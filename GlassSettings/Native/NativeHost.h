@@ -78,6 +78,10 @@ extern "C"
     __declspec(dllexport) void WINAPI GlassSettings_StartPlatformForArch(int arch) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_SetGlassAutorunTaskSchedulerEnabled(BOOL enable) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_SetGlassAutorunTaskSchedulerEnabledForArch(int arch, BOOL enable) noexcept;
+    /// Флаги питания/простоя задачи автозапуска уже безопасны для хоста?
+    __declspec(dllexport) BOOL WINAPI GlassSettings_IsAutorunTaskPowerIndependentForArch(int arch) noexcept;
+    /// Перерегистрация задачи без зависимости от питания (нужны права администратора).
+    __declspec(dllexport) BOOL WINAPI GlassSettings_ApplyAutorunTaskPowerIndependenceForArch(int arch) noexcept;
     /// Обновить Local\\GlassPlatform.TrayXamlPolicy.v3 до SignalReloadRender (UICompat / AppContainer).
     __declspec(dllexport) BOOL WINAPI GlassSettings_PublishTrayXamlPolicy() noexcept;
 

@@ -955,6 +955,26 @@ namespace TaskbarCompat
         ReloadSettingsAndReapplyOnMarshalThread();
     }
 
+    void TaskbarTapSite::RequestReloadSettingsAndReapply() noexcept
+    {
+        if (IsTapShutdownRequested())
+            return;
+
+        if (s_marshalHwnd && IsWindow(s_marshalHwnd)
+            && PostMessageW(
+                   s_marshalHwnd,
+                   TaskbarCompatMsg::WM_GLASS_TASKBAR_REAPPLY_SETTINGS,
+                   0,
+                   0) != 0)
+        {
+            return;
+        }
+
+        // Нет marshal-окна (TAP ещё не поднялся) — исходный путь: он сам решает,
+        // слать Send на чужой поток или выполнять inline.
+        ReloadSettingsAndReapply();
+    }
+
     void TaskbarTapSite::StartOgPatchReassertIfNeeded() noexcept
     {
         if (IsTapShutdownRequested())

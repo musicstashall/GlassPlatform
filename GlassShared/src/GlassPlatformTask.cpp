@@ -26,6 +26,8 @@ namespace GlassShared::GlassPlatformTask
         constexpr wchar_t kStopX86[] = L"GlassPlatform.StopEvent.x86";
         constexpr wchar_t kShutdownX64[] = L"GlassPlatform.HostShutdown.x64";
         constexpr wchar_t kShutdownX86[] = L"GlassPlatform.HostShutdown.x86";
+        constexpr wchar_t kHostAliveX64[] = L"GlassPlatform.HostAlive.x64";
+        constexpr wchar_t kHostAliveX86[] = L"GlassPlatform.HostAlive.x86";
         constexpr wchar_t kHostPidX64[] = L"Local\\GlassHostPid.x64";
         constexpr wchar_t kHostPidX86[] = L"Local\\GlassHostPid.x86";
         constexpr wchar_t kBusyX64[] = L"Local\\GlassPlatform.LifecycleBusy.x64";
@@ -102,6 +104,94 @@ namespace GlassShared::GlassPlatformTask
             std::wstring cmd = L"\"" + exe + L"\" " + verb + L" /TN \"" + GlassAutorunTaskName(arch) + L"\"";
             return RunSchtasksCmdLine(cmd);
         }
+
+        struct BstrHolder
+        {
+            BSTR value{};
+
+            explicit BstrHolder(const wchar_t* text) noexcept
+                : value(::SysAllocString(text))
+            {
+            }
+
+            ~BstrHolder() noexcept
+            {
+                if (value)
+                    ::SysFreeString(value);
+            }
+
+            BstrHolder(const BstrHolder&) = delete;
+            BstrHolder& operator=(const BstrHolder&) = delete;
+
+            [[nodiscard]] explicit operator bool() const noexcept { return value != nullptr; }
+        };
+
+        /// Набор флагов, из-за которых Планировщик завершает хост без StopEvent.
+        [[nodiscard]] bool AreTaskSettingsPowerIndependent(ITaskSettings* settings) noexcept
+        {
+            if (!settings)
+                return false;
+
+            VARIANT_BOOL disallowOnBatteries = VARIANT_TRUE;
+            VARIANT_BOOL stopOnBatteries = VARIANT_TRUE;
+            VARIANT_BOOL allowHardTerminate = VARIANT_TRUE;
+            if (FAILED(settings->get_DisallowStartIfOnBatteries(&disallowOnBatteries))
+                || FAILED(settings->get_StopIfGoingOnBatteries(&stopOnBatteries))
+                || FAILED(settings->get_AllowHardTerminate(&allowHardTerminate)))
+            {
+                return false;
+            }
+            if (disallowOnBatteries != VARIANT_FALSE
+                || stopOnBatteries != VARIANT_FALSE
+                || allowHardTerminate != VARIANT_FALSE)
+            {
+                return false;
+            }
+
+            BSTR limit = nullptr;
+            if (FAILED(settings->get_ExecutionTimeLimit(&limit)))
+                return false;
+            const bool noTimeLimit = limit != nullptr && _wcsicmp(limit, L"PT0S") == 0;
+            if (limit)
+                ::SysFreeString(limit);
+            if (!noTimeLimit)
+                return false;
+
+            wil::com_ptr<IIdleSettings> idle;
+            if (FAILED(settings->get_IdleSettings(idle.put())) || !idle)
+                return false;
+
+            VARIANT_BOOL stopOnIdleEnd = VARIANT_TRUE;
+            if (FAILED(idle->get_StopOnIdleEnd(&stopOnIdleEnd)))
+                return false;
+            return stopOnIdleEnd == VARIANT_FALSE;
+        }
+
+        [[nodiscard]] bool OpenAutorunTaskDefinition(
+            PlatformArch arch,
+            TaskSchedulerCom& ts,
+            wil::com_ptr<ITaskDefinition>& outDef,
+            wil::com_ptr<ITaskSettings>& outSettings) noexcept
+        {
+            if (!ts.Connect())
+                return false;
+
+            wil::com_ptr<IRegisteredTask> task;
+            if (!ts.GetRegisteredTask(L"\\", GlassAutorunTaskName(arch), task) || !task)
+                return false;
+
+            wil::com_ptr<ITaskDefinition> def;
+            if (FAILED(task->get_Definition(def.put())) || !def)
+                return false;
+
+            wil::com_ptr<ITaskSettings> settings;
+            if (FAILED(def->get_Settings(settings.put())) || !settings)
+                return false;
+
+            outDef = std::move(def);
+            outSettings = std::move(settings);
+            return true;
+        }
     }
 
     const wchar_t* InstanceMutexName(PlatformArch arch) noexcept
@@ -117,6 +207,11 @@ namespace GlassShared::GlassPlatformTask
     const wchar_t* HostShutdownEventName(PlatformArch arch) noexcept
     {
         return arch == PlatformArch::X64 ? kShutdownX64 : kShutdownX86;
+    }
+
+    const wchar_t* HostAliveMutexName(PlatformArch arch) noexcept
+    {
+        return arch == PlatformArch::X64 ? kHostAliveX64 : kHostAliveX86;
     }
 
     const wchar_t* HostPidMappingName(PlatformArch arch) noexcept
@@ -583,5 +678,88 @@ namespace GlassShared::GlassPlatformTask
         std::wstring cmd = L"\"" + exe + L"\" /Change /TN \"" + GlassAutorunTaskName(arch) + L"\" ";
         cmd += enable ? L"/ENABLE" : L"/DISABLE";
         return RunSchtasksCmdLine(cmd);
+    }
+
+    bool IsAutorunTaskPowerIndependent(PlatformArch arch) noexcept
+    {
+        ComInitGuard com;
+        if (FAILED(com.hr))
+            return false;
+
+        TaskSchedulerCom ts;
+        wil::com_ptr<ITaskDefinition> def;
+        wil::com_ptr<ITaskSettings> settings;
+        if (!OpenAutorunTaskDefinition(arch, ts, def, settings))
+            return false;
+
+        return AreTaskSettingsPowerIndependent(settings.get());
+    }
+
+    bool ApplyAutorunTaskPowerIndependence(PlatformArch arch) noexcept
+    {
+        ComInitGuard com;
+        if (FAILED(com.hr))
+            return false;
+
+        TaskSchedulerCom ts;
+        wil::com_ptr<ITaskDefinition> def;
+        wil::com_ptr<ITaskSettings> settings;
+        if (!OpenAutorunTaskDefinition(arch, ts, def, settings))
+            return false;
+
+        if (AreTaskSettingsPowerIndependent(settings.get()))
+            return true;
+
+        (void)settings->put_DisallowStartIfOnBatteries(VARIANT_FALSE);
+        (void)settings->put_StopIfGoingOnBatteries(VARIANT_FALSE);
+        // Хост завершается сам по StopEvent; hard terminate обходит UnhookWinEvent.
+        (void)settings->put_AllowHardTerminate(VARIANT_FALSE);
+        (void)settings->put_RunOnlyIfIdle(VARIANT_FALSE);
+        (void)settings->put_MultipleInstances(TASK_INSTANCES_IGNORE_NEW);
+
+        // Дефолт — 72 часа, после которых Планировщик убивает хост.
+        BstrHolder noTimeLimit(L"PT0S");
+        if (noTimeLimit)
+            (void)settings->put_ExecutionTimeLimit(noTimeLimit.value);
+
+        wil::com_ptr<IIdleSettings> idle;
+        if (SUCCEEDED(settings->get_IdleSettings(idle.put())) && idle)
+        {
+            (void)idle->put_StopOnIdleEnd(VARIANT_FALSE);
+            (void)idle->put_RestartOnIdle(VARIANT_FALSE);
+        }
+
+        BstrHolder rootPath(L"\\");
+        BstrHolder taskName(GlassAutorunTaskName(arch));
+        BstrHolder emptySddl(L"");
+        if (!rootPath || !taskName || !emptySddl)
+            return false;
+
+        wil::com_ptr<ITaskFolder> root;
+        if (FAILED(ts.Service()->GetFolder(rootPath.value, root.put())) || !root)
+            return false;
+
+        VARIANT vEmptyUser{};
+        VARIANT vEmptyPassword{};
+        VARIANT vSddl{};
+        ::VariantInit(&vEmptyUser);
+        ::VariantInit(&vEmptyPassword);
+        ::VariantInit(&vSddl);
+        vSddl.vt = VT_BSTR;
+        vSddl.bstrVal = emptySddl.value;
+
+        // TASK_LOGON_NONE — принципал берётся из самого определения задачи.
+        wil::com_ptr<IRegisteredTask> updated;
+        const HRESULT hr = root->RegisterTaskDefinition(
+            taskName.value,
+            def.get(),
+            TASK_UPDATE,
+            vEmptyUser,
+            vEmptyPassword,
+            TASK_LOGON_NONE,
+            vSddl,
+            updated.put());
+
+        return SUCCEEDED(hr) && updated != nullptr;
     }
 }

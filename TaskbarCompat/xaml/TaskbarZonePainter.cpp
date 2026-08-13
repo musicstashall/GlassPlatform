@@ -383,6 +383,32 @@ namespace TaskbarCompat::Zones
         void StopFrameStoryboard(FrameZoneState& state) noexcept;
         void StopLeftAppearStoryboard(FrameZoneState& state) noexcept;
 
+        // Токен для async-завершений; при нехватке памяти возвращает пустой weak_ptr,
+        // и колбэк просто ничего не делает.
+        [[nodiscard]] std::weak_ptr<FrameZoneState*> AcquireZoneLifetime(
+            FrameZoneState& state) noexcept
+        {
+            if (!state.lifetime || *state.lifetime != &state)
+            {
+                try
+                {
+                    state.lifetime = std::make_shared<FrameZoneState*>(&state);
+                }
+                catch (...)
+                {
+                    state.lifetime.reset();
+                }
+            }
+            return state.lifetime;
+        }
+
+        [[nodiscard]] FrameZoneState* LockZoneState(
+            std::weak_ptr<FrameZoneState*> const& token) noexcept
+        {
+            const auto locked = token.lock();
+            return locked ? *locked : nullptr;
+        }
+
         void RemoveOverlay(FrameZoneState& state, ZoneOverlay& overlay, wuxc::Grid const& root) noexcept
         {
             if (&overlay == &state.left)
@@ -512,6 +538,7 @@ namespace TaskbarCompat::Zones
 
         void StopLeftAppearStoryboard(FrameZoneState& state) noexcept
         {
+            ++state.leftAppearGeneration;
             ResetLeftAppearVisual(state.left);
             state.leftAppearRunning = false;
         }
@@ -556,25 +583,30 @@ namespace TaskbarCompat::Zones
                 auto batch = compositor.CreateScopedBatch(wuc::CompositionBatchTypes::Animation);
                 state.leftAppearRunning = true;
                 state.leftAllowAppearAnim = false;
+                const auto token = AcquireZoneLifetime(state);
+                const std::uint32_t generation = state.leftAppearGeneration;
                 visual.StartAnimation(L"Translation", anim);
                 batch.End();
                 batch.Completed(
-                    [&state](
+                    [token, generation](
                         wf::IInspectable const&,
                         wuc::CompositionBatchCompletedEventArgs const&) {
+                        FrameZoneState* const live = LockZoneState(token);
+                        if (!live || live->leftAppearGeneration != generation)
+                            return;
                         try
                         {
-                            state.leftAppearRunning = false;
-                            ResetLeftAppearVisual(state.left);
-                            if (state.left.host && state.left.hasVisual)
+                            live->leftAppearRunning = false;
+                            ResetLeftAppearVisual(live->left);
+                            if (live->left.host && live->left.hasVisual)
                             {
-                                state.left.visual.Y =
-                                    static_cast<float>(state.left.host.Margin().Top);
+                                live->left.visual.Y =
+                                    static_cast<float>(live->left.host.Margin().Top);
                             }
                         }
                         catch (...)
                         {
-                            state.leftAppearRunning = false;
+                            live->leftAppearRunning = false;
                         }
                     });
             }
@@ -692,6 +724,9 @@ namespace TaskbarCompat::Zones
 
         void BeginFrameStoryboard(FrameZoneState& state) noexcept
         {
+            // Новый кадр обесценивает Completed предыдущего Storyboard.
+            ++state.frameAnimGeneration;
+
             ZoneOverlay* zones[3] = { &state.left, &state.center, &state.tray };
             unsigned mask = 0;
             unsigned count = 0;
@@ -733,9 +768,14 @@ namespace TaskbarCompat::Zones
 
                 state.frameStoryboard = sb;
                 state.frameAnimRunning = true;
+                const auto token = AcquireZoneLifetime(state);
+                const std::uint32_t generation = state.frameAnimGeneration;
                 sb.Completed(
-                    [&state](wf::IInspectable const&, wf::IInspectable const&) {
-                        FinishFrameStoryboard(state);
+                    [token, generation](wf::IInspectable const&, wf::IInspectable const&) {
+                        FrameZoneState* const live = LockZoneState(token);
+                        if (!live || live->frameAnimGeneration != generation)
+                            return;
+                        FinishFrameStoryboard(*live);
                     });
 
                 sb.Begin();
@@ -766,6 +806,7 @@ namespace TaskbarCompat::Zones
 
         void StopFrameStoryboard(FrameZoneState& state) noexcept
         {
+            ++state.frameAnimGeneration;
             try
             {
                 if (state.animArmTimer)

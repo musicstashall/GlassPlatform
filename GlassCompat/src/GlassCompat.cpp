@@ -601,6 +601,8 @@ namespace
         WaitFailed,
         ExitCodeReadFailed,
         ExitCodeNotActive,
+        // Мьютекс GlassPlatform.HostAlive достался нам — хост его больше не держит.
+        HostAliveReleased,
     };
 
     static const wchar_t* HostLivenessReasonToString(HostLivenessReason reason) noexcept
@@ -614,6 +616,7 @@ namespace
         case HostLivenessReason::WaitFailed: return L"WaitFailed";
         case HostLivenessReason::ExitCodeReadFailed: return L"ExitCodeReadFailed";
         case HostLivenessReason::ExitCodeNotActive: return L"ExitCodeNotActive";
+        case HostLivenessReason::HostAliveReleased: return L"HostAliveReleased";
         default: return L"Unknown";
         }
     }
@@ -1947,6 +1950,13 @@ namespace
             FALSE,
             GlassShared::GlassPlatformTask::kHostShutdownEventName);
         const DWORD gleHostShutdown = hHostShutdownEarly ? 0u : GetLastError();
+        // Dead-man switch хоста: живой хост владеет мьютексом всегда, поэтому любой
+        // успешный захват (WAIT_OBJECT_0 или WAIT_ABANDONED) означает его смерть.
+        // Закрывает дыру, из-за которой CoreWindow-процессы не выгружались после
+        // TerminateProcess от Планировщика: StopEvent в этом случае не приходит никогда,
+        // а cwDeferToStop бесконечно сбрасывал PID-счётчик.
+        HANDLE hHostAlive = OpenMutexW(
+            SYNCHRONIZE, FALSE, GlassShared::GlassPlatformTask::kHostAliveMutexName);
         HANDLE hReloadSemaphore = OpenSemaphoreW(SYNCHRONIZE, FALSE, kReloadRenderSemaphoreName);
         HANDLE hReloadGenMap = OpenFileMappingW(FILE_MAP_READ, FALSE, kReloadGenerationMappingName);
         HANDLE hReloadFlagsMap = OpenFileMappingW(FILE_MAP_READ, FALSE, kReloadRenderFlagsMappingName);
@@ -2147,10 +2157,11 @@ namespace
                 hReloadSemaphore, hReloadGenMap, hReloadFlagsMap,
                 pReloadGenView, pReloadFlagsView);
 
-            HANDLE waitArr[3]{};
+            HANDLE waitArr[4]{};
             unsigned stopIdx = UINT_MAX;
             unsigned reloadIdx = UINT_MAX;
             unsigned unloadIdx = UINT_MAX;
+            unsigned hostAliveIdx = UINT_MAX;
             unsigned nH = 0;
             if (hPlatformStop)
             {
@@ -2167,6 +2178,11 @@ namespace
                 unloadIdx = nH;
                 waitArr[nH++] = hUnloadRequest;
             }
+            if (hHostAlive)
+            {
+                hostAliveIdx = nH;
+                waitArr[nH++] = hHostAlive;
+            }
 
             // H54 SEH: MsgWait+QS при XAML/COM может долго не отдавать Stop; Wait без QS.
             const DWORD r = cwHostGui
@@ -2177,9 +2193,30 @@ namespace
                     nH, nH ? waitArr : nullptr,
                     FALSE, 1000, QS_ALLINPUT);
 
-            if (nH > 0 && r >= WAIT_OBJECT_0 && r < WAIT_OBJECT_0 + nH)
+            // WAIT_ABANDONED_0 — мьютекс HostAlive от умершего хоста.
+            unsigned signaledIdx = UINT_MAX;
+            if (nH > 0)
             {
-                const unsigned i = r - WAIT_OBJECT_0;
+                if (r >= WAIT_OBJECT_0 && r < WAIT_OBJECT_0 + nH)
+                    signaledIdx = r - WAIT_OBJECT_0;
+                else if (r >= WAIT_ABANDONED_0 && r < WAIT_ABANDONED_0 + nH)
+                    signaledIdx = r - WAIT_ABANDONED_0;
+            }
+
+            if (signaledIdx != UINT_MAX)
+            {
+                const unsigned i = signaledIdx;
+                if (i == hostAliveIdx)
+                {
+                    // Отдаём мьютекс дальше: остальные инжектированные процессы
+                    // ждут на нём же и должны получить тот же сигнал.
+                    (void)ReleaseMutex(hHostAlive);
+                    shutdownByHostLiveness = true;
+                    hostDeadReason = HostLivenessReason::HostAliveReleased;
+                    DebugLog(DBG_IMPORTANT,
+                        L"[GlassCompat][HostWatch] host dead detected: HostAlive mutex released");
+                    break;
+                }
                 if (i == stopIdx)
                 {
                     DebugLog(L"[GlassCompat][Core] GlassGuiThread: stop event signaled, initiating shutdown");
@@ -2506,6 +2543,9 @@ namespace
                 // H51/H52: AppContainer SEH — OpenProcess/PID watch ложно «убивает» хост
                 // (лог: hostLiveness:true @55855, host_stop @60016). Пока StopEvent жив и
                 // не сигнален — только Stop/WM_QUIT; иначе ранний ExecuteShutdown + UI residual.
+                //
+                // Бесконечный сброс счётчика больше не запирает процесс: настоящая смерть
+                // хоста приходит отдельным сигналом через мьютекс HostAlive выше.
                 const bool cwDeferToStop =
                     Shared::RootBackdropPolicy::IsCoreWindowHostProcess()
                     && hPlatformStop
@@ -2557,6 +2597,7 @@ namespace
             hStopQuitCancel = nullptr;
         }
         if (hPlatformStop) CloseHandle(hPlatformStop);
+        if (hHostAlive) CloseHandle(hHostAlive);
         if (hUnloadRequest) CloseHandle(hUnloadRequest);
         if (hReloadSemaphore) CloseHandle(hReloadSemaphore);
         if (hostWatchProcess) CloseHandle(hostWatchProcess);
@@ -2875,12 +2916,19 @@ namespace
                         SYNCHRONIZE,
                         FALSE,
                         GlassShared::GlassPlatformTask::kHostShutdownEventName);
-                    if (hStop || hUnload)
+                    // Dead-man switch: при убитом хосте StopEvent и HostShutdown не придут
+                    // никогда, и watcher висел до таймаута в каждом процессе.
+                    HANDLE hHostAlive = OpenMutexW(
+                        SYNCHRONIZE,
+                        FALSE,
+                        GlassShared::GlassPlatformTask::kHostAliveMutexName);
+                    if (hStop || hUnload || hHostAlive)
                     {
-                        HANDLE waits[2]{};
+                        HANDLE waits[3]{};
                         DWORD n = 0;
                         unsigned stopIdx = UINT_MAX;
                         unsigned unloadIdx = UINT_MAX;
+                        unsigned hostAliveIdx = UINT_MAX;
                         if (hStop)
                         {
                             stopIdx = n;
@@ -2891,11 +2939,25 @@ namespace
                             unloadIdx = n;
                             waits[n++] = hUnload;
                         }
+                        if (hHostAlive)
+                        {
+                            hostAliveIdx = n;
+                            waits[n++] = hHostAlive;
+                        }
 
                         const DWORD wr = WaitForMultipleObjects(n, waits, FALSE, INFINITE);
-                        const unsigned signaled = wr - WAIT_OBJECT_0;
+                        const unsigned signaled = (wr >= WAIT_ABANDONED_0 && wr < WAIT_ABANDONED_0 + n)
+                            ? (wr - WAIT_ABANDONED_0)
+                            : (wr - WAIT_OBJECT_0);
                         const bool fromUnload =
                             (unloadIdx != UINT_MAX && signaled == unloadIdx);
+                        const bool hostDead =
+                            (hostAliveIdx != UINT_MAX && signaled == hostAliveIdx);
+                        if (hostDead)
+                        {
+                            // Передать сигнал следующему ожидающему процессу.
+                            (void)ReleaseMutex(hHostAlive);
+                        }
 
                         if (hStop)
                             CloseHandle(hStop);
@@ -2907,8 +2969,19 @@ namespace
                             Shared::InjectProcessMap::State::Unloading);
 
                         // H58: на глобальном Stop ждём HostShutdown; per-PID unload — FreeSelf сразу.
-                        if (!fromUnload && hHostShutdown)
-                            (void)WaitForSingleObject(hHostShutdown, 30000);
+                        // Хост уже мёртв — HostShutdown не придёт, ждать нечего.
+                        if (!fromUnload && !hostDead && hHostShutdown)
+                        {
+                            HANDLE shutdownWaits[2]{ hHostShutdown, hHostAlive };
+                            const DWORD n2 = hHostAlive ? 2u : 1u;
+                            const DWORD sr =
+                                WaitForMultipleObjects(n2, shutdownWaits, FALSE, 30000);
+                            if (hHostAlive
+                                && (sr == WAIT_OBJECT_0 + 1 || sr == WAIT_ABANDONED_0 + 1))
+                            {
+                                (void)ReleaseMutex(hHostAlive);
+                            }
+                        }
 
                         MSG msg{};
                         for (int i = 0; i < 32; ++i)
@@ -2932,6 +3005,8 @@ namespace
                     }
                     if (hHostShutdown)
                         CloseHandle(hHostShutdown);
+                    if (hHostAlive)
+                        CloseHandle(hHostAlive);
 
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
                     Shared::Log::GlassLogClient::Instance().Stop();

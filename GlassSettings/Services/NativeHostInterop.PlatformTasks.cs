@@ -75,6 +75,14 @@ public static partial class NativeHostInterop
     public static bool SetGlassAutorunTaskSchedulerEnabled(GlassPlatformArch arch, bool enable) =>
         Native_SetGlassAutorunTaskSchedulerEnabledForArch((int)arch, enable);
 
+    /// <summary>Флаги питания/простоя задачи уже не убивают хост?</summary>
+    public static bool IsAutorunTaskPowerIndependent(GlassPlatformArch arch) =>
+        Native_IsAutorunTaskPowerIndependentForArch((int)arch);
+
+    /// <summary>Перерегистрация задачи без зависимости от питания (нужны права администратора).</summary>
+    public static bool ApplyAutorunTaskPowerIndependence(GlassPlatformArch arch) =>
+        Native_ApplyAutorunTaskPowerIndependenceForArch((int)arch);
+
     /// <summary>Переписать TrayXamlPolicy map из реестра (до reload UICompat в SEH).</summary>
     public static bool PublishTrayXamlPolicy() => Native_PublishTrayXamlPolicy();
 
@@ -133,6 +141,14 @@ public static partial class NativeHostInterop
     private static extern bool Native_SetGlassAutorunTaskSchedulerEnabledForArch(
         int arch,
         [MarshalAs(UnmanagedType.Bool)] bool enable);
+
+    [DllImport(Dll, EntryPoint = "GlassSettings_IsAutorunTaskPowerIndependentForArch")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Native_IsAutorunTaskPowerIndependentForArch(int arch);
+
+    [DllImport(Dll, EntryPoint = "GlassSettings_ApplyAutorunTaskPowerIndependenceForArch")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Native_ApplyAutorunTaskPowerIndependenceForArch(int arch);
 
     [DllImport(Dll, EntryPoint = "GlassSettings_PublishTrayXamlPolicy")]
     [return: MarshalAs(UnmanagedType.Bool)]

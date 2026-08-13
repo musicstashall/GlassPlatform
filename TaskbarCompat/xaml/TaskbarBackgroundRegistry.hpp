@@ -85,8 +85,15 @@ namespace TaskbarCompat
             bool rootPaddingCaptured{};
 
             // Живая геометрия зон: LayoutUpdated → Apply; shrink-hold → debounce settle.
-            bool zoneLayoutHooked{};
-            winrt::event_token zoneLayoutToken{};
+            // Revoker, а не сырой event_token: токен снимался через текущий
+            // info.zones.rootGrid, и если Grid успевал смениться или обнулиться,
+            // делегат оставался висеть на старом элементе. После FreeLibrary XAML
+            // вызывал его в выгруженном образе — AV в CEventSourceBase::UntypedRaise
+            // (дамп explorer 11.08). Revoker снимает подписку с того объекта,
+            // на котором она была создана.
+            winrt::Windows::UI::Xaml::FrameworkElement::LayoutUpdated_revoker zoneLayoutRevoker{};
+            // Grid, на котором стоит подписка: панель может пересоздать RootGrid.
+            winrt::Windows::UI::Xaml::Controls::Grid zoneLayoutHookedGrid{ nullptr };
             winrt::Windows::UI::Xaml::DispatcherTimer zoneShrinkFollowUpTimer{ nullptr };
             float lastCenterWidth{ -1.0f };
             bool zoneLayoutApplyNesting{};

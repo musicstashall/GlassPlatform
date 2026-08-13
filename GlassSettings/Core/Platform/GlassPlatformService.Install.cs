@@ -18,7 +18,26 @@ public static partial class GlassPlatformService
         var tr = $"\"{rundll}\" \"{dll}\",Main /start";
         var args = $"/Create /TN \"{taskName}\" /TR \"{tr}\" /SC ONLOGON /RL HIGHEST /F";
         var (code, _) = RunSchtasks(args);
-        return code == 0 && GlassAutorunTaskExists(arch);
+        if (code != 0 || !GlassAutorunTaskExists(arch))
+            return false;
+
+        // schtasks /Create не умеет выставлять флаги питания: задача создаётся с
+        // StopIfGoingOnBatteries=true и убивается при переходе на батарею.
+        _ = TryEnsureAutorunTaskPowerIndependent(arch);
+        return true;
+    }
+
+    /// <summary>
+    /// Снимает зависимость задачи от питания и простоя (батарея, idle, лимит выполнения).
+    /// Перерегистрация требует прав администратора.
+    /// </summary>
+    public static bool TryEnsureAutorunTaskPowerIndependent(GlassPlatformArch arch)
+    {
+        if (!GlassAutorunTaskExists(arch))
+            return false;
+        if (NativeHostInterop.IsAutorunTaskPowerIndependent(arch))
+            return true;
+        return NativeHostInterop.ApplyAutorunTaskPowerIndependence(arch);
     }
 
     /// <summary>Остановка платформы и удаление задачи (паритет RemoveGlassAutorunTaskOnWorker).</summary>
@@ -40,6 +59,7 @@ public static partial class GlassPlatformService
     {
         if (!GlassAutorunTaskExists(arch))
             return TryInstallGlassAutorunTask(arch);
+        _ = TryEnsureAutorunTaskPowerIndependent(arch);
         return SetGlassAutorunTaskSchedulerEnabled(arch, true);
     }
 

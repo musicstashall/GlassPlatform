@@ -1219,18 +1219,15 @@ namespace TaskbarCompat
         info.lastCenterWidth = -1.0f;
         info.zones.centerShrinkCommit = false;
         info.zones.centerShrinkHoldPending = false;
-        if (info.zoneLayoutHooked && info.zones.rootGrid)
+        try
         {
-            try
-            {
-                info.zones.rootGrid.LayoutUpdated(info.zoneLayoutToken);
-            }
-            catch (...)
-            {
-            }
+            info.zoneLayoutRevoker.revoke();
         }
-        info.zoneLayoutHooked = false;
-        info.zoneLayoutToken = {};
+        catch (...)
+        {
+        }
+        info.zoneLayoutRevoker = {};
+        info.zoneLayoutHookedGrid = nullptr;
         info.zoneLayoutApplyNesting = false;
     }
 
@@ -1243,28 +1240,35 @@ namespace TaskbarCompat
             DetachZoneLayoutHook(info);
             return;
         }
-        if (info.zoneLayoutHooked)
-            return;
+        if (info.zoneLayoutRevoker)
+        {
+            if (info.zoneLayoutHookedGrid == info.zones.rootGrid)
+                return;
+            // RootGrid пересоздан — снять подписку со старого, иначе она живёт
+            // до erase записи, а Apply идёт уже по новому дереву.
+            DetachZoneLayoutHook(info);
+        }
 
         try
         {
-            info.zoneLayoutToken = info.zones.rootGrid.LayoutUpdated(
+            info.zoneLayoutRevoker = info.zones.rootGrid.LayoutUpdated(
+                winrt::auto_revoke,
                 [this, frameHandle](
                     winrt::Windows::Foundation::IInspectable const&,
                     winrt::Windows::Foundation::IInspectable const&) {
                     OnZoneLayoutUpdated(frameHandle);
                 });
-            info.zoneLayoutHooked = true;
+            info.zoneLayoutHookedGrid = info.zones.rootGrid;
         }
         catch (const winrt::hresult_error&)
         {
-            info.zoneLayoutHooked = false;
-            info.zoneLayoutToken = {};
+            info.zoneLayoutRevoker = {};
+            info.zoneLayoutHookedGrid = nullptr;
         }
         catch (...)
         {
-            info.zoneLayoutHooked = false;
-            info.zoneLayoutToken = {};
+            info.zoneLayoutRevoker = {};
+            info.zoneLayoutHookedGrid = nullptr;
         }
     }
 

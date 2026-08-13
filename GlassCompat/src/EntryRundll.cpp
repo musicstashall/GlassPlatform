@@ -54,6 +54,85 @@ namespace
     // Manual-reset: хост выставляет в done: перед CloseHandle(mutex).
     static HANDLE s_hostShutdownEvent = nullptr;
 
+    // Приёмник запросов на закрытие. Планировщик заданий при End task / переходе
+    // на батарею сначала рассылает WM_CLOSE по top-level окнам потоков процесса и
+    // только потом убивает его. Без окна хост получал сразу TerminateProcess:
+    // StopEvent и HostShutdown не выставлялись никогда, и инжектированные модули
+    // оставались висеть в чужих процессах.
+    // HWND_MESSAGE не подходит — message-only окна в такой рассылке не участвуют.
+    constexpr wchar_t kHostCloseSinkWndClass[] = L"GlassPlatformHostCloseSink";
+
+    static HWND s_hostCloseSinkHwnd = nullptr;
+    static HANDLE s_hostCloseSinkStopEvent = nullptr; // не владеем
+
+    static void RequestHostStopFromWindowMessage() noexcept
+    {
+        if (s_hostCloseSinkStopEvent)
+            SetEvent(s_hostCloseSinkStopEvent);
+    }
+
+    static LRESULT CALLBACK HostCloseSinkWndProc(
+        HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) noexcept
+    {
+        switch (msg)
+        {
+        case WM_CLOSE:
+            RequestHostStopFromWindowMessage();
+            return 0;
+
+        case WM_QUERYENDSESSION:
+            // Выгрузку здесь не начинаем: сеанс ещё может быть отменён другим
+            // приложением, и платформа осталась бы выключенной без причины.
+            return TRUE;
+
+        case WM_ENDSESSION:
+            if (wParam != FALSE)
+                RequestHostStopFromWindowMessage();
+            return 0;
+
+        default:
+            break;
+        }
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    /// Невидимое top-level окно нулевого размера; WS_EX_TOOLWINDOW убирает его
+    /// из Alt+Tab и панели задач.
+    [[nodiscard]] static HWND CreateHostCloseSinkWindow(HMODULE hSelf, HANDLE hStopEvent) noexcept
+    {
+        s_hostCloseSinkStopEvent = hStopEvent;
+
+        WNDCLASSEXW wc{};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = HostCloseSinkWndProc;
+        wc.hInstance = hSelf;
+        wc.lpszClassName = kHostCloseSinkWndClass;
+        if (RegisterClassExW(&wc) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+            return nullptr;
+
+        return CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            kHostCloseSinkWndClass,
+            L"GlassPlatform Host",
+            WS_POPUP,
+            0, 0, 0, 0,
+            nullptr,
+            nullptr,
+            hSelf,
+            nullptr);
+    }
+
+    static void DestroyHostCloseSinkWindow(HMODULE hSelf) noexcept
+    {
+        if (s_hostCloseSinkHwnd)
+        {
+            DestroyWindow(s_hostCloseSinkHwnd);
+            s_hostCloseSinkHwnd = nullptr;
+        }
+        s_hostCloseSinkStopEvent = nullptr;
+        (void)UnregisterClassW(kHostCloseSinkWndClass, hSelf);
+    }
+
     static void StopLogClientForShortLivedMain() noexcept
     {
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
@@ -595,6 +674,32 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         return;
     }
 
+    // Dead-man switch. Хост владеет мьютексом всё время работы; если процесс убит
+    // (TerminateProcess от Планировщика, краш), ядро отдаёт ожидающим WAIT_ABANDONED.
+    // В отличие от OpenProcess/PID-поллинга это не даёт ложных срабатываний в
+    // AppContainer (H51/H52) и не требует опроса.
+    HANDLE hHostAlive = CreateMutexW(
+        saPtr, TRUE, GlassShared::GlassPlatformTask::kHostAliveMutexName);
+    if (hHostAlive && GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        // Объект пережил прежнего хоста (клиенты держат handle) — забрать владение,
+        // иначе он остался бы вечно сигнальным и все клиенты сразу решили бы, что мы мертвы.
+        const DWORD claim = WaitForSingleObject(hHostAlive, 0);
+        if (claim != WAIT_OBJECT_0 && claim != WAIT_ABANDONED)
+        {
+            CloseHandle(hHostAlive);
+            hHostAlive = nullptr;
+        }
+    }
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+    if (!hHostAlive)
+    {
+        DebugLog(DBG_WARNING,
+            L"[GlassCompat][Host] HostAlive mutex недоступен, GLE=%u — детект смерти хоста только по PID",
+            GetLastError());
+    }
+#endif
+
     if (!CreateReloadRenderResources(saPtr))
     {
         CloseHandle(hStopEvent);
@@ -720,23 +825,18 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
     GlassCompat::CoreWindowHostInject::GrantPeerDllsAppPackagesAccess();
     GlassCompat::CoreWindowHostInject::Refresh();
 
-    // Поток-страж остановки: ждёт stop event → PostQuitMessage в этот поток
-    const DWORD mainTid = GetCurrentThreadId();
-    HANDLE hWatchThread = CreateThread(nullptr, 0,
-        [](LPVOID param) -> DWORD
-        {
-            HANDLE hEvt = reinterpret_cast<HANDLE>(param);
-            WaitForSingleObject(hEvt, INFINITE);
-            PostThreadMessageW(*reinterpret_cast<DWORD*>(&param), WM_QUIT, 0, 0);
-            // Trick: encode mainTid in param is wrong — use a lambda capture instead.
-            return 0;
-        },
-        hStopEvent, 0, nullptr);
+    // Окно должно быть на том же потоке, что и цикл сообщений ниже.
+    s_hostCloseSinkHwnd = CreateHostCloseSinkWindow(hSelf, hStopEvent);
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+    if (!s_hostCloseSinkHwnd)
+    {
+        DebugLog(DBG_WARNING,
+            L"[GlassCompat][Host] close-sink окно не создано, GLE=%u — End task пойдёт через TerminateProcess",
+            GetLastError());
+    }
+#endif
 
-    // Правильный способ: поток через явную структуру
-    if (hWatchThread) CloseHandle(hWatchThread);
-
-    // Простой, надёжный вариант: MsgWaitForMultipleObjects в цикле
+    // Остановка ловится через MsgWaitForMultipleObjects по hStopEvent.
     MSG msg;
     static ULONGLONG s_themePolicyDueMs = 0;
     static ULONGLONG s_nextCoreWindowInjectMs = 0;
@@ -787,6 +887,7 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
     }
 
 done:
+    DestroyHostCloseSinkWindow(hSelf);
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
     Shared::Log::GlassLogClient::Instance().Stop();
 #endif
@@ -839,5 +940,8 @@ done:
     // H71: не CloseHostShutdownEvent здесь. Named event должен жить, пока жив процесс хоста:
     // path=1 OpenEvent после COMPLETE (H70) иначе даёт WAIT_FAILED → FreeSelf при живом OS-pin.
     // Handle закроется при выходе rundll32. Early-abort пути по-прежнему Close явно.
+    //
+    // hHostAlive тоже не закрываем и не освобождаем: мьютекс должен стать abandoned
+    // ровно в момент смерти потока хоста — это и есть сигнал для клиентов.
     CloseHandle(hMutex);
 }

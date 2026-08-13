@@ -11,11 +11,21 @@
 #include <winrt/Windows.Foundation.h>
 
 #include <cstdint>
+#include <memory>
 
 #include "config/TaskbarRegistry.h"
 
 namespace TaskbarCompat::Zones
 {
+    struct FrameZoneState;
+
+    // Токен живости кадра для асинхронных завершений.
+    // Composition ScopedBatch.Completed и Storyboard.Completed приходят позже, чем
+    // запись реестра панели может быть удалена: захват FrameZoneState& по ссылке
+    // давал use-after-free (в дампе explorer — freed-heap 0xdd… в ResetLeftAppearVisual).
+    // Колбэк держит weak_ptr; деструктор состояния обнуляет цель.
+    using ZoneLifetimeToken = std::shared_ptr<FrameZoneState*>;
+
     struct ZoneOverlay
     {
         // Хост: геометрия/анимация; element — тинт/бэкдроп сегмента.
@@ -92,6 +102,26 @@ namespace TaskbarCompat::Zones
         // Close-window: не сужать center по mid-anim measure — hold до settle-commit.
         bool centerShrinkCommit{};
         bool centerShrinkHoldPending{};
+
+        ZoneLifetimeToken lifetime{};
+
+        // Поколения анимаций: Stop* инкрементирует, устаревшее Completed отбрасывается,
+        // чтобы завершение отменённой анимации не трогало уже перезапущенную.
+        std::uint32_t frameAnimGeneration{};
+        std::uint32_t leftAppearGeneration{};
+
+        FrameZoneState() = default;
+
+        ~FrameZoneState() noexcept
+        {
+            if (lifetime && *lifetime == this)
+                *lifetime = nullptr;
+        }
+
+        // Токен живости привязан к адресу состояния: копия/перемещение сделали бы
+        // его невалидным. Состояние живёт только внутри записи реестра панелей.
+        FrameZoneState(const FrameZoneState&) = delete;
+        FrameZoneState& operator=(const FrameZoneState&) = delete;
     };
 
     void Apply(

@@ -103,6 +103,12 @@ extern "C" __declspec(dllexport) void WINAPI TaskbarCompat_ReloadSettingsAndReap
     TaskbarCompat::TaskbarTapSite::ReloadSettingsAndReapply();
 }
 
+// Для вызовов из hook-колбэков: только поставить запрос в очередь marshal-потока.
+extern "C" __declspec(dllexport) void WINAPI TaskbarCompat_RequestReloadSettingsAndReapply() noexcept
+{
+    TaskbarCompat::TaskbarTapSite::RequestReloadSettingsAndReapply();
+}
+
 extern "C" __declspec(dllexport) BOOL WINAPI TaskbarCompat_Shutdown()
 {
     if (!g_initialized.load(std::memory_order_acquire))

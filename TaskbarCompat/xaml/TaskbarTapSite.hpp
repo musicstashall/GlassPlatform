@@ -40,6 +40,12 @@ namespace TaskbarCompat
         // Перечитать Tray\ из реестра и переутвердить патчи активного watcher.
         static void ReloadSettingsAndReapply() noexcept;
 
+        // То же, но всегда асинхронно (PostMessage на marshal-окно), даже если вызов
+        // пришёл с самого marshal-потока. Обязателен для вызовов из hook-колбэков
+        // (WH_GETMESSAGE): синхронная мутация XAML внутри KiUserCallbackDispatcher
+        // реэнтрантно входит в XAML core и рушит его CValue (краш explorer 13.08).
+        static void RequestReloadSettingsAndReapply() noexcept;
+
         // Reassert 12×4s при OG (Task Scheduler или OpenGlass.dll в dwm.exe).
         static void StartOgPatchReassertIfNeeded() noexcept;
 

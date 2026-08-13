@@ -9,6 +9,7 @@ EXPORTS
     TaskbarCompat_NotifyTrayTrackBarHwnd
     TaskbarCompat_ReapplyXamlBackgroundPatches
     TaskbarCompat_ReloadSettingsAndReapply
+    TaskbarCompat_RequestReloadSettingsAndReapply
     TaskbarCompat_ReleaseTrayIxdeSurfaceInterest
     TaskbarCompat_ResetIxdeSchedulingAfterFailure
     TaskbarCompat_DebugComState

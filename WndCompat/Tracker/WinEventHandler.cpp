@@ -180,9 +180,13 @@ namespace
             const HMODULE hTb = GetModuleHandleW(L"TaskbarCompat.dll");
             if (hTb)
             {
+                // Только Request*: вызов приходит из GetMsgHookProc, то есть изнутри
+                // kernel-callback от PeekMessage. Синхронный reapply реэнтрантно
+                // входил в XAML core на середине его операции — AV в
+                // CDependencyObject::AddRef на CValue-float (дамп explorer 13.08).
                 using ReloadFn = void(WINAPI*)() noexcept;
                 const auto pfn = reinterpret_cast<ReloadFn>(
-                    GetProcAddress(hTb, "TaskbarCompat_ReloadSettingsAndReapply"));
+                    GetProcAddress(hTb, "TaskbarCompat_RequestReloadSettingsAndReapply"));
                 if (pfn)
                     pfn();
             }

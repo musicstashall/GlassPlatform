@@ -23,17 +23,24 @@ namespace GlassShared::GlassPlatformTask
     constexpr wchar_t kInstanceMutexName[] = L"GlassPlatform.Instance.Mutex.x64";
     constexpr wchar_t kStopEventName[] = L"GlassPlatform.StopEvent.x64";
     constexpr wchar_t kHostShutdownEventName[] = L"GlassPlatform.HostShutdown.x64";
+    constexpr wchar_t kHostAliveMutexName[] = L"GlassPlatform.HostAlive.x64";
     constexpr wchar_t kHostPidMappingName[] = L"Local\\GlassHostPid.x64";
 #else
     constexpr wchar_t kInstanceMutexName[] = L"GlassPlatform.Instance.Mutex.x86";
     constexpr wchar_t kStopEventName[] = L"GlassPlatform.StopEvent.x86";
     constexpr wchar_t kHostShutdownEventName[] = L"GlassPlatform.HostShutdown.x86";
+    constexpr wchar_t kHostAliveMutexName[] = L"GlassPlatform.HostAlive.x86";
     constexpr wchar_t kHostPidMappingName[] = L"Local\\GlassHostPid.x86";
 #endif
 
     [[nodiscard]] const wchar_t* InstanceMutexName(PlatformArch arch) noexcept;
     [[nodiscard]] const wchar_t* StopEventName(PlatformArch arch) noexcept;
     [[nodiscard]] const wchar_t* HostShutdownEventName(PlatformArch arch) noexcept;
+    /// Dead-man switch: хост владеет этим мьютексом всё время работы.
+    /// Успешный захват в инжектированном процессе (WAIT_OBJECT_0 или WAIT_ABANDONED)
+    /// означает, что хост его больше не держит, то есть мёртв — в отличие от
+    /// OpenProcess/PID-поллинга, это не даёт ложных срабатываний в AppContainer.
+    [[nodiscard]] const wchar_t* HostAliveMutexName(PlatformArch arch) noexcept;
     [[nodiscard]] const wchar_t* HostPidMappingName(PlatformArch arch) noexcept;
 
     // Страховочный таймаут WaitForPlatformStopped (на практике 1–5 с).
@@ -105,4 +112,15 @@ namespace GlassShared::GlassPlatformTask
 
     [[nodiscard]] bool SetGlassAutorunTaskSchedulerEnabled(bool enable) noexcept;
     [[nodiscard]] bool SetGlassAutorunTaskSchedulerEnabled(PlatformArch arch, bool enable) noexcept;
+
+    /// Задача автозапуска не зависит от питания и простоя?
+    /// Дефолты schtasks /Create — DisallowStartIfOnBatteries и StopIfGoingOnBatteries
+    /// в true: при переходе на батарею Планировщик завершает хост, StopEvent никто
+    /// не выставляет, и инжектированные модули остаются в процессах.
+    [[nodiscard]] bool IsAutorunTaskPowerIndependent(PlatformArch arch) noexcept;
+
+    /// Перерегистрирует задачу с DisallowStartIfOnBatteries/StopIfGoingOnBatteries/
+    /// AllowHardTerminate/StopOnIdleEnd = false и ExecutionTimeLimit = PT0S.
+    /// Требует прав администратора (задача создана с RunLevel HighestAvailable).
+    [[nodiscard]] bool ApplyAutorunTaskPowerIndependence(PlatformArch arch) noexcept;
 }

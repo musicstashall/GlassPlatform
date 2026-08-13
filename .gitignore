@@ -36,6 +36,9 @@ _ReSharper*/
 [Oo]bj/
 artifacts/
 Generated Files/
+# Счётчик сборки на машину: Directory.Build.targets инкрементирует его при каждой
+# сборке и создаёт заново, если файла нет.
+BuildNumber.txt
 *_wpftmp.csproj
 project.lock.json
 

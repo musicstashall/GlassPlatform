@@ -414,6 +414,20 @@ extern "C"
             : FALSE;
     }
 
+    __declspec(dllexport) BOOL WINAPI GlassSettings_IsAutorunTaskPowerIndependentForArch(int arch) noexcept
+    {
+        return GlassShared::GlassPlatformTask::IsAutorunTaskPowerIndependent(ToPlatformArch(arch))
+            ? TRUE
+            : FALSE;
+    }
+
+    __declspec(dllexport) BOOL WINAPI GlassSettings_ApplyAutorunTaskPowerIndependenceForArch(int arch) noexcept
+    {
+        return GlassShared::GlassPlatformTask::ApplyAutorunTaskPowerIndependence(ToPlatformArch(arch))
+            ? TRUE
+            : FALSE;
+    }
+
     __declspec(dllexport) BOOL WINAPI GlassSettings_PublishTrayXamlPolicy() noexcept
     {
         return Shared::TrayXamlPolicyMap::TryRepublishFromRegistry() ? TRUE : FALSE;
