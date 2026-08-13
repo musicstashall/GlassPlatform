@@ -8,7 +8,14 @@ public static partial class GlassPlatformService
     public static bool TryInstallGlassAutorunTask() =>
         TryInstallGlassAutorunTask(GlassPlatformNames.NativeArch);
 
-    public static bool TryInstallGlassAutorunTask(GlassPlatformArch arch)
+    public static bool TryInstallGlassAutorunTask(GlassPlatformArch arch) =>
+        TryInstallGlassAutorunTask(arch, applyPowerIndependence: true);
+
+    /// <param name="applyPowerIndependence">
+    /// Только для явного создания задачи пользователем. Пути, которые лишь
+    /// пересинхронизируют /TR при старте платформы, флаги задачи не меняют.
+    /// </param>
+    private static bool TryInstallGlassAutorunTask(GlassPlatformArch arch, bool applyPowerIndependence)
     {
         var dll = ResolveGlassCompatDllPath(arch);
         if (dll is null) return false;
@@ -23,13 +30,16 @@ public static partial class GlassPlatformService
 
         // schtasks /Create не умеет выставлять флаги питания: задача создаётся с
         // StopIfGoingOnBatteries=true и убивается при переходе на батарею.
-        _ = TryEnsureAutorunTaskPowerIndependent(arch);
+        if (applyPowerIndependence)
+            _ = TryEnsureAutorunTaskPowerIndependent(arch);
         return true;
     }
 
     /// <summary>
     /// Снимает зависимость задачи от питания и простоя (батарея, idle, лимит выполнения).
-    /// Перерегистрация требует прав администратора.
+    /// Требует прав администратора.
+    /// Автоматически не вызывается: уже существующая задача пользователя не мигрируется,
+    /// флаги выставляются только при явном создании задачи из GlassSettings.
     /// </summary>
     public static bool TryEnsureAutorunTaskPowerIndependent(GlassPlatformArch arch)
     {
@@ -59,7 +69,6 @@ public static partial class GlassPlatformService
     {
         if (!GlassAutorunTaskExists(arch))
             return TryInstallGlassAutorunTask(arch);
-        _ = TryEnsureAutorunTaskPowerIndependent(arch);
         return SetGlassAutorunTaskSchedulerEnabled(arch, true);
     }
 
@@ -70,7 +79,8 @@ public static partial class GlassPlatformService
     {
         if (ResolveGlassCompatDllPath(arch) is null)
             return false;
-        return TryInstallGlassAutorunTask(arch);
+        // Старт платформы не должен переписывать флаги уже созданной задачи.
+        return TryInstallGlassAutorunTask(arch, applyPowerIndependence: false);
     }
 
     private static string? ResolveGlassCompatDllPath(GlassPlatformArch arch) =>
