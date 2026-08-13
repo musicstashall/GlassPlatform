@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.DwmOpacityGroupRow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls"
+    HorizontalAlignment="Stretch"
+    HorizontalContentAlignment="Stretch">
+    <Border
+        x:Name="RootBorder"
+        MinHeight="{StaticResource GlassSettingsSectionRowMinHeight}"
+        Padding="{StaticResource GlassSettingsOpacityRowPadding}"
+        HorizontalAlignment="Stretch"
+        Background="{ThemeResource LayerFillColorDefaultBrush}"
+        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="8">
+        <StackPanel Spacing="8">
+            <ctrl:SpoilerHeaderGrid x:Name="HeaderChrome" ShowChevron="False" />
+            <ContentControl
+                x:Name="ActionsBelowHost"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Right"
+                Visibility="Collapsed" />
+        </StackPanel>
+    </Border>
+</UserControl>

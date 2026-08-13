@@ -1,0 +1,1056 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="AppTitle" xml:space="preserve"><value>Platform settings</value></data>
+  <data name="Combo_CornerTypeItems" xml:space="preserve"><value>System;Square Corners;Large Corners;Small Corners</value></data>
+  <data name="Combo_XamlCornerTypeItems" xml:space="preserve"><value>System;Square Corners;Large Corners;Small Corners;Increased Rounding;Maximum Rounding</value></data>
+  <data name="Combo_EffectTypeItems" xml:space="preserve"><value>Disable;Transparent (SWCA);Solid (SWCA);Blur (SWCA);Classic Acrylic (SWCA);Modern Acrylic (SWCA);Acrylic (DWM);Mica (DWM);Mica Alt (DWM)</value></data>
+  <data name="Combo_EffectTypeNames" xml:space="preserve"><value>Disable;Transparent;Solid;Blur;Classic Acrylic;Modern Acrylic;Acrylic;Mica;Mica Alt</value></data>
+  <data name="Combo_XamlEffectTypeItems" xml:space="preserve"><value>Disable;Transparent;Solid;Blur;Acrylic;System</value></data>
+  <data name="Combo_XamlEffectTypeNames" xml:space="preserve"><value>Disable;Transparent;Solid;Blur;Acrylic;System</value></data>
+  <data name="Flyout_SeparateZones" xml:space="preserve"><value>Panel segmentation</value></data>
+  <data name="Flyout_SeparateZonesDesc" xml:space="preserve"><value>Organizes the taskbar into separate groups</value></data>
+  <data name="Flyout_ZonesNeedCornersTip" xml:space="preserve"><value>To enable segmentation, choose a corner style other than System.</value></data>
+  <data name="Flyout_ZonesCornersPolicyLimit" xml:space="preserve"><value>Limited by corner type policy; choose a corner style other than System.</value></data>
+  <data name="Flyout_GradientSystemBackdropLimit" xml:space="preserve"><value>Limited by backdrop policy; choose an effect type other than System.</value></data>
+  <data name="Flyout_GradientSystemBackdropTip" xml:space="preserve"><value>To customize gradient color, choose an effect type other than System.</value></data>
+  <data name="Param_ModeDwmSwca" xml:space="preserve"><value>DWM/SWCA</value></data>
+  <data name="Combo_PopInStyleItems" xml:space="preserve"><value>Slide Down;Ripple;Smooth Scroll;Smooth Zoom</value></data>
+  <data name="Attach_DetailForbidden" xml:space="preserve"><value>{0} Forbidden</value></data>
+  <data name="Attach_DetailFull" xml:space="preserve"><value>{0} Full</value></data>
+  <data name="Attach_DetailPopup" xml:space="preserve"><value>{0} Popup</value></data>
+  <data name="Attach_DetailSeparator" xml:space="preserve"><value> · </value></data>
+  <data name="Attach_ListSection" xml:space="preserve"><value>User process list</value></data>
+  <data name="Attach_ListSectionDesc" xml:space="preserve"><value>Processes into which Glass platform modules will be injected</value></data>
+  <data name="Runtime_Section" xml:space="preserve"><value>Processes in runtime</value></data>
+  <data name="Runtime_SectionDesc" xml:space="preserve"><value>Loaded Glass modules by process</value></data>
+  <data name="Runtime_Empty" xml:space="preserve"><value>No active or residual modules</value></data>
+  <data name="Runtime_ColProcess" xml:space="preserve"><value>Process</value></data>
+  <data name="Runtime_CountsFormat" xml:space="preserve"><value>{0}: {1} · {2}: {3} · {4}: {5}</value></data>
+  <data name="Runtime_Unload" xml:space="preserve"><value>Unload</value></data>
+  <data name="Runtime_UnloadAll" xml:space="preserve"><value>Unload all</value></data>
+  <data name="Runtime_UnloadAllConfirmTitle" xml:space="preserve"><value>Unload all modules?</value></data>
+  <data name="Runtime_UnloadAllConfirmBody" xml:space="preserve"><value>Glass modules will be unloaded from every process in the list.</value></data>
+  <data name="Runtime_UnloadAndExclude" xml:space="preserve"><value>Unload and exclude</value></data>
+  <data name="Runtime_UnloadAndForbid" xml:space="preserve"><value>Unload and forbid</value></data>
+  <data name="Runtime_CopyName" xml:space="preserve"><value>Copy name</value></data>
+  <data name="Runtime_SubsystemState" xml:space="preserve"><value>Subsystem state</value></data>
+  <data name="Runtime_SubsystemsTitleFormat" xml:space="preserve"><value>Subsystem state {0}</value></data>
+  <data name="Runtime_EndTask" xml:space="preserve"><value>End task</value></data>
+  <data name="Runtime_Kill" xml:space="preserve"><value>Kill</value></data>
+  <data name="Runtime_FlyoutMetaFormat" xml:space="preserve"><value>PID {0} · ({1})</value></data>
+  <data name="Runtime_FlyoutSubsystems" xml:space="preserve"><value>Subsystems</value></data>
+  <data name="Runtime_FlyoutSubclass" xml:space="preserve"><value>Subclasses</value></data>
+  <data name="Runtime_SubclassWindows" xml:space="preserve"><value>Subclasses</value></data>
+  <data name="Runtime_SubclassKinds" xml:space="preserve"><value>Kinds</value></data>
+  <data name="Runtime_DiagActive" xml:space="preserve"><value>active</value></data>
+  <data name="Runtime_DiagInactive" xml:space="preserve"><value>—</value></data>
+  <data name="Runtime_DiagWinEventProc" xml:space="preserve"><value>WinEventProc</value></data>
+  <data name="Runtime_DiagCrashGuard" xml:space="preserve"><value>CrashGuard</value></data>
+  <data name="Runtime_DiagHooks" xml:space="preserve"><value>Hooks</value></data>
+  <data name="Runtime_DiagPaintDispatcher" xml:space="preserve"><value>PaintDispatcher</value></data>
+  <data name="Runtime_DiagModuleHandler" xml:space="preserve"><value>ModuleHandler</value></data>
+  <data name="Runtime_DiagExplorer" xml:space="preserve"><value>Xaml Islands</value></data>
+  <data name="Runtime_DiagTaskbar" xml:space="preserve"><value>Xaml VisualTree</value></data>
+  <data name="Crashes_Section" xml:space="preserve"><value>Crash dumps</value></data>
+  <data name="Crashes_SectionDesc" xml:space="preserve"><value>Crash minidumps</value></data>
+  <data name="Crashes_TabPlatform" xml:space="preserve"><value>Platform dumps</value></data>
+  <data name="Crashes_TabSystem" xml:space="preserve"><value>System dumps</value></data>
+  <data name="Crashes_CountFound" xml:space="preserve"><value>(found {0} files)</value></data>
+  <data name="Crashes_CountNone" xml:space="preserve"><value>(no files)</value></data>
+  <data name="Crashes_Empty" xml:space="preserve"><value>No saved dumps</value></data>
+  <data name="Crashes_ColName" xml:space="preserve"><value>Name</value></data>
+  <data name="Crashes_ColDate" xml:space="preserve"><value>Date and time</value></data>
+  <data name="Crashes_ColProcess" xml:space="preserve"><value>Process</value></data>
+  <data name="Crashes_ColPid" xml:space="preserve"><value>PID</value></data>
+  <data name="Crashes_ColSize" xml:space="preserve"><value>Size</value></data>
+  <data name="Crashes_Open" xml:space="preserve"><value>Open</value></data>
+  <data name="Crashes_Delete" xml:space="preserve"><value>Delete</value></data>
+  <data name="Home_RuntimeActive" xml:space="preserve"><value>Active</value></data>
+  <data name="Home_RuntimeRejected" xml:space="preserve"><value>Rejected</value></data>
+  <data name="Home_RuntimeResidual" xml:space="preserve"><value>Not unloaded</value></data>
+  <data name="Attach_EmptyList" xml:space="preserve"><value>List is empty</value></data>
+  <data name="Attach_Process_Few" xml:space="preserve"><value>{0} processes</value></data>
+  <data name="Attach_Process_Many" xml:space="preserve"><value>{0} processes</value></data>
+  <data name="Attach_Process_One" xml:space="preserve"><value>{0} process</value></data>
+  <data name="Attach_FilterByLabel" xml:space="preserve"><value>Filter by:</value></data>
+  <data name="Attach_SortByLabel" xml:space="preserve"><value>Sort:</value></data>
+  <data name="Attach_AddProcess" xml:space="preserve"><value>Add</value></data>
+  <data name="Attach_AddFromRunningList" xml:space="preserve"><value>From process list</value></data>
+  <data name="Attach_AddChooseFile" xml:space="preserve"><value>Choose file</value></data>
+  <data name="Attach_AddEnterString" xml:space="preserve"><value>Enter string</value></data>
+  <data name="Attach_AddPickWindow" xml:space="preserve"><value>Select window</value></data>
+  <data name="Attach_WindowPickDuplicateTitle" xml:space="preserve"><value>Already in the list</value></data>
+  <data name="Attach_WindowPickDuplicateBody" xml:space="preserve"><value>Process “{0}” is already in the user process list.</value></data>
+  <data name="Attach_WindowPickConfirmTitle" xml:space="preserve"><value>Add process?</value></data>
+  <data name="Attach_WindowPickConfirmBody" xml:space="preserve"><value>Add “{0}” to the user process list?</value></data>
+  <data name="BlockList_WindowPickDuplicateTitle" xml:space="preserve"><value>Already in the list</value></data>
+  <data name="BlockList_WindowPickDuplicateBody" xml:space="preserve"><value>Process “{0}” is already on the forbidden list.</value></data>
+  <data name="BlockList_WindowPickConfirmTitle" xml:space="preserve"><value>Forbid process?</value></data>
+  <data name="BlockList_WindowPickConfirmBody" xml:space="preserve"><value>Add “{0}” to the forbidden process list?</value></data>
+  <data name="Attach_WindowPickConfirmButton" xml:space="preserve"><value>Add</value></data>
+  <data name="Attach_ProcessNameInputTitle" xml:space="preserve"><value>Process name</value></data>
+  <data name="Attach_ProcessNameInputPlaceholder" xml:space="preserve"><value>notepad.exe</value></data>
+  <data name="Attach_ProcessNameExtensionRequiredTitle" xml:space="preserve"><value>Specify file extension</value></data>
+  <data name="Attach_ProcessNameExtensionRequiredBody" xml:space="preserve"><value>Could not find an executable with this name. Enter the name with an extension (.exe, .com, .bat, or .cmd).</value></data>
+  <data name="Attach_ProcessPickerTitle" xml:space="preserve"><value>Running processes</value></data>
+  <data name="Attach_ProcessPickerSearch" xml:space="preserve"><value>Search processes</value></data>
+  <data name="Attach_ProcessPickerEmpty" xml:space="preserve"><value>No processes found</value></data>
+  <data name="Attach_ProcessPickerSelect" xml:space="preserve"><value>Select</value></data>
+  <data name="Attach_FilePickerTitle" xml:space="preserve"><value>Choose file</value></data>
+  <data name="Attach_FilePickerSelect" xml:space="preserve"><value>Select</value></data>
+  <data name="Attach_FilePickerSearch" xml:space="preserve"><value>Search in folder</value></data>
+  <data name="Attach_FilePickerEmpty" xml:space="preserve"><value>No files found</value></data>
+  <data name="Attach_FilePickerPath" xml:space="preserve"><value>Folder path</value></data>
+  <data name="Attach_FilePickerQuickDesktop" xml:space="preserve"><value>Desktop</value></data>
+  <data name="Attach_FilePickerQuickDocuments" xml:space="preserve"><value>Documents</value></data>
+  <data name="Attach_FilePickerQuickDownloads" xml:space="preserve"><value>Downloads</value></data>
+  <data name="Attach_FilePickerQuickPictures" xml:space="preserve"><value>Pictures</value></data>
+  <data name="Attach_FilePickerQuickAccess" xml:space="preserve"><value>Quick access</value></data>
+  <data name="Attach_FilePickerQuickComputer" xml:space="preserve"><value>This PC</value></data>
+  <data name="Attach_FilePickerFolders" xml:space="preserve"><value>Folders</value></data>
+  <data name="Attach_FilePickerGoUp" xml:space="preserve"><value>Up</value></data>
+  <data name="Attach_FilePickerGoBack" xml:space="preserve"><value>Back</value></data>
+  <data name="Attach_FilePickerGoForward" xml:space="preserve"><value>Forward</value></data>
+  <data name="Attach_FilePickerHome" xml:space="preserve"><value>Quick access</value></data>
+  <data name="Attach_FilePickerRefresh" xml:space="preserve"><value>Refresh</value></data>
+  <data name="Attach_FilePickerFolderType" xml:space="preserve"><value>File folder</value></data>
+  <data name="Attach_FilePickerDriveDefault" xml:space="preserve"><value>Local disk ({0})</value></data>
+  <data name="Attach_FilePickerAllFiles" xml:space="preserve"><value>All files</value></data>
+  <data name="Attach_FilePickerFilterExe" xml:space="preserve"><value>Applications (*.exe)</value></data>
+  <data name="Attach_FilePickerFilterCom" xml:space="preserve"><value>Applications (*.com)</value></data>
+  <data name="Attach_FilePickerFilterBat" xml:space="preserve"><value>Batch file (*.bat)</value></data>
+  <data name="Attach_FilePickerFilterCmd" xml:space="preserve"><value>Windows script (*.cmd)</value></data>
+  <data name="Attach_FilePickerInvalidTypeTitle" xml:space="preserve"><value>Invalid file type</value></data>
+  <data name="Attach_FilePickerInvalidTypeBody" xml:space="preserve"><value>Select an executable file with the .exe, .com, .bat, or .cmd extension.</value></data>
+  <data name="Attach_FilePickerSort" xml:space="preserve"><value>Sort</value></data>
+  <data name="Attach_FilePickerView" xml:space="preserve"><value>View</value></data>
+  <data name="Attach_ViewDetails" xml:space="preserve"><value>Details</value></data>
+  <data name="Attach_FilePickerColumnName" xml:space="preserve"><value>Name</value></data>
+  <data name="Attach_FilePickerColumnDateModified" xml:space="preserve"><value>Date modified</value></data>
+  <data name="Attach_FilePickerColumnType" xml:space="preserve"><value>Type</value></data>
+  <data name="Attach_FilePickerColumnSize" xml:space="preserve"><value>Size</value></data>
+  <data name="Attach_FilePickerSearchParameters" xml:space="preserve"><value>Search options</value></data>
+  <data name="Attach_FilePickerCloseSearch" xml:space="preserve"><value>Close search</value></data>
+  <data name="Attach_FilePickerSearchScopeAllNested" xml:space="preserve"><value>All subfolders</value></data>
+  <data name="Attach_FilePickerSearchScopeCurrent" xml:space="preserve"><value>Current folder</value></data>
+  <data name="Attach_FilePickerSearchType" xml:space="preserve"><value>Type</value></data>
+  <data name="Attach_FilePickerSearchSize" xml:space="preserve"><value>Size</value></data>
+  <data name="Attach_FilePickerSearchSizeSmall" xml:space="preserve"><value>Small (16 KB - 1 MB)</value></data>
+  <data name="Attach_FilePickerSearchSizeMedium" xml:space="preserve"><value>Medium (1 - 128 MB)</value></data>
+  <data name="Attach_FilePickerSearchSizeLarge" xml:space="preserve"><value>Large (128 MB - 1 GB)</value></data>
+  <data name="Attach_FilePickerSearchAnySize" xml:space="preserve"><value>Any size</value></data>
+  <data name="Attach_FilePickerSearchNoResults" xml:space="preserve"><value>No items match your search criteria.</value></data>
+  <data name="Attach_FilePickerSearchInProgress" xml:space="preserve"><value>Searching...</value></data>
+  <data name="Attach_DuplicateProcess" xml:space="preserve"><value>This process is already in the list.</value></data>
+  <data name="Attach_FilterAll" xml:space="preserve"><value>All modes</value></data>
+  <data name="Attach_FilterForbidden" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Attach_FilterSystem" xml:space="preserve"><value>System</value></data>
+  <data name="Attach_FoundCount" xml:space="preserve"><value>Processes found: {0}</value></data>
+  <data name="Attach_MenuDelete" xml:space="preserve"><value>Delete</value></data>
+  <data name="Attach_MenuDeleteAndBlock" xml:space="preserve"><value>Delete and block</value></data>
+  <data name="Attach_BlockedProcess" xml:space="preserve"><value>This process is blocked and cannot be added to AttachList.</value></data>
+  <data name="Attach_MenuDisable" xml:space="preserve"><value>Disable</value></data>
+  <data name="Attach_ModeForbidden" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Attach_ModeFull" xml:space="preserve"><value>Maximum</value></data>
+  <data name="Attach_ModePopup" xml:space="preserve"><value>Menu only</value></data>
+  <data name="Attach_ActionSuccess" xml:space="preserve"><value>Process list updated.</value></data>
+  <data name="Attach_SearchPlaceholder" xml:space="preserve"><value>Search processes</value></data>
+  <data name="Attach_SearchUserPlaceholder" xml:space="preserve"><value>Search user processes</value></data>
+  <data name="Attach_SearchBlockedPlaceholder" xml:space="preserve"><value>Search blocked processes</value></data>
+  <data name="Attach_ViewList" xml:space="preserve"><value>List</value></data>
+  <data name="Attach_ViewTiles" xml:space="preserve"><value>Tiles</value></data>
+  <data name="Attach_ViewCompact" xml:space="preserve"><value>Compact</value></data>
+  <data name="Attach_ViewLargeIcons" xml:space="preserve"><value>Large icons</value></data>
+  <data name="Attach_SortMode" xml:space="preserve"><value>Mode</value></data>
+  <data name="Attach_SortNameAsc" xml:space="preserve"><value>Name (A to Z)</value></data>
+  <data name="Attach_SortNameDesc" xml:space="preserve"><value>Name (Z to A)</value></data>
+  <data name="BlockList_Section" xml:space="preserve"><value>Forbidden process list</value></data>
+  <data name="BlockList_SectionDesc" xml:space="preserve"><value>Processes where injection is dangerous or undesirable</value></data>
+  <data name="BlockList_EmptyList" xml:space="preserve"><value>The forbidden process list is empty</value></data>
+  <data name="BlockList_DuplicateProcess" xml:space="preserve"><value>This process is already on the forbidden list</value></data>
+  <data name="BlockList_BuiltIn" xml:space="preserve"><value>Built-in</value></data>
+  <data name="BlockList_User" xml:space="preserve"><value>User</value></data>
+  <data name="BlockList_MenuRemove" xml:space="preserve"><value>Remove from block list</value></data>
+  <data name="Breadcrumb_AtlasImage" xml:space="preserve"><value>Atlases</value></data>
+  <data name="Breadcrumb_Colorization" xml:space="preserve"><value>Composition</value></data>
+  <data name="Breadcrumb_DropDown" xml:space="preserve"><value>DropDown</value></data>
+  <data name="Breadcrumb_DwmGlass" xml:space="preserve"><value>Appearance</value></data>
+  <data name="Breadcrumb_DwmSettings" xml:space="preserve"><value>DWM settings</value></data>
+  <data name="Breadcrumb_DwmTheme" xml:space="preserve"><value>Theme</value></data>
+  <data name="Breadcrumb_General" xml:space="preserve"><value>General</value></data>
+  <data name="Breadcrumb_GlassSettings" xml:space="preserve"><value>Glass settings</value></data>
+  <data name="Breadcrumb_Menu" xml:space="preserve"><value>Menu</value></data>
+  <data name="Breadcrumb_PopupWindows" xml:space="preserve"><value>Popup windows</value></data>
+  <data name="Breadcrumb_ReflectionImage" xml:space="preserve"><value>Textures</value></data>
+  <data name="Breadcrumb_RootSwca" xml:space="preserve"><value>Root windows</value></data>
+  <data name="Breadcrumb_Taskbar" xml:space="preserve"><value>Taskbar</value></data>
+  <data name="Breadcrumb_AdjacentWindows" xml:space="preserve"><value>Adjacent windows</value></data>
+  <data name="Breadcrumb_Tooltip" xml:space="preserve"><value>Tooltip</value></data>
+  <data name="CmdApply" xml:space="preserve"><value>Apply</value></data>
+  <data name="CmdCancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="CmdOk" xml:space="preserve"><value>OK</value></data>
+  <data name="CmdSave" xml:space="preserve"><value>Save</value></data>
+  <data name="Custom_Default" xml:space="preserve"><value>Default</value></data>
+  <data name="ColorPicker_ResetDefault" xml:space="preserve"><value>Default</value></data>
+  <data name="Custom_GeneralPrefix" xml:space="preserve"><value>General:</value></data>
+  <data name="Custom_NoBorder" xml:space="preserve"><value>No border</value></data>
+  <data name="Custom_Off" xml:space="preserve"><value>Off</value></data>
+  <data name="Custom_On" xml:space="preserve"><value>On</value></data>
+  <data name="Custom_ParamChanged_Few" xml:space="preserve"><value>{0} settings changed</value></data>
+  <data name="Custom_ParamChanged_Many" xml:space="preserve"><value>{0} settings changed</value></data>
+  <data name="Custom_ParamChanged_One" xml:space="preserve"><value>1 setting changed</value></data>
+  <data name="Custom_Section_Few" xml:space="preserve"><value>{0} sections</value></data>
+  <data name="Custom_Section_Many" xml:space="preserve"><value>{0} sections</value></data>
+  <data name="Custom_Section_One" xml:space="preserve"><value>1 section</value></data>
+  <data name="Custom_WithBorder" xml:space="preserve"><value>Border</value></data>
+  <data name="Dialog_AppSettingsBody1" xml:space="preserve"><value>GlassSettings window options: UI theme, startup behavior, and other preferences for the settings app itself.</value></data>
+  <data name="Dialog_AppSettingsBody2" xml:space="preserve"><value>Section in development. Settings unrelated to the Glass platform and the BWM/OpenGlass registry will appear here.</value></data>
+  <data name="Dialog_AppSettingsTitle" xml:space="preserve"><value>GlassSettings preferences</value></data>
+  <data name="AppSettings_ThemeHeader" xml:space="preserve"><value>App theme</value></data>
+  <data name="AppSettings_ThemeDescription" xml:space="preserve"><value>Choose a light or dark interface mode</value></data>
+  <data name="AppSettings_ThemeModeLabel" xml:space="preserve"><value>Mode</value></data>
+  <data name="AppSettings_ThemeLight" xml:space="preserve"><value>Light</value></data>
+  <data name="AppSettings_ThemeDark" xml:space="preserve"><value>Dark</value></data>
+  <data name="AppSettings_ThemeSystem" xml:space="preserve"><value>System</value></data>
+  <data name="AppSettings_BackdropHeader" xml:space="preserve"><value>Background behind window</value></data>
+  <data name="AppSettings_BackdropDescription" xml:space="preserve"><value>Choose the backdrop effect type</value></data>
+  <data name="AppSettings_BackdropTypeLabel" xml:space="preserve"><value>Effect type</value></data>
+  <data name="AppSettings_BackdropAcrylic" xml:space="preserve"><value>Acrylic</value></data>
+  <data name="AppSettings_BackdropSystem" xml:space="preserve"><value>System</value></data>
+  <data name="AppSettings_BusyOverlayHeader" xml:space="preserve"><value>Busy overlay</value></data>
+  <data name="AppSettings_BusyOverlayDescription" xml:space="preserve"><value>Window appearance when unavailable, for example under a dialog</value></data>
+  <data name="AppSettings_BusyOverlayModeAcrylic" xml:space="preserve"><value>Acrylic</value></data>
+  <data name="AppSettings_BusyOverlayModeDim" xml:space="preserve"><value>Dim</value></data>
+  <data name="AppSettings_LanguageLabel" xml:space="preserve"><value>Display language</value></data>
+  <data name="AppSettings_LanguageDescription" xml:space="preserve"><value>Choose your preferred language for GlassSettings</value></data>
+  <data name="AppSettings_LanguageSystem" xml:space="preserve"><value>System</value></data>
+  <data name="Dialog_Close" xml:space="preserve"><value>Close</value></data>
+  <data name="Dialog_Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Dialog_SaveBeforePlatformTitle" xml:space="preserve"><value>Save settings before start?</value></data>
+  <data name="Dialog_SaveBeforePlatformBody" xml:space="preserve"><value>You have unsaved changes. Glass Platform will apply current DWM registry values — save settings before starting.</value></data>
+  <data name="Dialog_SaveBeforePlatformConfirm" xml:space="preserve"><value>Save and start</value></data>
+  <data name="Dialog_RemoveSectionTitle" xml:space="preserve"><value>Remove section?</value></data>
+  <data name="Dialog_RemoveSectionBody" xml:space="preserve"><value>The section "{0}" will be disabled. All of its parameters will be removed from the registry and replaced with default values.</value></data>
+  <data name="Dialog_RemoveSectionConfirm" xml:space="preserve"><value>Remove</value></data>
+  <data name="Dialog_MenuAdvancedRemoveTitle" xml:space="preserve"><value>Disable menu custom rendering?</value></data>
+  <data name="Dialog_MenuAdvancedRemoveBody" xml:space="preserve"><value>Custom rendering for all menu items (Hot, Disabled Hot, Focusing, Separator) will be turned off. All related parameters under Menu will be removed from the registry.</value></data>
+  <data name="Dialog_UnsavedChangesExitTitle" xml:space="preserve"><value>Exit without saving?</value></data>
+  <data name="Dialog_UnsavedChangesExitBody" xml:space="preserve"><value>There are unsaved changes. They will be reverted and the registry will remain unchanged.</value></data>
+  <data name="Dialog_UnsavedChangesExitConfirm" xml:space="preserve"><value>Exit</value></data>
+  <data name="Dialog_DonationBody1" xml:space="preserve"><value>Glass is a non-commercial deep Windows UI customization project (successor to Black Window Manager). The platform, settings, and related modules are distributed free of charge.</value></data>
+  <data name="Dialog_DonationBody2" xml:space="preserve"><value>Development, testing on different Windows builds, and user support take time. Voluntary donations help continue the project and release updates.</value></data>
+  <data name="Dialog_DonationBody3" xml:space="preserve"><value>Support methods and current details are published by the author in official project channels. Donations do not unlock extra features — they are a way to say thank you.</value></data>
+  <data name="Dialog_DonationThanks" xml:space="preserve"><value>Thank you for using Glass!</value></data>
+  <data name="Dialog_DonationTitle" xml:space="preserve"><value>Support Glass</value></data>
+  <data name="Dialog_Understood" xml:space="preserve"><value>Got it</value></data>
+  <data name="Dialog_OpenGlassRootNoneTitle" xml:space="preserve"><value>Root mode is disabled</value></data>
+  <data name="Dialog_OpenGlassRootNoneBody" xml:space="preserve"><value>OpenGlass requires DWM root mode. Open Glass Settings → Root windows → DWM.</value></data>
+  <data name="Dwm_AtlasEmpty" xml:space="preserve"><value>No AtlasTheme images found.</value></data>
+  <data name="Dwm_AtlasImage" xml:space="preserve"><value>Atlases</value></data>
+  <data name="Dwm_AtlasImageDesc" xml:space="preserve"><value>AtlasTheme resources</value></data>
+  <data name="Dwm_AtlasCollection" xml:space="preserve"><value>Atlas collection</value></data>
+  <data name="Stylization_Layer_Wallpaper" xml:space="preserve"><value>Wallpaper</value></data>
+  <data name="Stylization_Layer_Glass" xml:space="preserve"><value>Glass</value></data>
+  <data name="Stylization_Layer_Reflection" xml:space="preserve"><value>Reflection</value></data>
+  <data name="Stylization_Layer_Material" xml:space="preserve"><value>Material</value></data>
+  <data name="Stylization_Layer_Window" xml:space="preserve"><value>Window</value></data>
+  <data name="Stylization_Layer_Atlas" xml:space="preserve"><value>Atlas</value></data>
+  <data name="Stylization_Layer_Default" xml:space="preserve"><value>default</value></data>
+  <data name="Dwm_ExportAtlasButton" xml:space="preserve"><value>Save theme atlas</value></data>
+  <data name="Dwm_ExportAtlasTooltip" xml:space="preserve"><value>Export the active theme atlas to the AtlasTheme folder (a .layout file is saved alongside).</value></data>
+  <data name="Dialog_ExportAtlasTitle" xml:space="preserve"><value>Save theme atlas?</value></data>
+  <data name="Dialog_ExportAtlasBody" xml:space="preserve"><value>Save the active theme atlas as «{0}»?</value></data>
+  <data name="Dialog_ExportAtlasConfirm" xml:space="preserve"><value>Save</value></data>
+  <data name="Dialog_DeleteThemeImageTitle" xml:space="preserve"><value>Delete image?</value></data>
+  <data name="Dialog_DeleteThemeImageBody" xml:space="preserve"><value>Delete «{0}» from the collection? The file will be removed from disk.</value></data>
+  <data name="Dialog_DeleteThemeImageInUse" xml:space="preserve"><value>«{0}» is selected in DWM settings and cannot be deleted. Clear the selection or choose another file first.</value></data>
+  <data name="Dialog_ExportAtlasOverwriteTitle" xml:space="preserve"><value>Overwrite atlas file?</value></data>
+  <data name="Dialog_ExportAtlasOverwriteBody" xml:space="preserve"><value>«{0}» already exists in the atlas collection folder. Overwrite it?</value></data>
+  <data name="Dialog_ExportAtlasOverwriteConfirm" xml:space="preserve"><value>Overwrite</value></data>
+  <data name="Dwm_ExportAtlasSaved" xml:space="preserve"><value>Saved</value></data>
+  <data name="Dwm_ExportAtlasFailed" xml:space="preserve"><value>Failed</value></data>
+  <data name="Dwm_Intensity" xml:space="preserve"><value>Intensity</value></data>
+  <data name="Dwm_CaptionButtons" xml:space="preserve"><value>CaptionButtons</value></data>
+  <data name="Dwm_CaptionButtonsDesc" xml:space="preserve"><value>Same as Theme page</value></data>
+  <data name="Dwm_CaptionColor" xml:space="preserve"><value>Caption color</value></data>
+  <data name="Dwm_CaptionColorMax" xml:space="preserve"><value>Caption color (maximized)</value></data>
+  <data name="Dwm_CaptionDefault" xml:space="preserve"><value>Default</value></data>
+  <data name="Dwm_CaptionHide" xml:space="preserve"><value>Hide</value></data>
+  <data name="Dwm_GlassColor" xml:space="preserve"><value>Glass color</value></data>
+  <data name="Dwm_GlassColorDesc" xml:space="preserve"><value>ARGB color in the DWM registry. Opacity is controlled by the alpha channel.</value></data>
+  <data name="Dwm_GlassColorSubtitle" xml:space="preserve"><value>DWM window ARGB colorization.</value></data>
+  <data name="Dwm_HubColorization" xml:space="preserve"><value>Composition</value></data>
+  <data name="Dwm_HubColorizationDesc" xml:space="preserve"><value>DWM window colors and opacity</value></data>
+  <data name="Dwm_HubGlass" xml:space="preserve"><value>Appearance</value></data>
+  <data name="Dwm_HubGlassDesc" xml:space="preserve"><value>Blur quality, window geometry, caption buttons, title text and colors.</value></data>
+  <data name="Dwm_AppearanceGeneral" xml:space="preserve"><value>General appearance</value></data>
+  <data name="Dwm_AppearanceGeneralSubtitle" xml:space="preserve"><value>Blur quality optimization and Direct3D renderer for the glass effect.</value></data>
+  <data name="Dwm_AppearanceWindow" xml:space="preserve"><value>Window appearance</value></data>
+  <data name="Dwm_AppearanceWindowSubtitle" xml:space="preserve"><value>Window corner geometry, caption button style, and border rendering.</value></data>
+  <data name="Dwm_AppearanceWindowBodyDesc" xml:space="preserve"><value>Configure corner rounding, caption button style, and modern borders if needed.</value></data>
+  <data name="Dwm_AppearanceCaption" xml:space="preserve"><value>Caption appearance</value></data>
+  <data name="Dwm_AppearanceCaptionSubtitle" xml:space="preserve"><value>Title text alignment and glow rendering on the caption bar.</value></data>
+  <data name="Dwm_AppearanceCaptionBodyDesc" xml:space="preserve"><value>Configure title alignment, glow mode, and glow size.</value></data>
+  <data name="Dwm_BlurOptimization" xml:space="preserve"><value>Blur optimization:</value></data>
+  <data name="Dwm_UseDirect3DRenderer" xml:space="preserve"><value>Use Direct3D renderer</value></data>
+  <data name="Dwm_UseDirect3DRendererTooltip" xml:space="preserve"><value>Switches glass rendering to the Direct3D 11 backend instead of the default Direct2D path. Only applies in Windows 7 Aero mode (Vista mode uses transparent glass without blur). When enabled, blur radius is fixed at 3 and blur settings become unavailable.</value></data>
+  <data name="Dwm_RoundRectProfileLabel" xml:space="preserve"><value>Corner rounding</value></data>
+  <data name="Dwm_GlassGeometryRadius" xml:space="preserve"><value>Corner radius</value></data>
+  <data name="Dwm_CaptionButtonsStyle" xml:space="preserve"><value>Caption buttons style:</value></data>
+  <data name="Dwm_DisableModernBorders" xml:space="preserve"><value>Classic border</value></data>
+  <data name="Dwm_TextCentering" xml:space="preserve"><value>Text centering:</value></data>
+  <data name="Dwm_TextGlowMode" xml:space="preserve"><value>Text glow mode:</value></data>
+  <data name="Dwm_TextGlowSize" xml:space="preserve"><value>Size:</value></data>
+  <data name="Dwm_CaptionColorOverride" xml:space="preserve"><value>Title text color</value></data>
+  <data name="Dwm_CaptionColorActiveTitle" xml:space="preserve"><value>Active window title text color</value></data>
+  <data name="Dwm_CaptionColorInactiveTitle" xml:space="preserve"><value>Inactive window title text color</value></data>
+  <data name="Dwm_CaptionColorActiveSubtitle" xml:space="preserve"><value>Title text color source for the active window: auto, theme, or custom.</value></data>
+  <data name="Dwm_CaptionColorInactiveSubtitle" xml:space="preserve"><value>Title text color source for the inactive window: auto, theme, or custom.</value></data>
+  <data name="Dwm_CaptionColorPickerActionDesc" xml:space="preserve"><value>Set a custom title text color by moving the slider in the color field, or enter a numeric color value in the input field.</value></data>
+  <data name="Dwm_PivotNormalWindow" xml:space="preserve"><value>Normal window</value></data>
+  <data name="Dwm_PivotMaximizedWindow" xml:space="preserve"><value>Maximized window</value></data>
+  <data name="Dwm_HubTheme" xml:space="preserve"><value>Theme</value></data>
+  <data name="Dwm_HubThemeDesc" xml:space="preserve"><value>Caption and chrome</value></data>
+  <data name="Dwm_LabelMode" xml:space="preserve"><value>Mode:</value></data>
+  <data name="Dwm_LabelOpaqueBlend" xml:space="preserve"><value>OpaqueBlend:</value></data>
+  <data name="Dwm_LabelOpaqueBlendPriority" xml:space="preserve"><value>Base color priority</value></data>
+  <data name="Dwm_LabelPercent" xml:space="preserve"><value>%:</value></data>
+  <data name="Dwm_ModeAuto" xml:space="preserve"><value>Auto</value></data>
+  <data name="Dwm_ModeFromTheme" xml:space="preserve"><value>From theme</value></data>
+  <data name="Dwm_ModeManual" xml:space="preserve"><value>Manual</value></data>
+  <data name="Dwm_BaseOpacityInfoTitle" xml:space="preserve"><value>Base reflection opacity</value></data>
+  <data name="Dwm_BaseOpacityExpanderDesc" xml:space="preserve"><value>Base reflection opacity. Final brightness = base × intensity × 2.</value></data>
+  <data name="Dwm_BaseOpacityInfoMessage" xml:space="preserve"><value>Four independent parameters (active / inactive × normal / maximized) control glass color blending opacity. Auto: key absent. From theme: 0xFFFFFFFF. Manual: 0–100%. Pivot switches the key pair; each tab has two flat rows with mode and slider.</value></data>
+  <data name="Dwm_OpacityColorization" xml:space="preserve"><value>Colorization opacity</value></data>
+  <data name="Dwm_OpacityGlass" xml:space="preserve"><value>Glass opacity</value></data>
+  <data name="Dwm_OpacityMaximized" xml:space="preserve"><value>Opacity (maximized)</value></data>
+  <data name="Dwm_OpacityModeDesc" xml:space="preserve"><value>Opacity mode and value</value></data>
+  <data name="Dwm_PivotActive" xml:space="preserve"><value>Active window</value></data>
+  <data name="Dwm_PivotInactive" xml:space="preserve"><value>Inactive window</value></data>
+  <data name="Dwm_ReflectionEmpty" xml:space="preserve"><value>No GlassReflection images found.</value></data>
+  <data name="Dwm_ReflectionImage" xml:space="preserve"><value>Reflection</value></data>
+  <data name="Dwm_ReflectionImageDesc" xml:space="preserve"><value>GlassReflection resources</value></data>
+  <data name="Dwm_ReflectionOpacity" xml:space="preserve"><value>Reflection opacity</value></data>
+  <data name="Dwm_ReflectionOpacityDesc" xml:space="preserve"><value>Glass reflection opacity</value></data>
+  <data name="Dwm_ReflectionOpacityMax" xml:space="preserve"><value>Reflection opacity (maximized)</value></data>
+  <data name="Dwm_ReflectionCollection" xml:space="preserve"><value>Reflection collection</value></data>
+  <data name="Dwm_ReflectionParametersTitle" xml:space="preserve"><value>Glass texture parameters</value></data>
+  <data name="Dwm_ReflectionParametersDesc" xml:space="preserve"><value>Glass texture, rays, mosaic, or material</value></data>
+  <data name="Dwm_MaterialCollection" xml:space="preserve"><value>Material collection</value></data>
+  <data name="Dwm_MaterialCollectionDesc" xml:space="preserve"><value>ThemeMaterial resources</value></data>
+  <data name="Dwm_MaterialEmpty" xml:space="preserve"><value>No ThemeMaterial images found.</value></data>
+  <data name="Dwm_MaterialOpacity" xml:space="preserve"><value>Material opacity</value></data>
+  <data name="Dwm_MaterialOpacityDesc" xml:space="preserve"><value>Material texture intensity. 0% disables the effect.</value></data>
+  <data name="Dwm_ReflectionControlsTitle" xml:space="preserve"><value>Reflection settings</value></data>
+  <data name="Dwm_ReflectionCurrentBadge" xml:space="preserve"><value>Current</value></data>
+  <data name="Dwm_ReflectionDefaultTitle" xml:space="preserve"><value>Default</value></data>
+  <data name="Dwm_ReflectionInfoMessage" xml:space="preserve"><value>Reflection is a texture stretched across the desktop and drawn above glass regions to create an environment effect (default: Aero Glass Win7 reflection texture). Material is a texture tiled above glass regions (default: acrylic noise texture).</value></data>
+  <data name="Dwm_ReflectionInfoTitle" xml:space="preserve"><value>What are reflection and material?</value></data>
+  <data name="Dwm_ReflectionIntensity" xml:space="preserve"><value>Reflection intensity</value></data>
+  <data name="Dwm_ReflectionIntensityDesc" xml:space="preserve"><value>Global effect multiplier. 0% disables reflection.</value></data>
+  <data name="Dwm_ReflectionParallax" xml:space="preserve"><value>Parallax</value></data>
+  <data name="Dwm_ReflectionParallaxDesc" xml:space="preserve"><value>Texture shift when moving the window horizontally.</value></data>
+  <data name="Dwm_ReflectionPercentFormat" xml:space="preserve"><value>{0}%</value></data>
+  <data name="Dwm_ReflectionPolicyAeroPeek" xml:space="preserve"><value>Aero Peek</value></data>
+  <data name="Dwm_ReflectionPolicyAeroSnap" xml:space="preserve"><value>Aero Snap (Win10)</value></data>
+  <data name="Dwm_ReflectionPolicyDesc" xml:space="preserve"><value>Default is everywhere. Check specific areas to restrict rendering.</value></data>
+  <data name="Dwm_ReflectionPolicyLabel" xml:space="preserve"><value>Rendering policy</value></data>
+  <data name="Dwm_ReflectionPolicyTitlebar" xml:space="preserve"><value>Titlebar</value></data>
+  <data name="Dwm_GlassTypeTitle" xml:space="preserve"><value>Glass type</value></data>
+  <data name="Dwm_GlassTypeDesc" xml:space="preserve"><value>Windows Vista Aero or Windows 7 Aero compositor mode.</value></data>
+  <data name="Dwm_GlassTypeVista" xml:space="preserve"><value>Windows Vista Aero</value></data>
+  <data name="Dwm_GlassTypeWin7" xml:space="preserve"><value>Windows 7 Aero</value></data>
+  <data name="Dwm_OpaqueBlendEnable" xml:space="preserve"><value>Opaque</value></data>
+  <data name="Dwm_ActiveGlassColor" xml:space="preserve"><value>Active window glass color and blur settings</value></data>
+  <data name="Dwm_ActiveGlassColorSubtitle" xml:space="preserve"><value>Glass color, tint intensity, blur settings</value></data>
+  <data name="Dwm_ActiveGlassColorDesc" xml:space="preserve"><value>ARGB glass color. The alpha channel is ignored by DWM.</value></data>
+  <data name="Dwm_ActiveGlassColorBodyDescVista" xml:space="preserve"><value>Set the color and intensity (opacity) for active window glass, and set the blur radius — how strongly the background under the glass is blurred.</value></data>
+  <data name="Dwm_ActiveGlassColorBodyDescWin7" xml:space="preserve"><value>Set the active window glass color and tint balance (opacity), and the blur radius — how strongly the background under the glass is blurred. Also set blur balance — the contribution of the already blurred backdrop in the Aero glass mix: the minimum gives a black opaque contribution (no wallpaper show-through), the maximum usually gives a white or milky glass tone (especially noticeable on dark themes and dark wallpapers); use mid-range values for transparent glass.</value></data>
+  <data name="Dwm_GlassColorWin7" xml:space="preserve"><value>Glass color and blur settings</value></data>
+  <data name="Dwm_GlassColorWin7Subtitle" xml:space="preserve"><value>Glass color, tint intensity, blur settings</value></data>
+  <data name="Dwm_CustomInactiveColor" xml:space="preserve"><value>Inactive window glass color</value></data>
+  <data name="Dwm_CustomInactiveColorSubtitle" xml:space="preserve"><value>Color and intensity for inactive window glass.</value></data>
+  <data name="Dwm_CustomInactiveColorDesc" xml:space="preserve"><value>Inactive-window glass color. Used only with Vista Aero.</value></data>
+  <data name="Dwm_CustomInactiveColorBodyDesc" xml:space="preserve"><value>Set the color and intensity (opacity) of inactive window glass.</value></data>
+  <data name="Dwm_AfterglowColor" xml:space="preserve"><value>Glass glow color and balance</value></data>
+  <data name="Dwm_AfterglowSubtitle" xml:space="preserve"><value>Secondary glass tint and blend balance.</value></data>
+  <data name="Dwm_AfterglowColorDesc" xml:space="preserve"><value>Win7 Aero afterglow color and balance.</value></data>
+  <data name="Dwm_AfterglowColorBodyDesc" xml:space="preserve"><value>Set the afterglow tint color and balance (opacity) for Aero glass.</value></data>
+  <data name="Dwm_BlurLevelTitle" xml:space="preserve"><value>Blur balance</value></data>
+  <data name="Dwm_BlurRadiusTitle" xml:space="preserve"><value>Blur radius</value></data>
+  <data name="Dwm_OverrideAccentTitle" xml:space="preserve"><value>Override accent</value></data>
+  <data name="Dwm_CompositionPreviewLayerBlur" xml:space="preserve"><value>Blur</value></data>
+  <data name="Dwm_CompositionPreviewLayerTint" xml:space="preserve"><value>Tint</value></data>
+  <data name="Dwm_CompositionPreviewLayerTintActive" xml:space="preserve"><value>Active tint</value></data>
+  <data name="Dwm_CompositionPreviewLayerTintInactive" xml:space="preserve"><value>Inactive tint</value></data>
+  <data name="Dwm_CompositionPreviewLayerGlow" xml:space="preserve"><value>Glow</value></data>
+  <data name="Dwm_CompositionPreviewStateActive" xml:space="preserve"><value>Active</value></data>
+  <data name="Dwm_CompositionPreviewStateInactive" xml:space="preserve"><value>Inactive</value></data>
+  <data name="Dwm_CompositionLayerTooltipFormat" xml:space="preserve"><value>{0}: {1}</value></data>
+  <data name="Dwm_OpaqueBlendTitle" xml:space="preserve"><value>Opaque mode</value></data>
+  <data name="Dwm_OpaqueBlendPriorityDesc" xml:space="preserve"><value>Base color selection order when blending: Vista Aero prefers maximized; Win7 Aero prefers opaque. Auto follows glass type.</value></data>
+  <data name="Dwm_GlassTypeShort" xml:space="preserve"><value>Glass type:</value></data>
+  <data name="Dwm_BaseTransparentDesc" xml:space="preserve"><value>ARGB base color for blending (transparent state).</value></data>
+  <data name="Dwm_BaseTransparentBodyDesc" xml:space="preserve"><value>Set the base blend color for transparent windows, or choose Auto / From theme.</value></data>
+  <data name="Dwm_BaseMaximizedDesc" xml:space="preserve"><value>ARGB base color for blending (maximized state).</value></data>
+  <data name="Dwm_BaseMaximizedBodyDesc" xml:space="preserve"><value>Set the base blend color for maximized windows, or choose Auto / From theme.</value></data>
+  <data name="Dwm_BaseOpaqueDesc" xml:space="preserve"><value>ARGB base color for blending (opaque state).</value></data>
+  <data name="Dwm_BaseOpaqueBodyDesc" xml:space="preserve"><value>Set the base blend color for opaque regions, or choose Auto / From theme.</value></data>
+  <data name="Dwm_AdvancedColorizationTitle" xml:space="preserve"><value>Advanced</value></data>
+  <data name="Dwm_System_GeneralTitle" xml:space="preserve"><value>General settings</value></data>
+  <data name="Dwm_System_GeneralSubtitle" xml:space="preserve"><value>OpenGlass hooks and power options</value></data>
+  <data name="Dwm_System_BatteryShort" xml:space="preserve"><value>Safe-battery</value></data>
+  <data name="Dwm_System_InfoTitle" xml:space="preserve"><value>OpenGlass system parameters</value></data>
+  <data name="Dwm_System_InfoMessage" xml:space="preserve"><value>Safe-battery makes glass opaque when energy saver is on or battery is low. No safe-zone disables the extra glass rendering margin at window edges — visual artifacts may appear. Caption text handler, Accent overrider, Glass frame handler, Glass reflection handler, and Caption metrics tweaker disable the corresponding OpenGlass handlers — use only to resolve third-party conflicts.</value></data>
+  <data name="Dwm_System_HooksCta" xml:space="preserve"><value>Turn on the switches below to disable the handlers you need. When unsure, leave them all off or click Default to restore standard behavior.</value></data>
+  <data name="Dwm_System_BatteryTooltip" xml:space="preserve"><value>If checked, the glass effect becomes opaque when battery or energy saver is on.</value></data>
+  <data name="Dwm_System_SafetyZoneShort" xml:space="preserve"><value>No safe-zone</value></data>
+  <data name="Dwm_System_SafetyZoneTooltip" xml:space="preserve"><value>When checked, the glass safety zone is disabled — visual artifacts may appear. Default is unchecked (zone enabled).</value></data>
+  <data name="Dwm_System_HooksDesc" xml:space="preserve"><value>Disable hooks for individual OpenGlass modules. Use only to maintain compatibility with third-party apps.</value></data>
+  <data name="Dwm_System_Hook_CaptionText" xml:space="preserve"><value>Caption text handler</value></data>
+  <data name="Dwm_System_Hook_AccentOverrider" xml:space="preserve"><value>Accent overrider</value></data>
+  <data name="Dwm_System_Hook_GlassFrame" xml:space="preserve"><value>Glass frame handler</value></data>
+  <data name="Dwm_System_Hook_GlassReflection" xml:space="preserve"><value>Glass reflection handler</value></data>
+  <data name="Dwm_System_Hook_CaptionMetrics" xml:space="preserve"><value>Caption metrics tweaker</value></data>
+  <data name="Dwm_System_SymbolsTitle" xml:space="preserve"><value>Download symbols</value></data>
+  <data name="Dwm_System_SymbolsDownload" xml:space="preserve"><value>Download symbols</value></data>
+  <data name="Dwm_System_SymbolsCancel" xml:space="preserve"><value>Cancel download</value></data>
+  <data name="Dwm_System_SymbolsCachePath" xml:space="preserve"><value>Download directory: {0}</value></data>
+  <data name="Dwm_System_SymbolsDownloading" xml:space="preserve"><value>Downloading {0} — {1}%</value></data>
+  <data name="Dialog_SymbolsMissingToolsTitle" xml:space="preserve"><value>Symbol tools missing</value></data>
+  <data name="Dialog_SymbolsMissingToolsBody" xml:space="preserve"><value>OpenGlass requires {0} to download and use symbols. Place both libraries next to OpenGlass.dll or install Windows Debugging Tools.</value></data>
+  <data name="Dialog_SymbolsNoInternetTitle" xml:space="preserve"><value>No internet connection</value></data>
+  <data name="Dialog_SymbolsNoInternetBody" xml:space="preserve"><value>Symbol download from the Microsoft server requires internet access. Check your network and try again.</value></data>
+  <data name="Dialog_SymbolsConnectionLostTitle" xml:space="preserve"><value>Internet connection lost</value></data>
+  <data name="Dialog_SymbolsConnectionLostBody" xml:space="preserve"><value>The internet connection was lost during symbol download. Check your network and try again.</value></data>
+  <data name="Dialog_Retry" xml:space="preserve"><value>Retry</value></data>
+  <data name="Dialog_SymbolsDownloadSucceededTitle" xml:space="preserve"><value>Symbols downloaded</value></data>
+  <data name="Dialog_SymbolsDownloadSucceededBody" xml:space="preserve"><value>All required symbol files were downloaded in full and saved to the working directory.</value></data>
+  <data name="Dialog_SymbolsDownloadFailedTitle" xml:space="preserve"><value>Symbol download failed</value></data>
+  <data name="Dialog_SymbolsDownloadFailedBody" xml:space="preserve"><value>{0}</value></data>
+  <data name="Dialog_SymbolsDownloadFailedBodyFallback" xml:space="preserve"><value>Failed to download symbols from the Microsoft server.</value></data>
+  <data name="Dialog_SymbolsCloseWhileDownloadingTitle" xml:space="preserve"><value>Cancel symbol download?</value></data>
+  <data name="Dialog_SymbolsCloseWhileDownloadingBody" xml:space="preserve"><value>Symbols are currently downloading. Close the window and cancel the download?</value></data>
+  <data name="Dialog_SymbolsCloseWhileDownloadingConfirm" xml:space="preserve"><value>Cancel and close</value></data>
+  <data name="Dialog_SymbolsClearCacheTitle" xml:space="preserve"><value>Replace symbol files?</value></data>
+  <data name="Dialog_SymbolsClearCacheBody" xml:space="preserve"><value>Symbol files already exist in the cache. If you continue, all old files in {0} will be deleted.</value></data>
+  <data name="Dialog_SymbolsClearCacheConfirm" xml:space="preserve"><value>Continue</value></data>
+  <data name="Dwm_AdvancedColorizationDesc" xml:space="preserve"><value>Base colors, base color priority, and base opacity modes.</value></data>
+  <data name="Dwm_BaseColorSpoilerTitle" xml:space="preserve"><value>Base color</value></data>
+  <data name="Dwm_BaseOpacitySpoilerTitle" xml:space="preserve"><value>Base opacity</value></data>
+  <data name="Dwm_BaseOpacitySpoilerTitleActive" xml:space="preserve"><value>Base opacity (active)</value></data>
+  <data name="Dwm_BaseOpacitySpoilerTitleInactive" xml:space="preserve"><value>Base opacity (inactive)</value></data>
+  <data name="Dwm_BaseTransparent" xml:space="preserve"><value>Base color (transparent)</value></data>
+  <data name="Dwm_PivotBaseColorTransparent" xml:space="preserve"><value>Transparent</value></data>
+  <data name="Dwm_PivotBaseColorMaximized" xml:space="preserve"><value>Maximized</value></data>
+  <data name="Dwm_PivotBaseColorOpaque" xml:space="preserve"><value>Opaque</value></data>
+  <data name="Dwm_BaseMaximized" xml:space="preserve"><value>Base color (maximized)</value></data>
+  <data name="Dwm_BaseOpaque" xml:space="preserve"><value>Base color (opaque)</value></data>
+  <data name="Dwm_LabelAlpha" xml:space="preserve"><value>Alpha:</value></data>
+  <data name="Dwm_BaseOpacityActive" xml:space="preserve"><value>Base opacity</value></data>
+  <data name="Dwm_BaseOpacityActiveDesc" xml:space="preserve"><value>Opacity factor for active windows</value></data>
+  <data name="Dwm_BaseOpacityInactive" xml:space="preserve"><value>Base inactive opacity</value></data>
+  <data name="Dwm_BaseOpacityInactiveDesc" xml:space="preserve"><value>Opacity factor for inactive windows.</value></data>
+  <data name="Dwm_BaseOpacityMaximized" xml:space="preserve"><value>Base maximized opacity</value></data>
+  <data name="Dwm_BaseOpacityMaximizedDesc" xml:space="preserve"><value>Opacity factor for maximized active windows</value></data>
+  <data name="Dwm_BaseOpacityInactiveMaximized" xml:space="preserve"><value>Base inactive maximized opacity</value></data>
+  <data name="Dwm_BaseOpacityInactiveMaximizedDesc" xml:space="preserve"><value>Opacity factor for inactive maximized windows</value></data>
+  <data name="Dwm_PivotBaseOpacityActive" xml:space="preserve"><value>Active</value></data>
+  <data name="Dwm_PivotBaseOpacityInactive" xml:space="preserve"><value>Inactive</value></data>
+  <data name="Dwm_PivotBaseOpacityMaximized" xml:space="preserve"><value>Maximized</value></data>
+  <data name="Dwm_PivotBaseOpacityInactiveMax" xml:space="preserve"><value>Inactive max</value></data>
+  <data name="Effect_Mica" xml:space="preserve"><value>Mica</value></data>
+  <data name="Effect_MicaAlt" xml:space="preserve"><value>Mica Alt</value></data>
+  <data name="Effect_System" xml:space="preserve"><value>System</value></data>
+  <data name="Effect_Unknown" xml:space="preserve"><value>Effect {0}</value></data>
+  <data name="Error_ShellExtensionNeedsHelper" xml:space="preserve"><value>Could not load the component required to register the context menu extension.</value></data>
+  <data name="Error_ShellExtensionFailed" xml:space="preserve"><value>Failed to change context menu extension registration.</value></data>
+  <data name="Error_ShellExtensionFailedToApply" xml:space="preserve"><value>Failed to apply registration changes.</value></data>
+  <data name="Error_ShellExtensionFailedToRegister" xml:space="preserve"><value>Could not register the desktop context menu extension.</value></data>
+  <data name="Error_ShellExtensionFailedToUnregister" xml:space="preserve"><value>Could not unregister the desktop context menu extension.</value></data>
+  <data name="Error_ShellExtensionFailedToStart" xml:space="preserve"><value>Failed to start the background operation.</value></data>
+  <data name="Error_ShellExtensionInconsistentState" xml:space="preserve"><value>The menu extension is in an inconsistent state. Turn it off, then turn it on again.</value></data>
+  <data name="Error_ShellExtensionNeedsExplorerRestart" xml:space="preserve"><value>Restart File Explorer to refresh the desktop menu.</value></data>
+  <data name="Error_ShellExtensionSparseArtifactsMissing" xml:space="preserve"><value>Context menu extension files are missing. Reinstall Glass Settings.</value></data>
+  <data name="Error_ShellExtensionSparseCertFailed" xml:space="preserve"><value>Could not prepare the certificate needed to install the menu extension.</value></data>
+  <data name="Error_ShellExtensionSparseDeployFailed" xml:space="preserve"><value>Could not register the desktop context menu extension.</value></data>
+  <data name="Error_ShellExtensionSparseExternalLocationConflict" xml:space="preserve"><value>A previous registration of the desktop context menu extension is still present. Turn the extension off in Glass Settings, then turn it on again.</value></data>
+  <data name="Error_ShellExtensionTimedOut" xml:space="preserve"><value>The operation timed out. The state may not have updated completely.</value></data>
+  <data name="Error_ShellExtensionTitle" xml:space="preserve"><value>Context menu extension</value></data>
+  <data name="Flyout_Animation" xml:space="preserve"><value>Animation</value></data>
+  <data name="Flyout_AnimationDesc" xml:space="preserve"><value>Timing in milliseconds, pop-in style, and whether a new flyout immediately interrupts the previous animation.</value></data>
+  <data name="Flyout_AnimationSubtitle" xml:space="preserve"><value>Fade timing, pop-in style, and interrupt behavior.</value></data>
+  <data name="Flyout_BorderColor" xml:space="preserve"><value>Border color</value></data>
+  <data name="Flyout_BorderColorDesc" xml:space="preserve"><value>System border color (AARRGGBB). Opacity is controlled by the alpha channel. On Windows 11, alpha may be ignored with rounded corners.</value></data>
+  <data name="Flyout_BorderColorSubtitle" xml:space="preserve"><value>Color and opacity of the system or custom border</value></data>
+  <data name="Flyout_BorderSource" xml:space="preserve"><value>Border source</value></data>
+  <data name="Flyout_BorderSourceDesc" xml:space="preserve"><value>DWM compositor border or XAML stroke in explorer.exe.</value></data>
+  <data name="Flyout_Corners" xml:space="preserve"><value>Corners</value></data>
+  <data name="Flyout_CornerType" xml:space="preserve"><value>Corner type</value></data>
+  <data name="Flyout_CornerTypeDesc" xml:space="preserve"><value>Corner shape for the flyout: system default, rectangle, large round, or small round.</value></data>
+  <data name="Flyout_CornersShadows" xml:space="preserve"><value>Corners and shadows</value></data>
+  <data name="Flyout_CornersShadowsSubtitle" xml:space="preserve"><value>Corner shape and drop shadow for flyouts.</value></data>
+  <data name="Flyout_DrawThemeAlpha" xml:space="preserve"><value>Element opacity</value></data>
+  <data name="Flyout_DrawThemeAlphaSubtitle" xml:space="preserve"><value>Adjust alpha transparency of buttons, combo boxes, tabs, and more</value></data>
+  <data name="Flyout_EffectParams" xml:space="preserve"><value>Effect parameters</value></data>
+  <data name="Flyout_EffectScopeDesc" xml:space="preserve"><value>Choose a glass effect type for {0}</value></data>
+  <data name="Flyout_EffectScopeTargets" xml:space="preserve"><value>menus;dropdown lists;tooltips</value></data>
+  <data name="Flyout_EffectScopeRootTargets" xml:space="preserve"><value>active root windows;inactive root windows</value></data>
+  <data name="Flyout_EffectScopeTaskbarTarget" xml:space="preserve"><value>the taskbar</value></data>
+  <data name="Flyout_EffectType" xml:space="preserve"><value>Effect type</value></data>
+  <data name="Flyout_EffectWithIndex" xml:space="preserve"><value>{0} ({1})</value></data>
+  <data name="Flyout_GradientColor" xml:space="preserve"><value>Gradient color</value></data>
+  <data name="Flyout_GradientColorDesc" xml:space="preserve"><value>Background color for the current theme (AARRGGBB). Opacity is controlled by the alpha channel. Ignored when EffectType is Acrylic, Mica, or MicaAlt (6–8).</value></data>
+  <data name="Flyout_GradientColorSubtitle" xml:space="preserve"><value>Glass tint color in SWCA effects</value></data>
+  <data name="Flyout_LabelAlpha" xml:space="preserve"><value>Alpha:</value></data>
+  <data name="Flyout_NoBorder" xml:space="preserve"><value>No border</value></data>
+  <data name="Flyout_NoBorderCheck" xml:space="preserve"><value>No border (NoBorderColor)</value></data>
+  <data name="Flyout_PageSubtitle" xml:space="preserve"><value>General and per-kind popup settings</value></data>
+  <data name="Flyout_RenderMode" xml:space="preserve"><value>Render mode</value></data>
+  <data name="Flyout_RenderModeDesc" xml:space="preserve"><value>DWM or XAML</value></data>
+  <data name="Flyout_RootEffectDesc" xml:space="preserve"><value>EffectType for root backdrop</value></data>
+  <data name="Flyout_Scope" xml:space="preserve"><value>Scope</value></data>
+  <data name="Flyout_ScopeGeneral" xml:space="preserve"><value>General</value></data>
+  <data name="Flyout_ScopeIndividual" xml:space="preserve"><value>Individual</value></data>
+  <data name="Flyout_Shadow" xml:space="preserve"><value>Shadows</value></data>
+  <data name="Flyout_TaskbarEffectDesc" xml:space="preserve"><value>Taskbar backdrop effect: transparency, blur, acrylic, Mica, and more.</value></data>
+  <data name="Flyout_Type" xml:space="preserve"><value>Popup type</value></data>
+  <data name="Glass_GeneralDesc" xml:space="preserve"><value>General Glass settings (work in progress)</value></data>
+  <data name="Glass_GeneralPlaceholder" xml:space="preserve"><value>Additional general settings will be added.</value></data>
+  <data name="Glass_GeneralTitle" xml:space="preserve"><value>General</value></data>
+  <data name="Glass_HubGeneral" xml:space="preserve"><value>General</value></data>
+  <data name="Glass_HubGeneralDesc" xml:space="preserve"><value>Global platform settings</value></data>
+  <data name="Glass_HubPopup" xml:space="preserve"><value>Popup windows</value></data>
+  <data name="Glass_HubPopupDesc" xml:space="preserve"><value>Menus, lists, and tooltips</value></data>
+  <data name="Glass_HubRoot" xml:space="preserve"><value>Root windows</value></data>
+  <data name="Glass_HubRootDesc" xml:space="preserve"><value>Backdrop policy and SWCA</value></data>
+  <data name="Glass_HubTaskbar" xml:space="preserve"><value>Taskbar</value></data>
+  <data name="Glass_HubTaskbarDesc" xml:space="preserve"><value>Tray settings</value></data>
+  <data name="Glass_AdjacentWindows" xml:space="preserve"><value>Adjacent windows</value></data>
+  <data name="Glass_AdjacentWindowsDesc" xml:space="preserve"><value>Configure Start, Notification Center, context menus, and more.</value></data>
+  <data name="Glass_Adjacent_TabPopup" xml:space="preserve"><value>Popup</value></data>
+  <data name="Glass_Adjacent_TabPreview" xml:space="preserve"><value>Preview</value></data>
+  <data name="Glass_Adjacent_TabMenu" xml:space="preserve"><value>Menu</value></data>
+  <data name="Glass_Adjacent_TabTooltip" xml:space="preserve"><value>Tooltip</value></data>
+  <data name="Glass_Adjacent_EffectDesc" xml:space="preserve"><value>Effect type for the selected surface. If unset, the taskbar parameter is used.</value></data>
+  <data name="Glass_Adjacent_CornerPreviewLocked" xml:space="preserve"><value>App preview corners are always system and cannot be changed.</value></data>
+  <data name="Glass_HubText" xml:space="preserve"><value>Text and fonts</value></data>
+  <data name="Glass_HubTextDesc" xml:space="preserve"><value>System fonts and text smoothing on glass</value></data>
+  <data name="Glass_LabelEffectType" xml:space="preserve"><value>EffectType:</value></data>
+  <data name="Popup_ScopeShared" xml:space="preserve"><value>Shared settings</value></data>
+  <data name="Popup_ScopeSeparate" xml:space="preserve"><value>Separate settings</value></data>
+  <data name="Popup_GeneralFallbackMarker" xml:space="preserve"><value>General parameter is set</value></data>
+  <data name="Popup_GeneralFallbackTooltip" xml:space="preserve"><value>Local key is missing. The value from general settings is used at runtime.</value></data>
+  <data name="Root_ScopeStateIndependent" xml:space="preserve"><value>Ignore window state</value></data>
+  <data name="Root_ScopePerWindowState" xml:space="preserve"><value>Per window state</value></data>
+  <data name="Root_ScopeStateIndependentDesc" xml:space="preserve"><value>One parameter set for active and inactive windows</value></data>
+  <data name="Root_ScopePerWindowStateDesc" xml:space="preserve"><value>Separate Active and Inactive keys; missing keys fall back to Root</value></data>
+  <data name="Glass_PopupDropDown" xml:space="preserve"><value>DropDown</value></data>
+  <data name="Glass_PopupDropDownDesc" xml:space="preserve"><value>Drop-down lists</value></data>
+  <data name="Glass_PopupMenu" xml:space="preserve"><value>Menu</value></data>
+  <data name="Glass_PopupMenuDesc" xml:space="preserve"><value>Context menu settings</value></data>
+  <data name="Glass_MenuGeneral_Title" xml:space="preserve"><value>Menu general</value></data>
+  <data name="Glass_MenuGeneralSettings_Title" xml:space="preserve"><value>General settings</value></data>
+  <data name="Glass_MenuGeneralSettings_Subtitle" xml:space="preserve"><value>Additional technical settings</value></data>
+  <data name="Glass_MenuGeneralSettings_Desc" xml:space="preserve"><value>Here you can set the icon background color to remove and its difference threshold; disable the system shadow and the modern menu style.</value></data>
+  <data name="Glass_MenuGeneral_NoSystemDropShadow_Title" xml:space="preserve"><value>No system shadow</value></data>
+  <data name="Glass_MenuGeneral_EnableImmersiveStyle_Title" xml:space="preserve"><value>Modern menu style</value></data>
+  <data name="Glass_MenuGeneral_NoModernAppBackground_Title" xml:space="preserve"><value>Remove UWP icon background</value></data>
+  <data name="Glass_MenuIcon_Title" xml:space="preserve"><value>Icon background removal</value></data>
+  <data name="Glass_MenuIcon_Action" xml:space="preserve"><value>Color treated as transparent (AARRGGBB). Removal expands from corners inward.</value></data>
+  <data name="Glass_MenuIcon_Threshold_Label" xml:space="preserve"><value>Color difference threshold</value></data>
+  <data name="Glass_ControlIcon_Title" xml:space="preserve"><value>Icon background</value></data>
+  <data name="Glass_ControlIcon_Subtitle" xml:space="preserve"><value>Removes a chosen color from the background of control icons and images.</value></data>
+  <data name="Glass_ControlIcon_Threshold_Label" xml:space="preserve"><value>Color difference threshold</value></data>
+  <data name="Glass_ControlIcon_Ribbon" xml:space="preserve"><value>Ribbon</value></data>
+  <data name="Glass_ControlIcon_ListView" xml:space="preserve"><value>ListView</value></data>
+  <data name="Glass_ControlIcon_TreeView" xml:space="preserve"><value>TreeView</value></data>
+  <data name="Glass_ControlIcon_Toolbar" xml:space="preserve"><value>Toolbar</value></data>
+  <data name="Glass_ControlIcon_Button" xml:space="preserve"><value>Button</value></data>
+  <data name="Glass_ControlIcon_Static" xml:space="preserve"><value>Static</value></data>
+  <data name="Glass_ControlIcon_Ribbon_Subtitle" xml:space="preserve"><value>The selected background color becomes transparent. Without a key the icon background is kept.</value></data>
+  <data name="Glass_ControlIcon_ListView_Subtitle" xml:space="preserve"><value>ListView icons: the selected background color becomes transparent. Without a key the black ImageList background is treated as transparent.</value></data>
+  <data name="Glass_ControlIcon_TreeView_Subtitle" xml:space="preserve"><value>TreeView icons: the selected background color becomes transparent. Without a key the black ImageList background is treated as transparent.</value></data>
+  <data name="Glass_ControlIcon_Toolbar_Subtitle" xml:space="preserve"><value>Toolbar icons: the selected background color becomes transparent. Without a key the black background is treated as transparent.</value></data>
+  <data name="Glass_ControlIcon_Button_Subtitle" xml:space="preserve"><value>Button icons: the selected background color becomes transparent. Without a key the black background is treated as transparent.</value></data>
+  <data name="Glass_ControlIcon_Static_Subtitle" xml:space="preserve"><value>The selected background color becomes transparent. Without a key the background is not removed.</value></data>
+  <data name="Glass_ControlIcon_Ribbon_Desc" xml:space="preserve"><value>See colored boxes around ribbon icons? Turn this on and pick that background color to make it transparent. Leave it off if ribbon icons already look clean.</value></data>
+  <data name="Glass_ControlIcon_ListView_Desc" xml:space="preserve"><value>Icons in lists showing a colored background box? Turn this on and pick the color to remove. A black ImageList background is already treated as transparent by default — change this only if you see artifacts.</value></data>
+  <data name="Glass_ControlIcon_TreeView_Desc" xml:space="preserve"><value>Tree icons showing a colored background box? Turn this on and pick the color to remove. A black ImageList background is already treated as transparent by default — change this only if you see artifacts.</value></data>
+  <data name="Glass_ControlIcon_Toolbar_Desc" xml:space="preserve"><value>Toolbar icons with a visible background box? Turn this on and pick the color to remove. A black background is treated as transparent by default — leave it off unless you see artifacts.</value></data>
+  <data name="Glass_ControlIcon_Button_Desc" xml:space="preserve"><value>Push-button icons drawn with a background box? Turn this on and pick the color to remove. A black background is treated as transparent by default — change this only if needed.</value></data>
+  <data name="Glass_ControlIcon_Static_Desc" xml:space="preserve"><value>Picture (Static) controls: turn this on and pick a background color to make it transparent. By default images are just blended correctly over the glass without removing any color.</value></data>
+  <data name="Glass_LabelThemeColorizationType" xml:space="preserve"><value>Theme colorization type</value></data>
+  <data name="Combo_MenuThemeColorTypeItems" xml:space="preserve"><value>ImmersiveStartHoverBackground;ImmersiveStartSelectionBackground;SystemAccent</value></data>
+  <data name="Glass_MenuItem_Hot" xml:space="preserve"><value>Hot</value></data>
+  <data name="Glass_MenuItem_DisabledHot" xml:space="preserve"><value>Disabled Hot</value></data>
+  <data name="Glass_MenuItem_Focusing" xml:space="preserve"><value>Focusing</value></data>
+  <data name="Glass_MenuItem_Separator" xml:space="preserve"><value>Separator</value></data>
+  <data name="Glass_MenuItem_HotAction" xml:space="preserve"><value>Configure the fill when the pointer rests on a menu item. Pick a color and transparency in the picker — both blend with the blur beneath the menu. CornerRadius controls how rounded that highlight is. Theme Colorization uses the Windows accent color instead of your picker choice.</value></data>
+  <data name="Glass_MenuItem_DisabledHotAction" xml:space="preserve"><value>The same highlight for disabled items (gray text): a separate fill appears on hover. Set color and transparency, and CornerRadius for corner rounding. Theme Colorization replaces your color with the current system accent.</value></data>
+  <data name="Glass_MenuItem_FocusingAction" xml:space="preserve"><value>Outline around the item when moving with the keyboard (↑↓, Tab). Set line color and transparency in the picker, CornerRadius for rounded corners, and Width for stroke thickness (1000 ≈ 1 px). Theme Colorization takes the color from the Windows theme instead of the picker.</value></data>
+  <data name="Glass_MenuItem_SeparatorAction" xml:space="preserve"><value>Horizontal rule between groups of items. Choose line color and transparency; Width sets thickness (1000 ≈ 1 px). Theme Colorization applies the system accent instead of the picked color.</value></data>
+  <data name="Glass_MenuItem_HotDesc" xml:space="preserve"><value>Hover highlight for an enabled menu item</value></data>
+  <data name="Glass_MenuItem_DisabledHotDesc" xml:space="preserve"><value>Hover highlight for a disabled menu item</value></data>
+  <data name="Glass_MenuItem_FocusingDesc" xml:space="preserve"><value>Keyboard focus outline around an item</value></data>
+  <data name="Glass_MenuItem_SeparatorDesc" xml:space="preserve"><value>Divider line between item groups</value></data>
+  <data name="Glass_TooltipRendering_Title" xml:space="preserve"><value>Tooltip text color</value></data>
+  <data name="Glass_TooltipRendering_Desc" xml:space="preserve"><value>Text color and content margins</value></data>
+  <data name="Glass_TooltipRendering_Action" xml:space="preserve"><value>Set the tooltip text color (DarkMode_Color / LightMode_Color). Gradient fill is configured in the main Gradient Color section above. Margins application controls how margin values are applied to the tooltip content box.</value></data>
+  <data name="Glass_TooltipRendering_MarginsType" xml:space="preserve"><value>Margins application</value></data>
+  <data name="Glass_TooltipRendering_MarginLeft" xml:space="preserve"><value>Margin left</value></data>
+  <data name="Glass_TooltipRendering_MarginRight" xml:space="preserve"><value>Margin right</value></data>
+  <data name="Glass_TooltipRendering_MarginTop" xml:space="preserve"><value>Margin top</value></data>
+  <data name="Glass_TooltipRendering_MarginBottom" xml:space="preserve"><value>Margin bottom</value></data>
+  <data name="Combo_TooltipMarginsTypeItems" xml:space="preserve"><value>Add;Replace</value></data>
+  <data name="Combo_MenuItemEnabledItems" xml:space="preserve"><value>Use;Do not use</value></data>
+  <data name="Glass_LabelCornerRadius" xml:space="preserve"><value>CornerRadius</value></data>
+  <data name="Glass_LabelMenuItemWidth" xml:space="preserve"><value>Width</value></data>
+  <data name="Glass_LabelEnableThemeColorization" xml:space="preserve"><value>Enable Theme Colorization</value></data>
+  <data name="Glass_PopupTooltip" xml:space="preserve"><value>Tooltip</value></data>
+  <data name="Glass_PopupTooltipDesc" xml:space="preserve"><value>Tooltips</value></data>
+  <data name="Home_CardComponents" xml:space="preserve"><value>Components</value></data>
+  <data name="Home_CardSubsystems" xml:space="preserve"><value>Subsystems</value></data>
+  <data name="Home_CardDonation" xml:space="preserve"><value>Support the project</value></data>
+  <data name="Home_CardDonationDesc" xml:space="preserve"><value>Voluntary donation to the Glass author</value></data>
+  <data name="Home_CardDwm" xml:space="preserve"><value>DWM settings</value></data>
+  <data name="Home_CardDwmLocal" xml:space="preserve"><value>DWM settings (L)</value></data>
+  <data name="Home_CardExtra" xml:space="preserve"><value>More</value></data>
+  <data name="Home_CardGlassPlatform" xml:space="preserve"><value>Glass platform</value></data>
+  <data name="Home_CardProcesses" xml:space="preserve"><value>Processes</value></data>
+  <data name="Home_CardSystem" xml:space="preserve"><value>Systems</value></data>
+  <data name="Home_DeviceReleaseLine" xml:space="preserve"><value>{0} · build {1} · {2}</value></data>
+  <data name="Home_FlyoutLine" xml:space="preserve"><value>General: {0}</value></data>
+  <data name="Home_FooterCustomPrefix" xml:space="preserve"><value>Customized settings: </value></data>
+  <data name="Home_FooterDefaultPrefix" xml:space="preserve"><value>All settings use defaults</value></data>
+  <data name="Home_FooterUnsavedPlain" xml:space="preserve"><value>need to be applied</value></data>
+  <data name="Home_FooterUnsavedPrefix" xml:space="preserve"><value>Unsaved changes: </value></data>
+  <data name="Home_NoticeDefaultMessage" xml:space="preserve"><value>All settings use defaults. Choose a section below to configure Glass.</value></data>
+  <data name="Notice_SavedSuccess" xml:space="preserve"><value>Settings saved successfully</value></data>
+  <data name="Notice_ExternalSectionSynced" xml:space="preserve"><value>Settings in this section were changed outside this app and have been synchronized.</value></data>
+  <data name="Notice_Download" xml:space="preserve"><value>Download</value></data>
+  <data name="Home_PageTitle" xml:space="preserve"><value>Overview</value></data>
+  <data name="Home_RowColorization" xml:space="preserve"><value>Composition</value></data>
+  <data name="Home_RowDonate" xml:space="preserve"><value>Donate</value></data>
+  <data name="Home_RowDonateSub" xml:space="preserve"><value>Support options and thanks</value></data>
+  <data name="Home_RowDwmGlass" xml:space="preserve"><value>Appearance</value></data>
+  <data name="Home_RowDwmTheme" xml:space="preserve"><value>Theme</value></data>
+  <data name="Home_RowGeneral" xml:space="preserve"><value>General</value></data>
+  <data name="Home_RowGlassPlatform" xml:space="preserve"><value>Glass platform</value></data>
+  <data name="Home_RowGlassPlatformX86" xml:space="preserve"><value>Glass platform x86</value></data>
+  <data name="Home_RowGlassPlatformX64" xml:space="preserve"><value>Glass platform x64</value></data>
+  <data name="Home_RowOpenGlass" xml:space="preserve"><value>OpenGlass</value></data>
+  <data name="Home_OpenGlassUpdateLinkFormat" xml:space="preserve"><value>New version {0}</value></data>
+  <data name="System_OpenGlassUpdateSpoilerFormat" xml:space="preserve"><value>New version {0} available</value></data>
+  <data name="Home_OpenGlassUpdateNotice" xml:space="preserve"><value>A new OpenGlass version {0} is available. Installed: {1}.</value></data>
+  <data name="Home_RowPopupWindows" xml:space="preserve"><value>Popup windows</value></data>
+  <data name="Home_RowProcessList" xml:space="preserve"><value>Process list</value></data>
+  <data name="Home_RowRootWindows" xml:space="preserve"><value>Root windows</value></data>
+  <data name="Home_RowShellExtension" xml:space="preserve"><value>Context menu extension</value></data>
+  <data name="Home_RowShellExtensionSub" xml:space="preserve"><value>Manage from the desktop context menu</value></data>
+  <data name="Home_RowSystemManagement" xml:space="preserve"><value>System management</value></data>
+  <data name="Home_RowTaskbar" xml:space="preserve"><value>Taskbar</value></data>
+  <data name="Home_RowTextFonts" xml:space="preserve"><value>Text and fonts</value></data>
+  <data name="Home_RowViewAllProcesses" xml:space="preserve"><value>View all processes</value></data>
+  <data name="Home_RowVisualStyles" xml:space="preserve"><value>Visual styles</value></data>
+  <data name="Home_RuntimeArchBuild" xml:space="preserve"><value>{0} · build {1}</value></data>
+  <data name="Home_SectionInDevelopment" xml:space="preserve"><value>Section in development</value></data>
+  <data name="Home_TableModule" xml:space="preserve"><value>Module</value></data>
+  <data name="Home_TableModulePlatform" xml:space="preserve"><value>Platform module</value></data>
+  <data name="Home_TableModuleAero" xml:space="preserve"><value>Aero module</value></data>
+  <data name="Home_TableFileVersion" xml:space="preserve"><value>File version</value></data>
+  <data name="Home_GroupPlatform" xml:space="preserve"><value>Glass Platform</value></data>
+  <data name="Home_GroupOpenGlass" xml:space="preserve"><value>OpenGlass (Aero)</value></data>
+  <data name="Home_ComponentsProductVersion" xml:space="preserve"><value>Product version: {0}</value></data>
+  <data name="Home_ComponentsVersion" xml:space="preserve"><value>Installed version: {0}</value></data>
+  <data name="Home_TableVersion" xml:space="preserve"><value>Version</value></data>
+  <data name="Home_TableCount" xml:space="preserve"><value>Count</value></data>
+  <data name="Home_TableStatus" xml:space="preserve"><value>Status</value></data>
+  <data name="Home_TaskbarLine" xml:space="preserve"><value>Mode {0}, {1}</value></data>
+  <data name="Home_WindowsBuildCaption" xml:space="preserve"><value>Windows, build {0}</value></data>
+  <data name="Main_BackToolTip" xml:space="preserve"><value>Back</value></data>
+  <data name="Main_AppSettingsToolTip" xml:space="preserve"><value>App settings</value></data>
+  <data name="Main_SearchPlaceholder" xml:space="preserve"><value>Search…</value></data>
+  <data name="Modules_NotFound" xml:space="preserve"><value>not found</value></data>
+  <data name="Modules_Unavailable" xml:space="preserve"><value>—</value></data>
+  <data name="NavAttach" xml:space="preserve"><value>Processes</value></data>
+  <data name="NavDwm" xml:space="preserve"><value>DWM settings</value></data>
+  <data name="NavFlyout" xml:space="preserve"><value>Menus and popups</value></data>
+  <data name="NavGlass" xml:space="preserve"><value>Glass settings</value></data>
+  <data name="NavHome" xml:space="preserve"><value>Overview</value></data>
+  <data name="NavRoot" xml:space="preserve"><value>Application windows</value></data>
+  <data name="NavSystem" xml:space="preserve"><value>Systems</value></data>
+  <data name="NavTaskbar" xml:space="preserve"><value>Taskbar</value></data>
+  <data name="NavText" xml:space="preserve"><value>Text and fonts</value></data>
+  <data name="NavThemes" xml:space="preserve"><value>Visual styles</value></data>
+  <data name="NavUser_LocalAccount" xml:space="preserve"><value>Local account</value></data>
+  <data name="ParamLabel_CornerType" xml:space="preserve"><value>Shape</value></data>
+  <data name="ParamLabel_EnableDropShadow" xml:space="preserve"><value>EnableDropShadow</value></data>
+  <data name="ParamLabel_FadeInTime" xml:space="preserve"><value>Fade-in (ms)</value></data>
+  <data name="ParamLabel_FadeOutTime" xml:space="preserve"><value>Fade-out (ms)</value></data>
+  <data name="ParamLabel_GlassDrawThemeConstantAlpha" xml:space="preserve"><value>GlassDrawThemeConstantAlpha</value></data>
+  <data name="ParamLabel_ImmediateInterrupting" xml:space="preserve"><value>Immediate interrupt</value></data>
+  <data name="ParamLabel_PopInStyle" xml:space="preserve"><value>Pop-in style</value></data>
+  <data name="ParamLabel_PopInTime" xml:space="preserve"><value>Pop-in (ms)</value></data>
+  <data name="ParamLabel_StartRatio" xml:space="preserve"><value>Start ratio (%)</value></data>
+  <data name="Param_Auto" xml:space="preserve"><value>Auto</value></data>
+  <data name="Param_BackdropDwm" xml:space="preserve"><value>DWM</value></data>
+  <data name="Root_AllowBackdropTitle" xml:space="preserve"><value>Allow backdrop</value></data>
+  <data name="Root_AllowBackdropDesc" xml:space="preserve"><value>Allow or deny the backdrop effect application policy</value></data>
+  <data name="Root_FullGlassToggle" xml:space="preserve"><value>Full glass</value></data>
+  <data name="Root_BackdropModeTitle" xml:space="preserve"><value>Backdrop mode</value></data>
+  <data name="Root_BackdropModeDesc" xml:space="preserve"><value>Change backdrop effect application policy</value></data>
+  <data name="Param_BackdropNone" xml:space="preserve"><value>NONE</value></data>
+  <data name="Param_BackdropSwca" xml:space="preserve"><value>SWCA</value></data>
+  <data name="Param_BlurBalance" xml:space="preserve"><value>Balance</value></data>
+  <data name="Param_BlurQuality" xml:space="preserve"><value>Quality</value></data>
+  <data name="Param_BlurSpeed" xml:space="preserve"><value>Speed</value></data>
+  <data name="Param_BlurSpeed" xml:space="preserve"><value>Speed</value></data>
+  <data name="Param_ModeDwm" xml:space="preserve"><value>DWM</value></data>
+  <data name="Param_ModeXaml" xml:space="preserve"><value>XAML</value></data>
+  <data name="Placeholder_Subtitle" xml:space="preserve"><value>Section in development</value></data>
+  <data name="Status_BwmDisabled" xml:space="preserve"><value>BWM: Disabled</value></data>
+  <data name="Status_BwmNoTask" xml:space="preserve"><value>BWM: No scheduled task</value></data>
+  <data name="Status_BwmReady" xml:space="preserve"><value>BWM: Ready</value></data>
+  <data name="Status_BwmRunning" xml:space="preserve"><value>BWM: Running</value></data>
+  <data name="Status_DeleteTask" xml:space="preserve"><value>Delete</value></data>
+  <data name="Status_Disable" xml:space="preserve"><value>Disable</value></data>
+  <data name="Status_DisableScheduler" xml:space="preserve"><value>Disable in Task Scheduler</value></data>
+  <data name="Status_Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Status_Enable" xml:space="preserve"><value>Enable</value></data>
+  <data name="Status_EnableScheduler" xml:space="preserve"><value>Enable in Task Scheduler</value></data>
+  <data name="Status_NoTask" xml:space="preserve"><value>No scheduled task</value></data>
+  <data name="Status_Ready" xml:space="preserve"><value>Ready</value></data>
+  <data name="Status_Running" xml:space="preserve"><value>Running</value></data>
+  <data name="Status_Unloading" xml:space="preserve"><value>Unloading</value></data>
+  <data name="Status_StartPlatform" xml:space="preserve"><value>Start</value></data>
+  <data name="Status_StopPlatform" xml:space="preserve"><value>Stop</value></data>
+  <data name="System_OrchestrationService" xml:space="preserve"><value>Service</value></data>
+  <data name="System_OrchestrationTask" xml:space="preserve"><value>Task</value></data>
+  <data name="System_OrchestrationTaskX86" xml:space="preserve"><value>Task x86</value></data>
+  <data name="System_OrchestrationTaskX64" xml:space="preserve"><value>Task x64</value></data>
+  <data name="System_ActionDisable" xml:space="preserve"><value>Disable</value></data>
+  <data name="System_ActionEnable" xml:space="preserve"><value>Enable</value></data>
+  <data name="System_LibBwm" xml:space="preserve"><value>BWM library (Glass)</value></data>
+  <data name="System_LibBwmDesc" xml:space="preserve"><value>Provides Glass effects and materials via BWM.</value></data>
+  <data name="System_LibOpenGlass" xml:space="preserve"><value>OpenGlass library</value></data>
+  <data name="System_LibOpenGlassDesc" xml:space="preserve"><value>Provides compatibility and effects via OpenGlass.</value></data>
+  <data name="System_MenuBwmAction" xml:space="preserve"><value>Action for BWM</value></data>
+  <data name="System_MenuBwmDesc" xml:space="preserve"><value>GlassPlatform scheduled task</value></data>
+  <data name="System_MenuGlassDesc" xml:space="preserve"><value>Additional items in the desktop context menu</value></data>
+  <data name="System_MenuGlassItem" xml:space="preserve"><value>Glass item on the desktop context menu</value></data>
+  <data name="System_MenuOgAction" xml:space="preserve"><value>Action for OpenGlass</value></data>
+  <data name="System_MenuOgDesc" xml:space="preserve"><value>OpenGlass scheduled task</value></data>
+  <data name="System_NoticeImmediateApply" xml:space="preserve"><value>OpenGlass brings back the Windows 7 "glass" look for windows: blur, reflections, and colored frames.&#10;Glass Platform adds modern see-through glass for menus, pop-ups, and the taskbar.&#10;Below you can enable autorun and the context-menu item; changes apply right away.</value></data>
+  <data name="System_NoticeBannerGlass" xml:space="preserve"><value>Glass Platform — global glass effects for Win32 application windows, plus menus, tooltip pop-ups, and the taskbar. It runs in the background alongside your apps.</value></data>
+  <data name="System_NoticeBannerImportantBefore" xml:space="preserve"><value>Important: platform modules are loaded globally into all processes. This carries a certain stability and security risk. Unwanted or risky processes can be added to the </value></data>
+  <data name="System_NoticeBannerImportantAfter" xml:space="preserve"><value>.</value></data>
+  <data name="System_NoticeProcessesLink" xml:space="preserve"><value>Blocked process list</value></data>
+  <data name="System_NoticeBannerOpenGlassBefore" xml:space="preserve"><value>OpenGlass is Legacy AeroGlass: blur behind the window; parallax movement of the glass glow texture (</value></data>
+  <data name="System_NoticeBannerOpenGlassAfter" xml:space="preserve"><value>); custom window frame; glass color and transparency.</value></data>
+  <data name="System_NoticeReflectionLink" xml:space="preserve"><value>textures</value></data>
+  <data name="System_OpenGlassUpdateTitle" xml:space="preserve"><value>A new OpenGlass version {0} is available. Installed: {1}.</value></data>
+  <data name="System_OpenGlassUpdateMessage" xml:space="preserve"><value>Consider updating OpenGlass to the latest legacy release.</value></data>
+  <data name="System_OpenGlassUpdateAction" xml:space="preserve"><value>Download</value></data>
+  <data name="Notice_OpenGlassBorderBody" xml:space="preserve"><value>Window borders are drawn by the Desktop Window Manager (DWM). When OpenGlass is active, it takes precedence over DWM and overrides border color. You cannot change border colors while OpenGlass is running. Stop OpenGlass if colored borders are important to you.</value></data>
+  <data name="Notice_OpenGlassBorderTitle" xml:space="preserve"><value>Border color changes are limited</value></data>
+  <data name="Notice_OpenGlassBorderTraySuffix" xml:space="preserve"><value>For the taskbar, it remains possible to customize colors in the XAML rendering path.</value></data>
+  <data name="Notice_SwcaDwmBackdropTitle" xml:space="preserve"><value>Tint color limitation</value></data>
+  <data name="Notice_SwcaDwmBackdropBody" xml:space="preserve"><value>The current glass backdrop type is a modern DWM Acrylic or Mica layer, which does not support gradient color changes, so you cannot set a custom color tint for the current effect. If a colored tint on windows matters to you, choose an effect from the SWCA category instead.</value></data>
+  <data name="Notice_SwcaDwmBackdropBodyRootFormat" xml:space="preserve"><value>The current glass backdrop effect type in {0} is a modern DWM Acrylic or Mica layer, which does not support gradient color changes, so you cannot set a custom color tint for the current effect. If a colored tint on windows matters to you, choose an effect from the SWCA category instead.</value></data>
+  <data name="Notice_SwcaDwmBackdropScopeActive" xml:space="preserve"><value>settings for the active window</value></data>
+  <data name="Notice_SwcaDwmBackdropScopeInactive" xml:space="preserve"><value>settings for the inactive window</value></data>
+  <data name="Notice_SwcaDwmBackdropScopeBoth" xml:space="preserve"><value>settings for the active and inactive window</value></data>
+  <data name="Notice_SwcaDwmBackdropScopePopupForKinds" xml:space="preserve"><value>settings for {0}</value></data>
+  <data name="Notice_SwcaDwmBackdropPopupKindMenu" xml:space="preserve"><value>Menu</value></data>
+  <data name="Notice_SwcaDwmBackdropPopupKindDropDown" xml:space="preserve"><value>DropDown</value></data>
+  <data name="Notice_SwcaDwmBackdropPopupKindToolTip" xml:space="preserve"><value>ToolTip</value></data>
+  <data name="Notice_OgRootBackdropTitle" xml:space="preserve"><value>Backdrop effect control is limited</value></data>
+  <data name="Notice_OgRootBackdropBody" xml:space="preserve"><value>OpenGlass is currently managing glass backdrop effects, so this section cannot configure DWM/SWCA effects or gradient color.</value></data>
+  <data name="Notice_OgRootBackdrop_ActionGlassBefore" xml:space="preserve"><value>Go to </value></data>
+  <data name="Notice_OgRootBackdrop_ActionGlassLink" xml:space="preserve"><value>DWM Settings</value></data>
+  <data name="Notice_OgRootBackdrop_ActionGlassAfter" xml:space="preserve"><value> to manage OpenGlass.</value></data>
+  <data name="Notice_OgRootBackdrop_ActionExternal" xml:space="preserve"><value>Open the OpenGlass application to manage it.</value></data>
+  <data name="System_RowOpenGlassDescFormat" xml:space="preserve"><value>DWM and colorization settings. Version: {0}</value></data>
+  <data name="System_RowGlassPlatform" xml:space="preserve"><value>Glass platform</value></data>
+  <data name="System_RowGlassPlatformX86" xml:space="preserve"><value>Glass platform x86</value></data>
+  <data name="System_RowGlassPlatformX64" xml:space="preserve"><value>Glass platform x64</value></data>
+  <data name="System_RowGlassPlatformDesc" xml:space="preserve"><value>Root, popup, taskbar, and text</value></data>
+  <data name="System_RowOpenGlass" xml:space="preserve"><value>OpenGlass system</value></data>
+  <data name="System_RowOpenGlassDesc" xml:space="preserve"><value>DWM settings and Legacy AeroGlass glass texture</value></data>
+  <data name="System_UpdateIntervalTitle" xml:space="preserve"><value>Update check</value></data>
+  <data name="System_UpdateIntervalDesc" xml:space="preserve"><value>How often to check for new Glass and OpenGlass versions</value></data>
+  <data name="System_UpdateDaily" xml:space="preserve"><value>Daily</value></data>
+  <data name="System_UpdateWeekly" xml:space="preserve"><value>Weekly</value></data>
+  <data name="System_UpdateMonthly" xml:space="preserve"><value>Monthly</value></data>
+  <data name="System_UpdateNever" xml:space="preserve"><value>Never</value></data>
+  <data name="System_RowShellExtension" xml:space="preserve"><value>Context menu extension</value></data>
+  <data name="System_RowShellExtensionDesc" xml:space="preserve"><value>Glass item on the desktop context menu</value></data>
+  <data name="Taskbar_PageSubtitle" xml:space="preserve"><value>Taskbar effects and colors</value></data>
+  <data name="Themes_ActiveBadge" xml:space="preserve"><value>Current</value></data>
+  <data name="Themes_AllSection" xml:space="preserve"><value>All themes</value></data>
+  <data name="Themes_ApplyStub" xml:space="preserve"><value>Theme</value></data>
+  <data name="Themes_ApplyStubFormat" xml:space="preserve"><value>"{0}" — stub only, theme was not applied</value></data>
+  <data name="Themes_ApplyProgress" xml:space="preserve"><value>Applying theme…</value></data>
+  <data name="Themes_ApplyProgressFormat" xml:space="preserve"><value>Applying “{0}”…</value></data>
+  <data name="Themes_ApplySuccessFormat" xml:space="preserve"><value>“{0}” applied</value></data>
+  <data name="Themes_ApplyFailedFormat" xml:space="preserve"><value>Could not apply “{0}” (0x{1:X8})</value></data>
+  <data name="Themes_ApplySystemFonts" xml:space="preserve"><value>Apply system fonts</value></data>
+  <data name="Themes_ApplySystemFontsDesc" xml:space="preserve"><value>Use fonts from the current Windows theme</value></data>
+  <data name="Themes_ApplySystemFontsStub" xml:space="preserve"><value>Applying system fonts will be available in a future version</value></data>
+  <data name="Themes_AdvancedTitle" xml:space="preserve"><value>Advanced</value></data>
+  <data name="Themes_BrowseStub" xml:space="preserve"><value>Browse themes — stub</value></data>
+  <data name="Themes_BrowseSite_7themes" xml:space="preserve"><value>7themes.su</value></data>
+  <data name="Themes_BrowseSite_vsthemes" xml:space="preserve"><value>vsthemes.org</value></data>
+  <data name="Themes_BrowseThemes" xml:space="preserve"><value>Browse themes</value></data>
+  <data name="Breadcrumb_ThemesColors" xml:space="preserve"><value>Colors</value></data>
+  <data name="Breadcrumb_ThemesDesktopBackground" xml:space="preserve"><value>Desktop background</value></data>
+  <data name="Themes_BackgroundCardTitle" xml:space="preserve"><value>Background</value></data>
+  <data name="Themes_BackgroundSlideshowFormat" xml:space="preserve"><value>Slideshow (images: {0})</value></data>
+  <data name="Themes_BackgroundSpotlight" xml:space="preserve"><value>Windows Spotlight</value></data>
+  <data name="Themes_BackgroundSolid" xml:space="preserve"><value>Solid color</value></data>
+  <data name="Themes_Bg_PersonalizeTitle" xml:space="preserve"><value>Personalize your background</value></data>
+  <data name="Themes_Bg_PersonalizeDesc" xml:space="preserve"><value>A picture background applies to your current desktop. Solid color or slideshow backgrounds apply to all desktops.</value></data>
+  <data name="Themes_Bg_ModeItems" xml:space="preserve"><value>Picture;Solid color;Slideshow;Windows Spotlight</value></data>
+  <data name="Themes_Bg_RecentImages" xml:space="preserve"><value>Recent images</value></data>
+  <data name="Themes_Bg_ChoosePhoto" xml:space="preserve"><value>Choose a photo</value></data>
+  <data name="Themes_Bg_BrowsePhotos" xml:space="preserve"><value>Browse photos</value></data>
+  <data name="Themes_Bg_FilePickerTitle" xml:space="preserve"><value>Choose a picture</value></data>
+  <data name="Themes_Bg_FolderPickerTitle" xml:space="preserve"><value>Choose folder</value></data>
+  <data name="Themes_Bg_FilePickerAllImages" xml:space="preserve"><value>Images (*.jpg;*.png;…)</value></data>
+  <data name="Themes_Bg_FilePickerFilterJpg" xml:space="preserve"><value>JPEG (*.jpg)</value></data>
+  <data name="Themes_Bg_FilePickerFilterJpeg" xml:space="preserve"><value>JPEG (*.jpeg)</value></data>
+  <data name="Themes_Bg_FilePickerFilterPng" xml:space="preserve"><value>PNG (*.png)</value></data>
+  <data name="Themes_Bg_FilePickerFilterBmp" xml:space="preserve"><value>BMP (*.bmp)</value></data>
+  <data name="Themes_Bg_FilePickerFilterGif" xml:space="preserve"><value>GIF (*.gif)</value></data>
+  <data name="Themes_Bg_FilePickerFilterTif" xml:space="preserve"><value>TIFF (*.tif)</value></data>
+  <data name="Themes_Bg_FilePickerFilterTiff" xml:space="preserve"><value>TIFF (*.tiff)</value></data>
+  <data name="Themes_Bg_FilePickerFilterJfif" xml:space="preserve"><value>JFIF (*.jfif)</value></data>
+  <data name="Themes_Bg_FilePickerFilterWebp" xml:space="preserve"><value>WebP (*.webp)</value></data>
+  <data name="Themes_Bg_FilePickerFilterHeic" xml:space="preserve"><value>HEIC (*.heic)</value></data>
+  <data name="Themes_Bg_FilePickerInvalidTypeTitle" xml:space="preserve"><value>Invalid file type</value></data>
+  <data name="Themes_Bg_FilePickerInvalidTypeBody" xml:space="preserve"><value>Select an image with a .jpg, .jpeg, .png, .bmp, .gif, .tif, .tiff, .jfif, .webp, or .heic extension.</value></data>
+  <data name="Themes_Bg_ChooseFit" xml:space="preserve"><value>Choose a fit for your desktop image</value></data>
+  <data name="Themes_Bg_FitItems" xml:space="preserve"><value>Fill;Fit;Stretch;Tile;Center;Span</value></data>
+  <data name="Themes_Bg_SlideshowAlbum" xml:space="preserve"><value>Choose a picture album for a slideshow</value></data>
+  <data name="Themes_Bg_Browse" xml:space="preserve"><value>Browse</value></data>
+  <data name="Themes_Bg_BrowseFolder" xml:space="preserve"><value>Browse…</value></data>
+  <data name="Themes_Bg_WindowsDesktopBackgrounds" xml:space="preserve"><value>Windows Desktop Backgrounds</value></data>
+  <data name="Themes_Bg_AlbumPickerTitle" xml:space="preserve"><value>Album pictures</value></data>
+  <data name="Themes_Bg_AlbumPickerDone" xml:space="preserve"><value>Done</value></data>
+  <data name="Themes_Bg_AlbumPickerSave" xml:space="preserve"><value>Save</value></data>
+  <data name="Themes_Bg_AlbumPickerEmpty" xml:space="preserve"><value>No pictures in this album</value></data>
+  <data name="Themes_Bg_AlbumSelectAll" xml:space="preserve"><value>Select all</value></data>
+  <data name="Themes_Bg_AlbumDeselectAll" xml:space="preserve"><value>Clear selection</value></data>
+  <data name="Themes_Bg_AlbumInvertSelection" xml:space="preserve"><value>Invert selection</value></data>
+  <data name="Themes_Bg_SlideshowInterval" xml:space="preserve"><value>Change picture every</value></data>
+  <data name="Themes_Bg_SlideshowIntervalItems" xml:space="preserve"><value>1 minute;10 minutes;30 minutes;1 hour;6 hours;1 day</value></data>
+  <data name="Themes_Bg_SlideshowShuffle" xml:space="preserve"><value>Shuffle the picture order</value></data>
+  <data name="Themes_Bg_SlideshowOnBattery" xml:space="preserve"><value>Allow slideshow when on battery power</value></data>
+  <data name="Themes_Bg_SlideshowChooseFit" xml:space="preserve"><value>Choose a fit for your desktop images</value></data>
+  <data name="Themes_ApplyFonts" xml:space="preserve"><value>Apply fonts</value></data>
+  <data name="Themes_TextAndFontsDesc" xml:space="preserve"><value>Text rendering and system fonts</value></data>
+  <data name="Themes_ColorCardTitle" xml:space="preserve"><value>Accent color</value></data>
+  <data name="Themes_Colors_AccentBodyDesc" xml:space="preserve"><value>Choose an accent color for buttons, links, and WinUI elements. It applies system-wide and to app windows.</value></data>
+  <data name="Themes_Colors_AccentDesc" xml:space="preserve"><value>Color of WinUI window elements</value></data>
+  <data name="Themes_Colors_ModeBodyDesc" xml:space="preserve"><value>Set Windows shell mode and app mode separately.</value></data>
+  <data name="Themes_DeleteConfirmFormat" xml:space="preserve"><value>Delete theme “{0}”? This cannot be undone.</value></data>
+  <data name="Themes_DeleteFailedFormat" xml:space="preserve"><value>Failed to delete theme ({0})</value></data>
+  <data name="Themes_DeleteMenu" xml:space="preserve"><value>Delete</value></data>
+  <data name="Themes_DeleteSuccessFormat" xml:space="preserve"><value>Theme “{0}” deleted</value></data>
+  <data name="Themes_Colors_AccentModeItems" xml:space="preserve"><value>Automatic;Manual</value></data>
+  <data name="Themes_Colors_RecentColors" xml:space="preserve"><value>Recently used colors</value></data>
+  <data name="Themes_Colors_AccentStartTaskbar" xml:space="preserve"><value>Show accent color on Start and taskbar</value></data>
+  <data name="Themes_Colors_AccentTitle" xml:space="preserve"><value>Accent color</value></data>
+  <data name="Themes_Colors_AccentTitleBars" xml:space="preserve"><value>Show accent color on title bars and window borders</value></data>
+  <data name="Themes_Colors_AppsMode" xml:space="preserve"><value>Choose your default app mode</value></data>
+  <data name="Themes_Colors_LightDarkItems" xml:space="preserve"><value>Light;Dark</value></data>
+  <data name="Themes_Colors_ModeChoiceItems" xml:space="preserve"><value>Light;Dark;Custom</value></data>
+  <data name="Themes_Colors_ModeDesc" xml:space="preserve"><value>Change colors in Windows and your apps</value></data>
+  <data name="Themes_Colors_ModeTitle" xml:space="preserve"><value>Choose your mode</value></data>
+  <data name="Themes_Colors_TransparencyDesc" xml:space="preserve"><value>Windows and surfaces appear translucent</value></data>
+  <data name="Themes_Colors_TransparencyTitle" xml:space="preserve"><value>Transparency effects</value></data>
+  <data name="Themes_Colors_WindowsMode" xml:space="preserve"><value>Choose your default Windows mode</value></data>
+  <data name="Themes_ColorName_BlueGray" xml:space="preserve"><value>blue-gray</value></data>
+  <data name="Themes_ColorName_BrickRed" xml:space="preserve"><value>brick red</value></data>
+  <data name="Themes_ColorName_Camouflage" xml:space="preserve"><value>camouflage</value></data>
+  <data name="Themes_ColorName_CamouflageDesert" xml:space="preserve"><value>camouflage desert</value></data>
+  <data name="Themes_ColorName_CoolBlue" xml:space="preserve"><value>cool blue</value></data>
+  <data name="Themes_ColorName_CoolBlueBright" xml:space="preserve"><value>cool blue bright</value></data>
+  <data name="Themes_ColorName_DefaultBlue" xml:space="preserve"><value>blue</value></data>
+  <data name="Themes_ColorName_Gold" xml:space="preserve"><value>gold</value></data>
+  <data name="Themes_ColorName_Gray" xml:space="preserve"><value>gray</value></data>
+  <data name="Themes_ColorName_GrayBrown" xml:space="preserve"><value>gray-brown</value></data>
+  <data name="Themes_ColorName_GrayDark" xml:space="preserve"><value>dark gray</value></data>
+  <data name="Themes_ColorName_Green" xml:space="preserve"><value>green</value></data>
+  <data name="Themes_ColorName_IrisPastel" xml:space="preserve"><value>iris pastel</value></data>
+  <data name="Themes_ColorName_IrisSpring" xml:space="preserve"><value>iris spring</value></data>
+  <data name="Themes_ColorName_LiddyGreen" xml:space="preserve"><value>liddy green</value></data>
+  <data name="Themes_ColorName_MeadowGreen" xml:space="preserve"><value>meadow green</value></data>
+  <data name="Themes_ColorName_MetalBlue" xml:space="preserve"><value>metal blue</value></data>
+  <data name="Themes_ColorName_MintDark" xml:space="preserve"><value>mint dark</value></data>
+  <data name="Themes_ColorName_MintLight" xml:space="preserve"><value>mint light</value></data>
+  <data name="Themes_ColorName_ModRed" xml:space="preserve"><value>mod red</value></data>
+  <data name="Themes_ColorName_Moss" xml:space="preserve"><value>moss</value></data>
+  <data name="Themes_ColorName_NavyBlue" xml:space="preserve"><value>navy blue</value></data>
+  <data name="Themes_ColorName_OrangeBright" xml:space="preserve"><value>orange bright</value></data>
+  <data name="Themes_ColorName_OrangeDark" xml:space="preserve"><value>orange dark</value></data>
+  <data name="Themes_ColorName_Orchid" xml:space="preserve"><value>orchid</value></data>
+  <data name="Themes_ColorName_OrchidLight" xml:space="preserve"><value>orchid light</value></data>
+  <data name="Themes_ColorName_Overcast" xml:space="preserve"><value>overcast</value></data>
+  <data name="Themes_ColorName_PaleMoss" xml:space="preserve"><value>pale moss</value></data>
+  <data name="Themes_ColorName_PaleRed" xml:space="preserve"><value>pale red</value></data>
+  <data name="Themes_ColorName_PaleRust" xml:space="preserve"><value>pale rust</value></data>
+  <data name="Themes_ColorName_Plum" xml:space="preserve"><value>plum</value></data>
+  <data name="Themes_ColorName_PlumLight" xml:space="preserve"><value>plum light</value></data>
+  <data name="Themes_ColorName_Purple" xml:space="preserve"><value>purple</value></data>
+  <data name="Themes_ColorName_PurpleShadow" xml:space="preserve"><value>purple shadow</value></data>
+  <data name="Themes_ColorName_Red" xml:space="preserve"><value>red</value></data>
+  <data name="Themes_ColorName_Rose" xml:space="preserve"><value>rose</value></data>
+  <data name="Themes_ColorName_RoseBright" xml:space="preserve"><value>rose bright</value></data>
+  <data name="Themes_ColorName_Rust" xml:space="preserve"><value>rust</value></data>
+  <data name="Themes_ColorName_Sage" xml:space="preserve"><value>sage</value></data>
+  <data name="Themes_ColorName_Seafoam" xml:space="preserve"><value>seafoam</value></data>
+  <data name="Themes_ColorName_SeafoamTeal" xml:space="preserve"><value>seafoam teal</value></data>
+  <data name="Themes_ColorName_SportGreen" xml:space="preserve"><value>sport green</value></data>
+  <data name="Themes_ColorName_SteelBlue" xml:space="preserve"><value>steel blue</value></data>
+  <data name="Themes_ColorName_Storm" xml:space="preserve"><value>storm</value></data>
+  <data name="Themes_ColorName_TurfGreen" xml:space="preserve"><value>turf green</value></data>
+  <data name="Themes_ColorName_VioletRed" xml:space="preserve"><value>violet red</value></data>
+  <data name="Themes_ColorName_VioletRedLight" xml:space="preserve"><value>violet red light</value></data>
+  <data name="Themes_ColorName_YellowGold" xml:space="preserve"><value>yellow gold</value></data>
+  <data name="Themes_SaveTheme" xml:space="preserve"><value>Save</value></data>
+  <data name="Themes_SaveThemeCancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Themes_SaveThemeDialogTitle" xml:space="preserve"><value>Save theme</value></data>
+  <data name="Themes_SaveThemeFailedFormat" xml:space="preserve"><value>Failed to save theme ({0})</value></data>
+  <data name="Themes_SaveThemeNameFormat" xml:space="preserve"><value>Theme {0}</value></data>
+  <data name="Themes_SaveThemeSuccessFormat" xml:space="preserve"><value>Theme “{0}” saved</value></data>
+  <data name="Themes_UsePersonalizedThemeMissing" xml:space="preserve"><value>Custom.theme was not found</value></data>
+  <data name="Themes_CurrentSection" xml:space="preserve"><value>Current theme</value></data>
+  <data name="Themes_Default" xml:space="preserve"><value>Default</value></data>
+  <data name="Themes_Empty" xml:space="preserve"><value>No themes found</value></data>
+  <data name="Themes_FindOnline" xml:space="preserve"><value>Find more themes online</value></data>
+  <data name="Themes_OtherLabel" xml:space="preserve"><value>Other</value></data>
+  <data name="Themes_PageSubtitle" xml:space="preserve"><value>Choose a Windows theme</value></data>
+  <data name="Themes_PatcherDesc" xml:space="preserve"><value>Patch .msstyles and theme resources</value></data>
+  <data name="Themes_PatcherStub" xml:space="preserve"><value>Theme patcher — stub</value></data>
+  <data name="Themes_PatcherTitle" xml:space="preserve"><value>Theme patcher</value></data>
+  <data name="Themes_SectionDesc" xml:space="preserve"><value>Choose a combination of wallpapers, sounds, and colors to personalize your desktop</value></data>
+  <data name="Themes_SystemFontsDesc" xml:space="preserve"><value>Glass system font settings</value></data>
+  <data name="Themes_SystemFontsTitle" xml:space="preserve"><value>System fonts</value></data>
+  <data name="Themes_ThemeFonts" xml:space="preserve"><value>Theme fonts</value></data>
+  <data name="Themes_ThemeFontsDesc" xml:space="preserve"><value>Apply theme fonts</value></data>
+  <data name="Themes_RowGlassSmoothing" xml:space="preserve"><value>Text smoothing</value></data>
+  <data name="Themes_RowGlassSmoothingDesc" xml:space="preserve"><value>Text on acrylic background</value></data>
+  <data name="Themes_RowSystemFontsDesc" xml:space="preserve"><value>Install system fonts</value></data>
+  <data name="Themes_TooltipFormat" xml:space="preserve"><value>{0}, Images: {1}, sounds</value></data>
+  <data name="Themes_UsePersonalizedTheme" xml:space="preserve"><value>Use personalized theme</value></data>
+  <data name="Themes_UsePersonalizedThemeStub" xml:space="preserve"><value>Personalized themes — stub</value></data>
+  <data name="Themes_FewInstalled" xml:space="preserve"><value>{0} styles installed</value></data>
+  <data name="Themes_ManyInstalled" xml:space="preserve"><value>{0} styles installed</value></data>
+  <data name="Themes_OneInstalled" xml:space="preserve"><value>1 style installed</value></data>
+  <data name="Text_GlassSmoothingStub" xml:space="preserve"><value>The "Text smoothing on glass" section is in development.</value></data>
+  <data name="Text_EffectsTitle" xml:space="preserve"><value>Effects</value></data>
+  <data name="Text_PreviewSample" xml:space="preserve"><value>Do not crunch French rolls baked on the ruin of people — desire bread from proletarian ovens, as much as you need, not from the gold reserve and not sweetened by bourgeois speeches.</value></data>
+  <data name="Text_InkGammaBlendTitle" xml:space="preserve"><value>Coverage gamma and blending</value></data>
+  <data name="Text_InkGammaBlendDesc" xml:space="preserve"><value>Refines symbol edges and performs resulting blending</value></data>
+  <data name="Text_InkGammaBlendIntro" xml:space="preserve"><value>Adjust text rendering quality in Edit controls by choosing gamma to refine symbol edges and the resulting text blend with the background.</value></data>
+  <data name="Text_InkPseudoTitle" xml:space="preserve"><value>Contour smoothing</value></data>
+  <data name="Text_InkPseudoDesc" xml:space="preserve"><value>Sets the symbol halo level</value></data>
+  <data name="Text_InkPseudoIntro" xml:space="preserve"><value>As an additional measure to smooth text in Edit controls, set halo levels around symbols: radius is the halo size; intensity is how much the halo shows through. Note that this option affects text rendering performance. Disabled by default.</value></data>
+  <data name="Combo_InkRenderModeItems" xml:space="preserve"><value>Auto;Single pass;Dual pass</value></data>
+  <data name="Text_InkVisualTuneButton" xml:space="preserve"><value>Visual tuning tool</value></data>
+  <data name="Text_RenderControlCardTitle" xml:space="preserve"><value>Text rendering control</value></data>
+  <data name="Text_InkProfileModeLabel" xml:space="preserve"><value>Profile mode</value></data>
+  <data name="Text_InkMasterToggleTooltip" xml:space="preserve"><value>Turning off removes ink capsule parameters and restores defaults.</value></data>
+  <data name="Text_InkVisualTuneUnavailableTitle" xml:space="preserve"><value>Visual tuning unavailable</value></data>
+  <data name="Text_InkVisualTuneUnavailableBody" xml:space="preserve"><value>Glass modules (chroma) are not loaded. Start the Glass platform or restart Glass Settings.</value></data>
+  <data name="Text_InkGammaLabel" xml:space="preserve"><value>Gamma</value></data>
+  <data name="Text_InkBlendLabel" xml:space="preserve"><value>Blending</value></data>
+  <data name="Text_InkPseudoRadiusLabel" xml:space="preserve"><value>Radius</value></data>
+  <data name="Text_InkPseudoIntensityLabel" xml:space="preserve"><value>Intensity</value></data>
+  <data name="Text_InkWizardTitle" xml:space="preserve"><value>Text smoothing visual tuning wizard</value></data>
+  <data name="Text_InkWizardPrompt" xml:space="preserve"><value>Choose the best text appearance (%d of %d)</value></data>
+  <data name="Text_InkWizardNext" xml:space="preserve"><value>Next</value></data>
+  <data name="Text_InkWizardCancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Text_InkWizardBack" xml:space="preserve"><value>←</value></data>
+  <data name="Text_InkWizardHint_ForkRoot" xml:space="preserve"><value>Here are two fundamentally different ways to build the text alpha channel. On the left — single-pass (slightly sharper and more graphic), on the right — dual-pass (softer edge transitions, slightly less dense at the same gamma value because the gamma scale is doubled automatically). Pick whichever looks better to you — you will refine details within the chosen direction next; you can always go back and try the alternative.</value></data>
+  <data name="Text_InkWizardHint_RefineCoarse" xml:space="preserve"><value>Gamma sets letter thickness: values above the baseline make the stroke thinner, below — bolder. The second row under each gamma option shows a contour preset already tuned to it — with contour on, you get a distinctive “printed” look that feels original. For clean smoothing without an embossed effect, pick the top row (contour off) on any gamma option. The next screen is another gamma refinement step in the same direction.</value></data>
+  <data name="Text_InkWizardHint_RefineMid" xml:space="preserve"><value>Another gamma refinement step — differences are subtler than on the previous screen. Top row: no contour; bottom row: contour on with presets tuned to each gamma. If you turned contour on on the previous screen, or turn it on on this one, you will fine-tune the halo radius next.</value></data>
+  <data name="Text_InkWizardHint_RefineFine" xml:space="preserve"><value>Final step — blending. This is the resulting density/transparency of everything you have already chosen and configured; it does not change thickness or contour — only the overall “weight” of the glyph with all effects applied. Pick what reads most comfortably on your background.</value></data>
+  <data name="Text_InkWizardHint_RefinePseudo" xml:space="preserve"><value>Here you can tune contour properties — radius in the top row and intensity in the bottom row. Radius sets how soft the contour is — from a barely noticeable thin edge to a wide soft halo. Intensity under each radius option is already tuned so the effect feels equally strong regardless of radius — only contour softness changes, not how prominent it looks.</value></data>
+  <data name="Text_PreviewHintTitle" xml:space="preserve"><value>Glass preview</value></data>
+  <data name="Text_PreviewHintBody" xml:space="preserve"><value>Wallpaper and blur match DWM composition. Text is rendered by Glass via ExtTextOutWithAlpha.</value></data>
+  <data name="Text_SystemFontsPivotTabs" xml:space="preserve"><value>Title;Small title;Menu;Status bar;Dialogs;Desktop</value></data>
+  <data name="Text_SystemFontsTitle" xml:space="preserve"><value>System fonts</value></data>
+  <data name="Text_SystemFontsDesc" xml:space="preserve"><value>Choose font name, style, and size</value></data>
+  <data name="Text_SystemFontsChoose" xml:space="preserve"><value>Choose</value></data>
+  <data name="Text_SystemFontsScopeGlobal" xml:space="preserve"><value>Global</value></data>
+  <data name="Text_SystemFontsScopeSelective" xml:space="preserve"><value>Selective</value></data>
+  <data name="Text_SystemFontsInfoMessage" xml:space="preserve"><value>In the next block, set system font parameters — choose the best font from the collection, set size and style variants globally for all desktop objects, or selectively as you prefer.</value></data>
+  <data name="Text_FontPickerTitle" xml:space="preserve"><value>Font</value></data>
+  <data name="Text_FontPickerFont" xml:space="preserve"><value>Font</value></data>
+  <data name="Text_FontPickerStyle" xml:space="preserve"><value>Style</value></data>
+  <data name="Text_FontPickerCharset" xml:space="preserve"><value>Character set</value></data>
+  <data name="Text_FontPickerSize" xml:space="preserve"><value>Size</value></data>
+  <data name="Text_FontPickerStyle_Regular" xml:space="preserve"><value>Regular</value></data>
+  <data name="Text_FontPickerStyle_Italic" xml:space="preserve"><value>Italic</value></data>
+  <data name="Text_FontPickerStyle_Light" xml:space="preserve"><value>Light</value></data>
+  <data name="Text_FontPickerStyle_LightItalic" xml:space="preserve"><value>Light Italic</value></data>
+  <data name="Text_FontPickerStyle_Medium" xml:space="preserve"><value>Medium</value></data>
+  <data name="Text_FontPickerStyle_MediumItalic" xml:space="preserve"><value>Medium Italic</value></data>
+  <data name="Text_FontPickerStyle_Semibold" xml:space="preserve"><value>Semibold</value></data>
+  <data name="Text_FontPickerStyle_SemiboldItalic" xml:space="preserve"><value>Semibold Italic</value></data>
+  <data name="Text_FontPickerStyle_Bold" xml:space="preserve"><value>Bold</value></data>
+  <data name="Text_FontPickerStyle_BoldItalic" xml:space="preserve"><value>Bold Italic</value></data>
+  <data name="Text_FontPickerCharset_0" xml:space="preserve"><value>ANSI</value></data>
+  <data name="Text_FontPickerCharset_1" xml:space="preserve"><value>Default</value></data>
+  <data name="Text_FontPickerCharset_2" xml:space="preserve"><value>Symbol</value></data>
+  <data name="Text_FontPickerCharset_128" xml:space="preserve"><value>Shift JIS</value></data>
+  <data name="Text_FontPickerCharset_129" xml:space="preserve"><value>Hangul</value></data>
+  <data name="Text_FontPickerCharset_134" xml:space="preserve"><value>GB2312</value></data>
+  <data name="Text_FontPickerCharset_136" xml:space="preserve"><value>Chinese Big5</value></data>
+  <data name="Text_FontPickerCharset_204" xml:space="preserve"><value>Cyrillic</value></data>
+  <data name="Text_FontPickerCharset_162" xml:space="preserve"><value>Turkish</value></data>
+  <data name="Text_FontPickerCharset_186" xml:space="preserve"><value>Baltic</value></data>
+  <data name="Text_EffectsDesc" xml:space="preserve"><value>Text glow effect parameters</value></data>
+  <data name="Text_GlowEnableToggle" xml:space="preserve"><value>Enable glow</value></data>
+  <data name="Text_GlowRadiusLabel" xml:space="preserve"><value>Radius (‰)</value></data>
+  <data name="Text_GlowSpreadLabel" xml:space="preserve"><value>Spread</value></data>
+  <data name="Text_GlowPanelIntro" xml:space="preserve"><value>Set text glow parameters: radius controls halo size; pick halo color, brightness, and intensity (visibility). Also choose how widely the effect applies on the desktop.</value></data>
+  <data name="Text_GlowColorDescLight" xml:space="preserve"><value>Glow color for light theme</value></data>
+  <data name="Text_GlowColorDescDark" xml:space="preserve"><value>Glow color for dark theme</value></data>
+  <data name="Combo_GlowSpreadItems" xml:space="preserve"><value>Minimal;Moderate;Global</value></data>
+  <data name="Combo_BlurOptimizationItems" xml:space="preserve"><value>Speed first;Balanced;Quality first</value></data>
+  <data name="Combo_RoundRectProfileItems" xml:space="preserve"><value>Windows 8;Windows 7;Manual</value></data>
+  <data name="Combo_CaptionButtonsItems" xml:space="preserve"><value>Vanilla style;Windows Vista style;Windows 7 style;Windows 8 style</value></data>
+  <data name="Combo_CenterCaptionItems" xml:space="preserve"><value>Disabled;Regular;Windows 8 style</value></data>
+  <data name="Combo_TextGlowModeItems" xml:space="preserve"><value>No glow;Use theme atlas;Use theme atlas (opacity);Composited (theme settings)</value></data>
+  <data name="Combo_CaptionColorModeItems" xml:space="preserve"><value>Auto;From theme;Manual;System</value></data>
+  <data name="Toggle_Off" xml:space="preserve"><value>Off</value></data>
+  <data name="Toggle_On" xml:space="preserve"><value>On</value></data>
+  <data name="Dwm_TabSystem" xml:space="preserve"><value>Local</value></data>
+  <data name="Dwm_TabUser" xml:space="preserve"><value>User</value></data>
+  <data name="Breadcrumb_DwmLocalSuffix" xml:space="preserve"><value> (L)</value></data>
+  <data name="Breadcrumb_DwmUserSuffix" xml:space="preserve"><value> (U)</value></data>
+  <data name="Dwm_BannerHklmBody" xml:space="preserve"><value>This section reads and writes HKLM\Software\Microsoft\Windows\DWM.</value></data>
+  <data name="Dwm_BannerHkcuBody" xml:space="preserve"><value>This section reads and writes HKCU\Software\Microsoft\Windows\DWM.</value></data>
+  <data name="Dwm_BannerHkcuOverrideLine" xml:space="preserve"><value>HKCU override is present and takes priority in OpenGlass rendering.</value></data>
+  <data name="Dwm_HklmInfoBlockMessage" xml:space="preserve"><value>Attention! This page reads and writes registry values in HKLM, so these settings become shared for all users of this computer.</value></data>
+  <data name="Dwm_HkcuConflictNotice" xml:space="preserve"><value>Local parameters were detected for this section and may override user settings.</value></data>
+  <data name="Dwm_HubOverrideBadge" xml:space="preserve"><value>Overridden by HKCU</value></data>
+  <data name="Dwm_ParallelWarnHklm" xml:space="preserve"><value>A parameter is set in HKCU. OpenGlass gives it priority at render time.</value></data>
+  <data name="Dwm_ParallelWarnHklmFallback" xml:space="preserve"><value>The HKLM value is missing. The page is currently using a fallback value from HKCU.</value></data>
+  <data name="Dwm_ParallelWarnHkcu" xml:space="preserve"><value>A parameter is set in HKLM. OpenGlass may use it when no local key is present.</value></data>
+  <data name="Dwm_ParallelDuplicateMarker" xml:space="preserve"><value>duplicate exists</value></data>
+  <data name="Dwm_ParallelDuplicateMarkerUser" xml:space="preserve"><value>U parameter set</value></data>
+  <data name="Dwm_ParallelDuplicateMarkerLocal" xml:space="preserve"><value>L parameter set</value></data>
+  <data name="Dwm_ParallelConflictSuffixUserValue" xml:space="preserve"><value>; conflict with U value</value></data>
+  <data name="Dwm_ParallelConflictSuffixLocalValue" xml:space="preserve"><value>; conflict with L value</value></data>
+  <data name="Dwm_DefaultReflectionTile" xml:space="preserve"><value>System reflection (default)</value></data>
+  <data name="Dwm_DefaultMaterialTile" xml:space="preserve"><value>System material (default)</value></data>
+</root>

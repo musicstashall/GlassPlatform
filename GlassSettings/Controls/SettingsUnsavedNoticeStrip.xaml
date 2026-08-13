@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<UserControl
+
+    x:Class="GlassSettings.Controls.SettingsUnsavedNoticeStrip"
+
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+
+    HorizontalAlignment="Stretch"
+
+    RenderTransformOrigin="0.5,0"
+
+    SizeChanged="OnSizeChanged"
+
+    Visibility="Collapsed">
+
+    <UserControl.RenderTransform>
+
+        <TranslateTransform x:Name="RootTransform" />
+
+    </UserControl.RenderTransform>
+
+    <Border
+
+        x:Name="NoticeBorder"
+
+        MinHeight="{StaticResource GlassSettingsNoticeStripMinHeight}"
+
+        Padding="12,10"
+
+        BorderThickness="0"
+
+        CornerRadius="4">
+
+        <Grid ColumnSpacing="12">
+
+            <Grid.ColumnDefinitions>
+
+                <ColumnDefinition Width="Auto" />
+
+                <ColumnDefinition Width="*" />
+
+                <ColumnDefinition Width="Auto" />
+
+            </Grid.ColumnDefinitions>
+
+            <FontIcon
+
+                x:Name="SeverityIcon"
+
+                Grid.Column="0"
+
+                FontSize="16"
+
+                VerticalAlignment="Center" />
+
+            <StackPanel
+
+                Grid.Column="1"
+
+                Orientation="Horizontal"
+
+                Spacing="20"
+
+                VerticalAlignment="Center">
+
+                <TextBlock
+
+                    x:Name="MessageText"
+
+                    VerticalAlignment="Center"
+
+                    TextWrapping="WrapWholeWords"
+
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+
+                <Button
+                    x:Name="SaveButton"
+                    MinHeight="32"
+                    Padding="16,4,16,4"
+                    VerticalAlignment="Center" />
+                <Button
+                    x:Name="ActionButton"
+                    MinHeight="32"
+                    Padding="16,4,16,4"
+                    VerticalAlignment="Center"
+                    Visibility="Collapsed" />
+
+            </StackPanel>
+
+            <Button
+
+                x:Name="CloseButton"
+
+                Grid.Column="2"
+
+                MinWidth="32"
+
+                MinHeight="32"
+
+                Padding="0"
+
+                VerticalAlignment="Center"
+
+                Style="{StaticResource SubtleButtonStyle}"
+
+                ToolTipService.ToolTip=""
+
+                Click="CloseButton_OnClick">
+
+                <FontIcon Glyph="&#xE711;" FontSize="10" />
+
+            </Button>
+
+        </Grid>
+
+    </Border>
+
+</UserControl>
+

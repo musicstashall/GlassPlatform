@@ -1,0 +1,80 @@
+<UserControl
+    x:Class="GlassSettings.Controls.Processes.ProcessGridTile"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Border
+        x:Name="RootBorder"
+        Width="200"
+        Height="200"
+        Padding="12"
+        Background="{ThemeResource LayerFillColorDefaultBrush}"
+        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="8"
+        PointerEntered="RootBorder_OnPointerEntered"
+        PointerExited="RootBorder_OnPointerExited">
+        <Grid RowSpacing="4">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Button
+                x:Name="MoreButton"
+                HorizontalAlignment="Right"
+                Click="MoreButton_OnClick"
+                Style="{StaticResource SubtleButtonStyle}">
+                <FontIcon FontSize="16" Glyph="&#xE712;" />
+            </Button>
+            <Grid Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Image
+                    x:Name="IconImage"
+                    Width="48"
+                    Height="48"
+                    Visibility="Collapsed" />
+                <FontIcon
+                    x:Name="IconFallback"
+                    FontSize="40"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Glyph="&#xE7C3;" />
+            </Grid>
+            <StackPanel Grid.Row="2" MaxWidth="176" Spacing="2">
+                <TextBlock
+                    x:Name="TitleText"
+                    MaxLines="2"
+                    HorizontalAlignment="Center"
+                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                    TextAlignment="Center"
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="WrapWholeWords" />
+                <TextBlock
+                    x:Name="CompanyText"
+                    MaxLines="1"
+                    HorizontalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    TextAlignment="Center"
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="NoWrap" />
+            </StackPanel>
+            <HyperlinkButton
+                x:Name="DeleteButton"
+                Grid.Row="3"
+                Margin="0,4,0,0"
+                HorizontalAlignment="Center"
+                Click="DeleteButton_OnClick"
+                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+        </Grid>
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="CommonStates">
+                <VisualState x:Name="Normal" />
+                <VisualState x:Name="PointerOver">
+                    <VisualState.Setters>
+                        <Setter Target="RootBorder.BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+    </Border>
+</UserControl>

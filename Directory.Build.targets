@@ -1,0 +1,84 @@
+<Project>
+  <!--
+    Авто-инкремент FileVersion (4-е поле) и единая ProductVersion для всех бинарников.
+    Источник продукта — GlassProductVersion в Directory.Build.props.
+    Счётчик сборки — BuildNumber.txt в каталоге каждого проекта.
+  -->
+  <PropertyGroup>
+    <GlassProductVersionBase3>$([System.Text.RegularExpressions.Regex]::Match('$(GlassProductVersion)', '^\d+\.\d+\.\d+').Value)</GlassProductVersionBase3>
+    <GlassProductVersionComma>$(GlassProductVersion.Replace('.', ','))</GlassProductVersionComma>
+    <IsGlassNativeBinary Condition="'$(ConfigurationType)' == 'DynamicLibrary' or '$(ConfigurationType)' == 'Application'">true</IsGlassNativeBinary>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsGlassNativeBinary)' == 'true'">
+    <GlassBuildNumberPath>$(MSBuildProjectDirectory)\BuildNumber.txt</GlassBuildNumberPath>
+    <GlassVersionHeaderPath>$(IntDir)GlassBuildVersion.h</GlassVersionHeaderPath>
+    <GlassModuleBinaryExt Condition="'$(ConfigurationType)' == 'DynamicLibrary'">dll</GlassModuleBinaryExt>
+    <GlassModuleBinaryExt Condition="'$(ConfigurationType)' == 'Application'">exe</GlassModuleBinaryExt>
+    <GlassModuleFileType Condition="'$(ConfigurationType)' == 'DynamicLibrary'">0x2L</GlassModuleFileType>
+    <GlassModuleFileType Condition="'$(ConfigurationType)' == 'Application'">0x1L</GlassModuleFileType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.csproj'">
+    <GlassBuildNumberPath>$(MSBuildProjectDirectory)\BuildNumber.txt</GlassBuildNumberPath>
+    <GlassBuildVersionCsPath>$(IntermediateOutputPath)GlassBuildVersion.g.cs</GlassBuildVersionCsPath>
+    <GenerateAssemblyFileVersionAttribute>false</GenerateAssemblyFileVersionAttribute>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsGlassNativeBinary)' == 'true'">
+    <ResourceCompile Include="$(MSBuildThisFileDirectory)Shared\GlassModuleVersion.rc">
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+  </ItemGroup>
+
+  <Target Name="GlassEnsureIntDir" BeforeTargets="GlassWriteVersionHeader" Condition="'$(IsGlassNativeBinary)' == 'true'">
+    <MakeDir Directories="$(IntDir)" Condition="!Exists('$(IntDir)')" />
+  </Target>
+
+  <Target Name="GlassWriteVersionHeader" BeforeTargets="BeforeBuildGenerateSources" Condition="'$(IsGlassNativeBinary)' == 'true' and '$(_GlassBuildNumberIncremented)' != 'true'">
+    <ReadLinesFromFile File="$(GlassBuildNumberPath)" Condition="Exists('$(GlassBuildNumberPath)')">
+      <Output TaskParameter="Lines" ItemName="_GlassBuildLine" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <_GlassBuildCurrent Condition="'@(_GlassBuildLine)' != ''">@(_GlassBuildLine)</_GlassBuildCurrent>
+      <_GlassBuildCurrent Condition="'@(_GlassBuildLine)' == ''">0</_GlassBuildCurrent>
+      <GlassBuildNumberNext>$([MSBuild]::Add($(_GlassBuildCurrent), 1))</GlassBuildNumberNext>
+      <GlassFileVersionDot>$(GlassProductVersionBase3).$(GlassBuildNumberNext)</GlassFileVersionDot>
+      <GlassFileVersionComma>$(GlassFileVersionDot.Replace('.', ','))</GlassFileVersionComma>
+      <_GlassVersionHeaderContent>#pragma once;#define GLASS_VER_COMMA $(GlassFileVersionComma);#define GLASS_VER_DOT $(GlassFileVersionDot);#define GLASS_VER_PRODUCT_COMMA $(GlassProductVersionComma);#define GLASS_VER_PRODUCT_DOT $(GlassProductVersion);#define GLASS_VER_MODULE $(MSBuildProjectName);#define GLASS_VER_EXT $(GlassModuleBinaryExt);#define GLASS_VER_FILETYPE $(GlassModuleFileType)</_GlassVersionHeaderContent>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(GlassBuildNumberPath)" Lines="$(GlassBuildNumberNext)" Overwrite="true" />
+    <WriteLinesToFile File="$(GlassVersionHeaderPath)" Lines="$(_GlassVersionHeaderContent)" Overwrite="true" />
+    <PropertyGroup>
+      <_GlassBuildNumberIncremented>true</_GlassBuildNumberIncremented>
+    </PropertyGroup>
+    <Message Importance="low" Text="Glass $(MSBuildProjectName): FileVersion=$(GlassFileVersionDot), ProductVersion=$(GlassProductVersion)" />
+  </Target>
+
+  <Target Name="GlassEnsureIntermediateOutputPath" BeforeTargets="GlassWriteCSharpFileVersion" Condition="'$(MSBuildProjectExtension)' == '.csproj'">
+    <MakeDir Directories="$(IntermediateOutputPath)" Condition="!Exists('$(IntermediateOutputPath)')" />
+  </Target>
+
+  <Target Name="GlassWriteCSharpFileVersion" BeforeTargets="BeforeBuild" Condition="'$(MSBuildProjectExtension)' == '.csproj' and '$(_GlassBuildNumberIncremented)' != 'true'">
+    <ReadLinesFromFile File="$(GlassBuildNumberPath)" Condition="Exists('$(GlassBuildNumberPath)')">
+      <Output TaskParameter="Lines" ItemName="_GlassBuildLine" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <_GlassBuildCurrent Condition="'@(_GlassBuildLine)' != ''">@(_GlassBuildLine)</_GlassBuildCurrent>
+      <_GlassBuildCurrent Condition="'@(_GlassBuildLine)' == ''">0</_GlassBuildCurrent>
+      <GlassBuildNumberNext>$([MSBuild]::Add($(_GlassBuildCurrent), 1))</GlassBuildNumberNext>
+      <GlassFileVersionDot>$(GlassProductVersionBase3).$(GlassBuildNumberNext)</GlassFileVersionDot>
+      <_GlassBuildVersionCsContent>// Автогенерация: Directory.Build.targets. Не редактировать.;[assembly: System.Reflection.AssemblyFileVersion("$(GlassFileVersionDot)")]</_GlassBuildVersionCsContent>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(GlassBuildNumberPath)" Lines="$(GlassBuildNumberNext)" Overwrite="true" />
+    <WriteLinesToFile File="$(GlassBuildVersionCsPath)" Lines="$(_GlassBuildVersionCsContent)" Overwrite="true" />
+    <ItemGroup>
+      <Compile Include="$(GlassBuildVersionCsPath)" />
+      <FileWrites Include="$(GlassBuildVersionCsPath)" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_GlassBuildNumberIncremented>true</_GlassBuildNumberIncremented>
+    </PropertyGroup>
+    <Message Importance="low" Text="Glass $(MSBuildProjectName): FileVersion=$(GlassFileVersionDot), ProductVersion=$(GlassProductVersion)" />
+  </Target>
+</Project>

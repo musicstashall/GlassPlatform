@@ -1,0 +1,9 @@
+<Page
+    x:Class="GlassSettings.Pages.Glass.GlassSettingsHubPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls">
+    <ctrl:SettingsPageShell>
+        <ctrl:SettingsNavigationHost x:Name="NavHost" />
+    </ctrl:SettingsPageShell>
+</Page>

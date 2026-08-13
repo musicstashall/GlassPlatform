@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{D514CF0D-53D2-421B-A994-7F0FE30FA7B8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\Helpers">
+      <UniqueIdentifier>{7D75A705-45EF-4529-AF10-C490A092F7DF}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\Providers">
+      <UniqueIdentifier>{76FFD3F6-70BC-467B-855F-F1A19190E55F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{E09F38C3-B25A-41AA-9393-A133CAAB8395}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="SharedPch.cpp">
+    </ClCompile>
+    <ClCompile Include="src\BitmapUtils.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\BorderDisplayHelper.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\DwmGlassOpacity.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\DXHelper.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GlassHostRegistry.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GlassPlatformTask.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GlassShellRegistration.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MenuUtils.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\OpenGlassDwmPolicy.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\OpenGlassHostState.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\OpenGlassHostCommand.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\OpenGlassHostLaunch.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\PlatformPresenceQuery.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ExplorerCompatHostPolicy.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\PlatformPresenceComPush.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\PlatformPresenceMonitor.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\PlatformPresenceState.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\InjectProcessMap.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\InjectModuleScan.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\RootSwcaRegistryQuery.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\EffectTypeQuery.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\InkCapsuleQuery.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\PartRegistryQuery.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ProcessBlockList.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\RootBackdropPolicy.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\RootNcActiveCache.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\RootPolicyQuery.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\RootRegistryMigration.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SwcaBackdrop.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\TaskSchedulerCom.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ThemeHelper.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\WinApiUtils.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\WndCompatHostApi.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\cpprt.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\DebugLog.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\dx.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\framework.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassBackdropMark.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassHostRegistry.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassInkAlphaCapsule.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassLogClient.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassLogProtocol.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassMessages.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassPlatformTask.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassShellMenuConstants.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\AddressBarPieUtils.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\BitmapUtils.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\BorderDisplayHelper.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\ColorUtils.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\DwmGlassOpacity.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\DwmThumbnailAPI.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\DXHelper.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\MenuUtils.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\RegHelper.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\RootNcActiveCache.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\SwcaBackdrop.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\SystemHelper.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\ThemeHelper.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Helpers\WinApiUtils.h">
+      <Filter>include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\InjectionMode.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\OpenGlassDwmPolicy.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\OpenGlassHostState.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\OpenGlassHostCommand.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\OpenGlassHostLaunch.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\PlatformPresenceQuery.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ExplorerCompatHostPolicy.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\PlatformPresenceMonitor.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\PlatformPresenceState.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\InjectProcessMap.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\InjectModuleScan.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\RootSwcaRegistryQuery.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\EffectTypeQuery.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\InkCapsuleQuery.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\PartRegistryQuery.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ProcessBlockList.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Providers\DirectUIEventProvider.h">
+      <Filter>include\Providers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Providers\DropDownContext.h">
+      <Filter>include\Providers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Providers\DropDownEventProvider.h">
+      <Filter>include\Providers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Providers\GlassCoreProviders.h">
+      <Filter>include\Providers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Providers\MenuContext.h">
+      <Filter>include\Providers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Providers\MenuEventProvider.h">
+      <Filter>include\Providers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Providers\RootEventProvider.h">
+      <Filter>include\Providers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\RootBackdropPolicy.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\RootPolicyQuery.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\RootRegistryMigration.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\TaskSchedulerCom.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\UnloadResult.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wil.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\WndCompatHostApi.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="SharedPch.h">
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config">
+    </None>
+  </ItemGroup>
+</Project>

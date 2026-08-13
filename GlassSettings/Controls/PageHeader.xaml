@@ -1,0 +1,12 @@
+<UserControl
+    x:Class="GlassSettings.Controls.PageHeader"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Spacing="4" Margin="0,0,0,16">
+        <TextBlock x:Name="TitleBlock" Style="{StaticResource TitleTextBlockStyle}" Text="" />
+        <TextBlock
+            x:Name="SubtitleBlock"
+            Style="{StaticResource GlassSettingsSpoilerSecondaryTextStyle}"
+            TextWrapping="WrapWholeWords" />
+    </StackPanel>
+</UserControl>

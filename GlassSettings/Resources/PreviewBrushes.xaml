@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- «Стекло» под миниатюрой атласа: полупрозрачная заливка (без размытия),
+         сквозь неё чётко видна шахматка-индикатор прозрачности. Шахматка всегда
+         светлая, поэтому мягкий холодноватый тинт читается как стекло. -->
+    <SolidColorBrush
+        x:Key="PreviewGlassFillBrush"
+        Color="#59AECCE6" />
+    <!-- «Стекло» для крупного каскадного превью «Стилизация»: настоящий акрил с размытием.
+         FallbackColor совпадает с PreviewGlassFillBrush — при отсутствии acrylic виден тот же тинт. -->
+    <AcrylicBrush
+        x:Key="PreviewGlassAcrylicBrush"
+        FallbackColor="#59AECCE6"
+        TintColor="#AECCE6"
+        TintLuminosityOpacity="0.45"
+        TintOpacity="0.35" />
+    <!-- Тонкая диагональная штриховка для error-state preview -->
+    <LinearGradientBrush
+        x:Key="PreviewDiagonalHatchBrush"
+        MappingMode="Absolute"
+        SpreadMethod="Repeat"
+        StartPoint="0,0"
+        EndPoint="6,6">
+        <GradientStop Offset="0" Color="#00000000" />
+        <GradientStop Offset="0.47" Color="#00000000" />
+        <GradientStop Offset="0.5" Color="#1A808080" />
+        <GradientStop Offset="0.53" Color="#00000000" />
+        <GradientStop Offset="1" Color="#00000000" />
+    </LinearGradientBrush>
+</ResourceDictionary>

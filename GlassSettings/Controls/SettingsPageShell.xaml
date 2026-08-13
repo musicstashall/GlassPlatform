@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.SettingsPageShell"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls">
+    <Grid Background="Transparent" VerticalAlignment="Stretch">
+        <ScrollViewer
+            x:Name="ContentScroll"
+            Background="Transparent"
+            Padding="{StaticResource SettingsPageShellScrollPadding}"
+            BringIntoViewOnFocusChange="False"
+            HorizontalAlignment="Stretch"
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalAlignment="Stretch"
+            VerticalScrollBarVisibility="Auto">
+            <Border
+                x:Name="ContentColumn"
+                Margin="{StaticResource SettingsPageShellContentMargin}"
+                Style="{StaticResource SettingsPageContentBorderStyle}">
+                <StackPanel Spacing="8">
+                    <StackPanel.ChildrenTransitions>
+                        <TransitionCollection>
+                            <RepositionThemeTransition />
+                        </TransitionCollection>
+                    </StackPanel.ChildrenTransitions>
+                    <ctrl:SettingsPageNoticeStack x:Name="NoticeStack" />
+                    <ContentPresenter x:Name="BodyHost" />
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

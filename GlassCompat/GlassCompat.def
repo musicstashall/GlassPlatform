@@ -1,0 +1,16 @@
+; Неукрашенные имена для GetProcAddress / rundll32 на x86 (иначе _Main@16).
+LIBRARY "GlassCompat"
+EXPORTS
+    GlassCompat_Initialize
+    GlassCompat_RemoteBootstrap
+    GlassCompat_RemoteCoreWindowShow
+    GlassCompat_RequestShutdown
+    GlassCompat_ReloadAttachList
+    GlassCompat_NotifyExplorerRootBackdropPolicyChanged
+    GlassCompat_EnsureTaskbarCompatLoaded
+    GlassCompat_EnsureExplorerCompatLoaded
+    GlassCompat_EnsureUICompatLoaded
+    GlassCompat_WinEventProc
+    GlassCompat_CwForceUnloadFlag DATA
+    GlassCompat_GuiThreadId DATA
+    Main

@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Controls">
+      <UniqueIdentifier>{2D54881A-039A-4891-947A-9956FEC499BA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Explorer">
+      <UniqueIdentifier>{AF5A1E60-B765-4CE4-9A07-3687A5D0A3F7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Mshtml">
+      <UniqueIdentifier>{37880265-2302-4C2C-B3E5-0E614D0677CB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Popup">
+      <UniqueIdentifier>{BFDEA38D-96B9-4842-A63C-6E0E7F83CC59}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Popup\ComboLBox">
+      <UniqueIdentifier>{607DC2EA-2735-4E66-AE18-8A9C974AA7C0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Popup\DropDown">
+      <UniqueIdentifier>{5F5FB542-735A-454F-B42D-98D85DE4456E}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Popup\Menu">
+      <UniqueIdentifier>{4EA69745-88D3-4F8E-81E1-D8D4FBB9AD48}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Popup\Tooltip">
+      <UniqueIdentifier>{E18669C0-8E4E-4710-9BCD-5A45379AB222}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Providers">
+      <UniqueIdentifier>{00B2B37D-0840-4FA6-8C1A-6EBFD73F62DD}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Root">
+      <UniqueIdentifier>{4598CC35-1555-4C15-8C76-D1D31AAA3F84}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Tracker">
+      <UniqueIdentifier>{51D51B0A-966D-4106-A7E1-DA445BB02F55}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="WinUiBridge">
+      <UniqueIdentifier>{109C8F88-7EEA-46AE-A714-B42AF0E37356}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Controls\ButtonSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\ControlNameSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\DateTimePickerSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\DirectUISubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\EditSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\HeaderSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\ListBoxSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\ListViewSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\MonthCalSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\NetUISubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\ProgressBarSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\RebarSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\ScrollBarHost.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\StaticSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\StatusBarSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\TabControlSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\ToolbarSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\TrackBarHost.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\TreeViewSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\UpDownHost.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
+    <ClCompile Include="dllmain.cpp">
+    </ClCompile>
+    <ClCompile Include="Explorer\ExplorerIslandContainerSubclass.cpp">
+      <Filter>Explorer</Filter>
+    </ClCompile>
+    <ClCompile Include="Mshtml\IeServerHost.cpp">
+      <Filter>Mshtml</Filter>
+    </ClCompile>
+    <ClCompile Include="Popup\ComboLBox\ComboBoxSubclass.cpp">
+      <Filter>Popup\ComboLBox</Filter>
+    </ClCompile>
+    <ClCompile Include="Popup\ComboLBox\ComboLBoxSubclass.cpp">
+      <Filter>Popup\ComboLBox</Filter>
+    </ClCompile>
+    <ClCompile Include="Popup\DropDown\DropDownSubclass.cpp">
+      <Filter>Popup\DropDown</Filter>
+    </ClCompile>
+    <ClCompile Include="Popup\DropDown\ListviewPopupSubclass.cpp">
+      <Filter>Popup\DropDown</Filter>
+    </ClCompile>
+    <ClCompile Include="Popup\DropDown\ViewControlSubclass.cpp">
+      <Filter>Popup\DropDown</Filter>
+    </ClCompile>
+    <ClCompile Include="Popup\Menu\MenuContext.cpp">
+      <Filter>Popup\Menu</Filter>
+    </ClCompile>
+    <ClCompile Include="Popup\Menu\MenuOwnerSubclass.cpp">
+      <Filter>Popup\Menu</Filter>
+    </ClCompile>
+    <ClCompile Include="Popup\Menu\MenuPolicy.cpp">
+      <Filter>Popup\Menu</Filter>
+    </ClCompile>
+    <ClCompile Include="Popup\Menu\MenuSubclass.cpp">
+      <Filter>Popup\Menu</Filter>
+    </ClCompile>
+    <ClCompile Include="Popup\Tooltip\KbxLabelSubclass.cpp">
+      <Filter>Popup\Tooltip</Filter>
+    </ClCompile>
+    <ClCompile Include="Popup\Tooltip\TooltipSubclass.cpp">
+      <Filter>Popup\Tooltip</Filter>
+    </ClCompile>
+    <ClCompile Include="Providers\DirectUIEventProvider.cpp">
+      <Filter>Providers</Filter>
+    </ClCompile>
+    <ClCompile Include="Providers\DropDownEventProvider.cpp">
+      <Filter>Providers</Filter>
+    </ClCompile>
+    <ClCompile Include="Providers\MenuEventProvider.cpp">
+      <Filter>Providers</Filter>
+    </ClCompile>
+    <ClCompile Include="Providers\RebarEventProvider.cpp">
+      <Filter>Providers</Filter>
+    </ClCompile>
+    <ClCompile Include="Providers\RootEventProvider.cpp">
+      <Filter>Providers</Filter>
+    </ClCompile>
+    <ClCompile Include="Providers\TooltipEventProvider.cpp">
+      <Filter>Providers</Filter>
+    </ClCompile>
+    <ClCompile Include="Root\ExplorerRootSubclass.cpp">
+      <Filter>Root</Filter>
+    </ClCompile>
+    <ClCompile Include="Root\RootBackdropRefreshThrottle.cpp">
+      <Filter>Root</Filter>
+    </ClCompile>
+    <ClCompile Include="Root\RootSubclass.cpp">
+      <Filter>Root</Filter>
+    </ClCompile>
+    <ClCompile Include="Root\TaskbarHost.cpp">
+      <Filter>Root</Filter>
+    </ClCompile>
+    <ClCompile Include="Root\Win32ChromeRestore.cpp">
+      <Filter>Root</Filter>
+    </ClCompile>
+    <ClCompile Include="Tracker\BackdropPolicyRescan.cpp">
+      <Filter>Tracker</Filter>
+    </ClCompile>
+    <ClCompile Include="Tracker\GlassAttachGate.cpp">
+      <Filter>Tracker</Filter>
+    </ClCompile>
+    <ClCompile Include="Tracker\WindowClassifier.cpp">
+      <Filter>Tracker</Filter>
+    </ClCompile>
+    <ClCompile Include="Tracker\WindowClassUtils.cpp">
+      <Filter>Tracker</Filter>
+    </ClCompile>
+    <ClCompile Include="Tracker\WinEventHandler.cpp">
+      <Filter>Tracker</Filter>
+    </ClCompile>
+    <ClCompile Include="UiDispatcher.cpp">
+    </ClCompile>
+    <ClCompile Include="WinUiBridge\WinUiContentBridgeHost.cpp">
+      <Filter>WinUiBridge</Filter>
+    </ClCompile>
+    <ClCompile Include="WinUiBridge\WinUiDesktopBridgeHost.cpp">
+      <Filter>WinUiBridge</Filter>
+    </ClCompile>
+    <ClCompile Include="WinUiBridge\NotificationCenterHost.cpp">
+      <Filter>WinUiBridge</Filter>
+    </ClCompile>
+    <ClCompile Include="WndCompat.cpp">
+    </ClCompile>
+    <ClCompile Include="WndPch.cpp">
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Controls\ButtonSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\ControlNameSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\DirectUISubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\EditSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\HeaderSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\ListViewSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\MonthCalSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\NetUISubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\RebarSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\ScrollBarHost.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\StaticSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\TabControlSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\ToolbarSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\TrackBarHost.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\TreeViewSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\UpDownHost.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Explorer\ExplorerIslandContainerSubclass.h">
+      <Filter>Explorer</Filter>
+    </ClInclude>
+    <ClInclude Include="Mshtml\IeServerHost.h">
+      <Filter>Mshtml</Filter>
+    </ClInclude>
+    <ClInclude Include="Popup\ComboLBox\ComboBoxSubclass.h">
+      <Filter>Popup\ComboLBox</Filter>
+    </ClInclude>
+    <ClInclude Include="Popup\ComboLBox\ComboLBoxSubclass.h">
+      <Filter>Popup\ComboLBox</Filter>
+    </ClInclude>
+    <ClInclude Include="Popup\DropDown\DropDownSubclass.h">
+      <Filter>Popup\DropDown</Filter>
+    </ClInclude>
+    <ClInclude Include="Popup\DropDown\ListviewPopupSubclass.h">
+      <Filter>Popup\DropDown</Filter>
+    </ClInclude>
+    <ClInclude Include="Popup\DropDown\ViewControlSubclass.h">
+      <Filter>Popup\DropDown</Filter>
+    </ClInclude>
+    <ClInclude Include="Popup\Menu\MenuOwnerSubclass.h">
+      <Filter>Popup\Menu</Filter>
+    </ClInclude>
+    <ClInclude Include="Popup\Menu\MenuPolicy.h">
+      <Filter>Popup\Menu</Filter>
+    </ClInclude>
+    <ClInclude Include="Popup\Menu\MenuSubclass.h">
+      <Filter>Popup\Menu</Filter>
+    </ClInclude>
+    <ClInclude Include="Popup\Tooltip\KbxLabelSubclass.h">
+      <Filter>Popup\Tooltip</Filter>
+    </ClInclude>
+    <ClInclude Include="Popup\Tooltip\TooltipSubclass.h">
+      <Filter>Popup\Tooltip</Filter>
+    </ClInclude>
+    <ClInclude Include="Root\ExplorerRootSubclass.h">
+      <Filter>Root</Filter>
+    </ClInclude>
+    <ClInclude Include="Root\RootBackdropRefreshThrottle.h">
+      <Filter>Root</Filter>
+    </ClInclude>
+    <ClInclude Include="Root\RootExplorerSubclassBridge.h">
+      <Filter>Root</Filter>
+    </ClInclude>
+    <ClInclude Include="Root\RootSubclass.h">
+      <Filter>Root</Filter>
+    </ClInclude>
+    <ClInclude Include="Root\RootSubclassShared.h">
+      <Filter>Root</Filter>
+    </ClInclude>
+    <ClInclude Include="Root\TaskbarHost.h">
+      <Filter>Root</Filter>
+    </ClInclude>
+    <ClInclude Include="Root\Win32ChromeRestore.h">
+      <Filter>Root</Filter>
+    </ClInclude>
+    <ClInclude Include="Tracker\BackdropPolicyRescan.h">
+      <Filter>Tracker</Filter>
+    </ClInclude>
+    <ClInclude Include="Tracker\GlassAttachGate.h">
+      <Filter>Tracker</Filter>
+    </ClInclude>
+    <ClInclude Include="Tracker\WindowClassifier.h">
+      <Filter>Tracker</Filter>
+    </ClInclude>
+    <ClInclude Include="Tracker\WindowClassUtils.h">
+      <Filter>Tracker</Filter>
+    </ClInclude>
+    <ClInclude Include="Tracker\WinEventHandler.h">
+      <Filter>Tracker</Filter>
+    </ClInclude>
+    <ClInclude Include="uah.h">
+    </ClInclude>
+    <ClInclude Include="UiDispatcher.h">
+    </ClInclude>
+    <ClInclude Include="WinUiBridge\WinUiContentBridgeHost.h">
+      <Filter>WinUiBridge</Filter>
+    </ClInclude>
+    <ClInclude Include="WinUiBridge\WinUiDesktopBridgeHost.h">
+      <Filter>WinUiBridge</Filter>
+    </ClInclude>
+    <ClInclude Include="WinUiBridge\NotificationCenterHost.h">
+      <Filter>WinUiBridge</Filter>
+    </ClInclude>
+    <ClInclude Include="WndCompat.h">
+    </ClInclude>
+    <ClInclude Include="WndPch.h">
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config">
+    </None>
+    <None Include="WndCompat.def">
+    </None>
+  </ItemGroup>
+</Project>

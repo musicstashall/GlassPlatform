@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.SettingsInfoBlock"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    HorizontalAlignment="Stretch"
+    HorizontalContentAlignment="Stretch"
+    Margin="{StaticResource GlassSettingsInfoBlockMargin}">
+    <Border
+        Padding="16"
+        HorizontalAlignment="Stretch"
+        Background="{ThemeResource LayerFillColorAltBrush}"
+        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="8">
+        <Grid ColumnSpacing="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <!-- Системная иконка "информация" (E946 Segoe MDL2) — без заливки, акцентный цвет -->
+            <FontIcon
+                x:Name="IconGlyphHost"
+                Width="27"
+                Height="27"
+                VerticalAlignment="Center"
+                FontSize="27"
+                Foreground="{ThemeResource AccentFillColorDefaultBrush}"
+                Glyph="&#xE946;" />
+            <StackPanel
+                Grid.Column="1"
+                Spacing="3"
+                VerticalAlignment="Center">
+                <TextBlock
+                    x:Name="TitleText"
+                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    x:Name="MessageText"
+                    Style="{StaticResource GlassSettingsSpoilerSecondaryTextStyle}"
+                    TextWrapping="WrapWholeWords" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

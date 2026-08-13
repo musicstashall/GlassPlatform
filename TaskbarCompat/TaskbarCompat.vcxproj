@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{A6E92F21-4D48-47BD-9A0D-6B7BFD2EE0A5}</ProjectGuid>
+    <RootNamespace>TaskbarCompat</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <OutDir>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Cache\$(ProjectName)\$(PlatformShortName)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <OutDir>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Cache\$(ProjectName)\$(PlatformShortName)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Cache\$(ProjectName)\$(PlatformShortName)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Cache\$(ProjectName)\$(PlatformShortName)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;TASKBARCOMPAT_EXPORTS;_WINDOWS;_USRDLL;GLASS_ENABLE_LOGGING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>TaskbarPch.h</PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)GlassShared\include;$(SolutionDir)GlassShared\include\Providers;$(SolutionDir)GlassShared\include\Helpers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>user32.lib;gdi32.lib;ole32.lib;oleaut32.lib;uuid.lib;runtimeobject.lib;d2d1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</AdditionalLibraryDirectories>
+      <ModuleDefinitionFile>TaskbarCompat.def</ModuleDefinitionFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;TASKBARCOMPAT_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>TaskbarPch.h</PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)GlassShared\include;$(SolutionDir)GlassShared\include\Providers;$(SolutionDir)GlassShared\include\Helpers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>user32.lib;gdi32.lib;ole32.lib;oleaut32.lib;uuid.lib;runtimeobject.lib;d2d1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</AdditionalLibraryDirectories>
+      <ModuleDefinitionFile>TaskbarCompat.def</ModuleDefinitionFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;TASKBARCOMPAT_EXPORTS;_WINDOWS;_USRDLL;GLASS_ENABLE_LOGGING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>TaskbarPch.h</PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)GlassShared\include;$(SolutionDir)GlassShared\include\Providers;$(SolutionDir)GlassShared\include\Helpers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <ShowIncludes>false</ShowIncludes>
+      <UseFullPaths>true</UseFullPaths>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>user32.lib;gdi32.lib;ole32.lib;oleaut32.lib;uuid.lib;runtimeobject.lib;d2d1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</AdditionalLibraryDirectories>
+      <ModuleDefinitionFile>TaskbarCompat.def</ModuleDefinitionFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;TASKBARCOMPAT_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>TaskbarPch.h</PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)GlassShared\include;$(SolutionDir)GlassShared\include\Providers;$(SolutionDir)GlassShared\include\Helpers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>user32.lib;gdi32.lib;ole32.lib;oleaut32.lib;uuid.lib;runtimeobject.lib;d2d1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</AdditionalLibraryDirectories>
+      <ModuleDefinitionFile>TaskbarCompat.def</ModuleDefinitionFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="TaskbarCompat.cpp" />
+    <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="TaskbarPch.cpp">
+      <PrecompiledHeader>Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="config\TaskbarRegistry.cpp" />
+    <ClCompile Include="xaml\DllGetClassObject.cpp" />
+    <ClCompile Include="xaml\XamlDiagGuids.cpp" />
+    <ClCompile Include="xaml\XamlClassFactory.cpp" />
+    <ClCompile Include="xaml\XamlDiagInit.cpp" />
+    <ClCompile Include="xaml\TaskbarTapSite.cpp" />
+    <ClCompile Include="xaml\TaskbarVisualTreeWatcher.cpp" />
+    <ClCompile Include="xaml\TaskbarBackgroundRegistry.cpp" />
+    <ClCompile Include="xaml\InputSwitchPanelRegistry.cpp" />
+    <ClCompile Include="xaml\TrayOverflowPanelRegistry.cpp" />
+    <ClCompile Include="xaml\TrayHoverFlyoutPanelRegistry.cpp" />
+    <ClCompile Include="xaml\TrayTooltipPanelRegistry.cpp" />
+    <ClCompile Include="xaml\TrayMenuFlyoutPanelRegistry.cpp" />
+    <ClCompile Include="xaml\TaskbarZonePainter.cpp" />
+    <ClCompile Include="xaml\brushes\XamlBlurBrush.cpp" />
+    <ClCompile Include="xaml\brushes\XamlBackdropFactory.cpp" />
+    <ClCompile Include="xaml\effects\GaussianBlurEffect.cpp" />
+    <ClCompile Include="xaml\effects\FloodEffect.cpp" />
+    <ClCompile Include="xaml\effects\CompositeEffect.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="TaskbarPch.h" />
+    <ClInclude Include="config\TaskbarRegistry.h" />
+    <ClInclude Include="xaml\XamlClassFactory.hpp" />
+    <ClInclude Include="xaml\XamlDiagInit.hpp" />
+    <ClInclude Include="xaml\XamlGlassIds.hpp" />
+    <ClInclude Include="xaml\XamlComLifetime.hpp" />
+    <ClInclude Include="xaml\TaskbarTapSite.hpp" />
+    <ClInclude Include="xaml\TaskbarVisualTreeWatcher.hpp" />
+    <ClInclude Include="xaml\TaskbarBackgroundRegistry.hpp" />
+    <ClInclude Include="xaml\InputSwitchPanelRegistry.hpp" />
+    <ClInclude Include="xaml\TrayOverflowPanelRegistry.hpp" />
+    <ClInclude Include="xaml\TrayHoverFlyoutPanelRegistry.hpp" />
+    <ClInclude Include="xaml\TrayTooltipPanelRegistry.hpp" />
+    <ClInclude Include="xaml\TrayMenuFlyoutPanelRegistry.hpp" />
+    <ClInclude Include="xaml\TaskbarZonePainter.hpp" />
+    <ClInclude Include="xaml\brushes\XamlBlurBrush.hpp" />
+    <ClInclude Include="xaml\brushes\XamlBackdropFactory.hpp" />
+    <ClInclude Include="xaml\effects\GaussianBlurEffect.hpp" />
+    <ClInclude Include="xaml\effects\FloodEffect.hpp" />
+    <ClInclude Include="xaml\effects\CompositeEffect.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="TaskbarCompat.def" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GlassShared\GlassShared.vcxproj">
+      <Project>{2591BB0C-7C14-42FC-A888-D9A7F4D2A723}</Project>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

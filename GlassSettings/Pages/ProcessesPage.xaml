@@ -1,0 +1,265 @@
+<Page
+    x:Class="GlassSettings.Pages.ProcessesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls"
+    xmlns:proc="using:GlassSettings.Controls.Processes"
+    xmlns:services="using:GlassSettings.Services">
+    <Page.Resources>
+        <Style x:Key="ProcessHeaderComboStyle" TargetType="ComboBox">
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="MinWidth" Value="148" />
+            <Setter Property="Padding" Value="12,4,28,4" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Background" Value="{ThemeResource ControlFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <DataTemplate x:Key="ProcessListTemplate" x:DataType="services:ProcessEntryModel">
+            <ItemContainer
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                AutomationProperties.Name="{x:Bind DisplayName}">
+                <proc:ProcessListTile Entry="{x:Bind}" ActionRequested="ProcessTile_OnActionRequested" />
+            </ItemContainer>
+        </DataTemplate>
+        <DataTemplate x:Key="ProcessGridTemplate" x:DataType="services:ProcessEntryModel">
+            <ItemContainer
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                AutomationProperties.Name="{x:Bind DisplayName}">
+                <proc:ProcessGridTile Entry="{x:Bind}" ActionRequested="ProcessTile_OnActionRequested" />
+            </ItemContainer>
+        </DataTemplate>
+        <DataTemplate x:Key="ProcessCompactTemplate" x:DataType="services:ProcessEntryModel">
+            <ItemContainer
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                AutomationProperties.Name="{x:Bind DisplayName}">
+                <proc:ProcessCompactTile Entry="{x:Bind}" ActionRequested="ProcessTile_OnActionRequested" />
+            </ItemContainer>
+        </DataTemplate>
+        <DataTemplate x:Key="BlockListListTemplate" x:DataType="services:ProcessEntryModel">
+            <ItemContainer
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                AutomationProperties.Name="{x:Bind DisplayName}">
+                <proc:ProcessListTile Entry="{x:Bind}" ActionRequested="BlockListTile_OnActionRequested" />
+            </ItemContainer>
+        </DataTemplate>
+        <DataTemplate x:Key="BlockListGridTemplate" x:DataType="services:ProcessEntryModel">
+            <ItemContainer
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                AutomationProperties.Name="{x:Bind DisplayName}">
+                <proc:ProcessGridTile Entry="{x:Bind}" ActionRequested="BlockListTile_OnActionRequested" />
+            </ItemContainer>
+        </DataTemplate>
+        <DataTemplate x:Key="BlockListCompactTemplate" x:DataType="services:ProcessEntryModel">
+            <ItemContainer
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                AutomationProperties.Name="{x:Bind DisplayName}">
+                <proc:ProcessCompactTile Entry="{x:Bind}" ActionRequested="BlockListTile_OnActionRequested" />
+            </ItemContainer>
+        </DataTemplate>
+    </Page.Resources>
+    <Grid x:Name="PageRoot">
+        <ctrl:SettingsPageShell x:Name="PageShell">
+        <StackPanel Spacing="0">
+            <ctrl:SettingsUnsavedNoticeStrip
+                x:Name="ActionNoticeStrip"
+                Margin="0,0,0,12"
+                AllowDismiss="True"
+                ShowSaveButton="False" />
+            <Grid
+                x:Name="ActionNoticeViewportAnchor"
+                Height="1"
+                Margin="0,0,0,12"
+                HorizontalAlignment="Stretch" />
+
+            <Grid
+                x:Name="HeaderHost"
+                Margin="0,0,0,16"
+                SizeChanged="HeaderHost_OnSizeChanged">
+                <Grid x:Name="HeaderGrid">
+                    <Grid
+                        x:Name="SearchRowGrid"
+                        ColumnSpacing="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <AutoSuggestBox
+                            x:Name="SearchBox"
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            QueryIcon="Find"
+                            TextChanged="SearchBox_OnTextChanged" />
+                        <proc:ProcessViewSwitcher
+                            x:Name="ViewSwitcher"
+                            Grid.Column="1"
+                            Margin="12,0,0,0"
+                            ViewModeChanged="ViewSwitcher_OnViewModeChanged" />
+                    </Grid>
+                    <TextBlock
+                        x:Name="FoundCountText"
+                        Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <StackPanel x:Name="FilterGroup" Orientation="Horizontal" Spacing="8">
+                        <FontIcon
+                            VerticalAlignment="Center"
+                            FontSize="16"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Glyph="&#xE71C;" />
+                        <TextBlock
+                            x:Name="FilterLabel"
+                            VerticalAlignment="Center"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource BodyTextBlockStyle}" />
+                        <ComboBox
+                            x:Name="FilterCombo"
+                            Style="{StaticResource ProcessHeaderComboStyle}"
+                            SelectionChanged="FilterCombo_OnSelectionChanged" />
+                    </StackPanel>
+                    <StackPanel x:Name="SortGroup" Orientation="Horizontal" Spacing="8">
+                        <FontIcon
+                            VerticalAlignment="Center"
+                            FontSize="16"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Glyph="&#xE8CB;" />
+                        <TextBlock
+                            x:Name="SortLabel"
+                            VerticalAlignment="Center"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource BodyTextBlockStyle}" />
+                        <ComboBox
+                            x:Name="SortCombo"
+                            Style="{StaticResource ProcessHeaderComboStyle}"
+                            SelectionChanged="SortCombo_OnSelectionChanged" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <ctrl:SettingsSystemGateExpander
+                x:Name="ProcessListExpander"
+                ShowGateSwitch="False"
+                HorizontalAlignment="Stretch">
+                <StackPanel Spacing="0">
+                    <Grid x:Name="ProcessItemsHost" HorizontalAlignment="Stretch">
+                        <ItemsView
+                            x:Name="ProcessItems"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Top"
+                            SelectionMode="None">
+                            <ItemsView.Layout>
+                                <StackLayout Orientation="Vertical" Spacing="8" />
+                            </ItemsView.Layout>
+                        </ItemsView>
+                    </Grid>
+                    <TextBlock
+                        x:Name="EmptyText"
+                        Margin="0,16,0,0"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        TextAlignment="Center"
+                        Visibility="Collapsed" />
+                </StackPanel>
+            </ctrl:SettingsSystemGateExpander>
+
+            <ctrl:SettingsSystemGateExpander
+                x:Name="BlockListExpander"
+                ShowGateSwitch="False"
+                Margin="0,16,0,0"
+                HorizontalAlignment="Stretch">
+                <StackPanel Spacing="0">
+                    <Grid x:Name="BlockListItemsHost" HorizontalAlignment="Stretch">
+                        <ItemsView
+                            x:Name="BlockListItems"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Top"
+                            SelectionMode="None">
+                            <ItemsView.Layout>
+                                <StackLayout Orientation="Vertical" Spacing="8" />
+                            </ItemsView.Layout>
+                        </ItemsView>
+                    </Grid>
+                    <TextBlock
+                        x:Name="BlockListEmptyText"
+                        Margin="0,16,0,0"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        TextAlignment="Center"
+                        Visibility="Collapsed" />
+                </StackPanel>
+            </ctrl:SettingsSystemGateExpander>
+
+            <ctrl:SettingsDividerExpander
+                x:Name="AdvancedExpander"
+                Expanded="AdvancedExpander_OnExpanded">
+                <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                    <ctrl:SettingsSystemGateExpander
+                        x:Name="RuntimeExpander"
+                        ShowGateSwitch="False"
+                        HorizontalAlignment="Stretch">
+                        <StackPanel Spacing="0">
+                            <ctrl:InjectRuntimeModuleTable
+                                x:Name="RuntimeTable"
+                                HorizontalAlignment="Stretch" />
+                            <TextBlock
+                                x:Name="RuntimeEmptyText"
+                                Margin="0,16,0,0"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                TextAlignment="Center"
+                                Visibility="Collapsed" />
+                        </StackPanel>
+                    </ctrl:SettingsSystemGateExpander>
+
+                    <ctrl:SettingsSystemGateExpander
+                        x:Name="CrashesExpander"
+                        ShowGateSwitch="True"
+                        HorizontalAlignment="Stretch"
+                        GateToggled="CrashesExpander_OnGateToggled">
+                        <Pivot
+                            x:Name="CrashesPivot"
+                            SelectionChanged="CrashesPivot_OnSelectionChanged">
+                            <Pivot.Resources>
+                                <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                            </Pivot.Resources>
+                            <PivotItem x:Name="PlatformCrashesPivotItem">
+                                <StackPanel Spacing="0" Margin="0,8,0,0">
+                                    <ctrl:CrashDumpTable
+                                        x:Name="PlatformCrashesTable"
+                                        HorizontalAlignment="Stretch" />
+                                    <TextBlock
+                                        x:Name="PlatformCrashesEmptyText"
+                                        Margin="0,16,0,0"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource BodyTextBlockStyle}"
+                                        TextAlignment="Center"
+                                        Visibility="Collapsed" />
+                                </StackPanel>
+                            </PivotItem>
+                            <PivotItem x:Name="SystemCrashesPivotItem">
+                                <StackPanel Spacing="0" Margin="0,8,0,0">
+                                    <ctrl:CrashDumpTable
+                                        x:Name="SystemCrashesTable"
+                                        HorizontalAlignment="Stretch" />
+                                    <TextBlock
+                                        x:Name="SystemCrashesEmptyText"
+                                        Margin="0,16,0,0"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource BodyTextBlockStyle}"
+                                        TextAlignment="Center"
+                                        Visibility="Collapsed" />
+                                </StackPanel>
+                            </PivotItem>
+                        </Pivot>
+                    </ctrl:SettingsSystemGateExpander>
+                </StackPanel>
+            </ctrl:SettingsDividerExpander>
+        </StackPanel>
+        </ctrl:SettingsPageShell>
+    </Grid>
+</Page>

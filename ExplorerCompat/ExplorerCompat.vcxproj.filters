@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="appearance">
+      <UniqueIdentifier>{CB61252B-2576-4889-B023-8A285F357492}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="util">
+      <UniqueIdentifier>{03AA741D-5B60-464A-9C3C-403D00F4F4DA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="xaml">
+      <UniqueIdentifier>{F93A4948-F15B-4627-A8DC-534B0A6ABDA9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="xaml\Patcher">
+      <UniqueIdentifier>{9B703F1A-2A2C-4C22-AB2C-29AA9B628926}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="appearance\ExplorerAppearanceConfig.cpp">
+      <Filter>appearance</Filter>
+    </ClCompile>
+    <ClCompile Include="appearance\ExplorerAppearanceWorker.cpp">
+      <Filter>appearance</Filter>
+    </ClCompile>
+    <ClCompile Include="dllmain.cpp">
+    </ClCompile>
+    <ClCompile Include="ExplorerCompat.cpp">
+    </ClCompile>
+    <ClCompile Include="ExplorerPch.cpp">
+    </ClCompile>
+    <ClCompile Include="util\Color.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="util\DCompUtils.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="util\ExplorerWindowInfo.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="util\XamlIslandUtils.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\DllGetClassObject.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\Patcher\XamlHostBarPatcher.cpp">
+      <Filter>xaml\Patcher</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\Patcher\XamlHostBarPatcherPatch.cpp">
+      <Filter>xaml\Patcher</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\Patcher\XamlHostBarPatcherLazy.cpp">
+      <Filter>xaml\Patcher</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\Patcher\XamlHostBarPatcherRestoreHostBar.cpp">
+      <Filter>xaml\Patcher</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\Patcher\XamlHostBarPatcherApply.cpp">
+      <Filter>xaml\Patcher</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\Patcher\XamlHostBarPatcherCommon.cpp">
+      <Filter>xaml\Patcher</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\Patcher\XamlHostBarPatcherPopupDwxs.cpp">
+      <Filter>xaml\Patcher</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\Patcher\XamlHostBarPatcherRestore.cpp">
+      <Filter>xaml\Patcher</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\Patcher\XamlHostBarPatcherState.cpp">
+      <Filter>xaml\Patcher</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlClassFactory.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlDiagGuids.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlDiagInit.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlShutdownMarshal.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlTapSite.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlVisualTreeWatcher.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="appearance\ExplorerAppearanceConfig.hpp">
+      <Filter>appearance</Filter>
+    </ClInclude>
+    <ClInclude Include="appearance\ExplorerAppearanceWorker.hpp">
+      <Filter>appearance</Filter>
+    </ClInclude>
+    <ClInclude Include="ExplorerCompat.hpp">
+    </ClInclude>
+    <ClInclude Include="ExplorerPch.h">
+    </ClInclude>
+    <ClInclude Include="util\Color.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="util\DCompUtils.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="util\ExplorerWindowInfo.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="util\XamlIslandUtils.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\Patcher\XamlHostBarPatcher.h">
+      <Filter>xaml\Patcher</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\Patcher\XamlHostBarPatcherCommon.h">
+      <Filter>xaml\Patcher</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\Patcher\XamlHostBarPatcherInternals.h">
+      <Filter>xaml\Patcher</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\Patcher\XamlHostBarPatcherPrivate.h">
+      <Filter>xaml\Patcher</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\Patcher\XamlHostBarPatcherState.h">
+      <Filter>xaml\Patcher</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlClassFactory.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlDiagInit.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlDiagTiming.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlGlassIds.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlTapSite.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlVisualTreeWatcher.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="ExplorerCompat.def">
+    </None>
+  </ItemGroup>
+</Project>

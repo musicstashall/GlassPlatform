@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Include">
+      <UniqueIdentifier>{9481DB3E-835A-4AAF-B35C-AFD4BAC6407B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include">
+      <UniqueIdentifier>{0B7A07DE-B99E-4C41-992C-7430928E905D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{17D8C37B-CB24-420F-ABC2-E9BE2B2F57B0}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="CompatPch.cpp">
+    </ClCompile>
+    <ClCompile Include="dllmain.cpp">
+    </ClCompile>
+    <ClCompile Include="src\AttachList.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CrashGuard.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\EntryRundll.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GlassCompat.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\HostShellWatchdog.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SymbolResolver.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Include\AttachList.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\CompatPch.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\CrashGuard.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\GlassCompat.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\HostPidHelper.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\HostShellWatchdog.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ShortLivedAgent.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\SymbolResolver.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="GlassCompat.def">
+    </None>
+  </ItemGroup>
+</Project>

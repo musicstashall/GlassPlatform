@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.PlatformSchedulerStackableActions"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Margin="{StaticResource GlassSettingsSplitButtonSpoilerMargin}"
+    HorizontalAlignment="Right"
+    VerticalAlignment="Center">
+    <StackPanel
+        HorizontalAlignment="Right"
+        Orientation="Horizontal"
+        Spacing="6"
+        VerticalAlignment="Center">
+        <TextBlock
+            x:Name="OrchestrationKindText"
+            VerticalAlignment="Center"
+            Style="{StaticResource GlassSettingsSpoilerSecondaryTextStyle}" />
+        <Grid VerticalAlignment="Center">
+            <SplitButton
+                x:Name="StatusSplit"
+                Width="{StaticResource GlassSettingsSplitButtonWidth}"
+                MinWidth="{StaticResource GlassSettingsSplitButtonWidth}"
+                MaxWidth="{StaticResource GlassSettingsSplitButtonWidth}"
+                Padding="0"
+                VerticalAlignment="Center"
+                Background="Transparent"
+                BorderThickness="1"
+                Click="StatusSplit_OnClick"
+                PointerEntered="StatusSplit_OnPointerEntered"
+                PointerExited="StatusSplit_OnPointerExited">
+                <Border
+                    x:Name="StatusColorFill"
+                    Padding="8,4"
+                    CornerRadius="4,0,0,4"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Stretch">
+                    <TextBlock
+                        x:Name="StatusText"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        TextTrimming="CharacterEllipsis"
+                        Foreground="White"
+                        Style="{StaticResource BodyStrongTextBlockStyle}" />
+                </Border>
+                <SplitButton.Flyout>
+                    <MenuFlyout Placement="Bottom">
+                        <MenuFlyoutItem x:Name="MenuToggle" Click="MenuToggle_OnClick" />
+                        <MenuFlyoutItem x:Name="MenuDelete" Click="MenuDelete_OnClick" />
+                    </MenuFlyout>
+                </SplitButton.Flyout>
+            </SplitButton>
+            <ProgressRing
+                x:Name="BusyRing"
+                Width="20"
+                Height="20"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                IsActive="True"
+                Visibility="Collapsed" />
+        </Grid>
+    </StackPanel>
+</UserControl>

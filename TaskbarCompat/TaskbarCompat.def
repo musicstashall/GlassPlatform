@@ -1,0 +1,17 @@
+LIBRARY "TaskbarCompat"
+
+EXPORTS
+    TaskbarCompat_Initialize
+    TaskbarCompat_Shutdown
+    TaskbarCompat_IsShutdownComplete
+    TaskbarCompat_HandleWinEvent
+    TaskbarCompat_NotifyContentBridgeWindow
+    TaskbarCompat_NotifyTrayTrackBarHwnd
+    TaskbarCompat_ReapplyXamlBackgroundPatches
+    TaskbarCompat_ReloadSettingsAndReapply
+    TaskbarCompat_ReleaseTrayIxdeSurfaceInterest
+    TaskbarCompat_ResetIxdeSchedulingAfterFailure
+    TaskbarCompat_DebugComState
+
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

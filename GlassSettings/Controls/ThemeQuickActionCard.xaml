@@ -1,0 +1,58 @@
+<UserControl
+    x:Class="GlassSettings.Controls.ThemeQuickActionCard"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Border
+        x:Name="RootBorder"
+        MinHeight="{StaticResource GlassSettingsSectionRowMinHeight}"
+        Padding="12,14"
+        HorizontalAlignment="Stretch"
+        Background="Transparent"
+        BorderBrush="Transparent"
+        BorderThickness="1"
+        CornerRadius="8"
+        PointerEntered="RootBorder_OnPointerEntered"
+        PointerExited="RootBorder_OnPointerExited"
+        PointerPressed="RootBorder_OnPointerPressed"
+        PointerReleased="RootBorder_OnPointerReleased">
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="CommonStates">
+                <VisualState x:Name="Normal" />
+                <VisualState x:Name="PointerOver">
+                    <VisualState.Setters>
+                        <Setter Target="RootBorder.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                        <Setter Target="RootBorder.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+        <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <FontIcon
+                x:Name="IconGlyph"
+                VerticalAlignment="Center"
+                FontSize="{StaticResource GlassSettingsSectionIconSize}"
+                Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+            <Grid Grid.Column="1" VerticalAlignment="Center" MaxHeight="44">
+                <StackPanel Spacing="2">
+                    <TextBlock
+                        x:Name="TitleText"
+                        MaxLines="1"
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
+                    <TextBlock
+                        x:Name="DescriptionText"
+                        MaxLines="1"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

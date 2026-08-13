@@ -1,0 +1,15 @@
+<UserControl
+    x:Class="GlassSettings.Controls.GlassAlphaColorPicker"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ColorPicker
+        x:Name="Picker"
+        ColorSpectrumShape="Box"
+        IsMoreButtonVisible="True"
+        IsColorSliderVisible="True"
+        IsColorChannelTextInputVisible="False"
+        IsHexInputVisible="True"
+        IsAlphaEnabled="True"
+        IsAlphaSliderVisible="True"
+        IsAlphaTextInputVisible="True" />
+</UserControl>

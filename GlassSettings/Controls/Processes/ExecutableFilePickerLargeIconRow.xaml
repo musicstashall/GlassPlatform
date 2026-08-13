@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.Processes.ExecutableFilePickerLargeIconRow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    HorizontalAlignment="Stretch"
+    VerticalAlignment="Stretch">
+    <Grid
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+        Width="112"
+        RowSpacing="4">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="96" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Border
+            Width="96"
+            Height="96"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="4">
+            <Grid>
+                <FontIcon
+                    x:Name="IconFallback"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    FontSize="36"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Glyph="&#xE8A5;" />
+                <Image
+                    x:Name="IconImage"
+                    Margin="2"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Stretch="Uniform"
+                    Visibility="Collapsed" />
+            </Grid>
+        </Border>
+        <TextBlock
+            x:Name="TitleText"
+            Grid.Row="1"
+            Width="112"
+            MaxHeight="40"
+            MaxLines="2"
+            HorizontalAlignment="Center"
+            TextAlignment="Center"
+            TextTrimming="CharacterEllipsis"
+            TextWrapping="Wrap"
+            Style="{StaticResource CaptionTextBlockStyle}" />
+    </Grid>
+</UserControl>

@@ -1,0 +1,117 @@
+<Page
+    x:Class="GlassSettings.Pages.Glass.PopupHubPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls">
+    <ctrl:SettingsPageShell>
+        <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+            <StackPanel x:Name="PageTopNotices" Spacing="{StaticResource SettingsCardSpacing}">
+                <ctrl:SettingsInfoBlock
+                    x:Name="OpenGlassBorderNotice"
+                    Visibility="Collapsed" />
+                <ctrl:SettingsInfoBlock
+                    x:Name="DwmSystemBackdropNotice"
+                    Visibility="Collapsed" />
+            </StackPanel>
+            <ctrl:PopupScopeSegmentBar
+                x:Name="ScopeBar"
+                ScopeChanged="ScopeBar_OnScopeChanged" />
+            <Grid x:Name="ScopeContentHost">
+                <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                    <Pivot
+                        x:Name="PopupPivot"
+                        Visibility="Collapsed"
+                        SelectionChanged="PopupPivot_OnSelectionChanged">
+                        <Pivot.Resources>
+                            <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                        </Pivot.Resources>
+                        <PivotItem Tag="Menu" />
+                        <PivotItem Tag="DropDown" />
+                        <PivotItem Tag="ToolTip" />
+                    </Pivot>
+                    <Grid x:Name="TabContentHost">
+                        <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                            <ctrl:SettingsFlatGateRow
+                                x:Name="EffectRow"
+                                GateToggled="EffectGate_OnToggled" />
+                            <ctrl:SettingsSystemGateExpander
+                                x:Name="GradientExpander"
+                                GateToggled="GradientGate_OnToggled">
+                                <ctrl:SettingsColorPickerPanel x:Name="GradientPanel">
+                                    <ctrl:GlassAlphaColorPicker x:Name="GradientPicker" />
+                                </ctrl:SettingsColorPickerPanel>
+                            </ctrl:SettingsSystemGateExpander>
+                            <ctrl:SettingsSystemGateExpander
+                                x:Name="BorderExpander"
+                                GateToggled="BorderGate_OnToggled">
+                                <ctrl:SettingsColorPickerPanel x:Name="BorderPanel">
+                                    <ctrl:GlassAlphaColorPicker x:Name="BorderPicker" />
+                                </ctrl:SettingsColorPickerPanel>
+                            </ctrl:SettingsSystemGateExpander>
+                            <ctrl:SettingsFlatGateRow
+                                x:Name="CornerRow"
+                                GateToggled="CornersGate_OnToggled" />
+                            <ctrl:SettingsSystemGateExpander
+                                x:Name="AnimationExpander"
+                                GateToggled="AnimGate_OnToggled">
+                                <ctrl:SettingsParameterPanel x:Name="AnimationPanel" />
+                            </ctrl:SettingsSystemGateExpander>
+                            <ctrl:SettingsDividerExpander
+                                x:Name="MenuAdvancedExpander"
+                                Visibility="Collapsed"
+                                Expanded="MenuAdvancedExpander_OnExpanded">
+                                <StackPanel x:Name="MenuAdvancedPanel" Spacing="{StaticResource SettingsCardSpacing}">
+                                    <ctrl:SettingsSystemGateExpander
+                                        x:Name="MenuGeneralSettingsExpander"
+                                        GateToggled="MenuGeneralSettingsExpander_OnGateToggled">
+                                        <ctrl:SettingsColorPickerPanel
+                                            x:Name="MenuGeneralPanel"
+                                            DefaultColorClick="MenuGeneralPanel_OnDefaultClick">
+                                            <ctrl:GlassAlphaColorPicker x:Name="MenuIconPicker" IsAlphaVisible="False" />
+                                        </ctrl:SettingsColorPickerPanel>
+                                    </ctrl:SettingsSystemGateExpander>
+                                    <Pivot
+                                        x:Name="MenuItemPivot"
+                                        SelectionChanged="MenuItemPivot_OnSelectionChanged">
+                                        <Pivot.Resources>
+                                            <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                                        </Pivot.Resources>
+                                        <PivotItem Tag="Hot" />
+                                        <PivotItem Tag="DisabledHot" />
+                                        <PivotItem Tag="Focusing" />
+                                        <PivotItem Tag="Separator" />
+                                    </Pivot>
+                                    <Grid x:Name="MenuItemTabHost">
+                                        <ctrl:SettingsSystemGateExpander
+                                            x:Name="MenuItemExpander"
+                                            GateToggled="MenuItemExpander_OnGateToggled">
+                                            <ctrl:SettingsColorPickerPanel
+                                                x:Name="MenuItemPanel"
+                                                DefaultColorClick="MenuItemPanel_OnDefaultClick">
+                                                <ctrl:GlassAlphaColorPicker x:Name="MenuItemPicker" />
+                                            </ctrl:SettingsColorPickerPanel>
+                                        </ctrl:SettingsSystemGateExpander>
+                                    </Grid>
+                                </StackPanel>
+                            </ctrl:SettingsDividerExpander>
+                            <ctrl:SettingsDividerExpander
+                                x:Name="TooltipAdvancedExpander"
+                                Visibility="Collapsed"
+                                Expanded="TooltipAdvancedExpander_OnExpanded">
+                                <ctrl:SettingsSystemGateExpander
+                                    x:Name="TooltipRenderingExpander"
+                                    GateToggled="TooltipRenderingExpander_OnGateToggled">
+                                    <ctrl:SettingsColorPickerPanel
+                                        x:Name="TooltipRenderingPanel"
+                                        DefaultColorClick="TooltipRenderingPanel_OnDefaultClick">
+                                        <ctrl:GlassAlphaColorPicker x:Name="TooltipRenderingPicker" IsAlphaVisible="False" />
+                                    </ctrl:SettingsColorPickerPanel>
+                                </ctrl:SettingsSystemGateExpander>
+                            </ctrl:SettingsDividerExpander>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Grid>
+        </StackPanel>
+    </ctrl:SettingsPageShell>
+</Page>

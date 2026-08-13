@@ -1,0 +1,843 @@
+#include "CompatPch.h"
+#include "GlassCompat.h"
+#include "HostPidHelper.h"
+#include "HostShellWatchdog.h"
+#include "CoreWindowHostInject.h"
+#include "AttachList.h"
+#include <GlassPlatformTask.h>
+#include <Helpers/DwmGlassOpacity.h>
+#include <OpenGlassDwmPolicy.h>
+#include <PlatformPresenceMonitor.h>
+#include <RootRegistryMigration.h>
+#include <PlatformPresenceState.h>
+#include <InjectProcessMap.h>
+#include <OpenGlassHostCommand.h>
+#include <ProcessBlockList.h>
+#include <TrayXamlPolicyMap.h>
+#include <ReloadRenderFlags.h>
+#include <windows.h>
+#include <sddl.h>
+#include <string>
+
+#ifndef WM_DWMCOLORIZATIONCOLORCHANGED
+#define WM_DWMCOLORIZATIONCOLORCHANGED 0x0320
+#endif
+
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+#include <GlassLogClient.h>
+#endif
+
+// ---- Внешнее объявление колбэка, определённого в GlassCompat.cpp ----
+extern "C" void CALLBACK GlassCompat_WinEventProc(
+    HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD);
+
+namespace
+{
+    static HWINEVENTHOOK g_globalHook = nullptr;
+    // Отдельный хук: смена переднего плана порождает событие в процессе окна с фокусом (INCONTEXT),
+    // минуя UIPI «высокий хост → низкий клиент» для SendMessage/NotifyWinEvent.
+    static HWINEVENTHOOK g_foregroundWinEventHook = nullptr;
+    // CREATE..SHOW не покрывает UNCLOAKED (0x8018): ShellHost QS Attach на cloaked SHOW
+    // видит пустое XAML-дерево; патч — на UNCLOAKED (см. WinEventHandler).
+    static HWINEVENTHOOK g_uncloakWinEventHook = nullptr;
+
+    // Хэндл именованного file mapping с PID хоста.
+    // Не закрываем до ClearHostPid — объект маппинга должен оставаться
+    // живым всё время работы хоста, иначе ReadHostPid() в других процессах
+    // (и в самом хосте) вернёт 0, и хост инжектирует сам себя.
+    static HANDLE s_hostPidMapping = nullptr;
+    static HANDLE s_reloadSemaphore = nullptr;
+    static HANDLE s_reloadGenMapping = nullptr;
+    static HANDLE s_reloadFlagsMapping = nullptr;
+    static HANDLE s_reloadScopeMapping = nullptr;
+    static HANDLE s_trayXamlPolicyMapping = nullptr;
+    // Manual-reset: хост выставляет в done: перед CloseHandle(mutex).
+    static HANDLE s_hostShutdownEvent = nullptr;
+
+    static void StopLogClientForShortLivedMain() noexcept
+    {
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+        Shared::Log::GlassLogClient::Instance().Stop();
+#endif
+    }
+
+    static void SignalHostShutdownComplete() noexcept
+    {
+        if (s_hostShutdownEvent)
+            SetEvent(s_hostShutdownEvent);
+    }
+
+    static void CloseHostShutdownEvent() noexcept
+    {
+        if (s_hostShutdownEvent)
+        {
+            CloseHandle(s_hostShutdownEvent);
+            s_hostShutdownEvent = nullptr;
+        }
+    }
+
+    [[nodiscard]] static bool CreateReloadRenderResources(SECURITY_ATTRIBUTES* pSa) noexcept
+    {
+        s_reloadGenMapping = CreateFileMappingW(
+            INVALID_HANDLE_VALUE,
+            pSa,
+            PAGE_READWRITE,
+            0,
+            sizeof(DWORD),
+            kReloadGenerationMappingName);
+
+        if (!s_reloadGenMapping)
+            return false;
+
+        void* pView = MapViewOfFile(s_reloadGenMapping, FILE_MAP_WRITE, 0, 0, sizeof(DWORD));
+        if (pView)
+        {
+            *static_cast<DWORD*>(pView) = 0;
+            UnmapViewOfFile(pView);
+        }
+
+        s_reloadFlagsMapping = CreateFileMappingW(
+            INVALID_HANDLE_VALUE,
+            pSa,
+            PAGE_READWRITE,
+            0,
+            sizeof(DWORD),
+            kReloadRenderFlagsMappingName);
+        if (!s_reloadFlagsMapping)
+        {
+            CloseHandle(s_reloadGenMapping);
+            s_reloadGenMapping = nullptr;
+            return false;
+        }
+
+        void* pFlagsView = MapViewOfFile(s_reloadFlagsMapping, FILE_MAP_WRITE, 0, 0, sizeof(DWORD));
+        if (pFlagsView)
+        {
+            *static_cast<DWORD*>(pFlagsView) = kReloadRenderFlagAll;
+            UnmapViewOfFile(pFlagsView);
+        }
+
+        s_reloadScopeMapping = CreateFileMappingW(
+            INVALID_HANDLE_VALUE,
+            pSa,
+            PAGE_READWRITE,
+            0,
+            sizeof(DWORD),
+            kReloadRootLiveScopeMappingName);
+        if (!s_reloadScopeMapping)
+        {
+            CloseHandle(s_reloadFlagsMapping);
+            s_reloadFlagsMapping = nullptr;
+            CloseHandle(s_reloadGenMapping);
+            s_reloadGenMapping = nullptr;
+            return false;
+        }
+
+        void* pScopeView = MapViewOfFile(s_reloadScopeMapping, FILE_MAP_WRITE, 0, 0, sizeof(DWORD));
+        if (pScopeView)
+        {
+            *static_cast<DWORD*>(pScopeView) = 0;
+            UnmapViewOfFile(pScopeView);
+        }
+
+        s_reloadSemaphore = CreateSemaphoreW(pSa, 0, 65535, kReloadRenderSemaphoreName);
+        if (!s_reloadSemaphore)
+        {
+            CloseHandle(s_reloadFlagsMapping);
+            s_reloadFlagsMapping = nullptr;
+            CloseHandle(s_reloadGenMapping);
+            s_reloadGenMapping = nullptr;
+            return false;
+        }
+        return true;
+    }
+
+    static void CloseReloadRenderResources() noexcept
+    {
+        if (s_reloadSemaphore)
+        {
+            CloseHandle(s_reloadSemaphore);
+            s_reloadSemaphore = nullptr;
+        }
+        if (s_reloadFlagsMapping)
+        {
+            CloseHandle(s_reloadFlagsMapping);
+            s_reloadFlagsMapping = nullptr;
+        }
+        if (s_reloadScopeMapping)
+        {
+            CloseHandle(s_reloadScopeMapping);
+            s_reloadScopeMapping = nullptr;
+        }
+        if (s_reloadGenMapping)
+        {
+            CloseHandle(s_reloadGenMapping);
+            s_reloadGenMapping = nullptr;
+        }
+        Shared::TrayXamlPolicyMap::CloseHost(&s_trayXamlPolicyMapping);
+    }
+
+    static void SignalReloadRender(DWORD flags) noexcept
+    {
+        // AppContainer UICompat: актуальный Tray\Xaml snapshot до сигнала reload.
+        (void)Shared::TrayXamlPolicyMap::Publish(&s_trayXamlPolicyMapping);
+
+        HANDLE hSem = OpenSemaphoreW(SEMAPHORE_MODIFY_STATE | SYNCHRONIZE, FALSE, kReloadRenderSemaphoreName);
+        HANDLE hMap = OpenFileMappingW(FILE_MAP_WRITE, FALSE, kReloadGenerationMappingName);
+        HANDLE hFlagsMap = OpenFileMappingW(FILE_MAP_WRITE, FALSE, kReloadRenderFlagsMappingName);
+        if (hSem && hMap)
+        {
+            while (WaitForSingleObject(hSem, 0) == WAIT_OBJECT_0)
+            {
+            }
+            if (hFlagsMap)
+            {
+                void* pFlagsView = MapViewOfFile(hFlagsMap, FILE_MAP_WRITE, 0, 0, sizeof(DWORD));
+                if (pFlagsView)
+                {
+                    *static_cast<DWORD*>(pFlagsView) = flags;
+                    UnmapViewOfFile(pFlagsView);
+                }
+            }
+            void* pView = MapViewOfFile(hMap, FILE_MAP_WRITE, 0, 0, sizeof(DWORD));
+            if (pView)
+            {
+                InterlockedIncrement(reinterpret_cast<LONG*>(pView));
+                UnmapViewOfFile(pView);
+            }
+            constexpr LONG kGuiThreadReleaseBudget = 512;
+            (void)ReleaseSemaphore(hSem, kGuiThreadReleaseBudget, nullptr);
+        }
+        if (hFlagsMap)
+            CloseHandle(hFlagsMap);
+        if (hSem)
+            CloseHandle(hSem);
+        if (hMap)
+            CloseHandle(hMap);
+    }
+
+    static void WriteHostPid(DWORD pid) noexcept
+    {
+        // H52: AppContainer SEH не читал NULL DACL → ReadHostPid=0 (лог cw_defer reason:1 PidMissing).
+        SECURITY_ATTRIBUTES sa{};
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = FALSE;
+
+        PSECURITY_DESCRIPTOR sd = nullptr;
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                L"D:(A;;GA;;;WD)(A;;GA;;;AC)",
+                SDDL_REVISION_1,
+                &sd,
+                nullptr)
+            || !sd)
+        {
+            sd = reinterpret_cast<PSECURITY_DESCRIPTOR>(
+                LocalAlloc(LPTR, SECURITY_DESCRIPTOR_MIN_LENGTH));
+            if (sd)
+            {
+                InitializeSecurityDescriptor(sd, SECURITY_DESCRIPTOR_REVISION);
+                SetSecurityDescriptorDacl(sd, TRUE, nullptr, FALSE);
+            }
+        }
+        sa.lpSecurityDescriptor = sd;
+
+        HANDLE hMap = CreateFileMappingW(
+            INVALID_HANDLE_VALUE,
+            sd ? &sa : nullptr,
+            PAGE_READWRITE,
+            0, sizeof(DWORD),
+            kHostPidMappingName);
+
+        // CreateFileMapping на существующий объект игнорирует новый SD — выставим ACL явно.
+        if (hMap && sd)
+        {
+            PACL pDacl = nullptr;
+            BOOL daclPresent = FALSE, daclDefaulted = FALSE;
+            if (GetSecurityDescriptorDacl(sd, &daclPresent, &pDacl, &daclDefaulted) && daclPresent)
+            {
+                (void)SetNamedSecurityInfoW(
+                    const_cast<LPWSTR>(kHostPidMappingName),
+                    SE_KERNEL_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    nullptr,
+                    nullptr,
+                    pDacl,
+                    nullptr);
+            }
+        }
+
+        if (sd) LocalFree(sd);
+
+        if (!hMap)
+            return;
+
+        void* pView = MapViewOfFile(hMap, FILE_MAP_WRITE, 0, 0, sizeof(DWORD));
+        if (pView)
+        {
+            *static_cast<DWORD*>(pView) = pid;
+            UnmapViewOfFile(pView);
+        }
+
+        // Намеренно НЕ закрываем hMap — именованный объект живёт пока жив хотя бы
+        // один хэндл. Закроем в ClearHostPid при завершении хоста.
+        s_hostPidMapping = hMap;
+    }
+
+    // Имя exe (нижний регистр, только имя файла) для фильтра ProcessBlockList при стартовом пинге.
+    [[nodiscard]] static std::wstring QueryExeBaseNameLower(DWORD pid) noexcept
+    {
+        HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (!hProc)
+            return {};
+
+        wchar_t path[MAX_PATH]{};
+        DWORD sz = MAX_PATH;
+        if (!QueryFullProcessImageNameW(hProc, 0, path, &sz))
+        {
+            CloseHandle(hProc);
+            return {};
+        }
+        CloseHandle(hProc);
+
+        std::wstring full(path);
+        const size_t slash = full.find_last_of(L"\\/");
+        if (slash != std::wstring::npos)
+            full.erase(0, slash + 1);
+        if (!full.empty())
+            CharLowerBuffW(full.data(), static_cast<DWORD>(full.size()));
+        return full;
+    }
+
+    // Стартовый пинг: у elevated-хоста UIPI часто блокирует SendMessageTimeout(WM_GETOBJECT) в medium-IL
+    // приложениях — инжекция не происходит. PostMessage(WM_NULL) иногда проходит; надёжнее сочетать с
+    // глобальным хуком EVENT_SYSTEM_FOREGROUND (см. Main /start) — колбэк приходит уже в целевом процессе.
+    static void WinEventStartupPingTopLevelWindows() noexcept
+    {
+        struct PingContext
+        {
+            unsigned stimulated = 0;
+            unsigned maxStimulate = 16384;
+            DWORD selfPid = 0;
+        } ctx;
+        ctx.selfPid = GetCurrentProcessId();
+
+        ProcessBlockList::Initialize();
+
+        constexpr UINT kGetObjectTimeoutMs = 40;
+        constexpr UINT kSmto = SMTO_ABORTIFHUNG | SMTO_NOTIMEOUTIFNOTHUNG;
+
+        (void)EnumWindows(
+            [](HWND hwnd, LPARAM lp) -> BOOL
+            {
+                auto* p = reinterpret_cast<PingContext*>(lp);
+                if (!p || p->stimulated >= p->maxStimulate)
+                    return FALSE;
+                if (!IsWindow(hwnd))
+                    return TRUE;
+                if (!IsWindowVisible(hwnd))
+                    return TRUE;
+                if (IsIconic(hwnd))
+                    return TRUE;
+
+                DWORD pid = 0;
+                (void)GetWindowThreadProcessId(hwnd, &pid);
+                if (!pid || pid == p->selfPid)
+                    return TRUE;
+
+                const std::wstring exe = QueryExeBaseNameLower(pid);
+                if (!exe.empty() && ProcessBlockList::IsBlocked(exe))
+                    return TRUE;
+
+                (void)PostMessageW(hwnd, WM_NULL, 0, 0);
+
+                DWORD_PTR answer = 0;
+                (void)SendMessageTimeoutW(
+                    hwnd,
+                    WM_GETOBJECT,
+                    0,
+                    static_cast<LPARAM>(OBJID_CLIENT),
+                    kSmto,
+                    kGetObjectTimeoutMs,
+                    &answer);
+                ++p->stimulated;
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&ctx));
+
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+        DebugLog(DBG_IMPORTANT,
+            L"[GlassCompat][Host] WinEvent startup ping: PostMessage(WM_NULL)+WM_GETOBJECT per top-level count=%u (cap=%u)",
+            ctx.stimulated,
+            ctx.maxStimulate);
+#endif
+    }
+
+    static void ClearHostPid() noexcept
+    {
+        if (!s_hostPidMapping)
+            return;
+
+        void* pView = MapViewOfFile(s_hostPidMapping, FILE_MAP_WRITE, 0, 0, sizeof(DWORD));
+        if (pView)
+        {
+            *static_cast<DWORD*>(pView) = 0;
+            UnmapViewOfFile(pView);
+        }
+        CloseHandle(s_hostPidMapping);
+        s_hostPidMapping = nullptr;
+    }
+
+    static std::wstring ToWide(const char* s) noexcept
+    {
+        if (!s || !*s) return {};
+        int len = MultiByteToWideChar(CP_ACP, 0, s, -1, nullptr, 0);
+        if (len <= 0) return {};
+        std::wstring w(len - 1, 0);
+        MultiByteToWideChar(CP_ACP, 0, s, -1, w.data(), len);
+        return w;
+    }
+
+    [[nodiscard]] static bool ThemeMessageSuggestsDwmPolicyReload(UINT msg, LPARAM lParam) noexcept
+    {
+        if (msg == WM_THEMECHANGED)
+            return true;
+        if (msg != WM_SETTINGCHANGE)
+            return false;
+        const wchar_t* s = reinterpret_cast<const wchar_t*>(lParam);
+        if (!s)
+            return true;
+        return _wcsicmp(s, L"ImmersiveColorSet") == 0;
+    }
+    [[nodiscard]] static bool ColorMessageSuggestsDwmPolicyReload(
+        UINT msg,
+        WPARAM wParam,
+        LPARAM lParam) noexcept
+    {
+        if (msg == WM_DWMCOLORIZATIONCOLORCHANGED)
+        {
+            return !Shared::DwmGlassOpacity::IsGeneratedDwmColorizationWave(
+                wParam,
+                lParam);
+        }
+        return ThemeMessageSuggestsDwmPolicyReload(msg, lParam);
+    }
+} // anonymous namespace
+
+// ============================================================
+// Экспорт Main для Rundll32:
+//   Rundll32.exe "path\GlassCompat.dll",Main /start
+//   Rundll32.exe "path\GlassCompat.dll",Main /stop
+//   Rundll32.exe "path\GlassCompat.dll",Main /reloadRender
+//   Rundll32.exe "path\GlassCompat.dll",Main /shellStartPlatform
+// ============================================================
+extern "C" __declspec(dllexport)
+void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
+{
+    std::wstring cmd = ToWide(lpszCmdLine);
+
+    const bool isStop = (cmd.find(L"/stop")  != std::wstring::npos ||
+                         cmd.find(L"-stop")  != std::wstring::npos);
+
+    if (isStop)
+    {
+        StopLogClientForShortLivedMain();
+        HANDLE hEvt = OpenEventW(EVENT_MODIFY_STATE, FALSE, kStopEventName);
+        if (hEvt)
+        {
+            SetEvent(hEvt);
+            CloseHandle(hEvt);
+        }
+        return;
+    }
+
+    const bool isReloadTaskbarSwca =
+        cmd.find(L"/reloadRenderTaskbarSwca") != std::wstring::npos ||
+        cmd.find(L"-reloadRenderTaskbarSwca") != std::wstring::npos;
+    const bool isReloadTaskbarXaml =
+        cmd.find(L"/reloadRenderTaskbarXaml") != std::wstring::npos ||
+        cmd.find(L"-reloadRenderTaskbarXaml") != std::wstring::npos;
+    const bool isReloadTaskbarBoth =
+        cmd.find(L"/reloadRenderTaskbarBoth") != std::wstring::npos ||
+        cmd.find(L"-reloadRenderTaskbarBoth") != std::wstring::npos;
+    const bool isReloadRenderCommit =
+        cmd.find(L"/reloadRenderCommit") != std::wstring::npos ||
+        cmd.find(L"-reloadRenderCommit") != std::wstring::npos;
+    const bool isReloadRender =
+        cmd.find(L"/reloadRender") != std::wstring::npos ||
+        cmd.find(L"-reloadRender") != std::wstring::npos;
+
+    if (isReloadTaskbarSwca)
+    {
+        SignalReloadRender(kReloadRenderFlagTaskbarSwca);
+        StopLogClientForShortLivedMain();
+        return;
+    }
+    if (isReloadTaskbarXaml)
+    {
+        SignalReloadRender(kReloadRenderFlagTaskbarXaml);
+        StopLogClientForShortLivedMain();
+        return;
+    }
+    if (isReloadTaskbarBoth)
+    {
+        SignalReloadRender(kReloadRenderFlagTaskbarBoth);
+        StopLogClientForShortLivedMain();
+        return;
+    }
+    if (isReloadRenderCommit)
+    {
+        SignalReloadRender(kReloadRenderFlagGlassSettingsCommit);
+        StopLogClientForShortLivedMain();
+        return;
+    }
+    if (isReloadRender)
+    {
+        SignalReloadRender(kReloadRenderFlagAll);
+        StopLogClientForShortLivedMain();
+        return;
+    }
+
+    const bool isShellStartPlatform = (cmd.find(L"/shellStartPlatform") != std::wstring::npos ||
+                                       cmd.find(L"-shellStartPlatform") != std::wstring::npos);
+    if (isShellStartPlatform)
+    {
+        // Один повышенный вызов из GlassShellExt: при необходимости /ENABLE и запуск задачи/хоста.
+        if (GlassShared::GlassPlatformTask::IsGlassPlatformRunning())
+        {
+            StopLogClientForShortLivedMain();
+            return;
+        }
+
+        const auto ui = GlassShared::GlassPlatformTask::QueryGlassAutorunUiState();
+        if (ui == GlassShared::GlassPlatformTask::AutorunUiState::NoTask)
+        {
+            StopLogClientForShortLivedMain();
+            return;
+        }
+
+        if (ui == GlassShared::GlassPlatformTask::AutorunUiState::Disabled)
+            (void)GlassShared::GlassPlatformTask::SetGlassAutorunTaskSchedulerEnabled(true);
+
+        GlassShared::GlassPlatformTask::StartPlatform();
+        StopLogClientForShortLivedMain();
+        return;
+    }
+
+    // ---- /start ----
+
+    // Проверяем одиночный экземпляр
+    HANDLE hMutex = CreateMutexW(nullptr, FALSE, kInstanceMutexName);
+    if (!hMutex) return;
+
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        CloseHandle(hMutex);
+        return; // уже запущен
+    }
+
+    // Публикуем PID хоста — WinEventProc в других процессах его прочитает
+    // и поймёт, что в хосте инициализация не нужна
+    WriteHostPid(GetCurrentProcessId());
+
+    Shared::OpenGlassDwmPolicy::ApplyDwmPolicyOnVisualStyleChange();
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+    DebugLog(DBG_IMPORTANT, L"[GlassCompat][Host] DWM policy on startup");
+#endif
+
+    // Stop/HostShutdown: WD+AC (как TrayXamlPolicy). NULL DACL не даёт AppContainer
+    // OpenEvent → SEH/SMEH не видят Stop → нет ExecuteShutdown/Restore/FreeSelf (H48).
+    SECURITY_ATTRIBUTES saEvt{};
+    saEvt.nLength = sizeof(saEvt);
+    saEvt.bInheritHandle = FALSE;
+
+    PSECURITY_DESCRIPTOR sdEvt = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:(A;;GA;;;WD)(A;;GA;;;AC)",
+            SDDL_REVISION_1,
+            &sdEvt,
+            nullptr)
+        || !sdEvt)
+    {
+        sdEvt = reinterpret_cast<PSECURITY_DESCRIPTOR>(
+            LocalAlloc(LPTR, SECURITY_DESCRIPTOR_MIN_LENGTH));
+        if (sdEvt)
+        {
+            InitializeSecurityDescriptor(sdEvt, SECURITY_DESCRIPTOR_REVISION);
+            SetSecurityDescriptorDacl(sdEvt, TRUE, nullptr, FALSE);
+        }
+    }
+    saEvt.lpSecurityDescriptor = sdEvt;
+
+    // SD живёт до конца создания именованных объектов; LocalFree раньше — UAF →
+    // CreateEventW(HostShutdown)/mapping часто падают, хост сразу выходит («не стартует»).
+    SECURITY_ATTRIBUTES* saPtr = sdEvt ? &saEvt : nullptr;
+
+    HANDLE hStopEvent = CreateEventW(saPtr, TRUE, FALSE, kStopEventName);
+    if (!hStopEvent)
+    {
+        if (sdEvt) LocalFree(sdEvt);
+        ClearHostPid();
+        CloseHandle(hMutex);
+        return;
+    }
+
+    s_hostShutdownEvent = CreateEventW(
+        saPtr,
+        TRUE,
+        FALSE,
+        GlassShared::GlassPlatformTask::kHostShutdownEventName);
+    if (!s_hostShutdownEvent)
+    {
+        CloseHandle(hStopEvent);
+        if (sdEvt) LocalFree(sdEvt);
+        ClearHostPid();
+        CloseHandle(hMutex);
+        return;
+    }
+
+    if (!CreateReloadRenderResources(saPtr))
+    {
+        CloseHandle(hStopEvent);
+        SignalHostShutdownComplete();
+        CloseHostShutdownEvent();
+        if (sdEvt) LocalFree(sdEvt);
+        ClearHostPid();
+        CloseHandle(hMutex);
+        return;
+    }
+
+    // Snapshot Tray XAML policy для AppContainer UICompat (до первого Refresh inject).
+    if (!Shared::TrayXamlPolicyMap::Publish(&s_trayXamlPolicyMapping))
+    {
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+        DebugLog(DBG_WARNING,
+            L"[GlassCompat][Host] TrayXamlPolicy map unavailable, GLE=%u — UICompat fallback to registry",
+            GetLastError());
+#endif
+    }
+
+    if (!Shared::PlatformPresenceState::CreateHostPresenceResources(saPtr))
+    {
+        CloseReloadRenderResources();
+        CloseHandle(hStopEvent);
+        SignalHostShutdownComplete();
+        CloseHostShutdownEvent();
+        if (sdEvt) LocalFree(sdEvt);
+        ClearHostPid();
+        CloseHandle(hMutex);
+        return;
+    }
+
+    if (!Shared::InjectProcessMap::CreateHostResources(saPtr))
+    {
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+        DebugLog(DBG_WARNING,
+            L"[GlassCompat][Host] InjectProcessMap unavailable, GLE=%u — host continues without inject map",
+            GetLastError());
+#endif
+    }
+
+    if (!Shared::OpenGlassHostCommand::CreateHostCommandResources(saPtr))
+    {
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+        DebugLog(DBG_WARNING,
+            L"[GlassCompat][Host] OpenGlassHostCommand IPC unavailable, GLE=%u — host continues without shell OG commands",
+            GetLastError());
+#endif
+    }
+
+    if (sdEvt)
+    {
+        LocalFree(sdEvt);
+        sdEvt = nullptr;
+        saEvt.lpSecurityDescriptor = nullptr;
+    }
+
+    Shared::RootRegistryMigration::MigrateLegacyRootBackDropType();
+    (void)Shared::PlatformPresenceMonitor::Start();
+
+    // Получаем HMODULE этого DLL (GlassCompat.dll)
+    HMODULE hSelf = nullptr;
+    GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(&GlassCompat_WinEventProc),
+        &hSelf);
+
+    // Устанавливаем глобальный INCONTEXT WinEvent-хук для всех процессов.
+    // Диапазон CREATE..SHOW: тултип (tooltips_class32) после скрытия получает WM_NCDESTROY
+    // и снимает субкласс; при следующем показе часто нет нового EVENT_OBJECT_CREATE —
+    // нужен EVENT_OBJECT_SHOW для повторного Tooltip_AttachIfNeeded (см. WinEventHandler).
+    g_globalHook = SetWinEventHook(
+        EVENT_OBJECT_CREATE,
+        EVENT_OBJECT_SHOW,
+        hSelf,
+        GlassCompat_WinEventProc,
+        0, 0,                     // все процессы, все потоки
+        WINEVENT_INCONTEXT
+    );
+
+    g_foregroundWinEventHook = SetWinEventHook(
+        EVENT_SYSTEM_FOREGROUND,
+        EVENT_SYSTEM_FOREGROUND,
+        hSelf,
+        GlassCompat_WinEventProc,
+        0,
+        0,
+        WINEVENT_INCONTEXT);
+
+    g_uncloakWinEventHook = SetWinEventHook(
+        EVENT_OBJECT_UNCLOAKED,
+        EVENT_OBJECT_UNCLOAKED,
+        hSelf,
+        GlassCompat_WinEventProc,
+        0,
+        0,
+        WINEVENT_INCONTEXT);
+
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+    if (!g_foregroundWinEventHook)
+        DebugLog(DBG_WARNING, L"[GlassCompat][Host] SetWinEventHook(EVENT_SYSTEM_FOREGROUND) failed, GLE=%u",
+            GetLastError());
+    if (!g_uncloakWinEventHook)
+        DebugLog(DBG_WARNING, L"[GlassCompat][Host] SetWinEventHook(EVENT_OBJECT_UNCLOAKED) failed, GLE=%u",
+            GetLastError());
+#endif
+
+    // Логируем полный список AttachList только в хосте — один раз при старте.
+    // В инжектированных процессах этот лог не нужен (они смотрят только свою запись).
+    AttachList::Initialize();
+    AttachList::LogAll();
+
+    if (g_globalHook || g_foregroundWinEventHook || g_uncloakWinEventHook)
+    {
+        WinEventStartupPingTopLevelWindows();
+        // Broadcast WM_NULL — лёгкий пинок очередей (как при shutdown), без гарантии WinEvent.
+        SendNotifyMessageW(HWND_BROADCAST, WM_NULL, 0, 0);
+    }
+
+    // AppContainer SEH/SMEH: глобальный hook (pid=0,tid=0) DLL не грузит — ACL + per-thread + LoadLibrary.
+    GlassCompat::CoreWindowHostInject::GrantPeerDllsAppPackagesAccess();
+    GlassCompat::CoreWindowHostInject::Refresh();
+
+    // Поток-страж остановки: ждёт stop event → PostQuitMessage в этот поток
+    const DWORD mainTid = GetCurrentThreadId();
+    HANDLE hWatchThread = CreateThread(nullptr, 0,
+        [](LPVOID param) -> DWORD
+        {
+            HANDLE hEvt = reinterpret_cast<HANDLE>(param);
+            WaitForSingleObject(hEvt, INFINITE);
+            PostThreadMessageW(*reinterpret_cast<DWORD*>(&param), WM_QUIT, 0, 0);
+            // Trick: encode mainTid in param is wrong — use a lambda capture instead.
+            return 0;
+        },
+        hStopEvent, 0, nullptr);
+
+    // Правильный способ: поток через явную структуру
+    if (hWatchThread) CloseHandle(hWatchThread);
+
+    // Простой, надёжный вариант: MsgWaitForMultipleObjects в цикле
+    MSG msg;
+    static ULONGLONG s_themePolicyDueMs = 0;
+    static ULONGLONG s_nextCoreWindowInjectMs = 0;
+    while (true)
+    {
+        DWORD r = MsgWaitForMultipleObjects(1, &hStopEvent, FALSE, 2000, QS_ALLINPUT);
+        if (r == WAIT_OBJECT_0)
+        {
+            break; // stop event
+        }
+
+        // Обрабатываем сообщения
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
+        {
+            if (msg.message == WM_QUIT)
+                goto done;
+            if (ColorMessageSuggestsDwmPolicyReload(msg.message, msg.wParam, msg.lParam))
+            {
+                s_themePolicyDueMs = GetTickCount64() + 300;
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+
+        if (s_themePolicyDueMs != 0 && GetTickCount64() >= s_themePolicyDueMs)
+        {
+            Shared::OpenGlassDwmPolicy::ApplyDwmPolicyOnVisualStyleChange();
+            // Publish TrayXamlPolicy + TaskbarCompat Recapture + UICompat theme brush refresh
+            // (не ClearValue-Recapture на общем TaskbarXaml — см. UiThemeBrushRefresh).
+            SignalReloadRender(
+                kReloadRenderFlagTaskbarBoth | kReloadRenderFlagUiThemeBrushRefresh);
+            s_themePolicyDueMs = 0;
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+            DebugLog(DBG_IMPORTANT,
+                L"[GlassCompat][Host] DWM policy + TaskbarBoth+UiThemeBrushRefresh "
+                L"on visual style change");
+#endif
+        }
+
+        const ULONGLONG now = GetTickCount64();
+        if (now >= s_nextCoreWindowInjectMs)
+        {
+            GlassCompat::CoreWindowHostInject::Refresh();
+            s_nextCoreWindowInjectMs = now + 3000;
+        }
+
+        GlassCompat::HostPollExplorerShellWatchdog();
+    }
+
+done:
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+    Shared::Log::GlassLogClient::Instance().Stop();
+#endif
+    {
+        const bool hadAnyHook =
+            (g_foregroundWinEventHook != nullptr
+             || g_globalHook != nullptr
+             || g_uncloakWinEventHook != nullptr);
+        ULONGLONG unhookResultMask = 0;
+        if (g_foregroundWinEventHook)
+        {
+            unhookResultMask |= UnhookWinEvent(g_foregroundWinEventHook) ? 0x1ULL : 0x100ULL;
+            g_foregroundWinEventHook = nullptr;
+        }
+        if (g_globalHook)
+        {
+            unhookResultMask |= UnhookWinEvent(g_globalHook) ? 0x2ULL : 0x200ULL;
+            g_globalHook = nullptr;
+        }
+        if (g_uncloakWinEventHook)
+        {
+            unhookResultMask |= UnhookWinEvent(g_uncloakWinEventHook) ? 0x4ULL : 0x400ULL;
+            g_uncloakWinEventHook = nullptr;
+        }
+        GlassCompat::CoreWindowHostInject::Shutdown();
+        BOOL broadcastResult = TRUE;
+        if (hadAnyHook)
+        {
+            // Стимулируем обработку очереди сообщений во всех GUI-процессах:
+            // ОС доставляет deferred FreeLibrary (от UnhookWinEvent) через очередь потока.
+            broadcastResult = SendNotifyMessageW(HWND_BROADCAST, WM_NULL, 0, 0);
+        }
+        // HR19: deferred INCONTEXT unhook в ShellHost/SEH — короткая пауза до ForceUnload.
+        if (hadAnyHook)
+            Sleep(300);
+        // BlockList MinimalUnloadWatcher ждёт HostShutdown — сигналим сразу после Unhook.
+        SignalHostShutdownComplete();
+        // H38: remote RequestShutdown для SEH/SMEH/ShellHost после HostShutdown;
+        // точечный residual-pin fallback ShellHost выполняется внутри CoreWindowHostInject.
+        GlassCompat::CoreWindowHostInject::ForceUnloadResiduals();
+    }
+
+    Shared::PlatformPresenceMonitor::Stop();
+    Shared::OpenGlassHostCommand::CloseHostCommandResources();
+    Shared::InjectProcessMap::CloseHostResources();
+    Shared::PlatformPresenceState::CloseHostPresenceResources();
+    ClearHostPid();
+    CloseReloadRenderResources();
+    CloseHandle(hStopEvent);
+    // H71: не CloseHostShutdownEvent здесь. Named event должен жить, пока жив процесс хоста:
+    // path=1 OpenEvent после COMPLETE (H70) иначе даёт WAIT_FAILED → FreeSelf при живом OS-pin.
+    // Handle закроется при выходе rundll32. Early-abort пути по-прежнему Close явно.
+    CloseHandle(hMutex);
+}

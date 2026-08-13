@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<UserControl
+
+    x:Class="GlassSettings.Controls.SettingsSystemGateExpander"
+
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+
+    xmlns:ctrl="using:GlassSettings.Controls"
+
+    HorizontalAlignment="Stretch"
+
+    HorizontalContentAlignment="Stretch">
+
+    <Expander
+
+        x:Name="RootExpander"
+
+        MinHeight="{StaticResource GlassSettingsSystemExpanderHeaderMinHeight}"
+
+        Padding="0"
+
+        HorizontalAlignment="Stretch"
+
+        HorizontalContentAlignment="Stretch"
+
+        Background="{ThemeResource LayerFillColorDefaultBrush}"
+
+        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+
+        BorderThickness="1"
+
+        CornerRadius="8"
+
+        IsExpanded="False">
+
+        <Expander.Resources>
+            <StaticResource x:Key="ExpanderHeaderBackground" ResourceKey="LayerFillColorDefaultBrush" />
+            <!-- Без expand: гасим WinUI header PointerOver; кастомный hover — только при CanExpandBody. -->
+            <StaticResource x:Key="ExpanderHeaderBackgroundPointerOver" ResourceKey="LayerFillColorDefaultBrush" />
+            <StaticResource x:Key="ExpanderHeaderBackgroundPressed" ResourceKey="LayerFillColorDefaultBrush" />
+        </Expander.Resources>
+
+        <Expander.Header>
+
+            <StackPanel HorizontalAlignment="Stretch" Spacing="8">
+
+                <ctrl:SpoilerHeaderGrid
+
+                    x:Name="HeaderChrome"
+
+                    HorizontalAlignment="Stretch"
+
+                    ShowChevron="True">
+
+                    <ctrl:GlassSettingsLabeledToggleSwitch
+
+                        x:Name="GateSwitch"
+
+                        Toggled="GateSwitch_OnToggled" />
+
+                </ctrl:SpoilerHeaderGrid>
+
+                <ContentControl
+
+                    x:Name="ActionsBelowHost"
+
+                    HorizontalAlignment="Stretch"
+
+                    HorizontalContentAlignment="Right"
+
+                    Visibility="Collapsed" />
+
+            </StackPanel>
+
+        </Expander.Header>
+
+        <Border
+
+            Padding="{StaticResource GlassSettingsSystemExpanderContentPadding}"
+
+            HorizontalAlignment="Stretch">
+
+            <ContentPresenter x:Name="BodyHost" />
+
+        </Border>
+
+    </Expander>
+
+</UserControl>
+

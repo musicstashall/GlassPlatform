@@ -1,0 +1,4 @@
+#include "resource.h"
+
+IDI_LOGVIEWER_SMALL ICON "small.ico"
+IDI_LOGVIEWER_BIG   ICON "small.ico"

@@ -1,0 +1,19 @@
+<UserControl
+    x:Class="GlassSettings.Controls.SwcaColorSection"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls"
+    xmlns:local="using:GlassSettings.Controls">
+    <Expander x:Name="RootExpander" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+        <Expander.Header>
+            <ctrl:SpoilerHeaderGrid x:Name="HeaderChrome" ShowChevron="False">
+                <ctrl:GlassSettingsLabeledToggleSwitch
+                    x:Name="EnableSwitch"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Toggled="EnableSwitch_OnToggled" />
+            </ctrl:SpoilerHeaderGrid>
+        </Expander.Header>
+        <local:GlassAlphaColorPicker x:Name="ColorPicker" Margin="0,8,0,0" />
+    </Expander>
+</UserControl>

@@ -1,0 +1,16 @@
+LIBRARY "UICompat"
+
+EXPORTS
+    UICompat_Initialize
+    UICompat_Shutdown
+    UICompat_IsShutdownComplete
+    UICompat_HandleWinEvent
+    UICompat_NotifyCoreWindow
+    UICompat_NotifyShellSurfaceWindow
+    UICompat_ReloadSettingsAndReapply
+    UICompat_ReleaseIxdeSurfaceInterest
+    UICompat_ResetIxdeSchedulingAfterFailure
+    UICompat_DebugComState
+
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="GlassSettings.Pages.ThemesDesktopBackgroundPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls">
+    <ctrl:SettingsPageShell x:Name="PageShell">
+        <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+            <ctrl:ThemeHeroPreview
+                x:Name="HeroPreview"
+                HorizontalAlignment="Left" />
+
+            <ctrl:SettingsSystemGateExpander
+                x:Name="PersonalizeExpander"
+                DimHeaderActionsWithGate="False"
+                ShowGateSwitch="False"
+                AllowBodyExpand="True"
+                IsExpanded="True">
+                <Grid x:Name="ModeBodiesHost">
+                    <StackPanel x:Name="PhotoBody" Spacing="16">
+                        <StackPanel x:Name="RecentStrip" Spacing="8">
+                            <TextBlock
+                                x:Name="RecentImagesLabel"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                TextWrapping="WrapWholeWords" />
+                            <StackPanel
+                                x:Name="RecentTilesHost"
+                                Orientation="Horizontal"
+                                Spacing="3">
+                                <StackPanel.ChildrenTransitions>
+                                    <TransitionCollection>
+                                        <RepositionThemeTransition />
+                                    </TransitionCollection>
+                                </StackPanel.ChildrenTransitions>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Grid x:Name="BrowseRow" MinHeight="40" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                x:Name="ChoosePhotoLabel"
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                TextWrapping="WrapWholeWords" />
+                            <Button
+                                x:Name="BrowsePhotosButton"
+                                Grid.Column="1"
+                                MinWidth="125"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Right"
+                                Click="BrowsePhotosButton_OnClick"
+                                Style="{StaticResource DefaultButtonStyle}" />
+                        </Grid>
+
+                        <Grid x:Name="PhotoFitRow" MinHeight="40" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                x:Name="ChooseFitLabel"
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                TextWrapping="WrapWholeWords" />
+                            <ComboBox
+                                x:Name="PhotoFitCombo"
+                                Grid.Column="1"
+                                MinWidth="125"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Right"
+                                SelectionChanged="FitCombo_OnSelectionChanged" />
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel x:Name="SlideshowBody" Spacing="12" Visibility="Collapsed">
+                        <Grid MinHeight="40" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                x:Name="SlideshowAlbumLabel"
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                TextWrapping="WrapWholeWords" />
+                            <ComboBox
+                                x:Name="SlideshowAlbumSourceCombo"
+                                Grid.Column="1"
+                                MinWidth="200"
+                                MaxWidth="280"
+                                VerticalAlignment="Center"
+                                SelectionChanged="SlideshowAlbumSourceCombo_OnSelectionChanged" />
+                            <Button
+                                x:Name="BrowseAlbumButton"
+                                Grid.Column="2"
+                                MinWidth="125"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Right"
+                                Click="BrowseAlbumButton_OnClick"
+                                Style="{StaticResource DefaultButtonStyle}" />
+                        </Grid>
+
+                        <!-- Host на всю ширину строки: клип не режет слайд по правому краю кнопки. -->
+                        <Grid
+                            x:Name="SlideshowFolderAnimHost"
+                            HorizontalAlignment="Stretch"
+                            SizeChanged="SlideshowFolderAnimHost_OnSizeChanged">
+                            <Grid
+                                x:Name="SlideshowFolderAnimLayer"
+                                HorizontalAlignment="Left">
+                                <Button
+                                    x:Name="SlideshowFolderRow"
+                                    MinWidth="200"
+                                    HorizontalAlignment="Left"
+                                    HorizontalContentAlignment="Left"
+                                    Padding="8,6"
+                                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Visibility="Collapsed"
+                                    Click="SlideshowFolderRow_OnClick">
+                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                        <Image
+                                            x:Name="SlideshowFolderIcon"
+                                            Width="32"
+                                            Height="32"
+                                            VerticalAlignment="Center"
+                                            Stretch="Uniform" />
+                                        <TextBlock
+                                            x:Name="SlideshowFolderName"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource BodyTextBlockStyle}"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </Grid>
+
+                        <Grid MinHeight="40" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                x:Name="SlideshowIntervalLabel"
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                TextWrapping="WrapWholeWords" />
+                            <ComboBox
+                                x:Name="SlideshowIntervalCombo"
+                                Grid.Column="1"
+                                MinWidth="125"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Right"
+                                SelectionChanged="SlideshowIntervalCombo_OnSelectionChanged" />
+                        </Grid>
+
+                        <Grid MinHeight="40" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                x:Name="SlideshowShuffleLabel"
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                TextWrapping="WrapWholeWords" />
+                            <ctrl:GlassSettingsLabeledToggleSwitch
+                                x:Name="SlideshowShuffleToggle"
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Toggled="SlideshowShuffleToggle_OnToggled" />
+                        </Grid>
+
+                        <Grid MinHeight="40" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                x:Name="SlideshowBatteryLabel"
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                TextWrapping="WrapWholeWords" />
+                            <ctrl:GlassSettingsLabeledToggleSwitch
+                                x:Name="SlideshowBatteryToggle"
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Toggled="SlideshowBatteryToggle_OnToggled" />
+                        </Grid>
+
+                        <Grid MinHeight="40" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                x:Name="SlideshowFitLabel"
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                TextWrapping="WrapWholeWords" />
+                            <ComboBox
+                                x:Name="SlideshowFitCombo"
+                                Grid.Column="1"
+                                MinWidth="125"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Right"
+                                SelectionChanged="FitCombo_OnSelectionChanged" />
+                        </Grid>
+                    </StackPanel>
+                </Grid>
+            </ctrl:SettingsSystemGateExpander>
+        </StackPanel>
+    </ctrl:SettingsPageShell>
+</Page>

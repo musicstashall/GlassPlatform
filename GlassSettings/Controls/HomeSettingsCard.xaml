@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.HomeSettingsCard"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    HorizontalAlignment="Stretch">
+    <Border
+        x:Name="CardBorder"
+        Padding="{StaticResource HomeCardPadding}"
+        HorizontalAlignment="Stretch"
+        Background="{ThemeResource LayerFillColorDefaultBrush}"
+        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="8">
+        <StackPanel x:Name="CardRoot" Spacing="0">
+            <!-- Раскрытие футера (осаждение startup green) — плавный Reposition, как у HomeNoticeHost. -->
+            <StackPanel.ChildrenTransitions>
+                <TransitionCollection>
+                    <RepositionThemeTransition />
+                </TransitionCollection>
+            </StackPanel.ChildrenTransitions>
+            <Grid x:Name="TopSection" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="LeadColumn" Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ContentPresenter
+                    x:Name="LeadHost"
+                    Grid.Column="0"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Visibility="Collapsed" />
+                <StackPanel x:Name="MainPanel" Grid.Column="1" Spacing="4">
+                    <StackPanel Spacing="2" Margin="0,0,0,4">
+                        <TextBlock
+                            x:Name="TitleText"
+                            Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock
+                            x:Name="DescriptionText"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap"
+                            Visibility="Collapsed" />
+                    </StackPanel>
+                    <StackPanel x:Name="RowHost" Spacing="0" />
+                </StackPanel>
+            </Grid>
+            <ContentPresenter
+                x:Name="FooterHost"
+                VerticalAlignment="Stretch"
+                Visibility="Collapsed" />
+        </StackPanel>
+    </Border>
+</UserControl>

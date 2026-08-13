@@ -1,0 +1,246 @@
+#pragma once
+#include "framework.h"
+#include "cpprt.h"
+#include "wil.h"
+
+namespace Shared
+{
+	namespace RegHelper
+	{
+		constexpr std::wstring_view g_regPath{ L"Software\\StanislavKa\\BlackWindowManager" };
+#ifdef _WIN64
+		constexpr std::wstring_view g_internalRegPath{ L"Software\\StanislavKa\\BlackWindowManager_Internals" };
+#else
+		constexpr std::wstring_view g_internalRegPath{ L"Software\\StanislavKa\\BlackWindowManager_Internals(x86)" };
+#endif // _WIN64
+
+		// Подключи Root\Active и Root\Inactive — один сегмент keyTree (как { L"Tooltip" } для Menu/DropDown).
+		constexpr std::wstring_view kBwmRootPath{ L"Root" };
+		constexpr std::wstring_view kBwmRootActivePath{ L"Root\\Active" };
+		constexpr std::wstring_view kBwmRootInactivePath{ L"Root\\Inactive" };
+
+		// keyTree: либо один сегмент с вложенным путём (см. kBwmRootActivePath), либо несколько сегментов
+		// от самого глубокого подключа к корню BWM: { L"Active", L"Root" } → …\Root\Active (редко нужно).
+		template <typename T, bool reverse>
+		inline std::optional<T> GetValueInternal(std::wstring_view root, std::vector<std::wstring_view> keyTree, std::wstring_view valueName, size_t maxFallThrough) try
+		{
+			std::optional<T> value{};
+			std::wstring keyName{ root };
+			maxFallThrough += 1;
+
+#ifdef _DEBUG
+			//OutputDebugStringW(std::format(L"GetValueInternal = Begin\n", keyName).c_str());
+#endif
+			if (!keyTree.empty())
+			{
+				for (size_t i{ 1 }; i <= keyTree.size(); i++)
+				{
+					keyName = root;
+					for (size_t j{ 1 }; j <= keyTree.size() - i + 1 && maxFallThrough >= 0; j++, maxFallThrough--)
+					{
+						auto index{ keyTree.size() - j };
+						if (!keyTree[index].empty())
+						{
+							keyName += L"\\";
+							keyName += keyTree[index];
+						}
+					}
+
+#ifdef _DEBUG
+					//OutputDebugStringW(std::format(L"GetValueInternal: {}\n", keyName).c_str());
+#endif
+					if constexpr (reverse)
+					{
+						value = wil::reg::try_get_value<T>(HKEY_LOCAL_MACHINE, keyName.c_str(), valueName.data());
+						if (value)
+						{
+							break;
+						}
+
+						value = wil::reg::try_get_value<T>(HKEY_CURRENT_USER, keyName.c_str(), valueName.data());
+						if (value)
+						{
+							break;
+						}
+					}
+					else
+					{
+						value = wil::reg::try_get_value<T>(HKEY_CURRENT_USER, keyName.c_str(), valueName.data());
+						if (value)
+						{
+							break;
+						}
+
+						value = wil::reg::try_get_value<T>(HKEY_LOCAL_MACHINE, keyName.c_str(), valueName.data());
+						if (value)
+						{
+							break;
+						}
+					}
+				}
+			}
+			else
+			{
+
+#ifdef _DEBUG
+				//OutputDebugStringW(std::format(L"GetValueInternal - {}\n", keyName).c_str());
+#endif
+				if constexpr (reverse)
+				{
+					value = wil::reg::try_get_value<T>(HKEY_LOCAL_MACHINE, keyName.c_str(), valueName.data());
+					if (value)
+					{
+						return value;
+					}
+
+					value = wil::reg::try_get_value<T>(HKEY_CURRENT_USER, keyName.c_str(), valueName.data());
+					if (value)
+					{
+						return value;
+					}
+				}
+				else
+				{
+					value = wil::reg::try_get_value<T>(HKEY_CURRENT_USER, keyName.c_str(), valueName.data());
+					if (value)
+					{
+						return value;
+					}
+
+					value = wil::reg::try_get_value<T>(HKEY_LOCAL_MACHINE, keyName.c_str(), valueName.data());
+					if (value)
+					{
+						return value;
+					}
+				}
+			}
+#ifdef _DEBUG
+			//OutputDebugStringW(std::format(L"GetValueInternal = End\n", keyName).c_str());
+#endif
+
+			return value;
+		}
+		catch (...) { return std::nullopt; }
+
+		template <typename T, bool reverse>
+		inline HRESULT SetValueInternal(std::wstring_view root, std::vector<std::wstring_view> keyTree, std::wstring_view valueName, T value, size_t maxFallThrough)
+		{
+			std::wstring keyName{ root };
+			maxFallThrough += 1;
+
+#ifdef _DEBUG
+			//OutputDebugStringW(std::format(L"SetValueInternal = Begin\n", keyName).c_str());
+#endif
+			if (!keyTree.empty())
+			{
+				for (size_t i{ 1 }; i <= keyTree.size(); i++)
+				{
+					keyName = root;
+					for (size_t j{ 1 }; j <= keyTree.size() - i + 1 && maxFallThrough >= 0; j++, maxFallThrough--)
+					{
+						auto index{ keyTree.size() - j };
+						if (!keyTree[index].empty())
+						{
+							keyName += L"\\";
+							keyName += keyTree[index];
+						}
+					}
+
+#ifdef _DEBUG
+					//OutputDebugStringW(std::format(L"SetValueInternal - {}\n", keyName).c_str());
+#endif
+					if constexpr (reverse)
+					{
+						if (FAILED(wil::reg::set_value_nothrow<T>(HKEY_LOCAL_MACHINE, keyName.c_str(), valueName.data(), value)))
+						{
+							wil::reg::set_value<T>(HKEY_CURRENT_USER, keyName.c_str(), valueName.data(), value);
+							break;
+						}
+					}
+					else
+					{
+
+						if (FAILED(wil::reg::set_value_nothrow<T>(HKEY_CURRENT_USER, keyName.c_str(), valueName.data(), value)))
+						{
+							wil::reg::set_value<T>(HKEY_LOCAL_MACHINE, keyName.c_str(), valueName.data(), value);
+							break;
+						}
+					}
+				}
+			}
+			else
+			{
+#ifdef _DEBUG
+				//OutputDebugStringW(std::format(L"SetValueInternal - {}\n", keyName).c_str());
+#endif
+				if constexpr (reverse)
+				{
+					if (FAILED(wil::reg::set_value_nothrow<T>(HKEY_LOCAL_MACHINE, keyName.c_str(), valueName.data(), value)))
+					{
+						return wil::reg::set_value_nothrow<T>(HKEY_CURRENT_USER, keyName.c_str(), valueName.data(), value);
+					}
+				}
+				else
+				{
+
+					if (FAILED(wil::reg::set_value_nothrow<T>(HKEY_CURRENT_USER, keyName.c_str(), valueName.data(), value)))
+					{
+						return wil::reg::set_value_nothrow<T>(HKEY_LOCAL_MACHINE, keyName.c_str(), valueName.data(), value);
+					}
+				}
+			}
+#ifdef _DEBUG
+			//OutputDebugStringW(std::format(L"SetValueInternal = End\n", keyName).c_str());
+#endif
+
+			return S_OK;
+		}
+
+		template <typename T>
+		inline T Get(std::vector<std::wstring_view> keyTree, std::wstring_view valueName, const T& defaultValue, size_t maxFallThrough = 0)
+		{
+			auto result{ TryGet<T>(keyTree, valueName, maxFallThrough) };
+			return result.has_value() ? result.value() : defaultValue;
+		}
+		template <typename T>
+		inline std::optional<T> TryGet(std::vector<std::wstring_view> keyTree, std::wstring_view valueName, size_t maxFallThrough = 0)
+		{
+			return GetValueInternal<T, false>(g_regPath.data(), keyTree, valueName, maxFallThrough);
+		}
+
+		template <typename T>
+		inline T __Get(std::vector<std::wstring_view> keyTree, std::wstring_view valueName, const T& defaultValue, size_t maxFallThrough = 0)
+		{
+			auto result{ __TryGet<T>(keyTree, valueName, maxFallThrough) };
+			return result.has_value() ? result.value() : defaultValue;
+		}
+		template <typename T>
+		inline std::optional<T> __TryGet(std::vector<std::wstring_view> keyTree, std::wstring_view valueName, size_t maxFallThrough = 0)
+		{
+			return GetValueInternal<T, true>(g_internalRegPath.data(), keyTree, valueName, maxFallThrough);
+		}
+		template <typename T>
+		inline HRESULT __Set(std::vector<std::wstring_view> keyTree, std::wstring_view valueName, const T& value, size_t maxFallThrough = 0)
+		{
+			return SetValueInternal<T, true>(g_internalRegPath.data(), keyTree, valueName, value, maxFallThrough);
+		}
+
+		// Удаляет DWORD-значения легаси-подключа RenderText (см. GlassCore::Text::LoadLegacyRenderTextSubkey).
+		inline void DeleteRenderTextLegacyValues() noexcept
+		{
+			std::wstring keyName{ g_regPath };
+			keyName += L"\\RenderText";
+			HKEY hKey = nullptr;
+			if (RegOpenKeyExW(HKEY_CURRENT_USER, keyName.c_str(), 0, KEY_SET_VALUE, &hKey) != ERROR_SUCCESS)
+				return;
+			static const wchar_t* const kLegacyValueNames[] = {
+				L"CoverageGamma", L"PreserveClearTypeTint", L"CovInAlphaScale", L"FringeGain",
+				L"AlphaPostAdd", L"GrayscaleMaskFont", L"TargetBlendAlpha", L"RenderMode",
+			};
+			for (const wchar_t* n : kLegacyValueNames)
+				(void)RegDeleteValueW(hKey, n);
+			RegCloseKey(hKey);
+		}
+	}
+}
+

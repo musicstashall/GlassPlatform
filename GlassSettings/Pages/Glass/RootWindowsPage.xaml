@@ -1,0 +1,94 @@
+<Page
+    x:Class="GlassSettings.Pages.Glass.RootWindowsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls">
+    <ctrl:SettingsPageShell>
+        <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+            <ctrl:SettingsInfoBlock
+                x:Name="OpenGlassRootBackdropNotice"
+                Visibility="Collapsed" />
+            <ctrl:SettingsInfoBlock
+                x:Name="OpenGlassBorderNotice"
+                Visibility="Collapsed" />
+            <ctrl:SettingsInfoBlock
+                x:Name="DwmSystemBackdropNotice"
+                Visibility="Collapsed" />
+            <ctrl:RootFullGlassRow x:Name="FullGlassRow" />
+            <ctrl:SettingsFlatGateRow
+                x:Name="CornerRow"
+                GateToggled="CornerGate_OnToggled" />
+            <ctrl:PopupScopeSegmentBar
+                x:Name="ScopeBar"
+                SharedLabelResourceKey="Root_ScopeStateIndependent"
+                SeparateLabelResourceKey="Root_ScopePerWindowState"
+                ScopeChanged="ScopeBar_OnScopeChanged" />
+            <Grid x:Name="ScopeContentHost">
+                <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                    <Pivot x:Name="RootPivot" SelectionChanged="RootPivot_OnSelectionChanged">
+                        <Pivot.Resources>
+                            <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                        </Pivot.Resources>
+                        <PivotItem Tag="Active" />
+                        <PivotItem Tag="Inactive" />
+                    </Pivot>
+                    <Grid x:Name="TabContentHost">
+                        <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                            <ctrl:SettingsFlatGateRow
+                                x:Name="EffectRow"
+                                GateToggled="EffectGate_OnToggled" />
+                            <ctrl:SettingsSystemGateExpander
+                                x:Name="GradientExpander"
+                                GateToggled="GradientGate_OnToggled">
+                                <ctrl:SettingsColorPickerPanel x:Name="GradientPanel">
+                                    <ctrl:GlassAlphaColorPicker x:Name="GradientPicker" />
+                                </ctrl:SettingsColorPickerPanel>
+                            </ctrl:SettingsSystemGateExpander>
+                            <ctrl:SettingsSystemGateExpander
+                                x:Name="BorderExpander"
+                                ShowGateStateText="False"
+                                GateToggled="BorderGate_OnToggled">
+                                <ctrl:SettingsColorPickerPanel x:Name="BorderPanel">
+                                    <ctrl:GlassAlphaColorPicker x:Name="BorderPicker" />
+                                </ctrl:SettingsColorPickerPanel>
+                            </ctrl:SettingsSystemGateExpander>
+                            <ctrl:SettingsFlatGateRow
+                                x:Name="DrawThemeRow"
+                                GateToggled="ThemeAlphaGate_OnToggled" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Grid>
+            <ctrl:SettingsDividerExpander
+                x:Name="RootAdvancedExpander"
+                Expanded="RootAdvancedExpander_OnExpanded">
+                <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                    <Pivot
+                        x:Name="ControlIconPivot"
+                        SelectionChanged="ControlIconPivot_OnSelectionChanged">
+                        <Pivot.Resources>
+                            <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                        </Pivot.Resources>
+                        <PivotItem Tag="Ribbon" />
+                        <PivotItem Tag="ListView" />
+                        <PivotItem Tag="TreeView" />
+                        <PivotItem Tag="Toolbar" />
+                        <PivotItem Tag="Button" />
+                        <PivotItem Tag="Static" />
+                    </Pivot>
+                    <Grid x:Name="ControlIconTabHost">
+                        <ctrl:SettingsSystemGateExpander
+                            x:Name="ControlIconExpander"
+                            GateToggled="ControlIconExpander_OnGateToggled">
+                            <ctrl:SettingsColorPickerPanel
+                                x:Name="ControlIconPanel"
+                                DefaultColorClick="ControlIconPanel_OnDefaultClick">
+                                <ctrl:GlassAlphaColorPicker x:Name="ControlIconPicker" IsAlphaVisible="False" />
+                            </ctrl:SettingsColorPickerPanel>
+                        </ctrl:SettingsSystemGateExpander>
+                    </Grid>
+                </StackPanel>
+            </ctrl:SettingsDividerExpander>
+        </StackPanel>
+    </ctrl:SettingsPageShell>
+</Page>

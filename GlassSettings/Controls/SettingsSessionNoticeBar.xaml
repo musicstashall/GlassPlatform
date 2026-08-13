@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<UserControl
+
+    x:Class="GlassSettings.Controls.SettingsSessionNoticeBar"
+
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+
+    xmlns:ctrl="using:GlassSettings.Controls"
+
+    HorizontalAlignment="Stretch">
+
+    <ctrl:SettingsUnsavedNoticeStrip
+
+        x:Name="NoticeStrip"
+
+        AllowDismiss="True" />
+
+</UserControl>
+

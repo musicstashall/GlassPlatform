@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Resources">
+      <UniqueIdentifier>{D2A4F941-4B9B-45D0-B313-0E6A2B566E01}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="DesktopExplorerCommands.cpp">
+    </ClCompile>
+    <ClCompile Include="DesktopShellActions.cpp">
+    </ClCompile>
+    <ClCompile Include="DesktopShellClsids.cpp">
+    </ClCompile>
+    <ClCompile Include="DesktopShellMenu.cpp">
+    </ClCompile>
+    <ClCompile Include="GlassShellPch.cpp">
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="DesktopExplorerFactory.h">
+    </ClInclude>
+    <ClInclude Include="DesktopShellActions.h">
+    </ClInclude>
+    <ClInclude Include="GlassShellExtClsids.h">
+    </ClInclude>
+    <ClInclude Include="GlassShellModule.h">
+    </ClInclude>
+    <ClInclude Include="GlassShellPch.h">
+    </ClInclude>
+    <ClInclude Include="resource.h">
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resource.rc">
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="Resources\app.ico">
+      <Filter>Resources</Filter>
+    </Image>
+    <Image Include="Resources\pt.ico">
+      <Filter>Resources</Filter>
+    </Image>
+    <Image Include="Resources\st.ico">
+      <Filter>Resources</Filter>
+    </Image>
+    <Image Include="Resources\og.ico">
+      <Filter>Resources</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="GlassShellExt.def">
+    </None>
+  </ItemGroup>
+</Project>

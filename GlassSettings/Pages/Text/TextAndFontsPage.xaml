@@ -1,0 +1,129 @@
+<Page
+    x:Class="GlassSettings.Pages.Text.TextAndFontsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls">
+    <ctrl:SettingsPageShell x:Name="PageShell">
+        <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+            <Grid
+                x:Name="TextHeroLayoutHost"
+                ColumnSpacing="24"
+                RowSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="TextPreviewColumn" Width="Auto" />
+                    <ColumnDefinition x:Name="TextControlsColumn" Width="2*" MinWidth="200" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid
+                    x:Name="TextPreviewHost"
+                    Grid.Column="0"
+                    Width="{StaticResource GlassSettingsHeroPreviewOuterWidth}"
+                    Height="{StaticResource GlassSettingsHeroPreviewOuterHeight}"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Margin="{StaticResource GlassSettingsHeroPreviewShadowMargin}">
+                    <ctrl:TextGlassPreviewHost x:Name="GlassPreview" />
+                </Grid>
+
+                <Border
+                    x:Name="TextControlsCard"
+                    Grid.Column="1"
+                    Padding="{StaticResource GlassSettingsOpacityRowPadding}"
+                    VerticalAlignment="Stretch"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <Grid x:Name="TextRenderControlPanel" VerticalAlignment="Stretch">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid
+                            x:Name="TextRenderControlBody"
+                            Grid.Row="0"
+                            VerticalAlignment="Stretch">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                        </Grid>
+                        <Border
+                            x:Name="TextRenderControlFooterHost"
+                            Grid.Row="1"
+                            Padding="0,8,0,0"
+                            BorderThickness="0,1,0,0"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            VerticalAlignment="Bottom" />
+                    </Grid>
+                </Border>
+
+                <ctrl:SettingsFlatGateRow
+                    x:Name="TextRenderFlatRow"
+                    Grid.Row="1"
+                    Grid.Column="0"
+                    Grid.ColumnSpan="2"
+                    Visibility="Collapsed"
+                    GateToggled="TextRenderFlatRow_OnGateToggled" />
+            </Grid>
+
+            <ctrl:SettingsSystemGateExpander
+                x:Name="GammaExpander"
+                ShowGateSwitch="True"
+                GateToggled="GammaGate_OnToggled">
+                <ctrl:SettingsParameterPanel x:Name="GammaPanel" />
+            </ctrl:SettingsSystemGateExpander>
+
+            <ctrl:SettingsSystemGateExpander
+                x:Name="PseudoExpander"
+                ShowGateSwitch="True"
+                GateToggled="PseudoGate_OnToggled">
+                <ctrl:SettingsParameterPanel x:Name="PseudoPanel" />
+            </ctrl:SettingsSystemGateExpander>
+
+            <ctrl:SettingsSystemGateExpander
+                x:Name="EffectsExpander"
+                DimHeaderActionsWithGate="True"
+                GateToggled="EffectsGate_OnToggled">
+                <ctrl:SettingsColorPickerPanel x:Name="GlowPanel">
+                    <ctrl:GlassAlphaColorPicker x:Name="GlowPicker" />
+                </ctrl:SettingsColorPickerPanel>
+            </ctrl:SettingsSystemGateExpander>
+
+            <ctrl:SettingsInfoBlock
+                x:Name="SystemFontsInfoBlock"
+                Margin="0,40,0,12" />
+
+            <ctrl:PopupScopeSegmentBar
+                x:Name="SystemFontsScopeBar"
+                SharedLabelResourceKey="Text_SystemFontsScopeGlobal"
+                SeparateLabelResourceKey="Text_SystemFontsScopeSelective"
+                ScopeChanged="SystemFontsScopeBar_OnScopeChanged" />
+
+            <Grid x:Name="SystemFontsScopeContentHost">
+                <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                    <Pivot x:Name="SystemFontsPivot" SelectionChanged="SystemFontsPivot_OnSelectionChanged">
+                        <Pivot.Resources>
+                            <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                        </Pivot.Resources>
+                        <PivotItem />
+                        <PivotItem />
+                        <PivotItem />
+                        <PivotItem />
+                        <PivotItem />
+                        <PivotItem />
+                    </Pivot>
+                    <Grid x:Name="SystemFontsContentHost">
+                        <ctrl:SettingsFlatGateRow
+                            x:Name="SystemFontsRow"
+                            GateToggled="SystemFontsRow_OnGateToggled" />
+                    </Grid>
+                </StackPanel>
+            </Grid>
+        </StackPanel>
+    </ctrl:SettingsPageShell>
+</Page>

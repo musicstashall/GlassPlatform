@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "GlassSettings (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "GlassSettings (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

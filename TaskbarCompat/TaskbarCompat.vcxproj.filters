@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="config">
+      <UniqueIdentifier>{94990005-2F19-45C5-BE8D-89F9F37A480F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="xaml">
+      <UniqueIdentifier>{FAF58496-131D-4952-BB44-6D8C4B8461FE}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="xaml\brushes">
+      <UniqueIdentifier>{B3E1C8A0-4F2D-4A91-9C7E-1D2A3B4C5D6E}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="xaml\effects">
+      <UniqueIdentifier>{C4F2D9B1-5E3A-4B82-8D6F-2E3B4C5D6E7F}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="config\TaskbarRegistry.cpp">
+      <Filter>config</Filter>
+    </ClCompile>
+    <ClCompile Include="dllmain.cpp">
+    </ClCompile>
+    <ClCompile Include="TaskbarCompat.cpp">
+    </ClCompile>
+    <ClCompile Include="TaskbarPch.cpp">
+    </ClCompile>
+    <ClCompile Include="xaml\DllGetClassObject.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\TaskbarBackgroundRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\InputSwitchPanelRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\TrayOverflowPanelRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\TrayHoverFlyoutPanelRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\TrayTooltipPanelRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\TrayMenuFlyoutPanelRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\TaskbarTapSite.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\TaskbarVisualTreeWatcher.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlClassFactory.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlDiagGuids.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlDiagInit.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\brushes\XamlBlurBrush.cpp">
+      <Filter>xaml\brushes</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\brushes\XamlBackdropFactory.cpp">
+      <Filter>xaml\brushes</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\effects\GaussianBlurEffect.cpp">
+      <Filter>xaml\effects</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\effects\FloodEffect.cpp">
+      <Filter>xaml\effects</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\effects\CompositeEffect.cpp">
+      <Filter>xaml\effects</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="config\TaskbarRegistry.h">
+      <Filter>config</Filter>
+    </ClInclude>
+    <ClInclude Include="TaskbarPch.h">
+    </ClInclude>
+    <ClInclude Include="xaml\TaskbarBackgroundRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\InputSwitchPanelRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\TrayOverflowPanelRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\TrayHoverFlyoutPanelRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\TrayTooltipPanelRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\TrayMenuFlyoutPanelRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\TaskbarTapSite.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\TaskbarVisualTreeWatcher.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlClassFactory.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlComLifetime.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlDiagInit.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlGlassIds.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\brushes\XamlBlurBrush.hpp">
+      <Filter>xaml\brushes</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\brushes\XamlBackdropFactory.hpp">
+      <Filter>xaml\brushes</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\effects\GaussianBlurEffect.hpp">
+      <Filter>xaml\effects</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\effects\FloodEffect.hpp">
+      <Filter>xaml\effects</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\effects\CompositeEffect.hpp">
+      <Filter>xaml\effects</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="TaskbarCompat.def">
+    </None>
+  </ItemGroup>
+</Project>

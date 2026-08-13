@@ -1,0 +1,139 @@
+<Page
+    x:Class="GlassSettings.Pages.Dwm.DwmColorizationDetailPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls">
+    <ctrl:SettingsPageShell x:Name="PageShell">
+        <StackPanel x:Name="MainStack" Spacing="{StaticResource SettingsCardSpacing}">
+            <ctrl:DwmHiveScopeBanner x:Name="HiveScopeBanner" />
+
+            <Grid
+                x:Name="CompositionHeroLayoutHost"
+                ColumnSpacing="24"
+                RowSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="CompositionPreviewColumn" Width="Auto" />
+                    <ColumnDefinition x:Name="CompositionControlsColumn" Width="2*" MinWidth="200" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid
+                    x:Name="CompositionPreviewHost"
+                    Grid.Row="0"
+                    Grid.Column="0"
+                    Width="{StaticResource GlassSettingsHeroPreviewOuterWidth}"
+                    Height="{StaticResource GlassSettingsHeroPreviewOuterHeight}"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Margin="{StaticResource GlassSettingsHeroPreviewShadowMargin}">
+                    <ctrl:DwmCompositionCascadePreview x:Name="VistaCompositionPreview" />
+                    <ctrl:DwmCompositionCascadePreview
+                        x:Name="Win7CompositionPreview"
+                        Visibility="Collapsed" />
+                </Grid>
+
+                <!-- Паритет PolicyCard на DwmThemeDetailPage (Стилизация): MinHeight + * / Auto + footer Padding 0,8,0,0 -->
+                <Border
+                    x:Name="CompositionControlsCard"
+                    Grid.Row="0"
+                    Grid.Column="1"
+                    MinHeight="{StaticResource GlassSettingsHeroPreviewOuterHeight}"
+                    Padding="{StaticResource GlassSettingsOpacityRowPadding}"
+                    VerticalAlignment="Top"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <Grid x:Name="CompositionControlPanel" RowSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <Pivot x:Name="GlassTypePivot" SelectionChanged="GlassTypePivot_OnSelectionChanged">
+                <Pivot.Resources>
+                    <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                </Pivot.Resources>
+                <PivotItem />
+                <PivotItem />
+            </Pivot>
+
+            <Grid x:Name="GlassTypeTabHost">
+                <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                    <ctrl:SettingsSystemGateExpander
+                        x:Name="ActiveColorExpander"
+                        GateToggled="ActiveColorExpander_OnGateToggled">
+                        <ctrl:SettingsColorPickerPanel
+                            x:Name="ActiveColorPanel"
+                            DefaultColorClick="ActiveColorPanel_OnDefaultColorClick">
+                            <ctrl:GlassAlphaColorPicker x:Name="ActiveColorPicker" IsAlphaVisible="True" />
+                        </ctrl:SettingsColorPickerPanel>
+                    </ctrl:SettingsSystemGateExpander>
+
+                    <ctrl:SettingsSystemGateExpander
+                        x:Name="SecondaryColorExpander"
+                        GateToggled="SecondaryColorExpander_OnGateToggled">
+                        <ctrl:SettingsColorPickerPanel
+                            x:Name="SecondaryColorPanel"
+                            DefaultColorClick="SecondaryColorPanel_OnDefaultColorClick">
+                            <ctrl:GlassAlphaColorPicker x:Name="SecondaryColorPicker" IsAlphaVisible="True" />
+                        </ctrl:SettingsColorPickerPanel>
+                    </ctrl:SettingsSystemGateExpander>
+                </StackPanel>
+            </Grid>
+
+            <ctrl:SettingsDividerExpander
+                x:Name="AdvancedExpander"
+                Expanded="AdvancedExpander_OnExpanded">
+                <StackPanel
+                    x:Name="AdvancedPanel"
+                    Spacing="{StaticResource SettingsCardSpacing}">
+
+                <ctrl:SettingsOptionRow x:Name="PriorityRow" />
+
+                <Pivot x:Name="BaseColorPivot" SelectionChanged="BaseColorPivot_OnSelectionChanged">
+                    <Pivot.Resources>
+                        <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                    </Pivot.Resources>
+                    <PivotItem />
+                    <PivotItem />
+                    <PivotItem />
+                </Pivot>
+                <Grid x:Name="BaseColorTabHost">
+                    <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                        <ctrl:SettingsSystemGateExpander
+                            x:Name="BaseColorExpander"
+                            DimHeaderActionsWithGate="False"
+                            ShowGateSwitch="False">
+                            <ctrl:SettingsColorPickerPanel
+                                x:Name="BaseColorPanel"
+                                DefaultColorClick="BaseColorPanel_OnDefaultColorClick">
+                                <ctrl:GlassAlphaColorPicker x:Name="BaseColorPicker" IsAlphaVisible="True" />
+                            </ctrl:SettingsColorPickerPanel>
+                        </ctrl:SettingsSystemGateExpander>
+                    </StackPanel>
+                </Grid>
+
+                <Pivot x:Name="BaseOpacityPivot" SelectionChanged="BaseOpacityPivot_OnSelectionChanged">
+                    <Pivot.Resources>
+                        <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                    </Pivot.Resources>
+                    <PivotItem />
+                    <PivotItem />
+                </Pivot>
+                <Grid x:Name="BaseOpacityTabHost">
+                    <StackPanel x:Name="BaseOpacityRowsPanel" Spacing="{StaticResource SettingsCardSpacing}" />
+                </Grid>
+
+                </StackPanel>
+            </ctrl:SettingsDividerExpander>
+
+        </StackPanel>
+    </ctrl:SettingsPageShell>
+</Page>

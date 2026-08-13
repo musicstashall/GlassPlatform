@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.SettingsPageNoticeStack"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls"
+    HorizontalAlignment="Stretch">
+    <StackPanel x:Name="RootPanel" Spacing="8">
+        <StackPanel.ChildrenTransitions>
+            <TransitionCollection>
+                <RepositionThemeTransition />
+            </TransitionCollection>
+        </StackPanel.ChildrenTransitions>
+        <ctrl:SettingsSessionNoticeBar x:Name="SessionNoticeBar" />
+        <ctrl:SettingsUnsavedNoticeStrip
+            x:Name="ExternalSyncNoticeStrip"
+            AllowDismiss="True"
+            ShowSaveButton="False"
+            Visibility="Collapsed" />
+        <ctrl:SettingsUnsavedNoticeStrip
+            x:Name="ActionNoticeStrip"
+            AllowDismiss="True"
+            ShowSaveButton="False"
+            Visibility="Collapsed" />
+        <Grid
+            x:Name="ViewportAnchor"
+            Height="1"
+            HorizontalAlignment="Stretch" />
+    </StackPanel>
+</UserControl>

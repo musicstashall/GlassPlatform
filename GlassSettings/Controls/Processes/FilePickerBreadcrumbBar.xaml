@@ -1,0 +1,334 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls">
+    <!-- Форк GlassSettingsBreadcrumbBarItemStyle: hover прямоугольником по тексту (как у полос адреса), шеврон без hit-test. -->
+    <Style x:Key="FilePickerBreadcrumbBarItemStyle" TargetType="controls:BreadcrumbBarItem" BasedOn="{StaticResource GlassSettingsBreadcrumbBarItemStyle}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="controls:BreadcrumbBarItem">
+                    <Grid x:Name="PART_LayoutRoot" CornerRadius="{TemplateBinding CornerRadius}">
+                        <VisualStateManager.VisualStateGroups>
+                            <VisualStateGroup x:Name="ItemTypeStates">
+                                <VisualState x:Name="Inline" />
+                                <VisualState x:Name="EllipsisDropDown">
+                                    <VisualState.Setters>
+                                        <Setter Target="PART_ItemButton.Visibility" Value="Collapsed" />
+                                        <Setter Target="PART_ChevronTextBlock.Visibility" Value="Collapsed" />
+                                        <Setter Target="PART_ContentColumn.Width" Value="*" />
+                                        <Setter Target="PART_EllipsisDropDownItemContentPresenter.Visibility" Value="Visible" />
+                                        <Setter Target="PART_LayoutRoot.Padding" Value="11,7,11,9" />
+                                        <Setter Target="PART_LayoutRoot.Margin" Value="5,3" />
+                                        <Setter Target="PART_LayoutRoot.FocusVisualMargin" Value="-3" />
+                                        <Setter Target="PART_ItemButton.(Control.IsTemplateFocusTarget)" Value="False" />
+                                        <Setter Target="PART_LayoutRoot.(Control.IsTemplateFocusTarget)" Value="True" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                            </VisualStateGroup>
+                            <VisualStateGroup x:Name="EllipsisDropDownItemCommonStates">
+                                <VisualState x:Name="Normal">
+                                    <Storyboard>
+                                        <PointerUpThemeAnimation Storyboard.TargetName="PART_LayoutRoot" />
+                                    </Storyboard>
+                                </VisualState>
+                                <VisualState x:Name="PointerOver">
+                                    <Storyboard>
+                                        <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PART_LayoutRoot" Storyboard.TargetProperty="Background">
+                                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                        </ObjectAnimationUsingKeyFrames>
+                                        <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PART_EllipsisDropDownItemContentPresenter" Storyboard.TargetProperty="Foreground">
+                                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource BreadcrumbBarEllipsisDropDownItemForegroundPointerOver}" />
+                                        </ObjectAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </VisualState>
+                                <VisualState x:Name="Pressed">
+                                    <Storyboard>
+                                        <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PART_LayoutRoot" Storyboard.TargetProperty="Background">
+                                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                        </ObjectAnimationUsingKeyFrames>
+                                        <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PART_EllipsisDropDownItemContentPresenter" Storyboard.TargetProperty="Foreground">
+                                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource BreadcrumbBarEllipsisDropDownItemForegroundPressed}" />
+                                        </ObjectAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </VisualState>
+                                <VisualState x:Name="Disabled">
+                                    <Storyboard>
+                                        <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PART_LayoutRoot" Storyboard.TargetProperty="Background">
+                                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource BreadcrumbBarEllipsisDropDownItemBackgroundDisabled}" />
+                                        </ObjectAnimationUsingKeyFrames>
+                                        <ObjectAnimationUsingKeyFrames Storyboard.TargetName="PART_EllipsisDropDownItemContentPresenter" Storyboard.TargetProperty="Foreground">
+                                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource BreadcrumbBarEllipsisDropDownItemForegroundDisabled}" />
+                                        </ObjectAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </VisualState>
+                            </VisualStateGroup>
+                            <VisualStateGroup x:Name="InlineItemTypeStates">
+                                <VisualState x:Name="Default">
+                                    <VisualState.Setters>
+                                        <Setter Target="PART_ChevronTextBlock.Text" Value="{ThemeResource BreadcrumbBarChevronLeftToRight}" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                                <VisualState x:Name="DefaultRTL">
+                                    <VisualState.Setters>
+                                        <Setter Target="PART_ChevronTextBlock.Text" Value="{ThemeResource BreadcrumbBarChevronRightToLeft}" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                                <VisualState x:Name="LastItem">
+                                    <VisualState.Setters>
+                                        <Setter Target="PART_ItemButton.Visibility" Value="Collapsed" />
+                                        <Setter Target="PART_ChevronTextBlock.Visibility" Value="Collapsed" />
+                                        <Setter Target="PART_LastItemContentPresenter.Visibility" Value="Visible" />
+                                        <Setter Target="PART_ItemButton.(Control.IsTemplateFocusTarget)" Value="False" />
+                                        <Setter Target="PART_LastItemContentPresenter.(Control.IsTemplateFocusTarget)" Value="True" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                                <VisualState x:Name="Ellipsis">
+                                    <VisualState.Setters>
+                                        <Setter Target="PART_ChevronTextBlock.Text" Value="{ThemeResource BreadcrumbBarChevronLeftToRight}" />
+                                        <Setter Target="PART_EllipsisTextBlock.Visibility" Value="Visible" />
+                                        <Setter Target="PART_ItemContentPresenter.Visibility" Value="Collapsed" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                                <VisualState x:Name="EllipsisRTL">
+                                    <VisualState.Setters>
+                                        <Setter Target="PART_EllipsisTextBlock.Visibility" Value="Visible" />
+                                        <Setter Target="PART_ItemContentPresenter.Visibility" Value="Collapsed" />
+                                        <Setter Target="PART_ChevronTextBlock.Text" Value="{ThemeResource BreadcrumbBarChevronRightToLeft}" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                            </VisualStateGroup>
+                        </VisualStateManager.VisualStateGroups>
+                        <Grid.Resources>
+                            <Flyout x:Name="PART_EllipsisFlyout" ShouldConstrainToRootBounds="False">
+                                <Flyout.FlyoutPresenterStyle>
+                                    <Style TargetType="FlyoutPresenter">
+                                        <Setter Property="Background" Value="{ThemeResource BreadcrumbBarEllipsisFlyoutPresenterBackground}" />
+                                        <Setter Property="BorderBrush" Value="{ThemeResource BreadcrumbBarEllipsisFlyoutPresenterBorderBrush}" />
+                                        <Setter Property="BorderThickness" Value="{ThemeResource BreadcrumbBarEllipsisFlyoutPresenterBorderThemeThickness}" />
+                                        <Setter Property="Padding" Value="0,2" />
+                                        <Setter Property="ScrollViewer.HorizontalScrollMode" Value="Disabled" />
+                                        <Setter Property="ScrollViewer.VerticalScrollMode" Value="Auto" />
+                                        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+                                        <Setter Property="ScrollViewer.IsHorizontalRailEnabled" Value="False" />
+                                        <Setter Property="ScrollViewer.IsVerticalRailEnabled" Value="False" />
+                                        <Setter Property="ScrollViewer.ZoomMode" Value="Disabled" />
+                                        <Setter Property="MaxWidth" Value="{ThemeResource FlyoutThemeMaxWidth}" />
+                                        <Setter Property="MinHeight" Value="40" />
+                                        <Setter Property="CornerRadius" Value="{ThemeResource OverlayCornerRadius}" />
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="FlyoutPresenter">
+                                                    <Grid Background="{TemplateBinding Background}" BackgroundSizing="InnerBorderEdge" CornerRadius="{TemplateBinding CornerRadius}">
+                                                        <ScrollViewer
+                                                            x:Name="FlyoutPresenterScrollViewer"
+                                                            AutomationProperties.AccessibilityView="Raw"
+                                                            Margin="{TemplateBinding Padding}"
+                                                            HorizontalScrollMode="{TemplateBinding ScrollViewer.HorizontalScrollMode}"
+                                                            HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                                            VerticalScrollMode="{TemplateBinding ScrollViewer.VerticalScrollMode}"
+                                                            VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"
+                                                            IsHorizontalRailEnabled="{TemplateBinding ScrollViewer.IsHorizontalRailEnabled}"
+                                                            IsVerticalRailEnabled="{TemplateBinding ScrollViewer.IsVerticalRailEnabled}"
+                                                            ZoomMode="{TemplateBinding ScrollViewer.ZoomMode}"
+                                                            Content="{TemplateBinding Content}" />
+                                                        <Border
+                                                            x:Name="FlyoutPresenterBorder"
+                                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                                            CornerRadius="{TemplateBinding CornerRadius}" />
+                                                    </Grid>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </Flyout.FlyoutPresenterStyle>
+                            </Flyout>
+                        </Grid.Resources>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition x:Name="PART_ContentColumn" Width="Auto" />
+                            <ColumnDefinition x:Name="PART_ChevronColumn" Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            x:Name="PART_ItemButton"
+                            x:DeferLoadStrategy="Lazy"
+                            AutomationProperties.AccessibilityView="Raw"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}"
+                            Foreground="{TemplateBinding Foreground}"
+                            Padding="4,2"
+                            Control.IsTemplateFocusTarget="True"
+                            FocusVisualMargin="-3"
+                            IsTabStop="False">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Foreground" Value="{ThemeResource BreadcrumbBarNormalForegroundBrush}" />
+                                    <Setter Property="BorderBrush" Value="Transparent" />
+                                    <Setter Property="Background" Value="Transparent" />
+                                    <Setter Property="HorizontalAlignment" Value="Left" />
+                                    <Setter Property="VerticalAlignment" Value="Center" />
+                                    <Setter Property="FontFamily" Value="{ThemeResource ContentControlThemeFontFamily}" />
+                                    <Setter Property="FontWeight" Value="Normal" />
+                                    <Setter Property="FontSize" Value="{ThemeResource BreadcrumbBarItemThemeFontSize}" />
+                                    <Setter Property="UseSystemFocusVisuals" Value="{StaticResource UseSystemFocusVisuals}" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Grid Background="Transparent">
+                                                    <VisualStateManager.VisualStateGroups>
+                                                        <VisualStateGroup x:Name="CommonStates">
+                                                            <VisualState x:Name="Normal" />
+                                                            <VisualState x:Name="CurrentNormal">
+                                                                <VisualState.Setters>
+                                                                    <Setter Target="PART_ContentPresenter.Foreground" Value="{ThemeResource BreadcrumbBarCurrentNormalForegroundBrush}" />
+                                                                </VisualState.Setters>
+                                                            </VisualState>
+                                                            <VisualState x:Name="PointerOver">
+                                                                <VisualState.Setters>
+                                                                    <Setter Target="PART_ContentPresenter.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                                                    <Setter Target="PART_ContentPresenter.Foreground" Value="{ThemeResource BreadcrumbBarNormalForegroundBrush}" />
+                                                                    <Setter Target="PART_ContentPresenter.BorderBrush" Value="Transparent" />
+                                                                    <Setter Target="PART_ContentPresenter.CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+                                                                </VisualState.Setters>
+                                                            </VisualState>
+                                                            <VisualState x:Name="CurrentPointerOver">
+                                                                <VisualState.Setters>
+                                                                    <Setter Target="PART_ContentPresenter.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                                                    <Setter Target="PART_ContentPresenter.Foreground" Value="{ThemeResource BreadcrumbBarCurrentNormalForegroundBrush}" />
+                                                                    <Setter Target="PART_ContentPresenter.BorderBrush" Value="Transparent" />
+                                                                    <Setter Target="PART_ContentPresenter.CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+                                                                </VisualState.Setters>
+                                                            </VisualState>
+                                                            <VisualState x:Name="Pressed">
+                                                                <VisualState.Setters>
+                                                                    <Setter Target="PART_ContentPresenter.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                                                    <Setter Target="PART_ContentPresenter.Foreground" Value="{ThemeResource BreadcrumbBarNormalForegroundBrush}" />
+                                                                    <Setter Target="PART_ContentPresenter.BorderBrush" Value="Transparent" />
+                                                                    <Setter Target="PART_ContentPresenter.CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+                                                                </VisualState.Setters>
+                                                            </VisualState>
+                                                            <VisualState x:Name="CurrentPressed">
+                                                                <VisualState.Setters>
+                                                                    <Setter Target="PART_ContentPresenter.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                                                    <Setter Target="PART_ContentPresenter.Foreground" Value="{ThemeResource BreadcrumbBarCurrentNormalForegroundBrush}" />
+                                                                    <Setter Target="PART_ContentPresenter.BorderBrush" Value="Transparent" />
+                                                                    <Setter Target="PART_ContentPresenter.CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+                                                                </VisualState.Setters>
+                                                            </VisualState>
+                                                            <VisualState x:Name="Disabled">
+                                                                <VisualState.Setters>
+                                                                    <Setter Target="PART_ContentPresenter.Foreground" Value="{ThemeResource BreadcrumbBarDisabledForegroundBrush}" />
+                                                                </VisualState.Setters>
+                                                            </VisualState>
+                                                            <VisualState x:Name="CurrentDisabled">
+                                                                <VisualState.Setters>
+                                                                    <Setter Target="PART_ContentPresenter.Foreground" Value="{ThemeResource BreadcrumbBarCurrentDisabledForegroundBrush}" />
+                                                                </VisualState.Setters>
+                                                            </VisualState>
+                                                            <VisualState x:Name="Focus">
+                                                                <VisualState.Setters>
+                                                                    <Setter Target="PART_ContentPresenter.Foreground" Value="{ThemeResource BreadcrumbBarFocusForegroundBrush}" />
+                                                                </VisualState.Setters>
+                                                            </VisualState>
+                                                            <VisualState x:Name="CurrentFocus">
+                                                                <VisualState.Setters>
+                                                                    <Setter Target="PART_ContentPresenter.Foreground" Value="{ThemeResource BreadcrumbBarCurrentFocusForegroundBrush}" />
+                                                                </VisualState.Setters>
+                                                            </VisualState>
+                                                        </VisualStateGroup>
+                                                    </VisualStateManager.VisualStateGroups>
+                                                    <ContentPresenter
+                                                        x:Name="PART_ContentPresenter"
+                                                        AutomationProperties.AccessibilityView="Raw"
+                                                        Padding="{TemplateBinding Padding}"
+                                                        HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                        VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                        Content="{TemplateBinding Content}"
+                                                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                        ContentTransitions="{TemplateBinding ContentTransitions}"
+                                                        Foreground="{TemplateBinding Foreground}" />
+                                                </Grid>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </Button.Style>
+                            <Grid AutomationProperties.AccessibilityView="Raw">
+                                <ContentPresenter
+                                    x:Name="PART_ItemContentPresenter"
+                                    AutomationProperties.AccessibilityView="Raw"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}"
+                                    FontFamily="{TemplateBinding FontFamily}"
+                                    FontSize="{TemplateBinding FontSize}"
+                                    FontWeight="{TemplateBinding FontWeight}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    LineHeight="20"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                                <TextBlock
+                                    x:Name="PART_EllipsisTextBlock"
+                                    AutomationProperties.AccessibilityView="Raw"
+                                    FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                    FontSize="{TemplateBinding FontSize}"
+                                    IsTextScaleFactorEnabled="False"
+                                    Padding="3"
+                                    Text="&#xE712;"
+                                    VerticalAlignment="Stretch"
+                                    Visibility="Collapsed" />
+                            </Grid>
+                        </Button>
+                        <ContentPresenter
+                            x:Name="PART_LastItemContentPresenter"
+                            AutomationProperties.AccessibilityView="Raw"
+                            Background="{TemplateBinding Background}"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            ContentTransitions="{TemplateBinding ContentTransitions}"
+                            CornerRadius="{TemplateBinding CornerRadius}"
+                            FocusVisualMargin="-3"
+                            FontFamily="{TemplateBinding FontFamily}"
+                            FontSize="{TemplateBinding FontSize}"
+                            FontWeight="{TemplateBinding FontWeight}"
+                            Foreground="{ThemeResource BreadcrumbBarCurrentNormalForegroundBrush}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            LineHeight="20"
+                            Padding="4,2"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                            Visibility="Collapsed" />
+                        <ContentPresenter
+                            x:Name="PART_EllipsisDropDownItemContentPresenter"
+                            x:DeferLoadStrategy="Lazy"
+                            AutomationProperties.AccessibilityView="Raw"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            ContentTransitions="{TemplateBinding ContentTransitions}"
+                            FontSize="{ThemeResource GlassSettingsBreadcrumbOverflowItemFontSize}"
+                            FontWeight="Normal"
+                            HorizontalAlignment="{TemplateBinding HorizontalAlignment}"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalAlignment="{TemplateBinding VerticalAlignment}"
+                            Visibility="Collapsed" />
+                        <TextBlock
+                            x:Name="PART_ChevronTextBlock"
+                            Grid.Column="1"
+                            AutomationProperties.AccessibilityView="Raw"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                            FontSize="{ThemeResource BreadcrumbBarChevronFontSize}"
+                            Foreground="{ThemeResource BreadcrumbBarNormalForegroundBrush}"
+                            HorizontalAlignment="Center"
+                            IsHitTestVisible="False"
+                            IsTextScaleFactorEnabled="False"
+                            Padding="{ThemeResource BreadcrumbBarChevronPadding}"
+                            Text="&#xE76C;"
+                            VerticalAlignment="Center" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

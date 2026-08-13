@@ -1,0 +1,21 @@
+LIBRARY "ExplorerCompat"
+
+EXPORTS
+    ; ============================================
+    ; CORE LIFECYCLE
+    ; ============================================
+    ExplorerCompat_Initialize
+    ExplorerCompat_Shutdown
+    
+    ; ============================================
+    ; EVENT NOTIFICATIONS
+    ; ============================================
+    ExplorerCompat_HandleWinEvent
+    ExplorerCompat_NotifyDesktopBridgeWindow
+    ExplorerCompat_OnRootBackdropPolicyChanged
+    ExplorerCompat_PostLiveDisableChromeRedraw
+    ExplorerCompat_DebugComState
+    ExplorerCompat_RunIxdeComReclaim
+
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

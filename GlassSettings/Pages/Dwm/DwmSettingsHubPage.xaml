@@ -1,0 +1,62 @@
+<Page
+    x:Class="GlassSettings.Pages.Dwm.DwmSettingsHubPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls">
+    <ctrl:SettingsPageShell x:Name="PageShell">
+        <Grid x:Name="HivePivotHost" RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Pivot
+                x:Name="HivePivot"
+                Grid.Row="0"
+                SelectionChanged="HivePivot_OnSelectionChanged">
+                <Pivot.Resources>
+                    <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                </Pivot.Resources>
+                <PivotItem />
+                <PivotItem />
+            </Pivot>
+            <Grid x:Name="HiveTabContentHost" Grid.Row="1">
+                <ctrl:SettingsNavigationHost x:Name="UserNavHost" />
+                <ctrl:SettingsNavigationHost
+                    x:Name="SystemNavHost"
+                    Visibility="Collapsed" />
+            </Grid>
+            <ctrl:SettingsDividerExpander
+                x:Name="AdvancedExpander"
+                Grid.Row="2"
+                Expanded="AdvancedExpander_OnExpanded">
+                <StackPanel
+                    x:Name="AdvancedPanel"
+                    Spacing="{StaticResource SettingsCardSpacing}">
+                    <Expander
+                        x:Name="AdvancedHiveSpecificExpander"
+                        MinHeight="0"
+                        Margin="0"
+                        ExpandDirection="Down"
+                        IsExpanded="False"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="0"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch">
+                        <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                            <ctrl:SettingsInfoBlock x:Name="SystemAdvancedInfoBlock" />
+                            <ctrl:SettingsSystemGateExpander
+                                x:Name="SystemGeneralExpander"
+                                GateToggled="SystemGeneralExpander_OnGateToggled">
+                                <ctrl:SettingsParameterPanel x:Name="HooksPanel" />
+                            </ctrl:SettingsSystemGateExpander>
+                        </StackPanel>
+                    </Expander>
+                    <ctrl:SettingsProgressActionRow x:Name="SymbolsDownloadRow" />
+                </StackPanel>
+            </ctrl:SettingsDividerExpander>
+        </Grid>
+    </ctrl:SettingsPageShell>
+</Page>

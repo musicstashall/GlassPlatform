@@ -1,0 +1,301 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.DwmCompositionCascadePreview"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    HorizontalAlignment="Left"
+    VerticalAlignment="Top">
+
+    <!-- Каскад слоёв реальной композиции: Обои → Размытие → Свечение → Тинт (Win7).
+         Раскладка (размер/Translation) задаётся code-behind один раз; при смене
+         параметров меняются только заливки/видимость (без мерцания, как в «Стилизация»). -->
+    <Grid x:Name="CascadeRoot">
+
+        <!-- Одиночный каскад (Vista без inactive / Win7) -->
+        <Grid x:Name="SingleCascadeHost">
+            <Border
+                x:Name="WallpaperLayer"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="#40000000"
+                BorderThickness="1"
+                CornerRadius="6"
+                Translation="0,0,8">
+                <Border.Shadow>
+                    <ThemeShadow />
+                </Border.Shadow>
+                <Grid>
+                    <Grid x:Name="WallpaperVisualHost">
+                        <Image
+                            x:Name="WallpaperImageA"
+                            Stretch="UniformToFill"
+                            Visibility="Collapsed" />
+                        <Image
+                            x:Name="WallpaperImageB"
+                            Stretch="UniformToFill"
+                            Visibility="Collapsed" />
+                        <Rectangle
+                            x:Name="WallpaperFallback"
+                            Fill="{ThemeResource LayerFillColorAltBrush}" />
+                    </Grid>
+                    <Border
+                        x:Name="WallpaperLabelPill"
+                        Style="{StaticResource StylizationLayerLabelPillStyle}">
+                        <TextBlock
+                            x:Name="WallpaperLabel"
+                            Style="{StaticResource StylizationLayerLabelTextStyle}" />
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- Full: слой blur. WallpaperBlurBase: каскадная карточка «Стекло» (blur+glow+tint+ink). -->
+            <Border
+                x:Name="BlurLayer"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="Transparent"
+                BorderBrush="#40FFFFFF"
+                BorderThickness="1"
+                CornerRadius="6"
+                Translation="0,0,16">
+                <Border.Shadow>
+                    <ThemeShadow />
+                </Border.Shadow>
+                <Grid>
+                    <Grid x:Name="BlurVisualHost">
+                        <Rectangle x:Name="BlurFillA" />
+                        <Rectangle
+                            x:Name="BlurFillB"
+                            Opacity="0"
+                            Visibility="Collapsed" />
+                        <!-- Состав стекла внутри карточки (только WallpaperBlurBase). -->
+                        <Rectangle
+                            x:Name="EmbeddedGlowFillA"
+                            Visibility="Collapsed" />
+                        <Rectangle
+                            x:Name="EmbeddedGlowFillB"
+                            Opacity="0"
+                            Visibility="Collapsed" />
+                        <Rectangle
+                            x:Name="EmbeddedTintFill"
+                            Visibility="Collapsed" />
+                        <Rectangle
+                            x:Name="EmbeddedOpaqueOverlay"
+                            Fill="#55000000"
+                            Visibility="Collapsed" />
+                        <Grid
+                            x:Name="TextOverlayHost"
+                            Margin="16"
+                            IsHitTestVisible="False"
+                            Visibility="Collapsed">
+                            <Image
+                                x:Name="TextOverlayA"
+                                Stretch="Fill"
+                                Visibility="Collapsed" />
+                            <Image
+                                x:Name="TextOverlayB"
+                                Stretch="Fill"
+                                Visibility="Collapsed" />
+                        </Grid>
+                    </Grid>
+                    <Border
+                        x:Name="BlurLabelPill"
+                        Style="{StaticResource StylizationLayerLabelPillStyle}">
+                        <TextBlock
+                            x:Name="BlurLabel"
+                            Style="{StaticResource StylizationLayerLabelTextStyle}" />
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Border
+                x:Name="GlowLayer"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="Transparent"
+                BorderBrush="#40000000"
+                BorderThickness="1"
+                CornerRadius="6"
+                Translation="0,0,24"
+                Visibility="Collapsed">
+                <Border.Shadow>
+                    <ThemeShadow />
+                </Border.Shadow>
+                <Grid>
+                    <Grid x:Name="GlowVisualHost">
+                        <Rectangle x:Name="GlowFillA" />
+                        <Rectangle
+                            x:Name="GlowFillB"
+                            Opacity="0"
+                            Visibility="Collapsed" />
+                    </Grid>
+                    <Border
+                        x:Name="GlowLabelPill"
+                        Style="{StaticResource StylizationLayerLabelPillStyle}">
+                        <TextBlock
+                            x:Name="GlowLabel"
+                            Style="{StaticResource StylizationLayerLabelTextStyle}" />
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Border
+                x:Name="TintLayer"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="Transparent"
+                BorderBrush="#40FFFFFF"
+                BorderThickness="1"
+                CornerRadius="6"
+                Translation="0,0,32">
+                <Border.Shadow>
+                    <ThemeShadow />
+                </Border.Shadow>
+                <Grid>
+                    <Grid x:Name="TintVisualHost">
+                        <Rectangle x:Name="TintFill" />
+                        <Rectangle
+                            x:Name="OpaqueOverlay"
+                            Fill="#55000000"
+                            Visibility="Collapsed" />
+                    </Grid>
+                    <Border
+                        x:Name="TintLabelPill"
+                        Style="{StaticResource StylizationLayerLabelPillStyle}">
+                        <TextBlock
+                            x:Name="TintLabel"
+                            Style="{StaticResource StylizationLayerLabelTextStyle}" />
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Vista inactive: обои + blur + два полноценных tint-rect (active/inactive) -->
+        <Grid x:Name="SplitCascadeHost" Visibility="Collapsed">
+            <Border
+                x:Name="SplitSharedWallpaperLayer"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="#40000000"
+                BorderThickness="1"
+                CornerRadius="6"
+                Translation="0,0,8">
+                <Border.Shadow>
+                    <ThemeShadow />
+                </Border.Shadow>
+                <Grid>
+                    <Grid x:Name="SplitSharedWallpaperVisualHost">
+                        <Image
+                            x:Name="SplitSharedWallpaperImageA"
+                            Stretch="UniformToFill"
+                            Visibility="Collapsed" />
+                        <Image
+                            x:Name="SplitSharedWallpaperImageB"
+                            Stretch="UniformToFill"
+                            Visibility="Collapsed" />
+                        <Rectangle
+                            x:Name="SplitSharedWallpaperFallback"
+                            Fill="{ThemeResource LayerFillColorAltBrush}" />
+                    </Grid>
+                    <Border Style="{StaticResource StylizationLayerLabelPillStyle}">
+                        <TextBlock
+                            x:Name="SplitSharedWallpaperLabel"
+                            Style="{StaticResource StylizationLayerLabelTextStyle}" />
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Border
+                x:Name="SplitBlurLayer"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="Transparent"
+                BorderBrush="#40FFFFFF"
+                BorderThickness="1"
+                CornerRadius="6"
+                Translation="0,0,16">
+                <Border.Shadow>
+                    <ThemeShadow />
+                </Border.Shadow>
+                <Grid>
+                    <Grid x:Name="SplitBlurVisualHost">
+                        <Rectangle x:Name="SplitBlurFillA" />
+                        <Rectangle
+                            x:Name="SplitBlurFillB"
+                            Opacity="0"
+                            Visibility="Collapsed" />
+                    </Grid>
+                    <Border Style="{StaticResource StylizationLayerLabelPillStyle}">
+                        <TextBlock
+                            x:Name="SplitBlurLabel"
+                            Style="{StaticResource StylizationLayerLabelTextStyle}" />
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Border
+                x:Name="SplitRightTintLayer"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="Transparent"
+                BorderBrush="#40FFFFFF"
+                BorderThickness="1"
+                CornerRadius="6"
+                Translation="0,0,16">
+                <Border.Shadow>
+                    <ThemeShadow />
+                </Border.Shadow>
+                <Grid>
+                    <Grid x:Name="SplitRightTintVisualHost">
+                        <Rectangle x:Name="SplitRightTintFill" />
+                        <Rectangle
+                            x:Name="SplitRightOpaqueOverlay"
+                            Fill="#55000000"
+                            Visibility="Collapsed" />
+                    </Grid>
+                    <Border
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Bottom"
+                        Margin="0,0,4,4"
+                        Padding="6,1"
+                        Background="#B3000000"
+                        CornerRadius="4">
+                        <TextBlock
+                            x:Name="SplitRightTintLabel"
+                            Style="{StaticResource StylizationLayerLabelTextStyle}" />
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Border
+                x:Name="SplitLeftTintLayer"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="Transparent"
+                BorderBrush="#40FFFFFF"
+                BorderThickness="1"
+                CornerRadius="6"
+                Translation="0,0,24">
+                <Border.Shadow>
+                    <ThemeShadow />
+                </Border.Shadow>
+                <Grid>
+                    <Grid x:Name="SplitLeftTintVisualHost">
+                        <Rectangle x:Name="SplitLeftTintFill" />
+                        <Rectangle
+                            x:Name="SplitLeftOpaqueOverlay"
+                            Fill="#55000000"
+                            Visibility="Collapsed" />
+                    </Grid>
+                    <Border Style="{StaticResource StylizationLayerLabelPillStyle}">
+                        <TextBlock
+                            x:Name="SplitLeftTintLabel"
+                            Style="{StaticResource StylizationLayerLabelTextStyle}" />
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

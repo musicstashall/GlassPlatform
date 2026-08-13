@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.NavigationUserCard"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    HorizontalAlignment="Stretch">
+    <Border
+        x:Name="RootBorder"
+        Margin="{StaticResource NavigationUserCardMargin}"
+        MinHeight="{StaticResource GlassSettingsSectionRowMinHeight}"
+        Padding="12,14"
+        HorizontalAlignment="Stretch"
+        Background="Transparent"
+        BorderBrush="Transparent"
+        BorderThickness="1"
+        CornerRadius="8"
+        PointerEntered="RootBorder_OnPointerEntered"
+        PointerExited="RootBorder_OnPointerExited">
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="CommonStates">
+                <VisualState x:Name="Normal" />
+                <VisualState x:Name="PointerOver">
+                    <VisualState.Setters>
+                        <Setter Target="RootBorder.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                        <Setter Target="RootBorder.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+        <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Border
+                Width="40"
+                Height="40"
+                VerticalAlignment="Center"
+                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                CornerRadius="20">
+                <TextBlock
+                    x:Name="InitialsText"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    FontWeight="SemiBold"
+                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+            </Border>
+            <Grid Grid.Column="1" VerticalAlignment="Center" MaxHeight="44">
+                <StackPanel Spacing="2">
+                    <TextBlock
+                        x:Name="DisplayNameText"
+                        MaxLines="1"
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        x:Name="AccountTypeText"
+                        MaxLines="1"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

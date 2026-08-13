@@ -1,0 +1,60 @@
+<UserControl
+    x:Class="GlassSettings.Controls.ThemeHeroPreview"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls"
+    HorizontalAlignment="Left"
+    HorizontalContentAlignment="Left">
+    <Grid
+        HorizontalAlignment="Left"
+        Margin="{StaticResource GlassSettingsHeroPreviewShadowMargin}">
+        <Border
+            x:Name="RootBorder"
+            Width="{StaticResource GlassSettingsHeroPreviewOuterWidth}"
+            Height="{StaticResource GlassSettingsHeroPreviewOuterHeight}"
+            Background="{ThemeResource LayerFillColorAltBrush}"
+            BorderBrush="#FF1A1A1A"
+            BorderThickness="0"
+            CornerRadius="8"
+            Translation="0,0,8">
+            <Border.Shadow>
+                <ThemeShadow />
+            </Border.Shadow>
+            <Grid>
+                <Grid.Clip>
+                    <RectangleGeometry Rect="0,0,340,192" />
+                </Grid.Clip>
+                <Image
+                    x:Name="PreviewImageA"
+                    Stretch="UniformToFill"
+                    Visibility="Collapsed" />
+                <Image
+                    x:Name="PreviewImageB"
+                    Stretch="UniformToFill"
+                    Visibility="Collapsed" />
+                <Grid x:Name="PreviewFallback">
+                    <FontIcon
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontSize="48"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Glyph="&#xE790;" />
+                </Grid>
+            </Grid>
+        </Border>
+        <Grid
+            x:Name="ChromeOverlayHost"
+            Width="{StaticResource GlassSettingsHeroPreviewOuterWidth}"
+            Height="{StaticResource GlassSettingsHeroPreviewOuterHeight}"
+            HorizontalAlignment="Left"
+            IsHitTestVisible="False">
+            <ctrl:ThemePreviewChromeGlyph
+                x:Name="PreviewChrome"
+                Width="96"
+                Height="96"
+                Margin="0,0,12,22"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom" />
+        </Grid>
+    </Grid>
+</UserControl>

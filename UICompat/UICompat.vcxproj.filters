@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="config">
+      <UniqueIdentifier>{A1B2C3D4-E5F6-4789-A012-3456789ABCDE}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="xaml">
+      <UniqueIdentifier>{B2C3D4E5-F6A7-4890-B123-456789ABCDEF}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="xaml\brushes">
+      <UniqueIdentifier>{C3D4E5F6-A7B8-4901-C234-56789ABCDEF0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="xaml\effects">
+      <UniqueIdentifier>{D4E5F6A7-B8C9-4012-D345-6789ABCDEF01}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="config\UiRegistry.cpp">
+      <Filter>config</Filter>
+    </ClCompile>
+    <ClCompile Include="dllmain.cpp">
+    </ClCompile>
+    <ClCompile Include="UICompat.cpp">
+    </ClCompile>
+    <ClCompile Include="UiPch.cpp">
+    </ClCompile>
+    <ClCompile Include="xaml\DllGetClassObject.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlDiagGuids.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlClassFactory.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\XamlDiagInit.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\UiTapSite.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\UiVisualTreeWatcher.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\NotificationCenterPanelRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\NcMenuFlyoutPanelRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\JumpListPanelRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\ShellSurfacePanelRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\SearchWebViewPanelRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\brushes\XamlBlurBrush.cpp">
+      <Filter>xaml\brushes</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\brushes\XamlBackdropFactory.cpp">
+      <Filter>xaml\brushes</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\effects\GaussianBlurEffect.cpp">
+      <Filter>xaml\effects</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\effects\FloodEffect.cpp">
+      <Filter>xaml\effects</Filter>
+    </ClCompile>
+    <ClCompile Include="xaml\effects\CompositeEffect.cpp">
+      <Filter>xaml\effects</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="config\UiRegistry.h">
+      <Filter>config</Filter>
+    </ClInclude>
+    <ClInclude Include="UiPch.h">
+    </ClInclude>
+    <ClInclude Include="xaml\XamlClassFactory.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlDiagInit.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlGlassIds.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\XamlComLifetime.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\UiTapSite.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\UiVisualTreeWatcher.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\NotificationCenterPanelRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\NcMenuFlyoutPanelRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\JumpListPanelRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\ShellSurfacePanelRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\SearchWebViewPanelRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\brushes\XamlBlurBrush.hpp">
+      <Filter>xaml\brushes</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\brushes\XamlBackdropFactory.hpp">
+      <Filter>xaml\brushes</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\effects\GaussianBlurEffect.hpp">
+      <Filter>xaml\effects</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\effects\FloodEffect.hpp">
+      <Filter>xaml\effects</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\effects\CompositeEffect.hpp">
+      <Filter>xaml\effects</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="UICompat.def">
+    </None>
+  </ItemGroup>
+</Project>

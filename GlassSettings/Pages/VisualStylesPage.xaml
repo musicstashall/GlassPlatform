@@ -1,0 +1,167 @@
+<Page
+    x:Class="GlassSettings.Pages.VisualStylesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls"
+    xmlns:local="using:GlassSettings.Services">
+    <ctrl:SettingsPageShell x:Name="PageShell">
+            <StackPanel x:Name="RootStack" Spacing="16">
+                <Grid
+                    x:Name="HeroLayoutHost"
+                    HorizontalAlignment="Stretch"
+                    ColumnSpacing="24"
+                    RowSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="ColPreview" Width="Auto" />
+                        <ColumnDefinition x:Name="ColActions" Width="*" MinWidth="200" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <ctrl:ThemeHeroPreview
+                        x:Name="CurrentThemePreview"
+                        Grid.Row="0"
+                        Grid.Column="0"
+                        HorizontalAlignment="Left" />
+                    <Grid
+                        x:Name="QuickActionsHost"
+                        Grid.Row="0"
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        ColumnSpacing="8"
+                        RowSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition x:Name="QuickActionCol0" Width="Auto" />
+                            <ColumnDefinition x:Name="QuickActionCol1" Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <ctrl:ThemeQuickActionCard
+                            x:Name="BackgroundCard"
+                            Grid.Row="0"
+                            Grid.Column="0"
+                            Click="BackgroundCard_OnClick" />
+                        <ctrl:ThemeQuickActionCard
+                            x:Name="ColorCard"
+                            Grid.Row="0"
+                            Grid.Column="1"
+                            Click="ColorCard_OnClick" />
+                        <ctrl:ThemeQuickActionCard
+                            x:Name="StubCard"
+                            Grid.Row="1"
+                            Grid.Column="0" />
+                        <ctrl:ThemeQuickActionCard
+                            x:Name="TextFontsCard"
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            Click="TextFontsCard_OnClick" />
+                        <StackPanel
+                            x:Name="SaveOrPersonalizedHost"
+                            Grid.Row="2"
+                            Grid.Column="0"
+                            Grid.ColumnSpan="2"
+                            Orientation="Horizontal"
+                            Spacing="8">
+                            <Button
+                                x:Name="SaveThemeButton"
+                                Margin="0,4,0,0"
+                                Padding="24,6"
+                                HorizontalAlignment="Left"
+                                Click="SaveThemeButton_OnClick"
+                                Style="{StaticResource DefaultButtonStyle}"
+                                Visibility="Collapsed" />
+                            <Button
+                                x:Name="UsePersonalizedThemeButton"
+                                Margin="0,4,0,0"
+                                Padding="24,6"
+                                HorizontalAlignment="Left"
+                                Click="UsePersonalizedThemeButton_OnClick"
+                                Style="{StaticResource DefaultButtonStyle}"
+                                Visibility="Collapsed" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+                <ctrl:SettingsSystemGateExpander
+                    x:Name="ThemesExpander"
+                    ShowGateSwitch="False"
+                    HorizontalAlignment="Stretch">
+                    <StackPanel Spacing="0">
+                        <Grid x:Name="ThemeItemsHost" HorizontalAlignment="Stretch">
+                            <ItemsView
+                                x:Name="ThemeItems"
+                                HorizontalAlignment="Center"
+                                IsItemInvokedEnabled="True"
+                                ItemInvoked="ThemeItems_OnItemInvoked"
+                                SelectionMode="None"
+                                Visibility="Collapsed">
+                                <ItemsView.Layout>
+                                    <UniformGridLayout
+                                        MinColumnSpacing="8"
+                                        MinRowSpacing="8"
+                                        MaximumRowsOrColumns="6" />
+                                </ItemsView.Layout>
+                                <ItemsView.ItemTemplate>
+                                    <DataTemplate x:DataType="local:VisualStyleTileModel">
+                                        <ItemContainer AutomationProperties.Name="{x:Bind TooltipText}">
+                                        <ctrl:VisualStyleTile
+                                            Entry="{x:Bind Entry, Mode=OneWay}"
+                                            IsActive="{x:Bind IsActive}"
+                                            PreviewImagePath="{x:Bind PreviewImagePath}"
+                                            TooltipText="{x:Bind TooltipText}"
+                                            DeleteRequested="VisualStyleTile_OnDeleteRequested" />
+                                        </ItemContainer>
+                                    </DataTemplate>
+                                </ItemsView.ItemTemplate>
+                            </ItemsView>
+                        </Grid>
+                        <TextBlock
+                            x:Name="EmptyText"
+                            Margin="0,8,0,0"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource BodyTextBlockStyle}"
+                            Visibility="Collapsed" />
+                        <Border
+                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                            BorderThickness="0,1,0,0"
+                            Margin="0,12,0,0">
+                            <Grid Margin="0,12,0,0" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    x:Name="FindThemesText"
+                                    VerticalAlignment="Center"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource BodyTextBlockStyle}" />
+                                <Button
+                                    x:Name="BrowseThemesButton"
+                                    Grid.Column="1"
+                                    Click="BrowseThemesButton_OnClick"
+                                    Style="{StaticResource DefaultButtonStyle}" />
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </ctrl:SettingsSystemGateExpander>
+
+                <ctrl:SettingsDividerExpander x:Name="AdvancedExpander">
+                    <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                        <ctrl:SettingsSystemGateExpander
+                            x:Name="ThemePatcherStubExpander"
+                            ShowGateSwitch="False"
+                            IsExpanded="False">
+                            <TextBlock
+                                x:Name="ThemePatcherStubText"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                TextWrapping="WrapWholeWords" />
+                        </ctrl:SettingsSystemGateExpander>
+                    </StackPanel>
+                </ctrl:SettingsDividerExpander>
+            </StackPanel>
+    </ctrl:SettingsPageShell>
+</Page>

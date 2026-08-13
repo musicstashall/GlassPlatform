@@ -1,0 +1,29 @@
+; Неукрашенные имена для GetProcAddress на x86 (иначе _Name@N).
+LIBRARY WndCompat
+
+EXPORTS
+    WndCompat_Initialize
+    WndCompat_BeginShutdown
+    WndCompat_BeginHostExitShutdown
+    WndCompat_HandleWinEvent
+    WndCompat_EarlyExplorerRootAttach
+    WndCompat_FlushPendingDesktopBridges
+    WndCompat_RescanTaskbarDesktopWindowContentBridges
+    WndCompat_OnTaskbarIxdeInstallOutcome
+    WndCompat_FlushPendingCoreWindows
+    WndCompat_AttachExistingCoreWindows
+    WndCompat_OnCoreWindowIxdeReady
+    WndCompat_ResetUICompatNotifyProcCache
+    WndCompat_ResetTaskbarCompatNotifyProcCache
+    WndCompat_SetInjectionMode
+    WndCompat_ApplyInjectionModeVisuals
+    WndCompat_IsInitialized
+    WndCompat_ReapplyTaskbarBackdrops
+    WndCompat_ApplyBackdropPolicyToTrackedRoots
+    WndCompat_MarshalApplyRootBackdropReapplyForHwnd
+    WndCompat_PostLiveRootBackdropReapply
+    WndCompat_PostLiveRootColorizationToAppliedRoots
+    WndCompat_CopyTrackedRoots
+    WndCompat_NudgeExplorerShellNativeChrome
+    WndCompat_SyncExplorerShellChromeRedrawAll
+    WndCompat_SyncExplorerShellRootRedrawAll

@@ -1,0 +1,31 @@
+<Project>
+  <!--
+    Единый источник истины версии продукта Glass.
+    Меняется ТОЛЬКО здесь (Major.Minor.Patch). FileVersion (4-е поле) —
+    автоинкремент per-project через BuildNumber.txt и Directory.Build.targets.
+  -->
+  <PropertyGroup>
+    <GlassProductVersion>2.0.0.0</GlassProductVersion>
+    <GlassProductName>Glass Platform</GlassProductName>
+    <GlassCompanyName>Glass</GlassCompanyName>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.csproj'">
+    <Version>$(GlassProductVersion)</Version>
+    <AssemblyVersion>$(GlassProductVersion)</AssemblyVersion>
+    <InformationalVersion>$(GlassProductVersion)</InformationalVersion>
+    <Product>$(GlassProductName)</Product>
+    <Company>$(GlassCompanyName)</Company>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'GlassSettings'">
+    <SolutionRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))</SolutionRoot>
+    <BaseOutputPath>$(SolutionRoot)Build\</BaseOutputPath>
+    <OutputPath>$(SolutionRoot)Build\$(Platform)\$(Configuration)\</OutputPath>
+    <BaseIntermediateOutputPath>$(SolutionRoot)Cache\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)$(Platform)\$(Configuration)\</IntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+</Project>

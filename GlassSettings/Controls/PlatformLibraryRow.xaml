@@ -1,0 +1,10 @@
+<UserControl
+    x:Class="GlassSettings.Controls.PlatformLibraryRow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Orientation="Horizontal" Spacing="8">
+        <ComboBox x:Name="StatusCombo" MinWidth="140" SelectionChanged="StatusCombo_OnSelectionChanged" />
+        <Button x:Name="ActionsBtn" Content="&#xE712;" FontFamily="{ThemeResource SymbolThemeFontFamily}" Click="ActionsBtn_OnClick" />
+        <ToggleSwitch x:Name="EnableSwitch" Toggled="EnableSwitch_OnToggled" />
+    </StackPanel>
+</UserControl>

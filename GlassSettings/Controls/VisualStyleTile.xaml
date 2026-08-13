@@ -1,0 +1,57 @@
+<UserControl
+    x:Class="GlassSettings.Controls.VisualStyleTile"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls"
+    xmlns:services="using:GlassSettings.Services">
+    <Border
+        x:Name="RootBorder"
+        Background="{ThemeResource LayerFillColorDefaultBrush}"
+        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="8"
+        PointerEntered="RootBorder_OnPointerEntered"
+        PointerExited="RootBorder_OnPointerExited"
+        PointerPressed="RootBorder_OnPointerPressed"
+        RightTapped="RootBorder_OnRightTapped">
+        <Grid x:Name="PreviewHost">
+            <Image
+                x:Name="PreviewImage"
+                Stretch="UniformToFill"
+                Visibility="Collapsed" />
+            <Grid x:Name="PreviewFallback" Background="{ThemeResource LayerFillColorAltBrush}">
+                <FontIcon
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    FontSize="24"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Glyph="&#xE790;" />
+            </Grid>
+            <ctrl:ThemePreviewChromeGlyph
+                x:Name="PreviewChrome"
+                Margin="0,0,6,6"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Layout="Tile" />
+        </Grid>
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="CommonStates">
+                <VisualState x:Name="Normal" />
+                <VisualState x:Name="PointerOver">
+                    <VisualState.Setters>
+                        <Setter Target="RootBorder.BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+            <VisualStateGroup x:Name="ActiveStates">
+                <VisualState x:Name="Inactive" />
+                <VisualState x:Name="Active">
+                    <VisualState.Setters>
+                        <Setter Target="RootBorder.BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                        <Setter Target="RootBorder.BorderThickness" Value="2" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+    </Border>
+</UserControl>

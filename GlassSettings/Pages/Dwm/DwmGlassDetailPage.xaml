@@ -1,0 +1,49 @@
+<Page
+    x:Class="GlassSettings.Pages.Dwm.DwmGlassDetailPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls">
+    <ctrl:SettingsPageShell x:Name="PageShell">
+        <StackPanel x:Name="RootPanel" Spacing="{StaticResource SettingsCardSpacing}">
+            <ctrl:DwmHiveScopeBanner x:Name="HiveScopeBanner" />
+
+            <ctrl:SettingsFlatGateRow
+                x:Name="GeneralRow"
+                HorizontalAlignment="Stretch"
+                GateToggled="GeneralRow_OnGateToggled" />
+
+            <ctrl:SettingsSystemGateExpander
+                x:Name="WindowExpander"
+                HorizontalAlignment="Stretch"
+                GateToggled="WindowExpander_OnGateToggled">
+                <ctrl:SettingsParameterPanel x:Name="WindowParameterPanel" />
+            </ctrl:SettingsSystemGateExpander>
+
+            <ctrl:SettingsSystemGateExpander
+                x:Name="CaptionExpander"
+                HorizontalAlignment="Stretch"
+                GateToggled="CaptionExpander_OnGateToggled">
+                <ctrl:SettingsParameterPanel x:Name="CaptionParameterPanel" />
+            </ctrl:SettingsSystemGateExpander>
+
+            <Pivot x:Name="CaptionColorPivot" SelectionChanged="CaptionColorPivot_OnSelectionChanged">
+                <Pivot.Resources>
+                    <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                </Pivot.Resources>
+                <PivotItem />
+                <PivotItem />
+            </Pivot>
+            <Grid x:Name="CaptionTabContentHost">
+                <StackPanel
+                    x:Name="CaptionNormalPanel"
+                    HorizontalAlignment="Stretch"
+                    Spacing="{StaticResource SettingsCardSpacing}" />
+                <StackPanel
+                    x:Name="CaptionMaximizedPanel"
+                    HorizontalAlignment="Stretch"
+                    Spacing="{StaticResource SettingsCardSpacing}"
+                    Visibility="Collapsed" />
+            </Grid>
+        </StackPanel>
+    </ctrl:SettingsPageShell>
+</Page>

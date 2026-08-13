@@ -1,0 +1,482 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Include">
+      <UniqueIdentifier>{0F6CAFA8-81A3-4420-A9D5-B082E204229B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\Core">
+      <UniqueIdentifier>{F87F5CB4-78DC-42D2-AACF-6C608DBC1B8F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\Core\Intercept">
+      <UniqueIdentifier>{CA90DD98-0B4C-4CFA-8279-4F3C1E88CB79}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\Helpers">
+      <UniqueIdentifier>{3F9F19B0-3CB8-4BF2-A47D-330C1EE5C9E7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\Hooks">
+      <UniqueIdentifier>{8258F2E1-59DB-4DCA-9B24-DBD1A31E0F88}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\Module">
+      <UniqueIdentifier>{8C631966-30B8-44D8-B991-DAEA1EA24C3E}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\Subsystems">
+      <UniqueIdentifier>{6C432B51-99CB-49B7-886B-B94403096293}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{49DF3746-C1BA-445C-A02A-3D21F4CCDB73}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\Core">
+      <UniqueIdentifier>{6E0A81D1-97A9-44ED-BB76-6917C9D871C7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\Core\Intercept">
+      <UniqueIdentifier>{F49C886B-A01F-4B74-942E-40248E591556}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\Hooks">
+      <UniqueIdentifier>{AD2D1EBD-89BF-41BB-98D5-B0EBF2A27B8F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\Hooks\forms">
+      <UniqueIdentifier>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\Hooks\forms">
+      <UniqueIdentifier>{B2C3D4E5-F6A7-8901-BCDE-F12345678901}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\Module">
+      <UniqueIdentifier>{ED18E532-EA63-482A-A932-F26E009561D8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\Subsystems">
+      <UniqueIdentifier>{0978CCDD-0CB7-465D-A926-9F8B142E3AAB}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="CorePch.cpp">
+    </ClCompile>
+    <ClCompile Include="dllmain.cpp">
+    </ClCompile>
+    <ClCompile Include="src\Core\Engine.cpp">
+      <Filter>src\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Exports.cpp">
+      <Filter>src\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Intercept\CodePatcher.cpp">
+      <Filter>src\Core\Intercept</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Intercept\DebugDetourHooks.cpp">
+      <Filter>src\Core\Intercept</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Intercept\HookHelper.cpp">
+      <Filter>src\Core\Intercept</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Intercept\Hooks.cpp">
+      <Filter>src\Core\Intercept</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Intercept\IATRegistry.cpp">
+      <Filter>src\Core\Intercept</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Intercept\TrampolinePool.cpp">
+      <Filter>src\Core\Intercept</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Utils.cpp">
+      <Filter>src\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\ButtonHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\ComboBoxControlHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\ComboLBoxHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\DateTimePickerHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\DirectUIHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\DropDownHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\EditHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\ExplorerFrameHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\forms\FormsHooks.cpp">
+      <Filter>src\Hooks\forms</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\forms\FormsHooksInternal.cpp">
+      <Filter>src\Hooks\forms</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\forms\FormsHooksDrawTextEx.cpp">
+      <Filter>src\Hooks\forms</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\forms\FormsHooksDrawThemeBackground.cpp">
+      <Filter>src\Hooks\forms</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\forms\FormsHooksDtbButton.cpp">
+      <Filter>src\Hooks\forms</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\forms\FormsHooksDtbComboBox.cpp">
+      <Filter>src\Hooks\forms</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\forms\FormsHooksDtbDateTimePicker.cpp">
+      <Filter>src\Hooks\forms</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\HeaderHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\IeServerHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\ImmersiveHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\KbxLabelHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\ListBoxHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\ListViewHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\MonthCalHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\ProgressBarHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\RebarHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\RootGdiHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\RootWindowHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\ScrollBarDrawTheme.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\ScrollBarThemeHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\StaticHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\StatusBarHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\TabHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\TaskbarHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\ToolbarHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\TooltipHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\TraverseLogHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\TreeViewHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\UiRibbonHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\UpDownHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\UxThemeHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Module\ModuleHandler.cpp">
+      <Filter>src\Module</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\Animation.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\Controls.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\EffectHelper.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\FlyoutFrame.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\GdiHookUtils.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\Menu.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\MenuEvents.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\MenuHandler.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\MenuRendering.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\PaintDispatcher.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\RenderText.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\RootEvents.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\Settings.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\TabChromaCache.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\ThemePaintRegistry.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\Tooltip.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\RootLiveReload.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\TextInkClientRegistry.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Subsystems\TextGlowClientRegistry.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Include\Core\Engine.h">
+      <Filter>Include\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Core\Exports.h">
+      <Filter>Include\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Core\Intercept\CodePatcher.h">
+      <Filter>Include\Core\Intercept</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Core\Intercept\DebugDetourHooks.h">
+      <Filter>Include\Core\Intercept</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Core\Intercept\HookDispatcher.h">
+      <Filter>Include\Core\Intercept</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Core\Intercept\HookHelper.h">
+      <Filter>Include\Core\Intercept</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Core\Intercept\Hooks.h">
+      <Filter>Include\Core\Intercept</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Core\Intercept\IATRegistry.h">
+      <Filter>Include\Core\Intercept</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Core\Intercept\TrampolinePool.h">
+      <Filter>Include\Core\Intercept</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Core\Utils.h">
+      <Filter>Include\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\CorePch.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Helpers\TabChroma.h">
+      <Filter>Include\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\Button.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\ComboAddressPieSkip.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\ComboBoxControl.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\ComboLBox.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\DateTimePicker.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\DirectUI.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\DropDown.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\EditControl.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\ExplorerFrame.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\forms\FormsHooks.h">
+      <Filter>Include\Hooks\forms</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\forms\FormsHooksInternal.h">
+      <Filter>Include\Hooks\forms</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\forms\FormsHooksDtbPolicies.h">
+      <Filter>Include\Hooks\forms</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\forms\ButtonFormsNiDtbAccess.h">
+      <Filter>Include\Hooks\forms</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\forms\ComboFormsNiDtbAccess.h">
+      <Filter>Include\Hooks\forms</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\forms\DateTimePickerFormsNiDtbAccess.h">
+      <Filter>Include\Hooks\forms</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\Header.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\IeServer.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\ImmersiveHooks.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\KbxLabelHooks.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\ListBox.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\ListView.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\MonthCal.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\ProgressBar.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\Rebar.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\RootGdiHooks.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\RootWindowHooks.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\ScrollBar.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\ScrollBarDrawTheme.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\ScrollBarTheme.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\Static.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\StatusBar.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\Tab.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\TaskbarHooks.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\Toolbar.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\TooltipHooks.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\TraverseLogHooks.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\TreeView.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\UiRibbonHooks.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\UpDown.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\UxThemeHooks.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Module\ModuleHandler.h">
+      <Filter>Include\Module</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\Animation.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\Controls.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\EffectHelper.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\FlyoutFrame.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\GdiHookUtils.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\Menu.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\MenuEvents.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\MenuHandler.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\MenuRendering.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\PaintDispatcher.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\RenderText.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\RootSwcaGradient.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\Settings.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\ThemePaintRegistry.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\Tooltip.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\TooltipContext.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\RootLiveReload.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\TextInkClientRegistry.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\TextGlowClientRegistry.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config">
+    </None>
+  </ItemGroup>
+</Project>

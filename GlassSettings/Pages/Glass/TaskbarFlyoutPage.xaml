@@ -1,0 +1,54 @@
+<Page
+    x:Class="GlassSettings.Pages.Glass.TaskbarFlyoutPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls">
+    <ctrl:SettingsPageShell x:Name="PageShell">
+        <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+            <ctrl:SettingsInfoBlock
+                x:Name="OpenGlassTrayBorderNotice"
+                Visibility="Collapsed" />
+            <ctrl:SettingsInfoBlock
+                x:Name="DwmSystemBackdropNotice"
+                Visibility="Collapsed" />
+            <ctrl:PopupScopeSegmentBar
+                x:Name="PaintPathBar"
+                Visibility="Collapsed"
+                SharedLabelResourceKey="Param_ModeDwmSwca"
+                SeparateLabelResourceKey="Param_ModeXaml"
+                ScopeChanged="PaintPathBar_OnScopeChanged" />
+            <Grid x:Name="ScopeTransitionRoot">
+                <Grid x:Name="ScopeContentHost">
+                    <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                        <ctrl:SettingsFlatGateRow
+                            x:Name="EffectRow"
+                            GateToggled="EffectGate_OnToggled" />
+                        <ctrl:SettingsSystemGateExpander
+                            x:Name="GradientExpander"
+                            GateToggled="GradientGate_OnToggled">
+                            <ctrl:SettingsColorPickerPanel x:Name="GradientPanel">
+                                <ctrl:GlassAlphaColorPicker x:Name="GradientPicker" />
+                            </ctrl:SettingsColorPickerPanel>
+                        </ctrl:SettingsSystemGateExpander>
+                        <ctrl:SettingsSystemGateExpander
+                            x:Name="BorderExpander"
+                            ShowGateStateText="True"
+                            GateToggled="BorderGate_OnToggled">
+                            <ctrl:SettingsColorPickerPanel x:Name="BorderPanel">
+                                <ctrl:GlassAlphaColorPicker x:Name="BorderPicker" />
+                            </ctrl:SettingsColorPickerPanel>
+                        </ctrl:SettingsSystemGateExpander>
+                        <ctrl:SettingsFlatGateRow
+                            x:Name="CornerRow"
+                            GateToggled="CornerGate_OnToggled" />
+                        <ctrl:SettingsOptionRow x:Name="ZonesRow" />
+                        <ctrl:SettingsNavigateRow
+                            x:Name="AdjacentWindowsRow"
+                            Visibility="Collapsed"
+                            NavigateRequested="AdjacentWindowsRow_OnNavigateRequested" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </StackPanel>
+    </ctrl:SettingsPageShell>
+</Page>

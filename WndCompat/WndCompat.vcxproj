@@ -1,0 +1,310 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{1BE293A8-BBEF-4919-A79E-C6A90F581444}</ProjectGuid>
+    <RootNamespace>WndCompat</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <!-- CONFIGURATIONS -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <!-- OUTPUT DIRS -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <OutDir>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Cache\WndCompat\$(PlatformShortName)\$(Configuration)\</IntDir>
+    <TargetName>WndCompat</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <OutDir>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Cache\WndCompat\$(PlatformShortName)\$(Configuration)\</IntDir>
+    <TargetName>WndCompat</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Cache\WndCompat\$(PlatformShortName)\$(Configuration)\</IntDir>
+    <TargetName>WndCompat</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)Cache\WndCompat\$(PlatformShortName)\$(Configuration)\</IntDir>
+    <TargetName>WndCompat</TargetName>
+  </PropertyGroup>
+  <!-- COMPILER SETTINGS -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;WNDCOMPAT_EXPORTS;_WINDOWS;_USRDLL;GLASS_ENABLE_LOGGING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>WndPch.h</PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(SolutionDir)GlassShared\include;$(SolutionDir)GlassShared\include\Providers;$(SolutionDir)GlassShared\include\Helpers;$(ProjectDir);$(ProjectDir)include;$(SolutionDir)GlassCore\include;$(SolutionDir)gtl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>user32.lib;gdi32.lib;Psapi.lib;oleacc.lib;ole32.lib;uuid.lib;oleaut32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</AdditionalLibraryDirectories>
+      <ModuleDefinitionFile>WndCompat.def</ModuleDefinitionFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <!-- Release|Win32 -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;WNDCOMPAT_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>WndPch.h</PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(SolutionDir)GlassShared\include;$(SolutionDir)GlassShared\include\Providers;$(SolutionDir)GlassShared\include\Helpers;$(ProjectDir);$(ProjectDir)include;$(SolutionDir)GlassCore\include;$(SolutionDir)gtl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>user32.lib;gdi32.lib;Psapi.lib;oleacc.lib;ole32.lib;uuid.lib;oleaut32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</AdditionalLibraryDirectories>
+      <ModuleDefinitionFile>WndCompat.def</ModuleDefinitionFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <!-- Debug|x64 -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;WNDCOMPAT_EXPORTS;_WINDOWS;_USRDLL;GLASS_ENABLE_LOGGING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>WndPch.h</PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(SolutionDir)GlassShared\include;$(SolutionDir)GlassShared\include\Providers;$(SolutionDir)GlassShared\include\Helpers;$(ProjectDir);$(ProjectDir)include;$(SolutionDir)GlassCore\include;$(SolutionDir)gtl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>user32.lib;gdi32.lib;Psapi.lib;oleacc.lib;ole32.lib;uuid.lib;oleaut32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</AdditionalLibraryDirectories>
+      <ModuleDefinitionFile>WndCompat.def</ModuleDefinitionFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <!-- Release|x64 -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;WNDCOMPAT_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>WndPch.h</PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(SolutionDir)GlassShared\include;$(SolutionDir)GlassShared\include\Providers;$(SolutionDir)GlassShared\include\Helpers;$(ProjectDir);$(ProjectDir)include;$(SolutionDir)GlassCore\include;$(SolutionDir)gtl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>user32.lib;gdi32.lib;Psapi.lib;oleacc.lib;ole32.lib;uuid.lib;oleaut32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Build\$(PlatformShortName)\$(Configuration)\</AdditionalLibraryDirectories>
+      <ModuleDefinitionFile>WndCompat.def</ModuleDefinitionFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <!-- SOURCE FILES -->
+  <ItemGroup>
+    <ClCompile Include="Controls\ButtonSubclass.cpp" />
+    <ClCompile Include="Controls\ControlNameSubclass.cpp" />
+    <ClCompile Include="Providers\DirectUIEventProvider.cpp" />
+    <ClCompile Include="Controls\DirectUISubclass.cpp" />
+    <ClCompile Include="Controls\NetUISubclass.cpp" />
+    <ClCompile Include="Controls\EditSubclass.cpp" />
+    <ClCompile Include="Controls\ListViewSubclass.cpp" />
+    <ClCompile Include="Controls\HeaderSubclass.cpp" />
+    <ClCompile Include="Controls\ListBoxSubclass.cpp" />
+    <ClCompile Include="Controls\StatusBarSubclass.cpp" />
+    <ClCompile Include="Controls\ProgressBarSubclass.cpp" />
+    <ClCompile Include="Controls\DateTimePickerSubclass.cpp" />
+    <ClCompile Include="Providers\RebarEventProvider.cpp" />
+    <ClCompile Include="Controls\RebarSubclass.cpp" />
+    <ClCompile Include="Controls\StaticSubclass.cpp" />
+    <ClCompile Include="Controls\MonthCalSubclass.cpp" />
+    <ClCompile Include="Controls\TabControlSubclass.cpp" />
+    <ClCompile Include="Controls\ToolbarSubclass.cpp" />
+    <ClCompile Include="Controls\TrackBarHost.cpp" />
+    <ClCompile Include="Controls\UpDownHost.cpp" />
+    <ClCompile Include="Controls\TreeViewSubclass.cpp" />
+    <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="Popup\ComboLBox\ComboBoxSubclass.cpp" />
+    <ClCompile Include="Popup\ComboLBox\ComboLBoxSubclass.cpp" />
+    <ClCompile Include="Providers\DropDownEventProvider.cpp" />
+    <ClCompile Include="Popup\DropDown\DropDownSubclass.cpp" />
+    <ClCompile Include="Popup\DropDown\ListviewPopupSubclass.cpp" />
+    <ClCompile Include="Popup\DropDown\ViewControlSubclass.cpp" />
+    <ClCompile Include="Popup\Menu\MenuContext.cpp" />
+    <ClCompile Include="Providers\MenuEventProvider.cpp" />
+    <ClCompile Include="Providers\TooltipEventProvider.cpp" />
+    <ClCompile Include="Popup\Menu\MenuOwnerSubclass.cpp" />
+    <ClCompile Include="Popup\Menu\MenuPolicy.cpp" />
+    <ClCompile Include="Popup\Menu\MenuSubclass.cpp" />
+    <ClCompile Include="Popup\Tooltip\TooltipSubclass.cpp" />
+    <ClCompile Include="Popup\Tooltip\KbxLabelSubclass.cpp" />
+    <ClCompile Include="Providers\RootEventProvider.cpp" />
+    <ClCompile Include="Root\ExplorerRootSubclass.cpp" />
+    <ClCompile Include="Root\RootBackdropRefreshThrottle.cpp" />
+    <ClCompile Include="Root\Win32ChromeRestore.cpp" />
+    <ClCompile Include="Root\RootSubclass.cpp" />
+    <ClCompile Include="Root\TaskbarHost.cpp" />
+    <ClCompile Include="Explorer\ExplorerIslandContainerSubclass.cpp" />
+    <ClCompile Include="Tracker\WindowClassifier.cpp" />
+    <ClCompile Include="Tracker\WindowClassUtils.cpp" />
+    <ClCompile Include="Tracker\BackdropPolicyRescan.cpp" />
+    <ClCompile Include="Tracker\WinEventHandler.cpp" />
+    <ClCompile Include="Tracker\SubclassDiagPublish.cpp" />
+    <ClCompile Include="Tracker\GlassAttachGate.cpp" />
+    <ClCompile Include="Mshtml\IeServerHost.cpp" />
+    <ClCompile Include="WinUiBridge\WinUiDesktopBridgeHost.cpp" />
+    <ClCompile Include="WinUiBridge\WinUiContentBridgeHost.cpp" />
+    <ClCompile Include="WinUiBridge\CoreWindowHost.cpp" />
+    <ClCompile Include="Controls\ScrollBarHost.cpp" />
+    <ClCompile Include="UiDispatcher.cpp" />
+    <ClCompile Include="WndCompat.cpp" />
+    <ClCompile Include="WndPch.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
+    </ClCompile>
+  </ItemGroup>
+  <!-- HEADER FILES -->
+  <ItemGroup>
+    <ClInclude Include="Controls\ButtonSubclass.h" />
+    <ClInclude Include="Controls\ControlNameSubclass.h" />
+    <ClInclude Include="Controls\DirectUISubclass.h" />
+    <ClInclude Include="Controls\NetUISubclass.h" />
+    <ClInclude Include="Controls\EditSubclass.h" />
+    <ClInclude Include="Controls\ListViewSubclass.h" />
+    <ClInclude Include="Controls\HeaderSubclass.h" />
+    <ClInclude Include="Controls\RebarSubclass.h" />
+    <ClInclude Include="Controls\StaticSubclass.h" />
+    <ClInclude Include="Controls\MonthCalSubclass.h" />
+    <ClInclude Include="Controls\TabControlSubclass.h" />
+    <ClInclude Include="Controls\ToolbarSubclass.h" />
+    <ClInclude Include="Controls\TrackBarHost.h" />
+    <ClInclude Include="Controls\UpDownHost.h" />
+    <ClInclude Include="Controls\TreeViewSubclass.h" />
+    <ClInclude Include="Popup\ComboLBox\ComboBoxSubclass.h" />
+    <ClInclude Include="Popup\ComboLBox\ComboLBoxSubclass.h" />
+    <ClInclude Include="Popup\DropDown\DropDownSubclass.h" />
+    <ClInclude Include="Popup\DropDown\ListviewPopupSubclass.h" />
+    <ClInclude Include="Popup\DropDown\ViewControlSubclass.h" />
+    <ClInclude Include="Popup\Menu\MenuOwnerSubclass.h" />
+    <ClInclude Include="Popup\Menu\MenuPolicy.h" />
+    <ClInclude Include="Popup\Menu\MenuSubclass.h" />
+    <ClInclude Include="Popup\Tooltip\TooltipSubclass.h" />
+    <ClInclude Include="Popup\Tooltip\KbxLabelSubclass.h" />
+    <ClInclude Include="Root\ExplorerRootSubclass.h" />
+    <ClInclude Include="Root\RootBackdropRefreshThrottle.h" />
+    <ClInclude Include="Root\Win32ChromeRestore.h" />
+    <ClInclude Include="Root\RootSubclass.h" />
+    <ClInclude Include="Root\TaskbarHost.h" />
+    <ClInclude Include="Root\RootExplorerSubclassBridge.h" />
+    <ClInclude Include="Root\RootSubclassShared.h" />
+    <ClInclude Include="Explorer\ExplorerIslandContainerSubclass.h" />
+    <ClInclude Include="Tracker\WindowClassifier.h" />
+    <ClInclude Include="Tracker\WindowClassUtils.h" />
+    <ClInclude Include="Tracker\BackdropPolicyRescan.h" />
+    <ClInclude Include="Tracker\WinEventHandler.h" />
+    <ClInclude Include="Tracker\GlassAttachGate.h" />
+    <ClInclude Include="Mshtml\IeServerHost.h" />
+    <ClInclude Include="WinUiBridge\WinUiDesktopBridgeHost.h" />
+    <ClInclude Include="WinUiBridge\WinUiContentBridgeHost.h" />
+    <ClInclude Include="WinUiBridge\CoreWindowHost.h" />
+    <ClInclude Include="Controls\ScrollBarHost.h" />
+    <ClInclude Include="uah.h" />
+    <ClInclude Include="UiDispatcher.h" />
+    <ClInclude Include="WndCompat.h" />
+    <ClInclude Include="WndPch.h" />
+  </ItemGroup>
+  <!-- REFERENCES -->
+  <ItemGroup>
+    <ProjectReference Include="..\GlassShared\GlassShared.vcxproj">
+      <Project>{2591BB0C-7C14-42FC-A888-D9A7F4D2A723}</Project>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+    <None Include="WndCompat.def" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets" Condition="Exists('..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets')" />
+  </ImportGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>Данный проект ссылается на пакеты NuGet, отсутствующие на этом компьютере. Используйте восстановление пакетов NuGet, чтобы скачать их.  Дополнительную информацию см. по адресу: http://go.microsoft.com/fwlink/?LinkID=322105. Отсутствует следующий файл: {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets'))" />
+  </Target>
+</Project>

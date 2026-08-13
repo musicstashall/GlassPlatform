@@ -1,0 +1,405 @@
+<Page
+    x:Class="GlassSettings.Pages.Dwm.DwmThemeDetailPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls"
+    xmlns:dwm="using:GlassSettings.Pages.Dwm">
+    <ctrl:SettingsPageShell x:Name="PageShell">
+        <StackPanel Spacing="16">
+            <ctrl:DwmHiveScopeBanner x:Name="HiveScopeBanner" />
+
+            <!-- Hero: превью + карточка политики (2/3 справа) -->
+            <Grid
+                x:Name="HeroLayoutHost"
+                ColumnSpacing="24"
+                RowSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="PreviewColumn" Width="Auto" />
+                    <ColumnDefinition x:Name="PolicyColumn" Width="2*" MinWidth="200" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid
+                    x:Name="PreviewCard"
+                    Grid.Row="0"
+                    Grid.Column="0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Margin="{StaticResource GlassSettingsHeroPreviewShadowMargin}">
+                    <ctrl:StylizationLayeredPreview x:Name="LayeredPreview" />
+                </Grid>
+
+                <Border
+                    x:Name="PolicyCard"
+                    Grid.Row="0"
+                    Grid.Column="1"
+                    MinHeight="{StaticResource GlassSettingsHeroPreviewOuterHeight}"
+                    Padding="{StaticResource GlassSettingsOpacityRowPadding}"
+                    VerticalAlignment="Top"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <Grid RowSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border
+                            x:Name="PolicyGatedContent"
+                            Grid.Row="0"
+                            Background="Transparent">
+                        <Grid
+                            x:Name="PolicyContentGrid"
+                            ColumnSpacing="16"
+                            VerticalAlignment="Stretch">
+                            <Grid.RowDefinitions>
+                                <RowDefinition x:Name="PolicyContentMainRow" Height="*" />
+                                <RowDefinition x:Name="PolicyContentStackRow" Height="0" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="PolicyTextColumn" Width="*" MinWidth="0" />
+                                <ColumnDefinition x:Name="PolicyChecksColumn" Width="*" MinWidth="0" />
+                            </Grid.ColumnDefinitions>
+
+                            <Grid
+                                x:Name="PolicyTextHost"
+                                Grid.Row="0"
+                                Grid.Column="0"
+                                MinWidth="0"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Stretch">
+                                <Grid
+                                    x:Name="PolicyTitlePanel"
+                                    MinWidth="0"
+                                    RowSpacing="4">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid
+                                        x:Name="PolicyHeaderRow"
+                                        Grid.Row="0"
+                                        MinWidth="0"
+                                        HorizontalAlignment="Stretch"
+                                        ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" MinWidth="0" />
+                                        </Grid.ColumnDefinitions>
+                                        <ctrl:UnsavedIndicatorDot
+                                            x:Name="PolicyUnsavedDot"
+                                            Grid.Column="0"
+                                            VerticalAlignment="Center"
+                                            Visibility="Collapsed" />
+                                        <FontIcon
+                                            x:Name="PolicyIcon"
+                                            Grid.Column="1"
+                                            FontSize="{StaticResource GlassSettingsSectionIconSize}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Glyph="&#xE713;" />
+                                        <TextBlock
+                                            x:Name="PolicyTitleText"
+                                            Grid.Column="2"
+                                            MinWidth="0"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                    <TextBlock
+                                        x:Name="PolicyDescText"
+                                        Grid.Row="1"
+                                        MinWidth="0"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        TextWrapping="WrapWholeWords" />
+                                </Grid>
+                            </Grid>
+
+                            <Grid
+                                x:Name="PolicyChecksHost"
+                                Grid.Row="0"
+                                Grid.Column="1"
+                                MinWidth="0"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Center">
+                            <Grid
+                                x:Name="PolicyCheckboxesGrid"
+                                MinWidth="0"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Center"
+                                ColumnSpacing="8"
+                                RowSpacing="4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition x:Name="PolicyCheckCol0" Width="*" MinWidth="0" />
+                                    <ColumnDefinition x:Name="PolicyCheckCol1" Width="*" MinWidth="0" />
+                                    <ColumnDefinition x:Name="PolicyCheckCol2" Width="*" MinWidth="0" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition x:Name="PolicyCheckboxesSecondRow" Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <CheckBox
+                                    x:Name="PolicyTitlebarCheck"
+                                    Grid.Row="0"
+                                    Grid.Column="0"
+                                    MinWidth="0"
+                                    HorizontalAlignment="Stretch"
+                                    Checked="PolicyCheckbox_OnChanged"
+                                    Unchecked="PolicyCheckbox_OnChanged" />
+                                <CheckBox
+                                    x:Name="PolicyAeroPeekCheck"
+                                    Grid.Row="0"
+                                    Grid.Column="1"
+                                    MinWidth="0"
+                                    HorizontalAlignment="Stretch"
+                                    Checked="PolicyCheckbox_OnChanged"
+                                    Unchecked="PolicyCheckbox_OnChanged" />
+                                <CheckBox
+                                    x:Name="PolicyAeroSnapCheck"
+                                    Grid.Row="1"
+                                    Grid.Column="0"
+                                    MinWidth="0"
+                                    HorizontalAlignment="Stretch"
+                                    Checked="PolicyCheckbox_OnChanged"
+                                    Unchecked="PolicyCheckbox_OnChanged" />
+                            </Grid>
+                            </Grid>
+                        </Grid>
+                        </Border>
+
+                        <Border
+                            Grid.Row="1"
+                            Padding="0,8,0,0"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="0,1,0,0">
+                            <ctrl:GlassSettingsLabeledToggleSwitch
+                                x:Name="PolicyGateSwitch"
+                                HorizontalAlignment="Right"
+                                Toggled="PolicyGateSwitch_OnToggled" />
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Информационный блок -->
+            <ctrl:SettingsInfoBlock
+                x:Name="ReflectionInfoBlock"
+                IconGlyph="&#xE946;" />
+
+            <!-- Параллакс (полная ширина) -->
+            <ctrl:SettingsFlatGateRow
+                x:Name="ParallaxRow"
+                HorizontalAlignment="Stretch"
+                GateToggled="ParallaxRow_OnGateToggled" />
+
+            <!-- Коллекция отражений -->
+            <ctrl:SettingsSystemGateExpander
+                x:Name="ReflectionCollectionExpander"
+                GateToggled="ReflectionCollectionExpander_OnGateToggled"
+                HorizontalAlignment="Stretch">
+                <Grid
+                    x:Name="ReflectionItemsHost"
+                    MinHeight="120"
+                    SizeChanged="ReflectionItemsHost_OnSizeChanged">
+                    <Border
+                        x:Name="EmptyStateHost"
+                        MinHeight="120"
+                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Visibility="Collapsed">
+                        <StackPanel
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="8">
+                            <FontIcon
+                                HorizontalAlignment="Center"
+                                FontSize="24"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Glyph="&#xE91B;" />
+                            <TextBlock
+                                x:Name="EmptyText"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource BodyTextBlockStyle}" />
+                        </StackPanel>
+                    </Border>
+                    <ItemsView
+                        x:Name="ReflectionItems"
+                        HorizontalAlignment="Center"
+                        IsItemInvokedEnabled="True"
+                        ItemInvoked="ReflectionItems_OnItemInvoked"
+                        SelectionMode="None"
+                        Visibility="Collapsed">
+                        <ItemsView.Layout>
+                            <UniformGridLayout
+                                MinColumnSpacing="12"
+                                MinRowSpacing="12"
+                                MaximumRowsOrColumns="5" />
+                        </ItemsView.Layout>
+                        <ItemsView.ItemTemplate>
+                            <DataTemplate x:DataType="dwm:ReflectionImageTileModel">
+                                <ItemContainer AutomationProperties.Name="{x:Bind Title}">
+                                    <ctrl:ReflectionImageTile
+                                        Tag="{x:Bind}"
+                                        FilePath="{x:Bind FilePath}"
+                                        Image="{x:Bind Image}"
+                                        IsSelected="{x:Bind IsSelected, Mode=OneWay}"
+                                        TooltipText="{x:Bind Title}" />
+                                </ItemContainer>
+                            </DataTemplate>
+                        </ItemsView.ItemTemplate>
+                    </ItemsView>
+                </Grid>
+            </ctrl:SettingsSystemGateExpander>
+
+            <!-- Коллекция материала -->
+            <ctrl:SettingsSystemGateExpander
+                x:Name="MaterialCollectionExpander"
+                GateToggled="MaterialCollectionExpander_OnGateToggled"
+                HorizontalAlignment="Stretch">
+                <Grid
+                    x:Name="MaterialItemsHost"
+                    MinHeight="120"
+                    SizeChanged="MaterialItemsHost_OnSizeChanged">
+                    <Border
+                        x:Name="MaterialEmptyStateHost"
+                        MinHeight="120"
+                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Visibility="Collapsed">
+                        <StackPanel
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="8">
+                            <FontIcon
+                                HorizontalAlignment="Center"
+                                FontSize="24"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Glyph="&#xE91B;" />
+                            <TextBlock
+                                x:Name="MaterialEmptyText"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource BodyTextBlockStyle}" />
+                        </StackPanel>
+                    </Border>
+                    <ItemsView
+                        x:Name="MaterialItems"
+                        HorizontalAlignment="Center"
+                        IsItemInvokedEnabled="True"
+                        ItemInvoked="MaterialItems_OnItemInvoked"
+                        SelectionMode="None"
+                        Visibility="Collapsed">
+                        <ItemsView.Layout>
+                            <UniformGridLayout
+                                MinColumnSpacing="12"
+                                MinRowSpacing="12"
+                                MaximumRowsOrColumns="5" />
+                        </ItemsView.Layout>
+                        <ItemsView.ItemTemplate>
+                            <DataTemplate x:DataType="dwm:ReflectionImageTileModel">
+                                <ItemContainer AutomationProperties.Name="{x:Bind Title}">
+                                    <ctrl:ReflectionImageTile
+                                        Tag="{x:Bind}"
+                                        FilePath="{x:Bind FilePath}"
+                                        Image="{x:Bind Image}"
+                                        IsSelected="{x:Bind IsSelected, Mode=OneWay}"
+                                        TooltipText="{x:Bind Title}" />
+                                </ItemContainer>
+                            </DataTemplate>
+                        </ItemsView.ItemTemplate>
+                    </ItemsView>
+                </Grid>
+            </ctrl:SettingsSystemGateExpander>
+
+            <!-- Коллекция атласов -->
+            <ctrl:SettingsSystemGateExpander
+                x:Name="AtlasCollectionExpander"
+                DimHeaderActionsWithGate="False"
+                GateToggled="AtlasCollectionExpander_OnGateToggled"
+                HorizontalAlignment="Stretch">
+                <Grid
+                    x:Name="AtlasItemsHost"
+                    MinHeight="120"
+                    SizeChanged="AtlasItemsHost_OnSizeChanged">
+                    <Border
+                        x:Name="AtlasEmptyStateHost"
+                        MinHeight="120"
+                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Visibility="Collapsed">
+                        <StackPanel
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="8">
+                            <FontIcon
+                                HorizontalAlignment="Center"
+                                FontSize="24"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Glyph="&#xE91B;" />
+                            <TextBlock
+                                x:Name="AtlasEmptyText"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource BodyTextBlockStyle}" />
+                        </StackPanel>
+                    </Border>
+                    <ItemsView
+                        x:Name="AtlasItems"
+                        HorizontalAlignment="Center"
+                        IsItemInvokedEnabled="True"
+                        ItemInvoked="AtlasItems_OnItemInvoked"
+                        SelectionMode="None"
+                        Visibility="Collapsed">
+                        <ItemsView.Layout>
+                            <UniformGridLayout
+                                MinColumnSpacing="12"
+                                MinRowSpacing="12"
+                                MaximumRowsOrColumns="5" />
+                        </ItemsView.Layout>
+                        <ItemsView.ItemTemplate>
+                            <DataTemplate x:DataType="dwm:AtlasImageTileModel">
+                                <ItemContainer AutomationProperties.Name="{x:Bind Title}">
+                                    <ctrl:AtlasImageTile
+                                        Tag="{x:Bind}"
+                                        FilePath="{x:Bind FilePath}"
+                                        Image="{x:Bind Image, Mode=OneWay}"
+                                        IsSelected="{x:Bind IsSelected, Mode=OneWay}"
+                                        PreviewState="{x:Bind PreviewState, Mode=OneWay}"
+                                        TooltipText="{x:Bind Title}" />
+                                </ItemContainer>
+                            </DataTemplate>
+                        </ItemsView.ItemTemplate>
+                    </ItemsView>
+                </Grid>
+            </ctrl:SettingsSystemGateExpander>
+
+            <ctrl:SettingsDividerExpander
+                x:Name="AdvancedExpander"
+                Expanded="AdvancedExpander_OnExpanded">
+                <StackPanel x:Name="AdvancedPanel" Spacing="{StaticResource SettingsCardSpacing}">
+                    <Pivot x:Name="ActivePivot" SelectionChanged="ActivePivot_OnSelectionChanged">
+                        <Pivot.Resources>
+                            <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                        </Pivot.Resources>
+                        <PivotItem />
+                        <PivotItem />
+                    </Pivot>
+                    <Grid x:Name="TabContentHost" HorizontalAlignment="Stretch">
+                        <StackPanel x:Name="OpacityTabPanel" Spacing="{StaticResource SettingsCardSpacing}" />
+                    </Grid>
+                </StackPanel>
+            </ctrl:SettingsDividerExpander>
+
+        </StackPanel>
+    </ctrl:SettingsPageShell>
+</Page>

@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Ui">
+      <UniqueIdentifier>{CCA9728E-03C6-4FC1-B9C9-23CB1F467AAC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Ui\Helpers">
+      <UniqueIdentifier>{AAF3982B-7A19-4B0D-9D44-B39E63B47BC9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Ui\List">
+      <UniqueIdentifier>{318F1349-F807-4650-9BA8-07F91380FC3D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Ui\MainWindow">
+      <UniqueIdentifier>{E05D3CFC-B6E0-4EFD-9E10-12067BB1C937}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Ui\Messages">
+      <UniqueIdentifier>{CC73ABDD-C43B-4A51-B01E-51B9D46289BF}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Ui\Model">
+      <UniqueIdentifier>{54AC85C3-57FD-46B2-8155-6DF21D7F10DC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Ui\Theme">
+      <UniqueIdentifier>{21D69246-01F0-4823-838B-B06755C5F494}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="GlassLogBridge.cpp">
+    </ClCompile>
+    <ClCompile Include="GlassLogServer.cpp">
+    </ClCompile>
+    <ClCompile Include="LogClient.cpp">
+    </ClCompile>
+    <ClCompile Include="LogViewerBackdrop.cpp">
+    </ClCompile>
+    <ClCompile Include="LogViewerComboLBoxSubclass.cpp">
+    </ClCompile>
+    <ClCompile Include="LogViewerGlassAttach.cpp">
+    </ClCompile>
+    <ClCompile Include="LogViewerGlassHost.cpp">
+    </ClCompile>
+    <ClCompile Include="LogViewerOpenGlass.cpp">
+    </ClCompile>
+    <ClCompile Include="LogViewerProcessDump.cpp">
+    </ClCompile>
+    <ClCompile Include="LogViewerWndCompatScan.cpp">
+    </ClCompile>
+    <ClCompile Include="main.cpp">
+    </ClCompile>
+    <ClCompile Include="MessageRouter.cpp">
+    </ClCompile>
+    <ClCompile Include="SharedPch.cpp">
+    </ClCompile>
+    <ClCompile Include="Ui\Helpers\LogViewerUiHelpers.cpp">
+      <Filter>Ui\Helpers</Filter>
+    </ClCompile>
+    <ClCompile Include="Ui\List\LogViewerTabListView.cpp">
+      <Filter>Ui\List</Filter>
+    </ClCompile>
+    <ClCompile Include="Ui\MainWindow\LogViewerFilterPopup.cpp">
+      <Filter>Ui\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Ui\MainWindow\UiMainWindow.cpp">
+      <Filter>Ui\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Ui\MainWindow\UiMainWindow_ImplCommands.cpp">
+      <Filter>Ui\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Ui\MainWindow\UiMainWindow_ImplData.cpp">
+      <Filter>Ui\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Ui\MainWindow\UiMainWindow_ImplPlatform.cpp">
+      <Filter>Ui\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Ui\MainWindow\UiMainWindow_ImplTabs.cpp">
+      <Filter>Ui\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Ui\MainWindow\UiMainWindow_ImplToolbar.cpp">
+      <Filter>Ui\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Ui\MainWindow\UiMainWindow_Subclasses.cpp">
+      <Filter>Ui\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Ui\MainWindow\UiMainWindow_WndProc.cpp">
+      <Filter>Ui\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Ui\Model\LogViewerLogModel.cpp">
+      <Filter>Ui\Model</Filter>
+    </ClCompile>
+    <ClCompile Include="UiRebarSetup.cpp">
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="framework.h">
+    </ClInclude>
+    <ClInclude Include="GlassLogBridge.h">
+    </ClInclude>
+    <ClInclude Include="GlassLogServer.h">
+    </ClInclude>
+    <ClInclude Include="LogClient.h">
+    </ClInclude>
+    <ClInclude Include="LogPacket.h">
+    </ClInclude>
+    <ClInclude Include="LogViewerBackdrop.h">
+    </ClInclude>
+    <ClInclude Include="LogViewerComboLBoxSubclass.h">
+    </ClInclude>
+    <ClInclude Include="LogViewerGlassAttach.h">
+    </ClInclude>
+    <ClInclude Include="LogViewerGlassHost.h">
+    </ClInclude>
+    <ClInclude Include="LogViewerLevelColors.h">
+    </ClInclude>
+    <ClInclude Include="LogViewerOpenGlass.h">
+    </ClInclude>
+    <ClInclude Include="LogViewerProcessDump.h">
+    </ClInclude>
+    <ClInclude Include="LogViewerWndCompatScan.h">
+    </ClInclude>
+    <ClInclude Include="MessageRouter.h">
+    </ClInclude>
+    <ClInclude Include="Resource.h">
+    </ClInclude>
+    <ClInclude Include="targetver.h">
+    </ClInclude>
+    <ClInclude Include="Ui\Helpers\LogViewerUiHelpers.h">
+      <Filter>Ui\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="Ui\List\LogViewerTabListView.h">
+      <Filter>Ui\List</Filter>
+    </ClInclude>
+    <ClInclude Include="Ui\MainWindow\UiMainWindowImpl.h">
+      <Filter>Ui\MainWindow</Filter>
+    </ClInclude>
+    <ClInclude Include="Ui\MainWindow\UiMainWindowInternal.h">
+      <Filter>Ui\MainWindow</Filter>
+    </ClInclude>
+    <ClInclude Include="Ui\MainWindow\UiMainWindowSubclasses.h">
+      <Filter>Ui\MainWindow</Filter>
+    </ClInclude>
+    <ClInclude Include="Ui\Messages\LogViewerAppMessages.h">
+      <Filter>Ui\Messages</Filter>
+    </ClInclude>
+    <ClInclude Include="Ui\Model\LogViewerLogModel.h">
+      <Filter>Ui\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="Ui\Theme\LogViewerListTheme.h">
+      <Filter>Ui\Theme</Filter>
+    </ClInclude>
+    <ClInclude Include="UiConsts.h">
+    </ClInclude>
+    <ClInclude Include="UiMainWindow.h">
+    </ClInclude>
+    <ClInclude Include="UiRebarSetup.h">
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resource.rc">
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config">
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="small.ico">
+    </Image>
+  </ItemGroup>
+</Project>

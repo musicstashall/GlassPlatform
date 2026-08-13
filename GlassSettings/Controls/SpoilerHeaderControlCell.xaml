@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.SpoilerHeaderControlCell"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    HorizontalAlignment="Left"
+    VerticalAlignment="Center">
+    <Grid x:Name="LayoutRoot" ColumnSpacing="8" VerticalAlignment="Center">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock
+            x:Name="LabelText"
+            VerticalAlignment="Center"
+            Style="{StaticResource GlassSettingsSpoilerSecondaryTextStyle}"
+            TextTrimming="CharacterEllipsis"
+            Visibility="Collapsed" />
+        <ContentPresenter x:Name="ControlHost" Grid.Column="1" VerticalAlignment="Center" />
+    </Grid>
+</UserControl>

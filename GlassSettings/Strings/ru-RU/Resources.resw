@@ -1,0 +1,1058 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="AppTitle" xml:space="preserve"><value>Настройки платформы</value></data>
+  <data name="Combo_CornerTypeItems" xml:space="preserve"><value>Системные;Прямые углы;Крупное скругление;Мелкое скругление</value></data>
+  <data name="Combo_XamlCornerTypeItems" xml:space="preserve"><value>Системные;Прямые углы;Крупное скругление;Мелкое скругление;Увеличенное скругление;Максимальное скругление</value></data>
+  <data name="Combo_EffectTypeItems" xml:space="preserve"><value>Отключить;Прозрачный (SWCA);Сплошная (SWCA);Размытие (SWCA);Классический акрил (SWCA);Современный акрил (SWCA);Акрил (DWM);Mica (DWM);Mica Alt (DWM)</value></data>
+  <data name="Combo_EffectTypeNames" xml:space="preserve"><value>Отключить;Прозрачный;Сплошная;Размытие;Классический акрил;Современный акрил;Акрил;Mica;Mica Alt</value></data>
+  <data name="Combo_XamlEffectTypeItems" xml:space="preserve"><value>Отключить;Прозрачный;Сплошная;Размытие;Акрил;Системный</value></data>
+  <data name="Combo_XamlEffectTypeNames" xml:space="preserve"><value>Отключить;Прозрачный;Сплошная;Размытие;Акрил;Системный</value></data>
+  <data name="Flyout_SeparateZones" xml:space="preserve"><value>Сегментирование панели</value></data>
+  <data name="Flyout_SeparateZonesDesc" xml:space="preserve"><value>Организует панель задач в виде отдельных групп</value></data>
+  <data name="Flyout_ZonesNeedCornersTip" xml:space="preserve"><value>Для сегментирования выберите тип углов, отличный от «Системные».</value></data>
+  <data name="Flyout_ZonesCornersPolicyLimit" xml:space="preserve"><value>Ограничено политикой типов углов, выберите тип углов отличный от «Системные».</value></data>
+  <data name="Flyout_GradientSystemBackdropLimit" xml:space="preserve"><value>Ограничено политикой backdrop, выберите тип эффекта отличный от «Системного».</value></data>
+  <data name="Flyout_GradientSystemBackdropTip" xml:space="preserve"><value>Для цвета градиента выберите тип эффекта, отличный от «Системного».</value></data>
+  <data name="Param_ModeDwmSwca" xml:space="preserve"><value>DWM/SWCA</value></data>
+  <data name="Combo_PopInStyleItems" xml:space="preserve"><value>Сдвиг вниз;Волна;Сдвиг вправо;Масштабирование</value></data>
+  <data name="Attach_DetailForbidden" xml:space="preserve"><value>{0} Forbidden</value></data>
+  <data name="Attach_DetailFull" xml:space="preserve"><value>{0} Full</value></data>
+  <data name="Attach_DetailPopup" xml:space="preserve"><value>{0} Popup</value></data>
+  <data name="Attach_DetailSeparator" xml:space="preserve"><value> · </value></data>
+  <data name="Attach_ListSection" xml:space="preserve"><value>Список пользовательских процессов</value></data>
+  <data name="Attach_ListSectionDesc" xml:space="preserve"><value>Процессы, в которые будет осуществляться инжект модулей платформы Glass</value></data>
+  <data name="Runtime_Section" xml:space="preserve"><value>Список процессов в работе</value></data>
+  <data name="Runtime_SectionDesc" xml:space="preserve"><value>Загруженные модули Glass по процессам</value></data>
+  <data name="Runtime_Empty" xml:space="preserve"><value>Нет активных или невыгруженных модулей</value></data>
+  <data name="Runtime_ColProcess" xml:space="preserve"><value>Процесс</value></data>
+  <data name="Runtime_CountsFormat" xml:space="preserve"><value>{0}: {1} · {2}: {3} · {4}: {5}</value></data>
+  <data name="Runtime_Unload" xml:space="preserve"><value>Выгрузить</value></data>
+  <data name="Runtime_UnloadAll" xml:space="preserve"><value>Выгрузить все</value></data>
+  <data name="Runtime_UnloadAllConfirmTitle" xml:space="preserve"><value>Выгрузить все модули?</value></data>
+  <data name="Runtime_UnloadAllConfirmBody" xml:space="preserve"><value>Модули Glass будут выгружены из всех процессов в списке.</value></data>
+  <data name="Runtime_UnloadAndExclude" xml:space="preserve"><value>Выгрузить и исключить</value></data>
+  <data name="Runtime_UnloadAndForbid" xml:space="preserve"><value>Выгрузить и запретить</value></data>
+  <data name="Runtime_CopyName" xml:space="preserve"><value>Копировать имя</value></data>
+  <data name="Runtime_SubsystemState" xml:space="preserve"><value>Состояние подсистем</value></data>
+  <data name="Runtime_SubsystemsTitleFormat" xml:space="preserve"><value>Состояние подсистем {0}</value></data>
+  <data name="Runtime_EndTask" xml:space="preserve"><value>Завершить</value></data>
+  <data name="Runtime_Kill" xml:space="preserve"><value>Убить</value></data>
+  <data name="Runtime_FlyoutMetaFormat" xml:space="preserve"><value>PID {0} · ({1})</value></data>
+  <data name="Runtime_FlyoutSubsystems" xml:space="preserve"><value>Подсистемы</value></data>
+  <data name="Runtime_FlyoutSubclass" xml:space="preserve"><value>Сабклассы</value></data>
+  <data name="Runtime_SubclassWindows" xml:space="preserve"><value>Сабклассы</value></data>
+  <data name="Runtime_SubclassKinds" xml:space="preserve"><value>Виды</value></data>
+  <data name="Runtime_DiagActive" xml:space="preserve"><value>active</value></data>
+  <data name="Runtime_DiagInactive" xml:space="preserve"><value>—</value></data>
+  <data name="Runtime_DiagWinEventProc" xml:space="preserve"><value>WinEventProc</value></data>
+  <data name="Runtime_DiagCrashGuard" xml:space="preserve"><value>CrashGuard</value></data>
+  <data name="Runtime_DiagHooks" xml:space="preserve"><value>Hooks</value></data>
+  <data name="Runtime_DiagPaintDispatcher" xml:space="preserve"><value>PaintDispatcher</value></data>
+  <data name="Runtime_DiagModuleHandler" xml:space="preserve"><value>ModuleHandler</value></data>
+  <data name="Runtime_DiagExplorer" xml:space="preserve"><value>XAML-острова</value></data>
+  <data name="Runtime_DiagTaskbar" xml:space="preserve"><value>XAML VisualTree</value></data>
+  <data name="Crashes_Section" xml:space="preserve"><value>Дампы сбоев</value></data>
+  <data name="Crashes_SectionDesc" xml:space="preserve"><value>Минидампы сбоев</value></data>
+  <data name="Crashes_TabPlatform" xml:space="preserve"><value>Дампы платформы</value></data>
+  <data name="Crashes_TabSystem" xml:space="preserve"><value>Дампы системы</value></data>
+  <data name="Crashes_CountFound" xml:space="preserve"><value>(найдено {0} файлов)</value></data>
+  <data name="Crashes_CountNone" xml:space="preserve"><value>(файлы отсутствуют)</value></data>
+  <data name="Crashes_Empty" xml:space="preserve"><value>Нет сохранённых дампов</value></data>
+  <data name="Crashes_ColName" xml:space="preserve"><value>Имя файла</value></data>
+  <data name="Crashes_ColDate" xml:space="preserve"><value>Дата и время</value></data>
+  <data name="Crashes_ColProcess" xml:space="preserve"><value>Процесс</value></data>
+  <data name="Crashes_ColPid" xml:space="preserve"><value>PID</value></data>
+  <data name="Crashes_ColSize" xml:space="preserve"><value>Размер</value></data>
+  <data name="Crashes_Open" xml:space="preserve"><value>Открыть</value></data>
+  <data name="Crashes_Delete" xml:space="preserve"><value>Удалить</value></data>
+  <data name="Home_RuntimeActive" xml:space="preserve"><value>В работе</value></data>
+  <data name="Home_RuntimeRejected" xml:space="preserve"><value>Отвергнутые</value></data>
+  <data name="Home_RuntimeResidual" xml:space="preserve"><value>Невыгружены</value></data>
+  <data name="Attach_EmptyList" xml:space="preserve"><value>Список пуст</value></data>
+  <data name="Attach_Process_Few" xml:space="preserve"><value>{0} процесса</value></data>
+  <data name="Attach_Process_Many" xml:space="preserve"><value>{0} процессов</value></data>
+  <data name="Attach_Process_One" xml:space="preserve"><value>{0} процесс</value></data>
+  <data name="Attach_FilterByLabel" xml:space="preserve"><value>Фильтровать по:</value></data>
+  <data name="Attach_SortByLabel" xml:space="preserve"><value>Сортировка:</value></data>
+  <data name="Attach_AddProcess" xml:space="preserve"><value>Добавить</value></data>
+  <data name="Attach_AddFromRunningList" xml:space="preserve"><value>Из списка процессов</value></data>
+  <data name="Attach_AddChooseFile" xml:space="preserve"><value>Выбрать файл</value></data>
+  <data name="Attach_AddEnterString" xml:space="preserve"><value>Ввести строку</value></data>
+  <data name="Attach_AddPickWindow" xml:space="preserve"><value>Выбрать окно</value></data>
+  <data name="Attach_WindowPickDuplicateTitle" xml:space="preserve"><value>Уже в списке</value></data>
+  <data name="Attach_WindowPickDuplicateBody" xml:space="preserve"><value>Процесс «{0}» уже есть в списке пользовательских.</value></data>
+  <data name="Attach_WindowPickConfirmTitle" xml:space="preserve"><value>Добавить процесс?</value></data>
+  <data name="Attach_WindowPickConfirmBody" xml:space="preserve"><value>Добавить «{0}» в список пользовательских процессов?</value></data>
+  <data name="BlockList_WindowPickDuplicateTitle" xml:space="preserve"><value>Уже в списке</value></data>
+  <data name="BlockList_WindowPickDuplicateBody" xml:space="preserve"><value>Процесс «{0}» уже есть в списке запрещённых.</value></data>
+  <data name="BlockList_WindowPickConfirmTitle" xml:space="preserve"><value>Запретить процесс?</value></data>
+  <data name="BlockList_WindowPickConfirmBody" xml:space="preserve"><value>Добавить «{0}» в список запрещённых процессов?</value></data>
+  <data name="Attach_WindowPickConfirmButton" xml:space="preserve"><value>Добавить</value></data>
+  <data name="Attach_ProcessNameInputTitle" xml:space="preserve"><value>Имя процесса</value></data>
+  <data name="Attach_ProcessNameInputPlaceholder" xml:space="preserve"><value>notepad.exe</value></data>
+  <data name="Attach_ProcessNameExtensionRequiredTitle" xml:space="preserve"><value>Укажите расширение</value></data>
+  <data name="Attach_ProcessNameExtensionRequiredBody" xml:space="preserve"><value>Не удалось найти исполняемый файл с таким именем. Введите имя с расширением (.exe, .com, .bat или .cmd).</value></data>
+  <data name="Attach_ProcessPickerTitle" xml:space="preserve"><value>Запущенные процессы</value></data>
+  <data name="Attach_ProcessPickerSearch" xml:space="preserve"><value>Поиск процессов</value></data>
+  <data name="Attach_ProcessPickerEmpty" xml:space="preserve"><value>Процессы не найдены</value></data>
+  <data name="Attach_ProcessPickerSelect" xml:space="preserve"><value>Выбрать</value></data>
+  <data name="Attach_FilePickerTitle" xml:space="preserve"><value>Выбор файла</value></data>
+  <data name="Attach_FilePickerSelect" xml:space="preserve"><value>Выбрать</value></data>
+  <data name="Attach_FilePickerSearch" xml:space="preserve"><value>Поиск в папке</value></data>
+  <data name="Attach_FilePickerEmpty" xml:space="preserve"><value>Файлы не найдены</value></data>
+  <data name="Attach_FilePickerPath" xml:space="preserve"><value>Путь к папке</value></data>
+  <data name="Attach_FilePickerQuickDesktop" xml:space="preserve"><value>Рабочий стол</value></data>
+  <data name="Attach_FilePickerQuickDocuments" xml:space="preserve"><value>Документы</value></data>
+  <data name="Attach_FilePickerQuickDownloads" xml:space="preserve"><value>Загрузки</value></data>
+  <data name="Attach_FilePickerQuickPictures" xml:space="preserve"><value>Изображения</value></data>
+  <data name="Attach_FilePickerQuickAccess" xml:space="preserve"><value>Быстрый доступ</value></data>
+  <data name="Attach_FilePickerQuickComputer" xml:space="preserve"><value>Этот компьютер</value></data>
+  <data name="Attach_FilePickerFolders" xml:space="preserve"><value>Папки</value></data>
+  <data name="Attach_FilePickerGoUp" xml:space="preserve"><value>Вверх</value></data>
+  <data name="Attach_FilePickerGoBack" xml:space="preserve"><value>Назад</value></data>
+  <data name="Attach_FilePickerGoForward" xml:space="preserve"><value>Вперёд</value></data>
+  <data name="Attach_FilePickerHome" xml:space="preserve"><value>Быстрый доступ</value></data>
+  <data name="Attach_FilePickerRefresh" xml:space="preserve"><value>Обновить</value></data>
+  <data name="Attach_FilePickerFolderType" xml:space="preserve"><value>Папка с файлами</value></data>
+  <data name="Attach_FilePickerDriveDefault" xml:space="preserve"><value>Диск ({0})</value></data>
+  <data name="Attach_FilePickerAllFiles" xml:space="preserve"><value>Все файлы</value></data>
+  <data name="Attach_FilePickerFilterExe" xml:space="preserve"><value>Приложения (*.exe)</value></data>
+  <data name="Attach_FilePickerFilterCom" xml:space="preserve"><value>Приложения (*.com)</value></data>
+  <data name="Attach_FilePickerFilterBat" xml:space="preserve"><value>Пакетный файл (*.bat)</value></data>
+  <data name="Attach_FilePickerFilterCmd" xml:space="preserve"><value>Сценарий Windows (*.cmd)</value></data>
+  <data name="Attach_FilePickerInvalidTypeTitle" xml:space="preserve"><value>Недопустимый тип файла</value></data>
+  <data name="Attach_FilePickerInvalidTypeBody" xml:space="preserve"><value>Выберите исполняемый файл с расширением .exe, .com, .bat или .cmd.</value></data>
+  <data name="Attach_FilePickerSort" xml:space="preserve"><value>Сортировать</value></data>
+  <data name="Attach_FilePickerView" xml:space="preserve"><value>Посмотреть</value></data>
+  <data name="Attach_ViewDetails" xml:space="preserve"><value>Таблица</value></data>
+  <data name="Attach_FilePickerColumnName" xml:space="preserve"><value>Имя</value></data>
+  <data name="Attach_FilePickerColumnDateModified" xml:space="preserve"><value>Дата изменения</value></data>
+  <data name="Attach_FilePickerColumnType" xml:space="preserve"><value>Тип</value></data>
+  <data name="Attach_FilePickerColumnSize" xml:space="preserve"><value>Размер</value></data>
+  <data name="Attach_FilePickerSearchParameters" xml:space="preserve"><value>Параметры поиска</value></data>
+  <data name="Attach_FilePickerCloseSearch" xml:space="preserve"><value>Закрыть окно поиска</value></data>
+  <data name="Attach_FilePickerSearchScopeAllNested" xml:space="preserve"><value>Все вложенные папки</value></data>
+  <data name="Attach_FilePickerSearchScopeCurrent" xml:space="preserve"><value>Текущая папка</value></data>
+  <data name="Attach_FilePickerSearchType" xml:space="preserve"><value>Тип</value></data>
+  <data name="Attach_FilePickerSearchSize" xml:space="preserve"><value>Размер</value></data>
+  <data name="Attach_FilePickerSearchSizeSmall" xml:space="preserve"><value>Маленькие (16 кб - 1 мб)</value></data>
+  <data name="Attach_FilePickerSearchSizeMedium" xml:space="preserve"><value>Средние (1 - 128 мб)</value></data>
+  <data name="Attach_FilePickerSearchSizeLarge" xml:space="preserve"><value>Большие (128 мб - 1 гб)</value></data>
+  <data name="Attach_FilePickerSearchAnySize" xml:space="preserve"><value>Любой размер</value></data>
+  <data name="Attach_FilePickerSearchNoResults" xml:space="preserve"><value>Нет элементов, удовлетворяющих условиям поиска.</value></data>
+  <data name="Attach_FilePickerSearchInProgress" xml:space="preserve"><value>Выполняется поиск...</value></data>
+  <data name="Attach_DuplicateProcess" xml:space="preserve"><value>Этот процесс уже есть в списке.</value></data>
+  <data name="Attach_FilterAll" xml:space="preserve"><value>Все режимы</value></data>
+  <data name="Attach_FilterForbidden" xml:space="preserve"><value>Отключено</value></data>
+  <data name="Attach_FilterSystem" xml:space="preserve"><value>Системные</value></data>
+  <data name="Attach_FoundCount" xml:space="preserve"><value>Найдено процессов: {0}</value></data>
+  <data name="Attach_MenuDelete" xml:space="preserve"><value>Удалить</value></data>
+  <data name="Attach_MenuDeleteAndBlock" xml:space="preserve"><value>Удалить и запретить</value></data>
+  <data name="Attach_BlockedProcess" xml:space="preserve"><value>Этот процесс в BlockList — добавление в AttachList недоступно.</value></data>
+  <data name="Attach_MenuDisable" xml:space="preserve"><value>Отключить</value></data>
+  <data name="Attach_ModeForbidden" xml:space="preserve"><value>Отключено</value></data>
+  <data name="Attach_ModeFull" xml:space="preserve"><value>Максимум</value></data>
+  <data name="Attach_ModePopup" xml:space="preserve"><value>Только меню</value></data>
+  <data name="Attach_ActionSuccess" xml:space="preserve"><value>Список процессов обновлён.</value></data>
+  <data name="Attach_SearchPlaceholder" xml:space="preserve"><value>Поиск процессов</value></data>
+  <data name="Attach_SearchUserPlaceholder" xml:space="preserve"><value>Поиск пользовательских процессов</value></data>
+  <data name="Attach_SearchBlockedPlaceholder" xml:space="preserve"><value>Поиск запрещенных процессов</value></data>
+  <data name="Attach_ViewList" xml:space="preserve"><value>Список</value></data>
+  <data name="Attach_ViewTiles" xml:space="preserve"><value>Плитки</value></data>
+  <data name="Attach_ViewCompact" xml:space="preserve"><value>Компакт</value></data>
+  <data name="Attach_ViewLargeIcons" xml:space="preserve"><value>Крупные значки</value></data>
+  <data name="Attach_SortMode" xml:space="preserve"><value>Режим</value></data>
+  <data name="Attach_SortNameAsc" xml:space="preserve"><value>Имя (от А до Я)</value></data>
+  <data name="Attach_SortNameDesc" xml:space="preserve"><value>Имя (от Я до А)</value></data>
+  <data name="BlockList_Section" xml:space="preserve"><value>Список запрещенных процессов</value></data>
+  <data name="BlockList_SectionDesc" xml:space="preserve"><value>Процессы, в которые опасно и нежелательно инжектироваться</value></data>
+  <data name="BlockList_EmptyList" xml:space="preserve"><value>Список запрещённых процессов пуст</value></data>
+  <data name="BlockList_DuplicateProcess" xml:space="preserve"><value>Этот процесс уже в списке запрещённых</value></data>
+  <data name="BlockList_BuiltIn" xml:space="preserve"><value>Встроенный</value></data>
+  <data name="BlockList_User" xml:space="preserve"><value>Пользовательский</value></data>
+  <data name="BlockList_MenuRemove" xml:space="preserve"><value>Убрать из списка</value></data>
+  <data name="Breadcrumb_AtlasImage" xml:space="preserve"><value>Атласы</value></data>
+  <data name="Breadcrumb_Colorization" xml:space="preserve"><value>Композиция</value></data>
+  <data name="Breadcrumb_DropDown" xml:space="preserve"><value>DropDown</value></data>
+  <data name="Breadcrumb_DwmGlass" xml:space="preserve"><value>Внешний вид</value></data>
+  <data name="Breadcrumb_DwmSettings" xml:space="preserve"><value>Настройки DWM</value></data>
+  <data name="Breadcrumb_DwmTheme" xml:space="preserve"><value>Стилизация</value></data>
+  <data name="Breadcrumb_General" xml:space="preserve"><value>Общие</value></data>
+  <data name="Breadcrumb_GlassSettings" xml:space="preserve"><value>Настройки Glass</value></data>
+  <data name="Breadcrumb_Menu" xml:space="preserve"><value>Меню</value></data>
+  <data name="Breadcrumb_PopupWindows" xml:space="preserve"><value>Popup-окна</value></data>
+  <data name="Breadcrumb_ReflectionImage" xml:space="preserve"><value>Текстуры</value></data>
+  <data name="Breadcrumb_RootSwca" xml:space="preserve"><value>Root-окна</value></data>
+  <data name="Breadcrumb_Taskbar" xml:space="preserve"><value>Панель задач</value></data>
+  <data name="Breadcrumb_AdjacentWindows" xml:space="preserve"><value>Смежные окна</value></data>
+  <data name="Breadcrumb_Tooltip" xml:space="preserve"><value>Tooltip</value></data>
+  <data name="CmdApply" xml:space="preserve"><value>Применить</value></data>
+  <data name="CmdCancel" xml:space="preserve"><value>Отмена</value></data>
+  <data name="CmdOk" xml:space="preserve"><value>OK</value></data>
+  <data name="CmdSave" xml:space="preserve"><value>Сохранить</value></data>
+  <data name="Custom_Default" xml:space="preserve"><value>По умолчанию</value></data>
+  <data name="ColorPicker_ResetDefault" xml:space="preserve"><value>По умолчанию</value></data>
+  <data name="Custom_GeneralPrefix" xml:space="preserve"><value>Общие:</value></data>
+  <data name="Custom_NoBorder" xml:space="preserve"><value>Без бордюра</value></data>
+  <data name="Custom_Off" xml:space="preserve"><value>Выкл</value></data>
+  <data name="Custom_On" xml:space="preserve"><value>Вкл</value></data>
+  <data name="Custom_ParamChanged_Few" xml:space="preserve"><value>{0} параметра изменены</value></data>
+  <data name="Custom_ParamChanged_Many" xml:space="preserve"><value>{0} параметров изменено</value></data>
+  <data name="Custom_ParamChanged_One" xml:space="preserve"><value>1 параметр изменён</value></data>
+  <data name="Custom_Section_Few" xml:space="preserve"><value>{0} раздела</value></data>
+  <data name="Custom_Section_Many" xml:space="preserve"><value>{0} разделов</value></data>
+  <data name="Custom_Section_One" xml:space="preserve"><value>1 раздел</value></data>
+  <data name="Custom_WithBorder" xml:space="preserve"><value>Бордюр</value></data>
+  <data name="Dialog_AppSettingsBody1" xml:space="preserve"><value>Параметры окна GlassSettings: тема интерфейса, поведение при запуске и прочие опции самого приложения настроек.</value></data>
+  <data name="Dialog_AppSettingsBody2" xml:space="preserve"><value>Раздел в разработке. Здесь появятся настройки, не связанные с платформой Glass и реестром BWM/OpenGlass.</value></data>
+  <data name="Dialog_AppSettingsTitle" xml:space="preserve"><value>Настройки GlassSettings</value></data>
+  <data name="AppSettings_ThemeHeader" xml:space="preserve"><value>Тема приложения</value></data>
+  <data name="AppSettings_ThemeDescription" xml:space="preserve"><value>Выберите режим интерфейса: тёмный или светлый</value></data>
+  <data name="AppSettings_ThemeModeLabel" xml:space="preserve"><value>Режим</value></data>
+  <data name="AppSettings_ThemeLight" xml:space="preserve"><value>Светлая</value></data>
+  <data name="AppSettings_ThemeDark" xml:space="preserve"><value>Тёмная</value></data>
+  <data name="AppSettings_ThemeSystem" xml:space="preserve"><value>Системная</value></data>
+  <data name="AppSettings_BackdropHeader" xml:space="preserve"><value>Фон за окном</value></data>
+  <data name="AppSettings_BackdropDescription" xml:space="preserve"><value>Выберите тип эффекта backdrop</value></data>
+  <data name="AppSettings_BackdropTypeLabel" xml:space="preserve"><value>Тип эффекта</value></data>
+  <data name="AppSettings_BackdropAcrylic" xml:space="preserve"><value>Acrylic</value></data>
+  <data name="AppSettings_BackdropSystem" xml:space="preserve"><value>Системный</value></data>
+  <data name="AppSettings_BusyOverlayHeader" xml:space="preserve"><value>Штора блокировки</value></data>
+  <data name="AppSettings_BusyOverlayDescription" xml:space="preserve"><value>Вид окна, когда оно недоступно, например под диалогом</value></data>
+  <data name="AppSettings_BusyOverlayModeAcrylic" xml:space="preserve"><value>Acrylic</value></data>
+  <data name="AppSettings_BusyOverlayModeDim" xml:space="preserve"><value>Затенение</value></data>
+  <data name="AppSettings_LanguageLabel" xml:space="preserve"><value>Язык интерфейса</value></data>
+  <data name="AppSettings_LanguageDescription" xml:space="preserve"><value>Выберите предпочитаемый язык для GlassSettings</value></data>
+  <data name="AppSettings_LanguageSystem" xml:space="preserve"><value>Системный</value></data>
+  <data name="Dialog_Close" xml:space="preserve"><value>Закрыть</value></data>
+  <data name="Dialog_Cancel" xml:space="preserve"><value>Отмена</value></data>
+  <data name="Dialog_SaveBeforePlatformTitle" xml:space="preserve"><value>Сохранить настройки перед запуском?</value></data>
+  <data name="Dialog_SaveBeforePlatformBody" xml:space="preserve"><value>Есть несохранённые изменения. Glass Platform применит текущие значения DWM из реестра — сохраните настройки перед запуском.</value></data>
+  <data name="Dialog_SaveBeforePlatformConfirm" xml:space="preserve"><value>Сохранить и запустить</value></data>
+  <data name="Dialog_RemoveSectionTitle" xml:space="preserve"><value>Удалить раздел?</value></data>
+  <data name="Dialog_RemoveSectionBody" xml:space="preserve"><value>Раздел «{0}» будет отключён. Все его параметры будут удалены из реестра и заменены значениями по умолчанию.</value></data>
+  <data name="Dialog_RemoveSectionConfirm" xml:space="preserve"><value>Удалить</value></data>
+  <data name="Dialog_MenuAdvancedRemoveTitle" xml:space="preserve"><value>Отключить custom rendering меню?</value></data>
+  <data name="Dialog_MenuAdvancedRemoveBody" xml:space="preserve"><value>Будет отключена кастомная отрисовка всех элементов меню (Hot, Disabled Hot, Focusing, Separator). Все связанные параметры в разделе Menu будут удалены из реестра.</value></data>
+  <data name="Dialog_UnsavedChangesExitTitle" xml:space="preserve"><value>Выйти без сохранения?</value></data>
+  <data name="Dialog_UnsavedChangesExitBody" xml:space="preserve"><value>Есть несохранённые изменения. Они будут отменены, и реестр останется без изменений.</value></data>
+  <data name="Dialog_UnsavedChangesExitConfirm" xml:space="preserve"><value>Выйти</value></data>
+  <data name="Dialog_DonationBody1" xml:space="preserve"><value>Glass — некоммерческий проект глубокой кастомизации интерфейса Windows (преемник Black Window Manager). Платформа, настройки и сопутствующие модули распространяются бесплатно.</value></data>
+  <data name="Dialog_DonationBody2" xml:space="preserve"><value>Разработка, тестирование на разных сборках Windows и ответы пользователям требуют времени. Добровольный донат помогает продолжать работу над проектом и выпускать обновления.</value></data>
+  <data name="Dialog_DonationBody3" xml:space="preserve"><value>Способы поддержки и актуальные реквизиты публикуются автором в официальных каналах проекта. Донат не даёт доступа к дополнительным функциям — это способ сказать «спасибо» за труд.</value></data>
+  <data name="Dialog_DonationThanks" xml:space="preserve"><value>Спасибо, что пользуетесь Glass!</value></data>
+  <data name="Dialog_DonationTitle" xml:space="preserve"><value>Поддержка Glass</value></data>
+  <data name="Dialog_Understood" xml:space="preserve"><value>Понятно</value></data>
+  <data name="Dialog_OpenGlassRootNoneTitle" xml:space="preserve"><value>Режим Root отключён</value></data>
+  <data name="Dialog_OpenGlassRootNoneBody" xml:space="preserve"><value>Для работы OpenGlass выберите режим DWM: «Настройки Glass» → «Root-окна» → DWM.</value></data>
+  <data name="Dwm_AtlasEmpty" xml:space="preserve"><value>Изображения AtlasTheme не найдены.</value></data>
+  <data name="Dwm_AtlasImage" xml:space="preserve"><value>Атласы</value></data>
+  <data name="Dwm_AtlasImageDesc" xml:space="preserve"><value>Ресурсы AtlasTheme</value></data>
+  <data name="Dwm_AtlasCollection" xml:space="preserve"><value>Коллекция атласов</value></data>
+  <data name="Stylization_Layer_Wallpaper" xml:space="preserve"><value>Обои</value></data>
+  <data name="Stylization_Layer_Glass" xml:space="preserve"><value>Стекло</value></data>
+  <data name="Stylization_Layer_Reflection" xml:space="preserve"><value>Отражение</value></data>
+  <data name="Stylization_Layer_Material" xml:space="preserve"><value>Материал</value></data>
+  <data name="Stylization_Layer_Window" xml:space="preserve"><value>Окно</value></data>
+  <data name="Stylization_Layer_Atlas" xml:space="preserve"><value>Атлас</value></data>
+  <data name="Stylization_Layer_Default" xml:space="preserve"><value>по умолчанию</value></data>
+  <data name="Dwm_ExportAtlasButton" xml:space="preserve"><value>Сохранить атлас темы</value></data>
+  <data name="Dwm_ExportAtlasTooltip" xml:space="preserve"><value>Экспортировать атлас активной темы в каталог AtlasTheme (рядом сохраняется файл .layout).</value></data>
+  <data name="Dialog_ExportAtlasTitle" xml:space="preserve"><value>Сохранить атлас темы?</value></data>
+  <data name="Dialog_ExportAtlasBody" xml:space="preserve"><value>Сохранить атлас активной темы как «{0}»?</value></data>
+  <data name="Dialog_ExportAtlasConfirm" xml:space="preserve"><value>Сохранить</value></data>
+  <data name="Dialog_DeleteThemeImageTitle" xml:space="preserve"><value>Удалить изображение?</value></data>
+  <data name="Dialog_DeleteThemeImageBody" xml:space="preserve"><value>Удалить «{0}» из коллекции? Файл будет удалён с диска.</value></data>
+  <data name="Dialog_DeleteThemeImageInUse" xml:space="preserve"><value>«{0}» выбрано в настройках DWM и не может быть удалено. Сначала сбросьте выбор или выберите другой файл.</value></data>
+  <data name="Dialog_ExportAtlasOverwriteTitle" xml:space="preserve"><value>Перезаписать файл атласа?</value></data>
+  <data name="Dialog_ExportAtlasOverwriteBody" xml:space="preserve"><value>«{0}» уже существует в каталоге коллекции атласов. Перезаписать?</value></data>
+  <data name="Dialog_ExportAtlasOverwriteConfirm" xml:space="preserve"><value>Перезаписать</value></data>
+  <data name="Dwm_ExportAtlasSaved" xml:space="preserve"><value>Сохранено</value></data>
+  <data name="Dwm_ExportAtlasFailed" xml:space="preserve"><value>Ошибка</value></data>
+  <data name="Dwm_Intensity" xml:space="preserve"><value>Интенсивность</value></data>
+  <data name="Dwm_CaptionButtons" xml:space="preserve"><value>CaptionButtons</value></data>
+  <data name="Dwm_CaptionButtonsDesc" xml:space="preserve"><value>Как на странице «Тема»</value></data>
+  <data name="Dwm_CaptionColor" xml:space="preserve"><value>Цвет подписи</value></data>
+  <data name="Dwm_CaptionColorMax" xml:space="preserve"><value>Цвет подписи (развёр.)</value></data>
+  <data name="Dwm_CaptionDefault" xml:space="preserve"><value>По умолчанию</value></data>
+  <data name="Dwm_CaptionHide" xml:space="preserve"><value>Скрыть</value></data>
+  <data name="Dwm_GlassColor" xml:space="preserve"><value>Цвет стекла</value></data>
+  <data name="Dwm_GlassColorDesc" xml:space="preserve"><value>Цвет ARGB в реестре DWM. Прозрачность задаётся альфа-каналом.</value></data>
+  <data name="Dwm_GlassColorSubtitle" xml:space="preserve"><value>ARGB-цветизация окон DWM.</value></data>
+  <data name="Dwm_HubColorization" xml:space="preserve"><value>Композиция</value></data>
+  <data name="Dwm_HubColorizationDesc" xml:space="preserve"><value>Цвета и прозрачность окон DWM</value></data>
+  <data name="Dwm_HubGlass" xml:space="preserve"><value>Внешний вид</value></data>
+  <data name="Dwm_HubGlassDesc" xml:space="preserve"><value>Качество размытия, геометрия окон, кнопки заголовка, текст и цвет подписи.</value></data>
+  <data name="Dwm_AppearanceGeneral" xml:space="preserve"><value>Общий вид</value></data>
+  <data name="Dwm_AppearanceGeneralSubtitle" xml:space="preserve"><value>Оптимизация качества размытия и рендерер Direct3D для эффекта стекла.</value></data>
+  <data name="Dwm_AppearanceWindow" xml:space="preserve"><value>Вид окон</value></data>
+  <data name="Dwm_AppearanceWindowSubtitle" xml:space="preserve"><value>Геометрия углов окна, стиль кнопок заголовка и отрисовка рамки.</value></data>
+  <data name="Dwm_AppearanceWindowBodyDesc" xml:space="preserve"><value>Настройте скругление углов, стиль кнопок заголовка и при необходимости отключите современные рамки.</value></data>
+  <data name="Dwm_AppearanceCaption" xml:space="preserve"><value>Вид заголовков</value></data>
+  <data name="Dwm_AppearanceCaptionSubtitle" xml:space="preserve"><value>Выравнивание текста заголовка и свечение на панели caption.</value></data>
+  <data name="Dwm_AppearanceCaptionBodyDesc" xml:space="preserve"><value>Настройте выравнивание текста заголовка, режим свечения и его размер.</value></data>
+  <data name="Dwm_BlurOptimization" xml:space="preserve"><value>Оптимизация размытия:</value></data>
+  <data name="Dwm_UseDirect3DRenderer" xml:space="preserve"><value>Рендер Direct3D</value></data>
+  <data name="Dwm_UseDirect3DRendererTooltip" xml:space="preserve"><value>Переключает отрисовку стекла на бэкенд Direct3D 11 вместо Direct2D по умолчанию. Действует только в режиме Windows 7 Aero (в режиме Vista — прозрачное стекло без размытия). При включении радиус размытия фиксируется на 3, настройки размытия становятся недоступны.</value></data>
+  <data name="Dwm_RoundRectProfileLabel" xml:space="preserve"><value>Скругление углов</value></data>
+  <data name="Dwm_GlassGeometryRadius" xml:space="preserve"><value>Радиус скругления</value></data>
+  <data name="Dwm_CaptionButtonsStyle" xml:space="preserve"><value>Стиль кнопок заголовка:</value></data>
+  <data name="Dwm_DisableModernBorders" xml:space="preserve"><value>Классическая рамка</value></data>
+  <data name="Dwm_TextCentering" xml:space="preserve"><value>Выравнивание текста:</value></data>
+  <data name="Dwm_TextGlowMode" xml:space="preserve"><value>Режим свечения текста:</value></data>
+  <data name="Dwm_TextGlowSize" xml:space="preserve"><value>Размер:</value></data>
+  <data name="Dwm_CaptionColorOverride" xml:space="preserve"><value>Цвет текста заголовка</value></data>
+  <data name="Dwm_CaptionColorActiveTitle" xml:space="preserve"><value>Цвет текста активного окна</value></data>
+  <data name="Dwm_CaptionColorInactiveTitle" xml:space="preserve"><value>Цвет текста неактивного окна</value></data>
+  <data name="Dwm_CaptionColorActiveSubtitle" xml:space="preserve"><value>Источник цвета текста заголовка активного окна: авто, тема или свой.</value></data>
+  <data name="Dwm_CaptionColorInactiveSubtitle" xml:space="preserve"><value>Источник цвета текста заголовка неактивного окна: авто, тема или свой.</value></data>
+  <data name="Dwm_CaptionColorPickerActionDesc" xml:space="preserve"><value>Задайте собственный цвет для текста в заголовке окна, перемещая ползунок в цветном поле, или задайте цифровое значение цвета в поле ввода.</value></data>
+  <data name="Dwm_PivotNormalWindow" xml:space="preserve"><value>Нормальное окно</value></data>
+  <data name="Dwm_PivotMaximizedWindow" xml:space="preserve"><value>Развёрнутое окно</value></data>
+  <data name="Dwm_HubTheme" xml:space="preserve"><value>Стилизация</value></data>
+  <data name="Dwm_HubThemeDesc" xml:space="preserve"><value>Заголовок и оформление</value></data>
+  <data name="Dwm_LabelMode" xml:space="preserve"><value>Режим:</value></data>
+  <data name="Dwm_LabelOpaqueBlend" xml:space="preserve"><value>OpaqueBlend:</value></data>
+  <data name="Dwm_LabelOpaqueBlendPriority" xml:space="preserve"><value>Приоритет базового цвета</value></data>
+  <data name="Dwm_LabelPercent" xml:space="preserve"><value>%:</value></data>
+  <data name="Dwm_ModeAuto" xml:space="preserve"><value>Авто</value></data>
+  <data name="Dwm_ModeFromTheme" xml:space="preserve"><value>Из темы</value></data>
+  <data name="Dwm_ModeManual" xml:space="preserve"><value>Вручную</value></data>
+  <data name="Dwm_BaseOpacityInfoTitle" xml:space="preserve"><value>Базовая прозрачность отражения</value></data>
+  <data name="Dwm_BaseOpacityExpanderDesc" xml:space="preserve"><value>Базовая непрозрачность отражений. Финальная яркость = базовая × интенсивность × 2.</value></data>
+  <data name="Dwm_BaseOpacityInfoMessage" xml:space="preserve"><value>Четыре независимых параметра (активное / неактивное × обычное / развёрнутое) задают прозрачность смешения цвета стекла. Авто: ключ отсутствует. Из темы: 0xFFFFFFFF. Вручную: 0–100%. Pivot переключает пару ключей; на вкладке — две плоские строки с режимом и слайдером.</value></data>
+  <data name="Dwm_OpacityColorization" xml:space="preserve"><value>Прозрачность цветизации</value></data>
+  <data name="Dwm_OpacityGlass" xml:space="preserve"><value>Прозрачность стекла</value></data>
+  <data name="Dwm_OpacityMaximized" xml:space="preserve"><value>Прозрачность (развёр.)</value></data>
+  <data name="Dwm_OpacityModeDesc" xml:space="preserve"><value>Режим и значение непрозрачности</value></data>
+  <data name="Dwm_PivotActive" xml:space="preserve"><value>Активное окно</value></data>
+  <data name="Dwm_PivotInactive" xml:space="preserve"><value>Неактивное окно</value></data>
+  <data name="Dwm_ReflectionEmpty" xml:space="preserve"><value>Изображения GlassReflection не найдены.</value></data>
+  <data name="Dwm_ReflectionImage" xml:space="preserve"><value>Отражение</value></data>
+  <data name="Dwm_ReflectionImageDesc" xml:space="preserve"><value>Ресурсы GlassReflection</value></data>
+  <data name="Dwm_ReflectionOpacity" xml:space="preserve"><value>Непрозрачность отражения</value></data>
+  <data name="Dwm_ReflectionOpacityDesc" xml:space="preserve"><value>Прозрачность отражения стекла</value></data>
+  <data name="Dwm_ReflectionOpacityMax" xml:space="preserve"><value>Непрозрачность отражения (развёр.)</value></data>
+  <data name="Dwm_ReflectionCollection" xml:space="preserve"><value>Коллекция отражений</value></data>
+  <data name="Dwm_ReflectionParametersTitle" xml:space="preserve"><value>Параметры текстуры стекла</value></data>
+  <data name="Dwm_ReflectionParametersDesc" xml:space="preserve"><value>Настройка текстуры стекла, лучи, мозаика или материал</value></data>
+  <data name="Dwm_MaterialCollection" xml:space="preserve"><value>Коллекция материала</value></data>
+  <data name="Dwm_MaterialCollectionDesc" xml:space="preserve"><value>Ресурсы ThemeMaterial</value></data>
+  <data name="Dwm_MaterialEmpty" xml:space="preserve"><value>Изображения ThemeMaterial не найдены.</value></data>
+  <data name="Dwm_MaterialOpacity" xml:space="preserve"><value>Непрозрачность материала</value></data>
+  <data name="Dwm_MaterialOpacityDesc" xml:space="preserve"><value>Интенсивность текстуры материала. 0% — эффект выключен.</value></data>
+  <data name="Dwm_ReflectionControlsTitle" xml:space="preserve"><value>Параметры отражателя</value></data>
+  <data name="Dwm_ReflectionCurrentBadge" xml:space="preserve"><value>Текущее</value></data>
+  <data name="Dwm_ReflectionDefaultTitle" xml:space="preserve"><value>По умолчанию</value></data>
+  <data name="Dwm_ReflectionInfoMessage" xml:space="preserve"><value>Отражение — это текстура, растянутая на весь рабочий стол и отображаемая над стеклянными областями и создает эффект окружения (по умолчанию — Aero Glass Win7 reflection texture). Материал — это текстура, которая отображается (тайлирована) над стеклянными областями (по умолчанию акриловая шумовая текстура).</value></data>
+  <data name="Dwm_ReflectionInfoTitle" xml:space="preserve"><value>Что такое отражение и материал</value></data>
+  <data name="Dwm_ReflectionIntensity" xml:space="preserve"><value>Интенсивность отражения</value></data>
+  <data name="Dwm_ReflectionIntensityDesc" xml:space="preserve"><value>Глобальный множитель эффекта. 0% — отражение выключено.</value></data>
+  <data name="Dwm_ReflectionParallax" xml:space="preserve"><value>Параллакс</value></data>
+  <data name="Dwm_ReflectionParallaxDesc" xml:space="preserve"><value>Смещение текстуры при движении окна по горизонтали.</value></data>
+  <data name="Dwm_ReflectionPercentFormat" xml:space="preserve"><value>{0}%</value></data>
+  <data name="Dwm_ReflectionPolicyAeroPeek" xml:space="preserve"><value>Aero Peek</value></data>
+  <data name="Dwm_ReflectionPolicyAeroSnap" xml:space="preserve"><value>Aero Snap (Win10)</value></data>
+  <data name="Dwm_ReflectionPolicyDesc" xml:space="preserve"><value>По умолчанию — везде. Отметьте нужные области, чтобы ограничить рендеринг.</value></data>
+  <data name="Dwm_ReflectionPolicyLabel" xml:space="preserve"><value>Политика рендеринга</value></data>
+  <data name="Dwm_ReflectionPolicyTitlebar" xml:space="preserve"><value>Заголовок</value></data>
+  <data name="Dwm_GlassTypeTitle" xml:space="preserve"><value>Тип стекла</value></data>
+  <data name="Dwm_GlassTypeDesc" xml:space="preserve"><value>Режим композитора: Windows Vista Aero или Windows 7 Aero.</value></data>
+  <data name="Dwm_GlassTypeVista" xml:space="preserve"><value>Windows Vista Aero</value></data>
+  <data name="Dwm_GlassTypeWin7" xml:space="preserve"><value>Windows 7 Aero</value></data>
+  <data name="Dwm_OpaqueBlendEnable" xml:space="preserve"><value>Непрозрачно</value></data>
+  <data name="Dwm_ActiveGlassColor" xml:space="preserve"><value>Цвет стекла активного окна и параметры размытия</value></data>
+  <data name="Dwm_ActiveGlassColorSubtitle" xml:space="preserve"><value>Цвет стекла, интенсивность тинта, параметры размытия</value></data>
+  <data name="Dwm_ActiveGlassColorDesc" xml:space="preserve"><value>ARGB-цвет стекла. Альфа-канал игнорируется DWM.</value></data>
+  <data name="Dwm_ActiveGlassColorBodyDescVista" xml:space="preserve"><value>Задайте цвет и интенсивность (прозрачность) для стекла активного окна и установите параметр радиуса размытия — степень размытия под стеклом.</value></data>
+  <data name="Dwm_ActiveGlassColorBodyDescWin7" xml:space="preserve"><value>Задайте цвет стекла активного окна и баланс (прозрачность) тинта и радиус размытия — степень размытия под стеклом. Также задайте баланс размытия — вклад уже размытого фона в состав стекла Aero: минимальное значение даёт чёрный непрозрачный вклад (без просвета обоев), максимальное обычно даёт белый или молочный тон стекла (особенно заметно на тёмных темах и тёмных обоях); для прозрачного стекла используйте средние значения.</value></data>
+  <data name="Dwm_GlassColorWin7" xml:space="preserve"><value>Цвет стекла и параметры размытия</value></data>
+  <data name="Dwm_GlassColorWin7Subtitle" xml:space="preserve"><value>Цвет стекла, интенсивность тинта, параметры размытия</value></data>
+  <data name="Dwm_CustomInactiveColor" xml:space="preserve"><value>Цвет стекла неактивного окна</value></data>
+  <data name="Dwm_CustomInactiveColorSubtitle" xml:space="preserve"><value>Цвет и интенсивность стекла неактивного окна.</value></data>
+  <data name="Dwm_CustomInactiveColorDesc" xml:space="preserve"><value>Цвет стекла неактивного окна. Только при Vista Aero.</value></data>
+  <data name="Dwm_CustomInactiveColorBodyDesc" xml:space="preserve"><value>Задайте цвет и интенсивность (прозрачность) стекла неактивного окна.</value></data>
+  <data name="Dwm_AfterglowColor" xml:space="preserve"><value>Цвет и баланс свечения стекла</value></data>
+  <data name="Dwm_AfterglowSubtitle" xml:space="preserve"><value>Параметры оттенка вторичного цвета стекла и баланс смешивания.</value></data>
+  <data name="Dwm_AfterglowColorDesc" xml:space="preserve"><value>Цвет и баланс подсветки Win7 Aero.</value></data>
+  <data name="Dwm_AfterglowColorBodyDesc" xml:space="preserve"><value>Задайте цвет и баланс (прозрачность) тинта подсветки Aero стекла.</value></data>
+  <data name="Dwm_BlurLevelTitle" xml:space="preserve"><value>Баланс размытия</value></data>
+  <data name="Dwm_BlurRadiusTitle" xml:space="preserve"><value>Радиус размытия</value></data>
+  <data name="Dwm_OverrideAccentTitle" xml:space="preserve"><value>Перекрытие акцента</value></data>
+  <data name="Dwm_CompositionPreviewLayerBlur" xml:space="preserve"><value>Размытие</value></data>
+  <data name="Dwm_CompositionPreviewLayerTint" xml:space="preserve"><value>Тинт</value></data>
+  <data name="Dwm_CompositionPreviewLayerTintActive" xml:space="preserve"><value>Тинт активного</value></data>
+  <data name="Dwm_CompositionPreviewLayerTintInactive" xml:space="preserve"><value>Тинт неактивного</value></data>
+  <data name="Dwm_CompositionPreviewLayerGlow" xml:space="preserve"><value>Свечение</value></data>
+  <data name="Dwm_CompositionPreviewStateActive" xml:space="preserve"><value>Активное</value></data>
+  <data name="Dwm_CompositionPreviewStateInactive" xml:space="preserve"><value>Неактивное</value></data>
+  <data name="Dwm_CompositionLayerTooltipFormat" xml:space="preserve"><value>{0}: {1}</value></data>
+  <data name="Dwm_OpaqueBlendTitle" xml:space="preserve"><value>Непрозрачный режим</value></data>
+  <data name="Dwm_OpaqueBlendPriorityDesc" xml:space="preserve"><value>Порядок выбора базового цвета при смешении: в Vista Aero приоритет у развёрнутого окна, в Win7 Aero — у непрозрачного. Авто — по типу стекла.</value></data>
+  <data name="Dwm_GlassTypeShort" xml:space="preserve"><value>Тип стекла:</value></data>
+  <data name="Dwm_BaseTransparentDesc" xml:space="preserve"><value>ARGB базовый цвет смешения (прозрачное состояние).</value></data>
+  <data name="Dwm_BaseTransparentBodyDesc" xml:space="preserve"><value>Задайте базовый цвет смешения для прозрачных окон или выберите Авто / Из темы.</value></data>
+  <data name="Dwm_BaseMaximizedDesc" xml:space="preserve"><value>ARGB базовый цвет смешения (развёрнутое состояние).</value></data>
+  <data name="Dwm_BaseMaximizedBodyDesc" xml:space="preserve"><value>Задайте базовый цвет для развёрнутых окон или выберите Авто / Из темы.</value></data>
+  <data name="Dwm_BaseOpaqueDesc" xml:space="preserve"><value>ARGB базовый цвет смешения (непрозрачное состояние).</value></data>
+  <data name="Dwm_BaseOpaqueBodyDesc" xml:space="preserve"><value>Задайте базовый цвет для непрозрачных областей или выберите Авто / Из темы.</value></data>
+  <data name="Dwm_AdvancedColorizationTitle" xml:space="preserve"><value>Дополнительно</value></data>
+  <data name="Dwm_System_GeneralTitle" xml:space="preserve"><value>Общие установки</value></data>
+  <data name="Dwm_System_GeneralSubtitle" xml:space="preserve"><value>Управление хуками и экономикой OpenGlass</value></data>
+  <data name="Dwm_System_BatteryShort" xml:space="preserve"><value>Safe-battery</value></data>
+  <data name="Dwm_System_InfoTitle" xml:space="preserve"><value>Системные параметры OpenGlass</value></data>
+  <data name="Dwm_System_InfoMessage" xml:space="preserve"><value>Safe-battery делает стекло непрозрачным при энергосбережении или низком заряде батареи. No safe-zone отключает дополнительную зону отрисовки стекла у краёв окон — возможны визуальные артефакты. «Текст заголовка», «Перехват акцента», «Рамка стекла», «Отражение стекла» и «Метрики заголовка» отключают соответствующие обработчики OpenGlass — используйте только при конфликте со сторонним ПО.</value></data>
+  <data name="Dwm_System_HooksCta" xml:space="preserve"><value>Включите переключатели ниже, чтобы отключить нужные обработчики. Если сомневаетесь — оставьте все выключенными или нажмите «По умолчанию», чтобы восстановить штатное поведение.</value></data>
+  <data name="Dwm_System_BatteryTooltip" xml:space="preserve"><value>Если включено, при режиме энергосбережения стекло становится непрозрачным для снижения энергопотребления.</value></data>
+  <data name="Dwm_System_SafetyZoneShort" xml:space="preserve"><value>No safe-zone</value></data>
+  <data name="Dwm_System_SafetyZoneTooltip" xml:space="preserve"><value>Если включено, зона безопасности стекла отключена — возможны визуальные артефакты. По умолчанию выключено (зона включена).</value></data>
+  <data name="Dwm_System_HooksDesc" xml:space="preserve"><value>Отключение хуков отдельных модулей OpenGlass. Используйте только для совместимости со сторонним ПО.</value></data>
+  <data name="Dwm_System_Hook_CaptionText" xml:space="preserve"><value>Текст заголовка</value></data>
+  <data name="Dwm_System_Hook_AccentOverrider" xml:space="preserve"><value>Перехват акцента</value></data>
+  <data name="Dwm_System_Hook_GlassFrame" xml:space="preserve"><value>Рамка стекла</value></data>
+  <data name="Dwm_System_Hook_GlassReflection" xml:space="preserve"><value>Отражение стекла</value></data>
+  <data name="Dwm_System_Hook_CaptionMetrics" xml:space="preserve"><value>Метрики заголовка</value></data>
+  <data name="Dwm_System_SymbolsTitle" xml:space="preserve"><value>Скачать символы</value></data>
+  <data name="Dwm_System_SymbolsDownload" xml:space="preserve"><value>Скачать символы</value></data>
+  <data name="Dwm_System_SymbolsCancel" xml:space="preserve"><value>Прервать загрузку</value></data>
+  <data name="Dwm_System_SymbolsCachePath" xml:space="preserve"><value>Каталог загрузки: {0}</value></data>
+  <data name="Dwm_System_SymbolsDownloading" xml:space="preserve"><value>Загрузка {0} — {1}%</value></data>
+  <data name="Dialog_SymbolsMissingToolsTitle" xml:space="preserve"><value>Нет инструментов символов</value></data>
+  <data name="Dialog_SymbolsMissingToolsBody" xml:space="preserve"><value>Для загрузки и использования символов OpenGlass нужны {0}. Поместите обе библиотеки в каталог OpenGlass.dll или установите Windows Debugging Tools.</value></data>
+  <data name="Dialog_SymbolsNoInternetTitle" xml:space="preserve"><value>Нет подключения к интернету</value></data>
+  <data name="Dialog_SymbolsNoInternetBody" xml:space="preserve"><value>Загрузка символов с сервера Microsoft невозможна без доступа в интернет. Проверьте сеть и повторите попытку.</value></data>
+  <data name="Dialog_SymbolsConnectionLostTitle" xml:space="preserve"><value>Соединение с интернетом прервано</value></data>
+  <data name="Dialog_SymbolsConnectionLostBody" xml:space="preserve"><value>Во время загрузки символов пропало подключение к интернету. Проверьте сеть и повторите попытку.</value></data>
+  <data name="Dialog_Retry" xml:space="preserve"><value>Повторить</value></data>
+  <data name="Dialog_SymbolsDownloadSucceededTitle" xml:space="preserve"><value>Символы загружены</value></data>
+  <data name="Dialog_SymbolsDownloadSucceededBody" xml:space="preserve"><value>Все необходимые файлы символов успешно скачаны в полном объеме и сохранены в рабочем каталоге.</value></data>
+  <data name="Dialog_SymbolsDownloadFailedTitle" xml:space="preserve"><value>Не удалось скачать символы</value></data>
+  <data name="Dialog_SymbolsDownloadFailedBody" xml:space="preserve"><value>{0}</value></data>
+  <data name="Dialog_SymbolsDownloadFailedBodyFallback" xml:space="preserve"><value>Не удалось загрузить символы с сервера Microsoft.</value></data>
+  <data name="Dialog_SymbolsCloseWhileDownloadingTitle" xml:space="preserve"><value>Прервать загрузку символов?</value></data>
+  <data name="Dialog_SymbolsCloseWhileDownloadingBody" xml:space="preserve"><value>Сейчас выполняется загрузка символов. Закрыть окно и прервать загрузку?</value></data>
+  <data name="Dialog_SymbolsCloseWhileDownloadingConfirm" xml:space="preserve"><value>Прервать и закрыть</value></data>
+  <data name="Dialog_SymbolsClearCacheTitle" xml:space="preserve"><value>Заменить файлы символов?</value></data>
+  <data name="Dialog_SymbolsClearCacheBody" xml:space="preserve"><value>В каталоге уже имеются файлы символов. Если продолжить, все старые файлы из каталога {0} будут удалены.</value></data>
+  <data name="Dialog_SymbolsClearCacheConfirm" xml:space="preserve"><value>Продолжить</value></data>
+  <data name="Dwm_AdvancedColorizationDesc" xml:space="preserve"><value>Базовые цвета, приоритет базового цвета и режимы базовой прозрачности.</value></data>
+  <data name="Dwm_BaseColorSpoilerTitle" xml:space="preserve"><value>Базовый цвет</value></data>
+  <data name="Dwm_BaseOpacitySpoilerTitle" xml:space="preserve"><value>Базовая прозрачность</value></data>
+  <data name="Dwm_BaseOpacitySpoilerTitleActive" xml:space="preserve"><value>Базовая прозрачность (Активное)</value></data>
+  <data name="Dwm_BaseOpacitySpoilerTitleInactive" xml:space="preserve"><value>Базовая прозрачность (Неактивное)</value></data>
+  <data name="Dwm_BaseTransparent" xml:space="preserve"><value>Базовый цвет (прозрачный)</value></data>
+  <data name="Dwm_PivotBaseColorTransparent" xml:space="preserve"><value>Прозрачный</value></data>
+  <data name="Dwm_PivotBaseColorMaximized" xml:space="preserve"><value>Развёрнутый</value></data>
+  <data name="Dwm_PivotBaseColorOpaque" xml:space="preserve"><value>Непрозрачный</value></data>
+  <data name="Dwm_BaseMaximized" xml:space="preserve"><value>Базовый цвет (развёрнутый)</value></data>
+  <data name="Dwm_BaseOpaque" xml:space="preserve"><value>Базовый цвет (непрозрачный)</value></data>
+  <data name="Dwm_LabelAlpha" xml:space="preserve"><value>Альфа:</value></data>
+  <data name="Dwm_BaseOpacityActive" xml:space="preserve"><value>Базовая прозрачность</value></data>
+  <data name="Dwm_BaseOpacityActiveDesc" xml:space="preserve"><value>Коэффициент прозрачности активных окон</value></data>
+  <data name="Dwm_BaseOpacityInactive" xml:space="preserve"><value>Базовая неактивная прозрачность</value></data>
+  <data name="Dwm_BaseOpacityInactiveDesc" xml:space="preserve"><value>Коэффициент прозрачности неактивных окон.</value></data>
+  <data name="Dwm_BaseOpacityMaximized" xml:space="preserve"><value>Базовая прозрачность (развёрнутый)</value></data>
+  <data name="Dwm_BaseOpacityMaximizedDesc" xml:space="preserve"><value>Коэффициент прозрачности развёрнутых активных окон</value></data>
+  <data name="Dwm_BaseOpacityInactiveMaximized" xml:space="preserve"><value>Базовая неактивная (развёрнутый)</value></data>
+  <data name="Dwm_BaseOpacityInactiveMaximizedDesc" xml:space="preserve"><value>Коэффициент прозрачности развёрнутых неактивных окон</value></data>
+  <data name="Dwm_PivotBaseOpacityActive" xml:space="preserve"><value>Активный</value></data>
+  <data name="Dwm_PivotBaseOpacityInactive" xml:space="preserve"><value>Неактивный</value></data>
+  <data name="Dwm_PivotBaseOpacityMaximized" xml:space="preserve"><value>Развёрнутый</value></data>
+  <data name="Dwm_PivotBaseOpacityInactiveMax" xml:space="preserve"><value>Неакт. разв.</value></data>
+  <data name="Effect_Mica" xml:space="preserve"><value>Mica</value></data>
+  <data name="Effect_MicaAlt" xml:space="preserve"><value>Mica Alt</value></data>
+  <data name="Effect_System" xml:space="preserve"><value>Системный</value></data>
+  <data name="Effect_Unknown" xml:space="preserve"><value>Effect {0}</value></data>
+  <data name="Error_ShellExtensionNeedsHelper" xml:space="preserve"><value>Не удалось загрузить компонент, необходимый для регистрации расширения меню.</value></data>
+  <data name="Error_ShellExtensionFailed" xml:space="preserve"><value>Не удалось изменить регистрацию расширения контекстного меню.</value></data>
+  <data name="Error_ShellExtensionFailedToApply" xml:space="preserve"><value>Не удалось применить изменения регистрации.</value></data>
+  <data name="Error_ShellExtensionFailedToRegister" xml:space="preserve"><value>Не удалось зарегистрировать расширение контекстного меню рабочего стола.</value></data>
+  <data name="Error_ShellExtensionFailedToUnregister" xml:space="preserve"><value>Не удалось отменить регистрацию расширения контекстного меню рабочего стола.</value></data>
+  <data name="Error_ShellExtensionFailedToStart" xml:space="preserve"><value>Не удалось запустить фоновую операцию.</value></data>
+  <data name="Error_ShellExtensionInconsistentState" xml:space="preserve"><value>Состояние расширения меню несогласовано. Отключите его и включите снова.</value></data>
+  <data name="Error_ShellExtensionNeedsExplorerRestart" xml:space="preserve"><value>Перезапустите проводник Windows, чтобы обновить меню рабочего стола.</value></data>
+  <data name="Error_ShellExtensionSparseArtifactsMissing" xml:space="preserve"><value>Не найдены файлы расширения контекстного меню. Переустановите Glass Settings.</value></data>
+  <data name="Error_ShellExtensionSparseCertFailed" xml:space="preserve"><value>Не удалось подготовить сертификат для установки пункта меню.</value></data>
+  <data name="Error_ShellExtensionSparseDeployFailed" xml:space="preserve"><value>Не удалось зарегистрировать расширение в контекстном меню рабочего стола.</value></data>
+  <data name="Error_ShellExtensionSparseExternalLocationConflict" xml:space="preserve"><value>Осталась прежняя регистрация расширения контекстного меню рабочего стола. Отключите расширение в настройках Glass Settings и включите снова.</value></data>
+  <data name="Error_ShellExtensionTimedOut" xml:space="preserve"><value>Операция не завершилась вовремя. Состояние могло не обновиться до конца.</value></data>
+  <data name="Error_ShellExtensionTitle" xml:space="preserve"><value>Расширение контекстного меню</value></data>
+  <data name="Flyout_Animation" xml:space="preserve"><value>Анимация</value></data>
+  <data name="Flyout_AnimationDesc" xml:space="preserve"><value>Тайминги в миллисекундах, стиль появления и немедленное прерывание предыдущей анимации при открытии нового flyout.</value></data>
+  <data name="Flyout_AnimationSubtitle" xml:space="preserve"><value>Тайминги затухания, стиль появления и прерывание анимации.</value></data>
+  <data name="Flyout_BorderColor" xml:space="preserve"><value>Цвет бордюров</value></data>
+  <data name="Flyout_BorderColorDesc" xml:space="preserve"><value>Цвет системной обводки (AARRGGBB). Прозрачность задаётся альфа-каналом. На Windows 11 при скруглённых углах альфа может игнорироваться.</value></data>
+  <data name="Flyout_BorderColorSubtitle" xml:space="preserve"><value>Цвет и прозрачность системной или кастомной обводки</value></data>
+  <data name="Flyout_BorderSource" xml:space="preserve"><value>Источник бордюра</value></data>
+  <data name="Flyout_BorderSourceDesc" xml:space="preserve"><value>DWM-бордюр compositor или XAML-обводка в explorer.exe.</value></data>
+  <data name="Flyout_SeparateZones" xml:space="preserve"><value>Сегментирование панели</value></data>
+  <data name="Flyout_SeparateZonesDesc" xml:space="preserve"><value>Организует панель задач в виде отдельных групп</value></data>
+  <data name="Param_ModeDwmSwca" xml:space="preserve"><value>DWM/SWCA</value></data>
+  <data name="Flyout_Corners" xml:space="preserve"><value>Углы</value></data>
+  <data name="Flyout_CornerType" xml:space="preserve"><value>Тип углов</value></data>
+  <data name="Flyout_CornerTypeDesc" xml:space="preserve"><value>Форма углов всплывающего окна: системная, прямоугольная, более или менее скруглённая.</value></data>
+  <data name="Flyout_CornersShadows" xml:space="preserve"><value>Углы и тени</value></data>
+  <data name="Flyout_CornersShadowsSubtitle" xml:space="preserve"><value>Форма углов и тень у всплывающих окон.</value></data>
+  <data name="Flyout_DrawThemeAlpha" xml:space="preserve"><value>Прозрачность элементов</value></data>
+  <data name="Flyout_DrawThemeAlphaSubtitle" xml:space="preserve"><value>Изменение альфа-прозрачности кнопок, комбобоксов, табов и др.</value></data>
+  <data name="Flyout_EffectParams" xml:space="preserve"><value>Параметры эффекта</value></data>
+  <data name="Flyout_EffectScopeDesc" xml:space="preserve"><value>Выбор типа стеклянного эффекта для {0}</value></data>
+  <data name="Flyout_EffectScopeTargets" xml:space="preserve"><value>меню;выпадающих списков;всплывающих подсказок</value></data>
+  <data name="Flyout_EffectScopeRootTargets" xml:space="preserve"><value>активных root-окон;неактивных root-окон</value></data>
+  <data name="Flyout_EffectScopeTaskbarTarget" xml:space="preserve"><value>панели задач</value></data>
+  <data name="Flyout_EffectType" xml:space="preserve"><value>Тип эффекта</value></data>
+  <data name="Flyout_EffectWithIndex" xml:space="preserve"><value>{0} ({1})</value></data>
+  <data name="Flyout_GradientColor" xml:space="preserve"><value>Цвет градиента</value></data>
+  <data name="Flyout_GradientColorDesc" xml:space="preserve"><value>Цвет фона в текущей теме (AARRGGBB). Прозрачность задаётся альфа-каналом. Не применяется при EffectType Acrylic, Mica или MicaAlt (6–8).</value></data>
+  <data name="Flyout_GradientColorSubtitle" xml:space="preserve"><value>Цвет тинта стекла в SWCA эффектах</value></data>
+  <data name="Flyout_LabelAlpha" xml:space="preserve"><value>Alpha:</value></data>
+  <data name="Flyout_NoBorder" xml:space="preserve"><value>Без бордюра</value></data>
+  <data name="Flyout_NoBorderCheck" xml:space="preserve"><value>Без бордюра (NoBorderColor)</value></data>
+  <data name="Flyout_PageSubtitle" xml:space="preserve"><value>Общие и индивидуальные параметры всплывающих окон</value></data>
+  <data name="Flyout_RenderMode" xml:space="preserve"><value>Режим отрисовки</value></data>
+  <data name="Flyout_RenderModeDesc" xml:space="preserve"><value>DWM или XAML</value></data>
+  <data name="Flyout_RootEffectDesc" xml:space="preserve"><value>EffectType для root backdrop</value></data>
+  <data name="Flyout_Scope" xml:space="preserve"><value>Область применения</value></data>
+  <data name="Flyout_ScopeGeneral" xml:space="preserve"><value>Общие</value></data>
+  <data name="Flyout_ScopeIndividual" xml:space="preserve"><value>Индивидуальные</value></data>
+  <data name="Flyout_Shadow" xml:space="preserve"><value>Тени</value></data>
+  <data name="Flyout_TaskbarEffectDesc" xml:space="preserve"><value>Эффект фона панели задач: прозрачность, размытие, акрил, Mica и др.</value></data>
+  <data name="Flyout_Type" xml:space="preserve"><value>Тип всплывающего</value></data>
+  <data name="Glass_GeneralDesc" xml:space="preserve"><value>Общие параметры Glass (в разработке)</value></data>
+  <data name="Glass_GeneralPlaceholder" xml:space="preserve"><value>Дополнительные общие настройки будут добавлены.</value></data>
+  <data name="Glass_GeneralTitle" xml:space="preserve"><value>Общие</value></data>
+  <data name="Glass_HubGeneral" xml:space="preserve"><value>Общие</value></data>
+  <data name="Glass_HubGeneralDesc" xml:space="preserve"><value>Глобальные параметры платформы</value></data>
+  <data name="Glass_HubPopup" xml:space="preserve"><value>Popup-окна</value></data>
+  <data name="Glass_HubPopupDesc" xml:space="preserve"><value>Меню, списки и подсказки</value></data>
+  <data name="Glass_HubRoot" xml:space="preserve"><value>Root-окна</value></data>
+  <data name="Glass_HubRootDesc" xml:space="preserve"><value>Политика backdrop и SWCA</value></data>
+  <data name="Glass_HubTaskbar" xml:space="preserve"><value>Панель задач</value></data>
+  <data name="Glass_HubTaskbarDesc" xml:space="preserve"><value>Параметры Tray</value></data>
+  <data name="Glass_AdjacentWindows" xml:space="preserve"><value>Смежные окна</value></data>
+  <data name="Glass_AdjacentWindowsDesc" xml:space="preserve"><value>Настройка меню Пуск, Центра уведомлений, контекстных меню и пр.</value></data>
+  <data name="Glass_Adjacent_TabPopup" xml:space="preserve"><value>Popup</value></data>
+  <data name="Glass_Adjacent_TabPreview" xml:space="preserve"><value>Preview</value></data>
+  <data name="Glass_Adjacent_TabMenu" xml:space="preserve"><value>Menu</value></data>
+  <data name="Glass_Adjacent_TabTooltip" xml:space="preserve"><value>Tooltip</value></data>
+  <data name="Glass_Adjacent_EffectDesc" xml:space="preserve"><value>Тип эффекта для выбранной поверхности. Без локального значения используется параметр панели задач.</value></data>
+  <data name="Glass_Adjacent_CornerPreviewLocked" xml:space="preserve"><value>Для превью кнопок приложений углы всегда системные и не настраиваются.</value></data>
+  <data name="Glass_HubText" xml:space="preserve"><value>Текст и шрифты</value></data>
+  <data name="Glass_HubTextDesc" xml:space="preserve"><value>Системные шрифты и сглаживание текста на стекле</value></data>
+  <data name="Glass_LabelEffectType" xml:space="preserve"><value>EffectType:</value></data>
+  <data name="Popup_ScopeShared" xml:space="preserve"><value>Общие настройки</value></data>
+  <data name="Popup_ScopeSeparate" xml:space="preserve"><value>Раздельные настройки</value></data>
+  <data name="Popup_GeneralFallbackMarker" xml:space="preserve"><value>Задан общий параметр</value></data>
+  <data name="Popup_GeneralFallbackTooltip" xml:space="preserve"><value>Локальный ключ отсутствует. Сейчас используется значение из общих настроек.</value></data>
+  <data name="Root_ScopeStateIndependent" xml:space="preserve"><value>Без учёта состояния</value></data>
+  <data name="Root_ScopePerWindowState" xml:space="preserve"><value>По состоянию окна</value></data>
+  <data name="Root_ScopeStateIndependentDesc" xml:space="preserve"><value>Один набор параметров для активных и неактивных окон</value></data>
+  <data name="Root_ScopePerWindowStateDesc" xml:space="preserve"><value>Отдельные ключи Active и Inactive; при отсутствии — значение из Root</value></data>
+  <data name="Glass_PopupDropDown" xml:space="preserve"><value>DropDown</value></data>
+  <data name="Glass_PopupDropDownDesc" xml:space="preserve"><value>Выпадающие списки</value></data>
+  <data name="Glass_PopupMenu" xml:space="preserve"><value>Меню</value></data>
+  <data name="Glass_PopupMenuDesc" xml:space="preserve"><value>Параметры контекстного меню</value></data>
+  <data name="Glass_MenuGeneral_Title" xml:space="preserve"><value>Общие параметры меню</value></data>
+  <data name="Glass_MenuGeneralSettings_Title" xml:space="preserve"><value>Общие настройки</value></data>
+  <data name="Glass_MenuGeneralSettings_Subtitle" xml:space="preserve"><value>Дополнительные технические настройки</value></data>
+  <data name="Glass_MenuGeneralSettings_Desc" xml:space="preserve"><value>Здесь вы можете задать цвет фона иконок, который будет удален, порог различения этого цвета; отключить системную тень, отключить современный стиль для меню.</value></data>
+  <data name="Glass_MenuGeneral_NoSystemDropShadow_Title" xml:space="preserve"><value>Без системной тени</value></data>
+  <data name="Glass_MenuGeneral_EnableImmersiveStyle_Title" xml:space="preserve"><value>Современный стиль меню</value></data>
+  <data name="Glass_MenuGeneral_NoModernAppBackground_Title" xml:space="preserve"><value>Без фона UWP-иконок</value></data>
+  <data name="Glass_MenuIcon_Title" xml:space="preserve"><value>Удаление фона иконок</value></data>
+  <data name="Glass_MenuIcon_Action" xml:space="preserve"><value>Цвет, считающийся прозрачным (AARRGGBB). Удаление идёт от углов к центру.</value></data>
+  <data name="Glass_MenuIcon_Threshold_Label" xml:space="preserve"><value>Порог различия цвета</value></data>
+  <data name="Glass_ControlIcon_Title" xml:space="preserve"><value>Фон иконок</value></data>
+  <data name="Glass_ControlIcon_Subtitle" xml:space="preserve"><value>Удаляет выбранный цвет из фона иконок и изображений элементов управления.</value></data>
+  <data name="Glass_ControlIcon_Threshold_Label" xml:space="preserve"><value>Порог различия цвета</value></data>
+  <data name="Glass_ControlIcon_Ribbon" xml:space="preserve"><value>Ribbon</value></data>
+  <data name="Glass_ControlIcon_ListView" xml:space="preserve"><value>ListView</value></data>
+  <data name="Glass_ControlIcon_TreeView" xml:space="preserve"><value>TreeView</value></data>
+  <data name="Glass_ControlIcon_Toolbar" xml:space="preserve"><value>Toolbar</value></data>
+  <data name="Glass_ControlIcon_Button" xml:space="preserve"><value>Button</value></data>
+  <data name="Glass_ControlIcon_Static" xml:space="preserve"><value>Static</value></data>
+  <data name="Glass_ControlIcon_Ribbon_Subtitle" xml:space="preserve"><value>Выбранный цвет фона иконки становится прозрачным. Без ключа фон иконки сохраняется.</value></data>
+  <data name="Glass_ControlIcon_ListView_Subtitle" xml:space="preserve"><value>Иконки ListView: выбранный цвет фона становится прозрачным. Без ключа чёрный фон ImageList считается прозрачным.</value></data>
+  <data name="Glass_ControlIcon_TreeView_Subtitle" xml:space="preserve"><value>Иконки TreeView: выбранный цвет фона становится прозрачным. Без ключа чёрный фон ImageList считается прозрачным.</value></data>
+  <data name="Glass_ControlIcon_Toolbar_Subtitle" xml:space="preserve"><value>Иконки Toolbar: выбранный цвет фона становится прозрачным. Без ключа чёрный фон считается прозрачным.</value></data>
+  <data name="Glass_ControlIcon_Button_Subtitle" xml:space="preserve"><value>Иконки Button: выбранный цвет фона становится прозрачным. Без ключа чёрный фон считается прозрачным.</value></data>
+  <data name="Glass_ControlIcon_Static_Subtitle" xml:space="preserve"><value>Выбранный цвет фона становится прозрачным. Без ключа фон не удаляется.</value></data>
+  <data name="Glass_ControlIcon_Ribbon_Desc" xml:space="preserve"><value>Видите цветные прямоугольники вокруг иконок ленты? Включите и выберите этот цвет фона, чтобы сделать его прозрачным. Если иконки выглядят нормально — не трогайте.</value></data>
+  <data name="Glass_ControlIcon_ListView_Desc" xml:space="preserve"><value>У иконок в списках виден цветной фон? Включите и выберите цвет для удаления. Чёрный фон ImageList по умолчанию уже считается прозрачным — меняйте только при артефактах.</value></data>
+  <data name="Glass_ControlIcon_TreeView_Desc" xml:space="preserve"><value>У иконок в дереве виден цветной фон? Включите и выберите цвет для удаления. Чёрный фон ImageList по умолчанию уже считается прозрачным — меняйте только при артефактах.</value></data>
+  <data name="Glass_ControlIcon_Toolbar_Desc" xml:space="preserve"><value>У иконок панели инструментов виден фоновый прямоугольник? Включите и выберите цвет для удаления. Чёрный фон по умолчанию считается прозрачным — не трогайте без необходимости.</value></data>
+  <data name="Glass_ControlIcon_Button_Desc" xml:space="preserve"><value>Иконки кнопок рисуются с фоновым прямоугольником? Включите и выберите цвет для удаления. Чёрный фон по умолчанию считается прозрачным — меняйте только при необходимости.</value></data>
+  <data name="Glass_ControlIcon_Static_Desc" xml:space="preserve"><value>Контролы-изображения (Static): включите и выберите цвет фона, чтобы сделать его прозрачным. По умолчанию картинки просто корректно смешиваются со стеклом, без удаления цвета.</value></data>
+  <data name="Glass_LabelThemeColorizationType" xml:space="preserve"><value>Тип цвета темы</value></data>
+  <data name="Combo_MenuThemeColorTypeItems" xml:space="preserve"><value>ImmersiveStartHoverBackground;ImmersiveStartSelectionBackground;SystemAccent</value></data>
+  <data name="Glass_MenuItem_Hot" xml:space="preserve"><value>Hot</value></data>
+  <data name="Glass_MenuItem_DisabledHot" xml:space="preserve"><value>Disabled Hot</value></data>
+  <data name="Glass_MenuItem_Focusing" xml:space="preserve"><value>Focusing</value></data>
+  <data name="Glass_MenuItem_Separator" xml:space="preserve"><value>Separator</value></data>
+  <data name="Glass_MenuItem_HotAction" xml:space="preserve"><value>Настройте заливку пункта, когда на него наводят курсор. В пикере выберите оттенок и прозрачность — через них просвечивает размытие под меню. CornerRadius задаёт, насколько скруглены углы этой подложки. Переключатель Theme Colorization подставит цвет акцента Windows вместо выбранного в пикере.</value></data>
+  <data name="Glass_MenuItem_DisabledHotAction" xml:space="preserve"><value>То же для неактивных пунктов (серый текст): при наведении рисуется отдельная подложка. Подберите цвет и прозрачность заливки, CornerRadius — форму скругления. Theme Colorization заменит ваш цвет на акцент текущей темы.</value></data>
+  <data name="Glass_MenuItem_FocusingAction" xml:space="preserve"><value>Контур вокруг пункта при навигации клавиатурой (↑↓, Tab). Цвет и прозрачность линии — в пикере, CornerRadius — скругление углов рамки, Width — толщина штриха (1000 ≈ 1 px). Theme Colorization возьмёт цвет из темы Windows вместо пикера.</value></data>
+  <data name="Glass_MenuItem_SeparatorAction" xml:space="preserve"><value>Горизонтальная черта между группами пунктов. Задайте цвет и прозрачность линии, Width — её толщину (1000 ≈ 1 px). Theme Colorization подставит акцент системы вместо выбранного цвета.</value></data>
+  <data name="Glass_MenuItem_HotDesc" xml:space="preserve"><value>Подсветка активного пункта при наведении мыши</value></data>
+  <data name="Glass_MenuItem_DisabledHotDesc" xml:space="preserve"><value>Подсветка отключённого пункта при наведении</value></data>
+  <data name="Glass_MenuItem_FocusingDesc" xml:space="preserve"><value>Рамка клавиатурного фокуса вокруг пункта</value></data>
+  <data name="Glass_MenuItem_SeparatorDesc" xml:space="preserve"><value>Линия-разделитель между группами пунктов</value></data>
+  <data name="Glass_TooltipRendering_Title" xml:space="preserve"><value>Цвет текста tooltip</value></data>
+  <data name="Glass_TooltipRendering_Desc" xml:space="preserve"><value>Цвет текста и отступы содержимого</value></data>
+  <data name="Glass_TooltipRendering_Action" xml:space="preserve"><value>Задайте цвет текста подсказки (DarkMode_Color / LightMode_Color). Заливка градиентом настраивается в основном блоке «Цвет градиента» выше. «Применение отступов» определяет, как значения margin применяются к области содержимого tooltip.</value></data>
+  <data name="Glass_TooltipRendering_MarginsType" xml:space="preserve"><value>Применение отступов</value></data>
+  <data name="Glass_TooltipRendering_MarginLeft" xml:space="preserve"><value>Отступ слева</value></data>
+  <data name="Glass_TooltipRendering_MarginRight" xml:space="preserve"><value>Отступ справа</value></data>
+  <data name="Glass_TooltipRendering_MarginTop" xml:space="preserve"><value>Отступ сверху</value></data>
+  <data name="Glass_TooltipRendering_MarginBottom" xml:space="preserve"><value>Отступ снизу</value></data>
+  <data name="Combo_TooltipMarginsTypeItems" xml:space="preserve"><value>Добавить;Заменить</value></data>
+  <data name="Combo_MenuItemEnabledItems" xml:space="preserve"><value>Использовать;Не использовать</value></data>
+  <data name="Glass_LabelCornerRadius" xml:space="preserve"><value>CornerRadius</value></data>
+  <data name="Glass_LabelMenuItemWidth" xml:space="preserve"><value>Width</value></data>
+  <data name="Glass_LabelEnableThemeColorization" xml:space="preserve"><value>Enable Theme Colorization</value></data>
+  <data name="Glass_PopupTooltip" xml:space="preserve"><value>Tooltip</value></data>
+  <data name="Glass_PopupTooltipDesc" xml:space="preserve"><value>Подсказки</value></data>
+  <data name="Home_CardComponents" xml:space="preserve"><value>Компоненты</value></data>
+  <data name="Home_CardSubsystems" xml:space="preserve"><value>Подсистемы</value></data>
+  <data name="Home_CardDonation" xml:space="preserve"><value>Поддержать проект</value></data>
+  <data name="Home_CardDonationDesc" xml:space="preserve"><value>Добровольный донат автору Glass</value></data>
+  <data name="Home_CardDwm" xml:space="preserve"><value>Настройки DWM</value></data>
+  <data name="Home_CardDwmLocal" xml:space="preserve"><value>Настройки DWM (L)</value></data>
+  <data name="Home_CardExtra" xml:space="preserve"><value>Дополнительно</value></data>
+  <data name="Home_CardGlassPlatform" xml:space="preserve"><value>Платформа Glass</value></data>
+  <data name="Home_CardProcesses" xml:space="preserve"><value>Процессы</value></data>
+  <data name="Home_CardSystem" xml:space="preserve"><value>Системы</value></data>
+  <data name="Home_DeviceReleaseLine" xml:space="preserve"><value>{0} · сборка {1} · {2}</value></data>
+  <data name="Home_FlyoutLine" xml:space="preserve"><value>Общие: {0}</value></data>
+  <data name="Home_FooterCustomPrefix" xml:space="preserve"><value>Изменённые параметры: </value></data>
+  <data name="Home_FooterDefaultPrefix" xml:space="preserve"><value>Все параметры по умолчанию</value></data>
+  <data name="Home_FooterUnsavedPlain" xml:space="preserve"><value>требуют применения</value></data>
+  <data name="Home_FooterUnsavedPrefix" xml:space="preserve"><value>Несохранённые изменения: </value></data>
+  <data name="Home_NoticeDefaultMessage" xml:space="preserve"><value>Все параметры по умолчанию. Выберите раздел ниже, чтобы настроить Glass.</value></data>
+  <data name="Notice_SavedSuccess" xml:space="preserve"><value>Настройки успешно сохранены</value></data>
+  <data name="Notice_ExternalSectionSynced" xml:space="preserve"><value>Замечены изменения параметров в текущем разделе за пределами этого приложения и были синхронизированы</value></data>
+  <data name="Notice_Download" xml:space="preserve"><value>Скачать</value></data>
+  <data name="Home_PageTitle" xml:space="preserve"><value>Обзор</value></data>
+  <data name="Home_RowColorization" xml:space="preserve"><value>Композиция</value></data>
+  <data name="Home_RowDonate" xml:space="preserve"><value>Сделать донат</value></data>
+  <data name="Home_RowDonateSub" xml:space="preserve"><value>Способы поддержки и благодарность</value></data>
+  <data name="Home_RowDwmGlass" xml:space="preserve"><value>Внешний вид</value></data>
+  <data name="Home_RowDwmTheme" xml:space="preserve"><value>Стилизация</value></data>
+  <data name="Home_RowGeneral" xml:space="preserve"><value>Общие</value></data>
+  <data name="Home_RowGlassPlatform" xml:space="preserve"><value>Платформа Glass</value></data>
+  <data name="Home_RowGlassPlatformX86" xml:space="preserve"><value>Платформа Glass x86</value></data>
+  <data name="Home_RowGlassPlatformX64" xml:space="preserve"><value>Платформа Glass x64</value></data>
+  <data name="Home_RowOpenGlass" xml:space="preserve"><value>OpenGlass</value></data>
+  <data name="Home_OpenGlassUpdateLinkFormat" xml:space="preserve"><value>Новая версия {0}</value></data>
+  <data name="System_OpenGlassUpdateSpoilerFormat" xml:space="preserve"><value>Доступна новая версия {0}</value></data>
+  <data name="Home_OpenGlassUpdateNotice" xml:space="preserve"><value>Доступна новая версия OpenGlass {0}. Установлена: {1}.</value></data>
+  <data name="Home_RowPopupWindows" xml:space="preserve"><value>Popup-окна</value></data>
+  <data name="Home_RowProcessList" xml:space="preserve"><value>Список процессов</value></data>
+  <data name="Home_RowRootWindows" xml:space="preserve"><value>Root-окна</value></data>
+  <data name="Home_RowShellExtension" xml:space="preserve"><value>Расширение контекстного меню</value></data>
+  <data name="Home_RowShellExtensionSub" xml:space="preserve"><value>Управление в меню рабочего стола</value></data>
+  <data name="Home_RowSystemManagement" xml:space="preserve"><value>Управление системой</value></data>
+  <data name="Home_RowTaskbar" xml:space="preserve"><value>Панель задач</value></data>
+  <data name="Home_RowTextFonts" xml:space="preserve"><value>Текст и шрифты</value></data>
+  <data name="Home_RowViewAllProcesses" xml:space="preserve"><value>Просмотреть все процессы</value></data>
+  <data name="Home_RowVisualStyles" xml:space="preserve"><value>Визуальные стили</value></data>
+  <data name="Home_RuntimeArchBuild" xml:space="preserve"><value>{0} · сборка {1}</value></data>
+  <data name="Home_SectionInDevelopment" xml:space="preserve"><value>Раздел в разработке</value></data>
+  <data name="Home_TableModule" xml:space="preserve"><value>Модуль</value></data>
+  <data name="Home_TableModulePlatform" xml:space="preserve"><value>Модуль платформы</value></data>
+  <data name="Home_TableModuleAero" xml:space="preserve"><value>Модуль Aero</value></data>
+  <data name="Home_TableFileVersion" xml:space="preserve"><value>Версия файла</value></data>
+  <data name="Home_GroupPlatform" xml:space="preserve"><value>Платформа Glass</value></data>
+  <data name="Home_GroupOpenGlass" xml:space="preserve"><value>OpenGlass (Aero)</value></data>
+  <data name="Home_ComponentsProductVersion" xml:space="preserve"><value>Версия продукта: {0}</value></data>
+  <data name="Home_ComponentsVersion" xml:space="preserve"><value>Установленная версия: {0}</value></data>
+  <data name="Home_TableVersion" xml:space="preserve"><value>Версия</value></data>
+  <data name="Home_TableCount" xml:space="preserve"><value>Кол-во</value></data>
+  <data name="Home_TableStatus" xml:space="preserve"><value>Статус</value></data>
+  <data name="Home_TaskbarLine" xml:space="preserve"><value>Режим {0}, {1}</value></data>
+  <data name="Home_WindowsBuildCaption" xml:space="preserve"><value>Windows, сборка {0}</value></data>
+  <data name="Main_BackToolTip" xml:space="preserve"><value>Назад</value></data>
+  <data name="Main_AppSettingsToolTip" xml:space="preserve"><value>Настройки приложения</value></data>
+  <data name="Main_SearchPlaceholder" xml:space="preserve"><value>Поиск…</value></data>
+  <data name="Modules_NotFound" xml:space="preserve"><value>не найден</value></data>
+  <data name="Modules_Unavailable" xml:space="preserve"><value>—</value></data>
+  <data name="NavAttach" xml:space="preserve"><value>Процессы</value></data>
+  <data name="NavDwm" xml:space="preserve"><value>Настройки DWM</value></data>
+  <data name="NavFlyout" xml:space="preserve"><value>Меню и всплывающие</value></data>
+  <data name="NavGlass" xml:space="preserve"><value>Настройки Glass</value></data>
+  <data name="NavHome" xml:space="preserve"><value>Обзор</value></data>
+  <data name="NavRoot" xml:space="preserve"><value>Окна приложений</value></data>
+  <data name="NavSystem" xml:space="preserve"><value>Системы</value></data>
+  <data name="NavTaskbar" xml:space="preserve"><value>Панель задач</value></data>
+  <data name="NavText" xml:space="preserve"><value>Текст и шрифты</value></data>
+  <data name="NavThemes" xml:space="preserve"><value>Визуальные стили</value></data>
+  <data name="NavUser_LocalAccount" xml:space="preserve"><value>Локальная учётная запись</value></data>
+  <data name="ParamLabel_CornerType" xml:space="preserve"><value>Форма</value></data>
+  <data name="ParamLabel_EnableDropShadow" xml:space="preserve"><value>EnableDropShadow</value></data>
+  <data name="ParamLabel_FadeInTime" xml:space="preserve"><value>Проявление (мс)</value></data>
+  <data name="ParamLabel_FadeOutTime" xml:space="preserve"><value>Затухание (мс)</value></data>
+  <data name="ParamLabel_GlassDrawThemeConstantAlpha" xml:space="preserve"><value>GlassDrawThemeConstantAlpha</value></data>
+  <data name="ParamLabel_ImmediateInterrupting" xml:space="preserve"><value>Немедленное прерывание</value></data>
+  <data name="ParamLabel_PopInStyle" xml:space="preserve"><value>Стиль появления</value></data>
+  <data name="ParamLabel_PopInTime" xml:space="preserve"><value>Появление (мс)</value></data>
+  <data name="ParamLabel_StartRatio" xml:space="preserve"><value>Начальное соотношение (%)</value></data>
+  <data name="Param_Auto" xml:space="preserve"><value>Auto</value></data>
+  <data name="Param_BackdropDwm" xml:space="preserve"><value>DWM</value></data>
+  <data name="Root_AllowBackdropTitle" xml:space="preserve"><value>Разрешить backdrop</value></data>
+  <data name="Root_AllowBackdropDesc" xml:space="preserve"><value>Разрешить или запретить политику применения эффектов backdrop</value></data>
+  <data name="Root_FullGlassToggle" xml:space="preserve"><value>Сплошное стекло</value></data>
+  <data name="Root_BackdropModeTitle" xml:space="preserve"><value>Режим backdrop</value></data>
+  <data name="Root_BackdropModeDesc" xml:space="preserve"><value>Изменение политики применения эффектов backdrop</value></data>
+  <data name="Param_BackdropNone" xml:space="preserve"><value>NONE</value></data>
+  <data name="Param_BackdropSwca" xml:space="preserve"><value>SWCA</value></data>
+  <data name="Param_BlurBalance" xml:space="preserve"><value>Balance</value></data>
+  <data name="Param_BlurQuality" xml:space="preserve"><value>Quality</value></data>
+  <data name="Param_BlurSpeed" xml:space="preserve"><value>Speed</value></data>
+  <data name="Param_ModeDwm" xml:space="preserve"><value>DWM</value></data>
+  <data name="Param_ModeXaml" xml:space="preserve"><value>XAML</value></data>
+  <data name="Placeholder_Subtitle" xml:space="preserve"><value>Раздел в разработке</value></data>
+  <data name="Status_BwmDisabled" xml:space="preserve"><value>BWM: Отключена</value></data>
+  <data name="Status_BwmNoTask" xml:space="preserve"><value>BWM: Нет задачи</value></data>
+  <data name="Status_BwmReady" xml:space="preserve"><value>BWM: Готова</value></data>
+  <data name="Status_BwmRunning" xml:space="preserve"><value>BWM: Работает</value></data>
+  <data name="Status_DeleteTask" xml:space="preserve"><value>Удалить</value></data>
+  <data name="Status_Disable" xml:space="preserve"><value>Отключить</value></data>
+  <data name="Status_DisableScheduler" xml:space="preserve"><value>Отключить в планировщике</value></data>
+  <data name="Status_Disabled" xml:space="preserve"><value>Отключена</value></data>
+  <data name="Status_Enable" xml:space="preserve"><value>Включить</value></data>
+  <data name="Status_EnableScheduler" xml:space="preserve"><value>Включить в планировщике</value></data>
+  <data name="Status_NoTask" xml:space="preserve"><value>Нет задачи</value></data>
+  <data name="Status_Ready" xml:space="preserve"><value>Готова</value></data>
+  <data name="Status_Running" xml:space="preserve"><value>Работает</value></data>
+  <data name="Status_Unloading" xml:space="preserve"><value>Выгружается</value></data>
+  <data name="Status_StartPlatform" xml:space="preserve"><value>Запустить</value></data>
+  <data name="Status_StopPlatform" xml:space="preserve"><value>Остановить</value></data>
+  <data name="System_OrchestrationService" xml:space="preserve"><value>Служба</value></data>
+  <data name="System_OrchestrationTask" xml:space="preserve"><value>Задача</value></data>
+  <data name="System_OrchestrationTaskX86" xml:space="preserve"><value>Задача x86</value></data>
+  <data name="System_OrchestrationTaskX64" xml:space="preserve"><value>Задача x64</value></data>
+  <data name="System_ActionDisable" xml:space="preserve"><value>Отключить</value></data>
+  <data name="System_ActionEnable" xml:space="preserve"><value>Включить</value></data>
+  <data name="System_LibBwm" xml:space="preserve"><value>Библиотека BWM (Glass)</value></data>
+  <data name="System_LibBwmDesc" xml:space="preserve"><value>Обеспечивает эффекты и материалы Glass на базе BWM.</value></data>
+  <data name="System_LibOpenGlass" xml:space="preserve"><value>Библиотека OpenGlass</value></data>
+  <data name="System_LibOpenGlassDesc" xml:space="preserve"><value>Обеспечивает совместимость и эффекты через OpenGlass.</value></data>
+  <data name="System_MenuBwmAction" xml:space="preserve"><value>Действие для BWM</value></data>
+  <data name="System_MenuBwmDesc" xml:space="preserve"><value>Задача планировщика GlassPlatform</value></data>
+  <data name="System_MenuGlassDesc" xml:space="preserve"><value>Интеграция дополнительных пунктов в контекстное меню рабочего стола</value></data>
+  <data name="System_MenuGlassItem" xml:space="preserve"><value>Пункт Glass в меню рабочего стола</value></data>
+  <data name="System_MenuOgAction" xml:space="preserve"><value>Действие для OpenGlass</value></data>
+  <data name="System_MenuOgDesc" xml:space="preserve"><value>Задача OpenGlass</value></data>
+  <data name="System_NoticeImmediateApply" xml:space="preserve"><value>OpenGlass возвращает «стеклянный» вид окон в стиле Windows 7: размытие, блики и цветные рамки.&#10;Платформа Glass добавляет современное прозрачное стекло для меню, всплывающих окон и панели задач.&#10;Ниже — автозапуск и пункт в контекстном меню; изменения применяются сразу.</value></data>
+  <data name="System_NoticeBannerGlass" xml:space="preserve"><value>Платформа Glass — глобальное остекление окон Win32-приложений, а также меню, всплывающих подсказок и панели задач. Работает в фоне и дополняет ваши программы.</value></data>
+  <data name="System_NoticeBannerImportantBefore" xml:space="preserve"><value>Важно: модули платформы загружаются глобально во все процессы. Это несёт определённый риск для стабильности и безопасности. Нежелательные и опасные процессы можно добавить в </value></data>
+  <data name="System_NoticeBannerImportantAfter" xml:space="preserve"><value>.</value></data>
+  <data name="System_NoticeProcessesLink" xml:space="preserve"><value>Список запрещённых процессов</value></data>
+  <data name="System_NoticeBannerOpenGlassBefore" xml:space="preserve"><value>OpenGlass — это Legacy AeroGlass: размытие за окном; движение текстуры свечения стекла (</value></data>
+  <data name="System_NoticeBannerOpenGlassAfter" xml:space="preserve"><value>); пользовательская рамка окна; цвет и прозрачность стекла.</value></data>
+  <data name="System_NoticeReflectionLink" xml:space="preserve"><value>текстуры</value></data>
+  <data name="System_OpenGlassUpdateTitle" xml:space="preserve"><value>Доступна новая версия OpenGlass {0}. Установлена: {1}.</value></data>
+  <data name="System_OpenGlassUpdateMessage" xml:space="preserve"><value>Рекомендуется обновить библиотеку OpenGlass до последнего legacy-релиза.</value></data>
+  <data name="System_OpenGlassUpdateAction" xml:space="preserve"><value>Скачать</value></data>
+  <data name="Notice_OpenGlassBorderBody" xml:space="preserve"><value>Так как бордюры создаются Диспетчером окон (DWM), активный OpenGlass имеет инициативу над DWM и поглощает цвет бордюров. В связи с этим вы не сможете изменить цвет бордюров, пока система OpenGlass приведена в действие. Выполните остановку OpenGlass, если для вас важно иметь цветные бордюры.</value></data>
+  <data name="Notice_OpenGlassBorderTitle" xml:space="preserve"><value>Ограничено изменение цвета бордюров</value></data>
+  <data name="Notice_OpenGlassBorderTraySuffix" xml:space="preserve"><value>Для панели задач остается возможным кастомизировать цвета в режиме XAML-пути отрисовки.</value></data>
+  <data name="Notice_SwcaDwmBackdropTitle" xml:space="preserve"><value>Ограничение цветового тинта</value></data>
+  <data name="Notice_SwcaDwmBackdropBody" xml:space="preserve"><value>Действующий тип эффекта стекла (backdrop) является современным акриловым или Mica слоем DWM, которые не поддерживают изменение цвета градиента, поэтому вы не сможете задать особый цветовой оттенок для текущего эффекта. Если для Вас важно иметь цветной тинт на окнах, то лучше выбрать эффект из категории SWCA.</value></data>
+  <data name="Notice_SwcaDwmBackdropBodyRootFormat" xml:space="preserve"><value>Действующий тип эффекта стекла (backdrop) в {0} является современным акриловым или Mica слоем DWM, которые не поддерживают изменение цвета градиента, поэтому вы не сможете задать особый цветовой оттенок для текущего эффекта. Если для Вас важно иметь цветной тинт на окнах, то лучше выбрать эффект из категории SWCA.</value></data>
+  <data name="Notice_SwcaDwmBackdropScopeActive" xml:space="preserve"><value>настройках для активного окна</value></data>
+  <data name="Notice_SwcaDwmBackdropScopeInactive" xml:space="preserve"><value>настройках для неактивного окна</value></data>
+  <data name="Notice_SwcaDwmBackdropScopeBoth" xml:space="preserve"><value>настройках для активного и неактивного окна</value></data>
+  <data name="Notice_SwcaDwmBackdropScopePopupForKinds" xml:space="preserve"><value>настройках для {0}</value></data>
+  <data name="Notice_SwcaDwmBackdropPopupKindMenu" xml:space="preserve"><value>Menu</value></data>
+  <data name="Notice_SwcaDwmBackdropPopupKindDropDown" xml:space="preserve"><value>DropDown</value></data>
+  <data name="Notice_SwcaDwmBackdropPopupKindToolTip" xml:space="preserve"><value>ToolTip</value></data>
+  <data name="Notice_OgRootBackdropTitle" xml:space="preserve"><value>Ограничено управление эффектами Backdrop</value></data>
+  <data name="Notice_OgRootBackdropBody" xml:space="preserve"><value>В данный момент управлением эффектами стекла (backdrop) осуществляется приложением OpenGlass, поэтому в текущем разделе возможность задавать DWM/SWCA эффекты и выбрать цвет градиента исключается.</value></data>
+  <data name="Notice_OgRootBackdrop_ActionGlassBefore" xml:space="preserve"><value>Перейдите в </value></data>
+  <data name="Notice_OgRootBackdrop_ActionGlassLink" xml:space="preserve"><value>Настройки DWM</value></data>
+  <data name="Notice_OgRootBackdrop_ActionGlassAfter" xml:space="preserve"><value>, чтобы управлять OpenGlass.</value></data>
+  <data name="Notice_OgRootBackdrop_ActionExternal" xml:space="preserve"><value>Перейдите в приложение OpenGlass, чтобы управлять им.</value></data>
+  <data name="System_RowOpenGlassDescFormat" xml:space="preserve"><value>Настройки DWM и цветизации. Версия: {0}</value></data>
+  <data name="System_RowGlassPlatform" xml:space="preserve"><value>Платформа Glass</value></data>
+  <data name="System_RowGlassPlatformX86" xml:space="preserve"><value>Платформа Glass x86</value></data>
+  <data name="System_RowGlassPlatformX64" xml:space="preserve"><value>Платформа Glass x64</value></data>
+  <data name="System_RowGlassPlatformDesc" xml:space="preserve"><value>Root, Popup, панель задач и текст</value></data>
+  <data name="System_RowOpenGlass" xml:space="preserve"><value>Система OpenGlass</value></data>
+  <data name="System_RowOpenGlassDesc" xml:space="preserve"><value>Настройка параметров DWM, текстуры стекла Legacy AeroGlass</value></data>
+  <data name="System_UpdateIntervalTitle" xml:space="preserve"><value>Проверка обновлений</value></data>
+  <data name="System_UpdateIntervalDesc" xml:space="preserve"><value>Периодичность проверки новых версий Glass и OpenGlass</value></data>
+  <data name="System_UpdateDaily" xml:space="preserve"><value>Ежедневно</value></data>
+  <data name="System_UpdateWeekly" xml:space="preserve"><value>Раз в неделю</value></data>
+  <data name="System_UpdateMonthly" xml:space="preserve"><value>Раз в месяц</value></data>
+  <data name="System_UpdateNever" xml:space="preserve"><value>Никогда</value></data>
+  <data name="System_RowShellExtension" xml:space="preserve"><value>Расширение контекстного меню</value></data>
+  <data name="System_RowShellExtensionDesc" xml:space="preserve"><value>Пункт Glass в меню рабочего стола</value></data>
+  <data name="Taskbar_PageSubtitle" xml:space="preserve"><value>Эффекты и цвета панели задач</value></data>
+  <data name="Themes_ActiveBadge" xml:space="preserve"><value>Текущая</value></data>
+  <data name="Themes_AllSection" xml:space="preserve"><value>Все темы</value></data>
+  <data name="Themes_ApplyStub" xml:space="preserve"><value>Тема</value></data>
+  <data name="Themes_ApplyStubFormat" xml:space="preserve"><value>«{0}» — заглушка, тема не применена</value></data>
+  <data name="Themes_ApplyProgress" xml:space="preserve"><value>Применение темы…</value></data>
+  <data name="Themes_ApplyProgressFormat" xml:space="preserve"><value>Применение «{0}»…</value></data>
+  <data name="Themes_ApplySuccessFormat" xml:space="preserve"><value>«{0}» применена</value></data>
+  <data name="Themes_ApplyFailedFormat" xml:space="preserve"><value>Не удалось применить «{0}» (0x{1:X8})</value></data>
+  <data name="Themes_ApplySystemFonts" xml:space="preserve"><value>Применять системные шрифты</value></data>
+  <data name="Themes_ApplySystemFontsDesc" xml:space="preserve"><value>Подставлять шрифты из текущей темы Windows</value></data>
+  <data name="Themes_ApplySystemFontsStub" xml:space="preserve"><value>Применение системных шрифтов будет доступно в следующей версии</value></data>
+  <data name="Themes_AdvancedTitle" xml:space="preserve"><value>Дополнительно</value></data>
+  <data name="Themes_BrowseStub" xml:space="preserve"><value>Обзор тем — заглушка</value></data>
+  <data name="Themes_BrowseSite_7themes" xml:space="preserve"><value>7themes.su</value></data>
+  <data name="Themes_BrowseSite_vsthemes" xml:space="preserve"><value>vsthemes.org</value></data>
+  <data name="Themes_BrowseThemes" xml:space="preserve"><value>Обзор тем</value></data>
+  <data name="Breadcrumb_ThemesColors" xml:space="preserve"><value>Цвета</value></data>
+  <data name="Breadcrumb_ThemesDesktopBackground" xml:space="preserve"><value>Фон рабочего стола</value></data>
+  <data name="Themes_BackgroundCardTitle" xml:space="preserve"><value>Фон</value></data>
+  <data name="Themes_BackgroundSlideshowFormat" xml:space="preserve"><value>Слайд-шоу (изображений: {0})</value></data>
+  <data name="Themes_BackgroundSpotlight" xml:space="preserve"><value>Windows: интересное</value></data>
+  <data name="Themes_BackgroundSolid" xml:space="preserve"><value>Сплошной цвет</value></data>
+  <data name="Themes_Bg_PersonalizeTitle" xml:space="preserve"><value>Персонализируйте фон</value></data>
+  <data name="Themes_Bg_PersonalizeDesc" xml:space="preserve"><value>Фон в виде изображения применяется к текущему рабочему столу. Фон со сплошной заливкой или в виде слайд-шоу применяется ко всем рабочим столам.</value></data>
+  <data name="Themes_Bg_ModeItems" xml:space="preserve"><value>Фото;Сплошной цвет;Слайд-шоу;Windows: интересное</value></data>
+  <data name="Themes_Bg_RecentImages" xml:space="preserve"><value>Недавние изображения</value></data>
+  <data name="Themes_Bg_ChoosePhoto" xml:space="preserve"><value>Выберите фотографию</value></data>
+  <data name="Themes_Bg_BrowsePhotos" xml:space="preserve"><value>Обзор фотографий</value></data>
+  <data name="Themes_Bg_FilePickerTitle" xml:space="preserve"><value>Выбор изображения</value></data>
+  <data name="Themes_Bg_FolderPickerTitle" xml:space="preserve"><value>Выбор папки</value></data>
+  <data name="Themes_Bg_FilePickerAllImages" xml:space="preserve"><value>Изображения (*.jpg;*.png;…)</value></data>
+  <data name="Themes_Bg_FilePickerFilterJpg" xml:space="preserve"><value>JPEG (*.jpg)</value></data>
+  <data name="Themes_Bg_FilePickerFilterJpeg" xml:space="preserve"><value>JPEG (*.jpeg)</value></data>
+  <data name="Themes_Bg_FilePickerFilterPng" xml:space="preserve"><value>PNG (*.png)</value></data>
+  <data name="Themes_Bg_FilePickerFilterBmp" xml:space="preserve"><value>BMP (*.bmp)</value></data>
+  <data name="Themes_Bg_FilePickerFilterGif" xml:space="preserve"><value>GIF (*.gif)</value></data>
+  <data name="Themes_Bg_FilePickerFilterTif" xml:space="preserve"><value>TIFF (*.tif)</value></data>
+  <data name="Themes_Bg_FilePickerFilterTiff" xml:space="preserve"><value>TIFF (*.tiff)</value></data>
+  <data name="Themes_Bg_FilePickerFilterJfif" xml:space="preserve"><value>JFIF (*.jfif)</value></data>
+  <data name="Themes_Bg_FilePickerFilterWebp" xml:space="preserve"><value>WebP (*.webp)</value></data>
+  <data name="Themes_Bg_FilePickerFilterHeic" xml:space="preserve"><value>HEIC (*.heic)</value></data>
+  <data name="Themes_Bg_FilePickerInvalidTypeTitle" xml:space="preserve"><value>Неверный тип файла</value></data>
+  <data name="Themes_Bg_FilePickerInvalidTypeBody" xml:space="preserve"><value>Выберите изображение с расширением .jpg, .jpeg, .png, .bmp, .gif, .tif, .tiff, .jfif, .webp или .heic.</value></data>
+  <data name="Themes_Bg_ChooseFit" xml:space="preserve"><value>Выберите подходящий размер для вашего изображения рабочего стола</value></data>
+  <data name="Themes_Bg_FitItems" xml:space="preserve"><value>Заполнение;По размеру;Растянуть;Замостить;По центру;Расширение</value></data>
+  <data name="Themes_Bg_SlideshowAlbum" xml:space="preserve"><value>Выбор альбома изображений для слайд-шоу</value></data>
+  <data name="Themes_Bg_Browse" xml:space="preserve"><value>Обзор</value></data>
+  <data name="Themes_Bg_BrowseFolder" xml:space="preserve"><value>Обзор…</value></data>
+  <data name="Themes_Bg_WindowsDesktopBackgrounds" xml:space="preserve"><value>Фоны рабочего стола Windows</value></data>
+  <data name="Themes_Bg_AlbumPickerTitle" xml:space="preserve"><value>Изображения альбома</value></data>
+  <data name="Themes_Bg_AlbumPickerDone" xml:space="preserve"><value>Готово</value></data>
+  <data name="Themes_Bg_AlbumPickerSave" xml:space="preserve"><value>Сохранить</value></data>
+  <data name="Themes_Bg_AlbumPickerEmpty" xml:space="preserve"><value>В альбоме нет изображений</value></data>
+  <data name="Themes_Bg_AlbumSelectAll" xml:space="preserve"><value>Выбрать всё</value></data>
+  <data name="Themes_Bg_AlbumDeselectAll" xml:space="preserve"><value>Снять выбор</value></data>
+  <data name="Themes_Bg_AlbumInvertSelection" xml:space="preserve"><value>Обратить выбор</value></data>
+  <data name="Themes_Bg_SlideshowInterval" xml:space="preserve"><value>Менять изображение каждые</value></data>
+  <data name="Themes_Bg_SlideshowIntervalItems" xml:space="preserve"><value>1 мин;10 мин;30 мин;1 час;6 час.;1 день</value></data>
+  <data name="Themes_Bg_SlideshowShuffle" xml:space="preserve"><value>Перемешать порядок рисунков</value></data>
+  <data name="Themes_Bg_SlideshowOnBattery" xml:space="preserve"><value>Разрешить запуск слайд-шоу даже при питании от батареи</value></data>
+  <data name="Themes_Bg_SlideshowChooseFit" xml:space="preserve"><value>Выберите соответствующий размер изображения для рабочего стола</value></data>
+  <data name="Themes_ApplyFonts" xml:space="preserve"><value>Применять шрифты</value></data>
+  <data name="Themes_TextAndFontsDesc" xml:space="preserve"><value>Рендеринг текста и системные шрифты</value></data>
+  <data name="Themes_ColorCardTitle" xml:space="preserve"><value>Цвет акцента</value></data>
+  <data name="Themes_Colors_AccentBodyDesc" xml:space="preserve"><value>Выберите цвет акцента для кнопок, ссылок и элементов WinUI. Он применяется ко всей системе и к окнам приложений.</value></data>
+  <data name="Themes_Colors_AccentDesc" xml:space="preserve"><value>Цвет элементов WinUI окон</value></data>
+  <data name="Themes_Colors_ModeBodyDesc" xml:space="preserve"><value>Задайте отдельно режим оболочки Windows и режим приложений.</value></data>
+  <data name="Themes_DeleteConfirmFormat" xml:space="preserve"><value>Удалить тему «{0}»? Это действие нельзя отменить.</value></data>
+  <data name="Themes_DeleteFailedFormat" xml:space="preserve"><value>Не удалось удалить тему ({0})</value></data>
+  <data name="Themes_DeleteMenu" xml:space="preserve"><value>Удалить</value></data>
+  <data name="Themes_DeleteSuccessFormat" xml:space="preserve"><value>Тема «{0}» удалена</value></data>
+  <data name="Themes_Colors_AccentModeItems" xml:space="preserve"><value>Автоматически;Вручную</value></data>
+  <data name="Themes_Colors_RecentColors" xml:space="preserve"><value>Недавно использованные цвета</value></data>
+  <data name="Themes_Colors_AccentStartTaskbar" xml:space="preserve"><value>Показать цвет элементов в меню "Пуск" и на панели задач</value></data>
+  <data name="Themes_Colors_AccentTitle" xml:space="preserve"><value>Цвет акцента</value></data>
+  <data name="Themes_Colors_AccentTitleBars" xml:space="preserve"><value>Показать контрастный цвет для заголовков и границ окон</value></data>
+  <data name="Themes_Colors_AppsMode" xml:space="preserve"><value>Выберите режим приложения по умолчанию</value></data>
+  <data name="Themes_Colors_LightDarkItems" xml:space="preserve"><value>Светлый;Тёмный</value></data>
+  <data name="Themes_Colors_ModeChoiceItems" xml:space="preserve"><value>Светлый;Тёмный;Настраиваемый</value></data>
+  <data name="Themes_Colors_ModeDesc" xml:space="preserve"><value>Изменение цветов в Windows и ваших приложениях</value></data>
+  <data name="Themes_Colors_ModeTitle" xml:space="preserve"><value>Выберите режим</value></data>
+  <data name="Themes_Colors_TransparencyDesc" xml:space="preserve"><value>Полупрозрачные окна и поверхности</value></data>
+  <data name="Themes_Colors_TransparencyTitle" xml:space="preserve"><value>Эффекты прозрачности</value></data>
+  <data name="Themes_Colors_WindowsMode" xml:space="preserve"><value>Выберите режим Windows по умолчанию</value></data>
+  <data name="Themes_ColorName_BlueGray" xml:space="preserve"><value>сине-серый</value></data>
+  <data name="Themes_ColorName_BrickRed" xml:space="preserve"><value>кирпично-красный</value></data>
+  <data name="Themes_ColorName_Camouflage" xml:space="preserve"><value>камуфляж</value></data>
+  <data name="Themes_ColorName_CamouflageDesert" xml:space="preserve"><value>пустынный камуфляж</value></data>
+  <data name="Themes_ColorName_CoolBlue" xml:space="preserve"><value>холодный синий</value></data>
+  <data name="Themes_ColorName_CoolBlueBright" xml:space="preserve"><value>яркий холодный синий</value></data>
+  <data name="Themes_ColorName_DefaultBlue" xml:space="preserve"><value>синий</value></data>
+  <data name="Themes_ColorName_Gold" xml:space="preserve"><value>золотой</value></data>
+  <data name="Themes_ColorName_Gray" xml:space="preserve"><value>серый</value></data>
+  <data name="Themes_ColorName_GrayBrown" xml:space="preserve"><value>серо-коричневый</value></data>
+  <data name="Themes_ColorName_GrayDark" xml:space="preserve"><value>тёмно-серый</value></data>
+  <data name="Themes_ColorName_Green" xml:space="preserve"><value>зелёный</value></data>
+  <data name="Themes_ColorName_IrisPastel" xml:space="preserve"><value>пастельный ирис</value></data>
+  <data name="Themes_ColorName_IrisSpring" xml:space="preserve"><value>весенний ирис</value></data>
+  <data name="Themes_ColorName_LiddyGreen" xml:space="preserve"><value>серо-зелёный</value></data>
+  <data name="Themes_ColorName_MeadowGreen" xml:space="preserve"><value>лугово-зелёный</value></data>
+  <data name="Themes_ColorName_MetalBlue" xml:space="preserve"><value>металлический синий</value></data>
+  <data name="Themes_ColorName_MintDark" xml:space="preserve"><value>тёмная мята</value></data>
+  <data name="Themes_ColorName_MintLight" xml:space="preserve"><value>светлая мята</value></data>
+  <data name="Themes_ColorName_ModRed" xml:space="preserve"><value>модный красный</value></data>
+  <data name="Themes_ColorName_Moss" xml:space="preserve"><value>мох</value></data>
+  <data name="Themes_ColorName_NavyBlue" xml:space="preserve"><value>тёмно-синий</value></data>
+  <data name="Themes_ColorName_OrangeBright" xml:space="preserve"><value>яркий оранжевый</value></data>
+  <data name="Themes_ColorName_OrangeDark" xml:space="preserve"><value>тёмный оранжевый</value></data>
+  <data name="Themes_ColorName_Orchid" xml:space="preserve"><value>орхидея</value></data>
+  <data name="Themes_ColorName_OrchidLight" xml:space="preserve"><value>светлая орхидея</value></data>
+  <data name="Themes_ColorName_Overcast" xml:space="preserve"><value>пасмурный</value></data>
+  <data name="Themes_ColorName_PaleMoss" xml:space="preserve"><value>бледный мох</value></data>
+  <data name="Themes_ColorName_PaleRed" xml:space="preserve"><value>бледно-красный</value></data>
+  <data name="Themes_ColorName_PaleRust" xml:space="preserve"><value>бледная ржавчина</value></data>
+  <data name="Themes_ColorName_Plum" xml:space="preserve"><value>сливовый</value></data>
+  <data name="Themes_ColorName_PlumLight" xml:space="preserve"><value>светло-сливовый</value></data>
+  <data name="Themes_ColorName_Purple" xml:space="preserve"><value>фиолетовый</value></data>
+  <data name="Themes_ColorName_PurpleShadow" xml:space="preserve"><value>тенистый фиолетовый</value></data>
+  <data name="Themes_ColorName_Red" xml:space="preserve"><value>красный</value></data>
+  <data name="Themes_ColorName_Rose" xml:space="preserve"><value>розовый</value></data>
+  <data name="Themes_ColorName_RoseBright" xml:space="preserve"><value>яркий розовый</value></data>
+  <data name="Themes_ColorName_Rust" xml:space="preserve"><value>ржавый</value></data>
+  <data name="Themes_ColorName_Sage" xml:space="preserve"><value>шалфей</value></data>
+  <data name="Themes_ColorName_Seafoam" xml:space="preserve"><value>морская пена</value></data>
+  <data name="Themes_ColorName_SeafoamTeal" xml:space="preserve"><value>бирюзовая пена</value></data>
+  <data name="Themes_ColorName_SportGreen" xml:space="preserve"><value>спортивный зелёный</value></data>
+  <data name="Themes_ColorName_SteelBlue" xml:space="preserve"><value>стальной синий</value></data>
+  <data name="Themes_ColorName_Storm" xml:space="preserve"><value>штормовой</value></data>
+  <data name="Themes_ColorName_TurfGreen" xml:space="preserve"><value>травяной</value></data>
+  <data name="Themes_ColorName_VioletRed" xml:space="preserve"><value>красно-фиолетовый</value></data>
+  <data name="Themes_ColorName_VioletRedLight" xml:space="preserve"><value>светлый красно-фиолетовый</value></data>
+  <data name="Themes_ColorName_YellowGold" xml:space="preserve"><value>жёлтое золото</value></data>
+  <data name="Themes_SaveTheme" xml:space="preserve"><value>Сохранить</value></data>
+  <data name="Themes_SaveThemeCancel" xml:space="preserve"><value>Отмена</value></data>
+  <data name="Themes_SaveThemeDialogTitle" xml:space="preserve"><value>Сохранить тему</value></data>
+  <data name="Themes_SaveThemeFailedFormat" xml:space="preserve"><value>Не удалось сохранить тему ({0})</value></data>
+  <data name="Themes_SaveThemeNameFormat" xml:space="preserve"><value>Тема {0}</value></data>
+  <data name="Themes_SaveThemeSuccessFormat" xml:space="preserve"><value>Тема «{0}» сохранена</value></data>
+  <data name="Themes_UsePersonalizedThemeMissing" xml:space="preserve"><value>Файл Custom.theme не найден</value></data>
+  <data name="Themes_CurrentSection" xml:space="preserve"><value>Текущая тема</value></data>
+  <data name="Themes_Default" xml:space="preserve"><value>По умолчанию</value></data>
+  <data name="Themes_Empty" xml:space="preserve"><value>Темы не найдены</value></data>
+  <data name="Themes_FindOnline" xml:space="preserve"><value>Найти другие темы в интернете</value></data>
+  <data name="Themes_OtherLabel" xml:space="preserve"><value>Другое</value></data>
+  <data name="Themes_PageSubtitle" xml:space="preserve"><value>Выберите тему оформления Windows</value></data>
+  <data name="Themes_PatcherDesc" xml:space="preserve"><value>Патч .msstyles и ресурсов темы</value></data>
+  <data name="Themes_PatcherStub" xml:space="preserve"><value>Патчер тем — заглушка</value></data>
+  <data name="Themes_PatcherTitle" xml:space="preserve"><value>Патчер тем</value></data>
+  <data name="Themes_SectionDesc" xml:space="preserve"><value>Выберите сочетание обоев, звуков и цветов, чтобы сделать свой рабочий стол более личным</value></data>
+  <data name="Themes_SystemFontsDesc" xml:space="preserve"><value>Настройка системных шрифтов Glass</value></data>
+  <data name="Themes_SystemFontsTitle" xml:space="preserve"><value>Системные шрифты</value></data>
+  <data name="Themes_ThemeFonts" xml:space="preserve"><value>Шрифты темы</value></data>
+  <data name="Themes_ThemeFontsDesc" xml:space="preserve"><value>Применять шрифты темы</value></data>
+  <data name="Themes_RowGlassSmoothing" xml:space="preserve"><value>Сглаживание текста</value></data>
+  <data name="Themes_RowGlassSmoothingDesc" xml:space="preserve"><value>Текст на акриловом фоне</value></data>
+  <data name="Themes_RowSystemFontsDesc" xml:space="preserve"><value>Установка системных шрифтов</value></data>
+  <data name="Themes_TooltipFormat" xml:space="preserve"><value>{0}, Изображения: {1}, звуки</value></data>
+  <data name="Themes_UsePersonalizedTheme" xml:space="preserve"><value>Использовать персонализированную тему</value></data>
+  <data name="Themes_UsePersonalizedThemeStub" xml:space="preserve"><value>Персонализированные темы — заглушка</value></data>
+  <data name="Themes_FewInstalled" xml:space="preserve"><value>{0} стиля установлено</value></data>
+  <data name="Themes_ManyInstalled" xml:space="preserve"><value>{0} стилей установлено</value></data>
+  <data name="Themes_OneInstalled" xml:space="preserve"><value>1 стиль установлен</value></data>
+  <data name="Text_GlassSmoothingStub" xml:space="preserve"><value>Раздел «Параметры сглаживания текста на стекле» в разработке.</value></data>
+  <data name="Text_EffectsTitle" xml:space="preserve"><value>Эффекты</value></data>
+  <data name="Text_PreviewSample" xml:space="preserve"><value>Не хрусти французской булкой, запечённой на разорении людей, — желай хлеба из пролетарских печей, да по потребности, а не по золотому запасу и не подслащённым от буржуйских речей.</value></data>
+  <data name="Text_InkGammaBlendTitle" xml:space="preserve"><value>Гамма покрытия и смешивание</value></data>
+  <data name="Text_InkGammaBlendDesc" xml:space="preserve"><value>Уточняет края символа и выполняет результирующее смешивание</value></data>
+  <data name="Text_InkGammaBlendIntro" xml:space="preserve"><value>Настройте качество отрисовки текста в редакторах Edit, вибирая уровень гаммы для уточнения края символа в тексте, и результирующее смешивание текста с фоном</value></data>
+  <data name="Text_InkPseudoTitle" xml:space="preserve"><value>Контурное сглаживание</value></data>
+  <data name="Text_InkPseudoDesc" xml:space="preserve"><value>Задает уровень ореола символов</value></data>
+  <data name="Text_InkPseudoIntro" xml:space="preserve"><value>В качестве дополнительной меры для сглаживания текста в редакторах Edit задайте уровни ореола вокруг символа: радиус — величина ореола; интенсивность — насколько ореол будет просвечивать. Учитывайте, что данная опция влияет на производительность отрисовки текста. По умолчанию — отключено.</value></data>
+  <data name="Combo_InkRenderModeItems" xml:space="preserve"><value>Авто;Один проход;Два прохода</value></data>
+  <data name="Text_InkVisualTuneButton" xml:space="preserve"><value>Средство визуальной настройки</value></data>
+  <data name="Text_RenderControlCardTitle" xml:space="preserve"><value>Управление рендерингом текста</value></data>
+  <data name="Text_InkProfileModeLabel" xml:space="preserve"><value>Профиль режима</value></data>
+  <data name="Text_InkMasterToggleTooltip" xml:space="preserve"><value>Выключение удаляет параметры капсулы ink и возвращает значения по умолчанию.</value></data>
+  <data name="Text_InkVisualTuneUnavailableTitle" xml:space="preserve"><value>Визуальная настройка недоступна</value></data>
+  <data name="Text_InkVisualTuneUnavailableBody" xml:space="preserve"><value>Модули Glass (хрома) не загружены. Запустите платформу Glass или перезапустите Glass Settings.</value></data>
+  <data name="Text_InkGammaLabel" xml:space="preserve"><value>Гамма</value></data>
+  <data name="Text_InkBlendLabel" xml:space="preserve"><value>Смешивание</value></data>
+  <data name="Text_InkPseudoRadiusLabel" xml:space="preserve"><value>Радиус</value></data>
+  <data name="Text_InkPseudoIntensityLabel" xml:space="preserve"><value>Интенсивность</value></data>
+  <data name="Text_InkWizardTitle" xml:space="preserve"><value>Средство визуальной настройки сглаживания текста</value></data>
+  <data name="Text_InkWizardPrompt" xml:space="preserve"><value>Выберите наилучший вид текста (%d из %d)</value></data>
+  <data name="Text_InkWizardNext" xml:space="preserve"><value>Далее</value></data>
+  <data name="Text_InkWizardCancel" xml:space="preserve"><value>Отмена</value></data>
+  <data name="Text_InkWizardBack" xml:space="preserve"><value>←</value></data>
+  <data name="Text_InkWizardHint_ForkRoot" xml:space="preserve"><value>Здесь два принципиально разных способа построения альфа-канала текста. Слева — однопроходный (чуть графичнее и контрастнее), справа — двухпроходный (мягче переходы на краях, чуть менее плотный при том же значении гаммы, так как масштаб гаммы удваивается автоматически). Выберите вариант, который выглядит приятнее — дальше вы уточняете детали уже внутри выбранного направления; всегда можно вернуться назад и попробовать альтернативное направление.</value></data>
+  <data name="Text_InkWizardHint_RefineCoarse" xml:space="preserve"><value>Гамма определяет толщину букв: значения выше базового делают штрих тоньше, ниже — жирнее. Под каждым вариантом гаммы во втором ряду показан контур, уже подобранный под неё — включив контур, вы получите характерный «печатный» вид текста, выглядит оригинально. Если хотите просто чистое сглаживание без эффекта оттиска — выбирайте верхний ряд (контур выкл) на любом варианте гаммы. Следующий экран — ещё один шаг уточнения гаммы в ту же сторону.</value></data>
+  <data name="Text_InkWizardHint_RefineMid" xml:space="preserve"><value>Ещё один шаг уточнения гаммы — отличия тоньше, чем на прошлом экране. Верхний ряд — без контура, нижний — с контуром под каждую гамму. Если на предыдущем экране вы включали контур, либо на текущем включите, дальше настроите радиус ореола.</value></data>
+  <data name="Text_InkWizardHint_RefineFine" xml:space="preserve"><value>Последний шаг — смешивание. Это результирующая плотность/прозрачность всего, что вы уже выбрали и настроили, и не меняет ни толщину, ни контур — только «вес» глифа целиком со всеми настроенными эффектами. Выберите то, что комфортнее читается на вашем фоне.</value></data>
+  <data name="Text_InkWizardHint_RefinePseudo" xml:space="preserve"><value>Здесь настройте свойства контура — радиуса в первом ряду и интенсивности во втором ряду. Радиус определяет мягкость контура — от почти незаметного тонкого ободка до широкого мягкого ореола. Интенсивность под каждым вариантом радиуса уже подобрана так, чтобы сила эффекта на глаз ощущалась одинаково, независимо от радиуса — меняется только мягкость контура, не его заметность.</value></data>
+  <data name="Text_PreviewHintTitle" xml:space="preserve"><value>Превью на стекле</value></data>
+  <data name="Text_PreviewHintBody" xml:space="preserve"><value>Обои и размытие — как в композиции DWM. Текст рисуется движком Glass через ExtTextOutWithAlpha.</value></data>
+  <data name="Text_SystemFontsPivotTabs" xml:space="preserve"><value>Заголовок;Малый заголовок;Меню;Строка состояния;Диалоги;Рабочий стол</value></data>
+  <data name="Text_SystemFontsTitle" xml:space="preserve"><value>Системные шрифты</value></data>
+  <data name="Text_SystemFontsDesc" xml:space="preserve"><value>Выберите имя шрифта, способ начертания и его размер</value></data>
+  <data name="Text_SystemFontsChoose" xml:space="preserve"><value>Выбрать</value></data>
+  <data name="Text_SystemFontsScopeGlobal" xml:space="preserve"><value>Глобально</value></data>
+  <data name="Text_SystemFontsScopeSelective" xml:space="preserve"><value>Выборочно</value></data>
+  <data name="Text_SystemFontsInfoMessage" xml:space="preserve"><value>В следующем блоке задайте параметры для системных шрифтов — выберите лучший шрифт из коллекции, установите размер, варианты начертания, как глобально, для всех объектов рабочего стола, так и выборочно, по желанию.</value></data>
+  <data name="Text_FontPickerTitle" xml:space="preserve"><value>Шрифт</value></data>
+  <data name="Text_FontPickerFont" xml:space="preserve"><value>Шрифт</value></data>
+  <data name="Text_FontPickerStyle" xml:space="preserve"><value>Начертание</value></data>
+  <data name="Text_FontPickerCharset" xml:space="preserve"><value>Набор символов</value></data>
+  <data name="Text_FontPickerSize" xml:space="preserve"><value>Размер</value></data>
+  <data name="Text_FontPickerStyle_Regular" xml:space="preserve"><value>Обычный</value></data>
+  <data name="Text_FontPickerStyle_Italic" xml:space="preserve"><value>Курсив</value></data>
+  <data name="Text_FontPickerStyle_Light" xml:space="preserve"><value>Тонкий</value></data>
+  <data name="Text_FontPickerStyle_LightItalic" xml:space="preserve"><value>Тонкий курсив</value></data>
+  <data name="Text_FontPickerStyle_Medium" xml:space="preserve"><value>Средний</value></data>
+  <data name="Text_FontPickerStyle_MediumItalic" xml:space="preserve"><value>Средний курсив</value></data>
+  <data name="Text_FontPickerStyle_Semibold" xml:space="preserve"><value>Плотный</value></data>
+  <data name="Text_FontPickerStyle_SemiboldItalic" xml:space="preserve"><value>Плотный курсив</value></data>
+  <data name="Text_FontPickerStyle_Bold" xml:space="preserve"><value>Полужирный</value></data>
+  <data name="Text_FontPickerStyle_BoldItalic" xml:space="preserve"><value>Полужирный курсив</value></data>
+  <data name="Text_FontPickerCharset_0" xml:space="preserve"><value>ANSI</value></data>
+  <data name="Text_FontPickerCharset_1" xml:space="preserve"><value>По умолчанию</value></data>
+  <data name="Text_FontPickerCharset_2" xml:space="preserve"><value>Символы</value></data>
+  <data name="Text_FontPickerCharset_128" xml:space="preserve"><value>Японский (Shift JIS)</value></data>
+  <data name="Text_FontPickerCharset_129" xml:space="preserve"><value>Корейский (Hangul)</value></data>
+  <data name="Text_FontPickerCharset_134" xml:space="preserve"><value>Китайский, упрощённый</value></data>
+  <data name="Text_FontPickerCharset_136" xml:space="preserve"><value>Китайский, традиционный</value></data>
+  <data name="Text_FontPickerCharset_204" xml:space="preserve"><value>Кириллица</value></data>
+  <data name="Text_FontPickerCharset_162" xml:space="preserve"><value>Турецкий</value></data>
+  <data name="Text_FontPickerCharset_186" xml:space="preserve"><value>Балтийский</value></data>
+  <data name="Text_EffectsDesc" xml:space="preserve"><value>Параметры эффекта свечения текста</value></data>
+  <data name="Text_GlowEnableToggle" xml:space="preserve"><value>Включить свечение</value></data>
+  <data name="Text_GlowRadiusLabel" xml:space="preserve"><value>Радиус (‰)</value></data>
+  <data name="Text_GlowSpreadLabel" xml:space="preserve"><value>Распространение</value></data>
+  <data name="Text_GlowPanelIntro" xml:space="preserve"><value>Установите параметры для эффекта свечения текста: радиус — размер ореола, цвет ореола, яркость и его интенсивность (видимость). Так же задайте степень распространения эффекта на рабочем столе.</value></data>
+  <data name="Text_GlowColorDescLight" xml:space="preserve"><value>Цвет свечения для светлой темы</value></data>
+  <data name="Text_GlowColorDescDark" xml:space="preserve"><value>Цвет свечения для тёмной темы</value></data>
+  <data name="Combo_GlowSpreadItems" xml:space="preserve"><value>Только Popup;Умеренно на окнах;Глобально</value></data>
+  <data name="Combo_BlurOptimizationItems" xml:space="preserve"><value>Сначала скорость;Баланс;Сначала качество</value></data>
+  <data name="Combo_RoundRectProfileItems" xml:space="preserve"><value>Windows 8;Windows 7;Вручную</value></data>
+  <data name="Combo_CaptionButtonsItems" xml:space="preserve"><value>Стандартный;Windows Vista;Windows 7;Windows 8</value></data>
+  <data name="Combo_CenterCaptionItems" xml:space="preserve"><value>Отключено;Обычное;Стиль Windows 8</value></data>
+  <data name="Combo_TextGlowModeItems" xml:space="preserve"><value>Без свечения;Атлас темы;Атлас темы (с прозрачностью);Композитное (настройки темы)</value></data>
+  <data name="Combo_CaptionColorModeItems" xml:space="preserve"><value>Авто;Из темы;Вручную;По системе</value></data>
+  <data name="Toggle_Off" xml:space="preserve"><value>Выкл.</value></data>
+  <data name="Toggle_On" xml:space="preserve"><value>Вкл.</value></data>
+  <data name="Dwm_TabSystem" xml:space="preserve"><value>Локальные</value></data>
+  <data name="Dwm_TabUser" xml:space="preserve"><value>Пользовательские</value></data>
+  <data name="Breadcrumb_DwmLocalSuffix" xml:space="preserve"><value> (L)</value></data>
+  <data name="Breadcrumb_DwmUserSuffix" xml:space="preserve"><value> (U)</value></data>
+  <data name="Dwm_BannerHklmBody" xml:space="preserve"><value>Раздел читается и записывается в HKLM\Software\Microsoft\Windows\DWM.</value></data>
+  <data name="Dwm_BannerHkcuBody" xml:space="preserve"><value>Раздел читается и записывается в HKCU\Software\Microsoft\Windows\DWM.</value></data>
+  <data name="Dwm_BannerHkcuOverrideLine" xml:space="preserve"><value>В HKCU есть переопределение — оно имеет приоритет при отрисовке OpenGlass.</value></data>
+  <data name="Dwm_HklmInfoBlockMessage" xml:space="preserve"><value>Внимание! На данной странице чтение и запись в реестре производится в HKLM, что делает настройки равными для всех пользователей компьютера.</value></data>
+  <data name="Dwm_HkcuConflictNotice" xml:space="preserve"><value>Обнаружены локальные параметры для этого раздела и могут переопределять пользовательские настройки</value></data>
+  <data name="Dwm_HubOverrideBadge" xml:space="preserve"><value>Переопределено HKCU</value></data>
+  <data name="Dwm_ParallelWarnHklm" xml:space="preserve"><value>В HKCU задан параметр. При отрисовке OpenGlass имеет приоритет.</value></data>
+  <data name="Dwm_ParallelWarnHklmFallback" xml:space="preserve"><value>Ключ в HKLM отсутствует. Сейчас используется значение из HKCU.</value></data>
+  <data name="Dwm_ParallelWarnHkcu" xml:space="preserve"><value>В HKLM задан параметр. При отсутствии локального ключа OpenGlass может использовать его.</value></data>
+  <data name="Dwm_ParallelDuplicateMarker" xml:space="preserve"><value>есть дубликат</value></data>
+  <data name="Dwm_ParallelDuplicateMarkerUser" xml:space="preserve"><value>Задан U-параметр</value></data>
+  <data name="Dwm_ParallelDuplicateMarkerLocal" xml:space="preserve"><value>Задан L-параметр</value></data>
+  <data name="Dwm_ParallelConflictSuffixUserValue" xml:space="preserve"><value>; конфликт с U-значением</value></data>
+  <data name="Dwm_ParallelConflictSuffixLocalValue" xml:space="preserve"><value>; конфликт с L-значением</value></data>
+  <data name="Dwm_DefaultReflectionTile" xml:space="preserve"><value>Системное отражение (по умолчанию)</value></data>
+  <data name="Dwm_DefaultMaterialTile" xml:space="preserve"><value>Системный материал (по умолчанию)</value></data>
+</root>

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.AtlasImageTile"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Border
+        x:Name="RootBorder"
+        Width="180"
+        Height="94"
+        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="8"
+        PointerEntered="RootBorder_OnPointerEntered"
+        PointerExited="RootBorder_OnPointerExited">
+        <Grid>
+            <Grid.Clip>
+                <RectangleGeometry Rect="0,0,178,92" />
+            </Grid.Clip>
+
+            <!-- Loading / Success: шахматка + акрил по габаритам изображения + изображение.
+                 Прямоугольник миниатюры приподнят по Z (Translation) и отбрасывает
+                 ThemeShadow на шахматку-фон — «стекло» как бы парит над карточкой. -->
+            <Grid x:Name="PreviewContentHost" Visibility="Collapsed">
+                <Image
+                    x:Name="CheckerboardImage"
+                    Stretch="Fill" />
+                <Grid
+                    x:Name="PreviewRect"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Translation="0,0,40">
+                    <Grid.Shadow>
+                        <ThemeShadow />
+                    </Grid.Shadow>
+                    <Rectangle
+                        x:Name="AcrylicSubstrate"
+                        RadiusX="4"
+                        RadiusY="4"
+                        Fill="{ThemeResource PreviewGlassFillBrush}" />
+                    <Image
+                        x:Name="PreviewImage"
+                        Stretch="None"
+                        Visibility="Collapsed" />
+                </Grid>
+            </Grid>
+
+            <!-- Error: чистый фон + штриховка + знак вопроса -->
+            <Grid x:Name="ErrorHost" Visibility="Collapsed">
+                <Rectangle Fill="{ThemeResource LayerFillColorDefaultBrush}" />
+                <Rectangle Opacity="0.55" Fill="{StaticResource PreviewDiagonalHatchBrush}" />
+                <FontIcon
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    FontSize="24"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Glyph="&#xE9CE;" />
+            </Grid>
+
+            <Border
+                x:Name="SelectionBorder"
+                BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                BorderThickness="2"
+                CornerRadius="8"
+                Visibility="Collapsed" />
+            <Border
+                x:Name="SelectionMark"
+                Width="22"
+                Height="22"
+                Margin="8"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                CornerRadius="11"
+                Visibility="Collapsed">
+                <FontIcon
+                    FontSize="12"
+                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                    Glyph="&#xE73E;" />
+            </Border>
+        </Grid>
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="CommonStates">
+                <VisualState x:Name="Normal" />
+                <VisualState x:Name="PointerOver">
+                    <VisualState.Setters>
+                        <Setter Target="RootBorder.BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+            <VisualStateGroup x:Name="ActiveStates">
+                <VisualState x:Name="Inactive" />
+                <VisualState x:Name="Active">
+                    <VisualState.Setters>
+                        <Setter Target="RootBorder.BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                        <Setter Target="RootBorder.BorderThickness" Value="2" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+    </Border>
+</UserControl>

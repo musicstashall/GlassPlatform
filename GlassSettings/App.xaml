@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="GlassSettings.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:GlassSettings"
+    xmlns:processes="using:GlassSettings.Controls.Processes"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+                <ResourceDictionary Source="ms-appx:///CommunityToolkit.WinUI.Controls.SettingsControls/Themes/Generic.xaml" />
+                <ResourceDictionary Source="Themes/GlassSettingsNavigationChrome.xaml" />
+                <ResourceDictionary Source="Themes/GlassSettingsToolTip.xaml" />
+                <ResourceDictionary Source="Themes/GlassSettingsScrollFade.xaml" />
+                <ResourceDictionary Source="Themes/GlassSettingsBreadcrumbBar.xaml" />
+                <ResourceDictionary Source="Resources/PreviewBrushes.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <Style TargetType="Page">
+                <Setter Property="Background" Value="Transparent" />
+            </Style>
+            <x:Double x:Key="SettingsCardSpacing">4</x:Double>
+            <x:Double x:Key="HomeCardCornerRadius">8</x:Double>
+            <Thickness x:Key="HomeCardPadding">16,12,16,4</Thickness>
+            <x:Double x:Key="HomeRowMinHeight">52</x:Double>
+            <x:Double x:Key="HomeColumnGap">12</x:Double>
+            <x:Double x:Key="HomeSingleColumnBreakpoint">680</x:Double>
+            <Thickness x:Key="SettingsBreadcrumbHostPadding">36,24,36,0</Thickness>
+            <Thickness x:Key="NavigationUserCardMargin">0,0,0,8</Thickness>
+            <x:Double x:Key="NavigationUserCardHorizontalOffset">5</x:Double>
+            <x:Double x:Key="GlassSettingsSectionRowMinHeight">66</x:Double>
+            <x:Double x:Key="GlassSettingsSystemExpanderHeaderMinHeight">74</x:Double>
+            <Thickness x:Key="GlassSettingsSystemExpanderHeaderPadding">12,16,16,16</Thickness>
+            <x:Double x:Key="GlassSettingsCommandBarButtonMinHeight">32</x:Double>
+            <!-- MinHeight полосы notice: padding 12,10 + строка 32 (кнопка/крестик). SlideOffsetY в коде = −этому значению. -->
+            <x:Double x:Key="GlassSettingsNoticeStripMinHeight">52</x:Double>
+            <x:Double x:Key="GlassSettingsCommandBarButtonMinWidth">108</x:Double>
+            <x:Double x:Key="GlassSettingsCommandBarOkButtonSpacing">16</x:Double>
+            <x:Double x:Key="GlassSettingsSplitButtonSpoilerMarginRight">8</x:Double>
+            <!-- Primary status + SplitFlyoutPartWidth(36) в PlatformSchedulerStackableActions. -->
+            <x:Double x:Key="GlassSettingsSplitButtonWidth">140</x:Double>
+            <x:Double x:Key="GlassSettingsRowControlSpacing">25</x:Double>
+            <x:Double x:Key="GlassSettingsOpacityRowControlSpacing">32</x:Double>
+            <Thickness x:Key="GlassSettingsOpacityRowPadding">12,16,16,16</Thickness>
+            <x:Double x:Key="GlassSettingsRowRightInset">16</x:Double>
+            <x:Double x:Key="GlassSettingsHeaderActionsSpacing">12</x:Double>
+            <x:Double x:Key="GlassSettingsNumberBoxWidth">150</x:Double>
+            <!-- Gate/actions ↔ шеврон = правый inset шапки (GlassSettingsRowRightInset). -->
+            <x:Double x:Key="GlassSettingsToggleChevronSpacing">16</x:Double>
+            <!-- ControlsTable → TrailingRail; эталон — правый padding шапки спойлера. -->
+            <Thickness x:Key="GlassSettingsTrailingRailMargin">16,0,0,0</Thickness>
+            <x:Double x:Key="GlassSettingsSectionIconSize">20</x:Double>
+            <x:Double x:Key="GlassSettingsSectionIconSpacing">12</x:Double>
+            <Thickness x:Key="GlassSettingsSectionIconMargin">0,0,12,0</Thickness>
+            <x:Double x:Key="GlassSettingsSectionTitleMinWidth">150</x:Double>
+            <x:Double x:Key="GlassSettingsTitleControlsGap">10</x:Double>
+            <x:Double x:Key="GlassSettingsPlatformSchedulerStackableWidth">230</x:Double>
+            <x:Double x:Key="GlassSettingsHeroPreviewOuterWidth">340</x:Double>
+            <x:Double x:Key="GlassSettingsHeroPreviewOuterHeight">192</x:Double>
+            <x:Double x:Key="GlassSettingsTextLayerPreviewOuterWidth">316</x:Double>
+            <x:Double x:Key="GlassSettingsTextLayerPreviewOuterHeight">168</x:Double>
+            <Thickness x:Key="GlassSettingsHeroPreviewBorderThickness">3</Thickness>
+            <Thickness x:Key="GlassSettingsTextLayerPreviewBorderThickness">2</Thickness>
+            <Thickness x:Key="GlassSettingsHeroPreviewShadowMargin">0,0,8,8</Thickness>
+            <!-- Метрики каскадного превью «Стилизация» (StylizationLayeredPreview). -->
+            <x:Double x:Key="GlassSettingsStylizationPreviewBaseWidth">340</x:Double>
+            <x:Double x:Key="GlassSettingsStylizationPreviewBaseHeight">192</x:Double>
+            <x:Double x:Key="GlassSettingsStylizationPreviewInset">30</x:Double>
+            <Style x:Key="StylizationLayerLabelPillStyle" TargetType="Border">
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="VerticalAlignment" Value="Bottom" />
+                <Setter Property="Margin" Value="4,0,0,4" />
+                <Setter Property="Padding" Value="6,1" />
+                <Setter Property="Background" Value="#B3000000" />
+                <Setter Property="CornerRadius" Value="4" />
+            </Style>
+            <Style x:Key="StylizationLayerLabelTextStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="White" />
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+            <Style x:Key="CompositionStateLabelGlowStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="#D9FFFFFF" />
+                <Setter Property="TextAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="CompositionStateLabelShadowStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="#66000000" />
+                <Setter Property="TextAlignment" Value="Center" />
+                <Setter Property="Margin" Value="1,1,0,0" />
+            </Style>
+            <Thickness x:Key="GlassSettingsGateSwitchMargin">0,0,0,0</Thickness>
+            <Thickness x:Key="GlassSettingsRowActionsHostMargin">8,0,16,0</Thickness>
+            <Thickness x:Key="GlassSettingsSplitButtonSpoilerMargin">0,0,8,0</Thickness>
+            <Thickness x:Key="GlassSettingsSystemExpanderContentPadding">12,4,12,10</Thickness>
+            <Thickness x:Key="GlassSettingsColorPickerZonePadding">16,14,16,14</Thickness>
+            <Thickness x:Key="GlassSettingsInfoBlockMargin">0,0,0,12</Thickness>
+            <Style x:Key="GlassSettingsSpoilerTitleTextStyle" BasedOn="{StaticResource BodyStrongTextBlockStyle}" TargetType="TextBlock" />
+            <Style x:Key="GlassSettingsSpoilerSecondaryTextStyle" BasedOn="{StaticResource CaptionTextBlockStyle}" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Style>
+            <Thickness x:Key="GlassSettingsSwcaToggleMargin">0,0,68,0</Thickness>
+            <GridLength x:Key="GlassSettingsHubSwitchWidth">44</GridLength>
+            <GridLength x:Key="GlassSettingsHubComboWidth">140</GridLength>
+            <GridLength x:Key="GlassSettingsHubSliderWidth">200</GridLength>
+            <x:Double x:Key="GlassSettingsSliderMinWidth">120</x:Double>
+            <x:Double x:Key="GlassSettingsSliderMaxWidth">200</x:Double>
+            <x:Double x:Key="GlassSettingsSliderSuffixReserve">48</x:Double>
+            <x:Double x:Key="GlassSettingsSliderHeaderPanelMinWidth">168</x:Double>
+            <x:Double x:Key="GlassSettingsSliderHeaderPanelMaxWidth">248</x:Double>
+            <x:Double x:Key="GlassSettingsSpoilerTrailingToggleRail">96</x:Double>
+            <x:Double x:Key="GlassSettingsPickerZoneMinWidth">360</x:Double>
+            <x:Double x:Key="GlassSettingsPickerInlineRail">392</x:Double>
+            <x:Double x:Key="GlassSettingsPickerBodyLabelControlGap">16</x:Double>
+            <x:Double x:Key="GlassSettingsParameterBodyInnerPairGap">12</x:Double>
+            <x:Double x:Key="GlassSettingsPickerBodyTableRightInset">20</x:Double>
+            <x:Double x:Key="GlassSettingsPickerInfoColumnFallbackMinWidth">200</x:Double>
+            <Style x:Key="SettingsSectionHeaderTextBlockStyle" BasedOn="{StaticResource BodyStrongTextBlockStyle}" TargetType="TextBlock">
+                <Setter Property="Margin" Value="1,30,0,6" />
+            </Style>
+            <Style x:Key="SettingsPageContentBorderStyle" TargetType="Border">
+                <Setter Property="MaxWidth" Value="1064" />
+            </Style>
+            <Style x:Key="GlassSettingsCommandBarGridStyle" TargetType="Grid">
+                <Setter Property="MinHeight" Value="56" />
+                <Setter Property="Padding" Value="16,14" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="0,1,0,0" />
+            </Style>
+            <Style
+                x:Key="GlassSettingsCommandBarButtonStyle"
+                BasedOn="{StaticResource DefaultButtonStyle}"
+                TargetType="Button">
+                <Setter Property="MinHeight" Value="{StaticResource GlassSettingsCommandBarButtonMinHeight}" />
+                <Setter Property="MinWidth" Value="{StaticResource GlassSettingsCommandBarButtonMinWidth}" />
+                <Setter Property="Padding" Value="20,8" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="GlassSettingsSectionRowStyle" TargetType="Button">
+                <Setter Property="MinHeight" Value="{StaticResource GlassSettingsSectionRowMinHeight}" />
+                <Setter Property="Padding" Value="12,14" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
+            <Style x:Key="GlassSettingsCommandBarAccentButtonStyle" BasedOn="{StaticResource AccentButtonStyle}" TargetType="Button">
+                <Setter Property="MinHeight" Value="{StaticResource GlassSettingsCommandBarButtonMinHeight}" />
+                <Setter Property="MinWidth" Value="{StaticResource GlassSettingsCommandBarButtonMinWidth}" />
+                <Setter Property="Padding" Value="20,8" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+            <Style
+                x:Key="GlassSettingsNoticeSaveButtonStyle"
+                BasedOn="{StaticResource GlassSettingsCommandBarButtonStyle}"
+                TargetType="Button">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+            </Style>
+            <Style x:Key="GlassSettingsExpanderStyle" TargetType="toolkit:SettingsExpander">
+                <Setter Property="Padding" Value="12,14" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+            </Style>
+            <Style x:Key="GlassSettingsCompactToggleSwitchStyle" TargetType="ToggleSwitch">
+                <Setter Property="Header" Value="" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="PlatformSchedulerSplitButtonStyle" TargetType="SplitButton">
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Foreground" Value="White" />
+            </Style>
+            <Style x:Key="GlassSettingsNumberBoxStyle" TargetType="NumberBox">
+                <Setter Property="Width" Value="{StaticResource GlassSettingsNumberBoxWidth}" />
+                <Setter Property="MinWidth" Value="{StaticResource GlassSettingsNumberBoxWidth}" />
+                <Setter Property="MaxWidth" Value="{StaticResource GlassSettingsNumberBoxWidth}" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+            </Style>
+            <x:Double x:Key="BreadcrumbBarItemThemeFontSize">28</x:Double>
+            <x:Double x:Key="BreadcrumbBarChevronFontSize">24</x:Double>
+            <Thickness x:Key="BreadcrumbBarChevronPadding">8,0,8,0</Thickness>
+            <SolidColorBrush x:Key="BreadcrumbBarChevronForeground" Color="{ThemeResource TextFillColorSecondary}" />
+            <SolidColorBrush x:Key="BreadcrumbBarItemBackground" Color="Transparent" />
+            <SolidColorBrush x:Key="BreadcrumbBarItemPointerOverBackground" Color="Transparent" />
+            <SolidColorBrush x:Key="BreadcrumbBarItemPressedBackground" Color="Transparent" />
+            <SolidColorBrush x:Key="BreadcrumbBarItemForegroundPointerOver" Color="{ThemeResource AccentTextFillColorPrimary}" />
+            <SolidColorBrush x:Key="BreadcrumbBarItemForegroundPressed" Color="{ThemeResource AccentTextFillColorPrimary}" />
+            <Style x:Key="GlassSettingsBreadcrumbTrailTextStyle" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="{ThemeResource ContentControlThemeFontFamily}" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            </Style>
+            <Style x:Key="GlassSettingsPivotHeaderItemStyle" TargetType="PivotHeaderItem">
+                <Setter Property="FontSize" Value="14" />
+            </Style>
+            <DataTemplate x:Key="RunningProcessPickerItemTemplate">
+                <processes:RunningProcessPickerRow />
+            </DataTemplate>
+            <DataTemplate x:Key="ExecutableFilePickerItemTemplate">
+                <processes:ExecutableFilePickerRow />
+            </DataTemplate>
+            <DataTemplate x:Key="ExecutableFilePickerDetailsItemTemplate">
+                <processes:ExecutableFilePickerDetailsRow />
+            </DataTemplate>
+            <DataTemplate x:Key="ExecutableFilePickerLargeIconItemTemplate">
+                <processes:ExecutableFilePickerLargeIconRow />
+            </DataTemplate>
+            <DataTemplate x:Key="SystemFontFamilyItemTemplate">
+                <TextBlock Text="{Binding FaceName}" FontFamily="{Binding PreviewFamily}" />
+            </DataTemplate>
+            <DataTemplate x:Key="SystemFontStyleItemTemplate">
+                <TextBlock
+                    Text="{Binding DisplayName}"
+                    FontFamily="{Binding PreviewFamily}"
+                    FontWeight="{Binding PreviewWeight}"
+                    FontStyle="{Binding PreviewStyle}" />
+            </DataTemplate>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

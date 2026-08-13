@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.TextGlassPreviewHost"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls"
+    HorizontalAlignment="Left"
+    VerticalAlignment="Top">
+
+    <!-- Каскад: обои → карточка стекла (blur+glow+tint+ink), параметры Композиции. -->
+    <ctrl:DwmCompositionCascadePreview
+        x:Name="Cascade"
+        PreviewKind="WallpaperBlurBase" />
+</UserControl>

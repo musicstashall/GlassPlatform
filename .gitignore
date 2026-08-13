@@ -1,0 +1,76 @@
+# ============================================================
+# GlassProject — корневой .gitignore
+# В репозиторий попадают только исходники проектов и вендоренные
+# зависимости, необходимые для сборки.
+# ============================================================
+
+# ---- Выходные каталоги сборки ----
+/Build/
+/Cache/
+# packages/ восстанавливается по packages.config (nuget restore)
+/packages/
+# .deps/parallel-hashmap — отдельный клон upstream для gtl/, ни один .vcxproj
+# на него не ссылается (сборка использует только gtl/)
+/.deps/
+
+# ---- Документация и инструкции для ИИ-агентов ----
+/docs/
+/.claude/
+/.cursor/
+/AGENTS.md
+/CLAUDE.md
+
+# ---- Локальное окружение редактора ----
+/.vscode/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.idea/
+_ReSharper*/
+*.DotSettings.user
+
+# ---- Промежуточные артефакты MSBuild / .NET ----
+[Bb]in/
+[Oo]bj/
+artifacts/
+Generated Files/
+*_wpftmp.csproj
+project.lock.json
+
+# ---- Артефакты C++ ----
+*.aps
+*.ncb
+*.opendb
+*.ipch
+*.pch
+*.tlog
+*.idb
+*.iobj
+*.ipdb
+*.VC.db
+*.VC.opendb
+
+# ---- Логи и результаты тестов ----
+*.log
+*.binlog
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+
+# ---- NuGet / MSIX ----
+*.nupkg
+*.snupkg
+AppPackages/
+BundleArtifacts/
+*.msix
+*.msixupload
+*.appx
+*.appxbundle
+*.appxupload
+
+# ---- Python (tools) ----
+__pycache__/
+*.py[cod]

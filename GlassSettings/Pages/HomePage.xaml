@@ -1,0 +1,62 @@
+<Page
+    x:Class="GlassSettings.Pages.HomePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:GlassSettings.Controls">
+    <ctrl:SettingsPageShell x:Name="PageShell">
+        <StackPanel x:Name="RootStack" Spacing="12">
+            <!-- Reposition-переход: при сворачивании уведомления нижние элементы плавно подтягиваются вверх. -->
+            <StackPanel.ChildrenTransitions>
+                <TransitionCollection>
+                    <RepositionThemeTransition />
+                </TransitionCollection>
+            </StackPanel.ChildrenTransitions>
+            <ctrl:HomeSettingsCard x:Name="PlatformSummaryCard" />
+            <!--
+              Пустой host — Collapsed (не занимает RootStack.Spacing).
+              Якорь зеркала — 1px overlay на ColumnsHost, без добавления высоты layout.
+            -->
+            <StackPanel
+                x:Name="HomeNoticeHost"
+                Spacing="8"
+                Visibility="Collapsed">
+                <StackPanel.ChildrenTransitions>
+                    <TransitionCollection>
+                        <RepositionThemeTransition />
+                    </TransitionCollection>
+                </StackPanel.ChildrenTransitions>
+                <ctrl:SettingsUnsavedNoticeStrip
+                    x:Name="SessionNoticeStrip"
+                    AllowDismiss="True"
+                    Visibility="Collapsed" />
+                <ctrl:SettingsUnsavedNoticeStrip
+                    x:Name="UnsavedNoticeStrip"
+                    AllowDismiss="True"
+                    Visibility="Collapsed" />
+                <ctrl:SettingsUnsavedNoticeStrip
+                    x:Name="UpdateNoticeStrip"
+                    AllowDismiss="True"
+                    ShowSaveButton="False"
+                    Visibility="Collapsed" />
+            </StackPanel>
+            <Grid x:Name="ColumnsHost">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="ColLeft" Width="*" />
+                    <ColumnDefinition x:Name="ColGap" Width="12" />
+                    <ColumnDefinition x:Name="ColRight" Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel x:Name="LeftColumn" Grid.Column="0" Spacing="12" />
+                <StackPanel x:Name="RightColumn" Grid.Column="2" Spacing="12" />
+                <!-- Якорь viewport-зеркала: не влияет на DesiredSize колонок. -->
+                <Border
+                    x:Name="HomeNoticeViewportAnchor"
+                    Grid.ColumnSpan="3"
+                    Height="1"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Top"
+                    IsHitTestVisible="False"
+                    Background="Transparent" />
+            </Grid>
+        </StackPanel>
+    </ctrl:SettingsPageShell>
+</Page>
