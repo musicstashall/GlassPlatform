@@ -11,22 +11,8 @@
             MinHeight="{StaticResource HomeRowMinHeight}"
             Padding="12,10"
             HorizontalAlignment="Stretch"
-            Background="Transparent">
-            <VisualStateManager.VisualStateGroups>
-                <VisualStateGroup x:Name="CommonStates">
-                    <VisualState x:Name="Normal" />
-                    <VisualState x:Name="PointerOver">
-                        <VisualState.Setters>
-                            <Setter Target="RowBorder.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
-                        </VisualState.Setters>
-                    </VisualState>
-                    <VisualState x:Name="Disabled">
-                        <VisualState.Setters>
-                            <Setter Target="RowBorder.Opacity" Value="0.55" />
-                        </VisualState.Setters>
-                    </VisualState>
-                </VisualStateGroup>
-            </VisualStateManager.VisualStateGroups>
+            Background="Transparent"
+            CornerRadius="8">
             <Grid HorizontalAlignment="Stretch">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />

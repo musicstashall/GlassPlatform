@@ -3,6 +3,7 @@
 #include <framework.h>
 #include <GlassPlatformTask.h>
 #include <InjectModuleScan.h>
+#include <GlassModulePath.h>
 #include <PlatformPresenceState.h>
 #include <ReloadRenderFlags.h>
 #include <TrayXamlPolicyMap.h>
@@ -165,6 +166,34 @@ namespace GlassShared::GlassPlatformTask
             if (FAILED(idle->get_StopOnIdleEnd(&stopOnIdleEnd)))
                 return false;
             return stopOnIdleEnd == VARIANT_FALSE;
+        }
+
+        [[nodiscard]] std::wstring TryParseGlassCompatDllFromExecArgs(const wchar_t* args) noexcept
+        {
+            if (!args || !*args)
+                return {};
+
+            const wchar_t* open = wcschr(args, L'"');
+            if (!open)
+                return {};
+            ++open;
+
+            const wchar_t* dll = wcsstr(open, L"GlassCompat.dll");
+            if (!dll)
+                return {};
+
+            const wchar_t* end = dll + wcslen(L"GlassCompat.dll");
+            if (end <= open)
+                return {};
+
+            return std::wstring(open, static_cast<size_t>(end - open));
+        }
+
+        [[nodiscard]] GlassShared::GlassModulePath::ModuleArch ToModuleArch(PlatformArch arch) noexcept
+        {
+            return arch == PlatformArch::X64
+                ? GlassShared::GlassModulePath::ModuleArch::X64
+                : GlassShared::GlassModulePath::ModuleArch::X86;
         }
 
         [[nodiscard]] bool OpenAutorunTaskDefinition(
@@ -761,5 +790,86 @@ namespace GlassShared::GlassPlatformTask
             updated.put());
 
         return SUCCEEDED(hr) && updated != nullptr;
+    }
+
+    std::wstring TryGetAutorunGlassCompatInstallRoot(PlatformArch arch) noexcept
+    {
+        ComInitGuard com;
+        if (FAILED(com.hr))
+            return {};
+
+        TaskSchedulerCom ts;
+        wil::com_ptr<IRegisteredTask> task;
+        if (!ts.Connect()
+            || !ts.GetRegisteredTask(L"\\", GlassAutorunTaskName(arch), task)
+            || !task)
+        {
+            return {};
+        }
+
+        wil::com_ptr<ITaskDefinition> def;
+        if (FAILED(task->get_Definition(def.put())) || !def)
+            return {};
+
+        wil::com_ptr<IActionCollection> actions;
+        if (FAILED(def->get_Actions(actions.put())) || !actions)
+            return {};
+
+        LONG count = 0;
+        if (FAILED(actions->get_Count(&count)) || count < 1)
+            return {};
+
+        for (LONG i = 1; i <= count; ++i)
+        {
+            IAction* rawAction = nullptr;
+            if (FAILED(actions->get_Item(i, &rawAction)) || !rawAction)
+                continue;
+            wil::com_ptr<IAction> action;
+            action.attach(rawAction);
+
+            TASK_ACTION_TYPE type = TASK_ACTION_EXEC;
+            if (FAILED(action->get_Type(&type)) || type != TASK_ACTION_EXEC)
+                continue;
+
+            wil::com_ptr<IExecAction> exec;
+            if (FAILED(action->QueryInterface(IID_PPV_ARGS(exec.put()))) || !exec)
+                continue;
+
+            std::wstring dllPath;
+            BSTR args = nullptr;
+            if (SUCCEEDED(exec->get_Arguments(&args)) && args)
+            {
+                dllPath = TryParseGlassCompatDllFromExecArgs(args);
+                ::SysFreeString(args);
+            }
+
+            if (dllPath.empty())
+            {
+                BSTR path = nullptr;
+                if (SUCCEEDED(exec->get_Path(&path)) && path)
+                {
+                    if (wcsstr(path, L"GlassCompat.dll") != nullptr)
+                        dllPath = path;
+                    ::SysFreeString(path);
+                }
+            }
+
+            if (dllPath.empty())
+                continue;
+
+            const std::wstring root =
+                GlassShared::GlassModulePath::GetInstallRootFromPath(dllPath.c_str());
+            if (root.empty())
+                continue;
+
+            const std::wstring resolved = GlassShared::GlassModulePath::ResolveGlassModulePath(
+                root.c_str(),
+                L"GlassCompat.dll",
+                ToModuleArch(arch));
+            if (!resolved.empty())
+                return root;
+        }
+
+        return {};
     }
 }

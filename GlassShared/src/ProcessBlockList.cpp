@@ -66,95 +66,49 @@ namespace ProcessBlockList
 {
     void Initialize()
     {
-        // Статический список процессов
-        static const wchar_t* kStaticBlockList[] =
-        {
-            // Системные процессы Windows
-            L"ApplicationFrameHost.exe",
-            L"backgroundTaskHost.exe",
-            L"CoreWidgetProvider.exe",
-            L"dwm.exe",
-            L"FileCoAuth.exe",
-            L"GameBar.exe",
-            L"GameBarFTServer.exe",
-            L"mblctr.exe",
-            L"Microsoft.SharePoint.exe",
-            L"mobsync.exe",
-            L"msedge.exe",
-            L"msedgewebview2.exe",
-            L"OneDriveStandaloneUpdater.exe",
-            L"PerfWatson2.exe",
-            L"RuntimeBroker.exe",
-            L"SDXHelper.exe",
-            L"ServiceHub.ThreadedWaitDialog.exe",
-            L"ServiceHub.VSDetouredHost.exe",
-            // ShellExperienceHost / ShellHost / StartMenuExperienceHost / SearchHost / SearchApp —
-            // UICompat CoreWindow hosts (см. docs/guides/UICompat-CoreWindow.md). Не в BlockList.
-            L"sihost.exe",
-            L"smartscreen.exe",
-            L"splwow64.exe",
-            L"spoolsv.exe",
-            L"svchost.exe",
-            L"taskhostw.exe",
-            L"WerFault.exe",
-            L"WidgetService.exe",
-            L"Widgets.exe",
-            L"WindowsPackageManagerServer.exe",
-            L"WkStartCpl64.exe",
-            L"WkStartCpl86.exe",
-            L"WSHost.exe",
+        for (std::size_t i = 0; i < BuiltInCount(); ++i)
+            g_blockList.insert(NormalizeName(kBuiltInNames[i]));
 
-            // Антивирус и безопасность
-            L"avpui.exe",
-
-            // Среды разработки
-            L"clangd.exe",
-            L"devenv.exe",
-            L"msvsmon.exe",
-            L"vsdebugger.exe",
-            L"ServiceHub.Host.dotnet.arm64.exe",
-            L"ServiceHub.Host.dotnet.x64.exe",
-
-            // Инструменты отладки и мониторинга
-            L"apimonitor-x64.exe",
-            L"apimonitor-x86.exe",
-            L"dbgview.exe",
-            L"dbgview64.exe",
-            L"procexp.exe",
-            L"procexp64.exe",
-            L"procmon.exe",
-            L"procmon64.exe",
-            L"windbg.exe",
-            L"x32dbg.exe",
-            L"x64dbg.exe",
-
-			//Собственные инструменты
-			L"LogViewer.exe",
-			L"GlassSettings.exe",
-        };
-
-        for (auto* exe : kStaticBlockList)
-            g_blockList.insert(NormalizeName(exe));
-
-        // Загружаем записи из реестра
         LoadFromRegistry();
+    }
+
+    bool IsBuiltIn(const std::wstring& exeName) noexcept
+    {
+        if (exeName.empty())
+            return false;
+        for (std::size_t i = 0; i < BuiltInCount(); ++i)
+        {
+            if (_wcsicmp(exeName.c_str(), kBuiltInNames[i]) == 0)
+                return true;
+        }
+        return false;
     }
 
     bool IsBlocked(const std::wstring& exeName)
     {
         const std::wstring norm = NormalizeName(exeName);
-        const bool blocked = g_blockList.contains(norm);
-
-#ifdef _DEBUG
-        if (blocked)
+        if (g_blockList.contains(norm))
         {
+#ifdef _DEBUG
             DebugLog(DBG_IMPORTANT,
                 L"[ProcessBlockList] Blocked: %s",
                 norm.c_str());
-        }
 #endif
+            return true;
+        }
 
-        return blocked;
+        // CEF/Chromium helpers (Adobe CEF Helper.exe и варианты) — path=2 only.
+        if (norm.find(L"cef helper") != std::wstring::npos)
+        {
+#ifdef _DEBUG
+            DebugLog(DBG_IMPORTANT,
+                L"[ProcessBlockList] Blocked (cef helper pattern): %s",
+                norm.c_str());
+#endif
+            return true;
+        }
+
+        return false;
     }
 
     std::wstring Normalize(const std::wstring& exeName)

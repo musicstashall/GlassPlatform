@@ -1,3 +1,5 @@
+using GlassSettings.Core.Platform;
+
 namespace GlassSettings.Services;
 
 /// <summary>
@@ -40,7 +42,7 @@ public static class SymbolDownloadPreflightService
 
     private static IEnumerable<string> EnumerateSearchDirectories()
     {
-        var dllPath = OpenGlassVersionService.ResolveOpenGlassDllPath();
+        var dllPath = PlatformPaths.OpenGlassDllPath;
         if (!string.IsNullOrWhiteSpace(dllPath))
         {
             var dllDir = Path.GetDirectoryName(dllPath);

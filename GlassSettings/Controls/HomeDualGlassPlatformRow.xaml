@@ -12,6 +12,7 @@
             Padding="12,10"
             HorizontalAlignment="Stretch"
             Background="Transparent"
+            CornerRadius="8"
             PointerPressed="RowBorder_OnPointerPressed"
             PointerEntered="RowBorder_OnPointerEntered"
             PointerExited="RowBorder_OnPointerExited">

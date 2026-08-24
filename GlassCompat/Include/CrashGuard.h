@@ -3,7 +3,8 @@
 
 namespace GlassCompat
 {
-    // Все процессы, куда загружен GlassCompat: UEF → опциональный минидамп (как BWM для инжектируемых).
+    // UEF → опциональный минидамп: long-lived хост (/start) и Normal-инъекция.
+    // BlockList/Forbidden (path=2/3) CrashGuard не ставят — только MinimalUnloadWatcher.
     // Диалог «остановить платформу» — только при серии падений explorer.exe (см. CrashGuard.cpp).
     //
     // HKCU\Software\StanislavKa\BlackWindowManager\Crashes — основной ключ; при первой загрузке создаётся ключ и
@@ -24,7 +25,7 @@ namespace GlassCompat
 
     void InstallProcessCrashGuard() noexcept;
     // Повторно вызвать SetUnhandledExceptionFilter(наш фильтр) после загрузки GlassCore/WndCompat —
-    // иначе чужой рантайм мог перезаписать UEF, заданный в DllMain.
+    // иначе чужой рантайм мог перезаписать UEF, заданный при Initialize / /start.
     void ReassertProcessCrashGuard() noexcept;
     void UninstallProcessCrashGuard() noexcept;
 }

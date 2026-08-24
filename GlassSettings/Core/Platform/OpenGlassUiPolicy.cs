@@ -38,11 +38,11 @@ public static class OpenGlassUiPolicy
         if (!IsBundledWithApplication())
             return false;
 
-        var dll = OpenGlassVersionService.ResolveOpenGlassDllPath();
+        var dll = PlatformPaths.OpenGlassDllPath;
         if (OpenGlassPathPolicy.IsPathBundled(dll))
             return true;
 
-        var host = OpenGlassVersionService.ResolveOpenGlassHostExePath();
+        var host = PlatformPaths.OpenGlassHostPath;
         if (OpenGlassPathPolicy.IsPathBundled(host))
             return true;
 

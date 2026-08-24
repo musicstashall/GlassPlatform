@@ -8,7 +8,7 @@ public static class OpenGlassInstallService
 {
     public static bool Install()
     {
-        var exe = OpenGlassVersionService.ResolveOpenGlassHostExePath();
+        var exe = PlatformPaths.OpenGlassHostPath;
         if (!string.IsNullOrEmpty(exe))
             return TryInstallService(exe);
 
@@ -18,7 +18,7 @@ public static class OpenGlassInstallService
     public static void Uninstall()
     {
         if (NativeHostInterop.OpenGlassOrchestrationInstalled()
-            && OpenGlassVersionService.ResolveOpenGlassHostExePath() is not null)
+            && PlatformPaths.OpenGlassHostPath is not null)
         {
             NativeHostInterop.StopOpenGlassService();
             _ = NativeHostInterop.RemoveOpenGlassService();

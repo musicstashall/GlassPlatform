@@ -28,6 +28,8 @@ internal static class NativeShellIconInterop
 
     private const string FakeExeFileName = "_.exe";
 
+    private const int MaxPath = 260;
+
     private static readonly string[] MuiCachePathSuffixes =
     [
         ".FriendlyAppName",
@@ -39,31 +41,20 @@ internal static class NativeShellIconInterop
     private static Dictionary<string, string>? _appCompatByFileName;
     private static bool _pathCachesWarmed;
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct Shfileinfo
-    {
-        public IntPtr hIcon;
-        public int iIcon;
-        public uint dwAttributes;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string szDisplayName;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
-        public string szTypeName;
-    }
+    private static readonly object ShellInteropLock = new();
 
-    [DllImport("shlwapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool PathFindOnPathW([In, Out] StringBuilder pszFile, string[]? ppszOtherDirs);
+    // Native SHFILEINFOW: HICON + iIcon + dwAttributes + WCHAR[260] + WCHAR[80].
+    // Не marshalled struct/class + ref — GS cookie (ISE x86). Буфер на куче.
+    private static int ShFileInfoByteSize =>
+        IntPtr.Size + sizeof(int) + sizeof(uint) + (MaxPath * 2) + (80 * 2);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr SHGetFileInfo(
         string pszPath,
         uint dwFileAttributes,
-        ref Shfileinfo psfi,
+        IntPtr psfi,
         uint cbFileInfo,
         uint uFlags);
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr ExtractAssociatedIcon(IntPtr hInst, StringBuilder lpIconPath, ref ushort lpiIcon);
 
     [DllImport("shlwapi.dll", CharSet = CharSet.Unicode, EntryPoint = "AssocQueryStringW", ExactSpelling = true, PreserveSig = true)]
     private static extern int AssocQueryString(
@@ -76,6 +67,65 @@ internal static class NativeShellIconInterop
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyIcon(IntPtr hIcon);
+
+    private static bool TryPathFindOnPath(string fileName, out string? fullPath)
+    {
+        fullPath = SearchPathEnvironment(fileName);
+        return fullPath is not null;
+    }
+
+    private static string? SearchPathEnvironment(string fileName)
+    {
+        var pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(pathEnv))
+            return null;
+
+        foreach (var segment in pathEnv.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.IsNullOrWhiteSpace(segment))
+                continue;
+
+            try
+            {
+                var dir = Environment.ExpandEnvironmentVariables(segment);
+                var candidate = Path.Combine(dir, fileName);
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+            catch
+            {
+                // сегмент PATH битый
+            }
+        }
+
+        return null;
+    }
+
+    private static string? SearchWellKnownRelativePaths(string fileName)
+    {
+        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        foreach (var relative in new[]
+                 {
+                     Path.Combine("SysWOW64", "WindowsPowerShell", "v1.0", fileName),
+                     Path.Combine("System32", "WindowsPowerShell", "v1.0", fileName),
+                     Path.Combine("SysWOW64", fileName),
+                     Path.Combine("System32", fileName),
+                 })
+        {
+            try
+            {
+                var candidate = Path.Combine(windows, relative);
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+            catch
+            {
+                // путь недоступен
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>Индекс MuiCache/AppCompat только для имён из AttachList; ранний выход.</summary>
     public static void WarmPathCaches(IReadOnlyCollection<string> exeNames)
@@ -133,7 +183,7 @@ internal static class NativeShellIconInterop
 
         lock (PathCacheLock)
         {
-            EnsurePathCaches();
+            EnsurePathCachesUnlocked();
 
             if (IsKnownPathForFileName(fileName, normalizedPath))
                 return;
@@ -262,39 +312,45 @@ internal static class NativeShellIconInterop
         if (Path.IsPathRooted(exeName) && File.Exists(exeName))
             return Path.GetFullPath(exeName);
 
-        EnsurePathCaches();
-
-        var fromAppPaths = ResolvePathFromAppPaths(fileName);
-        if (fromAppPaths is not null && File.Exists(fromAppPaths))
-            return fromAppPaths;
-
-        var fromAssoc = ResolvePathFromAssociationExecutable(fileName);
-        if (fromAssoc is not null && File.Exists(fromAssoc))
-            return fromAssoc;
-
-        if (_muiCacheByFileName!.TryGetValue(fileName, out var fromMui) && File.Exists(fromMui))
-            return fromMui;
-
-        if (_appCompatByFileName!.TryGetValue(fileName, out var fromStore) && File.Exists(fromStore))
-            return fromStore;
-
-        var lazyStore = ResolvePathFromAppCompatStoreDirect(fileName);
-        if (lazyStore is not null && File.Exists(lazyStore))
+        lock (PathCacheLock)
         {
-            _appCompatByFileName[fileName] = lazyStore;
-            return lazyStore;
+            EnsurePathCachesUnlocked();
+
+            var fromAppPaths = ResolvePathFromAppPaths(fileName);
+            if (fromAppPaths is not null && File.Exists(fromAppPaths))
+                return fromAppPaths;
+
+            var fromAssoc = ResolvePathFromAssociationExecutable(fileName);
+            if (fromAssoc is not null && File.Exists(fromAssoc))
+                return fromAssoc;
+
+            if (_muiCacheByFileName!.TryGetValue(fileName, out var fromMui) && File.Exists(fromMui))
+                return fromMui;
+
+            if (_appCompatByFileName!.TryGetValue(fileName, out var fromStore) && File.Exists(fromStore))
+                return fromStore;
+
+            var lazyStore = ResolvePathFromAppCompatStoreDirect(fileName);
+            if (lazyStore is not null && File.Exists(lazyStore))
+            {
+                _appCompatByFileName[fileName] = lazyStore;
+                return lazyStore;
+            }
+
+            var lazyMui = ResolvePathFromMuiCacheDirect(fileName);
+            if (lazyMui is not null && File.Exists(lazyMui))
+            {
+                _muiCacheByFileName[fileName] = lazyMui;
+                return lazyMui;
+            }
         }
 
-        var lazyMui = ResolvePathFromMuiCacheDirect(fileName);
-        if (lazyMui is not null && File.Exists(lazyMui))
-        {
-            _muiCacheByFileName[fileName] = lazyMui;
-            return lazyMui;
-        }
+        var fromWellKnown = SearchWellKnownRelativePaths(fileName);
+        if (fromWellKnown is not null)
+            return fromWellKnown;
 
-        var search = new StringBuilder(fileName);
-        if (PathFindOnPathW(search, null) && File.Exists(search.ToString()))
-            return search.ToString();
+        if (TryPathFindOnPath(fileName, out var fromPathSearch) && File.Exists(fromPathSearch))
+            return fromPathSearch;
 
         var systemRoot = Environment.GetFolderPath(Environment.SpecialFolder.System);
         var system32 = Path.Combine(systemRoot, fileName);
@@ -330,9 +386,12 @@ internal static class NativeShellIconInterop
         if (string.IsNullOrWhiteSpace(fullPath))
             return IntPtr.Zero;
 
-        var fromPath = TryShGetFileInfo(fullPath, 0);
-        if (fromPath != IntPtr.Zero)
-            return fromPath;
+        lock (ShellInteropLock)
+        {
+            var fromPath = TryShGetFileInfo(fullPath, 0);
+            if (fromPath != IntPtr.Zero)
+                return fromPath;
+        }
 
         return GetRegisteredFileTypeIconFromFileName(Path.GetFileName(fullPath));
     }
@@ -360,17 +419,20 @@ internal static class NativeShellIconInterop
 
     public static IntPtr GetRegisteredFileTypeIcon(string extension)
     {
-        if (string.IsNullOrWhiteSpace(extension))
-            return GetRegisteredExtensionIconHandle(".exe");
+        lock (ShellInteropLock)
+        {
+            if (string.IsNullOrWhiteSpace(extension))
+                return GetRegisteredExtensionIconHandle(".exe");
 
-        var ext = extension.Trim();
-        if (!ext.StartsWith('.'))
-            ext = "." + ext;
+            var ext = extension.Trim();
+            if (!ext.StartsWith('.'))
+                ext = "." + ext;
 
-        if (string.Equals(ext, ".exe", StringComparison.OrdinalIgnoreCase))
-            return GetRegisteredExeTypeIconHandle();
+            if (string.Equals(ext, ".exe", StringComparison.OrdinalIgnoreCase))
+                return GetRegisteredExeTypeIconHandle();
 
-        return GetRegisteredExtensionIconHandle(ext);
+            return GetRegisteredExtensionIconHandle(ext);
+        }
     }
 
     /// <summary>Иконка зарегистрированного типа .exe — как у безымянного exe в проводнике.</summary>
@@ -404,6 +466,16 @@ internal static class NativeShellIconInterop
             DestroyIcon(hIcon);
     }
 
+    private static void EnsurePathCachesUnlocked()
+    {
+        if (_pathCachesWarmed)
+            return;
+
+        _muiCacheByFileName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _appCompatByFileName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _pathCachesWarmed = true;
+    }
+
     private static void EnsurePathCaches()
     {
         if (_pathCachesWarmed)
@@ -411,12 +483,7 @@ internal static class NativeShellIconInterop
 
         lock (PathCacheLock)
         {
-            if (_pathCachesWarmed)
-                return;
-
-            _muiCacheByFileName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            _appCompatByFileName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            _pathCachesWarmed = true;
+            EnsurePathCachesUnlocked();
         }
     }
 
@@ -649,11 +716,8 @@ internal static class NativeShellIconInterop
         if (!File.Exists(path))
             return IntPtr.Zero;
 
-        var fromAssoc = ExtractIconFromPath(path);
-        if (fromAssoc != IntPtr.Zero)
-            return fromAssoc;
-
-        return TryShGetFileInfo(path, 0);
+        lock (ShellInteropLock)
+            return TryShGetFileInfo(path, 0);
     }
 
     private static IntPtr TryExtractFromSiblingFiles(string path)
@@ -664,16 +728,19 @@ internal static class NativeShellIconInterop
             if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
                 return IntPtr.Zero;
 
-            foreach (var pattern in new[] { "*.ico", "*.exe" })
+            lock (ShellInteropLock)
             {
-                foreach (var candidate in Directory.EnumerateFiles(directory, pattern))
+                foreach (var pattern in new[] { "*.ico", "*.exe" })
                 {
-                    if (!File.Exists(candidate))
-                        continue;
+                    foreach (var candidate in Directory.EnumerateFiles(directory, pattern))
+                    {
+                        if (!File.Exists(candidate))
+                            continue;
 
-                    var icon = ExtractIconFromPath(candidate);
-                    if (icon != IntPtr.Zero)
-                        return icon;
+                        var icon = TryShGetFileInfo(candidate, 0);
+                        if (icon != IntPtr.Zero)
+                            return icon;
+                    }
                 }
             }
         }
@@ -687,20 +754,27 @@ internal static class NativeShellIconInterop
 
     private static IntPtr TryShGetFileInfo(string path, uint fileAttributes)
     {
-        var shInfo = new Shfileinfo();
         var flags = ShgfiIcon | ShgfiLargeIcon;
         if (fileAttributes != 0)
             flags |= ShgfiUseFileAttributes;
 
-        var result = SHGetFileInfo(path, fileAttributes, ref shInfo, (uint)Marshal.SizeOf<Shfileinfo>(), flags);
-        return result != IntPtr.Zero && shInfo.hIcon != IntPtr.Zero ? shInfo.hIcon : IntPtr.Zero;
-    }
+        var cb = ShFileInfoByteSize;
+        var buf = Marshal.AllocHGlobal(cb);
+        try
+        {
+            var zeros = new byte[cb];
+            Marshal.Copy(zeros, 0, buf, cb);
 
-    private static IntPtr ExtractIconFromPath(string path)
-    {
-        var sb = new StringBuilder(path);
-        ushort index = 0;
-        return ExtractAssociatedIcon(IntPtr.Zero, sb, ref index);
+            IntPtr result;
+            lock (ShellInteropLock)
+                result = SHGetFileInfo(path, fileAttributes, buf, (uint)cb, flags);
+
+            return result != IntPtr.Zero ? Marshal.ReadIntPtr(buf) : IntPtr.Zero;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buf);
+        }
     }
 
     private static IntPtr ExtractIconFromAssociationString(string assocString)
@@ -709,23 +783,17 @@ internal static class NativeShellIconInterop
         if (comma >= 0)
         {
             var filePart = assocString[..comma].Trim();
-            var indexPart = assocString[(comma + 1)..].Trim();
-            if (int.TryParse(indexPart, out var index))
+            filePart = Environment.ExpandEnvironmentVariables(filePart);
+            if (File.Exists(filePart))
             {
-                filePart = Environment.ExpandEnvironmentVariables(filePart);
-                if (File.Exists(filePart))
-                {
-                    var sb = new StringBuilder(filePart);
-                    ushort iconIndex = (ushort)Math.Max(0, index);
-                    var hIcon = ExtractAssociatedIcon(IntPtr.Zero, sb, ref iconIndex);
-                    if (hIcon != IntPtr.Zero)
-                        return hIcon;
-                }
+                var hIcon = TryShGetFileInfo(filePart, 0);
+                if (hIcon != IntPtr.Zero)
+                    return hIcon;
             }
         }
 
         if (File.Exists(assocString))
-            return ExtractIconFromPath(assocString);
+            return TryShGetFileInfo(assocString, 0);
 
         return IntPtr.Zero;
     }
@@ -736,7 +804,7 @@ internal static class NativeShellIconInterop
         {
             uint length = 0;
             var hr = AssocQueryString(flags, assocStr, assoc, null, null, ref length);
-            if (hr < 0 || length == 0)
+            if (hr < 0 || length == 0 || length > 1024)
                 return null;
 
             var sb = new StringBuilder((int)length);

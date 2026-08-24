@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using GlassSettings.Core.Platform;
+using GlassSettings.Strings;
 using Microsoft.UI.Dispatching;
 
 namespace GlassSettings.Services;
@@ -45,7 +46,27 @@ public sealed class InjectRuntimeEntry
             : $"PID {Pid} · (x86)";
 
     /// <summary>Soft unload (событие) или Force FreeLibrary — при любом ненулевом ModuleBits.</summary>
-    public bool CanRequestUnload => ModuleBits != 0;
+    public bool CanRequestUnload =>
+        ModuleBits != 0 && !NeedsX86ForceAgentWithoutPackage;
+
+    /// <summary>
+    /// GS x64 + residual/off: Force через SysWOW64 rundll32 требует x86 InstallPath.
+    /// Soft UnloadRequest для живых injectee работает без x86-пакета.
+    /// </summary>
+    public bool NeedsX86ForceAgentWithoutPackage =>
+        Environment.Is64BitProcess
+        && Arch == NativeHostInterop.InjectArch.X86
+        && RequiresForceUnloadPath
+        && !GlassModulePath.IsPlatformInstalled(GlassPlatformArch.X86);
+
+    private bool RequiresForceUnloadPath =>
+        Beacon == InjectRuntimeBeacon.Residual
+        || !ReloadRenderService.IsAnyGlassPlatformRunning();
+
+    public string? UnloadDisabledReason =>
+        NeedsX86ForceAgentWithoutPackage
+            ? GlassSettingsResources.Get("Runtime_UnloadNeedsX86Package")
+            : null;
 }
 
 public sealed class InjectRuntimeSnapshot

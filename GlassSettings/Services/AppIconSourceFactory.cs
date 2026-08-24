@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices.WindowsRuntime;
+using GlassSettings.Core.Platform;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 
@@ -10,11 +11,11 @@ internal static class AppIconSourceFactory
 
     public static string ResolveIconPath()
     {
-        var direct = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, RelativeIconPath));
+        var direct = Path.GetFullPath(Path.Combine(PlatformPaths.AppBase, RelativeIconPath));
         if (File.Exists(direct))
             return direct;
 
-        var legacy = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
+        var legacy = Path.GetFullPath(Path.Combine(PlatformPaths.AppBase, "Assets", "AppIcon.ico"));
         return File.Exists(legacy) ? legacy : direct;
     }
 

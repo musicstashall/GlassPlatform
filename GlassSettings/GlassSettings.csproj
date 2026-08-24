@@ -95,7 +95,20 @@
     <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
     <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
     <UiLanguageCatalogGeneratedFile>$(IntermediateOutputPath)UiLanguageCatalog.g.cs</UiLanguageCatalogGeneratedFile>
+    <!-- Отключить валидацию WASDK single-file: требует IncludeAllContentForSelfExtract -->
+    <WindowsAppSDKSingleFileVerifyConfiguration>false</WindowsAppSDKSingleFileVerifyConfiguration>
+    <!-- Только managed assemblies в single-file; native/content отдельно -->
+    <IncludeAllContentForSelfExtract>false</IncludeAllContentForSelfExtract>
   </PropertyGroup>
+
+  <!-- Single-file: исключить Native.dll и content (.xbf, .pri, подпапки) из встраивания -->
+  <ItemGroup>
+    <Content Update="GlassSettings.Native.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Update="@(Content)" ExcludeFromSingleFile="true" />
+  </ItemGroup>
 
   <!-- Список BCP-47 из Strings/*/Resources.resw → UiLanguageCatalog.EmbeddedLanguageTags -->
   <PropertyGroup>
@@ -114,6 +127,18 @@
              Properties="Configuration=$(Configuration);Platform=$(GlassSettingsNativePlatform);SolutionDir=$(SolutionRoot)" />
   </Target>
 
+  <!-- Копировать GlassSettings.Native.dll из Build output в подпапку GlassSettings -->
+  <Target Name="CopyNativeDllToOutput" AfterTargets="BuildGlassSettingsNative" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <_NativeDllFrom>$([System.IO.Path]::GetFullPath('$(BaseOutputPath)$(Platform)\$(Configuration)\GlassSettings.Native.dll'))</_NativeDllFrom>
+      <_NativeDllTo>$(OutputPath)GlassSettings.Native.dll</_NativeDllTo>
+    </PropertyGroup>
+    <Copy SourceFiles="$(_NativeDllFrom)"
+          DestinationFolder="$(OutputPath)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(_NativeDllFrom)')" />
+  </Target>
+
   <!-- Self-contained WASDK копирует все *.mui-культуры — оставляем только en-US / en-us. -->
   <Target Name="TrimWasdkLanguageFolders" AfterTargets="CopyFilesToOutputDirectory">
     <PropertyGroup>
@@ -122,6 +147,68 @@
     <Exec Condition="Exists('$(_OutDirFull)')"
           IgnoreExitCode="true"
           Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$keep=@('en-US','en-us'); Get-ChildItem -LiteralPath '$(_OutDirFull.TrimEnd('\'))' -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^[a-z]{2,3}([_-][A-Za-z0-9]+)+$' -and $keep -notcontains $_.Name } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue&quot;" />
+  </Target>
+
+  <!-- Удалить onnxruntime.dll и DirectML.dll — не используются в GlassSettings (автозависимость WASDK AI/ML). -->
+  <Target Name="RemoveUnusedWasdkBinaries" AfterTargets="CopyFilesToOutputDirectory">
+    <Delete Files="$(OutputPath)onnxruntime.dll;$(OutputPath)DirectML.dll"
+           Condition="Exists('$(OutputPath)onnxruntime.dll') or Exists('$(OutputPath)DirectML.dll')" />
+  </Target>
+
+  <!-- Publish: копировать .xbf и Native.dll из Build output в publish directory -->
+  <PropertyGroup>
+    <_BuildOutputDir>$([System.IO.Path]::GetFullPath('$(OutputPath)'))</_BuildOutputDir>
+  </PropertyGroup>
+  <Target Name="CopyXbfAndNativeToPublish" AfterTargets="Publish" Condition="'$(PublishSingleFile)'=='true'">
+    <PropertyGroup>
+      <_PublishDir>$([System.IO.Path]::GetFullPath('$(PublishDir)'))</_PublishDir>
+    </PropertyGroup>
+    <!-- Копировать .xbf файлы из Build output в publish -->
+    <ItemGroup>
+      <_XbfFiles Include="$(_BuildOutputDir)\**\*.xbf" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_XbfFiles)"
+          DestinationFiles="@(_XbfFiles->'$(_PublishDir)\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <!-- Копировать GlassSettings.Native.dll -->
+    <Copy SourceFiles="$(_BuildOutputDir)\GlassSettings.Native.dll"
+          DestinationFolder="$(_PublishDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(_BuildOutputDir)\GlassSettings.Native.dll')" />
+  </Target>
+
+  <!-- Publish: обрезать WASDK language folders (оставить en-US/en-us) + удалить onnxruntime/DirectML -->
+  <Target Name="TrimPublishLanguageFolders" AfterTargets="CopyXbfAndNativeToPublish" Condition="'$(PublishSingleFile)'=='true'">
+    <PropertyGroup>
+      <_PublishDir>$([System.IO.Path]::GetFullPath('$(PublishDir)'))</_PublishDir>
+    </PropertyGroup>
+    <Exec Condition="Exists('$(_PublishDir)')"
+          IgnoreExitCode="true"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$keep=@('en-US','en-us'); Get-ChildItem -LiteralPath '$(_PublishDir.TrimEnd('\'))' -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^[a-z]{2,3}([_-][A-Za-z0-9]+)+$' -and $keep -notcontains $_.Name } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue&quot;" />
+    <!-- Удалить неиспользуемые WASDK компоненты: AI/ML, Widgets, Workloads, NPU -->
+    <Delete Files="$(_PublishDir)\onnxruntime.dll;$(_PublishDir)\DirectML.dll;
+                   $(_PublishDir)\Microsoft.Windows.AI.AICapabilities.dll;
+                   $(_PublishDir)\Microsoft.Windows.AI.ContentSafety.dll;
+                   $(_PublishDir)\Microsoft.Windows.AI.Imaging.dll;
+                   $(_PublishDir)\Microsoft.Windows.AI.MachineLearning.dll;
+                   $(_PublishDir)\Microsoft.Windows.AI.Text.dll;
+                   $(_PublishDir)\Microsoft.Windows.Widgets.dll;
+                   $(_PublishDir)\Microsoft.Windows.Workloads.dll;
+                   $(_PublishDir)\Microsoft.Windows.Workloads.Resources.dll;
+                   $(_PublishDir)\Microsoft.Windows.Workloads.Resources_ec.dll;
+                   $(_PublishDir)\NPUDetect.dll;
+                   $(_PublishDir)\RestartAgent.exe;
+                   $(_PublishDir)\SessionHandleIPCProxyStub.dll;
+                   $(_PublishDir)\PushNotificationsLongRunningTask.ProxyStub.dll;
+                   $(_PublishDir)\workloads.json;$(_PublishDir)\workloads.365.json;
+                   $(_PublishDir)\workloads.j32.json;$(_PublishDir)\workloads.lnl.json;
+                   $(_PublishDir)\workloads.qnn.json;$(_PublishDir)\workloads.stx.json"
+           Condition="true" />
+    <!-- Удалить исходники Native (.cpp, .h, .vcxproj) из publish + служебные файлы -->
+    <Exec Condition="Exists('$(_PublishDir)\Native')"
+          IgnoreExitCode="true"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Get-ChildItem -LiteralPath '$(_PublishDir)\Native' -File | Where-Object { $_.Extension -in '.cpp','.h','.old','.filters' -or $_.Name -like '*.vcxproj*' } | Remove-Item -Force -ErrorAction SilentlyContinue&quot;" />
+    <Delete Files="$(_PublishDir)\.gitignore;$(_PublishDir)\BuildNumber.txt" />
   </Target>
 
   <!-- SDK StackReserveSize на apphost не всегда применяется; editbin после копирования exe. -->

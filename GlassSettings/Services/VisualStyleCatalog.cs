@@ -15,6 +15,7 @@ public static class VisualStyleCatalog
     private const string DefaultColorStyle = "NormalColor";
     private const string DefaultSize = "NormalSize";
     private const string DefaultVisualStyleFileName = "aero.msstyles";
+    private const string LiteVisualStyleFileName = "aerolite.msstyles";
 
     public static string ResourcesDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Resources");
@@ -94,7 +95,8 @@ public static class VisualStyleCatalog
             return true;
 
         var fileName = Path.GetFileName(visualStylePath.Trim().Trim('"'));
-        return string.Equals(fileName, DefaultVisualStyleFileName, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(fileName, DefaultVisualStyleFileName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(fileName, LiteVisualStyleFileName, StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool TryReadVisualStylePath(string themeFilePath, out string visualStylePath) =>

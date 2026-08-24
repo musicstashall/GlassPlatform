@@ -50,6 +50,9 @@ public static class VisualStyleThemeManager
         if (string.IsNullOrWhiteSpace(entry.ThemeFilePath) || !File.Exists(entry.ThemeFilePath))
             return new VisualStyleApplyResult(false, false, unchecked((int)0x80070002));
 
+        if (SecureUxThemeService.ShouldBlockCustomThemeApply(entry))
+            return new VisualStyleApplyResult(false, false, unchecked((int)0x80070021), "SecureUxTheme pending restart");
+
         ThemeDwmBaselineSync.BeginThemeChangeWindow();
 
         var enableFonts = GlassSettingsRegistry.ReadEnableSystemFont();

@@ -19,6 +19,8 @@ namespace UICompat
     class NcMenuFlyoutPanelRegistry;
     class JumpListPanelRegistry;
     class SearchWebViewPanelRegistry;
+    class ShellTooltipPanelRegistry;
+    class ShellTooltipPanelRegistry;
 
     // VTC для CoreWindow hosts: NC grids + Start/Search + MenuFlyout (NC/QS/Start/Search) + Jump List.
     class UiVisualTreeWatcher final : public IVisualTreeServiceCallback2
@@ -100,6 +102,11 @@ namespace UICompat
             std::wstring_view type,
             std::wstring_view name) noexcept;
 
+        // Start/Search ToolTip: WUX ToolTip в Xaml_WindowedPopupClass (SMEH/SearchHost).
+        [[nodiscard]] bool TryRegisterShellTooltip(
+            InstanceHandle handle,
+            std::wstring_view type) noexcept;
+
         // Донор ждёт VTC Add WebView2Standalone; на SearchHost он часто
         // только внутри HostedWebView2Control — ищем по get_class_name в subtree.
         // Не на стеке Advise: Post через Dispatcher (AV WebView2Standalone).
@@ -122,5 +129,6 @@ namespace UICompat
         std::unique_ptr<NcMenuFlyoutPanelRegistry> m_menuFlyoutRegistry;
         std::unique_ptr<JumpListPanelRegistry> m_jumpListRegistry;
         std::unique_ptr<SearchWebViewPanelRegistry> m_searchWebViewRegistry;
+        std::unique_ptr<ShellTooltipPanelRegistry> m_shellTooltipRegistry;
     };
 }

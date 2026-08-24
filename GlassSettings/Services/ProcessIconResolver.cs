@@ -143,9 +143,10 @@ public static class ProcessIconResolver
         if (!MetadataCache.TryGetValue(exeName, out var meta) || meta.ResolvedPath is null)
             return;
 
-        var details = StaThreadRunner.RunWithTimeout(
-            () => ReadVersionDetails(meta.ResolvedPath!),
-            timeoutMs);
+        // FileVersionInfo не требует STA; отдельный 1MB-поток RunWithTimeout
+        // давал GS cookie на powershell_ise.exe (dump line 70).
+        _ = timeoutMs;
+        var details = ReadVersionDetails(meta.ResolvedPath!);
         if (details is null)
             return;
 
@@ -561,7 +562,7 @@ public static class ProcessIconResolver
         if (PngInFlight.TryGetValue(exeName, out var existing))
             return await existing.ConfigureAwait(false);
 
-        var loadTask = StaThreadRunner.RunAsyncWithTimeout(() => LoadIconPngBytes(exeName));
+        var loadTask = StaThreadRunner.RunAsync(() => LoadIconPngBytes(exeName));
         if (!PngInFlight.TryAdd(exeName, loadTask))
             return await PngInFlight[exeName].ConfigureAwait(false);
 
@@ -603,6 +604,7 @@ public static class ProcessIconResolver
         }
         catch
         {
+            _nativeIconIoDisabled = true;
             return null;
         }
     }
@@ -633,6 +635,7 @@ public static class ProcessIconResolver
         }
         catch
         {
+            _nativeIconIoDisabled = true;
             return null;
         }
     }
@@ -643,7 +646,7 @@ public static class ProcessIconResolver
         if (PngCache.TryGetValue(cacheKey, out var cached))
             return Task.FromResult<byte[]?>(cached);
 
-        return StaThreadRunner.RunAsyncWithTimeout(() => LoadDefaultFileTypePngBytes(fileName));
+        return StaThreadRunner.RunAsync(() => LoadDefaultFileTypePngBytes(fileName));
     }
 
     private static async Task EnsureFileTypeIconsAsync(IEnumerable<string> fileNames)

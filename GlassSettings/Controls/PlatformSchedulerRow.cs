@@ -39,6 +39,14 @@ public sealed class PlatformSchedulerRow
 
     private GlassPlatformArch EffectiveGlassArch => GlassArch ?? GlassPlatformNames.NativeArch;
 
+    /// <summary>
+    /// GS x64 + x86: блок только без задачи и без InstallPath (нет путей к модулям x86).
+    /// </summary>
+    private bool IsX86ControlsLocked =>
+        Kind == PlatformSchedulerKind.Glass
+        && GlassArch == GlassPlatformArch.X86
+        && GlassPlatformUiPolicy.IsX86DualUiControlsLocked();
+
     /// <summary>UserControl целиком — в HeaderActions / ActionsBelowHost.</summary>
     public PlatformSchedulerStackableActions StackableActions => _stackable;
 
@@ -103,10 +111,22 @@ public sealed class PlatformSchedulerRow
 
             UpdateOrchestrationKindLabel();
 
+            if (IsX86ControlsLocked)
+            {
+                ApplyExternalBusyChrome(false, splitEnabled: false);
+                _installGate.IsOn = false;
+                _installGate.IsEnabled = false;
+                _stackable.SetStatusTone(
+                    GlassSettingsResources.Get("Status_PlatformNotInstalled"),
+                    PlatformSchedulerStackableActions.StatusToneKind.Disabled);
+                return;
+            }
+
             if (!exists)
             {
                 ApplyExternalBusyChrome(false, splitEnabled: false);
                 _installGate.IsOn = false;
+                _installGate.IsEnabled = true;
                 _stackable.SetStatusTone(
                     GlassSettingsResources.Get("Status_Disabled"),
                     PlatformSchedulerStackableActions.StatusToneKind.Disabled);
@@ -361,6 +381,15 @@ public sealed class PlatformSchedulerRow
         if (_suppress || _busy)
             return;
 
+        if (IsX86ControlsLocked)
+        {
+            _suppress = true;
+            _installGate.IsOn = false;
+            _installGate.IsEnabled = false;
+            _suppress = false;
+            return;
+        }
+
         var wantInstalled = _installGate.IsOn;
         if (wantInstalled == TaskExists)
             return;
@@ -370,7 +399,7 @@ public sealed class PlatformSchedulerRow
 
     private async Task ApplyInstallToggleAsync(bool install)
     {
-        if (_busy)
+        if (_busy || IsX86ControlsLocked)
             return;
 
         await BeginBusyVisualAsync().ConfigureAwait(true);

@@ -18,7 +18,6 @@ public sealed partial class VisualStylesPage : Page
 {
     private const double HeroColumnGap = 24;
     private const double QuickActionColumnGap = 8;
-    private const double QuickActionColumnFloor = 96;
     private const double GridTileWidth = 168;
     private const double GridTileGap = 8;
     private const int MaxThemeColumns = 6;
@@ -33,11 +32,17 @@ public sealed partial class VisualStylesPage : Page
     private bool _applyInProgress;
     private bool _saveInProgress;
     private bool _applyFontsLoading;
+    private bool _signatureToggleLoading;
+    private bool _signatureBusy;
+    private EventHandler? _rebootActionHandler;
     private bool _heroActionsStacked;
     private bool _heroLayoutInitialized;
     private double _quickActionsCol0Width;
     private double _quickActionsCol1Width;
+    private double _quickActionsMinCol0Width;
+    private double _quickActionsMinCol1Width;
     private double _quickActionsMinTableWidth;
+    private double _quickActionsPreferredTableWidth;
     private bool _quickActionsWidthsDirty = true;
 
     public VisualStylesPage()
@@ -66,6 +71,34 @@ public sealed partial class VisualStylesPage : Page
             ThemesExpander_OnLoaded(ThemesExpander, new RoutedEventArgs());
         _quickActionsWidthsDirty = true;
         UpdatePageLayout();
+
+        // Восстановить уведомление о перезагрузке при возвращении на страницу
+        // (аналогично восстановлению yellow notice на детальных страницах).
+        try
+        {
+            var state = SecureUxThemeService.Query().State;
+            string? baseKey = state switch
+            {
+                SecureUxThemeState.ActivationPendingRestart => "Themes_SignatureActivated",
+                SecureUxThemeState.DeactivationPendingRestart => "Themes_SignatureDeactivated",
+                _ => null
+            };
+            if (baseKey is not null)
+            {
+                var message = GlassSettingsResources.Get(baseKey) + " " + GlassSettingsResources.Get("Themes_RestartRequired");
+                DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+                {
+                    if (IsLoaded)
+                        _ = ShowRebootNoticeAsync(
+                            message,
+                            GlassSettingsResources.Get("Themes_SignatureRebootButton"));
+                });
+            }
+        }
+        catch
+        {
+            // SecureUxTheme query failed — skip notice restore.
+        }
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
@@ -293,9 +326,9 @@ public sealed partial class VisualStylesPage : Page
         ColorCard.IconGlyphChar = SettingsSectionGlyphs.Colorization;
         UpdateColorCardSubtitle();
 
-        StubCard.Title = "Stub";
-        StubCard.Description = string.Empty;
-        StubCard.IconGlyphChar = SettingsSectionGlyphs.Symbols;
+        SignatureCard.Title = GlassSettingsResources.Get("Themes_SignatureCardTitle");
+        SignatureCard.Description = GlassSettingsResources.Get("Themes_SignatureCardDesc");
+        SignatureCard.IconGlyphChar = SettingsSectionGlyphs.Signature;
 
         TextFontsCard.Title = GlassSettingsResources.Get("NavText");
         TextFontsCard.Description = GlassSettingsResources.Get("Themes_TextAndFontsDesc");
@@ -312,12 +345,8 @@ public sealed partial class VisualStylesPage : Page
         EmptyText.Text = GlassSettingsResources.Get("Themes_Empty");
         FindThemesText.Text = GlassSettingsResources.Get("Themes_FindOnline");
         BrowseThemesButton.Content = GlassSettingsResources.Get("Themes_BrowseThemes");
-
-        AdvancedExpander.Title = GlassSettingsResources.Get("Themes_AdvancedTitle");
-        ThemePatcherStubExpander.Title = GlassSettingsResources.Get("Themes_PatcherTitle");
-        ThemePatcherStubExpander.Description = GlassSettingsResources.Get("Themes_PatcherDesc");
-        ThemePatcherStubExpander.IconGlyph = SettingsSectionGlyphs.Theme;
-        ThemePatcherStubText.Text = GlassSettingsResources.Get("Themes_PatcherStub");
+        SecureUxThemeOnlineIcon.Glyph = SettingsSectionGlyphs.WebSearch;
+        SecureUxThemeOnlineText.Text = GlassSettingsResources.Get("Themes_SecureUxThemeOnlineLink");
 
         _quickActionsWidthsDirty = true;
     }
@@ -385,7 +414,7 @@ public sealed partial class VisualStylesPage : Page
             - HeroPreviewLayoutMetrics.FootprintWidth
             - HeroColumnGap;
 
-        // Гистерезис: вниз при min−1, вверх при min+1.
+        // Сжатие текста до 100 px; перенос при min−1, возврат при min+1.
         bool sideBySide;
         if (!_heroLayoutInitialized)
         {
@@ -397,7 +426,7 @@ public sealed partial class VisualStylesPage : Page
         }
         else
         {
-            sideBySide = availableRight > _quickActionsMinTableWidth - 1;
+            sideBySide = availableRight >= _quickActionsMinTableWidth;
         }
 
         _heroActionsStacked = !sideBySide;
@@ -405,7 +434,7 @@ public sealed partial class VisualStylesPage : Page
 
         if (sideBySide)
         {
-            ApplySideBySideQuickActionColumns();
+            ApplySideBySideQuickActionColumns(availableRight);
             ColPreview.Width = GridLength.Auto;
             ColActions.Width = new GridLength(1, GridUnitType.Star);
             Grid.SetColumn(CurrentThemePreview, 0);
@@ -437,32 +466,46 @@ public sealed partial class VisualStylesPage : Page
         QuickActionsHost.VerticalAlignment = VerticalAlignment.Top;
     }
 
-    private void ApplySideBySideQuickActionColumns()
+    private void ApplySideBySideQuickActionColumns(double availableRight)
     {
-        QuickActionCol0.MinWidth = _quickActionsCol0Width;
-        QuickActionCol0.MaxWidth = _quickActionsCol0Width;
-        QuickActionCol0.Width = new GridLength(_quickActionsCol0Width);
-        QuickActionCol1.MinWidth = _quickActionsCol1Width;
-        QuickActionCol1.MaxWidth = _quickActionsCol1Width;
-        QuickActionCol1.Width = new GridLength(_quickActionsCol1Width);
-
+        QuickActionCol0.MinWidth = _quickActionsMinCol0Width;
+        QuickActionCol1.MinWidth = _quickActionsMinCol1Width;
+        QuickActionCol0.Width = new GridLength(1, GridUnitType.Star);
+        QuickActionCol1.Width = new GridLength(1, GridUnitType.Star);
         QuickActionsHost.ColumnSpacing = QuickActionColumnGap;
-        QuickActionsHost.Width = _quickActionsMinTableWidth;
+        QuickActionsHost.MinWidth = _quickActionsMinTableWidth;
+
+        // Шире preferred — растягиваем до колонки (паритет с notice/expander).
+        if (availableRight >= _quickActionsPreferredTableWidth)
+        {
+            QuickActionCol0.MaxWidth = double.PositiveInfinity;
+            QuickActionCol1.MaxWidth = double.PositiveInfinity;
+            QuickActionsHost.ClearValue(FrameworkElement.WidthProperty);
+            QuickActionsHost.ClearValue(FrameworkElement.MaxWidthProperty);
+            QuickActionsHost.HorizontalAlignment = HorizontalAlignment.Stretch;
+            return;
+        }
+
+        QuickActionCol0.MaxWidth = _quickActionsCol0Width;
+        QuickActionCol1.MaxWidth = _quickActionsCol1Width;
+        QuickActionsHost.MaxWidth = _quickActionsPreferredTableWidth;
+        QuickActionsHost.Width = Math.Max(availableRight, _quickActionsMinTableWidth);
         QuickActionsHost.HorizontalAlignment = HorizontalAlignment.Left;
     }
 
     private void ApplyStackedQuickActionColumns()
     {
-        // После переноса — колонки сжимаемы (остаток ширины уходит при ресайзе), текст — ellipsis.
-        QuickActionCol0.MinWidth = QuickActionColumnFloor;
-        QuickActionCol1.MinWidth = QuickActionColumnFloor;
-        QuickActionCol0.MaxWidth = _quickActionsCol0Width;
-        QuickActionCol1.MaxWidth = _quickActionsCol1Width;
+        QuickActionCol0.MinWidth = _quickActionsMinCol0Width;
+        QuickActionCol1.MinWidth = _quickActionsMinCol1Width;
+        QuickActionCol0.MaxWidth = double.PositiveInfinity;
+        QuickActionCol1.MaxWidth = double.PositiveInfinity;
         QuickActionCol0.Width = new GridLength(1, GridUnitType.Star);
         QuickActionCol1.Width = new GridLength(1, GridUnitType.Star);
 
         QuickActionsHost.ColumnSpacing = QuickActionColumnGap;
         QuickActionsHost.ClearValue(FrameworkElement.WidthProperty);
+        QuickActionsHost.ClearValue(FrameworkElement.MinWidthProperty);
+        QuickActionsHost.ClearValue(FrameworkElement.MaxWidthProperty);
         QuickActionsHost.HorizontalAlignment = HorizontalAlignment.Stretch;
     }
 
@@ -471,22 +514,21 @@ public sealed partial class VisualStylesPage : Page
         if (!_quickActionsWidthsDirty && _quickActionsMinTableWidth > 0)
             return;
 
-        var col0 = Math.Max(MeasureQuickActionCardWidth(BackgroundCard), MeasureQuickActionCardWidth(StubCard));
-        var col1 = Math.Max(MeasureQuickActionCardWidth(ColorCard), MeasureQuickActionCardWidth(TextFontsCard));
-        if (col0 <= 0 || col1 <= 0)
+        var pref0 = Math.Max(BackgroundCard.MeasurePreferredWidth(), SignatureCard.MeasurePreferredWidth());
+        var pref1 = Math.Max(ColorCard.MeasurePreferredWidth(), TextFontsCard.MeasurePreferredWidth());
+        var min0 = Math.Max(BackgroundCard.MeasureMinWidth(), SignatureCard.MeasureMinWidth());
+        var min1 = Math.Max(ColorCard.MeasureMinWidth(), TextFontsCard.MeasureMinWidth());
+        if (pref0 <= 0 || pref1 <= 0 || min0 <= 0 || min1 <= 0)
             return;
 
-        _quickActionsCol0Width = col0;
-        _quickActionsCol1Width = col1;
-        _quickActionsMinTableWidth = col0 + QuickActionColumnGap + col1;
+        _quickActionsCol0Width = pref0;
+        _quickActionsCol1Width = pref1;
+        _quickActionsMinCol0Width = Math.Min(min0, pref0);
+        _quickActionsMinCol1Width = Math.Min(min1, pref1);
+        _quickActionsPreferredTableWidth = pref0 + QuickActionColumnGap + pref1;
+        _quickActionsMinTableWidth = _quickActionsMinCol0Width + QuickActionColumnGap + _quickActionsMinCol1Width;
         QuickActionsHost.ColumnSpacing = QuickActionColumnGap;
         _quickActionsWidthsDirty = false;
-    }
-
-    private static double MeasureQuickActionCardWidth(ThemeQuickActionCard card)
-    {
-        card.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        return Math.Ceiling(card.DesiredSize.Width);
     }
 
     private void UpdateThemeTilesLayout()
@@ -526,6 +568,7 @@ public sealed partial class VisualStylesPage : Page
         UpdateColorCardSubtitle();
         UpdateBackgroundCardSubtitle();
         SyncApplyFontsCheckFromRegistry();
+        SyncSignatureToggleFromSystem();
 
         var themes = UserThemeCatalog.GetThemesForGrid();
         _themeCount = themes.Count;
@@ -612,6 +655,14 @@ public sealed partial class VisualStylesPage : Page
     {
         if (_applyInProgress || entry is null)
             return;
+
+        if (SecureUxThemeService.ShouldBlockCustomThemeApply(entry))
+        {
+            await ShowThemesNoticeAsync(
+                SettingsNoticeSeverity.Error,
+                GlassSettingsResources.Get("Themes_SignatureApplyBlockedPending")).ConfigureAwait(true);
+            return;
+        }
 
         _applyInProgress = true;
         ThemeItems.IsEnabled = false;
@@ -718,6 +769,258 @@ public sealed partial class VisualStylesPage : Page
         GlassSettingsRegistry.WriteEnableSystemFont(_applyFontsCheck.IsChecked == true);
     }
 
+    private void SyncSignatureToggleFromSystem()
+    {
+        _signatureToggleLoading = true;
+        try
+        {
+            var snapshot = SecureUxThemeService.Query();
+            SignatureToggle.IsEnabled = snapshot.SwitchEnabled && !_signatureBusy;
+            SignatureToggle.IsOn = snapshot.SwitchOn;
+            SignatureToggle.SyncInnerEnabled();
+
+            var cardBlocked = !snapshot.LocalDllPresent
+                && snapshot.State is not SecureUxThemeState.Active
+                    and not SecureUxThemeState.ActivationPendingRestart
+                    and not SecureUxThemeState.DeactivationPendingRestart;
+            SignatureCard.IsEnabled = !cardBlocked && !_signatureBusy;
+
+            GlassSettingsToolTipService.SetToolTip(SignatureCard, null);
+
+            if (snapshot.State == SecureUxThemeState.Active)
+                _ = SecureUxThemeService.TryEnsureLoaded();
+        }
+        finally
+        {
+            _signatureToggleLoading = false;
+        }
+    }
+
+    private async void SignatureToggle_OnToggled(object sender, RoutedEventArgs e)
+    {
+        if (_signatureToggleLoading || _signatureBusy)
+            return;
+
+        var wantOn = SignatureToggle.IsOn;
+        var snapshot = SecureUxThemeService.Query();
+        if (wantOn)
+        {
+            var obstacle = SecureUxThemeService.EvaluateActivationObstacle(snapshot);
+            if (obstacle != SecureUxThemeObstacle.None)
+            {
+                await ShowSignatureMessageAsync(
+                    SecureUxThemeService.ObstacleMessage(obstacle, snapshot.LocalDllPath)).ConfigureAwait(true);
+                SyncSignatureToggleFromSystem();
+                return;
+            }
+
+            var confirmed = await HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("Dialog_SignatureTitle"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Get("Dialog_SignatureActivateConfirm")),
+                Footer = HostedConfirmationDialogService.CreateCancelConfirmFooter(
+                    GlassSettingsResources.Get("Dialog_SignatureConfirm"))
+            }).ConfigureAwait(true);
+            if (!confirmed || !IsLoaded)
+            {
+                SyncSignatureToggleFromSystem();
+                return;
+            }
+
+            var reactivate = SecureUxThemeService.CheckCleanupPending();
+            var requiresRestart = SecureUxThemeService.ActivationRequiresRestart(snapshot, reactivate);
+            var activateBase = GlassSettingsResources.Get("Themes_SignatureActivated");
+            var restartSuffix = requiresRestart
+                ? GlassSettingsResources.Get("Themes_RestartRequired")
+                : GlassSettingsResources.Get("Themes_RestartNotRequired");
+            var activateMessage = activateBase + " " + restartSuffix;
+            await RunSignatureOperationAsync(
+                () => SecureUxThemeService.Activate(snapshot, reactivate),
+                SettingsNoticeSeverity.Success,
+                activateMessage,
+                "Themes_SignatureActivateFailedFormat",
+                requiresRestart: requiresRestart,
+                restartMessageKey: null,
+                restartButtonTextKey: null).ConfigureAwait(true);
+            return;
+        }
+
+        var deactivateConfirmed = await HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+        {
+            Title = GlassSettingsResources.Get("Dialog_SignatureTitle"),
+            Body = HostedConfirmationDialogService.CreateBody(
+                GlassSettingsResources.Get("Dialog_SignatureDeactivateConfirm")),
+            Footer = HostedConfirmationDialogService.CreateCancelConfirmFooter(
+                GlassSettingsResources.Get("Dialog_SignatureConfirm"))
+        }).ConfigureAwait(true);
+        if (!deactivateConfirmed || !IsLoaded)
+        {
+            SyncSignatureToggleFromSystem();
+            return;
+        }
+
+        if (IsCustomThemeActive())
+        {
+            var stock = SecureUxThemeService.TryGetStockThemeEntry();
+            if (stock is null)
+            {
+                await ShowThemesNoticeAsync(
+                    SettingsNoticeSeverity.Error,
+                    GlassSettingsResources.Get("Themes_SignatureStockThemeFailed")).ConfigureAwait(true);
+                SyncSignatureToggleFromSystem();
+                return;
+            }
+
+            var apply = await VisualStyleThemeManager.ApplyThemeAsync(stock).ConfigureAwait(true);
+            if (!apply.Success)
+            {
+                await ShowThemesNoticeAsync(
+                    SettingsNoticeSeverity.Error,
+                    GlassSettingsResources.Get("Themes_SignatureStockThemeFailed")).ConfigureAwait(true);
+                SyncSignatureToggleFromSystem();
+                return;
+            }
+        }
+
+        _signatureBusy = true;
+        SignatureToggle.IsEnabled = false;
+        SignatureToggle.SyncInnerEnabled();
+        try
+        {
+            var result = await Task.Run(SecureUxThemeService.DeactivateWithCleanup).ConfigureAwait(true);
+            if (!IsLoaded)
+                return;
+
+            if (result.Hr < 0)
+            {
+                await ShowThemesNoticeAsync(
+                    SettingsNoticeSeverity.Error,
+                    GlassSettingsResources.Format(
+                        "Themes_SignatureDeactivateFailedFormat",
+                        unchecked((uint)result.Hr))).ConfigureAwait(true);
+                return;
+            }
+
+            var deactivateBase = GlassSettingsResources.Get("Themes_SignatureDeactivated");
+            var restartSuffix = result.RebootRequired
+                ? GlassSettingsResources.Get("Themes_RestartRequired")
+                : GlassSettingsResources.Get("Themes_RestartNotRequired");
+            var deactivateMessage = deactivateBase + " " + restartSuffix;
+            if (result.RebootRequired)
+            {
+                await ShowRebootNoticeAsync(
+                    deactivateMessage,
+                    GlassSettingsResources.Get("Themes_SignatureRebootButton")).ConfigureAwait(true);
+            }
+            else
+            {
+                await ShowThemesNoticeAsync(
+                    SettingsNoticeSeverity.Success,
+                    deactivateMessage).ConfigureAwait(true);
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!IsLoaded)
+                return;
+
+            await ShowThemesNoticeAsync(
+                SettingsNoticeSeverity.Error,
+                GlassSettingsResources.Format(
+                    "Themes_SignatureDeactivateFailedFormat",
+                    unchecked((uint)ex.HResult))).ConfigureAwait(true);
+            Debug.WriteLine($"GlassSettings VisualStylesPage.SignatureToggle_OnToggled: {ex}");
+        }
+        finally
+        {
+            _signatureBusy = false;
+            if (IsLoaded)
+                SyncSignatureToggleFromSystem();
+        }
+    }
+
+    private async Task RunSignatureOperationAsync(
+        Func<int> operation,
+        SettingsNoticeSeverity successSeverity,
+        string successMessage,
+        string failedFormatKey,
+        bool requiresRestart = false,
+        string? restartMessageKey = null,
+        string? restartButtonTextKey = null)
+    {
+        _signatureBusy = true;
+        SignatureToggle.IsEnabled = false;
+        SignatureToggle.SyncInnerEnabled();
+        try
+        {
+            var hr = await Task.Run(operation).ConfigureAwait(true);
+            if (!IsLoaded)
+                return;
+
+            if (hr < 0)
+            {
+                await ShowThemesNoticeAsync(
+                    SettingsNoticeSeverity.Error,
+                    GlassSettingsResources.Format(failedFormatKey, unchecked((uint)hr))).ConfigureAwait(true);
+                return;
+            }
+
+            if (requiresRestart && restartMessageKey is not null && restartButtonTextKey is not null)
+            {
+                await ShowRebootNoticeAsync(
+                    GlassSettingsResources.Get(restartMessageKey),
+                    GlassSettingsResources.Get(restartButtonTextKey)).ConfigureAwait(true);
+            }
+            else
+            {
+                await ShowThemesNoticeAsync(successSeverity, successMessage).ConfigureAwait(true);
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!IsLoaded)
+                return;
+
+            await ShowThemesNoticeAsync(
+                SettingsNoticeSeverity.Error,
+                GlassSettingsResources.Format(failedFormatKey, unchecked((uint)ex.HResult))).ConfigureAwait(true);
+            Debug.WriteLine($"GlassSettings VisualStylesPage.RunSignatureOperationAsync: {ex}");
+        }
+        finally
+        {
+            _signatureBusy = false;
+            if (IsLoaded)
+                SyncSignatureToggleFromSystem();
+        }
+    }
+
+    private static bool IsCustomThemeActive()
+    {
+        if (!VisualStyleThemeManager.TryGetCurrentThemeFilePath(out var themePath))
+            return false;
+
+        if (VisualStyleCatalog.TryReadVisualStylePath(themePath, out var msstyles)
+            && VisualStyleCatalog.IsCustomVisualStylePath(msstyles))
+        {
+            return true;
+        }
+
+        var entry = VisualStyleCatalog.TryGetEntryForThemeFile(themePath);
+        return entry?.IsCustom == true;
+    }
+
+    private async Task ShowSignatureMessageAsync(string body)
+    {
+        await HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+        {
+            Title = GlassSettingsResources.Get("Dialog_SignatureTitle"),
+            Body = HostedConfirmationDialogService.CreateBody(body),
+            Footer = HostedConfirmationDialogService.CreateFooter(
+                GlassSettingsResources.Get("CmdOk"))
+        }).ConfigureAwait(true);
+    }
+
     private void BackgroundCard_OnClick(object sender, RoutedEventArgs e) =>
         App.ShellWindow?.NavigateToThemesDesktopBackgroundPage();
 
@@ -822,24 +1125,15 @@ public sealed partial class VisualStylesPage : Page
 
     private async void VisualStyleTile_OnDeleteRequested(object sender, VisualStyleThemeEntry entry)
     {
-        if (entry is null || !ThemeDeleteService.CanDelete(entry))
+        var plan = ThemeDeleteService.TryCreatePlan(entry);
+        if (plan is null)
             return;
 
-        var dialog = new ContentDialog
-        {
-            Title = GlassSettingsResources.Get("Themes_DeleteMenu"),
-            Content = GlassSettingsResources.Format("Themes_DeleteConfirmFormat", entry.DisplayName),
-            PrimaryButtonText = GlassSettingsResources.Get("Themes_DeleteMenu"),
-            CloseButtonText = GlassSettingsResources.Get("Themes_SaveThemeCancel"),
-            DefaultButton = ContentDialogButton.Close,
-            XamlRoot = XamlRoot
-        };
-
-        var result = await dialog.ShowAsync();
-        if (result != ContentDialogResult.Primary || !IsLoaded)
+        var confirmed = await ThemeDeleteDialogService.ConfirmAsync(plan).ConfigureAwait(true);
+        if (!confirmed || !IsLoaded)
             return;
 
-        var delete = ThemeDeleteService.Delete(entry);
+        var delete = ThemeDeleteService.Execute(plan);
         if (!IsLoaded)
             return;
 
@@ -890,8 +1184,23 @@ public sealed partial class VisualStylesPage : Page
         return item;
     }
 
+    private void SecureUxThemeOnlineLink_OnClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://github.com/namazso/SecureUxTheme")
+            {
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"GlassSettings SecureUxThemeOnline: {ex}");
+        }
+    }
+
     /// <summary>
-    /// Action-слот стека: Success без кнопок — только зеркало; Error — pinned на странице.
+    /// Action-слот стека: Success без кнопок — MirrorOnly; Error — PinnedLayout (полоса + зеркало off-screen).
     /// </summary>
     private async Task ShowThemesNoticeAsync(SettingsNoticeSeverity severity, string message)
     {
@@ -901,7 +1210,10 @@ public sealed partial class VisualStylesPage : Page
         strip.ShowSaveButton = false;
         strip.ShowActionButton = false;
 
-        if (severity == SettingsNoticeSeverity.Success)
+        if (strip.IsVisuallyOpen)
+            NoticeViewportMirrorService.ClosePinnedSourcePreservingScroll(strip);
+
+        if (NoticePresentationPolicy.IsInformationalMirrorOnly(severity, showSave: false, showAction: false))
             strip.Visibility = Visibility.Collapsed;
         else
             strip.Visibility = Visibility.Visible;
@@ -916,5 +1228,58 @@ public sealed partial class VisualStylesPage : Page
             ShowAction = false,
             Animate = true
         }).ConfigureAwait(true);
+    }
+
+    private async Task ShowRebootNoticeAsync(string message, string buttonText)
+    {
+        var stack = PageShell.PageNoticeStack;
+        var strip = stack.ActionNotice;
+
+        if (_rebootActionHandler is not null)
+            strip.ActionRequested -= _rebootActionHandler;
+
+        strip.AllowDismiss = true;
+        strip.ShowSaveButton = false;
+        strip.ShowActionButton = true;
+        strip.ActionButtonText = buttonText;
+
+        if (strip.IsVisuallyOpen)
+            NoticeViewportMirrorService.ClosePinnedSourcePreservingScroll(strip);
+
+        strip.Visibility = Visibility.Visible;
+
+        _rebootActionHandler = (_, _) =>
+        {
+            _ = RebootSystemAsync();
+        };
+        strip.ActionRequested += _rebootActionHandler;
+
+        var host = SettingsNoticeCoordinator.CreateShellHost(stack, PageShell.PageScrollViewer);
+        await SettingsNoticeCoordinator.PresentAsync(host, new SettingsNoticeCoordinator.NoticePresentRequest
+        {
+            Strip = strip,
+            Severity = SettingsNoticeSeverity.Warning,
+            Message = message,
+            ShowSave = false,
+            ShowAction = true,
+            ActionButtonText = buttonText,
+            Animate = true
+        }).ConfigureAwait(true);
+    }
+
+    private static async Task RebootSystemAsync()
+    {
+        await Task.Run(() =>
+        {
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = "shutdown",
+                Arguments = "/r /t 0 /d p:0:0",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            };
+            process.Start();
+        }).ConfigureAwait(false);
     }
 }

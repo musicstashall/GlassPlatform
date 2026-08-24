@@ -1,71 +1,123 @@
 namespace GlassSettings.Services;
 
 /// <summary>
-/// Безопасное удаление тем: системные — запрет; user .theme — файл;
-/// полный pack только если все ресурсы вне SystemRoot/ProgramFiles, в пакете темы и msstyles refcount==1.
+/// Удаление тем: стоковые aero/aerolite в Resources\Themes — запрет;
+/// всё остальное (в т.ч. Custom.theme и кастом в Resources\Themes) — .theme,
+/// и папка .msstyles если библиотека больше никому не нужна.
 /// </summary>
 public static class ThemeDeleteService
 {
+    public enum ThemeDeleteKind
+    {
+        ThemeFileOnly,
+        FullLibrary
+    }
+
+    public sealed record ThemeDeletePlan(
+        string ThemeFilePath,
+        string DisplayName,
+        ThemeDeleteKind Kind,
+        string? MsstylesPath);
+
     public sealed record DeleteResult(bool Success, string? ErrorDetail);
 
-    public static bool CanDelete(VisualStyleThemeEntry entry)
+    public static bool CanDelete(VisualStyleThemeEntry entry) =>
+        TryCreatePlan(entry) is not null;
+
+    public static ThemeDeletePlan? TryCreatePlan(VisualStyleThemeEntry entry)
     {
         if (entry is null || string.IsNullOrWhiteSpace(entry.ThemeFilePath))
-            return false;
+            return null;
 
-        string fullPath;
+        string themePath;
         try
         {
-            fullPath = Path.GetFullPath(entry.ThemeFilePath);
+            themePath = Path.GetFullPath(entry.ThemeFilePath);
         }
         catch
         {
+            return null;
+        }
+
+        if (!File.Exists(themePath))
+            return null;
+
+        var displayName = entry.DisplayName ?? string.Empty;
+        var visualStylePath = entry.VisualStylePath;
+        if (string.IsNullOrWhiteSpace(visualStylePath))
+            VisualStyleCatalog.TryReadVisualStylePath(themePath, out visualStylePath);
+
+        // Только стоковые aero/aerolite в Resources\Themes. Custom.theme и кастомные
+        // .theme в том же каталоге — не системные (как до регрессии IsSystemThemeFile).
+        if (IsStockSystemTheme(themePath, visualStylePath))
+            return null;
+
+        var msstyles = TryResolveMsstylesPath(themePath, visualStylePath);
+        if (string.IsNullOrWhiteSpace(msstyles)
+            || !File.Exists(msstyles)
+            || VisualStyleCatalog.IsDefaultVisualStylePath(msstyles)
+            || IsProgramFilesPath(msstyles))
+        {
+            return new ThemeDeletePlan(themePath, displayName, ThemeDeleteKind.ThemeFileOnly, null);
+        }
+
+        var libraryDir = Path.GetDirectoryName(msstyles);
+        if (string.IsNullOrWhiteSpace(libraryDir) || IsSystemLibraryFolder(libraryDir))
+            return new ThemeDeletePlan(themePath, displayName, ThemeDeleteKind.ThemeFileOnly, null);
+
+        if (CountMsstylesReferences(msstyles) != 1)
+            return new ThemeDeletePlan(themePath, displayName, ThemeDeleteKind.ThemeFileOnly, null);
+
+        return new ThemeDeletePlan(themePath, displayName, ThemeDeleteKind.FullLibrary, msstyles);
+    }
+
+    /// <summary>
+    /// FullLibrary трогает .msstyles, который сейчас загружен (текущий .theme или Path текущей темы).
+    /// </summary>
+    public static bool IsActiveLibrary(ThemeDeletePlan plan)
+    {
+        if (plan is null || plan.Kind != ThemeDeleteKind.FullLibrary)
+            return false;
+        if (string.IsNullOrWhiteSpace(plan.MsstylesPath))
+            return false;
+
+        if (!VisualStyleThemeManager.TryGetCurrentThemeFilePath(out var currentTheme)
+            || string.IsNullOrWhiteSpace(currentTheme))
+        {
             return false;
         }
 
-        if (!File.Exists(fullPath))
-            return false;
+        try
+        {
+            if (PathsEqual(currentTheme, plan.ThemeFilePath))
+                return true;
+        }
+        catch
+        {
+            /* ignore */
+        }
 
-        // Системные (%SystemRoot%\Resources\Themes) и Custom.theme — нельзя.
-        if (IsUnderSystemThemes(fullPath))
-            return false;
-
-        if (UserThemeCatalog.IsPersonalizedThemeFile(fullPath))
-            return false;
-
-        // Любая именованная тема в user Themes (в т.ч. юникодное имя файла).
-        return UserThemeCatalog.IsUserThemePath(fullPath);
+        var currentMsstyles = TryResolveMsstylesPath(currentTheme, visualStylePath: null);
+        return !string.IsNullOrWhiteSpace(currentMsstyles)
+            && PathsEqual(currentMsstyles, plan.MsstylesPath);
     }
 
-    public static DeleteResult Delete(VisualStyleThemeEntry entry)
+    public static DeleteResult Execute(ThemeDeletePlan plan)
     {
-        if (!CanDelete(entry))
+        if (plan is null || string.IsNullOrWhiteSpace(plan.ThemeFilePath))
             return new DeleteResult(false, "not allowed");
 
         try
         {
-            var themePath = Path.GetFullPath(entry.ThemeFilePath);
-            var packageRoot = Path.GetDirectoryName(themePath);
-            if (string.IsNullOrWhiteSpace(packageRoot))
-                return new DeleteResult(false, "no directory");
+            if (!File.Exists(plan.ThemeFilePath))
+                return new DeleteResult(false, "not allowed");
 
-            var resourcePaths = CollectOwnedResourcePaths(themePath, packageRoot);
-            File.Delete(themePath);
+            File.Delete(plan.ThemeFilePath);
 
-            if (resourcePaths.Count > 0)
+            if (plan.Kind == ThemeDeleteKind.FullLibrary
+                && !string.IsNullOrWhiteSpace(plan.MsstylesPath))
             {
-                foreach (var path in resourcePaths)
-                {
-                    try
-                    {
-                        if (File.Exists(path))
-                            File.Delete(path);
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"GlassSettings ThemeDeleteService resource: {ex}");
-                    }
-                }
+                TryDeleteLibrary(plan.MsstylesPath);
             }
 
             return new DeleteResult(true, null);
@@ -76,51 +128,85 @@ public static class ThemeDeleteService
         }
     }
 
-    /// <summary>
-    /// Ресурсы для полного удаления: только вне защищённых корней, внутри packageRoot,
-    /// и для .msstyles — единственная ссылка среди system+user Themes.
-    /// </summary>
-    private static List<string> CollectOwnedResourcePaths(string themePath, string packageRoot)
+    private static string? TryResolveMsstylesPath(string themePath, string? visualStylePath)
     {
-        var result = new List<string>();
-        if (!VisualStyleCatalog.TryReadVisualStylePath(themePath, out var msstylesRaw)
-            || string.IsNullOrWhiteSpace(msstylesRaw))
+        var raw = visualStylePath;
+        if (string.IsNullOrWhiteSpace(raw))
         {
-            return result;
+            if (!VisualStyleCatalog.TryReadVisualStylePath(themePath, out raw)
+                || string.IsNullOrWhiteSpace(raw))
+            {
+                return null;
+            }
         }
 
-        var msstyles = VisualStyleCatalog.NormalizeResourcePath(msstylesRaw, themePath);
-        if (string.IsNullOrWhiteSpace(msstyles) || !File.Exists(msstyles))
-            return result;
-
-        if (IsProtectedPath(msstyles))
-            return result;
-
-        if (!IsUnderDirectory(msstyles, packageRoot))
-            return result;
-
-        if (CountMsstylesReferences(msstyles) != 1)
-            return result;
-
-        result.Add(Path.GetFullPath(msstyles));
-
-        foreach (var resource in EnumerateThemeResourcePaths(themePath))
+        try
         {
-            if (IsProtectedPath(resource))
-                continue;
-
-            if (!IsUnderDirectory(resource, packageRoot))
-                continue;
-
-            if (!File.Exists(resource))
-                continue;
-
-            var full = Path.GetFullPath(resource);
-            if (!result.Contains(full, StringComparer.OrdinalIgnoreCase))
-                result.Add(full);
+            var normalized = VisualStyleCatalog.NormalizeResourcePath(raw, themePath);
+            return string.IsNullOrWhiteSpace(normalized) ? null : Path.GetFullPath(normalized);
         }
+        catch
+        {
+            return null;
+        }
+    }
 
-        return result;
+    private static void TryDeleteLibrary(string msstylesPath)
+    {
+        try
+        {
+            var full = Path.GetFullPath(msstylesPath);
+            var dir = Path.GetDirectoryName(full);
+            if (string.IsNullOrWhiteSpace(dir))
+                return;
+
+            if (IsProgramFilesPath(full) || IsSystemLibraryFolder(dir))
+                return;
+
+            // .msstyles в корне каталога тем — только файл, не весь Themes.
+            if (IsThemeCatalogRoot(dir))
+            {
+                if (File.Exists(full))
+                    File.Delete(full);
+                return;
+            }
+
+            // Соседние .msstyles ещё нужны другим .theme — не трогать pack, только эту библиотеку.
+            if (FolderHasOtherReferencedMsstyles(dir, full))
+            {
+                if (File.Exists(full))
+                    File.Delete(full);
+                return;
+            }
+
+            if (Directory.Exists(dir))
+                Directory.Delete(dir, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"GlassSettings ThemeDeleteService library: {ex}");
+        }
+    }
+
+    private static bool FolderHasOtherReferencedMsstyles(string directory, string msstylesPath)
+    {
+        try
+        {
+            var target = Path.GetFullPath(msstylesPath);
+            foreach (var file in Directory.EnumerateFiles(directory, "*.msstyles", SearchOption.AllDirectories))
+            {
+                if (string.Equals(Path.GetFullPath(file), target, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (CountMsstylesReferences(file) > 0)
+                    return true;
+            }
+
+            return false;
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     private static int CountMsstylesReferences(string msstylesPath)
@@ -186,76 +272,46 @@ public static class ThemeDeleteService
             yield return user;
     }
 
-    private static IEnumerable<string> EnumerateThemeResourcePaths(string themeFilePath)
-    {
-        string? currentSection = null;
-        foreach (var raw in ThemeFileLineReader.ReadLines(themeFilePath))
-        {
-            var line = raw.Trim();
-            if (line.Length == 0 || line[0] == ';')
-                continue;
-
-            if (line.StartsWith('[') && line.EndsWith(']'))
-            {
-                currentSection = line[1..^1].Trim();
-                continue;
-            }
-
-            if (currentSection is null)
-                continue;
-
-            // Секции с файловыми путями.
-            if (!IsResourceSection(currentSection))
-                continue;
-
-            var separator = line.IndexOf('=');
-            if (separator <= 0)
-                continue;
-
-            var value = line[(separator + 1)..].Trim().Trim('"');
-            if (string.IsNullOrWhiteSpace(value))
-                continue;
-
-            if (value.StartsWith("@", StringComparison.Ordinal))
-                continue;
-
-            var path = VisualStyleCatalog.NormalizeResourcePath(value, themeFilePath);
-            if (!string.IsNullOrWhiteSpace(path))
-                yield return path;
-        }
-    }
-
-    private static bool IsResourceSection(string section) =>
-        section.Equals("Control Panel\\Desktop", StringComparison.OrdinalIgnoreCase)
-        || section.Equals("Slideshow", StringComparison.OrdinalIgnoreCase)
-        || section.Equals("Sounds", StringComparison.OrdinalIgnoreCase)
-        || section.Equals("Cursors", StringComparison.OrdinalIgnoreCase)
-        || section.Equals("Boot", StringComparison.OrdinalIgnoreCase)
-        || section.Equals("Theme", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsUnderSystemThemes(string themeFilePath)
+    /// <summary>
+    /// Стоковая тема Windows: файл в Resources\Themes и [VisualStyles] Path = aero/aerolite.
+    /// </summary>
+    private static bool IsStockSystemTheme(string themeFilePath, string? visualStylePath)
     {
         var system = VisualStyleCatalog.SystemThemesDirectory;
-        return !string.IsNullOrWhiteSpace(system) && IsUnderDirectory(themeFilePath, system);
+        if (string.IsNullOrWhiteSpace(system) || !IsUnderDirectory(themeFilePath, system))
+            return false;
+
+        return VisualStyleCatalog.IsDefaultVisualStylePath(visualStylePath ?? string.Empty);
     }
 
-    private static bool IsUnderUserThemes(string themeFilePath)
+    private static bool IsThemeCatalogRoot(string directory)
     {
+        var system = VisualStyleCatalog.SystemThemesDirectory;
+        if (!string.IsNullOrWhiteSpace(system) && PathsEqual(directory, system))
+            return true;
+
         var user = UserThemeCatalog.UserThemesDirectory;
-        return !string.IsNullOrWhiteSpace(user) && IsUnderDirectory(themeFilePath, user);
+        return !string.IsNullOrWhiteSpace(user) && PathsEqual(directory, user);
     }
 
-    private static bool IsProtectedPath(string path)
+    private static bool IsSystemLibraryFolder(string directory)
+    {
+        var system = VisualStyleCatalog.SystemThemesDirectory;
+        if (string.IsNullOrWhiteSpace(system))
+            return false;
+
+        return PathsEqual(directory, Path.Combine(system, "Aero"))
+            || PathsEqual(directory, Path.Combine(system, "AeroLite"));
+    }
+
+    private static bool IsProgramFilesPath(string path)
     {
         try
         {
             var full = Path.GetFullPath(path);
-            var systemRoot = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
             var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
 
-            if (!string.IsNullOrWhiteSpace(systemRoot) && IsUnderDirectory(full, systemRoot))
-                return true;
             if (!string.IsNullOrWhiteSpace(programFiles) && IsUnderDirectory(full, programFiles))
                 return true;
             if (!string.IsNullOrWhiteSpace(programFilesX86) && IsUnderDirectory(full, programFilesX86))
@@ -267,6 +323,18 @@ public static class ThemeDeleteService
         }
 
         return false;
+    }
+
+    private static bool PathsEqual(string left, string right)
+    {
+        try
+        {
+            return string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool IsUnderDirectory(string path, string root)

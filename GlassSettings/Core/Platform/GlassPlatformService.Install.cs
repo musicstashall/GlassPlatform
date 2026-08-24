@@ -73,7 +73,7 @@ public static partial class GlassPlatformService
     }
 
     /// <summary>
-    /// Перезаписать /TR задачи текущим Resolve (корень GS x86 ≠ чужой Sys32 от прошлой установки).
+    /// Перезаписать /TR задачи текущим Resolve (корень GS / InstallPath x86).
     /// </summary>
     public static bool TrySyncAutorunTaskActionPath(GlassPlatformArch arch)
     {

@@ -90,26 +90,10 @@ namespace Shared::Log
             Instance().LogLine(text, level);
         }
 
+        // Явная остановка с GUI / watcher-потока: дождаться воркера.
         void Stop()
         {
-#if defined(_DEBUG) && defined(GLASS_ENABLE_LOGGING)
-            // Необратимая остановка: после Stop() новый воркер-поток не создаётся никогда.
-            // Это предотвращает перезапуск потока через EnsureWorkerStarted() из DebugLog-вызовов,
-            // которые могут поступать из других модулей уже после Engine::Shutdown().
-            m_stopped.store(true, std::memory_order_release);
-
-            bool expected = true;
-            if (!m_running.compare_exchange_strong(expected, false))
-                return;
-
-            // Разбудить worker, если он ждёт
-            m_queueCv.notify_all();
-
-            if (m_worker.joinable())
-                m_worker.join();
-
-            ClosePipe();
-#endif
+            StopImpl(/*joinWorker*/ true);
         }
 
     private:
@@ -121,7 +105,33 @@ namespace Shared::Log
 
         ~GlassLogClient()
         {
-            Stop();
+            // join() из деструктора / CRT teardown / DllMain DETACH даёт deadlock
+            // или std::terminate → abort()-диалог Debug CRT при reboot.
+            StopImpl(/*joinWorker*/ false);
+        }
+
+        void StopImpl(bool joinWorker)
+        {
+#if defined(_DEBUG) && defined(GLASS_ENABLE_LOGGING)
+            m_stopped.store(true, std::memory_order_release);
+
+            bool expected = true;
+            if (m_running.compare_exchange_strong(expected, false))
+                m_queueCv.notify_all();
+
+            if (m_worker.joinable())
+            {
+                if (joinWorker)
+                    m_worker.join();
+                else
+                    m_worker.detach();
+            }
+
+            if (joinWorker)
+                ClosePipe();
+#else
+            (void)joinWorker;
+#endif
         }
 
         struct PendingItem

@@ -30,20 +30,6 @@ namespace GlassShared::GlassModulePath
                 return {};
             return path.substr(0, slash);
         }
-
-        [[nodiscard]] std::wstring BaseName(std::wstring path) noexcept
-        {
-            path = TrimTrailingSlashes(std::move(path));
-            const size_t slash = path.find_last_of(L"\\/");
-            if (slash == std::wstring::npos)
-                return path;
-            return path.substr(slash + 1);
-        }
-
-        [[nodiscard]] bool EqualsIgnoreCase(const std::wstring& a, const wchar_t* b) noexcept
-        {
-            return ::_wcsicmp(a.c_str(), b) == 0;
-        }
     }
 
     bool IsOs64Bit() noexcept
@@ -70,10 +56,6 @@ namespace GlassShared::GlassModulePath
         else
             path = TrimTrailingSlashes(std::move(path));
 
-        const std::wstring leaf = BaseName(path);
-        if (EqualsIgnoreCase(leaf, L"Sys64") || EqualsIgnoreCase(leaf, L"Sys32"))
-            path = ParentDirectory(std::move(path));
-
         return TrimTrailingSlashes(std::move(path));
     }
 
@@ -89,7 +71,7 @@ namespace GlassShared::GlassModulePath
     std::wstring ResolveGlassModulePath(
         const wchar_t* installRoot,
         const wchar_t* fileName,
-        ModuleArch targetArch) noexcept
+        ModuleArch /*targetArch*/) noexcept
     {
         if (!installRoot || !*installRoot || !fileName || !*fileName)
             return {};
@@ -98,39 +80,6 @@ namespace GlassShared::GlassModulePath
         if (root.empty())
             return {};
 
-        const bool os64 = IsOs64Bit();
-        const bool want64 = targetArch == ModuleArch::X64;
-
-        if (os64)
-        {
-            if (want64)
-            {
-                const std::wstring sys64 = root + L"\\Sys64\\" + fileName;
-                if (FileExists(sys64))
-                    return sys64;
-                const std::wstring atRoot = root + L"\\" + fileName;
-                if (FileExists(atRoot))
-                    return atRoot;
-                return {};
-            }
-
-            // OS x64 + цель x86:
-            // — процесс x64 (GS x64): только Sys32 (не брать x64-DLL из корня);
-            // — процесс x86/WOW64 (GS x86, инжект): Sys32 затем корень своего installRoot.
-            const std::wstring sys32 = root + L"\\Sys32\\" + fileName;
-            if (FileExists(sys32))
-                return sys32;
-#ifdef _WIN64
-            return {};
-#else
-            const std::wstring atRoot = root + L"\\" + fileName;
-            return FileExists(atRoot) ? atRoot : std::wstring{};
-#endif
-        }
-
-        const std::wstring sys32 = root + L"\\Sys32\\" + fileName;
-        if (FileExists(sys32))
-            return sys32;
         const std::wstring atRoot = root + L"\\" + fileName;
         return FileExists(atRoot) ? atRoot : std::wstring{};
     }
@@ -143,6 +92,18 @@ namespace GlassShared::GlassModulePath
         const std::wstring root = GetInstallRootFromModule(hModule);
         if (root.empty())
             return {};
-        return ResolveGlassModulePath(root.c_str(), fileName, targetArch);
+
+        // Искать рядом с модулем
+        auto result = ResolveGlassModulePath(root.c_str(), fileName, targetArch);
+        if (!result.empty())
+            return result;
+
+        // Fallback: родительская папка
+        // (GlassSettings в Build\x64\Debug\GlassSettings\, платформа в Build\x64\Debug\)
+        const auto parent = ParentDirectory(root);
+        if (!parent.empty())
+            return ResolveGlassModulePath(parent.c_str(), fileName, targetArch);
+
+        return {};
     }
 }

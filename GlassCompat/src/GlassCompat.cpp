@@ -11,6 +11,7 @@
 #include <thread>
 #include <chrono>
 #include <cstdio>
+#include <cstdarg>
 
 #include <DebugLog.h>
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
@@ -173,6 +174,68 @@ namespace
         }
         CloseHandle(snap);
         return (static_cast<ULONGLONG>(seen) << 32) | static_cast<ULONGLONG>(posted);
+    }
+
+    struct SyncNullPumpCtx final
+    {
+        DWORD pid;
+        ULONG windows;
+        ULONG sentOk;
+    };
+
+    BOOL CALLBACK PumpWindowSyncNullProc(HWND hwnd, LPARAM lp) noexcept
+    {
+        auto* ctx = reinterpret_cast<SyncNullPumpCtx*>(lp);
+        DWORD wndPid = 0;
+        (void)GetWindowThreadProcessId(hwnd, &wndPid);
+        if (wndPid != ctx->pid)
+            return TRUE;
+
+        ++ctx->windows;
+        DWORD_PTR result = 0;
+        if (SendMessageTimeoutW(
+                hwnd,
+                WM_NULL,
+                0,
+                0,
+                SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                200,
+                &result) != 0)
+        {
+            ++ctx->sentOk;
+        }
+        return TRUE;
+    }
+
+    // path=2 Adobe: deferred Unhook снимает WinEvent только когда UI-поток реально
+    // обработал user callback (дамп c80cbb: __ClientCallWinEventProc после FLAET).
+    [[nodiscard]] ULONGLONG PumpAllProcessWindowsSyncWmNull() noexcept
+    {
+        SyncNullPumpCtx ctx{ GetCurrentProcessId(), 0, 0 };
+        (void)EnumWindows(PumpWindowSyncNullProc, reinterpret_cast<LPARAM>(&ctx));
+        return
+            (static_cast<ULONGLONG>(ctx.windows) << 32) |
+            static_cast<ULONGLONG>(ctx.sentOk);
+    }
+
+    // H72 + path=2: inFlight==0 не значит «безопасно FLAET» — deferred Unhook/user
+    // callback (KiUserCallbackDispatcher / __ClientCallWinEventProc) может прийти позже.
+    void DrainBeforeFreeSelf() noexcept
+    {
+        constexpr int kMinRounds = 8;
+        constexpr int kMaxRounds = 24;
+        for (int i = 0; i < kMaxRounds; ++i)
+        {
+            (void)WakeAllProcessThreadsWmNull();
+            (void)WakeWinEventCallbackThreads();
+            (void)PumpAllProcessWindowsSyncWmNull();
+            SleepEx(50, TRUE);
+            if (i + 1 >= kMinRounds
+                && g_winEventCallbacksInFlight.load(std::memory_order_acquire) == 0)
+            {
+                break;
+            }
+        }
     }
 
     // IXDE делает LoadLibrary(TAP), не CoLoadLibrary — CoFreeUnusedLibraries не снимает pin.
@@ -1544,7 +1607,6 @@ namespace
 
     void DoInitialize(HMODULE hSelf)
     {
-
         DebugLog(std::format(
             L"[GlassCompat][Core] DoInitialize: BEGIN (hSelf=0x{:X})",
             reinterpret_cast<uintptr_t>(hSelf)
@@ -1558,6 +1620,14 @@ namespace
 
         std::wstring dir = GetModuleDirectory(hSelf);
         std::wstring processName = GetProcessNameLower();
+        ProcessBlockList::Initialize();
+        if (ProcessBlockList::IsBlocked(processName))
+        {
+            DebugLog(
+                DBG_IMPORTANT,
+                L"[GlassCompat][Core] DoInitialize: blocked process — skip peer modules");
+            return;
+        }
         const std::wstring corePath = ResolvePeerDllPath(hSelf, L"GlassCore.dll");
         const std::wstring wndPath = ResolvePeerDllPath(hSelf, L"WndCompat.dll");
         DebugLog(std::format(L"[GlassCompat][Core] Process name: {}", processName).c_str());
@@ -1873,10 +1943,12 @@ namespace
         HMODULE hSelfRef,
         ULONGLONG path) noexcept
     {
+        (void)path;
         (void)Shared::InjectProcessMap::TryClearPid(GetCurrentProcessId());
 
-        // H69: path=1 — без DispatchMessage (explorer). H72: короткий wake callback-потоков
-        // уже сделан в GlassGuiThread до вызова; здесь только FLAET.
+        // H69: без DispatchMessage (explorer). H72: wake callback-потоков в GUI до вызова;
+        // здесь последний барьер — in-flight WinEventProc после deferred Unhook.
+        // path=1 раньше сразу шёл в FLAET → AV в <Unloaded_GlassCompat> (ShellHost/Adobe, 18.08).
         // Remote LoadLibrary (SEH/SMEH/ShellHost): pin LoadLibrary + pin GetModuleHandleEx — после Unhook
         // нужен лишний FreeLibrary, иначе модуль остаётся (скриншот InjectMap).
         const bool hadRemotePin =
@@ -1884,24 +1956,14 @@ namespace
         if (hadRemotePin && hSelfRef)
             (void)FreeLibrary(hSelfRef);
 
-        if (path == 1)
-            FreeLibraryAndExitThread(hSelfRef, 0);
+        DrainBeforeFreeSelf();
 
-        // path=2/3: короткий Post+Sleep (без DispatchMessage).
-        for (int i = 0; i < 16; ++i)
-        {
-            if (g_winEventCallbacksInFlight.load(std::memory_order_acquire) == 0)
-                break;
-            (void)WakeWinEventCallbackThreads();
-            Sleep(10);
-        }
 
-        (void)WakeWinEventCallbackThreads();
         FreeLibraryAndExitThread(hSelfRef, 0);
     }
 
     // H54: SEH GUI игнорирует WM_QUIT/Stop (лог: host_post posted:true, нет loop_exit).
-    // Отдельный waiter на Stop → force ExecuteShutdown + TerminateThread(GUI) + FreeSelf.
+    // Отдельный waiter на Stop → force ExecuteShutdown; GUI сам FreeSelf. Без TerminateThread.
     void StartCwUnloadWatcher() noexcept;
 
     DWORD WINAPI GlassGuiThreadProc(LPVOID)
@@ -2772,9 +2834,9 @@ namespace
                         (void)PostThreadMessageW(g_guiThreadId, WM_QUIT, 0, 0);
 
                     // H54: SEH теперь видит Stop (wake:stop) и доходит до ExecuteShutdown,
-                    // но FreeSelf ещё ждёт HostShutdown+H72 (~секунды). Ранний force
-                    // TerminateThread+FreeSelf гоняется с GUI → stillLoaded (лог 65453→65455).
-                    // Если shutdown уже начат — только ждём complete, без TerminateThread.
+                    // но FreeSelf ещё ждёт HostShutdown+H72 (~секунды). Watcher не
+                    // TerminateThread(GUI) и не FLAET, пока GUI жив — иначе AV в
+                    // <Unloaded_GlassCompat> (ShellHost dump 18.08).
                     const bool shutdownAlready =
                         g_shutdownStarted.load(std::memory_order_acquire)
                         || g_shutdownComplete.load(std::memory_order_acquire);
@@ -2828,20 +2890,44 @@ namespace
                         CloseHandle(hHs);
                     }
 
-                    // GUI pin (GetModuleHandleEx) иначе удерживает DLL после FLAET watcher.
                     const DWORD guiTid = g_guiThreadId;
                     if (guiTid != 0)
                     {
+                        (void)PostThreadMessageW(guiTid, WM_QUIT, 0, 0);
+                        (void)WakeAllProcessThreadsWmNull();
+                        (void)WakeWinEventCallbackThreads();
                         if (HANDLE hGui = OpenThread(
-                                THREAD_TERMINATE | THREAD_QUERY_INFORMATION, FALSE, guiTid))
+                                THREAD_QUERY_INFORMATION | SYNCHRONIZE, FALSE, guiTid))
                         {
-                            DWORD ec = 0;
-                            if (GetExitCodeThread(hGui, &ec) && ec == STILL_ACTIVE)
-                                (void)TerminateThread(hGui, 0);
+                            for (int i = 0; i < 40; ++i)
+                            {
+                                DWORD ec = 0;
+                                if (!GetExitCodeThread(hGui, &ec) || ec != STILL_ACTIVE)
+                                    break;
+                                if (g_shutdownComplete.load(std::memory_order_acquire)
+                                    || GetModuleHandleW(L"GlassCompat.dll") == nullptr)
+                                    break;
+                                (void)PostThreadMessageW(guiTid, WM_QUIT, 0, 0);
+                                (void)WakeWinEventCallbackThreads();
+                                Sleep(50);
+                            }
                             CloseHandle(hGui);
                         }
-                        // Снять pin зависшего GlassGuiThread (refcount, не lifetime потока).
-                        (void)FreeLibrary(hPin);
+                    }
+
+                    // GUI сам path=1 FreeSelf, либо ещё жив — FLAET из watcher запрещён.
+                    if (g_shutdownComplete.load(std::memory_order_acquire)
+                        || GetModuleHandleW(L"GlassCompat.dll") == nullptr
+                        || GlassCompat_GuiThreadId != 0)
+                    {
+                        DebugLog(
+                            DBG_IMPORTANT,
+                            L"[GlassCompat][CW] watcher skip FreeSelf (complete=%d loaded=%d guiTid=%u)",
+                            g_shutdownComplete.load(std::memory_order_acquire) ? 1 : 0,
+                            GetModuleHandleW(L"GlassCompat.dll") ? 1 : 0,
+                            static_cast<unsigned>(GlassCompat_GuiThreadId));
+                        FreeLibrary(hPin);
+                        return 0;
                     }
 
                     g_shutdownComplete.store(true, std::memory_order_release);
@@ -2866,6 +2952,19 @@ namespace
 
     // INCONTEXT грузит DLL даже в Forbidden/BlockList процессы без GlassGuiThread.
     // Без явного pin+Stop-watcher OS-pin часто остаётся (Taskmgr: mode=0, 7k WinEvent без FreeSelf).
+    void LogMinimalUnload(const wchar_t* fmt, ...) noexcept
+    {
+        wchar_t buf[384]{};
+        va_list args;
+        va_start(args, fmt);
+        _vsnwprintf_s(buf, _TRUNCATE, fmt, args);
+        va_end(args);
+        OutputDebugStringW(buf);
+        OutputDebugStringW(L"\n");
+        // Без DebugLog: иначе path=2 поднимает pipe-воркер в BlockList-процессах
+        // (msedgewebview2/taskhostw), и при reboot joinable std::thread даёт abort().
+    }
+
     struct MinimalUnloadPack
     {
         HMODULE module{};
@@ -2909,6 +3008,13 @@ namespace
                     const HMODULE hMod = p->module;
                     const ULONGLONG watcherPath = p->path;
                     delete p;
+
+                    const std::wstring exe = GetProcessNameLower();
+                    LogMinimalUnload(
+                        L"[GlassCompat][MinimalUnload] start pid=%u exe=%s path=%llu",
+                        GetCurrentProcessId(),
+                        exe.c_str(),
+                        watcherPath);
 
                     HANDLE hStop = OpenEventW(SYNCHRONIZE, FALSE, kStopEventName);
                     HANDLE hUnload = Shared::InjectProcessMap::CreateUnloadRequestEvent(nullptr);
@@ -2959,6 +3065,20 @@ namespace
                             (void)ReleaseMutex(hHostAlive);
                         }
 
+                        const wchar_t* trigger = L"stop";
+                        if (wr == WAIT_FAILED)
+                            trigger = L"wait_failed";
+                        else if (hostDead)
+                            trigger = L"hostAlive";
+                        else if (fromUnload)
+                            trigger = L"unload";
+                        LogMinimalUnload(
+                            L"[GlassCompat][MinimalUnload] wake trigger=%s hostDead=%d fromUnload=%d wr=0x%08X",
+                            trigger,
+                            hostDead ? 1 : 0,
+                            fromUnload ? 1 : 0,
+                            wr);
+
                         if (hStop)
                             CloseHandle(hStop);
                         if (hUnload)
@@ -2981,27 +3101,30 @@ namespace
                             {
                                 (void)ReleaseMutex(hHostAlive);
                             }
+                            LogMinimalUnload(
+                                L"[GlassCompat][MinimalUnload] HostShutdown wait result=0x%08X",
+                                sr);
+                        }
+                        else
+                        {
+                            LogMinimalUnload(
+                                L"[GlassCompat][MinimalUnload] HostShutdown wait skipped hostDead=%d fromUnload=%d hasEvent=%d",
+                                hostDead ? 1 : 0,
+                                fromUnload ? 1 : 0,
+                                hHostShutdown ? 1 : 0);
                         }
 
-                        MSG msg{};
-                        for (int i = 0; i < 32; ++i)
-                        {
-                            const DWORD r = MsgWaitForMultipleObjects(0, nullptr, FALSE, 50, QS_ALLINPUT);
-                            int pumped = 0;
-                            while (pumped < 32 && PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
-                            {
-                                ++pumped;
-                                TranslateMessage(&msg);
-                                DispatchMessageW(&msg);
-                            }
-                            if (r == WAIT_TIMEOUT)
-                                break;
-                        }
+                        (void)WakeWinEventCallbackThreads();
+                        DrainBeforeFreeSelf();
                     }
                     else
                     {
+                        LogMinimalUnload(
+                            L"[GlassCompat][MinimalUnload] fallback PID poll (no Stop/Unload/HostAlive handles)");
                         while (ReadHostPid() != 0)
                             Sleep(500);
+                        LogMinimalUnload(
+                            L"[GlassCompat][MinimalUnload] wake trigger=pid_gone");
                     }
                     if (hHostShutdown)
                         CloseHandle(hHostShutdown);
@@ -3011,6 +3134,10 @@ namespace
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
                     Shared::Log::GlassLogClient::Instance().Stop();
 #endif
+                    LogMinimalUnload(
+                        L"[GlassCompat][MinimalUnload] FreeSelf path=%llu pid=%u",
+                        watcherPath,
+                        GetCurrentProcessId());
                     FreeSelfAndExitThread(hMod, watcherPath);
                 },
                 pack,
@@ -3081,12 +3208,26 @@ namespace GlassCompat
         bool expected = false;
         if (!g_initialized.compare_exchange_strong(expected, true))
         {
+            ProcessBlockList::Initialize();
+            const bool blocked = ProcessBlockList::IsBlocked(GetProcessNameLower());
+            if (blocked)
+                return false;
             // Уже пытались: Forbidden держит g_initialized=true без GUI (без retry-спама).
             return g_mode != Shared::InjectionMode::Forbidden;
         }
 
         g_hSelf = hSelf ? hSelf : GetModuleHandleW(L"GlassCompat.dll");
         g_mode = ReadModeFromRegistry();
+
+        ProcessBlockList::Initialize();
+        if (ProcessBlockList::IsBlocked(GetProcessNameLower()))
+        {
+            DebugLog(
+                DBG_IMPORTANT,
+                L"[GlassCompat][Core] Initialize: process BLOCKLISTED — minimal watcher only");
+            StartMinimalUnloadWatcher(2);
+            return false;
+        }
 
         if (g_mode == Shared::InjectionMode::Forbidden)
         {
@@ -3101,6 +3242,9 @@ namespace GlassCompat
             L"[GlassCompat][Core] Initialize: BEGIN (hSelf=0x{:X})",
             reinterpret_cast<uintptr_t>(g_hSelf)
         ).c_str());
+
+        // Normal path=1: UEF/VEH только здесь. BlockList не вызывает Initialize.
+        GlassCompat::InstallProcessCrashGuard();
 
         StartGuiThreadIfNeeded();
 
@@ -3142,7 +3286,6 @@ __declspec(dllexport) BOOL WINAPI GlassCompat_Initialize(HMODULE hModule)
 extern "C"
 __declspec(dllexport) DWORD WINAPI GlassCompat_RemoteBootstrap(LPVOID)
 {
-
     g_remoteLoadLibraryPin.store(true, std::memory_order_release);
 
     HMODULE hSelf = nullptr;
@@ -3309,8 +3452,6 @@ void CALLBACK GlassCompat_WinEventProc(
         return WinEventInjectKind::Normal;
     }();
 
-    static std::atomic<bool> s_injectKindLogged{ false };
-
     if (s_injectKind == WinEventInjectKind::HostProcess ||
         s_injectKind == WinEventInjectKind::ShortLivedAgent)
     {
@@ -3368,7 +3509,15 @@ void CALLBACK GlassCompat_WinEventProc(
     }
 
     // Однократная инициализация в целевом процессе
-    GlassCompat::Initialize(nullptr);
+    ProcessBlockList::Initialize();
+    if (ProcessBlockList::IsBlocked(GetProcessNameLower()))
+    {
+        StartMinimalUnloadWatcher(2);
+        return;
+    }
+
+    if (!GlassCompat::Initialize(nullptr))
+        return;
 
     // DoInitialize ещё не завершён: GlassCore/WndCompat/провайдеры не готовы.
     // Если делегировать сейчас, субкласс встанет, но GetMenuEventProvider() → nullptr

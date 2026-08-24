@@ -793,28 +793,25 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
         var inUserList = exeName.Length > 0 && AttachListRegistry.Contains(exeName);
         var inForbiddenList = exeName.Length > 0 && BlockListRegistry.IsBlocked(exeName);
 
-        var unload = new MenuFlyoutItem
-        {
-            Text = GlassSettingsResources.Get("Runtime_Unload"),
-            IsEnabled = entry.CanRequestUnload,
-        };
-        unload.Click += (_, _) => RequestUnload(entry.Pid);
+        var unload = CreateUnloadMenuItem(
+            GlassSettingsResources.Get("Runtime_Unload"),
+            entry.CanRequestUnload,
+            entry.UnloadDisabledReason,
+            () => RequestUnload(entry.Pid));
         menu.Items.Add(unload);
 
-        var unloadAndExclude = new MenuFlyoutItem
-        {
-            Text = GlassSettingsResources.Get("Runtime_UnloadAndExclude"),
-            IsEnabled = inUserList,
-        };
-        unloadAndExclude.Click += (_, _) => UnloadAndExclude(entry);
+        var unloadAndExclude = CreateUnloadMenuItem(
+            GlassSettingsResources.Get("Runtime_UnloadAndExclude"),
+            inUserList && entry.CanRequestUnload,
+            entry.UnloadDisabledReason,
+            () => UnloadAndExclude(entry));
         menu.Items.Add(unloadAndExclude);
 
-        var unloadAndForbid = new MenuFlyoutItem
-        {
-            Text = GlassSettingsResources.Get("Runtime_UnloadAndForbid"),
-            IsEnabled = exeName.Length > 0 && !inForbiddenList,
-        };
-        unloadAndForbid.Click += (_, _) => UnloadAndForbid(entry);
+        var unloadAndForbid = CreateUnloadMenuItem(
+            GlassSettingsResources.Get("Runtime_UnloadAndForbid"),
+            exeName.Length > 0 && !inForbiddenList && entry.CanRequestUnload,
+            entry.UnloadDisabledReason,
+            () => UnloadAndForbid(entry));
         menu.Items.Add(unloadAndForbid);
 
         menu.Items.Add(new MenuFlyoutSeparator());
@@ -944,6 +941,8 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
 
         MountDiagMatrix(_liveDialog.MatrixHost, entry);
         _liveDialog.HostContext?.SetPrimaryEnabled(entry.CanRequestUnload);
+        if (_liveDialog.HostContext is not null && !entry.CanRequestUnload && entry.UnloadDisabledReason is { Length: > 0 } reason)
+            ToolTipService.SetToolTip(_liveDialog.HostContext.PrimaryButton, reason);
 
         if (_rowsByPid.TryGetValue(entry.Pid, out var row))
             ApplyEntry(row, entry, row.ContentGrid.Background is not null);
@@ -1098,6 +1097,23 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
         {
             // буфер обмена недоступен
         }
+    }
+
+    private static MenuFlyoutItem CreateUnloadMenuItem(
+        string text,
+        bool isEnabled,
+        string? disabledReason,
+        Action onClick)
+    {
+        var item = new MenuFlyoutItem
+        {
+            Text = text,
+            IsEnabled = isEnabled,
+        };
+        if (!isEnabled && disabledReason is { Length: > 0 })
+            ToolTipService.SetToolTip(item, disabledReason);
+        item.Click += (_, _) => onClick();
+        return item;
     }
 
     private static void RequestUnload(uint pid)

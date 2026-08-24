@@ -104,6 +104,9 @@ internal static class SettingsNoticeCoordinator
         public bool ShowYellow { get; init; }
         public bool ShowUpdate { get; init; }
         public string? UpdateActionText { get; init; }
+        /// <summary>Жёлтое уведомление — перезагрузка (кнопка «Перезагрузить» вместо «Сохранить»).</summary>
+        public bool IsRebootNotice { get; init; }
+        public string? RebootActionText { get; init; }
     }
 
     private sealed class NoticeEntry
@@ -172,6 +175,10 @@ internal static class SettingsNoticeCoordinator
         if (entry.State != NoticeEntryState.Visible)
             TryPromoteEntry(host, state, entry);
 
+        // Pinned (Yellow/Action/Error): новый lifecycle зеркала — как session InvalidateDismissOnMutation.
+        if (entry.PresentMode == NoticePresentMode.PinnedLayout)
+            NoticeViewportMirrorService.NotifyNewPinnedNoticeEpoch();
+
         var gen = ++state.RefreshGeneration;
         NoticeMirrorTrace.WriteCoord(
             $"Present: color={color}, severity={request.Severity}, gen={gen}, visible={state.Entries.Count(e => e.State == NoticeEntryState.Visible)}");
@@ -226,7 +233,8 @@ internal static class SettingsNoticeCoordinator
     public static async Task OnUserDismissedAsync(INoticePageHost host, SettingsUnsavedNoticeStrip strip)
     {
         var state = GetState(host.HostKey);
-        foreach (var entry in state.Entries.Where(e => ReferenceEquals(e.Strip, strip)).ToList())
+        var entriesToDismiss = state.Entries.Where(e => ReferenceEquals(e.Strip, strip)).ToList();
+        foreach (var entry in entriesToDismiss)
             entry.State = NoticeEntryState.Dismissed;
 
         state.Entries.RemoveAll(e => e.State == NoticeEntryState.Dismissed);
@@ -305,14 +313,17 @@ internal static class SettingsNoticeCoordinator
                 Color = NoticeSlotColor.Yellow,
                 Severity = SettingsNoticeSeverity.Warning,
                 Message = request.YellowMessage,
-                ShowSave = true,
-                ShowAction = false,
+                ShowSave = !request.IsRebootNotice,
+                ShowAction = request.IsRebootNotice,
+                ActionButtonText = request.IsRebootNotice ? request.RebootActionText : null,
                 AnimateOnPresent = HomeSessionNoticeState.ConsumeAnimateNextOpen(),
                 SaveEnabled = !request.SaveInProgress
             });
         }
         else
+        {
             PolicyRetractColor(state, NoticeSlotColor.Yellow, request.YellowStrip);
+        }
 
         if (request.ShowUpdate && request.UpdateMessage is not null)
         {
@@ -498,15 +509,10 @@ internal static class SettingsNoticeCoordinator
         state.Entries.RemoveAll(e => e.Color == color && ReferenceEquals(e.Strip, strip));
     }
 
-    /// <summary>На одном strip одновременно только один слот Green MirrorOnly или Yellow.</summary>
+    /// <summary>На одном strip одновременно один слот: Green MirrorOnly взаимно исключает Yellow/Action/Error.</summary>
     private static void ApplyStripSlotExclusivity(HostNoticeState state, INoticePageHost host, NoticeUpsertArgs args)
     {
-        if (args.Color == NoticeSlotColor.Yellow)
-            PolicyRetractColor(state, NoticeSlotColor.Green, args.Strip);
-
-        // Green всегда MirrorOnly — на том же strip не держать Yellow одновременно.
-        if (args.Color == NoticeSlotColor.Green)
-            PolicyRetractColor(state, NoticeSlotColor.Yellow, args.Strip);
+        state.Entries.RemoveAll(e => ReferenceEquals(e.Strip, args.Strip) && e.Color != args.Color);
     }
 
     private static void PolicyRetractStrip(HostNoticeState state, SettingsUnsavedNoticeStrip strip)

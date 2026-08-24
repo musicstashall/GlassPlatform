@@ -255,8 +255,10 @@ public sealed partial class HomeSettingsRow : UserControl, ISettingsUnsavedScope
     private void UpdateVisualState()
     {
         var navigable = CanNavigate && ShowChevron;
-        VisualStateManager.GoToState(this, navigable || !ShowChevron ? "Normal" : "Disabled", true);
         ChevronIcon.Opacity = navigable ? 1.0 : 0.4;
+        RowBorder.Opacity = navigable || !ShowChevron ? 1.0 : 0.55;
+        if (!navigable)
+            RowBorder.Background = null;
     }
 
     private void RowBorder_OnPointerPressed(object sender, PointerRoutedEventArgs e)
@@ -264,7 +266,8 @@ public sealed partial class HomeSettingsRow : UserControl, ISettingsUnsavedScope
         if (!CanNavigate || !ShowChevron || IsInteractiveSource(e.OriginalSource as DependencyObject))
             return;
         _activePointerId = e.Pointer.PointerId;
-        VisualStateManager.GoToState(this, "PointerOver", true);
+        RowBorder.Background = Application.Current.Resources["SubtleFillColorSecondaryBrush"] as Brush
+            ?? RowBorder.Background;
     }
 
     private void RowBorder_OnPointerReleased(object sender, PointerRoutedEventArgs e)
@@ -287,7 +290,8 @@ public sealed partial class HomeSettingsRow : UserControl, ISettingsUnsavedScope
     private void RowBorder_OnPointerEntered(object sender, PointerRoutedEventArgs e)
     {
         if (CanNavigate && ShowChevron && !_activePointerId.HasValue)
-            VisualStateManager.GoToState(this, "PointerOver", true);
+            RowBorder.Background = Application.Current.Resources["SubtleFillColorSecondaryBrush"] as Brush
+                ?? RowBorder.Background;
     }
 
     private void RowBorder_OnPointerCanceled(object sender, PointerRoutedEventArgs e)
@@ -302,7 +306,7 @@ public sealed partial class HomeSettingsRow : UserControl, ISettingsUnsavedScope
         if (_activePointerId == e.Pointer.PointerId)
             return;
         if (CanNavigate && ShowChevron)
-            VisualStateManager.GoToState(this, "Normal", true);
+            RowBorder.Background = null;
     }
 
     private bool IsInteractiveSource(DependencyObject? src)

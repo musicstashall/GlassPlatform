@@ -790,12 +790,43 @@ namespace
 
     // ShellHost: после HostShutdown + успешного Unhook всех WinEvent-hook,
     // завершённого path=1 (GuiTid=0) и снятия remote/self pins может остаться
-    // только deferred INCONTEXT-ref Windows. Один remote FreeLibrary снимает
-    // именно этот доказанный residual; до полного teardown сюда не попадаем.
+    // только deferred INCONTEXT-ref Windows. Remote FreeLibrary — только после
+    // wake-шторма; иначе callback в unmapped образе (dump 18.08).
     [[nodiscard]] bool TryRemoteDropShellHostResidualPin(DWORD pid) noexcept
     {
         if (ResolveLiveGuiTid(pid) != 0)
+        {
+            DebugLog(
+                DBG_IMPORTANT,
+                L"[GlassCompat][CWInject] residual skip pid=%u (gui live)",
+                static_cast<unsigned>(pid));
             return false;
+        }
+
+        if (!ModuleLoadedInProcess(pid, L"GlassCompat.dll"))
+            return true;
+
+        constexpr int kWakeRounds = 8;
+        for (int i = 0; i < kWakeRounds; ++i)
+        {
+            PostWmNullToTrackedHwnds(pid);
+            WakeRemoteCwProcess(pid);
+            PostWmNullAllThreads(pid);
+            Sleep(50);
+            if (!ModuleLoadedInProcess(pid, L"GlassCompat.dll"))
+                return true;
+            if (ResolveLiveGuiTid(pid) != 0)
+            {
+                DebugLog(
+                    DBG_IMPORTANT,
+                    L"[GlassCompat][CWInject] residual skip pid=%u (gui revived)",
+                    static_cast<unsigned>(pid));
+                return false;
+            }
+        }
+
+        if (!ModuleLoadedInProcess(pid, L"GlassCompat.dll"))
+            return true;
 
         const HMODULE remoteCompat = ModuleBaseInProcess(pid, L"GlassCompat.dll");
         const HMODULE remoteKernel = ModuleBaseInProcess(pid, L"kernel32.dll");

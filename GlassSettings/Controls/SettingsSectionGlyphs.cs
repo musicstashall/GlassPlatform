@@ -33,6 +33,8 @@ public static class SettingsSectionGlyphs
     public const string CaptionColor = "\uE8D2";
     public const string DrawTheme = "\uE7B3";
     public const string Symbols = "\uE896";
+    public const string Signature = "\uEA18";
+    public const string WebSearch = "\uF6FA";
 
     public enum SectionKind
     {

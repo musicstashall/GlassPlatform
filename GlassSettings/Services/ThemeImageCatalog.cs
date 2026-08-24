@@ -2,6 +2,7 @@ namespace GlassSettings.Services;
 
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
+using GlassSettings.Core.Platform;
 using Windows.Storage.Streams;
 
 public sealed class ThemeImageItem
@@ -154,8 +155,8 @@ public static class ThemeImageCatalog
     {
         AtlasPreviewTrace.CatalogStart();
         AtlasPreviewTrace.CatalogOpenGlass(
-            OpenGlassVersionService.ResolveOpenGlassDllPath(),
-            OpenGlassVersionService.TryGetInstallRoot());
+            PlatformPaths.OpenGlassDllPath,
+            PlatformPaths.OpenGlassInstallRoot);
 
         var nativeDllPath = ResolveNativeDllPath();
         AtlasPreviewTrace.CatalogNativeDll(nativeDllPath, nativeDllPath is not null && File.Exists(nativeDllPath));
@@ -164,7 +165,7 @@ public static class ThemeImageCatalog
     }
 
     public static IReadOnlyList<ThemeImageItem> LoadFromFolder(string relativeFolder) =>
-        LoadFromDirectory(Path.Combine(AppContext.BaseDirectory, relativeFolder));
+        LoadFromDirectory(Path.Combine(PlatformPaths.AppBase, relativeFolder));
 
     /// <summary>Генерация PNG preview в фоновом потоке. Возвращает байты или null.</summary>
     public static byte[]? TryGenerateAtlasPreviewBytes(
@@ -205,7 +206,7 @@ public static class ThemeImageCatalog
             string reflectionDllPath = string.Empty;
             if (reflectionAlphaPercent > 0)
             {
-                reflectionDllPath = OpenGlassVersionService.ResolveOpenGlassDllPath() ?? string.Empty;
+                reflectionDllPath = PlatformPaths.OpenGlassDllPath ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(reflectionDllPath) || !File.Exists(reflectionDllPath))
                 {
                     AtlasPreviewTrace.GenerationFailed(title, "OpenGlass.dll not found (reflection resource required)");
@@ -325,7 +326,7 @@ public static class ThemeImageCatalog
             return _defaultReflectionImage;
 
         _defaultReflectionResolved = true;
-        var dll = OpenGlassVersionService.ResolveOpenGlassDllPath();
+        var dll = PlatformPaths.OpenGlassDllPath;
         if (string.IsNullOrWhiteSpace(dll) || !File.Exists(dll))
             return null;
 
@@ -553,33 +554,8 @@ public static class ThemeImageCatalog
         return null;
     }
 
-    private static List<string> BuildSearchRoots()
-    {
-        var searchRoots = new List<string>();
-
-        var oglassDll = OpenGlassVersionService.ResolveOpenGlassDllPath();
-        if (!string.IsNullOrWhiteSpace(oglassDll))
-        {
-            var oglassDir = Path.GetDirectoryName(oglassDll);
-            if (!string.IsNullOrWhiteSpace(oglassDir))
-                AddRoot(searchRoots, oglassDir);
-        }
-
-        var installRoot = OpenGlassVersionService.TryGetInstallRoot();
-        if (!string.IsNullOrWhiteSpace(installRoot))
-            AddRoot(searchRoots, installRoot);
-
-        AddRoot(searchRoots, AppContext.BaseDirectory);
-        return searchRoots;
-    }
-
-    private static void AddRoot(List<string> roots, string path)
-    {
-        var full = Path.GetFullPath(path);
-        if (roots.Any(r => string.Equals(r, full, StringComparison.OrdinalIgnoreCase)))
-            return;
-        roots.Add(full);
-    }
+    private static List<string> BuildSearchRoots() =>
+        new(PlatformPaths.GetResourceSearchRoots());
 
     private static IReadOnlyList<ThemeImageItem> LoadFromDirectory(string dir, bool includeImage = true)
     {
@@ -632,7 +608,7 @@ public static class ThemeImageCatalog
 
     private static string? ResolveNativeDllPath()
     {
-        var nextToExe = Path.Combine(AppContext.BaseDirectory, NativeDllName);
+        var nextToExe = Path.Combine(PlatformPaths.AppBase, NativeDllName);
         if (File.Exists(nextToExe))
             return nextToExe;
 

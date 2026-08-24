@@ -9,28 +9,18 @@ internal static class ExecutableFilePickerFileTypeHelper
     private const uint FileAttributeNormal = 0x00000080;
     private const uint ShgfiTypename = 0x000000400;
     private const uint ShgfiUseFileAttributes = 0x000000010;
+    private const int MaxPath = 260;
 
     private static readonly ConcurrentDictionary<string, string> ExtensionCache = new(StringComparer.OrdinalIgnoreCase);
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct Shfileinfo
-    {
-        public IntPtr hIcon;
-        public int iIcon;
-        public uint dwAttributes;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string szDisplayName;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
-        public string szTypeName;
-    }
+    private static int ShFileInfoByteSize =>
+        IntPtr.Size + sizeof(int) + sizeof(uint) + (MaxPath * 2) + (80 * 2);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr SHGetFileInfo(
         string pszPath,
         uint dwFileAttributes,
-        ref Shfileinfo psfi,
+        IntPtr psfi,
         uint cbFileInfo,
         uint uFlags);
 
@@ -50,25 +40,39 @@ internal static class ExecutableFilePickerFileTypeHelper
 
     private static string? QueryTypeName(string path)
     {
-        var shInfo = new Shfileinfo();
-        var result = SHGetFileInfo(path, 0, ref shInfo, (uint)Marshal.SizeOf<Shfileinfo>(), ShgfiTypename);
-        if (result != IntPtr.Zero && !string.IsNullOrWhiteSpace(shInfo.szTypeName))
-            return shInfo.szTypeName.Trim();
+        var fromPath = QueryTypeNameCore(path, 0, ShgfiTypename);
+        if (!string.IsNullOrWhiteSpace(fromPath))
+            return fromPath.Trim();
 
         var extension = Path.GetExtension(path);
         if (string.IsNullOrEmpty(extension))
             return null;
 
-        shInfo = new Shfileinfo();
-        result = SHGetFileInfo(
+        var fromExt = QueryTypeNameCore(
             extension,
             FileAttributeNormal,
-            ref shInfo,
-            (uint)Marshal.SizeOf<Shfileinfo>(),
             ShgfiTypename | ShgfiUseFileAttributes);
-        if (result == IntPtr.Zero || string.IsNullOrWhiteSpace(shInfo.szTypeName))
-            return null;
+        return string.IsNullOrWhiteSpace(fromExt) ? null : fromExt.Trim();
+    }
 
-        return shInfo.szTypeName.Trim();
+    private static string? QueryTypeNameCore(string path, uint fileAttributes, uint flags)
+    {
+        var cb = ShFileInfoByteSize;
+        var buf = Marshal.AllocHGlobal(cb);
+        try
+        {
+            var zeros = new byte[cb];
+            Marshal.Copy(zeros, 0, buf, cb);
+            var result = SHGetFileInfo(path, fileAttributes, buf, (uint)cb, flags);
+            if (result == IntPtr.Zero)
+                return null;
+
+            var typeOffset = IntPtr.Size + sizeof(int) + sizeof(uint) + (MaxPath * 2);
+            return Marshal.PtrToStringUni(buf + typeOffset);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buf);
+        }
     }
 }

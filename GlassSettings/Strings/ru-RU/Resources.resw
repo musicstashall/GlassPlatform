@@ -36,6 +36,7 @@
   <data name="Runtime_UnloadAllConfirmBody" xml:space="preserve"><value>Модули Glass будут выгружены из всех процессов в списке.</value></data>
   <data name="Runtime_UnloadAndExclude" xml:space="preserve"><value>Выгрузить и исключить</value></data>
   <data name="Runtime_UnloadAndForbid" xml:space="preserve"><value>Выгрузить и запретить</value></data>
+  <data name="Runtime_UnloadNeedsX86Package" xml:space="preserve"><value>Для принудительной выгрузки из 32-битного процесса нужен установленный пакет платформы x86 (InstallPath в реестре).</value></data>
   <data name="Runtime_CopyName" xml:space="preserve"><value>Копировать имя</value></data>
   <data name="Runtime_SubsystemState" xml:space="preserve"><value>Состояние подсистем</value></data>
   <data name="Runtime_SubsystemsTitleFormat" xml:space="preserve"><value>Состояние подсистем {0}</value></data>
@@ -726,6 +727,7 @@
   <data name="Status_Enable" xml:space="preserve"><value>Включить</value></data>
   <data name="Status_EnableScheduler" xml:space="preserve"><value>Включить в планировщике</value></data>
   <data name="Status_NoTask" xml:space="preserve"><value>Нет задачи</value></data>
+  <data name="Status_PlatformNotInstalled" xml:space="preserve"><value>Не установлена</value></data>
   <data name="Status_Ready" xml:space="preserve"><value>Готова</value></data>
   <data name="Status_Running" xml:space="preserve"><value>Работает</value></data>
   <data name="Status_Unloading" xml:space="preserve"><value>Выгружается</value></data>
@@ -804,7 +806,27 @@
   <data name="Themes_ApplySystemFonts" xml:space="preserve"><value>Применять системные шрифты</value></data>
   <data name="Themes_ApplySystemFontsDesc" xml:space="preserve"><value>Подставлять шрифты из текущей темы Windows</value></data>
   <data name="Themes_ApplySystemFontsStub" xml:space="preserve"><value>Применение системных шрифтов будет доступно в следующей версии</value></data>
-  <data name="Themes_AdvancedTitle" xml:space="preserve"><value>Дополнительно</value></data>
+  <data name="Themes_SignatureCardTitle" xml:space="preserve"><value>Цифровая подпись</value></data>
+  <data name="Themes_SignatureCardDesc" xml:space="preserve"><value>Обход проверки цифровой подписи</value></data>
+  <data name="Themes_SignatureActivated" xml:space="preserve"><value>Обход подписи успешно активирован.</value></data>
+  <data name="Themes_SignatureDeactivated" xml:space="preserve"><value>Обход подписи успешно деактивирован.</value></data>
+  <data name="Themes_RestartRequired" xml:space="preserve"><value>Требуется перезагрузка.</value></data>
+  <data name="Themes_RestartNotRequired" xml:space="preserve"><value>Перезагрузка не требуется.</value></data>
+  <data name="Themes_SignatureActivateFailedFormat" xml:space="preserve"><value>Не удалось включить обход подписи (0x{0:X8})</value></data>
+  <data name="Themes_SignatureDeactivateFailedFormat" xml:space="preserve"><value>Не удалось отключить обход подписи (0x{0:X8})</value></data>
+  <data name="Themes_SignatureStockThemeFailed" xml:space="preserve"><value>Не удалось применить штатную тему Windows. Отключение отменено.</value></data>
+  <data name="Themes_SignatureApplyBlockedPending" xml:space="preserve"><value>Применение сторонней темы недоступно до перезагрузки.</value></data>
+  <data name="Dialog_SignatureTitle" xml:space="preserve"><value>Цифровая подпись</value></data>
+  <data name="Dialog_SignatureOfficialBody" xml:space="preserve"><value>Использование невозможно! Сначала необходимо удалить официальную версию SecureUxTheme в установленных приложениях</value></data>
+  <data name="Dialog_SignatureLegacyBody" xml:space="preserve"><value>Использование невозможно! Сначала необходимо удалить официальную версию SecureUxTheme с помощью соответствующей версии ThemeTool.</value></data>
+  <data name="Dialog_SignatureConflictBody" xml:space="preserve"><value>Обнаружена неполная или конфликтующая установка SecureUxTheme. Автоматическое исправление недоступно.</value></data>
+  <data name="Dialog_SignatureWrongArchBody" xml:space="preserve"><value>Архитектура модуля не совпадает с системой. Откройте GlassSettings той же разрядности, что и Windows.</value></data>
+  <data name="Dialog_SignatureWow64Body" xml:space="preserve"><value>x86-сборка GlassSettings не может активировать патчер на 64-разрядной Windows. Откройте x64 GlassSettings.</value></data>
+  <data name="Dialog_SignatureActivateConfirm" xml:space="preserve"><value>Включение изменит параметры загрузки winlogon.exe и потребует перезагрузки компьютера. Продолжить?</value></data>
+  <data name="Dialog_SignatureDeactivateConfirm" xml:space="preserve"><value>Отключение потребует перезагрузки. При активной сторонней теме будет применена штатная тема Windows. Продолжить?</value></data>
+  <data name="Dialog_SignatureConfirm" xml:space="preserve"><value>Продолжить</value></data>
+  <data name="Themes_SignatureRebootButton" xml:space="preserve"><value>Перезагрузить</value></data>
+  <data name="Home_FooterRebootRequired" xml:space="preserve"><value>Требуется перезагрузка</value></data>
   <data name="Themes_BrowseStub" xml:space="preserve"><value>Обзор тем — заглушка</value></data>
   <data name="Themes_BrowseSite_7themes" xml:space="preserve"><value>7themes.su</value></data>
   <data name="Themes_BrowseSite_vsthemes" xml:space="preserve"><value>vsthemes.org</value></data>
@@ -860,7 +882,9 @@
   <data name="Themes_Colors_AccentBodyDesc" xml:space="preserve"><value>Выберите цвет акцента для кнопок, ссылок и элементов WinUI. Он применяется ко всей системе и к окнам приложений.</value></data>
   <data name="Themes_Colors_AccentDesc" xml:space="preserve"><value>Цвет элементов WinUI окон</value></data>
   <data name="Themes_Colors_ModeBodyDesc" xml:space="preserve"><value>Задайте отдельно режим оболочки Windows и режим приложений.</value></data>
-  <data name="Themes_DeleteConfirmFormat" xml:space="preserve"><value>Удалить тему «{0}»? Это действие нельзя отменить.</value></data>
+  <data name="Themes_DeleteConfirmThemeOnlyFormat" xml:space="preserve"><value>Вы собираетесь удалить визуальный стиль «{0}». Будет удален только файл параметров .theme, прочие вариации стиля не затронутся.</value></data>
+  <data name="Themes_DeleteConfirmFullFormat" xml:space="preserve"><value>Вы собираетесь удалить визуальный стиль «{0}». Выбранный стиль удалится полностью без возможности восстановления.</value></data>
+  <data name="Themes_DeleteActiveLibraryBody" xml:space="preserve"><value>Нельзя удалить этот визуальный стиль, пока он используется. Сначала переключитесь на другую тему.</value></data>
   <data name="Themes_DeleteFailedFormat" xml:space="preserve"><value>Не удалось удалить тему ({0})</value></data>
   <data name="Themes_DeleteMenu" xml:space="preserve"><value>Удалить</value></data>
   <data name="Themes_DeleteSuccessFormat" xml:space="preserve"><value>Тема «{0}» удалена</value></data>
@@ -936,11 +960,9 @@
   <data name="Themes_Default" xml:space="preserve"><value>По умолчанию</value></data>
   <data name="Themes_Empty" xml:space="preserve"><value>Темы не найдены</value></data>
   <data name="Themes_FindOnline" xml:space="preserve"><value>Найти другие темы в интернете</value></data>
+  <data name="Themes_SecureUxThemeOnlineLink" xml:space="preserve"><value>SecureUxTheme в интернете</value></data>
   <data name="Themes_OtherLabel" xml:space="preserve"><value>Другое</value></data>
   <data name="Themes_PageSubtitle" xml:space="preserve"><value>Выберите тему оформления Windows</value></data>
-  <data name="Themes_PatcherDesc" xml:space="preserve"><value>Патч .msstyles и ресурсов темы</value></data>
-  <data name="Themes_PatcherStub" xml:space="preserve"><value>Патчер тем — заглушка</value></data>
-  <data name="Themes_PatcherTitle" xml:space="preserve"><value>Патчер тем</value></data>
   <data name="Themes_SectionDesc" xml:space="preserve"><value>Выберите сочетание обоев, звуков и цветов, чтобы сделать свой рабочий стол более личным</value></data>
   <data name="Themes_SystemFontsDesc" xml:space="preserve"><value>Настройка системных шрифтов Glass</value></data>
   <data name="Themes_SystemFontsTitle" xml:space="preserve"><value>Системные шрифты</value></data>

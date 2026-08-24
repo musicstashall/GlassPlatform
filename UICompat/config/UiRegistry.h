@@ -9,8 +9,9 @@ namespace UICompat::Registry
 {
     enum class SurfaceKind : DWORD
     {
-        Popup = 0, // NC / QS / Start / Search chrome
-        Menu  = 1, // MenuFlyout / JumpList / Search WebView menus
+        Popup   = 0, // NC / QS / Start / Search chrome
+        Menu    = 1, // MenuFlyout / JumpList / Search WebView menus
+        Tooltip = 2, // Shell tooltips (Start menu items)
     };
 
     struct Settings

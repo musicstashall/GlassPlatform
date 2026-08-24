@@ -41,9 +41,10 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
             return;
 
         // Один snapshot на arch до записи — fingerprint отсекает idle poll без thrash brush/DP.
+        var x86Locked = GlassPlatformUiPolicy.IsX86DualUiControlsLocked();
         var uiX86 = HomeStatusSummary.QueryGlassPlatformUi(GlassPlatformArch.X86);
         var uiX64 = HomeStatusSummary.QueryGlassPlatformUi(GlassPlatformArch.X64);
-        var fingerprint = BuildFingerprint(uiX86, uiX64, _busyX86, _busyX64);
+        var fingerprint = BuildFingerprint(uiX86, uiX64, _busyX86, _busyX64, x86Locked);
         if (string.Equals(_refreshFingerprint, fingerprint, StringComparison.Ordinal))
             return;
 
@@ -52,7 +53,7 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
         try
         {
             // Текст/точка — всегда (в т.ч. «Выгружается» при своём stop); IsOn — не трогаем у busy-линии.
-            ApplyLine(uiX86, SubtitleX86, DotX86, _gateX86, preserveGateOn: _busyX86);
+            ApplyLine(uiX86, SubtitleX86, DotX86, _gateX86, preserveGateOn: _busyX86, controlsLocked: x86Locked);
             ApplyLine(uiX64, SubtitleX64, DotX64, _gateX64, preserveGateOn: _busyX64);
         }
         finally
@@ -65,8 +66,9 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
         HomeStatusSummary.GlassPlatformUiSnapshot x86,
         HomeStatusSummary.GlassPlatformUiSnapshot x64,
         bool busyX86,
-        bool busyX64) =>
-        $"{PackUi(x86)}|{PackUi(x64)}|{(busyX86 ? '1' : '0')}{(busyX64 ? '1' : '0')}";
+        bool busyX64,
+        bool x86Locked) =>
+        $"{PackUi(x86)}|{PackUi(x64)}|{(busyX86 ? '1' : '0')}{(busyX64 ? '1' : '0')}{(x86Locked ? '1' : '0')}";
 
     private static string PackUi(HomeStatusSummary.GlassPlatformUiSnapshot ui) =>
         $"{(int)ui.Life}|{(int)ui.Autorun}|{(ui.IsUnloading ? 1 : 0)}|{(ui.LifecycleBusy ? 1 : 0)}|{ui.Line}|{PackColor(ui.DotColor)}";
@@ -89,8 +91,27 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
         TextBlock subtitle,
         Ellipse dot,
         GlassSettingsLabeledToggleSwitch? gate,
-        bool preserveGateOn = false)
+        bool preserveGateOn = false,
+        bool controlsLocked = false)
     {
+        if (controlsLocked)
+        {
+            var notInstalled = GlassSettingsResources.Get("Status_PlatformNotInstalled");
+            if (!string.Equals(subtitle.Text, notInstalled, StringComparison.Ordinal))
+                subtitle.Text = notInstalled;
+            var dim = PlatformStatusColors.GlassPlatform(GlassAutorunUiState.NoTask);
+            if (dot.Fill is not SolidColorBrush dimBrush || dimBrush.Color != dim)
+                dot.Fill = new SolidColorBrush(dim);
+            if (gate is not null)
+            {
+                if (gate.IsEnabled)
+                    gate.IsEnabled = false;
+                if (gate.IsOn)
+                    gate.IsOn = false;
+            }
+            return;
+        }
+
         if (!string.Equals(subtitle.Text, ui.Line, StringComparison.Ordinal))
             subtitle.Text = ui.Line;
         if (dot.Fill is not SolidColorBrush brush || brush.Color != ui.DotColor)
@@ -114,6 +135,22 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
     {
         if (_suppress || IsLocalBusy(arch))
             return;
+
+        if (arch == GlassPlatformArch.X86 && GlassPlatformUiPolicy.IsX86DualUiControlsLocked())
+        {
+            _suppress = true;
+            try
+            {
+                gate.IsOn = false;
+                gate.IsEnabled = false;
+            }
+            finally
+            {
+                _suppress = false;
+            }
+
+            return;
+        }
 
         // SoT как PlatformSchedulerRow: внешний stop/residual — не Start/Stop.
         var life = NativeHostInterop.QueryInjectLifecycleUi(arch);

@@ -1,3 +1,5 @@
+using GlassSettings.Core.Platform;
+
 namespace GlassSettings.Services;
 
 public enum OpenGlassSymbolDownloadOutcomeKind
@@ -43,7 +45,7 @@ public sealed class OpenGlassSymbolDownloadService
 
     public string GetCacheDirectoryAbsolute()
     {
-        var dllPath = OpenGlassVersionService.ResolveOpenGlassDllPath()
+        var dllPath = PlatformPaths.OpenGlassDllPath
                       ?? throw new InvalidOperationException("OpenGlass.dll path is unavailable.");
 
         var dllDir = Path.GetDirectoryName(dllPath)

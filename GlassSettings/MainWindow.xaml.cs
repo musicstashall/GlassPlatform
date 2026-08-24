@@ -3043,7 +3043,7 @@ public sealed partial class MainWindow : Window
 
     private void ApplyLocalizedStrings()
     {
-        AppTitleBar.Title = GlassSettingsResources.Get("AppTitle");
+        AppTitleBar.Title = SingleInstance.WindowTitle;
         GlassSettingsToolTipService.SetToolTip(TitleBarBackButton, GlassSettingsResources.Get("Main_BackToolTip"));
         AppSettingsPaneLabel.Text = GlassSettingsResources.Get("Main_AppSettingsToolTip");
         GlassSettingsToolTipService.SetToolTip(AppSettingsPaneButton, GlassSettingsResources.Get("Main_AppSettingsToolTip"));

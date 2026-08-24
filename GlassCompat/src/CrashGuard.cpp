@@ -807,7 +807,20 @@ void GlassCompat::UninstallProcessCrashGuard() noexcept
     g_vehRecordFastFail = false;
     g_vehRecordStowed = false;
 
-    (void)SetUnhandledExceptionFilter(g_prevExplorerFilter);
+    // SetUnhandledExceptionFilter возвращает прежний верхний фильтр.
+    // Если это не наш — чужой UEF встал позже: сразу вернуть его и не
+    // затирать чужую цепочку сохранённым prev при выгрузке.
+    const LPTOP_LEVEL_EXCEPTION_FILTER current =
+        SetUnhandledExceptionFilter(g_prevExplorerFilter);
+    if (current != ExplorerCrashGuardFilter)
+    {
+        (void)SetUnhandledExceptionFilter(current);
+        DebugLog(
+            DBG_IMPORTANT,
+            L"[GlassCompat][CrashGuard] UEF не наш (0x%p) — оставляем чужой фильтр",
+            reinterpret_cast<void*>(current));
+    }
+
     g_prevExplorerFilter = nullptr;
     g_crashGuardInstalled = false;
     (void)Shared::InjectProcessMap::TrySetDiagFlag(

@@ -23,14 +23,12 @@ namespace GlassShared::GlassModulePath
 
     [[nodiscard]] bool IsOs64Bit() noexcept;
 
-    // Каталог установки: dirname(modulePath); если basename — Sys32/Sys64, поднимаемся на уровень.
+    // Каталог установки: dirname(modulePath) или сам каталог.
     [[nodiscard]] std::wstring GetInstallRootFromPath(const wchar_t* fileOrDirPath) noexcept;
 
     [[nodiscard]] std::wstring GetInstallRootFromModule(HMODULE hModule) noexcept;
 
-    // OS x64 + x64: Sys64 затем root;
-    // OS x64 + x86 из процесса x64: только Sys32;
-    // OS x64 + x86 из процесса x86 (WOW64) / OS x86: Sys32 затем root.
+    // Плоский корень: <installRoot>\<fileName>. targetArch сохранён для ABI; путь не зависит от arch.
     [[nodiscard]] std::wstring ResolveGlassModulePath(
         const wchar_t* installRoot,
         const wchar_t* fileName,

@@ -17,12 +17,12 @@
 
 namespace Shared::TrayXamlPolicyMap
 {
-    // v3: новое имя — старый 48-байт mapping нельзя увеличить при живых хендлах.
-    inline constexpr wchar_t kMappingName[] = L"Local\\GlassPlatform.TrayXamlPolicy.v3";
+    // v4: + SurfaceSlot Tooltip (тултипы Пуска).
+    inline constexpr wchar_t kMappingName[] = L"Local\\GlassPlatform.TrayXamlPolicy.v4";
 
     inline constexpr DWORD kMagic   = 0x50584C47u; // 'GLXP'
-    // v3: + SurfaceSlot Popup / Menu (смежные окна).
-    inline constexpr DWORD kVersion = 3u;
+    // v4: + SurfaceSlot Tooltip.
+    inline constexpr DWORD kVersion = 4u;
 
     inline constexpr DWORD kFlagGradientPresent = 1u << 0;
     inline constexpr DWORD kFlagDarkMode        = 1u << 1;
@@ -56,13 +56,14 @@ namespace Shared::TrayXamlPolicyMap
         DWORD reserved0;
         DWORD reserved1;
         DWORD reserved2;
-        SurfaceSlot popup; // Tray\Xaml\Popup (fallback уже запечён)
-        SurfaceSlot menu;  // Tray\Xaml\Menu
+        SurfaceSlot popup;   // Tray\Xaml\Popup (fallback уже запечён)
+        SurfaceSlot menu;    // Tray\Xaml\Menu
+        SurfaceSlot tooltip; // Tray\Xaml\Tooltip (v4)
     };
 #pragma pack(pop)
 
     static_assert(sizeof(SurfaceSlot) == 20, "TrayXamlPolicy SurfaceSlot size");
-    static_assert(sizeof(Snapshot) == 88, "TrayXamlPolicy Snapshot size");
+    static_assert(sizeof(Snapshot) == 108, "TrayXamlPolicy Snapshot size (v4: +tooltip)");
 
     namespace detail
     {
@@ -188,6 +189,10 @@ namespace Shared::TrayXamlPolicyMap
             FillSurfaceSlot(out.menu, TrayXamlPaint::kXamlMenuSubKey, dark, false);
             if (dark)
                 out.menu.flags |= kFlagDarkMode;
+
+            FillSurfaceSlot(out.tooltip, TrayXamlPaint::kXamlTooltipSubKey, dark, false);
+            if (dark)
+                out.tooltip.flags |= kFlagDarkMode;
 
             return true;
         }

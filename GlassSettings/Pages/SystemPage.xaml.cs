@@ -313,6 +313,8 @@ public sealed partial class SystemPage : Page
         _ogNav!.CanNavigate = _ogRow!.TaskExists;
         if (_glassNavX86 is not null && _glassNavX64 is not null)
         {
+            var x86Locked = GlassPlatformUiPolicy.IsX86DualUiControlsLocked();
+            _glassNavX86.IsEnabled = !x86Locked;
             _glassNavX86.CanNavigate = _glassRowX86!.TaskExists;
             _glassNavX64.CanNavigate = _glassRowX64!.TaskExists;
         }

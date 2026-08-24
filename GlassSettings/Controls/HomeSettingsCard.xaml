@@ -13,24 +13,27 @@
         BorderThickness="1"
         CornerRadius="8">
         <StackPanel x:Name="CardRoot" Spacing="0">
-            <!-- Раскрытие футера (осаждение startup green) — плавный Reposition, как у HomeNoticeHost. -->
             <StackPanel.ChildrenTransitions>
                 <TransitionCollection>
                     <RepositionThemeTransition />
                 </TransitionCollection>
             </StackPanel.ChildrenTransitions>
-            <Grid x:Name="TopSection" ColumnSpacing="12">
+            <Grid x:Name="TopSection" RowSpacing="4" ColumnSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition x:Name="LeadColumn" Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <ContentPresenter
                     x:Name="LeadHost"
-                    Grid.Column="0"
+                    Grid.Row="0" Grid.Column="0"
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Stretch"
                     Visibility="Collapsed" />
-                <StackPanel x:Name="MainPanel" Grid.Column="1" Spacing="4">
+                <StackPanel x:Name="MainPanel" Grid.Row="0" Grid.Column="1" Spacing="4">
                     <StackPanel Spacing="2" Margin="0,0,0,4">
                         <TextBlock
                             x:Name="TitleText"
@@ -44,6 +47,25 @@
                     </StackPanel>
                     <StackPanel x:Name="RowHost" Spacing="0" />
                 </StackPanel>
+                <!-- Нижний край: текст + кнопка (inline или stacked) -->
+                <StackPanel
+                    x:Name="RebootInline"
+                    Grid.Row="0" Grid.Column="1"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Spacing="8"
+                    Margin="0,0,24,0"
+                    Visibility="Collapsed" />
+                <StackPanel
+                    x:Name="RebootStacked"
+                    Grid.Row="1" Grid.ColumnSpan="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Margin="0,4,24,0"
+                    Spacing="8"
+                    Visibility="Collapsed" />
             </Grid>
             <ContentPresenter
                 x:Name="FooterHost"

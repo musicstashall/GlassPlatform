@@ -20,8 +20,10 @@
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'GlassSettings'">
     <SolutionRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))</SolutionRoot>
+    <GlassSettingsOutputDir>$(SolutionRoot)Build\$(Platform)\$(Configuration)\GlassSettings\</GlassSettingsOutputDir>
+    <GlassSettingsUnpackagedDir>$(SolutionRoot)Build\$(Platform)\$(Configuration)\GlassSettingsUnpackaged\</GlassSettingsUnpackagedDir>
     <BaseOutputPath>$(SolutionRoot)Build\</BaseOutputPath>
-    <OutputPath>$(SolutionRoot)Build\$(Platform)\$(Configuration)\</OutputPath>
+    <OutputPath>$(GlassSettingsUnpackagedDir)</OutputPath>
     <BaseIntermediateOutputPath>$(SolutionRoot)Cache\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
     <IntermediateOutputPath>$(BaseIntermediateOutputPath)$(Platform)\$(Configuration)\</IntermediateOutputPath>
     <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>

@@ -1,5 +1,6 @@
 #include "CompatPch.h"
 #include "GlassCompat.h"
+#include "CrashGuard.h"
 #include "HostPidHelper.h"
 #include "HostShellWatchdog.h"
 #include "CoreWindowHostInject.h"
@@ -15,6 +16,7 @@
 #include <ProcessBlockList.h>
 #include <TrayXamlPolicyMap.h>
 #include <ReloadRenderFlags.h>
+#include <ForceUnloadGlassModules.h>
 #include <windows.h>
 #include <sddl.h>
 #include <string>
@@ -476,6 +478,24 @@ namespace
         return w;
     }
 
+    [[nodiscard]] static DWORD ParseForceUnloadPid(const std::wstring& cmd) noexcept
+    {
+        static const wchar_t* const kTags[] = { L"/forceUnload", L"-forceUnload" };
+        for (const wchar_t* tag : kTags)
+        {
+            const wchar_t* p = wcsstr(cmd.c_str(), tag);
+            if (!p)
+                continue;
+            p += wcslen(tag);
+            while (*p == L' ' || *p == L'\t')
+                ++p;
+            if (*p == L'\0')
+                return 0;
+            return static_cast<DWORD>(wcstoul(p, nullptr, 10));
+        }
+        return 0;
+    }
+
     [[nodiscard]] static bool ThemeMessageSuggestsDwmPolicyReload(UINT msg, LPARAM lParam) noexcept
     {
         if (msg == WM_THEMECHANGED)
@@ -508,6 +528,7 @@ namespace
 //   Rundll32.exe "path\GlassCompat.dll",Main /stop
 //   Rundll32.exe "path\GlassCompat.dll",Main /reloadRender
 //   Rundll32.exe "path\GlassCompat.dll",Main /shellStartPlatform
+//   Rundll32.exe "path\GlassCompat.dll",Main /forceUnload <pid>
 // ============================================================
 extern "C" __declspec(dllexport)
 void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
@@ -602,6 +623,20 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         return;
     }
 
+    const bool isForceUnload =
+        cmd.find(L"/forceUnload") != std::wstring::npos ||
+        cmd.find(L"-forceUnload") != std::wstring::npos;
+    if (isForceUnload)
+    {
+        const DWORD targetPid = ParseForceUnloadPid(cmd);
+        if (targetPid != 0)
+        {
+            (void)Shared::ForceUnloadGlassModules::ForceUnload(targetPid);
+        }
+        StopLogClientForShortLivedMain();
+        return;
+    }
+
     // ---- /start ----
 
     // Проверяем одиночный экземпляр
@@ -617,6 +652,10 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
     // Публикуем PID хоста — WinEventProc в других процессах его прочитает
     // и поймёт, что в хосте инициализация не нужна
     WriteHostPid(GetCurrentProcessId());
+
+    // Хост не проходит GlassCompat::Initialize (WinEventProc → HostProcess).
+    // CrashGuard здесь, а не в DllMain: BlockList-процессы не получают UEF/VEH.
+    GlassCompat::InstallProcessCrashGuard();
 
     Shared::OpenGlassDwmPolicy::ApplyDwmPolicyOnVisualStyleChange();
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)

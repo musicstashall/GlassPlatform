@@ -54,6 +54,7 @@ public sealed partial class HomePage : Page
     private HomeCustomizationFooterLine? _summaryFooter;
     private FrameworkElement? _platformSummaryFooter;
     private Button? _saveFooterButton;
+    private bool _yellowRebootActive;
     private bool _saveInProgress;
     private CancellationTokenSource? _footerRevealCts;
     private const int FooterRevealMs = 350;
@@ -131,12 +132,23 @@ public sealed partial class HomePage : Page
 
         // ЖЁЛТОЕ (несохранённые) — «Сохранить» + закрытие руками.
         UnsavedNoticeStrip.SaveRequested += async (_, _) => await SaveAllAsync();
+        UnsavedNoticeStrip.ActionRequested += (_, _) =>
+        {
+            if (_yellowRebootActive)
+                _ = RebootSystemFromHomePageAsync();
+        };
         UnsavedNoticeStrip.DismissStarting += (_, _) => HomeSessionNoticeState.StartDismissYellow();
         UnsavedNoticeStrip.DismissRequested += (_, _) =>
         {
             HomeSessionNoticeState.CompleteDismissYellow(SettingsSession.Current.HasUnsavedChanges);
             SyncSummaryFooterFromSession();
             _ = SettingsNoticeCoordinator.OnUserDismissedAsync(NoticeHost, UnsavedNoticeStrip);
+            // После закрытия жёлтого уведомления о перезагрузке — показать кнопку на карточке.
+            if (_yellowRebootActive)
+            {
+                HomeSessionNoticeState.DismissRebootNotice();
+                UpdateRebootButtonVisibility();
+            }
         };
 
         UpdateNoticeStrip.DismissRequested += (_, _) =>
@@ -407,10 +419,69 @@ public sealed partial class HomePage : Page
             _saveFooterButton.Style = saveStyle;
         _saveFooterButton.Click += async (_, _) => await SaveAllAsync();
         _summaryFooter.TrailingContent = _saveFooterButton;
+
+        PlatformSummaryCard.SetupRebootPrompt(
+            GlassSettingsResources.Get("Home_FooterRebootRequired"),
+            GlassSettingsResources.Get("Themes_SignatureRebootButton"),
+            async (_, _) =>
+            {
+                try
+                {
+                    await Task.Run(() =>
+                    {
+                        using var process = new System.Diagnostics.Process();
+                        process.StartInfo = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "shutdown",
+                            Arguments = "/r /t 0 /d p:0:0",
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        };
+                        process.Start();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"GlassSettings Reboot failed: {ex}");
+                }
+            });
+
         _summaryFooter.HorizontalAlignment = HorizontalAlignment.Stretch;
 
         _platformSummaryFooter = _summaryFooter;
         PlatformSummaryCard.SetFooter(_summaryFooter);
+    }
+
+    private void UpdateRebootButtonVisibility()
+    {
+        var requiresRestart = SecureUxThemeService.Query().State is SecureUxThemeState.ActivationPendingRestart
+            or SecureUxThemeState.DeactivationPendingRestart;
+        // Кнопка видна только если требование перезагрузки актуально И жёлтое уведомление закрыто.
+        var shouldShow = requiresRestart && HomeSessionNoticeState.RebootNoticeDismissed;
+        PlatformSummaryCard.SetRebootPromptVisible(shouldShow);
+    }
+
+    private async Task RebootSystemFromHomePageAsync()
+    {
+        try
+        {
+            await Task.Run(() =>
+            {
+                using var process = new System.Diagnostics.Process();
+                process.StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "shutdown",
+                    Arguments = "/r /t 0 /d p:0:0",
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                };
+                process.Start();
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"GlassSettings Reboot failed: {ex}");
+        }
     }
 
     private void BuildSystemCard()
@@ -1150,7 +1221,9 @@ public sealed partial class HomePage : Page
             dualX64,
             shellInProgress,
             shellTaskExists,
-            shellRegistered);
+            shellRegistered,
+            _glassPlatformDualRow is not null
+                && GlassPlatformUiPolicy.IsX86DualUiControlsLocked());
         if (string.Equals(_systemCardFingerprint, fingerprint, StringComparison.Ordinal))
             return;
 
@@ -1227,7 +1300,8 @@ public sealed partial class HomePage : Page
         HomeStatusSummary.GlassPlatformUiSnapshot? dualX64,
         bool shellInProgress,
         bool shellTaskExists,
-        bool shellRegistered)
+        bool shellRegistered,
+        bool x86Locked)
     {
         var sb = new System.Text.StringBuilder(192);
         sb.Append(ogLine).Append('|').Append(PackColor(ogColor)).Append('|')
@@ -1248,7 +1322,8 @@ public sealed partial class HomePage : Page
 
         sb.Append('|').Append(shellInProgress ? '1' : '0')
             .Append(shellTaskExists ? '1' : '0')
-            .Append(shellRegistered ? '1' : '0');
+            .Append(shellRegistered ? '1' : '0')
+            .Append(x86Locked ? '1' : '0');
         return sb.ToString();
     }
 
@@ -1598,6 +1673,18 @@ public sealed partial class HomePage : Page
 
         var showGreen = HomeSessionNoticeState.ShouldShowGreen && !_startupNoticePending;
         var showYellow = HomeSessionNoticeState.ShouldShowYellow(hasUnsaved) && !_startupNoticePending;
+        // Желтое уведомление о необходимости перезагрузки SecureUxTheme.
+        var requiresRestart = SecureUxThemeService.Query().State is SecureUxThemeState.ActivationPendingRestart
+            or SecureUxThemeState.DeactivationPendingRestart;
+
+        // Сбросить dismiss только когда требование перезагрузки ОТМЕНЕНО (true→false).
+        // При появлении требования (false→true) — dismiss НЕ сбрасывать, уведомление одноразовое.
+        if (!requiresRestart)
+            HomeSessionNoticeState.ResetRebootNoticeIfInactive(requiresRestart);
+
+        // Если уведомление уже закрыто пользователем — не показывать повторно.
+        var showRebootNotice = requiresRestart && !HomeSessionNoticeState.RebootNoticeDismissed;
+
         var showUpdate = false;
         string? updateMessage = null;
         string? updateActionText = null;
@@ -1619,6 +1706,11 @@ public sealed partial class HomePage : Page
 
         UnsavedNoticeStrip.IsSaveEnabled = !_saveInProgress;
 
+        string? yellowMessage = showYellow ? BuildYellowNoticeMessage() : null;
+        // Если требуется показать уведомление о перезагрузке — используем его текст.
+        if (showRebootNotice)
+            yellowMessage = GlassSettingsResources.Get("Home_FooterRebootRequired");
+
         await SettingsNoticeCoordinator.RefreshHomeAsync(new SettingsNoticeCoordinator.HomeNoticeRefreshRequest
         {
             Host = NoticeHost,
@@ -1630,12 +1722,19 @@ public sealed partial class HomePage : Page
             AnimateUpdate = animateUpdate,
             ShowGreen = showGreen,
             GreenMessage = showGreen ? BuildGreenNoticeMessage() : null,
-            ShowYellow = showYellow,
-            YellowMessage = showYellow ? BuildYellowNoticeMessage() : null,
+            ShowYellow = showYellow || showRebootNotice,
+            YellowMessage = yellowMessage,
             ShowUpdate = showUpdate,
             UpdateMessage = updateMessage,
-            UpdateActionText = updateActionText
+            UpdateActionText = updateActionText,
+            IsRebootNotice = showRebootNotice,
+            RebootActionText = showRebootNotice
+                ? GlassSettingsResources.Get("Themes_SignatureRebootButton")
+                : null
         }).ConfigureAwait(true);
+
+        _yellowRebootActive = showRebootNotice;
+        UpdateRebootButtonVisibility();
 
         NoticeViewportMirrorService.SyncSaveEnabled(!_saveInProgress);
         SyncSummaryFooterFromSession();

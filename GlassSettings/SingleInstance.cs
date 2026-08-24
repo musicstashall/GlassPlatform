@@ -21,7 +21,16 @@ public static class SingleInstance
     private const uint SmtoAbortIfHung = 0x0002;
     private const uint SmtoTimeoutMs = 2000;
 
-    public static string WindowTitle => GlassSettingsResources.Get("AppTitle");
+    public static string WindowTitle
+    {
+        get
+        {
+            var title = GlassSettingsResources.Get("AppTitle");
+            if (Environment.Is64BitOperatingSystem && !Environment.Is64BitProcess)
+                return title + " (x86)";
+            return title;
+        }
+    }
 
     private static Mutex? _mutex;
 

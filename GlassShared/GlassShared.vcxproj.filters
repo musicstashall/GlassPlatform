@@ -74,6 +74,12 @@
     <ClCompile Include="src\InjectModuleScan.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="src\ForceUnloadGlassModules.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ForceUnloadAgent.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="src\RootSwcaRegistryQuery.cpp">
       <Filter>src</Filter>
     </ClCompile>
@@ -227,6 +233,12 @@
       <Filter>include</Filter>
     </ClInclude>
     <ClInclude Include="include\InjectModuleScan.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ForceUnloadGlassModules.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ForceUnloadAgent.h">
       <Filter>include</Filter>
     </ClInclude>
     <ClInclude Include="include\RootSwcaRegistryQuery.h">

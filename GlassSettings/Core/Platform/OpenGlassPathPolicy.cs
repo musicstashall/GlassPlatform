@@ -13,6 +13,13 @@ public static class OpenGlassPathPolicy
         var root = BundledRootFullPath;
         yield return Path.Combine(root, "OpenGlass.dll");
         yield return Path.Combine(root, "OpenGlass", "OpenGlass.dll");
+
+        var parent = Path.GetDirectoryName(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (!string.IsNullOrWhiteSpace(parent))
+        {
+            yield return Path.Combine(parent, "OpenGlass.dll");
+            yield return Path.Combine(parent, "OpenGlass", "OpenGlass.dll");
+        }
     }
 
     public static string? TryResolveBundledDllPath()

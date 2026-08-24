@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using GlassSettings.Core.Platform;
 using GlassSettings.Strings;
 
 namespace GlassSettings.Services;
@@ -151,7 +152,7 @@ public static class PlatformModuleVersions
             /* ignore */
         }
 
-        return GlassSettings.Core.Platform.GlassModulePath.ResolveNative(dllFileName);
+        return PlatformPaths.ResolvePlatformModuleNative(dllFileName);
     }
 
     private static string? TryReadVersionString(string path) =>

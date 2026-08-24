@@ -191,6 +191,8 @@
     <ClInclude Include="include\PlatformPresenceState.h" />
     <ClInclude Include="include\InjectProcessMap.h" />
     <ClInclude Include="include\InjectModuleScan.h" />
+    <ClInclude Include="include\ForceUnloadGlassModules.h" />
+    <ClInclude Include="include\ForceUnloadAgent.h" />
     <ClInclude Include="include\RootPolicyQuery.h" />
     <ClInclude Include="include\RootSwcaRegistryQuery.h" />
     <ClInclude Include="include\EffectTypeQuery.h" />
@@ -233,6 +235,8 @@
     <ClCompile Include="src\PlatformPresenceState.cpp" />
     <ClCompile Include="src\InjectProcessMap.cpp" />
     <ClCompile Include="src\InjectModuleScan.cpp" />
+    <ClCompile Include="src\ForceUnloadGlassModules.cpp" />
+    <ClCompile Include="src\ForceUnloadAgent.cpp" />
     <ClCompile Include="src\RootPolicyQuery.cpp" />
     <ClCompile Include="src\RootSwcaRegistryQuery.cpp" />
     <ClCompile Include="src\EffectTypeQuery.cpp" />

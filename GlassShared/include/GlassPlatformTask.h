@@ -2,6 +2,8 @@
 
 #include <Windows.h>
 
+#include <string>
+
 namespace GlassShared::GlassPlatformTask
 {
     enum class PlatformArch : int
@@ -123,4 +125,7 @@ namespace GlassShared::GlassPlatformTask
     /// AllowHardTerminate/StopOnIdleEnd = false и ExecutionTimeLimit = PT0S.
     /// Требует прав администратора (задача создана с RunLevel HighestAvailable).
     [[nodiscard]] bool ApplyAutorunTaskPowerIndependence(PlatformArch arch) noexcept;
+
+    /// Каталог x86/x64 платформы из /TR задачи автозапуска (GlassCompat.dll). Пусто — задачи нет или TR не распознан.
+    [[nodiscard]] std::wstring TryGetAutorunGlassCompatInstallRoot(PlatformArch arch) noexcept;
 }

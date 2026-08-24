@@ -30,41 +30,41 @@
                 VerticalAlignment="Center"
                 RowSpacing="4">
 
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="LeftColumn" Width="*" />
-                <ColumnDefinition x:Name="RightColumn" Width="*" />
-            </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-
-            <TextBlock
-                x:Name="CustomText"
-                Grid.Column="0"
-                Grid.Row="0"
-                Style="{StaticResource BodyTextBlockStyle}"
-                TextWrapping="WrapWholeWords"
-                VerticalAlignment="Center" />
-
-            <StackPanel
-                x:Name="UnsavedRow"
-                Grid.Column="1"
-                Grid.Row="0"
-                Orientation="Horizontal"
-                Spacing="12"
-                VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="LeftColumn" Width="*" />
+                    <ColumnDefinition x:Name="RightColumn" Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
                 <TextBlock
-                    x:Name="UnsavedText"
+                    x:Name="CustomText"
+                    Grid.Column="0"
+                    Grid.Row="0"
                     Style="{StaticResource BodyTextBlockStyle}"
                     TextWrapping="WrapWholeWords"
                     VerticalAlignment="Center" />
 
-                <ContentPresenter
-                    x:Name="TrailingHost"
-                    VerticalAlignment="Center" />
-            </StackPanel>
+                <StackPanel
+                    x:Name="UnsavedRow"
+                    Grid.Column="1"
+                    Grid.Row="0"
+                    Orientation="Horizontal"
+                    Spacing="12"
+                    VerticalAlignment="Center">
+
+                    <TextBlock
+                        x:Name="UnsavedText"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        TextWrapping="WrapWholeWords"
+                        VerticalAlignment="Center" />
+
+                    <ContentPresenter
+                        x:Name="TrailingHost"
+                        VerticalAlignment="Center" />
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>

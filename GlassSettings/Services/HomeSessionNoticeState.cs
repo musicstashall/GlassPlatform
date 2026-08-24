@@ -26,6 +26,9 @@ internal static class HomeSessionNoticeState
     /// <summary>Жёлтое закрыто руками в текущей сессии несохранённых — не показывать до новой мутации/сохранения.</summary>
     public static bool YellowDismissed { get; private set; }
 
+    /// <summary>Жёлтое уведомление о перезагрузке закрыто — показать кнопку в карточке, не повторять notice.</summary>
+    public static bool RebootNoticeDismissed { get; private set; }
+
     /// <summary>Левая часть футера (кастомизация) раскрыта — после осаждения стартового green.</summary>
     public static bool FooterLeftRevealed { get; private set; }
 
@@ -168,6 +171,16 @@ internal static class HomeSessionNoticeState
 
         if (changed)
             SummaryFooterRevealedChanged?.Invoke(null, EventArgs.Empty);
+    }
+
+    /// <summary>Пользователь закрыл жёлтое уведомление о перезагрузке.</summary>
+    public static void DismissRebootNotice() => RebootNoticeDismissed = true;
+
+    /// <summary>Требование перезагрузки отменено — сбросить dismiss для следующего цикла.</summary>
+    public static void ResetRebootNoticeIfInactive(bool requiresRestart)
+    {
+        if (!requiresRestart)
+            RebootNoticeDismissed = false;
     }
 
     // --- Анимация открытия ---

@@ -25,5 +25,7 @@
     </ClCompile>
     <ClCompile Include="VisualStyleApplyNative.cpp">
     </ClCompile>
+    <ClCompile Include="SecureUxThemeNative.cpp">
+    </ClCompile>
   </ItemGroup>
 </Project>

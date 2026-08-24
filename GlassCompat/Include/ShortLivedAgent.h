@@ -55,6 +55,12 @@ namespace GlassCompat
             return true;
         }
 
+        if (CmdLineHasMainSwitch(cmd, L"/forceUnload") ||
+            CmdLineHasMainSwitch(cmd, L"-forceUnload"))
+        {
+            return true;
+        }
+
         return false;
     }
 }

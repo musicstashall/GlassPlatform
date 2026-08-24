@@ -266,6 +266,25 @@ namespace
         out[0] = L'\0';
         if (!GlassShellExt::g_module)
             return false;
+
+        // Получить каталог GlassShellExt.dll
+        wchar_t dllDir[MAX_PATH]{};
+        if (::GetModuleFileNameW(GlassShellExt::g_module, dllDir, MAX_PATH) == 0)
+            return false;
+        wchar_t* slash = wcsrchr(dllDir, L'\\');
+        if (!slash)
+            return false;
+        *(slash + 1) = L'\0';
+
+        // Сначала искать в подпапке GlassSettings\ (новая структура)
+        wchar_t candidate[MAX_PATH]{};
+        if (SUCCEEDED(::StringCchPrintfW(candidate, _countof(candidate), L"%sGlassSettings\\%s", dllDir, kGlassSettingsExe)))
+        {
+            if (::GetFileAttributesW(candidate) != INVALID_FILE_ATTRIBUTES)
+                return ::StringCchCopyW(out, cch, candidate) == S_OK;
+        }
+
+        // Fallback: рядом с GlassShellExt.dll (установленная платформа)
         const std::wstring path = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
             GlassShellExt::g_module, kGlassSettingsExe);
         if (path.empty())
@@ -301,76 +320,13 @@ namespace
         return true;
     }
 
-    [[nodiscard]] bool ResolveGlassCompatDllPath(wchar_t* out, size_t cch) noexcept
-    {
-        if (!out || cch == 0)
-            return false;
-        out[0] = L'\0';
-        if (!GlassShellExt::g_module)
-            return false;
-        const std::wstring path = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
-            GlassShellExt::g_module, L"GlassCompat.dll");
-        if (path.empty())
-            return false;
-        return ::StringCchCopyW(out, cch, path.c_str()) == S_OK;
-    }
-
-    [[nodiscard]] bool ResolveGlassCompatDllPathForArch(
-        GS::PlatformArch arch,
-        wchar_t* out,
-        size_t cch) noexcept
-    {
-        if (!out || cch == 0 || !GlassShellExt::g_module)
-            return false;
-        out[0] = L'\0';
-
-        const auto moduleArch = arch == GS::PlatformArch::X64
-            ? GlassShared::GlassModulePath::ModuleArch::X64
-            : GlassShared::GlassModulePath::ModuleArch::X86;
-        const std::wstring path = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
-            GlassShellExt::g_module, L"GlassCompat.dll", moduleArch);
-        if (path.empty())
-            return false;
-        return ::StringCchCopyW(out, cch, path.c_str()) == S_OK;
-    }
-
-    [[nodiscard]] bool ResolveRundll32ForArch(GS::PlatformArch arch, wchar_t* out, size_t cch) noexcept
-    {
-        if (!out || cch == 0)
-            return false;
-        out[0] = L'\0';
-
-        if (arch == GS::PlatformArch::X86 && GlassShared::GlassModulePath::IsOs64Bit())
-        {
-            if (::GetSystemWow64DirectoryW(out, static_cast<UINT>(cch)) == 0)
-                return false;
-            return ::StringCchCatW(out, cch, L"\\rundll32.exe") == S_OK;
-        }
-
-        if (::GetSystemDirectoryW(out, static_cast<UINT>(cch)) == 0)
-            return false;
-        return ::StringCchCatW(out, cch, L"\\rundll32.exe") == S_OK;
-    }
-
-    void LaunchPlatformStartElevated(HWND owner, GS::PlatformArch arch) noexcept
+    void LaunchPlatformStart(GS::PlatformArch arch) noexcept
     {
         if (GS::IsGlassPlatformRunning(arch))
             return;
 
-        wchar_t compatDll[MAX_PATH]{};
-        if (!ResolveGlassCompatDllPathForArch(arch, compatDll, _countof(compatDll)))
-            return;
-
-        wchar_t rundll[MAX_PATH]{};
-        if (!ResolveRundll32ForArch(arch, rundll, _countof(rundll)))
-            return;
-
-        wchar_t args[1024]{};
-        if (FAILED(::StringCchPrintfW(
-                args, _countof(args), L"\"%s\",Main /shellStartPlatform", compatDll)))
-            return;
-
-        (void)::ShellExecuteW(owner, L"runas", rundll, args, nullptr, SW_HIDE);
+        // Только задача планировщика — пути GlassCompat.dll ShellExt не резолвит.
+        GS::StartPlatform(arch);
     }
 }
 
@@ -466,6 +422,7 @@ namespace GlassDesktopActions
 
     void ExecutePlatformToggle(HWND owner, GS::PlatformArch arch) noexcept
     {
+        (void)owner;
         if (!GS::GlassAutorunTaskExists(arch))
             return;
         {
@@ -479,7 +436,7 @@ namespace GlassDesktopActions
         {
             if (!GS::TryBeginLifecycleBusy(arch))
                 return;
-            LaunchPlatformStartElevated(owner, arch);
+            LaunchPlatformStart(arch);
             // Busy до Running; при battery/schtasks deny — таймаут и сброс (не вечный lock).
             const auto a = arch;
             std::thread([a]() noexcept {

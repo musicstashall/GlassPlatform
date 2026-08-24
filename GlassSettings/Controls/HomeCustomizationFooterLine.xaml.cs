@@ -7,9 +7,8 @@ using Microsoft.UI.Xaml.Media;
 namespace GlassSettings.Controls;
 
 /// <summary>
-/// Подстрока-футер карточки устройства на «Обзоре». Две независимые части:
-/// левая — кастомизация, правая — несохранённые изменения (+ «Сохранить»).
-/// Если левая пустая — её ширина 0, правая позиционируется слева.
+/// Подстрока-футер карточки устройства на «Обзоре».
+/// Левая часть — кастомизация, правая — несохранённые изменения (+ «Сохранить»).
 /// При узком окне (обе части) — раскладка в две строки.
 /// </summary>
 public sealed partial class HomeCustomizationFooterLine : UserControl
@@ -27,9 +26,9 @@ public sealed partial class HomeCustomizationFooterLine : UserControl
     public event EventHandler? UnsavedLinkClicked;
 
     private bool _hasLeft;
-    private bool _hasRight;
     private string _leftPrefix = string.Empty;
     private string _leftLink = string.Empty;
+    private bool _hasRight;
     private string _rightPrefix = string.Empty;
     private string _rightLink = string.Empty;
     private string _rightPlain = string.Empty;
@@ -45,7 +44,7 @@ public sealed partial class HomeCustomizationFooterLine : UserControl
         set => SetValue(TrailingContentProperty, value);
     }
 
-    /// <summary>Установить обе части футера. Пустая часть скрывается, её колонка обнуляется.</summary>
+    /// <summary>Установить левую и правые части футера.</summary>
     public void SetParts(
         bool hasLeft,
         string leftPrefix,
@@ -66,6 +65,14 @@ public sealed partial class HomeCustomizationFooterLine : UserControl
         RebuildSegments();
         UpdateLayoutMode();
     }
+
+    /// <summary>Установить левую часть только.</summary>
+    public void SetParts(bool hasLeft, string leftPrefix, string? leftLink)
+        => SetParts(hasLeft, leftPrefix, leftLink, false, null, null, null);
+
+    /// <summary>Установить правую часть только.</summary>
+    public void SetParts(bool hasRight, string rightPrefix, string? rightLink, string? rightPlain)
+        => SetParts(false, string.Empty, null, hasRight, rightPrefix, rightLink, rightPlain);
 
     public void RefreshAccentAppearance() => RebuildSegments();
 
@@ -96,22 +103,32 @@ public sealed partial class HomeCustomizationFooterLine : UserControl
         CustomText.Visibility = _hasLeft ? Visibility.Visible : Visibility.Collapsed;
         UnsavedRow.Visibility = _hasRight ? Visibility.Visible : Visibility.Collapsed;
 
-        // Кнопка «Сохранить» живёт в правой части — показываем только вместе с правой строкой.
         TrailingHost.Content = _hasRight ? TrailingContent : null;
 
-        var stack = _hasLeft && _hasRight && ActualWidth > 0 && ActualWidth < StackBreakpoint;
+        var hasContent = _hasLeft || _hasRight;
+        var activeCount = (_hasLeft ? 1 : 0) + (_hasRight ? 1 : 0);
+
+        var stack = activeCount >= 2 && ActualWidth > 0 && ActualWidth < StackBreakpoint;
         if (stack)
         {
             LeftColumn.Width = StarLength;
             RightColumn.Width = ZeroLength;
 
-            Grid.SetColumn(CustomText, 0);
-            Grid.SetRow(CustomText, 0);
-            Grid.SetColumnSpan(CustomText, 2);
+            var row = 0;
+            if (_hasLeft)
+            {
+                Grid.SetColumn(CustomText, 0);
+                Grid.SetRow(CustomText, row);
+                Grid.SetColumnSpan(CustomText, 2);
+                row++;
+            }
 
-            Grid.SetColumn(UnsavedRow, 0);
-            Grid.SetRow(UnsavedRow, 1);
-            Grid.SetColumnSpan(UnsavedRow, 2);
+            if (_hasRight)
+            {
+                Grid.SetColumn(UnsavedRow, 0);
+                Grid.SetRow(UnsavedRow, row);
+                Grid.SetColumnSpan(UnsavedRow, 2);
+            }
             return;
         }
 
@@ -120,25 +137,7 @@ public sealed partial class HomeCustomizationFooterLine : UserControl
         Grid.SetRow(UnsavedRow, 0);
         Grid.SetColumnSpan(UnsavedRow, 1);
         Grid.SetColumn(CustomText, 0);
-        Grid.SetColumn(UnsavedRow, 1);
-
-        if (_hasLeft && _hasRight)
-        {
-            LeftColumn.Width = StarLength;
-            RightColumn.Width = StarLength;
-        }
-        else if (_hasLeft)
-        {
-            // Только левая — занимает всю ширину.
-            LeftColumn.Width = StarLength;
-            RightColumn.Width = ZeroLength;
-        }
-        else
-        {
-            // Только правая — левая колонка обнулена, правая прижата слева.
-            LeftColumn.Width = ZeroLength;
-            RightColumn.Width = StarLength;
-        }
+        Grid.SetColumn(UnsavedRow, _hasLeft ? 1 : 0);
     }
 
     private static void AppendPrefix(TextBlock target, string prefix)

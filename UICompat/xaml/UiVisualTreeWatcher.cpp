@@ -5,6 +5,7 @@
 #include "xaml/JumpListPanelRegistry.hpp"
 #include "xaml/ShellSurfacePanelRegistry.hpp"
 #include "xaml/SearchWebViewPanelRegistry.hpp"
+#include "xaml/ShellTooltipPanelRegistry.hpp"
 #include "xaml/XamlDiagInit.hpp"
 
 #include <DebugLog.h>
@@ -252,6 +253,12 @@ namespace UICompat
                 Registry::ReadSurface(Registry::SurfaceKind::Menu)))
     {
         (void)settings; // pending Popup — surface-specific читаем выше
+
+        // ShellTooltip: всегда инициализировать (как и другие registries).
+        m_shellTooltipRegistry = std::make_unique<ShellTooltipPanelRegistry>(
+            diagnostics,
+            Registry::ReadSurface(Registry::SurfaceKind::Tooltip));
+
         m_xamlDiagnostics = diagnostics;
         if (m_xamlDiagnostics)
             m_xamlDiagnostics->AddRef();
@@ -364,7 +371,17 @@ namespace UICompat
                         && menuFlyoutHost
                         && (typeSkip == L"Windows.UI.Xaml.Controls.MenuFlyoutPresenter"
                             || typeSkip.ends_with(L".MenuFlyoutPresenter"));
-                    if (!toastTarget && !menuFlyoutTarget && !jumpListTarget)
+                    // ToolTip (Start/Search) могут быть на другом STA —
+                    // обработать без adopt (не красть NC / Start tid).
+                    const bool tooltipHost =
+                        Shared::RootBackdropPolicy::IsStartMenuHostProcess()
+                        || Shared::RootBackdropPolicy::IsSearchHostProcess();
+                    const bool tooltipTarget =
+                        mutationType == Add
+                        && tooltipHost
+                        && (typeSkip == L"Windows.UI.Xaml.Controls.ToolTip"
+                            || typeSkip.ends_with(L".ToolTip"));
+                    if (!toastTarget && !menuFlyoutTarget && !tooltipTarget && !jumpListTarget)
                     {
                         const bool ncTarget =
                             mutationType == Add && IsNcAdoptName(nameSkip);
@@ -394,6 +411,8 @@ namespace UICompat
                     return S_OK;
                 if (TryRegisterSearchWebView(element.Handle, type, name))
                     return S_OK;
+                if (TryRegisterShellTooltip(element.Handle, type))
+                    return S_OK;
                 // Border шаблона MenuFlyout часто появляется после Presenter Add.
                 if (m_menuFlyoutRegistry && m_menuFlyoutRegistry->PanelCount() > 0
                     && m_menuFlyoutRegistry->UnresolvedCount() > 0)
@@ -404,6 +423,11 @@ namespace UICompat
                     && m_jumpListRegistry->UnresolvedCount() > 0)
                 {
                     m_jumpListRegistry->RetryUnresolvedPanels();
+                }
+                if (m_shellTooltipRegistry && m_shellTooltipRegistry->PanelCount() > 0
+                    && m_shellTooltipRegistry->UnresolvedCount() > 0)
+                {
+                    m_shellTooltipRegistry->RetryUnresolvedPanels();
                 }
                 return S_OK;
             }
@@ -419,6 +443,8 @@ namespace UICompat
                     m_jumpListRegistry->Unregister(element.Handle);
                 if (m_searchWebViewRegistry)
                     m_searchWebViewRegistry->Unregister(element.Handle);
+                if (m_shellTooltipRegistry)
+                    m_shellTooltipRegistry->Unregister(element.Handle);
                 if (m_shellRegistry)
                     m_shellRegistry->Unregister(element.Handle);
                 return S_OK;
@@ -457,6 +483,8 @@ namespace UICompat
             m_jumpListRegistry->RestoreAll();
         if (m_searchWebViewRegistry)
             m_searchWebViewRegistry->RestoreAll();
+        if (m_shellTooltipRegistry)
+            m_shellTooltipRegistry->RestoreAll();
         if (m_shellRegistry)
             m_shellRegistry->RestoreAll();
     }
@@ -471,6 +499,8 @@ namespace UICompat
             m_jumpListRegistry->ReapplyPatchedBrushes();
         if (m_searchWebViewRegistry)
             m_searchWebViewRegistry->ReapplyPatchedBrushes();
+        if (m_shellTooltipRegistry)
+            m_shellTooltipRegistry->ReapplyPatchedBrushes();
         if (m_shellRegistry)
             m_shellRegistry->ReapplyPatchedBrushes();
     }
@@ -479,6 +509,7 @@ namespace UICompat
     {
         const auto popup = Registry::ReadSurface(Registry::SurfaceKind::Popup);
         const auto menu = Registry::ReadSurface(Registry::SurfaceKind::Menu);
+        const auto tooltip = Registry::ReadSurface(Registry::SurfaceKind::Tooltip);
         if (m_ncRegistry)
             m_ncRegistry->RecaptureAfterThemeChange(popup);
         if (m_shellRegistry)
@@ -487,6 +518,8 @@ namespace UICompat
             m_menuFlyoutRegistry->RecaptureAfterThemeChange(menu);
         if (m_jumpListRegistry)
             m_jumpListRegistry->RecaptureAfterThemeChange(menu);
+        if (m_shellTooltipRegistry)
+            m_shellTooltipRegistry->RecaptureAfterThemeChange(tooltip);
         // SearchWebView: CSS/WebView — без XAML original*; Reapply достаточно.
         if (m_searchWebViewRegistry)
             m_searchWebViewRegistry->UpdateSettings(menu);
@@ -496,6 +529,7 @@ namespace UICompat
     {
         const auto popup = Registry::ReadSurface(Registry::SurfaceKind::Popup);
         const auto menu = Registry::ReadSurface(Registry::SurfaceKind::Menu);
+        const auto tooltip = Registry::ReadSurface(Registry::SurfaceKind::Tooltip);
         if (m_ncRegistry)
             m_ncRegistry->RefreshBrushesAfterThemeChange(popup);
         if (m_shellRegistry)
@@ -504,6 +538,8 @@ namespace UICompat
             m_menuFlyoutRegistry->RefreshBrushesAfterThemeChange(menu);
         if (m_jumpListRegistry)
             m_jumpListRegistry->RefreshBrushesAfterThemeChange(menu);
+        if (m_shellTooltipRegistry)
+            m_shellTooltipRegistry->RecaptureAfterThemeChange(tooltip);
         if (m_searchWebViewRegistry)
             m_searchWebViewRegistry->UpdateSettings(menu);
     }
@@ -513,6 +549,7 @@ namespace UICompat
         (void)settings;
         const auto popup = Registry::ReadSurface(Registry::SurfaceKind::Popup);
         const auto menu = Registry::ReadSurface(Registry::SurfaceKind::Menu);
+        const auto tooltip = Registry::ReadSurface(Registry::SurfaceKind::Tooltip);
         if (m_ncRegistry)
             m_ncRegistry->UpdateSettings(popup);
         if (m_shellRegistry)
@@ -523,6 +560,14 @@ namespace UICompat
             m_jumpListRegistry->UpdateSettings(menu);
         if (m_searchWebViewRegistry)
             m_searchWebViewRegistry->UpdateSettings(menu);
+        if (m_shellTooltipRegistry)
+            m_shellTooltipRegistry->UpdateSettings(tooltip);
+        else if (tooltip.paintPathXaml && popup.paintPathXaml)
+        {
+            // Создать registry если tooltip включён после старта.
+            m_shellTooltipRegistry = std::make_unique<ShellTooltipPanelRegistry>(
+                m_xamlDiagnostics, tooltip);
+        }
     }
 
     unsigned UiVisualTreeWatcher::NcPanelCount() const noexcept
@@ -799,6 +844,30 @@ namespace UICompat
             ScheduleDiscoverSearchWebViewSubtree(fe);
 
         return m_searchWebViewRegistry->PanelCount() > before || hostSubtree;
+    }
+
+    bool UiVisualTreeWatcher::TryRegisterShellTooltip(
+        InstanceHandle handle,
+        std::wstring_view type) noexcept
+    {
+        if (!m_shellTooltipRegistry || handle == 0)
+            return false;
+        if (type != L"Windows.UI.Xaml.Controls.ToolTip" && !type.ends_with(L".ToolTip"))
+            return false;
+
+        g_vtcStage = L"ShellTooltip";
+        try
+        {
+            const auto root = FromHandle<wux::FrameworkElement>(handle);
+            if (!root)
+                return false;
+            m_shellTooltipRegistry->RegisterPanel(handle, root);
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     bool UiVisualTreeWatcher::TryRegisterShellSurfaceBorder(

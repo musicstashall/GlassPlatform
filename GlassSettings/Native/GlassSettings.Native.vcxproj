@@ -72,7 +72,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>GlassShared.lib;ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -87,7 +87,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>GlassShared.lib;ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -103,7 +103,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>GlassShared.lib;ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -118,7 +118,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>GlassShared.lib;ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -129,13 +129,14 @@
     <ClCompile Include="OpenGlassHostTask.cpp" />
     <ClCompile Include="PlatformPresenceNative.cpp" />
     <ClCompile Include="InjectProcessMapNative.cpp" />
-    <ClCompile Include="ForceUnloadGlassModules.cpp" />
     <ClCompile Include="ShellExtensionQuery.cpp" />
     <ClCompile Include="ShellExtensionOps.cpp" />
     <ClCompile Include="SymbolModuleInfo.cpp" />
     <ClCompile Include="ShellSparsePackage.cpp" />
     <ClCompile Include="ShellDevCertificate.cpp" />
     <ClCompile Include="VisualStyleApplyNative.cpp" />
+    <ClCompile Include="SecureUxThemeNative.cpp" />
+    <ClCompile Include="BlockListNative.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\GlassShared\GlassShared.vcxproj">

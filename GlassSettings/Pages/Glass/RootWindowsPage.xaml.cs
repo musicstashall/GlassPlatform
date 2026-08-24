@@ -291,7 +291,7 @@ public sealed partial class RootWindowsPage : Page, ISettingsCommitScopeProvider
 
     private static void AddRootBackdropExternalHint(TextBlock target)
     {
-        var exe = OpenGlassVersionService.TryResolveOpenGlassGuiExePath();
+        var exe = PlatformPaths.OpenGlassGuiPath;
         if (string.IsNullOrWhiteSpace(exe))
         {
             AddInlineText(target, GlassSettingsResources.Get("Notice_OgRootBackdrop_ActionExternal"));

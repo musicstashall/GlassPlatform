@@ -23,7 +23,7 @@ public static class OpenGlassHostService
         if (LegacyHostTaskExists())
             return OpenGlassOrchestrationBackend.Task;
 
-        return !string.IsNullOrEmpty(OpenGlassVersionService.ResolveOpenGlassHostExePath())
+        return !string.IsNullOrEmpty(PlatformPaths.OpenGlassHostPath)
             ? OpenGlassOrchestrationBackend.Service
             : OpenGlassOrchestrationBackend.Task;
     }
@@ -66,7 +66,7 @@ public static class OpenGlassHostService
     {
         try
         {
-            var dll = OpenGlassVersionService.ResolveOpenGlassDllPath();
+            var dll = PlatformPaths.OpenGlassDllPath;
             if (string.IsNullOrEmpty(dll))
                 return LegacyHostTaskExists();
 

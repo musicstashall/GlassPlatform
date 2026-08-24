@@ -6,6 +6,9 @@ namespace GlassSettings.Services;
 internal static class StaThreadRunner
 {
     private const int DefaultTimeoutMs = 3000;
+    // Как <StackReserveSize> у exe: default 1MB на new Thread() даёт GS cookie
+    // в shell32/GDI+/FileVersionInfo (ISE x86, dump line 70).
+    private const int StaStackSizeBytes = 4 * 1024 * 1024;
 
     private sealed record WorkItem(Func<object?> Action, TaskCompletionSource<object?> Completion);
 
@@ -14,13 +17,19 @@ internal static class StaThreadRunner
 
     static StaThreadRunner()
     {
-        Worker = new Thread(WorkerLoop)
+        Worker = CreateStaThread(WorkerLoop, "GlassSettings.StaThreadRunner");
+        Worker.Start();
+    }
+
+    private static Thread CreateStaThread(ThreadStart start, string name)
+    {
+        var thread = new Thread(start, StaStackSizeBytes)
         {
             IsBackground = true,
-            Name = "GlassSettings.StaThreadRunner"
+            Name = name
         };
-        Worker.SetApartmentState(ApartmentState.STA);
-        Worker.Start();
+        thread.SetApartmentState(ApartmentState.STA);
+        return thread;
     }
 
     public static T? Run<T>(Func<T> func)
@@ -63,22 +72,19 @@ internal static class StaThreadRunner
 
         T? result = default;
         Exception? error = null;
-        var thread = new Thread(() =>
-        {
-            try
+        var thread = CreateStaThread(
+            () =>
             {
-                result = func();
-            }
-            catch (Exception ex)
-            {
-                error = ex;
-            }
-        })
-        {
-            IsBackground = true,
-            Name = "GlassSettings.StaCall"
-        };
-        thread.SetApartmentState(ApartmentState.STA);
+                try
+                {
+                    result = func();
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                }
+            },
+            "GlassSettings.StaCall");
         thread.Start();
         if (!thread.Join(timeoutMs))
             return default;

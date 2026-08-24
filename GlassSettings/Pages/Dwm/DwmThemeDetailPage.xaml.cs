@@ -727,9 +727,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         _reflectionRow.Reload();
         _reflectionMaxRow.Reload();
 
-        AtlasCollectionExpander.IsGateOn = DwmRegistryStore.HasAnyPresentForPage(
-            _hive,
-            [AtlasRegistryKey, LegacyAtlasRegistryKey]);
+        AtlasCollectionExpander.IsGateOn = _atlasItems.Count > 0
+            || DwmRegistryStore.HasAnyPresentForPage(
+                _hive,
+                [AtlasRegistryKey, LegacyAtlasRegistryKey]);
         ApplyPolicyGateVisual(PolicyGateSwitch.IsOn);
 
         UpdateValueLabels();

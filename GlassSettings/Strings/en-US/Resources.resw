@@ -36,6 +36,7 @@
   <data name="Runtime_UnloadAllConfirmBody" xml:space="preserve"><value>Glass modules will be unloaded from every process in the list.</value></data>
   <data name="Runtime_UnloadAndExclude" xml:space="preserve"><value>Unload and exclude</value></data>
   <data name="Runtime_UnloadAndForbid" xml:space="preserve"><value>Unload and forbid</value></data>
+  <data name="Runtime_UnloadNeedsX86Package" xml:space="preserve"><value>Force-unloading from a 32-bit process requires the installed x86 platform package (InstallPath in the registry).</value></data>
   <data name="Runtime_CopyName" xml:space="preserve"><value>Copy name</value></data>
   <data name="Runtime_SubsystemState" xml:space="preserve"><value>Subsystem state</value></data>
   <data name="Runtime_SubsystemsTitleFormat" xml:space="preserve"><value>Subsystem state {0}</value></data>
@@ -724,6 +725,7 @@
   <data name="Status_Enable" xml:space="preserve"><value>Enable</value></data>
   <data name="Status_EnableScheduler" xml:space="preserve"><value>Enable in Task Scheduler</value></data>
   <data name="Status_NoTask" xml:space="preserve"><value>No scheduled task</value></data>
+  <data name="Status_PlatformNotInstalled" xml:space="preserve"><value>Not installed</value></data>
   <data name="Status_Ready" xml:space="preserve"><value>Ready</value></data>
   <data name="Status_Running" xml:space="preserve"><value>Running</value></data>
   <data name="Status_Unloading" xml:space="preserve"><value>Unloading</value></data>
@@ -802,7 +804,27 @@
   <data name="Themes_ApplySystemFonts" xml:space="preserve"><value>Apply system fonts</value></data>
   <data name="Themes_ApplySystemFontsDesc" xml:space="preserve"><value>Use fonts from the current Windows theme</value></data>
   <data name="Themes_ApplySystemFontsStub" xml:space="preserve"><value>Applying system fonts will be available in a future version</value></data>
-  <data name="Themes_AdvancedTitle" xml:space="preserve"><value>Advanced</value></data>
+  <data name="Themes_SignatureCardTitle" xml:space="preserve"><value>Digital signature</value></data>
+  <data name="Themes_SignatureCardDesc" xml:space="preserve"><value>Bypass digital signature checks</value></data>
+  <data name="Themes_SignatureActivated" xml:space="preserve"><value>Signature bypass activated.</value></data>
+  <data name="Themes_SignatureDeactivated" xml:space="preserve"><value>Signature bypass deactivated.</value></data>
+  <data name="Themes_RestartRequired" xml:space="preserve"><value>Restart required.</value></data>
+  <data name="Themes_RestartNotRequired" xml:space="preserve"><value>No restart required.</value></data>
+  <data name="Themes_SignatureActivateFailedFormat" xml:space="preserve"><value>Could not enable signature bypass (0x{0:X8})</value></data>
+  <data name="Themes_SignatureDeactivateFailedFormat" xml:space="preserve"><value>Could not disable signature bypass (0x{0:X8})</value></data>
+  <data name="Themes_SignatureStockThemeFailed" xml:space="preserve"><value>Could not apply the built-in Windows theme. Deactivation was cancelled.</value></data>
+  <data name="Themes_SignatureApplyBlockedPending" xml:space="preserve"><value>Custom themes cannot be applied until the computer is restarted.</value></data>
+  <data name="Dialog_SignatureTitle" xml:space="preserve"><value>Digital signature</value></data>
+  <data name="Dialog_SignatureOfficialBody" xml:space="preserve"><value>This option cannot be used. Uninstall the official SecureUxTheme version from Installed apps first.</value></data>
+  <data name="Dialog_SignatureLegacyBody" xml:space="preserve"><value>This option cannot be used. Uninstall the official SecureUxTheme version with the matching ThemeTool first.</value></data>
+  <data name="Dialog_SignatureConflictBody" xml:space="preserve"><value>An incomplete or conflicting SecureUxTheme installation was found. Automatic repair is not available.</value></data>
+  <data name="Dialog_SignatureWrongArchBody" xml:space="preserve"><value>The module architecture does not match this system. Open the GlassSettings build that matches Windows.</value></data>
+  <data name="Dialog_SignatureWow64Body" xml:space="preserve"><value>The x86 GlassSettings build cannot activate the patcher on 64-bit Windows. Open x64 GlassSettings.</value></data>
+  <data name="Dialog_SignatureActivateConfirm" xml:space="preserve"><value>Turning this on changes winlogon.exe load settings and requires a computer restart. Continue?</value></data>
+  <data name="Dialog_SignatureDeactivateConfirm" xml:space="preserve"><value>Turning this off requires a restart. If a custom theme is active, the built-in Windows theme will be applied. Continue?</value></data>
+  <data name="Dialog_SignatureConfirm" xml:space="preserve"><value>Continue</value></data>
+  <data name="Themes_SignatureRebootButton" xml:space="preserve"><value>Restart</value></data>
+  <data name="Home_FooterRebootRequired" xml:space="preserve"><value>Restart required</value></data>
   <data name="Themes_BrowseStub" xml:space="preserve"><value>Browse themes — stub</value></data>
   <data name="Themes_BrowseSite_7themes" xml:space="preserve"><value>7themes.su</value></data>
   <data name="Themes_BrowseSite_vsthemes" xml:space="preserve"><value>vsthemes.org</value></data>
@@ -858,7 +880,9 @@
   <data name="Themes_Colors_AccentBodyDesc" xml:space="preserve"><value>Choose an accent color for buttons, links, and WinUI elements. It applies system-wide and to app windows.</value></data>
   <data name="Themes_Colors_AccentDesc" xml:space="preserve"><value>Color of WinUI window elements</value></data>
   <data name="Themes_Colors_ModeBodyDesc" xml:space="preserve"><value>Set Windows shell mode and app mode separately.</value></data>
-  <data name="Themes_DeleteConfirmFormat" xml:space="preserve"><value>Delete theme “{0}”? This cannot be undone.</value></data>
+  <data name="Themes_DeleteConfirmThemeOnlyFormat" xml:space="preserve"><value>You are about to delete the visual style “{0}”. Only the .theme settings file will be deleted; other variations of this style will not be affected.</value></data>
+  <data name="Themes_DeleteConfirmFullFormat" xml:space="preserve"><value>You are about to delete the visual style “{0}”. The selected style will be removed completely and cannot be restored.</value></data>
+  <data name="Themes_DeleteActiveLibraryBody" xml:space="preserve"><value>This visual style cannot be deleted while it is in use. Switch to another theme first.</value></data>
   <data name="Themes_DeleteFailedFormat" xml:space="preserve"><value>Failed to delete theme ({0})</value></data>
   <data name="Themes_DeleteMenu" xml:space="preserve"><value>Delete</value></data>
   <data name="Themes_DeleteSuccessFormat" xml:space="preserve"><value>Theme “{0}” deleted</value></data>
@@ -934,11 +958,9 @@
   <data name="Themes_Default" xml:space="preserve"><value>Default</value></data>
   <data name="Themes_Empty" xml:space="preserve"><value>No themes found</value></data>
   <data name="Themes_FindOnline" xml:space="preserve"><value>Find more themes online</value></data>
+  <data name="Themes_SecureUxThemeOnlineLink" xml:space="preserve"><value>SecureUxTheme online</value></data>
   <data name="Themes_OtherLabel" xml:space="preserve"><value>Other</value></data>
   <data name="Themes_PageSubtitle" xml:space="preserve"><value>Choose a Windows theme</value></data>
-  <data name="Themes_PatcherDesc" xml:space="preserve"><value>Patch .msstyles and theme resources</value></data>
-  <data name="Themes_PatcherStub" xml:space="preserve"><value>Theme patcher — stub</value></data>
-  <data name="Themes_PatcherTitle" xml:space="preserve"><value>Theme patcher</value></data>
   <data name="Themes_SectionDesc" xml:space="preserve"><value>Choose a combination of wallpapers, sounds, and colors to personalize your desktop</value></data>
   <data name="Themes_SystemFontsDesc" xml:space="preserve"><value>Glass system font settings</value></data>
   <data name="Themes_SystemFontsTitle" xml:space="preserve"><value>System fonts</value></data>

@@ -182,6 +182,7 @@
     <ClCompile Include="xaml\XamlImageBrushRetry.cpp" />
     <ClCompile Include="xaml\ShellSurfacePanelRegistry.cpp" />
     <ClCompile Include="xaml\SearchWebViewPanelRegistry.cpp" />
+    <ClCompile Include="xaml\ShellTooltipPanelRegistry.cpp" />
     <ClCompile Include="xaml\brushes\XamlBlurBrush.cpp" />
     <ClCompile Include="xaml\brushes\XamlBackdropFactory.cpp" />
     <ClCompile Include="xaml\effects\GaussianBlurEffect.cpp" />
@@ -203,6 +204,7 @@
     <ClInclude Include="xaml\XamlImageBrushRetry.hpp" />
     <ClInclude Include="xaml\ShellSurfacePanelRegistry.hpp" />
     <ClInclude Include="xaml\SearchWebViewPanelRegistry.hpp" />
+    <ClInclude Include="xaml\ShellTooltipPanelRegistry.hpp" />
     <ClInclude Include="xaml\brushes\XamlBlurBrush.hpp" />
     <ClInclude Include="xaml\brushes\XamlBackdropFactory.hpp" />
     <ClInclude Include="xaml\effects\GaussianBlurEffect.hpp" />

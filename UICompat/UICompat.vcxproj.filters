@@ -57,6 +57,9 @@
     <ClCompile Include="xaml\SearchWebViewPanelRegistry.cpp">
       <Filter>xaml</Filter>
     </ClCompile>
+    <ClCompile Include="xaml\ShellTooltipPanelRegistry.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
     <ClCompile Include="xaml\brushes\XamlBlurBrush.cpp">
       <Filter>xaml\brushes</Filter>
     </ClCompile>
@@ -110,6 +113,9 @@
       <Filter>xaml</Filter>
     </ClInclude>
     <ClInclude Include="xaml\SearchWebViewPanelRegistry.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\ShellTooltipPanelRegistry.hpp">
       <Filter>xaml</Filter>
     </ClInclude>
     <ClInclude Include="xaml\brushes\XamlBlurBrush.hpp">

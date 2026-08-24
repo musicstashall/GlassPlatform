@@ -137,7 +137,7 @@ internal static class ExecutableFilePickerListIconResolver
         if (PngInFlight.TryGetValue(fullPath, out var existing))
             return await existing.ConfigureAwait(false);
 
-        var loadTask = StaThreadRunner.RunAsyncWithTimeout(() => LoadIconPngBytes(fullPath));
+        var loadTask = StaThreadRunner.RunAsync(() => LoadIconPngBytes(fullPath));
         if (!PngInFlight.TryAdd(fullPath, loadTask))
             return await PngInFlight[fullPath].ConfigureAwait(false);
 

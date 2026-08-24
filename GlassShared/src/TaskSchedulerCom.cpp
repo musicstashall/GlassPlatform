@@ -275,6 +275,22 @@ namespace GlassShared
         return SUCCEEDED(root->DeleteTask(tn.b, 0));
     }
 
+    bool TaskSchedulerCom::DeleteRootSubfolder(const wchar_t* folderName) noexcept
+    {
+        if (!folderName || !*folderName || !m_service)
+            return false;
+
+        wil::com_ptr<ITaskFolder> root;
+        if (!EnsureConnectedRootFolder(root))
+            return false;
+
+        BstrWrap name(folderName);
+        if (!name)
+            return false;
+
+        return SUCCEEDED(root->DeleteFolder(name.b, 0));
+    }
+
     bool RunSchtasksOnTask(const wchar_t* fullTaskPathOrName, const wchar_t* verbArgs) noexcept
     {
         if (!fullTaskPathOrName || !verbArgs)

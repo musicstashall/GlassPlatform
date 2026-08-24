@@ -5,6 +5,12 @@ namespace GlassSettings.Controls;
 
 public sealed partial class HomeSettingsCard : UserControl
 {
+    private const double ResponsiveBreakpointDefault = 600;
+    private TextBlock? _rebootPromptText;
+    private Button? _rebootPromptButton;
+    private bool _isStackedLayout;
+    private double _responsiveBreakpoint = ResponsiveBreakpointDefault;
+
     public static readonly DependencyProperty CardTitleProperty =
         DependencyProperty.Register(nameof(CardTitle), typeof(string), typeof(HomeSettingsCard),
             new PropertyMetadata(string.Empty, OnHeaderChanged));
@@ -13,7 +19,12 @@ public sealed partial class HomeSettingsCard : UserControl
         DependencyProperty.Register(nameof(CardDescription), typeof(string), typeof(HomeSettingsCard),
             new PropertyMetadata(string.Empty, OnHeaderChanged));
 
-    public HomeSettingsCard() => InitializeComponent();
+    public HomeSettingsCard()
+    {
+        InitializeComponent();
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
+    }
 
     public string CardTitle
     {
@@ -35,6 +46,79 @@ public sealed partial class HomeSettingsCard : UserControl
                 yield return row;
         }
     }
+
+    /// <summary>Настроить блок «Требуется перезагрузка» + кнопку «Перезагрузить».</summary>
+    public void SetupRebootPrompt(string messageText, string buttonText, RoutedEventHandler? onButtonClick)
+    {
+        _rebootPromptText = new TextBlock
+        {
+            Text = messageText,
+            VerticalAlignment = VerticalAlignment.Center,
+            Style = Application.Current.Resources["CaptionTextBlockStyle"] as Style
+        };
+
+        _rebootPromptButton = new Button
+        {
+            Content = buttonText,
+            MinHeight = 28,
+            Padding = new Thickness(12, 2, 12, 2),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        if (Application.Current.Resources["GlassSettingsNoticeSaveButtonStyle"] is Style btnStyle)
+            _rebootPromptButton.Style = btnStyle;
+        if (onButtonClick is not null)
+            _rebootPromptButton.Click += onButtonClick;
+
+        RebootInline.Children.Add(_rebootPromptText);
+        RebootInline.Children.Add(_rebootPromptButton);
+
+        // Клон для stacked-режима (один Button нельзя иметь в двух панелях).
+        var stackedText = new TextBlock
+        {
+            Text = messageText,
+            VerticalAlignment = VerticalAlignment.Center,
+            Style = Application.Current.Resources["CaptionTextBlockStyle"] as Style
+        };
+        var stackedButton = new Button
+        {
+            Content = buttonText,
+            MinHeight = 28,
+            Padding = new Thickness(12, 2, 12, 2),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        if (Application.Current.Resources["GlassSettingsNoticeSaveButtonStyle"] is Style sBtnStyle)
+            stackedButton.Style = sBtnStyle;
+        if (onButtonClick is not null)
+            stackedButton.Click += onButtonClick;
+
+        RebootStacked.Children.Add(stackedText);
+        RebootStacked.Children.Add(stackedButton);
+
+        ApplyResponsiveLayout();
+    }
+
+    /// <summary>Показать/скрыть блок перезагрузки.</summary>
+    public void SetRebootPromptVisible(bool visible)
+    {
+        if (_rebootPromptButton is null)
+            return;
+
+        if (!visible)
+        {
+            RebootInline.Visibility = Visibility.Collapsed;
+            RebootStacked.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        // Всегда обновлять visibility, даже если _isStackedLayout не изменился.
+        var shouldStack = ActualWidth > 0 && ActualWidth < _responsiveBreakpoint;
+        _isStackedLayout = shouldStack;
+        RebootInline.Visibility = shouldStack ? Visibility.Collapsed : Visibility.Visible;
+        RebootStacked.Visibility = shouldStack ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Кнопка «Перезагрузить» (для прямого доступа к Visibility).</summary>
+    internal Button? RebootPromptButton => _rebootPromptButton;
 
     /// <summary>Корень карточки (для временного suppress ChildrenTransitions при reveal футера).</summary>
     internal Panel CardRootPanel => CardRoot;
@@ -126,6 +210,36 @@ public sealed partial class HomeSettingsCard : UserControl
         UpdateLeadLayout();
     }
 
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        SizeChanged += OnCardSizeChanged;
+        ApplyResponsiveLayout();
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        SizeChanged -= OnCardSizeChanged;
+    }
+
+    private void OnCardSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        ApplyResponsiveLayout();
+    }
+
+    private void ApplyResponsiveLayout()
+    {
+        if (_rebootPromptButton is null)
+            return;
+
+        var shouldStack = ActualWidth > 0 && ActualWidth < _responsiveBreakpoint;
+        if (shouldStack == _isStackedLayout)
+            return;
+
+        _isStackedLayout = shouldStack;
+        RebootInline.Visibility = shouldStack ? Visibility.Collapsed : Visibility.Visible;
+        RebootStacked.Visibility = shouldStack ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private void UpdateLeadLayout()
     {
         var hasLead = LeadHost.Content is not null;
@@ -143,7 +257,6 @@ public sealed partial class HomeSettingsCard : UserControl
             MainPanel.ClearValue(Grid.ColumnSpanProperty);
             var hasFooter = FooterHost.Visibility == Visibility.Visible &&
                             FooterHost.Content is FrameworkElement { Visibility: Visibility.Visible };
-            // Нижний отступ карточки — только во футере; иначе контент прижимается к разделителю.
             MainPanel.Padding = new Thickness(0, 12, 16, hasFooter ? 0 : 12);
             FooterHost.Padding = new Thickness(15, 0, 16, 0);
             FooterHost.HorizontalAlignment = HorizontalAlignment.Stretch;
@@ -160,7 +273,7 @@ public sealed partial class HomeSettingsCard : UserControl
         FooterHost.ClearValue(PaddingProperty);
         FooterHost.HorizontalAlignment = HorizontalAlignment.Stretch;
         MainPanel.SetValue(Grid.ColumnProperty, 0);
-        MainPanel.SetValue(Grid.ColumnSpanProperty, 2);
+        MainPanel.ClearValue(Grid.ColumnSpanProperty);
     }
 
     private static void OnHeaderChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

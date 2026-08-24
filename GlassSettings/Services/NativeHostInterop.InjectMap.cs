@@ -88,6 +88,17 @@ public static partial class NativeHostInterop
 
     public static bool ForceUnloadProcess(uint pid) => Native_ForceUnloadProcess(pid);
 
+    public static bool IsX86ForceUnloadAgentAvailable() => Native_IsX86ForceUnloadAgentAvailable();
+
+    public static string? TryGetAutorunGlassCompatInstallRoot(GlassPlatformArch arch)
+    {
+        var sb = new StringBuilder(1024);
+        if (!Native_TryGetAutorunGlassCompatInstallRootForArch((int)arch, sb, (uint)sb.Capacity))
+            return null;
+        var path = sb.ToString().Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.IsNullOrEmpty(path) ? null : path;
+    }
+
     public static bool HasShellInjectResiduals() =>
         HasShellInjectResiduals(GlassPlatformNames.NativeArch);
 
@@ -265,6 +276,17 @@ public static partial class NativeHostInterop
     [DllImport(Dll, EntryPoint = "GlassSettings_ForceUnloadProcess")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool Native_ForceUnloadProcess(uint pid);
+
+    [DllImport(Dll, EntryPoint = "GlassSettings_IsX86ForceUnloadAgentAvailable")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Native_IsX86ForceUnloadAgentAvailable();
+
+    [DllImport(Dll, EntryPoint = "GlassSettings_TryGetAutorunGlassCompatInstallRootForArch", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Native_TryGetAutorunGlassCompatInstallRootForArch(
+        int arch,
+        StringBuilder buf,
+        uint cch);
 
     [DllImport(Dll, EntryPoint = "GlassSettings_HasShellInjectResidualsForArch")]
     [return: MarshalAs(UnmanagedType.Bool)]

@@ -984,24 +984,29 @@ namespace UICompat
             {
                 try
                 {
-                    slot.chromeBorder.ClearValue(
-                        wux::Controls::Border::BackgroundProperty());
-                    restoredBg = true;
-                    if (preferNeutral)
+                    // SMEH: при hide (не Stop/DWM) — SetProperty(captured acrylic),
+                    // не ClearValue → прозрачность. ClearValue оставить для Stop/DWM/theme Neutral.
+                    const bool isHide = !preferNeutral && smehSoft && slot.originalBorderBackgroundVts3;
+                    if (isHide)
                     {
-                        if (const auto neut = CreateNeutralAcrylicBackdropBrush())
-                            slot.chromeBorder.Background(neut);
+                        restoredBg = RestoreBackgroundVts3(slot);
+                        hadOrig = restoredBg;
+                    }
+                    else
+                    {
+                        slot.chromeBorder.ClearValue(
+                            wux::Controls::Border::BackgroundProperty());
+                        restoredBg = true;
+                        if (preferNeutral)
+                        {
+                            if (const auto neut = CreateNeutralAcrylicBackdropBrush())
+                                slot.chromeBorder.Background(neut);
+                        }
                     }
                 }
                 catch (...)
                 {
                 }
-            }
-            if (!restoredBg && slot.chromeBorder && smehSoft && preferNeutral
-                && slot.originalBorderBackgroundVts3)
-            {
-                restoredBg = RestoreBackgroundVts3(slot);
-                hadOrig = restoredBg;
             }
             if (const auto ctrl = slot.root.try_as<wux::Controls::Control>())
             {
@@ -1268,12 +1273,9 @@ namespace UICompat
                 }
             }
 
-            const bool haveBgOrig =
-                static_cast<bool>(slot.originalBorderBackgroundVts3)
-                || static_cast<bool>(slot.originalBorderBackground);
-            const bool canPatchBg = !avoidWinrtCr || haveBgOrig || themeNeutral;
-
-            if (canPatchBg && !slot.backgroundPatched)
+            // Всегда apply кисть на chrome Border (как TrayMenuFlyout), не ждать haveBgOrig.
+            // Original capture для Stop, но не гейтит apply (fix reshow прозрачности).
+            if (!slot.backgroundPatched)
             {
                 if (themeNeutral)
                 {
@@ -1293,10 +1295,6 @@ namespace UICompat
                     solid.Color(clear);
                     ctrl.Background(solid);
                 }
-            }
-            else if (!canPatchBg)
-            {
-                slot.needsRetry = true;
             }
 
             // Уже ставили углы — только ждали BG: не повторять SetCorner VTS3.
@@ -1526,6 +1524,7 @@ namespace UICompat
             {
                 std::lock_guard lock(m_mx);
                 auto& ref = m_panels[handle];
+                const bool isReuse = static_cast<bool>(ref);
                 if (!ref)
                     ref = std::make_shared<PanelSlot>();
                 slot = ref;
@@ -1534,6 +1533,18 @@ namespace UICompat
                     slot->firstSeenTick = GetTickCount64();
                 if (m_themePreferNeutralRestore.load(std::memory_order_acquire))
                     slot->clearBackgroundOnRestore = true;
+
+                // Reuse слота (повторный показ меню без Remove): reset патч-флагов,
+                // чтобы apply заново выставил кисть (fix прозрачность со 2-го показа).
+                if (isReuse && (slot->sizeApplyDone || slot->backgroundPatched))
+                {
+                    slot->sizeApplyDone = false;
+                    slot->backgroundPatched = false;
+                    slot->chromePatched = false;
+                    slot->presenterCornerPatched = false;
+                    slot->appliedOk = false;
+                    slot->needsRetry = true;
+                }
             }
 
             ApplyPanelVisualsSync(*slot);

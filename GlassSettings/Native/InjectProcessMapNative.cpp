@@ -1,6 +1,8 @@
 #include <Windows.h>
 
-#include "ForceUnloadGlassModules.h"
+#include <ForceUnloadAgent.h>
+#include <ForceUnloadGlassModules.h>
+#include <GlassModulePath.h>
 
 #include <InjectModuleScan.h>
 #include <InjectProcessMap.h>
@@ -25,6 +27,27 @@ namespace
         return arch == static_cast<int>(GlassShared::GlassPlatformTask::PlatformArch::X86)
             ? GlassShared::GlassPlatformTask::PlatformArch::X86
             : GlassShared::GlassPlatformTask::PlatformArch::X64;
+    }
+
+    [[nodiscard]] BOOL ForceUnloadWithArchRouting(DWORD pid) noexcept
+    {
+        const auto result = Shared::ForceUnloadGlassModules::ForceUnload(pid);
+        switch (result)
+        {
+        case Shared::ForceUnloadGlassModules::ForceUnloadResult::Ok:
+            return TRUE;
+        case Shared::ForceUnloadGlassModules::ForceUnloadResult::NeedsX86Agent:
+        {
+            const std::wstring root = Shared::ForceUnloadAgent::TryGetX86InstallRoot();
+            if (root.empty())
+                return FALSE;
+            return Shared::ForceUnloadAgent::SpawnX86ForceUnloadAgent(pid, root.c_str()) ? TRUE : FALSE;
+        }
+        case Shared::ForceUnloadGlassModules::ForceUnloadResult::BlockedHost:
+        case Shared::ForceUnloadGlassModules::ForceUnloadResult::Failed:
+        default:
+            return FALSE;
+        }
     }
 }
 
@@ -109,12 +132,39 @@ extern "C"
         // Force: remote FreeLibrary (мёртвый residual / OS-pin без слушателя) — Unlocker-стиль.
         if (Shared::InjectProcessMap::SignalUnloadRequest(pid))
             return TRUE;
-        return GlassSettingsNative::ForceUnloadGlassModules(pid) ? TRUE : FALSE;
+        return ForceUnloadWithArchRouting(pid);
     }
 
     __declspec(dllexport) BOOL WINAPI GlassSettings_ForceUnloadProcess(DWORD pid) noexcept
     {
-        return GlassSettingsNative::ForceUnloadGlassModules(pid) ? TRUE : FALSE;
+        return ForceUnloadWithArchRouting(pid);
+    }
+
+    /// GS x64: x86 InstallPath или /TR x86-задачи + GlassCompat.dll для SysWOW64 rundll32 /forceUnload.
+    __declspec(dllexport) BOOL WINAPI GlassSettings_IsX86ForceUnloadAgentAvailable() noexcept
+    {
+#if defined(_WIN64)
+        return Shared::ForceUnloadAgent::TryGetX86InstallRoot().empty() ? FALSE : TRUE;
+#else
+        return TRUE;
+#endif
+    }
+
+    __declspec(dllexport) BOOL WINAPI GlassSettings_TryGetAutorunGlassCompatInstallRootForArch(
+        int arch,
+        wchar_t* buf,
+        DWORD cch) noexcept
+    {
+        if (!buf || cch == 0)
+            return FALSE;
+        buf[0] = L'\0';
+        const std::wstring root = GlassShared::GlassPlatformTask::TryGetAutorunGlassCompatInstallRoot(
+            ToPlatformArch(arch));
+        if (root.empty())
+            return FALSE;
+        if (wcscpy_s(buf, cch, root.c_str()) != 0)
+            return FALSE;
+        return TRUE;
     }
 
     /// arch: GlassPlatformArch / PlatformArch — 0 = x86, 1 = x64.

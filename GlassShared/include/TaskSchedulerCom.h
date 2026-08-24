@@ -51,6 +51,9 @@ namespace GlassShared
 
         [[nodiscard]] bool DeleteTaskInRootFolder(const wchar_t* taskName) noexcept;
 
+        /// <summary>Удалить подпапку корня планировщика (пусто / нет — false, без исключения).</summary>
+        [[nodiscard]] bool DeleteRootSubfolder(const wchar_t* folderName) noexcept;
+
     private:
         wil::com_ptr<ITaskService> m_service{};
 

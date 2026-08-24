@@ -30,13 +30,19 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <FontIcon
                 x:Name="IconGlyph"
                 VerticalAlignment="Center"
                 FontSize="{StaticResource GlassSettingsSectionIconSize}"
                 Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
-            <Grid Grid.Column="1" VerticalAlignment="Center" MaxHeight="44">
+            <Grid
+                x:Name="TextColumn"
+                Grid.Column="1"
+                MinWidth="100"
+                VerticalAlignment="Center"
+                MaxHeight="44">
                 <StackPanel Spacing="2">
                     <TextBlock
                         x:Name="TitleText"
@@ -53,6 +59,11 @@
                         TextWrapping="NoWrap" />
                 </StackPanel>
             </Grid>
+            <ContentPresenter
+                x:Name="TrailingHost"
+                Grid.Column="2"
+                VerticalAlignment="Center"
+                Visibility="Collapsed" />
         </Grid>
     </Border>
 </UserControl>

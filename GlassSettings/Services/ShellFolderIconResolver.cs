@@ -1,3 +1,4 @@
+using GlassSettings.Core.Platform;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 
@@ -39,7 +40,7 @@ internal static class ShellFolderIconResolver
         if (_folderIcon is not null)
             return;
 
-        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, FolderIconRelativePath));
+        var path = Path.GetFullPath(Path.Combine(PlatformPaths.AppBase, FolderIconRelativePath));
         if (File.Exists(path))
         {
             try

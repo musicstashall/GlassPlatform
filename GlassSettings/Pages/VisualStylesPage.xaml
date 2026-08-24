@@ -51,9 +51,15 @@
                             Grid.Column="1"
                             Click="ColorCard_OnClick" />
                         <ctrl:ThemeQuickActionCard
-                            x:Name="StubCard"
+                            x:Name="SignatureCard"
                             Grid.Row="1"
-                            Grid.Column="0" />
+                            Grid.Column="0">
+                            <ctrl:ThemeQuickActionCard.TrailingContent>
+                                <ctrl:GlassSettingsLabeledToggleSwitch
+                                    x:Name="SignatureToggle"
+                                    Toggled="SignatureToggle_OnToggled" />
+                            </ctrl:ThemeQuickActionCard.TrailingContent>
+                        </ctrl:ThemeQuickActionCard>
                         <ctrl:ThemeQuickActionCard
                             x:Name="TextFontsCard"
                             Grid.Row="1"
@@ -147,21 +153,25 @@
                         </Border>
                     </StackPanel>
                 </ctrl:SettingsSystemGateExpander>
-
-                <ctrl:SettingsDividerExpander x:Name="AdvancedExpander">
-                    <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
-                        <ctrl:SettingsSystemGateExpander
-                            x:Name="ThemePatcherStubExpander"
-                            ShowGateSwitch="False"
-                            IsExpanded="False">
-                            <TextBlock
-                                x:Name="ThemePatcherStubText"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Style="{StaticResource BodyTextBlockStyle}"
-                                TextWrapping="WrapWholeWords" />
-                        </ctrl:SettingsSystemGateExpander>
+                <HyperlinkButton
+                    x:Name="SecureUxThemeOnlineLink"
+                    Padding="0"
+                    HorizontalAlignment="Left"
+                    Click="SecureUxThemeOnlineLink_OnClick">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon
+                            x:Name="SecureUxThemeOnlineIcon"
+                            FontSize="14"
+                            Glyph="&#xF6FA;"
+                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock
+                            x:Name="SecureUxThemeOnlineText"
+                            VerticalAlignment="Center"
+                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                            Style="{StaticResource BodyTextBlockStyle}" />
                     </StackPanel>
-                </ctrl:SettingsDividerExpander>
+                </HyperlinkButton>
+
             </StackPanel>
     </ctrl:SettingsPageShell>
 </Page>

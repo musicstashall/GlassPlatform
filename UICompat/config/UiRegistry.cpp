@@ -17,6 +17,8 @@ namespace UICompat::Registry
             {
             case SurfaceKind::Menu:
                 return Shared::TrayXamlPaint::kXamlMenuSubKey;
+            case SurfaceKind::Tooltip:
+                return Shared::TrayXamlPaint::kXamlTooltipSubKey;
             case SurfaceKind::Popup:
             default:
                 return Shared::TrayXamlPaint::kXamlPopupSubKey;
@@ -29,6 +31,8 @@ namespace UICompat::Registry
             {
             case SurfaceKind::Menu:
                 return L"Menu";
+            case SurfaceKind::Tooltip:
+                return L"Tooltip";
             case SurfaceKind::Popup:
             default:
                 return L"Popup";
@@ -141,7 +145,9 @@ namespace UICompat::Registry
                     == static_cast<DWORD>(Shared::TrayBorderDrawMode::Mode::Xaml);
 
                 const Shared::TrayXamlPolicyMap::SurfaceSlot& slot =
-                    kind == SurfaceKind::Menu ? mapSnap.menu : mapSnap.popup;
+                    kind == SurfaceKind::Menu ? mapSnap.menu
+                    : kind == SurfaceKind::Tooltip ? mapSnap.tooltip
+                    : mapSnap.popup;
 
                 // AppContainer: prefer map; если HKCU доступен — CornerType из reg
                 // (как раньше для bar), иначе map slot (уже с fallback).
