@@ -70,26 +70,12 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
     ];
 
     /// <summary>Chrome строки карточки композиции: иконка/заголовок + точка-индикатор + подстрока конфликта.</summary>
-    private sealed class CompositionCardRowChrome
-    {
-        public required UnsavedIndicatorDot Dot { get; init; }
-        public required FrameworkElement Cell { get; init; }
-        public required TextBlock Subline { get; init; }
-        public required string RegistryKey { get; init; }
-    }
-
-    private ToggleSwitch? _opaqueBlendToggle;
-    private ToggleSwitch? _overrideAccentToggle;
     private Slider? _blurRadiusSlider;
     private TextBlock? _blurRadiusValueText;
-    private Grid? _compositionTable;
     private Slider? _blurBalanceSlider;
     private TextBlock? _blurBalanceValueText;
     private Grid? _activeColorBlurFooter;
     private TextBlock? _blurBalanceLabel;
-    private CompositionCardRowChrome? _overrideRowChrome;
-    private CompositionCardRowChrome? _opaqueRowChrome;
-    private GlassSettingsLabeledToggleSwitch? _compositionMasterToggle;
     private uint _lastBaseColorArgb;
 
     private uint _lastActiveRgb;
@@ -98,7 +84,6 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
     private uint _lastSecondaryRgb;
     private uint _lastSecondaryPercent;
     private bool _inactiveVistaGateArmed;
-    private bool _compositionMasterArmed;
 
     private ComboBox? _baseColorModeCombo;
     private int _lastBaseColorPivotIndex;
@@ -115,8 +100,16 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
 
     private ComboBox? _priorityCombo;
 
+    private const double QuickActionColumnGap = 8;
     private const double CompositionHeroColumnGap = 24;
-    private const double CompositionTableRightGapMin = 20;
+    private double _quickActionsCol0Width;
+    private double _quickActionsCol1Width;
+    private double _quickActionsMinCol0Width;
+    private double _quickActionsMinCol1Width;
+    private double _quickActionsMinTableWidth;
+    private double _quickActionsPreferredTableWidth;
+    private bool _quickActionsWidthsDirty = true;
+
     private const uint BlurDeviationDefault = 30;
     private const int BlurRadiusMin = 0;
     private const int BlurRadiusMax = 30;
@@ -130,6 +123,7 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
     private bool _loading;
     private bool _deferredPreviewRefresh;
     private bool _compositionHeroSideBySide = true;
+    private bool _quickActionCompactMode;
     private bool _compositionLayoutInitialized;
     private EventHandler<DesktopEnvironmentChangedEventArgs>? _environmentChangedHandler;
     private DispatcherQueueTimer? _wallpaperRefreshTimer;
@@ -165,6 +159,7 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
     {
         base.OnNavigatedTo(e);
         _hive = DwmNavigationContext.FromNavigationParameter(e.Parameter).Hive;
+        _quickActionsWidthsDirty = true;
         AdvancedExpander.UnsavedScope = DwmColorizationScopeCatalog.AdvancedScope(_hive);
         PageShell.UpdateCommitScope(GetCommitScope());
         HiveScopeBanner.Hive = _hive;
@@ -183,6 +178,7 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
     private void OnPageLoaded(object sender, RoutedEventArgs e)
     {
         SettingsSession.Current.DirtyChanged += Session_OnDirtyChanged;
+        _quickActionsWidthsDirty = true;
         Reload();
         UpdateCompositionHeroLayout();
         RefreshPivotTabUnsavedIndicators();
@@ -208,7 +204,6 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
         BaseColorExpander.RefreshUnsavedIndicator();
         AdvancedExpander.RefreshUnsavedIndicator();
         RefreshParallelBranchWarnings();
-        RefreshCompositionCardChrome();
         if (SettingsPageOperationGate.Current?.ShouldDeferNotices == true
             || SettingsPageOperationGate.Current?.ShouldBlockPageMutation == true)
         {
@@ -511,147 +506,18 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
 
     private void BuildCompositionTopControls()
     {
-        _compositionTable = SettingsPickerBodyLayout.CreateBodyTable();
-        _compositionTable.HorizontalAlignment = HorizontalAlignment.Left;
+        OverrideAccentToggle.Toggled += (_, _) => OnOverrideAccentToggleChanged(OverrideAccentToggle.IsOn);
+        OverrideAccentCard.IconGlyphChar = SettingsSectionGlyphs.GlassColor;
+        OverrideAccentCard.Title = GlassSettingsResources.Get("Dwm_OverrideAccentTitle");
+        OverrideAccentCard.Description = GlassSettingsResources.Get("Dwm_OverrideAccentDesc");
+        OverrideAccentCard.Click += (_, _) => OverrideAccentToggle.IsOn = !OverrideAccentToggle.IsOn;
 
-        BuildOverrideAccentRow();
-        BuildOpaqueBlendRow();
-
-        Grid.SetRow(_compositionTable, 0);
-        _compositionTable.VerticalAlignment = VerticalAlignment.Top;
-        CompositionControlPanel.Children.Add(_compositionTable);
-        BuildCompositionMasterToggle();
+        OpaqueBlendToggle.Toggled += (_, _) => OnOpaqueBlendToggleChanged(OpaqueBlendToggle.IsOn);
+        OpaqueBlendCard.IconGlyphChar = SettingsSectionGlyphs.Opacity;
+        OpaqueBlendCard.Title = GlassSettingsResources.Get("Dwm_OpaqueBlendTitle");
+        OpaqueBlendCard.Description = GlassSettingsResources.Get("Dwm_OpaqueBlendDesc");
+        OpaqueBlendCard.Click += (_, _) => OpaqueBlendToggle.IsOn = !OpaqueBlendToggle.IsOn;
     }
-
-    private void BuildOverrideAccentRow()
-    {
-        _overrideAccentToggle = CreateCompositionToggle();
-        _overrideAccentToggle.Toggled += (_, _) => OnOverrideAccentToggleChanged(_overrideAccentToggle.IsOn);
-        _overrideRowChrome = BuildCardRow(
-            SettingsSectionGlyphs.GlassColor,
-            GlassSettingsResources.Get("Dwm_OverrideAccentTitle"),
-            OverrideAccentKey,
-            _overrideAccentToggle,
-            topMargin: false);
-    }
-
-    private void BuildOpaqueBlendRow()
-    {
-        _opaqueBlendToggle = CreateCompositionToggle();
-        _opaqueBlendToggle.Toggled += (_, _) => OnOpaqueBlendToggleChanged(_opaqueBlendToggle.IsOn);
-        _opaqueRowChrome = BuildCardRow(
-            SettingsSectionGlyphs.Opacity,
-            GlassSettingsResources.Get("Dwm_OpaqueBlendTitle"),
-            OpaqueBlendKey,
-            _opaqueBlendToggle,
-            topMargin: true);
-    }
-
-    /// <summary>
-    /// Строка карточки: [точка][иконка][заголовок + подстрока конфликта] | контрол.
-    /// Заголовок — заголовочным шрифтом спойлеров; точка перед иконкой.
-    /// </summary>
-    private CompositionCardRowChrome BuildCardRow(
-        string glyph,
-        string title,
-        string registryKey,
-        FrameworkElement control,
-        bool topMargin)
-    {
-        var dot = new UnsavedIndicatorDot
-        {
-            Severity = SettingsNoticeSeverity.Warning,
-            VerticalAlignment = VerticalAlignment.Center,
-            Visibility = Visibility.Collapsed
-        };
-
-        var icon = new FontIcon
-        {
-            Glyph = glyph,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        if (Application.Current.Resources["GlassSettingsSectionIconSize"] is double iconSize)
-            icon.FontSize = iconSize;
-        if (Application.Current.Resources["TextFillColorSecondaryBrush"] is Brush iconBrush)
-            icon.Foreground = iconBrush;
-
-        var titleText = new TextBlock
-        {
-            Text = title,
-            Style = Application.Current.Resources["GlassSettingsSpoilerTitleTextStyle"] as Style
-        };
-
-        var subline = new TextBlock
-        {
-            Style = Application.Current.Resources["GlassSettingsSpoilerSecondaryTextStyle"] as Style,
-            TextWrapping = TextWrapping.WrapWholeWords,
-            Visibility = Visibility.Collapsed
-        };
-        if (Application.Current.Resources["SystemFillColorCautionBrush"] is Brush cautionBrush)
-            subline.Foreground = cautionBrush;
-
-        var textStack = new StackPanel
-        {
-            Orientation = Orientation.Vertical,
-            Spacing = 2,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        textStack.Children.Add(titleText);
-        textStack.Children.Add(subline);
-
-        var cell = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        cell.Children.Add(dot);
-        cell.Children.Add(icon);
-        cell.Children.Add(textStack);
-
-        SettingsPickerBodyLayout.AddLabeledRowCell(_compositionTable!, cell, control, topMargin);
-
-        return new CompositionCardRowChrome
-        {
-            Dot = dot,
-            Cell = cell,
-            Subline = subline,
-            RegistryKey = registryKey
-        };
-    }
-
-    /// <summary>Низ карточки: как PolicyGate на Стилизации — Border Padding 0,8,0,0 + верхняя линия.</summary>
-    private void BuildCompositionMasterToggle()
-    {
-        var container = new Border
-        {
-            Padding = new Thickness(0, 8, 0, 0),
-            BorderThickness = new Thickness(0, 1, 0, 0)
-        };
-        if (Application.Current.Resources["CardStrokeColorDefaultBrush"] is Brush dividerBrush)
-            container.BorderBrush = dividerBrush;
-
-        _compositionMasterToggle = new GlassSettingsLabeledToggleSwitch
-        {
-            HorizontalAlignment = HorizontalAlignment.Right
-        };
-        _compositionMasterToggle.Toggled += (_, _) => OnCompositionMasterToggled(_compositionMasterToggle.IsOn);
-
-        container.Child = _compositionMasterToggle;
-        Grid.SetRow(container, 1);
-        CompositionControlPanel.Children.Add(container);
-    }
-
-    private static ToggleSwitch CreateCompositionToggle() =>
-        new()
-        {
-            OnContent = string.Empty,
-            OffContent = string.Empty,
-            MinWidth = 0,
-            Style = Application.Current.Resources["GlassSettingsCompactToggleSwitchStyle"] as Style,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Center
-        };
 
     private void BuildActiveColorBlurSlider()
     {
@@ -834,60 +700,11 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
     {
         ReloadOverrideAccentToggle();
         ReloadBlurRadiusSlider();
-        ReloadCompositionMaster();
-    }
-
-    private void ReloadCompositionMaster()
-    {
-        if (_compositionMasterArmed && AnyCompositionCardKeyPresent())
-            _compositionMasterArmed = false;
-
-        var on = IsCompositionCardActive();
-        if (_compositionMasterToggle is null)
-            return;
-
-        if (_compositionMasterToggle.IsOn == on)
-        {
-            UpdateCompositionCardEnabled(on);
-            return;
-        }
-
-        _loading = true;
-        try
-        {
-            _compositionMasterToggle.IsOn = on;
-        }
-        finally
-        {
-            _loading = false;
-        }
-
-        UpdateCompositionCardEnabled(on);
-    }
-
-    private bool IsCompositionCardActive() =>
-        (_compositionMasterToggle?.IsOn ?? false)
-        || _compositionMasterArmed
-        || AnyCompositionCardKeyPresent();
-
-    private bool AnyCompositionCardKeyPresent() =>
-        DwmRegistryStore.ValueExistsForPage(_hive, OverrideAccentKey)
-        || DwmRegistryStore.ValueExistsForPage(_hive, OpaqueBlendKey);
-
-    private void UpdateCompositionCardEnabled(bool enabled)
-    {
-        if (_overrideAccentToggle is not null)
-            _overrideAccentToggle.IsEnabled = enabled;
-        if (_opaqueBlendToggle is not null)
-            _opaqueBlendToggle.IsEnabled = enabled;
     }
 
     private void ReloadOverrideAccentToggle()
     {
-        if (_overrideAccentToggle is null)
-            return;
-
-        _overrideAccentToggle.IsOn = (DwmRegistryStore.ReadDwordForPage(_hive, "GlassOverrideAccent") ?? 0) != 0;
+        OverrideAccentToggle.IsOn = (DwmRegistryStore.ReadDwordForPage(_hive, "GlassOverrideAccent") ?? 0) != 0;
     }
 
     private void ReloadBlurRadiusSlider()
@@ -974,22 +791,11 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
                 else
                     SettingsSession.Current.DeleteDwmValue(_hive, key, liveDwm: true);
 
-                _loading = true;
-                try
-                {
-                    ReloadCompositionMaster();
-                }
-                finally
-                {
-                    _loading = false;
-                }
-
                 await Task.CompletedTask.ConfigureAwait(false);
             }).ConfigureAwait(true);
 
             await seq.CosmeticAsync(() =>
             {
-                RefreshCompositionCardChrome();
                 RefreshCompositionPreview();
                 RefreshPivotTabUnsavedIndicators();
             }).ConfigureAwait(true);
@@ -1076,7 +882,7 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
 
     private DwmCompositionCascadePreview.PreviewState BuildVistaPreviewState()
     {
-        var opaque = _opaqueBlendToggle?.IsOn == true;
+        var opaque = OpaqueBlendToggle.IsOn;
         var blurRadius = ClampBlurRadius((int)Math.Round(_blurRadiusSlider?.Value ?? BlurRadiusD3DValue));
         var blurBalancePercent = ReadPreviewBlurBalancePercent();
         var tint = ActiveColorExpander.IsGateOn
@@ -1110,7 +916,7 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
 
     private DwmCompositionCascadePreview.PreviewState BuildWin7PreviewState()
     {
-        var opaque = _opaqueBlendToggle?.IsOn == true;
+        var opaque = OpaqueBlendToggle.IsOn;
         var blurRadius = ClampBlurRadius((int)Math.Round(_blurRadiusSlider?.Value ?? BlurRadiusD3DValue));
         var blurBalancePercent = ReadPreviewBlurBalancePercent();
         var tint = ActiveColorExpander.IsGateOn
@@ -1198,108 +1004,249 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
 
     private void UpdateCompositionHeroLayout()
     {
-        if (_compositionTable is null)
-            return;
-
         var hostWidth = CompositionHeroLayoutHost.ActualWidth;
         if (hostWidth <= 0)
             return;
 
-        // Минимум таблицы = подпись (макс) + контрол-колонка 120 + хвост значения.
-        var tableMinWidth = SettingsPickerBodyLayout.EstimateBodyTableMinWidth(_compositionTable);
-        var tableMaxWidth = tableMinWidth
-            + (GlassSettingsSliderMetrics.TrackMaxWidth - GlassSettingsSliderMetrics.TrackMinWidth);
-        var minCardInnerWidth = tableMinWidth + CompositionTableRightGapMin;
-
-        var cardHorizontalPadding = GetCompositionControlsCardHorizontalPadding();
-        var besideCardInner = hostWidth
-            - HeroPreviewLayoutMetrics.FootprintWidth
-            - CompositionHeroColumnGap
-            - cardHorizontalPadding;
-
-        var sideBySide = ResolveCompositionSideBySide(besideCardInner, minCardInnerWidth);
-        ApplyCompositionHeroPlacement(sideBySide);
-
-        var cardInner = sideBySide ? besideCardInner : hostWidth - cardHorizontalPadding;
-
-        // Сначала жмётся правый отступ (резерв 20 px), затем 2-я колонка (200→120 через clamp таблицы).
-        var availableForTable = cardInner - CompositionTableRightGapMin;
-        var tableWidth = Math.Clamp(availableForTable, tableMinWidth, tableMaxWidth);
-        ApplyCompositionTableWidth(tableWidth);
-    }
-
-    /// <summary>
-    /// Перенос карточки под превью при сжатии «минимум − 1 px»; возврат при «минимум + 1 px»
-    /// (гистерезис, чтобы карточка не дёргалась на границе).
-    /// </summary>
-    private bool ResolveCompositionSideBySide(double besideCardInner, double minCardInnerWidth)
-    {
-        if (!_compositionLayoutInitialized)
-            return besideCardInner >= minCardInnerWidth;
-
-        if (_compositionHeroSideBySide)
-            return besideCardInner >= minCardInnerWidth;
-
-        return besideCardInner >= minCardInnerWidth + 1;
-    }
-
-    private void ApplyCompositionTableWidth(double tableWidth)
-    {
-        if (_compositionTable is null)
+        EnsureQuickActionsColumnWidths();
+        if (_quickActionsMinTableWidth <= 0)
             return;
 
-        _compositionTable.HorizontalAlignment = HorizontalAlignment.Left;
-        _compositionTable.Width = tableWidth;
-        _compositionTable.MaxWidth = tableWidth;
-        SettingsPickerBodyLayout.UpdateBodyTableLayout(_compositionTable, tableWidth);
+        var availableRight = hostWidth
+            - HeroPreviewLayoutMetrics.FootprintWidth
+            - CompositionHeroColumnGap;
+
+        var controlsColWidth = Math.Max(availableRight, CompositionControlsColumn.MinWidth);
+
+        // A = max(pref0, pref1) — max card width
+        // B = minColWidth — min card width (text clipped)
+        // C = minTableWidth = 2*B + gap — min width for 2 columns
+        // D = B — min width for 1 column
+        var thresholdCompact = _quickActionsMinTableWidth;       // C
+        var thresholdUncompact = _quickActionsMinTableWidth + 1; // C + 1
+        var thresholdStack = _quickActionsMinCol0Width;          // D
+        var thresholdUnstack = _quickActionsMinCol0Width + 1;    // D + 1
+
+        // Cards available width depends on stacked or side-by-side
+        var cardsWidth = _compositionHeroSideBySide ? controlsColWidth : hostWidth;
+
+        bool stacked = _compositionHeroSideBySide ? false : true;
+        bool compact = _quickActionCompactMode;
+
+        if (!_compositionLayoutInitialized)
+        {
+            // First layout: pick narrowest state that fits
+            if (controlsColWidth >= _quickActionsPreferredTableWidth)
+            {
+                stacked = false; compact = false; // side-by-side, full
+            }
+            else if (cardsWidth >= thresholdCompact)
+            {
+                stacked = false; compact = false; // side-by-side, * cols shrink
+            }
+            else if (cardsWidth >= thresholdStack)
+            {
+                stacked = false; compact = true; // compact side-by-side
+            }
+            else if (hostWidth >= thresholdStack)
+            {
+                stacked = true; compact = false; // stacked, full width
+            }
+            else
+            {
+                stacked = true; compact = true; // stacked compact
+            }
+        }
+        else
+        {
+            // Shrink: detect C-1 and D-1 on cardsWidth
+            if (cardsWidth < thresholdCompact)
+            {
+                compact = true;
+            }
+
+            if (compact && cardsWidth < thresholdStack)
+            {
+                stacked = true;
+                compact = false; // reset compact for stacked (recalc below)
+            }
+
+            // Recalc cardsWidth for stacked
+            if (stacked)
+            {
+                cardsWidth = hostWidth;
+                if (cardsWidth < thresholdCompact)
+                {
+                    compact = true;
+                }
+            }
+
+            // Grow: detect C+1 and D+1 on cardsWidth
+            // When stacked, first uncompact, then unstack
+            if (stacked && compact)
+            {
+                // stacked compact → stacked non-compact
+                if (cardsWidth >= thresholdUncompact)
+                {
+                    compact = false;
+                }
+            }
+            else if (stacked && !compact)
+            {
+                // stacked non-compact → side-by-side compact
+                if (controlsColWidth >= thresholdUnstack)
+                {
+                    stacked = false;
+                    cardsWidth = controlsColWidth;
+                    // Check if still compact in side-by-side
+                    if (cardsWidth < thresholdCompact)
+                    {
+                        compact = true;
+                    }
+                    else
+                    {
+                        compact = false;
+                    }
+                }
+            }
+            else if (!stacked && compact)
+            {
+                // side-by-side compact → side-by-side non-compact
+                if (cardsWidth >= thresholdUncompact)
+                {
+                    compact = false;
+                }
+            }
+            else
+            {
+                // side-by-side non-compact: already full
+            }
+        }
+
+        ApplyCompositionHeroPlacement(stacked: stacked, compact: compact);
     }
 
-    private void ApplyCompositionHeroPlacement(bool sideBySide)
+    private void ApplyCompositionHeroPlacement(bool stacked, bool compact = false)
     {
-        if (_compositionLayoutInitialized && _compositionHeroSideBySide == sideBySide)
+        var sideBySide = !stacked;
+        if (_compositionLayoutInitialized && _compositionHeroSideBySide == sideBySide && _quickActionCompactMode == compact)
             return;
 
         _compositionHeroSideBySide = sideBySide;
+        _quickActionCompactMode = compact;
         _compositionLayoutInitialized = true;
 
         if (sideBySide)
         {
+            var availableRight = CompositionHeroLayoutHost.ActualWidth
+                - HeroPreviewLayoutMetrics.FootprintWidth
+                - CompositionHeroColumnGap;
+
+            ApplyQuickActionColumns(availableRight, compact);
+
             CompositionPreviewColumn.Width = GridLength.Auto;
-            CompositionControlsColumn.Width = new GridLength(2, GridUnitType.Star);
+            CompositionControlsColumn.Width = new GridLength(1, GridUnitType.Star);
 
             Grid.SetColumn(CompositionPreviewHost, 0);
             Grid.SetRow(CompositionPreviewHost, 0);
             Grid.SetColumnSpan(CompositionPreviewHost, 1);
 
-            Grid.SetColumn(CompositionControlsCard, 1);
-            Grid.SetRow(CompositionControlsCard, 0);
-            Grid.SetColumnSpan(CompositionControlsCard, 1);
-            // Как PolicyCard на Стилизации: MinHeight + MaxHeight = высота превью → footer у низа.
-            var heroHeight = HeroPreviewLayoutMetrics.OuterHeight;
-            CompositionControlsCard.MinHeight = heroHeight;
-            CompositionControlsCard.MaxHeight = heroHeight;
-            return;
+            Grid.SetColumn(QuickActionsHost, 1);
+            Grid.SetRow(QuickActionsHost, 0);
+            Grid.SetColumnSpan(QuickActionsHost, 1);
+            CompositionPreviewHost.MinWidth = HeroPreviewLayoutMetrics.FootprintWidth;
+            CompositionPreviewHost.HorizontalAlignment = HorizontalAlignment.Left;
+            QuickActionsHost.VerticalAlignment = VerticalAlignment.Stretch;
+            QuickActionsHost.MinHeight = HeroPreviewLayoutMetrics.OuterHeight;
+        }
+        else
+        {
+            var fullHostWidth = CompositionHeroLayoutHost.ActualWidth;
+            ApplyQuickActionColumns(fullHostWidth, compact);
+
+            CompositionPreviewColumn.Width = GridLength.Auto;
+            CompositionControlsColumn.Width = new GridLength(1, GridUnitType.Star);
+
+            Grid.SetColumn(CompositionPreviewHost, 0);
+            Grid.SetRow(CompositionPreviewHost, 0);
+            Grid.SetColumnSpan(CompositionPreviewHost, 2);
+
+            Grid.SetColumn(QuickActionsHost, 0);
+            Grid.SetRow(QuickActionsHost, 1);
+            Grid.SetColumnSpan(QuickActionsHost, 2);
+            CompositionPreviewHost.ClearValue(FrameworkElement.MinWidthProperty);
+            CompositionPreviewHost.HorizontalAlignment = HorizontalAlignment.Left;
+            QuickActionsHost.ClearValue(FrameworkElement.MinHeightProperty);
+            QuickActionsHost.VerticalAlignment = VerticalAlignment.Top;
         }
 
-        CompositionPreviewColumn.Width = GridLength.Auto;
-        CompositionControlsColumn.Width = new GridLength(1, GridUnitType.Star);
-
-        Grid.SetColumn(CompositionPreviewHost, 0);
-        Grid.SetRow(CompositionPreviewHost, 0);
-        Grid.SetColumnSpan(CompositionPreviewHost, 2);
-
-        Grid.SetColumn(CompositionControlsCard, 0);
-        Grid.SetRow(CompositionControlsCard, 1);
-        Grid.SetColumnSpan(CompositionControlsCard, 2);
-        CompositionControlsCard.MinHeight = HeroPreviewLayoutMetrics.OuterHeight;
-        CompositionControlsCard.ClearValue(FrameworkElement.MaxHeightProperty);
-        CompositionControlsCard.ClearValue(FrameworkElement.HeightProperty);
+        if (compact)
+        {
+            Grid.SetColumn(OpaqueBlendCard, 0);
+            Grid.SetRow(OpaqueBlendCard, 1);
+        }
+        else
+        {
+            Grid.SetColumn(OpaqueBlendCard, 1);
+            Grid.SetRow(OpaqueBlendCard, 0);
+        }
     }
 
-    private double GetCompositionControlsCardHorizontalPadding()
+    private void ApplyQuickActionColumns(double availableWidth, bool compact)
     {
-        var padding = CompositionControlsCard.Padding;
-        return padding.Left + padding.Right;
+        QuickActionsHost.ColumnSpacing = compact ? 0 : QuickActionColumnGap;
+
+        if (compact)
+        {
+            var compactMaxWidth = Math.Max(_quickActionsCol0Width, _quickActionsCol1Width);
+            QuickActionCol0.Width = new GridLength(1, GridUnitType.Star);
+            QuickActionCol0.MinWidth = _quickActionsMinCol0Width;
+            QuickActionCol0.MaxWidth = compactMaxWidth;
+            QuickActionCol1.Width = new GridLength(0, GridUnitType.Pixel);
+            QuickActionCol1.MinWidth = 0;
+            QuickActionCol1.MaxWidth = 0;
+
+            QuickActionsHost.ClearValue(FrameworkElement.WidthProperty);
+            QuickActionsHost.ClearValue(FrameworkElement.MinWidthProperty);
+            QuickActionsHost.ClearValue(FrameworkElement.MaxWidthProperty);
+            QuickActionsHost.HorizontalAlignment = HorizontalAlignment.Stretch;
+        }
+        else
+        {
+            QuickActionCol0.Width = new GridLength(1, GridUnitType.Star);
+            QuickActionCol0.MinWidth = _quickActionsMinCol0Width;
+            QuickActionCol0.MaxWidth = _quickActionsCol0Width;
+            QuickActionCol1.Width = new GridLength(1, GridUnitType.Star);
+            QuickActionCol1.MinWidth = _quickActionsMinCol1Width;
+            QuickActionCol1.MaxWidth = _quickActionsCol1Width;
+
+            QuickActionsHost.ClearValue(FrameworkElement.WidthProperty);
+            QuickActionsHost.ClearValue(FrameworkElement.MinWidthProperty);
+            QuickActionsHost.ClearValue(FrameworkElement.MaxWidthProperty);
+            QuickActionsHost.HorizontalAlignment = HorizontalAlignment.Stretch;
+        }
+    }
+
+    private void EnsureQuickActionsColumnWidths()
+    {
+        if (!_quickActionsWidthsDirty && _quickActionsMinTableWidth > 0)
+            return;
+
+        var pref0 = OverrideAccentCard.MeasurePreferredWidth();
+        var pref1 = OpaqueBlendCard.MeasurePreferredWidth();
+        var min0 = OverrideAccentCard.MeasureMinWidth();
+        var min1 = OpaqueBlendCard.MeasureMinWidth();
+        if (pref0 <= 0 || pref1 <= 0 || min0 <= 0 || min1 <= 0)
+            return;
+
+        _quickActionsCol0Width = pref0;
+        _quickActionsCol1Width = pref1;
+        _quickActionsMinCol0Width = Math.Min(min0, pref0);
+        _quickActionsMinCol1Width = Math.Min(min1, pref1);
+        _quickActionsPreferredTableWidth = pref0 + QuickActionColumnGap + pref1;
+        _quickActionsMinTableWidth = _quickActionsMinCol0Width + QuickActionColumnGap + _quickActionsMinCol1Width;
+        QuickActionsHost.ColumnSpacing = QuickActionColumnGap;
+        _quickActionsWidthsDirty = false;
     }
 
     // ─── Reload ───────────────────────────────────────────────────────────────
@@ -1346,8 +1293,7 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
 
     private void ReloadOpaqueBlend()
     {
-        if (_opaqueBlendToggle is not null)
-            _opaqueBlendToggle.IsOn = (DwmRegistryStore.ReadDwordForPage(_hive, "ColorizationOpaqueBlend") ?? 0) != 0;
+        OpaqueBlendToggle.IsOn = (DwmRegistryStore.ReadDwordForPage(_hive, "ColorizationOpaqueBlend") ?? 0) != 0;
     }
 
     private void ReloadActiveColor()
@@ -1861,8 +1807,6 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
         ApplySectionParallelWarning(
             (visible, tooltip, marker) => BaseColorExpander.SetParallelBranchWarning(visible, tooltip, marker),
             [baseColorKey]);
-
-        RefreshCompositionCardChrome();
     }
 
     // ─── Color handlers ───────────────────────────────────────────────────────
@@ -2130,120 +2074,9 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
         await WriteCompositionBoolToggleAsync(OpaqueBlendKey, enabled).ConfigureAwait(true);
     }
 
-    /// <summary>Master-тумблер карточки: ВКЛ — accent/opaque активны; ВЫКЛ — удалить эти два ключа. BlurDeviation не трогаем.</summary>
-    private async void OnCompositionMasterToggled(bool on)
+    /// <summary>Master-тумблер карточки удалён; тумблеры управляют параметрами независимо.</summary>
+    private void OnCompositionMasterToggled(bool on)
     {
-        if (_loading) return;
-
-        if (on)
-        {
-            // Включение: armed без записи (значения по умолчанию), как gate ON.
-            _compositionMasterArmed = true;
-            UpdateCompositionCardEnabled(true);
-            return;
-        }
-
-        await DisableCompositionMasterAsync().ConfigureAwait(true);
-    }
-
-    private async Task DisableCompositionMasterAsync()
-    {
-        _compositionMasterArmed = false;
-
-        await PageShell.Operations.RunSequenceAsync(async seq =>
-        {
-            CancelExternalPreviewRefresh();
-
-            await seq.RegistryMutationAsync(async () =>
-            {
-                SettingsSession.Current.DeleteDwmValue(_hive, OverrideAccentKey, liveDwm: true);
-                SettingsSession.Current.DeleteDwmValue(_hive, OpaqueBlendKey, liveDwm: true);
-
-                _loading = true;
-                try
-                {
-                    ReloadOverrideAccentToggle();
-                    ReloadOpaqueBlend();
-                }
-                finally
-                {
-                    _loading = false;
-                }
-
-                await Task.CompletedTask.ConfigureAwait(false);
-            }).ConfigureAwait(true);
-
-            await seq.CosmeticAsync(() =>
-            {
-                UpdateCompositionCardEnabled(false);
-                ReloadCompositionMaster();
-                RefreshCompositionCardChrome();
-                RefreshPivotTabUnsavedIndicators();
-                RefreshParallelBranchWarnings();
-                RefreshCompositionPreview();
-            }).ConfigureAwait(true);
-
-            await seq.NoticeSyncAsync(() => PageShell.FlushSessionNotice()).ConfigureAwait(true);
-        }).ConfigureAwait(true);
-    }
-
-    // ─── Card chrome: точки-индикаторы и подсветка конфликта ─────────────────────
-
-    /// <summary>
-    /// Обновляет точки-индикаторы строк и подсветку конфликта: если хотя бы один параметр
-    /// карточки пересекается в зеркальном разделе DWM, вся карточка жёлтая, подстрока — на конфликтном.
-    /// </summary>
-    private void RefreshCompositionCardChrome()
-    {
-        if (_overrideRowChrome is null || _opaqueRowChrome is null)
-            return;
-
-        ApplyCompositionRowWarning(_overrideRowChrome);
-        ApplyCompositionRowWarning(_opaqueRowChrome);
-
-        ApplyCompositionCardConflictHighlight(false);
-
-        SetCompositionRowDot(_overrideRowChrome);
-        SetCompositionRowDot(_opaqueRowChrome);
-    }
-
-    private void SetCompositionRowDot(CompositionCardRowChrome chrome)
-    {
-        var scope = SettingsCommitScope.ForDwmKeys(_hive, chrome.RegistryKey);
-        chrome.Dot.Visibility = SettingsSession.Current.HasUnsavedInScope(scope)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-    }
-
-    /// <summary>Подстрока строки: маркер U/L при отсутствии локального ключа в текущей ветке.</summary>
-    private bool ApplyCompositionRowWarning(CompositionCardRowChrome chrome)
-    {
-        var keys = new[] { chrome.RegistryKey };
-        if (!DwmRegistryStore.HasParallelValues(_hive, keys))
-        {
-            chrome.Subline.Visibility = Visibility.Collapsed;
-            ToolTipService.SetToolTip(chrome.Subline, null);
-            return false;
-        }
-
-        chrome.Subline.Text = DwmParallelBranchUi.ResolveMarker(_hive);
-        chrome.Subline.Visibility = Visibility.Visible;
-        ToolTipService.SetToolTip(chrome.Subline, DwmParallelBranchUi.ResolveTooltip(_hive));
-        return false;
-    }
-
-    private void ApplyCompositionCardConflictHighlight(bool conflict)
-    {
-        if (conflict)
-        {
-            CompositionControlsCard.BorderBrush = AppThemeVisualResolver.ResolveThemeBrush("SystemFillColorCautionBrush");
-            CompositionControlsCard.Background = AppThemeVisualResolver.ResolveThemeBrush("SystemFillColorCautionBackground");
-        }
-        else
-        {
-            CompositionControlsCard.BorderBrush = AppThemeVisualResolver.ResolveThemeBrush("CardStrokeColorDefaultBrush");
-            CompositionControlsCard.Background = AppThemeVisualResolver.ResolveThemeBrush("LayerFillColorDefaultBrush");
-        }
     }
 
     // ─── Registry writes (RGB / balance split) ──────────────────────────────────

@@ -1,0 +1,24 @@
+---
+description: Не ломать выгрузку GlassCompat — контракт path=1 vs BlockList path=2/3
+globs: GlassCompat/**/*.{cpp,h},GlassCompat/DllMain.cpp
+alwaysApply: true
+---
+
+# GlassCompat unload — не ломать
+
+Полный контракт: [docs/guides/GlassCompat-unload.md](docs/guides/GlassCompat-unload.md). Эталон: backup `2026-07-15_1017-glasscore-residual` + H58.
+
+## Обязательно
+
+- **path=1 (GUI):** `FreeSelf` **без** ожидания `HostShutdown` (модель 1510/1017).
+- **path=2/3 (BlockList/Forbidden MinimalUnloadWatcher):** **ждать** `HostShutdown` после `StopEvent`, затем FreeSelf.
+- На хосте: `SignalHostShutdownComplete()` сразу после `UnhookWinEvent` + broadcast `WM_NULL`.
+
+## Запрещено без явного запроса + runtime proof
+
+- Ждать `HostShutdown` в GUI `FreeSelf` / `GlassGuiThreadProc`.
+- Считать `ReadHostPid()==0` заменой Unhook на path=1.
+- Выносить тяжёлый `Engine::Initialize` из `DllMain` ради HWiNFO так, чтобы ломать FreeSelf (регрессия H53).
+- «Улучшать» unload ради Core residual, меняя path=1.
+
+При правках unload — читать гайд целиком. Не изобретать третий порядок.

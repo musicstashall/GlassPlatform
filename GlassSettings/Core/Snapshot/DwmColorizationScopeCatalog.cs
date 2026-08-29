@@ -5,13 +5,6 @@ using GlassSettings.Core.Registry;
 /// <summary>Группы DWM-ключей Colorization для точечных индикаторов на detail-странице.</summary>
 public static class DwmColorizationScopeCatalog
 {
-    /// <summary>Ключи верхней карточки «Композиция» (accent / opaque). BlurDeviation — в ActiveColor*.</summary>
-    public static readonly string[] CompositionCardKeys =
-    [
-        "GlassOverrideAccent",
-        "ColorizationOpaqueBlend"
-    ];
-
     public static readonly string[] ActiveColorVistaKeys =
     [
         "ColorizationColor",
@@ -73,11 +66,6 @@ public static class DwmColorizationScopeCatalog
         hive is { } selectedHive
             ? SettingsCommitScope.ForDwmKeys(selectedHive, "GlassType")
             : SettingsCommitScope.ForDwmKeys("GlassType");
-
-    public static SettingsCommitScope CompositionCardScope(DwmRegistryHive? hive = null) =>
-        hive is { } selectedHive
-            ? SettingsCommitScope.ForDwmKeys(selectedHive, CompositionCardKeys)
-            : SettingsCommitScope.ForDwmKeys(CompositionCardKeys);
 
     public static SettingsCommitScope ActiveColorVistaScope(DwmRegistryHive? hive = null) =>
         hive is { } selectedHive

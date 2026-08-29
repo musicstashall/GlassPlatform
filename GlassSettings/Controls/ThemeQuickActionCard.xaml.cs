@@ -9,6 +9,27 @@ namespace GlassSettings.Controls;
 
 public sealed partial class ThemeQuickActionCard : UserControl
 {
+    public static readonly DependencyProperty TitleProperty =
+        DependencyProperty.Register(
+            nameof(Title),
+            typeof(string),
+            typeof(ThemeQuickActionCard),
+            new PropertyMetadata(string.Empty, OnTitleChanged));
+
+    public static readonly DependencyProperty DescriptionProperty =
+        DependencyProperty.Register(
+            nameof(Description),
+            typeof(string),
+            typeof(ThemeQuickActionCard),
+            new PropertyMetadata(string.Empty, OnDescriptionChanged));
+
+    public static readonly DependencyProperty IconGlyphCharProperty =
+        DependencyProperty.Register(
+            nameof(IconGlyphChar),
+            typeof(string),
+            typeof(ThemeQuickActionCard),
+            new PropertyMetadata(string.Empty, OnIconGlyphCharChanged));
+
     public static readonly DependencyProperty TrailingContentProperty =
         DependencyProperty.Register(
             nameof(TrailingContent),
@@ -34,20 +55,20 @@ public sealed partial class ThemeQuickActionCard : UserControl
 
     public string Title
     {
-        get => TitleText.Text;
-        set => TitleText.Text = value;
+        get => (string)GetValue(TitleProperty);
+        set => SetValue(TitleProperty, value);
     }
 
     public string Description
     {
-        get => DescriptionText.Text;
-        set => DescriptionText.Text = value;
+        get => (string)GetValue(DescriptionProperty);
+        set => SetValue(DescriptionProperty, value);
     }
 
     public string IconGlyphChar
     {
-        get => IconGlyph.Glyph;
-        set =>         IconGlyph.Glyph = value;
+        get => (string)GetValue(IconGlyphCharProperty);
+        set => SetValue(IconGlyphCharProperty, value);
     }
 
     public double MeasurePreferredWidth()
@@ -125,6 +146,24 @@ public sealed partial class ThemeQuickActionCard : UserControl
         }
 
         return false;
+    }
+
+    private static void OnTitleChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is ThemeQuickActionCard card)
+            card.TitleText.Text = e.NewValue as string ?? string.Empty;
+    }
+
+    private static void OnDescriptionChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is ThemeQuickActionCard card)
+            card.DescriptionText.Text = e.NewValue as string ?? string.Empty;
+    }
+
+    private static void OnIconGlyphCharChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is ThemeQuickActionCard card)
+            card.IconGlyph.Glyph = e.NewValue as string ?? string.Empty;
     }
 
     private static void OnTrailingContentChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

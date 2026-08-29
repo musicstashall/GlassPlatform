@@ -384,6 +384,7 @@
   <data name="Dwm_BlurLevelTitle" xml:space="preserve"><value>Blur balance</value></data>
   <data name="Dwm_BlurRadiusTitle" xml:space="preserve"><value>Blur radius</value></data>
   <data name="Dwm_OverrideAccentTitle" xml:space="preserve"><value>Override accent</value></data>
+  <data name="Dwm_OverrideAccentDesc" xml:space="preserve"><value>Glass instead of Windows acrylic</value></data>
   <data name="Dwm_CompositionPreviewLayerBlur" xml:space="preserve"><value>Blur</value></data>
   <data name="Dwm_CompositionPreviewLayerTint" xml:space="preserve"><value>Tint</value></data>
   <data name="Dwm_CompositionPreviewLayerTintActive" xml:space="preserve"><value>Active tint</value></data>
@@ -393,6 +394,7 @@
   <data name="Dwm_CompositionPreviewStateInactive" xml:space="preserve"><value>Inactive</value></data>
   <data name="Dwm_CompositionLayerTooltipFormat" xml:space="preserve"><value>{0}: {1}</value></data>
   <data name="Dwm_OpaqueBlendTitle" xml:space="preserve"><value>Opaque mode</value></data>
+  <data name="Dwm_OpaqueBlendDesc" xml:space="preserve"><value>Disables the transparency effect</value></data>
   <data name="Dwm_OpaqueBlendPriorityDesc" xml:space="preserve"><value>Base color selection order when blending: Vista Aero prefers maximized; Win7 Aero prefers opaque. Auto follows glass type.</value></data>
   <data name="Dwm_GlassTypeShort" xml:space="preserve"><value>Glass type:</value></data>
   <data name="Dwm_BaseTransparentDesc" xml:space="preserve"><value>ARGB base color for blending (transparent state).</value></data>

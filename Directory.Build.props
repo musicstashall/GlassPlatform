@@ -19,7 +19,8 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'GlassSettings'">
-    <SolutionRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))</SolutionRoot>
+    <SolutionRoot Condition="'$(SolutionDir)' != ''">$(SolutionDir)</SolutionRoot>
+    <SolutionRoot Condition="'$(SolutionRoot)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))</SolutionRoot>
     <GlassSettingsOutputDir>$(SolutionRoot)Build\$(Platform)\$(Configuration)\GlassSettings\</GlassSettingsOutputDir>
     <GlassSettingsUnpackagedDir>$(SolutionRoot)Build\$(Platform)\$(Configuration)\GlassSettingsUnpackaged\</GlassSettingsUnpackagedDir>
     <BaseOutputPath>$(SolutionRoot)Build\</BaseOutputPath>

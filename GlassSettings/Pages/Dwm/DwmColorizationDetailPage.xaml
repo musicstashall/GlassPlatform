@@ -35,25 +35,39 @@
                         Visibility="Collapsed" />
                 </Grid>
 
-                <!-- Паритет PolicyCard на DwmThemeDetailPage (Стилизация): MinHeight + * / Auto + footer Padding 0,8,0,0 -->
-                <Border
-                    x:Name="CompositionControlsCard"
+                <Grid
+                    x:Name="QuickActionsHost"
                     Grid.Row="0"
                     Grid.Column="1"
-                    MinHeight="{StaticResource GlassSettingsHeroPreviewOuterHeight}"
-                    Padding="{StaticResource GlassSettingsOpacityRowPadding}"
-                    VerticalAlignment="Top"
-                    Background="{ThemeResource LayerFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="8">
-                    <Grid x:Name="CompositionControlPanel" RowSpacing="8">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="*" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                    </Grid>
-                </Border>
+                    ColumnSpacing="8"
+                    RowSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="QuickActionCol0" Width="Auto" />
+                        <ColumnDefinition x:Name="QuickActionCol1" Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <ctrl:ThemeQuickActionCard
+                        x:Name="OverrideAccentCard"
+                        Grid.Row="0"
+                        Grid.Column="0">
+                        <ctrl:ThemeQuickActionCard.TrailingContent>
+                            <ctrl:GlassSettingsLabeledToggleSwitch
+                                x:Name="OverrideAccentToggle" />
+                        </ctrl:ThemeQuickActionCard.TrailingContent>
+                    </ctrl:ThemeQuickActionCard>
+                    <ctrl:ThemeQuickActionCard
+                        x:Name="OpaqueBlendCard"
+                        Grid.Row="0"
+                        Grid.Column="1">
+                        <ctrl:ThemeQuickActionCard.TrailingContent>
+                            <ctrl:GlassSettingsLabeledToggleSwitch
+                                x:Name="OpaqueBlendToggle" />
+                        </ctrl:ThemeQuickActionCard.TrailingContent>
+                    </ctrl:ThemeQuickActionCard>
+                </Grid>
             </Grid>
 
             <Pivot x:Name="GlassTypePivot" SelectionChanged="GlassTypePivot_OnSelectionChanged">

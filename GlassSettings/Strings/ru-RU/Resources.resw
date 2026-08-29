@@ -384,6 +384,7 @@
   <data name="Dwm_BlurLevelTitle" xml:space="preserve"><value>Баланс размытия</value></data>
   <data name="Dwm_BlurRadiusTitle" xml:space="preserve"><value>Радиус размытия</value></data>
   <data name="Dwm_OverrideAccentTitle" xml:space="preserve"><value>Перекрытие акцента</value></data>
+  <data name="Dwm_OverrideAccentDesc" xml:space="preserve"><value>Стекло вместо акрила Windows</value></data>
   <data name="Dwm_CompositionPreviewLayerBlur" xml:space="preserve"><value>Размытие</value></data>
   <data name="Dwm_CompositionPreviewLayerTint" xml:space="preserve"><value>Тинт</value></data>
   <data name="Dwm_CompositionPreviewLayerTintActive" xml:space="preserve"><value>Тинт активного</value></data>
@@ -393,6 +394,7 @@
   <data name="Dwm_CompositionPreviewStateInactive" xml:space="preserve"><value>Неактивное</value></data>
   <data name="Dwm_CompositionLayerTooltipFormat" xml:space="preserve"><value>{0}: {1}</value></data>
   <data name="Dwm_OpaqueBlendTitle" xml:space="preserve"><value>Непрозрачный режим</value></data>
+  <data name="Dwm_OpaqueBlendDesc" xml:space="preserve"><value>Отключение эффекта прозрачности</value></data>
   <data name="Dwm_OpaqueBlendPriorityDesc" xml:space="preserve"><value>Порядок выбора базового цвета при смешении: в Vista Aero приоритет у развёрнутого окна, в Win7 Aero — у непрозрачного. Авто — по типу стекла.</value></data>
   <data name="Dwm_GlassTypeShort" xml:space="preserve"><value>Тип стекла:</value></data>
   <data name="Dwm_BaseTransparentDesc" xml:space="preserve"><value>ARGB базовый цвет смешения (прозрачное состояние).</value></data>

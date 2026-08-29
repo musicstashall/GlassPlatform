@@ -130,7 +130,7 @@
   <!-- Копировать GlassSettings.Native.dll из Build output в подпапку GlassSettings -->
   <Target Name="CopyNativeDllToOutput" AfterTargets="BuildGlassSettingsNative" BeforeTargets="CoreCompile">
     <PropertyGroup>
-      <_NativeDllFrom>$([System.IO.Path]::GetFullPath('$(BaseOutputPath)$(Platform)\$(Configuration)\GlassSettings.Native.dll'))</_NativeDllFrom>
+      <_NativeDllFrom>$([System.IO.Path]::GetFullPath('$(BaseOutputPath)$(GlassSettingsNativePlatform)\$(Configuration)\GlassSettings.Native.dll'))</_NativeDllFrom>
       <_NativeDllTo>$(OutputPath)GlassSettings.Native.dll</_NativeDllTo>
     </PropertyGroup>
     <Copy SourceFiles="$(_NativeDllFrom)"
