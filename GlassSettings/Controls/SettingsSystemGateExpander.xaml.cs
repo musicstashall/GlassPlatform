@@ -112,6 +112,18 @@ public sealed partial class SettingsSystemGateExpander : UserControl, ISettingsG
             typeof(SettingsSystemGateExpander),
             new PropertyMetadata(true, OnShowGateStateTextChanged));
 
+    /// <summary>
+    /// Сохранять видимость шеврона при заблокированном IsExpansionEnabled.
+    /// false (по умолчанию): шеврон скрывается вместе с блокировкой раскрытия.
+    /// true: шеврон остаётся видимым, но тело не раскрывается (CanExpandBody = false).
+    /// </summary>
+    public static readonly DependencyProperty KeepChevronVisibleProperty =
+        DependencyProperty.Register(
+            nameof(KeepChevronVisible),
+            typeof(bool),
+            typeof(SettingsSystemGateExpander),
+            new PropertyMetadata(false));
+
     public static readonly DependencyProperty UnsavedScopeProperty =
         DependencyProperty.Register(
             nameof(UnsavedScope),
@@ -246,6 +258,17 @@ public sealed partial class SettingsSystemGateExpander : UserControl, ISettingsG
     {
         get => (bool)GetValue(ShowGateStateTextProperty);
         set => SetValue(ShowGateStateTextProperty, value);
+    }
+
+    /// <summary>
+    /// Сохранять видимость шеврона при заблокированном IsExpansionEnabled.
+    /// false (по умолчанию): шеврон скрывается вместе с блокировкой раскрытия.
+    /// true: шеврон остаётся видимым, но тело не раскрывается (CanExpandBody = false).
+    /// </summary>
+    public bool KeepChevronVisible
+    {
+        get => (bool)GetValue(KeepChevronVisibleProperty);
+        set => SetValue(KeepChevronVisibleProperty, value);
     }
 
     public bool IsUnsavedPending
@@ -565,7 +588,8 @@ public sealed partial class SettingsSystemGateExpander : UserControl, ISettingsG
             RootExpander.IsExpanded = false;
 
         // Без AllowBodyExpand — плоский вид (нет шеврона), шапка остаётся активной.
-        HeaderChrome.ShowChevron = AllowBodyExpand && IsExpansionEnabled;
+        // KeepChevronVisible: шеврон остаётся видимым, но тело не раскрывается (CanExpandBody = false).
+        HeaderChrome.ShowChevron = KeepChevronVisible || (AllowBodyExpand && IsExpansionEnabled);
 
         ApplyBodyEnabled(canExpand);
         if (ShowGateSwitch)

@@ -32,6 +32,7 @@
 #include "CrashGuard.h"
 #include "ShortLivedAgent.h"
 #include <RootBackdropPolicy.h>
+
 // Определён в EXPORTS ниже; watcher polling (H54 WPM).
 extern "C" __declspec(dllexport) volatile LONG GlassCompat_CwForceUnloadFlag;
 extern "C" __declspec(dllexport) volatile DWORD GlassCompat_GuiThreadId;

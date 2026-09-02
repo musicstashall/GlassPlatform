@@ -725,18 +725,15 @@ namespace TaskbarCompat
         {
             hrAdvise = vts3->AdviseVisualTreeChange(watcher);
             if (SUCCEEDED(hrAdvise))
+            {
                 break;
+            }
             if (hrAdvise != E_UNEXPECTED)
+            {
                 break;
+            }
 
             const DWORD backoffMs = 20u + static_cast<DWORD>(attempt) * 25u;
-            DebugLog(
-                DBG_WARNING,
-                L"[TaskbarCompat][TapSite] AdviseVisualTreeChange E_UNEXPECTED attempt=%d/%d backoff=%ums tid=%u",
-                attempt + 1,
-                kAdviseMaxAttempts,
-                static_cast<unsigned>(backoffMs),
-                static_cast<unsigned>(GetCurrentThreadId()));
             Sleep(backoffMs);
         }
 
@@ -768,8 +765,6 @@ namespace TaskbarCompat
             g_activeWatcher = watcher;
             g_activeVts = vts3;
         }
-
-        DebugLog(DBG_IMPORTANT, L"[TaskbarCompat][TapSite] AdviseVisualTreeChange OK");
 
         if (s_marshalHwnd && IsWindow(s_marshalHwnd))
         {
@@ -866,9 +861,6 @@ namespace TaskbarCompat
                     kTimeoutMs,
                     &result) != 0)
             {
-                DebugLog(DBG_IMPORTANT,
-                    L"[TaskbarCompat][TapSite] Shutdown marshalled на tid=%u",
-                    static_cast<unsigned>(wndTid));
                 DebugLog(DBG_IMPORTANT, L"[TaskbarCompat][TapSite] ShutdownActiveWatcher: END");
                 return;
             }

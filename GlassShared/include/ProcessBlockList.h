@@ -61,6 +61,7 @@ namespace ProcessBlockList
         L"apimonitor-x86.exe",
         L"dbgview.exe",
         L"dbgview64.exe",
+        L"DbgX.Shell.exe",
         L"procexp.exe",
         L"procexp64.exe",
         L"procmon.exe",

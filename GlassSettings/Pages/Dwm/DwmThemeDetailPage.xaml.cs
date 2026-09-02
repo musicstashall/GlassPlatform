@@ -727,10 +727,11 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         _reflectionRow.Reload();
         _reflectionMaxRow.Reload();
 
-        AtlasCollectionExpander.IsGateOn = _atlasItems.Count > 0
-            || DwmRegistryStore.HasAnyPresentForPage(
-                _hive,
-                [AtlasRegistryKey, LegacyAtlasRegistryKey]);
+        var hasActiveAtlas = DwmRegistryStore.HasAnyPresentForPage(
+            _hive,
+            [AtlasRegistryKey, LegacyAtlasRegistryKey]);
+        AtlasCollectionExpander.IsGateOn = hasActiveAtlas;
+        AtlasCollectionExpander.IsExpansionEnabled = hasActiveAtlas;
         ApplyPolicyGateVisual(PolicyGateSwitch.IsOn);
 
         UpdateValueLabels();
@@ -1032,9 +1033,14 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private void AtlasCollectionExpander_OnGateToggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        if (AtlasCollectionExpander.IsGateOn)
-            return;
 
+        if (AtlasCollectionExpander.IsGateOn)
+        {
+            AtlasCollectionExpander.IsExpansionEnabled = true;
+            return;
+        }
+
+        AtlasCollectionExpander.IsExpansionEnabled = false;
         SettingsSession.Current.DeleteDwmValue(_hive, AtlasRegistryKey, liveDwm: true);
         if (DwmRegistryStore.ValueExists(_hive, LegacyAtlasRegistryKey))
             SettingsSession.Current.DeleteDwmValue(_hive, LegacyAtlasRegistryKey, liveDwm: false);

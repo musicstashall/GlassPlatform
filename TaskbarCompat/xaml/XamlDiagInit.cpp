@@ -221,7 +221,9 @@ namespace
         while (attempt < kIxdeDonorAttempts && !ShouldAbortInstall())
         {
             if (g_ixdeSucceeded.load(std::memory_order_acquire))
+            {
                 return S_OK;
+            }
 
             // InitializeXamlDiagnosticsEx на том же STA, что и IxdeInstallThreadProc (без временного thread).
             hr = ixde(
@@ -262,11 +264,15 @@ namespace
                 break;
 
             if (ShouldAbortInstall())
+            {
                 break;
+            }
 
             // Новый триггер (вторая панель задач и т.п.) — не ждём полный интервал между попытками.
             if (g_ixdeKickRequested.exchange(false, std::memory_order_acq_rel))
+            {
                 continue;
+            }
 
             InterruptibleSleepMs(kIxdeDonorSleepMs);
 
