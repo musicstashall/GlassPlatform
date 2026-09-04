@@ -852,7 +852,14 @@ namespace
             const bool isGaRoot = (GetAncestor(hWnd, GA_ROOT) == hWnd);
             const bool isWinFormsWindow = (kind == GlassShared::GlassControlKind::WinForms_Window);
             const bool isNetUi = (kind == GlassShared::GlassControlKind::NetUI);
-            if (!isGaRoot && !isWinFormsWindow && !isNetUi)
+            // mmc.exe: все корневые окна получают чёрный фон (BWM WinHandler:701).
+            static const bool isMmc = [] {
+                wchar_t exeName[MAX_PATH]{};
+                GetModuleFileNameW(nullptr, exeName, MAX_PATH);
+                const wchar_t* bs = wcsrchr(exeName, L'\\');
+                return _wcsicmp(bs ? bs + 1 : exeName, L"mmc.exe") == 0;
+            }();
+            if (!isGaRoot && !isWinFormsWindow && !isNetUi && !isMmc)
                 break;
 
             HDC hdc = reinterpret_cast<HDC>(wParam);

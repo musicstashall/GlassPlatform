@@ -19,6 +19,7 @@ namespace Shared::PlatformPresenceMonitor
         using PlatformPresenceState::PipelinePhase;
         using PlatformPresenceState::PresenceUiState;
         using PlatformPresenceState::Snapshot;
+        using ::GlassShared::GlassPlatformTask::PlatformArch;
 
         std::atomic<bool> g_running{ false };
         std::atomic<bool> g_refreshRequested{ false };
@@ -210,6 +211,13 @@ namespace Shared::PlatformPresenceMonitor
                 snap.openGlassHostProcessRunning = hostProc ? 1u : 0u;
                 snap.openGlassBackend = static_cast<std::int32_t>(OpenGlassHostState::QueryActiveBackend());
                 snap.rootBackdropMode = ComputeRootBackdropMode(backdropPipeline);
+                // dual-arch Glass
+                snap.glassTaskExistsX64 = ::GlassShared::GlassPlatformTask::GlassAutorunTaskExists(PlatformArch::X64) ? 1u : 0u;
+                snap.glassTaskExistsX86 = ::GlassShared::GlassPlatformTask::GlassAutorunTaskExists(PlatformArch::X86) ? 1u : 0u;
+                snap.injectLifecycleUiX64 = static_cast<std::int32_t>(::GlassShared::GlassPlatformTask::QueryInjectLifecycleUi(PlatformArch::X64));
+                snap.injectLifecycleUiX86 = static_cast<std::int32_t>(::GlassShared::GlassPlatformTask::QueryInjectLifecycleUi(PlatformArch::X86));
+                snap.glassAutorunStateX64 = static_cast<std::int32_t>(::GlassShared::GlassPlatformTask::QueryGlassAutorunUiState(PlatformArch::X64));
+                snap.glassAutorunStateX86 = static_cast<std::int32_t>(::GlassShared::GlassPlatformTask::QueryGlassAutorunUiState(PlatformArch::X86));
 
                 ApplySnapshot(snap, prevMode);
                 prevMode = snap.rootBackdropMode;
@@ -253,6 +261,13 @@ namespace Shared::PlatformPresenceMonitor
                     OpenGlassHostState::IsHostProcessRunning() ? 1u : 0u;
                 snap.openGlassBackend =
                     static_cast<std::int32_t>(OpenGlassHostState::QueryActiveBackend());
+                // dual-arch Glass
+                snap.glassTaskExistsX64 = ::GlassShared::GlassPlatformTask::GlassAutorunTaskExists(PlatformArch::X64) ? 1u : 0u;
+                snap.glassTaskExistsX86 = ::GlassShared::GlassPlatformTask::GlassAutorunTaskExists(PlatformArch::X86) ? 1u : 0u;
+                snap.injectLifecycleUiX64 = static_cast<std::int32_t>(::GlassShared::GlassPlatformTask::QueryInjectLifecycleUi(PlatformArch::X64));
+                snap.injectLifecycleUiX86 = static_cast<std::int32_t>(::GlassShared::GlassPlatformTask::QueryInjectLifecycleUi(PlatformArch::X86));
+                snap.glassAutorunStateX64 = static_cast<std::int32_t>(::GlassShared::GlassPlatformTask::QueryGlassAutorunUiState(PlatformArch::X64));
+                snap.glassAutorunStateX86 = static_cast<std::int32_t>(::GlassShared::GlassPlatformTask::QueryGlassAutorunUiState(PlatformArch::X86));
             }
 
             snap.rootBackdropMode = mode;

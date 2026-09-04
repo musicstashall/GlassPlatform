@@ -112,6 +112,9 @@
     <ClCompile Include="src\Hooks\forms\FormsHooksDrawTextEx.cpp">
       <Filter>src\Hooks\forms</Filter>
     </ClCompile>
+    <ClCompile Include="src\Hooks\forms\FormsHooksDrawText.cpp">
+      <Filter>src\Hooks\forms</Filter>
+    </ClCompile>
     <ClCompile Include="src\Hooks\forms\FormsHooksDrawThemeBackground.cpp">
       <Filter>src\Hooks\forms</Filter>
     </ClCompile>

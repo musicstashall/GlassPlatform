@@ -35,6 +35,7 @@
 #include <Controls/MonthCalSubclass.h>
 #include <Controls/TreeViewSubclass.h>
 #include <Controls/TabControlSubclass.h>
+#include <Controls/CustomTabSubclass.h>
 #include <Controls/TrackBarHost.h>
 #include <Controls/UpDownHost.h>
 #include <Popup/DropDown/DropDownSubclass.h>
@@ -1065,6 +1066,14 @@ namespace
                     }
                     break;
 
+                case ControlKind::AMCCustomTab:
+                    if (isFull && allowGlassForHwnd)
+                    {
+                        DebugLog(L"[WndCompat][WinEvent] CustomTab_Attach: hwnd=0x%p", hWnd);
+                        WndCompat::CustomTab_Attach(hWnd);
+                    }
+                    break;
+
                 case ControlKind::InternetExplorer_Server:
                     if (isFull && allowGlassForHwnd)
                     {
@@ -1853,6 +1862,11 @@ namespace
         case ControlKind::WinForms_TabControl:
             if (isFull)
                 return GK::TabControl;
+            break;
+
+        case ControlKind::AMCCustomTab:
+            if (isFull)
+                return GK::AMCCustomTab;
             break;
 
         case ControlKind::InternetExplorer_Server:

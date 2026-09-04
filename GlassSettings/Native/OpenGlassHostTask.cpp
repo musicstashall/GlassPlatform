@@ -329,6 +329,11 @@ extern "C"
         return ok;
     }
 
+    __declspec(dllexport) void WINAPI GlassSettings_InvalidateOGCache() noexcept
+    {
+        Shared::OpenGlassHostState::InvalidateCache();
+    }
+
     namespace
     {
         [[nodiscard]] GlassShared::GlassPlatformTask::PlatformArch ToPlatformArch(int arch) noexcept

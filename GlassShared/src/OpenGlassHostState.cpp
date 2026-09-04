@@ -2,6 +2,7 @@
 #include <OpenGlassHostState.h>
 #include <OpenGlassDwmPolicy.h>
 #include <TaskSchedulerCom.h>
+#include <GlassPlatformTask.h>
 
 #include <TlHelp32.h>
 #include <wil/com.h>
@@ -211,8 +212,33 @@ namespace Shared::OpenGlassHostState
         }
     } // namespace
 
+    constexpr DWORD kCacheTtlMs = 1500;
+
+    struct OrchestrationCache
+    {
+        HostUiState state = HostUiState::NoTask;
+        ULONGLONG timeMs = 0;
+    };
+
+    std::atomic<OrchestrationCache> g_orchestrationCache{};
+    std::atomic<ULONGLONG> g_legacyTaskCacheTimeMs{ 0 };
+    std::atomic<bool> g_legacyTaskCacheValue{ false };
+
+    void InvalidateCache() noexcept
+    {
+        g_orchestrationCache.store({}, std::memory_order_release);
+        g_legacyTaskCacheTimeMs.store(0, std::memory_order_release);
+        ::GlassShared::GlassPlatformTask::InvalidateGlassAutorunTaskCache();
+    }
+
     bool LegacyHostTaskExists() noexcept
     {
+        const auto now = GetTickCount64();
+        const auto cachedTime = g_legacyTaskCacheTimeMs.load(std::memory_order_acquire);
+        if (now - cachedTime < kCacheTtlMs)
+            return g_legacyTaskCacheValue.load(std::memory_order_acquire);
+
+        bool result = false;
         ComInitGuard com;
         if (SUCCEEDED(com.hr))
         {
@@ -221,11 +247,16 @@ namespace Shared::OpenGlassHostState
             {
                 wil::com_ptr<IRegisteredTask> task;
                 if (OpenOgHostTask(ts, task))
-                    return true;
+                    result = true;
             }
         }
 
-        return LegacyHostTaskExistsViaSchtasks();
+        if (!result)
+            result = LegacyHostTaskExistsViaSchtasks();
+
+        g_legacyTaskCacheValue.store(result, std::memory_order_release);
+        g_legacyTaskCacheTimeMs.store(now, std::memory_order_release);
+        return result;
     }
 
     bool ServiceInstalled() noexcept
@@ -317,29 +348,37 @@ namespace Shared::OpenGlassHostState
 
     HostUiState QueryOrchestrationUiState() noexcept
     {
+        const auto now = GetTickCount64();
+        auto cached = g_orchestrationCache.load(std::memory_order_acquire);
+        if (now - cached.timeMs < kCacheTtlMs)
+            return cached.state;
+
         const HostUiState svc = QueryServiceUiState();
         const HostUiState task = QueryTaskUiState();
 
+        HostUiState result;
         if (svc == HostUiState::NoTask && task == HostUiState::NoTask)
-            return HostUiState::NoTask;
-
-        if (svc == HostUiState::Running || task == HostUiState::Running)
-            return HostUiState::Running;
-
-        if (svc == HostUiState::Disabled || task == HostUiState::Disabled)
+            result = HostUiState::NoTask;
+        else if (svc == HostUiState::Running || task == HostUiState::Running)
+            result = HostUiState::Running;
+        else if (svc == HostUiState::Disabled || task == HostUiState::Disabled)
         {
             if (svc == HostUiState::Disabled && task == HostUiState::Disabled)
-                return HostUiState::Disabled;
-            if (svc == HostUiState::Disabled && task == HostUiState::NoTask)
-                return HostUiState::Disabled;
-            if (task == HostUiState::Disabled && svc == HostUiState::NoTask)
-                return HostUiState::Disabled;
+                result = HostUiState::Disabled;
+            else if (svc == HostUiState::Disabled && task == HostUiState::NoTask)
+                result = HostUiState::Disabled;
+            else if (task == HostUiState::Disabled && svc == HostUiState::NoTask)
+                result = HostUiState::Disabled;
+            else
+                result = svc != HostUiState::NoTask ? svc : task;
         }
+        else if (svc == HostUiState::Ready || task == HostUiState::Ready)
+            result = HostUiState::Ready;
+        else
+            result = svc != HostUiState::NoTask ? svc : task;
 
-        if (svc == HostUiState::Ready || task == HostUiState::Ready)
-            return HostUiState::Ready;
-
-        return svc != HostUiState::NoTask ? svc : task;
+        g_orchestrationCache.store({ result, now }, std::memory_order_release);
+        return result;
     }
 
     OpenGlassBackend QueryActiveBackend() noexcept

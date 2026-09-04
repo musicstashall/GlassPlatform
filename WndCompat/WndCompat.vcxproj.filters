@@ -87,6 +87,9 @@
     <ClCompile Include="Controls\TabControlSubclass.cpp">
       <Filter>Controls</Filter>
     </ClCompile>
+    <ClCompile Include="Controls\CustomTabSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
     <ClCompile Include="Controls\ToolbarSubclass.cpp">
       <Filter>Controls</Filter>
     </ClCompile>
@@ -239,6 +242,9 @@
       <Filter>Controls</Filter>
     </ClInclude>
     <ClInclude Include="Controls\TabControlSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\CustomTabSubclass.h">
       <Filter>Controls</Filter>
     </ClInclude>
     <ClInclude Include="Controls\ToolbarSubclass.h">

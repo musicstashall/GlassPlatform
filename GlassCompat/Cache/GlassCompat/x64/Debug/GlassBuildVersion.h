@@ -1,8 +1,0 @@
-#pragma once
-#define GLASS_VER_COMMA 2,0,0,865
-#define GLASS_VER_DOT 2.0.0.865
-#define GLASS_VER_PRODUCT_COMMA 2,0,0,0
-#define GLASS_VER_PRODUCT_DOT 2.0.0.0
-#define GLASS_VER_MODULE GlassCompat
-#define GLASS_VER_EXT dll
-#define GLASS_VER_FILETYPE 0x2L

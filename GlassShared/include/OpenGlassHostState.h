@@ -52,4 +52,7 @@ namespace Shared::OpenGlassHostState
 
     /// Какой backend активен (task / service / none).
     [[nodiscard]] OpenGlassBackend QueryActiveBackend() noexcept;
+
+    /// Сбросить TTL-кэш (вызывать при старте/остановке платформы).
+    void InvalidateCache() noexcept;
 }

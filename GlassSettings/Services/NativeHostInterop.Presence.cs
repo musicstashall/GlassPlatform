@@ -16,6 +16,19 @@ public static partial class NativeHostInterop
         public uint OpenGlassPipelineActive;
         public uint OpenGlassHostProcessRunning;
         public int OpenGlassBackend;
+        public int GlassAutorunState;
+        public int InjectLifecycleUi;
+        public uint StopEventSignaled;
+        // --- dual-arch Glass ---
+        public uint GlassTaskExistsX64;
+        public uint GlassTaskExistsX86;
+        public int InjectLifecycleUiX64;
+        public int InjectLifecycleUiX86;
+        public int GlassAutorunStateX64;
+        public int GlassAutorunStateX86;
+        // --- OG x64 only ---
+        public uint OgLegacyTaskExists;
+        public uint OgCurrentTaskExists;
     }
 
     public static bool TryReadPresenceSnapshot(out PresenceSnapshot snapshot)

@@ -56,6 +56,7 @@ enum class ControlKind
     DirectUI,           // DirectUIHWND (DUser.dll/wdc.dll, Windows 10+)
     NetUI,              // NetUIHWND, UIRibbonCommandBar (Office ribbon / UIRibbon.dll)
     NetUiToolWindow,    // «Net UI Tool Window», «Net UI Tool Window Layered» — WinEvent: Control (как DirectUI)
+    AMCCustomTab,       // AMCCustomTab — кастомный C#/WinForms таб-контрол mmc.exe (MFC42u.dll)
 
     // Delphi-контейнеры (WS_CHILD, но не leaf-контролы)
     DelphiContainer,    // TGroupBox, TTabSheet, TInplaceEditList

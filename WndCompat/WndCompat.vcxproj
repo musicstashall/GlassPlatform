@@ -190,6 +190,7 @@
     <ClCompile Include="Controls\StaticSubclass.cpp" />
     <ClCompile Include="Controls\MonthCalSubclass.cpp" />
     <ClCompile Include="Controls\TabControlSubclass.cpp" />
+    <ClCompile Include="Controls\CustomTabSubclass.cpp" />
     <ClCompile Include="Controls\ToolbarSubclass.cpp" />
     <ClCompile Include="Controls\TrackBarHost.cpp" />
     <ClCompile Include="Controls\UpDownHost.cpp" />
@@ -249,6 +250,7 @@
     <ClInclude Include="Controls\StaticSubclass.h" />
     <ClInclude Include="Controls\MonthCalSubclass.h" />
     <ClInclude Include="Controls\TabControlSubclass.h" />
+    <ClInclude Include="Controls\CustomTabSubclass.h" />
     <ClInclude Include="Controls\ToolbarSubclass.h" />
     <ClInclude Include="Controls\TrackBarHost.h" />
     <ClInclude Include="Controls\UpDownHost.h" />

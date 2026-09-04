@@ -64,6 +64,7 @@ namespace GlassShared::GlassPlatformTask
 
     [[nodiscard]] bool GlassAutorunTaskExists() noexcept;
     [[nodiscard]] bool GlassAutorunTaskExists(PlatformArch arch) noexcept;
+    void InvalidateGlassAutorunTaskCache() noexcept;
 
     [[nodiscard]] AutorunUiState QueryGlassAutorunUiState() noexcept;
     [[nodiscard]] AutorunUiState QueryGlassAutorunUiState(PlatformArch arch) noexcept;

@@ -180,6 +180,7 @@
     <ClCompile Include="src\Hooks\forms\FormsHooks.cpp" />
     <ClCompile Include="src\Hooks\forms\FormsHooksInternal.cpp" />
     <ClCompile Include="src\Hooks\forms\FormsHooksDrawTextEx.cpp" />
+    <ClCompile Include="src\Hooks\forms\FormsHooksDrawText.cpp" />
     <ClCompile Include="src\Hooks\forms\FormsHooksDrawThemeBackground.cpp" />
     <ClCompile Include="src\Hooks\forms\FormsHooksDtbButton.cpp" />
     <ClCompile Include="src\Hooks\forms\FormsHooksDtbComboBox.cpp" />

@@ -26,7 +26,6 @@ public static class SystemPlatformRunActions
             _ = GlassPlatformService.TrySyncAutorunTaskActionPath(arch);
             GlassPlatformService.StartPlatform(arch);
         }).ConfigureAwait(true);
-        // Mutex хоста, не TASK_STATE_RUNNING: rundll32 с MessageBox держит задачу «Running».
         if (!await WaitForGlassRunningAsync(arch, DefaultRunningWait).ConfigureAwait(true))
             return false;
 
@@ -39,26 +38,32 @@ public static class SystemPlatformRunActions
 
     public static async Task StopGlassAsync(GlassPlatformArch arch)
     {
-        using var busy = PlatformLifecycleBusy.Begin(arch);
-        // StopPlatformAndWait ждёт !mutex (не только HostShutdown) — один барьер.
-        await Task.Run(() => GlassPlatformService.StopPlatformAndWait(arch)).ConfigureAwait(true);
-        // Держим busy, пока sticky residual своей arch (тот же Refresh, что меню).
-        var residualDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
-        var emptyStreak = 0;
-        while (DateTime.UtcNow < residualDeadline)
+        NativeHostInterop.SignalPlatformStop(arch);
+        var busy = PlatformLifecycleBusy.TryBegin(arch);
+        try
         {
-            if (!NativeHostInterop.RefreshInjectResidualSticky(arch))
+            await Task.Run(() => GlassPlatformService.StopPlatformAndWait(arch)).ConfigureAwait(true);
+            var residualDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+            var emptyStreak = 0;
+            while (DateTime.UtcNow < residualDeadline)
             {
-                if (++emptyStreak >= 6)
-                    break;
+                if (!NativeHostInterop.RefreshInjectResidualSticky(arch))
+                {
+                    if (++emptyStreak >= 6)
+                        break;
+                }
+                else
+                {
+                    emptyStreak = 0;
+                }
+                await Task.Delay(250).ConfigureAwait(true);
             }
-            else
-            {
-                emptyStreak = 0;
-            }
-            await Task.Delay(250).ConfigureAwait(true);
         }
-        PlatformPresenceService.Instance.NotifyLifecycleChanged();
+        finally
+        {
+            busy?.Dispose();
+            PlatformPresenceService.Instance.NotifyLifecycleChanged();
+        }
     }
 
     public static async Task<bool> InstallOpenGlassOrchestrationAsync()
@@ -78,13 +83,23 @@ public static class SystemPlatformRunActions
             return true;
         }
 
-        if (!await Task.Run(OpenGlassHostService.TryStartHostNoWait).ConfigureAwait(true))
+        var busy = OpenGlassLifecycleBusy.TryBegin();
+        if (busy is null)
             return false;
-
-        if (!await WaitForOpenGlassLaunchCompleteAsync(OpenGlassLaunchWait).ConfigureAwait(true))
+        try
         {
-            await RollbackFailedOpenGlassStartAsync().ConfigureAwait(true);
-            return false;
+            if (!await Task.Run(OpenGlassHostService.TryStartHostNoWait).ConfigureAwait(true))
+                return false;
+
+            if (!await WaitForOpenGlassLaunchCompleteAsync(OpenGlassLaunchWait).ConfigureAwait(true))
+            {
+                await RollbackFailedOpenGlassStartAsync().ConfigureAwait(true);
+                return false;
+            }
+        }
+        finally
+        {
+            busy.Dispose();
         }
 
         CompleteOpenGlassStartSuccess();
@@ -104,7 +119,17 @@ public static class SystemPlatformRunActions
 
     public static async Task StopOpenGlassAsync()
     {
-        await StopOpenGlassOrchestrationAsync().ConfigureAwait(true);
+        var busy = OpenGlassLifecycleBusy.TryBegin();
+        if (busy is null)
+            return;
+        try
+        {
+            await StopOpenGlassOrchestrationAsync().ConfigureAwait(true);
+        }
+        finally
+        {
+            busy.Dispose();
+        }
         OpenGlassBorderPolicyCoordinator.NotifyOpenGlassStateChanged();
         NotifyRootBackdropAfterOpenGlassStop();
     }

@@ -153,4 +153,9 @@ public static partial class NativeHostInterop
     [DllImport(Dll, EntryPoint = "GlassSettings_PublishTrayXamlPolicy")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool Native_PublishTrayXamlPolicy();
+
+    public static void InvalidateOGCache() => Native_InvalidateOGCache();
+
+    [DllImport(Dll, EntryPoint = "GlassSettings_InvalidateOGCache")]
+    private static extern void Native_InvalidateOGCache();
 }

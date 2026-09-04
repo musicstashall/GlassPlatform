@@ -1071,6 +1071,14 @@ namespace GlassCore::ComboLBox
         {
             EnableHooksOnModule(base, OHK_EXTTEXTOUT, enable);
             EnableHooksOnModule(base, OHK_CREATEHATCHBRUSH, enable);
+            EnableHooksOnModule(base, OHK_FILLRECT, enable);
+        }
+
+        // dmview.ocx — Disk Management view control
+        if (PVOID base = GetModuleHandleW(L"dmview.ocx"))
+        {
+            EnableHooksOnModule(base, OHK_EXTTEXTOUT, enable);
+            EnableHooksOnModule(base, OHK_FILLRECT, enable);
         }
 
         // charmap.exe

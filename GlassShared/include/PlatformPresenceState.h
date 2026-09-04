@@ -34,6 +34,19 @@ namespace Shared::PlatformPresenceState
         DWORD openGlassHostProcessRunning = 0;
         /// Shared::OpenGlassHostState::OpenGlassBackend
         std::int32_t openGlassBackend = 0;
+        std::int32_t glassAutorunState = 0;
+        std::int32_t injectLifecycleUi = 0;
+        BOOL stopEventSignaled = FALSE;
+        // --- dual-arch Glass ---
+        DWORD glassTaskExistsX64 = 0;
+        DWORD glassTaskExistsX86 = 0;
+        std::int32_t injectLifecycleUiX64 = 0;
+        std::int32_t injectLifecycleUiX86 = 0;
+        std::int32_t glassAutorunStateX64 = 0;
+        std::int32_t glassAutorunStateX86 = 0;
+        // --- OG x64 only ---
+        DWORD ogLegacyTaskExists = 0;
+        DWORD ogCurrentTaskExists = 0;
     };
 
     inline constexpr wchar_t kPresenceStateMappingName[] = L"Local\\GlassPlatform.PresenceState";

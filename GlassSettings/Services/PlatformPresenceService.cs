@@ -1,28 +1,43 @@
+using GlassSettings.Controls;
 using GlassSettings.Core.Platform;
 using GlassSettings.Services;
 using Microsoft.UI.Dispatching;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace GlassSettings.Services;
 
 /// <summary>
-/// Подписка на snapshot платформы (mapping + event) с fallback poll без хоста.
+/// Event-driven presence watcher: maintains a subscriber list and invokes all subscribers
+/// when platform state changes. Single source of truth for task/service state.
+///
+/// When platform is RUNNING: reads from shared memory (native PlatformPresenceMonitor writes there).
+/// When platform is STOPPED: performs direct COM/SCM queries (fallback) on STA thread.
 /// </summary>
 public sealed class PlatformPresenceService : IDisposable
 {
     public static PlatformPresenceService Instance { get; } = new();
 
     private readonly object _gate = new();
+    private readonly List<Action<NativeHostInterop.PresenceSnapshot>> _subscribers = new();
     private DispatcherQueue? _dispatcher;
     private NativeHostInterop.PresenceSnapshot _snapshot;
     private uint _lastRevision;
-    private int _subscriberCount;
-    private bool _fallbackPollActive;
-    private RegisteredWaitHandle? _presenceWait;
     private CancellationTokenSource? _presenceWaitCts;
-    private CancellationTokenSource? _fallbackCts;
-    private Timer? _fallbackTimer;
 
+    // Watcher STA thread — always active while subscribers exist.
+    private Thread? _watcherThread;
+    private CancellationTokenSource? _watcherCts;
+    private ManualResetEventSlim? _watcherSignal;
+    private NativeHostInterop.PresenceSnapshot _lastWatcherSnapshot;
+    private static int s_watcherRevision;
+
+    private const int WatcherPollIntervalMs = 500;
+
+    private static void Log(string msg) =>
+        Debug.WriteLine($"[PlatformPresence] {msg}");
+
+    /// <summary>Fired on UI thread when snapshot changes (backward compat).</summary>
     public event EventHandler? PresenceChanged;
 
     public NativeHostInterop.PresenceSnapshot CurrentSnapshot
@@ -37,40 +52,79 @@ public sealed class PlatformPresenceService : IDisposable
     public void Attach(DispatcherQueue dispatcher)
     {
         _dispatcher = dispatcher;
-        // forceNotify без события: Home уже Refresh() в Loaded.
-        RefreshSnapshot(forceNotify: true, raiseEvent: false);
-        // EnsurePresenceWait — только после shell ready (см. StartPresenceWatchAfterShellReady).
-        // Иначе WaitForSingleObject сразу сигналит → DispatchRefresh(raiseEvent) →
-        // SchedulerRow.Refresh → AV на x86 до Low Ensure (лог: pump_normal_after, нет pump_low).
-        SyncFallbackPoll();
+        Log("Attach: reading shared memory");
+        RefreshSnapshotFromSharedMemory(forceNotify: true, raiseEvent: false);
+        SyncWatcher();
     }
 
-    /// <summary>После dismiss/Ensure: named wait + один PresenceChanged для карточек.</summary>
     public void StartPresenceWatchAfterShellReady()
     {
+        Log("StartPresenceWatchAfterShellReady");
         EnsurePresenceWait();
-        RefreshSnapshot(forceNotify: true, raiseEvent: true);
+        RefreshSnapshotFromSharedMemory(forceNotify: true, raiseEvent: true);
     }
 
-    /// <summary>После start/stop: snapshot + fallback-poll (хост мог уйти без Presence event).</summary>
     public void NotifyLifecycleChanged()
     {
-        SyncFallbackPoll();
-        DispatchRefresh();
+        Log("NotifyLifecycleChanged: invalidating OG cache + signaling watcher");
+        NativeHostInterop.InvalidateOGCache();
+        SignalWatcherRefresh();
+    }
+
+    public void Subscribe(Action<NativeHostInterop.PresenceSnapshot> callback)
+    {
+        lock (_gate)
+            _subscribers.Add(callback);
+        Log($"Subscribe: total={_subscribers.Count}, starting watcher");
+        SyncWatcher();
+        var snap = CurrentSnapshot;
+        if (snap.Revision > 0)
+        {
+            var dq = _dispatcher;
+            if (dq != null)
+                dq.TryEnqueue(() => callback(snap));
+        }
+    }
+
+    public void Unsubscribe(Action<NativeHostInterop.PresenceSnapshot> callback)
+    {
+        lock (_gate)
+            _subscribers.Remove(callback);
+        Log($"Unsubscribe: total={_subscribers.Count}");
+        SyncWatcher();
     }
 
     public void AddSubscriber()
     {
-        Interlocked.Increment(ref _subscriberCount);
-        SyncFallbackPoll();
+        var first = Interlocked.Increment(ref _subscriberCount) == 1;
+        SyncWatcher();
+        if (first)
+        {
+            Log($"AddSubscriber: count={_subscriberCount}, first=True, raising event");
+            // Always fire PresenceChanged on first subscriber — ensures initial state sync.
+            var dq = _dispatcher;
+            if (dq != null)
+            {
+                dq.TryEnqueue(() =>
+                {
+                    Log("AddSubscriber: dispatching PresenceChanged for initial state sync");
+                    PresenceChanged?.Invoke(this, EventArgs.Empty);
+                });
+            }
+            return;
+        }
+        Log($"AddSubscriber: count={_subscriberCount}, first=False");
     }
 
     public void RemoveSubscriber()
     {
         if (Interlocked.Decrement(ref _subscriberCount) < 0)
             Interlocked.Exchange(ref _subscriberCount, 0);
-        SyncFallbackPoll();
+        Log($"RemoveSubscriber: count={_subscriberCount}");
+        SyncWatcher();
     }
+
+    private int _subscriberCount;
 
     public async Task WaitForOpenGlassOrchestrationAsync(
         NativeHostInterop.NativeOpenGlassHostUiState expected,
@@ -81,25 +135,89 @@ public sealed class PlatformPresenceService : IDisposable
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            RefreshSnapshot(forceNotify: false);
+            RefreshSnapshotFromSharedMemory(forceNotify: false);
             if ((NativeHostInterop.NativeOpenGlassHostUiState)CurrentSnapshot.OpenGlassOrchestration == expected)
                 return;
             await Task.Delay(250, cancellationToken).ConfigureAwait(false);
         }
     }
 
+    /// <summary>
+    /// Единый источник истины для состояния задачи платформы.
+    /// </summary>
+    public PlatformTaskState QueryTaskState(PlatformSchedulerKind kind, GlassPlatformArch arch)
+    {
+        var snap = CurrentSnapshot;
+        if (snap.Revision > 0)
+        {
+            var result = kind switch
+            {
+                PlatformSchedulerKind.Glass => new PlatformTaskState(
+                    TaskExists: arch == GlassPlatformArch.X64
+                        ? snap.GlassTaskExistsX64 != 0
+                        : snap.GlassTaskExistsX86 != 0,
+                    Lifecycle: (NativeHostInterop.InjectLifecycleUi)(arch == GlassPlatformArch.X64
+                        ? snap.InjectLifecycleUiX64 : snap.InjectLifecycleUiX86),
+                    Autorun: (GlassAutorunUiState)(arch == GlassPlatformArch.X64
+                        ? snap.GlassAutorunStateX64 : snap.GlassAutorunStateX86)),
+                PlatformSchedulerKind.OpenGlass => new PlatformTaskState(
+                    TaskExists: snap.OgLegacyTaskExists != 0,
+                    Lifecycle: snap.OpenGlassOrchestration == 3
+                        ? NativeHostInterop.InjectLifecycleUi.Running
+                        : NativeHostInterop.InjectLifecycleUi.Idle,
+                    Autorun: snap.OpenGlassOrchestration == 3
+                        ? GlassAutorunUiState.Running
+                        : GlassAutorunUiState.Ready),
+                _ => PlatformTaskState.Default
+            };
+            Log($"QueryTaskState({kind},{arch}) rev={snap.Revision} -> TaskExists={result.TaskExists} Lifecycle={result.Lifecycle} Autorun={result.Autorun} IsBusy={result.IsLifecycleBusy} IsUnloading={result.IsUnloading}");
+            return result;
+        }
+
+        var direct = QueryTaskStateDirect(kind, arch);
+        Log($"QueryTaskState({kind},{arch}) REV=0(fallback) -> TaskExists={direct.TaskExists} Lifecycle={direct.Lifecycle} Autorun={direct.Autorun}");
+        return direct;
+    }
+
+    public PlatformTaskState QueryTaskStateDirect(PlatformSchedulerKind kind, GlassPlatformArch arch)
+    {
+        return kind switch
+        {
+            PlatformSchedulerKind.Glass => new PlatformTaskState(
+                TaskExists: NativeHostInterop.GlassAutorunTaskExistsNative(arch),
+                Lifecycle: NativeHostInterop.QueryInjectLifecycleUi(arch),
+                Autorun: GlassPlatformService.QueryGlassAutorunUiState(arch)),
+            PlatformSchedulerKind.OpenGlass => new PlatformTaskState(
+                TaskExists: NativeHostInterop.LegacyHostTaskExists(),
+                Lifecycle: NativeHostInterop.QueryInjectLifecycleUi(GlassPlatformNames.NativeArch),
+                Autorun: MapOgOrchestrationToAutorun(NativeHostInterop.QueryOpenGlassHostUiState())),
+            _ => PlatformTaskState.Default
+        };
+    }
+
+    private static GlassAutorunUiState MapOgOrchestrationToAutorun(NativeHostInterop.NativeOpenGlassHostUiState st) =>
+        st switch
+        {
+            NativeHostInterop.NativeOpenGlassHostUiState.Running => GlassAutorunUiState.Running,
+            NativeHostInterop.NativeOpenGlassHostUiState.Ready => GlassAutorunUiState.Ready,
+            NativeHostInterop.NativeOpenGlassHostUiState.Disabled => GlassAutorunUiState.Disabled,
+            _ => GlassAutorunUiState.NoTask
+        };
+
     public void Dispose()
     {
         _presenceWaitCts?.Cancel();
         _presenceWaitCts?.Dispose();
         _presenceWaitCts = null;
-        _presenceWait?.Unregister(null);
-        _presenceWait = null;
-        _fallbackCts?.Cancel();
-        _fallbackCts?.Dispose();
-        _fallbackCts = null;
-        _fallbackTimer?.Dispose();
-        _fallbackTimer = null;
+
+        _watcherCts?.Cancel();
+        _watcherSignal?.Set();
+        _watcherThread?.Join(2000);
+        _watcherCts?.Dispose();
+        _watcherCts = null;
+        _watcherSignal?.Dispose();
+        _watcherSignal = null;
+        _watcherThread = null;
     }
 
     private void EnsurePresenceWait()
@@ -115,68 +233,159 @@ public sealed class PlatformPresenceService : IDisposable
         var token = _presenceWaitCts.Token;
         _ = Task.Run(() =>
         {
-            while (!token.IsCancellationRequested)
+            try
             {
-                _ = WaitForSingleObject(h, 5000);
-                if (token.IsCancellationRequested)
-                    break;
-                DispatchRefresh();
+                while (!token.IsCancellationRequested)
+                {
+                    _ = WaitForSingleObject(h, 5000);
+                    if (token.IsCancellationRequested)
+                        break;
+                    Log("PresenceChanged event fired -> signaling watcher");
+                    SignalWatcherRefresh();
+                }
             }
+            catch (OperationCanceledException) { }
         }, token);
     }
 
     [DllImport("kernel32.dll")]
     private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
 
-    private void SyncFallbackPoll()
+    private void SyncWatcher()
     {
-        // Fallback-poll нужен, когда нет ни одного хоста (не только NativeArch).
-        var needFallback = _subscriberCount > 0 && !ReloadRenderService.IsAnyGlassPlatformRunning();
-        if (needFallback == _fallbackPollActive)
+        // Watcher always runs while GS is open — ensures snapshot is always current
+        // even when SystemPage is active and HomePage is unsubscribed.
+        if (_watcherThread != null)
             return;
 
-        _fallbackPollActive = needFallback;
-        if (!needFallback)
-        {
-            _fallbackCts?.Cancel();
-            _fallbackTimer?.Dispose();
-            _fallbackTimer = null;
-            return;
-        }
-
-        _fallbackCts?.Cancel();
-        _fallbackCts = new CancellationTokenSource();
-        _fallbackTimer?.Dispose();
-        // Только через dispatcher: BuildFallback → Task Scheduler/COM; Timer TP (MTA) на x86 даёт AV.
-        // dueTime != Zero: Attach/PostNav уже сделали Refresh; мгновенный повторный QueryGlassAutorun на x86 AV.
-        _fallbackTimer = new Timer(
-            _ => DispatchRefresh(),
-            null,
-            TimeSpan.FromSeconds(2),
-            TimeSpan.FromSeconds(2));
+        EnsureWatcherThread();
     }
 
-    private void DispatchRefresh()
+    private void EnsureWatcherThread()
     {
+        if (_watcherThread != null)
+            return;
+
+        Log("EnsureWatcherThread: creating new watcher thread");
+        _lastWatcherSnapshot = default;
+        _watcherCts = new CancellationTokenSource();
+        _watcherSignal = new ManualResetEventSlim(false);
+        _watcherThread = new Thread(WatcherThreadProc)
+        {
+            IsBackground = true,
+            Name = "PlatformPresence.Watcher"
+        };
+        _watcherThread.SetApartmentState(ApartmentState.STA);
+        _watcherThread.Start();
+    }
+
+    private void StopWatcherThread()
+    {
+        Log("StopWatcherThread");
+        _watcherCts?.Cancel();
+        _watcherSignal?.Set();
+        _watcherThread?.Join(2000);
+        _watcherCts?.Dispose();
+        _watcherCts = null;
+        _watcherSignal?.Dispose();
+        _watcherSignal = null;
+        _watcherThread = null;
+    }
+
+    private void WatcherThreadProc()
+    {
+        var token = _watcherCts!.Token;
+        try
+        {
+            Log("WatcherThreadProc: started");
+            while (!token.IsCancellationRequested)
+            {
+                _watcherSignal!.Wait(WatcherPollIntervalMs);
+                if (token.IsCancellationRequested)
+                    break;
+                _watcherSignal.Reset();
+
+                // Always build via direct COM/SCM queries.
+                // Shared memory from native monitor (DWM process) cannot see dual-arch Glass fields
+                // due to session isolation — they are always 0. The GS process CAN query everything
+                // correctly via P/Invoke, so we always use the direct-query path.
+                var snap = BuildFallbackSnapshot();
+
+                if (SnapshotEquals(snap, _lastWatcherSnapshot))
+                {
+                    Log($"Watcher: snapshot unchanged rev={snap.Revision} skip notify");
+                    continue;
+                }
+
+                Log($"Watcher: snapshot CHANGED rev={snap.Revision} " +
+                    $"lifeX64={snap.InjectLifecycleUiX64} lifeX86={snap.InjectLifecycleUiX86} " +
+                    $"autoX64={snap.GlassAutorunStateX64} autoX86={snap.GlassAutorunStateX86}");
+                _lastWatcherSnapshot = snap;
+
+                lock (_gate)
+                {
+                    _snapshot = snap;
+                }
+
+                NotifySubscribers(snap);
+            }
+            Log("WatcherThreadProc: exiting");
+        }
+        catch (OperationCanceledException) { Log("WatcherThreadProc: cancelled"); }
+    }
+
+    private static bool SnapshotEquals(
+        NativeHostInterop.PresenceSnapshot a,
+        NativeHostInterop.PresenceSnapshot b)
+    {
+        return a.Revision != 0
+            && a.GlassState == b.GlassState
+            && a.OpenGlassOrchestration == b.OpenGlassOrchestration
+            && a.OpenGlassHostProcessRunning == b.OpenGlassHostProcessRunning
+            && a.GlassAutorunState == b.GlassAutorunState
+            && a.InjectLifecycleUi == b.InjectLifecycleUi
+            && a.StopEventSignaled == b.StopEventSignaled
+            && a.GlassTaskExistsX64 == b.GlassTaskExistsX64
+            && a.GlassTaskExistsX86 == b.GlassTaskExistsX86
+            && a.InjectLifecycleUiX64 == b.InjectLifecycleUiX64
+            && a.InjectLifecycleUiX86 == b.InjectLifecycleUiX86
+            && a.GlassAutorunStateX64 == b.GlassAutorunStateX64
+            && a.GlassAutorunStateX86 == b.GlassAutorunStateX86
+            && a.OgLegacyTaskExists == b.OgLegacyTaskExists
+            && a.OgCurrentTaskExists == b.OgCurrentTaskExists;
+    }
+
+    private void NotifySubscribers(NativeHostInterop.PresenceSnapshot snap)
+    {
+        Action<NativeHostInterop.PresenceSnapshot>[] snapshot;
+        lock (_gate)
+            snapshot = _subscribers.ToArray();
+
         var dq = _dispatcher;
-        if (dq == null)
+        if (dq != null)
         {
-            RefreshSnapshot(forceNotify: true);
-            return;
+            dq.TryEnqueue(() =>
+            {
+                foreach (var cb in snapshot)
+                {
+                    try { cb(snap); }
+                    catch { }
+                }
+                // Always fire PresenceChanged — event-based subscribers (HomePage) rely on this.
+                PresenceChanged?.Invoke(this, EventArgs.Empty);
+            });
         }
-
-        dq.TryEnqueue(DispatcherQueuePriority.Normal, () => RefreshSnapshot(forceNotify: true));
     }
 
-    private void RefreshSnapshot(bool forceNotify, bool raiseEvent = true)
+    private void SignalWatcherRefresh()
     {
-        NativeHostInterop.PresenceSnapshot snap;
-        var fromMapping = NativeHostInterop.TryReadPresenceSnapshot(out snap);
+        _watcherSignal?.Set();
+    }
 
-        if (!fromMapping)
-        {
-            snap = BuildFallbackSnapshot();
-        }
+    private void RefreshSnapshotFromSharedMemory(bool forceNotify, bool raiseEvent = true)
+    {
+        // Always use direct queries — shared memory from DWM cannot see dual-arch Glass fields.
+        var snap = BuildFallbackSnapshot();
 
         var changed = false;
         lock (_gate)
@@ -188,6 +397,8 @@ public sealed class PlatformPresenceService : IDisposable
                 changed = true;
             }
         }
+
+        Log($"RefreshSnapshot: rev={snap.Revision} changed={changed} forceNotify={forceNotify}");
 
         if (changed && raiseEvent)
             PresenceChanged?.Invoke(this, EventArgs.Empty);
@@ -209,14 +420,42 @@ public sealed class PlatformPresenceService : IDisposable
         var glassState = (int)NativeHostInterop.QueryGlassAutorunUiState();
         var ogOrch = (int)NativeHostInterop.QueryOpenGlassHostUiState();
         var hostRunning = NativeHostInterop.IsOpenGlassHostProcessRunning();
+        var injectLifecycle = (int)NativeHostInterop.QueryInjectLifecycleUi(GlassPlatformNames.NativeArch);
+        var stopSignaled = HomeStatusSummary.IsStopEventSignaled(GlassPlatformNames.NativeArch);
+
+        var taskX64 = NativeHostInterop.GlassAutorunTaskExistsNative(GlassPlatformArch.X64);
+        var taskX86 = NativeHostInterop.GlassAutorunTaskExistsNative(GlassPlatformArch.X86);
+        var lifeX64 = (int)NativeHostInterop.QueryInjectLifecycleUi(GlassPlatformArch.X64);
+        var lifeX86 = (int)NativeHostInterop.QueryInjectLifecycleUi(GlassPlatformArch.X86);
+        var autoX64 = (int)NativeHostInterop.QueryGlassAutorunUiState(GlassPlatformArch.X64);
+        var autoX86 = (int)NativeHostInterop.QueryGlassAutorunUiState(GlassPlatformArch.X86);
+
+        var ogLegacy = NativeHostInterop.LegacyHostTaskExists() ? 1u : 0u;
+        var ogCurrent = ogOrch != 0 ? 1u : 0u;
+
+        var revision = (uint)Interlocked.Increment(ref s_watcherRevision);
+        if (revision == 0)
+            revision = (uint)Interlocked.Increment(ref s_watcherRevision);
 
         return new NativeHostInterop.PresenceSnapshot
         {
+            Revision = revision,
             GlassState = glassState,
             OpenGlassOrchestration = ogOrch,
             OpenGlassPipelineActive = pipeline ? 1u : 0u,
             OpenGlassHostProcessRunning = hostRunning ? 1u : 0u,
             RootBackdropMode = effective,
+            GlassAutorunState = glassState,
+            InjectLifecycleUi = injectLifecycle,
+            StopEventSignaled = stopSignaled ? 1u : 0u,
+            GlassTaskExistsX64 = taskX64 ? 1u : 0u,
+            GlassTaskExistsX86 = taskX86 ? 1u : 0u,
+            InjectLifecycleUiX64 = lifeX64,
+            InjectLifecycleUiX86 = lifeX86,
+            GlassAutorunStateX64 = autoX64,
+            GlassAutorunStateX86 = autoX86,
+            OgLegacyTaskExists = ogLegacy,
+            OgCurrentTaskExists = ogCurrent,
         };
     }
 }

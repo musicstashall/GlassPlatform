@@ -16,6 +16,7 @@
 #include <Controls/ScrollBarHost.h>
 #include <Controls/StaticSubclass.h>
 #include <Controls/TabControlSubclass.h>
+#include <Controls/CustomTabSubclass.h>
 #include <Controls/ToolbarSubclass.h>
 #include <Controls/TrackBarHost.h>
 #include <Controls/TreeViewSubclass.h>
@@ -182,6 +183,7 @@ namespace WndCompat
         NetUiToolWindow_DetachAll();
         TreeView_DetachAll();
         TabControl_DetachAll();
+        CustomTab_DetachAll();
         TrackBar_DetachAll();
         UpDown_DetachAll();
         Header_DetachAll();

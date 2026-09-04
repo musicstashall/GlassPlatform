@@ -136,6 +136,7 @@ extern "C"
     __declspec(dllexport) BOOL WINAPI GlassSettings_StartOpenGlassService() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_StopOpenGlassService() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_RemoveOpenGlassService() noexcept;
+    __declspec(dllexport) void WINAPI GlassSettings_InvalidateOGCache() noexcept;
 
     __declspec(dllexport) HRESULT WINAPI GlassSettings_TryBuildSymbolModuleDownloadInfo(
         const wchar_t* modulePath,

@@ -36,6 +36,10 @@ namespace GlassShared::GlassPlatformTask
         constexpr wchar_t kTaskX64[] = L"GlassPlatform.Win32 Autorun Task (x64)";
         constexpr wchar_t kTaskX86[] = L"GlassPlatform.Win32 Autorun Task (x86)";
 
+        constexpr ULONGLONG kAutorunTaskCacheTtlMs = 1500;
+        std::atomic<ULONGLONG> g_autorunTaskCacheTimeMs{ 0 };
+        std::atomic<bool> g_autorunTaskCacheValue{ false };
+
         // Держим named busy alive: CloseHandle после SetEvent уничтожает объект → ShellExt меню не видит busy.
         HANDLE g_busyHoldX64 = nullptr;
         HANDLE g_busyHoldX86 = nullptr;
@@ -279,7 +283,7 @@ namespace GlassShared::GlassPlatformTask
         return GlassAutorunTaskExists(NativePlatformArch());
     }
 
-    bool GlassAutorunTaskExists(PlatformArch arch) noexcept
+    bool GlassAutorunTaskExistsImpl(PlatformArch arch) noexcept
     {
         ComInitGuard com;
         if (FAILED(com.hr))
@@ -289,6 +293,29 @@ namespace GlassShared::GlassPlatformTask
         if (!ts.Connect())
             return false;
         return ts.TaskExists(L"\\", GlassAutorunTaskName(arch));
+    }
+
+    bool GlassAutorunTaskExists(PlatformArch arch) noexcept
+    {
+        if (arch == NativePlatformArch())
+        {
+            const auto now = GetTickCount64();
+            const auto cachedTime = g_autorunTaskCacheTimeMs.load(std::memory_order_acquire);
+            if (now - cachedTime < kAutorunTaskCacheTtlMs)
+                return g_autorunTaskCacheValue.load(std::memory_order_acquire);
+
+            bool result = GlassAutorunTaskExistsImpl(arch);
+            g_autorunTaskCacheValue.store(result, std::memory_order_release);
+            g_autorunTaskCacheTimeMs.store(now, std::memory_order_release);
+            return result;
+        }
+
+        return GlassAutorunTaskExistsImpl(arch);
+    }
+
+    void InvalidateGlassAutorunTaskCache() noexcept
+    {
+        g_autorunTaskCacheTimeMs.store(0, std::memory_order_release);
     }
 
     AutorunUiState QueryGlassAutorunUiState() noexcept

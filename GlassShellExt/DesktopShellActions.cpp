@@ -521,6 +521,21 @@ namespace GlassDesktopActions
         if (!IsOpenGlassMenuVisible())
             return;
 
+        // Cross-process busy guard: если GS уже управляет OG — не отправляем команду
+        {
+            constexpr wchar_t kOpenGlassBusy[] = L"Local\\GlassPlatform.OpenGlassBusy";
+            HANDLE hBusy = OpenEventW(SYNCHRONIZE, FALSE, kOpenGlassBusy);
+            if (hBusy)
+            {
+                if (WaitForSingleObject(hBusy, 0) == WAIT_OBJECT_0)
+                {
+                    CloseHandle(hBusy);
+                    return; // GS держит busy
+                }
+                CloseHandle(hBusy);
+            }
+        }
+
         const OG::HostUiState ui = PP::QueryOpenGlassOrchestrationHostUiState();
         if (ui == OG::HostUiState::Running)
             (void)OGC::PostCommand(OGC::Command::Stop);

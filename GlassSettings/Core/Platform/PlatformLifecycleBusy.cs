@@ -30,7 +30,31 @@ public static class PlatformLifecycleBusy
         }
     }
 
-    public static IDisposable Begin(GlassPlatformArch arch) => new Guard(arch);
+    /// <summary>Обычный захват: выбрасывает если busy уже захвачен другим процессом.</summary>
+    public static IDisposable Begin(GlassPlatformArch arch) =>
+        TryBegin(arch) ?? throw new InvalidOperationException("Lifecycle busy already held by another process");
+
+    /// <summary>
+    /// Try-захват: возвращает null если busy уже захвачен (ShellExt или другой процесс).
+    /// Вызывающий код продолжает операцию без busy guard — UI обновляется из snapshot.
+    /// </summary>
+    public static IDisposable? TryBegin(GlassPlatformArch arch)
+    {
+        var handle = CreateEventW(IntPtr.Zero, true, false, EventName(arch));
+        if (handle == IntPtr.Zero)
+            return null;
+
+        if (WaitForSingleObject(handle, 0) == 0)
+        {
+            // Уже signaled (busy) — другой процесс держит
+            CloseHandle(handle);
+            return null;
+        }
+
+        SetEvent(handle);
+        PulsePresenceChanged();
+        return new Guard(handle);
+    }
 
     private static void PulsePresenceChanged()
     {
@@ -52,14 +76,9 @@ public static class PlatformLifecycleBusy
         private IntPtr _handle;
         private bool _disposed;
 
-        public Guard(GlassPlatformArch arch)
+        public Guard(IntPtr handle)
         {
-            _handle = CreateEventW(IntPtr.Zero, true, false, EventName(arch));
-            if (_handle != IntPtr.Zero)
-            {
-                SetEvent(_handle);
-                PulsePresenceChanged();
-            }
+            _handle = handle;
         }
 
         public void Dispose()

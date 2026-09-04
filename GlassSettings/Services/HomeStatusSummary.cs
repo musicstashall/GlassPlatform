@@ -48,11 +48,36 @@ public static class HomeStatusSummary
 
     public static GlassPlatformUiSnapshot QueryGlassPlatformUi(GlassPlatformArch arch)
     {
+        var snap = PlatformPresenceService.Instance.CurrentSnapshot;
+        if (snap.Revision > 0)
+        {
+            var life = (NativeHostInterop.InjectLifecycleUi)(
+                arch == GlassPlatformArch.X64 ? snap.InjectLifecycleUiX64 : snap.InjectLifecycleUiX86);
+            var autorun = (GlassAutorunUiState)(
+                arch == GlassPlatformArch.X64 ? snap.GlassAutorunStateX64 : snap.GlassAutorunStateX86);
+            var stopSignaled = arch == GlassPlatformNames.NativeArch
+                ? snap.StopEventSignaled != 0
+                : IsStopEventSignaled(arch);
+            return BuildGlassPlatformUiSnapshot(arch, life, autorun, stopSignaled);
+        }
+
+        return QueryGlassPlatformUiDirect(arch);
+    }
+
+    private static GlassPlatformUiSnapshot QueryGlassPlatformUiDirect(GlassPlatformArch arch)
+    {
         var life = NativeHostInterop.QueryInjectLifecycleUi(arch);
-        // Live Query: Presence snapshot для NativeArch после stop залипает на Running.
         var autorun = GlassPlatformService.QueryGlassAutorunUiState(arch);
         var stopSignaled = IsStopEventSignaled(arch);
-        // Residual или Stopping из‑за StopEvent — не LifecycleBusy на старте.
+        return BuildGlassPlatformUiSnapshot(arch, life, autorun, stopSignaled);
+    }
+
+    private static GlassPlatformUiSnapshot BuildGlassPlatformUiSnapshot(
+        GlassPlatformArch arch,
+        NativeHostInterop.InjectLifecycleUi life,
+        GlassAutorunUiState autorun,
+        bool stopSignaled)
+    {
         var unloading = life == NativeHostInterop.InjectLifecycleUi.Residual
             || (life == NativeHostInterop.InjectLifecycleUi.Stopping && stopSignaled);
         var lifeBusy = life is NativeHostInterop.InjectLifecycleUi.Stopping
@@ -80,7 +105,7 @@ public static class HomeStatusSummary
         return new GlassPlatformUiSnapshot(life, autorun, unloading, lifeBusy, line, dot);
     }
 
-    private static bool IsStopEventSignaled(GlassPlatformArch arch)
+    public static bool IsStopEventSignaled(GlassPlatformArch arch)
     {
         var h = OpenEventW(0x00100000 /* SYNCHRONIZE */, false, GlassPlatformNames.StopEventFor(arch));
         if (h == IntPtr.Zero)

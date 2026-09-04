@@ -102,16 +102,16 @@ public static class PlatformPaths
         }
 
         var fromReg = PathOpenGlassDllFromBwmInstall(installDir);
-        if (File.Exists(fromReg))
+        if (IsFileAccessible(fromReg))
             return fromReg;
 
         foreach (var candidate in OpenGlassPathPolicy.EnumerateBundledOpenGlassDllCandidates())
         {
-            if (File.Exists(candidate))
+            if (IsFileAccessible(candidate))
                 return Path.GetFullPath(candidate);
         }
 
-        if (File.Exists(HardcodedOpenGlassDll))
+        if (IsFileAccessible(HardcodedOpenGlassDll))
             return HardcodedOpenGlassDll;
 
         return null;
@@ -251,11 +251,34 @@ public static class PlatformPaths
 
         foreach (var candidate in candidates)
         {
-            if (File.Exists(candidate))
+            if (IsFileAccessible(candidate))
                 return candidate;
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Проверяет, что файл существует и доступен для чтения (не заблокирован ACL OG-установщика).
+    /// </summary>
+    private static bool IsFileAccessible(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return false;
+
+        try
+        {
+            using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return true;
+        }
+        catch (IOException)
+        {
+            return File.Exists(path);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static string NormalizeDir(string path)

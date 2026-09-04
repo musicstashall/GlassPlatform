@@ -291,9 +291,41 @@ public sealed partial class HomePage : Page
         DispatcherQueue.TryEnqueue(() =>
         {
             RefreshSystemCard();
+            // Force toggle refresh independent of RefreshSystemCard debounce.
+            RefreshGlassPlatformToggleDirect();
             if (SettingsSession.Current.HasUnsavedChanges)
                 _ = RefreshNoticesAsync();
         });
+    }
+
+    /// <summary>Direct toggle refresh bypassing RefreshSystemCard debounce — ensures toggle
+    /// updates immediately on presence changes (e.g., menu-based start/stop).</summary>
+    private void RefreshGlassPlatformToggleDirect()
+    {
+        if (_glassPlatformDualRow is not null)
+        {
+            _glassPlatformDualRow.Refresh();
+            return;
+        }
+
+        if (_glassPlatformSwitch is null)
+            return;
+
+        HomeStatusSummary.GlassPlatformUiSnapshot? ui = null;
+        if (_glassPlatformRow is not null)
+        {
+            ui = HomeStatusSummary.QueryGlassPlatformUi(GlassPlatformNames.NativeArch);
+        }
+
+        if (ui is { } snapshot)
+        {
+            RefreshPlatformToggle(
+                _glassPlatformSwitch,
+                ref _glassPlatformSuppress,
+                _glassPlatformBusy || snapshot.LifecycleBusy,
+                snapshot.Autorun != GlassAutorunUiState.NoTask,
+                snapshot.Autorun == GlassAutorunUiState.Running);
+        }
     }
 
     private void OnSummaryFooterRevealedChanged(object? sender, EventArgs e) =>
@@ -318,16 +350,17 @@ public sealed partial class HomePage : Page
         ApplyOpenGlassUiVisibility();
         OpenGlassUiPolicy.Changed += OnOpenGlassUiPolicyChanged;
         OpenGlassBorderPolicyCoordinator.Changed += OnOpenGlassBorderPolicyChanged;
-        // Presence/RuntimeMonitor/PostNav — после выхода из Loaded (иначе x86 AV до следующего pump).
-        App.ShellWindow?.ScheduleColdStartPostNavAfterHomeLoaded(this);
-    }
-
-    /// <summary>После PostNav Attach — подписка Presence и InjectRuntimeMonitor.</summary>
-    internal void AttachColdStartRuntimeHooks()
-    {
+        // Presence subscription on every load — ensures toggle updates when navigating back.
         PlatformPresenceService.Instance.PresenceChanged -= OnPresenceChanged;
         PlatformPresenceService.Instance.PresenceChanged += OnPresenceChanged;
         PlatformPresenceService.Instance.AddSubscriber();
+        // RuntimeMonitor/PostNav — после выхода из Loaded (иначе x86 AV до следующего pump).
+        App.ShellWindow?.ScheduleColdStartPostNavAfterHomeLoaded(this);
+    }
+
+    /// <summary>После PostNav Attach — подписка RuntimeMonitor.</summary>
+    internal void AttachColdStartRuntimeHooks()
+    {
         StartRuntimeMonitor();
     }
 
@@ -1175,10 +1208,15 @@ public sealed partial class HomePage : Page
     private bool _glassPlatformSuppress;
     private bool _openGlassBusy;
     private bool _glassPlatformBusy;
+    private DateTime _lastRefreshSystemCardUtc = DateTime.MinValue;
 
     private void RefreshSystemCard()
     {
         if (_systemCard is null) return;
+
+        if ((DateTime.UtcNow - _lastRefreshSystemCardUtc).TotalMilliseconds < 2000)
+            return;
+        _lastRefreshSystemCardUtc = DateTime.UtcNow;
 
         var ogLine = HomeStatusSummary.OpenGlassLine();
         var ogColor = HomeStatusSummary.OpenGlassStatusColor();
@@ -1493,6 +1531,13 @@ public sealed partial class HomePage : Page
 
         _glassPlatformBusy = true;
         _glassPlatformSwitch.IsEnabled = false;
+        if (!want)
+        {
+            // Stop: immediately show OFF — don't wait for stop to complete.
+            _glassPlatformSuppress = true;
+            _glassPlatformSwitch.IsOn = false;
+            _glassPlatformSuppress = false;
+        }
         try
         {
             if (want)

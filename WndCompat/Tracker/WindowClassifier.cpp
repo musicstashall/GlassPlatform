@@ -259,6 +259,9 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
     if (Equals(cls, L"Net UI Tool Window") ||
         Equals(cls, L"Net UI Tool Window Layered"))
         return ControlKind::NetUiToolWindow;
+    // Кастомный C#/WinForms таб-контрол в mmc.exe (BWM PaintHandler: MFC42u.dll + AMCCustomTab)
+    if (Equals(cls, L"AMCCustomTab"))
+        return ControlKind::AMCCustomTab;
 
     // Shell-проводник (GA_ROOT): WinEvent → DispatchExplorerRootAttachToOwnerThread → ExplorerRoot::Attach.
     // Не смешивать с Root_Attach / RootSubclassProc (см. RootSubclass.h, GLASS_DIAG_EXPLORER_USE_ROOT_SUBCLASS).

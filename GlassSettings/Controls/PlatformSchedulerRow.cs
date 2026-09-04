@@ -55,11 +55,11 @@ public sealed class PlatformSchedulerRow
 
     public event EventHandler? StateChanged;
 
-    public bool TaskExists => Kind switch
-    {
-        PlatformSchedulerKind.Glass => GlassPlatformService.GlassAutorunTaskExists(EffectiveGlassArch),
-        _ => OpenGlassHostService.LegacyHostTaskExists()
-    };
+    public bool TaskExists => QueryDirectState().TaskExists;
+
+    /// <summary>Direct query bypassing snapshot — always reflects current state.</summary>
+    private PlatformTaskState QueryDirectState() =>
+        PlatformPresenceService.Instance.QueryTaskStateDirect(Kind, EffectiveGlassArch);
 
     /// <summary>Подключение к navigate-строке после AddNavigateSection (строка уже в дереве).</summary>
     public void AttachToNavigateRow(SettingsNavigateRow navRow)
@@ -105,7 +105,9 @@ public sealed class PlatformSchedulerRow
         _suppress = true;
         try
         {
-            var exists = TaskExists;
+            // Always query directly — snapshot may be stale during start/stop transitions.
+            var state = QueryDirectState();
+            var exists = state.TaskExists;
             if (_busy)
                 return;
 
@@ -135,34 +137,37 @@ public sealed class PlatformSchedulerRow
 
             if (Kind == PlatformSchedulerKind.Glass)
             {
-                // Один snapshot life+autorun — статус и split не разъезжаются.
-                var ui = HomeStatusSummary.QueryGlassPlatformUi(EffectiveGlassArch);
-                ApplyExternalBusyChrome(ui.LifecycleBusy, splitEnabled: exists && !ui.LifecycleBusy);
+                // Check named lifecycle busy event (set by ShellExt during menu start/stop).
+                var externalBusy = PlatformLifecycleBusy.IsBusy(EffectiveGlassArch);
+                var combinedBusy = state.IsLifecycleBusy || externalBusy;
+                ApplyExternalBusyChrome(combinedBusy, splitEnabled: exists && !combinedBusy);
                 _installGate.IsOn = exists;
-                if (ui.IsUnloading)
+                if (state.IsUnloading || (externalBusy && state.Lifecycle is NativeHostInterop.InjectLifecycleUi.Stopping or NativeHostInterop.InjectLifecycleUi.Residual))
                 {
                     _stackable.SetStatusTone(
-                        ui.Line,
+                        GlassSettingsResources.Get("Status_Unloading"),
                         PlatformSchedulerStackableActions.StatusToneKind.Unloading);
                 }
                 else
                 {
                     _stackable.SetStatusTone(
-                        StatusCaption(exists, ui.Autorun),
-                        ui.Autorun switch
+                        StatusCaption(exists, state.Autorun),
+                        state.Autorun switch
                         {
                             GlassAutorunUiState.Running => PlatformSchedulerStackableActions.StatusToneKind.Running,
                             GlassAutorunUiState.Ready => PlatformSchedulerStackableActions.StatusToneKind.Ready,
                             _ => PlatformSchedulerStackableActions.StatusToneKind.Disabled
                         });
                 }
-                _schedDisabled = ui.Autorun == GlassAutorunUiState.Disabled;
+                _schedDisabled = state.Autorun == GlassAutorunUiState.Disabled;
             }
             else
             {
                 ApplyExternalBusyChrome(false, splitEnabled: exists);
                 _installGate.IsOn = exists;
-                var st = OpenGlassHostService.QueryOpenGlassHostUiState();
+                var st = state.TaskExists
+                    ? (OpenGlassHostUiState)(int)state.Autorun
+                    : OpenGlassHostUiState.NoTask;
                 _stackable.SetStatusTone(
                     OgStatusCaption(exists, st),
                     st switch
@@ -261,14 +266,20 @@ public sealed class PlatformSchedulerRow
 
     private void OnStatusSplitClick()
     {
-        if (!TaskExists || _busy)
+        var currentTaskExists = TaskExists;
+        var currentBusy = _busy;
+
+        if (!currentTaskExists || currentBusy)
             return;
 
         if (Kind == PlatformSchedulerKind.Glass)
         {
             var life = NativeHostInterop.QueryInjectLifecycleUi(EffectiveGlassArch);
-            if (life is NativeHostInterop.InjectLifecycleUi.Stopping
-                or NativeHostInterop.InjectLifecycleUi.Residual)
+            var extBusy = PlatformLifecycleBusy.IsBusy(EffectiveGlassArch);
+            // Block during any lifecycle transition (Stopping, Residual) or external busy.
+            if (life is not NativeHostInterop.InjectLifecycleUi.Idle
+                and not NativeHostInterop.InjectLifecycleUi.Running
+                || extBusy)
                 return;
 
             var st = GlassPlatformService.QueryGlassAutorunUiState(EffectiveGlassArch);
@@ -310,6 +321,10 @@ public sealed class PlatformSchedulerRow
             return;
 
         await BeginBusyVisualAsync().ConfigureAwait(true);
+        // Show "Unloading" immediately — don't wait for snapshot update.
+        _stackable.SetStatusTone(
+            GlassSettingsResources.Get("Status_Unloading"),
+            PlatformSchedulerStackableActions.StatusToneKind.Unloading);
         try
         {
             await SystemPlatformRunActions.StopGlassAsync(EffectiveGlassArch).ConfigureAwait(true);

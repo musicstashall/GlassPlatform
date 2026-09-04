@@ -44,7 +44,19 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
         var x86Locked = GlassPlatformUiPolicy.IsX86DualUiControlsLocked();
         var uiX86 = HomeStatusSummary.QueryGlassPlatformUi(GlassPlatformArch.X86);
         var uiX64 = HomeStatusSummary.QueryGlassPlatformUi(GlassPlatformArch.X64);
-        var fingerprint = BuildFingerprint(uiX86, uiX64, _busyX86, _busyX64, x86Locked);
+
+        // Detect external lifecycle busy (menu start/stop) — preserve gate ON during startup only.
+        var externalBusyX86 = uiX86.LifecycleBusy;
+        var externalBusyX64 = uiX64.LifecycleBusy;
+        var effectiveBusyX86 = _busyX86 || externalBusyX86;
+        var effectiveBusyX64 = _busyX64 || externalBusyX64;
+
+        // preserveGateOn: only when RUNNING + busy (startup) — gate stays ON + disabled.
+        // During STOP + busy: gate goes OFF + disabled (normal autorun check).
+        var preserveGateOnX86 = effectiveBusyX86 && uiX86.Autorun == GlassAutorunUiState.Running;
+        var preserveGateOnX64 = effectiveBusyX64 && uiX64.Autorun == GlassAutorunUiState.Running;
+
+        var fingerprint = BuildFingerprint(uiX86, uiX64, effectiveBusyX86, effectiveBusyX64, x86Locked);
         if (string.Equals(_refreshFingerprint, fingerprint, StringComparison.Ordinal))
             return;
 
@@ -53,8 +65,8 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
         try
         {
             // Текст/точка — всегда (в т.ч. «Выгружается» при своём stop); IsOn — не трогаем у busy-линии.
-            ApplyLine(uiX86, SubtitleX86, DotX86, _gateX86, preserveGateOn: _busyX86, controlsLocked: x86Locked);
-            ApplyLine(uiX64, SubtitleX64, DotX64, _gateX64, preserveGateOn: _busyX64);
+            ApplyLine(uiX86, SubtitleX86, DotX86, _gateX86, preserveGateOn: preserveGateOnX86, controlsLocked: x86Locked);
+            ApplyLine(uiX64, SubtitleX64, DotX64, _gateX64, preserveGateOn: preserveGateOnX64);
         }
         finally
         {
@@ -120,10 +132,19 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
             return;
 
         var hasTask = ui.Autorun != GlassAutorunUiState.NoTask;
+        var stopping = ui.Life is NativeHostInterop.InjectLifecycleUi.Stopping
+            or NativeHostInterop.InjectLifecycleUi.Residual;
         var enabled = hasTask && !ui.LifecycleBusy && !preserveGateOn;
         if (gate.IsEnabled != enabled)
             gate.IsEnabled = enabled;
-        if (!preserveGateOn)
+        // Gate position: OFF when stopping/residual (regardless of preserveGateOn),
+        // otherwise based on autorun state.
+        if (stopping)
+        {
+            if (gate.IsOn)
+                gate.IsOn = false;
+        }
+        else if (!preserveGateOn)
         {
             var isOn = ui.Autorun == GlassAutorunUiState.Running;
             if (gate.IsOn != isOn)

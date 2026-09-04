@@ -465,6 +465,18 @@ namespace GlassCore::ModuleHandler
             return;
         }
 
+        // --- dmdskmgr.dll / dmview.ocx — Disk Management snap-in (BWM ModuleHandler:200-205) ---
+        else if (_wcsicmp(baseName, L"dmdskmgr.dll") == 0 || _wcsicmp(baseName, L"dmview.ocx") == 0)
+        {
+            if (attach)
+            {
+                DebugLog(L"[GlassCore][ModuleHandler] Disk Management module loaded: %s (0x%p)", baseName, module);
+                // GDI+ включается при первом paint через ComboLBoxHooks/RootWindowHooks.
+                // IAT хуки (EXTTEXTOUT, FILLRECT) устанавливаются при ComboLBox paint sessions.
+            }
+            return;
+        }
+
         // --- Taskbar.dll — панель задач: IAT после системного TRANSPARENT_GRADIENT на Shell_*TrayWnd ---
         else if (_wcsicmp(baseName, L"Taskbar.dll") == 0)
         {
