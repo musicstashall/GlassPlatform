@@ -276,7 +276,7 @@ public sealed class PlatformSchedulerRow
         {
             var life = NativeHostInterop.QueryInjectLifecycleUi(EffectiveGlassArch);
             var extBusy = PlatformLifecycleBusy.IsBusy(EffectiveGlassArch);
-            // Block during any lifecycle transition (Stopping, Residual) or external busy.
+            // Block during any lifecycle transition (Starting, Stopping, Residual) or external busy.
             if (life is not NativeHostInterop.InjectLifecycleUi.Idle
                 and not NativeHostInterop.InjectLifecycleUi.Running
                 || extBusy)

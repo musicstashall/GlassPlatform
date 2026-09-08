@@ -36,6 +36,8 @@
     <Compile Remove="Core\bin\**" />
     <None Remove="Core\obj\**" />
     <None Remove="Core\bin\**" />
+    <None Remove="Native\**" />
+    <None Remove="Microsoft.UI.Xaml\**" />
   </ItemGroup>
 
   <ItemGroup>
@@ -155,6 +157,13 @@
            Condition="Exists('$(OutputPath)onnxruntime.dll') or Exists('$(OutputPath)DirectML.dll')" />
   </Target>
 
+  <!-- Удалить Microsoft.UI.Xaml из build output — NoiseAsset загружается из Windows.UI.Xaml.Controls.dll at runtime -->
+  <Target Name="RemoveWinUIAssets" AfterTargets="CopyFilesToOutputDirectory">
+    <Exec Condition="Exists('$(OutputPath)Microsoft.UI.Xaml')"
+          IgnoreExitCode="true"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Remove-Item -LiteralPath '$(OutputPath)Microsoft.UI.Xaml' -Recurse -Force -ErrorAction SilentlyContinue&quot;" />
+  </Target>
+
   <!-- Publish: копировать .xbf и Native.dll из Build output в publish directory -->
   <PropertyGroup>
     <_BuildOutputDir>$([System.IO.Path]::GetFullPath('$(OutputPath)'))</_BuildOutputDir>
@@ -204,10 +213,13 @@
                    $(_PublishDir)\workloads.j32.json;$(_PublishDir)\workloads.lnl.json;
                    $(_PublishDir)\workloads.qnn.json;$(_PublishDir)\workloads.stx.json"
            Condition="true" />
-    <!-- Удалить исходники Native (.cpp, .h, .vcxproj) из publish + служебные файлы -->
+    <!-- Удалить папку Native целиком + Microsoft.UI.Xaml (NoiseAsset загружается из DLL at runtime) -->
     <Exec Condition="Exists('$(_PublishDir)\Native')"
           IgnoreExitCode="true"
-          Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Get-ChildItem -LiteralPath '$(_PublishDir)\Native' -File | Where-Object { $_.Extension -in '.cpp','.h','.old','.filters' -or $_.Name -like '*.vcxproj*' } | Remove-Item -Force -ErrorAction SilentlyContinue&quot;" />
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Remove-Item -LiteralPath '$(_PublishDir)\Native' -Recurse -Force -ErrorAction SilentlyContinue&quot;" />
+    <Exec Condition="Exists('$(_PublishDir)\Microsoft.UI.Xaml')"
+          IgnoreExitCode="true"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Remove-Item -LiteralPath '$(_PublishDir)\Microsoft.UI.Xaml' -Recurse -Force -ErrorAction SilentlyContinue&quot;" />
     <Delete Files="$(_PublishDir)\.gitignore;$(_PublishDir)\BuildNumber.txt" />
   </Target>
 

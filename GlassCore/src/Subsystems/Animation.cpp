@@ -162,12 +162,6 @@ namespace GlassCore::Animation
         void ProcessShutdown() {}
         void Schedule(std::shared_ptr<AnimationInfo> info);
 
-        // Останавливает поток: сигнализирует флаг shutdown и ждёт выхода потока (макс. 5 с).
-        // m_animationStorage НЕ чистится здесь — поток сам вызовет деструкторы
-        // анимаций (включая ~PopupIn → SendMessageTimeoutW) уже вне m_lock.
-        // Это устраняет потенциальный дедлок: поток GUI держит m_lock exclusive,
-        // ~PopupIn шлёт SendMessageTimeout в GUI-потоки — если один из них
-        // пытается вызвать Schedule(), он заблокируется на m_lock → дедлок.
         void ShutdownWithTimeout(DWORD maxWaitMs) noexcept
         {
             HANDLE hThread = nullptr;
@@ -195,6 +189,10 @@ namespace GlassCore::Animation
 
         AnimationWorker() = default;
         ~AnimationWorker() noexcept = default;
+
+        // Event-based shutdown: GUI-thread signals when all subclasses are removed
+        HANDLE m_hAnimDetachDone = nullptr;
+        std::atomic<int> g_pendingAnimDetaches{0};
 
     private:
         static DWORD WINAPI ThreadProc(LPVOID param);
@@ -905,11 +903,24 @@ namespace GlassCore::Animation
             return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         }
 
+        // Event-based shutdown: GUI-thread removes subclass and signals completion
+        if (uMsg == GlassCoreMsg::WM_GLASS_ANIM_DETACH)
+        {
+            self.Detach();
+
+            if (AnimationWorker::GetInstance().g_pendingAnimDetaches.fetch_sub(1) == 1)
+            {
+                SetEvent(AnimationWorker::GetInstance().m_hAnimDetachDone);
+            }
+            return 0;
+        }
+
             return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         }
 
     public:
         [[nodiscard]] HWND FlyoutHwnd() const noexcept { return m_flyoutHwnd; }
+        [[nodiscard]] HWND MenuWindow() const noexcept { return m_menuWindow; }
 
         PopupIn(HWND hWnd, HWND ownerWindow, float startPosRatio,
             std::chrono::milliseconds popupInDuration,
@@ -1000,10 +1011,10 @@ namespace GlassCore::Animation
                 HWND menuWnd = m_menuWindow;
                 m_menuWindow = nullptr; // Обнуляем до Send, чтобы повторный вход в Detach() был no-op
 
-                // КРИТИЧНО: SendMessageTimeout (а не Post!) гарантирует, что субкласс
-                // будет снят синхронно, пока объект PopupIn ещё жив (деструктор ещё
-                // не вернулся). PostMessageW оставляет SubclassProc с висячим dwRefData
-                // на уже освобождённой памяти — любое следующее сообщение приведёт к крашу.
+                // Fallback: если event-based shutdown не отработал (GUI-thread мёртв),
+                // шлём GetAnimationFinishedMsg через SendMessageTimeout.
+                // В нормальном случае m_menuWindow уже nullptr (Detach() вызван
+                // из WM_GLASS_ANIM_DETACH handler на GUI-thread).
                 DWORD_PTR sendResult = 0;
                 SendMessageTimeoutW(
                     menuWnd, GetAnimationFinishedMsg(), 0, 0,
@@ -1286,7 +1297,89 @@ namespace GlassCore::Animation
             {
                 DebugLog(L"[GlassCore][Animation] ThreadProc: shutdown, clearing %zu animations",
                     localStorage.size());
-                localStorage.clear(); // деструкторы анимаций в этом потоке — безопасно
+
+                // Event-based shutdown: post WM_GLASS_ANIM_DETACH to all active menu windows
+                // GUI-threads will remove subclasses and signal completion
+                int pendingCount = 0;
+                for (auto& anim : localStorage)
+                {
+                    if (auto* popup = dynamic_cast<PopupIn*>(anim.get()))
+                    {
+                        HWND menuWnd = popup->MenuWindow();
+                        if (menuWnd && IsWindow(menuWnd))
+                        {
+                            ++pendingCount;
+                        }
+                    }
+                }
+
+                if (pendingCount > 0)
+                {
+                    // Initialize event if needed
+                    if (!self.m_hAnimDetachDone)
+                    {
+                        self.m_hAnimDetachDone = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+                    }
+
+                    ResetEvent(self.m_hAnimDetachDone);
+                    self.g_pendingAnimDetaches.store(pendingCount);
+
+                    int actualPending = 0;
+                    for (auto& anim : localStorage)
+                    {
+                        if (auto* popup = dynamic_cast<PopupIn*>(anim.get()))
+                        {
+                            HWND menuWnd = popup->MenuWindow();
+                            if (menuWnd && IsWindow(menuWnd))
+                            {
+                                BOOL posted = PostMessageW(menuWnd,
+                                    GlassCoreMsg::WM_GLASS_ANIM_DETACH, 0, 0);
+                                if (posted)
+                                {
+                                    ++actualPending;
+                                }
+                                else
+                                {
+                                    // Окно уже уничтожено — не считаем его.
+                                    DebugLog(L"[GlassCore][Animation] PostMessageW FAILED for menu wnd=0x%p",
+                                        menuWnd);
+                                }
+                            }
+                        }
+                    }
+
+                    if (actualPending == 0)
+                    {
+                        // Все окна уже уничтожены — сигналим сразу.
+                        DebugLog(L"[GlassCore][Animation] All menu windows already destroyed, signaling immediately");
+                        if (self.m_hAnimDetachDone)
+                        {
+                            CloseHandle(self.m_hAnimDetachDone);
+                            self.m_hAnimDetachDone = nullptr;
+                        }
+                        self.g_pendingAnimDetaches.store(0, std::memory_order_release);
+                    }
+                    else
+                    {
+                        // Корректируем счётчик если some PostMessageW failed.
+                        self.g_pendingAnimDetaches.store(actualPending, std::memory_order_release);
+
+                        DebugLog(L"[GlassCore][Animation] Waiting for %d GUI detachments", actualPending);
+                        WaitForSingleObject(self.m_hAnimDetachDone, INFINITE);
+                        DebugLog(L"[GlassCore][Animation] All GUI detachments complete");
+
+                        // ОчищаемHANDLE и сбрасываем счётчик для следующего цикла.
+                        if (self.m_hAnimDetachDone)
+                        {
+                            CloseHandle(self.m_hAnimDetachDone);
+                            self.m_hAnimDetachDone = nullptr;
+                        }
+                        self.g_pendingAnimDetaches.store(0, std::memory_order_release);
+                    }
+                }
+
+                // Now safe to destroy PopupIn objects (subclasses already removed)
+                localStorage.clear();
                 self.m_threadId = 0;
                 break;
             }

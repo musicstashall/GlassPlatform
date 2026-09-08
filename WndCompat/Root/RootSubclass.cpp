@@ -648,7 +648,11 @@ namespace
         // Обрабатываем до шлюза IsShuttingDown — это и есть цель shutdown-пути.
         // RemoveWindowSubclass здесь безопасен: мы в потоке-владельце окна.
         if (uMsg == WndCompat::WM_GLASS_DETACH_ROOT)
-            return RootHandleDetachRootMessage(hWnd, selfProc, uIdSubclass);
+        {
+            RootHandleDetachRootMessage(hWnd, selfProc, uIdSubclass);
+            WndCompat::WinEventHook_SignalDetachComplete();
+            return 0;
+        }
 
         if (uMsg == WndCompat::WM_GLASS_REAPPLY_ROOT_BACKDROP)
             return RootHandleReapplyRootBackdropMessage(hWnd);
@@ -1206,6 +1210,11 @@ namespace
 
 namespace WndCompat
 {
+    void Root_ForceDetachSubclass(HWND hWnd) noexcept
+    {
+        RemoveWindowSubclass(hWnd, RootSubclassProc, kRootSubclassId);
+    }
+
     void WINAPI ApplyBackdropPolicyToTrackedRoots() noexcept
     {
         ApplyBackdropPolicyToTrackedRootsImpl();
@@ -1488,7 +1497,6 @@ namespace WndCompat
 
         unsigned sameOk = 0;
         unsigned crossOk = 0;
-        unsigned crossFail = 0;
         unsigned removeFail = 0;
 
         for (HWND hWnd : windows)
@@ -1501,34 +1509,22 @@ namespace WndCompat
 
             if (wndTid != curTid)
             {
-                DWORD_PTR sendResult = 0;
-                // SMTO_BLOCK намеренно не используется: если поток во время
-                // обработки WM_GLASS_DETACH_ROOT отправит сообщение обратно в наш поток,
-                // SMTO_BLOCK вызвал бы дедлок. SMTO_ABORTIFHUNG достаточен.
-                const BOOL sent = SendMessageTimeoutW(
-                    hWnd, WM_GLASS_DETACH_ROOT, 0, 0,
-                    SMTO_ABORTIFHUNG, 1000, &sendResult);
-
-                if (!sent)
+                WinEventHook_RegisterPendingDetach();
+                BOOL posted = PostMessageW(hWnd, WM_GLASS_DETACH_ROOT, 0, 0);
+                if (!posted)
                 {
-                    ++crossFail;
-                    DebugLog(DBG_WARNING,
-                        L"[WndCompat][Root] Root_DetachAll: cross-thread SendMessage timeout/fail "
-                        L"hwnd=0x%p — субкласс остался на окне",
-                        hWnd);
+                    // Окно уже уничтожено — откатываем счётчик, чтобы не зависнуть на WaitForSingleObject.
+                    WinEventHook_SignalDetachComplete();
+                    DebugLog(std::format(
+                        L"[WndCompat][Root] Root_DetachAll: PostMessageW FAILED for 0x{:X} (window destroyed?)",
+                        reinterpret_cast<std::uintptr_t>(hWnd)
+                    ).c_str());
                 }
-                else
-                {
-                    ++crossOk;
-                    DebugLog(
-                        L"[WndCompat][Root] Root_DetachAll: cross-thread detached via SendMessage "
-                        L"hwnd=0x%p",
-                        hWnd);
-                }
+                ++crossOk;
 
                 WndCompat::Root::ExplorerBridge::RestoreOriginalClassBrush(hWnd, classBrushes);
 
-                if (isRoot && sent)
+                if (isRoot)
                 {
                     const bool hadGlassBackdrop =
                         Shared::RootBackdropPolicy::DidGlassApplyRootBackdrop(hWnd);
@@ -1584,10 +1580,9 @@ namespace WndCompat
 
         DebugLog(
             DBG_IMPORTANT,
-            L"[WndCompat][Root] Root_DetachAll: sameOk=%u crossOk=%u crossFail=%u removeFail=%u total=%zu",
+            L"[WndCompat][Root] Root_DetachAll: sameOk=%u crossOk=%u removeFail=%u total=%zu",
             sameOk,
             crossOk,
-            crossFail,
             removeFail,
             windows.size());
     }

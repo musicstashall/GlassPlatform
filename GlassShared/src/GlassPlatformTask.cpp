@@ -618,11 +618,18 @@ namespace GlassShared::GlassPlatformTask
         const bool busy = IsLifecycleBusy(arch);
 
         InjectLifecycleUi state = InjectLifecycleUi::Idle;
-        // Stop в полёте (mutex ещё жив) или busy start/stop — Stopping.
-        if (busy || (running && stopSignaled))
+        // Busy + stop signaled — Stopping (выгрузка в полёте).
+        if (busy && stopSignaled)
             state = InjectLifecycleUi::Stopping;
-        else if (running)
+        // Busy без stop — Starting (старт/инициализация в полёте).
+        else if (busy)
+            state = InjectLifecycleUi::Starting;
+        // Mutex жив без stopSignaled — Running (старт завершён).
+        else if (running && !stopSignaled)
             state = InjectLifecycleUi::Running;
+        // Mutex жив + stop signaled (без busy) — тоже Stopping (финальная фаза).
+        else if (running && stopSignaled)
+            state = InjectLifecycleUi::Stopping;
         else if (RefreshInjectResidualSticky(arch))
             state = InjectLifecycleUi::Residual;
         else

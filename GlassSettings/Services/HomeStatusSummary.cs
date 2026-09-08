@@ -81,7 +81,8 @@ public static class HomeStatusSummary
         var unloading = life == NativeHostInterop.InjectLifecycleUi.Residual
             || (life == NativeHostInterop.InjectLifecycleUi.Stopping && stopSignaled);
         var lifeBusy = life is NativeHostInterop.InjectLifecycleUi.Stopping
-            or NativeHostInterop.InjectLifecycleUi.Residual;
+            or NativeHostInterop.InjectLifecycleUi.Residual
+            or NativeHostInterop.InjectLifecycleUi.Starting;
 
         string line;
         Windows.UI.Color dot;

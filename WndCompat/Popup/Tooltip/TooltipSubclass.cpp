@@ -6,6 +6,7 @@
 #include <TooltipEventProvider.h>
 #include <RegHelper.h>
 #include <CommCtrl.h>
+#include <Tracker/WinEventHandler.h>
 
 #include <algorithm>
 #include <mutex>
@@ -65,6 +66,7 @@ namespace
                 p->OnTooltipSubclassDetached(hWnd, static_cast<BOOL>(wParam != 0));
             Tooltip_RemoveFromList(hWnd);
             RemoveWindowSubclass(hWnd, TooltipSubclassProc, WndCompat::kTooltipSubclassId);
+            WndCompat::WinEventHook_SignalDetachComplete();
             return 0;
         }
 
@@ -243,13 +245,18 @@ namespace WndCompat
             if (!IsWindow(h))
                 continue;
 
-            DWORD_PTR result = 0;
             if (GetWindowThreadProcessId(h, nullptr) == selfTid)
-                SendMessageW(h, WM_GLASS_DETACH_TOOLTIP, 1, 0);
+                RemoveWindowSubclass(h, TooltipSubclassProc, kTooltipSubclassId);
             else
-                SendMessageTimeoutW(
-                    h, WM_GLASS_DETACH_TOOLTIP, 1, 0,
-                    SMTO_ABORTIFHUNG, 1000, &result);
+            {
+                WinEventHook_RegisterPendingDetach();
+                BOOL posted = PostMessageW(h, WM_GLASS_DETACH_TOOLTIP, 0, 0);
+                if (!posted)
+                {
+                    WinEventHook_SignalDetachComplete();
+                    DebugLog(L"[WndCompat][Tooltip] Tooltip_DetachAll: PostMessageW FAILED for 0x%p", h);
+                }
+            }
         }
 
         {

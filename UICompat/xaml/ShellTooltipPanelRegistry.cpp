@@ -320,6 +320,13 @@ namespace UICompat
     {
         if (!m_diagnostics || !m_vts3)
             return false;
+        const Registry::Settings settings = [this]() noexcept
+        {
+            std::lock_guard lock(m_mx);
+            return m_settings;
+        }();
+        if (settings.cornerType == 0)
+            return false;
         if (!EnsureTipHandle(slot))
             return false;
         if (slot.tipCornerPropIndex != UINT_MAX && slot.originalTipCornerVts3)
@@ -378,6 +385,13 @@ namespace UICompat
     bool ShellTooltipPanelRegistry::CaptureInnerCornerVts3(PanelSlot& slot) noexcept
     {
         if (!m_diagnostics || !m_vts3)
+            return false;
+        const Registry::Settings settings = [this]() noexcept
+        {
+            std::lock_guard lock(m_mx);
+            return m_settings;
+        }();
+        if (settings.cornerType == 0)
             return false;
         if (!EnsureInnerHandle(slot))
             return false;

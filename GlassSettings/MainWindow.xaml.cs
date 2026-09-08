@@ -1710,7 +1710,7 @@ public sealed partial class MainWindow : Window
         HostedDialogSurface.Clip = null;
     }
 
-    private void UpdateHostedDialogSurfaceClip()
+    internal void UpdateHostedDialogSurfaceClip()
     {
         var width = HostedDialogSurface.ActualWidth;
         var height = HostedDialogSurface.ActualHeight;

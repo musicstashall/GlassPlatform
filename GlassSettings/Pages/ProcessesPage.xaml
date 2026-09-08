@@ -20,6 +20,8 @@
             <ItemContainer
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Stretch"
+                IsTabStop="False"
+                AllowFocusOnInteraction="False"
                 AutomationProperties.Name="{x:Bind DisplayName}">
                 <proc:ProcessListTile Entry="{x:Bind}" ActionRequested="ProcessTile_OnActionRequested" />
             </ItemContainer>
@@ -28,6 +30,8 @@
             <ItemContainer
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Stretch"
+                IsTabStop="False"
+                AllowFocusOnInteraction="False"
                 AutomationProperties.Name="{x:Bind DisplayName}">
                 <proc:ProcessGridTile Entry="{x:Bind}" ActionRequested="ProcessTile_OnActionRequested" />
             </ItemContainer>
@@ -36,6 +40,8 @@
             <ItemContainer
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Stretch"
+                IsTabStop="False"
+                AllowFocusOnInteraction="False"
                 AutomationProperties.Name="{x:Bind DisplayName}">
                 <proc:ProcessCompactTile Entry="{x:Bind}" ActionRequested="ProcessTile_OnActionRequested" />
             </ItemContainer>
@@ -151,6 +157,7 @@
                             x:Name="ProcessItems"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Top"
+                            IsTabStop="False"
                             SelectionMode="None">
                             <ItemsView.Layout>
                                 <StackLayout Orientation="Vertical" Spacing="8" />
@@ -178,6 +185,7 @@
                             x:Name="BlockListItems"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Top"
+                            IsTabStop="False"
                             SelectionMode="None">
                             <ItemsView.Layout>
                                 <StackLayout Orientation="Vertical" Spacing="8" />

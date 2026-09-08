@@ -173,10 +173,11 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
             return;
         }
 
-        // SoT как PlatformSchedulerRow: внешний stop/residual — не Start/Stop.
+        // SoT как PlatformSchedulerRow: внешний stop/residual/starting — не Start/Stop.
         var life = NativeHostInterop.QueryInjectLifecycleUi(arch);
         if (life is NativeHostInterop.InjectLifecycleUi.Stopping
-            or NativeHostInterop.InjectLifecycleUi.Residual)
+            or NativeHostInterop.InjectLifecycleUi.Residual
+            or NativeHostInterop.InjectLifecycleUi.Starting)
         {
             _suppress = true;
             try

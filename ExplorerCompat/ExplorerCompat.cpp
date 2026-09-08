@@ -111,6 +111,11 @@ BOOL WINAPI ExplorerCompat_Initialize()
 {
     DebugLog(L"[ExplorerCompat][Core] Initialize: BEGIN");
 
+    (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+        GetCurrentProcessId(),
+        Shared::InjectProcessMap::DiagLifecycleExplorer,
+        true);
+
     // Soft unload может оставить DLL mapped (IXDE residual): g_initialized=true + shutdown done.
     // Без сброса reinject — no-op, а diag/g_hExplorer выглядят «живыми» → AV на Stop (H6).
     if (g_initialized.load(std::memory_order_acquire))
@@ -152,6 +157,10 @@ BOOL WINAPI ExplorerCompat_Initialize()
         L"[ExplorerCompat][Core] UWP taskbar IXDE выключен в ExplorerCompat (изолирован в TaskbarCompat)");
 
     DebugLog(L"[ExplorerCompat][Core] Initialize: END (thread-agnostic shutdown ready)");
+    (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+        GetCurrentProcessId(),
+        Shared::InjectProcessMap::DiagLifecycleExplorer,
+        false);
     (void)Shared::InjectProcessMap::TrySetDiagFlag(
         GetCurrentProcessId(),
         Shared::InjectProcessMap::DiagExplorer,

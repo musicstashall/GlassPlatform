@@ -335,16 +335,14 @@ public static class ThemeImageCatalog
         return _defaultReflectionImage;
     }
 
-    /// <summary>Дефолтный материал: RCDATA-ресурс 2000 из системного Windows.UI.Xaml.Controls.dll.</summary>
-    public static Microsoft.UI.Xaml.Media.ImageSource? TryGetDefaultMaterialImage()
+    /// <summary>Дефолтный материал: RCDATA-ресурс 2000 из системного Windows.UI.Xaml.Controls.dll — in-memory.</summary>
+    public static async System.Threading.Tasks.Task<Microsoft.UI.Xaml.Media.ImageSource?> TryGetDefaultMaterialImageAsync()
     {
         if (_defaultMaterialResolved)
             return _defaultMaterialImage;
 
         _defaultMaterialResolved = true;
-        var dll = ResolveWindowsUIXamlControlsDllPath();
-        var png = TryExtractResourceImageToCache(dll, MaterialResourceId, MaterialResourceType, "material_default_2000");
-        _defaultMaterialImage = png is null ? null : CreateImageSource(png);
+        _defaultMaterialImage = await MaterialTextureLoader.GetNoiseTextureAsync();
         return _defaultMaterialImage;
     }
 

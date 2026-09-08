@@ -1317,6 +1317,57 @@ void UICompat_StopXamlDiagnostics() noexcept
         DebugLog(DBG_WARNING, L"[UICompat][XamlDiag] Stop: поток IXDE-install ещё активен");
     }
 
+    // Агрессивный COM drain: ShellHost держит internal proxy-ссылки на UICompat-объекты,
+    // которые не отслеживаются g_objectCount/g_serverLocks.
+    // CoFreeUnusedLibraries + PeekMessage дают COM runtime шанс отпустить proxies.
+    // Много проходов с растущими задержками — иначе FreeLibrary → c0000005 на unloaded code.
+    constexpr int kComDrainRounds = 5;
+    constexpr int kComDrainBaseMs = 500;
+    for (int round = 0; round < kComDrainRounds; ++round)
+    {
+        const long objCount = UICompatCom::g_objectCount.load(std::memory_order_acquire);
+        const long srvLocks = UICompatCom::g_serverLocks.load(std::memory_order_acquire);
+        if (objCount == 0 && srvLocks == 0)
+        {
+            // Доп. пауза с msg pump — COM runtime мог отложить release до idle.
+            for (int m = 0; m < 200; m += 10)
+            {
+                MSG msg;
+                PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE | PM_NOYIELD);
+                Sleep(10);
+            }
+            CoFreeUnusedLibraries();
+            const long reCheck = UICompatCom::g_objectCount.load(std::memory_order_acquire);
+            const long reLocks = UICompatCom::g_serverLocks.load(std::memory_order_acquire);
+            if (reCheck == 0 && reLocks == 0)
+                break;
+            DebugLog(
+                DBG_WARNING,
+                L"[UICompat][XamlDiag] Stop: COM refs rebound after idle — obj=%ld locks=%ld (round %d)",
+                reCheck, reLocks, round);
+        }
+        const int delayMs = kComDrainBaseMs * (1 + round);
+        for (int w = 0; w < delayMs; w += 10)
+        {
+            MSG msg;
+            PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE | PM_NOYIELD);
+            Sleep(10);
+        }
+        CoFreeUnusedLibraries();
+    }
+    {
+        const long objCount = UICompatCom::g_objectCount.load(std::memory_order_acquire);
+        const long srvLocks = UICompatCom::g_serverLocks.load(std::memory_order_acquire);
+        if (objCount != 0 || srvLocks != 0)
+        {
+            DebugLog(
+                DBG_WARNING,
+                L"[UICompat][XamlDiag] Stop: COM drain FINAL — objectCount=%ld serverLocks=%ld",
+                objCount,
+                srvLocks);
+        }
+    }
+
     DebugLog(DBG_IMPORTANT, L"[UICompat][XamlDiag] Stop: END");
 }
 

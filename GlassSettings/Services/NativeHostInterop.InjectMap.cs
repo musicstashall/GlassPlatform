@@ -9,7 +9,7 @@ public static partial class NativeHostInterop
     public const int InjectMapSlotCount = 512;
     public const int InjectExeNameChars = 64;
     /// <summary>Р”РѕР»Р¶РµРЅ СЃРѕРІРїР°РґР°С‚СЊ СЃ sizeof(Shared::InjectProcessMap::Slot) v2 = 164.</summary>
-    public const int InjectMapSlotStride = 164;
+    public const int InjectMapSlotStride = 176;
     /// <summary>Р”РѕР»Р¶РµРЅ СЃРѕРІРїР°РґР°С‚СЊ СЃ sizeof(Shared::InjectModuleScan::Result) = 136.</summary>
     public const int InjectScanResultStride = 136;
 
@@ -57,6 +57,30 @@ public static partial class NativeHostInterop
         WinEventProc = 1u << 5,
         CrashGuard = 1u << 6,
         UICompat = 1u << 7,
+        Loader = 1u << 8,
+    }
+
+    [Flags]
+    public enum InjectDiagLifecycle : uint
+    {
+        Hooks = 1u << 0,
+        PaintDispatcher = 1u << 1,
+        ModuleHandler = 1u << 2,
+        Explorer = 1u << 3,
+        Taskbar = 1u << 4,
+        WinEventProc = 1u << 5,
+        CrashGuard = 1u << 6,
+        UICompat = 1u << 7,
+        Loader = 1u << 8,
+    }
+
+    public enum InjectShutdownPhase : uint
+    {
+        None = 0,
+        CoreDetaching = 1,
+        CoreDone = 2,
+        WndDetaching = 3,
+        WndDone = 4,
     }
 
     public struct InjectMapSlot
@@ -69,9 +93,11 @@ public static partial class NativeHostInterop
         public uint ModuleBits;
         public uint UnloadResult;
         public uint DiagFlags;
+        public uint DiagLifecycle;
         public uint SubclassWindowTotal;
         public ulong SubclassKindMask;
         public string ExeName;
+        public InjectShutdownPhase ShutdownPhase;
         public InjectArch Arch;
     }
 
@@ -111,6 +137,7 @@ public static partial class NativeHostInterop
         Running = 1,
         Stopping = 2,
         Residual = 3,
+        Starting = 4,
     }
 
     public static InjectLifecycleUi QueryInjectLifecycleUi(GlassPlatformArch arch) =>
@@ -220,7 +247,8 @@ public static partial class NativeHostInterop
     private static InjectMapSlot ParseMapSlot(byte[] bytes, int offset)
     {
         // Layout: seq(4) pid(4) kind/path/state/res(4) moduleBits(4) unload(4)
-        //         diag(4) subclassTotal(4) kindMask(8) exeName(128)
+        //         diag(4) diagLifecycle(4) subclassTotal(4) kindMask(8) exeName(128)
+        //         shutdownPhase(4) reserved2(4)
         return new InjectMapSlot
         {
             Seq = BitConverter.ToInt32(bytes, offset + 0),
@@ -231,9 +259,11 @@ public static partial class NativeHostInterop
             ModuleBits = BitConverter.ToUInt32(bytes, offset + 12),
             UnloadResult = BitConverter.ToUInt32(bytes, offset + 16),
             DiagFlags = BitConverter.ToUInt32(bytes, offset + 20),
-            SubclassWindowTotal = BitConverter.ToUInt32(bytes, offset + 24),
-            SubclassKindMask = BitConverter.ToUInt64(bytes, offset + 28),
-            ExeName = ReadFixedUnicode(bytes, offset + 36, InjectExeNameChars),
+            DiagLifecycle = BitConverter.ToUInt32(bytes, offset + 24),
+            SubclassWindowTotal = BitConverter.ToUInt32(bytes, offset + 28),
+            SubclassKindMask = BitConverter.ToUInt64(bytes, offset + 32),
+            ExeName = ReadFixedUnicode(bytes, offset + 40, InjectExeNameChars),
+            ShutdownPhase = (InjectShutdownPhase)BitConverter.ToUInt32(bytes, offset + 40 + InjectExeNameChars * 2),
         };
     }
 

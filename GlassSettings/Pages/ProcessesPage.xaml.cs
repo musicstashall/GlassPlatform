@@ -78,6 +78,56 @@ public sealed partial class ProcessesPage : Page
     {
         NavigationCacheMode = NavigationCacheMode.Enabled;
         InitializeComponent();
+
+        // Глушим BringIntoView на списке процессов — клик/двойной клик
+        // не должны уводить PageScrollViewer к началу.
+        ProcessItems.AddHandler(
+            UIElement.BringIntoViewRequestedEvent,
+            new TypedEventHandler<UIElement, BringIntoViewRequestedEventArgs>(
+                (_, e) =>
+                {
+                    e.Handled = true;
+                }),
+            handledEventsToo: true);
+        BlockListItems.AddHandler(
+            UIElement.BringIntoViewRequestedEvent,
+            new TypedEventHandler<UIElement, BringIntoViewRequestedEventArgs>(
+                (_, e) =>
+                {
+                    e.Handled = true;
+                }),
+            handledEventsToo: true);
+
+        // Подавляем Tapped на списке — клик не должен запускать цепочку фокуса
+        // (иначе фокус уходит в SearchBox и страница прокручивается к началу).
+        ProcessItems.Tapped += (_, e) =>
+        {
+            e.Handled = true;
+        };
+        BlockListItems.Tapped += (_, e) =>
+        {
+            e.Handled = true;
+        };
+
+        // Диагностика фокуса на странице (заглушка — без вывода)
+        GotFocus += (_, e) => { };
+        LostFocus += (_, e) => { };
+        ProcessItems.GotFocus += (_, e) => { };
+        BlockListItems.GotFocus += (_, e) => { };
+        SearchBox.GotFocus += (_, e) => { };
+        SearchBox.LostFocus += (_, e) => { };
+
+        // Подавляем BringIntoView на SearchBox — при получении фокуса
+        // (в т.ч. программном от root-окна) страница не должна прокручиваться к полю поиска.
+        SearchBox.AddHandler(
+            UIElement.BringIntoViewRequestedEvent,
+            new TypedEventHandler<UIElement, BringIntoViewRequestedEventArgs>(
+                (_, e) =>
+                {
+                    e.Handled = true;
+                }),
+            handledEventsToo: true);
+
         ApplyViewMode(ProcessViewMode.List);
         _headerLayout = new ProcessesPageHeaderLayout(
             HeaderGrid,

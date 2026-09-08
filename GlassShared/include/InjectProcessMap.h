@@ -58,6 +58,38 @@ namespace Shared::InjectProcessMap
         DiagWinEventProc = 1u << 5, // WndCompat WinEventHook tracker
         DiagCrashGuard = 1u << 6,   // GlassCompat CrashGuard
         DiagUICompat = 1u << 7,     // UICompat CoreWindow IXDE
+        DiagLoader = 1u << 8,       // Loader: загрузка/выгрузка модулей
+    };
+
+    /// Фазы выгрузки модулей (координация shutdown через shared memory).
+    /// GlassCompat пишет фазу; модули читают для синхронизации.
+    enum ShutdownPhase : std::uint32_t
+    {
+        ShutdownPhaseNone             = 0,
+        ShutdownPhaseCoreDetaching    = 1,  // GlassCore снимает subclass'ы
+        ShutdownPhaseCoreDone         = 2,  // GlassCore готов к FreeLibrary
+        ShutdownPhaseUiDetaching      = 3,  // UICompat останавливает COM callbacks
+        ShutdownPhaseUiDone           = 4,  // UICompat готов к FreeLibrary
+        ShutdownPhaseWndDetaching     = 5,  // WndCompat снимает subclass'ы
+        ShutdownPhaseWndDone          = 6,  // WndCompat готов к FreeLibrary
+    };
+
+    /// Промежуточные состояния подсистем (пишут модули при старте/остановке).
+    /// Каждый бит соответствует DiagFlags: бит set = подсистема в фазе Starting.
+    /// diagFlags=0 + diagLifecycle=bit → Starting (жёлтый).
+    /// diagFlags=bit + diagLifecycle=0 → Running (зелёный).
+    /// diagFlags=0 + diagLifecycle=0  → Unloaded (нет кружка).
+    enum DiagLifecycle : std::uint32_t
+    {
+        DiagLifecycleHooks            = DiagHooks,
+        DiagLifecyclePaintDispatcher  = DiagPaintDispatcher,
+        DiagLifecycleModuleHandler    = DiagModuleHandler,
+        DiagLifecycleExplorer         = DiagExplorer,
+        DiagLifecycleTaskbar          = DiagTaskbar,
+        DiagLifecycleWinEventProc     = DiagWinEventProc,
+        DiagLifecycleCrashGuard       = DiagCrashGuard,
+        DiagLifecycleUICompat         = DiagUICompat,
+        DiagLifecycleLoader           = DiagLoader,
     };
 
 #pragma pack(push, 4)
@@ -73,9 +105,12 @@ namespace Shared::InjectProcessMap
         std::uint32_t moduleBits;
         std::uint32_t unloadResult;
         std::uint32_t diagFlags;
+        std::uint32_t diagLifecycle;     // DiagLifecycle bitmask: bit set = Starting
         std::uint32_t subclassWindowTotal;
         std::uint64_t subclassKindMask;
         wchar_t exeName[kExeNameChars];
+        std::uint32_t shutdownPhase;      // ShutdownPhase: координация выгрузки
+        std::uint32_t reserved2;          // padding для 16-byte align
     };
 
     struct Header
@@ -88,7 +123,7 @@ namespace Shared::InjectProcessMap
     };
 #pragma pack(pop)
 
-    static_assert(sizeof(Slot) == 164, "InjectProcessMap::Slot stride must match GS native parse");
+    static_assert(sizeof(Slot) == 176, "InjectProcessMap::Slot stride must match GS native parse");
 
     [[nodiscard]] bool CreateHostResources(SECURITY_ATTRIBUTES* sa) noexcept;
     void CloseHostResources() noexcept;
@@ -107,6 +142,10 @@ namespace Shared::InjectProcessMap
     [[nodiscard]] bool TryGetModuleBits(DWORD pid, std::uint32_t& outBits) noexcept;
     [[nodiscard]] bool TrySetUnloadResult(DWORD pid, std::uint32_t unloadResult) noexcept;
     [[nodiscard]] bool TrySetDiagFlag(DWORD pid, std::uint32_t flag, bool active) noexcept;
+    /// Установить/сбросить бит diagLifecycle (Starting phase).
+    [[nodiscard]] bool TrySetDiagLifecycle(DWORD pid, std::uint32_t lifecycleBit, bool active) noexcept;
+    /// Записать фазу выгрузки (ShutdownPhase) в слот.
+    [[nodiscard]] bool TrySetShutdownPhase(DWORD pid, std::uint32_t phase) noexcept;
     [[nodiscard]] bool TryPublishSubclassStats(
         DWORD pid,
         std::uint32_t windowTotal,

@@ -735,6 +735,11 @@ void GlassCompat::InstallProcessCrashGuard() noexcept
     if (g_crashGuardInstalled)
         return;
 
+    (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+        GetCurrentProcessId(),
+        Shared::InjectProcessMap::DiagLifecycleCrashGuard,
+        true);
+
     EnsureCrashGuardRegistryBaseline();
 
     g_prevExplorerFilter = SetUnhandledExceptionFilter(ExplorerCrashGuardFilter);
@@ -759,6 +764,10 @@ void GlassCompat::InstallProcessCrashGuard() noexcept
     }
 
     g_crashGuardInstalled = true;
+    (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+        GetCurrentProcessId(),
+        Shared::InjectProcessMap::DiagLifecycleCrashGuard,
+        false);
     (void)Shared::InjectProcessMap::TrySetDiagFlag(
         GetCurrentProcessId(),
         Shared::InjectProcessMap::DiagCrashGuard,

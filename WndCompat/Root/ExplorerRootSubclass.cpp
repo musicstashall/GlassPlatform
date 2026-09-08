@@ -280,7 +280,11 @@ namespace WndCompat
         DWORD_PTR /*dwRefData*/)
     {
         if (uMsg == WndCompat::WM_GLASS_DETACH_ROOT)
-            return Root::ExplorerBridge::OnDetachRoot(hWnd, ExplorerRootSubclassProc, uIdSubclass);
+        {
+            Root::ExplorerBridge::OnDetachRoot(hWnd, ExplorerRootSubclassProc, uIdSubclass);
+            WndCompat::WinEventHook_SignalDetachComplete();
+            return 0;
+        }
 
         if (uMsg == WndCompat::WM_GLASS_REAPPLY_ROOT_BACKDROP)
         {
@@ -454,6 +458,11 @@ namespace WndCompat
 
 namespace WndCompat::ExplorerRoot
 {
+    void ExplorerRoot_ForceDetachSubclass(HWND hWnd) noexcept
+    {
+        RemoveWindowSubclass(hWnd, ExplorerRootSubclassProc, ExplorerRootSubclassId);
+    }
+
     void Attach(HWND hRoot)
     {
         if (!IsWindow(hRoot))
@@ -617,29 +626,21 @@ namespace WndCompat::ExplorerRoot
 
             if (wndTid != curTid)
             {
-                DWORD_PTR sendResult = 0;
-                const BOOL sent = SendMessageTimeoutW(
-                    hWnd, WndCompat::WM_GLASS_DETACH_ROOT, 0, 0,
-                    SMTO_ABORTIFHUNG, 1000, &sendResult);
-
-                if (!sent)
+                WinEventHook_RegisterPendingDetach();
+                BOOL posted = PostMessageW(hWnd, WndCompat::WM_GLASS_DETACH_ROOT, 0, 0);
+                if (!posted)
                 {
-                    DebugLog(DBG_WARNING,
-                        L"[WndCompat][ExplorerRoot] DetachAll: cross-thread SendMessage timeout/fail "
-                        L"hwnd=0x%p — субкласс остался на окне",
-                        hWnd);
-                }
-                else
-                {
-                    DebugLog(
-                        L"[WndCompat][ExplorerRoot] DetachAll: cross-thread detached via SendMessage "
-                        L"hwnd=0x%p",
-                        hWnd);
+                    // Окно уже уничтожено — откатываем счётчик, чтобы не зависнуть на WaitForSingleObject.
+                    WinEventHook_SignalDetachComplete();
+                    DebugLog(std::format(
+                        L"[WndCompat][ExplorerRoot] DetachAll: PostMessageW FAILED for 0x{:X} (window destroyed?)",
+                        reinterpret_cast<std::uintptr_t>(hWnd)
+                    ).c_str());
                 }
 
                 Root::ExplorerBridge::RestoreOriginalClassBrush(hWnd, classBrushes);
 
-                if (isRoot && sent)
+                if (isRoot)
                 {
                     const bool hadGlassBackdrop =
                         Shared::RootBackdropPolicy::DidGlassApplyRootBackdrop(hWnd);

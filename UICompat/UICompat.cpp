@@ -20,6 +20,11 @@ extern "C" __declspec(dllexport) BOOL WINAPI UICompat_Initialize(HMODULE)
     if (!g_initialized.compare_exchange_strong(expected, true))
         return TRUE;
 
+    (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+        GetCurrentProcessId(),
+        Shared::InjectProcessMap::DiagLifecycleUICompat,
+        true);
+
     g_shutdownComplete.store(false, std::memory_order_release);
     UICompatCom::g_shutdownDone.store(false, std::memory_order_release);
 
@@ -66,6 +71,10 @@ extern "C" __declspec(dllexport) BOOL WINAPI UICompat_Initialize(HMODULE)
     }
 
     DebugLog(DBG_IMPORTANT, L"[UICompat][Core] Initialize: END");
+    (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+        GetCurrentProcessId(),
+        Shared::InjectProcessMap::DiagLifecycleUICompat,
+        false);
     (void)Shared::InjectProcessMap::TrySetDiagFlag(
         GetCurrentProcessId(),
         Shared::InjectProcessMap::DiagUICompat,

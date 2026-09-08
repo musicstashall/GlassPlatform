@@ -48,6 +48,9 @@ namespace WndCompat::ExplorerRoot
 
     void Detach(HWND hRoot);
 
+    // Принудительное снятие subclass с окна (EnumWindows fallback перед FreeLibrary)
+    void ExplorerRoot_ForceDetachSubclass(HWND hWnd) noexcept;
+
     /// Снимок shutdown из Root_DetachAll: только File Explorer shell root из windows.
     void DetachAll(
         const std::vector<HWND>& windows,

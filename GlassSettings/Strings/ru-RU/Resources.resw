@@ -44,6 +44,9 @@
   <data name="Runtime_Kill" xml:space="preserve"><value>Убить</value></data>
   <data name="Runtime_FlyoutMetaFormat" xml:space="preserve"><value>PID {0} · ({1})</value></data>
   <data name="Runtime_FlyoutSubsystems" xml:space="preserve"><value>Подсистемы</value></data>
+  <data name="Runtime_LegendRunning" xml:space="preserve"><value>Запущена</value></data>
+  <data name="Runtime_LegendStarting" xml:space="preserve"><value>Запуск</value></data>
+  <data name="Runtime_LegendStopping" xml:space="preserve"><value>Остановка</value></data>
   <data name="Runtime_FlyoutSubclass" xml:space="preserve"><value>Сабклассы</value></data>
   <data name="Runtime_SubclassWindows" xml:space="preserve"><value>Сабклассы</value></data>
   <data name="Runtime_SubclassKinds" xml:space="preserve"><value>Виды</value></data>

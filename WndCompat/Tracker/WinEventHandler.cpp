@@ -28,6 +28,7 @@
 #include <RootPolicyQuery.h>
 #include <ProcessBlockList.h>
 #include <OpenGlassHostState.h>
+#include <wil.h>
 #include <TrayBorderDrawMode.h>
 #include "Tracker/GlassAttachGate.h"
 #include <Popup/DropDown/ListviewPopupSubclass.h>
@@ -132,6 +133,10 @@ namespace
     // Хуки снимаются в WinEventHook_Shutdown вместе с основным WinEvent-хуком.
     static std::unordered_map<DWORD, HHOOK> g_perThreadGetMsgHooks;
     static std::mutex                        g_perThreadHooksMutex;
+
+    // Event-based shutdown: GUI-threads signal when all subclasses are removed
+    static HANDLE           g_hDetachAllDone = nullptr;
+    static std::atomic<int> g_pendingDetaches{0};
 
     struct CallbackGuard
     {
@@ -1451,6 +1456,37 @@ namespace WndCompat
             (void)EnumWindows(EnumRemainingGlassMarkSubtree, reinterpret_cast<LPARAM>(&ctx));
             return ctx;
         }
+
+        // CFG-fix fallback: EnumWindows-based full scan to remove any remaining subclass procs
+        // before FreeLibrary. Catches windows that were subclassed by WinEvent callbacks
+        // but never entered g_rootWindows (race between WinEvent and shutdown snapshot).
+        struct ForceDetachCtx final
+        {
+            DWORD pid{};
+            unsigned removed{};
+        };
+
+        BOOL CALLBACK EnumForceDetachSubclasses(HWND hwnd, LPARAM lParam) noexcept
+        {
+            auto* ctx = reinterpret_cast<ForceDetachCtx*>(lParam);
+            DWORD pid = 0;
+            (void)GetWindowThreadProcessId(hwnd, &pid);
+            if (pid != ctx->pid)
+                return TRUE;
+
+            WndCompat::Root_ForceDetachSubclass(hwnd);
+            WndCompat::ExplorerRoot::ExplorerRoot_ForceDetachSubclass(hwnd);
+            ++ctx->removed;
+            return TRUE;
+        }
+
+        void ForceDetachAllSubclasses() noexcept
+        {
+            ForceDetachCtx ctx{};
+            ctx.pid = GetCurrentProcessId();
+            (void)EnumWindows(EnumForceDetachSubclasses, reinterpret_cast<LPARAM>(&ctx));
+            DebugLog(L"[WndCompat][WinEvent] ForceDetachAllSubclasses: scanned %u windows", ctx.removed);
+        }
     }
 
     void WinEventHook_Shutdown()
@@ -1539,8 +1575,7 @@ namespace WndCompat
                 }
             }
 
-        weh_shutdown_unhook_done:
-            g_hookInstalled.store(false);
+        weh_shutdown_unhook_done:;
         }
 
         // Detach вне g_hookMutex: SendMessageTimeout на чужие GUI-потоки не должен
@@ -1548,6 +1583,36 @@ namespace WndCompat
         TaskbarHost_DetachAll();
         UninstallAllGetMsgHooks();
         RestoreTrackedControlsWin32Chrome(Win32ChromeRestoreScope::ShutdownDetach);
+
+        // CFG-fix fallback: EnumWindows-based full scan to remove any remaining subclass
+        // procs that were subclassed by WinEvent callbacks but never entered g_rootWindows
+        // (race between WinEvent INCONTEXT and shutdown snapshot). This is the last line
+        // of defense before FreeLibrary — removes stale subclass procs from all windows.
+        ForceDetachAllSubclasses();
+
+        // CFG-fix: снимаем g_hookInstalled ПОСЛЕ DetachAll, чтобы никакой WinEvent callback
+        // не мог установить новый субкласс пока DetachAll работает.
+        // Раньше g_hookInstalled=false ставился внутри lock ДО DetachAll —
+        // гонка: callback из очереди → новый субкласс → FreeLibrary → crash.
+        g_hookInstalled.store(false);
+
+        // Event-based shutdown: wait for all cross-thread detachments to complete
+        const int pending = g_pendingDetaches.load(std::memory_order_acquire);
+        if (pending > 0)
+        {
+            DebugLog(L"[WndCompat][WinEvent] Waiting for %d cross-thread detachments", pending);
+            WaitForSingleObject(g_hDetachAllDone, INFINITE);
+            DebugLog(L"[WndCompat][WinEvent] All cross-thread detachments complete");
+        }
+
+        // ОчищаемHANDLE и сбрасываем счётчик для следующего цикла.
+        if (g_hDetachAllDone)
+        {
+            CloseHandle(g_hDetachAllDone);
+            g_hDetachAllDone = nullptr;
+        }
+        g_pendingDetaches.store(0, std::memory_order_release);
+
         const RemainingGlassMarkCtx marks = CountRemainingGlassMarks();
         WndCompat::SubclassDiag::ClearAll();
 
@@ -1562,6 +1627,25 @@ namespace WndCompat
     bool WinEventHook_IsInstalled()
     {
         return g_hookInstalled.load();
+    }
+
+    // Event-based shutdown: increment pending detach count and initialize event
+    void WinEventHook_RegisterPendingDetach()
+    {
+        if (!g_hDetachAllDone)
+        {
+            g_hDetachAllDone = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        }
+        ++g_pendingDetaches;
+    }
+
+    // Event-based shutdown: signal completion when a subclass is removed
+    void WinEventHook_SignalDetachComplete()
+    {
+        if (g_pendingDetaches.fetch_sub(1) == 1)
+        {
+            SetEvent(g_hDetachAllDone);
+        }
     }
 
     Shared::InjectionMode WinEventHook_GetMode()

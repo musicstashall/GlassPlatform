@@ -4,6 +4,7 @@
 #include <GlassControlKind.h>
 #include <DropDownEventProvider.h>
 #include "Tracker/WindowClassUtils.h"
+#include <Tracker/WinEventHandler.h>
 
 #include <vector>
 #include <algorithm>
@@ -21,6 +22,7 @@ namespace
         {
             RemoveWindowSubclass(hWnd, ComboBoxSubclassProc, 2);
             DebugLog(L"[WndCompat][ComboBox] WM_GLASS_DETACH_COMBOBOX: субкласс снят hwnd=0x%p", hWnd);
+            WndCompat::WinEventHook_SignalDetachComplete();
             return 0;
         }
 
@@ -127,21 +129,12 @@ namespace WndCompat
             }
             else
             {
-                // Чужой поток: RemoveWindowSubclass нельзя вызывать напрямую —
-                // это нарушает контракт API и может оставить субкласс висеть.
-                // Доставляем WM_GLASS_DETACH_COMBOBOX через SendMessageTimeout,
-                // ComboBoxSubclassProc снимет субкласс в потоке-владельце окна.
-                DWORD_PTR sendResult = 0;
-                const BOOL sent = SendMessageTimeoutW(
-                    hWnd, WM_GLASS_DETACH_COMBOBOX, 0, 0,
-                    SMTO_ABORTIFHUNG, 1000, &sendResult);
-
-                if (!sent)
+                WinEventHook_RegisterPendingDetach();
+                BOOL posted = PostMessageW(hWnd, WM_GLASS_DETACH_COMBOBOX, 0, 0);
+                if (!posted)
                 {
-                    DebugLog(DBG_WARNING,
-                        L"[WndCompat][ComboBox] ComboBox_DetachAll: cross-thread SendMessage timeout/fail "
-                        L"hwnd=0x%p — субкласс остался на окне",
-                        hWnd);
+                    WinEventHook_SignalDetachComplete();
+                    DebugLog(L"[WndCompat][ComboBox] ComboBox_DetachAll: PostMessageW FAILED for 0x%p", hWnd);
                 }
                 else
                 {

@@ -8,6 +8,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
@@ -54,6 +55,14 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
         NativeHostInterop.InjectModuleBits OwnerModule,
         bool IsSubclassCount);
 
+    private enum SubsystemLifecycle : byte
+    {
+        Unloaded,
+        Starting,
+        Running,
+        Stopping,
+    }
+
     private static readonly (string Title, NativeHostInterop.InjectModuleBits Bit)[] Modules =
     [
         ("GlassCompat", NativeHostInterop.InjectModuleBits.Compat),
@@ -67,6 +76,8 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
     /// <summary>Имена подсистем — hardcoded EN (не локализуются).</summary>
     private static readonly DiagMatrixRow[] DiagMatrixRows =
     [
+        new("Loader", NativeHostInterop.InjectDiagFlags.Loader,
+            NativeHostInterop.InjectModuleBits.Compat, false),
         new("CrashGuard", NativeHostInterop.InjectDiagFlags.CrashGuard,
             NativeHostInterop.InjectModuleBits.Compat, false),
         new("WinEventProc", NativeHostInterop.InjectDiagFlags.WinEventProc,
@@ -232,7 +243,7 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
             _headerBuilt = true;
         }
 
-        if (_interactionFreeze > 0 || _detailDialogOpen)
+        if (_interactionFreeze > 0)
         {
             // Без Restore здесь: отложенный ChangeView даёт видимую «пляску» скролла.
             SyncRowsInPlaceOnly();
@@ -240,6 +251,12 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
         }
 
         var scroll = FindAncestorScrollViewer(this);
+        // При открытом диалоге — принудительно pin scroll, чтобы add/remove строк не приводили к прыжку.
+        if (_detailDialogOpen && _heldScrollOffset is null && scroll is not null)
+        {
+            _pinnedScrollOffset = scroll.VerticalOffset;
+        }
+
         // Hold — абсолютный offset; без hold не цепляться к _pinnedScrollOffset
         // (иначе sync откатывает ручную прокрутку после отпускания).
         var scrollOffset = _heldScrollOffset ?? scroll?.VerticalOffset ?? 0;
@@ -877,6 +894,7 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
             Foreground = AppThemeVisualResolver.ResolveThemeBrush("TextFillColorSecondaryBrush"),
         });
         body.Children.Add(matrixHost);
+        body.Children.Add(BuildColorLegend());
 
         _liveDialog = new LiveDialogState
         {
@@ -887,7 +905,18 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
         void OnSnapshotChanged(InjectRuntimeSnapshot snapshot) =>
             DispatcherQueue.TryEnqueue(() => ApplyLiveDialogSnapshot(snapshot));
 
+        void OnSubsystemChanged(IReadOnlyList<SubsystemSnapshot> snapshots) =>
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_liveDialog is null) return;
+                var snap = snapshots.FirstOrDefault(s => s.Pid == _liveDialog.Pid);
+                if (snap is null || snap.Pid == 0) return;
+                ApplySubsystemSnapshot(snap);
+            });
+
         InjectRuntimeMonitor.Instance.SnapshotChanged += OnSnapshotChanged;
+        SubsystemMonitorService.Instance.SubsystemChanged += OnSubsystemChanged;
+        SubsystemMonitorService.Instance.Subscribe(this, DispatcherQueue);
         try
         {
             var title = string.Format(
@@ -917,6 +946,8 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
         finally
         {
             InjectRuntimeMonitor.Instance.SnapshotChanged -= OnSnapshotChanged;
+            SubsystemMonitorService.Instance.SubsystemChanged -= OnSubsystemChanged;
+            SubsystemMonitorService.Instance.Unsubscribe(this);
             _liveDialog = null;
             _detailDialogOpen = false;
             EndRowInteraction();
@@ -940,12 +971,43 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
             return;
 
         MountDiagMatrix(_liveDialog.MatrixHost, entry);
+        HostedDialogService.RefreshDialogClip();
         _liveDialog.HostContext?.SetPrimaryEnabled(entry.CanRequestUnload);
         if (_liveDialog.HostContext is not null && !entry.CanRequestUnload && entry.UnloadDisabledReason is { Length: > 0 } reason)
             ToolTipService.SetToolTip(_liveDialog.HostContext.PrimaryButton, reason);
 
         if (_rowsByPid.TryGetValue(entry.Pid, out var row))
             ApplyEntry(row, entry, row.ContentGrid.Background is not null);
+    }
+
+    private void ApplySubsystemSnapshot(SubsystemSnapshot snap)
+    {
+        if (_liveDialog is null)
+            return;
+
+        // Обновляем diag matrix напрямую из SubsystemSnapshot (250мс polling).
+        var entry = InjectRuntimeMonitor.Instance.Latest?.Entries.FirstOrDefault(e => e.Pid == snap.Pid);
+        if (entry is null) return;
+
+        // Создаём временный InjectRuntimeEntry с обновлёнными lifecycle-данными.
+        var updated = new InjectRuntimeEntry
+        {
+            Pid = entry.Pid,
+            ExeName = entry.ExeName,
+            Beacon = entry.Beacon,
+            ModulesText = entry.ModulesText,
+            ModuleBits = snap.ModuleBits,
+            Path = entry.Path,
+            Arch = entry.Arch,
+            DiagFlags = snap.DiagFlags,
+            DiagLifecycle = snap.DiagLifecycle,
+            SubclassWindowTotal = snap.SubclassWindowTotal,
+            SubclassKindMask = entry.SubclassKindMask,
+            State = snap.State,
+        };
+
+        MountDiagMatrix(_liveDialog.MatrixHost, updated);
+        HostedDialogService.RefreshDialogClip();
     }
 
     private static void MountDiagMatrix(Grid host, InjectRuntimeEntry entry)
@@ -957,10 +1019,15 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
     private static Grid BuildDiagMatrix(InjectRuntimeEntry entry)
     {
         var diagFlags = (NativeHostInterop.InjectDiagFlags)entry.DiagFlags;
+        var diagLifecycle = (NativeHostInterop.InjectDiagLifecycle)entry.DiagLifecycle;
         var moduleBits = (NativeHostInterop.InjectModuleBits)entry.ModuleBits;
+        var isProcessStopping = entry.State is NativeHostInterop.InjectState.Unloading
+            or NativeHostInterop.InjectState.Unloaded;
         var borderBrush = AppThemeVisualResolver.ResolveThemeBrush("DividerStrokeColorDefaultBrush")
             ?? new SolidColorBrush(Color.FromArgb(0x40, 0x80, 0x80, 0x80));
-        var activeBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0x16, 0xC6, 0xA));
+        var runningBrush = ProcessStatusColors.Running;
+        var startingBrush = ProcessStatusColors.Starting;
+        var stoppingBrush = ProcessStatusColors.Stopping;
 
         var visibleMods = new List<(string Title, NativeHostInterop.InjectModuleBits Bit, int Col)>();
         for (var i = 0; i < Modules.Length; i++)
@@ -1033,18 +1100,42 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
 
             foreach (var mod in visibleMods)
             {
-                var active = row.IsSubclassCount
-                    ? entry.SubclassWindowTotal > 0 && mod.Bit == row.OwnerModule
-                    : row.Flag is { } flag
-                        && diagFlags.HasFlag(flag)
-                        && mod.Bit == row.OwnerModule;
+                if (mod.Bit != row.OwnerModule)
+                {
+                    AddMatrixCell(grid, gridRow, mod.Col, borderBrush, null);
+                    continue;
+                }
 
-                UIElement? content = active
+                var isSubsystemStarting = !row.IsSubclassCount
+                    && row.Flag is { } flag
+                    && diagLifecycle.HasFlag((NativeHostInterop.InjectDiagLifecycle)(uint)flag);
+
+                var isSubsystemActive = row.IsSubclassCount
+                    ? entry.SubclassWindowTotal > 0
+                    : row.Flag is { } flag2 && diagFlags.HasFlag(flag2);
+
+                var lifecycle = isSubsystemStarting
+                    ? SubsystemLifecycle.Starting
+                    : isSubsystemActive
+                        ? SubsystemLifecycle.Running
+                        : isProcessStopping
+                            ? SubsystemLifecycle.Stopping
+                            : SubsystemLifecycle.Unloaded;
+
+                var fill = lifecycle switch
+                {
+                    SubsystemLifecycle.Running => runningBrush,
+                    SubsystemLifecycle.Starting => startingBrush,
+                    SubsystemLifecycle.Stopping => stoppingBrush,
+                    _ => null,
+                };
+
+                UIElement? content = fill is not null
                     ? new Ellipse
                     {
                         Width = 8,
                         Height = 8,
-                        Fill = activeBrush,
+                        Fill = fill,
                         HorizontalAlignment = HorizontalAlignment.Center,
                         VerticalAlignment = VerticalAlignment.Center,
                     }
@@ -1054,6 +1145,29 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
         }
 
         return grid;
+    }
+
+    private static UIElement BuildColorLegend()
+    {
+        var runningBrush = ProcessStatusColors.Running;
+        var startingBrush = ProcessStatusColors.Starting;
+        var stoppingBrush = ProcessStatusColors.Stopping;
+
+        var text = new TextBlock
+        {
+            Margin = new Thickness(0, 4, 0, 0),
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = AppThemeVisualResolver.ResolveThemeBrush("TextFillColorSecondaryBrush"),
+        };
+        text.Inlines.Add(new Run { Text = "\u25CF ", Foreground = runningBrush });
+        text.Inlines.Add(new Run { Text = GlassSettingsResources.Get("Runtime_LegendRunning") });
+        text.Inlines.Add(new Run { Text = "   " });
+        text.Inlines.Add(new Run { Text = "\u25CF ", Foreground = startingBrush });
+        text.Inlines.Add(new Run { Text = GlassSettingsResources.Get("Runtime_LegendStarting") });
+        text.Inlines.Add(new Run { Text = "   " });
+        text.Inlines.Add(new Run { Text = "\u25CF ", Foreground = stoppingBrush });
+        text.Inlines.Add(new Run { Text = GlassSettingsResources.Get("Runtime_LegendStopping") });
+        return text;
     }
 
     private static string ShortModuleTitle(string title) => title switch

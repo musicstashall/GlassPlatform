@@ -28,6 +28,9 @@ namespace WndCompat
     // Снять сабклассы со всех root-окон (Shutdown)
     void Root_DetachAll();
 
+    // Принудительное снятие subclass с окна (EnumWindows fallback перед FreeLibrary)
+    void Root_ForceDetachSubclass(HWND hWnd) noexcept;
+
     bool WINAPI Root_IsAttached(HWND hRoot) noexcept;
 
     void Root_CopyTrackedRoots(std::vector<HWND>& out) noexcept;

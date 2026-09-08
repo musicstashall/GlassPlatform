@@ -438,6 +438,12 @@ namespace
         // WinEventProc: колбэк GlassCompat_WinEventProc (host SetWinEventHook → INCONTEXT).
         (void)Shared::InjectProcessMap::TrySetDiagFlag(
             pid, Shared::InjectProcessMap::DiagWinEventProc, true);
+        // Loader: модули загружены (Running → зелёный).
+        if (g_hCore || g_hWndCompat || g_hSelf)
+        {
+            (void)Shared::InjectProcessMap::TrySetDiagFlag(
+                pid, Shared::InjectProcessMap::DiagLoader, true);
+        }
     }
 
     void ClearDiagFlagsInMap() noexcept
@@ -459,6 +465,8 @@ namespace
             pid, Shared::InjectProcessMap::DiagWinEventProc, false);
         (void)Shared::InjectProcessMap::TrySetDiagFlag(
             pid, Shared::InjectProcessMap::DiagCrashGuard, false);
+        (void)Shared::InjectProcessMap::TrySetDiagFlag(
+            pid, Shared::InjectProcessMap::DiagLoader, false);
     }
 
     // Читает режим из реестра (AttachList), используя имя текущего exe.
@@ -806,6 +814,10 @@ namespace
         (void)Shared::InjectProcessMap::TrySetState(
             pid, Shared::InjectProcessMap::State::Unloading);
 
+        // Loader: начало выгрузки модулей (clear diagFlag → серый через isProcessStopping).
+        (void)Shared::InjectProcessMap::TrySetDiagFlag(
+            pid, Shared::InjectProcessMap::DiagLoader, false);
+
         std::wstring processName = GetProcessNameLower();
         UnloadResult result = UnloadResult::Success;
         const bool isExplorer = (processName == L"explorer.exe");
@@ -835,6 +847,9 @@ namespace
                 GetProcAddress(hUiShutdown, "UICompat_IsShutdownComplete"));
             if (pUiShutdown)
             {
+                (void)Shared::InjectProcessMap::TrySetShutdownPhase(
+                    GetCurrentProcessId(),
+                    Shared::InjectProcessMap::ShutdownPhaseUiDetaching);
                 DebugLog(L"[GlassCompat][Core] [Shutdown] Calling UICompat_Shutdown");
                 (void)pUiShutdown();
                 if (pUiIsShutdownComplete)
@@ -849,6 +864,9 @@ namespace
                         waitedMs += 50;
                     }
                 }
+                (void)Shared::InjectProcessMap::TrySetShutdownPhase(
+                    GetCurrentProcessId(),
+                    Shared::InjectProcessMap::ShutdownPhaseUiDone);
             }
         }
 
@@ -917,8 +935,14 @@ namespace
                 if (pCoreShutdown)
                 {
                     result |= UnloadResult::CoreShutdown_Called;
+                    (void)Shared::InjectProcessMap::TrySetShutdownPhase(
+                        GetCurrentProcessId(),
+                        Shared::InjectProcessMap::ShutdownPhaseCoreDetaching);
                     DebugLog(L"[GlassCompat][Core] [Shutdown] Calling GlassCore_Shutdown");
                     CallGlassCoreShutdown(pCoreShutdown);
+                    (void)Shared::InjectProcessMap::TrySetShutdownPhase(
+                        GetCurrentProcessId(),
+                        Shared::InjectProcessMap::ShutdownPhaseCoreDone);
                     result |= UnloadResult::CoreShutdown_Returned;
                 }
                 else
@@ -944,8 +968,14 @@ namespace
             if (pWndShutdown)
             {
                 result |= UnloadResult::BeginWnd_Called;
+                (void)Shared::InjectProcessMap::TrySetShutdownPhase(
+                    GetCurrentProcessId(),
+                    Shared::InjectProcessMap::ShutdownPhaseWndDetaching);
                 DebugLog(L"[GlassCompat][Core] [Shutdown] Calling WndCompat_BeginShutdown");
                 pWndShutdown();
+                (void)Shared::InjectProcessMap::TrySetShutdownPhase(
+                    GetCurrentProcessId(),
+                    Shared::InjectProcessMap::ShutdownPhaseWndDone);
                 result |= UnloadResult::BeginWnd_Returned;
                 DebugLog(L"[GlassCompat][Core] [Shutdown] WndCompat_BeginShutdown returned");
             }
@@ -1189,6 +1219,23 @@ namespace
                 }
                 else if (hCheckUi)
                 {
+                    // CW host: UICompat ещё загружена — ShellHost держит COM proxies.
+                    // Агрессивный drain с msg pump + CoFreeUnusedLibraries.
+                    forcedUnloadMask |= 0x40ULL;
+                    for (int round = 0; round < 8; ++round)
+                    {
+                        CoFreeUnusedLibraries();
+                        for (int m = 0; m < 300; m += 10)
+                        {
+                            MSG msg;
+                            PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE | PM_NOYIELD);
+                            Sleep(10);
+                        }
+                        CoFreeUnusedLibraries();
+                        hCheckUi = GetModuleHandleW(L"UICompat.dll");
+                        if (!hCheckUi)
+                            break;
+                    }
                 }
 
                 DebugLog(
@@ -1642,6 +1689,12 @@ namespace
             Shared::InjectProcessMap::State::Alive,
             Shared::InjectProcessMap::ModuleCompat);
 
+        // Loader: начало загрузки модулей (Starting → жёлтый).
+        (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+            GetCurrentProcessId(),
+            Shared::InjectProcessMap::DiagLifecycleLoader,
+            true);
+
         // ---------------------------------------------------------
         // 1. GlassCore — всегда LoadLibrary (свой ref). H64: init в DllMain под SEH + EnsureEngine.
         // HWiNFO: AV → LoadLibrary OK, engine not ready → FreeLibrary с таймаутом на Stop.
@@ -1801,6 +1854,16 @@ namespace
         DebugLog(L"[GlassCompat][Core] === END SUMMARY ===");
 
         GlassCompat::ReassertProcessCrashGuard();
+
+        // Loader: загрузка модулей завершена (Running → зелёный).
+        (void)Shared::InjectProcessMap::TrySetDiagFlag(
+            GetCurrentProcessId(),
+            Shared::InjectProcessMap::DiagLoader,
+            true);
+        (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+            GetCurrentProcessId(),
+            Shared::InjectProcessMap::DiagLifecycleLoader,
+            false);
 
         // H35: в SEH/ShellHost/SMEH UICompat иначе никогда не грузится (Ensure ждёт Attach,
         // Attach ждёт remote SHOW, remote SHOW ждал initDone на чужом потоке → not_ready).

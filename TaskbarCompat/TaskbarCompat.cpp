@@ -23,6 +23,11 @@ extern "C" __declspec(dllexport) BOOL WINAPI TaskbarCompat_Initialize(HMODULE)
     if (!g_initialized.compare_exchange_strong(expected, true))
         return TRUE;
 
+    (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+        GetCurrentProcessId(),
+        Shared::InjectProcessMap::DiagLifecycleTaskbar,
+        true);
+
     g_shutdownComplete.store(false, std::memory_order_release);
     TaskbarCompatCom::g_shutdownDone.store(false, std::memory_order_release);
 
@@ -86,6 +91,10 @@ extern "C" __declspec(dllexport) BOOL WINAPI TaskbarCompat_Initialize(HMODULE)
     }
 
     DebugLog(DBG_IMPORTANT, L"[TaskbarCompat][Core] Initialize: END");
+    (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+        GetCurrentProcessId(),
+        Shared::InjectProcessMap::DiagLifecycleTaskbar,
+        false);
     (void)Shared::InjectProcessMap::TrySetDiagFlag(
         GetCurrentProcessId(),
         Shared::InjectProcessMap::DiagTaskbar,

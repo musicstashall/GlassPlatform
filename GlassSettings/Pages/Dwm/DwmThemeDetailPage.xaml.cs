@@ -556,10 +556,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             UpdateReflectionTilesLayout,
             model => _ = TryDeleteReflectionImageAsync(model));
 
-    private void LoadMaterialImages() =>
+    private async void LoadMaterialImages() =>
         PopulateCollection(
             _materialItems,
-            BuildMaterialItemsWithDefault(),
+            await BuildMaterialItemsWithDefaultAsync(),
             MaterialEmptyStateHost,
             MaterialItems,
             UpdateMaterialTilesLayout,
@@ -692,10 +692,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         return items;
     }
 
-    private static IReadOnlyList<ThemeImageItem> BuildMaterialItemsWithDefault()
+    private static async System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<ThemeImageItem>> BuildMaterialItemsWithDefaultAsync()
     {
         var items = ThemeImageCatalog.LoadMaterialImages().ToList();
-        var defaultImage = ThemeImageCatalog.TryGetDefaultMaterialImage();
+        var defaultImage = await ThemeImageCatalog.TryGetDefaultMaterialImageAsync();
         if (defaultImage is null)
             return items;
 

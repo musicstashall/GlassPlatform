@@ -1408,7 +1408,8 @@ public sealed partial class HomePage : Page
 
     private static bool IsInjectLifecycleBusy(GlassPlatformArch arch) =>
         NativeHostInterop.QueryInjectLifecycleUi(arch) is NativeHostInterop.InjectLifecycleUi.Stopping
-            or NativeHostInterop.InjectLifecycleUi.Residual;
+            or NativeHostInterop.InjectLifecycleUi.Residual
+            or NativeHostInterop.InjectLifecycleUi.Starting;
 
     private async void OpenGlassSwitch_OnToggled(object sender, RoutedEventArgs e)
     {

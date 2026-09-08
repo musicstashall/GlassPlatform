@@ -18,6 +18,10 @@
 /.claude/
 /.cursor/
 /.opencode/
+/.kilo/
+/.shared-skills/
+/.shared-rules/
+/_backups/
 /AGENTS.md
 /CLAUDE.md
 
@@ -78,3 +82,6 @@ BundleArtifacts/
 # ---- Python (tools) ----
 __pycache__/
 *.py[cod]
+
+# ---- Локальные скрипты публикации ----
+/Publish-GlassSettings.ps1

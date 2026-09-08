@@ -99,10 +99,12 @@ namespace GlassShared::GlassPlatformTask
         Running = 1,
         Stopping = 2,
         Residual = 3,
+        Starting = 4,
     };
 
-    /// Running=mutex; Stopping=LifecycleBusy|Stop+Running; Residual=sticky/live Module32;
-    /// Idle=иначе. Title «Включить» только Idle; Enabled Idle|Running.
+    /// Running=mutex; Stopping=LifecycleBusy|Stop+Running; Starting=mutex&&!stop&&!busy;
+    /// Residual=sticky/live Module32; Idle=иначе.
+    /// Title «Включить» только Idle; Enabled Idle|Running|Starting.
     [[nodiscard]] InjectLifecycleUi QueryInjectLifecycleUi(PlatformArch arch) noexcept;
 
     /// Скан known hosts → sticky named mapping (ShellExt / GS).

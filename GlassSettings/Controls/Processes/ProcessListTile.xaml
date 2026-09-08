@@ -13,6 +13,8 @@
         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
         BorderThickness="1"
         CornerRadius="8"
+        IsTabStop="False"
+        AllowFocusOnInteraction="False"
         PointerEntered="RootBorder_OnPointerEntered"
         PointerExited="RootBorder_OnPointerExited">
         <Grid HorizontalAlignment="Stretch" ColumnSpacing="16">

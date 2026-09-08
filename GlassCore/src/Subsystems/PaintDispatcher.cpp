@@ -271,6 +271,11 @@ namespace GlassCore::PaintDispatcher
 
     void Startup()
     {
+        (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+            GetCurrentProcessId(),
+            Shared::InjectProcessMap::DiagLifecyclePaintDispatcher,
+            true);
+
         HMODULE user32 = GetModuleHandleW(L"user32.dll");
         HMODULE gdi32  = GetModuleHandleW(L"gdi32.dll");
         if (!gdi32) gdi32 = GetModuleHandleW(L"gdi32full.dll");
@@ -303,6 +308,10 @@ namespace GlassCore::PaintDispatcher
         });
 
         DebugLog(DBG_IMPORTANT, L"[GlassCore][PaintDispatcher] PaintDispatcher::Startup");
+        (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+            GetCurrentProcessId(),
+            Shared::InjectProcessMap::DiagLifecyclePaintDispatcher,
+            false);
         (void)Shared::InjectProcessMap::TrySetDiagFlag(
             GetCurrentProcessId(),
             Shared::InjectProcessMap::DiagPaintDispatcher,

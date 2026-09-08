@@ -4,6 +4,7 @@
 #include "KbxLabelSubclass.h"
 #include <GlassMessages.h>
 #include <TooltipEventProvider.h>
+#include <Tracker/WinEventHandler.h>
 
 #include <algorithm>
 #include <mutex>
@@ -41,6 +42,7 @@ namespace
                 p->OnKbxLabelSubclassDetached(hWnd, static_cast<BOOL>(wParam != 0));
             KbxLabel_RemoveFromList(hWnd);
             RemoveWindowSubclass(hWnd, KbxLabelSubclassProc, WndCompat::kKbxLabelSubclassId);
+            WndCompat::WinEventHook_SignalDetachComplete();
             return 0;
         }
 
@@ -137,13 +139,18 @@ namespace WndCompat
             if (!IsWindow(h))
                 continue;
 
-            DWORD_PTR result = 0;
             if (GetWindowThreadProcessId(h, nullptr) == selfTid)
-                SendMessageW(h, WM_GLASS_DETACH_KBXLABEL, 1, 0);
+                RemoveWindowSubclass(h, KbxLabelSubclassProc, kKbxLabelSubclassId);
             else
-                SendMessageTimeoutW(
-                    h, WM_GLASS_DETACH_KBXLABEL, 1, 0,
-                    SMTO_ABORTIFHUNG, 1000, &result);
+            {
+                WinEventHook_RegisterPendingDetach();
+                BOOL posted = PostMessageW(h, WM_GLASS_DETACH_KBXLABEL, 0, 0);
+                if (!posted)
+                {
+                    WinEventHook_SignalDetachComplete();
+                    DebugLog(L"[WndCompat][KbxLabel] KbxLabel_DetachAll: PostMessageW FAILED for 0x%p", h);
+                }
+            }
         }
 
         {

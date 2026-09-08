@@ -2,7 +2,6 @@ using GlassSettings.Controls;
 using GlassSettings.Core.Platform;
 using GlassSettings.Services;
 using Microsoft.UI.Dispatching;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace GlassSettings.Services;
@@ -34,9 +33,6 @@ public sealed class PlatformPresenceService : IDisposable
 
     private const int WatcherPollIntervalMs = 500;
 
-    private static void Log(string msg) =>
-        Debug.WriteLine($"[PlatformPresence] {msg}");
-
     /// <summary>Fired on UI thread when snapshot changes (backward compat).</summary>
     public event EventHandler? PresenceChanged;
 
@@ -52,21 +48,18 @@ public sealed class PlatformPresenceService : IDisposable
     public void Attach(DispatcherQueue dispatcher)
     {
         _dispatcher = dispatcher;
-        Log("Attach: reading shared memory");
         RefreshSnapshotFromSharedMemory(forceNotify: true, raiseEvent: false);
         SyncWatcher();
     }
 
     public void StartPresenceWatchAfterShellReady()
     {
-        Log("StartPresenceWatchAfterShellReady");
         EnsurePresenceWait();
         RefreshSnapshotFromSharedMemory(forceNotify: true, raiseEvent: true);
     }
 
     public void NotifyLifecycleChanged()
     {
-        Log("NotifyLifecycleChanged: invalidating OG cache + signaling watcher");
         NativeHostInterop.InvalidateOGCache();
         SignalWatcherRefresh();
     }
@@ -75,7 +68,6 @@ public sealed class PlatformPresenceService : IDisposable
     {
         lock (_gate)
             _subscribers.Add(callback);
-        Log($"Subscribe: total={_subscribers.Count}, starting watcher");
         SyncWatcher();
         var snap = CurrentSnapshot;
         if (snap.Revision > 0)
@@ -90,7 +82,6 @@ public sealed class PlatformPresenceService : IDisposable
     {
         lock (_gate)
             _subscribers.Remove(callback);
-        Log($"Unsubscribe: total={_subscribers.Count}");
         SyncWatcher();
     }
 
@@ -100,27 +91,23 @@ public sealed class PlatformPresenceService : IDisposable
         SyncWatcher();
         if (first)
         {
-            Log($"AddSubscriber: count={_subscriberCount}, first=True, raising event");
             // Always fire PresenceChanged on first subscriber — ensures initial state sync.
             var dq = _dispatcher;
             if (dq != null)
             {
                 dq.TryEnqueue(() =>
                 {
-                    Log("AddSubscriber: dispatching PresenceChanged for initial state sync");
                     PresenceChanged?.Invoke(this, EventArgs.Empty);
                 });
             }
             return;
         }
-        Log($"AddSubscriber: count={_subscriberCount}, first=False");
     }
 
     public void RemoveSubscriber()
     {
         if (Interlocked.Decrement(ref _subscriberCount) < 0)
             Interlocked.Exchange(ref _subscriberCount, 0);
-        Log($"RemoveSubscriber: count={_subscriberCount}");
         SyncWatcher();
     }
 
@@ -170,12 +157,10 @@ public sealed class PlatformPresenceService : IDisposable
                         : GlassAutorunUiState.Ready),
                 _ => PlatformTaskState.Default
             };
-            Log($"QueryTaskState({kind},{arch}) rev={snap.Revision} -> TaskExists={result.TaskExists} Lifecycle={result.Lifecycle} Autorun={result.Autorun} IsBusy={result.IsLifecycleBusy} IsUnloading={result.IsUnloading}");
             return result;
         }
 
         var direct = QueryTaskStateDirect(kind, arch);
-        Log($"QueryTaskState({kind},{arch}) REV=0(fallback) -> TaskExists={direct.TaskExists} Lifecycle={direct.Lifecycle} Autorun={direct.Autorun}");
         return direct;
     }
 
@@ -240,7 +225,6 @@ public sealed class PlatformPresenceService : IDisposable
                     _ = WaitForSingleObject(h, 5000);
                     if (token.IsCancellationRequested)
                         break;
-                    Log("PresenceChanged event fired -> signaling watcher");
                     SignalWatcherRefresh();
                 }
             }
@@ -266,7 +250,6 @@ public sealed class PlatformPresenceService : IDisposable
         if (_watcherThread != null)
             return;
 
-        Log("EnsureWatcherThread: creating new watcher thread");
         _lastWatcherSnapshot = default;
         _watcherCts = new CancellationTokenSource();
         _watcherSignal = new ManualResetEventSlim(false);
@@ -281,7 +264,6 @@ public sealed class PlatformPresenceService : IDisposable
 
     private void StopWatcherThread()
     {
-        Log("StopWatcherThread");
         _watcherCts?.Cancel();
         _watcherSignal?.Set();
         _watcherThread?.Join(2000);
@@ -297,7 +279,6 @@ public sealed class PlatformPresenceService : IDisposable
         var token = _watcherCts!.Token;
         try
         {
-            Log("WatcherThreadProc: started");
             while (!token.IsCancellationRequested)
             {
                 _watcherSignal!.Wait(WatcherPollIntervalMs);
@@ -313,13 +294,9 @@ public sealed class PlatformPresenceService : IDisposable
 
                 if (SnapshotEquals(snap, _lastWatcherSnapshot))
                 {
-                    Log($"Watcher: snapshot unchanged rev={snap.Revision} skip notify");
                     continue;
                 }
 
-                Log($"Watcher: snapshot CHANGED rev={snap.Revision} " +
-                    $"lifeX64={snap.InjectLifecycleUiX64} lifeX86={snap.InjectLifecycleUiX86} " +
-                    $"autoX64={snap.GlassAutorunStateX64} autoX86={snap.GlassAutorunStateX86}");
                 _lastWatcherSnapshot = snap;
 
                 lock (_gate)
@@ -329,9 +306,8 @@ public sealed class PlatformPresenceService : IDisposable
 
                 NotifySubscribers(snap);
             }
-            Log("WatcherThreadProc: exiting");
         }
-        catch (OperationCanceledException) { Log("WatcherThreadProc: cancelled"); }
+        catch (OperationCanceledException) { }
     }
 
     private static bool SnapshotEquals(
@@ -397,8 +373,6 @@ public sealed class PlatformPresenceService : IDisposable
                 changed = true;
             }
         }
-
-        Log($"RefreshSnapshot: rev={snap.Revision} changed={changed} forceNotify={forceNotify}");
 
         if (changed && raiseEvent)
             PresenceChanged?.Invoke(this, EventArgs.Empty);

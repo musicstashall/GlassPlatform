@@ -1,8 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using Microsoft.UI;
 using Microsoft.UI.Xaml.Media;
-using Windows.UI;
 
 namespace GlassSettings.Services;
 
@@ -10,7 +8,7 @@ public sealed class InjectRuntimeRowModel : INotifyPropertyChanged
 {
     private string _exeName = string.Empty;
     private string _detail = string.Empty;
-    private Brush _beaconBrush = new SolidColorBrush(Colors.Gray);
+    private Brush _beaconBrush = ProcessStatusColors.Neutral;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -37,10 +35,10 @@ public sealed class InjectRuntimeRowModel : INotifyPropertyChanged
     public static Brush BrushFor(InjectRuntimeBeacon beacon) =>
         beacon switch
         {
-            InjectRuntimeBeacon.Active => new SolidColorBrush(Color.FromArgb(255, 16, 124, 16)),
-            InjectRuntimeBeacon.Rejected => new SolidColorBrush(Color.FromArgb(255, 196, 145, 0)),
-            InjectRuntimeBeacon.Residual => new SolidColorBrush(Color.FromArgb(255, 196, 43, 28)),
-            _ => new SolidColorBrush(Colors.Gray),
+            InjectRuntimeBeacon.Active => ProcessStatusColors.Active,
+            InjectRuntimeBeacon.Rejected => ProcessStatusColors.Rejected,
+            InjectRuntimeBeacon.Residual => ProcessStatusColors.Residual,
+            _ => ProcessStatusColors.Neutral,
         };
 
     public void Apply(InjectRuntimeEntry entry)

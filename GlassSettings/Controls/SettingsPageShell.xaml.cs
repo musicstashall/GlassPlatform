@@ -36,6 +36,7 @@ public sealed partial class SettingsPageShell : UserControl
             UIElement.KeyUpEvent,
             new KeyEventHandler(OnInteractionCompletedKey),
             handledEventsToo: true);
+
     }
 
     public UIElement? Body

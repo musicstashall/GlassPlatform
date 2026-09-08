@@ -24,4 +24,15 @@ public static class HostedDialogService
 
         return App.ShellWindow.ShowHostedDialogThenRunAsync(spec, procedure);
     }
+
+    /// <summary>Принудительное обновление clip hosted-диалога после изменения контента.</summary>
+    public static void RefreshDialogClip()
+    {
+        if (App.ShellWindow is null)
+            return;
+
+        // Откладываем на кадр — контент должен пройти layout перед обновлением clip.
+        App.ShellWindow.DispatcherQueue.TryEnqueue(() =>
+            App.ShellWindow.UpdateHostedDialogSurfaceClip());
+    }
 }

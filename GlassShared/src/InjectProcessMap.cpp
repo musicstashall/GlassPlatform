@@ -326,6 +326,55 @@ namespace Shared::InjectProcessMap
         return true;
     }
 
+    bool TrySetDiagLifecycle(DWORD pid, std::uint32_t lifecycleBit, bool active) noexcept
+    {
+        if (pid == 0 || lifecycleBit == 0)
+            return false;
+
+        Header* header = MapHeaderView(FILE_MAP_WRITE);
+        if (!header)
+            return false;
+
+        Slot* slot = FindSlotByPid(header, pid);
+        if (!slot)
+        {
+            UnmapViewOfFile(header);
+            return false;
+        }
+
+        BeginSlotWrite(*slot);
+        if (active)
+            slot->diagLifecycle |= lifecycleBit;
+        else
+            slot->diagLifecycle &= ~lifecycleBit;
+        EndSlotWrite(*slot);
+        UnmapViewOfFile(header);
+        return true;
+    }
+
+    bool TrySetShutdownPhase(DWORD pid, std::uint32_t phase) noexcept
+    {
+        if (pid == 0)
+            return false;
+
+        Header* header = MapHeaderView(FILE_MAP_WRITE);
+        if (!header)
+            return false;
+
+        Slot* slot = FindSlotByPid(header, pid);
+        if (!slot)
+        {
+            UnmapViewOfFile(header);
+            return false;
+        }
+
+        BeginSlotWrite(*slot);
+        slot->shutdownPhase = phase;
+        EndSlotWrite(*slot);
+        UnmapViewOfFile(header);
+        return true;
+    }
+
     bool TryPublishSubclassStats(
         DWORD pid,
         std::uint32_t windowTotal,
@@ -376,9 +425,12 @@ namespace Shared::InjectProcessMap
         slot->moduleBits = 0;
         slot->unloadResult = 0;
         slot->diagFlags = 0;
+        slot->diagLifecycle = 0;
         slot->subclassWindowTotal = 0;
         slot->subclassKindMask = 0;
         slot->exeName[0] = L'\0';
+        slot->shutdownPhase = 0;
+        slot->reserved2 = 0;
         MemoryBarrier();
         InterlockedExchange(reinterpret_cast<volatile LONG*>(&slot->pid), 0);
         EndSlotWrite(*slot);

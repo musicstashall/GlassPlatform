@@ -127,7 +127,7 @@ public sealed partial class StylizationLayeredPreview : UserControl
     }
 
     /// <summary>Пересобирает источники слоёв из текущего реестра DWM и обоев рабочего стола.</summary>
-    public void RefreshLayers()
+    public async void RefreshLayers()
     {
         _lastThemeFilePath = TryGetCurrentThemeRegistryPathNormalized();
 
@@ -179,7 +179,7 @@ public sealed partial class StylizationLayeredPreview : UserControl
             materialPath = NormalizeCustom(DwmRegistryStore.ReadEffectiveString(MaterialRegistryKey));
             material = materialPath is not null
                 ? ThemeImageCatalog.CreateImageSource(materialPath)
-                : ThemeImageCatalog.TryGetDefaultMaterialImage();
+                : await ThemeImageCatalog.TryGetDefaultMaterialImageAsync();
         }
 
         SetTextureLayer(MaterialImage, MaterialFallback, material);
@@ -205,7 +205,7 @@ public sealed partial class StylizationLayeredPreview : UserControl
     }
 
     /// <summary>После gate OFF→ON без полного RefreshLayers источник мог остаться null, fallback — видим.</summary>
-    private void RefreshReflectionMaterialSourcesIfNeeded()
+    private async void RefreshReflectionMaterialSourcesIfNeeded()
     {
         if (IsReflectionCollectionGateOn() && ReflectionTextureBrush.ImageSource is null)
         {
@@ -222,7 +222,7 @@ public sealed partial class StylizationLayeredPreview : UserControl
             var materialPath = NormalizeCustom(DwmRegistryStore.ReadEffectiveString(MaterialRegistryKey));
             var material = materialPath is not null
                 ? ThemeImageCatalog.CreateImageSource(materialPath)
-                : ThemeImageCatalog.TryGetDefaultMaterialImage();
+                : await ThemeImageCatalog.TryGetDefaultMaterialImageAsync();
             SetTextureLayer(MaterialImage, MaterialFallback, material);
             SetLayerTooltip(MaterialLayer, "Stylization_Layer_Material", materialPath);
         }

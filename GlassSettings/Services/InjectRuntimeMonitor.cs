@@ -22,6 +22,7 @@ public sealed class InjectRuntimeEntry
     public byte Path { get; init; }
     public NativeHostInterop.InjectArch Arch { get; init; }
     public uint DiagFlags { get; init; }
+    public uint DiagLifecycle { get; init; }
     public uint SubclassWindowTotal { get; init; }
     public ulong SubclassKindMask { get; init; }
     public NativeHostInterop.InjectState State { get; init; }
@@ -98,6 +99,8 @@ public sealed class InjectRuntimeMonitor
     private bool _lastHadResiduals;
     private bool _wasPlatformRunning;
     private bool _residualSweepActive;
+    /// <summary>Пик количества slots при живой платформе (для детекта shutdown race — резкое уменьшение slots).</summary>
+    private int _peakSlots;
     /// <summary>Один раз при старте монитора (платформа off): полный Toolhelp-scan residual.</summary>
     private bool _idlePlatformProbePending = true;
     private bool _pendingColdProbeCompletion;
@@ -332,6 +335,12 @@ public sealed class InjectRuntimeMonitor
         var platformRunning = ReloadRenderService.IsAnyGlassPlatformRunning();
         var selfPid = (uint)Environment.ProcessId;
 
+        // Читаем карту ДО lock, чтобы sweep trigger мог проверить slots.Length.
+        var mapOk = NativeHostInterop.TryReadInjectMapSlots(out var slots);
+        if (!mapOk)
+            slots = Array.Empty<NativeHostInterop.InjectMapSlot>();
+        slots = PruneDeadInjectMapSlots(slots);
+
         bool residualSweep;
         bool runColdProbe;
         bool forceFull;
@@ -343,13 +352,36 @@ public sealed class InjectRuntimeMonitor
             {
                 _residualSweepActive = true;
                 _residualEmptyStreak = 0;
+                _peakSlots = 0;
             }
-            if (platformRunning)
+            // Shutdown race: slots declined significantly from peak while mutex still alive.
+            // Trigger sweep immediately — scan-only processes must be Residual, not Active.
+            else if (platformRunning && _peakSlots > 0 && slots.Length < _peakSlots - 1
+                     && !_residualSweepActive)
+            {
+                _residualSweepActive = true;
+                _residualEmptyStreak = 0;
+            }
+            if (platformRunning && !_residualSweepActive)
+            {
+                _idlePlatformProbePending = false;
+                _pendingColdProbeCompletion = false;
+                _residualEmptyStreak = 0;
+                // Track peak slot count for shutdown race detection.
+                if (slots.Length > _peakSlots)
+                {
+                    _peakSlots = slots.Length;
+                }
+            }
+            // Recovery: sweep was from shutdown race, slots fully recovered to peak — deactivate.
+            // Do NOT deactivate during drain (slots > 0 but < peak) — sweep must stay ON.
+            if (platformRunning && _residualSweepActive && slots.Length >= _peakSlots && _peakSlots > 0)
             {
                 _residualSweepActive = false;
                 _idlePlatformProbePending = false;
                 _pendingColdProbeCompletion = false;
                 _residualEmptyStreak = 0;
+                _peakSlots = slots.Length;
             }
 
             _wasPlatformRunning = platformRunning;
@@ -368,12 +400,6 @@ public sealed class InjectRuntimeMonitor
         // Первый poll после StartPolling (_forceFullCapturePending) cheap-idle не использует.
         if (!platformRunning && !residualSweep && !runColdProbe)
             return new InjectRuntimeSnapshot { PlatformRunning = false };
-
-        var mapOk = NativeHostInterop.TryReadInjectMapSlots(out var slots);
-        if (!mapOk)
-            slots = Array.Empty<NativeHostInterop.InjectMapSlot>();
-        // Exit процесса без FreeSelf: слот остаётся Alive — убираем мёртвые PID из UI и карты.
-        slots = PruneDeadInjectMapSlots(slots);
 
         // Дыра: HostPublish CW off (H47) + map Close до !mutex → slots пусты при ещё «running»
         // или сразу после stop. Bridge PID + CW-host exe дополняют light-scan.
@@ -464,7 +490,7 @@ public sealed class InjectRuntimeMonitor
         _ = NativeHostInterop.RefreshInjectResidualSticky(GlassPlatformArch.X64);
         _ = NativeHostInterop.RefreshInjectResidualSticky(GlassPlatformArch.X86);
 
-        return Merge(platformRunning, slots, scan, selfPid);
+        return Merge(platformRunning, residualSweep, slots, scan, selfPid);
     }
 
     /// <summary>
@@ -716,6 +742,7 @@ public sealed class InjectRuntimeMonitor
 
     private static InjectRuntimeSnapshot Merge(
         bool platformRunning,
+        bool residualSweep,
         NativeHostInterop.InjectMapSlot[] slots,
         NativeHostInterop.InjectScanResult[] scan,
         uint selfPid)
@@ -730,7 +757,9 @@ public sealed class InjectRuntimeMonitor
                 if (slot.Pid == 0)
                     continue;
                 if (IsGlassSettingsProcess(slot.Pid, slot.ExeName, selfPid))
+                {
                     continue;
+                }
 
                 scanByPid.TryGetValue(slot.Pid, out var scanned);
                 // H42: AppContainer Toolhelp часто неполный (только Compat) — не даём scan
@@ -756,20 +785,14 @@ public sealed class InjectRuntimeMonitor
                     beacon = InjectRuntimeBeacon.Rejected;
                 }
                 else if (slot.State is NativeHostInterop.InjectState.Unloading
-                         or NativeHostInterop.InjectState.Unloaded)
+                    or NativeHostInterop.InjectState.Unloaded)
                 {
-                    beacon = bits != 0 ? InjectRuntimeBeacon.Residual : InjectRuntimeBeacon.Active;
+                    // Модули выгружаются/выгружены → красный (невыгруженный остаток).
+                    beacon = InjectRuntimeBeacon.Residual;
                 }
                 else
                 {
                     beacon = InjectRuntimeBeacon.Active;
-                }
-
-                if (bits != 0
-                    && slot.State is NativeHostInterop.InjectState.Unloading
-                        or NativeHostInterop.InjectState.Unloaded)
-                {
-                    beacon = InjectRuntimeBeacon.Residual;
                 }
 
                 list.Add(new InjectRuntimeEntry
@@ -781,6 +804,7 @@ public sealed class InjectRuntimeMonitor
                     Path = slot.Path,
                     Arch = slot.Arch,
                     DiagFlags = slot.DiagFlags,
+                    DiagLifecycle = slot.DiagLifecycle,
                     SubclassWindowTotal = slot.SubclassWindowTotal,
                     SubclassKindMask = slot.SubclassKindMask,
                     State = slot.State,
@@ -797,14 +821,23 @@ public sealed class InjectRuntimeMonitor
                     continue;
                 // Хост платформы (rundll32+GlassCompat) — не residual injectee.
                 if (IsGlassPlatformHostPid(s.Pid))
+                {
                     continue;
-                // Вне карты: только Residual (вышел из map / sticky hold до Module32=0).
-                // Раньше Active при slots>0 красил drain зелёным и прятал дыру.
+                }
+                // Вне карты: при живой платформе и пустых слотах — Residual (платформа выгружается).
+                // При живой платформе с активными слотами — Active (слот может запаздывать при старте).
+                // CFG-fix: residualSweep — sweep уже активен (мьютекс жив, но слоты пустеют),
+                // scan-only процессы должны быть Residual (иначе зелёный flicker после stop).
+                bool slotsEmpty = slots.Length == 0;
+                var scanBeacon = (platformRunning && !slotsEmpty && !residualSweep)
+                    ? InjectRuntimeBeacon.Active
+                    : InjectRuntimeBeacon.Residual;
+
                 list.Add(new InjectRuntimeEntry
                 {
                     Pid = s.Pid,
                     ExeName = s.ExeName ?? string.Empty,
-                    Beacon = InjectRuntimeBeacon.Residual,
+                    Beacon = scanBeacon,
                     ModuleBits = s.ModuleBits,
                     Arch = GuessProcessArch(s.Pid),
                     ModulesText = FormatModules(s.ModuleBits),
@@ -821,6 +854,7 @@ public sealed class InjectRuntimeMonitor
                     continue;
                 if (IsGlassPlatformHostPid(s.Pid))
                     continue;
+
                 list.Add(new InjectRuntimeEntry
                 {
                     Pid = s.Pid,
@@ -842,12 +876,16 @@ public sealed class InjectRuntimeMonitor
             return c != 0 ? c : a.Pid.CompareTo(b.Pid);
         });
 
+        var activeCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Active);
+        var rejectedCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Rejected);
+        var residualCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Residual);
+
         return new InjectRuntimeSnapshot
         {
             Entries = list,
-            ActiveCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Active),
-            RejectedCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Rejected),
-            ResidualCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Residual),
+            ActiveCount = activeCount,
+            RejectedCount = rejectedCount,
+            ResidualCount = residualCount,
             PlatformRunning = platformRunning,
         };
     }

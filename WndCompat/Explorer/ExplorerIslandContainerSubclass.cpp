@@ -58,6 +58,7 @@ namespace
             RemoveWindowSubclass(hWnd, IslandContainerSubclassProc, uIdSubclass);
             RestoreIslandDefaultAfterDetach(hWnd);
             DebugLog(L"[WndCompat][Explorer] WM_GLASS_DETACH_EXPLORER_ISLAND: субкласс снят hwnd=0x%p", hWnd);
+            WndCompat::WinEventHook_SignalDetachComplete();
             return 0;
         }
 
@@ -188,24 +189,12 @@ namespace WndCompat
 
             if (wndTid != curTid)
             {
-                DWORD_PTR sendResult = 0;
-                const BOOL sent = SendMessageTimeoutW(
-                    hWnd, WM_GLASS_DETACH_EXPLORER_ISLAND, 0, 0,
-                    SMTO_ABORTIFHUNG, 1000, &sendResult);
-
-                if (!sent)
+                WinEventHook_RegisterPendingDetach();
+                BOOL posted = PostMessageW(hWnd, WM_GLASS_DETACH_EXPLORER_ISLAND, 0, 0);
+                if (!posted)
                 {
-                    DebugLog(DBG_WARNING,
-                        L"[WndCompat][Explorer] ExplorerIslandContainer_DetachAll: cross-thread SendMessage timeout/fail "
-                        L"hwnd=0x%p — субкласс остался на окне",
-                        hWnd);
-                }
-                else
-                {
-                    DebugLog(
-                        L"[WndCompat][Explorer] ExplorerIslandContainer_DetachAll: cross-thread detached via SendMessage "
-                        L"hwnd=0x%p",
-                        hWnd);
+                    WinEventHook_SignalDetachComplete();
+                    DebugLog(L"[WndCompat][Explorer] ExplorerIslandContainer_DetachAll: PostMessageW FAILED for 0x%p", hWnd);
                 }
                 continue;
             }

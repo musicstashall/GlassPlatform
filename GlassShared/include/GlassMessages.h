@@ -274,3 +274,11 @@ namespace TaskbarCompatMsg
     // Класс HWND_MESSAGE; WndCompat::Root_Attach не должен субклассить (как ExplorerCompat XAML shutdown).
     inline constexpr wchar_t kTaskbarXamlShutdownWndClass[] = L"GlassTaskbarCompatXamlShutdown";
 }
+
+// ── GlassCore: animation shutdown (0xD00..0xDFF) ──────────────────────
+namespace GlassCoreMsg
+{
+    // PostMessage → PopupIn SubclassProc (GUI-thread) → RemoveWindowSubclass + signal event.
+    // Используется при shutdown для безопасного снятия subclass'ов с menu windows.
+    inline constexpr UINT WM_GLASS_ANIM_DETACH = WM_APP + 0xD00;
+}

@@ -11,7 +11,7 @@ namespace GlassSettings.Services;
 internal static class RegistryWatchTrace
 {
     /// <summary>true — включить трассу для отладки external-sync.</summary>
-    private static readonly bool Enabled = true;
+    private static readonly bool Enabled = false;
 
     public static void Write(string message)
     {

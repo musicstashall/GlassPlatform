@@ -26,6 +26,13 @@ namespace WndCompat
     Shared::InjectionMode WinEventHook_GetMode();
     void WinEventHook_SetMode(Shared::InjectionMode mode) noexcept;
 
+    /// Event-based shutdown: register a pending cross-thread detach.
+    /// Called by *_DetachAll() before PostMessage to a cross-thread window.
+    void WinEventHook_RegisterPendingDetach();
+    /// Event-based shutdown: signal completion when a subclass is removed.
+    /// Called by subclass proc after RemoveWindowSubclass.
+    void WinEventHook_SignalDetachComplete();
+
     /// NoBackdrop + InjectionMode Full (локально в WndCompat; не static-lib flag).
     [[nodiscard]] inline bool IsGlassVisualsAllowed() noexcept
     {

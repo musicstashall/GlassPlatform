@@ -21,5 +21,6 @@ public readonly record struct PlatformTaskState(
 
     public bool IsLifecycleBusy =>
         Lifecycle is NativeHostInterop.InjectLifecycleUi.Stopping
-        or NativeHostInterop.InjectLifecycleUi.Residual;
+        or NativeHostInterop.InjectLifecycleUi.Residual
+        or NativeHostInterop.InjectLifecycleUi.Starting;
 }

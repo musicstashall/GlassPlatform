@@ -605,6 +605,11 @@ namespace GlassCore::ModuleHandler
     {
         DebugLog(L"[GlassCore][ModuleHandler] ModuleHandler::Startup");
 
+        (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+            GetCurrentProcessId(),
+            Shared::InjectProcessMap::DiagLifecycleModuleHandler,
+            true);
+
         Shared::RootPolicyQuery::RefreshRootBackdropPolicyCache();
 
         g_entryPointModule = DetourGetContainingModule(DetourGetEntryPoint(nullptr));
@@ -619,6 +624,10 @@ namespace GlassCore::ModuleHandler
             DebugLog(L"[GlassCore][ModuleHandler] LdrRegisterDllNotification: 0x%08X", st);
         }
 
+        (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+            GetCurrentProcessId(),
+            Shared::InjectProcessMap::DiagLifecycleModuleHandler,
+            false);
         (void)Shared::InjectProcessMap::TrySetDiagFlag(
             GetCurrentProcessId(),
             Shared::InjectProcessMap::DiagModuleHandler,

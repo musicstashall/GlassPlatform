@@ -8,6 +8,7 @@
 #include <wil.h>
 #include <Tracker/WindowClassUtils.h>
 #include <Popup/DropDown/DropDownSubclass.h>
+#include <Tracker/WinEventHandler.h>
 #include <algorithm>
 #include <mutex>
 #include <vector>
@@ -15,8 +16,6 @@
 namespace
 {
     constexpr UINT_PTR kMonthCalSubclassId = 1;
-    constexpr DWORD kDetachTimeoutMs = 1000;
-    constexpr int kDetachRetryCount = 2;
 
     std::vector<HWND> g_monthCalWindows;
     std::mutex g_monthCalMutex;
@@ -31,6 +30,7 @@ namespace
         {
             WndCompat::MonthCal_Detach(hWnd);
             DebugLog(L"[WndCompat][MonthCal] WM_GLASS_DETACH_MONTHCAL: снят hwnd=0x%p", hWnd);
+            WndCompat::WinEventHook_SignalDetachComplete();
             return 0;
         }
 
@@ -213,33 +213,19 @@ namespace WndCompat
                 continue;
             }
 
-            bool detached = false;
-            for (int attempt = 1; attempt <= kDetachRetryCount; ++attempt)
+            WinEventHook_RegisterPendingDetach();
+            BOOL posted = PostMessageW(hWnd, WndCompat::WM_GLASS_DETACH_MONTHCAL, 0, 0);
+            if (!posted)
             {
-                DWORD_PTR sendResult = 0;
-                if (SendMessageTimeoutW(
-                        hWnd,
-                        WndCompat::WM_GLASS_DETACH_MONTHCAL,
-                        0,
-                        0,
-                        SMTO_ABORTIFHUNG,
-                        kDetachTimeoutMs,
-                        &sendResult))
-                {
-                    detached = true;
-                    DebugLog(
-                        L"[WndCompat][MonthCal] MonthCal_DetachAll: cross-thread detached hwnd=0x%p attempt=%d",
-                        hWnd,
-                        attempt);
-                    break;
-                }
+                WinEventHook_SignalDetachComplete();
+                DebugLog(
+                    L"[WndCompat][MonthCal] MonthCal_DetachAll: PostMessageW FAILED for 0x%p",
+                    hWnd);
             }
-
-            if (!detached)
+            else
             {
                 DebugLog(
-                    DBG_WARNING,
-                    L"[WndCompat][MonthCal] MonthCal_DetachAll: cross-thread timeout hwnd=0x%p",
+                    L"[WndCompat][MonthCal] MonthCal_DetachAll: cross-thread detached hwnd=0x%p",
                     hWnd);
             }
         }

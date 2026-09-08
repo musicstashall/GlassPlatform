@@ -6,6 +6,7 @@
 #include <BitmapUtils.h>
 #include <ColorUtils.h>
 #include <RegHelper.h>
+#include <Tracker/WinEventHandler.h>
 
 #include <commctrl.h>
 #include <vector>
@@ -71,6 +72,7 @@ namespace
         {
             WndCompat::StaticImage_Detach(hWnd);
             DebugLog(L"[WndCompat][Static] WM_GLASS_DETACH_STATIC: снят hwnd=0x%p", hWnd);
+            WndCompat::WinEventHook_SignalDetachComplete();
             return 0;
         }
 
@@ -250,11 +252,17 @@ namespace WndCompat
             }
             else
             {
-                DWORD_PTR sendResult = 0;
-                if (!SendMessageTimeoutW(hWnd, WM_GLASS_DETACH_STATIC, 0, 0, SMTO_ABORTIFHUNG, 1000, &sendResult))
-                    DebugLog(DBG_WARNING, L"[WndCompat][Static] StaticImage_DetachAll: cross-thread timeout hwnd=0x%p", hWnd);
+                WinEventHook_RegisterPendingDetach();
+                BOOL posted = PostMessageW(hWnd, WM_GLASS_DETACH_STATIC, 0, 0);
+                if (!posted)
+                {
+                    WinEventHook_SignalDetachComplete();
+                    DebugLog(L"[WndCompat][Static] StaticImage_DetachAll: PostMessageW FAILED for 0x%p", hWnd);
+                }
                 else
+                {
                     DebugLog(L"[WndCompat][Static] StaticImage_DetachAll: cross-thread detached hwnd=0x%p", hWnd);
+                }
             }
         }
     }

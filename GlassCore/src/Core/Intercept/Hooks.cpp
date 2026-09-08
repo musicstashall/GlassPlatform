@@ -18,7 +18,16 @@ namespace GlassCore::Hooks
     {
         DebugLog(L"[GlassCore][Hooks] Hooks::Install\n");
 
+        (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+            GetCurrentProcessId(),
+            Shared::InjectProcessMap::DiagLifecycleHooks,
+            true);
+
         GlassCore::ModuleHandler::Startup();
+        (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
+            GetCurrentProcessId(),
+            Shared::InjectProcessMap::DiagLifecycleHooks,
+            false);
         (void)Shared::InjectProcessMap::TrySetDiagFlag(
             GetCurrentProcessId(),
             Shared::InjectProcessMap::DiagHooks,
