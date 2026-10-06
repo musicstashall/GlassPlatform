@@ -22,4 +22,11 @@ namespace GlassCore::ComboLBox
 
     // CBN_DROPDOWN: arm user32!AnimateWindow Detour (comctl32 не импортирует AnimateWindow в IAT)
     void OnComboBoxDropDown(HWND hComboBox);
+
+    // Поздняя подгрузка второго экземпляра comctl32 (WinSxS v6 + legacy):
+    // ModuleHandler зовёт после AddComctl32 — докачать кеш IAT нового экземпляра.
+    void OnComctl32ModuleLoaded() noexcept;
+
+    // Выгрузка comctl32: снять IAT и выбросить stale-запись из g_overallMap.
+    void OnComctl32ModuleUnload(HMODULE unloaded) noexcept;
 }

@@ -2927,16 +2927,25 @@ namespace GlassCore::Hooks::DebugDetourHooks
             wchar_t winBuf[160]{};
             FormatHdcWindowSuffix(hdc, winBuf, std::size(winBuf));
 
-            DebugLog(
-                DBG_NORMAL,
-                L"[GlassCore][DebugDetour] SetBkColor outerCaller=%s retAddrMod=%s hdc=%p color=0x%08X %s",
-                outerMod,
-                retAddrMod,
-                hdc,
-                color,
-                winBuf);
-            if (GetCallerModule(_ReturnAddress()) == GetModuleHandleW(L"user32.dll"))
-                color = 0;
+            
+            if (GetCallerModule(_ReturnAddress()) == GetModuleHandleW(L"MFC42u.dll"))
+            {
+                const COLORREF c = color & 0xFFFFFF;
+                if (c == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
+                    || c == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF))
+                {
+                    DebugLog(
+                        DBG_NORMAL,
+                        L"[GlassCore][DebugDetour] SetBkColor outerCaller=%s retAddrMod=%s hdc=%p color=0x%08X %s",
+                        outerMod,
+                        retAddrMod,
+                        hdc,
+                        color,
+                        winBuf);
+                    color = 0;
+                }
+            }
+                
             return g_trueSetBkColor(hdc, color);
         }
 
@@ -3168,6 +3177,7 @@ namespace GlassCore::Hooks::DebugDetourHooks
             return wil::ResultFromCaughtException();
         }
     }
+
 }
 
 #endif // _DEBUG

@@ -91,16 +91,21 @@ namespace GlassCore::PaintDispatcher
         for (auto& p : providers) p.onBegin(hWnd, callerMod);
     }
 
-    // Снимает DC со стека по значению HDC (поиск с конца — обычный случай O(1)).
+    // Снимает DC со стека по паре (HWND, HDC), поиск с конца.
+    // Хинт HWND обязателен для пар Begin/End и Get/Release: иначе закрытие одного окна
+    // может вырезать запись другого окна при совпадении HDC (переиспользование DC ОС).
+    // Для DeleteDC хинта нет (сигнатура без HWND) — поиск только по HDC, как раньше.
     // Уведомляет указанный список провайдеров.
     static void PopDC(HDC hDC,
                       std::vector<PaintProvider>& providers,
-                      HMODULE callerMod) noexcept
+                      HMODULE callerMod,
+                      HWND hWndHint = nullptr) noexcept
     {
         if (g_shutdown.load(std::memory_order_acquire)) return;
         for (auto it = g_dcStack.rbegin(); it != g_dcStack.rend(); ++it)
         {
             if (it->hDC != hDC) continue;
+            if (hWndHint && it->hWnd != hWndHint) continue;
 
             HWND hWnd = it->hWnd;
             g_dcStack.erase((it + 1).base());
@@ -151,8 +156,14 @@ namespace GlassCore::PaintDispatcher
             }
             if (backgroundCleared && lpPaint)
                 lpPaint->fErase = 0;
-            g_dcStack.push_back({ hWnd, hdc });
-            g_activePaintHWnd = hWnd;
+            // P1: запись в стек — только для уведомлённых сессий. Иначе EndPaint найдёт
+            // чужую запись и разошлёт onEnd провайдерам, которые onBegin не получали
+            // («закрытие без открытия», расхождение стеков Root).
+            if (notifyProviders)
+            {
+                g_dcStack.push_back({ hWnd, hdc });
+                g_activePaintHWnd = hWnd;
+            }
         }
         else if (notifyProviders)
         {
@@ -173,7 +184,7 @@ namespace GlassCore::PaintDispatcher
             return g_origEndPaint(hWnd, lpPaint);
         }
         HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
-        if (lpPaint) PopDC(lpPaint->hdc, g_paintProviders, callerMod);
+        if (lpPaint) PopDC(lpPaint->hdc, g_paintProviders, callerMod, hWnd);
         return g_origEndPaint(hWnd, lpPaint);
     }
 
@@ -234,7 +245,7 @@ namespace GlassCore::PaintDispatcher
             return g_origReleaseDC(hWnd, hDC);
         }
         HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
-        PopDC(hDC, g_getDCProviders, callerMod);
+        PopDC(hDC, g_getDCProviders, callerMod, hWnd);
         return g_origReleaseDC(hWnd, hDC);
     }
 
@@ -244,13 +255,24 @@ namespace GlassCore::PaintDispatcher
     {
         HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
         HDC hdc = g_origCreateCompatibleDC(hdcSrc);
-        // Стек DC ведём всегда (не только при g_compatDCProviders), чтобы MEMDC из buffered paint
-        // отражался в IsPaintStackDcForHwnd для Edit session buffer.
-        if (hdc && g_activePaintHWnd && ShouldInvokeProvidersForHwnd(g_activePaintHWnd))
+        // P3: HWND-источник спрашиваем сначала у ОС (как первая ветка BWM WndList),
+        // и только для memory-DC (WindowFromDC==NULL) — у вершины стека.
+        // Привязка вслепую к g_activePaintHWnd давала stale-HWND: мем-DC, созданный
+        // внутри чужой/завершённой сессии (в т.ч. buffered paint), включал чужие
+        // compat-спеки. Стек DC ведём только для уведомлённых (см. P1), чтобы MEMDC
+        // из buffered paint отражался в IsPaintStackDcForHwnd для Edit session buffer.
+        if (hdc)
         {
-            g_dcStack.push_back({ g_activePaintHWnd, hdc });
-            for (auto& p : g_compatDCProviders)
-                p.onBegin(g_activePaintHWnd, callerMod);
+            HWND hResolved = hdcSrc ? WindowFromDC(hdcSrc) : nullptr;
+            if ((!hResolved || !ShouldInvokeProvidersForHwnd(hResolved)) && g_activePaintHWnd)
+                hResolved = g_activePaintHWnd;
+            if (hResolved && ShouldInvokeProvidersForHwnd(hResolved))
+            {
+                g_dcStack.push_back({ hResolved, hdc });
+                g_activePaintHWnd = hResolved;
+                for (auto& p : g_compatDCProviders)
+                    p.onBegin(hResolved, callerMod);
+            }
         }
         return hdc;
     }
@@ -354,6 +376,22 @@ namespace GlassCore::PaintDispatcher
                 return true;
         }
         return false;
+    }
+
+    // Tier-1: владелец memory-DC из стека текущего потока (см. PaintDispatcher.h).
+    HWND GetStackOwnerForDc(HDC hdc) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || !hdc)
+            return nullptr;
+        for (auto it = g_dcStack.rbegin(); it != g_dcStack.rend(); ++it)
+        {
+            if (it->hDC != hdc || !it->hWnd)
+                continue;
+            if (!IsWindow(it->hWnd))
+                continue;
+            return it->hWnd;
+        }
+        return nullptr;
     }
 
     void Shutdown()

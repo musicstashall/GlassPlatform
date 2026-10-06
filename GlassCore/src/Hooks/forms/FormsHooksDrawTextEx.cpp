@@ -32,7 +32,7 @@ namespace GlassCore::FormsHooks
         if (g_drawTextExShutdown.load(std::memory_order_acquire))
             return g_trueDrawTextExW(hdc, lpchText, cchText, lprc, format, lpdtp);
 
-        const HMODULE callerMod = Internal::GetCallerModule(_ReturnAddress());
+        const HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
 
         if (!Internal::IsSystemWindowsFormsNiModule(callerMod))
             return g_trueDrawTextExW(hdc, lpchText, cchText, lprc, format, lpdtp);

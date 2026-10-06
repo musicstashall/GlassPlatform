@@ -44,6 +44,7 @@
 #include <GlassMessages.h>
 #include <ProcessBlockList.h>
 #include <uxtheme.h>
+
 #include "Root/RootExplorerSubclassBridge.h"
 #include "Root/ExplorerRootSubclass.h"
 #include "Root/RootSubclassShared.h"

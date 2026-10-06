@@ -8,6 +8,7 @@
 #include <DebugLog.h>
 #include <ExplorerCompatHostPolicy.h>
 #include <GlassMessages.h>
+
 #include <objbase.h>
 
 #include <atomic>
@@ -657,6 +658,12 @@ namespace
             CoFreeUnusedLibraries();
             return 0;
         }
+        // Destroy — только на потоке-владельце (см. DestroyIxdeReclaimWindow).
+        if (msg == ExplorerCompatMsg::WM_GLASS_EXPLORER_DESTROY_IXDE_WND)
+        {
+            DestroyWindow(hwnd);
+            return 0;
+        }
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
 
@@ -792,6 +799,10 @@ namespace
     void DestroyIxdeReclaimWindow() noexcept
     {
         const HWND h = g_ixdeReclaimHwnd;
+        g_ixdeReclaimHwnd = nullptr;
+        if (!h || !IsWindow(h))
+            return;
+
         HMODULE hMod = nullptr;
         if (!GetModuleHandleExW(
                 GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -801,9 +812,35 @@ namespace
             hMod = GetModuleHandleW(nullptr);
         }
 
-        if (h && IsWindow(h))
-            DestroyWindow(h);
-        g_ixdeReclaimHwnd = nullptr;
+        // Окно создаётся на потоке InitializeXamlDiagnosticsEx, а Stop идёт на GUI-потоке.
+        // Прямой DestroyWindow с чужого tid молча fails → stale окно+класс → CFG-крах
+        // после FreeLibrary (как XamlShutdownMarshal::DestroyMessageWindow).
+        const DWORD wndTid = GetWindowThreadProcessId(h, nullptr);
+        const DWORD curTid = GetCurrentThreadId();
+        if (wndTid != 0 && curTid != wndTid)
+        {
+            DWORD_PTR result = 0;
+            constexpr UINT kTimeoutMs = 5'000;
+            if (SendMessageTimeoutW(
+                    h,
+                    ExplorerCompatMsg::WM_GLASS_EXPLORER_DESTROY_IXDE_WND,
+                    0,
+                    0,
+                    SMTO_ABORTIFHUNG,
+                    kTimeoutMs,
+                    &result) == 0)
+            {
+                DebugLog(
+                    DBG_WARNING,
+                    L"[ExplorerCompat][XamlDiag] IXDE DestroyMessageWindow marshal GLE=%u — fallback DestroyWindow",
+                    static_cast<unsigned>(GetLastError()));
+                (void)DestroyWindow(h);
+            }
+        }
+        else
+        {
+            (void)DestroyWindow(h);
+        }
 
         // Снять класс до FreeLibrary — иначе следующий LoadLibrary + CreateWindowEx
         // попадёт в stale WndProc (crash explorer @ CreateWindowExW).

@@ -170,15 +170,21 @@ namespace GlassCore::DropDown
             if (SUCCEEDED(Shared::ThemeHelper::GetThemeClass(hTheme, themeClassSb, MAX_PATH))
                 && !_wcsicmp(themeClassSb, L"ScrollBar"))
             {
-                HMODULE comctlMod = nullptr;
-                GlassCore::ModuleHandler::RunInActCtx([&] {
-                    comctlMod = GlassCore::ModuleHandler::g_comctl32New;
-                    if (!comctlMod)
-                        comctlMod = GetModuleHandleW(L"comctl32.dll");
-                });
+                // ScrollBar-orig ищем на обоих экземплярах comctl32 (v6 + legacy):
+                // GetModuleHandleW возвращает один, неизвестно какой, а полоса
+                // дропдауна может рисоваться через legacy. Предпочтение — v6.
+                HMODULE comctlMod = GlassCore::ModuleHandler::g_comctl32New
+                    ? GlassCore::ModuleHandler::g_comctl32New
+                    : GlassCore::ModuleHandler::g_comctl32Legacy;
                 auto sbOrig = comctlMod
                     ? GlassCore::ScrollBarTheme::GetComctlScrollBarDrawThemeOrig(comctlMod)
                     : nullptr;
+                if (!sbOrig)
+                {
+                    HMODULE legacyMod = GlassCore::ModuleHandler::g_comctl32Legacy;
+                    if (legacyMod && legacyMod != comctlMod)
+                        sbOrig = GlassCore::ScrollBarTheme::GetComctlScrollBarDrawThemeOrig(legacyMod);
+                }
                 auto dtbOrig = sbOrig ? sbOrig : orig;
                 if (!dtbOrig)
                     return DrawThemeBackground(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
@@ -443,7 +449,11 @@ namespace GlassCore::DropDown
     {
         g_insidePaint = true;
         auto lock = g_lock.lock_exclusive();
-        g_dispatcher.moduleAddress = GetModuleHandleW(L"comctl32.dll");
+        // Явный v6 вместо неоднозначного GetModuleHandleW(L"comctl32.dll").
+        // (moduleAddress здесь пока не используется — хуки ниже закомментированы.)
+        g_dispatcher.moduleAddress = GlassCore::ModuleHandler::g_comctl32New
+            ? GlassCore::ModuleHandler::g_comctl32New
+            : GlassCore::ModuleHandler::g_comctl32Legacy;
         /*if (g_dispatcher.moduleAddress)
             g_dispatcher.EnableHook(HK_DRAWTHEMETEXT, true);*/
     }
@@ -452,7 +462,9 @@ namespace GlassCore::DropDown
     {
         g_insidePaint = false;
         auto lock = g_lock.lock_exclusive();
-        g_dispatcher.moduleAddress = GetModuleHandleW(L"comctl32.dll");
+        g_dispatcher.moduleAddress = GlassCore::ModuleHandler::g_comctl32New
+            ? GlassCore::ModuleHandler::g_comctl32New
+            : GlassCore::ModuleHandler::g_comctl32Legacy;
         /*if (g_dispatcher.moduleAddress)
             g_dispatcher.EnableHook(HK_DRAWTHEMETEXT, false);*/
     }

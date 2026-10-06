@@ -27,6 +27,7 @@ namespace GlassCore::Root
         OHK_BITBLT,
         OHK_GRADIENTFILL,
         OHK_TEXTOUT,
+        OHK_FILLRECT,
         OHK_COUNT
     };
 

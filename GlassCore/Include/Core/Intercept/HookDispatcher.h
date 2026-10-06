@@ -131,6 +131,12 @@ namespace GlassCore::Hooks
             if (enable && hookRef[index] == 0) hookChanged = true;
             if (!enable && hookRef[index] == 1) hookChanged = true;
 
+            // Набор модулей динамический (второй comctl32 может подгрузиться после Arm):
+            // disable без парного enable не должен уводить счётчик в underflow SIZE_MAX
+            // с вечным «хук больше не включится». Как BWM HookIsChanged — молчаливый no-op.
+            if (!enable && hookRef[index] == 0)
+                return false;
+
             hookRef[index] += enable ? 1 : static_cast<size_t>(-1);
 
             if (!hookChanged)

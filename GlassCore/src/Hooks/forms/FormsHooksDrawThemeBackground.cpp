@@ -35,7 +35,7 @@ namespace GlassCore::FormsHooks
         if (g_drawThemeBgShutdown.load(std::memory_order_acquire))
             return g_trueDrawThemeBackground(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
-        const HMODULE callerMod = Internal::GetCallerModule(_ReturnAddress());
+        const HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
 
         if (!Internal::IsSystemWindowsFormsNiModule(callerMod))
             return g_trueDrawThemeBackground(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);

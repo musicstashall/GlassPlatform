@@ -185,6 +185,11 @@ namespace ExplorerCompatMsg
     // SendMessageTimeout на потоке-владельце HWND_MESSAGE → DestroyWindow (нельзя DestroyWindow с чужого tid).
     inline constexpr UINT WM_GLASS_EXPLORER_DESTROY_SHUTDOWN_WND = WM_APP + 0x80A;
 
+    // SendMessageTimeout на потоке-владельце IXDE reclaim HWND_MESSAGE → DestroyWindow.
+    // Причина: окно создаётся на потоке InitializeXamlDiagnosticsEx, а Stop идёт на GUI-потоке;
+    // прямой DestroyWindow с чужого tid молча fails → stale окно+класс → CFG-крах после FreeLibrary.
+    inline constexpr UINT WM_GLASS_EXPLORER_DESTROY_IXDE_WND = WM_APP + 0x80B;
+
     // Класс HWND_MESSAGE маршалинга; WndCompat::Root_Attach не должен субклассить (см. RootSubclass.cpp).
     inline constexpr wchar_t kExplorerXamlShutdownWndClass[] = L"GlassExplorerCompatXamlShutdown";
 

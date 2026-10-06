@@ -79,7 +79,7 @@ namespace Shared::WinApiUtils
 
         // Удаляем bitmap (brush сделал внутреннюю копию)
         DeleteObject(bitmap);
-
+        //DebugLog(L"[GlassShared][ApiUtils] CreateSolidColorBrushWithAlpha color=0x%06X", (unsigned)color);
         return brush;
     }
 

@@ -32,16 +32,4 @@ namespace GlassCore::FormsHooks::Internal
         const std::wstring base = Shared::WinApiUtils::GetModuleFileBaseName(mod);
         return _wcsicmp(base.c_str(), L"MFC42u.dll") == 0;
     }
-
-    bool IsMmcProcess() noexcept
-    {
-        static const bool isMmc = [] {
-            wchar_t exeName[MAX_PATH]{};
-            GetModuleFileNameW(nullptr, exeName, MAX_PATH);
-            const wchar_t* backslash = wcsrchr(exeName, L'\\');
-            const wchar_t* name = backslash ? backslash + 1 : exeName;
-            return _wcsicmp(name, L"mmc.exe") == 0;
-        }();
-        return isMmc;
-    }
 }

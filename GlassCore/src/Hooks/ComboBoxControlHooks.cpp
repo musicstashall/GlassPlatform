@@ -14,6 +14,7 @@
 #include <Helpers/ThemeHelper.h>
 #include <Subsystems/ThemePaintRegistry.h>
 #include <Core/Intercept/HookDispatcher.h>
+
 #include <Module/ModuleHandler.h>
 #include <GlassControlKind.h>
 #include <wil.h>

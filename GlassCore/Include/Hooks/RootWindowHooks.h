@@ -16,6 +16,10 @@ namespace GlassCore::Root
     // Удаление из кеша (хуки уже выключены — per-session модель).
     void OnRootHooksDetach(HWND hRoot) noexcept;
 
+    // Есть ли кеш спеков для HWND (аналог BWM WndList::IsDataAttach).
+    // Используется always-on хуками (D2): тематизировать только attach'нутые окна.
+    [[nodiscard]] bool HasRootHookCache(HWND hWnd) noexcept;
+
     void Shutdown() noexcept;
 
     // Добавить paint-спеки к кешу окна (DirectUI — DUser+wdc).

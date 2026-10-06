@@ -35,6 +35,7 @@
 #include <Hooks/forms/FormsHooks.h>
 #include <Subsystems/TextGlowClientRegistry.h>
 #include <DebugLog.h>
+
 #include <RootBackdropPolicy.h>
 #include <GlassBackdropMark.h>
 
@@ -67,15 +68,24 @@ namespace GlassCore::Root
         // Ключ — HWND из Root_Attach (не обязательно top-level).
         static std::unordered_map<HWND, RootHookCache>          s_rootCache;
 
-        // LIFO по потоку: вложенные BeginPaint / GetDC / CreateCompatibleDC снимаются в обратном порядке.
+        // Сессии по потоку: закрытие сверяется по HWND (P4/P5), а не снимает вслепую
+        // вершину. Диспетчер вырезает записи из середины по HDC — чистый LIFO здесь
+        // расходился с ним после первого внеочередного закрытия и дальше каждое
+        // закрытие выключало чужие спеки.
         struct RootPaintSession
         {
+            HWND hWnd = nullptr;
             std::vector<HookSpec> specs;
             bool winFormsDrawTextEx = false;
         };
+        struct RootHookSession
+        {
+            HWND hWnd = nullptr;
+            std::vector<HookSpec> specs;
+        };
         thread_local std::vector<RootPaintSession>              g_rootPaintStack;
-        thread_local std::vector<std::vector<HookSpec>>         g_rootDcStack;
-        thread_local std::vector<std::vector<HookSpec>>         g_rootCompatDcStack;
+        thread_local std::vector<RootHookSession>               g_rootDcStack;
+        thread_local std::vector<RootHookSession>               g_rootCompatDcStack;
 
         // ── Утилиты (только для ClassifyRootWindow) ─────────────────────────
 
@@ -122,6 +132,41 @@ namespace GlassCore::Root
 
         static void PushCompat(void* m, size_t i, RootHookCache& c) noexcept
         { if (m) c.compatDcHooks.push_back({ m, i }); }
+
+        // comctl32 в mmc живёт в двух экземплярах (WinSxS v6 + legacy): слоты фазы 0
+        // подтверждают два разных iatslot-адреса. GetModuleHandleW(L"comctl32.dll")
+        // возвращает только один (неизвестно какой), а ресайзный путь дисковой утилиты
+        // (AfxWnd42u через MFC42u) может рисовать через legacy-экземпляр.
+        // Поэтому слоты на comctl32 кладём на оба известных экземпляра
+        // (g_comctl32New + g_comctl32Legacy); fallback — GetModuleHandleW,
+        // если оба ещё null (classify до скана ModuleHandler::Startup; Push отбрасывает null).
+        // Дедупликация: New и Legacy могут совпасть в одноверсионном процессе.
+        static void PushPaintComctl32(size_t i, RootHookCache& c) noexcept
+        {
+            HMODULE n = GlassCore::ModuleHandler::g_comctl32New;
+            HMODULE l = GlassCore::ModuleHandler::g_comctl32Legacy;
+            if (n) PushPaint(n, i, c);
+            if (l && l != n) PushPaint(l, i, c);
+            if (!n && !l) PushPaint(GetModuleHandleW(L"comctl32.dll"), i, c);
+        }
+
+        static void PushDcComctl32(size_t i, RootHookCache& c) noexcept
+        {
+            HMODULE n = GlassCore::ModuleHandler::g_comctl32New;
+            HMODULE l = GlassCore::ModuleHandler::g_comctl32Legacy;
+            if (n) PushDc(n, i, c);
+            if (l && l != n) PushDc(l, i, c);
+            if (!n && !l) PushDc(GetModuleHandleW(L"comctl32.dll"), i, c);
+        }
+
+        static void PushCompatComctl32(size_t i, RootHookCache& c) noexcept
+        {
+            HMODULE n = GlassCore::ModuleHandler::g_comctl32New;
+            HMODULE l = GlassCore::ModuleHandler::g_comctl32Legacy;
+            if (n) PushCompat(n, i, c);
+            if (l && l != n) PushCompat(l, i, c);
+            if (!n && !l) PushCompat(GetModuleHandleW(L"comctl32.dll"), i, c);
+        }
 
         [[nodiscard]] static bool IsRarextWindowModule(HWND hWnd) noexcept
         {
@@ -402,11 +447,75 @@ namespace GlassCore::Root
                 }
             }
 
-            // MFC AfxWnd42u: BitBlt на comctl32 — BWM CompatibleDc only
+            // MFC AfxWnd42u: BitBlt на comctl32 — BWM CompatibleDc only.
+            // Оба экземпляра (v6 + legacy): ресайз дисковой утилиты рисует через
+            // неперехваченный экземпляр, если хук только на GetModuleHandleW.
             if (StrEqI(cls, L"AfxWnd42u"))
             {
-                void* cc = GetModuleHandleW(L"comctl32.dll");
-                PushCompat(cc, OHK_BITBLT, cache);
+                PushCompatComctl32(OHK_BITBLT, cache);
+            }
+
+            // AfxWnd42u (Disk Management, dmview.ocx): сессионные IAT на реальных
+            // рисующих модулях. BWM: ModuleHandler load-time EXTTEXTOUT+FILLRECT на
+            // dmview/dmdskmgr + SETBKCOLOR на MFC42u (по MSCTF); в Glass (D1) — только
+            // сессии BeginPaint/GetDC этого HWND.
+            if (StrEqI(cls, L"AfxWnd42u"))
+            {
+                if (void* mfc = GetModuleHandleW(L"MFC42u.dll"))
+                {
+                    PushPaint(mfc, OHK_SETBKCOLOR, cache);
+                    PushPaint(mfc, OHK_EXTTEXTOUT, cache);
+                    PushPaint(mfc, OHK_CREATESOLIDBRUSH, cache);
+                    PushDc(mfc, OHK_SETBKCOLOR, cache);
+                    PushDc(mfc, OHK_EXTTEXTOUT, cache);
+                    PushDc(mfc, OHK_CREATESOLIDBRUSH, cache);
+                    // Ловля серого фона: тела log-only (passthrough вне chart).
+                    PushPaint(mfc, OHK_PATBLT, cache);
+                    PushPaint(mfc, OHK_RECTANGLE, cache);
+                    PushDc(mfc, OHK_PATBLT, cache);
+                    PushDc(mfc, OHK_RECTANGLE, cache);
+                    // BITBLT-проба: тело log-only вне 16x16-comctl32.
+                    PushPaint(mfc, OHK_BITBLT, cache);
+                    PushDc(mfc, OHK_BITBLT, cache);
+                    // GRADIENTFILL-проба: тело log-only вне rarext.
+                    PushPaint(mfc, OHK_GRADIENTFILL, cache);
+                    PushDc(mfc, OHK_GRADIENTFILL, cache);
+                    // FILLRECT на MFC42u: ищем заливки фона мимо dmview
+                    // (тело для MFC42u+AfxWnd42u — passthrough, только лог).
+                    PushPaint(mfc, OHK_FILLRECT, cache);
+                    PushDc(mfc, OHK_FILLRECT, cache);
+                }
+                if (void* dmv = GetModuleHandleW(L"dmview.ocx"))
+                {
+                    PushPaint(dmv, OHK_EXTTEXTOUT, cache);
+                    PushPaint(dmv, OHK_FILLRECT, cache);
+                    PushDc(dmv, OHK_EXTTEXTOUT, cache);
+                    PushDc(dmv, OHK_FILLRECT, cache);
+                    // Ловля серого фона: тела log-only.
+                    PushPaint(dmv, OHK_PATBLT, cache);
+                    PushPaint(dmv, OHK_RECTANGLE, cache);
+                    PushDc(dmv, OHK_PATBLT, cache);
+                    PushDc(dmv, OHK_RECTANGLE, cache);
+                    // BITBLT-проба: тело log-only вне 16x16-comctl32.
+                    PushPaint(dmv, OHK_BITBLT, cache);
+                    PushDc(dmv, OHK_BITBLT, cache);
+                    // GRADIENTFILL-проба: тело log-only вне rarext.
+                    PushPaint(dmv, OHK_GRADIENTFILL, cache);
+                    PushDc(dmv, OHK_GRADIENTFILL, cache);
+                }
+                if (void* dmd = GetModuleHandleW(L"dmdskmgr.dll"))
+                {
+                    PushPaint(dmd, OHK_EXTTEXTOUT, cache);
+                    PushDc(dmd, OHK_EXTTEXTOUT, cache);
+                }
+                // Слоты на comctl32 — на оба экземпляра (v6 + legacy), см. PushComctl32*.
+                PushPaintComctl32(OHK_SETBKCOLOR, cache);
+                PushPaintComctl32(OHK_EXTTEXTOUT, cache);
+                PushDcComctl32(OHK_SETBKCOLOR, cache);
+                PushDcComctl32(OHK_EXTTEXTOUT, cache);
+                // FILLRECT на comctl32: тело для comctl32+AfxWnd42u — passthrough.
+                PushPaintComctl32(OHK_FILLRECT, cache);
+                PushDcComctl32(OHK_FILLRECT, cache);
             }
 
             // WinForms .Window — BWM Paint (Detours-хук, не IAT)
@@ -459,6 +568,7 @@ namespace GlassCore::Root
                 EnsureRarextHookCache(hWnd);
 
             RootPaintSession session{};
+            session.hWnd = hWnd;
             bool chartInherit = false;
             {
                 auto lock = s_cacheLock.lock_shared();
@@ -493,14 +603,22 @@ namespace GlassCore::Root
             g_rootPaintStack.push_back(std::move(session));
         }
 
-        static void Root_OnEndPaint(HWND /*hWnd*/, HMODULE /*callerMod*/) noexcept
+        static void Root_OnEndPaint(HWND hWnd, HMODULE /*callerMod*/) noexcept
         {
-            if (g_rootPaintStack.empty()) return;
-            auto session = std::move(g_rootPaintStack.back());
-            g_rootPaintStack.pop_back();
-            EnableSpecs(session.specs, false);
-            if (session.winFormsDrawTextEx)
-                GlassCore::FormsHooks::DrawTextExAttach(false);
+            // P5: снимаем сессию именно этого HWND (поиск с конца — обычный случай O(1)).
+            // Вершина чужого окна означает внеочередное закрытие: её не трогаем.
+            // Пары enable/disable сохраняются — чужие IAT больше не мигают.
+            for (auto it = g_rootPaintStack.rbegin(); it != g_rootPaintStack.rend(); ++it)
+            {
+                if (it->hWnd != hWnd) continue;
+                auto session = std::move(*it);
+                g_rootPaintStack.erase((it + 1).base());
+                EnableSpecs(session.specs, false);
+                if (session.winFormsDrawTextEx)
+                    GlassCore::FormsHooks::DrawTextExAttach(false);
+                return;
+            }
+            // Пары для этого HWND нет (открытие было без кеша/спеков) — тихий выход.
         }
 
         // --- Канал 2: GetDC / ReleaseDC (аналог PaintHandler::Dc) ---
@@ -511,32 +629,39 @@ namespace GlassCore::Root
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd)) return;
             if (IsRarextWindowModule(hWnd))
                 EnsureRarextHookCache(hWnd);
-            std::vector<HookSpec> specs;
+            RootHookSession session{};
+            session.hWnd = hWnd;
             {
                 auto lock = s_cacheLock.lock_shared();
                 const RootCacheLookupResult lr = LookupRootHookCacheLocked(hWnd);
                 if (!lr.cache) return;
-                specs = lr.cache->dcHooks;
+                session.specs = lr.cache->dcHooks;
             }
-            if (specs.empty()) return;
+            if (session.specs.empty()) return;
             wchar_t cn[256]{};
             GetClassNameW(hWnd, cn, _countof(cn));
             if (IsMmcChartSessionClass(cn))
             {
                 DebugLog(DBG_IMPORTANT,
                     L"[GlassCore][Root][Session] GetDC: hwnd=0x%p class=\"%s\" dcSpecs=%zu → EnableSpecs(true) (канал Dc)",
-                    hWnd, cn, specs.size());
+                    hWnd, cn, session.specs.size());
             }
-            EnableSpecs(specs, true);
-            g_rootDcStack.push_back(std::move(specs));
+            EnableSpecs(session.specs, true);
+            g_rootDcStack.push_back(std::move(session));
         }
 
-        static void Root_OnReleaseDC(HWND /*hWnd*/, HMODULE /*callerMod*/) noexcept
+        static void Root_OnReleaseDC(HWND hWnd, HMODULE /*callerMod*/) noexcept
         {
-            if (g_rootDcStack.empty()) return;
-            auto specs = std::move(g_rootDcStack.back());
-            g_rootDcStack.pop_back();
-            EnableSpecs(specs, false);
+            // P5: как в Root_OnEndPaint — пара по HWND, чужую вершину не трогаем.
+            for (auto it = g_rootDcStack.rbegin(); it != g_rootDcStack.rend(); ++it)
+            {
+                if (it->hWnd != hWnd) continue;
+                auto session = std::move(*it);
+                g_rootDcStack.erase((it + 1).base());
+                EnableSpecs(session.specs, false);
+                return;
+            }
+            // Пары для этого HWND нет — тихий выход.
         }
 
         // --- Канал 3: CreateCompatibleDC / DeleteDC (аналог CompatibleDc) ---
@@ -545,24 +670,31 @@ namespace GlassCore::Root
         {
             if (g_shutdown.load(std::memory_order_acquire)) return;
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd)) return;
-            std::vector<HookSpec> specs;
+            RootHookSession session{};
+            session.hWnd = hWnd;
             {
                 auto lock = s_cacheLock.lock_shared();
                 const RootCacheLookupResult lr = LookupRootHookCacheLocked(hWnd);
                 if (!lr.cache) return;
-                specs = lr.cache->compatDcHooks;
+                session.specs = lr.cache->compatDcHooks;
             }
-            if (specs.empty()) return;
-            EnableSpecs(specs, true);
-            g_rootCompatDcStack.push_back(std::move(specs));
+            if (session.specs.empty()) return;
+            EnableSpecs(session.specs, true);
+            g_rootCompatDcStack.push_back(std::move(session));
         }
 
-        static void Root_OnDeleteDC(HWND /*hWnd*/, HMODULE /*callerMod*/) noexcept
+        static void Root_OnDeleteDC(HWND hWnd, HMODULE /*callerMod*/) noexcept
         {
-            if (g_rootCompatDcStack.empty()) return;
-            auto specs = std::move(g_rootCompatDcStack.back());
-            g_rootCompatDcStack.pop_back();
-            EnableSpecs(specs, false);
+            // P5: как в Root_OnEndPaint — пара по HWND, чужую вершину не трогаем.
+            for (auto it = g_rootCompatDcStack.rbegin(); it != g_rootCompatDcStack.rend(); ++it)
+            {
+                if (it->hWnd != hWnd) continue;
+                auto session = std::move(*it);
+                g_rootCompatDcStack.erase((it + 1).base());
+                EnableSpecs(session.specs, false);
+                return;
+            }
+            // Пары для этого HWND нет — тихий выход.
         }
 
     // ── Lifecycle ────────────────────────────────────────────────────────
@@ -617,11 +749,21 @@ namespace GlassCore::Root
         s_rootCache.erase(hRoot);
     }
 
+    // Аналог BWM WndList::IsDataAttach: окно тематизируется, только если attach'нуто.
+    // Используется always-on хуками (D2) как guard вместо сессионного контекста.
+    bool HasRootHookCache(HWND hWnd) noexcept
+    {
+        if (!hWnd)
+            return false;
+        auto lock = s_cacheLock.lock_shared();
+        return s_rootCache.find(hWnd) != s_rootCache.end();
+    }
+
     // Engine::Startup: регистрируем три канала в PaintDispatcher.
     void Startup() noexcept
     {
         /*using namespace Hooks::DebugDetourHooks;
-        (void)SetEnabled(DDH_GetSysColorBrush, true);*/
+        (void)SetEnabled(DDH_SetBkColor | DDH_FillRect, true);*/
         GlassCore::PaintDispatcher::RegisterPaintProvider({ Root_OnBeginPaint, Root_OnEndPaint });
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ Root_OnGetDC, Root_OnReleaseDC });
         GlassCore::PaintDispatcher::RegisterCompatDCProvider({ Root_OnCreateCompatDC, Root_OnDeleteDC });
@@ -632,7 +774,7 @@ namespace GlassCore::Root
     void Shutdown() noexcept
     {
         /*using namespace Hooks::DebugDetourHooks;
-        (void)SetEnabled(DDH_GetSysColorBrush, false);*/
+        (void)SetEnabled(DDH_SetBkColor | DDH_FillRect, false);*/
         g_shutdown.store(true, std::memory_order_release);
         SetRootGdiShutdown(true);
 

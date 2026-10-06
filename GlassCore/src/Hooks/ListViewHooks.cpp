@@ -41,6 +41,7 @@
 #include <Subsystems/TextGlowClientRegistry.h>
 #include <Helpers/ThemeHelper.h>
 #include <Core/Intercept/HookDispatcher.h>
+
 #include <Module/ModuleHandler.h>
 #include <Subsystems/PaintDispatcher.h>
 #include <GlassControlKind.h>

@@ -199,12 +199,15 @@
     <ClCompile Include="WinUiBridge\WinUiDesktopBridgeHost.cpp">
       <Filter>WinUiBridge</Filter>
     </ClCompile>
-    <ClCompile Include="WinUiBridge\NotificationCenterHost.cpp">
-      <Filter>WinUiBridge</Filter>
-    </ClCompile>
     <ClCompile Include="WndCompat.cpp">
     </ClCompile>
     <ClCompile Include="WndPch.cpp">
+    </ClCompile>
+    <ClCompile Include="WinUiBridge\CoreWindowHost.cpp">
+      <Filter>WinUiBridge</Filter>
+    </ClCompile>
+    <ClCompile Include="Tracker\SubclassDiagPublish.cpp">
+      <Filter>Tracker</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -341,12 +344,12 @@
     <ClInclude Include="WinUiBridge\WinUiDesktopBridgeHost.h">
       <Filter>WinUiBridge</Filter>
     </ClInclude>
-    <ClInclude Include="WinUiBridge\NotificationCenterHost.h">
-      <Filter>WinUiBridge</Filter>
-    </ClInclude>
     <ClInclude Include="WndCompat.h">
     </ClInclude>
     <ClInclude Include="WndPch.h">
+    </ClInclude>
+    <ClInclude Include="WinUiBridge\CoreWindowHost.h">
+      <Filter>WinUiBridge</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -354,5 +357,12 @@
     </None>
     <None Include="WndCompat.def">
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Natvis Include="$(MSBuildThisFileDirectory)..\..\natvis\wil.natvis" />
+    <Natvis Include="$(MSBuildThisFileDirectory)..\..\natvis\wil.natstepfilter" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="$(MSBuildThisFileDirectory)Shared\GlassModuleVersion.rc" />
   </ItemGroup>
 </Project>

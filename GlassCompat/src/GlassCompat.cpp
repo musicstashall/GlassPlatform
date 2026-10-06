@@ -14,6 +14,7 @@
 #include <cstdarg>
 
 #include <DebugLog.h>
+
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
 #include <GlassLogClient.h>
 #endif
@@ -805,6 +806,79 @@ namespace
         }
     }
 
+    // S4: зачистка живых окон наших HWND_MESSAGE-классов перед FreeLibrary.
+    // Use-after-unload (stale WndProc → CFG fail, explorer.exe.10148.dmp):
+    // каждое найденное окно — best-effort destroy.
+    // Вызывать ДО FreeLibrary соответствующего модуля, пока его код на месте.
+    void AuditGlassMessageWindowsBeforeFree(
+        const wchar_t* modTag,
+        HMODULE hMod,
+        const wchar_t* const* classes,
+        size_t classCount) noexcept
+    {
+        if (!modTag || !classes || classCount == 0)
+            return;
+        const DWORD curTid = GetCurrentThreadId();
+        for (size_t ci = 0; ci < classCount; ++ci)
+        {
+            const wchar_t* cls = classes[ci];
+            if (!cls || !cls[0])
+                continue;
+            int stuckTotal = 0;
+            HWND prev = nullptr;
+            for (int i = 0; i < 128; ++i)
+            {
+                // Итерация через hwndChildAfter — иначе вечный цикл на первом окне.
+                const HWND h = FindWindowExW(HWND_MESSAGE, prev, cls, nullptr);
+                if (!h || !IsWindow(h))
+                    break;
+                DWORD wndTid = 0;
+                GetWindowThreadProcessId(h, &wndTid);
+                if (wndTid != 0 && wndTid == curTid)
+                {
+                    (void)DestroyWindow(h);
+                }
+                else
+                {
+                    // Чужой поток: WM_CLOSE → DefWindowProc → DestroyWindow на владельце.
+                    DWORD_PTR result = 0;
+                    (void)SendMessageTimeoutW(h, WM_CLOSE, 0, 0,
+                        SMTO_ABORTIFHUNG, 2000, &result);
+                }
+                if (IsWindow(h))
+                {
+                    // Не сносится (поток висит/игнорирует WM_CLOSE): идём дальше,
+                    // после 3 таких — стоп.
+                    prev = h; // шаг вперёд мимо несносимого
+                    if (++stuckTotal >= 3)
+                        break;
+                }
+                else
+                {
+                    prev = nullptr; // список сдвинулся — сначала
+                }
+            }
+            // Примечание: Unregister оставшихся классов — владелец DLL Stop, не здесь.
+            (void)hMod;
+        }
+    }
+
+    // HWND_MESSAGE-классы наших DLL (источники stale WndProc при выгрузке).
+    static const wchar_t* const kExplorerStopClasses[] = {
+        ExplorerCompatMsg::kExplorerXamlShutdownWndClass,
+        ExplorerCompatMsg::kExplorerIxdeComReclaimWndClass,
+        ExplorerCompatMsg::kExplorerXamlUwpShutdownWndClass,
+    };
+    static const wchar_t* const kTaskbarStopClasses[] = {
+        TaskbarCompatMsg::kTaskbarXamlShutdownWndClass,
+    };
+    static const wchar_t* const kUiStopClasses[] = {
+        UICompatMsg::kUiXamlShutdownWndClass,
+    };
+    static const wchar_t* const kWndStopClasses[] = {
+        L"WndCompat.ControlWindow",
+    };
+
     void ExecuteShutdown()
     {
         g_initDone.store(false, std::memory_order_release);
@@ -1107,6 +1181,8 @@ namespace
 
             if (savedExplorer)
             {
+                AuditGlassMessageWindowsBeforeFree(L"ExplorerCompat", savedExplorer,
+                    kExplorerStopClasses, _countof(kExplorerStopClasses));
                 FreeLibrary(savedExplorer);
                 result |= UnloadResult::FreeExplorer_Returned;
                 HMODULE hCheckEx = GetModuleHandleW(L"ExplorerCompat.dll");
@@ -1144,6 +1220,8 @@ namespace
             if (savedTaskbar)
             {
                 DebugLog(L"[GlassCompat][Core] [Shutdown] FreeLibrary TaskbarCompat");
+                AuditGlassMessageWindowsBeforeFree(L"TaskbarCompat", savedTaskbar,
+                    kTaskbarStopClasses, _countof(kTaskbarStopClasses));
                 FreeLibrary(savedTaskbar);
                 CoFreeUnusedLibraries();
                 constexpr int kTaskbarReclaimWaitMs = 2000;
@@ -1197,6 +1275,8 @@ namespace
             {
                 // Как TaskbarCompat: FreeLibrary → CoFree wait ≤2s → TryDropIxdeResidualModule.
                 DebugLog(L"[GlassCompat][Core] [Shutdown] FreeLibrary UICompat");
+                AuditGlassMessageWindowsBeforeFree(L"UICompat", savedUICompat,
+                    kUiStopClasses, _countof(kUiStopClasses));
                 FreeLibrary(savedUICompat);
                 const bool cwUiHost = Shared::RootBackdropPolicy::IsCoreWindowHostProcess();
 
@@ -1270,6 +1350,8 @@ namespace
             }
             if (savedWnd)
             {
+                AuditGlassMessageWindowsBeforeFree(L"WndCompat", savedWnd,
+                    kWndStopClasses, _countof(kWndStopClasses));
                 FreeLibrary(savedWnd);
                 result |= UnloadResult::FreeWnd_Returned;
             }

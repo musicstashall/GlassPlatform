@@ -6,7 +6,8 @@
 // g_comboDispatcher (2D) полностью удалён — он конкурировал с g_overallMap за
 // одни и те же IAT-слоты comctl32, второй патч перетирал первый.
 //
-// Хуки на comctl32.dll включаются через EnableHooksOnModule(g_comctl32Module, ...).
+// Хуки на comctl32.dll включаются через EnableHooksOnModule на ОБА экземпляра
+// (g_comctl32Module + g_comctl32ModuleLegacy: WinSxS v6 + legacy, см. EnsureComctl32Ready).
 // Хуки на COMDLG32, MFC и пр. — через EnableOverallModuleHooks().
 //
 // DrawThemeBackground: тема ScrollBar — отдельная ветка (полоса/стекло). Тема Combobox на ComboLBox —
@@ -14,10 +15,11 @@
 // список дропдауна не входит в сценарий GlassDrawThemeConstantAlpha для кнопок/вкладок/комбобокса на клиенте.
 // Исключение: ComboBoxEx32 «пирог» msctls_progress32 — только orig.
 //
-// ExtTextOutW: список ComboLBox рисуется из comctl32 через GDI32 — в тесте с DebugDetour виден вызов
-// ExtTextOutW, DrawThemeTextEx при этом не вызывается (нет IAT uxtheme в comctl32 на Win11). IAT на
-// ExtTextOutW обязательно ставим на тот экземпляр comctl32, который PaintDispatcher передаёт как
-// callerMod (модуль, вызвавший BeginPaint/GetDC/CreateCompatibleDC), см. EnableExtTextOutForComctlPaintCaller.
+ // ExtTextOutW: список ComboLBox рисуется из comctl32 через GDI32 — в тесте с DebugDetour виден вызов
+ // ExtTextOutW, DrawThemeTextEx при этом не вызывается (нет IAT uxtheme в comctl32 на Win11). IAT на
+ // ExtTextOutW ставим на ОБА известных экземпляра comctl32 через EnableComboHooks —
+ // callerMod из PaintDispatcher (модуль, вызвавший BeginPaint/GetDC/CreateCompatibleDC)
+ // при этом всегда покрыт (см. ForEachKnownComctlModule).
 //
 // AnimateWindow: comctl32.dll не импортирует user32!AnimateWindow в IAT (вызов не через слот импорта),
 // поэтому перехват — Detour на user32 (см. EnsureUser32AnimateDetour), а не EnableHooksOnModule(comctl32).
@@ -44,6 +46,8 @@
 #include <WinApiUtils.h>
 #include <Hooks/ComboAddressPieSkip.h>
 #include <Core/Intercept/HookHelper.h>
+#include <Core/Intercept/IATRegistry.h>
+#include <Hooks/RootGdiHooks.h>
 #if defined(_DEBUG)
 #include <Core/Intercept/DebugDetourHooks.h>
 #endif
@@ -77,8 +81,23 @@ namespace GlassCore::ComboLBox
     static std::atomic<bool> g_shutdown{ false };
     HWND h_combolbox = nullptr;
 
-    // База comctl32.dll для IAT (AnimateWindow и др.); задаётся в Startup / EnsureComctl32Ready.
+    // Базы comctl32.dll для IAT: в mmc живут два экземпляра (WinSxS v6 + legacy).
+    // Один g_comctl32Module покрывал только первый попавшийся (предпочтение New) —
+    // список через legacy-экземпляр рисовался мимо хуков. Держим оба слота явно:
+    // g_comctl32Module — v6 (или первый известный), g_comctl32ModuleLegacy — второй.
+    // GetModuleHandleW(L"comctl32.dll") здесь запрещён: возвращает один, неизвестно какой.
     static void* g_comctl32Module{ nullptr };
+    static void* g_comctl32ModuleLegacy{ nullptr };
+
+    // Перебор известных экземпляров comctl32 (дедупликация на случай совпадения).
+    template <typename Fn>
+    static void ForEachKnownComctlModule(Fn&& fn) noexcept
+    {
+        void* n = g_comctl32Module;
+        void* l = g_comctl32ModuleLegacy;
+        if (n) fn(n);
+        if (l && l != n) fn(l);
+    }
 
     // user32!AnimateWindow — глобальный Detour (comctl32 не имеет IAT на AnimateWindow).
     static decltype(&::AnimateWindow) g_trueUser32AnimateWindow = ::AnimateWindow;
@@ -244,16 +263,8 @@ namespace GlassCore::ComboLBox
             it->second.moduleAddress = baseAddress;
         }
 
-        it->second.EnableHook(index, enable);
+        (void)it->second.EnableHook(index, enable);
         return true;
-    }
-
-    // IAT ExtTextOutW на экземпляре comctl32, совпадающем с callerMod из PaintDispatcher (реальный вызывающий код).
-    static void EnableExtTextOutForComctlPaintCaller(HMODULE callerMod, bool enable) noexcept
-    {
-        if (!callerMod || !IsModuleName(callerMod, L"comctl32.dll"))
-            return;
-        EnableHooksOnModule(callerMod, OHK_EXTTEXTOUT, enable);
     }
 
     // ---- DisableAllOverallHooks ---------------------------------------------
@@ -641,6 +652,9 @@ namespace GlassCore::ComboLBox
         auto orig = GetOverallOrigSafe<OHK_SETBKCOLOR, decltype(&SetBkColor)>(callerMod);
         //DebugLog(L"[GlassCore][Overall_MySetBkColor]");
 
+        if (!orig)
+            return SetBkColor(hdc, color);
+
         if (IsActive())
         {
             if (color == GetSysColor(COLOR_WINDOW) || color == GetSysColor(COLOR_BTNFACE))
@@ -982,39 +996,129 @@ namespace GlassCore::ComboLBox
         return ComboLBox_ProcessAnimateWindow(hWnd, dwTime, dwFlags, pfnTrue, false, callerMod);
     }
 
-    // На ComboLBox::Startup comctl32 может ещё не быть загружен (GetModuleHandleW — NULL).
-    // ModuleHandler заполняет g_comctl32New после LdrDllNotification; повторяем резолв при первом Paint/DropDown.
+    // Один экземпляр comctl32: полный набор ComboLBox-хуков. В BWM эта роль —
+    // ComboBoxHooks на v6 (WinSxS), а legacy-экземпляр шёл через OverallHooks;
+    // в Glass карта g_overallMap единая, поэтому набор одинаков для обоих экземпляров.
+    static void EnableComboHooksOnModule(void* mod, bool enable)
+    {
+        // Standard path (non-themed): DrawTextExW, ExtTextOutW
+        EnableHooksOnModule(mod, OHK_DRAWTEXTEX, enable);
+        EnableHooksOnModule(mod, OHK_EXTTEXTOUT, enable);
+        // DrawThemeText / DrawThemeTextEx: в comctl32 нет статического IAT на uxtheme для DTTEx на Win11;
+        // список — ExtTextOutW (хуки стоят на обоих экземплярах — callerMod покрыт в любом случае).
+        //EnableHooksOnModule(mod, OHK_DRAWTHEMETEXT, enable);
+        EnableHooksOnModule(mod, OHK_DRAWTHEMEBG, enable);
+        // Общие: фоновые операции и перья
+        EnableHooksOnModule(mod, OHK_SELECTOBJECT, enable);
+        EnableHooksOnModule(mod, OHK_SETBKCOLOR, enable);
+        EnableHooksOnModule(mod, OHK_GETSTOCKOBJECT, enable);
+        EnableHooksOnModule(mod, OHK_CREATESOLIDBRUSH, enable);
+        // File dialog ComboLBox: comctl32 PatBlt(PATCOPY) с COLOR_WINDOW
+        EnableHooksOnModule(mod, OHK_PATBLT, enable);
+        EnableHooksOnModule(mod, OHK_GETSYSCOLORBRUSH, enable);
+    }
+
+    // На ComboLBox::Startup comctl32 может ещё не быть загружен.
+    // ModuleHandler заполняет g_comctl32New/g_comctl32Legacy после LdrDllNotification;
+    // повторяем резолв при первом Paint/DropDown. Кешируем ОБА экземпляра сразу:
+    // поздняя подгрузка второго экземпляра (первый attach его не застал) докачивается
+    // через OnComctl32ModuleLoaded и здесь (если primary уже был, а legacy пришёл позже).
+    //
+    // Флаг активной сессии — определение здесь (выше Arm/Disarm): OnComctl32ModuleLoaded
+    // читает его, чтобы докачать хуки на поздний экземпляр без расбаланса ref-count.
+    thread_local bool g_hooksArmed{ false };
+
+    // true — модуль закэширован только что (нужно для докачки хуков при поздней подгрузке).
+    static bool CacheComctlModule(void* mod) noexcept
+    {
+        if (!mod)
+            return false;
+        auto lock = g_overallLock.lock_exclusive();
+        if (g_overallMap.find(mod) != g_overallMap.end())
+            return false;
+        auto [it, inserted] = g_overallMap.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(mod),
+            std::forward_as_tuple(g_overallHookDep, mod));
+        it->second.CacheHookData();
+        DebugLog(L"[GlassCore][ComboLBox] comctl32=0x%p, overall hooks cached", mod);
+        return true;
+    }
+
     static void EnsureComctl32Ready() noexcept
     {
+        // Подтягиваем оба глобальных handle (могли появиться после Startup).
         if (!g_comctl32Module)
         {
             if (GlassCore::ModuleHandler::g_comctl32New)
                 g_comctl32Module = GlassCore::ModuleHandler::g_comctl32New;
             else if (GlassCore::ModuleHandler::g_comctl32Legacy)
                 g_comctl32Module = GlassCore::ModuleHandler::g_comctl32Legacy;
-            else if (HMODULE const h = GetModuleHandleW(L"comctl32.dll"))
-                g_comctl32Module = h;
+        }
+        if (!g_comctl32ModuleLegacy)
+        {
+            HMODULE legacy = GlassCore::ModuleHandler::g_comctl32Legacy;
+            if (legacy && legacy != g_comctl32Module)
+                g_comctl32ModuleLegacy = legacy;
             else
             {
-                GlassCore::ModuleHandler::RunInActCtx([&] {
-                    if (HMODULE const h2 = GetModuleHandleW(L"comctl32.dll"))
-                        g_comctl32Module = h2;
-                });
+                // New мог подгрузиться позже primary (primary тогда был legacy).
+                HMODULE fresh = GlassCore::ModuleHandler::g_comctl32New;
+                if (fresh && fresh != g_comctl32Module)
+                    g_comctl32ModuleLegacy = fresh;
             }
         }
-        if (!g_comctl32Module)
+        if (!g_comctl32Module && !g_comctl32ModuleLegacy)
             return;
 
+        // Блокировку берёт CacheComctlModule; здесь — без лока (только чтение указателей).
+        void* n = g_comctl32Module;
+        void* l = g_comctl32ModuleLegacy;
+        if (n) CacheComctlModule(n);
+        if (l && l != n) CacheComctlModule(l);
+    }
+
+    // Поздняя подгрузка comctl32 (второй экземпляр): ModuleHandler зовёт после AddComctl32.
+    // Если сессия уже armed на этом потоке — включаем хуки только на докачанных
+    // экземплярах (позже Disarm снимет со всех известных — баланс ref-count сохранён).
+    void OnComctl32ModuleLoaded() noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire))
+            return;
+        void* beforePrimary = g_comctl32Module;
+        void* beforeLegacy = g_comctl32ModuleLegacy;
+        EnsureComctl32Ready();
+        if (!g_hooksArmed)
+            return;
+        void* after[2]{ g_comctl32Module, g_comctl32ModuleLegacy };
+        void* armedNow = nullptr;
+        for (void* mod : after)
+        {
+            if (!mod || mod == beforePrimary || mod == beforeLegacy || mod == armedNow)
+                continue;
+            armedNow = mod;
+            EnableComboHooksOnModule(mod, true);
+        }
+    }
+
+    // Выгрузка comctl32: снять IAT и выбросить stale-запись (IATRegistry владеет слотами;
+    // держать кеш выгруженного модуля — use-after-free при следующем Enable).
+    void OnComctl32ModuleUnload(HMODULE unloaded) noexcept
+    {
+        if (!unloaded)
+            return;
+        if (g_comctl32Module == unloaded)
+            g_comctl32Module = nullptr;
+        if (g_comctl32ModuleLegacy == unloaded)
+            g_comctl32ModuleLegacy = nullptr;
         auto lock = g_overallLock.lock_exclusive();
-        if (g_overallMap.find(g_comctl32Module) != g_overallMap.end())
-            return;
-
-        auto [it, inserted] = g_overallMap.emplace(
-            std::piecewise_construct,
-            std::forward_as_tuple(g_comctl32Module),
-            std::forward_as_tuple(g_overallHookDep, g_comctl32Module));
-        it->second.CacheHookData();
-        DebugLog(L"[GlassCore][ComboLBox] comctl32=0x%p, overall hooks cached", g_comctl32Module);
+        auto it = g_overallMap.find(static_cast<void*>(unloaded));
+        if (it != g_overallMap.end())
+        {
+            it->second.DisableAllHooks();
+            g_overallMap.erase(it);
+            DebugLog(L"[GlassCore][ComboLBox] comctl32=0x%p unloaded, overall entry dropped", unloaded);
+        }
     }
 
     // =========================================================================
@@ -1025,22 +1129,13 @@ namespace GlassCore::ComboLBox
     {
         if (enable)
             EnsureComctl32Ready();
-        if (!g_comctl32Module) return;
-        // Standard path (non-themed): DrawTextExW, ExtTextOutW
-        EnableHooksOnModule(g_comctl32Module, OHK_DRAWTEXTEX, enable);
-        EnableHooksOnModule(g_comctl32Module, OHK_EXTTEXTOUT, enable);
-        // DrawThemeText / DrawThemeTextEx: в comctl32 нет статического IAT на uxtheme для DTTEx на Win11;
-        // список — ExtTextOutW (см. EnableExtTextOutForComctlPaintCaller при сессии PaintDispatcher).
-        //EnableHooksOnModule(g_comctl32Module, OHK_DRAWTHEMETEXT, enable);
-        EnableHooksOnModule(g_comctl32Module, OHK_DRAWTHEMEBG, enable);
-        // Общие: фоновые операции и перья
-        EnableHooksOnModule(g_comctl32Module, OHK_SELECTOBJECT, enable);
-        EnableHooksOnModule(g_comctl32Module, OHK_SETBKCOLOR, enable);
-        EnableHooksOnModule(g_comctl32Module, OHK_GETSTOCKOBJECT, enable);
-        EnableHooksOnModule(g_comctl32Module, OHK_CREATESOLIDBRUSH, enable);
-        // File dialog ComboLBox: comctl32 PatBlt(PATCOPY) с COLOR_WINDOW
-        EnableHooksOnModule(g_comctl32Module, OHK_PATBLT, enable);
-        EnableHooksOnModule(g_comctl32Module, OHK_GETSYSCOLORBRUSH, enable);
+        // Хуки на ОБА экземпляра comctl32: ref-count в HookDispatcher независим
+        // на каждый модуль, Arm/Disarm всегда трогают один и тот же набор — баланс.
+        // (Поздняя подгрузка второго экземпляра при активной сессии докачивается
+        // в OnComctl32ModuleLoaded; страховка от расбаланса — guard в HookDispatcher::EnableHook.)
+        ForEachKnownComctlModule([enable](void* mod) {
+            EnableComboHooksOnModule(mod, enable);
+        });
     }
 
     // =========================================================================
@@ -1100,8 +1195,6 @@ namespace GlassCore::ComboLBox
     // =========================================================================
     //  Session IAT — только на idle↔active (как BWM hookRef; без thrash на CompatDC)
     // =========================================================================
-
-    thread_local bool g_hooksArmed{ false };
 
     static void ArmSessionHooks(HWND /*hWnd*/, HMODULE /*callerMod*/) noexcept
     {
@@ -1201,14 +1294,18 @@ namespace GlassCore::ComboLBox
     {
         if (g_shutdown.load(std::memory_order_acquire)) return;
         if (g_activePaintMod) return;  // уже активно
-        HMODULE printCallerMod = nullptr;
-        GlassCore::ModuleHandler::RunInActCtx([&] {
-            printCallerMod = GlassCore::ModuleHandler::g_comctl32New;
-            if (!printCallerMod)
-                printCallerMod = GetModuleHandleW(L"comctl32.dll");
-            if (printCallerMod)
-                GlassCore::ScrollBarTheme::EnsureComctlScrollBarIatIfComctlCaller(hWnd, printCallerMod);
-        });
+        HMODULE printCallerMod = GlassCore::ModuleHandler::g_comctl32New
+            ? GlassCore::ModuleHandler::g_comctl32New
+            : GlassCore::ModuleHandler::g_comctl32Legacy;
+        if (printCallerMod)
+        {
+            // ScrollBar IAT — на оба экземпляра: PrintClient может идти через legacy.
+            EnsureComctl32Ready();
+            ForEachKnownComctlModule([hWnd](void* mod) {
+                GlassCore::ScrollBarTheme::EnsureComctlScrollBarIatIfComctlCaller(
+                    hWnd, static_cast<HMODULE>(mod));
+            });
+        }
         h_combolbox = hWnd;
         ++g_paintRef;
         ArmSessionHooks(hWnd, printCallerMod);
@@ -1216,12 +1313,8 @@ namespace GlassCore::ComboLBox
 
     void OnComboLBoxPrintClientEnd(HWND hWnd)
     {
+        // printCallerMod здесь не нужен: Disarm снимает сессию с обоих экземпляров.
         HMODULE printCallerMod = nullptr;
-        GlassCore::ModuleHandler::RunInActCtx([&] {
-            printCallerMod = GlassCore::ModuleHandler::g_comctl32New;
-            if (!printCallerMod)
-                printCallerMod = GetModuleHandleW(L"comctl32.dll");
-        });
         if (--g_paintRef < 0) g_paintRef = 0;
         DisarmSessionHooks(hWnd, printCallerMod);
         if (!IsActive()) h_combolbox = nullptr;
@@ -1375,12 +1468,11 @@ namespace GlassCore::ComboLBox
 
     void Startup()
     {
-        GlassCore::ModuleHandler::RunInActCtx([&] {
-            g_comctl32Module = GetModuleHandleW(L"comctl32.dll");
-        });
+        // Явные g_comctl32New/g_comctl32Legacy вместо неоднозначного
+        // GetModuleHandleW(L"comctl32.dll") (возвращает один, неизвестно какой).
         EnsureComctl32Ready();
 
-        if (!g_comctl32Module)
+        if (!g_comctl32Module && !g_comctl32ModuleLegacy)
         {
             DebugLog(
                 L"[GlassCore][ComboLBox] comctl32.dll ещё не в процессе — кеш IAT при первом Paint/DropDown");

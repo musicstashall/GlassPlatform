@@ -259,6 +259,12 @@
     <ClCompile Include="src\Subsystems\TextGlowClientRegistry.cpp">
       <Filter>src\Subsystems</Filter>
     </ClCompile>
+    <ClCompile Include="src\Subsystems\CtlColorProbe.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\MenuHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Core\Engine.h">
@@ -477,9 +483,26 @@
     <ClInclude Include="Include\Subsystems\TextGlowClientRegistry.h">
       <Filter>Include\Subsystems</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Subsystems\CtlColorProbe.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\MenuHooks.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Core\TextPreviewExport.h">
+      <Filter>Include\Core</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config">
     </None>
+    <None Include="GlassCore.def" />
+  </ItemGroup>
+  <ItemGroup>
+    <Natvis Include="$(MSBuildThisFileDirectory)..\..\natvis\wil.natvis" />
+    <Natvis Include="$(MSBuildThisFileDirectory)..\..\natvis\wil.natstepfilter" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="$(MSBuildThisFileDirectory)Shared\GlassModuleVersion.rc" />
   </ItemGroup>
 </Project>

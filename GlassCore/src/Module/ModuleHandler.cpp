@@ -3,9 +3,11 @@
 #include "Core\Utils.h"
 #include <Hooks/DirectUI.h>
 #include <Hooks/ScrollBarTheme.h>
+#include <Hooks/ComboLBox.h>
 #include <Hooks/ExplorerFrame.h>
 #include <Hooks/TaskbarHooks.h>
 #include <Hooks/forms/FormsHooks.h>
+#include <Hooks/RootGdiHooks.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <RootPolicyQuery.h>
 #include <InjectProcessMap.h>
@@ -398,10 +400,14 @@ namespace GlassCore::ModuleHandler
             {
                 AddComctl32(module);
                 // ScrollBar IAT для comctl32 — ленивая установка из PaintDispatcher::HookGetDCEx
+                // ComboLBox держит per-module IAT-кеш на оба экземпляра (v6 + legacy):
+                // докачать второй экземпляр, если он подгрузился позже первого attach.
+                GlassCore::ComboLBox::OnComctl32ModuleLoaded();
             }
             else
             {
                 GlassCore::ScrollBarTheme::OnComctl32ModuleUnload(module);
+                GlassCore::ComboLBox::OnComctl32ModuleUnload(module);
                 RemoveComctl32(module);
             }
             return;
@@ -466,16 +472,61 @@ namespace GlassCore::ModuleHandler
         }
 
         // --- dmdskmgr.dll / dmview.ocx — Disk Management snap-in (BWM ModuleHandler:200-205) ---
+        // D2: always-on IAT — действуют и на memory-DC, в отличие от сессионных.
+        // Ref-count (HookDispatcher) сосуществует с сессиями AfxWnd42u (RootWindowHooks).
         else if (_wcsicmp(baseName, L"dmdskmgr.dll") == 0 || _wcsicmp(baseName, L"dmview.ocx") == 0)
         {
-            if (attach)
+            GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_EXTTEXTOUT, attach);
+            GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_FILLRECT, attach);
+            // Ловля серого фона: тела log-only (passthrough вне chart) — ищем,
+            // чем реально заливается фон (PatBlt/Rectangle вместо FillRect).
+            GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_PATBLT, attach);
+            GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_RECTANGLE, attach);
+            // BITBLT-проба: тело log-only вне 16x16-comctl32.
+            GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_BITBLT, attach);
+            // GRADIENTFILL-проба: тело log-only вне rarext.
+            GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_GRADIENTFILL, attach);
+            DebugLog(L"[GlassCore][ModuleHandler] Disk Management always-on IAT %s: %s (0x%p)",
+                attach ? L"on" : L"off", baseName, module);
+            // Сессионные IAT (D1) на тех же модулях включаются
+            // при BeginPaint/GetDC-сессиях AfxWnd42u (RootWindowHooks).
+            return;
+        }
+
+        // --- MSCTF.dll — триггер SETBKCOLOR на MFC42u (BWM ModuleHandler:206-209) ---
+        else if (_wcsicmp(baseName, L"MSCTF.dll") == 0)
+        {
+            if (void* mfc = GetModuleHandleW(L"MFC42u.dll"))
             {
-                DebugLog(L"[GlassCore][ModuleHandler] Disk Management module loaded: %s (0x%p)", baseName, module);
-                // GDI+ включается при первом paint через ComboLBoxHooks/RootWindowHooks.
-                // IAT хуки (EXTTEXTOUT, FILLRECT) устанавливаются при ComboLBox paint sessions.
+                GlassCore::Root::EnableRootHook(mfc, GlassCore::Root::OHK_SETBKCOLOR, attach);
+                GlassCore::Root::EnableRootHook(mfc, GlassCore::Root::OHK_PATBLT, attach);
+                GlassCore::Root::EnableRootHook(mfc, GlassCore::Root::OHK_RECTANGLE, attach);
+                // FILLRECT на MFC42u: ищем заливки фона (тело — passthrough, только лог).
+                GlassCore::Root::EnableRootHook(mfc, GlassCore::Root::OHK_FILLRECT, attach);
+                // BITBLT-проба: тело log-only вне 16x16-comctl32.
+                GlassCore::Root::EnableRootHook(mfc, GlassCore::Root::OHK_BITBLT, attach);
+                // GRADIENTFILL-проба: тело log-only вне rarext.
+                GlassCore::Root::EnableRootHook(mfc, GlassCore::Root::OHK_GRADIENTFILL, attach);
             }
             return;
         }
+
+        //// --- MFC42u.dll — superset сверх BWM: MSCTF уже загружен → SETBKCOLOR сразу ---
+        //// (у BWM дыра: если MFC42u грузится после MSCTF, хук не ставится).
+        //else if (_wcsicmp(baseName, L"MFC42u.dll") == 0)
+        //{
+        //    if (GetModuleHandleW(L"MSCTF.dll"))
+        //    {
+        //        GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_SETBKCOLOR, attach);
+        //        GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_PATBLT, attach);
+        //        GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_RECTANGLE, attach);
+        //        GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_FILLRECT, attach);
+        //        GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_BITBLT, attach);
+        //        // GRADIENTFILL-проба: тело log-only вне rarext.
+        //        GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_GRADIENTFILL, attach);
+        //    }
+        //    return;
+        //}
 
         // --- Taskbar.dll — панель задач: IAT после системного TRANSPARENT_GRADIENT на Shell_*TrayWnd ---
         else if (_wcsicmp(baseName, L"Taskbar.dll") == 0)

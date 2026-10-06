@@ -1,4 +1,4 @@
-﻿// GlassCore/src/Hooks/RootGdiHooks.cpp — GDI-диспетчер для root-окон (тела IAT-хуков).
+// GlassCore/src/Hooks/RootGdiHooks.cpp — GDI-диспетчер для root-окон (тела IAT-хуков).
 // Классификация окон, кеш по HWND, провайдеры PaintDispatcher — в RootWindowHooks.cpp.
 //
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -22,6 +22,7 @@
 
 #include "CorePch.h"
 #include <Hooks/RootGdiHooks.h>
+#include <Hooks/RootWindowHooks.h>
 #include <Core/Intercept/HookDispatcher.h>
 #include <Core/Intercept/IATRegistry.h>
 #include <Module/ModuleHandler.h>
@@ -32,8 +33,10 @@
 #include <BitmapUtils.h>
 #include <DebugLog.h>
 
+
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 using namespace GlassCore::Hooks;
 using namespace std::literals;
@@ -227,6 +230,30 @@ namespace GlassCore::Root
             return WindowFromDC(hdc);
         }
 
+        // D2: memory-DC (CreateCompatibleDC) не резолвятся через WindowFromDC.
+        // Для MMC-модулей подставляем HWND активной paint-сессии того же потока,
+        // но только attach'нутую (аналог BWM DataWndList[CompatibleDC] + IsDataAttach).
+        // Затем обязательна проверка класса в теле хука.
+        // Сначала владелец из стека своего потока: закрывает buffered-рисование
+        // вне активной сессии (обратный поиск hdc→hWnd, только свой поток).
+        [[nodiscard]] static HWND HwndFromDcOrMmcSession(HDC hdc, HMODULE caller) noexcept
+        {
+            HWND w = HwndFromDc(hdc);
+            if (w)
+                return w;
+            if (HWND owner = GlassCore::PaintDispatcher::GetStackOwnerForDc(hdc))
+                return owner;
+            if (!caller)
+                return nullptr;
+            /*if (!CallerBaseIs(caller, L"dmview.ocx") && !CallerBaseIs(caller, L"dmdskmgr.dll")
+                && !CallerBaseIs(caller, L"MFC42u.dll") && !CallerBaseIs(caller, L"comctl32.dll"))
+                return nullptr;*/
+            HWND s = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+            if (!s || !IsWindow(s) || !GlassCore::Root::HasRootHookCache(s))
+                return nullptr;
+            return s;
+        }
+
         [[nodiscard]] static std::wstring CallerBaseName(HMODULE m) noexcept
         {
             wchar_t path[MAX_PATH]{};
@@ -327,6 +354,7 @@ namespace GlassCore::Root
         BOOL WINAPI Root_MyBitBlt(HDC, int, int, int, int, HDC, int, int, DWORD);
         BOOL WINAPI Root_MyGradientFill(HDC, PTRIVERTEX, ULONG, PVOID, ULONG, ULONG);
         BOOL WINAPI Root_MyTextOutW(HDC, int, int, LPCWSTR, int);
+        int WINAPI Root_MyFillRect(HDC, const RECT*, HBRUSH);
 
         inline const HookDispatcherDependency<OHK_COUNT, 3> g_rootHookDep
         { {
@@ -362,6 +390,8 @@ namespace GlassCore::Root
                 "GradientFill", reinterpret_cast<PVOID>(Root_MyGradientFill) },
             std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv },
                 "TextOutW", reinterpret_cast<PVOID>(Root_MyTextOutW) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                "FillRect", reinterpret_cast<PVOID>(Root_MyFillRect) },
         } };
 
         using RootDispatcher = HookDispatcher<OHK_COUNT, 3>;
@@ -460,11 +490,12 @@ namespace GlassCore::Root
             {
                 if (lpr)
                 {
-                    HWND    hW = HwndFromDc(hdc);
+                    auto caller = GetCallerModule(_ReturnAddress());
+                    // D2: memory-DC классифицируем через сессию.
+                    HWND    hW = HwndFromDcOrMmcSession(hdc, caller);
                     wchar_t cls[128]{};
                     wchar_t parentCls[128]{};
                     FillWndAndParentClass(hW, cls, _countof(cls), parentCls, _countof(parentCls));
-                    auto caller = GetCallerModule(_ReturnAddress());
                     if (WantSysmonStyleExtTextOpaqueBg(cls, parentCls))
                         ApplySysmonStyleOpaqueBackground(hdc, lpr, caller);
                     else
@@ -507,7 +538,8 @@ namespace GlassCore::Root
 
             const std::wstring callerBaseStr = CallerBaseName(caller);
             const wchar_t*     callerBase = callerBaseStr.c_str();
-            HWND               hFromDc = HwndFromDc(hdc);
+            // D2: memory-DC классифицируем через сессию.
+            HWND               hFromDc = HwndFromDcOrMmcSession(hdc, caller);
             wchar_t            cls[128]{};
             if (hFromDc)
                 GetClassNameW(hFromDc, cls, _countof(cls));
@@ -523,6 +555,18 @@ namespace GlassCore::Root
                         hdc, hFromDc, callerBase, cls);
                 }
                 color = 0;
+            }
+
+            if (!g_shutdown.load(std::memory_order_acquire) && StrEqI(cls, L"AfxWnd42u")
+                && (CallerBaseIs(caller, L"MFC42u.dll") || CallerBaseIs(caller, L"comctl32.dll")
+                    || CallerBaseIs(caller, L"dmview.ocx") || CallerBaseIs(caller, L"dmdskmgr.dll")))
+            {
+                const COLORREF c = color & 0xFFFFFF;
+                if (c == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
+                    || c == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF))
+                {
+                    color = 0;
+                }
             }
             return o(hdc, color);
         }
@@ -558,8 +602,11 @@ namespace GlassCore::Root
             const bool isInet = StrEqI(base.c_str(), L"inetcpl.cpl");
             const bool isSysmon = StrEqI(base.c_str(), L"sysmon.ocx");
             const bool isWdc = StrEqI(base.c_str(), L"wdc.dll");
+            // BWM OverallHooks::MyCreateSolidBrush:1222-1228 — MFC42u + Comctl32 в whitelist.
+            const bool isMfc = StrEqI(base.c_str(), L"MFC42u.dll");
+            const bool isCc = StrEqI(base.c_str(), L"comctl32.dll");
 
-            if (isComdlg || isInet || isSysmon || isWdc)
+            if (isComdlg || isInet || isSysmon || isWdc || isMfc || isCc)
             {
                 if (isSysmon
                     && (((0xFFFFFF & color) == GetSysColor(COLOR_WINDOW))
@@ -952,7 +999,7 @@ namespace GlassCore::Root
             if (g_shutdown.load(std::memory_order_acquire))
                 return o(hdc, left, top, right, bottom);
 
-            HWND hWnd = HwndFromDc(hdc);
+            HWND hWnd = HwndFromDcOrMmcSession(hdc, caller);
             if (CallerBaseIs(caller, L"COMDLG32.dll") && hWnd
                 && static_cast<ATOM>(GetClassLongPtrW(hWnd, GCW_ATOM)) == static_cast<ATOM>(32770))
             {
@@ -990,6 +1037,72 @@ namespace GlassCore::Root
                     && !lb.lbStyle)
                     hbr = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
             }
+            return o(hDC, lprc, hbr);
+        }
+
+        // BWM OverallHooks::MyFillRect (solid + hatched): цветные плитки комбобокса
+        // и квадратики под рисунками дисков в дисковой утилите.
+        int WINAPI Root_MyFillRect(HDC hDC, const RECT* lprc, HBRUSH hbr)
+        {
+            HMODULE caller = GetCallerModule(_ReturnAddress());
+            auto o = GetRootOrg<OHK_FILLRECT, decltype(&FillRect)>(caller);
+            if (!o)
+                return FillRect(hDC, lprc, hbr);
+            if (g_shutdown.load(std::memory_order_acquire))
+                return o(hDC, lprc, hbr);
+
+            // D2: memory-DC классифицируем через сессию (иначе cls пустой и фон мимо).
+            HWND hWnd = HwndFromDcOrMmcSession(hDC, caller);
+            wchar_t cls[256]{};
+            if (hWnd)
+                GetClassNameW(hWnd, cls, _countof(cls));
+
+            const bool isAfx = StrEqI(cls, L"AfxWnd42u");
+            const bool isDmView = CallerBaseIs(caller, L"dmview.ocx");
+
+            if (!lprc || !hbr)
+                return o(hDC, lprc, hbr);
+
+            LOGBRUSH lb{};
+            if (!GetObject(hbr, sizeof(lb), &lb))
+                return o(hDC, lprc, hbr);
+
+            if (lb.lbStyle == BS_SOLID)
+            {
+                // BWM OverallHooks:1054-1062 — только ветка dmview.ocx + AfxWnd42u
+                // (квадратики под рисунками дисков). Комбобокс — в ComboLBoxHooks,
+                // SysListView32 — в ListViewHooks, здесь им не место.
+                if (lb.lbColor == GetSysColor(COLOR_BTNFACE)
+                    || lb.lbColor == GetSysColor(COLOR_HIGHLIGHT)
+                    || (isDmView && isAfx))
+                {
+                    HBRUSH alphaBrush = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(lb.lbColor, 255);
+                    const int res = alphaBrush ? o(hDC, lprc, alphaBrush) : 0;
+                    if (alphaBrush)
+                        DeleteObject(alphaBrush);
+                    if (alphaBrush)
+                        return res;
+                }
+            }
+            else if (lb.lbStyle == BS_HATCHED)
+            {
+                // BWM OverallHooks:1099-1114 — только ветка dmview.ocx + AfxWnd42u.
+                // Штриховку не трогать: фон штриховки на плитках корректен.
+                if (isDmView && isAfx)
+                {
+                    PatBlt(hDC, lprc->left, lprc->top,
+                        lprc->right - lprc->left, lprc->bottom - lprc->top, BLACKNESS);
+                    HBRUSH hatch = CreateBrushIndirect(&lb);
+                    if (hatch)
+                    {
+                        const int res = o(hDC, lprc, hatch);
+                        DeleteObject(hatch);
+                        return res;
+                    }
+                    return 1;
+                }
+            }
+
             return o(hDC, lprc, hbr);
         }
 

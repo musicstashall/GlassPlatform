@@ -77,7 +77,7 @@ namespace GlassCore::FormsHooks
         if (g_drawTextShutdown.load(std::memory_order_acquire))
             return g_trueDrawTextW(hdc, lpchText, cchText, lprc, format);
 
-        const HMODULE callerMod = Internal::GetCallerModule(_ReturnAddress());
+        const HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
 
         // Только MFC42u.dll (AMCCustomTab context) и только внутри CustomTab paint-сессии
         if (!Internal::IsMFC42uModule(callerMod))
