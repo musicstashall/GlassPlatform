@@ -10,6 +10,7 @@
 #include <Hooks/ScrollBarDrawTheme.h>
 #include <Hooks/ScrollBarTheme.h>
 #include <Subsystems/PaintDispatcher.h>
+#include <Subsystems/GdiHookUtils.h>
 #include <Subsystems/RenderText.h>
 #include <Helpers/ThemeHelper.h>
 #include <Subsystems/ThemePaintRegistry.h>
@@ -36,6 +37,7 @@ namespace GlassCore::ComboBoxControl
     namespace
     {
         thread_local HMODULE g_activePaintMod = nullptr;
+        thread_local HMODULE g_activeHotMod = nullptr;
         thread_local HWND    g_comboHwnd = nullptr;
         static std::atomic<bool> g_shutdown{ false };
 
@@ -115,13 +117,48 @@ namespace GlassCore::ComboBoxControl
             return g_new ? g_new : g_legacy;
         }
 
-        static bool CbxSessionActive() noexcept { return g_activePaintMod != nullptr; }
+        static bool CbxSessionActive() noexcept { return g_activePaintMod != nullptr || g_activeHotMod != nullptr; }
+
+        // Имя caller-модуля без пути — узкая проверка своих сценариев (паритет ListView/ComboLBox).
+        [[nodiscard]] static bool CallerBaseIs(HMODULE caller, LPCWSTR base) noexcept
+        {
+            if (!caller || !base)
+                return false;
+            wchar_t path[MAX_PATH]{};
+            if (GetModuleFileNameW(caller, path, _countof(path)) == 0)
+                return false;
+            const wchar_t* p = wcsrchr(path, L'\\');
+            const wchar_t* name = p ? p + 1 : path;
+            return _wcsicmp(name, base) == 0;
+        }
+
+        // Штрихи sysmon на родительском ComboBox — opaque (паритет BWM GDI+ Color(255,...)).
+        constexpr BYTE kSysmonComboBoxStrokeAlpha = 255;
+
+        // sysmon рисует в memory-DC (WindowFromDC=NULL) — HWND берём из сессии PaintDispatcher.
+        // Возвращает HWND только для ComboBox-сессии, иначе nullptr → caller уходит в orig.
+        [[nodiscard]] static HWND HwndForComboBoxDraw(HDC hdc) noexcept
+        {
+            if (!hdc)
+                return nullptr;
+            HWND w = WindowFromDC(hdc);
+            if (w)
+                return IsComboBoxSessionKind(GlassShared::GlassGetWindowKind(w)) ? w : nullptr;
+            w = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+            if (w && IsWindow(w) && IsComboBoxSessionKind(GlassShared::GlassGetWindowKind(w)))
+                return w;
+            if (g_comboHwnd && IsWindow(g_comboHwnd))
+                return g_comboHwnd;
+            return nullptr;
+        }
 
         int      WINAPI Overall_MyDrawTextW(HDC, LPCWSTR, int, LPRECT, UINT);
         int      WINAPI Overall_MyDrawTextExW(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
         BOOL     WINAPI Overall_MyExtTextOutW(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
         COLORREF WINAPI Overall_MySetBkColor(HDC, COLORREF);
         HBRUSH   WINAPI Overall_MyCreateSolidBrush(COLORREF);
+        HGDIOBJ  WINAPI Overall_MyGetStockObject(int);
+        BOOL     WINAPI Overall_MyLineTo(HDC, int, int);
         HGDIOBJ  WINAPI Overall_MySelectObject(HDC, HGDIOBJ);
         HRESULT  WINAPI Overall_MyDrawThemeBg(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
         HRESULT  WINAPI Overall_MyDrawThemeText(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, DWORD, LPCRECT);
@@ -140,6 +177,8 @@ namespace GlassCore::ComboBoxControl
             OHK_DRAWTHEMETEXT,
             OHK_GETSYSCOLORBRUSH,
             OHK_TEXTOUT,
+            OHK_GETSTOCKOBJECT,
+            OHK_LINETO,
             OHK_COUNT
         };
 
@@ -165,6 +204,10 @@ namespace GlassCore::ComboBoxControl
                 "GetSysColorBrush", reinterpret_cast<PVOID>(Overall_MyGetSysColorBrush) },
             std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
                 "TextOutW", reinterpret_cast<PVOID>(Overall_MyTextOutW) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
+                "GetStockObject", reinterpret_cast<PVOID>(Overall_MyGetStockObject) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
+                "LineTo", reinterpret_cast<PVOID>(Overall_MyLineTo) },
         } };
 
         using OverallDispatcher = HookDispatcher<OHK_COUNT, 3>;
@@ -573,9 +616,108 @@ namespace GlassCore::ComboBoxControl
                 if (color == GetSysColor(COLOR_WINDOW) || color == 0xffffff ||
                     color == GetSysColor(COLOR_BTNFACE))
                     color = 0;
+
+                // Выбранная линия sysmon на родительском ComboBox — цветная alpha-кисть 255.
+                // Паритет BWM OverallHooks::MyCreateSolidBrush для sysmon.ocx и ComboLBoxHooks.
+                if (color != 0)
+                {
+                    HBRUSH alphaBrush = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255);
+                    if (alphaBrush)
+                        return alphaBrush;
+                }
             }
 
             return orig(color);
+        }
+
+        // ── Overall: MyGetStockObject — sysmon.ocx на родительском ComboBox ──
+        // Паритет BWM OverallHooks::MyGetStockObject: WHITE/DC → BLACK;
+        // BLACK/GRAY от sysmon.ocx → alpha-кисти. Иначе — настоящий orig.
+        HGDIOBJ WINAPI Overall_MyGetStockObject(int i)
+        {
+            HMODULE callerMod = GetCallerModule(_ReturnAddress());
+            auto orig = GetOverallOrigSafe<OHK_GETSTOCKOBJECT, decltype(&GetStockObject)>(callerMod);
+
+            if (CbxSessionActive())
+            {
+                if (i == WHITE_BRUSH || i == DC_BRUSH)
+                    i = BLACK_BRUSH;
+                else if (i == BLACK_BRUSH && CallerBaseIs(callerMod, L"sysmon.ocx"))
+                {
+                    HBRUSH alphaBrush = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(0, 255);
+                    if (alphaBrush)
+                        return alphaBrush;
+                }
+                else if (i == GRAY_BRUSH && CallerBaseIs(callerMod, L"sysmon.ocx") && orig)
+                {
+                    HGDIOBJ hStock = orig(i);
+                    LOGBRUSH lb{};
+                    if (hStock && GetObject(hStock, sizeof(lb), &lb))
+                    {
+                        HBRUSH alphaBrush = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(lb.lbColor, 255);
+                        if (alphaBrush)
+                            return alphaBrush;
+                    }
+                }
+            }
+
+            return orig ? orig(i) : GetStockObject(i);
+        }
+
+        // ── Overall: MyLineTo — sysmon.ocx на родительском ComboBox (выбранная линия) ──
+        // По мотивам BWM OverallHooks::MyLineTo (ветка sysmon + ComboBox),
+        // без GDI+: сплошные и пунктир — LayeredStrokePen::TryCreateStyled alpha 255.
+        // Узкое тело: чужие сессии/модули — настоящий orig (IATRegistry first-owner-wins).
+        BOOL WINAPI Overall_MyLineTo(HDC hdc, int x, int y)
+        {
+            HMODULE callerMod = GetCallerModule(_ReturnAddress());
+            auto orig = GetOverallOrigSafe<OHK_LINETO, decltype(&LineTo)>(callerMod);
+
+            if (!orig)
+                return LineTo(hdc, x, y);
+            if (g_shutdown.load(std::memory_order_acquire) || !CbxSessionActive())
+                return orig(hdc, x, y);
+            if (!CallerBaseIs(callerMod, L"sysmon.ocx"))
+                return orig(hdc, x, y);
+            if (!HwndForComboBoxDraw(hdc))
+                return orig(hdc, x, y);
+
+            HGDIOBJ penObj = GetCurrentObject(hdc, OBJ_PEN);
+            LOGPEN lp{};
+            if (GetObject(penObj, sizeof(lp), &lp) != sizeof(LOGPEN) || lp.lopnStyle == PS_NULL)
+                return orig(hdc, x, y);
+
+            // BWM: INSIDEFRAME → SOLID, ширина 0 → 1
+            if (lp.lopnStyle == PS_INSIDEFRAME)
+                lp.lopnStyle = PS_SOLID;
+            if (lp.lopnWidth.x <= 0)
+                lp.lopnWidth.x = 1;
+
+            POINT lppt{};
+            if (!GetCurrentPositionEx(hdc, &lppt))
+                return orig(hdc, x, y);
+
+            GlassCore::GdiUtils::LayeredStrokePen layeredStroke =
+                GlassCore::GdiUtils::LayeredStrokePen::TryCreateStyled(lp, kSysmonComboBoxStrokeAlpha);
+            wil::unique_hpen drawPen;
+            if (!layeredStroke)
+                drawPen = GlassCore::GdiUtils::PenFromLogPen(lp);
+            HGDIOBJ hStroke = layeredStroke ? static_cast<HGDIOBJ>(layeredStroke.get())
+                                            : static_cast<HGDIOBJ>(drawPen.get());
+            if (!hStroke)
+                return orig(hdc, x, y);
+
+            wil::unique_hpen nullPen(CreatePen(PS_NULL, 0, 0));
+            if (!nullPen)
+                return orig(hdc, x, y);
+
+            HGDIOBJ old = SelectObject(hdc, nullPen.get());
+            orig(hdc, x, y);
+            SelectObject(hdc, hStroke);
+            MoveToEx(hdc, lppt.x, lppt.y, nullptr);
+            const BOOL r = orig(hdc, x, y);
+            SelectObject(hdc, old);
+            return r;
         }
 
         HGDIOBJ WINAPI Overall_MySelectObject(HDC hdc, HGDIOBJ h)
@@ -751,9 +893,71 @@ namespace GlassCore::ComboBoxControl
                 return;
 
             EnableComboBoxHooksForSession(kind, g_activePaintMod, false);
-            g_comboDtbDedupField.reset();
             g_activePaintMod = nullptr;
-            g_comboHwnd = nullptr;
+            if (!CbxSessionActive())
+            {
+                g_comboDtbDedupField.reset();
+                g_comboHwnd = nullptr;
+            }
+        }
+
+        // ── GetDC-канал (hot): фокус/хот-перерисовки идут мимо BeginPaint ──
+        // Паритет BWM PaintHandler::Dc() — ветка ComboBox + caller COMCTL32 включает
+        // то же sysmon-трио (CREATESOLIDBRUSH/GETSTOCKOBJECT/LINETO). CompatibleDc
+        // в BWM ветки ComboBox не имеет — не переносим.
+        static void OnHotBeginGlobal(HWND hWnd, HMODULE callerMod)
+        {
+            using namespace GlassShared;
+            if (g_shutdown.load(std::memory_order_acquire))
+                return;
+
+            const GlassControlKind kind = GlassGetWindowKind(hWnd);
+            if (!IsComboBoxSessionKind(kind) || g_activeHotMod)
+                return;
+
+            auto* g_new = GlassCore::ModuleHandler::g_comctl32New;
+            auto* g_legacy = GlassCore::ModuleHandler::g_comctl32Legacy;
+            if (callerMod != g_new && callerMod != g_legacy)
+                return;
+
+            const HMODULE comctlMod = ResolveComboComctlHookModule(callerMod);
+            if (!comctlMod)
+                return;
+
+            GlassCore::ScrollBarTheme::EnsureComctlScrollBarIatIfComctlCaller(hWnd, callerMod);
+            g_activeHotMod = comctlMod;
+            g_comboHwnd = hWnd;
+            EnableComboBoxHooksForSession(kind, comctlMod, true);
+        }
+
+        static void OnHotEndGlobal(HWND hWnd, HMODULE /*callerMod*/)
+        {
+            using namespace GlassShared;
+            const GlassControlKind kind = GlassGetWindowKind(hWnd);
+            if (!IsComboBoxSessionKind(kind))
+                return;
+            if (!g_activeHotMod)
+                return;
+
+            EnableComboBoxHooksForSession(kind, g_activeHotMod, false);
+            g_activeHotMod = nullptr;
+            if (!CbxSessionActive())
+            {
+                g_comboDtbDedupField.reset();
+                g_comboHwnd = nullptr;
+            }
+        }
+
+        // sysmon.ocx — выбранная линия на родительском ComboBox (mmc, Системный монитор).
+        // Паритет BWM PaintHandler-ветки ComboBox: CREATESOLIDBRUSH + GETSTOCKOBJECT + LINETO.
+        static void EnableComboBoxSysmonHooks(bool enable) noexcept
+        {
+            if (PVOID base = GetModuleHandleW(L"sysmon.ocx"))
+            {
+                EnableHooksOnModule(base, OHK_CREATESOLIDBRUSH, enable);
+                EnableHooksOnModule(base, OHK_GETSTOCKOBJECT, enable);
+                EnableHooksOnModule(base, OHK_LINETO, enable);
+            }
         }
 
         static void EnableComboBoxHooksForSession(
@@ -764,6 +968,7 @@ namespace GlassCore::ComboBoxControl
             EnableComboBoxHooksOnComctlModule(comctlMod, enable);
             EnableComboBoxComdlgHooks(enable);
             EnableComboBoxMfcHooks(enable);
+            EnableComboBoxSysmonHooks(enable);
             if (kind == GlassShared::GlassControlKind::WinForms_ComboBox
                 && GetModuleHandleW(L"System.Windows.Forms.ni.dll"))
             {
@@ -842,7 +1047,7 @@ namespace GlassCore::ComboBoxControl
             return;
         }
         if (_wcsicmp(base, L"comctl32.dll") != 0 && _wcsicmp(base, L"COMDLG32.dll") != 0
-            && _wcsicmp(base, L"MFC42u.dll") != 0)
+            && _wcsicmp(base, L"MFC42u.dll") != 0 && _wcsicmp(base, L"sysmon.ocx") != 0)
             return;
         PrewarmModule(mod);
     }
@@ -850,8 +1055,10 @@ namespace GlassCore::ComboBoxControl
     void Startup()
     {
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintGlobal, OnEndPaintGlobal });
+        GlassCore::PaintDispatcher::RegisterGetDCProvider({ OnHotBeginGlobal, OnHotEndGlobal });
         PrewarmModule(GlassCore::ModuleHandler::g_comctl32New);
         PrewarmModule(GlassCore::ModuleHandler::g_comctl32Legacy);
+        PrewarmModule(GetModuleHandleW(L"sysmon.ocx"));
         GlassCore::ModuleHandler::RegisterModulePrewarmHandler(PrewarmForModule);
     }
 
@@ -861,6 +1068,7 @@ namespace GlassCore::ComboBoxControl
         DisableAllOverallHooks();
         g_comboDtbDedupField.reset();
         g_activePaintMod = nullptr;
+        g_activeHotMod = nullptr;
         g_comboHwnd = nullptr;
         g_shutdown.store(false, std::memory_order_seq_cst);
     }

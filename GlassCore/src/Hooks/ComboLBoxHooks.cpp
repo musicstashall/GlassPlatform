@@ -31,6 +31,7 @@
 #include <Hooks/ScrollBarDrawTheme.h>
 #include <Hooks/ScrollBarTheme.h>
 #include <Subsystems/PaintDispatcher.h>
+#include <Subsystems/GdiHookUtils.h>
 #include <Subsystems/RenderText.h>
 #include <Helpers/ThemeHelper.h>
 #include <Core/Intercept/HookDispatcher.h>
@@ -127,6 +128,46 @@ namespace GlassCore::ComboLBox
         return (!_wcsicmp(PathFindFileName(szModuleName), moduleName.data()));
     }
 
+    // Имя caller-модуля без пути — узкая проверка своих сценариев (паритет ListView/Root).
+    [[nodiscard]] static bool CallerBaseIs(HMODULE caller, LPCWSTR base) noexcept
+    {
+        if (!caller || !base)
+            return false;
+        wchar_t path[MAX_PATH]{};
+        if (!GetModuleFileNameW(caller, path, MAX_PATH))
+            return false;
+        const wchar_t* p = wcsrchr(path, L'\\');
+        const wchar_t* name = p ? p + 1 : path;
+        return StrEq(name, base);
+    }
+
+    // Штрихи sysmon в ComboLBox — opaque (паритет BWM GDI+ Color(255,...)).
+    constexpr BYTE kSysmonComboLBoxStrokeAlpha = 255;
+
+    // sysmon рисует в memory-DC (WindowFromDC=NULL) — HWND берём из сессии PaintDispatcher.
+    // Возвращает HWND только для ComboLBox, иначе nullptr → caller уходит в orig.
+    [[nodiscard]] static HWND HwndForComboLBoxDraw(HDC hdc) noexcept
+    {
+        if (!hdc)
+            return nullptr;
+        HWND w = WindowFromDC(hdc);
+        wchar_t cls[64]{};
+        if (w)
+        {
+            if (GetClassNameW(w, cls, _countof(cls)) > 0 && StrEq(cls, L"ComboLBox"))
+                return w;
+            return nullptr;
+        }
+        w = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+        if (!w || !IsWindow(w))
+            return nullptr;
+        if (GetClassNameW(w, cls, _countof(cls)) > 0 && StrEq(cls, L"ComboLBox"))
+            return w;
+        if (h_combolbox && IsWindow(h_combolbox))
+            return h_combolbox;
+        return nullptr;
+    }
+
     static const uint8_t kHatchPatterns[6][8] =
     {
         { 0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0x00 }, // HS_HORIZONTAL
@@ -161,6 +202,7 @@ namespace GlassCore::ComboLBox
     BOOL WINAPI Overall_MyFillRect(HDC, const RECT*, HBRUSH);
     BOOL WINAPI Overall_MyPatBlt(HDC, int, int, int, int, DWORD);
     HBRUSH WINAPI Overall_MyGetSysColorBrush(int);
+    BOOL WINAPI Overall_MyLineTo(HDC, int, int);
 
     enum OverallHookIndex : size_t
     {
@@ -180,6 +222,7 @@ namespace GlassCore::ComboLBox
         OHK_FILLRECT,
         OHK_PATBLT,
         OHK_GETSYSCOLORBRUSH,
+        OHK_LINETO,
         OHK_COUNT
     };
 
@@ -230,10 +273,13 @@ namespace GlassCore::ComboLBox
                                                        // OHK_PATBLT — comctl32 PATCOPY с COLOR_WINDOW
                                                        std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
                                                            "PatBlt", reinterpret_cast<PVOID>(Overall_MyPatBlt) },
-                                                       // OHK_GETSYSCOLORBRUSH — COMDLG32 COLOR_WINDOW → BLACK_BRUSH
-                                                       std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
-                                                           "GetSysColorBrush", reinterpret_cast<PVOID>(Overall_MyGetSysColorBrush) },
-                                            } };
+                                                        // OHK_GETSYSCOLORBRUSH — COMDLG32 COLOR_WINDOW → BLACK_BRUSH
+                                                        std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                                                            "GetSysColorBrush", reinterpret_cast<PVOID>(Overall_MyGetSysColorBrush) },
+                                                        // OHK_LINETO — sysmon.ocx в ComboLBox (линии/пунктир настроек графиков)
+                                                        std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
+                                                            "LineTo", reinterpret_cast<PVOID>(Overall_MyLineTo) },
+                                             } };
 
     using OverallDispatcher = HookDispatcher<OHK_COUNT, 3>;
 
@@ -706,6 +752,8 @@ namespace GlassCore::ComboLBox
     }
 
     // ── Overall: MyCreateSolidBrush ──────────────────────────────────────────
+    // Паритет BWM OverallHooks::MyCreateSolidBrush для sysmon.ocx:
+    // WINDOW/BTNFACE → чёрный (прозрачный на стекле), любой иной цвет → alpha-кисть 255 (плитки).
     HBRUSH WINAPI Overall_MyCreateSolidBrush(COLORREF color)
     {
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
@@ -722,12 +770,22 @@ namespace GlassCore::ComboLBox
             if (color == GetSysColor(COLOR_WINDOW) || color == 0xffffff ||
                 color == GetSysColor(COLOR_BTNFACE))
                 color = 0;
+
+            // Цветные плитки sysmon и прочих — непрозрачная alpha-кисть (без GDI+)
+            if (color != 0)
+            {
+                HBRUSH alphaBrush = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255);
+                if (alphaBrush)
+                    return alphaBrush;
+            }
         }
 
         return orig ? orig(color) : CreateSolidBrush(color);
     }
 
     // ── Overall: MyGetStockObject ────────────────────────────────────────────
+    // Паритет BWM OverallHooks::MyGetStockObject: WHITE/DC → BLACK;
+    // BLACK/GRAY от sysmon.ocx → alpha-кисти (плитки настроек графиков).
     HGDIOBJ WINAPI Overall_MyGetStockObject(int i)
     {
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
@@ -735,11 +793,85 @@ namespace GlassCore::ComboLBox
 
         if (IsActive())
         {
-            if (i == WHITE_BRUSH)
+            if (i == WHITE_BRUSH || i == DC_BRUSH)
                 i = BLACK_BRUSH;
+            else if (i == BLACK_BRUSH && CallerBaseIs(callerMod, L"sysmon.ocx"))
+            {
+                HBRUSH alphaBrush = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(0, 255);
+                if (alphaBrush)
+                    return alphaBrush;
+            }
+            else if (i == GRAY_BRUSH && CallerBaseIs(callerMod, L"sysmon.ocx") && orig)
+            {
+                HGDIOBJ hStock = orig(i);
+                LOGBRUSH lb{};
+                if (hStock && GetObject(hStock, sizeof(lb), &lb))
+                {
+                    HBRUSH alphaBrush = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(lb.lbColor, 255);
+                    if (alphaBrush)
+                        return alphaBrush;
+                }
+            }
         }
 
         return orig ? orig(i) : GetStockObject(i);
+    }
+
+    // ── Overall: MyLineTo — sysmon.ocx в ComboLBox (линии/пунктир настроек графиков) ──
+    // По мотивам BWM OverallHooks::MyLineTo (ветка sysmon + ComboBox/ComboLBox),
+    // без GDI+: сплошные и пунктир — LayeredStrokePen::TryCreateStyled alpha 255
+    // (геометрическое перо на pattern-DIB; пробелы пунктира прозрачны).
+    // Fallback PenFromLogPen — только для USERSTYLE/w>24 (без альфы, как раньше).
+    BOOL WINAPI Overall_MyLineTo(HDC hdc, int x, int y)
+    {
+        HMODULE callerMod = GetCallerModule(_ReturnAddress());
+        auto orig = GetOverallOrigSafe<OHK_LINETO, decltype(&LineTo)>(callerMod);
+
+        if (!orig)
+            return LineTo(hdc, x, y);
+        if (g_shutdown.load(std::memory_order_acquire) || !IsActive())
+            return orig(hdc, x, y);
+        if (!CallerBaseIs(callerMod, L"sysmon.ocx"))
+            return orig(hdc, x, y);
+        if (!HwndForComboLBoxDraw(hdc))
+            return orig(hdc, x, y);
+
+        HGDIOBJ penObj = GetCurrentObject(hdc, OBJ_PEN);
+        LOGPEN lp{};
+        if (GetObject(penObj, sizeof(lp), &lp) != sizeof(LOGPEN) || lp.lopnStyle == PS_NULL)
+            return orig(hdc, x, y);
+
+        // BWM: INSIDEFRAME → SOLID, ширина 0 → 1
+        if (lp.lopnStyle == PS_INSIDEFRAME)
+            lp.lopnStyle = PS_SOLID;
+        if (lp.lopnWidth.x <= 0)
+            lp.lopnWidth.x = 1;
+
+        POINT lppt{};
+        if (!GetCurrentPositionEx(hdc, &lppt))
+            return orig(hdc, x, y);
+
+        GlassCore::GdiUtils::LayeredStrokePen layeredStroke =
+            GlassCore::GdiUtils::LayeredStrokePen::TryCreateStyled(lp, kSysmonComboLBoxStrokeAlpha);
+        wil::unique_hpen drawPen;
+        if (!layeredStroke)
+            drawPen = GlassCore::GdiUtils::PenFromLogPen(lp);
+        HGDIOBJ hStroke = layeredStroke ? static_cast<HGDIOBJ>(layeredStroke.get())
+                                        : static_cast<HGDIOBJ>(drawPen.get());
+        if (!hStroke)
+            return orig(hdc, x, y);
+
+        wil::unique_hpen nullPen(CreatePen(PS_NULL, 0, 0));
+        if (!nullPen)
+            return orig(hdc, x, y);
+
+        HGDIOBJ old = SelectObject(hdc, nullPen.get());
+        orig(hdc, x, y);
+        SelectObject(hdc, hStroke);
+        MoveToEx(hdc, lppt.x, lppt.y, nullptr);
+        const BOOL r = orig(hdc, x, y);
+        SelectObject(hdc, old);
+        return r;
     }
 
     // ── Overall: MySelectObject ──────────────────────────────────────────────
@@ -1221,11 +1353,14 @@ namespace GlassCore::ComboLBox
         if (PVOID base = GetModuleHandleW(L"charmap.exe"))
             EnableHooksOnModule(base, OHK_BITBLT, enable);
 
-        // sysmon.ocx
+        // sysmon.ocx — настройки графиков Системного монитора (mmc):
+        // плитки (CreateSolidBrush/GetStockObject) + линии/пунктир (LineTo).
+        // Паритет BWM PaintHandler-ветки ComboLBox; Polyline там нет — только LineTo.
         if (PVOID base = GetModuleHandleW(L"sysmon.ocx"))
         {
             EnableHooksOnModule(base, OHK_CREATESOLIDBRUSH, enable);
             EnableHooksOnModule(base, OHK_GETSTOCKOBJECT, enable);
+            EnableHooksOnModule(base, OHK_LINETO, enable);
         }
 
         // EntryPointModule — EXE хост-процесса

@@ -26,6 +26,10 @@ namespace GlassCore::GdiUtils
 
         // Только PS_SOLID; иначе или при ошибке — пустой объект (вызывайте PenFromLogPen).
         [[nodiscard]] static LayeredStrokePen TryCreateSolid(const LOGPEN& lpIn, BYTE alpha) noexcept;
+
+        // SOLID/DASH/DOT/DASHDOT/DASHDOTDOT с альфой; пробелы пунктира прозрачны (не закрашиваются).
+        // INSIDEFRAME → SOLID. NULL/USERSTYLE/ошибка — пустой объект (вызывайте PenFromLogPen).
+        [[nodiscard]] static LayeredStrokePen TryCreateStyled(const LOGPEN& lpIn, BYTE alpha) noexcept;
     };
 
     // Подготовка HBITMAP к GdiAlphaBlend: Promise32BPP + опционально вырезание фона (как BWM HandleMenuBitmap).

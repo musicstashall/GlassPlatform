@@ -63,6 +63,66 @@ namespace GlassCore::GdiUtils
         return out;
     }
 
+    LayeredStrokePen LayeredStrokePen::TryCreateStyled(const LOGPEN& lpIn, BYTE alpha) noexcept
+    {
+        LayeredStrokePen out{};
+        if (alpha == 0)
+            return out;
+
+        LOGPEN lp = lpIn;
+        if (lp.lopnStyle == PS_INSIDEFRAME)
+            lp.lopnStyle = PS_SOLID;
+        const BYTE st = static_cast<BYTE>(lp.lopnStyle & 0xFU);
+        DWORD styleFlag = 0;
+        switch (st)
+        {
+        case PS_SOLID:      styleFlag = PS_SOLID;      break;
+        case PS_DASH:       styleFlag = PS_DASH;       break;
+        case PS_DOT:        styleFlag = PS_DOT;        break;
+        case PS_DASHDOT:    styleFlag = PS_DASHDOT;    break;
+        case PS_DASHDOTDOT: styleFlag = PS_DASHDOTDOT; break;
+        default:            return out;
+        }
+
+        int w = lp.lopnWidth.x <= 0 ? 1 : lp.lopnWidth.x;
+        if (w > 24)
+            return out;
+
+        const COLORREF rgb = lp.lopnColor & 0xFFFFFF;
+
+        BITMAPINFO bi{};
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = 1;
+        bi.bmiHeader.biHeight = -1;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+
+        UCHAR* bits = nullptr;
+        out.dib.reset(CreateDIBSection(nullptr, &bi, DIB_RGB_COLORS, reinterpret_cast<void**>(&bits), nullptr, 0));
+        if (!out.dib || !bits)
+        {
+            out.dib.reset();
+            return out;
+        }
+
+        bits[0] = PremulChannel(GetBValue(rgb), alpha);
+        bits[1] = PremulChannel(GetGValue(rgb), alpha);
+        bits[2] = PremulChannel(GetRValue(rgb), alpha);
+        bits[3] = alpha;
+
+        LOGBRUSH lb{};
+        lb.lbStyle = BS_PATTERN;
+        lb.lbColor = 0;
+        lb.lbHatch = reinterpret_cast<ULONG_PTR>(out.dib.get());
+
+        constexpr DWORD geoBase = PS_GEOMETRIC | PS_ENDCAP_ROUND | PS_JOIN_ROUND;
+        out.pen.reset(ExtCreatePen(geoBase | styleFlag, static_cast<DWORD>(w), &lb, 0, nullptr));
+        if (!out.pen)
+            out.dib.reset();
+        return out;
+    }
+
     wil::unique_hpen PenFromLogPen(const LOGPEN& lpIn) noexcept
     {
         LOGPEN lp = lpIn;
