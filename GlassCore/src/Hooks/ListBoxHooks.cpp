@@ -349,6 +349,12 @@ namespace GlassCore::ListBoxControl
                 }
             }
 
+            // BWM-паритет (WinHooks: ETO_OPAQUE → return TRUE без orig; ComboLBox: OPAQUE && !c → TRUE):
+            // фон уже залит выше (BLACKNESS [+alpha HIGHLIGHT]) — вызов orig с ETO_OPAQUE перекрасил бы
+            // rect дефолтной opaque-кистью поверх нашей (баг: на выделенной строке кисть без альфы).
+            if ((options & ETO_OPAQUE) && lprect && !c)
+                return TRUE;
+
             if (c && lpString && !(options & ETO_GLYPH_INDEX))
             {
                 RECT clip{};
