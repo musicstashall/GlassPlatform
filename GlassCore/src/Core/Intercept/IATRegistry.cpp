@@ -63,8 +63,48 @@ namespace GlassCore::Hooks
         return raw + offset;
     }
 
+    void IATRegistry::PreallocatePages(size_t pageCount)
+    {
+        auto lock = m_pageLock.lock_exclusive();
+
+        size_t ready = 0;
+        for (auto& page : m_pages)
+        {
+            if (page.used < Page::kCapacity && ++ready >= pageCount)
+                return;
+        }
+        while (ready < pageCount)
+        {
+            auto* raw = static_cast<uint8_t*>(VirtualAlloc(
+                nullptr,
+                Page::kCapacity,
+                MEM_COMMIT | MEM_RESERVE,
+                PAGE_EXECUTE_READWRITE
+            ));
+            if (!raw)
+                return;
+            auto& page = m_pages.emplace_back();
+            page.base = raw;
+            page.used = 0;
+            ++ready;
+        }
+    }
+
     IATRegistry::Trampoline* IATRegistry::AllocTrampoline(void* initialNext)
     {
+        // FIX owner-draw (dmdskmgr): сначала reuse из free-листа. Кодировку
+        // обновлять не нужно: адрес next неизменен (x86) либо RIP-relative (x64).
+        // Публикация next — через Interlocked, как в UpdateTrampolineNext.
+        {
+            auto freeLock = m_pageLock.lock_exclusive();
+            if (!m_freeTramps.empty())
+            {
+                Trampoline* t = m_freeTramps.back();
+                m_freeTramps.pop_back();
+                UpdateTrampolineNext(t, initialNext);
+                return t;
+            }
+        }
         // Аллоцируем с выравниванием 16 байт, чтобы поле next (offset=8)
         // оказалось выровнено → InterlockedExchangePointer атомарен.
         auto* mem = AllocRaw(sizeof(Trampoline), alignof(Trampoline));
@@ -288,13 +328,18 @@ namespace GlassCore::Hooks
         }
 
         // Трамплин удаляемого звена больше не нужен.
-        // Bump-allocator не освобождает поблочно: просто помечаем как неиспользуемый
-        // (страница будет переиспользована после Shutdown/реинициализации).
         // Реальный free опасен — трамплин мог быть кэширован в branch predictor.
         // Безопасная альтернатива: записать в его next_ptr адрес оригинала,
-        // чтобы случайный вызов (из кэша предиктора) не вёл в мусор.
+        // чтобы случайный вызов (из кэша предиктора) не вёл в мусор,
+        // и вернуть в reuse-пул (FIX owner-draw: шторм Arm/Disarm больше
+        // не растит RWX-страницы; порядок локов — сначала m_slotLock, затем
+        // m_pageLock, как в Register → AllocTrampoline).
         if (pos->trampoline)
+        {
             UpdateTrampolineNext(pos->trampoline, rec.original);
+            auto freeLock = m_pageLock.lock_exclusive();
+            m_freeTramps.push_back(pos->trampoline);
+        }
 
         chain.erase(pos);
 
@@ -329,10 +374,17 @@ namespace GlassCore::Hooks
             });
 
         // Инвалидируем трамплины (на случай кэшей предиктора, см. Unregister)
-        for (auto& link : rec.chain)
+        // и возвращаем их в reuse-пул (FIX owner-draw).
         {
-            if (link.trampoline)
-                UpdateTrampolineNext(link.trampoline, rec.original);
+            auto freeLock = m_pageLock.lock_exclusive();
+            for (auto& link : rec.chain)
+            {
+                if (link.trampoline)
+                {
+                    UpdateTrampolineNext(link.trampoline, rec.original);
+                    m_freeTramps.push_back(link.trampoline);
+                }
+            }
         }
 
         //DebugLog(L"[IATRegistry] UnregisterAll: slot=%p restored orig=%p", iatSlot, rec.original);
@@ -367,6 +419,7 @@ namespace GlassCore::Hooks
                     VirtualFree(page.base, 0, MEM_RELEASE);
             }
             m_pages.clear();
+            m_freeTramps.clear();
         }
     }
 

@@ -715,26 +715,46 @@ namespace GlassCore::Root
             && cache.compatDcHooks.empty() && !cache.winFormsDrawTextEx)
             return;
 
-        auto lock = s_cacheLock.lock_exclusive();
-        auto& entry = s_rootCache[hRoot];
-        // Мержим — DirectUI может добавить через AppendRootPaintSpecs раньше
-        entry.paintHooks.insert(entry.paintHooks.end(), cache.paintHooks.begin(), cache.paintHooks.end());
-        entry.dcHooks.insert(entry.dcHooks.end(), cache.dcHooks.begin(), cache.dcHooks.end());
-        entry.compatDcHooks.insert(entry.compatDcHooks.end(), cache.compatDcHooks.begin(), cache.compatDcHooks.end());
-        entry.winFormsDrawTextEx |= cache.winFormsDrawTextEx;
+        // Предпрогрев IAT-кешей модулей из спеков (только чтение) — холодный скан PE
+        // уходит из первого paint-кадра в attach окна. Пустые модули пропускаются.
+        // Прогрев — строго после освобождения s_cacheLock (PrewarmRootHook берёт
+        // свой g_rootLock; вложенность запрещена).
+        std::vector<void*> prewarmModules;
+        size_t paintCount = 0, dcCount = 0, compatCount = 0;
+        bool winForms = false;
+        {
+            auto lock = s_cacheLock.lock_exclusive();
+            auto& entry = s_rootCache[hRoot];
+            // Мержим — DirectUI может добавить через AppendRootPaintSpecs раньше
+            entry.paintHooks.insert(entry.paintHooks.end(), cache.paintHooks.begin(), cache.paintHooks.end());
+            entry.dcHooks.insert(entry.dcHooks.end(), cache.dcHooks.begin(), cache.dcHooks.end());
+            entry.compatDcHooks.insert(entry.compatDcHooks.end(), cache.compatDcHooks.begin(), cache.compatDcHooks.end());
+            entry.winFormsDrawTextEx |= cache.winFormsDrawTextEx;
+            prewarmModules.reserve(
+                entry.paintHooks.size() + entry.dcHooks.size() + entry.compatDcHooks.size());
+            for (auto& [mod, idx] : entry.paintHooks) { (void)idx; if (mod) prewarmModules.push_back(mod); }
+            for (auto& [mod, idx] : entry.dcHooks) { (void)idx; if (mod) prewarmModules.push_back(mod); }
+            for (auto& [mod, idx] : entry.compatDcHooks) { (void)idx; if (mod) prewarmModules.push_back(mod); }
+            paintCount = entry.paintHooks.size();
+            dcCount = entry.dcHooks.size();
+            compatCount = entry.compatDcHooks.size();
+            winForms = entry.winFormsDrawTextEx;
+        }
+        for (void* mod : prewarmModules)
+            PrewarmRootHook(mod);
 
         wchar_t cn[256]{};
         GetClassNameW(hRoot, cn, _countof(cn));
         DebugLog(DBG_NORMAL,
             L"[GlassCore][Root] Attach: hWnd=0x%p class=\"%s\" paint=%zu dc=%zu compat=%zu winForms=%d",
             hRoot, cn,
-            entry.paintHooks.size(), entry.dcHooks.size(), entry.compatDcHooks.size(),
-            entry.winFormsDrawTextEx ? 1 : 0);
+            paintCount, dcCount, compatCount,
+            winForms ? 1 : 0);
         if (IsMmcChartSessionClass(cn))
         {
             DebugLog(DBG_IMPORTANT,
                 L"[GlassCore][Root][Attach][MMC] итог кеша для hwnd=0x%p: paint=%zu dc=%zu compat=%zu (проверка сессий BeginPaint/GetDC)",
-                hRoot, entry.paintHooks.size(), entry.dcHooks.size(), entry.compatDcHooks.size());
+                hRoot, paintCount, dcCount, compatCount);
         }
     }
 

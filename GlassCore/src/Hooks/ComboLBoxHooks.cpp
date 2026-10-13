@@ -276,6 +276,37 @@ namespace GlassCore::ComboLBox
         g_overallMap.clear();
     }
 
+    // ---- Предпрогрев IAT-кеша (только чтение, без записей) ------------------
+    // Холодный скан PE уходит из paint-кадра: в Startup (уже загруженные)
+    // и в подписку ModuleHandler (поздняя подгрузка, под loader-lock безопасно).
+    static void PrewarmModule(void* mod) noexcept
+    {
+        if (!mod) return;
+        auto lock = g_overallLock.lock_exclusive();
+        auto [it, inserted] = g_overallMap.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(mod),
+            std::forward_as_tuple(g_overallHookDep, mod));
+        if (inserted)
+            it->second.CacheHookData();
+    }
+
+    // Только свои модули — чужие не кешируем (карта не раздувается).
+    static void PrewarmForModule(HMODULE mod, const wchar_t* base) noexcept
+    {
+        if (!mod || !base) return;
+        if (mod == GlassCore::ModuleHandler::g_entryPointModule)
+        {
+            PrewarmModule(mod);
+            return;
+        }
+        if (_wcsicmp(base, L"comctl32.dll") != 0 && _wcsicmp(base, L"COMDLG32.dll") != 0
+            && _wcsicmp(base, L"MFC42u.dll") != 0 && _wcsicmp(base, L"dmdskmgr.dll") != 0
+            && _wcsicmp(base, L"dmview.ocx") != 0 && _wcsicmp(base, L"sysmon.ocx") != 0)
+            return;
+        PrewarmModule(mod);
+    }
+
     // ---- GetCallerModule ----------------------------------------------------
     static HMODULE GetCallerModule(void* returnAddress)
     {
@@ -538,6 +569,7 @@ namespace GlassCore::ComboLBox
             return orig ? orig(hdc, x, y, options, lprect, lpString, c, lpDx)
             : ExtTextOutW(hdc, x, y, options, lprect, lpString, c, lpDx);
 
+
         if ((options & ETO_CLIPPED) && lprect)
         {
             RECT client{};
@@ -556,7 +588,15 @@ namespace GlassCore::ComboLBox
                 lprect->right - lprect->left, lprect->bottom - lprect->top, BLACKNESS);
 
             const COLORREF bk = GetBkColor(hdc);
-            if (bk == GetSysColor(COLOR_HIGHLIGHT))
+            RECT client{};
+            if (h_combolbox)
+                GetClientRect(h_combolbox, &client);
+            const bool mfcInset = IsModuleName(callerMod, L"MFC42u.dll")
+                && client.left != lprect->left && client.right != lprect->right;
+            const bool coloredBk = bk
+                && bk != GetSysColor(COLOR_WINDOW)
+                && bk != 0xffffff;
+            if (mfcInset || coloredBk)
             {
                 HBRUSH hi = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(bk, 255);
                 if (hi)
@@ -565,7 +605,7 @@ namespace GlassCore::ComboLBox
                     DeleteObject(hi);
                 }
             }
-            // WINDOW / white / 0 (remap SetBkColor) — без opaque fill
+            // WINDOW / white / 0 без MFC-inset — без opaque fill (паритет BWM)
         }
 
         if (c && lpString && !(options & ETO_GLYPH_INDEX))
@@ -583,8 +623,9 @@ namespace GlassCore::ComboLBox
                 dwTextFlags |= DT_RTLREADING;
 
             int result = 0;
-            if (!FAILED(GlassCore::Text::DrawTextWithAlpha(
-                    hdc, lpString, static_cast<int>(c), &textRect, dwTextFlags, result)))
+            const bool lbTextOk = lpString && !FAILED(GlassCore::Text::DrawTextWithAlpha(
+                    hdc, lpString, static_cast<int>(c), &textRect, dwTextFlags, result));
+            if (lbTextOk)
             {
                 if (options & ETO_CLIPPED)
                     SelectClipRgn(hdc, nullptr);
@@ -1198,6 +1239,7 @@ namespace GlassCore::ComboLBox
 
     static void ArmSessionHooks(HWND /*hWnd*/, HMODULE /*callerMod*/) noexcept
     {
+        // DEBUG diskmgmt: баланс arm/disarm — снять после диагностики.
         if (g_hooksArmed)
             return;
         EnableComboHooks(true);
@@ -1207,6 +1249,7 @@ namespace GlassCore::ComboLBox
 
     static void DisarmSessionHooks(HWND /*hWnd*/, HMODULE /*callerMod*/) noexcept
     {
+        // DEBUG diskmgmt: баланс arm/disarm — снять после диагностики.
         if (!g_hooksArmed || IsActive())
             return;
         EnableComboHooks(false);
@@ -1255,13 +1298,18 @@ namespace GlassCore::ComboLBox
         ArmSessionHooks(hWnd, callerMod);
     }
 
-    static void OnHotEndGlobal(HWND /*hWnd*/, HMODULE /*callerMod*/)
+    static void OnHotEndGlobal(HWND hWnd, HMODULE callerMod)
     {
         if (!g_activeHotMod) return;
         g_activeHotMod = nullptr;
         if (--g_hotRef < 0) g_hotRef = 0;
-        // Не Disarm: цепочки GetDC/ReleaseDC до BeginPaint иначе thrash IAT.
+        // FIX owner-draw (dmdskmgr): гасим и на этом канале, иначе окно остаётся
+        // armed-but-inactive — неактивная голова отдаёт orig в трамплин, а хвост
+        // цепочки (Root) слепнет по caller и уходит в сырой API мимо стекла.
+        // Disarm внутри сам проверяет !IsActive, thrash ограничен refcount-гейтом.
+        DisarmSessionHooks(hWnd, callerMod);
         if (!IsActive()) h_combolbox = nullptr;
+        // DEBUG diskmgmt: баланс refs — снять после диагностики.
     }
 
     static void OnScrollBeginGlobal(HWND hWnd, HMODULE callerMod)
@@ -1282,6 +1330,7 @@ namespace GlassCore::ComboLBox
         if (--g_scrollRef < 0) g_scrollRef = 0;
         DisarmSessionHooks(hWnd, callerMod);
         if (!IsActive()) h_combolbox = nullptr;
+        // DEBUG diskmgmt: баланс refs — снять после диагностики.
     }
 
     // =========================================================================
@@ -1471,6 +1520,14 @@ namespace GlassCore::ComboLBox
         // Явные g_comctl32New/g_comctl32Legacy вместо неоднозначного
         // GetModuleHandleW(L"comctl32.dll") (возвращает один, неизвестно какой).
         EnsureComctl32Ready();
+        PrewarmModule(g_comctl32Module);
+        PrewarmModule(g_comctl32ModuleLegacy);
+        PrewarmForModule(GetModuleHandleW(L"COMDLG32.dll"), L"COMDLG32.dll");
+        PrewarmForModule(GetModuleHandleW(L"MFC42u.dll"), L"MFC42u.dll");
+        PrewarmForModule(GetModuleHandleW(L"dmdskmgr.dll"), L"dmdskmgr.dll");
+        PrewarmForModule(GetModuleHandleW(L"dmview.ocx"), L"dmview.ocx");
+        PrewarmForModule(GetModuleHandleW(L"sysmon.ocx"), L"sysmon.ocx");
+        GlassCore::ModuleHandler::RegisterModulePrewarmHandler(PrewarmForModule);
 
         if (!g_comctl32Module && !g_comctl32ModuleLegacy)
         {

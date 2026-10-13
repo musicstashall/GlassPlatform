@@ -34,6 +34,13 @@ namespace GlassCore::Hooks
         std::array<std::pair<OffsetStorage, std::optional<OffsetStorage>>, hookCount> hookInfoCache{};
         std::array<std::pair<void*, std::optional<HMODULE>>, hookCount> hookTable{};
         std::array<size_t, hookCount> hookRef{};
+        // FIX perf (Explorer: слоты DrawTextW/SetBkColor отсутствуют в PE — скан
+        // таблицы импорта по 2-3мс на КАЖДОМ тогле). Negative cache: попытка поиска
+        // выполняется один раз за жизнь диспетчера; отсутствие импорта постоянно.
+        // Безопасность: delayload-дескрипторы находятся первым же сканом независимо
+        // от загрузки DLL, обычные импорты статичны; смена базы модуля — отдельный
+        // известный долг (stale hookInfoCache), классом не хуже.
+        std::array<bool, hookCount> hookCacheScanned{};
         mutable wil::srwlock hookLock{};
         void* moduleAddress{ nullptr };
 
@@ -121,8 +128,13 @@ namespace GlassCore::Hooks
 
             auto lock = hookLock.lock_exclusive();
 
-            if (!hookInfoCache[index].first.IsValid())
+            // Negative cache: слот, отсутствующий в PE (например DrawTextW/SetBkColor
+            // в Explorer.EXE), ищется один раз за жизнь диспетчера, а не на каждом тогле.
+            if (!hookInfoCache[index].first.IsValid() && !hookCacheScanned[index])
+            {
                 CacheHookData(index, true);
+                hookCacheScanned[index] = true;
+            }
 
             if (!hookInfoCache[index].first.IsValid())
                 return false;
@@ -156,7 +168,11 @@ namespace GlassCore::Hooks
                 auto  funcName = std::get<1>(dep);
                 auto  detour = std::get<2>(dep);
 
-                if (iatModule.has_value())
+                // FIX perf (Explorer delayload): резолв — только пока delayload
+                // не резолвлен (модуль ещё null). Повторный резолв на каждом тогле
+                // 0→1 дёргал loader-lock, LoadLibrary, GetProcAddress и 2 WriteMemory
+                // (~2-3мс под контеншном); слот с готовым модулем хукается напрямую.
+                if (iatModule.has_value() && *iatModule.value() == nullptr)
                 {
                     Hooks::ResolveDelayloadIAT(
                         std::make_pair(iatModule.value(), iatFunc),
@@ -186,11 +202,17 @@ namespace GlassCore::Hooks
 
                 if (iatModule.has_value() && hookTable[index].second.has_value())
                 {
-                    Hooks::WriteMemory(iatModule.value(), [&]
-                        {
-                            *iatModule.value() = hookTable[index].second.value();
-                            hookTable[index].second.reset();
-                        });
+                    // FIX perf: реставра модуля — только если значение реально менялось,
+                    // иначе это лишний VirtualProtect-цикл на каждом тогле 1→0.
+                    HMODULE savedModule = hookTable[index].second.value();
+                    hookTable[index].second.reset();
+                    if (*iatModule.value() != savedModule)
+                    {
+                        Hooks::WriteMemory(iatModule.value(), [&]
+                            {
+                                *iatModule.value() = savedModule;
+                            });
+                    }
                 }
             }
 
@@ -238,10 +260,15 @@ namespace GlassCore::Hooks
                     && hookTable[i].second.has_value())
                 {
                     auto* maddr = reinterpret_cast<HMODULE*>(moduleOffset->To(moduleAddress));
-                    Hooks::WriteMemory(maddr, [&]
-                        {
-                            *maddr = hookTable[i].second.value();
-                        });
+                    // FIX perf: тот же guard, что в EnableHook — без лишнего протекта.
+                    HMODULE savedModule = hookTable[i].second.value();
+                    if (*maddr != savedModule)
+                    {
+                        Hooks::WriteMemory(maddr, [&]
+                            {
+                                *maddr = savedModule;
+                            });
+                    }
                 }
 
                 hookRef[i] = 0;

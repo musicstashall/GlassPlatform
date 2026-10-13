@@ -241,17 +241,19 @@ namespace GlassCore::Root
             HWND w = HwndFromDc(hdc);
             if (w)
                 return w;
-            if (HWND owner = GlassCore::PaintDispatcher::GetStackOwnerForDc(hdc))
-                return owner;
+            if (HWND stackOwner = GlassCore::PaintDispatcher::GetStackOwnerForDc(hdc))
+            {
+                return stackOwner;
+            }
             if (!caller)
                 return nullptr;
             /*if (!CallerBaseIs(caller, L"dmview.ocx") && !CallerBaseIs(caller, L"dmdskmgr.dll")
                 && !CallerBaseIs(caller, L"MFC42u.dll") && !CallerBaseIs(caller, L"comctl32.dll"))
                 return nullptr;*/
             HWND s = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
-            if (!s || !IsWindow(s) || !GlassCore::Root::HasRootHookCache(s))
-                return nullptr;
-            return s;
+            const bool sAlive = s && ::IsWindow(s);
+            HWND host = (sAlive && GlassCore::Root::HasRootHookCache(s)) ? s : nullptr;
+            return host;
         }
 
         [[nodiscard]] static std::wstring CallerBaseName(HMODULE m) noexcept
@@ -334,6 +336,149 @@ namespace GlassCore::Root
             if (rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF) && CallerBaseIs(caller, L"sysmon.ocx"))
                 return;
             FillRect(hdc, lpr, brush.get());
+        }
+
+        // BWM OverallHooks:1099-1114 без GDI+: штриховка плиток комбобокса diskmgmt
+        // (dmdskmgr + ComboBox/ComboLBox) — 8×8 32bpp DIB с альфой (эталон — ComboLBox).
+        static const BYTE kRootHatchPatterns[6][8] =
+        {
+            { 0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0x00 }, // HS_HORIZONTAL
+            { 0x08,0x08,0x08,0x08,0x08,0x08,0x08,0x08 }, // HS_VERTICAL
+            { 0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80 }, // HS_FDIAGONAL
+            { 0x80,0x40,0x20,0x10,0x08,0x04,0x02,0x01 }, // HS_BDIAGONAL
+            { 0x08,0x08,0x08,0xFF,0x08,0x08,0x08,0x08 }, // HS_CROSS
+            { 0x81,0x42,0x24,0x18,0x18,0x24,0x42,0x81 }, // HS_DIAGCROSS
+        };
+
+        [[nodiscard]] static HBRUSH CreateRootAlphaHatchBrush(int fnStyle, COLORREF color) noexcept
+        {
+            if (fnStyle < 0 || fnStyle > 5)
+                return Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255);
+
+            const BYTE r = GetRValue(color);
+            const BYTE g = GetGValue(color);
+            const BYTE b = GetBValue(color);
+
+            BITMAPV4HEADER bmi{};
+            bmi.bV4Size = sizeof(BITMAPV4HEADER);
+            bmi.bV4Width = 8;
+            bmi.bV4Height = -8; // top-down
+            bmi.bV4Planes = 1;
+            bmi.bV4BitCount = 32;
+            bmi.bV4V4Compression = BI_BITFIELDS;
+            bmi.bV4RedMask = 0x00FF0000;
+            bmi.bV4GreenMask = 0x0000FF00;
+            bmi.bV4BlueMask = 0x000000FF;
+            bmi.bV4AlphaMask = 0xFF000000;
+
+            void* bits = nullptr;
+            HBITMAP hbm = CreateDIBSection(nullptr,
+                reinterpret_cast<BITMAPINFO*>(&bmi),
+                DIB_RGB_COLORS, &bits, nullptr, 0);
+            if (!hbm)
+                return nullptr;
+
+            auto* px = static_cast<DWORD*>(bits);
+            const DWORD fg = 0xFF000000u
+                | (static_cast<DWORD>(r) << 16)
+                | (static_cast<DWORD>(g) << 8)
+                | b;
+            const DWORD bg = 0x00000000u; // прозрачный
+
+            const auto& rows = kRootHatchPatterns[fnStyle];
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++)
+                    px[y * 8 + x] = (rows[y] & (0x80 >> x)) ? fg : bg;
+
+            HBRUSH hbr = CreatePatternBrush(hbm);
+            DeleteObject(hbm); // кисть владеет копией
+            return hbr;
+        }
+
+        // BWM ComboBoxHooks::WorkExtTextOutW через OverallHooks::MyExtTextOutW: плитки
+        // комбобоксов diskmgmt (dmdskmgr/dmview, поле и список). Сессионный аналог для
+        // comctl32/COMDLG32/MFC42u — ComboBoxControlHooks::Overall_MyExtTextOutW.
+        [[nodiscard]] static bool WantComboBoxStyleExtTextOut(HMODULE caller, LPCWSTR cls) noexcept
+        {
+            if (!StrEqI(cls, L"ComboBox") && !StrEqI(cls, L"ComboLBox"))
+                return false;
+            return CallerBaseIs(caller, L"dmdskmgr.dll") || CallerBaseIs(caller, L"dmview.ocx")
+                || CallerBaseIs(caller, L"MFC42u.dll") || CallerBaseIs(caller, L"comctl32.dll");
+        }
+
+        static BOOL ComboBoxStyleExtTextOut(HDC hdc, int x, int y, UINT options, const RECT* lprect,
+            LPCWSTR lpString, UINT c, const INT* lpDx, HWND hWnd, HMODULE caller,
+            BOOL (WINAPI* orig)(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*))
+        {
+            auto callOrig = [&](UINT opts) -> BOOL
+            {
+                if (orig)
+                    return orig(hdc, x, y, opts, lprect, lpString, c, lpDx);
+                return ExtTextOutW(hdc, x, y, opts, lprect, lpString, c, lpDx);
+            };
+
+            RECT client{};
+            if (hWnd)
+                GetClientRect(hWnd, &client);
+
+            if ((options & (ETO_OPAQUE | ETO_CLIPPED)) && lprect)
+            {
+                if (options & ETO_CLIPPED)
+                {
+                    IntersectClipRect(hdc,
+                        (std::max)(static_cast<int>(x), static_cast<int>(lprect->left)),
+                        (std::max)(static_cast<int>(y), static_cast<int>(lprect->top)),
+                        lprect->right,
+                        (std::min)(client.bottom, lprect->bottom));
+                }
+
+                PatBlt(hdc, lprect->left, lprect->top,
+                    lprect->right - lprect->left, lprect->bottom - lprect->top, BLACKNESS);
+
+                if (options & ETO_OPAQUE)
+                {
+                    const COLORREF bk = GetBkColor(hdc);
+                    // Дословно BWM ComboBoxHooks::WorkExtTextOutW — без лишних гардов.
+                    const bool mfcInset = CallerBaseIs(caller, L"MFC42u.dll")
+                        && client.left != lprect->left && client.right != lprect->right;
+                    const bool coloredBk = bk
+                        && bk != GetSysColor(COLOR_WINDOW)
+                        && bk != 0xffffff;
+                    if (mfcInset || coloredBk)
+                    {
+                        HBRUSH hi = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(bk, 255);
+                        if (hi)
+                        {
+                            FillRect(hdc, lprect, hi);
+                            DeleteObject(hi);
+                        }
+                    }
+                }
+            }
+
+            if (options == ETO_GLYPH_INDEX || options == ETO_IGNORELANGUAGE
+                || (options == ETO_OPAQUE && !c) || !c)
+            {
+                UINT stripped = options;
+                if (stripped != ETO_OPAQUE)
+                    stripped -= (stripped & ETO_OPAQUE);
+                if (stripped == ETO_OPAQUE && !c)
+                    return TRUE;
+                return callOrig(stripped);
+            }
+
+            RECT textRect = client;
+            textRect.left = x;
+            textRect.top = y;
+
+            int result = 0;
+            const bool ok = lpString && !FAILED(GlassCore::Text::DrawTextWithAlpha(
+                hdc, lpString, static_cast<int>(c), &textRect, GetTextAlign(hdc), result));
+            if (options & ETO_CLIPPED)
+                SelectClipRgn(hdc, nullptr);
+            if (ok)
+                return TRUE;
+            return callOrig(options);
         }
 
         // ── Root GDI dispatcher ─────────────────────────────────────────────
@@ -430,6 +575,24 @@ namespace GlassCore::Root
             return it->second.EnableHook(index, enable);
         }
 
+        void PrewarmRootHook(void* baseAddress) noexcept
+        {
+            if (!baseAddress)
+                return;
+
+            auto lock = g_rootLock.lock_exclusive();
+            auto it = g_rootMap.find(baseAddress);
+            if (it == g_rootMap.end())
+            {
+                auto [ins, ok] = g_rootMap.emplace(
+                    std::piecewise_construct,
+                    std::forward_as_tuple(baseAddress),
+                    std::forward_as_tuple(g_rootHookDep, baseAddress));
+                it = ins;
+                it->second.CacheHookData();
+            }
+        }
+
         void DisableAllRootHooks() noexcept
         {
             auto lock = g_rootLock.lock_exclusive();
@@ -486,6 +649,19 @@ namespace GlassCore::Root
                 return ExtTextOutW(hdc, x, y, opt, lpr, s, c, dx);
             if (g_shutdown.load(std::memory_order_acquire))
                 return o(hdc, x, y, opt, lpr, s, c, dx);
+            // Плитки комбобоксов diskmgmt (BWM WorkExtTextOutW): полный паритет фона
+            // и текста, общий путь ниже их не покрывает (там только sysmon-классы).
+            {
+                HMODULE caller = GetCallerModule(_ReturnAddress());
+                HWND hW = HwndFromDcOrMmcSession(hdc, caller);
+                wchar_t cls[128]{};
+                if (hW)
+                    GetClassNameW(hW, cls, _countof(cls));
+                if (WantComboBoxStyleExtTextOut(caller, cls))
+                {
+                    return ComboBoxStyleExtTextOut(hdc, x, y, opt, lpr, s, c, dx, hW, caller, o);
+                }
+            }
             if (opt & ETO_OPAQUE)
             {
                 if (lpr)
@@ -510,7 +686,9 @@ namespace GlassCore::Root
                     }
                 }
                 if (!s || c == 0)
+                {
                     return TRUE;
+                }
             }
 
             if (opt == ETO_GLYPH_INDEX || opt == ETO_IGNORELANGUAGE)
@@ -524,7 +702,8 @@ namespace GlassCore::Root
             UINT align = (opt & ETO_RTLREADING) ? (DT_RIGHT | DT_RTLREADING) : DT_LEFT;
             SetBkMode(hdc, TRANSPARENT);
             int r = 0;
-            if (!FAILED(GlassCore::Text::DrawTextWithAlpha(hdc, s, c, &clip, align, r)))
+            const bool afxTextOk = !FAILED(GlassCore::Text::DrawTextWithAlpha(hdc, s, c, &clip, align, r));
+            if (afxTextOk)
                 return r;
             return o(hdc, x, y, opt, lpr, s, c, dx);
         }
@@ -547,14 +726,18 @@ namespace GlassCore::Root
             if (!g_shutdown.load(std::memory_order_acquire)
                 && (0xFFFFFF & color) == GetSysColor(COLOR_WINDOW))
             {
+                // Лог 2026-10-06: ремап действует ТОЛЬКО для MMC-графиков (иначе
+                // SetBkColor(WHITE) от MFC42u для плиток комбобокса diskmgmt приходил
+                // в ExtTextOut уже чёрным — BWM там не ремапит). Строка color = 0
+                // раньше стояла вне if — накрывала все окна и коллеры.
                 if (IsMmcChartDiagCaller(callerBase) || StrEqI(cls, L"ChartGraphClass")
                     || StrEqI(cls, L"PerfStatus") || StrEqI(cls, L"SysmonCtrl"))
                 {
                     DebugLog(DBG_NORMAL,
                         L"[GlassCore][Root][MMC] SetBkColor: COLOR_WINDOW→0 hdc=0x%p hwndDC=0x%p caller=%s cls=\"%s\"",
                         hdc, hFromDc, callerBase, cls);
+                    color = 0;
                 }
-                color = 0;
             }
 
             if (!g_shutdown.load(std::memory_order_acquire) && StrEqI(cls, L"AfxWnd42u")
@@ -594,39 +777,36 @@ namespace GlassCore::Root
             if (g_shutdown.load(std::memory_order_acquire))
                 return o(color);
 
+            // BWM-паритет (WinHooks::MyCreateSolidBrush): глобальный перехват
+            // создания фоновых кистей. Свои вызовы не трогаем, чтобы не
+            // закольцевать собственные alpha-кисти.
+            static HMODULE s_selfMod = ::GetModuleHandleW(L"GlassCore.dll");
+            if (caller && caller == s_selfMod)
+                return o(color);
+
             wchar_t baseBuf[MAX_PATH]{};
             GetModuleFileNameW(caller, baseBuf, MAX_PATH);
             const std::wstring base = BasenamePtr(baseBuf);
 
-            const bool isComdlg = StrEqI(base.c_str(), L"COMDLG32.dll");
-            const bool isInet = StrEqI(base.c_str(), L"inetcpl.cpl");
-            const bool isSysmon = StrEqI(base.c_str(), L"sysmon.ocx");
-            const bool isWdc = StrEqI(base.c_str(), L"wdc.dll");
-            // BWM OverallHooks::MyCreateSolidBrush:1222-1228 — MFC42u + Comctl32 в whitelist.
-            const bool isMfc = StrEqI(base.c_str(), L"MFC42u.dll");
-            const bool isCc = StrEqI(base.c_str(), L"comctl32.dll");
-
-            if (isComdlg || isInet || isSysmon || isWdc || isMfc || isCc)
+            // BWM: COMDLG32 — только alpha-обёртка.
+            if (StrEqI(base.c_str(), L"COMDLG32.dll"))
             {
-                if (isSysmon
-                    && (((0xFFFFFF & color) == GetSysColor(COLOR_WINDOW))
-                        || ((0xFFFFFF & color) == GetSysColor(COLOR_BTNFACE))))
-                    color = RGB(0, 0, 0);
-                else
-                {
-                    HBRUSH b = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255);
-                    if (b)
-                        return b;
-                }
-            }
-            else if (caller == GlassCore::ModuleHandler::g_entryPointModule)
-            {
-                if (((0xFFFFFF & color) == GetSysColor(COLOR_WINDOW))
-                    || ((0xFFFFFF & color) == GetSysColor(COLOR_BTNFACE)))
-                    color = RGB(0, 0, 0);
+                HBRUSH b = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255);
+                return b ? b : o(color);
             }
 
-            return o(color);
+            // BWM: 0 / window / btnface / цвета темы — в чёрный (прозрачный фон).
+            const COLORREF plain = color & 0xFFFFFF;
+            if (!plain
+                || plain == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
+                || plain == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF)
+                || Shared::ThemeHelper::IsThemeColor(color, L"ExplorerNavPane")
+                || Shared::ThemeHelper::IsThemeColor(color, L"ProperTree"))
+                return o(RGB(0, 0, 0));
+
+            // Остальное — alpha-кисть для корректного композитинга.
+            HBRUSH b = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255);
+            return b ? b : o(color);
         }
 
         HGDIOBJ WINAPI Root_MySelectObject(HDC hdc, HGDIOBJ h)
@@ -1059,6 +1239,8 @@ namespace GlassCore::Root
 
             const bool isAfx = StrEqI(cls, L"AfxWnd42u");
             const bool isDmView = CallerBaseIs(caller, L"dmview.ocx");
+            const bool isDmdskmgr = CallerBaseIs(caller, L"dmdskmgr.dll");
+            const bool isCombo = StrEqI(cls, L"ComboBox") || StrEqI(cls, L"ComboLBox");
 
             if (!lprc || !hbr)
                 return o(hDC, lprc, hbr);
@@ -1069,12 +1251,14 @@ namespace GlassCore::Root
 
             if (lb.lbStyle == BS_SOLID)
             {
-                // BWM OverallHooks:1054-1062 — только ветка dmview.ocx + AfxWnd42u
-                // (квадратики под рисунками дисков). Комбобокс — в ComboLBoxHooks,
-                // SysListView32 — в ListViewHooks, здесь им не место.
+                // BWM OverallHooks:1054-1062 — ветка dmview.ocx + AfxWnd42u
+                // (квадратики под рисунками дисков) и dmdskmgr + ComboBox/ComboLBox
+                // (цветные плитки на комбобоксе — любой сплошной цвет в alpha-кисть).
+                // SysListView32 — в ListViewHooks, здесь ему не место.
                 if (lb.lbColor == GetSysColor(COLOR_BTNFACE)
                     || lb.lbColor == GetSysColor(COLOR_HIGHLIGHT)
-                    || (isDmView && isAfx))
+                    || (isDmView && isAfx)
+                    || (isDmdskmgr && isCombo))
                 {
                     HBRUSH alphaBrush = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(lb.lbColor, 255);
                     const int res = alphaBrush ? o(hDC, lprc, alphaBrush) : 0;
@@ -1086,8 +1270,22 @@ namespace GlassCore::Root
             }
             else if (lb.lbStyle == BS_HATCHED)
             {
-                // BWM OverallHooks:1099-1114 — только ветка dmview.ocx + AfxWnd42u.
-                // Штриховку не трогать: фон штриховки на плитках корректен.
+                // BWM OverallHooks:1099-1114 — штриховка плиток: dmview.ocx + AfxWnd42u
+                // (тело ниже не трогать) и dmdskmgr + ComboBox/ComboLBox («Узор» diskmgmt,
+                // цветные штриховки на комбобоксе — DIB-узор с альфой, без GDI+).
+                if (isDmdskmgr && isCombo)
+                {
+                    PatBlt(hDC, lprc->left, lprc->top,
+                        lprc->right - lprc->left, lprc->bottom - lprc->top, BLACKNESS);
+                    HBRUSH hatch = CreateRootAlphaHatchBrush(static_cast<int>(lb.lbHatch), lb.lbColor);
+                    if (hatch)
+                    {
+                        const int res = o(hDC, lprc, hatch);
+                        DeleteObject(hatch);
+                        return res;
+                    }
+                    return 1;
+                }
                 if (isDmView && isAfx)
                 {
                     PatBlt(hDC, lprc->left, lprc->top,

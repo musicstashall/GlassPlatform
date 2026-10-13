@@ -17,9 +17,6 @@
 
 namespace
 {
-    thread_local int  s_lastHotItem = -1;
-    thread_local HWND s_lastHotHwnd = nullptr;
-
     // Отдельная SEH-обёртка: в ComboLBoxSubclassProc есть C++ объекты (C2712).
     LRESULT SafeDefSubclassProcNc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) noexcept
     {
@@ -207,8 +204,6 @@ namespace
         {
             if (!wParam)
             {
-                s_lastHotItem = -1;
-                s_lastHotHwnd = nullptr;
                 // ComboLBox скрывается — снимаем DWM-эффекты (backdrop, corners, border).
                 // В отличие от меню, ComboLBox НЕ уничтожается при скрытии и живёт дальше.
                 // При повторном показе OnComboLBoxShow восстановит эффекты.
@@ -218,8 +213,6 @@ namespace
                     p->OnComboLBoxDetach(hWnd);
                 return DefSubclassProc(hWnd, uMsg, wParam, lParam);
             }
-            s_lastHotItem = static_cast<int>(SendMessage(hWnd, LB_GETCURSEL, 0, 0));
-            s_lastHotHwnd = hWnd;
             DebugLog(L"[WndCompat][ComboLBox] ComboLBox: WM_SHOWWINDOW (show) hwnd=0x%p", hWnd);
 
             // Системная настройка анимации ComboBox (BWM pattern)

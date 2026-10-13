@@ -1142,10 +1142,47 @@ namespace GlassCore::EditControl
     // =========================================================================
     void Prepare() {}
 
+    // Предпрогрев IAT-кеша (только чтение: emplace + CacheHookData, без записей).
+    // Холодный скан PE уходит из paint-кадра: в Startup (уже загруженные)
+    // и в подписку ModuleHandler (поздняя подгрузка, под loader-lock безопасно).
+    static void PrewarmModule(void* mod) noexcept
+    {
+        if (!mod) return;
+        auto lock = g_overallLock.lock_exclusive();
+        auto [it, inserted] = g_overallMap.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(mod),
+            std::forward_as_tuple(g_editHookDep, mod));
+        if (inserted)
+            it->second.CacheHookData();
+    }
+
+    // Только свои модули — чужие не кешируем (карта не раздувается).
+    static void PrewarmForModule(HMODULE mod, const wchar_t* base) noexcept
+    {
+        if (!mod || !base) return;
+        if (mod == GlassCore::ModuleHandler::g_entryPointModule)
+        {
+            PrewarmModule(mod);
+            return;
+        }
+        if (_wcsicmp(base, L"user32.dll") != 0 && _wcsicmp(base, L"gdi32full.dll") != 0
+            && _wcsicmp(base, L"gdi32.dll") != 0 && _wcsicmp(base, L"riched20.dll") != 0
+            && _wcsicmp(base, L"msftedit.dll") != 0)
+            return;
+        PrewarmModule(mod);
+    }
+
     void Startup()
     {
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintEdit, OnEndPaintEdit });
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ OnGetDCEdit, OnReleaseDCEdit });
+        PrewarmModule(GetModuleHandleW(L"user32.dll"));
+        PrewarmModule(GetModuleHandleW(L"gdi32full.dll"));
+        PrewarmModule(GetModuleHandleW(L"gdi32.dll"));
+        PrewarmModule(GetModuleHandleW(L"riched20.dll"));
+        PrewarmModule(GetModuleHandleW(L"msftedit.dll"));
+        GlassCore::ModuleHandler::RegisterModulePrewarmHandler(PrewarmForModule);
         DebugLog(DBG_IMPORTANT, L"[GlassCore][Edit] Startup: PaintProvider + GetDCProvider зарегистрированы");
     }
 

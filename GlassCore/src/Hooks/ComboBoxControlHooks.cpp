@@ -92,6 +92,19 @@ namespace GlassCore::ComboBoxControl
             return _wcsicmp(base, L"System.Windows.Forms.ni.dll") == 0;
         }
 
+        // BWM ComboBoxHooks::WorkExtTextOutW: caller MFC42u.dll с inset-rect — заливка alpha-кистью.
+        [[nodiscard]] static bool IsMFC42uModule(HMODULE mod) noexcept
+        {
+            if (!mod)
+                return false;
+            wchar_t path[MAX_PATH]{};
+            if (GetModuleFileNameW(mod, path, _countof(path)) == 0)
+                return false;
+            const wchar_t* base = wcsrchr(path, L'\\');
+            base = base ? base + 1 : path;
+            return _wcsicmp(base, L"MFC42u.dll") == 0;
+        }
+
         // WinForms .COMBOBOX: DTB/DTT рисует comctl32, не caller BeginPaint (forms.ni).
         [[nodiscard]] static HMODULE ResolveComboComctlHookModule(HMODULE callerMod) noexcept
         {
@@ -113,6 +126,7 @@ namespace GlassCore::ComboBoxControl
         HRESULT  WINAPI Overall_MyDrawThemeBg(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
         HRESULT  WINAPI Overall_MyDrawThemeText(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, DWORD, LPCRECT);
         HBRUSH   WINAPI Overall_MyGetSysColorBrush(int);
+        BOOL     WINAPI Overall_MyTextOutW(HDC, int, int, LPCWSTR, int);
 
         enum OverallHookIndex : size_t
         {
@@ -125,6 +139,7 @@ namespace GlassCore::ComboBoxControl
             OHK_DRAWTHEMEBG,
             OHK_DRAWTHEMETEXT,
             OHK_GETSYSCOLORBRUSH,
+            OHK_TEXTOUT,
             OHK_COUNT
         };
 
@@ -148,6 +163,8 @@ namespace GlassCore::ComboBoxControl
                 "DrawThemeText", reinterpret_cast<PVOID>(Overall_MyDrawThemeText) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
                 "GetSysColorBrush", reinterpret_cast<PVOID>(Overall_MyGetSysColorBrush) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
+                "TextOutW", reinterpret_cast<PVOID>(Overall_MyTextOutW) },
         } };
 
         using OverallDispatcher = HookDispatcher<OHK_COUNT, 3>;
@@ -226,7 +243,16 @@ namespace GlassCore::ComboBoxControl
                 EnableHooksOnModule(base, OHK_DRAWTEXT, enable);
                 EnableHooksOnModule(base, OHK_DRAWTEXTEX, enable);
                 EnableHooksOnModule(base, OHK_CREATESOLIDBRUSH, enable);
+                EnableHooksOnModule(base, OHK_TEXTOUT, enable);
             }
+        }
+
+        // BWM PaintHandler (ctrl-ветка ComboBox): IAT ExtTextOutW на MFC42u.dll.
+        // Без этого слота вызовы из MFC42u (диалоги mmc, diskmgmt) идут мимо сессии.
+        static void EnableComboBoxMfcHooks(bool enable) noexcept
+        {
+            if (PVOID base = GetModuleHandleW(L"MFC42u.dll"))
+                EnableHooksOnModule(base, OHK_EXTTEXTOUT, enable);
         }
 
         [[nodiscard]] static HRESULT InvokeComboDrawThemeBackground(
@@ -372,96 +398,137 @@ namespace GlassCore::ComboBoxControl
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
         }
 
+        // Паритет BWM ComboBoxHooks::WorkExtTextOutW: фон — PatBlt(BLACKNESS) + FillRect
+        // alpha-кистью при MFC42u-inset либо цветном BkColor; текст — DrawTextWithAlpha по
+        // client-rect с флагами GetTextAlign; ранний выход и strip ETO_OPAQUE — дословно BWM.
+        // Отличия от BWM (архитектура PaintDispatcher): gate — CbxSessionActive вместо
+        // WndList::IsDataAttach, HWND — сессионный g_comboHwnd вместо LWnd(hdc),
+        // orig — per-module слот (прямой вызов при отсутствии), гард lpString.
         BOOL WINAPI Overall_MyExtTextOutW(
             HDC hdc, int x, int y, UINT options, const RECT* lprect,
             LPCWSTR lpString, UINT c, const INT* lpDx)
         {
             HMODULE callerMod = GetCallerModule(_ReturnAddress());
             auto orig = GetOverallOrigSafe<OHK_EXTTEXTOUT, decltype(&ExtTextOutW)>(callerMod);
+            auto callOrig = [&](UINT opts) -> BOOL
+            {
+                return orig ? orig(hdc, x, y, opts, lprect, lpString, c, lpDx)
+                    : ExtTextOutW(hdc, x, y, opts, lprect, lpString, c, lpDx);
+            };
 
             if (!CbxSessionActive())
-                return orig ? orig(hdc, x, y, options, lprect, lpString, c, lpDx)
-                : ExtTextOutW(hdc, x, y, options, lprect, lpString, c, lpDx);
+                return callOrig(options);
 
-            if ((options & ETO_CLIPPED) && lprect)
-            {
-                RECT client{};
-                if (g_comboHwnd)
-                    GetClientRect(g_comboHwnd, &client);
-                IntersectClipRect(hdc,
-                    (std::max)(static_cast<int>(x), static_cast<int>(lprect->left)),
-                    (std::max)(static_cast<int>(y), static_cast<int>(lprect->top)),
-                    lprect->right,
-                    client.bottom ? (std::min)(client.bottom, lprect->bottom) : lprect->bottom);
-            }
+            RECT client{};
+            if (g_comboHwnd)
+                GetClientRect(g_comboHwnd, &client);
 
-            if ((options & ETO_OPAQUE) && lprect)
+            if ((options & (ETO_OPAQUE | ETO_CLIPPED)) && lprect)
             {
+                if (options & ETO_CLIPPED)
+                {
+                    IntersectClipRect(hdc,
+                        (std::max)(static_cast<int>(x), static_cast<int>(lprect->left)),
+                        (std::max)(static_cast<int>(y), static_cast<int>(lprect->top)),
+                        lprect->right,
+                        (std::min)(client.bottom, lprect->bottom));
+                }
+
                 PatBlt(hdc, lprect->left, lprect->top,
                     lprect->right - lprect->left, lprect->bottom - lprect->top, BLACKNESS);
 
-                const COLORREF bk = GetBkColor(hdc);
-                if (bk == GetSysColor(COLOR_HIGHLIGHT))
+                if (options & ETO_OPAQUE)
                 {
-                    HBRUSH hi = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(bk, 255);
-                    if (hi)
+                    const COLORREF bk = GetBkColor(hdc);
+                    // Дословно BWM ComboBoxHooks::WorkExtTextOutW — без лишних гардов.
+                    const bool mfcInset = IsMFC42uModule(callerMod)
+                        && client.left != lprect->left && client.right != lprect->right;
+                    const bool coloredBk = bk
+                        && bk != GetSysColor(COLOR_WINDOW)
+                        && bk != 0xffffff;
+                    if (mfcInset || coloredBk)
                     {
-                        FillRect(hdc, lprect, hi);
-                        DeleteObject(hi);
+                        HBRUSH hi = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(bk, 255);
+                        if (hi)
+                        {
+                            FillRect(hdc, lprect, hi);
+                            DeleteObject(hi);
+                        }
                     }
                 }
             }
 
-            if (c && lpString && !(options & ETO_GLYPH_INDEX))
+            if (options == ETO_GLYPH_INDEX || options == ETO_IGNORELANGUAGE
+                || (options == ETO_OPAQUE && !c) || !c)
             {
-                RECT textRect{};
-                if (lprect)
-                    textRect = *lprect;
-                else
-                    GetClipBox(hdc, &textRect);
-                textRect.left = x;
-                textRect.top = y;
-
-                DWORD dwTextFlags = DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOCLIP | DT_NOPREFIX;
-                if (options & ETO_RTLREADING)
-                    dwTextFlags |= DT_RTLREADING;
-
-                int result = 0;
-                if (!FAILED(GlassCore::Text::DrawTextWithAlpha(
-                        hdc, lpString, static_cast<int>(c), &textRect, dwTextFlags, result)))
-                {
-                    if (options & ETO_CLIPPED)
-                        SelectClipRgn(hdc, nullptr);
+                UINT stripped = options;
+                if (stripped != ETO_OPAQUE)
+                    stripped -= (stripped & ETO_OPAQUE);
+                if (stripped == ETO_OPAQUE && !c)
                     return TRUE;
-                }
+                return callOrig(stripped);
             }
 
-            if ((options & ETO_OPAQUE) && lprect && !c)
-            {
-                if (options & ETO_CLIPPED)
-                    SelectClipRgn(hdc, nullptr);
-                return TRUE;
-            }
+            RECT textRect = client;
+            textRect.left = x;
+            textRect.top = y;
 
-            UINT opts = options;
-            if (opts & ETO_OPAQUE)
-            {
-                const COLORREF bk = GetBkColor(hdc);
-                if (!bk
-                    || bk == GetSysColor(COLOR_WINDOW)
-                    || bk == GetSysColor(COLOR_BTNFACE)
-                    || bk == 0xffffff)
-                {
-                    opts &= ~static_cast<UINT>(ETO_OPAQUE);
-                }
-            }
-
-            const BOOL res = orig
-                ? orig(hdc, x, y, opts, lprect, lpString, c, lpDx)
-                : ExtTextOutW(hdc, x, y, opts, lprect, lpString, c, lpDx);
+            int result = 0;
+            const bool ok = lpString && !FAILED(GlassCore::Text::DrawTextWithAlpha(
+                hdc, lpString, static_cast<int>(c), &textRect, GetTextAlign(hdc), result));
             if (options & ETO_CLIPPED)
                 SelectClipRgn(hdc, nullptr);
-            return res;
+            if (ok)
+                return TRUE;
+            return callOrig(options);
+        }
+
+        // BWM OverallHooks::MyTextOutW: слот TEXTOUT ставится на COMDLG32 для комбобокса
+        // (текст неактивного поля). Фон — HIGHLIGHT→alpha, иначе BLACKNESS; текст всегда
+        // через DrawTextWithAlpha по clipbox-rect с флагами GetTextAlign.
+        BOOL WINAPI Overall_MyTextOutW(HDC hdc, int x, int y, LPCWSTR lpString, int c)
+        {
+            HMODULE callerMod = GetCallerModule(_ReturnAddress());
+            auto orig = GetOverallOrigSafe<OHK_TEXTOUT, decltype(&TextOutW)>(callerMod);
+
+            if (!CbxSessionActive())
+                return orig ? orig(hdc, x, y, lpString, c)
+                : TextOutW(hdc, x, y, lpString, c);
+
+
+            if (GlassShared::GlassGetWindowKind(g_comboHwnd) == GlassShared::GlassControlKind::ComboBox)
+            {
+                const COLORREF color = GetBkColor(hdc);
+                RECT rc{};
+                GetClipBox(hdc, &rc);
+                if (color == GetSysColor(COLOR_HIGHLIGHT))
+                {
+                    HBRUSH brush = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255);
+                    if (brush)
+                    {
+                        FillRect(hdc, &rc, brush);
+                        DeleteObject(brush);
+                    }
+                }
+                else
+                {
+                    PatBlt(hdc, rc.left, rc.top,
+                        rc.right - rc.left, rc.bottom - rc.top, BLACKNESS);
+                }
+            }
+
+            RECT rc{};
+            GetClipBox(hdc, &rc);
+            rc.left = x;
+            rc.top = y;
+
+            int result = 0;
+            const bool ok = lpString && !FAILED(GlassCore::Text::DrawTextWithAlpha(
+                hdc, lpString, c, &rc, GetTextAlign(hdc), result));
+            if (ok)
+                return TRUE;
+            return orig ? orig(hdc, x, y, lpString, c)
+                : TextOutW(hdc, x, y, lpString, c);
         }
 
         HBRUSH WINAPI Overall_MyGetSysColorBrush(int nIndex)
@@ -483,12 +550,10 @@ namespace GlassCore::ComboBoxControl
             if (!orig)
                 return SetBkColor(hdc, color);
 
-            if (CbxSessionActive())
-            {
-                if (color == GetSysColor(COLOR_WINDOW) || color == GetSysColor(COLOR_BTNFACE))
-                    color = 0;
-            }
-
+            // Лог 2026-10-06: BWM не аттачит SetBkColor на comctl для родительского
+            // комбобокса (только ветка ComboLBox цепляет DRAWTEXTEX/EXTTEXTOUT/SELECTOBJECT),
+            // ремап WINDOW/BTNFACE→0 отравлял shared-DC (bk=0: чёрные грани и blackout
+            // поля при фокус-перерисовках). Passthrough, как в BWM.
             return orig(hdc, color);
         }
 
@@ -698,6 +763,7 @@ namespace GlassCore::ComboBoxControl
         {
             EnableComboBoxHooksOnComctlModule(comctlMod, enable);
             EnableComboBoxComdlgHooks(enable);
+            EnableComboBoxMfcHooks(enable);
             if (kind == GlassShared::GlassControlKind::WinForms_ComboBox
                 && GetModuleHandleW(L"System.Windows.Forms.ni.dll"))
             {
@@ -751,22 +817,42 @@ namespace GlassCore::ComboBoxControl
 
     void Prepare() {}
 
+    // Предпрогрев IAT-кеша (только чтение, без записей).
+    // Холодный скан PE уходит из paint-кадра: в Startup (уже загруженные)
+    // и в подписку ModuleHandler (поздняя подгрузка, под loader-lock безопасно).
+    static void PrewarmModule(void* mod) noexcept
+    {
+        if (!mod) return;
+        auto lock = g_overallLock.lock_exclusive();
+        auto [it, ins] = g_overallMap.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(mod),
+            std::forward_as_tuple(g_dep, mod));
+        if (ins)
+            it->second.CacheHookData();
+    }
+
+    // Только свои модули — чужие не кешируем (карта не раздувается).
+    static void PrewarmForModule(HMODULE mod, const wchar_t* base) noexcept
+    {
+        if (!mod || !base) return;
+        if (mod == GlassCore::ModuleHandler::g_entryPointModule)
+        {
+            PrewarmModule(mod);
+            return;
+        }
+        if (_wcsicmp(base, L"comctl32.dll") != 0 && _wcsicmp(base, L"COMDLG32.dll") != 0
+            && _wcsicmp(base, L"MFC42u.dll") != 0)
+            return;
+        PrewarmModule(mod);
+    }
+
     void Startup()
     {
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintGlobal, OnEndPaintGlobal });
-        auto cache = [&](void* mod)
-            {
-                if (!mod) return;
-                auto lock = g_overallLock.lock_exclusive();
-                auto [it, ins] = g_overallMap.emplace(
-                    std::piecewise_construct,
-                    std::forward_as_tuple(mod),
-                    std::forward_as_tuple(g_dep, mod));
-                if (ins)
-                    it->second.CacheHookData();
-            };
-        cache(GlassCore::ModuleHandler::g_comctl32New);
-        cache(GlassCore::ModuleHandler::g_comctl32Legacy);
+        PrewarmModule(GlassCore::ModuleHandler::g_comctl32New);
+        PrewarmModule(GlassCore::ModuleHandler::g_comctl32Legacy);
+        GlassCore::ModuleHandler::RegisterModulePrewarmHandler(PrewarmForModule);
     }
 
     void Shutdown()

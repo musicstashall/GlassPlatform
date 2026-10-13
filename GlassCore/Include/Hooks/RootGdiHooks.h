@@ -34,6 +34,10 @@ namespace GlassCore::Root
     // Включить/выключить один IAT-хук на модуле (ref-counted).
     bool EnableRootHook(void* baseAddress, size_t index, bool enable) noexcept;
 
+    // Предпрогрев IAT-кеша модуля (только чтение: emplace диспетчера + CacheHookData,
+    // без записей и без refcount). Убирает холодный скан PE из первого paint-кадра.
+    void PrewarmRootHook(void* baseAddress) noexcept;
+
     // Безусловно снять все root-хуки (shutdown).
     void DisableAllRootHooks() noexcept;
 

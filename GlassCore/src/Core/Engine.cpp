@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include <Core/Intercept/Hooks.h>
+#include <Core/Intercept/IATRegistry.h>
 #include "Subsystems\Animation.h"
 #include "Subsystems\Menu.h"
 #include "Subsystems\Tooltip.h"
@@ -183,6 +184,8 @@ namespace GlassCore::Engine
         GlassCore::IeServerControl::Startup();
         // PaintDispatcher запускается последним среди Startup — провайдеры уже зарегистрированы
         GlassCore::PaintDispatcher::Startup();
+        // Предпрогрев исполняемых страниц трамплинов — вне видимых paint-кадров.
+        GlassCore::Hooks::IATRegistry::Instance().PreallocatePages(2);
 
         // WinUI backdrop hooks: включаются по жизненному циклу PopupWindowSiteBridge
         // (первый Attach / последний Detach) через WndCompat -> экспорт GlassCore.

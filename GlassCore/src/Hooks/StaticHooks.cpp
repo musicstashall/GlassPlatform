@@ -633,37 +633,58 @@ namespace GlassCore::StaticControl
 
     void Prepare() {}
 
+    // Предпрогрев IAT-кеша (только чтение, без записей).
+    // Холодный скан PE уходит из paint-кадра: в Startup (уже загруженные)
+    // и в подписку ModuleHandler (поздняя подгрузка, под loader-lock безопасно).
+    static void PrewarmModule(void* mod) noexcept
+    {
+        if (!mod) return;
+        auto lock = g_overallLock.lock_exclusive();
+        auto [it, inserted] = g_overallMap.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(mod),
+            std::forward_as_tuple(g_overallHookDep, mod));
+        if (inserted)
+        {
+            it->second.CacheHookData();
+            DebugLog(DBG_NORMAL, L"[GlassCore][Static] Startup: cached 0x%p", mod);
+        }
+    }
+
+    // Только свои модули — чужие не кешируем (карта не раздувается).
+    static void PrewarmForModule(HMODULE mod, const wchar_t* base) noexcept
+    {
+        if (!mod || !base) return;
+        if (mod == GlassCore::ModuleHandler::g_entryPointModule)
+        {
+            PrewarmModule(mod);
+            return;
+        }
+        if (_wcsicmp(base, L"comctl32.dll") != 0 && _wcsicmp(base, L"gdi32full.dll") != 0
+            && _wcsicmp(base, L"gdi32.dll") != 0 && _wcsicmp(base, L"inetcpl.cpl") != 0
+            && _wcsicmp(base, L"sysmon.ocx") != 0)
+            return;
+        PrewarmModule(mod);
+    }
+
     void Startup()
     {
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintGlobal, OnEndPaintGlobal });
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ OnStaticGetDCBegin, OnStaticGetDCEnd });
         GlassCore::PaintDispatcher::RegisterCompatDCProvider({ OnStaticCompatBegin, OnStaticCompatEnd });
 
-        auto cacheModule = [&](void* mod)
-            {
-                if (!mod) return;
-                auto lock = g_overallLock.lock_exclusive();
-                auto [it, inserted] = g_overallMap.emplace(
-                    std::piecewise_construct,
-                    std::forward_as_tuple(mod),
-                    std::forward_as_tuple(g_overallHookDep, mod));
-                if (inserted)
-                {
-                    it->second.CacheHookData();
-                    DebugLog(DBG_NORMAL, L"[GlassCore][Static] Startup: cached 0x%p", mod);
-                }
-            };
-        cacheModule(GlassCore::ModuleHandler::g_comctl32New);
-        cacheModule(GlassCore::ModuleHandler::g_comctl32Legacy);
-        cacheModule(GlassCore::ModuleHandler::g_entryPointModule);
+        PrewarmModule(GlassCore::ModuleHandler::g_comctl32New);
+        PrewarmModule(GlassCore::ModuleHandler::g_comctl32Legacy);
+        PrewarmModule(GlassCore::ModuleHandler::g_entryPointModule);
         if (void* gdi = GetModuleHandleW(L"gdi32full.dll"))
-            cacheModule(gdi);
+            PrewarmModule(gdi);
         else if (void* gdi = GetModuleHandleW(L"gdi32.dll"))
-            cacheModule(gdi);
+            PrewarmModule(gdi);
         if (void* inetcpl = GetModuleHandleW(L"inetcpl.cpl"))
-            cacheModule(inetcpl);
+            PrewarmModule(inetcpl);
         if (void* sysmon = GetModuleHandleW(L"sysmon.ocx"))
-            cacheModule(sysmon);
+            PrewarmModule(sysmon);
+        GlassCore::ModuleHandler::RegisterModulePrewarmHandler(PrewarmForModule);
     }
 
     bool IsInsideStaticPaint() noexcept

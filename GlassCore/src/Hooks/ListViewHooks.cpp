@@ -51,7 +51,11 @@
 #include <uxtheme.h>
 #include <WinApiUtils.h>
 #include <vector>
+#include <unordered_set>
 #include <cmath>
+#include <string>
+
+// Диагностика ListView снята (финиш 2026-10-13): фон красится кистями Root-CSB.
 
 #pragma comment(lib, "msimg32.lib")
 
@@ -69,8 +73,12 @@ namespace GlassCore::ListViewControl
         HMODULE                       mod{};
         GlassShared::GlassControlKind kind{};
         HWND                          hWnd{};
+        bool                          needBlackout{};
     };
     thread_local std::vector<ListViewPaintSession> g_lvSessionStack;
+    // Окна, чей фон уже чернили post-BLACKNESS (первый paint либо BkFlip).
+    // Чернить каждый paint — стробоскоп при шторме; у BWM такого нет.
+    thread_local std::unordered_set<HWND> g_lvBgPrimed;
 
     // Удаление фона иконок (Root\Control\ListView) — читается на входе внешней paint-сессии;
     // enable=false → black-key по умолчанию (см. GdiUtils::ApplyIconBackgroundAlpha).
@@ -286,6 +294,40 @@ namespace GlassCore::ListViewControl
         return true;
     }
 
+    // ── Предпрогрев IAT-кеша (только чтение: emplace + CacheHookData, без записей).
+    // Холодный скан PE уходит из первого paint-кадра: в Startup (уже загруженные)
+    // и в подписку ModuleHandler (поздняя подгрузка, под loader-lock безопасно).
+    static void PrewarmModule(void* mod) noexcept
+    {
+        if (!mod) return;
+        auto lock = g_overallLock.lock_exclusive();
+        auto [it, inserted] = g_overallMap.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(mod),
+            std::forward_as_tuple(g_overallHookDep, mod));
+        if (inserted)
+        {
+            it->second.CacheHookData();
+            DebugLog(DBG_NORMAL, L"[GlassCore][ListView] Startup: cached 0x%p", mod);
+        }
+    }
+
+    // Только свои модули — чужие не кешируем (карта не раздувается).
+    // Имя сравниваем с базовым (регистр не важен); EXE — по хэндлу точки входа.
+    static void PrewarmForModule(HMODULE mod, const wchar_t* base) noexcept
+    {
+        if (!mod || !base) return;
+        if (mod == GlassCore::ModuleHandler::g_entryPointModule)
+        {
+            PrewarmModule(mod);
+            return;
+        }
+        if (_wcsicmp(base, L"comctl32.dll") != 0 && _wcsicmp(base, L"uxtheme.dll") != 0
+            && _wcsicmp(base, L"sysmon.ocx") != 0 && _wcsicmp(base, L"SHELL32.dll") != 0)
+            return;
+        PrewarmModule(mod);
+    }
+
     // ── DisableAllOverallHooks ───────────────────────────────────────────────
     static void DisableAllOverallHooks()
     {
@@ -293,6 +335,26 @@ namespace GlassCore::ListViewControl
         for (auto& [addr, dispatcher] : g_overallMap)
             dispatcher.DisableAllHooks();
         g_overallMap.clear();
+    }
+
+    // Выгрузка comctl32: снять IAT и выбросить stale-запись (как ComboLBox —
+    // держать кеш выгруженного модуля значит use-after-free при следующем Enable).
+    void OnComctl32ModuleUnload(HMODULE unloaded) noexcept
+    {
+        if (!unloaded)
+            return;
+        try
+        {
+            auto lock = g_overallLock.lock_exclusive();
+            auto it = g_overallMap.find(static_cast<void*>(unloaded));
+            if (it != g_overallMap.end())
+            {
+                it->second.DisableAllHooks();
+                g_overallMap.erase(it);
+                DebugLog(L"[GlassCore][ListView] comctl32=0x%p unloaded, overall entry dropped", unloaded);
+            }
+        }
+        catch (...) {}
     }
 
     // ── GetCallerModule ──────────────────────────────────────────────────────
@@ -479,6 +541,8 @@ namespace GlassCore::ListViewControl
     //   COLOR_WINDOW → PatBlt(BLACKNESS) (прозрачный фон)
     //   чёрный (0)   → пропускаем (уже прозрачный)
     //   другой цвет  → заменяем кисть на alpha-aware версию
+    // Гистограмма заливок снята (финиш 2026-10-13).
+
     BOOL WINAPI Overall_MyFillRect(HDC hdc, const RECT* lprc, HBRUSH hbr)
     {
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
@@ -643,6 +707,10 @@ namespace GlassCore::ListViewControl
         if (!orig)
             return DrawTextExW(hdc, lpchText, cchText, lprc, format, lpdtp);
         if (g_lvSessionStack.empty())
+            return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
+        // Замер (DT_CALCRECT) ничего не рисует — альфа-рендер за ~750мкс
+        // на вызов здесь чистый перерасход: отдаём оригиналу.
+        if (format & DT_CALCRECT)
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
         if (lpdtp)
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
@@ -911,6 +979,14 @@ namespace GlassCore::ListViewControl
         if (color == 0)
             return orig(0);
 
+        // BWM-паритет (источник чёрного фона LV): comctl создаёт фоновые кисти
+        // через CreateSolidBrush — белые/фейсовые сразу отдаём чёрными, чтобы
+        // сам comctl красил фон с первого paint (а не post-BLACKNESS).
+        // GetSysColor здесь настоящий (чужой сессии нет).
+        const COLORREF plain = color & 0xFFFFFF;
+        if (plain == 0xFFFFFF || plain == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF))
+            return orig(0);
+
         // Создаём кисть с альфа-каналом для корректного композитинга
         HBRUSH alphaBrush = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255);
         return alphaBrush ? alphaBrush : orig(color);
@@ -1100,9 +1176,7 @@ namespace GlassCore::ListViewControl
                     EnableHooksOnModule(g_legacy, OHK_BITBLT, enable);
             }
 
-            // CreateSolidBrush на legacy comctl32
-            if (g_legacy)
-                EnableHooksOnModule(g_legacy, OHK_CREATESOLIDBRUSH, enable);
+            // CreateSolidBrush comctl — только Root (lifetime, ModuleHandler).
         }
     }
 
@@ -1119,12 +1193,25 @@ namespace GlassCore::ListViewControl
 
         // Гарантируем чёрный (прозрачный) фон перед BeginPaint/WM_ERASEBKGND.
         // LVM_* сообщения валидны только для SysListView32, не для SysHeader32.
+        // FIX repaint-storm: слать только при смене значения — comctl инвалидирует
+        // список на каждый LVM_SETBKCOLOR, превращая paint в самоподдержку (60fps).
+        bool diagFlipped = false;
         if (kind == GlassControlKind::ListView)
         {
-            ListView_SetBkColor(hWnd, 0);
-            ListView_SetTextBkColor(hWnd, 0);
+            // Дефолтный bk сбрасываем в чёрный (прозрачный фон).
+            const COLORREF diagBk = ListView_GetBkColor(hWnd);
+            const COLORREF diagTBk = ListView_GetTextBkColor(hWnd);
+            if (diagBk != 0)
+            {
+                ListView_SetBkColor(hWnd, 0);
+                diagFlipped = true;
+            }
+            if (diagTBk != 0)
+            {
+                ListView_SetTextBkColor(hWnd, 0);
+                diagFlipped = true;
+            }
         }
-
         GlassCore::ScrollBarTheme::EnsureComctlScrollBarIatIfComctlCaller(hWnd, callerMod);
 
         GlassCore::TextGlow::EnsureTextGlowClientRegistered(hWnd);
@@ -1132,8 +1219,15 @@ namespace GlassCore::ListViewControl
         if (g_lvSessionStack.empty())
             GlassCore::Settings::QueryIconBackgroundColorRemovalContext(
                 { L"Root", L"Control", L"ListView" }, g_lvIconRemoval);
+        // Гейт post-BLACKNESS: чернить только первый paint окна либо paint
+        // после реального BkFlip (дефолт мог просвечивать). Чернить каждый
+        // paint — стробоскоп при шторме; у BWM такого механизма нет, фон там
+        // красит сам comctl (LVM bk=0 + системные цвета).
+        if (g_lvBgPrimed.size() > 512)
+            g_lvBgPrimed.clear(); // защита от роста на recycled HWND
+        const bool firstPaint = g_lvBgPrimed.insert(hWnd).second;
 
-        g_lvSessionStack.push_back({ callerMod, kind, hWnd });
+        g_lvSessionStack.push_back({ callerMod, kind, hWnd, diagFlipped || firstPaint });
         DebugLog(DBG_NORMAL, L"[GlassCore][ListView] BeginPaint: callerMod=0x%p hWnd=0x%p kind=%d depth=%zu",
             callerMod, hWnd, static_cast<int>(kind), g_lvSessionStack.size());
         EnableListViewHooksForModule(hWnd, callerMod, kind, true);
@@ -1153,6 +1247,35 @@ namespace GlassCore::ListViewControl
         DebugLog(DBG_NORMAL, L"[GlassCore][ListView] EndPaint: hWnd=0x%p depth=%zu", hWnd, g_lvSessionStack.size());
     }
 
+    // Post-BeginPaint: разовая зачистка фона (первый paint окна либо после
+    // BkFlip). Диспетчер гасит fErase по возврату true. Каждый paint не
+    // черним: при шторме это стробоскоп blackout→контент.
+    [[nodiscard]] static bool OnListViewAfterBeginPaint(
+        HWND hWnd, HDC hdc, LPPAINTSTRUCT ps, HMODULE /*callerMod*/) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire))
+            return false;
+
+        using namespace GlassShared;
+        const GlassControlKind kind = GlassGetWindowKind(hWnd);
+        if (kind != GlassControlKind::ListView && kind != GlassControlKind::WinForms_ListView)
+            return false;
+
+        if (!hdc || !ps || IsRectEmpty(&ps->rcPaint))
+            return false;
+
+        if (g_lvSessionStack.empty() || !g_lvSessionStack.back().needBlackout)
+            return false; // фон уже чернили: не стробим, fErase не трогаем
+        g_lvSessionStack.back().needBlackout = false;
+
+        PatBlt(hdc,
+            ps->rcPaint.left, ps->rcPaint.top,
+            ps->rcPaint.right - ps->rcPaint.left,
+            ps->rcPaint.bottom - ps->rcPaint.top,
+            BLACKNESS);
+        return true;
+    }
+
     // =========================================================================
     //  Lifecycle
     // =========================================================================
@@ -1162,25 +1285,15 @@ namespace GlassCore::ListViewControl
     void Startup()
     {
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintGlobal, OnEndPaintGlobal });
+        GlassCore::PaintDispatcher::RegisterPostPaintProvider({ OnListViewAfterBeginPaint });
 
-        auto cacheModule = [&](void* mod)
-        {
-            if (!mod) return;
-            auto lock = g_overallLock.lock_exclusive();
-            auto [it, inserted] = g_overallMap.emplace(
-                std::piecewise_construct,
-                std::forward_as_tuple(mod),
-                std::forward_as_tuple(g_overallHookDep, mod));
-            if (inserted)
-            {
-                it->second.CacheHookData();
-                DebugLog(DBG_NORMAL, L"[GlassCore][ListView] Startup: cached 0x%p", mod);
-            }
-        };
-        cacheModule(GlassCore::ModuleHandler::g_comctl32New);
-        cacheModule(GlassCore::ModuleHandler::g_comctl32Legacy);
-        cacheModule(GlassCore::ModuleHandler::g_entryPointModule);
-        cacheModule(GetModuleHandleW(L"uxtheme.dll"));
+        PrewarmModule(GlassCore::ModuleHandler::g_comctl32New);
+        PrewarmModule(GlassCore::ModuleHandler::g_comctl32Legacy);
+        PrewarmModule(GlassCore::ModuleHandler::g_entryPointModule);
+        PrewarmModule(GetModuleHandleW(L"uxtheme.dll"));
+        PrewarmModule(GetModuleHandleW(L"SHELL32.dll"));
+        PrewarmModule(GetModuleHandleW(L"sysmon.ocx"));
+        GlassCore::ModuleHandler::RegisterModulePrewarmHandler(PrewarmForModule);
 
         // BitBlt на comctl32: базовая регистрация слота (ListView — обработчик иконок;
         // ScrollBar: DTB IAT — DirectUIHooks; BitBlt — ScrollBarTheme::ComctlScrollBarMyBitBlt; глубина orig — ScrollBarTheme).
@@ -1193,6 +1306,7 @@ namespace GlassCore::ListViewControl
         baselineBitBlt(GlassCore::ModuleHandler::g_comctl32New);
         baselineBitBlt(GlassCore::ModuleHandler::g_comctl32Legacy);
         DebugLog(DBG_IMPORTANT, L"[GlassCore][ListView] Startup: базовый ref BitBlt на comctl32");
+        // CreateSolidBrush comctl — только Root (lifetime, ModuleHandler).
     }
 
     void Shutdown()

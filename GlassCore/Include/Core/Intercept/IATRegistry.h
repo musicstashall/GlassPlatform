@@ -94,6 +94,10 @@ namespace GlassCore::Hooks
         // Освобождение всех страниц трамплинов (вызывать из Hooks::Uninstall).
         void Shutdown() noexcept;
 
+        // Предпрогрев исполняемых страниц (только коммит, без записей).
+        // Убирает первый VirtualAlloc из видимого paint-кадра; вызывать из Engine::Startup.
+        void PreallocatePages(size_t pageCount);
+
     private:
         // -----------------------------------------------------------------
         // Трамплин (16 байт)
@@ -186,6 +190,10 @@ namespace GlassCore::Hooks
 
         wil::srwlock       m_pageLock;
         std::vector<Page>  m_pages;
+        // FIX owner-draw (dmdskmgr): reuse снятых трамплинов вместо вечного
+        // bump-роста — сессионный шторм Arm/Disarm выделял новый трамплин
+        // на каждый цикл. Доступ только под m_pageLock.
+        std::vector<Trampoline*> m_freeTramps;
 
         uint8_t* AllocRaw(size_t bytes, size_t align);
     };

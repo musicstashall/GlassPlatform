@@ -452,6 +452,31 @@ namespace GlassCore::HeaderControl
         DebugLog(DBG_NORMAL, L"[GlassCore][Header] EndPaint: hWnd=0x%p depth=%zu", hWnd, g_headerStack.size());
     }
 
+    // ── Post BeginPaint: безусловное стирание фона ────────────────────────────
+    // Аналог BWM erase=true для SysHeader32 (WndList::MyBeginPaint делает
+    // PatBlt(rcPaint, BLACKNESS) после BeginPaint): чистим всю зону rcPaint,
+    // включая пустую область справа от колонок, которую item-хуки не покрывают.
+    [[nodiscard]] static bool OnHeaderAfterBeginPaint(
+        HWND hWnd, HDC hdc, LPPAINTSTRUCT ps, HMODULE /*callerMod*/) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire))
+            return false;
+
+        using namespace GlassShared;
+        if (GlassGetWindowKind(hWnd) != GlassControlKind::Header)
+            return false;
+
+        if (!hdc || !ps || IsRectEmpty(&ps->rcPaint))
+            return false;
+
+        PatBlt(hdc,
+            ps->rcPaint.left, ps->rcPaint.top,
+            ps->rcPaint.right - ps->rcPaint.left,
+            ps->rcPaint.bottom - ps->rcPaint.top,
+            BLACKNESS);
+        return true;
+    }
+
     // =========================================================================
     //  Lifecycle
     // =========================================================================
@@ -461,6 +486,7 @@ namespace GlassCore::HeaderControl
     void Startup()
     {
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintGlobal, OnEndPaintGlobal });
+        GlassCore::PaintDispatcher::RegisterPostPaintProvider({ OnHeaderAfterBeginPaint });
 
         auto cacheModule = [&](void* mod)
         {

@@ -694,32 +694,53 @@ namespace GlassCore::ListBoxControl
 
     void Prepare() {}
 
+    // Предпрогрев IAT-кеша (только чтение: emplace + CacheHookData, без записей).
+    // Холодный скан PE уходит из paint-кадра: в Startup (уже загруженные)
+    // и в подписку ModuleHandler (поздняя подгрузка, под loader-lock безопасно).
+    static void PrewarmModule(void* mod) noexcept
+    {
+        if (!mod) return;
+        auto lock = g_overallLock.lock_exclusive();
+        auto [it, ins] = g_overallMap.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(mod),
+            std::forward_as_tuple(g_dep, mod));
+        if (ins)
+            it->second.CacheHookData();
+    }
+
+    // Только свои модули — чужие не кешируем (карта не раздувается).
+    static void PrewarmForModule(HMODULE mod, const wchar_t* base) noexcept
+    {
+        if (!mod || !base) return;
+        if (mod == GlassCore::ModuleHandler::g_entryPointModule)
+        {
+            PrewarmModule(mod);
+            return;
+        }
+        if (_wcsicmp(base, L"comctl32.dll") != 0 && _wcsicmp(base, L"uxtheme.dll") != 0
+            && _wcsicmp(base, L"main.cpl") != 0 && _wcsicmp(base, L"gdiplus.dll") != 0
+            && _wcsicmp(base, L"System.Windows.Forms.ni.dll") != 0)
+            return;
+        PrewarmModule(mod);
+    }
+
     void Startup()
     {
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintGlobal, OnEndPaintGlobal });
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ OnListBoxGetDCBegin, OnListBoxGetDCEnd });
         GlassCore::PaintDispatcher::RegisterCompatDCProvider({ OnListBoxCompatBegin, OnListBoxCompatEnd });
-        auto cache = [&](void* mod)
-            {
-                if (!mod) return;
-                auto lock = g_overallLock.lock_exclusive();
-                auto [it, ins] = g_overallMap.emplace(
-                    std::piecewise_construct,
-                    std::forward_as_tuple(mod),
-                    std::forward_as_tuple(g_dep, mod));
-                if (ins)
-                    it->second.CacheHookData();
-            };
-        cache(GlassCore::ModuleHandler::g_comctl32New);
-        cache(GlassCore::ModuleHandler::g_comctl32Legacy);
+        PrewarmModule(GlassCore::ModuleHandler::g_comctl32New);
+        PrewarmModule(GlassCore::ModuleHandler::g_comctl32Legacy);
         if (HMODULE const ux = GetModuleHandleW(L"uxtheme.dll"))
-            cache(ux);
+            PrewarmModule(ux);
         if (HMODULE const mc = GetModuleHandleW(L"main.cpl"))
-            cache(mc);
+            PrewarmModule(mc);
         if (HMODULE const formsNi = GetModuleHandleW(L"System.Windows.Forms.ni.dll"))
-            cache(formsNi);
+            PrewarmModule(formsNi);
         if (HMODULE const gdiplus = GetModuleHandleW(L"gdiplus.dll"))
-            cache(gdiplus);
+            PrewarmModule(gdiplus);
+        GlassCore::ModuleHandler::RegisterModulePrewarmHandler(PrewarmForModule);
     }
 
     bool IsInsideWinFormsListBoxPaint() noexcept

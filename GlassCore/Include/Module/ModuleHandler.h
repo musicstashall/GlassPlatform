@@ -36,4 +36,12 @@ namespace GlassCore::ModuleHandler
     // Запустить callback в контексте активации WinSxS comctl32 v6 (shell32.dll manifest #124).
     // Публичная — используется ModuleHandler и другими подсистемами.
     void RunInActCtx(std::function<void()> callback);
+
+    // Предпрогрев IAT-кешей при загрузке DLL (только чтение: emplace диспетчера +
+    // CacheHookData, без записей в IAT — семантика сессий не меняется).
+    // Подписка из *Hooks::Startup (каждый файл — только свои модули);
+    // дёргается из HandleModuleAttach(attach) — и сканом, и Ldr-уведомлением.
+    // Безопасно под loader-lock: только чтение уже смапленного PE.
+    using ModulePrewarmFn = void(*)(HMODULE loadedModule, const wchar_t* baseName) noexcept;
+    void RegisterModulePrewarmHandler(ModulePrewarmFn fn) noexcept;
 }

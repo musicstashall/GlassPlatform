@@ -4,6 +4,7 @@
 #include <Hooks/DirectUI.h>
 #include <Hooks/ScrollBarTheme.h>
 #include <Hooks/ComboLBox.h>
+#include <Hooks/ListView.h>
 #include <Hooks/ExplorerFrame.h>
 #include <Hooks/TaskbarHooks.h>
 #include <Hooks/forms/FormsHooks.h>
@@ -35,6 +36,33 @@ namespace GlassCore::ModuleHandler
     void SetXamlHostDllNotify(XamlHostDllNotifyFn fn) noexcept
     {
         g_xamlHostDllNotify.store(fn, std::memory_order_release);
+    }
+
+    // Подписчики предпрогрева IAT-кешей (см. ModuleHandler.h). Только добавление,
+    // регистрация — из *Hooks::Startup; чтение — из HandleModuleAttach(attach).
+    static wil::srwlock g_prewarmLock;
+    static std::vector<ModulePrewarmFn> g_prewarmHandlers;
+
+    void RegisterModulePrewarmHandler(ModulePrewarmFn fn) noexcept
+    {
+        if (!fn)
+            return;
+        auto lock = g_prewarmLock.lock_exclusive();
+        for (auto f : g_prewarmHandlers)
+        {
+            if (f == fn)
+                return;
+        }
+        g_prewarmHandlers.push_back(fn);
+    }
+
+    static void NotifyModulePrewarm(HMODULE module, const wchar_t* baseName) noexcept
+    {
+        if (!module || !baseName)
+            return;
+        auto lock = g_prewarmLock.lock_shared();
+        for (auto fn : g_prewarmHandlers)
+            fn(module, baseName);
     }
 
     // Два известных XAML-хоста: UWP (Windows.UI.Xaml) и WinUI (Microsoft.UI.Xaml).
@@ -385,6 +413,11 @@ namespace GlassCore::ModuleHandler
                 attach ? L"loaded" : L"unloaded", baseName, module);
         }
 
+        // Предпрогрев IAT-кешей подписчиков (только чтение, без записей).
+        // Срабатывает и сканом при старте, и Ldr-уведомлением о поздней подгрузке.
+        if (attach)
+            NotifyModulePrewarm(module, baseName);
+
         // --- Windows.UI.Xaml.dll (UWP) / Microsoft.UI.Xaml.dll (WinUI) ---
         if (const XamlHostKind xamlKind = ClassifyXamlHostBaseName(baseName); xamlKind != XamlHostKind::None)
         {
@@ -403,11 +436,16 @@ namespace GlassCore::ModuleHandler
                 // ComboLBox держит per-module IAT-кеш на оба экземпляра (v6 + legacy):
                 // докачать второй экземпляр, если он подгрузился позже первого attach.
                 GlassCore::ComboLBox::OnComctl32ModuleLoaded();
+                // Root: lifetime-перехват CreateSolidBrush на жизнь модуля
+                // (фон LV — кисти, созданные вне paint-сессий; BWM-паритет).
+                GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_CREATESOLIDBRUSH, true);
             }
             else
             {
                 GlassCore::ScrollBarTheme::OnComctl32ModuleUnload(module);
                 GlassCore::ComboLBox::OnComctl32ModuleUnload(module);
+                GlassCore::ListViewControl::OnComctl32ModuleUnload(module);
+                GlassCore::Root::EnableRootHook(module, GlassCore::Root::OHK_CREATESOLIDBRUSH, false);
                 RemoveComctl32(module);
             }
             return;
