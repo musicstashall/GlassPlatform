@@ -7,6 +7,11 @@
 # ---- Выходные каталоги сборки ----
 /Build/
 /Cache/
+# Те же выхлопы внутри каталогов проектов (GlassCore/Build, GlassShared/Cache, ...)
+GlassCore/Build/
+GlassCore/Cache/
+GlassShared/Build/
+GlassShared/Cache/
 # packages/ восстанавливается по packages.config (nuget restore)
 /packages/
 # .deps/parallel-hashmap — отдельный клон upstream для gtl/, ни один .vcxproj
