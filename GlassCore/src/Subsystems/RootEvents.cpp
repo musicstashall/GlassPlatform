@@ -209,6 +209,7 @@ namespace GlassCore::Root
         std::atomic<Shared::InjectionMode> g_injectionMode{ Shared::InjectionMode::PopupOnly };
         void (WINAPI* g_trackedRootsBackdropApplier)() noexcept = nullptr;
         bool (WINAPI* g_queryRootIsAttached)(HWND) noexcept = nullptr;
+        void (WINAPI* g_requestRootAttach)(HWND) noexcept = nullptr;
     }
 
     void RegisterTrackedRootsBackdropApplier(void (WINAPI* fn)() noexcept) noexcept
@@ -219,6 +220,18 @@ namespace GlassCore::Root
     void RegisterRootIsAttachedQuery(bool (WINAPI* fn)(HWND) noexcept) noexcept
     {
         Detail::g_queryRootIsAttached = fn;
+    }
+
+    void RegisterRootAttachRequest(void (WINAPI* fn)(HWND) noexcept) noexcept
+    {
+        Detail::g_requestRootAttach = fn;
+    }
+
+    void RequestRootAttachForHwnd(HWND hWnd) noexcept
+    {
+        const auto fn = Detail::g_requestRootAttach;
+        if (fn && hWnd)
+            fn(hWnd);
     }
 
     bool IsFullInjectionMode() noexcept
@@ -1525,6 +1538,12 @@ extern "C" __declspec(dllexport) void WINAPI GlassCore_RegisterRootIsAttachedQue
     bool (WINAPI* fn)(HWND) noexcept) noexcept
 {
     GlassCore::Root::RegisterRootIsAttachedQuery(fn);
+}
+
+extern "C" __declspec(dllexport) void WINAPI GlassCore_RegisterRootAttachRequest(
+    void (WINAPI* fn)(HWND) noexcept) noexcept
+{
+    GlassCore::Root::RegisterRootAttachRequest(fn);
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI GlassCore_IsExplorerAuxiliaryRootHwnd(HWND hRoot) noexcept

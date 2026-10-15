@@ -376,6 +376,13 @@ namespace WndCompat
             {
                 pfnRootAttached(&WndCompat::Root_IsAttached);
             }
+
+            using RegisterRootAttachRequestFn = void(WINAPI*)(void(WINAPI*)(HWND) noexcept);
+            if (const auto pfnRootAttachRequest = reinterpret_cast<RegisterRootAttachRequestFn>(
+                    GetProcAddress(hCore, "GlassCore_RegisterRootAttachRequest")))
+            {
+                pfnRootAttachRequest(&WndCompat::RequestRootAttachForHwnd);
+            }
         }
         else
         {

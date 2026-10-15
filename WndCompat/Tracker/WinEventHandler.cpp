@@ -385,6 +385,61 @@ namespace WndCompat
         }
         WndCompat::ExplorerRoot::Attach(hRoot);
     }
+
+    // Catch-up всегда через PostMessage (даже на своём потоке): прямой attach
+    // из BeginPaint-хука вешал процесс; отложенный идёт вне paint — как здоровый
+    // CREATE-путь (GetMsgHook перемаршрутизирует в WndHandler → тот же gate).
+    static void PostCatchupAttachToOwnerThread(HWND hWnd) noexcept
+    {
+        const DWORD wndTid = GetWindowThreadProcessId(hWnd, nullptr);
+        if (wndTid != 0)
+            InstallGetMsgHookForThread(wndTid);
+        if (!PostMessageW(hWnd, WndCompat::WM_GLASS_ATTACH_ROOT, 0, 0))
+        {
+            DebugLog(DBG_WARNING,
+                L"[WndCompat][WinEvent] PostCatchupAttachToOwnerThread: PostMessage failed hwnd=0x%p GLE=%u",
+                hWnd,
+                GetLastError());
+        }
+    }
+
+    // Catch-up для top-level окон с потерянным CREATE (гонка холодного старта):
+    // GlassCore зовёт из paint-MISS top-level окон. Повторяет gate и маршрутизацию
+    // CREATE-Root (Full only; shell-проводник — в ExplorerRoot). Идемпотентно:
+    // повторы отсекаются Root_IsAttached / TryRegister внутри Dispatch*.
+    void RequestRootAttachForHwnd(HWND hWnd) noexcept
+    {
+        static std::mutex s_catchupReqMutex;
+        static std::unordered_map<HWND, ULONGLONG> s_catchupLastReq;
+        if (!hWnd || !IsWindow(hWnd))
+            return;
+        if (WinEventHook_GetMode() != Shared::InjectionMode::Full)
+            return;
+        if (WndCompat::IsWindowClass(hWnd, L"Shell_TrayWnd")
+            || WndCompat::IsWindowClass(hWnd, L"Shell_SecondaryTrayWnd"))
+            return;
+        if (Root_IsAttached(hWnd))
+            return;
+        // Троттлинг: не чаще одного запроса на HWND в 2 с — гасит рекурсию
+        // (синхронная перерисовка внутри attach) и шторм PostMessage при failing attach.
+        {
+            std::lock_guard lock(s_catchupReqMutex);
+            const ULONGLONG now = GetTickCount64();
+            const auto it = s_catchupLastReq.find(hWnd);
+            if (it != s_catchupLastReq.end() && now - it->second < 2000)
+                return;
+            s_catchupLastReq[hWnd] = now;
+        }
+        auto [role, kind] = WindowClassifier::Classify(hWnd);
+        (void)kind;
+        if (role != WindowRole::Root)
+            return;
+        if (!WndCompat::GlassAttachGate::ShouldAttachGlassToHwnd(hWnd))
+            return;
+        // Не Dispatch* напрямую: Request идёт из BeginPaint-хука (часто свой поток),
+        // а прямой attach внутри paint вешал процесс. Всегда откладываем.
+        PostCatchupAttachToOwnerThread(hWnd);
+    }
 }
 
 namespace

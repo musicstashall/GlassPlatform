@@ -18,6 +18,11 @@ namespace GlassCore::Root
     /// WndCompat::Root_IsAttached — для gate per-root WM_DWMCOLORIZATION (без линка на WndCompat.dll).
     void RegisterRootIsAttachedQuery(bool (WINAPI* fn)(HWND) noexcept) noexcept;
 
+    /// WndCompat::RequestRootAttachForHwnd — catch-up для top-level окон с потерянным
+    /// CREATE (гонка холодного старта), вызывается из paint-MISS (без линка на WndCompat.dll).
+    void RegisterRootAttachRequest(void (WINAPI* fn)(HWND) noexcept) noexcept;
+    void RequestRootAttachForHwnd(HWND hWnd) noexcept;
+
     void OnRootSwcaBackdropActiveApply(HWND hRoot);
     void OnRootSwcaBackdropInactiveApply(HWND hRoot);
 

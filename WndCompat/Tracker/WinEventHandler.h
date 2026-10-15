@@ -14,6 +14,11 @@ namespace WndCompat
     void DispatchRootAttachToOwnerThread(HWND hRoot) noexcept;
     void DispatchExplorerRootAttachToOwnerThread(HWND hRoot) noexcept;
 
+    /// Catch-up для top-level окон с потерянным CREATE (GlassCore зовёт из paint-MISS).
+    /// Повторяет gate и маршрутизацию CREATE-Root. Регистрируется в GlassCore как
+    /// GlassCore_RegisterRootAttachRequest (прецедент: GlassCore_RegisterRootIsAttachedQuery).
+    void RequestRootAttachForHwnd(HWND hWnd) noexcept;
+
     /// WH_GETMESSAGE для cross-thread PostMessage glass attach/detach.
     void EnsureGetMsgHookForHwnd(HWND hWnd) noexcept;
 

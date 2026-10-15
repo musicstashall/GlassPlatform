@@ -74,6 +74,7 @@ void WINAPI GlassCore_SetInjectionMode(DWORD mode);
 extern "C" __declspec(dllexport)
 void WINAPI GlassCore_RegisterTrackedRootsBackdropApplier(void (WINAPI* fn)() noexcept) noexcept;
 void WINAPI GlassCore_RegisterRootIsAttachedQuery(bool (WINAPI* fn)(HWND) noexcept) noexcept;
+void WINAPI GlassCore_RegisterRootAttachRequest(void (WINAPI* fn)(HWND) noexcept) noexcept;
 
 extern "C" __declspec(dllexport)
 BOOL WINAPI GlassCore_IsExplorerAuxiliaryRootHwnd(HWND hRoot) noexcept;

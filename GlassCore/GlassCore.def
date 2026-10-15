@@ -27,6 +27,7 @@ EXPORTS
     GlassCore_RebindTextGlowClientsFromMarkedWindows
     GlassCore_RebindThemedChromeClientsAfterWinFormsWindowMarked
     GlassCore_RefreshCachedForegroundWindow
+    GlassCore_RegisterRootAttachRequest
     GlassCore_RegisterRootIsAttachedQuery
     GlassCore_RegisterTextGlowPopupClient
     GlassCore_RegisterThemedChromeClient
