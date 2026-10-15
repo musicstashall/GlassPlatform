@@ -752,10 +752,19 @@ namespace GlassCore::TabControl
         if (session.hookDrawThemeText)
             ++g_tabDrawThemeTextSessionDepth;
         EnableTabHooks(callerMod, true, session);
+        // Паритет BWM (PaintHandler: фон таба идёт через DUI70): кисть BTNFACE/WINDOW
+        // под язычками — чёрная, иначе под стеклом проступает серая заливка.
+        if (session.hookGetSysColorBrush)
+        {
+            if (HMODULE hDui70 = GetModuleHandleW(L"DUI70.dll"))
+                EnableHooksOnModule(hDui70, OHK_GETSYSCOLORBRUSH, true);
+        }
         DebugLog(DBG_NORMAL,
-            L"[GlassCore][Tab] BeginPaint: callerMod=0x%p hWnd=0x%p themed=%d vert=%d "
+            L"[GlassCore][Tab] BeginPaint: callerMod=0x%p caller=%s hWnd=0x%p themed=%d vert=%d "
             L"hookETO=%d hookDTB=%d hookDTT=%d hookGSCB=%d depth=%zu",
-            callerMod, hWnd, useTheme ? 1 : 0, vertical ? 1 : 0,
+            callerMod,
+            Shared::WinApiUtils::GetModuleFileBaseName(callerMod).c_str(),
+            hWnd, useTheme ? 1 : 0, vertical ? 1 : 0,
             session.hookExtTextOut ? 1 : 0,
             session.hookDrawThemeBg ? 1 : 0,
             session.hookDrawThemeText ? 1 : 0,
@@ -776,6 +785,11 @@ namespace GlassCore::TabControl
             --g_tabDrawThemeTextSessionDepth;
         g_tabStack.pop_back();
         EnableTabHooks(top.mod, false, top);
+        if (top.hookGetSysColorBrush)
+        {
+            if (HMODULE hDui70 = GetModuleHandleW(L"DUI70.dll"))
+                EnableHooksOnModule(hDui70, OHK_GETSYSCOLORBRUSH, false);
+        }
         DebugLog(DBG_NORMAL, L"[GlassCore][Tab] EndPaint: hWnd=0x%p depth=%zu", hWnd, g_tabStack.size());
     }
 

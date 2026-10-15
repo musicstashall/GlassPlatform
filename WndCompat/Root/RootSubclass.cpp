@@ -640,11 +640,53 @@ namespace
 
     LRESULT CALLBACK RootSubclassProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 
+    // Root без WS_CLIPCHILDREN (напр. главное окно perfmon.exe): чёрная заливка
+    // WM_ERASEBKGND накрывала дочерние окна (таб SysTabControl32), если erase приходил
+    // позже их paint. Исключаем видимых детей из клипа (ручной clipchildren),
+    // чёрная база под стекло в остальной области сохраняется.
+    struct ExcludeVisibleChildrenCtx
+    {
+        HRGN hClip;
+        HWND hRoot;
+    };
+
+    static BOOL CALLBACK ExcludeVisibleChildProc(HWND hChild, LPARAM lParam)
+    {
+        const auto* ctx = reinterpret_cast<ExcludeVisibleChildrenCtx*>(lParam);
+        if (!ctx || !ctx->hClip || !IsWindowVisible(hChild))
+            return TRUE;
+        RECT rc{};
+        if (!GetWindowRect(hChild, &rc))
+            return TRUE;
+        MapWindowPoints(HWND_DESKTOP, ctx->hRoot, reinterpret_cast<LPPOINT>(&rc), 2);
+        if (rc.left > rc.right) { const LONG t = rc.left; rc.left = rc.right; rc.right = t; }
+        if (rc.top > rc.bottom) { const LONG t = rc.top; rc.top = rc.bottom; rc.bottom = t; }
+        if (rc.right <= rc.left || rc.bottom <= rc.top)
+            return TRUE;
+        wil::unique_hrgn hChildRgn{ CreateRectRgn(rc.left, rc.top, rc.right, rc.bottom) };
+        if (hChildRgn)
+            CombineRgn(ctx->hClip, ctx->hClip, hChildRgn.get(), RGN_DIFF);
+        return TRUE;
+    }
+
+    static void ExcludeVisibleChildrenFromEraseClip(HWND hWnd, HDC hdc, const RECT& clipRect)
+    {
+        if ((GetWindowLongW(hWnd, GWL_STYLE) & WS_CLIPCHILDREN) != 0)
+            return;
+        wil::unique_hrgn hClip{ CreateRectRgn(clipRect.left, clipRect.top, clipRect.right, clipRect.bottom) };
+        if (!hClip)
+            return;
+        ExcludeVisibleChildrenCtx ctx{ hClip.get(), hWnd };
+        EnumChildWindows(hWnd, ExcludeVisibleChildProc, reinterpret_cast<LPARAM>(&ctx));
+        SelectClipRgn(hdc, hClip.get());
+    }
+
     LRESULT CALLBACK RootSubclassProcShared(
         HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         UINT_PTR uIdSubclass, DWORD_PTR dwRefData,
         SUBCLASSPROC selfProc)
     {
+        if (WndCompat::IsWindowClass(hWnd, L"CtrlNotifySink") && uMsg != WM_COMMAND) return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         // Снятие субкласса по запросу из чужого потока (Root_DetachAll → SendMessageTimeout).
         // Обрабатываем до шлюза IsShuttingDown — это и есть цель shutdown-пути.
         // RemoveWindowSubclass здесь безопасен: мы в потоке-владельце окна.
@@ -761,6 +803,7 @@ namespace
                     HDC hdc = reinterpret_cast<HDC>(wParam);
                     RECT clipRect{};
                     GetClipBox(hdc, &clipRect);
+                    ExcludeVisibleChildrenFromEraseClip(hWnd, hdc, clipRect);
                     PatBlt(hdc, clipRect.left, clipRect.top,
                         clipRect.right - clipRect.left,
                         clipRect.bottom - clipRect.top,
