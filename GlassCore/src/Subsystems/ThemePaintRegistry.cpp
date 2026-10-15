@@ -61,8 +61,6 @@ namespace GlassCore::ThemePaint
     {
         std::uint8_t g_drawThemeConstantAlphaActive   = kDefaultDrawThemeConstantAlpha;
         std::uint8_t g_drawThemeConstantAlphaInactive = kDefaultDrawThemeConstantAlpha;
-        bool         g_drawThemeAlphaActiveFromRoot   = true;
-        bool         g_drawThemeAlphaInactiveFromRoot = true;
 
         std::uint8_t g_tabChromaThreshActive   = kDefaultTabChromaThreshold;
         std::uint8_t g_tabChromaThreshInactive = kDefaultTabChromaThreshold;
@@ -1289,10 +1287,21 @@ namespace GlassCore::ThemePaint
         }
 
         RefreshCachedForegroundWindow();
-        if (g_drawThemeAlphaActiveFromRoot && g_drawThemeAlphaInactiveFromRoot)
-            return;
 
-        if (g_drawThemeConstantAlphaActive != g_drawThemeConstantAlphaInactive)
+        // Инвалидация DTB-хрома при смене визуальной активности нужна и когда обе альфы
+        // разрешились из общего ключа реестра (прежний ранний выход по resolvedFromRoot гасил
+        // перерисовку — стартовый кадр навсегда оставался inactive; заодно покрыт live-превью
+        // GlassSettings с разными active/inactive).
+        const bool regAlphaDiffers =
+            g_drawThemeConstantAlphaActive != g_drawThemeConstantAlphaInactive;
+        const bool previewAlphaDiffers =
+            g_previewAppliesToStandardThemedChrome.load(std::memory_order_acquire)
+            && g_previewThemeAlphaActiveValid.load(std::memory_order_acquire)
+            && g_previewThemeAlphaInactiveValid.load(std::memory_order_acquire)
+            && (g_previewThemeAlphaActive.load(std::memory_order_acquire)
+                != g_previewThemeAlphaInactive.load(std::memory_order_acquire));
+
+        if (regAlphaDiffers || previewAlphaDiffers)
         {
             DebugLog(DBG_IMPORTANT,
                 L"[GlassCore][ThemePaint][Chrome] Finalize hRoot=0x%p gaRoot=0x%p ncActive=%d "
@@ -1419,8 +1428,6 @@ namespace GlassCore::ThemePaint
             static_cast<std::uint8_t>(std::min<DWORD>(activeRead.value, 255u));
         g_drawThemeConstantAlphaInactive =
             static_cast<std::uint8_t>(std::min<DWORD>(inactiveRead.value, 255u));
-        g_drawThemeAlphaActiveFromRoot = activeRead.resolvedFromRoot;
-        g_drawThemeAlphaInactiveFromRoot = inactiveRead.resolvedFromRoot;
 
         const DWORD ta = Shared::RegHelper::Get<DWORD>(
             { Shared::RegHelper::kBwmRootActivePath },

@@ -757,6 +757,19 @@ namespace
                     provider->OnRootSwcaBackdropActiveApply(hWnd);
                 }
             }
+            if (wParam && GetAncestor(hWnd, GA_ROOT) == hWnd)
+            {
+                // Seed актуального nc-состояния при показе: hide→show может менять визуальную
+                // активность, а карта GlassCore иначе хранит протухшее значение до WM_NCACTIVATE.
+                const HWND fgShow = GetForegroundWindow();
+                const bool showActive = fgShow && GetAncestor(fgShow, GA_ROOT) == hWnd;
+                Shared::RootNcActiveCache::Set(hWnd, showActive);
+                WndCompat::FinalizeGlassCoreRootActivationVisualUpdate(hWnd, showActive ? TRUE : FALSE);
+                DebugLog(DBG_IMPORTANT,
+                    L"[WndCompat][Root][ThemePaint][Chrome] WM_SHOWWINDOW seed hwnd=0x%p ncActive=%d",
+                    hWnd,
+                    showActive ? 1 : 0);
+            }
             break;
 
         case WM_DWMCOLORIZATIONCHANGED:
@@ -1439,6 +1452,17 @@ namespace WndCompat
                         return rWnd && rWnd == rFg;
                     }();
 
+                    // Seed стартового nc-состояния для DTB-хрома (ThemePaintRegistry в GlassCore):
+                    // первый paint контролов может прийти раньше первого WM_NCACTIVATE, а при позднем
+                    // attach (initial scan / catch-up) NCACTIVATE вообще уже прошёл — без seed карта
+                    // GlassCore пуста и RootVisuallyActiveForThemedChrome падает в inactive-ветку.
+                    Shared::RootNcActiveCache::Set(hRoot, isActive);
+                    WndCompat::FinalizeGlassCoreRootActivationVisualUpdate(hRoot, isActive ? TRUE : FALSE);
+                    DebugLog(DBG_IMPORTANT,
+                        L"[WndCompat][Root][ThemePaint][Chrome] Root_Attach seed hwnd=0x%p ncActive=%d",
+                        hRoot,
+                        isActive ? 1 : 0);
+
                     if (Shared::RootPolicyQuery::UsesSwcaBackdrop())
                     {
                         WndCompat::RootBackdropRefreshThrottle::SetRootSwcaApplyReasonForNextCall(L"ATTACH");
@@ -1448,7 +1472,6 @@ namespace WndCompat
                             provider->OnRootSwcaBackdropInactiveApply(hRoot);
                         else if (provider->OnRootSwcaBackdropActiveApply)
                             provider->OnRootSwcaBackdropActiveApply(hRoot);
-                        Shared::RootNcActiveCache::Set(hRoot, isActive);
                     }
                     else if (provider->OnRootDwmBackdropApply)
                     {

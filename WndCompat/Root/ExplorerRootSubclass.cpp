@@ -342,7 +342,13 @@ namespace WndCompat
 
         case WM_SHOWWINDOW:
             if (wParam)
+            {
                 TryRefreshExplorerShellBackdropOnFirstShow(hWnd, L"SHOWWINDOW");
+                // Seed актуального nc-состояния при показе (симметрия RootSubclassProc).
+                const bool showActive = ExplorerRootIsVisuallyActive(hWnd);
+                Shared::RootNcActiveCache::Set(hWnd, showActive);
+                WndCompat::FinalizeGlassCoreRootActivationVisualUpdate(hWnd, showActive ? TRUE : FALSE);
+            }
             break;
 
         case WM_NCACTIVATE:
@@ -538,6 +544,11 @@ namespace WndCompat::ExplorerRoot
                 else if (provider->OnRootDwmBackdropApply)
                     provider->OnRootDwmBackdropApply(hRoot);
             }
+
+            // Seed стартового nc-состояния для DTB-хрома (см. Root_Attach в RootSubclass.cpp).
+            const bool attachActive = ExplorerRootIsVisuallyActive(hRoot);
+            Shared::RootNcActiveCache::Set(hRoot, attachActive);
+            WndCompat::FinalizeGlassCoreRootActivationVisualUpdate(hRoot, attachActive ? TRUE : FALSE);
         }
 
         DebugLog(std::format(
