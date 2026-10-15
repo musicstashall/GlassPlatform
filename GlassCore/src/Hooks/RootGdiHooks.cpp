@@ -611,7 +611,18 @@ namespace GlassCore::Root
         int WINAPI Root_MyDrawTextW(
             HDC hdc, LPCWSTR t, int c, LPRECT rc, UINT fmt)
         {
-            auto o = GetRootOrg<OHK_DRAWTEXT, decltype(&DrawTextW)>(GetCallerModule(_ReturnAddress()));
+            HMODULE caller = GetCallerModule(_ReturnAddress());
+            auto o = GetRootOrg<OHK_DRAWTEXT, decltype(&DrawTextW)>(caller);
+            // Паритет BWM OverallHooks::MyDrawTextW: вызов DrawTextW из кода msinfo32.exe
+            // идёт через IAT-слот MFC42u (хвостовой вызов CDC::DrawText — адрес возврата
+            // остаётся в EXE, а импорт DrawTextW в msinfo32.exe отсутствует), поэтому orig
+            // берём из диспетчера MFC42u. Без этого o == null и вызов уходит в локальный
+            // DrawTextW мимо стекла — кастомный заголовок не виден.
+            if (!o && CallerBaseIs(caller, L"msinfo32.exe"))
+            {
+                if (HMODULE mfc = GetModuleHandleW(L"MFC42u.dll"))
+                    o = GetRootOrg<OHK_DRAWTEXT, decltype(&DrawTextW)>(mfc);
+            }
             if (!o)
                 return DrawTextW(hdc, t, c, rc, fmt);
             if (g_shutdown.load(std::memory_order_acquire))
@@ -619,7 +630,8 @@ namespace GlassCore::Root
             if ((fmt & DT_CALCRECT) != 0)
                 return o(hdc, t, c, rc, fmt);
             int r = 0;
-            if (!FAILED(GlassCore::Text::DrawTextWithAlpha(hdc, t, c, rc, fmt, r)))
+            const HRESULT hr = GlassCore::Text::DrawTextWithAlpha(hdc, t, c, rc, fmt, r);
+            if (!FAILED(hr))
                 return r;
             return o(hdc, t, c, rc, fmt);
         }
@@ -748,6 +760,35 @@ namespace GlassCore::Root
                 if (c == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
                     || c == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF))
                 {
+                    color = 0;
+                }
+            }
+
+            // BWM OverallHooks::MySetBkColor parity, дженерик-ветка
+            // (!mmc && caller != user32 && color == COLOR_WINDOW → 0):
+            // фон окон и #32770-диалогов, рисуемых кодом самого EXE (dfrgui.exe),
+            // заливается через SetBkColor(COLOR_WINDOW) из точки входа.
+            // Слот включается динамически в Root_OnBeginPaint (caller == entry-point).
+            // Гейты: только attach'нутый root (HasRootHookCache), только COLOR_WINDOW,
+            // mmc.exe исключён как в BWM.
+            if (!g_shutdown.load(std::memory_order_acquire) && caller
+                && caller == GlassCore::ModuleHandler::g_entryPointModule
+                && (color & 0xFFFFFF) == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
+                && hFromDc && GlassCore::Root::HasRootHookCache(hFromDc))
+            {
+                wchar_t epPath[MAX_PATH]{};
+                bool isMmc = false;
+                if (GetModuleFileNameW(
+                        GlassCore::ModuleHandler::g_entryPointModule,
+                        epPath, _countof(epPath)))
+                {
+                    isMmc = StrEqI(BasenamePtr(epPath).c_str(), L"mmc.exe");
+                }
+                if (!isMmc)
+                {
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][Root] SetBkColor: entryPoint COLOR_WINDOW→0 hdc=0x%p hwndDC=0x%p caller=%s cls=\"%s\"",
+                        hdc, hFromDc, callerBase, cls);
                     color = 0;
                 }
             }

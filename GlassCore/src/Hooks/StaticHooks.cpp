@@ -400,7 +400,8 @@ namespace GlassCore::StaticControl
         }
 
         int result = 0;
-        if (!FAILED(GlassCore::Text::DrawTextWithAlpha(hdc, lpchText, cchText, lprc, format, result)))
+        const HRESULT hr = GlassCore::Text::DrawTextWithAlpha(hdc, lpchText, cchText, lprc, format, result);
+        if (!FAILED(hr))
             return result;
 
         return orig(hdc, lpchText, cchText, lprc, format);

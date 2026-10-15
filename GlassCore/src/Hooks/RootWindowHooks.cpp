@@ -32,6 +32,7 @@
 #include <Hooks/ExplorerFrame.h>
 #include <Module/ModuleHandler.h>
 #include <Subsystems/PaintDispatcher.h>
+#include <Subsystems/RootSwcaGradient.h>
 #include <Hooks/forms/FormsHooks.h>
 #include <Subsystems/TextGlowClientRegistry.h>
 #include <DebugLog.h>
@@ -77,6 +78,11 @@ namespace GlassCore::Root
             HWND hWnd = nullptr;
             std::vector<HookSpec> specs;
             bool winFormsDrawTextEx = false;
+            // BWM PaintHandler.cpp, ветка window, callerModule == EntryPointModule:
+            // динамический SETBKCOLOR на точке входа (dfrgui и аналоги).
+            // Статика Classify покрывает только instMod == entry-point,
+            // а caller BeginPaint виден лишь в сессии. Только Paint-канал.
+            bool entryPointSetBkColor = false;
         };
         struct RootHookSession
         {
@@ -530,13 +536,23 @@ namespace GlassCore::Root
                 PushPaint(ep, OHK_DRAWTEXT, cache);
                 PushPaint(ep, OHK_GETSYSCOLORBR, cache);
                 PushPaint(ep, OHK_CREATESOLIDBRUSH, cache);
+                // BWM Paint, ветка «else // window», «callerModule == EntryPointModule»:
+                // «else if (szModuleName == msinfo32.exe)» — там szModuleName это basename
+                // caller-модуля BeginPaint (т.е. имя EXE точки входа), а не модуль окна.
+                // wndBase для #32770-диалога обычно USER32.dll, поэтому проверка по wndBase
+                // здесь никогда не срабатывала и слот MFC42u!DrawTextW не включался —
+                // заголовок «Выберите подкатегорию» (DrawTextW из msinfo32.exe) уходил мимо.
+                wchar_t epPath[MAX_PATH]{};
+                GetModuleFileNameW(
+                    GlassCore::ModuleHandler::g_entryPointModule,
+                    epPath, _countof(epPath));
+                const std::wstring epBase = BasenamePtr(epPath);
                 if (StrEqI(cls, L"HEX"))
                 {
                     PushPaint(ep, OHK_EXTTEXTOUT, cache);
                     PushDc(ep, OHK_EXTTEXTOUT, cache);
                 }
-
-                if (StrEqI(wndBase.c_str(), L"msinfo32.exe"))
+                else if (StrEqI(epBase.c_str(), L"msinfo32.exe"))
                 {
                     void* mfc = GetModuleHandleW(L"MFC42u.dll");
                     if (mfc)
@@ -559,7 +575,7 @@ namespace GlassCore::Root
 
         // --- Канал 1: BeginPaint / EndPaint (аналог PaintHandler::Paint) ---
 
-        static void Root_OnBeginPaint(HWND hWnd, HMODULE /*callerMod*/) noexcept
+        static void Root_OnBeginPaint(HWND hWnd, HMODULE callerMod) noexcept
         {
             if (g_shutdown.load(std::memory_order_acquire)) return;
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd)) return;
@@ -574,12 +590,41 @@ namespace GlassCore::Root
                 auto lock = s_cacheLock.lock_shared();
                 const RootCacheLookupResult lr = LookupRootHookCacheLocked(hWnd);
                 if (!lr.cache)
+                {
+                    // Catch-up: CREATE окна потерян (гонка холодного старта) — top-level
+                    // окно рисуется без attach: ни сабкласса, ни хуков, ни бэкдропа.
+                    // Просим WndCompat аттачить (идемпотентно, Full only внутри).
+                    if (GetAncestor(hWnd, GA_ROOT) == hWnd)
+                        GlassCore::Root::RequestRootAttachForHwnd(hWnd);
                     return;
+                }
                 chartInherit = lr.inheritedFromChartGraph;
                 session.specs = lr.cache->paintHooks;
                 session.winFormsDrawTextEx = lr.cache->winFormsDrawTextEx;
             }
-            if (session.specs.empty() && !session.winFormsDrawTextEx)
+            // BWM PaintHandler.cpp, ветка «window», callerModule == EntryPointModule:
+            // фон окон и #32770-диалогов, рисуемых кодом самого EXE (dfrgui.exe),
+            // идёт через SetBkColor из точки входа. Classify статичен по HINSTANCE
+            // окна и такой caller не видит — включаем динамически, per-сессия.
+            // Только Paint-канал, только OHK_SETBKCOLOR (scope задачи).
+            bool wantEntrySetBk = false;
+            if (callerMod && GlassCore::ModuleHandler::g_entryPointModule
+                && callerMod == GlassCore::ModuleHandler::g_entryPointModule)
+            {
+                void* ep = GlassCore::ModuleHandler::g_entryPointModule;
+                bool already = false;
+                for (const auto& sp : session.specs)
+                {
+                    if (sp.module == ep && sp.index == OHK_SETBKCOLOR)
+                    {
+                        already = true;
+                        break;
+                    }
+                }
+                if (!already)
+                    wantEntrySetBk = true;
+            }
+            if (session.specs.empty() && !session.winFormsDrawTextEx && !wantEntrySetBk)
                 return;
             wchar_t cn[256]{};
             GetClassNameW(hWnd, cn, _countof(cn));
@@ -598,6 +643,14 @@ namespace GlassCore::Root
                     TextGlow::TextGlowSpreadCategory::Global);
             }
             EnableSpecs(session.specs, true);
+            if (wantEntrySetBk)
+            {
+                EnableRootHook(GlassCore::ModuleHandler::g_entryPointModule, OHK_SETBKCOLOR, true);
+                session.entryPointSetBkColor = true;
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][Root][Session] BeginPaint: hwnd=0x%p entryPoint SetBkColor on (caller==entry-point)",
+                    hWnd);
+            }
             if (session.winFormsDrawTextEx)
                 GlassCore::FormsHooks::DrawTextExAttach(true);
             g_rootPaintStack.push_back(std::move(session));
@@ -614,6 +667,8 @@ namespace GlassCore::Root
                 auto session = std::move(*it);
                 g_rootPaintStack.erase((it + 1).base());
                 EnableSpecs(session.specs, false);
+                if (session.entryPointSetBkColor)
+                    EnableRootHook(GlassCore::ModuleHandler::g_entryPointModule, OHK_SETBKCOLOR, false);
                 if (session.winFormsDrawTextEx)
                     GlassCore::FormsHooks::DrawTextExAttach(false);
                 return;
@@ -784,6 +839,10 @@ namespace GlassCore::Root
     {
         /*using namespace Hooks::DebugDetourHooks;
         (void)SetEnabled(DDH_SetBkColor | DDH_FillRect, true);*/
+        // Предпрогрев IAT точки входа для динамического SETBKCOLOR
+        // (BWM window / caller == EntryPoint): холодный скан PE уходит из первого кадра.
+        if (void* ep = GlassCore::ModuleHandler::g_entryPointModule)
+            PrewarmRootHook(ep);
         GlassCore::PaintDispatcher::RegisterPaintProvider({ Root_OnBeginPaint, Root_OnEndPaint });
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ Root_OnGetDC, Root_OnReleaseDC });
         GlassCore::PaintDispatcher::RegisterCompatDCProvider({ Root_OnCreateCompatDC, Root_OnDeleteDC });

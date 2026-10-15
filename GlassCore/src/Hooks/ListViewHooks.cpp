@@ -161,6 +161,20 @@ namespace GlassCore::ListViewControl
             SetTextColor(hdc, GetSysColor(COLOR_WINDOWTEXT));
     }
 
+    // BWM-паритет: иконка целиком, без вырезания фона — все пиксели непрозрачные.
+    // Promise32BPP для 32bpp-источников сохраняет сырой 4-й байт (у strip-битмапов
+    // ImageList там мусор), поэтому альфу принудительно поднимаем в 0xFF.
+    static void ForceOpaqueAlpha(HBITMAP hbmp32) noexcept
+    {
+        DIBSECTION ds{};
+        if (!GetObject(hbmp32, sizeof(ds), &ds) || !ds.dsBm.bmBits)
+            return;
+        auto* pixels = static_cast<DWORD*>(ds.dsBm.bmBits);
+        const int count = ds.dsBm.bmWidth * std::abs(ds.dsBm.bmHeight);
+        for (int i = 0; i < count; ++i)
+            pixels[i] |= 0xFF000000u;
+    }
+
     // sysmon → LV: при memory-DC WindowFromDC=NULL — HWND с вершины стека PaintDispatcher (как Root MMC).
     [[nodiscard]] static HWND HwndForSysmonListViewDraw(HDC hdc) noexcept
     {
@@ -366,6 +380,52 @@ namespace GlassCore::ListViewControl
             reinterpret_cast<LPCWSTR>(returnAddress),
             &hMod);
         return hMod;
+    }
+
+    // Модуль собственного образа — детект chain-bounce через IATRegistry:
+    // предыдущее звено цепочки вызвало свой orig-трамплин, и _ReturnAddress()
+    // лежит в нашем коде, а не у настоящего вызывающего.
+    static HMODULE OwnGlassCoreModule() noexcept
+    {
+        static HMODULE s_own = nullptr;
+        if (!s_own)
+        {
+            HMODULE h = nullptr;
+            GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&Overall_MyBitBlt),
+                &h);
+            s_own = h;
+        }
+        return s_own;
+    }
+
+    // Настоящий comctl-caller сквозь chain-bounce: первый кадр стека вне
+    // собственного образа, принадлежащий отслеживаемому comctl32.
+    // Кадры наших звеньев (свой модуль) и трамплинов (не модули) пропускаем.
+    // Только для различения BWM-связки «сессия legacy / вызовы new» внутри
+    // LV-сессии; вне сессий не вызывается.
+    [[nodiscard]] static HMODULE FindTrueComctlCaller() noexcept
+    {
+        void* stack[24]{};
+        const USHORT n = CaptureStackBackTrace(
+            0, static_cast<DWORD>(std::size(stack)), stack, nullptr);
+        auto* g_new = GlassCore::ModuleHandler::g_comctl32New;
+        auto* g_legacy = GlassCore::ModuleHandler::g_comctl32Legacy;
+        const HMODULE own = OwnGlassCoreModule();
+        for (USHORT i = 0; i < n; ++i)
+        {
+            HMODULE m = nullptr;
+            if (!GetModuleHandleExW(
+                    GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                    reinterpret_cast<LPCWSTR>(stack[i]), &m) || !m)
+                continue;
+            if (own && m == own)
+                continue;
+            if ((g_new && m == g_new) || (g_legacy && m == g_legacy))
+                return m;
+        }
+        return nullptr;
     }
 
     // ── GetOverallOrigSafe ───────────────────────────────────────────────────
@@ -728,9 +788,19 @@ namespace GlassCore::ListViewControl
     // Иконки без альфа-канала: Promise32BPP конвертирует в 32bpp (alpha=0xFF),
     // затем GdiAlphaBlend рисует с корректным compositing поверх стекла.
     //
-    // Отличие от BWM: BWM вызывает оригинальный BitBlt после конвертации —
-    // это неправильно, т.к. обычный BitBlt игнорирует альфу. Мы используем
-    // GdiAlphaBlend (AC_SRC_OVER + AC_SRC_ALPHA).
+    // BWM-паритет ТОЛЬКО для связки «сессия рисования в legacy, вызовы BitBlt
+    // из new» (BWM-ветка callerModule == OverallHooks::GetComctl32Module() +
+    // WinHooks::HK_BITBLT): иконка целиком, без вырезания фона — opaque 32bpp +
+    // оригинальный BitBlt. Настоящий caller сквозь chain-bounce восстанавливает
+    // FindTrueComctlCaller (проход стека до первого отслеживаемого comctl32).
+    // Вызов через BitBlt (а не AlphaBlend) означает, что надёжной альфы
+    // у битмапа нет (настоящую альфу comctl рисует через AlphaBlend — та же
+    // логика, что в TreeView Overall_MyMaskBlt): проверять HasAlphaChannel
+    // в этой ветке нельзя — в 32bpp strip-битмапах ImageList альфа-позиция
+    // мусорная и даёт ложное true → просвечивание через AlphaBlend, а black-key
+    // дополнительно выедает тёмные пиксели иконки.
+    // Остальные связки идут общим путём ниже (как до правки): обычный BitBlt
+    // игнорирует альфу, поэтому там GdiAlphaBlend (AC_SRC_OVER + AC_SRC_ALPHA).
 
     // ── BitBlt ──────────────────────────────────────────────────────────────
     BOOL WINAPI Overall_MyBitBlt(
@@ -739,6 +809,28 @@ namespace GlassCore::ListViewControl
     {
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<OHK_BITBLT, decltype(&BitBlt)>(callerMod);
+
+        // Chain-bounce через IATRegistry (голова — ComctlScrollBarMyBitBlt,
+        // зарегистрирован позже базового LV-ref и вызывает свой orig-трамплин):
+        // _ReturnAddress() лежит в нашем GlassCore.dll, настоящий caller
+        // потерян, orig пуст. Настоящий caller восстанавливаем проходом
+        // стека до первого отслеживаемого comctl32; не нашли — берём модуль
+        // инициатора paint из владеющей LV-сессии (у него запись есть).
+        // LV зарегистрирован базовым ref раньше ленивого SB → LV.orig ведёт
+        // на настоящий BitBlt, рекурсии нет при любом порядке звеньев
+        // (вызов всегда идёт вниз по цепочке к оригиналу).
+        if (!orig && !g_lvSessionStack.empty())
+        {
+            const HMODULE own = OwnGlassCoreModule();
+            if (own && callerMod == own)
+            {
+                HMODULE trueCaller = FindTrueComctlCaller();
+                if (!trueCaller)
+                    trueCaller = g_lvSessionStack.back().mod;
+                callerMod = trueCaller;
+                orig = GetOverallOrigSafe<OHK_BITBLT, decltype(&BitBlt)>(callerMod);
+            }
+        }
 
         if (!orig)
             return BitBlt(hdc, x, y, cx, cy, hdcSrc, x1, y1, rop);
@@ -772,6 +864,34 @@ namespace GlassCore::ListViewControl
         BITMAP bm{};
         GetObject(hSrcBitmap, sizeof(bm), &bm);
         bool hasAlpha = Shared::BitmapUtils::HasAlphaChannel(hSrcBitmap);
+
+        // BWM-паритет (см. шапку секции): ТОЛЬКО точная связка из ветки
+        // callerModule == OverallHooks::GetComctl32Module() + WinHooks::HK_BITBLT:
+        // сессия рисования в legacy, вызовы BitBlt из new — иконка целиком,
+        // без вырезания фона: opaque 32bpp + оригинальный BitBlt.
+        // Остальные связки (new/new, legacy/legacy, WinForms, чужие caller)
+        // идут общим путём ниже — там фоны были прозрачными и до правки;
+        // opaque целиком корректен только в этой связке (фон гарантированно
+        // чёрный, как у BWM; поверх темизированных фонов он дал бы боксы).
+        auto* g_parityNew = GlassCore::ModuleHandler::g_comctl32New;
+        if (g_parityNew &&
+            g_lvSessionStack.back().kind == GlassShared::GlassControlKind::ListView &&
+            g_lvSessionStack.back().mod == GlassCore::ModuleHandler::g_comctl32Legacy &&
+            callerMod == g_parityNew)
+        {
+            wil::unique_hbitmap hConverted{ Shared::BitmapUtils::Promise32BPP(hSrcBitmap) };
+            if (!hConverted)
+            {
+                return orig(hdc, x, y, cx, cy, hdcSrc, x1, y1, rop);
+            }
+
+            ForceOpaqueAlpha(hConverted.get());
+
+            HGDIOBJ hOldBitmap = SelectObject(hdcSrc, hConverted.get());
+            auto restoreBitmap = wil::scope_exit([&] { SelectObject(hdcSrc, hOldBitmap); });
+
+            return orig(hdc, x, y, cx, cy, hdcSrc, x1, y1, rop);
+        }
 
         /*DebugLog(DBG_IMPORTANT,
             L"[GlassCore][ListView] BitBlt: x=%d y=%d cx=%d cy=%d srcX=%d srcY=%d "

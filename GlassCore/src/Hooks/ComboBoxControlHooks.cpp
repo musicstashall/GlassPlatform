@@ -39,6 +39,9 @@ namespace GlassCore::ComboBoxControl
         thread_local HMODULE g_activePaintMod = nullptr;
         thread_local HMODULE g_activeHotMod = nullptr;
         thread_local HWND    g_comboHwnd = nullptr;
+        // BWM Paint/ComboBox (caller == comctl32 v6): EXTTEXTOUT точки входа
+        // включён только в paint-сессии; флаг — для парного снятия в EndPaint.
+        thread_local bool   g_entryPointExtTextOutOn = false;
         static std::atomic<bool> g_shutdown{ false };
 
         // Дедуп: два идентичных DTB подряд (тот же part/state/rect) → skip, иначе второй проход ломает стекло.
@@ -296,6 +299,16 @@ namespace GlassCore::ComboBoxControl
         {
             if (PVOID base = GetModuleHandleW(L"MFC42u.dll"))
                 EnableHooksOnModule(base, OHK_EXTTEXTOUT, enable);
+        }
+
+        // BWM PaintHandler (paint-сессия, ветка ComboBox, caller == comctl32 v6):
+        // IAT ExtTextOutW на точке входа — cleanmgr.exe и аналоги рисуют текст
+        // поля комбобокса своим кодом, без этого слота вызовы идут мимо сессии.
+        // Только paint-канал, только OHK_EXTTEXTOUT (scope задачи).
+        static void EnableComboBoxEntryPointHooks(bool enable) noexcept
+        {
+            if (void* ep = GlassCore::ModuleHandler::g_entryPointModule)
+                EnableHooksOnModule(ep, OHK_EXTTEXTOUT, enable);
         }
 
         [[nodiscard]] static HRESULT InvokeComboDrawThemeBackground(
@@ -881,6 +894,15 @@ namespace GlassCore::ComboBoxControl
             g_activePaintMod = comctlMod;
             g_comboHwnd = hWnd;
             EnableComboBoxHooksForSession(kind, comctlMod, true);
+            // Паритет BWM Paint/ComboBox (caller == comctl32 v6, т.е. g_new):
+            // текст поля рисует точка входа (cleanmgr.exe) — цепляем её ExtTextOutW.
+            // Тело Overall_MyExtTextOutW гейтится CbxSessionActive, отдельный
+            // caller-гейт в теле не нужен.
+            if (callerMod && callerMod == g_new && !g_entryPointExtTextOutOn)
+            {
+                EnableComboBoxEntryPointHooks(true);
+                g_entryPointExtTextOutOn = true;
+            }
         }
 
         static void OnEndPaintGlobal(HWND hWnd, HMODULE /*callerMod*/)
@@ -893,6 +915,11 @@ namespace GlassCore::ComboBoxControl
                 return;
 
             EnableComboBoxHooksForSession(kind, g_activePaintMod, false);
+            if (g_entryPointExtTextOutOn)
+            {
+                EnableComboBoxEntryPointHooks(false);
+                g_entryPointExtTextOutOn = false;
+            }
             g_activePaintMod = nullptr;
             if (!CbxSessionActive())
             {
@@ -1059,6 +1086,10 @@ namespace GlassCore::ComboBoxControl
         PrewarmModule(GlassCore::ModuleHandler::g_comctl32New);
         PrewarmModule(GlassCore::ModuleHandler::g_comctl32Legacy);
         PrewarmModule(GetModuleHandleW(L"sysmon.ocx"));
+        // Точка входа — слот EXTTEXTOUT для paint-сессий ComboBox (cleanmgr.exe):
+        // холодный скан PE уходит из первого кадра (модуль уже загружен —
+        // ModuleHandler::Startup отработал раньше subsystem Startup).
+        PrewarmModule(GlassCore::ModuleHandler::g_entryPointModule);
         GlassCore::ModuleHandler::RegisterModulePrewarmHandler(PrewarmForModule);
     }
 
