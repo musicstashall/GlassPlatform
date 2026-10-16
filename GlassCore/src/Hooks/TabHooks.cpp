@@ -50,6 +50,23 @@ namespace GlassCore::TabControl
             return h == reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(1u));
         }
 
+        // Header-only таб (perfmon: полоса язычков без тела) — только для таких
+        // включаем ETO-хук/blacken, обычные табы с телом не трогаем.
+        [[nodiscard]] bool IsHeaderOnlyTabControl(HWND hWnd) noexcept
+        {
+            if (!hWnd || !IsWindow(hWnd))
+                return false;
+            const UINT style = static_cast<UINT>(GetWindowLongW(hWnd, GWL_STYLE));
+            if (style & TCS_VERTICAL)
+                return false;
+            RECT client{};
+            if (!GetClientRect(hWnd, &client))
+                return false;
+            if (client.right - client.left <= 0 || client.bottom - client.top > 48)
+                return false;
+            return TabCtrl_GetItemCount(hWnd) > 0;
+        }
+
         static bool StrEq(LPCWSTR a, LPCWSTR b) noexcept
         {
             return _wcsicmp(a, b) == 0;
@@ -301,9 +318,11 @@ namespace GlassCore::TabControl
 
         const bool themedTabSession = g_tabStack.back().useTheme;
 
-        // 1) Очистка фона (ETO_OPAQUE) — только для unthemed: под стекло чёрным.
-        // Для themed не трогаем прямоугольник текста: иначе подпись вкладки на чёрном, не стыкуется с alpha-язычком.
-        if (!themedTabSession && (options & ETO_OPAQUE) && lprect)
+        // 1) Очистка фона (ETO_OPAQUE) — чёрным под стекло: unthemed всегда,
+        // themed — только header-only (фон comctl32 иначе перекрашивает светлым
+        // поверх blacken и язычки выглядят дефолтно).
+        if ((options & ETO_OPAQUE) && lprect
+            && (!themedTabSession || IsHeaderOnlyTabControl(g_tabStack.back().hWnd)))
         {
             PatBlt(hdc, lprect->left, lprect->top,
                 lprect->right - lprect->left, lprect->bottom - lprect->top,
@@ -698,8 +717,11 @@ namespace GlassCore::TabControl
         if (!g_tabStack.back().hookGetSysColorBrush)
             return orig(nIndex);
 
-        if (nIndex == COLOR_BTNFACE || nIndex == COLOR_WINDOW)
+        if (nIndex == COLOR_BTNFACE || nIndex == COLOR_WINDOW || nIndex == COLOR_MENU)
+        {
+            // Паритет BWM DUIHooks::MyGetSysColorBrush: светлые кисти под табом — чёрные.
             return reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+        }
 
         return orig(nIndex);
     }
@@ -739,11 +761,12 @@ namespace GlassCore::TabControl
         const UINT style = static_cast<UINT>(GetWindowLongW(hWnd, GWL_STYLE));
         const bool vertical = (style & TCS_VERTICAL) != 0;
         // BWM PaintHandler: ExtTextOut при vertical || !theme; DrawThemeText при theme && !vertical.
+        // Плюс header-only: ETO-хук нужен чтобы comctl32 не заливал фон светлым поверх blacken.
         const TabPaintSession session{
             callerMod,
             hWnd,
             useTheme,
-            vertical || !useTheme,
+            vertical || !useTheme || IsHeaderOnlyTabControl(hWnd),
             useTheme,
             useTheme && !vertical,
             useTheme,
@@ -754,10 +777,13 @@ namespace GlassCore::TabControl
         EnableTabHooks(callerMod, true, session);
         // Паритет BWM (PaintHandler: фон таба идёт через DUI70): кисть BTNFACE/WINDOW
         // под язычками — чёрная, иначе под стеклом проступает серая заливка.
+        // Только COMCTL32 paint-сессия (вложенные сессии других контролов не трогаем).
         if (session.hookGetSysColorBrush)
         {
             if (HMODULE hDui70 = GetModuleHandleW(L"DUI70.dll"))
                 EnableHooksOnModule(hDui70, OHK_GETSYSCOLORBRUSH, true);
+            if (HMODULE hUxTheme = GetModuleHandleW(L"uxtheme.dll"))
+                EnableHooksOnModule(hUxTheme, OHK_GETSYSCOLORBRUSH, true);
         }
         DebugLog(DBG_NORMAL,
             L"[GlassCore][Tab] BeginPaint: callerMod=0x%p caller=%s hWnd=0x%p themed=%d vert=%d "
@@ -789,8 +815,42 @@ namespace GlassCore::TabControl
         {
             if (HMODULE hDui70 = GetModuleHandleW(L"DUI70.dll"))
                 EnableHooksOnModule(hDui70, OHK_GETSYSCOLORBRUSH, false);
+            if (HMODULE hUxTheme = GetModuleHandleW(L"uxtheme.dll"))
+                EnableHooksOnModule(hUxTheme, OHK_GETSYSCOLORBRUSH, false);
         }
         DebugLog(DBG_NORMAL, L"[GlassCore][Tab] EndPaint: hWnd=0x%p depth=%zu", hWnd, g_tabStack.size());
+    }
+
+    // ── Post BeginPaint: чёрная база только header-only табов (perfmon) ─────────
+    // Активный alpha блендится с фоном DC таба; без чёрной базы gaps светлые и
+    // язычки выглядят дефолтно-светлыми. Обычные табы с телом не трогаем:
+    // гейт по горизонтальному header-only (высота клиента <= 48) — как Header.
+    [[nodiscard]] static bool OnTabAfterBeginPaint(
+        HWND hWnd, HDC hdc, LPPAINTSTRUCT ps, HMODULE /*callerMod*/) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire))
+            return false;
+        using namespace GlassShared;
+        if (GlassGetWindowKind(hWnd) != GlassControlKind::TabControl)
+            return false;
+        if (!hdc || !ps || IsRectEmpty(&ps->rcPaint))
+            return false;
+        const UINT style = static_cast<UINT>(GetWindowLongW(hWnd, GWL_STYLE));
+        if (style & TCS_VERTICAL)
+            return false;
+        RECT client{};
+        if (!GetClientRect(hWnd, &client))
+            return false;
+        if (client.right - client.left <= 0 || client.bottom - client.top > 48)
+            return false;
+        if (TabCtrl_GetItemCount(hWnd) <= 0)
+            return false;
+        PatBlt(hdc,
+            ps->rcPaint.left, ps->rcPaint.top,
+            ps->rcPaint.right - ps->rcPaint.left,
+            ps->rcPaint.bottom - ps->rcPaint.top,
+            BLACKNESS);
+        return true;
     }
 
     // =========================================================================
@@ -806,6 +866,7 @@ namespace GlassCore::TabControl
     {
         // Регистрация провайдера в PaintDispatcher (до PaintDispatcher::Startup)
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintGlobal, OnEndPaintGlobal });
+        GlassCore::PaintDispatcher::RegisterPostPaintProvider({ OnTabAfterBeginPaint });
 
         // Кэшируем диспетчеры для известных модулей.
         auto cacheModule = [&](void* mod)

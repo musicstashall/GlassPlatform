@@ -638,48 +638,106 @@ namespace
         return true;
     }
 
-    LRESULT CALLBACK RootSubclassProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
-
-    // Root без WS_CLIPCHILDREN (напр. главное окно perfmon.exe): чёрная заливка
-    // WM_ERASEBKGND накрывала дочерние окна (таб SysTabControl32), если erase приходил
-    // позже их paint. Исключаем видимых детей из клипа (ручной clipchildren),
-    // чёрная база под стекло в остальной области сохраняется.
-    struct ExcludeVisibleChildrenCtx
+    // Узкое исключение header язычков таба из root erase (order-fix perfmon):
+    // корень без WS_CLIPCHILDREN накрывает таб чёрным ПОСЛЕ его paint; вычитаем
+    // только union TabCtrl_GetItemRect (pane/тело по-прежнему чернятся).
+    struct ExcludeTabHeaderCtx
     {
-        HRGN hClip;
         HWND hRoot;
+        HDC hdc;
+        const RECT* clipRect;
+        bool excluded;
     };
 
-    static BOOL CALLBACK ExcludeVisibleChildProc(HWND hChild, LPARAM lParam)
+    static BOOL CALLBACK ExcludeTabHeaderProc(HWND hChild, LPARAM lParam)
     {
-        const auto* ctx = reinterpret_cast<ExcludeVisibleChildrenCtx*>(lParam);
-        if (!ctx || !ctx->hClip || !IsWindowVisible(hChild))
+        auto* ctx = reinterpret_cast<ExcludeTabHeaderCtx*>(lParam);
+        if (!ctx || !ctx->hRoot || !ctx->hdc || !ctx->clipRect || !IsWindowVisible(hChild))
             return TRUE;
-        RECT rc{};
-        if (!GetWindowRect(hChild, &rc))
+        wchar_t className[128]{};
+        if (!GetClassNameW(hChild, className, static_cast<int>(std::size(className))))
             return TRUE;
-        MapWindowPoints(HWND_DESKTOP, ctx->hRoot, reinterpret_cast<LPPOINT>(&rc), 2);
-        if (rc.left > rc.right) { const LONG t = rc.left; rc.left = rc.right; rc.right = t; }
-        if (rc.top > rc.bottom) { const LONG t = rc.top; rc.top = rc.bottom; rc.bottom = t; }
-        if (rc.right <= rc.left || rc.bottom <= rc.top)
+        if (_wcsicmp(className, L"SysTabControl32") != 0)
             return TRUE;
-        wil::unique_hrgn hChildRgn{ CreateRectRgn(rc.left, rc.top, rc.right, rc.bottom) };
-        if (hChildRgn)
-            CombineRgn(ctx->hClip, ctx->hClip, hChildRgn.get(), RGN_DIFF);
+        if (GetAncestor(hChild, GA_ROOT) != GetAncestor(ctx->hRoot, GA_ROOT))
+            return TRUE;
+        if (GetWindowThreadProcessId(hChild, nullptr) != GetCurrentThreadId())
+            return TRUE;
+        RECT clientRect{};
+        if (!GetClientRect(hChild, &clientRect))
+            return TRUE;
+        if (clientRect.right <= clientRect.left || clientRect.bottom <= clientRect.top)
+            return TRUE;
+        const int n = TabCtrl_GetItemCount(hChild);
+        if (n <= 0)
+            return TRUE;
+        RECT header{};
+        bool haveHeader = false;
+        for (int i = 0; i < n; ++i)
+        {
+            RECT ir{};
+            if (!TabCtrl_GetItemRect(hChild, i, &ir))
+                return TRUE;
+            if (ir.right <= ir.left || ir.bottom <= ir.top)
+                continue;
+            if (!haveHeader)
+            {
+                header = ir;
+                haveHeader = true;
+            }
+            else
+            {
+                RECT u{};
+                if (!UnionRect(&u, &header, &ir))
+                    return TRUE;
+                header = u;
+            }
+        }
+        if (!haveHeader)
+            return TRUE;
+        RECT headerClipped{};
+        if (!IntersectRect(&headerClipped, &header, &clientRect))
+            return TRUE;
+        RECT headerRoot = headerClipped;
+        MapWindowPoints(hChild, ctx->hRoot, reinterpret_cast<LPPOINT>(&headerRoot), 2);
+        if (headerRoot.left > headerRoot.right)
+        {
+            const LONG t = headerRoot.left;
+            headerRoot.left = headerRoot.right;
+            headerRoot.right = t;
+        }
+        if (headerRoot.top > headerRoot.bottom)
+        {
+            const LONG t = headerRoot.top;
+            headerRoot.top = headerRoot.bottom;
+            headerRoot.bottom = t;
+        }
+        RECT inter{};
+        if (!IntersectRect(&inter, ctx->clipRect, &headerRoot))
+            return TRUE;
+        if (inter.right <= inter.left || inter.bottom <= inter.top)
+            return TRUE;
+        wil::unique_hrgn hRgn{ CreateRectRgnIndirect(&inter) };
+        if (!hRgn)
+            return TRUE;
+        if (ExtSelectClipRgn(ctx->hdc, hRgn.get(), RGN_DIFF) == ERROR)
+            return TRUE;
+        ctx->excluded = true;
         return TRUE;
     }
 
-    static void ExcludeVisibleChildrenFromEraseClip(HWND hWnd, HDC hdc, const RECT& clipRect)
+    [[nodiscard]] static bool TryExcludeTabHeadersFromEraseClip(HWND hRoot, HDC hdc, const RECT& clipRect) noexcept
     {
-        if ((GetWindowLongW(hWnd, GWL_STYLE) & WS_CLIPCHILDREN) != 0)
-            return;
-        wil::unique_hrgn hClip{ CreateRectRgn(clipRect.left, clipRect.top, clipRect.right, clipRect.bottom) };
-        if (!hClip)
-            return;
-        ExcludeVisibleChildrenCtx ctx{ hClip.get(), hWnd };
-        EnumChildWindows(hWnd, ExcludeVisibleChildProc, reinterpret_cast<LPARAM>(&ctx));
-        SelectClipRgn(hdc, hClip.get());
+        if (!hRoot || !hdc)
+            return false;
+        if (GetWindowThreadProcessId(hRoot, nullptr) != GetCurrentThreadId())
+            return false;
+        ExcludeTabHeaderCtx ctx{ hRoot, hdc, &clipRect, false };
+        EnumChildWindows(hRoot, ExcludeTabHeaderProc, reinterpret_cast<LPARAM>(&ctx));
+        return ctx.excluded;
     }
+
+    LRESULT CALLBACK RootSubclassProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 
     LRESULT CALLBACK RootSubclassProcShared(
         HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
@@ -759,16 +817,12 @@ namespace
             }
             if (wParam && GetAncestor(hWnd, GA_ROOT) == hWnd)
             {
-                // Seed актуального nc-состояния при показе: hide→show может менять визуальную
-                // активность, а карта GlassCore иначе хранит протухшее значение до WM_NCACTIVATE.
+                // Seed nc-состояния при показе: первый paint таба может прийти раньше
+                // WM_NCACTIVATE — без seed GlassCore уходит в inactive-ветку (alpha 0).
                 const HWND fgShow = GetForegroundWindow();
                 const bool showActive = fgShow && GetAncestor(fgShow, GA_ROOT) == hWnd;
                 Shared::RootNcActiveCache::Set(hWnd, showActive);
                 WndCompat::FinalizeGlassCoreRootActivationVisualUpdate(hWnd, showActive ? TRUE : FALSE);
-                DebugLog(DBG_IMPORTANT,
-                    L"[WndCompat][Root][ThemePaint][Chrome] WM_SHOWWINDOW seed hwnd=0x%p ncActive=%d",
-                    hWnd,
-                    showActive ? 1 : 0);
             }
             break;
 
@@ -816,11 +870,17 @@ namespace
                     HDC hdc = reinterpret_cast<HDC>(wParam);
                     RECT clipRect{};
                     GetClipBox(hdc, &clipRect);
-                    ExcludeVisibleChildrenFromEraseClip(hWnd, hdc, clipRect);
+                    // Узкое исключение header язычков таба: корень без WS_CLIPCHILDREN
+                    // накрывал таб чёрным после его paint (perfmon). Pane/тело чернятся.
+                    const int savedDc = SaveDC(hdc);
+                    if (savedDc != 0)
+                        (void)TryExcludeTabHeadersFromEraseClip(hWnd, hdc, clipRect);
                     PatBlt(hdc, clipRect.left, clipRect.top,
                         clipRect.right - clipRect.left,
                         clipRect.bottom - clipRect.top,
                         BLACKNESS);
+                    if (savedDc != 0)
+                        RestoreDC(hdc, savedDc);
                     return 1;
                 }
             }
@@ -1452,16 +1512,10 @@ namespace WndCompat
                         return rWnd && rWnd == rFg;
                     }();
 
-                    // Seed стартового nc-состояния для DTB-хрома (ThemePaintRegistry в GlassCore):
-                    // первый paint контролов может прийти раньше первого WM_NCACTIVATE, а при позднем
-                    // attach (initial scan / catch-up) NCACTIVATE вообще уже прошёл — без seed карта
-                    // GlassCore пуста и RootVisuallyActiveForThemedChrome падает в inactive-ветку.
+                    // Seed стартового nc-состояния для DTB-хрома: при позднем attach
+                    // NCACTIVATE уже прошёл — без seed GlassCore пуст и уходит в inactive (alpha 0).
                     Shared::RootNcActiveCache::Set(hRoot, isActive);
                     WndCompat::FinalizeGlassCoreRootActivationVisualUpdate(hRoot, isActive ? TRUE : FALSE);
-                    DebugLog(DBG_IMPORTANT,
-                        L"[WndCompat][Root][ThemePaint][Chrome] Root_Attach seed hwnd=0x%p ncActive=%d",
-                        hRoot,
-                        isActive ? 1 : 0);
 
                     if (Shared::RootPolicyQuery::UsesSwcaBackdrop())
                     {
