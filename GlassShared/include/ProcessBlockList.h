@@ -85,8 +85,11 @@ namespace ProcessBlockList
         return index < BuiltInCount() ? kBuiltInNames[index] : nullptr;
     }
 
-    /// Статический список + записи из реестра.
+    /// Статический список + записи из реестра. Повторный вызов — no-op, пока не Reload().
     void Initialize();
+
+    /// Сбросить кэш и заново прочитать реестр (смена BlockList без перезапуска процесса).
+    void Reload();
 
     /// Заблокирован: полная инъекция (GlassCore/WndCompat/GUI) не выполняется.
     bool IsBlocked(const std::wstring& exeName);

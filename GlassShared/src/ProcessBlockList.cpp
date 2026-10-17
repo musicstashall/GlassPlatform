@@ -3,12 +3,16 @@
 #include <windows.h>
 #include <string>
 #include <algorithm>
+#include <atomic>
 #include <unordered_set>
 #include <DebugLog.h>
 
 namespace
 {
     std::unordered_set<std::wstring> g_blockList;
+    // WinEvent зовёт Initialize на каждое событие; реестр читается один раз.
+    std::atomic<bool> g_blockListReady{ false };
+    SRWLOCK g_blockListLock = SRWLOCK_INIT;
 
     std::wstring NormalizeName(const std::wstring& name)
     {
@@ -60,16 +64,39 @@ namespace
 
         RegCloseKey(hKey);
     }
+
+    void LoadBlockListContents()
+    {
+        g_blockList.clear();
+        for (std::size_t i = 0; i < ProcessBlockList::BuiltInCount(); ++i)
+            g_blockList.insert(NormalizeName(ProcessBlockList::kBuiltInNames[i]));
+        LoadFromRegistry();
+    }
 }
 
 namespace ProcessBlockList
 {
     void Initialize()
     {
-        for (std::size_t i = 0; i < BuiltInCount(); ++i)
-            g_blockList.insert(NormalizeName(kBuiltInNames[i]));
+        if (!g_blockListReady.load(std::memory_order_acquire))
+        {
+            AcquireSRWLockExclusive(&g_blockListLock);
+            if (!g_blockListReady.load(std::memory_order_relaxed))
+            {
+                LoadBlockListContents();
+                g_blockListReady.store(true, std::memory_order_release);
+            }
+            ReleaseSRWLockExclusive(&g_blockListLock);
+        }
+    }
 
-        LoadFromRegistry();
+    void Reload()
+    {
+        AcquireSRWLockExclusive(&g_blockListLock);
+        g_blockListReady.store(false, std::memory_order_relaxed);
+        LoadBlockListContents();
+        g_blockListReady.store(true, std::memory_order_release);
+        ReleaseSRWLockExclusive(&g_blockListLock);
     }
 
     bool IsBuiltIn(const std::wstring& exeName) noexcept

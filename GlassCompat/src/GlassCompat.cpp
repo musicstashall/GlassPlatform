@@ -489,7 +489,7 @@ namespace
     void ReloadAttachListFromRegistry() noexcept
     {
         AttachList::Initialize();
-        ProcessBlockList::Initialize();
+        ProcessBlockList::Reload();
 
         const std::wstring processName = GetProcessNameLower();
         const Shared::InjectionMode oldMode = g_mode;
