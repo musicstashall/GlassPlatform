@@ -176,7 +176,6 @@
     <ClCompile Include="src\HostShellWatchdog.cpp" />
     <ClCompile Include="src\EntryRundll.cpp" />
     <ClCompile Include="src\GlassCompat.cpp" />
-    <ClCompile Include="src\SymbolResolver.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\CompatPch.h" />
@@ -186,7 +185,6 @@
     <ClInclude Include="Include\GlassCompat.h" />
     <ClInclude Include="Include\HostPidHelper.h" />
     <ClInclude Include="Include\ShortLivedAgent.h" />
-    <ClInclude Include="Include\SymbolResolver.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\GlassShared\GlassShared.vcxproj">

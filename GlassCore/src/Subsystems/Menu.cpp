@@ -13,9 +13,7 @@ namespace GlassCore::Menu
         // Подготовка состояния меню (контекст, флаги)
         MenuHandler::Prepare();
 
-        // Подготовка UxTheme‑хуков:
-        // - чтение оффсетов из реестра
-        // - определение compatible‑mode
+        // Подготовка UxTheme-хуков (Detours/IAT, без PDB-оффсетов).
         Hooks::UxThemeHooks::Prepare();
         Hooks::MenuHooks::Prepare();
 

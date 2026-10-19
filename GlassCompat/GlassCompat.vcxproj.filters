@@ -31,9 +31,6 @@
     <ClCompile Include="src\HostShellWatchdog.cpp">
       <Filter>src</Filter>
     </ClCompile>
-    <ClCompile Include="src\SymbolResolver.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\AttachList.h">
@@ -55,9 +52,6 @@
       <Filter>Include</Filter>
     </ClInclude>
     <ClInclude Include="Include\ShortLivedAgent.h">
-      <Filter>Include</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\SymbolResolver.h">
       <Filter>Include</Filter>
     </ClInclude>
   </ItemGroup>

@@ -8,14 +8,12 @@
 #include <Subsystems/MenuHandler.h>
 #include <Subsystems/RenderText.h>
 
-#include <RegHelper.h> 
-#include <SystemHelper.h>
-#include <Core/Intercept/CodePatcher.h>
-#include <Core/Intercept/TrampolinePool.h>
 #include <Helpers/ThemeHelper.h>
 #include <MenuUtils.h>
 #include <WinApiUtils.h>
 #include <Core/Intercept/DebugDetourHooks.h>
+#include <Subsystems/GdiHookUtils.h>
+#include <ColorUtils.h>
 #include <vssym32.h>
 
 using namespace std::literals;
@@ -25,27 +23,11 @@ namespace GlassCore::Menu
     bool IsInsideOwnerDraw() noexcept;
 }
 
-static GlassCore::Hooks::TrampolinePool g_trampolines;
-
 // private
 static decltype(&::DrawThemeBackground) g_actualDrawThemeBackground{ nullptr };
 static decltype(&::DrawThemeText)       g_actualDrawThemeText{ nullptr };
 static decltype(&::DrawThemeTextEx)     g_actualDrawThemeTextEx{ nullptr };
 static decltype(&::ExtTextOutW) g_actualExtTextOutW = ExtTextOutW;
-
-// E8 patches
-static std::optional<GlassCore::Hooks::E8Patch> g_patch_DrawItem_1;
-static std::optional<GlassCore::Hooks::E8Patch> g_patch_DrawItem_2;
-static std::optional<GlassCore::Hooks::E8Patch> g_patch_DrawItem_3;
-static std::optional<GlassCore::Hooks::E8Patch> g_patch_DrawItem_4;
-
-static std::optional<GlassCore::Hooks::E8Patch> g_patch_DrawItemCheck_1;
-static std::optional<GlassCore::Hooks::E8Patch> g_patch_DrawItemCheck_2;
-
-static std::optional<GlassCore::Hooks::E8Patch> g_patch_DrawClientArea_1;
-static std::optional<GlassCore::Hooks::E8Patch> g_patch_DrawNonClientArea_1;
-
-static bool g_e8PatchesApplied = false;
 
 namespace
 {
@@ -74,88 +56,8 @@ namespace
 
 namespace GlassCore::Hooks::UxThemeHooks
 {
-    // ------------------------------------------------------------
-    // Registry
-    // ------------------------------------------------------------
-
-    static constexpr wchar_t kBwmInternalsKey[] =
-        L"SOFTWARE\\StanislavKa\\BlackWindowManager_Internals";
-
-    static bool ReadInt64HKLM(std::wstring_view subKey, std::wstring_view valueName, long long& out)
-    {
-        out = 0;
-
-        HKEY hKey = nullptr;
-        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, subKey.data(), 0, KEY_READ, &hKey) != ERROR_SUCCESS)
-            return false;
-
-        auto closeKey = wil::scope_exit([&] {
-            if (hKey) RegCloseKey(hKey);
-            });
-
-        DWORD type = 0;
-        DWORD cb = sizeof(out);
-        if (RegQueryValueExW(hKey, valueName.data(), nullptr, &type, reinterpret_cast<BYTE*>(&out), &cb) != ERROR_SUCCESS)
-            return false;
-
-        if (type == REG_QWORD && cb == sizeof(out))
-            return true;
-
-        if (type == REG_DWORD && cb == sizeof(DWORD))
-        {
-            DWORD v = 0;
-            memcpy(&v, &out, sizeof(DWORD));
-            out = static_cast<long long>(v);
-            return true;
-        }
-
-        return false;
-    }
-
-    static bool ReadOffset(const wchar_t* valueName, OffsetStorage& out)
-    {
-        long long v = 0;
-        if (!ReadInt64HKLM(kBwmInternalsKey, valueName, v))
-            return false;
-
-        out.value = v;
-        return out.IsValid();
-    }
-
-    // ------------------------------------------------------------
-    // Offsets (BWM internals)
-    // ------------------------------------------------------------
-
-    struct UxThemeOffsets
-    {
-        OffsetStorage CThemeMenu_DrawItemBitmap;
-
-        OffsetStorage Popup_DrawItem;
-        OffsetStorage Popup_DrawItemCheck;
-        OffsetStorage Popup_DrawClientArea;
-        OffsetStorage Popup_DrawNonClientArea;
-
-        bool IsValid() const
-        {
-            return Popup_DrawItem.IsValid() &&
-                Popup_DrawItemCheck.IsValid() &&
-                Popup_DrawClientArea.IsValid() &&
-                Popup_DrawNonClientArea.IsValid();
-        }
-    };
-
-    static UxThemeOffsets g_offsets{};
     static bool g_prepared = false;
     static bool g_started = false;
-
-    static void* ResolveUxThemeAddress(const OffsetStorage& offset)
-    {
-        HMODULE hUxTheme = GetModuleHandleW(L"uxtheme.dll");
-        if (!hUxTheme)
-            return nullptr;
-
-        return offset.To<void*>(hUxTheme);
-    }
 
     // ------------------------------------------------------------
     // Forward declarations of detours
@@ -230,45 +132,6 @@ namespace GlassCore::Hooks::UxThemeHooks
         const DTTOPTS* pOptions);
 
     // ------------------------------------------------------------
-    // E8 detour targets (internal uxtheme methods)
-    // ------------------------------------------------------------
-
-    using PFN_DrawItemBitmap = void(__fastcall*)(void* This, void* /*unused*/, HDC hdc, RECT* rc, int state);
-
-    static void __fastcall MyDrawItemBitmap(
-        void* This,
-        void* /*unused*/,
-        HDC hdc,
-        RECT* rc,
-        int state);
-
-    static void __fastcall MyPopupDrawItem(
-        void* This,
-        void* /*unused*/,
-        HDC hdc,
-        RECT* rc,
-        int index);
-
-    static void __fastcall MyPopupDrawItemCheck(
-        void* This,
-        void* /*unused*/,
-        HDC hdc,
-        RECT* rc,
-        int index);
-
-    static void __fastcall MyPopupDrawClientArea(
-        void* This,
-        void* /*unused*/,
-        HDC hdc,
-        RECT* rc);
-
-    static void __fastcall MyPopupDrawNonClientArea(
-        void* This,
-        void* /*unused*/,
-        HDC hdc,
-        RECT* rc);
-
-    // ------------------------------------------------------------
     // HookDispatcher dependency (ширина 4 кандидата импорта, как g_overallHookDep в ListViewHooks)
     //
     // Индексы UTHK_*:
@@ -310,8 +173,9 @@ namespace GlassCore::Hooks::UxThemeHooks
     static size_t g_commonRef = 0; // StretchBlt + DwmSetWindowAttribute (IAT uxtheme)
     static size_t g_themeRef = 0;  // Detours DTB/DTT + IAT DrawTextExW (uxtheme) + ref ETW-Detour
     static size_t g_etwRef = 0;
-    // Включение текста: либо DTT-Detour, либо IAT DrawTextExW (как IsInkGlowEffectActive в ListView)
-    // DrawThemeTextEx: глобальный Detour (shell32+owner-draw → DrawThemeText), только при inkGlow.
+    // Текст меню: IAT DrawTextExW → DrawTextWithAlpha (#126). Detours DrawThemeText не ставим:
+    // DrawThemeTextEx рисует глиф послойно и затирает Glow.
+    // DrawThemeTextEx-Detour: shell32 owner-draw → DrawThemeText, чтобы текст дошёл до DrawTextExW.
     static bool   s_enableThemeDttDetourArmed{ false };
     static bool   s_enableThemeDtexIatArmed{ false };
     static bool   s_enableThemeDttexDetourArmed{ false };
@@ -339,11 +203,6 @@ namespace GlassCore::Hooks::UxThemeHooks
         return true;
     }
 
-    static bool CheckUxThemeVersion()
-    {
-        return GetModuleHandleW(L"uxtheme.dll") != nullptr;
-    }
-
     // ------------------------------------------------------------
     // Public API
     // ------------------------------------------------------------
@@ -353,36 +212,7 @@ namespace GlassCore::Hooks::UxThemeHooks
         if (g_prepared)
             return;
 
-        if (!CheckUxThemeVersion())
-        {
-            DebugLog(L"[GlassCore][UxThemeHooks] uxtheme.dll not loaded (yet)");
-        }
-
-        bool ok = ReadOffset(L"CThemeMenu_DrawItemBitmap_Offset", g_offsets.CThemeMenu_DrawItemBitmap);
-        if (ok)
-        {
-            void* p = ResolveUxThemeAddress(g_offsets.CThemeMenu_DrawItemBitmap);
-            DebugLog(L"[GlassCore][UxThemeHooks] CThemeMenu::DrawItemBitmap = %p", p);
-        }
-        else
-        {
-            DebugLog(L"[GlassCore][UxThemeHooks] CThemeMenu_DrawItemBitmap_Offset missing");
-        }
-
-        bool fnOk = true;
-        fnOk &= ReadOffset(L"CThemeMenuPopup_DrawItem_Offset", g_offsets.Popup_DrawItem);
-        fnOk &= ReadOffset(L"CThemeMenuPopup_DrawItemCheck_Offset", g_offsets.Popup_DrawItemCheck);
-        fnOk &= ReadOffset(L"CThemeMenuPopup_DrawClientArea_Offset", g_offsets.Popup_DrawClientArea);
-        fnOk &= ReadOffset(L"CThemeMenuPopup_DrawNonClientArea_Offset", g_offsets.Popup_DrawNonClientArea);
-
         g_prepared = true;
-        ResetE8PatchState();
-
-        if (!fnOk)
-        {
-            DebugLog(L"[GlassCore][UxThemeHooks] function offsets missing → E8 patches will be skipped");
-        }
-
         DebugLog(L"[GlassCore][UxThemeHooks] Prepare done");
     }
 
@@ -414,12 +244,6 @@ namespace GlassCore::Hooks::UxThemeHooks
                 g_actualExtTextOutW = reinterpret_cast<decltype(g_actualExtTextOutW)>(
                     GetProcAddress(hGdi, "ExtTextOutW"));
             }
-        }
-
-        if (g_prepared && g_offsets.IsValid())
-        {
-            ResetE8PatchState();
-            PrepareE8Patches();
         }
 
         DebugLog(L"[GlassCore][UxThemeHooks] Startup: DTB=%p DTT=%p DTTEx=%p ETW=%p",
@@ -532,20 +356,6 @@ namespace GlassCore::Hooks::UxThemeHooks
                 }
             });
 
-        // E8 patches — применяются только для NativeTheme (uxtheme активен)
-        if (enable && !g_e8PatchesApplied)
-        {
-            if (ApplyAllE8Patches())
-            {
-                g_e8PatchesApplied = true;
-                DebugLog(L"[GlassCore][UxThemeHooks] E8 patches applied");
-            }
-        }
-        else if (!enable && g_e8PatchesApplied)
-        {
-            RevertAllE8Patches();
-        }
-
         if (EnsureTargetModule())
         {
             g_uxThemeDispatcher.EnableHook(UTHK_DRAWTEXTEXW, enable);
@@ -617,177 +427,6 @@ namespace GlassCore::Hooks::UxThemeHooks
                         MyExtTextOutW);
                 }
             });
-    }
-
-    static void ResetE8PatchState()
-    {
-        g_patch_DrawItem_1.reset();
-        g_patch_DrawItem_2.reset();
-        g_patch_DrawItem_3.reset();
-        g_patch_DrawItem_4.reset();
-
-        g_patch_DrawItemCheck_1.reset();
-        g_patch_DrawItemCheck_2.reset();
-
-        g_patch_DrawClientArea_1.reset();
-        g_patch_DrawNonClientArea_1.reset();
-
-        g_e8PatchesApplied = false;
-    }
-
-    static std::optional<GlassCore::Hooks::E8Patch> MakePatchFromUxThemeOffset(const OffsetStorage& callE8Offset)
-    {
-        void* callSite = ResolveUxThemeAddress(callE8Offset);
-        if (!callSite)
-            return std::nullopt;
-
-        auto patch = GlassCore::Hooks::InspectE8Call(callSite);
-        if (!patch.has_value())
-            return std::nullopt;
-
-        return patch;
-    }
-
-    static void* ReadFunctionAddress(const wchar_t* valueName)
-    {
-        long long v = 0;
-        if (!ReadInt64HKLM(kBwmInternalsKey, valueName, v) || v == 0)
-            return nullptr;
-        HMODULE uxtheme = GetModuleHandleW(L"uxtheme.dll");
-        if (!uxtheme)
-            return nullptr;
-        return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(uxtheme) + v);
-    }
-
-    static void* FindE8CallTo(void* startAddr, void* targetFunc, size_t maxBytes = 0x400)
-    {
-        auto* p = reinterpret_cast<uint8_t*>(startAddr);
-        auto* end = p + maxBytes;
-        while (p + 5 <= end)
-        {
-            if (p[0] == 0xE8)
-            {
-                int32_t rel = *reinterpret_cast<int32_t*>(p + 1);
-                void* target = p + 5 + rel;
-                if (target == targetFunc)
-                    return p;
-            }
-            ++p;
-        }
-        return nullptr;
-    }
-
-    static void PrepareE8Patches()
-    {
-        g_trampolines.Initialize(GetModuleHandleW(L"uxtheme.dll"));
-
-        void* fnDrawItem = ResolveUxThemeAddress(g_offsets.Popup_DrawItem);
-        void* fnDrawCheck = ResolveUxThemeAddress(g_offsets.Popup_DrawItemCheck);
-        void* fnDrawClient = ResolveUxThemeAddress(g_offsets.Popup_DrawClientArea);
-        void* fnDrawNC = ResolveUxThemeAddress(g_offsets.Popup_DrawNonClientArea);
-
-        DebugLog(L"[GlassCore][UxThemeHooks] Function addresses: DrawItem=%p DrawCheck=%p DrawClient=%p DrawNC=%p",
-            fnDrawItem, fnDrawCheck, fnDrawClient, fnDrawNC);
-
-        if (!fnDrawItem || !fnDrawCheck || !fnDrawClient || !fnDrawNC)
-        {
-            DebugLog(L"[GlassCore][UxThemeHooks] PrepareE8Patches: missing function addresses");
-            return;
-        }
-
-        void* dtb = reinterpret_cast<void*>(g_actualDrawThemeBackground);
-
-        auto makeFromPtr = [](void* callSite) -> std::optional<E8Patch>
-            {
-                if (!callSite) return std::nullopt;
-                return GlassCore::Hooks::InspectE8Call(callSite);
-            };
-
-        void* e8_DrawItem_1 = FindE8CallTo(fnDrawItem, dtb);
-        void* e8_DrawItem_2 = e8_DrawItem_1
-            ? FindE8CallTo(reinterpret_cast<uint8_t*>(e8_DrawItem_1) + 5, dtb)
-            : nullptr;
-        void* e8_DrawItem_3 = e8_DrawItem_2
-            ? FindE8CallTo(reinterpret_cast<uint8_t*>(e8_DrawItem_2) + 5, dtb)
-            : nullptr;
-        void* e8_DrawItem_4 = e8_DrawItem_3
-            ? FindE8CallTo(reinterpret_cast<uint8_t*>(e8_DrawItem_3) + 5, dtb)
-            : nullptr;
-
-        g_patch_DrawItem_1 = makeFromPtr(e8_DrawItem_1);
-        g_patch_DrawItem_2 = makeFromPtr(e8_DrawItem_2);
-        g_patch_DrawItem_3 = makeFromPtr(e8_DrawItem_3);
-        g_patch_DrawItem_4 = makeFromPtr(e8_DrawItem_4);
-
-        void* e8_DrawCheck_1 = FindE8CallTo(fnDrawCheck, dtb);
-        void* e8_DrawCheck_2 = e8_DrawCheck_1
-            ? FindE8CallTo(reinterpret_cast<uint8_t*>(e8_DrawCheck_1) + 5, dtb)
-            : nullptr;
-
-        g_patch_DrawItemCheck_1 = makeFromPtr(e8_DrawCheck_1);
-        g_patch_DrawItemCheck_2 = makeFromPtr(e8_DrawCheck_2);
-
-        g_patch_DrawClientArea_1 = makeFromPtr(FindE8CallTo(fnDrawClient, dtb));
-        g_patch_DrawNonClientArea_1 = makeFromPtr(FindE8CallTo(fnDrawNC, dtb));
-
-        DebugLog(DBG_IMPORTANT, L"[GlassCore][UxThemeHooks] E8 callsites: DrawItem(%p,%p,%p,%p) DrawCheck(%p,%p) DrawClient(%p) DrawNC(%p)",
-            e8_DrawItem_1, e8_DrawItem_2, e8_DrawItem_3, e8_DrawItem_4,
-            e8_DrawCheck_1, e8_DrawCheck_2,
-            g_patch_DrawClientArea_1.has_value() ? g_patch_DrawClientArea_1->callSite : nullptr,
-            g_patch_DrawNonClientArea_1.has_value() ? g_patch_DrawNonClientArea_1->callSite : nullptr);
-    }
-
-    static bool ApplyAllE8Patches()
-    {
-        auto applyOpt = [](std::optional<E8Patch>& opt, void* dest) -> bool
-            {
-                if (!opt.has_value()) return false;
-                return ApplyE8CallPatch(*opt, dest);
-            };
-
-        bool any = false;
-        any |= applyOpt(g_patch_DrawItem_1, reinterpret_cast<void*>(MyDrawThemeBackground));
-        any |= applyOpt(g_patch_DrawItem_2, reinterpret_cast<void*>(MyDrawThemeBackground));
-        any |= applyOpt(g_patch_DrawItem_3, reinterpret_cast<void*>(MyDrawThemeBackground));
-        any |= applyOpt(g_patch_DrawItem_4, reinterpret_cast<void*>(MyDrawThemeBackground));
-        any |= applyOpt(g_patch_DrawItemCheck_1, reinterpret_cast<void*>(MyDrawThemeBackground));
-        any |= applyOpt(g_patch_DrawItemCheck_2, reinterpret_cast<void*>(MyDrawThemeBackground));
-        any |= applyOpt(g_patch_DrawClientArea_1, reinterpret_cast<void*>(MyDrawThemeBackground));
-        any |= applyOpt(g_patch_DrawNonClientArea_1, reinterpret_cast<void*>(MyDrawThemeBackground));
-
-        DebugLog(L"[GlassCore][UxThemeHooks] E8 patch status: "
-            L"DI1=%d DI2=%d DI3=%d DI4=%d DC1=%d DC2=%d CA1=%d NC1=%d",
-            g_patch_DrawItem_1.has_value() ? (int)g_patch_DrawItem_1->applied : -1,
-            g_patch_DrawItem_2.has_value() ? (int)g_patch_DrawItem_2->applied : -1,
-            g_patch_DrawItem_3.has_value() ? (int)g_patch_DrawItem_3->applied : -1,
-            g_patch_DrawItem_4.has_value() ? (int)g_patch_DrawItem_4->applied : -1,
-            g_patch_DrawItemCheck_1.has_value() ? (int)g_patch_DrawItemCheck_1->applied : -1,
-            g_patch_DrawItemCheck_2.has_value() ? (int)g_patch_DrawItemCheck_2->applied : -1,
-            g_patch_DrawClientArea_1.has_value() ? (int)g_patch_DrawClientArea_1->applied : -1,
-            g_patch_DrawNonClientArea_1.has_value() ? (int)g_patch_DrawNonClientArea_1->applied : -1);
-
-        return any;
-    }
-
-    static void RevertAllE8Patches()
-    {
-        auto revertOpt = [](std::optional<E8Patch>& opt)
-            {
-                if (opt.has_value() && opt->applied)
-                    RevertE8CallPatch(*opt);
-            };
-
-        revertOpt(g_patch_DrawItem_1);
-        revertOpt(g_patch_DrawItem_2);
-        revertOpt(g_patch_DrawItem_3);
-        revertOpt(g_patch_DrawItem_4);
-        revertOpt(g_patch_DrawItemCheck_1);
-        revertOpt(g_patch_DrawItemCheck_2);
-        revertOpt(g_patch_DrawClientArea_1);
-        revertOpt(g_patch_DrawNonClientArea_1);
-
-        g_e8PatchesApplied = false;
-        DebugLog(L"[GlassCore][UxThemeHooks] E8 patches reverted");
     }
 
     // ============================================================
@@ -902,6 +541,7 @@ namespace GlassCore::Hooks::UxThemeHooks
         return g_actualDrawThemeBackground(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
     }
 
+    // Не вешается: тело через DrawThemeTextEx затирает Glow. Текст идёт в MyDrawTextExW / MyExtTextOutW.
     HRESULT WINAPI MyDrawThemeText(
         HTHEME hTheme, HDC hdc, int iPartId, int iStateId,
         LPCWSTR pszText, int cchText, DWORD dwTextFlags, DWORD dwTextFlags2,
@@ -1230,9 +870,59 @@ namespace GlassCore::Hooks::UxThemeHooks
         int hSrc,
         DWORD rop)
     {
-        return g_uxThemeDispatcher.GetOrg<UTHK_STRETCHBLT, decltype(&MyStretchBlt)>()(
+        auto orig = g_uxThemeDispatcher.GetOrg<UTHK_STRETCHBLT, decltype(&MyStretchBlt)>();
+        if (!orig)
+        {
+            return StretchBlt(
+                hdcDest, xDest, yDest, wDest, hDest,
+                hdcSrc, xSrc, ySrc, wSrc, hSrc, rop);
+        }
+
+        if (!GlassCore::Menu::MenuHandler::IsUxHooksEnabled()
+            || !wSrc || !hSrc || !wDest || !hDest
+            || DetourGetContainingModule(_ReturnAddress()) != GetModuleHandleW(L"uxtheme.dll"))
+        {
+            return orig(
+                hdcDest, xDest, yDest, wDest, hDest,
+                hdcSrc, xSrc, ySrc, wSrc, hSrc, rop);
+        }
+
+        auto hBitmap = reinterpret_cast<HBITMAP>(GetCurrentObject(hdcSrc, OBJ_BITMAP));
+        GlassCore::GdiUtils::BitmapAlphaPrepareOptions opts{};
+        const auto& removal = GlassCore::Menu::MenuHandler::GetContext().iconBackgroundColorRemoval;
+        if (removal.enable)
+        {
+            opts.chromaKey = true;
+            opts.chromaColor = Shared::ColorUtils::ARGBToCOLORREF(removal.colorTreatAsTransparent);
+            opts.chromaThreshold = static_cast<BYTE>(removal.colorTreatAsTransparentThreshold);
+        }
+
+        wil::unique_hbitmap converted{};
+        if (!GlassCore::GdiUtils::PrepareBitmapForAlphaBlend(hBitmap, converted, opts))
+        {
+            return orig(
+                hdcDest, xDest, yDest, wDest, hDest,
+                hdcSrc, xSrc, ySrc, wSrc, hSrc, rop);
+        }
+
+        const HGDIOBJ previous = SelectObject(hdcSrc, hBitmap);
+        auto restoreBitmap = wil::scope_exit([&]
+        {
+            if (previous)
+                SelectObject(hdcSrc, previous);
+        });
+
+        BLENDFUNCTION blend{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+        if (!GdiAlphaBlend(
             hdcDest, xDest, yDest, wDest, hDest,
-            hdcSrc, xSrc, ySrc, wSrc, hSrc, rop);
+            hdcSrc, xSrc, ySrc, wSrc, hSrc, blend))
+        {
+            return orig(
+                hdcDest, xDest, yDest, wDest, hDest,
+                hdcSrc, xSrc, ySrc, wSrc, hSrc, rop);
+        }
+
+        return TRUE;
     }
 
     HRESULT WINAPI MyDwmSetWindowAttribute(
@@ -1310,79 +1000,6 @@ namespace GlassCore::Hooks::UxThemeHooks
                 hdc, lpchText, cchText, lprc, format, result)))
             return result;
         return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
-    }
-
-    static void __fastcall MyDrawItemBitmap(
-        void* This,
-        void*,
-        HDC hdc,
-        RECT* rc,
-        int state)
-    {
-        auto orig = reinterpret_cast<PFN_DrawItemBitmap>(
-            ResolveUxThemeAddress(g_offsets.CThemeMenu_DrawItemBitmap));
-
-        if (orig)
-            orig(This, nullptr, hdc, rc, state);
-    }
-
-    static void __fastcall MyPopupDrawItem(
-        void* This,
-        void*,
-        HDC hdc,
-        RECT* rc,
-        int index)
-    {
-        // TODO: MenuRendering::HandlePopupDrawItem(...)
-    }
-
-    static void __fastcall MyPopupDrawItemCheck(
-        void* This,
-        void*,
-        HDC hdc,
-        RECT* rc,
-        int index)
-    {
-    }
-
-    static void __fastcall MyPopupDrawClientArea(
-        void* This,
-        void*,
-        HDC hdc,
-        RECT* rc)
-    {
-    }
-
-    static void __fastcall MyPopupDrawNonClientArea(
-        void* This,
-        void* /*unused*/,
-        HDC hdc,
-        RECT* rc)
-    {
-        if (!hdc || !rc)
-            return;
-
-        // Заливаем NC-область чёрным — открываем DWM blur
-        PatBlt(hdc, rc->left, rc->top,
-            rc->right - rc->left, rc->bottom - rc->top, BLACKNESS);
-
-        
-        // Рамка поверх: кастомный цвет или системная 1px
-        if (!Shared::MenuUtils::HandlePopupMenuNonClientBorderColors(
-            hdc, *rc, GlassCore::Menu::MenuHandler::GetContext().border))
-        {
-            int savedDC = SaveDC(hdc);
-            ExcludeClipRect(hdc,
-                rc->left + 1, rc->top + 1,
-                rc->right - 1, rc->bottom - 1);
-            HTHEME hMenuTheme = OpenThemeData(nullptr, L"Menu");
-            if (hMenuTheme)
-            {
-                g_actualDrawThemeBackground(hMenuTheme, hdc, MENU_POPUPBORDERS, 0, rc, nullptr);
-                CloseThemeData(hMenuTheme);
-            }
-            RestoreDC(hdc, savedDC);
-        }
     }
 
 }

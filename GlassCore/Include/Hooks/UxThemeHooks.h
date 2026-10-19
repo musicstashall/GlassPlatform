@@ -3,7 +3,7 @@
 
 namespace GlassCore::Hooks::UxThemeHooks
 {
-    // Чтение оффсетов из реестра, подготовка внутренних структур
+    // Подготовка состояния хуков меню.
     void Prepare();
 
     // Инициализация хуков (установка Detours для ExtTextOutW)
@@ -28,9 +28,4 @@ namespace GlassCore::Hooks::UxThemeHooks
     void EnableExtTextOutHook(bool enable);
     void SetCurrentMenuHwnd(HWND hWnd) noexcept;
     HWND GetCurrentMenuHwnd() noexcept;
-    // E8 patches для внутренних методов uxtheme
-    void ResetE8PatchState();
-    void RevertAllE8Patches();
-    void PrepareE8Patches();
-    bool ApplyAllE8Patches();
 }
