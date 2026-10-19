@@ -245,6 +245,39 @@ public sealed class SettingsSnapshot
         return false;
     }
 
+    /// <summary>Отпечаток DWM по уже прочитанным значениям, без повторного обхода реестра.</summary>
+    internal static string FormatDwmFingerprint(IReadOnlyList<RegEntry> values)
+    {
+        var parts = new List<string>(values.Count);
+        foreach (var entry in values
+                     .OrderBy(e => e.DwmHive)
+                     .ThenBy(e => e.ValueName, StringComparer.OrdinalIgnoreCase))
+        {
+            parts.Add($"{entry.DwmHive}:{entry.ValueName}={Convert.ToHexString(entry.Data)}");
+        }
+
+        return string.Join("|", parts);
+    }
+
+    /// <summary>Чтение HKCU/HKLM\DWM вне UI-потока.</summary>
+    internal List<RegEntry> ReadDwmValues() => CaptureAllDwmValues();
+
+    /// <summary>Подставить заранее прочитанный DWM-baseline. Реестр не трогает.</summary>
+    internal void ReplaceDwmBaseline(List<RegEntry> full)
+    {
+        _dwmFullSnapshot = full;
+        foreach (var partition in DwmSnapshotCatalog.AllPartitions)
+            _dwmPartitions[partition] = FilterDwmPartition(_dwmFullSnapshot, partition);
+    }
+
+    /// <summary>Чтение раздела Glass вне UI-потока.</summary>
+    internal static List<RegEntry> ReadGlassPartition(GlassRegistryPartition partition) =>
+        CaptureGlassPartition(partition);
+
+    /// <summary>Подставить заранее прочитанный раздел Glass. Реестр не трогает.</summary>
+    internal void ReplaceGlassPartition(GlassRegistryPartition partition, List<RegEntry> entries) =>
+        _glassPartitions[partition] = entries;
+
     /// <summary>Отпечаток текущего DWM-реестра (HKCU+HKLM) для ожидания стабилизации после старта платформы.</summary>
     public string ComputeDwmRegistryFingerprint()
     {

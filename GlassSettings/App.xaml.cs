@@ -30,6 +30,9 @@ public partial class App : Application
             return;
         }
 
+        // UI-поток: с него нельзя обходить дерево задач планировщика.
+        NativeHostInterop.NoteUiThread();
+
         AppThemeService.ApplyApplicationThemeAtStartup();
         UiLanguageService.ApplyAtStartup();
         SystemFontsSpiCache.LoadAtStartup();

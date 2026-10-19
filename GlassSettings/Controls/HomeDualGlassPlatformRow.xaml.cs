@@ -51,12 +51,13 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
         var effectiveBusyX86 = _busyX86 || externalBusyX86;
         var effectiveBusyX64 = _busyX64 || externalBusyX64;
 
-        // preserveGateOn: only when RUNNING + busy (startup) — gate stays ON + disabled.
-        // During STOP + busy: gate goes OFF + disabled (normal autorun check).
-        var preserveGateOnX86 = effectiveBusyX86 && uiX86.Autorun == GlassAutorunUiState.Running;
-        var preserveGateOnX64 = effectiveBusyX64 && uiX64.Autorun == GlassAutorunUiState.Running;
+        // Старт: тумблер остаётся вкл, пока mutex ещё не Running.
+        // Стоп: сразу выкл (Stopping/Residual или StopEvent).
+        var preserveGateOnX86 = GlassPlatformService.IsStartInFlight(GlassPlatformArch.X86, uiX86.Life);
+        var preserveGateOnX64 = GlassPlatformService.IsStartInFlight(GlassPlatformArch.X64, uiX64.Life);
 
-        var fingerprint = BuildFingerprint(uiX86, uiX64, effectiveBusyX86, effectiveBusyX64, x86Locked);
+        var fingerprint = BuildFingerprint(
+            uiX86, uiX64, effectiveBusyX86, effectiveBusyX64, x86Locked, preserveGateOnX86, preserveGateOnX64);
         if (string.Equals(_refreshFingerprint, fingerprint, StringComparison.Ordinal))
             return;
 
@@ -79,8 +80,10 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
         HomeStatusSummary.GlassPlatformUiSnapshot x64,
         bool busyX86,
         bool busyX64,
-        bool x86Locked) =>
-        $"{PackUi(x86)}|{PackUi(x64)}|{(busyX86 ? '1' : '0')}{(busyX64 ? '1' : '0')}{(x86Locked ? '1' : '0')}";
+        bool x86Locked,
+        bool preserveOnX86,
+        bool preserveOnX64) =>
+        $"{PackUi(x86)}|{PackUi(x64)}|{(busyX86 ? '1' : '0')}{(busyX64 ? '1' : '0')}{(x86Locked ? '1' : '0')}{(preserveOnX86 ? '1' : '0')}{(preserveOnX64 ? '1' : '0')}";
 
     private static string PackUi(HomeStatusSummary.GlassPlatformUiSnapshot ui) =>
         $"{(int)ui.Life}|{(int)ui.Autorun}|{(ui.IsUnloading ? 1 : 0)}|{(ui.LifecycleBusy ? 1 : 0)}|{ui.Line}|{PackColor(ui.DotColor)}";

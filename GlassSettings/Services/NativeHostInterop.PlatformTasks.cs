@@ -158,4 +158,9 @@ public static partial class NativeHostInterop
 
     [DllImport(Dll, EntryPoint = "GlassSettings_InvalidateOGCache")]
     private static extern void Native_InvalidateOGCache();
+
+    public static void NoteUiThread() => Native_NoteUiThread();
+
+    [DllImport(Dll, EntryPoint = "GlassSettings_NoteUiThread")]
+    private static extern void Native_NoteUiThread();
 }

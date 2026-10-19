@@ -319,12 +319,13 @@ public sealed partial class HomePage : Page
 
         if (ui is { } snapshot)
         {
+            var startInFlight = GlassPlatformService.IsStartInFlight(GlassPlatformNames.NativeArch, snapshot.Life);
             RefreshPlatformToggle(
                 _glassPlatformSwitch,
                 ref _glassPlatformSuppress,
-                _glassPlatformBusy || snapshot.LifecycleBusy,
-                snapshot.Autorun != GlassAutorunUiState.NoTask,
-                snapshot.Autorun == GlassAutorunUiState.Running);
+                _glassPlatformBusy || snapshot.LifecycleBusy || startInFlight,
+                snapshot.Autorun != GlassAutorunUiState.NoTask || startInFlight,
+                startInFlight || snapshot.Autorun == GlassAutorunUiState.Running);
         }
     }
 
@@ -1220,8 +1221,20 @@ public sealed partial class HomePage : Page
 
         var ogLine = HomeStatusSummary.OpenGlassLine();
         var ogColor = HomeStatusSummary.OpenGlassStatusColor();
-        var ogTaskExists = OpenGlassHostService.LegacyHostTaskExists();
-        var ogRunning = OpenGlassHostService.QueryOpenGlassHostUiState() == OpenGlassHostUiState.Running;
+        var presence = PlatformPresenceService.Instance.CurrentSnapshot;
+        bool ogTaskExists;
+        bool ogRunning;
+        if (presence.Revision > 0)
+        {
+            ogTaskExists = presence.OgLegacyTaskExists != 0 || presence.OgCurrentTaskExists != 0;
+            ogRunning = presence.OpenGlassOrchestration
+                == (int)NativeHostInterop.NativeOpenGlassHostUiState.Running;
+        }
+        else
+        {
+            ogTaskExists = OpenGlassHostService.LegacyHostTaskExists();
+            ogRunning = OpenGlassHostService.QueryOpenGlassHostUiState() == OpenGlassHostUiState.Running;
+        }
 
         HomeStatusSummary.GlassPlatformUiSnapshot? singleUi = null;
         HomeStatusSummary.GlassPlatformUiSnapshot? dualX86 = null;
@@ -1243,9 +1256,9 @@ public sealed partial class HomePage : Page
         if (!shellInProgress)
         {
             shellTaskExists = GlassPlatformNames.ShowDualGlassPlatformUi
-                ? GlassPlatformService.GlassAutorunTaskExists(GlassPlatformArch.X86)
-                  || GlassPlatformService.GlassAutorunTaskExists(GlassPlatformArch.X64)
-                : GlassPlatformService.GlassAutorunTaskExists();
+                ? GlassPlatformService.GlassAutorunTaskExistsForUi(GlassPlatformArch.X86)
+                  || GlassPlatformService.GlassAutorunTaskExistsForUi(GlassPlatformArch.X64)
+                : GlassPlatformService.GlassAutorunTaskExistsForUi(GlassPlatformNames.NativeArch);
             shellRegistered = ShellExtensionService.IsBundledDllRegistered();
         }
 
@@ -1263,7 +1276,9 @@ public sealed partial class HomePage : Page
             _glassPlatformDualRow is not null
                 && GlassPlatformUiPolicy.IsX86DualUiControlsLocked());
         if (string.Equals(_systemCardFingerprint, fingerprint, StringComparison.Ordinal))
+        {
             return;
+        }
 
         _systemCardFingerprint = fingerprint;
 
@@ -1291,12 +1306,13 @@ public sealed partial class HomePage : Page
                 _glassPlatformRow.Subtitle = ui.Line;
             if (_glassPlatformRow.StatusIndicatorColor != ui.DotColor)
                 _glassPlatformRow.StatusIndicatorColor = ui.DotColor;
+            var startInFlight = GlassPlatformService.IsStartInFlight(GlassPlatformNames.NativeArch, ui.Life);
             RefreshPlatformToggle(
                 _glassPlatformSwitch,
                 ref _glassPlatformSuppress,
-                _glassPlatformBusy || ui.LifecycleBusy,
-                ui.Autorun != GlassAutorunUiState.NoTask,
-                ui.Autorun == GlassAutorunUiState.Running);
+                _glassPlatformBusy || ui.LifecycleBusy || startInFlight,
+                ui.Autorun != GlassAutorunUiState.NoTask || startInFlight,
+                startInFlight || ui.Autorun == GlassAutorunUiState.Running);
         }
 
         if (_shellSwitch is not null)
@@ -1900,7 +1916,8 @@ public sealed partial class HomePage : Page
             return;
 
         var want = _shellSwitch.IsOn;
-        var taskExists = Core.Platform.GlassPlatformService.GlassAutorunTaskExists();
+        var taskExists = Core.Platform.GlassPlatformService.GlassAutorunTaskExistsForUi(
+            GlassPlatformNames.NativeArch);
         if (want && !taskExists)
         {
             _shellSuppress = true;

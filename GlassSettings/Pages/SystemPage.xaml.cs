@@ -106,9 +106,9 @@ public sealed partial class SystemPage : Page
 
     private static bool AnyGlassAutorunTaskExists() =>
         GlassPlatformNames.ShowDualGlassPlatformUi
-            ? GlassPlatformService.GlassAutorunTaskExists(GlassPlatformArch.X86)
-              || GlassPlatformService.GlassAutorunTaskExists(GlassPlatformArch.X64)
-            : GlassPlatformService.GlassAutorunTaskExists();
+            ? GlassPlatformService.GlassAutorunTaskExistsForUi(GlassPlatformArch.X86)
+              || GlassPlatformService.GlassAutorunTaskExistsForUi(GlassPlatformArch.X64)
+            : GlassPlatformService.GlassAutorunTaskExistsForUi(GlassPlatformNames.NativeArch);
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {

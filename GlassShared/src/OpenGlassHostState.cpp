@@ -226,7 +226,11 @@ namespace Shared::OpenGlassHostState
 
     void InvalidateCache() noexcept
     {
-        g_orchestrationCache.store({}, std::memory_order_release);
+        // Срок кэша сбрасывается, последнее состояние остаётся.
+        // Иначе UI на старте Glass читает NoTask и на кадр гасит кнопку OpenGlass.
+        auto cached = g_orchestrationCache.load(std::memory_order_acquire);
+        cached.timeMs = 0;
+        g_orchestrationCache.store(cached, std::memory_order_release);
         g_legacyTaskCacheTimeMs.store(0, std::memory_order_release);
         ::GlassShared::GlassPlatformTask::InvalidateGlassAutorunTaskCache();
     }
@@ -235,7 +239,12 @@ namespace Shared::OpenGlassHostState
     {
         const auto now = GetTickCount64();
         const auto cachedTime = g_legacyTaskCacheTimeMs.load(std::memory_order_acquire);
-        if (now - cachedTime < kCacheTtlMs)
+        if (cachedTime != 0 && now - cachedTime < kCacheTtlMs)
+            return g_legacyTaskCacheValue.load(std::memory_order_acquire);
+
+        // Холодный обход дерева с UI держит прокрутку. Кэш не обновляем:
+        // фоновый watcher дочитает задачу сам.
+        if (GlassShared::IsSchedulerUiThread())
             return g_legacyTaskCacheValue.load(std::memory_order_acquire);
 
         bool result = false;
@@ -266,7 +275,10 @@ namespace Shared::OpenGlassHostState
 
     bool OrchestrationInstalled() noexcept
     {
-        return LegacyHostTaskExists() || ServiceInstalled();
+        // Служба отвечает на вопрос без обхода всех папок планировщика.
+        if (ServiceInstalled())
+            return true;
+        return LegacyHostTaskExists();
     }
 
     bool IsServiceRunning() noexcept
@@ -350,10 +362,20 @@ namespace Shared::OpenGlassHostState
     {
         const auto now = GetTickCount64();
         auto cached = g_orchestrationCache.load(std::memory_order_acquire);
-        if (now - cached.timeMs < kCacheTtlMs)
+        if (cached.timeMs != 0 && now - cached.timeMs < kCacheTtlMs)
+            return cached.state;
+
+        if (GlassShared::IsSchedulerUiThread())
             return cached.state;
 
         const HostUiState svc = QueryServiceUiState();
+        // Running не зависит от задачи: не сканировать дерево.
+        if (svc == HostUiState::Running)
+        {
+            g_orchestrationCache.store({ svc, now }, std::memory_order_release);
+            return svc;
+        }
+
         const HostUiState task = QueryTaskUiState();
 
         HostUiState result;

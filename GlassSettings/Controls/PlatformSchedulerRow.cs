@@ -55,11 +55,35 @@ public sealed class PlatformSchedulerRow
 
     public event EventHandler? StateChanged;
 
-    public bool TaskExists => QueryDirectState().TaskExists;
+    public bool TaskExists => QueryUiState().TaskExists;
 
     /// <summary>Direct query bypassing snapshot — always reflects current state.</summary>
     private PlatformTaskState QueryDirectState() =>
         PlatformPresenceService.Instance.QueryTaskStateDirect(Kind, EffectiveGlassArch);
+
+    /// <summary>
+    /// UI читает снимок presence. Прямой планировщик после сброса кэша на старте Glass
+    /// на кадр показывает OpenGlass как отсутствующий.
+    /// </summary>
+    private PlatformTaskState QueryUiState()
+    {
+        var snap = PlatformPresenceService.Instance.CurrentSnapshot;
+        if (snap.Revision > 0)
+            return PlatformPresenceService.Instance.QueryTaskState(Kind, EffectiveGlassArch);
+
+        if (Kind == PlatformSchedulerKind.Glass && GlassPlatformService.IsAnyLifecycleBusy())
+        {
+            var life = NativeHostInterop.QueryInjectLifecycleUi(EffectiveGlassArch);
+            return new PlatformTaskState(
+                TaskExists: true,
+                Lifecycle: life,
+                Autorun: life == NativeHostInterop.InjectLifecycleUi.Starting
+                    ? GlassAutorunUiState.Ready
+                    : GlassAutorunUiState.NoTask);
+        }
+
+        return QueryDirectState();
+    }
 
     /// <summary>Подключение к navigate-строке после AddNavigateSection (строка уже в дереве).</summary>
     public void AttachToNavigateRow(SettingsNavigateRow navRow)
@@ -105,8 +129,8 @@ public sealed class PlatformSchedulerRow
         _suppress = true;
         try
         {
-            // Always query directly — snapshot may be stale during start/stop transitions.
-            var state = QueryDirectState();
+            // Во время start/stop снимок presence: прямой COM планировщика блокирует UI.
+            var state = QueryUiState();
             var exists = state.TaskExists;
             if (_busy)
                 return;

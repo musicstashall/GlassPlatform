@@ -20,17 +20,31 @@ public static class SystemPlatformRunActions
         if (!await ConfirmSaveBeforePlatformStartAsync().ConfigureAwait(true))
             return false;
 
-        using var busy = PlatformLifecycleBusy.Begin(arch);
-        await Task.Run(() =>
-        {
-            _ = GlassPlatformService.TrySyncAutorunTaskActionPath(arch);
-            GlassPlatformService.StartPlatform(arch);
-        }).ConfigureAwait(true);
-        if (!await WaitForGlassRunningAsync(arch, DefaultRunningWait).ConfigureAwait(true))
+        // Как Stop: диалог на UI, schtasks/Run и ожидание mutex — в фоне.
+        // true = старт принят; неуспех снимает busy, presence возвращает тумблер в выкл.
+        NativeHostInterop.NoteUiThread();
+        var busy = PlatformLifecycleBusy.TryBegin(arch);
+        if (busy is null)
             return false;
 
-        await SettingsSession.Current.ReloadBaselinesAfterPlatformSubsystemStartAsync().ConfigureAwait(true);
-        PlatformPresenceService.Instance.NotifyLifecycleChanged();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                _ = GlassPlatformService.TrySyncAutorunTaskActionPath(arch);
+                GlassPlatformService.StartPlatform(arch);
+                if (await WaitForGlassRunningAsync(arch, DefaultRunningWait).ConfigureAwait(false))
+                {
+                    await SettingsSession.Current.ReloadBaselinesAfterPlatformSubsystemStartAsync()
+                        .ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                busy.Dispose();
+                PlatformPresenceService.Instance.NotifyLifecycleChanged();
+            }
+        });
         return true;
     }
 
@@ -184,7 +198,7 @@ public static class SystemPlatformRunActions
             if (GlassPlatformService.IsGlassPlatformRunning(arch))
                 return true;
 
-            await Task.Delay(250).ConfigureAwait(true);
+            await Task.Delay(250).ConfigureAwait(false);
         }
 
         return GlassPlatformService.IsGlassPlatformRunning(arch);

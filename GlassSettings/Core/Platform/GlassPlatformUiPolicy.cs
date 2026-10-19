@@ -11,7 +11,7 @@ public static class GlassPlatformUiPolicy
         if (!GlassPlatformNames.ShowDualGlassPlatformUi)
             return false;
 
-        if (GlassPlatformService.GlassAutorunTaskExists(GlassPlatformArch.X86))
+        if (GlassPlatformService.GlassAutorunTaskExistsForUi(GlassPlatformArch.X86))
             return false;
 
         return !GlassModulePath.IsPlatformInstalled(GlassPlatformArch.X86);

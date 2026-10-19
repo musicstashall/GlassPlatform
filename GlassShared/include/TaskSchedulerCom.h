@@ -68,4 +68,9 @@ namespace GlassShared
 
     [[nodiscard]] bool RunSchtasksOnTask(const wchar_t* fullTaskPathOrName, const wchar_t* verbArgs) noexcept;
 
+    /// Поток UI GlassSettings: с него нельзя обходить дерево задач.
+    void NoteSchedulerUiThread() noexcept;
+
+    [[nodiscard]] bool IsSchedulerUiThread() noexcept;
+
 }

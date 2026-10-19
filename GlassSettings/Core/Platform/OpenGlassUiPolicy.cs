@@ -57,11 +57,25 @@ public static class OpenGlassUiPolicy
 
     private static void OnPresenceChanged(object? sender, EventArgs e)
     {
-        var now = IsFeatureExposedInUi();
+        // Снимок уже знает, есть ли задача OpenGlass. Повторный планировщик с UI
+        // после сброса кэша на старте Glass держит прокрутку больше секунды.
+        var now = IsFeatureExposedWithoutScheduler();
         if (now == _lastFeatureExposed)
             return;
 
         _lastFeatureExposed = now;
         Changed?.Invoke(null, EventArgs.Empty);
+    }
+
+    private static bool IsFeatureExposedWithoutScheduler()
+    {
+        if (!IsBundledWithApplication())
+            return false;
+
+        var snap = PlatformPresenceService.Instance.CurrentSnapshot;
+        if (snap.Revision == 0 || (snap.OgLegacyTaskExists == 0 && snap.OgCurrentTaskExists == 0))
+            return _lastFeatureExposed;
+
+        return OrchestrationTargetsBundledPackage();
     }
 }

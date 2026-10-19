@@ -14,8 +14,10 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <!-- WASDK MUI: только en-US (десятки af-ZA/… раздувают output; UI-строки GS — в PRI). -->
     <SatelliteResourceLanguages>en-US</SatelliteResourceLanguages>
-    <!-- RID по Platform (не по архитектуре MSBuild-процесса): иначе x86-сборка на OS x64 уходит в win-x64. -->
-    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$(Platform)</RuntimeIdentifier>
+    <!-- RID по Platform (не по архитектуре MSBuild-процесса): иначе x86-сборка на OS x64 уходит в win-x64.
+         IDE грузит проект как AnyCPU; win-AnyCPU нет в RuntimeIdentifiers (NETSDK1083). -->
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(Platform)' == 'x86'">win-x86</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(Platform)' != 'x86'">win-x64</RuntimeIdentifier>
     <PublishProfile Condition="Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">win-$(Platform).pubxml</PublishProfile>
     <UseWinUI>true</UseWinUI>
     <WinUISDKReferences>false</WinUISDKReferences>

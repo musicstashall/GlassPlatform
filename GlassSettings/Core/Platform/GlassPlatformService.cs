@@ -19,6 +19,44 @@ public static partial class GlassPlatformService
     public static bool GlassAutorunTaskExists(GlassPlatformArch arch) =>
         NativeHostInterop.GlassAutorunTaskExistsNative(arch);
 
+    /// <summary>
+    /// Наличие задачи для UI. Пока идёт старт или стоп любой битности, планировщик
+    /// с диспетчера не вызывается — берётся снимок presence.
+    /// </summary>
+    public static bool GlassAutorunTaskExistsForUi(GlassPlatformArch arch)
+    {
+        var snap = PlatformPresenceService.Instance.CurrentSnapshot;
+        if (snap.Revision > 0)
+        {
+            return arch == GlassPlatformArch.X64
+                ? snap.GlassTaskExistsX64 != 0
+                : snap.GlassTaskExistsX86 != 0;
+        }
+
+        if (IsAnyLifecycleBusy())
+            return true;
+
+        return GlassAutorunTaskExists(arch);
+    }
+
+    /// <summary>Busy start/stop: COM планировщика на UI в этот момент блокирует окно.</summary>
+    public static bool IsAnyLifecycleBusy() =>
+        PlatformLifecycleBusy.IsBusy(GlassPlatformArch.X64)
+        || PlatformLifecycleBusy.IsBusy(GlassPlatformArch.X86);
+
+    /// <summary>Старт в полёте: тумблер остаётся вкл, пока mutex ещё не Running. Стоп не считается.</summary>
+    public static bool IsStartInFlight(GlassPlatformArch arch, NativeHostInterop.InjectLifecycleUi life)
+    {
+        if (life is NativeHostInterop.InjectLifecycleUi.Stopping
+            or NativeHostInterop.InjectLifecycleUi.Residual)
+            return false;
+
+        if (life == NativeHostInterop.InjectLifecycleUi.Starting)
+            return true;
+
+        return PlatformLifecycleBusy.IsBusy(arch) && !HomeStatusSummary.IsStopEventSignaled(arch);
+    }
+
     public static GlassAutorunUiState QueryGlassAutorunUiState() =>
         QueryGlassAutorunUiState(GlassPlatformNames.NativeArch);
 

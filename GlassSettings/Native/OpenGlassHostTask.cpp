@@ -184,6 +184,11 @@ namespace
 
 extern "C"
 {
+    __declspec(dllexport) void WINAPI GlassSettings_NoteUiThread() noexcept
+    {
+        GlassShared::NoteSchedulerUiThread();
+    }
+
     __declspec(dllexport) int WINAPI GlassSettings_QueryOpenGlassHostUiState() noexcept
     {
         return QueryOpenGlassHostUiStateNative();

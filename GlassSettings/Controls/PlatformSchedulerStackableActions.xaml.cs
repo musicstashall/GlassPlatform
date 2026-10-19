@@ -1,3 +1,4 @@
+using GlassSettings.Core.Platform;
 using GlassSettings.Services;
 using GlassSettings.Strings;
 using Microsoft.UI.Xaml;
@@ -34,6 +35,8 @@ public sealed partial class PlatformSchedulerStackableActions : UserControl
     public PlatformSchedulerStackableActions()
     {
         InitializeComponent();
+        // Правый отступ равен секции шеврона: кольцо стоит по центру основной части.
+        BusyRing.Margin = new Thickness(0, 0, SplitFlyoutPartWidth, 0);
         ApplyLocalizedStrings();
         StatusSplit.SizeChanged += (_, _) => UpdateStatusFillSize();
         ActualThemeChanged += (_, _) => RefreshStatusChrome();

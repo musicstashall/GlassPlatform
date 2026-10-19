@@ -12,7 +12,8 @@ public static class OpenGlassHostService
     private const string TaskNameCurrent = "OpenGlass Host";
     private const string TaskNameLegacy = "OpenGlass Legacy Host";
 
-    public static bool LegacyHostTaskExists() => NativeHostInterop.LegacyHostTaskExists();
+    public static bool LegacyHostTaskExists() =>
+        NativeHostInterop.LegacyHostTaskExists();
 
     /// <summary>Backend OG: служба, если установлена или рядом с DLL есть OpenGlassHost.exe.</summary>
     public static OpenGlassOrchestrationBackend ResolveOrchestrationBackend()

@@ -62,6 +62,19 @@ public sealed class PlatformPresenceService : IDisposable
     {
         NativeHostInterop.InvalidateOGCache();
         SignalWatcherRefresh();
+        // Watcher молчит, если снимок не изменился (неудачный старт). Тумблер всё равно
+        // нужно снять с busy — иначе он остаётся выключенным.
+        var dq = _dispatcher;
+        if (dq is null)
+        {
+            RaisePresenceTimed();
+            return;
+        }
+
+        if (dq.HasThreadAccess)
+            RaisePresenceTimed();
+        else
+            dq.TryEnqueue(RaisePresenceTimed);
     }
 
     public void Subscribe(Action<NativeHostInterop.PresenceSnapshot> callback)
@@ -148,13 +161,11 @@ public sealed class PlatformPresenceService : IDisposable
                     Autorun: (GlassAutorunUiState)(arch == GlassPlatformArch.X64
                         ? snap.GlassAutorunStateX64 : snap.GlassAutorunStateX86)),
                 PlatformSchedulerKind.OpenGlass => new PlatformTaskState(
-                    TaskExists: snap.OgLegacyTaskExists != 0,
-                    Lifecycle: snap.OpenGlassOrchestration == 3
+                    TaskExists: snap.OgLegacyTaskExists != 0 || snap.OgCurrentTaskExists != 0,
+                    Lifecycle: snap.OpenGlassOrchestration == (int)NativeHostInterop.NativeOpenGlassHostUiState.Running
                         ? NativeHostInterop.InjectLifecycleUi.Running
                         : NativeHostInterop.InjectLifecycleUi.Idle,
-                    Autorun: snap.OpenGlassOrchestration == 3
-                        ? GlassAutorunUiState.Running
-                        : GlassAutorunUiState.Ready),
+                    Autorun: (GlassAutorunUiState)snap.OpenGlassOrchestration),
                 _ => PlatformTaskState.Default
             };
             return result;
@@ -348,7 +359,7 @@ public sealed class PlatformPresenceService : IDisposable
                     catch { }
                 }
                 // Always fire PresenceChanged — event-based subscribers (HomePage) rely on this.
-                PresenceChanged?.Invoke(this, EventArgs.Empty);
+                RaisePresenceTimed();
             });
         }
     }
@@ -375,7 +386,26 @@ public sealed class PlatformPresenceService : IDisposable
         }
 
         if (changed && raiseEvent)
-            PresenceChanged?.Invoke(this, EventArgs.Empty);
+            RaisePresenceTimed();
+    }
+
+    private void RaisePresenceTimed()
+    {
+        var handlers = PresenceChanged?.GetInvocationList();
+        if (handlers is null)
+            return;
+
+        foreach (var handler in handlers)
+        {
+            try
+            {
+                ((EventHandler)handler)(this, EventArgs.Empty);
+            }
+            catch
+            {
+                // Подписчик не должен срывать остальных.
+            }
+        }
     }
 
     private static NativeHostInterop.PresenceSnapshot BuildFallbackSnapshot()

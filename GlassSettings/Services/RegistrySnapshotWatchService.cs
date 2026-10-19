@@ -104,6 +104,14 @@ public sealed class RegistrySnapshotWatchService : IDisposable
         RegistryWatchTrace.Write("SyncFingerprintFromSnapshot: cancel settle");
     }
 
+    /// <summary>Тот же контракт, что SyncFingerprintFromSnapshot, но отпечаток уже посчитан вне UI.</summary>
+    public void AdoptDwmFingerprint(SettingsSnapshot snapshot, string fingerprint)
+    {
+        _snapshotRef = snapshot;
+        _lastFingerprint = fingerprint;
+        CancelExternalSyncSettle();
+    }
+
     /// <summary>После page operation sequence — один evaluate, если debounce был отложен.</summary>
     internal void RequestEvaluateAfterPageOperation()
     {

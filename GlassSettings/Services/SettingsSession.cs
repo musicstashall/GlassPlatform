@@ -71,10 +71,18 @@ public sealed class SettingsSession
 
     // Как в temp/GlassSettings: semantic dirty по снимку/флагам. Ложный cold-start yellow
     // закрывается defer до Capture + MarkReady (не гейтом HasUnsavedChanges).
-    public bool HasUnsavedChanges =>
-        _baselineCaptured
-            ? (_scopeDirtyFlags.Count > 0 || _snapshot.HasUnsavedChanges())
-            : false;
+    public bool HasUnsavedChanges
+    {
+        get
+        {
+            if (!_baselineCaptured)
+                return false;
+            if (_scopeDirtyFlags.Count > 0)
+                return true;
+
+            return _snapshot.HasUnsavedChanges();
+        }
+    }
 
     public bool HasUnsavedInScope(SettingsCommitScope scope)
     {
@@ -361,11 +369,83 @@ public sealed class SettingsSession
         RaiseDirtyChanged();
     }
 
-    /// <summary>DWM + Taskbar baseline после старта Glass Platform / OpenGlass (без ложных dirty).</summary>
+    /// <summary>DWM + Taskbar baseline после старта Glass Platform (без ложных dirty).</summary>
     public async Task ReloadBaselinesAfterPlatformSubsystemStartAsync()
     {
-        await ReloadDwmSnapshotBaselineAsync().ConfigureAwait(true);
-        SyncScopeBaseline(SettingsCommitScope.ForArea(CustomizationAreaId.Taskbar));
+        var (fingerprint, dwmValues) = await WaitForStableDwmBaselineAsync().ConfigureAwait(false);
+        var tray = SettingsSnapshot.ReadGlassPartition(GlassRegistryPartition.Tray);
+        await RunOnUiAsync(() =>
+        {
+            var dirtyBefore = _scopeDirtyFlags.Count;
+            RegistrySnapshotWatchService.Current?.SuppressExternalDirty(TimeSpan.FromSeconds(2));
+            _snapshot.ReplaceDwmBaseline(dwmValues);
+            _snapshot.ReplaceGlassPartition(GlassRegistryPartition.Tray, tray);
+            ClearDwmScopeDirtyFlags();
+            _scopeDirtyFlags.Remove(SettingsCommitScope.ForArea(CustomizationAreaId.Taskbar));
+            ReconcileScopeDirtyFlags();
+            RegistrySnapshotWatchService.Current?.AdoptDwmFingerprint(_snapshot, fingerprint);
+            var dirtyAfter = _scopeDirtyFlags.Count;
+            // Подписчики DirtyChanged обходят дерево и реестр (~300 мс на UI).
+            // Если флаги не менялись, индикаторы уже верные — событие не нужно.
+            if (dirtyBefore != dirtyAfter)
+            {
+                App.ShellWindow?.DispatcherQueue.TryEnqueue(
+                    Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                    RaiseDirtyChanged);
+            }
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>Отпечаток и значения DWM вне диспетчера: два одинаковых чтения подряд или 24 попытки.</summary>
+    private async Task<(string Fingerprint, List<RegEntry> Values)> WaitForStableDwmBaselineAsync()
+    {
+        string? previous = null;
+        List<RegEntry>? previousValues = null;
+        for (var attempt = 0; attempt < 24; attempt++)
+        {
+            var values = _snapshot.ReadDwmValues();
+            var fingerprint = SettingsSnapshot.FormatDwmFingerprint(values);
+            if (previous == fingerprint && previousValues is not null)
+                return (fingerprint, previousValues);
+
+            previous = fingerprint;
+            previousValues = values;
+            await Task.Delay(250).ConfigureAwait(false);
+        }
+
+        return (previous ?? string.Empty, previousValues ?? _snapshot.ReadDwmValues());
+    }
+
+    /// <summary>Запись снимка и DirtyChanged — на UI. Без окна применение пропускается.</summary>
+    private static Task RunOnUiAsync(Action action)
+    {
+        var queue = App.ShellWindow?.DispatcherQueue;
+        if (queue is null)
+            return Task.CompletedTask;
+
+        if (queue.HasThreadAccess)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!queue.TryEnqueue(() =>
+            {
+                try
+                {
+                    action();
+                }
+                finally
+                {
+                    done.TrySetResult();
+                }
+            }))
+        {
+            done.TrySetResult();
+        }
+
+        return done.Task;
     }
 
     private void ClearDwmScopeDirtyFlags()

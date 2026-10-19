@@ -5,12 +5,29 @@
 
 #include <oleauto.h>
 
+#include <atomic>
 #include <vector>
 
 #pragma comment(lib, "oleaut32.lib")
 
 namespace GlassShared
 {
+    namespace
+    {
+        std::atomic<DWORD> g_schedulerUiThread{ 0 };
+    }
+
+    void NoteSchedulerUiThread() noexcept
+    {
+        g_schedulerUiThread.store(GetCurrentThreadId(), std::memory_order_release);
+    }
+
+    bool IsSchedulerUiThread() noexcept
+    {
+        const DWORD id = g_schedulerUiThread.load(std::memory_order_acquire);
+        return id != 0 && id == GetCurrentThreadId();
+    }
+
     namespace
     {
         struct BstrWrap
@@ -189,6 +206,9 @@ namespace GlassShared
         std::wstring* outFullPath) noexcept
     {
         outTask.reset();
+        // Обход всех папок планировщика с UI не отдаёт сообщения и держит прокрутку.
+        if (IsSchedulerUiThread())
+            return false;
         if (!taskName || !m_service)
             return false;
         if (outFullPath)

@@ -30,8 +30,14 @@ public static class OpenGlassBorderPolicyCoordinator
         PlatformPresenceService.Instance.PresenceChanged += OnPresenceChanged;
     }
 
-    public static bool IsOpenGlassAffectingBorders() =>
-        NativeHostInterop.IsOpenGlassBackdropPipelineActive();
+    public static bool IsOpenGlassAffectingBorders()
+    {
+        var snapshot = PlatformPresenceService.Instance.CurrentSnapshot;
+        if (snapshot.Revision != 0)
+            return snapshot.OpenGlassPipelineActive != 0;
+
+        return NativeHostInterop.IsOpenGlassBackdropPipelineActive();
+    }
 
     public static bool ShouldShowBorderColorLimitNotice() =>
         WindowsOsHelper.IsWindows11OrGreater() && IsOpenGlassAffectingBorders();
@@ -70,7 +76,8 @@ public static class OpenGlassBorderPolicyCoordinator
     {
         var nowNotice = ShouldShowBorderColorLimitNotice();
         var nowPipeline = IsOpenGlassAffectingBorders();
-        if (nowNotice == _lastNoticeVisible && nowPipeline == _lastPipelineAffectingBorders)
+        var changed = nowNotice != _lastNoticeVisible || nowPipeline != _lastPipelineAffectingBorders;
+        if (!changed)
             return;
 
         _lastNoticeVisible = nowNotice;

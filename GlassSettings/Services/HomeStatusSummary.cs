@@ -61,6 +61,16 @@ public static class HomeStatusSummary
             return BuildGlassPlatformUiSnapshot(arch, life, autorun, stopSignaled);
         }
 
+        // Старт держит schtasks: прямой опрос планировщика с UI замораживает окно.
+        if (GlassPlatformService.IsAnyLifecycleBusy())
+        {
+            var life = NativeHostInterop.QueryInjectLifecycleUi(arch);
+            var autorun = life == NativeHostInterop.InjectLifecycleUi.Starting
+                ? GlassAutorunUiState.Ready
+                : GlassAutorunUiState.NoTask;
+            return BuildGlassPlatformUiSnapshot(arch, life, autorun, IsStopEventSignaled(arch));
+        }
+
         return QueryGlassPlatformUiDirect(arch);
     }
 
