@@ -7,7 +7,7 @@ namespace Shared::RootPolicyQuery
     [[nodiscard]] bool UsesSwcaBackdrop() noexcept;
 
     /// RootBackdropMode: 0=off (NoBackdrop=1), 1=DWM (OG pipeline), 2=SWCA.
-    /// Чтение: NoBackdrop → snapshot mapping (seed) → кэш → OG-fallback.
+    /// Горячий путь — кэш. Первое чтение и Refresh: NoBackdrop → snapshot → OG-fallback.
     [[nodiscard]] DWORD ReadRootBackdropMode() noexcept;
 
     [[nodiscard]] bool IsRootGlassRenderingEnabled() noexcept;

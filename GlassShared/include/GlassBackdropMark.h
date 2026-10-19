@@ -80,6 +80,14 @@ namespace GlassShared
         if (!hRoot)
             return false;
 
+        // Attach/reapply уже записал 1 или 2. Список классов и wstring — только для корня без метки.
+        const HANDLE mark = GetPropW(hRoot, MAKEINTATOM(GetRootBackdropAllowedAtom()));
+        if (mark == reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(2u))
+            || mark == reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(1u)))
+        {
+            return GlassIsRootBackdropAllowed(hRoot);
+        }
+
         if (IsShellTrayRootHwnd(hRoot))
             return true;
 

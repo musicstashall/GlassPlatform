@@ -100,6 +100,12 @@ namespace Shared::RootPolicyQuery
             return kLogViewerRootBackdropMode;
         }
 
+        // Paint зовёт это тысячи раз в секунду. Реестр и snapshot — только пока кэш пуст;
+        // смена политики приходит через SetRootBackdropMode / RefreshRootBackdropPolicyCache.
+        const DWORD cached = g_cachedRootBackdropMode.load(std::memory_order_acquire);
+        if (cached != 0xFFFFFFFFu)
+            return cached;
+
         const bool toolHost = ProcessBlockList::IsCurrentProcessGlassToolHost();
         if (!toolHost && ReadNoBackdropRaw() != 0)
         {
@@ -114,9 +120,9 @@ namespace Shared::RootPolicyQuery
             return fromMapping;
         }
 
-        const DWORD cached = g_cachedRootBackdropMode.load(std::memory_order_acquire);
-        if (cached != 0xFFFFFFFFu)
-            return cached;
+        const DWORD cachedAgain = g_cachedRootBackdropMode.load(std::memory_order_acquire);
+        if (cachedAgain != 0xFFFFFFFFu)
+            return cachedAgain;
 
         const DWORD mode = ComputeFallbackRootBackdropMode(toolHost);
         g_cachedRootBackdropMode.store(mode, std::memory_order_release);

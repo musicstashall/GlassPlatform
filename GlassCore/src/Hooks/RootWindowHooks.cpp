@@ -245,6 +245,39 @@ namespace GlassCore::Root
                 r.cache = &it->second;
                 return r;
             }
+            bool skipChartWalk = false;
+            const HWND firstParent = GetParent(hWnd);
+            static const ATOM chartMemoParentAtom = GlobalAddAtomW(L"GlassPlatform.ChartMemoParent");
+            static const ATOM chartMemoResultAtom = GlobalAddAtomW(L"GlassPlatform.ChartMemoResult");
+            if (firstParent)
+            {
+                const HANDLE seenParent = GetPropW(hWnd, MAKEINTATOM(chartMemoParentAtom));
+                const HANDLE memo = GetPropW(hWnd, MAKEINTATOM(chartMemoResultAtom));
+                if (seenParent == reinterpret_cast<HANDLE>(firstParent) && memo)
+                {
+                    if (memo == reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(1)))
+                    {
+                        skipChartWalk = true;
+                    }
+                    else
+                    {
+                        const HWND chart = static_cast<HWND>(memo);
+                        if (IsWindow(chart))
+                        {
+                            it = s_rootCache.find(chart);
+                            if (it != s_rootCache.end())
+                            {
+                                r.cache = &it->second;
+                                r.inheritedFromChartGraph = true;
+                                return r;
+                            }
+                        }
+                    }
+                }
+            }
+            if (!skipChartWalk)
+            {
+            bool sawChartClass = false;
             for (HWND par = GetParent(hWnd); par; par = GetParent(par))
             {
                 wchar_t pcls[128]{};
@@ -252,13 +285,26 @@ namespace GlassCore::Root
                     continue;
                 if (!StrEqI(pcls, L"ChartGraphClass"))
                     continue;
+                sawChartClass = true;
                 it = s_rootCache.find(par);
                 if (it != s_rootCache.end())
                 {
+                    if (firstParent)
+                    {
+                        SetPropW(hWnd, MAKEINTATOM(chartMemoParentAtom), reinterpret_cast<HANDLE>(firstParent));
+                        SetPropW(hWnd, MAKEINTATOM(chartMemoResultAtom), reinterpret_cast<HANDLE>(par));
+                    }
                     r.cache = &it->second;
                     r.inheritedFromChartGraph = true;
                     return r;
                 }
+            }
+            if (firstParent && !sawChartClass)
+            {
+                SetPropW(hWnd, MAKEINTATOM(chartMemoParentAtom), reinterpret_cast<HANDLE>(firstParent));
+                SetPropW(hWnd, MAKEINTATOM(chartMemoResultAtom),
+                    reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(1)));
+            }
             }
             if (IsRarextWindowModule(hWnd))
             {
