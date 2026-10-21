@@ -130,16 +130,20 @@
              Properties="Configuration=$(Configuration);Platform=$(GlassSettingsNativePlatform);SolutionDir=$(SolutionRoot)" />
   </Target>
 
-  <!-- Копировать GlassSettings.Native.dll из Build output в подпапку GlassSettings -->
-  <Target Name="CopyNativeDllToOutput" AfterTargets="BuildGlassSettingsNative" BeforeTargets="CoreCompile">
+  <!--
+    Копировать GlassSettings.Native.dll рядом с exe.
+    VC Platform=Win32, но OutDir = Build\$(PlatformShortName)\…, а у Win32 PlatformShortName=x86.
+    Источник — Build\x86|x64, не Build\Win32: иначе Exists=false и рядом с exe остаётся старая DLL.
+  -->
+  <Target Name="CopyNativeDllToOutput" AfterTargets="Build">
     <PropertyGroup>
-      <_NativeDllFrom>$([System.IO.Path]::GetFullPath('$(BaseOutputPath)$(GlassSettingsNativePlatform)\$(Configuration)\GlassSettings.Native.dll'))</_NativeDllFrom>
-      <_NativeDllTo>$(OutputPath)GlassSettings.Native.dll</_NativeDllTo>
+      <_NativeDllFrom>$([System.IO.Path]::GetFullPath('$(BaseOutputPath)$(Platform)\$(Configuration)\GlassSettings.Native.dll'))</_NativeDllFrom>
     </PropertyGroup>
+    <Error Text="GlassSettings.Native.dll не найдена: $(_NativeDllFrom). Сборка VC Platform=$(GlassSettingsNativePlatform) пишет DLL в Build\$(Platform)\$(Configuration)\."
+           Condition="!Exists('$(_NativeDllFrom)')" />
     <Copy SourceFiles="$(_NativeDllFrom)"
           DestinationFolder="$(OutputPath)"
-          SkipUnchangedFiles="true"
-          Condition="Exists('$(_NativeDllFrom)')" />
+          SkipUnchangedFiles="true" />
   </Target>
 
   <!-- Self-contained WASDK копирует все *.mui-культуры — оставляем только en-US / en-us. -->
