@@ -7,7 +7,7 @@
 namespace GlassCore::ThemePaint
 {
     // Альфа DrawThemeBackground → offscreen + GdiAlphaBlend (Tab, Combo, push-Button).
-    // Реестр: HKCU\Software\StanislavKa\BlackWindowManager
+    // Реестр: HKCU\Software\StanislavKa\GlassPlatform
     //   Root\Active\GlassDrawThemeConstantAlpha и Root\Inactive\GlassDrawThemeConstantAlpha
     //   (REG_DWORD 0…255). При отсутствии ключа — kDefaultDrawThemeConstantAlpha (255);
     //   fallthrough: Inactive/Active subkey → Root\ (RootSwcaRegistryQuery).

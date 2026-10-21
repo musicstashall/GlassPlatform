@@ -15,8 +15,8 @@ public static class CrashDumpCatalog
 
     private static readonly string[] DumpFolderRegPaths =
     [
-        @"Software\StanislavKa\BlackWindowManager\Crashes",
-        @"Software\StanislavKa\BlackWindowManager",
+        @"Software\StanislavKa\GlassPlatform\Crashes",
+        @"Software\StanislavKa\GlassPlatform",
         @"Software\Glass\CrashGuard",
     ];
 

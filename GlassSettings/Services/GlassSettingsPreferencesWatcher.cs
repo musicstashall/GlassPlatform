@@ -8,7 +8,7 @@ namespace GlassSettings.Services;
 /// <summary>RegNotify на HKCU\...\GlassSettings — только AppTheme/WindowBackdrop/overlay без лишних reapply.</summary>
 public sealed class GlassSettingsPreferencesWatcher : IDisposable
 {
-    private const string GlassSettingsSubKey = @"Software\StanislavKa\BlackWindowManager\GlassSettings";
+    private const string GlassSettingsSubKey = @"Software\StanislavKa\GlassPlatform\GlassSettings";
 
     private readonly RegistryValueChangeWatcher _watcher;
     private AppThemeMode _theme;

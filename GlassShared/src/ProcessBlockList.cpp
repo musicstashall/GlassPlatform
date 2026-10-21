@@ -27,7 +27,7 @@ namespace
         HKEY hKey;
         if (RegOpenKeyExW(
             HKEY_CURRENT_USER,
-            L"Software\\StanislavKa\\BlackWindowManager\\BlockList",
+            L"Software\\StanislavKa\\GlassPlatform\\BlockList",
             0, KEY_READ, &hKey) != ERROR_SUCCESS)
         {
             return;
@@ -205,7 +205,7 @@ namespace ProcessBlockList
         DWORD disp = 0;
         LONG rc = RegCreateKeyExW(
             HKEY_CURRENT_USER,
-            L"Software\\StanislavKa\\BlackWindowManager\\BlockList",
+            L"Software\\StanislavKa\\GlassPlatform\\BlockList",
             0, nullptr,
             REG_OPTION_NON_VOLATILE,
             KEY_SET_VALUE,

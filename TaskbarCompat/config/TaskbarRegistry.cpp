@@ -12,7 +12,7 @@ namespace TaskbarCompat::Registry
 {
     namespace
     {
-        constexpr const wchar_t* kSubKey = L"Software\\StanislavKa\\BlackWindowManager\\Tray";
+        constexpr const wchar_t* kSubKey = L"Software\\StanislavKa\\GlassPlatform\\Tray";
         constexpr const wchar_t* kValueCornerType = L"CornerType";
 
         // Последние системные SolidColorBrush с XAML-острова (только память — не реестр).

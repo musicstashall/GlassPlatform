@@ -2,7 +2,7 @@
 
 // Чтение DWORD из «настоящего» HKCU пользователя через HKEY_USERS\<SID>\...
 // Нужно для AppContainer (SEH/SMEH/ShellHost): виртуализированный HKEY_CURRENT_USER
-// не видит Software\StanislavKa\BlackWindowManager, записанный GlassSettings в user hive.
+// не видит Software\StanislavKa\GlassPlatform, записанный GlassSettings в user hive.
 
 #include <Windows.h>
 #include <sddl.h>

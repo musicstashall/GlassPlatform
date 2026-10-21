@@ -47,7 +47,7 @@ namespace Shared::OpenGlassDwmPolicy
     /// No-op если !ShouldApplyDwmCompositionPolicy().
     void ApplyDwmPolicyOnVisualStyleChange() noexcept;
 
-    /// Реестр: отключить всю политику (HKCU …\BlackWindowManager, значение OpenGlassDwmPolicyDisable = 1).
+    /// Реестр: отключить всю политику (HKCU …\GlassPlatform, значение OpenGlassDwmPolicyDisable = 1).
     [[nodiscard]] bool IsHostDwmPolicyDisabled() noexcept;
 
     /// Echo-guard: host policy пишет Override (GlassCore skip registry sync на colorization wave).

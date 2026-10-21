@@ -21,7 +21,7 @@ namespace
     constexpr wchar_t kOgHostTaskNameCurrent[] = L"OpenGlass Host";
     constexpr wchar_t kOgHostTaskNameLegacy[]  = L"OpenGlass Legacy Host";
 
-    constexpr wchar_t kBwmRegKey[] = L"Software\\StanislavKa\\BlackWindowManager";
+    constexpr wchar_t kBwmRegKey[] = L"Software\\StanislavKa\\GlassPlatform";
     constexpr wchar_t kInstallPathValue[] = L"InstallPath";
 
     [[nodiscard]] bool FileExists(const std::wstring& p) noexcept

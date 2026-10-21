@@ -24,7 +24,7 @@ public enum UpdateCheckInterval
 
 
 
-/// <summary>Параметры GlassSettings в HKCU\Software\StanislavKa\BlackWindowManager\GlassSettings.</summary>
+/// <summary>Параметры GlassSettings в HKCU\Software\StanislavKa\GlassPlatform\GlassSettings.</summary>
 
 public static class GlassSettingsRegistry
 

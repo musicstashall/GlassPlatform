@@ -79,7 +79,7 @@ namespace Shared::ThemeHelper
     /// Не COLOR_WINDOW.
     [[nodiscard]] bool IsTrayXamlDarkMode() noexcept;
 
-    /// Реестр: HKCU\Software\StanislavKa\BlackWindowManager, Win32DarkModeKickDisable=1 — отключить пинок uxtheme.
+    /// Реестр: HKCU\Software\StanislavKa\GlassPlatform, Win32DarkModeKickDisable=1 — отключить пинок uxtheme.
     [[nodiscard]] bool IsWin32DarkModeKickEnabled() noexcept;
 
     /// Process-level пinок uxtheme (ordinals 135/104/136): SetPreferredAppMode + refresh. Идемпотентно.

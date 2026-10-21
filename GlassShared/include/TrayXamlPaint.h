@@ -1,6 +1,6 @@
 #pragma once
 
-// Настройки XAML-пути панели задач: HKCU\...\BlackWindowManager\Tray\Xaml
+// Настройки XAML-пути панели задач: HKCU\...\GlassPlatform\Tray\Xaml
 
 #include <Windows.h>
 #include <Helpers/RealUserReg.h>
@@ -8,7 +8,7 @@
 
 namespace Shared::TrayXamlPaint
 {
-    // Относительный путь под BlackWindowManager.
+    // Относительный путь под GlassPlatform.
     inline constexpr const wchar_t* kXamlSubKey = L"Tray\\Xaml";
     // Смежные окна (per-surface): fallback на Tray\Xaml при отсутствии value.
     inline constexpr const wchar_t* kXamlPopupSubKey = L"Tray\\Xaml\\Popup";
@@ -17,15 +17,15 @@ namespace Shared::TrayXamlPaint
     inline constexpr const wchar_t* kXamlTooltipSubKey = L"Tray\\Xaml\\Tooltip";
 
     inline constexpr const wchar_t* kRegPath =
-        L"Software\\StanislavKa\\BlackWindowManager\\Tray\\Xaml";
+        L"Software\\StanislavKa\\GlassPlatform\\Tray\\Xaml";
     inline constexpr const wchar_t* kRegPathPopup =
-        L"Software\\StanislavKa\\BlackWindowManager\\Tray\\Xaml\\Popup";
+        L"Software\\StanislavKa\\GlassPlatform\\Tray\\Xaml\\Popup";
     inline constexpr const wchar_t* kRegPathPreview =
-        L"Software\\StanislavKa\\BlackWindowManager\\Tray\\Xaml\\Preview";
+        L"Software\\StanislavKa\\GlassPlatform\\Tray\\Xaml\\Preview";
     inline constexpr const wchar_t* kRegPathMenu =
-        L"Software\\StanislavKa\\BlackWindowManager\\Tray\\Xaml\\Menu";
+        L"Software\\StanislavKa\\GlassPlatform\\Tray\\Xaml\\Menu";
     inline constexpr const wchar_t* kRegPathTooltip =
-        L"Software\\StanislavKa\\BlackWindowManager\\Tray\\Xaml\\Tooltip";
+        L"Software\\StanislavKa\\GlassPlatform\\Tray\\Xaml\\Tooltip";
 
     inline constexpr const wchar_t* kEffectTypeValue = L"EffectType";
     inline constexpr const wchar_t* kSeparateZonesValue = L"SeparateZones";
@@ -40,7 +40,7 @@ namespace Shared::TrayXamlPaint
     inline constexpr const wchar_t* kDarkBorder = L"DarkMode_BorderColor";
     inline constexpr const wchar_t* kNoBorderColor = L"NoBorderColor";
 
-    // Surface → абсолютный путь HKCU под Software\...\BlackWindowManager.
+    // Surface → абсолютный путь HKCU под Software\...\GlassPlatform.
     [[nodiscard]] inline const wchar_t* RegPathForSubKey(const wchar_t* bwmSubKey) noexcept
     {
         if (!bwmSubKey || !*bwmSubKey || wcscmp(bwmSubKey, kXamlSubKey) == 0)

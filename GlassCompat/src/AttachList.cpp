@@ -12,7 +12,7 @@ void AttachList::Initialize()
     HKEY hKey = nullptr;
     if (RegOpenKeyExW(
         HKEY_CURRENT_USER,
-        L"Software\\StanislavKa\\BlackWindowManager\\AttachList",
+        L"Software\\StanislavKa\\GlassPlatform\\AttachList",
         0, KEY_READ, &hKey) != ERROR_SUCCESS)
     {
         return;

@@ -8,7 +8,7 @@ namespace Shared::DwmGlassOpacity
     /// `MergeGlassOpacityIntoArgb`. Запись из UI (LogViewer и др.) — только через Write*/Delete*/Restore* ниже.
     ///
     /// Рассылка `WM_DWMCOLORIZATIONCHANGED` (HWND_BROADCAST): вызывается после успешных Write*/Delete*/Restore*
-    /// и после сохранения стиля backdrop Root (`…\BlackWindowManager\Root\EffectType`).
+    /// и после сохранения стиля backdrop Root (`…\GlassPlatform\Root\EffectType`).
     /// При нескольких правках подряд — `BeginDwmColorizationNotifyBatch` / `EndDwmColorizationNotifyBatch`,
     /// чтобы отправить одно сообщение (например откат GlassOpacity + backdrop в диалоге параметров).
 

@@ -2,7 +2,7 @@ namespace GlassSettings.Core.Registry;
 
 public static class RegistryPaths
 {
-    public const string GlassRoot = @"Software\StanislavKa\BlackWindowManager";
+    public const string GlassRoot = @"Software\StanislavKa\GlassPlatform";
 
     public const string DwmRoot = @"Software\Microsoft\Windows\DWM";
 

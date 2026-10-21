@@ -2,7 +2,7 @@ using GlassSettings.Core.Text;
 
 namespace GlassSettings.Core.Registry;
 
-/// <summary>HKCU\...\BlackWindowManager\LightMode_|DarkMode_GlobalTextGlow (REG_BINARY, 16 byte).</summary>
+/// <summary>HKCU\...\GlassPlatform\LightMode_|DarkMode_GlobalTextGlow (REG_BINARY, 16 byte).</summary>
 public static class GlobalTextGlowRegistry
 {
     public static bool IsPresent()

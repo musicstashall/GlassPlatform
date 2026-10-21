@@ -7,11 +7,11 @@ namespace Shared
 {
 	namespace RegHelper
 	{
-		constexpr std::wstring_view g_regPath{ L"Software\\StanislavKa\\BlackWindowManager" };
+		constexpr std::wstring_view g_regPath{ L"Software\\StanislavKa\\GlassPlatform" };
 #ifdef _WIN64
-		constexpr std::wstring_view g_internalRegPath{ L"Software\\StanislavKa\\BlackWindowManager_Internals" };
+		constexpr std::wstring_view g_internalRegPath{ L"Software\\StanislavKa\\GlassPlatform_Internals" };
 #else
-		constexpr std::wstring_view g_internalRegPath{ L"Software\\StanislavKa\\BlackWindowManager_Internals(x86)" };
+		constexpr std::wstring_view g_internalRegPath{ L"Software\\StanislavKa\\GlassPlatform_Internals(x86)" };
 #endif // _WIN64
 
 		// Подключи Root\Active и Root\Inactive — один сегмент keyTree (как { L"Tooltip" } для Menu/DropDown).

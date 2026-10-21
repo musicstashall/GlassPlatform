@@ -18,8 +18,8 @@
 namespace
 {
     // Настройки дампов / VEH (см. CrashGuard.h). Запись — только в kCrashRegPath.
-    constexpr wchar_t kBwmRegRoot[] = L"Software\\StanislavKa\\BlackWindowManager";
-    constexpr wchar_t kCrashRegPath[] = L"Software\\StanislavKa\\BlackWindowManager\\Crashes";
+    constexpr wchar_t kBwmRegRoot[] = L"Software\\StanislavKa\\GlassPlatform";
+    constexpr wchar_t kCrashRegPath[] = L"Software\\StanislavKa\\GlassPlatform\\Crashes";
     // Fallback чтения: прошлая сборка писала в корень BWM; ещё старее — Glass\CrashGuard.
     constexpr wchar_t kLegacyRegPath[] = L"Software\\Glass\\CrashGuard";
     constexpr DWORD kMaxCrashes = 3;
@@ -128,7 +128,7 @@ namespace
         return true;
     }
 
-    // Только …\Crashes и Glass\CrashGuard. Корень BlackWindowManager не трогаем: там десятки чужих DWORD
+    // Только …\Crashes и Glass\CrashGuard. Корень GlassPlatform не трогаем: там десятки чужих DWORD
     // (меню host UI, Root…) — одноимённый EnableMiniDump=0 отключал бы дампы, не доходя до legacy.
     [[nodiscard]] bool ReadRegDwordCrashSettingsThenLegacy(
         const wchar_t* valueName, DWORD& out, DWORD defaultVal) noexcept
@@ -664,7 +664,7 @@ namespace
 
         return result;
     }
-    // При первой загрузке GlassCompat: ключ HKCU\…\BlackWindowManager\Crashes и каталог по умолчанию,
+    // При первой загрузке GlassCompat: ключ HKCU\…\GlassPlatform\Crashes и каталог по умолчанию,
     // чтобы настройки не «пропадали» из виду и дампы не отключались чужим DWORD в корне BWM.
     void EnsureCrashGuardRegistryBaseline() noexcept
     {

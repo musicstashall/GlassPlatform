@@ -8,7 +8,7 @@
 
 namespace GlassCore::Settings
 {
-    /// Ветка реестра (…\BlackWindowManager\Root\) для backdrop/border **root**-окон.
+    /// Ветка реестра (…\GlassPlatform\Root\) для backdrop/border **root**-окон.
     /// Подключи Active и Inactive хранят параметры для активного и неактивного окна.
     inline constexpr std::wstring_view kRootRegistryPart{L"Root"};
     inline constexpr std::wstring_view kTrayRegistryPart{L"Tray"};

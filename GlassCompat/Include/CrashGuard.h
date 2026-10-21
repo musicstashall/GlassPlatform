@@ -7,10 +7,10 @@ namespace GlassCompat
     // BlockList/Forbidden (path=2/3) CrashGuard не ставят — только MinimalUnloadWatcher.
     // Диалог «остановить платформу» — только при серии падений explorer.exe (см. CrashGuard.cpp).
     //
-    // HKCU\Software\StanislavKa\BlackWindowManager\Crashes — основной ключ; при первой загрузке создаётся ключ и
+    // HKCU\Software\StanislavKa\GlassPlatform\Crashes — основной ключ; при первой загрузке создаётся ключ и
     // при отсутствии — EnableMiniDump=1, плюс каталог %LOCALAPPDATA%\GlassPlatform\Crashes.
-    // Чтение DWORD (EnableMiniDump, флаги VEH и т.д.): только …\Crashes и Glass\CrashGuard — не корень BWM
-    // (коллизии имён). DumpFolder (REG_SZ) по-прежнему: Crashes → корень BWM → legacy.
+    // Чтение DWORD (EnableMiniDump, флаги VEH и т.д.): только …\Crashes и Glass\CrashGuard — не корень GlassPlatform
+    // (коллизии имён). DumpFolder (REG_SZ) по-прежнему: Crashes → корень GlassPlatform → legacy.
     //   EnableMiniDump (DWORD, по умолчанию 1), MiniDumpWithFullMemory,
     //   DumpFolder (REG_EXPAND_SZ по умолчанию %LOCALAPPDATA%\GlassPlatform\Crashes — пишется при первой загрузке);
     //   иначе по очереди: %LOCALAPPDATA%\GlassPlatform\Crashes, %TEMP%\GlassPlatformCrashes.

@@ -3,7 +3,7 @@ using Microsoft.Win32;
 
 namespace GlassSettings.Core.Registry;
 
-/// <summary>Список процессов AttachList (HKCU\...\BlackWindowManager\AttachList).</summary>
+/// <summary>Список процессов AttachList (HKCU\...\GlassPlatform\AttachList).</summary>
 public static class AttachListRegistry
 {
     private const string SubKey = "AttachList";

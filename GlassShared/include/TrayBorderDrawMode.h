@@ -9,7 +9,7 @@
 
 namespace Shared::TrayBorderDrawMode
 {
-    inline constexpr const wchar_t* kSubKey = L"Software\\StanislavKa\\BlackWindowManager\\Tray";
+    inline constexpr const wchar_t* kSubKey = L"Software\\StanislavKa\\GlassPlatform\\Tray";
     inline constexpr const wchar_t* kValueName = L"BorderDrawMode";
 
     enum class Mode : DWORD

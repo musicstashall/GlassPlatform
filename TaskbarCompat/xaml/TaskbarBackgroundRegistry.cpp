@@ -44,7 +44,7 @@ namespace TaskbarCompat
             DWORD cb = sizeof(v);
             const LSTATUS ls = RegGetValueW(
                 HKEY_CURRENT_USER,
-                L"Software\\StanislavKa\\BlackWindowManager\\Tray",
+                L"Software\\StanislavKa\\GlassPlatform\\Tray",
                 valueName,
                 RRF_RT_REG_DWORD,
                 nullptr,
@@ -83,7 +83,7 @@ namespace TaskbarCompat
             DWORD cb = sizeof(v);
             const LSTATUS ls = RegGetValueW(
                 HKEY_CURRENT_USER,
-                L"Software\\StanislavKa\\BlackWindowManager\\Tray",
+                L"Software\\StanislavKa\\GlassPlatform\\Tray",
                 L"CornerType",
                 RRF_RT_REG_DWORD,
                 nullptr,
@@ -168,7 +168,7 @@ namespace TaskbarCompat
             DWORD cb = sizeof(v);
             (void)RegGetValueW(
                 HKEY_CURRENT_USER,
-                L"Software\\StanislavKa\\BlackWindowManager\\Tray",
+                L"Software\\StanislavKa\\GlassPlatform\\Tray",
                 L"EnableDropShadow",
                 RRF_RT_REG_DWORD,
                 nullptr,

@@ -2,7 +2,7 @@ using GlassSettings.Core.Text;
 
 namespace GlassSettings.Core.Registry;
 
-/// <summary>HKCU\...\BlackWindowManager\GlassInkAlphaCapsule (REG_BINARY, 100 byte).</summary>
+/// <summary>HKCU\...\GlassPlatform\GlassInkAlphaCapsule (REG_BINARY, 100 byte).</summary>
 public static class GlassInkAlphaCapsuleRegistry
 {
     public const string ValueName = "GlassInkAlphaCapsule";

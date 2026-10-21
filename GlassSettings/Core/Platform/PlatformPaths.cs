@@ -8,7 +8,7 @@ namespace GlassSettings.Core.Platform;
 /// </summary>
 public static class PlatformPaths
 {
-    private const string BwmRegKey = @"Software\StanislavKa\BlackWindowManager";
+    private const string BwmRegKey = @"Software\StanislavKa\GlassPlatform";
     private const string InstallPathValue = "InstallPath";
     private const string HardcodedOpenGlassDll =
         @"C:\Program Files (x86)\BlackWindowManager\openglass\OpenGlass.dll";
