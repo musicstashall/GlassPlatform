@@ -17,6 +17,9 @@ GlassShared/Cache/
 # .deps/parallel-hashmap — отдельный клон upstream для gtl/, ни один .vcxproj
 # на него не ссылается (сборка использует только gtl/)
 /.deps/
+# gtl и tools остаются на диске для сборки, в публикацию GitHub не входят
+/gtl/
+/tools/
 
 # ---- Документация и инструкции для ИИ-агентов ----
 /docs/
