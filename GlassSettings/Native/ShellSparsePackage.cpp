@@ -12,6 +12,7 @@
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Management.Deployment.h>
 
+#include <GlassModulePath.h>
 #include <GlassShellMenuConstants.h>
 #include <DebugLog.h>
 
@@ -197,6 +198,74 @@ namespace GlassSettings::ShellSparsePackage
             return CanonicalizeOutputDirectory(exe, cch) && wcscpy_s(out, cch, exe) == 0;
         }
 
+        [[nodiscard]] bool DirectoryHasSparseArtifacts(const wchar_t* platformDir) noexcept
+        {
+            if (!platformDir || !*platformDir)
+                return false;
+
+            wchar_t probe[MAX_PATH]{};
+            if (wcscpy_s(probe, platformDir) != 0)
+                return false;
+            if (wcscat_s(probe, _countof(probe), GlassShared::GlassShellMenu::kSparsePackageSubdir) != 0)
+                return false;
+            if (wcscat_s(probe, _countof(probe), L"AppxManifest.xml") != 0)
+                return false;
+            return ::GetFileAttributesW(probe) != INVALID_FILE_ATTRIBUTES;
+        }
+
+        [[nodiscard]] bool TryCanonicalizePlatformDir(const wchar_t* dir, wchar_t* out, size_t cch) noexcept
+        {
+            if (!dir || !*dir || !out || cch == 0)
+                return false;
+
+            wchar_t buf[MAX_PATH]{};
+            if (wcscpy_s(buf, dir) != 0)
+                return false;
+            if (!CanonicalizeOutputDirectory(buf, _countof(buf)))
+                return false;
+            if (!DirectoryHasSparseArtifacts(buf))
+                return false;
+            return wcscpy_s(out, cch, buf) == 0;
+        }
+
+        /// Каталог ExternalLocation sparse-пакета: рядом с GlassShellExt.dll (как PackageRootFolder в AppX).
+        [[nodiscard]] bool ResolveGlassPlatformOutputDirectory(wchar_t* out, size_t cch) noexcept
+        {
+            if (!out || cch == 0)
+                return false;
+            out[0] = L'\0';
+
+            const std::wstring shellExt =
+                GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(nullptr, L"GlassShellExt.dll");
+            if (!shellExt.empty())
+            {
+                const std::wstring root = GlassShared::GlassModulePath::GetInstallRootFromPath(shellExt.c_str());
+                if (!root.empty())
+                {
+                    wchar_t buf[MAX_PATH]{};
+                    if (wcscpy_s(buf, root.c_str()) == 0 && TryCanonicalizePlatformDir(buf, out, cch))
+                        return true;
+                }
+            }
+
+            wchar_t exeDir[MAX_PATH]{};
+            if (ResolveExeOutputDirectory(exeDir, _countof(exeDir)) && TryCanonicalizePlatformDir(exeDir, out, cch))
+                return true;
+
+            size_t len = wcslen(exeDir);
+            if (len > 0 && exeDir[len - 1] == L'\\')
+                exeDir[len - 1] = L'\0';
+            wchar_t* slash = wcsrchr(exeDir, L'\\');
+            if (slash)
+            {
+                *slash = L'\0';
+                if (TryCanonicalizePlatformDir(exeDir, out, cch))
+                    return true;
+            }
+
+            return false;
+        }
+
         [[nodiscard]] bool AppendSparseSubdir(wchar_t* dir, size_t cch) noexcept
         {
             return wcscat_s(dir, cch, GlassShared::GlassShellMenu::kSparsePackageSubdir) == 0;
@@ -205,7 +274,7 @@ namespace GlassSettings::ShellSparsePackage
         [[nodiscard]] bool ResolveSparseManifestPath(wchar_t* out, size_t cch) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveExeOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
                 return false;
             if (wcscat_s(dir, _countof(dir), L"AppxManifest.xml") != 0)
                 return false;
@@ -215,7 +284,7 @@ namespace GlassSettings::ShellSparsePackage
         [[nodiscard]] bool ResolveSparseUnregisterStubManifestPath(wchar_t* out, size_t cch) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveExeOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
                 return false;
             if (wcscat_s(dir, _countof(dir), GlassShared::GlassShellMenu::kSparseUnregisterStubFileName) != 0)
                 return false;
@@ -225,7 +294,7 @@ namespace GlassSettings::ShellSparsePackage
         [[nodiscard]] bool ResolveSparsePackageDirectory(wchar_t* out, size_t cch) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveExeOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
                 return false;
             return wcscpy_s(out, cch, dir) == 0;
         }
@@ -233,7 +302,7 @@ namespace GlassSettings::ShellSparsePackage
         [[nodiscard]] bool ResolveSparseMsixPath(wchar_t* out, size_t cch) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveExeOutputDirectory(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)))
                 return false;
 
             // PostBuild BuildSparsePackage.ps1 кладёт msix в корень OutDir, не в GlassShellSparse\.
@@ -345,9 +414,38 @@ namespace GlassSettings::ShellSparsePackage
             return true;
         }
 
+        [[nodiscard]] bool IsSparsePackagePresentInPackageManager(winmd::PackageManager const& pm) noexcept
+        {
+            try
+            {
+                for (auto const& pkg : pm.FindPackagesForUser(L"", GlassShared::GlassShellMenu::kSparsePackageName))
+                {
+                    (void)pkg;
+                    return true;
+                }
+            }
+            catch (...)
+            {
+            }
+
+            try
+            {
+                for (auto const& pkg : pm.FindPackages())
+                {
+                    if (pkg.Id().Name() == GlassShared::GlassShellMenu::kSparsePackageName)
+                        return true;
+                }
+            }
+            catch (...)
+            {
+            }
+
+            return false;
+        }
+
         [[nodiscard]] bool IsSparsePackagePresentAnywhere(winmd::PackageManager const& pm) noexcept
         {
-            return !CollectSparsePackageFullNames(pm).empty() || IsSparsePackagePresentInRepositoryRegistry();
+            return IsSparsePackagePresentInPackageManager(pm) || IsSparsePackagePresentInRepositoryRegistry();
         }
 
         [[nodiscard]] bool RemoveAllSparsePackages(winmd::PackageManager& pm) noexcept
@@ -367,7 +465,7 @@ namespace GlassSettings::ShellSparsePackage
             const DWORD started = ::GetTickCount();
             while (true)
             {
-                if (!IsSparsePackagePresentAnywhere(pm))
+                if (!IsSparsePackagePresentInPackageManager(pm))
                     return true;
 
                 (void)RemoveAllSparsePackages(pm);
@@ -378,7 +476,7 @@ namespace GlassSettings::ShellSparsePackage
                 ::Sleep(step);
             }
 
-            return !IsSparsePackagePresentAnywhere(pm);
+            return !IsSparsePackagePresentInPackageManager(pm);
         }
 
         void EnsureBlockedKeyExists() noexcept
@@ -645,7 +743,7 @@ namespace GlassSettings::ShellSparsePackage
         try
         {
             winmd::PackageManager pm;
-            return IsSparsePackagePresentAnywhere(pm);
+            return IsSparsePackagePresentInPackageManager(pm);
         }
         catch (...)
         {
@@ -660,7 +758,7 @@ namespace GlassSettings::ShellSparsePackage
         wchar_t outDir[MAX_PATH]{};
         wchar_t sparseDir[MAX_PATH]{};
         wchar_t manifest[MAX_PATH]{};
-        if (!ResolveExeOutputDirectory(outDir, _countof(outDir)) ||
+        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir)) ||
             !ResolveSparsePackageDirectory(sparseDir, _countof(sparseDir)) ||
             !ResolveSparseManifestPath(manifest, _countof(manifest)))
         {
@@ -823,17 +921,18 @@ namespace GlassSettings::ShellSparsePackage
     {
         wchar_t outDir[MAX_PATH]{};
         wchar_t stubManifest[MAX_PATH]{};
-        if (!ResolveExeOutputDirectory(outDir, _countof(outDir)) ||
+        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir)) ||
             !ResolveSparseUnregisterStubManifestPath(stubManifest, _countof(stubManifest)))
         {
             DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] unregister: пути не найдены");
+            SetLastSparsePackageError(SparsePackageError::ArtifactsMissing);
             return false;
         }
 
-        if (GetFileAttributesW(stubManifest) == INVALID_FILE_ATTRIBUTES)
+        const bool hasStubManifest = ::GetFileAttributesW(stubManifest) != INVALID_FILE_ATTRIBUTES;
+        if (!hasStubManifest)
         {
-            DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] unregister: нет stub manifest");
-            return false;
+            DebugLog(DBG_WARNING, L"[GlassSettings][ShellSparse] unregister: нет stub manifest, только RemovePackage");
         }
 
         WinRtApartmentScope apartment;
@@ -858,7 +957,7 @@ namespace GlassSettings::ShellSparsePackage
 
             const winrtf::Uri outDirUri = UriFromPath(outDir);
             const winrtf::Uri stubUri = UriFromPath(stubManifest);
-            if (outDirUri && stubUri)
+            if (hasStubManifest && outDirUri && stubUri)
             {
                 winmd::RegisterPackageOptions stubOptions;
                 stubOptions.ExternalLocationUri(outDirUri);
@@ -875,12 +974,16 @@ namespace GlassSettings::ShellSparsePackage
                 }
             }
 
-            (void)RemoveAllSparsePackages(pm);
-            SetExplorerCommandsBlocked(false);
-
-            if (!FindPackageFullNames(pm).empty())
+            if (!EnsureSparsePackagesRemoved(pm, 15000))
             {
                 DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] unregister: пакет всё ещё установлен");
+                return false;
+            }
+            SetExplorerCommandsBlocked(false);
+
+            if (IsSparsePackagePresentInPackageManager(pm))
+            {
+                DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] unregister: PackageManager всё ещё видит пакет");
                 return false;
             }
 

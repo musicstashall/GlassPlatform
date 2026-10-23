@@ -184,19 +184,6 @@ namespace
         static std::once_flag once;
         std::call_once(once, []() noexcept
         {
-            static constexpr wchar_t kBwmRoot[] = L"Software\\GlassProject\\BlackWindowManager";
-            HKEY hBwm = nullptr;
-            if (::RegOpenKeyExW(HKEY_CURRENT_USER, kBwmRoot, 0, KEY_SET_VALUE, &hBwm) == ERROR_SUCCESS)
-            {
-                HKEY hShellExt = nullptr;
-                if (::RegOpenKeyExW(hBwm, L"ShellExt", 0, KEY_SET_VALUE, &hShellExt) == ERROR_SUCCESS)
-                {
-                    (void)::RegDeleteValueW(hShellExt, L"SparseKnownRegistered");
-                    ::RegCloseKey(hShellExt);
-                }
-                ::RegCloseKey(hBwm);
-            }
-
             // Устаревший hive placement (Win32-конфигуратор); удаляем флаг sparse после миграции.
             static constexpr wchar_t kLegacyPlacementHive[] = L"Software\\GlassProject\\GlassConfig";
             HKEY hKey = nullptr;
@@ -359,11 +346,12 @@ namespace
             {
                 if (!GlassSettings::ShellSparsePackage::UnregisterSparsePackageQuiet())
                 {
-                    if (GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser())
-                    {
+                    SetLastOpMessageFromSparseError();
+                    if (static_cast<OpMessageId>(g_lastOpMessageId.load(std::memory_order_acquire)) ==
+                        OpMessageId::None)
                         SetLastOpMessage(OpMessageId::FailedToUnregister);
+                    if (GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser())
                         return false;
-                    }
                 }
             }
 
@@ -390,11 +378,12 @@ namespace
         {
             if (!GlassSettings::ShellSparsePackage::UnregisterSparsePackageQuiet())
             {
-                if (GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser())
-                {
+                SetLastOpMessageFromSparseError();
+                if (static_cast<OpMessageId>(g_lastOpMessageId.load(std::memory_order_acquire)) ==
+                    OpMessageId::None)
                     SetLastOpMessage(OpMessageId::FailedToUnregister);
+                if (GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser())
                     return false;
-                }
             }
         }
 
