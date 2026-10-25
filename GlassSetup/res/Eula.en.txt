@@ -1,0 +1,59 @@
+LICENSE AGREEMENT
+Glass Platform
+
+Read this page before you continue. Next stays disabled until you check "I accept the terms of this agreement". The English GNU General Public License, version 3, reproduced below, is the only legally controlling license of the Glass source code.
+
+
+1. What this program is
+
+Glass Platform is experimental software for Windows 10 and Windows 11. It changes the desktop: glass on windows, the taskbar, the Start menu, the notification center and the context menu.
+
+Glass is built on the example of TranslucentFlyouts
+(https://github.com/ALTaleX531/TranslucentFlyouts).
+TranslucentFlyouts was the inspiration. That project is licensed under the GNU Lesser General Public License, version 3, and the GNU General Public License, version 3. Glass is a separate program, not a copy of TranslucentFlyouts, and this repository does not distribute TranslucentFlyouts.
+
+The installer may offer to install OpenGlass
+(https://github.com/ALTaleX531/OpenGlass)
+inside the Glass directory. OpenGlass is a separate program by its own authors, licensed under the GNU General Public License, version 3. Copyright in OpenGlass stays with its authors. Installing OpenGlass means you also accept that license.
+
+
+2. License of the Glass source code
+
+The Glass Platform source code is distributed under the terms of the GNU General Public License, version 3 (GPL-3.0). The full English text is the file LICENSE in this repository and is reproduced below.
+
+You may run, study, modify and redistribute the program. If you convey the program or a modified version, you must keep this license, keep the copyright notices, and give recipients the source code or a written offer to obtain it, as GPL-3.0 requires.
+
+GPL section 7(a) permits additional terms that disclaim warranty differently. The risk, performance and warranty terms below are those additional terms. They do not remove any permission the GPL grants.
+
+
+3. Risks
+
+The program injects into Windows graphical processes and changes desktop composition (windows, File Explorer, the taskbar and menus).
+
+The system may become unstable. That includes:
+
+- crashes or restarts of File Explorer and the Desktop Window Manager (DWM);
+- visual artifacts, blank windows, or a hung shell;
+- conflicts with a Windows update, antivirus software, other theming tools, and game anti-cheat;
+- in rare cases, loss of unsaved data in other programs if the Windows shell terminates abnormally.
+
+This is not a defect the author is obliged to fix. Do not install the program on a machine where downtime or a crash is unacceptable.
+
+
+4. Performance
+
+Blur, glass and the extra composition work use CPU and GPU time. Expect a partial loss of performance: the interface and games may run slower, power draw may increase, and battery life may get shorter.
+
+
+5. Disclaimer of warranty
+
+THE PROGRAM IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING ANY WARRANTY OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+
+THE AUTHORS AND COPYRIGHT HOLDERS SHALL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY OR CONSEQUENTIAL DAMAGES, INCLUDING LOSS OF DATA, DOWNTIME, LOSS OF USE OR DAMAGE TO THE SYSTEM, EVEN IF THEY HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+You assume the entire risk as to the quality, operation and consequences of installing the program. If you do not agree, close the installer and do not install it.
+
+
+6. Acceptance
+
+Checking "I accept the terms of this agreement" and continuing means that you have read this agreement, that you understand the risks, the partial loss of performance and the disclaimer of warranty, and that you accept GPL-3.0 for Glass and, if you install OpenGlass, GPL-3.0 for OpenGlass.

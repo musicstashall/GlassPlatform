@@ -143,37 +143,6 @@ namespace
         RemoveLegacyContextMenuHandlerOnly();
     }
 
-    [[nodiscard]] bool FindSparsePackageByPrefixInRepoKey(const wchar_t* subkey) noexcept
-    {
-        if (!subkey || !*subkey)
-            return false;
-
-        HKEY hKey = nullptr;
-        if (::RegOpenKeyExW(HKEY_CURRENT_USER, subkey, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
-            return false;
-
-        const std::wstring prefix = std::wstring(GlassShared::GlassShellMenu::kSparsePackageName) + L"_";
-        bool found = false;
-        for (DWORD index = 0;; ++index)
-        {
-            wchar_t name[256]{};
-            DWORD cch = _countof(name);
-            const LONG e = ::RegEnumKeyExW(hKey, index, name, &cch, nullptr, nullptr, nullptr, nullptr);
-            if (e == ERROR_NO_MORE_ITEMS)
-                break;
-            if (e != ERROR_SUCCESS)
-                continue;
-            if (_wcsnicmp(name, prefix.c_str(), prefix.size()) == 0)
-            {
-                found = true;
-                break;
-            }
-        }
-
-        ::RegCloseKey(hKey);
-        return found;
-    }
-
     [[nodiscard]] bool IsWindows11OrGreater() noexcept
     {
         return Shared::SystemHelper::g_buildNumber >= 22000;
@@ -198,18 +167,7 @@ namespace
     [[nodiscard]] bool IsSparseShellPackageRegistered() noexcept
     {
         CleanupLegacySparseKnownFlags();
-
-        static constexpr wchar_t kPackagesKey[] =
-            L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\Repository\\Packages";
-        static constexpr wchar_t kFamiliesKey[] =
-            L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\Repository\\Families";
-
-        if (FindSparsePackageByPrefixInRepoKey(kPackagesKey))
-            return true;
-        if (FindSparsePackageByPrefixInRepoKey(kFamiliesKey))
-            return true;
-
-        return GlassSettings::ShellSparsePackage::IsSparsePackageRegisteredForCurrentUser();
+        return GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser();
     }
 
     [[nodiscard]] bool IsWin11SparseRegistrationHealthy(bool sparsePm) noexcept

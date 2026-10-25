@@ -229,6 +229,15 @@
           IgnoreExitCode="true" />
   </Target>
 
+  <!-- Release: publish в Build\$(Platform)\Release\GlassSettings для MSI (после обычного Build). -->
+  <Target Name="GlassSettingsPublishForMsi"
+          AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release' and '$(DesignTimeBuild)' != 'true' and '$(GlassSettingsSkipPublishForMsi)' != 'true' and Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">
+    <MSBuild Projects="$(MSBuildProjectFile)"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);GlassSettingsSkipPublishForMsi=true" />
+  </Target>
+
   <Target Name="GenerateUiLanguageCatalog"
           Inputs="$(MSBuildProjectDirectory)\Strings\*\Resources.resw"
           Outputs="$(UiLanguageCatalogGeneratedFile)">

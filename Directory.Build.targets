@@ -36,18 +36,26 @@
   </Target>
 
   <Target Name="GlassWriteVersionHeader" BeforeTargets="BeforeBuildGenerateSources" Condition="'$(IsGlassNativeBinary)' == 'true' and '$(_GlassBuildNumberIncremented)' != 'true'">
+    <PropertyGroup>
+      <GlassProductVersion Condition="'$(GlassProductVersion)' == ''">2.0.0.0</GlassProductVersion>
+      <GlassProductVersionBase3 Condition="'$(GlassProductVersionBase3)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(GlassProductVersion)', '^\d+\.\d+\.\d+').Value)</GlassProductVersionBase3>
+      <GlassProductVersionComma Condition="'$(GlassProductVersionComma)' == ''">$(GlassProductVersion.Replace('.', ','))</GlassProductVersionComma>
+      <_GlassVerModuleName Condition="'$(GlassVerModule)' != ''">$(GlassVerModule)</_GlassVerModuleName>
+      <_GlassVerModuleName Condition="'$(_GlassVerModuleName)' == ''">$(MSBuildProjectName)</_GlassVerModuleName>
+    </PropertyGroup>
     <ReadLinesFromFile File="$(GlassBuildNumberPath)" Condition="Exists('$(GlassBuildNumberPath)')">
       <Output TaskParameter="Lines" ItemName="_GlassBuildLine" />
     </ReadLinesFromFile>
     <PropertyGroup>
       <_GlassBuildCurrent Condition="'@(_GlassBuildLine)' != ''">@(_GlassBuildLine)</_GlassBuildCurrent>
       <_GlassBuildCurrent Condition="'@(_GlassBuildLine)' == ''">0</_GlassBuildCurrent>
-      <GlassBuildNumberNext>$([MSBuild]::Add($(_GlassBuildCurrent), 1))</GlassBuildNumberNext>
+      <GlassBuildNumberNext Condition="'$(GlassSkipBuildNumberWrite)' == 'true'">$(_GlassBuildCurrent)</GlassBuildNumberNext>
+      <GlassBuildNumberNext Condition="'$(GlassSkipBuildNumberWrite)' != 'true'">$([MSBuild]::Add($(_GlassBuildCurrent), 1))</GlassBuildNumberNext>
       <GlassFileVersionDot>$(GlassProductVersionBase3).$(GlassBuildNumberNext)</GlassFileVersionDot>
       <GlassFileVersionComma>$(GlassFileVersionDot.Replace('.', ','))</GlassFileVersionComma>
-      <_GlassVersionHeaderContent>#pragma once;#define GLASS_VER_COMMA $(GlassFileVersionComma);#define GLASS_VER_DOT $(GlassFileVersionDot);#define GLASS_VER_PRODUCT_COMMA $(GlassProductVersionComma);#define GLASS_VER_PRODUCT_DOT $(GlassProductVersion);#define GLASS_VER_MODULE $(MSBuildProjectName);#define GLASS_VER_EXT $(GlassModuleBinaryExt);#define GLASS_VER_FILETYPE $(GlassModuleFileType)</_GlassVersionHeaderContent>
+      <_GlassVersionHeaderContent>#pragma once;#define GLASS_VER_COMMA $(GlassFileVersionComma);#define GLASS_VER_DOT $(GlassFileVersionDot);#define GLASS_VER_PRODUCT_COMMA $(GlassProductVersionComma);#define GLASS_VER_PRODUCT_DOT $(GlassProductVersion);#define GLASS_VER_MODULE $(_GlassVerModuleName);#define GLASS_VER_EXT $(GlassModuleBinaryExt);#define GLASS_VER_FILETYPE $(GlassModuleFileType)</_GlassVersionHeaderContent>
     </PropertyGroup>
-    <WriteLinesToFile File="$(GlassBuildNumberPath)" Lines="$(GlassBuildNumberNext)" Overwrite="true" />
+    <WriteLinesToFile File="$(GlassBuildNumberPath)" Lines="$(GlassBuildNumberNext)" Overwrite="true" Condition="'$(GlassSkipBuildNumberWrite)' != 'true'" />
     <WriteLinesToFile File="$(GlassVersionHeaderPath)" Lines="$(_GlassVersionHeaderContent)" Overwrite="true" />
     <PropertyGroup>
       <_GlassBuildNumberIncremented>true</_GlassBuildNumberIncremented>

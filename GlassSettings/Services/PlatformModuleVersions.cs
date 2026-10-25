@@ -91,6 +91,23 @@ public static class PlatformModuleVersions
         return GlassSettingsResources.Get("Modules_Unavailable");
     }
 
+    /// <summary>Наибольший FileVersion среди найденных модулей платформы.</summary>
+    public static string GetHighestFileVersion()
+    {
+        string? best = null;
+        foreach (var module in GetAllDetailed())
+        {
+            if (IsPlaceholder(module.FileVersion))
+                continue;
+            if (best is null || GlassReleaseUpdateService.IsInstalledOlderThan(best, module.FileVersion))
+                best = module.FileVersion;
+        }
+
+        return best ?? GlassSettingsResources.Get("Modules_Unavailable");
+    }
+
+    public static bool IsPlaceholderVersion(string value) => IsPlaceholder(value);
+
     private static string ReadFileVersion(string path)
     {
         if (!File.Exists(path))

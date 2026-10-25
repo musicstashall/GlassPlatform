@@ -1904,9 +1904,14 @@ public sealed partial class MainWindow : Window
 
         if (uMsg == WmGlassSettingsActivate)
         {
-            _ = DispatcherQueue.TryEnqueue(BringMainWindowToForeground);
+            if (!_closeInProgress)
+                _ = DispatcherQueue.TryEnqueue(BringMainWindowToForeground);
             return IntPtr.Zero;
         }
+
+        // После BeginAppCloseSequence subclass снят; при Stop Debugging окно может быть мёртвым.
+        if (_closeInProgress || !_closeSubclassInstalled)
+            return IntPtr.Zero;
 
         return Win32WindowSubclass.CallDef(hWnd, uMsg, wParam, lParam);
     }
@@ -1951,6 +1956,7 @@ public sealed partial class MainWindow : Window
             return;
 
         _closeInProgress = true;
+        RemoveCloseSubclass();
         SettingsSession.Current.BeginShutdown();
         NoticeViewportMirrorService.HideMirrorImmediate();
         _ = RunAppCloseSequenceAsync();
@@ -2055,21 +2061,23 @@ public sealed partial class MainWindow : Window
         Environment.Exit(0);
     }
 
-    private void UnhookWindowCloseInterception()
+    private void RemoveCloseSubclass()
     {
-        AppWindow.Closing -= OnAppWindowClosing;
-
         if (!_closeSubclassInstalled)
             return;
 
         var hwnd = WindowNative.GetWindowHandle(this);
         if (hwnd != IntPtr.Zero && _closeSubclassFn != IntPtr.Zero)
-        {
             Win32WindowSubclass.Remove(hwnd, _closeSubclassFn, CloseSubclassId);
-            _closeSubclassFn = IntPtr.Zero;
-        }
 
+        _closeSubclassFn = IntPtr.Zero;
         _closeSubclassInstalled = false;
+    }
+
+    private void UnhookWindowCloseInterception()
+    {
+        AppWindow.Closing -= OnAppWindowClosing;
+        RemoveCloseSubclass();
     }
 
     /// <summary>Отпускает тяжёлое XAML-дерево до teardown процесса.</summary>

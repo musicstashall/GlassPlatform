@@ -407,7 +407,7 @@ namespace WndCompat
     // GlassCore зовёт из paint-MISS top-level окон. Повторяет gate и маршрутизацию
     // CREATE-Root (Full only; shell-проводник — в ExplorerRoot). Идемпотентно:
     // повторы отсекаются Root_IsAttached / TryRegister внутри Dispatch*.
-    void RequestRootAttachForHwnd(HWND hWnd) noexcept
+    void WINAPI RequestRootAttachForHwnd(HWND hWnd) noexcept
     {
         static std::mutex s_catchupReqMutex;
         static std::unordered_map<HWND, ULONGLONG> s_catchupLastReq;

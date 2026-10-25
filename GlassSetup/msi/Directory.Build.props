@@ -1,0 +1,35 @@
+<Project>
+  <!-- WiX не подхватывает корневой Directory.Build.props — задаём SolutionRoot здесь (GlassSetup\msi → корень репо). -->
+  <PropertyGroup>
+    <SolutionRoot Condition="'$(SolutionRoot)' == ''">$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..'))))</SolutionRoot>
+  </PropertyGroup>
+
+  <!-- Одна MSI-архитектура на .wixproj; без явных ProjectConfiguration VS/HeatWave показывает x64 и x86. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x86'">
+    <GlassWixLockedPlatform>x86</GlassWixLockedPlatform>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x64' or '$(MSBuildProjectName)' == 'OpenGlass-x64'">
+    <GlassWixLockedPlatform>x64</GlassWixLockedPlatform>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GlassWixLockedPlatform)' != ''">
+    <Platforms>$(GlassWixLockedPlatform)</Platforms>
+    <InstallerPlatform>$(GlassWixLockedPlatform)</InstallerPlatform>
+    <Platform Condition="'$(Platform)' == '' or '$(Platform)' == 'Any CPU'">$(GlassWixLockedPlatform)</Platform>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GlassWixLockedPlatform)' != '' and '$(Platform)' != '$(GlassWixLockedPlatform)'">
+    <BuildProject>false</BuildProject>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(GlassWixLockedPlatform)' != ''">
+    <ProjectConfiguration Include="Debug|$(GlassWixLockedPlatform)">
+      <Configuration>Debug</Configuration>
+      <Platform>$(GlassWixLockedPlatform)</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|$(GlassWixLockedPlatform)">
+      <Configuration>Release</Configuration>
+      <Platform>$(GlassWixLockedPlatform)</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+</Project>

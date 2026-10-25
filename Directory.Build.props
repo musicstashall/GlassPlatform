@@ -8,6 +8,8 @@
     <GlassProductVersion>2.0.0.0</GlassProductVersion>
     <GlassProductName>Glass Platform</GlassProductName>
     <GlassCompanyName>Glass</GlassCompanyName>
+    <!-- Корень репо для MSI staging, Build\, GlassSettings и т.д. (не только .csproj). -->
+    <SolutionRoot Condition="'$(SolutionRoot)' == ''">$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))))</SolutionRoot>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.csproj'">
@@ -19,7 +21,6 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'GlassSettings'">
-    <SolutionRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))</SolutionRoot>
     <GlassSettingsUnpackagedDir>$(SolutionRoot)Build\$(Platform)\$(Configuration)\GlassSettingsUnpackaged\</GlassSettingsUnpackagedDir>
     <BaseOutputPath>$(SolutionRoot)Build\</BaseOutputPath>
     <OutputPath>$(GlassSettingsUnpackagedDir)</OutputPath>

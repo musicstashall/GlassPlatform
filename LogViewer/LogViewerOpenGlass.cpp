@@ -87,27 +87,11 @@ namespace
 
         const std::wstring base = NormalizeDir(std::wstring(installDir));
 
-        // BWM установки встречались как минимум в двух вариантах:
-        //  - <InstallPath>\\OpenGlass\\OpenGlass.dll
-        //  - <InstallPath>\\openglass\\OpenGlass.dll
-        const std::wstring candidates[] = {
-            base + L"\\openglass\\OpenGlass.dll",
-            base + L"\\OpenGlass\\OpenGlass.dll",
-            base + L"\\OpenGlass.dll",
-        };
-
-        for (const std::wstring& c : candidates)
-        {
-            if (FileExists(c))
-                return c;
-        }
-        return {};
+        const std::wstring candidate = base + L"\\OpenGlass\\OpenGlass.dll";
+        return FileExists(candidate) ? candidate : std::wstring{};
     }
 
-    // Временно: при отсутствии InstallPath в реестре (см. PathOpenGlassDllFromBwmInstall).
-    constexpr wchar_t kHardcodedOpenGlassDll[] =
-        L"C:\\Program Files (x86)\\BlackWindowManager\\openglass\\OpenGlass.dll";
-
+    // Каталог LogViewer.exe — корень сборки, OpenGlass лежит в подкаталоге OpenGlass.
     [[nodiscard]] std::wstring PathOpenGlassDllNextToExe() noexcept
     {
         wchar_t buf[MAX_PATH]{};
@@ -119,7 +103,7 @@ namespace
             p.resize(sl + 1);
         else
             p.clear();
-        p += L"OpenGlass.dll";
+        p += L"OpenGlass\\OpenGlass.dll";
         return p;
     }
 
@@ -133,18 +117,14 @@ namespace
                 return fromInstall;
         }
 
-        // Исторический путь (через InstallPath + \\OpenGlass\\OpenGlass.dll), но теперь с проверкой существования.
         std::wstring fromReg = PathOpenGlassDllFromBwmInstall();
         if (FileExists(fromReg))
             return fromReg;
 
-        // Временно: без InstallPath в реестре — типовая установка x86; если файла нет — рядом с LogViewer.
-        if (FileExists(std::wstring(kHardcodedOpenGlassDll)))
-            return std::wstring(kHardcodedOpenGlassDll);
         std::wstring nextToExe = PathOpenGlassDllNextToExe();
         if (FileExists(nextToExe))
             return nextToExe;
-        return std::wstring(kHardcodedOpenGlassDll);
+        return {};
     }
 
     [[nodiscard]] std::wstring ParentDirOfPath(const std::wstring& p) noexcept

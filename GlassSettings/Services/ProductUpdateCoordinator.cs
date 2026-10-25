@@ -80,14 +80,13 @@ public static class ProductUpdateCoordinator
         MigrateLegacyDismissedTag();
 
         ReconcileOpenGlassPendingWithInstalled();
-
-
+        ReconcileGlassPendingWithInstalled();
 
         if (OpenGlassReleaseUpdateService.ShouldRefreshNetworkCheck())
-
             await CheckNetworkForOpenGlassAsync().ConfigureAwait(false);
 
-
+        if (GlassReleaseUpdateService.ShouldRefreshNetworkCheck())
+            await CheckNetworkForGlassAsync().ConfigureAwait(false);
 
         NotifyChanged();
 
@@ -199,7 +198,41 @@ public static class ProductUpdateCoordinator
 
     }
 
+    private static void ReconcileGlassPendingWithInstalled()
+    {
+        if (!GlassSettingsRegistry.HasGlassUpdatePending())
+            return;
 
+        var installed = PlatformModuleVersions.GetHighestFileVersion();
+        if (string.IsNullOrWhiteSpace(installed) || PlatformModuleVersions.IsPlaceholderVersion(installed))
+            return;
+
+        var pendingVersion = GlassSettingsRegistry.ReadGlassUpdatePendingVersion();
+        if (string.IsNullOrWhiteSpace(pendingVersion))
+            return;
+
+        if (GlassReleaseUpdateService.IsInstalledAtLeast(installed, pendingVersion))
+            GlassSettingsRegistry.ClearGlassUpdatePending();
+    }
+
+    private static async Task CheckNetworkForGlassAsync()
+    {
+        var installed = PlatformModuleVersions.GetHighestFileVersion();
+        if (string.IsNullOrWhiteSpace(installed) || PlatformModuleVersions.IsPlaceholderVersion(installed))
+            return;
+
+        var latest = await GlassReleaseUpdateService.TryFetchLatestAsync().ConfigureAwait(false);
+        if (latest is null)
+            return;
+
+        if (!GlassReleaseUpdateService.IsInstalledOlderThan(installed, latest.Version))
+            return;
+
+        if (string.IsNullOrWhiteSpace(latest.HtmlUrl))
+            return;
+
+        GlassSettingsRegistry.WriteGlassUpdatePending(latest.Version, latest.HtmlUrl);
+    }
 
     private static async Task CheckNetworkForOpenGlassAsync()
 
@@ -242,6 +275,46 @@ public static class ProductUpdateCoordinator
     }
 
 
+
+    public static bool ShouldShowGlassNotice =>
+        HasPendingGlassUpdate() && !GlassSettingsRegistry.IsGlassUpdateNoticeDismissedForPending();
+
+    public static bool HasPendingGlassUpdate() => GlassSettingsRegistry.HasGlassUpdatePending();
+
+    public static GlassReleaseInfo? GetPendingGlass() =>
+        GlassReleaseUpdateService.TryReadPendingRelease();
+
+    public static void DismissGlassNotice()
+    {
+        var pending = GlassSettingsRegistry.ReadGlassUpdatePendingVersion();
+        if (!string.IsNullOrWhiteSpace(pending))
+            GlassSettingsRegistry.WriteGlassUpdateNoticeDismissedVersion(pending);
+    }
+
+    public static void DismissVisibleUpdateNotice()
+    {
+        if (ShouldShowOpenGlassNotice)
+            DismissOpenGlassNotice();
+        else if (ShouldShowGlassNotice)
+            DismissGlassNotice();
+    }
+
+    public static async Task OpenPendingGlassDownloadAsync()
+    {
+        var url = GlassSettingsRegistry.ReadGlassUpdatePendingUrl();
+        if (string.IsNullOrWhiteSpace(url))
+            return;
+
+        await Launcher.LaunchUriAsync(new Uri(url));
+    }
+
+    public static async Task OpenVisibleUpdateDownloadAsync()
+    {
+        if (ShouldShowOpenGlassNotice)
+            await OpenPendingOpenGlassDownloadAsync().ConfigureAwait(false);
+        else if (ShouldShowGlassNotice)
+            await OpenPendingGlassDownloadAsync().ConfigureAwait(false);
+    }
 
     private static void NotifyChanged() => PendingUpdatesChanged?.Invoke(null, EventArgs.Empty);
 

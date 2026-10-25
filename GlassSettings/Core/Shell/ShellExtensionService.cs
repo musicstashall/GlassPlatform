@@ -19,8 +19,16 @@ public static class ShellExtensionService
         }
     }
 
+    public static bool IsBundledShellExtensionPresent() =>
+        ShellExtensionAvailability.IsBundledShellExtensionPresent();
+
     public static bool CanToggleShellExtension =>
-        GlassAutorunTaskExists() || IsBundledDllRegistered();
+        IsBundledDllRegistered()
+        || IsBundledShellExtensionPresent()
+        || GlassAutorunTaskExists();
+
+    public static bool CanRegisterShellExtension(bool autorunTaskExists) =>
+        ShellExtensionAvailability.CanRegisterShellExtension(autorunTaskExists);
 
     public static bool IsShellExtensionOperationInProgress()
     {
@@ -45,7 +53,7 @@ public static class ShellExtensionService
         if (!register && !currentlyRegistered)
             return true;
 
-        if (register && !taskExists)
+        if (register && !CanRegisterShellExtension(taskExists))
             return false;
 
         if (!NativeHostInterop.BeginShellExtensionChange(register))

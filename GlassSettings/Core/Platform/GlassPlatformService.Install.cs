@@ -22,9 +22,19 @@ public static partial class GlassPlatformService
 
         var rundll = GlassModulePath.GetRundll32Path(arch);
         var taskName = GlassPlatformNames.GlassAutorunTaskNameFor(arch);
+        // /TR — один аргумент; ArgumentList не требует экранирования пробелов в Program Files.
         var tr = $"\"{rundll}\" \"{dll}\",Main /start";
-        var args = $"/Create /TN \"{taskName}\" /TR \"{tr}\" /SC ONLOGON /RL HIGHEST /F";
-        var (code, _) = RunSchtasks(args);
+        var (code, _) = RunSchtasks(
+            "/Create",
+            "/TN",
+            taskName,
+            "/TR",
+            tr,
+            "/SC",
+            "ONLOGON",
+            "/RL",
+            "HIGHEST",
+            "/F");
         if (code != 0 || !GlassAutorunTaskExists(arch))
             return false;
 
@@ -58,7 +68,7 @@ public static partial class GlassPlatformService
     {
         NativeHostInterop.SignalPlatformStop(arch);
         NativeHostInterop.WaitForPlatformStopped(arch, DefaultPlatformShutdownWaitMs);
-        _ = RunSchtasks($"/End /TN \"{GlassPlatformNames.GlassAutorunTaskNameFor(arch)}\"");
+        _ = RunSchtasks("/End", "/TN", GlassPlatformNames.GlassAutorunTaskNameFor(arch));
         return RemoveGlassAutorunTask(arch);
     }
 

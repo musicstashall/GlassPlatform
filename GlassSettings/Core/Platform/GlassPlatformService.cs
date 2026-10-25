@@ -99,21 +99,28 @@ public static partial class GlassPlatformService
 
     public static bool RemoveGlassAutorunTask(GlassPlatformArch arch)
     {
-        var (code, _) = RunSchtasks($"/Delete /TN \"{GlassPlatformNames.GlassAutorunTaskNameFor(arch)}\" /F");
+        var (code, _) = RunSchtasks(
+            "/Delete",
+            "/TN",
+            GlassPlatformNames.GlassAutorunTaskNameFor(arch),
+            "/F");
         return code == 0;
     }
 
-    private static (int exitCode, string output) RunSchtasks(string args)
+    internal static (int exitCode, string output) RunSchtasks(params string[] args)
     {
         var sys = Environment.GetFolderPath(Environment.SpecialFolder.System);
         var exe = Path.Combine(sys, "schtasks.exe");
-        var psi = new ProcessStartInfo(exe, args)
+        var psi = new ProcessStartInfo(exe)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        foreach (var arg in args)
+            psi.ArgumentList.Add(arg);
+
         using var p = Process.Start(psi);
         if (p is null) return (-1, "");
         var o = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();

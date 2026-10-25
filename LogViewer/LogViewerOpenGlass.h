@@ -1,7 +1,7 @@
 #pragma once
 
-// Запуск/останов OpenGlass: HKCU|HKLM\Software\StanislavKa\GlassPlatform\InstallPath + \OpenGlass\OpenGlass.dll;
-// иначе fallback — OpenGlass.dll рядом с LogViewer.exe. Rundll32 runas.
+// Запуск/останов OpenGlass: HKCU|HKLM\Software\StanislavKa\GlassPlatform\InstallPath\OpenGlass\OpenGlass.dll;
+// иначе каталог LogViewer.exe\OpenGlass\OpenGlass.dll. Rundll32 runas.
 namespace LogViewer::OpenGlass
 {
     [[nodiscard]] bool TryLaunchOpenGlassStartup() noexcept;

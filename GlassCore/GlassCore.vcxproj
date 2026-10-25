@@ -100,7 +100,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>CorePch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(ProjectDir)include;$(SolutionDir)GlassShared\include;$(SolutionDir)GlassShared\include\Providers;$(SolutionDir)GlassShared\include\Helpers;$(SolutionDir)gtl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(SolutionDir)GlassShared;$(SolutionDir)GlassShared\include;$(SolutionDir)GlassShared\include\Providers;$(SolutionDir)GlassShared\include\Helpers;$(SolutionDir)gtl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>

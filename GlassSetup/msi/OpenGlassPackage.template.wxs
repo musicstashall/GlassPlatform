@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="OpenGlass"
+           Manufacturer="Glass"
+           Version="$(var.GlassMsiVersion)"
+           UpgradeCode="$(var.GlassUpgradeCode)"
+           ProductCode="$(var.GlassProductCode)"
+           Scope="perMachine"
+           Compressed="yes">
+    <MajorUpgrade AllowDowngrades="no" AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Установлена более новая версия OpenGlass." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="GlassProductIcon" SourceFile="$(var.GlassSetupIcon)" />
+    <Property Id="ARPPRODUCTICON" Value="GlassProductIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/ALTaleX531/OpenGlass" Secure="yes" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/ALTaleX531/OpenGlass" Secure="yes" />
+
+    <Feature Id="MainFeature" Title="OpenGlass" Level="1">
+      <ComponentGroupRef Id="GlassPayloadFiles" />
+      <ComponentRef Id="OpenGlassInstallPathRegistry" />
+      <ComponentRef Id="GlassUninstallExe" />
+      <ComponentRef Id="GlassUninstallDat" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLDIR" Name="OpenGlass" />
+    </StandardDirectory>
+
+    <Component Id="OpenGlassInstallPathRegistry" Directory="INSTALLDIR" Guid="*">
+      <RegistryKey Root="HKCU" Key="Software\StanislavKa\OpenGlass">
+        <RegistryValue Name="InstallPath" Type="string" Value="[INSTALLDIR]" KeyPath="yes" />
+      </RegistryKey>
+    </Component>
+
+    <Component Id="GlassUninstallExe" Directory="INSTALLDIR" Guid="*">
+      <File Id="GlassUninsExe" Source="$(var.GlassUninsExe)" Name="unins000.exe" KeyPath="yes" />
+    </Component>
+    <Component Id="GlassUninstallDat" Directory="INSTALLDIR" Guid="*">
+      <File Id="GlassUninsDat" Source="$(var.GlassPayloadStage)\unins000.dat" Name="unins000.dat" KeyPath="yes" />
+    </Component>
+  </Package>
+</Wix>

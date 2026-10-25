@@ -88,9 +88,9 @@ public sealed partial class SystemPage : Page
         }
 
         PageShell.PageNoticeStack.ActionNotice.ActionRequested += async (_, _) =>
-            await ProductUpdateCoordinator.OpenPendingOpenGlassDownloadAsync();
+            await ProductUpdateCoordinator.OpenVisibleUpdateDownloadAsync();
         PageShell.PageNoticeStack.ActionNotice.DismissRequested += (_, _) =>
-            ProductUpdateCoordinator.DismissOpenGlassNotice();
+            ProductUpdateCoordinator.DismissVisibleUpdateNotice();
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -128,6 +128,7 @@ public sealed partial class SystemPage : Page
         ApplyOpenGlassUiVisibility();
         RefreshShellRow();
         RefreshOpenGlassRowSubtitle();
+        RefreshGlassRowSubtitle();
         RefreshUpdateNotice();
         _ogNav?.RefreshHeaderLayout();
         _glassNav?.RefreshHeaderLayout();
@@ -261,32 +262,60 @@ public sealed partial class SystemPage : Page
             hasUpdate ? () => _ = ProductUpdateCoordinator.OpenPendingOpenGlassDownloadAsync() : null);
     }
 
+    private void RefreshGlassRowSubtitle()
+    {
+        var pending = ProductUpdateCoordinator.GetPendingGlass();
+        var hasUpdate = pending is not null;
+        var line = hasUpdate
+            ? string.Format(GlassSettingsResources.Get("System_OpenGlassUpdateSpoilerFormat"), pending!.Version)
+            : null;
+        Action? click = hasUpdate
+            ? () => _ = ProductUpdateCoordinator.OpenPendingGlassDownloadAsync()
+            : null;
+
+        _glassNav?.SetUpdateLine(hasUpdate, line, click);
+        _glassNavX86?.SetUpdateLine(hasUpdate, line, click);
+        _glassNavX64?.SetUpdateLine(hasUpdate, line, click);
+    }
+
     private async void RefreshUpdateNotice()
     {
-        if (!ProductUpdateCoordinator.ShouldShowOpenGlassNotice)
+        if (ProductUpdateCoordinator.ShouldShowOpenGlassNotice
+            && ProductUpdateCoordinator.GetPendingOpenGlass() is { } pendingOg)
         {
-            await PageShell.PageNoticeStack.CloseActionNoticeAsync();
+            if (!OpenGlassVersionService.TryGetInstalledVersion(out var installedOg, out _))
+                installedOg = "—";
+
+            await PageShell.PageNoticeStack.ShowActionNoticeAsync(
+                SettingsNoticeSeverity.Warning,
+                string.Format(
+                    GlassSettingsResources.Get("System_OpenGlassUpdateTitle"),
+                    pendingOg.Version,
+                    installedOg),
+                GlassSettingsResources.Get("System_OpenGlassUpdateAction"),
+                animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
             return;
         }
 
-        var pending = ProductUpdateCoordinator.GetPendingOpenGlass();
-        if (pending is null)
+        if (ProductUpdateCoordinator.ShouldShowGlassNotice
+            && ProductUpdateCoordinator.GetPendingGlass() is { } pendingGlass)
         {
-            await PageShell.PageNoticeStack.CloseActionNoticeAsync();
+            var installedGlass = PlatformModuleVersions.GetHighestFileVersion();
+            if (PlatformModuleVersions.IsPlaceholderVersion(installedGlass))
+                installedGlass = "—";
+
+            await PageShell.PageNoticeStack.ShowActionNoticeAsync(
+                SettingsNoticeSeverity.Warning,
+                string.Format(
+                    GlassSettingsResources.Get("System_GlassUpdateTitle"),
+                    pendingGlass.Version,
+                    installedGlass),
+                GlassSettingsResources.Get("System_OpenGlassUpdateAction"),
+                animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
             return;
         }
 
-        if (!OpenGlassVersionService.TryGetInstalledVersion(out var installed, out _))
-            installed = "—";
-
-        await PageShell.PageNoticeStack.ShowActionNoticeAsync(
-            SettingsNoticeSeverity.Warning,
-            string.Format(
-                GlassSettingsResources.Get("System_OpenGlassUpdateTitle"),
-                pending.Version,
-                installed),
-            GlassSettingsResources.Get("System_OpenGlassUpdateAction"),
-            animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
+        await PageShell.PageNoticeStack.CloseActionNoticeAsync();
     }
 
     private void RefreshShellRow()
@@ -302,7 +331,9 @@ public sealed partial class SystemPage : Page
         _shellSuppress = true;
         try
         {
-            ShellExtensionSwitch.IsEnabled = taskExists || registered;
+            ShellExtensionSwitch.IsEnabled = registered
+                || ShellExtensionService.IsBundledShellExtensionPresent()
+                || taskExists;
             ShellExtensionSwitch.IsOn = registered;
         }
         finally
@@ -331,7 +362,7 @@ public sealed partial class SystemPage : Page
 
         var want = ShellExtensionSwitch.IsOn;
         var taskExists = AnyGlassAutorunTaskExists();
-        if (want && !taskExists)
+        if (want && !ShellExtensionService.CanRegisterShellExtension(taskExists))
         {
             _shellSuppress = true;
             ShellExtensionSwitch.IsOn = ShellExtensionService.IsBundledDllRegistered();

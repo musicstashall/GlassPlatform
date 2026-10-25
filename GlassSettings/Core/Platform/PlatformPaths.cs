@@ -10,8 +10,6 @@ public static class PlatformPaths
 {
     private const string BwmRegKey = @"Software\StanislavKa\GlassPlatform";
     private const string InstallPathValue = "InstallPath";
-    private const string HardcodedOpenGlassDll =
-        @"C:\Program Files (x86)\BlackWindowManager\openglass\OpenGlass.dll";
 
     private static string? _platformRoot;
     private static string? _openGlassDllPath;
@@ -111,8 +109,9 @@ public static class PlatformPaths
                 return Path.GetFullPath(candidate);
         }
 
-        if (IsFileAccessible(HardcodedOpenGlassDll))
-            return HardcodedOpenGlassDll;
+        var fromPlatformRoot = Path.Combine(PlatformRoot, "OpenGlass", "OpenGlass.dll");
+        if (IsFileAccessible(fromPlatformRoot))
+            return Path.GetFullPath(fromPlatformRoot);
 
         return null;
     }
@@ -242,20 +241,8 @@ public static class PlatformPaths
     private static string? PathOpenGlassDllFromInstallDir(string installDir)
     {
         var baseDir = NormalizeDir(installDir);
-        string[] candidates =
-        [
-            Path.Combine(baseDir, "openglass", "OpenGlass.dll"),
-            Path.Combine(baseDir, "OpenGlass", "OpenGlass.dll"),
-            Path.Combine(baseDir, "OpenGlass.dll")
-        ];
-
-        foreach (var candidate in candidates)
-        {
-            if (IsFileAccessible(candidate))
-                return candidate;
-        }
-
-        return null;
+        var candidate = Path.Combine(baseDir, "OpenGlass", "OpenGlass.dll");
+        return IsFileAccessible(candidate) ? candidate : null;
     }
 
     /// <summary>
