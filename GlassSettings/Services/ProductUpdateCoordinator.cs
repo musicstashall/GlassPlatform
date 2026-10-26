@@ -61,6 +61,8 @@ public static class ProductUpdateCoordinator
 
             GlassSettingsRegistry.WriteOpenGlassUpdateNoticeDismissedVersion(pending);
 
+        NotifyChanged();
+
     }
 
 
@@ -108,6 +110,12 @@ public static class ProductUpdateCoordinator
 
         NotifyChanged();
 
+    }
+
+    public static async Task RefreshGlassFromNetworkAsync()
+    {
+        await CheckNetworkForGlassAsync().ConfigureAwait(false);
+        NotifyChanged();
     }
 
 
@@ -203,7 +211,7 @@ public static class ProductUpdateCoordinator
         if (!GlassSettingsRegistry.HasGlassUpdatePending())
             return;
 
-        var installed = PlatformModuleVersions.GetHighestFileVersion();
+        var installed = PlatformModuleVersions.GetGlassPlatformReleaseVersion();
         if (string.IsNullOrWhiteSpace(installed) || PlatformModuleVersions.IsPlaceholderVersion(installed))
             return;
 
@@ -217,7 +225,7 @@ public static class ProductUpdateCoordinator
 
     private static async Task CheckNetworkForGlassAsync()
     {
-        var installed = PlatformModuleVersions.GetHighestFileVersion();
+        var installed = PlatformModuleVersions.GetGlassPlatformReleaseVersion();
         if (string.IsNullOrWhiteSpace(installed) || PlatformModuleVersions.IsPlaceholderVersion(installed))
             return;
 
@@ -289,6 +297,8 @@ public static class ProductUpdateCoordinator
         var pending = GlassSettingsRegistry.ReadGlassUpdatePendingVersion();
         if (!string.IsNullOrWhiteSpace(pending))
             GlassSettingsRegistry.WriteGlassUpdateNoticeDismissedVersion(pending);
+
+        NotifyChanged();
     }
 
     public static void DismissVisibleUpdateNotice()

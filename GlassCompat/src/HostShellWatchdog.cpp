@@ -44,10 +44,17 @@ void GlassCompat::HostPollExplorerShellWatchdog() noexcept
 
         if (res == IDYES)
         {
-            if (HANDLE hStop = OpenEventW(EVENT_MODIFY_STATE, FALSE, kStopEventName))
+            const wchar_t* names[] = {
+                L"GlassPlatform.StopEvent.x64",
+                L"GlassPlatform.StopEvent.x86",
+            };
+            for (const wchar_t* name : names)
             {
-                (void)SetEvent(hStop);
-                CloseHandle(hStop);
+                if (HANDLE hStop = OpenEventW(EVENT_MODIFY_STATE, FALSE, name))
+                {
+                    (void)SetEvent(hStop);
+                    CloseHandle(hStop);
+                }
             }
         }
 

@@ -1,4 +1,4 @@
-<?define GlassMsiVersion = "2.0.0.1478" ?>
+<?define GlassMsiVersion = "2.0.0.1479" ?>
 <?define GlassUpgradeCode = "B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5030" ?>
 <?define GlassProductCode = "B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5073" ?>
 <?define GlassPlatformTitle = "Glass Platform" ?>

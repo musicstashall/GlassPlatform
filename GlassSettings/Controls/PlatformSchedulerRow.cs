@@ -2,6 +2,7 @@ using GlassSettings.Core.Platform;
 using GlassSettings.Services;
 using GlassSettings.Strings;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 
 namespace GlassSettings.Controls;
 
@@ -16,7 +17,11 @@ public sealed class PlatformSchedulerRow
     private bool _suppress;
     private bool _schedDisabled;
     private bool _busy;
+    private bool? _pendingGateTarget;
     private bool _presenceHooked;
+
+    /// <summary>Идёт install/uninstall через gate (блокирует Refresh и EnsureTrailingGateEnabled).</summary>
+    public bool IsInstallGateBusy => _busy;
 
     public PlatformSchedulerRow()
     {
@@ -62,6 +67,17 @@ public sealed class PlatformSchedulerRow
         PlatformPresenceService.Instance.QueryTaskStateDirect(Kind, EffectiveGlassArch);
 
     /// <summary>
+    /// Install-gate (задача есть/нет): прямой планировщик. Snapshot dual x64 часто на кадр отстаёт после install/uninstall.
+    /// </summary>
+    private bool QueryInstallGateTaskExists()
+    {
+        if (_busy && _pendingGateTarget is { } target)
+            return target;
+
+        return QueryDirectState().TaskExists;
+    }
+
+    /// <summary>
     /// UI читает снимок presence. Прямой планировщик после сброса кэша на старте Glass
     /// на кадр показывает OpenGlass как отсутствующий.
     /// </summary>
@@ -88,8 +104,16 @@ public sealed class PlatformSchedulerRow
     /// <summary>Подключение к navigate-строке после AddNavigateSection (строка уже в дереве).</summary>
     public void AttachToNavigateRow(SettingsNavigateRow navRow)
     {
+        navRow.PlatformSchedulerOwner = this;
         navRow.HeaderActions = _stackable;
         navRow.TrailingContent = _installGate;
+    }
+
+    /// <summary>Split + gate в одной строке dual-шапки (без TrailingContent navigate-строки).</summary>
+    public void AttachToDualControlRow(ContentPresenter actionsHost, ContentPresenter gateHost)
+    {
+        actionsHost.Content = _stackable;
+        gateHost.Content = _installGate;
     }
 
     private void OnStackableLoaded(object sender, RoutedEventArgs e)
@@ -126,12 +150,18 @@ public sealed class PlatformSchedulerRow
         if (_suppress)
             return;
 
+        if (_busy && _pendingGateTarget is { } pendingTarget)
+        {
+            ApplyPendingInstallGateChrome(pendingTarget);
+            return;
+        }
+
         _suppress = true;
         try
         {
             // Во время start/stop снимок presence: прямой COM планировщика блокирует UI.
             var state = QueryUiState();
-            var exists = state.TaskExists;
+            var gateTaskExists = QueryInstallGateTaskExists();
             if (_busy)
                 return;
 
@@ -148,7 +178,7 @@ public sealed class PlatformSchedulerRow
                 return;
             }
 
-            if (!exists)
+            if (!gateTaskExists)
             {
                 ApplyExternalBusyChrome(false, splitEnabled: false);
                 _installGate.IsOn = false;
@@ -164,8 +194,8 @@ public sealed class PlatformSchedulerRow
                 // Check named lifecycle busy event (set by ShellExt during menu start/stop).
                 var externalBusy = PlatformLifecycleBusy.IsBusy(EffectiveGlassArch);
                 var combinedBusy = state.IsLifecycleBusy || externalBusy;
-                ApplyExternalBusyChrome(combinedBusy, splitEnabled: exists && !combinedBusy);
-                _installGate.IsOn = exists;
+                ApplyExternalBusyChrome(combinedBusy, splitEnabled: gateTaskExists && !combinedBusy);
+                _installGate.IsOn = gateTaskExists;
                 if (state.IsUnloading || (externalBusy && state.Lifecycle is NativeHostInterop.InjectLifecycleUi.Stopping or NativeHostInterop.InjectLifecycleUi.Residual))
                 {
                     _stackable.SetStatusTone(
@@ -175,7 +205,7 @@ public sealed class PlatformSchedulerRow
                 else
                 {
                     _stackable.SetStatusTone(
-                        StatusCaption(exists, state.Autorun),
+                        StatusCaption(gateTaskExists, state.Autorun),
                         state.Autorun switch
                         {
                             GlassAutorunUiState.Running => PlatformSchedulerStackableActions.StatusToneKind.Running,
@@ -187,13 +217,13 @@ public sealed class PlatformSchedulerRow
             }
             else
             {
-                ApplyExternalBusyChrome(false, splitEnabled: exists);
-                _installGate.IsOn = exists;
-                var st = state.TaskExists
+                ApplyExternalBusyChrome(false, splitEnabled: gateTaskExists);
+                _installGate.IsOn = gateTaskExists;
+                var st = gateTaskExists
                     ? (OpenGlassHostUiState)(int)state.Autorun
                     : OpenGlassHostUiState.NoTask;
                 _stackable.SetStatusTone(
-                    OgStatusCaption(exists, st),
+                    OgStatusCaption(gateTaskExists, st),
                     st switch
                     {
                         OpenGlassHostUiState.Running => PlatformSchedulerStackableActions.StatusToneKind.Running,
@@ -377,7 +407,8 @@ public sealed class PlatformSchedulerRow
 
     private void FinishBusyRefresh()
     {
-        SetBusyVisual(false);
+        _busy = false;
+        _pendingGateTarget = null;
         Refresh();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -430,40 +461,96 @@ public sealed class PlatformSchedulerRow
         }
 
         var wantInstalled = _installGate.IsOn;
-        if (wantInstalled == TaskExists)
-            return;
+        var directExists = QueryDirectState().TaskExists;
+        if (wantInstalled == directExists)
+        {
+            if (_installGate.IsOn != directExists)
+            {
+                _suppress = true;
+                _installGate.IsOn = directExists;
+                _suppress = false;
+            }
 
+            return;
+        }
+
+        BeginInstallGateOperation(wantInstalled);
+        StateChanged?.Invoke(this, EventArgs.Empty);
         _ = ApplyInstallToggleAsync(wantInstalled);
+    }
+
+    private void BeginInstallGateOperation(bool targetOn)
+    {
+        _pendingGateTarget = targetOn;
+        _busy = true;
+        ApplyPendingInstallGateChrome(targetOn);
+    }
+
+    private void ApplyPendingInstallGateChrome(bool targetOn)
+    {
+        _suppress = true;
+        try
+        {
+            _installGate.IsOn = targetOn;
+            _installGate.IsEnabled = false;
+            _stackable.SetBusyVisual(true, splitEnabled: false);
+            _stackable.SetStatusTone(
+                GlassSettingsResources.Get("Status_Disabled"),
+                PlatformSchedulerStackableActions.StatusToneKind.Disabled);
+        }
+        finally
+        {
+            _suppress = false;
+        }
     }
 
     private async Task ApplyInstallToggleAsync(bool install)
     {
-        if (_busy || IsX86ControlsLocked)
+        if (IsX86ControlsLocked)
             return;
 
-        await BeginBusyVisualAsync().ConfigureAwait(true);
         try
         {
+            var operationOk = false;
             if (install)
             {
                 if (Kind == PlatformSchedulerKind.OpenGlass)
-                    await SystemPlatformRunActions.InstallOpenGlassOrchestrationAsync().ConfigureAwait(true);
+                    operationOk = await SystemPlatformRunActions.InstallOpenGlassOrchestrationAsync().ConfigureAwait(true);
                 else
-                {
-                    await Task.Run(() => GlassPlatformService.TryInstallGlassAutorunTask(EffectiveGlassArch))
+                    operationOk = await Task.Run(() => GlassPlatformService.TryInstallGlassAutorunTask(EffectiveGlassArch))
                         .ConfigureAwait(true);
-                }
             }
             else
             {
                 await Task.Run(DeleteTask).ConfigureAwait(true);
                 if (Kind == PlatformSchedulerKind.OpenGlass)
                     await ApplyOpenGlassStopPolicyAfterDeleteAsync().ConfigureAwait(true);
+                operationOk = !QueryDirectState().TaskExists;
             }
+
+            PlatformPresenceService.Instance.RefreshSnapshotSynchronouslyFromDirectQueries();
+            PlatformPresenceService.Instance.NotifyLifecycleChanged();
+            if (!operationOk || QueryDirectState().TaskExists != install)
+                RestoreInstallGateFromDirectState();
         }
         finally
         {
+            _pendingGateTarget = null;
             FinishBusyRefresh();
+        }
+    }
+
+    private void RestoreInstallGateFromDirectState()
+    {
+        _suppress = true;
+        try
+        {
+            var exists = QueryDirectState().TaskExists;
+            _installGate.IsOn = exists;
+        }
+        finally
+        {
+            _suppress = false;
         }
     }
 

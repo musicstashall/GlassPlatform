@@ -1,4 +1,4 @@
-// Win32 installer prototype. No files are installed and no shell processes are modified.
+// Win32-мастер GlassPlatform. Release ставит MSI. Debug без GLASS_EMBED_MSI только имитирует прогресс.
 #include <windows.h>
 #include <windowsx.h>
 #include <objbase.h>
@@ -33,13 +33,18 @@ constexpr int kWidth = 1000, kHtmlHeight = 600, kProgressHeight = 4;
 constexpr int kContentHeight = kHtmlHeight + kProgressHeight;
 constexpr int kFooterHeight = 56, kHeight = kContentHeight + kFooterHeight;
 constexpr UINT_PTR kInstallTimer = 1, kFadeTimer = 2;
+constexpr UINT kInstallTimerMs = 16;
+constexpr ULONGLONG kMarqueePeriodMs = 1400;
+constexpr double kProgressSmoothTauMs = 120.0;
 constexpr UINT kInitWebView = WM_APP + 1;
 constexpr UINT kCheckForUpdate = WM_APP + 2;
 constexpr ULONGLONG kFadeDuration = 280;
+#ifndef GLASS_EMBED_MSI
 constexpr ULONGLONG kDuration = 30000;
+#endif
 constexpr COLORREF kDark = RGB(16,18,37), kLight = RGB(247,248,252);
 constexpr wchar_t kDocumentUrl[] = L"https://glassplatform.invalid/index.html";
-enum class Page { Welcome, License, Installing, Complete, Error };
+enum class Page { Welcome, Update, License, Installing, ModulesBusy, ProcessesStuck, Complete, Error };
 HINSTANCE gInstance = nullptr;
 LANGID gLanguage = MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
 
@@ -213,25 +218,19 @@ bool FetchLatestSetupVersion(std::wstring& latest, std::wstring& url) {
     return true;
 }
 
-void OfferNewerSetupIfAvailable(HWND owner) {
-    InstallLog::Line(L"Checking for newer setup on GitHub…");
-    std::wstring latest, url;
-    if (!FetchLatestSetupVersion(latest, url)) {
-        InstallLog::Line(L"Version check: fetch failed or skipped");
-        return;
+std::wstring FormatUpdateBody(const std::wstring& self, const std::wstring& latest) {
+    const std::wstring pattern = Text(IDS_UPDATE_BODY);
+    std::wstring out;
+    out.reserve(pattern.size() + self.size() + latest.size());
+    for (size_t i = 0; i < pattern.size(); ++i) {
+        if (pattern[i] == L'{' && i + 2 < pattern.size() && pattern[i + 2] == L'}') {
+            out += pattern[i + 1] == L'0' ? self : latest;
+            i += 2;
+            continue;
+        }
+        out += pattern[i];
     }
-    const std::wstring self = SelfFileVersion();
-    InstallLog::LineFormat(L"Version check: local=%s remote=%s", self.c_str(), latest.c_str());
-    if (self.empty() || !VersionOlder(self, latest)) {
-        InstallLog::Line(L"Version check: no newer setup");
-        return;
-    }
-    wchar_t message[512]{};
-    swprintf_s(message, Text(IDS_UPDATE_NEWER).c_str(), self.c_str(), latest.c_str());
-    InstallLog::Line(L"Version check: prompting user");
-    if (MessageBoxW(owner, message, Text(IDS_TITLE).c_str(),
-            MB_YESNO | MB_ICONINFORMATION | MB_DEFBUTTON1) == IDYES)
-        ShellExecuteW(owner, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    return out;
 }
 
 std::wstring PlatformVersionFromGlassCore() {
@@ -351,6 +350,7 @@ private:
     Page page_ = Page::Welcome;
     UINT dpi_ = 96;
     HWND back_ = nullptr, next_ = nullptr, cancel_ = nullptr;
+    HWND updateDownload_ = nullptr, updateSkip_ = nullptr;
     HWND eula_ = nullptr, accept_ = nullptr, progress_ = nullptr, webHost_ = nullptr;
     HFONT font_ = nullptr, heading_ = nullptr, small_ = nullptr, title_ = nullptr;
     HBRUSH darkBrush_ = nullptr, lightBrush_ = nullptr;
@@ -370,9 +370,18 @@ private:
     bool haveWebBounds_ = false;
     HRESULT webError_ = S_OK;
     ULONGLONG started_ = 0;
-    int percent_ = 0, progressValue_ = 0;
+    int percent_ = 0, progressValue_ = 0, progressTarget_ = 0, displayProgress_ = 0;
+    double marqueePhase_ = 0;
+    ULONGLONG progressTickMs_ = 0;
+    bool progressMarquee_ = false;
+    bool progressFinishing_ = false;
+    bool simulateInstall_ = false;
     std::wstring installStatusLine_;
+    std::wstring updateLatest_;
+    std::wstring updateUrl_;
+    std::wstring updateBody_;
     std::wstring errorReason_;
+    std::wstring holdReport_;
     InstallEngine installEngine_;
     std::wstring userDataFolder_;
     EventRegistrationToken requestToken_{}, navigationToken_{}, completeToken_{},
@@ -407,7 +416,7 @@ private:
         };
         font_ = create(14,FW_NORMAL); small_ = create(12,FW_NORMAL);
         heading_ = create(28,FW_NORMAL); title_ = create(39,FW_LIGHT);
-        for (HWND c : {back_,next_,cancel_,eula_,accept_})
+        for (HWND c : {back_,next_,cancel_,eula_,accept_,updateDownload_,updateSkip_})
             if (c) SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
     void OpenTheme() {
@@ -424,6 +433,8 @@ private:
         back_ = Control(L"BUTTON",Text(IDS_BACK),BS_PUSHBUTTON | WS_TABSTOP,IDC_BACK);
         next_ = Control(L"BUTTON",Text(IDS_NEXT),BS_DEFPUSHBUTTON | WS_TABSTOP,IDC_NEXT);
         cancel_ = Control(L"BUTTON",Text(IDS_CANCEL),BS_PUSHBUTTON | WS_TABSTOP,IDC_CANCEL);
+        updateDownload_ = Control(L"BUTTON",Text(IDS_UPDATE_DOWNLOAD),BS_PUSHBUTTON | WS_TABSTOP,IDC_UPDATE_DOWNLOAD);
+        updateSkip_ = Control(L"BUTTON",Text(IDS_UPDATE_SKIP),BS_DEFPUSHBUTTON | WS_TABSTOP,IDC_UPDATE_SKIP);
         eula_ = Control(L"EDIT",L"",WS_BORDER | WS_TABSTOP | ES_MULTILINE | ES_READONLY |
                          ES_AUTOVSCROLL | ES_LEFT | WS_VSCROLL,IDC_EULA);
         accept_ = Control(L"BUTTON",Text(IDS_ACCEPT),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_ACCEPT);
@@ -455,8 +466,11 @@ private:
     void Layout() {
         Move(back_,644,kContentHeight+12,96,32);
         // Complete uses the exact rectangle previously occupied by Cancel.
-        Move(next_,(page_==Page::Complete || page_==Page::Error)?864:750,kContentHeight+12,104,32);
+        const bool unlock = page_==Page::ProcessesStuck;
+        Move(next_,(page_==Page::Complete || page_==Page::Error)?864:(unlock?694:750),kContentHeight+12,unlock?160:104,32);
         Move(cancel_,864,kContentHeight+12,104,32);
+        Move(updateDownload_,644,kContentHeight+12,104,32);
+        Move(updateSkip_,750,kContentHeight+12,104,32);
         Move(eula_,48,132,904,382);
         Move(accept_,48,540,904,30);
         Move(progress_,0,kHtmlHeight,kWidth,kProgressHeight);
@@ -480,7 +494,11 @@ private:
     void ShowContentControls() {
         ShowWindow(eula_,page_==Page::License && !transitioning_?SW_SHOWNA:SW_HIDE);
         ShowWindow(accept_,page_==Page::License && !transitioning_?SW_SHOWNA:SW_HIDE);
-        ShowWindow(progress_,page_==Page::Installing?SW_SHOWNA:SW_HIDE);
+        const bool showProgress = page_==Page::Installing || page_==Page::Complete;
+        ShowWindow(progress_, showProgress ? SW_SHOWNA : SW_HIDE);
+        const bool update = page_==Page::Update && !transitioning_;
+        ShowWindow(updateDownload_,update?SW_SHOWNA:SW_HIDE);
+        ShowWindow(updateSkip_,update?SW_SHOWNA:SW_HIDE);
         const bool slides = SlidesVisible();
         if (controller_) controller_->put_IsVisible(slides ? TRUE : FALSE);
         ShowWindow(webHost_,slides?SW_SHOWNA:SW_HIDE);
@@ -507,7 +525,9 @@ private:
         PushPlatformVersion();
     }
     void FocusPage() {
-        SetFocus(page_==Page::License && !accepted_ ? accept_ :
+        SetFocus(page_==Page::ModulesBusy || page_==Page::ProcessesStuck ? next_ :
+                 page_==Page::Update ? updateSkip_ :
+                 page_==Page::License && !accepted_ ? accept_ :
                  page_==Page::Installing ? cancel_ : next_);
     }
     void PrintControl(HDC dc, HWND control) {
@@ -559,10 +579,13 @@ private:
             DwmSetWindowAttribute(window,19,&darkCaption,sizeof(darkCaption));
         ShowWindow(eula_,SW_HIDE); ShowWindow(accept_,SW_HIDE);
         Layout();
-        SetWindowTextW(next_,Text(page_==Page::License?IDS_INSTALL:
-                                 (page_==Page::Complete || page_==Page::Error)?IDS_FINISH:IDS_NEXT).c_str());
+        const UINT nextId = page_==Page::License ? IDS_INSTALL :
+            (page_==Page::Complete || page_==Page::Error) ? IDS_FINISH :
+            page_==Page::ModulesBusy ? IDS_HOLD_RETRY :
+            page_==Page::ProcessesStuck ? IDS_UNLOCK : IDS_NEXT;
+        SetWindowTextW(next_,Text(nextId).c_str());
         ShowWindow(back_,page_==Page::License?SW_SHOWNA:SW_HIDE);
-        ShowWindow(next_,page_==Page::Installing?SW_HIDE:SW_SHOWNA);
+        ShowWindow(next_,(page_==Page::Installing || page_==Page::Update)?SW_HIDE:SW_SHOWNA);
         ShowWindow(cancel_,(page_==Page::Complete || page_==Page::Error)?SW_HIDE:SW_SHOWNA);
         EnableWindow(next_,page_!=Page::License || accepted_);
         if ((oldPage==Page::Welcome && page_==Page::License) ||
@@ -600,9 +623,20 @@ private:
         started_ = GetTickCount64();
         percent_ = 0;
         progressValue_ = 0;
+        progressTarget_ = 0;
+        displayProgress_ = 0;
+        progressFinishing_ = false;
+        progressTickMs_ = GetTickCount64();
         installStatusLine_ = Text(IDS_STATUS_EXTRACT);
         InvalidateRect(progress_, nullptr, FALSE);
         SetPage(Page::Installing);
+#ifndef GLASS_EMBED_MSI
+        simulateInstall_ = true;
+        installStatusLine_ = Text(IDS_SIMULATION_NOTE);
+        InstallLog::Line(L"Debug build: simulated installation, platform is not stopped");
+        SetTimer(window, kInstallTimer, kInstallTimerMs, nullptr);
+        return;
+#else
         std::wstring x64Dir, x86Dir, ogDir;
         if (!DefaultProgramGlassDir(true, x64Dir) || !DefaultProgramGlassDir(false, x86Dir)) {
             InstallLog::Line(L"Install path resolution failed (Program Files)");
@@ -613,21 +647,152 @@ private:
         InstallLog::Line(L"User started installation");
         InstallLog::LineFormat(L"Target x64=%s x86=%s OpenGlass=%s", x64Dir.c_str(), x86Dir.c_str(), ogDir.c_str());
         InstallEngine::PhaseLabels labels;
+        labels.stop64 = Text(IDS_STATUS_STOP64);
+        labels.stop86 = Text(IDS_STATUS_STOP86);
+        labels.stopOg = Text(IDS_STATUS_STOPOG);
+        labels.unload = Text(IDS_STATUS_UNLOAD);
+        labels.start64 = Text(IDS_STATUS_START64);
+        labels.start86 = Text(IDS_STATUS_START86);
+        labels.startOg = Text(IDS_STATUS_STARTOG);
         labels.extract = Text(IDS_STATUS_EXTRACT);
         labels.platform64 = Text(IDS_STATUS_X64);
         labels.platform32 = Text(IDS_STATUS_X86);
         labels.openGlass = Text(IDS_STATUS_OG);
         labels.finalize = Text(IDS_STATUS_FINAL);
         installEngine_.Start(gInstance, x64Dir, x86Dir, ogDir, true, std::move(labels), nullptr);
-        SetTimer(window, kInstallTimer, 50, nullptr);
+        SetTimer(window, kInstallTimer, kInstallTimerMs, nullptr);
+#endif
     }
+    void CheckForNewerSetup() {
+        if (page_ != Page::Welcome) return;
+        InstallLog::Line(L"Checking for newer setup on GitHub…");
+        std::wstring latest, url;
+        if (!FetchLatestSetupVersion(latest, url)) {
+            InstallLog::Line(L"Version check: fetch failed or skipped");
+            return;
+        }
+        const std::wstring self = SelfFileVersion();
+        InstallLog::LineFormat(L"Version check: local=%s remote=%s", self.c_str(), latest.c_str());
+        if (self.empty() || !VersionOlder(self, latest)) {
+            InstallLog::Line(L"Version check: no newer setup");
+            return;
+        }
+        if (page_ != Page::Welcome) return;
+        updateLatest_ = latest;
+        updateUrl_ = url;
+        updateBody_ = FormatUpdateBody(self, latest);
+        InstallLog::Line(L"Version check: showing update page");
+        SetPage(Page::Update);
+    }
+#ifndef GLASS_EMBED_MSI
+    void FinishSimulatedInstall() {
+        displayProgress_ = 10000;
+        progressValue_ = 10000;
+        percent_ = 100;
+        KillTimer(window, kInstallTimer);
+        SetPage(Page::Complete);
+    }
+    void TickSimulation() {
+        const ULONGLONG now = GetTickCount64();
+        const ULONGLONG elapsed = now - started_;
+        const ULONGLONG dt = progressTickMs_ ? (now - progressTickMs_) : kInstallTimerMs;
+        progressTickMs_ = now;
+        progressMarquee_ = false;
+        progressTarget_ = elapsed >= kDuration ? 10000
+            : static_cast<int>(elapsed * 10000 / kDuration);
+        const double alpha = std::min(1.0, static_cast<double>(dt) / kProgressSmoothTauMs);
+        int step = static_cast<int>(std::lround((progressTarget_ - displayProgress_) * alpha));
+        if (step < 1 && progressTarget_ > displayProgress_) step = 1;
+        displayProgress_ += step;
+        if (displayProgress_ > progressTarget_) displayProgress_ = progressTarget_;
+        progressValue_ = displayProgress_;
+        percent_ = std::min(100, displayProgress_ / 100);
+        installStatusLine_ = Text(IDS_SIMULATION_NOTE);
+        if (elapsed >= kDuration && displayProgress_ >= 10000) {
+            FinishSimulatedInstall();
+            return;
+        }
+        InvalidateRect(progress_, nullptr, FALSE);
+        InvalidateFooter();
+    }
+#endif
     void Tick() {
-        if (page_ != Page::Installing) return;
-        progressValue_ = std::clamp(installEngine_.ProgressUnits(), 0, 10000);
-        percent_ = progressValue_ / 100;
-        installStatusLine_ = installEngine_.StatusLine();
+#ifndef GLASS_EMBED_MSI
+        if (simulateInstall_) {
+            TickSimulation();
+            return;
+        }
+#endif
+        if (page_ != Page::Installing && page_ != Page::ModulesBusy && page_ != Page::ProcessesStuck) return;
+        const auto hold = installEngine_.CurrentHold();
+        if (hold == InstallEngine::HoldKind::Modules && page_ != Page::ModulesBusy) {
+            holdReport_ = installEngine_.HoldReport();
+            SetPage(Page::ModulesBusy);
+            return;
+        }
+        if (hold == InstallEngine::HoldKind::Processes && page_ != Page::ProcessesStuck) {
+            holdReport_ = installEngine_.HoldReport();
+            SetPage(Page::ProcessesStuck);
+            return;
+        }
+        if (hold == InstallEngine::HoldKind::None &&
+            (page_ == Page::ModulesBusy || page_ == Page::ProcessesStuck)) {
+            SetPage(Page::Installing);
+        }
+        const bool animateProgress = page_==Page::Installing || page_==Page::ModulesBusy ||
+            page_==Page::ProcessesStuck;
+        const ULONGLONG now = GetTickCount64();
+        const ULONGLONG dt = progressTickMs_ ? (now - progressTickMs_) : kInstallTimerMs;
+        progressTickMs_ = now;
+        if (animateProgress) {
+            progressMarquee_ = installEngine_.IsMarquee() && !progressFinishing_;
+            if (progressMarquee_) {
+                // Фаза от абсолютного времени — без накопления ошибки таймера (как в имитации установки).
+                marqueePhase_ = static_cast<double>((now - started_) % kMarqueePeriodMs) /
+                    static_cast<double>(kMarqueePeriodMs);
+            } else {
+                if (progressFinishing_)
+                    progressTarget_ = 10000;
+                else
+                    progressTarget_ = std::clamp(installEngine_.ProgressUnits(), 0, 10000);
+                const double alpha = std::min(1.0, static_cast<double>(dt) / kProgressSmoothTauMs);
+                displayProgress_ += static_cast<int>(std::lround(
+                    (progressTarget_ - displayProgress_) * alpha));
+                progressValue_ = displayProgress_;
+                percent_ = std::min(100, displayProgress_ / 100);
+            }
+            installStatusLine_ = installEngine_.StatusLine();
+        }
+        if (page_ != Page::Installing) {
+            InvalidateRect(progress_, nullptr, FALSE);
+            if (animateProgress) InvalidateFooter();
+            return;
+        }
         if (installEngine_.Poll()) {
+            if (installEngine_.Succeeded() && displayProgress_ < 10000) {
+                progressFinishing_ = true;
+                progressMarquee_ = false;
+                const int gap = 10000 - displayProgress_;
+                const double alpha = std::min(1.0, static_cast<double>(dt) / kProgressSmoothTauMs);
+                int step = static_cast<int>(std::lround(gap * alpha));
+                // lround(малый хвост) даёт 0, и страница «Готово» не открывается, пока тик не станет крупным.
+                if (step < 1) step = gap;
+                displayProgress_ += step;
+                if (displayProgress_ > 10000) displayProgress_ = 10000;
+                progressValue_ = displayProgress_;
+                percent_ = std::min(100, displayProgress_ / 100);
+                installStatusLine_ = installEngine_.StatusLine();
+                if (displayProgress_ < 10000) {
+                    InvalidateRect(progress_, nullptr, FALSE);
+                    InvalidateFooter();
+                    return;
+                }
+            }
             KillTimer(window, kInstallTimer);
+            if (installEngine_.QuietClose()) {
+                DestroyWindow(window);
+                return;
+            }
             if (!installEngine_.Succeeded()) {
                 const std::wstring err = installEngine_.ErrorText();
                 InstallLog::LineFormat(L"Installation failed: %s",
@@ -640,9 +805,11 @@ private:
                 ShowInstallError(reason);
                 return;
             }
+            displayProgress_ = 10000;
             progressValue_ = 10000;
             percent_ = 100;
             InvalidateRect(progress_, nullptr, FALSE);
+            InstallLog::Line(L"Complete page");
             SetPage(Page::Complete);
             return;
         }
@@ -650,6 +817,16 @@ private:
         InvalidateFooter();
     }
     void RequestClose() {
+        if (page_ == Page::ProcessesStuck) {
+            installEngine_.SignalHold(InstallEngine::HoldAction::Cancel);
+            SetPage(Page::Installing);
+            return;
+        }
+        if (page_ == Page::ModulesBusy) {
+            installEngine_.SignalHold(InstallEngine::HoldAction::Cancel);
+            DestroyWindow(window);
+            return;
+        }
         if (page_ == Page::Installing && MessageBoxW(window,Text(IDS_CONFIRM_CANCEL).c_str(),
             Text(IDS_TITLE).c_str(),MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return;
         DestroyWindow(window);
@@ -811,6 +988,14 @@ private:
             Gdiplus::Color(255,16,18,37),Gdiplus::Color(0,16,18,37));
         g.FillRectangle(&shade,Scale(240),Scale(100),Scale(350),Scale(447));
     }
+    void DrawBannerFull(HDC dc) {
+        if (!banner_) return;
+        Gdiplus::Graphics g(dc);
+        g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+        Gdiplus::Rect dest(0, 0, Scale(kWidth), Scale(kContentHeight));
+        g.DrawImage(banner_.get(), dest, 0, 0, static_cast<INT>(banner_->GetWidth()),
+                    static_cast<INT>(banner_->GetHeight()), Gdiplus::UnitPixel);
+    }
     void RenderContent(HDC dc) {
         RECT content=Box(0,0,kWidth,kContentHeight);
         FillRect(dc,&content,page_==Page::License?lightBrush_:darkBrush_);
@@ -820,8 +1005,13 @@ private:
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
             DrawLabel(dc,Text(IDS_DONE_TAG),Box(48,139,400,25),small_,accent);
             DrawLabel(dc,Text(IDS_DONE_TITLE),Box(48,181,410,120),title_,white);
+#ifdef GLASS_EMBED_MSI
             DrawLabel(dc,Text(IDS_DONE_BODY),Box(48,323,328,126),font_,muted);
             DrawLabel(dc,Text(IDS_DONE_NOTE),Box(48,521,430,75),small_,muted);
+#else
+            DrawLabel(dc,Text(IDS_DONE_BODY_DEMO),Box(48,323,328,126),font_,muted);
+            DrawLabel(dc,Text(IDS_DONE_NOTE_DEMO),Box(48,521,430,75),small_,muted);
+#endif
         } else if (page_ == Page::Error) {
             DrawBanner(dc,true);
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
@@ -830,6 +1020,23 @@ private:
             DrawLabel(dc,Text(IDS_ERROR_BODY),Box(48,323,328,56),font_,muted);
             DrawLabel(dc,errorReason_,Box(48,385,520,120),font_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
             DrawLabel(dc,Text(IDS_ERROR_LOG_HINT),Box(48,521,430,75),small_,muted);
+        } else if (page_ == Page::ModulesBusy || page_ == Page::ProcessesStuck) {
+            DrawBanner(dc,true);
+            const bool kill = page_ == Page::ProcessesStuck;
+            DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
+            DrawLabel(dc,Text(kill ? IDS_KILL_TITLE : IDS_HOLD_TITLE),Box(48,139,520,70),heading_,white);
+            DrawLabel(dc,Text(kill ? IDS_KILL_BODY : IDS_HOLD_BODY),Box(48,220,460,140),font_,muted);
+            DrawLabel(dc,holdReport_,Box(48,370,520,180),font_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+        } else if (page_ == Page::Update) {
+            DrawBannerFull(dc);
+            auto shadow = [&](const std::wstring& text, RECT rect, HFONT font, UINT format) {
+                RECT back = rect;
+                OffsetRect(&back, Scale(1), Scale(1));
+                DrawLabel(dc, text, back, font, RGB(16, 18, 37), format);
+                DrawLabel(dc, text, rect, font, RGB(255, 255, 255), format);
+            };
+            shadow(Text(IDS_UPDATE_TITLE), Box(48,48,700,48), heading_, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+            shadow(updateBody_, Box(48,112,640,180), font_, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
         } else if (page_ == Page::License) {
             DrawLabel(dc,Text(IDS_EULA_TITLE),Box(48,35,904,46),heading_,RGB(31,35,53));
             DrawLabel(dc,Text(IDS_EULA_BODY),Box(48,88,904,32),font_,RGB(97,103,121));
@@ -848,8 +1055,8 @@ private:
     void RenderFooterText(HDC dc) {
         if (page_!=Page::Installing) return;
         const std::wstring line = installStatusLine_.empty() ? Text(IDS_STATUS_PREPARE) : installStatusLine_;
-        DrawLabel(dc, line + L"  " + std::to_wstring(percent_) + L"%",
-                  Box(32,kContentHeight+8,760,23),font_,RGB(40,44,60));
+        const std::wstring shown = progressMarquee_ ? line : line + L"  " + std::to_wstring(percent_) + L"%";
+        DrawLabel(dc, shown, Box(32,kContentHeight+8,760,23),font_,RGB(40,44,60));
     }
     void Paint() {
         PAINTSTRUCT ps{};
@@ -899,7 +1106,7 @@ private:
             if (bufferedErase_) Erase(reinterpret_cast<HDC>(w));
             return 1; // Do not clear the on-screen client before the buffered paint.
         case kInitWebView: if (!closing_) InitializeWebView(); return 0;
-        case kCheckForUpdate: if (!closing_) OfferNewerSetupIfAvailable(window); return 0;
+        case kCheckForUpdate: if (!closing_) CheckForNewerSetup(); return 0;
         case WM_PAINT: Paint(); return 0;
         case WM_SIZE: Layout(); return 0;
         case WM_MOVE: if (controller_) controller_->NotifyParentWindowPositionChanged(); return 0;
@@ -921,12 +1128,22 @@ private:
         case WM_DRAWITEM: {
             const auto item=reinterpret_cast<const DRAWITEMSTRUCT*>(l);
             if (item && item->CtlID==IDC_PROGRESS) {
-                RECT filled=item->rcItem, track=item->rcItem;
-                filled.right=filled.left+MulDiv(filled.right-filled.left,progressValue_,10000);
-                track.left=filled.right;
-                // Non-overlapping fills: no background erase followed by repaint.
-                FillRect(item->hDC,&filled,progressFill_);
-                FillRect(item->hDC,&track,progressTrack_);
+                FillRect(item->hDC,&item->rcItem,progressTrack_);
+                if (progressMarquee_) {
+                    const int width = item->rcItem.right - item->rcItem.left;
+                    const int span = std::max(width / 3, 48);
+                    const int travel = width + span;
+                    const int left = item->rcItem.left + static_cast<int>(marqueePhase_ * travel) - span;
+                    RECT chip{left, item->rcItem.top, left + span, item->rcItem.bottom};
+                    IntersectRect(&chip, &chip, &item->rcItem);
+                    if (chip.right > chip.left)
+                        FillRect(item->hDC,&chip,progressFill_);
+                } else {
+                    RECT filled=item->rcItem;
+                    filled.right=filled.left+MulDiv(filled.right-filled.left,progressValue_,10000);
+                    if (filled.right > filled.left)
+                        FillRect(item->hDC,&filled,progressFill_);
+                }
                 return TRUE;
             }
             break;
@@ -947,10 +1164,32 @@ private:
                     EnableWindow(next_,accepted_);
                 }
                 return 0;
+            case IDC_UPDATE_DOWNLOAD:
+                if (page_==Page::Update && !updateUrl_.empty()) {
+                    InstallLog::LineFormat(L"Update download page: %s", updateUrl_.c_str());
+                    ShellExecuteW(window, L"open", updateUrl_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                }
+                return 0;
+            case IDC_UPDATE_SKIP:
+                if (page_==Page::Update) {
+                    InstallLog::Line(L"Update skipped");
+                    SetPage(Page::Welcome);
+                }
+                return 0;
             case IDC_BACK: if (!transitioning_ && page_==Page::License) SetPage(Page::Welcome); return 0;
             case IDOK:
             case IDC_NEXT:
                 if (transitioning_) return 0;
+                if (page_==Page::ModulesBusy) {
+                    installEngine_.SignalHold(InstallEngine::HoldAction::Retry);
+                    SetPage(Page::Installing);
+                    return 0;
+                }
+                if (page_==Page::ProcessesStuck) {
+                    installEngine_.SignalHold(InstallEngine::HoldAction::Unlock);
+                    SetPage(Page::Installing);
+                    return 0;
+                }
                 if (page_==Page::Welcome) SetPage(Page::License);
                 else if (page_==Page::License && accepted_) StartInstallation();
                 else if (page_==Page::Complete || page_==Page::Error) RequestClose();

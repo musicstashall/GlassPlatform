@@ -560,6 +560,22 @@ namespace
         return v != 0;
     }
 
+    static void SignalPlatformStopBothArch() noexcept
+    {
+        const wchar_t* names[] = {
+            L"GlassPlatform.StopEvent.x64",
+            L"GlassPlatform.StopEvent.x86",
+        };
+        for (const wchar_t* name : names)
+        {
+            if (HANDLE hStop = OpenEventW(EVENT_MODIFY_STATE, FALSE, name))
+            {
+                (void)SetEvent(hStop);
+                CloseHandle(hStop);
+            }
+        }
+    }
+
     static void MaybePromptStopAfterExplorerSeries() noexcept
     {
         if (!IsCurrentProcessExplorer() || !RecordExplorerCrashAndIsOverThreshold())
@@ -574,13 +590,7 @@ namespace
         }
 
         if (data.result == IDYES)
-        {
-            if (HANDLE hStop = OpenEventW(EVENT_MODIFY_STATE, FALSE, kStopEventName))
-            {
-                (void)SetEvent(hStop);
-                CloseHandle(hStop);
-            }
-        }
+            SignalPlatformStopBothArch();
     }
 
     // Первый шанс: многие краши WinUI не доходят до UEF — пишем дамп здесь (explorer по умолчанию).
@@ -652,17 +662,17 @@ namespace
     LONG NTAPI ExplorerCrashGuardFilter(EXCEPTION_POINTERS* info) noexcept
     {
         LogFaultingModuleProbe(info, "UEF");
-        // Сначала дамп — пока контекст гарантированно доступен; потом цепочка prev (часто не возвращается).
+        // Сначала дамп — пока контекст гарантированно доступен.
         if (IsMiniDumpEnabled())
             TryWriteProcessMiniDump(info);
 
-        const LONG result = g_prevExplorerFilter
-            ? g_prevExplorerFilter(info)
-            : EXCEPTION_CONTINUE_SEARCH;
-
+        // Цепочка prev (WER) часто не возвращается и убивает процесс вместе с диалогом,
+        // так что SetEvent на Stop не успевает. Спрашиваем и сигналим стоп до неё.
         MaybePromptStopAfterExplorerSeries();
 
-        return result;
+        if (g_prevExplorerFilter)
+            return g_prevExplorerFilter(info);
+        return EXCEPTION_CONTINUE_SEARCH;
     }
     // При первой загрузке GlassCompat: ключ HKCU\…\GlassPlatform\Crashes и каталог по умолчанию,
     // чтобы настройки не «пропадали» из виду и дампы не отключались чужим DWORD в корне BWM.

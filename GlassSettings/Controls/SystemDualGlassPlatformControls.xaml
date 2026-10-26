@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GlassSettings.Controls.SystemDualGlassPlatformControls"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    HorizontalAlignment="Right"
+    VerticalAlignment="Center">
+    <StackPanel x:Name="ActionsStack" Spacing="16" VerticalAlignment="Center">
+        <ContentPresenter x:Name="ActionsX86Host" VerticalAlignment="Center" />
+        <ContentPresenter x:Name="ActionsX64Host" VerticalAlignment="Center" />
+    </StackPanel>
+</UserControl>

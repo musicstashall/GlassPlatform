@@ -252,9 +252,17 @@ public sealed partial class SpoilerHeaderGrid : UserControl
             max = Math.Max(max, MeasureTextBlockWidth(DescriptionText));
         if (ParallelDuplicateText.Visibility == Visibility.Visible)
             max = Math.Max(max, MeasureTextBlockWidth(ParallelDuplicateText));
+        if (UpdateLineLink.Visibility == Visibility.Visible)
+            max = Math.Max(max, MeasureUpdateLineLinkWidth());
 
         max = Math.Max(max, SpoilerHeaderLayoutMetrics.TitleMinWidth);
         return Math.Ceiling(max);
+    }
+
+    private double MeasureUpdateLineLinkWidth()
+    {
+        UpdateLineLink.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        return UpdateLineLink.DesiredSize.Width;
     }
 
     private static double MeasureTextBlockWidth(TextBlock textBlock)
@@ -279,7 +287,12 @@ public sealed partial class SpoilerHeaderGrid : UserControl
         }
 
         _updateLineAction = onLineClick;
-        UpdateLineLink.Content = lineText;
+        UpdateLineLink.Content = new TextBlock
+        {
+            Text = lineText,
+            TextWrapping = TextWrapping.WrapWholeWords,
+            TextTrimming = TextTrimming.None
+        };
         UpdateLineLink.Foreground = AccentSubtitleBrushService.ResolveAccent();
         UpdateLineLink.Visibility = Visibility.Visible;
         UpdateLineLink.Click -= OnUpdateLineClick;

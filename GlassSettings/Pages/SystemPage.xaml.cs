@@ -19,8 +19,7 @@ public sealed partial class SystemPage : Page
     private PlatformSchedulerRow? _glassRowX64;
     private SettingsNavigateRow? _ogNav;
     private SettingsNavigateRow? _glassNav;
-    private SettingsNavigateRow? _glassNavX86;
-    private SettingsNavigateRow? _glassNavX64;
+    private SystemDualGlassPlatformControls? _glassDualControls;
     private bool _shellSuppress;
     private bool _updateNoticeSubscribed;
 
@@ -44,35 +43,19 @@ public sealed partial class SystemPage : Page
 
         if (GlassPlatformNames.ShowDualGlassPlatformUi)
         {
-            _glassRowX86 = new PlatformSchedulerRow
-            {
-                Kind = PlatformSchedulerKind.Glass,
-                GlassArch = GlassPlatformArch.X86
-            };
-            _glassRowX64 = new PlatformSchedulerRow
-            {
-                Kind = PlatformSchedulerKind.Glass,
-                GlassArch = GlassPlatformArch.X64
-            };
+            _glassDualControls = new SystemDualGlassPlatformControls();
+            _glassRowX86 = _glassDualControls.RowX86;
+            _glassRowX64 = _glassDualControls.RowX64;
 
-            _glassNavX86 = NavHost.AddNavigateSection(
-                "glass-x86",
-                GlassSettingsResources.Get("System_RowGlassPlatformX86"),
+            _glassNav = NavHost.AddNavigateSection(
+                "glass",
+                GlassSettingsResources.Get("System_RowGlassPlatform"),
                 GlassSettingsResources.Get("System_RowGlassPlatformDesc"),
-                canNavigate: () => _glassRowX86.TaskExists,
+                canNavigate: () => _glassRowX86.TaskExists || _glassRowX64.TaskExists,
                 onNavigate: PushGlassSettingsHub);
-            _glassRowX86.AttachToNavigateRow(_glassNavX86);
-
-            _glassNavX64 = NavHost.AddNavigateSection(
-                "glass-x64",
-                GlassSettingsResources.Get("System_RowGlassPlatformX64"),
-                GlassSettingsResources.Get("System_RowGlassPlatformDesc"),
-                canNavigate: () => _glassRowX64.TaskExists,
-                onNavigate: PushGlassSettingsHub);
-            _glassRowX64.AttachToNavigateRow(_glassNavX64);
-
-            _glassRowX86.StateChanged += (_, _) => RefreshShellRow();
-            _glassRowX64.StateChanged += (_, _) => RefreshShellRow();
+            _glassNav.HeaderActions = _glassDualControls;
+            _glassNav.TrailingContent = _glassDualControls.TrailingGates;
+            _glassDualControls.StateChanged += (_, _) => RefreshShellRow();
         }
         else
         {
@@ -132,8 +115,6 @@ public sealed partial class SystemPage : Page
         RefreshUpdateNotice();
         _ogNav?.RefreshHeaderLayout();
         _glassNav?.RefreshHeaderLayout();
-        _glassNavX86?.RefreshHeaderLayout();
-        _glassNavX64?.RefreshHeaderLayout();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -185,6 +166,10 @@ public sealed partial class SystemPage : Page
 
         Core.Registry.GlassSettingsRegistry.WriteUpdateCheckInterval(
             (Core.Registry.UpdateCheckInterval)UpdateIntervalCombo.SelectedIndex);
+
+        _ = ProductUpdateCoordinator.RefreshGlassFromNetworkAsync();
+        if (OpenGlassUiPolicy.IsFeatureExposedInUi())
+            _ = ProductUpdateCoordinator.RefreshOpenGlassFromNetworkAsync();
     }
 
     private void OnOpenGlassUiPolicyChanged(object? sender, EventArgs e) =>
@@ -260,6 +245,7 @@ public sealed partial class SystemPage : Page
                 ? string.Format(GlassSettingsResources.Get("System_OpenGlassUpdateSpoilerFormat"), pending!.Version)
                 : null,
             hasUpdate ? () => _ = ProductUpdateCoordinator.OpenPendingOpenGlassDownloadAsync() : null);
+        _ogNav.RefreshHeaderLayout();
     }
 
     private void RefreshGlassRowSubtitle()
@@ -274,8 +260,7 @@ public sealed partial class SystemPage : Page
             : null;
 
         _glassNav?.SetUpdateLine(hasUpdate, line, click);
-        _glassNavX86?.SetUpdateLine(hasUpdate, line, click);
-        _glassNavX64?.SetUpdateLine(hasUpdate, line, click);
+        _glassNav?.RefreshHeaderLayout();
     }
 
     private async void RefreshUpdateNotice()
@@ -300,7 +285,7 @@ public sealed partial class SystemPage : Page
         if (ProductUpdateCoordinator.ShouldShowGlassNotice
             && ProductUpdateCoordinator.GetPendingGlass() is { } pendingGlass)
         {
-            var installedGlass = PlatformModuleVersions.GetHighestFileVersion();
+            var installedGlass = PlatformModuleVersions.GetGlassPlatformReleaseVersion();
             if (PlatformModuleVersions.IsPlaceholderVersion(installedGlass))
                 installedGlass = "—";
 
@@ -342,12 +327,12 @@ public sealed partial class SystemPage : Page
         }
 
         _ogNav!.CanNavigate = _ogRow!.TaskExists;
-        if (_glassNavX86 is not null && _glassNavX64 is not null)
+        if (_glassDualControls is not null && _glassNav is not null)
         {
-            var x86Locked = GlassPlatformUiPolicy.IsX86DualUiControlsLocked();
-            _glassNavX86.IsEnabled = !x86Locked;
-            _glassNavX86.CanNavigate = _glassRowX86!.TaskExists;
-            _glassNavX64.CanNavigate = _glassRowX64!.TaskExists;
+            // Snapshot dual x64 может отставать — спойлер и gate должны совпадать с планировщиком.
+            var anyTask = GlassPlatformService.GlassAutorunTaskExists(GlassPlatformArch.X86)
+                || GlassPlatformService.GlassAutorunTaskExists(GlassPlatformArch.X64);
+            _glassNav.CanNavigate = anyTask;
         }
         else if (_glassNav is not null)
         {

@@ -1776,7 +1776,7 @@ public sealed partial class HomePage : Page
             && ProductUpdateCoordinator.GetPendingGlass() is { } pendingGlassNotice)
         {
             showUpdate = true;
-            var installedGlass = PlatformModuleVersions.GetHighestFileVersion();
+            var installedGlass = PlatformModuleVersions.GetGlassPlatformReleaseVersion();
             if (PlatformModuleVersions.IsPlaceholderVersion(installedGlass))
                 installedGlass = "—";
             updateMessage = string.Format(

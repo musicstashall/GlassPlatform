@@ -1,3 +1,7 @@
+# SecureUxTheme (Glass payload)
+
+Бинарники из официального MSI [namazso/SecureUxTheme](https://github.com/namazso/SecureUxTheme) (x86/x64), для каталога `SecureUxTheme\` в MSI платформы. Обновление — распаковка `/a` соответствующего MSI в `SecureUxTheme\x86\` / `x64\`.
+
 # WebView2 SDK
 
 Vendored from the official NuGet package:

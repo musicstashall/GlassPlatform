@@ -121,6 +121,7 @@ extern "C"
         void* outResults,
         DWORD maxResults,
         DWORD* outCount) noexcept;
+    void CALLBACK GlassSettings_UnlockerW(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show);
     __declspec(dllexport) BOOL WINAPI GlassSettings_IsOpenGlassNotificationWindowPresent() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_IsOpenGlassBackdropPipelineActive() noexcept;
     /// Pipeline/модуль OG или служба/задача — можно писать Composition/DWM policy.

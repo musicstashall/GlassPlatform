@@ -95,15 +95,75 @@ public static class PlatformModuleVersions
     public static string GetHighestFileVersion()
     {
         string? best = null;
-        foreach (var module in GetAllDetailed())
+        foreach (var fileVersion in EnumerateInstalledModuleFileVersions())
         {
-            if (IsPlaceholder(module.FileVersion))
-                continue;
-            if (best is null || GlassReleaseUpdateService.IsInstalledOlderThan(best, module.FileVersion))
-                best = module.FileVersion;
+            if (best is null || GlassReleaseUpdateService.IsInstalledOlderThan(best, fileVersion))
+                best = fileVersion;
         }
 
         return best ?? GlassSettingsResources.Get("Modules_Unavailable");
+    }
+
+    /// <summary>
+    /// Версия релиза платформы для проверки обновлений: поле <c>glass</c> в version.json = FileVersion GlassCore.dll.
+    /// Берётся наименьшая GlassCore среди корней x64/x86 — обновление, если хотя бы одна битность отстаёт.
+    /// </summary>
+    public static string GetGlassPlatformReleaseVersion()
+    {
+        string? oldest = null;
+        foreach (var fileVersion in EnumerateGlassCoreFileVersionsByArch())
+        {
+            if (oldest is null || GlassReleaseUpdateService.IsInstalledOlderThan(fileVersion, oldest))
+                oldest = fileVersion;
+        }
+
+        return oldest ?? GlassSettingsResources.Get("Modules_Unavailable");
+    }
+
+    /// <summary>
+    /// Версии модулей по корням установки (x64 и x86 на 64-bit OS).
+    /// </summary>
+    private static IEnumerable<string> EnumerateInstalledModuleFileVersions()
+    {
+        foreach (var arch in GetVersionProbeArchitectures())
+        {
+            foreach (var name in ModuleNames)
+            {
+                var path = GlassModulePath.Resolve(name, arch);
+                if (path is null || !File.Exists(path))
+                    continue;
+
+                var fileVersion = ReadFileVersion(path);
+                if (!IsPlaceholder(fileVersion))
+                    yield return fileVersion;
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateGlassCoreFileVersionsByArch()
+    {
+        foreach (var arch in GetVersionProbeArchitectures())
+        {
+            var path = GlassModulePath.Resolve("GlassCore.dll", arch);
+            if (path is null || !File.Exists(path))
+                continue;
+
+            var fileVersion = ReadFileVersion(path);
+            if (!IsPlaceholder(fileVersion))
+                yield return fileVersion;
+        }
+    }
+
+    private static IEnumerable<GlassPlatformArch> GetVersionProbeArchitectures()
+    {
+        if (Environment.Is64BitOperatingSystem)
+        {
+            yield return GlassPlatformArch.X64;
+            yield return GlassPlatformArch.X86;
+            yield break;
+        }
+
+        yield return GlassPlatformArch.X86;
     }
 
     public static bool IsPlaceholderVersion(string value) => IsPlaceholder(value);

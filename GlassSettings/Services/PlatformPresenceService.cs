@@ -58,6 +58,22 @@ public sealed class PlatformPresenceService : IDisposable
         RefreshSnapshotFromSharedMemory(forceNotify: true, raiseEvent: true);
     }
 
+    /// <summary>
+    /// Прямые запросы планировщика/COM на текущем потоке — без ожидания watcher.
+    /// После install/uninstall gate иначе QueryTaskState читает устаревший TaskExists и тумблер «отскакивает».
+    /// </summary>
+    public void RefreshSnapshotSynchronouslyFromDirectQueries()
+    {
+        var snap = BuildFallbackSnapshot();
+        lock (_gate)
+        {
+            _snapshot = snap;
+            _lastRevision = snap.Revision;
+        }
+
+        _lastWatcherSnapshot = snap;
+    }
+
     public void NotifyLifecycleChanged()
     {
         NativeHostInterop.InvalidateOGCache();

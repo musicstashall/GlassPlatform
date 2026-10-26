@@ -12,6 +12,7 @@ public sealed class GlassReleaseInfo
 
 /// <summary>
 /// Последний релиз Glass: https://github.com/musicstashall/GlassPlatform/releases/latest/download/version.json
+/// Поле <c>glass</c> — FileVersion GlassCore.dll; <c>url</c> — страница релиза (тег setup).
 /// </summary>
 public static class GlassReleaseUpdateService
 {

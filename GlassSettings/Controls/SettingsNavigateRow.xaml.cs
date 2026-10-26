@@ -90,6 +90,9 @@ public sealed partial class SettingsNavigateRow : UserControl, ISettingsUnsavedS
         set => SetValue(CanNavigateProperty, value);
     }
 
+    /// <summary>Строка планировщика на этой navigate-строке (OpenGlass / single Glass).</summary>
+    public PlatformSchedulerRow? PlatformSchedulerOwner { get; set; }
+
     public SettingsCommitScope? UnsavedScope
     {
         get => (SettingsCommitScope?)GetValue(UnsavedScopeProperty);
@@ -200,7 +203,14 @@ public sealed partial class SettingsNavigateRow : UserControl, ISettingsUnsavedS
 
     private void EnsureTrailingGateEnabled()
     {
-        if (HeaderChrome.Trailing is GlassSettingsLabeledToggleSwitch gate)
+        if (PlatformSchedulerOwner?.IsInstallGateBusy == true)
+            return;
+
+        // Dual Glass: trailing — StackPanel с двумя gate; их IsEnabled ведёт PlatformSchedulerRow.
+        if (HeaderChrome.Trailing is not GlassSettingsLabeledToggleSwitch gate)
+            return;
+
+        if (!CanNavigate)
             gate.IsEnabled = true;
     }
 

@@ -1,6 +1,9 @@
 #include <Windows.h>
 
 #include <ForceUnloadAgent.h>
+#include <cstdio>
+#include <string>
+#include <vector>
 #include <ForceUnloadGlassModules.h>
 #include <GlassModulePath.h>
 
@@ -29,6 +32,340 @@ namespace
             : GlassShared::GlassPlatformTask::PlatformArch::X64;
     }
 
+    [[nodiscard]] bool FileExists(const std::wstring& path) noexcept
+    {
+        const DWORD attrs = GetFileAttributesW(path.c_str());
+        return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    }
+
+    [[nodiscard]] std::wstring NativeDllPath(bool wantX64) noexcept
+    {
+        using PA = GlassShared::GlassPlatformTask::PlatformArch;
+        std::wstring root = GlassShared::GlassPlatformTask::TryGetAutorunGlassCompatInstallRoot(
+            wantX64 ? PA::X64 : PA::X86);
+        if (root.empty())
+        {
+            wchar_t buf[MAX_PATH]{};
+            const wchar_t* env = wantX64 ? L"ProgramW6432" : L"ProgramFiles(x86)";
+            if (GetEnvironmentVariableW(env, buf, MAX_PATH) == 0)
+                return {};
+            root = buf;
+            root += L"\\GlassPlatform";
+        }
+        if (!root.empty() && root.back() != L'\\')
+            root += L'\\';
+        root += L"GlassSettings\\GlassSettings.Native.dll";
+        return FileExists(root) ? root : std::wstring{};
+    }
+
+    [[nodiscard]] std::wstring Rundll32Path(bool wantX64Host) noexcept
+    {
+        wchar_t windows[MAX_PATH]{};
+        if (!GetWindowsDirectoryW(windows, MAX_PATH))
+            return {};
+#ifdef _WIN64
+        if (!wantX64Host)
+        {
+            wchar_t wow[MAX_PATH]{};
+            if (GetSystemWow64DirectoryW(wow, MAX_PATH) == 0)
+                return {};
+            return std::wstring(wow) + L"\\rundll32.exe";
+        }
+        return std::wstring(windows) + L"\\System32\\rundll32.exe";
+#else
+        if (wantX64Host)
+        {
+            const std::wstring sysnative = std::wstring(windows) + L"\\Sysnative\\rundll32.exe";
+            if (FileExists(sysnative))
+                return sysnative;
+        }
+        return std::wstring(windows) + L"\\System32\\rundll32.exe";
+#endif
+    }
+
+    // rundll32 сам показывает MessageBox, если экспорта нет. Не запускать такой DLL.
+    [[nodiscard]] bool PeHasUnlocker(const std::wstring& path, bool wantX64) noexcept
+    {
+        HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return false;
+        LARGE_INTEGER size{};
+        if (!GetFileSizeEx(file, &size) || size.QuadPart < 512 || size.QuadPart > 64 * 1024 * 1024)
+        {
+            CloseHandle(file);
+            return false;
+        }
+        HANDLE mapping = CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
+        CloseHandle(file);
+        if (!mapping)
+            return false;
+        const auto* base = static_cast<const BYTE*>(MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0));
+        CloseHandle(mapping);
+        if (!base)
+            return false;
+        bool ok = false;
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+        const auto fileSize = static_cast<size_t>(size.QuadPart);
+        if (dos->e_magic == IMAGE_DOS_SIGNATURE && dos->e_lfanew > 0
+            && static_cast<size_t>(dos->e_lfanew) + sizeof(IMAGE_NT_HEADERS64) < fileSize)
+        {
+            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+            const WORD expect = wantX64 ? IMAGE_FILE_MACHINE_AMD64 : IMAGE_FILE_MACHINE_I386;
+            if (nt->Signature == IMAGE_NT_SIGNATURE && nt->FileHeader.Machine == expect)
+            {
+                DWORD exportRva = 0;
+                const IMAGE_SECTION_HEADER* section = nullptr;
+                const WORD sectionCount = nt->FileHeader.NumberOfSections;
+                if (expect == IMAGE_FILE_MACHINE_AMD64)
+                {
+                    const auto* nt64 = reinterpret_cast<const IMAGE_NT_HEADERS64*>(nt);
+                    exportRva = nt64->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+                    section = IMAGE_FIRST_SECTION(nt64);
+                }
+                else
+                {
+                    const auto* nt32 = reinterpret_cast<const IMAGE_NT_HEADERS32*>(nt);
+                    exportRva = nt32->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+                    section = IMAGE_FIRST_SECTION(nt32);
+                }
+                auto rvaToOff = [&](DWORD rva) -> const BYTE* {
+                    if (!section || rva == 0 || sectionCount == 0 || sectionCount > 96)
+                        return nullptr;
+                    const auto* sectionBytes = reinterpret_cast<const BYTE*>(section);
+                    if (sectionBytes < base
+                        || sectionBytes + static_cast<size_t>(sectionCount) * sizeof(IMAGE_SECTION_HEADER) > base + fileSize)
+                        return nullptr;
+                    for (WORD i = 0; i < sectionCount; ++i)
+                    {
+                        const DWORD va = section[i].VirtualAddress;
+                        const DWORD raw = section[i].SizeOfRawData;
+                        if (rva < va || rva >= va + raw)
+                            continue;
+                        const size_t off = static_cast<size_t>(section[i].PointerToRawData) + (rva - va);
+                        if (off >= fileSize)
+                            return nullptr;
+                        return base + off;
+                    }
+                    return nullptr;
+                };
+                const auto* exp = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(rvaToOff(exportRva));
+                const auto* names = exp ? reinterpret_cast<const DWORD*>(rvaToOff(exp->AddressOfNames)) : nullptr;
+                const DWORD nameCount = exp && exp->NumberOfNames < 8192 ? exp->NumberOfNames : 0;
+                const size_t namesOff = names ? static_cast<size_t>(reinterpret_cast<const BYTE*>(names) - base) : 0;
+                if (names && namesOff + static_cast<size_t>(nameCount) * sizeof(DWORD) <= fileSize)
+                {
+                    for (DWORD i = 0; i < nameCount; ++i)
+                    {
+                        const char* item = reinterpret_cast<const char*>(rvaToOff(names[i]));
+                        if (!item)
+                            continue;
+                        const char kExport[] = "GlassSettings_UnlockerW";
+                        const size_t off = static_cast<size_t>(item - reinterpret_cast<const char*>(base));
+                        bool same = off + sizeof(kExport) <= fileSize;
+                        for (size_t n = 0; same && kExport[n]; ++n)
+                            same = item[n] == kExport[n];
+                        if (same && item[sizeof(kExport) - 1] == '\0')
+                        {
+                            ok = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        UnmapViewOfFile(base);
+        return ok;
+    }
+
+    // exit code процесса rundll32. 0 — успех. DLL грузится в rundll32, не в целевой процесс.
+    [[nodiscard]] DWORD RunUnlocker(bool wantX64Dll, const std::wstring& args) noexcept
+    {
+        const std::wstring dll = NativeDllPath(wantX64Dll);
+        const std::wstring rundll = Rundll32Path(wantX64Dll);
+        if (dll.empty() || rundll.empty() || !PeHasUnlocker(dll, wantX64Dll))
+            return 1;
+        std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\",GlassSettings_UnlockerW " + args;
+        std::vector<wchar_t> buf(cmd.begin(), cmd.end());
+        buf.push_back(L'\0');
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION pi{};
+        if (!CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                nullptr, nullptr, &si, &pi))
+            return GetLastError() ? GetLastError() : 1;
+        WaitForSingleObject(pi.hProcess, 120000);
+        DWORD code = 1;
+        GetExitCodeProcess(pi.hProcess, &code);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return code;
+    }
+
+    [[nodiscard]] std::wstring ModuleNamesFromBits(std::uint32_t bits) noexcept
+    {
+        using namespace Shared::InjectModuleScan;
+        std::wstring text;
+        auto add = [&](std::uint32_t flag, const wchar_t* name) {
+            if ((bits & flag) == 0) return;
+            if (!text.empty()) text += L", ";
+            text += name;
+        };
+        add(ModuleCompat, L"GlassCompat.dll");
+        add(ModuleCore, L"GlassCore.dll");
+        add(ModuleWnd, L"WndCompat.dll");
+        add(ModuleUICompat, L"UICompat.dll");
+        add(ModuleExplorer, L"ExplorerCompat.dll");
+        add(ModuleTaskbar, L"TaskbarCompat.dll");
+        return text;
+    }
+
+    [[nodiscard]] bool WriteScanTsv(const wchar_t* outPath) noexcept
+    {
+        Shared::InjectModuleScan::Result results[Shared::InjectModuleScan::kMaxResults]{};
+        DWORD count = 0;
+        if (!Shared::InjectModuleScan::Scan(
+                nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count))
+            return false;
+        FILE* file = nullptr;
+        if (_wfopen_s(&file, outPath, L"wb") != 0 || !file)
+            return false;
+        for (DWORD i = 0; i < count; ++i)
+        {
+            const std::wstring modules = ModuleNamesFromBits(results[i].moduleBits);
+            if (modules.empty())
+                continue;
+            char line[640]{};
+            const int n = std::snprintf(line, sizeof(line), "%lu\t",
+                static_cast<unsigned long>(results[i].pid));
+            if (n <= 0)
+                continue;
+            std::string row(line);
+            auto append = [&](const wchar_t* wide) {
+                if (!wide || !wide[0]) return;
+                const int need = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+                if (need <= 1) return;
+                std::string chunk(static_cast<size_t>(need - 1), '\0');
+                WideCharToMultiByte(CP_UTF8, 0, wide, -1, chunk.data(), need, nullptr, nullptr);
+                row += chunk;
+            };
+            append(results[i].exeName);
+            row += '\t';
+            append(modules.c_str());
+            row += '\n';
+            fwrite(row.data(), 1, row.size(), file);
+        }
+        fclose(file);
+        return true;
+    }
+
+    [[nodiscard]] std::uint32_t BitsFromNames(const std::wstring& modules) noexcept
+    {
+        using namespace Shared::InjectModuleScan;
+        std::uint32_t bits = 0;
+        auto hit = [&](const wchar_t* name, std::uint32_t flag) {
+            if (modules.find(name) != std::wstring::npos)
+                bits |= flag;
+        };
+        hit(L"GlassCompat.dll", ModuleCompat);
+        hit(L"GlassCore.dll", ModuleCore);
+        hit(L"WndCompat.dll", ModuleWnd);
+        hit(L"UICompat.dll", ModuleUICompat);
+        hit(L"ExplorerCompat.dll", ModuleExplorer);
+        hit(L"TaskbarCompat.dll", ModuleTaskbar);
+        return bits;
+    }
+
+    void MergeScanResult(
+        Shared::InjectModuleScan::Result* out,
+        DWORD maxResults,
+        DWORD* count,
+        const Shared::InjectModuleScan::Result& add) noexcept
+    {
+        if (!out || !count || add.pid == 0 || add.moduleBits == 0)
+            return;
+        for (DWORD i = 0; i < *count; ++i)
+        {
+            if (out[i].pid != add.pid)
+                continue;
+            out[i].moduleBits |= add.moduleBits;
+            if (!out[i].exeName[0] && add.exeName[0])
+                wcsncpy_s(out[i].exeName, add.exeName, _TRUNCATE);
+            return;
+        }
+        if (*count >= maxResults)
+            return;
+        out[(*count)++] = add;
+    }
+
+    // WOW64 GS не видит native x64 через Module32 — тот же скан делает x64 Native.dll.
+    [[nodiscard]] bool MergeOppositeX64Scan(
+        Shared::InjectModuleScan::Result* out,
+        DWORD maxResults,
+        DWORD* count,
+        const DWORD* onlyPids,
+        DWORD onlyCount) noexcept
+    {
+        wchar_t tempDir[MAX_PATH]{};
+        wchar_t outPath[MAX_PATH]{};
+        if (!GetTempPathW(MAX_PATH, tempDir) || !GetTempFileNameW(tempDir, L"gsu", 0, outPath))
+            return false;
+        const DWORD code = RunUnlocker(true, L"/scanGlassModules \"" + std::wstring(outPath) + L"\"");
+        HANDLE file = CreateFileW(outPath, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        bool any = false;
+        if (file != INVALID_HANDLE_VALUE)
+        {
+            DWORD size = GetFileSize(file, nullptr);
+            std::string bytes(size && size != INVALID_FILE_SIZE ? size : 0, '\0');
+            DWORD got = 0;
+            if (!bytes.empty())
+                ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &got, nullptr);
+            CloseHandle(file);
+            bytes.resize(got);
+            int wideCount = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
+            std::wstring text(wideCount > 0 ? static_cast<size_t>(wideCount) : 0, L'\0');
+            if (wideCount > 0)
+                MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), text.data(), wideCount);
+            size_t pos = 0;
+            while (pos < text.size())
+            {
+                size_t end = text.find(L'\n', pos);
+                if (end == std::wstring::npos) end = text.size();
+                std::wstring line = text.substr(pos, end - pos);
+                if (!line.empty() && line.back() == L'\r') line.pop_back();
+                pos = end + 1;
+                const size_t tab1 = line.find(L'\t');
+                const size_t tab2 = tab1 == std::wstring::npos ? std::wstring::npos : line.find(L'\t', tab1 + 1);
+                if (tab1 == std::wstring::npos || tab2 == std::wstring::npos)
+                    continue;
+                Shared::InjectModuleScan::Result row{};
+                row.pid = static_cast<DWORD>(wcstoul(line.substr(0, tab1).c_str(), nullptr, 10));
+                wcsncpy_s(row.exeName, line.substr(tab1 + 1, tab2 - tab1 - 1).c_str(), _TRUNCATE);
+                row.moduleBits = BitsFromNames(line.substr(tab2 + 1));
+                if (onlyPids && onlyCount > 0)
+                {
+                    bool wanted = false;
+                    for (DWORD n = 0; n < onlyCount; ++n)
+                    {
+                        if (onlyPids[n] == row.pid)
+                        {
+                            wanted = true;
+                            break;
+                        }
+                    }
+                    if (!wanted)
+                        continue;
+                }
+                MergeScanResult(out, maxResults, count, row);
+                any = true;
+            }
+        }
+        DeleteFileW(outPath);
+        return code == 0 || any;
+    }
+
     [[nodiscard]] BOOL ForceUnloadWithArchRouting(DWORD pid) noexcept
     {
         const auto result = Shared::ForceUnloadGlassModules::ForceUnload(pid);
@@ -38,6 +375,8 @@ namespace
             return TRUE;
         case Shared::ForceUnloadGlassModules::ForceUnloadResult::NeedsX86Agent:
         {
+            if (RunUnlocker(false, L"/forceUnload " + std::to_wstring(pid)) == 0)
+                return TRUE;
             const std::wstring root = Shared::ForceUnloadAgent::TryGetX86InstallRoot();
             if (root.empty())
                 return FALSE;
@@ -48,6 +387,29 @@ namespace
         default:
             return FALSE;
         }
+    }
+}
+
+namespace
+{
+    [[nodiscard]] BOOL UnloadPid(DWORD pid) noexcept
+    {
+#if !defined(_WIN64)
+        BOOL selfWow = FALSE;
+        if (pid != 0 && IsWow64Process(GetCurrentProcess(), &selfWow) && selfWow)
+        {
+            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (process)
+            {
+                BOOL targetWow = TRUE;
+                const BOOL ok = IsWow64Process(process, &targetWow);
+                CloseHandle(process);
+                if (ok && !targetWow)
+                    return RunUnlocker(true, L"/forceUnload " + std::to_wstring(pid)) == 0 ? TRUE : FALSE;
+            }
+        }
+#endif
+        return ForceUnloadWithArchRouting(pid);
     }
 }
 
@@ -132,18 +494,20 @@ extern "C"
         // Force: remote FreeLibrary (мёртвый residual / OS-pin без слушателя) — Unlocker-стиль.
         if (Shared::InjectProcessMap::SignalUnloadRequest(pid))
             return TRUE;
-        return ForceUnloadWithArchRouting(pid);
+        return UnloadPid(pid);
     }
 
     __declspec(dllexport) BOOL WINAPI GlassSettings_ForceUnloadProcess(DWORD pid) noexcept
     {
-        return ForceUnloadWithArchRouting(pid);
+        return UnloadPid(pid);
     }
 
     /// GS x64: x86 InstallPath или /TR x86-задачи + GlassCompat.dll для SysWOW64 rundll32 /forceUnload.
     __declspec(dllexport) BOOL WINAPI GlassSettings_IsX86ForceUnloadAgentAvailable() noexcept
     {
 #if defined(_WIN64)
+        if (!NativeDllPath(false).empty())
+            return TRUE;
         return Shared::ForceUnloadAgent::TryGetX86InstallRoot().empty() ? FALSE : TRUE;
 #else
         return TRUE;
@@ -212,6 +576,84 @@ extern "C"
             static_cast<Shared::InjectModuleScan::Result*>(outResults),
             maxResults,
             outCount) ? TRUE : FALSE;
+#if !defined(_WIN64)
+        BOOL selfWow = FALSE;
+        if (IsWow64Process(GetCurrentProcess(), &selfWow) && selfWow)
+        {
+            auto* rows = static_cast<Shared::InjectModuleScan::Result*>(outResults);
+            if (MergeOppositeX64Scan(rows, maxResults, outCount, pids, pidsCount))
+                return TRUE;
+        }
+#endif
         return ok;
     }
+}
+
+namespace
+{
+    [[nodiscard]] std::wstring UnlockerToken(wchar_t*& cursor) noexcept
+    {
+        while (cursor && *cursor == L' ')
+            ++cursor;
+        if (!cursor || !*cursor)
+            return {};
+        if (*cursor == L'"')
+        {
+            ++cursor;
+            const wchar_t* start = cursor;
+            while (*cursor && *cursor != L'"')
+                ++cursor;
+            std::wstring token(start, static_cast<size_t>(cursor - start));
+            if (*cursor == L'"')
+                ++cursor;
+            return token;
+        }
+        const wchar_t* start = cursor;
+        while (*cursor && *cursor != L' ')
+            ++cursor;
+        return std::wstring(start, static_cast<size_t>(cursor - start));
+    }
+}
+
+// rundll32 передаёт хвост командной строки как ANSI (char*), даже если имя
+// экспорта заканчивается на W. На Windows 11 26100 указатель "/scan..." читается
+// как wchar 0x732F, глагол не совпадает, выход 1. Настоящий UTF-16 начинается с L'/'.
+std::wstring UnlockerCommandText(LPWSTR cmdLine) noexcept
+{
+    if (!cmdLine || !cmdLine[0])
+        return {};
+    const auto first = static_cast<unsigned>(cmdLine[0]);
+    const bool wideAscii = first < 128
+        && (cmdLine[0] == L'/' || cmdLine[0] == L'"' || cmdLine[0] == L' ');
+    if (wideAscii)
+        return cmdLine;
+    const char* ansi = reinterpret_cast<const char*>(cmdLine);
+    const int n = MultiByteToWideChar(CP_ACP, 0, ansi, -1, nullptr, 0);
+    if (n <= 1)
+        return {};
+    std::wstring text(static_cast<size_t>(n), L'\0');
+    if (MultiByteToWideChar(CP_ACP, 0, ansi, -1, text.data(), n) <= 0)
+        return {};
+    if (!text.empty() && text.back() == L'\0')
+        text.pop_back();
+    return text;
+}
+
+extern "C" __declspec(dllexport) void CALLBACK GlassSettings_UnlockerW(HWND, HINSTANCE, LPWSTR cmdLine, int)
+{
+    std::wstring text = UnlockerCommandText(cmdLine);
+    wchar_t* cursor = text.empty() ? const_cast<wchar_t*>(L"") : text.data();
+    const std::wstring verb = UnlockerToken(cursor);
+    if (_wcsicmp(verb.c_str(), L"/scanGlassModules") == 0)
+    {
+        const std::wstring path = UnlockerToken(cursor);
+        ExitProcess(path.empty() || !WriteScanTsv(path.c_str()) ? 2 : 0);
+    }
+    if (_wcsicmp(verb.c_str(), L"/forceUnload") == 0)
+    {
+        const std::wstring pidText = UnlockerToken(cursor);
+        const DWORD pid = static_cast<DWORD>(wcstoul(pidText.c_str(), nullptr, 10));
+        ExitProcess(pid != 0 && UnloadPid(pid) ? 0 : 3);
+    }
+    ExitProcess(1);
 }
