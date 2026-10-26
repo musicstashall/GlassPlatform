@@ -105,20 +105,23 @@ public static class PlatformModuleVersions
     }
 
     /// <summary>
-    /// Версия релиза платформы для проверки обновлений: поле <c>glass</c> в version.json = FileVersion GlassCore.dll.
-    /// Берётся наименьшая GlassCore среди корней x64/x86 — обновление, если хотя бы одна битность отстаёт.
+    /// Версия комплекта платформы для проверки обновлений: ProductVersion модулей (= GlassBundleVersion).
+    /// На 64-bit OS берётся наименьшая среди x64/x86 — обновление, если хотя бы одна битность отстаёт.
     /// </summary>
     public static string GetGlassPlatformReleaseVersion()
     {
         string? oldest = null;
-        foreach (var fileVersion in EnumerateGlassCoreFileVersionsByArch())
+        foreach (var productVersion in EnumerateInstalledModuleProductVersions())
         {
-            if (oldest is null || GlassReleaseUpdateService.IsInstalledOlderThan(fileVersion, oldest))
-                oldest = fileVersion;
+            if (oldest is null || GlassReleaseUpdateService.IsInstalledOlderThan(productVersion, oldest))
+                oldest = productVersion;
         }
 
         return oldest ?? GlassSettingsResources.Get("Modules_Unavailable");
     }
+
+    /// <summary>Наибольший FileVersion среди модулей — только диагностика, не версия комплекта.</summary>
+    public static string GetHighestModuleFileVersion() => GetHighestFileVersion();
 
     /// <summary>
     /// Версии модулей по корням установки (x64 и x86 на 64-bit OS).
@@ -140,7 +143,7 @@ public static class PlatformModuleVersions
         }
     }
 
-    private static IEnumerable<string> EnumerateGlassCoreFileVersionsByArch()
+    private static IEnumerable<string> EnumerateInstalledModuleProductVersions()
     {
         foreach (var arch in GetVersionProbeArchitectures())
         {
@@ -148,9 +151,9 @@ public static class PlatformModuleVersions
             if (path is null || !File.Exists(path))
                 continue;
 
-            var fileVersion = ReadFileVersion(path);
-            if (!IsPlaceholder(fileVersion))
-                yield return fileVersion;
+            var productVersion = ReadProductVersion(path);
+            if (!IsPlaceholder(productVersion))
+                yield return productVersion;
         }
     }
 

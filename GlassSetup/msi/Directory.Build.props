@@ -1,8 +1,10 @@
 <Project>
-  <!-- WiX не подхватывает корневой Directory.Build.props — задаём SolutionRoot здесь (GlassSetup\msi → корень репо). -->
+  <!-- WiX: SolutionRoot и версия продукта из корня репо + активная сессия комплекта. -->
   <PropertyGroup>
     <SolutionRoot Condition="'$(SolutionRoot)' == ''">$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..'))))</SolutionRoot>
   </PropertyGroup>
+  <Import Project="$([System.IO.Path]::Combine('$(SolutionRoot)', 'Directory.Build.props'))" Condition="'$(GlassProductVersion)' == ''" />
+  <Import Project="$(SolutionRoot)Build\GlassBundleSession.props" Condition="Exists('$(SolutionRoot)Build\GlassBundleSession.props')" />
 
   <!-- Одна MSI-архитектура на .wixproj; без явных ProjectConfiguration VS/HeatWave показывает x64 и x86. -->
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x86'">

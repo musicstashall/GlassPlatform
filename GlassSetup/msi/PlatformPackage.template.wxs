@@ -13,6 +13,7 @@
 
     <Icon Id="GlassProductIcon" SourceFile="$(var.GlassSetupIcon)" />
     <Property Id="ARPPRODUCTICON" Value="GlassProductIcon" />
+    <Property Id="GLASSBUNDLEVERSION" Value="$(var.GlassMsiBundleVersion)" Hidden="yes" />
 
     <Feature Id="MainFeature" Title="$(var.GlassPlatformTitle)" Level="1">
       <ComponentGroupRef Id="GlassPayloadFiles" />

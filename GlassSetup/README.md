@@ -17,4 +17,21 @@ msbuild GlassProject.sln /t:GlassSetup /p:Configuration=Debug /p:Platform=x86
 
 **Выход:** `Build\GlassSetup\Debug\GlassSetup.exe` или `Build\GlassSetup\Release\GlassSetup.exe`.
 
+## Версия комплекта (Release)
+
+Полный релизный комплект получает один номер вида `2.0.0.0042` (версия комплекта / ProductVersion модулей и GlassSetup). Счётчик модулей по-прежнему задаёт **FileVersion** каждой DLL.
+
+1. **Release | x64** — собрать **весь** `GlassProject.sln` (создаётся сессия, выделяется номер комплекта, MSI x64).
+2. **Release | x86** — снова собрать **весь** solution (MSI x86 + GlassSetup с тем же номером; сессия финализируется).
+
+Локальный счётчик: `Build\GlassBundleBuildNumber.txt`. Активная сессия: `Build\GlassBundleSession.json` / `.props`. Первый номер после клона — **0042** (`GlassBundleBuildNumberSeed` в `Directory.Build.props`). CI может передать `/p:GlassBundleBuildNumber=N`.
+
+Отмена незавершённой сессии (номер не возвращается в счётчик):
+
+```bat
+msbuild GlassProject.sln /t:GlassBundleCancelSession /p:Configuration=Release /p:Platform=x64
+```
+
+Сборка одного проекта или Debug **не** создаёт сессию комплекта.
+
 WebView2 Loader (x86) статически в `third_party/`; для запуска нужен **WebView2 Evergreen Runtime** той же битности.

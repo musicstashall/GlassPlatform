@@ -9,10 +9,12 @@
     <GlassHarvestWxs>$(BaseIntermediateOutputPath)$(MSBuildProjectName).Harvest.wxs</GlassHarvestWxs>
     <GlassHarvestScript>$(MSBuildThisFileDirectory)scripts\Generate-HarvestWxs.ps1</GlassHarvestScript>
     <GlassProductVersionBase3>$([System.Text.RegularExpressions.Regex]::Match('$(GlassProductVersion)', '^\d+\.\d+\.\d+').Value)</GlassProductVersionBase3>
-    <GlassCoreBuildNumberPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'GlassCore', 'BuildNumber.txt'))</GlassCoreBuildNumberPath>
-    <GlassCoreBuildNumber>0</GlassCoreBuildNumber>
-    <GlassCoreBuildNumber Condition="Exists('$(GlassCoreBuildNumberPath)')">$([System.IO.File]::ReadAllText('$(GlassCoreBuildNumberPath)').Trim())</GlassCoreBuildNumber>
-    <GlassMsiVersion>$(GlassProductVersionBase3).$(GlassCoreBuildNumber)</GlassMsiVersion>
+    <GlassBundleBuildNumberEffective Condition="'$(GlassBundleBuildNumber)' != ''">$(GlassBundleBuildNumber)</GlassBundleBuildNumberEffective>
+    <GlassBundleBuildNumberEffective Condition="'$(GlassBundleBuildNumberEffective)' == ''">0</GlassBundleBuildNumberEffective>
+    <!-- MSI ProductVersion: базовая тройка + номер комплекта (числовое поле, без ведущих нулей). -->
+    <GlassMsiVersion>$(GlassProductVersionBase3).$(GlassBundleBuildNumberEffective)</GlassMsiVersion>
+    <GlassMsiBundleVersion Condition="'$(GlassBundleVersion)' != ''">$(GlassBundleVersion)</GlassMsiBundleVersion>
+    <GlassMsiBundleVersion Condition="'$(GlassMsiBundleVersion)' == ''">$(GlassMsiVersion)</GlassMsiBundleVersion>
     <GlassUninsExePath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassUnins', 'Release', 'GlassUnins.exe'))</GlassUninsExePath>
     <GlassSetupIconPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'GlassSetup', 'res', 'app.ico'))</GlassSetupIconPath>
     <GlassSecureUxThemeVendorDir>$([System.IO.Path]::Combine('$(SolutionRoot)', 'GlassSetup', 'third_party', 'SecureUxTheme', '$(GlassPayloadArch)'))</GlassSecureUxThemeVendorDir>
@@ -105,19 +107,23 @@
     <GlassPlatformScript>$(MSBuildThisFileDirectory)scripts\Generate-PlatformWxs.ps1</GlassPlatformScript>
   </PropertyGroup>
 
-  <Target Name="GlassWriteProductMetadata" BeforeTargets="GlassGenerateHarvest" DependsOnTargets="GlassStagePayload" Condition="'$(GlassPayloadArch)' != ''">
+  <Target Name="GlassWriteProductMetadata" BeforeTargets="GlassGenerateHarvest" DependsOnTargets="GlassStagePayload;GlassBundlePrepareSession" Condition="'$(GlassPayloadArch)' != ''">
     <PropertyGroup>
       <_GlassProductVersion Condition="'$(GlassProductVersion)' != ''">$(GlassProductVersion)</_GlassProductVersion>
       <_GlassProductVersion Condition="'$(GlassProductVersion)' == ''">2.0.0.0</_GlassProductVersion>
       <_GlassProductBase3>$([System.Text.RegularExpressions.Regex]::Match('$(_GlassProductVersion)', '^\d+\.\d+\.\d+').Value)</_GlassProductBase3>
-      <_GlassBuildNumberPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'GlassCore', 'BuildNumber.txt'))</_GlassBuildNumberPath>
-      <_GlassBuildNumber Condition="Exists('$(_GlassBuildNumberPath)')">$([System.IO.File]::ReadAllText('$(_GlassBuildNumberPath)').Trim())</_GlassBuildNumber>
-      <_GlassBuildNumber Condition="'$(_GlassBuildNumber)' == ''">0</_GlassBuildNumber>
-      <_GlassMsiVersion>$(_GlassProductBase3).$(_GlassBuildNumber)</_GlassMsiVersion>
+      <_GlassBundleBuild Condition="'$(GlassBundleBuildNumber)' != ''">$(GlassBundleBuildNumber)</_GlassBundleBuild>
+      <_GlassBundleBuild Condition="'$(_GlassBundleBuild)' == ''">0</_GlassBundleBuild>
+      <_GlassMsiVersion>$(_GlassProductBase3).$(_GlassBundleBuild)</_GlassMsiVersion>
+      <_GlassMsiBundleVersion Condition="'$(GlassBundleVersion)' != ''">$(GlassBundleVersion)</_GlassMsiBundleVersion>
+      <_GlassMsiBundleVersion Condition="'$(_GlassMsiBundleVersion)' == ''">$(_GlassMsiVersion)</_GlassMsiBundleVersion>
       <_GlassPlatformTitle Condition="'$(GlassPlatformTitle)' == ''">Glass Platform</_GlassPlatformTitle>
       <_GlassPlatformTitle Condition="'$(GlassPlatformTitle)' != ''">$(GlassPlatformTitle)</_GlassPlatformTitle>
     </PropertyGroup>
+    <Error Condition="'$(GlassPayloadArch)' != 'OpenGlass' and '$(GlassBundlePackagingEnabled)' == 'true' and '$(_GlassBundleBuild)' == '0'"
+      Text="Glass MSI $(GlassPayloadArch): номер комплекта не задан. Сначала Release|x64 solution, затем x86 с активной сессией." />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Overwrite="true" Lines="&lt;?define GlassMsiVersion = &quot;$(_GlassMsiVersion)&quot; ?&gt;" />
+    <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassMsiBundleVersion = &quot;$(_GlassMsiBundleVersion)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassUpgradeCode = &quot;$(GlassUpgradeCode)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassProductCode = &quot;$(GlassProductCode)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassPlatformTitle = &quot;$(_GlassPlatformTitle)&quot; ?&gt;" Overwrite="false" />

@@ -2,10 +2,8 @@
   <!-- MSBuild подхватывает только ближайший Directory.Build.props — тянем корень репо (GlassProductVersion и т.д.). -->
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..'))" Condition="'$(GlassProductVersion)' == ''" />
 
-  <!-- FileVersion GlassSetup = FileVersion GlassCore (без отдельного счётчика). -->
+  <!-- Собственный FileVersion; ProductVersion комплекта — из GlassBundleBuild.targets / Directory.Build.targets. -->
   <PropertyGroup>
-    <GlassBuildNumberPath>$(MSBuildThisFileDirectory)..\GlassCore\BuildNumber.txt</GlassBuildNumberPath>
-    <GlassSkipBuildNumberWrite>true</GlassSkipBuildNumberWrite>
     <GlassVerModule>GlassSetup</GlassVerModule>
   </PropertyGroup>
 </Project>

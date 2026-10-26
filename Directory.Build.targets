@@ -1,9 +1,12 @@
 <Project>
   <!--
-    Авто-инкремент FileVersion (4-е поле) и единая ProductVersion для всех бинарников.
+    Авто-инкремент FileVersion (4-е поле) и ProductVersion комплекта для всех бинарников.
     Источник продукта — GlassProductVersion в Directory.Build.props.
+    Версия комплекта — GlassBundleVersion (Release + сборка solution, см. GlassBundleBuild.targets).
     Счётчик сборки — BuildNumber.txt в каталоге каждого проекта.
   -->
+  <Import Project="$(MSBuildThisFileDirectory)Shared\GlassBundleBuild.targets" />
+
   <PropertyGroup>
     <GlassProductVersionBase3>$([System.Text.RegularExpressions.Regex]::Match('$(GlassProductVersion)', '^\d+\.\d+\.\d+').Value)</GlassProductVersionBase3>
     <GlassProductVersionComma>$(GlassProductVersion.Replace('.', ','))</GlassProductVersionComma>
@@ -53,14 +56,16 @@
       <GlassBuildNumberNext Condition="'$(GlassSkipBuildNumberWrite)' != 'true'">$([MSBuild]::Add($(_GlassBuildCurrent), 1))</GlassBuildNumberNext>
       <GlassFileVersionDot>$(GlassProductVersionBase3).$(GlassBuildNumberNext)</GlassFileVersionDot>
       <GlassFileVersionComma>$(GlassFileVersionDot.Replace('.', ','))</GlassFileVersionComma>
-      <_GlassVersionHeaderContent>#pragma once;#define GLASS_VER_COMMA $(GlassFileVersionComma);#define GLASS_VER_DOT $(GlassFileVersionDot);#define GLASS_VER_PRODUCT_COMMA $(GlassProductVersionComma);#define GLASS_VER_PRODUCT_DOT $(GlassProductVersion);#define GLASS_VER_MODULE $(_GlassVerModuleName);#define GLASS_VER_EXT $(GlassModuleBinaryExt);#define GLASS_VER_FILETYPE $(GlassModuleFileType)</_GlassVersionHeaderContent>
+      <_GlassProductVersionComma>$(GlassBundleVersionCommaEffective)</_GlassProductVersionComma>
+      <_GlassProductVersionDot>$(GlassBundleVersionEffective)</_GlassProductVersionDot>
+      <_GlassVersionHeaderContent>#pragma once;#define GLASS_VER_COMMA $(GlassFileVersionComma);#define GLASS_VER_DOT $(GlassFileVersionDot);#define GLASS_VER_PRODUCT_COMMA $(_GlassProductVersionComma);#define GLASS_VER_PRODUCT_DOT $(_GlassProductVersionDot);#define GLASS_VER_MODULE $(_GlassVerModuleName);#define GLASS_VER_EXT $(GlassModuleBinaryExt);#define GLASS_VER_FILETYPE $(GlassModuleFileType)</_GlassVersionHeaderContent>
     </PropertyGroup>
     <WriteLinesToFile File="$(GlassBuildNumberPath)" Lines="$(GlassBuildNumberNext)" Overwrite="true" Condition="'$(GlassSkipBuildNumberWrite)' != 'true'" />
     <WriteLinesToFile File="$(GlassVersionHeaderPath)" Lines="$(_GlassVersionHeaderContent)" Overwrite="true" />
     <PropertyGroup>
       <_GlassBuildNumberIncremented>true</_GlassBuildNumberIncremented>
     </PropertyGroup>
-    <Message Importance="low" Text="Glass $(MSBuildProjectName): FileVersion=$(GlassFileVersionDot), ProductVersion=$(GlassProductVersion)" />
+    <Message Importance="low" Text="Glass $(MSBuildProjectName): FileVersion=$(GlassFileVersionDot), ProductVersion=$(_GlassProductVersionDot)" />
   </Target>
 
   <Target Name="GlassEnsureIntermediateOutputPath" BeforeTargets="GlassWriteCSharpFileVersion" Condition="'$(MSBuildProjectExtension)' == '.csproj'">
@@ -76,7 +81,7 @@
       <_GlassBuildCurrent Condition="'@(_GlassBuildLine)' == ''">0</_GlassBuildCurrent>
       <GlassBuildNumberNext>$([MSBuild]::Add($(_GlassBuildCurrent), 1))</GlassBuildNumberNext>
       <GlassFileVersionDot>$(GlassProductVersionBase3).$(GlassBuildNumberNext)</GlassFileVersionDot>
-      <_GlassBuildVersionCsContent>// Автогенерация: Directory.Build.targets. Не редактировать.;[assembly: System.Reflection.AssemblyFileVersion("$(GlassFileVersionDot)")]</_GlassBuildVersionCsContent>
+      <_GlassBuildVersionCsContent>// Автогенерация: Directory.Build.targets. Не редактировать.;[assembly: System.Reflection.AssemblyFileVersion("$(GlassFileVersionDot)")];[assembly: System.Reflection.AssemblyInformationalVersion("$(GlassBundleVersionEffective)")]</_GlassBuildVersionCsContent>
     </PropertyGroup>
     <WriteLinesToFile File="$(GlassBuildNumberPath)" Lines="$(GlassBuildNumberNext)" Overwrite="true" />
     <WriteLinesToFile File="$(GlassBuildVersionCsPath)" Lines="$(_GlassBuildVersionCsContent)" Overwrite="true" />
@@ -87,6 +92,6 @@
     <PropertyGroup>
       <_GlassBuildNumberIncremented>true</_GlassBuildNumberIncremented>
     </PropertyGroup>
-    <Message Importance="low" Text="Glass $(MSBuildProjectName): FileVersion=$(GlassFileVersionDot), ProductVersion=$(GlassProductVersion)" />
+    <Message Importance="low" Text="Glass $(MSBuildProjectName): FileVersion=$(GlassFileVersionDot), ProductVersion=$(GlassBundleVersionEffective)" />
   </Target>
 </Project>

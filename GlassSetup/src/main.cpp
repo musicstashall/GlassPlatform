@@ -87,8 +87,7 @@ std::wstring Utf8(Bytes b) {
     return result;
 }
 
-// FileVersion GlassCore — четвёртое поле растёт при сборке GlassCore, не GlassCompat.
-std::wstring ReadFileVersionString(const std::wstring& path, ULONGLONG& key) {
+std::wstring ReadVersionStringField(const std::wstring& path, const wchar_t* fieldName, ULONGLONG& key, bool useProductFixed) {
     key = 0;
     DWORD unused = 0;
     const DWORD bytes = GetFileVersionInfoSizeW(path.c_str(), &unused);
@@ -99,24 +98,34 @@ std::wstring ReadFileVersionString(const std::wstring& path, ULONGLONG& key) {
     UINT fixedSize = 0;
     if (!VerQueryValueW(block.data(), L"\\", reinterpret_cast<void**>(&fixedInfo), &fixedSize) || !fixedInfo)
         return L"";
-    key = (static_cast<ULONGLONG>(fixedInfo->dwFileVersionMS) << 32) | fixedInfo->dwFileVersionLS;
+    const uint32_t ms = useProductFixed ? fixedInfo->dwProductVersionMS : fixedInfo->dwFileVersionMS;
+    const uint32_t ls = useProductFixed ? fixedInfo->dwProductVersionLS : fixedInfo->dwFileVersionLS;
+    key = (static_cast<ULONGLONG>(ms) << 32) | ls;
     LPWSTR text = nullptr;
     UINT textChars = 0;
-    if (VerQueryValueW(block.data(), L"\\StringFileInfo\\040904b0\\FileVersion",
-                       reinterpret_cast<void**>(&text), &textChars) && text && *text)
+    wchar_t subBlock[128]{};
+    swprintf_s(subBlock, L"\\StringFileInfo\\040904b0\\%s", fieldName);
+    if (VerQueryValueW(block.data(), subBlock, reinterpret_cast<void**>(&text), &textChars) && text && *text)
         return text;
     wchar_t fallback[64]{};
     swprintf_s(fallback, L"%u.%u.%u.%u",
-        HIWORD(fixedInfo->dwFileVersionMS), LOWORD(fixedInfo->dwFileVersionMS),
-        HIWORD(fixedInfo->dwFileVersionLS), LOWORD(fixedInfo->dwFileVersionLS));
+        HIWORD(ms), LOWORD(ms), HIWORD(ls), LOWORD(ls));
     return fallback;
 }
 
-std::wstring SelfFileVersion() {
+std::wstring ReadFileVersionString(const std::wstring& path, ULONGLONG& key) {
+    return ReadVersionStringField(path, L"FileVersion", key, false);
+}
+
+std::wstring ReadProductVersionString(const std::wstring& path, ULONGLONG& key) {
+    return ReadVersionStringField(path, L"ProductVersion", key, true);
+}
+
+std::wstring SelfProductVersion() {
     wchar_t exe[MAX_PATH]{};
     if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return L"";
     ULONGLONG key = 0;
-    return ReadFileVersionString(exe, key);
+    return ReadProductVersionString(exe, key);
 }
 
 bool VersionOlder(const std::wstring& installed, const std::wstring& latest) {
@@ -233,7 +242,7 @@ std::wstring FormatUpdateBody(const std::wstring& self, const std::wstring& late
     return out;
 }
 
-std::wstring PlatformVersionFromGlassCore() {
+std::wstring PlatformVersionFromInstalledModules() {
     wchar_t exe[MAX_PATH]{};
     if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return L"";
     PathRemoveFileSpecW(exe);
@@ -252,7 +261,7 @@ std::wstring PlatformVersionFromGlassCore() {
         wchar_t full[MAX_PATH]{};
         if (!PathCanonicalizeW(full, combined)) continue;
         ULONGLONG key = 0;
-        const std::wstring text = ReadFileVersionString(full, key);
+        const std::wstring text = ReadProductVersionString(full, key);
         if (text.empty()) continue;
         if (best.empty() || key > bestKey) {
             best = text;
@@ -425,7 +434,7 @@ private:
     }
     void Initialize() {
         dpi_ = GetDpiForWindow(window);
-        platformVersion_ = PlatformVersionFromGlassCore();
+        platformVersion_ = PlatformVersionFromInstalledModules();
         darkBrush_ = CreateSolidBrush(kDark);
         lightBrush_ = CreateSolidBrush(kLight);
         progressFill_ = CreateSolidBrush(RGB(144,127,230));
@@ -671,7 +680,7 @@ private:
             InstallLog::Line(L"Version check: fetch failed or skipped");
             return;
         }
-        const std::wstring self = SelfFileVersion();
+        const std::wstring self = SelfProductVersion();
         InstallLog::LineFormat(L"Version check: local=%s remote=%s", self.c_str(), latest.c_str());
         if (self.empty() || !VersionOlder(self, latest)) {
             InstallLog::Line(L"Version check: no newer setup");

@@ -1,6 +1,6 @@
 // Общий VERSIONINFO для нативных бинарников Glass.
 // Числовые версии — из генерируемого GlassBuildVersion.h (Directory.Build.targets).
-// Версия продукта — GlassProductVersion в Directory.Build.props. Не править версии здесь.
+// ProductVersion — версия комплекта (GlassBundleVersion); FileVersion — счётчик модуля. Не править версии здесь.
 #include <winver.h>
 #include "GlassBuildVersion.h"
 

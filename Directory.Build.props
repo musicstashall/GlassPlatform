@@ -6,16 +6,23 @@
   -->
   <PropertyGroup>
     <GlassProductVersion>2.0.0.0</GlassProductVersion>
+    <!-- Первый локальный номер комплекта (Release x64→x86), если Build\GlassBundleBuildNumber.txt ещё не создан. -->
+    <GlassBundleBuildNumberSeed>42</GlassBundleBuildNumberSeed>
     <GlassProductName>Glass Platform</GlassProductName>
     <GlassCompanyName>Glass</GlassCompanyName>
     <!-- Корень репо для MSI staging, Build\, GlassSettings и т.д. (не только .csproj). -->
     <SolutionRoot Condition="'$(SolutionRoot)' == ''">$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))))</SolutionRoot>
+    <GlassProductVersionBase>$([System.Text.RegularExpressions.Regex]::Match('$(GlassProductVersion)', '^\d+\.\d+\.\d+').Value)</GlassProductVersionBase>
   </PropertyGroup>
+
+  <!-- Активная сессия комплекта между ручными вызовами VS (x64 затем x86). -->
+  <Import Project="$(SolutionRoot)Build\GlassBundleSession.props" Condition="Exists('$(SolutionRoot)Build\GlassBundleSession.props')" />
 
   <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.csproj'">
     <Version>$(GlassProductVersion)</Version>
     <AssemblyVersion>$(GlassProductVersion)</AssemblyVersion>
-    <InformationalVersion>$(GlassProductVersion)</InformationalVersion>
+    <InformationalVersion Condition="'$(GlassBundleVersion)' != ''">$(GlassBundleVersion)</InformationalVersion>
+    <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(GlassProductVersion)</InformationalVersion>
     <Product>$(GlassProductName)</Product>
     <Company>$(GlassCompanyName)</Company>
   </PropertyGroup>
