@@ -26,6 +26,7 @@
     <GlassBuildNumberPath>$(MSBuildProjectDirectory)\BuildNumber.txt</GlassBuildNumberPath>
     <GlassBuildVersionCsPath>$(IntermediateOutputPath)GlassBuildVersion.g.cs</GlassBuildVersionCsPath>
     <GenerateAssemblyFileVersionAttribute>false</GenerateAssemblyFileVersionAttribute>
+    <GenerateAssemblyInformationalVersionAttribute>false</GenerateAssemblyInformationalVersionAttribute>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsGlassNativeBinary)' == 'true'">
