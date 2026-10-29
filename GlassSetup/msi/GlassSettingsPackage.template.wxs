@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="$(var.GlassPlatformTitle)"
+           Manufacturer="Glass"
+           Version="$(var.GlassMsiVersion)"
+           UpgradeCode="$(var.GlassUpgradeCode)"
+           ProductCode="$(var.GlassProductCode)"
+           Scope="perUser"
+           Compressed="yes">
+    <MajorUpgrade AllowDowngrades="no" AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Установлена более новая версия GlassSettings." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPSYSTEMCOMPONENT" Value="1" Secure="yes" />
+    <!-- В MSI значение "0" истинно. Файлы отключает только GLASS_RESTORE_NO_CAB=1. -->
+    <Property Id="GLASS_RESTORE_NO_CAB" Value="0" Hidden="yes" />
+
+    <Feature Id="MainFeature" Title="$(var.GlassPlatformTitle)" Level="1">
+      <ComponentGroupRef Id="GlassPayloadFiles" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLDIR" Name="GlassPlatform" />
+    </StandardDirectory>
+
+    <InstallExecuteSequence>
+      <InstallFiles Condition="GLASS_RESTORE_NO_CAB &lt;&gt; 1" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

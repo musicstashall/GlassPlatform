@@ -5,13 +5,14 @@
     Версия комплекта — GlassBundleVersion (Release + сборка solution, см. GlassBundleBuild.targets).
     Счётчик сборки — BuildNumber.txt в каталоге каждого проекта.
   -->
-  <Import Project="$(MSBuildThisFileDirectory)Shared\GlassBundleBuild.targets" />
-
+  <!-- До GlassBundleBuild.targets: fallback GlassBundleVersionCommaEffective читает GlassProductVersionComma. -->
   <PropertyGroup>
     <GlassProductVersionBase3>$([System.Text.RegularExpressions.Regex]::Match('$(GlassProductVersion)', '^\d+\.\d+\.\d+').Value)</GlassProductVersionBase3>
     <GlassProductVersionComma>$(GlassProductVersion.Replace('.', ','))</GlassProductVersionComma>
     <IsGlassNativeBinary Condition="'$(ConfigurationType)' == 'DynamicLibrary' or '$(ConfigurationType)' == 'Application'">true</IsGlassNativeBinary>
   </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)Shared\GlassBundleBuild.targets" />
 
   <PropertyGroup Condition="'$(IsGlassNativeBinary)' == 'true'">
     <GlassBuildNumberPath>$(MSBuildProjectDirectory)\BuildNumber.txt</GlassBuildNumberPath>
@@ -39,7 +40,7 @@
     <MakeDir Directories="$(IntDir)" Condition="!Exists('$(IntDir)')" />
   </Target>
 
-  <Target Name="GlassWriteVersionHeader" BeforeTargets="BeforeBuildGenerateSources" Condition="'$(IsGlassNativeBinary)' == 'true' and '$(_GlassBuildNumberIncremented)' != 'true'">
+  <Target Name="GlassWriteVersionHeader" BeforeTargets="BeforeBuildGenerateSources" DependsOnTargets="GlassBundlePrepareSession;GlassBundleImportSessionProps" Condition="'$(IsGlassNativeBinary)' == 'true' and '$(_GlassBuildNumberIncremented)' != 'true'">
     <PropertyGroup>
       <GlassProductVersion Condition="'$(GlassProductVersion)' == ''">2.0.0.0</GlassProductVersion>
       <GlassProductVersionBase3 Condition="'$(GlassProductVersionBase3)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(GlassProductVersion)', '^\d+\.\d+\.\d+').Value)</GlassProductVersionBase3>
@@ -57,12 +58,16 @@
       <GlassBuildNumberNext Condition="'$(GlassSkipBuildNumberWrite)' != 'true'">$([MSBuild]::Add($(_GlassBuildCurrent), 1))</GlassBuildNumberNext>
       <GlassFileVersionDot>$(GlassProductVersionBase3).$(GlassBuildNumberNext)</GlassFileVersionDot>
       <GlassFileVersionComma>$(GlassFileVersionDot.Replace('.', ','))</GlassFileVersionComma>
-      <_GlassProductVersionComma>$(GlassBundleVersionCommaEffective)</_GlassProductVersionComma>
-      <_GlassProductVersionDot>$(GlassBundleVersionEffective)</_GlassProductVersionDot>
-      <_GlassVersionHeaderContent>#pragma once;#define GLASS_VER_COMMA $(GlassFileVersionComma);#define GLASS_VER_DOT $(GlassFileVersionDot);#define GLASS_VER_PRODUCT_COMMA $(_GlassProductVersionComma);#define GLASS_VER_PRODUCT_DOT $(_GlassProductVersionDot);#define GLASS_VER_MODULE $(_GlassVerModuleName);#define GLASS_VER_EXT $(GlassModuleBinaryExt);#define GLASS_VER_FILETYPE $(GlassModuleFileType)</_GlassVersionHeaderContent>
+      <!-- PRODUCTVERSION comma: WriteLinesToFile/свойства MSBuild ломают значения с запятыми (2,0,0,N). -->
+      <_GlassUseBundleProduct Condition="'$(GlassBundleVersion)' != '' and '$(GlassBundleBuildNumber)' != ''">true</_GlassUseBundleProduct>
+      <_GlassProductVersionDot Condition="'$(_GlassUseBundleProduct)' == 'true'">$(GlassBundleVersion)</_GlassProductVersionDot>
+      <_GlassProductVersionDot Condition="'$(_GlassUseBundleProduct)' != 'true'">$(GlassProductVersion)</_GlassProductVersionDot>
+      <GlassWriteVersionHeaderScript>$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', 'Shared', 'scripts', 'Write-GlassModuleVersionHeader.ps1'))</GlassWriteVersionHeaderScript>
     </PropertyGroup>
+    <Error Condition="'$(GlassBundleRequiresProductVersion)' == 'true' and '$(GlassBundleVersion)' == ''"
+      Text="Glass $(MSBuildProjectName): версия комплекта не загружена (ProductVersion=$(GlassProductVersion)). Соберите Release|x64 всего solution до модулей; проверьте GlassBundle в Output." />
     <WriteLinesToFile File="$(GlassBuildNumberPath)" Lines="$(GlassBuildNumberNext)" Overwrite="true" Condition="'$(GlassSkipBuildNumberWrite)' != 'true'" />
-    <WriteLinesToFile File="$(GlassVersionHeaderPath)" Lines="$(_GlassVersionHeaderContent)" Overwrite="true" />
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(GlassWriteVersionHeaderScript)&quot; -OutPath &quot;$(GlassVersionHeaderPath)&quot; -FileVersionDot &quot;$(GlassFileVersionDot)&quot; -ProductVersionDot &quot;$(_GlassProductVersionDot)&quot; -ModuleName &quot;$(_GlassVerModuleName)&quot; -BinaryExt &quot;$(GlassModuleBinaryExt)&quot; -FileType &quot;$(GlassModuleFileType)&quot;" />
     <PropertyGroup>
       <_GlassBuildNumberIncremented>true</_GlassBuildNumberIncremented>
     </PropertyGroup>
@@ -73,7 +78,7 @@
     <MakeDir Directories="$(IntermediateOutputPath)" Condition="!Exists('$(IntermediateOutputPath)')" />
   </Target>
 
-  <Target Name="GlassWriteCSharpFileVersion" BeforeTargets="BeforeBuild" Condition="'$(MSBuildProjectExtension)' == '.csproj' and '$(_GlassBuildNumberIncremented)' != 'true'">
+  <Target Name="GlassWriteCSharpFileVersion" BeforeTargets="BeforeBuild" DependsOnTargets="GlassBundlePrepareSession;GlassBundleImportSessionProps" Condition="'$(MSBuildProjectExtension)' == '.csproj' and '$(_GlassBuildNumberIncremented)' != 'true'">
     <ReadLinesFromFile File="$(GlassBuildNumberPath)" Condition="Exists('$(GlassBuildNumberPath)')">
       <Output TaskParameter="Lines" ItemName="_GlassBuildLine" />
     </ReadLinesFromFile>
@@ -94,5 +99,26 @@
       <_GlassBuildNumberIncremented>true</_GlassBuildNumberIncremented>
     </PropertyGroup>
     <Message Importance="low" Text="Glass $(MSBuildProjectName): FileVersion=$(GlassFileVersionDot), ProductVersion=$(GlassBundleVersionEffective)" />
+  </Target>
+
+  <!-- После WiX SDK. BaseOutputPath — каталог одного проекта: общий родительский msi\ Clean одного пакета стирает соседние. Жёсткие ссылки не использовать: удаление промежуточного MSI снимает и выходной файл. -->
+  <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.wixproj' and '$(GlassWixLockedPlatform)' != ''">
+    <BaseOutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassSetup', 'msi', '$(Configuration)', '$(MSBuildProjectName)'))\</BaseOutputPath>
+    <OutputPath>$(BaseOutputPath)</OutputPath>
+    <OutDir>$(OutputPath)</OutDir>
+    <TargetDir>$(OutputPath)</TargetDir>
+    <TargetPath>$(OutputPath)$(OutputName).msi</TargetPath>
+    <AppendPlatformToOutputPath>false</AppendPlatformToOutputPath>
+    <CreateHardLinksForCopyFilesToOutputDirectoryIfPossible>false</CreateHardLinksForCopyFilesToOutputDirectoryIfPossible>
+  </PropertyGroup>
+
+  <!-- Чужая платформа (например Win32 у Glass-x86) не должна делать Clean: OutDir общий, FileList удалит уже собранный MSI. -->
+  <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.wixproj' and '$(GlassWixLockedPlatform)' != '' and '$(Platform)' != '$(GlassWixLockedPlatform)'">
+    <BuildDependsOn>GlassWixSkipForeignPlatform</BuildDependsOn>
+    <CleanDependsOn>GlassWixSkipForeignPlatform</CleanDependsOn>
+    <RebuildDependsOn>GlassWixSkipForeignPlatform</RebuildDependsOn>
+  </PropertyGroup>
+  <Target Name="GlassWixSkipForeignPlatform" Condition="'$(MSBuildProjectExtension)' == '.wixproj' and '$(GlassWixLockedPlatform)' != '' and '$(Platform)' != '$(GlassWixLockedPlatform)'">
+    <Message Importance="high" Text="Glass $(MSBuildProjectName): платформа $(Platform) пропущена, MSI собирается только как $(GlassWixLockedPlatform)." />
   </Target>
 </Project>

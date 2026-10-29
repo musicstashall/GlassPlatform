@@ -49,6 +49,17 @@ msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64
 
 **Настройки:** GlassSettings.exe. Регистрация пункта контекстного меню рабочего стола — из GlassSettings.
 
+### Подпись сборок (Authenticode)
+
+Официальные Release-сборки автор подписывает сертификатом Code Signing **`CN=Stanislav K.`** (self-signed на машине автора; контракт допускает SignPath в CI позже). SmartScreen может показывать «Unknown publisher» — это нормально для self-signed.
+
+- **Проверка:** свойства `GlassSetup.exe` → «Цифровые подписи» → «Сведения» → «Состав» → **Отпечаток (SHA-1)**; или `Get-AuthenticodeSignature`, `sigcheck.exe -i`.
+- **Официальный SHA-1 отпечаток:** `<!-- вставьте после New-GlassSelfSignedCert.ps1 -->`
+- **Гарантия:** файл собран владельцем ключа и не изменён после подписи.
+- **Не гарантирует:** отсутствие ошибок и доверие SmartScreen. Системные DLL WinUI/CRT и сторонние OpenGlass/SecureUxTheme сохраняют подписи своих авторов.
+
+Сертификат: `Shared/scripts/New-GlassSelfSignedCert.ps1`. Сборка Release: `/p:GlassSign=Local` (по умолчанию) или `/p:GlassSign=Skip`.
+
 ## Состав
 
 | Модуль | Роль |

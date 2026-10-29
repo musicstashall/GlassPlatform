@@ -7,56 +7,80 @@
     <GlassBundleSessionScript>$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', 'scripts', 'Invoke-GlassBundleSession.ps1'))</GlassBundleSessionScript>
     <GlassBundleBuildDir>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build'))</GlassBundleBuildDir>
     <GlassBundleSessionProps>$([System.IO.Path]::Combine('$(GlassBundleBuildDir)', 'GlassBundleSession.props'))</GlassBundleSessionProps>
+    <GlassBundleSessionJson>$([System.IO.Path]::Combine('$(GlassBundleBuildDir)', 'GlassBundleSession.json'))</GlassBundleSessionJson>
     <!-- Trailing backslash перед закрывающей кавычкой ломает командную строку cmd при Exec. -->
     <GlassSolutionRootExec>$([System.String]::Copy('$(SolutionRoot)').TrimEnd('\').TrimEnd('/'))</GlassSolutionRootExec>
     <GlassProductVersionBase Condition="'$(GlassProductVersionBase)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(GlassProductVersion)', '^\d+\.\d+\.\d+').Value)</GlassProductVersionBase>
     <GlassBundleBuildNumberSeed Condition="'$(GlassBundleBuildNumberSeed)' == ''">42</GlassBundleBuildNumberSeed>
     <GlassBundlePlatformNorm Condition="'$(Platform)' == 'x64'">x64</GlassBundlePlatformNorm>
     <GlassBundlePlatformNorm Condition="'$(Platform)' == 'x86' or '$(Platform)' == 'Win32'">x86</GlassBundlePlatformNorm>
-    <GlassBundlePackagingEnabled Condition="'$(GlassBundlePackagingEnabled)' == '' and '$(Configuration)' == 'Release' and '$(BuildingSolutionFile)' == 'true' and '$(MSBuildProjectName)' != 'OpenGlass-x64'">true</GlassBundlePackagingEnabled>
+    <!-- VS Rebuild Solution иногда не выставляет BuildingSolutionFile — дублируем признак solution. -->
+    <GlassBundleFromSolution Condition="'$(BuildingSolutionFile)' == 'true'">true</GlassBundleFromSolution>
+    <GlassBundleFromSolution Condition="'$(GlassBundleFromSolution)' == '' and '$(SolutionPath)' != ''">true</GlassBundleFromSolution>
+    <GlassBundleFromSolution Condition="'$(GlassBundleFromSolution)' == '' and '$(SolutionDir)' != ''">true</GlassBundleFromSolution>
+    <GlassBundleFromSolution Condition="'$(GlassBundleFromSolution)' == ''">false</GlassBundleFromSolution>
+    <GlassBundlePackagingEnabled Condition="'$(GlassBundlePackagingEnabled)' == '' and '$(Configuration)' == 'Release' and '$(GlassBundleFromSolution)' == 'true' and '$(MSBuildProjectName)' != 'OpenGlass-x64'">true</GlassBundlePackagingEnabled>
     <GlassBundlePackagingEnabled Condition="'$(GlassBundlePackagingEnabled)' == ''">false</GlassBundlePackagingEnabled>
+    <GlassBundleRequiresProductVersion Condition="'$(Configuration)' == 'Release' and '$(GlassBundleFromSolution)' == 'true' and '$(MSBuildProjectName)' != 'OpenGlass-x64'">true</GlassBundleRequiresProductVersion>
+    <!-- Новый номер комплекта после финализации — только x64 native DLL (Release|x64). Остальное — повторная сборка того же комплекта. -->
+    <GlassBundleAllowNewAfterCompleted Condition="'$(GlassBundleAllowNewAfterCompleted)' == '' and '$(IsGlassNativeBinary)' == 'true' and '$(GlassBundlePlatformNorm)' == 'x64'">true</GlassBundleAllowNewAfterCompleted>
     <GlassBundleVersionEffective Condition="'$(GlassBundleVersion)' != ''">$(GlassBundleVersion)</GlassBundleVersionEffective>
     <GlassBundleVersionEffective Condition="'$(GlassBundleVersionEffective)' == ''">$(GlassProductVersion)</GlassBundleVersionEffective>
     <GlassBundleVersionCommaEffective Condition="'$(GlassBundleVersionComma)' != ''">$(GlassBundleVersionComma)</GlassBundleVersionCommaEffective>
     <GlassBundleVersionCommaEffective Condition="'$(GlassBundleVersionCommaEffective)' == ''">$(GlassProductVersionComma)</GlassBundleVersionCommaEffective>
   </PropertyGroup>
 
+  <!-- JSON вместо .props: MSBuild ломает regex по XML с GlassBundleVersionComma (2,0,0,N). -->
+  <Target Name="GlassBundleImportSessionProps" Condition="Exists('$(GlassBundleSessionJson)')">
+    <PropertyGroup>
+      <_GlassBundleJsonText>$([System.IO.File]::ReadAllText('$(GlassBundleSessionJson)'))</_GlassBundleJsonText>
+      <GlassBundleVersion>$([System.Text.RegularExpressions.Regex]::Match('$(_GlassBundleJsonText)', '&quot;GlassBundleVersion&quot;\s*:\s*&quot;([^&quot;]+)&quot;').Groups[1].Value)</GlassBundleVersion>
+      <GlassBundleBuildNumber>$([System.Text.RegularExpressions.Regex]::Match('$(_GlassBundleJsonText)', '&quot;GlassBundleBuildNumber&quot;\s*:\s*(\d+)').Groups[1].Value)</GlassBundleBuildNumber>
+      <GlassBundlePhase>$([System.Text.RegularExpressions.Regex]::Match('$(_GlassBundleJsonText)', '&quot;Phase&quot;\s*:\s*&quot;([^&quot;]+)&quot;').Groups[1].Value)</GlassBundlePhase>
+      <GlassBundleVersionEffective Condition="'$(GlassBundleVersion)' != ''">$(GlassBundleVersion)</GlassBundleVersionEffective>
+    </PropertyGroup>
+  </Target>
+
   <Target Name="GlassBundlePrepareSession"
-          BeforeTargets="GlassWriteVersionHeader;GlassWriteCSharpFileVersion"
           Condition="'$(GlassBundlePackagingEnabled)' == 'true'">
     <PropertyGroup>
-      <_GlassBundleAction Condition="'$(GlassBundlePlatformNorm)' == 'x64'">BeginOrResumeX64</_GlassBundleAction>
-      <_GlassBundleAction Condition="'$(GlassBundlePlatformNorm)' == 'x86'">ContinueX86</_GlassBundleAction>
+      <!-- Win32-утилиты (GlassUnins) в Release|x64 solution не переводят сессию в x86 до настоящего x86-прохода. -->
+      <_GlassBundleAction Condition="'$(GlassBundlePlatformNorm)' == 'x64' or '$(MSBuildProjectName)' == 'GlassUnins' or '$(MSBuildProjectName)' == 'GlassSetup'">BeginOrResumeX64</_GlassBundleAction>
+      <_GlassBundleAction Condition="'$(_GlassBundleAction)' == '' and '$(GlassBundlePlatformNorm)' == 'x86'">ContinueX86</_GlassBundleAction>
       <_GlassBundleCommit>unknown</_GlassBundleCommit>
-      <_GlassBundleOverride Condition="'$(GlassBundleBuildNumber)' != ''">$(GlassBundleBuildNumber)</_GlassBundleOverride>
+      <!-- Только /p:GlassBundleCiBuildNumber=… (CI). Не GlassBundleBuildNumber — его выставляет ImportSessionProps и ломает BeginOrResume. -->
+      <_GlassBundleOverride Condition="'$(GlassBundleCiBuildNumber)' != ''">$(GlassBundleCiBuildNumber)</_GlassBundleOverride>
       <_GlassBundleOverride Condition="'$(_GlassBundleOverride)' == ''">0</_GlassBundleOverride>
+      <_GlassBundleAllowNewSwitch Condition="'$(GlassBundleAllowNewAfterCompleted)' == 'true'"> -AllowNewBundleAfterCompleted</_GlassBundleAllowNewSwitch>
+      <_GlassBundleAllowNewSwitch Condition="'$(_GlassBundleAllowNewSwitch)' == ''"></_GlassBundleAllowNewSwitch>
     </PropertyGroup>
-    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(GlassBundleSessionScript)&quot; -Action $(_GlassBundleAction) -SolutionRoot &quot;$(GlassSolutionRootExec)&quot; -Configuration &quot;$(Configuration)&quot; -GlassProductVersionBase &quot;$(GlassProductVersionBase)&quot; -GlassBundleBuildNumberOverride $(_GlassBundleOverride) -GlassBundleBuildNumberSeed $(GlassBundleBuildNumberSeed) -SourceCommit &quot;$(_GlassBundleCommit)&quot;"
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(GlassBundleSessionScript)&quot; -Action $(_GlassBundleAction) -SolutionRoot &quot;$(GlassSolutionRootExec)&quot; -Configuration &quot;$(Configuration)&quot; -GlassProductVersionBase &quot;$(GlassProductVersionBase)&quot; -GlassBundleBuildNumberOverride $(_GlassBundleOverride) -GlassBundleBuildNumberSeed $(GlassBundleBuildNumberSeed) -SourceCommit &quot;$(_GlassBundleCommit)&quot;$(_GlassBundleAllowNewSwitch)"
           ConsoleToMSBuild="true">
       <Output TaskParameter="ConsoleOutput" ItemName="_GlassBundleLogLine" />
     </Exec>
     <Message Importance="high" Text="@(_GlassBundleLogLine)" Condition="'@(_GlassBundleLogLine)' != ''" />
-    <Error Condition="!Exists('$(GlassBundleSessionProps)')" Text="GlassBundle: не создан $(GlassBundleSessionProps). См. лог сессии выше." />
-    <PropertyGroup Condition="Exists('$(GlassBundleSessionProps)')">
-      <_GlassBundlePropsText>$([System.IO.File]::ReadAllText('$(GlassBundleSessionProps)'))</_GlassBundlePropsText>
-      <GlassBundleVersion>$([System.Text.RegularExpressions.Regex]::Match('$(_GlassBundlePropsText)', '&lt;GlassBundleVersion&gt;([^&lt;]+)&lt;/GlassBundleVersion&gt;').Groups[1].Value)</GlassBundleVersion>
-      <GlassBundleBuildNumber>$([System.Text.RegularExpressions.Regex]::Match('$(_GlassBundlePropsText)', '&lt;GlassBundleBuildNumber&gt;([^&lt;]+)&lt;/GlassBundleBuildNumber&gt;').Groups[1].Value)</GlassBundleBuildNumber>
-      <GlassBundleVersionComma>$([System.Text.RegularExpressions.Regex]::Match('$(_GlassBundlePropsText)', '&lt;GlassBundleVersionComma&gt;([^&lt;]+)&lt;/GlassBundleVersionComma&gt;').Groups[1].Value)</GlassBundleVersionComma>
-      <GlassBundlePhase>$([System.Text.RegularExpressions.Regex]::Match('$(_GlassBundlePropsText)', '&lt;GlassBundlePhase&gt;([^&lt;]+)&lt;/GlassBundlePhase&gt;').Groups[1].Value)</GlassBundlePhase>
-      <GlassBundleVersionEffective>$(GlassBundleVersion)</GlassBundleVersionEffective>
-      <GlassBundleVersionCommaEffective>$(GlassBundleVersionComma)</GlassBundleVersionCommaEffective>
-    </PropertyGroup>
-    <Error Condition="'$(GlassBundleVersion)' == ''" Text="GlassBundle: не удалось прочитать GlassBundleVersion из $(GlassBundleSessionProps)." />
+    <Error Condition="!Exists('$(GlassBundleSessionJson)')" Text="GlassBundle: не создан $(GlassBundleSessionJson). См. лог сессии выше." />
   </Target>
 
   <Target Name="GlassBundleFinalizeSession"
           AfterTargets="Build"
           Condition="'$(GlassBundlePackagingEnabled)' == 'true' and '$(MSBuildProjectName)' == 'GlassSetup' and '$(GlassBundlePlatformNorm)' == 'x86'">
-    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(GlassBundleSessionScript)&quot; -Action Finalize -SolutionRoot &quot;$(GlassSolutionRootExec)&quot; -Configuration &quot;$(Configuration)&quot; -GlassProductVersionBase &quot;$(GlassProductVersionBase)&quot; -GlassBundleBuildNumberSeed &quot;$(GlassBundleBuildNumberSeed)&quot;"
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(GlassBundleSessionScript)&quot; -Action FinalizeIfX86Ready -SolutionRoot &quot;$(GlassSolutionRootExec)&quot; -Configuration &quot;$(Configuration)&quot; -GlassProductVersionBase &quot;$(GlassProductVersionBase)&quot; -GlassBundleBuildNumberSeed &quot;$(GlassBundleBuildNumberSeed)&quot;"
           ConsoleToMSBuild="true">
       <Output TaskParameter="ConsoleOutput" ItemName="_GlassBundleFinalizeLog" />
     </Exec>
     <Message Importance="high" Text="@(_GlassBundleFinalizeLog)" Condition="'@(_GlassBundleFinalizeLog)' != ''" />
+  </Target>
+
+  <!-- Финализация даже если GlassSetup пропущен как up-to-date (AfterTargets Build не срабатывает). -->
+  <Target Name="GlassBundleTryFinalizeAfterX86Msi"
+          AfterTargets="GlassPublishBuiltMsi"
+          Condition="'$(GlassBundlePackagingEnabled)' == 'true' and '$(MSBuildProjectName)' == 'Glass-x86'">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(GlassBundleSessionScript)&quot; -Action FinalizeIfX86Ready -SolutionRoot &quot;$(GlassSolutionRootExec)&quot; -Configuration &quot;$(Configuration)&quot; -GlassProductVersionBase &quot;$(GlassProductVersionBase)&quot; -GlassBundleBuildNumberSeed &quot;$(GlassBundleBuildNumberSeed)&quot;"
+          ConsoleToMSBuild="true">
+      <Output TaskParameter="ConsoleOutput" ItemName="_GlassBundleFinalizeAfterMsiLog" />
+    </Exec>
+    <Message Importance="high" Text="@(_GlassBundleFinalizeAfterMsiLog)" Condition="'@(_GlassBundleFinalizeAfterMsiLog)' != ''" />
   </Target>
 
   <Target Name="GlassBundleCancelSession">

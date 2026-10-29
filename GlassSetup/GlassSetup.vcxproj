@@ -67,7 +67,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateManifest>false</GenerateManifest>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>GlassShared.lib;$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>GlassShared.lib;$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)res;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -93,7 +93,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateManifest>false</GenerateManifest>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>GlassShared.lib;$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>GlassShared.lib;$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)res;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -101,24 +101,15 @@
     </ResourceCompile>
   </ItemDefinitionGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <GlassMsiPayloadDir>$(ProjectDir)..\Build\GlassSetup\msi\Release\</GlassMsiPayloadDir>
+    <GlassMsiPayloadDir>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\Build\GlassSetup\msi\Release\'))</GlassMsiPayloadDir>
   </PropertyGroup>
-  <!-- GlassSetup — Win32: пересобираем только x86 MSI. x64/OpenGlass — из Release|x64 (иначе C1905 при Publish x64 из Win32-процесса). -->
-  <Target Name="GlassSetupBuildEmbeddedMsi" BeforeTargets="GlassSetupStageEmbeddedMsi" Condition="'$(Configuration)|$(Platform)'=='Release|Win32' And '$(GlassSetupBuildEmbeddedMsi)' != 'false'">
-    <MSBuild Projects="$(ProjectDir)msi\Glass-x86.wixproj"
-             Targets="Build"
-             Properties="Configuration=Release;Platform=x86;BuildProjectReferences=true" />
-  </Target>
-  <Target Name="GlassSetupStageEmbeddedMsi" BeforeTargets="BeforeResourceCompile" DependsOnTargets="GlassSetupBuildEmbeddedMsi" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <MakeDir Directories="$(ProjectDir)res\payload" />
-    <Error Condition="!Exists('$(GlassMsiPayloadDir)x64\Glass-x64.msi')" Text="Glass-x64.msi not found — build Glass-x64.wixproj Release|x64 first." />
-    <Error Condition="!Exists('$(GlassMsiPayloadDir)x86\Glass-x86.msi')" Text="Glass-x86.msi not found — build Glass-x86.wixproj Release|x86 first." />
-    <Error Condition="!Exists('$(GlassMsiPayloadDir)OpenGlass\OpenGlass-x64.msi')" Text="OpenGlass-x64.msi not found — build OpenGlass-x64.wixproj Release|x64 first." />
-    <Copy SourceFiles="$(GlassMsiPayloadDir)x64\Glass-x64.msi" DestinationFiles="$(ProjectDir)res\payload\Glass-x64.msi" SkipUnchangedFiles="false" />
-    <Copy SourceFiles="$(GlassMsiPayloadDir)x86\Glass-x86.msi" DestinationFiles="$(ProjectDir)res\payload\Glass-x86.msi" SkipUnchangedFiles="false" />
-    <Copy SourceFiles="$(GlassMsiPayloadDir)OpenGlass\OpenGlass-x64.msi" DestinationFiles="$(ProjectDir)res\payload\OpenGlass-x64.msi" SkipUnchangedFiles="false" />
-    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll')" Text="x64 GlassSettings.Native.dll not found — build GlassSettings.Native Release|x64 first." />
-    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll" DestinationFiles="$(ProjectDir)res\payload\GlassSettings.Native.x64.dll" SkipUnchangedFiles="false" />
+  <!-- MSI собирает solution: x64 WiX только в Release|x64, x86 WiX только в Release|x86. GlassSetup (Win32, шаг x86) только проверяет, что файлы уже лежат в Build. -->
+  <Target Name="GlassSetupVerifyEmbeddedMsi" BeforeTargets="BeforeResourceCompile" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Error Condition="!Exists('$(GlassMsiPayloadDir)GlassSettings-x64\GlassSettings-x64.msi')" Text="Нет $(GlassMsiPayloadDir)GlassSettings-x64\GlassSettings-x64.msi. Сначала полная сборка solution Release|x64 (GlassSettings-x64, Glass-x64, OpenGlass-x64), затем Release|x86." />
+    <Error Condition="!Exists('$(GlassMsiPayloadDir)Glass-x64\Glass-x64.msi')" Text="Нет Glass-x64.msi. Сначала solution Release|x64." />
+    <Error Condition="!Exists('$(GlassMsiPayloadDir)OpenGlass-x64\OpenGlass-x64.msi')" Text="Нет OpenGlass-x64.msi. Сначала solution Release|x64." />
+    <Error Condition="!Exists('$(GlassMsiPayloadDir)GlassSettings-x86\GlassSettings-x86.msi')" Text="Нет GlassSettings-x86.msi. Его собирает solution Release|x86 до GlassSetup." />
+    <Error Condition="!Exists('$(GlassMsiPayloadDir)Glass-x86\Glass-x86.msi')" Text="Нет Glass-x86.msi. Его собирает solution Release|x86 до GlassSetup." />
     <Touch Files="$(ProjectDir)res\GlassSetup.rc" />
   </Target>
   <ItemGroup>
@@ -130,6 +121,13 @@
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\InstallEngine.cpp" />
     <ClCompile Include="src\InstallLog.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassInstallLog.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassInstallMsi.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassInstallRollback.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassInstallUtil.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassInstallWatch.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassInstallHost.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassInstallUnlock.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="res\GlassSetup.rc" />
@@ -143,6 +141,16 @@
     <None Include="res\app.manifest" />
     <None Include="res\app.ico" />
     <None Include="tests\verify_resources.py" />
+    <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="..\packages\Detours.4.0.1\build\native\Detours.targets" Condition="Exists('..\packages\Detours.4.0.1\build\native\Detours.targets')" />
+  </ImportGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>Данный проект ссылается на пакет NuGet Detours, отсутствующий на этом компьютере. Используйте восстановление пакетов NuGet. Отсутствует файл: {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\packages\Detours.4.0.1\build\native\Detours.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Detours.4.0.1\build\native\Detours.targets'))" />
+  </Target>
 </Project>

@@ -24,7 +24,9 @@ msbuild GlassProject.sln /t:GlassSetup /p:Configuration=Debug /p:Platform=x86
 1. **Release | x64** — собрать **весь** `GlassProject.sln` (создаётся сессия, выделяется номер комплекта, MSI x64).
 2. **Release | x86** — снова собрать **весь** solution (MSI x86 + GlassSetup с тем же номером; сессия финализируется).
 
-Локальный счётчик: `Build\GlassBundleBuildNumber.txt`. Активная сессия: `Build\GlassBundleSession.json` / `.props`. Первый номер после клона — **0042** (`GlassBundleBuildNumberSeed` в `Directory.Build.props`). CI может передать `/p:GlassBundleBuildNumber=N`.
+Повторная **Release | x86** после финализации **не** выделяет новый номер комплекта (тот же ProductVersion). Новый номер — только после **Release | x64** (первый x64-native модуль в solution).
+
+Локальный счётчик: `Build\GlassBundleBuildNumber.txt`. Активная сессия: `Build\GlassBundleSession.json` / `.props`. Первый номер после клона — **0042** (`GlassBundleBuildNumberSeed` в `Directory.Build.props`). CI может передать `/p:GlassBundleCiBuildNumber=N` (не `GlassBundleBuildNumber` — это поле сессии после Import).
 
 Отмена незавершённой сессии (номер не возвращается в счётчик):
 

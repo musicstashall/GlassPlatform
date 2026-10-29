@@ -4,14 +4,21 @@
     <SolutionRoot Condition="'$(SolutionRoot)' == ''">$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..'))))</SolutionRoot>
   </PropertyGroup>
   <Import Project="$([System.IO.Path]::Combine('$(SolutionRoot)', 'Directory.Build.props'))" Condition="'$(GlassProductVersion)' == ''" />
-  <Import Project="$(SolutionRoot)Build\GlassBundleSession.props" Condition="Exists('$(SolutionRoot)Build\GlassBundleSession.props')" />
 
   <!-- Одна MSI-архитектура на .wixproj; без явных ProjectConfiguration VS/HeatWave показывает x64 и x86. -->
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x86'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x86' or '$(MSBuildProjectName)' == 'GlassSettings-x86'">
     <GlassWixLockedPlatform>x86</GlassWixLockedPlatform>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x64' or '$(MSBuildProjectName)' == 'OpenGlass-x64'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x64' or '$(MSBuildProjectName)' == 'OpenGlass-x64' or '$(MSBuildProjectName)' == 'GlassSettings-x64'">
     <GlassWixLockedPlatform>x64</GlassWixLockedPlatform>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GlassWixLockedPlatform)' != ''">
+    <BaseOutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassSetup', 'msi', '$(Configuration)', '$(MSBuildProjectName)'))\</BaseOutputPath>
+    <OutputPath>$(BaseOutputPath)</OutputPath>
+    <AppendPlatformToOutputPath>false</AppendPlatformToOutputPath>
+    <BaseIntermediateOutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Cache', '$(MSBuildProjectName)'))\</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)$(Platform)\$(Configuration)\</IntermediateOutputPath>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(GlassWixLockedPlatform)' != ''">
@@ -23,15 +30,4 @@
   <PropertyGroup Condition="'$(GlassWixLockedPlatform)' != '' and '$(Platform)' != '$(GlassWixLockedPlatform)'">
     <BuildProject>false</BuildProject>
   </PropertyGroup>
-
-  <ItemGroup Condition="'$(GlassWixLockedPlatform)' != ''">
-    <ProjectConfiguration Include="Debug|$(GlassWixLockedPlatform)">
-      <Configuration>Debug</Configuration>
-      <Platform>$(GlassWixLockedPlatform)</Platform>
-    </ProjectConfiguration>
-    <ProjectConfiguration Include="Release|$(GlassWixLockedPlatform)">
-      <Configuration>Release</Configuration>
-      <Platform>$(GlassWixLockedPlatform)</Platform>
-    </ProjectConfiguration>
-  </ItemGroup>
 </Project>

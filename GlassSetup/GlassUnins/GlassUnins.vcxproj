@@ -29,21 +29,68 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;UNICODE;_UNICODE;GLASS_UNINS;NOMINMAX;WIN32_LEAN_AND_MEAN;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\src;$(MSBuildThisFileDirectory)..\..\GlassShared;$(MSBuildThisFileDirectory)..\..\GlassShared\include;$(MSBuildThisFileDirectory)..\..\GlassShared\include\Helpers;$(MSBuildThisFileDirectory)..\..\gtl;$(MSBuildThisFileDirectory)..\..\packages\Detours.4.0.1\lib\native\include;$(MSBuildThisFileDirectory)..\..\GlassPlatform\include\Internal;$(MSBuildThisFileDirectory)..\..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
-      <AdditionalDependencies>shlwapi.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>comctl32.lib;msi.lib;taskschd.lib;ole32.lib;oleaut32.lib;advapi32.lib;user32.lib;version.lib;shlwapi.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalOptions>/MANIFESTUAC:"level='requireAdministrator' uiAccess='false'" %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="..\src\InstallSupport\GlassInstallLog.cpp" />
+    <ClCompile Include="..\src\InstallSupport\GlassInstallMsi.cpp" />
+    <ClCompile Include="..\src\InstallSupport\GlassInstallUtil.cpp" />
+    <ClCompile Include="..\src\InstallSupport\GlassInstallWatch.cpp" />
+    <ClCompile Include="..\src\InstallSupport\GlassInstallHost.cpp" />
+    <ClCompile Include="..\src\InstallSupport\GlassInstallUnlock.cpp" />
+    <ClCompile Include="..\..\GlassShared\src\GlassPlatformTask.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\TaskSchedulerCom.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\GlassModulePath.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\PlatformPresenceState.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\PlatformPresenceQuery.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\GlassHostRegistry.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\InjectProcessMap.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\InjectModuleScan.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\ForceUnloadGlassModules.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\ForceUnloadAgent.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\WinApiUtils.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\BorderDisplayHelper.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\..\GlassShared\src\ThemeHelper.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

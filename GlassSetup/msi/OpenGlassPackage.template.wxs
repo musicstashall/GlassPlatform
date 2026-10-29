@@ -15,6 +15,8 @@
     <Property Id="ARPPRODUCTICON" Value="GlassProductIcon" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/ALTaleX531/OpenGlass" Secure="yes" />
     <Property Id="ARPHELPLINK" Value="https://github.com/ALTaleX531/OpenGlass" Secure="yes" />
+    <!-- В MSI значение "0" истинно. Файлы отключает только GLASS_RESTORE_NO_CAB=1. -->
+    <Property Id="GLASS_RESTORE_NO_CAB" Value="0" Hidden="yes" />
 
     <Feature Id="MainFeature" Title="OpenGlass" Level="1">
       <ComponentGroupRef Id="GlassPayloadFiles" />
@@ -23,8 +25,11 @@
       <ComponentRef Id="GlassUninstallDat" />
     </Feature>
 
+    <!-- Name="." не дописывает ещё один OpenGlass к абсолютному INSTALLDIR. -->
     <StandardDirectory Id="ProgramFiles6432Folder">
-      <Directory Id="INSTALLDIR" Name="OpenGlass" />
+      <Directory Id="GlassPlatformFolder" Name="GlassPlatform">
+        <Directory Id="INSTALLDIR" Name="." />
+      </Directory>
     </StandardDirectory>
 
     <Component Id="OpenGlassInstallPathRegistry" Directory="INSTALLDIR" Guid="*">
@@ -39,5 +44,9 @@
     <Component Id="GlassUninstallDat" Directory="INSTALLDIR" Guid="*">
       <File Id="GlassUninsDat" Source="$(var.GlassPayloadStage)\unins000.dat" Name="unins000.dat" KeyPath="yes" />
     </Component>
+
+    <InstallExecuteSequence>
+      <InstallFiles Condition="GLASS_RESTORE_NO_CAB &lt;&gt; 1" />
+    </InstallExecuteSequence>
   </Package>
 </Wix>

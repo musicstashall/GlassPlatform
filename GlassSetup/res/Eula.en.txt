@@ -12,6 +12,8 @@ Glass is built on the example of TranslucentFlyouts
 (https://github.com/ALTaleX531/TranslucentFlyouts).
 TranslucentFlyouts was the inspiration. That project is licensed under the GNU Lesser General Public License, version 3, and the GNU General Public License, version 3. Glass is a separate program, not a copy of TranslucentFlyouts, and this repository does not distribute TranslucentFlyouts.
 
+Official author builds of GlassSetup and core modules may be signed with a Code Signing certificate for "Stanislav K." (self-signed). Windows may show "Unknown publisher" — that is expected. How to verify the SHA-1 thumbprint and what the signature means is described in the repository README.
+
 The installer may offer to install OpenGlass
 (https://github.com/ALTaleX531/OpenGlass)
 inside the Glass directory. OpenGlass is a separate program by its own authors, licensed under the GNU General Public License, version 3. Copyright in OpenGlass stays with its authors. Installing OpenGlass means you also accept that license.

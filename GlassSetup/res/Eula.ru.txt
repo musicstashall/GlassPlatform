@@ -12,6 +12,8 @@ Glass Platform — экспериментальная программа для 
 (https://github.com/ALTaleX531/TranslucentFlyouts).
 TranslucentFlyouts был вдохновителем. Его лицензии — GNU LGPL версии 3 и GNU GPL версии 3. Glass — отдельная программа, а не копия TranslucentFlyouts, и этот репозиторий TranslucentFlyouts не распространяет.
 
+Официальные авторские сборки GlassSetup и ключевых модулей могут быть подписаны сертификатом Code Signing издателя «Stanislav K.» (self-signed). Windows может показывать «Неизвестный издатель» — это ожидаемо. Как проверить отпечаток (SHA-1) и что гарантирует подпись — в README репозитория.
+
 Установщик может предложить поставить OpenGlass
 (https://github.com/ALTaleX531/OpenGlass)
 внутрь каталога Glass. OpenGlass — отдельная программа своих авторов. Её лицензия — GNU GPL версии 3. Авторские права на OpenGlass остаются у его авторов. Устанавливая OpenGlass, вы принимаете и его лицензию.

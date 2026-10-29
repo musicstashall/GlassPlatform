@@ -1,0 +1,24 @@
+<Project Sdk="WixToolset.Sdk">
+  <PropertyGroup>
+    <ProjectGuid>{F2E3A4B5-C6D7-4890-1BCD-EF1234567891}</ProjectGuid>
+    <Configurations>Debug;Release</Configurations>
+    <OutputName>GlassSettings-x86</OutputName>
+    <OutputType>Package</OutputType>
+    <Cultures>neutral</Cultures>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <GlassUpgradeCode>B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5050</GlassUpgradeCode>
+    <GlassProductCode>B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5075</GlassProductCode>
+    <GlassPlatformTitle>GlassSettings (32-bit)</GlassPlatformTitle>
+    <GlassMsiProductCode>$(GlassProductCode)</GlassMsiProductCode>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' != 'Release'">
+    <BuildProject>false</BuildProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="GlassSettingsPackage.template.wxs" />
+    <None Include="GlassSetupPayload.targets" />
+    <None Include="scripts\Generate-HarvestWxs.ps1" />
+    <None Include="scripts\Generate-PlatformWxs.ps1" />
+  </ItemGroup>
+  <Import Project="GlassSetupPayload.targets" />
+</Project>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <GlassSign Condition="'$(GlassSign)' == '' and '$(Configuration)' == 'Release'">Local</GlassSign>
+    <GlassSign Condition="'$(GlassSign)' == ''">Skip</GlassSign>
+    <GlassSignSubject Condition="'$(GlassSignSubject)' == ''">CN=Stanislav K.</GlassSignSubject>
+    <GlassSignScript>$(MSBuildThisFileDirectory)scripts\Invoke-GlassSign.ps1</GlassSignScript>
+  </PropertyGroup>
+
+  <Target Name="GlassSignAfterBuild" AfterTargets="Build"
+          Condition="'$(GlassSign)' == 'Local' and '$(GlassSignPaths)' != ''">
+    <Exec IgnoreExitCode="true"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(GlassSignScript)&quot; -Paths &quot;$(GlassSignPaths)&quot; -Subject &quot;$(GlassSignSubject)&quot; -Thumbprint &quot;$(GlassSignThumbprint)&quot; -PfxPath &quot;$(GlassSignPfxPath)&quot; -PfxPassword &quot;$(GlassSignPfxPassword)&quot;" />
+  </Target>
+</Project>

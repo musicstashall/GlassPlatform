@@ -222,43 +222,156 @@ namespace
         return text;
     }
 
-    [[nodiscard]] bool WriteScanTsv(const wchar_t* outPath) noexcept
+    void AppendUtf8Field(std::string& row, const wchar_t* wide) noexcept
+    {
+        if (!wide || !wide[0])
+            return;
+        const int need = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+        if (need <= 1)
+            return;
+        std::string chunk(static_cast<size_t>(need - 1), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, wide, -1, chunk.data(), need, nullptr, nullptr);
+        row += chunk;
+    }
+
+    [[nodiscard]] bool WriteScanRowUtf8(
+        HANDLE dest,
+        const Shared::InjectModuleScan::Result& row) noexcept
+    {
+        const std::wstring modules = ModuleNamesFromBits(row.moduleBits);
+        if (modules.empty())
+            return false;
+        char line[640]{};
+        const int n = std::snprintf(line, sizeof(line), "%lu\t",
+            static_cast<unsigned long>(row.pid));
+        if (n <= 0)
+            return false;
+        std::string bytes(line);
+        AppendUtf8Field(bytes, row.exeName);
+        bytes += '\t';
+        AppendUtf8Field(bytes, modules.c_str());
+        bytes += '\n';
+        DWORD written = 0;
+        return WriteFile(dest, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) != FALSE;
+    }
+
+    [[nodiscard]] DWORD CountScanHolders() noexcept
     {
         Shared::InjectModuleScan::Result results[Shared::InjectModuleScan::kMaxResults]{};
         DWORD count = 0;
         if (!Shared::InjectModuleScan::Scan(
                 nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count))
-            return false;
-        FILE* file = nullptr;
-        if (_wfopen_s(&file, outPath, L"wb") != 0 || !file)
-            return false;
+            return 0;
+        DWORD holders = 0;
         for (DWORD i = 0; i < count; ++i)
         {
-            const std::wstring modules = ModuleNamesFromBits(results[i].moduleBits);
-            if (modules.empty())
+            if (ModuleNamesFromBits(results[i].moduleBits).empty())
                 continue;
-            char line[640]{};
-            const int n = std::snprintf(line, sizeof(line), "%lu\t",
-                static_cast<unsigned long>(results[i].pid));
-            if (n <= 0)
-                continue;
-            std::string row(line);
-            auto append = [&](const wchar_t* wide) {
-                if (!wide || !wide[0]) return;
-                const int need = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
-                if (need <= 1) return;
-                std::string chunk(static_cast<size_t>(need - 1), '\0');
-                WideCharToMultiByte(CP_UTF8, 0, wide, -1, chunk.data(), need, nullptr, nullptr);
-                row += chunk;
-            };
-            append(results[i].exeName);
-            row += '\t';
-            append(modules.c_str());
-            row += '\n';
-            fwrite(row.data(), 1, row.size(), file);
+            ++holders;
         }
-        fclose(file);
+        return holders;
+    }
+
+    [[nodiscard]] bool WriteScanResultsUtf8(
+        HANDLE dest,
+        bool* anyOut) noexcept
+    {
+        if (anyOut)
+            *anyOut = false;
+        Shared::InjectModuleScan::Result results[Shared::InjectModuleScan::kMaxResults]{};
+        DWORD count = 0;
+        if (!Shared::InjectModuleScan::Scan(
+                nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count))
+            return false;
+        bool any = false;
+        for (DWORD i = 0; i < count; ++i)
+        {
+            if (!WriteScanRowUtf8(dest, results[i]))
+                continue;
+            any = true;
+        }
+        if (anyOut)
+            *anyOut = any;
         return true;
+    }
+
+    [[nodiscard]] bool WriteScanTsv(const wchar_t* outPath) noexcept
+    {
+        HANDLE file = CreateFileW(outPath, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return false;
+        bool any = false;
+        const bool ok = WriteScanResultsUtf8(file, &any);
+        (void)any;
+        CloseHandle(file);
+        return ok;
+    }
+
+    [[nodiscard]] bool WritePipeMarker(HANDLE pipe, const char* marker) noexcept
+    {
+        if (!marker)
+            return false;
+        const size_t len = std::strlen(marker);
+        DWORD written = 0;
+        if (!WriteFile(pipe, marker, static_cast<DWORD>(len), &written, nullptr))
+            return false;
+        FlushFileBuffers(pipe);
+        return true;
+    }
+
+    [[nodiscard]] bool WatchGlassModulesPipe(const wchar_t* pipeName, DWORD timeoutMs) noexcept
+    {
+        if (!pipeName || !pipeName[0])
+            ExitProcess(1);
+        HANDLE pipe = INVALID_HANDLE_VALUE;
+        const DWORD connectStart = GetTickCount();
+        while (GetTickCount() - connectStart < 5000)
+        {
+            pipe = CreateFileW(pipeName, GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+            if (pipe != INVALID_HANDLE_VALUE)
+                break;
+            Sleep(50);
+        }
+        if (pipe == INVALID_HANDLE_VALUE)
+            ExitProcess(1);
+        const DWORD watchStart = GetTickCount();
+        for (;;)
+        {
+            if (GetTickCount() - watchStart >= timeoutMs)
+            {
+                CloseHandle(pipe);
+                ExitProcess(2);
+            }
+            bool any = false;
+            if (!WriteScanResultsUtf8(pipe, &any))
+            {
+                CloseHandle(pipe);
+                ExitProcess(2);
+            }
+            if (!any)
+            {
+                if (!WritePipeMarker(pipe, "#empty\n"))
+                {
+                    CloseHandle(pipe);
+                    ExitProcess(0);
+                }
+                CloseHandle(pipe);
+                ExitProcess(0);
+            }
+            if (!WritePipeMarker(pipe, "#end\n"))
+            {
+                CloseHandle(pipe);
+                ExitProcess(0);
+            }
+            const DWORD wait = 500;
+            if (timeoutMs - (GetTickCount() - watchStart) <= wait)
+            {
+                CloseHandle(pipe);
+                ExitProcess(2);
+            }
+            Sleep(wait);
+        }
     }
 
     [[nodiscard]] std::uint32_t BitsFromNames(const std::wstring& modules) noexcept
@@ -654,6 +767,15 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_UnlockerW(HWND, HIN
         const std::wstring pidText = UnlockerToken(cursor);
         const DWORD pid = static_cast<DWORD>(wcstoul(pidText.c_str(), nullptr, 10));
         ExitProcess(pid != 0 && UnloadPid(pid) ? 0 : 3);
+    }
+    if (_wcsicmp(verb.c_str(), L"/watchGlassModules") == 0)
+    {
+        const std::wstring pipeName = UnlockerToken(cursor);
+        const std::wstring timeoutText = UnlockerToken(cursor);
+        const DWORD timeoutMs = timeoutText.empty()
+            ? 30000u
+            : static_cast<DWORD>(wcstoul(timeoutText.c_str(), nullptr, 10));
+        WatchGlassModulesPipe(pipeName.c_str(), timeoutMs == 0 ? 30000u : timeoutMs);
     }
     ExitProcess(1);
 }

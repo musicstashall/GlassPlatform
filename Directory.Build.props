@@ -15,8 +15,7 @@
     <GlassProductVersionBase>$([System.Text.RegularExpressions.Regex]::Match('$(GlassProductVersion)', '^\d+\.\d+\.\d+').Value)</GlassProductVersionBase>
   </PropertyGroup>
 
-  <!-- Активная сессия комплекта между ручными вызовами VS (x64 затем x86). -->
-  <Import Project="$(SolutionRoot)Build\GlassBundleSession.props" Condition="Exists('$(SolutionRoot)Build\GlassBundleSession.props')" />
+  <!-- Версия комплекта подхватывается в GlassBundleImportSessionProps (JSON), не через Import .props — иначе GlassBundleBuildNumber ломает Override сессии. -->
 
   <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.csproj'">
     <Version>$(GlassProductVersion)</Version>
@@ -37,4 +36,6 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)Shared\GlassSign.targets" Condition="Exists('$(MSBuildThisFileDirectory)Shared\GlassSign.targets')" />
 </Project>

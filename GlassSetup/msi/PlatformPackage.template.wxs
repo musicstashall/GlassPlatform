@@ -14,6 +14,8 @@
     <Icon Id="GlassProductIcon" SourceFile="$(var.GlassSetupIcon)" />
     <Property Id="ARPPRODUCTICON" Value="GlassProductIcon" />
     <Property Id="GLASSBUNDLEVERSION" Value="$(var.GlassMsiBundleVersion)" Hidden="yes" />
+    <!-- В MSI значение "0" истинно. Файлы отключает только GLASS_RESTORE_NO_CAB=1. -->
+    <Property Id="GLASS_RESTORE_NO_CAB" Value="0" Hidden="yes" />
 
     <Feature Id="MainFeature" Title="$(var.GlassPlatformTitle)" Level="1">
       <ComponentGroupRef Id="GlassPayloadFiles" />
@@ -38,5 +40,9 @@
     <Component Id="GlassUninstallDat" Directory="INSTALLDIR" Guid="*">
       <File Id="GlassUninsDat" Source="$(var.GlassPayloadStage)\unins000.dat" Name="unins000.dat" KeyPath="yes" />
     </Component>
+
+    <InstallExecuteSequence>
+      <InstallFiles Condition="GLASS_RESTORE_NO_CAB &lt;&gt; 1" />
+    </InstallExecuteSequence>
   </Package>
 </Wix>

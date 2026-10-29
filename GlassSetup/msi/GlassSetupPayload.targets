@@ -3,8 +3,11 @@
     <GlassPayloadArch Condition="'$(MSBuildProjectName)' == 'Glass-x64'">x64</GlassPayloadArch>
     <GlassPayloadArch Condition="'$(MSBuildProjectName)' == 'Glass-x86'">x86</GlassPayloadArch>
     <GlassPayloadArch Condition="'$(MSBuildProjectName)' == 'OpenGlass-x64'">OpenGlass</GlassPayloadArch>
-    <GlassBuildRelease Condition="'$(GlassPayloadArch)' == 'OpenGlass'">$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'x64', 'Release'))</GlassBuildRelease>
-    <GlassBuildRelease Condition="'$(GlassPayloadArch)' != 'OpenGlass'">$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', '$(GlassPayloadArch)', 'Release'))</GlassBuildRelease>
+    <GlassPayloadArch Condition="'$(MSBuildProjectName)' == 'GlassSettings-x64'">GlassSettings-x64</GlassPayloadArch>
+    <GlassPayloadArch Condition="'$(MSBuildProjectName)' == 'GlassSettings-x86'">GlassSettings-x86</GlassPayloadArch>
+    <GlassNativeArch Condition="'$(GlassPayloadArch)' == 'x86' or '$(GlassPayloadArch)' == 'GlassSettings-x86'">x86</GlassNativeArch>
+    <GlassNativeArch Condition="'$(GlassNativeArch)' == ''">x64</GlassNativeArch>
+    <GlassBuildRelease>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', '$(GlassNativeArch)', 'Release'))</GlassBuildRelease>
     <GlassPayloadStage>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'SetupPayload', '$(GlassPayloadArch)'))</GlassPayloadStage>
     <GlassHarvestWxs>$(BaseIntermediateOutputPath)$(MSBuildProjectName).Harvest.wxs</GlassHarvestWxs>
     <GlassHarvestScript>$(MSBuildThisFileDirectory)scripts\Generate-HarvestWxs.ps1</GlassHarvestScript>
@@ -20,14 +23,26 @@
     <GlassSecureUxThemeVendorDir>$([System.IO.Path]::Combine('$(SolutionRoot)', 'GlassSetup', 'third_party', 'SecureUxTheme', '$(GlassPayloadArch)'))</GlassSecureUxThemeVendorDir>
   </PropertyGroup>
 
-  <!-- Release: single-file Publish до staging MSI (Unpackaged остаётся промежуточным OutputPath). -->
+  <!--
+    Publish для MSI делает проект GlassSettings (GlassSettingsPublishForMsi).
+    Повторный MSBuild отсюда во время сборки solution идёт параллельно с Clean GlassSettings.Native
+    и сносит Cache\...\vc143.pdb (C1090, код 3). Отдельная сборка одного .wixproj Publish вызывает сама.
+  -->
   <Target Name="GlassEnsureGlassSettingsPublish"
           BeforeTargets="GlassStagePayload"
-          Condition="'$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86'">
-    <Message Importance="high" Text="GlassSettings Publish $(GlassPayloadArch) before MSI" />
-    <MSBuild Projects="$(SolutionRoot)GlassSettings\GlassSettings.csproj"
+          Condition="'$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86' or '$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86'">
+    <PropertyGroup>
+      <_GsPublishExe>$(GlassBuildRelease)\GlassSettings\GlassSettings.exe</_GsPublishExe>
+      <_GsPublishFromSolution Condition="'$(BuildingSolutionFile)' == 'true' or '$(BuildingInsideVisualStudio)' == 'true' or '$(SolutionDir)' != ''">true</_GsPublishFromSolution>
+    </PropertyGroup>
+    <Message Importance="high" Condition="'$(_GsPublishFromSolution)' == 'true'" Text="GlassSettings для MSI: $(_GsPublishExe)" />
+    <Message Importance="high" Condition="'$(_GsPublishFromSolution)' != 'true'" Text="GlassSettings Publish $(GlassPayloadArch) before MSI" />
+    <MSBuild Condition="'$(_GsPublishFromSolution)' != 'true'"
+             Projects="$(SolutionRoot)GlassSettings\GlassSettings.csproj"
              Targets="Publish"
-             Properties="Configuration=Release;Platform=$(GlassPayloadArch);GlassSettingsSkipPublishForMsi=true" />
+             Properties="Configuration=Release;Platform=$(GlassNativeArch);GlassSettingsSkipPublishForMsi=true" />
+    <Error Condition="!Exists('$(_GsPublishExe)')"
+           Text="Нет $(_GsPublishExe). Сначала соберите GlassSettings Release|$(GlassNativeArch): он публикует каталог для MSI." />
   </Target>
 
   <!-- SecureUxTheme: vendored в репо → Build\…\Release\SecureUxTheme перед staging (Build\ в git нет). -->
@@ -66,10 +81,6 @@
       <GlassNative Include="$(GlassBuildRelease)\msvcp140_1.dll" Condition="Exists('$(GlassBuildRelease)\msvcp140_1.dll')" />
       <GlassNative Include="$(GlassBuildRelease)\msvcp140_2.dll" Condition="Exists('$(GlassBuildRelease)\msvcp140_2.dll')" />
       <GlassNative Include="$(GlassBuildRelease)\concrt140.dll" Condition="Exists('$(GlassBuildRelease)\concrt140.dll')" />
-      <GlassSettingsPublish Include="$(GlassBuildRelease)\GlassSettings\**\*.*"
-        Exclude="$(GlassBuildRelease)\GlassSettings\**\*.pdb;$(GlassBuildRelease)\GlassSettings\**\*.xaml;$(GlassBuildRelease)\GlassSettings\Package.appxmanifest;$(GlassBuildRelease)\GlassSettings\app.manifest;$(GlassBuildRelease)\GlassSettings\Properties\**\*.*;$(GlassBuildRelease)\GlassSettings\Microsoft.UI.Designer.dll;$(GlassBuildRelease)\GlassSettings\Microsoft.UI.Xaml\Assets\map.html;$(GlassBuildRelease)\GlassSettings\Microsoft.Windows.Workloads.pri;$(GlassBuildRelease)\GlassSettings\Assets\StoreLogo.png;$(GlassBuildRelease)\GlassSettings\Assets\SplashScreen.*;$(GlassBuildRelease)\GlassSettings\Assets\Square150x150Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\Square44x44Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\Wide310x150Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\LockScreenLogo.*" />
-      <GlassNativeExtra Include="$(GlassBuildRelease)\GlassSettings.Native.dll"
-        Condition="'$(GlassPayloadArch)' == 'x86' and !Exists('$(GlassBuildRelease)\GlassSettings\GlassSettings.Native.dll')" />
       <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\**\*.*" />
       <GlassSecureUxTheme Include="$(GlassBuildRelease)\SecureUxTheme\**\*.*" />
       <GlassUnins Include="$(GlassUninsExePath)" Condition="Exists('$(GlassUninsExePath)')" />
@@ -83,9 +94,9 @@
       <GlassUnins Include="$(GlassUninsExePath)" Condition="Exists('$(GlassUninsExePath)')" />
     </ItemGroup>
 
+    <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and !Exists('$(GlassBuildRelease)\GlassCompat.dll')"
+      Text="Glass $(GlassPayloadArch) MSI: нет $(GlassBuildRelease)\GlassCompat.dll — сначала успешно соберите Release|$(GlassPayloadArch) solution (модули платформы), затем MSI." />
     <Copy SourceFiles="@(GlassNative)" DestinationFolder="$(GlassPayloadStage)" SkipUnchangedFiles="true" Condition="'@(GlassNative)' != ''" />
-    <Copy SourceFiles="@(GlassNativeExtra)" DestinationFolder="$(GlassPayloadStage)\GlassSettings" SkipUnchangedFiles="true" Condition="'@(GlassNativeExtra)' != ''" />
-    <Copy SourceFiles="@(GlassSettingsPublish)" DestinationFiles="@(GlassSettingsPublish->'$(GlassPayloadStage)\GlassSettings\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(GlassSettingsPublish)' != ''" />
     <Copy SourceFiles="@(GlassShellSparse)" DestinationFiles="@(GlassShellSparse->'$(GlassPayloadStage)\GlassShellSparse\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(GlassShellSparse)' != ''" />
     <Copy SourceFiles="@(GlassSecureUxTheme)" DestinationFiles="@(GlassSecureUxTheme->'$(GlassPayloadStage)\SecureUxTheme\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(GlassSecureUxTheme)' != ''" />
     <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and !Exists('$(GlassBuildRelease)\GlassShellSparse\AppxManifest.xml')"
@@ -96,18 +107,32 @@
     <Copy SourceFiles="@(GlassOgResources)" DestinationFiles="@(GlassOgResources->'$(GlassPayloadStage)\Resources\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(GlassOgResources)' != ''" />
     <MakeDir Directories="$(GlassPayloadStage)\Resources\ThemeMaterial" Condition="'$(GlassPayloadArch)' == 'OpenGlass' and !Exists('$(GlassPayloadStage)\Resources\ThemeMaterial')" />
     <MakeDir Directories="$(GlassPayloadStage)" Condition="!Exists('$(GlassPayloadStage)')" />
-    <WriteLinesToFile File="$(GlassPayloadStage)\unins000.dat" Lines="PRODUCT_CODE={$(GlassMsiProductCode)}" Overwrite="true" Condition="'$(GlassMsiProductCode)' != ''" />
+    <WriteLinesToFile File="$(GlassPayloadStage)\unins000.dat" Lines="PRODUCT_CODE={$(GlassMsiProductCode)}" Overwrite="true" Condition="'$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86'" />
+    <WriteLinesToFile File="$(GlassPayloadStage)\unins000.dat" Lines="SETTINGS_PRODUCT_CODE={B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5074}" Overwrite="false" Condition="'$(GlassPayloadArch)' == 'x64'" />
+    <WriteLinesToFile File="$(GlassPayloadStage)\unins000.dat" Lines="SETTINGS_PRODUCT_CODE={B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5075}" Overwrite="false" Condition="'$(GlassPayloadArch)' == 'x86'" />
+    <WriteLinesToFile File="$(GlassPayloadStage)\unins000.dat" Lines="PRODUCT_CODE={$(GlassMsiProductCode)}" Overwrite="true" Condition="'$(GlassPayloadArch)' == 'OpenGlass' and '$(GlassMsiProductCode)' != ''" />
+
+    <!-- GlassSettings MSI: только каталог GlassSettings -->
+    <ItemGroup Condition="'$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86'">
+      <GlassSettingsOnly Include="$(GlassBuildRelease)\GlassSettings\**\*.*"
+        Exclude="$(GlassBuildRelease)\GlassSettings\**\*.pdb;$(GlassBuildRelease)\GlassSettings\**\*.xaml;$(GlassBuildRelease)\GlassSettings\Package.appxmanifest;$(GlassBuildRelease)\GlassSettings\app.manifest;$(GlassBuildRelease)\GlassSettings\Properties\**\*.*;$(GlassBuildRelease)\GlassSettings\Microsoft.UI.Designer.dll;$(GlassBuildRelease)\GlassSettings\Microsoft.UI.Xaml\Assets\map.html;$(GlassBuildRelease)\GlassSettings\Microsoft.Windows.Workloads.pri;$(GlassBuildRelease)\GlassSettings\Assets\StoreLogo.png;$(GlassBuildRelease)\GlassSettings\Assets\SplashScreen.*;$(GlassBuildRelease)\GlassSettings\Assets\Square150x150Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\Square44x44Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\Wide310x150Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\LockScreenLogo.*" />
+      <GlassNativeExtraGs Include="$(GlassBuildRelease)\GlassSettings.Native.dll"
+        Condition="!Exists('$(GlassBuildRelease)\GlassSettings\GlassSettings.Native.dll')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(GlassSettingsOnly)" DestinationFiles="@(GlassSettingsOnly->'$(GlassPayloadStage)\GlassSettings\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(GlassSettingsOnly)' != ''" />
+    <Copy SourceFiles="@(GlassNativeExtraGs)" DestinationFolder="$(GlassPayloadStage)\GlassSettings" SkipUnchangedFiles="true" Condition="'@(GlassNativeExtraGs)' != ''" />
   </Target>
 
   <PropertyGroup>
-    <GlassProductMetadataWxi>$(MSBuildThisFileDirectory)ProductMetadata.$(GlassPayloadArch).wxi</GlassProductMetadataWxi>
+    <GlassProductMetadataWxi>$(IntermediateOutputPath)ProductMetadata.$(GlassPayloadArch).wxi</GlassProductMetadataWxi>
     <GlassPlatformWxs>$(BaseIntermediateOutputPath)$(MSBuildProjectName).PlatformPackage.wxs</GlassPlatformWxs>
     <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' == 'OpenGlass-x64'">$(MSBuildThisFileDirectory)OpenGlassPackage.template.wxs</GlassPlatformTemplate>
-    <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' != 'OpenGlass-x64'">$(MSBuildThisFileDirectory)PlatformPackage.template.wxs</GlassPlatformTemplate>
+    <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' == 'GlassSettings-x64' or '$(MSBuildProjectName)' == 'GlassSettings-x86'">$(MSBuildThisFileDirectory)GlassSettingsPackage.template.wxs</GlassPlatformTemplate>
+    <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' != 'OpenGlass-x64' and '$(MSBuildProjectName)' != 'GlassSettings-x64' and '$(MSBuildProjectName)' != 'GlassSettings-x86'">$(MSBuildThisFileDirectory)PlatformPackage.template.wxs</GlassPlatformTemplate>
     <GlassPlatformScript>$(MSBuildThisFileDirectory)scripts\Generate-PlatformWxs.ps1</GlassPlatformScript>
   </PropertyGroup>
 
-  <Target Name="GlassWriteProductMetadata" BeforeTargets="GlassGenerateHarvest" DependsOnTargets="GlassStagePayload;GlassBundlePrepareSession" Condition="'$(GlassPayloadArch)' != ''">
+  <Target Name="GlassWriteProductMetadata" BeforeTargets="GlassGenerateHarvest" DependsOnTargets="GlassBundlePrepareSession;GlassBundleImportSessionProps;GlassStagePayload" Condition="'$(GlassPayloadArch)' != ''">
     <PropertyGroup>
       <_GlassProductVersion Condition="'$(GlassProductVersion)' != ''">$(GlassProductVersion)</_GlassProductVersion>
       <_GlassProductVersion Condition="'$(GlassProductVersion)' == ''">2.0.0.0</_GlassProductVersion>
@@ -142,19 +167,13 @@
     </ItemGroup>
   </Target>
 
-  <!-- GlassSetup вшивает MSI из Build\GlassSetup\msi, а WiX пишет в msi\bin. Без этой копии мастер ставит старый пакет. -->
-  <Target Name="GlassPublishBuiltMsi" AfterTargets="Build" Condition="'$(GlassPayloadArch)' != ''">
+  <Target Name="GlassVerifyBuiltMsi" AfterTargets="Build" Condition="'$(GlassPayloadArch)' != ''">
     <PropertyGroup>
-      <_GlassMsiPublish Condition="'$(GlassPayloadArch)' == 'x64'">$(SolutionRoot)Build\GlassSetup\msi\$(Configuration)\x64\</_GlassMsiPublish>
-      <_GlassMsiPublish Condition="'$(GlassPayloadArch)' == 'x86'">$(SolutionRoot)Build\GlassSetup\msi\$(Configuration)\x86\</_GlassMsiPublish>
-      <_GlassMsiPublish Condition="'$(GlassPayloadArch)' == 'OpenGlass'">$(SolutionRoot)Build\GlassSetup\msi\$(Configuration)\OpenGlass\</_GlassMsiPublish>
       <_GlassBuiltMsi Condition="'$(TargetPath)' != '' and Exists('$(TargetPath)')">$(TargetPath)</_GlassBuiltMsi>
       <_GlassBuiltMsi Condition="'$(_GlassBuiltMsi)' == ''">$(OutputPath)$(OutputName).msi</_GlassBuiltMsi>
     </PropertyGroup>
     <Error Condition="!Exists('$(_GlassBuiltMsi)')" Text="Glass MSI was not produced: $(_GlassBuiltMsi)" />
-    <MakeDir Directories="$(_GlassMsiPublish)" />
-    <Copy SourceFiles="$(_GlassBuiltMsi)" DestinationFolder="$(_GlassMsiPublish)" />
-    <Message Importance="high" Text="Published $(_GlassBuiltMsi) -> $(_GlassMsiPublish)" />
+    <Message Importance="high" Text="Glass MSI built: $(_GlassBuiltMsi)" />
     <Exec Condition="'$(GlassPayloadArch)' == 'OpenGlass'"
       Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -Command &quot;$n=(New-Object -ComObject WindowsInstaller.Installer).OpenDatabase('$(_GlassBuiltMsi)',0); $v=$n.OpenView('SELECT Value FROM Property WHERE Property=''ProductName'''); $v.Execute(); if($v.Fetch().StringData(1) -ne 'OpenGlass'){ throw 'OpenGlass-x64.msi has wrong ProductName (WiX obj collision?)' }&quot;" />
   </Target>

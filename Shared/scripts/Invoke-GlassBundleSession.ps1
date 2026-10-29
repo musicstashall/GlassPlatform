@@ -2,7 +2,7 @@
 # Вызывается из Shared/GlassBundleBuild.targets; не запускать вручную без необходимости.
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('BeginOrResumeX64', 'ContinueX86', 'Finalize', 'Cancel')]
+    [ValidateSet('BeginOrResumeX64', 'ContinueX86', 'Finalize', 'FinalizeIfX86Ready', 'Cancel')]
     [string] $Action,
 
     [Parameter(Mandatory = $true)]
@@ -18,7 +18,10 @@ param(
 
     [int] $GlassBundleBuildNumberSeed = 42,
 
-    [string] $SourceCommit = ''
+    [string] $SourceCommit = '',
+
+    # Только x64 native DLL: после финализации начать новый комплект. Остальные проекты — повторная сборка без нового номера.
+    [switch] $AllowNewBundleAfterCompleted
 )
 
 Set-StrictMode -Version Latest
@@ -39,9 +42,19 @@ function Ensure-BuildDir([string] $Root) {
 
 function Read-JsonFile([string] $Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
-    $raw = [System.IO.File]::ReadAllText($Path)
-    if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
-    return $raw | ConvertFrom-Json
+    $attempts = 0
+    while ($true) {
+        $attempts++
+        try {
+            $raw = [System.IO.File]::ReadAllText($Path)
+            if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+            return $raw | ConvertFrom-Json
+        }
+        catch {
+            if ($attempts -ge 5) { throw }
+            Start-Sleep -Milliseconds 80
+        }
+    }
 }
 
 function Write-JsonAtomic([string] $Path, [object] $Object) {
@@ -94,17 +107,26 @@ function Test-BuildNumberRange([int] $Build) {
 }
 
 function Invoke-WithSessionLock([string] $LockPath, [scriptblock] $Body) {
+    # FileShare.None на File.Open не блокирует — при /m>1 MSBuild получает IOException. Mutex ждёт.
     $dir = Split-Path -Parent $LockPath
     if (-not (Test-Path -LiteralPath $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
-    $fs = $null
+    $mutexName = 'Local\GlassProject_GlassBundleSession'
+    $mutex = New-Object System.Threading.Mutex($false, $mutexName)
+    $acquired = $false
     try {
-        $fs = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        $acquired = $mutex.WaitOne(180000)
+        if (-not $acquired) {
+            throw 'GlassBundle: не удалось захватить lock сессии за 180 с (параллельная сборка solution).'
+        }
         & $Body
     }
     finally {
-        if ($null -ne $fs) { $fs.Dispose() }
+        if ($acquired) {
+            try { [void]$mutex.ReleaseMutex() } catch { }
+        }
+        $mutex.Dispose()
     }
 }
 
@@ -121,19 +143,32 @@ function New-SessionObject([string] $Base3, [int] $Build, [string] $Phase, [stri
     }
 }
 
+function Test-SessionSameProduct([object] $Session, [string] $Base3, [string] $Config) {
+    if ($null -eq $Session) { return $false }
+    if ($Session.GlassProductVersionBase -ne $Base3) {
+        throw "Активная сессия комплекта для базовой версии '$($Session.GlassProductVersionBase)' не совместима с '$Base3'. Сбросьте сессию (GlassBundleCancelSession)."
+    }
+    if ($Session.Configuration -ne $Config) {
+        throw "Активная сессия комплекта для конфигурации '$($Session.Configuration)' не совместима с '$Config'."
+    }
+    return $true
+}
+
 function Write-SessionArtifacts([string] $BuildDir, [object] $Session) {
     $sessionJson = Join-Path $BuildDir 'GlassBundleSession.json'
     $sessionProps = Join-Path $BuildDir 'GlassBundleSession.props'
-    Write-JsonAtomic $sessionJson $Session
-    $commaParts = Parse-Base3 $Session.GlassProductVersionBase
-    $comma = "$($commaParts[0]),$($commaParts[1]),$($commaParts[2]),$($Session.GlassBundleBuildNumber)"
+    $record = if ($Session -is [System.Collections.IDictionary]) { $Session } else { ConvertTo-SessionRecord $Session @{} }
+    Write-JsonAtomic $sessionJson $record
+    $commaParts = Parse-Base3 $record.GlassProductVersionBase
+    $comma = "$($commaParts[0]),$($commaParts[1]),$($commaParts[2]),$($record.GlassBundleBuildNumber)"
+    $sessionActive = if ($record.Phase -eq 'completed') { 'false' } else { 'true' }
     Write-PropsFile $sessionProps @{
-        GlassProductVersionBase   = $Session.GlassProductVersionBase
-        GlassBundleBuildNumber    = $Session.GlassBundleBuildNumber
-        GlassBundleVersion        = $Session.GlassBundleVersion
+        GlassProductVersionBase   = $record.GlassProductVersionBase
+        GlassBundleBuildNumber    = $record.GlassBundleBuildNumber
+        GlassBundleVersion        = $record.GlassBundleVersion
         GlassBundleVersionComma   = $comma
-        GlassBundlePhase          = $Session.Phase
-        GlassBundleSessionActive  = 'true'
+        GlassBundlePhase          = $record.Phase
+        GlassBundleSessionActive  = $sessionActive
     }
 }
 
@@ -155,21 +190,64 @@ function Write-Counter([string] $CounterPath, [int] $Value) {
     Move-Item -LiteralPath $tmp -Destination $CounterPath -Force
 }
 
+function ConvertTo-SessionRecord([object] $Session, [hashtable] $Overrides) {
+    $record = [ordered]@{
+        GlassProductVersionBase = [string]$Session.GlassProductVersionBase
+        GlassBundleBuildNumber  = [int]$Session.GlassBundleBuildNumber
+        GlassBundleVersion      = [string]$Session.GlassBundleVersion
+        Phase                   = [string]$Session.Phase
+        Configuration           = [string]$Session.Configuration
+        StartedUtc              = [string]$Session.StartedUtc
+        SourceCommit            = [string]$Session.SourceCommit
+    }
+    if ($null -ne $Session.PSObject.Properties['CompletedUtc']) {
+        $record.CompletedUtc = [string]$Session.CompletedUtc
+    }
+    foreach ($kv in $Overrides.GetEnumerator()) {
+        $record[$kv.Key] = $kv.Value
+    }
+    return $record
+}
+
 function Test-SessionCompatible([object] $Session, [string] $Base3, [string] $Config) {
     if ($null -eq $Session) { return $false }
     if ($Session.Phase -eq 'completed') { return $false }
-    if ($Session.GlassProductVersionBase -ne $Base3) {
-        throw "Активная сессия комплекта для базовой версии '$($Session.GlassProductVersionBase)' не совместима с '$Base3'. Сбросьте сессию (GlassBundleCancelSession)."
-    }
-    if ($Session.Configuration -ne $Config) {
-        throw "Активная сессия комплекта для конфигурации '$($Session.Configuration)' не совместима с '$Config'."
-    }
+    if (-not (Test-SessionSameProduct $Session $Base3 $Config)) { return $false }
     return $true
+}
+
+function Complete-Session([object] $Session) {
+    $completedUtc = ([DateTime]::UtcNow).ToString('o')
+    $record = ConvertTo-SessionRecord $Session @{
+        Phase        = 'completed'
+        CompletedUtc = $completedUtc
+    }
+    if (-not (Test-Path -LiteralPath $bundlesDir)) {
+        New-Item -ItemType Directory -Path $bundlesDir -Force | Out-Null
+    }
+    $manifestPath = Join-Path $bundlesDir "$($record.GlassBundleVersion).json"
+    Write-JsonAtomic $manifestPath $record
+    Write-JsonAtomic $sessionJson $record
+    $finalizeCommaParts = Parse-Base3 $record.GlassProductVersionBase
+    $finalizeComma = "$($finalizeCommaParts[0]),$($finalizeCommaParts[1]),$($finalizeCommaParts[2]),$($record.GlassBundleBuildNumber)"
+    Write-PropsFile (Join-Path $buildDir 'GlassBundleSession.props') @{
+        GlassProductVersionBase   = $record.GlassProductVersionBase
+        GlassBundleBuildNumber    = $record.GlassBundleBuildNumber
+        GlassBundleVersion        = $record.GlassBundleVersion
+        GlassBundleVersionComma   = $finalizeComma
+        GlassBundlePhase          = 'completed'
+        GlassBundleSessionActive  = 'false'
+    }
+    Write-Host "GlassBundle: комплект $($record.GlassBundleVersion) финализирован → $manifestPath"
 }
 
 function Allocate-BuildNumber([string] $CounterPath, [int] $Override, [int] $Seed) {
     if ($Override -gt 0) {
         Test-BuildNumberRange $Override
+        $last = Read-Counter $CounterPath
+        if ($Override -lt $last) {
+            throw "GlassBundleBuildNumber=$Override меньше локального счётчика $last. Не используйте Override для повторного номера — продолжите сессию."
+        }
         Write-Counter $CounterPath $Override
         return $Override
     }
@@ -195,14 +273,25 @@ Invoke-WithSessionLock $lockPath {
     switch ($Action) {
         'BeginOrResumeX64' {
             $existing = Read-JsonFile $sessionJson
-            if (Test-SessionCompatible $existing $GlassProductVersionBase $Configuration) {
-                if ($existing.Phase -eq 'x86-started') {
-                    throw "Активная сессия уже на фазе x86. Завершите x86/GlassSetup или выполните Cancel."
+            if ($null -ne $existing -and (Test-SessionSameProduct $existing $GlassProductVersionBase $Configuration)) {
+                if ($existing.Phase -eq 'completed') {
+                    if (-not $AllowNewBundleAfterCompleted) {
+                        Write-SessionArtifacts $buildDir $existing
+                        Write-Host "GlassBundle: повторная сборка, комплект $($existing.GlassBundleVersion) (номер без изменений, Phase=completed)."
+                        return
+                    }
                 }
-                $existing.Phase = 'x64-started'
-                Write-SessionArtifacts $buildDir $existing
-                Write-Host "GlassBundle: продолжение сессии x64, номер $($existing.GlassBundleBuildNumber) ($($existing.GlassBundleVersion))."
-                return
+                elseif (Test-SessionCompatible $existing $GlassProductVersionBase $Configuration) {
+                    if ($existing.Phase -eq 'x86-started') {
+                        Write-SessionArtifacts $buildDir $existing
+                        Write-Host "GlassBundle: x64 при фазе x86, номер $($existing.GlassBundleBuildNumber) ($($existing.GlassBundleVersion)), фаза без изменений."
+                        return
+                    }
+                    $record = ConvertTo-SessionRecord $existing @{ Phase = 'x64-started' }
+                    Write-SessionArtifacts $buildDir $record
+                    Write-Host "GlassBundle: продолжение сессии x64, номер $($record.GlassBundleBuildNumber) ($($record.GlassBundleVersion))."
+                    return
+                }
             }
 
             $build = Allocate-BuildNumber $counterPath $GlassBundleBuildNumberOverride $GlassBundleBuildNumberSeed
@@ -213,15 +302,25 @@ Invoke-WithSessionLock $lockPath {
 
         'ContinueX86' {
             $existing = Read-JsonFile $sessionJson
+            if ($null -eq $existing) {
+                Write-Host 'GlassBundle: ContinueX86 пропущен (сессия ещё не создана — нормально для Win32-утилит в параллельном x64-проходе).'
+                return
+            }
+            if ($existing.Phase -eq 'completed' -and (Test-SessionSameProduct $existing $GlassProductVersionBase $Configuration)) {
+                Write-SessionArtifacts $buildDir $existing
+                Write-Host "GlassBundle: повторная x86-сборка, комплект $($existing.GlassBundleVersion) (номер без изменений, Phase=completed)."
+                return
+            }
             if (-not (Test-SessionCompatible $existing $GlassProductVersionBase $Configuration)) {
                 throw "Нет активной сессии x64 для комплекта. Сначала соберите Release|x64 всего solution."
             }
-            if ($existing.Phase -eq 'completed') {
-                throw "Сессия комплекта уже завершена. Для нового комплекта начните Release|x64."
+            if ($existing.Phase -eq 'x86-started') {
+                Write-Host "GlassBundle: фаза x86 уже активна, номер $($existing.GlassBundleBuildNumber) ($($existing.GlassBundleVersion))."
+                return
             }
-            $existing.Phase = 'x86-started'
-            Write-SessionArtifacts $buildDir $existing
-            Write-Host "GlassBundle: фаза x86, номер $($existing.GlassBundleBuildNumber) ($($existing.GlassBundleVersion))."
+            $record = ConvertTo-SessionRecord $existing @{ Phase = 'x86-started' }
+            Write-SessionArtifacts $buildDir $record
+            Write-Host "GlassBundle: фаза x86, номер $($record.GlassBundleBuildNumber) ($($record.GlassBundleVersion))."
         }
 
         'Finalize' {
@@ -232,25 +331,28 @@ Invoke-WithSessionLock $lockPath {
             if ($existing.Phase -ne 'x86-started') {
                 throw "Финализация допустима только после фазы x86 (текущая фаза: $($existing.Phase))."
             }
-            $existing.Phase = 'completed'
-            $existing.CompletedUtc = ([DateTime]::UtcNow).ToString('o')
-            if (-not (Test-Path -LiteralPath $bundlesDir)) {
-                New-Item -ItemType Directory -Path $bundlesDir -Force | Out-Null
+            Complete-Session $existing
+        }
+
+        'FinalizeIfX86Ready' {
+            $existing = Read-JsonFile $sessionJson
+            if ($null -eq $existing) {
+                Write-Host 'GlassBundle: финализация пропущена (нет сессии).'
+                return
             }
-            $manifestPath = Join-Path $bundlesDir "$($existing.GlassBundleVersion).json"
-            Write-JsonAtomic $manifestPath $existing
-            Write-JsonAtomic $sessionJson $existing
-            $finalizeCommaParts = Parse-Base3 $existing.GlassProductVersionBase
-            $finalizeComma = "$($finalizeCommaParts[0]),$($finalizeCommaParts[1]),$($finalizeCommaParts[2]),$($existing.GlassBundleBuildNumber)"
-            Write-PropsFile (Join-Path $buildDir 'GlassBundleSession.props') @{
-                GlassProductVersionBase   = $existing.GlassProductVersionBase
-                GlassBundleBuildNumber    = $existing.GlassBundleBuildNumber
-                GlassBundleVersion        = $existing.GlassBundleVersion
-                GlassBundleVersionComma   = $finalizeComma
-                GlassBundlePhase          = 'completed'
-                GlassBundleSessionActive  = 'false'
+            if ($existing.Phase -eq 'completed') {
+                Write-Host "GlassBundle: комплект $($existing.GlassBundleVersion) уже финализирован."
+                return
             }
-            Write-Host "GlassBundle: комплект $($existing.GlassBundleVersion) финализирован → $manifestPath"
+            if (-not (Test-SessionCompatible $existing $GlassProductVersionBase $Configuration)) {
+                Write-Host 'GlassBundle: финализация пропущена (сессия несовместима).'
+                return
+            }
+            if ($existing.Phase -ne 'x86-started') {
+                Write-Host "GlassBundle: финализация пропущена (фаза $($existing.Phase), нужна x86-started)."
+                return
+            }
+            Complete-Session $existing
         }
 
         'Cancel' {
