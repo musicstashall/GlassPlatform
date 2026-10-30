@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstddef>
 #include <string>
 
@@ -6,7 +6,7 @@ namespace ProcessBlockList
 {
     /// Встроенный BlockList — единственный источник истины.
     /// ShellExperienceHost / ShellHost / StartMenuExperienceHost / SearchHost / SearchApp
-    /// сюда не входят: UICompat CoreWindow hosts (см. docs/guides/UICompat-CoreWindow.md).
+    /// сюда не входят: UICompat CoreWindow hosts (см. UICompat/docs/UICompat-CoreWindow.md).
     inline constexpr wchar_t const* const kBuiltInNames[] =
     {
         // Системные процессы Windows

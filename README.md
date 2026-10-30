@@ -8,6 +8,10 @@ Glass Platform — глубокая кастомизация внешнего в
 
 Glass Platform is experimental desktop theming for Windows 10/11: it hooks into GUI processes and replaces how controls and shell surfaces are painted. License: GNU GPL v3.
 
+## Для разработчиков и ИИ-агентов
+
+Инструкции по архитектуре, модулям и сборке — в [AGENTS.md](AGENTS.md) и README каталогов проектов (`GlassCore/`, `GlassCompat/`, `GlassSettings/` и т.д.). Сквозная схема платформы: [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Что вы получаете
 
 - **Окна и диалоги** — нестандартные рамки и фоны, согласованные с цветом рабочего стола.

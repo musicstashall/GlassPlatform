@@ -1,4 +1,4 @@
-using GlassSettings.Core.Layout;
+﻿using GlassSettings.Core.Layout;
 using GlassSettings.Core.Snapshot;
 using GlassSettings.Services;
 using GlassSettings.Strings;
@@ -7,7 +7,7 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace GlassSettings.Controls;
 
-/// <summary>Стек notice-полос страницы (Session / ExternalSync / Action). См. docs/guides/GlassSettings-notices.md.</summary>
+/// <summary>Стек notice-полос страницы (Session / ExternalSync / Action). См. GlassSettings/docs/GlassSettings-notices.md.</summary>
 public sealed partial class SettingsPageNoticeStack : UserControl
 {
     private ScrollViewer? _scrollViewer;

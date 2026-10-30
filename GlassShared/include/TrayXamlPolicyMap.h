@@ -1,8 +1,8 @@
-#pragma once
+﻿#pragma once
 
 // Snapshot Tray\BorderDrawMode + Tray\Xaml (+ Popup/Menu) для AppContainer (SEH/SMEH/ShellHost).
 // Хост (rundll32) пишет; UICompat читает раньше HKCU / HKEY_USERS.
-// См. docs/guides/TaskbarBorders.md (CoreWindow / UICompat).
+// См. TaskbarCompat/docs/TaskbarBorders.md (CoreWindow / UICompat).
 
 #include <Windows.h>
 #include <aclapi.h>

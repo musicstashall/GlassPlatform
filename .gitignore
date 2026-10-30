@@ -21,8 +21,7 @@ GlassShared/Cache/
 /gtl/
 /tools/
 
-# ---- Документация и инструкции для ИИ-агентов ----
-/docs/
+# ---- Локальные инструкции и окружение агентов ----
 /.claude/
 /.cursor/
 /.opencode/
@@ -30,7 +29,6 @@ GlassShared/Cache/
 /.shared-skills/
 /.shared-rules/
 /_backups/
-/AGENTS.md
 /CLAUDE.md
 
 # ---- Локальное окружение редактора ----

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <UserControl
     x:Class="GlassSettings.Controls.SettingsNavigateRow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -6,7 +6,7 @@
     xmlns:ctrl="using:GlassSettings.Controls"
     HorizontalAlignment="Stretch"
     HorizontalContentAlignment="Stretch">
-    <!-- См. docs/guides/GlassSettings-detail-cards.md — тип 2 (навигационная строка) -->
+    <!-- См. GlassSettings/docs/GlassSettings-detail-cards.md — тип 2 (навигационная строка) -->
     <Border
         x:Name="RootBorder"
         MinHeight="{StaticResource GlassSettingsSystemExpanderHeaderMinHeight}"

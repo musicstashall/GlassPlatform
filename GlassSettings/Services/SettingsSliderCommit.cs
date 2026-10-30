@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -7,7 +7,7 @@ namespace GlassSettings.Services;
 
 /// <summary>
 /// Commit для слайдеров: Deferred (250 ms) или LiveImmediate (как wxEVT_SLIDER у OpenGlassGUI).
-/// См. docs/guides/GlassSettings-slider-commit.md.
+/// См. GlassSettings/docs/GlassSettings-slider-commit.md.
 /// </summary>
 public static class SettingsSliderCommit
 {
