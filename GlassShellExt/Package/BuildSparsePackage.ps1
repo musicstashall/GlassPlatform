@@ -82,18 +82,20 @@ if ($makeAppx) {
             $cert = $myCandidates | Select-Object -First 1
         }
 
-        if (-not (Get-ChildItem Cert:\CurrentUser\TrustedPeople | Where-Object { $_.Thumbprint -eq $cert.Thumbprint })) {
-            $pwd = ConvertTo-SecureString 'glass' -AsPlainText -Force
-            $pfx = Join-Path $env:TEMP 'GlassShellDev.pfx'
-            Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $pwd | Out-Null
-            Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\TrustedPeople -Password $pwd | Out-Null
+        # Trust only the public certificate. Never export the signing private key to %TEMP%.
+        $publicCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$cert.RawData)
+        try {
+            foreach ($storeName in @('TrustedPeople', 'TrustedPublisher')) {
+                $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($storeName, [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+                try {
+                    $store.Open('ReadWrite')
+                    $exists = @($store.Certificates | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }).Count -gt 0
+                    if (-not $exists) { $store.Add($publicCert) }
+                }
+                finally { $store.Close() }
+            }
         }
-        if (-not (Get-ChildItem Cert:\CurrentUser\TrustedPublisher -ErrorAction SilentlyContinue | Where-Object { $_.Thumbprint -eq $cert.Thumbprint })) {
-            $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('TrustedPublisher', 'CurrentUser')
-            $store.Open('ReadWrite')
-            $store.Add($cert)
-            $store.Close()
-        }
+        finally { $publicCert.Dispose() }
         Write-Host "[BuildSparsePackage] signing thumbprint=$($cert.Thumbprint)"
         & $signTool sign /fd SHA256 /sha1 $cert.Thumbprint $msixPath | Out-Null
     }

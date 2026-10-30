@@ -2,7 +2,7 @@
 #include <windows.h>
 #include <string>
 
-// Журнал установки: GlassSetup.log и GlassSetup-msi-*.log рядом с GlassSetup.exe.
+// Журналы установки находятся в защищённом Windows\Temp\GlassSetupLogs-*.
 namespace InstallLog {
 
 void Initialize() noexcept;

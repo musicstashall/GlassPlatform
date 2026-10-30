@@ -28,24 +28,27 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;UNICODE;_UNICODE;GLASS_UNINS;NOMINMAX;WIN32_LEAN_AND_MEAN;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\src;$(MSBuildThisFileDirectory)..\..\GlassShared;$(MSBuildThisFileDirectory)..\..\GlassShared\include;$(MSBuildThisFileDirectory)..\..\GlassShared\include\Helpers;$(MSBuildThisFileDirectory)..\..\gtl;$(MSBuildThisFileDirectory)..\..\packages\Detours.4.0.1\lib\native\include;$(MSBuildThisFileDirectory)..\..\GlassPlatform\include\Internal;$(MSBuildThisFileDirectory)..\..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\src;$(MSBuildThisFileDirectory)..\res;$(MSBuildThisFileDirectory)..\third_party;$(MSBuildThisFileDirectory)..\..\GlassShared;$(MSBuildThisFileDirectory)..\..\GlassShared\include;$(MSBuildThisFileDirectory)..\..\GlassShared\include\Helpers;$(MSBuildThisFileDirectory)..\..\gtl;$(MSBuildThisFileDirectory)..\..\packages\Detours.4.0.1\lib\native\include;$(MSBuildThisFileDirectory)..\..\GlassPlatform\include\Internal;$(MSBuildThisFileDirectory)..\..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
+      <OptimizeReferences>true</OptimizeReferences>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
-      <AdditionalDependencies>comctl32.lib;msi.lib;taskschd.lib;ole32.lib;oleaut32.lib;advapi32.lib;user32.lib;version.lib;shlwapi.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalOptions>/MANIFESTUAC:"level='requireAdministrator' uiAccess='false'" %(AdditionalOptions)</AdditionalOptions>
+      <GenerateManifest>false</GenerateManifest>
+      <AdditionalDependencies>$(MSBuildThisFileDirectory)..\third_party\WebView2LoaderStatic.lib;comctl32.lib;msi.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;advapi32.lib;user32.lib;version.lib;shlwapi.lib;shell32.lib;uxtheme.lib;gdiplus.lib;dwmapi.lib;gdi32.lib;msimg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="..\src\WizardTheme.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallLog.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallMsi.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallUtil.cpp" />
@@ -92,5 +95,22 @@
       <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="GlassUnins.rc" />
+    <None Include="app.manifest" />
+    <ClInclude Include="..\src\WizardAssets.h" />
+    <ClInclude Include="..\src\WizardTheme.h" />
+    <ClInclude Include="..\src\GlassProducts.h" />
+  </ItemGroup>
+  <Target Name="GlassUninsVerifyNativeHelper" BeforeTargets="BeforeResourceCompile">
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\..\Build\x64\Release\GlassSettings.Native.dll')" Text="GlassUnins: сначала соберите GlassSettings.Native Release|x64 (IDR_UNLOCKER_X64)." />
+    <Touch Files="$(MSBuildThisFileDirectory)GlassUnins.rc" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="..\..\packages\Detours.4.0.1\build\native\Detours.targets" Condition="Exists('..\..\packages\Detours.4.0.1\build\native\Detours.targets')" />
+  </ImportGroup>
+  <Target Name="GlassUninsEnsureDetours" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('..\..\packages\Detours.4.0.1\build\native\Detours.targets')" Text="GlassUnins: восстановите NuGet-пакет Detours 4.0.1." />
+  </Target>
 </Project>

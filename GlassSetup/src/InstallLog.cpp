@@ -1,4 +1,5 @@
 #include "InstallLog.h"
+#include "InstallSupport/GlassInstallUtil.h"
 #include <shlwapi.h>
 #include <cstdarg>
 #include <cstdio>
@@ -46,11 +47,9 @@ std::wstring FileStamp() noexcept {
 }
 
 bool ResolveLogDirectory(std::wstring& outDir) noexcept {
-    wchar_t exe[MAX_PATH]{};
-    if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return false;
-    if (!PathRemoveFileSpecW(exe)) return false;
-    outDir.assign(exe);
-    return true;
+    // Logs are written by an elevated process. Never follow a user-controlled
+    // Downloads/%TEMP% path to an existing log or MSI log target.
+    return GlassInstallUtil::CreateSecureTempDirectory(L"GlassSetupLogs",outDir);
 }
 
 } // namespace
@@ -59,7 +58,7 @@ namespace InstallLog {
 
 void Initialize() noexcept {
     if (gLogFile != INVALID_HANDLE_VALUE) return;
-    if (!ResolveLogDirectory(gLogDir)) return;
+    if (gLogDir.empty() && !ResolveLogDirectory(gLogDir)) return;
     gSessionStamp = FileStamp();
     const std::wstring path = gLogDir + L"\\GlassSetup.log";
     gLogFile = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
@@ -110,11 +109,8 @@ void LineFormat(const wchar_t* format, ...) noexcept {
 }
 
 std::wstring NextMsiVerboseLogPath(const wchar_t* msiLabel) noexcept {
-    if (gLogDir.empty() && !ResolveLogDirectory(gLogDir)) {
-        wchar_t temp[MAX_PATH]{};
-        GetTempPathW(MAX_PATH, temp);
-        gLogDir = temp;
-    }
+    if (gLogDir.empty()) Initialize();
+    if (gLogDir.empty()) return {};
     if (gSessionStamp.empty()) gSessionStamp = FileStamp();
     const unsigned id = ++gMsiLogSerial;
     wchar_t name[MAX_PATH]{};

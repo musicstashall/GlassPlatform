@@ -87,66 +87,51 @@ namespace Shared::ForceUnloadAgent
             return !dll.empty();
         }
 
+        [[nodiscard]] std::wstring TryReadRegString(
+            HKEY root,
+            const wchar_t* subKey,
+            const wchar_t* valueName,
+            REGSAM extraSam = 0) noexcept
+        {
+            HKEY hKey = nullptr;
+            if (RegOpenKeyExW(root, subKey, 0, KEY_READ | extraSam, &hKey) != ERROR_SUCCESS)
+                return {};
+
+            wchar_t buf[MAX_PATH * 4]{};
+            DWORD cb = sizeof(buf);
+            DWORD type = 0;
+            const LSTATUS st = RegQueryValueExW(
+                hKey,
+                valueName,
+                nullptr,
+                &type,
+                reinterpret_cast<LPBYTE>(buf),
+                &cb);
+            RegCloseKey(hKey);
+
+            if (st != ERROR_SUCCESS || type != REG_SZ || !buf[0])
+                return {};
+
+            return TrimTrailingSlashes(buf);
+        }
+
         [[nodiscard]] std::wstring TryGetX86InstallRootFromRegistry() noexcept
         {
+            if (auto v = TryReadRegString(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPathX86", KEY_WOW64_32KEY); !v.empty())
+                return v;
+            if (auto v = TryReadRegString(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPath", KEY_WOW64_32KEY); !v.empty())
+                return v;
+            if (auto v = TryReadRegString(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPathX86"); !v.empty())
+                return v;
 #if defined(_WIN64)
-            HKEY hKey = nullptr;
-            if (RegOpenKeyExW(
-                    HKEY_CURRENT_USER,
-                    L"Software\\Wow6432Node\\GlassPlatform",
-                    0,
-                    KEY_READ,
-                    &hKey)
-                != ERROR_SUCCESS)
-            {
-                return {};
-            }
-
-            wchar_t buf[MAX_PATH * 4]{};
-            DWORD cb = sizeof(buf);
-            DWORD type = 0;
-            const LSTATUS st = RegQueryValueExW(
-                hKey,
-                L"InstallPath",
-                nullptr,
-                &type,
-                reinterpret_cast<LPBYTE>(buf),
-                &cb);
-            RegCloseKey(hKey);
-
-            if (st != ERROR_SUCCESS || type != REG_SZ || !buf[0])
-                return {};
-
-            return TrimTrailingSlashes(buf);
+            return TryReadRegString(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath");
 #else
-            HKEY hKey = nullptr;
-            if (RegOpenKeyExW(
-                    HKEY_CURRENT_USER,
-                    L"Software\\GlassPlatform",
-                    0,
-                    KEY_READ,
-                    &hKey)
-                != ERROR_SUCCESS)
+            if (GlassShared::GlassModulePath::IsOs64Bit())
             {
-                return {};
+                if (auto v = TryReadRegString(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath"); !v.empty())
+                    return v;
             }
-
-            wchar_t buf[MAX_PATH * 4]{};
-            DWORD cb = sizeof(buf);
-            DWORD type = 0;
-            const LSTATUS st = RegQueryValueExW(
-                hKey,
-                L"InstallPath",
-                nullptr,
-                &type,
-                reinterpret_cast<LPBYTE>(buf),
-                &cb);
-            RegCloseKey(hKey);
-
-            if (st != ERROR_SUCCESS || type != REG_SZ || !buf[0])
-                return {};
-
-            return TrimTrailingSlashes(buf);
+            return TryReadRegString(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPath");
 #endif
         }
     }

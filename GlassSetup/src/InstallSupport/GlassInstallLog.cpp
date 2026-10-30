@@ -1,21 +1,22 @@
 #include "GlassInstallLog.h"
+#include "GlassInstallUtil.h"
 #ifndef GLASS_UNINS
 #include "../InstallLog.h"
 #endif
 #include <cstdarg>
 #include <stdio.h>
 #include <windows.h>
+#include <mutex>
 
 namespace GlassInstallLog {
 
 namespace {
 
 void AppendLine(const wchar_t* message) noexcept {
-    wchar_t temp[MAX_PATH]{};
-    if (!GetTempPathW(MAX_PATH, temp)) return;
-    wchar_t path[MAX_PATH]{};
-    swprintf_s(path, L"%sGlassInstallSupport.log", temp);
-    HANDLE file = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
+    const std::wstring dir=SecureLogDirectory();
+    if (dir.empty()) return;
+    const std::wstring path=dir+L"\\GlassInstallSupport.log";
+    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
         OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) return;
     const size_t len = message ? wcslen(message) : 0;
@@ -28,6 +29,19 @@ void AppendLine(const wchar_t* message) noexcept {
 }
 
 } // namespace
+
+std::wstring SecureLogDirectory() noexcept {
+#ifdef GLASS_UNINS
+    static std::once_flag once;
+    static std::wstring directory;
+    try {
+        std::call_once(once, []() { (void)GlassInstallUtil::CreateSecureTempDirectory(L"GlassUninsLogs",directory); });
+        return directory;
+    } catch (...) { return {}; }
+#else
+    return {}; // Setup uses its own protected InstallLog directory.
+#endif
+}
 
 void Line(const wchar_t* message) noexcept {
 #ifdef GLASS_UNINS

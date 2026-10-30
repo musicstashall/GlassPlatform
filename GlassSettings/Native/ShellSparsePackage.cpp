@@ -1,5 +1,5 @@
 #ifndef GLASS_SETTINGS_SHELL_SPARSE_PACKAGE_CPP
-#define GLASS_CONFIG_SHELL_SPARSE_PACKAGE_CPP
+#define GLASS_SETTINGS_SHELL_SPARSE_PACKAGE_CPP
 
 #include <windows.h>
 #ifdef GetCurrentTime
@@ -31,6 +31,8 @@
 #pragma comment(lib, "runtimeobject.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "shell32.lib")
+
+EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
 namespace winmd = winrt::Windows::Management::Deployment;
 namespace winrtf = winrt::Windows::Foundation;
@@ -228,6 +230,40 @@ namespace GlassSettings::ShellSparsePackage
             return wcscpy_s(out, cch, buf) == 0;
         }
 
+
+        [[nodiscard]] std::wstring TryReadRegistryInstallDir() noexcept
+        {
+            auto readVal = [](HKEY hive, const wchar_t* valName, REGSAM sam) noexcept -> std::wstring {
+                HKEY key = nullptr;
+                if (::RegOpenKeyExW(hive, L"Software\\GlassPlatform", 0, KEY_READ | sam, &key) != ERROR_SUCCESS)
+                    return {};
+                wchar_t buf[MAX_PATH]{};
+                DWORD cb = sizeof(buf);
+                DWORD type = 0;
+                const LSTATUS st = ::RegQueryValueExW(key, valName, nullptr, &type, reinterpret_cast<LPBYTE>(buf), &cb);
+                ::RegCloseKey(key);
+                if (st != ERROR_SUCCESS || type != REG_SZ || !buf[0])
+                    return {};
+                return buf;
+            };
+#if defined(_WIN64)
+            if (auto v = readVal(HKEY_LOCAL_MACHINE, L"InstallPathX64", KEY_WOW64_64KEY); !v.empty())
+                return v;
+            if (auto v = readVal(HKEY_LOCAL_MACHINE, L"InstallPath", KEY_WOW64_64KEY); !v.empty())
+                return v;
+            if (auto v = readVal(HKEY_CURRENT_USER, L"InstallPathX64", 0); !v.empty())
+                return v;
+#else
+            if (auto v = readVal(HKEY_LOCAL_MACHINE, L"InstallPathX86", KEY_WOW64_32KEY); !v.empty())
+                return v;
+            if (auto v = readVal(HKEY_LOCAL_MACHINE, L"InstallPath", KEY_WOW64_32KEY); !v.empty())
+                return v;
+            if (auto v = readVal(HKEY_CURRENT_USER, L"InstallPathX86", 0); !v.empty())
+                return v;
+#endif
+            return readVal(HKEY_CURRENT_USER, L"InstallPath", 0);
+        }
+
         /// Каталог ExternalLocation sparse-пакета: рядом с GlassShellExt.dll (как PackageRootFolder в AppX).
         [[nodiscard]] bool ResolveGlassPlatformOutputDirectory(wchar_t* out, size_t cch) noexcept
         {
@@ -235,8 +271,13 @@ namespace GlassSettings::ShellSparsePackage
                 return false;
             out[0] = L'\0';
 
-            const std::wstring shellExt =
+            std::wstring shellExt =
                 GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(nullptr, L"GlassShellExt.dll");
+            if (shellExt.empty())
+            {
+                shellExt = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
+                    reinterpret_cast<HMODULE>(&__ImageBase), L"GlassShellExt.dll");
+            }
             if (!shellExt.empty())
             {
                 const std::wstring root = GlassShared::GlassModulePath::GetInstallRootFromPath(shellExt.c_str());
@@ -246,6 +287,13 @@ namespace GlassSettings::ShellSparsePackage
                     if (wcscpy_s(buf, root.c_str()) == 0 && TryCanonicalizePlatformDir(buf, out, cch))
                         return true;
                 }
+            }
+
+            if (const std::wstring regRoot = TryReadRegistryInstallDir(); !regRoot.empty())
+            {
+                wchar_t regBuf[MAX_PATH]{};
+                if (wcscpy_s(regBuf, regRoot.c_str()) == 0 && TryCanonicalizePlatformDir(regBuf, out, cch))
+                    return true;
             }
 
             wchar_t exeDir[MAX_PATH]{};
@@ -751,7 +799,7 @@ namespace GlassSettings::ShellSparsePackage
         }
     }
 
-    bool RegisterSparsePackageQuiet() noexcept
+    bool RegisterSparsePackageQuiet(bool provisionDevCertificate) noexcept
     {
         SetLastSparsePackageError(SparsePackageError::None);
 
@@ -799,7 +847,7 @@ namespace GlassSettings::ShellSparsePackage
                 return false;
             }
 
-            if (!ShellDevCertificate::EnsureGlassShellDevCertificateTrusted())
+            if (provisionDevCertificate && !ShellDevCertificate::EnsureGlassShellDevCertificateTrusted())
             {
                 DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: dev certificate failed");
                 SetLastSparsePackageError(SparsePackageError::DevCertFailed);
@@ -842,10 +890,11 @@ namespace GlassSettings::ShellSparsePackage
             };
 
             wchar_t thumbprint[64]{};
-            (void)ShellDevCertificate::GetGlassShellDevCertThumbprint(thumbprint, _countof(thumbprint));
+            if (provisionDevCertificate)
+                (void)ShellDevCertificate::GetGlassShellDevCertThumbprint(thumbprint, _countof(thumbprint));
 
             SparseSdkTools sdk{};
-            const bool sdkOk = ResolveSparseSdkTools(sdk);
+            const bool sdkOk = provisionDevCertificate && ResolveSparseSdkTools(sdk);
             if (!sdkOk)
             {
                 DebugLog(DBG_NORMAL, L"[GlassSettings][ShellSparse] Windows SDK tools не найдены, пропуск repack/sign");

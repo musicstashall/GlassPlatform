@@ -754,6 +754,9 @@ std::wstring UnlockerCommandText(LPWSTR cmdLine) noexcept
 
 extern "C" __declspec(dllexport) void CALLBACK GlassSettings_UnlockerW(HWND, HINSTANCE, LPWSTR cmdLine, int)
 {
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_UnlockerW=_GlassSettings_UnlockerW@16")
+#endif
     std::wstring text = UnlockerCommandText(cmdLine);
     wchar_t* cursor = text.empty() ? const_cast<wchar_t*>(L"") : text.data();
     const std::wstring verb = UnlockerToken(cursor);

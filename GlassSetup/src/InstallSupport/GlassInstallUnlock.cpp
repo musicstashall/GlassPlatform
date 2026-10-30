@@ -67,12 +67,12 @@ std::vector<GlassInstallUnlock::ModuleHolder> ScanNativeOneShot(
             : L"Unlocker: Sysnative rundll32.exe not found");
         return holders;
     }
-    wchar_t tempDir[MAX_PATH]{};
-    wchar_t outPath[MAX_PATH]{};
-    if (!GetTempPathW(MAX_PATH, tempDir) || !GetTempFileNameW(tempDir, L"gsh", 0, outPath)) {
+    std::wstring tempDir;
+    if (!GlassInstallUtil::CreateSecureTempDirectory(L"GlassScan",tempDir)) {
         failed = true;
         return holders;
     }
+    const std::wstring outPath=tempDir+L"\\scan.tsv";
     const std::wstring cmd = L"\"" + rundll + L"\" \"" + dll
         + L"\",GlassSettings_UnlockerW /scanGlassModules \"" + outPath + L"\"";
     DWORD exitCode = 1;
@@ -80,7 +80,7 @@ std::vector<GlassInstallUnlock::ModuleHolder> ScanNativeOneShot(
         failed = true;
         GlassInstallLog::LineFormat(L"Unlocker: x64 scan failed, exit %lu", exitCode);
     }
-    HANDLE out = CreateFileW(outPath, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+    HANDLE out = CreateFileW(outPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL, nullptr);
     if (out != INVALID_HANDLE_VALUE) {
         DWORD size = GetFileSize(out, nullptr);
@@ -94,7 +94,8 @@ std::vector<GlassInstallUnlock::ModuleHolder> ScanNativeOneShot(
     } else if (!failed) {
         failed = true;
     }
-    DeleteFileW(outPath);
+    DeleteFileW(outPath.c_str());
+    RemoveDirectoryW(tempDir.c_str());
     return holders;
 }
 
@@ -113,18 +114,17 @@ bool TargetIsWow64(DWORD pid) noexcept {
 
 void MergeInto(std::vector<ModuleHolder>& holders, const ModuleHolder& add) {
     if (add.pid == 0 || add.modules.empty()) return;
+    if (_wcsicmp(add.exe.c_str(), L"GlassSetup.exe") == 0) return;
+    if (_wcsicmp(add.exe.c_str(), L"unins000.exe") == 0) return;
     for (auto& h : holders) {
         if (h.pid != add.pid) continue;
         if (!add.exe.empty()) h.exe = add.exe;
-        if (!add.modules.empty()) {
-            if (!h.modules.empty() && h.modules.find(add.modules) == std::wstring::npos)
-                h.modules += L", ";
-            if (h.modules.find(add.modules) == std::wstring::npos)
-                h.modules += add.modules;
-        }
+        GlassInstallWatch::MergeModuleTokens(h.modules, add.modules);
         return;
     }
-    holders.push_back(add);
+    ModuleHolder fresh{add.pid, add.exe, {}};
+    GlassInstallWatch::MergeModuleTokens(fresh.modules, add.modules);
+    holders.push_back(std::move(fresh));
 }
 
 std::vector<ModuleHolder> CollectHolders(
@@ -163,14 +163,15 @@ std::wstring FormatHolders(const std::vector<ModuleHolder>& holders) {
     return text;
 }
 
+BOOL CALLBACK PostCloseForProcess(HWND hwnd, LPARAM param) {
+    DWORD windowPid = 0;
+    GetWindowThreadProcessId(hwnd, &windowPid);
+    if (windowPid == static_cast<DWORD>(param)) PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    return TRUE;
+}
+
 void CloseProcessWindows(DWORD pid) noexcept {
-    EnumWindows([](HWND hwnd, LPARAM param) -> BOOL {
-        DWORD windowPid = 0;
-        GetWindowThreadProcessId(hwnd, &windowPid);
-        if (windowPid == static_cast<DWORD>(param))
-            PostMessageW(hwnd, WM_CLOSE, 0, 0);
-        return TRUE;
-    }, static_cast<LPARAM>(pid));
+    EnumWindows(PostCloseForProcess, static_cast<LPARAM>(pid));
 }
 
 bool ForceUnloadHolder(const ModuleHolder& holder, const std::wstring& x64Dir,
@@ -217,8 +218,8 @@ void UnlockProcess(DWORD pid, const wchar_t* exe) noexcept {
     }
     if (IsProtectedProcess(exe)) return;
     CloseProcessWindows(pid);
-    const DWORD start = GetTickCount();
-    while (ProcessAlive(pid) && GetTickCount() - start < 8000)
+    const ULONGLONG start = GetTickCount64();
+    while (ProcessAlive(pid) && GetTickCount64() - start < 8000)
         Sleep(200);
     if (!ProcessAlive(pid)) return;
     HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);

@@ -5,6 +5,7 @@
 #include <InjectModuleScan.h>
 #include <InjectProcessMap.h>
 #include <shlwapi.h>
+#include <sddl.h>
 #include <cstring>
 #include <string>
 
@@ -12,19 +13,27 @@ namespace {
 
 namespace GP = GlassShared::GlassPlatformTask;
 
-void MergeModuleList(std::wstring& into, const std::wstring& add) {
-    if (add.empty()) return;
-    size_t start = 0;
-    while (start < add.size()) {
-        size_t comma = add.find(L", ", start);
-        const std::wstring token = add.substr(start, comma == std::wstring::npos ? std::wstring::npos : comma - start);
-        if (!token.empty() && into.find(token) == std::wstring::npos) {
-            if (!into.empty()) into += L", ";
-            into += token;
-        }
+std::wstring TrimToken(std::wstring s) {
+    size_t b = 0;
+    while (b < s.size() && (s[b] == L' ' || s[b] == L'\t')) ++b;
+    size_t e = s.size();
+    while (e > b && (s[e - 1] == L' ' || s[e - 1] == L'\t')) --e;
+    return s.substr(b, e - b);
+}
+
+bool ContainsModuleToken(const std::wstring& list, const std::wstring& candidate) {
+    if (candidate.empty()) return true;
+    size_t pos = 0;
+    while (pos < list.size()) {
+        size_t comma = list.find(L',', pos);
+        const std::wstring item = TrimToken(list.substr(
+            pos, comma == std::wstring::npos ? std::wstring::npos : comma - pos));
+        if (!item.empty() && _wcsicmp(item.c_str(), candidate.c_str()) == 0)
+            return true;
         if (comma == std::wstring::npos) break;
-        start = comma + 2;
+        pos = comma + 1;
     }
+    return false;
 }
 
 void MergeHolder(std::vector<GlassInstallWatch::ModuleHolder>& holders, DWORD pid,
@@ -35,10 +44,12 @@ void MergeHolder(std::vector<GlassInstallWatch::ModuleHolder>& holders, DWORD pi
     for (auto& holder : holders) {
         if (holder.pid != pid) continue;
         if (!exe.empty()) holder.exe = exe;
-        MergeModuleList(holder.modules, modules);
+        GlassInstallWatch::MergeModuleTokens(holder.modules, modules);
         return;
     }
-    holders.push_back({pid, exe, modules});
+    GlassInstallWatch::ModuleHolder fresh{pid, exe, {}};
+    GlassInstallWatch::MergeModuleTokens(fresh.modules, modules);
+    holders.push_back(std::move(fresh));
 }
 
 std::wstring ModuleNamesFromBits(std::uint32_t bits) {
@@ -91,32 +102,53 @@ bool NeedNativeX64Helper() noexcept {
     return IsWow64Process(GetCurrentProcess(), &selfWow) && selfWow;
 }
 
-void ConsumePipeBuffer(std::string& buffer, std::vector<GlassInstallWatch::ModuleHolder>& tickOut,
-    bool& gotEmpty, bool& gotEnd) {
+bool ConsumeNextPipeEvent(
+    std::string& buffer,
+    std::vector<GlassInstallWatch::ModuleHolder>& pendingRows,
+    bool& gotEmpty,
+    bool& gotEnd) {
     gotEmpty = false;
     gotEnd = false;
-    tickOut.clear();
+    bool progressed = false;
     for (;;) {
         const size_t nl = buffer.find('\n');
         if (nl == std::string::npos) break;
+        progressed = true;
         std::string line = buffer.substr(0, nl);
         buffer.erase(0, nl + 1);
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line == "#empty") {
             gotEmpty = true;
-            return;
+            return true;
         }
         if (line == "#end") {
             gotEnd = true;
-            return;
+            return true;
         }
-        GlassInstallWatch::ParseNativePipeUtf8(line + "\n", tickOut);
+        GlassInstallWatch::ParseNativePipeUtf8(line + "\n", pendingRows);
     }
+    return progressed;
 }
 
 } // namespace
 
 namespace GlassInstallWatch {
+
+void MergeModuleTokens(std::wstring& into, const std::wstring& add) {
+    if (add.empty()) return;
+    size_t pos = 0;
+    while (pos < add.size()) {
+        size_t comma = add.find(L',', pos);
+        const std::wstring token = TrimToken(add.substr(
+            pos, comma == std::wstring::npos ? std::wstring::npos : comma - pos));
+        if (!token.empty() && !ContainsModuleToken(into, token)) {
+            if (!into.empty()) into += L", ";
+            into += token;
+        }
+        if (comma == std::wstring::npos) break;
+        pos = comma + 1;
+    }
+}
 
 void ParseNativePipeUtf8(const std::string& bytes, std::vector<ModuleHolder>& holders) {
     int wideCount = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
@@ -157,19 +189,23 @@ bool WaitUntilClearOrTimeout(
     const std::wstring& x86Dir,
     bool scanNativeX64,
     std::vector<ModuleHolder>& lastHolders,
-    bool& nativeScanFailed) noexcept {
+    bool& nativeScanFailed,
+    const std::atomic<bool>* cancelRequested) noexcept {
     nativeScanFailed = false;
     lastHolders.clear();
 
-    const DWORD waitStart = GetTickCount();
-    auto waitExpired = [&]() -> bool { return GetTickCount() - waitStart >= timeoutMs; };
+    const ULONGLONG waitStart = GetTickCount64();
+    auto waitExpired = [&]() -> bool { return GetTickCount64() - waitStart >= timeoutMs; };
     HANDLE pipe = INVALID_HANDLE_VALUE;
     HANDLE watchProcess = nullptr;
     bool pipeConnected = false;
+    bool receivedFrame = false;
     std::string pipeBuffer;
+    std::vector<ModuleHolder> pendingRows;
     std::vector<ModuleHolder> x64Tick;
     bool x64Empty = !scanNativeX64 || !NeedNativeX64Helper();
-    DWORD lastBeat = waitStart;
+    ULONGLONG lastBeat = waitStart;
+    DWORD helperExitCode=STILL_ACTIVE;
 
     if (scanNativeX64 && NeedNativeX64Helper()) {
         const std::wstring dll = GlassInstallUtil::NativeDllForArch(GP::PlatformArch::X64, x64Dir, x86Dir);
@@ -179,11 +215,18 @@ bool WaitUntilClearOrTimeout(
             GlassInstallLog::Line(L"Watch: x64 Native.dll or Sysnative rundll32 missing");
         } else {
             wchar_t pipeName[128]{};
-            swprintf_s(pipeName, L"\\\\.\\pipe\\GlassWatch-%u", GetTickCount());
-            // PIPE_NOWAIT: ConnectNamedPipe не блокирует поток. PIPE_WAIT вешал установщик
-            // навсегда, если rundll32 завершался до подключения — таймаут и локальный скан не начинались.
-            pipe = CreateNamedPipeW(pipeName, PIPE_ACCESS_INBOUND,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT, 1, 65536, 65536, 0, nullptr);
+            swprintf_s(pipeName, L"\\\\.\\pipe\\GlassWatch-%lu-%llu",
+                GetCurrentProcessId(), static_cast<unsigned long long>(GetTickCount64()));
+            PSECURITY_DESCRIPTOR descriptor=nullptr;
+            SECURITY_ATTRIBUTES security{sizeof(security),nullptr,FALSE};
+            if (ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    L"D:P(A;;GA;;;SY)(A;;GA;;;BA)",SDDL_REVISION_1,&descriptor,nullptr)) {
+                security.lpSecurityDescriptor=descriptor;
+                pipe = CreateNamedPipeW(pipeName, PIPE_ACCESS_INBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                    1, 65536, 65536, 0, &security);
+                LocalFree(descriptor);
+            }
             if (pipe == INVALID_HANDLE_VALUE) {
                 nativeScanFailed = true;
                 GlassInstallLog::LineFormat(L"Watch: CreateNamedPipe failed %lu", GetLastError());
@@ -215,7 +258,12 @@ bool WaitUntilClearOrTimeout(
     }
 
     for (;;) {
+        if (cancelRequested && cancelRequested->load(std::memory_order_acquire)) {
+            GlassInstallLog::Line(L"Watch: aborted by user cancel");
+            break;
+        }
         if (waitExpired()) {
+            if (scanNativeX64 && NeedNativeX64Helper() && !receivedFrame) nativeScanFailed=true;
             GlassInstallLog::LineFormat(L"Watch: timeout %lu ms, holders=%u",
                 timeoutMs, static_cast<unsigned>(lastHolders.size()));
             break;
@@ -242,6 +290,7 @@ bool WaitUntilClearOrTimeout(
             DWORD code = 1;
             GetExitCodeProcess(watchProcess, &code);
             GlassInstallLog::LineFormat(L"Watch: helper exit %lu", code);
+            helperExitCode=code;
             CloseHandle(watchProcess);
             watchProcess = nullptr;
         }
@@ -249,38 +298,43 @@ bool WaitUntilClearOrTimeout(
         if (pipeConnected && pipe != INVALID_HANDLE_VALUE) {
             char chunk[4096]{};
             DWORD avail = 0;
-            if (PeekNamedPipe(pipe, nullptr, 0, nullptr, &avail, nullptr) && avail > 0) {
+            while (PeekNamedPipe(pipe, nullptr, 0, nullptr, &avail, nullptr) && avail > 0) {
                 DWORD read = 0;
                 const DWORD toRead = avail > sizeof(chunk) ? sizeof(chunk) : avail;
-                if (ReadFile(pipe, chunk, toRead, &read, nullptr) && read > 0)
-                    pipeBuffer.append(chunk, chunk + read);
+                if (!ReadFile(pipe, chunk, toRead, &read, nullptr) || read == 0)
+                    break;
+                pipeBuffer.append(chunk, chunk + read);
             }
             for (;;) {
                 bool emptyMark = false;
                 bool endMark = false;
-                std::vector<ModuleHolder> tick;
-                ConsumePipeBuffer(pipeBuffer, tick, emptyMark, endMark);
+                if (!ConsumeNextPipeEvent(pipeBuffer, pendingRows, emptyMark, endMark))
+                    break;
                 if (emptyMark) {
+                    receivedFrame=true;
                     x64Empty = true;
                     x64Tick.clear();
-                    break;
+                    pendingRows.clear();
+                } else if (endMark) {
+                    receivedFrame=true;
+                    x64Empty = pendingRows.empty();
+                    x64Tick = std::move(pendingRows);
+                    pendingRows.clear();
                 }
-                if (endMark) {
-                    for (const auto& row : tick)
-                        MergeHolder(x64Tick, row.pid, row.exe, row.modules);
-                    break;
-                }
-                if (tick.empty() && !endMark && !emptyMark) break;
             }
         }
 
+        if (helperExitCode!=STILL_ACTIVE && !receivedFrame) {
+            nativeScanFailed=true;
+            break;
+        }
         lastHolders.clear();
         CollectInProcessHolders(lastHolders);
         for (const auto& row : x64Tick)
             MergeHolder(lastHolders, row.pid, row.exe, row.modules);
 
-        if (GetTickCount() - lastBeat >= 5000) {
-            lastBeat = GetTickCount();
+        if (GetTickCount64() - lastBeat >= 5000) {
+            lastBeat = GetTickCount64();
             GlassInstallLog::LineFormat(L"Watch: still held %u pipe=%d",
                 static_cast<unsigned>(lastHolders.size()), pipeConnected ? 1 : 0);
         }
@@ -299,7 +353,7 @@ bool WaitUntilClearOrTimeout(
             return true;
         }
 
-        Sleep(400);
+        Sleep(300);
     }
 
     if (pipe != INVALID_HANDLE_VALUE) {

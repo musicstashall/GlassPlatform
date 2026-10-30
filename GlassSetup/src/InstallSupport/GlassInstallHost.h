@@ -14,7 +14,18 @@ bool StopAllForUninstall(
     bool stopX86,
     bool stopOpenGlass) noexcept;
 
-void RemoveOpenGlassServiceAndTasks() noexcept;
-void RemovePlatformAutorunTasks(bool removeX64, bool removeX86) noexcept;
+bool EnsureGlassAutorunTask(
+    GlassShared::GlassPlatformTask::PlatformArch arch,
+    const std::wstring& installDir,
+    bool enableTask,
+    bool applyPowerIndependence) noexcept;
+
+bool EnsureOpenGlassService(
+    const std::wstring& openGlassDir,
+    DWORD desiredStartType) noexcept;
+bool StartOpenGlassService() noexcept;
+
+bool RemoveOpenGlassServiceAndTasks(bool removeTasks = true) noexcept;
+bool RemovePlatformAutorunTasks(bool removeX64, bool removeX86) noexcept;
 
 } // namespace GlassInstallHost

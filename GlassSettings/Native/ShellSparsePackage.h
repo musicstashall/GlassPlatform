@@ -21,7 +21,7 @@ namespace GlassSettings::ShellSparsePackage
 
     [[nodiscard]] SparsePackageError GetLastSparsePackageError() noexcept;
 
-    [[nodiscard]] bool RegisterSparsePackageQuiet() noexcept;
+    [[nodiscard]] bool RegisterSparsePackageQuiet(bool provisionDevCertificate = true) noexcept;
 
     [[nodiscard]] bool UnregisterSparsePackageQuiet() noexcept;
 }

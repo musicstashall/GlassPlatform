@@ -8,6 +8,7 @@
 #include <GlassModulePath.h>
 #include <GlassPlatformTask.h>
 #include <strsafe.h>
+#include <shlobj.h>
 
 #include <cstdarg>
 #include <cstdio>
@@ -287,9 +288,63 @@ namespace
         // Fallback: рядом с GlassShellExt.dll (установленная платформа)
         const std::wstring path = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
             GlassShellExt::g_module, kGlassSettingsExe);
-        if (path.empty())
+        if (!path.empty())
+            return ::StringCchCopyW(out, cch, path.c_str()) == S_OK;
+
+        // Fallback для 32-bit GlassShellExt на 64-bit ОС (GlassSettings ставится в 64-bit корень)
+        auto tryRoot = [&](const wchar_t* rootDir) noexcept -> bool {
+            if (!rootDir || !*rootDir)
+                return false;
+            std::wstring root(rootDir);
+            while (!root.empty() && (root.back() == L'\\' || root.back() == L'/'))
+                root.pop_back();
+            if (root.empty())
+                return false;
+            wchar_t sub[MAX_PATH]{};
+            if (SUCCEEDED(::StringCchPrintfW(sub, _countof(sub), L"%s\\GlassSettings\\%s", root.c_str(), kGlassSettingsExe))
+                && ::GetFileAttributesW(sub) != INVALID_FILE_ATTRIBUTES)
+            {
+                return ::StringCchCopyW(out, cch, sub) == S_OK;
+            }
+            if (SUCCEEDED(::StringCchPrintfW(sub, _countof(sub), L"%s\\%s", root.c_str(), kGlassSettingsExe))
+                && ::GetFileAttributesW(sub) != INVALID_FILE_ATTRIBUTES)
+            {
+                return ::StringCchCopyW(out, cch, sub) == S_OK;
+            }
             return false;
-        return ::StringCchCopyW(out, cch, path.c_str()) == S_OK;
+        };
+
+        auto tryReg = [&](HKEY hive, const wchar_t* valName, REGSAM sam) noexcept -> bool {
+            HKEY key = nullptr;
+            if (::RegOpenKeyExW(hive, L"Software\\GlassPlatform", 0, KEY_READ | sam, &key) != ERROR_SUCCESS)
+                return false;
+            wchar_t regBuf[MAX_PATH]{};
+            DWORD cb = sizeof(regBuf);
+            DWORD type = 0;
+            const LSTATUS st = ::RegQueryValueExW(key, valName, nullptr, &type, reinterpret_cast<LPBYTE>(regBuf), &cb);
+            ::RegCloseKey(key);
+            if (st != ERROR_SUCCESS || type != REG_SZ || !regBuf[0])
+                return false;
+            return tryRoot(regBuf);
+        };
+
+        if (tryReg(HKEY_LOCAL_MACHINE, L"InstallPathX64", KEY_WOW64_64KEY))
+            return true;
+        if (tryReg(HKEY_LOCAL_MACHINE, L"InstallPath", KEY_WOW64_64KEY))
+            return true;
+        if (tryReg(HKEY_CURRENT_USER, L"InstallPathX64", 0))
+            return true;
+
+        PWSTR pf64 = nullptr;
+        if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_ProgramFilesX64, KF_FLAG_DEFAULT, nullptr, &pf64)) && pf64)
+        {
+            const std::wstring defaultRoot = std::wstring(pf64) + L"\\GlassPlatform";
+            ::CoTaskMemFree(pf64);
+            if (tryRoot(defaultRoot.c_str()))
+                return true;
+        }
+
+        return false;
     }
 
     [[nodiscard]] bool ResolveGlassSettingsExePathWithDiag(wchar_t* out, size_t cch) noexcept

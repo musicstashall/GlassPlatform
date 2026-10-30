@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,9 @@ struct ModuleHolder {
 // Локальный скан (x86 in-process + inject map) без x64 rundll32.
 void CollectInProcessHolders(std::vector<ModuleHolder>& holders) noexcept;
 
+// Токенизированное слияние списка модулей ("GlassCompat.dll, UICompat.dll") без коллизий подстрок.
+void MergeModuleTokens(std::wstring& into, const std::wstring& add);
+
 // Один resident /watchGlassModules + локальный скан до timeoutMs или пока держателей нет.
 // nativeScanFailed — не удалось поднять x64 watch (нет Native.dll / pipe).
 bool WaitUntilClearOrTimeout(
@@ -23,7 +27,8 @@ bool WaitUntilClearOrTimeout(
     const std::wstring& x86Dir,
     bool scanNativeX64,
     std::vector<ModuleHolder>& lastHolders,
-    bool& nativeScanFailed) noexcept;
+    bool& nativeScanFailed,
+    const std::atomic<bool>* cancelRequested = nullptr) noexcept;
 
 void ParseNativePipeUtf8(const std::string& bytes, std::vector<ModuleHolder>& holders);
 

@@ -19,6 +19,8 @@
 
 #pragma comment(lib, "shell32.lib")
 
+EXTERN_C IMAGE_DOS_HEADER __ImageBase;
+
 namespace
 {
     std::atomic<bool> g_shellExtOpInProgress{ false };
@@ -67,12 +69,46 @@ namespace
         return wcscpy_s(out, cch, exe) == 0;
     }
 
+
     [[nodiscard]] bool ResolveBundledGlassShellExtDll(wchar_t* out, size_t cch) noexcept
     {
         if (!out || cch == 0)
             return false;
-        const std::wstring path =
+        std::wstring path =
             GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(nullptr, L"GlassShellExt.dll");
+        if (path.empty())
+        {
+            path = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
+                reinterpret_cast<HMODULE>(&__ImageBase), L"GlassShellExt.dll");
+        }
+        if (path.empty())
+        {
+            const wchar_t* valName =
+#if defined(_WIN64)
+                L"InstallPathX64";
+            constexpr REGSAM machineView = KEY_WOW64_64KEY;
+#else
+                L"InstallPathX86";
+            constexpr REGSAM machineView = KEY_WOW64_32KEY;
+#endif
+            const auto tryValue = [&](HKEY hive, REGSAM view, const wchar_t* name) noexcept {
+                HKEY key = nullptr;
+                if (::RegOpenKeyExW(hive, L"Software\\GlassPlatform", 0, KEY_READ | view, &key) != ERROR_SUCCESS)
+                    return;
+                wchar_t value[MAX_PATH]{};
+                DWORD bytes = sizeof(value), type = 0;
+                const LSTATUS status = ::RegQueryValueExW(key, name, nullptr, &type,
+                    reinterpret_cast<LPBYTE>(value), &bytes);
+                ::RegCloseKey(key);
+                if (status == ERROR_SUCCESS && type == REG_SZ && value[0])
+                    path = GlassShared::GlassModulePath::ResolveGlassModulePath(
+                        value, L"GlassShellExt.dll", GlassShared::GlassModulePath::NativeModuleArch());
+            };
+            tryValue(HKEY_LOCAL_MACHINE, machineView, valName);
+            if (path.empty()) tryValue(HKEY_LOCAL_MACHINE, machineView, L"InstallPath");
+            if (path.empty()) tryValue(HKEY_CURRENT_USER, 0, valName);
+            if (path.empty()) tryValue(HKEY_CURRENT_USER, 0, L"InstallPath");
+        }
         if (path.empty())
             return false;
         return wcscpy_s(out, cch, path.c_str()) == 0;
@@ -124,6 +160,31 @@ namespace
         std::vector<wchar_t> buf(cmd.begin(), cmd.end());
         buf.push_back(L'\0');
         return RunHiddenCommandLine(buf.data(), 20000);
+    }
+
+    [[nodiscard]] bool HasExistingShellRegistrationKeys() noexcept
+    {
+        using namespace GlassShared::GlassShellMenu;
+        std::vector<std::wstring> keys;
+        for (const wchar_t* root : {L"DesktopBackground", L"Directory\\Background"})
+        {
+            const std::wstring prefix = std::wstring(L"Software\\Classes\\") + root;
+            keys.push_back(prefix + L"\\ShellEx\\ContextMenuHandlers\\" + kHandlerSubkeyName);
+            keys.push_back(prefix + L"\\Shell\\" + kDesktopToggleVerbSubkey);
+            keys.push_back(prefix + L"\\Shell\\" + kDesktopOpenConfigVerbSubkey);
+        }
+        for (const wchar_t* clsid : {kClsidStringBraced, kToggleExplorerClsidBraced, kOpenConfigExplorerClsidBraced})
+            keys.push_back(std::wstring(L"Software\\Classes\\CLSID\\") + clsid);
+        for (const auto& path : keys)
+        {
+            HKEY key = nullptr;
+            const LSTATUS status = ::RegOpenKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, KEY_READ, &key);
+            if (key) ::RegCloseKey(key);
+            // Unknown/access-denied means preserve, not replace.
+            if (status == ERROR_SUCCESS || (status != ERROR_FILE_NOT_FOUND && status != ERROR_PATH_NOT_FOUND))
+                return true;
+        }
+        return false;
     }
 
     [[nodiscard]] bool IsRegistryShellExtensionRegistered() noexcept
@@ -263,12 +324,12 @@ namespace
         }
     }
 
-    [[nodiscard]] bool RegisterBundledDllQuietImpl() noexcept
+    [[nodiscard]] bool RegisterBundledDllQuietImpl(bool provisionDevCertificate = true) noexcept
     {
         SetLastOpMessage(OpMessageId::None);
         if (IsWindows11OrGreater())
         {
-            if (!GlassSettings::ShellSparsePackage::RegisterSparsePackageQuiet())
+            if (!GlassSettings::ShellSparsePackage::RegisterSparsePackageQuiet(provisionDevCertificate))
             {
                 DebugLog(
                     DBG_ERROR,
@@ -277,8 +338,10 @@ namespace
                 return false;
             }
 
-            RemoveLegacyContextMenuHandlerOnly();
-            VerifyWin11RegistrationHasNoLegacyHandlers();
+            if (provisionDevCertificate) {
+                RemoveLegacyContextMenuHandlerOnly();
+                VerifyWin11RegistrationHasNoLegacyHandlers();
+            }
             SetLastOpMessage(OpMessageId::Success);
             return true;
         }
@@ -442,4 +505,47 @@ extern "C" __declspec(dllexport) void WINAPI GlassSettings_NotifyShellCachesAfte
     wchar_t desktopDir[MAX_PATH]{};
     if (SUCCEEDED(::SHGetFolderPathW(nullptr, CSIDL_DESKTOPDIRECTORY, nullptr, SHGFP_TYPE_CURRENT, desktopDir)))
         ::SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_IDLIST, desktopDir, nullptr);
+}
+
+extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterW(
+    HWND,
+    HINSTANCE,
+    LPWSTR cmdLine,
+    int) noexcept
+{
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_ShellExtRegisterW=_GlassSettings_ShellExtRegisterW@16")
+#endif
+    std::wstring parsed;
+    if (cmdLine && cmdLine[0])
+    {
+        const auto first = static_cast<unsigned>(cmdLine[0]);
+        const bool wideAscii = first < 128
+            && (cmdLine[0] == L'/' || cmdLine[0] == L'-' || cmdLine[0] == L'"' || cmdLine[0] == L' ');
+        if (wideAscii)
+        {
+            parsed = cmdLine;
+        }
+        else
+        {
+            const char* ansi = reinterpret_cast<const char*>(cmdLine);
+            const int n = ::MultiByteToWideChar(CP_ACP, 0, ansi, -1, nullptr, 0);
+            if (n > 1)
+            {
+                parsed.resize(static_cast<size_t>(n - 1));
+                ::MultiByteToWideChar(CP_ACP, 0, ansi, -1, parsed.data(), n);
+            }
+        }
+    }
+    const bool unregister = parsed.find(L"/unregister") != std::wstring::npos
+        || parsed.find(L"-u") != std::wstring::npos;
+    const bool setup = parsed.find(L"/setup") != std::wstring::npos;
+    if (setup && !unregister && (HasExistingShellRegistrationKeys() ||
+        GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser())) {
+        // Explicit sentinel: distinguish an intentional no-op from rundll32 loader errors.
+        ::ExitProcess(0x47505245u);
+    }
+    const bool ok = unregister ? UnregisterBundledDllQuietImpl() : RegisterBundledDllQuietImpl(!setup);
+    GlassSettings_NotifyShellCachesAfterRegistrationChange();
+    ::ExitProcess(ok ? 0u : 1u);
 }

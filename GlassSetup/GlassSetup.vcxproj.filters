@@ -1,35 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="src">
-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="res">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="tests">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-    </Filter>
+    <Filter Include="src"><UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier></Filter>
+    <Filter Include="src\InstallSupport"><UniqueIdentifier>{BD4925A4-C5E2-4FDB-A577-DBB59DA45E11}</UniqueIdentifier></Filter>
+    <Filter Include="res"><UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier></Filter>
+    <Filter Include="res\assets"><UniqueIdentifier>{9D7FB1D4-ABCE-4D2A-AD44-4BB5F4E5C114}</UniqueIdentifier></Filter>
+    <Filter Include="tests"><UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier></Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\main.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
+    <ClCompile Include="src\main.cpp"><Filter>src</Filter></ClCompile>
+    <ClCompile Include="src\InstallEngine.cpp"><Filter>src</Filter></ClCompile>
+    <ClCompile Include="src\InstallLog.cpp"><Filter>src</Filter></ClCompile>
+    <ClCompile Include="src\WizardTheme.cpp"><Filter>src</Filter></ClCompile>
+    <ClCompile Include="src\InstallSupport\GlassInstallLog.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
+    <ClCompile Include="src\InstallSupport\GlassInstallMsi.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
+    <ClCompile Include="src\InstallSupport\GlassInstallRollback.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
+    <ClCompile Include="src\InstallSupport\GlassInstallUtil.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
+    <ClCompile Include="src\InstallSupport\GlassInstallWatch.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
+    <ClCompile Include="src\InstallSupport\GlassInstallHost.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
+    <ClCompile Include="src\InstallSupport\GlassInstallUnlock.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="res\GlassSetup.rc">
-      <Filter>res</Filter>
-    </ResourceCompile>
+    <ClInclude Include="src\WizardTheme.h"><Filter>src</Filter></ClInclude>
+    <ClInclude Include="src\WizardAssets.h"><Filter>src</Filter></ClInclude>
+    <ClInclude Include="src\GlassProducts.h"><Filter>src</Filter></ClInclude>
+    <ClInclude Include="src\InstallEngine.h"><Filter>src</Filter></ClInclude>
+    <ClInclude Include="src\InstallLog.h"><Filter>src</Filter></ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="res\GlassSetup.rc"><Filter>res</Filter></ResourceCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="res\slideshow.html"><Filter>res</Filter></None>
     <None Include="res\welcome_banner.png"><Filter>res</Filter></None>
+    <None Include="res\assets\handwritten.ttf"><Filter>res\assets</Filter></None>
+    <None Include="res\assets\slide_start.jpg"><Filter>res\assets</Filter></None>
+    <None Include="res\assets\slide_taskbar.jpg"><Filter>res\assets</Filter></None>
+    <None Include="res\assets\slide_notification.png"><Filter>res\assets</Filter></None>
+    <None Include="res\assets\slide_context_menu.jpg"><Filter>res\assets</Filter></None>
+    <None Include="res\assets\slide_explorer.jpg"><Filter>res\assets</Filter></None>
     <None Include="res\Eula.ru.txt"><Filter>res</Filter></None>
     <None Include="res\Eula.en.txt"><Filter>res</Filter></None>
     <None Include="res\GPL-3.0.txt"><Filter>res</Filter></None>
     <None Include="res\app.manifest"><Filter>res</Filter></None>
     <None Include="res\app.ico"><Filter>res</Filter></None>
     <None Include="tests\verify_resources.py"><Filter>tests</Filter></None>
+    <None Include="tests\selection_tests.cpp"><Filter>tests</Filter></None>
+    <None Include="tests\asset-hashes.json"><Filter>tests</Filter></None>
+    <None Include="tests\user-resource-hashes.json"><Filter>tests</Filter></None>
     <None Include="packages.config" />
   </ItemGroup>
 </Project>
