@@ -36,6 +36,11 @@ struct Session {
 bool ValidatePlatformTask(GlassShared::GlassPlatformTask::PlatformArch arch,
     const std::wstring& fixedRoot, bool expectedExists, bool requireRunning,
     bool russian, std::wstring& error) noexcept;
+// Validate the task's action and single running instance on the same Scheduler
+// object immediately before requesting Stop. No event or process fallback.
+bool StopValidatedPlatformTask(GlassShared::GlassPlatformTask::PlatformArch arch,
+    const std::wstring& fixedRoot, const std::atomic_bool* cancelled,
+    bool& stopAttempted, bool russian, std::wstring& error) noexcept;
 bool ValidateOpenGlassPaths(const std::wstring& fixedRoot, const std::atomic_bool* cancelled,
     bool russian, std::wstring& error) noexcept;
 

@@ -11,10 +11,15 @@ namespace GlassCompat::CoreWindowHostInject
     /// Вызывать из хост-цикла (не из injected).
     void Refresh() noexcept;
 
-    /// Снять все per-target хуки при stop хоста (до SignalHostShutdown).
-    void Shutdown() noexcept;
+    /// Снять все per-target хуки до SignalHostShutdown. При остановке задачи
+    /// не менять настройки чужих процессов и не посылать им дополнительные wake.
+    void Shutdown(bool wakeProcesses) noexcept;
 
-    /// После HostShutdown: если SEH/SMEH ещё держат GlassCompat — remote FreeLibrary.
+    /// Освободить ресурсы и собственный PLM-debug при обычной остановке задачи,
+    /// не выполняя удалённую выгрузку модулей.
+    void FinishTaskStop() noexcept;
+
+    /// Для других сценариев остановки: дополнительная обработка остатков.
     void ForceUnloadResiduals() noexcept;
 
     /// Host OOC SHOW CoreWindow → post GUI attach (не CreateRemoteThread).

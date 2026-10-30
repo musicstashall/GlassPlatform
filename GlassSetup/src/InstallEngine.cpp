@@ -361,9 +361,11 @@ bool InstallEngine::CapturePriorHostState() noexcept {
 bool InstallEngine::RestorePriorHosts(bool selectedOnly) noexcept {
     if (!hostsStopped_) return true;
     bool ok=true;
-    auto restoreArch=[&](GP::PlatformArch arch,const std::wstring& root,bool existed,bool enabled,bool running,bool stopSignalled) -> bool {
+    auto restoreArch=[&](GP::PlatformArch arch,const std::wstring& root,bool existed,bool enabled,bool running,bool stopAttempted) -> bool {
         if (!running) return true;
-        if (stopSignalled) (void)GP::WaitForPlatformStopped(arch,30000);
+        // A timed-out stop may still complete later. Do not report rollback as
+        // successful or restart another instance while that stop is in flight.
+        if (stopAttempted && !GP::WaitForPlatformStopped(arch,30000)) return false;
         bool hostRunning = false;
         if (!QueryPlatformMutex(arch, hostRunning)) return false;
         if (hostRunning) return true;
@@ -393,9 +395,9 @@ bool InstallEngine::RestorePriorHosts(bool selectedOnly) noexcept {
     // During success only restore manually running *selected* platforms whose
     // tasks were disabled. Unselected products are being removed, not restarted.
     if (!selectedOnly || (selection_.platform64 && prior_.x64WasRunning && !prior_.x64TaskEnabled))
-        if (!restoreArch(GP::PlatformArch::X64,x64Dir_,prior_.x64TaskExisted,prior_.x64TaskEnabled,prior_.x64WasRunning,x64StopSignalled_)) ok=false;
+        if (!restoreArch(GP::PlatformArch::X64,x64Dir_,prior_.x64TaskExisted,prior_.x64TaskEnabled,prior_.x64WasRunning,x64StopAttempted_)) ok=false;
     if (!selectedOnly || (selection_.platform32 && prior_.x86WasRunning && !prior_.x86TaskEnabled))
-        if (!restoreArch(GP::PlatformArch::X86,x86Dir_,prior_.x86TaskExisted,prior_.x86TaskEnabled,prior_.x86WasRunning,x86StopSignalled_)) ok=false;
+        if (!restoreArch(GP::PlatformArch::X86,x86Dir_,prior_.x86TaskExisted,prior_.x86TaskEnabled,prior_.x86WasRunning,x86StopAttempted_)) ok=false;
     if (selectedOnly) return ok; // selected OpenGlass is handled by the launch phase
     bool ogPathsSafe=true;
     if (((prior_.ogWasRunning && ogStopSignalled_) || ogServiceStartTypeMayNeedRestore_) &&
@@ -859,26 +861,21 @@ bool InstallEngine::StopGlassPlatform(GP::PlatformArch arch, const std::wstring&
         SetFailure(taskError,0);
         return false;
     }
-    const bool signaled = GP::SignalPlatformStop(arch);
-    if (arch==GP::PlatformArch::X64) x64StopSignalled_=signaled;
-    else x86StopSignalled_=signaled;
-    InstallLog::LineFormat(L"%s: SignalPlatformStop %s", logTag, signaled ? L"ok" : L"failed");
-
-    const ULONGLONG deadline = GetTickCount64() + 45000;
-    // Finish an already-signalled stop before rollback checks the old state.
-    while (running && GetTickCount64() < deadline) {
-        Sleep(250);
-        if (!QueryPlatformMutex(arch, running)) return fail(L"GlassPlatform mutex state");
-    }
-    if (!running) (void)GP::StopOrphanAutorunTaskInstance(arch);
-    // Residual modules are monitored in ReleaseLockedModules, with their own
-    // visible status and the unlock pages, not hidden in the host-stop phase.
+    bool attempted=false;
+    taskError.clear();
+    const bool stopped=GlassInstallHost::StopGlassPlatform(
+        arch,fixedRoot,&cancelRequested_,&attempted,&taskError);
+    if (arch==GP::PlatformArch::X64) x64StopAttempted_=attempted;
+    else x86StopAttempted_=attempted;
     if (IsCancelRequested()) return false;
-    if (running) {
-        InstallLog::LineFormat(L"%s: host still running", logTag);
+    if (!stopped) {
+        InstallLog::LineFormat(L"%s: task stop failed or host did not settle",logTag);
+        if (!taskError.empty()) { SetFailure(taskError,0); return false; }
         return fail(L"GlassPlatform host");
     }
-    InstallLog::LineFormat(L"%s: stopped", logTag);
+    // Residual modules are monitored later in ReleaseLockedModules, with
+    // their own visible status and unlock pages.
+    InstallLog::LineFormat(L"%s: stopped via Task Scheduler",logTag);
     return true;
 }
 
@@ -1275,7 +1272,13 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
     ReleaseSRWLockExclusive(&statusLock_);
 
     const std::wstring msiLog = InstallLog::NextMsiVerboseLogPath(label.c_str());
-    if (!msiLog.empty()) MsiEnableLogW(INSTALLLOGMODE_VERBOSE, msiLog.c_str(), INSTALLLOGATTRIBUTES_FLUSHEACHLINE);
+    // Removal and installation are separate MSI sessions. Append both so the
+    // second session does not erase evidence from the preceding uninstall.
+    if (!msiLog.empty()) {
+        const UINT logResult=MsiEnableLogW(INSTALLLOGMODE_VERBOSE, msiLog.c_str(),
+            INSTALLLOGATTRIBUTES_FLUSHEACHLINE | INSTALLLOGATTRIBUTES_APPEND);
+        InstallLog::LineFormat(L"MSI verbose log: %s (enable=%u)", msiLog.c_str(),logResult);
+    }
     const std::wstring productCode = GlassInstallMsi::ResolveProductCode(msiPath);
     GlassInstallMsi::ProgressSink sink;
     sink.label = label; sink.base = progressBase; sink.span = progressSpan;
@@ -1314,12 +1317,12 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
     const std::wstring props = GlassInstallMsi::BuildInstallPropertyString(installDir, false);
     InstallLog::LineFormat(L"MsiInstallProduct %s", msiPath.c_str());
     InstallLog::LineFormat(L"  %s", props.c_str());
-    InstallLog::LineFormat(L"MSI verbose log: %s", msiLog.c_str());
 
     UINT exitCode = GlassInstallMsi::InstallProduct(msiPath, props, &sink);
     if (exitCode == ERROR_PRODUCT_VERSION && !IsCancelRequested()) {
         InstallLog::Line(L"MSI 1638 — forced uninstall and retry");
-        MsiEnableLogW(INSTALLLOGMODE_VERBOSE,msiLog.c_str(),INSTALLLOGATTRIBUTES_FLUSHEACHLINE);
+        MsiEnableLogW(INSTALLLOGMODE_VERBOSE,msiLog.c_str(),
+            INSTALLLOGATTRIBUTES_FLUSHEACHLINE | INSTALLLOGATTRIBUTES_APPEND);
         if (!productCode.empty() && GlassInstallMsi::IsProductInstalled(productCode.c_str())) {
             if (!ProductWasSnapshotted(rollbackSession_,productCode.c_str())) {
                 MsiEnableLogW(0,nullptr,0);
@@ -1696,11 +1699,19 @@ bool InstallEngine::LaunchAndVerifySelectedProducts() noexcept {
         SetFailure(L"Could not restart a previously running component.",0);
         return false;
     }
-    // Register last. Existing shell registration is never replaced by this setup;
-    // do not provision or trust developer certificates on a user's machine.
-    if (cleanInstall_ && !rollbackSession_.hadPriorInstall &&
-        !GlassInstallUtil::InvokeShellExtRegistration(true,x64Dir_,x86Dir_,&shellRegisteredBySetup_)) {
-        SetFailure(labels_.shellRegisterFailed.empty()?L"Could not register the Windows shell extension.":labels_.shellRegisterFailed,0);
+    // Register by default on both fresh installs and reinstalls. The helper
+    // preserves an existing registration and reports whether it changed one,
+    // so rollback only removes a registration made by this setup. Never add or
+    // trust a developer certificate on the user's machine.
+    bool shellConflict=false;
+    if (!GlassInstallUtil::InvokeShellExtRegistration(true,x64Dir_,x86Dir_,&shellRegisteredBySetup_,&shellConflict)) {
+        if (shellConflict) {
+            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+            SetFailure(ru ? L"Обнаружена существующая или непроверяемая регистрация расширения оболочки. Она сохранена без изменений; проверьте журнал."
+                          : L"An existing or unverifiable shell registration was preserved without changes; check the log.",0);
+        } else {
+            SetFailure(labels_.shellRegisterFailed.empty()?L"Could not register the Windows shell extension.":labels_.shellRegisterFailed,0);
+        }
         return false;
     }
     SetStatus(labels_.finalize, 9950);

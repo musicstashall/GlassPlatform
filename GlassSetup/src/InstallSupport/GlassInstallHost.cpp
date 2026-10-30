@@ -1,5 +1,6 @@
 #include "GlassInstallHost.h"
 #include "GlassInstallLog.h"
+#include "GlassInstallRemoval.h"
 #include "GlassInstallUtil.h"
 #include <shlwapi.h>
 #include <winsvc.h>
@@ -9,27 +10,54 @@ namespace {
 
 namespace GP = GlassShared::GlassPlatformTask;
 
-bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::atomic_bool* cancelled = nullptr) noexcept {
-    if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
+bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::wstring& installDir,
+    const std::atomic_bool* cancelled, bool* stopAttempted, std::wstring* detail,
+    bool allowRunning) noexcept {
+    if (stopAttempted) *stopAttempted=false;
+    if (detail) detail->clear();
+    const auto isCancelled=[&]() { return cancelled && cancelled->load(std::memory_order_acquire); };
+    if (isCancelled()) { SetLastError(ERROR_CANCELLED); return false; }
     bool running=false;
     if (!GlassInstallHost::QueryGlassPlatformRunning(arch,running)) return false;
-    if (running) {
-        const bool signaled = GP::SignalPlatformStop(arch);
-        GlassInstallLog::LineFormat(L"HostStop: SignalPlatformStop %s",
-            signaled ? L"ok" : L"failed");
+    if (!running) {
+        GlassInstallLog::LineFormat(L"HostStop: %s already stopped",GP::GlassAutorunTaskName(arch));
+        return true;
     }
-    const ULONGLONG deadline = GetTickCount64() + 45000;
-    // Once the stop signal is sent, wait for it to finish even after cancel;
-    // otherwise rollback can observe a still-running host that stops afterwards.
-    while (GetTickCount64() < deadline) {
+    if (!allowRunning) {
+        GlassInstallLog::LineFormat(L"HostStop: %s started after its state was captured",GP::GlassAutorunTaskName(arch));
+        SetLastError(ERROR_INVALID_STATE);
+        return false;
+    }
+
+    bool attempted=false;
+    std::wstring error;
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    const bool accepted=GlassInstallRemoval::StopValidatedPlatformTask(
+        arch,installDir,cancelled,attempted,ru,error);
+    const DWORD requestError=accepted ? ERROR_SUCCESS : GetLastError();
+    if (stopAttempted) *stopAttempted=attempted;
+    if (!error.empty()) {
+        GlassInstallLog::LineFormat(L"HostStop: %s",error.c_str());
+        if (detail) *detail=error;
+    }
+    if (!attempted) return false;
+
+    // Even a failed Scheduler call can race with shutdown. Wait for an
+    // attempted stop to settle before rollback decides whether to restart.
+    const ULONGLONG deadline=GetTickCount64()+45000;
+    for (;;) {
         if (!GlassInstallHost::QueryGlassPlatformRunning(arch,running)) return false;
-        if (!running) {
-            (void)GP::StopOrphanAutorunTaskInstance(arch);
-            return true; // the separate watch phase handles residual modules
+        if (!running) break;
+        if (GetTickCount64()>=deadline) {
+            SetLastError(isCancelled() ? ERROR_CANCELLED : ERROR_TIMEOUT);
+            return false;
         }
         Sleep(250);
     }
-    return GlassInstallHost::QueryGlassPlatformRunning(arch,running) && !running;
+    if (isCancelled()) { SetLastError(ERROR_CANCELLED); return false; }
+    if (!accepted) { SetLastError(requestError); return false; }
+    // The separate watch phase, never this task-stop stage, handles residuals.
+    return true;
 }
 
 } // namespace
@@ -43,8 +71,9 @@ bool QueryGlassPlatformRunning(GP::PlatformArch arch, bool& running) noexcept {
     return GetLastError()==ERROR_FILE_NOT_FOUND;
 }
 
-bool StopGlassPlatform(GP::PlatformArch arch) noexcept {
-    return StopGlassPlatformImpl(arch);
+bool StopGlassPlatform(GP::PlatformArch arch, const std::wstring& installDir,
+    const std::atomic_bool* cancelled, bool* stopAttempted, std::wstring* detail) noexcept {
+    return StopGlassPlatformImpl(arch,installDir,cancelled,stopAttempted,detail,true);
 }
 
 bool StopOpenGlassHost(const std::atomic_bool* cancelled, bool* stopRequested) noexcept {
@@ -143,18 +172,22 @@ bool StopAllForUninstall(
     bool stopX64,
     bool stopX86,
     bool stopOpenGlass,
-    const std::atomic_bool* cancelled) noexcept {
-    (void)x64InstallDir;
-    (void)x86InstallDir;
+    const std::atomic_bool* cancelled,
+    bool* stopAttemptedX64,
+    bool* stopAttemptedX86,
+    const bool* wasRunningX64,
+    const bool* wasRunningX86) noexcept {
+    if (stopAttemptedX64) *stopAttemptedX64=false;
+    if (stopAttemptedX86) *stopAttemptedX86=false;
     GlassInstallUtil::CloseGlassSettingsProcesses(cancelled);
     if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
-    bool ok = true;
-    if (stopX64 && !StopGlassPlatformImpl(GP::PlatformArch::X64, cancelled)) ok = false;
+    if (stopX64 && !StopGlassPlatformImpl(GP::PlatformArch::X64,x64InstallDir,cancelled,
+            stopAttemptedX64,nullptr,!wasRunningX64 || *wasRunningX64)) return false;
     if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
-    if (stopX86 && !StopGlassPlatformImpl(GP::PlatformArch::X86, cancelled)) ok = false;
+    if (stopX86 && !StopGlassPlatformImpl(GP::PlatformArch::X86,x86InstallDir,cancelled,
+            stopAttemptedX86,nullptr,!wasRunningX86 || *wasRunningX86)) return false;
     if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
-    if (stopOpenGlass && !StopOpenGlassHost(cancelled)) ok = false;
-    return ok;
+    return !stopOpenGlass || StopOpenGlassHost(cancelled);
 }
 
 bool EnsureGlassAutorunTask(

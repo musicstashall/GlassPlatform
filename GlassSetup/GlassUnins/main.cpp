@@ -633,8 +633,12 @@ private:
             return 10;
         }
         bool removed64=false,removed86=false,removedOg=false;
-        auto restoreArch=[&](GP::PlatformArch arch,const std::wstring& root,bool wasRunning,bool wasEnabled,bool removed) -> bool {
+        bool stopAttempted64=false,stopAttempted86=false;
+        auto restoreArch=[&](GP::PlatformArch arch,const std::wstring& root,bool wasRunning,bool wasEnabled,bool removed,bool stopAttempted) -> bool {
             if (!wasRunning || removed) return true;
+            // Do not claim restoration while a previously requested stop can
+            // still complete and shut down the restored instance afterwards.
+            if (stopAttempted && !GP::WaitForPlatformStopped(arch,30000)) return false;
             bool running=false;
             if (!GlassInstallHost::QueryGlassPlatformRunning(arch,running)) return false;
             if (running) return true;
@@ -653,8 +657,8 @@ private:
         };
         auto restoreRemaining=[&]() -> bool {
             bool restored=true;
-            if (!restoreArch(GP::PlatformArch::X64,x64Dir_,prior64,enabled64,removed64)) restored=false;
-            if (!restoreArch(GP::PlatformArch::X86,x86Dir_,prior86,enabled86,removed86)) restored=false;
+            if (!restoreArch(GP::PlatformArch::X64,x64Dir_,prior64,enabled64,removed64,stopAttempted64)) restored=false;
+            if (!restoreArch(GP::PlatformArch::X86,x86Dir_,prior86,enabled86,removed86,stopAttempted86)) restored=false;
             if (priorOg && !removedOg) {
                 bool running=false;
                 if (!GlassInstallUtil::QueryOpenGlassRunning(running)) restored=false;
@@ -693,10 +697,16 @@ private:
             return 17;
         };
         SetStatus(T(L"Остановка компонентов…",L"Stopping components…"),500);
-        if (!GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,platformRemoval,platformRemoval,stopOg,&cancelRequested_)) {
+        if (!GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,platformRemoval,platformRemoval,stopOg,
+                &cancelRequested_,&stopAttempted64,&stopAttempted86,&prior64,&prior86)) {
             if (cancelRequested_.load()) return cancelledResult();
+            if (!restoreRemaining()) {
+                SetError(T(L"Не удалось остановить компоненты или восстановить их прежнее состояние. Пакеты не удалены.",
+                    L"Could not stop components or restore their previous state. No packages were removed."));
+                return 17;
+            }
             SetError(T(L"Не удалось остановить компоненты. Пакеты не удалены.",L"Could not stop components. No packages were removed."));
-            restoreRemaining(); return 10;
+            return 10;
         }
         if (cancelRequested_.load()) return cancelledResult();
         if (platformRemoval || chosen.settings)

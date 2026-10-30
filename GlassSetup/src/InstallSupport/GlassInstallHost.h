@@ -8,7 +8,11 @@ namespace GlassInstallHost {
 
 // A failed mutex query is not the same as a stopped platform.
 bool QueryGlassPlatformRunning(GlassShared::GlassPlatformTask::PlatformArch arch, bool& running) noexcept;
-bool StopGlassPlatform(GlassShared::GlassPlatformTask::PlatformArch arch) noexcept;
+// Stop the validated Scheduler task and wait for its host mutex. Once a stop
+// was attempted, settle it even if cancellation arrives before returning.
+bool StopGlassPlatform(GlassShared::GlassPlatformTask::PlatformArch arch,
+    const std::wstring& installDir, const std::atomic_bool* cancelled = nullptr,
+    bool* stopAttempted = nullptr, std::wstring* detail = nullptr) noexcept;
 // Inspect real service/task status before sending any stop. Once requested,
 // wait for the stop to settle even on cancellation so rollback can restore it.
 bool StopOpenGlassHost(const std::atomic_bool* cancelled = nullptr,
@@ -19,7 +23,11 @@ bool StopAllForUninstall(
     bool stopX64,
     bool stopX86,
     bool stopOpenGlass,
-    const std::atomic_bool* cancelled = nullptr) noexcept;
+    const std::atomic_bool* cancelled = nullptr,
+    bool* stopAttemptedX64 = nullptr,
+    bool* stopAttemptedX86 = nullptr,
+    const bool* wasRunningX64 = nullptr,
+    const bool* wasRunningX86 = nullptr) noexcept;
 
 bool EnsureGlassAutorunTask(
     GlassShared::GlassPlatformTask::PlatformArch arch,

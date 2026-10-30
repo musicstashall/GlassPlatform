@@ -204,6 +204,41 @@ namespace
         return Shared::GlassShellRegistration::IsLegacyContextMenuHandlerPresent();
     }
 
+    [[nodiscard]] bool HasMatchingLegacyShellRegistration(const wchar_t* root) noexcept
+    {
+        if (!root || !root[0] || !IsRegistryShellExtensionRegistered())
+            return false;
+        const std::wstring expected=GlassShared::GlassModulePath::ResolveGlassModulePath(
+            root,L"GlassShellExt.dll",GlassShared::GlassModulePath::NativeModuleArch());
+        if (expected.empty())
+            return false;
+        const std::wstring key=std::wstring(L"Software\\Classes\\CLSID\\")+
+            GlassShared::GlassShellMenu::kClsidStringBraced+L"\\InprocServer32";
+        wchar_t value[MAX_PATH]{};
+        DWORD bytes=sizeof(value);
+        if (::RegGetValueW(HKEY_CURRENT_USER,key.c_str(),nullptr,RRF_RT_REG_SZ,
+                nullptr,value,&bytes)!=ERROR_SUCCESS || !value[0])
+            return false;
+        wchar_t a[MAX_PATH]{},b[MAX_PATH]{};
+        const DWORD na=GetFullPathNameW(value,_countof(a),a,nullptr);
+        const DWORD nb=GetFullPathNameW(expected.c_str(),_countof(b),b,nullptr);
+        return na && na<_countof(a) && nb && nb<_countof(b) && _wcsicmp(a,b)==0;
+    }
+
+    [[nodiscard]] bool ExplorerCommandsBlockedOrUnknown() noexcept
+    {
+        constexpr wchar_t key[]=L"Software\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Blocked";
+        for (const wchar_t* clsid : {GlassShared::GlassShellMenu::kToggleExplorerClsidBraced,
+                                     GlassShared::GlassShellMenu::kOpenConfigExplorerClsidBraced})
+        {
+            DWORD bytes=0;
+            const LSTATUS result=::RegGetValueW(HKEY_CURRENT_USER,key,clsid,RRF_RT_ANY,nullptr,nullptr,&bytes);
+            if (result!=ERROR_FILE_NOT_FOUND && result!=ERROR_PATH_NOT_FOUND)
+                return true; // present, or not safely inspectable
+        }
+        return false;
+    }
+
     void RemoveLegacyContextMenuHandlerOnly() noexcept
     {
         Shared::GlassShellRegistration::RemoveLegacyContextMenuHandler();
@@ -372,6 +407,18 @@ namespace
     [[nodiscard]] bool UnregisterBundledDllQuietImpl(const wchar_t* exactPlatformRoot = nullptr) noexcept
     {
         SetLastOpMessage(OpMessageId::None);
+
+        if (exactPlatformRoot)
+        {
+            // The versioned Setup/Unins route must never use the general
+            // cross-user/package-stub cleanup used by the Settings UI.
+            if (IsWindows11OrGreater())
+                return GlassSettings::ShellSparsePackage::UnregisterInstallerSparsePackageQuiet(exactPlatformRoot);
+            if (!HasExistingShellRegistrationKeys())
+                return true;
+            return HasMatchingLegacyShellRegistration(exactPlatformRoot) &&
+                RunRegsvr32(true,exactPlatformRoot) && !IsRegistryShellExtensionRegistered();
+        }
 
         if (IsWindows11OrGreater())
         {
@@ -591,9 +638,46 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSet
     bool unregister = false;
     std::wstring root;
     if (!ParseInstallerShellArguments(cmdLine, unregister, root)) ::ExitProcess(1u);
-    if (!unregister && (HasExistingShellRegistrationKeys() ||
-        GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser()))
-        ::ExitProcess(0x47505245u);
+    if (!unregister)
+    {
+        // Preserve existing registrations only when they actually match the
+        // selected root. Never silently report an unrelated/partial one as OK.
+        constexpr DWORD kExisting=0x47505245u;
+        constexpr DWORD kConflict=0x47504346u;
+        const bool keys=HasExistingShellRegistrationKeys();
+        if (IsWindows11OrGreater())
+        {
+            using GlassSettings::ShellSparsePackage::InstallerSparseState;
+            const auto sparse=GlassSettings::ShellSparsePackage::QueryInstallerSparseState(root.c_str());
+            if (sparse==InstallerSparseState::Matching && !keys && !ExplorerCommandsBlockedOrUnknown() &&
+                GlassSettings::ShellSparsePackage::InstallerSparseHasVerifiedMenu(root.c_str()))
+                ::ExitProcess(kExisting);
+            if (sparse!=InstallerSparseState::Absent || keys)
+                ::ExitProcess(kConflict);
+        }
+        else if (keys)
+        {
+            ::ExitProcess(HasMatchingLegacyShellRegistration(root.c_str()) ? kExisting : kConflict);
+        }
+    }
+    else
+    {
+        // Both Unins and rollback must refuse to remove a registration that
+        // belongs to a different root/user or cannot be inspected safely.
+        constexpr DWORD kConflict=0x47504346u;
+        const bool keys=HasExistingShellRegistrationKeys();
+        if (IsWindows11OrGreater())
+        {
+            using GlassSettings::ShellSparsePackage::InstallerSparseState;
+            const auto sparse=GlassSettings::ShellSparsePackage::QueryInstallerSparseState(root.c_str());
+            if ((sparse!=InstallerSparseState::Absent && sparse!=InstallerSparseState::Matching) || keys)
+                ::ExitProcess(kConflict);
+        }
+        else if (keys && !HasMatchingLegacyShellRegistration(root.c_str()))
+        {
+            ::ExitProcess(kConflict);
+        }
+    }
     const bool ok = unregister ? UnregisterBundledDllQuietImpl(root.c_str())
                                : RegisterBundledDllQuietImpl(false, root.c_str());
     GlassSettings_NotifyShellCachesAfterRegistrationChange();

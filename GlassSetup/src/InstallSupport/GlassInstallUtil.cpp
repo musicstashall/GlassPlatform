@@ -51,6 +51,24 @@ bool HasExistingShellRegistrationKeys() noexcept {
     return false;
 }
 
+bool HasMatchingLegacyShellRegistration(const std::wstring& root) noexcept {
+    using namespace GlassShared::GlassShellMenu;
+    bool handler=false;
+    for (const wchar_t* shellRoot : {L"DesktopBackground",L"Directory\\Background"}) {
+        const std::wstring key=std::wstring(L"Software\\Classes\\")+shellRoot+
+            L"\\ShellEx\\ContextMenuHandlers\\"+kHandlerSubkeyName;
+        wchar_t clsid[128]{};DWORD bytes=sizeof(clsid);
+        if (RegGetValueW(HKEY_CURRENT_USER,key.c_str(),nullptr,RRF_RT_REG_SZ,
+                nullptr,clsid,&bytes)==ERROR_SUCCESS && _wcsicmp(clsid,kClsidStringBraced)==0)
+            handler=true;
+    }
+    if (!handler) return false;
+    const std::wstring key=std::wstring(L"Software\\Classes\\CLSID\\")+kClsidStringBraced+L"\\InprocServer32";
+    wchar_t value[32768]{};DWORD bytes=sizeof(value);
+    return RegGetValueW(HKEY_CURRENT_USER,key.c_str(),nullptr,RRF_RT_REG_SZ,nullptr,value,&bytes)==ERROR_SUCCESS &&
+        SameInstallPath(value,TrimTrailingSlashes(root)+L"\\GlassShellExt.dll");
+}
+
 enum class RegistryPathRead { Missing, Found, Error };
 
 RegistryPathRead ReadInstallPathValue(HKEY hive, const wchar_t* subKey,
@@ -1413,8 +1431,10 @@ bool InvokeShellExtRegistration(
     bool registerExtension,
     const std::wstring& x64Dir,
     const std::wstring& x86Dir,
-    bool* registrationMayHaveChanged) noexcept {
+    bool* registrationMayHaveChanged,
+    bool* registrationConflict) noexcept {
     if (registrationMayHaveChanged) *registrationMayHaveChanged=false;
+    if (registrationConflict) *registrationConflict=false;
     const bool os64 = IsOs64Bit();
     const auto arch = os64
         ? GlassShared::GlassPlatformTask::PlatformArch::X64
@@ -1430,7 +1450,15 @@ bool InvokeShellExtRegistration(
         if (os64) return false;
         const std::wstring shellExt = root + L"\\GlassShellExt.dll";
         if (!IsSafeInstallPath(shellExt) || !PathFileExistsW(shellExt.c_str())) return false;
-        if (registerExtension && HasExistingShellRegistrationKeys()) return true;
+        if (HasExistingShellRegistrationKeys()) {
+            const bool matches=HasMatchingLegacyShellRegistration(root);
+            if (!matches) {
+                GlassInstallLog::Line(L"ShellExt: existing legacy registration does not match the selected root");
+                if (registrationConflict) *registrationConflict=true;
+                return false;
+            }
+            if (registerExtension) return true;
+        }
         const std::wstring regsvr = System64ExePath(L"regsvr32.exe");
         std::wstring args = registerExtension ? L"/s \"" : L"/u /s \"";
         args += shellExt + L"\"";
@@ -1449,11 +1477,14 @@ bool InvokeShellExtRegistration(
     DWORD exitCode = 1;
     bool started=false,completed=false;
     const bool ran = RunHiddenCommand(cmd, &exitCode, 45000, &started, &completed);
-    constexpr DWORD kShellAlreadyRegistered=0x47505245; // Explicit sentinel, not a generic rundll32 error.
+    constexpr DWORD kShellAlreadyRegistered=0x47505245; // Verified existing registration.
+    constexpr DWORD kShellRegistrationConflict=0x47504346; // Preserved, no change made.
     const bool alreadyRegistered=registerExtension && completed && exitCode==kShellAlreadyRegistered;
-    if (registrationMayHaveChanged) *registrationMayHaveChanged=started && !alreadyRegistered;
-    GlassInstallLog::LineFormat(L"ShellExt %s via Native.dll: ran=%d exit=%lu existing=%d",
-        registerExtension ? L"register" : L"unregister", ran ? 1 : 0, exitCode, alreadyRegistered?1:0);
+    const bool conflict=completed && exitCode==kShellRegistrationConflict;
+    if (registrationMayHaveChanged) *registrationMayHaveChanged=started && !alreadyRegistered && !conflict;
+    GlassInstallLog::LineFormat(L"ShellExt %s via Native.dll: ran=%d exit=%lu existing=%d conflict=%d",
+        registerExtension ? L"register" : L"unregister", ran ? 1 : 0, exitCode, alreadyRegistered?1:0, conflict?1:0);
+    if (registrationConflict) *registrationConflict=conflict;
     return alreadyRegistered || (ran && exitCode == 0);
 }
 

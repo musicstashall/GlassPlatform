@@ -100,6 +100,7 @@ bool InvokeShellExtRegistration(
     bool registerExtension,
     const std::wstring& x64Dir,
     const std::wstring& x86Dir,
-    bool* registrationMayHaveChanged = nullptr) noexcept;
+    bool* registrationMayHaveChanged = nullptr,
+    bool* registrationConflict = nullptr) noexcept;
 
 } // namespace GlassInstallUtil

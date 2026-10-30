@@ -196,7 +196,7 @@ private:
     bool forceClean_ = false;
     bool purgeCompleted_ = false;
     bool hostsStopped_ = false;
-    bool x64StopSignalled_ = false, x86StopSignalled_ = false, ogStopSignalled_ = false;
+    bool x64StopAttempted_ = false, x86StopAttempted_ = false, ogStopSignalled_ = false;
     bool installAttempted_ = false;
     // Before this boundary only the early GlassSettings MSI can have changed.
     bool nonSettingsChangesAttempted_ = false;

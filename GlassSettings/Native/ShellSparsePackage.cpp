@@ -8,9 +8,11 @@
 
 #include <winrt/base.h>
 #include <winrt/Windows.ApplicationModel.h>
+#include <winrt/Windows.Data.Xml.Dom.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Management.Deployment.h>
+#include <winrt/Windows.Storage.h>
 
 #include <GlassModulePath.h>
 #include <GlassShellMenuConstants.h>
@@ -75,14 +77,14 @@ namespace GlassSettings::ShellSparsePackage
             WinRtApartmentScope() noexcept
                 : m_hr(::RoInitialize(RO_INIT_MULTITHREADED))
             {
-                if (m_hr == S_OK)
+                if (SUCCEEDED(m_hr))
                     m_owned = true;
             }
 
             ~WinRtApartmentScope() noexcept
             {
-                // Только если мы подняли MTA на этом потоке.
-                // S_FALSE — WinRT уже MTA; RPC_E_CHANGED_MODE — STA (UI), RoUninitialize нельзя.
+                // Each successful RoInitialize, including S_FALSE, must be balanced.
+                // RPC_E_CHANGED_MODE is not a successful initialization.
                 if (m_owned)
                     ::RoUninitialize();
             }
@@ -390,7 +392,7 @@ namespace GlassSettings::ShellSparsePackage
 
             try
             {
-                for (auto const& pkg : pm.FindPackagesForUser(L"", GlassShared::GlassShellMenu::kSparsePackageName))
+                for (auto const& pkg : pm.FindPackagesForUser(L"", GlassShared::GlassShellMenu::kSparsePackageFamilyName))
                 {
                     AppendUniquePackageName(names, pkg.Id().FullName());
                 }
@@ -473,7 +475,7 @@ namespace GlassSettings::ShellSparsePackage
         {
             try
             {
-                for (auto const& pkg : pm.FindPackagesForUser(L"", GlassShared::GlassShellMenu::kSparsePackageName))
+                for (auto const& pkg : pm.FindPackagesForUser(L"", GlassShared::GlassShellMenu::kSparsePackageFamilyName))
                 {
                     (void)pkg;
                     return true;
@@ -806,6 +808,142 @@ namespace GlassSettings::ShellSparsePackage
         }
     }
 
+    InstallerSparseState QueryInstallerSparseState(const wchar_t* exactPlatformRoot) noexcept
+    {
+        if (!exactPlatformRoot || !exactPlatformRoot[0])
+            return InstallerSparseState::Unknown;
+        wchar_t expected[MAX_PATH]{};
+        if (wcscpy_s(expected, exactPlatformRoot) != 0 ||
+            !CanonicalizeOutputDirectory(expected, _countof(expected)))
+            return InstallerSparseState::Unknown;
+
+        WinRtApartmentScope apartment;
+        if (!apartment.CanUsePackageManager())
+            return InstallerSparseState::Unknown;
+        try
+        {
+            winmd::PackageManager pm;
+            std::wstring currentFullName;
+            // The two-argument overload takes a family name, not Identity@Name.
+            for (auto const& pkg : pm.FindPackagesForUser(
+                     L"", GlassShared::GlassShellMenu::kSparsePackageFamilyName))
+            {
+                if (!currentFullName.empty() || !pkg.Status().VerifyIsOK())
+                    return InstallerSparseState::Conflict;
+                const auto location = pkg.EffectiveExternalPath();
+                wchar_t actual[MAX_PATH]{};
+                if (location.empty() || wcscpy_s(actual, location.c_str()) != 0 ||
+                    !CanonicalizeOutputDirectory(actual, _countof(actual)) ||
+                    _wcsicmp(actual, expected) != 0)
+                    return InstallerSparseState::Conflict;
+                currentFullName = pkg.Id().FullName().c_str();
+                if (currentFullName.empty())
+                    return InstallerSparseState::Unknown;
+            }
+            // Never remove a same-name package registered only for another user
+            // or an additional version as a side effect of this installer.
+            for (auto const& pkg : pm.FindPackages())
+            {
+                if (pkg.Id().Name() != GlassShared::GlassShellMenu::kSparsePackageName)
+                    continue;
+                const auto fullName = pkg.Id().FullName();
+                if (currentFullName.empty() || _wcsicmp(fullName.c_str(), currentFullName.c_str()) != 0)
+                    return InstallerSparseState::Conflict;
+            }
+            return currentFullName.empty() ? InstallerSparseState::Absent : InstallerSparseState::Matching;
+        }
+        catch (...)
+        {
+            return InstallerSparseState::Unknown;
+        }
+    }
+
+    bool InstallerSparseHasVerifiedMenu(const wchar_t* exactPlatformRoot) noexcept
+    {
+        WinRtApartmentScope apartment;
+        if (!apartment.CanUsePackageManager() ||
+            QueryInstallerSparseState(exactPlatformRoot)!=InstallerSparseState::Matching)
+            return false;
+        try
+        {
+            winmd::PackageManager pm;
+            for (auto const& pkg : pm.FindPackagesForUser(
+                     L"",GlassShared::GlassShellMenu::kSparsePackageFamilyName))
+            {
+                // A loose development registration can use a different file
+                // with the same identity (including our unregister stub).
+                // InstalledLocation alone cannot establish which was applied.
+                if (pkg.IsDevelopmentMode())
+                    return false;
+                const std::wstring path=std::wstring(pkg.InstalledLocation().Path().c_str())+L"\\AppxManifest.xml";
+                WIN32_FILE_ATTRIBUTE_DATA attributes{};
+                if (!GetFileAttributesExW(path.c_str(),GetFileExInfoStandard,&attributes) ||
+                    attributes.nFileSizeHigh || attributes.nFileSizeLow>1024*1024 ||
+                    (attributes.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                    return false;
+                auto file=winrt::Windows::Storage::StorageFile::GetFileFromPathAsync(winrt::hstring{ path }).get();
+                winrt::Windows::Data::Xml::Dom::XmlLoadSettings settings;
+                settings.ProhibitDtd(true);
+                settings.ResolveExternals(false);
+                auto xml=winrt::Windows::Data::Xml::Dom::XmlDocument::LoadFromFileAsync(file,settings).get();
+                const auto ns=winrt::box_value(winrt::hstring{
+                    L"xmlns:d4='http://schemas.microsoft.com/appx/manifest/desktop/windows10/4' "
+                    L"xmlns:d5='http://schemas.microsoft.com/appx/manifest/desktop/windows10/5' "
+                    L"xmlns:com='http://schemas.microsoft.com/appx/manifest/com/windows10'"});
+                const auto verb=xml.SelectSingleNodeNS(
+                    L"//d4:Extension[@Category='windows.fileExplorerContextMenus']/d4:FileExplorerContextMenus/"
+                    L"d5:ItemType[@Type='Directory\\Background']/d5:Verb[@Id='GlassPlatform00Toggle' and "
+                    L"@Clsid='6D4E18F4-91B2-4C7D-A3E9-442B7C889D41']",ns);
+                const auto cls=xml.SelectSingleNodeNS(
+                    L"//com:Extension[@Category='windows.comServer']/com:ComServer/com:SurrogateServer/"
+                    L"com:Class[@Id='6D4E18F4-91B2-4C7D-A3E9-442B7C889D41' and @Path='GlassShellExt.dll']",ns);
+                return verb && cls;
+            }
+        }
+        catch (...) {}
+        return false;
+    }
+
+    bool UnregisterInstallerSparsePackageQuiet(const wchar_t* exactPlatformRoot) noexcept
+    {
+        WinRtApartmentScope apartment;
+        if (!apartment.CanUsePackageManager())
+            return false;
+        try
+        {
+            const auto state=QueryInstallerSparseState(exactPlatformRoot);
+            if (state==InstallerSparseState::Absent)
+                return true;
+            if (state!=InstallerSparseState::Matching)
+                return false;
+            winmd::PackageManager pm;
+            auto packages=pm.FindPackagesForUser(L"",GlassShared::GlassShellMenu::kSparsePackageFamilyName);
+            std::wstring fullName;
+            for (auto const& pkg : packages)
+            {
+                if (!fullName.empty())
+                    return false;
+                fullName=pkg.Id().FullName().c_str();
+            }
+            if (fullName.empty() || !DeploymentSucceeded(
+                    pm.RemovePackageAsync(winrt::hstring{ fullName },winmd::RemovalOptions::None).get()))
+                return false;
+            // Another user's installation may still appear machine-wide. It is
+            // not ours to remove and must not trigger the unregister-stub path.
+            for (auto const& pkg : pm.FindPackagesForUser(
+                     L"",GlassShared::GlassShellMenu::kSparsePackageFamilyName))
+            {
+                (void)pkg;
+                return false;
+            }
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
     bool RegisterSparsePackageQuiet(bool provisionDevCertificate, const wchar_t* exactPlatformRoot) noexcept
     {
         SetLastSparsePackageError(SparsePackageError::None);
@@ -847,7 +985,18 @@ namespace GlassSettings::ShellSparsePackage
         try
         {
             winmd::PackageManager pm;
-            if (!EnsureSparsePackagesRemoved(pm, 10000))
+            const bool installerMode = !provisionDevCertificate && exactPlatformRoot;
+            if (installerMode)
+            {
+                // Setup never removes or replaces an existing package during
+                // registration: there is no complete package-state rollback.
+                if (QueryInstallerSparseState(exactPlatformRoot) != InstallerSparseState::Absent)
+                {
+                    SetLastSparsePackageError(SparsePackageError::ExternalLocationConflict);
+                    return false;
+                }
+            }
+            else if (!EnsureSparsePackagesRemoved(pm, 10000))
             {
                 DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: не удалось снять прежний sparse-пакет");
                 SetLastSparsePackageError(SparsePackageError::ExternalLocationConflict);
@@ -878,11 +1027,15 @@ namespace GlassSettings::ShellSparsePackage
 
                 winmd::AddPackageOptions options;
                 options.ExternalLocationUri(outDirUri);
-                options.ForceUpdateFromAnyVersion(true);
+                options.ForceUpdateFromAnyVersion(!installerMode);
                 DebugLog(DBG_IMPORTANT, L"[GlassSettings][ShellSparse] AddPackageByUriAsync msix: %ls", msixPath);
                 if (DeploymentSucceeded(pm.AddPackageByUriAsync(msixUri, options).get()))
                     return true;
 
+                // A package that appeared concurrently is not evidence that our
+                // registration succeeded, and must not be removed by Setup.
+                if (installerMode)
+                    return false;
                 if (IsSparsePackagePresentAnywhere(pm))
                     return true;
 
@@ -924,12 +1077,17 @@ namespace GlassSettings::ShellSparsePackage
 
             if (!registered)
             {
+                if (installerMode && QueryInstallerSparseState(exactPlatformRoot) != InstallerSparseState::Absent)
+                {
+                    SetLastSparsePackageError(SparsePackageError::ExternalLocationConflict);
+                    return false;
+                }
                 winmd::RegisterPackageOptions regOptions;
                 regOptions.ExternalLocationUri(outDirUri);
-                regOptions.ForceUpdateFromAnyVersion(true);
+                regOptions.ForceUpdateFromAnyVersion(!installerMode);
                 DebugLog(DBG_IMPORTANT, L"[GlassSettings][ShellSparse] RegisterPackageByUriAsync manifest: %ls", manifest);
                 registered = DeploymentSucceeded(pm.RegisterPackageByUriAsync(manifestUri, regOptions).get());
-                if (!registered &&
+                if (!registered && !installerMode &&
                     g_lastDeploymentHr.load(std::memory_order_acquire) == kHrPackageExternalLocationConflict &&
                     EnsureSparsePackagesRemoved(pm, 10000))
                 {
@@ -946,6 +1104,11 @@ namespace GlassSettings::ShellSparsePackage
                 return false;
             }
 
+            if (installerMode && QueryInstallerSparseState(exactPlatformRoot) != InstallerSparseState::Matching)
+            {
+                SetLastSparsePackageError(SparsePackageError::DeploymentFailed);
+                return false;
+            }
             SetExplorerCommandsBlocked(false);
 
             if (FindPackageFullNames(pm).empty() && !IsSparsePackagePresentInRepositoryRegistry())

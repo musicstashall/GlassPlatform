@@ -119,6 +119,16 @@ namespace GlassInstallUtil {
  bool ClearOpenGlassInstallPath(){return fake.clearOk;}
 }
 namespace GlassInstallHost {
+ bool StopGlassPlatform(GP::PlatformArch,const std::wstring&,const std::atomic_bool* cancel,bool* attempted,std::wstring*) {
+  *attempted=false;if(cancel && cancel->load()) return false;
+  ++fake.signals;*attempted=true;if(!fake.signalOk) return false;
+  const auto deadline=fake.now+45000;
+  while(fake.mutexPresent && (!fake.closeAt || fake.now<fake.closeAt)) {
+   if(fake.denyMutex || fake.now>=fake.denyAt || fake.now>=deadline) return false;
+   Sleep(250);
+  }
+  return !(cancel && cancel->load());
+ }
  bool QueryOpenGlassServiceStartType(bool& exists,DWORD& type){exists=fake.ogServiceExists;type=SERVICE_AUTO_START;return fake.backendOk;}
  bool StopOpenGlassHost(const std::atomic_bool* cancel,bool* requested){++fake.ogStopCalls;*requested=true;
   if(fake.cancelDuringOgStop)const_cast<std::atomic_bool*>(cancel)->store(true);return fake.ogStopOk;}
@@ -146,7 +156,7 @@ public:
   stop64=L"stop64",stop86=L"stop86",stopOg=L"stopOg";} labels_;
  GlassInstallRollback::SessionState rollbackSession_;
  std::wstring tempDir_=L"secure",x64Dir_=L"root64",x86Dir_=L"root86",openGlassDir_=L"og",error_;
- bool installAttempted_=false,purgeCompleted_=false,x64StopSignalled_=false,x86StopSignalled_=false,
+ bool installAttempted_=false,purgeCompleted_=false,x64StopAttempted_=false,x86StopAttempted_=false,
   hostsStopped_=false,ogStopSignalled_=false,cleanInstall_=false,scanNativeX64_=false;
  std::atomic_bool cancelRequested_{false};
  bool IsCancelRequested()const{return cancelRequested_.load();}
@@ -194,7 +204,7 @@ int main(){
   assert(fake.signals==0 && fake.orphans==0);}
  {reset();InstallEngine e;e.prior_.x64WasRunning=true;fake.mutexPresent=true;fake.closeAt=750;
   assert(e.StopGlassPlatform(GP::PlatformArch::X64,L"stop",L"x64",fail));
-  assert(fake.now==750 && fake.signals==1 && fake.orphans==1 && e.x64StopSignalled_);}
+  assert(fake.now==750 && fake.signals==1 && fake.orphans==0 && e.x64StopAttempted_);}
  {reset();InstallEngine e;fake.denyMutex=true;fails=0;
   assert(!e.StopGlassPlatform(GP::PlatformArch::X64,L"stop",L"x64",fail));assert(fails==1 && fake.signals==0);}
  {reset();InstallEngine e;e.prior_.x64WasRunning=true;fake.mutexPresent=true;fake.denyAt=250;fails=0;
@@ -204,7 +214,7 @@ int main(){
  {reset();InstallEngine e;e.prior_.x64WasRunning=true;fake.mutexPresent=true;fails=0;
   assert(!e.StopGlassPlatform(GP::PlatformArch::X64,L"stop",L"x64",fail));assert(fails==1 && fake.now>=45000);}
  {reset();InstallEngine e;e.prior_.x64WasRunning=true;fake.mutexPresent=true;fake.closeAt=500;e.cancelRequested_=true;
-  assert(!e.StopGlassPlatform(GP::PlatformArch::X64,L"stop",L"x64",fail));assert(fake.now==500 && e.x64StopSignalled_);}
+  assert(!e.StopGlassPlatform(GP::PlatformArch::X64,L"stop",L"x64",fail));assert(fake.now==0 && !e.x64StopAttempted_ && fake.signals==0);}
  {reset();InstallEngine e;e.prior_.ogServiceExisted=true;assert(e.StopRunningHosts());
   assert(fake.ogQueries==1 && fake.ogStopCalls==0 && !e.ogStopSignalled_ && fake.now==0);}
  {reset();InstallEngine e;e.prior_.ogLegacyTaskExisted=true;assert(e.StopRunningHosts());

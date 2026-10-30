@@ -469,7 +469,7 @@ namespace
         }
 
         const HRESULT hrInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        const bool needUninit = (hrInit == S_OK);
+        const bool needUninit = SUCCEEDED(hrInit);
 
         IPackageDebugSettings* settings = CreatePackageDebugSettings();
         HRESULT hrEn = E_FAIL;
@@ -522,7 +522,7 @@ namespace
             return;
 
         const HRESULT hrInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        const bool needUninit = (hrInit == S_OK);
+        const bool needUninit = SUCCEEDED(hrInit);
 
         IPackageDebugSettings* settings = CreatePackageDebugSettings();
         HRESULT hrDis = E_FAIL;
@@ -1571,7 +1571,7 @@ namespace GlassCompat::CoreWindowHostInject
         (void)TryRemoteCoreWindowShowAsync(pid, hwnd);
     }
 
-    void Shutdown() noexcept
+    void Shutdown(bool wakeProcesses) noexcept
     {
         std::vector<DWORD> wakePids;
         std::vector<HWINEVENTHOOK> hooks;
@@ -1596,13 +1596,45 @@ namespace GlassCompat::CoreWindowHostInject
         // без pump на remote ShellHost держит GlassCompat до случайного WM_NULL.
         for (const HWINEVENTHOOK hook : hooks)
             UnhookWinEvent(hook);
-        for (const DWORD pid : wakePids)
+        if (wakeProcesses)
         {
-            WakeRemoteCwProcess(pid);
-            PostWmNullToTrackedHwnds(pid);
+            for (const DWORD pid : wakePids)
+            {
+                WakeRemoteCwProcess(pid);
+                PostWmNullToTrackedHwnds(pid);
+            }
+            if (!hooks.empty())
+                Sleep(200);
         }
-        if (!hooks.empty())
-            Sleep(200);
+    }
+
+    void FinishTaskStop() noexcept
+    {
+        // Balance only debugging enabled by this host. Do not create threads in
+        // other processes, set remote unload flags, or force FreeLibrary here.
+        std::vector<std::wstring> debugPackages;
+        {
+            std::lock_guard lock(g_mx);
+            debugPackages.assign(g_sehPlmDebugPkgs.begin(), g_sehPlmDebugPkgs.end());
+            g_sehPlmDebugPkgs.clear();
+            g_remoteLoadPids.clear();
+            g_remoteGuiTids.clear();
+            g_remoteCwHwnds.clear();
+            g_attachExistingPosted.clear();
+        }
+        if (!debugPackages.empty())
+        {
+            const HRESULT init=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+            if (IPackageDebugSettings* settings=CreatePackageDebugSettings())
+            {
+                for (const auto& package : debugPackages)
+                    (void)settings->DisableDebugging(package.c_str());
+                settings->Release();
+            }
+            if (SUCCEEDED(init))
+                CoUninitialize();
+        }
+        CloseCwForceEvents();
     }
 
     void ForceUnloadResiduals() noexcept

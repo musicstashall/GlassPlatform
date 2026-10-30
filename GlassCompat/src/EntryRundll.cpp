@@ -66,9 +66,13 @@ namespace
 
     static HWND s_hostCloseSinkHwnd = nullptr;
     static HANDLE s_hostCloseSinkStopEvent = nullptr; // не владеем
+    // WM_CLOSE / завершение сеанса: штатная остановка задачи, без удалённой
+    // принудительной выгрузки в других процессах.
+    static bool s_stopFromCloseMessage = false;
 
     static void RequestHostStopFromWindowMessage() noexcept
     {
+        s_stopFromCloseMessage = true;
         if (s_hostCloseSinkStopEvent)
             SetEvent(s_hostCloseSinkStopEvent);
     }
@@ -865,6 +869,7 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
     GlassCompat::CoreWindowHostInject::Refresh();
 
     // Окно должно быть на том же потоке, что и цикл сообщений ниже.
+    s_stopFromCloseMessage = false;
     s_hostCloseSinkHwnd = CreateHostCloseSinkWindow(hSelf, hStopEvent);
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
     if (!s_hostCloseSinkHwnd)
@@ -898,6 +903,10 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
             }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
+            // Do not run another injection refresh/watchdog iteration after
+            // the Scheduler close request has been processed.
+            if (s_stopFromCloseMessage)
+                goto done;
         }
 
         if (s_themePolicyDueMs != 0 && GetTickCount64() >= s_themePolicyDueMs)
@@ -935,38 +944,40 @@ done:
             (g_foregroundWinEventHook != nullptr
              || g_globalHook != nullptr
              || g_uncloakWinEventHook != nullptr);
-        ULONGLONG unhookResultMask = 0;
         if (g_foregroundWinEventHook)
         {
-            unhookResultMask |= UnhookWinEvent(g_foregroundWinEventHook) ? 0x1ULL : 0x100ULL;
+            (void)UnhookWinEvent(g_foregroundWinEventHook);
             g_foregroundWinEventHook = nullptr;
         }
         if (g_globalHook)
         {
-            unhookResultMask |= UnhookWinEvent(g_globalHook) ? 0x2ULL : 0x200ULL;
+            (void)UnhookWinEvent(g_globalHook);
             g_globalHook = nullptr;
         }
         if (g_uncloakWinEventHook)
         {
-            unhookResultMask |= UnhookWinEvent(g_uncloakWinEventHook) ? 0x4ULL : 0x400ULL;
+            (void)UnhookWinEvent(g_uncloakWinEventHook);
             g_uncloakWinEventHook = nullptr;
         }
-        GlassCompat::CoreWindowHostInject::Shutdown();
-        BOOL broadcastResult = TRUE;
-        if (hadAnyHook)
+        GlassCompat::CoreWindowHostInject::Shutdown(!s_stopFromCloseMessage);
+        if (hadAnyHook && !s_stopFromCloseMessage)
         {
-            // Стимулируем обработку очереди сообщений во всех GUI-процессах:
-            // ОС доставляет deferred FreeLibrary (от UnhookWinEvent) через очередь потока.
-            broadcastResult = SendNotifyMessageW(HWND_BROADCAST, WM_NULL, 0, 0);
-        }
-        // HR19: deferred INCONTEXT unhook в ShellHost/SEH — короткая пауза до ForceUnload.
-        if (hadAnyHook)
+            // Для обычного сигнала платформы сохраняется прежняя обработка.
+            (void)SendNotifyMessageW(HWND_BROADCAST, WM_NULL, 0, 0);
             Sleep(300);
-        // BlockList MinimalUnloadWatcher ждёт HostShutdown — сигналим сразу после Unhook.
+        }
+        // Клиенты могут самостоятельно завершиться после снятия хуков.
         SignalHostShutdownComplete();
-        // H38: remote RequestShutdown для SEH/SMEH/ShellHost после HostShutdown;
-        // точечный residual-pin fallback ShellHost выполняется внутри CoreWindowHostInject.
-        GlassCompat::CoreWindowHostInject::ForceUnloadResiduals();
+        if (s_stopFromCloseMessage)
+        {
+            // Планировщик попросил закрыть задачу: только локальная очистка.
+            // Остатки проверяет отдельный этап мониторинга Setup/Unins.
+            GlassCompat::CoreWindowHostInject::FinishTaskStop();
+        }
+        else
+        {
+            GlassCompat::CoreWindowHostInject::ForceUnloadResiduals();
+        }
     }
 
     Shared::PlatformPresenceMonitor::Stop();

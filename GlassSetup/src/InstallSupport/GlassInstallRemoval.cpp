@@ -761,6 +761,55 @@ bool ValidatePlatformTask(GP::PlatformArch arch, const std::wstring& fixedRoot,
     return true;
 }
 
+bool StopValidatedPlatformTask(GP::PlatformArch arch, const std::wstring& fixedRoot,
+    const std::atomic_bool* cancelled, bool& stopAttempted, bool russian, std::wstring& error) noexcept {
+    stopAttempted=false;
+    error.clear();
+    if (Cancelled(cancelled)) { SetLastError(ERROR_CANCELLED); return false; }
+    if (!ValidatePlatformTask(arch,fixedRoot,true,true,russian,error)) return false;
+    if (Cancelled(cancelled)) { SetLastError(ERROR_CANCELLED); return false; }
+
+    // Reopen and recheck the exact object that receives Stop. A task may have
+    // changed after the earlier snapshot or between the initial check and now.
+    ComGuard com; ComPtr<ITaskService> service; ComPtr<ITaskFolder> root;
+    Bstr name(GP::GlassAutorunTaskName(arch));
+    ComPtr<IRegisteredTask> task;
+    const auto expected=GlassInstallUtil::TrimTrailingSlashes(fixedRoot)+L"\\GlassCompat.dll";
+    if (!com.ok() || !name.value || !GlassInstallUtil::IsSafeInstallPath(expected) ||
+        !Connect(service) || !GetFolder(service.Get(),L"\\",root) ||
+        FAILED(root->GetTask(name.value,task.GetAddressOf())) || !task) {
+        error=Problem(russian,L"Не удалось повторно проверить задачу платформы перед остановкой.",
+            L"Could not recheck the platform task before stopping it.",GP::GlassAutorunTaskName(arch));
+        return false;
+    }
+    ComPtr<ITaskDefinition> definition;
+    ComPtr<IRunningTaskCollection> instances; LONG running=0;
+    if (FAILED(task->get_Definition(definition.GetAddressOf())) || !definition ||
+        !ExpectedAction(definition.Get(),true,expected,arch) ||
+        FAILED(task->GetInstances(0,instances.GetAddressOf())) || !instances ||
+        FAILED(instances->get_Count(&running)) || running!=1) {
+        error=Problem(russian,L"Задача платформы или её экземпляр изменились. Остановка отменена.",
+            L"The platform task or its instance changed. Stop was not requested.",GP::GlassAutorunTaskName(arch));
+        return false;
+    }
+    if (Cancelled(cancelled)) { SetLastError(ERROR_CANCELLED); return false; }
+
+    // IRegisteredTask::Stop is the Task Scheduler operation used to end a
+    // task. S_FALSE is not success: it means the instances could not be stopped.
+    stopAttempted=true;
+    const HRESULT result=task->Stop(0);
+    GlassInstallLog::LineFormat(L"TaskStop: %s IRegisteredTask::Stop hr=0x%08lX",
+        GP::GlassAutorunTaskName(arch),static_cast<unsigned long>(result));
+    if (result!=S_OK) {
+        error=Problem(russian,L"Планировщик не подтвердил остановку задачи платформы.",
+            L"Task Scheduler did not confirm the platform task was stopped.",
+            GP::GlassAutorunTaskName(arch),static_cast<unsigned>(result));
+        SetLastError(result==S_FALSE ? ERROR_ACCESS_DENIED : ERROR_GEN_FAILURE);
+        return false;
+    }
+    return true;
+}
+
 bool ValidateOpenGlassPaths(const std::wstring& fixedRoot, const std::atomic_bool* cancelled,
     bool russian, std::wstring& error) noexcept {
     error.clear();

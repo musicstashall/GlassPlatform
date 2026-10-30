@@ -13,6 +13,14 @@ namespace GlassSettings::ShellSparsePackage
 
     [[nodiscard]] bool IsSparsePackageInstalledForCurrentUser() noexcept;
 
+    // Installer must distinguish a verified current-user registration at its
+    // exact root from another user's/another root's package and query failures.
+    enum class InstallerSparseState { Absent, Matching, Conflict, Unknown };
+    [[nodiscard]] InstallerSparseState QueryInstallerSparseState(const wchar_t* exactPlatformRoot) noexcept;
+    // The package identity alone is also used by the unregister stub.
+    [[nodiscard]] bool InstallerSparseHasVerifiedMenu(const wchar_t* exactPlatformRoot) noexcept;
+    [[nodiscard]] bool UnregisterInstallerSparsePackageQuiet(const wchar_t* exactPlatformRoot) noexcept;
+
     /// Синоним для обратной совместимости вызовов из ShellExtensionOps.
     [[nodiscard]] inline bool IsSparsePackageRegisteredForCurrentUser() noexcept
     {
