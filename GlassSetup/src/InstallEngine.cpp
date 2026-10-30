@@ -8,7 +8,6 @@
 #include "InstallSupport/GlassInstallWatch.h"
 #include "../res/resource.h"
 #include <GlassPlatformTask.h>
-#include <OpenGlassHostLaunch.h>
 #include <OpenGlassHostState.h>
 #include <msi.h>
 #include <msiquery.h>
@@ -228,7 +227,7 @@ InstallEngine::~InstallEngine() noexcept {
 bool InstallEngine::PauseForCancelDecision() noexcept {
     AcquireSRWLockExclusive(&statusLock_);
     const bool allowed=started_ && !finished_.load() && !launchingPhase_.load() &&
-        !rollingBack_.load() && !cancelRequested_.load() && decisionGate_;
+        !rollingBack_.load() && !failureFinalizing_.load() && !cancelRequested_.load() && decisionGate_;
     if (allowed) ResetEvent(decisionGate_);
     ReleaseSRWLockExclusive(&statusLock_);
     return allowed;
@@ -242,7 +241,8 @@ void InstallEngine::RequestCancel() noexcept {
     // Coordinate the commit/launch boundary with the worker: never accept cancellation
     // after the final launch has begun, and never lose a wake-up in the unlocker.
     AcquireSRWLockExclusive(&statusLock_);
-    const bool accepted=started_ && !finished_.load() && !launchingPhase_.load() && !rollingBack_.load();
+    const bool accepted=started_ && !finished_.load() && !launchingPhase_.load() &&
+        !rollingBack_.load() && !failureFinalizing_.load();
     if (accepted) {
         cancelRequested_.store(true,std::memory_order_release);
         holdAction_=HoldAction::Cancel;
@@ -255,6 +255,25 @@ void InstallEngine::RequestCancel() noexcept {
     if (holdGate_) SetEvent(holdGate_);
     if (decisionGate_) SetEvent(decisionGate_);
     if (errorPageShown_) SetEvent(errorPageShown_);
+}
+
+bool InstallEngine::ChooseCancellationOrFailure(bool failed) noexcept {
+    // The operation can fail while the confirmation page is open. Let the
+    // user decide first; claim the failure under the same lock used by Pause
+    // and RequestCancel so an accepted cancel cannot become an error page.
+    for (;;) {
+        if (decisionGate_) WaitForSingleObject(decisionGate_, INFINITE);
+        AcquireSRWLockExclusive(&statusLock_);
+        const bool ready = !decisionGate_ || WaitForSingleObject(decisionGate_, 0) == WAIT_OBJECT_0;
+        if (ready) {
+            const bool cancelled = cancelRequested_.load(std::memory_order_acquire) ||
+                                   quietClose_.load(std::memory_order_acquire);
+            if (failed && !cancelled) failureFinalizing_.store(true, std::memory_order_release);
+            ReleaseSRWLockExclusive(&statusLock_);
+            return cancelled;
+        }
+        ReleaseSRWLockExclusive(&statusLock_);
+    }
 }
 
 bool InstallEngine::CapturePriorHostState() noexcept {
@@ -299,7 +318,8 @@ bool InstallEngine::CapturePriorHostState() noexcept {
     // Do not stop an externally managed or ambiguous running instance when
     // rollback cannot know which backend must be restarted.
     if (prior_.ogWasRunning && ((!prior_.ogServiceExisted && !prior_.ogLegacyTaskExisted) ||
-        (prior_.ogServiceExisted && openGlassTasks.anyRunning))) {
+        (prior_.ogServiceExisted && openGlassTasks.anyRunning) ||
+        (openGlassTasks.anyRunning && (openGlassTasks.multipleTasks || openGlassTasks.multipleRunningInstances)))) {
         const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
         SetFailure(ru ? L"Текущее состояние OpenGlass нельзя безопасно восстановить. Остановите OpenGlass и снова запустите установщик; изменений не внесено."
                       : L"The current OpenGlass state cannot be safely restored. Stop OpenGlass and restart Setup; no changes were made.",0);
@@ -480,7 +500,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
 
             MsiEnableLogW(0, nullptr, 0);
 
-            const bool cancelled = self->IsCancelRequested() || self->quietClose_.load();
+            const bool cancelled = self->ChooseCancellationOrFailure(!ok);
             bool restored=true;
             const auto restoreRemovalArtifacts = [&]() {
                 const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
@@ -498,6 +518,15 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             };
             if (!ok || cancelled) {
                 if (cancelled) {
+                    // A timeout or MSI error may have raced with the user's
+                    // confirmation. Cancellation owns the outcome; retain
+                    // only new errors actually produced by restoration.
+                    AcquireSRWLockExclusive(&self->statusLock_);
+                    self->error_.clear();
+                    self->failureDetail_.clear();
+                    self->msiMessage_.clear();
+                    self->msiExitCode_ = 0;
+                    ReleaseSRWLockExclusive(&self->statusLock_);
                     self->rollingBack_.store(true, std::memory_order_release);
                     if (self->installAttempted_) {
                         if (self->rollbackSession_.hadPriorInstall) {
@@ -596,6 +625,7 @@ bool InstallEngine::Start(
     cancelRequested_.store(false, std::memory_order_relaxed);
     userCancelled_.store(false, std::memory_order_relaxed);
     rollingBack_.store(false, std::memory_order_relaxed);
+    failureFinalizing_.store(false, std::memory_order_relaxed);
     launchingPhase_.store(false, std::memory_order_relaxed);
 
     selection_=GlassProducts::NormalizeInstall(selection_,GlassInstallUtil::IsOs64Bit());
@@ -820,29 +850,64 @@ bool InstallEngine::StopRunningHosts() noexcept {
     };
 
     hostsStopped_ = true;
-    const bool openGlass = OpenGlassPresent(openGlassDir_) || prior_.ogLegacyTaskExisted || prior_.ogWasRunning;
     // Recheck both mutexes even on a seemingly clean install: a host may have
     // appeared after the initial snapshot. Unknown mutex state fails closed.
     if (!StopGlassPlatform(GP::PlatformArch::X64, labels_.stop64, L"x64", fail)) return false;
     if (!StopGlassPlatform(GP::PlatformArch::X86, labels_.stop86, L"x86", fail)) return false;
+    if (IsCancelRequested()) return false;
 
-    if (openGlass) {
-        SetStatus(labels_.stopOg, -1);
-        InstallLog::Line(L"OpenGlass: TryShutdown");
-        ogStopSignalled_=true;
-        (void)Shared::OpenGlassHostLaunch::TryShutdown();
-        (void)GlassInstallHost::StopOpenGlassHost();
-        const ULONGLONG ogStart = GetTickCount64();
-        for (;;) {
-            if (IsCancelRequested()) return false;
-            bool running=false;
-            if (!GlassInstallUtil::QueryOpenGlassRunning(running)) return fail(L"OpenGlassHost state");
-            if (!running) break;
-            if (GetTickCount64() - ogStart >= 45000) return fail(L"OpenGlassHost");
-            Sleep(250);
-        }
+    bool openGlassRunning = false;
+    const bool openGlassKnown = GlassInstallUtil::QueryOpenGlassRunning(openGlassRunning);
+    const DWORD stateError = openGlassKnown ? ERROR_SUCCESS : GetLastError();
+    if (IsCancelRequested()) return false;
+    if (!openGlassKnown) {
+        SetFailure(ru ? L"Не удалось проверить состояние службы или задачи OpenGlass."
+                      : L"Could not check the OpenGlass service or task state.", stateError);
+        return false;
+    }
+    if (!openGlassRunning) {
+        InstallLog::Line(L"OpenGlass: service/task already stopped; no shutdown or wait");
     } else {
-        InstallLog::Line(L"OpenGlass: not installed — skip shutdown");
+        // Do not stop a host that appeared after its rollback state was saved.
+        if (!prior_.ogWasRunning) {
+            SetFailure(ru ? L"Состояние OpenGlass изменилось после создания копии. Повторите установку."
+                          : L"OpenGlass changed state after the snapshot. Run Setup again.", 0);
+            return false;
+        }
+        GlassInstallUtil::OpenGlassTaskState currentTasks;
+        bool currentServiceExists = false;
+        DWORD currentStartType = SERVICE_AUTO_START;
+        const bool backendKnown = GlassInstallUtil::QueryOpenGlassTasks(currentTasks) &&
+            GlassInstallHost::QueryOpenGlassServiceStartType(currentServiceExists, currentStartType);
+        const DWORD backendError = backendKnown ? ERROR_SUCCESS : GetLastError();
+        if (IsCancelRequested()) return false;
+        if (!backendKnown) {
+            SetFailure(ru ? L"Не удалось повторно проверить службу или задачу OpenGlass."
+                          : L"Could not recheck the OpenGlass service or task.", backendError);
+            return false;
+        }
+        const bool wasTaskRunning = !prior_.ogServiceExisted && prior_.ogLegacyTaskExisted && prior_.ogWasRunning;
+        if (currentServiceExists != prior_.ogServiceExisted ||
+            (currentServiceExists && currentStartType != prior_.ogServiceStartType) ||
+            currentTasks.found != prior_.ogLegacyTaskExisted ||
+            (currentTasks.found && (!currentTasks.anyDisabled) != prior_.ogLegacyTaskEnabled) ||
+            currentTasks.anyRunning != wasTaskRunning ||
+            (currentTasks.anyRunning && (currentTasks.multipleTasks || currentTasks.multipleRunningInstances))) {
+            SetFailure(ru ? L"Состояние OpenGlass изменилось после создания копии. Повторите установку."
+                          : L"OpenGlass changed state after the snapshot. Run Setup again.", 0);
+            return false;
+        }
+        SetStatus(labels_.stopOg, -1);
+        InstallLog::Line(L"OpenGlass: stopping running service/task");
+        const bool stopped = GlassInstallHost::StopOpenGlassHost(&cancelRequested_, &ogStopSignalled_);
+        const DWORD stopError = stopped ? ERROR_SUCCESS : GetLastError();
+        if (IsCancelRequested()) return false;
+        if (!stopped) {
+            if (stopError == ERROR_TIMEOUT) return fail(L"OpenGlassHost");
+            SetFailure(ru ? L"Не удалось остановить службу или задачу OpenGlass."
+                          : L"Could not stop the OpenGlass service or task.", stopError);
+            return false;
+        }
     }
 
     InstallLog::Line(L"Hosts stopped");

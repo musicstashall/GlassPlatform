@@ -546,10 +546,16 @@ struct OpenGlassTaskCandidates {
     ComPtr<IRegisteredTask> current;
     ComPtr<IRegisteredTask> legacy;
 };
+enum class OpenGlassTaskOperation { Query, Start, Stop };
 
 bool InspectOpenGlassTaskFolder(ITaskFolder* folder, OpenGlassTaskState& state,
-    OpenGlassTaskCandidates& candidates, unsigned depth) noexcept {
+    OpenGlassTaskCandidates& candidates, unsigned depth, OpenGlassTaskOperation operation,
+    bool* stopRequested, const std::atomic_bool* cancelled) noexcept {
     if (!folder || depth > 64) return SchedulerError(E_FAIL);
+    if (cancelled && cancelled->load(std::memory_order_acquire)) {
+        SetLastError(ERROR_CANCELLED);
+        return false;
+    }
     ComPtr<IRegisteredTaskCollection> tasks;
     HRESULT hr = folder->GetTasks(TASK_ENUM_HIDDEN, tasks.GetAddressOf());
     if (FAILED(hr) || !tasks) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
@@ -578,9 +584,23 @@ bool InspectOpenGlassTaskFolder(ITaskFolder* folder, OpenGlassTaskState& state,
         LONG instances = 0;
         hr = running->get_Count(&instances);
         if (FAILED(hr) || instances < 0) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+        state.multipleTasks = state.multipleTasks || state.found;
+        state.multipleRunningInstances = state.multipleRunningInstances || instances > 1 ||
+            (state.anyRunning && instances > 0);
         state.found = true;
         state.anyDisabled = state.anyDisabled || enabled == VARIANT_FALSE;
         state.anyRunning = state.anyRunning || instances > 0;
+        if (operation == OpenGlassTaskOperation::Stop && instances > 0) {
+            if (cancelled && cancelled->load(std::memory_order_acquire)) {
+                SetLastError(ERROR_CANCELLED);
+                return false;
+            }
+            // Stop can partially succeed even when it returns an error. Record
+            // the attempt before calling COM, so rollback does not forget it.
+            if (stopRequested) *stopRequested = true;
+            hr = task->Stop(0);
+            if (FAILED(hr)) return SchedulerError(hr);
+        }
     }
     ComPtr<ITaskFolderCollection> folders;
     hr = folder->GetFolders(0, folders.GetAddressOf());
@@ -592,15 +612,21 @@ bool InspectOpenGlassTaskFolder(ITaskFolder* folder, OpenGlassTaskState& state,
         ComPtr<ITaskFolder> child;
         hr = folders->get_Item(index, child.GetAddressOf());
         if (FAILED(hr) || !child) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
-        if (!InspectOpenGlassTaskFolder(child.Get(), state, candidates, depth + 1)) return false;
+        if (!InspectOpenGlassTaskFolder(child.Get(), state, candidates, depth + 1,
+                                        operation, stopRequested, cancelled)) return false;
     }
     return true;
 }
 
 // When requested, run only a still-enabled task via IRegisteredTask::Run;
 // unlike the shared UI helper this never enables a task as a side effect.
-bool AccessOpenGlassTasks(OpenGlassTaskState& state, bool start) noexcept {
+bool AccessOpenGlassTasks(OpenGlassTaskState& state, OpenGlassTaskOperation operation,
+    bool* stopRequested = nullptr, const std::atomic_bool* cancelled = nullptr) noexcept {
     state = {};
+    if (cancelled && cancelled->load(std::memory_order_acquire)) {
+        SetLastError(ERROR_CANCELLED);
+        return false;
+    }
     SchedulerComGuard com;
     if (!com.ok()) return SchedulerError(com.result);
     ComPtr<ITaskService> service;
@@ -616,8 +642,9 @@ bool AccessOpenGlassTasks(OpenGlassTaskState& state, bool start) noexcept {
     hr = service->GetFolder(path.value, root.GetAddressOf());
     if (FAILED(hr) || !root) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
     OpenGlassTaskCandidates candidates;
-    if (!InspectOpenGlassTaskFolder(root.Get(), state, candidates, 0)) return false;
-    if (!start) return true;
+    if (!InspectOpenGlassTaskFolder(root.Get(), state, candidates, 0, operation,
+                                    stopRequested, cancelled)) return false;
+    if (operation != OpenGlassTaskOperation::Start) return true;
     if (!state.found || state.anyDisabled) return SchedulerError(E_FAIL);
     if (state.anyRunning) return true;
     ComPtr<IRegisteredTask> task = candidates.current ? candidates.current : candidates.legacy;
@@ -632,25 +659,36 @@ bool AccessOpenGlassTasks(OpenGlassTaskState& state, bool start) noexcept {
 } // namespace
 
 bool QueryOpenGlassTasks(OpenGlassTaskState& state) noexcept {
-    return AccessOpenGlassTasks(state, false);
+    return AccessOpenGlassTasks(state, OpenGlassTaskOperation::Query);
 }
 
 bool RunEnabledOpenGlassTask() noexcept {
     OpenGlassTaskState state;
-    return AccessOpenGlassTasks(state, true);
+    return AccessOpenGlassTasks(state, OpenGlassTaskOperation::Start);
+}
+
+bool StopRunningOpenGlassTasks(bool& requested, const std::atomic_bool* cancelled) noexcept {
+    requested = false;
+    OpenGlassTaskState state;
+    if (!AccessOpenGlassTasks(state, OpenGlassTaskOperation::Query, nullptr, cancelled)) return false;
+    // We can faithfully restart one task instance, not an ambiguous set.
+    if (state.anyRunning && (state.multipleTasks || state.multipleRunningInstances)) {
+        SetLastError(ERROR_INVALID_DATA);
+        return false;
+    }
+    if (!state.anyRunning) return true;
+    return AccessOpenGlassTasks(state, OpenGlassTaskOperation::Stop, &requested, cancelled);
 }
 
 bool QueryOpenGlassRunning(bool& running, const OpenGlassTaskState* knownTasks) noexcept {
     running = false;
-    bool process = false;
-    if (!QueryImageRunning(L"OpenGlassHost.exe", process)) return false;
-    if (process) { running = true; return true; }
-
-    // Query status directly: the shared UI state reports Disabled before
-    // checking whether a disabled service is still running manually.
+    // The service/task state, not the ordinary DWM window or merely the
+    // presence of an executable, determines whether a managed host is active.
+    // A disabled service can still be running, so inspect its actual status.
     const SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     if (!scm) return false;
     const SC_HANDLE service = OpenServiceW(scm, L"OpenGlassHost", SERVICE_QUERY_STATUS);
+    const bool serviceExists = service != nullptr;
     const DWORD openError = service ? ERROR_SUCCESS : GetLastError();
     CloseServiceHandle(scm);
     if (!service && openError != ERROR_SERVICE_DOES_NOT_EXIST) { SetLastError(openError); return false; }
@@ -670,8 +708,12 @@ bool QueryOpenGlassRunning(bool& running, const OpenGlassTaskState* knownTasks) 
     OpenGlassTaskState tasks;
     if (knownTasks) tasks = *knownTasks;
     else if (!QueryOpenGlassTasks(tasks)) return false;
-    running = tasks.anyRunning || FindWindowW(L"Dwm", nullptr) != nullptr;
-    return true;
+    if (tasks.anyRunning) { running = true; return true; }
+    if (serviceExists || tasks.found) return true; // managed service/task is stopped
+
+    // If no managed backend exists, detect an independently started host so
+    // callers can refuse to stop an instance they cannot safely restore.
+    return QueryImageRunning(L"OpenGlassHost.exe", running);
 }
 
 bool QueryOpenGlassFiles(const std::wstring& openGlassDir, const std::wstring& platformDir, bool& present) noexcept {

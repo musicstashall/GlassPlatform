@@ -77,6 +77,7 @@ public:
         return started_ && !finished_
             && !cancelRequested_.load(std::memory_order_acquire)
             && !rollingBack_.load(std::memory_order_acquire)
+            && !failureFinalizing_.load(std::memory_order_acquire)
             && !launchingPhase_.load(std::memory_order_acquire);
     }
 
@@ -126,6 +127,8 @@ private:
 
     static DWORD WINAPI WorkerThread(LPVOID context) noexcept;
     bool CapturePriorHostState() noexcept;
+    // Synchronize failure handling with the user's open cancel confirmation.
+    bool ChooseCancellationOrFailure(bool failed) noexcept;
     bool RestorePriorHosts(bool selectedOnly = false) noexcept;
     bool PrepareProductRemoval() noexcept;
     bool StopGlassPlatform(GlassShared::GlassPlatformTask::PlatformArch arch,
@@ -175,6 +178,7 @@ private:
     std::atomic<bool> cancelRequested_{false};
     std::atomic<bool> userCancelled_{false};
     std::atomic<bool> rollingBack_{false};
+    std::atomic<bool> failureFinalizing_{false};
     std::atomic<bool> launchingPhase_{false};
     std::atomic_bool rollbackSucceeded_{true};
     bool preserveSnapshot_ = false;

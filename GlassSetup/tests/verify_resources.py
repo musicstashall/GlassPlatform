@@ -361,6 +361,12 @@ assert "GlassSettings_ScanGlassModules" in native and "kNativeInstallerScanProto
 assert "IsWow64Process(GetCurrentProcess(), &selfWow)" in engine and "scanNativeX64_ = selfWow != FALSE" in engine
 assert "if (priorStateOk) priorStateOk=self->DetermineCleanInstall()" in worker
 assert "QueryOpenGlassTasks" in util and "GetInstances(0" in util and "QueryOpenGlassRunning" in setup
+og_probe = section(util, "bool QueryOpenGlassRunning(", "bool QueryOpenGlassFiles(")
+assert 'FindWindowW(L"Dwm"' not in og_probe and "serviceExists || tasks.found" in og_probe
+og_stop = section(host, "bool StopOpenGlassHost(", "bool StopAllForUninstall(")
+assert og_stop.index("QueryOpenGlassRunning") < og_stop.index("ControlService")
+assert "if (!running)" in og_stop and "StopRunningOpenGlassTasks" in og_stop
+assert "ChooseCancellationOrFailure(!ok)" in worker and "failureFinalizing_" in engine_h
 assert "ShouldStartOpenGlass(openGlassStartup_)" in engine and "Snapshot OpenGlass path unavailable" in rollback
 assert "protectedHandles" in util and "FILE_FLAG_OPEN_REPARSE_POINT" in util and "FileDispositionInfo" in util
 assert "PruneEmptyDirectories(openGlassDir_, keptRoots)" in engine and "PruneEmptyDirectories(openGlassDir_,keptRoots)" in unins

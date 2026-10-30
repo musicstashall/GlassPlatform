@@ -1,7 +1,6 @@
 #include "GlassInstallHost.h"
 #include "GlassInstallLog.h"
 #include "GlassInstallUtil.h"
-#include <OpenGlassHostLaunch.h>
 #include <shlwapi.h>
 #include <winsvc.h>
 #include <vector>
@@ -38,28 +37,93 @@ bool StopGlassPlatform(GP::PlatformArch arch) noexcept {
     return StopGlassPlatformImpl(arch);
 }
 
-bool StopOpenGlassHost() noexcept {
-    (void)Shared::OpenGlassHostLaunch::TryShutdown(); // also handles legacy tasks in subfolders
-    const std::wstring schtasks = GlassInstallUtil::System64ExePath(L"schtasks.exe");
-    GlassInstallUtil::RunHidden(schtasks.c_str(), L"/End /TN \"OpenGlass Host\"");
-    GlassInstallUtil::RunHidden(schtasks.c_str(), L"/End /TN \"OpenGlass Legacy Host\"");
-    const SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-    if (scm) {
-        const SC_HANDLE svc = OpenServiceW(scm, L"OpenGlassHost", SERVICE_STOP | SERVICE_QUERY_STATUS);
-        CloseServiceHandle(scm);
-        if (svc) {
-            SERVICE_STATUS status{};
-            ControlService(svc, SERVICE_CONTROL_STOP, &status);
-            CloseServiceHandle(svc);
-        }
+bool StopOpenGlassHost(const std::atomic_bool* cancelled, bool* stopRequested) noexcept {
+    if (stopRequested) *stopRequested = false;
+    const auto isCancelled = [&]() { return cancelled && cancelled->load(std::memory_order_acquire); };
+    const auto cancelledResult = [&]() { SetLastError(ERROR_CANCELLED); return false; };
+    if (isCancelled()) return cancelledResult();
+
+    bool running = false;
+    if (!GlassInstallUtil::QueryOpenGlassRunning(running)) return false;
+    if (isCancelled()) return cancelledResult();
+    if (!running) {
+        GlassInstallLog::Line(L"OpenGlass: service/task already stopped; no shutdown or wait");
+        return true;
     }
+
+    GlassInstallUtil::OpenGlassTaskState tasks;
+    if (!GlassInstallUtil::QueryOpenGlassTasks(tasks)) return false;
+    if (isCancelled()) return cancelledResult();
+    if (tasks.anyRunning && (tasks.multipleTasks || tasks.multipleRunningInstances)) {
+        SetLastError(ERROR_INVALID_DATA);
+        return false;
+    }
+
+    const SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!scm) return false;
+    const SC_HANDLE svc = OpenServiceW(scm, L"OpenGlassHost", SERVICE_QUERY_STATUS);
+    const bool serviceExists = svc != nullptr;
+    const DWORD openError = svc ? ERROR_SUCCESS : GetLastError();
+    if (!svc && openError != ERROR_SERVICE_DOES_NOT_EXIST) {
+        CloseServiceHandle(scm); SetLastError(openError); return false;
+    }
+
+    bool attempted = false;
+    if (svc) {
+        SERVICE_STATUS_PROCESS status{};
+        DWORD needed = 0;
+        const BOOL queried = QueryServiceStatusEx(svc, SC_STATUS_PROCESS_INFO,
+            reinterpret_cast<BYTE*>(&status), sizeof(status), &needed);
+        const DWORD queryError = queried ? ERROR_SUCCESS : GetLastError();
+        if (!queried) { CloseServiceHandle(svc); CloseServiceHandle(scm); SetLastError(queryError); return false; }
+        if (isCancelled()) { CloseServiceHandle(svc); CloseServiceHandle(scm); return cancelledResult(); }
+        if (status.dwCurrentState != SERVICE_STOPPED && status.dwCurrentState != SERVICE_STOP_PENDING) {
+            // Do not demand SERVICE_STOP rights for a service already stopped.
+            const SC_HANDLE stopper = OpenServiceW(scm, L"OpenGlassHost", SERVICE_STOP);
+            const DWORD accessError = stopper ? ERROR_SUCCESS : GetLastError();
+            if (!stopper) { CloseServiceHandle(svc); CloseServiceHandle(scm); SetLastError(accessError); return false; }
+            if (isCancelled()) { CloseServiceHandle(stopper); CloseServiceHandle(svc); CloseServiceHandle(scm); return cancelledResult(); }
+            SERVICE_STATUS stoppedStatus{};
+            // A failed call can still race with the service shutting down.
+            attempted = true;
+            if (stopRequested) *stopRequested = true;
+            const BOOL sent = ControlService(stopper, SERVICE_CONTROL_STOP, &stoppedStatus);
+            const DWORD error = sent ? ERROR_SUCCESS : GetLastError();
+            CloseServiceHandle(stopper);
+            if (!sent && error != ERROR_SERVICE_NOT_ACTIVE) {
+                CloseServiceHandle(svc); CloseServiceHandle(scm); SetLastError(error); return false;
+            }
+        }
+        CloseServiceHandle(svc);
+    }
+    CloseServiceHandle(scm);
+
+    if (!isCancelled() && tasks.anyRunning) {
+        bool taskRequested = false;
+        const bool taskOk = GlassInstallUtil::StopRunningOpenGlassTasks(taskRequested, cancelled);
+        attempted = attempted || taskRequested;
+        if (taskRequested && stopRequested) *stopRequested = true;
+        if (!taskOk && !isCancelled()) return false;
+    }
+    if (isCancelled() && !attempted) return cancelledResult();
+    if (!serviceExists && !tasks.found) {
+        // A manually started, unowned host has no safe restart/stop backend.
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return false;
+    }
+
+    // If a stop was sent, let it settle before rollback can restart the host;
+    // otherwise a late stop could kill the just-restored instance.
     const ULONGLONG start = GetTickCount64();
     for (;;) {
-        bool running = false;
         if (!GlassInstallUtil::QueryOpenGlassRunning(running)) return false;
-        if (!running) return true;
-        if (GetTickCount64() - start >= 20000) return false;
-        Sleep(300);
+        if (!running) return isCancelled() ? cancelledResult() : true;
+        if (isCancelled() && !attempted) return cancelledResult();
+        if (GetTickCount64() - start >= 20000) {
+            SetLastError(isCancelled() ? ERROR_CANCELLED : ERROR_TIMEOUT);
+            return false;
+        }
+        Sleep(250);
     }
 }
 
@@ -79,7 +143,7 @@ bool StopAllForUninstall(
     if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
     if (stopX86 && !StopGlassPlatformImpl(GP::PlatformArch::X86, cancelled)) ok = false;
     if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
-    if (stopOpenGlass && !StopOpenGlassHost()) ok = false;
+    if (stopOpenGlass && !StopOpenGlassHost(cancelled)) ok = false;
     return ok;
 }
 

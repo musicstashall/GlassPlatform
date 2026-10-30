@@ -7,7 +7,10 @@
 namespace GlassInstallHost {
 
 bool StopGlassPlatform(GlassShared::GlassPlatformTask::PlatformArch arch) noexcept;
-bool StopOpenGlassHost() noexcept;
+// Inspect real service/task status before sending any stop. Once requested,
+// wait for the stop to settle even on cancellation so rollback can restore it.
+bool StopOpenGlassHost(const std::atomic_bool* cancelled = nullptr,
+                       bool* stopRequested = nullptr) noexcept;
 bool StopAllForUninstall(
     const std::wstring& x64InstallDir,
     const std::wstring& x86InstallDir,

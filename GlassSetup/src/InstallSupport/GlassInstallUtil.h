@@ -43,10 +43,16 @@ bool QueryImageRunning(const wchar_t* imageName, bool& found) noexcept;
 bool ImageRunning(const wchar_t* imageName) noexcept;
 // A disabled legacy task can still have a running instance. Failure to inspect
 // Scheduler is distinct from the absence of a task.
-struct OpenGlassTaskState { bool found = false, anyDisabled = false, anyRunning = false; };
+struct OpenGlassTaskState {
+    bool found = false, anyDisabled = false, anyRunning = false;
+    bool multipleTasks = false, multipleRunningInstances = false;
+};
 bool QueryOpenGlassTasks(OpenGlassTaskState& state) noexcept;
 // Run an existing enabled legacy task without ever enabling a disabled task.
 bool RunEnabledOpenGlassTask() noexcept;
+// Stop only running instances; do not enable/delete tasks. `requested` is set
+// once a stop may have been sent, so rollback can restore the previous host.
+bool StopRunningOpenGlassTasks(bool& requested, const std::atomic_bool* cancelled = nullptr) noexcept;
 bool QueryOpenGlassRunning(bool& running, const OpenGlassTaskState* knownTasks = nullptr) noexcept;
 bool QueryOpenGlassFiles(const std::wstring& openGlassDir, const std::wstring& platformDir, bool& present) noexcept;
 

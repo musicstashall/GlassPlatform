@@ -40,6 +40,7 @@ assert "!selection_.glassSettings" in sequence and "kProductSettingsX86" in sequ
 
 mutex_fn = function("bool QueryPlatformMutex(")
 stop_fn = function("bool InstallEngine::StopGlassPlatform(")
+stop_hosts_fn = function("bool InstallEngine::StopRunningHosts(")
 determine_fn = function("bool InstallEngine::DetermineCleanInstall(")
 early_fn = function("bool InstallEngine::InstallGlassSettingsEarly(")
 purge_fn = function("bool InstallEngine::PurgeRemnants(")
@@ -58,13 +59,15 @@ prefix = r'''
 using DWORD=std::uint32_t;using UINT=unsigned;using ULONGLONG=std::uint64_t;using BOOL=int;
 #define _wcsicmp wcscasecmp
 #define PRIMARYLANGID(x) (x)
-constexpr DWORD ERROR_FILE_NOT_FOUND=2,ERROR_ACCESS_DENIED=5,ERROR_SUCCESS=0,ERROR_INSTALL_USEREXIT=1602;
-constexpr DWORD SYNCHRONIZE=1;constexpr BOOL FALSE=0;constexpr int MAX_PATH=260,LANG_RUSSIAN=25;
+constexpr DWORD ERROR_FILE_NOT_FOUND=2,ERROR_ACCESS_DENIED=5,ERROR_SUCCESS=0,ERROR_TIMEOUT=1460,ERROR_INSTALL_USEREXIT=1602;
+constexpr DWORD SYNCHRONIZE=1,SERVICE_AUTO_START=2;constexpr BOOL FALSE=0;constexpr int MAX_PATH=260,LANG_RUSSIAN=25;
 struct Mock {
  bool is64=true,settingsRunning=false,queryOk=true,msiSuccess=true,snapshotted=true,clearOk=true;
  bool mutexPresent=false,denyMutex=false,signalOk=true,wowOk=true,wow=true;
+ bool ogRunning=false,ogQueryOk=true,ogStopOk=true,cancelDuringOgStop=false;
+ bool ogServiceExists=true,ogTaskFound=false,ogTaskRunning=false,ogTaskDisabled=false,backendOk=true;
  ULONGLONG now=0,closeAt=0,denyAt=~ULONGLONG(0);
- DWORD lastError=0;int queries=0,msiCalls=0,signals=0,orphans=0;
+ DWORD lastError=0;int queries=0,msiCalls=0,signals=0,orphans=0,ogQueries=0,ogStopCalls=0;
  std::wstring msiPath,msiDir,msiLabel;int base=0,span=0;
  std::set<std::wstring> installed;std::vector<std::wstring> modified,removed;std::vector<int> progress;
 } fake;
@@ -101,10 +104,19 @@ namespace GlassInstallRollback {
 }
 bool ProductWasSnapshotted(const GlassInstallRollback::SessionState&,const wchar_t*){return fake.snapshotted;}
 namespace GlassInstallUtil {
+ struct OpenGlassTaskState{bool found=false,anyDisabled=false,anyRunning=false,multipleTasks=false,multipleRunningInstances=false;};
  bool IsOs64Bit(){return fake.is64;}
  bool QueryImageRunning(const wchar_t*,bool& found){++fake.queries;found=fake.settingsRunning;return fake.queryOk;}
+ bool QueryOpenGlassRunning(bool& running){++fake.ogQueries;running=fake.ogRunning;return fake.ogQueryOk;}
+ bool QueryOpenGlassTasks(OpenGlassTaskState& state){state.found=fake.ogTaskFound;state.anyRunning=fake.ogTaskRunning;
+  state.anyDisabled=fake.ogTaskDisabled;return fake.backendOk;}
  bool ClearPlatformInstallPath(bool){return fake.clearOk;}
  bool ClearOpenGlassInstallPath(){return fake.clearOk;}
+}
+namespace GlassInstallHost {
+ bool QueryOpenGlassServiceStartType(bool& exists,DWORD& type){exists=fake.ogServiceExists;type=SERVICE_AUTO_START;return fake.backendOk;}
+ bool StopOpenGlassHost(const std::atomic_bool* cancel,bool* requested){++fake.ogStopCalls;*requested=true;
+  if(fake.cancelDuringOgStop)const_cast<std::atomic_bool*>(cancel)->store(true);return fake.ogStopOk;}
 }
 namespace GlassInstallMsi {
  constexpr wchar_t kProductSettingsX64[]=L"gs64",kProductSettingsX86[]=L"gs86",kProductPlatformX64[]=L"p64",
@@ -123,12 +135,14 @@ class InstallEngine {
 public:
  struct Selection {bool glassSettings=true;} selection_;
  struct Prior {bool x64WasRunning=false,x86WasRunning=false,x64TaskExisted=false,x86TaskExisted=false,
-  ogLegacyTaskExisted=false,ogServiceExisted=false,ogWasRunning=false;} prior_;
- struct Labels {std::wstring glassSettings64=L"gs64-label",glassSettings86=L"gs86-label",purge=L"purge",purgeFailed=L"purge-error",nativeScanFailed=L"scan-error";} labels_;
+  ogLegacyTaskExisted=false,ogServiceExisted=false,ogWasRunning=false,ogLegacyTaskEnabled=true;
+  DWORD ogServiceStartType=SERVICE_AUTO_START;} prior_;
+ struct Labels {std::wstring glassSettings64=L"gs64-label",glassSettings86=L"gs86-label",purge=L"purge",purgeFailed=L"purge-error",nativeScanFailed=L"scan-error",
+  stop64=L"stop64",stop86=L"stop86",stopOg=L"stopOg";} labels_;
  GlassInstallRollback::SessionState rollbackSession_;
  std::wstring tempDir_=L"secure",x64Dir_=L"root64",x86Dir_=L"root86",openGlassDir_=L"og",error_;
  bool installAttempted_=false,purgeCompleted_=false,x64StopSignalled_=false,x86StopSignalled_=false,
-  cleanInstall_=false,scanNativeX64_=false;
+  hostsStopped_=false,ogStopSignalled_=false,cleanInstall_=false,scanNativeX64_=false;
  std::atomic_bool cancelRequested_{false};
  bool IsCancelRequested()const{return cancelRequested_.load();}
  void SetFailure(const std::wstring& text,unsigned){error_=text;}
@@ -141,6 +155,7 @@ public:
  bool DetermineCleanInstall() noexcept;
  bool PurgeRemnants() noexcept;
  bool StopGlassPlatform(GP::PlatformArch,const std::wstring&,const wchar_t*,const std::function<bool(const wchar_t*)>&) noexcept;
+ bool StopRunningHosts() noexcept;
 };
 '''
 main = r'''
@@ -184,13 +199,32 @@ int main(){
   assert(!e.StopGlassPlatform(GP::PlatformArch::X64,L"stop",L"x64",fail));assert(fails==1 && fake.now>=45000);}
  {reset();InstallEngine e;e.prior_.x64WasRunning=true;fake.mutexPresent=true;fake.closeAt=500;e.cancelRequested_=true;
   assert(!e.StopGlassPlatform(GP::PlatformArch::X64,L"stop",L"x64",fail));assert(fake.now==500 && e.x64StopSignalled_);}
- std::cout<<"PASS: real stage functions: MSI selection, purge preservation, mutex states, timeout and cancellation\n";
+ {reset();InstallEngine e;e.prior_.ogServiceExisted=true;assert(e.StopRunningHosts());
+  assert(fake.ogQueries==1 && fake.ogStopCalls==0 && !e.ogStopSignalled_ && fake.now==0);}
+ {reset();InstallEngine e;e.prior_.ogLegacyTaskExisted=true;assert(e.StopRunningHosts());
+  assert(fake.ogStopCalls==0 && !e.ogStopSignalled_);}
+ {reset();InstallEngine e;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;fake.ogRunning=true;assert(e.StopRunningHosts());
+  assert(fake.ogStopCalls==1 && e.ogStopSignalled_);}
+ {reset();InstallEngine e;fake.ogRunning=true;assert(!e.StopRunningHosts());
+  assert(fake.ogStopCalls==0 && !e.error_.empty());} // newly started after snapshot
+ {reset();InstallEngine e;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;fake.ogRunning=true;
+  fake.ogServiceExists=false;fake.ogTaskFound=true;fake.ogTaskRunning=true;
+  assert(!e.StopRunningHosts());assert(fake.ogStopCalls==0 && !e.error_.empty());} // backend changed
+ {reset();InstallEngine e;e.prior_.ogLegacyTaskExisted=true;e.prior_.ogWasRunning=true;fake.ogRunning=true;
+  fake.ogServiceExists=false;fake.ogTaskFound=true;fake.ogTaskRunning=true;
+  assert(e.StopRunningHosts());assert(fake.ogStopCalls==1 && e.ogStopSignalled_);}
+ {reset();InstallEngine e;fake.ogQueryOk=false;assert(!e.StopRunningHosts());assert(!e.error_.empty() && fake.ogStopCalls==0);}
+ {reset();InstallEngine e;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;fake.ogRunning=true;fake.cancelDuringOgStop=true;
+  assert(!e.StopRunningHosts());assert(e.error_.empty() && e.cancelRequested_ && e.ogStopSignalled_);}
+ {reset();InstallEngine e;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;fake.ogRunning=true;fake.ogStopOk=false;
+  assert(!e.StopRunningHosts());assert(!e.error_.empty());}
+ std::cout<<"PASS: real stage functions: MSI, purge, mutexes, stopped/running OpenGlass and cancellation\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix="glass-order-test-") as directory:
     cpp = Path(directory) / "order.cpp"
     exe = Path(directory) / "order"
-    cpp.write_text(prefix + mutex_fn + "\n" + stop_fn + "\n" + determine_fn + "\n" + early_fn + "\n" + purge_fn + "\n" + main, encoding="utf-8")
+    cpp.write_text(prefix + mutex_fn + "\n" + stop_fn + "\n" + stop_hosts_fn + "\n" + determine_fn + "\n" + early_fn + "\n" + purge_fn + "\n" + main, encoding="utf-8")
     compiler = os.environ.get("CXX", "g++")
     subprocess.run([compiler, "-std=c++17", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                     str(cpp), "-o", str(exe)], check=True)
