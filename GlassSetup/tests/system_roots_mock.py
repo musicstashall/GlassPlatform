@@ -31,19 +31,21 @@ def function(text, token):
 
 read_value = function(util, "LSTATUS ReadNativeProgramFilesValue(")
 validate = function(util, "DWORD ValidateSystemProgramFiles(")
+architecture = function(util, "bool QueryNativeOs64Bit(")
+default_root = function(util, "DWORD ResolveDefaultPlatformRoot(")
 resolve = function(util, "bool ResolveFixedPlatformRoots(")
 assert 'KEY_QUERY_VALUE|KEY_WOW64_64KEY' in read_value
-assert 'HKEY_LOCAL_MACHINE' in read_value and 'ProgramFilesDir' in resolve and 'ProgramW6432Dir' in resolve
-assert 'GetEnvironmentVariable' not in read_value + resolve and 'ExpandEnvironmentStrings' not in read_value + resolve
-assert 'FOLDERID_ProgramFilesX64' not in resolve
+assert 'HKEY_LOCAL_MACHINE' in read_value and 'ProgramFilesDir' in default_root and 'ProgramW6432Dir' in default_root
+assert 'GetEnvironmentVariable' not in read_value + default_root and 'ExpandEnvironmentStrings' not in read_value + default_root
+assert 'FOLDERID_ProgramFilesX64' not in default_root
 for token in ('bool InstalledGlassRoots(', 'void StartupWorker(', 'void StartInstallation('):
-    assert 'ResolveFixedPlatformRoots(' in function(setup, token), token
+    assert 'ResolveInstallRoots(' in function(setup, token), token
 start_install = function(setup, 'void StartInstallation(')
-assert 'preflightX64Root_' in start_install and 'preflightX86Root_' in start_install
+assert 'preflightX64Root_' in start_install and 'preflightX86Root_' in start_install and 'preflightOpenGlassRoot_' in start_install
 assert start_install.index('SameInstallPath(') < start_install.index('installEngine_.Start(')
 for token in ('void ResolveRoots()', 'int RunOperation('):
-    assert 'ResolveFixedPlatformRoots(' in function(unins, token), token
-assert 'fixedRootsKnown_' in function(unins, 'int RunOperation(')
+    assert 'ResolveInstallRoots(' in function(unins, token), token
+assert 'rootsKnown_' in function(unins, 'int RunOperation(')
 
 prefix = r'''
 #include <algorithm>
@@ -62,7 +64,7 @@ using DWORD=uint32_t; using LSTATUS=int32_t; using HRESULT=int32_t; using BOOL=i
 using HKEY=void*; using LPBYTE=unsigned char*; using PWSTR=wchar_t*;
 constexpr BOOL FALSE=0; constexpr DWORD ERROR_SUCCESS=0,ERROR_FILE_NOT_FOUND=2,ERROR_PATH_NOT_FOUND=3,
  ERROR_ACCESS_DENIED=5,ERROR_INVALID_DATA=13,ERROR_NOT_ENOUGH_MEMORY=8,ERROR_INVALID_NAME=123,
- ERROR_MORE_DATA=234,FILE_ATTRIBUTE_DIRECTORY=16,FILE_ATTRIBUTE_REPARSE_POINT=0x400,
+ ERROR_MORE_DATA=234,ERROR_INVALID_PARAMETER=87,FILE_ATTRIBUTE_DIRECTORY=16,FILE_ATTRIBUTE_REPARSE_POINT=0x400,
  INVALID_FILE_ATTRIBUTES=0xffffffffu,REG_SZ=1,REG_EXPAND_SZ=2,KEY_QUERY_VALUE=1,KEY_WOW64_64KEY=0x100,
  KF_FLAG_DEFAULT=0; constexpr int FOLDERID_ProgramFilesX86=1,FOLDERID_ProgramFiles=2;
 HKEY const HKEY_LOCAL_MACHINE=reinterpret_cast<HKEY>(1);
@@ -166,7 +168,7 @@ int main(){std::wstring x64=L"old",x86=L"old";
 with tempfile.TemporaryDirectory(prefix="glass-roots-") as directory:
     cpp = Path(directory) / "test.cpp"
     exe = Path(directory) / "test"
-    cpp.write_text(prefix + read_value + "\n" + validate + "\n" + resolve + "\n" + main, encoding="utf-8")
+    cpp.write_text(prefix + read_value + "\n" + validate + "\n" + architecture + "\n" + default_root + "\n" + resolve + "\n" + main, encoding="utf-8")
     subprocess.run([os.environ.get("CXX", "g++"), "-std=c++17", "-g", "-fsanitize=address,undefined",
                     "-fno-omit-frame-pointer", "-no-pie", str(cpp), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

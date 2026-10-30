@@ -9,6 +9,8 @@
 #include "ShellSparsePackage.h"
 
 #include <ShlObj.h>
+#include <ShellApi.h>
+#include <Shlwapi.h>
 
 #include <atomic>
 #include <cstdint>
@@ -70,10 +72,20 @@ namespace
     }
 
 
-    [[nodiscard]] bool ResolveBundledGlassShellExtDll(wchar_t* out, size_t cch) noexcept
+    [[nodiscard]] bool ResolveBundledGlassShellExtDll(
+        wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
     {
         if (!out || cch == 0)
             return false;
+        if (exactPlatformRoot)
+        {
+            // Setup/Unins supply the already resolved root. Do not select a
+            // different file near rundll32, the temporary helper, or another
+            // registry value when this exact path is unavailable.
+            const std::wstring exact = GlassShared::GlassModulePath::ResolveGlassModulePath(
+                exactPlatformRoot, L"GlassShellExt.dll", GlassShared::GlassModulePath::NativeModuleArch());
+            return !exact.empty() && wcscpy_s(out, cch, exact.c_str()) == 0;
+        }
         std::wstring path =
             GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(nullptr, L"GlassShellExt.dll");
         if (path.empty())
@@ -140,10 +152,10 @@ namespace
         return exitCode == 0;
     }
 
-    [[nodiscard]] bool RunRegsvr32(bool unregister) noexcept
+    [[nodiscard]] bool RunRegsvr32(bool unregister, const wchar_t* exactPlatformRoot = nullptr) noexcept
     {
         wchar_t dllPath[MAX_PATH]{};
-        if (!ResolveBundledGlassShellExtDll(dllPath, _countof(dllPath)))
+        if (!ResolveBundledGlassShellExtDll(dllPath, _countof(dllPath), exactPlatformRoot))
             return false;
 
         wchar_t sysdir[MAX_PATH]{};
@@ -197,10 +209,10 @@ namespace
         Shared::GlassShellRegistration::RemoveLegacyContextMenuHandler();
     }
 
-    void RemoveLegacyContextMenuHandlerForUnregister() noexcept
+    void RemoveLegacyContextMenuHandlerForUnregister(const wchar_t* exactPlatformRoot = nullptr) noexcept
     {
         RemoveLegacyContextMenuHandlerOnly();
-        (void)RunRegsvr32(true);
+        (void)RunRegsvr32(true, exactPlatformRoot);
         RemoveLegacyContextMenuHandlerOnly();
     }
 
@@ -324,12 +336,13 @@ namespace
         }
     }
 
-    [[nodiscard]] bool RegisterBundledDllQuietImpl(bool provisionDevCertificate = true) noexcept
+    [[nodiscard]] bool RegisterBundledDllQuietImpl(bool provisionDevCertificate = true,
+        const wchar_t* exactPlatformRoot = nullptr) noexcept
     {
         SetLastOpMessage(OpMessageId::None);
         if (IsWindows11OrGreater())
         {
-            if (!GlassSettings::ShellSparsePackage::RegisterSparsePackageQuiet(provisionDevCertificate))
+            if (!GlassSettings::ShellSparsePackage::RegisterSparsePackageQuiet(provisionDevCertificate, exactPlatformRoot))
             {
                 DebugLog(
                     DBG_ERROR,
@@ -346,7 +359,7 @@ namespace
             return true;
         }
 
-        if (!RunRegsvr32(false))
+        if (!RunRegsvr32(false, exactPlatformRoot))
         {
             SetLastOpMessage(OpMessageId::FailedToRegister);
             return false;
@@ -356,7 +369,7 @@ namespace
         return true;
     }
 
-    [[nodiscard]] bool UnregisterBundledDllQuietImpl() noexcept
+    [[nodiscard]] bool UnregisterBundledDllQuietImpl(const wchar_t* exactPlatformRoot = nullptr) noexcept
     {
         SetLastOpMessage(OpMessageId::None);
 
@@ -365,7 +378,7 @@ namespace
             if (IsSparseShellPackageRegistered() ||
                 GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser())
             {
-                if (!GlassSettings::ShellSparsePackage::UnregisterSparsePackageQuiet())
+                if (!GlassSettings::ShellSparsePackage::UnregisterSparsePackageQuiet(exactPlatformRoot))
                 {
                     SetLastOpMessageFromSparseError();
                     if (static_cast<OpMessageId>(g_lastOpMessageId.load(std::memory_order_acquire)) ==
@@ -397,7 +410,7 @@ namespace
         if (IsSparseShellPackageRegistered() ||
             GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser())
         {
-            if (!GlassSettings::ShellSparsePackage::UnregisterSparsePackageQuiet())
+            if (!GlassSettings::ShellSparsePackage::UnregisterSparsePackageQuiet(exactPlatformRoot))
             {
                 SetLastOpMessageFromSparseError();
                 if (static_cast<OpMessageId>(g_lastOpMessageId.load(std::memory_order_acquire)) ==
@@ -409,7 +422,7 @@ namespace
         }
 
         if (IsRegistryShellExtensionRegistered())
-            RemoveLegacyContextMenuHandlerForUnregister();
+            RemoveLegacyContextMenuHandlerForUnregister(exactPlatformRoot);
 
         if (IsRegistryShellExtensionRegistered())
         {
@@ -448,6 +461,43 @@ namespace
 
         g_shellExtOpInProgress.store(false, std::memory_order_release);
         return ok ? 0 : 1;
+    }
+
+    std::wstring ReadRundllCommand(LPWSTR cmdLine)
+    {
+        if (!cmdLine || !cmdLine[0]) return {};
+        const auto first = static_cast<unsigned>(cmdLine[0]);
+        const bool wideAscii = first < 128
+            && (cmdLine[0] == L'/' || cmdLine[0] == L'-' || cmdLine[0] == L'"' || cmdLine[0] == L' ');
+        if (wideAscii) return cmdLine;
+        const char* ansi = reinterpret_cast<const char*>(cmdLine);
+        const int count = ::MultiByteToWideChar(CP_ACP, 0, ansi, -1, nullptr, 0);
+        if (count <= 1) return {};
+        std::wstring parsed(static_cast<size_t>(count), L'\0');
+        if (::MultiByteToWideChar(CP_ACP, 0, ansi, -1, parsed.data(), count) != count) return {};
+        parsed.pop_back(); // MultiByteToWideChar included the terminator.
+        return parsed;
+    }
+
+    bool ParseInstallerShellArguments(LPWSTR cmdLine, bool& unregister, std::wstring& root) noexcept
+    {
+        unregister = false;
+        root.clear();
+        try
+        {
+            const std::wstring args = L"GlassShellHelper " + ReadRundllCommand(cmdLine);
+            int count = 0;
+            LPWSTR* values = ::CommandLineToArgvW(args.c_str(), &count);
+            if (!values) return false;
+            struct Guard { LPWSTR* p; ~Guard() { ::LocalFree(p); } } guard{values};
+            if (count != 4 || _wcsicmp(values[2], L"/installroot") != 0 || !values[3][0] ||
+                ::PathIsRelativeW(values[3])) return false;
+            if (_wcsicmp(values[1], L"/unregister") == 0) unregister = true;
+            else if (_wcsicmp(values[1], L"/register") != 0) return false;
+            root = values[3];
+            return true;
+        }
+        catch (...) { root.clear(); return false; }
     }
 
 }
@@ -516,27 +566,7 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterW(
 #ifdef _M_IX86
 #pragma comment(linker, "/EXPORT:GlassSettings_ShellExtRegisterW=_GlassSettings_ShellExtRegisterW@16")
 #endif
-    std::wstring parsed;
-    if (cmdLine && cmdLine[0])
-    {
-        const auto first = static_cast<unsigned>(cmdLine[0]);
-        const bool wideAscii = first < 128
-            && (cmdLine[0] == L'/' || cmdLine[0] == L'-' || cmdLine[0] == L'"' || cmdLine[0] == L' ');
-        if (wideAscii)
-        {
-            parsed = cmdLine;
-        }
-        else
-        {
-            const char* ansi = reinterpret_cast<const char*>(cmdLine);
-            const int n = ::MultiByteToWideChar(CP_ACP, 0, ansi, -1, nullptr, 0);
-            if (n > 1)
-            {
-                parsed.resize(static_cast<size_t>(n - 1));
-                ::MultiByteToWideChar(CP_ACP, 0, ansi, -1, parsed.data(), n);
-            }
-        }
-    }
+    const std::wstring parsed = ReadRundllCommand(cmdLine);
     const bool unregister = parsed.find(L"/unregister") != std::wstring::npos
         || parsed.find(L"-u") != std::wstring::npos;
     const bool setup = parsed.find(L"/setup") != std::wstring::npos;
@@ -546,6 +576,26 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterW(
         ::ExitProcess(0x47505245u);
     }
     const bool ok = unregister ? UnregisterBundledDllQuietImpl() : RegisterBundledDllQuietImpl(!setup);
+    GlassSettings_NotifyShellCachesAfterRegistrationChange();
+    ::ExitProcess(ok ? 0u : 1u);
+}
+
+// Versioned entry point: unlike the legacy GlassSettings UI API, the installer
+// must use its resolved InstallPath without searching other candidate folders.
+extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSetupV1W(
+    HWND, HINSTANCE, LPWSTR cmdLine, int) noexcept
+{
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_ShellExtRegisterSetupV1W=_GlassSettings_ShellExtRegisterSetupV1W@16")
+#endif
+    bool unregister = false;
+    std::wstring root;
+    if (!ParseInstallerShellArguments(cmdLine, unregister, root)) ::ExitProcess(1u);
+    if (!unregister && (HasExistingShellRegistrationKeys() ||
+        GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser()))
+        ::ExitProcess(0x47505245u);
+    const bool ok = unregister ? UnregisterBundledDllQuietImpl(root.c_str())
+                               : RegisterBundledDllQuietImpl(false, root.c_str());
     GlassSettings_NotifyShellCachesAfterRegistrationChange();
     ::ExitProcess(ok ? 0u : 1u);
 }

@@ -265,11 +265,18 @@ namespace GlassSettings::ShellSparsePackage
         }
 
         /// Каталог ExternalLocation sparse-пакета: рядом с GlassShellExt.dll (как PackageRootFolder в AppX).
-        [[nodiscard]] bool ResolveGlassPlatformOutputDirectory(wchar_t* out, size_t cch) noexcept
+        [[nodiscard]] bool ResolveGlassPlatformOutputDirectory(
+            wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
             if (!out || cch == 0)
                 return false;
             out[0] = L'\0';
+
+            // Setup/Unins already resolved InstallPath. Never search the
+            // rundll32 directory, temp parent or another registry copy when
+            // an exact root was supplied, even if that root is unavailable.
+            if (exactPlatformRoot)
+                return exactPlatformRoot[0] && TryCanonicalizePlatformDir(exactPlatformRoot, out, cch);
 
             std::wstring shellExt =
                 GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(nullptr, L"GlassShellExt.dll");
@@ -319,38 +326,38 @@ namespace GlassSettings::ShellSparsePackage
             return wcscat_s(dir, cch, GlassShared::GlassShellMenu::kSparsePackageSubdir) == 0;
         }
 
-        [[nodiscard]] bool ResolveSparseManifestPath(wchar_t* out, size_t cch) noexcept
+        [[nodiscard]] bool ResolveSparseManifestPath(wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir), exactPlatformRoot) || !AppendSparseSubdir(dir, _countof(dir)))
                 return false;
             if (wcscat_s(dir, _countof(dir), L"AppxManifest.xml") != 0)
                 return false;
             return wcscpy_s(out, cch, dir) == 0;
         }
 
-        [[nodiscard]] bool ResolveSparseUnregisterStubManifestPath(wchar_t* out, size_t cch) noexcept
+        [[nodiscard]] bool ResolveSparseUnregisterStubManifestPath(wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir), exactPlatformRoot) || !AppendSparseSubdir(dir, _countof(dir)))
                 return false;
             if (wcscat_s(dir, _countof(dir), GlassShared::GlassShellMenu::kSparseUnregisterStubFileName) != 0)
                 return false;
             return wcscpy_s(out, cch, dir) == 0;
         }
 
-        [[nodiscard]] bool ResolveSparsePackageDirectory(wchar_t* out, size_t cch) noexcept
+        [[nodiscard]] bool ResolveSparsePackageDirectory(wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir), exactPlatformRoot) || !AppendSparseSubdir(dir, _countof(dir)))
                 return false;
             return wcscpy_s(out, cch, dir) == 0;
         }
 
-        [[nodiscard]] bool ResolveSparseMsixPath(wchar_t* out, size_t cch) noexcept
+        [[nodiscard]] bool ResolveSparseMsixPath(wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir), exactPlatformRoot))
                 return false;
 
             // PostBuild BuildSparsePackage.ps1 кладёт msix в корень OutDir, не в GlassShellSparse\.
@@ -799,16 +806,16 @@ namespace GlassSettings::ShellSparsePackage
         }
     }
 
-    bool RegisterSparsePackageQuiet(bool provisionDevCertificate) noexcept
+    bool RegisterSparsePackageQuiet(bool provisionDevCertificate, const wchar_t* exactPlatformRoot) noexcept
     {
         SetLastSparsePackageError(SparsePackageError::None);
 
         wchar_t outDir[MAX_PATH]{};
         wchar_t sparseDir[MAX_PATH]{};
         wchar_t manifest[MAX_PATH]{};
-        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir)) ||
-            !ResolveSparsePackageDirectory(sparseDir, _countof(sparseDir)) ||
-            !ResolveSparseManifestPath(manifest, _countof(manifest)))
+        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir), exactPlatformRoot) ||
+            !ResolveSparsePackageDirectory(sparseDir, _countof(sparseDir), exactPlatformRoot) ||
+            !ResolveSparseManifestPath(manifest, _countof(manifest), exactPlatformRoot))
         {
             DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: пути не найдены");
             SetLastSparsePackageError(SparsePackageError::ArtifactsMissing);
@@ -902,7 +909,7 @@ namespace GlassSettings::ShellSparsePackage
 
             bool registered = false;
             wchar_t msixPath[MAX_PATH]{};
-            const bool hasMsix = ResolveSparseMsixPath(msixPath, _countof(msixPath));
+            const bool hasMsix = ResolveSparseMsixPath(msixPath, _countof(msixPath), exactPlatformRoot);
 
             if (hasMsix)
                 registered = tryDeployMsix(msixPath);
@@ -966,12 +973,12 @@ namespace GlassSettings::ShellSparsePackage
         }
     }
 
-    bool UnregisterSparsePackageQuiet() noexcept
+    bool UnregisterSparsePackageQuiet(const wchar_t* exactPlatformRoot) noexcept
     {
         wchar_t outDir[MAX_PATH]{};
         wchar_t stubManifest[MAX_PATH]{};
-        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir)) ||
-            !ResolveSparseUnregisterStubManifestPath(stubManifest, _countof(stubManifest)))
+        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir), exactPlatformRoot) ||
+            !ResolveSparseUnregisterStubManifestPath(stubManifest, _countof(stubManifest), exactPlatformRoot))
         {
             DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] unregister: пути не найдены");
             SetLastSparsePackageError(SparsePackageError::ArtifactsMissing);

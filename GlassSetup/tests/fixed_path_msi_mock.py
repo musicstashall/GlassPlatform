@@ -33,11 +33,15 @@ startup = function(setup, "void StartupWorker(")
 roots = function(setup, "bool InstalledGlassRoots(")
 unins_roots = function(unins, "void ResolveRoots()")
 for body in (start_install, startup, roots, unins_roots):
-    assert "QueryPlatformInstallPath(" not in body
+    assert "ResolveInstallRoots(" in body
     assert "TryGetAutorunGlassCompatInstallRoot(" not in body
-    assert "QueryOpenGlassInstallPath(" not in body
 assert "args_.originalDir" not in unins_roots
-assert 'ogDir=x64Dir+L"\\\\OpenGlass"' in start_install
+assert 'ogDir=roots.openGlass' in start_install
+# Workspace paths use one Windows separator at the junction, not a doubled
+# literal that depends on Win32 path normalization.
+assert r'workspace.directory+L"\\current-' in unins
+assert r'workspaceDir+L"\\rollback-prior-' in rollback_src
+assert r'workspaceDir+L"\\recheck-' in engine
 worker = function(engine, "DWORD WINAPI InstallEngine::WorkerThread(")
 assert worker.index("CreateRollbackSnapshot()") < worker.index("StopRunningHosts()") < worker.index("InstallGlassSettingsEarly()")
 assert worker.index("CapturePriorHostState()") < worker.index("CreateRollbackSnapshot()")

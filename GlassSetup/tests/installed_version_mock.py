@@ -78,8 +78,11 @@ DWORD GetFileAttributesW(const wchar_t* name){std::wstring p=name;auto error=fak
 int _wcsicmp(const wchar_t* a,const wchar_t* b){while(*a&&*b){wchar_t x=std::towlower(*a++),y=std::towlower(*b++);if(x!=y)return x<y?-1:1;}return *a?1:*b?-1:0;}
 namespace InstallLog {void Line(const wchar_t*){} template<class... T>void LineFormat(const wchar_t*,T...) {}}
 namespace GlassInstallUtil {
- bool ResolveFixedPlatformRoots(std::wstring& x64,std::wstring& x86){
-  if(!fake.roots){x64.clear();x86.clear();fake.error=ERROR_ACCESS_DENIED;return false;}x64=fake.x64;x86=fake.x86;return true;}
+ struct InstallRoots {std::wstring x64,x86,openGlass,sourceX64,sourceX86,sourceOpenGlass;};
+ bool ResolveInstallRoots(InstallRoots& roots){
+  if(!fake.roots){roots={};fake.error=ERROR_ACCESS_DENIED;return false;}
+  roots.x64=fake.x64;roots.x86=fake.x86;roots.openGlass=fake.x64.empty()?L"":fake.x64+L"\\OpenGlass";
+  roots.sourceX64=L"registry";roots.sourceX86=L"registry";roots.sourceOpenGlass=L"default";return true;}
  bool IsSafeInstallPath(const std::wstring& path){return !fake.unsafe.count(path);}
 }
 namespace GlassInstallMsi {
@@ -99,7 +102,7 @@ std::wstring SelfProductVersion(){return fake.self;}
 std::vector<std::wstring> DetectConflictingApps(){return {};}
 std::wstring FormatVersionPairText(int,const std::wstring& a,const std::wstring& b){return a+L" / "+b;}
 struct Wizard {Page page_=Page::Welcome;std::vector<std::wstring> conflicts_;
- std::wstring installedGlassVersion_,setupProductVersion_,preflightX64Root_,preflightX86Root_,blockReason_,versionInvalidNote_,downgradeBody_;
+ std::wstring installedGlassVersion_,setupProductVersion_,preflightX64Root_,preflightX86Root_,preflightOpenGlassRoot_,blockReason_,versionInvalidNote_,downgradeBody_;
  void SetPage(Page p){page_=p;}
 '''+preflight+r'''
 };
@@ -111,6 +114,10 @@ int main(){
  // Resolve and compare both architectures, retaining the highest valid version.
  reset();fake.reg86=true;addCore(fake.x64,L"2.0.0.50");addCore(fake.x86,L"2.0.0.51");
  Wizard both;assert(both.RunPreflightChecks() && both.installedGlassVersion_==L"2.0.0.51");
+ // A registered, non-default root must be used for version detection.
+ reset();fake.reg86=true;fake.x86=L"D:\\Programs\\GlassPlatform";addCore(fake.x64,L"2.0.0.50");
+ addCore(fake.x86,L"2.0.0.51");Wizard custom;assert(custom.RunPreflightChecks());
+ assert(custom.preflightX86Root_==fake.x86 && custom.installedGlassVersion_==L"2.0.0.51");
  // A genuinely clean system is distinct from an unreadable registered install.
  reset();fake.reg64=false;Wizard empty;assert(empty.RunPreflightChecks() && empty.installedGlassVersion_.empty());
  reset();Wizard missing;assert(!missing.RunPreflightChecks() && missing.page_==Page::VersionInvalid);

@@ -233,7 +233,7 @@ private:
     EventRegistrationToken requestToken_{}, navToken_{}, completedToken_{}, messageToken_{}, popupToken_{}, permissionToken_{};
     std::wstring webState_;
     std::wstring x64Dir_,x86Dir_,openGlassDir_;
-    bool fixedRootsKnown_=false;
+    bool rootsKnown_=false;
     std::mutex dataMutex_;
     std::wstring status_,error_,holdReport_;
     int progress_=0, resultCode_=0;
@@ -281,17 +281,18 @@ private:
         selected_={safe.platform64,safe.platform32,safe.glassSettings,safe.openGlass};
     }
     void ResolveRoots() {
-        // Match Setup's fixed OS-derived destinations. Product registry values,
-        // task commands and old uninstaller locations are not targets.
-        openGlassDir_.clear();
-        fixedRootsKnown_=GlassInstallUtil::ResolveFixedPlatformRoots(x64Dir_,x86Dir_);
-        if (!fixedRootsKnown_) {
-            LogLine(L"Fixed Program Files roots unavailable, error "+std::to_wstring(GetLastError()));
+        GlassInstallUtil::InstallRoots roots;
+        rootsKnown_=GlassInstallUtil::ResolveInstallRoots(roots);
+        if (!rootsKnown_) {
+            x64Dir_.clear(); x86Dir_.clear(); openGlassDir_.clear();
+            LogLine(L"Installation roots unavailable, error "+std::to_wstring(GetLastError()));
             return;
         }
-        if (!x64Dir_.empty()) openGlassDir_=x64Dir_+L"\\OpenGlass";
-        LogLine(L"Fixed roots x64="+x64Dir_+L" x86="+x86Dir_+L" OpenGlass="+openGlassDir_);
+        x64Dir_=roots.x64; x86Dir_=roots.x86; openGlassDir_=roots.openGlass;
+        LogLine(L"Roots x64="+x64Dir_+L" ("+roots.sourceX64+L") x86="+x86Dir_+L" ("+
+            roots.sourceX86+L") OpenGlass="+openGlassDir_+L" ("+roots.sourceOpenGlass+L")");
     }
+
     void Initialize() {
         dpi_=GetDpiForWindow(window);
         DetectInstalled(); ChooseInitialProduct(); NormalizeSelection(); ResolveRoots();
@@ -492,20 +493,23 @@ private:
         }
     }
     int RunOperation(Selection chosen) {
-        std::wstring current64,current86;
-        const bool rootsNow=GlassInstallUtil::ResolveFixedPlatformRoots(current64,current86);
-        const bool same64=(current64.empty() && x64Dir_.empty()) ||
-            GlassInstallUtil::SameInstallPath(current64,x64Dir_);
-        if (!fixedRootsKnown_ || !rootsNow || !same64 ||
-            !GlassInstallUtil::SameInstallPath(current86,x86Dir_)) {
-            LogLine(L"Fixed Program Files roots unavailable or changed; removal stopped");
-            SetError(T(L"Не удалось безопасно определить системные каталоги установки. Пакеты не удалены; сохраните журнал.",
-                L"Could not safely resolve the system installation directories. No packages were removed; save the log."));
+        GlassInstallUtil::InstallRoots current;
+        const bool rootsNow=GlassInstallUtil::ResolveInstallRoots(current);
+        const bool same64=(current.x64.empty() && x64Dir_.empty()) ||
+            GlassInstallUtil::SameInstallPath(current.x64,x64Dir_);
+        const bool sameOg=(current.openGlass.empty() && openGlassDir_.empty()) ||
+            GlassInstallUtil::SameInstallPath(current.openGlass,openGlassDir_);
+        if (!rootsKnown_ || !rootsNow || !same64 || !sameOg ||
+            !GlassInstallUtil::SameInstallPath(current.x86,x86Dir_)) {
+            LogLine(L"Installation roots unavailable or changed; removal stopped");
+            SetError(T(L"Не удалось определить неизменившиеся пути установки. Пакеты не удалены; сохраните журнал.",
+                L"Could not resolve unchanged installation paths. No packages were removed; save the log."));
             return 9;
         }
         // MsiConfigureProductEx uninstalls the MSI's registered file paths,
         // not our cleanup directory. Inspect selected products before stopping
-        // any host, and do not treat a stale registry value as a safe target.
+        // any host; the agreed safety check prevents touching paths outside
+        // the corresponding InstallPath.
         struct Probe { const wchar_t* code; std::wstring root, cached; bool installed=false; };
         struct ProbeWorkspace {
             std::wstring directory;
@@ -547,7 +551,7 @@ private:
             if (context!=Msi::ProductPathCheck::Safe) { refuse(p,detail);return 9; }
             p.installed=Msi::IsProductInstalled(p.code);
             if (!p.installed) continue;
-            if (p.root.empty()) { refuse(p,L"<fixed directory unavailable>");return 9; }
+            if (p.root.empty()) { refuse(p,L"<installation directory unavailable>");return 9; }
             p.cached=workspace.directory+L"\\product-"+std::to_wstring(workspace.files.size())+L".msi";
             workspace.files.push_back(p.cached);
             if (!Msi::CopyLocalPackage(p.code,p.cached,&cancelRequested_)) {
@@ -557,6 +561,29 @@ private:
             const auto checked=Msi::CheckProductFileRoots(p.code,p.cached,p.root,detail,&cancelRequested_);
             if (checked==Msi::ProductPathCheck::Cancelled) return ERROR_INSTALL_USEREXIT;
             if (checked!=Msi::ProductPathCheck::Safe) { refuse(p,detail);return 9; }
+        }
+        // Native x64 must understand the exact-root installer protocol. Check
+        // before stopping hosts or deleting any MSI, not after partial removal.
+        // On 32-bit Windows the supported fallback is regsvr32 of ShellExt from
+        // the selected root, which must remain available until platform removal.
+        const bool os64=GlassInstallUtil::IsOs64Bit();
+        const bool removingCore=os64?chosen.x64:chosen.x86;
+        if (removingCore) {
+            bool helperReady=false;
+            if (os64) {
+                const std::wstring helper=GlassInstallUtil::NativeDllForArch(GP::PlatformArch::X64,x64Dir_,x86Dir_);
+                helperReady=!helper.empty() && GlassInstallUtil::PeMatches(helper,IMAGE_FILE_MACHINE_AMD64,
+                    GlassInstallUtil::kInstallerShellExport);
+            } else {
+                const std::wstring shell=GlassInstallUtil::TrimTrailingSlashes(x86Dir_)+L"\\GlassShellExt.dll";
+                helperReady=!x86Dir_.empty() && GlassInstallUtil::IsSafeInstallPath(shell) && PathFileExistsW(shell.c_str());
+            }
+            if (!helperReady) {
+                LogLine(L"Shell helper for the selected root is missing or incompatible; no packages removed");
+                SetError(T(L"Не удалось подготовить компонент регистрации оболочки для выбранного пути. Пакеты не удалены.",
+                    L"Could not prepare the shell registration component for the selected path. No packages were removed."));
+                return 9;
+            }
         }
         bool prior64=false,prior86=false;
         if (!GlassInstallHost::QueryGlassPlatformRunning(GP::PlatformArch::X64,prior64) ||
@@ -699,7 +726,7 @@ private:
             if (it->installed) {
                 // Re-read the current cached package: the registration may
                 // have changed since the protected preflight copy was made.
-                const std::wstring current=workspace.directory+L"\\\\current-"+code+L".msi";
+                const std::wstring current=workspace.directory+L"\\current-"+code+L".msi";
                 const bool copied=Msi::CopyLocalPackage(code,current);
                 const auto paths=copied ? Msi::CheckProductFileRoots(code,current,it->root,detail)
                                         : Msi::ProductPathCheck::Unverifiable;
@@ -731,7 +758,6 @@ private:
             if (!GlassInstallHost::RemoveOpenGlassServiceAndTasks()) { SetError(T(L"OpenGlass удалён, но служба или задача не удалена.",L"OpenGlass was removed, but its service or task could not be removed.")); (void)restoreRemaining(); return 17; }
             GlassInstallUtil::ClearOpenGlassInstallPath(); ++done;
         }
-        const bool removingCore=GlassInstallUtil::IsOs64Bit()?chosen.x64:chosen.x86;
         if (removingCore && !GlassInstallUtil::InvokeShellExtRegistration(false,x64Dir_,x86Dir_)) {
             SetError(T(L"Не удалось снять регистрацию расширения оболочки. Некоторые выбранные продукты могли уже быть удалены.",
                 L"Could not unregister the shell extension. Some selected products may already have been removed."));

@@ -267,9 +267,11 @@ bool ForceUnloadHolder(const ModuleHolder& holder, const std::wstring& x64Dir,
         if (result == Shared::ForceUnloadGlassModules::ForceUnloadResult::Ok)
             return true;
         if (result == Shared::ForceUnloadGlassModules::ForceUnloadResult::NeedsX86Agent) {
-            std::wstring root = Shared::ForceUnloadAgent::TryGetX86InstallRoot();
-            if (root.empty()) root = x86Dir;
-            return Shared::ForceUnloadAgent::SpawnX86ForceUnloadAgent(pid, root.c_str());
+            // The uninstaller uses the same resolved InstallPath as MSI and
+            // never replaces it with a task or another registry candidate.
+            const std::wstring compat = GlassInstallUtil::TrimTrailingSlashes(x86Dir) + L"\\GlassCompat.dll";
+            if (x86Dir.empty() || !GlassInstallUtil::IsSafeInstallPath(compat)) return false;
+            return Shared::ForceUnloadAgent::SpawnX86ForceUnloadAgent(pid, x86Dir.c_str());
         }
         return false;
 #endif

@@ -395,7 +395,9 @@ assert "QueryPlatformInstallPath(" not in native_helper and "TryGetAutorunGlassC
 shell_ops = (repo / "GlassSettings/Native/ShellExtensionOps.cpp").read_text(encoding="utf-8")
 shell_sparse = (repo / "GlassSettings/Native/ShellSparsePackage.cpp").read_text(encoding="utf-8")
 pack = (repo / "GlassShellExt/Package/BuildSparsePackage.ps1").read_text(encoding="utf-8")
-assert 'L"/register /setup"' in util and "0x47505245" in util and "0x47505245" in shell_ops
+assert "GlassSettings_ShellExtRegisterSetupV1W" in util and "/installroot" in util
+assert "exactPlatformRoot" in shell_ops and "exactPlatformRoot" in shell_sparse
+assert "0x47505245" in util and "0x47505245" in shell_ops
 assert "provisionDevCertificate && !ShellDevCertificate::Ensure" in shell_sparse
 assert "provisionDevCertificate && ResolveSparseSdkTools" in shell_sparse
 assert "Export-PfxCertificate" not in pack and "$cert.RawData" in pack

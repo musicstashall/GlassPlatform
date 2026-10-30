@@ -24,6 +24,8 @@ bool ExtractResourceToFile(
     const std::atomic_bool* cancelled = nullptr) noexcept;
 
 bool PeMatches(const std::wstring& path, WORD machine, const char* exportName) noexcept;
+// Protocol marker and rundll32 entry point for exact installer-selected paths.
+inline constexpr char kInstallerShellExport[] = "GlassSettings_ShellExtRegisterSetupV1W";
 std::wstring NativeRundll64();
 std::wstring System64ExePath(const wchar_t* exeName);
 std::wstring RundllPathForTaskArch(GlassShared::GlassPlatformTask::PlatformArch arch);
@@ -57,10 +59,18 @@ bool QueryOpenGlassRunning(bool& running, const OpenGlassTaskState* knownTasks =
 bool QueryOpenGlassFiles(const std::wstring& openGlassDir, const std::wstring& platformDir, bool& present) noexcept;
 
 bool IsOs64Bit() noexcept;
-// Resolve the OS-managed Program Files folders, never product registry/task
-// paths or inherited environment variables. On 32-bit Windows x64 is empty.
-// Failure clears both results and sets GetLastError for diagnostics.
+// Default product roots for a first installation, derived from Windows rather
+// than an inherited environment variable. x64 is empty on 32-bit Windows.
 bool ResolveFixedPlatformRoots(std::wstring& x64, std::wstring& x86) noexcept;
+
+struct InstallRoots {
+    std::wstring x64, x86, openGlass;
+    std::wstring sourceX64, sourceX86, sourceOpenGlass;
+};
+// Use saved product InstallPath values when present; otherwise use the
+// system defaults. Task commands and uninstaller locations are never targets.
+// Failure clears the result and sets GetLastError for diagnostics.
+bool ResolveInstallRoots(InstallRoots& roots) noexcept;
 std::wstring TrimTrailingSlashes(std::wstring path);
 // Best-effort cleanup of empty directories only; never deletes files, follows
 // reparse points, or enters a directory retained by another product.
@@ -75,11 +85,11 @@ bool IsWithinInstallRoot(const std::wstring& root, const std::wstring& path) noe
 bool IsSafeInstallPath(const std::wstring& path) noexcept;
 
 bool QueryPlatformInstallPath(bool x64, std::wstring& out) noexcept;
-void WritePlatformInstallPath(bool x64, const std::wstring& installDir) noexcept;
+bool WritePlatformInstallPath(bool x64, const std::wstring& installDir) noexcept;
 bool ClearPlatformInstallPath(bool x64) noexcept;
 
 bool QueryOpenGlassInstallPath(std::wstring& out) noexcept;
-void WriteOpenGlassInstallPath(const std::wstring& x64RootDir, const std::wstring& openGlassDir) noexcept;
+bool WriteOpenGlassInstallPath(const std::wstring& x64RootDir, const std::wstring& openGlassDir) noexcept;
 bool ClearOpenGlassInstallPath() noexcept;
 
 bool StartMenuShortcutExists() noexcept;

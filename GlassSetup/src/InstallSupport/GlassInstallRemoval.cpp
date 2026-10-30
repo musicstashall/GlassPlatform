@@ -263,8 +263,8 @@ bool ScanTasks(ITaskFolder* folder, bool x86, bool og, const std::wstring& x86Ex
                 if (FAILED(task->get_Path(taskPath.out())) || !taskPath.value ||
                     FAILED(task->get_Definition(definition.GetAddressOf())) || !definition ||
                     !ExpectedAction(definition.Get(),isX86,isX86?x86Exe:ogExe)) {
-                    error=Problem(ru,L"Задача запускает программу вне стандартной папки или содержит неизвестные действия. Она не будет запущена.",
-                        L"A task runs a program outside the fixed directory or has unsupported actions. It will not be started.",
+                    error=Problem(ru,L"Задача запускает программу вне каталога установки или содержит неизвестные действия. Она не будет запущена.",
+                        L"A task runs a program outside the installation directory or has unsupported actions. It will not be started.",
                         taskPath.value?taskPath.value:L"");
                     return false;
                 }
@@ -739,8 +739,8 @@ bool ValidatePlatformTask(GP::PlatformArch arch, const std::wstring& fixedRoot,
         ComPtr<ITaskDefinition> definition;
         if (FAILED(task->get_Definition(definition.GetAddressOf())) || !definition ||
             !ExpectedAction(definition.Get(),true,expected,arch)) {
-            error=Problem(russian,L"Задача платформы указывает не на стандартный путь или содержит неизвестные действия. Она не будет запущена или изменена.",
-                L"The platform task points outside the fixed directory or has unsupported actions. It will not be started or changed.",name.value);
+            error=Problem(russian,L"Задача платформы не соответствует пути установки или содержит неизвестные действия. Она не будет запущена или изменена.",
+                L"The platform task points outside the installation directory or has unsupported actions. It will not be started or changed.",name.value);
             return false;
         }
         if (requireRunning) {
@@ -800,8 +800,8 @@ bool ValidateOpenGlassPaths(const std::wstring& fixedRoot, const std::atomic_boo
         }
         CloseServiceHandle(service);
         if (!matches) {
-            error=Problem(russian,L"Служба OpenGlassHost указывает не на стандартный путь или её конфигурацию нельзя проверить. Она не будет запущена или изменена.",
-                L"OpenGlassHost points outside the fixed directory or its configuration cannot be verified. It will not be started or changed.",expected);
+            error=Problem(russian,L"Служба OpenGlassHost не соответствует пути установки или её конфигурацию нельзя проверить. Она не будет запущена или изменена.",
+                L"OpenGlassHost points outside the installation directory or its configuration cannot be verified. It will not be started or changed.",expected);
             return false;
         }
     }

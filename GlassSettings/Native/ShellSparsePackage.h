@@ -21,7 +21,10 @@ namespace GlassSettings::ShellSparsePackage
 
     [[nodiscard]] SparsePackageError GetLastSparsePackageError() noexcept;
 
-    [[nodiscard]] bool RegisterSparsePackageQuiet(bool provisionDevCertificate = true) noexcept;
+    // A non-null exactPlatformRoot is used only by the installer helper; in
+    // that mode missing artifacts fail without falling back to other paths.
+    [[nodiscard]] bool RegisterSparsePackageQuiet(bool provisionDevCertificate = true,
+        const wchar_t* exactPlatformRoot = nullptr) noexcept;
 
-    [[nodiscard]] bool UnregisterSparsePackageQuiet() noexcept;
+    [[nodiscard]] bool UnregisterSparsePackageQuiet(const wchar_t* exactPlatformRoot = nullptr) noexcept;
 }

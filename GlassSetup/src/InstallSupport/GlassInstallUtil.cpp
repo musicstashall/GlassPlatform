@@ -51,28 +51,63 @@ bool HasExistingShellRegistrationKeys() noexcept {
     return false;
 }
 
-bool TryReadRegSz(HKEY root, const wchar_t* subKey, const wchar_t* valueName, REGSAM sam, std::wstring& out) noexcept {
-    HKEY key = nullptr;
-    if (RegOpenKeyExW(root, subKey, 0, KEY_READ | sam, &key) != ERROR_SUCCESS)
-        return false;
-    wchar_t buf[MAX_PATH * 2]{};
-    DWORD cb = sizeof(buf);
-    DWORD type = 0;
-    const LSTATUS st = RegQueryValueExW(key, valueName, nullptr, &type, reinterpret_cast<LPBYTE>(buf), &cb);
+enum class RegistryPathRead { Missing, Found, Error };
+
+RegistryPathRead ReadInstallPathValue(HKEY hive, const wchar_t* subKey,
+    const wchar_t* valueName, REGSAM view, std::wstring& out) {
+    HKEY key=nullptr;
+    LSTATUS status=RegOpenKeyExW(hive,subKey,0,KEY_QUERY_VALUE|view,&key);
+    if (status==ERROR_FILE_NOT_FOUND || status==ERROR_PATH_NOT_FOUND) return RegistryPathRead::Missing;
+    if (status!=ERROR_SUCCESS) { SetLastError(status); return RegistryPathRead::Error; }
+    wchar_t buffer[32768]{};
+    DWORD bytes=sizeof(buffer),type=0;
+    status=RegQueryValueExW(key,valueName,nullptr,&type,reinterpret_cast<LPBYTE>(buffer),&bytes);
     RegCloseKey(key);
-    if (st != ERROR_SUCCESS || type != REG_SZ || !buf[0])
-        return false;
-    out = TrimTrailingSlashes(buf);
-    return !out.empty();
+    if (status==ERROR_FILE_NOT_FOUND || status==ERROR_PATH_NOT_FOUND) return RegistryPathRead::Missing;
+    if (status!=ERROR_SUCCESS) { SetLastError(status); return RegistryPathRead::Error; }
+    if (type!=REG_SZ || bytes<sizeof(wchar_t) || bytes>sizeof(buffer) || bytes%sizeof(wchar_t)!=0) {
+        SetLastError(ERROR_INVALID_DATA); return RegistryPathRead::Error;
+    }
+    const size_t count=bytes/sizeof(wchar_t);
+    if (buffer[count-1]!=L'\0' || !buffer[0]) { SetLastError(ERROR_INVALID_DATA); return RegistryPathRead::Error; }
+    const size_t length=std::wcslen(buffer);
+    for (size_t i=length+1;i<count;++i) if (buffer[i]!=L'\0') {
+        SetLastError(ERROR_INVALID_DATA); return RegistryPathRead::Error;
+    }
+    out=TrimTrailingSlashes(std::wstring(buffer,length));
+    if (out.empty()) { SetLastError(ERROR_INVALID_DATA); return RegistryPathRead::Error; }
+    return RegistryPathRead::Found;
 }
 
-void WriteRegSz(HKEY root, const wchar_t* subKey, const wchar_t* valueName, REGSAM sam, const std::wstring& val) noexcept {
-    HKEY key = nullptr;
-    if (RegCreateKeyExW(root, subKey, 0, nullptr, 0, KEY_SET_VALUE | sam, nullptr, &key, nullptr) != ERROR_SUCCESS)
-        return;
-    const DWORD bytes = static_cast<DWORD>((val.size() + 1) * sizeof(wchar_t));
-    RegSetValueExW(key, valueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(val.c_str()), bytes);
+// Installation registers missing values; it does not reconcile existing
+// copies, including values of a type that this resolver cannot use. MSI owns
+// its own registry component, handled separately by the rollback snapshot.
+// This Win32 sequence is not atomic against another registry writer.
+bool WriteRegSzIfMissing(HKEY root, const wchar_t* subKey, const wchar_t* valueName,
+    REGSAM sam, const std::wstring& val) noexcept {
+    HKEY key=nullptr;
+    LSTATUS status=RegOpenKeyExW(root,subKey,0,KEY_QUERY_VALUE|sam,&key);
+    if (status==ERROR_SUCCESS) {
+        DWORD bytes=0;
+        status=RegQueryValueExW(key,valueName,nullptr,nullptr,nullptr,&bytes);
+        RegCloseKey(key); key=nullptr;
+        if (status==ERROR_SUCCESS) return true;
+        if (status!=ERROR_FILE_NOT_FOUND) { SetLastError(status); return false; }
+    } else if (status!=ERROR_FILE_NOT_FOUND && status!=ERROR_PATH_NOT_FOUND) {
+        SetLastError(status); return false;
+    }
+
+    status=RegCreateKeyExW(root,subKey,0,nullptr,0,KEY_QUERY_VALUE|KEY_SET_VALUE|sam,nullptr,&key,nullptr);
+    if (status!=ERROR_SUCCESS) { SetLastError(status); return false; }
+    DWORD existingBytes=0;
+    status=RegQueryValueExW(key,valueName,nullptr,nullptr,nullptr,&existingBytes);
+    if (status==ERROR_FILE_NOT_FOUND) {
+        const DWORD bytes=static_cast<DWORD>((val.size()+1)*sizeof(wchar_t));
+        status=RegSetValueExW(key,valueName,0,REG_SZ,reinterpret_cast<const BYTE*>(val.c_str()),bytes);
+    }
     RegCloseKey(key);
+    if (status!=ERROR_SUCCESS) { SetLastError(status); return false; }
+    return true;
 }
 
 bool DeleteRegistryValue(HKEY root, const wchar_t* subKey, const wchar_t* valueName, REGSAM sam) noexcept {
@@ -514,61 +549,73 @@ DWORD ValidateSystemProgramFiles(const std::wstring& input, std::wstring& normal
 
 } // namespace
 
+namespace {
+
+bool QueryNativeOs64Bit(bool& os64) noexcept {
+#ifdef _WIN64
+    os64=true;
+    return true;
+#else
+    BOOL wow=FALSE;
+    if (!IsWow64Process(GetCurrentProcess(),&wow)) return false;
+    os64=wow!=FALSE;
+    return true;
+#endif
+}
+
+// Resolve one default only when its corresponding product path is absent.
+// The other architecture may have an unrelated registered location.
+DWORD ResolveDefaultPlatformRoot(bool x64, bool os64, std::wstring& root) {
+    root.clear();
+    std::wstring raw;
+    if (x64) {
+        if (!os64) return ERROR_INVALID_PARAMETER;
+#ifdef _WIN64
+        PWSTR folder=nullptr;
+        const HRESULT hr=SHGetKnownFolderPath(FOLDERID_ProgramFiles,KF_FLAG_DEFAULT,nullptr,&folder);
+        struct FolderGuard { PWSTR p; ~FolderGuard(){ if (p) CoTaskMemFree(p); } } guard{folder};
+        if (FAILED(hr) || !folder) return FAILED(hr) ? HRESULT_CODE(hr) : ERROR_PATH_NOT_FOUND;
+        raw.assign(folder);
+#else
+        const LSTATUS native=ReadNativeProgramFilesValue(L"ProgramFilesDir",raw);
+        if (native!=ERROR_SUCCESS) return static_cast<DWORD>(native);
+        std::wstring nativeAlias;
+        const LSTATUS alias=ReadNativeProgramFilesValue(L"ProgramW6432Dir",nativeAlias);
+        if (alias!=ERROR_SUCCESS) return static_cast<DWORD>(alias);
+        if (!SameInstallPath(raw,nativeAlias)) return ERROR_INVALID_DATA;
+#endif
+    } else {
+        PWSTR folder=nullptr;
+        HRESULT hr=SHGetKnownFolderPath(FOLDERID_ProgramFilesX86,KF_FLAG_DEFAULT,nullptr,&folder);
+        if ((FAILED(hr) || !folder) && !os64) {
+            if (folder) CoTaskMemFree(folder);
+            folder=nullptr;
+            hr=SHGetKnownFolderPath(FOLDERID_ProgramFiles,KF_FLAG_DEFAULT,nullptr,&folder);
+        }
+        struct FolderGuard { PWSTR p; ~FolderGuard(){ if (p) CoTaskMemFree(p); } } guard{folder};
+        if (FAILED(hr) || !folder) return FAILED(hr) ? HRESULT_CODE(hr) : ERROR_PATH_NOT_FOUND;
+        raw.assign(folder);
+    }
+    std::wstring base;
+    const DWORD error=ValidateSystemProgramFiles(raw,base);
+    if (error!=ERROR_SUCCESS) return error;
+    root=base+L"\\GlassPlatform";
+    return ERROR_SUCCESS;
+}
+
+} // namespace
+
 bool ResolveFixedPlatformRoots(std::wstring& x64, std::wstring& x86) noexcept {
     x64.clear(); x86.clear();
     auto fail=[&](DWORD error) { x64.clear(); x86.clear(); SetLastError(error); return false; };
     try {
-#ifdef _WIN64
-        const bool os64=true;
-#else
-        BOOL wow=FALSE;
-        if (!IsWow64Process(GetCurrentProcess(),&wow)) return fail(GetLastError());
-        const bool os64=wow!=FALSE;
-#endif
-        PWSTR path=nullptr;
-        HRESULT hr=SHGetKnownFolderPath(FOLDERID_ProgramFilesX86,KF_FLAG_DEFAULT,nullptr,&path);
-        if ((FAILED(hr) || !path) && !os64) {
-            if (path) CoTaskMemFree(path);
-            path=nullptr;
-            hr=SHGetKnownFolderPath(FOLDERID_ProgramFiles,KF_FLAG_DEFAULT,nullptr,&path);
-        }
-        if (FAILED(hr) || !path) {
-            if (path) CoTaskMemFree(path);
-            return fail(FAILED(hr) ? HRESULT_CODE(hr) : ERROR_PATH_NOT_FOUND);
-        }
-        std::wstring raw86(path); CoTaskMemFree(path);
-        std::wstring base86;
-        DWORD error=ValidateSystemProgramFiles(raw86,base86);
+        bool os64=false;
+        if (!QueryNativeOs64Bit(os64)) return fail(GetLastError());
+        DWORD error=ResolveDefaultPlatformRoot(false,os64,x86);
         if (error!=ERROR_SUCCESS) return fail(error);
-
-        std::wstring base64;
         if (os64) {
-            std::wstring raw64;
-#ifdef _WIN64
-            path=nullptr;
-            hr=SHGetKnownFolderPath(FOLDERID_ProgramFiles,KF_FLAG_DEFAULT,nullptr,&path);
-            if (FAILED(hr) || !path) {
-                if (path) CoTaskMemFree(path);
-                return fail(FAILED(hr) ? HRESULT_CODE(hr) : ERROR_PATH_NOT_FOUND);
-            }
-            raw64.assign(path); CoTaskMemFree(path);
-#else
-            const LSTATUS native=ReadNativeProgramFilesValue(L"ProgramFilesDir",raw64);
-            if (native!=ERROR_SUCCESS) return fail(static_cast<DWORD>(native));
-            std::wstring nativeAlias;
-            const LSTATUS alias=ReadNativeProgramFilesValue(L"ProgramW6432Dir",nativeAlias);
-            if (alias!=ERROR_SUCCESS) return fail(static_cast<DWORD>(alias));
-            if (!SameInstallPath(raw64,nativeAlias)) return fail(ERROR_INVALID_DATA);
-#endif
-            error=ValidateSystemProgramFiles(raw64,base64);
+            error=ResolveDefaultPlatformRoot(true,os64,x64);
             if (error!=ERROR_SUCCESS) return fail(error);
-            if (SameInstallPath(base64,base86)) return fail(ERROR_INVALID_DATA);
-        }
-        x86=base86+L"\\GlassPlatform";
-        if (os64) {
-            x64=base64+L"\\GlassPlatform";
-            // Overlapping product trees could make one architecture's cleanup
-            // affect the other even if the Program Files bases were distinct.
             if (IsWithinInstallRoot(x64,x86) || IsWithinInstallRoot(x86,x64))
                 return fail(ERROR_INVALID_DATA);
         }
@@ -1080,14 +1127,14 @@ std::wstring NativeDllForArch(
     const bool x64 = arch == GlassShared::GlassPlatformTask::PlatformArch::X64;
     const WORD machine = x64 ? IMAGE_FILE_MACHINE_AMD64 : IMAGE_FILE_MACHINE_I386;
     if (x64) {
-        // Elevated setup/uninstall never load a helper from a user-writable registry path.
-        // Release builds embed it; missing/corrupt resources fail closed, including Debug.
+        // The x64 helper is embedded in Setup/Unins and extracted to a
+        // restricted temporary directory. A missing resource fails closed.
         if (!g_unlockerInstance || !g_unlockerX64ResId ||
             !FindResourceW(g_unlockerInstance,MAKEINTRESOURCEW(g_unlockerX64ResId),RT_RCDATA)) return {};
         return EnsureExtractedUnlockerX64();
     }
-    // Setup also embeds x86; use that trusted resource for its elevated
-    // shell-registration helper instead of an install/registry-derived path.
+    // Setup also embeds x86; prefer that resource over an installed helper.
+    // The resource is trusted only to the extent the Setup executable is trusted.
     if (g_unlockerX86ResId) return EmbeddedNativeDllX86();
     const std::wstring root = x86Dir;
     if (!root.empty()) {
@@ -1095,55 +1142,157 @@ std::wstring NativeDllForArch(
         if (PeMatches(dll, machine, "GlassSettings_UnlockerW"))
             return dll;
     }
-    // Uninstaller builds without the x86 resource may use only the fixed
-    // product root. Never load elevated code from a stale registry/task path.
+    // Unins without an embedded x86 resource can use the resolved product
+    // root, which may be registry-derived. PeMatches checks format and export,
+    // not the origin or signature of that DLL.
     return {};
 }
 
-bool QueryPlatformInstallPath(bool x64, std::wstring& out) noexcept {
-    out.clear();
-    if (x64 && !IsOs64Bit())
-        return false;
+namespace {
 
-    const wchar_t* explicitVal = x64 ? L"InstallPathX64" : L"InstallPathX86";
-    // Prefer the machine-owned value when an unprivileged user can edit HKCU.
-    const REGSAM lmSam = x64 ? KEY_WOW64_64KEY : KEY_WOW64_32KEY;
-    if (TryReadRegSz(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", explicitVal, lmSam, out))
-        return true;
-    if (TryReadRegSz(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPath", lmSam, out))
-        return true;
-    if (TryReadRegSz(HKEY_CURRENT_USER, L"Software\\GlassPlatform", explicitVal, 0, out))
-        return true;
-
-    if (!x64 && IsOs64Bit()) {
-        return TryReadRegSz(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath", 0, out);
-    }
-
-    if (TryReadRegSz(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPath", 0, out)) {
-        if (x64 && IsOs64Bit()) {
-            // HKCU\Software is shared: an old x86 MSI could have overwritten this value,
-            // including for a custom directory outside Program Files (x86).
-            const std::wstring compat=out+L"\\GlassCompat.dll";
-            if (!PeMatches(compat,IMAGE_FILE_MACHINE_AMD64,nullptr)) { out.clear(); return false; }
-        }
-        return true;
-    }
-    return false;
+RegistryPathRead ReadPlatformInstallPath(bool x64, bool os64,
+    std::wstring& path, std::wstring& source) {
+    path.clear(); source.clear();
+    if (x64 && !os64) return RegistryPathRead::Missing;
+    const wchar_t* explicitValue=x64?L"InstallPathX64":L"InstallPathX86";
+    const REGSAM machineView=x64?KEY_WOW64_64KEY:KEY_WOW64_32KEY;
+    const auto read=[&](HKEY hive,const wchar_t* key,const wchar_t* value,
+                        REGSAM view,const wchar_t* label) {
+        const auto result=ReadInstallPathValue(hive,key,value,view,path);
+        if (result==RegistryPathRead::Found) source=label;
+        return result;
+    };
+    // Preserve the established machine-before-user precedence. The view and
+    // value actually used are reported, rather than comparing or repairing
+    // other registry copies.
+    auto status=read(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",explicitValue,machineView,
+        x64?L"HKLM(64) InstallPathX64":L"HKLM(32) InstallPathX86");
+    if (status!=RegistryPathRead::Missing) return status;
+    status=read(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",L"InstallPath",machineView,
+        x64?L"HKLM(64) InstallPath":L"HKLM(32) InstallPath");
+    if (status!=RegistryPathRead::Missing) return status;
+    status=read(HKEY_CURRENT_USER,L"Software\\GlassPlatform",explicitValue,0,
+        x64?L"HKCU InstallPathX64":L"HKCU InstallPathX86");
+    if (status!=RegistryPathRead::Missing) return status;
+    if (!x64 && os64)
+        return read(HKEY_CURRENT_USER,L"Software\\Wow6432Node\\GlassPlatform",L"InstallPath",0,
+            L"HKCU Wow6432Node InstallPath");
+    return read(HKEY_CURRENT_USER,L"Software\\GlassPlatform",L"InstallPath",0,L"HKCU InstallPath");
 }
 
-void WritePlatformInstallPath(bool x64, const std::wstring& installDir) noexcept {
-    const std::wstring dir = TrimTrailingSlashes(installDir);
-    if (dir.empty()) return;
-    const wchar_t* explicitVal = x64 ? L"InstallPathX64" : L"InstallPathX86";
-    const REGSAM lmSam = x64 ? KEY_WOW64_64KEY : KEY_WOW64_32KEY;
-    WriteRegSz(HKEY_CURRENT_USER, L"Software\\GlassPlatform", explicitVal, 0, dir);
-    WriteRegSz(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", explicitVal, lmSam, dir);
-    WriteRegSz(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPath", lmSam, dir);
-    if (x64 == IsOs64Bit()) {
-        WriteRegSz(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPath", 0, dir);
-    } else if (!x64 && IsOs64Bit()) {
-        WriteRegSz(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath", 0, dir);
+RegistryPathRead ReadOpenGlassInstallPath(std::wstring& path, std::wstring& source) {
+    path.clear(); source.clear();
+    const auto read=[&](HKEY hive,const wchar_t* key,const wchar_t* value,
+                        REGSAM view,const wchar_t* label) {
+        const auto result=ReadInstallPathValue(hive,key,value,view,path);
+        if (result==RegistryPathRead::Found) source=label;
+        return result;
+    };
+    auto status=read(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",
+        L"OpenGlassInstallPath",KEY_WOW64_64KEY,L"HKLM(64) OpenGlassInstallPath");
+    if (status!=RegistryPathRead::Missing) return status;
+    status=read(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform",
+        L"OpenGlassInstallPath",0,L"HKCU OpenGlassInstallPath");
+    if (status!=RegistryPathRead::Missing) return status;
+    return read(HKEY_CURRENT_USER,L"Software\\StanislavKa\\OpenGlass",
+        L"InstallPath",0,L"HKCU legacy OpenGlass InstallPath");
+}
+
+DWORD ValidateRegisteredInstallRoot(std::wstring& path) {
+    // Keep the registered destination, but reject malformed names, roots,
+    // device paths and existing links before passing it to elevated operations.
+    if (path.empty()) return ERROR_INVALID_NAME;
+    for (size_t i=0;i<path.size();++i) {
+        const wchar_t ch=path[i];
+        if (ch<32 || ch==L'"' || ch==L'<' || ch==L'>' || ch==L'|' ||
+            ch==L'?' || ch==L'*' || (ch==L':' && i!=1)) return ERROR_INVALID_NAME;
     }
+    std::wstring normalized;
+    if (!NormalProductDirectory(path,normalized)) return ERROR_INVALID_NAME;
+    std::wstring supplied=TrimTrailingSlashes(path);
+    for (auto& ch:supplied) if (ch==L'/') ch=L'\\';
+    if (_wcsicmp(supplied.c_str(),normalized.c_str())!=0) return ERROR_INVALID_NAME;
+    const DWORD attributes=GetFileAttributesW(normalized.c_str());
+    if (attributes==INVALID_FILE_ATTRIBUTES) {
+        const DWORD error=GetLastError();
+        if (error!=ERROR_FILE_NOT_FOUND && error!=ERROR_PATH_NOT_FOUND)
+            return error ? error : ERROR_PATH_NOT_FOUND;
+    } else if (!(attributes&FILE_ATTRIBUTE_DIRECTORY)) return ERROR_INVALID_DATA;
+    if (!IsSafeInstallPath(normalized)) return ERROR_INVALID_DATA;
+    path=std::move(normalized);
+    return ERROR_SUCCESS;
+}
+
+} // namespace
+
+bool QueryPlatformInstallPath(bool x64, std::wstring& out) noexcept {
+    try {
+        bool os64=false;
+        if (!QueryNativeOs64Bit(os64)) return false;
+        std::wstring source;
+        return ReadPlatformInstallPath(x64,os64,out,source)==RegistryPathRead::Found;
+    } catch (...) { out.clear(); SetLastError(ERROR_NOT_ENOUGH_MEMORY); return false; }
+}
+
+bool ResolveInstallRoots(InstallRoots& roots) noexcept {
+    roots={};
+    auto fail=[&](DWORD error) { roots={}; SetLastError(error?error:ERROR_INVALID_DATA); return false; };
+    try {
+        bool os64=false;
+        if (!QueryNativeOs64Bit(os64)) return fail(GetLastError());
+        const auto resolvePlatform=[&](bool x64,std::wstring& path,std::wstring& source) {
+            const auto status=ReadPlatformInstallPath(x64,os64,path,source);
+            if (status==RegistryPathRead::Error) return GetLastError();
+            if (status==RegistryPathRead::Found) return ValidateRegisteredInstallRoot(path);
+            const DWORD error=ResolveDefaultPlatformRoot(x64,os64,path);
+            if (error==ERROR_SUCCESS) source=L"Windows Program Files default";
+            return error;
+        };
+        DWORD error=resolvePlatform(false,roots.x86,roots.sourceX86);
+        if (error!=ERROR_SUCCESS) return fail(error);
+        if (os64) {
+            error=resolvePlatform(true,roots.x64,roots.sourceX64);
+            if (error!=ERROR_SUCCESS) return fail(error);
+            const auto og=ReadOpenGlassInstallPath(roots.openGlass,roots.sourceOpenGlass);
+            if (og==RegistryPathRead::Error) return fail(GetLastError());
+            if (og==RegistryPathRead::Found) error=ValidateRegisteredInstallRoot(roots.openGlass);
+            else {
+                roots.openGlass=roots.x64+L"\\OpenGlass";
+                roots.sourceOpenGlass=L"x64 root default";
+                error=ValidateRegisteredInstallRoot(roots.openGlass);
+            }
+            if (error!=ERROR_SUCCESS) return fail(error);
+        }
+        SetLastError(ERROR_SUCCESS);
+        return true;
+    } catch (...) { return fail(ERROR_NOT_ENOUGH_MEMORY); }
+}
+
+bool WritePlatformInstallPath(bool x64, const std::wstring& installDir) noexcept {
+    try {
+        const std::wstring dir=TrimTrailingSlashes(installDir);
+        if (dir.empty()) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
+        bool os64=false;
+        if (!QueryNativeOs64Bit(os64)) return false;
+        const wchar_t* explicitVal=x64?L"InstallPathX64":L"InstallPathX86";
+        const REGSAM lmSam=x64?KEY_WOW64_64KEY:KEY_WOW64_32KEY;
+        if (!WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\GlassPlatform",explicitVal,0,dir) ||
+            !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",explicitVal,lmSam,dir) ||
+            !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",L"InstallPath",lmSam,dir)) return false;
+        if (x64==os64 &&
+            !WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\GlassPlatform",L"InstallPath",0,dir)) return false;
+        if (!x64 && os64 &&
+            !WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\Wow6432Node\\GlassPlatform",L"InstallPath",0,dir)) return false;
+        // Only the authoritative value is rechecked. Conflicting copies are
+        // neither compared with each other nor rewritten to match it.
+        std::wstring effective,source;
+        const auto status=ReadPlatformInstallPath(x64,os64,effective,source);
+        if (status==RegistryPathRead::Error) return false;
+        if (status!=RegistryPathRead::Found || !SameInstallPath(effective,dir)) {
+            SetLastError(ERROR_INVALID_DATA); return false;
+        }
+        return true;
+    } catch (...) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return false; }
 }
 
 bool ClearPlatformInstallPath(bool x64) noexcept {
@@ -1162,24 +1311,29 @@ bool ClearPlatformInstallPath(bool x64) noexcept {
 }
 
 bool QueryOpenGlassInstallPath(std::wstring& out) noexcept {
-    out.clear();
-    if (TryReadRegSz(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",L"OpenGlassInstallPath",KEY_WOW64_64KEY,out)) return true;
-    if (TryReadRegSz(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform",L"OpenGlassInstallPath",0,out)) return true;
-    // Previous MSI versions wrote the actual OpenGlass directory here.
-    return TryReadRegSz(HKEY_CURRENT_USER,L"Software\\StanislavKa\\OpenGlass",L"InstallPath",0,out);
+    try {
+        std::wstring source;
+        return ReadOpenGlassInstallPath(out,source)==RegistryPathRead::Found;
+    } catch (...) { out.clear(); SetLastError(ERROR_NOT_ENOUGH_MEMORY); return false; }
 }
 
-void WriteOpenGlassInstallPath(const std::wstring& x64RootDir, const std::wstring& openGlassDir) noexcept {
-    const std::wstring root = TrimTrailingSlashes(x64RootDir);
-    const std::wstring og = TrimTrailingSlashes(openGlassDir);
-    if (!root.empty()) {
-        WriteRegSz(HKEY_CURRENT_USER, L"Software\\StanislavKa\\GlassPlatform", L"InstallPath", 0, root);
-        WriteRegSz(HKEY_LOCAL_MACHINE, L"Software\\StanislavKa\\GlassPlatform", L"InstallPath", KEY_WOW64_64KEY, root);
-    }
-    if (!og.empty()) {
-        WriteRegSz(HKEY_CURRENT_USER, L"Software\\StanislavKa\\GlassPlatform", L"OpenGlassInstallPath", 0, og);
-        WriteRegSz(HKEY_LOCAL_MACHINE, L"Software\\StanislavKa\\GlassPlatform", L"OpenGlassInstallPath", KEY_WOW64_64KEY, og);
-    }
+bool WriteOpenGlassInstallPath(const std::wstring& x64RootDir, const std::wstring& openGlassDir) noexcept {
+    try {
+        const std::wstring root=TrimTrailingSlashes(x64RootDir);
+        const std::wstring og=TrimTrailingSlashes(openGlassDir);
+        if (root.empty() || og.empty()) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
+        if (!WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform",L"InstallPath",0,root) ||
+            !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",L"InstallPath",KEY_WOW64_64KEY,root) ||
+            !WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform",L"OpenGlassInstallPath",0,og) ||
+            !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",L"OpenGlassInstallPath",KEY_WOW64_64KEY,og)) return false;
+        std::wstring effective,source;
+        const auto status=ReadOpenGlassInstallPath(effective,source);
+        if (status==RegistryPathRead::Error) return false;
+        if (status!=RegistryPathRead::Found || !SameInstallPath(effective,og)) {
+            SetLastError(ERROR_INVALID_DATA); return false;
+        }
+        return true;
+    } catch (...) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return false; }
 }
 
 bool ClearOpenGlassInstallPath() noexcept {
@@ -1254,16 +1408,17 @@ bool InvokeShellExtRegistration(
     const auto arch = os64
         ? GlassShared::GlassPlatformTask::PlatformArch::X64
         : GlassShared::GlassPlatformTask::PlatformArch::X86;
+    const std::wstring& selectedRoot=os64 ? x64Dir : x86Dir;
+    const std::wstring root=TrimTrailingSlashes(selectedRoot);
+    if (root.empty() || root.find(L'"')!=std::wstring::npos || !IsSafeInstallPath(root)) return false;
     const std::wstring dll = NativeDllForArch(arch, x64Dir, x86Dir);
     const WORD machine=os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386;
-    if (dll.empty() || !PeMatches(dll,machine,"GlassSettings_ShellExtRegisterW")) {
+    if (dll.empty() || !PeMatches(dll,machine,kInstallerShellExport)) {
         // Windows 11 requires the sparse package; do not silently substitute legacy regsvr32.
         // On 32-bit Windows 10, legacy registration is the supported fallback.
         if (os64) return false;
-        const std::wstring root = x86Dir;
-        if (root.empty()) return false;
-        const std::wstring shellExt = TrimTrailingSlashes(root) + L"\\GlassShellExt.dll";
-        if (!PathFileExistsW(shellExt.c_str())) return false;
+        const std::wstring shellExt = root + L"\\GlassShellExt.dll";
+        if (!IsSafeInstallPath(shellExt) || !PathFileExistsW(shellExt.c_str())) return false;
         if (registerExtension && HasExistingShellRegistrationKeys()) return true;
         const std::wstring regsvr = System64ExePath(L"regsvr32.exe");
         std::wstring args = registerExtension ? L"/s \"" : L"/u /s \"";
@@ -1277,8 +1432,9 @@ bool InvokeShellExtRegistration(
     }
     const std::wstring rundll = os64 ? NativeRundll64() : RundllPathForTaskArch(arch);
     if (rundll.empty()) return false;
-    std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\",GlassSettings_ShellExtRegisterW ";
-    cmd += registerExtension ? L"/register /setup" : L"/unregister";
+    std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\",GlassSettings_ShellExtRegisterSetupV1W ";
+    cmd += registerExtension ? L"/register" : L"/unregister";
+    cmd += L" /installroot \"" + root + L"\"";
     DWORD exitCode = 1;
     bool started=false,completed=false;
     const bool ran = RunHiddenCommand(cmd, &exitCode, 45000, &started, &completed);

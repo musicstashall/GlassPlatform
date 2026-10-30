@@ -334,7 +334,7 @@ bool TrySnapshotProduct(GlassInstallRollback::SessionState& state,
         return false;
     }
     // Uninstalling a previously registered MSI uses its own recorded paths,
-    // not the new INSTALLDIR. Never guess that those files were under our fixed
+    // not the new INSTALLDIR. Never guess that those files were under the resolved
     // destination: verify the registered file components before MSI is touched.
     std::wstring detail;
     const auto checked=GlassInstallMsi::CheckProductFileRoots(productCode,snap.cachedMsiPath,installDir,detail,cancelled);
@@ -344,7 +344,7 @@ bool TrySnapshotProduct(GlassInstallRollback::SessionState& state,
         state.productPathCode=productCode;
         state.productPathDetail=detail;
         state.copyError=ERROR_INVALID_DATA;
-        GlassInstallLog::LineFormat(L"Snapshot refused unverified MSI paths: product=%s fixed=%s detail=%s status=%d",
+        GlassInstallLog::LineFormat(L"Snapshot refused unverified MSI paths: product=%s root=%s detail=%s status=%d",
             productCode,installDir.c_str(),detail.empty()?L"<unknown>":detail.c_str(),static_cast<int>(checked));
         return false;
     }
@@ -386,7 +386,7 @@ bool CreateSnapshot(
         if (!GlassInstallUtil::IsSafeInstallPath(*root)) {
             state.copyError=ERROR_INVALID_DATA;
             state.productPathUnverified=true;
-            state.productPathCode=L"<fixed directory>";
+            state.productPathCode=L"<installation directory>";
             state.productPathDetail=*root;
             GlassInstallLog::LineFormat(L"Snapshot refused unsafe target or ancestor: %s",root->c_str());
             return false;
@@ -462,7 +462,7 @@ bool CreateSnapshot(
             copiedOk = false;
             if (state.copyError==ERROR_NOT_SUPPORTED) {
                 state.productPathUnverified=true;
-                state.productPathCode=L"<fixed directory>";
+                state.productPathCode=L"<installation directory>";
                 state.productPathDetail=src;
             }
         }
@@ -547,7 +547,7 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
         std::wstring detail;
         bool verified=false;
         if (snapshot && !state.workspaceDir.empty()) {
-            const std::wstring current=state.workspaceDir+L"\\\\rollback-prior-"+product+L".msi";
+            const std::wstring current=state.workspaceDir+L"\\rollback-prior-"+product+L".msi";
             if (GlassInstallMsi::CopyLocalPackage(product,current))
                 verified=GlassInstallMsi::CheckProductFileRoots(product,current,snapshot->installDir,detail)
                     ==GlassInstallMsi::ProductPathCheck::Safe;
@@ -663,6 +663,28 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
     if (ok && !RestoreRegistryValues(state)) ok=false;
     if (ok && onProgress) onProgress(10000);
     return ok;
+}
+
+bool PreservePlatformUserPath(const SessionState& state, bool x64) noexcept {
+    const wchar_t* name=x64?L"InstallPathX64":L"InstallPathX86";
+    for (const auto& item:state.registryValues) {
+        if (item.hive!=HKEY_CURRENT_USER || item.view!=0 ||
+            _wcsicmp(item.key.c_str(),L"Software\\GlassPlatform")!=0 ||
+            _wcsicmp(item.name.c_str(),name)!=0) continue;
+        if (!item.existed) return true; // MSI may register the new value.
+        HKEY key=nullptr;
+        LSTATUS status=RegCreateKeyExW(item.hive,item.key.c_str(),0,nullptr,0,
+            KEY_SET_VALUE,nullptr,&key,nullptr);
+        if (status==ERROR_SUCCESS) {
+            status=RegSetValueExW(key,item.name.c_str(),0,item.type,
+                item.data.empty()?nullptr:item.data.data(),static_cast<DWORD>(item.data.size()));
+            RegCloseKey(key);
+        }
+        if (status!=ERROR_SUCCESS) { SetLastError(status); return false; }
+        return true;
+    }
+    SetLastError(ERROR_INVALID_DATA); // No snapshot means we cannot preserve the value.
+    return false;
 }
 
 bool RestoreRegistryValues(const SessionState& state) noexcept {

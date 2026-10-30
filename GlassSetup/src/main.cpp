@@ -675,7 +675,7 @@ struct InstalledGlassVersionInfo {
     bool hasUnreadableInstallation = false;
     std::wstring version;
     std::wstring modulePath;
-    std::wstring x64Root, x86Root;
+    std::wstring x64Root, x86Root, openGlassRoot;
     ParsedVersion parsed{};
 };
 
@@ -704,22 +704,21 @@ void AddInstallRoot(std::vector<InstallRootCandidate>& roots, std::wstring path)
     roots.push_back({std::move(path)});
 }
 
-bool InstalledGlassRoots(std::vector<InstallRootCandidate>& roots, std::wstring& x64, std::wstring& x86) {
-    // Use the same system-derived destinations as Setup and GlassUnins. Never
-    // turn an old product registry value or developer task into a target.
-    if (!GlassInstallUtil::ResolveFixedPlatformRoots(x64,x86)) {
-        InstallLog::LineFormat(L"Preflight: fixed Program Files roots unavailable (error %lu)",GetLastError());
+bool InstalledGlassRoots(std::vector<InstallRootCandidate>& roots,
+    std::wstring& x64, std::wstring& x86, std::wstring& openGlass) {
+    GlassInstallUtil::InstallRoots resolved;
+    if (!GlassInstallUtil::ResolveInstallRoots(resolved)) {
+        InstallLog::LineFormat(L"Preflight: installation roots unavailable (error %lu)",GetLastError());
         return false;
     }
-    InstallLog::LineFormat(L"Preflight: fixed roots x64=%s x86=%s",x64.c_str(),x86.c_str());
-    const auto add=[&](const std::wstring& root) {
-        if (root.empty()) return;
-        AddInstallRoot(roots,root);
-        // Check the historical sibling without ever using it as a new target.
-        const size_t separator=root.find_last_of(L"\\/");
-        if (separator!=std::wstring::npos) AddInstallRoot(roots,root.substr(0,separator)+L"\\Glass");
-    };
-    add(x64); add(x86);
+    x64=resolved.x64; x86=resolved.x86; openGlass=resolved.openGlass;
+    InstallLog::LineFormat(L"Preflight: x64=%s (%s) x86=%s (%s) OpenGlass=%s (%s)",
+        x64.c_str(),resolved.sourceX64.c_str(),x86.c_str(),resolved.sourceX86.c_str(),
+        openGlass.c_str(),resolved.sourceOpenGlass.c_str());
+    // The resolved product paths are authoritative; do not add task paths,
+    // sibling directories or a second, guessed installation destination.
+    AddInstallRoot(roots,x64);
+    AddInstallRoot(roots,x86);
     return true;
 }
 
@@ -750,7 +749,7 @@ bool InspectInstalledMarker(const std::wstring& path, bool& exists) {
 InstalledGlassVersionInfo FindInstalledGlassVersion() {
     InstalledGlassVersionInfo result;
     std::vector<InstallRootCandidate> roots;
-    result.rootsResolved=InstalledGlassRoots(roots,result.x64Root,result.x86Root);
+    result.rootsResolved=InstalledGlassRoots(roots,result.x64Root,result.x86Root,result.openGlassRoot);
     if (!result.rootsResolved) return result;
     const bool registered=GlassInstallRegistrationExists();
     InstallLog::LineFormat(L"Preflight: platform MSI registered=%d",registered?1:0);
@@ -791,8 +790,8 @@ InstalledGlassVersionInfo FindInstalledGlassVersion() {
         }
     }
     if (registered && !result.detected) {
-        // A registered MSI with no readable files at the fixed roots has an
-        // unknown location; it is not proof of a broken installation.
+        // A registered MSI with no readable files at the resolved roots has an
+        // unknown version; it is not proof of a broken installation.
         result.detected=true;
         result.hasUnreadableInstallation=true;
     }
@@ -1164,7 +1163,7 @@ private:
     std::vector<std::wstring> conflicts_;
     std::wstring installedGlassVersion_;
     std::wstring setupProductVersion_;
-    std::wstring preflightX64Root_,preflightX86Root_;
+    std::wstring preflightX64Root_,preflightX86Root_,preflightOpenGlassRoot_;
     std::wstring blockReason_;
     std::wstring versionInvalidNote_;
     std::wstring downgradeBody_;
@@ -1308,7 +1307,7 @@ private:
     }
     void StartupWorker(HWND target, bool themed, bool slowStartup) noexcept {
         StartupResult result;
-        std::wstring fixed64,fixed86;
+        GlassInstallUtil::InstallRoots startupRoots;
         DWORD rootsError=ERROR_SUCCESS;
         bool rootsChecked=false;
         const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
@@ -1318,13 +1317,13 @@ private:
             if (SUCCEEDED(com) && !gAlreadyRunning && !startupStop_.load(std::memory_order_acquire)) {
                 result.os64=GlassInstallUtil::IsOs64Bit();
                 rootsChecked=true;
-                const bool rootsKnown=GlassInstallUtil::ResolveFixedPlatformRoots(fixed64,fixed86);
+                const bool rootsKnown=GlassInstallUtil::ResolveInstallRoots(startupRoots);
                 if (!rootsKnown) rootsError=GetLastError();
                 if (result.os64) {
                     const bool runningKnown=GlassInstallUtil::QueryOpenGlassRunning(result.openGlass.wasRunning);
-                    if (rootsKnown) result.openGlassDir=fixed64+L"\\OpenGlass";
+                    if (rootsKnown) result.openGlassDir=startupRoots.openGlass;
                     const bool filesKnown=rootsKnown && GlassInstallUtil::QueryOpenGlassFiles(
-                        result.openGlassDir,fixed64,result.openGlass.filesPresent);
+                        result.openGlassDir,startupRoots.x64,result.openGlass.filesPresent);
                     result.openGlass.valid=runningKnown && filesKnown;
                 }
             }
@@ -1332,8 +1331,13 @@ private:
             // UI interactions are locked until this worker has been joined.
             InstallLog::Initialize();
             InstallLog::Line(themed ? L"Theme Detours installed" : L"Theme Detours unavailable");
-            if (rootsChecked) InstallLog::LineFormat(L"Startup fixed roots: x64=%s x86=%s error=%lu",
-                fixed64.c_str(),fixed86.c_str(),rootsError);
+            if (rootsChecked) {
+                InstallLog::LineFormat(L"Startup installation roots: x64=%s (%s) x86=%s (%s) error=%lu",
+                    startupRoots.x64.c_str(),startupRoots.sourceX64.c_str(),
+                    startupRoots.x86.c_str(),startupRoots.sourceX86.c_str(),rootsError);
+                if (result.os64) InstallLog::LineFormat(L"Startup OpenGlass root: %s (%s)",
+                    startupRoots.openGlass.c_str(),startupRoots.sourceOpenGlass.c_str());
+            }
             if (result.os64) InstallLog::LineFormat(L"OpenGlass at wizard startup: valid=%d files=%d running=%d dir=%s",
                 result.openGlass.valid ? 1 : 0, result.openGlass.filesPresent ? 1 : 0,
                 result.openGlass.wasRunning ? 1 : 0, result.openGlassDir.c_str());
@@ -2011,24 +2015,25 @@ private:
         SetTimer(window, kInstallTimer, kInstallTimerMs, nullptr);
         return;
 #else
-        std::wstring x64Dir, x86Dir, ogDir;
-        const bool os64=GlassInstallUtil::IsOs64Bit();
-        // Destinations are a product policy, not a discovery result. In
-        // particular an autorun task can intentionally point at a build tree;
-        // never use it, or an old registry value, as an MSI/cleanup target.
-        if (!GlassInstallUtil::ResolveFixedPlatformRoots(x64Dir,x86Dir)) {
-            InstallLog::LineFormat(L"Install path resolution failed (Program Files, error %lu)",GetLastError());
+        GlassInstallUtil::InstallRoots roots;
+        if (!GlassInstallUtil::ResolveInstallRoots(roots)) {
+            InstallLog::LineFormat(L"Install path resolution failed (error %lu)",GetLastError());
             ShowInstallError(Text(IDS_ERR_INSTALL_PATH));
             return;
         }
+        const std::wstring& x64Dir=roots.x64;
+        const std::wstring& x86Dir=roots.x86;
+        const std::wstring& ogDir=roots.openGlass;
+        const bool os64=!x64Dir.empty();
         const bool same64=(x64Dir.empty() && preflightX64Root_.empty()) ||
             GlassInstallUtil::SameInstallPath(x64Dir,preflightX64Root_);
-        if (!same64 || !GlassInstallUtil::SameInstallPath(x86Dir,preflightX86Root_)) {
-            InstallLog::Line(L"Fixed Program Files roots changed after the version check; no changes made");
+        const bool sameOg=(ogDir.empty() && preflightOpenGlassRoot_.empty()) ||
+            GlassInstallUtil::SameInstallPath(ogDir,preflightOpenGlassRoot_);
+        if (!same64 || !sameOg || !GlassInstallUtil::SameInstallPath(x86Dir,preflightX86Root_)) {
+            InstallLog::Line(L"Installation roots changed after the version check; no changes made");
             ShowInstallError(Text(IDS_ERR_INSTALL_PATH));
             return;
         }
-        if (os64) ogDir=x64Dir+L"\\OpenGlass";
         if (os64 && selection_.openGlass && (!openGlassStartup_.valid ||
             !GlassInstallUtil::SameInstallPath(openGlassStartupDir_,ogDir))) {
             InstallLog::Line(L"OpenGlass startup state or installation path could not be verified; no changes made");
@@ -2115,6 +2120,7 @@ private:
         }
         preflightX64Root_=installed.x64Root;
         preflightX86Root_=installed.x86Root;
+        preflightOpenGlassRoot_=installed.openGlassRoot;
         blockReason_.clear();
         versionInvalidNote_.clear();
         downgradeBody_.clear();

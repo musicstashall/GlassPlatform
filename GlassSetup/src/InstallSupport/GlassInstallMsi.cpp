@@ -408,7 +408,7 @@ ProductPathCheck CheckProductFileRoots(const wchar_t* productCode, const std::ws
             if (result!=ProductPathCheck::Safe) return result;
             if (total!=matched) { detail=L"Unmatched CreateFolder components";return ProductPathCheck::Unverifiable; }
         } else if (folders!=MSICONDITION_NONE) return ProductPathCheck::Unverifiable;
-        GlassInstallLog::LineFormat(L"MSI component paths verified under fixed root: product=%s components=%u root=%s",
+        GlassInstallLog::LineFormat(L"MSI component paths verified under installation root: product=%s components=%u root=%s",
             productCode, static_cast<unsigned>(seen.size()), fixedRoot.c_str());
         return ProductPathCheck::Safe;
     } catch (...) {

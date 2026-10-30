@@ -45,24 +45,26 @@ namespace Shared::InjectModuleScan {constexpr char kNativeInstallerProtocolExpor
 namespace GP {enum class PlatformArch{X86,X64};}
 namespace InstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
 struct Mock {
- bool x86Present=true,x86Protocol=true,x64Present=true,x64Protocol=true,cancelDuringX86=false;
+ bool x86Present=true,x86Protocol=true,x86Shell=true,x64Present=true,x64Protocol=true,x64Shell=true,cancelDuringX86=false;
  int x86Extracts=0,x64Extracts=0;std::vector<WORD> checked;
  std::atomic_bool* cancelled=nullptr;
 } fake;
 namespace GlassInstallUtil {
+ constexpr char kInstallerShellExport[]="GlassSettings_ShellExtRegisterSetupV1W";
  std::wstring EmbeddedNativeDllX86(){++fake.x86Extracts;return fake.x86Present?L"bundled86.dll":L"";}
  std::wstring NativeDllForArch(GP::PlatformArch arch,const std::wstring&,const std::wstring&){
   assert(arch==GP::PlatformArch::X64);++fake.x64Extracts;return fake.x64Present?L"bundled64.dll":L"";
  }
  bool PeMatches(const std::wstring& path,WORD machine,const char* marker){
-  assert(std::string(marker)==Shared::InjectModuleScan::kNativeInstallerProtocolExport);
+  const bool scan=std::string(marker)==Shared::InjectModuleScan::kNativeInstallerProtocolExport;
+  assert(scan || std::string(marker)==kInstallerShellExport);
   fake.checked.push_back(machine);
   if(path==L"bundled86.dll"){
    assert(machine==IMAGE_FILE_MACHINE_I386);
    if(fake.cancelDuringX86 && fake.cancelled)fake.cancelled->store(true);
-   return fake.x86Protocol;
+   return scan?fake.x86Protocol:fake.x86Shell;
   }
-  assert(path==L"bundled64.dll" && machine==IMAGE_FILE_MACHINE_AMD64);return fake.x64Protocol;
+  assert(path==L"bundled64.dll" && machine==IMAGE_FILE_MACHINE_AMD64);return scan?fake.x64Protocol:fake.x64Shell;
  }
 }
 class InstallEngine {
@@ -77,17 +79,21 @@ main = r'''
 int main(){
  auto reset=[](){fake=Mock{};};
  reset();{InstallEngine e;assert(e.VerifyEmbeddedNativePayload());assert(e.error_.empty());
-  assert(fake.x86Extracts==1 && fake.x64Extracts==1 && fake.checked.size()==2);}
+  assert(fake.x86Extracts==1 && fake.x64Extracts==1 && fake.checked.size()==4);}
  reset();{InstallEngine e;e.scanNativeX64_=false;assert(e.VerifyEmbeddedNativePayload());
-  assert(fake.x64Extracts==0 && fake.checked.size()==1);}
+  assert(fake.x64Extracts==0 && fake.checked.size()==2);}
  reset();{InstallEngine e;fake.x86Present=false;assert(!e.VerifyEmbeddedNativePayload());
   assert(!e.error_.empty() && e.error_.find(L"x86")!=std::wstring::npos && fake.x64Extracts==0);}
  reset();{InstallEngine e;fake.x86Protocol=false;assert(!e.VerifyEmbeddedNativePayload());
   assert(!e.error_.empty() && fake.checked.size()==1 && fake.x64Extracts==0);}
+ reset();{InstallEngine e;fake.x86Shell=false;assert(!e.VerifyEmbeddedNativePayload());
+  assert(!e.error_.empty() && fake.checked.size()==2 && fake.x64Extracts==0);}
  reset();{InstallEngine e;fake.x64Present=false;assert(!e.VerifyEmbeddedNativePayload());
-  assert(e.error_.find(L"x64")!=std::wstring::npos && fake.checked.size()==1);}
+  assert(e.error_.find(L"x64")!=std::wstring::npos && fake.checked.size()==2);}
  reset();{InstallEngine e;fake.x64Protocol=false;assert(!e.VerifyEmbeddedNativePayload());
-  assert(!e.error_.empty() && fake.checked.size()==2);}
+  assert(!e.error_.empty() && fake.checked.size()==3);}
+ reset();{InstallEngine e;fake.x64Shell=false;assert(!e.VerifyEmbeddedNativePayload());
+  assert(!e.error_.empty() && fake.checked.size()==4);}
  reset();{InstallEngine e;e.cancel.store(true);assert(!e.VerifyEmbeddedNativePayload());
   assert(e.error_.empty() && fake.checked.empty() && fake.x64Extracts==0);}
  reset();{InstallEngine e;fake.x86Protocol=false;fake.cancelDuringX86=true;fake.cancelled=&e.cancel;

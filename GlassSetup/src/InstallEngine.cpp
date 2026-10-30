@@ -292,7 +292,7 @@ bool InstallEngine::CapturePriorHostState() noexcept {
         !checkTask(GP::PlatformArch::X86,prior_.x86TaskExisted,prior_.x86WasRunning,x86Dir_)) return false;
     if ((prior_.x64WasRunning && (!prior_.x64TaskExisted || !prior_.x64TaskEnabled)) ||
         (prior_.x86WasRunning && (!prior_.x86TaskExisted || !prior_.x86TaskEnabled))) {
-        // We cannot infer a manually launched host's DLL path from the fixed
+        // We cannot infer a manually launched host's DLL path from the resolved
         // install destination. Stopping it would make rollback guess what to run.
         const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
         InstallLog::Line(L"Running platform has no enabled autorun task; refusing to guess its rollback path");
@@ -1155,11 +1155,12 @@ bool InstallEngine::VerifyEmbeddedNativePayload() noexcept {
         // Parsing the export table does not load the DLL or run DllMain. The
         // normal monitoring session still begins only after the Settings MSI.
         if (!path.empty() && GlassInstallUtil::PeMatches(path, machine,
-                Shared::InjectModuleScan::kNativeInstallerProtocolExport)) {
-            InstallLog::LineFormat(L"Native preflight %s: protocol export present (%s)", arch, path.c_str());
+                Shared::InjectModuleScan::kNativeInstallerProtocolExport) &&
+            GlassInstallUtil::PeMatches(path, machine, GlassInstallUtil::kInstallerShellExport)) {
+            InstallLog::LineFormat(L"Native preflight %s: scan and installer-shell exports present (%s)", arch, path.c_str());
             return true;
         }
-        InstallLog::LineFormat(L"Native preflight %s: embedded DLL missing, unreadable or missing protocol export (path=%s)",
+        InstallLog::LineFormat(L"Native preflight %s: embedded DLL missing, unreadable or missing an installer export (path=%s)",
             arch, path.empty() ? L"<none>" : path.c_str());
         if (!IsCancelRequested()) {
             const std::wstring message = ru
@@ -1194,7 +1195,7 @@ bool InstallEngine::RecheckSnapshottedProduct(const wchar_t* productCode) noexce
             GlassInstallMsi::IsProductInstalled(productCode) && !rollbackSession_.workspaceDir.empty()) {
             // Check the currently registered LocalPackage, not only the copy
             // from the original snapshot: it may have changed in the meantime.
-            const std::wstring current=rollbackSession_.workspaceDir+L"\\\\recheck-"+productCode+L".msi";
+            const std::wstring current=rollbackSession_.workspaceDir+L"\\recheck-"+productCode+L".msi";
             if (GlassInstallMsi::CopyLocalPackage(productCode,current,&cancelRequested_))
                 paths=GlassInstallMsi::CheckProductFileRoots(productCode,current,snap.installDir,detail,&cancelRequested_);
             else {
@@ -1502,9 +1503,22 @@ bool InstallEngine::RunMsiSequence() noexcept {
         if (!RunOneMsi(msiPath, step.dir, step.label, base, span)) return false;
         base += span;
 
-        if (step.msiFile == L"Glass-x64.msi") GlassInstallUtil::WritePlatformInstallPath(true, x64Dir_);
-        else if (step.msiFile == L"Glass-x86.msi") GlassInstallUtil::WritePlatformInstallPath(false, x86Dir_);
-        else if (step.msiFile == L"OpenGlass-x64.msi") GlassInstallUtil::WriteOpenGlassInstallPath(x64Dir_, openGlassDir_);
+        bool pathWritten=true;
+        if (step.msiFile == L"Glass-x64.msi")
+            pathWritten=GlassInstallRollback::PreservePlatformUserPath(rollbackSession_,true) &&
+                GlassInstallUtil::WritePlatformInstallPath(true, x64Dir_);
+        else if (step.msiFile == L"Glass-x86.msi")
+            pathWritten=GlassInstallRollback::PreservePlatformUserPath(rollbackSession_,false) &&
+                GlassInstallUtil::WritePlatformInstallPath(false, x86Dir_);
+        else if (step.msiFile == L"OpenGlass-x64.msi")
+            pathWritten=GlassInstallUtil::WriteOpenGlassInstallPath(x64Dir_, openGlassDir_);
+        if (!pathWritten) {
+            const DWORD error=GetLastError();
+            InstallLog::LineFormat(L"Could not write installation path for %s (error %lu)",step.msiFile.c_str(),error);
+            SetFailure(ru ? L"Не удалось сохранить путь установки в реестре."
+                          : L"Could not save the installation path in the registry.",error);
+            return false;
+        }
     }
 
     // Do not replace an existing customised shortcut without a backup.
@@ -1737,12 +1751,12 @@ bool InstallEngine::CreateRollbackSnapshot() noexcept {
                 : labels_.diskFull, ERROR_DISK_FULL);
         } else if (rollbackSession_.productPathUnverified) {
             const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-            const bool directory=rollbackSession_.productPathCode==L"<fixed directory>";
+            const bool directory=rollbackSession_.productPathCode==L"<installation directory>";
             std::wstring message=directory
                 ? (ru ? L"Каталог установки или его содержимое не удалось безопасно проверить: обнаружена ссылка или недоступен путь. Установка остановлена до изменений. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную."
                       : L"The installation directory or its contents could not be checked safely: a link or an inaccessible path was found. Setup stopped before making changes. Save the log and ask for help; do not delete files manually.")
-                : (ru ? L"Не удалось безопасно проверить ранее зарегистрированный MSI: его файлы находятся вне стандартной папки либо неизвестны пути, контекст или связанный продукт. Установка остановлена до изменений. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную."
-                      : L"A previously registered MSI cannot be verified safely: its files are outside the fixed directory, or its paths, context or related products are unknown. Setup stopped before making changes. Save the log and ask for help; do not delete files manually.");
+                : (ru ? L"Не удалось безопасно проверить ранее зарегистрированный MSI: его файлы находятся вне определённого каталога установки либо неизвестны пути, контекст или связанный продукт. Установка остановлена до изменений. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную."
+                      : L"A previously registered MSI cannot be verified safely: its files are outside the installation directory, or its paths, context or related products are unknown. Setup stopped before making changes. Save the log and ask for help; do not delete files manually.");
             if (!directory) message+=L"\r\n"+rollbackSession_.productPathCode;
             if (!rollbackSession_.productPathDetail.empty()) message+=L"\r\n"+rollbackSession_.productPathDetail;
             SetFailure(message,ERROR_INVALID_DATA);

@@ -40,7 +40,7 @@ struct SessionState {
     bool hadPriorInstall = false;
     unsigned copyError = 0;
     // Failure to verify an installed MSI's file locations is distinct from a
-    // copy error: proceeding could uninstall files outside the fixed root.
+    // copy error: proceeding could uninstall files outside the installation root.
     bool productPathUnverified = false;
     std::wstring productPathCode;
     std::wstring productPathDetail;
@@ -71,6 +71,9 @@ bool ExecuteRollback(
     RestoreScope scope = RestoreScope::AllProducts) noexcept;
 
 bool RestoreRegistryValues(const SessionState& state) noexcept;
+// Platform MSI owns the HKCU architecture value. Preserve its exact previous
+// contents if it existed, rather than reconciling a conflicting registry copy.
+bool PreservePlatformUserPath(const SessionState& state, bool x64) noexcept;
 void CleanupSnapshot(SessionState& state) noexcept;
 
 } // namespace GlassInstallRollback
