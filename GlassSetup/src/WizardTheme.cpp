@@ -4,7 +4,7 @@
 #include <commctrl.h>
 #include <detours.h>
 #include <dwmapi.h>
-#include <gdiplus.h>
+#include "GdiPlusCompat.h"
 #include <uxtheme.h>
 #include <vssym32.h>
 #include <algorithm>

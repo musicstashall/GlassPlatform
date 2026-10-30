@@ -48,6 +48,22 @@ for path in [*root.joinpath("src").rglob("*.cpp"), root / "GlassUnins/main.cpp"]
     used = set(re.findall(r"\b(?:IDS|IDR|IDI|IDC)_[A-Z0-9_]+\b", text)) - {"IDC_ARROW"}
     assert not used - ids.keys(), f"undefined IDs in {path}: {used - ids.keys()}"
     assert not re.search(r"\b(?:MessageBox[AW]?|TaskDialog(?:Indirect)?)\s*\(", text), f"system dialog in {path}"
+    includes = [m.group(1).lower() for m in re.finditer(
+        r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', text, re.MULTILINE)]
+    assert "gdiplus.h" not in includes, f"{path}: use GdiPlusCompat.h instead"
+
+# With WIN32_LEAN_AND_MEAN/NOMINMAX, MSVC's GDI+ headers need explicit COM
+# declarations and min/max in their namespace. Match directives, not comments.
+compat = read("src/GdiPlusCompat.h")
+compat_includes = [m.group(1).lower() for m in re.finditer(
+    r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', compat, re.MULTILINE)]
+assert "gdiplus.h" in compat_includes
+for dependency in ("windows.h", "objbase.h", "objidl.h", "algorithm"):
+    assert dependency in compat_includes and compat_includes.index(dependency) < compat_includes.index("gdiplus.h"), dependency
+assert compat.index("namespace Gdiplus") < compat.index("#include <gdiplus.h>")
+assert "using std::min;" in compat and "using std::max;" in compat
+for path in ("src/main.cpp", "src/WizardTheme.cpp", "GlassUnins/main.cpp"):
+    assert '#include "GdiPlusCompat.h"' in read(path), path
 
 # Original user-provided legal/banner resources are untouched.
 for filename, expected in json.loads(read("tests/user-resource-hashes.json")).items():
@@ -97,8 +113,9 @@ for project in (root / "GlassSetup.vcxproj", root / "GlassUnins/GlassUnins.vcxpr
 project = read("GlassSetup.vcxproj")
 unins_project = read("GlassUnins/GlassUnins.vcxproj")
 for text in (project, unins_project):
-    assert "WizardTheme.cpp" in text and "WebView2LoaderStatic.lib" in text
+    assert "WizardTheme.cpp" in text and "GdiPlusCompat.h" in text and "WebView2LoaderStatic.lib" in text
     assert "Detours.4.0.1" in text
+assert "GdiPlusCompat.h" in read("GlassSetup.vcxproj.filters")
 assert 'ResourceCompile Include="GlassUnins.rc"' in unins_project
 assert "GLASS_HAVE_UNLOCKER_X64" in project
 assert "GlassSettings.Native.dll" in project and "GlassSettings.Native.dll" in unins_rc

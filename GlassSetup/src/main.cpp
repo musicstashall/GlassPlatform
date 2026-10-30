@@ -6,7 +6,7 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <vssym32.h>
-#include <gdiplus.h>
+#include "GdiPlusCompat.h"
 #include <dwmapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>

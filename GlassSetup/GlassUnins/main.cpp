@@ -12,7 +12,7 @@
 
 #include <windows.h>
 #include <commctrl.h>
-#include <gdiplus.h>
+#include "GdiPlusCompat.h"
 #include <msi.h>
 #include <shellapi.h>
 #include <shlobj.h>

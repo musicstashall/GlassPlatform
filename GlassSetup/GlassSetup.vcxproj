@@ -134,6 +134,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\WizardTheme.h" />
+    <ClInclude Include="src\GdiPlusCompat.h" />
     <ClInclude Include="src\WizardAssets.h" />
     <ClInclude Include="src\GlassProducts.h" />
     <ClInclude Include="src\InstallEngine.h" />
