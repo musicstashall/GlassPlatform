@@ -67,7 +67,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateManifest>false</GenerateManifest>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>GlassShared.lib;$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>GlassShared.lib;$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)res;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -94,7 +94,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateManifest>false</GenerateManifest>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>GlassShared.lib;$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>GlassShared.lib;$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)res;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -130,6 +130,7 @@
     <ClCompile Include="src\InstallSupport\GlassInstallUtil.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallWatch.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallHost.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassInstallRemoval.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallUnlock.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -139,6 +140,8 @@
     <ClInclude Include="src\WizardProgress.h" />
     <ClInclude Include="src\GlassProducts.h" />
     <ClInclude Include="src\InstallEngine.h" />
+    <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h" />
+    <ClInclude Include="src\InstallSupport\GlassRemovalOrder.h" />
     <ClInclude Include="src\InstallLog.h" />
   </ItemGroup>
   <ItemGroup>
@@ -160,6 +163,7 @@
     <None Include="res\app.ico" />
     <None Include="tests\verify_resources.py" />
     <None Include="tests\selection_tests.cpp" />
+    <None Include="tests\removal_order_tests.cpp" />
     <None Include="tests\progress_tests.cpp" />
     <None Include="tests\asset-hashes.json" />
     <None Include="tests\user-resource-hashes.json" />

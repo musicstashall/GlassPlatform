@@ -1314,14 +1314,17 @@ private:
                     result.platformVersion=PlatformVersionFromInstalledModules();
                 if (!startupStop_.load(std::memory_order_acquire)) result.os64=GlassInstallUtil::IsOs64Bit();
                 if (!startupStop_.load(std::memory_order_acquire))
-                    result.installed.platform64=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX64);
+                    result.installed.platform64=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX64) ||
+                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX64);
                 if (!startupStop_.load(std::memory_order_acquire))
-                    result.installed.platform32=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX86);
+                    result.installed.platform32=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX86) ||
+                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX86);
                 if (!startupStop_.load(std::memory_order_acquire))
                     result.installed.glassSettings=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64) ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86);
                 if (!startupStop_.load(std::memory_order_acquire))
-                    result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass);
+                    result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
+                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass);
                 if (!startupStop_.load(std::memory_order_acquire)) {
                     result.eulaText=Utf8(Resource(IDR_EULA,gLanguage));
                     result.eulaText+=L"\r\n\r\n────────────────────────────────\r\n"+
@@ -1467,6 +1470,9 @@ private:
         ShowWindow(componentSettings_,nativeComponents?SW_SHOWNA:SW_HIDE);
         ShowWindow(componentOpenGlass_,nativeComponents && os64?SW_SHOWNA:SW_HIDE);
         if (nativeComponents) {
+            const std::wstring mandatory=L" ("+Text(IDS_COMP_MANDATORY)+L")";
+            SetWindowTextW(component64_,(Text(IDS_COMP_P64_TITLE)+(os64?mandatory:L"")).c_str());
+            SetWindowTextW(component32_,(Text(IDS_COMP_P32_TITLE)+(!os64?mandatory:L"")).c_str());
             SendMessageW(component64_,BM_SETCHECK,selection_.platform64?BST_CHECKED:BST_UNCHECKED,0);
             SendMessageW(component32_,BM_SETCHECK,selection_.platform32?BST_CHECKED:BST_UNCHECKED,0);
             SendMessageW(componentSettings_,BM_SETCHECK,selection_.glassSettings?BST_CHECKED:BST_UNCHECKED,0);
@@ -1536,15 +1542,28 @@ private:
         json+=L"]";
         return json;
     }
+    UINT ComponentStateId(bool selected, bool installed) const noexcept {
+        return installed ? (selected ? IDS_COMP_STATE_UPDATE : IDS_COMP_STATE_REMOVE)
+                         : (selected ? IDS_COMP_STATE_INSTALL : IDS_COMP_STATE_ABSENT);
+    }
+    std::wstring ComponentWarnings() const {
+        std::wstring text;
+        if (GlassInstallUtil::IsOs64Bit() && !selection_.platform32) text = Text(IDS_COMP_X86_WARNING);
+        if (!selection_.glassSettings) {
+            if (!text.empty()) text += L"\n";
+            text += Text(IDS_COMP_GS_WARNING);
+        }
+        return text;
+    }
     std::wstring ComponentsJson() const {
         const bool os64=GlassInstallUtil::IsOs64Bit();
         std::wstring json=L"[";
         auto item=[&](const wchar_t* id, UINT title, UINT desc, bool checked, bool locked, bool hidden, bool installed) {
             if (json.size()>1) json+=L",";
-            const std::wstring badge=locked ? Text(IDS_COMP_MANDATORY) :
-                installed ? (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN ? L"УСТАНОВЛЕНО" : L"INSTALLED") : L"";
+            const std::wstring badge=locked ? Text(IDS_COMP_MANDATORY) : L"";
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
                 L",\"description\":"+JsStringLiteral(Text(desc))+L",\"badge\":"+JsStringLiteral(badge)+
+                L",\"state\":"+JsStringLiteral(Text(ComponentStateId(checked,installed)))+
                 L",\"checked\":"+(checked?L"true":L"false")+L",\"locked\":"+(locked?L"true":L"false")+
                 L",\"hidden\":"+(hidden?L"true":L"false")+L"}";
         };
@@ -1649,7 +1668,7 @@ private:
             L",\"unlockActive\":"+((page_==Page::Installing && visualMode_!=VisualMode::Slideshow)?L"true":L"false")+
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
             L",\"components\":"+ComponentsJson()+
-            L",\"componentsWarning\":"+JsStringLiteral(selection_.glassSettings?L"":Text(IDS_COMP_GS_WARNING))+
+            L",\"componentsWarning\":"+JsStringLiteral(ComponentWarnings())+
             L",\"launchCards\":"+LaunchCardsJson()+L"}";
         if (json==lastWebState_) return;
         const HRESULT hr=web_->PostWebMessageAsJson(json.c_str());
@@ -1866,20 +1885,18 @@ private:
         case 1639: id = IDS_MSI_CMDLINE; break;
         default: break;
         }
-        const bool mapped = id != 0;
-        std::wstring text;
-        if (mapped)
-            text = Text(id);
-        else if (!msi.empty())
-            text = msi;
-        else if (!detail.empty())
-            text = detail;
-        else
-            text = installEngine_.ErrorText();
-        if ((mapped || !msi.empty() || !detail.empty()) && !note.empty()) {
+        std::wstring text = id ? Text(id) : L"";
+        const auto append = [&](const std::wstring& part) {
+            if (part.empty() || part == text) return;
             if (!text.empty()) text += L"\r\n\r\n";
-            text += note;
-        }
+            text += part;
+        };
+        // A later service/task/rollback failure is more relevant than a stale
+        // MSI warning left by a successful earlier package.
+        append(detail);
+        if (code != 0) append(msi);
+        if (text.empty()) text = installEngine_.ErrorText();
+        if (!note.empty() && text.find(note) == std::wstring::npos) append(note);
         return text;
     }
     void ShowFailurePage(bool finished) noexcept {
@@ -1964,7 +1981,9 @@ private:
             if (!out.empty()) return true;
             if (!DefaultProgramGlassDir(x64,out)) return false;
             const wchar_t* code=x64?GlassInstallMsi::kProductPlatformX64:GlassInstallMsi::kProductPlatformX86;
-            if (GlassInstallMsi::IsProductInstalled(code) && GetFileAttributesW((out+L"\\GlassCompat.dll").c_str())==INVALID_FILE_ATTRIBUTES) {
+            const wchar_t* legacy=x64?GlassInstallMsi::kLegacyPlatformX64:GlassInstallMsi::kLegacyPlatformX86;
+            if ((GlassInstallMsi::IsProductInstalled(code) || GlassInstallMsi::IsProductInstalled(legacy)) &&
+                GetFileAttributesW((out+L"\\GlassCompat.dll").c_str())==INVALID_FILE_ATTRIBUTES) {
                 InstallLog::Line(L"Refusing to upgrade a registered product at an unverified guessed path");
                 return false;
             }
@@ -1977,7 +1996,19 @@ private:
             ShowInstallError(Text(IDS_ERR_INSTALL_PATH));
             return;
         }
-        if (os64 && !GlassInstallUtil::QueryOpenGlassInstallPath(ogDir)) ogDir=x64Dir+L"\\OpenGlass";
+        if (os64 && !GlassInstallUtil::QueryOpenGlassInstallPath(ogDir)) {
+            ogDir=x64Dir+L"\\OpenGlass";
+            // A registered product must not be removed using a guessed root
+            // when its files could be elsewhere and therefore not backed up.
+            if ((GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
+                 GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass)) &&
+                GetFileAttributesW((ogDir+L"\\OpenGlassHost.exe").c_str())==INVALID_FILE_ATTRIBUTES &&
+                GetFileAttributesW((ogDir+L"\\OpenGlass.dll").c_str())==INVALID_FILE_ATTRIBUTES) {
+                InstallLog::Line(L"Refusing to use an unverified guessed OpenGlass path");
+                ShowInstallError(Text(IDS_ERR_INSTALL_PATH));
+                return;
+            }
+        }
         InstallLog::Line(L"User started installation");
         InstallLog::LineFormat(L"Target x64=%s x86=%s OpenGlass=%s", x64Dir.c_str(), x86Dir.c_str(), ogDir.c_str());
         InstallEngine::PhaseLabels labels;
@@ -1998,6 +2029,7 @@ private:
         labels.backup = Text(IDS_STATUS_BACKUP);
         labels.glassSettings64 = Text(IDS_STATUS_GS64);
         labels.glassSettings86 = Text(IDS_STATUS_GS86);
+        labels.removing = Text(IDS_STATUS_REMOVE);
         labels.rollback = Text(IDS_STATUS_ROLLBACK);
         labels.purge = Text(IDS_STATUS_PURGE);
         labels.purgeFailed = Text(IDS_ERR_PURGE_FAILED);
@@ -2910,8 +2942,21 @@ private:
             DrawBanner(dc,true);
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
             DrawLabel(dc,Text(IDS_COMP_TITLE),Box(48,90,700,50),heading_,white);
-            DrawLabel(dc,Text(IDS_COMP_INTRO),Box(48,145,840,36),font_,muted);
-            if (!selection_.glassSettings) DrawLabel(dc,Text(IDS_COMP_GS_WARNING),Box(48,390,840,90),font_,white);
+            DrawLabel(dc,Text(IDS_COMP_INTRO),Box(48,142,840,42),font_,muted);
+            const bool os64=GlassInstallUtil::IsOs64Bit();
+            const auto state=[&](bool selected, bool installed, int x, int y) {
+                DrawLabel(dc,Text(ComponentStateId(selected,installed)),Box(x,y,400,38),small_,accent);
+            };
+            if (os64) state(selection_.platform64,installedSelection_.platform64,60,220);
+            state(selection_.platform32,installedSelection_.platform32,510,220);
+            state(selection_.glassSettings,installedSelection_.glassSettings,60,310);
+            if (os64) state(selection_.openGlass,installedSelection_.openGlass,510,310);
+            int warningY=380;
+            if (os64 && !selection_.platform32) {
+                DrawLabel(dc,Text(IDS_COMP_X86_WARNING),Box(48,warningY,840,48),font_,white);
+                warningY+=50;
+            }
+            if (!selection_.glassSettings) DrawLabel(dc,Text(IDS_COMP_GS_WARNING),Box(48,warningY,840,88),font_,white);
         } else if (page_==Page::ConfirmCancel || page_==Page::Cancelled || page_==Page::Cancelling || page_==Page::Launching) {
             DrawBanner(dc,true);
             const UINT title=page_==Page::ConfirmCancel?IDS_CONFIRM_CANCEL_TITLE:page_==Page::Cancelled?IDS_CANCELLED_TITLE:

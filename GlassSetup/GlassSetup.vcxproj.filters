@@ -18,6 +18,7 @@
     <ClCompile Include="src\InstallSupport\GlassInstallUtil.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
     <ClCompile Include="src\InstallSupport\GlassInstallWatch.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
     <ClCompile Include="src\InstallSupport\GlassInstallHost.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
+    <ClCompile Include="src\InstallSupport\GlassInstallRemoval.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
     <ClCompile Include="src\InstallSupport\GlassInstallUnlock.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -27,6 +28,8 @@
     <ClInclude Include="src\WizardProgress.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\GlassProducts.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\InstallEngine.h"><Filter>src</Filter></ClInclude>
+    <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h"><Filter>src\InstallSupport</Filter></ClInclude>
+    <ClInclude Include="src\InstallSupport\GlassRemovalOrder.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClInclude Include="src\InstallLog.h"><Filter>src</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -48,6 +51,7 @@
     <None Include="res\app.ico"><Filter>res</Filter></None>
     <None Include="tests\verify_resources.py"><Filter>tests</Filter></None>
     <None Include="tests\selection_tests.cpp"><Filter>tests</Filter></None>
+    <None Include="tests\removal_order_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\progress_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\asset-hashes.json"><Filter>tests</Filter></None>
     <None Include="tests\user-resource-hashes.json"><Filter>tests</Filter></None>

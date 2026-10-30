@@ -110,14 +110,24 @@ bool IsProductInstalled(const wchar_t* productCode) noexcept {
     return MsiQueryProductStateW(productCode) == INSTALLSTATE_DEFAULT;
 }
 
-bool UninstallProduct(const wchar_t* productCode) noexcept {
+bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress, UINT* resultCode) noexcept {
+    if (resultCode) *resultCode = ERROR_SUCCESS;
     if (!productCode || !productCode[0]) return true;
     const INSTALLSTATE state = MsiQueryProductStateW(productCode);
     if (state == INSTALLSTATE_ABSENT || state == INSTALLSTATE_UNKNOWN) return true;
     GlassInstallLog::LineFormat(L"MsiConfigureProductEx uninstall %s", productCode);
     MsiSetInternalUI(INSTALLUILEVEL_NONE, nullptr);
+    if (progress) {
+        progress->total=0; progress->sofar=0; progress->script=false;
+        progress->forward=true; progress->cancellationSent=false;
+        MsiSetExternalUIRecord(OnMsiUiRecord,
+            INSTALLLOGMODE_PROGRESS | INSTALLLOGMODE_ACTIONSTART | INSTALLLOGMODE_ERROR
+            | INSTALLLOGMODE_FATALEXIT | INSTALLLOGMODE_WARNING, progress, nullptr);
+    }
     const UINT exitCode = MsiConfigureProductExW(
         productCode, 0, INSTALLSTATE_ABSENT, L"REBOOT=ReallySuppress");
+    if (progress) MsiSetExternalUIRecord(nullptr, 0, nullptr, nullptr);
+    if (resultCode) *resultCode = exitCode;
     GlassInstallLog::LineFormat(L"Uninstall exit code %u", exitCode);
     return exitCode == ERROR_SUCCESS || exitCode == ERROR_SUCCESS_REBOOT_REQUIRED ||
            exitCode == ERROR_UNKNOWN_PRODUCT;

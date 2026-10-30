@@ -12,10 +12,16 @@ inline constexpr wchar_t kProductPlatformX86[] = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D
 inline constexpr wchar_t kProductOpenGlass[]   = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5073}";
 inline constexpr wchar_t kProductSettingsX64[] = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5074}";
 inline constexpr wchar_t kProductSettingsX86[] = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5075}";
+inline constexpr wchar_t kLegacyPlatformX64[] = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5061}";
+inline constexpr wchar_t kLegacyPlatformX86[] = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5062}";
+inline constexpr wchar_t kLegacyOpenGlass[]   = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5063}";
 
+struct ProgressSink;
 bool MsiSuccess(UINT code) noexcept;
 bool IsProductInstalled(const wchar_t* productCode) noexcept;
-bool UninstallProduct(const wchar_t* productCode) noexcept;
+// Progress/cancellation are optional; rollback always uses the non-cancellable form.
+bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress = nullptr,
+    UINT* resultCode = nullptr) noexcept;
 
 std::wstring ProductCodeFromMsiPath(const std::wstring& msiPath);
 std::wstring KnownProductCodeFromFileName(const std::wstring& msiPath);

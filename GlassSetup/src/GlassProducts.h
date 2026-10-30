@@ -1,8 +1,9 @@
 #pragma once
 
-// Shared, platform-neutral component policy. Selection for installation is not
-// an uninstall request. The OS-native platform is mandatory at install time;
-// deleting that platform cascades to the other installed products.
+// Shared, platform-neutral component policy. An install selection describes
+// the desired final product set: previously installed, unchecked products are
+// removed. The OS-native platform is mandatory; removing it in the separate
+// uninstaller cascades to the other installed products.
 namespace GlassProducts {
 struct Selection {
     bool platform64 = true;
@@ -19,6 +20,18 @@ constexpr Selection NormalizeInstall(Selection choice, bool os64) noexcept {
         choice.openGlass = false;
     }
     return choice;
+}
+
+// Installed products outside the desired set must be removed, never the
+// mandatory platform. Individual MSI architectures can be mapped to one item.
+constexpr Selection RemovalForInstall(Selection choice, Selection installed, bool os64) noexcept {
+    const Selection desired = NormalizeInstall(choice, os64);
+    return {
+        os64 && installed.platform64 && !desired.platform64,
+        installed.platform32 && !desired.platform32,
+        installed.glassSettings && !desired.glassSettings,
+        os64 && installed.openGlass && !desired.openGlass
+    };
 }
 
 constexpr Selection NormalizeRemoval(Selection choice, Selection installed, bool os64) noexcept {

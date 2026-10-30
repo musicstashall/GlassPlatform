@@ -41,11 +41,11 @@ std::wstring TrimTrailingSlashes(std::wstring path);
 
 bool QueryPlatformInstallPath(bool x64, std::wstring& out) noexcept;
 void WritePlatformInstallPath(bool x64, const std::wstring& installDir) noexcept;
-void ClearPlatformInstallPath(bool x64) noexcept;
+bool ClearPlatformInstallPath(bool x64) noexcept;
 
 bool QueryOpenGlassInstallPath(std::wstring& out) noexcept;
 void WriteOpenGlassInstallPath(const std::wstring& x64RootDir, const std::wstring& openGlassDir) noexcept;
-void ClearOpenGlassInstallPath() noexcept;
+bool ClearOpenGlassInstallPath() noexcept;
 
 bool StartMenuShortcutExists() noexcept;
 bool CreateStartMenuShortcut(const std::wstring& targetExe, const std::wstring& workingDir) noexcept;

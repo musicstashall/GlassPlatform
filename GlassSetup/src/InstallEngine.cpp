@@ -76,32 +76,11 @@ bool QueryServiceConfigStartType(const wchar_t* serviceName, bool& exists, DWORD
     return true;
 }
 
-bool LeafIs(const std::wstring& path, const wchar_t* leaf) noexcept {
-    if (path.empty() || !leaf) return false;
-    size_t end = path.size();
-    while (end > 0 && (path[end - 1] == L'\\' || path[end - 1] == L'/')) --end;
-    if (end == 0) return false;
-    const size_t slash = path.find_last_of(L"\\/", end - 1);
-    const size_t start = slash == std::wstring::npos ? 0 : slash + 1;
-    const size_t leafLen = wcslen(leaf);
-    if (end <= start || end - start != leafLen) return false;
-    return _wcsnicmp(path.c_str() + start, leaf, leafLen) == 0;
-}
-
-bool DeleteTree(const std::wstring& dir) noexcept {
-    if (dir.empty()) return false;
-    const DWORD attr = GetFileAttributesW(dir.c_str());
-    if (attr == INVALID_FILE_ATTRIBUTES) return true;
-    if ((attr & FILE_ATTRIBUTE_DIRECTORY) == 0) return false;
-    std::wstring from = GlassInstallUtil::TrimTrailingSlashes(dir);
-    from.push_back(L'\0');
-    SHFILEOPSTRUCTW op{};
-    op.wFunc = FO_DELETE;
-    op.pFrom = from.c_str();
-    op.fFlags = FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
-    const int st = SHFileOperationW(&op);
-    InstallLog::LineFormat(L"Delete tree %s -> %d", dir.c_str(), st);
-    return st == 0 && !op.fAnyOperationsAborted;
+bool ProductWasSnapshotted(const GlassInstallRollback::SessionState& state, const wchar_t* code) noexcept {
+    if (!code) return false;
+    for (const auto& product : state.oldProducts)
+        if (_wcsicmp(product.productCode.c_str(), code) == 0) return true;
+    return false;
 }
 
 std::wstring LongTempPath(const std::wstring& path) noexcept {
@@ -201,7 +180,8 @@ std::wstring PlatformRoot(GP::PlatformArch arch) noexcept {
 bool OpenGlassPresent(const std::wstring& openGlassDir) noexcept {
     if (GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe"))
         return true;
-    if (GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass))
+    if (GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
+        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass))
         return true;
     if (!openGlassDir.empty() && PathFileExistsW((GlassInstallUtil::TrimTrailingSlashes(openGlassDir) + L"\\OpenGlassHost.exe").c_str()))
         return true;
@@ -224,7 +204,9 @@ ArchPresence ClassifyArch(GP::PlatformArch arch) noexcept {
     const wchar_t* prod = (arch == GP::PlatformArch::X64)
         ? GlassInstallMsi::kProductPlatformX64
         : GlassInstallMsi::kProductPlatformX86;
-    if (GlassInstallMsi::IsProductInstalled(prod))
+    const wchar_t* legacy = (arch == GP::PlatformArch::X64)
+        ? GlassInstallMsi::kLegacyPlatformX64 : GlassInstallMsi::kLegacyPlatformX86;
+    if (GlassInstallMsi::IsProductInstalled(prod) || GlassInstallMsi::IsProductInstalled(legacy))
         return ArchPresence::Files;
     if (!PlatformRoot(arch).empty())
         return ArchPresence::Files;
@@ -330,7 +312,7 @@ bool InstallEngine::CapturePriorHostState() noexcept {
     return true;
 }
 
-bool InstallEngine::RestorePriorHosts(bool unselectedOnly) noexcept {
+bool InstallEngine::RestorePriorHosts(bool selectedOnly) noexcept {
     if (!hostsStopped_) return true;
     bool ok=true;
     auto restoreArch=[&](GP::PlatformArch arch,const std::wstring& root,bool existed,bool enabled,bool running,bool stopSignalled) -> bool {
@@ -353,11 +335,13 @@ bool InstallEngine::RestorePriorHosts(bool unselectedOnly) noexcept {
         while (!GP::IsGlassPlatformRunning(arch) && GetTickCount64()-start<30000) Sleep(200);
         return GP::IsGlassPlatformRunning(arch);
     };
-    if (!unselectedOnly || !selection_.platform64 || (prior_.x64WasRunning && !prior_.x64TaskEnabled))
+    // During success only restore manually running *selected* platforms whose
+    // tasks were disabled. Unselected products are being removed, not restarted.
+    if (!selectedOnly || (selection_.platform64 && prior_.x64WasRunning && !prior_.x64TaskEnabled))
         if (!restoreArch(GP::PlatformArch::X64,x64Dir_,prior_.x64TaskExisted,prior_.x64TaskEnabled,prior_.x64WasRunning,x64StopSignalled_)) ok=false;
-    if (!unselectedOnly || !selection_.platform32 || (prior_.x86WasRunning && !prior_.x86TaskEnabled))
+    if (!selectedOnly || (selection_.platform32 && prior_.x86WasRunning && !prior_.x86TaskEnabled))
         if (!restoreArch(GP::PlatformArch::X86,x86Dir_,prior_.x86TaskExisted,prior_.x86TaskEnabled,prior_.x86WasRunning,x86StopSignalled_)) ok=false;
-    if (unselectedOnly && selection_.openGlass) return ok;
+    if (selectedOnly) return ok; // selected OpenGlass is handled by the launch phase
     if (!prior_.ogServiceExisted && prior_.ogLegacyTaskExisted && prior_.ogWasRunning && ogStopSignalled_) {
         // TryStartup enables a disabled legacy task; never change that user preference.
         if (!prior_.ogLegacyTaskEnabled || !Shared::OpenGlassHostLaunch::TryStartup()) ok=false;
@@ -365,11 +349,10 @@ bool InstallEngine::RestorePriorHosts(bool unselectedOnly) noexcept {
     if (prior_.ogServiceExisted) {
         const SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
         if (scm) {
-            const SC_HANDLE svc = OpenServiceW(scm, L"OpenGlassHost", SERVICE_CHANGE_CONFIG | SERVICE_START);
+            const SC_HANDLE svc = OpenServiceW(scm, L"OpenGlassHost", SERVICE_START);
             CloseServiceHandle(scm);
             if (svc) {
-                (void)ChangeServiceConfigW(svc, SERVICE_NO_CHANGE, prior_.ogServiceStartType,
-                    SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+                // Existing service configuration was never changed; do not overwrite it.
                 if (prior_.ogWasRunning && ogStopSignalled_) {
                     const BOOL started=StartServiceW(svc,0,nullptr);
                     if (!started && GetLastError()!=ERROR_SERVICE_ALREADY_RUNNING) ok=false;
@@ -395,6 +378,13 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             if (ok) {
                 // Snapshot even on a clean/reinstall path: pre-existing user files must survive cancellation.
                 ok = self->CreateRollbackSnapshot();
+                snapshotFailed = !ok && !self->IsCancelRequested();
+            }
+
+            // Inspect and back up non-MSI auxiliaries before stopping hosts or
+            // touching MSI. Unsupported credentials or foreign tasks fail closed.
+            if (ok && !self->IsCancelRequested()) {
+                ok = self->PrepareProductRemoval();
                 snapshotFailed = !ok && !self->IsCancelRequested();
             }
 
@@ -452,6 +442,16 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                         const ULONGLONG remain = kMinLaunchMs - elapsed;
                         Sleep(remain > 150 ? 150 : static_cast<DWORD>(remain));
                     }
+                    // No cancellation is accepted after the launch boundary.
+                    // The last step may delete a service whose credentials cannot
+                    // be snapshotted; no fallible work follows that commit.
+                    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+                    std::wstring removalError;
+                    ok = GlassInstallRemoval::Commit(self->removalSession_, ru, removalError);
+                    if (!ok) self->SetFailure(removalError.empty()
+                        ? (ru ? L"Не удалось завершить удаление компонентов." : L"Could not finish removing components.")
+                        : removalError, 0);
+                    else self->SetStatus(self->labels_.finalize, 10000);
                 }
             }
 
@@ -459,15 +459,32 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
 
             const bool cancelled = self->IsCancelRequested() || self->quietClose_.load();
             bool restored=true;
+            const auto restoreRemovalArtifacts = [&]() {
+                const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+                std::wstring detail;
+                if (!GlassInstallRemoval::Restore(self->removalSession_, ru, detail)) {
+                    restored=false;
+                    InstallLog::LineFormat(L"Could not restore removal auxiliaries: %s", detail.c_str());
+                    AcquireSRWLockExclusive(&self->statusLock_);
+                    if (!detail.empty()) {
+                        if (!self->failureDetail_.empty()) self->failureDetail_ += L"\r\n\r\n";
+                        self->failureDetail_ += detail;
+                    }
+                    ReleaseSRWLockExclusive(&self->statusLock_);
+                }
+            };
             if (!ok || cancelled) {
                 if (cancelled) {
                     self->rollingBack_.store(true, std::memory_order_release);
                     if (self->installAttempted_) {
                         if (self->rollbackSession_.hadPriorInstall) {
                             restored=self->PerformRollback();
+                            restoreRemovalArtifacts();
                             if (!self->RestorePriorHosts()) restored=false;
                         } else {
                             restored=self->UndoCleanInstall();
+                            restoreRemovalArtifacts();
+                            if (!self->RestorePriorHosts()) restored=false;
                         }
                     } else {
                         // Отмена до изменения MSI/файлов — возвращаем остановленные хосты в прежнее состояние.
@@ -484,6 +501,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                             WaitForSingleObject(self->errorPageShown_, 20000);
                         self->rollingBack_.store(true, std::memory_order_release);
                         restored=self->PerformRollback();
+                        restoreRemovalArtifacts();
                         if (!self->RestorePriorHosts()) restored=false;
                         self->rollingBack_.store(false, std::memory_order_release);
                     } else if (snapshotFailed) {
@@ -495,6 +513,8 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                             WaitForSingleObject(self->errorPageShown_, 20000);
                         self->rollingBack_.store(true, std::memory_order_release);
                         restored=self->UndoCleanInstall();
+                        restoreRemovalArtifacts();
+                        if (!self->RestorePriorHosts()) restored=false;
                         self->rollingBack_.store(false, std::memory_order_release);
                     } else {
                         InstallLog::LineFormat(L"Install failed before MSI changes: %s", self->error_.c_str());
@@ -1002,12 +1022,29 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
     const std::wstring msiLog = InstallLog::NextMsiVerboseLogPath(label.c_str());
     if (!msiLog.empty()) MsiEnableLogW(INSTALLLOGMODE_VERBOSE, msiLog.c_str(), INSTALLLOGATTRIBUTES_FLUSHEACHLINE);
     const std::wstring productCode = GlassInstallMsi::ResolveProductCode(msiPath);
+    GlassInstallMsi::ProgressSink sink;
+    sink.label = label; sink.base = progressBase; sink.span = progressSpan;
+    sink.cancelRequested = &cancelRequested_;
+    sink.onError = [this](const std::wstring& text) { RememberMsiMessage(text.c_str()); };
+    sink.onProgress = [this](const std::wstring& lbl, int units) { SetStatus(lbl, units); };
     if (!productCode.empty() && GlassInstallMsi::IsProductInstalled(productCode.c_str())) {
+        if (!ProductWasSnapshotted(rollbackSession_, productCode.c_str())) {
+            MsiEnableLogW(0,nullptr,0);
+            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+            SetFailure(ru ? L"Продукт появился после создания резервной копии. Повторите установку."
+                          : L"The product appeared after the snapshot. Run Setup again.", 0);
+            return false;
+        }
         InstallLog::LineFormat(L"Existing product %s detected — uninstall before upgrade", productCode.c_str());
         GlassInstallRollback::NoteModified(rollbackSession_,productCode.c_str());
-        if (!GlassInstallMsi::UninstallProduct(productCode.c_str())) {
+        UINT removeCode=ERROR_SUCCESS;
+        if (!GlassInstallMsi::UninstallProduct(productCode.c_str(), &sink, &removeCode)) {
             MsiEnableLogW(0,nullptr,0);
-            SetFailure(L"Could not remove the previous MSI product",0);
+            if (removeCode == ERROR_INSTALL_USEREXIT) cancelRequested_.store(true,std::memory_order_release);
+            if (!IsCancelRequested()) {
+                const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+                SetFailure(ru ? L"Не удалось удалить предыдущую версию продукта." : L"Could not remove the previous MSI product.", removeCode);
+            }
             return false;
         }
     }
@@ -1021,24 +1058,28 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
     InstallLog::LineFormat(L"  %s", props.c_str());
     InstallLog::LineFormat(L"MSI verbose log: %s", msiLog.c_str());
 
-    GlassInstallMsi::ProgressSink sink;
-    sink.label = label;
-    sink.base = progressBase;
-    sink.span = progressSpan;
-    sink.cancelRequested = &cancelRequested_;
-    sink.onError = [this](const std::wstring& text) { RememberMsiMessage(text.c_str()); };
-    sink.onProgress = [this](const std::wstring& lbl, int units) {
-        SetStatus(lbl, units);
-    };
-
     UINT exitCode = GlassInstallMsi::InstallProduct(msiPath, props, &sink);
     if (exitCode == ERROR_PRODUCT_VERSION && !IsCancelRequested()) {
         InstallLog::Line(L"MSI 1638 — forced uninstall and retry");
         MsiEnableLogW(INSTALLLOGMODE_VERBOSE,msiLog.c_str(),INSTALLLOGATTRIBUTES_FLUSHEACHLINE);
-        if (!productCode.empty()) {
+        if (!productCode.empty() && GlassInstallMsi::IsProductInstalled(productCode.c_str())) {
+            if (!ProductWasSnapshotted(rollbackSession_,productCode.c_str())) {
+                MsiEnableLogW(0,nullptr,0);
+                const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+                SetFailure(ru ? L"Продукт появился после создания резервной копии. Повторите установку."
+                              : L"The product appeared after the snapshot. Run Setup again.", 0);
+                return false;
+            }
             GlassInstallRollback::NoteModified(rollbackSession_,productCode.c_str());
-            if (!GlassInstallMsi::UninstallProduct(productCode.c_str())) { MsiEnableLogW(0,nullptr,0); return false; }
+            UINT removeCode=ERROR_SUCCESS;
+            if (!GlassInstallMsi::UninstallProduct(productCode.c_str(), &sink, &removeCode)) {
+                MsiEnableLogW(0,nullptr,0);
+                if (removeCode == ERROR_INSTALL_USEREXIT) cancelRequested_.store(true,std::memory_order_release);
+                if (!IsCancelRequested()) SetFailure(L"Could not remove the previous MSI product",removeCode);
+                return false;
+            }
         }
+        if (IsCancelRequested()) { MsiEnableLogW(0,nullptr,0); return false; }
         exitCode = GlassInstallMsi::InstallProduct(msiPath, props, &sink);
     }
     MsiEnableLogW(0, nullptr, 0);
@@ -1071,70 +1112,122 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
 
 bool InstallEngine::RunMsiSequence() noexcept {
     const bool is64 = GlassInstallUtil::IsOs64Bit();
-
+    const bool ru = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
     struct Step {
         std::wstring msiFile;
         std::wstring dir;
         std::wstring label;
+        const wchar_t* removeCode = nullptr;
     };
     std::vector<Step> steps;
+    const auto addRemoval = [&](const wchar_t* code, const wchar_t* name) {
+        if (!GlassInstallMsi::IsProductInstalled(code)) return true;
+        // A product that appeared after the snapshot has no recoverable backup.
+        if (!ProductWasSnapshotted(rollbackSession_, code)) {
+            SetFailure(ru ? L"Состав установленных продуктов изменился после создания копии. Повторите установку."
+                          : L"Installed products changed after the snapshot. Run Setup again.", 0);
+            return false;
+        }
+        const std::wstring prefix = labels_.removing.empty() ? (ru ? L"Удаление: " : L"Removing: ") : labels_.removing;
+        steps.push_back({L"", L"", prefix + name, code});
+        return true;
+    };
+    // GlassSettings is one UI choice but can have either or both MSI codes.
+    if (!selection_.glassSettings &&
+        (!addRemoval(GlassInstallMsi::kProductSettingsX64, L"GlassSettings (x64)") ||
+         !addRemoval(GlassInstallMsi::kProductSettingsX86, L"GlassSettings (x86)"))) return false;
+    if (is64 && !selection_.openGlass &&
+        (!addRemoval(GlassInstallMsi::kProductOpenGlass, L"OpenGlass") ||
+         !addRemoval(GlassInstallMsi::kLegacyOpenGlass, L"OpenGlass"))) return false;
+    if (!selection_.platform32 &&
+        (!addRemoval(GlassInstallMsi::kProductPlatformX86, L"Glass Platform (x86)") ||
+         !addRemoval(GlassInstallMsi::kLegacyPlatformX86, L"Glass Platform (x86)"))) return false;
+
     if (is64 && selection_.platform64)
         steps.push_back({L"Glass-x64.msi", x64Dir_, labels_.platform64});
     if (selection_.platform32)
         steps.push_back({L"Glass-x86.msi", x86Dir_, labels_.platform32});
     if (selection_.glassSettings) {
-        if (is64)
-            steps.push_back({L"GlassSettings-x64.msi", x64Dir_, labels_.glassSettings64});
-        else
-            steps.push_back({L"GlassSettings-x86.msi", x86Dir_, labels_.glassSettings86});
+        if (is64) steps.push_back({L"GlassSettings-x64.msi", x64Dir_, labels_.glassSettings64});
+        else steps.push_back({L"GlassSettings-x86.msi", x86Dir_, labels_.glassSettings86});
     }
     if (is64 && selection_.openGlass)
         steps.push_back({L"OpenGlass-x64.msi", openGlassDir_, labels_.openGlass});
 
-    // An unchecked product is skipped, not uninstalled. Selective removal is handled by GlassUnins.
-    // Old products are not removed implicitly: an upgrade must remain reversible.
-
-    if (steps.empty())
-        return true;
-
     constexpr int kProgressStart = 800;
     constexpr int kProgressEnd = 9000;
-    const int span = (kProgressEnd - kProgressStart) / static_cast<int>(steps.size());
+    const int span = steps.empty() ? 0 : (kProgressEnd - kProgressStart) / static_cast<int>(steps.size());
     int base = kProgressStart;
-
     for (const auto& step : steps) {
         if (IsCancelRequested()) return false;
-        if (step.msiFile == L"Glass-x64.msi")
-            RemoveEmptyChildDir(x64Dir_, L"x64");
-        else if (step.msiFile == L"Glass-x86.msi")
-            RemoveEmptyChildDir(x86Dir_, L"x86");
+        if (step.removeCode) {
+            // Note BEFORE calling MSI: cancellation or an error can still have
+            // partially changed its registration and must be recoverable.
+            GlassInstallRollback::NoteModified(rollbackSession_, step.removeCode);
+            SetStatus(step.label, base);
+            GlassInstallMsi::ProgressSink sink;
+            sink.label=step.label; sink.base=base; sink.span=span; sink.cancelRequested=&cancelRequested_;
+            sink.onError=[this](const std::wstring& text) { RememberMsiMessage(text.c_str()); };
+            sink.onProgress=[this](const std::wstring& text, int units) { SetStatus(text, units); };
+            const std::wstring log=InstallLog::NextMsiVerboseLogPath(step.label.c_str());
+            if (!log.empty()) MsiEnableLogW(INSTALLLOGMODE_VERBOSE, log.c_str(), INSTALLLOGATTRIBUTES_FLUSHEACHLINE);
+            UINT exitCode=ERROR_SUCCESS;
+            const bool removed=GlassInstallMsi::UninstallProduct(step.removeCode, &sink, &exitCode);
+            MsiEnableLogW(0, nullptr, 0);
+            if (IsCancelRequested() || exitCode==ERROR_INSTALL_USEREXIT) {
+                cancelRequested_.store(true, std::memory_order_release);
+                return false;
+            }
+            if (!removed || GlassInstallMsi::IsProductInstalled(step.removeCode)) {
+                const std::wstring detail = (ru ? L"Не удалось удалить продукт: " : L"Could not remove product: ") + step.label;
+                SetFailure(detail, exitCode);
+                InstallLog::LineFormat(L"Remove MSI failed %s (%u); log %s", step.removeCode, exitCode, log.c_str());
+                return false;
+            }
+            base += span;
+            SetStatus(step.label, base);
+            continue;
+        }
 
-        // WiX MajorUpgrade may remove these legacy product codes inside this MSI transaction.
-        const wchar_t* legacy=step.msiFile==L"Glass-x64.msi"?L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5061}":
-            step.msiFile==L"Glass-x86.msi"?L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5062}":
-            step.msiFile==L"OpenGlass-x64.msi"?L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5063}":nullptr;
-        if (legacy && GlassInstallMsi::IsProductInstalled(legacy)) GlassInstallRollback::NoteModified(rollbackSession_,legacy);
+        if (step.msiFile == L"Glass-x64.msi") RemoveEmptyChildDir(x64Dir_, L"x64");
+        else if (step.msiFile == L"Glass-x86.msi") RemoveEmptyChildDir(x86Dir_, L"x86");
+
+        // WiX MajorUpgrade may remove legacy product codes during this transaction.
+        const wchar_t* legacy=step.msiFile==L"Glass-x64.msi"?GlassInstallMsi::kLegacyPlatformX64:
+            step.msiFile==L"Glass-x86.msi"?GlassInstallMsi::kLegacyPlatformX86:
+            step.msiFile==L"OpenGlass-x64.msi"?GlassInstallMsi::kLegacyOpenGlass:nullptr;
+        if (legacy && GlassInstallMsi::IsProductInstalled(legacy)) {
+            if (!ProductWasSnapshotted(rollbackSession_, legacy)) {
+                SetFailure(ru ? L"Установленный продукт изменился после создания копии." : L"An installed product changed after the snapshot.", 0);
+                return false;
+            }
+            GlassInstallRollback::NoteModified(rollbackSession_,legacy);
+        }
         wchar_t msiPath[MAX_PATH]{};
-        if (!PathCombineW(msiPath, tempDir_.c_str(), step.msiFile.c_str()))
-            return false;
-        if (!RunOneMsi(msiPath, step.dir, step.label, base, span))
-            return false;
+        if (!PathCombineW(msiPath, tempDir_.c_str(), step.msiFile.c_str())) return false;
+        if (!RunOneMsi(msiPath, step.dir, step.label, base, span)) return false;
         base += span;
 
-        if (step.msiFile == L"Glass-x64.msi") {
-            GlassInstallUtil::WritePlatformInstallPath(true, x64Dir_);
-        } else if (step.msiFile == L"Glass-x86.msi") {
-            GlassInstallUtil::WritePlatformInstallPath(false, x86Dir_);
-        } else if (step.msiFile == L"OpenGlass-x64.msi") {
-            GlassInstallUtil::WriteOpenGlassInstallPath(x64Dir_, openGlassDir_);
-        } else if (step.msiFile == L"GlassSettings-x64.msi" || step.msiFile == L"GlassSettings-x86.msi") {
+        if (step.msiFile == L"Glass-x64.msi") GlassInstallUtil::WritePlatformInstallPath(true, x64Dir_);
+        else if (step.msiFile == L"Glass-x86.msi") GlassInstallUtil::WritePlatformInstallPath(false, x86Dir_);
+        else if (step.msiFile == L"OpenGlass-x64.msi") GlassInstallUtil::WriteOpenGlassInstallPath(x64Dir_, openGlassDir_);
+        else if (step.msiFile == L"GlassSettings-x64.msi" || step.msiFile == L"GlassSettings-x86.msi") {
             const std::wstring gsDir = GlassInstallUtil::TrimTrailingSlashes(step.dir) + L"\\GlassSettings";
-            const std::wstring gsExe = gsDir + L"\\GlassSettings.exe";
-            (void)GlassInstallUtil::CreateStartMenuShortcut(gsExe, gsDir);
+            (void)GlassInstallUtil::CreateStartMenuShortcut(gsDir + L"\\GlassSettings.exe", gsDir);
         }
     }
 
-    InstallLog::Line(L"InstallEngine: all MSI steps succeeded");
+    // These exact values were captured in the rollback snapshot. Keep other
+    // registry settings and user files intact, and only prune empty folders.
+    if ((remove_.platform32 && !GlassInstallUtil::ClearPlatformInstallPath(false)) ||
+        (remove_.openGlass && !GlassInstallUtil::ClearOpenGlassInstallPath())) {
+        SetFailure(ru ? L"Не удалось удалить пути снятых продуктов из реестра."
+                      : L"Could not clear the removed products' registry paths.", GetLastError());
+        return false;
+    }
+    if (remove_.platform32 && !x86Dir_.empty()) (void)RemoveDirectoryW(x86Dir_.c_str());
+    if (remove_.openGlass && !openGlassDir_.empty()) (void)RemoveDirectoryW(openGlassDir_.c_str());
+    InstallLog::Line(L"InstallEngine: desired MSI selection applied");
     return true;
 }
 
@@ -1244,7 +1337,7 @@ bool InstallEngine::LaunchAndVerifySelectedProducts() noexcept {
         SetFailure(labels_.shellRegisterFailed.empty()?L"Could not register the Windows shell extension.":labels_.shellRegisterFailed,0);
         return false;
     }
-    SetStatus(labels_.finalize, 10000);
+    SetStatus(labels_.finalize, 9950);
     return true;
 }
 
@@ -1284,6 +1377,33 @@ bool InstallEngine::CreateRollbackSnapshot() noexcept {
     }
     SetStatus(labels_.backup, 800);
     return ok;
+}
+
+bool InstallEngine::PrepareProductRemoval() noexcept {
+    ComponentSelection installed{false, false, false, false};
+    installed.platform64 = ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductPlatformX64) ||
+        ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kLegacyPlatformX64);
+    installed.platform32 = ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductPlatformX86) ||
+        ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kLegacyPlatformX86);
+    installed.glassSettings = ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductSettingsX64) ||
+        ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductSettingsX86);
+    installed.openGlass = ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductOpenGlass) ||
+        ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kLegacyOpenGlass);
+    remove_ = GlassProducts::RemovalForInstall(selection_, installed, GlassInstallUtil::IsOs64Bit());
+    if (!remove_.platform32 && !remove_.openGlass && !remove_.glassSettings) return true;
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    std::wstring error;
+    if (!GlassInstallRemoval::Prepare(removalSession_, remove_.platform32, remove_.openGlass, remove_.glassSettings,
+            x64Dir_, x86Dir_, openGlassDir_, rollbackSession_.workspaceDir, &cancelRequested_, ru, error)) {
+        if (!IsCancelRequested()) SetFailure(error.empty()
+            ? (ru ? L"Не удалось подготовить безопасное удаление компонентов." : L"Could not prepare safe component removal.")
+            : error, 0);
+        return false;
+    }
+    InstallLog::LineFormat(L"Removal plan: x86=%d OpenGlass=%d Settings=%d (task backups=%u)",
+        remove_.platform32 ? 1 : 0, remove_.openGlass ? 1 : 0, remove_.glassSettings ? 1 : 0,
+        static_cast<unsigned>(removalSession_.tasks.size()));
+    return true;
 }
 
 bool InstallEngine::PerformRollback() noexcept {
@@ -1384,32 +1504,40 @@ bool InstallEngine::PurgeRemnants() noexcept {
     for (const wchar_t* code : codes) {
         if (!GlassInstallMsi::IsProductInstalled(code)) continue;
         if (IsCancelRequested()) return false;
+        if (!ProductWasSnapshotted(rollbackSession_,code)) {
+            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+            SetFailure(ru ? L"Состав установленных продуктов изменился после создания копии. Повторите установку."
+                          : L"Installed products changed after the snapshot. Run Setup again.", 0);
+            return false;
+        }
         InstallLog::LineFormat(L"Purge uninstall %s", code);
         GlassInstallRollback::NoteModified(rollbackSession_,code);
-        if (!GlassInstallMsi::UninstallProduct(code)) {
-            SetFailure(L"Could not remove an older MSI product",0);
+        GlassInstallMsi::ProgressSink sink;
+        sink.label=labels_.purge; sink.base=300; sink.span=100;
+        sink.cancelRequested=&cancelRequested_;
+        sink.onError=[this](const std::wstring& text) { RememberMsiMessage(text.c_str()); };
+        UINT removeCode=ERROR_SUCCESS;
+        if (!GlassInstallMsi::UninstallProduct(code, &sink, &removeCode)) {
+            if (removeCode == ERROR_INSTALL_USEREXIT) cancelRequested_.store(true,std::memory_order_release);
+            if (!IsCancelRequested()) {
+                const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+                SetFailure(ru ? L"Не удалось удалить прежний MSI-пакет." : L"Could not remove an older MSI product.", removeCode);
+            }
             return false;
         }
+        if (IsCancelRequested()) return false;
     }
-    auto removeInstallDir = [&](const std::wstring& dir) {
-        if (dir.empty()) return true;
-        if (!LeafIs(dir, L"GlassPlatform")) {
-            InstallLog::LineFormat(L"Purge refused, path is not GlassPlatform: %s", dir.c_str());
-            return false;
-        }
-        return DeleteTree(dir);
-    };
-    const bool removed = removeInstallDir(x64Dir_) && removeInstallDir(x86Dir_);
-    // Keep existing tasks, service and shell registrations intact; they are needed on rollback.
-    GlassInstallUtil::ClearPlatformInstallPath(true);
-    GlassInstallUtil::ClearPlatformInstallPath(false);
-    GlassInstallUtil::ClearOpenGlassInstallPath();
-    if (!removed) {
-        SetFailure(labels_.purgeFailed.empty()
-            ? L"Install folder could not be deleted." : labels_.purgeFailed, 0);
+    // MSI owns its installed files. Never recursively delete an installation
+    // directory: it can contain unrelated or user-created files. Keep tasks,
+    // service and shell registration intact until the reversible commit phase.
+    const bool is64 = GlassInstallUtil::IsOs64Bit();
+    if ((is64 && !GlassInstallUtil::ClearPlatformInstallPath(true)) ||
+        !GlassInstallUtil::ClearPlatformInstallPath(false) ||
+        (is64 && !GlassInstallUtil::ClearOpenGlassInstallPath())) {
+        SetFailure(labels_.purgeFailed.empty() ? L"Could not clear installation paths." : labels_.purgeFailed, GetLastError());
         return false;
     }
     purgeCompleted_ = true;
-    InstallLog::Line(L"Purge remnants completed");
+    InstallLog::Line(L"Purge MSI registrations completed; user files retained");
     return true;
 }

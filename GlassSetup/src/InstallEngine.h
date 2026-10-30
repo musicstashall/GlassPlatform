@@ -1,5 +1,6 @@
 #pragma once
 #include "InstallSupport/GlassInstallRollback.h"
+#include "InstallSupport/GlassInstallRemoval.h"
 #include "GlassProducts.h"
 #include <windows.h>
 #include <winsvc.h>
@@ -44,6 +45,7 @@ public:
         std::wstring nativeScanFailed;
         std::wstring snapshotFailed;
         std::wstring diskFull;
+        std::wstring removing;
     };
 
     InstallEngine() noexcept = default;
@@ -121,7 +123,8 @@ private:
 
     static DWORD WINAPI WorkerThread(LPVOID context) noexcept;
     bool CapturePriorHostState() noexcept;
-    bool RestorePriorHosts(bool unselectedOnly = false) noexcept;
+    bool RestorePriorHosts(bool selectedOnly = false) noexcept;
+    bool PrepareProductRemoval() noexcept;
     bool StopGlassPlatform(GlassShared::GlassPlatformTask::PlatformArch arch,
         const std::wstring& statusLabel, const wchar_t* logTag,
         const std::function<bool(const wchar_t*)>& fail) noexcept;
@@ -142,7 +145,9 @@ private:
 
     StatusFn status_;
     GlassInstallRollback::SessionState rollbackSession_;
+    GlassInstallRemoval::Session removalSession_;
     ComponentSelection selection_{};
+    ComponentSelection remove_ {false, false, false, false};
     PriorHostState prior_{};
     PhaseLabels labels_;
     std::wstring tempDir_;

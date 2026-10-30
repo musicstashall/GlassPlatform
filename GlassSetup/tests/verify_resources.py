@@ -34,6 +34,8 @@ rollback = read("src/InstallSupport/GlassInstallRollback.cpp")
 msi = read("src/InstallSupport/GlassInstallMsi.cpp")
 util = read("src/InstallSupport/GlassInstallUtil.cpp")
 host = read("src/InstallSupport/GlassInstallHost.cpp")
+removal = read("src/InstallSupport/GlassInstallRemoval.cpp")
+removal_order = read("src/InstallSupport/GlassRemovalOrder.h")
 watch = read("src/InstallSupport/GlassInstallWatch.cpp")
 ui = read("res/slideshow.html")
 theme = read("src/WizardTheme.cpp")
@@ -117,7 +119,9 @@ for text in (project, unins_project):
     assert "Detours.4.0.1" in text
 assert "GdiPlusCompat.h" in read("GlassSetup.vcxproj.filters")
 assert "WizardProgress.h" in project and "WizardProgress.h" in read("GlassSetup.vcxproj.filters")
-assert "progress_tests.cpp" in project
+assert "progress_tests.cpp" in project and "removal_order_tests.cpp" in project
+assert "GlassInstallRemoval.cpp" in project and "GlassRemovalOrder.h" in project
+assert project.count("taskschd.lib") >= 2
 assert 'ResourceCompile Include="GlassUnins.rc"' in unins_project
 assert "GLASS_HAVE_UNLOCKER_X64" in project
 assert "GlassSettings.Native.dll" in project and "GlassSettings.Native.dll" in unins_rc
@@ -142,6 +146,38 @@ assert "selection_.platform64=os64" in setup
 assert "IDS_COMP_GS_WARNING" in setup and "HKCU\\\\Software\\\\StanislavKa\\\\GlassPlatform" in rc
 assert "StartMenuShortcutExists" in util
 assert "QueryPlatformInstallPath" in util and "QueryOpenGlassInstallPath" in util
+# Installation is a desired-state operation, not a skip-only selection.
+policy = read("src/GlassProducts.h")
+assert "RemovalForInstall" in policy and "not an uninstall request" not in policy
+sequence = section(engine, "bool InstallEngine::RunMsiSequence()", "bool InstallEngine::LaunchAndVerifySelectedProducts()")
+for token in ("kProductSettingsX64", "kProductSettingsX86", "kProductOpenGlass", "kLegacyOpenGlass",
+              "kProductPlatformX86", "kLegacyPlatformX86", "ClearPlatformInstallPath(false)",
+              "ClearOpenGlassInstallPath()", "ProductWasSnapshotted"):
+    assert token in sequence, token
+assert sequence.index("NoteModified(rollbackSession_, step.removeCode)") < sequence.index("UninstallProduct(step.removeCode, &sink")
+assert "cancelRequested=&cancelRequested_" in sequence
+assert "TASK_LOGON_PASSWORD" in removal and "TASK_LOGON_S4U" in removal
+assert all(t in removal for t in ("GetSecurityDescriptor(kTaskSecurity", "SACL_SECURITY_INFORMATION", "ExpectedAction",
+                                  "TASK_DONT_ADD_PRINCIPAL_ACE", "TASK_IGNORE_REGISTRATION_TRIGGERS",
+                                  "RegisterTask(taskName.value", "DeleteServiceLast", "FILE_FLAG_OPEN_REPARSE_POINT",
+                                  "RegSaveKeyExW", "SE_BACKUP_NAME", "LocalSystem", "session.serviceConfiguration",
+                                  "GlassSettings.security.bin", "RestoreFileSecurity", "security == session.shortcutSecurity",
+                                  "The GlassSettings shortcut points to a different program"))
+assert "saved.xml != actualXml.value" in removal and "saved.security != actualSecurity.value" in removal
+assert "GlassRemovalOrder::Commit" in removal and removal_order.index("if (!removeShortcut())") < removal_order.index("if (!removeTask(i))") < removal_order.index("return deleteService()")
+worker = section(engine, "DWORD WINAPI InstallEngine::WorkerThread(", "bool InstallEngine::Start(")
+assert worker.index("CreateRollbackSnapshot()") < worker.index("PrepareProductRemoval()") < worker.index("StopRunningHosts()")
+assert worker.index("LaunchAndVerifySelectedProducts()") < worker.index("GlassInstallRemoval::Commit")
+assert "GlassInstallRemoval::Restore" in worker and "restoreRemovalArtifacts()" in worker
+success_restore = section(engine, "bool InstallEngine::RestorePriorHosts(", "DWORD WINAPI InstallEngine::WorkerThread(")
+assert "selection_.platform32 && prior_.x86WasRunning" in success_restore and "if (selectedOnly) return ok" in success_restore
+purge = engine[engine.index("bool InstallEngine::PurgeRemnants()"):]
+assert "DeleteTree(" not in purge and "RemoveDirectoryTree(" not in purge
+warnings = section(setup, "    std::wstring ComponentWarnings()", "    std::wstring ComponentsJson()")
+assert "IDS_COMP_X86_WARNING" in warnings and "IDS_COMP_GS_WARNING" in warnings and 'L"\\n"' in warnings
+assert "ComponentStateId" in setup and "installedSelection_.platform32" in setup and "IDS_COMP_STATE_REMOVE" in rc
+assert "item.state" in ui and "white-space:pre-line" in ui
+assert "DrawLabel(dc,Text(IDS_COMP_X86_WARNING)" in setup and "DrawLabel(dc,Text(IDS_COMP_GS_WARNING)" in setup
 
 # Detours remain in the button drawing path. The button subclass only forwards to comctl32.
 assert "DetourAttach(&g_originalDrawThemeBackground" in theme

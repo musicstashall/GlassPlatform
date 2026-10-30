@@ -65,26 +65,21 @@ void WriteRegSz(HKEY root, const wchar_t* subKey, const wchar_t* valueName, REGS
     RegCloseKey(key);
 }
 
-void DeleteRegValueAndEmptyKey(HKEY root, const wchar_t* subKey, const wchar_t* valueName, REGSAM sam) noexcept {
+bool DeleteRegistryValue(HKEY root, const wchar_t* subKey, const wchar_t* valueName, REGSAM sam) noexcept {
     HKEY key = nullptr;
-    if (RegOpenKeyExW(root, subKey, 0, KEY_READ | KEY_SET_VALUE | sam, &key) != ERROR_SUCCESS)
-        return;
-    if (valueName && *valueName)
-        RegDeleteValueW(key, valueName);
-    DWORD subKeys = 0;
-    DWORD values = 0;
-    const LSTATUS q = RegQueryInfoKeyW(key, nullptr, nullptr, nullptr, &subKeys, nullptr, nullptr,
-        &values, nullptr, nullptr, nullptr, nullptr);
-    RegCloseKey(key);
-    if (q == ERROR_SUCCESS && subKeys == 0 && values == 0) {
-        using RegDeleteKeyExFn = LSTATUS(WINAPI*)(HKEY, LPCWSTR, REGSAM, DWORD);
-        static auto pRegDeleteKeyExW = reinterpret_cast<RegDeleteKeyExFn>(
-            GetProcAddress(GetModuleHandleW(L"advapi32.dll"), "RegDeleteKeyExW"));
-        if (pRegDeleteKeyExW && sam != 0)
-            pRegDeleteKeyExW(root, subKey, sam, 0);
-        else
-            RegDeleteKeyW(root, subKey);
+    const LSTATUS opened = RegOpenKeyExW(root, subKey, 0, KEY_READ | KEY_SET_VALUE | sam, &key);
+    if (opened == ERROR_FILE_NOT_FOUND || opened == ERROR_PATH_NOT_FOUND) return true;
+    if (opened != ERROR_SUCCESS) { SetLastError(opened); return false; }
+    if (valueName && *valueName) {
+        const LSTATUS deleted = RegDeleteValueW(key, valueName);
+        if (deleted != ERROR_SUCCESS && deleted != ERROR_FILE_NOT_FOUND) {
+            RegCloseKey(key); SetLastError(deleted); return false;
+        }
     }
+    // Preserve the key and its security descriptor, even if it is now empty.
+    // A rollback can then restore the value without recreating a customised key.
+    RegCloseKey(key);
+    return true;
 }
 
 std::wstring EnsureExtractedUnlockerX64() noexcept {
@@ -490,17 +485,19 @@ void WritePlatformInstallPath(bool x64, const std::wstring& installDir) noexcept
     }
 }
 
-void ClearPlatformInstallPath(bool x64) noexcept {
+bool ClearPlatformInstallPath(bool x64) noexcept {
     const wchar_t* explicitVal = x64 ? L"InstallPathX64" : L"InstallPathX86";
     const REGSAM lmSam = x64 ? KEY_WOW64_64KEY : KEY_WOW64_32KEY;
-    DeleteRegValueAndEmptyKey(HKEY_CURRENT_USER, L"Software\\GlassPlatform", explicitVal, 0);
-    DeleteRegValueAndEmptyKey(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", explicitVal, lmSam);
-    DeleteRegValueAndEmptyKey(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPath", lmSam);
+    if (!DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", explicitVal, 0) ||
+        !DeleteRegistryValue(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", explicitVal, lmSam) ||
+        !DeleteRegistryValue(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPath", lmSam)) return false;
     if (x64 == IsOs64Bit()) {
-        DeleteRegValueAndEmptyKey(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPath", 0);
-    } else if (!x64 && IsOs64Bit()) {
-        DeleteRegValueAndEmptyKey(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath", 0);
+        return DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPath", 0);
     }
+    if (!x64 && IsOs64Bit()) {
+        return DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath", 0);
+    }
+    return true;
 }
 
 bool QueryOpenGlassInstallPath(std::wstring& out) noexcept {
@@ -524,10 +521,10 @@ void WriteOpenGlassInstallPath(const std::wstring& x64RootDir, const std::wstrin
     }
 }
 
-void ClearOpenGlassInstallPath() noexcept {
-    DeleteRegValueAndEmptyKey(HKEY_CURRENT_USER, L"Software\\StanislavKa\\GlassPlatform", L"OpenGlassInstallPath", 0);
-    DeleteRegValueAndEmptyKey(HKEY_LOCAL_MACHINE, L"Software\\StanislavKa\\GlassPlatform", L"OpenGlassInstallPath", KEY_WOW64_64KEY);
-    DeleteRegValueAndEmptyKey(HKEY_CURRENT_USER, L"Software\\StanislavKa\\OpenGlass", L"InstallPath", 0);
+bool ClearOpenGlassInstallPath() noexcept {
+    return DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\StanislavKa\\GlassPlatform", L"OpenGlassInstallPath", 0) &&
+        DeleteRegistryValue(HKEY_LOCAL_MACHINE, L"Software\\StanislavKa\\GlassPlatform", L"OpenGlassInstallPath", KEY_WOW64_64KEY) &&
+        DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\StanislavKa\\OpenGlass", L"InstallPath", 0);
 }
 
 bool StartMenuShortcutExists() noexcept {
