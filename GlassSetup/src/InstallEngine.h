@@ -138,6 +138,7 @@ private:
     bool ReleaseLockedModules() noexcept;
     bool EnsureTempWorkspace() noexcept;
     bool ExtractPayload(HINSTANCE instance) noexcept;
+    bool VerifyEmbeddedNativePayload() noexcept;
     bool InstallGlassSettingsEarly() noexcept;
     bool RunMsiSequence() noexcept;
     bool RunOneMsi(const std::wstring& msiPath, const std::wstring& installDir,

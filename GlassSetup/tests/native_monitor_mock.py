@@ -79,19 +79,23 @@ loader = section(watch, "bool BeginLocalNativeMonitor(", "\n#endif\n\nvoid Merge
 loader_prefix = r'''
 #include <cassert>
 #include <cstdint>
+#include <cwchar>
 #include <iostream>
+#include <iterator>
 #include <string>
 #define GLASS_SETUP_NATIVE_MONITOR 1
 #define WINAPI
+#define _wcsicmp wcscasecmp
 using DWORD=std::uint32_t;using BOOL=int;using FARPROC=void(*)();using HMODULE=void*;
 constexpr BOOL FALSE=0,TRUE=1;
 constexpr DWORD LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR=1,LOAD_LIBRARY_SEARCH_SYSTEM32=2;
 namespace Shared::InjectModuleScan {
  constexpr DWORD kNativeLocalInstallerScan=0x80000000u,kNativeInstallerScanProtocol=0x31495347u;
+ constexpr char kNativeInstallerProtocolExport[]="GlassSettings_InstallerScanProtocolV1";
  struct Result {DWORD pid=0;};
 }
 struct Fake {
- bool path=true,load=true,scanExport=true,unloadExport=true,capable=true,wrongProtocol=false,scanSucceeds=true,overCount=false;
+ bool path=true,load=true,identify=true,wrongLoadedPath=false,scanExport=true,unloadExport=true,marker=true,wrongMarker=false,capable=true,wrongProtocol=false,scanSucceeds=true,overCount=false;
  int frees=0,strictScans=0,handshakes=0,unloadCalls=0;DWORD flags=0;
 } fake;
 BOOL scanImpl(const DWORD*,DWORD,void* results,DWORD cap,DWORD* count){
@@ -104,11 +108,18 @@ namespace GlassInstallUtil { std::wstring EmbeddedNativeDllX86(){return fake.pat
 namespace GlassInstallLog { void Line(const wchar_t*){} template<class... T>void LineFormat(const wchar_t*,T...){} }
 DWORD GetLastError(){return 5;}
 HMODULE LoadLibraryExW(const wchar_t*,void*,DWORD flags){fake.flags=flags;return fake.load?reinterpret_cast<HMODULE>(1):nullptr;}
+DWORD GetModuleFileNameW(HMODULE,wchar_t* out,DWORD capacity){
+ if(!fake.identify)return 0;
+ const wchar_t* path=fake.wrongLoadedPath?L"other/Native.dll":L"trusted-temp/Native.dll";
+ const auto length=std::wcslen(path);assert(length<capacity);std::wcscpy(out,path);return static_cast<DWORD>(length);
+}
 BOOL FreeLibrary(HMODULE){++fake.frees;return TRUE;}
 FARPROC GetProcAddress(HMODULE,const char* name){
  std::string n(name);
  if(n=="GlassSettings_ScanGlassModules@20" && fake.scanExport) return reinterpret_cast<FARPROC>(&scanImpl);
  if(n=="_GlassSettings_ForceUnloadProcess@4" && fake.unloadExport) return reinterpret_cast<FARPROC>(&unloadImpl);
+ if(n=="GlassSettings_InstallerScanProtocolV1" && fake.marker)
+  return fake.wrongMarker?reinterpret_cast<FARPROC>(&unloadImpl):reinterpret_cast<FARPROC>(&scanImpl);
  return nullptr;
 }
 '''
@@ -118,8 +129,12 @@ int main(){
  auto reset=[](){fake={};};
  reset();fake.path=false;assert(!GlassInstallWatch::BeginLocalNativeMonitor());assert(fake.frees==0);
  reset();fake.load=false;assert(!GlassInstallWatch::BeginLocalNativeMonitor());assert(fake.frees==0);
+ reset();fake.identify=false;assert(!GlassInstallWatch::BeginLocalNativeMonitor());assert(fake.frees==1 && fake.handshakes==0);
+ reset();fake.wrongLoadedPath=true;assert(!GlassInstallWatch::BeginLocalNativeMonitor());assert(fake.frees==1 && fake.handshakes==0);
  reset();fake.scanExport=false;assert(!GlassInstallWatch::BeginLocalNativeMonitor());assert(fake.frees==1);
  reset();fake.unloadExport=false;assert(!GlassInstallWatch::BeginLocalNativeMonitor());assert(fake.frees==1);
+ reset();fake.marker=false;assert(!GlassInstallWatch::BeginLocalNativeMonitor());assert(fake.frees==1 && fake.handshakes==0);
+ reset();fake.wrongMarker=true;assert(!GlassInstallWatch::BeginLocalNativeMonitor());assert(fake.frees==1 && fake.handshakes==0);
  reset();fake.capable=false;assert(!GlassInstallWatch::BeginLocalNativeMonitor());assert(fake.frees==1 && fake.strictScans==0);
  reset();fake.wrongProtocol=true;assert(!GlassInstallWatch::BeginLocalNativeMonitor());assert(fake.frees==1 && fake.strictScans==0);
  reset();assert(GlassInstallWatch::BeginLocalNativeMonitor());assert(fake.handshakes==1);

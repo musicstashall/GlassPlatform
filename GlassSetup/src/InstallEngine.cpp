@@ -8,6 +8,7 @@
 #include "InstallSupport/GlassInstallWatch.h"
 #include "../res/resource.h"
 #include <GlassPlatformTask.h>
+#include <InjectModuleScan.h>
 #include <OpenGlassHostState.h>
 #include <msi.h>
 #include <msiquery.h>
@@ -415,6 +416,10 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
 
             bool ok = priorStateOk && !self->IsCancelRequested() && self->ExtractPayload(self->instance_);
             bool snapshotFailed = !priorStateOk && !self->IsCancelRequested();
+
+            // Check the embedded helper files without loading or executing them.
+            // A stale DLL must be diagnosed before stopping hosts or changing MSI.
+            if (ok && !self->IsCancelRequested()) ok = self->VerifyEmbeddedNativePayload();
 
             // Снимок до стопа хостов: если на диске нет места или нажата Отмена, система не затрагивается.
             if (ok) {
@@ -1099,6 +1104,40 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
     SetFailure(L"Release build required (embedded MSI missing).", 0);
     return false;
 #endif
+}
+
+bool InstallEngine::VerifyEmbeddedNativePayload() noexcept {
+    const bool ru = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
+    auto check = [&](const std::wstring& path, WORD machine, const wchar_t* arch) {
+        if (IsCancelRequested()) return false;
+        // Parsing the export table does not load the DLL or run DllMain. The
+        // normal monitoring session still begins only after the Settings MSI.
+        if (!path.empty() && GlassInstallUtil::PeMatches(path, machine,
+                Shared::InjectModuleScan::kNativeInstallerProtocolExport)) {
+            InstallLog::LineFormat(L"Native preflight %s: protocol export present (%s)", arch, path.c_str());
+            return true;
+        }
+        InstallLog::LineFormat(L"Native preflight %s: embedded DLL missing, unreadable or missing protocol export (path=%s)",
+            arch, path.empty() ? L"<none>" : path.c_str());
+        if (!IsCancelRequested()) {
+            const std::wstring message = ru
+                ? std::wstring(L"Встроенная библиотека GlassSettings.Native ") + arch +
+                    L" отсутствует или несовместима с установщиком. Проверьте журнал и пересоберите решение: Release | x64, затем Release | x86. Установленные продукты не изменялись."
+                : std::wstring(L"The embedded GlassSettings.Native ") + arch +
+                    L" is missing or incompatible with this installer. Check the log and rebuild the solution: Release | x64, then Release | x86. Installed products were not changed.";
+            SetFailure(message, 0);
+        }
+        return false;
+    };
+
+    const std::wstring x86 = GlassInstallUtil::EmbeddedNativeDllX86();
+    if (!check(x86, IMAGE_FILE_MACHINE_I386, L"x86")) return false;
+    if (scanNativeX64_) {
+        if (IsCancelRequested()) return false;
+        const std::wstring x64 = GlassInstallUtil::NativeDllForArch(GP::PlatformArch::X64, x64Dir_, x86Dir_);
+        if (!check(x64, IMAGE_FILE_MACHINE_AMD64, L"x64")) return false;
+    }
+    return !IsCancelRequested();
 }
 
 bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& installDir,

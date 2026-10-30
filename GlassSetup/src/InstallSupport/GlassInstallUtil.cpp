@@ -133,7 +133,9 @@ std::wstring EmbeddedNativeDllX86() noexcept {
     if (!g_unlockerInstance || !g_unlockerX86ResId) return {};
     std::wstring dir;
     if (!CreateSecureTempDirectory(L"GlassUnlocker86", dir)) return {};
-    const std::wstring path = dir + L"\\GlassSettings.Native.dll";
+    // Use a distinct temporary basename so a previously loaded Settings DLL
+    // cannot be mistaken for this installer's bundled x86 Native module.
+    const std::wstring path = dir + L"\\GlassSetup.Native.x86.dll";
     if (!ExtractResourceToFile(g_unlockerInstance, g_unlockerX86ResId, RT_RCDATA, path) ||
         !PeMatches(path, IMAGE_FILE_MACHINE_I386, "GlassSettings_UnlockerW")) {
         DeleteFileW(path.c_str());

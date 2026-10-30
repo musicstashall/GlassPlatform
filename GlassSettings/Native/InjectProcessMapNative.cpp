@@ -706,7 +706,12 @@ extern "C"
     {
 #ifdef _M_IX86
 #pragma comment(linker, "/EXPORT:GlassSettings_ScanGlassModules=_GlassSettings_ScanGlassModules@20")
+#pragma comment(linker, "/EXPORT:GlassSettings_InstallerScanProtocolV1=_GlassSettings_ScanGlassModules@20")
+#elif defined(_M_X64)
+#pragma comment(linker, "/EXPORT:GlassSettings_InstallerScanProtocolV1=GlassSettings_ScanGlassModules")
 #endif
+        // The versioned alias above points to this same existing scan export;
+        // it lets Setup reject an older embedded DLL before altering products.
         // Preserve the original public export for GlassSettings. Setup also uses
         // this export, but monitors x64 in its own resident rundll32 process.
         // Its explicit option requests a strict scan of only this architecture.

@@ -6,6 +6,7 @@
     <Filter Include="res"><UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier></Filter>
     <Filter Include="res\assets"><UniqueIdentifier>{9D7FB1D4-ABCE-4D2A-AD44-4BB5F4E5C114}</UniqueIdentifier></Filter>
     <Filter Include="tests"><UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier></Filter>
+    <Filter Include="scripts"><UniqueIdentifier>{4E17814D-2BEC-4AA1-B142-7C6A96F16A4B}</UniqueIdentifier></Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp"><Filter>src</Filter></ClCompile>
@@ -58,6 +59,7 @@
     <None Include="tests\unlock_state_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\asset-hashes.json"><Filter>tests</Filter></None>
     <None Include="tests\user-resource-hashes.json"><Filter>tests</Filter></None>
+    <None Include="scripts\Verify-InstallerNative.ps1"><Filter>scripts</Filter></None>
     <None Include="packages.config" />
   </ItemGroup>
 </Project>

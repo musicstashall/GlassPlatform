@@ -192,27 +192,47 @@ bool BeginLocalNativeMonitor() noexcept {
     HMODULE dll = LoadLibraryExW(path.c_str(), nullptr,
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!dll) {
-        GlassInstallLog::LineFormat(L"Watch: loading x86 Native failed (%lu)", GetLastError());
+        GlassInstallLog::LineFormat(L"Watch: loading x86 Native failed (%lu), requested=%s", GetLastError(), path.c_str());
         return false;
     }
-    const auto scan = reinterpret_cast<NativeScan>(FindNativeExport(dll,
-        "GlassSettings_ScanGlassModules", "GlassSettings_ScanGlassModules@20", "_GlassSettings_ScanGlassModules@20"));
-    const auto unload = reinterpret_cast<NativeForceUnload>(FindNativeExport(dll,
-        "GlassSettings_ForceUnloadProcess", "GlassSettings_ForceUnloadProcess@4", "_GlassSettings_ForceUnloadProcess@4"));
-    if (!scan || !unload) {
-        GlassInstallLog::Line(L"Watch: x86 Native is missing a required existing export");
+    // Verify what the loader actually returned. A same-named module, loader
+    // redirection or unexpected path must not silently bypass our preflight.
+    wchar_t loadedPath[1024]{};
+    const DWORD loadedLength = GetModuleFileNameW(dll, loadedPath, static_cast<DWORD>(std::size(loadedPath)));
+    if (!loadedLength || loadedLength >= std::size(loadedPath)) {
+        GlassInstallLog::LineFormat(L"Watch: cannot identify loaded x86 Native path (%lu)", GetLastError());
         FreeLibrary(dll);
         return false;
     }
+    GlassInstallLog::LineFormat(L"Watch: x86 Native requested=%s loaded=%s", path.c_str(), loadedPath);
+    if (_wcsicmp(path.c_str(), loadedPath) != 0) {
+        GlassInstallLog::Line(L"Watch: loaded x86 Native path differs from the embedded file");
+        FreeLibrary(dll);
+        return false;
+    }
+    const FARPROC scanExport = FindNativeExport(dll,
+        "GlassSettings_ScanGlassModules", "GlassSettings_ScanGlassModules@20", "_GlassSettings_ScanGlassModules@20");
+    const FARPROC unloadExport = FindNativeExport(dll,
+        "GlassSettings_ForceUnloadProcess", "GlassSettings_ForceUnloadProcess@4", "_GlassSettings_ForceUnloadProcess@4");
+    const FARPROC protocolExport = GetProcAddress(dll, Shared::InjectModuleScan::kNativeInstallerProtocolExport);
+    if (!scanExport || !unloadExport || !protocolExport || protocolExport != scanExport) {
+        GlassInstallLog::Line(L"Watch: x86 Native exports or versioned scan alias do not match");
+        FreeLibrary(dll);
+        return false;
+    }
+    const auto scan = reinterpret_cast<NativeScan>(scanExport);
+    const auto unload = reinterpret_cast<NativeForceUnload>(unloadExport);
     // Never pass the option-bearing capacity to an older DLL: without this
     // handshake it could interpret the high bit as a huge output buffer.
     DWORD protocol = 0;
-    if (!scan(nullptr, 0, nullptr, Shared::InjectModuleScan::kNativeLocalInstallerScan, &protocol) ||
-        protocol != Shared::InjectModuleScan::kNativeInstallerScanProtocol) {
-        GlassInstallLog::Line(L"Watch: x86 Native is too old for installer monitoring");
+    const BOOL handshake = scan(nullptr, 0, nullptr, Shared::InjectModuleScan::kNativeLocalInstallerScan, &protocol);
+    if (!handshake || protocol != Shared::InjectModuleScan::kNativeInstallerScanProtocol) {
+        GlassInstallLog::LineFormat(L"Watch: x86 Native protocol mismatch: returned=%d value=0x%08lX expected=0x%08lX",
+            handshake ? 1 : 0, protocol, Shared::InjectModuleScan::kNativeInstallerScanProtocol);
         FreeLibrary(dll);
         return false;
     }
+    GlassInstallLog::LineFormat(L"Watch: x86 Native protocol 0x%08lX accepted", protocol);
     g_localNative = dll;
     g_localScan = scan;
     g_localForceUnload = unload;

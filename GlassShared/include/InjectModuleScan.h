@@ -28,6 +28,10 @@ namespace Shared::InjectModuleScan
     // capacity plus the option above, and a valid outCount. Older DLLs return
     // FALSE; supported DLLs return TRUE and this value without scanning.
     inline constexpr DWORD kNativeInstallerScanProtocol = 0x31495347u; // 'GSI1'
+    // A versioned alias of the SAME scan export, not a second scanner. Setup
+    // inspects the PE export table before stopping hosts or changing MSI, so an
+    // older embedded DLL is rejected without executing it or touching products.
+    inline constexpr char kNativeInstallerProtocolExport[] = "GlassSettings_InstallerScanProtocolV1";
 
     struct Result
     {

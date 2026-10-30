@@ -71,6 +71,7 @@ int main(){
  assert(EmbeddedNativeDllX86().empty());assert(fake.deleted==1 && fake.removed==1 && fake.machines[0]==IMAGE_FILE_MACHINE_I386);
  reset();ConfigureEmbeddedUnlocker(reinterpret_cast<HINSTANCE>(1),216,217);
  const auto path=EmbeddedNativeDllX86();assert(!path.empty() && path.find(L"GlassUnlocker86")!=std::wstring::npos);
+ assert(path.find(L"GlassSetup.Native.x86.dll")!=std::wstring::npos);
  assert(fake.resources.size()==1 && fake.resources[0]==217 && fake.machines[0]==IMAGE_FILE_MACHINE_I386);
  assert(EmbeddedNativeDllX86()==path && fake.extracts==1 && fake.dirs==1);
  assert(!EnsureExtractedUnlockerX64().empty());assert(fake.resources.back()==216 && fake.machines.back()==IMAGE_FILE_MACHINE_AMD64);

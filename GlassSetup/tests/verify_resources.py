@@ -129,6 +129,16 @@ assert "GLASS_HAVE_UNLOCKER_X64" in project and "GLASS_HAVE_UNLOCKER_X86" in pro
 assert "GLASS_SETUP_NATIVE_MONITOR" in project and "IDR_UNLOCKER_X86" in project
 assert "GlassSettings.Native.dll" in project and "GlassSettings.Native.dll" in unins_rc
 assert "<LinkLibraryDependencies>true</LinkLibraryDependencies>" in project
+native_reference = section(project, '<ProjectReference Include="..\\GlassSettings\\Native\\GlassSettings.Native.vcxproj"', '</ProjectReference>')
+assert "<LinkLibraryDependencies>false</LinkLibraryDependencies>" in native_reference
+assert '<ResourceCompile Include="res\\GlassSetup.rc"' in project
+assert "VerifyEmbeddedNativePayload()" in engine and "kNativeInstallerProtocolExport" in engine
+native = (repo / "GlassSettings/Native/InjectProcessMapNative.cpp").read_text(encoding="utf-8")
+protocol = (repo / "GlassShared/include/InjectModuleScan.h").read_text(encoding="utf-8")
+assert "GlassSettings_InstallerScanProtocolV1" in native and "GlassSettings_InstallerScanProtocolV1" in protocol
+build_guard = read("scripts/Verify-InstallerNative.ps1")
+assert "GlassSettings_InstallerScanProtocolV1" in build_guard
+assert "-X86" in project and "-X64" in project and "Verify-InstallerNative.ps1" in project
 assert "<AdditionalDependencies>GlassShared.lib;" not in project
 solution = (repo / "GlassProject.sln").read_text(encoding="utf-8")
 setup_guid = "{7E4C1A90-6B2D-4F58-9C31-0A6E5D4B2F18}"
