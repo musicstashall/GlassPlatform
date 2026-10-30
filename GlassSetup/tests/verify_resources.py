@@ -176,8 +176,30 @@ assert "DeleteTree(" not in purge and "RemoveDirectoryTree(" not in purge
 warnings = section(setup, "    std::wstring ComponentWarnings()", "    std::wstring ComponentsJson()")
 assert "IDS_COMP_X86_WARNING" in warnings and "IDS_COMP_GS_WARNING" in warnings and 'L"\\n"' in warnings
 assert "ComponentStateId" in setup and "installedSelection_.platform32" in setup and "IDS_COMP_STATE_REMOVE" in rc
+assert "ActionForInstall" in policy and "ComponentBadgeId" in setup and "ComponentBadgeTone" in setup
+for action in ("INSTALL", "UPDATE", "REMOVE"):
+    assert f"IDS_COMP_BADGE_{action}" in setup and rc.count(f"IDS_COMP_BADGE_{action}") == 2
+    assert f".comp-badge.action-{action.lower()}" in ui
+assert "item.badgeTone" in ui and "comp-badge-lock" in ui and "item.lockTitle" in ui
+assert "DrawComponentActionBadge(dc,selected,installed,locked" in setup
 assert "item.state" in ui and "white-space:pre-line" in ui
 assert "DrawLabel(dc,Text(IDS_COMP_X86_WARNING)" in setup and "DrawLabel(dc,Text(IDS_COMP_GS_WARNING)" in setup
+
+# Merely looking up a ProductCode must never start an MSI UI session; opening
+# the read-only database avoids the initial "Preparing to install" window.
+metadata = section(msi, "std::wstring ProductCodeFromMsiPath(", "std::wstring KnownProductCodeFromFileName(")
+assert "MsiOpenDatabaseW" in metadata and "MSIDBOPEN_READONLY" in metadata
+assert "MsiDatabaseOpenViewW" in metadata and "MsiViewFetch" in metadata and "MsiRecordGetStringW" in metadata
+assert "MsiCloseHandle(record)" in metadata and "MsiCloseHandle(view)" in metadata and "MsiCloseHandle(db)" in metadata
+assert "MsiOpenPackage" not in msi and "MsiOpenProduct" not in msi
+msi_remove = section(msi, "bool UninstallProduct(", "std::wstring ProductCodeFromMsiPath(")
+msi_install = section(msi, "UINT InstallProduct(", "std::wstring QueryDisplayVersion(")
+assert msi_remove.index("MsiSetInternalUI(INSTALLUILEVEL_NONE") < msi_remove.index("MsiConfigureProductExW")
+assert msi_install.index("MsiSetInternalUI(INSTALLUILEVEL_NONE") < msi_install.index("MsiInstallProductW")
+assert "MsiSetExternalUIRecord(OnMsiUiRecord" in msi_install and "cancelRequested" in msi_install
+restore_security = section(removal, "bool RestoreFileSecurity(", "bool PrepareShortcut(")
+assert "READ_CONTROL | WRITE_DAC | WRITE_OWNER | ACCESS_SYSTEM_SECURITY" in restore_security
+assert "ReadFileSecurity(file, actual)" in restore_security
 
 # Detours remain in the button drawing path. The button subclass only forwards to comctl32.
 assert "DetourAttach(&g_originalDrawThemeBackground" in theme

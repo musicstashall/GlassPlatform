@@ -518,7 +518,8 @@ bool RestoreFileSecurity(const std::wstring& path, const std::vector<BYTE>& byte
     if (bytes.empty()) return false;
     ScopedPrivilege security(SE_SECURITY_NAME), restore(SE_RESTORE_NAME);
     if (!security.enabled || !restore.enabled) return false;
-    const HANDLE file = CreateFileW(path.c_str(), WRITE_DAC | WRITE_OWNER | ACCESS_SYSTEM_SECURITY,
+    // The restored descriptor is read back through this same handle below.
+    const HANDLE file = CreateFileW(path.c_str(), READ_CONTROL | WRITE_DAC | WRITE_OWNER | ACCESS_SYSTEM_SECURITY,
         FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (file == INVALID_HANDLE_VALUE) return false;
     BY_HANDLE_FILE_INFORMATION info{};

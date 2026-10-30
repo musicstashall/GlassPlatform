@@ -134,15 +134,23 @@ bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress, UINT* 
 }
 
 std::wstring ProductCodeFromMsiPath(const std::wstring& msiPath) {
-    MSIHANDLE pkg = 0;
-    const UINT open = MsiOpenPackageW(msiPath.c_str(), &pkg);
-    if (open != ERROR_SUCCESS) return L"";
+    // Reading a property must not start an MSI installation session: opening
+    // a package can briefly show the system "Preparing to install" window,
+    // even before our silent install callback is registered.
+    MSIHANDLE db = 0;
+    if (MsiOpenDatabaseW(msiPath.c_str(), MSIDBOPEN_READONLY, &db) != ERROR_SUCCESS) return L"";
+    MSIHANDLE view = 0, record = 0;
+    const wchar_t* query = L"SELECT `Value` FROM `Property` WHERE `Property` = 'ProductCode'";
+    UINT result = MsiDatabaseOpenViewW(db, query, &view);
+    if (result == ERROR_SUCCESS) result = MsiViewExecute(view, 0);
+    if (result == ERROR_SUCCESS) result = MsiViewFetch(view, &record);
     wchar_t value[64]{};
     DWORD cch = static_cast<DWORD>(std::size(value));
-    const UINT prop = MsiGetPropertyW(pkg, L"ProductCode", value, &cch);
-    MsiCloseHandle(pkg);
-    if (prop != ERROR_SUCCESS || !value[0]) return L"";
-    return value;
+    if (result == ERROR_SUCCESS) result = MsiRecordGetStringW(record, 1, value, &cch);
+    if (record) MsiCloseHandle(record);
+    if (view) { MsiViewClose(view); MsiCloseHandle(view); }
+    MsiCloseHandle(db);
+    return result == ERROR_SUCCESS && value[0] ? std::wstring(value) : std::wstring{};
 }
 
 std::wstring KnownProductCodeFromFileName(const std::wstring& msiPath) {

@@ -1543,8 +1543,28 @@ private:
         return json;
     }
     UINT ComponentStateId(bool selected, bool installed) const noexcept {
-        return installed ? (selected ? IDS_COMP_STATE_UPDATE : IDS_COMP_STATE_REMOVE)
-                         : (selected ? IDS_COMP_STATE_INSTALL : IDS_COMP_STATE_ABSENT);
+        switch (GlassProducts::ActionForInstall(selected,installed)) {
+        case GlassProducts::InstallAction::Install: return IDS_COMP_STATE_INSTALL;
+        case GlassProducts::InstallAction::Update: return IDS_COMP_STATE_UPDATE;
+        case GlassProducts::InstallAction::Remove: return IDS_COMP_STATE_REMOVE;
+        default: return IDS_COMP_STATE_ABSENT;
+        }
+    }
+    UINT ComponentBadgeId(GlassProducts::InstallAction action) const noexcept {
+        switch (action) {
+        case GlassProducts::InstallAction::Install: return IDS_COMP_BADGE_INSTALL;
+        case GlassProducts::InstallAction::Update: return IDS_COMP_BADGE_UPDATE;
+        case GlassProducts::InstallAction::Remove: return IDS_COMP_BADGE_REMOVE;
+        default: return 0;
+        }
+    }
+    const wchar_t* ComponentBadgeTone(GlassProducts::InstallAction action) const noexcept {
+        switch (action) {
+        case GlassProducts::InstallAction::Install: return L"install";
+        case GlassProducts::InstallAction::Update: return L"update";
+        case GlassProducts::InstallAction::Remove: return L"remove";
+        default: return L"";
+        }
     }
     std::wstring ComponentWarnings() const {
         std::wstring text;
@@ -1560,9 +1580,12 @@ private:
         std::wstring json=L"[";
         auto item=[&](const wchar_t* id, UINT title, UINT desc, bool checked, bool locked, bool hidden, bool installed) {
             if (json.size()>1) json+=L",";
-            const std::wstring badge=locked ? Text(IDS_COMP_MANDATORY) : L"";
+            const auto action=GlassProducts::ActionForInstall(checked,installed);
+            const UINT badgeId=ComponentBadgeId(action);
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
-                L",\"description\":"+JsStringLiteral(Text(desc))+L",\"badge\":"+JsStringLiteral(badge)+
+                L",\"description\":"+JsStringLiteral(Text(desc))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
+                L",\"badgeTone\":"+JsStringLiteral(ComponentBadgeTone(action))+
+                L",\"lockTitle\":"+JsStringLiteral(locked?Text(IDS_COMP_MANDATORY):L"")+
                 L",\"state\":"+JsStringLiteral(Text(ComponentStateId(checked,installed)))+
                 L",\"checked\":"+(checked?L"true":L"false")+L",\"locked\":"+(locked?L"true":L"false")+
                 L",\"hidden\":"+(hidden?L"true":L"false")+L"}";
@@ -2696,6 +2719,36 @@ private:
         DrawTextW(dc,s.c_str(),static_cast<int>(s.size()),&rect,format);
         SelectObject(dc,old);
     }
+    void DrawComponentActionBadge(HDC dc, bool selected, bool installed, bool locked, int x, int y) {
+        const auto action=GlassProducts::ActionForInstall(selected,installed);
+        const UINT badgeId=ComponentBadgeId(action);
+        if (!badgeId) return;
+        COLORREF fill=RGB(28,57,48), border=RGB(86,169,125), ink=RGB(184,244,209);
+        if (action==GlassProducts::InstallAction::Update) {
+            fill=RGB(62,48,35); border=RGB(194,153,81); ink=RGB(255,223,157);
+        } else if (action==GlassProducts::InstallAction::Remove) {
+            fill=RGB(65,34,45); border=RGB(206,101,119); ink=RGB(255,194,205);
+        }
+        constexpr int width=140, height=24;
+        {
+            Gdiplus::Graphics g(dc);
+            g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+            Gdiplus::RectF bounds(GdiReal(Scale(x)),GdiReal(Scale(y)),GdiReal(Scale(width)),GdiReal(Scale(height)));
+            Gdiplus::GraphicsPath path;
+            AddRoundedRectPath(path,bounds,GdiReal(Scale(12)));
+            Gdiplus::SolidBrush brush(Gdiplus::Color(255,GetRValue(fill),GetGValue(fill),GetBValue(fill)));
+            Gdiplus::Pen edge(Gdiplus::Color(255,GetRValue(border),GetGValue(border),GetBValue(border)),GdiReal(Scale(1)));
+            g.FillPath(&brush,&path); g.DrawPath(&edge,&path);
+            if (locked) {
+                Gdiplus::Pen lockPen(Gdiplus::Color(255,GetRValue(ink),GetGValue(ink),GetBValue(ink)),GdiReal(Scale(1)));
+                g.DrawArc(&lockPen,GdiInt(Scale(x+9)),GdiInt(Scale(y+5)),GdiInt(Scale(8)),GdiInt(Scale(9)),180.0f,180.0f);
+                g.DrawRectangle(&lockPen,GdiInt(Scale(x+8)),GdiInt(Scale(y+11)),GdiInt(Scale(10)),GdiInt(Scale(8)));
+            }
+        }
+        const int start=locked?23:8;
+        DrawLabel(dc,Text(badgeId),Box(x+start,y,width-start-6,height),small_,ink,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    }
     void DrawBrandMark(HDC dc, int x, int y) {
         Gdiplus::Graphics g(dc);
         g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
@@ -2944,13 +2997,14 @@ private:
             DrawLabel(dc,Text(IDS_COMP_TITLE),Box(48,90,700,50),heading_,white);
             DrawLabel(dc,Text(IDS_COMP_INTRO),Box(48,142,840,42),font_,muted);
             const bool os64=GlassInstallUtil::IsOs64Bit();
-            const auto state=[&](bool selected, bool installed, int x, int y) {
-                DrawLabel(dc,Text(ComponentStateId(selected,installed)),Box(x,y,400,38),small_,accent);
+            const auto state=[&](bool selected, bool installed, bool locked, int x, int y) {
+                DrawLabel(dc,Text(ComponentStateId(selected,installed)),Box(x,y,250,38),small_,accent);
+                DrawComponentActionBadge(dc,selected,installed,locked,x+260,y+2);
             };
-            if (os64) state(selection_.platform64,installedSelection_.platform64,60,220);
-            state(selection_.platform32,installedSelection_.platform32,510,220);
-            state(selection_.glassSettings,installedSelection_.glassSettings,60,310);
-            if (os64) state(selection_.openGlass,installedSelection_.openGlass,510,310);
+            if (os64) state(selection_.platform64,installedSelection_.platform64,true,60,220);
+            state(selection_.platform32,installedSelection_.platform32,!os64,510,220);
+            state(selection_.glassSettings,installedSelection_.glassSettings,false,60,310);
+            if (os64) state(selection_.openGlass,installedSelection_.openGlass,false,510,310);
             int warningY=380;
             if (os64 && !selection_.platform32) {
                 DrawLabel(dc,Text(IDS_COMP_X86_WARNING),Box(48,warningY,840,48),font_,white);

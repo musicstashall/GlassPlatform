@@ -12,6 +12,14 @@ struct Selection {
     bool openGlass = true;
 };
 
+// A checked product is installed or updated; an unchecked installed product is
+// removed. An unchecked absent product has no action and needs no badge.
+enum class InstallAction { None, Install, Update, Remove };
+constexpr InstallAction ActionForInstall(bool selected, bool installed) noexcept {
+    if (selected) return installed ? InstallAction::Update : InstallAction::Install;
+    return installed ? InstallAction::Remove : InstallAction::None;
+}
+
 constexpr Selection NormalizeInstall(Selection choice, bool os64) noexcept {
     if (os64) choice.platform64 = true;
     else {
