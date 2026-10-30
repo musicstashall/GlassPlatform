@@ -138,6 +138,7 @@
     <ClInclude Include="src\GdiPlusCompat.h" />
     <ClInclude Include="src\WizardAssets.h" />
     <ClInclude Include="src\WizardProgress.h" />
+    <ClInclude Include="src\WizardUnlockState.h" />
     <ClInclude Include="src\GlassProducts.h" />
     <ClInclude Include="src\InstallEngine.h" />
     <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h" />
@@ -165,6 +166,7 @@
     <None Include="tests\selection_tests.cpp" />
     <None Include="tests\removal_order_tests.cpp" />
     <None Include="tests\progress_tests.cpp" />
+    <None Include="tests\unlock_state_tests.cpp" />
     <None Include="tests\asset-hashes.json" />
     <None Include="tests\user-resource-hashes.json" />
     <None Include="packages.config" />

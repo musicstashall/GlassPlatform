@@ -2,6 +2,7 @@
 #include "InstallSupport/GlassInstallRollback.h"
 #include "InstallSupport/GlassInstallRemoval.h"
 #include "GlassProducts.h"
+#include "WizardUnlockState.h"
 #include <windows.h>
 #include <winsvc.h>
 #include <atomic>
@@ -101,6 +102,7 @@ public:
     enum class HoldAction { None, Retry, Unlock, Cancel };
 
     HoldKind CurrentHold() const noexcept;
+    WizardUnlock::Phase ActiveUnlock() const noexcept { return unlockActivity_.Current(); }
     std::wstring HoldReport() const noexcept;
     bool QuietClose() const noexcept { return quietClose_; }
     void SignalHold(HoldAction action) noexcept;
@@ -161,6 +163,7 @@ private:
     std::wstring openGlassDir_;
     std::wstring holdReport_;
     HoldKind holdKind_ = HoldKind::None;
+    WizardUnlock::Activity unlockActivity_;
     std::atomic<HoldAction> holdAction_{HoldAction::None};
     HANDLE holdGate_ = nullptr;
     HANDLE decisionGate_ = nullptr;

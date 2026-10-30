@@ -119,7 +119,8 @@ for text in (project, unins_project):
     assert "Detours.4.0.1" in text
 assert "GdiPlusCompat.h" in read("GlassSetup.vcxproj.filters")
 assert "WizardProgress.h" in project and "WizardProgress.h" in read("GlassSetup.vcxproj.filters")
-assert "progress_tests.cpp" in project and "removal_order_tests.cpp" in project
+assert "WizardUnlockState.h" in project and "WizardUnlockState.h" in read("GlassSetup.vcxproj.filters")
+assert "progress_tests.cpp" in project and "removal_order_tests.cpp" in project and "unlock_state_tests.cpp" in project
 assert "GlassInstallRemoval.cpp" in project and "GlassRemovalOrder.h" in project
 assert project.count("taskschd.lib") >= 2
 assert 'ResourceCompile Include="GlassUnins.rc"' in unins_project
@@ -180,10 +181,24 @@ assert "ActionForInstall" in policy and "ComponentBadgeId" in setup and "Compone
 for action in ("INSTALL", "UPDATE", "REMOVE"):
     assert f"IDS_COMP_BADGE_{action}" in setup and rc.count(f"IDS_COMP_BADGE_{action}") == 2
     assert f".comp-badge.action-{action.lower()}" in ui
-assert "item.badgeTone" in ui and "comp-badge-lock" in ui and "item.lockTitle" in ui
-assert "DrawComponentActionBadge(dc,selected,installed,locked" in setup
+assert "item.badgeTone" in ui and "comp-lock" in ui and "item.lockTitle" in ui
+assert "heading.append(componentLock(" in ui and "badge.textContent=String(item.badge)" in ui
+assert "#a7dfff" in ui and "#efb94f" in ui  # independent blue-and-gold lock, not badge-tinted
+assert "DrawComponentActionBadge(dc,selected,installed" in setup and "DrawMandatoryLock(dc," in setup
 assert "item.state" in ui and "white-space:pre-line" in ui
 assert "DrawLabel(dc,Text(IDS_COMP_X86_WARNING)" in setup and "DrawLabel(dc,Text(IDS_COMP_GS_WARNING)" in setup
+
+# The animated unlock screen must stop when the worker exits the unlock phase,
+# not when a localised status string happens to change.
+unlock = read("src/WizardUnlockState.h")
+signal = section(engine, "void InstallEngine::SignalHold(", "bool InstallEngine::StopGlassPlatform(")
+release = section(engine, "bool InstallEngine::ReleaseLockedModules(", "bool InstallEngine::EnsureTempWorkspace(")
+assert "Phase::Modules" in signal and "Phase::Processes" in signal
+assert "WizardUnlock::EndOnExit finishUnlock(unlockActivity_)" in release
+assert "unlockActivity_.End()" in release  # the next prompt clears the previous operation
+assert 'return L"installing"' in unlock and "activity_.End()" in unlock
+assert "installEngine_.ActiveUnlock()" in setup and "WizardUnlock::InstallingPage(unlock)" in setup
+assert "visualMode_" not in setup and "unlockVisualUntil_" not in setup
 
 # Merely looking up a ProductCode must never start an MSI UI session; opening
 # the read-only database avoids the initial "Preparing to install" window.

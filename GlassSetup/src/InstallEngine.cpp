@@ -278,6 +278,7 @@ void InstallEngine::RequestCancel() noexcept {
         cancelRequested_.store(true,std::memory_order_release);
         holdAction_=HoldAction::Cancel;
         holdKind_=HoldKind::None;
+        unlockActivity_.End();
     }
     ReleaseSRWLockExclusive(&statusLock_);
     if (!accepted) return;
@@ -733,6 +734,9 @@ void InstallEngine::SignalHold(HoldAction action) noexcept {
     AcquireSRWLockExclusive(&statusLock_);
     holdAction_ = action;
     holdKind_ = HoldKind::None;
+    if (action==HoldAction::Retry) unlockActivity_.Begin(WizardUnlock::Phase::Modules);
+    else if (action==HoldAction::Unlock) unlockActivity_.Begin(WizardUnlock::Phase::Processes);
+    else unlockActivity_.End();
     ReleaseSRWLockExclusive(&statusLock_);
     if (action == HoldAction::Cancel)
         cancelRequested_.store(true, std::memory_order_release);
@@ -837,9 +841,12 @@ bool InstallEngine::StopRunningHosts() noexcept {
 
 bool InstallEngine::ReleaseLockedModules() noexcept {
     using ModuleHolder = GlassInstallUnlock::ModuleHolder;
+    WizardUnlock::EndOnExit finishUnlock(unlockActivity_);
     auto publish = [&](HoldKind kind, const std::vector<ModuleHolder>& holders) {
         AcquireSRWLockExclusive(&statusLock_);
         if (!cancelRequested_.load(std::memory_order_acquire)) {
+            // A new prompt replaces the previous active unlock animation.
+            unlockActivity_.End();
             if (holdGate_) ResetEvent(holdGate_);
             holdKind_ = kind;
             holdReport_ = GlassInstallUnlock::FormatHolders(holders);

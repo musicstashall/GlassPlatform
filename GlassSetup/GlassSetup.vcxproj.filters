@@ -26,6 +26,7 @@
     <ClInclude Include="src\GdiPlusCompat.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\WizardAssets.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\WizardProgress.h"><Filter>src</Filter></ClInclude>
+    <ClInclude Include="src\WizardUnlockState.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\GlassProducts.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\InstallEngine.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h"><Filter>src\InstallSupport</Filter></ClInclude>
@@ -53,6 +54,7 @@
     <None Include="tests\selection_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\removal_order_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\progress_tests.cpp"><Filter>tests</Filter></None>
+    <None Include="tests\unlock_state_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\asset-hashes.json"><Filter>tests</Filter></None>
     <None Include="tests\user-resource-hashes.json"><Filter>tests</Filter></None>
     <None Include="packages.config" />

@@ -83,7 +83,6 @@ constexpr UINT_PTR kDebugDemoTimer = 4;
 constexpr UINT kDebugDemoPageMs = 1800;
 #endif
 enum class Page { RuntimeRequired, RuntimeInstalling, RuntimeError, AlreadyRunning, Welcome, Checking, Update, Conflicts, Downgrade, VersionInvalid, License, Components, Installing, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
-enum class VisualMode { Slideshow, UnlockModules, UnlockProcesses };
 HINSTANCE gInstance = nullptr;
 HBRUSH gWindowClassBrush = nullptr;
 bool gWindowClassRegistered = false;
@@ -1147,10 +1146,6 @@ private:
     std::wstring setupProductVersion_;
     std::wstring blockReason_;
     std::wstring downgradeBody_;
-    VisualMode visualMode_ = VisualMode::Slideshow;
-    std::wstring unlockStatusLine_;
-    ULONGLONG unlockVisualUntil_ = 0;
-    bool unlockStatusObserved_ = false;
     struct VersionCheckResult {
         bool completed = false;
         bool fetched = false;
@@ -1433,7 +1428,8 @@ private:
         Move(accept_,48,447,904,32);
         Move(progress_,0,kHtmlHeight,kWidth,kProgressHeight);
         Move(webHost_,0,0,kWidth,kHtmlHeight);
-        Move(component64_,60,185,400,32); Move(component32_,510,185,400,32);
+        // Leave room outside each platform checkbox for the separate mandatory lock.
+        Move(component64_,60,185,360,32); Move(component32_,510,185,360,32);
         Move(componentSettings_,60,275,400,32); Move(componentOpenGlass_,510,275,400,32);
         if (controller_) {
             RECT bounds=Box(0,0,kWidth,kHtmlHeight);
@@ -1492,7 +1488,7 @@ private:
         return false;
 #endif
     }
-    [[nodiscard]] const wchar_t* WebPageName() const noexcept {
+    [[nodiscard]] const wchar_t* WebPageName(WizardUnlock::Phase unlock) const noexcept {
         switch (page_) {
         case Page::Welcome: return L"welcome";
         case Page::Checking: return L"checking";
@@ -1506,10 +1502,7 @@ private:
         case Page::Cancelling: return L"cancelling";
         case Page::Cancelled: return L"cancelled";
         case Page::Launching: return L"launching";
-        case Page::Installing:
-            if (visualMode_==VisualMode::UnlockModules) return L"unlock-modules";
-            if (visualMode_==VisualMode::UnlockProcesses) return L"unlock-processes";
-            return L"installing";
+        case Page::Installing: return WizardUnlock::InstallingPage(unlock);
         case Page::ModulesBusy: return L"unlock-modules";
         case Page::ProcessesStuck: return L"unlock-processes";
         case Page::Complete: return L"complete";
@@ -1670,7 +1663,8 @@ private:
             if (FAILED(web_->PostWebMessageAsJson(init.c_str()))) return;
             webInitSent_=true;
         }
-        std::wstring json=L"{\"type\":\"state\",\"page\":"+JsStringLiteral(WebPageName())+
+        const auto unlock=installEngine_.ActiveUnlock();
+        std::wstring json=L"{\"type\":\"state\",\"page\":"+JsStringLiteral(WebPageName(unlock))+
             L",\"accepted\":"+(accepted_?L"true":L"false")+
             L",\"platformVersion\":"+JsStringLiteral(platformVersion_)+
             L",\"updateCurrent\":"+JsStringLiteral(updateCurrent_)+
@@ -1688,7 +1682,7 @@ private:
             L",\"percent\":"+std::to_wstring(percent_)+
             L",\"progress\":"+std::to_wstring(WizardProgress::ClampUnits(progressValue_))+
             L",\"marquee\":"+(progressMarquee_?L"true":L"false")+
-            L",\"unlockActive\":"+((page_==Page::Installing && visualMode_!=VisualMode::Slideshow)?L"true":L"false")+
+            L",\"unlockActive\":"+((page_==Page::Installing && unlock!=WizardUnlock::Phase::None)?L"true":L"false")+
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
             L",\"components\":"+ComponentsJson()+
             L",\"componentsWarning\":"+JsStringLiteral(ComponentWarnings())+
@@ -1979,10 +1973,6 @@ private:
         rollbackFinishStarted_ = 0;
         rollbackFinishFrom_ = 0;
         progressTickMs_ = GetTickCount64();
-        visualMode_ = VisualMode::Slideshow;
-        unlockStatusLine_.clear();
-        unlockVisualUntil_ = 0;
-        unlockStatusObserved_ = false;
         installStatusLine_ = Text(IDS_STATUS_EXTRACT);
         InvalidateRect(progress_, nullptr, FALSE);
         SetPage(Page::Installing);
@@ -2250,7 +2240,6 @@ private:
             break;
         case Page::Installing:
             simulateInstall_=false;
-            visualMode_=VisualMode::Slideshow;
             progressReverse_=false;
             progressMarquee_=false;
             rollbackFinishing_=false;
@@ -2324,7 +2313,6 @@ private:
         displayProgress_=0;
         progressTarget_=0;
         installStatusLine_.clear();
-        visualMode_=VisualMode::Slideshow;
         InstallLog::Line(L"Debug page tour finished; returned to Welcome");
         SetPage(Page::Welcome);
     }
@@ -2719,7 +2707,7 @@ private:
         DrawTextW(dc,s.c_str(),static_cast<int>(s.size()),&rect,format);
         SelectObject(dc,old);
     }
-    void DrawComponentActionBadge(HDC dc, bool selected, bool installed, bool locked, int x, int y) {
+    void DrawComponentActionBadge(HDC dc, bool selected, bool installed, int x, int y) {
         const auto action=GlassProducts::ActionForInstall(selected,installed);
         const UINT badgeId=ComponentBadgeId(action);
         if (!badgeId) return;
@@ -2739,15 +2727,26 @@ private:
             Gdiplus::SolidBrush brush(Gdiplus::Color(255,GetRValue(fill),GetGValue(fill),GetBValue(fill)));
             Gdiplus::Pen edge(Gdiplus::Color(255,GetRValue(border),GetGValue(border),GetBValue(border)),GdiReal(Scale(1)));
             g.FillPath(&brush,&path); g.DrawPath(&edge,&path);
-            if (locked) {
-                Gdiplus::Pen lockPen(Gdiplus::Color(255,GetRValue(ink),GetGValue(ink),GetBValue(ink)),GdiReal(Scale(1)));
-                g.DrawArc(&lockPen,GdiInt(Scale(x+9)),GdiInt(Scale(y+5)),GdiInt(Scale(8)),GdiInt(Scale(9)),180.0f,180.0f);
-                g.DrawRectangle(&lockPen,GdiInt(Scale(x+8)),GdiInt(Scale(y+11)),GdiInt(Scale(10)),GdiInt(Scale(8)));
-            }
         }
-        const int start=locked?23:8;
-        DrawLabel(dc,Text(badgeId),Box(x+start,y,width-start-6,height),small_,ink,
+        DrawLabel(dc,Text(badgeId),Box(x+8,y,width-14,height),small_,ink,
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    }
+    void DrawMandatoryLock(HDC dc, int x, int y) {
+        // A separate two-colour icon, not tinted by the installation action.
+        Gdiplus::Graphics g(dc);
+        g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+        Gdiplus::Pen shackle(Gdiplus::Color(255,167,223,255),GdiReal(Scale(3)));
+        g.DrawArc(&shackle,GdiInt(Scale(x+7)),GdiInt(Scale(y+2)),GdiInt(Scale(10)),GdiInt(Scale(14)),180.0f,180.0f);
+        Gdiplus::GraphicsPath body;
+        AddRoundedRectPath(body,Gdiplus::RectF(GdiReal(Scale(x+4)),GdiReal(Scale(y+10)),
+            GdiReal(Scale(16)),GdiReal(Scale(13))),GdiReal(Scale(3)));
+        Gdiplus::SolidBrush gold(Gdiplus::Color(255,239,185,79));
+        Gdiplus::Pen rim(Gdiplus::Color(255,255,226,163),GdiReal(Scale(1)));
+        g.FillPath(&gold,&body); g.DrawPath(&rim,&body);
+        Gdiplus::SolidBrush keyhole(Gdiplus::Color(255,87,60,56));
+        g.FillEllipse(&keyhole,GdiInt(Scale(x+10)),GdiInt(Scale(y+14)),GdiInt(Scale(4)),GdiInt(Scale(4)));
+        Gdiplus::Pen stem(Gdiplus::Color(255,87,60,56),GdiReal(Scale(2)));
+        g.DrawLine(&stem,GdiInt(Scale(x+12)),GdiInt(Scale(y+17)),GdiInt(Scale(x+12)),GdiInt(Scale(y+20)));
     }
     void DrawBrandMark(HDC dc, int x, int y) {
         Gdiplus::Graphics g(dc);
@@ -2997,14 +2996,15 @@ private:
             DrawLabel(dc,Text(IDS_COMP_TITLE),Box(48,90,700,50),heading_,white);
             DrawLabel(dc,Text(IDS_COMP_INTRO),Box(48,142,840,42),font_,muted);
             const bool os64=GlassInstallUtil::IsOs64Bit();
-            const auto state=[&](bool selected, bool installed, bool locked, int x, int y) {
+            const auto state=[&](bool selected, bool installed, int x, int y) {
                 DrawLabel(dc,Text(ComponentStateId(selected,installed)),Box(x,y,250,38),small_,accent);
-                DrawComponentActionBadge(dc,selected,installed,locked,x+260,y+2);
+                DrawComponentActionBadge(dc,selected,installed,x+260,y+2);
             };
-            if (os64) state(selection_.platform64,installedSelection_.platform64,true,60,220);
-            state(selection_.platform32,installedSelection_.platform32,!os64,510,220);
-            state(selection_.glassSettings,installedSelection_.glassSettings,false,60,310);
-            if (os64) state(selection_.openGlass,installedSelection_.openGlass,false,510,310);
+            if (os64) state(selection_.platform64,installedSelection_.platform64,60,220);
+            state(selection_.platform32,installedSelection_.platform32,510,220);
+            state(selection_.glassSettings,installedSelection_.glassSettings,60,310);
+            if (os64) state(selection_.openGlass,installedSelection_.openGlass,510,310);
+            DrawMandatoryLock(dc,os64?425:875,188);
             int warningY=380;
             if (os64 && !selection_.platform32) {
                 DrawLabel(dc,Text(IDS_COMP_X86_WARNING),Box(48,warningY,840,48),font_,white);
@@ -3402,23 +3402,15 @@ private:
                     return 0;
                 }
                 if (page_==Page::ModulesBusy) {
-                    visualMode_ = VisualMode::UnlockModules;
-                    unlockStatusLine_ = Text(IDS_STATUS_FORCE_UNLOAD);
-                    unlockVisualUntil_ = GetTickCount64() + 700;
-                    unlockStatusObserved_ = true;
-                    installEngine_.SetStatus(unlockStatusLine_,-1);
-                    installStatusLine_ = unlockStatusLine_;
+                    installStatusLine_ = Text(IDS_STATUS_FORCE_UNLOAD);
+                    installEngine_.SetStatus(installStatusLine_,-1);
                     installEngine_.SignalHold(InstallEngine::HoldAction::Retry);
                     SetPage(Page::Installing);
                     return 0;
                 }
                 if (page_==Page::ProcessesStuck) {
-                    visualMode_ = VisualMode::UnlockProcesses;
-                    unlockStatusLine_ = Text(IDS_STATUS_UNLOCK_PROCESSES);
-                    unlockVisualUntil_ = GetTickCount64() + 700;
-                    unlockStatusObserved_ = true;
-                    installEngine_.SetStatus(unlockStatusLine_,-1);
-                    installStatusLine_ = unlockStatusLine_;
+                    installStatusLine_ = Text(IDS_STATUS_UNLOCK_PROCESSES);
+                    installEngine_.SetStatus(installStatusLine_,-1);
                     installEngine_.SignalHold(InstallEngine::HoldAction::Unlock);
                     SetPage(Page::Installing);
                     return 0;
