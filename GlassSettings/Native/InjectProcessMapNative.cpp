@@ -632,6 +632,9 @@ extern "C"
 
     __declspec(dllexport) BOOL WINAPI GlassSettings_ForceUnloadProcess(DWORD pid) noexcept
     {
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_ForceUnloadProcess=_GlassSettings_ForceUnloadProcess@4")
+#endif
         return UnloadPid(pid);
     }
 
@@ -701,8 +704,23 @@ extern "C"
         DWORD maxResults,
         DWORD* outCount) noexcept
     {
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_ScanGlassModules=_GlassSettings_ScanGlassModules@20")
+#endif
+        // Preserve the original public export for GlassSettings. Setup also uses
+        // this export, but monitors x64 in its own resident rundll32 process.
+        // Its explicit option requests a strict scan of only this architecture.
+        const bool installerLocal = (maxResults & Shared::InjectModuleScan::kNativeLocalInstallerScan) != 0;
+        maxResults &= ~Shared::InjectModuleScan::kNativeLocalInstallerScan;
+        if (installerLocal && !pids && pidsCount == 0 && !outResults && maxResults == 0 && outCount) {
+            *outCount = Shared::InjectModuleScan::kNativeInstallerScanProtocol;
+            return TRUE;
+        }
         if (!outResults || maxResults == 0 || !outCount)
             return FALSE;
+        if (installerLocal)
+            return Shared::InjectModuleScan::ScanForSetup(pids, pidsCount,
+                static_cast<Shared::InjectModuleScan::Result*>(outResults), maxResults, outCount) ? TRUE : FALSE;
         const BOOL ok = Shared::InjectModuleScan::Scan(
             pids,
             pidsCount,

@@ -33,6 +33,7 @@ prefix = r'''
 #include <string_view>
 #include <thread>
 #include <vector>
+#define GLASS_SETUP_NATIVE_MONITOR 1
 using DWORD=unsigned; using ULONGLONG=unsigned long long;
 #define _wcsicmp wcscasecmp
 constexpr int INFINITE=-1;
@@ -51,8 +52,8 @@ namespace InstallLog { void Line(const wchar_t*){} template<class... A>void Line
 struct Harness {
  std::atomic_bool retrySucceeds{true},released{false},forceEntered{false},processEntered{false};
  std::atomic_bool failAfterProcess{false};
- bool emptyInitially=false,failWatch=false; int failAt=0;
- Event forceGate,processGate; std::atomic_int scans{0};
+ bool emptyInitially=false,failWatch=false,failNativeLoad=false; int failAt=0;
+ Event forceGate,processGate; std::atomic_int scans{0},loads{0},unloads{0};
 };
 static Harness* harness=nullptr;
 namespace GlassInstallUnlock {
@@ -75,9 +76,13 @@ namespace GlassInstallUnlock {
  }
 }
 namespace GlassInstallWatch {
- bool WaitUntilClearOrTimeout(int,const std::wstring&,const std::wstring&,bool,
-     std::vector<GlassInstallUnlock::ModuleHolder>&,bool& failed,const std::atomic_bool*){
-   failed=harness->failWatch; return false;
+ bool BeginLocalNativeMonitor(){++harness->loads;return !harness->failNativeLoad;}
+ void EndLocalNativeMonitor(){++harness->unloads;}
+ bool WaitUntilClearOrTimeout(int,const std::wstring& x64,const std::wstring& x86,bool need64,
+     std::vector<GlassInstallUnlock::ModuleHolder>& rows,bool& failed,const std::atomic_bool* cancel){
+   if(harness->failWatch){failed=true;return false;}
+   rows=GlassInstallUnlock::CollectHolders(x64,x86,need64,failed,cancel);
+   return !failed && rows.empty();
  }
 }
 bool IsProtectedProcessName(const wchar_t*){return false;}
@@ -120,6 +125,7 @@ int main(){
      SetEvent(&h.processGate);
    }
    worker.join();assert(result);assert(!e.failed_);assert(page(e,L"installing"));
+   assert(h.loads==1 && h.unloads==1);
  }
  {
    Harness h;harness=&h;fakeTime=0;InstallEngine e;bool result=true;
@@ -127,7 +133,11 @@ int main(){
    until([&]{return e.CurrentHold()==InstallEngine::HoldKind::Modules;});e.SignalHold(InstallEngine::HoldAction::Retry);
    until([&]{return h.forceEntered.load(std::memory_order_acquire);});
    e.cancelRequested_.store(true,std::memory_order_release);SetEvent(&h.forceGate);worker.join();
-   assert(!result);assert(!e.failed_);assert(page(e,L"installing"));
+   assert(!result);assert(!e.failed_);assert(page(e,L"installing"));assert(h.loads==1 && h.unloads==1);
+ }
+ {
+   Harness h;h.failNativeLoad=true;harness=&h;fakeTime=0;InstallEngine e;
+   assert(!e.ReleaseLockedModules());assert(e.failed_);assert(h.loads==1 && h.unloads==0 && h.scans==0);
  }
  for(bool clean:{false,true}){
    Harness h;h.failAt=1;harness=&h;fakeTime=0;InstallEngine e;e.forceClean_=clean;

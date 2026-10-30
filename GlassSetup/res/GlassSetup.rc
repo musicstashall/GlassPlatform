@@ -348,6 +348,9 @@ END
 #ifdef GLASS_HAVE_UNLOCKER_X64
 IDR_UNLOCKER_X64 RCDATA "..\\..\\Build\\x64\\Release\\GlassSettings.Native.dll"
 #endif
+#ifdef GLASS_HAVE_UNLOCKER_X86
+IDR_UNLOCKER_X86 RCDATA "..\\..\\Build\\x86\\Release\\GlassSettings.Native.dll"
+#endif
 #ifdef GLASS_EMBED_MSI
 IDR_MSI_GS_X64 RCDATA "..\\..\\Build\\GlassSetup\\msi\\Release\\GlassSettings-x64\\GlassSettings-x64.msi"
 IDR_MSI_GS_X86 RCDATA "..\\..\\Build\\GlassSetup\\msi\\Release\\GlassSettings-x86\\GlassSettings-x86.msi"

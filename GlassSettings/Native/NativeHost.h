@@ -115,6 +115,9 @@ extern "C"
     /// 0=Idle, 1=Running, 2=Stopping, 3=Residual (GlassPlatformTask::InjectLifecycleUi).
     __declspec(dllexport) int WINAPI GlassSettings_QueryInjectLifecycleUiForArch(int arch) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_RefreshInjectResidualStickyForArch(int arch) noexcept;
+    // Setup may OR Shared::InjectModuleScan::kNativeLocalInstallerScan into
+    // maxResults after the documented capability handshake; normal callers
+    // continue to pass the plain output-buffer capacity.
     __declspec(dllexport) BOOL WINAPI GlassSettings_ScanGlassModules(
         const DWORD* pids,
         DWORD pidsCount,

@@ -51,11 +51,15 @@
     <IntDir>$(MSBuildThisFileDirectory)..\Cache\GlassSetup\Win32\Release\</IntDir>
     <TargetName>GlassSetup</TargetName>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <GlassDebugNativeX64 Condition="Exists('$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll')">GLASS_HAVE_UNLOCKER_X64;</GlassDebugNativeX64>
+    <GlassDebugNativeX86 Condition="Exists('$(MSBuildThisFileDirectory)..\Build\x86\Release\GlassSettings.Native.dll')">GLASS_HAVE_UNLOCKER_X86;</GlassDebugNativeX86>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;_WIN32_WINNT=0x0A00;GLASS_SETUP_NATIVE_MONITOR;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -66,12 +70,12 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateManifest>false</GenerateManifest>
-      <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>GlassShared.lib;$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)res;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions Condition="Exists('$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll')">GLASS_HAVE_UNLOCKER_X64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>$(GlassDebugNativeX64)$(GlassDebugNativeX86)%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -80,7 +84,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;_WIN32_WINNT=0x0A00;GLASS_EMBED_MSI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;_WIN32_WINNT=0x0A00;GLASS_EMBED_MSI;GLASS_SETUP_NATIVE_MONITOR;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
@@ -93,12 +97,12 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateManifest>false</GenerateManifest>
-      <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>GlassShared.lib;$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)res;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>GLASS_EMBED_MSI;GLASS_HAVE_UNLOCKER_X64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GLASS_EMBED_MSI;GLASS_HAVE_UNLOCKER_X64;GLASS_HAVE_UNLOCKER_X86;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
   </ItemDefinitionGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -107,6 +111,7 @@
   <!-- MSI собирает solution: x64 WiX только в Release|x64, x86 WiX только в Release|x86. GlassSetup (Win32, шаг x86) только проверяет, что файлы уже лежат в Build. -->
   <Target Name="GlassSetupVerifyEmbeddedMsi" BeforeTargets="BeforeResourceCompile" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll')" Text="Нет Build\x64\Release\GlassSettings.Native.dll (IDR_UNLOCKER_X64). Сначала выполните сборку solution Release|x64." />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\Build\x86\Release\GlassSettings.Native.dll')" Text="Нет Build\x86\Release\GlassSettings.Native.dll (IDR_UNLOCKER_X86). Сначала соберите GlassSettings.Native Release|Win32." />
     <Error Condition="!Exists('$(GlassMsiPayloadDir)GlassSettings-x64\GlassSettings-x64.msi')" Text="Нет $(GlassMsiPayloadDir)GlassSettings-x64\GlassSettings-x64.msi. Сначала полная сборка solution Release|x64 (GlassSettings-x64, Glass-x64, OpenGlass-x64), затем Release|x86." />
     <Error Condition="!Exists('$(GlassMsiPayloadDir)Glass-x64\Glass-x64.msi')" Text="Нет Glass-x64.msi. Сначала solution Release|x64." />
     <Error Condition="!Exists('$(GlassMsiPayloadDir)OpenGlass-x64\OpenGlass-x64.msi')" Text="Нет OpenGlass-x64.msi. Сначала solution Release|x64." />
@@ -117,6 +122,7 @@
   <ItemGroup>
     <ProjectReference Include="..\GlassShared\GlassShared.vcxproj">
       <Project>{2591bb0c-7c14-42fc-a888-d9a7f4d2a723}</Project>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>

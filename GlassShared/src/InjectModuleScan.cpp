@@ -63,12 +63,22 @@ namespace Shared::InjectModuleScan
         // WOW64 cannot inspect native x64 modules; the installer's native
         // helper handles those PIDs. Access errors are different from an
         // intentionally skipped architecture and must not look like success.
-        [[nodiscard]] ScanAbility CanScanProcessModules(DWORD pid) noexcept
+        [[nodiscard]] ScanAbility CanScanProcessModules(DWORD pid, bool localArchitectureOnly) noexcept
         {
 #if defined(_WIN64)
-            (void)pid;
-            return ScanAbility::Supported;
+            // The ordinary GlassSettings scan keeps its historical ability to
+            // inspect WOW64 processes. The installer has a separate x86 Native
+            // monitor, so the strict x64 helper reports only native processes.
+            if (!localArchitectureOnly) return ScanAbility::Supported;
+            HANDLE hProc = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (!hProc) return ScanAbility::Unknown;
+            BOOL targetWow = FALSE;
+            const BOOL ok = ::IsWow64Process(hProc, &targetWow);
+            ::CloseHandle(hProc);
+            if (!ok) return ScanAbility::Unknown;
+            return targetWow ? ScanAbility::OtherArchitecture : ScanAbility::Supported;
 #else
+            (void)localArchitectureOnly;
             BOOL selfWow = FALSE;
             if (!::IsWow64Process(::GetCurrentProcess(), &selfWow))
                 return ScanAbility::Unknown;
@@ -106,7 +116,7 @@ namespace Shared::InjectModuleScan
             CopyExeName(out.exeName, exeHint);
             if (incomplete) *incomplete = false;
 
-            const ScanAbility ability = CanScanProcessModules(pid);
+            const ScanAbility ability = CanScanProcessModules(pid, scanAllExplorerModules);
             if (ability != ScanAbility::Supported)
             {
                 if (incomplete && ability == ScanAbility::Unknown) *incomplete = true;

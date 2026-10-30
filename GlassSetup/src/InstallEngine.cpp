@@ -150,6 +150,20 @@ bool OpenGlassPresent(const std::wstring& openGlassDir) noexcept {
 
 enum class ArchPresence { Running, TaskStopped, Files, Absent };
 
+// GP::IsGlassPlatformRunning treats all OpenMutex failures as "stopped".
+// Setup must distinguish a missing mutex from access or other errors before
+// modifying MSI, and keep checking until the named mutex really disappears.
+bool QueryPlatformMutex(GP::PlatformArch arch, bool& running) noexcept {
+    running = false;
+    HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, GP::InstanceMutexName(arch));
+    if (mutex) {
+        CloseHandle(mutex);
+        running = true;
+        return true;
+    }
+    return GetLastError() == ERROR_FILE_NOT_FOUND;
+}
+
 ArchPresence ClassifyArch(GP::PlatformArch arch) noexcept {
     if (GP::IsGlassPlatformRunning(arch))
         return ArchPresence::Running;
@@ -248,11 +262,16 @@ bool InstallEngine::CapturePriorHostState() noexcept {
     GP::InvalidateGlassAutorunTaskCache();
     prior_.x64TaskExisted = GP::GlassAutorunTaskExists(GP::PlatformArch::X64);
     prior_.x64TaskEnabled = GP::QueryGlassAutorunUiState(GP::PlatformArch::X64) != GP::AutorunUiState::Disabled;
-    prior_.x64WasRunning = GP::IsGlassPlatformRunning(GP::PlatformArch::X64);
-
     prior_.x86TaskExisted = GP::GlassAutorunTaskExists(GP::PlatformArch::X86);
     prior_.x86TaskEnabled = GP::QueryGlassAutorunUiState(GP::PlatformArch::X86) != GP::AutorunUiState::Disabled;
-    prior_.x86WasRunning = GP::IsGlassPlatformRunning(GP::PlatformArch::X86);
+    if (!QueryPlatformMutex(GP::PlatformArch::X64, prior_.x64WasRunning) ||
+        !QueryPlatformMutex(GP::PlatformArch::X86, prior_.x86WasRunning)) {
+        const DWORD error = GetLastError();
+        InstallLog::LineFormat(L"Could not inspect platform mutex before changes (%lu)", error);
+        SetFailure(labels_.snapshotFailed.empty() ? L"Could not inspect the platform; no changes were made."
+                                                 : labels_.snapshotFailed, error);
+        return false;
+    }
 
     if (!GlassInstallHost::QueryOpenGlassServiceStartType(prior_.ogServiceExisted, prior_.ogServiceStartType)) {
         const DWORD error=GetLastError();
@@ -305,7 +324,9 @@ bool InstallEngine::RestorePriorHosts(bool selectedOnly) noexcept {
     auto restoreArch=[&](GP::PlatformArch arch,const std::wstring& root,bool existed,bool enabled,bool running,bool stopSignalled) -> bool {
         if (!running) return true;
         if (stopSignalled) (void)GP::WaitForPlatformStopped(arch,30000);
-        if (GP::IsGlassPlatformRunning(arch)) return true;
+        bool hostRunning = false;
+        if (!QueryPlatformMutex(arch, hostRunning)) return false;
+        if (hostRunning) return true;
         if (existed && enabled) GP::StartPlatform(arch);
         else {
             // A manually started host may have no task or a disabled task. Do not enable it.
@@ -319,8 +340,12 @@ bool InstallEngine::RestorePriorHosts(bool selectedOnly) noexcept {
             CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
         }
         const ULONGLONG start=GetTickCount64();
-        while (!GP::IsGlassPlatformRunning(arch) && GetTickCount64()-start<30000) Sleep(200);
-        return GP::IsGlassPlatformRunning(arch);
+        do {
+            if (!QueryPlatformMutex(arch, hostRunning)) return false;
+            if (hostRunning) return true;
+            Sleep(200);
+        } while (GetTickCount64()-start<30000);
+        return false;
     };
     // During success only restore manually running *selected* platforms whose
     // tasks were disabled. Unselected products are being removed, not restarted.
@@ -363,8 +388,8 @@ bool InstallEngine::RestorePriorHosts(bool selectedOnly) noexcept {
 
 DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             auto* self = static_cast<InstallEngine*>(p);
-            const bool priorStateOk=self->CapturePriorHostState();
-            if (priorStateOk) self->DetermineCleanInstall();
+            bool priorStateOk=self->CapturePriorHostState();
+            if (priorStateOk) priorStateOk=self->DetermineCleanInstall();
             if (self->forceClean_)
                 InstallLog::Line(L"Clean reinstall: remnants will be removed before install");
 
@@ -387,20 +412,27 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
 
             if (ok && !self->IsCancelRequested()) {
                 GlassInstallUtil::CloseGlassSettingsProcesses(&self->cancelRequested_);
-                if (!self->IsCancelRequested() && (self->forceClean_ || !self->cleanInstall_)) ok = self->StopRunningHosts();
-                // Even a fresh install can encounter orphaned modules from a
-                // previous installation. Always scan both OS architectures.
-                if (ok && !self->IsCancelRequested()) ok = self->ReleaseLockedModules();
-                if (ok && !self->IsCancelRequested() && self->forceClean_) {
-                    self->installAttempted_ = true;
-                    ok = self->PurgeRemnants();
-                    if (ok) self->cleanInstall_ = true;
-                }
+                if (!self->IsCancelRequested()) ok = self->StopRunningHosts();
             }
 
-            // GlassSettings ставится строго ПОСЛЕ ReleaseLockedModules — до MSI ни один пакет не тронут.
+            // The chosen Settings product is installed after the snapshot and
+            // platform-stop/mutex wait, but before the two Native monitors.
+            // If it is not chosen, only embedded helpers are used; no temporary
+            // Settings MSI is registered. Record changes before starting MSI so
+            // cancellation or a scan failure takes the normal rollback path.
+            if (ok && !self->IsCancelRequested()) ok = self->InstallGlassSettingsEarly();
+            // Even a fresh install can encounter orphaned modules from an
+            // older installation. Always monitor both OS architectures.
+            if (ok && !self->IsCancelRequested()) ok = self->ReleaseLockedModules();
+            if (ok && !self->IsCancelRequested() && self->forceClean_) {
+                self->installAttempted_ = true;
+                self->nonSettingsChangesAttempted_ = true;
+                ok = self->PurgeRemnants();
+                if (ok) self->cleanInstall_ = true;
+            }
             if (ok && !self->IsCancelRequested()) {
                 self->installAttempted_ = true;
+                self->nonSettingsChangesAttempted_ = true;
                 ok = self->RunMsiSequence();
             }
 
@@ -530,6 +562,9 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                 (void)RemoveDirectoryTree(self->tempDir_);
                 self->tempDir_.clear();
             }
+            // The local Native module has been released before rollback and no
+            // helper process is needed beyond this point.
+            GlassInstallUtil::CleanupEmbeddedUnlocker();
 
             self->succeeded_ = ok && !self->userCancelled_.load(std::memory_order_acquire);
             self->finished_.store(true,std::memory_order_release);
@@ -565,7 +600,7 @@ bool InstallEngine::Start(
 
     selection_=GlassProducts::NormalizeInstall(selection_,GlassInstallUtil::IsOs64Bit());
 
-    GlassInstallUtil::ConfigureEmbeddedUnlocker(instance, IDR_UNLOCKER_X64);
+    GlassInstallUtil::ConfigureEmbeddedUnlocker(instance, IDR_UNLOCKER_X64, IDR_UNLOCKER_X86);
 
     holdGate_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     decisionGate_ = CreateEventW(nullptr, TRUE, TRUE, nullptr);
@@ -738,29 +773,36 @@ void InstallEngine::SignalHold(HoldAction action) noexcept {
 bool InstallEngine::StopGlassPlatform(GP::PlatformArch arch, const std::wstring& statusLabel,
     const wchar_t* logTag, const std::function<bool(const wchar_t*)>& fail) noexcept {
     SetStatus(statusLabel, -1);
-    if (GP::IsGlassPlatformRunning(arch)) {
-        const bool signaled = GP::SignalPlatformStop(arch);
-        if (arch==GP::PlatformArch::X64) x64StopSignalled_=signaled;
-        else x86StopSignalled_=signaled;
-        InstallLog::LineFormat(L"%s: SignalPlatformStop %s", logTag, signaled ? L"ok" : L"failed");
-    } else {
-        InstallLog::LineFormat(L"%s: host already stopped", logTag);
+    bool running = false;
+    if (!QueryPlatformMutex(arch, running)) return fail(L"GlassPlatform mutex state");
+    const bool wasRunning = arch == GP::PlatformArch::X64 ? prior_.x64WasRunning : prior_.x86WasRunning;
+    if (running && !wasRunning) {
+        // Do not stop a host that started after the rollback state was captured.
+        const bool ru = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
+        SetFailure(ru ? L"Состояние платформы изменилось после создания копии. Повторите установку."
+                      : L"The platform state changed after the snapshot. Run Setup again.", 0);
+        return false;
     }
+    if (!running) {
+        InstallLog::LineFormat(L"%s: host already stopped", logTag);
+        return !IsCancelRequested();
+    }
+    const bool signaled = GP::SignalPlatformStop(arch);
+    if (arch==GP::PlatformArch::X64) x64StopSignalled_=signaled;
+    else x86StopSignalled_=signaled;
+    InstallLog::LineFormat(L"%s: SignalPlatformStop %s", logTag, signaled ? L"ok" : L"failed");
 
     const ULONGLONG deadline = GetTickCount64() + 45000;
     // Finish an already-signalled stop before rollback checks the old state.
-    while (GetTickCount64() < deadline) {
-        if (!GP::IsGlassPlatformRunning(arch)) {
-            (void)GP::StopOrphanAutorunTaskInstance(arch);
-            break;
-        }
+    while (running && GetTickCount64() < deadline) {
         Sleep(250);
+        if (!QueryPlatformMutex(arch, running)) return fail(L"GlassPlatform mutex state");
     }
+    if (!running) (void)GP::StopOrphanAutorunTaskInstance(arch);
     // Residual modules are monitored in ReleaseLockedModules, with their own
     // visible status and the unlock pages, not hidden in the host-stop phase.
-    if (IsCancelRequested())
-        return false;
-    if (GP::IsGlassPlatformRunning(arch)) {
+    if (IsCancelRequested()) return false;
+    if (running) {
         InstallLog::LineFormat(L"%s: host still running", logTag);
         return fail(L"GlassPlatform host");
     }
@@ -777,32 +819,12 @@ bool InstallEngine::StopRunningHosts() noexcept {
         return false;
     };
 
-    if (cleanInstall_) {
-        InstallLog::Line(L"Clean install — no hosts to stop; module scan still required");
-        return true;
-    }
-
     hostsStopped_ = true;
-    const ArchPresence x64 = ClassifyArch(GP::PlatformArch::X64);
-    const ArchPresence x86 = ClassifyArch(GP::PlatformArch::X86);
     const bool openGlass = OpenGlassPresent(openGlassDir_) || prior_.ogLegacyTaskExisted || prior_.ogWasRunning;
-
-    if (x64 == ArchPresence::Running) {
-        if (!StopGlassPlatform(GP::PlatformArch::X64, labels_.stop64, L"x64", fail))
-            return false;
-    } else {
-        InstallLog::Line(x64 == ArchPresence::Absent
-            ? L"x64: no task and no files"
-            : L"x64: host not running — skip stop");
-    }
-    if (x86 == ArchPresence::Running) {
-        if (!StopGlassPlatform(GP::PlatformArch::X86, labels_.stop86, L"x86", fail))
-            return false;
-    } else {
-        InstallLog::Line(x86 == ArchPresence::Absent
-            ? L"x86: no task and no files"
-            : L"x86: host not running — skip stop");
-    }
+    // Recheck both mutexes even on a seemingly clean install: a host may have
+    // appeared after the initial snapshot. Unknown mutex state fails closed.
+    if (!StopGlassPlatform(GP::PlatformArch::X64, labels_.stop64, L"x64", fail)) return false;
+    if (!StopGlassPlatform(GP::PlatformArch::X86, labels_.stop86, L"x86", fail)) return false;
 
     if (openGlass) {
         SetStatus(labels_.stopOg, -1);
@@ -851,6 +873,12 @@ bool InstallEngine::ReleaseLockedModules() noexcept {
             ? L"Process module scan failed." : labels_.nativeScanFailed, 0);
         return false;
     };
+#ifdef GLASS_SETUP_NATIVE_MONITOR
+    if (!GlassInstallWatch::BeginLocalNativeMonitor()) return failScan();
+    struct LocalMonitorScope {
+        ~LocalMonitorScope() { GlassInstallWatch::EndLocalNativeMonitor(); }
+    } localMonitorScope;
+#endif
     std::vector<DWORD> settingsClosed;
     auto nudgeSettings = [&](const std::vector<ModuleHolder>& list) {
         for (const auto& holder : list) {
@@ -866,10 +894,14 @@ bool InstallEngine::ReleaseLockedModules() noexcept {
         }
     };
 
-    std::vector<ModuleHolder> holders =
-        GlassInstallUnlock::CollectHolders(x64Dir_, x86Dir_, scanNativeX64_, nativeFailed, &cancelRequested_);
+    std::vector<ModuleHolder> holders;
+    // Start the resident x64 rundll32 monitor before the first local x86 scan;
+    // the watcher keeps both results current while modules unload naturally.
+    const bool cleared = GlassInstallWatch::WaitUntilClearOrTimeout(
+        30000, x64Dir_, x86Dir_, scanNativeX64_, holders, nativeFailed, &cancelRequested_);
     if (IsCancelRequested()) return false;
     if (nativeFailed) return failScan();
+    if (cleared) holders.clear();
     nudgeSettings(holders);
     // A very fast empty scan must still be visible to the user. Remain
     // cancellable while the UI receives and paints the real scanning status.
@@ -877,24 +909,16 @@ bool InstallEngine::ReleaseLockedModules() noexcept {
         if (IsCancelRequested()) return false;
         Sleep(50);
     }
-    if (!holders.empty() && !IsCancelRequested()) {
+    if (!holders.empty()) {
         InstallLog::LineFormat(L"Unlocker: %u processes still hold Glass modules after stop",
             static_cast<unsigned>(holders.size()));
         for (const auto& holder : holders) {
             InstallLog::LineFormat(L"  holder %s pid %lu%s: %s",
-                holder.exe.c_str(),
-                holder.pid,
+                holder.exe.c_str(), holder.pid,
                 GlassInstallUnlock::TargetIsWow64(holder.pid) ? L" wow64" : L"",
                 holder.modules.c_str());
         }
-        const bool cleared = GlassInstallWatch::WaitUntilClearOrTimeout(
-            30000, x64Dir_, x86Dir_, scanNativeX64_, holders, nativeFailed, &cancelRequested_);
-        nudgeSettings(holders);
-        if (cleared) holders.clear();
     }
-    if (IsCancelRequested())
-        return false;
-    if (nativeFailed) return failScan();
     if (holders.empty()) {
         InstallLog::Line(L"Unlocker: all Glass modules unloaded");
         return true;
@@ -970,7 +994,7 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
 
     SetStatus(labels_.extract, 0);
 #ifdef GLASS_EMBED_MSI
-    const bool os64 = GlassInstallUtil::IsOs64Bit();
+    const bool os64 = scanNativeX64_; // verified before this worker stage
     const ResourceBlob blobs[] = {
         {IDR_MSI_X64,       L"Glass-x64.msi",         os64 && selection_.platform64},
         {IDR_MSI_X86,       L"Glass-x86.msi",         selection_.platform32},
@@ -1115,8 +1139,42 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
     return true;
 }
 
+bool InstallEngine::InstallGlassSettingsEarly() noexcept {
+    if (!selection_.glassSettings) {
+        InstallLog::Line(L"GlassSettings not selected: monitor will use embedded temporary Native DLLs");
+        return true;
+    }
+    bool settingsRunning = false;
+    const bool settingsKnown = GlassInstallUtil::QueryImageRunning(L"GlassSettings.exe", settingsRunning);
+    const DWORD settingsQueryError = settingsKnown ? 0 : GetLastError();
+    if (!settingsKnown || settingsRunning) {
+        const bool ru = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
+        SetFailure(!settingsKnown
+            ? (ru ? L"Не удалось проверить состояние GlassSettings. Повторите установку."
+                  : L"Could not check whether GlassSettings is running. Run Setup again.")
+            : (ru ? L"Закройте GlassSettings и повторите установку."
+                  : L"Close GlassSettings and run Setup again."),
+            settingsQueryError);
+        return false;
+    }
+    const bool is64 = scanNativeX64_; // checked before extraction and host changes
+    const std::wstring file = is64 ? L"GlassSettings-x64.msi" : L"GlassSettings-x86.msi";
+    const std::wstring& dir = is64 ? x64Dir_ : x86Dir_;
+    const std::wstring& label = is64 ? labels_.glassSettings64 : labels_.glassSettings86;
+    wchar_t path[MAX_PATH]{};
+    if (!PathCombineW(path, tempDir_.c_str(), file.c_str())) {
+        SetFailure(L"GlassSettings MSI path is too long.", 0);
+        return false;
+    }
+    // RunOneMsi records a previous product before removal and a newly
+    // installed product before checking cancellation. Rollback therefore also
+    // works if the monitor or a later package fails.
+    installAttempted_ = true;
+    return RunOneMsi(path, dir, label, 800, 1200);
+}
+
 bool InstallEngine::RunMsiSequence() noexcept {
-    const bool is64 = GlassInstallUtil::IsOs64Bit();
+    const bool is64 = scanNativeX64_;
     const bool ru = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
     struct Step {
         std::wstring msiFile;
@@ -1152,14 +1210,11 @@ bool InstallEngine::RunMsiSequence() noexcept {
         steps.push_back({L"Glass-x64.msi", x64Dir_, labels_.platform64});
     if (selection_.platform32)
         steps.push_back({L"Glass-x86.msi", x86Dir_, labels_.platform32});
-    if (selection_.glassSettings) {
-        if (is64) steps.push_back({L"GlassSettings-x64.msi", x64Dir_, labels_.glassSettings64});
-        else steps.push_back({L"GlassSettings-x86.msi", x86Dir_, labels_.glassSettings86});
-    }
+    // The selected GlassSettings MSI has already run before monitoring.
     if (is64 && selection_.openGlass)
         steps.push_back({L"OpenGlass-x64.msi", openGlassDir_, labels_.openGlass});
 
-    constexpr int kProgressStart = 800;
+    constexpr int kProgressStart = 2200;
     constexpr int kProgressEnd = 9000;
     const int span = steps.empty() ? 0 : (kProgressEnd - kProgressStart) / static_cast<int>(steps.size());
     int base = kProgressStart;
@@ -1216,10 +1271,13 @@ bool InstallEngine::RunMsiSequence() noexcept {
         if (step.msiFile == L"Glass-x64.msi") GlassInstallUtil::WritePlatformInstallPath(true, x64Dir_);
         else if (step.msiFile == L"Glass-x86.msi") GlassInstallUtil::WritePlatformInstallPath(false, x86Dir_);
         else if (step.msiFile == L"OpenGlass-x64.msi") GlassInstallUtil::WriteOpenGlassInstallPath(x64Dir_, openGlassDir_);
-        else if (step.msiFile == L"GlassSettings-x64.msi" || step.msiFile == L"GlassSettings-x86.msi") {
-            const std::wstring gsDir = GlassInstallUtil::TrimTrailingSlashes(step.dir) + L"\\GlassSettings";
-            (void)GlassInstallUtil::CreateStartMenuShortcut(gsDir + L"\\GlassSettings.exe", gsDir);
-        }
+    }
+
+    // Do not replace an existing customised shortcut without a backup.
+    if (selection_.glassSettings && !prior_.shortcutExisted) {
+        const std::wstring& gsRoot = is64 ? x64Dir_ : x86Dir_;
+        const std::wstring gsDir = GlassInstallUtil::TrimTrailingSlashes(gsRoot) + L"\\GlassSettings";
+        (void)GlassInstallUtil::CreateStartMenuShortcut(gsDir + L"\\GlassSettings.exe", gsDir);
     }
 
     // These exact values were captured in the rollback snapshot. Keep other
@@ -1259,7 +1317,7 @@ bool InstallEngine::RunMsiSequence() noexcept {
 }
 
 bool InstallEngine::LaunchAndVerifySelectedProducts() noexcept {
-    const bool is64 = GlassInstallUtil::IsOs64Bit();
+    const bool is64 = scanNativeX64_;
 
     SetStatus(labels_.finalize, 9200);
     auto configureAndStartArch = [this](
@@ -1399,7 +1457,19 @@ bool InstallEngine::DetermineCleanInstall() noexcept {
         && !prior_.ogServiceExisted && !prior_.ogLegacyTaskExisted && !prior_.ogWasRunning;
     // Setup is x86; on x64 Windows the embedded x64 helper is required even
     // when product registration/files are missing or the install looks clean.
-    scanNativeX64_ = GlassInstallUtil::IsOs64Bit();
+    // Failure to determine WOW64 must not silently skip the x64 monitor.
+#if defined(_WIN64)
+    scanNativeX64_ = true;
+#else
+    BOOL selfWow = FALSE;
+    if (!IsWow64Process(GetCurrentProcess(), &selfWow)) {
+        const DWORD error = GetLastError();
+        SetFailure(labels_.nativeScanFailed.empty() ? L"Could not determine the system architecture."
+                                                    : labels_.nativeScanFailed, error);
+        return false;
+    }
+    scanNativeX64_ = selfWow != FALSE;
+#endif
     InstallLog::LineFormat(L"Clean install=%d scanNativeX64=%d", cleanInstall_ ? 1 : 0, scanNativeX64_ ? 1 : 0);
     return true;
 }
@@ -1438,7 +1508,7 @@ bool InstallEngine::PrepareProductRemoval() noexcept {
         ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductSettingsX86);
     installed.openGlass = ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductOpenGlass) ||
         ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kLegacyOpenGlass);
-    remove_ = GlassProducts::RemovalForInstall(selection_, installed, GlassInstallUtil::IsOs64Bit());
+    remove_ = GlassProducts::RemovalForInstall(selection_, installed, scanNativeX64_);
     if (!remove_.platform32 && !remove_.openGlass && !remove_.glassSettings) return true;
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
     std::wstring error;
@@ -1470,7 +1540,9 @@ bool InstallEngine::PerformRollback() noexcept {
     const bool filesOk = GlassInstallRollback::ExecuteRollback(
         rollbackSession_, [this](int units) {
             SetStatus(labels_.rollback, WizardProgress::RollbackRemaining(units));
-        });
+        }, nonSettingsChangesAttempted_ ? GlassInstallRollback::RestoreScope::AllProducts
+            : (scanNativeX64_ ? GlassInstallRollback::RestoreScope::SettingsX64
+                              : GlassInstallRollback::RestoreScope::SettingsX86));
     const bool ok=lifecycleOk && filesOk;
     std::wstring note;
     if (!ok)
@@ -1539,7 +1611,9 @@ bool InstallEngine::UndoCleanInstall() noexcept {
 }
 
 bool InstallEngine::PurgeRemnants() noexcept {
-    SetStatus(labels_.purge.empty() ? L"…" : labels_.purge, 300);
+    SetStatus(labels_.purge.empty() ? L"…" : labels_.purge, 2000);
+    const bool is64 = scanNativeX64_;
+    const wchar_t* installedSettings = is64 ? GlassInstallMsi::kProductSettingsX64 : GlassInstallMsi::kProductSettingsX86;
     const wchar_t* codes[] = {
         GlassInstallMsi::kProductSettingsX64,
         GlassInstallMsi::kProductSettingsX86,
@@ -1551,6 +1625,10 @@ bool InstallEngine::PurgeRemnants() noexcept {
         L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5063}",
     };
     for (const wchar_t* code : codes) {
+        // This Settings MSI was installed before monitoring. A clean reinstall
+        // must not immediately uninstall it again; the other architecture, if
+        // present, is still purged normally.
+        if (selection_.glassSettings && _wcsicmp(code, installedSettings) == 0) continue;
         if (!GlassInstallMsi::IsProductInstalled(code)) continue;
         if (IsCancelRequested()) return false;
         if (!ProductWasSnapshotted(rollbackSession_,code)) {
@@ -1562,7 +1640,7 @@ bool InstallEngine::PurgeRemnants() noexcept {
         InstallLog::LineFormat(L"Purge uninstall %s", code);
         GlassInstallRollback::NoteModified(rollbackSession_,code);
         GlassInstallMsi::ProgressSink sink;
-        sink.label=labels_.purge; sink.base=300; sink.span=100;
+        sink.label=labels_.purge; sink.base=2000; sink.span=0;
         sink.cancelRequested=&cancelRequested_;
         sink.onError=[this](const std::wstring& text) { RememberMsiMessage(text.c_str()); };
         UINT removeCode=ERROR_SUCCESS;
@@ -1579,7 +1657,6 @@ bool InstallEngine::PurgeRemnants() noexcept {
     // MSI owns its installed files. Never recursively delete an installation
     // directory: it can contain unrelated or user-created files. Keep tasks,
     // service and shell registration intact until the reversible commit phase.
-    const bool is64 = GlassInstallUtil::IsOs64Bit();
     if ((is64 && !GlassInstallUtil::ClearPlatformInstallPath(true)) ||
         !GlassInstallUtil::ClearPlatformInstallPath(false) ||
         (is64 && !GlassInstallUtil::ClearOpenGlassInstallPath())) {
@@ -1587,6 +1664,7 @@ bool InstallEngine::PurgeRemnants() noexcept {
         return false;
     }
     purgeCompleted_ = true;
+    SetStatus(labels_.purge, 2200);
     InstallLog::Line(L"Purge MSI registrations completed; user files retained");
     return true;
 }

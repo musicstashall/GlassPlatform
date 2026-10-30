@@ -32,16 +32,19 @@ bool IsProtectedProcess(const wchar_t* exe) noexcept {
     return false;
 }
 
-bool TargetIsNative64(DWORD pid) noexcept {
+bool QueryTargetIsNative64(DWORD pid, bool& native64) noexcept {
+    native64 = false;
     BOOL selfWow = FALSE;
-    if (!IsWow64Process(GetCurrentProcess(), &selfWow) || !selfWow)
-        return false;
+    if (!IsWow64Process(GetCurrentProcess(), &selfWow)) return false;
+    if (!selfWow) return true; // this Win32 wizard is on 32-bit Windows
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!process) return false;
     BOOL targetWow = FALSE;
     const BOOL ok = IsWow64Process(process, &targetWow);
     CloseHandle(process);
-    return ok && !targetWow;
+    if (!ok) return false;
+    native64 = !targetWow;
+    return true;
 }
 
 bool ProcessAlive(DWORD pid) noexcept {
@@ -252,7 +255,14 @@ bool ForceUnloadHolder(const ModuleHolder& holder, const std::wstring& x64Dir,
     if (Shared::InjectProcessMap::SignalUnloadRequest(pid))
         Sleep(500);
 
-    if (!TargetIsNative64(pid)) {
+    bool native64 = false;
+    if (!QueryTargetIsNative64(pid, native64)) return false;
+    if (!native64) {
+#ifdef GLASS_SETUP_NATIVE_MONITOR
+        // Use the same x86 GlassSettings.Native instance that performs the
+        // scan, rather than a second installer-specific unload implementation.
+        return GlassInstallWatch::ForceUnloadInLocalNative(pid);
+#else
         const auto result = Shared::ForceUnloadGlassModules::ForceUnload(pid);
         if (result == Shared::ForceUnloadGlassModules::ForceUnloadResult::Ok)
             return true;
@@ -262,6 +272,7 @@ bool ForceUnloadHolder(const ModuleHolder& holder, const std::wstring& x64Dir,
             return Shared::ForceUnloadAgent::SpawnX86ForceUnloadAgent(pid, root.c_str());
         }
         return false;
+#endif
     }
 
     const std::wstring dll = GlassInstallUtil::NativeDllForArch(GP::PlatformArch::X64, x64Dir, x86Dir);

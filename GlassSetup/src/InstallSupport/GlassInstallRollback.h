@@ -55,9 +55,12 @@ bool CreateSnapshot(
 void NoteModified(SessionState& state, const wchar_t* productCode) noexcept;
 void NoteInstalled(SessionState& state, const wchar_t* productCode) noexcept;
 
+enum class RestoreScope { AllProducts, SettingsX86, SettingsX64 };
+
 bool ExecuteRollback(
     SessionState& state,
-    CopyProgressFn onProgress) noexcept;
+    CopyProgressFn onProgress,
+    RestoreScope scope = RestoreScope::AllProducts) noexcept;
 
 bool RestoreRegistryValues(const SessionState& state) noexcept;
 void CleanupSnapshot(SessionState& state) noexcept;

@@ -13,6 +13,14 @@ struct ModuleHolder {
     std::wstring modules;
 };
 
+#ifdef GLASS_SETUP_NATIVE_MONITOR
+// Load the embedded x86 GlassSettings.Native into Setup for this monitoring
+// session. Free it before any later MSI removal or rollback.
+bool BeginLocalNativeMonitor() noexcept;
+void EndLocalNativeMonitor() noexcept;
+bool ForceUnloadInLocalNative(DWORD pid) noexcept;
+#endif
+
 // Local scan plus the GlassSettings process list; false means the result is incomplete.
 bool CollectInProcessHolders(std::vector<ModuleHolder>& holders) noexcept;
 

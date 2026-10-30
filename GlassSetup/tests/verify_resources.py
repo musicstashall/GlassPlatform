@@ -88,6 +88,7 @@ for resource_id in ("IDR_HTML", "IDR_WELCOME", "IDR_FONT_HANDWRITTEN", "IDR_SLID
                     "IDR_SLIDE_TASKBAR", "IDR_SLIDE_NOTIFICATION", "IDR_SLIDE_CONTEXT_MENU",
                     "IDR_SLIDE_EXPLORER", "IDR_UNLOCKER_X64"):
     assert resource_id in ids and resource_id in rc and resource_id in unins_rc, resource_id
+assert "IDR_UNLOCKER_X86" in ids and "IDR_UNLOCKER_X86" in rc
 for filename in expected_assets:
     assert filename in rc and filename in unins_rc and filename in assets, filename
 for token in ("data:image/jpeg;base64,", "data:image/png;base64,", "data:font/ttf;base64,"):
@@ -124,9 +125,17 @@ assert "progress_tests.cpp" in project and "removal_order_tests.cpp" in project 
 assert "GlassInstallRemoval.cpp" in project and "GlassRemovalOrder.h" in project
 assert project.count("taskschd.lib") >= 2
 assert 'ResourceCompile Include="GlassUnins.rc"' in unins_project
-assert "GLASS_HAVE_UNLOCKER_X64" in project
+assert "GLASS_HAVE_UNLOCKER_X64" in project and "GLASS_HAVE_UNLOCKER_X86" in project
+assert "GLASS_SETUP_NATIVE_MONITOR" in project and "IDR_UNLOCKER_X86" in project
 assert "GlassSettings.Native.dll" in project and "GlassSettings.Native.dll" in unins_rc
-assert (repo / "GlassProject.sln").is_file()
+assert "<LinkLibraryDependencies>true</LinkLibraryDependencies>" in project
+assert "<AdditionalDependencies>GlassShared.lib;" not in project
+solution = (repo / "GlassProject.sln").read_text(encoding="utf-8")
+setup_guid = "{7E4C1A90-6B2D-4F58-9C31-0A6E5D4B2F18}"
+assert f"{setup_guid}.Debug|x64.Build.0" not in solution
+assert f"{setup_guid}.Debug|Any CPU.Build.0" not in solution
+assert f"{setup_guid}.Debug|x86.Build.0 = Debug|Win32" in solution
+assert f"{setup_guid}.Release|x86.Build.0 = Release|Win32" in solution
 
 # Four user-visible products, individual product code routing and no legacy forced settings removal.
 settings_wxs = read("msi/GlassSettingsPackage.template.wxs")
@@ -336,11 +345,21 @@ assert "DeleteTree" not in undo, "never recursively delete unrelated files on cl
 assert undo.index("GlassInstallMsi::UninstallProduct") < undo.index("++productsProcessed") < undo.index("productsProcessed*8000/productCount")
 assert "DirBytes(state.backupX64)" in rollback and "IsNestedSubPath" in rollback
 assert "receivedFrame" in watch and "FILE_FLAG_FIRST_PIPE_INSTANCE" in watch
-assert "ScanForSetup" in watch and "GetModuleHandleW(L\"GlassCompat.dll\")" in watch
+assert "BeginLocalNativeMonitor" in watch and "GlassSettings_ScanGlassModules" in watch
+assert "kNativeInstallerScanProtocol" in watch and "GetModuleHandleW(L\"GlassCompat.dll\")" in watch
 assert "pendingRows.empty() && pipeBuffer.empty()" in watch and "helperExitCode!=STILL_ACTIVE" in watch
 worker = section(engine, "DWORD WINAPI InstallEngine::WorkerThread(", "bool InstallEngine::Start(")
-assert worker.index("ReleaseLockedModules()") < worker.index("RunMsiSequence()")
-assert "scanNativeX64_ = GlassInstallUtil::IsOs64Bit()" in engine
+assert worker.index("CreateRollbackSnapshot()") < worker.index("StopRunningHosts()")
+assert worker.index("StopRunningHosts()") < worker.index("InstallGlassSettingsEarly()")
+assert worker.index("InstallGlassSettingsEarly()") < worker.index("ReleaseLockedModules()") < worker.index("RunMsiSequence()")
+assert "nonSettingsChangesAttempted_ = true" in worker and "nonSettingsChangesAttempted_ ? GlassInstallRollback::RestoreScope::AllProducts" in rollback_ui
+assert "RestoreScope::SettingsX64" in rollback and 'L"\\\\GlassSettings"' in rollback
+assert "RestoreScope::SettingsX64" in rollback_ui and "RestoreScope::SettingsX86" in rollback_ui
+assert "QueryPlatformMutex" in engine and "GetLastError() == ERROR_FILE_NOT_FOUND" in engine
+native = (repo / "GlassSettings/Native/InjectProcessMapNative.cpp").read_text(encoding="utf-8")
+assert "GlassSettings_ScanGlassModules" in native and "kNativeInstallerScanProtocol" in native
+assert "IsWow64Process(GetCurrentProcess(), &selfWow)" in engine and "scanNativeX64_ = selfWow != FALSE" in engine
+assert "if (priorStateOk) priorStateOk=self->DetermineCleanInstall()" in worker
 assert "QueryOpenGlassTasks" in util and "GetInstances(0" in util and "QueryOpenGlassRunning" in setup
 assert "ShouldStartOpenGlass(openGlassStartup_)" in engine and "Snapshot OpenGlass path unavailable" in rollback
 assert "protectedHandles" in util and "FILE_FLAG_OPEN_REPARSE_POINT" in util and "FileDispositionInfo" in util

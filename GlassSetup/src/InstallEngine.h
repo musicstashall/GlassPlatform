@@ -135,6 +135,7 @@ private:
     bool ReleaseLockedModules() noexcept;
     bool EnsureTempWorkspace() noexcept;
     bool ExtractPayload(HINSTANCE instance) noexcept;
+    bool InstallGlassSettingsEarly() noexcept;
     bool RunMsiSequence() noexcept;
     bool RunOneMsi(const std::wstring& msiPath, const std::wstring& installDir,
         const std::wstring& label, int progressBase, int progressSpan) noexcept;
@@ -188,6 +189,8 @@ private:
     bool hostsStopped_ = false;
     bool x64StopSignalled_ = false, x86StopSignalled_ = false, ogStopSignalled_ = false;
     bool installAttempted_ = false;
+    // Before this boundary only the early GlassSettings MSI can have changed.
+    bool nonSettingsChangesAttempted_ = false;
     bool scanNativeX64_ = false;
     bool started_ = false;
     std::atomic_bool finished_{false};

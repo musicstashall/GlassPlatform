@@ -17,6 +17,21 @@ namespace {
 
 namespace GP = GlassShared::GlassPlatformTask;
 
+#ifdef GLASS_SETUP_NATIVE_MONITOR
+using NativeScan = BOOL (WINAPI*)(const DWORD*, DWORD, void*, DWORD, DWORD*);
+using NativeForceUnload = BOOL (WINAPI*)(DWORD);
+HMODULE g_localNative = nullptr;
+NativeScan g_localScan = nullptr;
+NativeForceUnload g_localForceUnload = nullptr;
+
+FARPROC FindNativeExport(HMODULE dll, const char* undecorated,
+    const char* stdcallName, const char* stdcallUnderscoreName) noexcept {
+    if (FARPROC proc = GetProcAddress(dll, undecorated)) return proc;
+    if (FARPROC proc = GetProcAddress(dll, stdcallName)) return proc;
+    return GetProcAddress(dll, stdcallUnderscoreName);
+}
+#endif
+
 std::wstring TrimToken(std::wstring s) {
     size_t b = 0;
     while (b < s.size() && (s[b] == L' ' || s[b] == L'\t')) ++b;
@@ -78,6 +93,20 @@ void AppendScanResults(std::vector<GlassInstallWatch::ModuleHolder>& holders,
     }
 }
 
+bool ScanLocalNative(const DWORD* pids, DWORD pidsCount,
+    Shared::InjectModuleScan::Result* results, DWORD capacity, DWORD* count) noexcept {
+#ifdef GLASS_SETUP_NATIVE_MONITOR
+    if (!g_localScan || !capacity || !count || capacity >= Shared::InjectModuleScan::kNativeLocalInstallerScan)
+        return false;
+    *count = 0;
+    return g_localScan(pids, pidsCount, results,
+        capacity | Shared::InjectModuleScan::kNativeLocalInstallerScan, count) != FALSE && *count <= capacity;
+#else
+    // The separately packaged uninstaller still links its local implementation.
+    return Shared::InjectModuleScan::ScanForSetup(pids, pidsCount, results, capacity, count);
+#endif
+}
+
 bool ScanInjectMapInto(std::vector<GlassInstallWatch::ModuleHolder>& holders, const wchar_t* mapName) {
     Shared::InjectProcessMap::Slot slots[Shared::InjectProcessMap::kSlotCount]{};
     DWORD slotCount = 0;
@@ -93,8 +122,7 @@ bool ScanInjectMapInto(std::vector<GlassInstallWatch::ModuleHolder>& holders, co
     if (pids.empty()) return true;
     Shared::InjectModuleScan::Result results[Shared::InjectModuleScan::kMaxResults]{};
     DWORD count = 0;
-    if (!Shared::InjectModuleScan::ScanForSetup(
-            pids.data(), static_cast<DWORD>(pids.size()), results,
+    if (!ScanLocalNative(pids.data(), static_cast<DWORD>(pids.size()), results,
             Shared::InjectModuleScan::kMaxResults, &count)) return false;
     AppendScanResults(holders, results, count);
     return true;
@@ -151,6 +179,61 @@ bool ConsumeNextPipeEvent(
 
 namespace GlassInstallWatch {
 
+#ifdef GLASS_SETUP_NATIVE_MONITOR
+bool BeginLocalNativeMonitor() noexcept {
+    if (g_localNative) return g_localScan && g_localForceUnload;
+    const std::wstring path = GlassInstallUtil::EmbeddedNativeDllX86();
+    if (path.empty()) {
+        GlassInstallLog::Line(L"Watch: embedded x86 GlassSettings.Native.dll is unavailable");
+        return false;
+    }
+    // Do not search the current working directory or a user-selected install
+    // path for dependencies of this elevated process.
+    HMODULE dll = LoadLibraryExW(path.c_str(), nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!dll) {
+        GlassInstallLog::LineFormat(L"Watch: loading x86 Native failed (%lu)", GetLastError());
+        return false;
+    }
+    const auto scan = reinterpret_cast<NativeScan>(FindNativeExport(dll,
+        "GlassSettings_ScanGlassModules", "GlassSettings_ScanGlassModules@20", "_GlassSettings_ScanGlassModules@20"));
+    const auto unload = reinterpret_cast<NativeForceUnload>(FindNativeExport(dll,
+        "GlassSettings_ForceUnloadProcess", "GlassSettings_ForceUnloadProcess@4", "_GlassSettings_ForceUnloadProcess@4"));
+    if (!scan || !unload) {
+        GlassInstallLog::Line(L"Watch: x86 Native is missing a required existing export");
+        FreeLibrary(dll);
+        return false;
+    }
+    // Never pass the option-bearing capacity to an older DLL: without this
+    // handshake it could interpret the high bit as a huge output buffer.
+    DWORD protocol = 0;
+    if (!scan(nullptr, 0, nullptr, Shared::InjectModuleScan::kNativeLocalInstallerScan, &protocol) ||
+        protocol != Shared::InjectModuleScan::kNativeInstallerScanProtocol) {
+        GlassInstallLog::Line(L"Watch: x86 Native is too old for installer monitoring");
+        FreeLibrary(dll);
+        return false;
+    }
+    g_localNative = dll;
+    g_localScan = scan;
+    g_localForceUnload = unload;
+    GlassInstallLog::Line(L"Watch: loaded embedded x86 GlassSettings.Native.dll into Setup");
+    return true;
+}
+
+void EndLocalNativeMonitor() noexcept {
+    g_localScan = nullptr;
+    g_localForceUnload = nullptr;
+    if (g_localNative) {
+        FreeLibrary(g_localNative);
+        g_localNative = nullptr;
+    }
+}
+
+bool ForceUnloadInLocalNative(DWORD pid) noexcept {
+    return pid && g_localForceUnload && g_localForceUnload(pid) != FALSE;
+}
+#endif
+
 void MergeModuleTokens(std::wstring& into, const std::wstring& add) {
     if (add.empty()) return;
     size_t pos = 0;
@@ -203,8 +286,7 @@ bool ParseNativePipeUtf8(const std::string& bytes, std::vector<ModuleHolder>& ho
 bool CollectInProcessHolders(std::vector<ModuleHolder>& holders) noexcept {
     Shared::InjectModuleScan::Result results[Shared::InjectModuleScan::kMaxResults]{};
     DWORD count = 0;
-    if (!Shared::InjectModuleScan::ScanForSetup(
-            nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count)) {
+    if (!ScanLocalNative(nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count)) {
         GlassInstallLog::Line(L"Watch: local process scan was incomplete (including Explorer)");
         return false;
     }

@@ -387,7 +387,7 @@ void NoteInstalled(SessionState& state, const wchar_t* productCode) noexcept {
     state.installedThisSession.push_back(productCode);
 }
 
-bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress) noexcept {
+bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScope scope) noexcept {
     bool uninstallOk=true;
     for (auto it = state.installedThisSession.rbegin(); it != state.installedThisSession.rend(); ++it)
         if (!GlassInstallMsi::UninstallProduct(it->c_str())) uninstallOk=false;
@@ -398,19 +398,50 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress) noexcept {
         return uninstallOk;
     }
 
-    uint64_t total = DirBytes(state.backupX64) + DirBytes(state.backupX86) + DirBytes(state.backupOpenGlass);
-    if (total == 0) total = 1;
     uint64_t copied = 0;
     bool ok = uninstallOk;
     unsigned copyError = 0;
-    if (!state.backupX64.empty() && !state.x64Dir.empty()) {
-        if (!CopyTree(state.backupX64, state.x64Dir, {}, copied, total, onProgress, copyError)) ok = false;
-    }
-    if (copyError != ERROR_DISK_FULL && !state.backupX86.empty() && !state.x86Dir.empty()) {
-        if (!CopyTree(state.backupX86, state.x86Dir, {}, copied, total, onProgress, copyError)) ok = false;
-    }
-    if (copyError != ERROR_DISK_FULL && !state.backupOpenGlass.empty() && !state.openGlassDir.empty()) {
-        if (!CopyTree(state.backupOpenGlass, state.openGlassDir, {}, copied, total, onProgress, copyError)) ok = false;
+    if (scope != RestoreScope::AllProducts) {
+        // Cancellation during the module-monitor pages occurs before any
+        // platform MSI is touched. Those old DLLs can still be loaded by
+        // Explorer: do not overwrite the entire platform snapshot. Restore
+        // only the Settings directory affected by the early MSI. The chosen
+        // architecture is captured before any changes; do not re-detect it
+        // during rollback, where a query error could select the wrong folder.
+        const bool is64 = scope == RestoreScope::SettingsX64;
+        const std::wstring& backup = is64 ? state.backupX64 : state.backupX86;
+        const std::wstring& target = is64 ? state.x64Dir : state.x86Dir;
+        if (!backup.empty() && !target.empty()) {
+            const std::wstring from = GlassInstallUtil::TrimTrailingSlashes(backup) + L"\\GlassSettings";
+            const std::wstring to = GlassInstallUtil::TrimTrailingSlashes(target) + L"\\GlassSettings";
+            const DWORD attr = GetFileAttributesW(from.c_str());
+            if (attr == INVALID_FILE_ATTRIBUTES) {
+                const DWORD err = GetLastError();
+                if (err != ERROR_FILE_NOT_FOUND && err != ERROR_PATH_NOT_FOUND) {
+                    copyError = err ? err : ERROR_GEN_FAILURE;
+                    ok = false;
+                }
+            } else if ((attr & FILE_ATTRIBUTE_DIRECTORY) == 0 || (attr & FILE_ATTRIBUTE_REPARSE_POINT)) {
+                copyError = ERROR_NOT_SUPPORTED;
+                ok = false;
+            } else {
+                uint64_t total = DirBytes(from);
+                if (!total) total = 1;
+                if (!CopyTree(from, to, {}, copied, total, onProgress, copyError)) ok = false;
+            }
+        }
+    } else {
+        uint64_t total = DirBytes(state.backupX64) + DirBytes(state.backupX86) + DirBytes(state.backupOpenGlass);
+        if (total == 0) total = 1;
+        if (!state.backupX64.empty() && !state.x64Dir.empty()) {
+            if (!CopyTree(state.backupX64, state.x64Dir, {}, copied, total, onProgress, copyError)) ok = false;
+        }
+        if (copyError != ERROR_DISK_FULL && !state.backupX86.empty() && !state.x86Dir.empty()) {
+            if (!CopyTree(state.backupX86, state.x86Dir, {}, copied, total, onProgress, copyError)) ok = false;
+        }
+        if (copyError != ERROR_DISK_FULL && !state.backupOpenGlass.empty() && !state.openGlassDir.empty()) {
+            if (!CopyTree(state.backupOpenGlass, state.openGlassDir, {}, copied, total, onProgress, copyError)) ok = false;
+        }
     }
     if (copyError != 0) state.copyError = copyError;
 

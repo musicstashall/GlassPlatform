@@ -23,8 +23,11 @@ namespace {
 std::mutex g_unlockerMutex;
 HINSTANCE g_unlockerInstance = nullptr;
 UINT g_unlockerX64ResId = 0;
+UINT g_unlockerX86ResId = 0;
 std::wstring g_extractedUnlockerDir;
 std::wstring g_extractedUnlockerX64Path;
+std::wstring g_extractedUnlockerX86Dir;
+std::wstring g_extractedUnlockerX86Path;
 
 // Fail closed: do not overwrite an orphaned legacy shell registration on a clean install.
 bool HasExistingShellRegistrationKeys() noexcept {
@@ -115,22 +118,66 @@ std::wstring EnsureExtractedUnlockerX64() noexcept {
 
 } // namespace
 
-void ConfigureEmbeddedUnlocker(HINSTANCE instance, UINT x64ResourceId) noexcept {
+void ConfigureEmbeddedUnlocker(HINSTANCE instance, UINT x64ResourceId, UINT x86ResourceId) noexcept {
     std::lock_guard<std::mutex> lock(g_unlockerMutex);
     g_unlockerInstance = instance;
     g_unlockerX64ResId = x64ResourceId;
+    g_unlockerX86ResId = x86ResourceId;
+}
+
+std::wstring EmbeddedNativeDllX86() noexcept {
+    std::lock_guard<std::mutex> lock(g_unlockerMutex);
+    if (!g_extractedUnlockerX86Path.empty() &&
+        PeMatches(g_extractedUnlockerX86Path, IMAGE_FILE_MACHINE_I386, "GlassSettings_UnlockerW"))
+        return g_extractedUnlockerX86Path;
+    if (!g_unlockerInstance || !g_unlockerX86ResId) return {};
+    std::wstring dir;
+    if (!CreateSecureTempDirectory(L"GlassUnlocker86", dir)) return {};
+    const std::wstring path = dir + L"\\GlassSettings.Native.dll";
+    if (!ExtractResourceToFile(g_unlockerInstance, g_unlockerX86ResId, RT_RCDATA, path) ||
+        !PeMatches(path, IMAGE_FILE_MACHINE_I386, "GlassSettings_UnlockerW")) {
+        DeleteFileW(path.c_str());
+        RemoveDirectoryW(dir.c_str());
+        return {};
+    }
+    g_extractedUnlockerX86Dir = dir;
+    g_extractedUnlockerX86Path = path;
+    return path;
 }
 
 void CleanupEmbeddedUnlocker() noexcept {
     std::lock_guard<std::mutex> lock(g_unlockerMutex);
+    // The in-process x86 module must have been FreeLibrary'd first.
+    if (!g_extractedUnlockerX86Path.empty()) {
+        if (!DeleteFileW(g_extractedUnlockerX86Path.c_str())) {
+            const DWORD error = GetLastError();
+            const bool deferred = MoveFileExW(g_extractedUnlockerX86Path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
+            GlassInstallLog::LineFormat(L"x86 Native cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
+        }
+        g_extractedUnlockerX86Path.clear();
+    }
+    if (!g_extractedUnlockerX86Dir.empty()) {
+        if (!RemoveDirectoryW(g_extractedUnlockerX86Dir.c_str())) {
+            const DWORD error = GetLastError();
+            const bool deferred = MoveFileExW(g_extractedUnlockerX86Dir.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
+            GlassInstallLog::LineFormat(L"x86 Native temp directory cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
+        }
+        g_extractedUnlockerX86Dir.clear();
+    }
     if (!g_extractedUnlockerX64Path.empty()) {
-        if (!DeleteFileW(g_extractedUnlockerX64Path.c_str()))
-            MoveFileExW(g_extractedUnlockerX64Path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+        if (!DeleteFileW(g_extractedUnlockerX64Path.c_str())) {
+            const DWORD error = GetLastError();
+            const bool deferred = MoveFileExW(g_extractedUnlockerX64Path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
+            GlassInstallLog::LineFormat(L"x64 Native cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
+        }
         g_extractedUnlockerX64Path.clear();
     }
     if (!g_extractedUnlockerDir.empty()) {
-        if (!RemoveDirectoryW(g_extractedUnlockerDir.c_str()))
-            MoveFileExW(g_extractedUnlockerDir.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+        if (!RemoveDirectoryW(g_extractedUnlockerDir.c_str())) {
+            const DWORD error = GetLastError();
+            const bool deferred = MoveFileExW(g_extractedUnlockerDir.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
+            GlassInstallLog::LineFormat(L"x64 Native temp directory cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
+        }
         g_extractedUnlockerDir.clear();
     }
 }
@@ -447,7 +494,6 @@ bool RunHidden(const wchar_t* file, const std::wstring& args) noexcept {
     return RunHiddenCommand(command, &code, 20000) && code == 0;
 }
 
-namespace {
 bool QueryImageRunning(const wchar_t* imageName, bool& found) noexcept {
     found = false;
     const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -469,7 +515,6 @@ bool QueryImageRunning(const wchar_t* imageName, bool& found) noexcept {
     if (!ok) SetLastError(error);
     return ok;
 }
-} // namespace
 
 bool ImageRunning(const wchar_t* imageName) noexcept {
     bool found = false;
@@ -817,6 +862,9 @@ std::wstring NativeDllForArch(
             !FindResourceW(g_unlockerInstance,MAKEINTRESOURCEW(g_unlockerX64ResId),RT_RCDATA)) return {};
         return EnsureExtractedUnlockerX64();
     }
+    // Setup also embeds x86; use that trusted resource for its elevated
+    // shell-registration helper instead of an install/registry-derived path.
+    if (g_unlockerX86ResId) return EmbeddedNativeDllX86();
     const std::wstring root = x86Dir;
     if (!root.empty()) {
         const std::wstring dll = TrimTrailingSlashes(root) + L"\\GlassSettings\\GlassSettings.Native.dll";

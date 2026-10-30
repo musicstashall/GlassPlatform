@@ -35,7 +35,12 @@ struct PROCESSENTRY32W { DWORD dwSize=0,th32ProcessID=0; wchar_t szExeFile[260]{
 struct MODULEENTRY32W { DWORD dwSize=0; wchar_t szModule[260]{}; };
 struct Process {
  DWORD pid;std::wstring name;std::vector<std::wstring> modules;
- bool wow=true, alive=true, accessible=true, snapshotFails=false, nextFails=false;
+#ifdef _WIN64
+ bool wow=false;
+#else
+ bool wow=true;
+#endif
+ bool alive=true, accessible=true, snapshotFails=false, nextFails=false;
  int badLength=0;
 };
 struct FakeHandle { int kind; std::size_t index=0; Process* process=nullptr; };
@@ -121,6 +126,10 @@ int main(){
  reset();processes.push_back({2,L"explorer.exe",{L"ExplorerCompat.dll"}});processes[0].wow=false;
  assert(strict(rows,4,count));assert(count==0); // native helper must scan this explorer
  processes[0].accessible=false;assert(!strict(rows,4,count));
+#else
+ reset();processes.push_back({2,L"wow-app.exe",{L"GlassCore.dll"}});processes[0].wow=true;
+ assert(strict(rows,4,count));assert(count==0); // x86 Native monitors WOW64
+ assert(Scan(nullptr,0,rows,4,&count));assert(count==1); // existing Settings behavior unchanged
 #endif
  std::cout<<"PASS: real scan: Explorer safety, architecture split, failures, retries, limits\n";
 }

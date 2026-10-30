@@ -19,6 +19,16 @@ namespace Shared::InjectModuleScan
     inline constexpr DWORD kMaxResults = 512u;
     inline constexpr DWORD kExeNameChars = 64u;
 
+    // Optional high bit of GlassSettings_ScanGlassModules' maxResults argument.
+    // Installer callers use the existing Native export for a strict, local-arch
+    // scan; the remaining bits are the actual capacity. Ordinary GlassSettings
+    // callers omit it and retain their existing cross-architecture behaviour.
+    inline constexpr DWORD kNativeLocalInstallerScan = 0x80000000u;
+    // Capability handshake: call the Native export with null results, zero
+    // capacity plus the option above, and a valid outCount. Older DLLs return
+    // FALSE; supported DLLs return TRUE and this value without scanning.
+    inline constexpr DWORD kNativeInstallerScanProtocol = 0x31495347u; // 'GSI1'
+
     struct Result
     {
         DWORD pid;

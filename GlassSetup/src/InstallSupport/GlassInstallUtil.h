@@ -8,8 +8,11 @@
 
 namespace GlassInstallUtil {
 
-void ConfigureEmbeddedUnlocker(HINSTANCE instance, UINT x64ResourceId) noexcept;
+void ConfigureEmbeddedUnlocker(HINSTANCE instance, UINT x64ResourceId, UINT x86ResourceId = 0) noexcept;
 void CleanupEmbeddedUnlocker() noexcept;
+// Only the installer embeds an x86 Native helper; never fall back to a
+// potentially user-writable installed path for an elevated in-process DLL.
+std::wstring EmbeddedNativeDllX86() noexcept;
 // Creates a new, administrator/SYSTEM-only directory under Windows Temp.
 bool CreateSecureTempDirectory(const wchar_t* prefix, std::wstring& out) noexcept;
 
@@ -36,6 +39,7 @@ bool RunHiddenCommand(const std::wstring& commandLine, DWORD* exitCode, DWORD ti
 bool RunHidden(const wchar_t* file, const std::wstring& args) noexcept;
 
 void CloseGlassSettingsProcesses(const std::atomic_bool* cancelled = nullptr) noexcept;
+bool QueryImageRunning(const wchar_t* imageName, bool& found) noexcept;
 bool ImageRunning(const wchar_t* imageName) noexcept;
 // A disabled legacy task can still have a running instance. Failure to inspect
 // Scheduler is distinct from the absence of a task.
