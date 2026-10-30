@@ -58,17 +58,19 @@ namespace {
 constexpr int kWidth = 1000, kHtmlHeight = 540, kProgressHeight = 4;
 constexpr int kContentHeight = kHtmlHeight + kProgressHeight;
 constexpr int kFooterHeight = 56, kHeight = 600;
-constexpr UINT_PTR kInstallTimer = 1, kFadeTimer = 2, kHeroTimer = 3;
+constexpr UINT_PTR kInstallTimer = 1, kFadeTimer = 2, kHeroTimer = 3, kStartupPollTimer = 5;
 constexpr UINT kInstallTimerMs = 16, kHeroTimerMs = 50;
 constexpr ULONGLONG kMarqueePeriodMs = 1400;
 constexpr double kProgressSmoothTauMs = 120.0;
+constexpr ULONGLONG kRollbackFinishMs = 900;
 constexpr UINT kInitWebView = WM_APP + 1;
 constexpr UINT kVersionCheckComplete = WM_APP + 2;
 constexpr UINT kRuntimeStatus = WM_APP + 3, kRuntimeComplete = WM_APP + 4;
+constexpr UINT kBeginStartup = WM_APP + 5, kStartupComplete = WM_APP + 6;
 constexpr ULONGLONG kFadeDuration = 280;
 #ifndef GLASS_EMBED_MSI
 constexpr ULONGLONG kDuration = 30000;
-constexpr ULONGLONG kSimulatedRollbackWait = 1000, kSimulatedRollbackDuration = 5000;
+constexpr ULONGLONG kSimulatedRollbackDuration = 5000;
 #endif
 constexpr COLORREF kDark = RGB(16,18,37), kLicensePanel = RGB(27,29,52);
 constexpr COLORREF kFooterTop = RGB(26,27,50), kFooterBottom = RGB(17,18,35);
@@ -1079,9 +1081,22 @@ public:
             std::max<LONG>(0,(mi.rcWork.bottom-mi.rcWork.top-finalHeight)/2));
         SetWindowPos(window,nullptr,finalX,finalY,finalWidth,finalHeight,SWP_NOZORDER | SWP_NOACTIVATE);
         ShowWindow(window, show);
-        UpdateWindow(window); // Первый кадр до WebView: тёмный фон, слайды появятся после готовности.
-        if (!gAlreadyRunning && IsWebView2RuntimeInstalled()) PostMessageW(window, kInitWebView, 0, 0);
+        // Paint the centered loading indicator before starting any expensive work.
+        UpdateWindow(window);
+        if (!PostMessageW(window,kBeginStartup,0,0)) {
+            DestroyWindow(window);
+            return false;
+        }
         return true;
+    }
+    void JoinStartup() {
+        {
+            std::lock_guard<std::mutex> lock(startupMutex_);
+            startupStop_.store(true,std::memory_order_release);
+        }
+        // Never wait for a slow MSI/registry query in WM_DESTROY: the window is
+        // already gone when this is called from the main loop's shutdown path.
+        if (startupThread_.joinable()) startupThread_.join();
     }
 private:
     Page page_ = Page::Welcome;
@@ -1096,6 +1111,7 @@ private:
     HBRUSH progressFill_ = nullptr, progressTrack_ = nullptr;
     ComPtr<IStream> bannerStream_;
     std::unique_ptr<Gdiplus::Bitmap> banner_;
+    bool bannerLoaded_ = false;
     ComPtr<ICoreWebView2Environment> environment_;
     ComPtr<ICoreWebView2Controller> controller_;
     ComPtr<ICoreWebView2> web_;
@@ -1107,6 +1123,17 @@ private:
     ULONGLONG lastWebPush_=0;
     Page beforeCancel_ = Page::Installing;
     ULONGLONG launchStarted_ = 0;
+    struct StartupResult {
+        bool ok = false, os64 = false, runtimeInstalled = false;
+        InstallEngine::ComponentSelection installed{};
+        std::wstring platformVersion, eulaText;
+    };
+    std::thread startupThread_;
+    std::mutex startupMutex_;
+    std::atomic_bool startupStop_{false};
+    StartupResult startupResult_;
+    bool startupReady_ = false, startupPending_ = true, startupStarted_ = false;
+    bool controlsReady_ = false, loadingAnimationsEnabled_ = true;
     std::thread runtimeThread_;
     std::atomic_bool runtimeCancel_{false};
     std::mutex runtimeMutex_;
@@ -1148,11 +1175,15 @@ private:
     HRESULT webError_ = S_OK;
     ULONGLONG started_ = 0;
     int percent_ = 0, progressValue_ = 0, progressTarget_ = 0, displayProgress_ = 0;
+    WizardProgress::VisibleProgress visibleProgress_;
     bool progressReverse_ = false;
     double marqueePhase_ = 0;
-    ULONGLONG progressTickMs_ = 0, rollbackVisualStarted_ = 0;
+    ULONGLONG progressTickMs_ = 0;
     bool progressMarquee_ = false;
-    bool progressFinishing_ = false;
+    WizardProgress::RollbackTracker rollbackProgress_;
+    bool rollbackFinishing_ = false;
+    ULONGLONG rollbackFinishStarted_ = 0;
+    int rollbackFinishFrom_ = 0;
     bool simulateInstall_ = false;
 #ifndef GLASS_EMBED_MSI
     bool simulateRollback_ = false;
@@ -1186,13 +1217,6 @@ private:
         for (HWND button : {back_,next_,cancel_,updateDownload_,updateSkip_})
             WizardTheme::AttachButtonScope(button);
     }
-    void BuildButtonImageCache() {
-        HDC reference=GetDC(window);
-        if (!reference) return;
-        const std::vector<int> widths={Scale(96),Scale(104),Scale(132),Scale(160),Scale(184),Scale(190),Scale(230)};
-        WizardTheme::PrewarmButtonCache(reference,widths,Scale(32));
-        ReleaseDC(window,reference);
-    }
     void InvalidatePushButtons() {
         for (HWND button:{back_,next_,cancel_,updateDownload_,updateSkip_})
             if (button && IsWindow(button)) InvalidateRect(button,nullptr,FALSE);
@@ -1221,16 +1245,20 @@ private:
         for (HWND c : {back_,next_,cancel_,eula_,accept_,updateDownload_,updateSkip_,component64_,component32_,componentSettings_,componentOpenGlass_})
             if (c) SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
-    void Initialize() {
-        dpi_ = GetDpiForWindow(window);
-        platformVersion_ = SelfProductVersion();
-        if (platformVersion_.empty())
-            platformVersion_ = PlatformVersionFromInstalledModules();
-        darkBrush_ = CreateSolidBrush(kDark);
+    void InitializeLoading() {
+        dpi_=GetDpiForWindow(window);
+        darkBrush_=CreateSolidBrush(kDark);
+        footerBrush_=CreateSolidBrush(kFooterTop);
+        footerRuleBrush_=CreateSolidBrush(RGB(74,71,109));
+        WizardTheme::ApplyDarkWindowChrome(window);
+        BOOL animationsEnabled=TRUE;
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
+        loadingAnimationsEnabled_=animationsEnabled!=FALSE;
+        if (loadingAnimationsEnabled_) SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
+    }
+    void InitializeControls() {
         licenseBrush_ = CreateSolidBrush(kLicensePanel);
         buttonBrush_ = CreateSolidBrush(kButtonBase);
-        footerBrush_ = CreateSolidBrush(kFooterTop);
-        footerRuleBrush_ = CreateSolidBrush(RGB(74,71,109));
         progressFill_ = CreateSolidBrush(RGB(144,127,230));
         progressTrack_ = CreateSolidBrush(RGB(42,45,67));
         back_ = Control(L"BUTTON",Text(IDS_BACK),BS_PUSHBUTTON | WS_TABSTOP,IDC_BACK);
@@ -1254,38 +1282,131 @@ private:
         SetWindowTheme(eula_,L"",nullptr);
         SendMessageW(window,DM_SETDEFID,IDC_NEXT,0);
         CreateFonts();
-        eulaText_ = Utf8(Resource(IDR_EULA,gLanguage));
-        eulaText_ += L"\r\n\r\n────────────────────────────────\r\n" +
-                     Text(IDS_GPL_APPENDIX) + L"\r\n\r\n" + Utf8(Resource(IDR_GPL));
         SendMessageW(eula_,EM_SETLIMITTEXT,1024*1024,0);
-        SetWindowTextW(eula_,eulaText_.c_str());
         SendMessageW(eula_,EM_SETMARGINS,EC_LEFTMARGIN | EC_RIGHTMARGIN,MAKELPARAM(14,14));
-        const auto image = Resource(IDR_WELCOME);
-        bannerStream_.Attach(SHCreateMemStream(image.data,image.size));
-        if (bannerStream_) {
-            banner_.reset(Gdiplus::Bitmap::FromStream(bannerStream_.Get()));
-            if (banner_ && banner_->GetLastStatus() != Gdiplus::Ok) banner_.reset();
+#ifdef _DEBUG
+        debugDemoPending_=HasCommandLineSwitch(L"--demo-tour");
+#endif
+        Layout();
+        AttachButtonSubclasses();
+        controlsReady_=true;
+    }
+    void StartupWorker(HWND target, bool themed, bool slowStartup) noexcept {
+        StartupResult result;
+        const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+        try {
+            // This is the first logger user on the successful startup path.
+            // UI interactions are locked until this worker has been joined.
+            InstallLog::Initialize();
+            InstallLog::Line(themed ? L"Theme Detours installed" : L"Theme Detours unavailable");
+#ifdef _DEBUG
+            if (slowStartup) {
+                for (int i=0;i<80 && !startupStop_.load(std::memory_order_acquire);++i) Sleep(50);
+            }
+#else
+            (void)slowStartup;
+#endif
+            if (FAILED(com)) {
+                InstallLog::LineFormat(L"Startup worker COM init failed: 0x%08X",static_cast<unsigned>(com));
+            } else if (!gAlreadyRunning && !startupStop_.load(std::memory_order_acquire)) {
+                result.platformVersion=SelfProductVersion();
+                if (result.platformVersion.empty() && !startupStop_.load(std::memory_order_acquire))
+                    result.platformVersion=PlatformVersionFromInstalledModules();
+                if (!startupStop_.load(std::memory_order_acquire)) result.os64=GlassInstallUtil::IsOs64Bit();
+                if (!startupStop_.load(std::memory_order_acquire))
+                    result.installed.platform64=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX64);
+                if (!startupStop_.load(std::memory_order_acquire))
+                    result.installed.platform32=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX86);
+                if (!startupStop_.load(std::memory_order_acquire))
+                    result.installed.glassSettings=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64) ||
+                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86);
+                if (!startupStop_.load(std::memory_order_acquire))
+                    result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass);
+                if (!startupStop_.load(std::memory_order_acquire)) {
+                    result.eulaText=Utf8(Resource(IDR_EULA,gLanguage));
+                    result.eulaText+=L"\r\n\r\n────────────────────────────────\r\n"+
+                        Text(IDS_GPL_APPENDIX)+L"\r\n\r\n"+Utf8(Resource(IDR_GPL));
+                    result.runtimeInstalled=IsWebView2RuntimeInstalled();
+                }
+            }
+            result.ok=SUCCEEDED(com) && !startupStop_.load(std::memory_order_acquire);
+        } catch (...) {
+            result.ok=false;
         }
-        const bool os64=GlassInstallUtil::IsOs64Bit();
-        installedSelection_.platform64=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX64);
-        installedSelection_.platform32=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX86);
-        installedSelection_.glassSettings=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64) ||
-            GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86);
-        installedSelection_.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass);
+        if (SUCCEEDED(com)) CoUninitialize();
+        {
+            // Synchronize posting with window destruction: never post to an HWND
+            // which could already have been destroyed and reused by another app.
+            std::lock_guard<std::mutex> lock(startupMutex_);
+            if (startupStop_.load(std::memory_order_acquire)) return;
+            startupResult_=std::move(result);
+            startupReady_=true;
+            (void)PostMessageW(target,kStartupComplete,0,0);
+        }
+    }
+    void BeginStartup() {
+        if (!startupPending_ || startupStarted_ || closing_) return;
+        startupStarted_=true;
+        // Attach Detours on the UI thread before any worker can enter uxtheme.
+        const bool themed=WizardTheme::InstallDetours();
+        bool slowStartup=false;
+#ifdef _DEBUG
+        slowStartup=HasCommandLineSwitch(L"--debug-slow-startup");
+#endif
+        bool workerStarted=false;
+        try {
+            const HWND target=window;
+            startupThread_=std::thread([this,target,themed,slowStartup]() {
+                StartupWorker(target,themed,slowStartup);
+            });
+            workerStarted=true;
+        } catch (...) {
+            workerStarted=false;
+        }
+        InitializeControls();
+        if (!workerStarted) {
+            startupPending_=false;
+            errorReason_=Text(IDS_STARTUP_FAILED);
+            SetPage(Page::Error);
+            return;
+        }
+        // Fallback if the worker's PostMessage fails because the queue is full.
+        SetTimer(window,kStartupPollTimer,100,nullptr);
+        CompleteStartupIfReady();
+    }
+    void CompleteStartupIfReady() {
+        if (!startupPending_ || closing_) return;
+        StartupResult result;
+        {
+            std::lock_guard<std::mutex> lock(startupMutex_);
+            if (!startupReady_) return;
+            result=std::move(startupResult_);
+            startupReady_=false;
+        }
+        if (startupThread_.joinable()) startupThread_.join();
+        KillTimer(window,kStartupPollTimer);
+        startupPending_=false;
+        if (!result.ok) {
+            errorReason_=Text(IDS_STARTUP_FAILED);
+            SetPage(Page::Error);
+            return;
+        }
+        if (gAlreadyRunning) { SetPage(Page::AlreadyRunning); return; }
+        platformVersion_=std::move(result.platformVersion);
+        eulaText_=std::move(result.eulaText);
+        SetWindowTextW(eula_,eulaText_.c_str());
+        installedSelection_=result.installed;
+        const bool os64=result.os64;
         const bool anyInstalled=installedSelection_.platform64 || installedSelection_.platform32 ||
             installedSelection_.glassSettings || installedSelection_.openGlass;
         selection_.platform64=os64;
         selection_.platform32=!os64 || !anyInstalled || installedSelection_.platform32;
         selection_.glassSettings=!anyInstalled || installedSelection_.glassSettings;
         selection_.openGlass=os64 && (!anyInstalled || installedSelection_.openGlass);
-#ifdef _DEBUG
-        debugDemoPending_=HasCommandLineSwitch(L"--demo-tour");
-#endif
-        Layout();
-        AttachButtonSubclasses();
-        BuildButtonImageCache();
-        SetPage(gAlreadyRunning ? Page::AlreadyRunning :
-            (IsWebView2RuntimeInstalled() ? Page::Welcome : Page::RuntimeRequired));
+        SetPage(result.runtimeInstalled ? Page::Welcome : Page::RuntimeRequired);
+        // WebView2 environment and controller creation must stay on the UI STA.
+        if (result.runtimeInstalled && !PostMessageW(window,kInitWebView,0,0))
+            WebFailure(HRESULT_FROM_WIN32(GetLastError()));
     }
     void Layout() {
         Move(back_,644,kContentHeight+12,96,32);
@@ -1523,7 +1644,7 @@ private:
             L",\"cancelledDetail\":"+JsStringLiteral(cancelledDetail_)+
             L",\"status\":"+JsStringLiteral(installStatusLine_)+
             L",\"percent\":"+std::to_wstring(percent_)+
-            L",\"progress\":"+std::to_wstring(WizardProgress::CompletedUnits(progressValue_,progressReverse_))+
+            L",\"progress\":"+std::to_wstring(WizardProgress::ClampUnits(progressValue_))+
             L",\"marquee\":"+(progressMarquee_?L"true":L"false")+
             L",\"unlockActive\":"+((page_==Page::Installing && visualMode_!=VisualMode::Slideshow)?L"true":L"false")+
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
@@ -1591,6 +1712,7 @@ private:
         page_=page;
         BOOL animationsEnabled=TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
+        loadingAnimationsEnabled_=animationsEnabled!=FALSE;
         const bool nativeLoading=page_==Page::Welcome && !webReady_ && SUCCEEDED(webError_);
         if (animationsEnabled && !webReady_ &&
             (nativeLoading || page_==Page::Update || page_==Page::Error || page_==Page::RuntimeInstalling))
@@ -1783,14 +1905,24 @@ private:
         if (next_) EnableWindow(next_, finished ? TRUE : FALSE);
     }
     void BeginRollbackVisual(ULONGLONG now) noexcept {
-        // Rollback is a separate operation: start its completed amount at zero.
-        // It is indeterminate until the engine can report rollback progress.
+        // Capture the last painted strip, not a newer, unpainted timer value or
+        // an unsmoothed engine target. The confirmation page freezes this value.
+        rollbackProgress_.Begin(visibleProgress_.RollbackStart(progressValue_));
         progressReverse_=true;
-        progressMarquee_=true;
-        rollbackVisualStarted_=now;
-        marqueePhase_=0;
-        progressValue_=progressTarget_=displayProgress_=WizardProgress::kMaxUnits;
-        percent_=0;
+        progressMarquee_=false;
+        progressValue_=progressTarget_=displayProgress_=rollbackProgress_.Start();
+        percent_=WizardProgress::Percent(progressValue_);
+        progressTickMs_=now;
+        rollbackFinishing_=false;
+    }
+    void ShowCancelling() {
+        SetPage(Page::Cancelling);
+        // Show the captured width at least once before a fast rollback or a
+        // queued timer can advance the animation.
+        if (progress_) {
+            InvalidateRect(progress_,nullptr,FALSE);
+            UpdateWindow(progress_);
+        }
     }
     void StartInstallation() {
         if (!accepted_ || transitioning_) return;
@@ -1800,10 +1932,12 @@ private:
         progressValue_ = 0;
         progressTarget_ = 0;
         displayProgress_ = 0;
+        visibleProgress_.Reset();
         progressReverse_ = false;
         progressMarquee_ = false;
-        rollbackVisualStarted_ = 0;
-        progressFinishing_ = false;
+        rollbackFinishing_ = false;
+        rollbackFinishStarted_ = 0;
+        rollbackFinishFrom_ = 0;
         progressTickMs_ = GetTickCount64();
         visualMode_ = VisualMode::Slideshow;
         unlockStatusLine_.clear();
@@ -2064,7 +2198,7 @@ private:
             visualMode_=VisualMode::Slideshow;
             progressReverse_=false;
             progressMarquee_=false;
-            progressFinishing_=false;
+            rollbackFinishing_=false;
             percent_=43;
             progressValue_=4300;
             displayProgress_=4300;
@@ -2082,8 +2216,8 @@ private:
         case Page::Cancelling:
             progressReverse_=true;
             progressMarquee_=false;
-            progressValue_=displayProgress_=progressTarget_=5000;
-            percent_=WizardProgress::Percent(progressValue_,true);
+            progressValue_=displayProgress_=progressTarget_=4300;
+            percent_=WizardProgress::Percent(progressValue_);
             installStatusLine_=Text(IDS_SIMULATION_ROLLBACK);
             break;
         case Page::Launching:
@@ -2129,7 +2263,7 @@ private:
         downgradeBody_.clear();
         progressReverse_=false;
         progressMarquee_=false;
-        rollbackVisualStarted_=0;
+        rollbackFinishing_=false;
         percent_=0;
         progressValue_=0;
         displayProgress_=0;
@@ -2155,17 +2289,10 @@ private:
         const ULONGLONG now=GetTickCount64();
         if (simulateRollback_) {
             const ULONGLONG elapsed=now-simulateRollbackStarted_;
-            // Demonstrate both the reverse marquee while waiting for MSI and
-            // the right-to-left determinate bar when progress is available.
-            progressMarquee_=elapsed<kSimulatedRollbackWait;
-            if (progressMarquee_)
-                marqueePhase_=static_cast<double>(elapsed%kMarqueePeriodMs)/kMarqueePeriodMs;
-            const ULONGLONG measured=elapsed>kSimulatedRollbackWait ? elapsed-kSimulatedRollbackWait : 0;
-            const ULONGLONG duration=kSimulatedRollbackDuration-kSimulatedRollbackWait;
-            const int completed=measured>=duration ? WizardProgress::kMaxUnits :
-                static_cast<int>(measured*WizardProgress::kMaxUnits/duration);
-            progressValue_=displayProgress_=progressTarget_=WizardProgress::RollbackRemaining(completed);
-            percent_=WizardProgress::Percent(progressValue_,true);
+            progressMarquee_=false;
+            progressValue_=displayProgress_=progressTarget_=WizardProgress::FadeToZero(
+                rollbackProgress_.Start(),elapsed,kSimulatedRollbackDuration);
+            percent_=WizardProgress::Percent(progressValue_);
             if (elapsed>=kSimulatedRollbackDuration) {
                 simulateInstall_=false;
                 simulateRollback_=false;
@@ -2177,8 +2304,10 @@ private:
             InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter(); SyncWebViewState();
             return;
         }
+        // The bar is hidden on the confirmation page: retain exactly the value
+        // that was visible when the cancellation command was issued.
+        if (page_==Page::ConfirmCancel) return;
         const ULONGLONG elapsed=now-started_;
-        if (elapsed>=kDuration-5000 && page_==Page::ConfirmCancel) return;
         if (elapsed>=kDuration-5000 && page_!=Page::Launching) {
             launchStarted_=now;
             installStatusLine_=Text(IDS_LAUNCH_TITLE);
@@ -2186,7 +2315,7 @@ private:
         }
         progressMarquee_=false;
         progressValue_=elapsed>=kDuration ? 10000 : static_cast<int>(elapsed*10000/kDuration);
-        displayProgress_=progressValue_; percent_=progressValue_/100;
+        displayProgress_=progressValue_; percent_=WizardProgress::Percent(progressValue_);
         if (elapsed>=kDuration && launchStarted_ && now-launchStarted_>=5000) {
             simulateInstall_=false; KillTimer(window,kInstallTimer); SetPage(Page::Complete); return;
         }
@@ -2213,13 +2342,35 @@ private:
         const ULONGLONG now=GetTickCount64();
         const bool finished=installEngine_.Poll();
         if (finished && installEngine_.WasCancelled()) {
-            KillTimer(window,kInstallTimer);
-            cancelledDetail_=installEngine_.RollbackNote();
-            if (installEngine_.RollbackSucceeded()) SetPage(Page::Cancelled);
-            else ShowFailurePage(true);
+            if (!installEngine_.RollbackSucceeded()) { ShowFailurePage(true); return; }
+            if (!progressReverse_) BeginRollbackVisual(now);
+            if (!rollbackFinishing_) {
+                // The engine succeeded, including MSI, registry and host work.
+                // Only now may the held remainder finish animating to zero.
+                rollbackFinishing_=true;
+                rollbackFinishStarted_=now;
+                rollbackFinishFrom_=progressValue_;
+                rollbackProgress_.Finish();
+                progressTarget_=0;
+                progressMarquee_=false;
+                installStatusLine_=Text(IDS_STATUS_ROLLBACK);
+                if (page_!=Page::Cancelling) ShowCancelling();
+            }
+            progressValue_=displayProgress_=WizardProgress::FadeToZero(
+                rollbackFinishFrom_,now-rollbackFinishStarted_,kRollbackFinishMs);
+            percent_=WizardProgress::Percent(progressValue_);
+            if (now-rollbackFinishStarted_>=kRollbackFinishMs || !rollbackFinishFrom_) {
+                KillTimer(window,kInstallTimer);
+                cancelledDetail_=installEngine_.RollbackNote();
+                SetPage(Page::Cancelled);
+                return;
+            }
+            InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter();
+            if (now-lastWebPush_>=100) { lastWebPush_=now; SyncWebViewState(); }
             return;
         }
         if (finished && !installEngine_.Succeeded()) { ShowFailurePage(true); return; }
+        if (page_==Page::ConfirmCancel) { progressTickMs_=now; return; }
         if (installEngine_.IsLaunchingPhase() || (finished && installEngine_.Succeeded())) {
             if (!launchStarted_) launchStarted_=now;
             if (page_!=Page::Launching) SetPage(Page::Launching);
@@ -2236,27 +2387,32 @@ private:
         const ULONGLONG dt=progressTickMs_ ? now-progressTickMs_ : kInstallTimerMs;
         progressTickMs_=now;
         const bool engineReverse=installEngine_.IsProgressReverse();
-        const auto progressMode=WizardProgress::ResolveMode(
-            page_==Page::Cancelling,engineReverse,installEngine_.IsMarquee());
-        if (progressMode.reverse && !progressReverse_) BeginRollbackVisual(now);
-        progressReverse_=progressMode.reverse;
-        progressMarquee_=progressMode.marquee;
-        if (progressMarquee_) {
-            const ULONGLONG epoch=progressReverse_?rollbackVisualStarted_:started_;
-            marqueePhase_=static_cast<double>((now-epoch)%kMarqueePeriodMs)/kMarqueePeriodMs;
+        if ((page_==Page::Cancelling || engineReverse) && !progressReverse_)
+            BeginRollbackVisual(now);
+        if (progressReverse_) {
+            // Stale installation callbacks and unknown rollback stages must not
+            // move the strip; reliable remaining-work reports can only shrink it.
+            progressMarquee_=false;
+            rollbackProgress_.ReportRemaining(installEngine_.ProgressUnits(),
+                engineReverse && !installEngine_.IsMarquee());
+            progressTarget_=rollbackProgress_.Target();
         } else {
-            progressTarget_=std::clamp(installEngine_.ProgressUnits(),0,WizardProgress::kMaxUnits);
-            if (page_==Page::Launching && launchStarted_) {
-                const int cap=8800+static_cast<int>(std::min<ULONGLONG>(5000,now-launchStarted_)*1200/5000);
-                progressTarget_=std::min(progressTarget_,cap);
+            progressMarquee_=installEngine_.IsMarquee();
+            if (!progressMarquee_) {
+                int reported=WizardProgress::ClampUnits(installEngine_.ProgressUnits());
+                if (page_==Page::Launching && launchStarted_) {
+                    const int cap=8800+static_cast<int>(std::min<ULONGLONG>(5000,now-launchStarted_)*1200/5000);
+                    reported=std::min(reported,cap);
+                }
+                // Several installer phases reset their counters. Do not make an
+                // installation bar retract when a phase changes.
+                progressTarget_=std::max(progressTarget_,reported);
             }
-            const double alpha=std::min(1.0,static_cast<double>(dt)/kProgressSmoothTauMs);
-            int step=static_cast<int>(std::lround((progressTarget_-displayProgress_)*alpha));
-            if (!step && progressTarget_!=displayProgress_) step=progressTarget_>displayProgress_?1:-1;
-            displayProgress_+=step;
-            progressValue_=std::clamp(displayProgress_,0,WizardProgress::kMaxUnits);
-            percent_=WizardProgress::Percent(progressValue_,progressReverse_);
         }
+        const double alpha=std::min(1.0,static_cast<double>(dt)/kProgressSmoothTauMs);
+        displayProgress_=WizardProgress::SmoothTowards(displayProgress_,progressTarget_,alpha);
+        progressValue_=displayProgress_;
+        percent_=WizardProgress::Percent(progressValue_);
         // While MSI is acknowledging cancellation, its callbacks still describe
         // installation, not overall rollback progress.
         installStatusLine_=page_==Page::Cancelling && !engineReverse
@@ -2283,10 +2439,15 @@ private:
         if (page_==Page::Cancelling || page_==Page::Launching || page_==Page::ConfirmCancel ||
             (page_==Page::Error && failurePending_)) return;
         if (page_==Page::Installing || page_==Page::ModulesBusy || page_==Page::ProcessesStuck) {
+            const int visibleAtRequest=visibleProgress_.PaintedOr(progressValue_);
 #ifndef GLASS_EMBED_MSI
-            if (simulateInstall_) { beforeCancel_=page_; SetPage(Page::ConfirmCancel); return; }
+            if (simulateInstall_) {
+                visibleProgress_.Capture(visibleAtRequest);
+                beforeCancel_=page_; SetPage(Page::ConfirmCancel); return;
+            }
 #endif
             if (installEngine_.PauseForCancelDecision()) {
+                visibleProgress_.Capture(visibleAtRequest);
                 beforeCancel_=page_; SetPage(Page::ConfirmCancel);
             }
             return;
@@ -2680,7 +2841,7 @@ private:
         g.FillEllipse(&spark,GdiReal(cx-Scale(127)),GdiReal(cy+Scale(81)),GdiReal(Scale(5)),GdiReal(Scale(5)));
     }
     void DrawLoadingScreen(HDC dc) {
-        const double phase=static_cast<double>(GetTickCount64()%1200)/1200.0;
+        const double phase=loadingAnimationsEnabled_ ? static_cast<double>(GetTickCount64()%1200)/1200.0 : 0.0;
         const Gdiplus::REAL x=static_cast<Gdiplus::REAL>(Scale(473));
         const Gdiplus::REAL y=static_cast<Gdiplus::REAL>(Scale(243));
         const Gdiplus::REAL diameter=static_cast<Gdiplus::REAL>(Scale(54));
@@ -2692,7 +2853,18 @@ private:
         g.DrawEllipse(&track,x,y,diameter,diameter);
         g.DrawArc(&arc,x,y,diameter,diameter,GdiReal(-90.0+phase*360.0),GdiReal(268.0));
     }
+    void EnsureBanner() {
+        if (bannerLoaded_) return;
+        bannerLoaded_=true;
+        const auto image=Resource(IDR_WELCOME);
+        bannerStream_.Attach(SHCreateMemStream(image.data,image.size));
+        if (bannerStream_) {
+            banner_.reset(Gdiplus::Bitmap::FromStream(bannerStream_.Get()));
+            if (banner_ && banner_->GetLastStatus()!=Gdiplus::Ok) banner_.reset();
+        }
+    }
     void DrawBanner(HDC dc, bool complete) {
+        EnsureBanner();
         if (!banner_) return;
         Gdiplus::Graphics g(dc);
         g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
@@ -2710,6 +2882,7 @@ private:
         g.FillRectangle(&shade,GdiInt(Scale(240)),GdiInt(Scale(100)),GdiInt(Scale(350)),GdiInt(Scale(440)));
     }
     void DrawBannerFull(HDC dc) {
+        EnsureBanner();
         if (!banner_) return;
         Gdiplus::Graphics g(dc);
         g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
@@ -2873,7 +3046,8 @@ private:
     void RenderFooterText(HDC dc) {
         if (page_!=Page::Installing && page_!=Page::Cancelling && page_!=Page::Launching && page_!=Page::RuntimeInstalling) return;
         const std::wstring line=page_==Page::RuntimeInstalling?runtimeStatus_:installStatusLine_.empty()?Text(IDS_STATUS_PREPARE):installStatusLine_;
-        const std::wstring shown=progressMarquee_?line:line+L"  "+std::to_wstring(percent_)+L"%";
+        const std::wstring percentText=progressValue_>0 && percent_==0 ? L"<1%" : std::to_wstring(percent_)+L"%";
+        const std::wstring shown=progressMarquee_?line:line+L"  "+percentText;
         RECT dot=Box(32,kContentHeight+22,8,8);
         HBRUSH dotBrush=CreateSolidBrush(RGB(183,168,255));
         HGDIOBJ oldBrush=SelectObject(dc,dotBrush);
@@ -2912,6 +3086,11 @@ private:
     }
     void Cleanup() {
         closing_ = true;
+        {
+            std::lock_guard<std::mutex> lock(startupMutex_);
+            startupStop_.store(true,std::memory_order_release);
+        }
+        KillTimer(window,kStartupPollTimer);
         KillTimer(window,kInstallTimer); KillTimer(window,kFadeTimer); KillTimer(window,kHeroTimer);
 #ifdef _DEBUG
         KillTimer(window,kDebugDemoTimer);
@@ -2938,7 +3117,9 @@ private:
     }
     LRESULT Handle(UINT msg, WPARAM w, LPARAM l) {
         switch (msg) {
-        case WM_CREATE: Initialize(); return 0;
+        case WM_CREATE: InitializeLoading(); return 0;
+        case kBeginStartup: BeginStartup(); return 0;
+        case kStartupComplete: CompleteStartupIfReady(); return 0;
         case WM_ERASEBKGND:
             if (bufferedErase_) Erase(reinterpret_cast<HDC>(w));
             return 1; // Do not clear the on-screen client before the buffered paint.
@@ -2959,6 +3140,16 @@ private:
             break;
         case WM_THEMECHANGED:
             EndTransition(); InvalidateRect(window,nullptr,FALSE); return 0;
+        case WM_SETTINGCHANGE:
+            if (page_==Page::Welcome && !webReady_ && SUCCEEDED(webError_)) {
+                BOOL enabled=TRUE;
+                SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&enabled,0);
+                loadingAnimationsEnabled_=enabled!=FALSE;
+                if (loadingAnimationsEnabled_) SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
+                else KillTimer(window,kHeroTimer);
+                InvalidateContent();
+            }
+            break;
         case WM_DPICHANGED: {
             EndTransition();
             frame_.Reset(); fadeFrame_.Reset(); haveWebBounds_=false;
@@ -2969,26 +3160,27 @@ private:
                                     FALSE,static_cast<DWORD>(GetWindowLongPtrW(window,GWL_EXSTYLE)),dpi_);
             SetWindowPos(window,nullptr,suggested->left,suggested->top,size.right-size.left,
                          size.bottom-size.top,SWP_NOACTIVATE | SWP_NOZORDER);
-            CreateFonts(); Layout(); BuildButtonImageCache(); InvalidateRect(window,nullptr,FALSE);
+            if (controlsReady_) { CreateFonts(); Layout(); WizardTheme::ResetButtonCache(); }
+            InvalidateRect(window,nullptr,FALSE);
             RedrawWindow(window,nullptr,nullptr,RDW_INVALIDATE | RDW_ALLCHILDREN); return 0;
         }
         case WM_DRAWITEM: {
             const auto item=reinterpret_cast<const DRAWITEMSTRUCT*>(l);
             if (item && item->CtlID==IDC_PROGRESS) {
                 FillRect(item->hDC,&item->rcItem,progressTrack_);
-                if (progressMarquee_) {
+                if (progressMarquee_ && page_==Page::RuntimeInstalling) {
                     const int width = item->rcItem.right - item->rcItem.left;
                     const int span = std::max(width / 3, 48);
                     const int travel = width + span;
-                    const double phase = WizardProgress::MarqueePhase(marqueePhase_,progressReverse_);
-                    const int left = item->rcItem.left + static_cast<int>(phase * travel) - span;
+                    const int left = item->rcItem.left + static_cast<int>(marqueePhase_ * travel) - span;
                     RECT chip{left, item->rcItem.top, left + span, item->rcItem.bottom};
                     IntersectRect(&chip, &chip, &item->rcItem);
                     if (chip.right > chip.left)
                         FillRect(item->hDC,&chip,progressFill_);
                 } else {
                     const auto span=WizardProgress::DeterminateSpan(
-                        item->rcItem.left,item->rcItem.right,progressValue_,progressReverse_);
+                        item->rcItem.left,item->rcItem.right,progressValue_);
+                    visibleProgress_.RecordPaint(progressValue_);
                     RECT filled{span.left,item->rcItem.top,span.right,item->rcItem.bottom};
                     if (filled.right > filled.left)
                         FillRect(item->hDC,&filled,progressFill_);
@@ -3018,6 +3210,10 @@ private:
             return reinterpret_cast<LRESULT>(license?licenseBrush_:darkBrush_);
         }
         case WM_COMMAND:
+            if (startupPending_) {
+                if (LOWORD(w)==IDCANCEL || LOWORD(w)==IDC_CANCEL) RequestClose();
+                return 0;
+            }
             switch (LOWORD(w)) {
             case IDC_ACCEPT:
                 if (HIWORD(w)==BN_CLICKED && page_==Page::License && !DebugDemoLocksControls()) {
@@ -3051,7 +3247,10 @@ private:
                 }
                 return 0;
             case IDC_BACK:
-                if (!DebugDemoLocksControls() && page_==Page::ConfirmCancel) { installEngine_.ResumeAfterCancelDecision(); SetPage(beforeCancel_); return 0; }
+                if (!DebugDemoLocksControls() && page_==Page::ConfirmCancel) {
+                    visibleProgress_.Resume();
+                    installEngine_.ResumeAfterCancelDecision(); SetPage(beforeCancel_); return 0;
+                }
                 if (!DebugDemoLocksControls() && page_==Page::Components) { SetPage(Page::License); return 0; }
                 if (!DebugDemoLocksControls() && !transitioning_ && page_==Page::License) {
                     forceCleanInstall_=false;
@@ -3076,7 +3275,7 @@ private:
                         simulateRollbackStarted_=GetTickCount64();
                         BeginRollbackVisual(simulateRollbackStarted_);
                         installStatusLine_=Text(IDS_SIMULATION_ROLLBACK);
-                        SetPage(Page::Cancelling);
+                        ShowCancelling();
                         return 0;
                     }
 #endif
@@ -3084,7 +3283,7 @@ private:
                     if (installEngine_.IsCancelRequested()) {
                         BeginRollbackVisual(GetTickCount64());
                         installStatusLine_=Text(IDS_STATUS_ROLLBACK);
-                        SetPage(Page::Cancelling);
+                        ShowCancelling();
                     }
                     return 0;
                 }
@@ -3135,7 +3334,8 @@ private:
             }
             break;
         case WM_TIMER:
-            if (w==kInstallTimer) Tick();
+            if (w==kStartupPollTimer) CompleteStartupIfReady();
+            else if (w==kInstallTimer) Tick();
 #ifdef _DEBUG
             else if (w==kDebugDemoTimer) TickDebugDemo();
 #endif
@@ -3177,7 +3377,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     gLanguage = PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN ?
         MAKELANGID(LANG_RUSSIAN,SUBLANG_DEFAULT) : MAKELANGID(LANG_ENGLISH,SUBLANG_ENGLISH_US);
     SetThreadUILanguage(gLanguage);
-    InstallLog::Initialize();
     HRESULT com = CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
     if (FAILED(com)) {
         InstallLog::LineFormat(L"COM init failed: 0x%08X", static_cast<unsigned>(com));
@@ -3197,8 +3396,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         InstallLog::Shutdown();
         return 3;
     }
-    const bool themed=WizardTheme::InstallDetours();
-    InstallLog::Line(themed ? L"Theme Detours installed" : L"Theme Detours unavailable");
     int exitCode = 0;
     if (!gInstaller.Create(show)) {
         InstallLog::Line(L"Could not create setup window");
@@ -3213,6 +3410,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         }
         exitCode = result==-1 ? 5 : static_cast<int>(message.wParam);
     }
+    gInstaller.JoinStartup();
     if (gWindowClassRegistered) {
         UnregisterClassW(L"GlassSetupWindow",gInstance);
         gWindowClassRegistered=false;

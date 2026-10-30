@@ -153,7 +153,10 @@ assert hook.index("return original(") < hook.index("DrawThemeTextEx(")
 assert "HookDrawTextExW" not in theme + setup and "DetourEnumerateImportsEx" not in theme + setup
 scope = section(theme, "LRESULT CALLBACK ButtonScopeSubclassProc(", "bool IsActiveFocusedButton(")
 assert "DefSubclassProc" in scope and not re.search(r"case\s+WM_(?:PAINT|PRINTCLIENT)\b", scope)
-assert "EnsureAndDraw" in theme and "Scale(132)" in setup and "Scale(184)" in setup
+assert "EnsureAndDraw" in theme and "AddState(destination, width, height, normalizedState, focusedBlue)" in theme
+# Only the needed comctl32 state is rasterized on demand; do not prewarm all
+# seven sizes on the setup UI thread before the first window appears.
+assert "PrewarmButtonCache" not in setup
 
 # One-document UI, static initialization and user-driven cancel controls.
 for mode in ("welcome", "checking", "update", "conflicts", "downgrade", "version-invalid", "license",
@@ -167,13 +170,67 @@ assert "postMessage('cancel')" in ui and 'message==L"cancel"' in setup and 'mess
 assert 'Page::Components' in setup and 'installEngine_.Start' in setup
 assert "PauseForCancelDecision" in engine and "decisionGate_" in engine
 assert "Page::ConfirmCancel" in setup and "Page::Cancelling" in setup and "Page::Cancelled" in setup
-# Both the pending MSI cancellation marquee and determinate rollback use the
-# same right-to-left progress policy; the standalone C++ test checks geometry.
+
+# The first, centered native spinner is painted before deferred startup. MSI,
+# version, logger, EULA decoding, and the runtime probe run on the worker; the
+# actual WebView environment/controller are still created on the UI STA.
+create = section(setup, "    bool Create(int show)", "    void JoinStartup()")
+assert create.index("ShowWindow(window, show)") < create.index("UpdateWindow(window)") < create.index("PostMessageW(window,kBeginStartup")
+loading = section(setup, "    void InitializeLoading()", "    void InitializeControls()")
+assert "kHeroTimer" in loading and "IsProductInstalled" not in loading and "IsWebView2RuntimeInstalled" not in loading
+spinner = section(setup, "    void DrawLoadingScreen(", "    void EnsureBanner()")
+assert all(token in spinner for token in ("Scale(473)", "Scale(243)", "Scale(54)", "loadingAnimationsEnabled_"))
+assert "DrawLoadingScreen(dc)" in setup and "case WM_SETTINGCHANGE:" in setup
+startup_worker = section(setup, "    void StartupWorker(", "    void BeginStartup()")
+for token in ("COINIT_MULTITHREADED", "InstallLog::Initialize()", "SelfProductVersion()",
+              "IsProductInstalled", "IsWebView2RuntimeInstalled()", "Utf8(Resource(IDR_EULA"):
+    assert token in startup_worker, token
+assert startup_worker.index("std::lock_guard<std::mutex> lock(startupMutex_)") < startup_worker.index("startupStop_.load(std::memory_order_acquire)) return;") < startup_worker.index("PostMessageW(target,kStartupComplete")
+controls_init = section(setup, "    void InitializeControls()", "    void StartupWorker(")
+assert "InstallLog::" not in controls_init and "IsProductInstalled" not in controls_init
+begin_startup = section(setup, "    void BeginStartup()", "    void CompleteStartupIfReady()")
+assert "std::thread" in begin_startup and "kStartupPollTimer" in begin_startup
+assert begin_startup.index("WizardTheme::InstallDetours()") < begin_startup.index("std::thread")
+assert "--debug-slow-startup" in begin_startup and "IDS_STARTUP_FAILED" in begin_startup
+complete_startup = section(setup, "    void CompleteStartupIfReady()", "    void Layout()")
+assert "startupThread_.join()" in complete_startup and "Page::RuntimeRequired" in complete_startup
+assert "Page::AlreadyRunning" in complete_startup and "PostMessageW(window,kInitWebView" in complete_startup
+assert "case kInitWebView: if (!closing_) InitializeWebView()" in setup
+assert "COINIT_APARTMENTTHREADED" in setup
+cleanup = section(setup, "    void Cleanup()", "    LRESULT Handle(")
+assert "startupMutex_" in cleanup and "startupStop_.store(true" in cleanup and "startupThread_.join()" not in cleanup
+main_loop = section(setup, "int WINAPI wWinMain(", "    if (gWindowClassRegistered)")
+assert main_loop.index("gInstaller.Create(show)") < main_loop.index("gInstaller.JoinStartup()")
+assert "InstallLog::Initialize()" not in main_loop
+assert "case WM_CREATE: InitializeLoading()" in setup
+assert "if (LOWORD(w)==IDCANCEL || LOWORD(w)==IDC_CANCEL) RequestClose()" in setup
+assert "if (controlsReady_) { CreateFonts(); Layout(); WizardTheme::ResetButtonCache(); }" in setup
+# The *last painted* left-anchored strip is captured when cancel is requested;
+# confirmation, MSI acknowledgement, and unknown rollback stages cannot replace
+# it with the engine target, a right-anchored fill, or a moving segment.
 progress_draw = section(setup, "case WM_DRAWITEM:", "case WM_CTLCOLORBTN:")
-assert "WizardProgress::DeterminateSpan" in progress_draw and "WizardProgress::MarqueePhase" in progress_draw
+assert "WizardProgress::DeterminateSpan" in progress_draw and "visibleProgress_.RecordPaint(progressValue_)" in progress_draw
+assert "progressMarquee_ && page_==Page::RuntimeInstalling" in progress_draw
+assert "MarqueePhase" not in progress_draw and "progressValue_,progressReverse_" not in progress_draw
+cancel_request = section(setup, "void RequestClose() {", "void WebFailure(")
+assert "visibleProgress_.PaintedOr(progressValue_)" in cancel_request
+assert "visibleProgress_.Capture(visibleAtRequest)" in cancel_request
+begin_rollback = section(setup, "void BeginRollbackVisual(", "void StartInstallation()")
+assert "rollbackProgress_.Begin(visibleProgress_.RollbackStart(progressValue_))" in begin_rollback
+assert "progressMarquee_=false" in begin_rollback
+assert "visibleProgress_.Reset()" in section(setup, "void StartInstallation()", "bool RunPreflightChecks()")
+assert 'L"<1%"' in section(setup, "void RenderFooterText(", "void Paint()")
+simulation = section(setup, "void TickSimulation()", "    void Tick() {")
+assert "page_==Page::ConfirmCancel) return" in simulation
+assert "FadeToZero" in simulation and "rollbackProgress_.Start()" in simulation
 progress_tick = section(setup, "void Tick() {", "void RequestClose() {")
-assert "WizardProgress::ResolveMode" in progress_tick and "BeginRollbackVisual(now)" in progress_tick
-assert "page_==Page::Cancelling" in progress_tick and "WizardProgress::Percent" in progress_tick
+assert "page_==Page::ConfirmCancel) { progressTickMs_=now; return; }" in progress_tick
+assert "rollbackProgress_.ReportRemaining" in progress_tick
+assert "engineReverse && !installEngine_.IsMarquee()" in progress_tick
+assert progress_tick.index("RollbackSucceeded()") < progress_tick.index("rollbackProgress_.Finish()")
+assert "WizardProgress::FadeToZero" in progress_tick and "WizardProgress::Percent(progressValue_)" in progress_tick
+assert "WizardProgress::SmoothTowards(displayProgress_,progressTarget_,alpha)" in progress_tick
+assert "progressTarget_=std::max(progressTarget_,reported)" in progress_tick
 rollback_ui = section(engine, "bool InstallEngine::PerformRollback()", "bool InstallEngine::PurgeRemnants()")
 assert "WizardProgress::RollbackRemaining(units)" in rollback_ui
 for start, end in (("bool InstallEngine::PerformRollback()", "bool InstallEngine::UndoCleanInstall()"),
@@ -181,7 +238,9 @@ for start, end in (("bool InstallEngine::PerformRollback()", "bool InstallEngine
     phase = section(engine, start, end)
     assert phase.index('SetStatus(labels_.rollback.empty() ? L"…" : labels_.rollback, -1)') < phase.index("progressReverse_.store(true")
 confirm = section(setup, "case IDC_NEXT:", "case IDCANCEL:")
-assert "BeginRollbackVisual(GetTickCount64())" in confirm and "SetPage(Page::Cancelling)" in confirm
+assert "BeginRollbackVisual(GetTickCount64())" in confirm and "ShowCancelling()" in confirm
+show_cancel = section(setup, "void ShowCancelling()", "void StartInstallation()")
+assert "SetPage(Page::Cancelling)" in show_cancel and "UpdateWindow(progress_)" in show_cancel
 assert "simulateRollback_" in confirm and "IDS_SIMULATION_ROLLBACK" in setup and "IDS_SIMULATION_CANCELLED" in setup
 assert "WM_CLOSE" in setup and "SC_CLOSE" in setup and "SetSystemCloseEnabled" in setup
 assert "cancelRequested_.store(true" in engine and "return IDCANCEL" in msi and "cancellationSent" in msi
@@ -200,6 +259,7 @@ assert "cached MSI unavailable" in rollback
 assert "preserveSnapshot_=true" in engine and "RollbackSucceeded" in engine_h
 undo = section(engine, "bool InstallEngine::UndoCleanInstall()", "bool InstallEngine::PurgeRemnants()")
 assert "DeleteTree" not in undo, "never recursively delete unrelated files on clean-install cancellation"
+assert undo.index("GlassInstallMsi::UninstallProduct") < undo.index("++productsProcessed") < undo.index("productsProcessed*8000/productCount")
 assert "DirBytes(state.backupX64)" in rollback and "IsNestedSubPath" in rollback
 assert "receivedFrame" in watch and "FILE_FLAG_FIRST_PIPE_INSTANCE" in watch
 assert "Page::Launching" in setup and "kMinLaunchMs = 5000" in engine

@@ -134,52 +134,46 @@ class ButtonImageCache {
     };
     std::vector<Entry> entries_;
 
-    bool AddSizeStates(HDC reference, int width, int height) noexcept {
+    bool AddState(HDC reference, int width, int height, int state, bool blue) noexcept {
         if (!reference || width <= 0 || height <= 0 || width > 2048 || height > 256)
             return false;
-        static constexpr int states[] = {
-            PBS_NORMAL, PBS_HOT, PBS_PRESSED, PBS_DISABLED, PBS_DEFAULTED, PBS_DEFAULTED_ANIMATING
-        };
+        if (std::any_of(entries_.begin(), entries_.end(), [&](const Entry& e) {
+                return e.width == width && e.height == height && e.state == state && e.focusedBlue == blue;
+            })) return true;
+        Entry entry;
+        entry.width = width;
+        entry.height = height;
+        entry.state = state;
+        entry.focusedBlue = blue;
+        entry.dc = CreateCompatibleDC(reference);
+        if (!entry.dc) return false;
+        BITMAPINFO info{};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = width;
+        info.bmiHeader.biHeight = -height;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        void* bits = nullptr;
+        entry.bitmap = CreateDIBSection(reference, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (!entry.bitmap || !bits) {
+            if (entry.bitmap) DeleteObject(entry.bitmap);
+            DeleteDC(entry.dc);
+            return false;
+        }
+        entry.previous = SelectObject(entry.dc, entry.bitmap);
+        if (!entry.previous || entry.previous == HGDI_ERROR) {
+            DeleteDC(entry.dc);
+            DeleteObject(entry.bitmap);
+            return false;
+        }
+        RasterizeButtonImage(static_cast<DWORD*>(bits), width, height, blue, state);
         try {
-            for (bool blue : {false, true}) {
-                for (int st : states) {
-                    if (std::any_of(entries_.begin(), entries_.end(), [&](const Entry& e) {
-                            return e.width == width && e.height == height && e.state == st && e.focusedBlue == blue;
-                        })) {
-                        continue;
-                    }
-                    Entry entry;
-                    entry.width = width;
-                    entry.height = height;
-                    entry.state = st;
-                    entry.focusedBlue = blue;
-                    entry.dc = CreateCompatibleDC(reference);
-                    if (!entry.dc) return false;
-                    BITMAPINFO info{};
-                    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-                    info.bmiHeader.biWidth = width;
-                    info.bmiHeader.biHeight = -height;
-                    info.bmiHeader.biPlanes = 1;
-                    info.bmiHeader.biBitCount = 32;
-                    info.bmiHeader.biCompression = BI_RGB;
-                    void* bits = nullptr;
-                    entry.bitmap = CreateDIBSection(reference, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
-                    if (!entry.bitmap || !bits) {
-                        if (entry.bitmap) DeleteObject(entry.bitmap);
-                        DeleteDC(entry.dc);
-                        return false;
-                    }
-                    entry.previous = SelectObject(entry.dc, entry.bitmap);
-                    if (!entry.previous || entry.previous == HGDI_ERROR) {
-                        DeleteDC(entry.dc);
-                        DeleteObject(entry.bitmap);
-                        return false;
-                    }
-                    RasterizeButtonImage(static_cast<DWORD*>(bits), width, height, blue, st);
-                    entries_.push_back(entry);
-                }
-            }
+            entries_.push_back(entry);
         } catch (...) {
+            SelectObject(entry.dc, entry.previous);
+            DeleteDC(entry.dc);
+            DeleteObject(entry.bitmap);
             return false;
         }
         return true;
@@ -206,8 +200,13 @@ public:
     void Prewarm(HDC reference, const std::vector<int>& widths, int height) noexcept {
         Reset();
         if (!reference || height <= 0) return;
+        static constexpr int states[] = {
+            PBS_NORMAL, PBS_HOT, PBS_PRESSED, PBS_DISABLED, PBS_DEFAULTED, PBS_DEFAULTED_ANIMATING
+        };
         for (int w : widths)
-            (void)AddSizeStates(reference, w, height);
+            for (bool blue : {false, true})
+                for (int state : states)
+                    (void)AddState(reference, w, height, state, blue);
     }
 
     bool EnsureAndDraw(HDC destination, LPCRECT rect, LPCRECT clip, int state, bool focusedBlue) noexcept {
@@ -226,7 +225,9 @@ public:
         };
         auto found = findIt();
         if (found == entries_.end()) {
-            if (!AddSizeStates(destination, width, height))
+            // Rasterize only the state actually requested by comctl32. Prewarming
+            // every size and state delayed the first visible installer window.
+            if (!AddState(destination, width, height, normalizedState, focusedBlue))
                 return false;
             found = findIt();
             if (found == entries_.end())

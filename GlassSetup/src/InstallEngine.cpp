@@ -1326,15 +1326,22 @@ bool InstallEngine::PerformRollback() noexcept {
 }
 
 bool InstallEngine::UndoCleanInstall() noexcept {
-    // The clean-install cleanup has no per-operation progress callbacks.
+    // Individual MSI operations do not expose reliable continuous progress.
     SetStatus(labels_.rollback.empty() ? L"…" : labels_.rollback, -1);
     progressReverse_.store(true,std::memory_order_release);
     InstallLog::Line(L"Clean install failed or cancelled; removing partial install");
     (void)GlassInstallHost::StopAllForUninstall(x64Dir_, x86Dir_, true, true, true);
     bool ok = !shellRegisteredBySetup_ || GlassInstallUtil::InvokeShellExtRegistration(false,x64Dir_,x86Dir_);
+    const size_t productCount=rollbackSession_.installedThisSession.size();
+    size_t productsProcessed=0;
     for (auto it = rollbackSession_.installedThisSession.rbegin();
          it != rollbackSession_.installedThisSession.rend(); ++it) {
         if (!GlassInstallMsi::UninstallProduct(it->c_str())) ok = false;
+        ++productsProcessed;
+        // Leave room for registry, services and tasks; final success is reported
+        // separately after all cleanup and host restoration have finished.
+        if (productCount) SetStatus(labels_.rollback,WizardProgress::kMaxUnits-
+            static_cast<int>(productsProcessed*8000/productCount));
     }
     // MSI removes its own files. Only empty directories may be removed; never delete user content.
     if (!openGlassDir_.empty()) RemoveDirectoryW(openGlassDir_.c_str());
