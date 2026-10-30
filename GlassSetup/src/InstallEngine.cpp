@@ -1,5 +1,6 @@
 #include "InstallEngine.h"
 #include "InstallLog.h"
+#include "WizardProgress.h"
 #include "InstallSupport/GlassInstallHost.h"
 #include "InstallSupport/GlassInstallMsi.h"
 #include "InstallSupport/GlassInstallUtil.h"
@@ -1286,8 +1287,10 @@ bool InstallEngine::CreateRollbackSnapshot() noexcept {
 }
 
 bool InstallEngine::PerformRollback() noexcept {
-    progressReverse_ = true;
-    SetStatus(labels_.rollback.empty() ? L"…" : labels_.rollback, progressUnits_);
+    // The stop/uninstall stages have no reliable percentage. Publish marquee
+    // before exposing the reverse flag so the UI never uses stale MSI progress.
+    SetStatus(labels_.rollback.empty() ? L"…" : labels_.rollback, -1);
+    progressReverse_.store(true,std::memory_order_release);
     (void)GlassInstallHost::StopAllForUninstall(x64Dir_, x86Dir_, true, true, true);
     bool lifecycleOk=true;
     if (shellRegisteredBySetup_ && !GlassInstallUtil::InvokeShellExtRegistration(false,x64Dir_,x86Dir_)) lifecycleOk=false;
@@ -1297,9 +1300,7 @@ bool InstallEngine::PerformRollback() noexcept {
     if (!prior_.shortcutExisted) GlassInstallUtil::DeleteStartMenuShortcut();
     const bool filesOk = GlassInstallRollback::ExecuteRollback(
         rollbackSession_, [this](int units) {
-            if (units < 0) units = 0;
-            if (units > 10000) units = 10000;
-            SetStatus(labels_.rollback, 10000 - units);
+            SetStatus(labels_.rollback, WizardProgress::RollbackRemaining(units));
         });
     const bool ok=lifecycleOk && filesOk;
     std::wstring note;
@@ -1325,8 +1326,9 @@ bool InstallEngine::PerformRollback() noexcept {
 }
 
 bool InstallEngine::UndoCleanInstall() noexcept {
-    progressReverse_ = true;
-    SetStatus(labels_.rollback.empty() ? L"…" : labels_.rollback, progressUnits_);
+    // The clean-install cleanup has no per-operation progress callbacks.
+    SetStatus(labels_.rollback.empty() ? L"…" : labels_.rollback, -1);
+    progressReverse_.store(true,std::memory_order_release);
     InstallLog::Line(L"Clean install failed or cancelled; removing partial install");
     (void)GlassInstallHost::StopAllForUninstall(x64Dir_, x86Dir_, true, true, true);
     bool ok = !shellRegisteredBySetup_ || GlassInstallUtil::InvokeShellExtRegistration(false,x64Dir_,x86Dir_);

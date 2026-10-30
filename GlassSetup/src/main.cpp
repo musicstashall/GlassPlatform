@@ -25,6 +25,7 @@
 #include <Helpers/ThemeHelper.h>
 #include "WizardTheme.h"
 #include "WizardAssets.h"
+#include "WizardProgress.h"
 #include "InstallSupport/GlassInstallMsi.h"
 #include "InstallSupport/GlassInstallUtil.h"
 #ifdef ShellExecute
@@ -67,6 +68,7 @@ constexpr UINT kRuntimeStatus = WM_APP + 3, kRuntimeComplete = WM_APP + 4;
 constexpr ULONGLONG kFadeDuration = 280;
 #ifndef GLASS_EMBED_MSI
 constexpr ULONGLONG kDuration = 30000;
+constexpr ULONGLONG kSimulatedRollbackWait = 1000, kSimulatedRollbackDuration = 5000;
 #endif
 constexpr COLORREF kDark = RGB(16,18,37), kLicensePanel = RGB(27,29,52);
 constexpr COLORREF kFooterTop = RGB(26,27,50), kFooterBottom = RGB(17,18,35);
@@ -1148,10 +1150,14 @@ private:
     int percent_ = 0, progressValue_ = 0, progressTarget_ = 0, displayProgress_ = 0;
     bool progressReverse_ = false;
     double marqueePhase_ = 0;
-    ULONGLONG progressTickMs_ = 0;
+    ULONGLONG progressTickMs_ = 0, rollbackVisualStarted_ = 0;
     bool progressMarquee_ = false;
     bool progressFinishing_ = false;
     bool simulateInstall_ = false;
+#ifndef GLASS_EMBED_MSI
+    bool simulateRollback_ = false;
+    ULONGLONG simulateRollbackStarted_ = 0;
+#endif
 #ifdef _DEBUG
     bool debugDemoPending_ = false, debugDemoStarted_ = false, debugDemoActive_ = false;
     size_t debugDemoStep_ = 0;
@@ -1517,7 +1523,7 @@ private:
             L",\"cancelledDetail\":"+JsStringLiteral(cancelledDetail_)+
             L",\"status\":"+JsStringLiteral(installStatusLine_)+
             L",\"percent\":"+std::to_wstring(percent_)+
-            L",\"progress\":"+std::to_wstring(progressValue_)+
+            L",\"progress\":"+std::to_wstring(WizardProgress::CompletedUnits(progressValue_,progressReverse_))+
             L",\"marquee\":"+(progressMarquee_?L"true":L"false")+
             L",\"unlockActive\":"+((page_==Page::Installing && visualMode_!=VisualMode::Slideshow)?L"true":L"false")+
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
@@ -1776,6 +1782,16 @@ private:
         WizardTheme::SetSystemCloseEnabled(window,finished);
         if (next_) EnableWindow(next_, finished ? TRUE : FALSE);
     }
+    void BeginRollbackVisual(ULONGLONG now) noexcept {
+        // Rollback is a separate operation: start its completed amount at zero.
+        // It is indeterminate until the engine can report rollback progress.
+        progressReverse_=true;
+        progressMarquee_=true;
+        rollbackVisualStarted_=now;
+        marqueePhase_=0;
+        progressValue_=progressTarget_=displayProgress_=WizardProgress::kMaxUnits;
+        percent_=0;
+    }
     void StartInstallation() {
         if (!accepted_ || transitioning_) return;
         if (!RunPreflightChecks()) return;
@@ -1784,6 +1800,9 @@ private:
         progressValue_ = 0;
         progressTarget_ = 0;
         displayProgress_ = 0;
+        progressReverse_ = false;
+        progressMarquee_ = false;
+        rollbackVisualStarted_ = 0;
         progressFinishing_ = false;
         progressTickMs_ = GetTickCount64();
         visualMode_ = VisualMode::Slideshow;
@@ -1795,6 +1814,8 @@ private:
         SetPage(Page::Installing);
 #ifndef GLASS_EMBED_MSI
         simulateInstall_ = true;
+        simulateRollback_ = false;
+        simulateRollbackStarted_ = 0;
         installStatusLine_ = Text(IDS_SIMULATION_NOTE);
         InstallLog::Line(L"Debug build: simulated installation, platform is not stopped");
         SetTimer(window, kInstallTimer, kInstallTimerMs, nullptr);
@@ -2041,6 +2062,7 @@ private:
         case Page::Installing:
             simulateInstall_=false;
             visualMode_=VisualMode::Slideshow;
+            progressReverse_=false;
             progressMarquee_=false;
             progressFinishing_=false;
             percent_=43;
@@ -2057,11 +2079,26 @@ private:
             holdReport_=L"explorer.exe (PID 2080): ExplorerCompat.dll, TaskbarCompat.dll\r\n"
                         L"GlassSettings.exe (PID 4120): GlassCore.dll, WndCompat.dll";
             break;
+        case Page::Cancelling:
+            progressReverse_=true;
+            progressMarquee_=false;
+            progressValue_=displayProgress_=progressTarget_=5000;
+            percent_=WizardProgress::Percent(progressValue_,true);
+            installStatusLine_=Text(IDS_SIMULATION_ROLLBACK);
+            break;
+        case Page::Launching:
+            progressReverse_=false;
+            progressMarquee_=false;
+            progressValue_=displayProgress_=progressTarget_=9000;
+            percent_=90;
+            installStatusLine_=Text(IDS_LAUNCH_TITLE);
+            break;
         case Page::Complete:
             percent_=100;
             progressValue_=10000;
             displayProgress_=10000;
             progressTarget_=10000;
+            progressReverse_=false;
             progressMarquee_=false;
             break;
         case Page::Error:
@@ -2090,7 +2127,9 @@ private:
         setupProductVersion_.clear();
         blockReason_.clear();
         downgradeBody_.clear();
+        progressReverse_=false;
         progressMarquee_=false;
+        rollbackVisualStarted_=0;
         percent_=0;
         progressValue_=0;
         displayProgress_=0;
@@ -2114,6 +2153,30 @@ private:
 #ifndef GLASS_EMBED_MSI
     void TickSimulation() {
         const ULONGLONG now=GetTickCount64();
+        if (simulateRollback_) {
+            const ULONGLONG elapsed=now-simulateRollbackStarted_;
+            // Demonstrate both the reverse marquee while waiting for MSI and
+            // the right-to-left determinate bar when progress is available.
+            progressMarquee_=elapsed<kSimulatedRollbackWait;
+            if (progressMarquee_)
+                marqueePhase_=static_cast<double>(elapsed%kMarqueePeriodMs)/kMarqueePeriodMs;
+            const ULONGLONG measured=elapsed>kSimulatedRollbackWait ? elapsed-kSimulatedRollbackWait : 0;
+            const ULONGLONG duration=kSimulatedRollbackDuration-kSimulatedRollbackWait;
+            const int completed=measured>=duration ? WizardProgress::kMaxUnits :
+                static_cast<int>(measured*WizardProgress::kMaxUnits/duration);
+            progressValue_=displayProgress_=progressTarget_=WizardProgress::RollbackRemaining(completed);
+            percent_=WizardProgress::Percent(progressValue_,true);
+            if (elapsed>=kSimulatedRollbackDuration) {
+                simulateInstall_=false;
+                simulateRollback_=false;
+                cancelledDetail_=Text(IDS_SIMULATION_CANCELLED);
+                KillTimer(window,kInstallTimer);
+                SetPage(Page::Cancelled);
+                return;
+            }
+            InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter(); SyncWebViewState();
+            return;
+        }
         const ULONGLONG elapsed=now-started_;
         if (elapsed>=kDuration-5000 && page_==Page::ConfirmCancel) return;
         if (elapsed>=kDuration-5000 && page_!=Page::Launching) {
@@ -2172,12 +2235,17 @@ private:
 
         const ULONGLONG dt=progressTickMs_ ? now-progressTickMs_ : kInstallTimerMs;
         progressTickMs_=now;
-        progressReverse_=installEngine_.IsProgressReverse();
-        progressMarquee_=installEngine_.IsMarquee();
+        const bool engineReverse=installEngine_.IsProgressReverse();
+        const auto progressMode=WizardProgress::ResolveMode(
+            page_==Page::Cancelling,engineReverse,installEngine_.IsMarquee());
+        if (progressMode.reverse && !progressReverse_) BeginRollbackVisual(now);
+        progressReverse_=progressMode.reverse;
+        progressMarquee_=progressMode.marquee;
         if (progressMarquee_) {
-            marqueePhase_=static_cast<double>((now-started_)%kMarqueePeriodMs)/kMarqueePeriodMs;
+            const ULONGLONG epoch=progressReverse_?rollbackVisualStarted_:started_;
+            marqueePhase_=static_cast<double>((now-epoch)%kMarqueePeriodMs)/kMarqueePeriodMs;
         } else {
-            progressTarget_=std::clamp(installEngine_.ProgressUnits(),0,10000);
+            progressTarget_=std::clamp(installEngine_.ProgressUnits(),0,WizardProgress::kMaxUnits);
             if (page_==Page::Launching && launchStarted_) {
                 const int cap=8800+static_cast<int>(std::min<ULONGLONG>(5000,now-launchStarted_)*1200/5000);
                 progressTarget_=std::min(progressTarget_,cap);
@@ -2186,10 +2254,13 @@ private:
             int step=static_cast<int>(std::lround((progressTarget_-displayProgress_)*alpha));
             if (!step && progressTarget_!=displayProgress_) step=progressTarget_>displayProgress_?1:-1;
             displayProgress_+=step;
-            progressValue_=std::clamp(displayProgress_,0,10000);
-            percent_=progressReverse_?(10000-progressValue_)/100:progressValue_/100;
+            progressValue_=std::clamp(displayProgress_,0,WizardProgress::kMaxUnits);
+            percent_=WizardProgress::Percent(progressValue_,progressReverse_);
         }
-        installStatusLine_=installEngine_.StatusLine();
+        // While MSI is acknowledging cancellation, its callbacks still describe
+        // installation, not overall rollback progress.
+        installStatusLine_=page_==Page::Cancelling && !engineReverse
+            ? Text(IDS_STATUS_ROLLBACK) : installEngine_.StatusLine();
         if (finished && installEngine_.Succeeded() && launchStarted_ && now-launchStarted_>=5000) {
             KillTimer(window,kInstallTimer); progressValue_=displayProgress_=10000; percent_=100;
             SetPage(Page::Complete); return;
@@ -2909,20 +2980,16 @@ private:
                     const int width = item->rcItem.right - item->rcItem.left;
                     const int span = std::max(width / 3, 48);
                     const int travel = width + span;
-                    const double phase = progressReverse_ ? (1.0 - marqueePhase_) : marqueePhase_;
+                    const double phase = WizardProgress::MarqueePhase(marqueePhase_,progressReverse_);
                     const int left = item->rcItem.left + static_cast<int>(phase * travel) - span;
                     RECT chip{left, item->rcItem.top, left + span, item->rcItem.bottom};
                     IntersectRect(&chip, &chip, &item->rcItem);
                     if (chip.right > chip.left)
                         FillRect(item->hDC,&chip,progressFill_);
                 } else {
-                    RECT filled=item->rcItem;
-                    const int bar = MulDiv(filled.right-filled.left,progressValue_,10000);
-                    if (progressReverse_) {
-                        filled.left = filled.right - bar;
-                    } else {
-                        filled.right = filled.left + bar;
-                    }
+                    const auto span=WizardProgress::DeterminateSpan(
+                        item->rcItem.left,item->rcItem.right,progressValue_,progressReverse_);
+                    RECT filled{span.left,item->rcItem.top,span.right,item->rcItem.bottom};
                     if (filled.right > filled.left)
                         FillRect(item->hDC,&filled,progressFill_);
                 }
@@ -3004,10 +3071,21 @@ private:
                 if (page_==Page::RuntimeRequired) { StartRuntimeInstallation(); return 0; }
                 if (page_==Page::ConfirmCancel) {
 #ifndef GLASS_EMBED_MSI
-                    if (simulateInstall_) { simulateInstall_=false; cancelledDetail_=Text(IDS_ERR_ROLLBACK_REMOVED); KillTimer(window,kInstallTimer); SetPage(Page::Cancelled); return 0; }
+                    if (simulateInstall_) {
+                        simulateRollback_=true;
+                        simulateRollbackStarted_=GetTickCount64();
+                        BeginRollbackVisual(simulateRollbackStarted_);
+                        installStatusLine_=Text(IDS_SIMULATION_ROLLBACK);
+                        SetPage(Page::Cancelling);
+                        return 0;
+                    }
 #endif
                     installEngine_.RequestCancel();
-                    if (installEngine_.IsCancelRequested()) SetPage(Page::Cancelling);
+                    if (installEngine_.IsCancelRequested()) {
+                        BeginRollbackVisual(GetTickCount64());
+                        installStatusLine_=Text(IDS_STATUS_ROLLBACK);
+                        SetPage(Page::Cancelling);
+                    }
                     return 0;
                 }
                 if (page_==Page::Conflicts) { RecheckConflicts(); return 0; }

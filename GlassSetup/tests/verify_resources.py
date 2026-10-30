@@ -116,6 +116,8 @@ for text in (project, unins_project):
     assert "WizardTheme.cpp" in text and "GdiPlusCompat.h" in text and "WebView2LoaderStatic.lib" in text
     assert "Detours.4.0.1" in text
 assert "GdiPlusCompat.h" in read("GlassSetup.vcxproj.filters")
+assert "WizardProgress.h" in project and "WizardProgress.h" in read("GlassSetup.vcxproj.filters")
+assert "progress_tests.cpp" in project
 assert 'ResourceCompile Include="GlassUnins.rc"' in unins_project
 assert "GLASS_HAVE_UNLOCKER_X64" in project
 assert "GlassSettings.Native.dll" in project and "GlassSettings.Native.dll" in unins_rc
@@ -165,6 +167,22 @@ assert "postMessage('cancel')" in ui and 'message==L"cancel"' in setup and 'mess
 assert 'Page::Components' in setup and 'installEngine_.Start' in setup
 assert "PauseForCancelDecision" in engine and "decisionGate_" in engine
 assert "Page::ConfirmCancel" in setup and "Page::Cancelling" in setup and "Page::Cancelled" in setup
+# Both the pending MSI cancellation marquee and determinate rollback use the
+# same right-to-left progress policy; the standalone C++ test checks geometry.
+progress_draw = section(setup, "case WM_DRAWITEM:", "case WM_CTLCOLORBTN:")
+assert "WizardProgress::DeterminateSpan" in progress_draw and "WizardProgress::MarqueePhase" in progress_draw
+progress_tick = section(setup, "void Tick() {", "void RequestClose() {")
+assert "WizardProgress::ResolveMode" in progress_tick and "BeginRollbackVisual(now)" in progress_tick
+assert "page_==Page::Cancelling" in progress_tick and "WizardProgress::Percent" in progress_tick
+rollback_ui = section(engine, "bool InstallEngine::PerformRollback()", "bool InstallEngine::PurgeRemnants()")
+assert "WizardProgress::RollbackRemaining(units)" in rollback_ui
+for start, end in (("bool InstallEngine::PerformRollback()", "bool InstallEngine::UndoCleanInstall()"),
+                   ("bool InstallEngine::UndoCleanInstall()", "bool InstallEngine::PurgeRemnants()")):
+    phase = section(engine, start, end)
+    assert phase.index('SetStatus(labels_.rollback.empty() ? L"…" : labels_.rollback, -1)') < phase.index("progressReverse_.store(true")
+confirm = section(setup, "case IDC_NEXT:", "case IDCANCEL:")
+assert "BeginRollbackVisual(GetTickCount64())" in confirm and "SetPage(Page::Cancelling)" in confirm
+assert "simulateRollback_" in confirm and "IDS_SIMULATION_ROLLBACK" in setup and "IDS_SIMULATION_CANCELLED" in setup
 assert "WM_CLOSE" in setup and "SC_CLOSE" in setup and "SetSystemCloseEnabled" in setup
 assert "cancelRequested_.store(true" in engine and "return IDCANCEL" in msi and "cancellationSent" in msi
 assert engine.index("GlassInstallRollback::NoteInstalled(rollbackSession_,productCode.c_str())") < engine.index("if (exitCode == ERROR_INSTALL_USEREXIT")
