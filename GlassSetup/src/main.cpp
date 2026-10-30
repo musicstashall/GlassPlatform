@@ -669,11 +669,13 @@ struct InstallRootCandidate {
 };
 
 struct InstalledGlassVersionInfo {
+    bool rootsResolved = false;
     bool detected = false;
     bool valid = false;
     bool hasUnreadableInstallation = false;
     std::wstring version;
     std::wstring modulePath;
+    std::wstring x64Root, x86Root;
     ParsedVersion parsed{};
 };
 
@@ -702,26 +704,23 @@ void AddInstallRoot(std::vector<InstallRootCandidate>& roots, std::wstring path)
     roots.push_back({std::move(path)});
 }
 
-std::vector<InstallRootCandidate> InstalledGlassRoots() {
-    // An autorun task or stale registry value can point to a developer build,
-    // which must not be mistaken for the installed version either.
-    std::vector<InstallRootCandidate> roots;
-    PWSTR program64=nullptr;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX64,KF_FLAG_DEFAULT,nullptr,&program64)) && program64) {
-        AddInstallRoot(roots,std::wstring(program64)+L"\\GlassPlatform");
-        AddInstallRoot(roots,std::wstring(program64)+L"\\Glass");
-        CoTaskMemFree(program64);
+bool InstalledGlassRoots(std::vector<InstallRootCandidate>& roots, std::wstring& x64, std::wstring& x86) {
+    // Use the same system-derived destinations as Setup and GlassUnins. Never
+    // turn an old product registry value or developer task into a target.
+    if (!GlassInstallUtil::ResolveFixedPlatformRoots(x64,x86)) {
+        InstallLog::LineFormat(L"Preflight: fixed Program Files roots unavailable (error %lu)",GetLastError());
+        return false;
     }
-    PWSTR program32=nullptr;
-    HRESULT hr=SHGetKnownFolderPath(FOLDERID_ProgramFilesX86,KF_FLAG_DEFAULT,nullptr,&program32);
-    if (FAILED(hr) || !program32)
-        hr=SHGetKnownFolderPath(FOLDERID_ProgramFiles,KF_FLAG_DEFAULT,nullptr,&program32);
-    if (SUCCEEDED(hr) && program32) {
-        AddInstallRoot(roots,std::wstring(program32)+L"\\GlassPlatform");
-        AddInstallRoot(roots,std::wstring(program32)+L"\\Glass");
-        CoTaskMemFree(program32);
-    }
-    return roots;
+    InstallLog::LineFormat(L"Preflight: fixed roots x64=%s x86=%s",x64.c_str(),x86.c_str());
+    const auto add=[&](const std::wstring& root) {
+        if (root.empty()) return;
+        AddInstallRoot(roots,root);
+        // Check the historical sibling without ever using it as a new target.
+        const size_t separator=root.find_last_of(L"\\/");
+        if (separator!=std::wstring::npos) AddInstallRoot(roots,root.substr(0,separator)+L"\\Glass");
+    };
+    add(x64); add(x86);
+    return true;
 }
 
 bool GlassInstallRegistrationExists() {
@@ -731,16 +730,45 @@ bool GlassInstallRegistrationExists() {
         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX86);
 }
 
+bool InspectInstalledMarker(const std::wstring& path, bool& exists) {
+    exists=false;
+    const DWORD attributes=GetFileAttributesW(path.c_str());
+    if (attributes==INVALID_FILE_ATTRIBUTES) {
+        const DWORD error=GetLastError();
+        if (error==ERROR_FILE_NOT_FOUND || error==ERROR_PATH_NOT_FOUND) return true;
+        InstallLog::LineFormat(L"Preflight: cannot inspect %s (error %lu)",path.c_str(),error);
+        return false;
+    }
+    if ((attributes&FILE_ATTRIBUTE_DIRECTORY) || !GlassInstallUtil::IsSafeInstallPath(path)) {
+        InstallLog::LineFormat(L"Preflight: unsafe or non-file marker %s",path.c_str());
+        return false;
+    }
+    exists=true;
+    return true;
+}
+
 InstalledGlassVersionInfo FindInstalledGlassVersion() {
     InstalledGlassVersionInfo result;
+    std::vector<InstallRootCandidate> roots;
+    result.rootsResolved=InstalledGlassRoots(roots,result.x64Root,result.x86Root);
+    if (!result.rootsResolved) return result;
     const bool registered=GlassInstallRegistrationExists();
-    for (const auto& root : InstalledGlassRoots()) {
+    InstallLog::LineFormat(L"Preflight: platform MSI registered=%d",registered?1:0);
+    for (const auto& root : roots) {
         const std::wstring corePath=root.path+L"\\GlassCore.dll";
-        const bool coreExists=GetFileAttributesW(corePath.c_str())!=INVALID_FILE_ATTRIBUTES;
-        const bool markerExists=coreExists ||
-            GetFileAttributesW((root.path+L"\\GlassCompat.dll").c_str())!=INVALID_FILE_ATTRIBUTES ||
-            GetFileAttributesW((root.path+L"\\GlassShellHost.exe").c_str())!=INVALID_FILE_ATTRIBUTES;
-        if (!markerExists) continue;
+        bool coreExists=false, compatExists=false, shellExists=false;
+        const bool coreChecked=InspectInstalledMarker(corePath,coreExists);
+        const bool compatChecked=InspectInstalledMarker(root.path+L"\\GlassCompat.dll",compatExists);
+        const bool shellChecked=InspectInstalledMarker(root.path+L"\\GlassShellHost.exe",shellExists);
+        InstallLog::LineFormat(L"Preflight: root=%s core=%d compat=%d shell=%d checked=%d",
+            root.path.c_str(),coreExists?1:0,compatExists?1:0,shellExists?1:0,
+            coreChecked && compatChecked && shellChecked ? 1 : 0);
+        if (!coreChecked || !compatChecked || !shellChecked) {
+            result.detected=true;
+            result.hasUnreadableInstallation=true;
+            continue;
+        }
+        if (!coreExists && !compatExists && !shellExists) continue;
         result.detected=true;
         if (!coreExists) {
             result.hasUnreadableInstallation=true;
@@ -751,9 +779,11 @@ InstalledGlassVersionInfo FindInstalledGlassVersion() {
         const std::wstring version=ReadProductVersionString(corePath,key);
         ParsedVersion parsed{};
         if (version.empty() || !TryParseVersion(version,parsed)) {
+            InstallLog::LineFormat(L"Preflight: ProductVersion unavailable or invalid: %s",corePath.c_str());
             result.hasUnreadableInstallation=true;
             continue;
         }
+        InstallLog::LineFormat(L"Preflight: installed ProductVersion %s from %s",version.c_str(),corePath.c_str());
         if (result.version.empty() || CompareVersions(parsed,result.parsed)>0) {
             result.version=version;
             result.modulePath=corePath;
@@ -761,8 +791,8 @@ InstalledGlassVersionInfo FindInstalledGlassVersion() {
         }
     }
     if (registered && !result.detected) {
-        // A registered MSI with no readable files in a known location is not a
-        // clean install. Its actual file paths are checked again before MSI work.
+        // A registered MSI with no readable files at the fixed roots has an
+        // unknown location; it is not proof of a broken installation.
         result.detected=true;
         result.hasUnreadableInstallation=true;
     }
@@ -1134,7 +1164,9 @@ private:
     std::vector<std::wstring> conflicts_;
     std::wstring installedGlassVersion_;
     std::wstring setupProductVersion_;
+    std::wstring preflightX64Root_,preflightX86Root_;
     std::wstring blockReason_;
+    std::wstring versionInvalidNote_;
     std::wstring downgradeBody_;
     struct VersionCheckResult {
         bool completed = false;
@@ -1149,8 +1181,6 @@ private:
     VersionCheckResult versionCheckResult_;
     bool versionCheckStarted_ = false, versionCheckHandled_ = false;
     bool updateAvailable_ = false, updateSkipped_ = false;
-    bool offerCleanInstall_ = false;
-    bool forceCleanInstall_ = false;
     bool failurePending_ = false;
     bool transitioning_ = false, bufferedErase_ = false;
     ULONGLONG fadeStarted_ = 0;
@@ -1278,21 +1308,23 @@ private:
     }
     void StartupWorker(HWND target, bool themed, bool slowStartup) noexcept {
         StartupResult result;
+        std::wstring fixed64,fixed86;
+        DWORD rootsError=ERROR_SUCCESS;
+        bool rootsChecked=false;
         const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
         try {
             // Capture running state as soon as the initial window is shown,
             // before version checks, user choices, or any host is stopped.
             if (SUCCEEDED(com) && !gAlreadyRunning && !startupStop_.load(std::memory_order_acquire)) {
                 result.os64=GlassInstallUtil::IsOs64Bit();
+                rootsChecked=true;
+                const bool rootsKnown=GlassInstallUtil::ResolveFixedPlatformRoots(fixed64,fixed86);
+                if (!rootsKnown) rootsError=GetLastError();
                 if (result.os64) {
                     const bool runningKnown=GlassInstallUtil::QueryOpenGlassRunning(result.openGlass.wasRunning);
-                    std::wstring platformDir;
-                    // The installer's destination is fixed, even when an old
-                    // registry value or a developer task points elsewhere.
-                    const bool rootKnown=DefaultProgramGlassDir(true,platformDir);
-                    if (rootKnown) result.openGlassDir=platformDir+L"\\OpenGlass";
-                    const bool filesKnown=rootKnown && GlassInstallUtil::QueryOpenGlassFiles(
-                        result.openGlassDir,platformDir,result.openGlass.filesPresent);
+                    if (rootsKnown) result.openGlassDir=fixed64+L"\\OpenGlass";
+                    const bool filesKnown=rootsKnown && GlassInstallUtil::QueryOpenGlassFiles(
+                        result.openGlassDir,fixed64,result.openGlass.filesPresent);
                     result.openGlass.valid=runningKnown && filesKnown;
                 }
             }
@@ -1300,6 +1332,8 @@ private:
             // UI interactions are locked until this worker has been joined.
             InstallLog::Initialize();
             InstallLog::Line(themed ? L"Theme Detours installed" : L"Theme Detours unavailable");
+            if (rootsChecked) InstallLog::LineFormat(L"Startup fixed roots: x64=%s x86=%s error=%lu",
+                fixed64.c_str(),fixed86.c_str(),rootsError);
             if (result.os64) InstallLog::LineFormat(L"OpenGlass at wizard startup: valid=%d files=%d running=%d dir=%s",
                 result.openGlass.valid ? 1 : 0, result.openGlass.filesPresent ? 1 : 0,
                 result.openGlass.wasRunning ? 1 : 0, result.openGlassDir.c_str());
@@ -1330,6 +1364,9 @@ private:
                     result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass);
                 if (!startupStop_.load(std::memory_order_acquire)) {
+                    InstallLog::LineFormat(L"Startup MSI registrations: x64=%d x86=%d Settings=%d OpenGlass=%d",
+                        result.installed.platform64?1:0,result.installed.platform32?1:0,
+                        result.installed.glassSettings?1:0,result.installed.openGlass?1:0);
                     result.eulaText=Utf8(Resource(IDR_EULA,gLanguage));
                     result.eulaText+=L"\r\n\r\n────────────────────────────────\r\n"+
                         Text(IDS_GPL_APPENDIX)+L"\r\n\r\n"+Utf8(Resource(IDR_GPL));
@@ -1422,15 +1459,13 @@ private:
         // Complete uses the exact rectangle previously occupied by Cancel.
         const bool unlock = page_==Page::ProcessesStuck;
         const bool conflictCheck = page_==Page::Conflicts;
-        const bool cleanOffer = page_==Page::VersionInvalid && offerCleanInstall_;
-        // «Продолжить» в Segoe UI 14px — 88 px; 132 px даёт поля по 22 px.
         const bool confirm=page_==Page::ConfirmCancel;
         const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error ||
             page_==Page::RuntimeError || page_==Page::AlreadyRunning;
         if (confirm) Move(back_,568,kContentHeight+12,190,32);
-        const int nextWidth=confirm?190:page_==Page::RuntimeRequired?230:(unlock || conflictCheck)?160:cleanOffer?132:104;
+        const int nextWidth=confirm?190:page_==Page::RuntimeRequired?230:(unlock || conflictCheck)?160:104;
         const int nextX=confirm?778:page_==Page::RuntimeRequired?624:terminal?864:
-            (unlock || conflictCheck)?694:cleanOffer?722:750;
+            (unlock || conflictCheck)?694:750;
         Move(next_,nextX,kContentHeight+12,nextWidth,32);
         Move(cancel_,864,kContentHeight+12,104,32);
         Move(updateDownload_,644,kContentHeight+12,104,32);
@@ -1684,7 +1719,7 @@ private:
             L",\"conflicts\":"+ConflictsJson()+
             L",\"installedGlassVersion\":"+JsStringLiteral(installedGlassVersion_)+
             L",\"setupProductVersion\":"+JsStringLiteral(setupProductVersion_)+
-            L",\"versionInvalidNote\":"+JsStringLiteral(Text(offerCleanInstall_?IDS_VERSION_INVALID_NOTE:IDS_SETUP_VERSION_INVALID_NOTE))+
+            L",\"versionInvalidNote\":"+JsStringLiteral(versionInvalidNote_)+
             L",\"blockReason\":"+JsStringLiteral(blockReason_)+
             L",\"downgradeBody\":"+JsStringLiteral(downgradeBody_)+
             L",\"errorReason\":"+JsStringLiteral(errorReason_)+
@@ -1707,7 +1742,7 @@ private:
         if (page_==Page::ConfirmCancel) { SetFocus(back_); return; }
         if (webReady_ && (page_==Page::License || page_==Page::Components)) { SetFocus(webHost_); return; }
         SetFocus(page_==Page::ModulesBusy || page_==Page::ProcessesStuck || page_==Page::Conflicts ? next_ :
-                 page_==Page::Downgrade || (page_==Page::VersionInvalid && !offerCleanInstall_) ? cancel_ :
+                 page_==Page::Downgrade || page_==Page::VersionInvalid ? cancel_ :
                  page_==Page::Update ? updateSkip_ :
                  page_==Page::Checking ? cancel_ :
                  page_==Page::License && !accepted_ ? accept_ :
@@ -1771,8 +1806,7 @@ private:
         WizardTheme::SetSystemCloseEnabled(window,!closeBlocked);
         ShowWindow(eula_,SW_HIDE); ShowWindow(accept_,SW_HIDE);
         Layout();
-        const bool cleanOffer=page_==Page::VersionInvalid && offerCleanInstall_;
-        const bool blockedPage=page_==Page::Downgrade || (page_==Page::VersionInvalid && !offerCleanInstall_);
+        const bool blockedPage=page_==Page::Downgrade || page_==Page::VersionInvalid;
         const bool demoControlsLocked=DebugDemoLocksControls();
         const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error ||
             page_==Page::RuntimeError || page_==Page::AlreadyRunning;
@@ -1781,7 +1815,6 @@ private:
         const UINT nextId = page_==Page::RuntimeRequired?IDS_RUNTIME_INSTALL:
             page_==Page::ConfirmCancel?IDS_CONFIRM_ABORT:
             page_==Page::Conflicts?IDS_RECHECK_CONFLICTS:
-            cleanOffer?IDS_CONTINUE:
             page_==Page::Components?IDS_INSTALL:
             terminal?IDS_FINISH:
             page_==Page::ModulesBusy?IDS_HOLD_RETRY:
@@ -1810,24 +1843,6 @@ private:
         if (!transitioning_) FocusPage();
         SyncWebViewState();
         InvalidateRect(window,nullptr,FALSE);
-    }
-    static bool DefaultProgramGlassDir(bool x64, std::wstring& out) {
-        if (x64) {
-            PWSTR path=nullptr;
-            if (FAILED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX64,KF_FLAG_DEFAULT,nullptr,&path)) || !path) return false;
-            out.assign(path);
-            CoTaskMemFree(path);
-        } else {
-            PWSTR path = nullptr;
-            if (FAILED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX86, KF_FLAG_DEFAULT, nullptr, &path)) || !path) {
-                if (FAILED(SHGetKnownFolderPath(FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, nullptr, &path)) || !path)
-                    return false;
-            }
-            out.assign(path);
-            CoTaskMemFree(path);
-        }
-        out += L"\\GlassPlatform";
-        return true;
     }
     void StartRuntimeInstallation() {
         if (runtimeThread_.joinable() || page_!=Page::RuntimeRequired) return;
@@ -2001,8 +2016,15 @@ private:
         // Destinations are a product policy, not a discovery result. In
         // particular an autorun task can intentionally point at a build tree;
         // never use it, or an old registry value, as an MSI/cleanup target.
-        if ((os64 && !DefaultProgramGlassDir(true,x64Dir)) || !DefaultProgramGlassDir(false,x86Dir)) {
-            InstallLog::Line(L"Install path resolution failed (Program Files)");
+        if (!GlassInstallUtil::ResolveFixedPlatformRoots(x64Dir,x86Dir)) {
+            InstallLog::LineFormat(L"Install path resolution failed (Program Files, error %lu)",GetLastError());
+            ShowInstallError(Text(IDS_ERR_INSTALL_PATH));
+            return;
+        }
+        const bool same64=(x64Dir.empty() && preflightX64Root_.empty()) ||
+            GlassInstallUtil::SameInstallPath(x64Dir,preflightX64Root_);
+        if (!same64 || !GlassInstallUtil::SameInstallPath(x86Dir,preflightX86Root_)) {
+            InstallLog::Line(L"Fixed Program Files roots changed after the version check; no changes made");
             ShowInstallError(Text(IDS_ERR_INSTALL_PATH));
             return;
         }
@@ -2045,7 +2067,7 @@ private:
         labels.nativeScanFailed = Text(IDS_ERR_NATIVE_SCAN);
         labels.snapshotFailed = Text(IDS_ERR_SNAPSHOT);
         labels.diskFull = Text(IDS_MSI_DISK_FULL);
-        installEngine_.Start(gInstance, x64Dir, x86Dir, ogDir, selection_, openGlassStartup_, forceCleanInstall_, std::move(labels), nullptr);
+        installEngine_.Start(gInstance, x64Dir, x86Dir, ogDir, selection_, openGlassStartup_, false, std::move(labels), nullptr);
         SetTimer(window, kInstallTimer, kInstallTimerMs, nullptr);
 #endif
     }
@@ -2063,23 +2085,20 @@ private:
         setupProductVersion_=SelfProductVersion();
         ParsedVersion setupParsed{};
         const bool setupVersionValid=TryParseVersion(setupProductVersion_,setupParsed);
-        if (installed.detected && !installed.valid) {
-            if (!forceCleanInstall_) {
-                offerCleanInstall_=true;
-                blockReason_=Text(IDS_VERSION_INVALID_BODY);
-                downgradeBody_.clear();
-                InstallLog::LineFormat(L"Preflight: integrity failure, offering clean reinstall (%s)",
-                    installed.modulePath.empty()?L"installation path not resolved":installed.modulePath.c_str());
-                SetPage(Page::VersionInvalid);
-                return false;
-            }
-            InstallLog::Line(L"Preflight: clean reinstall accepted after integrity failure");
-        } else {
-            offerCleanInstall_=false;
+        if (!installed.rootsResolved || (installed.detected && !installed.valid)) {
+            // Missing paths, inaccessible files, and unreadable metadata do not
+            // prove corruption. Never offer destructive clean reinstall here.
+            blockReason_=Text(installed.rootsResolved?IDS_VERSION_INVALID_BODY:IDS_ERR_INSTALL_PATH);
+            versionInvalidNote_=Text(IDS_VERSION_INVALID_NOTE);
+            downgradeBody_.clear();
+            InstallLog::LineFormat(L"Preflight blocked: installed location or version cannot be verified (%s); no changes made",
+                installed.modulePath.empty()?L"no readable installed module":installed.modulePath.c_str());
+            SetPage(Page::VersionInvalid);
+            return false;
         }
         if (installed.detected && !setupVersionValid) {
-            offerCleanInstall_=false;
             blockReason_=Text(IDS_SETUP_VERSION_INVALID_BODY);
+            versionInvalidNote_=Text(IDS_SETUP_VERSION_INVALID_NOTE);
             downgradeBody_.clear();
             InstallLog::Line(L"Preflight blocked: this setup's ProductVersion is missing or invalid; safe comparison is impossible");
             SetPage(Page::VersionInvalid);
@@ -2094,7 +2113,10 @@ private:
             SetPage(Page::Downgrade);
             return false;
         }
+        preflightX64Root_=installed.x64Root;
+        preflightX86Root_=installed.x86Root;
         blockReason_.clear();
+        versionInvalidNote_.clear();
         downgradeBody_.clear();
         return true;
     }
@@ -2221,8 +2243,8 @@ private:
             conflicts_.clear();
             installedGlassVersion_.clear();
             setupProductVersion_=SelfProductVersion();
-            offerCleanInstall_=true;
             blockReason_=Text(IDS_VERSION_INVALID_BODY);
+            versionInvalidNote_=Text(IDS_VERSION_INVALID_NOTE);
             downgradeBody_.clear();
             break;
         case Page::License:
@@ -2287,8 +2309,7 @@ private:
         simulateInstall_=false;
         updateAvailable_=false;
         updateSkipped_=false;
-        offerCleanInstall_=false;
-        forceCleanInstall_=false;
+        versionInvalidNote_.clear();
         errorReason_.clear();
         holdReport_.clear();
         conflicts_.clear();
@@ -3123,7 +3144,7 @@ private:
             DrawLabel(dc,blockReason_,Box(48,238,520,126),font_,muted,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX);
             DrawLabel(dc,Text(IDS_INSTALLED_VERSION_LABEL)+L": "+(installedGlassVersion_.empty()?L"—":installedGlassVersion_),Box(48,382,520,30),font_,white);
             DrawLabel(dc,Text(IDS_SETUP_VERSION_LABEL)+L": "+(setupProductVersion_.empty()?L"—":setupProductVersion_),Box(48,420,520,30),font_,white);
-            DrawLabel(dc,Text(offerCleanInstall_?IDS_VERSION_INVALID_NOTE:IDS_SETUP_VERSION_INVALID_NOTE),Box(48,489,520,34),small_,muted);
+            DrawLabel(dc,versionInvalidNote_,Box(48,489,520,34),small_,muted);
         } else if (page_==Page::Welcome && !webReady_ && SUCCEEDED(webError_)) {
             DrawLoadingScreen(dc);
         } else if (!webReady_ && FAILED(webError_)) {
@@ -3343,7 +3364,6 @@ private:
                 }
                 if (!DebugDemoLocksControls() && page_==Page::Components) { SetPage(Page::License); return 0; }
                 if (!DebugDemoLocksControls() && !transitioning_ && page_==Page::License) {
-                    forceCleanInstall_=false;
                     SetPage(Page::Welcome);
                 }
                 return 0;
@@ -3379,13 +3399,7 @@ private:
                 }
                 if (page_==Page::Conflicts) { RecheckConflicts(); return 0; }
                 if (page_==Page::Downgrade) return 0;
-                if (page_==Page::VersionInvalid) {
-                    if (!offerCleanInstall_) return 0;
-                    forceCleanInstall_=true;
-                    InstallLog::Line(L"User accepted clean reinstall after integrity failure");
-                    ContinueVersionCheck();
-                    return 0;
-                }
+                if (page_==Page::VersionInvalid) return 0;
                 if (w==IDOK && page_==Page::Update) {
                     InstallLog::Line(L"Update skipped by keyboard; continuing with this setup");
                     updateSkipped_ = true;

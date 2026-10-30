@@ -30,7 +30,7 @@ def function(text, token):
 
 start_install = function(setup, "void StartInstallation()")
 startup = function(setup, "void StartupWorker(")
-roots = function(setup, "std::vector<InstallRootCandidate> InstalledGlassRoots()")
+roots = function(setup, "bool InstalledGlassRoots(")
 unins_roots = function(unins, "void ResolveRoots()")
 for body in (start_install, startup, roots, unins_roots):
     assert "QueryPlatformInstallPath(" not in body

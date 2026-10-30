@@ -57,6 +57,10 @@ bool QueryOpenGlassRunning(bool& running, const OpenGlassTaskState* knownTasks =
 bool QueryOpenGlassFiles(const std::wstring& openGlassDir, const std::wstring& platformDir, bool& present) noexcept;
 
 bool IsOs64Bit() noexcept;
+// Resolve the OS-managed Program Files folders, never product registry/task
+// paths or inherited environment variables. On 32-bit Windows x64 is empty.
+// Failure clears both results and sets GetLastError for diagnostics.
+bool ResolveFixedPlatformRoots(std::wstring& x64, std::wstring& x86) noexcept;
 std::wstring TrimTrailingSlashes(std::wstring path);
 // Best-effort cleanup of empty directories only; never deletes files, follows
 // reparse points, or enters a directory retained by another product.

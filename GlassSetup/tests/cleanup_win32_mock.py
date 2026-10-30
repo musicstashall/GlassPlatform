@@ -13,7 +13,11 @@ root = Path(__file__).resolve().parents[2]
 source = (root / "GlassSetup/src/InstallSupport/GlassInstallUtil.cpp").read_text(encoding="utf-8")
 start = source.index("namespace {\n\n// Normalise before checking roots")
 end = source.index("bool RunHiddenCommand(", start)
-cleanup = source[start:end]
+# The system-root resolver has its own Win32/registry mock; keep this fake
+# focused on the directory-cleanup adapter and its filesystem API surface.
+resolver_start = source.index("namespace {\n\n// FOLDERID_ProgramFilesX64", start)
+resolver_end = source.index("void PruneEmptyDirectories(", resolver_start)
+cleanup = source[start:resolver_start] + source[resolver_end:end]
 header = (root / "GlassSetup/src/InstallSupport/GlassEmptyDirectories.h").as_posix()
 prefix = r'''
 #include "HEADER_PATH"
@@ -172,6 +176,6 @@ with tempfile.TemporaryDirectory(prefix="glass-cleanup-test-") as directory:
     exe = Path(directory) / "cleanup-test"
     cpp.write_text(prefix + cleanup + main, encoding="utf-8")
     compiler = os.environ.get("CXX", "g++")
-    subprocess.run([compiler, "-std=c++17", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
+    subprocess.run([compiler, "-std=c++17", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-no-pie",
                     str(cpp), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

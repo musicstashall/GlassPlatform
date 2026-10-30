@@ -233,6 +233,7 @@ private:
     EventRegistrationToken requestToken_{}, navToken_{}, completedToken_{}, messageToken_{}, popupToken_{}, permissionToken_{};
     std::wstring webState_;
     std::wstring x64Dir_,x86Dir_,openGlassDir_;
+    bool fixedRootsKnown_=false;
     std::mutex dataMutex_;
     std::wstring status_,error_,holdReport_;
     int progress_=0, resultCode_=0;
@@ -280,22 +281,16 @@ private:
         selected_={safe.platform64,safe.platform32,safe.glassSettings,safe.openGlass};
     }
     void ResolveRoots() {
-        // Match Setup's fixed destinations. Registry values, task commands and
-        // the location of an old unins000.exe are not deletion/launch targets.
-        x64Dir_.clear();x86Dir_.clear();openGlassDir_.clear();
-        if (GlassInstallUtil::IsOs64Bit()) {
-            PWSTR pf=nullptr;
-            if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX64,0,nullptr,&pf)) && pf) {
-                x64Dir_=std::wstring(pf)+L"\\GlassPlatform";CoTaskMemFree(pf);
-                openGlassDir_=x64Dir_+L"\\OpenGlass";
-            }
+        // Match Setup's fixed OS-derived destinations. Product registry values,
+        // task commands and old uninstaller locations are not targets.
+        openGlassDir_.clear();
+        fixedRootsKnown_=GlassInstallUtil::ResolveFixedPlatformRoots(x64Dir_,x86Dir_);
+        if (!fixedRootsKnown_) {
+            LogLine(L"Fixed Program Files roots unavailable, error "+std::to_wstring(GetLastError()));
+            return;
         }
-        PWSTR pf=nullptr;
-        HRESULT hr=SHGetKnownFolderPath(FOLDERID_ProgramFilesX86,0,nullptr,&pf);
-        if (FAILED(hr) || !pf) hr=SHGetKnownFolderPath(FOLDERID_ProgramFiles,0,nullptr,&pf);
-        if (SUCCEEDED(hr) && pf) {
-            x86Dir_=std::wstring(pf)+L"\\GlassPlatform";CoTaskMemFree(pf);
-        }
+        if (!x64Dir_.empty()) openGlassDir_=x64Dir_+L"\\OpenGlass";
+        LogLine(L"Fixed roots x64="+x64Dir_+L" x86="+x86Dir_+L" OpenGlass="+openGlassDir_);
     }
     void Initialize() {
         dpi_=GetDpiForWindow(window);
@@ -497,6 +492,17 @@ private:
         }
     }
     int RunOperation(Selection chosen) {
+        std::wstring current64,current86;
+        const bool rootsNow=GlassInstallUtil::ResolveFixedPlatformRoots(current64,current86);
+        const bool same64=(current64.empty() && x64Dir_.empty()) ||
+            GlassInstallUtil::SameInstallPath(current64,x64Dir_);
+        if (!fixedRootsKnown_ || !rootsNow || !same64 ||
+            !GlassInstallUtil::SameInstallPath(current86,x86Dir_)) {
+            LogLine(L"Fixed Program Files roots unavailable or changed; removal stopped");
+            SetError(T(L"Не удалось безопасно определить системные каталоги установки. Пакеты не удалены; сохраните журнал.",
+                L"Could not safely resolve the system installation directories. No packages were removed; save the log."));
+            return 9;
+        }
         // MsiConfigureProductEx uninstalls the MSI's registered file paths,
         // not our cleanup directory. Inspect selected products before stopping
         // any host, and do not treat a stale registry value as a safe target.

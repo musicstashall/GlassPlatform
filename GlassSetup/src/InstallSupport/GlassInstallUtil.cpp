@@ -12,6 +12,7 @@
 #include <shlwapi.h>
 #include <tlhelp32.h>
 #include <cstring>
+#include <cwchar>
 #include <iterator>
 #include <mutex>
 #include <vector>
@@ -449,6 +450,131 @@ bool IsSafeInstallPath(const std::wstring& path) noexcept {
         }
         return true;
     } catch (...) { return false; }
+}
+
+namespace {
+
+// FOLDERID_ProgramFilesX64 is not supported for a 32-bit process, including
+// on x64 Windows. Query the Windows machine-wide native registry view instead
+// of trusting ProgramW6432 from an inherited, potentially modified environment.
+#ifndef _WIN64
+LSTATUS ReadNativeProgramFilesValue(const wchar_t* name, std::wstring& value) {
+    value.clear();
+    HKEY key=nullptr;
+    LSTATUS status=RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion",0,KEY_QUERY_VALUE|KEY_WOW64_64KEY,&key);
+    if (status!=ERROR_SUCCESS) return status;
+    wchar_t buffer[32768]{};
+    DWORD type=0, bytes=sizeof(buffer);
+    status=RegQueryValueExW(key,name,nullptr,&type,reinterpret_cast<LPBYTE>(buffer),&bytes);
+    RegCloseKey(key);
+    if (status!=ERROR_SUCCESS) return status;
+    if (type!=REG_SZ || bytes<sizeof(wchar_t) || bytes>sizeof(buffer) ||
+        bytes%sizeof(wchar_t)!=0) return ERROR_INVALID_DATA;
+    const size_t count=bytes/sizeof(wchar_t);
+    if (buffer[count-1]!=L'\0') return ERROR_INVALID_DATA;
+    const size_t length=std::wcslen(buffer);
+    if (!length) return ERROR_INVALID_DATA;
+    for (size_t i=length+1;i<count;++i) if (buffer[i]!=L'\0') return ERROR_INVALID_DATA;
+    value.assign(buffer,length);
+    return ERROR_SUCCESS;
+}
+#endif
+
+DWORD ValidateSystemProgramFiles(const std::wstring& input, std::wstring& normalized) {
+    // Accept only a local, fully qualified path to an existing ordinary
+    // directory. Do not normalize an ambiguous '..', device, or relative path
+    // into a new installation target.
+    if (input.size()<3 || !((input[0]>=L'A' && input[0]<=L'Z') ||
+            (input[0]>=L'a' && input[0]<=L'z')) || input[1]!=L':' ||
+        (input[2]!=L'\\' && input[2]!=L'/')) return ERROR_INVALID_NAME;
+    for (size_t i=2;i<input.size();++i)
+        if (input[i]<32 || input[i]==L':' || input[i]==L'%' || input[i]==L'"' ||
+            input[i]==L'?' || input[i]==L'*' || input[i]==L'|' || input[i]==L'<' || input[i]==L'>')
+            return ERROR_INVALID_NAME;
+    if (!NormalProductDirectory(input,normalized)) return ERROR_INVALID_NAME;
+    std::wstring supplied=TrimTrailingSlashes(input);
+    for (auto& ch:supplied) if (ch==L'/') ch=L'\\';
+    if (_wcsicmp(supplied.c_str(),normalized.c_str())!=0) return ERROR_INVALID_NAME;
+    const DWORD attributes=GetFileAttributesW(normalized.c_str());
+    if (attributes==INVALID_FILE_ATTRIBUTES) {
+        const DWORD error=GetLastError();
+        return error ? error : ERROR_PATH_NOT_FOUND;
+    }
+    if (!(attributes&FILE_ATTRIBUTE_DIRECTORY) || (attributes&FILE_ATTRIBUTE_REPARSE_POINT)) return ERROR_INVALID_DATA;
+    const std::wstring target=normalized+L"\\GlassPlatform";
+    const DWORD targetAttributes=GetFileAttributesW(target.c_str());
+    if (targetAttributes==INVALID_FILE_ATTRIBUTES) {
+        const DWORD error=GetLastError();
+        if (error!=ERROR_FILE_NOT_FOUND && error!=ERROR_PATH_NOT_FOUND) return error ? error : ERROR_INVALID_DATA;
+    } else if (!(targetAttributes&FILE_ATTRIBUTE_DIRECTORY)) return ERROR_INVALID_DATA;
+    if (!IsSafeInstallPath(target)) return ERROR_INVALID_DATA;
+    return ERROR_SUCCESS;
+}
+
+} // namespace
+
+bool ResolveFixedPlatformRoots(std::wstring& x64, std::wstring& x86) noexcept {
+    x64.clear(); x86.clear();
+    auto fail=[&](DWORD error) { x64.clear(); x86.clear(); SetLastError(error); return false; };
+    try {
+#ifdef _WIN64
+        const bool os64=true;
+#else
+        BOOL wow=FALSE;
+        if (!IsWow64Process(GetCurrentProcess(),&wow)) return fail(GetLastError());
+        const bool os64=wow!=FALSE;
+#endif
+        PWSTR path=nullptr;
+        HRESULT hr=SHGetKnownFolderPath(FOLDERID_ProgramFilesX86,KF_FLAG_DEFAULT,nullptr,&path);
+        if ((FAILED(hr) || !path) && !os64) {
+            if (path) CoTaskMemFree(path);
+            path=nullptr;
+            hr=SHGetKnownFolderPath(FOLDERID_ProgramFiles,KF_FLAG_DEFAULT,nullptr,&path);
+        }
+        if (FAILED(hr) || !path) {
+            if (path) CoTaskMemFree(path);
+            return fail(FAILED(hr) ? HRESULT_CODE(hr) : ERROR_PATH_NOT_FOUND);
+        }
+        std::wstring raw86(path); CoTaskMemFree(path);
+        std::wstring base86;
+        DWORD error=ValidateSystemProgramFiles(raw86,base86);
+        if (error!=ERROR_SUCCESS) return fail(error);
+
+        std::wstring base64;
+        if (os64) {
+            std::wstring raw64;
+#ifdef _WIN64
+            path=nullptr;
+            hr=SHGetKnownFolderPath(FOLDERID_ProgramFiles,KF_FLAG_DEFAULT,nullptr,&path);
+            if (FAILED(hr) || !path) {
+                if (path) CoTaskMemFree(path);
+                return fail(FAILED(hr) ? HRESULT_CODE(hr) : ERROR_PATH_NOT_FOUND);
+            }
+            raw64.assign(path); CoTaskMemFree(path);
+#else
+            const LSTATUS native=ReadNativeProgramFilesValue(L"ProgramFilesDir",raw64);
+            if (native!=ERROR_SUCCESS) return fail(static_cast<DWORD>(native));
+            std::wstring nativeAlias;
+            const LSTATUS alias=ReadNativeProgramFilesValue(L"ProgramW6432Dir",nativeAlias);
+            if (alias!=ERROR_SUCCESS) return fail(static_cast<DWORD>(alias));
+            if (!SameInstallPath(raw64,nativeAlias)) return fail(ERROR_INVALID_DATA);
+#endif
+            error=ValidateSystemProgramFiles(raw64,base64);
+            if (error!=ERROR_SUCCESS) return fail(error);
+            if (SameInstallPath(base64,base86)) return fail(ERROR_INVALID_DATA);
+        }
+        x86=base86+L"\\GlassPlatform";
+        if (os64) {
+            x64=base64+L"\\GlassPlatform";
+            // Overlapping product trees could make one architecture's cleanup
+            // affect the other even if the Program Files bases were distinct.
+            if (IsWithinInstallRoot(x64,x86) || IsWithinInstallRoot(x86,x64))
+                return fail(ERROR_INVALID_DATA);
+        }
+        SetLastError(ERROR_SUCCESS);
+        return true;
+    } catch (...) { return fail(ERROR_NOT_ENOUGH_MEMORY); }
 }
 
 void PruneEmptyDirectories(const std::wstring& root, const std::vector<std::wstring>& protectedRoots) noexcept {
