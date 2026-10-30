@@ -11,7 +11,9 @@ namespace GP = GlassShared::GlassPlatformTask;
 
 bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::atomic_bool* cancelled = nullptr) noexcept {
     if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
-    if (GP::IsGlassPlatformRunning(arch)) {
+    bool running=false;
+    if (!GlassInstallHost::QueryGlassPlatformRunning(arch,running)) return false;
+    if (running) {
         const bool signaled = GP::SignalPlatformStop(arch);
         GlassInstallLog::LineFormat(L"HostStop: SignalPlatformStop %s",
             signaled ? L"ok" : L"failed");
@@ -20,18 +22,26 @@ bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::atomic_bool* cancel
     // Once the stop signal is sent, wait for it to finish even after cancel;
     // otherwise rollback can observe a still-running host that stops afterwards.
     while (GetTickCount64() < deadline) {
-        if (!GP::IsGlassPlatformRunning(arch)) {
+        if (!GlassInstallHost::QueryGlassPlatformRunning(arch,running)) return false;
+        if (!running) {
             (void)GP::StopOrphanAutorunTaskInstance(arch);
             return true; // the separate watch phase handles residual modules
         }
         Sleep(250);
     }
-    return !GP::IsGlassPlatformRunning(arch);
+    return GlassInstallHost::QueryGlassPlatformRunning(arch,running) && !running;
 }
 
 } // namespace
 
 namespace GlassInstallHost {
+
+bool QueryGlassPlatformRunning(GP::PlatformArch arch, bool& running) noexcept {
+    running=false;
+    HANDLE mutex=OpenMutexW(SYNCHRONIZE,FALSE,GP::InstanceMutexName(arch));
+    if (mutex) { CloseHandle(mutex);running=true;return true; }
+    return GetLastError()==ERROR_FILE_NOT_FOUND;
+}
 
 bool StopGlassPlatform(GP::PlatformArch arch) noexcept {
     return StopGlassPlatformImpl(arch);

@@ -141,6 +141,10 @@ private:
     bool VerifyEmbeddedNativePayload() noexcept;
     bool InstallGlassSettingsEarly() noexcept;
     bool RunMsiSequence() noexcept;
+    bool RecheckSnapshottedProduct(const wchar_t* productCode) noexcept;
+    bool RecheckRelatedProducts(const wchar_t* productCode) noexcept;
+    bool StopHostsForRollback() noexcept;
+    bool RemoveCreatedHostsForRollback() noexcept;
     bool RunOneMsi(const std::wstring& msiPath, const std::wstring& installDir,
         const std::wstring& label, int progressBase, int progressSpan) noexcept;
     bool LaunchAndVerifySelectedProducts() noexcept;

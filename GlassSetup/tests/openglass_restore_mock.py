@@ -19,6 +19,7 @@ def function(token):
 
 impl = function("bool InstallEngine::RestorePriorHosts(")
 prefix = r'''
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -26,9 +27,12 @@ prefix = r'''
 using DWORD=std::uint32_t;using ULONGLONG=std::uint64_t;using BOOL=int;using HANDLE=void*;
 constexpr int FALSE=0,STARTF_USESHOWWINDOW=1,SW_HIDE=0,CREATE_NO_WINDOW=1;
 constexpr DWORD SERVICE_DISABLED=4,SERVICE_DEMAND_START=3;
+constexpr int LANG_RUSSIAN=25;
+#define PRIMARYLANGID(x) (x)
+int GetUserDefaultUILanguage(){return 0;}
 struct STARTUPINFOW{DWORD cb=0,dwFlags=0;unsigned short wShowWindow=0;};
 struct PROCESS_INFORMATION{HANDLE hThread=nullptr,hProcess=nullptr;};
-struct Scenario{bool startOk=true,taskOk=true,queryOk=true,running=false,restoreTypeOk=true;
+struct Scenario{bool startOk=true,taskOk=true,queryOk=true,running=false,restoreTypeOk=true,pathsOk=true;
  int serviceStarts=0,taskStarts=0,restoreTypes=0;DWORD startType=0;ULONGLONG now=0;} s;
 ULONGLONG GetTickCount64(){return s.now;}void Sleep(DWORD ms){s.now+=ms;}
 BOOL CloseHandle(HANDLE){return 1;}BOOL PathFileExistsW(const wchar_t*){return 1;}
@@ -37,11 +41,19 @@ namespace GP {
  enum class PlatformArch{X64,X86};
  bool WaitForPlatformStopped(PlatformArch,DWORD){return true;}
  bool StartPlatform(PlatformArch){return true;}
+ std::wstring TryGetAutorunGlassCompatInstallRoot(PlatformArch a){return a==PlatformArch::X64?L"x64":L"x86";}
+ const wchar_t* GlassAutorunTaskName(PlatformArch){return L"platform-task";}
+}
+namespace InstallLog {void Line(const wchar_t*){} template<class... T>void LineFormat(const wchar_t*,T...) {}}
+namespace GlassInstallRemoval {
+ bool ValidatePlatformTask(GP::PlatformArch,const std::wstring&,bool,bool,bool,std::wstring&){return s.pathsOk;}
+ bool ValidateOpenGlassPaths(const std::wstring&,const std::atomic_bool*,bool,std::wstring&){return s.pathsOk;}
 }
 bool QueryPlatformMutex(GP::PlatformArch,bool& running){running=false;return true;}
 namespace GlassInstallUtil {
  std::wstring NativeRundll64(){return L"rundll64";}std::wstring RundllPathForTaskArch(GP::PlatformArch){return L"rundll";}
  std::wstring TrimTrailingSlashes(std::wstring path){return path;}
+ bool SameInstallPath(const std::wstring& a,const std::wstring& b){return a==b;}
  bool RunEnabledOpenGlassTask(){++s.taskStarts;if(s.taskOk)s.running=true;return s.taskOk;}
  bool QueryOpenGlassRunning(bool& running){running=s.running;return s.queryOk;}
 }
@@ -57,7 +69,7 @@ public:
  struct Selection{bool platform64=true,platform32=true;} selection_;
  bool hostsStopped_=true,x64StopSignalled_=false,x86StopSignalled_=false,ogStopSignalled_=false,
   ogServiceStartTypeMayNeedRestore_=false;
- std::wstring x64Dir_=L"x64",x86Dir_=L"x86";
+ std::wstring x64Dir_=L"x64",x86Dir_=L"x86",openGlassDir_=L"og";
  bool RestorePriorHosts(bool selectedOnly=false) noexcept;
 };
 '''
@@ -79,7 +91,9 @@ int main(){
   assert(!e.RestorePriorHosts());assert(s.serviceStarts==1);}
  {reset();InstallEngine e;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;e.ogStopSignalled_=true;
   assert(e.RestorePriorHosts(true));assert(s.serviceStarts==0);} // normal launch phase handles OG
- std::cout<<"PASS: real host rollback: stopped OpenGlass stays stopped, running service/task restored\n";
+ {reset();InstallEngine e;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;e.ogStopSignalled_=true;s.pathsOk=false;
+  assert(!e.RestorePriorHosts());assert(s.serviceStarts==0 && s.taskStarts==0);} // changed backend cannot be started
+ std::cout<<"PASS: real host rollback: stopped OpenGlass stays stopped, running service/task restored; changed path blocked\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix="glass-og-restore-") as directory:

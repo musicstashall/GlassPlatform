@@ -28,6 +28,7 @@ prefix = r'''
 #include <vector>
 using DWORD=std::uint32_t;using BOOL=int;constexpr BOOL TRUE=1,FALSE=0;
 #define _wcsicmp wcscasecmp
+#define _wcsnicmp wcsncasecmp
 constexpr DWORD FILE_SHARE_READ=1,FILE_SHARE_WRITE=2,FILE_SHARE_DELETE=4,
  FILE_LIST_DIRECTORY=8,FILE_READ_ATTRIBUTES=16,DELETE=32,OPEN_EXISTING=3,
  FILE_FLAG_BACKUP_SEMANTICS=64,FILE_FLAG_OPEN_REPARSE_POINT=128,
@@ -35,11 +36,11 @@ constexpr DWORD FILE_SHARE_READ=1,FILE_SHARE_WRITE=2,FILE_SHARE_DELETE=4,
  ERROR_FILE_NOT_FOUND=2,ERROR_PATH_NOT_FOUND=3,ERROR_ACCESS_DENIED=5,ERROR_NO_MORE_FILES=18,
  ERROR_SHARING_VIOLATION=32,ERROR_DIR_NOT_EMPTY=145,ERROR_DIRECTORY=267;
 constexpr int FileDispositionInfo=1;
-struct Node{bool directory=true,reparse=false;};
+struct Node{bool directory=true,reparse=false;DWORD links=1;};
 struct Handle{int kind=0;std::wstring path;DWORD access=0,share=0;std::vector<std::wstring> entries;std::size_t index=0;};
 using HANDLE=Handle*;
 #define INVALID_HANDLE_VALUE reinterpret_cast<HANDLE>(static_cast<std::intptr_t>(-1))
-struct BY_HANDLE_FILE_INFORMATION{DWORD dwFileAttributes=0;};
+struct BY_HANDLE_FILE_INFORMATION{DWORD dwFileAttributes=0,nNumberOfLinks=1;};
 struct FILE_DISPOSITION_INFO{BOOL DeleteFile=FALSE;};
 struct WIN32_FIND_DATAW{DWORD dwFileAttributes=0;wchar_t cFileName[260]{};};
 static DWORD errorCode=0;static std::map<std::wstring,Node> nodes;static std::vector<HANDLE> openHandles;
@@ -85,7 +86,8 @@ HANDLE CreateFileW(const wchar_t* p,DWORD access,DWORD share,void*,DWORD,DWORD,v
  }
  auto* h=new Handle{1,path,access,share};openHandles.push_back(h);return h;
 }
-BOOL GetFileInformationByHandle(HANDLE h,BY_HANDLE_FILE_INFORMATION* info){info->dwFileAttributes=attributes(h->path);return info->dwFileAttributes!=INVALID_FILE_ATTRIBUTES;}
+BOOL GetFileInformationByHandle(HANDLE h,BY_HANDLE_FILE_INFORMATION* info){info->dwFileAttributes=attributes(h->path);
+ if(info->dwFileAttributes==INVALID_FILE_ATTRIBUTES)return FALSE;info->nNumberOfLinks=nodes.at(h->path).links;return TRUE;}
 BOOL CloseHandle(HANDLE h){auto it=std::find(openHandles.begin(),openHandles.end(),h);if(it!=openHandles.end())openHandles.erase(it);delete h;return TRUE;}
 void copyEntry(WIN32_FIND_DATAW* out,const std::wstring& name,const Node& n){
  std::wcsncpy(out->cFileName,name.c_str(),259);out->cFileName[259]=0;
@@ -116,6 +118,31 @@ main = r'''
 using namespace GlassInstallUtil;
 void reset(){assert(openHandles.empty());nodes.clear();removed.clear();opened.clear();protectedError.clear();raceLink.clear();errorCode=0;}
 int main(){
+ assert(IsWithinInstallRoot(L"C:\\Program Files (x86)\\GlassPlatform",L"c:\\PROGRAM FILES (X86)\\GlassPlatform\\GlassCompat.dll"));
+ assert(IsWithinInstallRoot(L"C:\\products",L"C:\\products\\sub\\..\\file.dll"));
+ assert(IsWithinInstallRoot(L"C:\\products",L"C:\\products"));
+ assert(!IsWithinInstallRoot(L"C:\\products",L"C:\\products-old\\file.dll"));
+ assert(!IsWithinInstallRoot(L"C:\\products",L"C:\\products\\..\\developer\\Debug\\GlassCompat.dll"));
+ assert(!IsWithinInstallRoot(L"C:\\products",L"D:\\VS_PROJECT\\Build\\x86\\Debug\\GlassCompat.dll"));
+ assert(!IsWithinInstallRoot(L"C:\\products",L"01:\\Software\\GlassPlatform"));
+ assert(!IsWithinInstallRoot(L"C:\\products",L"relative\\GlassCompat.dll"));
+ reset();nodes={{L"C:\\products",{}},{L"C:\\products\\ordinary",{}},{L"C:\\products\\ordinary\\file.dll",{false,false}}};
+ assert(IsSafeInstallPath(L"C:\\products\\ordinary\\file.dll"));
+ nodes[L"C:\\products\\ordinary\\file.dll"].links=2;
+ assert(!IsSafeInstallPath(L"C:\\products\\ordinary\\file.dll"));
+ nodes[L"C:\\products\\ordinary\\file.dll"].links=1;
+ assert(IsSafeInstallPath(L"C:\\products\\new\\file.dll"));
+ assert(!IsSafeInstallPath(L"relative\\file.dll"));
+ nodes[L"C:\\products"].reparse=true;
+ assert(!IsSafeInstallPath(L"C:\\products\\ordinary\\file.dll"));
+ nodes[L"C:\\products"].reparse=false;nodes[L"C:\\products\\ordinary"].reparse=true;
+ assert(!IsSafeInstallPath(L"C:\\products\\ordinary\\file.dll"));
+ nodes[L"C:\\products\\ordinary"].reparse=false;protectedError=L"C:\\products\\ordinary";
+ assert(!IsSafeInstallPath(L"C:\\products\\ordinary\\file.dll"));
+ reset();nodes={{L"\\\\server\\share\\folder",{}},{L"\\\\server\\share\\folder\\file.dll",{false,false}}};
+ assert(IsSafeInstallPath(L"\\\\server\\share\\folder\\file.dll"));
+ nodes[L"\\\\server\\share\\folder"].reparse=true;
+ assert(!IsSafeInstallPath(L"\\\\server\\share\\folder\\file.dll"));
  reset();nodes={{L"C:\\products",{}},{L"C:\\products\\OpenGlass",{}},{L"C:\\products\\OpenGlass\\empty",{}},
   {L"C:\\products\\OpenGlass\\file.txt",{false,false}},{L"C:\\products\\OpenGlass\\link",{true,true}}};
  PruneEmptyDirectories(L"C:\\products\\OpenGlass",{});

@@ -1,9 +1,13 @@
 #include "GlassInstallMsi.h"
 #include "GlassInstallLog.h"
+#include "GlassInstallUtil.h"
 #include <msi.h>
 #include <msiquery.h>
 #include <shlwapi.h>
+#include <climits>
 #include <cstring>
+#include <set>
+#include <vector>
 
 namespace {
 
@@ -250,6 +254,166 @@ bool CopyLocalPackage(const wchar_t* productCode, const std::wstring& destPath,
     if (!local[0] || !PathFileExistsW(local)) return false;
     if (cancelled && cancelled->load(std::memory_order_acquire)) { SetLastError(ERROR_CANCELLED); return false; }
     return CopyFileExW(local,destPath.c_str(),SnapshotCopyProgress,const_cast<std::atomic_bool*>(cancelled),nullptr,0)!=FALSE;
+}
+
+ProductPathCheck CheckProductContexts(const wchar_t* productCode, std::wstring& detail,
+    const std::atomic_bool* cancelled) noexcept {
+    detail.clear();
+    if (!productCode || !*productCode) return ProductPathCheck::Unverifiable;
+    try {
+        const auto isCancelled=[&]() { return cancelled && cancelled->load(std::memory_order_acquire); };
+        const auto countContexts=[&](const wchar_t* sid,unsigned& count) {
+            count=0;
+            for (DWORD i=0;;++i) {
+                if (isCancelled()) return false;
+                const UINT rc=MsiEnumProductsExW(productCode,sid,MSIINSTALLCONTEXT_ALL,i,nullptr,nullptr,nullptr,nullptr);
+                if (rc==ERROR_NO_MORE_ITEMS || (rc==ERROR_UNKNOWN_PRODUCT && i==0)) return true;
+                if (rc!=ERROR_SUCCESS) { detail=L"MSI context enumeration error "+std::to_wstring(rc);return false; }
+                ++count;
+            }
+        };
+        unsigned all=0,current=0;
+        if (!countContexts(L"S-1-1-0",all) || !countContexts(nullptr,current))
+            return isCancelled()?ProductPathCheck::Cancelled:ProductPathCheck::Unverifiable;
+        const INSTALLSTATE installed=MsiQueryProductStateW(productCode);
+        if (all!=current || all>1 || (all==1 && installed!=INSTALLSTATE_DEFAULT) ||
+            (all==0 && installed!=INSTALLSTATE_UNKNOWN && installed!=INSTALLSTATE_ABSENT)) {
+            detail=L"Ambiguous MSI context/state: all="+std::to_wstring(all)+L" current="+
+                std::to_wstring(current)+L" state="+std::to_wstring(static_cast<int>(installed));
+            return ProductPathCheck::Unverifiable;
+        }
+        return isCancelled()?ProductPathCheck::Cancelled:ProductPathCheck::Safe;
+    } catch (...) { return ProductPathCheck::Unverifiable; }
+}
+
+ProductPathCheck CheckProductFileRoots(const wchar_t* productCode, const std::wstring& cachedMsi,
+    const std::wstring& fixedRoot, std::wstring& detail, const std::atomic_bool* cancelled) noexcept {
+    detail.clear();
+    const auto isCancelled=[&]() { return cancelled && cancelled->load(std::memory_order_acquire); };
+    if (isCancelled()) return ProductPathCheck::Cancelled;
+    if (!productCode || !*productCode || cachedMsi.empty() || fixedRoot.empty())
+        return ProductPathCheck::Unverifiable;
+    try {
+        if (!GlassInstallUtil::IsSafeInstallPath(fixedRoot)) {
+            detail=fixedRoot;
+            return ProductPathCheck::Unverifiable;
+        }
+        const std::wstring cachedCode=ProductCodeFromMsiPath(cachedMsi);
+        if (cachedCode.empty() || _wcsicmp(cachedCode.c_str(),productCode)!=0) {
+            detail=L"Cached MSI product code does not match its registration";
+            return ProductPathCheck::Unverifiable;
+        }
+        if (isCancelled()) return ProductPathCheck::Cancelled;
+        struct MsiHandle {
+            MSIHANDLE value=0;
+            ~MsiHandle() { if (value) MsiCloseHandle(value); }
+        } db;
+        if (MsiOpenDatabaseW(cachedMsi.c_str(), MSIDBOPEN_READONLY, &db.value)!=ERROR_SUCCESS)
+            return ProductPathCheck::Unverifiable;
+        // Our packages do not author these tables. Their operations/custom
+        // code can affect paths not represented by File component key paths.
+        // Unknown legacy packages must be inspected rather than guessed safe.
+        for (const wchar_t* table:{L"CustomAction",L"RemoveFile",L"MoveFile",L"DuplicateFile",
+                                  L"ServiceInstall",L"ServiceControl",L"Shortcut",L"RemoveRegistry"}) {
+            if (isCancelled()) return ProductPathCheck::Cancelled;
+            if (MsiDatabaseIsTablePersistentW(db.value,table)!=MSICONDITION_NONE) {
+                detail=std::wstring(L"Unsupported MSI table: ")+table;
+                return ProductPathCheck::Unverifiable;
+            }
+        }
+        std::set<std::wstring> seen;
+        std::vector<wchar_t> path(32768);
+        // File components and explicitly created empty-folder components can
+        // both be removed by MSI. Query their registered key paths without
+        // starting an install session. Registry key paths fail containment.
+        const auto countRows=[&](const wchar_t* sql,unsigned& count) -> ProductPathCheck {
+            count=0;MsiHandle view;
+            if (MsiDatabaseOpenViewW(db.value,sql,&view.value)!=ERROR_SUCCESS ||
+                MsiViewExecute(view.value,0)!=ERROR_SUCCESS) return ProductPathCheck::Unverifiable;
+            for (;;) {
+                if (isCancelled()) return ProductPathCheck::Cancelled;
+                MsiHandle row;const UINT status=MsiViewFetch(view.value,&row.value);
+                if (status==ERROR_NO_MORE_ITEMS) break;
+                if (status!=ERROR_SUCCESS || !row.value || count==UINT_MAX) return ProductPathCheck::Unverifiable;
+                ++count;
+            }
+            MsiViewClose(view.value);return ProductPathCheck::Safe;
+        };
+        const auto checkRows=[&](const wchar_t* sql,bool requireRows,bool folderRows,unsigned& rows) -> ProductPathCheck {
+            rows=0;
+            MsiHandle view;
+            if (MsiDatabaseOpenViewW(db.value,sql,&view.value)!=ERROR_SUCCESS ||
+                MsiViewExecute(view.value,0)!=ERROR_SUCCESS) return ProductPathCheck::Unverifiable;
+            for (;;) {
+                if (isCancelled()) return ProductPathCheck::Cancelled;
+                MsiHandle row;
+                const UINT status=MsiViewFetch(view.value,&row.value);
+                if (status==ERROR_NO_MORE_ITEMS) break;
+                if (status!=ERROR_SUCCESS || !row.value || rows==UINT_MAX) return ProductPathCheck::Unverifiable;
+                ++rows;
+                wchar_t id[64]{};
+                DWORD idSize=static_cast<DWORD>(std::size(id));
+                if (MsiRecordGetStringW(row.value,1,id,&idSize)!=ERROR_SUCCESS || !id[0])
+                    return ProductPathCheck::Unverifiable;
+                if (folderRows) {
+                    // CreateFolder can refer to a different directory than its
+                    // component's key path. Accept only our generated shape:
+                    // the same directory and a directory (null) key path.
+                    wchar_t folderId[256]{},componentDir[256]{};
+                    DWORD folderSize=static_cast<DWORD>(std::size(folderId));
+                    DWORD dirSize=static_cast<DWORD>(std::size(componentDir));
+                    if (MsiRecordGetStringW(row.value,2,folderId,&folderSize)!=ERROR_SUCCESS || !folderId[0] ||
+                        MsiRecordGetStringW(row.value,3,componentDir,&dirSize)!=ERROR_SUCCESS || !componentDir[0] ||
+                        _wcsicmp(folderId,componentDir)!=0 || !MsiRecordIsNull(row.value,4)) {
+                        detail=std::wstring(L"Unsupported CreateFolder component: ")+id;
+                        return ProductPathCheck::Unverifiable;
+                    }
+                }
+                if (!seen.emplace(id).second) continue;
+                path[0]=L'\0';
+                DWORD size=static_cast<DWORD>(path.size());
+                const INSTALLSTATE state=MsiGetComponentPathW(productCode,id,path.data(),&size);
+                if (state!=INSTALLSTATE_LOCAL || !path[0] || size>=path.size()) {
+                    detail=std::wstring(L"component ")+id+L" (state="+std::to_wstring(static_cast<int>(state))+L")";
+                    return ProductPathCheck::Unverifiable;
+                }
+                if (!GlassInstallUtil::IsWithinInstallRoot(fixedRoot,path.data())) {
+                    detail=path.data();
+                    return ProductPathCheck::OutsideRoot;
+                }
+                if (!GlassInstallUtil::IsSafeInstallPath(path.data())) {
+                    detail=path.data();
+                    return ProductPathCheck::Unverifiable;
+                }
+            }
+            MsiViewClose(view.value);
+            return requireRows && !rows?ProductPathCheck::Unverifiable:ProductPathCheck::Safe;
+        };
+        const wchar_t* files=L"SELECT `Component`.`ComponentId` FROM `File`, `Component` "
+            L"WHERE `File`.`Component_` = `Component`.`Component`";
+        unsigned total=0,matched=0;
+        ProductPathCheck result=countRows(L"SELECT `Component_` FROM `File`",total);
+        if (result!=ProductPathCheck::Safe) return result;
+        result=checkRows(files,true,false,matched);
+        if (result!=ProductPathCheck::Safe) return result;
+        if (total!=matched) { detail=L"Unmatched File components";return ProductPathCheck::Unverifiable; }
+        const MSICONDITION folders=MsiDatabaseIsTablePersistentW(db.value,L"CreateFolder");
+        if (folders==MSICONDITION_TRUE) {
+            result=countRows(L"SELECT `Component_` FROM `CreateFolder`",total);
+            if (result!=ProductPathCheck::Safe) return result;
+            const wchar_t* sql=L"SELECT `Component`.`ComponentId`, `CreateFolder`.`Directory_`, "
+                L"`Component`.`Directory_`, `Component`.`KeyPath` FROM `CreateFolder`, `Component` "
+                L"WHERE `CreateFolder`.`Component_` = `Component`.`Component`";
+            result=checkRows(sql,false,true,matched);
+            if (result!=ProductPathCheck::Safe) return result;
+            if (total!=matched) { detail=L"Unmatched CreateFolder components";return ProductPathCheck::Unverifiable; }
+        } else if (folders!=MSICONDITION_NONE) return ProductPathCheck::Unverifiable;
+        GlassInstallLog::LineFormat(L"MSI component paths verified under fixed root: product=%s components=%u root=%s",
+            productCode, static_cast<unsigned>(seen.size()), fixedRoot.c_str());
+        return ProductPathCheck::Safe;
+    } catch (...) {
+        return ProductPathCheck::Unverifiable;
+    }
 }
 
 bool PrepareRestoreMsiCopy(const std::wstring& sourceMsi, const std::wstring& destMsi) noexcept {

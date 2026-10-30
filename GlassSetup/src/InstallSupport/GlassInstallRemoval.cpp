@@ -107,6 +107,9 @@ std::wstring ExpandAndNormalize(const std::wstring& input) {
     std::vector<wchar_t> expanded(need);
     if (!ExpandEnvironmentStringsW(value.c_str(), expanded.data(), need)) return {};
     if (wcschr(expanded.data(), L'%')) return {}; // unresolved environment variable
+    const std::wstring absolute(expanded.data());
+    if (absolute.size()<3 || absolute[1]!=L':' || (absolute[2]!=L'\\' && absolute[2]!=L'/'))
+        return {}; // Task Scheduler may resolve a relative path in a different working directory.
     const DWORD fullNeed = GetFullPathNameW(expanded.data(), 0, nullptr, nullptr);
     if (!fullNeed || fullNeed > 32768) return {};
     std::vector<wchar_t> full(fullNeed + 1);
@@ -119,16 +122,25 @@ bool SamePath(const std::wstring& a, const std::wstring& b) {
     return !left.empty() && !right.empty() && _wcsicmp(left.c_str(), right.c_str()) == 0;
 }
 
-std::wstring FirstArgument(const std::wstring& arguments) {
+bool ExpectedPlatformArguments(const std::wstring& arguments, const std::wstring& expected) {
     const std::wstring command = L"placeholder.exe " + arguments;
     int count = 0;
     LPWSTR* argv = CommandLineToArgvW(command.c_str(), &count);
-    std::wstring first = (argv && count > 1) ? argv[1] : L"";
+    bool matches=false;
+    if (argv && count==3 && _wcsicmp(argv[2],L"/start")==0) {
+        std::wstring module=argv[1];
+        const auto comma=module.rfind(L',');
+        if (comma!=std::wstring::npos && _wcsicmp(module.c_str()+comma+1,L"Main")==0) {
+            module.resize(comma);
+            matches=SamePath(module,expected);
+        }
+    }
     if (argv) LocalFree(argv);
-    return first;
+    return matches;
 }
 
-bool ExpectedAction(ITaskDefinition* definition, bool platform, const std::wstring& expected) noexcept {
+bool ExpectedAction(ITaskDefinition* definition, bool platform, const std::wstring& expected,
+    GP::PlatformArch arch = GP::PlatformArch::X86) noexcept {
     ComPtr<IActionCollection> actions;
     LONG count = 0;
     if (FAILED(definition->get_Actions(actions.GetAddressOf())) || !actions ||
@@ -141,13 +153,9 @@ bool ExpectedAction(ITaskDefinition* definition, bool platform, const std::wstri
     if (FAILED(action->QueryInterface(IID_IExecAction, reinterpret_cast<void**>(exec.GetAddressOf()))) || !exec) return false;
     Bstr path, arguments;
     if (FAILED(exec->get_Path(path.out())) || !path.value || FAILED(exec->get_Arguments(arguments.out()))) return false;
-    if (!platform) return SamePath(path.value, expected);
-    if (!SamePath(path.value, GlassInstallUtil::RundllPathForTaskArch(GP::PlatformArch::X86))) return false;
-    std::wstring module = FirstArgument(arguments.value ? arguments.value : L"");
-    const auto comma = module.find(L',');
-    if (comma == std::wstring::npos) return false;
-    module.resize(comma);
-    return SamePath(module, expected);
+    const std::wstring args=arguments.value ? arguments.value : L"";
+    if (!platform) return args.find_first_not_of(L" \t\r\n")==std::wstring::npos && SamePath(path.value,expected);
+    return SamePath(path.value,GlassInstallUtil::RundllPathForTaskArch(arch)) && ExpectedPlatformArguments(args,expected);
 }
 
 bool WriteTextBackup(const std::wstring& path, const std::wstring& text) noexcept {
@@ -218,7 +226,8 @@ bool CaptureTask(IRegisteredTask* task, bool platform, const std::wstring& expec
 // removal or delete an unrelated same-named task.
 bool ScanTasks(ITaskFolder* folder, bool x86, bool og, const std::wstring& x86Exe,
     const std::wstring& ogExe, Session& session, const std::wstring& workspace,
-    const std::atomic_bool* cancel, bool ru, std::wstring& error, unsigned depth = 0) noexcept {
+    const std::atomic_bool* cancel, bool ru, std::wstring& error, unsigned depth = 0,
+    bool validateOnly = false) noexcept {
     if (Cancelled(cancel)) return false;
     if (depth > 64) {
         error = Problem(ru, L"Слишком большая вложенность папок планировщика.", L"Task Scheduler folder nesting is too deep.");
@@ -246,8 +255,21 @@ bool ScanTasks(ITaskFolder* folder, bool x86, bool og, const std::wstring& x86Ex
         const bool isX86 = x86 && _wcsicmp(name.value, GP::GlassAutorunTaskName(GP::PlatformArch::X86)) == 0;
         const bool isOg = og && (_wcsicmp(name.value, L"OpenGlass Host") == 0 ||
                                 _wcsicmp(name.value, L"OpenGlass Legacy Host") == 0);
-        if ((isX86 || isOg) && !CaptureTask(task.Get(), isX86, isX86 ? x86Exe : ogExe, session, workspace, ru, error))
-            return false;
+        if (isX86 || isOg) {
+            if (!validateOnly) {
+                if (!CaptureTask(task.Get(),isX86,isX86?x86Exe:ogExe,session,workspace,ru,error)) return false;
+            } else {
+                ComPtr<ITaskDefinition> definition; Bstr taskPath;
+                if (FAILED(task->get_Path(taskPath.out())) || !taskPath.value ||
+                    FAILED(task->get_Definition(definition.GetAddressOf())) || !definition ||
+                    !ExpectedAction(definition.Get(),isX86,isX86?x86Exe:ogExe)) {
+                    error=Problem(ru,L"Задача запускает программу вне стандартной папки или содержит неизвестные действия. Она не будет запущена.",
+                        L"A task runs a program outside the fixed directory or has unsupported actions. It will not be started.",
+                        taskPath.value?taskPath.value:L"");
+                    return false;
+                }
+            }
+        }
     }
     // Platform autorun is created and looked up only in the root folder.
     // OpenGlass legacy discovery, in contrast, can locate tasks recursively.
@@ -269,7 +291,7 @@ bool ScanTasks(ITaskFolder* folder, bool x86, bool og, const std::wstring& x86Ex
                 L"Could not read a Task Scheduler subfolder. No changes were made.", folderName, static_cast<unsigned>(childResult));
             return false;
         }
-        if (!ScanTasks(child.Get(), x86, og, x86Exe, ogExe, session, workspace, cancel, ru, error, depth + 1)) return false;
+        if (!ScanTasks(child.Get(), x86, og, x86Exe, ogExe, session, workspace, cancel, ru, error, depth + 1, validateOnly)) return false;
     }
     return true;
 }
@@ -680,6 +702,117 @@ bool RemoveShortcut(Session& session, bool ru, std::wstring& error) noexcept {
 } // namespace
 
 namespace GlassInstallRemoval {
+bool ValidatePlatformTask(GP::PlatformArch arch, const std::wstring& fixedRoot,
+    bool expectedExists, bool requireRunning, bool russian, std::wstring& error) noexcept {
+    error.clear();
+    if ((!fixedRoot.empty() && !GlassInstallUtil::IsSafeInstallPath(
+            GlassInstallUtil::TrimTrailingSlashes(fixedRoot)+L"\\GlassCompat.dll")) ||
+        (fixedRoot.empty() && (expectedExists || requireRunning))) {
+        error=Problem(russian,L"Небезопасный путь платформы или его родительский каталог.",
+            L"The platform path or an ancestor is unsafe.",fixedRoot);
+        return false;
+    }
+    ComGuard com; ComPtr<ITaskService> service; ComPtr<ITaskFolder> root;
+    if (!com.ok() || !Connect(service) || !GetFolder(service.Get(),L"\\",root)) {
+        error=Problem(russian,L"Не удалось проверить задачу платформы. Установка остановлена.",
+            L"Could not inspect the platform task. Setup stopped.");
+        return false;
+    }
+    ComPtr<IRegisteredTaskCollection> tasks; LONG count=0;
+    if (FAILED(root->GetTasks(TASK_ENUM_HIDDEN,tasks.GetAddressOf())) || !tasks ||
+        FAILED(tasks->get_Count(&count)) || count<0) {
+        error=Problem(russian,L"Не удалось прочитать задачи платформы.",L"Could not read platform tasks.");
+        return false;
+    }
+    bool found=false;
+    const auto expected=GlassInstallUtil::TrimTrailingSlashes(fixedRoot)+L"\\GlassCompat.dll";
+    for (LONG i=1;i<=count;++i) {
+        VARIANT index{};VariantInit(&index);index.vt=VT_I4;index.lVal=i;
+        ComPtr<IRegisteredTask> task;Bstr name;
+        if (FAILED(tasks->get_Item(index,task.GetAddressOf())) || !task ||
+            FAILED(task->get_Name(name.out())) || !name.value) {
+            error=Problem(russian,L"Не удалось прочитать имя задачи.",L"Could not read a task name.");
+            return false;
+        }
+        if (_wcsicmp(name.value,GP::GlassAutorunTaskName(arch))!=0) continue;
+        found=true;
+        ComPtr<ITaskDefinition> definition;
+        if (FAILED(task->get_Definition(definition.GetAddressOf())) || !definition ||
+            !ExpectedAction(definition.Get(),true,expected,arch)) {
+            error=Problem(russian,L"Задача платформы указывает не на стандартный путь или содержит неизвестные действия. Она не будет запущена или изменена.",
+                L"The platform task points outside the fixed directory or has unsupported actions. It will not be started or changed.",name.value);
+            return false;
+        }
+        if (requireRunning) {
+            ComPtr<IRunningTaskCollection> instances;LONG running=0;
+            if (FAILED(task->GetInstances(0,instances.GetAddressOf())) || !instances ||
+                FAILED(instances->get_Count(&running)) || running!=1) {
+                error=Problem(russian,L"Работающий экземпляр платформы не удалось однозначно связать с задачей. Остановите его вручную и повторите установку.",
+                    L"The running platform could not be associated with exactly one task instance. Stop it manually and run Setup again.",name.value);
+                return false;
+            }
+        }
+    }
+    if (found!=expectedExists || (requireRunning && !found)) {
+        error=Problem(russian,L"Задача платформы появилась или исчезла во время проверки. Повторите установку.",
+            L"The platform task appeared or disappeared during the check. Run Setup again.",GP::GlassAutorunTaskName(arch));
+        return false;
+    }
+    return true;
+}
+
+bool ValidateOpenGlassPaths(const std::wstring& fixedRoot, const std::atomic_bool* cancelled,
+    bool russian, std::wstring& error) noexcept {
+    error.clear();
+    if (Cancelled(cancelled)) return false;
+    const auto expected=GlassInstallUtil::TrimTrailingSlashes(fixedRoot)+L"\\OpenGlassHost.exe";
+    if (fixedRoot.empty() || !GlassInstallUtil::IsSafeInstallPath(expected)) {
+        error=Problem(russian,L"Небезопасный путь OpenGlass или его родительский каталог.",
+            L"The OpenGlass path or an ancestor is unsafe.",fixedRoot);
+        return false;
+    }
+    const SC_HANDLE scm=OpenSCManagerW(nullptr,nullptr,SC_MANAGER_CONNECT);
+    if (!scm) {
+        error=Problem(russian,L"Не удалось проверить службу OpenGlassHost.",L"Could not inspect OpenGlassHost.",{},GetLastError());
+        return false;
+    }
+    const SC_HANDLE service=OpenServiceW(scm,L"OpenGlassHost",SERVICE_QUERY_CONFIG|SERVICE_QUERY_STATUS);
+    const DWORD openError=service?ERROR_SUCCESS:GetLastError();
+    CloseServiceHandle(scm);
+    if (!service && openError!=ERROR_SERVICE_DOES_NOT_EXIST) {
+        error=Problem(russian,L"Не удалось проверить службу OpenGlassHost.",L"Could not inspect OpenGlassHost.",{},openError);
+        return false;
+    }
+    if (service) {
+        std::wstring signature;
+        bool matches=ReadServiceConfiguration(service,expected,signature);
+        SERVICE_STATUS_PROCESS status{};DWORD needed=0;
+        matches=matches && QueryServiceStatusEx(service,SC_STATUS_PROCESS_INFO,
+            reinterpret_cast<BYTE*>(&status),sizeof(status),&needed)!=FALSE;
+        if (matches && status.dwCurrentState!=SERVICE_STOPPED) {
+            // The configured path alone does not prove which executable was
+            // already running when somebody changed the service configuration.
+            const HANDLE process=status.dwProcessId?OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,status.dwProcessId):nullptr;
+            std::vector<wchar_t> image(32768);DWORD size=static_cast<DWORD>(image.size());
+            const bool known=process && QueryFullProcessImageNameW(process,0,image.data(),&size);
+            if (process) CloseHandle(process);
+            matches=known && SamePath(image.data(),expected);
+        }
+        CloseServiceHandle(service);
+        if (!matches) {
+            error=Problem(russian,L"Служба OpenGlassHost указывает не на стандартный путь или её конфигурацию нельзя проверить. Она не будет запущена или изменена.",
+                L"OpenGlassHost points outside the fixed directory or its configuration cannot be verified. It will not be started or changed.",expected);
+            return false;
+        }
+    }
+    ComGuard com;ComPtr<ITaskService> taskService;ComPtr<ITaskFolder> root;Session unused;
+    if (!com.ok() || !Connect(taskService) || !GetFolder(taskService.Get(),L"\\",root)) {
+        error=Problem(russian,L"Не удалось проверить задачи OpenGlass.",L"Could not inspect OpenGlass tasks.");
+        return false;
+    }
+    return ScanTasks(root.Get(),false,true,{},expected,unused,{},cancelled,russian,error,0,true);
+}
+
 bool Prepare(Session& session, bool removeX86, bool removeOpenGlass, bool removeSettings,
     const std::wstring& x64Dir, const std::wstring& x86Dir, const std::wstring& openGlassDir,
     const std::wstring& secureWorkspace, const std::atomic_bool* cancelled,

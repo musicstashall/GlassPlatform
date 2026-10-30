@@ -36,6 +36,20 @@ DWORD CALLBACK CopyProgress(LARGE_INTEGER, LARGE_INTEGER, LARGE_INTEGER, LARGE_I
 bool CopyFileLogged(const std::wstring& from, const std::wstring& to, unsigned& copyError,
     const std::atomic_bool* cancelled) noexcept {
     if (cancelled && cancelled->load(std::memory_order_acquire)) { copyError=ERROR_CANCELLED; return false; }
+    const DWORD destination=GetFileAttributesW(to.c_str());
+    if (destination==INVALID_FILE_ATTRIBUTES) {
+        const DWORD error=GetLastError();
+        if (error!=ERROR_FILE_NOT_FOUND && error!=ERROR_PATH_NOT_FOUND) { copyError=error?error:ERROR_GEN_FAILURE;return false; }
+    } else if (destination & FILE_ATTRIBUTE_REPARSE_POINT) {
+        copyError=ERROR_NOT_SUPPORTED;
+        GlassInstallLog::LineFormat(L"Copy refused destination reparse point: %s",to.c_str());
+        return false;
+    }
+    if (!GlassInstallUtil::IsSafeInstallPath(from) || !GlassInstallUtil::IsSafeInstallPath(to)) {
+        copyError=ERROR_NOT_SUPPORTED;
+        GlassInstallLog::LineFormat(L"Copy refused unsafe ancestor: %s -> %s",from.c_str(),to.c_str());
+        return false;
+    }
     if (CopyFileExW(from.c_str(), to.c_str(), CopyProgress, const_cast<std::atomic_bool*>(cancelled), nullptr, 0)) return true;
     const DWORD err = GetLastError();
     if (err == ERROR_DISK_FULL || copyError == 0) copyError = err;
@@ -64,6 +78,11 @@ bool CopyTree(
     if (attr & FILE_ATTRIBUTE_REPARSE_POINT) { copyError=ERROR_NOT_SUPPORTED; return false; }
     if ((attr & FILE_ATTRIBUTE_DIRECTORY) == 0)
         return CopyFileLogged(from, to, copyError, cancelled);
+    if (!GlassInstallUtil::IsSafeInstallPath(from) || !GlassInstallUtil::IsSafeInstallPath(to)) {
+        copyError=ERROR_NOT_SUPPORTED;
+        GlassInstallLog::LineFormat(L"Copy refused unsafe directory ancestor: %s -> %s",from.c_str(),to.c_str());
+        return false;
+    }
 
     if (!CreateDirectoryW(to.c_str(), nullptr)) {
         const DWORD err = GetLastError();
@@ -72,6 +91,13 @@ bool CopyTree(
             GlassInstallLog::LineFormat(L"CreateDirectory failed %s (%lu)", to.c_str(), err);
             return false;
         }
+    }
+    const DWORD destination=GetFileAttributesW(to.c_str());
+    if (destination==INVALID_FILE_ATTRIBUTES || !(destination & FILE_ATTRIBUTE_DIRECTORY) ||
+        (destination & FILE_ATTRIBUTE_REPARSE_POINT)) {
+        copyError=ERROR_NOT_SUPPORTED;
+        GlassInstallLog::LineFormat(L"Copy refused unsafe destination directory: %s",to.c_str());
+        return false;
     }
 
     std::wstring prefix = from;
@@ -240,6 +266,48 @@ bool CaptureRegistryValues(GlassInstallRollback::SessionState& state) noexcept {
     return true;
 }
 
+bool VerifyProductRegistrations(GlassInstallRollback::SessionState& state,
+    const std::atomic_bool* cancelled) noexcept {
+    // MajorUpgrade can remove any related product, not only the codes we
+    // explicitly uninstall. Unknown/advertised products are not snapshotted.
+    struct Family { const wchar_t* upgrade; const wchar_t* primary; const wchar_t* legacy; };
+    const Family families[]={
+        {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5010}",GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kLegacyPlatformX64},
+        {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5020}",GlassInstallMsi::kProductPlatformX86,GlassInstallMsi::kLegacyPlatformX86},
+        {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5030}",GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass},
+        {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5040}",GlassInstallMsi::kProductSettingsX64,nullptr},
+        {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5050}",GlassInstallMsi::kProductSettingsX86,nullptr},
+    };
+    const auto isCancelled=[&]() { return cancelled && cancelled->load(std::memory_order_acquire); };
+    const auto refuse=[&](const wchar_t* code,const std::wstring& detail) {
+        state.productPathUnverified=true;state.productPathCode=code;state.productPathDetail=detail;
+        state.copyError=ERROR_INVALID_DATA;
+        GlassInstallLog::LineFormat(L"Snapshot refused MSI registration: %s (%s)",code,detail.c_str());
+        return false;
+    };
+    for (const auto& family:families) {
+        for (const wchar_t* product:{family.primary,family.legacy}) {
+            if (!product) continue;
+            std::wstring detail;
+            const auto checked=GlassInstallMsi::CheckProductContexts(product,detail,cancelled);
+            if (checked==GlassInstallMsi::ProductPathCheck::Cancelled) { state.copyError=ERROR_CANCELLED;return false; }
+            if (checked!=GlassInstallMsi::ProductPathCheck::Safe) return refuse(product,detail);
+        }
+        for (DWORD i=0;;++i) {
+            if (isCancelled()) { state.copyError=ERROR_CANCELLED;return false; }
+            wchar_t product[39]{};
+            const UINT rc=MsiEnumRelatedProductsW(family.upgrade,0,i,product);
+            if (rc==ERROR_NO_MORE_ITEMS) break;
+            if (rc!=ERROR_SUCCESS) return refuse(family.upgrade,L"Could not enumerate related MSI products");
+            if ((_wcsicmp(product,family.primary)!=0 &&
+                (!family.legacy || _wcsicmp(product,family.legacy)!=0)) ||
+                MsiQueryProductStateW(product)!=INSTALLSTATE_DEFAULT)
+                return refuse(product,L"Unknown or advertised related MSI product");
+        }
+    }
+    return true;
+}
+
 bool TrySnapshotProduct(GlassInstallRollback::SessionState& state,
     const wchar_t* productCode,
     const std::wstring& installDir,
@@ -263,6 +331,21 @@ bool TrySnapshotProduct(GlassInstallRollback::SessionState& state,
         state.copyError=GetLastError();
         if (!state.copyError) state.copyError=ERROR_FILE_NOT_FOUND;
         GlassInstallLog::LineFormat(L"Snapshot failed: cached MSI unavailable for %s",productCode);
+        return false;
+    }
+    // Uninstalling a previously registered MSI uses its own recorded paths,
+    // not the new INSTALLDIR. Never guess that those files were under our fixed
+    // destination: verify the registered file components before MSI is touched.
+    std::wstring detail;
+    const auto checked=GlassInstallMsi::CheckProductFileRoots(productCode,snap.cachedMsiPath,installDir,detail,cancelled);
+    if (checked!=GlassInstallMsi::ProductPathCheck::Safe) {
+        if (checked==GlassInstallMsi::ProductPathCheck::Cancelled) { state.copyError=ERROR_CANCELLED; return false; }
+        state.productPathUnverified=true;
+        state.productPathCode=productCode;
+        state.productPathDetail=detail;
+        state.copyError=ERROR_INVALID_DATA;
+        GlassInstallLog::LineFormat(L"Snapshot refused unverified MSI paths: product=%s fixed=%s detail=%s status=%d",
+            productCode,installDir.c_str(),detail.empty()?L"<unknown>":detail.c_str(),static_cast<int>(checked));
         return false;
     }
     state.oldProducts.push_back(std::move(snap));
@@ -294,6 +377,22 @@ bool CreateSnapshot(
     state.backupX86.clear();
     state.backupOpenGlass.clear();
     state.copyError = 0;
+    state.productPathUnverified = false;
+    state.productPathCode.clear();
+    state.productPathDetail.clear();
+    for (const auto* root:{&x64Dir,&x86Dir,&openGlassDir}) {
+        if (root->empty()) continue; // x64/OpenGlass do not exist on 32-bit Windows
+        if (cancelled && cancelled->load(std::memory_order_acquire)) { state.copyError=ERROR_CANCELLED;return false; }
+        if (!GlassInstallUtil::IsSafeInstallPath(*root)) {
+            state.copyError=ERROR_INVALID_DATA;
+            state.productPathUnverified=true;
+            state.productPathCode=L"<fixed directory>";
+            state.productPathDetail=*root;
+            GlassInstallLog::LineFormat(L"Snapshot refused unsafe target or ancestor: %s",root->c_str());
+            return false;
+        }
+    }
+    if (!VerifyProductRegistrations(state,cancelled)) return false;
     if (!CaptureRegistryValues(state)) return false;
 
     if (!GlassInstallUtil::CreateSecureTempDirectory(L"GlassRollback",state.workspaceDir)) {
@@ -340,7 +439,7 @@ bool CreateSnapshot(
     uint64_t copied = 0;
     bool copiedOk = true;
     const auto bump = [&](const std::wstring& src, const std::wstring& sub, const std::wstring& skipSub, std::wstring& outBackup) {
-        if (src.empty()) return;
+        if (!copiedOk || src.empty()) return;
         const DWORD attr = GetFileAttributesW(src.c_str());
         if (attr == INVALID_FILE_ATTRIBUTES) {
             const DWORD error=GetLastError();
@@ -359,8 +458,14 @@ bool CreateSnapshot(
         CreateDirectoryW(dest, nullptr);
         outBackup = dest;
         state.hadPriorInstall = true; // Existing files must survive even if MSI registration is broken.
-        if (!CopyTree(src, dest, skipSub, copied, total, onProgress, state.copyError, cancelled))
+        if (!CopyTree(src, dest, skipSub, copied, total, onProgress, state.copyError, cancelled)) {
             copiedOk = false;
+            if (state.copyError==ERROR_NOT_SUPPORTED) {
+                state.productPathUnverified=true;
+                state.productPathCode=L"<fixed directory>";
+                state.productPathDetail=src;
+            }
+        }
     };
     bump(x64Dir, L"x64", skipInX64, state.backupX64);
     bump(x86Dir, L"x86", {}, state.backupX86);
@@ -387,15 +492,73 @@ void NoteInstalled(SessionState& state, const wchar_t* productCode) noexcept {
     state.installedThisSession.push_back(productCode);
 }
 
+bool UninstallSessionProductSafely(SessionState& state,const wchar_t* productCode) noexcept {
+    if (!productCode || !*productCode) return false;
+    std::wstring detail;
+    if (GlassInstallMsi::CheckProductContexts(productCode,detail)!=GlassInstallMsi::ProductPathCheck::Safe) {
+        GlassInstallLog::LineFormat(L"Rollback refused ambiguous product %s: %s",productCode,detail.c_str());return false;
+    }
+    if (!GlassInstallMsi::IsProductInstalled(productCode)) return true;
+    const std::wstring* root=nullptr;
+    if (_wcsicmp(productCode,GlassInstallMsi::kProductPlatformX64)==0 ||
+        _wcsicmp(productCode,GlassInstallMsi::kProductSettingsX64)==0) root=&state.x64Dir;
+    else if (_wcsicmp(productCode,GlassInstallMsi::kProductPlatformX86)==0 ||
+             _wcsicmp(productCode,GlassInstallMsi::kProductSettingsX86)==0) root=&state.x86Dir;
+    else if (_wcsicmp(productCode,GlassInstallMsi::kProductOpenGlass)==0) root=&state.openGlassDir;
+    if (!root || root->empty() || state.workspaceDir.empty()) return false;
+    const std::wstring cached=state.workspaceDir+L"\\rollback-check-"+productCode+L".msi";
+    if (!GlassInstallMsi::CopyLocalPackage(productCode,cached)) return false;
+    const auto result=GlassInstallMsi::CheckProductFileRoots(productCode,cached,*root,detail);
+    DeleteFileW(cached.c_str());
+    if (result!=GlassInstallMsi::ProductPathCheck::Safe) {
+        GlassInstallLog::LineFormat(L"Rollback refused MSI paths for %s: %s",productCode,detail.c_str());return false;
+    }
+    return GlassInstallMsi::UninstallProduct(productCode);
+}
+
 bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScope scope) noexcept {
     bool uninstallOk=true;
-    for (auto it = state.installedThisSession.rbegin(); it != state.installedThisSession.rend(); ++it)
-        if (!GlassInstallMsi::UninstallProduct(it->c_str())) uninstallOk=false;
+    for (auto it = state.installedThisSession.rbegin(); it != state.installedThisSession.rend(); ++it) {
+        if (!UninstallSessionProductSafely(state,it->c_str())) { uninstallOk=false;break; }
+    }
+    if (!uninstallOk) {
+        state.copyError=ERROR_INVALID_DATA;
+        GlassInstallLog::Line(L"Rollback stopped: a current MSI could not be safely removed; backup retained");
+        return false;
+    }
 
     if (!state.hadPriorInstall
         && state.backupX64.empty() && state.backupX86.empty() && state.backupOpenGlass.empty()) {
         if (onProgress) onProgress(10000);
         return uninstallOk;
+    }
+
+    // Restoring an MSI can itself trigger MajorUpgrade. Refuse newly appeared
+    // or relocated products instead of letting that operation remove them.
+    if (!VerifyProductRegistrations(state,nullptr)) return false;
+    const wchar_t* known[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
+        GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass,
+        GlassInstallMsi::kLegacyPlatformX64,GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
+    for (const auto* product:known) {
+        if (!GlassInstallMsi::IsProductInstalled(product)) continue;
+        const ProductSnapshot* snapshot=nullptr;
+        for (const auto& item:state.oldProducts)
+            if (_wcsicmp(item.productCode.c_str(),product)==0) { snapshot=&item;break; }
+        std::wstring detail;
+        bool verified=false;
+        if (snapshot && !state.workspaceDir.empty()) {
+            const std::wstring current=state.workspaceDir+L"\\\\rollback-prior-"+product+L".msi";
+            if (GlassInstallMsi::CopyLocalPackage(product,current))
+                verified=GlassInstallMsi::CheckProductFileRoots(product,current,snapshot->installDir,detail)
+                    ==GlassInstallMsi::ProductPathCheck::Safe;
+            else detail=L"Current cached MSI is unavailable";
+            DeleteFileW(current.c_str());
+        }
+        if (!verified) {
+            state.copyError=ERROR_INVALID_DATA;
+            GlassInstallLog::LineFormat(L"Rollback refused changed pre-existing MSI %s: %s",product,detail.c_str());
+            return false;
+        }
     }
 
     uint64_t copied = 0;
@@ -436,17 +599,22 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
         if (!state.backupX64.empty() && !state.x64Dir.empty()) {
             if (!CopyTree(state.backupX64, state.x64Dir, {}, copied, total, onProgress, copyError)) ok = false;
         }
-        if (copyError != ERROR_DISK_FULL && !state.backupX86.empty() && !state.x86Dir.empty()) {
+        if (ok && !state.backupX86.empty() && !state.x86Dir.empty()) {
             if (!CopyTree(state.backupX86, state.x86Dir, {}, copied, total, onProgress, copyError)) ok = false;
         }
-        if (copyError != ERROR_DISK_FULL && !state.backupOpenGlass.empty() && !state.openGlassDir.empty()) {
+        if (ok && !state.backupOpenGlass.empty() && !state.openGlassDir.empty()) {
             if (!CopyTree(state.backupOpenGlass, state.openGlassDir, {}, copied, total, onProgress, copyError)) ok = false;
         }
     }
-    if (copyError != 0) state.copyError = copyError;
+    if (!ok) {
+        state.copyError=copyError ? copyError : ERROR_GEN_FAILURE;
+        GlassInstallLog::Line(L"Rollback stopped after an unsafe or incomplete file restore; backup retained");
+        return false;
+    }
 
     // Восстановить продуктовый реестр MSI в порядке: платформы -> настройки -> OpenGlass.
     auto restoreOne = [&](const ProductSnapshot& snap) {
+        if (!ok) return;
         bool modified=false;
         for (const auto& code:state.modifiedProducts)
             if (_wcsicmp(code.c_str(),snap.productCode.c_str())==0) { modified=true; break; }
@@ -454,7 +622,9 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
         if (GlassInstallMsi::IsProductInstalled(snap.productCode.c_str()) &&
             !snap.displayVersion.empty() && GlassInstallMsi::QueryDisplayVersion(snap.productCode.c_str())==snap.displayVersion)
             return;
-        if (snap.cachedMsiPath.empty() || snap.installDir.empty()) { ok=false; return; }
+        if (snap.cachedMsiPath.empty() || snap.installDir.empty() ||
+            !GlassInstallUtil::IsSafeInstallPath(snap.installDir) ||
+            !VerifyProductRegistrations(state,nullptr)) { ok=false; return; }
         const std::wstring patched=state.workspaceDir+L"\\restore-"+snap.productCode+L".msi";
         if (!GlassInstallMsi::PrepareRestoreMsiCopy(snap.cachedMsiPath, patched)) {
             ok = false;
@@ -490,8 +660,8 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
                 restoreOne(snap);
         }
     }
-    if (!RestoreRegistryValues(state)) ok=false;
-    if (onProgress) onProgress(10000);
+    if (ok && !RestoreRegistryValues(state)) ok=false;
+    if (ok && onProgress) onProgress(10000);
     return ok;
 }
 

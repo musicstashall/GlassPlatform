@@ -3,6 +3,7 @@
 #include "InstallSupport/GlassInstallHost.h"
 #include "InstallSupport/GlassInstallLog.h"
 #include "InstallSupport/GlassInstallMsi.h"
+#include "InstallSupport/GlassInstallRemoval.h"
 #include "InstallSupport/GlassInstallUnlock.h"
 #include "InstallSupport/GlassInstallUtil.h"
 #include "InstallSupport/GlassInstallWatch.h"
@@ -279,34 +280,21 @@ private:
         selected_={safe.platform64,safe.platform32,safe.glassSettings,safe.openGlass};
     }
     void ResolveRoots() {
-        (void)GlassInstallUtil::QueryPlatformInstallPath(true,x64Dir_);
-        (void)GlassInstallUtil::QueryPlatformInstallPath(false,x86Dir_);
-        if (x64Dir_.empty()) x64Dir_=GP::TryGetAutorunGlassCompatInstallRoot(GP::PlatformArch::X64);
-        if (x86Dir_.empty()) x86Dir_=GP::TryGetAutorunGlassCompatInstallRoot(GP::PlatformArch::X86);
-        if (!args_.originalDir.empty()) {
-            std::wstring original=GlassInstallUtil::TrimTrailingSlashes(args_.originalDir);
-            if (SameCode(args_.product,Msi::kProductSettingsX64) || SameCode(args_.product,Msi::kProductSettingsX86)) {
-                const auto slash=original.find_last_of(L"\\/");
-                if (slash!=std::wstring::npos) original.resize(slash);
-            }
-            if (x64Dir_.empty() && (SameCode(args_.product,Msi::kProductPlatformX64) || SameCode(args_.product,Msi::kProductSettingsX64))) x64Dir_=original;
-            if (x86Dir_.empty() && (SameCode(args_.product,Msi::kProductPlatformX86) || SameCode(args_.product,Msi::kProductSettingsX86))) x86Dir_=original;
-        }
-        if (x64Dir_.empty() && GlassInstallUtil::IsOs64Bit()) {
+        // Match Setup's fixed destinations. Registry values, task commands and
+        // the location of an old unins000.exe are not deletion/launch targets.
+        x64Dir_.clear();x86Dir_.clear();openGlassDir_.clear();
+        if (GlassInstallUtil::IsOs64Bit()) {
             PWSTR pf=nullptr;
             if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX64,0,nullptr,&pf)) && pf) {
-                x64Dir_=std::wstring(pf)+L"\\GlassPlatform"; CoTaskMemFree(pf);
+                x64Dir_=std::wstring(pf)+L"\\GlassPlatform";CoTaskMemFree(pf);
+                openGlassDir_=x64Dir_+L"\\OpenGlass";
             }
         }
-        if (x86Dir_.empty()) {
-            PWSTR pf=nullptr;
-            if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX86,0,nullptr,&pf)) && pf) {
-                x86Dir_=std::wstring(pf)+L"\\GlassPlatform"; CoTaskMemFree(pf);
-            }
-        }
-        if (!GlassInstallUtil::QueryOpenGlassInstallPath(openGlassDir_)) {
-            if (SameCode(args_.product,Msi::kProductOpenGlass) && !args_.originalDir.empty()) openGlassDir_=args_.originalDir;
-            else if (!x64Dir_.empty()) openGlassDir_=x64Dir_+L"\\OpenGlass";
+        PWSTR pf=nullptr;
+        HRESULT hr=SHGetKnownFolderPath(FOLDERID_ProgramFilesX86,0,nullptr,&pf);
+        if (FAILED(hr) || !pf) hr=SHGetKnownFolderPath(FOLDERID_ProgramFiles,0,nullptr,&pf);
+        if (SUCCEEDED(hr) && pf) {
+            x86Dir_=std::wstring(pf)+L"\\GlassPlatform";CoTaskMemFree(pf);
         }
     }
     void Initialize() {
@@ -509,12 +497,85 @@ private:
         }
     }
     int RunOperation(Selection chosen) {
-        const bool prior64=GP::IsGlassPlatformRunning(GP::PlatformArch::X64);
-        const bool prior86=GP::IsGlassPlatformRunning(GP::PlatformArch::X86);
+        // MsiConfigureProductEx uninstalls the MSI's registered file paths,
+        // not our cleanup directory. Inspect selected products before stopping
+        // any host, and do not treat a stale registry value as a safe target.
+        struct Probe { const wchar_t* code; std::wstring root, cached; bool installed=false; };
+        struct ProbeWorkspace {
+            std::wstring directory;
+            std::vector<std::wstring> files;
+            ~ProbeWorkspace() { for (const auto& file:files) DeleteFileW(file.c_str()); if (!directory.empty()) RemoveDirectoryW(directory.c_str()); }
+        } workspace;
+        std::vector<Probe> probes;
+        if (chosen.x64) probes.push_back({Msi::kProductPlatformX64,x64Dir_,{}});
+        if (chosen.x86) probes.push_back({Msi::kProductPlatformX86,x86Dir_,{}});
+        if (chosen.settings) {
+            probes.push_back({Msi::kProductSettingsX64,x64Dir_,{}});
+            probes.push_back({Msi::kProductSettingsX86,x86Dir_,{}});
+        }
+        if (chosen.openGlass) probes.push_back({Msi::kProductOpenGlass,openGlassDir_,{}});
+        SetStatus(T(L"Проверка путей установленных продуктов…",L"Checking installed product paths…"),100);
+        if (!GlassInstallUtil::CreateSecureTempDirectory(L"GlassUninsCheck",workspace.directory)) {
+            SetError(T(L"Не удалось подготовить проверку MSI. Пакеты не удалены.",L"Could not prepare the MSI check. No packages were removed."));
+            return 9;
+        }
+        const auto refuse=[&](const Probe& p,const std::wstring& detail,bool beforeChanges=true) {
+            LogLine(std::wstring(L"Refusing MSI removal: ")+p.code+L" "+detail);
+            std::wstring message=beforeChanges
+                ? T(L"Путь или контекст ранее установленного MSI нельзя безопасно проверить. Удаление остановлено до изменений. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную.",
+                    L"The installed MSI path or context cannot be verified safely. Removal stopped before making changes. Save the log and ask for help; do not delete files manually.")
+                : T(L"Регистрация MSI изменилась во время удаления; некоторые продукты могли уже быть удалены. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную.",
+                    L"An MSI registration changed during removal; some products may already have been removed. Save the log and ask for help; do not delete files manually.");
+            message+=L"\r\n";message+=p.code;if (!detail.empty()) message+=L"\r\n"+detail;
+            SetError(message);
+            return false;
+        };
+        for (auto& p:probes) {
+            if (cancelRequested_.load()) return ERROR_INSTALL_USEREXIT;
+            std::wstring detail;
+            if (!p.root.empty() && !GlassInstallUtil::IsSafeInstallPath(p.root)) {
+                refuse(p,p.root);return 9;
+            }
+            const auto context=Msi::CheckProductContexts(p.code,detail,&cancelRequested_);
+            if (context==Msi::ProductPathCheck::Cancelled) return ERROR_INSTALL_USEREXIT;
+            if (context!=Msi::ProductPathCheck::Safe) { refuse(p,detail);return 9; }
+            p.installed=Msi::IsProductInstalled(p.code);
+            if (!p.installed) continue;
+            if (p.root.empty()) { refuse(p,L"<fixed directory unavailable>");return 9; }
+            p.cached=workspace.directory+L"\\product-"+std::to_wstring(workspace.files.size())+L".msi";
+            workspace.files.push_back(p.cached);
+            if (!Msi::CopyLocalPackage(p.code,p.cached,&cancelRequested_)) {
+                if (cancelRequested_.load()) return ERROR_INSTALL_USEREXIT;
+                refuse(p,L"<cached MSI unavailable>");return 9;
+            }
+            const auto checked=Msi::CheckProductFileRoots(p.code,p.cached,p.root,detail,&cancelRequested_);
+            if (checked==Msi::ProductPathCheck::Cancelled) return ERROR_INSTALL_USEREXIT;
+            if (checked!=Msi::ProductPathCheck::Safe) { refuse(p,detail);return 9; }
+        }
+        bool prior64=false,prior86=false;
+        if (!GlassInstallHost::QueryGlassPlatformRunning(GP::PlatformArch::X64,prior64) ||
+            !GlassInstallHost::QueryGlassPlatformRunning(GP::PlatformArch::X86,prior86)) {
+            LogLine(L"Could not inspect platform mutex state before removal");
+            SetError(T(L"Не удалось проверить состояние платформы. Пакеты не удалены.",
+                L"Could not inspect the platform state. No packages were removed."));
+            return 10;
+        }
         const bool enabled64=GP::QueryGlassAutorunUiState(GP::PlatformArch::X64)!=GP::AutorunUiState::Disabled;
         const bool enabled86=GP::QueryGlassAutorunUiState(GP::PlatformArch::X86)!=GP::AutorunUiState::Disabled;
         const bool platformRemoval=chosen.x64 || chosen.x86;
         const bool stopOg=GlassInstallUtil::IsOs64Bit() && (chosen.x64 || chosen.openGlass);
+        const bool task64=GP::GlassAutorunTaskExists(GP::PlatformArch::X64);
+        const bool task86=GP::GlassAutorunTaskExists(GP::PlatformArch::X86);
+        if (platformRemoval) {
+            std::wstring error;
+            if (!GlassInstallRemoval::ValidatePlatformTask(GP::PlatformArch::X64,x64Dir_,task64,prior64,IsRu(),error) ||
+                !GlassInstallRemoval::ValidatePlatformTask(GP::PlatformArch::X86,x86Dir_,task86,prior86,IsRu(),error) ||
+                (prior64 && (!task64 || !enabled64)) || (prior86 && (!task86 || !enabled86))) {
+                if (error.empty()) error=T(L"Работающую платформу невозможно безопасно восстановить. Остановите её и повторите удаление.",
+                    L"The running platform cannot be restored safely. Stop it and retry removal.");
+                LogLine(L"Refusing platform task: "+error);SetError(error);return 10;
+            }
+        }
         bool priorOg=false, ogServiceExisted=false;
         DWORD ogStartType=SERVICE_AUTO_START;
         GlassInstallUtil::OpenGlassTaskState ogTasks;
@@ -525,6 +586,13 @@ private:
                 L"Could not inspect OpenGlass. No packages were removed."));
             return 10;
         }
+        if (stopOg && (ogServiceExisted || ogTasks.found)) {
+            std::wstring error;
+            if (!GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,&cancelRequested_,IsRu(),error)) {
+                if (cancelRequested_.load()) return ERROR_INSTALL_USEREXIT;
+                LogLine(L"Refusing OpenGlass backend: "+error);SetError(error);return 10;
+            }
+        }
         if (stopOg && priorOg && ((!ogServiceExisted && (!ogTasks.found || ogTasks.anyDisabled)) ||
             (ogServiceExisted && ogTasks.anyRunning))) {
             SetError(T(L"Нельзя безопасно восстановить текущее состояние OpenGlass. Остановите OpenGlass и повторите удаление.",
@@ -533,22 +601,22 @@ private:
         }
         bool removed64=false,removed86=false,removedOg=false;
         auto restoreArch=[&](GP::PlatformArch arch,const std::wstring& root,bool wasRunning,bool wasEnabled,bool removed) -> bool {
-            if (!wasRunning || removed || GP::IsGlassPlatformRunning(arch)) return true;
-            if (wasEnabled && GP::GlassAutorunTaskExists(arch)) GP::StartPlatform(arch);
-            else {
-                // Preserve disabled or absent tasks for manually started hosts.
-                const std::wstring rundll=arch==GP::PlatformArch::X64?GlassInstallUtil::NativeRundll64():GlassInstallUtil::RundllPathForTaskArch(arch);
-                const std::wstring dll=GlassInstallUtil::TrimTrailingSlashes(root)+L"\\GlassCompat.dll";
-                if (rundll.empty() || !PathFileExistsW(dll.c_str())) return false;
-                std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",Main /start";
-                STARTUPINFOW si{}; si.cb=sizeof(si); si.dwFlags=STARTF_USESHOWWINDOW; si.wShowWindow=SW_HIDE;
-                PROCESS_INFORMATION pi{};
-                if (!CreateProcessW(rundll.c_str(),cmd.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi)) return false;
-                CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+            if (!wasRunning || removed) return true;
+            bool running=false;
+            if (!GlassInstallHost::QueryGlassPlatformRunning(arch,running)) return false;
+            if (running) return true;
+            std::wstring error;
+            if (!wasEnabled || !GlassInstallRemoval::ValidatePlatformTask(arch,root,true,false,IsRu(),error)) {
+                LogLine(L"Refusing to restart changed platform task: "+error);return false;
             }
+            GP::StartPlatform(arch);
             const ULONGLONG start=GetTickCount64();
-            while (!GP::IsGlassPlatformRunning(arch) && GetTickCount64()-start<30000) Sleep(200);
-            return GP::IsGlassPlatformRunning(arch);
+            do {
+                if (!GlassInstallHost::QueryGlassPlatformRunning(arch,running)) return false;
+                if (running) return true;
+                Sleep(200);
+            } while (GetTickCount64()-start<30000);
+            return false;
         };
         auto restoreRemaining=[&]() -> bool {
             bool restored=true;
@@ -558,6 +626,10 @@ private:
                 bool running=false;
                 if (!GlassInstallUtil::QueryOpenGlassRunning(running)) restored=false;
                 else if (!running) {
+                    std::wstring error;
+                    if (!GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,nullptr,IsRu(),error)) {
+                        LogLine(L"Refusing to restart changed OpenGlass backend: "+error);return false;
+                    }
                     bool started=false;
                     if (ogServiceExisted) {
                         started=GlassInstallHost::StartOpenGlassServicePreservingStartType(ogStartType);
@@ -612,6 +684,23 @@ private:
         int done=0;
         auto remove=[&](const wchar_t* code,const wchar_t* name) -> bool {
             SetStatus(std::wstring(T(L"Удаление ",L"Removing "))+name+L"…",1000+(done*8500/std::max(1,count)));
+            const auto it=std::find_if(probes.begin(),probes.end(),[&](const Probe& p){return _wcsicmp(p.code,code)==0;});
+            if (it==probes.end()) return false;
+            std::wstring detail;
+            if (Msi::CheckProductContexts(code,detail)!=Msi::ProductPathCheck::Safe ||
+                Msi::IsProductInstalled(code)!=it->installed)
+                return refuse(*it,detail,false);
+            if (it->installed) {
+                // Re-read the current cached package: the registration may
+                // have changed since the protected preflight copy was made.
+                const std::wstring current=workspace.directory+L"\\\\current-"+code+L".msi";
+                const bool copied=Msi::CopyLocalPackage(code,current);
+                const auto paths=copied ? Msi::CheckProductFileRoots(code,current,it->root,detail)
+                                        : Msi::ProductPathCheck::Unverifiable;
+                DeleteFileW(current.c_str());
+                if (!copied) detail=L"Current cached MSI is unavailable";
+                if (paths!=Msi::ProductPathCheck::Safe) return refuse(*it,detail,false);
+            }
             if (!Msi::UninstallProduct(code)) {
                 SetError(std::wstring(T(L"Не удалось удалить пакет: ",L"Could not remove package: "))+name);
                 return false;
@@ -625,6 +714,14 @@ private:
         if (chosen.openGlass) {
             if (!remove(Msi::kProductOpenGlass,L"OpenGlass")) { restoreRemaining(); return 13; }
             removedOg=true;
+            std::wstring backendError;bool serviceExists=false;DWORD serviceType=0;GlassInstallUtil::OpenGlassTaskState currentTasks;
+            if (!GlassInstallHost::QueryOpenGlassServiceStartType(serviceExists,serviceType) ||
+                !GlassInstallUtil::QueryOpenGlassTasks(currentTasks) || serviceExists!=ogServiceExisted || currentTasks.found!=ogTasks.found ||
+                !GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,nullptr,IsRu(),backendError)) {
+                SetError(T(L"OpenGlass MSI удалён, но служба или задача изменилась и не будет удалена.",
+                    L"OpenGlass MSI was removed, but the service or task changed and will not be deleted."));
+                LogLine(L"OpenGlass cleanup refused: "+backendError);(void)restoreRemaining();return 17;
+            }
             if (!GlassInstallHost::RemoveOpenGlassServiceAndTasks()) { SetError(T(L"OpenGlass удалён, но служба или задача не удалена.",L"OpenGlass was removed, but its service or task could not be removed.")); (void)restoreRemaining(); return 17; }
             GlassInstallUtil::ClearOpenGlassInstallPath(); ++done;
         }
@@ -637,13 +734,23 @@ private:
         if (chosen.x86) {
             if (!remove(Msi::kProductPlatformX86,L"Glass Platform x86")) { restoreRemaining(); return 14; }
             removed86=true;
-            if (!GlassInstallHost::RemovePlatformAutorunTasks(false,true)) { SetError(T(L"Платформа x86 удалена, но задача автозапуска осталась.",L"The x86 platform was removed, but its startup task remains.")); (void)restoreRemaining(); return 17; }
+            std::wstring taskError;
+            if (!GlassInstallRemoval::ValidatePlatformTask(GP::PlatformArch::X86,x86Dir_,task86,false,IsRu(),taskError) ||
+                !GlassInstallHost::RemovePlatformAutorunTasks(false,true)) {
+                SetError(T(L"Платформа x86 удалена, но задача автозапуска не удалена.",L"The x86 platform was removed, but its startup task was not removed."));
+                LogLine(L"x86 task cleanup refused: "+taskError);(void)restoreRemaining();return 17;
+            }
             GlassInstallUtil::ClearPlatformInstallPath(false); ++done;
         }
         if (chosen.x64) {
             if (!remove(Msi::kProductPlatformX64,L"Glass Platform x64")) { restoreRemaining(); return 15; }
             removed64=true;
-            if (!GlassInstallHost::RemovePlatformAutorunTasks(true,false)) { SetError(T(L"Платформа x64 удалена, но задача автозапуска осталась.",L"The x64 platform was removed, but its startup task remains.")); (void)restoreRemaining(); return 17; }
+            std::wstring taskError;
+            if (!GlassInstallRemoval::ValidatePlatformTask(GP::PlatformArch::X64,x64Dir_,task64,false,IsRu(),taskError) ||
+                !GlassInstallHost::RemovePlatformAutorunTasks(true,false)) {
+                SetError(T(L"Платформа x64 удалена, но задача автозапуска не удалена.",L"The x64 platform was removed, but its startup task was not removed."));
+                LogLine(L"x64 task cleanup refused: "+taskError);(void)restoreRemaining();return 17;
+            }
             GlassInstallUtil::ClearPlatformInstallPath(true); ++done;
         }
         // Pin retained product directories, including nested/aliased roots,

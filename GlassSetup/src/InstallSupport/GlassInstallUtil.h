@@ -63,6 +63,12 @@ std::wstring TrimTrailingSlashes(std::wstring path);
 void PruneEmptyDirectories(const std::wstring& root,
     const std::vector<std::wstring>& protectedRoots = {}) noexcept;
 bool SameInstallPath(const std::wstring& left, const std::wstring& right) noexcept;
+// Lexical, case-insensitive containment for an absolute registered MSI path.
+// This does not establish file identity, signature or reparse-point safety.
+bool IsWithinInstallRoot(const std::wstring& root, const std::wstring& path) noexcept;
+// Reject existing reparse-point ancestors and multiply linked leaf files.
+// This is a conservative preflight, not an atomic lock against other processes.
+bool IsSafeInstallPath(const std::wstring& path) noexcept;
 
 bool QueryPlatformInstallPath(bool x64, std::wstring& out) noexcept;
 void WritePlatformInstallPath(bool x64, const std::wstring& installDir) noexcept;

@@ -34,9 +34,9 @@ prefix = r'''
 using DWORD=std::uint32_t;using UINT=unsigned;using uint64_t=std::uint64_t;
 #define _wcsicmp wcscasecmp
 constexpr DWORD INVALID_FILE_ATTRIBUTES=0xffffffffu,FILE_ATTRIBUTE_DIRECTORY=0x10,FILE_ATTRIBUTE_REPARSE_POINT=0x400,
- ERROR_FILE_NOT_FOUND=2,ERROR_PATH_NOT_FOUND=3,ERROR_GEN_FAILURE=31,ERROR_NOT_SUPPORTED=50,ERROR_DISK_FULL=112;
+ ERROR_FILE_NOT_FOUND=2,ERROR_PATH_NOT_FOUND=3,ERROR_GEN_FAILURE=31,ERROR_NOT_SUPPORTED=50,ERROR_DISK_FULL=112,ERROR_INVALID_DATA=13;
 struct Fake {
- bool os64=true,settingDirExists=true,settingReparse=false,uninstallOk=true,registryOk=true,otherFilesLocked=false;
+ bool os64=true,settingDirExists=true,settingReparse=false,uninstallOk=true,registryOk=true,otherFilesLocked=false,registrationsOk=true;
  DWORD attrError=ERROR_FILE_NOT_FOUND;std::vector<std::wstring> copies,uninstalls,installs;int registryCalls=0;
 } fake;
 DWORD GetLastError(){return fake.attrError;}
@@ -56,15 +56,21 @@ namespace GlassInstallRollback {
  };
  using CopyProgressFn=std::function<void(int)>;
  bool RestoreRegistryValues(const SessionState&){++fake.registryCalls;return fake.registryOk;}
+ bool UninstallSessionProductSafely(SessionState&,const wchar_t*);
 }
 namespace GlassInstallUtil {
  bool IsOs64Bit(){return fake.os64;}
+ bool IsSafeInstallPath(const std::wstring&){return true;}
  std::wstring TrimTrailingSlashes(std::wstring value){while(!value.empty()&&(value.back()==L'\\'||value.back()==L'/'))value.pop_back();return value;}
 }
 namespace GlassInstallLog { template<class... T>void LineFormat(const wchar_t*,T...){} void Line(const wchar_t*){} }
 namespace GlassInstallMsi {
  constexpr wchar_t kProductPlatformX64[]=L"p64",kProductPlatformX86[]=L"p86",kProductSettingsX64[]=L"gs64",
-  kProductSettingsX86[]=L"gs86",kProductOpenGlass[]=L"og";
+  kProductSettingsX86[]=L"gs86",kProductOpenGlass[]=L"og",kLegacyPlatformX64[]=L"old64",
+  kLegacyPlatformX86[]=L"old86",kLegacyOpenGlass[]=L"oldog";
+ enum class ProductPathCheck {Safe,OutsideRoot,Unverifiable,Cancelled};
+ ProductPathCheck CheckProductFileRoots(const wchar_t*,const std::wstring&,const std::wstring&,std::wstring&){return ProductPathCheck::Safe;}
+ bool CopyLocalPackage(const wchar_t*,const std::wstring&){return true;}
  bool UninstallProduct(const wchar_t* code){fake.uninstalls.emplace_back(code);return fake.uninstallOk;}
  bool IsProductInstalled(const wchar_t*){return false;}
  std::wstring QueryDisplayVersion(const wchar_t*){return L"old";}
@@ -74,6 +80,10 @@ namespace GlassInstallMsi {
  bool MsiSuccess(UINT code){return code==0;}
  void PatchArpUninstallString(const std::wstring&,const std::wstring&){}
 }
+namespace GlassInstallRollback {
+ bool UninstallSessionProductSafely(SessionState&,const wchar_t* code){return GlassInstallMsi::UninstallProduct(code);}
+}
+bool VerifyProductRegistrations(GlassInstallRollback::SessionState&,const void*){return fake.registrationsOk;}
 uint64_t DirBytes(const std::wstring&){return 10;}
 bool CopyTree(const std::wstring& from,const std::wstring& to,const std::wstring&,uint64_t& copied,uint64_t,
  const GlassInstallRollback::CopyProgressFn& onProgress,unsigned&){
@@ -106,9 +116,13 @@ int main(){
   assert(!ExecuteRollback(s,nullptr,RestoreScope::SettingsX64));assert(s.copyError==ERROR_NOT_SUPPORTED && fake.copies.empty());}
  {reset();SessionState s;assert(ExecuteRollback(s,nullptr,RestoreScope::AllProducts));
   assert(fake.copies.size()==3 && fake.registryCalls==1);}
- {reset();SessionState s;fake.otherFilesLocked=true;assert(!ExecuteRollback(s,nullptr,RestoreScope::AllProducts));assert(fake.copies.size()==3);}
- {reset();SessionState s;s.installedThisSession={L"gs64"};fake.uninstallOk=false;
-  assert(!ExecuteRollback(s,nullptr,RestoreScope::SettingsX64));assert(fake.uninstalls.size()==1 && fake.registryCalls==1);}
+ {reset();SessionState s;fake.otherFilesLocked=true;assert(!ExecuteRollback(s,nullptr,RestoreScope::AllProducts));
+  assert(fake.copies.size()==1 && fake.installs.empty() && fake.registryCalls==0);}
+ {reset();SessionState s;s.installedThisSession={L"p64",L"gs64"};fake.uninstallOk=false;
+  assert(!ExecuteRollback(s,nullptr,RestoreScope::SettingsX64));
+  assert(fake.uninstalls.size()==1 && fake.registryCalls==0 && fake.copies.empty() && s.copyError==ERROR_INVALID_DATA);}
+ {reset();SessionState s;fake.registrationsOk=false;
+  assert(!ExecuteRollback(s,nullptr,RestoreScope::AllProducts));assert(fake.copies.empty() && fake.registryCalls==0);}
  std::cout<<"PASS: real rollback: only Settings restored during unlock, full snapshot afterward, errors retained\n";
 }
 '''

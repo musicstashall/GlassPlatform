@@ -51,6 +51,7 @@
     <ClCompile Include="..\src\WizardTheme.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallLog.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallMsi.cpp" />
+    <ClCompile Include="..\src\InstallSupport\GlassInstallRemoval.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallUtil.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallWatch.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallHost.cpp" />

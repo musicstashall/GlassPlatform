@@ -352,7 +352,7 @@ assert "cached MSI unavailable" in rollback
 assert "preserveSnapshot_=true" in engine and "RollbackSucceeded" in engine_h
 undo = section(engine, "bool InstallEngine::UndoCleanInstall()", "bool InstallEngine::PurgeRemnants()")
 assert "DeleteTree" not in undo, "never recursively delete unrelated files on clean-install cancellation"
-assert undo.index("GlassInstallMsi::UninstallProduct") < undo.index("++productsProcessed") < undo.index("productsProcessed*8000/productCount")
+assert undo.index("UninstallSessionProductSafely") < undo.index("++productsProcessed") < undo.index("productsProcessed*8000/productCount")
 assert "DirBytes(state.backupX64)" in rollback and "IsNestedSubPath" in rollback
 assert "receivedFrame" in watch and "FILE_FLAG_FIRST_PIPE_INSTANCE" in watch
 assert "BeginLocalNativeMonitor" in watch and "GlassSettings_ScanGlassModules" in watch
@@ -391,7 +391,7 @@ assert 'CreateSecureTempDirectory(L"GlassUninsLogs"' in read("src/InstallSupport
 assert "SecureLogDirectory()" in unins and 'GetEnvironmentVariableW(L"ProgramW6432"' not in setup + unins + engine
 native_helper = section(util, "std::wstring NativeDllForArch(", "bool QueryPlatformInstallPath(")
 assert "if (x64)" in native_helper and "return EnsureExtractedUnlockerX64();" in native_helper
-assert native_helper.index("return EnsureExtractedUnlockerX64();") < native_helper.index("QueryPlatformInstallPath(")
+assert "QueryPlatformInstallPath(" not in native_helper and "TryGetAutorunGlassCompatInstallRoot(" not in native_helper
 shell_ops = (repo / "GlassSettings/Native/ShellExtensionOps.cpp").read_text(encoding="utf-8")
 shell_sparse = (repo / "GlassSettings/Native/ShellSparsePackage.cpp").read_text(encoding="utf-8")
 pack = (repo / "GlassShellExt/Package/BuildSparsePackage.ps1").read_text(encoding="utf-8")

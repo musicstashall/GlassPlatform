@@ -397,6 +397,60 @@ bool SameInstallPath(const std::wstring& left, const std::wstring& right) noexce
     } catch (...) { return false; }
 }
 
+bool IsWithinInstallRoot(const std::wstring& root, const std::wstring& path) noexcept {
+    try {
+        std::wstring parent, child;
+        if (!NormalProductDirectory(root,parent) || !NormalProductDirectory(path,child) ||
+            child.size()<parent.size() || _wcsnicmp(parent.c_str(),child.c_str(),parent.size())!=0)
+            return false;
+        return child.size()==parent.size() || child[parent.size()]==L'\\';
+    } catch (...) { return false; }
+}
+
+bool IsSafeInstallPath(const std::wstring& path) noexcept {
+    try {
+        std::wstring normalized;
+        if (!NormalProductDirectory(path,normalized)) return false;
+        size_t start=3; // drive root has no child component to inspect
+        if (normalized.rfind(L"\\\\",0)==0) {
+            const size_t server=normalized.find(L'\\',2);
+            const size_t share=server==std::wstring::npos ? server : normalized.find(L'\\',server+1);
+            if (share==std::wstring::npos) return false;
+            start=share+1;
+        }
+        while (start<=normalized.size()) {
+            const size_t end=normalized.find(L'\\',start);
+            const std::wstring component=normalized.substr(0,end);
+            const DWORD attr=GetFileAttributesW(component.c_str());
+            if (attr==INVALID_FILE_ATTRIBUTES) {
+                const DWORD error=GetLastError();
+                // Once an ancestor does not exist, no deeper component can
+                // already be a link. Recheck immediately before mutations.
+                return error==ERROR_FILE_NOT_FOUND || error==ERROR_PATH_NOT_FOUND;
+            }
+            if ((attr & FILE_ATTRIBUTE_REPARSE_POINT) ||
+                (end!=std::wstring::npos && !(attr & FILE_ATTRIBUTE_DIRECTORY))) return false;
+            if (end==std::wstring::npos) {
+                if (attr & FILE_ATTRIBUTE_DIRECTORY) return true;
+                // Overwriting an NTFS hard link can modify a file outside the
+                // product tree even though its name is lexically inside it.
+                HANDLE file=CreateFileW(component.c_str(),FILE_READ_ATTRIBUTES,
+                    FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
+                    FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+                if (file==INVALID_HANDLE_VALUE) return false;
+                BY_HANDLE_FILE_INFORMATION info{};
+                const bool safe=GetFileInformationByHandle(file,&info) &&
+                    !(info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) &&
+                    info.nNumberOfLinks==1;
+                CloseHandle(file);
+                return safe;
+            }
+            start=end+1;
+        }
+        return true;
+    } catch (...) { return false; }
+}
+
 void PruneEmptyDirectories(const std::wstring& root, const std::vector<std::wstring>& protectedRoots) noexcept {
     try {
         std::wstring normalized;
@@ -915,18 +969,8 @@ std::wstring NativeDllForArch(
         if (PeMatches(dll, machine, "GlassSettings_UnlockerW"))
             return dll;
     }
-    std::wstring regRoot;
-    if (QueryPlatformInstallPath(x64, regRoot) && !regRoot.empty()) {
-        const std::wstring dll = regRoot + L"\\GlassSettings\\GlassSettings.Native.dll";
-        if (PeMatches(dll, machine, "GlassSettings_UnlockerW"))
-            return dll;
-    }
-    std::wstring fromTask = GlassShared::GlassPlatformTask::TryGetAutorunGlassCompatInstallRoot(arch);
-    if (!fromTask.empty()) {
-        const std::wstring dll = TrimTrailingSlashes(fromTask) + L"\\GlassSettings\\GlassSettings.Native.dll";
-        if (PeMatches(dll, machine, "GlassSettings_UnlockerW"))
-            return dll;
-    }
+    // Uninstaller builds without the x86 resource may use only the fixed
+    // product root. Never load elevated code from a stale registry/task path.
     return {};
 }
 

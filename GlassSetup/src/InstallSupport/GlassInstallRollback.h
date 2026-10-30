@@ -39,6 +39,11 @@ struct SessionState {
     std::vector<std::wstring> modifiedProducts;
     bool hadPriorInstall = false;
     unsigned copyError = 0;
+    // Failure to verify an installed MSI's file locations is distinct from a
+    // copy error: proceeding could uninstall files outside the fixed root.
+    bool productPathUnverified = false;
+    std::wstring productPathCode;
+    std::wstring productPathDetail;
 };
 
 using CopyProgressFn = std::function<void(int percentUnits)>;
@@ -54,6 +59,9 @@ bool CreateSnapshot(
 
 void NoteModified(SessionState& state, const wchar_t* productCode) noexcept;
 void NoteInstalled(SessionState& state, const wchar_t* productCode) noexcept;
+// During rollback, recheck the current registered MSI before uninstalling it;
+// a concurrently changed/foreign registration is never removed speculatively.
+bool UninstallSessionProductSafely(SessionState& state, const wchar_t* productCode) noexcept;
 
 enum class RestoreScope { AllProducts, SettingsX86, SettingsX64 };
 

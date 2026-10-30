@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <GlassPlatformTask.h>
 #include <atomic>
 #include <string>
 #include <vector>
@@ -29,6 +30,14 @@ struct Session {
     bool shortcutRemoved = false;
     bool serviceExisted = false;
 };
+
+// Read-only checks used before touching or starting managed backends. Refuse
+// unexpected task actions or service executables instead of executing them.
+bool ValidatePlatformTask(GlassShared::GlassPlatformTask::PlatformArch arch,
+    const std::wstring& fixedRoot, bool expectedExists, bool requireRunning,
+    bool russian, std::wstring& error) noexcept;
+bool ValidateOpenGlassPaths(const std::wstring& fixedRoot, const std::atomic_bool* cancelled,
+    bool russian, std::wstring& error) noexcept;
 
 // Prepare before stopping hosts or changing MSI registrations. Only remove
 // auxiliaries of products known to have been installed. Refuse unknown task

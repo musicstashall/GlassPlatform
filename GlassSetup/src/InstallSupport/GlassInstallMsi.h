@@ -33,6 +33,18 @@ void PatchArpUninstallString(const std::wstring& productCode, const std::wstring
 
 bool CopyLocalPackage(const wchar_t* productCode, const std::wstring& destPath,
     const std::atomic_bool* cancelled = nullptr) noexcept;
+
+enum class ProductPathCheck { Safe, OutsideRoot, Unverifiable, Cancelled };
+// Older MSI APIs select a context implicitly. Reject duplicates or instances
+// belonging to other users rather than checking one and modifying another.
+ProductPathCheck CheckProductContexts(const wchar_t* productCode, std::wstring& detail,
+    const std::atomic_bool* cancelled = nullptr) noexcept;
+// Read the copied MSI database and installed component key paths. Do not run a
+// product with unknown or foreign file locations through uninstall/rollback.
+ProductPathCheck CheckProductFileRoots(const wchar_t* productCode, const std::wstring& cachedMsi,
+    const std::wstring& fixedRoot, std::wstring& detail,
+    const std::atomic_bool* cancelled = nullptr) noexcept;
+
 bool PrepareRestoreMsiCopy(const std::wstring& sourceMsi, const std::wstring& destMsi) noexcept;
 
 struct ProgressSink {

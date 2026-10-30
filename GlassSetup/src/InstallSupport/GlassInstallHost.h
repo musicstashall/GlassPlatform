@@ -6,6 +6,8 @@
 
 namespace GlassInstallHost {
 
+// A failed mutex query is not the same as a stopped platform.
+bool QueryGlassPlatformRunning(GlassShared::GlassPlatformTask::PlatformArch arch, bool& running) noexcept;
 bool StopGlassPlatform(GlassShared::GlassPlatformTask::PlatformArch arch) noexcept;
 // Inspect real service/task status before sending any stop. Once requested,
 // wait for the stop to settle even on cancellation so rollback can restore it.

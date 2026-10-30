@@ -666,7 +666,6 @@ std::wstring FormatUpdateBody(const std::wstring& self, const std::wstring& late
 
 struct InstallRootCandidate {
     std::wstring path;
-    bool fromRegistry = false;
 };
 
 struct InstalledGlassVersionInfo {
@@ -695,65 +694,53 @@ bool ReadRegistryString(HKEY key, const wchar_t* valueName, std::wstring& value,
     return !value.empty();
 }
 
-void AddInstallRoot(std::vector<InstallRootCandidate>& roots, std::wstring path, bool fromRegistry) {
+void AddInstallRoot(std::vector<InstallRootCandidate>& roots, std::wstring path) {
     while (!path.empty() && (path.back()==L'\\' || path.back()==L'/')) path.pop_back();
     if (path.empty()) return;
-    for (auto& root : roots) {
-        if (_wcsicmp(root.path.c_str(),path.c_str())==0) {
-            root.fromRegistry = root.fromRegistry || fromRegistry;
-            return;
-        }
-    }
-    roots.push_back({std::move(path),fromRegistry});
+    for (const auto& root : roots)
+        if (_wcsicmp(root.path.c_str(),path.c_str())==0) return;
+    roots.push_back({std::move(path)});
 }
 
 std::vector<InstallRootCandidate> InstalledGlassRoots() {
+    // An autorun task or stale registry value can point to a developer build,
+    // which must not be mistaken for the installed version either.
     std::vector<InstallRootCandidate> roots;
-    for (bool x64 : {true,false}) {
-        std::wstring path;
-        if (GlassInstallUtil::QueryPlatformInstallPath(x64,path))
-            AddInstallRoot(roots,std::move(path),true);
-    }
-    for (auto arch:{GlassShared::GlassPlatformTask::PlatformArch::X64,GlassShared::GlassPlatformTask::PlatformArch::X86}) {
-        std::wstring path=GlassShared::GlassPlatformTask::TryGetAutorunGlassCompatInstallRoot(arch);
-        if (!path.empty()) AddInstallRoot(roots,std::move(path),true);
-    }
     PWSTR program64=nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX64,KF_FLAG_DEFAULT,nullptr,&program64)) && program64) {
-        AddInstallRoot(roots,std::wstring(program64)+L"\\GlassPlatform",false);
-        AddInstallRoot(roots,std::wstring(program64)+L"\\Glass",false);
+        AddInstallRoot(roots,std::wstring(program64)+L"\\GlassPlatform");
+        AddInstallRoot(roots,std::wstring(program64)+L"\\Glass");
         CoTaskMemFree(program64);
     }
     PWSTR program32=nullptr;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX86,KF_FLAG_DEFAULT,nullptr,&program32)) && program32) {
-        AddInstallRoot(roots,std::wstring(program32)+L"\\GlassPlatform",false);
-        AddInstallRoot(roots,std::wstring(program32)+L"\\Glass",false);
+    HRESULT hr=SHGetKnownFolderPath(FOLDERID_ProgramFilesX86,KF_FLAG_DEFAULT,nullptr,&program32);
+    if (FAILED(hr) || !program32)
+        hr=SHGetKnownFolderPath(FOLDERID_ProgramFiles,KF_FLAG_DEFAULT,nullptr,&program32);
+    if (SUCCEEDED(hr) && program32) {
+        AddInstallRoot(roots,std::wstring(program32)+L"\\GlassPlatform");
+        AddInstallRoot(roots,std::wstring(program32)+L"\\Glass");
         CoTaskMemFree(program32);
     }
     return roots;
 }
 
 bool GlassInstallRegistrationExists() {
-    if (GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX64) ||
+    return GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX64) ||
         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX86) ||
-        GlassInstallMsi::IsProductInstalled(L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5061}") ||
-        GlassInstallMsi::IsProductInstalled(L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5062}")) return true;
-    std::wstring path;
-    return GlassInstallUtil::QueryPlatformInstallPath(true,path) || GlassInstallUtil::QueryPlatformInstallPath(false,path);
+        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX64) ||
+        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX86);
 }
 
 InstalledGlassVersionInfo FindInstalledGlassVersion() {
     InstalledGlassVersionInfo result;
     const bool registered=GlassInstallRegistrationExists();
-    bool registryPathExamined=false;
     for (const auto& root : InstalledGlassRoots()) {
-        registryPathExamined=registryPathExamined || root.fromRegistry;
         const std::wstring corePath=root.path+L"\\GlassCore.dll";
         const bool coreExists=GetFileAttributesW(corePath.c_str())!=INVALID_FILE_ATTRIBUTES;
         const bool markerExists=coreExists ||
             GetFileAttributesW((root.path+L"\\GlassCompat.dll").c_str())!=INVALID_FILE_ATTRIBUTES ||
             GetFileAttributesW((root.path+L"\\GlassShellHost.exe").c_str())!=INVALID_FILE_ATTRIBUTES;
-        if (!coreExists && !root.fromRegistry && !markerExists) continue;
+        if (!markerExists) continue;
         result.detected=true;
         if (!coreExists) {
             result.hasUnreadableInstallation=true;
@@ -773,9 +760,9 @@ InstalledGlassVersionInfo FindInstalledGlassVersion() {
             result.parsed=parsed;
         }
     }
-    if (registered && !registryPathExamined) {
-        // A registered installation with a missing/invalid InstallPath is still
-        // a discovered product; silently treating it as a fresh install could downgrade it.
+    if (registered && !result.detected) {
+        // A registered MSI with no readable files in a known location is not a
+        // clean install. Its actual file paths are checked again before MSI work.
         result.detected=true;
         result.hasUnreadableInstallation=true;
     }
@@ -1300,14 +1287,10 @@ private:
                 if (result.os64) {
                     const bool runningKnown=GlassInstallUtil::QueryOpenGlassRunning(result.openGlass.wasRunning);
                     std::wstring platformDir;
-                    bool rootKnown=GlassInstallUtil::QueryPlatformInstallPath(true,platformDir);
-                    if (!rootKnown) {
-                        platformDir=GlassShared::GlassPlatformTask::TryGetAutorunGlassCompatInstallRoot(
-                            GlassShared::GlassPlatformTask::PlatformArch::X64);
-                        rootKnown=!platformDir.empty() || DefaultProgramGlassDir(true,platformDir);
-                    }
-                    if (!GlassInstallUtil::QueryOpenGlassInstallPath(result.openGlassDir) && rootKnown)
-                        result.openGlassDir=platformDir+L"\\OpenGlass";
+                    // The installer's destination is fixed, even when an old
+                    // registry value or a developer task points elsewhere.
+                    const bool rootKnown=DefaultProgramGlassDir(true,platformDir);
+                    if (rootKnown) result.openGlassDir=platformDir+L"\\OpenGlass";
                     const bool filesKnown=rootKnown && GlassInstallUtil::QueryOpenGlassFiles(
                         result.openGlassDir,platformDir,result.openGlass.filesPresent);
                     result.openGlass.valid=runningKnown && filesKnown;
@@ -2015,41 +1998,15 @@ private:
 #else
         std::wstring x64Dir, x86Dir, ogDir;
         const bool os64=GlassInstallUtil::IsOs64Bit();
-        const auto resolveRoot=[&](bool x64,std::wstring& out) {
-            if (GlassInstallUtil::QueryPlatformInstallPath(x64,out)) return true;
-            out=GlassShared::GlassPlatformTask::TryGetAutorunGlassCompatInstallRoot(
-                x64?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86);
-            if (!out.empty()) return true;
-            if (!DefaultProgramGlassDir(x64,out)) return false;
-            const wchar_t* code=x64?GlassInstallMsi::kProductPlatformX64:GlassInstallMsi::kProductPlatformX86;
-            const wchar_t* legacy=x64?GlassInstallMsi::kLegacyPlatformX64:GlassInstallMsi::kLegacyPlatformX86;
-            if ((GlassInstallMsi::IsProductInstalled(code) || GlassInstallMsi::IsProductInstalled(legacy)) &&
-                GetFileAttributesW((out+L"\\GlassCompat.dll").c_str())==INVALID_FILE_ATTRIBUTES) {
-                InstallLog::Line(L"Refusing to upgrade a registered product at an unverified guessed path");
-                return false;
-            }
-            return true;
-        };
-        if ((!os64 || resolveRoot(true,x64Dir)) && resolveRoot(false,x86Dir)) {
-            // Resolved existing install roots or their default Program Files locations.
-        } else {
+        // Destinations are a product policy, not a discovery result. In
+        // particular an autorun task can intentionally point at a build tree;
+        // never use it, or an old registry value, as an MSI/cleanup target.
+        if ((os64 && !DefaultProgramGlassDir(true,x64Dir)) || !DefaultProgramGlassDir(false,x86Dir)) {
             InstallLog::Line(L"Install path resolution failed (Program Files)");
             ShowInstallError(Text(IDS_ERR_INSTALL_PATH));
             return;
         }
-        if (os64 && !GlassInstallUtil::QueryOpenGlassInstallPath(ogDir)) {
-            ogDir=x64Dir+L"\\OpenGlass";
-            // A registered product must not be removed using a guessed root
-            // when its files could be elsewhere and therefore not backed up.
-            if ((GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
-                 GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass)) &&
-                GetFileAttributesW((ogDir+L"\\OpenGlassHost.exe").c_str())==INVALID_FILE_ATTRIBUTES &&
-                GetFileAttributesW((ogDir+L"\\OpenGlass.dll").c_str())==INVALID_FILE_ATTRIBUTES) {
-                InstallLog::Line(L"Refusing to use an unverified guessed OpenGlass path");
-                ShowInstallError(Text(IDS_ERR_INSTALL_PATH));
-                return;
-            }
-        }
+        if (os64) ogDir=x64Dir+L"\\OpenGlass";
         if (os64 && selection_.openGlass && (!openGlassStartup_.valid ||
             !GlassInstallUtil::SameInstallPath(openGlassStartupDir_,ogDir))) {
             InstallLog::Line(L"OpenGlass startup state or installation path could not be verified; no changes made");

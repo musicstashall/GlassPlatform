@@ -95,7 +95,11 @@ namespace GP {
  bool StopOrphanAutorunTaskInstance(PlatformArch){++fake.orphans;return true;}
 }
 enum class ArchPresence {Absent,Running};
-ArchPresence ClassifyArch(GP::PlatformArch){return ArchPresence::Absent;}
+ArchPresence ClassifyArch(GP::PlatformArch,const std::wstring&){return ArchPresence::Absent;}
+namespace GlassInstallRemoval {
+ bool ValidatePlatformTask(GP::PlatformArch,const std::wstring&,bool,bool,bool,std::wstring&){return true;}
+ bool ValidateOpenGlassPaths(const std::wstring&,const std::atomic_bool*,bool,std::wstring&){return true;}
+}
 bool OpenGlassPresent(const std::wstring&){return false;}
 namespace InstallLog { void Line(const wchar_t*){} template<class... T>void LineFormat(const wchar_t*,T...){} }
 namespace GlassInstallRollback {
@@ -104,6 +108,7 @@ namespace GlassInstallRollback {
 }
 bool ProductWasSnapshotted(const GlassInstallRollback::SessionState&,const wchar_t*){return fake.snapshotted;}
 namespace GlassInstallUtil {
+ bool IsSafeInstallPath(const std::wstring&){return true;}
  struct OpenGlassTaskState{bool found=false,anyDisabled=false,anyRunning=false,multipleTasks=false,multipleRunningInstances=false;};
  bool IsOs64Bit(){return fake.is64;}
  bool QueryImageRunning(const wchar_t*,bool& found){++fake.queries;found=fake.settingsRunning;return fake.queryOk;}
@@ -147,6 +152,7 @@ public:
  bool IsCancelRequested()const{return cancelRequested_.load();}
  void SetFailure(const std::wstring& text,unsigned){error_=text;}
  void RememberMsiMessage(const wchar_t*){}
+ bool RecheckSnapshottedProduct(const wchar_t*){return fake.snapshotted;}
  void SetStatus(const std::wstring&,int value){fake.progress.push_back(value);}
  bool RunOneMsi(const std::wstring& path,const std::wstring& dir,const std::wstring& label,int base,int span){
   assert(installAttempted_);++fake.msiCalls;fake.msiPath=path;fake.msiDir=dir;fake.msiLabel=label;fake.base=base;fake.span=span;return fake.msiSuccess;
