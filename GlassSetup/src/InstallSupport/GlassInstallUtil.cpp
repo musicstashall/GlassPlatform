@@ -354,9 +354,15 @@ struct EmptyDirectoryFileSystem {
             return LockedDirectory{};
         }
         BY_HANDLE_FILE_INFORMATION info{};
-        if (!GetFileInformationByHandle(handle, &info) ||
-            !(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+        if (!GetFileInformationByHandle(handle, &info)) {
+            const DWORD error = GetLastError();
+            GlassInstallLog::LineFormat(L"Empty-directory cleanup could not inspect %s (%lu)", path.c_str(), error);
+            CloseHandle(handle);
+            return LockedDirectory{};
+        }
+        if (!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
             (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+            GlassInstallLog::LineFormat(L"Empty-directory cleanup skipped non-directory or reparse point %s", path.c_str());
             CloseHandle(handle);
             return LockedDirectory{};
         }
@@ -413,12 +419,13 @@ struct EmptyDirectoryFileSystem {
         FILE_DISPOSITION_INFO disposition{};
         disposition.DeleteFile = TRUE;
         if (SetFileInformationByHandle(directory.handle, FileDispositionInfo, &disposition, sizeof(disposition))) {
-            GlassInstallLog::LineFormat(L"Removed empty directory %s", path.c_str());
+            // Actual deletion can be deferred by other handles after this handle closes.
+            GlassInstallLog::LineFormat(L"Marked empty directory for removal %s", path.c_str());
         } else {
             const DWORD error = GetLastError();
-            // A file, a skipped link, or a concurrently created item keeps the directory intact.
-            if (error != ERROR_DIR_NOT_EMPTY && error != ERROR_DIRECTORY)
-                GlassInstallLog::LineFormat(L"Empty-directory cleanup retained %s (%lu)", path.c_str(), error);
+            // Report even non-empty directories: hidden files, skipped links,
+            // pending deletes, or concurrent changes can all retain the parent.
+            GlassInstallLog::LineFormat(L"Empty-directory cleanup retained %s (%lu)", path.c_str(), error);
         }
     }
 };
@@ -631,6 +638,7 @@ void PruneEmptyDirectories(const std::wstring& root, const std::vector<std::wstr
             GlassInstallLog::LineFormat(L"Empty-directory cleanup refused unsafe root %s", root.c_str());
             return;
         }
+        GlassInstallLog::LineFormat(L"Empty-directory cleanup starting %s", normalized.c_str());
         EmptyDirectoryFileSystem fs;
         std::vector<LockedDirectory> ancestors, protectedHandles;
         if (!fs.LockAncestors(normalized, ancestors)) return;
@@ -649,7 +657,10 @@ void PruneEmptyDirectories(const std::wstring& root, const std::vector<std::wstr
                 return;
             }
             if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-            if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) return;
+            if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                GlassInstallLog::LineFormat(L"Empty-directory cleanup refused linked kept root %s", protectedPath.c_str());
+                return;
+            }
             // Sharing denies DELETE opens through any spelling/8.3 alias of a
             // kept directory. Its non-empty parent is also retained, while
             // unrelated empty siblings can still be pruned.

@@ -164,7 +164,7 @@ struct Selection {
 };
 enum class Page { Select, Stopping, UnlockModules, UnlockProcesses, Removing, Cancelled, Complete, Error };
 enum class Action { None, Retry, Unlock, Cancel };
-enum class OperationState { BeforeRemoval, CancelRequested, Removing };
+enum class OperationState { BeforeRemoval, CancelRequested, Removing, Finished };
 
 class Uninstaller {
 public:
@@ -829,6 +829,17 @@ private:
             });
         } catch (...) { SetError(T(L"Не удалось запустить удаление.",L"Could not start uninstallation.")); SetPage(Page::Error); }
     }
+    void FinishRemoval() {
+        if (worker_.joinable()) worker_.join();
+        // The irreversible MSI phase has actually ended. Keeping Removing here
+        // makes both Close and the system X ignore clicks on every terminal page.
+        operationState_.store(OperationState::Finished,std::memory_order_release);
+        int result; { std::lock_guard<std::mutex> lock(dataMutex_); result=resultCode_; }
+        LogLine(L"Removal worker finished; result="+std::to_wstring(result));
+        if (result==ERROR_INSTALL_USEREXIT) SetPage(Page::Cancelled);
+        else if (result==0) SetPage(Page::Complete);
+        else SetPage(Page::Error);
+    }
     void RequestClose() {
         if (page_==Page::Removing || operationState_.load(std::memory_order_acquire)==OperationState::Removing) return;
         if (page_==Page::Stopping || page_==Page::UnlockModules || page_==Page::UnlockProcesses) {
@@ -1007,14 +1018,7 @@ private:
         case kWebInit: if (!closing_) InitializeWebView(); return 0;
         case kWorkerStatus: SyncWeb(); InvalidateRect(window,nullptr,FALSE); return 0;
         case kWorkerHold: if (!closing_) SetPage(static_cast<Page>(w)); return 0;
-        case kWorkerFinished: {
-            if (worker_.joinable()) worker_.join();
-            int result; { std::lock_guard<std::mutex> lock(dataMutex_); result=resultCode_; }
-            if (result==ERROR_INSTALL_USEREXIT) SetPage(Page::Cancelled);
-            else if (result==0) SetPage(Page::Complete);
-            else SetPage(Page::Error);
-            return 0;
-        }
+        case kWorkerFinished: FinishRemoval(); return 0;
         case WM_SIZE: Layout(); return 0;
         case WM_MOVE: if (controller_) controller_->NotifyParentWindowPositionChanged(); return 0;
         case WM_DPICHANGED: {

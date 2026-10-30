@@ -113,14 +113,19 @@ BOOL SetFileInformationByHandle(HANDLE h,int,void*,DWORD){
  const std::wstring prefix=h->path+L"\\";for(const auto& [path,node]:nodes)if(path.rfind(prefix,0)==0){errorCode=ERROR_DIR_NOT_EMPTY;return FALSE;}
  removed.insert(h->path);nodes.erase(h->path);return TRUE;
 }
-namespace GlassInstallLog {template<class...A>void LineFormat(const wchar_t*,A...){} void Line(const wchar_t*){} }
+namespace GlassInstallLog {
+ std::vector<std::wstring> messages;
+ template<class...A>void LineFormat(const wchar_t* f,A...){messages.emplace_back(f);}
+ void Line(const wchar_t* f){messages.emplace_back(f);}
+ bool Has(const wchar_t* token){for(const auto& m:messages)if(m.find(token)!=std::wstring::npos)return true;return false;}
+}
 namespace GlassInstallUtil {
 std::wstring TrimTrailingSlashes(std::wstring path){while(!path.empty() && (path.back()==L'\\'||path.back()==L'/'))path.pop_back();return path;}
 '''.replace("HEADER_PATH", header)
 main = r'''
 }
 using namespace GlassInstallUtil;
-void reset(){assert(openHandles.empty());nodes.clear();removed.clear();opened.clear();protectedError.clear();raceLink.clear();errorCode=0;}
+void reset(){assert(openHandles.empty());nodes.clear();removed.clear();opened.clear();protectedError.clear();raceLink.clear();GlassInstallLog::messages.clear();errorCode=0;}
 int main(){
  assert(IsWithinInstallRoot(L"C:\\Program Files (x86)\\GlassPlatform",L"c:\\PROGRAM FILES (X86)\\GlassPlatform\\GlassCompat.dll"));
  assert(IsWithinInstallRoot(L"C:\\products",L"C:\\products\\sub\\..\\file.dll"));
@@ -152,6 +157,7 @@ int main(){
  PruneEmptyDirectories(L"C:\\products\\OpenGlass",{});
  assert(removed.count(L"C:\\products\\OpenGlass\\empty"));assert(nodes.count(L"C:\\products\\OpenGlass\\file.txt"));
  assert(nodes.count(L"C:\\products\\OpenGlass\\link") && nodes.count(L"C:\\products\\OpenGlass"));
+ assert(GlassInstallLog::Has(L"cleanup starting") && GlassInstallLog::Has(L"Marked empty directory") && GlassInstallLog::Has(L"cleanup retained"));
  reset();nodes={{L"C:\\products",{}},{L"C:\\products\\kept",{}},{L"C:\\products\\kept\\empty",{}},
   {L"C:\\products\\removed",{}},{L"C:\\products\\removed\\empty",{}}};
  PruneEmptyDirectories(L"C:\\products",{L"C:\\products\\KEE~1"});
@@ -160,6 +166,7 @@ int main(){
  reset();nodes={{L"C:\\products",{}},{L"C:\\products\\unsafe",{}},{L"C:\\products\\unsafe\\child",{}}};
  raceLink=L"C:\\products\\unsafe";PruneEmptyDirectories(L"C:\\products",{});
  assert(nodes.count(L"C:\\products\\unsafe\\child") && !opened.count(L"C:\\products\\unsafe\\child"));
+ assert(GlassInstallLog::Has(L"skipped non-directory or reparse point"));
  reset();nodes={{L"C:\\products",{}},{L"C:\\products\\link",{true,true}},{L"C:\\products\\link\\child",{}}};
  PruneEmptyDirectories(L"C:\\products\\link\\child",{});assert(nodes.count(L"C:\\products\\link\\child"));
  reset();nodes={{L"C:\\products",{}},{L"C:\\products\\empty",{}}};protectedError=L"C:\\products\\kept";
