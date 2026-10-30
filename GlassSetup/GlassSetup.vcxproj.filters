@@ -31,6 +31,7 @@
     <ClInclude Include="src\InstallEngine.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClInclude Include="src\InstallSupport\GlassRemovalOrder.h"><Filter>src\InstallSupport</Filter></ClInclude>
+    <ClInclude Include="src\InstallSupport\GlassEmptyDirectories.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClInclude Include="src\InstallLog.h"><Filter>src</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>

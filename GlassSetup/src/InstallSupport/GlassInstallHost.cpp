@@ -1,30 +1,29 @@
 #include "GlassInstallHost.h"
 #include "GlassInstallLog.h"
 #include "GlassInstallUtil.h"
+#include <OpenGlassHostLaunch.h>
 #include <shlwapi.h>
 #include <winsvc.h>
+#include <vector>
 
 namespace {
 
 namespace GP = GlassShared::GlassPlatformTask;
 
-bool StopGlassPlatformImpl(GP::PlatformArch arch) noexcept {
+bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::atomic_bool* cancelled = nullptr) noexcept {
+    if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
     if (GP::IsGlassPlatformRunning(arch)) {
         const bool signaled = GP::SignalPlatformStop(arch);
         GlassInstallLog::LineFormat(L"HostStop: SignalPlatformStop %s",
             signaled ? L"ok" : L"failed");
     }
     const ULONGLONG deadline = GetTickCount64() + 45000;
-    int emptyResidualStreak = 0;
+    // Once the stop signal is sent, wait for it to finish even after cancel;
+    // otherwise rollback can observe a still-running host that stops afterwards.
     while (GetTickCount64() < deadline) {
         if (!GP::IsGlassPlatformRunning(arch)) {
             (void)GP::StopOrphanAutorunTaskInstance(arch);
-            if (!GP::RefreshInjectResidualSticky(arch)) {
-                if (++emptyResidualStreak >= 6)
-                    return true;
-            } else {
-                emptyResidualStreak = 0;
-            }
+            return true; // the separate watch phase handles residual modules
         }
         Sleep(250);
     }
@@ -40,6 +39,7 @@ bool StopGlassPlatform(GP::PlatformArch arch) noexcept {
 }
 
 bool StopOpenGlassHost() noexcept {
+    (void)Shared::OpenGlassHostLaunch::TryShutdown(); // also handles legacy tasks in subfolders
     const std::wstring schtasks = GlassInstallUtil::System64ExePath(L"schtasks.exe");
     GlassInstallUtil::RunHidden(schtasks.c_str(), L"/End /TN \"OpenGlass Host\"");
     GlassInstallUtil::RunHidden(schtasks.c_str(), L"/End /TN \"OpenGlass Legacy Host\"");
@@ -54,9 +54,13 @@ bool StopOpenGlassHost() noexcept {
         }
     }
     const ULONGLONG start = GetTickCount64();
-    while (GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe") && GetTickCount64() - start < 20000)
+    for (;;) {
+        bool running = false;
+        if (!GlassInstallUtil::QueryOpenGlassRunning(running)) return false;
+        if (!running) return true;
+        if (GetTickCount64() - start >= 20000) return false;
         Sleep(300);
-    return !GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe");
+    }
 }
 
 bool StopAllForUninstall(
@@ -64,13 +68,17 @@ bool StopAllForUninstall(
     const std::wstring& x86InstallDir,
     bool stopX64,
     bool stopX86,
-    bool stopOpenGlass) noexcept {
+    bool stopOpenGlass,
+    const std::atomic_bool* cancelled) noexcept {
     (void)x64InstallDir;
     (void)x86InstallDir;
-    GlassInstallUtil::CloseGlassSettingsProcesses();
+    GlassInstallUtil::CloseGlassSettingsProcesses(cancelled);
+    if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
     bool ok = true;
-    if (stopX64 && !StopGlassPlatformImpl(GP::PlatformArch::X64)) ok = false;
-    if (stopX86 && !StopGlassPlatformImpl(GP::PlatformArch::X86)) ok = false;
+    if (stopX64 && !StopGlassPlatformImpl(GP::PlatformArch::X64, cancelled)) ok = false;
+    if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
+    if (stopX86 && !StopGlassPlatformImpl(GP::PlatformArch::X86, cancelled)) ok = false;
+    if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
     if (stopOpenGlass && !StopOpenGlassHost()) ok = false;
     return ok;
 }
@@ -107,6 +115,41 @@ bool EnsureGlassAutorunTask(
         (void)GP::SetGlassAutorunTaskSchedulerEnabled(arch, false);
     GP::InvalidateGlassAutorunTaskCache();
     GlassInstallLog::LineFormat(L"HostSetup: ensured autorun task %s (enabled=%d)", taskName, enableTask ? 1 : 0);
+    return true;
+}
+
+bool QueryOpenGlassServiceStartType(bool& exists, DWORD& startType) noexcept {
+    exists = false;
+    startType = SERVICE_AUTO_START;
+    const SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!scm) return false;
+    const SC_HANDLE svc = OpenServiceW(scm, L"OpenGlassHost", SERVICE_QUERY_CONFIG);
+    const DWORD openError = svc ? ERROR_SUCCESS : GetLastError();
+    CloseServiceHandle(scm);
+    if (!svc) {
+        if (openError == ERROR_SERVICE_DOES_NOT_EXIST) return true;
+        SetLastError(openError);
+        return false;
+    }
+    exists = true;
+    DWORD needed = 0;
+    (void)QueryServiceConfigW(svc, nullptr, 0, &needed);
+    if (!needed || needed >= 65536) {
+        const DWORD error = GetLastError();
+        CloseServiceHandle(svc); SetLastError(error ? error : ERROR_INVALID_DATA); return false;
+    }
+    try {
+        std::vector<BYTE> buffer(needed);
+        auto* config = reinterpret_cast<QUERY_SERVICE_CONFIGW*>(buffer.data());
+        if (!QueryServiceConfigW(svc, config, needed, &needed)) {
+            const DWORD error = GetLastError();
+            CloseServiceHandle(svc); SetLastError(error); return false;
+        }
+        startType = config->dwStartType;
+    } catch (...) {
+        CloseServiceHandle(svc); SetLastError(ERROR_OUTOFMEMORY); return false;
+    }
+    CloseServiceHandle(svc);
     return true;
 }
 
@@ -165,16 +208,53 @@ bool EnsureOpenGlassService(
     return true;
 }
 
-bool StartOpenGlassService() noexcept {
+bool StartOpenGlassServicePreservingStartType(DWORD startType) noexcept {
     const SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     if (!scm) return false;
-    const SC_HANDLE svc = OpenServiceW(scm, L"OpenGlassHost", SERVICE_START | SERVICE_QUERY_STATUS);
+    const bool disabled = startType == SERVICE_DISABLED;
+    const SC_HANDLE svc = OpenServiceW(scm, L"OpenGlassHost", SERVICE_START | SERVICE_QUERY_STATUS |
+        (disabled ? SERVICE_CHANGE_CONFIG : 0));
     CloseServiceHandle(scm);
     if (!svc) return false;
+    if (disabled && !ChangeServiceConfigW(svc, SERVICE_NO_CHANGE, SERVICE_DEMAND_START,
+            SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr)) {
+        GlassInstallLog::LineFormat(L"OpenGlass: could not temporarily start disabled service (%lu)", GetLastError());
+        CloseServiceHandle(svc);
+        return false;
+    }
     const BOOL started = StartServiceW(svc, 0, nullptr);
-    const DWORD err = started ? ERROR_SUCCESS : GetLastError();
+    const DWORD startError = started ? ERROR_SUCCESS : GetLastError();
+    // Disabling a running service does not stop it; restore the exact preference
+    // even when StartService fails. Never silently leave autostart changed.
+    const BOOL restored = !disabled || ChangeServiceConfigW(svc, SERVICE_NO_CHANGE, SERVICE_DISABLED,
+        SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+    const DWORD restoreError = restored ? ERROR_SUCCESS : GetLastError();
     CloseServiceHandle(svc);
-    return started != FALSE || err == ERROR_SERVICE_ALREADY_RUNNING;
+    if (!restored) {
+        GlassInstallLog::LineFormat(L"OpenGlass: could not restore disabled service preference (%lu)", restoreError);
+        SetLastError(restoreError);
+        return false;
+    }
+    if (!started && startError != ERROR_SERVICE_ALREADY_RUNNING) SetLastError(startError);
+    return started != FALSE || startError == ERROR_SERVICE_ALREADY_RUNNING;
+}
+
+bool StartOpenGlassService() noexcept {
+    return StartOpenGlassServicePreservingStartType(SERVICE_DEMAND_START);
+}
+
+bool RestoreOpenGlassServiceStartType(DWORD startType) noexcept {
+    const SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!scm) return false;
+    const SC_HANDLE svc = OpenServiceW(scm, L"OpenGlassHost", SERVICE_CHANGE_CONFIG);
+    CloseServiceHandle(scm);
+    if (!svc) return false;
+    const BOOL ok = ChangeServiceConfigW(svc, SERVICE_NO_CHANGE, startType, SERVICE_NO_CHANGE,
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+    const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+    CloseServiceHandle(svc);
+    if (!ok) SetLastError(error);
+    return ok != FALSE;
 }
 
 bool RemoveOpenGlassServiceAndTasks(bool removeTasks) noexcept {

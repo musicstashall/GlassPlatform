@@ -1,12 +1,18 @@
 #include "GlassInstallUtil.h"
 #include "GlassInstallLog.h"
+#include "GlassEmptyDirectories.h"
 #include <shlobj.h>
 #include <GlassShellMenuConstants.h>
+#include <objbase.h>
+#include <oleauto.h>
+#include <taskschd.h>
+#include <wrl/client.h>
 #include <shobjidl.h>
 #include <sddl.h>
 #include <shlwapi.h>
 #include <tlhelp32.h>
 #include <cstring>
+#include <iterator>
 #include <mutex>
 #include <vector>
 
@@ -203,10 +209,192 @@ std::wstring TrimTrailingSlashes(std::wstring path) {
     return path;
 }
 
+namespace {
+
+// Normalise before checking roots or comparing paths. Refuse device paths and
+// UNC share roots as well as drive roots; these are never product directories.
+bool NormalProductDirectory(const std::wstring& path, std::wstring& normalized) {
+    normalized.clear();
+    const bool driveAbsolute = path.size() >= 3 &&
+        ((path[0] >= L'A' && path[0] <= L'Z') || (path[0] >= L'a' && path[0] <= L'z')) &&
+        path[1] == L':' && (path[2] == L'\\' || path[2] == L'/');
+    const bool uncAbsolute = path.size() >= 3 && path[0] == L'\\' && path[1] == L'\\';
+    if ((!driveAbsolute && !uncAbsolute) || PathIsRelativeW(path.c_str()) ||
+        path.rfind(L"\\\\?\\", 0) == 0 || path.rfind(L"\\\\.\\", 0) == 0) return false;
+    const DWORD needed = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
+    if (!needed || needed > 32767) return false;
+    std::vector<wchar_t> buffer(static_cast<size_t>(needed) + 1);
+    const DWORD length = GetFullPathNameW(path.c_str(), static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
+    if (!length || length >= buffer.size()) return false;
+    normalized.assign(buffer.data(), length);
+    for (auto& ch : normalized) if (ch == L'/') ch = L'\\';
+    if (PathIsRootW(normalized.c_str())) return false;
+    if (normalized.rfind(L"\\\\", 0) == 0) {
+        const size_t server = normalized.find(L'\\', 2);
+        const size_t shareEnd = server == std::wstring::npos ? server : normalized.find(L'\\', server + 1);
+        if (server == std::wstring::npos || shareEnd == std::wstring::npos || shareEnd + 1 >= normalized.size())
+            return false;
+    }
+    normalized = TrimTrailingSlashes(normalized);
+    return !normalized.empty();
+}
+
+struct LockedDirectory {
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    explicit LockedDirectory(HANDLE h = INVALID_HANDLE_VALUE) noexcept : handle(h) {}
+    LockedDirectory(const LockedDirectory&) = delete;
+    LockedDirectory& operator=(const LockedDirectory&) = delete;
+    LockedDirectory(LockedDirectory&& other) noexcept : handle(other.handle) { other.handle = INVALID_HANDLE_VALUE; }
+    ~LockedDirectory() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
+    explicit operator bool() const noexcept { return handle != INVALID_HANDLE_VALUE; }
+};
+
+struct FindGuard {
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    ~FindGuard() { if (handle != INVALID_HANDLE_VALUE) FindClose(handle); }
+};
+
+struct EmptyDirectoryFileSystem {
+    LockedDirectory OpenDirectory(const std::wstring& path, DWORD access) const noexcept {
+        // Keep each ancestor open without FILE_SHARE_DELETE while visiting its
+        // children. OPEN_REPARSE_POINT and the handle check reject links even
+        // if a child was replaced between enumeration and opening it.
+        HANDLE handle = CreateFileW(path.c_str(), access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            const DWORD error = GetLastError();
+            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
+                GlassInstallLog::LineFormat(L"Empty-directory cleanup skipped %s (%lu)", path.c_str(), error);
+            return LockedDirectory{};
+        }
+        BY_HANDLE_FILE_INFORMATION info{};
+        if (!GetFileInformationByHandle(handle, &info) ||
+            !(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+            (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+            CloseHandle(handle);
+            return LockedDirectory{};
+        }
+        return LockedDirectory{handle};
+    }
+
+    LockedDirectory OpenOrdinaryDirectory(const std::wstring& path) const noexcept {
+        return OpenDirectory(path, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | DELETE);
+    }
+
+    bool LockAncestors(const std::wstring& path, std::vector<LockedDirectory>& locked) const {
+        size_t position = 0;
+        if (path.rfind(L"\\\\", 0) == 0) {
+            const size_t server = path.find(L'\\', 2);
+            if (server == std::wstring::npos) return false;
+            position = path.find(L'\\', server + 1); // include the UNC share root
+        } else {
+            position = path.find(L'\\', 3); // drive root itself is not a link
+        }
+        while (position != std::wstring::npos) {
+            auto directory = OpenDirectory(path.substr(0, position), FILE_READ_ATTRIBUTES);
+            if (!directory) {
+                GlassInstallLog::LineFormat(L"Empty-directory cleanup refused an inaccessible or linked ancestor of %s", path.c_str());
+                return false;
+            }
+            locked.push_back(std::move(directory));
+            position = path.find(L'\\', position + 1);
+        }
+        return true;
+    }
+
+    bool ReadEntries(const LockedDirectory&, const std::wstring& path,
+        std::vector<GlassEmptyDirectories::Entry>& entries) const {
+        WIN32_FIND_DATAW data{};
+        FindGuard find{FindFirstFileW((path + L"\\*").c_str(), &data)};
+        if (find.handle == INVALID_HANDLE_VALUE) {
+            const DWORD error = GetLastError();
+            if (error == ERROR_FILE_NOT_FOUND) return true;
+            GlassInstallLog::LineFormat(L"Empty-directory enumeration failed %s (%lu)", path.c_str(), error);
+            return false;
+        }
+        do {
+            entries.push_back({data.cFileName,
+                (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0,
+                (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0});
+        } while (FindNextFileW(find.handle, &data));
+        const DWORD error = GetLastError();
+        if (error == ERROR_NO_MORE_FILES) return true;
+        GlassInstallLog::LineFormat(L"Empty-directory enumeration interrupted %s (%lu)", path.c_str(), error);
+        return false;
+    }
+
+    void RemoveIfEmpty(const LockedDirectory& directory, const std::wstring& path) const noexcept {
+        FILE_DISPOSITION_INFO disposition{};
+        disposition.DeleteFile = TRUE;
+        if (SetFileInformationByHandle(directory.handle, FileDispositionInfo, &disposition, sizeof(disposition))) {
+            GlassInstallLog::LineFormat(L"Removed empty directory %s", path.c_str());
+        } else {
+            const DWORD error = GetLastError();
+            // A file, a skipped link, or a concurrently created item keeps the directory intact.
+            if (error != ERROR_DIR_NOT_EMPTY && error != ERROR_DIRECTORY)
+                GlassInstallLog::LineFormat(L"Empty-directory cleanup retained %s (%lu)", path.c_str(), error);
+        }
+    }
+};
+
+} // namespace
+
+bool SameInstallPath(const std::wstring& left, const std::wstring& right) noexcept {
+    try {
+        std::wstring a, b;
+        return NormalProductDirectory(left, a) && NormalProductDirectory(right, b) &&
+            _wcsicmp(a.c_str(), b.c_str()) == 0;
+    } catch (...) { return false; }
+}
+
+void PruneEmptyDirectories(const std::wstring& root, const std::vector<std::wstring>& protectedRoots) noexcept {
+    try {
+        std::wstring normalized;
+        if (!NormalProductDirectory(root, normalized)) {
+            GlassInstallLog::LineFormat(L"Empty-directory cleanup refused unsafe root %s", root.c_str());
+            return;
+        }
+        EmptyDirectoryFileSystem fs;
+        std::vector<LockedDirectory> ancestors, protectedHandles;
+        if (!fs.LockAncestors(normalized, ancestors)) return;
+        for (const auto& kept : protectedRoots) {
+            if (kept.empty()) continue;
+            std::wstring protectedPath;
+            if (!NormalProductDirectory(kept, protectedPath)) {
+                GlassInstallLog::LineFormat(L"Empty-directory cleanup refused unsafe kept root %s", kept.c_str());
+                return;
+            }
+            const DWORD attributes = GetFileAttributesW(protectedPath.c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES) {
+                const DWORD error = GetLastError();
+                if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) continue;
+                GlassInstallLog::LineFormat(L"Empty-directory cleanup could not inspect kept root %s (%lu)", kept.c_str(), error);
+                return;
+            }
+            if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+            if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) return;
+            // Sharing denies DELETE opens through any spelling/8.3 alias of a
+            // kept directory. Its non-empty parent is also retained, while
+            // unrelated empty siblings can still be pruned.
+            auto handle = fs.OpenDirectory(protectedPath, FILE_READ_ATTRIBUTES);
+            if (!handle) return;
+            protectedHandles.push_back(std::move(handle));
+        }
+        GlassEmptyDirectories::Prune(fs, normalized);
+    } catch (...) {
+        GlassInstallLog::Line(L"Empty-directory cleanup stopped because of an unexpected error");
+    }
+}
+
 bool RunHiddenCommand(const std::wstring& commandLine, DWORD* exitCode, DWORD timeoutMs,
-    bool* started, bool* completed) noexcept {
+    bool* started, bool* completed, const std::atomic_bool* cancelled) noexcept {
     if (started) *started=false;
     if (completed) *completed=false;
+    if (cancelled && cancelled->load(std::memory_order_acquire)) {
+        if (exitCode) *exitCode=ERROR_CANCELLED;
+        return false;
+    }
     std::vector<wchar_t> cmdBuf(commandLine.begin(), commandLine.end());
     cmdBuf.push_back(L'\0');
     STARTUPINFOW si{};
@@ -221,14 +409,28 @@ bool RunHiddenCommand(const std::wstring& commandLine, DWORD* exitCode, DWORD ti
     }
     if (started) *started=true;
     CloseHandle(pi.hThread);
-    const DWORD wait = WaitForSingleObject(pi.hProcess, timeoutMs);
-    if (wait != WAIT_OBJECT_0) {
-        if (wait == WAIT_TIMEOUT) {
-            TerminateProcess(pi.hProcess, 1);
-            WaitForSingleObject(pi.hProcess, 2000);
+    DWORD wait = WAIT_TIMEOUT;
+    bool wasCancelled = false;
+    if (cancelled) {
+        const ULONGLONG start = GetTickCount64();
+        for (;;) {
+            if (cancelled->load(std::memory_order_acquire)) { wasCancelled = true; break; }
+            const ULONGLONG elapsed = GetTickCount64() - start;
+            if (elapsed >= timeoutMs) break;
+            const DWORD remaining = static_cast<DWORD>(timeoutMs - elapsed);
+            wait = WaitForSingleObject(pi.hProcess, remaining < 100 ? remaining : 100);
+            if (wait != WAIT_TIMEOUT) break;
         }
+    } else wait = WaitForSingleObject(pi.hProcess, timeoutMs);
+    if (wait != WAIT_OBJECT_0 || wasCancelled) {
+        const DWORD error = wasCancelled ? ERROR_CANCELLED :
+            wait == WAIT_TIMEOUT ? static_cast<DWORD>(WAIT_TIMEOUT) : GetLastError();
+        // This handle belongs to the child created above, never a user process.
+        // Even WAIT_FAILED must not leave a helper running after failure.
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 2000);
         CloseHandle(pi.hProcess);
-        if (exitCode) *exitCode = (wait == WAIT_TIMEOUT) ? static_cast<DWORD>(WAIT_TIMEOUT) : GetLastError();
+        if (exitCode) *exitCode = error;
         return false;
     }
     DWORD code = 1;
@@ -245,12 +447,14 @@ bool RunHidden(const wchar_t* file, const std::wstring& args) noexcept {
     return RunHiddenCommand(command, &code, 20000) && code == 0;
 }
 
-bool ImageRunning(const wchar_t* imageName) noexcept {
+namespace {
+bool QueryImageRunning(const wchar_t* imageName, bool& found) noexcept {
+    found = false;
     const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) return false;
     PROCESSENTRY32W entry{};
     entry.dwSize = sizeof(entry);
-    bool found = false;
+    bool ok = true;
     if (Process32FirstW(snap, &entry)) {
         do {
             if (_wcsicmp(entry.szExeFile, imageName) == 0) {
@@ -258,9 +462,193 @@ bool ImageRunning(const wchar_t* imageName) noexcept {
                 break;
             }
         } while (Process32NextW(snap, &entry));
-    }
+        if (!found && GetLastError() != ERROR_NO_MORE_FILES) ok = false;
+    } else if (GetLastError() != ERROR_NO_MORE_FILES) ok = false;
+    const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
     CloseHandle(snap);
-    return found;
+    if (!ok) SetLastError(error);
+    return ok;
+}
+} // namespace
+
+bool ImageRunning(const wchar_t* imageName) noexcept {
+    bool found = false;
+    return QueryImageRunning(imageName, found) && found;
+}
+
+namespace {
+using Microsoft::WRL::ComPtr;
+
+struct SchedulerComGuard {
+    const HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    ~SchedulerComGuard() { if (SUCCEEDED(result)) CoUninitialize(); }
+    bool ok() const noexcept { return SUCCEEDED(result) || result == RPC_E_CHANGED_MODE; }
+};
+struct SchedulerBstr {
+    BSTR value = nullptr;
+    explicit SchedulerBstr(const wchar_t* text = nullptr) noexcept : value(text ? SysAllocString(text) : nullptr) {}
+    ~SchedulerBstr() { if (value) SysFreeString(value); }
+    SchedulerBstr(const SchedulerBstr&) = delete;
+    SchedulerBstr& operator=(const SchedulerBstr&) = delete;
+};
+bool SchedulerError(HRESULT hr) noexcept {
+    const DWORD code = HRESULT_FACILITY(hr) == FACILITY_WIN32 ? HRESULT_CODE(hr) : ERROR_GEN_FAILURE;
+    SetLastError(code ? code : ERROR_GEN_FAILURE);
+    return false;
+}
+
+struct OpenGlassTaskCandidates {
+    ComPtr<IRegisteredTask> current;
+    ComPtr<IRegisteredTask> legacy;
+};
+
+bool InspectOpenGlassTaskFolder(ITaskFolder* folder, OpenGlassTaskState& state,
+    OpenGlassTaskCandidates& candidates, unsigned depth) noexcept {
+    if (!folder || depth > 64) return SchedulerError(E_FAIL);
+    ComPtr<IRegisteredTaskCollection> tasks;
+    HRESULT hr = folder->GetTasks(TASK_ENUM_HIDDEN, tasks.GetAddressOf());
+    if (FAILED(hr) || !tasks) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+    LONG count = 0;
+    hr = tasks->get_Count(&count);
+    if (FAILED(hr) || count < 0) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+    for (LONG i = 1; i <= count; ++i) {
+        VARIANT index{}; VariantInit(&index); index.vt = VT_I4; index.lVal = i;
+        ComPtr<IRegisteredTask> task;
+        hr = tasks->get_Item(index, task.GetAddressOf());
+        if (FAILED(hr) || !task) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+        SchedulerBstr name;
+        hr = task->get_Name(&name.value);
+        if (FAILED(hr) || !name.value) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+        const bool isCurrent = _wcsicmp(name.value, L"OpenGlass Host") == 0;
+        const bool isLegacy = _wcsicmp(name.value, L"OpenGlass Legacy Host") == 0;
+        if (!isCurrent && !isLegacy) continue;
+        if (isCurrent && !candidates.current) candidates.current = task;
+        if (isLegacy && !candidates.legacy) candidates.legacy = task;
+        VARIANT_BOOL enabled = VARIANT_FALSE;
+        hr = task->get_Enabled(&enabled);
+        if (FAILED(hr)) return SchedulerError(hr);
+        ComPtr<IRunningTaskCollection> running;
+        hr = task->GetInstances(0, running.GetAddressOf());
+        if (FAILED(hr) || !running) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+        LONG instances = 0;
+        hr = running->get_Count(&instances);
+        if (FAILED(hr) || instances < 0) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+        state.found = true;
+        state.anyDisabled = state.anyDisabled || enabled == VARIANT_FALSE;
+        state.anyRunning = state.anyRunning || instances > 0;
+    }
+    ComPtr<ITaskFolderCollection> folders;
+    hr = folder->GetFolders(0, folders.GetAddressOf());
+    if (FAILED(hr) || !folders) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+    hr = folders->get_Count(&count);
+    if (FAILED(hr) || count < 0) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+    for (LONG i = 1; i <= count; ++i) {
+        VARIANT index{}; VariantInit(&index); index.vt = VT_I4; index.lVal = i;
+        ComPtr<ITaskFolder> child;
+        hr = folders->get_Item(index, child.GetAddressOf());
+        if (FAILED(hr) || !child) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+        if (!InspectOpenGlassTaskFolder(child.Get(), state, candidates, depth + 1)) return false;
+    }
+    return true;
+}
+
+// When requested, run only a still-enabled task via IRegisteredTask::Run;
+// unlike the shared UI helper this never enables a task as a side effect.
+bool AccessOpenGlassTasks(OpenGlassTaskState& state, bool start) noexcept {
+    state = {};
+    SchedulerComGuard com;
+    if (!com.ok()) return SchedulerError(com.result);
+    ComPtr<ITaskService> service;
+    HRESULT hr = CoCreateInstance(CLSID_TaskScheduler, nullptr, CLSCTX_INPROC_SERVER,
+        IID_ITaskService, reinterpret_cast<void**>(service.GetAddressOf()));
+    if (FAILED(hr) || !service) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+    VARIANT empty{}; VariantInit(&empty);
+    hr = service->Connect(empty, empty, empty, empty);
+    if (FAILED(hr)) return SchedulerError(hr);
+    SchedulerBstr path(L"\\");
+    if (!path.value) return SchedulerError(E_OUTOFMEMORY);
+    ComPtr<ITaskFolder> root;
+    hr = service->GetFolder(path.value, root.GetAddressOf());
+    if (FAILED(hr) || !root) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+    OpenGlassTaskCandidates candidates;
+    if (!InspectOpenGlassTaskFolder(root.Get(), state, candidates, 0)) return false;
+    if (!start) return true;
+    if (!state.found || state.anyDisabled) return SchedulerError(E_FAIL);
+    if (state.anyRunning) return true;
+    ComPtr<IRegisteredTask> task = candidates.current ? candidates.current : candidates.legacy;
+    if (!task) return SchedulerError(E_FAIL);
+    VARIANT_BOOL enabled = VARIANT_FALSE;
+    hr = task->get_Enabled(&enabled);
+    if (FAILED(hr) || enabled == VARIANT_FALSE) return SchedulerError(FAILED(hr) ? hr : E_FAIL);
+    ComPtr<IRunningTask> running;
+    hr = task->Run(empty, running.GetAddressOf());
+    return SUCCEEDED(hr) && running ? true : SchedulerError(FAILED(hr) ? hr : E_FAIL);
+}
+} // namespace
+
+bool QueryOpenGlassTasks(OpenGlassTaskState& state) noexcept {
+    return AccessOpenGlassTasks(state, false);
+}
+
+bool RunEnabledOpenGlassTask() noexcept {
+    OpenGlassTaskState state;
+    return AccessOpenGlassTasks(state, true);
+}
+
+bool QueryOpenGlassRunning(bool& running, const OpenGlassTaskState* knownTasks) noexcept {
+    running = false;
+    bool process = false;
+    if (!QueryImageRunning(L"OpenGlassHost.exe", process)) return false;
+    if (process) { running = true; return true; }
+
+    // Query status directly: the shared UI state reports Disabled before
+    // checking whether a disabled service is still running manually.
+    const SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!scm) return false;
+    const SC_HANDLE service = OpenServiceW(scm, L"OpenGlassHost", SERVICE_QUERY_STATUS);
+    const DWORD openError = service ? ERROR_SUCCESS : GetLastError();
+    CloseServiceHandle(scm);
+    if (!service && openError != ERROR_SERVICE_DOES_NOT_EXIST) { SetLastError(openError); return false; }
+    if (service) {
+        SERVICE_STATUS_PROCESS status{};
+        DWORD needed = 0;
+        const BOOL ok = QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO,
+            reinterpret_cast<BYTE*>(&status), sizeof(status), &needed);
+        const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+        CloseServiceHandle(service);
+        if (!ok) { SetLastError(error); return false; }
+        if (status.dwCurrentState != SERVICE_STOPPED) {
+            running = true; // includes start/stop pending and paused
+            return true;
+        }
+    }
+    OpenGlassTaskState tasks;
+    if (knownTasks) tasks = *knownTasks;
+    else if (!QueryOpenGlassTasks(tasks)) return false;
+    running = tasks.anyRunning || FindWindowW(L"Dwm", nullptr) != nullptr;
+    return true;
+}
+
+bool QueryOpenGlassFiles(const std::wstring& openGlassDir, const std::wstring& platformDir, bool& present) noexcept {
+    present = false;
+    if (openGlassDir.empty()) return false;
+    try {
+        const std::wstring og = TrimTrailingSlashes(openGlassDir);
+        const std::wstring platform = TrimTrailingSlashes(platformDir);
+        std::vector<std::wstring> candidates = {og + L"\\OpenGlass.dll", og + L"\\OpenGlassHost.exe",
+            og + L"\\OpenGlass\\OpenGlass.dll"};
+        if (!platform.empty()) candidates.push_back(platform + L"\\OpenGlass.dll");
+        for (const auto& path : candidates) {
+            const DWORD attr = GetFileAttributesW(path.c_str());
+            if (attr != INVALID_FILE_ATTRIBUTES) {
+                if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) { present = true; return true; }
+                continue;
+            }
+            const DWORD error = GetLastError();
+            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return false;
+        }
+        return true;
+    } catch (...) { return false; }
 }
 
 BOOL CALLBACK CloseWindowsForPid(HWND hwnd, LPARAM param) {
@@ -270,21 +658,32 @@ BOOL CALLBACK CloseWindowsForPid(HWND hwnd, LPARAM param) {
     return TRUE;
 }
 
-void CloseGlassSettingsProcesses() noexcept {
+void CloseGlassSettingsProcesses(const std::atomic_bool* cancelled) noexcept {
     const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) return;
     PROCESSENTRY32W entry{};
     entry.dwSize = sizeof(entry);
     if (Process32FirstW(snap, &entry)) {
         do {
+            if (cancelled && cancelled->load(std::memory_order_acquire)) break;
             if (_wcsicmp(entry.szExeFile, L"GlassSettings.exe") != 0) continue;
-            EnumWindows(CloseWindowsForPid, static_cast<LPARAM>(entry.th32ProcessID));
+            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, entry.th32ProcessID);
+            if (!process) continue;
+            wchar_t path[32768]{};
+            DWORD length = static_cast<DWORD>(std::size(path));
+            const bool alive = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+            if (alive && QueryFullProcessImageNameW(process, 0, path, &length)) {
+                const wchar_t* name = wcsrchr(path, L'\\');
+                if (_wcsicmp(name ? name + 1 : path, L"GlassSettings.exe") == 0)
+                    EnumWindows(CloseWindowsForPid, static_cast<LPARAM>(entry.th32ProcessID));
+            }
+            CloseHandle(process);
         } while (Process32NextW(snap, &entry));
     }
     CloseHandle(snap);
     const ULONGLONG start = GetTickCount64();
-    while (ImageRunning(L"GlassSettings.exe") && GetTickCount64() - start < 8000)
-        Sleep(200);
+    while ((!cancelled || !cancelled->load(std::memory_order_acquire)) &&
+        ImageRunning(L"GlassSettings.exe") && GetTickCount64() - start < 8000) Sleep(200);
 }
 
 std::wstring NativeRundll64() {

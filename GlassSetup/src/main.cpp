@@ -1119,13 +1119,16 @@ private:
     std::wstring lastWebState_;
     InstallEngine::ComponentSelection selection_{};
     InstallEngine::ComponentSelection installedSelection_{};
+    GlassProducts::OpenGlassStartupState openGlassStartup_{};
+    std::wstring openGlassStartupDir_;
     ULONGLONG lastWebPush_=0;
     Page beforeCancel_ = Page::Installing;
     ULONGLONG launchStarted_ = 0;
     struct StartupResult {
         bool ok = false, os64 = false, runtimeInstalled = false;
         InstallEngine::ComponentSelection installed{};
-        std::wstring platformVersion, eulaText;
+        GlassProducts::OpenGlassStartupState openGlass{};
+        std::wstring openGlassDir, platformVersion, eulaText;
     };
     std::thread startupThread_;
     std::mutex startupMutex_;
@@ -1290,10 +1293,33 @@ private:
         StartupResult result;
         const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
         try {
+            // Capture running state as soon as the initial window is shown,
+            // before version checks, user choices, or any host is stopped.
+            if (SUCCEEDED(com) && !gAlreadyRunning && !startupStop_.load(std::memory_order_acquire)) {
+                result.os64=GlassInstallUtil::IsOs64Bit();
+                if (result.os64) {
+                    const bool runningKnown=GlassInstallUtil::QueryOpenGlassRunning(result.openGlass.wasRunning);
+                    std::wstring platformDir;
+                    bool rootKnown=GlassInstallUtil::QueryPlatformInstallPath(true,platformDir);
+                    if (!rootKnown) {
+                        platformDir=GlassShared::GlassPlatformTask::TryGetAutorunGlassCompatInstallRoot(
+                            GlassShared::GlassPlatformTask::PlatformArch::X64);
+                        rootKnown=!platformDir.empty() || DefaultProgramGlassDir(true,platformDir);
+                    }
+                    if (!GlassInstallUtil::QueryOpenGlassInstallPath(result.openGlassDir) && rootKnown)
+                        result.openGlassDir=platformDir+L"\\OpenGlass";
+                    const bool filesKnown=rootKnown && GlassInstallUtil::QueryOpenGlassFiles(
+                        result.openGlassDir,platformDir,result.openGlass.filesPresent);
+                    result.openGlass.valid=runningKnown && filesKnown;
+                }
+            }
             // This is the first logger user on the successful startup path.
             // UI interactions are locked until this worker has been joined.
             InstallLog::Initialize();
             InstallLog::Line(themed ? L"Theme Detours installed" : L"Theme Detours unavailable");
+            if (result.os64) InstallLog::LineFormat(L"OpenGlass at wizard startup: valid=%d files=%d running=%d dir=%s",
+                result.openGlass.valid ? 1 : 0, result.openGlass.filesPresent ? 1 : 0,
+                result.openGlass.wasRunning ? 1 : 0, result.openGlassDir.c_str());
 #ifdef _DEBUG
             if (slowStartup) {
                 for (int i=0;i<80 && !startupStop_.load(std::memory_order_acquire);++i) Sleep(50);
@@ -1394,6 +1420,8 @@ private:
         eulaText_=std::move(result.eulaText);
         SetWindowTextW(eula_,eulaText_.c_str());
         installedSelection_=result.installed;
+        openGlassStartup_=result.openGlass;
+        openGlassStartupDir_=std::move(result.openGlassDir);
         const bool os64=result.os64;
         const bool anyInstalled=installedSelection_.platform64 || installedSelection_.platform32 ||
             installedSelection_.glassSettings || installedSelection_.openGlass;
@@ -1429,8 +1457,8 @@ private:
         Move(progress_,0,kHtmlHeight,kWidth,kProgressHeight);
         Move(webHost_,0,0,kWidth,kHtmlHeight);
         // Leave room outside each platform checkbox for the separate mandatory lock.
-        Move(component64_,60,185,360,32); Move(component32_,510,185,360,32);
-        Move(componentSettings_,60,275,400,32); Move(componentOpenGlass_,510,275,400,32);
+        Move(component64_,60,203,360,32); Move(component32_,510,203,360,32);
+        Move(componentSettings_,60,293,400,32); Move(componentOpenGlass_,510,293,400,32);
         if (controller_) {
             RECT bounds=Box(0,0,kWidth,kHtmlHeight);
             if (!haveWebBounds_ || !EqualRect(&bounds,&webBounds_)) {
@@ -2022,6 +2050,12 @@ private:
                 return;
             }
         }
+        if (os64 && selection_.openGlass && (!openGlassStartup_.valid ||
+            !GlassInstallUtil::SameInstallPath(openGlassStartupDir_,ogDir))) {
+            InstallLog::Line(L"OpenGlass startup state or installation path could not be verified; no changes made");
+            ShowInstallError(Text(IDS_ERR_OG_STATE));
+            return;
+        }
         InstallLog::Line(L"User started installation");
         InstallLog::LineFormat(L"Target x64=%s x86=%s OpenGlass=%s", x64Dir.c_str(), x86Dir.c_str(), ogDir.c_str());
         InstallEngine::PhaseLabels labels;
@@ -2054,7 +2088,7 @@ private:
         labels.nativeScanFailed = Text(IDS_ERR_NATIVE_SCAN);
         labels.snapshotFailed = Text(IDS_ERR_SNAPSHOT);
         labels.diskFull = Text(IDS_MSI_DISK_FULL);
-        installEngine_.Start(gInstance, x64Dir, x86Dir, ogDir, selection_, forceCleanInstall_, std::move(labels), nullptr);
+        installEngine_.Start(gInstance, x64Dir, x86Dir, ogDir, selection_, openGlassStartup_, forceCleanInstall_, std::move(labels), nullptr);
         SetTimer(window, kInstallTimer, kInstallTimerMs, nullptr);
 #endif
     }
@@ -2996,16 +3030,16 @@ private:
             DrawLabel(dc,Text(IDS_COMP_TITLE),Box(48,90,700,50),heading_,white);
             DrawLabel(dc,Text(IDS_COMP_INTRO),Box(48,142,840,42),font_,muted);
             const bool os64=GlassInstallUtil::IsOs64Bit();
-            const auto state=[&](bool selected, bool installed, int x, int y) {
-                DrawLabel(dc,Text(ComponentStateId(selected,installed)),Box(x,y,250,38),small_,accent);
+            const auto state=[&](bool selected, bool installed, bool mandatory, int x, int y) {
+                DrawLabel(dc,Text(ComponentStateId(selected,installed)),Box(x,y,mandatory?220:250,38),small_,accent);
+                if (mandatory) DrawMandatoryLock(dc,x+230,y+1);
                 DrawComponentActionBadge(dc,selected,installed,x+260,y+2);
             };
-            if (os64) state(selection_.platform64,installedSelection_.platform64,60,220);
-            state(selection_.platform32,installedSelection_.platform32,510,220);
-            state(selection_.glassSettings,installedSelection_.glassSettings,60,310);
-            if (os64) state(selection_.openGlass,installedSelection_.openGlass,510,310);
-            DrawMandatoryLock(dc,os64?425:875,188);
-            int warningY=380;
+            if (os64) state(selection_.platform64,installedSelection_.platform64,true,60,238);
+            state(selection_.platform32,installedSelection_.platform32,!os64,510,238);
+            state(selection_.glassSettings,installedSelection_.glassSettings,false,60,328);
+            if (os64) state(selection_.openGlass,installedSelection_.openGlass,false,510,328);
+            int warningY=398;
             if (os64 && !selection_.platform32) {
                 DrawLabel(dc,Text(IDS_COMP_X86_WARNING),Box(48,warningY,840,48),font_,white);
                 warningY+=50;

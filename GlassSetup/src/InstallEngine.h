@@ -61,6 +61,7 @@ public:
         const std::wstring& x86Dir,
         const std::wstring& openGlassDir,
         ComponentSelection selection,
+        GlassProducts::OpenGlassStartupState openGlassStartup,
         bool forceClean,
         PhaseLabels labels,
         StatusFn onStatus) noexcept;
@@ -149,6 +150,7 @@ private:
     GlassInstallRollback::SessionState rollbackSession_;
     GlassInstallRemoval::Session removalSession_;
     ComponentSelection selection_{};
+    GlassProducts::OpenGlassStartupState openGlassStartup_{};
     ComponentSelection remove_ {false, false, false, false};
     PriorHostState prior_{};
     PhaseLabels labels_;
@@ -178,6 +180,7 @@ private:
     bool shellRegisteredBySetup_ = false;
     bool x64TaskCreatedBySetup_ = false, x86TaskCreatedBySetup_ = false;
     bool ogServiceCreatedBySetup_ = false;
+    bool ogServiceStartTypeMayNeedRestore_ = false;
     std::atomic_bool quietClose_{false};
     bool cleanInstall_ = false;
     bool forceClean_ = false;

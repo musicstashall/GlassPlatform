@@ -12,6 +12,16 @@ struct Selection {
     bool openGlass = true;
 };
 
+// Recorded at wizard startup, independently of the later rollback snapshot.
+struct OpenGlassStartupState {
+    bool valid = false;
+    bool filesPresent = false;
+    bool wasRunning = false;
+};
+constexpr bool ShouldStartOpenGlass(const OpenGlassStartupState& startup) noexcept {
+    return startup.valid && (!startup.filesPresent || startup.wasRunning);
+}
+
 // A checked product is installed or updated; an unchecked installed product is
 // removed. An unchecked absent product has no action and needs no badge.
 enum class InstallAction { None, Install, Update, Remove };

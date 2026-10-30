@@ -30,52 +30,6 @@ struct ResourceBlob {
     bool needed = false;
 };
 
-bool ServiceStopped(const wchar_t* serviceName) noexcept {
-    const SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-    if (!scm) return true;
-    const SC_HANDLE svc = OpenServiceW(scm, serviceName, SERVICE_QUERY_STATUS);
-    CloseServiceHandle(scm);
-    if (!svc) return true;
-    SERVICE_STATUS_PROCESS status{};
-    DWORD needed = 0;
-    const BOOL ok = QueryServiceStatusEx(svc, SC_STATUS_PROCESS_INFO,
-        reinterpret_cast<BYTE*>(&status), sizeof(status), &needed);
-    CloseServiceHandle(svc);
-    if (!ok) return false;
-    return status.dwCurrentState == SERVICE_STOPPED;
-}
-
-bool QueryServiceConfigStartType(const wchar_t* serviceName, bool& exists, DWORD& startType) noexcept {
-    exists = false;
-    startType = SERVICE_AUTO_START;
-    const SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-    if (!scm) return false;
-    const SC_HANDLE svc = OpenServiceW(scm, serviceName, SERVICE_QUERY_CONFIG);
-    const DWORD openError=svc?ERROR_SUCCESS:GetLastError();
-    CloseServiceHandle(scm);
-    if (!svc) {
-        if (openError==ERROR_SERVICE_DOES_NOT_EXIST) return true;
-        SetLastError(openError);
-        return false;
-    }
-    exists = true;
-    DWORD needed = 0;
-    (void)QueryServiceConfigW(svc, nullptr, 0, &needed);
-    if (!needed || needed>=65536) {
-        const DWORD error=GetLastError();
-        CloseServiceHandle(svc); SetLastError(error?error:ERROR_INVALID_DATA); return false;
-    }
-    std::vector<BYTE> buf(needed);
-    auto* cfg = reinterpret_cast<QUERY_SERVICE_CONFIGW*>(buf.data());
-    if (!QueryServiceConfigW(svc, cfg, needed, &needed)) {
-        const DWORD error=GetLastError();
-        CloseServiceHandle(svc); SetLastError(error); return false;
-    }
-    startType = cfg->dwStartType;
-    CloseServiceHandle(svc);
-    return true;
-}
-
 bool ProductWasSnapshotted(const GlassInstallRollback::SessionState& state, const wchar_t* code) noexcept {
     if (!code) return false;
     for (const auto& product : state.oldProducts)
@@ -219,6 +173,7 @@ bool IsProtectedProcessName(const wchar_t* exe) noexcept {
         L"System", L"Registry", L"smss.exe", L"csrss.exe", L"wininit.exe",
         L"services.exe", L"lsass.exe", L"winlogon.exe", L"dwm.exe",
         L"fontdrvhost.exe", L"Memory Compression", L"Secure System",
+        L"GlassSetup.exe", L"unins000.exe",
     };
     for (const wchar_t* name : blocked)
         if (_wcsicmp(exe, name) == 0) return true;
@@ -299,16 +254,47 @@ bool InstallEngine::CapturePriorHostState() noexcept {
     prior_.x86TaskEnabled = GP::QueryGlassAutorunUiState(GP::PlatformArch::X86) != GP::AutorunUiState::Disabled;
     prior_.x86WasRunning = GP::IsGlassPlatformRunning(GP::PlatformArch::X86);
 
-    if (!QueryServiceConfigStartType(L"OpenGlassHost", prior_.ogServiceExisted, prior_.ogServiceStartType)) {
+    if (!GlassInstallHost::QueryOpenGlassServiceStartType(prior_.ogServiceExisted, prior_.ogServiceStartType)) {
         const DWORD error=GetLastError();
         InstallLog::LineFormat(L"Could not inspect prior OpenGlass service state (%lu)",error);
         SetFailure(labels_.snapshotFailed.empty()?L"Could not inspect the existing service; no changes were made.":labels_.snapshotFailed,error);
         return false;
     }
-    prior_.ogLegacyTaskExisted = Shared::OpenGlassHostState::LegacyHostTaskExists();
-    if (prior_.ogLegacyTaskExisted && !prior_.ogServiceExisted)
-        prior_.ogLegacyTaskEnabled = Shared::OpenGlassHostState::QueryOrchestrationUiState()!=Shared::OpenGlassHostState::HostUiState::Disabled;
-    prior_.ogWasRunning = GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe") || !ServiceStopped(L"OpenGlassHost");
+    GlassInstallUtil::OpenGlassTaskState openGlassTasks;
+    if (!GlassInstallUtil::QueryOpenGlassTasks(openGlassTasks)) {
+        const DWORD error=GetLastError();
+        InstallLog::LineFormat(L"Could not inspect OpenGlass tasks before changes (%lu)",error);
+        SetFailure(labels_.snapshotFailed.empty()?L"Could not inspect OpenGlass tasks; no changes were made.":labels_.snapshotFailed,error);
+        return false;
+    }
+    prior_.ogLegacyTaskExisted = openGlassTasks.found;
+    prior_.ogLegacyTaskEnabled = !openGlassTasks.anyDisabled;
+    // This later state is for rollback only; launch policy uses the separate
+    // snapshot taken when the wizard was opened.
+    if (!GlassInstallUtil::QueryOpenGlassRunning(prior_.ogWasRunning, &openGlassTasks)) {
+        const DWORD error=GetLastError();
+        InstallLog::LineFormat(L"Could not inspect running OpenGlass state before changes (%lu)",error);
+        SetFailure(labels_.snapshotFailed.empty()?L"Could not inspect OpenGlass; no changes were made.":labels_.snapshotFailed,error);
+        return false;
+    }
+    // Do not stop an externally managed or ambiguous running instance when
+    // rollback cannot know which backend must be restarted.
+    if (prior_.ogWasRunning && ((!prior_.ogServiceExisted && !prior_.ogLegacyTaskExisted) ||
+        (prior_.ogServiceExisted && openGlassTasks.anyRunning))) {
+        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+        SetFailure(ru ? L"Текущее состояние OpenGlass нельзя безопасно восстановить. Остановите OpenGlass и снова запустите установщик; изменений не внесено."
+                      : L"The current OpenGlass state cannot be safely restored. Stop OpenGlass and restart Setup; no changes were made.",0);
+        return false;
+    }
+    // A disabled legacy task cannot be started without enabling it. Do not
+    // silently change that preference or stop an instance we cannot restore.
+    if (!prior_.ogServiceExisted && prior_.ogLegacyTaskExisted && !prior_.ogLegacyTaskEnabled &&
+        (prior_.ogWasRunning || (selection_.openGlass && GlassProducts::ShouldStartOpenGlass(openGlassStartup_)))) {
+        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+        SetFailure(ru ? L"OpenGlass работает с отключённой старой задачей. Остановите OpenGlass или включите задачу и заново откройте установщик; изменений не внесено."
+                      : L"OpenGlass uses a disabled legacy task. Stop OpenGlass or enable the task, then restart Setup; no changes were made.", 0);
+        return false;
+    }
     prior_.shortcutExisted = GlassInstallUtil::StartMenuShortcutExists();
     return true;
 }
@@ -344,23 +330,33 @@ bool InstallEngine::RestorePriorHosts(bool selectedOnly) noexcept {
         if (!restoreArch(GP::PlatformArch::X86,x86Dir_,prior_.x86TaskExisted,prior_.x86TaskEnabled,prior_.x86WasRunning,x86StopSignalled_)) ok=false;
     if (selectedOnly) return ok; // selected OpenGlass is handled by the launch phase
     if (!prior_.ogServiceExisted && prior_.ogLegacyTaskExisted && prior_.ogWasRunning && ogStopSignalled_) {
-        // TryStartup enables a disabled legacy task; never change that user preference.
-        if (!prior_.ogLegacyTaskEnabled || !Shared::OpenGlassHostLaunch::TryStartup()) ok=false;
+        // Never enable a task as a side effect of rollback.
+        if (!prior_.ogLegacyTaskEnabled || !GlassInstallUtil::RunEnabledOpenGlassTask()) ok=false;
+        else {
+            bool running=false, known=true;
+            const ULONGLONG start=GetTickCount64();
+            do {
+                known=GlassInstallUtil::QueryOpenGlassRunning(running);
+                if (!known || running || GetTickCount64()-start>=15000) break;
+                Sleep(300);
+            } while (true);
+            if (!known || !running) ok=false;
+        }
     }
-    if (prior_.ogServiceExisted) {
-        const SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-        if (scm) {
-            const SC_HANDLE svc = OpenServiceW(scm, L"OpenGlassHost", SERVICE_START);
-            CloseServiceHandle(scm);
-            if (svc) {
-                // Existing service configuration was never changed; do not overwrite it.
-                if (prior_.ogWasRunning && ogStopSignalled_) {
-                    const BOOL started=StartServiceW(svc,0,nullptr);
-                    if (!started && GetLastError()!=ERROR_SERVICE_ALREADY_RUNNING) ok=false;
-                }
-                CloseServiceHandle(svc);
-            } else if (prior_.ogWasRunning && ogStopSignalled_) ok=false;
-        } else if (prior_.ogWasRunning && ogStopSignalled_) ok=false;
+    if (ogServiceStartTypeMayNeedRestore_) {
+        if (GlassInstallHost::RestoreOpenGlassServiceStartType(prior_.ogServiceStartType))
+            ogServiceStartTypeMayNeedRestore_=false;
+        else ok=false;
+    }
+    if (prior_.ogServiceExisted && prior_.ogWasRunning && ogStopSignalled_) {
+        if (prior_.ogServiceStartType==SERVICE_DISABLED) ogServiceStartTypeMayNeedRestore_=true;
+        if (GlassInstallHost::StartOpenGlassServicePreservingStartType(prior_.ogServiceStartType))
+            ogServiceStartTypeMayNeedRestore_=false;
+        else ok=false;
+        if (ogServiceStartTypeMayNeedRestore_ &&
+            GlassInstallHost::RestoreOpenGlassServiceStartType(prior_.ogServiceStartType))
+            ogServiceStartTypeMayNeedRestore_=false;
+        if (ogServiceStartTypeMayNeedRestore_) ok=false;
     }
     return ok;
 }
@@ -390,21 +386,15 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             }
 
             if (ok && !self->IsCancelRequested()) {
-                if (self->forceClean_) {
-                    GlassInstallUtil::CloseGlassSettingsProcesses();
-                    ok = self->StopRunningHosts();
-                    if (ok && !self->IsCancelRequested()) ok = self->ReleaseLockedModules();
-                    if (ok && !self->IsCancelRequested()) {
-                        self->installAttempted_ = true;
-                        ok = self->PurgeRemnants();
-                    }
+                GlassInstallUtil::CloseGlassSettingsProcesses(&self->cancelRequested_);
+                if (!self->IsCancelRequested() && (self->forceClean_ || !self->cleanInstall_)) ok = self->StopRunningHosts();
+                // Even a fresh install can encounter orphaned modules from a
+                // previous installation. Always scan both OS architectures.
+                if (ok && !self->IsCancelRequested()) ok = self->ReleaseLockedModules();
+                if (ok && !self->IsCancelRequested() && self->forceClean_) {
+                    self->installAttempted_ = true;
+                    ok = self->PurgeRemnants();
                     if (ok) self->cleanInstall_ = true;
-                } else if (!self->cleanInstall_) {
-                    GlassInstallUtil::CloseGlassSettingsProcesses();
-                    ok = self->StopRunningHosts();
-                    if (ok && !self->IsCancelRequested()) ok = self->ReleaseLockedModules();
-                } else {
-                    GlassInstallUtil::CloseGlassSettingsProcesses();
                 }
             }
 
@@ -553,6 +543,7 @@ bool InstallEngine::Start(
     const std::wstring& x86Dir,
     const std::wstring& openGlassDir,
     ComponentSelection selection,
+    GlassProducts::OpenGlassStartupState openGlassStartup,
     bool forceClean,
     PhaseLabels labels,
     StatusFn onStatus) noexcept {
@@ -562,6 +553,7 @@ bool InstallEngine::Start(
     labels_ = std::move(labels);
     status_ = std::move(onStatus);
     selection_ = selection;
+    openGlassStartup_ = openGlassStartup;
     forceClean_ = forceClean;
     x64Dir_ = x64Dir;
     x86Dir_ = x86Dir;
@@ -756,21 +748,16 @@ bool InstallEngine::StopGlassPlatform(GP::PlatformArch arch, const std::wstring&
     }
 
     const ULONGLONG deadline = GetTickCount64() + 45000;
-    int emptyResidualStreak = 0;
+    // Finish an already-signalled stop before rollback checks the old state.
     while (GetTickCount64() < deadline) {
-        if (IsCancelRequested())
-            return false;
         if (!GP::IsGlassPlatformRunning(arch)) {
             (void)GP::StopOrphanAutorunTaskInstance(arch);
-            if (!GP::RefreshInjectResidualSticky(arch)) {
-                if (++emptyResidualStreak >= 6)
-                    break;
-            } else {
-                emptyResidualStreak = 0;
-            }
+            break;
         }
         Sleep(250);
     }
+    // Residual modules are monitored in ReleaseLockedModules, with their own
+    // visible status and the unlock pages, not hidden in the host-stop phase.
     if (IsCancelRequested())
         return false;
     if (GP::IsGlassPlatformRunning(arch)) {
@@ -791,14 +778,14 @@ bool InstallEngine::StopRunningHosts() noexcept {
     };
 
     if (cleanInstall_) {
-        InstallLog::Line(L"Clean install — skip stop and module scan");
+        InstallLog::Line(L"Clean install — no hosts to stop; module scan still required");
         return true;
     }
 
     hostsStopped_ = true;
     const ArchPresence x64 = ClassifyArch(GP::PlatformArch::X64);
     const ArchPresence x86 = ClassifyArch(GP::PlatformArch::X86);
-    const bool openGlass = OpenGlassPresent(openGlassDir_);
+    const bool openGlass = OpenGlassPresent(openGlassDir_) || prior_.ogLegacyTaskExisted || prior_.ogWasRunning;
 
     if (x64 == ArchPresence::Running) {
         if (!StopGlassPlatform(GP::PlatformArch::X64, labels_.stop64, L"x64", fail))
@@ -824,11 +811,12 @@ bool InstallEngine::StopRunningHosts() noexcept {
         (void)Shared::OpenGlassHostLaunch::TryShutdown();
         (void)GlassInstallHost::StopOpenGlassHost();
         const ULONGLONG ogStart = GetTickCount64();
-        while (GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe") || !ServiceStopped(L"OpenGlassHost")) {
-            if (IsCancelRequested())
-                return false;
-            if (GetTickCount64() - ogStart >= 45000)
-                return fail(L"OpenGlassHost");
+        for (;;) {
+            if (IsCancelRequested()) return false;
+            bool running=false;
+            if (!GlassInstallUtil::QueryOpenGlassRunning(running)) return fail(L"OpenGlassHost state");
+            if (!running) break;
+            if (GetTickCount64() - ogStart >= 45000) return fail(L"OpenGlassHost");
             Sleep(250);
         }
     } else {
@@ -855,8 +843,14 @@ bool InstallEngine::ReleaseLockedModules() noexcept {
         ReleaseSRWLockExclusive(&statusLock_);
     };
 
+    const ULONGLONG scanStarted=GetTickCount64();
     SetStatus(labels_.unload.empty() ? L"…" : labels_.unload, -1);
     bool nativeFailed = false;
+    const auto failScan = [&]() {
+        if (!IsCancelRequested()) SetFailure(labels_.nativeScanFailed.empty()
+            ? L"Process module scan failed." : labels_.nativeScanFailed, 0);
+        return false;
+    };
     std::vector<DWORD> settingsClosed;
     auto nudgeSettings = [&](const std::vector<ModuleHolder>& list) {
         for (const auto& holder : list) {
@@ -868,13 +862,21 @@ bool InstallEngine::ReleaseLockedModules() noexcept {
             if (seen) continue;
             settingsClosed.push_back(holder.pid);
             InstallLog::LineFormat(L"Unlocker: GlassSettings pid %lu — WM_CLOSE before MSI", holder.pid);
-            GlassInstallUnlock::CloseProcessWindows(holder.pid);
+            GlassInstallUnlock::CloseMatchingProcessWindows(holder.pid, holder.exe.c_str());
         }
     };
 
     std::vector<ModuleHolder> holders =
-        GlassInstallUnlock::CollectHolders(x64Dir_, x86Dir_, scanNativeX64_, nativeFailed);
+        GlassInstallUnlock::CollectHolders(x64Dir_, x86Dir_, scanNativeX64_, nativeFailed, &cancelRequested_);
+    if (IsCancelRequested()) return false;
+    if (nativeFailed) return failScan();
     nudgeSettings(holders);
+    // A very fast empty scan must still be visible to the user. Remain
+    // cancellable while the UI receives and paints the real scanning status.
+    while (GetTickCount64()-scanStarted < 600) {
+        if (IsCancelRequested()) return false;
+        Sleep(50);
+    }
     if (!holders.empty() && !IsCancelRequested()) {
         InstallLog::LineFormat(L"Unlocker: %u processes still hold Glass modules after stop",
             static_cast<unsigned>(holders.size()));
@@ -892,15 +894,7 @@ bool InstallEngine::ReleaseLockedModules() noexcept {
     }
     if (IsCancelRequested())
         return false;
-    if (nativeFailed) {
-        if (forceClean_) {
-            InstallLog::Line(L"Clean reinstall: native x64 scan unavailable, purge continues");
-        } else {
-            SetFailure(labels_.nativeScanFailed.empty()
-                ? L"64-bit process scan failed." : labels_.nativeScanFailed, 0);
-            return false;
-        }
-    }
+    if (nativeFailed) return failScan();
     if (holders.empty()) {
         InstallLog::Line(L"Unlocker: all Glass modules unloaded");
         return true;
@@ -925,7 +919,9 @@ bool InstallEngine::ReleaseLockedModules() noexcept {
         do {
             if (IsCancelRequested()) return false;
             Sleep(1000);
-            holders = GlassInstallUnlock::CollectHolders(x64Dir_, x86Dir_, scanNativeX64_, nativeFailed);
+            holders = GlassInstallUnlock::CollectHolders(x64Dir_, x86Dir_, scanNativeX64_, nativeFailed, &cancelRequested_);
+            if (IsCancelRequested()) return false;
+            if (nativeFailed) return failScan();
         } while (!holders.empty() && GetTickCount64() - retryStart < 8000);
         if (holders.empty()) {
             InstallLog::Line(L"Unlocker: force unload cleared modules");
@@ -949,7 +945,9 @@ bool InstallEngine::ReleaseLockedModules() noexcept {
             }
             GlassInstallUnlock::UnlockProcess(holder.pid, holder.exe.c_str());
         }
-        holders = GlassInstallUnlock::CollectHolders(x64Dir_, x86Dir_, scanNativeX64_, nativeFailed);
+        holders = GlassInstallUnlock::CollectHolders(x64Dir_, x86Dir_, scanNativeX64_, nativeFailed, &cancelRequested_);
+        if (IsCancelRequested()) return false;
+        if (nativeFailed) return failScan();
         if (holders.empty()) {
             InstallLog::Line(L"Unlocker: processes released modules");
             return true;
@@ -1232,8 +1230,30 @@ bool InstallEngine::RunMsiSequence() noexcept {
                       : L"Could not clear the removed products' registry paths.", GetLastError());
         return false;
     }
-    if (remove_.platform32 && !x86Dir_.empty()) (void)RemoveDirectoryW(x86Dir_.c_str());
-    if (remove_.openGlass && !openGlassDir_.empty()) (void)RemoveDirectoryW(openGlassDir_.c_str());
+    std::vector<std::wstring> keptRoots;
+    if (selection_.platform64 && !x64Dir_.empty()) keptRoots.push_back(x64Dir_);
+    if (selection_.platform32 && !x86Dir_.empty()) keptRoots.push_back(x86Dir_);
+    if (selection_.openGlass && !openGlassDir_.empty()) keptRoots.push_back(openGlassDir_);
+    if (selection_.glassSettings) {
+        if (!x64Dir_.empty()) keptRoots.push_back(GlassInstallUtil::TrimTrailingSlashes(x64Dir_) + L"\\GlassSettings");
+        if (!x86Dir_.empty()) keptRoots.push_back(GlassInstallUtil::TrimTrailingSlashes(x86Dir_) + L"\\GlassSettings");
+    }
+    if (remove_.glassSettings) {
+        if (!x64Dir_.empty()) GlassInstallUtil::PruneEmptyDirectories(GlassInstallUtil::TrimTrailingSlashes(x64Dir_) + L"\\GlassSettings", keptRoots);
+        if (!x86Dir_.empty()) GlassInstallUtil::PruneEmptyDirectories(GlassInstallUtil::TrimTrailingSlashes(x86Dir_) + L"\\GlassSettings", keptRoots);
+    }
+    if (remove_.openGlass && !openGlassDir_.empty()) {
+        // A legacy/custom OpenGlass path can coincide with the shared platform root.
+        if (!GlassInstallUtil::SameInstallPath(openGlassDir_, x64Dir_) &&
+            !GlassInstallUtil::SameInstallPath(openGlassDir_, x86Dir_))
+            GlassInstallUtil::PruneEmptyDirectories(openGlassDir_, keptRoots);
+        else InstallLog::Line(L"Empty-directory cleanup skipped shared OpenGlass/platform root");
+    }
+    if (remove_.platform32 && !x86Dir_.empty()) {
+        if (!GlassInstallUtil::SameInstallPath(x86Dir_, x64Dir_))
+            GlassInstallUtil::PruneEmptyDirectories(x86Dir_, keptRoots);
+        else InstallLog::Line(L"Empty-directory cleanup skipped shared platform root");
+    }
     InstallLog::Line(L"InstallEngine: desired MSI selection applied");
     return true;
 }
@@ -1302,31 +1322,51 @@ bool InstallEngine::LaunchAndVerifySelectedProducts() noexcept {
 
     if (is64 && selection_.openGlass) {
         SetStatus(labels_.startOg, 9900);
+        if (!openGlassStartup_.valid) {
+            SetFailure(L"OpenGlass startup state was not captured; no automatic launch was attempted.",0);
+            return false;
+        }
         if (!prior_.ogServiceExisted && !prior_.ogLegacyTaskExisted) {
-            if (!GlassInstallHost::EnsureOpenGlassService(openGlassDir_, SERVICE_AUTO_START)) {
+            // Files without orchestration may have been run manually. Do not
+            // introduce automatic startup for that existing installation.
+            const DWORD startType=openGlassStartup_.filesPresent ? SERVICE_DEMAND_START : SERVICE_AUTO_START;
+            if (!GlassInstallHost::EnsureOpenGlassService(openGlassDir_, startType)) {
                 SetFailure(L"Could not register OpenGlassHost service",0);
                 return false;
             }
             ogServiceCreatedBySetup_=true;
         }
-        const bool shouldStartOg = (prior_.ogServiceExisted || prior_.ogLegacyTaskExisted)
-            ? prior_.ogWasRunning && prior_.ogServiceStartType != SERVICE_DISABLED && prior_.ogLegacyTaskEnabled : true;
+        const bool shouldStartOg = GlassProducts::ShouldStartOpenGlass(openGlassStartup_);
+        InstallLog::LineFormat(L"Autostart: OpenGlass files-at-start=%d running-at-start=%d start=%d",
+            openGlassStartup_.filesPresent ? 1 : 0, openGlassStartup_.wasRunning ? 1 : 0, shouldStartOg ? 1 : 0);
         if (shouldStartOg) {
-            InstallLog::Line(L"Autostart: OpenGlass startup");
-            const bool startupAccepted=Shared::OpenGlassHostLaunch::TryStartup();
+            bool startupAccepted=false;
+            const bool serviceBackend=prior_.ogServiceExisted || ogServiceCreatedBySetup_;
+            if (serviceBackend && prior_.ogServiceExisted && prior_.ogServiceStartType==SERVICE_DISABLED) {
+                ogServiceStartTypeMayNeedRestore_=true;
+                startupAccepted=GlassInstallHost::StartOpenGlassServicePreservingStartType(prior_.ogServiceStartType);
+                if (startupAccepted) ogServiceStartTypeMayNeedRestore_=false;
+            } else if (serviceBackend) {
+                startupAccepted=GlassInstallHost::StartOpenGlassService();
+            } else {
+                // The COM runner refuses a disabled or concurrently changed
+                // task and never enables it as a side effect.
+                startupAccepted=GlassInstallUtil::RunEnabledOpenGlassTask();
+            }
             if (!startupAccepted) {
                 SetFailure(L"OpenGlassHost could not be started.",0);
                 return false;
             }
+            bool running=false, known=true;
             const ULONGLONG start = GetTickCount64();
-            while (startupAccepted && !GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe")) {
-                if (GetTickCount64() - start >= 15000)
-                    break;
+            do {
+                if (serviceBackend) running=GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe");
+                else known=GlassInstallUtil::QueryOpenGlassRunning(running); // legacy task need not use OpenGlassHost.exe
+                if (running || !known || GetTickCount64()-start>=15000) break;
                 Sleep(250);
-            }
-            const bool running=GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe");
-            InstallLog::LineFormat(L"Autostart: OpenGlass running=%d",running?1:0);
-            if (!running) {
+            } while (true);
+            InstallLog::LineFormat(L"Autostart: OpenGlass running=%d known=%d",running?1:0,known?1:0);
+            if (!running || !known) {
                 SetFailure(L"OpenGlassHost did not start within the timeout.",0);
                 return false;
             }
@@ -1353,11 +1393,13 @@ bool InstallEngine::DetermineCleanInstall() noexcept {
     const ArchPresence x86 = ClassifyArch(GP::PlatformArch::X86);
     const bool gsInstalled = GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64)
         || GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86);
-    const bool openGlass = OpenGlassPresent(openGlassDir_) || Shared::OpenGlassHostState::LegacyHostTaskExists();
+    const bool openGlass = OpenGlassPresent(openGlassDir_) || prior_.ogLegacyTaskExisted;
     cleanInstall_ = x64 == ArchPresence::Absent && x86 == ArchPresence::Absent
         && !gsInstalled && !openGlass && !prior_.x64TaskExisted && !prior_.x86TaskExisted
         && !prior_.ogServiceExisted && !prior_.ogLegacyTaskExisted && !prior_.ogWasRunning;
-    scanNativeX64_ = GlassInstallUtil::IsOs64Bit() && (x64 != ArchPresence::Absent || gsInstalled);
+    // Setup is x86; on x64 Windows the embedded x64 helper is required even
+    // when product registration/files are missing or the install looks clean.
+    scanNativeX64_ = GlassInstallUtil::IsOs64Bit();
     InstallLog::LineFormat(L"Clean install=%d scanNativeX64=%d", cleanInstall_ ? 1 : 0, scanNativeX64_ ? 1 : 0);
     return true;
 }

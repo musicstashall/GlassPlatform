@@ -4,6 +4,7 @@
 #include <atomic>
 #include <GlassPlatformTask.h>
 #include <string>
+#include <vector>
 
 namespace GlassInstallUtil {
 
@@ -30,14 +31,28 @@ std::wstring NativeDllForArch(
     const std::wstring& x86Dir) noexcept;
 
 bool RunHiddenCommand(const std::wstring& commandLine, DWORD* exitCode, DWORD timeoutMs,
-    bool* started = nullptr, bool* completed = nullptr) noexcept;
+    bool* started = nullptr, bool* completed = nullptr,
+    const std::atomic_bool* cancelled = nullptr) noexcept;
 bool RunHidden(const wchar_t* file, const std::wstring& args) noexcept;
 
-void CloseGlassSettingsProcesses() noexcept;
+void CloseGlassSettingsProcesses(const std::atomic_bool* cancelled = nullptr) noexcept;
 bool ImageRunning(const wchar_t* imageName) noexcept;
+// A disabled legacy task can still have a running instance. Failure to inspect
+// Scheduler is distinct from the absence of a task.
+struct OpenGlassTaskState { bool found = false, anyDisabled = false, anyRunning = false; };
+bool QueryOpenGlassTasks(OpenGlassTaskState& state) noexcept;
+// Run an existing enabled legacy task without ever enabling a disabled task.
+bool RunEnabledOpenGlassTask() noexcept;
+bool QueryOpenGlassRunning(bool& running, const OpenGlassTaskState* knownTasks = nullptr) noexcept;
+bool QueryOpenGlassFiles(const std::wstring& openGlassDir, const std::wstring& platformDir, bool& present) noexcept;
 
 bool IsOs64Bit() noexcept;
 std::wstring TrimTrailingSlashes(std::wstring path);
+// Best-effort cleanup of empty directories only; never deletes files, follows
+// reparse points, or enters a directory retained by another product.
+void PruneEmptyDirectories(const std::wstring& root,
+    const std::vector<std::wstring>& protectedRoots = {}) noexcept;
+bool SameInstallPath(const std::wstring& left, const std::wstring& right) noexcept;
 
 bool QueryPlatformInstallPath(bool x64, std::wstring& out) noexcept;
 void WritePlatformInstallPath(bool x64, const std::wstring& installDir) noexcept;

@@ -9,6 +9,12 @@ int main() {
     static_assert(GlassProducts::ActionForInstall(true, false) == InstallAction::Install);
     static_assert(GlassProducts::ActionForInstall(true, true) == InstallAction::Update);
     static_assert(GlassProducts::ActionForInstall(false, true) == InstallAction::Remove);
+    using GlassProducts::OpenGlassStartupState;
+    static_assert(!GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{false,false,true}));
+    static_assert(GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,false,false})); // first install
+    static_assert(GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,false,true}));
+    static_assert(!GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,true,false})); // upgrade, stopped at wizard start
+    static_assert(GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,true,true}));  // upgrade, running at wizard start
     for (int bits=0;bits<16;++bits) for (bool os64:{false,true}) {
         const Selection raw{bool(bits&1),bool(bits&2),bool(bits&4),bool(bits&8)};
         const auto installed=GlassProducts::NormalizeInstall(raw,os64);

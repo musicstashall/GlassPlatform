@@ -317,8 +317,22 @@ bool CreateSnapshot(
 
     const bool skipNestedOg = IsNestedSubPath(x64Dir, openGlassDir);
     const std::wstring skipInX64 = skipNestedOg ? openGlassDir : std::wstring{};
-    // The OpenGlass subdirectory can contain user data even when no MSI is registered.
-    const bool backupOg = includeOpenGlass || (!openGlassDir.empty() && GetFileAttributesW(openGlassDir.c_str())!=INVALID_FILE_ATTRIBUTES);
+    // The OpenGlass subdirectory can contain user data even when no MSI is
+    // registered. Access errors are not evidence that it is absent.
+    bool ogDirectoryExists = false;
+    if (!openGlassDir.empty()) {
+        const DWORD attributes = GetFileAttributesW(openGlassDir.c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES) ogDirectoryExists = true;
+        else {
+            const DWORD error = GetLastError();
+            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+                state.copyError = error ? error : ERROR_GEN_FAILURE;
+                GlassInstallLog::LineFormat(L"Snapshot OpenGlass path unavailable: %s (%lu)",openGlassDir.c_str(),state.copyError);
+                return false;
+            }
+        }
+    }
+    const bool backupOg = includeOpenGlass || ogDirectoryExists;
 
     uint64_t total = DirBytes(x64Dir, skipInX64, cancelled) + DirBytes(x86Dir, {}, cancelled)
         + (backupOg ? DirBytes(openGlassDir, {}, cancelled) : 0);

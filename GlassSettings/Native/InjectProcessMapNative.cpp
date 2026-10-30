@@ -222,16 +222,17 @@ namespace
         return text;
     }
 
-    void AppendUtf8Field(std::string& row, const wchar_t* wide) noexcept
+    [[nodiscard]] bool AppendUtf8Field(std::string& row, const wchar_t* wide) noexcept
     {
-        if (!wide || !wide[0])
-            return;
+        if (!wide || !wide[0]) return false;
         const int need = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
-        if (need <= 1)
-            return;
-        std::string chunk(static_cast<size_t>(need - 1), '\0');
-        WideCharToMultiByte(CP_UTF8, 0, wide, -1, chunk.data(), need, nullptr, nullptr);
+        if (need <= 1) return false;
+        std::string chunk(static_cast<size_t>(need), '\0');
+        if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, chunk.data(), need, nullptr, nullptr) != need)
+            return false;
+        chunk.pop_back();
         row += chunk;
+        return true;
     }
 
     [[nodiscard]] bool WriteScanRowUtf8(
@@ -247,12 +248,13 @@ namespace
         if (n <= 0)
             return false;
         std::string bytes(line);
-        AppendUtf8Field(bytes, row.exeName);
+        if (!AppendUtf8Field(bytes, row.exeName)) return false;
         bytes += '\t';
-        AppendUtf8Field(bytes, modules.c_str());
+        if (!AppendUtf8Field(bytes, modules.c_str())) return false;
         bytes += '\n';
         DWORD written = 0;
-        return WriteFile(dest, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) != FALSE;
+        return WriteFile(dest, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) != FALSE &&
+            written == bytes.size();
     }
 
     [[nodiscard]] DWORD CountScanHolders() noexcept
@@ -272,37 +274,58 @@ namespace
         return holders;
     }
 
+    [[nodiscard]] bool ValidateTrackedProcesses(const wchar_t* mapName) noexcept
+    {
+        Shared::InjectProcessMap::Slot slots[Shared::InjectProcessMap::kSlotCount]{};
+        DWORD slotCount = 0;
+        if (!Shared::InjectProcessMap::TryReadSlotsFromMapping(
+                mapName, slots, Shared::InjectProcessMap::kSlotCount, &slotCount))
+            return true; // absent host/map is normal
+        std::vector<DWORD> pids;
+        for (DWORD i = 0; i < slotCount; ++i)
+            if (slots[i].pid && slots[i].moduleBits) pids.push_back(slots[i].pid);
+        if (pids.empty()) return true;
+        Shared::InjectModuleScan::Result tracked[Shared::InjectModuleScan::kMaxResults]{};
+        DWORD count = 0;
+        return Shared::InjectModuleScan::ScanForSetup(pids.data(), static_cast<DWORD>(pids.size()),
+            tracked, Shared::InjectModuleScan::kMaxResults, &count);
+    }
+
     [[nodiscard]] bool WriteScanResultsUtf8(
         HANDLE dest,
-        bool* anyOut) noexcept
+        bool* anyOut,
+        bool forSetup) noexcept
     {
-        if (anyOut)
-            *anyOut = false;
+        if (anyOut) *anyOut = false;
         Shared::InjectModuleScan::Result results[Shared::InjectModuleScan::kMaxResults]{};
         DWORD count = 0;
-        if (!Shared::InjectModuleScan::Scan(
-                nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count))
-            return false;
+        const bool scanned = forSetup
+            ? Shared::InjectModuleScan::ScanForSetup(nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count)
+            : Shared::InjectModuleScan::Scan(nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count);
+        if (!scanned) return false;
+        if (forSetup &&
+            (!ValidateTrackedProcesses(Shared::InjectProcessMap::kMappingNameX64) ||
+             !ValidateTrackedProcesses(Shared::InjectProcessMap::kMappingNameX86) ||
+             !ValidateTrackedProcesses(Shared::InjectProcessMap::kMappingNameLegacy))) return false;
         bool any = false;
         for (DWORD i = 0; i < count; ++i)
         {
-            if (!WriteScanRowUtf8(dest, results[i]))
-                continue;
+            if (ModuleNamesFromBits(results[i].moduleBits).empty()) continue;
+            if (!WriteScanRowUtf8(dest, results[i])) return false;
             any = true;
         }
-        if (anyOut)
-            *anyOut = any;
+        if (anyOut) *anyOut = any;
         return true;
     }
 
-    [[nodiscard]] bool WriteScanTsv(const wchar_t* outPath) noexcept
+    [[nodiscard]] bool WriteScanTsv(const wchar_t* outPath, bool forSetup) noexcept
     {
         HANDLE file = CreateFileW(outPath, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE)
             return false;
         bool any = false;
-        const bool ok = WriteScanResultsUtf8(file, &any);
+        const bool ok = WriteScanResultsUtf8(file, &any, forSetup);
         (void)any;
         CloseHandle(file);
         return ok;
@@ -314,13 +337,13 @@ namespace
             return false;
         const size_t len = std::strlen(marker);
         DWORD written = 0;
-        if (!WriteFile(pipe, marker, static_cast<DWORD>(len), &written, nullptr))
+        if (!WriteFile(pipe, marker, static_cast<DWORD>(len), &written, nullptr) || written != len)
             return false;
         FlushFileBuffers(pipe);
         return true;
     }
 
-    [[nodiscard]] bool WatchGlassModulesPipe(const wchar_t* pipeName, DWORD timeoutMs) noexcept
+    [[nodiscard]] bool WatchGlassModulesPipe(const wchar_t* pipeName, DWORD timeoutMs, bool forSetup) noexcept
     {
         if (!pipeName || !pipeName[0])
             ExitProcess(1);
@@ -344,22 +367,19 @@ namespace
                 ExitProcess(2);
             }
             bool any = false;
-            if (!WriteScanResultsUtf8(pipe, &any))
+            if (!WriteScanResultsUtf8(pipe, &any, forSetup))
             {
                 CloseHandle(pipe);
                 ExitProcess(2);
             }
-            if (!any)
+            if (!WritePipeMarker(pipe, any ? "#end\n" : "#empty\n"))
             {
-                if (!WritePipeMarker(pipe, "#empty\n"))
-                {
-                    CloseHandle(pipe);
-                    ExitProcess(0);
-                }
                 CloseHandle(pipe);
                 ExitProcess(0);
             }
-            if (!WritePipeMarker(pipe, "#end\n"))
+            // Setup keeps watching both architectures while even one holder
+            // remains; otherwise an early empty frame could become stale.
+            if (!any && !forSetup)
             {
                 CloseHandle(pipe);
                 ExitProcess(0);
@@ -760,10 +780,11 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_UnlockerW(HWND, HIN
     std::wstring text = UnlockerCommandText(cmdLine);
     wchar_t* cursor = text.empty() ? const_cast<wchar_t*>(L"") : text.data();
     const std::wstring verb = UnlockerToken(cursor);
-    if (_wcsicmp(verb.c_str(), L"/scanGlassModules") == 0)
+    const bool setupScan = _wcsicmp(verb.c_str(), L"/scanGlassModulesSetup") == 0;
+    if (setupScan || _wcsicmp(verb.c_str(), L"/scanGlassModules") == 0)
     {
         const std::wstring path = UnlockerToken(cursor);
-        ExitProcess(path.empty() || !WriteScanTsv(path.c_str()) ? 2 : 0);
+        ExitProcess(path.empty() || !WriteScanTsv(path.c_str(), setupScan) ? 2 : 0);
     }
     if (_wcsicmp(verb.c_str(), L"/forceUnload") == 0)
     {
@@ -771,14 +792,15 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_UnlockerW(HWND, HIN
         const DWORD pid = static_cast<DWORD>(wcstoul(pidText.c_str(), nullptr, 10));
         ExitProcess(pid != 0 && UnloadPid(pid) ? 0 : 3);
     }
-    if (_wcsicmp(verb.c_str(), L"/watchGlassModules") == 0)
+    const bool setupWatch = _wcsicmp(verb.c_str(), L"/watchGlassModulesSetup") == 0;
+    if (setupWatch || _wcsicmp(verb.c_str(), L"/watchGlassModules") == 0)
     {
         const std::wstring pipeName = UnlockerToken(cursor);
         const std::wstring timeoutText = UnlockerToken(cursor);
         const DWORD timeoutMs = timeoutText.empty()
             ? 30000u
             : static_cast<DWORD>(wcstoul(timeoutText.c_str(), nullptr, 10));
-        WatchGlassModulesPipe(pipeName.c_str(), timeoutMs == 0 ? 30000u : timeoutMs);
+        (void)WatchGlassModulesPipe(pipeName.c_str(), timeoutMs == 0 ? 30000u : timeoutMs, setupWatch);
     }
     ExitProcess(1);
 }

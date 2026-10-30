@@ -143,6 +143,7 @@
     <ClInclude Include="src\InstallEngine.h" />
     <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h" />
     <ClInclude Include="src\InstallSupport\GlassRemovalOrder.h" />
+    <ClInclude Include="src\InstallSupport\GlassEmptyDirectories.h" />
     <ClInclude Include="src\InstallLog.h" />
   </ItemGroup>
   <ItemGroup>

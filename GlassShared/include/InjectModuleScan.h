@@ -35,6 +35,15 @@ namespace Shared::InjectModuleScan
         DWORD maxResults,
         DWORD* outCount) noexcept;
 
+    /// Installer safety scan: report an uninspectable live Explorer or explicitly
+    /// requested PID, or a truncated result, instead of treating it as empty.
+    [[nodiscard]] bool ScanForSetup(
+        const DWORD* pids,
+        DWORD pidsCount,
+        Result* outResults,
+        DWORD maxResults,
+        DWORD* outCount) noexcept;
+
     /// GlassCompat residual в known hosts после стопа (!mutex).
     /// Не вызывать как блок меню при живой платформе — тогда Compat в explorer/SEH нормален.
     [[nodiscard]] bool HasGlassCompatInKnownHosts() noexcept;

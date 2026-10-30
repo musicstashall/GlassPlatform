@@ -352,8 +352,8 @@ private:
         Move(cancel_,864,kContentHeight+12,104,32);
         if (page_==Page::Select) { Move(next_,750,kContentHeight+12,104,32); Move(back_,574,kContentHeight+12,160,32); }
         if (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error) Move(next_,864,kContentHeight+12,104,32);
-        Move(check_[0],60,185,390,32); Move(check_[1],510,185,390,32);
-        Move(check_[2],60,275,390,32); Move(check_[3],510,275,390,32);
+        Move(check_[0],60,203,390,32); Move(check_[1],510,203,390,32);
+        Move(check_[2],60,293,390,32); Move(check_[3],510,293,390,32);
         if (controller_) { RECT bounds=Box(0,0,kWidth,kHtmlHeight); controller_->put_Bounds(bounds); }
     }
     void ShowNativeChecks() {
@@ -484,23 +484,23 @@ private:
     }
     bool EnsureModulesReleased() {
         bool nativeFailed=false;
-        auto holders=GlassInstallUnlock::CollectHolders(x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),nativeFailed);
-        if (nativeFailed) { SetError(T(L"Не удалось просканировать 64-битные процессы.",L"Could not scan 64-bit processes.")); return false; }
+        auto holders=GlassInstallUnlock::CollectHolders(x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),nativeFailed,&cancelRequested_);
+        if (nativeFailed) { SetError(T(L"Не удалось проверить модули в процессах.",L"Could not check modules in processes.")); return false; }
         if (holders.empty()) return true;
         const bool clear=GlassInstallWatch::WaitUntilClearOrTimeout(30000,x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),holders,nativeFailed,&cancelRequested_);
         if (cancelRequested_.load()) return false;
-        if (nativeFailed) { SetError(T(L"Не удалось просканировать 64-битные процессы.",L"Could not scan 64-bit processes.")); return false; }
+        if (nativeFailed) { SetError(T(L"Не удалось проверить модули в процессах.",L"Could not check modules in processes.")); return false; }
         if (clear && holders.empty()) return true;
         for (;;) {
-            holders=GlassInstallUnlock::CollectHolders(x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),nativeFailed);
-            if (nativeFailed) { SetError(T(L"Не удалось просканировать 64-битные процессы.",L"Could not scan 64-bit processes.")); return false; }
+            holders=GlassInstallUnlock::CollectHolders(x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),nativeFailed,&cancelRequested_);
+            if (nativeFailed) { SetError(T(L"Не удалось проверить модули в процессах.",L"Could not check modules in processes.")); return false; }
             if (holders.empty()) return true;
             Action choice=AskUser(Page::UnlockModules,GlassInstallUnlock::FormatHolders(holders));
             if (choice==Action::Cancel) { cancelRequested_.store(true); return false; }
             for (const auto& h:holders) (void)GlassInstallUnlock::ForceUnloadHolder(h,x64Dir_,x86Dir_);
             if (cancelRequested_.load()) return false;
-            holders=GlassInstallUnlock::CollectHolders(x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),nativeFailed);
-            if (nativeFailed) { SetError(T(L"Не удалось просканировать 64-битные процессы.",L"Could not scan 64-bit processes.")); return false; }
+            holders=GlassInstallUnlock::CollectHolders(x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),nativeFailed,&cancelRequested_);
+            if (nativeFailed) { SetError(T(L"Не удалось проверить модули в процессах.",L"Could not check modules in processes.")); return false; }
             if (holders.empty()) return true;
             choice=AskUser(Page::UnlockProcesses,GlassInstallUnlock::FormatHolders(holders));
             if (choice==Action::Cancel) { cancelRequested_.store(true); return false; }
@@ -513,8 +513,24 @@ private:
         const bool prior86=GP::IsGlassPlatformRunning(GP::PlatformArch::X86);
         const bool enabled64=GP::QueryGlassAutorunUiState(GP::PlatformArch::X64)!=GP::AutorunUiState::Disabled;
         const bool enabled86=GP::QueryGlassAutorunUiState(GP::PlatformArch::X86)!=GP::AutorunUiState::Disabled;
-        const bool priorOg=GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe");
         const bool platformRemoval=chosen.x64 || chosen.x86;
+        const bool stopOg=GlassInstallUtil::IsOs64Bit() && (chosen.x64 || chosen.openGlass);
+        bool priorOg=false, ogServiceExisted=false;
+        DWORD ogStartType=SERVICE_AUTO_START;
+        GlassInstallUtil::OpenGlassTaskState ogTasks;
+        if (stopOg && (!GlassInstallHost::QueryOpenGlassServiceStartType(ogServiceExisted,ogStartType) ||
+            !GlassInstallUtil::QueryOpenGlassTasks(ogTasks) ||
+            !GlassInstallUtil::QueryOpenGlassRunning(priorOg,&ogTasks))) {
+            SetError(T(L"Не удалось проверить состояние OpenGlass. Пакеты не удалены.",
+                L"Could not inspect OpenGlass. No packages were removed."));
+            return 10;
+        }
+        if (stopOg && priorOg && ((!ogServiceExisted && (!ogTasks.found || ogTasks.anyDisabled)) ||
+            (ogServiceExisted && ogTasks.anyRunning))) {
+            SetError(T(L"Нельзя безопасно восстановить текущее состояние OpenGlass. Остановите OpenGlass и повторите удаление.",
+                L"The current OpenGlass state cannot be safely restored. Stop OpenGlass and retry removal."));
+            return 10;
+        }
         bool removed64=false,removed86=false,removedOg=false;
         auto restoreArch=[&](GP::PlatformArch arch,const std::wstring& root,bool wasRunning,bool wasEnabled,bool removed) -> bool {
             if (!wasRunning || removed || GP::IsGlassPlatformRunning(arch)) return true;
@@ -538,11 +554,28 @@ private:
             bool restored=true;
             if (!restoreArch(GP::PlatformArch::X64,x64Dir_,prior64,enabled64,removed64)) restored=false;
             if (!restoreArch(GP::PlatformArch::X86,x86Dir_,prior86,enabled86,removed86)) restored=false;
-            if (priorOg && !removedOg && !GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe")) {
-                if (!GlassInstallHost::StartOpenGlassService()) {
-                    const std::wstring schtasks=GlassInstallUtil::System64ExePath(L"schtasks.exe");
-                    if (!GlassInstallUtil::RunHidden(schtasks.c_str(),L"/Run /TN \"OpenGlass Host\"") &&
-                        !GlassInstallUtil::RunHidden(schtasks.c_str(),L"/Run /TN \"OpenGlass Legacy Host\"")) restored=false;
+            if (priorOg && !removedOg) {
+                bool running=false;
+                if (!GlassInstallUtil::QueryOpenGlassRunning(running)) restored=false;
+                else if (!running) {
+                    bool started=false;
+                    if (ogServiceExisted) {
+                        started=GlassInstallHost::StartOpenGlassServicePreservingStartType(ogStartType);
+                        if (!started && ogStartType==SERVICE_DISABLED)
+                            (void)GlassInstallHost::RestoreOpenGlassServiceStartType(ogStartType);
+                    } else {
+                        started=GlassInstallUtil::RunEnabledOpenGlassTask();
+                    }
+                    if (!started) restored=false;
+                    else {
+                        const ULONGLONG start=GetTickCount64();
+                        do {
+                            if (!GlassInstallUtil::QueryOpenGlassRunning(running)) { restored=false; break; }
+                            if (running || GetTickCount64()-start>=15000) break;
+                            Sleep(300);
+                        } while (true);
+                        if (!running) restored=false;
+                    }
                 }
             }
             if (!restored) LogLine(L"Could not restore a previously running component");
@@ -555,12 +588,15 @@ private:
             return 17;
         };
         SetStatus(T(L"Остановка компонентов…",L"Stopping components…"),500);
-        if (!GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,platformRemoval,platformRemoval,platformRemoval||chosen.openGlass)) {
+        if (!GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,platformRemoval,platformRemoval,stopOg,&cancelRequested_)) {
+            if (cancelRequested_.load()) return cancelledResult();
             SetError(T(L"Не удалось остановить компоненты. Пакеты не удалены.",L"Could not stop components. No packages were removed."));
             restoreRemaining(); return 10;
         }
         if (cancelRequested_.load()) return cancelledResult();
-        if (platformRemoval && !EnsureModulesReleased()) {
+        if (platformRemoval || chosen.settings)
+            SetStatus(T(L"Проверка модулей в процессах…",L"Checking modules in processes…"),600);
+        if ((platformRemoval || chosen.settings) && !EnsureModulesReleased()) {
             if (cancelRequested_.load()) return cancelledResult();
             (void)restoreRemaining(); return 11;
         }
@@ -610,6 +646,28 @@ private:
             if (!GlassInstallHost::RemovePlatformAutorunTasks(true,false)) { SetError(T(L"Платформа x64 удалена, но задача автозапуска осталась.",L"The x64 platform was removed, but its startup task remains.")); (void)restoreRemaining(); return 17; }
             GlassInstallUtil::ClearPlatformInstallPath(true); ++done;
         }
+        // Pin retained product directories, including nested/aliased roots,
+        // while pruning only empty directories of removed products.
+        std::vector<std::wstring> keptRoots;
+        if (installed_.x64 && !chosen.x64 && !x64Dir_.empty()) keptRoots.push_back(x64Dir_);
+        if (installed_.x86 && !chosen.x86 && !x86Dir_.empty()) keptRoots.push_back(x86Dir_);
+        if (installed_.openGlass && !chosen.openGlass && !openGlassDir_.empty()) keptRoots.push_back(openGlassDir_);
+        if (installed_.settings && !chosen.settings) {
+            if (!x64Dir_.empty()) keptRoots.push_back(GlassInstallUtil::TrimTrailingSlashes(x64Dir_)+L"\\GlassSettings");
+            if (!x86Dir_.empty()) keptRoots.push_back(GlassInstallUtil::TrimTrailingSlashes(x86Dir_)+L"\\GlassSettings");
+        }
+        if (chosen.settings) {
+            if (!x64Dir_.empty()) GlassInstallUtil::PruneEmptyDirectories(GlassInstallUtil::TrimTrailingSlashes(x64Dir_)+L"\\GlassSettings",keptRoots);
+            if (!x86Dir_.empty()) GlassInstallUtil::PruneEmptyDirectories(GlassInstallUtil::TrimTrailingSlashes(x86Dir_)+L"\\GlassSettings",keptRoots);
+        }
+        if (chosen.openGlass && !openGlassDir_.empty() &&
+            !GlassInstallUtil::SameInstallPath(openGlassDir_,x64Dir_) &&
+            !GlassInstallUtil::SameInstallPath(openGlassDir_,x86Dir_))
+            GlassInstallUtil::PruneEmptyDirectories(openGlassDir_,keptRoots);
+        if (chosen.x86 && !x86Dir_.empty() &&
+            (chosen.x64 || !GlassInstallUtil::SameInstallPath(x86Dir_,x64Dir_)))
+            GlassInstallUtil::PruneEmptyDirectories(x86Dir_,keptRoots);
+        if (chosen.x64 && !x64Dir_.empty()) GlassInstallUtil::PruneEmptyDirectories(x64Dir_,keptRoots);
         if (!restoreRemaining()) {
             SetError(T(L"Выбранные продукты удалены, но не удалось перезапустить оставшиеся компоненты.",
                 L"Selected products were removed, but remaining components could not be restarted."));

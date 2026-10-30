@@ -182,7 +182,8 @@ for action in ("INSTALL", "UPDATE", "REMOVE"):
     assert f"IDS_COMP_BADGE_{action}" in setup and rc.count(f"IDS_COMP_BADGE_{action}") == 2
     assert f".comp-badge.action-{action.lower()}" in ui
 assert "item.badgeTone" in ui and "comp-lock" in ui and "item.lockTitle" in ui
-assert "heading.append(componentLock(" in ui and "badge.textContent=String(item.badge)" in ui
+assert "action.append(componentLock(" in ui and "badge.textContent=String(item.badge);action.append(badge)" in ui
+assert ".comp-action{display:flex" in ui and "top:198px" in ui and "top:440px" in ui
 assert "#a7dfff" in ui and "#efb94f" in ui  # independent blue-and-gold lock, not badge-tinted
 assert "DrawComponentActionBadge(dc,selected,installed" in setup and "DrawMandatoryLock(dc," in setup
 assert "item.state" in ui and "white-space:pre-line" in ui
@@ -335,6 +336,15 @@ assert "DeleteTree" not in undo, "never recursively delete unrelated files on cl
 assert undo.index("GlassInstallMsi::UninstallProduct") < undo.index("++productsProcessed") < undo.index("productsProcessed*8000/productCount")
 assert "DirBytes(state.backupX64)" in rollback and "IsNestedSubPath" in rollback
 assert "receivedFrame" in watch and "FILE_FLAG_FIRST_PIPE_INSTANCE" in watch
+assert "ScanForSetup" in watch and "GetModuleHandleW(L\"GlassCompat.dll\")" in watch
+assert "pendingRows.empty() && pipeBuffer.empty()" in watch and "helperExitCode!=STILL_ACTIVE" in watch
+worker = section(engine, "DWORD WINAPI InstallEngine::WorkerThread(", "bool InstallEngine::Start(")
+assert worker.index("ReleaseLockedModules()") < worker.index("RunMsiSequence()")
+assert "scanNativeX64_ = GlassInstallUtil::IsOs64Bit()" in engine
+assert "QueryOpenGlassTasks" in util and "GetInstances(0" in util and "QueryOpenGlassRunning" in setup
+assert "ShouldStartOpenGlass(openGlassStartup_)" in engine and "Snapshot OpenGlass path unavailable" in rollback
+assert "protectedHandles" in util and "FILE_FLAG_OPEN_REPARSE_POINT" in util and "FileDispositionInfo" in util
+assert "PruneEmptyDirectories(openGlassDir_, keptRoots)" in engine and "PruneEmptyDirectories(openGlassDir_,keptRoots)" in unins
 assert "Page::Launching" in setup and "kMinLaunchMs = 5000" in engine
 assert "--demo-tour" in setup and "debugDemoPending_ = false" in setup
 assert "MsiEnableLogW(0, nullptr, 0)" in engine

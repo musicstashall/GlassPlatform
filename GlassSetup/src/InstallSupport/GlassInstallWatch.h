@@ -13,14 +13,14 @@ struct ModuleHolder {
     std::wstring modules;
 };
 
-// Локальный скан (x86 in-process + inject map) без x64 rundll32.
-void CollectInProcessHolders(std::vector<ModuleHolder>& holders) noexcept;
+// Local scan plus the GlassSettings process list; false means the result is incomplete.
+bool CollectInProcessHolders(std::vector<ModuleHolder>& holders) noexcept;
 
 // Токенизированное слияние списка модулей ("GlassCompat.dll, UICompat.dll") без коллизий подстрок.
 void MergeModuleTokens(std::wstring& into, const std::wstring& add);
 
 // Один resident /watchGlassModules + локальный скан до timeoutMs или пока держателей нет.
-// nativeScanFailed — не удалось поднять x64 watch (нет Native.dll / pipe).
+// nativeScanFailed also reports an incomplete local scan or a broken helper protocol.
 bool WaitUntilClearOrTimeout(
     DWORD timeoutMs,
     const std::wstring& x64Dir,
@@ -30,6 +30,6 @@ bool WaitUntilClearOrTimeout(
     bool& nativeScanFailed,
     const std::atomic<bool>* cancelRequested = nullptr) noexcept;
 
-void ParseNativePipeUtf8(const std::string& bytes, std::vector<ModuleHolder>& holders);
+bool ParseNativePipeUtf8(const std::string& bytes, std::vector<ModuleHolder>& holders);
 
 } // namespace GlassInstallWatch
