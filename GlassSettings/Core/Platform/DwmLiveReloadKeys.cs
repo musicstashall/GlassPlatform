@@ -1,6 +1,6 @@
-namespace GlassSettings.Core.Platform;
+﻿namespace GlassSettings.Core.Platform;
 
-/// <summary>Маршрутизация live-reload по типу DWM-ключа. См. docs/guides/GlassSettings-host-glass.md.</summary>
+/// <summary>Маршрутизация live-reload по типу DWM-ключа. См. GlassSettings/docs/GlassSettings-host-glass.md.</summary>
 internal static class DwmLiveReloadKeys
 {
     public const string CustomThemeReflection = "CustomThemeReflection";

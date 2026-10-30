@@ -1,8 +1,8 @@
-using Microsoft.UI.Dispatching;
+﻿using Microsoft.UI.Dispatching;
 
 namespace GlassSettings.Services;
 
-/// <summary>Фаза serial-конвейера операций detail-страницы (см. docs/guides/GlassSettings-page-pipeline.md).</summary>
+/// <summary>Фаза serial-конвейера операций detail-страницы (см. GlassSettings/docs/GlassSettings-page-pipeline.md).</summary>
 public enum SettingsPageOperationPhase
 {
     Idle,
@@ -15,7 +15,7 @@ public enum SettingsPageOperationPhase
 /// <summary>
 /// Serial-очередь фаз на <see cref="Controls.SettingsPageShell"/>:
 /// Animating → RegistryMutation → Cosmetic → NoticeSync.
-/// Политика и порядок — docs/guides/GlassSettings-page-pipeline.md.
+/// Политика и порядок — GlassSettings/docs/GlassSettings-page-pipeline.md.
 /// </summary>
 public sealed class SettingsPageOperationGate
 {

@@ -1,9 +1,9 @@
-#pragma once
+﻿#pragma once
 
 #include <Windows.h>
 
 // Параметры UICompat: XAML-фон/бордюр CoreWindow surfaces из Tray\Xaml\{Popup|Menu}.
-// См. docs/guides/TaskbarBorders.md (секция UICompat).
+// См. TaskbarCompat/docs/TaskbarBorders.md (секция UICompat).
 
 namespace UICompat::Registry
 {

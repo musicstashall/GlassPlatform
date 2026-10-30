@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <Windows.h>
 
@@ -6,7 +6,7 @@
 // Shared (Tray\): BorderDrawMode (и SWCA EffectType/Gradient/Border/CornerType).
 // XAML bar (Tray\Xaml\): EffectType, SeparateZones, CornerType, Gradient/Border.
 // Смежные: Tray\Xaml\{Popup|Preview|Menu|Tooltip} с fallback на Tray\Xaml.
-// См. docs/guides/TaskbarBorders.md
+// См. TaskbarCompat/docs/TaskbarBorders.md
 
 namespace TaskbarCompat::Registry
 {
