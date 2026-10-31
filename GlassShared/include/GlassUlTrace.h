@@ -336,19 +336,6 @@ namespace GlassUlTrace
         CloseHandle(h);
     }
 
-    // Одна строка на процесс: фактический путь лога (видно, сработал ли fallback).
-    inline void LogTraceInitOnce() noexcept
-    {
-        static LONG s_done = 0;
-        if (InterlockedCompareExchange(&s_done, 1, 0) != 0)
-            return;
-        const wchar_t* path = LogPath(nullptr);
-        char narrow[MAX_PATH * 2]{};
-        WideToJson(narrow, sizeof(narrow), path);
-        Logf("H82", "GlassUlTrace.h:LogTraceInit", "trace_init",
-            "\"path\":\"%s\",\"run\":\"%s\"", narrow, kRunId);
-    }
-
     inline void Logf(
         const char* hyp,
         const char* location,
@@ -362,6 +349,19 @@ namespace GlassUlTrace
         _vsnprintf_s(data, _TRUNCATE, fmt, ap);
         va_end(ap);
         Log(hyp, location, message, data);
+    }
+
+    // Одна строка на процесс: фактический путь лога (видно, сработал ли fallback).
+    inline void LogTraceInitOnce() noexcept
+    {
+        static LONG s_done = 0;
+        if (InterlockedCompareExchange(&s_done, 1, 0) != 0)
+            return;
+        const wchar_t* path = LogPath(nullptr);
+        char narrow[MAX_PATH * 2]{};
+        WideToJson(narrow, sizeof(narrow), path);
+        Logf("H82", "GlassUlTrace.h:LogTraceInit", "trace_init",
+            "\"path\":\"%s\",\"run\":\"%s\"", narrow, kRunId);
     }
 
     inline void LogVerify(unsigned delaySec) noexcept

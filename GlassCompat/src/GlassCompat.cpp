@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdarg>
+#include <cstdint>
 
 #include <DebugLog.h>
 

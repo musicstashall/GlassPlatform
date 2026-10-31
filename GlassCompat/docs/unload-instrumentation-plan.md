@@ -236,6 +236,29 @@
 | A8 | Фильтр по exe (переменная окружения или список) и выключение одним макросом | иначе Stop пишет сотни файлов и меняет тайминги гонки |
 | A9 | `verify` существует и **из другого процесса** (хост/GS native): через 0/2/10 с, с битовой маской модулей | внутрипроцессный verify исчезает ровно тогда, когда модуль ушёл/процесс в AppContainer |
 
+### Матрица пересборки (что собирать после каждого цикла правок)
+
+`GlassUlTrace.h` — header-only, но компилируется в каждый TU, который его включает.
+Минимальный достаточный набор — **трим проекта + GlassShared**:
+
+| Что изменено | Собрать/пересобрать |
+|---|---|
+| `GlassShared/include/GlassUlTrace.h` (любая правка формата/API) | **GlassShared → GlassCompat → WndCompat → GlassSettings.Native** (+ GlassSettings UI, если менялся C#) |
+| `GlassCompat/src/*.cpp`, `GlassCompat/DllMain.cpp` | GlassCompat |
+| `WndCompat/Tracker/*` | WndCompat |
+| `GlassSettings/Native/*` | GlassSettings.Native |
+| `GlassShared/src/ForceUnloadGlassModules.cpp` | GlassShared → GlassCompat → GlassSettings.Native |
+
+Полный список TU, включающих трассер: `GlassCompat/DllMain.cpp`,
+`GlassCompat/src/{GlassCompat,EntryRundll,CoreWindowHostInject}.cpp`,
+`WndCompat/Tracker/WinEventHandler.cpp`, `GlassSettings/Native/InjectProcessMapNative.cpp`,
+`GlassShared/src/ForceUnloadGlassModules.cpp`.
+
+Порядок сборки: `GlassShared` (static lib) **до** `GlassCompat`/`GlassSettings.Native` —
+при инкрементальной сборке solution из корня VS делает это сам; при ручной сборке
+по проектам — сначала GlassShared. После сборки проверять время файлов
+`Build\x64\Debug\{GlassCompat,WndCompat}.dll`.
+
 ## 6. Протокол тестирования
 
 Для каждого прогона приложить: время Stop (UTC), список процессов (PID + exe) до Stop,
