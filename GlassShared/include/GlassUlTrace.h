@@ -8,13 +8,19 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace GlassUlTrace
 {
     inline constexpr char kSessionId[] = "8e6259";
-    inline constexpr char kRunId[] = "r1";
+    inline constexpr char kRunId[] = "r2";
+    // Основной путь (машина разработчика). Если недоступен (ACL/AppContainer/другой ПК) —
+    // %LOCALAPPDATA%\GlassPlatform\diag, затем %TEMP%. Фактический путь пишется в trace_init.
     inline constexpr wchar_t kLogPath[] =
         L"d:\\VS_PROJECT\\DWM\\GlassProject\\debug-8e6259.log";
+
+    // rc: 0 = модуля нет в списке загрузчика, kRcUnknown = прочитать не удалось.
+    inline constexpr unsigned kRcUnknown = 0xFFFFFFFFu;
 
     inline unsigned long long NowMs() noexcept
     {
@@ -34,17 +40,21 @@ namespace GlassUlTrace
         if (!src)
             return;
         size_t j = 0;
-        for (size_t i = 0; src[i] && j + 2 < cch; ++i)
+        for (size_t i = 0; src[i] && j + 8 < cch; ++i)
         {
-            const wchar_t c = src[i];
+            const unsigned c = static_cast<unsigned>(src[i]);
             if (c == L'\\' || c == L'"')
             {
                 dst[j++] = '\\';
                 dst[j++] = (c == L'\\') ? '\\' : '"';
             }
-            else if (c < 32 || c > 126)
+            else if (c < 0x20 || c > 0x7E)
             {
-                dst[j++] = '?';
+                // Валидный JSON для не-ASCII: RU-имена процессов больше не "?????? ??????".
+                const int r = _snprintf_s(dst + j, cch - j, _TRUNCATE, "\\u%04X", c);
+                if (r <= 0)
+                    break;
+                j += static_cast<size_t>(r);
             }
             else
             {
@@ -117,7 +127,9 @@ namespace GlassUlTrace
         PebLdrUl* Ldr;
     };
 
-    // Фактический loader refcount (DdagNode->LoadCount / ObsoleteLoadCount). 0 = нет модуля / сбой.
+    // Фактический loader refcount (DdagNode->LoadCount / ObsoleteLoadCount).
+    // 0 = модуля нет в списке загрузчика; kRcUnknown = прочитать не удалось
+    // (важно различать: «модуль выгружен» и «rc не измерен»).
     inline unsigned QueryLoadCount(HMODULE hMod) noexcept
     {
         if (!hMod)
@@ -128,7 +140,7 @@ namespace GlassUlTrace
         auto* peb = reinterpret_cast<PebUl*>(__readfsdword(0x30));
 #endif
         if (!peb || !peb->Ldr)
-            return 0;
+            return kRcUnknown;
         LIST_ENTRY* const head = &peb->Ldr->InLoadOrderModuleList;
         for (LIST_ENTRY* e = head->Flink; e && e != head; e = e->Flink)
         {
@@ -232,6 +244,52 @@ namespace GlassUlTrace
             strncat_s(dst, cch, "none", _TRUNCATE);
     }
 
+    // Разрешение пути: env GLASS_ULTRACE_LOG → kLogPath → %LOCALAPPDATA%\GlassPlatform\diag →
+    // %TEMP%\GlassPlatform-diag. Возвращает nullptr, если ни один каталог не открылся (тогда
+    // остаётся только OutputDebugStringW).
+    inline const wchar_t* LogPath(bool* outFromFallback) noexcept
+    {
+        static wchar_t s_path[MAX_PATH * 2]{};
+        static LONG s_state = 0; // 0 = не разрешён, 1 = готов
+        if (InterlockedCompareExchange(&s_state, 1, 0) == 0)
+        {
+            wchar_t candidate[MAX_PATH * 2]{};
+            if (GetEnvironmentVariableW(L"GLASS_ULTRACE_LOG", candidate, _countof(candidate)) > 0)
+            {
+                wcscpy_s(s_path, candidate);
+                if (outFromFallback)
+                    *outFromFallback = true;
+            }
+            else
+            {
+                wcscpy_s(s_path, kLogPath);
+                // Проверяем каталог основного пути.
+                wchar_t dir[MAX_PATH * 2]{};
+                wcscpy_s(dir, s_path);
+                wchar_t* slash = wcsrchr(dir, L'\\');
+                const wchar_t* probe = s_path;
+                if (slash)
+                {
+                    *slash = 0;
+                    probe = dir;
+                }
+                if (GetFileAttributesW(probe) == INVALID_FILE_ATTRIBUTES)
+                {
+                    wchar_t base[MAX_PATH]{};
+                    const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, _countof(base));
+                    if (n == 0 || n >= _countof(base))
+                        (void)GetTempPathW(static_cast<DWORD>(_countof(base)), base);
+                    swprintf_s(s_path, L"%s\\GlassPlatform\\diag\\unload-trace.log", base);
+                    CreateDirectoryW((std::wstring(base) + L"\\GlassPlatform").c_str(), nullptr);
+                    CreateDirectoryW((std::wstring(base) + L"\\GlassPlatform\\diag").c_str(), nullptr);
+                    if (outFromFallback)
+                        *outFromFallback = true;
+                }
+            }
+        }
+        return s_path;
+    }
+
     inline void Log(const char* hyp, const char* location, const char* message, const char* dataJson) noexcept
     {
         char exe[80]{};
@@ -261,7 +319,7 @@ namespace GlassUlTrace
             dataJson && dataJson[0] ? dataJson : "\"_\":0");
 
         HANDLE h = CreateFileW(
-            kLogPath,
+            LogPath(nullptr),
             FILE_APPEND_DATA,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             nullptr,
@@ -269,10 +327,26 @@ namespace GlassUlTrace
             FILE_ATTRIBUTE_NORMAL,
             nullptr);
         if (h == INVALID_HANDLE_VALUE)
+        {
+            ::OutputDebugStringA(line);
             return;
+        }
         DWORD written = 0;
         (void)WriteFile(h, line, static_cast<DWORD>(strlen(line)), &written, nullptr);
         CloseHandle(h);
+    }
+
+    // Одна строка на процесс: фактический путь лога (видно, сработал ли fallback).
+    inline void LogTraceInitOnce() noexcept
+    {
+        static LONG s_done = 0;
+        if (InterlockedCompareExchange(&s_done, 1, 0) != 0)
+            return;
+        const wchar_t* path = LogPath(nullptr);
+        char narrow[MAX_PATH * 2]{};
+        WideToJson(narrow, sizeof(narrow), path);
+        Logf("H82", "GlassUlTrace.h:LogTraceInit", "trace_init",
+            "\"path\":\"%s\",\"run\":\"%s\"", narrow, kRunId);
     }
 
     inline void Logf(
@@ -307,6 +381,9 @@ namespace GlassUlTrace
         {
             do
             {
+                // pid 0 = System Idle; CreateToolhelp32Snapshot(0,...) снимает ТЕКУЩИЙ процесс.
+                if (pe.th32ProcessID == 0)
+                    continue;
                 const unsigned mask = RemoteModuleMask(pe.th32ProcessID);
                 if (mask == 0)
                     continue;

@@ -5,6 +5,7 @@
 
 #include <WndCompat.h>
 #include <GlassControlKind.h>
+#include <GlassUlTrace.h>
 #include "Tracker/WindowClassifier.h"
 #include "Root/RootSubclass.h"
 #include "Root/RootExplorerSubclassBridge.h"
@@ -1535,12 +1536,13 @@ namespace WndCompat
             return TRUE;
         }
 
-        void ForceDetachAllSubclasses() noexcept
+        unsigned ForceDetachAllSubclasses() noexcept
         {
             ForceDetachCtx ctx{};
             ctx.pid = GetCurrentProcessId();
             (void)EnumWindows(EnumForceDetachSubclasses, reinterpret_cast<LPARAM>(&ctx));
             DebugLog(L"[WndCompat][WinEvent] ForceDetachAllSubclasses: scanned %u windows", ctx.removed);
+            return ctx.removed;
         }
     }
 
@@ -1633,6 +1635,21 @@ namespace WndCompat
         weh_shutdown_unhook_done:;
         }
 
+        // #region agent log
+        // GLASS-ULTRACE (R2, H91): состояние перед detach и после.
+        const std::uint32_t subclassesBefore = WndCompat::SubclassDiag::Total();
+        const int pendingBefore = g_pendingDetaches.load(std::memory_order_acquire);
+        GlassUlTrace::Logf(
+            "H91",
+            "WndCompat:WinEventHook_Shutdown",
+            "wnd_shutdown_begin",
+            "\"pending_before\":%d,\"subclasses_before\":%u,\"hook_installed\":%d",
+            pendingBefore,
+            subclassesBefore,
+            g_hookInstalled.load() ? 1 : 0);
+        // #endregion
+        const ULONGLONG wndShutdownT0 = GetTickCount64();
+
         // Detach вне g_hookMutex: SendMessageTimeout на чужие GUI-потоки не должен
         // держать lock (иначе риск дедлока с Initialize/SetMode).
         TaskbarHost_DetachAll();
@@ -1643,7 +1660,19 @@ namespace WndCompat
         // procs that were subclassed by WinEvent callbacks but never entered g_rootWindows
         // (race between WinEvent INCONTEXT and shutdown snapshot). This is the last line
         // of defense before FreeLibrary — removes stale subclass procs from all windows.
-        ForceDetachAllSubclasses();
+        const unsigned forceScanned = ForceDetachAllSubclasses();
+        // #region agent log
+        // GLASS-ULTRACE (H91): ForceDetachAllSubclasses обходит ТОЛЬКО top-level окна
+        // (EnumWindows). Дочерние контролы (кнопки/статики/rebar/listview) не посещаются —
+        // их сабкласс-проки переживут FreeLibrary. subclasses_after показывает остаток.
+        GlassUlTrace::Logf(
+            "H91",
+            "WndCompat:WinEventHook_Shutdown",
+            "wnd_force_detach",
+            "\"top_level_scanned\":%u,\"subclasses_after\":%u",
+            forceScanned,
+            WndCompat::SubclassDiag::Total());
+        // #endregion
 
         // CFG-fix: снимаем g_hookInstalled ПОСЛЕ DetachAll, чтобы никакой WinEvent callback
         // не мог установить новый субкласс пока DetachAll работает.
@@ -1669,6 +1698,20 @@ namespace WndCompat
         g_pendingDetaches.store(0, std::memory_order_release);
 
         const RemainingGlassMarkCtx marks = CountRemainingGlassMarks();
+        // #region agent log
+        // GLASS-ULTRACE (H91)
+        GlassUlTrace::Logf(
+            "H91",
+            "WndCompat:WinEventHook_Shutdown",
+            "wnd_shutdown_end",
+            "\"pending_waited\":%d,\"root_marks\":%u,\"other_marks\":%u,"
+            "\"subclasses_left\":%u,\"ms\":%llu",
+            pending,
+            marks.rootMarks,
+            marks.otherMarks,
+            WndCompat::SubclassDiag::Total(),
+            GetTickCount64() - wndShutdownT0);
+        // #endregion
         WndCompat::SubclassDiag::ClearAll();
 
         DebugLog(L"[WndCompat][WinEvent] WinEventHook_Shutdown complete");

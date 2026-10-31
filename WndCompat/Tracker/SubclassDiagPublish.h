@@ -2,6 +2,7 @@
 
 #include <GlassControlKind.h>
 #include <cstddef>
+#include <cstdint>
 
 namespace WndCompat::SubclassDiag
 {
@@ -11,4 +12,10 @@ namespace WndCompat::SubclassDiag
 
     /// Обнуляет статистику сабклассов в InjectMap (после DetachAll).
     void ClearAll() noexcept;
+
+    /// #region agent log
+    /// GLASS-ULTRACE (R2, H91): суммарное число «живых» сабклассов по всем kind.
+    /// После DetachAll должно быть 0; иначе FreeLibrary(WndCompat) = stale proc → CFG fail-fast.
+    std::uint32_t Total() noexcept;
+    /// #endregion
 }

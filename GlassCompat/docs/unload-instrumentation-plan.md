@@ -149,6 +149,9 @@
 | **H88** | `SignalHostShutdownComplete` (`:970`) раньше `ForceUnloadResiduals` (`:979`) → гонка «наш FLAET vs remote FreeLibrary» | таймлайн трёх событий |
 | **H89** | Новая генерация GUI (`StartGuiThreadIfNeeded`, `:3303`) берёт новый пин; если предыдущая не сделала FLAET — утечка +1 за цикл | номер поколения GUI и парность пин/снятие |
 | **H90** | Soft unload (`UnloadRequest`) для path=1 процесса никем не слушается → GS считает «запрошено», реакции нет, дальше Force | факт запроса в процессе vs отсутствие триггера |
+| **H91** | **WndCompat снимается до того, как с процесса сняты все указатели на её код.** `ForceDetachAllSubclasses` обходит только top-level окна (`EnumWindows`), дочерние контролы не посещаются; остаток прока «живёт» после `FreeLibrary` → комctl32 вызывает stale proc → CFG fail-fast | `stale_scan` (окна с `GWLP_WNDPROC` внутри модуля), `wnd_force_detach.subclasses_after`, `wnd_shutdown_end.subclasses_left` |
+| **H92** | После shutdown WinEvent-хуки хоста продолжают присылать события в процесс → `WndCompat_HandleWinEvent` навешивает **новый** сабкласс уже после detach | `subclasses_left > 0` при `g_hookInstalled=0`, повторный `stale_scan` при следующем цикле |
+| **H93** | Класс окна зарегистрирован с `lpfnWndProc` внутри нашего модуля и не снят (`UnregisterClass`) → диспетчеризация любого сообщения после unmap | `window_proc_in_module` с `class`/`rva` |
 
 ---
 
@@ -193,7 +196,16 @@
 достаточно того, что даёт, плюс `GetModuleHandle`/Toolhelp-присутствие; тогда «наши vs чужие» ссылки
 различаем по леджеру пинов из точек 2–3, 13–14, 15–16.
 
-### R2 — детализация модулей (второй прогон)
+### R2 — детализация модулей (второй прогон, частично уже в ветке)
+
+Внесено (лог-только, порядок фаз не менялся):
+
+| # | Файл / функция | Событие | Поля |
+|---|---|---|---|
+| R2-1 | `GlassCompat.cpp:ExecuteShutdown` перед `FreeLibrary(WndCompat)` и `(ExplorerCompat)` | `stale_scan` / `window_proc_in_module` | окна процесса, чей `GWLP_WNDPROC` лежит внутри выгружаемого модуля: hwnd, class, rva, kind; итог `windows/marked/proc_inside` |
+| R2-2 | `WndCompat/Tracker/WinEventHandler.cpp:WinEventHook_Shutdown` | `wnd_shutdown_begin` / `wnd_force_detach` / `wnd_shutdown_end` | `pending_before`, `subclasses_before`, `top_level_scanned`, `subclasses_after`, `root_marks`, `other_marks`, `subclasses_left`, `ms` |
+| R2-3 | `GlassCompat.cpp:GlassGuiThreadProc` (H71-ожидание) | `hostshutdown_wait` / `hostshutdown_done` | `already_signaled`, `by_host_liveness`, `signaled`, `ms`, `rc` |
+| R2-4 | `GlassShared/include/GlassUlTrace.h` | `trace_init` | фактический путь лога (fallback), `run` |
 
 - `WndCompat_BeginShutdown` / `WndCompat_IsShutdownComplete` + число снятых субклассов.
 - `ExplorerCompat_Shutdown` / `UICompat_Shutdown` / `TaskbarCompat_Shutdown` + `*_DebugComState` до/после `CoFreeUnusedLibraries`.

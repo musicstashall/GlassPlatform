@@ -34,6 +34,7 @@
 #include "ShortLivedAgent.h"
 #include <RootBackdropPolicy.h>
 #include <GlassUlTrace.h>
+#include <GlassControlKind.h>
 
 // Определён в EXPORTS ниже; watcher polling (H54 WPM).
 extern "C" __declspec(dllexport) volatile LONG GlassCompat_CwForceUnloadFlag;
@@ -949,6 +950,137 @@ namespace
         }
     }
 
+    // #region agent log
+    // GLASS-ULTRACE (R2, H91): перед FreeLibrary ищем окна, чей WndProc указывает внутрь
+    // выгружаемого модуля. Дампы explorer 35156/40076: CFG fail-fast, цель вызова =
+    // module+0x193150 при уже выгруженном модуле, стек через comctl32 subclass thunk.
+    struct StaleCallbackScan
+    {
+        DWORD pid{};
+        std::uintptr_t begin{};
+        std::uintptr_t end{};
+        unsigned windows{};
+        unsigned marked{};
+        unsigned procInside{};
+        unsigned details{};
+        const char* tag{""};
+    };
+
+    void NoteWindowCandidate(StaleCallbackScan& s, HWND hwnd) noexcept
+    {
+        DWORD wndPid = 0;
+        (void)GetWindowThreadProcessId(hwnd, &wndPid);
+        if (wndPid != s.pid)
+            return;
+        ++s.windows;
+        const auto kind = GlassShared::GlassGetWindowKind(hwnd);
+        if (kind != GlassShared::GlassControlKind::None)
+            ++s.marked;
+        const auto proc = reinterpret_cast<std::uintptr_t>(
+            GetWindowLongPtrW(hwnd, GWLP_WNDPROC));
+        if (proc < s.begin || proc >= s.end)
+            return;
+        ++s.procInside;
+        if (s.details >= 12)
+            return;
+        ++s.details;
+        wchar_t cls[96]{};
+        (void)GetClassNameW(hwnd, cls, _countof(cls));
+        char clsJson[200]{};
+        GlassUlTrace::WideToJson(clsJson, sizeof(clsJson), cls);
+        GlassUlTrace::Logf(
+            "H91",
+            "GlassCompat.cpp:ScanStaleCallbacks",
+            "window_proc_in_module",
+            "\"module\":\"%s\",\"hwnd\":\"%p\",\"class\":\"%s\",\"rva\":\"0x%llX\",\"kind\":%u",
+            s.tag,
+            static_cast<void*>(hwnd),
+            clsJson,
+            static_cast<unsigned long long>(proc - s.begin),
+            static_cast<unsigned>(kind));
+    }
+
+    BOOL CALLBACK ScanWindowProcCb(HWND hwnd, LPARAM lp) noexcept
+    {
+        auto* s = reinterpret_cast<StaleCallbackScan*>(lp);
+        NoteWindowCandidate(*s, hwnd);
+        (void)EnumChildWindows(hwnd, ScanWindowProcCb, lp);
+        return TRUE;
+    }
+
+    BOOL CALLBACK ScanThreadWindowCb(HWND hwnd, LPARAM lp) noexcept
+    {
+        NoteWindowCandidate(*reinterpret_cast<StaleCallbackScan*>(lp), hwnd);
+        return TRUE;
+    }
+
+    void ScanStaleCallbacksBeforeFree(const char* tag, HMODULE hMod) noexcept
+    {
+        if (!tag || !hMod)
+            return;
+        DWORD imageSize = 0;
+        HANDLE snap = CreateToolhelp32Snapshot(
+            TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
+        if (snap != INVALID_HANDLE_VALUE)
+        {
+            MODULEENTRY32W me{};
+            me.dwSize = sizeof(me);
+            if (Module32FirstW(snap, &me))
+            {
+                do
+                {
+                    if (me.hModule == hMod)
+                    {
+                        imageSize = me.modBaseSize;
+                        break;
+                    }
+                } while (Module32NextW(snap, &me));
+            }
+            CloseHandle(snap);
+        }
+        if (!imageSize)
+            return;
+
+        StaleCallbackScan s;
+        s.pid = GetCurrentProcessId();
+        s.begin = reinterpret_cast<std::uintptr_t>(hMod);
+        s.end = s.begin + imageSize;
+        s.tag = tag;
+
+        (void)EnumWindows(ScanWindowProcCb, reinterpret_cast<LPARAM>(&s));
+
+        // Message-only и окна не-GUI потоков EnumWindows не отдаёт.
+        HANDLE threads = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (threads != INVALID_HANDLE_VALUE)
+        {
+            THREADENTRY32 te{};
+            te.dwSize = sizeof(te);
+            if (Thread32First(threads, &te))
+            {
+                do
+                {
+                    if (te.th32OwnerProcessID != s.pid)
+                        continue;
+                    (void)EnumThreadWindows(
+                        te.th32ThreadID, ScanThreadWindowCb, reinterpret_cast<LPARAM>(&s));
+                } while (Thread32Next(threads, &te));
+            }
+            CloseHandle(threads);
+        }
+
+        GlassUlTrace::Logf(
+            "H91",
+            "GlassCompat.cpp:ScanStaleCallbacks",
+            "stale_scan",
+            "\"module\":\"%s\",\"windows\":%u,\"marked\":%u,\"proc_inside\":%u,\"size\":\"0x%X\"",
+            tag,
+            s.windows,
+            s.marked,
+            s.procInside,
+            imageSize);
+    }
+    // #endregion
+
     // HWND_MESSAGE-классы наших DLL (источники stale WndProc при выгрузке).
     static const wchar_t* const kExplorerStopClasses[] = {
         ExplorerCompatMsg::kExplorerXamlShutdownWndClass,
@@ -981,6 +1113,7 @@ namespace
             "\"reason\":\"%s\",\"phase\":\"begin\"",
             shutdownReason);
         // #endregion
+        GlassUlTrace::LogTraceInitOnce();
         DebugLog(L"[GlassCompat][Core] ExecuteShutdown: BEGIN");
         (void)Shared::InjectProcessMap::TrySetState(
             pid, Shared::InjectProcessMap::State::Unloading);
@@ -1344,6 +1477,10 @@ namespace
             {
                 AuditGlassMessageWindowsBeforeFree(L"ExplorerCompat", savedExplorer,
                     kExplorerStopClasses, _countof(kExplorerStopClasses));
+                // #region agent log
+                // GLASS-ULTRACE (H91)
+                ScanStaleCallbacksBeforeFree("ExplorerCompat", savedExplorer);
+                // #endregion
                 const unsigned rcExBefore = GlassUlTrace::QueryLoadCount(savedExplorer);
                 const BOOL exFreed = FreeLibrary(savedExplorer);
                 result |= UnloadResult::FreeExplorer_Returned;
@@ -1561,6 +1698,10 @@ namespace
             {
                 AuditGlassMessageWindowsBeforeFree(L"WndCompat", savedWnd,
                     kWndStopClasses, _countof(kWndStopClasses));
+                // #region agent log
+                // GLASS-ULTRACE (H91)
+                ScanStaleCallbacksBeforeFree("WndCompat", savedWnd);
+                // #endregion
                 const unsigned rcWndBefore = GlassUlTrace::QueryLoadCount(savedWnd);
                 const BOOL wndFreed = FreeLibrary(savedWnd);
                 result |= UnloadResult::FreeWnd_Returned;
@@ -1592,7 +1733,7 @@ namespace
             "H88",
             "GlassCompat.cpp:ExecuteShutdown",
             "shutdown_end",
-            "\"reason\":\"%s\",\"result\":%u,\"mask\":0x%X,\"ms\":%llu,\"phase\":\"end\"",
+            "\"reason\":\"%s\",\"result\":%u,\"mask\":\"0x%X\",\"ms\":%llu,\"phase\":\"end\"",
             shutdownReason,
             static_cast<unsigned>(result),
             static_cast<unsigned>(result),
@@ -3223,8 +3364,32 @@ namespace
         {
             if (hHostShutdownEarly)
             {
-                if (WaitForSingleObject(hHostShutdownEarly, 0) != WAIT_OBJECT_0)
+                // #region agent log
+                // GLASS-ULTRACE (R2, H82): после смерти хоста HostShutdown не приходит никогда —
+                // здесь процесс висит 30 с, держа GlassCompat (наблюдение «модуль остался»).
+                const BOOL already = (WaitForSingleObject(hHostShutdownEarly, 0) == WAIT_OBJECT_0);
+                const ULONGLONG hsT0 = GetTickCount64();
+                GlassUlTrace::Logf(
+                    "H82",
+                    "GlassCompat.cpp:GlassGuiThreadProc",
+                    "hostshutdown_wait",
+                    "\"already_signaled\":%d,\"by_host_liveness\":%d",
+                    already ? 1 : 0,
+                    shutdownByHostLiveness ? 1 : 0);
+                // #endregion
+                if (!already)
                     (void)WaitForSingleObject(hHostShutdownEarly, 30000);
+                // #region agent log
+                // GLASS-ULTRACE (H82)
+                GlassUlTrace::Logf(
+                    "H82",
+                    "GlassCompat.cpp:GlassGuiThreadProc",
+                    "hostshutdown_done",
+                    "\"signaled\":%d,\"ms\":%llu,\"rc\":%u",
+                    (WaitForSingleObject(hHostShutdownEarly, 0) == WAIT_OBJECT_0) ? 1 : 0,
+                    GetTickCount64() - hsT0,
+                    GlassUlTrace::QueryLoadCountByName(L"GlassCompat.dll"));
+                // #endregion
                 CloseHandle(hHostShutdownEarly);
                 hHostShutdownEarly = nullptr;
             }
