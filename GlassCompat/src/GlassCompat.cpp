@@ -1294,9 +1294,30 @@ namespace
         L"WndCompat.ControlWindow",
     };
 
+    // R6 (H96): подтверждение «наш ExecuteShutdown в этом процессе выполнялся».
+    // Хост (CoreWindowHostInject::ShutdownAckUl) читает его как разрешение на raw
+    // CreateRemoteThread(FreeLibrary) в этом процессе: только тогда мы знаем, что
+    // UnhookWinEvent/скан колбэков уже прошли и OS не держит указатель на наш код.
+    // Процессы, куда GlassCompat попал лишь через WINEVENT_INCONTEXT-инжект user32,
+    // ack не создают — их добивать нельзя (прогон 6, pid 35444: AV в выгруженном
+    // GlassCompat после sweep'а). Объект живёт до конца процесса (handle не закрываем).
+    static void CreateShutdownAckUl() noexcept
+    {
+        static HANDLE s_ack = nullptr;
+        static bool s_created = false;
+        if (s_created)
+            return;
+        s_created = true;
+        wchar_t name[80]{};
+        swprintf_s(name, L"Local\\GlassCompat_ShutdownDone_%lu",
+            static_cast<unsigned long>(GetCurrentProcessId()));
+        s_ack = CreateMutexW(nullptr, FALSE, name);
+    }
+
     void ExecuteShutdown()
     {
         g_initDone.store(false, std::memory_order_release);
+        CreateShutdownAckUl();
 
         DWORD pid = GetCurrentProcessId();
         const ULONGLONG shutdownT0 = GetTickCount64();

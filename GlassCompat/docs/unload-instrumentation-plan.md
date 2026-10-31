@@ -380,6 +380,58 @@ A/B для taskhostw: прогон с `GLASS_ULTRACE_NOWATCHER=1`. Если кр
 - `pending_underflow` → были detach-нотификации без Register (гонка между циклами); больше не ломает подсчёт.
 - `pending_wait_ok=0` при `pending_waited>0` → detach не завершились за 3 с; остаток виден в `wnd_shutdown_end`.
 
+### R6 — прогон 7 (крашей после Stop нет) + AV в стороннем приложении от sweep'а
+
+**Прогон 7 (`debug-8e6259-7.log`): крашей после Stop нет** — R5b подтверждён
+(stale-скан + guard у Taskbar/UICompat, баланс `pending`). Приоритет 1 закрыт.
+
+**Новая проблема: `Яндекс Музыка.exe` (pid 35444) упал в 11:59:36** с `0xC0000005` внутри
+**уже выгруженного** `GlassCompat.dll`.
+
+Дамп `Яндекс Музыка.exe.35444.dmp.log` (снят 2026-10-31T11:59:36Z):
+
+| Параметр | Значение |
+|---|---|
+| Исключение | AV `0xC0000005`, tid 22084, `Rip = 0x7FF933D7B10B`, params `0x8, Rip` → **запись по адресу 0x8** («this == null» у мёртвого колбэка) |
+| Где | `GlassCompat.dll` base `0x7FF933CC0000` size `0x349000` → **RVA `0xBB10B`**; модуль в `UnloadedModuleList` (тип 14), в `ModuleList` его нет |
+| Стек | 48 потоков; в стеке 22084 — **шесть копий** `0x7FF933D7B10B`; кадры `user32(+0x47c30)`, `win32u`, `ntdll`, `Яндекс Музыка.exe` |
+| Возраст процесса | создан **27.10 03:48** (MiscInfo) — жил 4 суток, т.е. его инжектил INCONTEXT-хук, а не запуск платформы |
+| Соседние события | `WerFault.exe` получил `GlassCompat` в 11:59:34/36; `Яндекс Музыка` pid 31620/35600/38024/44856 — только `dll_attach`+`pin_acq`, без `dll_detach` |
+
+**Причина найдена в логе прогона 6 (не в дампе):**
+
+| Время | Событие |
+|---|---|
+| 10:10:44 | `fu_begin` → `fu_try GlassCompat.dll base 0x7FF930100000` → `fu_end any=1 mask=0` в **pid 35444 (Яндекс Музыка.exe)**, `mask_before=1` |
+| 11:33:35 | то же, base `0x7FF93F0C0000`, `mask_before=1 mask_after=0` — снова pid 35444 |
+
+`mask_before == 1` означает: в процессе был **только** `GlassCompat`, без `GlassCore`/`WndCompat`
+⇒ наш `ExecuteShutdown` там **никогда не выполнялся**; модуль попал туда исключительно
+INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent` для него не вызывался, указатель
+на `GlassCompat_WinEventProc` жил в `user32`, а sweep «добил» модуль `CreateRemoteThread(FreeLibrary)`.
+Первое же диспетчеризованное событие (после старта платформы в 11:59:21) прыгнуло в освобождённую
+страницу — отсюда AV и «this == null» (запись `+8`). Тезис «виноват лишний refcount» не подтвердился:
+модуль выгружался **штатно, но в процессе, где нельзя**.
+
+Внесено (R6):
+
+| # | Файл | Правка |
+|---|---|---|
+| R6-1 | `GlassCompat/src/CoreWindowHostInject.cpp` | `SweepCompatLeftoversOnce`: перед raw `FreeLibrary` — (1) `ack` = наличие `Local\GlassCompat_ShutdownDone_<pid>`; (2) `windows` = число видимых окон процесса; (3) при отсутствии ack сначала `TryRemoteRequestShutdown` (graceful), и только если модуль остался и **окон нет** — прежний `ForceUnload`; процесс с окнами и без ack **не трогаем** (`result=-2`) |
+| R6-2 | `GlassCompat/src/CoreWindowHostInject.cpp` | события `cw_sweep_guard` (`ack/windows/mode/sweep_all/graceful`), расширенный `cw_sweep_pid` (`mode/ack/windows`), агрегаты `graceful`/`denied` в `cw_sweep_end`; kill-switch `GLASS_ULTRACE_SWEEP_ALL=1` возвращает прежнее поведение |
+| R6-3 | `GlassCompat/src/GlassCompat.cpp` | `ExecuteShutdown` создаёт named mutex `Local\GlassCompat_ShutdownDone_<pid>` (ack для R6-1), handle не закрывается — объект живёт до конца процесса |
+
+Как читать:
+
+- `cw_sweep_guard mode=0` — raw free разрешён (есть ack либо `SWEEP_ALL=1`); `mode=1` — сначала graceful;
+  `mode=2` — процесс оставлен как есть (не управляемый, с окнами).
+- `cw_sweep_pid result=-2` — отказ по guard'у; `mode=1 ack=0 windows=0` — невидимый процесс, добит после graceful.
+- `cw_sweep_end denied>0` — столько процессов сознательно оставлено с `GlassCompat` после Stop
+  (цена: пункт S8 не 100 %, зато без AV в чужих процессах). Если это неприемлемо — отказаться от
+  host-wide INCONTEXT-хука (отдельная задача, меняет поведение тултипов/SEH).
+- `ack=0` при `mask_before=1` в любом новом `cw_sweep_*` — признак «модуль в процессе от инжекта,
+  shutdown не шёл»; такие pid нельзя выгружать ничем, кроме graceful.
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
@@ -418,6 +470,10 @@ A/B для taskhostw: прогон с `GLASS_ULTRACE_NOWATCHER=1`. Если кр
 при инкрементальной сборке solution из корня VS делает это сам; при ручной сборке
 по проектам — сначала GlassShared. После сборки проверять время файлов
 `Build\x64\Debug\{GlassCompat,WndCompat}.dll`.
+
+**Текущий цикл (R6):** менялись только `GlassCompat/src/CoreWindowHostInject.cpp` и
+`GlassCompat/src/GlassCompat.cpp` → собирать **GlassCompat**. `GlassShared`, `WndCompat`,
+`GlassSettings` не менялись; пересборка R5b (WndCompat) остаётся в силе, если она ещё не собрана.
 
 ## 6. Протокол тестирования
 

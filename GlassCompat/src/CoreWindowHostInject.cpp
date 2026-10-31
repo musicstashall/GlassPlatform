@@ -1813,12 +1813,61 @@ namespace GlassCompat::CoreWindowHostInject
     // (CreateRemoteThread(FreeLibrary)). Условие безопасности: в процессе остался РОВНО
     // compat (core/wnd/explorer/taskbar/ui уже выгружены ⇒ наш shutdown завершён,
     // потоков внутри GlassCompat нет).
+    // R6 (H96): «слепое» CreateRemoteThread(FreeLibrary) в сторонних процессах — источник
+    // use-after-unmap. Прогон 6: pid 35444 (Яндекс Музыка.exe, живёт с 27.10) добит в
+    // 10:10:44 и 11:33:35 при mask_before=1 (наш shutdown в нём не выполнялся, WndCompat/
+    // GlassCore не грузились ⇒ модуль там только от INCONTEXT-инжекта user32). В 11:59:36
+    // процесс упал AV 0xC0000005 внутри уже выгруженного GlassCompat (RVA 0xBB10B, запись
+    // в address 0x8 — «this==null» у освобождённого колбэка); в стеке потока — 6 копий
+    // этого адреса. Т.е. OS-указатель на наш WinEventProc пережил FreeLibrary.
+    // Порядок: (1) graceful TryRemoteRequestShutdown; (2) raw FreeLibrary только если наш
+    // shutdown подтверждён (named mutex ack) либо в процессе нет видимых окон; иначе deny.
+    // Kill-switch: GLASS_ULTRACE_SWEEP_ALL=1 → прежнее поведение (добивать всех).
+    bool SweepAllEnvUl() noexcept
+    {
+        wchar_t v[8]{};
+        const DWORD n = GetEnvironmentVariableW(L"GLASS_ULTRACE_SWEEP_ALL", v, _countof(v));
+        return n > 0 && n < _countof(v) && v[0] != L'0';
+    }
+
+    bool ShutdownAckUl(DWORD pid) noexcept
+    {
+        wchar_t name[80]{};
+        swprintf_s(name, L"Local\\GlassCompat_ShutdownDone_%lu",
+            static_cast<unsigned long>(pid));
+        HANDLE hAck = OpenMutexW(SYNCHRONIZE, FALSE, name);
+        if (!hAck)
+            return false;
+        CloseHandle(hAck);
+        return true;
+    }
+
+    BOOL CALLBACK CountVisibleWindowsUl(HWND hwnd, LPARAM param) noexcept
+    {
+        auto* ctx = reinterpret_cast<std::pair<DWORD, unsigned>*>(param);
+        DWORD wpid = 0;
+        (void)GetWindowThreadProcessId(hwnd, &wpid);
+        if (wpid == ctx->first && IsWindowVisible(hwnd))
+            ++ctx->second;
+        return TRUE;
+    }
+
+    unsigned VisibleWindowCountUl(DWORD pid) noexcept
+    {
+        std::pair<DWORD, unsigned> ctx{pid, 0};
+        (void)EnumWindows(CountVisibleWindowsUl, reinterpret_cast<LPARAM>(&ctx));
+        return ctx.second;
+    }
+
     unsigned SweepCompatLeftoversOnce(
         const std::vector<DWORD>& candidates,
         const std::unordered_set<DWORD>& alivePids,
-        unsigned& outTried) noexcept
+        unsigned& outTried,
+        unsigned& outGraceful,
+        unsigned& outDenied) noexcept
     {
         unsigned unloaded = 0;
+        const bool sweepAll = SweepAllEnvUl();
         for (const DWORD pid : candidates)
         {
             const unsigned before = GlassUlTrace::RemoteModuleMask(pid);
@@ -1829,9 +1878,51 @@ namespace GlassCompat::CoreWindowHostInject
             if (alivePids.count(pid) != 0)
                 continue;
             ++outTried;
-            const auto res = Shared::ForceUnloadGlassModules::ForceUnload(pid);
-            const unsigned after = GlassUlTrace::RemoteModuleMask(pid);
-            if (after == 0)
+
+            const bool ack = ShutdownAckUl(pid);
+            const unsigned windows = VisibleWindowCountUl(pid);
+            // mode: 0 = raw FreeLibrary (как раньше), 1 = сначала graceful, 2 = не трогать.
+            int mode = (sweepAll || ack) ? 0 : 1;
+            bool gracefulDone = false;
+            if (mode == 1)
+            {
+                gracefulDone = TryRemoteRequestShutdown(pid)
+                    && GlassUlTrace::RemoteModuleMask(pid) == 0u;
+                if (!gracefulDone)
+                    mode = (windows == 0) ? 0 : 2;
+            }
+            // #region agent log
+            // GLASS-ULTRACE
+            GlassUlTrace::Logf(
+                "H96",
+                "CoreWindowHostInject.cpp:SweepCompatLeftovers",
+                "cw_sweep_guard",
+                "\"target_pid\":%lu,\"ack\":%d,\"windows\":%u,\"mode\":%d,\"sweep_all\":%d,"
+                "\"graceful\":%d",
+                static_cast<unsigned long>(pid),
+                ack ? 1 : 0,
+                windows,
+                mode,
+                sweepAll ? 1 : 0,
+                gracefulDone ? 1 : 0);
+            // #endregion
+            int res = -1;
+            if (mode == 2)
+            {
+                ++outDenied;
+                res = -2;
+            }
+            unsigned after = GlassUlTrace::RemoteModuleMask(pid);
+            if (mode != 2)
+            {
+                if (gracefulDone && after == 0u)
+                    ++outGraceful;
+                else
+                    res = static_cast<int>(
+                        Shared::ForceUnloadGlassModules::ForceUnload(pid));
+                after = GlassUlTrace::RemoteModuleMask(pid);
+            }
+            if (after == 0u)
                 ++unloaded;
             // #region agent log
             char leaf[96]{};
@@ -1850,15 +1941,19 @@ namespace GlassCompat::CoreWindowHostInject
                 }
             }
             GlassUlTrace::Logf(
-                "H82",
+                "H96",
                 "CoreWindowHostInject.cpp:SweepCompatLeftovers",
                 "cw_sweep_pid",
-                "\"target_pid\":%lu,\"target_exe\":\"%s\",\"result\":%d,\"mask_before\":%u,\"mask_after\":%u",
+                "\"target_pid\":%lu,\"target_exe\":\"%s\",\"result\":%d,\"mask_before\":%u,"
+                "\"mask_after\":%u,\"mode\":%d,\"ack\":%d,\"windows\":%u",
                 static_cast<unsigned long>(pid),
                 leaf,
-                static_cast<int>(res),
+                res,
                 before,
-                after);
+                after,
+                mode,
+                ack ? 1 : 0,
+                windows);
             // #endregion
         }
         return unloaded;
@@ -2132,6 +2227,8 @@ namespace GlassCompat::CoreWindowHostInject
             const ULONGLONG sweepT0 = GetTickCount64();
             unsigned tried = 0;
             unsigned unloaded = 0;
+            unsigned graceful = 0;
+            unsigned denied = 0;
             for (int pass = 0; pass < 2; ++pass)
             {
                 if (pass > 0)
@@ -2151,7 +2248,8 @@ namespace GlassCompat::CoreWindowHostInject
                     }
                 }
                 unsigned passTried = 0;
-                unloaded += SweepCompatLeftoversOnce(sweepCandidates, alivePids, passTried);
+                unloaded += SweepCompatLeftoversOnce(
+                    sweepCandidates, alivePids, passTried, graceful, denied);
                 tried += passTried;
             }
             unsigned leftGlobal = 0;
@@ -2176,10 +2274,13 @@ namespace GlassCompat::CoreWindowHostInject
                 "H82",
                 "CoreWindowHostInject.cpp:SweepCompatLeftovers",
                 "cw_sweep_end",
-                "\"passes\":2,\"candidates\":%u,\"tried\":%u,\"unloaded\":%u,\"left\":%u,\"left_pids\":\"%s\",\"ms\":%llu",
+                "\"passes\":2,\"candidates\":%u,\"tried\":%u,\"unloaded\":%u,\"graceful\":%u,"
+                "\"denied\":%u,\"left\":%u,\"left_pids\":\"%s\",\"ms\":%llu",
                 static_cast<unsigned>(sweepCandidates.size()),
                 tried,
                 unloaded,
+                graceful,
+                denied,
                 leftGlobal,
                 leftPidsList,
                 GetTickCount64() - sweepT0);
