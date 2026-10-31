@@ -290,6 +290,49 @@ remote `LoadLibrary`); наш поток к этому моменту уже в�
 - `cw_sweep_end left>0` → есть процесс, который не удалось снять снаружи (обычно: нет прав
   `PROCESS_CREATE_THREAD`, WOW64-цель или приложение AppContainer).
 
+### R5 — прогон 5 (выгрузка закрыта) и разбор крэша taskhostw
+
+**Прогон `debug-8e6259-5.log`:** `cw_sweep_pid` ×12, все `mask_before=1 → mask_after=0`,
+`cw_sweep_end unloaded=12 left=1`, `verify hits=2` (только сам хост и живой
+`GlassSettings` с `compat,core`). R4 закрыт: залипших процессов больше нет.
+
+`rc_wait` во всех 14 случаях `released=0` — подтверждена модель «остаток стабилен, снимает
+только внешний `FreeLibrary`»; самопробуждение очередей ссылку не отпускает.
+
+**Дамп `taskhostw.exe.9484` (10:10:47Z, через 2 с после `cw_sweep_end`):**
+
+| Что | Значение |
+|---|---|
+| Код | `0xE06D7363` — необработанное C++-исключение MSVC, tid 22016 |
+| Параметры | `pObject=0x23EAD00`, `pThrowInfo=AccountHealth+0x35720`, база `AccountHealth=0x7FF9E6700000` |
+| Объект исключения | vtable `AccountHealth+0x2D138`, на +0x20 значение `0xC00000E5` = `STATUS_INTERNAL_ERROR` |
+| Стек | `AccountHealth.dll` ← `ucrtbase` (`RaiseException` ← throw-хелпер), ни одного нашего кадра |
+| Модули в процессе | 47, **ни одного Glass-модуля**; `AccountsService`, `Windows.Web.Http`, `Windows.Security.Authentication.Web.Core`, `vaultcli`, `staterepository*`, `usermgrcli` — задача «Account Health» (MSA) |
+| Строки в дампе | `GlassCompat`/`GlassCore`/`WndCompat`/`UxSubclassInfo` — **0 вхождений** (ASCII и UTF-16) |
+
+Вывод: крэш не наш — `taskhostw` выполнял Windows-задачу, которая бросила необработанное
+C++-исключение внутри `AccountHealth.dll`. Тот же паттерн (`e06d7363`, fault module
+`KERNELBASE`) — типовая сигнатура «unhandled C++ exception» у `taskhostw`.
+
+Сопутствующее наблюдение (его и надо закрыть данными): в этом же прогоне наш модуль
+загружался в **два других** экземпляра `taskhostw` (15460, 14312, path=2) и жил там
+**30 и 25 мс** — процесс завершался сразу (`dll_detach process_exit=1`). Корреляции с
+крэшем 9484 нет (его pid в логе отсутствует вообще), но чтобы исключить наше влияние
+окончательно, добавлена возможность A/B.
+
+Внесено (R5):
+
+| # | Файл | Правка |
+|---|---|---|
+| R5-1 | `GlassCompat.cpp:StartMinimalUnloadWatcher` | kill-switch `GLASS_ULTRACE_NOWATCHER=1`: без pin и без потока (DLL просто лежит в процессе до его смерти). Событие `watcher_skipped` |
+| R5-2 | `DllMain.cpp` | `dll_detach` пишет `alive_ms` — сколько прожил модуль в процессе (видно short-lived кейсы) |
+| R5-3 | `CoreWindowHostInject.cpp` | `cw_sweep_end` пишет `left_pids` |
+
+A/B для taskhostw: прогон с `GLASS_ULTRACE_NOWATCHER=1`. Если крэши `taskhostw`
+продолжаются — наше присутствие исключено окончательно (модуль в процессе ничего не делает);
+если исчезают — значит виноват не сам факт загрузки, а watcher-поток, и тогда следующий шаг —
+не ставить watcher в процессах, которые завершаются быстрее, чем приходит Stop.
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:

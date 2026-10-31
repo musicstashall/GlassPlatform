@@ -2155,20 +2155,33 @@ namespace GlassCompat::CoreWindowHostInject
                 tried += passTried;
             }
             unsigned leftGlobal = 0;
+            // #region agent log
+            // GLASS-ULTRACE (R5): кто остался — иначе left=1 не с чем сопоставить.
+            char leftPidsList[256]{};
+            bool firstLeft = true;
             for (const DWORD pid : sweepCandidates)
             {
-                if ((GlassUlTrace::RemoteModuleMask(pid) & 1u) != 0)
-                    ++leftGlobal;
+                if ((GlassUlTrace::RemoteModuleMask(pid) & 1u) == 0)
+                    continue;
+                ++leftGlobal;
+                if (!firstLeft)
+                    strncat_s(leftPidsList, _countof(leftPidsList), ",", _TRUNCATE);
+                char one[16]{};
+                _snprintf_s(one, _TRUNCATE, "%lu", static_cast<unsigned long>(pid));
+                strncat_s(leftPidsList, _countof(leftPidsList), one, _TRUNCATE);
+                firstLeft = false;
             }
+            // #endregion
             GlassUlTrace::Logf(
                 "H82",
                 "CoreWindowHostInject.cpp:SweepCompatLeftovers",
                 "cw_sweep_end",
-                "\"passes\":2,\"candidates\":%u,\"tried\":%u,\"unloaded\":%u,\"left\":%u,\"ms\":%llu",
+                "\"passes\":2,\"candidates\":%u,\"tried\":%u,\"unloaded\":%u,\"left\":%u,\"left_pids\":\"%s\",\"ms\":%llu",
                 static_cast<unsigned>(sweepCandidates.size()),
                 tried,
                 unloaded,
                 leftGlobal,
+                leftPidsList,
                 GetTickCount64() - sweepT0);
         }
         // #endregion

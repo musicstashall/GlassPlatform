@@ -3989,6 +3989,28 @@ namespace
 
     void StartMinimalUnloadWatcher(ULONGLONG path) noexcept
     {
+        // #region agent log
+        // GLASS-ULTRACE (R5, H95): kill-switch для A/B по крэшу taskhostw.
+        // В прогоне 5 наш модуль жил в taskhostw 15460/14312 всего 30 мс (процесс сразу
+        // завершался). Отдельный дамп taskhostw 9484 — C++ exception (0xE06D7363) из
+        // AccountHealth.dll при 0xC00000E5, наших модулей в процессе нет. Чтобы отделить
+        // «наше присутствие» от «бага Windows», при GLASS_ULTRACE_NOWATCHER=1 watcher
+        // не ставит pin и не создаёт поток: DLL просто лежит в процессе до его смерти.
+        {
+            wchar_t noWatcher[16]{};
+            if (GetEnvironmentVariableW(L"GLASS_ULTRACE_NOWATCHER", noWatcher, _countof(noWatcher)) > 0)
+            {
+                GlassUlTrace::Logf(
+                    "H95",
+                    "GlassCompat.cpp:StartMinimalUnloadWatcher",
+                    "watcher_skipped",
+                    "\"path\":%llu,\"env\":1,\"rc\":%u",
+                    path,
+                    GlassUlTrace::QueryLoadCount(GetModuleHandleW(L"GlassCompat.dll")));
+                return;
+            }
+        }
+        // #endregion
         static std::once_flag s_minimalUnloadOnce;
         std::call_once(s_minimalUnloadOnce, [path]() noexcept
         {

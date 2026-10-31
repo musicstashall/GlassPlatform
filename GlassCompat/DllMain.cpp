@@ -10,6 +10,12 @@
 #include <cstdlib>
 #endif
 
+// #region agent log
+// GLASS-ULTRACE (R5): сколько прожил модуль в процессе. Нужно для short-lived процессов
+// (taskhostw живёт десятки мс): по alive_ms видно, успел ли наш watcher вообще начать работу.
+static ULONGLONG g_ultraceAttachTick = 0;
+// #endregion
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
 {
     (void)reserved;
@@ -30,6 +36,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
         (void)_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
         (void)_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
 #endif
+        g_ultraceAttachTick = GetTickCount64();
         // #region agent log
         // GLASS-ULTRACE
         GlassUlTrace::Logf(
@@ -50,9 +57,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
             "H82",
             "DllMain.cpp:DllMain",
             "dll_detach",
-            "\"base\":\"%p\",\"reason\":\"detach\",\"process_exit\":%d",
+            "\"base\":\"%p\",\"reason\":\"detach\",\"process_exit\":%d,\"alive_ms\":%llu",
             static_cast<void*>(hModule),
-            reserved ? 1 : 0);
+            reserved ? 1 : 0,
+            g_ultraceAttachTick ? (GetTickCount64() - g_ultraceAttachTick) : 0ull);
         // #endregion
         if (GlassCompat::IsProcessCrashGuardInstalled())
             GlassCompat::UninstallProcessCrashGuard();
