@@ -333,7 +333,10 @@ R12h-2 действует и на удалятор: `StopAllForUninstall` идё
 писать слот «один раз на процесс» (по маркеру `GlassCompatGateSlot_<pid>`) ломала список:
 процесс, получивший отказ в прошлой сессии, в новую карту уже не попадал, и «отвергнутые»
 исчезали из GlassSettings, хотя user32 продолжал подсовывать им `GlassCompat`.
-Цена — один `OpenFileMapping`+`MapViewOfFile` на попытку загрузки.
+Цена — один `OpenFileMapping`+`MapViewOfFile` на попытку загрузки. Плюс хост на старте
+(`RepublishCachedAttachDenials`) публикует слоты по маркерам отказа `GlassCompatGateDeny_<pid>`:
+процесс, в который user32 больше не пытается загрузить DLL, иначе выпадал бы из списка до
+следующего события в нём.
 
 Контракт `GlassCompat/docs/GlassCompat-unload.md` не тронут: фазы, таймауты и семантика
 `path=1/2/3` те же.

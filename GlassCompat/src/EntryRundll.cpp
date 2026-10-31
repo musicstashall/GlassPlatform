@@ -20,6 +20,7 @@
 #include <ForceUnloadGlassModules.h>
 #include <windows.h>
 #include <sddl.h>
+#include <tlhelp32.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -695,6 +696,68 @@ namespace
             allowMode ? L"allow" : L"deny", count, path, ok ? 1 : 0);
     }
 
+    // Карта инжекта живёт одну сессию платформы (CreateHostResources обнуляет её), а решение
+    // об отказе у процесса закэшировано в kernel-объекте `Local\GlassCompatGateDeny_<pid>`
+    // и живёт до конца самого процесса. user32 может больше не дёрнуть DllMain в «тихом»
+    // процессе (нет событий — нет INCONTEXT-загрузки), поэтому после рестарта платформы
+    // исключённые процессы оставались без слота и пропадали из списка GlassSettings.
+    // Публикуем их сами: наличие маркера отказа доказывает, что GlassCompat в процесс
+    // отображалась и гейт её отверг.
+    void RepublishCachedAttachDenials() noexcept
+    {
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE)
+            return;
+
+        BOOL selfWow = FALSE;
+        if (!IsWow64Process(GetCurrentProcess(), &selfWow))
+        {
+            CloseHandle(snap);
+            return;
+        }
+        const DWORD self = GetCurrentProcessId();
+
+        PROCESSENTRY32W pe{};
+        pe.dwSize = sizeof(pe);
+        if (Process32FirstW(snap, &pe))
+        {
+            do
+            {
+                const DWORD pid = pe.th32ProcessID;
+                if (pid == 0 || pid == self)
+                    continue;
+                // Свою разрядность публикует свой хост: иначе x64-хост записал бы в x64-карту
+                // и 32-битный процесс, и в списке появилась бы вторая строка того же pid.
+                HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+                if (!process)
+                    continue;
+                BOOL targetWow = FALSE;
+                const BOOL wowOk = IsWow64Process(process, &targetWow);
+                CloseHandle(process);
+                if (!wowOk || ((selfWow != FALSE) != (targetWow != FALSE)))
+                    continue;
+
+                wchar_t denyName[64]{};
+                if (swprintf_s(denyName, L"Local\\GlassCompatGateDeny_%lu",
+                        static_cast<unsigned long>(pid)) <= 0)
+                    continue;
+                HANDLE denied = OpenMutexW(SYNCHRONIZE, FALSE, denyName);
+                if (!denied)
+                    continue;
+                CloseHandle(denied);
+
+                (void)Shared::InjectProcessMap::TryUpsert(
+                    pid,
+                    Shared::InjectProcessMap::Kind::RejectedBlockList,
+                    /*path=*/2,
+                    Shared::InjectProcessMap::State::Alive,
+                    Shared::InjectProcessMap::ModuleCompat,
+                    pe.szExeFile);
+            } while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+    }
+
     static void ClearHostPid() noexcept
     {
         if (!s_hostPidMapping)
@@ -1119,6 +1182,9 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         // Broadcast WM_NULL — лёгкий пинок очередей (как при shutdown), без гарантии WinEvent.
         SendNotifyMessageW(HWND_BROADCAST, WM_NULL, 0, 0);
     }
+    // Список «отвергнутых» не должен зависеть от того, дёрнет ли user32 DllMain в процессе
+    // ещё раз: всё, что уже отказано, публикуем в текущую карту сразу после установки хуков.
+    RepublishCachedAttachDenials();
 
     // AppContainer SEH/SMEH: глобальный hook (pid=0,tid=0) DLL не грузит — ACL + per-thread + LoadLibrary.
     GlassCompat::CoreWindowHostInject::GrantPeerDllsAppPackagesAccess();
