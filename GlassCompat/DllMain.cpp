@@ -7,6 +7,7 @@
 #include <string.h>
 #include <GlassUlTrace.h>
 #include <ProcessBlockList.h>
+#include <InjectProcessMap.h>
 #include <cstddef>
 
 #if defined(_DEBUG)
@@ -345,6 +346,26 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
                 gle);
             if (!allow)
             {
+                // R12c: отказ — тоже факт, и он должен быть виден в списке процессов.
+                // Раньше гейт просто возвращал FALSE: слота в карте не появлялось, и
+                // «отвергнутые» процессы в UI отсутствовали физически («не вижу
+                // отвергнутых»). Пишем слот здесь, пока модуль ещё отображён в процессе.
+                // ModuleBits=0 — наших модулей в процессе нет, path=2 — отказ по списку
+                // (Forbidden отличается только на пути Initialize, там пишет path=3).
+                // Слот снимается сам: GS чистит записи мёртвых PID.
+                const bool slotWritten = Shared::InjectProcessMap::TryUpsert(
+                    GetCurrentProcessId(),
+                    Shared::InjectProcessMap::Kind::RejectedBlockList,
+                    2,
+                    Shared::InjectProcessMap::State::Alive,
+                    0,
+                    exeStem);
+                GlassUlTrace::Logf(
+                    "H97",
+                    "DllMain.cpp:DllMain",
+                    "deny_slot",
+                    "\"written\":%d,\"kind\":2,\"path\":2",
+                    slotWritten ? 1 : 0);
                 // Маркер «уже отказали» — повторные LoadLibrary от user32 молчат.
                 (void)CreateMutexW(nullptr, FALSE, denyName);
                 GlassUlTrace::Logf(

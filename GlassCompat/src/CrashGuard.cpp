@@ -594,6 +594,14 @@ namespace
             SignalPlatformStopBothArch();
     }
 
+    /// Служебные исключения ntdll, которые не являются падениями процесса.
+    static bool IsDebugPrintException(DWORD code) noexcept
+    {
+        return code == 0x40010006UL   // DBG_PRINTEXCEPTION_C
+            || code == 0x4001000AUL   // DBG_PRINTEXCEPTION_WIDE_C
+            || code == 0x406D1388UL;  // MS_VC_EXCEPTION (имя потока)
+    }
+
     // Первый шанс: многие краши WinUI не доходят до UEF — пишем дамп здесь (explorer по умолчанию).
     LONG NTAPI GlassVectoredDumpHandler(EXCEPTION_POINTERS* info) noexcept
     {
@@ -602,6 +610,13 @@ namespace
 
         const DWORD code = static_cast<DWORD>(info->ExceptionRecord->ExceptionCode);
         const bool explorer = IsCurrentProcessExplorer();
+
+        // R12c: 0x40010006 (DBG_PRINTEXCEPTION_C) и 0x4001000A (DBG_PRINTEXCEPTION_WIDE_C) —
+        // не падения, а транспорт OutputDebugString: ntdll::RaiseException с этими кодами.
+        // В прогоне 14 они дали 72 ложных `crash_seen` и забили общий лог. Отсекаем до всех
+        // логов и проб модуля; 0x406D1388 (имя потока) — тот же класс служебных исключений.
+        if (IsDebugPrintException(code))
+            return EXCEPTION_CONTINUE_SEARCH;
 
         // AutoIt/JIT: first-chance AV вне Glass — без DebugLog/MiniDump (VEH+лог вешали UI).
         if (!explorer && code == STATUS_ACCESS_VIOLATION)

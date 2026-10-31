@@ -4165,18 +4165,16 @@ namespace
             }
         }
         // #endregion
-        static std::once_flag s_minimalUnloadOnce;
-        std::call_once(s_minimalUnloadOnce, [path]() noexcept
+        // R12c: регистрация слота отделена от создания потока. Раньше всё лежало внутри
+        // std::call_once, и первый вызов (страховка path=4 из DllMain) навсегда «съедал»
+        // право записать более точный путь. Из-за этого процессы из ProcessBlockList и
+        // Forbidden больше не помечались Rejected* и пропадали из списка «отвергнутых».
+        // Теперь поток создаётся один раз, а слот уточняется при каждом обращении
+        // (path=2/3 перекрывает path=4, обратное — нет).
         {
-            // R12b: для path=4 (страховка из DllMain) НЕ затираем уже существующий слот.
-            // DllMain отрабатывает раньше Initialize и раньше Upsert хоста: если записать
-            // здесь Kind=RejectedBlockList/path=4 поверх нормального слота, процесс навсегда
-            // выглядит «отвергнутым» и выпадает из списка «в работе». Пишем только если
-            // записи ещё нет, и всегда — реальный набор наших модулей в процессе.
             bool hasSlot = false;
-            if (path == 4)
+            Shared::InjectProcessMap::Slot slotProbe{};
             {
-                // Слоты: 512 записей; читаем все и ищем свой pid (порядок не гарантирован).
                 static Shared::InjectProcessMap::Slot s_slots[Shared::InjectProcessMap::kSlotCount];
                 DWORD slotCount = 0;
                 if (Shared::InjectProcessMap::TryReadSlots(
@@ -4188,19 +4186,22 @@ namespace
                         if (s_slots[i].pid == self)
                         {
                             hasSlot = true;
+                            slotProbe = s_slots[i];
                             break;
                         }
                     }
                 }
             }
-            if (!hasSlot)
+
+            // path=4 пишет только «записи нет вовсе»; 2/3 — точнее страховки и перекрывают её.
+            const bool watcherOnly = (path == 4);
+            const bool slotIsRejected =
+                hasSlot && (slotProbe.kind == Shared::InjectProcessMap::Kind::RejectedBlockList
+                            || slotProbe.kind == Shared::InjectProcessMap::Kind::RejectedForbidden);
+            const bool needWrite = !hasSlot || (!watcherOnly && !slotIsRejected);
+
+            if (needWrite)
             {
-                // R12b: path=4 — это НЕ «отвергнутый» процесс. Страховочный watcher
-                // ставится любому процессу, куда user32 загрузил DLL, и запись должна
-                // отражать реальность: процесс активен, наши модули в нём загружены.
-                // Иначе UI показывал такие процессы как Rejected и они «пропадали»
-                // из списка «в работе» (жалоба прогона 13).
-                const bool watcherOnly = (path == 4);
                 const auto kind = watcherOnly
                     ? Shared::InjectProcessMap::Kind::ActiveGui
                     : ((path == 3) ? Shared::InjectProcessMap::Kind::RejectedForbidden
@@ -4212,7 +4213,11 @@ namespace
                     watcherOnly ? CurrentModuleBits()
                                 : Shared::InjectProcessMap::ModuleCompat);
             }
+        }
 
+        static std::once_flag s_minimalUnloadOnce;
+        std::call_once(s_minimalUnloadOnce, [path]() noexcept
+        {
             HMODULE hRef = nullptr;
             if (!GetModuleHandleExW(
                     GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,

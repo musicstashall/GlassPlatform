@@ -703,6 +703,38 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 `crash_seen/crash_unhandled` и с каким `code`; (2) в `watcher_handles` у «спящих» — что не
 открылось (обычно `host_alive=0` в AppContainer).
 
+### R12c — прогон 14: выгрузка чистая, но UI не показывает выгорание точек и «отвергнутых»
+
+**Прогон 14 (`debug-8e6259-14.log`, 489 строк, 60 с), единственный стоп — End задачи из
+планировщика.** Выгрузка прошла полностью: `watcher_wake trigger=stopEvent` у всех 8
+процессов в 44.7 с, `host_close_ping pings=4` в 44.8, `dll_detach` у всех (последний `mmc`
+— 59.7 с). Остатков нет. Замечания пользователя касались уже не выгрузки, а отображения.
+
+| Наблюдение | Данные прогона | Причина в коде |
+|---|---|---|
+| Строки процессов в UI исчезают мгновенно, точки модулей не гаснут | стоп из планировщика: карта закрывается целиком, а не по одному слоту | `InjectRuntimeMonitor.CaptureSnapshot` на cheap-idle возвращал `new InjectRuntimeSnapshot { PlatformRunning = false }` — пустые массивы; таблица удаляла строки одним sync'ом |
+| «Отвергнутых» процессов в списке нет | единственный отказ за прогон — `GlassSettings.exe dll_attach_denied gate=builtin` в 10.0 с, слота в карте нет | гейт `DllMain.cpp` возвращал `FALSE` без записи в `InjectProcessMap`: показывать было физически нечего |
+| В логе 72 записи `crash_seen` | коды `0x40010006`/`0x4001000A`, fault IP `ntdll!RaiseException` | `OutputDebugString` — не краш; VEH писал их как падения и забивал лог |
+
+Правки R12c:
+
+| # | Файл | Правка |
+|---|---|---|
+| R12c-1 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | вместо пустого снимка — **выгорание**: `WithFade()` держит строку и гасит по одной точке модуля за тик (таймер 1 с, до 6 тиков), строка удаляется последней. Работает и при частичной потере битов, и при исчезновении PID из карты/скана; состояние — `_prevBits`/`_prevEntries`/`_fadeByPid` |
+| R12c-2 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | новое поле `InjectRuntimeEntry.IsFading`: догорающие строки не попадают в счётчики Active/Rejected/Residual и не питают `_stickyPids`/`_bridgePids` (иначе они бы «воскрешали» остатки) |
+| R12c-3 | `GlassCompat/DllMain.cpp` | отказ гейта пишет слот `Kind::RejectedBlockList`, `path=2`, `State::Alive`, `moduleBits=0` + лог `deny_slot written=1` — «отвергнутые» появляются в списке |
+| R12c-4 | `GlassCompat/src/GlassCompat.cpp` | `StartMinimalUnloadWatcher`: регистрация слота вынесена из `std::call_once`; `path=2/3` уточняет слот поверх страховки `path=4`, обратное — нет (иначе первый вызов «съедал» право записать точный путь) |
+| R12c-5 | `GlassCompat/src/CrashGuard.cpp` | фильтр `IsDebugPrintException()`: `0x40010006`, `0x4001000A`, `0x406D1388` не считаются падением и не пишутся в `crash_seen` |
+
+Что должен показать следующий прогон:
+
+| Ожидание | Как проверить |
+|---|---|
+| При стопе из планировщика строки не исчезают, а гаснут по точкам | страница «Процессы» с шагом ~1 с: у строки последовательно пропадают индикаторы модулей, затем строка уходит |
+| Отказ гейта виден как «отвергнутый» | в списке строка с красным индикатором (в прогоне 14 — сам `GlassSettings.exe`) |
+| Лог без ложных крашей | `crash_seen` только с реальными кодами (`0xC0000005`, `0xC0000409`, …) |
+| Слот пишется | `deny_slot ... written=1` рядом с `dll_attach_denied` |
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
@@ -742,10 +774,11 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 по проектам — сначала GlassShared. После сборки проверять время файлов
 `Build\x64\Debug\{GlassCompat,WndCompat}.dll`.
 
-**Текущий цикл (R9):** менялись `GlassShared/include/GlassUlTrace.h`, файлы **GlassCompat**
-и добавлен **`GlassSettings/Native/PostStopVerify.cpp`** → собирать
-**GlassShared → GlassCompat → GlassSettings.Native** (плюс **WndCompat**, он тоже включает
-`GlassUlTrace.h`).
+**Текущий цикл (R12c):** менялись `GlassCompat/DllMain.cpp`,
+`GlassCompat/src/{GlassCompat,CrashGuard}.cpp` и C# `GlassSettings/Services/InjectRuntimeMonitor.cs`
+→ собирать **GlassCompat** (x64 **и** x86 — менялись `DllMain.cpp`/`GlassCompat.cpp`) и
+**GlassSettings** (UI). `GlassShared` не менялся, но `GlassCompat` линкует его статически —
+при полной сборке solution порядок обычный: `GlassShared → GlassCompat → GlassSettings.Native`.
 
 ## 6. Протокол тестирования
 
