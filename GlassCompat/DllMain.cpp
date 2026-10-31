@@ -308,6 +308,68 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
         (void)_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
         (void)_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
 #endif
+        // R12i: путь отказа проверяем ДО логов загрузки. Повторные LoadLibrary от user32
+        // в исключённом процессе (msedge: 1600+ попыток за сессию) больше не пишут ни
+        // `dll_attach`, ни `dll_detach`, ни слот карты: решение уже принято и закэшировано
+        // мьютексом с именем pid. В прогоне 17 это дало 1878 `deny_slot` и ~1900 пар
+        // attach/detach — при том, что новой информации там не было ни строки.
+        wchar_t exePath[MAX_PATH]{};
+        const DWORD exeLen = GetModuleFileNameW(nullptr, exePath, _countof(exePath));
+        const wchar_t* exeStem = exePath;
+        if (exeLen > 0)
+        {
+            for (DWORD i = exeLen; i > 0; --i)
+            {
+                if (exePath[i - 1] == L'\\' || exePath[i - 1] == L'/')
+                {
+                    exeStem = exePath + i;
+                    break;
+                }
+            }
+        }
+        // Отказ кэшируем на процесс. Статик модуля НЕ годится: при возврате FALSE модуль
+        // не загружается, и его состояние исчезает — так в прогоне 9 получилось 21
+        // сообщение вместо одного. Держим kernel-объект с именем pid: он живёт в таблице
+        // хэндлов процесса, а не в модуле, и переживает возврат FALSE.
+        wchar_t denyName[64]{};
+        swprintf_s(denyName, L"Local\\GlassCompatGateDeny_%lu",
+            static_cast<unsigned long>(GetCurrentProcessId()));
+        // Отдельный маркер «слот отказа уже записан»: без него каждый повторный отказ
+        // заново писал карту (CreateFileMapping+MapViewOfFile на каждую попытку).
+        wchar_t slotName[64]{};
+        swprintf_s(slotName, L"Local\\GlassCompatGateSlot_%lu",
+            static_cast<unsigned long>(GetCurrentProcessId()));
+        const bool slotWrittenAlready = [] (const wchar_t* name) noexcept
+        {
+            if (HANDLE h = OpenMutexW(SYNCHRONIZE, FALSE, name))
+            {
+                CloseHandle(h);
+                return true;
+            }
+            return false;
+        }(slotName);
+        auto writeSlotOnce = [&](bool cached) noexcept
+        {
+            if (slotWrittenAlready)
+                return;
+            WriteRejectedSlot(exeStem, cached);
+            (void)CreateMutexW(nullptr, FALSE, slotName);
+        };
+
+        {
+            HANDLE hDenied = OpenMutexW(SYNCHRONIZE, FALSE, denyName);
+            if (hDenied)
+            {
+                CloseHandle(hDenied);
+                // Гейт уже отказывал этому процессу (в т.ч. в прошлой сессии платформы).
+                // Решение не пересчитываем; слот пишем один раз на процесс — иначе
+                // долгоживущие исключённые процессы не попадают в список вообще (карта
+                // в момент первого отказа принадлежала другой сессии).
+                writeSlotOnce(/*cached=*/true);
+                return FALSE;
+            }
+        }
+
         g_ultraceAttachTick = GetTickCount64();
         // #region agent log
         // GLASS-ULTRACE
@@ -323,38 +385,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
         // незагруженным: user32 не получит колбэк в этом процессе, а значит не будет
         // ни «висящей» OS-ссылки, ни остатка DLL после Stop, ни AV в чужом стеке.
         {
-            wchar_t exePath[MAX_PATH]{};
-            const DWORD exeLen = GetModuleFileNameW(nullptr, exePath, _countof(exePath));
-            const wchar_t* exeStem = exePath;
-            if (exeLen > 0)
-            {
-                for (DWORD i = exeLen; i > 0; --i)
-                {
-                    if (exePath[i - 1] == L'\\' || exePath[i - 1] == L'/')
-                    {
-                        exeStem = exePath + i;
-                        break;
-                    }
-                }
-            }
-            // Отказ кэшируем на процесс. Статик модуля НЕ годится: при возврате FALSE модуль
-            // не загружается, и его состояние исчезает — так в прогоне 9 получилось 21
-            // сообщение вместо одного. Держим kernel-объект с именем pid: он живёт в таблице
-            // хэндлов процесса, а не в модуле, и переживает возврат FALSE.
-            wchar_t denyName[64]{};
-            swprintf_s(denyName, L"Local\\GlassCompatGateDeny_%lu",
-                static_cast<unsigned long>(GetCurrentProcessId()));
-            if (HANDLE hDenied = OpenMutexW(SYNCHRONIZE, FALSE, denyName))
-            {
-                CloseHandle(hDenied);
-                // Гейт уже отказывал этому процессу (в т.ч. в прошлой сессии платформы).
-                // Решение не пересчитываем, но слот отказа обновляем: иначе долгоживущие
-                // исключённые процессы не попадают в список вообще — карта в момент
-                // первого отказа принадлежала другой сессии.
-                WriteRejectedSlot(exeStem, /*cached=*/true);
-                return FALSE;
-            }
-
             GateMode gateMode = GateMode::Off;
             // mode — узкая строка: Logf принимает const char*, wide-строка печаталась
             // как один символ ("d" вместо "deny") в прогоне 8.
@@ -378,7 +408,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
             if (!allow)
             {
                 // Отказ — тоже факт: пишем слот, пока модуль ещё отображён в процессе.
-                WriteRejectedSlot(exeStem, /*cached=*/false);
+                writeSlotOnce(/*cached=*/false);
                 // Маркер «уже отказали» — повторные LoadLibrary от user32 молчат.
                 (void)CreateMutexW(nullptr, FALSE, denyName);
                 GlassUlTrace::Logf(
@@ -399,16 +429,21 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
     case DLL_PROCESS_DETACH:
         // Не Stop() лог-клиента здесь: join воркера под loader lock запрещён.
         // GUI / MinimalUnloadWatcher / short-lived Main стопают клиент сами.
+        // R12i: attach для отказанного процесса не логировался — парную строку тоже не
+        // пишем (g_ultraceAttachTick != 0 означает «эта загрузка попала в лог»).
         // #region agent log
         // GLASS-ULTRACE
-        GlassUlTrace::Logf(
-            "H82",
-            "DllMain.cpp:DllMain",
-            "dll_detach",
-            "\"base\":\"%p\",\"reason\":\"detach\",\"process_exit\":%d,\"alive_ms\":%llu",
-            static_cast<void*>(hModule),
-            reserved ? 1 : 0,
-            g_ultraceAttachTick ? (GetTickCount64() - g_ultraceAttachTick) : 0ull);
+        if (g_ultraceAttachTick != 0)
+        {
+            GlassUlTrace::Logf(
+                "H82",
+                "DllMain.cpp:DllMain",
+                "dll_detach",
+                "\"base\":\"%p\",\"reason\":\"detach\",\"process_exit\":%d,\"alive_ms\":%llu",
+                static_cast<void*>(hModule),
+                reserved ? 1 : 0,
+                GetTickCount64() - g_ultraceAttachTick);
+        }
         // #endregion
         if (GlassCompat::IsProcessCrashGuardInstalled())
             GlassCompat::UninstallProcessCrashGuard();
