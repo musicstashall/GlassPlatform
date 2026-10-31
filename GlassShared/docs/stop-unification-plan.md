@@ -15,7 +15,7 @@
 | 2 | **GlassShellExt** (меню рабочего стола) | `DesktopShellActions` | `TryBeginLifecycleBusy` + `GS::SignalPlatformStop` + ожидание `!Running` + `StopOrphanAutorunTaskInstance` | `GlassShellExt/DesktopShellActions.cpp:510-525` |
 | 3 | **GlassSetup** (установка/обновление) | `StopRunningOpenGlassTasks` | **не сигналит StopEvent**: перечисляет задачи планировщика и вызывает `IRegisteredTask::Stop(0)` (жёсткое завершение) | `GlassSetup/src/InstallSupport/GlassInstallUtil.cpp:817-860`, `GlassInstallHost.cpp` |
 | 4 | **GlassUnins** (удаление) | тот же путь | то же + отдельный `TaskStop` перед снятием MSI | `GlassSetup/src/InstallSupport/GlassInstallRemoval.cpp:797-801` |
-| 5 | **Ручная остановка задачи в Планировщике** | — | хост убивается планировщиком; `GlassStop`-вызова нет вообще | — |
+| 5 | **Ручная остановка задачи в Планировщике** (и любой TerminateProcess хоста) | — | хост убивается; инжектированные процессы узнают об этом сами — по abandoned-мьютексу `GlassPlatform.HostAlive` (см. §2а) | `GlassCompat/src/GlassCompat.cpp:3283` |
 | 6 | **LogViewer** | `UiMainWindow_ImplPlatform.cpp` | `SignalPlatformStop` (свой, не через общий слой) | `LogViewer/Ui/MainWindow/UiMainWindow_ImplPlatform.cpp` |
 | 7 | **GlassCompat: CrashGuard** | `SignalPlatformStopBothArch` | дублирует обе ветки arch вручную | `GlassCompat/src/CrashGuard.cpp:563` |
 | 8 | **GlassCompat: HostShellWatchdog** | — | свой цикл `SetEvent` по обоим архам | `GlassCompat/src/HostShellWatchdog.cpp:48` |
@@ -65,15 +65,85 @@
 
 ---
 
+---
+
+## 2б. `ForceUnloadResiduals` пошагово (что делает «дожим»)
+
+Функция живёт **в процессе хоста** (`GlassCompat/src/CoreWindowHostInject.cpp:2033-2440`) и
+вызывается из `EntryRundll.cpp` после `host_shutdown_signal`. Ни одного нового процесса она
+не создаёт.
+
+| Шаг | Что делает | События |
+|---|---|---|
+| 1 | `CollectCompatCandidates` — снимок процессов, где есть `GlassCompat` (до всех ожиданий, чтобы не зацепить свежие инжекты) | — |
+| 2 | забирает `g_remoteLoadPids` (процессы, куда модули грузили через `LoadLibrary` удалённо: ShellHost/SEH/Start/Search) и очищает список | — |
+| 3 | добавляет CoreWindow-хосты, `explorer.exe`, `Widgets*`, у которых реально загружен `GlassCompat` (Toolhelp) | `cw_residual_begin`, `cw_residual_pid` |
+| 4 | UICompat-restore: для каждого (кроме explorer — там remote shutdown давал AV в `Windows.UI.Xaml`) `TrySehPlmWake` → проверка `IsRemoteProcessSchedulable` → `WakeRemoteCwProcess` → `PostWmNullToTrackedHwnds` → `TryRemoteUICompatShutdown` | — |
+| 5 | мягкий сигнал: `SignalRemoteUnload` (флаг в WPM + named event + `WM_QUIT`), wake, `WM_NULL` | — |
+| 6 | немедленный graceful: `TryRemoteRequestShutdown` — `CreateRemoteThread` **внутрь** процесса с его же export `GlassCompat_RequestShutdown` (внутри: `RequestShutdown` → GUI-цикл → `ExecuteShutdown` → `FreeLibraryAndExitThread`). Это **просьба**, а не выгрузка | `cw_remote_shutdown` |
+| 7 | ожидание №1: до 20 тиков (40 для смеси процессов) × 50 мс, каждый тик дешёвый wake; полное перечисление потоков — каждый 10-й тик; ранний выход, если остался только OS-pin (все `GuiTid=0`) | — |
+| 8 | повторный сигнал + ожидание №2: 10–20 тиков × 50 мс | — |
+| 9 | ушедшим — `TrySehPlmRest(DisableDebugging)`; у кого модуль остался — `EnableDebugging` не снимаем | — |
+| 10 | подсчёт остатка | `cw_residual_end` (`left`, `left_pids`, `ms`) |
+| 11 | sweep: по каждому кандидату с `mask==1` (только `compat`) — `ack` (named mutex `GlassCompat_ShutdownDone_<pid>`), число видимых окон, graceful + «пинок» окон/потоков, ожидание 0.6 с; не ушёл → `mode=2` (оставить) | `cw_sweep_guard`, `cw_sweep_pid` |
+| 12 | агрегат | `cw_sweep_end` (`candidates/tried/unloaded/graceful/denied/left/left_pids`) |
+
+Чего функция **не** делает (по политике R6/R7): не вызывает `FreeLibrary` в чужих процессах
+(только при `GLASS_ULTRACE_SWEEP_ALL=1`), не завершает процессы, не трогает explorer-UICompat.
+
+Бюджет времени в прогоне 11: `cw_residual_begin` 13:52:32.860 → `cw_residual_end` 13:52:43.417
+(10.9 с, из них ожидания 1–2 и UICompat), затем sweep 13:52:45.7…54.7 (~9 с — по ~2.2 с на
+кандидата, потому что каждый graceful-вызов ждёт до 3 с). Основной резерв ускорения Stop —
+параллельный обход кандидатов и отказ от graceful для процессов с `ack=1` и без окон.
+
+---
+
+## 2а. Стоп через завершение хоста — штатный путь, а не дефект
+
+Требование к платформе: **остановка хоста = сигнал остановки всем процессам**. Оно
+выполнено и должно сохраниться при унификации. Механика (работает уже сейчас):
+
+| Шаг | Кто | Что происходит |
+|---|---|---|
+| 1 | хост | всё время держит мьютекс `Local\GlassPlatform.HostAlive.x64` (own) |
+| 2 | каждый инжектированный процесс | в GUI-цикле `WaitForMultipleObjects` ждёт `StopEvent` / `UnloadRequest` / **`HostAlive`** (`GlassCompat.cpp:3226-3290`) |
+| 3 | хост убит (TaskScheduler `End`, диспетчер, падение) | мьютекс становится **abandoned** → ожидание отдаёт `WAIT_ABANDONED_0` |
+| 4 | процесс | `ReleaseMutex` (передать сигнал следующему ждущему) → `guiStopTrigger="hostAlive"` → `ExecuteShutdown()` → `FreeLibraryAndExitThread` |
+| 5 | процессы `path=2/3` (BlockList/Forbidden) | то же в `StartMinimalUnloadWatcher`: `trigger=hostAlive` → FLAET (`GlassCompat.cpp:4270-4290`) |
+| 6 | ОС | после смерти процесса-владельца INCONTEXT-хуков user32 отпускает per-process ссылки, и оставшиеся процессы доканчивают unload |
+
+Что при этом **не** происходит (и это нормально): хост, убитый жёстко, не выполняет свою
+часть работы — `UnhookWinEvent`, `host_broadcast`, `ForceUnloadResiduals`. Компенсируют это
+пункты 4–6: каждый процесс уходит сам, а ссылки на нашу DLL снимает ОС по факту смерти
+процесса-владельца хуков. Именно поэтому в логе прогона 11 `dll_detach` приходят **после**
+`dll_detach` хоста.
+
+Что в этом пути действительно надо доработать (пункты для этапа 5 плана):
+
+| # | Проблема | Доработка |
+|---|---|---|
+| A1 | процесс, в который DLL попала INCONTEXT-инъекцией, но `WinEventProc` больше не вызывался, не имеет ни GUI-цикла, ни watcher'а → узнает о стопе только при следующем событии | при неудаче `StartGuiThreadIfNeeded` (и при `Initialize`, если GUI не поднялся) поднимать `StartMinimalUnloadWatcher(1)` — тогда liveness-ожидание есть у любого процесса с нашей DLL |
+| A2 | «тихий» процесс может отдать модуль через минуты (в прогоне 11 `DllHost` 35892 — 2 мин 15 с после стопа) | различать «ещё не проснулся» и «не может»: watcher пишет `host_alive_seen` с задержкой; для инсталлятора это повод показать страницу остатков, а не жать |
+| A3 | нет отдельной записи «стоп пришёл по смерти хоста» единого формата | `stop_trigger what="hostAlive"`, `stop_result reason=host_dead` в общем формате `GlassStop` |
+| A4 | никто не проверяет, что путь «смерть хоста» реально доходит до всех | тест-сценарий U7: End задачи → у каждого процесса `stop_trigger what=hostAlive` → `verify post8 hits=0` |
+
+**Вывод для унификации:** `StopEvent` остаётся предпочтительным путём (хост успевает снять
+хуки и разослать `host_broadcast`), но путь «хост убит» — равноправный штатный режим, а не
+ошибка. Поэтому в `GlassStop` он становится явной причиной `Reason::HostDead`, а не
+«недостатком, который надо исключить»; установщику достаточно остановить задачу и
+дождаться, пока процессы сами снимут модули (шаги 4–6), — принудительная выгрузка не нужна.
+
 ## 3. Что не так с текущим состоянием
 
 1. **Пять инициаторов — четыре механизма.** Поведение зависит от того, кто нажал «стоп»:
    из установщика процесс умирает жёстко, из меню — мягко.
-2. **Установщик не посылает StopEvent.** Инжектированные процессы узнают о конце только по
-   исчезновению `HostAlive`; при жёстком убийстве хоста не выполняется
-   `UnhookWinEvent` + `host_broadcast` (см. лог: при мягком стопе он есть, при TaskStop — нет).
+2. **Установщик не посылает StopEvent, а сразу убивает задачу.** Процессы при этом всё равно
+   получают стоп (abandoned `HostAlive`, §2а), но хост не успевает сделать свою часть:
+   `UnhookWinEvent` + `host_broadcast` + дожим остатков. Это не «лишний путь», а менее
+   полный: его надо приблизить к штатному (этап 5, A1–A4).
 3. **Установщик умеет raw `ForceUnload`** (`/forceUnload` → `CreateRemoteThread(FreeLibrary)`),
    что противоречит политике R6/R7 и ровно этим был вызван AV в `Яндекс Музыка.exe`.
+   При этом он и не нужен: после смерти хоста процессы снимают модуль сами (§2а).
 4. **`StopEvent` не сбрасывается при старте хоста.** Событие manual-reset: `CreateEventW`
    на существующее имя вернёт уже сигнальное состояние, если кто-то ещё держит хэндл.
 5. **`LifecycleBusy` берут не все** (GlassSetup/GlassUnins/LogViewer — нет), поэтому GS и
@@ -196,14 +266,25 @@ __declspec(dllexport) int WINAPI GlassSettings_RequestPlatformStop(int arch, int
 * Критерий: при установке/удалении в логе есть `stop_request reason=installer`, а при
   отказе от закрытия процессов — ни одного `fu_begin` без `ack=1`.
 
-### Этап 5. Ручная остановка задачи
+### Этап 5. Паритет пути «хост завершён» (abort-parity)
 
-* Ничего не меняем на стороне инициатора (планировщик убивает хост), но координатор при
-  следующем запуске/проверке распознаёт отсутствие `HostAlive` и пишет `stop_result
-  reason=external`. Документируем как штатный путь: инжектированные процессы уходят по
-  `shutdownByHostLiveness`, peer-модули выгружают себя сами.
-* Критерий: прогон «End задачи» даёт ту же итоговую картину (`verify post8 hits=0`), что и
-  мягкий стоп.
+Цель: **остановка хоста любым способом = полная остановка платформы**. Этот путь уже
+работает (abandoned `HostAlive`, §2а), его надо довести до паритета с мягким стопом.
+
+* 5.1 `Reason::HostDead` в `GlassStop`: координатор (и любой наблюдатель) при отсутствии
+  `HostAlive` пишет `stop_result reason=host_dead` без попыток «дожать» чужие процессы.
+* 5.2 Закрыть дыру «DLL есть, watcher'а нет» (A1): если `StartGuiThreadIfNeeded` не смог
+  создать поток, вызывать `StartMinimalUnloadWatcher(1)` — liveness-ожидание появится у
+  любого процесса с нашей DLL.
+* 5.3 Наблюдаемость (A2/A3): `stop_trigger what="hostAlive"` + в записи watcher'а
+  `host_alive_ms` (сколько процесс ждал от смерти хоста до FLAET); это отличает «проснулся
+  поздно» от «не может проснуться».
+* 5.4 Установщику не нужен `IRegisteredTask::Stop` как отдельный механизм выгрузки: он
+  останавливает задачу (или посылает StopEvent) и **ждёт исчезновения модулей** по
+  `InjectModuleScan` — процессы уходят сами по §2а, шаги 4–6.
+* Критерий: четыре сценария (меню, GlassSettings, установщик, End задачи) дают одинаковый
+  итог `verify post8 hits=0`; в логе каждого процесса при End задачи есть
+  `stop_trigger what="hostAlive"`.
 
 ### Этап 6. Документация и приёмка
 
@@ -222,6 +303,8 @@ __declspec(dllexport) int WINAPI GlassSettings_RequestPlatformStop(int arch, int
 | U4 | Все четыре сценария (меню, GS, установщик, End задачи) дают одинаковый итог: `post8 hits=0` |
 | U5 | `StopEvent` не «протекает» между циклами старт/стоп |
 | U6 | Второй одновременный стоп не запускается (`failedPhase="busy"`) |
+| U7 | «End задачи» = полная остановка: в каждом инжектированном процессе `stop_trigger what="hostAlive"`, peer-модули выгружены, `post8 hits=0`, крашей нет |
+| U8 | Ни один сценарий остановки не требует `FreeLibrary` в чужом процессе (включая установщик) |
 
 ---
 
