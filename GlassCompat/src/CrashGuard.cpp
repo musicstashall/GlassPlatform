@@ -6,7 +6,6 @@
 #include <DebugLog.h>
 #include <DbgHelp.h>
 #include <InjectProcessMap.h>
-#include <GlassUlTrace.h>
 #include <cstring>
 #include <cstdio>
 #include <process.h>
@@ -631,39 +630,7 @@ namespace
                 return EXCEPTION_CONTINUE_SEARCH;
         }
 
-        // R12b: единый след краша в общем логе. Раньше падения были видны только в
-        // DebugLog/дампах, и по GLASS-ULTRACE нельзя было сказать, кто упал. Пишем
-        // только то, что уже прошло фильтр «fault IP — наш модуль» (или explorer),
-        // максимум 8 записей на процесс.
-        // R12d: в VEH пишем только коды, которые действительно означают падение. Первый шанс
-        // 0xE06D7363 (C++), 0xE0434352 (CLR) и подобные приложения бросают штатно — в прогоне
-        // 15 они дали 41 запись `crash_seen` без единого падения. Необработанные всё равно
-        // видны как `crash_unhandled` из UEF, так что информация не теряется.
-        {
-            static std::atomic<unsigned> s_vehSeen{ 0 };
-            const bool fatalLooking =
-                code == STATUS_ACCESS_VIOLATION || code == 0xC0000409UL || code == 0xC0000374UL ||
-                code == 0xC000001DUL || code == 0xC0000094UL || code == kStowedExceptionCode;
-            if (fatalLooking && s_vehSeen.fetch_add(1, std::memory_order_acq_rel) < 8)
-            {
-                GlassUlTrace::Logf(
-                    "H102",
-                    "CrashGuard.cpp:GlassVectoredDumpHandler",
-                    "crash_seen",
-                    "\"code\":\"0x%08X\",\"fault\":\"%p\",\"explorer\":%d,\"chance\":\"first\"",
-                    code,
-                    info->ExceptionRecord->ExceptionAddress,
-                    explorer ? 1 : 0);
-            }
-        }
         LogFaultingModuleProbe(info, "VEH");
-        if (code == 0xC0000409UL)
-        {
-            const ULONGLONG fastFailCode = info->ExceptionRecord->NumberParameters > 0
-                ? static_cast<ULONGLONG>(info->ExceptionRecord->ExceptionInformation[0])
-                : 0;
-            (void)fastFailCode;
-        }
 
         bool wantDump = false;
         if (explorer && IsMiniDumpEnabled() && !IsExplorerVehFatalDumpsDisabled())
@@ -703,14 +670,6 @@ namespace
     LONG NTAPI ExplorerCrashGuardFilter(EXCEPTION_POINTERS* info) noexcept
     {
         // R12b: последний шанс — единственная точка, где падение точно состоялось.
-        GlassUlTrace::Logf(
-            "H102",
-            "CrashGuard.cpp:ExplorerCrashGuardFilter",
-            "crash_unhandled",
-            "\"code\":\"0x%08X\",\"fault\":\"%p\",\"explorer\":%d",
-            info && info->ExceptionRecord ? static_cast<unsigned>(info->ExceptionRecord->ExceptionCode) : 0u,
-            (info && info->ExceptionRecord) ? info->ExceptionRecord->ExceptionAddress : nullptr,
-            IsCurrentProcessExplorer() ? 1 : 0);
         LogFaultingModuleProbe(info, "UEF");
         // Сначала дамп — пока контекст гарантированно доступен.
         if (IsMiniDumpEnabled())

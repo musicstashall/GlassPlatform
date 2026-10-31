@@ -11,7 +11,6 @@
 #include <InjectProcessMap.h>
 #include <GlassPlatformTask.h>
 #include <GlassStop.h>
-#include <GlassUlTrace.h>
 
 namespace
 {
@@ -623,23 +622,6 @@ extern "C"
         countMap(Shared::InjectProcessMap::kMappingNameX64, x64Total, x64Rejected);
         countMap(Shared::InjectProcessMap::kMappingNameX86, x86Total, x86Rejected);
 
-        GlassUlTrace::Logf(
-            "H103",
-            "InjectProcessMapNative.cpp:GlassSettings_LogMonitorSummary",
-            "monitor_summary",
-            "\"running\":%lu,\"slot_count\":%lu,\"slot_rejected\":%lu,\"slot_bits0\":%lu,"
-            "\"entry_count\":%lu,\"entry_rejected\":%lu,"
-            "\"map_x64\":%lu,\"map_x64_rejected\":%lu,\"map_x86\":%lu,\"map_x86_rejected\":%lu",
-            static_cast<unsigned long>(platformRunning),
-            static_cast<unsigned long>(slotCount),
-            static_cast<unsigned long>(slotRejected),
-            static_cast<unsigned long>(slotBitsZero),
-            static_cast<unsigned long>(entryCount),
-            static_cast<unsigned long>(entryRejected),
-            static_cast<unsigned long>(x64Total),
-            static_cast<unsigned long>(x64Rejected),
-            static_cast<unsigned long>(x86Total),
-            static_cast<unsigned long>(x86Rejected));
     }
 
     /// arch: 0 = x64 (+ legacy), 1 = x86. Слот мёртвого PID после exit без FreeSelf.
@@ -678,50 +660,9 @@ extern "C"
     {
         // Soft: UnloadRequest event (живой GUI-поток GlassCompat).
         // Force: remote FreeLibrary (мёртвый residual / OS-pin без слушателя) — Unlocker-стиль.
-        const bool soft = Shared::InjectProcessMap::SignalUnloadRequest(pid);
-        // #region agent log
-        // GLASS-ULTRACE
-        {
-            char before[80]{};
-            GlassUlTrace::FormatModuleMask(GlassUlTrace::RemoteModuleMask(pid), before, sizeof(before));
-            GlassUlTrace::Logf(
-                "H90",
-                "InjectProcessMapNative.cpp:GlassSettings_RequestProcessUnload",
-                "gs_request",
-                "\"target_pid\":%lu,\"soft\":%d,\"modules_before\":\"%s\"",
-                static_cast<unsigned long>(pid),
-                soft ? 1 : 0,
-                before);
-        }
-        // #endregion
-        if (soft)
-        {
-            // #region agent log
-            // GLASS-ULTRACE
-            (void)GlassUlTrace::ScheduleVerify();
-            // #endregion
+        if (Shared::InjectProcessMap::SignalUnloadRequest(pid))
             return TRUE;
-        }
-        const BOOL force = UnloadPid(pid);
-        // #region agent log
-        // GLASS-ULTRACE
-        {
-            char left[80]{};
-            const unsigned mask = GlassUlTrace::RemoteModuleMask(pid);
-            GlassUlTrace::FormatModuleMask(mask, left, sizeof(left));
-            GlassUlTrace::Logf(
-                "H90",
-                "InjectProcessMapNative.cpp:GlassSettings_RequestProcessUnload",
-                "gs_request",
-                "\"target_pid\":%lu,\"soft\":0,\"force\":%d,\"left\":\"%s\",\"mask\":%u",
-                static_cast<unsigned long>(pid),
-                force ? 1 : 0,
-                left,
-                mask);
-            (void)GlassUlTrace::ScheduleVerify();
-        }
-        // #endregion
-        return force;
+        return UnloadPid(pid);
     }
 
     __declspec(dllexport) BOOL WINAPI GlassSettings_ForceUnloadProcess(DWORD pid) noexcept

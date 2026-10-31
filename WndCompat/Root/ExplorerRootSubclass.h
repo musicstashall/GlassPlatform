@@ -53,10 +53,7 @@ namespace WndCompat::ExplorerRoot
     // true = RemoveWindowSubclass реально снял наш прок.
     bool ExplorerRoot_ForceDetachSubclass(HWND hWnd) noexcept;
 
-    // #region agent log
-    // GLASS-ULTRACE (H91): RVA ExplorerRootSubclassProc внутри WndCompat.dll.
     std::size_t ExplorerRoot_SubclassProcRva() noexcept;
-    // #endregion
 
     /// Снимок shutdown из Root_DetachAll: только File Explorer shell root из windows.
     void DetachAll(

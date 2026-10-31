@@ -18,7 +18,6 @@
 #include <TrayXamlPolicyMap.h>
 #include <ReloadRenderFlags.h>
 #include <ForceUnloadGlassModules.h>
-#include <GlassUlTrace.h>
 #include <windows.h>
 #include <sddl.h>
 #include <string>
@@ -550,9 +549,6 @@ namespace
         if (gateOff)
         {
             (void)DeleteFileW(path);
-            GlassUlTrace::Logf(
-                "H97", "EntryRundll.cpp:WriteAttachGateFile", "attach_gate_written",
-                "\"mode\":\"off\",\"names\":0,\"removed\":1");
             return;
         }
 
@@ -697,119 +693,6 @@ namespace
         DebugLog(DBG_IMPORTANT,
             L"[GlassCompat][Host] attach-gate: mode=%s names=%u path=%s ok=%d",
             allowMode ? L"allow" : L"deny", count, path, ok ? 1 : 0);
-        GlassUlTrace::Logf(
-            "H97", "EntryRundll.cpp:WriteAttachGateFile", "attach_gate_written",
-            "\"mode\":\"%s\",\"names\":%u,\"ok\":%d",
-            allowMode ? "allow" : "deny",
-            count,
-            ok ? 1 : 0);
-    }
-
-    // R9: пост-стопная проверка — отдельным процессом, но на GlassSettings.Native.dll,
-    // а не на GlassCompat. Иначе верификатор сам появляется в списке процессов как
-    // RunDLL32 с загруженным GlassCompat (наблюдение прогона 9) и портит и список, и hits.
-    // R10: идёт установка/удаление? Тогда никаких новых процессов с нашими DLL:
-    // `GlassSettings.Native.dll` — файл компонента MSI, и его нельзя держать открытым,
-    // пока GlassSetup/GlassUnins заменяют или удаляют файлы.
-    static bool InstallerRunning() noexcept
-    {
-        static const wchar_t* const kInstallers[] = {
-            L"GlassSetup.exe",
-            L"GlassUnins.exe",
-            L"msiexec.exe",
-        };
-        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snap == INVALID_HANDLE_VALUE)
-            return false;
-        PROCESSENTRY32W pe{};
-        pe.dwSize = sizeof(pe);
-        bool found = false;
-        if (Process32FirstW(snap, &pe))
-        {
-            do
-            {
-                for (const wchar_t* name : kInstallers)
-                {
-                    if (_wcsicmp(pe.szExeFile, name) == 0)
-                    {
-                        found = true;
-                        break;
-                    }
-                }
-                if (found)
-                    break;
-            } while (Process32NextW(snap, &pe));
-        }
-        CloseHandle(snap);
-        return found;
-    }
-
-    // R10: пост-стопная проверка — ТОЛЬКО по запросу (`GLASS_ULTRACE_VERIFY=1`).
-    // По умолчанию Stop не порождает ни одного нового процесса: установщик и деинсталлятор
-    // (GlassSetup/GlassUnins) считают «занятыми» процессы с GlassCompat/GlassCore/WndCompat
-    // (InjectModuleScan) и валят их через rundll32+GlassSettings.Native. Верификатор их в
-    // этот список не попадает, но держит `GlassSettings.Native.dll` — файл компонента MSI,
-    // и создаёт окно гонки на ~9 с после Stop. Для диагностических прогонов включается
-    // переменной окружения хоста; на проде этого процесса не существует.
-    static void SpawnPostStopVerify(HMODULE hSelf) noexcept
-    {
-        wchar_t verifyEnv[8]{};
-        const DWORD verifyLen =
-            GetEnvironmentVariableW(L"GLASS_ULTRACE_VERIFY", verifyEnv, _countof(verifyEnv));
-        const bool verifyEnabled =
-            verifyLen > 0 && verifyLen < _countof(verifyEnv) && verifyEnv[0] == L'1';
-        const bool installer = InstallerRunning();
-        if (!verifyEnabled || installer)
-        {
-            GlassUlTrace::Logf(
-                "H98", "EntryRundll.cpp:SpawnPostStopVerify", "post_verify_spawn",
-                "\"ok\":0,\"reason\":\"%s\",\"gle\":0",
-                !verifyEnabled ? "disabled" : "installer");
-            return;
-        }
-
-        wchar_t selfPath[MAX_PATH]{};
-        if (!GetModuleFileNameW(hSelf, selfPath, _countof(selfPath)))
-            return;
-        wchar_t verifyDll[MAX_PATH * 2]{};
-        if (swprintf_s(verifyDll, L"%s", selfPath) <= 0)
-            return;
-        if (wchar_t* slash = wcsrchr(verifyDll, L'\\'))
-        {
-            *(slash + 1) = 0;
-            wcsncat_s(verifyDll, L"GlassSettings.Native.dll", _TRUNCATE);
-        }
-        else
-        {
-            wcsncpy_s(verifyDll, L"GlassSettings.Native.dll", _TRUNCATE);
-        }
-
-        wchar_t sysDir[MAX_PATH]{};
-        if (GetSystemDirectoryW(sysDir, _countof(sysDir)) == 0)
-            return;
-
-        wchar_t cmd[4 * MAX_PATH]{};
-        if (swprintf_s(cmd,
-                L"\"%s\\rundll32.exe\" \"%s\",GlassSettings_PostStopVerify",
-                sysDir, verifyDll) <= 0)
-            return;
-
-        STARTUPINFOW si{};
-        si.cb = sizeof(si);
-        PROCESS_INFORMATION pi{};
-        const BOOL ok = CreateProcessW(
-            nullptr, cmd, nullptr, nullptr, FALSE,
-            CREATE_NO_WINDOW | DETACHED_PROCESS, nullptr, nullptr, &si, &pi);
-        if (ok)
-        {
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-        }
-        GlassUlTrace::Logf(
-            "H98", "EntryRundll.cpp:SpawnPostStopVerify", "post_verify_spawn",
-            "\"ok\":%d,\"gle\":%lu",
-            ok ? 1 : 0,
-            ok ? 0ul : static_cast<unsigned long>(GetLastError()));
     }
 
     static void ClearHostPid() noexcept
@@ -910,26 +793,6 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
             ? GlassShared::GlassPlatformTask::PlatformArch::X64
             : GlassShared::GlassPlatformTask::PlatformArch::X86;
         (void)Shared::GlassStop::Request(arch, options);
-        return;
-    }
-
-    if (cmd.find(L"/verify") != std::wstring::npos)
-    {
-        // R8: пост-стопная проверка из ОТДЕЛЬНОГО процесса (хост её запускает на выходе).
-        // Нужна потому, что внутри хоста замер врёт: OS снимает per-process ссылку на нашу
-        // DLL только когда процесс-владелец хуков завершился. Прогон 8: три процесса с
-        // os_refs=1 отдали модуль через 0.3–0.6 с ПОСЛЕ выхода rundll32, т.е. уже после
-        // того, как хост записал «left=3». Ничего не грузим, хуков не ставим.
-        GlassUlTrace::Logf(
-            "H98", "EntryRundll.cpp:Main", "verify_process",
-            "\"stage\":\"start\"");
-        Sleep(2000);
-        GlassUlTrace::LogVerify(2, "post2");
-        Sleep(6000);
-        GlassUlTrace::LogVerify(8, "post8");
-        GlassUlTrace::Logf(
-            "H98", "EntryRundll.cpp:Main", "verify_process",
-            "\"stage\":\"done\"");
         return;
     }
 
@@ -1089,9 +952,6 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
     if (WaitForSingleObject(hStopEvent, 0) == WAIT_OBJECT_0)
     {
         (void)ResetEvent(hStopEvent);
-        GlassUlTrace::Logf(
-            "H102", "EntryRundll.cpp:Main", "stop_event_stale_reset",
-            "\"phase\":\"start\"");
     }
 
     s_hostShutdownEvent = CreateEventW(
@@ -1220,16 +1080,6 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         0, 0,                     // все процессы, все потоки
         WINEVENT_INCONTEXT
     );
-    // #region agent log
-    // GLASS-ULTRACE
-    GlassUlTrace::Logf(
-        "H81",
-        "EntryRundll.cpp:Main",
-        "host_hook_install",
-        "\"kind\":\"global\",\"handle\":\"%p\",\"ok\":%d",
-        static_cast<void*>(g_globalHook),
-        g_globalHook ? 1 : 0);
-    // #endregion
 
     g_foregroundWinEventHook = SetWinEventHook(
         EVENT_SYSTEM_FOREGROUND,
@@ -1239,16 +1089,6 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         0,
         0,
         WINEVENT_INCONTEXT);
-    // #region agent log
-    // GLASS-ULTRACE
-    GlassUlTrace::Logf(
-        "H81",
-        "EntryRundll.cpp:Main",
-        "host_hook_install",
-        "\"kind\":\"foreground\",\"handle\":\"%p\",\"ok\":%d",
-        static_cast<void*>(g_foregroundWinEventHook),
-        g_foregroundWinEventHook ? 1 : 0);
-    // #endregion
 
     g_uncloakWinEventHook = SetWinEventHook(
         EVENT_OBJECT_UNCLOAKED,
@@ -1258,16 +1098,6 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         0,
         0,
         WINEVENT_INCONTEXT);
-    // #region agent log
-    // GLASS-ULTRACE
-    GlassUlTrace::Logf(
-        "H81",
-        "EntryRundll.cpp:Main",
-        "host_hook_install",
-        "\"kind\":\"uncloak\",\"handle\":\"%p\",\"ok\":%d",
-        static_cast<void*>(g_uncloakWinEventHook),
-        g_uncloakWinEventHook ? 1 : 0);
-    // #endregion
 
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
     if (!g_foregroundWinEventHook)
@@ -1370,85 +1200,30 @@ done:
             (g_foregroundWinEventHook != nullptr
              || g_globalHook != nullptr
              || g_uncloakWinEventHook != nullptr);
-        unsigned unhooked = 0;
         if (g_foregroundWinEventHook)
         {
-            const BOOL okFg = UnhookWinEvent(g_foregroundWinEventHook);
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H81",
-                "EntryRundll.cpp:Main",
-                "host_hook_unhook",
-                "\"kind\":\"foreground\",\"handle\":\"%p\",\"ok\":%d",
-                static_cast<void*>(g_foregroundWinEventHook),
-                okFg ? 1 : 0);
-            // #endregion
+            (void)UnhookWinEvent(g_foregroundWinEventHook);
             g_foregroundWinEventHook = nullptr;
-            ++unhooked;
         }
         if (g_globalHook)
         {
-            const BOOL okGl = UnhookWinEvent(g_globalHook);
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H81",
-                "EntryRundll.cpp:Main",
-                "host_hook_unhook",
-                "\"kind\":\"global\",\"handle\":\"%p\",\"ok\":%d",
-                static_cast<void*>(g_globalHook),
-                okGl ? 1 : 0);
-            // #endregion
+            (void)UnhookWinEvent(g_globalHook);
             g_globalHook = nullptr;
-            ++unhooked;
         }
         if (g_uncloakWinEventHook)
         {
-            const BOOL okUc = UnhookWinEvent(g_uncloakWinEventHook);
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H81",
-                "EntryRundll.cpp:Main",
-                "host_hook_unhook",
-                "\"kind\":\"uncloak\",\"handle\":\"%p\",\"ok\":%d,\"total\":%u",
-                static_cast<void*>(g_uncloakWinEventHook),
-                okUc ? 1 : 0,
-                unhooked + 1);
-            // #endregion
+            (void)UnhookWinEvent(g_uncloakWinEventHook);
             g_uncloakWinEventHook = nullptr;
-            ++unhooked;
         }
         GlassCompat::CoreWindowHostInject::Shutdown(!s_stopFromCloseMessage);
         if (hadAnyHook && !s_stopFromCloseMessage)
         {
             // Для обычного сигнала платформы сохраняется прежняя обработка.
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H88",
-                "EntryRundll.cpp:Main",
-                "host_broadcast",
-                "\"unhooked\":%u",
-                unhooked);
-            // #endregion
             (void)SendNotifyMessageW(HWND_BROADCAST, WM_NULL, 0, 0);
             Sleep(300);
         }
         // Клиенты могут самостоятельно завершиться после снятия хуков.
-        // #region agent log
-        // GLASS-ULTRACE
-        GlassUlTrace::Logf(
-            "H88",
-            "EntryRundll.cpp:Main",
-            "host_shutdown_signal",
-            "\"unhooked\":%u,\"from_close\":%d",
-            unhooked,
-            s_stopFromCloseMessage ? 1 : 0);
-        // #endregion
         SignalHostShutdownComplete();
-        HANDLE hVerify = nullptr;
         if (s_stopFromCloseMessage)
         {
             // R12b (§2а/5.4): End задачи — такой же стоп, как кнопка Stop, только без
@@ -1457,9 +1232,6 @@ done:
             // WM_NULL-пинков: инжектированные сами уходят по StopEvent, а «спящие»
             // (DllHost) получают шанс обработать deferred free до смерти хоста.
             // Лог: host_close_ping.
-            GlassUlTrace::Logf(
-                "H102", "EntryRundll.cpp:Main", "host_close_ping",
-                "\"pings\":4,\"before\":\"freeself\"");
             for (unsigned i = 0; i < 4; ++i)
             {
                 (void)SendNotifyMessageW(HWND_BROADCAST, WM_NULL, 0, 0);
@@ -1471,17 +1243,7 @@ done:
         else
         {
             GlassCompat::CoreWindowHostInject::ForceUnloadResiduals();
-            // #region agent log
-            // GLASS-ULTRACE
-            // R8: замер внутри хоста оставляем для таймингов, но решение по S8 принимаем
-            // по post2/post8 из отдельного процесса — только они сняты после того, как
-            // user32 отпустил ссылки (см. комментарий в /verify).
-            hVerify = GlassUlTrace::ScheduleVerify();
-            SpawnPostStopVerify(hSelf);
-            // #endregion
         }
-        if (hVerify)
-            CloseHandle(hVerify);
     }
 
     Shared::PlatformPresenceMonitor::Stop();

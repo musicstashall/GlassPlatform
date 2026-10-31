@@ -1,7 +1,6 @@
 #include "SharedPch.h"
 
 #include <GlassStop.h>
-#include <GlassUlTrace.h>
 #include <InjectModuleScan.h>
 
 #include <TlHelp32.h>
@@ -154,23 +153,8 @@ namespace Shared::GlassStop
                     outPids[nudged] = pids[i];
                 ++nudged;
             }
-            GlassUlTrace::Logf(
-                "H102",
-                "GlassStop.cpp:WakeResidualProcesses",
-                "stop_wake_pid",
-                "\"target_pid\":%lu,\"windows\":%u,\"threads\":%u",
-                static_cast<unsigned long>(pids[i]),
-                windows,
-                threads);
         }
 
-        GlassUlTrace::Logf(
-            "H102",
-            "GlassStop.cpp:WakeResidualProcesses",
-            "stop_wake_end",
-            "\"scanned\":%u,\"nudged\":%u",
-            total,
-            nudged);
         return nudged;
     }
 
@@ -180,27 +164,10 @@ namespace Shared::GlassStop
         Result result{};
         const char* reason = ReasonTag(options.reason);
 
-        GlassUlTrace::Logf(
-            "H102",
-            "GlassStop.cpp:Request",
-            "stop_request",
-            "\"reason\":\"%s\",\"arch\":%d,\"graceful_ms\":%lu,\"host_gone_ms\":%lu,"
-            "\"allow_task_stop\":%d,\"wake_residuals\":%d,\"force_unload\":%d",
-            reason,
-            static_cast<int>(arch),
-            static_cast<unsigned long>(options.gracefulMs),
-            static_cast<unsigned long>(options.hostGoneMs),
-            options.allowTaskStop ? 1 : 0,
-            options.wakeResiduals ? 1 : 0,
-            options.allowForceUnload ? 1 : 0);
 
         // Политика R6/R7: принудительная выгрузка в чужих процессах запрещена.
         if (options.allowForceUnload)
         {
-            GlassUlTrace::Logf(
-                "H102", "GlassStop.cpp:Request", "stop_phase",
-                "\"reason\":\"%s\",\"phase\":\"policy\",\"note\":\"force_unload_ignored\"",
-                reason);
         }
 
         // (5.1) Reason::HostDead — хост уже умер (abandoned HostAlive / TerminateProcess).
@@ -222,21 +189,8 @@ namespace Shared::GlassStop
             result.hostGone = !GPT::IsGlassPlatformRunning(arch);
             result.failedPhase = L"already_stopped";
             result.elapsedMs = static_cast<DWORD>(GetTickCount64() - t0);
-            GlassUlTrace::Logf(
-                "H102", "GlassStop.cpp:Request", "stop_result",
-                "\"reason\":\"%s\",\"phase\":\"host_dead_probe\",\"host_gone\":%d,"
-                "\"residuals\":%u,\"ms\":%lu",
-                reason,
-                result.hostGone ? 1 : 0,
-                result.residualProcesses,
-                static_cast<unsigned long>(result.elapsedMs));
             for (unsigned i = 0; i < result.residualPidCount && i < kMaxResiduals; ++i)
             {
-                GlassUlTrace::Logf(
-                    "H102", "GlassStop.cpp:Request", "stop_residual",
-                    "\"reason\":\"%s\",\"target_pid\":%lu",
-                    reason,
-                    static_cast<unsigned long>(result.residualPids[i]));
             }
             return result;
         }
@@ -253,13 +207,6 @@ namespace Shared::GlassStop
             if (options.wakeResiduals)
                 (void)WakeResidualProcesses(arch, nullptr, 0);
             result.elapsedMs = static_cast<DWORD>(GetTickCount64() - t0);
-            GlassUlTrace::Logf(
-                "H102", "GlassStop.cpp:Request", "stop_result",
-                "\"reason\":\"%s\",\"phase\":\"already_stopped\",\"host_gone\":1,"
-                "\"residuals\":%u,\"ms\":%lu",
-                reason,
-                result.residualProcesses,
-                static_cast<unsigned long>(result.elapsedMs));
             return result;
         }
 
@@ -269,9 +216,6 @@ namespace Shared::GlassStop
         {
             result.failedPhase = L"signal";
             result.elapsedMs = static_cast<DWORD>(GetTickCount64() - t0);
-            GlassUlTrace::Logf(
-                "H102", "GlassStop.cpp:Request", "stop_phase",
-                "\"reason\":\"%s\",\"phase\":\"signal\",\"ok\":0", reason);
             return result;
         }
 
@@ -283,11 +227,6 @@ namespace Shared::GlassStop
         const bool busyAcquired = GPT::TryBeginLifecycleBusy(arch);
         if (busyAcquired)
             GPT::EndLifecycleBusy(arch);
-        GlassUlTrace::Logf(
-            "H102", "GlassStop.cpp:Request", "stop_phase",
-            "\"reason\":\"%s\",\"phase\":\"busy\",\"acquired\":%d,\"held\":0",
-            reason,
-            busyAcquired ? 1 : 0);
 
         // (2b) Немедленный «пинок» остаткам: WM_NULL окнам и потокам. Делаем это ДО
         // ожидания, потому что инициатор может исчезнуть вместе со своим процессом
@@ -300,33 +239,16 @@ namespace Shared::GlassStop
         // дожимает остатки и отпускает мьютекс платформы (gracefulMs=0 — не ждём).
         result.hostGone =
             GPT::WaitForPlatformStopped(arch, options.gracefulMs);
-        GlassUlTrace::Logf(
-            "H102", "GlassStop.cpp:Request", "stop_phase",
-            "\"reason\":\"%s\",\"phase\":\"wait_host\",\"gone\":%d,\"ms\":%lu",
-            reason,
-            result.hostGone ? 1 : 0,
-            static_cast<unsigned long>(GetTickCount64() - t0));
 
         // (4) Хост не ушёл и разрешено — останавливаем задачу (это и есть «доработанный»
         // путь ручной остановки: после него процессы уходят по abandoned HostAlive).
         if (!result.hostGone && options.allowTaskStop)
         {
             result.hostKilledByTask = GPT::StopOrphanAutorunTaskInstance(arch);
-            GlassUlTrace::Logf(
-                "H102", "GlassStop.cpp:Request", "stop_phase",
-                "\"reason\":\"%s\",\"phase\":\"task_stop\",\"ok\":%d",
-                reason,
-                result.hostKilledByTask ? 1 : 0);
 
             const DWORD afterKill =
                 options.hostGoneMs > 0 ? options.hostGoneMs : 3000;
             result.hostGone = GPT::WaitForPlatformStopped(arch, afterKill);
-            GlassUlTrace::Logf(
-                "H102", "GlassStop.cpp:Request", "stop_phase",
-                "\"reason\":\"%s\",\"phase\":\"after_task_stop\",\"gone\":%d,\"ms\":%lu",
-                reason,
-                result.hostGone ? 1 : 0,
-                static_cast<unsigned long>(GetTickCount64() - t0));
         }
 
         // (5) Остатки: сначала снимок, затем (если просили) побуждение — WM_NULL окнам
@@ -341,11 +263,6 @@ namespace Shared::GlassStop
             result.residualPidCount = CollectResiduals(
                 arch, result.residualPids, kMaxResiduals);
             result.residualProcesses = result.residualPidCount;
-            GlassUlTrace::Logf(
-                "H102", "GlassStop.cpp:Request", "stop_phase",
-                "\"reason\":\"%s\",\"phase\":\"wake_residuals\",\"left\":%u",
-                reason,
-                result.residualProcesses);
         }
 
         // (6) Состояние для UI/присутствия: sticky пересчитываем. Busy уже снят в фазе 2.
@@ -357,24 +274,9 @@ namespace Shared::GlassStop
             result.failedPhase = L"";
 
         result.elapsedMs = static_cast<DWORD>(GetTickCount64() - t0);
-        GlassUlTrace::Logf(
-            "H102", "GlassStop.cpp:Request", "stop_result",
-            "\"reason\":\"%s\",\"phase\":\"%s\",\"host_gone\":%d,\"task_stop\":%d,"
-            "\"residuals\":%u,\"ms\":%lu",
-            reason,
-            *result.failedPhase ? "partial" : "done",
-            result.hostGone ? 1 : 0,
-            result.hostKilledByTask ? 1 : 0,
-            result.residualProcesses,
-            static_cast<unsigned long>(result.elapsedMs));
 
         for (unsigned i = 0; i < result.residualPidCount && i < kMaxResiduals; ++i)
         {
-            GlassUlTrace::Logf(
-                "H102", "GlassStop.cpp:Request", "stop_residual",
-                "\"reason\":\"%s\",\"target_pid\":%lu",
-                reason,
-                static_cast<unsigned long>(result.residualPids[i]));
         }
         return result;
     }

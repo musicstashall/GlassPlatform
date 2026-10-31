@@ -35,7 +35,7 @@
 #include "CrashGuard.h"
 #include "ShortLivedAgent.h"
 #include <RootBackdropPolicy.h>
-#include <GlassUlTrace.h>
+#include <GlassModuleRefCount.h>
 #include <GlassControlKind.h>
 
 // Определён в EXPORTS ниже; watcher polling (H54 WPM).
@@ -73,16 +73,7 @@ namespace
     // Единый предохранитель: ExecuteShutdown должен стартовать только один раз
     // даже если почти одновременно пришли StopEvent и HostLivenessLost.
     std::atomic<bool> g_shutdownStarted{ false };
-    // R11/5.3: момент, когда процесс узнал о смерти хоста. Нужен, чтобы отличить
-    // «проснулся поздно» от «не может проснуться»: в freeself_flaet пишем host_alive_ms.
-    std::atomic<ULONGLONG> g_hostDeadTickMs{ 0 };
     std::atomic<ULONG> g_winEventCallbacksInFlight{ 0 };
-    // GLASS-ULTRACE: только наблюдение (H86/H89), на FreeLibrary не влияет.
-    std::atomic<unsigned> g_guiGeneration{ 0 };
-    bool g_taskbarOwnedPin = false;
-    bool g_explorerOwnedPin = false;
-    bool g_uiCompatOwnedPin = false;
-    const char* g_ultraceShutdownReason = "unknown";
 
     constexpr size_t kWinEventCallbackTargetCapacity = 64;
 
@@ -239,65 +230,18 @@ namespace
     {
         constexpr int kMinRounds = 8;
         constexpr int kMaxRounds = 24;
-        const ULONGLONG t0 = GetTickCount64();
-        const unsigned rc0 = GlassUlTrace::QueryLoadCountByName(L"GlassCompat.dll");
-        const ULONG inflight0 = g_winEventCallbacksInFlight.load(std::memory_order_acquire);
-        // #region agent log
-        // GLASS-ULTRACE
-        GlassUlTrace::Logf(
-            "H82",
-            "GlassCompat.cpp:DrainBeforeFreeSelf",
-            "drain_begin",
-            "\"min\":%d,\"max\":%d,\"inflight\":%lu,\"rc\":%u",
-            kMinRounds,
-            kMaxRounds,
-            static_cast<unsigned long>(inflight0),
-            rc0);
-        // #endregion
-        int done = 0;
         for (int i = 0; i < kMaxRounds; ++i)
         {
-            const ULONGLONG wAll = WakeAllProcessThreadsWmNull();
-            const ULONGLONG wCb = WakeWinEventCallbackThreads();
+            (void)WakeAllProcessThreadsWmNull();
+            (void)WakeWinEventCallbackThreads();
             (void)PumpAllProcessWindowsSyncWmNull();
             SleepEx(50, TRUE);
-            ++done;
-            const ULONG inflight = g_winEventCallbacksInFlight.load(std::memory_order_acquire);
-            const unsigned rc = GlassUlTrace::QueryLoadCountByName(L"GlassCompat.dll");
-            const unsigned woke =
-                static_cast<unsigned>(wAll & 0xFFFFFFFFull)
-                + static_cast<unsigned>(wCb & 0xFFFFFFFFull);
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H82",
-                "GlassCompat.cpp:DrainBeforeFreeSelf",
-                "drain_round",
-                "\"round\":%d,\"woke\":%u,\"inflight\":%lu,\"rc\":%u",
-                done,
-                woke,
-                static_cast<unsigned long>(inflight),
-                rc);
-            // #endregion
             if (i + 1 >= kMinRounds
                 && g_winEventCallbacksInFlight.load(std::memory_order_acquire) == 0)
             {
                 break;
             }
         }
-        // #region agent log
-        // GLASS-ULTRACE
-        GlassUlTrace::Logf(
-            "H82",
-            "GlassCompat.cpp:DrainBeforeFreeSelf",
-            "drain_end",
-            "\"rounds\":%d,\"max\":%d,\"inflight\":%lu,\"rc\":%u,\"ms\":%llu",
-            done,
-            kMaxRounds,
-            static_cast<unsigned long>(g_winEventCallbacksInFlight.load(std::memory_order_acquire)),
-            GlassUlTrace::QueryLoadCountByName(L"GlassCompat.dll"),
-            GetTickCount64() - t0);
-        // #endregion
     }
 
     // IXDE делает LoadLibrary(TAP), не CoLoadLibrary — CoFreeUnusedLibraries не снимает pin.
@@ -321,40 +265,8 @@ namespace
         const unsigned long long serverLocks = (comStateOut >> 16) & 0xFFFFULL;
         const bool shutdownDone = ((comStateOut >> 32) & 1ULL) != 0;
         if (!shutdownDone || objectCount != 0 || serverLocks != 0)
-        {
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H83",
-                "GlassCompat.cpp:TryDropIxdeResidualModule",
-                "module_residual_drop",
-                "\"export\":\"%s\",\"ok\":0,\"skipped\":1,\"objectCount\":%llu,\"locks\":%llu,\"shutdownDone\":%d,\"rc\":%u",
-                exportName,
-                objectCount,
-                serverLocks,
-                shutdownDone ? 1 : 0,
-                GlassUlTrace::QueryLoadCount(hModule));
-            // #endregion
             return false;
-        }
-        const unsigned rcBefore = GlassUlTrace::QueryLoadCount(hModule);
-        const BOOL freed = FreeLibrary(hModule);
-        // #region agent log
-        // GLASS-ULTRACE
-        GlassUlTrace::Logf(
-            "H83",
-            "GlassCompat.cpp:TryDropIxdeResidualModule",
-            "module_residual_drop",
-            "\"export\":\"%s\",\"ok\":%d,\"skipped\":0,\"objectCount\":%llu,\"locks\":%llu,\"shutdownDone\":%d,\"rc_before\":%u,\"rc_after\":%u",
-            exportName,
-            freed ? 1 : 0,
-            objectCount,
-            serverLocks,
-            shutdownDone ? 1 : 0,
-            rcBefore,
-            GlassUlTrace::QueryLoadCount(hModule));
-        // #endregion
-        return freed != FALSE;
+        return FreeLibrary(hModule) != FALSE;
     }
 
     // Устанавливается после полного завершения DoInitialize (GlassCore + WndCompat + провайдеры).
@@ -955,8 +867,6 @@ namespace
         }
     }
 
-    // #region agent log
-    // GLASS-ULTRACE (R2b, H91): перед FreeLibrary ищем окна, чей обработчик указывает внутрь
     // выгружаемого модуля. Важно: один только GWLP_WNDPROC ничего не показывает, если субкласс
     // ставился через SetWindowSubclass — тогда GWLP_WNDPROC = thunk comctl32, а наши проки лежат
     // в цепочке comctl32 (property "UxSubclassInfo"). Дамп explorer 39284: CFG fail-fast,
@@ -1075,26 +985,11 @@ namespace
     void LogMarkedWindowUl(StaleCallbackScan& s, HWND hwnd, GlassShared::GlassControlKind kind,
         LONG_PTR proc, const HANDLE subclassProp) noexcept
     {
-        wchar_t cls[96]{};
-        (void)GetClassNameW(hwnd, cls, _countof(cls));
-        char clsJson[220]{};
-        GlassUlTrace::WideToJson(clsJson, sizeof(clsJson), cls);
-        const ModuleRangeUl* procMod = FindModuleRangeUl(reinterpret_cast<const void*>(proc));
-        char procModJson[120]{};
-        GlassUlTrace::WideToJson(procModJson, sizeof(procModJson), procMod ? procMod->name : L"");
-        GlassUlTrace::Logf(
-            "H91",
-            "GlassCompat.cpp:ScanStaleCallbacks",
-            "marked_window",
-            "\"module\":\"%s\",\"hwnd\":\"%p\",\"class\":\"%s\",\"kind\":%u,"
-            "\"proc_mod\":\"%s\",\"proc_rva\":\"0x%llX\",\"prop\":%d",
-            s.tag,
-            static_cast<void*>(hwnd),
-            clsJson,
-            static_cast<unsigned>(kind),
-            procModJson,
-            procMod ? static_cast<unsigned long long>(static_cast<std::uintptr_t>(proc) - procMod->base) : 0ull,
-            subclassProp ? 1 : 0);
+        (void)s;
+        (void)hwnd;
+        (void)kind;
+        (void)proc;
+        (void)subclassProp;
     }
 
     void NoteWindowCandidate(StaleCallbackScan& s, HWND hwnd) noexcept
@@ -1156,23 +1051,6 @@ namespace
         if (s.details >= 12)
             return;
         ++s.details;
-        wchar_t cls[96]{};
-        (void)GetClassNameW(hwnd, cls, _countof(cls));
-        char clsJson[200]{};
-        GlassUlTrace::WideToJson(clsJson, sizeof(clsJson), cls);
-        GlassUlTrace::Logf(
-            "H91",
-            "GlassCompat.cpp:ScanStaleCallbacks",
-            "window_proc_in_module",
-            "\"module\":\"%s\",\"hwnd\":\"%p\",\"class\":\"%s\",\"gwlp_inside\":%d,"
-            "\"prop_hits\":%u,\"prop_code_hits\":%u,\"kind\":%u",
-            s.tag,
-            static_cast<void*>(hwnd),
-            clsJson,
-            gwlpInside ? 1 : 0,
-            propHits,
-            propCodeHits,
-            static_cast<unsigned>(kind));
     }
 
     // R12: EnumChildWindows сам рекурсивно обходит всё поддерево и вызывает callback на
@@ -1206,27 +1084,6 @@ namespace
     // чтение по адресу 0x7FF91E2BFBB0 — вне списка модулей (уже размотанный образ).
     // Точный модуль не определить без его размера, поэтому размер пишем в module_free:
     // при следующем падении адрес из дампа сверяется с [base, base+size).
-    unsigned ImageSizeUl(HMODULE hMod) noexcept
-    {
-        RefreshModuleRangesUl();
-        const auto base = reinterpret_cast<std::uintptr_t>(hMod);
-        for (unsigned i = 0; i < g_moduleRangeCountUl; ++i)
-        {
-            if (g_moduleRangesUl[i].base == base)
-                return static_cast<unsigned>(g_moduleRangesUl[i].end - g_moduleRangesUl[i].base);
-        }
-        return 0;
-    }
-
-    // A/B-бисект: GLASS_ULTRACE_KEEP_MODULES=1 — не выгружать НИ ОДНОГО peer-модуля
-    // (GlassCore/Explorer/Taskbar/UI/Wnd). Нужно, чтобы отделить «unmap оставил висячий
-    // указатель» от любой другой причины падения.
-    bool KeepModulesEnvUl() noexcept
-    {
-        wchar_t v[16]{};
-        return GetEnvironmentVariableW(L"GLASS_ULTRACE_KEEP_MODULES", v, _countof(v)) > 0;
-    }
-
     // Возвращает число найденных «живых» указателей на код модуля (GWLP + comctl32-цепочка).
     unsigned ScanStaleCallbacksBeforeFree(const char* tag, HMODULE hMod) noexcept
     {
@@ -1273,26 +1130,10 @@ namespace
             CloseHandle(threads);
         }
 
-        GlassUlTrace::Logf(
-            "H91",
-            "GlassCompat.cpp:ScanStaleCallbacks",
-            "stale_scan",
-            "\"module\":\"%s\",\"base\":\"%p\",\"size\":\"0x%X\","
-            "\"windows\":%u,\"marked\":%u,\"proc_inside\":%u,"
-            "\"prop_inside\":%u,\"prop_code\":%u",
-            tag,
-            static_cast<void*>(hMod),
-            imageSize,
-            s.windows,
-            s.marked,
-            s.procInside,
-            s.propInside,
-            s.propCodeInside);
         // Реальная опасность = наш КОД в GWLP или в comctl32-цепочке. prop_inside без фильтра
         // по исполняемым страницам содержит указатели на данные и как критерий не годится.
         return s.procInside + s.propCodeInside;
     }
-    // #endregion
 
     // HWND_MESSAGE-классы наших DLL (источники stale WndProc при выгрузке).
     static const wchar_t* const kExplorerStopClasses[] = {
@@ -1336,18 +1177,6 @@ namespace
         CreateShutdownAckUl();
 
         DWORD pid = GetCurrentProcessId();
-        const ULONGLONG shutdownT0 = GetTickCount64();
-        const char* const shutdownReason = g_ultraceShutdownReason;
-        // #region agent log
-        // GLASS-ULTRACE
-        GlassUlTrace::Logf(
-            "H88",
-            "GlassCompat.cpp:ExecuteShutdown",
-            "shutdown_begin",
-            "\"reason\":\"%s\",\"phase\":\"begin\"",
-            shutdownReason);
-        // #endregion
-        GlassUlTrace::LogTraceInitOnce();
         DebugLog(L"[GlassCompat][Core] ExecuteShutdown: BEGIN");
         (void)Shared::InjectProcessMap::TrySetState(
             pid, Shared::InjectProcessMap::State::Unloading);
@@ -1404,16 +1233,6 @@ namespace
                     }
                     complete = pUiIsShutdownComplete() ? 1 : 0;
                 }
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H83",
-                    "GlassCompat.cpp:ExecuteShutdown",
-                    "module_shutdown",
-                    "\"module\":\"UICompat\",\"called\":1,\"complete\":%d,\"waited_ms\":%d",
-                    complete,
-                    waitedMs);
-                // #endregion
                 (void)Shared::InjectProcessMap::TrySetShutdownPhase(
                     GetCurrentProcessId(),
                     Shared::InjectProcessMap::ShutdownPhaseUiDone);
@@ -1451,16 +1270,6 @@ namespace
                         waitedMs,
                         complete);
                 }
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H86",
-                    "GlassCompat.cpp:ExecuteShutdown",
-                    "module_shutdown",
-                    "\"module\":\"TaskbarCompat\",\"called\":1,\"complete\":%d,\"waited_ms\":%d",
-                    complete,
-                    waitedMs);
-                // #endregion
             }
         }
 
@@ -1476,14 +1285,6 @@ namespace
                 DebugLog(L"[GlassCompat][Core] [Shutdown] Calling ExplorerCompat_Shutdown (before Core)");
                 pExplorerShutdown();
                 result |= UnloadResult::ExplorerShutdown_Returned;
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H86",
-                    "GlassCompat.cpp:ExecuteShutdown",
-                    "module_shutdown",
-                    "\"module\":\"ExplorerCompat\",\"called\":1,\"complete\":1,\"waited_ms\":0");
-                // #endregion
             }
         }
         else
@@ -1514,14 +1315,6 @@ namespace
                         GetCurrentProcessId(),
                         Shared::InjectProcessMap::ShutdownPhaseCoreDone);
                     result |= UnloadResult::CoreShutdown_Returned;
-                    // #region agent log
-                    // GLASS-ULTRACE
-                    GlassUlTrace::Logf(
-                        "H88",
-                        "GlassCompat.cpp:ExecuteShutdown",
-                        "module_shutdown",
-                        "\"module\":\"GlassCore\",\"called\":1,\"complete\":1,\"waited_ms\":0");
-                    // #endregion
                 }
                 else
                 {
@@ -1556,14 +1349,6 @@ namespace
                     Shared::InjectProcessMap::ShutdownPhaseWndDone);
                 result |= UnloadResult::BeginWnd_Returned;
                 DebugLog(L"[GlassCompat][Core] [Shutdown] WndCompat_BeginShutdown returned");
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H88",
-                    "GlassCompat.cpp:ExecuteShutdown",
-                    "module_shutdown",
-                    "\"module\":\"WndCompat\",\"called\":1,\"complete\":1,\"waited_ms\":0");
-                // #endregion
             }
             else
             {
@@ -1598,21 +1383,6 @@ namespace
                 hCoreFree = nullptr;
             }
 
-            // R5b: A/B-выключатель полной выгрузки (см. KeepModulesEnvUl).
-            if (hCoreFree && KeepModulesEnvUl())
-            {
-                // #region agent log
-                GlassUlTrace::Logf(
-                    "H91",
-                    "GlassCompat.cpp:ExecuteShutdown",
-                    "module_free_skipped",
-                    "\"module\":\"GlassCore\",\"base\":\"%p\",\"size\":%u,\"env\":1",
-                    static_cast<void*>(hCoreFree),
-                    ImageSizeUl(hCoreFree));
-                // #endregion
-                hCoreFree = nullptr;
-            }
-
             if (hCoreFree)
             {
                 result |= UnloadResult::FreeCore_Called;
@@ -1622,25 +1392,8 @@ namespace
                     DebugLog(
                         L"[GlassCompat][Core] [Shutdown] FreeLibrary GlassCore (attempt=%u)",
                         freed + 1);
-                    const unsigned rcCoreBefore = GlassUlTrace::QueryLoadCount(hCoreFree);
-                    const BOOL coreFreed = FreeLibrary(hCoreFree);
+                    FreeLibrary(hCoreFree);
                     ++freed;
-                    // #region agent log
-                    // GLASS-ULTRACE
-                    GlassUlTrace::Logf(
-                        "H88",
-                        "GlassCompat.cpp:ExecuteShutdown",
-                        "module_free",
-                        "\"module\":\"GlassCore\",\"base\":\"%p\",\"size\":%u,\"ok\":%d,\"owned\":1,\"attempt\":%u,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
-                        static_cast<void*>(hCoreFree),
-                        ImageSizeUl(hCoreFree),
-                        coreFreed ? 1 : 0,
-                        freed,
-                        rcCoreBefore,
-                        GlassUlTrace::QueryLoadCountByName(L"GlassCore.dll"),
-                        GlassUlTrace::ModulePresentGmh(L"GlassCore.dll") ? 1 : 0,
-                        GlassUlTrace::ModulePresentToolhelp(L"GlassCore.dll") ? 1 : 0);
-                    // #endregion
                     result |= UnloadResult::FreeCore_Returned;
 
                     hCoreFree = GetModuleHandleW(L"GlassCore.dll");
@@ -1727,47 +1480,14 @@ namespace
             {
                 AuditGlassMessageWindowsBeforeFree(L"ExplorerCompat", savedExplorer,
                     kExplorerStopClasses, _countof(kExplorerStopClasses));
-                // #region agent log
-                // GLASS-ULTRACE (H91)
                 const unsigned staleExplorer = ScanStaleCallbacksBeforeFree("ExplorerCompat", savedExplorer);
-                // #endregion
-                const bool keepExplorer = KeepModulesEnvUl();
-                if (keepExplorer || staleExplorer > 0)
+                if (staleExplorer > 0)
                 {
-                    // #region agent log
-                    GlassUlTrace::Logf(
-                        "H91",
-                        "GlassCompat.cpp:ExecuteShutdown",
-                        "module_free_skipped",
-                        "\"module\":\"ExplorerCompat\",\"base\":\"%p\",\"size\":%u,"
-                        "\"stale_procs\":%u,\"env\":%d",
-                        static_cast<void*>(savedExplorer),
-                        ImageSizeUl(savedExplorer),
-                        staleExplorer,
-                        keepExplorer ? 1 : 0);
-                    // #endregion
                 }
                 else
                 {
-                const unsigned rcExBefore = GlassUlTrace::QueryLoadCount(savedExplorer);
-                const BOOL exFreed = FreeLibrary(savedExplorer);
+                FreeLibrary(savedExplorer);
                 result |= UnloadResult::FreeExplorer_Returned;
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H86",
-                    "GlassCompat.cpp:ExecuteShutdown",
-                    "module_free",
-                    "\"module\":\"ExplorerCompat\",\"base\":\"%p\",\"size\":%u,\"ok\":%d,\"owned\":%d,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
-                    static_cast<void*>(savedExplorer),
-                    ImageSizeUl(savedExplorer),
-                    exFreed ? 1 : 0,
-                    g_explorerOwnedPin ? 1 : 0,
-                    rcExBefore,
-                    GlassUlTrace::QueryLoadCountByName(L"ExplorerCompat.dll"),
-                    GlassUlTrace::ModulePresentGmh(L"ExplorerCompat.dll") ? 1 : 0,
-                    GlassUlTrace::ModulePresentToolhelp(L"ExplorerCompat.dll") ? 1 : 0);
-                // #endregion
                 HMODULE hCheckEx = GetModuleHandleW(L"ExplorerCompat.dll");
                 DebugLog(
                     DBG_IMPORTANT,
@@ -1812,42 +1532,12 @@ namespace
                 // остался в чужом коде».
                 const unsigned staleTaskbar =
                     ScanStaleCallbacksBeforeFree("TaskbarCompat", savedTaskbar);
-                const bool keepModules = KeepModulesEnvUl();
-                if (keepModules || staleTaskbar > 0)
+                if (staleTaskbar > 0)
                 {
-                    // #region agent log
-                    GlassUlTrace::Logf(
-                        "H91",
-                        "GlassCompat.cpp:ExecuteShutdown",
-                        "module_free_skipped",
-                        "\"module\":\"TaskbarCompat\",\"base\":\"%p\",\"size\":%u,"
-                        "\"stale_procs\":%u,\"env\":%d",
-                        static_cast<void*>(savedTaskbar),
-                        ImageSizeUl(savedTaskbar),
-                        staleTaskbar,
-                        keepModules ? 1 : 0);
-                    // #endregion
                 }
                 else
                 {
-                const unsigned rcTbBefore = GlassUlTrace::QueryLoadCount(savedTaskbar);
-                const BOOL tbFreed = FreeLibrary(savedTaskbar);
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H86",
-                    "GlassCompat.cpp:ExecuteShutdown",
-                    "module_free",
-                    "\"module\":\"TaskbarCompat\",\"base\":\"%p\",\"size\":%u,\"ok\":%d,\"owned\":%d,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
-                    static_cast<void*>(savedTaskbar),
-                    ImageSizeUl(savedTaskbar),
-                    tbFreed ? 1 : 0,
-                    g_taskbarOwnedPin ? 1 : 0,
-                    rcTbBefore,
-                    GlassUlTrace::QueryLoadCountByName(L"TaskbarCompat.dll"),
-                    GlassUlTrace::ModulePresentGmh(L"TaskbarCompat.dll") ? 1 : 0,
-                    GlassUlTrace::ModulePresentToolhelp(L"TaskbarCompat.dll") ? 1 : 0);
-                // #endregion
+                FreeLibrary(savedTaskbar);
                 CoFreeUnusedLibraries();
                 constexpr int kTaskbarReclaimWaitMs = 2000;
                 int reclaimWaitedMs = 0;
@@ -1904,42 +1594,12 @@ namespace
                 AuditGlassMessageWindowsBeforeFree(L"UICompat", savedUICompat,
                     kUiStopClasses, _countof(kUiStopClasses));
                 const unsigned staleUi = ScanStaleCallbacksBeforeFree("UICompat", savedUICompat);
-                const bool keepUi = KeepModulesEnvUl();
-                if (keepUi || staleUi > 0)
+                if (staleUi > 0)
                 {
-                    // #region agent log
-                    GlassUlTrace::Logf(
-                        "H91",
-                        "GlassCompat.cpp:ExecuteShutdown",
-                        "module_free_skipped",
-                        "\"module\":\"UICompat\",\"base\":\"%p\",\"size\":%u,"
-                        "\"stale_procs\":%u,\"env\":%d",
-                        static_cast<void*>(savedUICompat),
-                        ImageSizeUl(savedUICompat),
-                        staleUi,
-                        keepUi ? 1 : 0);
-                    // #endregion
                 }
                 else
                 {
-                const unsigned rcUiBefore = GlassUlTrace::QueryLoadCount(savedUICompat);
-                const BOOL uiFreed = FreeLibrary(savedUICompat);
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H83",
-                    "GlassCompat.cpp:ExecuteShutdown",
-                    "module_free",
-                    "\"module\":\"UICompat\",\"base\":\"%p\",\"size\":%u,\"ok\":%d,\"owned\":%d,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
-                    static_cast<void*>(savedUICompat),
-                    ImageSizeUl(savedUICompat),
-                    uiFreed ? 1 : 0,
-                    g_uiCompatOwnedPin ? 1 : 0,
-                    rcUiBefore,
-                    GlassUlTrace::QueryLoadCountByName(L"UICompat.dll"),
-                    GlassUlTrace::ModulePresentGmh(L"UICompat.dll") ? 1 : 0,
-                    GlassUlTrace::ModulePresentToolhelp(L"UICompat.dll") ? 1 : 0);
-                // #endregion
+                FreeLibrary(savedUICompat);
                 const bool cwUiHost = Shared::RootBackdropPolicy::IsCoreWindowHostProcess();
 
                 // HR7 (лог 561350 @81939): SEH FreeLibrary → still:true → CoFreeUnusedLibraries
@@ -2015,66 +1675,12 @@ namespace
             {
                 AuditGlassMessageWindowsBeforeFree(L"WndCompat", savedWnd,
                     kWndStopClasses, _countof(kWndStopClasses));
-                // #region agent log
-                // GLASS-ULTRACE (H91): эксперимент «не выгружать под живым указателем».
-                // GLASS_ULTRACE_WND_SAFE=1 → WndCompat ВООБЩЕ не выгружается в этом процессе
-                // (модуль остаётся; крэша по stale-указателю быть не должно).
+                // H91: не unmap WndCompat, пока скан видит наш код в GWLP/comctl32-цепочке.
                 const unsigned staleWndProcs = ScanStaleCallbacksBeforeFree("WndCompat", savedWnd);
-                wchar_t safeFlag[16]{};
-                const bool safeEnv =
-                    GetEnvironmentVariableW(L"GLASS_ULTRACE_WND_SAFE", safeFlag, _countof(safeFlag)) > 0;
-                // Эксперимент: флаг = «не выгружать WndCompat вообще» (не только при найденных
-                // указателях). Нужен, чтобы отделить «наш unmap» от «чужие ссылки/COM».
-                // H91 (дамп explorer 29784): при staleWndProcs>0 FreeLibrary = unmap модуля, на
-                // который всё ещё указывает comctl32-цепочка → CFG fail-fast при WM_PAINT
-                // (в дампе R13=hwnd 0xD41014 из marked-лога, цель WndCompat+0x194240).
-                // Поэтому unmap запрещён, пока скан видит наш КОД: residual-модуль лучше, чем
-                // падение Проводника. Причина видна в логе (reason=stale|env).
-                const bool skipByStale = staleWndProcs > 0;
-                const bool skipWndFree = safeEnv || skipByStale || KeepModulesEnvUl();
-                if (skipWndFree)
+                if (staleWndProcs == 0)
                 {
-                    GlassUlTrace::Logf(
-                        "H91",
-                        "GlassCompat.cpp:ExecuteShutdown",
-                        "wnd_free_skipped",
-                        "\"stale_procs\":%u,\"env\":%d,\"reason\":\"%s\"",
-                        staleWndProcs,
-                        safeEnv ? 1 : 0,
-                        safeEnv ? "env" : "stale");
-                }
-                else
-                {
-                    GlassUlTrace::Logf(
-                        "H91",
-                        "GlassCompat.cpp:ExecuteShutdown",
-                        "wnd_free_proceed",
-                        "\"stale_procs\":%u",
-                        staleWndProcs);
-                }
-                // #endregion
-                // GLASS-ULTRACE (H91): при skipWndFree модуль НЕ выгружается — логируем отдельно,
-                // чтобы rc_after в module_free не путался с «не выгрузилось из-за ссылки».
-                if (!skipWndFree)
-                {
-                    const unsigned rcWndBefore = GlassUlTrace::QueryLoadCount(savedWnd);
-                    const BOOL wndFreed = FreeLibrary(savedWnd);
+                    (void)FreeLibrary(savedWnd);
                     result |= UnloadResult::FreeWnd_Returned;
-                    // #region agent log
-                    // GLASS-ULTRACE
-                    GlassUlTrace::Logf(
-                        "H88",
-                        "GlassCompat.cpp:ExecuteShutdown",
-                        "module_free",
-                        "\"module\":\"WndCompat\",\"base\":\"%p\",\"size\":%u,\"ok\":%d,\"owned\":1,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
-                        static_cast<void*>(savedWnd),
-                        ImageSizeUl(savedWnd),
-                        wndFreed ? 1 : 0,
-                        rcWndBefore,
-                        GlassUlTrace::QueryLoadCountByName(L"WndCompat.dll"),
-                        GlassUlTrace::ModulePresentGmh(L"WndCompat.dll") ? 1 : 0,
-                        GlassUlTrace::ModulePresentToolhelp(L"WndCompat.dll") ? 1 : 0);
-                    // #endregion
                 }
             }
         }
@@ -2084,18 +1690,6 @@ namespace
         // GetModuleHandleW здесь ненадёжен из-за async системного cleanup.
         DebugLog(L"[GlassCompat][Core] ExecuteShutdown: COMPLETE, reporting result=0x%08X",
             static_cast<uint32_t>(result));
-        // #region agent log
-        // GLASS-ULTRACE
-        GlassUlTrace::Logf(
-            "H88",
-            "GlassCompat.cpp:ExecuteShutdown",
-            "shutdown_end",
-            "\"reason\":\"%s\",\"result\":%u,\"mask\":\"0x%X\",\"ms\":%llu,\"phase\":\"end\"",
-            shutdownReason,
-            static_cast<unsigned>(result),
-            static_cast<unsigned>(result),
-            GetTickCount64() - shutdownT0);
-        // #endregion
 
         ReportUnloadResult(pid, result);
     }
@@ -2138,13 +1732,11 @@ namespace
         g_hTaskbar = GetModuleHandleW(L"TaskbarCompat.dll");
         if (g_hTaskbar)
         {
-            g_taskbarOwnedPin = false;
             DebugLog(L"[GlassCompat][Core] TaskbarCompat already loaded — skipping LoadLibrary");
         }
         else if (!taskbarPath.empty())
         {
             g_hTaskbar = LoadOptionalModule(taskbarPath, L"TaskbarCompat");
-            g_taskbarOwnedPin = g_hTaskbar != nullptr;
         }
 
         if (!g_hTaskbar)
@@ -2254,13 +1846,11 @@ namespace
         g_hExplorer = GetModuleHandleW(L"ExplorerCompat.dll");
         if (g_hExplorer)
         {
-            g_explorerOwnedPin = false;
             DebugLog(L"[GlassCompat][Core] ExplorerCompat already loaded — skipping LoadLibrary");
         }
         else if (!explorerPath.empty())
         {
             g_hExplorer = LoadOptionalModule(explorerPath, L"ExplorerCompat");
-            g_explorerOwnedPin = g_hExplorer != nullptr;
         }
 
         if (!g_hExplorer)
@@ -2385,7 +1975,6 @@ namespace
             if (GetModuleHandleExW(0, L"UICompat.dll", &pinned) && pinned)
             {
                 g_hUICompat = pinned;
-                g_uiCompatOwnedPin = true;
                 DebugLog(
                     L"[GlassCompat][Core] UICompat already loaded — pinned via GetModuleHandleEx");
             }
@@ -2395,7 +1984,6 @@ namespace
                 (void)attr;
                 SetLastError(0);
                 g_hUICompat = LoadOptionalModule(uiPath, L"UICompat");
-                g_uiCompatOwnedPin = g_hUICompat != nullptr;
             }
         }
 
@@ -2534,8 +2122,6 @@ namespace
         else
         {
             g_hCore = corePath.empty() ? nullptr : LoadOptionalModule(corePath, L"GlassCore");
-            const DWORD coreLoadGle = g_hCore ? 0 : GetLastError();
-            (void)coreLoadGle;
 
             wchar_t thPath[MAX_PATH]{};
             const HMODULE thCore = FindModuleViaToolhelp(L"GlassCore.dll", thPath, MAX_PATH);
@@ -2837,117 +2423,27 @@ namespace
         // path=1 раньше сразу шёл в FLAET → AV в <Unloaded_GlassCompat> (ShellHost/Adobe, 18.08).
         // Remote LoadLibrary (SEH/SMEH/ShellHost): pin LoadLibrary + pin GetModuleHandleEx — после Unhook
         // нужен лишний FreeLibrary, иначе модуль остаётся (скриншот InjectMap).
-        const bool remoteFlagBefore =
-            g_remoteLoadLibraryPin.load(std::memory_order_acquire);
-        const unsigned rcBegin = GlassUlTrace::QueryLoadCount(hSelfRef);
-        const ULONG inflightBegin = g_winEventCallbacksInFlight.load(std::memory_order_acquire);
-        // #region agent log
-        // GLASS-ULTRACE
-        GlassUlTrace::Logf(
-            "H80",
-            "GlassCompat.cpp:FreeSelfAndExitThread",
-            "freeself_begin",
-            "\"path\":%llu,\"handle\":\"%p\",\"remote_flag\":%d,\"rc\":%u,\"inflight\":%lu,\"gui_gen\":%u",
-            path,
-            static_cast<void*>(hSelfRef),
-            remoteFlagBefore ? 1 : 0,
-            rcBegin,
-            static_cast<unsigned long>(inflightBegin),
-            g_guiGeneration.load(std::memory_order_acquire));
-        // #endregion
         const bool hadRemotePin =
             g_remoteLoadLibraryPin.exchange(false, std::memory_order_acq_rel);
-        BOOL remoteCompOk = FALSE;
-        unsigned rcAfterRemote = rcBegin;
         if (hadRemotePin && hSelfRef)
-        {
-            const unsigned rcCompBefore = GlassUlTrace::QueryLoadCount(hSelfRef);
-            remoteCompOk = FreeLibrary(hSelfRef);
-            rcAfterRemote = GlassUlTrace::QueryLoadCount(hSelfRef);
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H80",
-                "GlassCompat.cpp:FreeSelfAndExitThread",
-                "freeself_remote_comp",
-                "\"called\":1,\"ok\":%d,\"rc_before\":%u,\"rc_after\":%u",
-                remoteCompOk ? 1 : 0,
-                rcCompBefore,
-                rcAfterRemote);
-            // #endregion
-        }
-        else
-        {
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H80",
-                "GlassCompat.cpp:FreeSelfAndExitThread",
-                "freeself_remote_comp",
-                "\"called\":0,\"ok\":0,\"remote_flag\":%d",
-                hadRemotePin ? 1 : 0);
-            // #endregion
-        }
+            (void)FreeLibrary(hSelfRef);
 
         DrainBeforeFreeSelf();
 
-        // #region agent log
-        // GLASS-ULTRACE (H82): expected_rc_after = сколько ссылок ОСТАНЕТСЯ после FLAET.
-        // >0 и при этом dll_detach не пришёл = deferred free ОС не доставлен (idle/PLM-процесс).
+        // H82: если loader-refcount выше наших пинов — deferred OS-free ещё не доставлен.
+        // Короткий wake, чтобы idle/PLM успели снять ссылку до FLAET.
         const unsigned ownRefs = 1u + (hadRemotePin ? 1u : 0u);
-        unsigned rcBeforeFlaet = GlassUlTrace::QueryLoadCount(hSelfRef);
-        // R4 (H82): прогон 4 показал, что этот остаток решает исход: os_refs=0 → dll_detach
-        // в том же миллисекунде; os_refs=1 → выгрузка приходит на 8–13 с позже либо не
-        // приходит вовсе (DllHost, msedgewebview2). Разделяем два случая: (а) ссылку снимает
-        // ОС своим deferred FreeLibrary — тогда она уйдёт за миллисекунды, если разбудить
-        // очереди потоков процесса; (б) ссылка наша собственная, но не учтённая в ownRefs.
-        // Поэтому перед FLAET коротко ждём с wake и логируем переходы rc.
+        unsigned rcBeforeFlaet = Shared::ModuleRef::QueryLoadCount(hSelfRef);
         if (rcBeforeFlaet > ownRefs)
         {
             const ULONGLONG waitT0 = GetTickCount64();
-            const unsigned rcStart = rcBeforeFlaet;
-            unsigned polls = 0;
             while (rcBeforeFlaet > ownRefs && GetTickCount64() - waitT0 < 1200)
             {
                 (void)WakeAllProcessThreadsWmNull();
                 Sleep(150);
-                ++polls;
-                rcBeforeFlaet = GlassUlTrace::QueryLoadCount(hSelfRef);
+                rcBeforeFlaet = Shared::ModuleRef::QueryLoadCount(hSelfRef);
             }
-            GlassUlTrace::Logf(
-                "H82",
-                "GlassCompat.cpp:FreeSelfAndExitThread",
-                "rc_wait",
-                "\"path\":%llu,\"rc_start\":%u,\"rc_end\":%u,\"own\":%u,\"polls\":%u,"
-                "\"ms\":%llu,\"released\":%d",
-                path,
-                rcStart,
-                rcBeforeFlaet,
-                ownRefs,
-                polls,
-                GetTickCount64() - waitT0,
-                (rcBeforeFlaet <= ownRefs) ? 1 : 0);
         }
-        const unsigned expectedRcAfter = rcBeforeFlaet > ownRefs ? rcBeforeFlaet - ownRefs : 0u;
-        const unsigned osRefs = expectedRcAfter;
-        GlassUlTrace::Logf(
-            "H82",
-            "GlassCompat.cpp:FreeSelfAndExitThread",
-            "freeself_flaet",
-            "\"path\":%llu,\"handle\":\"%p\",\"rc\":%u,\"our_pins\":1,\"remote_comp\":%d,"
-            "\"expected_rc_after\":%u,\"os_refs\":%u,\"inflight\":%lu,\"host_alive_ms\":%llu",
-            path,
-            static_cast<void*>(hSelfRef),
-            rcBeforeFlaet,
-            hadRemotePin ? 1 : 0,
-            expectedRcAfter,
-            osRefs,
-            static_cast<unsigned long>(g_winEventCallbacksInFlight.load(std::memory_order_acquire)),
-            [&]() -> unsigned long long {
-                const ULONGLONG dead = g_hostDeadTickMs.load(std::memory_order_acquire);
-                return dead == 0 ? 0ULL : GetTickCount64() - dead;
-            }());
-        // #endregion
         FreeLibraryAndExitThread(hSelfRef, 0);
     }
 
@@ -2973,26 +2469,10 @@ namespace
         // Решение: увеличиваем рефкаунт до 2. Тогда UnhookWinEvent опускает его до 1 (DLL жива),
         // а FreeLibraryAndExitThread в конце атомарно опускает до 0 и завершает поток.
         HMODULE hSelfRef = nullptr;
-        const unsigned rcPinBefore = GlassUlTrace::QueryLoadCountByName(L"GlassCompat.dll");
-        const BOOL pinOk = GetModuleHandleExW(
+        GetModuleHandleExW(
             GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
             reinterpret_cast<LPCWSTR>(&GlassGuiThreadProc),
             &hSelfRef);
-        const DWORD pinGle = pinOk ? 0u : GetLastError();
-        // #region agent log
-        // GLASS-ULTRACE
-        GlassUlTrace::Logf(
-            "H89",
-            "GlassCompat.cpp:GlassGuiThreadProc",
-            "pin_acq",
-            "\"gen\":%u,\"handle\":\"%p\",\"ok\":%d,\"gle\":%lu,\"rc_before\":%u,\"rc_after\":%u",
-            g_guiGeneration.load(std::memory_order_acquire),
-            static_cast<void*>(hSelfRef),
-            pinOk ? 1 : 0,
-            static_cast<unsigned long>(pinGle),
-            rcPinBefore,
-            GlassUlTrace::QueryLoadCount(hSelfRef ? hSelfRef : GetModuleHandleW(L"GlassCompat.dll")));
-        // #endregion
 
         DoInitialize(g_hSelf);
 
@@ -3007,7 +2487,6 @@ namespace
         // удалила) — Fallback: периодически проверяем ReadHostPid(). Когда хост
         // завершился и PID исчез, инициируем shutdown самостоятельно.
         HANDLE hPlatformStop = OpenEventW(SYNCHRONIZE, FALSE, kStopEventName);
-        const DWORD gleStop = hPlatformStop ? 0u : GetLastError();
         HANDLE hUnloadRequest = Shared::InjectProcessMap::CreateUnloadRequestEvent(nullptr);
         // H71: HostShutdown открываем СРАЗУ (как BlockList watcher), не после ExecuteShutdown.
         // H70 OpenEvent после COMPLETE → часто WAIT_FAILED: хост уже CloseHostShutdownEvent
@@ -3016,7 +2495,6 @@ namespace
             SYNCHRONIZE,
             FALSE,
             GlassShared::GlassPlatformTask::kHostShutdownEventName);
-        const DWORD gleHostShutdown = hHostShutdownEarly ? 0u : GetLastError();
         // Dead-man switch хоста: живой хост владеет мьютексом всегда, поэтому любой
         // успешный захват (WAIT_OBJECT_0 или WAIT_ABANDONED) означает его смерть.
         // Закрывает дыру, из-за которой CoreWindow-процессы не выгружались после
@@ -3125,7 +2603,6 @@ namespace
         bool shutdownByHostLiveness = false;
         HostLivenessReason hostDeadReason = HostLivenessReason::Alive;
         bool softModuleUnloadDone = false;
-        const char* guiStopTrigger = "unknown";
 
         MSG msg{};
         const bool cwHostGui = Shared::RootBackdropPolicy::IsCoreWindowHostProcess();
@@ -3137,7 +2614,6 @@ namespace
                 const DWORD stopWr = WaitForSingleObject(hPlatformStop, 0);
                 if (stopWr == WAIT_OBJECT_0)
                 {
-                    guiStopTrigger = "stopEvent";
                     break;
                 }
                 // H54: битый handle в AppContainer — переоткрыть named Stop.
@@ -3148,8 +2624,7 @@ namespace
                     if (hPlatformStop &&
                         WaitForSingleObject(hPlatformStop, 0) == WAIT_OBJECT_0)
                     {
-                        guiStopTrigger = "stopEvent";
-                        break;
+                            break;
                     }
                 }
             }
@@ -3158,7 +2633,6 @@ namespace
             // не стреляет; host WPM force ok, но GUI не поллил флаг → 22s до loop_exit.
             if (cwHostGui && InterlockedCompareExchange(&GlassCompat_CwForceUnloadFlag, 0, 0) != 0)
             {
-                guiStopTrigger = "cwForceFlag";
                 break;
             }
 
@@ -3186,17 +2660,6 @@ namespace
                     // Не трогаем g_shutdownStarted: soft unload ≠ global Stop (reinject + полный Stop).
                     DebugLog(DBG_IMPORTANT,
                         L"[GlassCompat][Core] GlassGuiThread: per-PID soft unload — ExecuteShutdown");
-                    // #region agent log
-                    // GLASS-ULTRACE
-                    GlassUlTrace::Logf(
-                        "H90",
-                        "GlassCompat.cpp:GlassGuiThreadProc",
-                        "stop_trigger",
-                        "\"what\":\"unloadRequest\",\"soft\":1,\"host_gone\":%d,\"host_shutdown\":%d",
-                        hostGone ? 1 : 0,
-                        hostShutdownAlready ? 1 : 0);
-                    // #endregion
-                    g_ultraceShutdownReason = "unloadRequest";
                     ExecuteShutdown();
                     softModuleUnloadDone = true;
                     g_softModulesUnloaded.store(true, std::memory_order_release);
@@ -3236,7 +2699,6 @@ namespace
 
             if (handlePerPidUnload(false))
             {
-                guiStopTrigger = "unloadRequest";
                 break;
             }
 
@@ -3298,17 +2760,14 @@ namespace
                     // Отдаём мьютекс дальше: остальные инжектированные процессы
                     // ждут на нём же и должны получить тот же сигнал.
                     (void)ReleaseMutex(hHostAlive);
-                    g_hostDeadTickMs.store(GetTickCount64(), std::memory_order_release);
                     shutdownByHostLiveness = true;
                     hostDeadReason = HostLivenessReason::HostAliveReleased;
-                    guiStopTrigger = "hostAlive";
                     DebugLog(DBG_IMPORTANT,
                         L"[GlassCompat][HostWatch] host dead detected: HostAlive mutex released");
                     break;
                 }
                 if (i == stopIdx)
                 {
-                    guiStopTrigger = "stopEvent";
                     DebugLog(L"[GlassCompat][Core] GlassGuiThread: stop event signaled, initiating shutdown");
                     break;
                 }
@@ -3316,8 +2775,7 @@ namespace
                 {
                     if (handlePerPidUnload(true))
                     {
-                        guiStopTrigger = "unloadRequest";
-                        break;
+                                break;
                     }
                     continue;
                 }
@@ -3620,7 +3078,6 @@ namespace
             }
             if (quit)
             {
-                guiStopTrigger = "wm_quit";
                 break;
             }
 
@@ -3628,7 +3085,6 @@ namespace
             // о сигнале wait-объектов. После drain обязательно проверяем StopEvent.
             if (hPlatformStop && WaitForSingleObject(hPlatformStop, 0) == WAIT_OBJECT_0)
             {
-                guiStopTrigger = "stopEvent";
                 DebugLog(L"[GlassCompat][Core] GlassGuiThread: stop event (post-drain poll), initiating shutdown");
                 break;
             }
@@ -3659,9 +3115,7 @@ namespace
                     {
                         shutdownByHostLiveness = true;
                         hostDeadReason = lr;
-                        g_hostDeadTickMs.store(GetTickCount64(), std::memory_order_release);
-                        guiStopTrigger = "hostLiveness";
-                        DebugLog(DBG_IMPORTANT,
+                            DebugLog(DBG_IMPORTANT,
                             L"[GlassCompat][HostWatch] host dead detected: reason=%s pid=%lu",
                             HostLivenessReasonToString(lr),
                             static_cast<unsigned long>(hostWatchPid));
@@ -3713,22 +3167,10 @@ namespace
                     L"[GlassCompat][Core] GlassGuiThread: stopping by HostLivenessLost (reason=%s)",
                     HostLivenessReasonToString(hostDeadReason));
             }
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H90",
-                "GlassCompat.cpp:GlassGuiThreadProc",
-                "stop_trigger",
-                "\"what\":\"%s\",\"host_liveness\":%d,\"soft_done\":%d",
-                guiStopTrigger,
-                shutdownByHostLiveness ? 1 : 0,
-                softModuleUnloadDone ? 1 : 0);
-            // #endregion
             // Soft unload уже снимал peer-модули — полный ExecuteShutdown не нужен.
             // UICompat мог вернуться через Ensure после soft → добить Restore/Unadvise.
             if (!softModuleUnloadDone)
             {
-                g_ultraceShutdownReason = guiStopTrigger;
                 ExecuteShutdown();
             }
             else if (GetModuleHandleW(L"UICompat.dll"))
@@ -3767,32 +3209,10 @@ namespace
         {
             if (hHostShutdownEarly)
             {
-                // #region agent log
-                // GLASS-ULTRACE (R2, H82): после смерти хоста HostShutdown не приходит никогда —
                 // здесь процесс висит 30 с, держа GlassCompat (наблюдение «модуль остался»).
                 const BOOL already = (WaitForSingleObject(hHostShutdownEarly, 0) == WAIT_OBJECT_0);
-                const ULONGLONG hsT0 = GetTickCount64();
-                GlassUlTrace::Logf(
-                    "H82",
-                    "GlassCompat.cpp:GlassGuiThreadProc",
-                    "hostshutdown_wait",
-                    "\"already_signaled\":%d,\"by_host_liveness\":%d",
-                    already ? 1 : 0,
-                    shutdownByHostLiveness ? 1 : 0);
-                // #endregion
                 if (!already)
                     (void)WaitForSingleObject(hHostShutdownEarly, 30000);
-                // #region agent log
-                // GLASS-ULTRACE (H82)
-                GlassUlTrace::Logf(
-                    "H82",
-                    "GlassCompat.cpp:GlassGuiThreadProc",
-                    "hostshutdown_done",
-                    "\"signaled\":%d,\"ms\":%llu,\"rc\":%u",
-                    (WaitForSingleObject(hHostShutdownEarly, 0) == WAIT_OBJECT_0) ? 1 : 0,
-                    GetTickCount64() - hsT0,
-                    GlassUlTrace::QueryLoadCountByName(L"GlassCompat.dll"));
-                // #endregion
                 CloseHandle(hHostShutdownEarly);
                 hHostShutdownEarly = nullptr;
             }
@@ -3839,26 +3259,8 @@ namespace
                     reinterpret_cast<LPCWSTR>(&StartCwUnloadWatcher),
                     &hRef))
             {
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H87",
-                    "GlassCompat.cpp:StartCwUnloadWatcher",
-                    "watcher_exit",
-                    "\"kind\":\"cw\",\"branch\":\"pin_fail\",\"pin_released\":0");
-                // #endregion
                 return;
             }
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H87",
-                "GlassCompat.cpp:StartCwUnloadWatcher",
-                "watcher_start",
-                "\"kind\":\"cw\",\"handle\":\"%p\",\"rc\":%u",
-                static_cast<void*>(hRef),
-                GlassUlTrace::QueryLoadCount(hRef));
-            // #endregion
 
             HANDLE hThread = CreateThread(
                 nullptr,
@@ -3920,16 +3322,6 @@ namespace
                     if (hForce)
                         CloseHandle(hForce);
 
-                    // #region agent log
-                    // GLASS-ULTRACE
-                    GlassUlTrace::Logf(
-                        "H87",
-                        "GlassCompat.cpp:StartCwUnloadWatcher",
-                        "watcher_wake",
-                        "\"kind\":\"cw\",\"trigger\":\"%s\",\"wake\":%lu",
-                        wakeSrc,
-                        static_cast<unsigned long>(wake));
-                    // #endregion
 
                     // HR3: сначала WM_QUIT, потом лог — CreateFile в AC раньше
                     // блокировал PostThreadMessage (нет stop_seen / residual SEH).
@@ -3948,29 +3340,11 @@ namespace
                     {
                         if (g_shutdownComplete.load(std::memory_order_acquire))
                         {
-                            // #region agent log
-                            // GLASS-ULTRACE
-                            GlassUlTrace::Logf(
-                                "H87",
-                                "GlassCompat.cpp:StartCwUnloadWatcher",
-                                "watcher_exit",
-                                "\"kind\":\"cw\",\"branch\":\"wait_complete\",\"pin_released\":1,\"shutdownStarted\":1,\"shutdownComplete\":1,\"guiTid\":%lu,\"loaded\":1",
-                                static_cast<unsigned long>(GlassCompat_GuiThreadId));
-                            // #endregion
                             FreeLibrary(hPin);
                             return 0;
                         }
                         if (GetModuleHandleW(L"GlassCompat.dll") == nullptr)
                         {
-                            // #region agent log
-                            // GLASS-ULTRACE
-                            GlassUlTrace::Logf(
-                                "H87",
-                                "GlassCompat.cpp:StartCwUnloadWatcher",
-                                "watcher_exit",
-                                "\"kind\":\"cw\",\"branch\":\"wait_unloaded\",\"pin_released\":1,\"guiTid\":%lu,\"loaded\":0",
-                                static_cast<unsigned long>(GlassCompat_GuiThreadId));
-                            // #endregion
                             FreeLibrary(hPin);
                             return 0;
                         }
@@ -3990,16 +3364,6 @@ namespace
                                 break;
                             Sleep(50);
                         }
-                        // #region agent log
-                        // GLASS-ULTRACE
-                        GlassUlTrace::Logf(
-                            "H87",
-                            "GlassCompat.cpp:StartCwUnloadWatcher",
-                            "watcher_exit",
-                            "\"kind\":\"cw\",\"branch\":\"already_started\",\"pin_released\":1,\"shutdownStarted\":1,\"guiTid\":%lu,\"loaded\":%d",
-                            static_cast<unsigned long>(GlassCompat_GuiThreadId),
-                            GetModuleHandleW(L"GlassCompat.dll") ? 1 : 0);
-                        // #endregion
                         FreeLibrary(hPin);
                         return 0;
                     }
@@ -4008,16 +3372,6 @@ namespace
                     if (g_shutdownStarted.compare_exchange_strong(
                             expected, true, std::memory_order_acq_rel, std::memory_order_acquire))
                     {
-                        // #region agent log
-                        // GLASS-ULTRACE
-                        GlassUlTrace::Logf(
-                            "H90",
-                            "GlassCompat.cpp:StartCwUnloadWatcher",
-                            "stop_trigger",
-                            "\"what\":\"%s\",\"kind\":\"cw\"",
-                            wakeSrc);
-                        // #endregion
-                        g_ultraceShutdownReason = wakeSrc;
                         ExecuteShutdown();
                     }
 
@@ -4067,17 +3421,6 @@ namespace
                             g_shutdownComplete.load(std::memory_order_acquire) ? 1 : 0,
                             GetModuleHandleW(L"GlassCompat.dll") ? 1 : 0,
                             static_cast<unsigned>(GlassCompat_GuiThreadId));
-                        // #region agent log
-                        // GLASS-ULTRACE
-                        GlassUlTrace::Logf(
-                            "H87",
-                            "GlassCompat.cpp:StartCwUnloadWatcher",
-                            "watcher_exit",
-                            "\"kind\":\"cw\",\"branch\":\"skip_freeself\",\"pin_released\":1,\"shutdownComplete\":%d,\"guiTid\":%lu,\"loaded\":%d",
-                            g_shutdownComplete.load(std::memory_order_acquire) ? 1 : 0,
-                            static_cast<unsigned long>(GlassCompat_GuiThreadId),
-                            GetModuleHandleW(L"GlassCompat.dll") ? 1 : 0);
-                        // #endregion
                         FreeLibrary(hPin);
                         return 0;
                     }
@@ -4086,16 +3429,6 @@ namespace
                     if (g_shutdownEvent)
                         SetEvent(g_shutdownEvent);
 
-                    // #region agent log
-                    // GLASS-ULTRACE
-                    GlassUlTrace::Logf(
-                        "H87",
-                        "GlassCompat.cpp:StartCwUnloadWatcher",
-                        "watcher_exit",
-                        "\"kind\":\"cw\",\"branch\":\"freeself\",\"pin_released\":0,\"guiTid\":%lu,\"loaded\":%d",
-                        static_cast<unsigned long>(GlassCompat_GuiThreadId),
-                        GetModuleHandleW(L"GlassCompat.dll") ? 1 : 0);
-                    // #endregion
                     FreeSelfAndExitThread(hPin, 1);
                     return 0;
                 },
@@ -4105,14 +3438,6 @@ namespace
 
             if (!hThread)
             {
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H87",
-                    "GlassCompat.cpp:StartCwUnloadWatcher",
-                    "watcher_exit",
-                    "\"kind\":\"cw\",\"branch\":\"create_fail\",\"pin_released\":1");
-                // #endregion
                 FreeLibrary(hRef);
                 return;
             }
@@ -4143,28 +3468,6 @@ namespace
 
     void StartMinimalUnloadWatcher(ULONGLONG path) noexcept
     {
-        // #region agent log
-        // GLASS-ULTRACE (R5, H95): kill-switch для A/B по крэшу taskhostw.
-        // В прогоне 5 наш модуль жил в taskhostw 15460/14312 всего 30 мс (процесс сразу
-        // завершался). Отдельный дамп taskhostw 9484 — C++ exception (0xE06D7363) из
-        // AccountHealth.dll при 0xC00000E5, наших модулей в процессе нет. Чтобы отделить
-        // «наше присутствие» от «бага Windows», при GLASS_ULTRACE_NOWATCHER=1 watcher
-        // не ставит pin и не создаёт поток: DLL просто лежит в процессе до его смерти.
-        {
-            wchar_t noWatcher[16]{};
-            if (GetEnvironmentVariableW(L"GLASS_ULTRACE_NOWATCHER", noWatcher, _countof(noWatcher)) > 0)
-            {
-                GlassUlTrace::Logf(
-                    "H95",
-                    "GlassCompat.cpp:StartMinimalUnloadWatcher",
-                    "watcher_skipped",
-                    "\"path\":%llu,\"env\":1,\"rc\":%u",
-                    path,
-                    GlassUlTrace::QueryLoadCount(GetModuleHandleW(L"GlassCompat.dll")));
-                return;
-            }
-        }
-        // #endregion
         // R12c: регистрация слота отделена от создания потока. Раньше всё лежало внутри
         // std::call_once, и первый вызов (страховка path=4 из DllMain) навсегда «съедал»
         // право записать более точный путь. Из-за этого процессы из ProcessBlockList и
@@ -4224,41 +3527,12 @@ namespace
                     reinterpret_cast<LPCWSTR>(&StartMinimalUnloadWatcher),
                     &hRef))
             {
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H87",
-                    "GlassCompat.cpp:StartMinimalUnloadWatcher",
-                    "watcher_exit",
-                    "\"kind\":\"minimal\",\"path\":%llu,\"branch\":\"pin_fail\",\"pin_released\":0",
-                    path);
-                // #endregion
                 return;
             }
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H87",
-                "GlassCompat.cpp:StartMinimalUnloadWatcher",
-                "watcher_start",
-                "\"kind\":\"minimal\",\"path\":%llu,\"handle\":\"%p\",\"rc\":%u",
-                path,
-                static_cast<void*>(hRef),
-                GlassUlTrace::QueryLoadCount(hRef));
-            // #endregion
 
             auto* pack = new (std::nothrow) MinimalUnloadPack{ hRef, path };
             if (!pack)
             {
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H87",
-                    "GlassCompat.cpp:StartMinimalUnloadWatcher",
-                    "watcher_exit",
-                    "\"kind\":\"minimal\",\"path\":%llu,\"branch\":\"pack_fail\",\"pin_released\":1",
-                    path);
-                // #endregion
                 FreeLibrary(hRef);
                 return;
             }
@@ -4296,16 +3570,6 @@ namespace
                     // процессов (DllHost) не было ни watcher_wake, ни следа причины —
                     // без этого нельзя отличить «не открылся StopEvent» от «не дошёл
                     // до ожидания».
-                    GlassUlTrace::Logf(
-                        "H102",
-                        "GlassCompat.cpp:StartMinimalUnloadWatcher",
-                        "watcher_handles",
-                        "\"path\":%llu,\"stop\":%d,\"unload\":%d,\"host_alive\":%d,\"host_shutdown\":%d",
-                        watcherPath,
-                        hStop ? 1 : 0,
-                        hUnload ? 1 : 0,
-                        hHostAlive ? 1 : 0,
-                        hHostShutdown ? 1 : 0);
                     if (hStop || hUnload || hHostAlive)
                     {
                         HANDLE waits[3]{};
@@ -4341,8 +3605,7 @@ namespace
                         {
                             // Передать сигнал следующему ожидающему процессу.
                             (void)ReleaseMutex(hHostAlive);
-                            g_hostDeadTickMs.store(GetTickCount64(), std::memory_order_release);
-                        }
+                                }
 
                         const wchar_t* trigger = L"stop";
                         if (wr == WAIT_FAILED)
@@ -4357,19 +3620,6 @@ namespace
                             hostDead ? 1 : 0,
                             fromUnload ? 1 : 0,
                             wr);
-                        // #region agent log
-                        // GLASS-ULTRACE
-                        GlassUlTrace::Logf(
-                            "H87",
-                            "GlassCompat.cpp:StartMinimalUnloadWatcher",
-                            "watcher_wake",
-                            "\"kind\":\"minimal\",\"path\":%llu,\"trigger\":\"%s\",\"hostDead\":%d,\"fromUnload\":%d,\"wr\":%lu",
-                            watcherPath,
-                            (wr == WAIT_FAILED) ? "wait_failed" : (hostDead ? "hostAlive" : (fromUnload ? "unloadRequest" : "stopEvent")),
-                            hostDead ? 1 : 0,
-                            fromUnload ? 1 : 0,
-                            static_cast<unsigned long>(wr));
-                        // #endregion
 
                         if (hStop)
                             CloseHandle(hStop);
@@ -4381,12 +3631,6 @@ namespace
                         // занимается он; watcher отдаёт свою pin-ссылку и уходит.
                         if (watcherPath == 4 && g_guiThreadId != 0)
                         {
-                            GlassUlTrace::Logf(
-                                "H102",
-                                "GlassCompat.cpp:StartMinimalUnloadWatcher",
-                                "watcher_exit",
-                                "\"kind\":\"minimal\",\"path\":%llu,\"branch\":\"gui_present\"",
-                                watcherPath);
                             FreeLibraryAndExitThread(hMod, 0);
                         }
 
@@ -4410,16 +3654,6 @@ namespace
                             LogMinimalUnload(
                                 L"[GlassCompat][MinimalUnload] HostShutdown wait result=0x%08X",
                                 sr);
-                            // #region agent log
-                            // GLASS-ULTRACE
-                            GlassUlTrace::Logf(
-                                "H87",
-                                "GlassCompat.cpp:StartMinimalUnloadWatcher",
-                                "watcher_wake",
-                                "\"kind\":\"minimal\",\"path\":%llu,\"h58\":\"waited\",\"sr\":%lu",
-                                watcherPath,
-                                static_cast<unsigned long>(sr));
-                            // #endregion
                         }
                         else
                         {
@@ -4454,15 +3688,6 @@ namespace
                         L"[GlassCompat][MinimalUnload] FreeSelf path=%llu pid=%u",
                         watcherPath,
                         GetCurrentProcessId());
-                    // #region agent log
-                    // GLASS-ULTRACE
-                    GlassUlTrace::Logf(
-                        "H87",
-                        "GlassCompat.cpp:StartMinimalUnloadWatcher",
-                        "watcher_exit",
-                        "\"kind\":\"minimal\",\"path\":%llu,\"branch\":\"freeself\",\"pin_released\":0",
-                        watcherPath);
-                    // #endregion
                     FreeSelfAndExitThread(hMod, watcherPath);
                 },
                 pack,
@@ -4471,15 +3696,6 @@ namespace
 
             if (!hThread)
             {
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H87",
-                    "GlassCompat.cpp:StartMinimalUnloadWatcher",
-                    "watcher_exit",
-                    "\"kind\":\"minimal\",\"path\":%llu,\"branch\":\"create_fail\",\"pin_released\":1",
-                    path);
-                // #endregion
                 FreeLibrary(hRef);
                 delete pack;
                 return;
@@ -4504,7 +3720,6 @@ namespace
             g_guiThreadId = 0;
         }
 
-        g_guiGeneration.fetch_add(1, std::memory_order_acq_rel);
         g_shutdownStarted.store(false, std::memory_order_release);
         g_shutdownComplete.store(false, std::memory_order_release);
         if (!g_shutdownEvent)
@@ -4521,19 +3736,12 @@ namespace
             &g_guiThreadId
         );
 
-        const DWORD createThreadError = g_guiThreadHandle ? ERROR_SUCCESS : GetLastError();
-
         if (!g_guiThreadHandle)
         {
             DebugLog(L"[GlassCompat][Core] FAILED to create GlassGuiThread");
             // R11/5.2: без GUI-потока у процесса не было бы ни ожидания StopEvent,
             // ни abandoned HostAlive — DLL осталась бы висеть до смерти процесса.
             // MinimalUnloadWatcher даёт liveness-ожидание любому процессу с нашей DLL.
-            GlassUlTrace::Logf(
-                "H102", "GlassCompat.cpp:StartGuiThreadIfNeeded",
-                "gui_thread_failed_fallback",
-                "\"gle\":%lu,\"path\":\"minimal_watcher\"",
-                static_cast<unsigned long>(createThreadError));
             StartMinimalUnloadWatcher(1);
         }
         else
@@ -4565,12 +3773,6 @@ namespace GlassCompat
 
         // R12: видно, доходил ли процесс до Initialize. В прогоне 12 DllHost 32120 имел
         // attach_gate + pin_acq и дальше тишину — ни лога о причине, ни watcher'а.
-        GlassUlTrace::Logf(
-            "H102", "GlassCompat.cpp:Initialize", "init_begin",
-            "\"mode\":%d,\"hSelf\":\"%p\",\"gui_tid\":%lu",
-            static_cast<int>(g_mode),
-            static_cast<void*>(g_hSelf),
-            static_cast<unsigned long>(g_guiThreadId));
 
         ProcessBlockList::Initialize();
         if (ProcessBlockList::IsBlocked(GetProcessNameLower()))
@@ -4601,11 +3803,6 @@ namespace GlassCompat
 
         StartGuiThreadIfNeeded();
 
-        GlassUlTrace::Logf(
-            "H102", "GlassCompat.cpp:Initialize", "init_end",
-            "\"gui_tid\":%lu,\"mode\":%d",
-            static_cast<unsigned long>(g_guiThreadId),
-            static_cast<int>(g_mode));
 
         DebugLog(L"[GlassCompat][Core] Initialize: END");
         return true;
@@ -4621,7 +3818,7 @@ namespace GlassCompat
         if (g_guiThreadId != 0)
             return;
 
-        // Хост и короткоживущие агенты (rundll32 /stop,/verify,/forceUnload) управляют
+        // Хост и короткоживущие агенты (rundll32 /stop,/forceUnload) управляют
         // своей выгрузкой сами — лишний watcher там только мешает (двойной FreeSelf).
         const DWORD hostPid = ReadHostPid();
         if (hostPid != 0 && hostPid == GetCurrentProcessId())
@@ -4630,7 +3827,7 @@ namespace GlassCompat
             return;
 
         // rundll32 — это всегда наш хост (/start) или короткоживущий агент
-        // (/stop,/verify,/forceUnload): у них своя выгрузка. В момент DllMain хост
+        // (/stop,/forceUnload): у них своя выгрузка. В момент DllMain хост
         // мог ещё не записать HostPid, поэтому проверяем по имени процесса.
         {
             wchar_t exePath[MAX_PATH]{};
@@ -4655,11 +3852,6 @@ namespace GlassCompat
         }
 
         StartMinimalUnloadWatcher(4);
-        GlassUlTrace::Logf(
-            "H102", "GlassCompat.cpp:EnsureAttachWatcher",
-            "attach_watcher_path4",
-            "\"rc\":%u",
-            GlassUlTrace::QueryLoadCount(GetModuleHandleW(L"GlassCompat.dll")));
     }
 
     bool RequestShutdown()
@@ -4696,8 +3888,6 @@ __declspec(dllexport) BOOL WINAPI GlassCompat_Initialize(HMODULE hModule)
 extern "C"
 __declspec(dllexport) DWORD WINAPI GlassCompat_RemoteBootstrap(LPVOID)
 {
-    const bool remoteBefore = g_remoteLoadLibraryPin.load(std::memory_order_acquire);
-    const unsigned rcBefore = GlassUlTrace::QueryLoadCountByName(L"GlassCompat.dll");
     g_remoteLoadLibraryPin.store(true, std::memory_order_release);
 
     HMODULE hSelf = nullptr;
@@ -4708,20 +3898,6 @@ __declspec(dllexport) DWORD WINAPI GlassCompat_RemoteBootstrap(LPVOID)
 
     const bool ok = GlassCompat::Initialize(hSelf);
     const DWORD exitCode = !ok ? 0u : (g_guiThreadId != 0 ? g_guiThreadId : 1u);
-    // #region agent log
-    // GLASS-ULTRACE
-    GlassUlTrace::Logf(
-        "H80",
-        "GlassCompat.cpp:GlassCompat_RemoteBootstrap",
-        "bootstrap",
-        "\"remote_flag_before\":%d,\"remote_flag_after\":%d,\"rc_before\":%u,\"rc_after\":%u,\"ok\":%d,\"exit\":%lu",
-        remoteBefore ? 1 : 0,
-        g_remoteLoadLibraryPin.load(std::memory_order_acquire) ? 1 : 0,
-        rcBefore,
-        GlassUlTrace::QueryLoadCount(hSelf),
-        ok ? 1 : 0,
-        static_cast<unsigned long>(exitCode));
-    // #endregion
 
     // 1 = init принят (GUI/watcher стартовал или уже был).
     // H54: хост кэширует GUI tid из exit code (AppContainer mapping Local\ ему не виден).

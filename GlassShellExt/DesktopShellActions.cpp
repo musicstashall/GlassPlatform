@@ -8,7 +8,6 @@
 #include <GlassModulePath.h>
 #include <GlassPlatformTask.h>
 #include <GlassStop.h>
-#include <GlassUlTrace.h>
 #include <strsafe.h>
 #include <shlobj.h>
 
@@ -526,12 +525,6 @@ namespace GlassDesktopActions
                 {
                     // Дублируем итог в общий лог: stop_result уже есть, но из UI важно
                     // видеть, что поток дожима завершился, а не завис.
-                    GlassUlTrace::Logf(
-                        "H102", "DesktopShellActions.cpp:ExecutePlatformToggle",
-                        "stop_incomplete",
-                        "\"hostGone\":%d,\"residuals\":%u,\"ms\":%lu,\"phase\":\"%ls\"",
-                        r.hostGone ? 1 : 0, r.residualProcesses, r.elapsedMs,
-                        r.failedPhase ? r.failedPhase : L"");
                 }
             }).detach();
         }

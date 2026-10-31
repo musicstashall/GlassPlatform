@@ -34,11 +34,8 @@ namespace WndCompat
     // доказательства, что обход дошёл до окна и цепочка comctl32 действительно очищена).
     bool Root_ForceDetachSubclass(HWND hWnd) noexcept;
 
-    // #region agent log
-    // GLASS-ULTRACE (H91): RVA RootSubclassProc внутри WndCompat.dll — чтобы сопоставить
     // адрес из crash-дампа (WndCompat+0xXXXXXX) с конкретным проком.
     std::size_t Root_SubclassProcRva() noexcept;
-    // #endregion
 
     bool WINAPI Root_IsAttached(HWND hRoot) noexcept;
 

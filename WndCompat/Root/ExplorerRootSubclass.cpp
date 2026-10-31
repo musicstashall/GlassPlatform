@@ -469,8 +469,6 @@ namespace WndCompat::ExplorerRoot
         return RemoveWindowSubclass(hWnd, ExplorerRootSubclassProc, ExplorerRootSubclassId) != FALSE;
     }
 
-    // #region agent log
-    // GLASS-ULTRACE (H91): RVA прокa для сверки с адресом из дампа.
     std::size_t ExplorerRoot_SubclassProcRva() noexcept
     {
         HMODULE self = nullptr;
@@ -482,7 +480,6 @@ namespace WndCompat::ExplorerRoot
         const auto proc = reinterpret_cast<std::uintptr_t>(&ExplorerRootSubclassProc);
         return proc >= base ? static_cast<std::size_t>(proc - base) : 0;
     }
-    // #endregion
 
     void Attach(HWND hRoot)
     {

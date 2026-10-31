@@ -5,7 +5,6 @@
 
 #include <WndCompat.h>
 #include <GlassControlKind.h>
-#include <GlassUlTrace.h>
 #include "Tracker/WindowClassifier.h"
 #include "Root/RootSubclass.h"
 #include "Root/RootExplorerSubclassBridge.h"
@@ -1691,21 +1690,6 @@ namespace WndCompat
         weh_shutdown_unhook_done:;
         }
 
-        // #region agent log
-        // GLASS-ULTRACE (R2, H91): состояние перед detach и после.
-        const std::uint32_t subclassesBefore = WndCompat::SubclassDiag::Total();
-        const int pendingBefore = g_pendingDetaches.load(std::memory_order_acquire);
-        GlassUlTrace::Logf(
-            "H91",
-            "WndCompat:WinEventHook_Shutdown",
-            "wnd_shutdown_begin",
-            "\"pending_before\":%d,\"subclasses_before\":%u,\"hook_installed\":%d",
-            pendingBefore,
-            subclassesBefore,
-            g_hookInstalled.load() ? 1 : 0);
-        // #endregion
-        const ULONGLONG wndShutdownT0 = GetTickCount64();
-
         // Detach вне g_hookMutex: SendMessageTimeout на чужие GUI-потоки не должен
         // держать lock (иначе риск дедлока с Initialize/SetMode).
         TaskbarHost_DetachAll();
@@ -1718,27 +1702,9 @@ namespace WndCompat
         // of defense before FreeLibrary — removes stale subclass procs from all windows.
         ForceDetachCtx forceCtx{};
         const unsigned forceScanned = ForceDetachAllSubclasses(forceCtx);
-        // #region agent log
-        // GLASS-ULTRACE (H91): посещены top-level + дочерние + thread-окна.
         // removed_root/removed_explorer — сколько RemoveWindowSubclass реально сняли наш прок
         // (доказательство, что detach дошёл до окна). RVA проков нужны, чтобы сверить адрес
         // из crash-дампа (WndCompat+0xXXXXXX) с конкретным проком.
-        GlassUlTrace::Logf(
-            "H91",
-            "WndCompat:WinEventHook_Shutdown",
-            "wnd_force_detach",
-            "\"top_level_scanned\":%u,\"child_scanned\":%u,\"visited\":%u,"
-            "\"removed_root\":%u,\"removed_explorer\":%u,\"subclasses_after\":%u,"
-            "\"root_proc_rva\":\"0x%llX\",\"explorer_root_proc_rva\":\"0x%llX\"",
-            forceCtx.topLevel,
-            forceCtx.child,
-            forceScanned,
-            forceCtx.removedRoot,
-            forceCtx.removedExplorer,
-            WndCompat::SubclassDiag::Total(),
-            static_cast<unsigned long long>(WndCompat::Root_SubclassProcRva()),
-            static_cast<unsigned long long>(WndCompat::ExplorerRoot::ExplorerRoot_SubclassProcRva()));
-        // #endregion
 
         // CFG-fix: снимаем g_hookInstalled ПОСЛЕ DetachAll, чтобы никакой WinEvent callback
         // не мог установить новый субкласс пока DetachAll работает.
@@ -1770,21 +1736,6 @@ namespace WndCompat
         g_pendingDetaches.store(0, std::memory_order_release);
 
         const RemainingGlassMarkCtx marks = CountRemainingGlassMarks();
-        // #region agent log
-        // GLASS-ULTRACE (H91)
-        GlassUlTrace::Logf(
-            "H91",
-            "WndCompat:WinEventHook_Shutdown",
-            "wnd_shutdown_end",
-            "\"pending_waited\":%d,\"pending_wait_ok\":%d,\"root_marks\":%u,\"other_marks\":%u,"
-            "\"subclasses_left\":%u,\"ms\":%llu",
-            pending,
-            pendingWait == WAIT_OBJECT_0 ? 1 : 0,
-            marks.rootMarks,
-            marks.otherMarks,
-            WndCompat::SubclassDiag::Total(),
-            GetTickCount64() - wndShutdownT0);
-        // #endregion
         WndCompat::SubclassDiag::ClearAll();
 
         DebugLog(L"[WndCompat][WinEvent] WinEventHook_Shutdown complete");
@@ -1832,16 +1783,7 @@ namespace WndCompat
                 return;
             }
         }
-        // #region agent log
         // Лишняя нотификация (detach завершился после store(0) или без Register).
-        GlassUlTrace::Logf(
-            "H91",
-            "WndCompat:WinEventHook_Shutdown",
-            "pending_underflow",
-            "\"cur\":%d,\"hook_installed\":%d",
-            cur,
-            g_hookInstalled.load() ? 1 : 0);
-        // #endregion
     }
 
     Shared::InjectionMode WinEventHook_GetMode()

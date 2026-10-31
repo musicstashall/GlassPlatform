@@ -1332,8 +1332,6 @@ namespace WndCompat
         return RemoveWindowSubclass(hWnd, RootSubclassProc, kRootSubclassId) != FALSE;
     }
 
-    // #region agent log
-    // GLASS-ULTRACE (H91): RVA прокa для сверки с адресом из дампа.
     std::size_t Root_SubclassProcRva() noexcept
     {
         HMODULE self = nullptr;
@@ -1345,7 +1343,6 @@ namespace WndCompat
         const auto proc = reinterpret_cast<std::uintptr_t>(&RootSubclassProc);
         return proc >= base ? static_cast<std::size_t>(proc - base) : 0;
     }
-    // #endregion
 
     void WINAPI ApplyBackdropPolicyToTrackedRoots() noexcept
     {

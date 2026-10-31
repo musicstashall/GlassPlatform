@@ -5,7 +5,6 @@
 #include <Windows.h>
 #include <wchar.h>
 #include <string.h>
-#include <GlassUlTrace.h>
 #include <ProcessBlockList.h>
 #include <InjectProcessMap.h>
 #include <cstddef>
@@ -14,12 +13,6 @@
 #include <crtdbg.h>
 #include <cstdlib>
 #endif
-
-// #region agent log
-// GLASS-ULTRACE (R5): сколько прожил модуль в процессе. Нужно для short-lived процессов
-// (taskhostw живёт десятки мс): по alive_ms видно, успел ли наш watcher вообще начать работу.
-static ULONGLONG g_ultraceAttachTick = 0;
-// #endregion
 
 // ── R7 (H97): гейт загрузки ─────────────────────────────────────────────────
 //
@@ -279,13 +272,6 @@ static void WriteRejectedSlot(const wchar_t* exeName, bool cached) noexcept
         Shared::InjectProcessMap::State::Alive,
         Shared::InjectProcessMap::ModuleCompat,
         exeName);
-    GlassUlTrace::Logf(
-        "H97",
-        "DllMain.cpp:DllMain",
-        "deny_slot",
-        "\"written\":%d,\"kind\":2,\"path\":2,\"cached\":%d",
-        written ? 1 : 0,
-        cached ? 1 : 0);
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
@@ -373,55 +359,23 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
                 }
             }
 
-            g_ultraceAttachTick = GetTickCount64();
-            // #region agent log
-            // GLASS-ULTRACE
-            GlassUlTrace::Logf(
-                "H82",
-                "DllMain.cpp:DllMain",
-                "dll_attach",
-                "\"base\":\"%p\",\"reason\":\"attach\",\"rc\":%u",
-                static_cast<void*>(hModule),
-                GlassUlTrace::QueryLoadCount(hModule));
-            // #endregion
             // R7: гейт загрузки. Отказ — DllMain возвращает FALSE, модуль остаётся
             // незагруженным: user32 не получит колбэк в этом процессе, а значит не будет
             // ни «висящей» OS-ссылки, ни остатка DLL после Stop, ни AV в чужом стеке.
             {
                 GateMode gateMode = GateMode::Off;
-                // mode — узкая строка: Logf принимает const char*, wide-строка печаталась
-                // как один символ ("d" вместо "deny") в прогоне 8.
                 char modeText[16]{};
                 char reason[16]{};
                 unsigned long gle = 0;
                 const bool allow = GateAllowsAttach(
                     exeStem, gateMode, modeText, _countof(modeText),
                     reason, _countof(reason), gle);
-                // exe уже есть в контексте строки лога (GlassUlTrace::Log добавляет его сам),
-                // поэтому в data кладём только решение гейта и причину.
-                GlassUlTrace::Logf(
-                    "H97",
-                    "DllMain.cpp:DllMain",
-                    "attach_gate",
-                    "\"gate\":\"%s\",\"reason\":\"%s\",\"allow\":%d,\"gle\":%lu",
-                    modeText,
-                    reason,
-                    allow ? 1 : 0,
-                    gle);
                 if (!allow)
                 {
                     // Отказ — тоже факт: пишем слот, пока модуль ещё отображён в процессе.
                     writeSlotOnce(/*cached=*/false);
                     // Маркер «уже отказали» — повторные LoadLibrary от user32 молчат.
                     (void)CreateMutexW(nullptr, FALSE, denyName);
-                    GlassUlTrace::Logf(
-                        "H97",
-                        "DllMain.cpp:DllMain",
-                        "dll_attach_denied",
-                        "\"gate\":\"%s\",\"reason\":\"%s\",\"gle\":%lu",
-                        modeText,
-                        reason,
-                        gle);
                     return FALSE;
                 }
             }
@@ -433,22 +387,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
     case DLL_PROCESS_DETACH:
         // Не Stop() лог-клиента здесь: join воркера под loader lock запрещён.
         // GUI / MinimalUnloadWatcher / short-lived Main стопают клиент сами.
-        // R12i: attach для отказанного процесса не логировался — парную строку тоже не
-        // пишем (g_ultraceAttachTick != 0 означает «эта загрузка попала в лог»).
-        // #region agent log
-        // GLASS-ULTRACE
-        if (g_ultraceAttachTick != 0)
-        {
-            GlassUlTrace::Logf(
-                "H82",
-                "DllMain.cpp:DllMain",
-                "dll_detach",
-                "\"base\":\"%p\",\"reason\":\"detach\",\"process_exit\":%d,\"alive_ms\":%llu",
-                static_cast<void*>(hModule),
-                reserved ? 1 : 0,
-                GetTickCount64() - g_ultraceAttachTick);
-        }
-        // #endregion
         if (GlassCompat::IsProcessCrashGuardInstalled())
             GlassCompat::UninstallProcessCrashGuard();
         break;
