@@ -262,6 +262,29 @@ namespace
     }
 }
 
+// R12e: отказ гейта обязан быть виден в UI так же, как его показывал path=2 в master.
+// В master DLL грузилась и Initialize писал слот `RejectedBlockList`; после R7 гейт
+// возвращает FALSE раньше Initialize, и слот не писался вовсе — исключённые процессы
+// (devenv.exe, msedge.exe, …) исчезли из списка «отвергнутых».
+// ModuleBits=0 — правда: наших модулей в процессе нет.
+static void WriteRejectedSlot(const wchar_t* exeName, bool cached) noexcept
+{
+    const bool written = Shared::InjectProcessMap::TryUpsert(
+        GetCurrentProcessId(),
+        Shared::InjectProcessMap::Kind::RejectedBlockList,
+        /*path=*/2,
+        Shared::InjectProcessMap::State::Alive,
+        /*moduleBits=*/0,
+        exeName);
+    GlassUlTrace::Logf(
+        "H97",
+        "DllMain.cpp:DllMain",
+        "deny_slot",
+        "\"written\":%d,\"kind\":2,\"path\":2,\"cached\":%d",
+        written ? 1 : 0,
+        cached ? 1 : 0);
+}
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
 {
     (void)reserved;
@@ -321,6 +344,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
             if (HANDLE hDenied = OpenMutexW(SYNCHRONIZE, FALSE, denyName))
             {
                 CloseHandle(hDenied);
+                // Гейт уже отказывал этому процессу (в т.ч. в прошлой сессии платформы).
+                // Решение не пересчитываем, но слот отказа обновляем: иначе долгоживущие
+                // исключённые процессы не попадают в список вообще — карта в момент
+                // первого отказа принадлежала другой сессии.
+                WriteRejectedSlot(exeStem, /*cached=*/true);
                 return FALSE;
             }
 
@@ -346,26 +374,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
                 gle);
             if (!allow)
             {
-                // R12c: отказ — тоже факт, и он должен быть виден в списке процессов.
-                // Раньше гейт просто возвращал FALSE: слота в карте не появлялось, и
-                // «отвергнутые» процессы в UI отсутствовали физически («не вижу
-                // отвергнутых»). Пишем слот здесь, пока модуль ещё отображён в процессе.
-                // ModuleBits=0 — наших модулей в процессе нет, path=2 — отказ по списку
-                // (Forbidden отличается только на пути Initialize, там пишет path=3).
-                // Слот снимается сам: GS чистит записи мёртвых PID.
-                const bool slotWritten = Shared::InjectProcessMap::TryUpsert(
-                    GetCurrentProcessId(),
-                    Shared::InjectProcessMap::Kind::RejectedBlockList,
-                    2,
-                    Shared::InjectProcessMap::State::Alive,
-                    0,
-                    exeStem);
-                GlassUlTrace::Logf(
-                    "H97",
-                    "DllMain.cpp:DllMain",
-                    "deny_slot",
-                    "\"written\":%d,\"kind\":2,\"path\":2",
-                    slotWritten ? 1 : 0);
+                // Отказ — тоже факт: пишем слот, пока модуль ещё отображён в процессе.
+                WriteRejectedSlot(exeStem, /*cached=*/false);
                 // Маркер «уже отказали» — повторные LoadLibrary от user32 молчат.
                 (void)CreateMutexW(nullptr, FALSE, denyName);
                 GlassUlTrace::Logf(

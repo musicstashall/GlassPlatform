@@ -779,6 +779,32 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 Если `map_*_rejected > 0`, а `entry_rejected == 0` — ошибка в сборке списка; если
 `map_*_rejected == 0` при `deny_slot written=1` — слот не доезжает до карты (права/имя секции).
 
+### R12e — прогон 15: почему исключённые процессы пропали из «отвергнутых»
+
+Сравнение с `master` показало регрессию от R7, а не отсутствие данных:
+
+| Где | Поведение |
+|---|---|
+| `master` | Гейта нет: DLL грузится, `Initialize` видит BlockList → `StartMinimalUnloadWatcher(2)` → слот `Kind::RejectedBlockList`, UI показывает строку |
+| ветка после R7 | Гейт `DllMain` возвращает `FALSE` **до** `Initialize`: слота нет, процесса в списке нет |
+
+Хуже: отказ кэшируется именованным мьютексом `Local\GlassCompatGateDeny_<pid>`, и повторная
+загрузка в тот же процесс выходит **раньше** и гейта, и любой записи. В прогоне 15 это ровно
+случай `devenv.exe` 5.8 с и `msedge.exe` 11.6 с: есть `dll_attach`/`dll_detach` с `alive_ms=0`,
+но нет ни `attach_gate`, ни `deny_slot` — отказ был выдан в прошлой сессии платформы, а карта
+той сессии давно закрыта. `deny_slot written=1` в прогоне был только у тех, кому отказали
+впервые (`GlassSettings.exe`, `DataExchangeHost.exe`).
+
+Правка R12e:
+
+| # | Файл | Правка |
+|---|---|---|
+| R12e-1 | `GlassCompat/DllMain.cpp` | общий `WriteRejectedSlot()`: слот `RejectedBlockList`/`path=2`/`moduleBits=0` пишется **и** при первом отказе, **и** на выходе по кэшу (`cached=1`) |
+| R12e-2 | `GlassCompat/DllMain.cpp` | в лог `deny_slot` добавлено поле `cached` — видно, пересчитывался гейт или сработал маркер |
+
+`moduleBits=0` — правда: гейт не пустил DLL, наших модулей в процессе нет. В `master` бит
+`GlassCompat` был настоящим, потому что DLL действительно загружалась (path=2 watcher).
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
@@ -818,10 +844,9 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 по проектам — сначала GlassShared. После сборки проверять время файлов
 `Build\x64\Debug\{GlassCompat,WndCompat}.dll`.
 
-**Текущий цикл (R12d):** менялись C# `GlassSettings/Services/{InjectRuntimeMonitor,NativeHostInterop.InjectMap}.cs`,
-нативный `GlassSettings/Native/{InjectProcessMapNative.cpp,NativeHost.h}` и
-`GlassCompat/src/CrashGuard.cpp` → собирать **GlassCompat** (x64 и x86), **GlassSettings.Native**
-(новый экспорт) и **GlassSettings** (UI). `GlassShared` не менялся.
+**Текущий цикл (R12e):** менялся `GlassCompat/DllMain.cpp` → собирать **GlassCompat**
+(x64 и x86). Если сборка R12d (кэш отвергнутых, `monitor_summary`, фильтр `crash_seen`) ещё
+не ставилась — дополнительно **GlassSettings.Native** и **GlassSettings** (UI).
 
 ## 6. Протокол тестирования
 
