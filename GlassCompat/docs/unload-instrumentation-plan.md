@@ -765,6 +765,7 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 | R12d-2 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | `AddRejectedCache()` добавляет отвергнутых в снимок — и при живом хосте, и в sweep, и в cheap-idle после Stop |
 | R12d-3 | `GlassSettings/Native/InjectProcessMapNative.cpp`, `NativeHost.h` | экспорт `GlassSettings_LogMonitorSummary` → строка `monitor_summary` в общий лог |
 | R12d-4 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | `LogMonitorSummary()` пишет счётчики: слоты и отвергнутые слоты, биты, размер списка и отвергнутые строки; нативно рядом — что лежит в `map.x64`/`map.x86` |
+| R12d-5 | `GlassCompat/src/CrashGuard.cpp` | `crash_seen` только для кодов падения (`0xC0000005`, `0xC0000409`, `0xC0000374`, `0xC000001D`, `0xC0000094`, stowed); первый шанс `0xE06D7363`/`0xE0434352` — штатные исключения приложений (41 запись в прогоне 15) |
 
 `monitor_summary` читается так:
 
@@ -817,10 +818,10 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 по проектам — сначала GlassShared. После сборки проверять время файлов
 `Build\x64\Debug\{GlassCompat,WndCompat}.dll`.
 
-**Текущий цикл (R12d):** менялись C# `GlassSettings/Services/{InjectRuntimeMonitor,NativeHostInterop.InjectMap}.cs`
-и нативный `GlassSettings/Native/{InjectProcessMapNative.cpp,NativeHost.h}` → собирать
-**GlassSettings.Native** (новый экспорт) и **GlassSettings** (UI). `GlassShared`/`GlassCompat`
-не менялись.
+**Текущий цикл (R12d):** менялись C# `GlassSettings/Services/{InjectRuntimeMonitor,NativeHostInterop.InjectMap}.cs`,
+нативный `GlassSettings/Native/{InjectProcessMapNative.cpp,NativeHost.h}` и
+`GlassCompat/src/CrashGuard.cpp` → собирать **GlassCompat** (x64 и x86), **GlassSettings.Native**
+(новый экспорт) и **GlassSettings** (UI). `GlassShared` не менялся.
 
 ## 6. Протокол тестирования
 

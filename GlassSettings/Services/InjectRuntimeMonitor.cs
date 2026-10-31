@@ -141,6 +141,8 @@ public sealed class InjectRuntimeMonitor
     /// <summary>Троттлинг диагностики `monitor_summary` (не чаще раза в 15 опросов).</summary>
     private int _pollSeq;
     private int _lastLoggedEntryRejected = -1;
+    /// <summary>New-monitor summary отсутствует в старой сборке Native — не повторяем вызов.</summary>
+    private bool _monitorSummaryUnavailable;
 
     public event Action<InjectRuntimeSnapshot>? SnapshotChanged;
 
@@ -663,13 +665,23 @@ public sealed class InjectRuntimeMonitor
             return;
         _lastLoggedEntryRejected = entryRejected;
 
-        NativeHostInterop.LogMonitorSummary(
-            platformRunning,
-            (uint)slots.Length,
-            (uint)slotRejected,
-            (uint)slotBitsZero,
-            (uint)snapshot.Entries.Count,
-            (uint)entryRejected);
+        if (_monitorSummaryUnavailable)
+            return;
+        try
+        {
+            NativeHostInterop.LogMonitorSummary(
+                platformRunning,
+                (uint)slots.Length,
+                (uint)slotRejected,
+                (uint)slotBitsZero,
+                (uint)snapshot.Entries.Count,
+                (uint)entryRejected);
+        }
+        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException)
+        {
+            // Старый GlassSettings.Native.dll: без диагностики список всё равно должен жить.
+            _monitorSummaryUnavailable = true;
+        }
     }
 
     /// <summary>Состояние догорающей строки: сколько ещё битов и сколько тиков осталось.</summary>
