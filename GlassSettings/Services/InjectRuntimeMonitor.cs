@@ -669,8 +669,10 @@ public sealed class InjectRuntimeMonitor
             {
                 if (present.Contains(kv.Key) || kv.Value.Bits == 0)
                     continue;
+                // Цвет берём у самой строки: отвергнутый процесс должен догорать жёлтым,
+                // а не превращаться в «остаток DLL» на последних тиках.
                 list.Add(CloneWithBits(
-                    kv.Value.Template, kv.Value.Bits, InjectRuntimeBeacon.Residual, fading: true));
+                    kv.Value.Template, kv.Value.Bits, kv.Value.Template.Beacon, fading: true));
             }
 
             _prevBits.Clear();
