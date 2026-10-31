@@ -589,6 +589,50 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 - Если в списке процессов появился `RunDLL32` **без** Glass-модулей — это верификатор,
   он сам уйдёт через 8 с.
 
+### R10 — прогон 10: S8 закрыт; согласование верификатора с установщиком
+
+**Прогон 10 (`debug-8e6259-10.log`, 13:10:10–13:11:07).**
+
+| Что | Результат |
+|---|---|
+| `Y.Music.exe` 38484 | `attach_gate gate="builtin" allow=0` → DLL не загружена, процесс жив (жалоба закрыта) |
+| `ApplicationFrameHost.exe` 14672 | `builtin` deny — то же |
+| `svchost.exe` 39208 | `builtin` deny |
+| `GlassSettings.exe` 37044 | `builtin` deny (он в `ProcessBlockList` как собственный инструмент) — `compat` больше не нужен |
+| `dll_attach_denied` | ровно по одной записи на процесс — маркер-мьютекс работает |
+| `verify tag=""` | `hits=2 own=1`: Telegram + explorer держали `compat` в момент выхода хоста |
+| **`verify tag=post2` и `tag=post8`** | **`hits=0`** (в `post8` и `own=0`) → после выхода хоста остатков нет |
+
+Отсюда: гейт закрывает падения, а S8 подтверждён честным замером — из процесса,
+который стартует уже после смерти хоста.
+
+#### Согласование с GlassSetup / GlassUnins
+
+| Участник | Что запускает | Что сканирует/ждёт |
+|---|---|---|
+| Stop платформы | `rundll32 GlassCompat.dll,Main /stop` (существующий механизм: задача/трей/ShellExt) → `StopEvent` | — |
+| Хост `/start` | тот же `rundll32`, который уже работает | `HostShutdown` → `ForceUnloadResiduals` |
+| **Верификатор (R8/R9)** | `rundll32 GlassSettings.Native.dll,GlassSettings_PostStopVerify` | — (пишет `post2`/`post8`) |
+| GlassSetup / GlassUnins | `rundll32 GlassSettings.Native.dll,GlassSettings_UnlockerW /scanGlassModulesSetup`, `/forceUnload` | `InjectModuleScan` по `GlassCompat/GlassCore/WndCompat`; мьютекс `GlassPlatform.HostAlive`; страница «закрыть процессы» |
+
+Что важно:
+
+* Stop **не** получил нового механизма: `/stop` был и остался rundll32-вызовом.
+  Новый процесс — только диагностический верификатор.
+* Верификатор не держит `GlassCompat/GlassCore/WndCompat`, поэтому в `InjectModuleScan`
+  установщика он не «занятый процесс». Но он держит **`GlassSettings.Native.dll`** —
+  файл компонента MSI, значит создаёт окно гонки на ~9 с при обновлении/удалении.
+* Поэтому (R10):
+
+| # | Файл | Правка |
+|---|---|---|
+| R10-1 | `EntryRundll.cpp` | `SpawnPostStopVerify` работает **только** при `GLASS_ULTRACE_VERIFY=1`; по умолчанию Stop не порождает процессов, событие `post_verify_spawn ok=0 reason="disabled"` |
+| R10-2 | `EntryRundll.cpp` | `InstallerRunning()`: если в системе есть `GlassSetup.exe`, `GlassUnins.exe` или `msiexec.exe` — верификатор не запускается (`reason="installer"`) |
+
+Правило на будущее: любой процесс, который мы создаём на Stop, обязан (1) быть
+выключен по умолчанию и (2) проверять установщик перед стартом, иначе он попадает в
+чужие сценарии обновления/удаления и в список «занятых» на странице закрытия процессов.
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:

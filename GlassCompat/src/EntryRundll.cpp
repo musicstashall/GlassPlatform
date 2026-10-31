@@ -707,8 +707,66 @@ namespace
     // R9: пост-стопная проверка — отдельным процессом, но на GlassSettings.Native.dll,
     // а не на GlassCompat. Иначе верификатор сам появляется в списке процессов как
     // RunDLL32 с загруженным GlassCompat (наблюдение прогона 9) и портит и список, и hits.
+    // R10: идёт установка/удаление? Тогда никаких новых процессов с нашими DLL:
+    // `GlassSettings.Native.dll` — файл компонента MSI, и его нельзя держать открытым,
+    // пока GlassSetup/GlassUnins заменяют или удаляют файлы.
+    static bool InstallerRunning() noexcept
+    {
+        static const wchar_t* const kInstallers[] = {
+            L"GlassSetup.exe",
+            L"GlassUnins.exe",
+            L"msiexec.exe",
+        };
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE)
+            return false;
+        PROCESSENTRY32W pe{};
+        pe.dwSize = sizeof(pe);
+        bool found = false;
+        if (Process32FirstW(snap, &pe))
+        {
+            do
+            {
+                for (const wchar_t* name : kInstallers)
+                {
+                    if (_wcsicmp(pe.szExeFile, name) == 0)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (found)
+                    break;
+            } while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+        return found;
+    }
+
+    // R10: пост-стопная проверка — ТОЛЬКО по запросу (`GLASS_ULTRACE_VERIFY=1`).
+    // По умолчанию Stop не порождает ни одного нового процесса: установщик и деинсталлятор
+    // (GlassSetup/GlassUnins) считают «занятыми» процессы с GlassCompat/GlassCore/WndCompat
+    // (InjectModuleScan) и валят их через rundll32+GlassSettings.Native. Верификатор их в
+    // этот список не попадает, но держит `GlassSettings.Native.dll` — файл компонента MSI,
+    // и создаёт окно гонки на ~9 с после Stop. Для диагностических прогонов включается
+    // переменной окружения хоста; на проде этого процесса не существует.
     static void SpawnPostStopVerify(HMODULE hSelf) noexcept
     {
+        wchar_t verifyEnv[8]{};
+        const DWORD verifyLen =
+            GetEnvironmentVariableW(L"GLASS_ULTRACE_VERIFY", verifyEnv, _countof(verifyEnv));
+        const bool verifyEnabled =
+            verifyLen > 0 && verifyLen < _countof(verifyEnv) && verifyEnv[0] == L'1';
+        const bool installer = InstallerRunning();
+        if (!verifyEnabled || installer)
+        {
+            GlassUlTrace::Logf(
+                "H98", "EntryRundll.cpp:SpawnPostStopVerify", "post_verify_spawn",
+                "\"ok\":0,\"reason\":\"%s\",\"gle\":0",
+                !verifyEnabled ? "disabled" : "installer");
+            return;
+        }
+
         wchar_t selfPath[MAX_PATH]{};
         if (!GetModuleFileNameW(hSelf, selfPath, _countof(selfPath)))
             return;
