@@ -260,5 +260,5 @@ UICompat использует COM-объекты (IXDE, TAP, visual tree watcher
 
 ## Диагностика
 
-Аудит refcount и план инструментации (логи в файл) для разбора «модули выгружаются нестабильно,
-GlassCompat остаётся загруженной»: [unload-instrumentation-plan.md](unload-instrumentation-plan.md).
+Аудит refcount и точки инструментации (логи в файл) для разбора «модули выгружаются
+нестабильно, GlassCompat остаётся загруженной»: [unload-instrumentation.md](unload-instrumentation.md).

@@ -221,7 +221,7 @@ Watcher обрабатывает только `Windows.UI.Xaml.Controls.Border` 
 | `Border#LayerBorder` | штатный слой Поиск | `Visibility=Collapsed` |
 | `Border#DropShadow`, `dropshadow`, `RootGridDropShadow`, `StartDropShadow` | штатная тень | `Opacity=0` |
 
-`Grid#BorderGrid`, `Grid#OuterBorderGrid` и `Border#AccentAppBorder` в текущий allow-list **не входят**. Их упоминание в старом плане было предварительной гипотезой; фактический дамп 24H2 показал рабочие Border-цели выше. Не добавлять Grid в этот путь без отдельного runtime proof: обращение к ним через текущую схему ранее давало AV/hang.
+`Grid#BorderGrid`, `Grid#OuterBorderGrid` и `Border#AccentAppBorder` в текущий allow-list **не входят**. Их упоминание в прежней редакции документа было предварительной гипотезой; фактический дамп 24H2 показал рабочие Border-цели выше. Не добавлять Grid в этот путь без отдельного runtime proof: обращение к ним через текущую схему ранее давало AV/hang.
 
 ### Версионная совместимость имён
 

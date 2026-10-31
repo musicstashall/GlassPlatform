@@ -11,13 +11,13 @@
 // Все инициаторы (GlassSettings, GlassShellExt, GlassSetup, GlassUnins, LogViewer,
 // CrashGuard, HostShellWatchdog) вызывают Request(), а не SetEvent/StopTask напрямую.
 //
-// План и обоснование: GlassShared/docs/stop-unification-plan.md.
+// Обоснование и устройство: GlassShared/docs/stop-unification.md.
 //
 // Инварианты (не менять без runtime-доказательства):
 //  * порядок фаз и семантика path=1/2/3 в GlassCompat не меняются
 //    (GlassCompat/docs/GlassCompat-unload.md);
 //  * никакого FreeLibrary в чужих процессах: снять INCONTEXT-ссылку user32 может
-//    только сам процесс/ОС (policy R6/R7, GlassCompat/docs/unload-instrumentation-plan.md);
+//    только сам процесс/ОС (policy R6/R7, GlassCompat/docs/unload-instrumentation.md);
 //  * «дожим» = просьба + пинок + ожидание, а не принудительная выгрузка;
 //  * остановка хоста любым способом (в т.ч. TerminateProcess планировщиком) —
 //    штатный путь: инжектированные процессы уходят по abandoned HostAlive.
@@ -79,7 +79,7 @@ namespace Shared::GlassStop
     [[nodiscard]] unsigned SnapshotResiduals(
         PlatformArch arch, DWORD* outPids, unsigned maxPids) noexcept;
 
-    /// W2 (§2в плана): разбудить процессы с остатками — PostMessage(WM_NULL) всем их
+    /// W2 (§2в документа): разбудить процессы с остатками — PostMessage(WM_NULL) всем их
     /// окнам и PostThreadMessage(WM_NULL) всем их потокам. Нужно, когда хост убит и
     /// «пинкать» больше некому: у «тихого» процесса иначе остаётся per-thread
     /// hook-ссылка до следующего обращения к user32.

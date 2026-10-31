@@ -61,7 +61,7 @@ public static partial class NativeHostInterop
         Native_WaitForPlatformStoppedForArch((int)arch, timeoutMs);
 
     /// <summary>
-    /// Единый механизм остановки (GlassShared/docs/stop-unification-plan.md, этап 1).
+    /// Единый механизм остановки (GlassShared/docs/stop-unification.md).
     /// Все шаги — в нативном Shared::GlassStop::Request: сигнал → ожидание → остановка задачи
     /// → снимок остатков. managed-код не должен сам звать SignalPlatformStop + Wait в цикле.
     /// </summary>
