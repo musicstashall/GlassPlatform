@@ -10,6 +10,7 @@
 #include <InjectModuleScan.h>
 #include <InjectProcessMap.h>
 #include <GlassPlatformTask.h>
+#include <GlassStop.h>
 #include <GlassUlTrace.h>
 
 namespace
@@ -856,6 +857,18 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_UnlockerW(HWND, HIN
         const std::wstring pidText = UnlockerToken(cursor);
         const DWORD pid = static_cast<DWORD>(wcstoul(pidText.c_str(), nullptr, 10));
         ExitProcess(pid != 0 && UnloadPid(pid) ? 0 : 3);
+    }
+    // R11/5.5 (W2): «пинок» остаткам после смерти хоста. Ничего не грузит и не выгружает —
+    // только WM_NULL окнам и потокам процессов с нашими модулями. Нужен установщику,
+    // деинсталлятору и GS, когда хоста уже нет и будить процессы больше некому.
+    if (_wcsicmp(verb.c_str(), L"/wakeResiduals") == 0)
+    {
+        const std::wstring archText = UnlockerToken(cursor);
+        const auto arch = archText == L"86"
+            ? GlassShared::GlassPlatformTask::PlatformArch::X86
+            : GlassShared::GlassPlatformTask::PlatformArch::X64;
+        const unsigned nudged = Shared::GlassStop::WakeResidualProcesses(arch, nullptr, 0);
+        ExitProcess(nudged > 250u ? 250u : static_cast<UINT>(nudged));
     }
     const bool setupWatch = _wcsicmp(verb.c_str(), L"/watchGlassModulesSetup") == 0;
     if (setupWatch || _wcsicmp(verb.c_str(), L"/watchGlassModules") == 0)

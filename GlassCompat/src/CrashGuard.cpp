@@ -1,4 +1,5 @@
 #include "CompatPch.h"
+#include <GlassStop.h>
 #include "CrashGuard.h"
 #include "HostPidHelper.h"
 
@@ -560,19 +561,18 @@ namespace
         return v != 0;
     }
 
+    // R11: единый координатор вместо двух ручных SetEvent по архам.
+    // gracefulMs=0 — при краше не ждём: наш процесс сейчас умрёт.
     static void SignalPlatformStopBothArch() noexcept
     {
-        const wchar_t* names[] = {
-            L"GlassPlatform.StopEvent.x64",
-            L"GlassPlatform.StopEvent.x86",
-        };
-        for (const wchar_t* name : names)
+        for (const auto arch : { Shared::GlassStop::PlatformArch::X64,
+                                 Shared::GlassStop::PlatformArch::X86 })
         {
-            if (HANDLE hStop = OpenEventW(EVENT_MODIFY_STATE, FALSE, name))
-            {
-                (void)SetEvent(hStop);
-                CloseHandle(hStop);
-            }
+            Shared::GlassStop::Options options{};
+            options.reason = Shared::GlassStop::Reason::Crash;
+            options.gracefulMs = 0;
+            options.hostGoneMs = 0;
+            (void)Shared::GlassStop::Request(arch, options);
         }
     }
 

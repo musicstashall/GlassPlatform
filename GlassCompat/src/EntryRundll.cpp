@@ -1,4 +1,5 @@
 #include "CompatPch.h"
+#include <GlassStop.h>
 #include "GlassCompat.h"
 #include "CrashGuard.h"
 #include "HostPidHelper.h"
@@ -899,12 +900,16 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
     if (isStop)
     {
         StopLogClientForShortLivedMain();
-        HANDLE hEvt = OpenEventW(EVENT_MODIFY_STATE, FALSE, kStopEventName);
-        if (hEvt)
-        {
-            SetEvent(hEvt);
-            CloseHandle(hEvt);
-        }
+        // R11: тот же единый координатор, что и у остальных инициаторов.
+        // Собственный процесс не ждёт: /stop — короткоживущий rundll32.
+        Shared::GlassStop::Options options{};
+        options.reason = Shared::GlassStop::Reason::External;
+        options.gracefulMs = 0;
+        options.hostGoneMs = 0;
+        const auto arch = sizeof(void*) == 8
+            ? GlassShared::GlassPlatformTask::PlatformArch::X64
+            : GlassShared::GlassPlatformTask::PlatformArch::X86;
+        (void)Shared::GlassStop::Request(arch, options);
         return;
     }
 
@@ -1075,6 +1080,18 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         ClearHostPid();
         CloseHandle(hMutex);
         return;
+    }
+
+    // R11 (этап 2 плана унификации): StopEvent — manual-reset и общий на все циклы
+    // старт/стоп. Если он остался сигнальным от прошлого запуска (кто-то держал
+    // хэндл дольше хоста), новый хост немедленно завершится сам. Сбрасываем на старте
+    // ровно один раз и пишем об этом в лог.
+    if (WaitForSingleObject(hStopEvent, 0) == WAIT_OBJECT_0)
+    {
+        (void)ResetEvent(hStopEvent);
+        GlassUlTrace::Logf(
+            "H102", "EntryRundll.cpp:Main", "stop_event_stale_reset",
+            "\"phase\":\"start\"");
     }
 
     s_hostShutdownEvent = CreateEventW(

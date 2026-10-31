@@ -372,3 +372,45 @@ __declspec(dllexport) int WINAPI GlassSettings_RequestPlatformStop(int arch, int
 | `LifecycleBusy` теперь берут все — возможен «залипший» busy | busy всегда снимается в конце `Request` (RAII-хранитель) |
 | Инжектированный процесс может не просыпаться (DllHost в прогоне 11 — 2 мин) | ожидание остатков не блокирует установку: страница остатков + решение пользователя |
 | Изменение поведения `CrashGuard` | `gracefulMs=0`, только `SetEvent` — эквивалентно текущему |
+
+---
+
+## 7. Статус реализации (R11)
+
+Этапы 1–5.5 реализованы в одном пакете; 5.6 отложен по решению пользователя.
+Ниже — что именно поменялось и как это увидеть в логе.
+
+| Что | Где | Тег/смысл в логе |
+|---|---|---|
+| Координатор `Shared::GlassStop` | `GlassShared/include/GlassStop.h`, `GlassShared/src/GlassStop.cpp` | `stop_request`, `stop_phase`, `stop_result`, `stop_residual`, `stop_wake_pid`, `stop_wake_end` |
+| GlassSettings (C#) | `GlassPlatformService.StopPlatformAndWait` → `NativeHostInterop.RequestPlatformStop` | `reason="user"`, фазы `busy`/`wait_host`/`task_stop` |
+| Нативный мост для managed | `GlassSettings_Native`: `GlassSettings_RequestPlatformStop(arch, reason, gracefulMs, hostGoneMs, flags)` | flags: bit0 `allowTaskStop`, bit1 `wakeResiduals`; `allowForceUnload` в API отсутствует (R6/R7) |
+| GlassShellExt (меню) | `DesktopShellActions.ExecutePlatformToggle` (ветка `Running`) | `stop_request reason="user"` + `stop_incomplete`, если остатки/хост не ушли |
+| CrashGuard / HostShellWatchdog | `GlassCompat/src/CrashGuard.cpp`, `HostShellWatchdog.cpp` | `reason="crash"`, `gracefulMs=0` — поведение прежнее (только сигнал) |
+| `/stop` внутри хоста | `GlassCompat/src/EntryRundll.cpp` (Main) | `reason="external"`, без ожидания |
+| Установщик | `GlassInstallHost::StopGlassPlatformImpl` | `reason="installer"`, 5 с штатного ожидания, затем прежний `IRegisteredTask::Stop` + ожидание 45 с |
+| Удаляльщик | тот же путь с `Reason::Uninstaller` | `reason="uninstaller"` |
+| Сброс залипшего `StopEvent` | `EntryRundll` после `CreateEventW` | `stop_event_stale_reset` (этап 2) |
+| W2 «пинок» остаткам | `GlassSettings_UnlockerW /wakeResiduals [86]` | `stop_wake_pid`/`stop_wake_end`; ничего не грузит и не выгружает |
+| Abort-parity | `Reason::HostDead` (ветка `host_dead_probe`), fallback `StartMinimalUnloadWatcher(1)` при неудаче `CreateThread` GUI, `host_alive_ms` в `freeself_flaet` | 5.1/5.2/5.3 |
+
+Отложено:
+* 5.6 (сторожевая задача W3) — требует создания/удаления задачи установщиком; без
+  отдельного прогона не включаем, чтобы не менять установку/удаление (R10).
+* `LogViewer`: инициатора стопа в коде нет — правка не требуется.
+
+Матрица пересборки после этих правок: `GlassShared` → `GlassCompat` → `GlassSettings.Native`
+и C# (`GlassSettings`) → `GlassShellExt` → `GlassSetup` → `GlassUnins`. Только `GlassShared`
+пересобирать бессмысленно: координатор компилируется в каждый линкующий проект
+(`GlassUnins` собирает исходники GlassShared напрямую).
+
+Что искать в логе нового прогона:
+
+1. `stop_request` с ожидаемым `reason` — ровно одна запись на инициатора.
+2. `stop_phase phase="busy" acquired=1` — стоп захватил `LifecycleBusy` (U6).
+3. `stop_phase phase="wait_host" gone=1` — хост ушёл сам, `task_stop` не потребовался.
+4. `stop_result` + `stop_residual` — кто остался и с каким `target_pid`.
+5. В инжектированных процессах при End задачи: `watcher_wake trigger="hostAlive"`,
+   затем `freeself_flaet` с `host_alive_ms` (5.3) — это и есть доказательство
+   оркестрации по §2а.
+6. `verify tag="post8" hits=0` — итог (U4/U7).

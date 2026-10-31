@@ -73,6 +73,9 @@ namespace
     // Единый предохранитель: ExecuteShutdown должен стартовать только один раз
     // даже если почти одновременно пришли StopEvent и HostLivenessLost.
     std::atomic<bool> g_shutdownStarted{ false };
+    // R11/5.3: момент, когда процесс узнал о смерти хоста. Нужен, чтобы отличить
+    // «проснулся поздно» от «не может проснуться»: в freeself_flaet пишем host_alive_ms.
+    std::atomic<ULONGLONG> g_hostDeadTickMs{ 0 };
     std::atomic<ULONG> g_winEventCallbacksInFlight{ 0 };
     // GLASS-ULTRACE: только наблюдение (H86/H89), на FreeLibrary не влияет.
     std::atomic<unsigned> g_guiGeneration{ 0 };
@@ -2919,14 +2922,18 @@ namespace
             "GlassCompat.cpp:FreeSelfAndExitThread",
             "freeself_flaet",
             "\"path\":%llu,\"handle\":\"%p\",\"rc\":%u,\"our_pins\":1,\"remote_comp\":%d,"
-            "\"expected_rc_after\":%u,\"os_refs\":%u,\"inflight\":%lu",
+            "\"expected_rc_after\":%u,\"os_refs\":%u,\"inflight\":%lu,\"host_alive_ms\":%llu",
             path,
             static_cast<void*>(hSelfRef),
             rcBeforeFlaet,
             hadRemotePin ? 1 : 0,
             expectedRcAfter,
             osRefs,
-            static_cast<unsigned long>(g_winEventCallbacksInFlight.load(std::memory_order_acquire)));
+            static_cast<unsigned long>(g_winEventCallbacksInFlight.load(std::memory_order_acquire)),
+            [&]() -> unsigned long long {
+                const ULONGLONG dead = g_hostDeadTickMs.load(std::memory_order_acquire);
+                return dead == 0 ? 0ULL : GetTickCount64() - dead;
+            }());
         // #endregion
         FreeLibraryAndExitThread(hSelfRef, 0);
     }
@@ -3278,6 +3285,7 @@ namespace
                     // Отдаём мьютекс дальше: остальные инжектированные процессы
                     // ждут на нём же и должны получить тот же сигнал.
                     (void)ReleaseMutex(hHostAlive);
+                    g_hostDeadTickMs.store(GetTickCount64(), std::memory_order_release);
                     shutdownByHostLiveness = true;
                     hostDeadReason = HostLivenessReason::HostAliveReleased;
                     guiStopTrigger = "hostAlive";
@@ -3638,6 +3646,7 @@ namespace
                     {
                         shutdownByHostLiveness = true;
                         hostDeadReason = lr;
+                        g_hostDeadTickMs.store(GetTickCount64(), std::memory_order_release);
                         guiStopTrigger = "hostLiveness";
                         DebugLog(DBG_IMPORTANT,
                             L"[GlassCompat][HostWatch] host dead detected: reason=%s pid=%lu",
@@ -4264,6 +4273,7 @@ namespace
                         {
                             // Передать сигнал следующему ожидающему процессу.
                             (void)ReleaseMutex(hHostAlive);
+                            g_hostDeadTickMs.store(GetTickCount64(), std::memory_order_release);
                         }
 
                         const wchar_t* trigger = L"stop";
@@ -4434,6 +4444,15 @@ namespace
         if (!g_guiThreadHandle)
         {
             DebugLog(L"[GlassCompat][Core] FAILED to create GlassGuiThread");
+            // R11/5.2: без GUI-потока у процесса не было бы ни ожидания StopEvent,
+            // ни abandoned HostAlive — DLL осталась бы висеть до смерти процесса.
+            // MinimalUnloadWatcher даёт liveness-ожидание любому процессу с нашей DLL.
+            GlassUlTrace::Logf(
+                "H102", "GlassCompat.cpp:StartGuiThreadIfNeeded",
+                "gui_thread_failed_fallback",
+                "\"gle\":%lu,\"path\":\"minimal_watcher\"",
+                static_cast<unsigned long>(createThreadError));
+            StartMinimalUnloadWatcher(1);
         }
         else
         {

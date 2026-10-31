@@ -60,6 +60,36 @@ public static partial class NativeHostInterop
     public static bool WaitForPlatformStopped(GlassPlatformArch arch, uint timeoutMs = 30000) =>
         Native_WaitForPlatformStoppedForArch((int)arch, timeoutMs);
 
+    /// <summary>
+    /// Единый механизм остановки (GlassShared/docs/stop-unification-plan.md, этап 1).
+    /// Все шаги — в нативном Shared::GlassStop::Request: сигнал → ожидание → остановка задачи
+    /// → снимок остатков. managed-код не должен сам звать SignalPlatformStop + Wait в цикле.
+    /// </summary>
+    public static (bool HostGone, bool HostKilledByTask, int Residuals) RequestPlatformStop(
+        GlassPlatformArch arch,
+        StopReason reason,
+        uint gracefulMs = 0,
+        uint hostGoneMs = 0,
+        bool allowTaskStop = false,
+        bool wakeResiduals = false)
+    {
+        var flags = (allowTaskStop ? 1 : 0) | (wakeResiduals ? 2 : 0);
+        var packed = Native_RequestPlatformStopForArch(
+            (int)arch, (int)reason, gracefulMs, hostGoneMs, flags);
+        return ((packed & 1) != 0, (packed & 2) != 0, packed >> 2);
+    }
+
+    /// <summary>Shared::GlassStop::Reason — значения обязаны совпадать порядком.</summary>
+    public enum StopReason
+    {
+        User = 0,
+        Installer = 1,
+        Uninstaller = 2,
+        Crash = 3,
+        External = 4,
+        HostDead = 5,
+    }
+
     /// <summary>Зомби Task Scheduler Running без mutex — IRegisteredTask::Stop / schtasks /End.</summary>
     public static bool StopOrphanAutorunTaskInstance(GlassPlatformArch arch) =>
         Native_StopOrphanAutorunTaskInstanceForArch((int)arch);
@@ -124,6 +154,10 @@ public static partial class NativeHostInterop
     [DllImport(Dll, EntryPoint = "GlassSettings_SignalPlatformStopForArch")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool Native_SignalPlatformStopForArch(int arch);
+
+    [DllImport(Dll, EntryPoint = "GlassSettings_RequestPlatformStop")]
+    private static extern int Native_RequestPlatformStopForArch(
+        int arch, int reason, uint gracefulMs, uint hostGoneMs, int flags);
 
     [DllImport(Dll, EntryPoint = "GlassSettings_WaitForPlatformStoppedForArch")]
     [return: MarshalAs(UnmanagedType.Bool)]

@@ -224,6 +224,7 @@
     <ClCompile Include="src\OpenGlassHostLaunch.cpp" />
     <ClCompile Include="src\PlatformPresenceQuery.cpp" />
     <ClCompile Include="src\GlassPlatformTask.cpp" />
+    <ClCompile Include="src\GlassStop.cpp" />
     <ClCompile Include="src\GlassModulePath.cpp" />
     <ClCompile Include="src\DwmGlassOpacity.cpp" />
     <ClCompile Include="src\SwcaBackdrop.cpp" />
