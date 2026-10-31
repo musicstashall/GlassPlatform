@@ -27,6 +27,7 @@
 | Задача | Документ |
 |--------|----------|
 | Выгрузка (path=1 vs BlockList) | [docs/GlassCompat-unload.md](docs/GlassCompat-unload.md) |
+| Диагностика выгрузки (точки инструментации) | [docs/unload-instrumentation-plan.md](docs/unload-instrumentation-plan.md) |
 | Архитектура платформы | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 | PlatformPresenceService | [GlassSettings/docs/PlatformPresenceService-architecture.md](../GlassSettings/docs/PlatformPresenceService-architecture.md) |
 - `ReadHostPid()` / `WriteHostPid()` — работа с `Local\GlassHostPid`; `s_hostPidMapping` хранит handle всё время жизни хоста
