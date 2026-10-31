@@ -263,8 +263,8 @@ namespace Shared::GlassStop
             return result;
         }
 
-        // (1) Сигнал. Порядок «сигнал → busy» сохранён как в ShellExt: LifecycleBusy
-        // при busy+Running без Stop auto-clear'ится, поэтому стоп должен уйти первым.
+        // (1) Сигнал. Порядок «сигнал → busy» сохранён: LifecycleBusy при busy+Running
+        // без Stop auto-clear'ится, поэтому стоп должен уйти первым.
         if (!GPT::SignalPlatformStop(arch))
         {
             result.failedPhase = L"signal";
@@ -275,31 +275,26 @@ namespace Shared::GlassStop
             return result;
         }
 
-        // (2) Busy — best-effort: второй одновременный стоп не должен ломать первый,
-        // но и дублировать работу ему незачем (он просто ждёт того же условия).
+        // (2) Busy только на время сигнала и сразу отпускаем.
+        // R12: держать busy всё время ожидания нельзя. Инициатор (GlassShellExt в explorer
+        // или в DllHost) сам инжектирован и выгружается вместе с остальными; если его
+        // поток умрёт на ожидании, busy останется залипшим навсегда (прогон 12: stop_request
+        // из DllHost 6284 → stop_phase busy → и ни wait_host, ни stop_result).
         const bool busyAcquired = GPT::TryBeginLifecycleBusy(arch);
+        if (busyAcquired)
+            GPT::EndLifecycleBusy(arch);
         GlassUlTrace::Logf(
             "H102", "GlassStop.cpp:Request", "stop_phase",
-            "\"reason\":\"%s\",\"phase\":\"busy\",\"acquired\":%d",
+            "\"reason\":\"%s\",\"phase\":\"busy\",\"acquired\":%d,\"held\":0",
             reason,
             busyAcquired ? 1 : 0);
 
-        // U6: если busy занят чужим стопом и мы пришли с ожиданием, второй стоп не
-        // дублирует работу — сигнал уже отправлен, остальное делает первый.
-        // gracefulMs=0 (краши, /stop) сюда не попадает: там busy не нужен вовсе.
-        if (!busyAcquired && options.gracefulMs > 0)
-        {
-            result.failedPhase = L"busy";
-            result.hostGone = !GPT::IsGlassPlatformRunning(arch);
-            result.elapsedMs = static_cast<DWORD>(GetTickCount64() - t0);
-            GlassUlTrace::Logf(
-                "H102", "GlassStop.cpp:Request", "stop_result",
-                "\"reason\":\"%s\",\"phase\":\"busy\",\"host_gone\":%d,\"ms\":%lu",
-                reason,
-                result.hostGone ? 1 : 0,
-                static_cast<unsigned long>(result.elapsedMs));
-            return result;
-        }
+        // (2b) Немедленный «пинок» остаткам: WM_NULL окнам и потокам. Делаем это ДО
+        // ожидания, потому что инициатор может исчезнуть вместе со своим процессом
+        // (ShellExt в explorer). Позже, в фазе 5, пинок повторим для тех, кто появился
+        // или не отреагировал.
+        if (options.wakeResiduals)
+            (void)WakeResidualProcesses(arch, nullptr, 0);
 
         // (3) Ожидание штатного завершения: хост снимает хуки, рассылает broadcast,
         // дожимает остатки и отпускает мьютекс платформы (gracefulMs=0 — не ждём).
@@ -353,10 +348,8 @@ namespace Shared::GlassStop
                 result.residualProcesses);
         }
 
-        // (6) Состояние для UI/присутствия: sticky пересчитываем, busy снимаем.
+        // (6) Состояние для UI/присутствия: sticky пересчитываем. Busy уже снят в фазе 2.
         (void)GPT::RefreshInjectResidualSticky(arch);
-        if (busyAcquired)
-            GPT::EndLifecycleBusy(arch);
 
         if (!result.hostGone && result.failedPhase[0] == L'\0')
             result.failedPhase = L"host";
@@ -367,13 +360,12 @@ namespace Shared::GlassStop
         GlassUlTrace::Logf(
             "H102", "GlassStop.cpp:Request", "stop_result",
             "\"reason\":\"%s\",\"phase\":\"%s\",\"host_gone\":%d,\"task_stop\":%d,"
-            "\"residuals\":%u,\"busy\":%d,\"ms\":%lu",
+            "\"residuals\":%u,\"ms\":%lu",
             reason,
             *result.failedPhase ? "partial" : "done",
             result.hostGone ? 1 : 0,
             result.hostKilledByTask ? 1 : 0,
             result.residualProcesses,
-            busyAcquired ? 1 : 0,
             static_cast<unsigned long>(result.elapsedMs));
 
         for (unsigned i = 0; i < result.residualPidCount && i < kMaxResiduals; ++i)

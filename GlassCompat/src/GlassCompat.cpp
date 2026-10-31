@@ -1175,17 +1175,30 @@ namespace
             static_cast<unsigned>(kind));
     }
 
+    // R12: EnumChildWindows сам рекурсивно обходит всё поддерево и вызывает callback на
+    // каждого потомка. Раньше в callback'е повторно вызывался EnumChildWindows — получался
+    // повторный обход на каждой глубине (прогон 12: mmc.exe → windows=924992 при 184
+    // реальных окнах, 22 с на один скан, выгрузка «замирала»). Теперь callback только
+    // отмечает окно.
+    BOOL CALLBACK ScanChildWindowCb(HWND hwnd, LPARAM lp) noexcept
+    {
+        NoteWindowCandidate(*reinterpret_cast<StaleCallbackScan*>(lp), hwnd);
+        return TRUE;
+    }
+
     BOOL CALLBACK ScanWindowProcCb(HWND hwnd, LPARAM lp) noexcept
     {
         auto* s = reinterpret_cast<StaleCallbackScan*>(lp);
         NoteWindowCandidate(*s, hwnd);
-        (void)EnumChildWindows(hwnd, ScanWindowProcCb, lp);
+        (void)EnumChildWindows(hwnd, ScanChildWindowCb, lp);
         return TRUE;
     }
 
     BOOL CALLBACK ScanThreadWindowCb(HWND hwnd, LPARAM lp) noexcept
     {
         NoteWindowCandidate(*reinterpret_cast<StaleCallbackScan*>(lp), hwnd);
+        // Window'ы не-GUI потоков EnumWindows не видит; их детей обходим явно.
+        (void)EnumChildWindows(hwnd, ScanChildWindowCb, lp);
         return TRUE;
     }
 
@@ -4308,6 +4321,20 @@ namespace
                         if (hUnload)
                             CloseHandle(hUnload);
 
+                        // R12: path=4 — страховка на случай, когда Initialize не приходил.
+                        // Если за это время GUI-поток всё-таки поднялся, выгрузкой
+                        // занимается он; watcher отдаёт свою pin-ссылку и уходит.
+                        if (watcherPath == 4 && g_guiThreadId != 0)
+                        {
+                            GlassUlTrace::Logf(
+                                "H102",
+                                "GlassCompat.cpp:StartMinimalUnloadWatcher",
+                                "watcher_exit",
+                                "\"kind\":\"minimal\",\"path\":%llu,\"branch\":\"gui_present\"",
+                                watcherPath);
+                            FreeLibraryAndExitThread(hMod, 0);
+                        }
+
                         (void)Shared::InjectProcessMap::TrySetState(
                             GetCurrentProcessId(),
                             Shared::InjectProcessMap::State::Unloading);
@@ -4481,6 +4508,15 @@ namespace GlassCompat
         g_hSelf = hSelf ? hSelf : GetModuleHandleW(L"GlassCompat.dll");
         g_mode = ReadModeFromRegistry();
 
+        // R12: видно, доходил ли процесс до Initialize. В прогоне 12 DllHost 32120 имел
+        // attach_gate + pin_acq и дальше тишину — ни лога о причине, ни watcher'а.
+        GlassUlTrace::Logf(
+            "H102", "GlassCompat.cpp:Initialize", "init_begin",
+            "\"mode\":%d,\"hSelf\":\"%p\",\"gui_tid\":%lu",
+            static_cast<int>(g_mode),
+            static_cast<void*>(g_hSelf),
+            static_cast<unsigned long>(g_guiThreadId));
+
         ProcessBlockList::Initialize();
         if (ProcessBlockList::IsBlocked(GetProcessNameLower()))
         {
@@ -4510,8 +4546,65 @@ namespace GlassCompat
 
         StartGuiThreadIfNeeded();
 
+        GlassUlTrace::Logf(
+            "H102", "GlassCompat.cpp:Initialize", "init_end",
+            "\"gui_tid\":%lu,\"mode\":%d",
+            static_cast<unsigned long>(g_guiThreadId),
+            static_cast<int>(g_mode));
+
         DebugLog(L"[GlassCompat][Core] Initialize: END");
         return true;
+    }
+
+    // R12: процесс получил DLL (обычно через глобальный WinEvent-хук), но WinEventProc
+    // ещё ни разу не вызывался — GlassCompat::Initialize не выполнялся, значит нет ни
+    // GUI-потока, ни minimal watcher'а. После стопа такой процесс не выгрузит модули
+    // никогда (прогон 12: DllHost 32120 — attach_gate + pin_acq и тишина до конца лога).
+    // Ставим watcher path=4 здесь же: он ждёт StopEvent/HostAlive и выгружает модуль.
+    void EnsureAttachWatcher() noexcept
+    {
+        if (g_guiThreadId != 0)
+            return;
+
+        // Хост и короткоживущие агенты (rundll32 /stop,/verify,/forceUnload) управляют
+        // своей выгрузкой сами — лишний watcher там только мешает (двойной FreeSelf).
+        const DWORD hostPid = ReadHostPid();
+        if (hostPid != 0 && hostPid == GetCurrentProcessId())
+            return;
+        if (IsShortLivedGlassCompatProcess())
+            return;
+
+        // rundll32 — это всегда наш хост (/start) или короткоживущий агент
+        // (/stop,/verify,/forceUnload): у них своя выгрузка. В момент DllMain хост
+        // мог ещё не записать HostPid, поэтому проверяем по имени процесса.
+        {
+            wchar_t exePath[MAX_PATH]{};
+            const DWORD exeLen = GetModuleFileNameW(nullptr, exePath, _countof(exePath));
+            const wchar_t* leaf = exePath;
+            for (DWORD i = exeLen; i > 0; --i)
+            {
+                if (exePath[i - 1] == L'\\' || exePath[i - 1] == L'/')
+                {
+                    leaf = exePath + i;
+                    break;
+                }
+            }
+            if (_wcsicmp(leaf, L"rundll32.exe") == 0)
+                return;
+        }
+
+        if (ProcessBlockList::IsBlocked(GetProcessNameLower()))
+        {
+            StartMinimalUnloadWatcher(2);
+            return;
+        }
+
+        StartMinimalUnloadWatcher(4);
+        GlassUlTrace::Logf(
+            "H102", "GlassCompat.cpp:EnsureAttachWatcher",
+            "attach_watcher_path4",
+            "\"rc\":%u",
+            GlassUlTrace::QueryLoadCount(GetModuleHandleW(L"GlassCompat.dll")));
     }
 
     bool RequestShutdown()

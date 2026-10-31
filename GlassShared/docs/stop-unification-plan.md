@@ -414,3 +414,16 @@ __declspec(dllexport) int WINAPI GlassSettings_RequestPlatformStop(int arch, int
    затем `freeself_flaet` с `host_alive_ms` (5.3) — это и есть доказательство
    оркестрации по §2а.
 6. `verify tag="post8" hits=0` — итог (U4/U7).
+
+### 7.1. Правки после прогона 12 (R12)
+
+| Симптом прогона 12 | Причина | Правка |
+|---|---|---|
+| `stop_request` из DllHost → `stop_phase busy` и больше ничего, busy залипает | инициатор сам инжектирован и выгружается вместе с процессом | busy берётся и сразу отпускается (`held=0`); ожидание не требует busy |
+| DllHost с нашими модулями не выгрузился вообще | DLL попала через глобальный хук, `Initialize` (и watcher) не вызывались | `GlassCompat::EnsureAttachWatcher()` из `DllMain` → `StartMinimalUnloadWatcher(4)` для всех, кроме хоста/rundll32/short-lived |
+| «модули не выгружаются», выгрузка висит десятки секунд | `ScanWindowProcCb` рекурсивно вызывал `EnumChildWindows` (тот сам рекурсивен) → `windows=924992` при 184 окнах | отдельный `ScanChildWindowCb` без рекурсии |
+| остатки в DllHost после FLAET (`os_refs=1`) | пинок делался только после ожидания, когда инициатора уже нет | WM_NULL-пинок сразу после сигнала (фаза 2b) + повтор в фазе 5 |
+| не видно, почему процесс без watcher'а | не было записи о входе в `Initialize` | `init_begin`/`init_end` |
+
+Проверка следующего прогона: `watcher_start path=4` у процессов из глобального хука,
+`stale_scan windows` ≈ реальному числу окон, `stop_result` появляется и при стопе из ShellExt.

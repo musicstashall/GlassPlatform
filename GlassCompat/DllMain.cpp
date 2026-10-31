@@ -358,6 +358,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
                 return FALSE;
             }
         }
+        // R12: страховка от «DLL есть, watcher'а нет». Процесс из глобального хука может
+        // никогда не получить WinEventProc → Initialize не вызовется → модули не выгрузятся.
+        GlassCompat::EnsureAttachWatcher();
         break;
     case DLL_PROCESS_DETACH:
         // Не Stop() лог-клиента здесь: join воркера под loader lock запрещён.

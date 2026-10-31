@@ -633,6 +633,46 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 выключен по умолчанию и (2) проверять установщик перед стартом, иначе он попадает в
 чужие сценарии обновления/удаления и в список «занятых» на странице закрытия процессов.
 
+### R12 — прогон 12: стоп из меню/GS/планировщика после унификации (`Shared::GlassStop`)
+
+**Прогон 12 (`debug-8e6259-12.log`, 199 с, три цикла: стоп 27.6 / 96.5 / 156.8).**
+
+Что подтвердилось:
+
+| Наблюдение | Данные |
+|---|---|
+| Координатор работает, но вызов пришёл из инжектированного процесса | `stop_request reason="user" graceful_ms=45000` с `exe=DllHost.exe pid=6284` (меню рабочего стола обслуживается DllHost) |
+| Инициатор умер на ожидании, `stop_result` не появился | `stop_phase busy acquired=1` и дальше тишина → `busy` остался залипшим |
+| Процесс с нашей DLL, но **без** watcher'а | `DllHost 32120`: `dll_attach` + `attach_gate` + `pin_acq` — и ни одного события до конца лога; `stop_trigger` нет, модули не выгружены |
+| Выгрузка «замирает» в MMC | `mmc.exe 15988`: `wnd_shutdown_end other_marks=83404`, затем `stale_scan windows=924992` — 22 с на скан при 184 реальных окнах |
+| Модули в DllHost остаются после FLAET | `freeself_flaet os_refs=1` у DllHost 6284/22508, `dll_detach` не пришёл за 60+ с |
+
+Найденные причины:
+
+1. **Экспоненциальный обход окон.** `ScanWindowProcCb` вызывал `EnumChildWindows(hwnd, ScanWindowProcCb, …)`,
+   а `EnumChildWindows` сам рекурсивен → повторный обход поддерева на каждой глубине.
+   Отсюда `windows=924992`, дубли `marked_window` одного `hwnd` по 3–4 раза и «модули не выгружаются».
+2. **Нет страховки на «DLL есть, инициализации не было».** `Initialize` вызывается только из
+   `WinEventProc` (Normal) или `RemoteBootstrap`. Процесс, куда DLL пришла через глобальный хук и
+   который не получил ни одного WinEvent, не имел ни GUI-потока, ни watcher'а.
+3. **`LifecycleBusy` держался всё время ожидания.** Если инициатор — инжектированный процесс
+   (ShellExt в explorer/DllHost), его поток умирает вместе с выгрузкой → busy навсегда.
+4. **Пинок остаткам шёл только после ожидания.** К этому моменту инициатора уже нет.
+
+Правки R12:
+
+| # | Файл | Правка |
+|---|---|---|
+| R12-1 | `GlassCompat/src/GlassCompat.cpp` | `ScanChildWindowCb` без рекурсии; `ScanWindowProcCb`/`ScanThreadWindowCb` вызывают его один раз (`EnumChildWindows` покрывает поддерево) |
+| R12-2 | `GlassCompat/src/GlassCompat.cpp` (+`DllMain.cpp`, `Include/GlassCompat.h`) | `GlassCompat::EnsureAttachWatcher()` из `DllMain(ATTACH)`: ставит `StartMinimalUnloadWatcher(4)` для любого процесса кроме хоста/rundll32/short-lived; при появлении GUI watcher уступает (`branch="gui_present"`) |
+| R12-3 | `GlassCompat/src/GlassCompat.cpp` | `init_begin`/`init_end` — видно, доходил ли процесс до инициализации |
+| R12-4 | `GlassShared/src/GlassStop.cpp` | `busy` берётся и сразу отпускается (`held=0`); убран ранний выход по busy |
+| R12-5 | `GlassShared/src/GlassStop.cpp` | WM_NULL-пинок остаткам сразу после сигнала (фаза 2b) и повторно в фазе 5 |
+
+Ожидаемо в следующем прогоне: у процессов из глобального хука появляется `watcher_start kind="minimal" path=4`;
+`stale_scan windows` сравним с числом реальных окон; в ShellExt-стопе после `stop_phase busy` идёт
+`wait_host`/`stop_result`, а не тишина.
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
