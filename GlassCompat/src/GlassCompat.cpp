@@ -4202,7 +4202,7 @@ namespace
                 // из списка «в работе» (жалоба прогона 13).
                 const bool watcherOnly = (path == 4);
                 const auto kind = watcherOnly
-                    ? Shared::InjectProcessMap::Kind::Normal
+                    ? Shared::InjectProcessMap::Kind::ActiveGui
                     : ((path == 3) ? Shared::InjectProcessMap::Kind::RejectedForbidden
                                    : Shared::InjectProcessMap::Kind::RejectedBlockList);
                 InjectMapUpsert(
