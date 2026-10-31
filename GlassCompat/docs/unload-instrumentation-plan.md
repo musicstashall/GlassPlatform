@@ -252,6 +252,44 @@
 - `root_proc_rva` / `explorer_root_proc_rva` из `wnd_force_detach` сверять с `WndCompat+0x194240`
   из дампа: совпадение подтверждает, что падал именно прок Root/ExplorerRoot.
 
+### R4 — прогон 4 (без крэшей): кто держит последнюю ссылку
+
+**Итог прогона `debug-8e6259-4.log` (2 цикла Start/Stop, 977 событий):** крэшей нет,
+`wnd_free_proceed` = 18, `wnd_free_skipped` = 0, во всех процессах со стеклом
+`prop_code = 0` — рекурсивный detach (R3-1) дошёл до дочерних окон, `prop_inside`
+сократился с 204 до нуля. R3 закрыт.
+
+Остался один дефект — **последняя чужая ссылка**. Она видна как `expected_rc_after` в
+`freeself_flaet` (это `rc` перед FLAET минус наши пины). Связь с исходом строгая:
+
+| `expected_rc_after` | `dll_detach` |
+|---|---|
+| `0` | в том же миллисекунде (ShellExperienceHost, StartMenuExperienceHost, SearchHost, TextInputHost, SystemSettings, ShellHost 45044) |
+| `1` | задержка 7.9–13.0 с (Explorer, Happ, Яндекс Музыка, devenv, msedge, GlassSettings, ApplicationFrameHost) **или не приходит вовсе**: `msedgewebview2 13912`, `DllHost 21396/27684/6852/2872` |
+
+То есть модуль снимает не наш код, а **внешняя ссылка инжектора** (loader-ref от
+remote `LoadLibrary`); наш поток к этому моменту уже вышел через
+`FreeLibraryAndExitThread`, и снять её изнутри процесса некому. Отсюда «процесс не
+выгрузил GlassCompat»: `verify` видит `mask=1`, `cw_residual_end` его не знает
+(в резидентном списке только CW-хосты), кнопка «Force unload» его бы сняла — но никто
+не нажимает.
+
+Внесено (R4, лог-только + добивание):
+
+| # | Файл | Правка |
+|---|---|---|
+| R4-1 | `CoreWindowHostInject.cpp` | `CollectCompatCandidates()` — снимок pid с `compat` **сразу после Stop**, чтобы sweep не зацепил процессы, инжектнутые позже |
+| R4-2 | `CoreWindowHostInject.cpp` | `SweepCompatLeftoversOnce()` + 2 прохода в конце `ForceUnloadResiduals()`: для кандидата, у которого остался **ровно** `compat` (core/wnd/explorer/taskbar/ui уже выгружены) и который **не Alive** в `InjectProcessMap`, вызывается `ForceUnload` (CreateRemoteThread(FreeLibrary)) — тот же механизм, что у кнопки «Force unload». События `cw_sweep_pid`, `cw_sweep_end` |
+| R4-3 | `GlassCompat.cpp:FreeSelfAndExitThread` | если перед FLAET `rc > ownRefs`, до 1.2 с опрашиваем `rc` с `WakeAllProcessThreadsWmNull`; событие `rc_wait` (`rc_start`, `rc_end`, `polls`, `released`). Отвечает: ссылка «поздняя» (ОС доставила deferred free) или «наша неучтённая» |
+| R4-4 | `DllMain.cpp` | `dll_attach` теперь пишет `rc` — сколько ссылок создал сам инжектор |
+
+Как читать:
+
+- `rc_wait released=1` → ссылка была «поздней», unmap просто откладывался.
+- `rc_wait released=0` → остаток стабилен; его снимает только `cw_sweep_pid` (внешний FreeLibrary).
+- `cw_sweep_end left>0` → есть процесс, который не удалось снять снаружи (обычно: нет прав
+  `PROCESS_CREATE_THREAD`, WOW64-цель или приложение AppContainer).
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:

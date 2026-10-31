@@ -36,8 +36,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
             "H82",
             "DllMain.cpp:DllMain",
             "dll_attach",
-            "\"base\":\"%p\",\"reason\":\"attach\"",
-            static_cast<void*>(hModule));
+            "\"base\":\"%p\",\"reason\":\"attach\",\"rc\":%u",
+            static_cast<void*>(hModule),
+            GlassUlTrace::QueryLoadCount(hModule));
         // #endregion
         break;
     case DLL_PROCESS_DETACH:

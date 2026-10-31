@@ -4,6 +4,7 @@
 #include "HostPidHelper.h"
 
 #include <GlassMessages.h>
+#include <ForceUnloadGlassModules.h>
 #include <InjectProcessMap.h>
 #include <RootBackdropPolicy.h>
 #include <GlassUlTrace.h>
@@ -1776,9 +1777,101 @@ namespace GlassCompat::CoreWindowHostInject
         CloseCwForceEvents();
     }
 
+    // #region agent log
+    // GLASS-ULTRACE (R4, H82): снимок кандидатов на добивание ДО ожиданий residual.
+    // В прогоне 4 после Stop у части процессов оставалась ровно одна чужая ссылка на
+    // GlassCompat (loader-ref инжектора). Наш поток к этому моменту уже вышел
+    // (FreeLibraryAndExitThread), снять ссылку изнутри некому → модуль висит до конца
+    // жизни процесса: msedgewebview2 13912 и DllHost 21396/27684/6852/2872.
+    // Снимок берётся сразу после Stop, чтобы заведомо не зацепить процессы, которые
+    // инжектятся ПОСЛЕ остановки (у свежего инжекта сначала появляется только compat).
+    void CollectCompatCandidates(std::vector<DWORD>& out) noexcept
+    {
+        out.clear();
+        const DWORD self = GetCurrentProcessId();
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE)
+            return;
+        PROCESSENTRY32W pe{};
+        pe.dwSize = sizeof(pe);
+        if (Process32FirstW(snap, &pe))
+        {
+            do
+            {
+                const DWORD pid = pe.th32ProcessID;
+                if (pid == 0 || pid == self)
+                    continue;
+                if ((GlassUlTrace::RemoteModuleMask(pid) & 1u) == 0)
+                    continue;
+                out.push_back(pid);
+            } while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+    }
+
+    // Добивание остатка снаружи — тот же механизм, что и кнопка «Force unload»
+    // (CreateRemoteThread(FreeLibrary)). Условие безопасности: в процессе остался РОВНО
+    // compat (core/wnd/explorer/taskbar/ui уже выгружены ⇒ наш shutdown завершён,
+    // потоков внутри GlassCompat нет).
+    unsigned SweepCompatLeftoversOnce(
+        const std::vector<DWORD>& candidates,
+        const std::unordered_set<DWORD>& alivePids,
+        unsigned& outTried) noexcept
+    {
+        unsigned unloaded = 0;
+        for (const DWORD pid : candidates)
+        {
+            const unsigned before = GlassUlTrace::RemoteModuleMask(pid);
+            if (before != 1u)
+                continue;
+            // Процесс ещё живёт по карте инжекта (Alive) — значит его shutdown мог не
+            // начаться; снаружи не трогаем, это работа path=1/2, а не sweep.
+            if (alivePids.count(pid) != 0)
+                continue;
+            ++outTried;
+            const auto res = Shared::ForceUnloadGlassModules::ForceUnload(pid);
+            const unsigned after = GlassUlTrace::RemoteModuleMask(pid);
+            if (after == 0)
+                ++unloaded;
+            // #region agent log
+            char leaf[96]{};
+            {
+                HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+                if (hProc)
+                {
+                    wchar_t path[MAX_PATH]{};
+                    DWORD cch = _countof(path);
+                    if (QueryFullProcessImageNameW(hProc, 0, path, &cch))
+                    {
+                        const wchar_t* base = wcsrchr(path, L'\\');
+                        GlassUlTrace::WideToJson(leaf, sizeof(leaf), base ? base + 1 : path);
+                    }
+                    CloseHandle(hProc);
+                }
+            }
+            GlassUlTrace::Logf(
+                "H82",
+                "CoreWindowHostInject.cpp:SweepCompatLeftovers",
+                "cw_sweep_pid",
+                "\"target_pid\":%lu,\"target_exe\":\"%s\",\"result\":%d,\"mask_before\":%u,\"mask_after\":%u",
+                static_cast<unsigned long>(pid),
+                leaf,
+                static_cast<int>(res),
+                before,
+                after);
+            // #endregion
+        }
+        return unloaded;
+    }
+    // #endregion
+
     void ForceUnloadResiduals() noexcept
     {
         const ULONGLONG residualT0 = GetTickCount64();
+        // #region agent log
+        std::vector<DWORD> sweepCandidates;
+        CollectCompatCandidates(sweepCandidates);
+        // #endregion
         // После HostShutdown + Unhook: сначала ждём штатный path=1 по StopEvent,
         // затем backup RequestShutdown (не FreeLibrary). Лог: SEH без loop_exit при
         // немедленном remote thread — даём Stop ~2с.
@@ -2030,6 +2123,54 @@ namespace GlassCompat::CoreWindowHostInject
             left,
             leftPidsList,
             GetTickCount64() - residualT0);
+        // #endregion
+
+        // #region agent log
+        // GLASS-ULTRACE (R4, H82): добиваем чужие ссылки снаружи. Две попытки: если процесс
+        // в момент первой ещё дописывал shutdown, вторая застанет его уже «только compat».
+        {
+            const ULONGLONG sweepT0 = GetTickCount64();
+            unsigned tried = 0;
+            unsigned unloaded = 0;
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                if (pass > 0)
+                    Sleep(400);
+                // Alive-слоты карты инжекта: их не трогаем (shutdown ещё/ещё не начался).
+                std::unordered_set<DWORD> alivePids;
+                std::vector<Shared::InjectProcessMap::Slot> slots(
+                    Shared::InjectProcessMap::kSlotCount);
+                DWORD slotCount = 0;
+                if (Shared::InjectProcessMap::TryReadSlots(
+                        slots.data(), static_cast<DWORD>(slots.size()), &slotCount))
+                {
+                    for (DWORD i = 0; i < slotCount; ++i)
+                    {
+                        if (slots[i].state == Shared::InjectProcessMap::State::Alive)
+                            alivePids.insert(slots[i].pid);
+                    }
+                }
+                unsigned passTried = 0;
+                unloaded += SweepCompatLeftoversOnce(sweepCandidates, alivePids, passTried);
+                tried += passTried;
+            }
+            unsigned leftGlobal = 0;
+            for (const DWORD pid : sweepCandidates)
+            {
+                if ((GlassUlTrace::RemoteModuleMask(pid) & 1u) != 0)
+                    ++leftGlobal;
+            }
+            GlassUlTrace::Logf(
+                "H82",
+                "CoreWindowHostInject.cpp:SweepCompatLeftovers",
+                "cw_sweep_end",
+                "\"passes\":2,\"candidates\":%u,\"tried\":%u,\"unloaded\":%u,\"left\":%u,\"ms\":%llu",
+                static_cast<unsigned>(sweepCandidates.size()),
+                tried,
+                unloaded,
+                leftGlobal,
+                GetTickCount64() - sweepT0);
+        }
         // #endregion
 
         CloseCwForceEvents();

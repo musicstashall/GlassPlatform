@@ -2746,8 +2746,40 @@ namespace
         // #region agent log
         // GLASS-ULTRACE (H82): expected_rc_after = сколько ссылок ОСТАНЕТСЯ после FLAET.
         // >0 и при этом dll_detach не пришёл = deferred free ОС не доставлен (idle/PLM-процесс).
-        const unsigned rcBeforeFlaet = GlassUlTrace::QueryLoadCount(hSelfRef);
         const unsigned ownRefs = 1u + (hadRemotePin ? 1u : 0u);
+        unsigned rcBeforeFlaet = GlassUlTrace::QueryLoadCount(hSelfRef);
+        // R4 (H82): прогон 4 показал, что этот остаток решает исход: os_refs=0 → dll_detach
+        // в том же миллисекунде; os_refs=1 → выгрузка приходит на 8–13 с позже либо не
+        // приходит вовсе (DllHost, msedgewebview2). Разделяем два случая: (а) ссылку снимает
+        // ОС своим deferred FreeLibrary — тогда она уйдёт за миллисекунды, если разбудить
+        // очереди потоков процесса; (б) ссылка наша собственная, но не учтённая в ownRefs.
+        // Поэтому перед FLAET коротко ждём с wake и логируем переходы rc.
+        if (rcBeforeFlaet > ownRefs)
+        {
+            const ULONGLONG waitT0 = GetTickCount64();
+            const unsigned rcStart = rcBeforeFlaet;
+            unsigned polls = 0;
+            while (rcBeforeFlaet > ownRefs && GetTickCount64() - waitT0 < 1200)
+            {
+                (void)WakeAllProcessThreadsWmNull();
+                Sleep(150);
+                ++polls;
+                rcBeforeFlaet = GlassUlTrace::QueryLoadCount(hSelfRef);
+            }
+            GlassUlTrace::Logf(
+                "H82",
+                "GlassCompat.cpp:FreeSelfAndExitThread",
+                "rc_wait",
+                "\"path\":%llu,\"rc_start\":%u,\"rc_end\":%u,\"own\":%u,\"polls\":%u,"
+                "\"ms\":%llu,\"released\":%d",
+                path,
+                rcStart,
+                rcBeforeFlaet,
+                ownRefs,
+                polls,
+                GetTickCount64() - waitT0,
+                (rcBeforeFlaet <= ownRefs) ? 1 : 0);
+        }
         const unsigned expectedRcAfter = rcBeforeFlaet > ownRefs ? rcBeforeFlaet - ownRefs : 0u;
         const unsigned osRefs = expectedRcAfter;
         GlassUlTrace::Logf(
