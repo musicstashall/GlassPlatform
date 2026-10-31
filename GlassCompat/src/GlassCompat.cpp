@@ -4168,14 +4168,50 @@ namespace
         static std::once_flag s_minimalUnloadOnce;
         std::call_once(s_minimalUnloadOnce, [path]() noexcept
         {
-            const auto kind = (path == 3)
-                ? Shared::InjectProcessMap::Kind::RejectedForbidden
-                : Shared::InjectProcessMap::Kind::RejectedBlockList;
-            InjectMapUpsert(
-                kind,
-                static_cast<std::uint8_t>(path),
-                Shared::InjectProcessMap::State::Alive,
-                Shared::InjectProcessMap::ModuleCompat);
+            // R12b: для path=4 (страховка из DllMain) НЕ затираем уже существующий слот.
+            // DllMain отрабатывает раньше Initialize и раньше Upsert хоста: если записать
+            // здесь Kind=RejectedBlockList/path=4 поверх нормального слота, процесс навсегда
+            // выглядит «отвергнутым» и выпадает из списка «в работе». Пишем только если
+            // записи ещё нет, и всегда — реальный набор наших модулей в процессе.
+            bool hasSlot = false;
+            if (path == 4)
+            {
+                // Слоты: 512 записей; читаем все и ищем свой pid (порядок не гарантирован).
+                static Shared::InjectProcessMap::Slot s_slots[Shared::InjectProcessMap::kSlotCount];
+                DWORD slotCount = 0;
+                if (Shared::InjectProcessMap::TryReadSlots(
+                        s_slots, Shared::InjectProcessMap::kSlotCount, &slotCount))
+                {
+                    const DWORD self = GetCurrentProcessId();
+                    for (DWORD i = 0; i < slotCount; ++i)
+                    {
+                        if (s_slots[i].pid == self)
+                        {
+                            hasSlot = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!hasSlot)
+            {
+                // R12b: path=4 — это НЕ «отвергнутый» процесс. Страховочный watcher
+                // ставится любому процессу, куда user32 загрузил DLL, и запись должна
+                // отражать реальность: процесс активен, наши модули в нём загружены.
+                // Иначе UI показывал такие процессы как Rejected и они «пропадали»
+                // из списка «в работе» (жалоба прогона 13).
+                const bool watcherOnly = (path == 4);
+                const auto kind = watcherOnly
+                    ? Shared::InjectProcessMap::Kind::Normal
+                    : ((path == 3) ? Shared::InjectProcessMap::Kind::RejectedForbidden
+                                   : Shared::InjectProcessMap::Kind::RejectedBlockList);
+                InjectMapUpsert(
+                    kind,
+                    static_cast<std::uint8_t>(watcherOnly ? 1 : path),
+                    Shared::InjectProcessMap::State::Alive,
+                    watcherOnly ? CurrentModuleBits()
+                                : Shared::InjectProcessMap::ModuleCompat);
+            }
 
             HMODULE hRef = nullptr;
             if (!GetModuleHandleExW(
@@ -4251,6 +4287,20 @@ namespace
                         SYNCHRONIZE,
                         FALSE,
                         GlassShared::GlassPlatformTask::kHostAliveMutexName);
+                    // R12b: видно, что именно удалось открыть. В прогоне 13 у части
+                    // процессов (DllHost) не было ни watcher_wake, ни следа причины —
+                    // без этого нельзя отличить «не открылся StopEvent» от «не дошёл
+                    // до ожидания».
+                    GlassUlTrace::Logf(
+                        "H102",
+                        "GlassCompat.cpp:StartMinimalUnloadWatcher",
+                        "watcher_handles",
+                        "\"path\":%llu,\"stop\":%d,\"unload\":%d,\"host_alive\":%d,\"host_shutdown\":%d",
+                        watcherPath,
+                        hStop ? 1 : 0,
+                        hUnload ? 1 : 0,
+                        hHostAlive ? 1 : 0,
+                        hHostShutdown ? 1 : 0);
                     if (hStop || hUnload || hHostAlive)
                     {
                         HANDLE waits[3]{};

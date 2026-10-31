@@ -1451,8 +1451,21 @@ done:
         HANDLE hVerify = nullptr;
         if (s_stopFromCloseMessage)
         {
-            // Планировщик попросил закрыть задачу: только локальная очистка.
-            // Остатки проверяет отдельный этап мониторинга Setup/Unins.
+            // R12b (§2а/5.4): End задачи — такой же стоп, как кнопка Stop, только без
+            // 20-секундного ForceUnloadResiduals (планировщик после WM_CLOSE быстро
+            // переходит к TerminateProcess). Даём процессам короткое окно и несколько
+            // WM_NULL-пинков: инжектированные сами уходят по StopEvent, а «спящие»
+            // (DllHost) получают шанс обработать deferred free до смерти хоста.
+            // Лог: host_close_ping.
+            GlassUlTrace::Logf(
+                "H102", "EntryRundll.cpp:Main", "host_close_ping",
+                "\"pings\":4,\"before\":\"freeself\"");
+            for (unsigned i = 0; i < 4; ++i)
+            {
+                (void)SendNotifyMessageW(HWND_BROADCAST, WM_NULL, 0, 0);
+                if (i + 1 < 4)
+                    Sleep(700);
+            }
             GlassCompat::CoreWindowHostInject::FinishTaskStop();
         }
         else

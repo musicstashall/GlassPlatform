@@ -6,6 +6,7 @@
 #include <DebugLog.h>
 #include <DbgHelp.h>
 #include <InjectProcessMap.h>
+#include <GlassUlTrace.h>
 #include <cstring>
 #include <cstdio>
 #include <process.h>
@@ -615,6 +616,24 @@ namespace
                 return EXCEPTION_CONTINUE_SEARCH;
         }
 
+        // R12b: единый след краша в общем логе. Раньше падения были видны только в
+        // DebugLog/дампах, и по GLASS-ULTRACE нельзя было сказать, кто упал. Пишем
+        // только то, что уже прошло фильтр «fault IP — наш модуль» (или explorer),
+        // максимум 8 записей на процесс.
+        {
+            static std::atomic<unsigned> s_vehSeen{ 0 };
+            if (s_vehSeen.fetch_add(1, std::memory_order_acq_rel) < 8)
+            {
+                GlassUlTrace::Logf(
+                    "H102",
+                    "CrashGuard.cpp:GlassVectoredDumpHandler",
+                    "crash_seen",
+                    "\"code\":\"0x%08X\",\"fault\":\"%p\",\"explorer\":%d,\"chance\":\"first\"",
+                    code,
+                    info->ExceptionRecord->ExceptionAddress,
+                    explorer ? 1 : 0);
+            }
+        }
         LogFaultingModuleProbe(info, "VEH");
         if (code == 0xC0000409UL)
         {
@@ -661,6 +680,15 @@ namespace
 
     LONG NTAPI ExplorerCrashGuardFilter(EXCEPTION_POINTERS* info) noexcept
     {
+        // R12b: последний шанс — единственная точка, где падение точно состоялось.
+        GlassUlTrace::Logf(
+            "H102",
+            "CrashGuard.cpp:ExplorerCrashGuardFilter",
+            "crash_unhandled",
+            "\"code\":\"0x%08X\",\"fault\":\"%p\",\"explorer\":%d",
+            info && info->ExceptionRecord ? static_cast<unsigned>(info->ExceptionRecord->ExceptionCode) : 0u,
+            (info && info->ExceptionRecord) ? info->ExceptionRecord->ExceptionAddress : nullptr,
+            IsCurrentProcessExplorer() ? 1 : 0);
         LogFaultingModuleProbe(info, "UEF");
         // Сначала дамп — пока контекст гарантированно доступен.
         if (IsMiniDumpEnabled())

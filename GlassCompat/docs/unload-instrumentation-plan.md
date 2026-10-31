@@ -673,6 +673,36 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 `stale_scan windows` сравним с числом реальных окон; в ShellExt-стопе после `stop_phase busy` идёт
 `wait_host`/`stop_result`, а не тишина.
 
+### R12b — прогон 13: страховка работает, остались DllHost и End задачи
+
+**Прогон 13 (`debug-8e6259-13.log`, 321 с).** Главное: страховка из R12 сработала —
+`attach_watcher_path4` в 28 процессах, `init_begin/init_end` в 28, фикс обхода окон виден
+по таймингам (`mmc`: `shutdown_end ms=11359` против 40203 в прогоне 12).
+
+Что осталось:
+
+| Наблюдение | Данные |
+|---|---|
+| Свои процессы «исчезли» из списка «в работе» | `StartMinimalUnloadWatcher(4)` писал слот `Kind=RejectedBlockList` + `path=4` поверх нормального (DllMain раньше Initialize/хоста) → UI показывал процесс как отвергнутый |
+| End задачи: хост умирает, никого не дожимая | ветка `s_stopFromCloseMessage` вызывала только `FinishTaskStop()` — без broadcast и без `ForceUnloadResiduals`; `host_shutdown_signal` → `dll_detach` за 0.1 с |
+| Остатки DllHost после стопа | `freeself_flaet` есть, `dll_detach` нет (os_refs=1) — пинок был только один и до их FLAET |
+| Не видно, почему watcher не проснулся | не логировались открытые хэндлы (`StopEvent`/`Unload`/`HostAlive`) |
+| «Посыпались краши», но в логе нет следов | VEH/UEF писали только в DebugLog и дампы |
+
+Правки R12b:
+
+| # | Файл | Правка |
+|---|---|---|
+| R12b-1 | `GlassCompat/src/GlassCompat.cpp` | `path=4` не затирает существующий слот; новый пишет как `Kind::Normal`, `path=1`, `moduleBits=CurrentModuleBits()` — «в работе», а не «отвергнут» |
+| R12b-2 | `GlassCompat/src/EntryRundll.cpp` | ветка End задачи: 4× `SendNotifyMessage(HWND_BROADCAST, WM_NULL)` с шагом 700 мс перед `FinishTaskStop` (`host_close_ping`) |
+| R12b-3 | `GlassCompat/src/GlassCompat.cpp` | лог `watcher_handles` (какие объекты удалось открыть) |
+| R12b-4 | `GlassCompat/src/CrashGuard.cpp` | `crash_seen` (VEH, не более 8 на процесс) и `crash_unhandled` (UEF) |
+| R12b-5 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | список показывает **все** процессы с нашими модулями, включая сам GlassSettings и rundll32-хост: поле `IsToolProcess` (в счётчики остатков они не идут, в списке — последними) |
+
+Следующий прогон должен ответить на два вопроса данными: (1) какие процессы дают
+`crash_seen/crash_unhandled` и с каким `code`; (2) в `watcher_handles` у «спящих» — что не
+открылось (обычно `host_alive=0` в AppContainer).
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:

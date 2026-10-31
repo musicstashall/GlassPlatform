@@ -427,3 +427,20 @@ __declspec(dllexport) int WINAPI GlassSettings_RequestPlatformStop(int arch, int
 
 Проверка следующего прогона: `watcher_start path=4` у процессов из глобального хука,
 `stale_scan windows` ≈ реальному числу окон, `stop_result` появляется и при стопе из ShellExt.
+
+### 7.2. Правки после прогона 13 (R12b)
+
+* **End задачи = полная остановка.** Раньше ветка `s_stopFromCloseMessage` в `EntryRundll`
+  делала только `FinishTaskStop()`: хост уходил за 0.1 с, не разбудив и не дожав никого.
+  Теперь перед выходом — четыре `SendNotifyMessage(HWND_BROADCAST, WM_NULL)` с шагом 700 мс:
+  инжектированные процессы успевают выгрузиться, «спящие» (DllHost) — обработать deferred free.
+  Полный `ForceUnloadResiduals` (≈20 с) при End задачи намеренно не вызывается: планировщик
+  после `WM_CLOSE` переходит к `TerminateProcess`.
+* **«Пропавшие» процессы в списке.** Слот, который писал страховочный watcher (`path=4`),
+  теперь `Kind::Normal`/`path=1` и не затирает уже существующую запись. Для UI `path=4` —
+  это не «отвергнутый» процесс.
+* **Список процессов показывает всё.** `InjectRuntimeMonitor` больше не выбрасывает
+  rundll32-хост и сам GlassSettings: они видны как `IsToolProcess`, но не входят в счётчик
+  остатков (иначе `HasResiduals` горел бы всегда).
+* **Наблюдаемость.** `watcher_handles` — какие объекты открыл watcher; `crash_seen`/`crash_unhandled` —
+  кто и с каким кодом упал.

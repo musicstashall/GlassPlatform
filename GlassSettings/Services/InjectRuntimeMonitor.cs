@@ -28,6 +28,13 @@ public sealed class InjectRuntimeEntry
     public ulong SubclassKindMask { get; init; }
     public NativeHostInterop.InjectState State { get; init; }
 
+    /// <summary>
+    /// Процесс нашего же инструмента (сам GlassSettings или rundll32-хост платформы).
+    /// Показываем его в списке — иначе картина «кто держит GlassCompat» неполная, — но
+    /// в счётчики остатков/активных не включаем: это не инжектированное приложение.
+    /// </summary>
+    public bool IsToolProcess { get; init; }
+
     public string ArchLabel => Arch == NativeHostInterop.InjectArch.X86 ? "x86" : "x64";
 
     /// <summary>
@@ -787,10 +794,8 @@ public sealed class InjectRuntimeMonitor
             {
                 if (slot.Pid == 0)
                     continue;
-                if (IsGlassSettingsProcess(slot.Pid, slot.ExeName, selfPid))
-                {
-                    continue;
-                }
+                var slotIsTool = IsGlassSettingsProcess(slot.Pid, slot.ExeName, selfPid)
+                    || IsGlassPlatformHostPid(slot.Pid);
 
                 scanByPid.TryGetValue(slot.Pid, out var scanned);
                 // H42: AppContainer Toolhelp часто неполный (только Compat) — не даём scan
@@ -840,6 +845,7 @@ public sealed class InjectRuntimeMonitor
                     SubclassKindMask = slot.SubclassKindMask,
                     State = slot.State,
                     ModulesText = FormatModules(bits),
+                    IsToolProcess = slotIsTool,
                 });
             }
 
@@ -848,13 +854,8 @@ public sealed class InjectRuntimeMonitor
             {
                 if (mapped.Contains(s.Pid) || s.ModuleBits == 0)
                     continue;
-                if (IsGlassSettingsProcess(s.Pid, s.ExeName, selfPid))
-                    continue;
-                // Хост платформы (rundll32+GlassCompat) — не residual injectee.
-                if (IsGlassPlatformHostPid(s.Pid))
-                {
-                    continue;
-                }
+                var scanIsTool = IsGlassSettingsProcess(s.Pid, s.ExeName, selfPid)
+                    || IsGlassPlatformHostPid(s.Pid);
                 // Вне карты: при живой платформе и пустых слотах — Residual (платформа выгружается).
                 // При живой платформе с активными слотами — Active (слот может запаздывать при старте).
                 // CFG-fix: residualSweep — sweep уже активен (мьютекс жив, но слоты пустеют),
@@ -872,6 +873,7 @@ public sealed class InjectRuntimeMonitor
                     ModuleBits = s.ModuleBits,
                     Arch = GuessProcessArch(s.Pid),
                     ModulesText = FormatModules(s.ModuleBits),
+                    IsToolProcess = scanIsTool,
                 });
             }
         }
@@ -881,10 +883,8 @@ public sealed class InjectRuntimeMonitor
             {
                 if (s.ModuleBits == 0)
                     continue;
-                if (IsGlassSettingsProcess(s.Pid, s.ExeName, selfPid))
-                    continue;
-                if (IsGlassPlatformHostPid(s.Pid))
-                    continue;
+                var scanIsTool = IsGlassSettingsProcess(s.Pid, s.ExeName, selfPid)
+                    || IsGlassPlatformHostPid(s.Pid);
 
                 list.Add(new InjectRuntimeEntry
                 {
@@ -894,22 +894,29 @@ public sealed class InjectRuntimeMonitor
                     ModuleBits = s.ModuleBits,
                     Arch = GuessProcessArch(s.Pid),
                     ModulesText = FormatModules(s.ModuleBits),
+                    IsToolProcess = scanIsTool,
                 });
             }
         }
 
         list.Sort((a, b) =>
         {
-            var c = a.Beacon.CompareTo(b.Beacon);
+            var c = a.IsToolProcess.CompareTo(b.IsToolProcess);
+            if (c != 0)
+                return c;
+            c = a.Beacon.CompareTo(b.Beacon);
             if (c != 0)
                 return c;
             c = string.Compare(a.ExeName, b.ExeName, StringComparison.OrdinalIgnoreCase);
             return c != 0 ? c : a.Pid.CompareTo(b.Pid);
         });
 
-        var activeCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Active);
-        var rejectedCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Rejected);
-        var residualCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Residual);
+        // Счётчики — только по инжектированным приложениям. Свои процессы (хост платформы и
+        // сам GlassSettings) видны в списке, но остатком не считаются: GlassSettings держит
+        // GlassCore локально до собственного закрытия, а rundll32-хост — это и есть платформа.
+        var activeCount = list.Count(e => !e.IsToolProcess && e.Beacon == InjectRuntimeBeacon.Active);
+        var rejectedCount = list.Count(e => !e.IsToolProcess && e.Beacon == InjectRuntimeBeacon.Rejected);
+        var residualCount = list.Count(e => !e.IsToolProcess && e.Beacon == InjectRuntimeBeacon.Residual);
 
         return new InjectRuntimeSnapshot
         {
