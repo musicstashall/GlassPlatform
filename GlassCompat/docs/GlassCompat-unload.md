@@ -257,3 +257,8 @@ UICompat использует COM-объекты (IXDE, TAP, visual tree watcher
 - `Local\GlassHostPid` — не использовать как замену HostShutdown на path=1.
 - `Local\GlassPlatform.InjectMap.x64` / `.x86` — **только диагностика** для GlassSettings (PID/kind/modules/diag/subclass). Не барьер выгрузки: не ждать карту в FreeSelf / path=1 и не менять порядок HostShutdown ради неё. Legacy `Local\GlassPlatform.InjectMap` — только fallback чтения.
 - `Local\GlassCompat.UnloadRequest.<pid>` — per-PID команда из монитора. **Не** замена глобальному `StopEvent`. Семантика: Alive + хост жив (path=1) → `ExecuteShutdown` модулей, **без** `FreeSelf` Compat, пока жив INCONTEXT-хук; path=2/3 → FreeSelf как после Stop; residual / HostShutdown уже был → teardown + FreeSelf при живом GUI/watcher. Порядок path=1/2/3 при **глобальном** stop не менять.
+
+## Диагностика
+
+Аудит refcount и план инструментации (логи в файл) для разбора «модули выгружаются нестабильно,
+GlassCompat остаётся загруженной»: [unload-instrumentation-plan.md](unload-instrumentation-plan.md).
