@@ -1,4 +1,4 @@
-#include "WndPch.h"
+﻿#include "WndPch.h"
 #include "WinEventHandler.h"
 #include "Tracker/BackdropPolicyRescan.h"
 #include "Tracker/SubclassDiagPublish.h"
@@ -1748,11 +1748,17 @@ namespace WndCompat
 
         // Event-based shutdown: wait for all cross-thread detachments to complete
         const int pending = g_pendingDetaches.load(std::memory_order_acquire);
-        if (pending > 0)
+        // R5b: ожидание ограничено по времени. Раньше был INFINITE на событии, которое
+        // при «потерянном» Register не придёт никогда (а теперь ещё и не может появиться
+        // отрицательный счётчик). Зависание Stop хуже, чем незавершённый detach: после
+        // таймаута остаток виден в wnd_shutdown_end и попадает под защиту stale_scan.
+        constexpr DWORD kPendingWaitMs = 3000;
+        DWORD pendingWait = WAIT_TIMEOUT;
+        if (pending > 0 && g_hDetachAllDone)
         {
             DebugLog(L"[WndCompat][WinEvent] Waiting for %d cross-thread detachments", pending);
-            WaitForSingleObject(g_hDetachAllDone, INFINITE);
-            DebugLog(L"[WndCompat][WinEvent] All cross-thread detachments complete");
+            pendingWait = WaitForSingleObject(g_hDetachAllDone, kPendingWaitMs);
+            DebugLog(L"[WndCompat][WinEvent] Cross-thread detachments wait=%lu", pendingWait);
         }
 
         // ОчищаемHANDLE и сбрасываем счётчик для следующего цикла.
@@ -1770,9 +1776,10 @@ namespace WndCompat
             "H91",
             "WndCompat:WinEventHook_Shutdown",
             "wnd_shutdown_end",
-            "\"pending_waited\":%d,\"root_marks\":%u,\"other_marks\":%u,"
+            "\"pending_waited\":%d,\"pending_wait_ok\":%d,\"root_marks\":%u,\"other_marks\":%u,"
             "\"subclasses_left\":%u,\"ms\":%llu",
             pending,
+            pendingWait == WAIT_OBJECT_0 ? 1 : 0,
             marks.rootMarks,
             marks.otherMarks,
             WndCompat::SubclassDiag::Total(),
@@ -1804,12 +1811,37 @@ namespace WndCompat
     }
 
     // Event-based shutdown: signal completion when a subclass is removed
+    //
+    // R5b (прогон 6, explorer 20124): здесь счётчик уходил в минус — в логе
+    // wnd_shutdown_begin pending_before=-3. Причина: Shutdown ставит store(0) после
+    // ожидания, а «хвостовые» SignalDetachComplete из уже отправленных кросс-поточных
+    // detach приходят позже и декрементируют ноль. Дальше в следующем цикле
+    // Register(+11) и -3 дают pending=8, т.е. ждём меньше, чем реально в полёте, и
+    // FreeLibrary может случиться раньше, чем завершится чужой detach.
+    // Теперь счётчик не может стать отрицательным, а недобор фиксируется в логе.
     void WinEventHook_SignalDetachComplete()
     {
-        if (g_pendingDetaches.fetch_sub(1) == 1)
+        int cur = g_pendingDetaches.load(std::memory_order_acquire);
+        while (cur > 0)
         {
-            SetEvent(g_hDetachAllDone);
+            if (g_pendingDetaches.compare_exchange_weak(
+                    cur, cur - 1, std::memory_order_acq_rel, std::memory_order_acquire))
+            {
+                if (cur == 1)
+                    SetEvent(g_hDetachAllDone);
+                return;
+            }
         }
+        // #region agent log
+        // Лишняя нотификация (detach завершился после store(0) или без Register).
+        GlassUlTrace::Logf(
+            "H91",
+            "WndCompat:WinEventHook_Shutdown",
+            "pending_underflow",
+            "\"cur\":%d,\"hook_installed\":%d",
+            cur,
+            g_hookInstalled.load() ? 1 : 0);
+        // #endregion
     }
 
     Shared::InjectionMode WinEventHook_GetMode()

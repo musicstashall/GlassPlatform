@@ -1,4 +1,4 @@
-#include "CompatPch.h"
+﻿#include "CompatPch.h"
 #include "GlassCompat.h"
 #include <windows.h>
 #include <dwmapi.h>
@@ -1186,6 +1186,31 @@ namespace
         return TRUE;
     }
 
+    // R5b (прогон 6, explorer 20124): AV 0xC0000005 в Windows.UI.Xaml.dll+0x8E122,
+    // чтение по адресу 0x7FF91E2BFBB0 — вне списка модулей (уже размотанный образ).
+    // Точный модуль не определить без его размера, поэтому размер пишем в module_free:
+    // при следующем падении адрес из дампа сверяется с [base, base+size).
+    unsigned ImageSizeUl(HMODULE hMod) noexcept
+    {
+        RefreshModuleRangesUl();
+        const auto base = reinterpret_cast<std::uintptr_t>(hMod);
+        for (unsigned i = 0; i < g_moduleRangeCountUl; ++i)
+        {
+            if (g_moduleRangesUl[i].base == base)
+                return static_cast<unsigned>(g_moduleRangesUl[i].end - g_moduleRangesUl[i].base);
+        }
+        return 0;
+    }
+
+    // A/B-бисект: GLASS_ULTRACE_KEEP_MODULES=1 — не выгружать НИ ОДНОГО peer-модуля
+    // (GlassCore/Explorer/Taskbar/UI/Wnd). Нужно, чтобы отделить «unmap оставил висячий
+    // указатель» от любой другой причины падения.
+    bool KeepModulesEnvUl() noexcept
+    {
+        wchar_t v[16]{};
+        return GetEnvironmentVariableW(L"GLASS_ULTRACE_KEEP_MODULES", v, _countof(v)) > 0;
+    }
+
     // Возвращает число найденных «живых» указателей на код модуля (GWLP + comctl32-цепочка).
     unsigned ScanStaleCallbacksBeforeFree(const char* tag, HMODULE hMod) noexcept
     {
@@ -1236,15 +1261,17 @@ namespace
             "H91",
             "GlassCompat.cpp:ScanStaleCallbacks",
             "stale_scan",
-            "\"module\":\"%s\",\"windows\":%u,\"marked\":%u,\"proc_inside\":%u,"
-            "\"prop_inside\":%u,\"prop_code\":%u,\"size\":\"0x%X\"",
+            "\"module\":\"%s\",\"base\":\"%p\",\"size\":\"0x%X\","
+            "\"windows\":%u,\"marked\":%u,\"proc_inside\":%u,"
+            "\"prop_inside\":%u,\"prop_code\":%u",
             tag,
+            static_cast<void*>(hMod),
+            imageSize,
             s.windows,
             s.marked,
             s.procInside,
             s.propInside,
-            s.propCodeInside,
-            imageSize);
+            s.propCodeInside);
         // Реальная опасность = наш КОД в GWLP или в comctl32-цепочке. prop_inside без фильтра
         // по исполняемым страницам содержит указатели на данные и как критерий не годится.
         return s.procInside + s.propCodeInside;
@@ -1534,6 +1561,21 @@ namespace
                 hCoreFree = nullptr;
             }
 
+            // R5b: A/B-выключатель полной выгрузки (см. KeepModulesEnvUl).
+            if (hCoreFree && KeepModulesEnvUl())
+            {
+                // #region agent log
+                GlassUlTrace::Logf(
+                    "H91",
+                    "GlassCompat.cpp:ExecuteShutdown",
+                    "module_free_skipped",
+                    "\"module\":\"GlassCore\",\"base\":\"%p\",\"size\":%u,\"env\":1",
+                    static_cast<void*>(hCoreFree),
+                    ImageSizeUl(hCoreFree));
+                // #endregion
+                hCoreFree = nullptr;
+            }
+
             if (hCoreFree)
             {
                 result |= UnloadResult::FreeCore_Called;
@@ -1552,8 +1594,9 @@ namespace
                         "H88",
                         "GlassCompat.cpp:ExecuteShutdown",
                         "module_free",
-                        "\"module\":\"GlassCore\",\"base\":\"%p\",\"ok\":%d,\"owned\":1,\"attempt\":%u,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
+                        "\"module\":\"GlassCore\",\"base\":\"%p\",\"size\":%u,\"ok\":%d,\"owned\":1,\"attempt\":%u,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
                         static_cast<void*>(hCoreFree),
+                        ImageSizeUl(hCoreFree),
                         coreFreed ? 1 : 0,
                         freed,
                         rcCoreBefore,
@@ -1649,8 +1692,26 @@ namespace
                     kExplorerStopClasses, _countof(kExplorerStopClasses));
                 // #region agent log
                 // GLASS-ULTRACE (H91)
-                ScanStaleCallbacksBeforeFree("ExplorerCompat", savedExplorer);
+                const unsigned staleExplorer = ScanStaleCallbacksBeforeFree("ExplorerCompat", savedExplorer);
                 // #endregion
+                const bool keepExplorer = KeepModulesEnvUl();
+                if (keepExplorer || staleExplorer > 0)
+                {
+                    // #region agent log
+                    GlassUlTrace::Logf(
+                        "H91",
+                        "GlassCompat.cpp:ExecuteShutdown",
+                        "module_free_skipped",
+                        "\"module\":\"ExplorerCompat\",\"base\":\"%p\",\"size\":%u,"
+                        "\"stale_procs\":%u,\"env\":%d",
+                        static_cast<void*>(savedExplorer),
+                        ImageSizeUl(savedExplorer),
+                        staleExplorer,
+                        keepExplorer ? 1 : 0);
+                    // #endregion
+                }
+                else
+                {
                 const unsigned rcExBefore = GlassUlTrace::QueryLoadCount(savedExplorer);
                 const BOOL exFreed = FreeLibrary(savedExplorer);
                 result |= UnloadResult::FreeExplorer_Returned;
@@ -1660,8 +1721,9 @@ namespace
                     "H86",
                     "GlassCompat.cpp:ExecuteShutdown",
                     "module_free",
-                    "\"module\":\"ExplorerCompat\",\"base\":\"%p\",\"ok\":%d,\"owned\":%d,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
+                    "\"module\":\"ExplorerCompat\",\"base\":\"%p\",\"size\":%u,\"ok\":%d,\"owned\":%d,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
                     static_cast<void*>(savedExplorer),
+                    ImageSizeUl(savedExplorer),
                     exFreed ? 1 : 0,
                     g_explorerOwnedPin ? 1 : 0,
                     rcExBefore,
@@ -1700,12 +1762,37 @@ namespace
                         hCheckEx2 ? L"STILL LOADED" : L"unloaded OK",
                         residualDropped ? 1 : 0);
                 }
+                } // else (keepModules guard)
             }
             if (savedTaskbar)
             {
                 DebugLog(L"[GlassCompat][Core] [Shutdown] FreeLibrary TaskbarCompat");
                 AuditGlassMessageWindowsBeforeFree(L"TaskbarCompat", savedTaskbar,
                     kTaskbarStopClasses, _countof(kTaskbarStopClasses));
+                // R5b: та же защита, что для WndCompat/ExplorerCompat. Раньше TaskbarCompat и
+                // UICompat выгружались вообще без скана. Падение в XAML (см. комментарий у
+                // ImageSizeUl) указывает именно на «размотали модуль, а указатель на него
+                // остался в чужом коде».
+                const unsigned staleTaskbar =
+                    ScanStaleCallbacksBeforeFree("TaskbarCompat", savedTaskbar);
+                const bool keepModules = KeepModulesEnvUl();
+                if (keepModules || staleTaskbar > 0)
+                {
+                    // #region agent log
+                    GlassUlTrace::Logf(
+                        "H91",
+                        "GlassCompat.cpp:ExecuteShutdown",
+                        "module_free_skipped",
+                        "\"module\":\"TaskbarCompat\",\"base\":\"%p\",\"size\":%u,"
+                        "\"stale_procs\":%u,\"env\":%d",
+                        static_cast<void*>(savedTaskbar),
+                        ImageSizeUl(savedTaskbar),
+                        staleTaskbar,
+                        keepModules ? 1 : 0);
+                    // #endregion
+                }
+                else
+                {
                 const unsigned rcTbBefore = GlassUlTrace::QueryLoadCount(savedTaskbar);
                 const BOOL tbFreed = FreeLibrary(savedTaskbar);
                 // #region agent log
@@ -1714,8 +1801,9 @@ namespace
                     "H86",
                     "GlassCompat.cpp:ExecuteShutdown",
                     "module_free",
-                    "\"module\":\"TaskbarCompat\",\"base\":\"%p\",\"ok\":%d,\"owned\":%d,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
+                    "\"module\":\"TaskbarCompat\",\"base\":\"%p\",\"size\":%u,\"ok\":%d,\"owned\":%d,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
                     static_cast<void*>(savedTaskbar),
+                    ImageSizeUl(savedTaskbar),
                     tbFreed ? 1 : 0,
                     g_taskbarOwnedPin ? 1 : 0,
                     rcTbBefore,
@@ -1770,6 +1858,7 @@ namespace
                         DBG_IMPORTANT,
                         L"[GlassCompat][Core] [Shutdown] TaskbarCompat final unload state: unloaded OK");
                 }
+                } // else (keepModules/stale guard)
             }
             if (savedUICompat)
             {
@@ -1777,6 +1866,25 @@ namespace
                 DebugLog(L"[GlassCompat][Core] [Shutdown] FreeLibrary UICompat");
                 AuditGlassMessageWindowsBeforeFree(L"UICompat", savedUICompat,
                     kUiStopClasses, _countof(kUiStopClasses));
+                const unsigned staleUi = ScanStaleCallbacksBeforeFree("UICompat", savedUICompat);
+                const bool keepUi = KeepModulesEnvUl();
+                if (keepUi || staleUi > 0)
+                {
+                    // #region agent log
+                    GlassUlTrace::Logf(
+                        "H91",
+                        "GlassCompat.cpp:ExecuteShutdown",
+                        "module_free_skipped",
+                        "\"module\":\"UICompat\",\"base\":\"%p\",\"size\":%u,"
+                        "\"stale_procs\":%u,\"env\":%d",
+                        static_cast<void*>(savedUICompat),
+                        ImageSizeUl(savedUICompat),
+                        staleUi,
+                        keepUi ? 1 : 0);
+                    // #endregion
+                }
+                else
+                {
                 const unsigned rcUiBefore = GlassUlTrace::QueryLoadCount(savedUICompat);
                 const BOOL uiFreed = FreeLibrary(savedUICompat);
                 // #region agent log
@@ -1785,8 +1893,9 @@ namespace
                     "H83",
                     "GlassCompat.cpp:ExecuteShutdown",
                     "module_free",
-                    "\"module\":\"UICompat\",\"base\":\"%p\",\"ok\":%d,\"owned\":%d,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
+                    "\"module\":\"UICompat\",\"base\":\"%p\",\"size\":%u,\"ok\":%d,\"owned\":%d,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
                     static_cast<void*>(savedUICompat),
+                    ImageSizeUl(savedUICompat),
                     uiFreed ? 1 : 0,
                     g_uiCompatOwnedPin ? 1 : 0,
                     rcUiBefore,
@@ -1863,6 +1972,7 @@ namespace
                     L"[GlassCompat][Core] [Shutdown] UICompat after residual reclaim: %s (dropped=%d)",
                     hCheckUi ? L"STILL LOADED" : L"unloaded OK",
                     residualDropped ? 1 : 0);
+                } // else (keepModules/stale guard)
             }
             if (savedWnd)
             {
@@ -1884,7 +1994,7 @@ namespace
                 // Поэтому unmap запрещён, пока скан видит наш КОД: residual-модуль лучше, чем
                 // падение Проводника. Причина видна в логе (reason=stale|env).
                 const bool skipByStale = staleWndProcs > 0;
-                const bool skipWndFree = safeEnv || skipByStale;
+                const bool skipWndFree = safeEnv || skipByStale || KeepModulesEnvUl();
                 if (skipWndFree)
                 {
                     GlassUlTrace::Logf(
@@ -1919,8 +2029,9 @@ namespace
                         "H88",
                         "GlassCompat.cpp:ExecuteShutdown",
                         "module_free",
-                        "\"module\":\"WndCompat\",\"base\":\"%p\",\"ok\":%d,\"owned\":1,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
+                        "\"module\":\"WndCompat\",\"base\":\"%p\",\"size\":%u,\"ok\":%d,\"owned\":1,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
                         static_cast<void*>(savedWnd),
+                        ImageSizeUl(savedWnd),
                         wndFreed ? 1 : 0,
                         rcWndBefore,
                         GlassUlTrace::QueryLoadCountByName(L"WndCompat.dll"),

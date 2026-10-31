@@ -333,6 +333,53 @@ A/B для taskhostw: прогон с `GLASS_ULTRACE_NOWATCHER=1`. Если кр
 если исчезают — значит виноват не сам факт загрузки, а watcher-поток, и тогда следующий шаг —
 не ставить watcher в процессах, которые завершаются быстрее, чем приходит Stop.
 
+### R5b — прогон 6: AV в XAML после выгрузки TaskbarCompat/UICompat
+
+**Прогон `debug-8e6259-6.log`, второй цикл, explorer 20124.**
+
+| Событие | Время (в цикле) |
+|---|---|
+| `module_free ExplorerCompat` rc 2→1, `module_residual_drop` rc 1→0 | +2.0 с (unmap) |
+| `module_free TaskbarCompat` rc 2→1 | +2.0 с |
+| `module_residual_drop TaskbarCompat` rc 1→0 | +4.4 с (unmap) |
+| `module_free WndCompat` rc 1→0, `stale_scan prop_code=0` | +4.5 с (unmap) |
+| `freeself_flaet` rc=2 `expected_rc_after=1` | +7.7 с |
+| `cw_remote_shutdown` / sweep (`fu_try` ×2, `mask_after=1`) | +9.0 … +10.6 с |
+| **дамп explorer 20124** | **+11.3 с** |
+
+Дамп: `0xC0000005` (AV), tid 16400, RIP `Windows.UI.Xaml.dll+0x8E122`, чтение по адресу
+`0x7FF91E2BFBB0` — адрес не входит ни в один загруженный модуль (образ уже размотан).
+Регистр `RAX = 0x7FF91E2BFBA8` = fault−8, т.е. код читал поле `+8` структуры, чей указатель
+уже невалиден. Стек — целиком `Windows.UI.Xaml`/`CoreMessaging`/`DWrite` (рендер текста),
+наших кадров нет.
+
+Атрибуция: `ExplorerCompat` (base `0x7FF91CB80000`, size `0x48C000`) заканчивается на
+`0x7FF91D008000`; `TaskbarCompat` (base `0x7FF91DFA0000`) при размере ≈`0x320000`–`0x400000`
+покрывает `0x7FF91E2BFBB0` (смещение `0x31FBB0`). Так как `TaskbarCompat` и `UICompat`
+выгружались **без скана живых указателей** (скан был только для WndCompat/ExplorerCompat),
+наиболее вероятный виновник — unmap `TaskbarCompat` под указателем, который держит XAML
+(кисти/темы/ресурсы, зарегистрированные из модуля).
+
+Второй дефект, найденный в том же прогоне: `wnd_shutdown_begin pending_before = -3`.
+`WinEventHook_SignalDetachComplete` декрементировал счётчик после `store(0)` в конце
+предыдущего цикла → счётчик ушёл в минус → в следующем цикле `pending` оказался на 3 меньше
+реального, т.е. ждали меньше, чем detach'ей в полёте.
+
+Внесено (R5b):
+
+| # | Файл | Правка |
+|---|---|---|
+| R5b-1 | `GlassCompat.cpp` | `ScanStaleCallbacksBeforeFree` + guard для **ExplorerCompat / TaskbarCompat / UICompat**; событие `module_free_skipped` с `module/base/size/stale_procs/env` |
+| R5b-2 | `GlassCompat.cpp` | в `module_free` всех модулей и в `stale_scan` добавлены `size` (и `base` для `stale_scan`) — следующий AV-адрес из дампа можно будет отнести к конкретному модулю |
+| R5b-3 | `GlassCompat.cpp` | `ImageSizeUl()`, `KeepModulesEnvUl()`; `GLASS_ULTRACE_KEEP_MODULES=1` — **не выгружать ни один peer-модуль** (GlassCore/Explorer/Taskbar/UI/Wnd), A/B-бисект |
+| R5b-4 | `WndCompat/Tracker/WinEventHandler.cpp` | `SignalDetachComplete` через CAS: счётчик не уходит в минус, при «лишней» нотификации пишется `pending_underflow`; ожидание detach ограничено 3 с, результат в `pending_wait_ok` |
+
+Как читать:
+
+- `module_free_skipped` → модуль оставлен из-за живого указателя (`stale_procs>0`) или из-за `KEEP_MODULES`.
+- `pending_underflow` → были detach-нотификации без Register (гонка между циклами); больше не ломает подсчёт.
+- `pending_wait_ok=0` при `pending_waited>0` → detach не завершились за 3 с; остаток виден в `wnd_shutdown_end`.
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
