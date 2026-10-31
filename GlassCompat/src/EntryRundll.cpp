@@ -21,6 +21,8 @@
 #include <windows.h>
 #include <sddl.h>
 #include <string>
+#include <utility>
+#include <vector>
 
 #ifndef WM_DWMCOLORIZATIONCOLORCHANGED
 #define WM_DWMCOLORIZATIONCOLORCHANGED 0x0320
@@ -458,6 +460,222 @@ namespace
 #endif
     }
 
+    // ── R7 (H97): публикация гейта загрузки ─────────────────────────────────
+    //
+    // Файл читает DllMain каждого процесса (GlassCompat/DllMain.cpp, GateAllowsAttach).
+    // Смысл: если процесс «недоверенный», наш DLL не должна загружаться в него вовсе.
+    // Иначе user32 держит в нём указатель на GlassCompat_WinEventProc, снять ссылку
+    // снаружи нельзя, и после принудительного FreeLibrary процесс падает в чужом стеке
+    // (дамп Яндекс Музыки 35444: AV 0xC0000005 внутри выгруженного GlassCompat).
+    //
+    // Режимы (переменная окружения ХОСТА GLASS_ATTACH_GATE):
+    //   (нет) / deny — не грузимся в процессы из BlockList + AttachList=Forbidden
+    //   allow        — грузимся ТОЛЬКО в перечисленные (строгий режим)
+    //   0 / off      — гейт выключен (файл удаляется)
+    // Дополнительные исключения без правки реестра: GLASS_ATTACH_GATE_EXTRA="a.exe;b.exe".
+
+    std::wstring GateLowerCopy(const std::wstring& in)
+    {
+        std::wstring out = in;
+        if (!out.empty())
+            CharLowerBuffW(out.data(), static_cast<DWORD>(out.size()));
+        return out;
+    }
+
+    void GateAddName(std::wstring& body, const wchar_t* name)
+    {
+        if (!name || !*name)
+            return;
+        std::wstring lower = GateLowerCopy(name);
+        body += L"name=";
+        body += lower;
+        body += L'\n';
+    }
+
+    // Имена из реестрового BlockList (HKCU\...\GlassPlatform\BlockList, DWORD != 0).
+    void GateCollectRegistryBlockList(std::vector<std::wstring>& out)
+    {
+        HKEY hKey = nullptr;
+        if (RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                L"Software\\StanislavKa\\GlassPlatform\\BlockList",
+                0, KEY_READ, &hKey) != ERROR_SUCCESS)
+            return;
+
+        wchar_t name[256]{};
+        DWORD index = 0;
+        for (;; ++index)
+        {
+            DWORD nameSize = _countof(name);
+            DWORD type = 0;
+            DWORD value = 0;
+            DWORD valueSize = sizeof(value);
+            const LONG rc = RegEnumValueW(
+                hKey, index, name, &nameSize, nullptr, &type,
+                reinterpret_cast<BYTE*>(&value), &valueSize);
+            if (rc == ERROR_NO_MORE_ITEMS)
+                break;
+            if (rc == ERROR_SUCCESS && type == REG_DWORD && value != 0 && nameSize > 0)
+                out.emplace_back(name, nameSize);
+        }
+        RegCloseKey(hKey);
+    }
+
+    void WriteAttachGateFile() noexcept
+    {
+        wchar_t modeEnv[16]{};
+        const DWORD modeLen =
+            GetEnvironmentVariableW(L"GLASS_ATTACH_GATE", modeEnv, _countof(modeEnv));
+        const bool gateOff =
+            modeLen > 0 && (modeEnv[0] == L'0' || _wcsicmp(modeEnv, L"off") == 0);
+        const bool allowMode = modeLen > 0 && _wcsicmp(modeEnv, L"allow") == 0;
+
+        wchar_t localAppData[MAX_PATH]{};
+        if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, _countof(localAppData)) == 0)
+        {
+            DebugLog(DBG_WARNING, L"[GlassCompat][Host] attach-gate: no LOCALAPPDATA");
+            return;
+        }
+
+        wchar_t dir[MAX_PATH * 2]{};
+        if (swprintf_s(dir, L"%s\\GlassPlatform", localAppData) <= 0)
+            return;
+        (void)CreateDirectoryW(dir, nullptr);
+
+        wchar_t path[MAX_PATH * 2]{};
+        if (swprintf_s(path, L"%s\\attach-gate.txt", dir) <= 0)
+            return;
+
+        if (gateOff)
+        {
+            (void)DeleteFileW(path);
+            GlassUlTrace::Logf(
+                "H97", "EntryRundll.cpp:WriteAttachGateFile", "attach_gate_written",
+                "\"mode\":\"off\",\"names\":0,\"removed\":1");
+            return;
+        }
+
+        std::wstring body = L"v1\n";
+        body += allowMode ? L"mode=allow\n" : L"mode=deny\n";
+        unsigned count = 0;
+
+        // Хост и собственные инструменты грузят DLL всегда — иначе платформа
+        // не сможет ни стартовать, ни показать состояние процессов.
+        const wchar_t* const kAlwaysTrusted[] = {
+            L"rundll32.exe",
+            L"GlassPlatform.exe",
+            L"GlassSettings.exe",
+            L"LogViewer.exe",
+            L"explorer.exe",
+        };
+        const wchar_t* const kUiCompatHosts[] = {
+            L"shellexperiencehost.exe",
+            L"shellhost.exe",
+            L"startmenuexperiencehost.exe",
+            L"searchhost.exe",
+            L"searchapp.exe",
+        };
+
+        std::vector<std::wstring> names;
+        if (allowMode)
+        {
+            std::vector<std::pair<std::wstring, DWORD>> entries;
+            AttachList::GetEntries(entries);
+            for (const auto& [name, raw] : entries)
+            {
+                if (raw >= 1)
+                    names.push_back(name);
+            }
+            for (const wchar_t* n : kAlwaysTrusted)
+                names.emplace_back(n);
+            for (const wchar_t* n : kUiCompatHosts)
+                names.emplace_back(n);
+        }
+        else
+        {
+            for (std::size_t i = 0; i < ProcessBlockList::BuiltInCount(); ++i)
+            {
+                if (const wchar_t* n = ProcessBlockList::BuiltInAt(i))
+                    names.emplace_back(n);
+            }
+            GateCollectRegistryBlockList(names);
+
+            std::vector<std::pair<std::wstring, DWORD>> entries;
+            AttachList::GetEntries(entries);
+            for (const auto& [name, raw] : entries)
+            {
+                if (raw == 0) // Forbidden
+                    names.push_back(name);
+            }
+
+            wchar_t extra[1024]{};
+            if (GetEnvironmentVariableW(
+                    L"GLASS_ATTACH_GATE_EXTRA", extra, _countof(extra)) > 0)
+            {
+                std::wstring rest(extra);
+                size_t pos = 0;
+                while (pos <= rest.size())
+                {
+                    const size_t sep = rest.find(L';', pos);
+                    std::wstring one = rest.substr(
+                        pos, sep == std::wstring::npos ? std::wstring::npos : sep - pos);
+                    if (!one.empty())
+                        names.push_back(one);
+                    if (sep == std::wstring::npos)
+                        break;
+                    pos = sep + 1;
+                }
+            }
+        }
+
+        for (const std::wstring& name : names)
+        {
+            if (name.empty())
+                continue;
+            // В deny-режиме исключаем свои процессы даже если они попали в BlockList.
+            if (!allowMode)
+            {
+                bool exempt = false;
+                for (const wchar_t* trusted : kAlwaysTrusted)
+                {
+                    if (_wcsicmp(name.c_str(), trusted) == 0)
+                    {
+                        exempt = true;
+                        break;
+                    }
+                }
+                if (exempt)
+                    continue;
+            }
+            GateAddName(body, name.c_str());
+            ++count;
+        }
+
+        HANDLE hFile = CreateFileW(
+            path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hFile == INVALID_HANDLE_VALUE)
+        {
+            DebugLog(DBG_WARNING,
+                L"[GlassCompat][Host] attach-gate: create failed GLE=%u", GetLastError());
+            return;
+        }
+        DWORD written = 0;
+        const DWORD bytes = static_cast<DWORD>(body.size() * sizeof(wchar_t));
+        const BOOL ok = WriteFile(hFile, body.c_str(), bytes, &written, nullptr);
+        CloseHandle(hFile);
+
+        DebugLog(DBG_IMPORTANT,
+            L"[GlassCompat][Host] attach-gate: mode=%s names=%u path=%s ok=%d",
+            allowMode ? L"allow" : L"deny", count, path, ok ? 1 : 0);
+        GlassUlTrace::Logf(
+            "H97", "EntryRundll.cpp:WriteAttachGateFile", "attach_gate_written",
+            "\"mode\":\"%s\",\"names\":%u,\"ok\":%d",
+            allowMode ? "allow" : "deny",
+            count,
+            ok ? 1 : 0);
+    }
+
     static void ClearHostPid() noexcept
     {
         if (!s_hostPidMapping)
@@ -812,6 +1030,11 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
         reinterpret_cast<LPCWSTR>(&GlassCompat_WinEventProc),
         &hSelf);
+
+    // R7 (H97): публикуем гейт загрузки ДО установки хуков — DllMain читает этот файл
+    // при каждом INCONTEXT-attach в любом процессе, в том числе на стартовом пинге.
+    AttachList::Initialize();
+    WriteAttachGateFile();
 
     // Устанавливаем глобальный INCONTEXT WinEvent-хук для всех процессов.
     // Диапазон CREATE..SHOW: тултип (tooltips_class32) после скрытия получает WM_NCDESTROY

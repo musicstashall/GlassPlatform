@@ -1809,20 +1809,26 @@ namespace GlassCompat::CoreWindowHostInject
         CloseHandle(snap);
     }
 
-    // Добивание остатка снаружи — тот же механизм, что и кнопка «Force unload»
-    // (CreateRemoteThread(FreeLibrary)). Условие безопасности: в процессе остался РОВНО
-    // compat (core/wnd/explorer/taskbar/ui уже выгружены ⇒ наш shutdown завершён,
-    // потоков внутри GlassCompat нет).
-    // R6 (H96): «слепое» CreateRemoteThread(FreeLibrary) в сторонних процессах — источник
-    // use-after-unmap. Прогон 6: pid 35444 (Яндекс Музыка.exe, живёт с 27.10) добит в
-    // 10:10:44 и 11:33:35 при mask_before=1 (наш shutdown в нём не выполнялся, WndCompat/
-    // GlassCore не грузились ⇒ модуль там только от INCONTEXT-инжекта user32). В 11:59:36
-    // процесс упал AV 0xC0000005 внутри уже выгруженного GlassCompat (RVA 0xBB10B, запись
-    // в address 0x8 — «this==null» у освобождённого колбэка); в стеке потока — 6 копий
-    // этого адреса. Т.е. OS-указатель на наш WinEventProc пережил FreeLibrary.
-    // Порядок: (1) graceful TryRemoteRequestShutdown; (2) raw FreeLibrary только если наш
-    // shutdown подтверждён (named mutex ack) либо в процессе нет видимых окон; иначе deny.
-    // Kill-switch: GLASS_ULTRACE_SWEEP_ALL=1 → прежнее поведение (добивать всех).
+    // Добивание остатка снаружи: остался РОВНО compat (core/wnd/explorer/taskbar/ui уже
+    // выгружены ⇒ наш shutdown завершён).
+    //
+    // R6 (H96): «слепое» CreateRemoteThread(FreeLibrary) по чужим процессам — источник
+    // use-after-unmap. R7 (H97): raw FreeLibrary по умолчанию ВЫКЛЮЧЕН совсем.
+    //
+    // Почему: после нашего FLAET в таких процессах остаётся ровно одна OS-ссылка — это
+    // user32, который держит INCONTEXT-hook DLL и указатель на GlassCompat_WinEventProc.
+    // Снять такую ссылку снаружи нельзя: FreeLibrary просто размапит модуль, а user32
+    // продолжит звать наш код. Итог — дамп `Яндекс Музыка.exe.35444`: AV 0xC0000005
+    // записью по 0x8 внутри уже выгруженного GlassCompat (RVA 0xBB10B), стек вызова —
+    // user32!… 6 копий адреса в стеке потока. Причём в этом процессе наш shutdown
+    // выполнялся штатно (лог 6: attach 11:31:17 → ExecuteShutdown 11:33:21 →
+    // freeself rc=2 expected_rc_after=1), т.е. виноват не «лишний refcount», а именно
+    // принудительное FreeLibrary.
+    //
+    // Порядок сейчас: (1) graceful shutdown в процессе; (2) «пинок» его окон/потоков —
+    // процесс сам обработает снятие хука и ОС выгрузит DLL; (3) ожидание до 3 с;
+    // (4) если не ушёл — оставляем и пишем `left_by_design` (лучше остаток, чем AV).
+    // Прежнее поведение для A/B: GLASS_ULTRACE_SWEEP_ALL=1.
     bool SweepAllEnvUl() noexcept
     {
         wchar_t v[8]{};
@@ -1859,6 +1865,46 @@ namespace GlassCompat::CoreWindowHostInject
         return ctx.second;
     }
 
+    // Невредные сообщения во все окна и все потоки процесса: поток с очередью обработает
+    // отложенное снятие INCONTEXT-хука, после чего ОС сама снимет ссылку и выгрузит DLL.
+    void NudgeProcessThreadsUl(DWORD pid) noexcept
+    {
+        struct NudgeCtx
+        {
+            DWORD pid;
+            unsigned posted;
+        } ctx{ pid, 0 };
+
+        (void)EnumWindows(
+            [](HWND hwnd, LPARAM lp) -> BOOL
+            {
+                auto* c = reinterpret_cast<NudgeCtx*>(lp);
+                DWORD wpid = 0;
+                (void)GetWindowThreadProcessId(hwnd, &wpid);
+                if (wpid == c->pid && PostMessageW(hwnd, WM_NULL, 0, 0))
+                    ++c->posted;
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&ctx));
+
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snap == INVALID_HANDLE_VALUE)
+            return;
+        THREADENTRY32 te{};
+        te.dwSize = sizeof(te);
+        if (Thread32First(snap, &te))
+        {
+            do
+            {
+                if (te.th32OwnerProcessID != pid)
+                    continue;
+                if (PostThreadMessageW(te.th32ThreadID, WM_NULL, 0, 0))
+                    ++ctx.posted;
+            } while (Thread32Next(snap, &te));
+        }
+        CloseHandle(snap);
+    }
+
     unsigned SweepCompatLeftoversOnce(
         const std::vector<DWORD>& candidates,
         const std::unordered_set<DWORD>& alivePids,
@@ -1868,6 +1914,8 @@ namespace GlassCompat::CoreWindowHostInject
     {
         unsigned unloaded = 0;
         const bool sweepAll = SweepAllEnvUl();
+        constexpr ULONGLONG kWaitMs = 3000;
+
         for (const DWORD pid : candidates)
         {
             const unsigned before = GlassUlTrace::RemoteModuleMask(pid);
@@ -1881,50 +1929,68 @@ namespace GlassCompat::CoreWindowHostInject
 
             const bool ack = ShutdownAckUl(pid);
             const unsigned windows = VisibleWindowCountUl(pid);
-            // mode: 0 = raw FreeLibrary (как раньше), 1 = сначала graceful, 2 = не трогать.
-            int mode = (sweepAll || ack) ? 0 : 1;
+
+            // mode: 0 = graceful + пинок, 1 = raw FreeLibrary (только SWEEP_ALL), 2 = оставить.
+            int mode = 0;
+            int res = -1;
             bool gracefulDone = false;
-            if (mode == 1)
+            ULONGLONG waitedMs = 0;
+            ULONGLONG tick0 = GetTickCount64();
+
+            if (sweepAll)
             {
-                gracefulDone = TryRemoteRequestShutdown(pid)
-                    && GlassUlTrace::RemoteModuleMask(pid) == 0u;
-                if (!gracefulDone)
-                    mode = (windows == 0) ? 0 : 2;
+                mode = 1;
+                res = static_cast<int>(Shared::ForceUnloadGlassModules::ForceUnload(pid));
             }
+            else
+            {
+                gracefulDone = TryRemoteRequestShutdown(pid);
+                if ((GlassUlTrace::RemoteModuleMask(pid) & 1u) == 0)
+                {
+                    res = 0;
+                }
+                else
+                {
+                    tick0 = GetTickCount64();
+                    while ((GlassUlTrace::RemoteModuleMask(pid) & 1u) != 0
+                        && GetTickCount64() - tick0 < kWaitMs)
+                    {
+                        NudgeProcessThreadsUl(pid);
+                        Sleep(200);
+                    }
+                    waitedMs = GetTickCount64() - tick0;
+                    if ((GlassUlTrace::RemoteModuleMask(pid) & 1u) == 0)
+                    {
+                        res = 0;
+                        ++outGraceful;
+                    }
+                    else
+                    {
+                        mode = 2;
+                        res = -2;
+                        ++outDenied;
+                    }
+                }
+            }
+
+            const unsigned after = GlassUlTrace::RemoteModuleMask(pid);
+            if (after == 0u)
+                ++unloaded;
+
             // #region agent log
-            // GLASS-ULTRACE
             GlassUlTrace::Logf(
-                "H96",
+                "H97",
                 "CoreWindowHostInject.cpp:SweepCompatLeftovers",
                 "cw_sweep_guard",
                 "\"target_pid\":%lu,\"ack\":%d,\"windows\":%u,\"mode\":%d,\"sweep_all\":%d,"
-                "\"graceful\":%d",
+                "\"graceful\":%d,\"waited_ms\":%llu",
                 static_cast<unsigned long>(pid),
                 ack ? 1 : 0,
                 windows,
                 mode,
                 sweepAll ? 1 : 0,
-                gracefulDone ? 1 : 0);
-            // #endregion
-            int res = -1;
-            if (mode == 2)
-            {
-                ++outDenied;
-                res = -2;
-            }
-            unsigned after = GlassUlTrace::RemoteModuleMask(pid);
-            if (mode != 2)
-            {
-                if (gracefulDone && after == 0u)
-                    ++outGraceful;
-                else
-                    res = static_cast<int>(
-                        Shared::ForceUnloadGlassModules::ForceUnload(pid));
-                after = GlassUlTrace::RemoteModuleMask(pid);
-            }
-            if (after == 0u)
-                ++unloaded;
-            // #region agent log
+                gracefulDone ? 1 : 0,
+                waitedMs);
             char leaf[96]{};
             {
                 HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
@@ -1941,7 +2007,7 @@ namespace GlassCompat::CoreWindowHostInject
                 }
             }
             GlassUlTrace::Logf(
-                "H96",
+                "H97",
                 "CoreWindowHostInject.cpp:SweepCompatLeftovers",
                 "cw_sweep_pid",
                 "\"target_pid\":%lu,\"target_exe\":\"%s\",\"result\":%d,\"mask_before\":%u,"

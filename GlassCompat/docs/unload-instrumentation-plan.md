@@ -432,6 +432,62 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 - `ack=0` при `mask_before=1` в любом новом `cw_sweep_*` — признак «модуль в процессе от инжекта,
   shutdown не шёл»; такие pid нельзя выгружать ничем, кроме graceful.
 
+### R7 — «исключение из доверенных» как единственное безопасное лечение (H97)
+
+**Вопрос:** можно ли убрать и крэш, и остаток DLL, исключив процесс из доверенных?
+
+**Ответ по данным:** да — но исключение должно запрещать **загрузку**, а не инициализацию.
+
+Разбор дампа `Яндекс Музыка.exe.35444` + лога прогона 6 показал механику:
+
+| Факт | Вывод |
+|---|---|
+| AV `0xC0000005`, `Rip = GlassCompat+0xBB10B`, модуль в `UnloadedModuleList`, запись по адресу `0x8` | исполнялся уже выгруженный код; «this == null» — колбэк без объекта |
+| стек потока: `user32+0x47c30` → `win32u` → наш адрес (6 копий в стеке) | вызывает **user32**, т.е. держит указатель на `GlassCompat_WinEventProc` |
+| в процессе 35444 наш `ExecuteShutdown` **выполнялся** (attach 11:31:17 → shutdown 11:33:21 → `freeself rc=2 expected_rc_after=1`) | это не «лишний refcount» и не «не было shutdown»: остаётся одна OS-ссылка от INCONTEXT-хука |
+| эту ссылку снимал sweep: `fu_try` 10:10:44 и 11:33:35, `mask_before=1 → mask_after=0` | `CreateRemoteThread(FreeLibrary)` размапил модуль, а user32 продолжал на него указывать |
+
+Ссылку INCONTEXT-хука снимает только сама ОС — когда процесс обработает снятие хука.
+Снаружи её снять нельзя ничем: любой `FreeLibrary` извне = use-after-unmap. Значит:
+
+* `path=2/3` (BlockList/Forbidden) сегодня **не** исключает загрузку — DLL всё равно грузится
+  хуком, живёт с OS-ссылкой и либо остаётся, либо добивается sweep'ом с риском AV;
+* «не инициализироваться» бесполезно: user32 уже держит адрес нашего кода.
+
+Поэтому сделано (R7):
+
+| # | Файл | Правка |
+|---|---|---|
+| R7-1 | `GlassCompat/DllMain.cpp` | **гейт загрузки**: на `DLL_PROCESS_ATTACH` читается `%LOCALAPPDATA%\GlassPlatform\attach-gate.txt` (только kernel32, без реестра и CRT-аллокаций). Режим `allow` — грузимся только в перечисленные, `deny` — не грузимся в перечисленные, `off`/нет файла — как раньше. При отказе `DllMain` возвращает `FALSE`, модуль остаётся незагруженным, события `attach_gate` / `dll_attach_denied` |
+| R7-2 | `GlassCompat/src/EntryRundll.cpp` | хост пишет гейт **до установки хуков**: имена из `ProcessBlockList` (встроенный + реестр), `AttachList`=Forbidden и `GLASS_ATTACH_GATE_EXTRA` (через `;`); свои процессы (`rundll32`, `GlassPlatform`, `GlassSettings`, `LogViewer`, `explorer`) в deny-режиме не блокируются; событие `attach_gate_written` |
+| R7-3 | `GlassCompat/Include/AttachList.h`, `src/AttachList.cpp` | `GetEntries()` — хост получает реестровые записи (имя → сырое значение) |
+| R7-4 | `GlassCompat/src/CoreWindowHostInject.cpp` | sweep **больше не делает raw `FreeLibrary`** по умолчанию: graceful → «пинок» окон/потоков (`NudgeProcessThreadsUl`) → ожидание до 3 с → если не ушёл, оставляем (`mode=2`, `result=-2`). Прежнее поведение — `GLASS_ULTRACE_SWEEP_ALL=1` |
+
+Управление (переменные окружения **хоста**):
+
+| Переменная | Значение |
+|---|---|
+| `GLASS_ATTACH_GATE` | нет/`deny` — исключаем только BlockList+Forbidden; `allow` — строгий режим «только доверенные»; `0`/`off` — гейт выключен |
+| `GLASS_ATTACH_GATE_EXTRA` | `"Яндекс Музыка.exe;Telegram.exe"` — исключения без правки реестра |
+| `GLASS_ULTRACE_SWEEP_ALL` | `1` — вернуть прежний sweep с raw `FreeLibrary` (A/B) |
+
+Эквивалент через реестр (постоянно): `HKCU\Software\StanislavKa\GlassPlatform\AttachList`
+→ значение `Яндекс Музыка.exe` = `0` (Forbidden), либо `...\BlockList` → `Яндекс Музыка.exe` = `1`.
+
+Цена режимов:
+
+| Режим | Крэши в чужих процессах | Остатки после Stop (S8) | Кастомные попапы/тултипы |
+|---|---|---|---|
+| `deny` (по умолчанию) | нет (raw free выключен) | возможны у приложений вне списка исключений | везде как раньше |
+| `allow` | нет | практически нет: грузимся только туда, что сами контролируем | только в доверенных процессах |
+| `0` | риск возвращается при `SWEEP_ALL=1` | минимум | везде |
+
+Как читать:
+
+- `attach_gate allow=0` + `dll_attach_denied` — процесс исключён, DLL в нём не будет вовсе.
+- `attach_gate mode="missing"` — гейт-файла нет (платформа не стартовала): поведение прежнее.
+- `cw_sweep_guard mode=2` / `cw_sweep_pid result=-2` — процесс оставлен сознательно, причина в `ack`/`windows`/`waited_ms`.
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
@@ -471,9 +527,9 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 по проектам — сначала GlassShared. После сборки проверять время файлов
 `Build\x64\Debug\{GlassCompat,WndCompat}.dll`.
 
-**Текущий цикл (R6):** менялись только `GlassCompat/src/CoreWindowHostInject.cpp` и
-`GlassCompat/src/GlassCompat.cpp` → собирать **GlassCompat**. `GlassShared`, `WndCompat`,
-`GlassSettings` не менялись; пересборка R5b (WndCompat) остаётся в силе, если она ещё не собрана.
+**Текущий цикл (R7):** менялись только файлы проекта **GlassCompat**
+(`DllMain.cpp`, `EntryRundll.cpp`, `CoreWindowHostInject.cpp`, `GlassCompat.cpp`, `AttachList.*`)
+→ собирать **GlassCompat**. `GlassShared`, `WndCompat`, `GlassSettings` не менялись.
 
 ## 6. Протокол тестирования
 
