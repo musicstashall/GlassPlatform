@@ -460,3 +460,16 @@ __declspec(dllexport) int WINAPI GlassSettings_RequestPlatformStop(int arch, int
   `std::call_once`: страховка `path=4` больше не «съедает» право записать `path=2/3`.
 * **Меньше шума.** `0x40010006`/`0x4001000A`/`0x406D1388` (OutputDebugString, имя потока)
   не считаются падениями в `CrashGuard`.
+
+### 7.4. Правки после прогона 15 (R12d)
+
+* **Оба пути стопа подтверждены логами.** Планировщик: `host_close_ping pings=4` → `StopEvent`
+  у всех → `dll_detach` по одному (36.8…47.7 с). Меню: `stop_request reason=user`,
+  `stop_wake_pid` 8/8, `freeself_flaet path=1 rc=2`, остаток `left=2` дожат позже.
+* **Отвергнутые не зависят от жизни карты.** `InjectRuntimeMonitor` держит собственный кэш
+  отказов (`Kind::Rejected*`): запись снимается, только когда процесс завершился. Раньше
+  отказ показывался ровно столько, сколько живёт общая карта хоста.
+* **Диагностика вместо догадок.** Экспорт `GlassSettings_LogMonitorSummary` пишет
+  `monitor_summary`: слоты и отвергнутые слоты в `map.x64`/`map.x86` (нативно), то же после
+  разбора в C# и то, что реально попало в список UI.
+

@@ -735,6 +735,49 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 | Лог без ложных крашей | `crash_seen` только с реальными кодами (`0xC0000005`, `0xC0000409`, …) |
 | Слот пишется | `deny_slot ... written=1` рядом с `dll_attach_denied` |
 
+### R12d — прогон 15: выгрузка подтверждена, отвергнутые теряются в UI
+
+**Прогон 15 (`debug-8e6259-15.log`, 981 строка, ~145 с).** Два стопа подряд: планировщик в
+34.6 с и меню рабочего стола в 116.7 с. Пользователь подтвердил: отображение выгрузки
+восстановлено (точки гаснут, строки не исчезают пачкой).
+
+| Что проверено | Данные |
+|---|---|
+| Стоп из планировщика (34.6 с) | `host_close_ping pings=4`, `hostshutdown_done` у всех 8, `dll_detach` у всех: 36.8 (`Telegram`), 36.9 (`ShellHost`), 37.1 (`Happ`), 40.0 (`SearchHost`), 40.1 (`StartMenuExperienceHost`), 41.5 (`Explorer`), 47.7 (`mmc`) — выгрузка по одному, `drain_end rounds=8 inflight=0` |
+| Стоп из меню (116.7 с) | `stop_request reason=user`, `StopEvent` у 9 процессов, `stop_wake_pid` (8/8), `freeself_flaet path=1 rc=2`, `dll_detach` у `Explorer` 143.0 и `explorer` 145.1; `cw_residual_end left=2` → дожато позже |
+| Слот отказа **пишется** | `deny_slot written=1` трижды: `GlassSettings.exe` 2.9 с и 87.2 с (`gate=builtin`), `DataExchangeHost.exe` 95.3 с (`gate=deny reason=file`) |
+| Ложных крашей больше нет | `crash_seen` только `0xE06D7363` (40) и `0xE0434352` (1) — C++/CLR-исключения; `0x40010006/0x4001000A` не пишутся |
+| Отвергнутые в списке | **отсутствуют** |
+
+Что известно точно: запись живёт в общей карте, а карта принадлежит хосту. Пользователь
+смотрит список по итогам Stop — к этому моменту хост уже закрыл карту
+(`CloseHostResources`), и снимок строится только по Toolhelp, без слотов. То есть отказанный
+процесс виден максимум пока жив хост, и «памяти» об отказе у монитора нет. Виден ли он был
+при работающей платформе, по логу прогона 15 установить нельзя: строк `monitor_summary`
+тогда ещё не было. Поэтому R12d делает сразу две вещи — вводит эту диагностику и убирает
+зависимость «отказ виден, только пока жива карта».
+
+Правки R12d:
+
+| # | Файл | Правка |
+|---|---|---|
+| R12d-1 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | кэш `_rejectedCache`: слоты `Kind::Rejected*` запоминаются вместе с PID/exe/arch и живут дольше карты; запись снимается только когда процесс завершился |
+| R12d-2 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | `AddRejectedCache()` добавляет отвергнутых в снимок — и при живом хосте, и в sweep, и в cheap-idle после Stop |
+| R12d-3 | `GlassSettings/Native/InjectProcessMapNative.cpp`, `NativeHost.h` | экспорт `GlassSettings_LogMonitorSummary` → строка `monitor_summary` в общий лог |
+| R12d-4 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | `LogMonitorSummary()` пишет счётчики: слоты и отвергнутые слоты, биты, размер списка и отвергнутые строки; нативно рядом — что лежит в `map.x64`/`map.x86` |
+
+`monitor_summary` читается так:
+
+| Поле | Смысл |
+|---|---|
+| `map_x64` / `map_x86` | сколько слотов реально лежит в карте (нативный отсчёт, без C#) |
+| `map_x64_rejected` / `map_x86_rejected` | сколько из них `Rejected*` — так видно, доехал ли слот отказа |
+| `slot_count` / `slot_rejected` | что прочитала и разобрала C#-часть |
+| `entry_count` / `entry_rejected` | что попало в список для UI |
+
+Если `map_*_rejected > 0`, а `entry_rejected == 0` — ошибка в сборке списка; если
+`map_*_rejected == 0` при `deny_slot written=1` — слот не доезжает до карты (права/имя секции).
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
@@ -774,11 +817,10 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 по проектам — сначала GlassShared. После сборки проверять время файлов
 `Build\x64\Debug\{GlassCompat,WndCompat}.dll`.
 
-**Текущий цикл (R12c):** менялись `GlassCompat/DllMain.cpp`,
-`GlassCompat/src/{GlassCompat,CrashGuard}.cpp` и C# `GlassSettings/Services/InjectRuntimeMonitor.cs`
-→ собирать **GlassCompat** (x64 **и** x86 — менялись `DllMain.cpp`/`GlassCompat.cpp`) и
-**GlassSettings** (UI). `GlassShared` не менялся, но `GlassCompat` линкует его статически —
-при полной сборке solution порядок обычный: `GlassShared → GlassCompat → GlassSettings.Native`.
+**Текущий цикл (R12d):** менялись C# `GlassSettings/Services/{InjectRuntimeMonitor,NativeHostInterop.InjectMap}.cs`
+и нативный `GlassSettings/Native/{InjectProcessMapNative.cpp,NativeHost.h}` → собирать
+**GlassSettings.Native** (новый экспорт) и **GlassSettings** (UI). `GlassShared`/`GlassCompat`
+не менялись.
 
 ## 6. Протокол тестирования
 

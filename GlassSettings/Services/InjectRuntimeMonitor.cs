@@ -131,6 +131,17 @@ public sealed class InjectRuntimeMonitor
     /// <summary>Пустые residual-сканы подряд; не рвём sweep на первом miss (дыра map→scan).</summary>
     private int _residualEmptyStreak;
 
+    /// <summary>
+    /// Отвергнутые (Denied/BlockList/Forbidden) по PID. Карта живёт, пока жив хост, а отказ
+    /// остаётся фактом и после Stop: держим записи сами, пока процесс не завершится, иначе
+    /// «отвергнутые» исчезают из списка ровно в тот момент, когда пользователь смотрит итог.
+    /// </summary>
+    private readonly Dictionary<uint, InjectRuntimeEntry> _rejectedCache = [];
+
+    /// <summary>Троттлинг диагностики `monitor_summary` (не чаще раза в 15 опросов).</summary>
+    private int _pollSeq;
+    private int _lastLoggedEntryRejected = -1;
+
     public event Action<InjectRuntimeSnapshot>? SnapshotChanged;
 
     public InjectRuntimeSnapshot Latest
@@ -363,6 +374,9 @@ public sealed class InjectRuntimeMonitor
         if (!mapOk)
             slots = Array.Empty<NativeHostInterop.InjectMapSlot>();
         slots = PruneDeadInjectMapSlots(slots);
+        // Отказы в загрузке: слот с Kind=Rejected* живёт только пока жив хост. Держим их у
+        // себя, чтобы «отвергнутые» оставались в списке и после Stop (пока процесс жив).
+        UpdateRejectedCache(mapOk ? slots : null, selfPid);
 
         bool residualSweep;
         bool runColdProbe;
@@ -425,7 +439,9 @@ public sealed class InjectRuntimeMonitor
         // планировщика карта закрывается раньше, чем UI успевает показать выгорание точек.
         // Поэтому отдаём не пустоту, а остаток прошлого снимка, который догорает по тикам.
         if (!platformRunning && !residualSweep && !runColdProbe)
-            return WithFade(new InjectRuntimeSnapshot { PlatformRunning = false }, fadeActive: true);
+            return WithFade(
+                AddRejectedCache(new InjectRuntimeSnapshot { PlatformRunning = false }),
+                fadeActive: true);
 
         // Дыра: HostPublish CW off (H47) + map Close до !mutex → slots пусты при ещё «running»
         // или сразу после stop. Bridge PID + CW-host exe дополняют light-scan.
@@ -516,10 +532,144 @@ public sealed class InjectRuntimeMonitor
         _ = NativeHostInterop.RefreshInjectResidualSticky(GlassPlatformArch.X64);
         _ = NativeHostInterop.RefreshInjectResidualSticky(GlassPlatformArch.X86);
 
-        var merged = Merge(platformRunning, residualSweep, slots, scan, selfPid);
+        var merged = AddRejectedCache(Merge(platformRunning, residualSweep, slots, scan, selfPid));
+        LogMonitorSummary(platformRunning, slots, merged);
         // Выгорание точек включаем только когда платформа уже останавливается: при живой
         // платформе строка исчезает потому, что процесс закрылся сам, — там гасить нечего.
         return WithFade(merged, fadeActive: !platformRunning || residualSweep);
+    }
+
+    /// <summary>
+    /// Обновить кэш отвергнутых по прочитанной карте и вычистить записи завершившихся
+    /// процессов. Вызывается на каждом опросе, даже когда карты уже нет: тогда только
+    /// чистим (новых отказов без карты не бывает).
+    /// </summary>
+    private void UpdateRejectedCache(NativeHostInterop.InjectMapSlot[]? slots, uint selfPid)
+    {
+        List<uint> known;
+        lock (_gate)
+        {
+            if (slots is not null)
+            {
+                foreach (var s in slots)
+                {
+                    if (s.Pid == 0)
+                        continue;
+                    if (s.Kind is not (NativeHostInterop.InjectKind.RejectedBlockList
+                        or NativeHostInterop.InjectKind.RejectedForbidden))
+                        continue;
+                    _rejectedCache[s.Pid] = new InjectRuntimeEntry
+                    {
+                        Pid = s.Pid,
+                        ExeName = s.ExeName,
+                        Beacon = InjectRuntimeBeacon.Rejected,
+                        ModuleBits = 0,
+                        ModulesText = FormatModules(0),
+                        Path = s.Path,
+                        Arch = s.Arch,
+                        IsToolProcess = IsGlassSettingsProcess(s.Pid, s.ExeName, selfPid)
+                            || IsGlassPlatformHostPid(s.Pid),
+                    };
+                }
+            }
+
+            known = _rejectedCache.Count == 0 ? new List<uint>() : _rejectedCache.Keys.ToList();
+        }
+
+        // Проверка живости — вне блокировки: OpenProcess/Wait не должны ждать UI-поток.
+        List<uint>? dead = null;
+        foreach (var pid in known)
+        {
+            if (!IsProcessStillAlive(pid))
+                (dead ??= new List<uint>()).Add(pid);
+        }
+        if (dead is not null)
+        {
+            lock (_gate)
+            {
+                foreach (var pid in dead)
+                    _rejectedCache.Remove(pid);
+            }
+        }
+    }
+
+    /// <summary>Процесс жив. Не смогли открыть — считаем живым (не теряем запись из-за ACL).</summary>
+    private static bool IsProcessStillAlive(uint pid)
+    {
+        const int errorInvalidParameter = 87;
+        const uint waitObject0 = 0;
+        var h = OpenProcess(0x1000 | 0x100000 /* QUERY_LIMITED_INFORMATION | SYNCHRONIZE */, false, pid);
+        if (h == IntPtr.Zero)
+            return Marshal.GetLastWin32Error() != errorInvalidParameter;
+        try
+        {
+            return WaitForSingleObject(h, 0) != waitObject0;
+        }
+        finally
+        {
+            CloseHandle(h);
+        }
+    }
+
+    /// <summary>
+    /// Добавить в снимок отвергнутые, которые уже выпали из карты (платформа остановлена),
+    /// но чьи процессы живы. Без этого после Stop список показывает только остатки DLL —
+    /// «отвергнутых» в нём нет, хотя отказ был.
+    /// </summary>
+    private InjectRuntimeSnapshot AddRejectedCache(InjectRuntimeSnapshot snapshot)
+    {
+        InjectRuntimeEntry[] cached;
+        lock (_gate)
+            cached = _rejectedCache.Count == 0
+                ? Array.Empty<InjectRuntimeEntry>()
+                : _rejectedCache.Values.ToArray();
+        if (cached.Length == 0)
+            return snapshot;
+
+        var present = new HashSet<uint>(snapshot.Entries.Select(static e => e.Pid));
+        List<InjectRuntimeEntry>? list = null;
+        foreach (var e in cached)
+        {
+            if (present.Contains(e.Pid))
+                continue;
+            list ??= snapshot.Entries.ToList();
+            list.Add(e);
+        }
+
+        return list is null ? snapshot : Build(list, snapshot.PlatformRunning);
+    }
+
+    /// <summary>Диагностика R12d: что видит нативная карта и что дошло до списка UI.</summary>
+    private void LogMonitorSummary(
+        bool platformRunning,
+        NativeHostInterop.InjectMapSlot[] slots,
+        InjectRuntimeSnapshot snapshot)
+    {
+        var slotRejected = 0;
+        var slotBitsZero = 0;
+        foreach (var s in slots)
+        {
+            if (s.Kind is NativeHostInterop.InjectKind.RejectedBlockList
+                or NativeHostInterop.InjectKind.RejectedForbidden)
+                ++slotRejected;
+            if (s.ModuleBits == 0)
+                ++slotBitsZero;
+        }
+
+        var entryRejected = snapshot.Entries.Count(static e => e.Beacon == InjectRuntimeBeacon.Rejected);
+        var seq = Interlocked.Increment(ref _pollSeq);
+        // Пишем всегда, когда есть отвергнутые (это и есть предмет проверки), иначе — редко.
+        if (slotRejected == 0 && entryRejected == 0 && _lastLoggedEntryRejected == 0 && seq % 15 != 0)
+            return;
+        _lastLoggedEntryRejected = entryRejected;
+
+        NativeHostInterop.LogMonitorSummary(
+            platformRunning,
+            (uint)slots.Length,
+            (uint)slotRejected,
+            (uint)slotBitsZero,
+            (uint)snapshot.Entries.Count,
+            (uint)entryRejected);
     }
 
     /// <summary>Состояние догорающей строки: сколько ещё битов и сколько тиков осталось.</summary>

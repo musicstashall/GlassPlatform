@@ -591,6 +591,57 @@ extern "C"
         return GlassSettings_TryReadInjectMapSlotsForArch(0, outSlots, maxSlots, outCount);
     }
 
+    /// R12d: доказательство вместо догадок. Пишем в общий лог то, что лежит в карте
+    /// (нативно) и то, что дошло до списка UI (C#). Если `map_x64_rejected > 0`, а
+    /// `entry_rejected == 0` — слот есть, но теряется при разборе/сборке списка.
+    __declspec(dllexport) void WINAPI GlassSettings_LogMonitorSummary(
+        DWORD platformRunning,
+        DWORD slotCount,
+        DWORD slotRejected,
+        DWORD slotBitsZero,
+        DWORD entryCount,
+        DWORD entryRejected) noexcept
+    {
+        auto countMap = [](const wchar_t* name, DWORD& total, DWORD& rejected) noexcept
+        {
+            static Shared::InjectProcessMap::Slot slots[Shared::InjectProcessMap::kSlotCount];
+            DWORD n = 0;
+            if (!Shared::InjectProcessMap::TryReadSlotsFromMapping(
+                    name, slots, Shared::InjectProcessMap::kSlotCount, &n))
+                return;
+            for (DWORD i = 0; i < n; ++i)
+            {
+                ++total;
+                const auto kind = slots[i].kind;
+                if (kind == Shared::InjectProcessMap::Kind::RejectedBlockList ||
+                    kind == Shared::InjectProcessMap::Kind::RejectedForbidden)
+                    ++rejected;
+            }
+        };
+
+        DWORD x64Total = 0, x64Rejected = 0, x86Total = 0, x86Rejected = 0;
+        countMap(Shared::InjectProcessMap::kMappingNameX64, x64Total, x64Rejected);
+        countMap(Shared::InjectProcessMap::kMappingNameX86, x86Total, x86Rejected);
+
+        GlassUlTrace::Logf(
+            "H103",
+            "InjectProcessMapNative.cpp:GlassSettings_LogMonitorSummary",
+            "monitor_summary",
+            "\"running\":%lu,\"slot_count\":%lu,\"slot_rejected\":%lu,\"slot_bits0\":%lu,"
+            "\"entry_count\":%lu,\"entry_rejected\":%lu,"
+            "\"map_x64\":%lu,\"map_x64_rejected\":%lu,\"map_x86\":%lu,\"map_x86_rejected\":%lu",
+            static_cast<unsigned long>(platformRunning),
+            static_cast<unsigned long>(slotCount),
+            static_cast<unsigned long>(slotRejected),
+            static_cast<unsigned long>(slotBitsZero),
+            static_cast<unsigned long>(entryCount),
+            static_cast<unsigned long>(entryRejected),
+            static_cast<unsigned long>(x64Total),
+            static_cast<unsigned long>(x64Rejected),
+            static_cast<unsigned long>(x86Total),
+            static_cast<unsigned long>(x86Rejected));
+    }
+
     /// arch: 0 = x64 (+ legacy), 1 = x86. Слот мёртвого PID после exit без FreeSelf.
     __declspec(dllexport) BOOL WINAPI GlassSettings_ClearInjectMapPidForArch(
         DWORD arch,
