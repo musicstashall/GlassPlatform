@@ -859,6 +859,7 @@ user32 загрузить Glass, получает отказ, и каждый о
 | R12i-1 | `GlassCompat/DllMain.cpp` | проверка кэша отказа (`OpenMutexW` по `GlassCompatGateDeny_<pid>`) вынесена **до** `dll_attach`; при попадании в кэш пишется один слот и сразу `return FALSE` — ни `dll_attach`, ни `dll_detach` для этой попытки нет |
 | R12i-2 | `GlassCompat/DllMain.cpp` | слот отказа за процесс пишется **один раз** (маркер `GlassCompatGateSlot_<pid>`); `deny_slot` из источника «было 1878, стало ≈ число процессов» |
 | R12i-3 | `GlassCompat/DllMain.cpp` | `dll_detach` пишется только если для этого модуля была строка `dll_attach` (`g_ultraceAttachTick != 0`) — пары остаются корректными |
+| R12i-4 | `GlassCompat/DllMain.cpp` | всё тело attach-гейта обёрнуто в собственный блок `{ … }` внутри `case DLL_PROCESS_ATTACH` — иначе MSVC C2360 («пропуск инициализации из-за метки `case`») на `exePath`/`denyName`/`slotName`/ламбде. Ошибка сборки, не логики |
 
 Отдельно: `CreateMutexW` для маркера вызывался **на каждую** попытку и хэндл не закрывался —
 на 1600 попыток это 1600 хэндлов в чужом процессе. Теперь маркер создаётся один раз, а
