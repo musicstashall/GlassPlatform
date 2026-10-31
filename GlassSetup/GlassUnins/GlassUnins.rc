@@ -1,0 +1,15 @@
+#pragma code_page(65001)
+#include <winres.h>
+#include "../res/resource.h"
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+1 RT_MANIFEST "app.manifest"
+IDI_APP ICON "..\\res\\app.ico"
+IDR_HTML RCDATA "..\\res\\slideshow.html"
+IDR_WELCOME RCDATA "..\\res\\welcome_banner.png"
+IDR_FONT_HANDWRITTEN RCDATA "..\\res\\assets\\handwritten.ttf"
+IDR_SLIDE_START RCDATA "..\\res\\assets\\slide_start.jpg"
+IDR_SLIDE_TASKBAR RCDATA "..\\res\\assets\\slide_taskbar.jpg"
+IDR_SLIDE_NOTIFICATION RCDATA "..\\res\\assets\\slide_notification.png"
+IDR_SLIDE_CONTEXT_MENU RCDATA "..\\res\\assets\\slide_context_menu.jpg"
+IDR_SLIDE_EXPLORER RCDATA "..\\res\\assets\\slide_explorer.jpg"
+IDR_UNLOCKER_X64 RCDATA "..\\..\\Build\\x64\\Release\\GlassSettings.Native.dll"

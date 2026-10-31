@@ -108,19 +108,23 @@
     <MakeDir Directories="$(GlassPayloadStage)\Resources\ThemeMaterial" Condition="'$(GlassPayloadArch)' == 'OpenGlass' and !Exists('$(GlassPayloadStage)\Resources\ThemeMaterial')" />
     <MakeDir Directories="$(GlassPayloadStage)" Condition="!Exists('$(GlassPayloadStage)')" />
     <WriteLinesToFile File="$(GlassPayloadStage)\unins000.dat" Lines="PRODUCT_CODE={$(GlassMsiProductCode)}" Overwrite="true" Condition="'$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86'" />
-    <WriteLinesToFile File="$(GlassPayloadStage)\unins000.dat" Lines="SETTINGS_PRODUCT_CODE={B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5074}" Overwrite="false" Condition="'$(GlassPayloadArch)' == 'x64'" />
-    <WriteLinesToFile File="$(GlassPayloadStage)\unins000.dat" Lines="SETTINGS_PRODUCT_CODE={B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5075}" Overwrite="false" Condition="'$(GlassPayloadArch)' == 'x86'" />
     <WriteLinesToFile File="$(GlassPayloadStage)\unins000.dat" Lines="PRODUCT_CODE={$(GlassMsiProductCode)}" Overwrite="true" Condition="'$(GlassPayloadArch)' == 'OpenGlass' and '$(GlassMsiProductCode)' != ''" />
 
-    <!-- GlassSettings MSI: только каталог GlassSettings -->
+    <!-- GlassSettings MSI: каталог GlassSettings + собственный unins000.exe/dat (4-я запись в Установленных приложениях) -->
     <ItemGroup Condition="'$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86'">
       <GlassSettingsOnly Include="$(GlassBuildRelease)\GlassSettings\**\*.*"
         Exclude="$(GlassBuildRelease)\GlassSettings\**\*.pdb;$(GlassBuildRelease)\GlassSettings\**\*.xaml;$(GlassBuildRelease)\GlassSettings\Package.appxmanifest;$(GlassBuildRelease)\GlassSettings\app.manifest;$(GlassBuildRelease)\GlassSettings\Properties\**\*.*;$(GlassBuildRelease)\GlassSettings\Microsoft.UI.Designer.dll;$(GlassBuildRelease)\GlassSettings\Microsoft.UI.Xaml\Assets\map.html;$(GlassBuildRelease)\GlassSettings\Microsoft.Windows.Workloads.pri;$(GlassBuildRelease)\GlassSettings\Assets\StoreLogo.png;$(GlassBuildRelease)\GlassSettings\Assets\SplashScreen.*;$(GlassBuildRelease)\GlassSettings\Assets\Square150x150Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\Square44x44Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\Wide310x150Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\LockScreenLogo.*" />
       <GlassNativeExtraGs Include="$(GlassBuildRelease)\GlassSettings.Native.dll"
         Condition="!Exists('$(GlassBuildRelease)\GlassSettings\GlassSettings.Native.dll')" />
+      <GlassSettingsUnins Include="$(GlassUninsExePath)" Condition="Exists('$(GlassUninsExePath)')" />
     </ItemGroup>
+    <Error Condition="('$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86') and !Exists('$(GlassUninsExePath)')"
+      Text="Glass $(GlassPayloadArch) MSI: нет $(GlassUninsExePath) — соберите проект GlassUnins Release|Win32." />
+    <MakeDir Directories="$(GlassPayloadStage)\GlassSettings" Condition="('$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86') and !Exists('$(GlassPayloadStage)\GlassSettings')" />
     <Copy SourceFiles="@(GlassSettingsOnly)" DestinationFiles="@(GlassSettingsOnly->'$(GlassPayloadStage)\GlassSettings\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(GlassSettingsOnly)' != ''" />
     <Copy SourceFiles="@(GlassNativeExtraGs)" DestinationFolder="$(GlassPayloadStage)\GlassSettings" SkipUnchangedFiles="true" Condition="'@(GlassNativeExtraGs)' != ''" />
+    <Copy SourceFiles="@(GlassSettingsUnins)" DestinationFiles="$(GlassPayloadStage)\GlassSettings\unins000.exe" SkipUnchangedFiles="true" Condition="'@(GlassSettingsUnins)' != ''" />
+    <WriteLinesToFile File="$(GlassPayloadStage)\GlassSettings\unins000.dat" Lines="PRODUCT_CODE={$(GlassMsiProductCode)}" Overwrite="true" Condition="('$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86') and '$(GlassMsiProductCode)' != ''" />
   </Target>
 
   <PropertyGroup>
@@ -144,6 +148,9 @@
       <_GlassMsiBundleVersion Condition="'$(_GlassMsiBundleVersion)' == ''">$(_GlassMsiVersion)</_GlassMsiBundleVersion>
       <_GlassPlatformTitle Condition="'$(GlassPlatformTitle)' == ''">Glass Platform</_GlassPlatformTitle>
       <_GlassPlatformTitle Condition="'$(GlassPlatformTitle)' != ''">$(GlassPlatformTitle)</_GlassPlatformTitle>
+      <_GlassInstallPathValueName Condition="'$(GlassPayloadArch)' == 'x64'">InstallPathX64</_GlassInstallPathValueName>
+      <_GlassInstallPathValueName Condition="'$(GlassPayloadArch)' == 'x86'">InstallPathX86</_GlassInstallPathValueName>
+      <_GlassInstallPathValueName Condition="'$(_GlassInstallPathValueName)' == ''">InstallPath</_GlassInstallPathValueName>
     </PropertyGroup>
     <Error Condition="'$(GlassPayloadArch)' != 'OpenGlass' and '$(GlassBundlePackagingEnabled)' == 'true' and '$(_GlassBundleBuild)' == '0'"
       Text="Glass MSI $(GlassPayloadArch): номер комплекта не задан. Сначала Release|x64 solution, затем x86 с активной сессией." />
@@ -152,6 +159,7 @@
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassUpgradeCode = &quot;$(GlassUpgradeCode)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassProductCode = &quot;$(GlassProductCode)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassPlatformTitle = &quot;$(_GlassPlatformTitle)&quot; ?&gt;" Overwrite="false" />
+    <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassInstallPathValueName = &quot;$(_GlassInstallPathValueName)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassPayloadStage = &quot;$(GlassPayloadStage)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassUninsExe = &quot;$(GlassUninsExePath)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassSetupIcon = &quot;$(GlassSetupIconPath)&quot; ?&gt;" Overwrite="false" />

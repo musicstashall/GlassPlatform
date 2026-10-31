@@ -1,6 +1,7 @@
 #include "NativeHost.h"
 
 #include <TaskSchedulerCom.h>
+#include <GlassModulePath.h>
 #include <GlassPlatformTask.h>
 #include <aclapi.h>
 #include <wil/resource.h>
@@ -468,22 +469,21 @@ namespace
         return end == std::wstring::npos ? s : s.substr(0, end + 1);
     }
 
-    [[nodiscard]] std::wstring TryReadInstallPathFromRegistry() noexcept
+    [[nodiscard]] std::wstring TryReadRegInstallValue(
+        HKEY root,
+        const wchar_t* subKey,
+        const wchar_t* valueName,
+        REGSAM extraSam = 0) noexcept
     {
-#if defined(_WIN64)
-        constexpr wchar_t kRegKey[] = L"Software\\Wow6432Node\\GlassPlatform";
-#else
-        constexpr wchar_t kRegKey[] = L"Software\\GlassPlatform";
-#endif
         HKEY hKey = nullptr;
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+        if (RegOpenKeyExW(root, subKey, 0, KEY_READ | extraSam, &hKey) != ERROR_SUCCESS)
             return {};
 
         wchar_t buf[MAX_PATH * 4]{};
         DWORD cb = sizeof(buf);
         DWORD type = 0;
         const LSTATUS st = RegQueryValueExW(
-            hKey, L"InstallPath", nullptr, &type,
+            hKey, valueName, nullptr, &type,
             reinterpret_cast<LPBYTE>(buf), &cb);
         RegCloseKey(hKey);
 
@@ -491,6 +491,26 @@ namespace
             return {};
 
         return TrimTrailingSlashes(buf);
+    }
+
+    [[nodiscard]] std::wstring TryReadInstallPathFromRegistry() noexcept
+    {
+        if (auto v = TryReadRegInstallValue(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPathX86", KEY_WOW64_32KEY); !v.empty())
+            return v;
+        if (auto v = TryReadRegInstallValue(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPath", KEY_WOW64_32KEY); !v.empty())
+            return v;
+        if (auto v = TryReadRegInstallValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPathX86"); !v.empty())
+            return v;
+#if defined(_WIN64)
+        return TryReadRegInstallValue(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath");
+#else
+        if (GlassShared::GlassModulePath::IsOs64Bit())
+        {
+            if (auto v = TryReadRegInstallValue(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath"); !v.empty())
+                return v;
+        }
+        return TryReadRegInstallValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPath");
+#endif
     }
 
     [[nodiscard]] std::wstring TryGetAutorunInstallRoot() noexcept

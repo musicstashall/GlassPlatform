@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using GlassSettings.Core.Platform;
 using GlassSettings.Strings;
 using Microsoft.UI.Dispatching;
@@ -664,21 +665,49 @@ public sealed class InjectRuntimeMonitor
     }
 
     /// <summary>
-    /// STILL_ACTIVE — жив; exit code иначе — мёртв.
-    /// OpenProcess/GetExitCode fail — unknown (оставляем слот; access denied ≠ exit).
+    /// The map can outlive its process. A nonexistent PID is different from
+    /// access denied; a reused PID with a different executable is not the old
+    /// slot either. Unknown states are retained rather than guessed dead.
     /// </summary>
-    private static bool IsOsProcessAlive(uint pid)
+    private static bool IsCurrentInjectMapSlot(NativeHostInterop.InjectMapSlot slot)
     {
-        if (pid == 0)
+        const int errorInvalidParameter = 87;
+        const uint waitObject0 = 0;
+        const uint waitTimeout = 258;
+        const int mapExeNameLimit = 63; // kExeNameChars - terminating NUL
+        if (slot.Pid == 0)
             return false;
-        var h = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, pid);
+        var h = OpenProcess(0x1000 | 0x100000 /* QUERY_LIMITED_INFORMATION | SYNCHRONIZE */, false, slot.Pid);
         if (h == IntPtr.Zero)
-            return true; // unknown → не prune / не ClearInjectMapPid
+        {
+            // No handle to the old process means the PID can be reused at any
+            // moment. Hide a missing PID, but never clear its shared slot here.
+            return Marshal.GetLastWin32Error() != errorInvalidParameter;
+        }
         try
         {
-            if (!GetExitCodeProcess(h, out var code))
+            var wait = WaitForSingleObject(h, 0);
+            if (wait == waitObject0)
+            {
+                // Keep the handle open while clearing: the old process object
+                // and its PID cannot be reused before this handle is closed.
+                _ = NativeHostInterop.ClearInjectMapPidForArch(slot.Arch, slot.Pid);
+                return false;
+            }
+            if (wait != waitTimeout)
                 return true; // unknown
-            return code == 259; // STILL_ACTIVE
+            if (string.IsNullOrEmpty(slot.ExeName))
+                return true;
+            var path = new StringBuilder(1024);
+            var length = (uint)path.Capacity;
+            if (!QueryFullProcessImageName(h, 0, path, ref length))
+                return true;
+            var actual = Path.GetFileName(path.ToString());
+            if (string.IsNullOrEmpty(actual))
+                return true;
+            return string.Equals(actual, slot.ExeName, StringComparison.OrdinalIgnoreCase)
+                || (slot.ExeName.Length == mapExeNameLimit
+                    && actual.StartsWith(slot.ExeName, StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -696,14 +725,12 @@ public sealed class InjectRuntimeMonitor
         for (var i = 0; i < slots.Length; i++)
         {
             var s = slots[i];
-            if (s.Pid == 0 || IsOsProcessAlive(s.Pid))
+            if (IsCurrentInjectMapSlot(s))
             {
                 if (alive is not null)
                     alive.Add(s);
                 continue;
             }
-
-            var cleared = NativeHostInterop.ClearInjectMapPidForArch(s.Arch, s.Pid);
             alive ??= slots.Take(i).ToList();
         }
 
@@ -714,8 +741,12 @@ public sealed class InjectRuntimeMonitor
     private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
 
     [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(IntPtr hHandle, uint milliseconds);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+    private static extern bool QueryFullProcessImageName(
+        IntPtr hProcess, uint flags, StringBuilder image, ref uint size);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

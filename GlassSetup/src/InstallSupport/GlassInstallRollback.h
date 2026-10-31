@@ -1,5 +1,7 @@
 #pragma once
 
+#include <windows.h>
+#include <atomic>
 #include <functional>
 #include <string>
 #include <vector>
@@ -13,6 +15,16 @@ struct ProductSnapshot {
     std::wstring displayVersion;
 };
 
+struct RegistryValueSnapshot {
+    HKEY hive = nullptr;
+    REGSAM view = 0;
+    std::wstring key;
+    std::wstring name;
+    DWORD type = 0;
+    std::vector<BYTE> data;
+    bool existed = false;
+};
+
 struct SessionState {
     std::wstring workspaceDir;
     std::wstring x64Dir;
@@ -22,9 +34,16 @@ struct SessionState {
     std::wstring backupX86;
     std::wstring backupOpenGlass;
     std::vector<ProductSnapshot> oldProducts;
+    std::vector<RegistryValueSnapshot> registryValues;
     std::vector<std::wstring> installedThisSession;
+    std::vector<std::wstring> modifiedProducts;
     bool hadPriorInstall = false;
     unsigned copyError = 0;
+    // Failure to verify an installed MSI's file locations is distinct from a
+    // copy error: proceeding could uninstall files outside the installation root.
+    bool productPathUnverified = false;
+    std::wstring productPathCode;
+    std::wstring productPathDetail;
 };
 
 using CopyProgressFn = std::function<void(int percentUnits)>;
@@ -35,12 +54,26 @@ bool CreateSnapshot(
     const std::wstring& x86Dir,
     const std::wstring& openGlassDir,
     bool includeOpenGlass,
-    CopyProgressFn onProgress) noexcept;
+    CopyProgressFn onProgress,
+    const std::atomic_bool* cancelled = nullptr) noexcept;
 
+void NoteModified(SessionState& state, const wchar_t* productCode) noexcept;
 void NoteInstalled(SessionState& state, const wchar_t* productCode) noexcept;
+// During rollback, recheck the current registered MSI before uninstalling it;
+// a concurrently changed/foreign registration is never removed speculatively.
+bool UninstallSessionProductSafely(SessionState& state, const wchar_t* productCode) noexcept;
+
+enum class RestoreScope { AllProducts, SettingsX86, SettingsX64 };
 
 bool ExecuteRollback(
     SessionState& state,
-    CopyProgressFn onProgress) noexcept;
+    CopyProgressFn onProgress,
+    RestoreScope scope = RestoreScope::AllProducts) noexcept;
+
+bool RestoreRegistryValues(const SessionState& state) noexcept;
+// Platform MSI owns the HKCU architecture value. Preserve its exact previous
+// contents if it existed, rather than reconciling a conflicting registry copy.
+bool PreservePlatformUserPath(const SessionState& state, bool x64) noexcept;
+void CleanupSnapshot(SessionState& state) noexcept;
 
 } // namespace GlassInstallRollback

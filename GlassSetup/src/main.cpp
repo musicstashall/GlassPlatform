@@ -1,4 +1,4 @@
-// Win32-мастер GlassPlatform. Release ставит MSI; Debug без GLASS_EMBED_MSI автоматически показывает все страницы без установки.
+// Win32-мастер GlassPlatform. Release устанавливает MSI; Debug предлагает симуляцию.
 #include <windows.h>
 #include <windowsx.h>
 #include <objbase.h>
@@ -6,10 +6,13 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <vssym32.h>
-#include <gdiplus.h>
+#include "GdiPlusCompat.h"
 #include <dwmapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <exdisp.h>
+#include <servprov.h>
+#include <shldisp.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <winhttp.h>
@@ -20,6 +23,14 @@
 #include <WebView2.h>
 #include <detours.h>
 #include <Helpers/ThemeHelper.h>
+#include "WizardTheme.h"
+#include "WizardAssets.h"
+#include "WizardProgress.h"
+#include "InstallSupport/GlassInstallMsi.h"
+#include "InstallSupport/GlassInstallUtil.h"
+#ifdef ShellExecute
+#undef ShellExecute // IShellDispatch2::ShellExecute is a COM method, not the Win32 macro.
+#endif
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -47,15 +58,19 @@ namespace {
 constexpr int kWidth = 1000, kHtmlHeight = 540, kProgressHeight = 4;
 constexpr int kContentHeight = kHtmlHeight + kProgressHeight;
 constexpr int kFooterHeight = 56, kHeight = 600;
-constexpr UINT_PTR kInstallTimer = 1, kFadeTimer = 2, kHeroTimer = 3;
+constexpr UINT_PTR kInstallTimer = 1, kFadeTimer = 2, kHeroTimer = 3, kStartupPollTimer = 5;
 constexpr UINT kInstallTimerMs = 16, kHeroTimerMs = 50;
 constexpr ULONGLONG kMarqueePeriodMs = 1400;
 constexpr double kProgressSmoothTauMs = 120.0;
+constexpr ULONGLONG kRollbackFinishMs = 900;
 constexpr UINT kInitWebView = WM_APP + 1;
 constexpr UINT kVersionCheckComplete = WM_APP + 2;
+constexpr UINT kRuntimeStatus = WM_APP + 3, kRuntimeComplete = WM_APP + 4;
+constexpr UINT kBeginStartup = WM_APP + 5, kStartupComplete = WM_APP + 6;
 constexpr ULONGLONG kFadeDuration = 280;
 #ifndef GLASS_EMBED_MSI
 constexpr ULONGLONG kDuration = 30000;
+constexpr ULONGLONG kSimulatedRollbackDuration = 5000;
 #endif
 constexpr COLORREF kDark = RGB(16,18,37), kLicensePanel = RGB(27,29,52);
 constexpr COLORREF kFooterTop = RGB(26,27,50), kFooterBottom = RGB(17,18,35);
@@ -67,12 +82,12 @@ constexpr wchar_t kWebView2BootstrapperUrl[] = L"https://go.microsoft.com/fwlink
 constexpr UINT_PTR kDebugDemoTimer = 4;
 constexpr UINT kDebugDemoPageMs = 1800;
 #endif
-enum class Page { Welcome, Checking, Update, Conflicts, Downgrade, VersionInvalid, License, Installing, ModulesBusy, ProcessesStuck, Complete, Error };
-enum class VisualMode { Slideshow, UnlockModules, UnlockProcesses };
+enum class Page { RuntimeRequired, RuntimeInstalling, RuntimeError, AlreadyRunning, Welcome, Checking, Update, Conflicts, Downgrade, VersionInvalid, License, Components, Installing, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
 HINSTANCE gInstance = nullptr;
 HBRUSH gWindowClassBrush = nullptr;
 bool gWindowClassRegistered = false;
 HWND gRootWindow = nullptr;
+bool gAlreadyRunning = false;
 LANGID gLanguage = MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
 
 // Explicit language lookup: never rely on the OS's resource fallback order.
@@ -160,10 +175,6 @@ std::wstring ReadVersionStringField(const std::wstring& path, const wchar_t* fie
     return fallback;
 }
 
-std::wstring ReadFileVersionString(const std::wstring& path, ULONGLONG& key) {
-    return ReadVersionStringField(path, L"FileVersion", key, false);
-}
-
 std::wstring ReadProductVersionString(const std::wstring& path, ULONGLONG& key) {
     return ReadVersionStringField(path, L"ProductVersion", key, true);
 }
@@ -244,6 +255,56 @@ std::wstring Utf8ToWide(const std::string& text) {
     return wide;
 }
 
+bool IsAllowedReleaseUrl(const std::wstring& url) noexcept {
+    URL_COMPONENTS parts{}; parts.dwStructSize=sizeof(parts);
+    parts.dwSchemeLength=parts.dwHostNameLength=parts.dwUrlPathLength=static_cast<DWORD>(-1);
+    parts.dwUserNameLength=parts.dwPasswordLength=static_cast<DWORD>(-1);
+    if (!WinHttpCrackUrl(url.c_str(),0,0,&parts) || parts.nScheme!=INTERNET_SCHEME_HTTPS ||
+        parts.nPort!=INTERNET_DEFAULT_HTTPS_PORT || parts.dwUserNameLength || parts.dwPasswordLength)
+        return false;
+    const std::wstring host(parts.lpszHostName,parts.dwHostNameLength);
+    const std::wstring path(parts.lpszUrlPath,parts.dwUrlPathLength);
+    constexpr wchar_t prefix[]=L"/musicstashall/GlassPlatform/releases/";
+    if (_wcsicmp(host.c_str(),L"github.com")!=0 || path.rfind(prefix,0)!=0) return false;
+    // Do not allow encoded separators, backslashes, control characters or path traversal.
+    if (path.find(L'%')!=std::wstring::npos || path.find(L'\\')!=std::wstring::npos ||
+        path.find(L"..")!=std::wstring::npos) return false;
+    for (wchar_t c:url) if (c<0x20 || c==0x7f) return false;
+    return true;
+}
+
+// ShellExecute through Explorer's desktop shell, not the elevated setup token.
+bool OpenReleaseInUserBrowser(const std::wstring& url) noexcept {
+    if (!IsAllowedReleaseUrl(url)) return false;
+    ComPtr<IShellWindows> windows;
+    if (FAILED(CoCreateInstance(CLSID_ShellWindows,nullptr,CLSCTX_LOCAL_SERVER,IID_PPV_ARGS(&windows)))) return false;
+    VARIANT location{},root{}; VariantInit(&location); VariantInit(&root);
+    location.vt=VT_I4; location.lVal=CSIDL_DESKTOP;
+    long shellHwnd=0; ComPtr<IDispatch> desktop;
+    if (FAILED(windows->FindWindowSW(&location,&root,SWC_DESKTOP,&shellHwnd,SWFO_NEEDDISPATCH,&desktop)) || !desktop) return false;
+    ComPtr<IServiceProvider> provider;
+    if (FAILED(desktop.As(&provider))) return false;
+    ComPtr<IShellBrowser> browser;
+    if (FAILED(provider->QueryService(SID_STopLevelBrowser,IID_PPV_ARGS(&browser)))) return false;
+    ComPtr<IShellView> view;
+    if (FAILED(browser->QueryActiveShellView(&view)) || !view) return false;
+    ComPtr<IDispatch> background;
+    if (FAILED(view->GetItemObject(SVGIO_BACKGROUND,IID_PPV_ARGS(&background)))) return false;
+    ComPtr<IShellFolderViewDual> folder;
+    if (FAILED(background.As(&folder))) return false;
+    ComPtr<IDispatch> application;
+    if (FAILED(folder->get_Application(&application)) || !application) return false;
+    ComPtr<IShellDispatch2> shell;
+    if (FAILED(application.As(&shell))) return false;
+    BSTR file=SysAllocString(url.c_str());
+    if (!file) return false;
+    VARIANT empty{},show{}; VariantInit(&empty); VariantInit(&show);
+    show.vt=VT_I4; show.lVal=SW_SHOWNORMAL;
+    const HRESULT hr=shell->ShellExecute(file,empty,empty,empty,show);
+    SysFreeString(file);
+    return SUCCEEDED(hr);
+}
+
 bool FetchLatestSetupVersion(std::wstring& latest, std::wstring& url) {
     latest.clear();
     url.clear();
@@ -261,25 +322,30 @@ bool FetchLatestSetupVersion(std::wstring& latest, std::wstring& url) {
         WinHttpCloseHandle(session);
         return false;
     }
-    DWORD redirect = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+    DWORD redirect = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
     WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &redirect, sizeof(redirect));
     bool ok = WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
         WINHTTP_NO_REQUEST_DATA, 0, 0, 0) && WinHttpReceiveResponse(request, nullptr);
+    DWORD httpStatus=0, httpStatusSize=sizeof(httpStatus);
+    ok = ok && WinHttpQueryHeaders(request,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,
+        WINHTTP_HEADER_NAME_BY_INDEX,&httpStatus,&httpStatusSize,WINHTTP_NO_HEADER_INDEX) && httpStatus==200;
     std::string body;
     if (ok) {
         for (;;) {
             DWORD available = 0;
-            if (!WinHttpQueryDataAvailable(request, &available) || available == 0) break;
+            if (!WinHttpQueryDataAvailable(request, &available)) { ok=false; break; }
+            if (available == 0) break;
+            if (available>256*1024 || body.size()+available>256*1024) { ok=false; break; }
             std::string chunk(available, '\0');
             DWORD read = 0;
-            if (!WinHttpReadData(request, chunk.data(), available, &read) || read == 0) break;
+            if (!WinHttpReadData(request, chunk.data(), available, &read) || read == 0) { ok=false; break; }
             body.append(chunk.data(), read);
         }
     }
     WinHttpCloseHandle(request);
     WinHttpCloseHandle(connect);
     WinHttpCloseHandle(session);
-    if (body.empty()) return false;
+    if (!ok || body.empty()) return false;
     const std::string glass = JsonStringField(body, "glass");
     if (glass.empty()) {
         const std::string setup = JsonStringField(body, "setup");
@@ -291,7 +357,7 @@ bool FetchLatestSetupVersion(std::wstring& latest, std::wstring& url) {
     const std::string page = JsonStringField(body, "url");
     if (page.empty()) return false;
     url = Utf8ToWide(page);
-    return true;
+    return IsAllowedReleaseUrl(url);
 }
 
 bool IsWebView2RuntimeInstalled(std::wstring* versionOut=nullptr) {
@@ -305,24 +371,10 @@ bool IsWebView2RuntimeInstalled(std::wstring* versionOut=nullptr) {
 
 bool CreateWebView2TempPath(std::wstring& directory, std::wstring& installer,
                             std::wstring& error) {
-    wchar_t tempPath[MAX_PATH]{};
-    const DWORD length=GetTempPathW(static_cast<DWORD>(std::size(tempPath)),tempPath);
-    if (!length || length>=std::size(tempPath)) {
-        error=L"GetTempPathW failed ("+std::to_wstring(GetLastError())+L")";
+    if (!GlassInstallUtil::CreateSecureTempDirectory(L"GlassWebView2",directory)) {
+        error=L"Could not create a private temporary folder ("+std::to_wstring(GetLastError())+L")";
         return false;
     }
-    wchar_t unique[MAX_PATH]{};
-    if (!GetTempFileNameW(tempPath,L"GPW",0,unique)) {
-        error=L"GetTempFileNameW failed ("+std::to_wstring(GetLastError())+L")";
-        return false;
-    }
-    if (!DeleteFileW(unique) || !CreateDirectoryW(unique,nullptr)) {
-        error=L"Could not create a private temporary folder ("+
-            std::to_wstring(GetLastError())+L")";
-        DeleteFileW(unique);
-        return false;
-    }
-    directory=unique;
     installer=directory+L"\\InstallerWebView2.exe";
     return true;
 }
@@ -333,7 +385,8 @@ void RemoveWebView2TempFiles(const std::wstring& directory,
     if (!directory.empty()) RemoveDirectoryW(directory.c_str());
 }
 
-bool DownloadWebView2Bootstrapper(const std::wstring& outputPath, std::wstring& error) {
+bool DownloadWebView2Bootstrapper(const std::wstring& outputPath, std::wstring& error, const std::atomic_bool& cancelled) {
+    if (cancelled.load()) { error=L"Cancelled"; return false; }
     URL_COMPONENTS parts{};
     parts.dwStructSize=sizeof(parts);
     parts.dwSchemeLength=static_cast<DWORD>(-1);
@@ -354,7 +407,7 @@ bool DownloadWebView2Bootstrapper(const std::wstring& outputPath, std::wstring& 
         error=L"WinHttpOpen failed ("+std::to_wstring(GetLastError())+L")";
         return false;
     }
-    WinHttpSetTimeouts(session,10000,10000,15000,30000);
+    WinHttpSetTimeouts(session,5000,5000,8000,8000);
     HINTERNET connection=WinHttpConnect(session,host.c_str(),parts.nPort,0);
     if (!connection) {
         error=L"WinHttpConnect failed ("+std::to_wstring(GetLastError())+L")";
@@ -369,7 +422,7 @@ bool DownloadWebView2Bootstrapper(const std::wstring& outputPath, std::wstring& 
         WinHttpCloseHandle(session);
         return false;
     }
-    DWORD redirect=WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+    DWORD redirect=WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
     WinHttpSetOption(request,WINHTTP_OPTION_REDIRECT_POLICY,&redirect,sizeof(redirect));
     bool ok=WinHttpSendRequest(request,WINHTTP_NO_ADDITIONAL_HEADERS,0,
         WINHTTP_NO_REQUEST_DATA,0,0,0) && WinHttpReceiveResponse(request,nullptr);
@@ -400,6 +453,7 @@ bool DownloadWebView2Bootstrapper(const std::wstring& outputPath, std::wstring& 
     ULONGLONG total=0;
     std::vector<BYTE> buffer(64*1024);
     while (ok) {
+        if (cancelled.load()) { error=L"Cancelled"; ok=false; break; }
         DWORD available=0;
         if (!WinHttpQueryDataAvailable(request,&available)) {
             error=L"WinHttpQueryDataAvailable failed ("+
@@ -409,6 +463,7 @@ bool DownloadWebView2Bootstrapper(const std::wstring& outputPath, std::wstring& 
         }
         if (!available) break;
         while (ok && available) {
+            if (cancelled.load()) { error=L"Cancelled"; ok=false; break; }
             const DWORD toRead=std::min<DWORD>(available,static_cast<DWORD>(buffer.size()));
             DWORD read=0;
             if (!WinHttpReadData(request,buffer.data(),toRead,&read) || !read) {
@@ -473,6 +528,7 @@ bool VerifyMicrosoftSignature(const std::wstring& path, std::wstring& error) {
     GUID action=WINTRUST_ACTION_GENERIC_VERIFY_V2;
     const LONG status=WinVerifyTrust(nullptr,&action,&trust);
     bool microsoftPublisher=false;
+    bool microsoftRoot=false;
     if (status==ERROR_SUCCESS) {
         CRYPT_PROVIDER_DATA* provider=WTHelperProvDataFromStateData(trust.hWVTStateData);
         CRYPT_PROVIDER_SGNR* signer=provider?WTHelperGetProvSignerFromChain(provider,0,FALSE,0):nullptr;
@@ -481,6 +537,10 @@ bool VerifyMicrosoftSignature(const std::wstring& path, std::wstring& error) {
             const DWORD chars=CertGetNameStringW(signer->pasCertChain[0].pCert,
                 CERT_NAME_SIMPLE_DISPLAY_TYPE,0,nullptr,publisher,static_cast<DWORD>(std::size(publisher)));
             microsoftPublisher=chars>1 && _wcsicmp(publisher,L"Microsoft Corporation")==0;
+            CERT_CHAIN_POLICY_PARA policy{}; policy.cbSize=sizeof(policy);
+            CERT_CHAIN_POLICY_STATUS chainStatus{}; chainStatus.cbSize=sizeof(chainStatus);
+            microsoftRoot=signer->pChainContext && CertVerifyCertificateChainPolicy(
+                CERT_CHAIN_POLICY_MICROSOFT_ROOT,signer->pChainContext,&policy,&chainStatus) && chainStatus.dwError==0;
         }
     }
     trust.dwStateAction=WTD_STATEACTION_CLOSE;
@@ -490,8 +550,8 @@ bool VerifyMicrosoftSignature(const std::wstring& path, std::wstring& error) {
             std::to_wstring(static_cast<unsigned long>(status))+L")";
         return false;
     }
-    if (!microsoftPublisher) {
-        error=L"The downloaded WebView2 installer is not signed by Microsoft Corporation";
+    if (!microsoftPublisher || !microsoftRoot) {
+        error=L"The downloaded WebView2 installer is not signed by Microsoft Corporation with a Microsoft root";
         return false;
     }
     return true;
@@ -499,7 +559,7 @@ bool VerifyMicrosoftSignature(const std::wstring& path, std::wstring& error) {
 
 bool RunWebView2Bootstrapper(const std::wstring& installerPath,
                              const std::wstring& directory,
-                             DWORD& exitCode, std::wstring& error) {
+                             DWORD& exitCode, std::wstring& error, const std::atomic_bool& cancelled) {
     std::wstring command=L"\""+installerPath+L"\" /silent /install";
     STARTUPINFOW startup{};
     startup.cb=sizeof(startup);
@@ -510,7 +570,17 @@ bool RunWebView2Bootstrapper(const std::wstring& installerPath,
             std::to_wstring(GetLastError())+L")";
         return false;
     }
-    const DWORD wait=WaitForSingleObject(process.hProcess,INFINITE);
+    // Bound the wait. Cancellation is honoured while the bootstrapper is running too.
+    const ULONGLONG deadline=GetTickCount64()+300000;
+    DWORD wait=WAIT_TIMEOUT;
+    while (GetTickCount64()<deadline && !cancelled.load()) {
+        wait=WaitForSingleObject(process.hProcess,200);
+        if (wait!=WAIT_TIMEOUT) break;
+    }
+    if (wait==WAIT_TIMEOUT) {
+        TerminateProcess(process.hProcess,ERROR_CANCELLED);
+        WaitForSingleObject(process.hProcess,5000);
+    }
     const DWORD waitError=wait==WAIT_FAILED?GetLastError():ERROR_SUCCESS;
     const BOOL gotExit=wait==WAIT_OBJECT_0 && GetExitCodeProcess(process.hProcess,&exitCode);
     const DWORD exitError=!gotExit?GetLastError():ERROR_SUCCESS;
@@ -524,197 +594,16 @@ bool RunWebView2Bootstrapper(const std::wstring& installerPath,
     return true;
 }
 
-bool HasWebView2RestartSwitch() {
+bool HasCommandLineSwitch(const wchar_t* name) {
     int argc=0;
     LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     if (!argv) return false;
     bool found=false;
     for (int i=1;i<argc;++i) {
-        if (_wcsicmp(argv[i],L"--glass-webview2-restarted")==0) { found=true; break; }
+        if (_wcsicmp(argv[i],name)==0) { found=true; break; }
     }
     LocalFree(argv);
     return found;
-}
-
-bool RelaunchCurrentSetup(std::wstring& error) {
-    wchar_t executable[MAX_PATH]{};
-    const DWORD length=GetModuleFileNameW(nullptr,executable,static_cast<DWORD>(std::size(executable)));
-    if (!length || length>=std::size(executable)) {
-        error=L"Could not resolve the setup executable path ("+
-            std::to_wstring(GetLastError())+L")";
-        return false;
-    }
-    std::wstring command=GetCommandLineW();
-    if (command.empty()) command=L"\""+std::wstring(executable)+L"\"";
-    command+=L" --glass-webview2-restarted";
-    STARTUPINFOW startup{};
-    startup.cb=sizeof(startup);
-    PROCESS_INFORMATION process{};
-    if (!CreateProcessW(executable,command.data(),nullptr,nullptr,FALSE,0,nullptr,nullptr,
-                        &startup,&process)) {
-        error=L"Could not restart GlassSetup ("+std::to_wstring(GetLastError())+L")";
-        return false;
-    }
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
-    return true;
-}
-
-struct RuntimeInstallContext {
-    std::thread worker;
-    bool success=false;
-    DWORD installerExitCode=0;
-    std::wstring error;
-};
-void SetRuntimeDialogContent(HWND dialog, UINT id) {
-    const std::wstring text=Text(id);
-    SendMessageW(dialog,TDM_SET_ELEMENT_TEXT,TDE_CONTENT,
-                 reinterpret_cast<LPARAM>(text.c_str()));
-}
-HRESULT CALLBACK RuntimeInstallDialogProc(HWND dialog, UINT notification,
-                                           WPARAM, LPARAM, LONG_PTR reference) {
-    auto* context=reinterpret_cast<RuntimeInstallContext*>(reference);
-    if (notification==TDN_CREATED && context) {
-        SendMessageW(dialog,TDM_ENABLE_BUTTON,IDOK,FALSE);
-        SendMessageW(dialog,TDM_SET_PROGRESS_BAR_MARQUEE,TRUE,35);
-        try {
-            context->worker=std::thread([context,dialog]() {
-                std::wstring directory,installer,error;
-                DWORD installerExitCode=0;
-                bool success=false;
-                try {
-                    if (!CreateWebView2TempPath(directory,installer,error)) {
-                        // Keep the detailed Win32 error for the final message.
-                    } else {
-                        SetRuntimeDialogContent(dialog,IDS_RUNTIME_DOWNLOADING);
-                        if (DownloadWebView2Bootstrapper(installer,error)) {
-                            if (VerifyMicrosoftSignature(installer,error)) {
-                                SetRuntimeDialogContent(dialog,IDS_RUNTIME_INSTALLING_PACKAGE);
-                                if (RunWebView2Bootstrapper(installer,directory,installerExitCode,error)) {
-                                    SetRuntimeDialogContent(dialog,IDS_RUNTIME_VERIFYING);
-                                    success=true;
-                                }
-                            }
-                        }
-                    }
-                } catch (...) {
-                    error=L"Unexpected error while acquiring or installing WebView2 Runtime";
-                    success=false;
-                }
-                RemoveWebView2TempFiles(directory,installer);
-                context->success=success;
-                context->installerExitCode=installerExitCode;
-                context->error=std::move(error);
-                SendMessageW(dialog,TDM_ENABLE_BUTTON,IDOK,TRUE);
-                SendMessageW(dialog,TDM_CLICK_BUTTON,IDOK,0);
-            });
-        } catch (...) {
-            context->error=L"Could not start the WebView2 download worker";
-            SendMessageW(dialog,TDM_ENABLE_BUTTON,IDOK,TRUE);
-            SendMessageW(dialog,TDM_CLICK_BUTTON,IDOK,0);
-        }
-    }
-    return S_OK;
-}
-
-bool InstallWebView2WithProgress(std::wstring& error) {
-    RuntimeInstallContext context;
-    const std::wstring title=Text(IDS_TITLE);
-    const std::wstring instruction=Text(IDS_RUNTIME_INSTALLING_TITLE);
-    const std::wstring content=Text(IDS_RUNTIME_INSTALLING);
-    const std::wstring close=Text(IDS_FINISH);
-    TASKDIALOG_BUTTON button{IDOK,close.c_str()};
-    TASKDIALOGCONFIG config{};
-    config.cbSize=sizeof(config);
-    config.pszWindowTitle=title.c_str();
-    config.pszMainInstruction=instruction.c_str();
-    config.pszContent=content.c_str();
-    config.dwFlags=TDF_SHOW_MARQUEE_PROGRESS_BAR;
-    config.cButtons=1;
-    config.pButtons=&button;
-    config.nDefaultButton=IDOK;
-    config.pfCallback=RuntimeInstallDialogProc;
-    config.lpCallbackData=reinterpret_cast<LONG_PTR>(&context);
-    int selected=0;
-    const HRESULT dialogResult=TaskDialogIndirect(&config,&selected,nullptr,nullptr);
-    if (context.worker.joinable()) context.worker.join();
-    if (FAILED(dialogResult)) {
-        error=L"TaskDialogIndirect failed ("+
-            std::to_wstring(static_cast<unsigned long>(dialogResult))+L")";
-        return false;
-    }
-    error=context.error;
-    if (!context.success) return false;
-    if (!IsWebView2RuntimeInstalled()) {
-        error=L"The WebView2 bootstrapper exited with code "+
-            std::to_wstring(context.installerExitCode)+
-            L", but WebView2 Runtime was not detected.";
-        return false;
-    }
-    return true;
-}
-
-int PromptToInstallWebView2() {
-    const std::wstring title=Text(IDS_TITLE);
-    const std::wstring instruction=Text(IDS_RUNTIME_REQUIRED_TITLE);
-    const std::wstring content=Text(IDS_RUNTIME_MISSING);
-    const std::wstring install=Text(IDS_RUNTIME_INSTALL);
-    const std::wstring cancel=Text(IDS_CANCEL);
-    const TASKDIALOG_BUTTON buttons[]={{IDYES,install.c_str()},{IDCANCEL,cancel.c_str()}};
-    TASKDIALOGCONFIG config{};
-    config.cbSize=sizeof(config);
-    config.pszWindowTitle=title.c_str();
-    config.pszMainInstruction=instruction.c_str();
-    config.pszContent=content.c_str();
-    config.pszMainIcon=TD_WARNING_ICON;
-    config.dwFlags=TDF_ALLOW_DIALOG_CANCELLATION;
-    config.cButtons=static_cast<UINT>(std::size(buttons));
-    config.pButtons=buttons;
-    config.nDefaultButton=IDCANCEL;
-    int selected=IDCANCEL;
-    const HRESULT result=TaskDialogIndirect(&config,&selected,nullptr,nullptr);
-    if (FAILED(result)) {
-        const std::wstring message=instruction+L"\r\n\r\n"+content;
-        return MessageBoxW(nullptr,message.c_str(),title.c_str(),
-            MB_OKCANCEL|MB_ICONWARNING|MB_DEFBUTTON2)==IDOK?IDYES:IDCANCEL;
-    }
-    return selected;
-}
-
-enum class RuntimeGateResult { Ready, Restarted, Cancelled, Failed };
-RuntimeGateResult EnsureWebView2Runtime(bool restartAttempt) {
-    std::wstring version;
-    if (IsWebView2RuntimeInstalled(&version)) {
-        InstallLog::LineFormat(L"WebView2 Runtime detected: %s",version.c_str());
-        return RuntimeGateResult::Ready;
-    }
-    InstallLog::Line(L"WebView2 Runtime is not installed");
-    if (restartAttempt) {
-        const std::wstring message=Text(IDS_RUNTIME_INSTALL_FAILED);
-        MessageBoxW(nullptr,message.c_str(),Text(IDS_TITLE).c_str(),MB_OK|MB_ICONERROR);
-        return RuntimeGateResult::Failed;
-    }
-    if (PromptToInstallWebView2()!=IDYES) {
-        InstallLog::Line(L"WebView2 installation declined; exiting setup");
-        return RuntimeGateResult::Cancelled;
-    }
-    std::wstring error;
-    if (!InstallWebView2WithProgress(error)) {
-        InstallLog::LineFormat(L"WebView2 installation failed: %s",error.c_str());
-        std::wstring message=Text(IDS_RUNTIME_INSTALL_FAILED);
-        if (!error.empty()) message+=L"\r\n\r\n"+error;
-        MessageBoxW(nullptr,message.c_str(),Text(IDS_TITLE).c_str(),MB_OK|MB_ICONERROR);
-        return RuntimeGateResult::Failed;
-    }
-    InstallLog::Line(L"WebView2 Runtime installed; restarting GlassSetup");
-    if (!RelaunchCurrentSetup(error)) {
-        InstallLog::LineFormat(L"GlassSetup restart failed: %s",error.c_str());
-        std::wstring message=Text(IDS_RUNTIME_RESTART_FAILED);
-        if (!error.empty()) message+=L"\r\n\r\n"+error;
-        MessageBoxW(nullptr,message.c_str(),Text(IDS_TITLE).c_str(),MB_OK|MB_ICONERROR);
-        return RuntimeGateResult::Failed;
-    }
-    return RuntimeGateResult::Restarted;
 }
 
 std::wstring JsStringLiteral(const std::wstring& value) {
@@ -756,585 +645,6 @@ constexpr INT GdiInt(T value) noexcept { return static_cast<INT>(value); }
 template <typename T>
 constexpr Gdiplus::REAL GdiReal(T value) noexcept { return static_cast<Gdiplus::REAL>(value); }
 
-using DrawThemeBackgroundFn = HRESULT(WINAPI*)(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
-using DrawThemeTextFn = HRESULT(WINAPI*)(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, DWORD, LPCRECT);
-using DrawTextExWFn = int(WINAPI*)(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
-PVOID g_originalDrawThemeBackground = nullptr;
-PVOID g_originalDrawThemeText = nullptr;
-DrawTextExWFn g_originalDrawTextExW = nullptr;
-HMODULE g_uxThemeModule = nullptr;
-bool g_themeDetoursInstalled = false;
-LONG g_themeDetourStatus = ERROR_PROC_NOT_FOUND;
-bool g_uxthemeDrawTextExImportFound = false;
-LONG g_uxthemeDrawTextExImportStatus = ERROR_PROC_NOT_FOUND;
-PVOID* g_uxthemeDrawTextExImportSlot = nullptr;
-std::recursive_mutex g_drawThemeTextHookMutex;
-unsigned g_drawTextExHookDepth = 0;
-bool g_drawTextExHookOwned = false;
-constexpr UINT_PTR kButtonSubclassId = 0x47505354;
-thread_local HWND g_dtbCurrentButton = nullptr;
-
-struct ThemeTextCallState {
-    int part = 0;
-    int state = 0;
-    HWND button = nullptr;
-    bool focusedBlue = false;
-    bool active = false;
-};
-// Keep the DrawThemeText part/state on the painting thread; nested and concurrent paints must not collide.
-thread_local ThemeTextCallState g_themeTextCallState{};
-
-#ifdef _DEBUG
-std::atomic_bool g_dtbAnyCallLogged{false};
-std::atomic_bool g_dtbButtonCallLogged{false};
-std::atomic_bool g_dtbCacheHitLogged{false};
-std::atomic_uint g_drawThemeTextStateLogMask{0};
-std::atomic_uint g_drawTextExStateLogMask{0};
-#endif
-
-struct ButtonSkin {
-    COLORREF top;
-    COLORREF bottom;
-    COLORREF border;
-    COLORREF highlight;
-    BYTE opacity;
-};
-
-ButtonSkin ButtonSkinFor(bool focusedBlue, int state) noexcept {
-    if (focusedBlue) {
-        switch (state) {
-        case PBS_HOT: return {RGB(62,137,207),RGB(37,86,145),RGB(132,205,255),RGB(217,243,255),255};
-        case PBS_PRESSED: return {RGB(30,77,127),RGB(24,57,98),RGB(80,161,226),RGB(122,191,239),255};
-        case PBS_DISABLED: return {RGB(43,58,75),RGB(31,40,56),RGB(69,89,111),RGB(84,108,132),150};
-        case PBS_DEFAULTED:
-        case PBS_DEFAULTED_ANIMATING: return {RGB(51,119,183),RGB(34,76,129),RGB(112,195,255),RGB(209,239,255),255};
-        default: return {RGB(47,109,171),RGB(32,73,124),RGB(93,180,247),RGB(198,231,255),255};
-        }
-    }
-    switch (state) {
-    case PBS_HOT: return {RGB(58,62,89),RGB(34,37,63),RGB(132,139,179),RGB(205,207,232),255};
-    case PBS_PRESSED: return {RGB(21,23,42),RGB(32,35,56),RGB(84,90,126),RGB(110,115,148),255};
-    case PBS_DISABLED: return {RGB(30,32,47),RGB(23,25,39),RGB(62,65,86),RGB(75,78,98),150};
-    case PBS_DEFAULTED:
-    case PBS_DEFAULTED_ANIMATING: return {RGB(47,49,72),RGB(27,29,49),RGB(119,125,164),RGB(190,192,218),255};
-    default: return {RGB(42,45,67),RGB(25,27,47),RGB(91,96,132),RGB(165,170,202),255};
-    }
-}
-
-COLORREF MixColor(COLORREF from, COLORREF to, double amount) noexcept {
-    amount = std::clamp(amount, 0.0, 1.0);
-    const auto mix = [amount](BYTE a, BYTE b) {
-        return static_cast<BYTE>(std::lround(a + (b - a) * amount));
-    };
-    return RGB(mix(GetRValue(from),GetRValue(to)),
-               mix(GetGValue(from),GetGValue(to)),
-               mix(GetBValue(from),GetBValue(to)));
-}
-
-bool InsideRoundedRect(double x, double y, double width, double height, double radius) noexcept {
-    if (x < 0.0 || y < 0.0 || x >= width || y >= height) return false;
-    const double cx = std::clamp(x, radius, width - radius);
-    const double cy = std::clamp(y, radius, height - radius);
-    const double dx = x - cx, dy = y - cy;
-    return dx * dx + dy * dy <= radius * radius;
-}
-
-void RasterizeButtonImage(DWORD* pixels, int width, int height, bool focusedBlue, int state) noexcept {
-    if (!pixels || width <= 0 || height <= 0) return;
-    const ButtonSkin skin = ButtonSkinFor(focusedBlue,state);
-    constexpr int kSamples = 4;
-    constexpr int kSampleCount = kSamples * kSamples;
-    const double radius = std::min(7.5, std::min(width,height) / 3.0);
-    const double innerRadius = std::max(1.0,radius - 1.25);
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            unsigned alphaSum = 0, redSum = 0, greenSum = 0, blueSum = 0;
-            for (int sy = 0; sy < kSamples; ++sy) {
-                for (int sx = 0; sx < kSamples; ++sx) {
-                    const double px = x + (sx + 0.5) / kSamples;
-                    const double py = y + (sy + 0.5) / kSamples;
-                    if (!InsideRoundedRect(px,py,width,height,radius)) continue;
-                    const bool border = !InsideRoundedRect(px - 1.25,py - 1.25,
-                        width - 2.5,height - 2.5,innerRadius);
-                    const double vertical = height > 1 ? py / (height - 1.0) : 0.0;
-                    COLORREF color = border ? skin.border : MixColor(skin.top,skin.bottom,vertical);
-                    if (!border && state != PBS_PRESSED && py < 2.0)
-                        color = MixColor(color,skin.highlight,0.34);
-                    const unsigned opacity = skin.opacity;
-                    alphaSum += opacity;
-                    redSum += GetRValue(color) * opacity / 255;
-                    greenSum += GetGValue(color) * opacity / 255;
-                    blueSum += GetBValue(color) * opacity / 255;
-                }
-            }
-            const unsigned a = (alphaSum + kSampleCount / 2) / kSampleCount;
-            const unsigned r = (redSum + kSampleCount / 2) / kSampleCount;
-            const unsigned g = (greenSum + kSampleCount / 2) / kSampleCount;
-            const unsigned b = (blueSum + kSampleCount / 2) / kSampleCount;
-            // Little-endian BGRA with premultiplied RGB, ready for AC_SRC_ALPHA.
-            pixels[static_cast<size_t>(y) * width + x] =
-                (a << 24) | (r << 16) | (g << 8) | b;
-        }
-    }
-}
-
-class ButtonImageCache {
-    struct Entry {
-        int width = 0, height = 0, state = 0;
-        bool focusedBlue = false;
-        HDC dc = nullptr;
-        HBITMAP bitmap = nullptr;
-        HGDIOBJ previous = nullptr;
-    };
-    std::vector<Entry> entries_;
-public:
-    ButtonImageCache() = default;
-    ButtonImageCache(const ButtonImageCache&) = delete;
-    ButtonImageCache& operator=(const ButtonImageCache&) = delete;
-    ~ButtonImageCache() { Reset(); }
-
-    void Reset() noexcept {
-        for (auto& entry : entries_) {
-            if (entry.dc) {
-                if (entry.previous && entry.previous != HGDI_ERROR)
-                    SelectObject(entry.dc,entry.previous);
-                DeleteDC(entry.dc);
-            }
-            if (entry.bitmap) DeleteObject(entry.bitmap);
-        }
-        entries_.clear();
-    }
-
-    bool Build(HDC reference, const std::vector<int>& widths, int height) noexcept {
-        Reset();
-        if (!reference || height <= 0 || widths.empty()) return false;
-        static constexpr int states[] = {
-            PBS_NORMAL,PBS_HOT,PBS_PRESSED,PBS_DISABLED,PBS_DEFAULTED,PBS_DEFAULTED_ANIMATING
-        };
-        try {
-            entries_.reserve(widths.size()*2*std::size(states));
-            for (int width : widths) {
-                if (width <= 0) continue;
-                if (std::any_of(entries_.begin(),entries_.end(),[&](const Entry& e) {
-                    return e.width == width && e.height == height;
-                })) continue;
-                for (bool blue : {false,true}) {
-                    for (int state : states) {
-                        Entry entry;
-                        entry.width = width; entry.height = height; entry.state = state;
-                        entry.focusedBlue = blue;
-                        entry.dc = CreateCompatibleDC(reference);
-                        if (!entry.dc) { Reset(); return false; }
-                        BITMAPINFO info{};
-                        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-                        info.bmiHeader.biWidth = width;
-                        info.bmiHeader.biHeight = -height;
-                        info.bmiHeader.biPlanes = 1;
-                        info.bmiHeader.biBitCount = 32;
-                        info.bmiHeader.biCompression = BI_RGB;
-                        void* bits = nullptr;
-                        entry.bitmap = CreateDIBSection(reference,&info,DIB_RGB_COLORS,&bits,nullptr,0);
-                        if (!entry.bitmap || !bits) {
-                            if (entry.bitmap) DeleteObject(entry.bitmap);
-                            DeleteDC(entry.dc);
-                            Reset();
-                            return false;
-                        }
-                        entry.previous = SelectObject(entry.dc,entry.bitmap);
-                        if (!entry.previous || entry.previous == HGDI_ERROR) {
-                            DeleteDC(entry.dc); DeleteObject(entry.bitmap); Reset(); return false;
-                        }
-                        RasterizeButtonImage(static_cast<DWORD*>(bits),width,height,blue,state);
-                        entries_.push_back(entry);
-                    }
-                }
-            }
-        } catch (...) {
-            Reset();
-            return false;
-        }
-        return !entries_.empty();
-    }
-
-    size_t EntryCount() const noexcept { return entries_.size(); }
-
-    bool Contains(int width, int height, int state, bool focusedBlue) const noexcept {
-        return std::any_of(entries_.begin(),entries_.end(),[&](const Entry& entry) {
-            return entry.width == width && entry.height == height && entry.state == state &&
-                   entry.focusedBlue == focusedBlue;
-        });
-    }
-
-    bool Draw(HDC destination, LPCRECT rect, LPCRECT clip, int state, bool focusedBlue) const noexcept {
-        if (!destination || !rect || IsRectEmpty(rect)) return false;
-        const int width = rect->right - rect->left;
-        const int height = rect->bottom - rect->top;
-        auto found = std::find_if(entries_.begin(),entries_.end(),[&](const Entry& entry) {
-            return entry.width == width && entry.height == height && entry.state == state &&
-                   entry.focusedBlue == focusedBlue;
-        });
-        if (found == entries_.end()) return false;
-        RECT clipped = *rect;
-        if (clip && !IntersectRect(&clipped,rect,clip)) return true;
-        const int drawWidth = clipped.right - clipped.left;
-        const int drawHeight = clipped.bottom - clipped.top;
-        const int sourceX = clipped.left - rect->left;
-        const int sourceY = clipped.top - rect->top;
-        const BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};
-        return AlphaBlend(destination,clipped.left,clipped.top,drawWidth,drawHeight,
-            found->dc,sourceX,sourceY,drawWidth,drawHeight,blend) != FALSE;
-    }
-};
-
-ButtonImageCache g_buttonImageCache;
-
-void PaintFooterBackdropForButton(HDC dc, HWND button, LPCRECT rect, LPCRECT clip) noexcept {
-    if (!dc || !button || !rect || !gRootWindow || GetAncestor(button,GA_ROOT) != gRootWindow)
-        return;
-    POINT buttonOrigin{0,0};
-    MapWindowPoints(button,gRootWindow,&buttonOrigin,1);
-    const UINT dpi = GetDpiForWindow(gRootWindow);
-    const int footerTop = MulDiv(kContentHeight,static_cast<int>(dpi),96);
-    const int footerBottom = MulDiv(kHeight,static_cast<int>(dpi),96);
-    RECT paint = *rect;
-    if (clip && !IntersectRect(&paint,rect,clip)) return;
-    const int saved = SaveDC(dc);
-    IntersectClipRect(dc,paint.left,paint.top,paint.right,paint.bottom);
-    Gdiplus::Graphics graphics(dc);
-    graphics.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
-    Gdiplus::LinearGradientBrush backdrop(
-        Gdiplus::Point(paint.left,footerTop-buttonOrigin.y),
-        Gdiplus::Point(paint.left,footerBottom-buttonOrigin.y),
-        Gdiplus::Color(255,GetRValue(kFooterTop),GetGValue(kFooterTop),GetBValue(kFooterTop)),
-        Gdiplus::Color(255,GetRValue(kFooterBottom),GetGValue(kFooterBottom),GetBValue(kFooterBottom)));
-    graphics.FillRectangle(&backdrop,GdiInt(paint.left),GdiInt(paint.top),
-        GdiInt(paint.right-paint.left),GdiInt(paint.bottom-paint.top));
-    RestoreDC(dc,saved);
-}
-
-LRESULT CALLBACK GlassButtonSubclassProc(HWND hwnd, UINT message, WPARAM wParam,
-                                          LPARAM lParam, UINT_PTR subclassId, DWORD_PTR reference) {
-    // Some BUTTON implementations repaint synchronously while handling WM_ENABLE or state changes,
-    // before a separate WM_PAINT arrives. Keep the originating HWND scoped for every message.
-    HWND previous = g_dtbCurrentButton;
-    g_dtbCurrentButton = hwnd;
-    const LRESULT result = DefSubclassProc(hwnd,message,wParam,lParam);
-    g_dtbCurrentButton = previous;
-    return result;
-}
-
-bool IsActiveFocusedButton(HWND button) noexcept {
-    return button && IsWindow(button) && button == GetFocus() && IsWindowEnabled(button) &&
-           GetAncestor(button,GA_ROOT) == gRootWindow && GetForegroundWindow() == gRootWindow;
-}
-
-COLORREF ButtonTextColorForThemeState(int part, int state, bool focusedBlue) noexcept {
-    if (part != BP_PUSHBUTTON) return RGB(239,237,249);
-    if (state == PBS_DISABLED) return RGB(143,147,166);
-    if (focusedBlue) {
-        switch (state) {
-        case PBS_HOT: return RGB(255,255,255);
-        case PBS_PRESSED: return RGB(229,243,255);
-        case PBS_DEFAULTED:
-        case PBS_DEFAULTED_ANIMATING: return RGB(250,252,255);
-        default: return RGB(246,250,255);
-        }
-    }
-    switch (state) {
-    case PBS_HOT: return RGB(250,250,255);
-    case PBS_PRESSED: return RGB(222,224,239);
-    case PBS_DEFAULTED:
-    case PBS_DEFAULTED_ANIMATING: return RGB(246,245,253);
-    default: return RGB(239,237,249);
-    }
-}
-
-int WINAPI HookDrawTextExW(HDC dc, LPWSTR text, int textLength, LPRECT textRect,
-                           UINT format, LPDRAWTEXTPARAMS params) {
-    const auto original = g_originalDrawTextExW;
-    if (!original) return 0;
-    const ThemeTextCallState drawState = g_themeTextCallState;
-    if (!dc || !drawState.active || drawState.part != BP_PUSHBUTTON ||
-        !drawState.button || !IsWindow(drawState.button))
-        return original(dc,text,textLength,textRect,format,params);
-
-    const COLORREF textColor = ButtonTextColorForThemeState(
-        drawState.part,drawState.state,drawState.focusedBlue);
-    const COLORREF previousTextColor = SetTextColor(dc,textColor);
-#ifdef _DEBUG
-    const unsigned stateIndex=static_cast<unsigned>(drawState.state)&7u;
-    const unsigned logBit=1u << (stateIndex+(drawState.focusedBlue?8u:0u));
-    if (!(g_drawTextExStateLogMask.fetch_or(logBit,std::memory_order_relaxed)&logBit))
-        InstallLog::LineFormat(L"UxTheme DrawTextExW button text: hwnd=%p part=%d state=%d focusedBlue=%d color=0x%06X",
-            drawState.button,drawState.part,drawState.state,drawState.focusedBlue?1:0,
-            static_cast<unsigned>(textColor));
-#endif
-    const int result = original(dc,text,textLength,textRect,format,params);
-    if (previousTextColor != CLR_INVALID) SetTextColor(dc,previousTextColor);
-    return result;
-}
-
-// Locate UxTheme's import slot once; it is swapped only for the duration of DrawThemeText.
-bool IsUser32ImportLibrary(LPCSTR moduleName) noexcept {
-    if (!moduleName) return false;
-    if (_stricmp(moduleName,"USER32.dll") == 0) return true;
-    static constexpr char apiSetPrefix[] = "API-MS-WIN-NTUSER-";
-    static constexpr char extSetPrefix[] = "EXT-MS-WIN-NTUSER-";
-    return _strnicmp(moduleName,apiSetPrefix,sizeof(apiSetPrefix)-1) == 0 ||
-           _strnicmp(moduleName,extSetPrefix,sizeof(extSetPrefix)-1) == 0;
-}
-
-struct UxThemeDrawTextImportScan {
-    bool currentFileIsUser32 = false;
-    PVOID* slot = nullptr;
-    PVOID original = nullptr;
-    unsigned matches = 0;
-};
-
-BOOL CALLBACK UxThemeImportFileCallback(PVOID context, HMODULE importedModule, LPCSTR importedFile) {
-    (void)importedModule;
-    auto* scan = static_cast<UxThemeDrawTextImportScan*>(context);
-    if (!scan) return FALSE;
-    scan->currentFileIsUser32 = IsUser32ImportLibrary(importedFile);
-    return TRUE;
-}
-
-BOOL CALLBACK UxThemeImportFuncCallbackEx(PVOID context, DWORD ordinal, LPCSTR functionName,
-                                          PVOID* iatSlot) {
-    (void)ordinal;
-    auto* scan = static_cast<UxThemeDrawTextImportScan*>(context);
-    if (!scan || !scan->currentFileIsUser32 || !functionName || !iatSlot ||
-        _stricmp(functionName,"DrawTextExW") != 0)
-        return TRUE;
-    ++scan->matches;
-    if (!scan->slot) {
-        scan->slot = iatSlot;
-        scan->original = *iatSlot;
-    }
-    return TRUE;
-}
-
-bool LocateUxThemeDrawTextExImport() noexcept {
-    if (g_uxthemeDrawTextExImportFound) return true;
-    if (!g_uxThemeModule) {
-        g_uxthemeDrawTextExImportStatus = ERROR_MOD_NOT_FOUND;
-        return false;
-    }
-    UxThemeDrawTextImportScan scan;
-    SetLastError(ERROR_SUCCESS);
-    const BOOL enumerated = DetourEnumerateImportsEx(
-        g_uxThemeModule,&scan,UxThemeImportFileCallback,UxThemeImportFuncCallbackEx);
-    if (!enumerated) {
-        const DWORD error = GetLastError();
-        g_uxthemeDrawTextExImportStatus = error ? static_cast<LONG>(error) : ERROR_BAD_EXE_FORMAT;
-        return false;
-    }
-    if (!scan.slot || !scan.original) {
-        g_uxthemeDrawTextExImportStatus = ERROR_PROC_NOT_FOUND;
-        return false;
-    }
-    g_uxthemeDrawTextExImportSlot = scan.slot;
-    g_originalDrawTextExW = reinterpret_cast<DrawTextExWFn>(scan.original);
-    g_uxthemeDrawTextExImportFound = true;
-    g_uxthemeDrawTextExImportStatus = NO_ERROR;
-    InstallLog::LineFormat(L"UxTheme DrawTextExW IAT target found: slot=%p original=%p matches=%u",
-        g_uxthemeDrawTextExImportSlot,reinterpret_cast<PVOID>(g_originalDrawTextExW),scan.matches);
-    return true;
-}
-
-bool ExchangeUxThemeDrawTextExImport(PVOID expected, PVOID replacement, LONG& status) noexcept {
-    status = NO_ERROR;
-    if (!g_uxthemeDrawTextExImportSlot || !expected || !replacement) {
-        status = ERROR_INVALID_PARAMETER;
-        return false;
-    }
-    DWORD oldProtection = 0;
-    if (!VirtualProtect(g_uxthemeDrawTextExImportSlot,sizeof(PVOID),PAGE_READWRITE,&oldProtection)) {
-        status = static_cast<LONG>(GetLastError());
-        return false;
-    }
-    const PVOID previous = InterlockedCompareExchangePointer(
-        reinterpret_cast<PVOID volatile*>(g_uxthemeDrawTextExImportSlot),replacement,expected);
-    const bool swapped = previous == expected || previous == replacement;
-    DWORD ignoredProtection = 0;
-    if (!VirtualProtect(g_uxthemeDrawTextExImportSlot,sizeof(PVOID),oldProtection,&ignoredProtection) &&
-        status == NO_ERROR)
-        status = static_cast<LONG>(GetLastError());
-    if (!swapped && status == NO_ERROR) status = ERROR_BUSY;
-    return swapped;
-}
-
-bool BeginDrawTextExHook() noexcept {
-    if (!g_uxthemeDrawTextExImportFound || !g_uxthemeDrawTextExImportSlot ||
-        !g_originalDrawTextExW) {
-        g_uxthemeDrawTextExImportStatus = ERROR_PROC_NOT_FOUND;
-        return false;
-    }
-    if (g_drawTextExHookDepth) {
-        ++g_drawTextExHookDepth;
-        return true;
-    }
-    const PVOID hook = reinterpret_cast<PVOID>(&HookDrawTextExW);
-    const PVOID original = reinterpret_cast<PVOID>(g_originalDrawTextExW);
-    LONG status = NO_ERROR;
-    if (!ExchangeUxThemeDrawTextExImport(original,hook,status)) {
-        g_uxthemeDrawTextExImportStatus = status;
-        return false;
-    }
-    g_drawTextExHookOwned = true;
-    g_drawTextExHookDepth = 1;
-    g_uxthemeDrawTextExImportStatus = status;
-    return true;
-}
-
-void EndDrawTextExHook() noexcept {
-    if (!g_drawTextExHookDepth) return;
-    if (--g_drawTextExHookDepth) return;
-    if (!g_drawTextExHookOwned) return;
-    const PVOID hook = reinterpret_cast<PVOID>(&HookDrawTextExW);
-    const PVOID original = reinterpret_cast<PVOID>(g_originalDrawTextExW);
-    LONG status = NO_ERROR;
-    if (!ExchangeUxThemeDrawTextExImport(hook,original,status)) {
-        g_uxthemeDrawTextExImportStatus = status;
-        InstallLog::LineFormat(L"UxTheme DrawTextExW IAT restore failed: status=%ld",
-                              g_uxthemeDrawTextExImportStatus);
-        return;
-    }
-    g_drawTextExHookOwned = false;
-    g_uxthemeDrawTextExImportStatus = status;
-}
-
-class ScopedThemeTextHook {
-    std::unique_lock<std::recursive_mutex> lock_;
-    ThemeTextCallState previous_{};
-    bool active_ = false;
-public:
-    explicit ScopedThemeTextHook(const ThemeTextCallState& state)
-        : lock_(g_drawThemeTextHookMutex), previous_(g_themeTextCallState) {
-        g_themeTextCallState = state;
-        active_ = BeginDrawTextExHook();
-        if (!active_) g_themeTextCallState = previous_;
-    }
-    ScopedThemeTextHook(const ScopedThemeTextHook&) = delete;
-    ScopedThemeTextHook& operator=(const ScopedThemeTextHook&) = delete;
-    ~ScopedThemeTextHook() {
-        if (!active_) return;
-        g_themeTextCallState = previous_;
-        EndDrawTextExHook();
-    }
-};
-
-HRESULT WINAPI HookDrawThemeText(HTHEME theme, HDC dc, int part, int state,
-                                 LPCWSTR text, int textLength, DWORD textFlags,
-                                 DWORD textFlags2, LPCRECT textRect) {
-    const auto original = reinterpret_cast<DrawThemeTextFn>(g_originalDrawThemeText);
-    if (!original) return E_UNEXPECTED;
-    HWND button = g_dtbCurrentButton;
-    const bool validButton = button && IsWindow(button);
-    const DWORD buttonType = validButton ?
-        (static_cast<DWORD>(GetWindowLongPtrW(button,GWL_STYLE)) & BS_TYPEMASK) : 0xFFFFFFFFu;
-    const bool ourPushButton = validButton && GetAncestor(button,GA_ROOT) == gRootWindow &&
-        (buttonType == BS_PUSHBUTTON || buttonType == BS_DEFPUSHBUTTON);
-    const bool nestedThemeText = g_themeTextCallState.active;
-    if ((part != BP_PUSHBUTTON || !ourPushButton) && !nestedThemeText)
-        return original(theme,dc,part,state,text,textLength,textFlags,textFlags2,textRect);
-
-    HWND trackedButton = ourPushButton ? button : g_themeTextCallState.button;
-    const ThemeTextCallState drawState{part,state,trackedButton,
-                                       IsActiveFocusedButton(trackedButton),true};
-#ifdef _DEBUG
-    const unsigned stateIndex=static_cast<unsigned>(state)&7u;
-    const unsigned logBit=1u << (stateIndex+(drawState.focusedBlue?8u:0u));
-    if (!(g_drawThemeTextStateLogMask.fetch_or(logBit,std::memory_order_relaxed)&logBit))
-        InstallLog::LineFormat(L"UxTheme DrawThemeText button state: hwnd=%p part=%d state=%d focusedBlue=%d",
-            trackedButton,part,state,drawState.focusedBlue?1:0);
-#endif
-    ScopedThemeTextHook scopedHook(drawState);
-    (void)scopedHook; // Keep the scoped IAT interception active across the original themed draw.
-    return original(theme,dc,part,state,text,textLength,textFlags,textFlags2,textRect);
-}
-
-HRESULT WINAPI HookDrawThemeBackground(HTHEME theme, HDC dc, int part, int state,
-                                       LPCRECT rect, LPCRECT clip) {
-    const auto original = reinterpret_cast<DrawThemeBackgroundFn>(g_originalDrawThemeBackground);
-    if (!original) return E_UNEXPECTED;
-    wchar_t themeClass[MAX_PATH]{L"?"};
-    const HRESULT classHr = theme ? Shared::ThemeHelper::GetThemeClass(theme,themeClass,MAX_PATH) : E_INVALIDARG;
-    const bool buttonTheme = SUCCEEDED(classHr) && _wcsicmp(themeClass,L"Button") == 0;
-#ifdef _DEBUG
-    if (!g_dtbAnyCallLogged.exchange(true,std::memory_order_relaxed))
-        InstallLog::LineFormat(L"DTB Detour reached: class=%s classHr=0x%08X part=%d state=%d",
-            themeClass,static_cast<unsigned>(classHr),part,state);
-    if (buttonTheme && !g_dtbButtonCallLogged.exchange(true,std::memory_order_relaxed))
-        InstallLog::LineFormat(L"Button DTB found: theme=%p part=%d state=%d rect=[%d,%d,%d,%d]",
-            theme,part,state,rect?rect->left:-1,rect?rect->top:-1,
-            rect?rect->right:-1,rect?rect->bottom:-1);
-#endif
-    if (buttonTheme && part == BP_PUSHBUTTON && dc && rect && !IsRectEmpty(rect)) {
-        HWND button = g_dtbCurrentButton;
-        if (!button || GetAncestor(button,GA_ROOT) != gRootWindow)
-            button = WindowFromDC(dc);
-        const bool activeFocus = button && button == GetFocus() &&
-            IsWindowEnabled(button) && GetAncestor(button,GA_ROOT) == gRootWindow &&
-            GetForegroundWindow() == gRootWindow;
-        if (g_buttonImageCache.Contains(rect->right-rect->left,rect->bottom-rect->top,
-                                        state,activeFocus)) {
-            PaintFooterBackdropForButton(dc,button,rect,clip);
-            if (g_buttonImageCache.Draw(dc,rect,clip,state,activeFocus)) {
-#ifdef _DEBUG
-                if (!g_dtbCacheHitLogged.exchange(true,std::memory_order_relaxed))
-                    InstallLog::LineFormat(L"Button DTB cached image: state=%d palette=%s size=%dx%d",
-                        state,activeFocus?L"focused-blue":L"neutral",
-                        rect->right-rect->left,rect->bottom-rect->top);
-#endif
-                return S_OK;
-            }
-        }
-    }
-    return original(theme,dc,part,state,rect,clip);
-}
-
-bool InstallThemeDetours() noexcept {
-    if (!g_uxThemeModule) {
-        g_uxThemeModule=LoadLibraryW(L"uxtheme.dll");
-        if (!g_uxThemeModule) {
-            g_themeDetourStatus=static_cast<LONG>(GetLastError());
-            g_uxthemeDrawTextExImportStatus=g_themeDetourStatus;
-            return false;
-        }
-    }
-    if (!g_originalDrawThemeBackground)
-        g_originalDrawThemeBackground=reinterpret_cast<PVOID>(GetProcAddress(g_uxThemeModule,"DrawThemeBackground"));
-    if (!g_originalDrawThemeText)
-        g_originalDrawThemeText=reinterpret_cast<PVOID>(GetProcAddress(g_uxThemeModule,"DrawThemeText"));
-    if (!g_originalDrawThemeBackground || !g_originalDrawThemeText) {
-        g_themeDetourStatus=static_cast<LONG>(GetLastError());
-        if (g_themeDetourStatus == NO_ERROR) g_themeDetourStatus=ERROR_PROC_NOT_FOUND;
-    }
-    const bool importFound=LocateUxThemeDrawTextExImport();
-    if (!g_themeDetoursInstalled && g_originalDrawThemeBackground && g_originalDrawThemeText) {
-        DetourSetIgnoreTooSmall(TRUE);
-        LONG status=DetourTransactionBegin();
-        const bool transactionStarted=status==NO_ERROR;
-        if (status==NO_ERROR) status=DetourUpdateThread(GetCurrentThread());
-        if (status==NO_ERROR)
-            status=DetourAttach(&g_originalDrawThemeBackground,
-                                reinterpret_cast<PVOID>(HookDrawThemeBackground));
-        if (status==NO_ERROR)
-            status=DetourAttach(&g_originalDrawThemeText,
-                                reinterpret_cast<PVOID>(HookDrawThemeText));
-        if (status!=NO_ERROR) {
-            g_themeDetourStatus=status;
-            if (transactionStarted) DetourTransactionAbort();
-        } else {
-            status=DetourTransactionCommit();
-            g_themeDetourStatus=status;
-            g_themeDetoursInstalled=status==NO_ERROR;
-        }
-    }
-    return g_themeDetoursInstalled && importFound;
-}
-
 std::wstring FormatVersionPairText(UINT resourceId, const std::wstring& first,
                                    const std::wstring& second) {
     const std::wstring pattern=Text(resourceId);
@@ -1356,15 +666,16 @@ std::wstring FormatUpdateBody(const std::wstring& self, const std::wstring& late
 
 struct InstallRootCandidate {
     std::wstring path;
-    bool fromRegistry = false;
 };
 
 struct InstalledGlassVersionInfo {
+    bool rootsResolved = false;
     bool detected = false;
     bool valid = false;
     bool hasUnreadableInstallation = false;
     std::wstring version;
     std::wstring modulePath;
+    std::wstring x64Root, x86Root, openGlassRoot;
     ParsedVersion parsed{};
 };
 
@@ -1385,87 +696,78 @@ bool ReadRegistryString(HKEY key, const wchar_t* valueName, std::wstring& value,
     return !value.empty();
 }
 
-bool ReadInstallRootFromRegistry(HKEY hive, const wchar_t* keyPath, REGSAM view,
-                                 std::wstring& out) {
-    HKEY key = nullptr;
-    if (RegOpenKeyExW(hive,keyPath,0,KEY_READ|view,&key) != ERROR_SUCCESS) return false;
-    DWORD type = 0;
-    std::wstring value;
-    const bool ok = ReadRegistryString(key,L"InstallPath",value,&type);
-    RegCloseKey(key);
-    if (!ok) return false;
-    if (type == REG_EXPAND_SZ) {
-        const DWORD needed = ExpandEnvironmentStringsW(value.c_str(),nullptr,0);
-        if (!needed || needed > 32768) return false;
-        std::wstring expanded(needed,L'\0');
-        if (!ExpandEnvironmentStringsW(value.c_str(),expanded.data(),needed)) return false;
-        expanded.resize(wcslen(expanded.c_str()));
-        value=std::move(expanded);
-    }
-    while (!value.empty() && (value.back()==L'\\' || value.back()==L'/')) value.pop_back();
-    out=std::move(value);
-    return !out.empty();
-}
-
-void AddInstallRoot(std::vector<InstallRootCandidate>& roots, std::wstring path, bool fromRegistry) {
+void AddInstallRoot(std::vector<InstallRootCandidate>& roots, std::wstring path) {
     while (!path.empty() && (path.back()==L'\\' || path.back()==L'/')) path.pop_back();
     if (path.empty()) return;
-    for (auto& root : roots) {
-        if (_wcsicmp(root.path.c_str(),path.c_str())==0) {
-            root.fromRegistry = root.fromRegistry || fromRegistry;
-            return;
-        }
-    }
-    roots.push_back({std::move(path),fromRegistry});
+    for (const auto& root : roots)
+        if (_wcsicmp(root.path.c_str(),path.c_str())==0) return;
+    roots.push_back({std::move(path)});
 }
 
-std::vector<InstallRootCandidate> InstalledGlassRoots() {
-    std::vector<InstallRootCandidate> roots;
-    const REGSAM views[] = {KEY_WOW64_64KEY,KEY_WOW64_32KEY};
-    for (REGSAM view : views) {
-        std::wstring path;
-        if (ReadInstallRootFromRegistry(HKEY_CURRENT_USER,L"Software\\GlassPlatform",view,path))
-            AddInstallRoot(roots,std::move(path),true);
+bool InstalledGlassRoots(std::vector<InstallRootCandidate>& roots,
+    std::wstring& x64, std::wstring& x86, std::wstring& openGlass) {
+    GlassInstallUtil::InstallRoots resolved;
+    if (!GlassInstallUtil::ResolveInstallRoots(resolved)) {
+        InstallLog::LineFormat(L"Preflight: installation roots unavailable (error %lu)",GetLastError());
+        return false;
     }
-    wchar_t program64[MAX_PATH]{};
-    DWORD chars=GetEnvironmentVariableW(L"ProgramW6432",program64,MAX_PATH);
-    if (chars && chars<MAX_PATH) {
-        AddInstallRoot(roots,std::wstring(program64)+L"\\GlassPlatform",false);
-        AddInstallRoot(roots,std::wstring(program64)+L"\\Glass",false);
-    }
-    PWSTR program32=nullptr;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX86,KF_FLAG_DEFAULT,nullptr,&program32)) && program32) {
-        AddInstallRoot(roots,std::wstring(program32)+L"\\GlassPlatform",false);
-        AddInstallRoot(roots,std::wstring(program32)+L"\\Glass",false);
-        CoTaskMemFree(program32);
-    }
-    return roots;
+    x64=resolved.x64; x86=resolved.x86; openGlass=resolved.openGlass;
+    InstallLog::LineFormat(L"Preflight: x64=%s (%s) x86=%s (%s) OpenGlass=%s (%s)",
+        x64.c_str(),resolved.sourceX64.c_str(),x86.c_str(),resolved.sourceX86.c_str(),
+        openGlass.c_str(),resolved.sourceOpenGlass.c_str());
+    // The resolved product paths are authoritative; do not add task paths,
+    // sibling directories or a second, guessed installation destination.
+    AddInstallRoot(roots,x64);
+    AddInstallRoot(roots,x86);
+    return true;
 }
 
 bool GlassInstallRegistrationExists() {
-    for (REGSAM view : {KEY_WOW64_64KEY,KEY_WOW64_32KEY}) {
-        HKEY key=nullptr;
-        if (RegOpenKeyExW(HKEY_CURRENT_USER,L"Software\\GlassPlatform",0,
-                          KEY_READ|view,&key)==ERROR_SUCCESS) {
-            RegCloseKey(key);
-            return true;
-        }
+    return GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX64) ||
+        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX86) ||
+        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX64) ||
+        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX86);
+}
+
+bool InspectInstalledMarker(const std::wstring& path, bool& exists) {
+    exists=false;
+    const DWORD attributes=GetFileAttributesW(path.c_str());
+    if (attributes==INVALID_FILE_ATTRIBUTES) {
+        const DWORD error=GetLastError();
+        if (error==ERROR_FILE_NOT_FOUND || error==ERROR_PATH_NOT_FOUND) return true;
+        InstallLog::LineFormat(L"Preflight: cannot inspect %s (error %lu)",path.c_str(),error);
+        return false;
     }
-    return false;
+    if ((attributes&FILE_ATTRIBUTE_DIRECTORY) || !GlassInstallUtil::IsSafeInstallPath(path)) {
+        InstallLog::LineFormat(L"Preflight: unsafe or non-file marker %s",path.c_str());
+        return false;
+    }
+    exists=true;
+    return true;
 }
 
 InstalledGlassVersionInfo FindInstalledGlassVersion() {
     InstalledGlassVersionInfo result;
+    std::vector<InstallRootCandidate> roots;
+    result.rootsResolved=InstalledGlassRoots(roots,result.x64Root,result.x86Root,result.openGlassRoot);
+    if (!result.rootsResolved) return result;
     const bool registered=GlassInstallRegistrationExists();
-    bool registryPathExamined=false;
-    for (const auto& root : InstalledGlassRoots()) {
-        registryPathExamined=registryPathExamined || root.fromRegistry;
+    InstallLog::LineFormat(L"Preflight: platform MSI registered=%d",registered?1:0);
+    for (const auto& root : roots) {
         const std::wstring corePath=root.path+L"\\GlassCore.dll";
-        const bool coreExists=GetFileAttributesW(corePath.c_str())!=INVALID_FILE_ATTRIBUTES;
-        const bool markerExists=coreExists ||
-            GetFileAttributesW((root.path+L"\\GlassCompat.dll").c_str())!=INVALID_FILE_ATTRIBUTES ||
-            GetFileAttributesW((root.path+L"\\GlassShellHost.exe").c_str())!=INVALID_FILE_ATTRIBUTES;
-        if (!coreExists && !root.fromRegistry && !markerExists) continue;
+        bool coreExists=false, compatExists=false, shellExists=false;
+        const bool coreChecked=InspectInstalledMarker(corePath,coreExists);
+        const bool compatChecked=InspectInstalledMarker(root.path+L"\\GlassCompat.dll",compatExists);
+        const bool shellChecked=InspectInstalledMarker(root.path+L"\\GlassShellHost.exe",shellExists);
+        InstallLog::LineFormat(L"Preflight: root=%s core=%d compat=%d shell=%d checked=%d",
+            root.path.c_str(),coreExists?1:0,compatExists?1:0,shellExists?1:0,
+            coreChecked && compatChecked && shellChecked ? 1 : 0);
+        if (!coreChecked || !compatChecked || !shellChecked) {
+            result.detected=true;
+            result.hasUnreadableInstallation=true;
+            continue;
+        }
+        if (!coreExists && !compatExists && !shellExists) continue;
         result.detected=true;
         if (!coreExists) {
             result.hasUnreadableInstallation=true;
@@ -1476,18 +778,20 @@ InstalledGlassVersionInfo FindInstalledGlassVersion() {
         const std::wstring version=ReadProductVersionString(corePath,key);
         ParsedVersion parsed{};
         if (version.empty() || !TryParseVersion(version,parsed)) {
+            InstallLog::LineFormat(L"Preflight: ProductVersion unavailable or invalid: %s",corePath.c_str());
             result.hasUnreadableInstallation=true;
             continue;
         }
+        InstallLog::LineFormat(L"Preflight: installed ProductVersion %s from %s",version.c_str(),corePath.c_str());
         if (result.version.empty() || CompareVersions(parsed,result.parsed)>0) {
             result.version=version;
             result.modulePath=corePath;
             result.parsed=parsed;
         }
     }
-    if (registered && !registryPathExamined) {
-        // A registered installation with a missing/invalid InstallPath is still
-        // a discovered product; silently treating it as a fresh install could downgrade it.
+    if (registered && !result.detected) {
+        // A registered MSI with no readable files at the resolved roots has an
+        // unknown version; it is not proof of a broken installation.
         result.detected=true;
         result.hasUnreadableInstallation=true;
     }
@@ -1792,9 +1096,22 @@ public:
             std::max<LONG>(0,(mi.rcWork.bottom-mi.rcWork.top-finalHeight)/2));
         SetWindowPos(window,nullptr,finalX,finalY,finalWidth,finalHeight,SWP_NOZORDER | SWP_NOACTIVATE);
         ShowWindow(window, show);
-        UpdateWindow(window); // Первый кадр до WebView: тёмный фон, слайды появятся после готовности.
-        PostMessageW(window, kInitWebView, 0, 0);
+        // Paint the centered loading indicator before starting any expensive work.
+        UpdateWindow(window);
+        if (!PostMessageW(window,kBeginStartup,0,0)) {
+            DestroyWindow(window);
+            return false;
+        }
         return true;
+    }
+    void JoinStartup() {
+        {
+            std::lock_guard<std::mutex> lock(startupMutex_);
+            startupStop_.store(true,std::memory_order_release);
+        }
+        // Never wait for a slow MSI/registry query in WM_DESTROY: the window is
+        // already gone when this is called from the main loop's shutdown path.
+        if (startupThread_.joinable()) startupThread_.join();
     }
 private:
     Page page_ = Page::Welcome;
@@ -1802,27 +1119,54 @@ private:
     HWND back_ = nullptr, next_ = nullptr, cancel_ = nullptr;
     HWND updateDownload_ = nullptr, updateSkip_ = nullptr;
     HWND eula_ = nullptr, accept_ = nullptr, progress_ = nullptr, webHost_ = nullptr;
+    HWND component64_ = nullptr, component32_ = nullptr, componentSettings_ = nullptr, componentOpenGlass_ = nullptr;
     HFONT font_ = nullptr, heading_ = nullptr, small_ = nullptr, title_ = nullptr;
     HBRUSH darkBrush_ = nullptr, licenseBrush_ = nullptr, buttonBrush_ = nullptr;
     HBRUSH footerBrush_ = nullptr, footerRuleBrush_ = nullptr;
     HBRUSH progressFill_ = nullptr, progressTrack_ = nullptr;
     ComPtr<IStream> bannerStream_;
     std::unique_ptr<Gdiplus::Bitmap> banner_;
+    bool bannerLoaded_ = false;
     ComPtr<ICoreWebView2Environment> environment_;
     ComPtr<ICoreWebView2Controller> controller_;
     ComPtr<ICoreWebView2> web_;
     bool accepted_ = false, closing_ = false, webReady_ = false, webBridgeReady_ = false;
+    bool webInitSent_ = false;
+    std::wstring lastWebState_;
+    InstallEngine::ComponentSelection selection_{};
+    InstallEngine::ComponentSelection installedSelection_{};
+    GlassProducts::OpenGlassStartupState openGlassStartup_{};
+    std::wstring openGlassStartupDir_;
+    ULONGLONG lastWebPush_=0;
+    Page beforeCancel_ = Page::Installing;
+    ULONGLONG launchStarted_ = 0;
+    struct StartupResult {
+        bool ok = false, os64 = false, runtimeInstalled = false;
+        InstallEngine::ComponentSelection installed{};
+        GlassProducts::OpenGlassStartupState openGlass{};
+        std::wstring openGlassDir, platformVersion, eulaText;
+    };
+    std::thread startupThread_;
+    std::mutex startupMutex_;
+    std::atomic_bool startupStop_{false};
+    StartupResult startupResult_;
+    bool startupReady_ = false, startupPending_ = true, startupStarted_ = false;
+    bool controlsReady_ = false, loadingAnimationsEnabled_ = true;
+    std::thread runtimeThread_;
+    std::atomic_bool runtimeCancel_{false};
+    std::mutex runtimeMutex_;
+    std::wstring runtimeStatus_, runtimeError_;
+    bool runtimeSuccess_ = false;
+    std::wstring cancelledDetail_;
     std::wstring platformVersion_;
     std::wstring eulaText_;
     std::vector<std::wstring> conflicts_;
     std::wstring installedGlassVersion_;
     std::wstring setupProductVersion_;
+    std::wstring preflightX64Root_,preflightX86Root_,preflightOpenGlassRoot_;
     std::wstring blockReason_;
+    std::wstring versionInvalidNote_;
     std::wstring downgradeBody_;
-    VisualMode visualMode_ = VisualMode::Slideshow;
-    std::wstring unlockStatusLine_;
-    ULONGLONG unlockVisualUntil_ = 0;
-    bool unlockStatusObserved_ = false;
     struct VersionCheckResult {
         bool completed = false;
         bool fetched = false;
@@ -1836,8 +1180,6 @@ private:
     VersionCheckResult versionCheckResult_;
     bool versionCheckStarted_ = false, versionCheckHandled_ = false;
     bool updateAvailable_ = false, updateSkipped_ = false;
-    bool offerCleanInstall_ = false;
-    bool forceCleanInstall_ = false;
     bool failurePending_ = false;
     bool transitioning_ = false, bufferedErase_ = false;
     ULONGLONG fadeStarted_ = 0;
@@ -1847,14 +1189,22 @@ private:
     HRESULT webError_ = S_OK;
     ULONGLONG started_ = 0;
     int percent_ = 0, progressValue_ = 0, progressTarget_ = 0, displayProgress_ = 0;
+    WizardProgress::VisibleProgress visibleProgress_;
     bool progressReverse_ = false;
     double marqueePhase_ = 0;
     ULONGLONG progressTickMs_ = 0;
     bool progressMarquee_ = false;
-    bool progressFinishing_ = false;
+    WizardProgress::RollbackTracker rollbackProgress_;
+    bool rollbackFinishing_ = false;
+    ULONGLONG rollbackFinishStarted_ = 0;
+    int rollbackFinishFrom_ = 0;
     bool simulateInstall_ = false;
+#ifndef GLASS_EMBED_MSI
+    bool simulateRollback_ = false;
+    ULONGLONG simulateRollbackStarted_ = 0;
+#endif
 #ifdef _DEBUG
-    bool debugDemoPending_ = true, debugDemoStarted_ = false, debugDemoActive_ = false;
+    bool debugDemoPending_ = false, debugDemoStarted_ = false, debugDemoActive_ = false;
     size_t debugDemoStep_ = 0;
 #endif
     std::wstring installStatusLine_;
@@ -1878,24 +1228,8 @@ private:
             0,0,0,0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), gInstance, nullptr);
     }
     void AttachButtonSubclasses() {
-        for (HWND button : {back_,next_,cancel_,updateDownload_,updateSkip_}) {
-            if (button && !SetWindowSubclass(button,GlassButtonSubclassProc,kButtonSubclassId,0))
-                InstallLog::LineFormat(L"Could not subclass push button %p (%lu)",
-                    button,static_cast<unsigned long>(GetLastError()));
-        }
-    }
-    void BuildButtonImageCache() {
-        HDC reference=GetDC(window);
-        if (!reference) {
-            InstallLog::LineFormat(L"Button image cache skipped: GetDC failed (%lu)",
-                                   static_cast<unsigned long>(GetLastError()));
-            return;
-        }
-        const std::vector<int> widths={Scale(96),Scale(104),Scale(160)};
-        const bool built=g_buttonImageCache.Build(reference,widths,Scale(32));
-        ReleaseDC(window,reference);
-        InstallLog::LineFormat(L"Cached push-button image states %s (%zu entries, DPI %u)",
-            built?L"ready":L"unavailable",built?g_buttonImageCache.EntryCount():0u,dpi_);
+        for (HWND button : {back_,next_,cancel_,updateDownload_,updateSkip_})
+            WizardTheme::AttachButtonScope(button);
     }
     void InvalidatePushButtons() {
         for (HWND button:{back_,next_,cancel_,updateDownload_,updateSkip_})
@@ -1922,19 +1256,23 @@ private:
         };
         font_ = create(14,FW_NORMAL); small_ = create(12,FW_NORMAL);
         heading_ = create(28,FW_NORMAL); title_ = create(39,FW_LIGHT);
-        for (HWND c : {back_,next_,cancel_,eula_,accept_,updateDownload_,updateSkip_})
+        for (HWND c : {back_,next_,cancel_,eula_,accept_,updateDownload_,updateSkip_,component64_,component32_,componentSettings_,componentOpenGlass_})
             if (c) SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
-    void Initialize() {
-        dpi_ = GetDpiForWindow(window);
-        platformVersion_ = SelfProductVersion();
-        if (platformVersion_.empty())
-            platformVersion_ = PlatformVersionFromInstalledModules();
-        darkBrush_ = CreateSolidBrush(kDark);
+    void InitializeLoading() {
+        dpi_=GetDpiForWindow(window);
+        darkBrush_=CreateSolidBrush(kDark);
+        footerBrush_=CreateSolidBrush(kFooterTop);
+        footerRuleBrush_=CreateSolidBrush(RGB(74,71,109));
+        WizardTheme::ApplyDarkWindowChrome(window);
+        BOOL animationsEnabled=TRUE;
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
+        loadingAnimationsEnabled_=animationsEnabled!=FALSE;
+        if (loadingAnimationsEnabled_) SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
+    }
+    void InitializeControls() {
         licenseBrush_ = CreateSolidBrush(kLicensePanel);
         buttonBrush_ = CreateSolidBrush(kButtonBase);
-        footerBrush_ = CreateSolidBrush(kFooterTop);
-        footerRuleBrush_ = CreateSolidBrush(RGB(74,71,109));
         progressFill_ = CreateSolidBrush(RGB(144,127,230));
         progressTrack_ = CreateSolidBrush(RGB(42,45,67));
         back_ = Control(L"BUTTON",Text(IDS_BACK),BS_PUSHBUTTON | WS_TABSTOP,IDC_BACK);
@@ -1945,6 +1283,10 @@ private:
         eula_ = Control(L"EDIT",L"",WS_BORDER | WS_TABSTOP | ES_MULTILINE | ES_READONLY |
                          ES_AUTOVSCROLL | ES_LEFT | WS_VSCROLL,IDC_EULA);
         accept_ = Control(L"BUTTON",Text(IDS_ACCEPT),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_ACCEPT);
+        component64_ = Control(L"BUTTON",Text(IDS_COMP_P64_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT64);
+        component32_ = Control(L"BUTTON",Text(IDS_COMP_P32_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT32);
+        componentSettings_ = Control(L"BUTTON",Text(IDS_COMP_GS_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_SETTINGS);
+        componentOpenGlass_ = Control(L"BUTTON",Text(IDS_COMP_OG_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_OG);
         // Owner-drawn STATIC avoids the classic PROGRESS control's sunken border,
         // which would consume most/all of a 4 px high strip.
         progress_ = Control(L"STATIC",L"",SS_OWNERDRAW,IDC_PROGRESS);
@@ -1954,33 +1296,180 @@ private:
         SetWindowTheme(eula_,L"",nullptr);
         SendMessageW(window,DM_SETDEFID,IDC_NEXT,0);
         CreateFonts();
-        eulaText_ = Utf8(Resource(IDR_EULA,gLanguage));
-        eulaText_ += L"\r\n\r\n────────────────────────────────\r\n" +
-                     Text(IDS_GPL_APPENDIX) + L"\r\n\r\n" + Utf8(Resource(IDR_GPL));
         SendMessageW(eula_,EM_SETLIMITTEXT,1024*1024,0);
-        SetWindowTextW(eula_,eulaText_.c_str());
         SendMessageW(eula_,EM_SETMARGINS,EC_LEFTMARGIN | EC_RIGHTMARGIN,MAKELPARAM(14,14));
-        const auto image = Resource(IDR_WELCOME);
-        bannerStream_.Attach(SHCreateMemStream(image.data,image.size));
-        if (bannerStream_) {
-            banner_.reset(Gdiplus::Bitmap::FromStream(bannerStream_.Get()));
-            if (banner_ && banner_->GetLastStatus() != Gdiplus::Ok) banner_.reset();
-        }
+#ifdef _DEBUG
+        debugDemoPending_=HasCommandLineSwitch(L"--demo-tour");
+#endif
         Layout();
         AttachButtonSubclasses();
-        BuildButtonImageCache();
-        SetPage(Page::Welcome);
+        controlsReady_=true;
+    }
+    void StartupWorker(HWND target, bool themed, bool slowStartup) noexcept {
+        StartupResult result;
+        GlassInstallUtil::InstallRoots startupRoots;
+        DWORD rootsError=ERROR_SUCCESS;
+        bool rootsChecked=false;
+        const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+        try {
+            // Capture running state as soon as the initial window is shown,
+            // before version checks, user choices, or any host is stopped.
+            if (SUCCEEDED(com) && !gAlreadyRunning && !startupStop_.load(std::memory_order_acquire)) {
+                result.os64=GlassInstallUtil::IsOs64Bit();
+                rootsChecked=true;
+                const bool rootsKnown=GlassInstallUtil::ResolveInstallRoots(startupRoots);
+                if (!rootsKnown) rootsError=GetLastError();
+                if (result.os64) {
+                    const bool runningKnown=GlassInstallUtil::QueryOpenGlassRunning(result.openGlass.wasRunning);
+                    if (rootsKnown) result.openGlassDir=startupRoots.openGlass;
+                    const bool filesKnown=rootsKnown && GlassInstallUtil::QueryOpenGlassFiles(
+                        result.openGlassDir,startupRoots.x64,result.openGlass.filesPresent);
+                    result.openGlass.valid=runningKnown && filesKnown;
+                }
+            }
+            // This is the first logger user on the successful startup path.
+            // UI interactions are locked until this worker has been joined.
+            InstallLog::Initialize();
+            InstallLog::Line(themed ? L"Theme Detours installed" : L"Theme Detours unavailable");
+            if (rootsChecked) {
+                InstallLog::LineFormat(L"Startup installation roots: x64=%s (%s) x86=%s (%s) error=%lu",
+                    startupRoots.x64.c_str(),startupRoots.sourceX64.c_str(),
+                    startupRoots.x86.c_str(),startupRoots.sourceX86.c_str(),rootsError);
+                if (result.os64) InstallLog::LineFormat(L"Startup OpenGlass root: %s (%s)",
+                    startupRoots.openGlass.c_str(),startupRoots.sourceOpenGlass.c_str());
+            }
+            if (result.os64) InstallLog::LineFormat(L"OpenGlass at wizard startup: valid=%d files=%d running=%d dir=%s",
+                result.openGlass.valid ? 1 : 0, result.openGlass.filesPresent ? 1 : 0,
+                result.openGlass.wasRunning ? 1 : 0, result.openGlassDir.c_str());
+#ifdef _DEBUG
+            if (slowStartup) {
+                for (int i=0;i<80 && !startupStop_.load(std::memory_order_acquire);++i) Sleep(50);
+            }
+#else
+            (void)slowStartup;
+#endif
+            if (FAILED(com)) {
+                InstallLog::LineFormat(L"Startup worker COM init failed: 0x%08X",static_cast<unsigned>(com));
+            } else if (!gAlreadyRunning && !startupStop_.load(std::memory_order_acquire)) {
+                result.platformVersion=SelfProductVersion();
+                if (result.platformVersion.empty() && !startupStop_.load(std::memory_order_acquire))
+                    result.platformVersion=PlatformVersionFromInstalledModules();
+                if (!startupStop_.load(std::memory_order_acquire)) result.os64=GlassInstallUtil::IsOs64Bit();
+                if (!startupStop_.load(std::memory_order_acquire))
+                    result.installed.platform64=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX64) ||
+                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX64);
+                if (!startupStop_.load(std::memory_order_acquire))
+                    result.installed.platform32=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductPlatformX86) ||
+                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX86);
+                if (!startupStop_.load(std::memory_order_acquire))
+                    result.installed.glassSettings=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64) ||
+                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86);
+                if (!startupStop_.load(std::memory_order_acquire))
+                    result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
+                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass);
+                if (!startupStop_.load(std::memory_order_acquire)) {
+                    InstallLog::LineFormat(L"Startup MSI registrations: x64=%d x86=%d Settings=%d OpenGlass=%d",
+                        result.installed.platform64?1:0,result.installed.platform32?1:0,
+                        result.installed.glassSettings?1:0,result.installed.openGlass?1:0);
+                    result.eulaText=Utf8(Resource(IDR_EULA,gLanguage));
+                    result.eulaText+=L"\r\n\r\n────────────────────────────────\r\n"+
+                        Text(IDS_GPL_APPENDIX)+L"\r\n\r\n"+Utf8(Resource(IDR_GPL));
+                    result.runtimeInstalled=IsWebView2RuntimeInstalled();
+                }
+            }
+            result.ok=SUCCEEDED(com) && !startupStop_.load(std::memory_order_acquire);
+        } catch (...) {
+            result.ok=false;
+        }
+        if (SUCCEEDED(com)) CoUninitialize();
+        {
+            // Synchronize posting with window destruction: never post to an HWND
+            // which could already have been destroyed and reused by another app.
+            std::lock_guard<std::mutex> lock(startupMutex_);
+            if (startupStop_.load(std::memory_order_acquire)) return;
+            startupResult_=std::move(result);
+            startupReady_=true;
+            (void)PostMessageW(target,kStartupComplete,0,0);
+        }
+    }
+    void BeginStartup() {
+        if (!startupPending_ || startupStarted_ || closing_) return;
+        startupStarted_=true;
+        // Attach Detours on the UI thread before any worker can enter uxtheme.
+        const bool themed=WizardTheme::InstallDetours();
+        bool slowStartup=false;
+#ifdef _DEBUG
+        slowStartup=HasCommandLineSwitch(L"--debug-slow-startup");
+#endif
+        bool workerStarted=false;
+        try {
+            const HWND target=window;
+            startupThread_=std::thread([this,target,themed,slowStartup]() {
+                StartupWorker(target,themed,slowStartup);
+            });
+            workerStarted=true;
+        } catch (...) {
+            workerStarted=false;
+        }
+        InitializeControls();
+        if (!workerStarted) {
+            startupPending_=false;
+            errorReason_=Text(IDS_STARTUP_FAILED);
+            SetPage(Page::Error);
+            return;
+        }
+        // Fallback if the worker's PostMessage fails because the queue is full.
+        SetTimer(window,kStartupPollTimer,100,nullptr);
+        CompleteStartupIfReady();
+    }
+    void CompleteStartupIfReady() {
+        if (!startupPending_ || closing_) return;
+        StartupResult result;
+        {
+            std::lock_guard<std::mutex> lock(startupMutex_);
+            if (!startupReady_) return;
+            result=std::move(startupResult_);
+            startupReady_=false;
+        }
+        if (startupThread_.joinable()) startupThread_.join();
+        KillTimer(window,kStartupPollTimer);
+        startupPending_=false;
+        if (!result.ok) {
+            errorReason_=Text(IDS_STARTUP_FAILED);
+            SetPage(Page::Error);
+            return;
+        }
+        if (gAlreadyRunning) { SetPage(Page::AlreadyRunning); return; }
+        platformVersion_=std::move(result.platformVersion);
+        eulaText_=std::move(result.eulaText);
+        SetWindowTextW(eula_,eulaText_.c_str());
+        installedSelection_=result.installed;
+        openGlassStartup_=result.openGlass;
+        openGlassStartupDir_=std::move(result.openGlassDir);
+        const bool os64=result.os64;
+        const bool anyInstalled=installedSelection_.platform64 || installedSelection_.platform32 ||
+            installedSelection_.glassSettings || installedSelection_.openGlass;
+        selection_.platform64=os64;
+        selection_.platform32=!os64 || !anyInstalled || installedSelection_.platform32;
+        selection_.glassSettings=!anyInstalled || installedSelection_.glassSettings;
+        selection_.openGlass=os64 && (!anyInstalled || installedSelection_.openGlass);
+        SetPage(result.runtimeInstalled ? Page::Welcome : Page::RuntimeRequired);
+        // WebView2 environment and controller creation must stay on the UI STA.
+        if (result.runtimeInstalled && !PostMessageW(window,kInitWebView,0,0))
+            WebFailure(HRESULT_FROM_WIN32(GetLastError()));
     }
     void Layout() {
         Move(back_,644,kContentHeight+12,96,32);
         // Complete uses the exact rectangle previously occupied by Cancel.
         const bool unlock = page_==Page::ProcessesStuck;
         const bool conflictCheck = page_==Page::Conflicts;
-        const bool cleanOffer = page_==Page::VersionInvalid && offerCleanInstall_;
-        // «Продолжить» в Segoe UI 14px — 88 px; 132 px даёт поля по 22 px.
-        const int nextWidth = (unlock || conflictCheck) ? 160 : (cleanOffer ? 132 : 104);
-        const int nextX = (page_==Page::Complete || page_==Page::Error) ? 864 :
-            ((unlock || conflictCheck) ? 694 : (cleanOffer ? 722 : 750));
+        const bool confirm=page_==Page::ConfirmCancel;
+        const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error ||
+            page_==Page::RuntimeError || page_==Page::AlreadyRunning;
+        if (confirm) Move(back_,568,kContentHeight+12,190,32);
+        const int nextWidth=confirm?190:page_==Page::RuntimeRequired?230:(unlock || conflictCheck)?160:104;
+        const int nextX=confirm?778:page_==Page::RuntimeRequired?624:terminal?864:
+            (unlock || conflictCheck)?694:750;
         Move(next_,nextX,kContentHeight+12,nextWidth,32);
         Move(cancel_,864,kContentHeight+12,104,32);
         Move(updateDownload_,644,kContentHeight+12,104,32);
@@ -1989,6 +1478,9 @@ private:
         Move(accept_,48,447,904,32);
         Move(progress_,0,kHtmlHeight,kWidth,kProgressHeight);
         Move(webHost_,0,0,kWidth,kHtmlHeight);
+        // Leave room outside each platform checkbox for the separate mandatory lock.
+        Move(component64_,60,203,360,32); Move(component32_,510,203,360,32);
+        Move(componentSettings_,60,293,400,32); Move(componentOpenGlass_,510,293,400,32);
         if (controller_) {
             RECT bounds=Box(0,0,kWidth,kHtmlHeight);
             if (!haveWebBounds_ || !EqualRect(&bounds,&webBounds_)) {
@@ -2010,13 +1502,29 @@ private:
         const bool nativeLicense = !webVisible && page_==Page::License && !transitioning_;
         ShowWindow(eula_,nativeLicense?SW_SHOWNA:SW_HIDE);
         ShowWindow(accept_,nativeLicense?SW_SHOWNA:SW_HIDE);
-        const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Complete);
+        const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching || page_==Page::RuntimeInstalling || page_==Page::Complete);
         ShowWindow(progress_, showProgress ? SW_SHOWNA : SW_HIDE);
         const bool update = page_==Page::Update && !transitioning_;
         ShowWindow(updateDownload_,update?SW_SHOWNA:SW_HIDE);
         ShowWindow(updateSkip_,update?SW_SHOWNA:SW_HIDE);
         if (controller_) controller_->put_IsVisible(webVisible ? TRUE : FALSE);
         ShowWindow(webHost_,webVisible?SW_SHOWNA:SW_HIDE);
+        const bool nativeComponents=!webVisible && page_==Page::Components && !transitioning_;
+        const bool os64=GlassInstallUtil::IsOs64Bit();
+        ShowWindow(component64_,nativeComponents && os64?SW_SHOWNA:SW_HIDE);
+        ShowWindow(component32_,nativeComponents?SW_SHOWNA:SW_HIDE);
+        ShowWindow(componentSettings_,nativeComponents?SW_SHOWNA:SW_HIDE);
+        ShowWindow(componentOpenGlass_,nativeComponents && os64?SW_SHOWNA:SW_HIDE);
+        if (nativeComponents) {
+            const std::wstring mandatory=L" ("+Text(IDS_COMP_MANDATORY)+L")";
+            SetWindowTextW(component64_,(Text(IDS_COMP_P64_TITLE)+(os64?mandatory:L"")).c_str());
+            SetWindowTextW(component32_,(Text(IDS_COMP_P32_TITLE)+(!os64?mandatory:L"")).c_str());
+            SendMessageW(component64_,BM_SETCHECK,selection_.platform64?BST_CHECKED:BST_UNCHECKED,0);
+            SendMessageW(component32_,BM_SETCHECK,selection_.platform32?BST_CHECKED:BST_UNCHECKED,0);
+            SendMessageW(componentSettings_,BM_SETCHECK,selection_.glassSettings?BST_CHECKED:BST_UNCHECKED,0);
+            SendMessageW(componentOpenGlass_,BM_SETCHECK,selection_.openGlass?BST_CHECKED:BST_UNCHECKED,0);
+            EnableWindow(component64_,FALSE); EnableWindow(component32_,os64?TRUE:FALSE);
+        }
     }
     [[nodiscard]] bool SlidesVisible() const noexcept {
         // One WebView2 child stays visible for every HTML page. Page changes are
@@ -2025,12 +1533,12 @@ private:
     }
     [[nodiscard]] bool DebugDemoLocksControls() const noexcept {
 #ifdef _DEBUG
-        return debugDemoPending_ || debugDemoActive_;
+        return debugDemoActive_ || (debugDemoPending_ && page_==Page::Welcome);
 #else
         return false;
 #endif
     }
-    [[nodiscard]] const wchar_t* WebPageName() const noexcept {
+    [[nodiscard]] const wchar_t* WebPageName(WizardUnlock::Phase unlock) const noexcept {
         switch (page_) {
         case Page::Welcome: return L"welcome";
         case Page::Checking: return L"checking";
@@ -2039,14 +1547,17 @@ private:
         case Page::Downgrade: return L"downgrade";
         case Page::VersionInvalid: return L"version-invalid";
         case Page::License: return L"license";
-        case Page::Installing:
-            if (visualMode_==VisualMode::UnlockModules) return L"unlock-modules";
-            if (visualMode_==VisualMode::UnlockProcesses) return L"unlock-processes";
-            return L"installing";
+        case Page::Components: return L"components";
+        case Page::ConfirmCancel: return L"confirm-cancel";
+        case Page::Cancelling: return L"cancelling";
+        case Page::Cancelled: return L"cancelled";
+        case Page::Launching: return L"launching";
+        case Page::Installing: return WizardUnlock::InstallingPage(unlock);
         case Page::ModulesBusy: return L"unlock-modules";
         case Page::ProcessesStuck: return L"unlock-processes";
         case Page::Complete: return L"complete";
         case Page::Error: return L"error";
+        case Page::RuntimeRequired: case Page::RuntimeInstalling: case Page::RuntimeError: case Page::AlreadyRunning: return L"loading";
         }
         return L"welcome";
     }
@@ -2074,80 +1585,172 @@ private:
         json+=L"]";
         return json;
     }
+    UINT ComponentStateId(bool selected, bool installed) const noexcept {
+        switch (GlassProducts::ActionForInstall(selected,installed)) {
+        case GlassProducts::InstallAction::Install: return IDS_COMP_STATE_INSTALL;
+        case GlassProducts::InstallAction::Update: return IDS_COMP_STATE_UPDATE;
+        case GlassProducts::InstallAction::Remove: return IDS_COMP_STATE_REMOVE;
+        default: return IDS_COMP_STATE_ABSENT;
+        }
+    }
+    UINT ComponentBadgeId(GlassProducts::InstallAction action) const noexcept {
+        switch (action) {
+        case GlassProducts::InstallAction::Install: return IDS_COMP_BADGE_INSTALL;
+        case GlassProducts::InstallAction::Update: return IDS_COMP_BADGE_UPDATE;
+        case GlassProducts::InstallAction::Remove: return IDS_COMP_BADGE_REMOVE;
+        default: return 0;
+        }
+    }
+    const wchar_t* ComponentBadgeTone(GlassProducts::InstallAction action) const noexcept {
+        switch (action) {
+        case GlassProducts::InstallAction::Install: return L"install";
+        case GlassProducts::InstallAction::Update: return L"update";
+        case GlassProducts::InstallAction::Remove: return L"remove";
+        default: return L"";
+        }
+    }
+    std::wstring ComponentWarnings() const {
+        std::wstring text;
+        if (GlassInstallUtil::IsOs64Bit() && !selection_.platform32) text = Text(IDS_COMP_X86_WARNING);
+        if (!selection_.glassSettings) {
+            if (!text.empty()) text += L"\n";
+            text += Text(IDS_COMP_GS_WARNING);
+        }
+        return text;
+    }
+    std::wstring ComponentsJson() const {
+        const bool os64=GlassInstallUtil::IsOs64Bit();
+        std::wstring json=L"[";
+        auto item=[&](const wchar_t* id, UINT title, UINT desc, bool checked, bool locked, bool hidden, bool installed) {
+            if (json.size()>1) json+=L",";
+            const auto action=GlassProducts::ActionForInstall(checked,installed);
+            const UINT badgeId=ComponentBadgeId(action);
+            json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
+                L",\"description\":"+JsStringLiteral(Text(desc))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
+                L",\"badgeTone\":"+JsStringLiteral(ComponentBadgeTone(action))+
+                L",\"lockTitle\":"+JsStringLiteral(locked?Text(IDS_COMP_MANDATORY):L"")+
+                L",\"state\":"+JsStringLiteral(Text(ComponentStateId(checked,installed)))+
+                L",\"checked\":"+(checked?L"true":L"false")+L",\"locked\":"+(locked?L"true":L"false")+
+                L",\"hidden\":"+(hidden?L"true":L"false")+L"}";
+        };
+        item(L"x64",IDS_COMP_P64_TITLE,IDS_COMP_P64_DESC,selection_.platform64,os64,!os64,installedSelection_.platform64);
+        item(L"x86",IDS_COMP_P32_TITLE,IDS_COMP_P32_DESC,selection_.platform32,!os64,false,installedSelection_.platform32);
+        item(L"settings",IDS_COMP_GS_TITLE,IDS_COMP_GS_DESC,selection_.glassSettings,false,false,installedSelection_.glassSettings);
+        item(L"openglass",IDS_COMP_OG_TITLE,IDS_COMP_OG_DESC,selection_.openGlass,false,!os64,installedSelection_.openGlass);
+        return json+L"]";
+    }
+    std::wstring LaunchCardsJson() const {
+        const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
+        std::wstring json=L"[";
+        auto add=[&](const wchar_t* title,int threshold) {
+            if (json.size()>1) json+=L",";
+            const bool ready=progressValue_>=threshold;
+            const wchar_t* label=ready?(ru?L"ГОТОВО":L"READY"):(ru?L"ЗАПУСК":L"STARTING");
+            json+=L"{\"title\":"+JsStringLiteral(title)+L",\"sub\":"+JsStringLiteral(label)+
+                L",\"ready\":"+(ready?L"true":L"false")+L"}";
+        };
+        if (selection_.platform64) add(L"GLASS x64",9500);
+        if (selection_.platform32) add(L"GLASS x86",9750);
+        if (selection_.openGlass) add(L"OPENGLASS",9900);
+        else if (selection_.glassSettings) add(L"SETTINGS",9900);
+        return json+L"]";
+    }
     void SyncWebViewState() {
         if (!web_ || !webReady_ || !webBridgeReady_) return;
+        if (!webInitSent_) {
 #ifdef GLASS_EMBED_MSI
-        const UINT doneBodyId = IDS_DONE_BODY, doneNoteId = IDS_DONE_NOTE;
+            const UINT doneBodyId=IDS_DONE_BODY, doneNoteId=IDS_DONE_NOTE;
 #else
-        const UINT doneBodyId = IDS_DONE_BODY_DEMO, doneNoteId = IDS_DONE_NOTE_DEMO;
+            const UINT doneBodyId=IDS_DONE_BODY_DEMO, doneNoteId=IDS_DONE_NOTE_DEMO;
 #endif
-        std::wstring labels=L"{\"brand\":" + JsStringLiteral(Text(IDS_BRAND)) +
-            L",\"licenseTitle\":" + JsStringLiteral(Text(IDS_EULA_TITLE)) +
-            L",\"licenseIntro\":" + JsStringLiteral(Text(IDS_EULA_BODY)) +
-            L",\"licenseAccept\":" + JsStringLiteral(Text(IDS_ACCEPT)) +
-            L",\"updateTag\":" + JsStringLiteral(Text(IDS_UPDATE_TAG)) +
-            L",\"updateTitle\":" + JsStringLiteral(Text(IDS_UPDATE_TITLE)) +
-            L",\"updateReady\":" + JsStringLiteral(Text(IDS_UPDATE_READY)) +
-            L",\"updateCurrentLabel\":" + JsStringLiteral(Text(IDS_UPDATE_CURRENT)) +
-            L",\"updateLatestLabel\":" + JsStringLiteral(Text(IDS_UPDATE_LATEST)) +
-            L",\"conflictsTag\":" + JsStringLiteral(Text(IDS_CONFLICTS_TAG)) +
-            L",\"conflictsTitle\":" + JsStringLiteral(Text(IDS_CONFLICTS_TITLE)) +
-            L",\"conflictsBody\":" + JsStringLiteral(Text(IDS_CONFLICTS_BODY)) +
-            L",\"conflictsInstructions\":" + JsStringLiteral(Text(IDS_CONFLICTS_INSTRUCTIONS)) +
-            L",\"downgradeTag\":" + JsStringLiteral(Text(IDS_DOWNGRADE_TAG)) +
-            L",\"downgradeTitle\":" + JsStringLiteral(Text(IDS_DOWNGRADE_TITLE)) +
-            L",\"versionInvalidTag\":" + JsStringLiteral(Text(IDS_VERSION_INVALID_TAG)) +
-            L",\"versionInvalidTitle\":" + JsStringLiteral(Text(IDS_VERSION_INVALID_TITLE)) +
-            L",\"downgradeNote\":" + JsStringLiteral(Text(IDS_DOWNGRADE_NOTE)) +
-            L",\"versionInvalidNote\":" + JsStringLiteral(Text(offerCleanInstall_ ? IDS_VERSION_INVALID_NOTE : IDS_SETUP_VERSION_INVALID_NOTE)) +
-            L",\"versionLabel\":" + JsStringLiteral(Text(IDS_INSTALLED_VERSION_LABEL)) +
-            L",\"setupVersionLabel\":" + JsStringLiteral(Text(IDS_SETUP_VERSION_LABEL)) +
-            L",\"doneTag\":" + JsStringLiteral(Text(IDS_DONE_TAG)) +
-            L",\"doneTitle\":" + JsStringLiteral(Text(IDS_DONE_TITLE)) +
-            L",\"doneBody\":" + JsStringLiteral(Text(doneBodyId)) +
-            L",\"doneNote\":" + JsStringLiteral(Text(doneNoteId)) +
-            L",\"doneReady\":" + JsStringLiteral(Text(IDS_DONE_READY)) +
-            L",\"errorTag\":" + JsStringLiteral(Text(IDS_ERROR_TAG)) +
-            L",\"errorTitle\":" + JsStringLiteral(Text(IDS_ERROR_TITLE)) +
-            L",\"errorBody\":" + JsStringLiteral(Text(IDS_ERROR_BODY)) +
-            L",\"errorDetails\":" + JsStringLiteral(Text(IDS_ERROR_DETAILS)) +
-            L",\"errorNote\":" + JsStringLiteral(Text(IDS_ERROR_LOG_HINT)) + L"}";
-        std::wstring json=L"{\"type\":\"state\",\"page\":" + JsStringLiteral(WebPageName()) +
-            L",\"locale\":" + JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"ru":L"en") +
-            L",\"accepted\":" + (accepted_?L"true":L"false") +
-            L",\"eula\":" + JsStringLiteral(page_==Page::License?eulaText_:std::wstring()) +
-            L",\"platformVersion\":" + JsStringLiteral(platformVersion_) +
-            L",\"updateCurrent\":" + JsStringLiteral(updateCurrent_) +
-            L",\"updateLatest\":" + JsStringLiteral(updateLatest_) +
-            L",\"updateBody\":" + JsStringLiteral(updateBody_) +
-            L",\"conflicts\":" + ConflictsJson() +
-            L",\"installedGlassVersion\":" + JsStringLiteral(installedGlassVersion_) +
-            L",\"setupProductVersion\":" + JsStringLiteral(setupProductVersion_) +
-            L",\"blockReason\":" + JsStringLiteral(blockReason_) +
-            L",\"downgradeBody\":" + JsStringLiteral(downgradeBody_) +
-            L",\"errorReason\":" + JsStringLiteral(errorReason_) +
-            L",\"status\":" + JsStringLiteral(installStatusLine_) +
-            L",\"percent\":" + std::to_wstring(percent_) +
-            L",\"progress\":" + std::to_wstring(progressValue_) +
-            L",\"marquee\":" + (progressMarquee_?L"true":L"false") +
-            L",\"unlockActive\":" +
-                ((page_==Page::Installing &&
-                  (visualMode_==VisualMode::UnlockModules || visualMode_==VisualMode::UnlockProcesses))
-                    ? L"true" : L"false") +
-            L",\"holdReport\":" + JsStringLiteral(holdReport_) +
-            L",\"ui\":" + labels + L"}";
+            std::wstring labels=L"{\"brand\":"+JsStringLiteral(Text(IDS_BRAND))+
+                L",\"licenseTitle\":"+JsStringLiteral(Text(IDS_EULA_TITLE))+
+                L",\"licenseIntro\":"+JsStringLiteral(Text(IDS_EULA_BODY))+
+                L",\"licenseAccept\":"+JsStringLiteral(Text(IDS_ACCEPT))+
+                L",\"updateTag\":"+JsStringLiteral(Text(IDS_UPDATE_TAG))+
+                L",\"updateTitle\":"+JsStringLiteral(Text(IDS_UPDATE_TITLE))+
+                L",\"updateReady\":"+JsStringLiteral(Text(IDS_UPDATE_READY))+
+                L",\"updateCurrentLabel\":"+JsStringLiteral(Text(IDS_UPDATE_CURRENT))+
+                L",\"updateLatestLabel\":"+JsStringLiteral(Text(IDS_UPDATE_LATEST))+
+                L",\"conflictsTag\":"+JsStringLiteral(Text(IDS_CONFLICTS_TAG))+
+                L",\"conflictsTitle\":"+JsStringLiteral(Text(IDS_CONFLICTS_TITLE))+
+                L",\"conflictsBody\":"+JsStringLiteral(Text(IDS_CONFLICTS_BODY))+
+                L",\"conflictsInstructions\":"+JsStringLiteral(Text(IDS_CONFLICTS_INSTRUCTIONS))+
+                L",\"downgradeTag\":"+JsStringLiteral(Text(IDS_DOWNGRADE_TAG))+
+                L",\"downgradeTitle\":"+JsStringLiteral(Text(IDS_DOWNGRADE_TITLE))+
+                L",\"versionInvalidTag\":"+JsStringLiteral(Text(IDS_VERSION_INVALID_TAG))+
+                L",\"versionInvalidTitle\":"+JsStringLiteral(Text(IDS_VERSION_INVALID_TITLE))+
+                L",\"downgradeNote\":"+JsStringLiteral(Text(IDS_DOWNGRADE_NOTE))+
+                L",\"versionLabel\":"+JsStringLiteral(Text(IDS_INSTALLED_VERSION_LABEL))+
+                L",\"setupVersionLabel\":"+JsStringLiteral(Text(IDS_SETUP_VERSION_LABEL))+
+                L",\"doneTag\":"+JsStringLiteral(Text(IDS_DONE_TAG))+
+                L",\"doneTitle\":"+JsStringLiteral(Text(IDS_DONE_TITLE))+
+                L",\"doneBody\":"+JsStringLiteral(Text(doneBodyId))+
+                L",\"doneNote\":"+JsStringLiteral(Text(doneNoteId))+
+                L",\"doneReady\":"+JsStringLiteral(Text(IDS_DONE_READY))+
+                L",\"errorTag\":"+JsStringLiteral(Text(IDS_ERROR_TAG))+
+                L",\"errorTitle\":"+JsStringLiteral(Text(IDS_ERROR_TITLE))+
+                L",\"errorBody\":"+JsStringLiteral(Text(IDS_ERROR_BODY))+
+                L",\"errorDetails\":"+JsStringLiteral(Text(IDS_ERROR_DETAILS))+
+                L",\"errorNote\":"+JsStringLiteral(Text(IDS_ERROR_LOG_HINT))+
+                L",\"compTag\":"+JsStringLiteral(Text(IDS_COMP_TAG))+
+                L",\"compTitle\":"+JsStringLiteral(Text(IDS_COMP_TITLE))+
+                L",\"compIntro\":"+JsStringLiteral(Text(IDS_COMP_INTRO))+
+                L",\"confirmTag\":"+JsStringLiteral(Text(IDS_CONFIRM_CANCEL_TAG))+
+                L",\"confirmTitle\":"+JsStringLiteral(Text(IDS_CONFIRM_CANCEL_TITLE))+
+                L",\"confirmBody\":"+JsStringLiteral(Text(IDS_CONFIRM_CANCEL_BODY))+
+                L",\"confirmNote\":"+JsStringLiteral(Text(IDS_CONFIRM_CANCEL_NOTE))+
+                L",\"cancelledTag\":"+JsStringLiteral(Text(IDS_CANCELLED_TAG))+
+                L",\"cancelledTitle\":"+JsStringLiteral(Text(IDS_CANCELLED_TITLE))+
+                L",\"cancelledBody\":"+JsStringLiteral(Text(IDS_CANCELLED_BODY))+
+                L",\"launchTag\":"+JsStringLiteral(Text(IDS_LAUNCH_TAG))+
+                L",\"launchTitle\":"+JsStringLiteral(Text(IDS_LAUNCH_TITLE))+
+                L",\"launchBody\":"+JsStringLiteral(Text(IDS_LAUNCH_BODY))+
+                L",\"launchSubstatus\":"+JsStringLiteral(Text(IDS_LAUNCH_SUBSTATUS))+L"}";
+            const std::wstring init=L"{\"type\":\"init\",\"locale\":"+
+                JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"ru":L"en")+
+                L",\"eula\":"+JsStringLiteral(eulaText_)+L",\"ui\":"+labels+L"}";
+            if (FAILED(web_->PostWebMessageAsJson(init.c_str()))) return;
+            webInitSent_=true;
+        }
+        const auto unlock=installEngine_.ActiveUnlock();
+        std::wstring json=L"{\"type\":\"state\",\"page\":"+JsStringLiteral(WebPageName(unlock))+
+            L",\"accepted\":"+(accepted_?L"true":L"false")+
+            L",\"platformVersion\":"+JsStringLiteral(platformVersion_)+
+            L",\"updateCurrent\":"+JsStringLiteral(updateCurrent_)+
+            L",\"updateLatest\":"+JsStringLiteral(updateLatest_)+
+            L",\"updateBody\":"+JsStringLiteral(updateBody_)+
+            L",\"conflicts\":"+ConflictsJson()+
+            L",\"installedGlassVersion\":"+JsStringLiteral(installedGlassVersion_)+
+            L",\"setupProductVersion\":"+JsStringLiteral(setupProductVersion_)+
+            L",\"versionInvalidNote\":"+JsStringLiteral(versionInvalidNote_)+
+            L",\"blockReason\":"+JsStringLiteral(blockReason_)+
+            L",\"downgradeBody\":"+JsStringLiteral(downgradeBody_)+
+            L",\"errorReason\":"+JsStringLiteral(errorReason_)+
+            L",\"cancelledDetail\":"+JsStringLiteral(cancelledDetail_)+
+            L",\"status\":"+JsStringLiteral(installStatusLine_)+
+            L",\"percent\":"+std::to_wstring(percent_)+
+            L",\"progress\":"+std::to_wstring(WizardProgress::ClampUnits(progressValue_))+
+            L",\"marquee\":"+(progressMarquee_?L"true":L"false")+
+            L",\"unlockActive\":"+((page_==Page::Installing && unlock!=WizardUnlock::Phase::None)?L"true":L"false")+
+            L",\"holdReport\":"+JsStringLiteral(holdReport_)+
+            L",\"components\":"+ComponentsJson()+
+            L",\"componentsWarning\":"+JsStringLiteral(ComponentWarnings())+
+            L",\"launchCards\":"+LaunchCardsJson()+L"}";
+        if (json==lastWebState_) return;
         const HRESULT hr=web_->PostWebMessageAsJson(json.c_str());
-        if (FAILED(hr)) InstallLog::LineFormat(L"WebView2 state message failed: 0x%08X",
-                                               static_cast<unsigned>(hr));
+        if (SUCCEEDED(hr)) lastWebState_=std::move(json);
+        else InstallLog::LineFormat(L"WebView2 state message failed: 0x%08X",static_cast<unsigned>(hr));
     }
     void FocusPage() {
-        if (webReady_ && page_==Page::License) { SetFocus(webHost_); return; }
+        if (page_==Page::ConfirmCancel) { SetFocus(back_); return; }
+        if (webReady_ && (page_==Page::License || page_==Page::Components)) { SetFocus(webHost_); return; }
         SetFocus(page_==Page::ModulesBusy || page_==Page::ProcessesStuck || page_==Page::Conflicts ? next_ :
-                 page_==Page::Downgrade || (page_==Page::VersionInvalid && !offerCleanInstall_) ? cancel_ :
+                 page_==Page::Downgrade || page_==Page::VersionInvalid ? cancel_ :
                  page_==Page::Update ? updateSkip_ :
                  page_==Page::Checking ? cancel_ :
                  page_==Page::License && !accepted_ ? accept_ :
-                 page_==Page::Installing ? cancel_ : next_);
+                 page_==Page::Installing || page_==Page::RuntimeInstalling ? cancel_ : next_);
     }
     void PrintControl(HDC dc, HWND control) {
         RECT r{}; GetWindowRect(control,&r);
@@ -2195,72 +1798,115 @@ private:
         page_=page;
         BOOL animationsEnabled=TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
+        loadingAnimationsEnabled_=animationsEnabled!=FALSE;
         const bool nativeLoading=page_==Page::Welcome && !webReady_ && SUCCEEDED(webError_);
         if (animationsEnabled && !webReady_ &&
-            (nativeLoading || page_==Page::Update || page_==Page::Error))
+            (nativeLoading || page_==Page::Update || page_==Page::Error || page_==Page::RuntimeInstalling))
             SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
-        else
-            KillTimer(window,kHeroTimer);
-        BOOL darkCaption=TRUE;
-        if (FAILED(DwmSetWindowAttribute(window,20,&darkCaption,sizeof(darkCaption))))
-            DwmSetWindowAttribute(window,19,&darkCaption,sizeof(darkCaption));
+        else KillTimer(window,kHeroTimer);
+        WizardTheme::ApplyDarkWindowChrome(window);
+        const bool closeBlocked=page_==Page::Cancelling || page_==Page::Launching ||
+            (page_==Page::Error && failurePending_);
+        WizardTheme::SetSystemCloseEnabled(window,!closeBlocked);
         ShowWindow(eula_,SW_HIDE); ShowWindow(accept_,SW_HIDE);
         Layout();
-        const bool cleanOffer=page_==Page::VersionInvalid && offerCleanInstall_;
-        const UINT nextId = page_==Page::Conflicts ? IDS_RECHECK_CONFLICTS :
-            cleanOffer ? IDS_CONTINUE :
-            page_==Page::License ? IDS_INSTALL :
-            (page_==Page::Complete || page_==Page::Error) ? IDS_FINISH :
-            page_==Page::ModulesBusy ? IDS_HOLD_RETRY :
-            page_==Page::ProcessesStuck ? IDS_UNLOCK : IDS_NEXT;
-        SetWindowTextW(next_,Text(nextId).c_str());
-        SetWindowTextW(cancel_,Text((page_==Page::Downgrade || (page_==Page::VersionInvalid && !offerCleanInstall_))?IDS_CLOSE:IDS_CANCEL).c_str());
-        const bool blockedPage=page_==Page::Downgrade || (page_==Page::VersionInvalid && !offerCleanInstall_);
+        const bool blockedPage=page_==Page::Downgrade || page_==Page::VersionInvalid;
         const bool demoControlsLocked=DebugDemoLocksControls();
-        const int defaultId=demoControlsLocked?IDOK:
-            page_==Page::Update?IDC_UPDATE_SKIP:blockedPage?IDC_CANCEL:IDC_NEXT;
-        SendMessageW(window,DM_SETDEFID,defaultId,0);
-        const bool demoFinishButton =
-#ifdef _DEBUG
-            debugDemoActive_ && (page_==Page::Complete || page_==Page::Error);
-#else
-            false;
-#endif
-        const bool demoLocked = demoControlsLocked && !demoFinishButton;
-        const bool cancelSlotTaken=page_==Page::Complete || page_==Page::Error;
-        ShowWindow(back_,page_==Page::License?SW_SHOWNA:SW_HIDE);
-        ShowWindow(next_,(page_==Page::Checking || page_==Page::Installing || page_==Page::Update || blockedPage)?SW_HIDE:SW_SHOWNA);
-        ShowWindow(cancel_,!cancelSlotTaken && !demoControlsLocked?SW_SHOWNA:SW_HIDE);
-        EnableWindow(next_,!demoLocked && (page_!=Page::License || accepted_));
+        const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error ||
+            page_==Page::RuntimeError || page_==Page::AlreadyRunning;
+        const bool inProgress=page_==Page::Checking || page_==Page::Installing || page_==Page::Cancelling ||
+            page_==Page::Launching || page_==Page::RuntimeInstalling || page_==Page::Update;
+        const UINT nextId = page_==Page::RuntimeRequired?IDS_RUNTIME_INSTALL:
+            page_==Page::ConfirmCancel?IDS_CONFIRM_ABORT:
+            page_==Page::Conflicts?IDS_RECHECK_CONFLICTS:
+            page_==Page::Components?IDS_INSTALL:
+            terminal?IDS_FINISH:
+            page_==Page::ModulesBusy?IDS_HOLD_RETRY:
+            page_==Page::ProcessesStuck?IDS_UNLOCK:IDS_NEXT;
+        SetWindowTextW(next_,Text(nextId).c_str());
+        SetWindowTextW(back_,Text(page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
+        SetWindowTextW(cancel_,Text(blockedPage?IDS_CLOSE:IDS_CANCEL).c_str());
+        const bool confirm=page_==Page::ConfirmCancel;
+        const bool backVisible=page_==Page::License || page_==Page::Components || confirm;
+        const bool nextVisible=!inProgress && !blockedPage;
+        const bool cancelVisible=!terminal && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
+        const bool demoLocked=demoControlsLocked && !terminal;
+        ShowWindow(back_,backVisible?SW_SHOWNA:SW_HIDE);
+        ShowWindow(next_,nextVisible?SW_SHOWNA:SW_HIDE);
+        ShowWindow(cancel_,cancelVisible && !demoLocked?SW_SHOWNA:SW_HIDE);
+        EnableWindow(next_,!failurePending_ && !demoLocked && (page_!=Page::License || accepted_));
+        EnableWindow(back_,!demoLocked);
+        EnableWindow(cancel_,!demoLocked && !(page_==Page::RuntimeInstalling && runtimeCancel_.load()));
         EnableWindow(updateDownload_,!demoLocked);
         EnableWindow(updateSkip_,!demoLocked);
-        if (!webReady_ &&
-            ((oldPage==Page::Welcome && (page_==Page::Checking || page_==Page::License)) ||
-             (oldPage==Page::Checking && (page_==Page::Update || page_==Page::License)) ||
-             (oldPage==Page::Installing && (page_==Page::Complete || page_==Page::Error))))
-            BeginTransition();
+        const int defaultId=confirm?IDC_BACK:page_==Page::Update?IDC_UPDATE_SKIP:blockedPage?IDC_CANCEL:IDC_NEXT;
+        SendMessageW(window,DM_SETDEFID,defaultId,0);
+        if (!webReady_ && ((oldPage==Page::Welcome && (page_==Page::Checking || page_==Page::License)) ||
+            (oldPage==Page::Checking && (page_==Page::Update || page_==Page::License)))) BeginTransition();
         ShowContentControls();
-        EnableWindow(back_,!transitioning_ && !DebugDemoLocksControls());
-        EnableWindow(next_,!failurePending_ && !transitioning_ && !demoLocked && (page_!=Page::License || accepted_));
-        if (!transitioning_) FocusPage(); else if (page_==Page::License) SetFocus(cancel_);
+        if (!transitioning_) FocusPage();
         SyncWebViewState();
-        // One non-erasing repaint for a real page change, never a clear-then-paint cycle.
         InvalidateRect(window,nullptr,FALSE);
     }
-    static bool DefaultProgramGlassDir(bool x64, std::wstring& out) {
-        if (x64) {
-            wchar_t buffer[MAX_PATH]{};
-            if (!GetEnvironmentVariableW(L"ProgramW6432", buffer, MAX_PATH)) return false;
-            out.assign(buffer);
-        } else {
-            PWSTR path = nullptr;
-            if (FAILED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX86, KF_FLAG_DEFAULT, nullptr, &path)))
-                return false;
-            out.assign(path);
-            CoTaskMemFree(path);
+    void StartRuntimeInstallation() {
+        if (runtimeThread_.joinable() || page_!=Page::RuntimeRequired) return;
+        runtimeCancel_.store(false);
+        runtimeSuccess_=false;
+        runtimeError_.clear();
+        runtimeStatus_=Text(IDS_RUNTIME_DOWNLOADING);
+        progressMarquee_=true;
+        SetPage(Page::RuntimeInstalling);
+        const HWND target=window;
+        try {
+            runtimeThread_=std::thread([this,target]() {
+                std::wstring directory,installer,error;
+                DWORD exitCode=0;
+                bool success=false;
+                auto status=[target](UINT id) { PostMessageW(target,kRuntimeStatus,id,0); };
+                try {
+                    if (CreateWebView2TempPath(directory,installer,error) &&
+                        DownloadWebView2Bootstrapper(installer,error,runtimeCancel_) &&
+                        !runtimeCancel_.load() && VerifyMicrosoftSignature(installer,error)) {
+                        status(IDS_RUNTIME_INSTALLING_PACKAGE);
+                        if (RunWebView2Bootstrapper(installer,directory,exitCode,error,runtimeCancel_) &&
+                            !runtimeCancel_.load()) {
+                            status(IDS_RUNTIME_VERIFYING);
+                            success=IsWebView2RuntimeInstalled();
+                            if (!success) error=L"WebView2 Runtime was not detected after installer exit "+std::to_wstring(exitCode);
+                        }
+                    }
+                } catch (...) { error=L"Unexpected error while installing WebView2 Runtime"; }
+                RemoveWebView2TempFiles(directory,installer);
+                {
+                    std::lock_guard<std::mutex> lock(runtimeMutex_);
+                    runtimeError_=std::move(error);
+                    runtimeSuccess_=success;
+                }
+                PostMessageW(target,kRuntimeComplete,0,0);
+            });
+        } catch (...) {
+            runtimeError_=L"Could not create the WebView2 installation worker";
+            SetPage(Page::RuntimeError);
         }
-        out += L"\\GlassPlatform";
-        return true;
+    }
+    void CompleteRuntimeInstallation() {
+        if (runtimeThread_.joinable()) runtimeThread_.join();
+        if (runtimeCancel_.load()) { DestroyWindow(window); return; }
+        bool success=false;
+        {
+            std::lock_guard<std::mutex> lock(runtimeMutex_);
+            success=runtimeSuccess_;
+        }
+        progressMarquee_=false;
+        if (!success) {
+            InstallLog::LineFormat(L"WebView2 setup failed: %s",runtimeError_.c_str());
+            if (runtimeError_.empty()) runtimeError_=Text(IDS_RUNTIME_INSTALL_FAILED);
+            SetPage(Page::RuntimeError);
+            return;
+        }
+        InstallLog::Line(L"WebView2 Runtime installed");
+        SetPage(Page::Welcome);
+        InitializeWebView();
     }
     void ShowInstallError(const std::wstring& reason) noexcept {
         errorReason_ = reason;
@@ -2286,20 +1932,18 @@ private:
         case 1639: id = IDS_MSI_CMDLINE; break;
         default: break;
         }
-        const bool mapped = id != 0;
-        std::wstring text;
-        if (mapped)
-            text = Text(id);
-        else if (!msi.empty())
-            text = msi;
-        else if (!detail.empty())
-            text = detail;
-        else
-            text = installEngine_.ErrorText();
-        if ((mapped || !msi.empty() || !detail.empty()) && !note.empty()) {
+        std::wstring text = id ? Text(id) : L"";
+        const auto append = [&](const std::wstring& part) {
+            if (part.empty() || part == text) return;
             if (!text.empty()) text += L"\r\n\r\n";
-            text += note;
-        }
+            text += part;
+        };
+        // A later service/task/rollback failure is more relevant than a stale
+        // MSI warning left by a successful earlier package.
+        append(detail);
+        if (code != 0) append(msi);
+        if (text.empty()) text = installEngine_.ErrorText();
+        if (!note.empty() && text.find(note) == std::wstring::npos) append(note);
         return text;
     }
     void ShowFailurePage(bool finished) noexcept {
@@ -2321,7 +1965,28 @@ private:
         }
         if (page_ != Page::Error) SetPage(Page::Error);
         else SyncWebViewState();
+        WizardTheme::SetSystemCloseEnabled(window,finished);
         if (next_) EnableWindow(next_, finished ? TRUE : FALSE);
+    }
+    void BeginRollbackVisual(ULONGLONG now) noexcept {
+        // Capture the last painted strip, not a newer, unpainted timer value or
+        // an unsmoothed engine target. The confirmation page freezes this value.
+        rollbackProgress_.Begin(visibleProgress_.RollbackStart(progressValue_));
+        progressReverse_=true;
+        progressMarquee_=false;
+        progressValue_=progressTarget_=displayProgress_=rollbackProgress_.Start();
+        percent_=WizardProgress::Percent(progressValue_);
+        progressTickMs_=now;
+        rollbackFinishing_=false;
+    }
+    void ShowCancelling() {
+        SetPage(Page::Cancelling);
+        // Show the captured width at least once before a fast rollback or a
+        // queued timer can advance the animation.
+        if (progress_) {
+            InvalidateRect(progress_,nullptr,FALSE);
+            UpdateWindow(progress_);
+        }
     }
     void StartInstallation() {
         if (!accepted_ || transitioning_) return;
@@ -2331,29 +1996,50 @@ private:
         progressValue_ = 0;
         progressTarget_ = 0;
         displayProgress_ = 0;
-        progressFinishing_ = false;
+        visibleProgress_.Reset();
+        progressReverse_ = false;
+        progressMarquee_ = false;
+        rollbackFinishing_ = false;
+        rollbackFinishStarted_ = 0;
+        rollbackFinishFrom_ = 0;
         progressTickMs_ = GetTickCount64();
-        visualMode_ = VisualMode::Slideshow;
-        unlockStatusLine_.clear();
-        unlockVisualUntil_ = 0;
-        unlockStatusObserved_ = false;
         installStatusLine_ = Text(IDS_STATUS_EXTRACT);
         InvalidateRect(progress_, nullptr, FALSE);
         SetPage(Page::Installing);
 #ifndef GLASS_EMBED_MSI
         simulateInstall_ = true;
+        simulateRollback_ = false;
+        simulateRollbackStarted_ = 0;
         installStatusLine_ = Text(IDS_SIMULATION_NOTE);
         InstallLog::Line(L"Debug build: simulated installation, platform is not stopped");
         SetTimer(window, kInstallTimer, kInstallTimerMs, nullptr);
         return;
 #else
-        std::wstring x64Dir, x86Dir, ogDir;
-        if (!DefaultProgramGlassDir(true, x64Dir) || !DefaultProgramGlassDir(false, x86Dir)) {
-            InstallLog::Line(L"Install path resolution failed (Program Files)");
+        GlassInstallUtil::InstallRoots roots;
+        if (!GlassInstallUtil::ResolveInstallRoots(roots)) {
+            InstallLog::LineFormat(L"Install path resolution failed (error %lu)",GetLastError());
             ShowInstallError(Text(IDS_ERR_INSTALL_PATH));
             return;
         }
-        ogDir = x64Dir + L"\\OpenGlass";
+        const std::wstring& x64Dir=roots.x64;
+        const std::wstring& x86Dir=roots.x86;
+        const std::wstring& ogDir=roots.openGlass;
+        const bool os64=!x64Dir.empty();
+        const bool same64=(x64Dir.empty() && preflightX64Root_.empty()) ||
+            GlassInstallUtil::SameInstallPath(x64Dir,preflightX64Root_);
+        const bool sameOg=(ogDir.empty() && preflightOpenGlassRoot_.empty()) ||
+            GlassInstallUtil::SameInstallPath(ogDir,preflightOpenGlassRoot_);
+        if (!same64 || !sameOg || !GlassInstallUtil::SameInstallPath(x86Dir,preflightX86Root_)) {
+            InstallLog::Line(L"Installation roots changed after the version check; no changes made");
+            ShowInstallError(Text(IDS_ERR_INSTALL_PATH));
+            return;
+        }
+        if (os64 && selection_.openGlass && (!openGlassStartup_.valid ||
+            !GlassInstallUtil::SameInstallPath(openGlassStartupDir_,ogDir))) {
+            InstallLog::Line(L"OpenGlass startup state or installation path could not be verified; no changes made");
+            ShowInstallError(Text(IDS_ERR_OG_STATE));
+            return;
+        }
         InstallLog::Line(L"User started installation");
         InstallLog::LineFormat(L"Target x64=%s x86=%s OpenGlass=%s", x64Dir.c_str(), x86Dir.c_str(), ogDir.c_str());
         InstallEngine::PhaseLabels labels;
@@ -2374,17 +2060,19 @@ private:
         labels.backup = Text(IDS_STATUS_BACKUP);
         labels.glassSettings64 = Text(IDS_STATUS_GS64);
         labels.glassSettings86 = Text(IDS_STATUS_GS86);
+        labels.removing = Text(IDS_STATUS_REMOVE);
         labels.rollback = Text(IDS_STATUS_ROLLBACK);
         labels.purge = Text(IDS_STATUS_PURGE);
         labels.purgeFailed = Text(IDS_ERR_PURGE_FAILED);
         labels.platformDidNotStart = Text(IDS_ERR_PLATFORM_START);
+        labels.shellRegisterFailed = Text(IDS_ERR_SHELL_REGISTER);
         labels.rollbackFailed = Text(IDS_ERR_ROLLBACK_FAILED);
         labels.rollbackRestored = Text(IDS_ERR_ROLLBACK_RESTORED);
         labels.rollbackRemoved = Text(IDS_ERR_ROLLBACK_REMOVED);
         labels.nativeScanFailed = Text(IDS_ERR_NATIVE_SCAN);
         labels.snapshotFailed = Text(IDS_ERR_SNAPSHOT);
         labels.diskFull = Text(IDS_MSI_DISK_FULL);
-        installEngine_.Start(gInstance, x64Dir, x86Dir, ogDir, true, forceCleanInstall_, std::move(labels), nullptr);
+        installEngine_.Start(gInstance, x64Dir, x86Dir, ogDir, selection_, openGlassStartup_, false, std::move(labels), nullptr);
         SetTimer(window, kInstallTimer, kInstallTimerMs, nullptr);
 #endif
     }
@@ -2402,23 +2090,20 @@ private:
         setupProductVersion_=SelfProductVersion();
         ParsedVersion setupParsed{};
         const bool setupVersionValid=TryParseVersion(setupProductVersion_,setupParsed);
-        if (installed.detected && !installed.valid) {
-            if (!forceCleanInstall_) {
-                offerCleanInstall_=true;
-                blockReason_=Text(IDS_VERSION_INVALID_BODY);
-                downgradeBody_.clear();
-                InstallLog::LineFormat(L"Preflight: integrity failure, offering clean reinstall (%s)",
-                    installed.modulePath.empty()?L"installation path not resolved":installed.modulePath.c_str());
-                SetPage(Page::VersionInvalid);
-                return false;
-            }
-            InstallLog::Line(L"Preflight: clean reinstall accepted after integrity failure");
-        } else {
-            offerCleanInstall_=false;
+        if (!installed.rootsResolved || (installed.detected && !installed.valid)) {
+            // Missing paths, inaccessible files, and unreadable metadata do not
+            // prove corruption. Never offer destructive clean reinstall here.
+            blockReason_=Text(installed.rootsResolved?IDS_VERSION_INVALID_BODY:IDS_ERR_INSTALL_PATH);
+            versionInvalidNote_=Text(IDS_VERSION_INVALID_NOTE);
+            downgradeBody_.clear();
+            InstallLog::LineFormat(L"Preflight blocked: installed location or version cannot be verified (%s); no changes made",
+                installed.modulePath.empty()?L"no readable installed module":installed.modulePath.c_str());
+            SetPage(Page::VersionInvalid);
+            return false;
         }
         if (installed.detected && !setupVersionValid) {
-            offerCleanInstall_=false;
             blockReason_=Text(IDS_SETUP_VERSION_INVALID_BODY);
+            versionInvalidNote_=Text(IDS_SETUP_VERSION_INVALID_NOTE);
             downgradeBody_.clear();
             InstallLog::Line(L"Preflight blocked: this setup's ProductVersion is missing or invalid; safe comparison is impossible");
             SetPage(Page::VersionInvalid);
@@ -2433,7 +2118,11 @@ private:
             SetPage(Page::Downgrade);
             return false;
         }
+        preflightX64Root_=installed.x64Root;
+        preflightX86Root_=installed.x86Root;
+        preflightOpenGlassRoot_=installed.openGlassRoot;
         blockReason_.clear();
+        versionInvalidNote_.clear();
         downgradeBody_.clear();
         return true;
     }
@@ -2521,7 +2210,7 @@ private:
     }
 #ifdef _DEBUG
     void MaybeStartDebugDemo() {
-        if (debugDemoStarted_ || !webReady_ || !webBridgeReady_) return;
+        if (!debugDemoPending_ || debugDemoStarted_ || !webReady_ || !webBridgeReady_) return;
         debugDemoStarted_=true;
         debugDemoPending_=false;
         debugDemoActive_=true;
@@ -2560,8 +2249,8 @@ private:
             conflicts_.clear();
             installedGlassVersion_.clear();
             setupProductVersion_=SelfProductVersion();
-            offerCleanInstall_=true;
             blockReason_=Text(IDS_VERSION_INVALID_BODY);
+            versionInvalidNote_=Text(IDS_VERSION_INVALID_NOTE);
             downgradeBody_.clear();
             break;
         case Page::License:
@@ -2570,9 +2259,9 @@ private:
             break;
         case Page::Installing:
             simulateInstall_=false;
-            visualMode_=VisualMode::Slideshow;
+            progressReverse_=false;
             progressMarquee_=false;
-            progressFinishing_=false;
+            rollbackFinishing_=false;
             percent_=43;
             progressValue_=4300;
             displayProgress_=4300;
@@ -2587,11 +2276,26 @@ private:
             holdReport_=L"explorer.exe (PID 2080): ExplorerCompat.dll, TaskbarCompat.dll\r\n"
                         L"GlassSettings.exe (PID 4120): GlassCore.dll, WndCompat.dll";
             break;
+        case Page::Cancelling:
+            progressReverse_=true;
+            progressMarquee_=false;
+            progressValue_=displayProgress_=progressTarget_=4300;
+            percent_=WizardProgress::Percent(progressValue_);
+            installStatusLine_=Text(IDS_SIMULATION_ROLLBACK);
+            break;
+        case Page::Launching:
+            progressReverse_=false;
+            progressMarquee_=false;
+            progressValue_=displayProgress_=progressTarget_=9000;
+            percent_=90;
+            installStatusLine_=Text(IDS_LAUNCH_TITLE);
+            break;
         case Page::Complete:
             percent_=100;
             progressValue_=10000;
             displayProgress_=10000;
             progressTarget_=10000;
+            progressReverse_=false;
             progressMarquee_=false;
             break;
         case Page::Error:
@@ -2611,8 +2315,7 @@ private:
         simulateInstall_=false;
         updateAvailable_=false;
         updateSkipped_=false;
-        offerCleanInstall_=false;
-        forceCleanInstall_=false;
+        versionInvalidNote_.clear();
         errorReason_.clear();
         holdReport_.clear();
         conflicts_.clear();
@@ -2620,20 +2323,21 @@ private:
         setupProductVersion_.clear();
         blockReason_.clear();
         downgradeBody_.clear();
+        progressReverse_=false;
         progressMarquee_=false;
+        rollbackFinishing_=false;
         percent_=0;
         progressValue_=0;
         displayProgress_=0;
         progressTarget_=0;
         installStatusLine_.clear();
-        visualMode_=VisualMode::Slideshow;
         InstallLog::Line(L"Debug page tour finished; returned to Welcome");
         SetPage(Page::Welcome);
     }
     void TickDebugDemo() {
         static constexpr Page sequence[]={Page::Welcome,Page::Checking,Page::Update,
-            Page::Conflicts,Page::Downgrade,Page::VersionInvalid,Page::License,
-            Page::Installing,Page::ModulesBusy,Page::ProcessesStuck,Page::Complete,Page::Error};
+            Page::Conflicts,Page::Downgrade,Page::VersionInvalid,Page::License,Page::Components,
+            Page::Installing,Page::ModulesBusy,Page::ProcessesStuck,Page::ConfirmCancel,Page::Cancelling,Page::Cancelled,Page::Launching,Page::Complete,Page::Error};
         constexpr size_t count=sizeof(sequence)/sizeof(sequence[0]);
         if (!debugDemoActive_) { KillTimer(window,kDebugDemoTimer); return; }
         if (debugDemoStep_+1>=count) { FinishDebugDemo(); return; }
@@ -2642,185 +2346,179 @@ private:
     }
 #endif
 #ifndef GLASS_EMBED_MSI
-    void FinishSimulatedInstall() {
-        displayProgress_ = 10000;
-        progressValue_ = 10000;
-        percent_ = 100;
-        KillTimer(window, kInstallTimer);
-        SetPage(Page::Complete);
-    }
     void TickSimulation() {
-        const ULONGLONG now = GetTickCount64();
-        const ULONGLONG elapsed = now - started_;
-        const ULONGLONG dt = progressTickMs_ ? (now - progressTickMs_) : kInstallTimerMs;
-        progressTickMs_ = now;
-        progressMarquee_ = false;
-        progressTarget_ = elapsed >= kDuration ? 10000
-            : static_cast<int>(elapsed * 10000 / kDuration);
-        const double alpha = std::min(1.0, static_cast<double>(dt) / kProgressSmoothTauMs);
-        int step = static_cast<int>(std::lround((progressTarget_ - displayProgress_) * alpha));
-        if (step < 1 && progressTarget_ > displayProgress_) step = 1;
-        displayProgress_ += step;
-        if (displayProgress_ > progressTarget_) displayProgress_ = progressTarget_;
-        progressValue_ = displayProgress_;
-        percent_ = std::min(100, displayProgress_ / 100);
-        installStatusLine_ = Text(IDS_SIMULATION_NOTE);
-        if (elapsed >= kDuration && displayProgress_ >= 10000) {
-            FinishSimulatedInstall();
+        const ULONGLONG now=GetTickCount64();
+        if (simulateRollback_) {
+            const ULONGLONG elapsed=now-simulateRollbackStarted_;
+            progressMarquee_=false;
+            progressValue_=displayProgress_=progressTarget_=WizardProgress::FadeToZero(
+                rollbackProgress_.Start(),elapsed,kSimulatedRollbackDuration);
+            percent_=WizardProgress::Percent(progressValue_);
+            if (elapsed>=kSimulatedRollbackDuration) {
+                simulateInstall_=false;
+                simulateRollback_=false;
+                cancelledDetail_=Text(IDS_SIMULATION_CANCELLED);
+                KillTimer(window,kInstallTimer);
+                SetPage(Page::Cancelled);
+                return;
+            }
+            InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter(); SyncWebViewState();
             return;
         }
-        InvalidateRect(progress_, nullptr, FALSE);
-        InvalidateFooter();
+        // The bar is hidden on the confirmation page: retain exactly the value
+        // that was visible when the cancellation command was issued.
+        if (page_==Page::ConfirmCancel) return;
+        const ULONGLONG elapsed=now-started_;
+        if (elapsed>=kDuration-5000 && page_!=Page::Launching) {
+            launchStarted_=now;
+            installStatusLine_=Text(IDS_LAUNCH_TITLE);
+            SetPage(Page::Launching);
+        }
+        progressMarquee_=false;
+        progressValue_=elapsed>=kDuration ? 10000 : static_cast<int>(elapsed*10000/kDuration);
+        displayProgress_=progressValue_; percent_=WizardProgress::Percent(progressValue_);
+        if (elapsed>=kDuration && launchStarted_ && now-launchStarted_>=5000) {
+            simulateInstall_=false; KillTimer(window,kInstallTimer); SetPage(Page::Complete); return;
+        }
+        InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter(); SyncWebViewState();
     }
 #endif
     void Tick() {
 #ifndef GLASS_EMBED_MSI
-        if (simulateInstall_) {
-            TickSimulation();
-            return;
-        }
+        if (simulateInstall_) { TickSimulation(); return; }
 #endif
-        if (page_ == Page::Installing && installEngine_.TakeErrorPageRequest()) {
+        if (installEngine_.TakeErrorPageRequest()) {
             ShowFailurePage(false);
             installEngine_.NotifyErrorPageShown();
-            return;
         }
-        if (page_ == Page::Error) {
-            if (installEngine_.Poll()) {
-                ShowFailurePage(true);
-                return;
-            }
-            installStatusLine_ = installEngine_.StatusLine();
+        if (page_==Page::Error) {
+            if (installEngine_.Poll()) { ShowFailurePage(true); return; }
+            installStatusLine_=installEngine_.StatusLine();
             SyncWebViewState();
             return;
         }
-        if (page_ != Page::Installing && page_ != Page::ModulesBusy && page_ != Page::ProcessesStuck) return;
-        const auto hold = installEngine_.CurrentHold();
-        if (hold == InstallEngine::HoldKind::Modules && page_ != Page::ModulesBusy) {
-            holdReport_ = installEngine_.HoldReport();
-            SetPage(Page::ModulesBusy);
-            return;
-        }
-        if (hold == InstallEngine::HoldKind::Processes && page_ != Page::ProcessesStuck) {
-            holdReport_ = installEngine_.HoldReport();
-            SetPage(Page::ProcessesStuck);
-            return;
-        }
-        if (hold == InstallEngine::HoldKind::None &&
-            (page_ == Page::ModulesBusy || page_ == Page::ProcessesStuck)) {
-            SetPage(Page::Installing);
-        }
-        const bool animateProgress = page_==Page::Installing || page_==Page::ModulesBusy ||
-            page_==Page::ProcessesStuck;
-        const ULONGLONG now = GetTickCount64();
-        const ULONGLONG dt = progressTickMs_ ? (now - progressTickMs_) : kInstallTimerMs;
-        progressTickMs_ = now;
-        if (animateProgress) {
-            progressReverse_ = installEngine_.IsProgressReverse();
-            progressMarquee_ = installEngine_.IsMarquee() && !progressFinishing_;
-            if (progressMarquee_) {
-                // Фаза от абсолютного времени — без накопления ошибки таймера (как в имитации установки).
-                marqueePhase_ = static_cast<double>((now - started_) % kMarqueePeriodMs) /
-                    static_cast<double>(kMarqueePeriodMs);
-            } else {
-                if (progressFinishing_)
-                    progressTarget_ = progressReverse_ ? 0 : 10000;
-                else
-                    progressTarget_ = std::clamp(installEngine_.ProgressUnits(), 0, 10000);
-                const double alpha = std::min(1.0, static_cast<double>(dt) / kProgressSmoothTauMs);
-                displayProgress_ += static_cast<int>(std::lround(
-                    (progressTarget_ - displayProgress_) * alpha));
-                progressValue_ = displayProgress_;
-                percent_ = std::min(100, progressReverse_
-                    ? (10000 - displayProgress_) / 100
-                    : displayProgress_ / 100);
+        if (page_!=Page::Installing && page_!=Page::ModulesBusy && page_!=Page::ProcessesStuck &&
+            page_!=Page::ConfirmCancel && page_!=Page::Cancelling && page_!=Page::Launching) return;
+
+        const ULONGLONG now=GetTickCount64();
+        const bool finished=installEngine_.Poll();
+        if (finished && installEngine_.WasCancelled()) {
+            if (!installEngine_.RollbackSucceeded()) { ShowFailurePage(true); return; }
+            if (!progressReverse_) BeginRollbackVisual(now);
+            if (!rollbackFinishing_) {
+                // The engine succeeded, including MSI, registry and host work.
+                // Only now may the held remainder finish animating to zero.
+                rollbackFinishing_=true;
+                rollbackFinishStarted_=now;
+                rollbackFinishFrom_=progressValue_;
+                rollbackProgress_.Finish();
+                progressTarget_=0;
+                progressMarquee_=false;
+                installStatusLine_=Text(IDS_STATUS_ROLLBACK);
+                if (page_!=Page::Cancelling) ShowCancelling();
             }
-            installStatusLine_ = installEngine_.StatusLine();
-            if (page_==Page::Installing && visualMode_!=VisualMode::Slideshow) {
-                if (installStatusLine_ == unlockStatusLine_) {
-                    unlockStatusObserved_ = true;
-                } else if (unlockStatusObserved_ && now >= unlockVisualUntil_) {
-                    visualMode_ = VisualMode::Slideshow;
-                    unlockStatusLine_.clear();
-                    unlockVisualUntil_ = 0;
-                    unlockStatusObserved_ = false;
-                    SyncWebViewState();
-                }
-            }
-        }
-        if (page_ != Page::Installing) {
-            InvalidateRect(progress_, nullptr, FALSE);
-            if (animateProgress) InvalidateFooter();
-            return;
-        }
-        if (installEngine_.Poll()) {
-            if (installEngine_.Succeeded() && displayProgress_ < 10000) {
-                progressFinishing_ = true;
-                progressMarquee_ = false;
-                const int gap = 10000 - displayProgress_;
-                const double alpha = std::min(1.0, static_cast<double>(dt) / kProgressSmoothTauMs);
-                int step = static_cast<int>(std::lround(gap * alpha));
-                // lround(малый хвост) даёт 0, и страница «Готово» не открывается, пока тик не станет крупным.
-                if (step < 1) step = gap;
-                displayProgress_ += step;
-                if (displayProgress_ > 10000) displayProgress_ = 10000;
-                progressValue_ = displayProgress_;
-                percent_ = std::min(100, displayProgress_ / 100);
-                installStatusLine_ = installEngine_.StatusLine();
-                if (displayProgress_ < 10000) {
-                    InvalidateRect(progress_, nullptr, FALSE);
-                    InvalidateFooter();
-                    return;
-                }
-            }
-            KillTimer(window, kInstallTimer);
-            if (installEngine_.QuietClose()) {
-                DestroyWindow(window);
+            progressValue_=displayProgress_=WizardProgress::FadeToZero(
+                rollbackFinishFrom_,now-rollbackFinishStarted_,kRollbackFinishMs);
+            percent_=WizardProgress::Percent(progressValue_);
+            if (now-rollbackFinishStarted_>=kRollbackFinishMs || !rollbackFinishFrom_) {
+                KillTimer(window,kInstallTimer);
+                cancelledDetail_=installEngine_.RollbackNote();
+                SetPage(Page::Cancelled);
                 return;
             }
-            if (!installEngine_.Succeeded()) {
-                ShowFailurePage(true);
-                return;
-            }
-            displayProgress_ = 10000;
-            progressValue_ = 10000;
-            percent_ = 100;
-            InvalidateRect(progress_, nullptr, FALSE);
-            InstallLog::Line(L"Complete page");
-            SetPage(Page::Complete);
+            InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter();
+            if (now-lastWebPush_>=100) { lastWebPush_=now; SyncWebViewState(); }
             return;
         }
-        InvalidateRect(progress_, nullptr, FALSE);
-        InvalidateFooter();
+        if (finished && !installEngine_.Succeeded()) { ShowFailurePage(true); return; }
+        if (page_==Page::ConfirmCancel) { progressTickMs_=now; return; }
+        if (installEngine_.IsLaunchingPhase() || (finished && installEngine_.Succeeded())) {
+            if (!launchStarted_) launchStarted_=now;
+            if (page_!=Page::Launching) SetPage(Page::Launching);
+        } else if (page_!=Page::ConfirmCancel && page_!=Page::Cancelling) {
+            const auto hold=installEngine_.CurrentHold();
+            if (hold==InstallEngine::HoldKind::Modules && page_!=Page::ModulesBusy) {
+                holdReport_=installEngine_.HoldReport(); SetPage(Page::ModulesBusy);
+            } else if (hold==InstallEngine::HoldKind::Processes && page_!=Page::ProcessesStuck) {
+                holdReport_=installEngine_.HoldReport(); SetPage(Page::ProcessesStuck);
+            } else if (hold==InstallEngine::HoldKind::None &&
+                       (page_==Page::ModulesBusy || page_==Page::ProcessesStuck)) SetPage(Page::Installing);
+        }
+
+        const ULONGLONG dt=progressTickMs_ ? now-progressTickMs_ : kInstallTimerMs;
+        progressTickMs_=now;
+        const bool engineReverse=installEngine_.IsProgressReverse();
+        if ((page_==Page::Cancelling || engineReverse) && !progressReverse_)
+            BeginRollbackVisual(now);
+        if (progressReverse_) {
+            // Stale installation callbacks and unknown rollback stages must not
+            // move the strip; reliable remaining-work reports can only shrink it.
+            progressMarquee_=false;
+            rollbackProgress_.ReportRemaining(installEngine_.ProgressUnits(),
+                engineReverse && !installEngine_.IsMarquee());
+            progressTarget_=rollbackProgress_.Target();
+        } else {
+            progressMarquee_=installEngine_.IsMarquee();
+            if (!progressMarquee_) {
+                int reported=WizardProgress::ClampUnits(installEngine_.ProgressUnits());
+                if (page_==Page::Launching && launchStarted_) {
+                    const int cap=8800+static_cast<int>(std::min<ULONGLONG>(5000,now-launchStarted_)*1200/5000);
+                    reported=std::min(reported,cap);
+                }
+                // Several installer phases reset their counters. Do not make an
+                // installation bar retract when a phase changes.
+                progressTarget_=std::max(progressTarget_,reported);
+            }
+        }
+        const double alpha=std::min(1.0,static_cast<double>(dt)/kProgressSmoothTauMs);
+        displayProgress_=WizardProgress::SmoothTowards(displayProgress_,progressTarget_,alpha);
+        progressValue_=displayProgress_;
+        percent_=WizardProgress::Percent(progressValue_);
+        // While MSI is acknowledging cancellation, its callbacks still describe
+        // installation, not overall rollback progress.
+        installStatusLine_=page_==Page::Cancelling && !engineReverse
+            ? Text(IDS_STATUS_ROLLBACK) : installEngine_.StatusLine();
+        if (finished && installEngine_.Succeeded() && launchStarted_ && now-launchStarted_>=5000) {
+            KillTimer(window,kInstallTimer); progressValue_=displayProgress_=10000; percent_=100;
+            SetPage(Page::Complete); return;
+        }
+        InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter();
+        if (now-lastWebPush_>=100) { lastWebPush_=now; SyncWebViewState(); }
     }
     void RequestClose() {
 #ifdef _DEBUG
-        if (debugDemoActive_ || debugDemoPending_) {
-            KillTimer(window,kDebugDemoTimer);
-            debugDemoActive_=false;
-            debugDemoPending_=false;
-            DestroyWindow(window);
-            return;
+        if (debugDemoActive_ || (debugDemoPending_ && page_==Page::Welcome)) {
+            KillTimer(window,kDebugDemoTimer); debugDemoActive_=false; debugDemoPending_=false;
+            DestroyWindow(window); return;
         }
 #endif
-        if (page_ == Page::ProcessesStuck) {
-            installEngine_.SignalHold(InstallEngine::HoldAction::Cancel);
-            SetPage(Page::Installing);
+        if (page_==Page::RuntimeInstalling) {
+            runtimeCancel_.store(true); EnableWindow(cancel_,FALSE);
+            runtimeStatus_=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Отмена, дождитесь завершения…":L"Cancelling; please wait…";
+            InvalidateContent(); InvalidateFooter(); return;
+        }
+        if (page_==Page::Cancelling || page_==Page::Launching || page_==Page::ConfirmCancel ||
+            (page_==Page::Error && failurePending_)) return;
+        if (page_==Page::Installing || page_==Page::ModulesBusy || page_==Page::ProcessesStuck) {
+            const int visibleAtRequest=visibleProgress_.PaintedOr(progressValue_);
+#ifndef GLASS_EMBED_MSI
+            if (simulateInstall_) {
+                visibleProgress_.Capture(visibleAtRequest);
+                beforeCancel_=page_; SetPage(Page::ConfirmCancel); return;
+            }
+#endif
+            if (installEngine_.PauseForCancelDecision()) {
+                visibleProgress_.Capture(visibleAtRequest);
+                beforeCancel_=page_; SetPage(Page::ConfirmCancel);
+            }
             return;
         }
-        if (page_ == Page::ModulesBusy) {
-            installEngine_.SignalHold(InstallEngine::HoldAction::Cancel);
-            DestroyWindow(window);
-            return;
-        }
-        if (page_ == Page::Installing && MessageBoxW(window,Text(IDS_CONFIRM_CANCEL).c_str(),
-            Text(IDS_TITLE).c_str(),MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return;
         DestroyWindow(window);
     }
     void WebFailure(HRESULT hr) {
         webError_ = FAILED(hr) ? hr : E_FAIL;
         webReady_ = false;
-        webBridgeReady_ = false;
+        webBridgeReady_ = false; webInitSent_=false; lastWebState_.clear();
 #ifdef _DEBUG
         if (debugDemoPending_) {
             debugDemoPending_=false;
@@ -2850,12 +2548,22 @@ private:
         const std::wstring message(raw);
         CoTaskMemFree(raw);
         if (message.size()>64) return S_OK;
+        if (message==L"cancel") { RequestClose(); return S_OK; }
         if (message==L"ready") {
             webBridgeReady_=true;
             SyncWebViewState();
 #ifdef _DEBUG
             MaybeStartDebugDemo();
 #endif
+            return S_OK;
+        }
+        if (page_==Page::Components && !DebugDemoLocksControls()) {
+            const bool os64=GlassInstallUtil::IsOs64Bit();
+            if (message==L"component:x86:1" || message==L"component:x86:0") selection_.platform32=!os64 || message.back()==L'1';
+            else if (message==L"component:settings:1" || message==L"component:settings:0") selection_.glassSettings=message.back()==L'1';
+            else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
+            selection_.platform64=os64;
+            SyncWebViewState();
             return S_OK;
         }
         if (page_==Page::License && !DebugDemoLocksControls() &&
@@ -2928,23 +2636,25 @@ private:
                 LPWSTR uri = nullptr; req->get_Uri(&uri);
                 std::wstring url = uri ? uri : L"";
                 CoTaskMemFree(uri);
-                const bool allowed = url == kDocumentUrl ||
-                    url == std::wstring(kDocumentUrl)+L"?lang=ru-RU" ||
-                    url == std::wstring(kDocumentUrl)+L"?lang=en-US";
+                const auto asset=WizardAssets::Resolve(url);
+                const bool allowed=asset.id!=0;
                 ComPtr<IStream> body;
                 if (allowed) {
-                    auto html = Resource(IDR_HTML);
-                    body.Attach(SHCreateMemStream(html.data,html.size));
+                    const auto blob=Resource(asset.id);
+                    if (!blob.data || !blob.size) return E_FAIL;
+                    body.Attach(SHCreateMemStream(blob.data,blob.size));
                     if (!body) return E_OUTOFMEMORY;
                 }
+                std::wstring headers=L"Content-Type: ";
+                headers+=allowed?asset.contentType:L"text/plain; charset=utf-8";
+                headers+=L"\r\nCache-Control: no-store\r\n";
+                if (asset.document) headers+=
+                    L"Content-Security-Policy: default-src 'none'; img-src https://glassplatform.invalid data:; "
+                    L"font-src https://glassplatform.invalid; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                    L"connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'\r\n";
                 ComPtr<ICoreWebView2WebResourceResponse> response;
-                HRESULT hr = environment_->CreateWebResourceResponse(body.Get(),allowed?200:403,
-                    allowed?L"OK":L"Forbidden",
-                    L"Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n"
-                    L"Content-Security-Policy: default-src 'none'; img-src data:; "
-                    L"font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
-                    L"connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'\r\n",
-                    &response);
+                HRESULT hr=environment_->CreateWebResourceResponse(body.Get(),allowed?200:403,
+                    allowed?L"OK":L"Forbidden",headers.c_str(),&response);
                 return FAILED(hr) ? hr : args->put_Response(response.Get());
             }).Get(),&requestToken_);
         if (FAILED(request)) { WebFailure(request); return; }
@@ -3014,6 +2724,47 @@ private:
         SetBkMode(dc,TRANSPARENT); SetTextColor(dc,color);
         DrawTextW(dc,s.c_str(),static_cast<int>(s.size()),&rect,format);
         SelectObject(dc,old);
+    }
+    void DrawComponentActionBadge(HDC dc, bool selected, bool installed, int x, int y) {
+        const auto action=GlassProducts::ActionForInstall(selected,installed);
+        const UINT badgeId=ComponentBadgeId(action);
+        if (!badgeId) return;
+        COLORREF fill=RGB(28,57,48), border=RGB(86,169,125), ink=RGB(184,244,209);
+        if (action==GlassProducts::InstallAction::Update) {
+            fill=RGB(62,48,35); border=RGB(194,153,81); ink=RGB(255,223,157);
+        } else if (action==GlassProducts::InstallAction::Remove) {
+            fill=RGB(65,34,45); border=RGB(206,101,119); ink=RGB(255,194,205);
+        }
+        constexpr int width=140, height=24;
+        {
+            Gdiplus::Graphics g(dc);
+            g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+            Gdiplus::RectF bounds(GdiReal(Scale(x)),GdiReal(Scale(y)),GdiReal(Scale(width)),GdiReal(Scale(height)));
+            Gdiplus::GraphicsPath path;
+            AddRoundedRectPath(path,bounds,GdiReal(Scale(12)));
+            Gdiplus::SolidBrush brush(Gdiplus::Color(255,GetRValue(fill),GetGValue(fill),GetBValue(fill)));
+            Gdiplus::Pen edge(Gdiplus::Color(255,GetRValue(border),GetGValue(border),GetBValue(border)),GdiReal(Scale(1)));
+            g.FillPath(&brush,&path); g.DrawPath(&edge,&path);
+        }
+        DrawLabel(dc,Text(badgeId),Box(x+8,y,width-14,height),small_,ink,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    }
+    void DrawMandatoryLock(HDC dc, int x, int y) {
+        // A separate two-colour icon, not tinted by the installation action.
+        Gdiplus::Graphics g(dc);
+        g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+        Gdiplus::Pen shackle(Gdiplus::Color(255,167,223,255),GdiReal(Scale(3)));
+        g.DrawArc(&shackle,GdiInt(Scale(x+7)),GdiInt(Scale(y+2)),GdiInt(Scale(10)),GdiInt(Scale(14)),180.0f,180.0f);
+        Gdiplus::GraphicsPath body;
+        AddRoundedRectPath(body,Gdiplus::RectF(GdiReal(Scale(x+4)),GdiReal(Scale(y+10)),
+            GdiReal(Scale(16)),GdiReal(Scale(13))),GdiReal(Scale(3)));
+        Gdiplus::SolidBrush gold(Gdiplus::Color(255,239,185,79));
+        Gdiplus::Pen rim(Gdiplus::Color(255,255,226,163),GdiReal(Scale(1)));
+        g.FillPath(&gold,&body); g.DrawPath(&rim,&body);
+        Gdiplus::SolidBrush keyhole(Gdiplus::Color(255,87,60,56));
+        g.FillEllipse(&keyhole,GdiInt(Scale(x+10)),GdiInt(Scale(y+14)),GdiInt(Scale(4)),GdiInt(Scale(4)));
+        Gdiplus::Pen stem(Gdiplus::Color(255,87,60,56),GdiReal(Scale(2)));
+        g.DrawLine(&stem,GdiInt(Scale(x+12)),GdiInt(Scale(y+17)),GdiInt(Scale(x+12)),GdiInt(Scale(y+20)));
     }
     void DrawBrandMark(HDC dc, int x, int y) {
         Gdiplus::Graphics g(dc);
@@ -3192,7 +2943,7 @@ private:
         g.FillEllipse(&spark,GdiReal(cx-Scale(127)),GdiReal(cy+Scale(81)),GdiReal(Scale(5)),GdiReal(Scale(5)));
     }
     void DrawLoadingScreen(HDC dc) {
-        const double phase=static_cast<double>(GetTickCount64()%1200)/1200.0;
+        const double phase=loadingAnimationsEnabled_ ? static_cast<double>(GetTickCount64()%1200)/1200.0 : 0.0;
         const Gdiplus::REAL x=static_cast<Gdiplus::REAL>(Scale(473));
         const Gdiplus::REAL y=static_cast<Gdiplus::REAL>(Scale(243));
         const Gdiplus::REAL diameter=static_cast<Gdiplus::REAL>(Scale(54));
@@ -3204,7 +2955,18 @@ private:
         g.DrawEllipse(&track,x,y,diameter,diameter);
         g.DrawArc(&arc,x,y,diameter,diameter,GdiReal(-90.0+phase*360.0),GdiReal(268.0));
     }
+    void EnsureBanner() {
+        if (bannerLoaded_) return;
+        bannerLoaded_=true;
+        const auto image=Resource(IDR_WELCOME);
+        bannerStream_.Attach(SHCreateMemStream(image.data,image.size));
+        if (bannerStream_) {
+            banner_.reset(Gdiplus::Bitmap::FromStream(bannerStream_.Get()));
+            if (banner_ && banner_->GetLastStatus()!=Gdiplus::Ok) banner_.reset();
+        }
+    }
     void DrawBanner(HDC dc, bool complete) {
+        EnsureBanner();
         if (!banner_) return;
         Gdiplus::Graphics g(dc);
         g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
@@ -3222,6 +2984,7 @@ private:
         g.FillRectangle(&shade,GdiInt(Scale(240)),GdiInt(Scale(100)),GdiInt(Scale(350)),GdiInt(Scale(440)));
     }
     void DrawBannerFull(HDC dc) {
+        EnsureBanner();
         if (!banner_) return;
         Gdiplus::Graphics g(dc);
         g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
@@ -3233,7 +2996,51 @@ private:
         RECT content=Box(0,0,kWidth,kContentHeight);
         FillRect(dc,&content,darkBrush_);
         const COLORREF white=RGB(245,244,252), muted=RGB(163,168,191), accent=RGB(193,180,255);
-        if (page_ == Page::Complete) {
+        if (page_==Page::RuntimeRequired || page_==Page::RuntimeInstalling || page_==Page::RuntimeError || page_==Page::AlreadyRunning) {
+            DrawBanner(dc,true);
+            DrawBrandMark(dc,48,29);
+            DrawLabel(dc,Text(IDS_BRAND),Box(82,27,340,30),font_,white,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
+            const UINT titleId=page_==Page::RuntimeRequired?IDS_RUNTIME_REQUIRED_TITLE:
+                page_==Page::RuntimeInstalling?IDS_RUNTIME_INSTALLING_TITLE:
+                page_==Page::AlreadyRunning?IDS_ALREADY_RUNNING_TITLE:IDS_RUNTIME_INSTALL_FAILED;
+            const std::wstring body=page_==Page::RuntimeRequired?Text(IDS_RUNTIME_MISSING):
+                page_==Page::RuntimeInstalling?runtimeStatus_:
+                page_==Page::AlreadyRunning?Text(IDS_ALREADY_RUNNING_BODY):runtimeError_;
+            DrawLabel(dc,Text(titleId),Box(48,140,620,110),heading_,white);
+            DrawLabel(dc,body,Box(48,250,620,190),font_,muted);
+        } else if (page_==Page::Components && !webReady_) {
+            DrawBanner(dc,true);
+            DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
+            DrawLabel(dc,Text(IDS_COMP_TITLE),Box(48,90,700,50),heading_,white);
+            DrawLabel(dc,Text(IDS_COMP_INTRO),Box(48,142,840,42),font_,muted);
+            const bool os64=GlassInstallUtil::IsOs64Bit();
+            const auto state=[&](bool selected, bool installed, bool mandatory, int x, int y) {
+                DrawLabel(dc,Text(ComponentStateId(selected,installed)),Box(x,y,mandatory?220:250,38),small_,accent);
+                if (mandatory) DrawMandatoryLock(dc,x+230,y+1);
+                DrawComponentActionBadge(dc,selected,installed,x+260,y+2);
+            };
+            if (os64) state(selection_.platform64,installedSelection_.platform64,true,60,238);
+            state(selection_.platform32,installedSelection_.platform32,!os64,510,238);
+            state(selection_.glassSettings,installedSelection_.glassSettings,false,60,328);
+            if (os64) state(selection_.openGlass,installedSelection_.openGlass,false,510,328);
+            int warningY=398;
+            if (os64 && !selection_.platform32) {
+                DrawLabel(dc,Text(IDS_COMP_X86_WARNING),Box(48,warningY,840,48),font_,white);
+                warningY+=50;
+            }
+            if (!selection_.glassSettings) DrawLabel(dc,Text(IDS_COMP_GS_WARNING),Box(48,warningY,840,88),font_,white);
+        } else if (page_==Page::ConfirmCancel || page_==Page::Cancelled || page_==Page::Cancelling || page_==Page::Launching) {
+            DrawBanner(dc,true);
+            const UINT title=page_==Page::ConfirmCancel?IDS_CONFIRM_CANCEL_TITLE:page_==Page::Cancelled?IDS_CANCELLED_TITLE:
+                page_==Page::Launching?IDS_LAUNCH_TITLE:IDS_STATUS_ROLLBACK;
+            const UINT body=page_==Page::ConfirmCancel?IDS_CONFIRM_CANCEL_BODY:page_==Page::Cancelled?IDS_CANCELLED_BODY:
+                page_==Page::Launching?IDS_LAUNCH_BODY:IDS_CONFIRM_CANCEL_NOTE;
+            DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
+            DrawLabel(dc,Text(title),Box(48,150,540,75),heading_,white);
+            DrawLabel(dc,Text(body),Box(48,235,520,140),font_,muted);
+            if (page_==Page::Cancelled && !cancelledDetail_.empty()) DrawLabel(dc,cancelledDetail_,Box(48,380,520,80),font_,white);
+            DrawSuccessIllustration(dc);
+        } else if (page_ == Page::Complete) {
             DrawBanner(dc,true);
             DrawHeroPanel(dc,32,120,558,408,RGB(139,201,218));
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
@@ -3343,7 +3150,7 @@ private:
             DrawLabel(dc,blockReason_,Box(48,238,520,126),font_,muted,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX);
             DrawLabel(dc,Text(IDS_INSTALLED_VERSION_LABEL)+L": "+(installedGlassVersion_.empty()?L"—":installedGlassVersion_),Box(48,382,520,30),font_,white);
             DrawLabel(dc,Text(IDS_SETUP_VERSION_LABEL)+L": "+(setupProductVersion_.empty()?L"—":setupProductVersion_),Box(48,420,520,30),font_,white);
-            DrawLabel(dc,Text(offerCleanInstall_?IDS_VERSION_INVALID_NOTE:IDS_SETUP_VERSION_INVALID_NOTE),Box(48,489,520,34),small_,muted);
+            DrawLabel(dc,versionInvalidNote_,Box(48,489,520,34),small_,muted);
         } else if (page_==Page::Welcome && !webReady_ && SUCCEEDED(webError_)) {
             DrawLoadingScreen(dc);
         } else if (!webReady_ && FAILED(webError_)) {
@@ -3354,9 +3161,10 @@ private:
         }
     }
     void RenderFooterText(HDC dc) {
-        if (page_!=Page::Installing) return;
-        const std::wstring line=installStatusLine_.empty()?Text(IDS_STATUS_PREPARE):installStatusLine_;
-        const std::wstring shown=progressMarquee_?line:line+L"  "+std::to_wstring(percent_)+L"%";
+        if (page_!=Page::Installing && page_!=Page::Cancelling && page_!=Page::Launching && page_!=Page::RuntimeInstalling) return;
+        const std::wstring line=page_==Page::RuntimeInstalling?runtimeStatus_:installStatusLine_.empty()?Text(IDS_STATUS_PREPARE):installStatusLine_;
+        const std::wstring percentText=progressValue_>0 && percent_==0 ? L"<1%" : std::to_wstring(percent_)+L"%";
+        const std::wstring shown=progressMarquee_?line:line+L"  "+percentText;
         RECT dot=Box(32,kContentHeight+22,8,8);
         HBRUSH dotBrush=CreateSolidBrush(RGB(183,168,255));
         HGDIOBJ oldBrush=SelectObject(dc,dotBrush);
@@ -3395,10 +3203,17 @@ private:
     }
     void Cleanup() {
         closing_ = true;
+        {
+            std::lock_guard<std::mutex> lock(startupMutex_);
+            startupStop_.store(true,std::memory_order_release);
+        }
+        KillTimer(window,kStartupPollTimer);
         KillTimer(window,kInstallTimer); KillTimer(window,kFadeTimer); KillTimer(window,kHeroTimer);
 #ifdef _DEBUG
         KillTimer(window,kDebugDemoTimer);
 #endif
+        runtimeCancel_.store(true);
+        if (runtimeThread_.joinable()) runtimeThread_.join();
         if (versionCheckThread_.joinable()) versionCheckThread_.join();
         frame_.Reset(); fadeFrame_.Reset();
         if (web_ && webMessageToken_.value) web_->remove_WebMessageReceived(webMessageToken_);
@@ -3406,8 +3221,8 @@ private:
         web_.Reset(); controller_.Reset(); environment_.Reset();
         banner_.reset(); bannerStream_.Reset();
         for (HWND button : {back_,next_,cancel_,updateDownload_,updateSkip_})
-            if (button && IsWindow(button)) RemoveWindowSubclass(button,GlassButtonSubclassProc,kButtonSubclassId);
-        g_buttonImageCache.Reset();
+            if (button && IsWindow(button)) WizardTheme::DetachButtonScope(button);
+        WizardTheme::ResetButtonCache();
         for (HFONT f : {font_,heading_,small_,title_}) if (f) DeleteObject(f);
         if (darkBrush_) DeleteObject(darkBrush_);
         if (licenseBrush_) DeleteObject(licenseBrush_);
@@ -3419,12 +3234,19 @@ private:
     }
     LRESULT Handle(UINT msg, WPARAM w, LPARAM l) {
         switch (msg) {
-        case WM_CREATE: Initialize(); return 0;
+        case WM_CREATE: InitializeLoading(); return 0;
+        case kBeginStartup: BeginStartup(); return 0;
+        case kStartupComplete: CompleteStartupIfReady(); return 0;
         case WM_ERASEBKGND:
             if (bufferedErase_) Erase(reinterpret_cast<HDC>(w));
             return 1; // Do not clear the on-screen client before the buffered paint.
         case kInitWebView: if (!closing_) InitializeWebView(); return 0;
         case kVersionCheckComplete: if (!closing_) CompleteVersionCheck(); return 0;
+        case kRuntimeStatus: {
+            std::lock_guard<std::mutex> lock(runtimeMutex_); runtimeStatus_=Text(static_cast<UINT>(w));
+            InvalidateContent(); InvalidateFooter(); return 0;
+        }
+        case kRuntimeComplete: CompleteRuntimeInstallation(); return 0;
         case WM_PAINT: Paint(); return 0;
         case WM_SIZE: Layout(); return 0;
         case WM_MOVE: if (controller_) controller_->NotifyParentWindowPositionChanged(); return 0;
@@ -3435,6 +3257,16 @@ private:
             break;
         case WM_THEMECHANGED:
             EndTransition(); InvalidateRect(window,nullptr,FALSE); return 0;
+        case WM_SETTINGCHANGE:
+            if (page_==Page::Welcome && !webReady_ && SUCCEEDED(webError_)) {
+                BOOL enabled=TRUE;
+                SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&enabled,0);
+                loadingAnimationsEnabled_=enabled!=FALSE;
+                if (loadingAnimationsEnabled_) SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
+                else KillTimer(window,kHeroTimer);
+                InvalidateContent();
+            }
+            break;
         case WM_DPICHANGED: {
             EndTransition();
             frame_.Reset(); fadeFrame_.Reset(); haveWebBounds_=false;
@@ -3445,31 +3277,28 @@ private:
                                     FALSE,static_cast<DWORD>(GetWindowLongPtrW(window,GWL_EXSTYLE)),dpi_);
             SetWindowPos(window,nullptr,suggested->left,suggested->top,size.right-size.left,
                          size.bottom-size.top,SWP_NOACTIVATE | SWP_NOZORDER);
-            CreateFonts(); Layout(); BuildButtonImageCache(); InvalidateRect(window,nullptr,FALSE);
+            if (controlsReady_) { CreateFonts(); Layout(); WizardTheme::ResetButtonCache(); }
+            InvalidateRect(window,nullptr,FALSE);
             RedrawWindow(window,nullptr,nullptr,RDW_INVALIDATE | RDW_ALLCHILDREN); return 0;
         }
         case WM_DRAWITEM: {
             const auto item=reinterpret_cast<const DRAWITEMSTRUCT*>(l);
             if (item && item->CtlID==IDC_PROGRESS) {
                 FillRect(item->hDC,&item->rcItem,progressTrack_);
-                if (progressMarquee_) {
+                if (progressMarquee_ && page_==Page::RuntimeInstalling) {
                     const int width = item->rcItem.right - item->rcItem.left;
                     const int span = std::max(width / 3, 48);
                     const int travel = width + span;
-                    const double phase = progressReverse_ ? (1.0 - marqueePhase_) : marqueePhase_;
-                    const int left = item->rcItem.left + static_cast<int>(phase * travel) - span;
+                    const int left = item->rcItem.left + static_cast<int>(marqueePhase_ * travel) - span;
                     RECT chip{left, item->rcItem.top, left + span, item->rcItem.bottom};
                     IntersectRect(&chip, &chip, &item->rcItem);
                     if (chip.right > chip.left)
                         FillRect(item->hDC,&chip,progressFill_);
                 } else {
-                    RECT filled=item->rcItem;
-                    const int bar = MulDiv(filled.right-filled.left,progressValue_,10000);
-                    if (progressReverse_) {
-                        filled.left = filled.right - bar;
-                    } else {
-                        filled.right = filled.left + bar;
-                    }
+                    const auto span=WizardProgress::DeterminateSpan(
+                        item->rcItem.left,item->rcItem.right,progressValue_);
+                    visibleProgress_.RecordPaint(progressValue_);
+                    RECT filled{span.left,item->rcItem.top,span.right,item->rcItem.bottom};
                     if (filled.right > filled.left)
                         FillRect(item->hDC,&filled,progressFill_);
                 }
@@ -3484,7 +3313,7 @@ private:
                                     button==updateDownload_ || button==updateSkip_;
             SetBkMode(dc,TRANSPARENT);
             SetBkColor(dc,footerButton?kButtonBase:kDark);
-            // Footer push-button captions are colored in the scoped DrawTextExW detour.
+            // Footer captions are drawn by the DrawThemeTextEx detour.
             if (!footerButton) SetTextColor(dc,RGB(239,237,249));
             // The cache is alpha-composited over the exact footer gradient.
             return reinterpret_cast<LRESULT>(footerButton?buttonBrush_:darkBrush_);
@@ -3498,6 +3327,10 @@ private:
             return reinterpret_cast<LRESULT>(license?licenseBrush_:darkBrush_);
         }
         case WM_COMMAND:
+            if (startupPending_) {
+                if (LOWORD(w)==IDCANCEL || LOWORD(w)==IDC_CANCEL) RequestClose();
+                return 0;
+            }
             switch (LOWORD(w)) {
             case IDC_ACCEPT:
                 if (HIWORD(w)==BN_CLICKED && page_==Page::License && !DebugDemoLocksControls()) {
@@ -3510,7 +3343,7 @@ private:
             case IDC_UPDATE_DOWNLOAD:
                 if (!DebugDemoLocksControls() && page_==Page::Update && !updateUrl_.empty()) {
                     InstallLog::LineFormat(L"Update download page: %s", updateUrl_.c_str());
-                    ShellExecuteW(window, L"open", updateUrl_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    if (!OpenReleaseInUserBrowser(updateUrl_)) InstallLog::Line(L"Could not open release page as desktop user");
                 }
                 return 0;
             case IDC_UPDATE_SKIP:
@@ -3520,31 +3353,59 @@ private:
                     SetPage(Page::License);
                 }
                 return 0;
+            case IDC_COMPONENT64: case IDC_COMPONENT32: case IDC_COMPONENT_SETTINGS: case IDC_COMPONENT_OG:
+                if (page_==Page::Components && HIWORD(w)==BN_CLICKED && !webReady_) {
+                    const bool os64=GlassInstallUtil::IsOs64Bit();
+                    selection_.platform64=os64;
+                    selection_.platform32=!os64 || SendMessageW(component32_,BM_GETCHECK,0,0)==BST_CHECKED;
+                    selection_.glassSettings=SendMessageW(componentSettings_,BM_GETCHECK,0,0)==BST_CHECKED;
+                    selection_.openGlass=os64 && SendMessageW(componentOpenGlass_,BM_GETCHECK,0,0)==BST_CHECKED;
+                    InvalidateContent();
+                }
+                return 0;
             case IDC_BACK:
+                if (!DebugDemoLocksControls() && page_==Page::ConfirmCancel) {
+                    visibleProgress_.Resume();
+                    installEngine_.ResumeAfterCancelDecision(); SetPage(beforeCancel_); return 0;
+                }
+                if (!DebugDemoLocksControls() && page_==Page::Components) { SetPage(Page::License); return 0; }
                 if (!DebugDemoLocksControls() && !transitioning_ && page_==Page::License) {
-                    forceCleanInstall_=false;
                     SetPage(Page::Welcome);
                 }
                 return 0;
             case IDOK:
             case IDC_NEXT:
 #ifdef _DEBUG
-                if (debugDemoPending_) return 0;
+                if (debugDemoPending_ && page_==Page::Welcome) return 0;
                 if (debugDemoActive_) {
                     if (page_==Page::Complete || page_==Page::Error) RequestClose();
                     return 0;
                 }
 #endif
                 if (transitioning_) return 0;
-                if (page_==Page::Conflicts) { RecheckConflicts(); return 0; }
-                if (page_==Page::Downgrade) return 0;
-                if (page_==Page::VersionInvalid) {
-                    if (!offerCleanInstall_) return 0;
-                    forceCleanInstall_=true;
-                    InstallLog::Line(L"User accepted clean reinstall after integrity failure");
-                    ContinueVersionCheck();
+                if (page_==Page::RuntimeRequired) { StartRuntimeInstallation(); return 0; }
+                if (page_==Page::ConfirmCancel) {
+#ifndef GLASS_EMBED_MSI
+                    if (simulateInstall_) {
+                        simulateRollback_=true;
+                        simulateRollbackStarted_=GetTickCount64();
+                        BeginRollbackVisual(simulateRollbackStarted_);
+                        installStatusLine_=Text(IDS_SIMULATION_ROLLBACK);
+                        ShowCancelling();
+                        return 0;
+                    }
+#endif
+                    installEngine_.RequestCancel();
+                    if (installEngine_.IsCancelRequested()) {
+                        BeginRollbackVisual(GetTickCount64());
+                        installStatusLine_=Text(IDS_STATUS_ROLLBACK);
+                        ShowCancelling();
+                    }
                     return 0;
                 }
+                if (page_==Page::Conflicts) { RecheckConflicts(); return 0; }
+                if (page_==Page::Downgrade) return 0;
+                if (page_==Page::VersionInvalid) return 0;
                 if (w==IDOK && page_==Page::Update) {
                     InstallLog::Line(L"Update skipped by keyboard; continuing with this setup");
                     updateSkipped_ = true;
@@ -3552,37 +3413,31 @@ private:
                     return 0;
                 }
                 if (page_==Page::ModulesBusy) {
-                    visualMode_ = VisualMode::UnlockModules;
-                    unlockStatusLine_ = Text(IDS_STATUS_FORCE_UNLOAD);
-                    unlockVisualUntil_ = GetTickCount64() + 700;
-                    unlockStatusObserved_ = true;
-                    installEngine_.SetStatus(unlockStatusLine_,-1);
-                    installStatusLine_ = unlockStatusLine_;
+                    installStatusLine_ = Text(IDS_STATUS_FORCE_UNLOAD);
+                    installEngine_.SetStatus(installStatusLine_,-1);
                     installEngine_.SignalHold(InstallEngine::HoldAction::Retry);
                     SetPage(Page::Installing);
                     return 0;
                 }
                 if (page_==Page::ProcessesStuck) {
-                    visualMode_ = VisualMode::UnlockProcesses;
-                    unlockStatusLine_ = Text(IDS_STATUS_UNLOCK_PROCESSES);
-                    unlockVisualUntil_ = GetTickCount64() + 700;
-                    unlockStatusObserved_ = true;
-                    installEngine_.SetStatus(unlockStatusLine_,-1);
-                    installStatusLine_ = unlockStatusLine_;
+                    installStatusLine_ = Text(IDS_STATUS_UNLOCK_PROCESSES);
+                    installEngine_.SetStatus(installStatusLine_,-1);
                     installEngine_.SignalHold(InstallEngine::HoldAction::Unlock);
                     SetPage(Page::Installing);
                     return 0;
                 }
                 if (page_==Page::Welcome) StartVersionCheck();
-                else if (page_==Page::License && accepted_) StartInstallation();
-                else if (page_==Page::Complete || page_==Page::Error) RequestClose();
+                else if (page_==Page::License && accepted_) SetPage(Page::Components);
+                else if (page_==Page::Components) StartInstallation();
+                else if (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error || page_==Page::RuntimeError || page_==Page::AlreadyRunning) RequestClose();
                 return 0;
             case IDCANCEL:
             case IDC_CANCEL: RequestClose(); return 0;
             }
             break;
         case WM_TIMER:
-            if (w==kInstallTimer) Tick();
+            if (w==kStartupPollTimer) CompleteStartupIfReady();
+            else if (w==kInstallTimer) Tick();
 #ifdef _DEBUG
             else if (w==kDebugDemoTimer) TickDebugDemo();
 #endif
@@ -3590,10 +3445,12 @@ private:
                 if (GetTickCount64()-fadeStarted_>=kFadeDuration) EndTransition();
                 else InvalidateContent();
             } else if (w==kHeroTimer && !webReady_ &&
-                       (page_==Page::Welcome || page_==Page::Update || page_==Page::Error)) {
+                       (page_==Page::Welcome || page_==Page::Update || page_==Page::Error || page_==Page::RuntimeInstalling)) {
+                if (page_==Page::RuntimeInstalling) { progressMarquee_=true; marqueePhase_=static_cast<double>(GetTickCount64()%kMarqueePeriodMs)/kMarqueePeriodMs; InvalidateRect(progress_,nullptr,FALSE); }
                 InvalidateContent();
             }
             return 0;
+        case WM_SYSCOMMAND: if ((w & 0xfff0)==SC_CLOSE) { RequestClose(); return 0; } break;
         case WM_CLOSE: RequestClose(); return 0;
         case WM_DESTROY: Cleanup(); PostQuitMessage(0); return 0;
         }
@@ -3605,10 +3462,11 @@ private:
             self = static_cast<Installer*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);
             self->window = hwnd;
             gRootWindow=hwnd;
+            WizardTheme::SetRootWindow(hwnd,kContentHeight,kHeight,kFooterTop,kFooterBottom);
             SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));
         }
         const LRESULT result=self ? self->Handle(msg,w,l) : DefWindowProcW(hwnd,msg,w,l);
-        if (msg==WM_NCDESTROY && gRootWindow==hwnd) gRootWindow=nullptr;
+        if (msg==WM_NCDESTROY && gRootWindow==hwnd) { gRootWindow=nullptr; WizardTheme::SetRootWindow(nullptr); }
         return result;
     }
 };
@@ -3621,38 +3479,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     gLanguage = PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN ?
         MAKELANGID(LANG_RUSSIAN,SUBLANG_DEFAULT) : MAKELANGID(LANG_ENGLISH,SUBLANG_ENGLISH_US);
     SetThreadUILanguage(gLanguage);
-    InstallLog::Initialize();
     HRESULT com = CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
     if (FAILED(com)) {
         InstallLog::LineFormat(L"COM init failed: 0x%08X", static_cast<unsigned>(com));
-        const std::wstring message=Text(IDS_COM_ERROR);
-        MessageBoxW(nullptr,message.c_str(),Text(IDS_TITLE).c_str(),MB_OK|MB_ICONERROR);
         InstallLog::Shutdown();
         return 4;
     }
+    HANDLE instanceMutex=CreateMutexW(nullptr,FALSE,L"Local\\GlassSetup.Instance.Mutex");
+    if (!instanceMutex) { InstallLog::Line(L"CreateMutex failed"); CoUninitialize(); InstallLog::Shutdown(); return 4; }
+    gAlreadyRunning=GetLastError()==ERROR_ALREADY_EXISTS;
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS};
     InitCommonControlsEx(&controls);
-    const RuntimeGateResult runtimeGate=EnsureWebView2Runtime(HasWebView2RestartSwitch());
-    if (runtimeGate!=RuntimeGateResult::Ready) {
-        if (SUCCEEDED(com)) CoUninitialize();
-        InstallLog::Shutdown();
-        return runtimeGate==RuntimeGateResult::Cancelled ||
-               runtimeGate==RuntimeGateResult::Restarted ? 0 : 6;
-    }
     ULONG_PTR gdiplusToken = 0;
     Gdiplus::GdiplusStartupInput graphicsInput;
     if (Gdiplus::GdiplusStartup(&gdiplusToken,&graphicsInput,nullptr)!=Gdiplus::Ok) {
+        CloseHandle(instanceMutex);
         if (SUCCEEDED(com)) CoUninitialize();
+        InstallLog::Shutdown();
         return 3;
     }
-    // Keep themed backgrounds, but scope DrawTextExW interception to each DrawThemeText call.
-    InstallThemeDetours();
-    InstallLog::LineFormat(L"UxTheme DrawThemeBackground/DrawThemeText Detours %s: status=%ld background=%p text=%p module=%p",
-        g_themeDetoursInstalled?L"installed":L"FAILED",g_themeDetourStatus,
-        g_originalDrawThemeBackground,g_originalDrawThemeText,g_uxThemeModule);
-    InstallLog::LineFormat(L"UxTheme DrawTextExW IAT target %s: status=%ld slot=%p original=%p",
-        g_uxthemeDrawTextExImportFound?L"found":L"NOT FOUND",g_uxthemeDrawTextExImportStatus,
-        g_uxthemeDrawTextExImportSlot,reinterpret_cast<PVOID>(g_originalDrawTextExW));
     int exitCode = 0;
     if (!gInstaller.Create(show)) {
         InstallLog::Line(L"Could not create setup window");
@@ -3667,6 +3512,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         }
         exitCode = result==-1 ? 5 : static_cast<int>(message.wParam);
     }
+    gInstaller.JoinStartup();
     if (gWindowClassRegistered) {
         UnregisterClassW(L"GlassSetupWindow",gInstance);
         gWindowClassRegistered=false;
@@ -3675,7 +3521,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         DeleteObject(gWindowClassBrush);
         gWindowClassBrush=nullptr;
     }
+    WizardTheme::UninstallDetours();
+    GlassInstallUtil::CleanupEmbeddedUnlocker();
     Gdiplus::GdiplusShutdown(gdiplusToken);
+    CloseHandle(instanceMutex);
     InstallLog::Shutdown();
     if (SUCCEEDED(com)) CoUninitialize();
     return exitCode;

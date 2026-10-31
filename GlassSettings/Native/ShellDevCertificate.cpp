@@ -110,13 +110,14 @@ namespace
         if (!store || !ctx)
             return false;
 
-        return ::CertFindCertificateInStore(
-                   store,
-                   X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-                   0,
-                   CERT_FIND_EXISTING,
-                   ctx,
-                   nullptr) != nullptr;
+        wil::unique_cert_context existing{ ::CertFindCertificateInStore(
+            store,
+            X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+            0,
+            CERT_FIND_EXISTING,
+            ctx,
+            nullptr) };
+        return existing != nullptr;
     }
 
     [[nodiscard]] bool AddCertToStore(HCERTSTORE store, PCCERT_CONTEXT ctx) noexcept

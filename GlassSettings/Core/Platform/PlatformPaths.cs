@@ -217,17 +217,38 @@ public static class PlatformPaths
 
     private static string ReadBlackWindowManagerInstallPath()
     {
-        var hkcu = ReadInstallPath(Microsoft.Win32.Registry.CurrentUser);
+        var hkcu = ReadInstallPath(Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Default);
         if (!string.IsNullOrEmpty(hkcu))
             return hkcu;
 
-        return ReadInstallPath(Microsoft.Win32.Registry.LocalMachine) ?? string.Empty;
+        if (Environment.Is64BitOperatingSystem)
+        {
+            var hklm64 = ReadInstallPath(Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64);
+            if (!string.IsNullOrEmpty(hklm64))
+                return hklm64;
+        }
+
+        return ReadInstallPath(Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Default) ?? string.Empty;
     }
 
-    private static string? ReadInstallPath(Microsoft.Win32.RegistryKey root)
+    private static string? ReadInstallPath(Microsoft.Win32.RegistryHive hive, Microsoft.Win32.RegistryView view)
     {
-        using var key = root.OpenSubKey(BwmRegKey, false);
-        return key?.GetValue(InstallPathValue) as string;
+        try
+        {
+            using var baseKey = Microsoft.Win32.RegistryKey.OpenBaseKey(hive, view);
+            using var key = baseKey.OpenSubKey(BwmRegKey, false);
+            if (key is null)
+                return null;
+            if (key.GetValue(InstallPathValue) is string root && !string.IsNullOrWhiteSpace(root))
+                return root;
+            if (key.GetValue("OpenGlassInstallPath") is string ogDir && !string.IsNullOrWhiteSpace(ogDir))
+                return ogDir;
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string PathOpenGlassDllFromBwmInstall(string installDir)
@@ -235,14 +256,21 @@ public static class PlatformPaths
         if (string.IsNullOrEmpty(installDir))
             return string.Empty;
 
-        return Path.Combine(NormalizeDir(installDir), "OpenGlass", "OpenGlass.dll");
+        var baseDir = NormalizeDir(installDir);
+        var direct = Path.Combine(baseDir, "OpenGlass.dll");
+        if (baseDir.EndsWith("\\OpenGlass", StringComparison.OrdinalIgnoreCase) && IsFileAccessible(direct))
+            return direct;
+        return Path.Combine(baseDir, "OpenGlass", "OpenGlass.dll");
     }
 
     private static string? PathOpenGlassDllFromInstallDir(string installDir)
     {
         var baseDir = NormalizeDir(installDir);
         var candidate = Path.Combine(baseDir, "OpenGlass", "OpenGlass.dll");
-        return IsFileAccessible(candidate) ? candidate : null;
+        if (IsFileAccessible(candidate))
+            return candidate;
+        var direct = Path.Combine(baseDir, "OpenGlass.dll");
+        return IsFileAccessible(direct) ? direct : null;
     }
 
     /// <summary>

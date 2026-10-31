@@ -11,7 +11,9 @@
                   DowngradeErrorMessage="Установлена более новая версия GlassSettings." />
     <MediaTemplate EmbedCab="yes" />
 
-    <Property Id="ARPSYSTEMCOMPONENT" Value="1" Secure="yes" />
+    <Icon Id="GlassProductIcon" SourceFile="$(var.GlassSetupIcon)" />
+    <Property Id="ARPPRODUCTICON" Value="GlassProductIcon" />
+    <Property Id="GLASSBUNDLEVERSION" Value="$(var.GlassMsiBundleVersion)" Hidden="yes" />
     <!-- В MSI значение "0" истинно. Файлы отключает только GLASS_RESTORE_NO_CAB=1. -->
     <Property Id="GLASS_RESTORE_NO_CAB" Value="0" Hidden="yes" />
 

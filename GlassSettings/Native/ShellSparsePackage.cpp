@@ -1,5 +1,5 @@
 #ifndef GLASS_SETTINGS_SHELL_SPARSE_PACKAGE_CPP
-#define GLASS_CONFIG_SHELL_SPARSE_PACKAGE_CPP
+#define GLASS_SETTINGS_SHELL_SPARSE_PACKAGE_CPP
 
 #include <windows.h>
 #ifdef GetCurrentTime
@@ -8,9 +8,11 @@
 
 #include <winrt/base.h>
 #include <winrt/Windows.ApplicationModel.h>
+#include <winrt/Windows.Data.Xml.Dom.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Management.Deployment.h>
+#include <winrt/Windows.Storage.h>
 
 #include <GlassModulePath.h>
 #include <GlassShellMenuConstants.h>
@@ -31,6 +33,8 @@
 #pragma comment(lib, "runtimeobject.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "shell32.lib")
+
+EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
 namespace winmd = winrt::Windows::Management::Deployment;
 namespace winrtf = winrt::Windows::Foundation;
@@ -73,14 +77,14 @@ namespace GlassSettings::ShellSparsePackage
             WinRtApartmentScope() noexcept
                 : m_hr(::RoInitialize(RO_INIT_MULTITHREADED))
             {
-                if (m_hr == S_OK)
+                if (SUCCEEDED(m_hr))
                     m_owned = true;
             }
 
             ~WinRtApartmentScope() noexcept
             {
-                // Только если мы подняли MTA на этом потоке.
-                // S_FALSE — WinRT уже MTA; RPC_E_CHANGED_MODE — STA (UI), RoUninitialize нельзя.
+                // Each successful RoInitialize, including S_FALSE, must be balanced.
+                // RPC_E_CHANGED_MODE is not a successful initialization.
                 if (m_owned)
                     ::RoUninitialize();
             }
@@ -228,15 +232,61 @@ namespace GlassSettings::ShellSparsePackage
             return wcscpy_s(out, cch, buf) == 0;
         }
 
+
+        [[nodiscard]] std::wstring TryReadRegistryInstallDir() noexcept
+        {
+            auto readVal = [](HKEY hive, const wchar_t* valName, REGSAM sam) noexcept -> std::wstring {
+                HKEY key = nullptr;
+                if (::RegOpenKeyExW(hive, L"Software\\GlassPlatform", 0, KEY_READ | sam, &key) != ERROR_SUCCESS)
+                    return {};
+                wchar_t buf[MAX_PATH]{};
+                DWORD cb = sizeof(buf);
+                DWORD type = 0;
+                const LSTATUS st = ::RegQueryValueExW(key, valName, nullptr, &type, reinterpret_cast<LPBYTE>(buf), &cb);
+                ::RegCloseKey(key);
+                if (st != ERROR_SUCCESS || type != REG_SZ || !buf[0])
+                    return {};
+                return buf;
+            };
+#if defined(_WIN64)
+            if (auto v = readVal(HKEY_LOCAL_MACHINE, L"InstallPathX64", KEY_WOW64_64KEY); !v.empty())
+                return v;
+            if (auto v = readVal(HKEY_LOCAL_MACHINE, L"InstallPath", KEY_WOW64_64KEY); !v.empty())
+                return v;
+            if (auto v = readVal(HKEY_CURRENT_USER, L"InstallPathX64", 0); !v.empty())
+                return v;
+#else
+            if (auto v = readVal(HKEY_LOCAL_MACHINE, L"InstallPathX86", KEY_WOW64_32KEY); !v.empty())
+                return v;
+            if (auto v = readVal(HKEY_LOCAL_MACHINE, L"InstallPath", KEY_WOW64_32KEY); !v.empty())
+                return v;
+            if (auto v = readVal(HKEY_CURRENT_USER, L"InstallPathX86", 0); !v.empty())
+                return v;
+#endif
+            return readVal(HKEY_CURRENT_USER, L"InstallPath", 0);
+        }
+
         /// Каталог ExternalLocation sparse-пакета: рядом с GlassShellExt.dll (как PackageRootFolder в AppX).
-        [[nodiscard]] bool ResolveGlassPlatformOutputDirectory(wchar_t* out, size_t cch) noexcept
+        [[nodiscard]] bool ResolveGlassPlatformOutputDirectory(
+            wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
             if (!out || cch == 0)
                 return false;
             out[0] = L'\0';
 
-            const std::wstring shellExt =
+            // Setup/Unins already resolved InstallPath. Never search the
+            // rundll32 directory, temp parent or another registry copy when
+            // an exact root was supplied, even if that root is unavailable.
+            if (exactPlatformRoot)
+                return exactPlatformRoot[0] && TryCanonicalizePlatformDir(exactPlatformRoot, out, cch);
+
+            std::wstring shellExt =
                 GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(nullptr, L"GlassShellExt.dll");
+            if (shellExt.empty())
+            {
+                shellExt = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
+                    reinterpret_cast<HMODULE>(&__ImageBase), L"GlassShellExt.dll");
+            }
             if (!shellExt.empty())
             {
                 const std::wstring root = GlassShared::GlassModulePath::GetInstallRootFromPath(shellExt.c_str());
@@ -246,6 +296,13 @@ namespace GlassSettings::ShellSparsePackage
                     if (wcscpy_s(buf, root.c_str()) == 0 && TryCanonicalizePlatformDir(buf, out, cch))
                         return true;
                 }
+            }
+
+            if (const std::wstring regRoot = TryReadRegistryInstallDir(); !regRoot.empty())
+            {
+                wchar_t regBuf[MAX_PATH]{};
+                if (wcscpy_s(regBuf, regRoot.c_str()) == 0 && TryCanonicalizePlatformDir(regBuf, out, cch))
+                    return true;
             }
 
             wchar_t exeDir[MAX_PATH]{};
@@ -271,38 +328,38 @@ namespace GlassSettings::ShellSparsePackage
             return wcscat_s(dir, cch, GlassShared::GlassShellMenu::kSparsePackageSubdir) == 0;
         }
 
-        [[nodiscard]] bool ResolveSparseManifestPath(wchar_t* out, size_t cch) noexcept
+        [[nodiscard]] bool ResolveSparseManifestPath(wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir), exactPlatformRoot) || !AppendSparseSubdir(dir, _countof(dir)))
                 return false;
             if (wcscat_s(dir, _countof(dir), L"AppxManifest.xml") != 0)
                 return false;
             return wcscpy_s(out, cch, dir) == 0;
         }
 
-        [[nodiscard]] bool ResolveSparseUnregisterStubManifestPath(wchar_t* out, size_t cch) noexcept
+        [[nodiscard]] bool ResolveSparseUnregisterStubManifestPath(wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir), exactPlatformRoot) || !AppendSparseSubdir(dir, _countof(dir)))
                 return false;
             if (wcscat_s(dir, _countof(dir), GlassShared::GlassShellMenu::kSparseUnregisterStubFileName) != 0)
                 return false;
             return wcscpy_s(out, cch, dir) == 0;
         }
 
-        [[nodiscard]] bool ResolveSparsePackageDirectory(wchar_t* out, size_t cch) noexcept
+        [[nodiscard]] bool ResolveSparsePackageDirectory(wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)) || !AppendSparseSubdir(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir), exactPlatformRoot) || !AppendSparseSubdir(dir, _countof(dir)))
                 return false;
             return wcscpy_s(out, cch, dir) == 0;
         }
 
-        [[nodiscard]] bool ResolveSparseMsixPath(wchar_t* out, size_t cch) noexcept
+        [[nodiscard]] bool ResolveSparseMsixPath(wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir)))
+            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir), exactPlatformRoot))
                 return false;
 
             // PostBuild BuildSparsePackage.ps1 кладёт msix в корень OutDir, не в GlassShellSparse\.
@@ -335,7 +392,7 @@ namespace GlassSettings::ShellSparsePackage
 
             try
             {
-                for (auto const& pkg : pm.FindPackagesForUser(L"", GlassShared::GlassShellMenu::kSparsePackageName))
+                for (auto const& pkg : pm.FindPackagesForUser(L"", GlassShared::GlassShellMenu::kSparsePackageFamilyName))
                 {
                     AppendUniquePackageName(names, pkg.Id().FullName());
                 }
@@ -418,7 +475,7 @@ namespace GlassSettings::ShellSparsePackage
         {
             try
             {
-                for (auto const& pkg : pm.FindPackagesForUser(L"", GlassShared::GlassShellMenu::kSparsePackageName))
+                for (auto const& pkg : pm.FindPackagesForUser(L"", GlassShared::GlassShellMenu::kSparsePackageFamilyName))
                 {
                     (void)pkg;
                     return true;
@@ -751,16 +808,152 @@ namespace GlassSettings::ShellSparsePackage
         }
     }
 
-    bool RegisterSparsePackageQuiet() noexcept
+    InstallerSparseState QueryInstallerSparseState(const wchar_t* exactPlatformRoot) noexcept
+    {
+        if (!exactPlatformRoot || !exactPlatformRoot[0])
+            return InstallerSparseState::Unknown;
+        wchar_t expected[MAX_PATH]{};
+        if (wcscpy_s(expected, exactPlatformRoot) != 0 ||
+            !CanonicalizeOutputDirectory(expected, _countof(expected)))
+            return InstallerSparseState::Unknown;
+
+        WinRtApartmentScope apartment;
+        if (!apartment.CanUsePackageManager())
+            return InstallerSparseState::Unknown;
+        try
+        {
+            winmd::PackageManager pm;
+            std::wstring currentFullName;
+            // The two-argument overload takes a family name, not Identity@Name.
+            for (auto const& pkg : pm.FindPackagesForUser(
+                     L"", GlassShared::GlassShellMenu::kSparsePackageFamilyName))
+            {
+                if (!currentFullName.empty() || !pkg.Status().VerifyIsOK())
+                    return InstallerSparseState::Conflict;
+                const auto location = pkg.EffectiveExternalPath();
+                wchar_t actual[MAX_PATH]{};
+                if (location.empty() || wcscpy_s(actual, location.c_str()) != 0 ||
+                    !CanonicalizeOutputDirectory(actual, _countof(actual)) ||
+                    _wcsicmp(actual, expected) != 0)
+                    return InstallerSparseState::Conflict;
+                currentFullName = pkg.Id().FullName().c_str();
+                if (currentFullName.empty())
+                    return InstallerSparseState::Unknown;
+            }
+            // Never remove a same-name package registered only for another user
+            // or an additional version as a side effect of this installer.
+            for (auto const& pkg : pm.FindPackages())
+            {
+                if (pkg.Id().Name() != GlassShared::GlassShellMenu::kSparsePackageName)
+                    continue;
+                const auto fullName = pkg.Id().FullName();
+                if (currentFullName.empty() || _wcsicmp(fullName.c_str(), currentFullName.c_str()) != 0)
+                    return InstallerSparseState::Conflict;
+            }
+            return currentFullName.empty() ? InstallerSparseState::Absent : InstallerSparseState::Matching;
+        }
+        catch (...)
+        {
+            return InstallerSparseState::Unknown;
+        }
+    }
+
+    bool InstallerSparseHasVerifiedMenu(const wchar_t* exactPlatformRoot) noexcept
+    {
+        WinRtApartmentScope apartment;
+        if (!apartment.CanUsePackageManager() ||
+            QueryInstallerSparseState(exactPlatformRoot)!=InstallerSparseState::Matching)
+            return false;
+        try
+        {
+            winmd::PackageManager pm;
+            for (auto const& pkg : pm.FindPackagesForUser(
+                     L"",GlassShared::GlassShellMenu::kSparsePackageFamilyName))
+            {
+                // A loose development registration can use a different file
+                // with the same identity (including our unregister stub).
+                // InstalledLocation alone cannot establish which was applied.
+                if (pkg.IsDevelopmentMode())
+                    return false;
+                const std::wstring path=std::wstring(pkg.InstalledLocation().Path().c_str())+L"\\AppxManifest.xml";
+                WIN32_FILE_ATTRIBUTE_DATA attributes{};
+                if (!GetFileAttributesExW(path.c_str(),GetFileExInfoStandard,&attributes) ||
+                    attributes.nFileSizeHigh || attributes.nFileSizeLow>1024*1024 ||
+                    (attributes.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                    return false;
+                auto file=winrt::Windows::Storage::StorageFile::GetFileFromPathAsync(winrt::hstring{ path }).get();
+                winrt::Windows::Data::Xml::Dom::XmlLoadSettings settings;
+                settings.ProhibitDtd(true);
+                settings.ResolveExternals(false);
+                auto xml=winrt::Windows::Data::Xml::Dom::XmlDocument::LoadFromFileAsync(file,settings).get();
+                const auto ns=winrt::box_value(winrt::hstring{
+                    L"xmlns:d4='http://schemas.microsoft.com/appx/manifest/desktop/windows10/4' "
+                    L"xmlns:d5='http://schemas.microsoft.com/appx/manifest/desktop/windows10/5' "
+                    L"xmlns:com='http://schemas.microsoft.com/appx/manifest/com/windows10'"});
+                const auto verb=xml.SelectSingleNodeNS(
+                    L"//d4:Extension[@Category='windows.fileExplorerContextMenus']/d4:FileExplorerContextMenus/"
+                    L"d5:ItemType[@Type='Directory\\Background']/d5:Verb[@Id='GlassPlatform00Toggle' and "
+                    L"@Clsid='6D4E18F4-91B2-4C7D-A3E9-442B7C889D41']",ns);
+                const auto cls=xml.SelectSingleNodeNS(
+                    L"//com:Extension[@Category='windows.comServer']/com:ComServer/com:SurrogateServer/"
+                    L"com:Class[@Id='6D4E18F4-91B2-4C7D-A3E9-442B7C889D41' and @Path='GlassShellExt.dll']",ns);
+                return verb && cls;
+            }
+        }
+        catch (...) {}
+        return false;
+    }
+
+    bool UnregisterInstallerSparsePackageQuiet(const wchar_t* exactPlatformRoot) noexcept
+    {
+        WinRtApartmentScope apartment;
+        if (!apartment.CanUsePackageManager())
+            return false;
+        try
+        {
+            const auto state=QueryInstallerSparseState(exactPlatformRoot);
+            if (state==InstallerSparseState::Absent)
+                return true;
+            if (state!=InstallerSparseState::Matching)
+                return false;
+            winmd::PackageManager pm;
+            auto packages=pm.FindPackagesForUser(L"",GlassShared::GlassShellMenu::kSparsePackageFamilyName);
+            std::wstring fullName;
+            for (auto const& pkg : packages)
+            {
+                if (!fullName.empty())
+                    return false;
+                fullName=pkg.Id().FullName().c_str();
+            }
+            if (fullName.empty() || !DeploymentSucceeded(
+                    pm.RemovePackageAsync(winrt::hstring{ fullName },winmd::RemovalOptions::None).get()))
+                return false;
+            // Another user's installation may still appear machine-wide. It is
+            // not ours to remove and must not trigger the unregister-stub path.
+            for (auto const& pkg : pm.FindPackagesForUser(
+                     L"",GlassShared::GlassShellMenu::kSparsePackageFamilyName))
+            {
+                (void)pkg;
+                return false;
+            }
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool RegisterSparsePackageQuiet(bool provisionDevCertificate, const wchar_t* exactPlatformRoot) noexcept
     {
         SetLastSparsePackageError(SparsePackageError::None);
 
         wchar_t outDir[MAX_PATH]{};
         wchar_t sparseDir[MAX_PATH]{};
         wchar_t manifest[MAX_PATH]{};
-        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir)) ||
-            !ResolveSparsePackageDirectory(sparseDir, _countof(sparseDir)) ||
-            !ResolveSparseManifestPath(manifest, _countof(manifest)))
+        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir), exactPlatformRoot) ||
+            !ResolveSparsePackageDirectory(sparseDir, _countof(sparseDir), exactPlatformRoot) ||
+            !ResolveSparseManifestPath(manifest, _countof(manifest), exactPlatformRoot))
         {
             DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: пути не найдены");
             SetLastSparsePackageError(SparsePackageError::ArtifactsMissing);
@@ -792,14 +985,25 @@ namespace GlassSettings::ShellSparsePackage
         try
         {
             winmd::PackageManager pm;
-            if (!EnsureSparsePackagesRemoved(pm, 10000))
+            const bool installerMode = !provisionDevCertificate && exactPlatformRoot;
+            if (installerMode)
+            {
+                // Setup never removes or replaces an existing package during
+                // registration: there is no complete package-state rollback.
+                if (QueryInstallerSparseState(exactPlatformRoot) != InstallerSparseState::Absent)
+                {
+                    SetLastSparsePackageError(SparsePackageError::ExternalLocationConflict);
+                    return false;
+                }
+            }
+            else if (!EnsureSparsePackagesRemoved(pm, 10000))
             {
                 DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: не удалось снять прежний sparse-пакет");
                 SetLastSparsePackageError(SparsePackageError::ExternalLocationConflict);
                 return false;
             }
 
-            if (!ShellDevCertificate::EnsureGlassShellDevCertificateTrusted())
+            if (provisionDevCertificate && !ShellDevCertificate::EnsureGlassShellDevCertificateTrusted())
             {
                 DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: dev certificate failed");
                 SetLastSparsePackageError(SparsePackageError::DevCertFailed);
@@ -823,11 +1027,15 @@ namespace GlassSettings::ShellSparsePackage
 
                 winmd::AddPackageOptions options;
                 options.ExternalLocationUri(outDirUri);
-                options.ForceUpdateFromAnyVersion(true);
+                options.ForceUpdateFromAnyVersion(!installerMode);
                 DebugLog(DBG_IMPORTANT, L"[GlassSettings][ShellSparse] AddPackageByUriAsync msix: %ls", msixPath);
                 if (DeploymentSucceeded(pm.AddPackageByUriAsync(msixUri, options).get()))
                     return true;
 
+                // A package that appeared concurrently is not evidence that our
+                // registration succeeded, and must not be removed by Setup.
+                if (installerMode)
+                    return false;
                 if (IsSparsePackagePresentAnywhere(pm))
                     return true;
 
@@ -842,10 +1050,11 @@ namespace GlassSettings::ShellSparsePackage
             };
 
             wchar_t thumbprint[64]{};
-            (void)ShellDevCertificate::GetGlassShellDevCertThumbprint(thumbprint, _countof(thumbprint));
+            if (provisionDevCertificate)
+                (void)ShellDevCertificate::GetGlassShellDevCertThumbprint(thumbprint, _countof(thumbprint));
 
             SparseSdkTools sdk{};
-            const bool sdkOk = ResolveSparseSdkTools(sdk);
+            const bool sdkOk = provisionDevCertificate && ResolveSparseSdkTools(sdk);
             if (!sdkOk)
             {
                 DebugLog(DBG_NORMAL, L"[GlassSettings][ShellSparse] Windows SDK tools не найдены, пропуск repack/sign");
@@ -853,7 +1062,7 @@ namespace GlassSettings::ShellSparsePackage
 
             bool registered = false;
             wchar_t msixPath[MAX_PATH]{};
-            const bool hasMsix = ResolveSparseMsixPath(msixPath, _countof(msixPath));
+            const bool hasMsix = ResolveSparseMsixPath(msixPath, _countof(msixPath), exactPlatformRoot);
 
             if (hasMsix)
                 registered = tryDeployMsix(msixPath);
@@ -868,12 +1077,17 @@ namespace GlassSettings::ShellSparsePackage
 
             if (!registered)
             {
+                if (installerMode && QueryInstallerSparseState(exactPlatformRoot) != InstallerSparseState::Absent)
+                {
+                    SetLastSparsePackageError(SparsePackageError::ExternalLocationConflict);
+                    return false;
+                }
                 winmd::RegisterPackageOptions regOptions;
                 regOptions.ExternalLocationUri(outDirUri);
-                regOptions.ForceUpdateFromAnyVersion(true);
+                regOptions.ForceUpdateFromAnyVersion(!installerMode);
                 DebugLog(DBG_IMPORTANT, L"[GlassSettings][ShellSparse] RegisterPackageByUriAsync manifest: %ls", manifest);
                 registered = DeploymentSucceeded(pm.RegisterPackageByUriAsync(manifestUri, regOptions).get());
-                if (!registered &&
+                if (!registered && !installerMode &&
                     g_lastDeploymentHr.load(std::memory_order_acquire) == kHrPackageExternalLocationConflict &&
                     EnsureSparsePackagesRemoved(pm, 10000))
                 {
@@ -890,6 +1104,11 @@ namespace GlassSettings::ShellSparsePackage
                 return false;
             }
 
+            if (installerMode && QueryInstallerSparseState(exactPlatformRoot) != InstallerSparseState::Matching)
+            {
+                SetLastSparsePackageError(SparsePackageError::DeploymentFailed);
+                return false;
+            }
             SetExplorerCommandsBlocked(false);
 
             if (FindPackageFullNames(pm).empty() && !IsSparsePackagePresentInRepositoryRegistry())
@@ -917,12 +1136,12 @@ namespace GlassSettings::ShellSparsePackage
         }
     }
 
-    bool UnregisterSparsePackageQuiet() noexcept
+    bool UnregisterSparsePackageQuiet(const wchar_t* exactPlatformRoot) noexcept
     {
         wchar_t outDir[MAX_PATH]{};
         wchar_t stubManifest[MAX_PATH]{};
-        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir)) ||
-            !ResolveSparseUnregisterStubManifestPath(stubManifest, _countof(stubManifest)))
+        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir), exactPlatformRoot) ||
+            !ResolveSparseUnregisterStubManifestPath(stubManifest, _countof(stubManifest), exactPlatformRoot))
         {
             DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] unregister: пути не найдены");
             SetLastSparsePackageError(SparsePackageError::ArtifactsMissing);

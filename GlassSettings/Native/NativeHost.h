@@ -115,6 +115,9 @@ extern "C"
     /// 0=Idle, 1=Running, 2=Stopping, 3=Residual (GlassPlatformTask::InjectLifecycleUi).
     __declspec(dllexport) int WINAPI GlassSettings_QueryInjectLifecycleUiForArch(int arch) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_RefreshInjectResidualStickyForArch(int arch) noexcept;
+    // Setup may OR Shared::InjectModuleScan::kNativeLocalInstallerScan into
+    // maxResults after the documented capability handshake; normal callers
+    // continue to pass the plain output-buffer capacity.
     __declspec(dllexport) BOOL WINAPI GlassSettings_ScanGlassModules(
         const DWORD* pids,
         DWORD pidsCount,
@@ -122,6 +125,8 @@ extern "C"
         DWORD maxResults,
         DWORD* outCount) noexcept;
     void CALLBACK GlassSettings_UnlockerW(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show);
+    void CALLBACK GlassSettings_ShellExtRegisterW(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
+    void CALLBACK GlassSettings_ShellExtRegisterSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_IsOpenGlassNotificationWindowPresent() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_IsOpenGlassBackdropPipelineActive() noexcept;
     /// Pipeline/модуль OG или служба/задача — можно писать Composition/DWM policy.

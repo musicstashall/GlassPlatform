@@ -8,7 +8,7 @@
     <EnableDefaultItems>false</EnableDefaultItems>
     <GlassUpgradeCode>B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5050</GlassUpgradeCode>
     <GlassProductCode>B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5075</GlassProductCode>
-    <GlassPlatformTitle>GlassSettings (32-bit)</GlassPlatformTitle>
+    <GlassPlatformTitle>GlassSettings</GlassPlatformTitle>
     <GlassMsiProductCode>$(GlassProductCode)</GlassMsiProductCode>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' != 'Release'">

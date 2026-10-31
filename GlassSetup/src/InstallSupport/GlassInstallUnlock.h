@@ -13,7 +13,8 @@ std::vector<ModuleHolder> CollectHolders(
     const std::wstring& x64Dir,
     const std::wstring& x86Dir,
     bool scanNativeX64,
-    bool& nativeScanFailed) noexcept;
+    bool& nativeScanFailed,
+    const std::atomic_bool* cancelRequested = nullptr) noexcept;
 
 std::wstring FormatHolders(const std::vector<ModuleHolder>& holders);
 bool TargetIsWow64(DWORD pid) noexcept;
@@ -23,7 +24,7 @@ bool ForceUnloadHolder(
     const std::wstring& x64Dir,
     const std::wstring& x86Dir) noexcept;
 
-void CloseProcessWindows(DWORD pid) noexcept;
+void CloseMatchingProcessWindows(DWORD pid, const wchar_t* exe) noexcept;
 void UnlockProcess(DWORD pid, const wchar_t* exe) noexcept;
 
 } // namespace GlassInstallUnlock
