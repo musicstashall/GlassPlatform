@@ -266,7 +266,10 @@ namespace
 // В master DLL грузилась и Initialize писал слот `RejectedBlockList`; после R7 гейт
 // возвращает FALSE раньше Initialize, и слот не писался вовсе — исключённые процессы
 // (devenv.exe, msedge.exe, …) исчезли из списка «отвергнутых».
-// ModuleBits=0 — правда: наших модулей в процессе нет.
+// R12f: бит модуля — как в master (`StartMinimalUnloadWatcher(2)` писал ModuleCompat).
+// Это то, что реально произошло с процессом: GlassCompat был в него отображён загрузчиком
+// и отказался работать. Без бита строка отвергнутого процесса пустая — ни одной точки в
+// колонках модулей, хотя пользователь видит процесс «отвергнутым», а не «пустым».
 static void WriteRejectedSlot(const wchar_t* exeName, bool cached) noexcept
 {
     const bool written = Shared::InjectProcessMap::TryUpsert(
@@ -274,7 +277,7 @@ static void WriteRejectedSlot(const wchar_t* exeName, bool cached) noexcept
         Shared::InjectProcessMap::Kind::RejectedBlockList,
         /*path=*/2,
         Shared::InjectProcessMap::State::Alive,
-        /*moduleBits=*/0,
+        Shared::InjectProcessMap::ModuleCompat,
         exeName);
     GlassUlTrace::Logf(
         "H97",

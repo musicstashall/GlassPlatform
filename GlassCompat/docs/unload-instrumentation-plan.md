@@ -761,8 +761,8 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 
 | # | Файл | Правка |
 |---|---|---|
-| R12d-1 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | кэш `_rejectedCache`: слоты `Kind::Rejected*` запоминаются вместе с PID/exe/arch и живут дольше карты; запись снимается только когда процесс завершился |
-| R12d-2 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | `AddRejectedCache()` добавляет отвергнутых в снимок — и при живом хосте, и в sweep, и в cheap-idle после Stop |
+| ~~R12d-1~~ | `GlassSettings/Services/InjectRuntimeMonitor.cs` | кэш `_rejectedCache` — **отменён в R12f**: строки отвергнутых не должны переживать карту, иначе они висят в списке после Stop |
+| ~~R12d-2~~ | `GlassSettings/Services/InjectRuntimeMonitor.cs` | `AddRejectedCache()` — **отменён в R12f** |
 | R12d-3 | `GlassSettings/Native/InjectProcessMapNative.cpp`, `NativeHost.h` | экспорт `GlassSettings_LogMonitorSummary` → строка `monitor_summary` в общий лог |
 | R12d-4 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | `LogMonitorSummary()` пишет счётчики: слоты и отвергнутые слоты, биты, размер списка и отвергнутые строки; нативно рядом — что лежит в `map.x64`/`map.x86` |
 | R12d-5 | `GlassCompat/src/CrashGuard.cpp` | `crash_seen` только для кодов падения (`0xC0000005`, `0xC0000409`, `0xC0000374`, `0xC000001D`, `0xC0000094`, stowed); первый шанс `0xE06D7363`/`0xE0434352` — штатные исключения приложений (41 запись в прогоне 15) |
@@ -805,6 +805,25 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 `moduleBits=0` — правда: гейт не пустил DLL, наших модулей в процессе нет. В `master` бит
 `GlassCompat` был настоящим, потому что DLL действительно загружалась (path=2 watcher).
 
+### R12f — отвергнутые строки без индикаторов и «залипание» после Stop
+
+Две регрессии относительно `master`, обе внесены мной в R12d/R12e:
+
+| Наблюдение | Причина | Как в `master` |
+|---|---|---|
+| Отвергнутый процесс в списке, но ни одной точки в колонках модулей | R12e писал слот отказа с `moduleBits=0` | `StartMinimalUnloadWatcher(2)` писал слот с `ModuleCompat` — точка `GlassCompat` рисовалась |
+| Строки отвергнутых остаются после Stop, исчезают только после перезапуска GS | R12d завёл `_rejectedCache`: записи жили, пока жив процесс | Строки приходили только из карты: хост закрыл карту — список очистился |
+
+Правки R12f:
+
+| # | Файл | Правка |
+|---|---|---|
+| R12f-1 | `GlassCompat/DllMain.cpp` | `WriteRejectedSlot()` пишет `moduleBits = ModuleCompat`, как `path=2` в `master`: GlassCompat был отображён в процесс и отказался работать — строка не пустая |
+| R12f-2 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | удалён `_rejectedCache` и `AddRejectedCache()`: состав списка снова определяется только картой и сканом. Выгорание точек (R12c) остаётся и теперь само убирает строки за ≤6 тиков |
+
+Рефакторинг выгрузки (R11/R12/R12b) не затрагивался: менялись только запись слота отказа и
+сборка списка в UI.
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
@@ -844,9 +863,9 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 по проектам — сначала GlassShared. После сборки проверять время файлов
 `Build\x64\Debug\{GlassCompat,WndCompat}.dll`.
 
-**Текущий цикл (R12e):** менялся `GlassCompat/DllMain.cpp` → собирать **GlassCompat**
-(x64 и x86). Если сборка R12d (кэш отвергнутых, `monitor_summary`, фильтр `crash_seen`) ещё
-не ставилась — дополнительно **GlassSettings.Native** и **GlassSettings** (UI).
+**Текущий цикл (R12f):** менялись `GlassCompat/DllMain.cpp` (бит модуля в слоте отказа) и
+`GlassSettings/Services/InjectRuntimeMonitor.cs` (удалён кэш отвергнутых) → собирать
+**GlassCompat** (x64 и x86) и **GlassSettings** (UI). `GlassSettings.Native` не менялся.
 
 ## 6. Протокол тестирования
 
