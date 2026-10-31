@@ -284,6 +284,23 @@ namespace Shared::GlassStop
             reason,
             busyAcquired ? 1 : 0);
 
+        // U6: если busy занят чужим стопом и мы пришли с ожиданием, второй стоп не
+        // дублирует работу — сигнал уже отправлен, остальное делает первый.
+        // gracefulMs=0 (краши, /stop) сюда не попадает: там busy не нужен вовсе.
+        if (!busyAcquired && options.gracefulMs > 0)
+        {
+            result.failedPhase = L"busy";
+            result.hostGone = !GPT::IsGlassPlatformRunning(arch);
+            result.elapsedMs = static_cast<DWORD>(GetTickCount64() - t0);
+            GlassUlTrace::Logf(
+                "H102", "GlassStop.cpp:Request", "stop_result",
+                "\"reason\":\"%s\",\"phase\":\"busy\",\"host_gone\":%d,\"ms\":%lu",
+                reason,
+                result.hostGone ? 1 : 0,
+                static_cast<unsigned long>(result.elapsedMs));
+            return result;
+        }
+
         // (3) Ожидание штатного завершения: хост снимает хуки, рассылает broadcast,
         // дожимает остатки и отпускает мьютекс платформы (gracefulMs=0 — не ждём).
         result.hostGone =
