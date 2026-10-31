@@ -4,6 +4,7 @@
 #include <CrashGuard.h>
 #include <Windows.h>
 #include <wchar.h>
+#include <string.h>
 #include <GlassUlTrace.h>
 
 #if defined(_DEBUG)
@@ -79,11 +80,11 @@ namespace
     }
 
     /// true — процессу разрешено грузить DLL.
-    bool GateAllowsAttach(const wchar_t* exeName, GateMode& modeOut, wchar_t* modeText,
-        DWORD modeTextCch) noexcept
+    bool GateAllowsAttach(const wchar_t* exeName, GateMode& modeOut, char* modeText,
+        size_t modeTextCch) noexcept
     {
         modeOut = GateMode::Off;
-        wcsncpy_s(modeText, modeTextCch, L"missing", _TRUNCATE);
+        strncpy_s(modeText, modeTextCch, "missing", _TRUNCATE);
 
         wchar_t path[MAX_PATH * 2]{};
         if (!GateBuildPath(path, _countof(path)))
@@ -128,19 +129,19 @@ namespace
                 {
                     modeOut = GateMode::Allow;
                     allow = false; // пока имя не встретится
-                    wcsncpy_s(modeText, modeTextCch, L"allow", _TRUNCATE);
+                    strncpy_s(modeText, modeTextCch, "allow", _TRUNCATE);
                 }
                 else if (isDeny)
                 {
                     modeOut = GateMode::Deny;
                     allow = true;
-                    wcsncpy_s(modeText, modeTextCch, L"deny", _TRUNCATE);
+                    strncpy_s(modeText, modeTextCch, "deny", _TRUNCATE);
                 }
                 else if (isOff)
                 {
                     modeOut = GateMode::Off;
                     allow = true;
-                    wcsncpy_s(modeText, modeTextCch, L"off", _TRUNCATE);
+                    strncpy_s(modeText, modeTextCch, "off", _TRUNCATE);
                 }
             }
             else if (end - line > 5 && wcsncmp(line, L"name=", 5) == 0)
@@ -217,27 +218,35 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
                     }
                 }
             }
+            // Отказ кэшируем на процесс: user32 повторяет LoadLibrary на каждое событие
+            // (в прогоне 8 — 46 попыток за 15 с в ApplicationFrameHost.exe). Повторный
+            // отказ не читает файл и не пишет лог, но модуль по-прежнему не грузится.
+            static bool s_denied = false;
+            if (s_denied)
+                return FALSE;
+
             GateMode gateMode = GateMode::Off;
-            wchar_t modeText[16]{};
+            // mode — узкая строка: Logf принимает const char*, wide-строка печаталась
+            // как один символ ("d" вместо "deny") в прогоне 8.
+            char modeText[16]{};
             const bool allow = GateAllowsAttach(exeStem, gateMode, modeText, _countof(modeText));
-            char exeJson[160]{};
-            GlassUlTrace::WideToJson(exeJson, sizeof(exeJson), exeStem);
+            // exe уже есть в контексте строки лога (GlassUlTrace::Log добавляет его сам),
+            // поэтому в data кладём только решение гейта.
             GlassUlTrace::Logf(
                 "H97",
                 "DllMain.cpp:DllMain",
                 "attach_gate",
-                "\"exe\":\"%s\",\"mode\":\"%s\",\"allow\":%d",
-                exeJson,
+                "\"gate\":\"%s\",\"allow\":%d",
                 modeText,
                 allow ? 1 : 0);
             if (!allow)
             {
+                s_denied = true;
                 GlassUlTrace::Logf(
                     "H97",
                     "DllMain.cpp:DllMain",
                     "dll_attach_denied",
-                    "\"exe\":\"%s\",\"mode\":\"%s\"",
-                    exeJson,
+                    "\"gate\":\"%s\",\"note\":\"further attempts silent\"",
                     modeText);
                 return FALSE;
             }

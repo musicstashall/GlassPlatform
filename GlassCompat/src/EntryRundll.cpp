@@ -561,6 +561,11 @@ namespace
 
         // Хост и собственные инструменты грузят DLL всегда — иначе платформа
         // не сможет ни стартовать, ни показать состояние процессов.
+        const wchar_t* const kGateDefaultDeny[] = {
+            L"Y.Music.exe",
+            L"Яндекс Музыка.exe",
+            L"YMusic.exe",
+        };
         const wchar_t* const kAlwaysTrusted[] = {
             L"rundll32.exe",
             L"GlassPlatform.exe",
@@ -600,6 +605,15 @@ namespace
             }
             GateCollectRegistryBlockList(names);
 
+            // R8: процессы, которые заведомо не нуждаются в нашей DLL, но получают её
+            // от INCONTEXT-хука и не отдают ссылку без обработки сообщений.
+            // `Y.Music.exe` и `Яндекс Музыка.exe` — оба имени приложения Яндекс Музыки
+            // (в логах встречаются оба); падение 31.10 было в `Яндекс Музыка.exe` 35444
+            // внутри уже выгруженного GlassCompat.
+            for (const wchar_t* n : kGateDefaultDeny)
+                names.emplace_back(n);
+
+            // AttachList >= 1 — явное «хочу здесь Glass»: убирает имя из deny.
             std::vector<std::pair<std::wstring, DWORD>> entries;
             AttachList::GetEntries(entries);
             for (const auto& [name, raw] : entries)
@@ -632,7 +646,8 @@ namespace
         {
             if (name.empty())
                 continue;
-            // В deny-режиме исключаем свои процессы даже если они попали в BlockList.
+            // В deny-режиме исключаем свои процессы даже если они попали в BlockList,
+            // и уважаем AttachList>=1 как явное разрешение.
             if (!allowMode)
             {
                 bool exempt = false;
@@ -642,6 +657,19 @@ namespace
                     {
                         exempt = true;
                         break;
+                    }
+                }
+                if (!exempt)
+                {
+                    std::vector<std::pair<std::wstring, DWORD>> trustedEntries;
+                    AttachList::GetEntries(trustedEntries);
+                    for (const auto& [tname, raw] : trustedEntries)
+                    {
+                        if (raw >= 1 && _wcsicmp(name.c_str(), tname.c_str()) == 0)
+                        {
+                            exempt = true;
+                            break;
+                        }
                     }
                 }
                 if (exempt)
@@ -674,6 +702,39 @@ namespace
             allowMode ? "allow" : "deny",
             count,
             ok ? 1 : 0);
+    }
+
+    // R8: запускаем пост-стопную проверку в отдельном rundll32, чтобы она жила дольше хоста.
+    static void SpawnPostStopVerify(HMODULE hSelf) noexcept
+    {
+        wchar_t dllPath[MAX_PATH]{};
+        if (!GetModuleFileNameW(hSelf, dllPath, _countof(dllPath)))
+            return;
+
+        wchar_t sysDir[MAX_PATH]{};
+        if (GetSystemDirectoryW(sysDir, _countof(sysDir)) == 0)
+            return;
+
+        wchar_t cmd[2 * MAX_PATH + 64]{};
+        if (swprintf_s(cmd, L"\"%s\\rundll32.exe\" \"%s\",Main /verify", sysDir, dllPath) <= 0)
+            return;
+
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        const BOOL ok = CreateProcessW(
+            nullptr, cmd, nullptr, nullptr, FALSE,
+            CREATE_NO_WINDOW | DETACHED_PROCESS, nullptr, nullptr, &si, &pi);
+        if (ok)
+        {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+        GlassUlTrace::Logf(
+            "H98", "EntryRundll.cpp:SpawnPostStopVerify", "post_verify_spawn",
+            "\"ok\":%d,\"gle\":%lu",
+            ok ? 1 : 0,
+            ok ? 0ul : static_cast<unsigned long>(GetLastError()));
     }
 
     static void ClearHostPid() noexcept
@@ -770,6 +831,26 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
             SetEvent(hEvt);
             CloseHandle(hEvt);
         }
+        return;
+    }
+
+    if (cmd.find(L"/verify") != std::wstring::npos)
+    {
+        // R8: пост-стопная проверка из ОТДЕЛЬНОГО процесса (хост её запускает на выходе).
+        // Нужна потому, что внутри хоста замер врёт: OS снимает per-process ссылку на нашу
+        // DLL только когда процесс-владелец хуков завершился. Прогон 8: три процесса с
+        // os_refs=1 отдали модуль через 0.3–0.6 с ПОСЛЕ выхода rundll32, т.е. уже после
+        // того, как хост записал «left=3». Ничего не грузим, хуков не ставим.
+        GlassUlTrace::Logf(
+            "H98", "EntryRundll.cpp:Main", "verify_process",
+            "\"stage\":\"start\"");
+        Sleep(2000);
+        GlassUlTrace::LogVerify(2, "post2");
+        Sleep(6000);
+        GlassUlTrace::LogVerify(8, "post8");
+        GlassUlTrace::Logf(
+            "H98", "EntryRundll.cpp:Main", "verify_process",
+            "\"stage\":\"done\"");
         return;
     }
 
@@ -1288,7 +1369,11 @@ done:
             GlassCompat::CoreWindowHostInject::ForceUnloadResiduals();
             // #region agent log
             // GLASS-ULTRACE
+            // R8: замер внутри хоста оставляем для таймингов, но решение по S8 принимаем
+            // по post2/post8 из отдельного процесса — только они сняты после того, как
+            // user32 отпустил ссылки (см. комментарий в /verify).
             hVerify = GlassUlTrace::ScheduleVerify();
+            SpawnPostStopVerify(hSelf);
             // #endregion
         }
         if (hVerify)

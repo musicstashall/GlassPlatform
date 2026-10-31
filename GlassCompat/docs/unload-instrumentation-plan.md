@@ -488,6 +488,59 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 - `attach_gate mode="missing"` — гейт-файла нет (платформа не стартовала): поведение прежнее.
 - `cw_sweep_guard mode=2` / `cw_sweep_pid result=-2` — процесс оставлен сознательно, причина в `ack`/`windows`/`waited_ms`.
 
+### R8 — прогон 8: гейт работает, и главное — когда ОС отпускает DLL
+
+**Прогон 8 (`debug-8e6259-8.log`, 12:52:01–12:53:19).** Впервые с гейтом:
+
+| Что | Результат |
+|---|---|
+| гейт | `attach_gate_written mode=deny names=75`; **46 отказов** в `ApplicationFrameHost.exe`, 3 в `msedge.exe`, 2 в `devenv.exe` |
+| ATL-гость Яндекс Музыки | `ApplicationFrameHost.exe` (14672) — DLL **не загружена вовсе** |
+| приложение | `Y.Music.exe` 20796/36056 — гейт разрешил (имени не было в списке), своих `dll_detach` не потребовалось: процессы завершились раньше Stop |
+| краши | нет |
+| sweep | 4 попытки, `graceful=0`, `denied=4`, `left=3` (Happ 10644, explorer 39400, GlassSettings 37636) |
+| **но** | все три получили `dll_detach` в 12:53:19.33–19.61 — то есть через **0.3–0.6 с после выхода хоста-rundll32** (его собственный detach 12:53:19.314) |
+
+Замеры «freeself → dll_detach» в прогоне 8:
+
+| pid | exe | os_refs | freeself | dll_detach | задержка |
+|---|---|---|---|---|---|
+| 7180 | SearchHost | 0 | 12:52:54.188 | 12:52:54.188 | 0 с |
+| 27848 | ShellExperienceHost | 0 | 12:52:54.299 | 12:52:54.299 | 0 с |
+| 26352 | ShellHost | 0 | 12:52:51.507 | 12:52:54.315 | 2.8 с |
+| 39400 | explorer | 1 | 12:52:56.821 | 12:53:19.614 | 22.8 с |
+| 37636 | GlassSettings | 1 | 12:52:53.029 | 12:53:19.329 | 26.3 с |
+| 10644 | Happ.exe | 1 | 12:52:52.760 | 12:53:19.535 | 26.8 с |
+
+**Вывод (H98).** Остаток `os_refs=1` — это ссылка user32 на INCONTEXT-хук, и снимает её
+**не наш код, а ОС — в момент завершения процесса-владельца хуков** (хоста-rundll32).
+Поэтому:
+
+* «left=N» внутри хоста — ложный показатель: он снят до того, как ссылки отпущены;
+* никакой `FreeLibrary` извне для таких процессов не нужен и опасен (R6/R7);
+* настоящая проверка S8 — только **после** выхода хоста.
+
+Внесено (R8):
+
+| # | Файл | Правка |
+|---|---|---|
+| R8-1 | `GlassUlTrace.h` | `LogVerify(delaySec, tag)`; проверяющий процесс исключается из `hits`; `tag` в каждой строке `verify` |
+| R8-2 | `EntryRundll.cpp` | новая команда `Main /verify`: спит 2 с → `verify tag=post2`, ещё 6 с → `tag=post8`, ничего не грузит и хуков не ставит |
+| R8-3 | `EntryRundll.cpp` | `SpawnPostStopVerify` — хост запускает `rundll32 <dll>,Main /verify` (DETACHED_PROCESS) в самом конце Stop; событие `post_verify_spawn` |
+| R8-4 | `EntryRundll.cpp` | `kGateDefaultDeny` = `Y.Music.exe`, `Яндекс Музыка.exe`, `YMusic.exe`; `AttachList >= 1` отменяет deny для имени (явное «хочу здесь Glass») |
+| R8-5 | `DllMain.cpp` | отказ гейта кэшируется на процесс (user32 повторяет `LoadLibrary` на каждое событие: 46 попыток за 15 с) — лог и чтение файла только при первом отказе; `mode` печатается узкой строкой (было `"d"` вместо `"deny"` из-за wide-строки в `%s`), дубль ключа `exe` убран |
+| R8-6 | `CoreWindowHostInject.cpp` | sweep: один проход (было 2) и ожидание 0.6 с вместо 3 с — Stop сократился с ~19 с до ~3 с; смысла ждать нет, ссылку всё равно отпустит выход хоста |
+
+Как читать:
+
+- **S8 смотрим только по `verify tag=post2` / `tag=post8`** — они снимаются после выхода хоста.
+  `verify tag=""` (внутри хоста) — это тайминги, а не приёмка.
+- `verify tag=post8 hits=0` — чисто. `hits>0` — реальный остаток: смотреть `target_exe`.
+- `attach_gate gate="deny" allow=0` + один `dll_attach_denied` на процесс — процесс исключён;
+  повторные попытки user32 глушатся без записи в лог.
+- `cw_sweep_guard mode=2` — процесс оставлен сознательно, но после выхода хоста он, как
+  правило, всё равно уходит сам (проверяется `post2`/`post8`).
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
@@ -527,9 +580,9 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 по проектам — сначала GlassShared. После сборки проверять время файлов
 `Build\x64\Debug\{GlassCompat,WndCompat}.dll`.
 
-**Текущий цикл (R7):** менялись только файлы проекта **GlassCompat**
-(`DllMain.cpp`, `EntryRundll.cpp`, `CoreWindowHostInject.cpp`, `GlassCompat.cpp`, `AttachList.*`)
-→ собирать **GlassCompat**. `GlassShared`, `WndCompat`, `GlassSettings` не менялись.
+**Текущий цикл (R8):** менялись `GlassShared/include/GlassUlTrace.h` (header-only, но
+компилируется в каждый TU) и файлы **GlassCompat** → собирать **GlassShared → GlassCompat**,
+затем **WndCompat** (тоже включает `GlassUlTrace.h`) и **GlassSettings.Native** (тоже).
 
 ## 6. Протокол тестирования
 

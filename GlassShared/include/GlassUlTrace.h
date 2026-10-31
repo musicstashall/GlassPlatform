@@ -364,14 +364,20 @@ namespace GlassUlTrace
             "\"path\":\"%s\",\"run\":\"%s\"", narrow, kRunId);
     }
 
-    inline void LogVerify(unsigned delaySec) noexcept
+    // R8: `tag` отделяет замеры внутри хоста ("" = прежнее поведение) от пост-стопных
+    // проверок из отдельного процесса после выхода хоста ("post2"/"post8"). Только
+    // пост-стопные цифры годятся для приёмки S8: OS снимает per-process ссылку на DLL
+    // ровно в момент завершения процесса-владельца хуков (наблюдение прогона 8:
+    // freeself 12:52:52…56 → dll_detach 12:53:19.3–19.6, т.е. через 0.3–0.6 с после
+    // выхода rundll32).
+    inline void LogVerify(unsigned delaySec, const char* tag = nullptr) noexcept
     {
         HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if (snap == INVALID_HANDLE_VALUE)
         {
             Logf("H82", "GlassUlTrace.h:LogVerify", "verify",
-                "\"delay_s\":%u,\"scan\":\"failed\",\"gle\":%lu",
-                delaySec, static_cast<unsigned long>(GetLastError()));
+                "\"delay_s\":%u,\"tag\":\"%s\",\"scan\":\"failed\",\"gle\":%lu",
+                delaySec, tag ? tag : "", static_cast<unsigned long>(GetLastError()));
             return;
         }
         PROCESSENTRY32W pe{};
@@ -383,6 +389,9 @@ namespace GlassUlTrace
             {
                 // pid 0 = System Idle; CreateToolhelp32Snapshot(0,...) снимает ТЕКУЩИЙ процесс.
                 if (pe.th32ProcessID == 0)
+                    continue;
+                // Себя (проверяющий процесс) в остатки не считаем: в нём наша DLL по определению.
+                if (pe.th32ProcessID == GetCurrentProcessId())
                     continue;
                 const unsigned mask = RemoteModuleMask(pe.th32ProcessID);
                 if (mask == 0)
@@ -396,8 +405,9 @@ namespace GlassUlTrace
                     "H82",
                     "GlassUlTrace.h:LogVerify",
                     "verify",
-                    "\"delay_s\":%u,\"target_pid\":%lu,\"target_exe\":\"%s\",\"modules\":\"%s\",\"mask\":%u",
+                    "\"delay_s\":%u,\"tag\":\"%s\",\"target_pid\":%lu,\"target_exe\":\"%s\",\"modules\":\"%s\",\"mask\":%u",
                     delaySec,
+                    tag ? tag : "",
                     static_cast<unsigned long>(pe.th32ProcessID),
                     exe,
                     mods,
@@ -406,7 +416,8 @@ namespace GlassUlTrace
         }
         CloseHandle(snap);
         Logf("H82", "GlassUlTrace.h:LogVerify", "verify",
-            "\"delay_s\":%u,\"hits\":%u,\"scan\":\"done\"", delaySec, hits);
+            "\"delay_s\":%u,\"tag\":\"%s\",\"hits\":%u,\"scan\":\"done\"",
+            delaySec, tag ? tag : "", hits);
     }
 
     inline DWORD WINAPI VerifyThreadProc(LPVOID) noexcept

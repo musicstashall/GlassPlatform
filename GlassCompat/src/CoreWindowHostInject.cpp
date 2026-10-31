@@ -1914,7 +1914,11 @@ namespace GlassCompat::CoreWindowHostInject
     {
         unsigned unloaded = 0;
         const bool sweepAll = SweepAllEnvUl();
-        constexpr ULONGLONG kWaitMs = 3000;
+        // R8: ожидание внутри хоста сокращено с 3 с до 0.6 с. Прогон 8 показал, что
+        // за это время не снимается ни одна OS-ссылка (три процесса висели 23–27 с и
+        // отдали модуль через 0.3–0.6 с после выхода rundll32) — ждать дольше бессмысленно
+        // и растягивает Stop до 19 с. Итоговое состояние измеряет пост-стопный /verify.
+        constexpr ULONGLONG kWaitMs = 600;
 
         for (const DWORD pid : candidates)
         {
@@ -2295,7 +2299,9 @@ namespace GlassCompat::CoreWindowHostInject
             unsigned unloaded = 0;
             unsigned graceful = 0;
             unsigned denied = 0;
-            for (int pass = 0; pass < 2; ++pass)
+            // R8: один проход (было два с паузой 400 мс) — второй проход повторял то же
+            // самое по тем же pid и лишь удваивал время Stop.
+            for (int pass = 0; pass < 1; ++pass)
             {
                 if (pass > 0)
                     Sleep(400);
@@ -2340,7 +2346,7 @@ namespace GlassCompat::CoreWindowHostInject
                 "H82",
                 "CoreWindowHostInject.cpp:SweepCompatLeftovers",
                 "cw_sweep_end",
-                "\"passes\":2,\"candidates\":%u,\"tried\":%u,\"unloaded\":%u,\"graceful\":%u,"
+                "\"passes\":1,\"candidates\":%u,\"tried\":%u,\"unloaded\":%u,\"graceful\":%u,"
                 "\"denied\":%u,\"left\":%u,\"left_pids\":\"%s\",\"ms\":%llu",
                 static_cast<unsigned>(sweepCandidates.size()),
                 tried,
