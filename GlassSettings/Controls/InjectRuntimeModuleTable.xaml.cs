@@ -30,11 +30,6 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
         public required Grid ContentGrid { get; init; }
         public required Image IconImage { get; init; }
         public required FontIcon IconFallback { get; init; }
-        /// <summary>
-        /// Точка статуса строки (цвет Beacon). Нужна именно строке, а не модулям: у
-        /// отвергнутого процесса модулей нет вовсе — без неё отказ выглядит пустой строкой.
-        /// </summary>
-        public required Ellipse StatusDot { get; init; }
         public required TextBlock NameText { get; init; }
         public required TextBlock PidText { get; init; }
         public required Grid[] ModuleCells { get; init; }
@@ -565,14 +560,6 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(4, 2, 4, 2),
         };
-        var statusDot = new Ellipse
-        {
-            Width = 8,
-            Height = 8,
-            VerticalAlignment = VerticalAlignment.Center,
-            Fill = InjectRuntimeRowModel.BrushFor(entry.Beacon),
-        };
-        namePanel.Children.Add(statusDot);
         namePanel.Children.Add(iconHost);
         namePanel.Children.Add(textPanel);
         content.Children.Add(namePanel);
@@ -605,7 +592,6 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
             ContentGrid = content,
             IconImage = iconImage,
             IconFallback = iconFallback,
-            StatusDot = statusDot,
             NameText = nameText,
             PidText = pidText,
             ModuleCells = moduleCells,
@@ -692,7 +678,6 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
             row.AppliedBeacon = entry.Beacon;
 
             var brush = InjectRuntimeRowModel.BrushFor(entry.Beacon);
-            row.StatusDot.Fill = brush;
             var bits = (NativeHostInterop.InjectModuleBits)entry.ModuleBits;
             for (var i = 0; i < Modules.Length; i++)
             {

@@ -765,7 +765,6 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 | R12d-2 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | `AddRejectedCache()` добавляет отвергнутых в снимок — и при живом хосте, и в sweep, и в cheap-idle после Stop |
 | R12d-3 | `GlassSettings/Native/InjectProcessMapNative.cpp`, `NativeHost.h` | экспорт `GlassSettings_LogMonitorSummary` → строка `monitor_summary` в общий лог |
 | R12d-4 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | `LogMonitorSummary()` пишет счётчики: слоты и отвергнутые слоты, биты, размер списка и отвергнутые строки; нативно рядом — что лежит в `map.x64`/`map.x86` |
-| R12d-6 | `GlassSettings/Services/ProcessStatusColors.cs`, `GlassSettings/Controls/InjectRuntimeModuleTable.xaml.cs` | «Отвергнут» — жёлтый `#E6BE00` (был тёмно-янтарный `#C49100`, читался как красный), красный остаётся только за остатками DLL; у строки появилась своя точка статуса, иначе отказ без модулей выглядел пустой строкой |
 | R12d-5 | `GlassCompat/src/CrashGuard.cpp` | `crash_seen` только для кодов падения (`0xC0000005`, `0xC0000409`, `0xC0000374`, `0xC000001D`, `0xC0000094`, stowed); первый шанс `0xE06D7363`/`0xE0434352` — штатные исключения приложений (41 запись в прогоне 15) |
 
 `monitor_summary` читается так:

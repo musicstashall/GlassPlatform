@@ -16,14 +16,9 @@ public static class ProcessStatusColors
     public static Brush Active { get; } =
         new SolidColorBrush(Color.FromArgb(0xFF, 0x10, 0xC6, 0x0A)); // #10C60A
 
-    /// <summary>
-    /// Отвергнут (BlockList / Forbidden / Denied гейта) — жёлтый. Отказ в загрузке не
-    /// авария: процесс жив и работает сам, мы в него просто не лезем. Красный закреплён
-    /// за остатками DLL после выгрузки (Residual), смешивать их нельзя.
-    /// Тот же жёлтый, что и у подсистемы в фазе Starting (#E6BE00).
-    /// </summary>
+    /// <summary>Отвергнут (BlockList / Forbidden).</summary>
     public static Brush Rejected { get; } =
-        new SolidColorBrush(Color.FromArgb(0xFF, 0xE6, 0xBE, 0x00)); // #E6BE00
+        new SolidColorBrush(Color.FromArgb(0xFF, 0xC4, 0x91, 0x00)); // #C49100
 
     /// <summary>Residual — модули в памяти после выгрузки (только при активной выгрузке).</summary>
     public static Brush Residual { get; } =
