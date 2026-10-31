@@ -1999,10 +1999,25 @@ namespace GlassCompat::CoreWindowHostInject
         }
 
         unsigned left = 0;
+        // #region agent log
+        // GLASS-ULTRACE (H82): какие именно pid остались с модулем (пусто = всё выгружено).
+        char leftPidsList[512]{};
+        bool firstLeft = true;
+        // #endregion
         for (const DWORD pid : pids)
         {
             if (ModuleLoadedInProcess(pid, L"GlassCompat.dll"))
+            {
                 ++left;
+                // #region agent log
+                if (!firstLeft)
+                    strncat_s(leftPidsList, _countof(leftPidsList), ",", _TRUNCATE);
+                char one[32]{};
+                _snprintf_s(one, _TRUNCATE, "%lu", static_cast<unsigned long>(pid));
+                strncat_s(leftPidsList, _countof(leftPidsList), one, _TRUNCATE);
+                firstLeft = false;
+                // #endregion
+            }
         }
         // #region agent log
         // GLASS-ULTRACE
@@ -2010,9 +2025,10 @@ namespace GlassCompat::CoreWindowHostInject
             "H88",
             "CoreWindowHostInject.cpp:ForceUnloadResiduals",
             "cw_residual_end",
-            "\"pid_count\":%u,\"left\":%u,\"ms\":%llu",
+            "\"pid_count\":%u,\"left\":%u,\"left_pids\":\"%s\",\"ms\":%llu",
             static_cast<unsigned>(pids.size()),
             left,
+            leftPidsList,
             GetTickCount64() - residualT0);
         // #endregion
 

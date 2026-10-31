@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdarg>
 #include <cstdint>
+#include <cstring>
 
 #include <DebugLog.h>
 
@@ -952,9 +953,89 @@ namespace
     }
 
     // #region agent log
-    // GLASS-ULTRACE (R2, H91): перед FreeLibrary ищем окна, чей WndProc указывает внутрь
-    // выгружаемого модуля. Дампы explorer 35156/40076: CFG fail-fast, цель вызова =
-    // module+0x193150 при уже выгруженном модуле, стек через comctl32 subclass thunk.
+    // GLASS-ULTRACE (R2b, H91): перед FreeLibrary ищем окна, чей обработчик указывает внутрь
+    // выгружаемого модуля. Важно: один только GWLP_WNDPROC ничего не показывает, если субкласс
+    // ставился через SetWindowSubclass — тогда GWLP_WNDPROC = thunk comctl32, а наши проки лежат
+    // в цепочке comctl32 (property "UxSubclassInfo"). Дамп explorer 39284: CFG fail-fast,
+    // цель = WndCompat+0x194240, стек через comctl32 thunk, но proc_inside=0 — ложный «чисто».
+    struct ModuleRangeUl
+    {
+        std::uintptr_t base{};
+        std::uintptr_t end{};
+        wchar_t name[MAX_PATH]{};
+    };
+
+    constexpr unsigned kMaxModuleRanges = 512;
+    ModuleRangeUl g_moduleRangesUl[kMaxModuleRanges]{};
+    unsigned g_moduleRangeCountUl = 0;
+
+    void RefreshModuleRangesUl() noexcept
+    {
+        g_moduleRangeCountUl = 0;
+        HANDLE snap = CreateToolhelp32Snapshot(
+            TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
+        if (snap == INVALID_HANDLE_VALUE)
+            return;
+        MODULEENTRY32W me{};
+        me.dwSize = sizeof(me);
+        if (Module32FirstW(snap, &me))
+        {
+            do
+            {
+                if (g_moduleRangeCountUl >= kMaxModuleRanges)
+                    break;
+                auto& r = g_moduleRangesUl[g_moduleRangeCountUl++];
+                r.base = reinterpret_cast<std::uintptr_t>(me.hModule);
+                r.end = r.base + me.modBaseSize;
+                wcsncpy_s(r.name, me.szModule, _TRUNCATE);
+            } while (Module32NextW(snap, &me));
+        }
+        CloseHandle(snap);
+    }
+
+    [[nodiscard]] const ModuleRangeUl* FindModuleRangeUl(const void* proc) noexcept
+    {
+        const auto a = reinterpret_cast<std::uintptr_t>(proc);
+        for (unsigned i = 0; i < g_moduleRangeCountUl; ++i)
+        {
+            if (a >= g_moduleRangesUl[i].base && a < g_moduleRangesUl[i].end)
+                return &g_moduleRangesUl[i];
+        }
+        return nullptr;
+    }
+
+    // Безопасное чтение чужой (comctl32) структуры: только committed-память, под SEH.
+    bool TryReadBlobUl(const void* p, size_t bytes, unsigned long long* out, unsigned maxOut, unsigned& outCount) noexcept
+    {
+        outCount = 0;
+        if (!p || !bytes || !out || !maxOut)
+            return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(p, &mbi, sizeof(mbi)) == 0 || mbi.State != MEM_COMMIT)
+            return false;
+        if ((mbi.Protect & PAGE_NOACCESS) || (mbi.Protect & PAGE_GUARD))
+            return false;
+        const auto regionEnd =
+            reinterpret_cast<std::uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        const auto start = reinterpret_cast<std::uintptr_t>(p);
+        size_t avail = regionEnd > start ? static_cast<size_t>(regionEnd - start) : 0;
+        size_t n = (bytes < avail ? bytes : avail) / sizeof(unsigned long long);
+        if (n > maxOut)
+            n = maxOut;
+        if (!n)
+            return false;
+        __try
+        {
+            memcpy(out, p, n * sizeof(unsigned long long));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        outCount = static_cast<unsigned>(n);
+        return true;
+    }
+
     struct StaleCallbackScan
     {
         DWORD pid{};
@@ -962,10 +1043,37 @@ namespace
         std::uintptr_t end{};
         unsigned windows{};
         unsigned marked{};
-        unsigned procInside{};
+        unsigned procInside{};   // GWLP_WNDPROC внутри модуля
+        unsigned propInside{};   // проки в цепочке comctl32 внутри модуля
+        unsigned markedLogged{};
         unsigned details{};
         const char* tag{""};
     };
+
+    void LogMarkedWindowUl(StaleCallbackScan& s, HWND hwnd, GlassShared::GlassControlKind kind,
+        LONG_PTR proc, const HANDLE subclassProp) noexcept
+    {
+        wchar_t cls[96]{};
+        (void)GetClassNameW(hwnd, cls, _countof(cls));
+        char clsJson[220]{};
+        GlassUlTrace::WideToJson(clsJson, sizeof(clsJson), cls);
+        const ModuleRangeUl* procMod = FindModuleRangeUl(reinterpret_cast<const void*>(proc));
+        char procModJson[120]{};
+        GlassUlTrace::WideToJson(procModJson, sizeof(procModJson), procMod ? procMod->name : L"");
+        GlassUlTrace::Logf(
+            "H91",
+            "GlassCompat.cpp:ScanStaleCallbacks",
+            "marked_window",
+            "\"module\":\"%s\",\"hwnd\":\"%p\",\"class\":\"%s\",\"kind\":%u,"
+            "\"proc_mod\":\"%s\",\"proc_rva\":\"0x%llX\",\"prop\":%d",
+            s.tag,
+            static_cast<void*>(hwnd),
+            clsJson,
+            static_cast<unsigned>(kind),
+            procModJson,
+            procMod ? static_cast<unsigned long long>(static_cast<std::uintptr_t>(proc) - procMod->base) : 0ull,
+            subclassProp ? 1 : 0);
+    }
 
     void NoteWindowCandidate(StaleCallbackScan& s, HWND hwnd) noexcept
     {
@@ -974,16 +1082,48 @@ namespace
         if (wndPid != s.pid)
             return;
         ++s.windows;
+
+        const LONG_PTR procRaw = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
+        const auto proc = static_cast<std::uintptr_t>(procRaw);
+
+        // Цепочка субклассов comctl32 (SetWindowSubclass): property = указатель на структуру
+        // с {uIdSubclass, pfnSubclass, dwRefData}[]. Точный layout версионный, поэтому
+        // ищем не по полям, а по значениям внутри диапазона модуля.
+        const HANDLE subclassProp = GetPropW(hwnd, L"UxSubclassInfo");
+        unsigned propHits = 0;
+        if (subclassProp)
+        {
+            unsigned long long words[48]{};
+            unsigned got = 0;
+            if (TryReadBlobUl(subclassProp, sizeof(words), words, _countof(words), got))
+            {
+                for (unsigned i = 0; i < got; ++i)
+                {
+                    if (words[i] >= s.begin && words[i] < s.end)
+                        ++propHits;
+                }
+            }
+        }
+
         const auto kind = GlassShared::GlassGetWindowKind(hwnd);
         if (kind != GlassShared::GlassControlKind::None)
+        {
             ++s.marked;
-        // GetWindowLongPtrW возвращает LONG_PTR (целое) — only static_cast,
-        // reinterpret_cast между целочисленными типами запрещён (C2440).
-        const LONG_PTR procRaw = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
-        const std::uintptr_t proc = static_cast<std::uintptr_t>(procRaw);
-        if (proc < s.begin || proc >= s.end)
+            if (s.markedLogged < 16)
+            {
+                ++s.markedLogged;
+                LogMarkedWindowUl(s, hwnd, kind, procRaw, subclassProp);
+            }
+        }
+
+        const bool gwlpInside = (proc >= s.begin && proc < s.end);
+        if (gwlpInside)
+            ++s.procInside;
+        if (propHits)
+            s.propInside += propHits;
+
+        if (!gwlpInside && !propHits)
             return;
-        ++s.procInside;
         if (s.details >= 12)
             return;
         ++s.details;
@@ -995,11 +1135,13 @@ namespace
             "H91",
             "GlassCompat.cpp:ScanStaleCallbacks",
             "window_proc_in_module",
-            "\"module\":\"%s\",\"hwnd\":\"%p\",\"class\":\"%s\",\"rva\":\"0x%llX\",\"kind\":%u",
+            "\"module\":\"%s\",\"hwnd\":\"%p\",\"class\":\"%s\",\"gwlp_inside\":%d,"
+            "\"prop_hits\":%u,\"kind\":%u",
             s.tag,
             static_cast<void*>(hwnd),
             clsJson,
-            static_cast<unsigned long long>(proc - s.begin),
+            gwlpInside ? 1 : 0,
+            propHits,
             static_cast<unsigned>(kind));
     }
 
@@ -1017,30 +1159,21 @@ namespace
         return TRUE;
     }
 
-    // Возвращает число окон, чей WndProc лежит внутри модуля (0 = «чисто» или модуль не найден).
+    // Возвращает число найденных «живых» указателей на код модуля (GWLP + comctl32-цепочка).
     unsigned ScanStaleCallbacksBeforeFree(const char* tag, HMODULE hMod) noexcept
     {
         if (!tag || !hMod)
             return 0;
+        RefreshModuleRangesUl();
+
         DWORD imageSize = 0;
-        HANDLE snap = CreateToolhelp32Snapshot(
-            TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
-        if (snap != INVALID_HANDLE_VALUE)
+        for (unsigned i = 0; i < g_moduleRangeCountUl; ++i)
         {
-            MODULEENTRY32W me{};
-            me.dwSize = sizeof(me);
-            if (Module32FirstW(snap, &me))
+            if (g_moduleRangesUl[i].base == reinterpret_cast<std::uintptr_t>(hMod))
             {
-                do
-                {
-                    if (me.hModule == hMod)
-                    {
-                        imageSize = me.modBaseSize;
-                        break;
-                    }
-                } while (Module32NextW(snap, &me));
+                imageSize = static_cast<DWORD>(g_moduleRangesUl[i].end - g_moduleRangesUl[i].base);
+                break;
             }
-            CloseHandle(snap);
         }
         if (!imageSize)
             return 0;
@@ -1076,13 +1209,15 @@ namespace
             "H91",
             "GlassCompat.cpp:ScanStaleCallbacks",
             "stale_scan",
-            "\"module\":\"%s\",\"windows\":%u,\"marked\":%u,\"proc_inside\":%u,\"size\":\"0x%X\"",
+            "\"module\":\"%s\",\"windows\":%u,\"marked\":%u,\"proc_inside\":%u,"
+            "\"prop_inside\":%u,\"size\":\"0x%X\"",
             tag,
             s.windows,
             s.marked,
             s.procInside,
+            s.propInside,
             imageSize);
-        return s.procInside;
+        return s.procInside + s.propInside;
     }
     // #endregion
 
@@ -1705,23 +1840,22 @@ namespace
                     kWndStopClasses, _countof(kWndStopClasses));
                 // #region agent log
                 // GLASS-ULTRACE (H91): эксперимент «не выгружать под живым указателем».
-                // GLASS_ULTRACE_WND_SAFE=1 → при наличии окна с WndProc внутри WndCompat
-                // FreeLibrary пропускается (модуль остаётся, крэша быть не должно).
+                // GLASS_ULTRACE_WND_SAFE=1 → WndCompat ВООБЩЕ не выгружается в этом процессе
+                // (модуль остаётся; крэша по stale-указателю быть не должно).
                 const unsigned staleWndProcs = ScanStaleCallbacksBeforeFree("WndCompat", savedWnd);
-                bool skipWndFree = false;
-                if (staleWndProcs > 0)
-                {
-                    wchar_t safeFlag[16]{};
-                    skipWndFree =
-                        GetEnvironmentVariableW(L"GLASS_ULTRACE_WND_SAFE", safeFlag, _countof(safeFlag)) > 0;
-                }
+                wchar_t safeFlag[16]{};
+                const bool safeEnv =
+                    GetEnvironmentVariableW(L"GLASS_ULTRACE_WND_SAFE", safeFlag, _countof(safeFlag)) > 0;
+                // Эксперимент: флаг = «не выгружать WndCompat вообще» (не только при найденных
+                // указателях). Нужен, чтобы отделить «наш unmap» от «чужие ссылки/COM».
+                const bool skipWndFree = safeEnv;
                 if (skipWndFree)
                 {
                     GlassUlTrace::Logf(
                         "H91",
                         "GlassCompat.cpp:ExecuteShutdown",
                         "wnd_free_skipped",
-                        "\"stale_procs\":%u,\"env\":\"GLASS_ULTRACE_WND_SAFE\"",
+                        "\"stale_procs\":%u,\"env\":1",
                         staleWndProcs);
                 }
                 else
@@ -2572,16 +2706,24 @@ namespace
         DrainBeforeFreeSelf();
 
         // #region agent log
-        // GLASS-ULTRACE
+        // GLASS-ULTRACE (H82): expected_rc_after = сколько ссылок ОСТАНЕТСЯ после FLAET.
+        // >0 и при этом dll_detach не пришёл = deferred free ОС не доставлен (idle/PLM-процесс).
+        const unsigned rcBeforeFlaet = GlassUlTrace::QueryLoadCount(hSelfRef);
+        const unsigned ownRefs = 1u + (hadRemotePin ? 1u : 0u);
+        const unsigned expectedRcAfter = rcBeforeFlaet > ownRefs ? rcBeforeFlaet - ownRefs : 0u;
+        const unsigned osRefs = expectedRcAfter;
         GlassUlTrace::Logf(
             "H82",
             "GlassCompat.cpp:FreeSelfAndExitThread",
             "freeself_flaet",
-            "\"path\":%llu,\"handle\":\"%p\",\"rc\":%u,\"our_pins\":1,\"remote_comp\":%d,\"inflight\":%lu",
+            "\"path\":%llu,\"handle\":\"%p\",\"rc\":%u,\"our_pins\":1,\"remote_comp\":%d,"
+            "\"expected_rc_after\":%u,\"os_refs\":%u,\"inflight\":%lu",
             path,
             static_cast<void*>(hSelfRef),
-            GlassUlTrace::QueryLoadCount(hSelfRef),
+            rcBeforeFlaet,
             hadRemotePin ? 1 : 0,
+            expectedRcAfter,
+            osRefs,
             static_cast<unsigned long>(g_winEventCallbacksInFlight.load(std::memory_order_acquire)));
         // #endregion
         FreeLibraryAndExitThread(hSelfRef, 0);
