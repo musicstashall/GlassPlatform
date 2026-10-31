@@ -756,10 +756,17 @@ public sealed class InjectRuntimeMonitor
         return dropped;
     }
 
-    private static bool IsGlassSettingsProcess(uint pid, string? exe, uint selfPid) =>
+    /// <summary>
+    /// Свои инструменты, которым в списке процессов работы не место: сам GlassSettings
+    /// (в т.ч. текущий процесс — <paramref name="selfPid"/>) и LogViewer. Оба — tool-host'ы
+    /// с локальными модулями, а не инжектированные приложения. Как в master: такие записи
+    /// отбрасываются и из карты, и из скана.
+    /// </summary>
+    private static bool IsOwnToolProcess(uint pid, string? exe, uint selfPid) =>
         pid == selfPid
         || (!string.IsNullOrEmpty(exe)
-            && exe.Equals("GlassSettings.exe", StringComparison.OrdinalIgnoreCase));
+            && (exe.Equals("GlassSettings.exe", StringComparison.OrdinalIgnoreCase)
+                || exe.Equals("LogViewer.exe", StringComparison.OrdinalIgnoreCase)));
 
     private static bool IsGlassPlatformHostPid(uint pid)
     {
@@ -1015,8 +1022,10 @@ public sealed class InjectRuntimeMonitor
             {
                 if (slot.Pid == 0)
                     continue;
-                var slotIsTool = IsGlassSettingsProcess(slot.Pid, slot.ExeName, selfPid)
-                    || IsGlassPlatformHostPid(slot.Pid);
+                // Свои инструменты (GlassSettings, LogViewer) в список не попадают.
+                if (IsOwnToolProcess(slot.Pid, slot.ExeName, selfPid))
+                    continue;
+                var slotIsTool = IsGlassPlatformHostPid(slot.Pid);
 
                 scanByPid.TryGetValue(slot.Pid, out var scanned);
                 // H42: AppContainer Toolhelp часто неполный (только Compat) — не даём scan
@@ -1075,8 +1084,9 @@ public sealed class InjectRuntimeMonitor
             {
                 if (mapped.Contains(s.Pid) || s.ModuleBits == 0)
                     continue;
-                var scanIsTool = IsGlassSettingsProcess(s.Pid, s.ExeName, selfPid)
-                    || IsGlassPlatformHostPid(s.Pid);
+                if (IsOwnToolProcess(s.Pid, s.ExeName, selfPid))
+                    continue;
+                var scanIsTool = IsGlassPlatformHostPid(s.Pid);
                 // Вне карты: при живой платформе и пустых слотах — Residual (платформа выгружается).
                 // При живой платформе с активными слотами — Active (слот может запаздывать при старте).
                 // CFG-fix: residualSweep — sweep уже активен (мьютекс жив, но слоты пустеют),
@@ -1104,8 +1114,10 @@ public sealed class InjectRuntimeMonitor
             {
                 if (s.ModuleBits == 0)
                     continue;
-                var scanIsTool = IsGlassSettingsProcess(s.Pid, s.ExeName, selfPid)
-                    || IsGlassPlatformHostPid(s.Pid);
+                // Платформа остановлена: свои инструменты тоже не показываем.
+                if (IsOwnToolProcess(s.Pid, s.ExeName, selfPid))
+                    continue;
+                var scanIsTool = IsGlassPlatformHostPid(s.Pid);
 
                 list.Add(new InjectRuntimeEntry
                 {

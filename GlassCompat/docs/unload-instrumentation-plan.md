@@ -824,6 +824,19 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 Рефакторинг выгрузки (R11/R12/R12b) не затрагивался: менялись только запись слота отказа и
 сборка списка в UI.
 
+### R12g — свои инструменты не в списке процессов работы
+
+Требование уточнено: **GlassSettings и LogViewer в списке быть не должно**. Раньше действовало
+правило «показывать всё, включая свои процессы», но оно относилось к хосту платформы
+(rundll32 + GlassCompat) — именно он и остаётся в списке как `IsToolProcess`.
+
+| # | Файл | Правка |
+|---|---|---|
+| R12g-1 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | `IsGlassSettingsProcess` → `IsOwnToolProcess`: к фильтру добавлен `LogViewer.exe` (в `master` отбрасывался только GlassSettings) |
+| R12g-2 | `GlassSettings/Services/InjectRuntimeMonitor.cs` | фильтр снова применяется во всех трёх ветках `Merge` (слоты при живой платформе, scan-only при живой, scan при остановленной) — как в `master` |
+
+Счётчики от этого не меняются: свои процессы и раньше не входили в Active/Rejected/Residual.
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
@@ -863,9 +876,10 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 по проектам — сначала GlassShared. После сборки проверять время файлов
 `Build\x64\Debug\{GlassCompat,WndCompat}.dll`.
 
-**Текущий цикл (R12f):** менялись `GlassCompat/DllMain.cpp` (бит модуля в слоте отказа) и
-`GlassSettings/Services/InjectRuntimeMonitor.cs` (удалён кэш отвергнутых) → собирать
-**GlassCompat** (x64 и x86) и **GlassSettings** (UI). `GlassSettings.Native` не менялся.
+**Текущий цикл (R12g):** менялся `GlassSettings/Services/InjectRuntimeMonitor.cs` (фильтр
+своих инструментов) → собирать **GlassSettings** (UI). Если ещё не собиралась R12f
+(`GlassCompat/DllMain.cpp`: бит модуля в слоте отказа) — дополнительно **GlassCompat**
+(x64 и x86).
 
 ## 6. Протокол тестирования
 
