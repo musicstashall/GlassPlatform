@@ -977,8 +977,10 @@ namespace
         const auto kind = GlassShared::GlassGetWindowKind(hwnd);
         if (kind != GlassShared::GlassControlKind::None)
             ++s.marked;
-        const auto proc = reinterpret_cast<std::uintptr_t>(
-            GetWindowLongPtrW(hwnd, GWLP_WNDPROC));
+        // GetWindowLongPtrW возвращает LONG_PTR (целое) — only static_cast,
+        // reinterpret_cast между целочисленными типами запрещён (C2440).
+        const LONG_PTR procRaw = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
+        const std::uintptr_t proc = static_cast<std::uintptr_t>(procRaw);
         if (proc < s.begin || proc >= s.end)
             return;
         ++s.procInside;
