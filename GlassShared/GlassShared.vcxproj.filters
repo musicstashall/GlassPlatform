@@ -154,6 +154,9 @@
     <ClInclude Include="include\GlassMessages.h">
       <Filter>include</Filter>
     </ClInclude>
+    <ClInclude Include="include\GlassUlTrace.h">
+      <Filter>include</Filter>
+    </ClInclude>
     <ClInclude Include="include\GlassPlatformTask.h">
       <Filter>include</Filter>
     </ClInclude>

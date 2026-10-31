@@ -149,6 +149,7 @@
     <ClInclude Include="include\GlassLogClient.h" />
     <ClInclude Include="include\GlassLogProtocol.h" />
     <ClInclude Include="include\GlassMessages.h" />
+    <ClInclude Include="include\GlassUlTrace.h" />
     <ClInclude Include="include\GlassShellMenuConstants.h" />
     <ClInclude Include="include\GlassInkAlphaCapsule.h" />
     <ClInclude Include="include\InjectionMode.h" />

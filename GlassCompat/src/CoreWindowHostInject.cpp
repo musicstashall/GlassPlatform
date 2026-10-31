@@ -6,6 +6,7 @@
 #include <GlassMessages.h>
 #include <InjectProcessMap.h>
 #include <RootBackdropPolicy.h>
+#include <GlassUlTrace.h>
 #include <aclapi.h>
 #include <appmodel.h>
 #include <sddl.h>
@@ -550,8 +551,20 @@ namespace
     {
         if (dllPath.empty() || !loadedLeafName || !loadedLeafName[0])
             return false;
-        if (ModuleLoadedInProcess(pid, loadedLeafName))
+        const bool already = ModuleLoadedInProcess(pid, loadedLeafName);
+        if (already)
+        {
+            // #region agent log
+            // GLASS-ULTRACE
+            GlassUlTrace::Logf(
+                "H80",
+                "CoreWindowHostInject.cpp:TryRemoteLoadLibrary",
+                "cw_remote_load",
+                "\"target_pid\":%lu,\"leaf\":\"skip_already\",\"ok\":1,\"already\":1",
+                static_cast<unsigned long>(pid));
+            // #endregion
             return true;
+        }
         if (IsPlatformStopSignaled())
             return false;
 
@@ -598,6 +611,22 @@ namespace
             std::lock_guard lock(g_mx);
             g_remoteLoadPids.insert(pid);
         }
+        // #region agent log
+        // GLASS-ULTRACE
+        {
+            char leaf[80]{};
+            GlassUlTrace::WideToJson(leaf, sizeof(leaf), loadedLeafName);
+            GlassUlTrace::Logf(
+                "H80",
+                "CoreWindowHostInject.cpp:TryRemoteLoadLibrary",
+                "cw_remote_load",
+                "\"target_pid\":%lu,\"leaf\":\"%s\",\"ok\":%d,\"already\":0,\"after\":%d",
+                static_cast<unsigned long>(pid),
+                leaf,
+                ok ? 1 : 0,
+                ModuleLoadedInProcess(pid, loadedLeafName) ? 1 : 0);
+        }
+        // #endregion
         return ok;
     }
 
@@ -656,6 +685,17 @@ namespace
             }
             EnsureCwForceEvent(pid);
         }
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H80",
+            "CoreWindowHostInject.cpp:TryRemoteBootstrap",
+            "cw_bootstrap",
+            "\"target_pid\":%lu,\"ok\":%d,\"exit\":%lu",
+            static_cast<unsigned long>(pid),
+            ok ? 1 : 0,
+            static_cast<unsigned long>(exitCode));
+        // #endregion
         return ok;
     }
 
@@ -794,7 +834,20 @@ namespace
     // wake-шторма; иначе callback в unmapped образе (dump 18.08).
     [[nodiscard]] bool TryRemoteDropShellHostResidualPin(DWORD pid) noexcept
     {
-        if (ResolveLiveGuiTid(pid) != 0)
+        const DWORD guiTid0 = ResolveLiveGuiTid(pid);
+        const bool loaded0 = ModuleLoadedInProcess(pid, L"GlassCompat.dll");
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H84",
+            "CoreWindowHostInject.cpp:TryRemoteDropShellHostResidualPin",
+            "cw_residual_drop",
+            "\"target_pid\":%lu,\"stage\":\"begin\",\"loaded\":%d,\"guiTid\":%lu",
+            static_cast<unsigned long>(pid),
+            loaded0 ? 1 : 0,
+            static_cast<unsigned long>(guiTid0));
+        // #endregion
+        if (guiTid0 != 0)
         {
             DebugLog(
                 DBG_IMPORTANT,
@@ -803,7 +856,7 @@ namespace
             return false;
         }
 
-        if (!ModuleLoadedInProcess(pid, L"GlassCompat.dll"))
+        if (!loaded0)
             return true;
 
         constexpr int kWakeRounds = 8;
@@ -827,6 +880,16 @@ namespace
 
         if (!ModuleLoadedInProcess(pid, L"GlassCompat.dll"))
             return true;
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H84",
+            "CoreWindowHostInject.cpp:TryRemoteDropShellHostResidualPin",
+            "cw_residual_drop",
+            "\"target_pid\":%lu,\"stage\":\"wake\",\"loaded\":1,\"guiTid\":%lu",
+            static_cast<unsigned long>(pid),
+            static_cast<unsigned long>(ResolveLiveGuiTid(pid)));
+        // #endregion
 
         const HMODULE remoteCompat = ModuleBaseInProcess(pid, L"GlassCompat.dll");
         const HMODULE remoteKernel = ModuleBaseInProcess(pid, L"kernel32.dll");
@@ -872,11 +935,34 @@ namespace
         {
             Sleep(25);
         }
-        return !ModuleLoadedInProcess(pid, L"GlassCompat.dll");
+        const bool still = ModuleLoadedInProcess(pid, L"GlassCompat.dll");
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H84",
+            "CoreWindowHostInject.cpp:TryRemoteDropShellHostResidualPin",
+            "cw_residual_drop",
+            "\"target_pid\":%lu,\"stage\":\"free\",\"loaded\":%d,\"guiTid\":%lu",
+            static_cast<unsigned long>(pid),
+            still ? 1 : 0,
+            static_cast<unsigned long>(ResolveLiveGuiTid(pid)));
+        // #endregion
+        return !still;
     }
 
     bool TryRemoteRequestShutdown(DWORD pid) noexcept
     {
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H88",
+            "CoreWindowHostInject.cpp:TryRemoteRequestShutdown",
+            "cw_remote_shutdown",
+            "\"target_pid\":%lu,\"stage\":\"begin\",\"guiTid\":%lu,\"loaded\":%d",
+            static_cast<unsigned long>(pid),
+            static_cast<unsigned long>(ResolveLiveGuiTid(pid)),
+            ModuleLoadedInProcess(pid, L"GlassCompat.dll") ? 1 : 0);
+        // #endregion
         // Будим CwUnloadWatcher: WPM-флаг + named event + WM_QUIT.
         SignalRemoteUnload(pid);
         WakeRemoteCwProcess(pid);
@@ -968,7 +1054,19 @@ namespace
             Sleep(50);
         }
 
-        return !ModuleLoadedInProcess(pid, L"GlassCompat.dll");
+        const bool gone = !ModuleLoadedInProcess(pid, L"GlassCompat.dll");
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H88",
+            "CoreWindowHostInject.cpp:TryRemoteRequestShutdown",
+            "cw_remote_shutdown",
+            "\"target_pid\":%lu,\"stage\":\"end\",\"guiTid\":%lu,\"loaded\":%d",
+            static_cast<unsigned long>(pid),
+            static_cast<unsigned long>(ResolveLiveGuiTid(pid)),
+            gone ? 0 : 1);
+        // #endregion
+        return gone;
     }
 
     void InstallProcessHook(HMODULE hSelf, DWORD pid) noexcept
@@ -1029,7 +1127,35 @@ namespace
             g_hooks.emplace(
                 key, ThreadHook{ pid, 0, hook, uncloakHook, locationHook });
         }
-
+        unsigned hooksForPid = 0;
+        {
+            std::lock_guard lock(g_mx);
+            for (const auto& [k, th] : g_hooks)
+            {
+                (void)k;
+                if (th.pid != pid)
+                    continue;
+                if (th.hook)
+                    ++hooksForPid;
+                if (th.uncloakHook)
+                    ++hooksForPid;
+                if (th.locationHook)
+                    ++hooksForPid;
+            }
+        }
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H81",
+            "CoreWindowHostInject.cpp:InstallProcessHook",
+            "cw_hook_install",
+            "\"target_pid\":%lu,\"create\":\"%p\",\"uncloak\":\"%p\",\"location\":\"%p\",\"hooks\":%u",
+            static_cast<unsigned long>(pid),
+            static_cast<void*>(hook),
+            static_cast<void*>(uncloakHook),
+            static_cast<void*>(locationHook),
+            hooksForPid);
+        // #endregion
     }
 
     struct VisibleCwEnumCtx
@@ -1573,6 +1699,7 @@ namespace GlassCompat::CoreWindowHostInject
 
     void Shutdown(bool wakeProcesses) noexcept
     {
+        const ULONGLONG t0 = GetTickCount64();
         std::vector<DWORD> wakePids;
         std::vector<HWINEVENTHOOK> hooks;
         {
@@ -1596,6 +1723,18 @@ namespace GlassCompat::CoreWindowHostInject
         // без pump на remote ShellHost держит GlassCompat до случайного WM_NULL.
         for (const HWINEVENTHOOK hook : hooks)
             UnhookWinEvent(hook);
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H81",
+            "CoreWindowHostInject.cpp:Shutdown",
+            "cw_hook_unhook",
+            "\"pids\":%u,\"unhooked\":%u,\"wake\":%d,\"ms\":%llu",
+            static_cast<unsigned>(wakePids.size()),
+            static_cast<unsigned>(hooks.size()),
+            wakeProcesses ? 1 : 0,
+            GetTickCount64() - t0);
+        // #endregion
         if (wakeProcesses)
         {
             for (const DWORD pid : wakePids)
@@ -1639,6 +1778,7 @@ namespace GlassCompat::CoreWindowHostInject
 
     void ForceUnloadResiduals() noexcept
     {
+        const ULONGLONG residualT0 = GetTickCount64();
         // После HostShutdown + Unhook: сначала ждём штатный path=1 по StopEvent,
         // затем backup RequestShutdown (не FreeLibrary). Лог: SEH без loop_exit при
         // немедленном remote thread — даём Stop ~2с.
@@ -1688,6 +1828,35 @@ namespace GlassCompat::CoreWindowHostInject
                 CloseHandle(snap);
             }
         }
+
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H88",
+            "CoreWindowHostInject.cpp:ForceUnloadResiduals",
+            "cw_residual_begin",
+            "\"pid_count\":%u",
+            static_cast<unsigned>(pids.size()));
+        for (const DWORD pid : pids)
+        {
+            wchar_t exe[MAX_PATH]{};
+            (void)QueryProcessExeBase(pid, exe, MAX_PATH);
+            char leaf[80]{};
+            GlassUlTrace::WideToJson(leaf, sizeof(leaf), exe);
+            char mods[80]{};
+            GlassUlTrace::FormatModuleMask(GlassUlTrace::RemoteModuleMask(pid), mods, sizeof(mods));
+            GlassUlTrace::Logf(
+                "H88",
+                "CoreWindowHostInject.cpp:ForceUnloadResiduals",
+                "cw_residual_pid",
+                "\"target_pid\":%lu,\"target_exe\":\"%s\",\"modules\":\"%s\",\"compat\":%d,\"ui\":%d",
+                static_cast<unsigned long>(pid),
+                leaf,
+                mods,
+                ModuleLoadedInProcess(pid, L"GlassCompat.dll") ? 1 : 0,
+                ModuleLoadedInProcess(pid, L"UICompat.dll") ? 1 : 0);
+        }
+        // #endregion
 
         // ShellHost/SEH/Start/Search: UICompat Restore. Explorer — НЕ UICompat_Shutdown:
         // CreateRemoteThread + XAML dump AV в Explorer (Windows.UI.Xaml.dll).
@@ -1828,6 +1997,24 @@ namespace GlassCompat::CoreWindowHostInject
             if (!still)
                 TrySehPlmRest(pid, false);
         }
+
+        unsigned left = 0;
+        for (const DWORD pid : pids)
+        {
+            if (ModuleLoadedInProcess(pid, L"GlassCompat.dll"))
+                ++left;
+        }
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H88",
+            "CoreWindowHostInject.cpp:ForceUnloadResiduals",
+            "cw_residual_end",
+            "\"pid_count\":%u,\"left\":%u,\"ms\":%llu",
+            static_cast<unsigned>(pids.size()),
+            left,
+            GetTickCount64() - residualT0);
+        // #endregion
 
         CloseCwForceEvents();
         {

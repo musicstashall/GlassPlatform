@@ -3,6 +3,7 @@
 #include "GlassCompat.h"
 #include <CrashGuard.h>
 #include <Windows.h>
+#include <GlassUlTrace.h>
 
 #if defined(_DEBUG)
 #include <crtdbg.h>
@@ -29,10 +30,29 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
         (void)_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
         (void)_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
 #endif
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H82",
+            "DllMain.cpp:DllMain",
+            "dll_attach",
+            "\"base\":\"%p\",\"reason\":\"attach\"",
+            static_cast<void*>(hModule));
+        // #endregion
         break;
     case DLL_PROCESS_DETACH:
         // Не Stop() лог-клиента здесь: join воркера под loader lock запрещён.
         // GUI / MinimalUnloadWatcher / short-lived Main стопают клиент сами.
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H82",
+            "DllMain.cpp:DllMain",
+            "dll_detach",
+            "\"base\":\"%p\",\"reason\":\"detach\",\"process_exit\":%d",
+            static_cast<void*>(hModule),
+            reserved ? 1 : 0);
+        // #endregion
         if (GlassCompat::IsProcessCrashGuardInstalled())
             GlassCompat::UninstallProcessCrashGuard();
         break;

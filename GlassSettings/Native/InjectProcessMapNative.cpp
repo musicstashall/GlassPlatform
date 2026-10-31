@@ -10,6 +10,7 @@
 #include <InjectModuleScan.h>
 #include <InjectProcessMap.h>
 #include <GlassPlatformTask.h>
+#include <GlassUlTrace.h>
 
 namespace
 {
@@ -625,9 +626,50 @@ extern "C"
     {
         // Soft: UnloadRequest event (живой GUI-поток GlassCompat).
         // Force: remote FreeLibrary (мёртвый residual / OS-pin без слушателя) — Unlocker-стиль.
-        if (Shared::InjectProcessMap::SignalUnloadRequest(pid))
+        const bool soft = Shared::InjectProcessMap::SignalUnloadRequest(pid);
+        // #region agent log
+        // GLASS-ULTRACE
+        {
+            char before[80]{};
+            GlassUlTrace::FormatModuleMask(GlassUlTrace::RemoteModuleMask(pid), before, sizeof(before));
+            GlassUlTrace::Logf(
+                "H90",
+                "InjectProcessMapNative.cpp:GlassSettings_RequestProcessUnload",
+                "gs_request",
+                "\"target_pid\":%lu,\"soft\":%d,\"modules_before\":\"%s\"",
+                static_cast<unsigned long>(pid),
+                soft ? 1 : 0,
+                before);
+        }
+        // #endregion
+        if (soft)
+        {
+            // #region agent log
+            // GLASS-ULTRACE
+            (void)GlassUlTrace::ScheduleVerify();
+            // #endregion
             return TRUE;
-        return UnloadPid(pid);
+        }
+        const BOOL force = UnloadPid(pid);
+        // #region agent log
+        // GLASS-ULTRACE
+        {
+            char left[80]{};
+            const unsigned mask = GlassUlTrace::RemoteModuleMask(pid);
+            GlassUlTrace::FormatModuleMask(mask, left, sizeof(left));
+            GlassUlTrace::Logf(
+                "H90",
+                "InjectProcessMapNative.cpp:GlassSettings_RequestProcessUnload",
+                "gs_request",
+                "\"target_pid\":%lu,\"soft\":0,\"force\":%d,\"left\":\"%s\",\"mask\":%u",
+                static_cast<unsigned long>(pid),
+                force ? 1 : 0,
+                left,
+                mask);
+            (void)GlassUlTrace::ScheduleVerify();
+        }
+        // #endregion
+        return force;
     }
 
     __declspec(dllexport) BOOL WINAPI GlassSettings_ForceUnloadProcess(DWORD pid) noexcept

@@ -17,6 +17,7 @@
 #include <TrayXamlPolicyMap.h>
 #include <ReloadRenderFlags.h>
 #include <ForceUnloadGlassModules.h>
+#include <GlassUlTrace.h>
 #include <windows.h>
 #include <sddl.h>
 #include <string>
@@ -824,6 +825,16 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         0, 0,                     // все процессы, все потоки
         WINEVENT_INCONTEXT
     );
+    // #region agent log
+    // GLASS-ULTRACE
+    GlassUlTrace::Logf(
+        "H81",
+        "EntryRundll.cpp:Main",
+        "host_hook_install",
+        "\"kind\":\"global\",\"handle\":\"%p\",\"ok\":%d",
+        static_cast<void*>(g_globalHook),
+        g_globalHook ? 1 : 0);
+    // #endregion
 
     g_foregroundWinEventHook = SetWinEventHook(
         EVENT_SYSTEM_FOREGROUND,
@@ -833,6 +844,16 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         0,
         0,
         WINEVENT_INCONTEXT);
+    // #region agent log
+    // GLASS-ULTRACE
+    GlassUlTrace::Logf(
+        "H81",
+        "EntryRundll.cpp:Main",
+        "host_hook_install",
+        "\"kind\":\"foreground\",\"handle\":\"%p\",\"ok\":%d",
+        static_cast<void*>(g_foregroundWinEventHook),
+        g_foregroundWinEventHook ? 1 : 0);
+    // #endregion
 
     g_uncloakWinEventHook = SetWinEventHook(
         EVENT_OBJECT_UNCLOAKED,
@@ -842,6 +863,16 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         0,
         0,
         WINEVENT_INCONTEXT);
+    // #region agent log
+    // GLASS-ULTRACE
+    GlassUlTrace::Logf(
+        "H81",
+        "EntryRundll.cpp:Main",
+        "host_hook_install",
+        "\"kind\":\"uncloak\",\"handle\":\"%p\",\"ok\":%d",
+        static_cast<void*>(g_uncloakWinEventHook),
+        g_uncloakWinEventHook ? 1 : 0);
+    // #endregion
 
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
     if (!g_foregroundWinEventHook)
@@ -944,30 +975,85 @@ done:
             (g_foregroundWinEventHook != nullptr
              || g_globalHook != nullptr
              || g_uncloakWinEventHook != nullptr);
+        unsigned unhooked = 0;
         if (g_foregroundWinEventHook)
         {
-            (void)UnhookWinEvent(g_foregroundWinEventHook);
+            const BOOL okFg = UnhookWinEvent(g_foregroundWinEventHook);
+            // #region agent log
+            // GLASS-ULTRACE
+            GlassUlTrace::Logf(
+                "H81",
+                "EntryRundll.cpp:Main",
+                "host_hook_unhook",
+                "\"kind\":\"foreground\",\"handle\":\"%p\",\"ok\":%d",
+                static_cast<void*>(g_foregroundWinEventHook),
+                okFg ? 1 : 0);
+            // #endregion
             g_foregroundWinEventHook = nullptr;
+            ++unhooked;
         }
         if (g_globalHook)
         {
-            (void)UnhookWinEvent(g_globalHook);
+            const BOOL okGl = UnhookWinEvent(g_globalHook);
+            // #region agent log
+            // GLASS-ULTRACE
+            GlassUlTrace::Logf(
+                "H81",
+                "EntryRundll.cpp:Main",
+                "host_hook_unhook",
+                "\"kind\":\"global\",\"handle\":\"%p\",\"ok\":%d",
+                static_cast<void*>(g_globalHook),
+                okGl ? 1 : 0);
+            // #endregion
             g_globalHook = nullptr;
+            ++unhooked;
         }
         if (g_uncloakWinEventHook)
         {
-            (void)UnhookWinEvent(g_uncloakWinEventHook);
+            const BOOL okUc = UnhookWinEvent(g_uncloakWinEventHook);
+            // #region agent log
+            // GLASS-ULTRACE
+            GlassUlTrace::Logf(
+                "H81",
+                "EntryRundll.cpp:Main",
+                "host_hook_unhook",
+                "\"kind\":\"uncloak\",\"handle\":\"%p\",\"ok\":%d,\"total\":%u",
+                static_cast<void*>(g_uncloakWinEventHook),
+                okUc ? 1 : 0,
+                unhooked + 1);
+            // #endregion
             g_uncloakWinEventHook = nullptr;
+            ++unhooked;
         }
         GlassCompat::CoreWindowHostInject::Shutdown(!s_stopFromCloseMessage);
         if (hadAnyHook && !s_stopFromCloseMessage)
         {
             // Для обычного сигнала платформы сохраняется прежняя обработка.
+            // #region agent log
+            // GLASS-ULTRACE
+            GlassUlTrace::Logf(
+                "H88",
+                "EntryRundll.cpp:Main",
+                "host_broadcast",
+                "\"unhooked\":%u",
+                unhooked);
+            // #endregion
             (void)SendNotifyMessageW(HWND_BROADCAST, WM_NULL, 0, 0);
             Sleep(300);
         }
         // Клиенты могут самостоятельно завершиться после снятия хуков.
+        // #region agent log
+        // GLASS-ULTRACE
+        GlassUlTrace::Logf(
+            "H88",
+            "EntryRundll.cpp:Main",
+            "host_shutdown_signal",
+            "\"unhooked\":%u,\"from_close\":%d",
+            unhooked,
+            s_stopFromCloseMessage ? 1 : 0);
+        // #endregion
         SignalHostShutdownComplete();
+        HANDLE hVerify = nullptr;
         if (s_stopFromCloseMessage)
         {
             // Планировщик попросил закрыть задачу: только локальная очистка.
@@ -977,7 +1063,13 @@ done:
         else
         {
             GlassCompat::CoreWindowHostInject::ForceUnloadResiduals();
+            // #region agent log
+            // GLASS-ULTRACE
+            hVerify = GlassUlTrace::ScheduleVerify();
+            // #endregion
         }
+        if (hVerify)
+            CloseHandle(hVerify);
     }
 
     Shared::PlatformPresenceMonitor::Stop();

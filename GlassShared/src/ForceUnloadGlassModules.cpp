@@ -2,6 +2,7 @@
 
 #include <ForceUnloadGlassModules.h>
 #include <InjectProcessMap.h>
+#include <GlassUlTrace.h>
 
 #include <TlHelp32.h>
 
@@ -88,6 +89,17 @@ namespace Shared::ForceUnloadGlassModules
 
             const DWORD wait = WaitForSingleObject(hThread, 1500);
             CloseHandle(hThread);
+            // #region agent log
+            // GLASS-ULTRACE
+            GlassUlTrace::Logf(
+                "H85",
+                "ForceUnloadGlassModules.cpp:RemoteFreeLibrary",
+                "fu_try",
+                "\"stage\":\"wait\",\"base\":\"%p\",\"wait\":%lu,\"ok\":%d",
+                static_cast<void*>(hMod),
+                static_cast<unsigned long>(wait),
+                wait == WAIT_OBJECT_0 ? 1 : 0);
+            // #endregion
             return wait == WAIT_OBJECT_0;
         }
 
@@ -129,6 +141,24 @@ namespace Shared::ForceUnloadGlassModules
 
     ForceUnloadResult ForceUnload(DWORD pid) noexcept
     {
+        const ULONGLONG t0 = GetTickCount64();
+        const bool wow64 = IsWow64ProcessPid(pid);
+        // #region agent log
+        // GLASS-ULTRACE
+        {
+            char mods[80]{};
+            GlassUlTrace::FormatModuleMask(GlassUlTrace::RemoteModuleMask(pid), mods, sizeof(mods));
+            GlassUlTrace::Logf(
+                "H85",
+                "ForceUnloadGlassModules.cpp:ForceUnload",
+                "fu_begin",
+                "\"target_pid\":%lu,\"wow64\":%d,\"host\":%d,\"modules\":\"%s\"",
+                static_cast<unsigned long>(pid),
+                wow64 ? 1 : 0,
+                IsGlassPlatformHostPid(pid) ? 1 : 0,
+                mods);
+        }
+        // #endregion
         if (pid == 0 || pid == GetCurrentProcessId())
             return ForceUnloadResult::Failed;
 
@@ -155,6 +185,20 @@ namespace Shared::ForceUnloadGlassModules
                 const HMODULE hMod = FindModuleBase(pid, name);
                 if (!hMod)
                     continue;
+                char leaf[64]{};
+                GlassUlTrace::WideToJson(leaf, sizeof(leaf), name);
+                // #region agent log
+                // GLASS-ULTRACE
+                GlassUlTrace::Logf(
+                    "H85",
+                    "ForceUnloadGlassModules.cpp:ForceUnload",
+                    "fu_try",
+                    "\"target_pid\":%lu,\"pass\":%d,\"module\":\"%s\",\"base\":\"%p\"",
+                    static_cast<unsigned long>(pid),
+                    pass,
+                    leaf,
+                    static_cast<void*>(hMod));
+                // #endregion
                 if (RemoteFreeLibrary(hProcess, hMod))
                 {
                     any = true;
@@ -171,6 +215,27 @@ namespace Shared::ForceUnloadGlassModules
         if (any)
             ClearInjectMapsForPid(pid);
 
-        return any ? ForceUnloadResult::Ok : ForceUnloadResult::Failed;
+        const auto outcome = any ? ForceUnloadResult::Ok : ForceUnloadResult::Failed;
+        // #region agent log
+        // GLASS-ULTRACE
+        {
+            char left[80]{};
+            const unsigned mask = GlassUlTrace::RemoteModuleMask(pid);
+            GlassUlTrace::FormatModuleMask(mask, left, sizeof(left));
+            GlassUlTrace::Logf(
+                "H85",
+                "ForceUnloadGlassModules.cpp:ForceUnload",
+                "fu_end",
+                "\"target_pid\":%lu,\"wow64\":%d,\"any\":%d,\"left\":\"%s\",\"mask\":%u,\"ms\":%llu,\"result\":%d",
+                static_cast<unsigned long>(pid),
+                wow64 ? 1 : 0,
+                any ? 1 : 0,
+                left,
+                mask,
+                GetTickCount64() - t0,
+                static_cast<int>(outcome));
+        }
+        // #endregion
+        return outcome;
     }
 }
