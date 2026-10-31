@@ -34,18 +34,41 @@ bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::wstring& installDir
     // R11/этап 1: единый сигнал стопа (одно место SetEvent — U1) до жёсткой остановки
     // задачи. Хосту даётся короткое окно на штатную выгрузку; если не успел —
     // дальше работает прежний проверенный путь IRegisteredTask::Stop + ожидание.
+    bool hostGoneByStop = false;
     {
         Shared::GlassStop::Options options{};
         options.reason = reason;
-        options.gracefulMs = 5000;
+        // Хосту нужно время на штатную выгрузку: в прогонах 14/15 он снимал хуки,
+        // рассылал broadcast и дожимал 8-9 процессов ~10-20 с. Пока окно было 5 с,
+        // установщик убивал задачу посреди дренажа (жёсткий Stop), и остатки DLL
+        // доживали сами. 15 с укладываются в типичный таймаут и не меняют логику:
+        // если хост ушёл раньше, ждать не будем (WaitForPlatformStopped выходит сразу).
+        options.gracefulMs = 15000;
         options.hostGoneMs = 0;
         options.allowTaskStop = false;
         options.wakeResiduals = false;
         const Shared::GlassStop::Result r = Shared::GlassStop::Request(arch, options);
+        hostGoneByStop = r.hostGone;
         GlassInstallLog::LineFormat(L"HostStop: %s signal hostGone=%d ms=%lu residuals=%u",
             GP::GlassAutorunTaskName(arch), r.hostGone ? 1 : 0,
             static_cast<unsigned long>(r.elapsedMs), r.residualProcesses);
         if (isCancelled()) { SetLastError(ERROR_CANCELLED); return false; }
+    }
+
+    // Штатная выгрузка уже увела хост: останавливать задачу нечего и не у кого
+    // проверять «ровно один экземпляр». Раньше установка падала здесь с «работающий
+    // экземпляр не удалось однозначно связать с задачей» — хост умирал за время
+    // graceful-окна, а следующий шаг требовал живой экземпляр (прогон 16: x86,
+    // hostGone=1 ms=2969, при этом у пользователя платформа действительно остановилась).
+    {
+        bool stillRunning = false;
+        if (!GlassInstallHost::QueryGlassPlatformRunning(arch, stillRunning)) return false;
+        if (hostGoneByStop || !stillRunning) {
+            GlassInstallLog::LineFormat(L"HostStop: %s stopped by GlassStop; task stop not needed",
+                GP::GlassAutorunTaskName(arch));
+            if (stopAttempted) *stopAttempted = false;
+            return true;
+        }
     }
 
     bool attempted=false;

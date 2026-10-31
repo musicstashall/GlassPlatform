@@ -498,3 +498,28 @@ __declspec(dllexport) int WINAPI GlassSettings_RequestPlatformStop(int arch, int
 * Ранее действовавшее правило «показывать всё, включая свои процессы» этим уточнено:
   речь шла о хосте, а не о tool-host'ах с локальными модулями.
 
+### 7.8. Прогон 16: установка поверх падала на остановке x86 (R12h)
+
+**Данные.** `GlassSetup.log`: `HostStop: ... (x64) signal hostGone=0 ms=5015` → далее
+`IRegisteredTask::Stop hr=0` → «x64: stopped via Task Scheduler». Затем
+`HostStop: ... (x86) signal hostGone=1 ms=2969 residuals=0` — и сразу ошибка
+«Работающий экземпляр платформы не удалось однозначно связать с задачей».
+В `debug-8e6259-16.log`: `stop_result reason=installer phase=done host_gone=1 ms=2969`,
+все процессы выгрузились (`dll_detach` у Telegram/ShellHost/SearchHost/Explorer).
+
+| Наблюдение | Причина |
+|---|---|
+| x86-хост остановился, установка всё равно упала | `StopGlassPlatformImpl` после graceful-сигнала шёл в `StopValidatedPlatformTask`, а тот требует `GetInstances() == 1`. Хост ушёл за время окна → экземпляров 0 → «не удалось связать» |
+| x64-хост убивали задачей посреди дренажа | окно `gracefulMs` было 5 с, а штатная выгрузка 8-9 процессов занимает 10-20 с |
+
+Правки R12h (только `GlassSetup`, механизм выгрузки не менялся):
+
+| # | Файл | Правка |
+|---|---|---|
+| R12h-1 | `GlassSetup/src/InstallSupport/GlassInstallHost.cpp` | если `GlassStop::Request` вернул `hostGone=1` (или мьютекс уже свободен) — задача не останавливается, установка продолжается |
+| R12h-2 | `GlassSetup/src/InstallSupport/GlassInstallRemoval.cpp` | `StopValidatedPlatformTask` в начале проверяет мьютекс: хост успел уйти — «останавливать нечего» вместо ошибки «ровно один экземпляр» |
+| R12h-3 | `GlassSetup/src/InstallSupport/GlassInstallHost.cpp` | `gracefulMs` 5000 → 15000: у хоста есть время на штатную выгрузку, жёсткий `IRegisteredTask::Stop` остаётся только как резерв |
+| R12h-4 | `GlassSetup/src/InstallEngine.cpp` | установка с нуля (`cleanInstall_`) пропускает этап сканирования модулей в процессах; на машине нет ни платформы, ни задач/служб/продуктов, которые могли бы держать Glass*.dll |
+
+R12h-2 действует и на удалятор: `StopAllForUninstall` идёт тем же `StopGlassPlatformImpl`.
+
