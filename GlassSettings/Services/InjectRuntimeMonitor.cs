@@ -131,12 +131,6 @@ public sealed class InjectRuntimeMonitor
     /// <summary>Пустые residual-сканы подряд; не рвём sweep на первом miss (дыра map→scan).</summary>
     private int _residualEmptyStreak;
 
-    /// <summary>Троттлинг диагностики `monitor_summary` (не чаще раза в 15 опросов).</summary>
-    private int _pollSeq;
-    private int _lastLoggedEntryRejected = -1;
-    /// <summary>New-monitor summary отсутствует в старой сборке Native — не повторяем вызов.</summary>
-    private bool _monitorSummaryUnavailable;
-
     public event Action<InjectRuntimeSnapshot>? SnapshotChanged;
 
     public InjectRuntimeSnapshot Latest
@@ -523,53 +517,9 @@ public sealed class InjectRuntimeMonitor
         _ = NativeHostInterop.RefreshInjectResidualSticky(GlassPlatformArch.X86);
 
         var merged = Merge(platformRunning, residualSweep, slots, scan, selfPid);
-        LogMonitorSummary(platformRunning, slots, merged);
         // Выгорание точек включаем только когда платформа уже останавливается: при живой
         // платформе строка исчезает потому, что процесс закрылся сам, — там гасить нечего.
         return WithFade(merged, fadeActive: !platformRunning || residualSweep);
-    }
-
-    /// <summary>Диагностика R12d: что видит нативная карта и что дошло до списка UI.</summary>
-    private void LogMonitorSummary(
-        bool platformRunning,
-        NativeHostInterop.InjectMapSlot[] slots,
-        InjectRuntimeSnapshot snapshot)
-    {
-        var slotRejected = 0;
-        var slotBitsZero = 0;
-        foreach (var s in slots)
-        {
-            if (s.Kind is NativeHostInterop.InjectKind.RejectedBlockList
-                or NativeHostInterop.InjectKind.RejectedForbidden)
-                ++slotRejected;
-            if (s.ModuleBits == 0)
-                ++slotBitsZero;
-        }
-
-        var entryRejected = snapshot.Entries.Count(static e => e.Beacon == InjectRuntimeBeacon.Rejected);
-        var seq = Interlocked.Increment(ref _pollSeq);
-        // Пишем всегда, когда есть отвергнутые (это и есть предмет проверки), иначе — редко.
-        if (slotRejected == 0 && entryRejected == 0 && _lastLoggedEntryRejected == 0 && seq % 15 != 0)
-            return;
-        _lastLoggedEntryRejected = entryRejected;
-
-        if (_monitorSummaryUnavailable)
-            return;
-        try
-        {
-            NativeHostInterop.LogMonitorSummary(
-                platformRunning,
-                (uint)slots.Length,
-                (uint)slotRejected,
-                (uint)slotBitsZero,
-                (uint)snapshot.Entries.Count,
-                (uint)entryRejected);
-        }
-        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException)
-        {
-            // Старый GlassSettings.Native.dll: без диагностики список всё равно должен жить.
-            _monitorSummaryUnavailable = true;
-        }
     }
 
     /// <summary>Состояние догорающей строки: сколько ещё битов и сколько тиков осталось.</summary>

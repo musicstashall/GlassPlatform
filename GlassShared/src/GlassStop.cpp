@@ -23,20 +23,6 @@ namespace Shared::GlassStop
 #endif
         }
 
-        [[nodiscard]] const char* ReasonTag(Reason reason) noexcept
-        {
-            switch (reason)
-            {
-            case Reason::User: return "user";
-            case Reason::Installer: return "installer";
-            case Reason::Uninstaller: return "uninstaller";
-            case Reason::Crash: return "crash";
-            case Reason::External: return "external";
-            case Reason::HostDead: return "host_dead";
-            }
-            return "unknown";
-        }
-
         // Снимок: процессы, где реально лежит хоть один наш модуль.
         // Только чтение — установщик и наблюдатели используют этот же путь.
         [[nodiscard]] unsigned CollectResiduals(
@@ -112,20 +98,6 @@ namespace Shared::GlassStop
         }
     }
 
-    const wchar_t* ReasonName(Reason reason) noexcept
-    {
-        switch (reason)
-        {
-        case Reason::User: return L"user";
-        case Reason::Installer: return L"installer";
-        case Reason::Uninstaller: return L"uninstaller";
-        case Reason::Crash: return L"crash";
-        case Reason::External: return L"external";
-        case Reason::HostDead: return L"host_dead";
-        }
-        return L"unknown";
-    }
-
     unsigned SnapshotResiduals(
         PlatformArch arch, DWORD* outPids, unsigned maxPids) noexcept
     {
@@ -162,13 +134,6 @@ namespace Shared::GlassStop
     {
         const ULONGLONG t0 = GetTickCount64();
         Result result{};
-        const char* reason = ReasonTag(options.reason);
-
-
-        // Политика R6/R7: принудительная выгрузка в чужих процессах запрещена.
-        if (options.allowForceUnload)
-        {
-        }
 
         // (5.1) Reason::HostDead — хост уже умер (abandoned HostAlive / TerminateProcess).
         // По этому пути НЕ сигналим и НЕ трогаем задачу: будить и добивать нечего, у
@@ -189,9 +154,6 @@ namespace Shared::GlassStop
             result.hostGone = !GPT::IsGlassPlatformRunning(arch);
             result.failedPhase = L"already_stopped";
             result.elapsedMs = static_cast<DWORD>(GetTickCount64() - t0);
-            for (unsigned i = 0; i < result.residualPidCount && i < kMaxResiduals; ++i)
-            {
-            }
             return result;
         }
 
@@ -220,10 +182,10 @@ namespace Shared::GlassStop
         }
 
         // (2) Busy только на время сигнала и сразу отпускаем.
-        // R12: держать busy всё время ожидания нельзя. Инициатор (GlassShellExt в explorer
-        // или в DllHost) сам инжектирован и выгружается вместе с остальными; если его
-        // поток умрёт на ожидании, busy останется залипшим навсегда (прогон 12: stop_request
-        // из DllHost 6284 → stop_phase busy → и ни wait_host, ни stop_result).
+        // Держать busy всё время ожидания нельзя: инициатор (GlassShellExt в explorer или
+        // в DllHost) сам инжектирован и выгружается вместе с остальными; если его поток
+        // умрёт на ожидании, busy останется залипшим навсегда и следующий стоп получит
+        // «busy» вместо работы.
         const bool busyAcquired = GPT::TryBeginLifecycleBusy(arch);
         if (busyAcquired)
             GPT::EndLifecycleBusy(arch);
@@ -274,10 +236,6 @@ namespace Shared::GlassStop
             result.failedPhase = L"";
 
         result.elapsedMs = static_cast<DWORD>(GetTickCount64() - t0);
-
-        for (unsigned i = 0; i < result.residualPidCount && i < kMaxResiduals; ++i)
-        {
-        }
         return result;
     }
 

@@ -8,8 +8,9 @@
 // ============================================================================
 // Shared::GlassStop — единственный механизм остановки платформы.
 //
-// Все инициаторы (GlassSettings, GlassShellExt, GlassSetup, GlassUnins, LogViewer,
-// CrashGuard, HostShellWatchdog) вызывают Request(), а не SetEvent/StopTask напрямую.
+// Все инициаторы (GlassSettings, GlassShellExt, GlassSetup, GlassUnins,
+// CrashGuard, HostShellWatchdog) вызывают Request(), а не SetEvent/StopTask напрямую;
+// LogViewer по-прежнему только сигналит (ему не нужно ждать).
 //
 // Обоснование и устройство: GlassShared/docs/stop-unification.md.
 //
@@ -17,7 +18,7 @@
 //  * порядок фаз и семантика path=1/2/3 в GlassCompat не меняются
 //    (GlassCompat/docs/GlassCompat-unload.md);
 //  * никакого FreeLibrary в чужих процессах: снять INCONTEXT-ссылку user32 может
-//    только сам процесс/ОС (policy R6/R7, GlassCompat/docs/unload-instrumentation.md);
+//    только сам процесс/ОС (политика R6/R7, GlassCompat/docs/GlassCompat-unload.md);
 //  * «дожим» = просьба + пинок + ожидание, а не принудительная выгрузка;
 //  * остановка хоста любым способом (в т.ч. TerminateProcess планировщиком) —
 //    штатный путь: инжектированные процессы уходят по abandoned HostAlive.
@@ -37,8 +38,6 @@ namespace Shared::GlassStop
         HostDead = 5,    // зафиксирована смерть хоста без StopEvent
     };
 
-    [[nodiscard]] const wchar_t* ReasonName(Reason reason) noexcept;
-
     struct Options
     {
         Reason reason = Reason::User;
@@ -51,8 +50,8 @@ namespace Shared::GlassStop
         /// Разбудить процессы с остатками (WM_NULL окнам и потокам). Никогда не грузит
         /// наши DLL и не вызывает FreeLibrary.
         bool wakeResiduals = false;
-        /// Запрещено политикой R6/R7; поле оставлено, чтобы вызов не мог «включить» raw free.
-        bool allowForceUnload = false;
+        // Принудительной выгрузки в чужих процессах координатор не умеет: политика R6/R7,
+        // raw FreeLibrary извне запрещён. Опции для неё нет намеренно.
     };
 
     struct Result

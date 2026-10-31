@@ -103,16 +103,6 @@ extern "C"
         DWORD pid) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_TryReadInjectMapSlotsForArch(
         DWORD arch, void* outSlots, DWORD maxSlots, DWORD* outCount) noexcept;
-    /// R12d: одна строка `monitor_summary` в общий лог. Нативные счётчики карты (x64/x86)
-    /// рядом со счётчиками C#-монитора: видно, где теряются отвергнутые записи — в карте,
-    /// при разборе слотов или уже в списке для UI.
-    __declspec(dllexport) void WINAPI GlassSettings_LogMonitorSummary(
-        DWORD platformRunning,
-        DWORD slotCount,
-        DWORD slotRejected,
-        DWORD slotBitsZero,
-        DWORD entryCount,
-        DWORD entryRejected) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_RequestProcessUnload(DWORD pid) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_ForceUnloadProcess(DWORD pid) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_IsX86ForceUnloadAgentAvailable() noexcept;

@@ -52,18 +52,17 @@
 | Explorer XAML hosts | [ExplorerCompat/docs/ExplorerXamlIslands.md](../ExplorerCompat/docs/ExplorerXamlIslands.md) |
 | Выгрузка / detach | [GlassCompat/docs/GlassCompat-unload.md](../GlassCompat/docs/GlassCompat-unload.md) |
 
-### Снятие субклассов при остановке платформы и диагностика
+### Снятие субклассов при остановке платформы
 
-Порядок при `WndCompat_BeginShutdown` → `ForceDetachAllSubclasses` → `WndCompat_IsShutdownComplete`:
+Порядок: `WndCompat_BeginShutdown` → `ForceDetachAllSubclasses` → `WndCompat_IsShutdownComplete`.
 
-1. `wnd_shutdown_begin` — сколько субклассов и отложенных снятий было до начала;
-2. обход top-level окон и их дочерних окон (`EnumChildWindows` вызывается один раз на окно,
-   собственным колбэком — рекурсию по детям делает сама система);
-3. `wnd_force_detach` — `top_level_scanned` / `child_scanned` / `subclasses_after`;
-4. `stale_scan` — окна, чей `GWLP_WNDPROC` всё ещё лежит внутри выгружаемого модуля
-   (`marked`, `proc_inside`, `prop_inside`);
-5. `wnd_shutdown_end` — `subclasses_left`, `pending_wait_ok`, `ms`.
+`ForceDetachAllSubclasses` обходит top-level окна и их дочерние окна (`EnumChildWindows`
+вызывается один раз на окно, собственным колбэком — рекурсию по детям делает сама система):
+субклассы снимаются на потоке-владельце окна, чужим потокам уходит `WM_GLASS_DETACH_*`
+через `SendMessageTimeoutW`.
 
-События нужны, чтобы отличать «субкласс снят» от «модуль выгружен, а указатель на его код
-в окне остался» — второе даёт CFG fail-fast уже после `FreeLibrary`. Подробности и формат
-записей — в [GlassCompat/docs/unload-instrumentation.md](../GlassCompat/docs/unload-instrumentation.md) (R5b, R12).
+Почему обход обязателен перед `FreeLibrary(WndCompat)`: снятый субкласс — это отсутствие
+`GWLP_WNDPROC` на наш код, а оставшийся указатель даёт CFG fail-fast уже после выгрузки
+модуля. Поэтому `GlassCompat::ExecuteShutdown` перед выгрузкой сканирует окна процесса
+(`ScanStaleCallbacksBeforeFree`) и при остатке колбэков модуль не выгружает — строка
+`[Shutdown] <модуль> kept: stale callbacks in %u windows` в общем логе платформы.

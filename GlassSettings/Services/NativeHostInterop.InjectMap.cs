@@ -329,34 +329,6 @@ public static partial class NativeHostInterop
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool Native_RefreshInjectResidualStickyForArch(int arch);
 
-    /// <summary>
-    /// R12d: счётчики монитора в общий лог (нативная карта vs. собранный список).
-    /// Нужен, чтобы по логу отличить «слот не доехал» от «слот есть, но потерян в UI».
-    /// </summary>
-    public static void LogMonitorSummary(
-        bool platformRunning,
-        uint slotCount,
-        uint slotRejected,
-        uint slotBitsZero,
-        uint entryCount,
-        uint entryRejected) =>
-        Native_LogMonitorSummary(
-            platformRunning ? 1u : 0u,
-            slotCount,
-            slotRejected,
-            slotBitsZero,
-            entryCount,
-            entryRejected);
-
-    [DllImport(Dll, EntryPoint = "GlassSettings_LogMonitorSummary")]
-    private static extern void Native_LogMonitorSummary(
-        uint platformRunning,
-        uint slotCount,
-        uint slotRejected,
-        uint slotBitsZero,
-        uint entryCount,
-        uint entryRejected);
-
     [DllImport(Dll, EntryPoint = "GlassSettings_ClearInjectMapPidForArch")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool Native_ClearInjectMapPidForArch(uint arch, uint pid);

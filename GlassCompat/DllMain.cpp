@@ -255,17 +255,13 @@ namespace
     }
 }
 
-// R12e: отказ гейта обязан быть виден в UI так же, как его показывал path=2 в master.
-// В master DLL грузилась и Initialize писал слот `RejectedBlockList`; после R7 гейт
-// возвращает FALSE раньше Initialize, и слот не писался вовсе — исключённые процессы
-// (devenv.exe, msedge.exe, …) исчезли из списка «отвергнутых».
-// R12f: бит модуля — как в master (`StartMinimalUnloadWatcher(2)` писал ModuleCompat).
-// Это то, что реально произошло с процессом: GlassCompat был в него отображён загрузчиком
-// и отказался работать. Без бита строка отвергнутого процесса пустая — ни одной точки в
-// колонках модулей, хотя пользователь видит процесс «отвергнутым», а не «пустым».
-static void WriteRejectedSlot(const wchar_t* exeName, bool cached) noexcept
+// Отказ гейта (path=2) обязан быть виден в GlassSettings. Гейт возвращает FALSE раньше
+// Initialize, поэтому слот `RejectedBlockList` пишет сам DllMain — иначе исключённые
+// процессы вообще не попадают в список. Бит ModuleCompat показывает, что произошло:
+// GlassCompat был отображён в процесс загрузчиком и отказался работать.
+static void WriteRejectedSlot(const wchar_t* exeName) noexcept
 {
-    const bool written = Shared::InjectProcessMap::TryUpsert(
+    (void)Shared::InjectProcessMap::TryUpsert(
         GetCurrentProcessId(),
         Shared::InjectProcessMap::Kind::RejectedBlockList,
         /*path=*/2,
@@ -297,11 +293,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
         // C2360: объявления внутри `case` без собственного блока запрещены (метка `case`
         // пересекает инициализацию). Всё тело attach-гейта — в своём блоке.
         {
-            // R12i: путь отказа проверяем ДО логов загрузки. Повторные LoadLibrary от user32
-            // в исключённом процессе (msedge: 1600+ попыток за сессию) больше не пишут ни
-            // `dll_attach`, ни `dll_detach`, ни слот карты: решение уже принято и закэшировано
-            // мьютексом с именем pid. В прогоне 17 это дало 1878 `deny_slot` и ~1900 пар
-            // attach/detach — при том, что новой информации там не было ни строки.
+            // Решение об отказе проверяется первым: повторные LoadLibrary от user32 в
+            // исключённом процессе (msedge — сотни попыток за сессию) не должны ни считать
+            // гейт заново, ни трогать карту инжекта. Решение кэшируется мьютексом с именем
+            // pid, слот карты пишется один раз на процесс — этого достаточно для списка
+            // «отвергнутых» в GlassSettings.
             wchar_t exePath[MAX_PATH]{};
             const DWORD exeLen = GetModuleFileNameW(nullptr, exePath, _countof(exePath));
             const wchar_t* exeStem = exePath;
@@ -317,8 +313,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
                 }
             }
             // Отказ кэшируем на процесс. Статик модуля НЕ годится: при возврате FALSE модуль
-            // не загружается, и его состояние исчезает — так в прогоне 9 получилось 21
-            // сообщение вместо одного. Держим kernel-объект с именем pid: он живёт в таблице
+            // не загружается, и его состояние исчезает — решение пришлось бы принимать заново
+            // на каждой попытке. Держим kernel-объект с именем pid: он живёт в таблице
             // хэндлов процесса, а не в модуле, и переживает возврат FALSE.
             wchar_t denyName[64]{};
             swprintf_s(denyName, L"Local\\GlassCompatGateDeny_%lu",
@@ -337,11 +333,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
                 }
                 return false;
             }(slotName);
-            auto writeSlotOnce = [&](bool cached) noexcept
+            auto writeSlotOnce = [&]() noexcept
             {
                 if (slotWrittenAlready)
                     return;
-                WriteRejectedSlot(exeStem, cached);
+                WriteRejectedSlot(exeStem);
                 (void)CreateMutexW(nullptr, FALSE, slotName);
             };
 
@@ -354,7 +350,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
                     // Решение не пересчитываем; слот пишем один раз на процесс — иначе
                     // долгоживущие исключённые процессы не попадают в список вообще (карта
                     // в момент первого отказа принадлежала другой сессии).
-                    writeSlotOnce(/*cached=*/true);
+                    writeSlotOnce();
                     return FALSE;
                 }
             }
@@ -373,7 +369,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
                 if (!allow)
                 {
                     // Отказ — тоже факт: пишем слот, пока модуль ещё отображён в процессе.
-                    writeSlotOnce(/*cached=*/false);
+                    writeSlotOnce();
                     // Маркер «уже отказали» — повторные LoadLibrary от user32 молчат.
                     (void)CreateMutexW(nullptr, FALSE, denyName);
                     return FALSE;

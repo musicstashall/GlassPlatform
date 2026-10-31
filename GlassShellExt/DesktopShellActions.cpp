@@ -523,8 +523,13 @@ namespace GlassDesktopActions
                 GS::RefreshInjectResidualSticky(a);
                 if (!r.hostGone || r.residualProcesses != 0)
                 {
-                    // Дублируем итог в общий лог: stop_result уже есть, но из UI важно
-                    // видеть, что поток дожима завершился, а не завис.
+                    // Хост не ушёл или остались процессы с нашими модулями: из UI важно
+                    // видеть, что поток дожима завершился, а не завис на ожидании.
+                    AppendShellLaunchLog(
+                        L"[GlassShellExt] stop finished: hostGone=%d residuals=%u ms=%lu",
+                        r.hostGone ? 1 : 0,
+                        r.residualProcesses,
+                        static_cast<unsigned long>(r.elapsedMs));
                 }
             }).detach();
         }

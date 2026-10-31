@@ -21,15 +21,14 @@
 - `s_shouldSkip` — определяется один раз через `std::call_once`; `true` для процессов из `ProcessBlockList` или для хост-процесса
 - Заблокированные процессы получают "unload watcher" поток с `GetModuleHandleExW` + `FreeLibraryAndExitThread`
 - **Контракт выгрузки (не ломать):** [docs/GlassCompat-unload.md](docs/GlassCompat-unload.md) — path=1 без HostShutdown; path=2/3 ждут HostShutdown (H58)
-- **Гейт загрузки (R7).** `DllMain` решает, грузиться ли модулю в процесс: встроенный deny-список (`ProcessBlockList` + приложения, падавшие в чужом стеке), затем `GateIsAlwaysTrusted` (хост, `explorer.exe`, shell-хосты), затем файл `%LOCALAPPDATA%\GlassPlatform\attach-gate.txt` с fail-closed. Отказ кэшируется на процесс мьютексом `GlassCompatGateDeny_<pid>`, поэтому повторные `LoadLibrary` от user32 не пересчитывают решение; слот «отвергнут» пишется один раз на процесс (`GlassCompatGateSlot_<pid>`), а `dll_attach`/`dll_detach` в лог не попадают (R12i)
-- **Отвергнутые процессы.** Отказ гейта пишет слот карты инжекта с битом `ModuleCompat` (`deny_slot`), поэтому исключённые процессы видны в GlassSettings как «отвергнутые»
+- **Гейт загрузки (R7).** `DllMain` решает, грузиться ли модулю в процесс: встроенный deny-список (`ProcessBlockList` + приложения, падавшие в чужом стеке), затем `GateIsAlwaysTrusted` (хост, `explorer.exe`, shell-хосты), затем файл `%LOCALAPPDATA%\GlassPlatform\attach-gate.txt` с fail-closed. Отказ кэшируется на процесс мьютексом `GlassCompatGateDeny_<pid>`, поэтому повторные `LoadLibrary` от user32 не пересчитывают решение; слот «отвергнут» пишется один раз на процесс (`GlassCompatGateSlot_<pid>`); никакой записи в лог на пути отказа нет — повторные попытки не создают шума (R12i)
+- **Отвергнутые процессы.** Отказ гейта пишет слот карты инжекта с битом `ModuleCompat`, поэтому исключённые процессы видны в GlassSettings как «отвергнутые»
 
 ## Документация
 
 | Задача | Документ |
 |--------|----------|
 | Выгрузка (path=1 vs BlockList) | [docs/GlassCompat-unload.md](docs/GlassCompat-unload.md) |
-| Диагностика выгрузки (точки инструментации, события NDJSON) | [docs/unload-instrumentation.md](docs/unload-instrumentation.md) |
 | Архитектура платформы | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 | PlatformPresenceService | [GlassSettings/docs/PlatformPresenceService-architecture.md](../GlassSettings/docs/PlatformPresenceService-architecture.md) |
 - `ReadHostPid()` / `WriteHostPid()` — работа с `Local\GlassHostPid`; `s_hostPidMapping` хранит handle всё время жизни хоста

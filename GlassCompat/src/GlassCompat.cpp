@@ -1483,6 +1483,12 @@ namespace
                 const unsigned staleExplorer = ScanStaleCallbacksBeforeFree("ExplorerCompat", savedExplorer);
                 if (staleExplorer > 0)
                 {
+                    // H91: указатели на код модуля ещё лежат в чужих окнах — выгрузка
+                    // превратила бы их в висячие. Оставляем модуль жить до снятия ссылок.
+                    DebugLog(
+                        DBG_IMPORTANT,
+                        L"[GlassCompat][Core] [Shutdown] ExplorerCompat kept: stale callbacks in %u windows",
+                        staleExplorer);
                 }
                 else
                 {
@@ -1534,6 +1540,11 @@ namespace
                     ScanStaleCallbacksBeforeFree("TaskbarCompat", savedTaskbar);
                 if (staleTaskbar > 0)
                 {
+                    // H91: то же, что для ExplorerCompat — без снятия ссылок модуль не выгружаем.
+                    DebugLog(
+                        DBG_IMPORTANT,
+                        L"[GlassCompat][Core] [Shutdown] TaskbarCompat kept: stale callbacks in %u windows",
+                        staleTaskbar);
                 }
                 else
                 {
@@ -1596,6 +1607,11 @@ namespace
                 const unsigned staleUi = ScanStaleCallbacksBeforeFree("UICompat", savedUICompat);
                 if (staleUi > 0)
                 {
+                    // H91: то же, что для ExplorerCompat — без снятия ссылок модуль не выгружаем.
+                    DebugLog(
+                        DBG_IMPORTANT,
+                        L"[GlassCompat][Core] [Shutdown] UICompat kept: stale callbacks in %u windows",
+                        staleUi);
                 }
                 else
                 {
@@ -2636,8 +2652,8 @@ namespace
                 break;
             }
 
-            // Heartbeat NDJSON убран с GUI-потока: CreateFile в AppContainer мог
-            // блокировать poll Stop (H54: последний hb SEH, затем нет loop_exit).
+            // Файловых операций на GUI-потоке нет: CreateFile в AppContainer мог
+            // блокировать poll Stop (H54: процесс замирал до таймаута).
 
             // Per-PID unload: MsgWait на auto-reset УЖЕ снимает сигнал — нельзя откладывать на poll (H1).
             auto handlePerPidUnload = [&](bool alreadySignaled) -> bool
@@ -3566,10 +3582,6 @@ namespace
                         SYNCHRONIZE,
                         FALSE,
                         GlassShared::GlassPlatformTask::kHostAliveMutexName);
-                    // R12b: видно, что именно удалось открыть. В прогоне 13 у части
-                    // процессов (DllHost) не было ни watcher_wake, ни следа причины —
-                    // без этого нельзя отличить «не открылся StopEvent» от «не дошёл
-                    // до ожидания».
                     if (hStop || hUnload || hHostAlive)
                     {
                         HANDLE waits[3]{};

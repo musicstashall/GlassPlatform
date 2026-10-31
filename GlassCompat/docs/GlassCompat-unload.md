@@ -260,5 +260,35 @@ UICompat использует COM-объекты (IXDE, TAP, visual tree watcher
 
 ## Диагностика
 
-Аудит refcount и точки инструментации (логи в файл) для разбора «модули выгружаются
-нестабильно, GlassCompat остаётся загруженной»: [unload-instrumentation.md](unload-instrumentation.md).
+Диагностика ведётся штатным логом платформы (`GlassLogClient` → общий лог, вывод
+`DebugLog`), отдельного канала инструментации выгрузки нет. Что смотреть при «модули
+выгружаются нестабильно, GlassCompat остаётся загруженной»:
+
+- **refcount и пины.** Внутри процесса `Shared::ModuleRef::RemoteMask(pid)` показывает,
+  какие из наших модулей ещё отображены (`bit0` — `GlassCompat`). Остаток `mask==1` после
+  `ExecuteShutdown` — норма: это INCONTEXT-ссылка от `SetWinEventHook`, её снимает только
+  сама ОС, когда процесс обработает `UnhookWinEvent`; выгружать модуль в этот момент нельзя
+  и по этой одной ссылке `FreeLibrary` извне не вызывается.
+- **остаток колбэков.** Перед `FreeLibrary` peer-модулей `ExecuteShutdown` сканирует окна
+  процесса (`ScanStaleCallbacksBeforeFree`); если в окнах остались колбэки выгружаемого
+  модуля, строка `[Shutdown] <модуль> kept: stale callbacks in %u windows` показывает,
+  сколько окон это затрагивает, — выгрузка такого модуля откладывается, а не форсируется.
+- **sweep остатков** (`ForceUnloadResiduals` → `SweepCompatLeftoversOnce`): по кандидату
+  с `mask==1` (только `compat`), не числящемуся `Alive` в карте инжекта, выполняется
+  graceful-запрос shutdown и «пинок» окон/потоков с ожиданием 0.6 с; не ушёл — процесс
+  остаётся с модулем до своего завершения.
+
+Политика выгрузки (из неё следует всё остальное):
+
+- в чужих процессах платформа **не вызывает** raw `FreeLibrary` / `CreateRemoteThread(FreeLibrary)`.
+  Ссылку INCONTEXT-хука снаружи снять нельзя: любой внешний `FreeLibrary` — use-after-unmap,
+  user32 продолжает держать указатель на наш код (падение уже после размапливания). Поэтому
+  sweep работает только graceful-путём, а остаток `os_refs=1` считается нормой, а не ошибкой;
+- исключение процесса из доверенных делается **запретом загрузки**, а не инициализации:
+  гейт на `DLL_PROCESS_ATTACH` (`GlassCompat/DllMain.cpp`) читает
+  `%LOCALAPPDATA%\GlassPlatform\attach-gate.txt` и при отказе `DllMain` возвращает `FALSE`.
+  Управление — переменные окружения хоста `GLASS_ATTACH_GATE` (`deny` по умолчанию,
+  `allow` — только доверенные, `0`/`off` — выключен), `GLASS_ATTACH_GATE_EXTRA`
+  (список через `;`) и реестр `HKCU\Software\StanislavKa\GlassPlatform\BlockList`
+  / `AttachList`. Отказ виден в GlassSettings как «отвергнутый» процесс: слот карты
+  инжекта пишет сам `DllMain` (бит `ModuleCompat`), потому что до `Initialize` дело не доходит.
