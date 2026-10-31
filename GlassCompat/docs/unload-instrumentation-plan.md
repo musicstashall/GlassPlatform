@@ -220,6 +220,38 @@
 - Loader-события извне (ETW / Process Monitor), если внутрипроцессных данных не хватит.
 - Дамп (скилл `crashdump`) при крэше + сопоставление с `freeself_flaet` / `dll_detach`.
 
+### R2b/R3 — результат прогона 29784 и внесённые правки
+
+**Что показал прогон `debug-8e6259-3.log` + `explorer.exe.29784.dmp.log`:**
+
+| Факт | Значение |
+|---|---|
+| `wnd_force_detach` (Explorer 29784) | `top_level_scanned=84`, `subclasses_after=0` — обход шёл **только** по top-level окнам |
+| `stale_scan` WndCompat уже после detach | `windows=903, marked=6, proc_inside=0, prop_inside=204` |
+| `wnd_free_proceed` | `stale_procs=204` → модуль всё равно выгружен (`module_free rc 1→0`) |
+| дамп | `0xC0000409` subcode `0xA`, цель indirect call = `WndCompat+0x194240`, в стеке `comctl32+0x237DF/0x23A08` + `uxtheme` |
+| регистры дампа | `R13=0xD41014` — **это ровно то окно**, которое лог записал в `window_proc_in_module` (`CtrlNotifySink`, `prop_hits=1`) |
+
+Вывод: детектор сработал верно, а политика — нет: при живых проках в comctl32-цепочке
+модуль всё равно выгружался. Плюс `prop_inside` как критерий шумит (указатели на данные модуля).
+
+Внесено (R3):
+
+| # | Файл | Правка |
+|---|---|---|
+| R3-1 | `WndCompat/Tracker/WinEventHandler.cpp` | `ForceDetachAllSubclasses` обходит **top-level + дочерние (`EnumChildWindows`) + `EnumThreadWindows`**; считает `top_level_scanned/child_scanned/visited/removed_root/removed_explorer` |
+| R3-2 | `WndCompat/Root/RootSubclass.cpp`, `Root/ExplorerRootSubclass.cpp` (+`.h`) | `*_ForceDetachSubclass` возвращают `bool` (= `RemoveWindowSubclass` реально снял прок); добавлены `*_SubclassProcRva()` для сверки с адресом из дампа |
+| R3-3 | `GlassCompat.cpp:StaleCallbacks` | новый фильтр `IsCodePtrInRangeUl` (VirtualQuery + `PAGE_EXECUTE*`): `prop_inside` — все совпадения, `prop_code` — только реальные проки; критерий возврата = `proc_inside + prop_code` |
+| R3-4 | `GlassCompat.cpp:ExecuteShutdown` | `skipWndFree = env(WND_SAFE) \|\| stale_procs>0`; событие `wnd_free_skipped` с `reason=stale\|env`. **Unmap модуля под живым проком запрещён** — лучше residual, чем падение Проводника |
+
+Как читать новый лог:
+
+- `prop_code=0` → цепочка чистая, выгрузка безопасна (`wnd_free_proceed`).
+- `prop_code>0` → detach не дошёл до окон; в логе будут `child_scanned>top_level_scanned` и
+  `removed_root/removed_explorer`, а `wnd_free_skipped reason=stale` удержит модуль.
+- `root_proc_rva` / `explorer_root_proc_rva` из `wnd_force_detach` сверять с `WndCompat+0x194240`
+  из дампа: совпадение подтверждает, что падал именно прок Root/ExplorerRoot.
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
@@ -278,6 +310,22 @@
 **Критерий приёмки:** после S8 через 5 с — ни одного процесса с `Glass*.dll`; ни одного крэша/дампа;
 Stop укладывается в бюджет (baseline длительностей фиксируем в первом прогоне; цель ≤ 3 с на процесс,
 хост `done:` ≤ 5 с).
+
+### Прогон после R3 (обязательно два)
+
+| # | Как | Что смотреть |
+|---|---|---|
+| A | обычный Stop, затем **не трогать систему минимум 3 минуты** | крэш предыдущего прогона пришёл через ~78 с после `module_free`; ранний выход из теста его пропустит |
+| B | `set GLASS_ULTRACE_WND_SAFE=1` (тот же сценарий) | контроль: WndCompat не выгружается вовсе → падений быть не должно; в A модуль тоже должен остаться (`wnd_free_skipped reason=stale`), если detach не дошёл |
+
+Самопроверка лога перед отправкой:
+
+```
+findstr /C:"wnd_force_detach"   debug-8e6259.log
+findstr /C:"prop_code"          debug-8e6259.log
+findstr /C:"wnd_free_skipped"   debug-8e6259.log
+findstr /C:"wnd_free_proceed"   debug-8e6259.log
+```
 
 ---
 

@@ -1327,10 +1327,25 @@ namespace
 
 namespace WndCompat
 {
-    void Root_ForceDetachSubclass(HWND hWnd) noexcept
+    bool Root_ForceDetachSubclass(HWND hWnd) noexcept
     {
-        RemoveWindowSubclass(hWnd, RootSubclassProc, kRootSubclassId);
+        return RemoveWindowSubclass(hWnd, RootSubclassProc, kRootSubclassId) != FALSE;
     }
+
+    // #region agent log
+    // GLASS-ULTRACE (H91): RVA прокa для сверки с адресом из дампа.
+    std::size_t Root_SubclassProcRva() noexcept
+    {
+        HMODULE self = nullptr;
+        if (!GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&Root_ForceDetachSubclass), &self) || !self)
+            return 0;
+        const auto base = reinterpret_cast<std::uintptr_t>(self);
+        const auto proc = reinterpret_cast<std::uintptr_t>(&RootSubclassProc);
+        return proc >= base ? static_cast<std::size_t>(proc - base) : 0;
+    }
+    // #endregion
 
     void WINAPI ApplyBackdropPolicyToTrackedRoots() noexcept
     {

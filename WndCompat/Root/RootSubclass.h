@@ -1,6 +1,7 @@
 #pragma once
 #include "WndPch.h"
 #include <GlassMessages.h>
+#include <cstddef>
 
 // Диагностика: в WinEventHandler case WindowRole::Root дорожка проводника зовёт
 // DispatchRootAttachToOwnerThread вместо DispatchExplorerRootAttachToOwnerThread.
@@ -28,8 +29,16 @@ namespace WndCompat
     // Снять сабклассы со всех root-окон (Shutdown)
     void Root_DetachAll();
 
-    // Принудительное снятие subclass с окна (EnumWindows fallback перед FreeLibrary)
-    void Root_ForceDetachSubclass(HWND hWnd) noexcept;
+    // Принудительное снятие subclass с окна (EnumWindows fallback перед FreeLibrary).
+    // Возвращает true, если RemoveWindowSubclass реально снял наш прок (H91: нужно для
+    // доказательства, что обход дошёл до окна и цепочка comctl32 действительно очищена).
+    bool Root_ForceDetachSubclass(HWND hWnd) noexcept;
+
+    // #region agent log
+    // GLASS-ULTRACE (H91): RVA RootSubclassProc внутри WndCompat.dll — чтобы сопоставить
+    // адрес из crash-дампа (WndCompat+0xXXXXXX) с конкретным проком.
+    std::size_t Root_SubclassProcRva() noexcept;
+    // #endregion
 
     bool WINAPI Root_IsAttached(HWND hRoot) noexcept;
 

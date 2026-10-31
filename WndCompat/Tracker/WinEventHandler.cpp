@@ -1513,14 +1513,47 @@ namespace WndCompat
             return ctx;
         }
 
-        // CFG-fix fallback: EnumWindows-based full scan to remove any remaining subclass procs
-        // before FreeLibrary. Catches windows that were subclassed by WinEvent callbacks
-        // but never entered g_rootWindows (race between WinEvent and shutdown snapshot).
+        // CFG-fix fallback: full scan to remove any remaining subclass procs before
+        // FreeLibrary. Catches windows that were subclassed by WinEvent callbacks but never
+        // entered g_rootWindows (race between WinEvent and shutdown snapshot).
+        //
+        // H91 (дамп explorer 29784): крэш = вызов WndCompat+0x194240 из comctl32-thunk при
+        // WM_PAINT окна CtrlNotifySink, которое НЕ было посещено — старый обход шёл только
+        // через EnumWindows (top-level). Окна DirectUI-шелла (CtrlNotifySink и прочие
+        // дочерние) переживали detach → оставались в цепочке comctl32 → unmap → fail-fast.
+        // Поэтому: рекурсивный обход дочерних + EnumThreadWindows (message-only окна).
         struct ForceDetachCtx final
         {
             DWORD pid{};
-            unsigned removed{};
+            unsigned visited{};      // окон посещено (top + child + thread)
+            unsigned topLevel{};
+            unsigned child{};
+            unsigned removedRoot{};      // RemoveWindowSubclass(RootSubclassProc) == TRUE
+            unsigned removedExplorer{};  // RemoveWindowSubclass(ExplorerRootSubclassProc) == TRUE
         };
+
+        void ForceDetachOne(HWND hwnd, ForceDetachCtx& ctx) noexcept
+        {
+            if (WndCompat::Root_ForceDetachSubclass(hwnd))
+                ++ctx.removedRoot;
+            if (WndCompat::ExplorerRoot::ExplorerRoot_ForceDetachSubclass(hwnd))
+                ++ctx.removedExplorer;
+            ++ctx.visited;
+        }
+
+        BOOL CALLBACK EnumForceDetachChild(HWND hwnd, LPARAM lParam) noexcept
+        {
+            auto* ctx = reinterpret_cast<ForceDetachCtx*>(lParam);
+            DWORD pid = 0;
+            (void)GetWindowThreadProcessId(hwnd, &pid);
+            if (pid != ctx->pid)
+                return TRUE;
+            ++ctx->child;
+            ForceDetachOne(hwnd, *ctx);
+            // EnumChildWindows уже рекурсивен, но повторный проход безвреден и страхует
+            // от окон, пересозданных во время обхода.
+            return TRUE;
+        }
 
         BOOL CALLBACK EnumForceDetachSubclasses(HWND hwnd, LPARAM lParam) noexcept
         {
@@ -1530,19 +1563,42 @@ namespace WndCompat
             if (pid != ctx->pid)
                 return TRUE;
 
-            WndCompat::Root_ForceDetachSubclass(hwnd);
-            WndCompat::ExplorerRoot::ExplorerRoot_ForceDetachSubclass(hwnd);
-            ++ctx->removed;
+            ++ctx->topLevel;
+            ForceDetachOne(hwnd, *ctx);
+            if (IsWindow(hwnd))
+                (void)EnumChildWindows(hwnd, EnumForceDetachChild, lParam);
             return TRUE;
         }
 
-        unsigned ForceDetachAllSubclasses() noexcept
+        unsigned ForceDetachAllSubclasses(ForceDetachCtx& ctx) noexcept
         {
-            ForceDetachCtx ctx{};
+            ctx = ForceDetachCtx{};
             ctx.pid = GetCurrentProcessId();
             (void)EnumWindows(EnumForceDetachSubclasses, reinterpret_cast<LPARAM>(&ctx));
-            DebugLog(L"[WndCompat][WinEvent] ForceDetachAllSubclasses: scanned %u windows", ctx.removed);
-            return ctx.removed;
+
+            // Message-only (HWND_MESSAGE) и окна не-GUI потоков: EnumWindows их не отдаёт.
+            HANDLE threads = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            if (threads != INVALID_HANDLE_VALUE)
+            {
+                THREADENTRY32 te{};
+                te.dwSize = sizeof(te);
+                if (Thread32First(threads, &te))
+                {
+                    do
+                    {
+                        if (te.th32OwnerProcessID != ctx.pid)
+                            continue;
+                        (void)EnumThreadWindows(te.th32ThreadID, EnumForceDetachSubclasses,
+                            reinterpret_cast<LPARAM>(&ctx));
+                    } while (Thread32Next(threads, &te));
+                }
+                CloseHandle(threads);
+            }
+
+            DebugLog(L"[WndCompat][WinEvent] ForceDetachAllSubclasses: visited %u "
+                     L"(top %u, child %u), removed root %u explorer %u",
+                ctx.visited, ctx.topLevel, ctx.child, ctx.removedRoot, ctx.removedExplorer);
+            return ctx.visited;
         }
     }
 
@@ -1660,18 +1716,28 @@ namespace WndCompat
         // procs that were subclassed by WinEvent callbacks but never entered g_rootWindows
         // (race between WinEvent INCONTEXT and shutdown snapshot). This is the last line
         // of defense before FreeLibrary — removes stale subclass procs from all windows.
-        const unsigned forceScanned = ForceDetachAllSubclasses();
+        ForceDetachCtx forceCtx{};
+        const unsigned forceScanned = ForceDetachAllSubclasses(forceCtx);
         // #region agent log
-        // GLASS-ULTRACE (H91): ForceDetachAllSubclasses обходит ТОЛЬКО top-level окна
-        // (EnumWindows). Дочерние контролы (кнопки/статики/rebar/listview) не посещаются —
-        // их сабкласс-проки переживут FreeLibrary. subclasses_after показывает остаток.
+        // GLASS-ULTRACE (H91): посещены top-level + дочерние + thread-окна.
+        // removed_root/removed_explorer — сколько RemoveWindowSubclass реально сняли наш прок
+        // (доказательство, что detach дошёл до окна). RVA проков нужны, чтобы сверить адрес
+        // из crash-дампа (WndCompat+0xXXXXXX) с конкретным проком.
         GlassUlTrace::Logf(
             "H91",
             "WndCompat:WinEventHook_Shutdown",
             "wnd_force_detach",
-            "\"top_level_scanned\":%u,\"subclasses_after\":%u",
+            "\"top_level_scanned\":%u,\"child_scanned\":%u,\"visited\":%u,"
+            "\"removed_root\":%u,\"removed_explorer\":%u,\"subclasses_after\":%u,"
+            "\"root_proc_rva\":\"0x%llX\",\"explorer_root_proc_rva\":\"0x%llX\"",
+            forceCtx.topLevel,
+            forceCtx.child,
             forceScanned,
-            WndCompat::SubclassDiag::Total());
+            forceCtx.removedRoot,
+            forceCtx.removedExplorer,
+            WndCompat::SubclassDiag::Total(),
+            static_cast<unsigned long long>(WndCompat::Root_SubclassProcRva()),
+            static_cast<unsigned long long>(WndCompat::ExplorerRoot::ExplorerRoot_SubclassProcRva()));
         // #endregion
 
         // CFG-fix: снимаем g_hookInstalled ПОСЛЕ DetachAll, чтобы никакой WinEvent callback

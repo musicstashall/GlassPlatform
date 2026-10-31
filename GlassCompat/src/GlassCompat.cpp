@@ -1036,6 +1036,24 @@ namespace
         return true;
     }
 
+    // H91: «внутри диапазона модуля» — ещё не обязательно прок. В blob'е comctl32-цепочки
+    // (и в dwRefData/vtable) лежат указатели на ДАННЫЕ модуля. Настоящий прок обязан лежать
+    // на исполняемой странице: без этого фильтра prop_inside давал 204 «хита» и не позволял
+    // отличить реальную опасность от шума (прогон R2b, explorer 29784).
+    bool IsCodePtrInRangeUl(std::uintptr_t a, std::uintptr_t begin, std::uintptr_t end) noexcept
+    {
+        if (a < begin || a >= end)
+            return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(reinterpret_cast<const void*>(a), &mbi, sizeof(mbi)) == 0)
+            return false;
+        if (mbi.State != MEM_COMMIT)
+            return false;
+        const DWORD prot = mbi.Protect & 0xFFu;
+        return prot == PAGE_EXECUTE || prot == PAGE_EXECUTE_READ ||
+               prot == PAGE_EXECUTE_READWRITE || prot == PAGE_EXECUTE_WRITECOPY;
+    }
+
     struct StaleCallbackScan
     {
         DWORD pid{};
@@ -1043,8 +1061,9 @@ namespace
         std::uintptr_t end{};
         unsigned windows{};
         unsigned marked{};
-        unsigned procInside{};   // GWLP_WNDPROC внутри модуля
-        unsigned propInside{};   // проки в цепочке comctl32 внутри модуля
+        unsigned procInside{};      // GWLP_WNDPROC внутри модуля
+        unsigned propInside{};      // любые значения цепочки comctl32 внутри модуля (шумно)
+        unsigned propCodeInside{};  // из них на исполняемых страницах = реальные проки
         unsigned markedLogged{};
         unsigned details{};
         const char* tag{""};
@@ -1091,6 +1110,7 @@ namespace
         // ищем не по полям, а по значениям внутри диапазона модуля.
         const HANDLE subclassProp = GetPropW(hwnd, L"UxSubclassInfo");
         unsigned propHits = 0;
+        unsigned propCodeHits = 0;
         if (subclassProp)
         {
             unsigned long long words[48]{};
@@ -1099,8 +1119,12 @@ namespace
             {
                 for (unsigned i = 0; i < got; ++i)
                 {
-                    if (words[i] >= s.begin && words[i] < s.end)
-                        ++propHits;
+                    const auto v = static_cast<std::uintptr_t>(words[i]);
+                    if (v < s.begin || v >= s.end)
+                        continue;
+                    ++propHits;
+                    if (IsCodePtrInRangeUl(v, s.begin, s.end))
+                        ++propCodeHits;
                 }
             }
         }
@@ -1121,6 +1145,8 @@ namespace
             ++s.procInside;
         if (propHits)
             s.propInside += propHits;
+        if (propCodeHits)
+            s.propCodeInside += propCodeHits;
 
         if (!gwlpInside && !propHits)
             return;
@@ -1136,12 +1162,13 @@ namespace
             "GlassCompat.cpp:ScanStaleCallbacks",
             "window_proc_in_module",
             "\"module\":\"%s\",\"hwnd\":\"%p\",\"class\":\"%s\",\"gwlp_inside\":%d,"
-            "\"prop_hits\":%u,\"kind\":%u",
+            "\"prop_hits\":%u,\"prop_code_hits\":%u,\"kind\":%u",
             s.tag,
             static_cast<void*>(hwnd),
             clsJson,
             gwlpInside ? 1 : 0,
             propHits,
+            propCodeHits,
             static_cast<unsigned>(kind));
     }
 
@@ -1210,14 +1237,17 @@ namespace
             "GlassCompat.cpp:ScanStaleCallbacks",
             "stale_scan",
             "\"module\":\"%s\",\"windows\":%u,\"marked\":%u,\"proc_inside\":%u,"
-            "\"prop_inside\":%u,\"size\":\"0x%X\"",
+            "\"prop_inside\":%u,\"prop_code\":%u,\"size\":\"0x%X\"",
             tag,
             s.windows,
             s.marked,
             s.procInside,
             s.propInside,
+            s.propCodeInside,
             imageSize);
-        return s.procInside + s.propInside;
+        // Реальная опасность = наш КОД в GWLP или в comctl32-цепочке. prop_inside без фильтра
+        // по исполняемым страницам содержит указатели на данные и как критерий не годится.
+        return s.procInside + s.propCodeInside;
     }
     // #endregion
 
@@ -1848,15 +1878,23 @@ namespace
                     GetEnvironmentVariableW(L"GLASS_ULTRACE_WND_SAFE", safeFlag, _countof(safeFlag)) > 0;
                 // Эксперимент: флаг = «не выгружать WndCompat вообще» (не только при найденных
                 // указателях). Нужен, чтобы отделить «наш unmap» от «чужие ссылки/COM».
-                const bool skipWndFree = safeEnv;
+                // H91 (дамп explorer 29784): при staleWndProcs>0 FreeLibrary = unmap модуля, на
+                // который всё ещё указывает comctl32-цепочка → CFG fail-fast при WM_PAINT
+                // (в дампе R13=hwnd 0xD41014 из marked-лога, цель WndCompat+0x194240).
+                // Поэтому unmap запрещён, пока скан видит наш КОД: residual-модуль лучше, чем
+                // падение Проводника. Причина видна в логе (reason=stale|env).
+                const bool skipByStale = staleWndProcs > 0;
+                const bool skipWndFree = safeEnv || skipByStale;
                 if (skipWndFree)
                 {
                     GlassUlTrace::Logf(
                         "H91",
                         "GlassCompat.cpp:ExecuteShutdown",
                         "wnd_free_skipped",
-                        "\"stale_procs\":%u,\"env\":1",
-                        staleWndProcs);
+                        "\"stale_procs\":%u,\"env\":%d,\"reason\":\"%s\"",
+                        staleWndProcs,
+                        safeEnv ? 1 : 0,
+                        safeEnv ? "env" : "stale");
                 }
                 else
                 {
