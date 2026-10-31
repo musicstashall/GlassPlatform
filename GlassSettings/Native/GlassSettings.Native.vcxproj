@@ -135,6 +135,7 @@
     <ClCompile Include="VisualStyleApplyNative.cpp" />
     <ClCompile Include="SecureUxThemeNative.cpp" />
     <ClCompile Include="BlockListNative.cpp" />
+    <ClCompile Include="PostStopVerify.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\GlassShared\GlassShared.vcxproj">

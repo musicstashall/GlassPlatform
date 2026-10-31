@@ -6,6 +6,8 @@
 #include <wchar.h>
 #include <string.h>
 #include <GlassUlTrace.h>
+#include <ProcessBlockList.h>
+#include <cstddef>
 
 #if defined(_DEBUG)
 #include <crtdbg.h>
@@ -70,31 +72,118 @@ namespace
         return *a == 0 && *b == 0;
     }
 
+    // R9: путь гейта. В прогоне 9 приложение Яндекс Музыки (`Y.Music.exe`, pid 904)
+    // получило `gate="missing"` при уже записанном файле — почти наверняка потому, что
+    // процесс живёт с другой средой (AppContainer/пакетное приложение переписывает
+    // LOCALAPPDATA на свой LocalCache). Поэтому: LOCALAPPDATA → USERPROFILE\AppData\Local,
+    // а если и это недоступно — гейт работает fail-closed (см. GateAllowsAttach).
     bool GateBuildPath(wchar_t* out, DWORD cch) noexcept
     {
         wchar_t base[MAX_PATH]{};
         const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, _countof(base));
-        if (n == 0 || n >= _countof(base))
-            return false;
-        return swprintf_s(out, cch, L"%s\\%s", base, kGateRelPath) > 0;
+        if (n > 0 && n < _countof(base))
+            return swprintf_s(out, cch, L"%s\\%s", base, kGateRelPath) > 0;
+
+        const DWORD m = GetEnvironmentVariableW(L"USERPROFILE", base, _countof(base));
+        if (m > 0 && m < _countof(base))
+            return swprintf_s(out, cch, L"%s\\AppData\\Local\\%s", base, kGateRelPath) > 0;
+
+        return false;
     }
 
-    /// true — процессу разрешено грузить DLL.
+    // Процессы, которые обязаны получать DLL даже при нечитаемом/отсутствующем гейте:
+    // иначе платформа не запустится (rundll32-хост), не покажет процессы (GlassSettings),
+    // не отрисует shell-хосты UICompat и не починит панель задач (explorer).
+    bool GateIsAlwaysTrusted(const wchar_t* exeName) noexcept
+    {
+        static const wchar_t* const kTrusted[] = {
+            L"rundll32.exe",
+            L"GlassPlatform.exe",
+            L"GlassSettings.exe",
+            L"LogViewer.exe",
+            L"explorer.exe",
+            L"shellexperiencehost.exe",
+            L"shellhost.exe",
+            L"startmenuexperiencehost.exe",
+            L"searchhost.exe",
+            L"searchapp.exe",
+        };
+        for (const wchar_t* t : kTrusted)
+        {
+            if (GateNameEquals(exeName, t))
+                return true;
+        }
+        return false;
+    }
+
+    // Встроенный deny: имена из ProcessBlockList (header-only список, без реестра и без
+    // I/O — в DllMain это обязательное условие) плюс приложения, которые падали в чужом
+    // стеке после выгрузки GlassCompat.
+    bool GateIsBuiltInDeny(const wchar_t* exeName) noexcept
+    {
+        static const wchar_t* const kExtra[] = {
+            L"Y.Music.exe",
+            L"Яндекс Музыка.exe",
+            L"YMusic.exe",
+            L"RuntimeBroker.exe",
+            L"ApplicationFrameHost.exe",
+        };
+        for (const wchar_t* n : kExtra)
+        {
+            if (GateNameEquals(exeName, n))
+                return true;
+        }
+        for (std::size_t i = 0; i < ProcessBlockList::BuiltInCount(); ++i)
+        {
+            if (GateNameEquals(exeName, ProcessBlockList::kBuiltInNames[i]))
+                return true;
+        }
+        return false;
+    }
+
+    /// true — процессу разрешено грузить DLL. `reasonOut` — короткая причина для лога.
     bool GateAllowsAttach(const wchar_t* exeName, GateMode& modeOut, char* modeText,
-        size_t modeTextCch) noexcept
+        size_t modeTextCch, char* reasonOut, size_t reasonCch, unsigned long& gleOut) noexcept
     {
         modeOut = GateMode::Off;
+        gleOut = 0;
         strncpy_s(modeText, modeTextCch, "missing", _TRUNCATE);
+        strncpy_s(reasonOut, reasonCch, "file", _TRUNCATE);
 
+        // (1) Встроенный список: не зависит ни от файла, ни от реестра, ни от среды.
+        // Именно здесь ловится прогон 9: `Y.Music.exe` получил allow=1 лишь потому, что
+        // гейт-файл в его среде не читался ("missing").
+        if (GateIsBuiltInDeny(exeName))
+        {
+            strncpy_s(modeText, modeTextCch, "builtin", _TRUNCATE);
+            strncpy_s(reasonOut, reasonCch, "builtin", _TRUNCATE);
+            return false;
+        }
+        if (GateIsAlwaysTrusted(exeName))
+        {
+            strncpy_s(reasonOut, reasonCch, "trusted", _TRUNCATE);
+            return true;
+        }
+
+        // (2) Файл гейта. FAIL-CLOSED: если его не прочитать (нет среды, ACL AppContainer,
+        // платформа не стартовала) — не грузимся. Для остальных процессов это безопасно:
+        // DLL приходит только от наших хуков, и без работающей платформы ей там нечего делать.
         wchar_t path[MAX_PATH * 2]{};
         if (!GateBuildPath(path, _countof(path)))
-            return true;
+        {
+            strncpy_s(modeText, modeTextCch, "noenv", _TRUNCATE);
+            strncpy_s(reasonOut, reasonCch, "noenv", _TRUNCATE);
+            return false;
+        }
 
         HANDLE hFile = CreateFileW(
             path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (hFile == INVALID_HANDLE_VALUE)
-            return true;
+        {
+            gleOut = static_cast<unsigned long>(GetLastError());
+            return false;
+        }
 
         static wchar_t s_buf[kGateMaxChars];
         DWORD read = 0;
@@ -102,7 +191,10 @@ namespace
             hFile, s_buf, static_cast<DWORD>(sizeof(s_buf) - sizeof(wchar_t)), &read, nullptr);
         CloseHandle(hFile);
         if (!readOk || read == 0)
-            return true;
+        {
+            gleOut = static_cast<unsigned long>(GetLastError());
+            return false;
+        }
 
         const DWORD chars = read / sizeof(wchar_t);
         s_buf[chars] = 0;
@@ -218,36 +310,51 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
                     }
                 }
             }
-            // Отказ кэшируем на процесс: user32 повторяет LoadLibrary на каждое событие
-            // (в прогоне 8 — 46 попыток за 15 с в ApplicationFrameHost.exe). Повторный
-            // отказ не читает файл и не пишет лог, но модуль по-прежнему не грузится.
-            static bool s_denied = false;
-            if (s_denied)
+            // Отказ кэшируем на процесс. Статик модуля НЕ годится: при возврате FALSE модуль
+            // не загружается, и его состояние исчезает — так в прогоне 9 получилось 21
+            // сообщение вместо одного. Держим kernel-объект с именем pid: он живёт в таблице
+            // хэндлов процесса, а не в модуле, и переживает возврат FALSE.
+            wchar_t denyName[64]{};
+            swprintf_s(denyName, L"Local\\GlassCompatGateDeny_%lu",
+                static_cast<unsigned long>(GetCurrentProcessId()));
+            if (HANDLE hDenied = OpenMutexW(SYNCHRONIZE, FALSE, denyName))
+            {
+                CloseHandle(hDenied);
                 return FALSE;
+            }
 
             GateMode gateMode = GateMode::Off;
             // mode — узкая строка: Logf принимает const char*, wide-строка печаталась
             // как один символ ("d" вместо "deny") в прогоне 8.
             char modeText[16]{};
-            const bool allow = GateAllowsAttach(exeStem, gateMode, modeText, _countof(modeText));
+            char reason[16]{};
+            unsigned long gle = 0;
+            const bool allow = GateAllowsAttach(
+                exeStem, gateMode, modeText, _countof(modeText),
+                reason, _countof(reason), gle);
             // exe уже есть в контексте строки лога (GlassUlTrace::Log добавляет его сам),
-            // поэтому в data кладём только решение гейта.
+            // поэтому в data кладём только решение гейта и причину.
             GlassUlTrace::Logf(
                 "H97",
                 "DllMain.cpp:DllMain",
                 "attach_gate",
-                "\"gate\":\"%s\",\"allow\":%d",
+                "\"gate\":\"%s\",\"reason\":\"%s\",\"allow\":%d,\"gle\":%lu",
                 modeText,
-                allow ? 1 : 0);
+                reason,
+                allow ? 1 : 0,
+                gle);
             if (!allow)
             {
-                s_denied = true;
+                // Маркер «уже отказали» — повторные LoadLibrary от user32 молчат.
+                (void)CreateMutexW(nullptr, FALSE, denyName);
                 GlassUlTrace::Logf(
                     "H97",
                     "DllMain.cpp:DllMain",
                     "dll_attach_denied",
-                    "\"gate\":\"%s\",\"note\":\"further attempts silent\"",
-                    modeText);
+                    "\"gate\":\"%s\",\"reason\":\"%s\",\"gle\":%lu",
+                    modeText,
+                    reason,
+                    gle);
                 return FALSE;
             }
         }

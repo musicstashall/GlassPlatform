@@ -541,6 +541,54 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 - `cw_sweep_guard mode=2` — процесс оставлен сознательно, но после выхода хоста он, как
   правило, всё равно уходит сам (проверяется `post2`/`post8`).
 
+### R9 — прогон 9: `gate="missing"` у Яндекс Музыки и «RunDLL32 в списке»
+
+**Прогон 9 (`debug-8e6259-9.log`, 13:00:43–13:01:37).**
+
+| Что | Результат |
+|---|---|
+| гейт | `attach_gate_written mode=deny names=77` |
+| `ApplicationFrameHost.exe` | **21 × `dll_attach_denied`** — кэш отказа не работал (см. ниже) |
+| `Y.Music.exe` 904 | `dll_attach` + **`attach_gate gate="missing" allow=1`** → DLL загружена → падение повторилось |
+| пост-стоп | `post_verify_spawn ok=1`, `verify post8 hits=1` — остался `GlassSettings.exe` с `core` (свой инструмент, см. ниже) |
+| explorer 39400 | `dll_detach` 13:01:29.479 — через 0.5 с после выхода хоста (13:01:28.973), как в R8 |
+
+Два дефекта и один «фантом»:
+
+1. **`gate="missing"` → allow.** Гейт-файл был записан в 13:00:43, а процесс 904 прочитал
+   «missing»: среда процесса не даёт обычный `%LOCALAPPDATA%` (пакетное/AppContainer-
+   приложение подменяет его на свой LocalCache) либо чтение запрещено ACL. Логика была
+   fail-open, поэтому приложение получило DLL и снова упало.
+2. **Кэш отказа не выживал.** `DllMain` возвращал `FALSE`, модуль не загружался — вместе с
+   ним исчезал и `static bool s_denied`. user32 повторял `LoadLibrary` на каждое событие:
+   21 запись вместо одной.
+3. **«RunDLL32 в списке после explorer»** — это был наш верификатор
+   (`rundll32 GlassCompat.dll,Main /verify`): он сам держит `GlassCompat`, поэтому после
+   того как explorer отпустил модуль, в списке появлялся новый процесс с `GlassCompat`.
+   Сканер тут не ошибался — ошибался инструмент наблюдения.
+
+Внесено (R9):
+
+| # | Файл | Правка |
+|---|---|---|
+| R9-1 | `DllMain.cpp` | **fail-closed**: не прочитали гейт (нет среды/ACL/файла) — не грузимся. Исключение — компилируемый список доверенных (`rundll32`, `GlassPlatform`, `GlassSettings`, `LogViewer`, `explorer`, UICompat-хосты) |
+| R9-2 | `DllMain.cpp` | **встроенный deny без I/O**: `ProcessBlockList` (header-only) + `Y.Music.exe`, `Яндекс Музыка.exe`, `YMusic.exe`, `RuntimeBroker.exe`, `ApplicationFrameHost.exe`; проверяется **до** файла, поэтому среда процесса больше не влияет |
+| R9-3 | `DllMain.cpp` | путь гейта: `LOCALAPPDATA` → `USERPROFILE\AppData\Local`; в лог добавлены `reason` (`builtin`/`trusted`/`noenv`/`file`) и `gle` |
+| R9-4 | `DllMain.cpp` | кэш отказа — **named mutex** `Local\GlassCompatGateDeny_<pid>`: kernel-объект живёт в таблице хэндлов процесса и переживает возврат `FALSE` |
+| R9-5 | `GlassSettings/Native/PostStopVerify.cpp` (новый) | экспорт `GlassSettings_PostStopVerify` для rundll32: `post2` / `post8` |
+| R9-6 | `EntryRundll.cpp` | верификатор запускается как `rundll32 GlassSettings.Native.dll,GlassSettings_PostStopVerify` — в процессе нет `compat/core/wnd`, поэтому он не появляется в списке и в `hits` |
+| R9-7 | `GlassUlTrace.h` | `verify` считает свои инструменты отдельно: `hits` (остатки) и `own` (GlassSettings/LogViewer), в записи процесса — `own:1` |
+
+Как читать:
+
+- `attach_gate reason="builtin" allow=0` — процесс исключён компилируемым списком (не зависит
+  от файла/среды). Именно так теперь выглядит Яндекс Музыка.
+- `attach_gate reason="noenv"/"file" allow=0` — гейт не прочитался, поведение fail-closed.
+- `dll_attach_denied` — ровно одно сообщение на процесс (дальше маркер).
+- `verify tag=post8 hits=0 own=N` — чисто; `own` — наши же открытые инструменты.
+- Если в списке процессов появился `RunDLL32` **без** Glass-модулей — это верификатор,
+  он сам уйдёт через 8 с.
+
 ### Приёмка R1 (проверяется до первого прогона)
 
 Инструментация R1 считается принятой, только если выполнено всё:
@@ -580,9 +628,10 @@ INCONTEXT-инжектом `user32`. Следовательно `UnhookWinEvent`
 по проектам — сначала GlassShared. После сборки проверять время файлов
 `Build\x64\Debug\{GlassCompat,WndCompat}.dll`.
 
-**Текущий цикл (R8):** менялись `GlassShared/include/GlassUlTrace.h` (header-only, но
-компилируется в каждый TU) и файлы **GlassCompat** → собирать **GlassShared → GlassCompat**,
-затем **WndCompat** (тоже включает `GlassUlTrace.h`) и **GlassSettings.Native** (тоже).
+**Текущий цикл (R9):** менялись `GlassShared/include/GlassUlTrace.h`, файлы **GlassCompat**
+и добавлен **`GlassSettings/Native/PostStopVerify.cpp`** → собирать
+**GlassShared → GlassCompat → GlassSettings.Native** (плюс **WndCompat**, он тоже включает
+`GlassUlTrace.h`).
 
 ## 6. Протокол тестирования
 

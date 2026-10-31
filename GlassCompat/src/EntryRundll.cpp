@@ -704,19 +704,35 @@ namespace
             ok ? 1 : 0);
     }
 
-    // R8: запускаем пост-стопную проверку в отдельном rundll32, чтобы она жила дольше хоста.
+    // R9: пост-стопная проверка — отдельным процессом, но на GlassSettings.Native.dll,
+    // а не на GlassCompat. Иначе верификатор сам появляется в списке процессов как
+    // RunDLL32 с загруженным GlassCompat (наблюдение прогона 9) и портит и список, и hits.
     static void SpawnPostStopVerify(HMODULE hSelf) noexcept
     {
-        wchar_t dllPath[MAX_PATH]{};
-        if (!GetModuleFileNameW(hSelf, dllPath, _countof(dllPath)))
+        wchar_t selfPath[MAX_PATH]{};
+        if (!GetModuleFileNameW(hSelf, selfPath, _countof(selfPath)))
             return;
+        wchar_t verifyDll[MAX_PATH * 2]{};
+        if (swprintf_s(verifyDll, L"%s", selfPath) <= 0)
+            return;
+        if (wchar_t* slash = wcsrchr(verifyDll, L'\\'))
+        {
+            *(slash + 1) = 0;
+            wcsncat_s(verifyDll, L"GlassSettings.Native.dll", _TRUNCATE);
+        }
+        else
+        {
+            wcsncpy_s(verifyDll, L"GlassSettings.Native.dll", _TRUNCATE);
+        }
 
         wchar_t sysDir[MAX_PATH]{};
         if (GetSystemDirectoryW(sysDir, _countof(sysDir)) == 0)
             return;
 
-        wchar_t cmd[2 * MAX_PATH + 64]{};
-        if (swprintf_s(cmd, L"\"%s\\rundll32.exe\" \"%s\",Main /verify", sysDir, dllPath) <= 0)
+        wchar_t cmd[4 * MAX_PATH]{};
+        if (swprintf_s(cmd,
+                L"\"%s\\rundll32.exe\" \"%s\",GlassSettings_PostStopVerify",
+                sysDir, verifyDll) <= 0)
             return;
 
         STARTUPINFOW si{};

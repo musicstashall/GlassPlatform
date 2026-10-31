@@ -383,6 +383,10 @@ namespace GlassUlTrace
         PROCESSENTRY32W pe{};
         pe.dwSize = sizeof(pe);
         unsigned hits = 0;
+        // R9: свои инструменты считаем отдельно. GlassSettings держит локальный GlassCore
+        // для превью и выгружает его только при собственном закрытии — если окно настроек
+        // открыто после Stop, `core` там остаётся намеренно и к остаткам не относится.
+        unsigned own = 0;
         if (Process32FirstW(snap, &pe))
         {
             do
@@ -396,7 +400,13 @@ namespace GlassUlTrace
                 const unsigned mask = RemoteModuleMask(pe.th32ProcessID);
                 if (mask == 0)
                     continue;
-                ++hits;
+                const bool ownTool =
+                    _wcsicmp(pe.szExeFile, L"GlassSettings.exe") == 0 ||
+                    _wcsicmp(pe.szExeFile, L"LogViewer.exe") == 0;
+                if (ownTool)
+                    ++own;
+                else
+                    ++hits;
                 char exe[80]{};
                 WideToJson(exe, sizeof(exe), pe.szExeFile);
                 char mods[80]{};
@@ -405,19 +415,20 @@ namespace GlassUlTrace
                     "H82",
                     "GlassUlTrace.h:LogVerify",
                     "verify",
-                    "\"delay_s\":%u,\"tag\":\"%s\",\"target_pid\":%lu,\"target_exe\":\"%s\",\"modules\":\"%s\",\"mask\":%u",
+                    "\"delay_s\":%u,\"tag\":\"%s\",\"target_pid\":%lu,\"target_exe\":\"%s\",\"modules\":\"%s\",\"mask\":%u,\"own\":%d",
                     delaySec,
                     tag ? tag : "",
                     static_cast<unsigned long>(pe.th32ProcessID),
                     exe,
                     mods,
-                    mask);
+                    mask,
+                    ownTool ? 1 : 0);
             } while (Process32NextW(snap, &pe));
         }
         CloseHandle(snap);
         Logf("H82", "GlassUlTrace.h:LogVerify", "verify",
-            "\"delay_s\":%u,\"tag\":\"%s\",\"hits\":%u,\"scan\":\"done\"",
-            delaySec, tag ? tag : "", hits);
+            "\"delay_s\":%u,\"tag\":\"%s\",\"hits\":%u,\"own\":%u,\"scan\":\"done\"",
+            delaySec, tag ? tag : "", hits, own);
     }
 
     inline DWORD WINAPI VerifyThreadProc(LPVOID) noexcept
