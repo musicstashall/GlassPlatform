@@ -1014,10 +1014,11 @@ namespace
         return TRUE;
     }
 
-    void ScanStaleCallbacksBeforeFree(const char* tag, HMODULE hMod) noexcept
+    // Возвращает число окон, чей WndProc лежит внутри модуля (0 = «чисто» или модуль не найден).
+    unsigned ScanStaleCallbacksBeforeFree(const char* tag, HMODULE hMod) noexcept
     {
         if (!tag || !hMod)
-            return;
+            return 0;
         DWORD imageSize = 0;
         HANDLE snap = CreateToolhelp32Snapshot(
             TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
@@ -1039,7 +1040,7 @@ namespace
             CloseHandle(snap);
         }
         if (!imageSize)
-            return;
+            return 0;
 
         StaleCallbackScan s;
         s.pid = GetCurrentProcessId();
@@ -1078,6 +1079,7 @@ namespace
             s.marked,
             s.procInside,
             imageSize);
+        return s.procInside;
     }
     // #endregion
 
@@ -1699,26 +1701,58 @@ namespace
                 AuditGlassMessageWindowsBeforeFree(L"WndCompat", savedWnd,
                     kWndStopClasses, _countof(kWndStopClasses));
                 // #region agent log
-                // GLASS-ULTRACE (H91)
-                ScanStaleCallbacksBeforeFree("WndCompat", savedWnd);
+                // GLASS-ULTRACE (H91): эксперимент «не выгружать под живым указателем».
+                // GLASS_ULTRACE_WND_SAFE=1 → при наличии окна с WndProc внутри WndCompat
+                // FreeLibrary пропускается (модуль остаётся, крэша быть не должно).
+                const unsigned staleWndProcs = ScanStaleCallbacksBeforeFree("WndCompat", savedWnd);
+                bool skipWndFree = false;
+                if (staleWndProcs > 0)
+                {
+                    wchar_t safeFlag[16]{};
+                    skipWndFree =
+                        GetEnvironmentVariableW(L"GLASS_ULTRACE_WND_SAFE", safeFlag, _countof(safeFlag)) > 0;
+                }
+                if (skipWndFree)
+                {
+                    GlassUlTrace::Logf(
+                        "H91",
+                        "GlassCompat.cpp:ExecuteShutdown",
+                        "wnd_free_skipped",
+                        "\"stale_procs\":%u,\"env\":\"GLASS_ULTRACE_WND_SAFE\"",
+                        staleWndProcs);
+                }
+                else
+                {
+                    GlassUlTrace::Logf(
+                        "H91",
+                        "GlassCompat.cpp:ExecuteShutdown",
+                        "wnd_free_proceed",
+                        "\"stale_procs\":%u",
+                        staleWndProcs);
+                }
                 // #endregion
-                const unsigned rcWndBefore = GlassUlTrace::QueryLoadCount(savedWnd);
-                const BOOL wndFreed = FreeLibrary(savedWnd);
-                result |= UnloadResult::FreeWnd_Returned;
-                // #region agent log
-                // GLASS-ULTRACE
-                GlassUlTrace::Logf(
-                    "H88",
-                    "GlassCompat.cpp:ExecuteShutdown",
-                    "module_free",
-                    "\"module\":\"WndCompat\",\"base\":\"%p\",\"ok\":%d,\"owned\":1,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
-                    static_cast<void*>(savedWnd),
-                    wndFreed ? 1 : 0,
-                    rcWndBefore,
-                    GlassUlTrace::QueryLoadCountByName(L"WndCompat.dll"),
-                    GlassUlTrace::ModulePresentGmh(L"WndCompat.dll") ? 1 : 0,
-                    GlassUlTrace::ModulePresentToolhelp(L"WndCompat.dll") ? 1 : 0);
-                // #endregion
+                // GLASS-ULTRACE (H91): при skipWndFree модуль НЕ выгружается — логируем отдельно,
+                // чтобы rc_after в module_free не путался с «не выгрузилось из-за ссылки».
+                if (!skipWndFree)
+                {
+                    const unsigned rcWndBefore = GlassUlTrace::QueryLoadCount(savedWnd);
+                    const BOOL wndFreed = FreeLibrary(savedWnd);
+                    result |= UnloadResult::FreeWnd_Returned;
+                    // #region agent log
+                    // GLASS-ULTRACE
+                    GlassUlTrace::Logf(
+                        "H88",
+                        "GlassCompat.cpp:ExecuteShutdown",
+                        "module_free",
+                        "\"module\":\"WndCompat\",\"base\":\"%p\",\"ok\":%d,\"owned\":1,\"rc_before\":%u,\"rc_after\":%u,\"gmh\":%d,\"toolhelp\":%d",
+                        static_cast<void*>(savedWnd),
+                        wndFreed ? 1 : 0,
+                        rcWndBefore,
+                        GlassUlTrace::QueryLoadCountByName(L"WndCompat.dll"),
+                        GlassUlTrace::ModulePresentGmh(L"WndCompat.dll") ? 1 : 0,
+                        GlassUlTrace::ModulePresentToolhelp(L"WndCompat.dll") ? 1 : 0);
+                    // #endregion
+                }
             }
         }
 
