@@ -33,11 +33,13 @@ GlassSettings публикуется отдельно от solution после �
 
 ```bat
 :: x64
-msbuild GlassSettings\GlassSettings.csproj /p:Configuration=Debug /p:Platform=x64 /t:Publish /p:PublishProfile=win-x64
+msbuild GlassSettings\GlassSettings.csproj /p:Configuration=Debug /p:Platform=x64 /t:Publish /p:PublishProfile=win-x64 /p:GlassSettingsSkipPublishForMsi=true
 
 :: x86
-msbuild GlassSettings\GlassSettings.csproj /p:Configuration=Debug /p:Platform=x86 /t:Publish /p:PublishProfile=win-x86
+msbuild GlassSettings\GlassSettings.csproj /p:Configuration=Debug /p:Platform=x86 /t:Publish /p:PublishProfile=win-x86 /p:GlassSettingsSkipPublishForMsi=true
 ```
+
+Для Release флаг `GlassSettingsSkipPublishForMsi` обязателен: `Build` внутри `Publish` уже вызывает `GlassSettingsPublishForMsi`, а второй проход удаляет нативные DLL WASDK из каталога публикации.
 
 **Результат публикации:**
 - `Build\x64\Debug\GlassSettings\` — single-file exe + WASDK native DLLs

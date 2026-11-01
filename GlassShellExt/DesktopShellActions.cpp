@@ -7,6 +7,7 @@
 #include <GlassMessages.h>
 #include <GlassModulePath.h>
 #include <GlassPlatformTask.h>
+#include <GlassStop.h>
 #include <strsafe.h>
 #include <shlobj.h>
 
@@ -507,35 +508,29 @@ namespace GlassDesktopActions
         }
         else if (ui == GS::AutorunUiState::Running)
         {
-            // Сначала Stop: иначе Presence после TryBegin → IsLifecycleBusy(busy+Running
-            // без Stop) auto-clear'ит busy, и GS не блокирует кнопки на время unload.
-            (void)GS::SignalPlatformStop(arch);
-            if (!GS::TryBeginLifecycleBusy(arch))
-                return;
+            // R11: единый координатор. Signal+Busy идут в Request подряд (без Sleep),
+            // поэтому окно, в котором Presence auto-clear'ит busy, отсутствует.
+            // Из UI ждём долго: unload ShellHost идёт десятками секунд.
             const auto a = arch;
             std::thread([a]() noexcept {
-                const DWORD deadline = ::GetTickCount() + 45000u;
-                // Пока держим busy, Query==Stopping — ждём !Running и пустой sticky.
-                // Несколько пустых подряд: Module32 miss на idle ShellHost.
-                int emptyResidualStreak = 0;
-                while (::GetTickCount() < deadline)
+                Shared::GlassStop::Options options{};
+                options.reason = Shared::GlassStop::Reason::User;
+                options.gracefulMs = 45000u;
+                options.hostGoneMs = 15000u;
+                options.allowTaskStop = true;   // прежний StopOrphanAutorunTaskInstance
+                options.wakeResiduals = true;   // прежний WakeWinEventCallbackThreads
+                const Shared::GlassStop::Result r = Shared::GlassStop::Request(a, options);
+                GS::RefreshInjectResidualSticky(a);
+                if (!r.hostGone || r.residualProcesses != 0)
                 {
-                    if (!GS::IsGlassPlatformRunning(a))
-                    {
-                        (void)GS::StopOrphanAutorunTaskInstance(a);
-                        if (!GS::RefreshInjectResidualSticky(a))
-                        {
-                            if (++emptyResidualStreak >= 6)
-                                break;
-                        }
-                        else
-                        {
-                            emptyResidualStreak = 0;
-                        }
-                    }
-                    ::Sleep(250);
+                    // Хост не ушёл или остались процессы с нашими модулями: из UI важно
+                    // видеть, что поток дожима завершился, а не завис на ожидании.
+                    AppendShellLaunchLog(
+                        L"[GlassShellExt] stop finished: hostGone=%d residuals=%u ms=%lu",
+                        r.hostGone ? 1 : 0,
+                        r.residualProcesses,
+                        static_cast<unsigned long>(r.elapsedMs));
                 }
-                GS::EndLifecycleBusy(a);
             }).detach();
         }
     }

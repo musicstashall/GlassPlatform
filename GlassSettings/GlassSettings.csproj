@@ -95,6 +95,8 @@
   <PropertyGroup>
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
+    <!-- Single-file + R2R иначе включает composite и выкидывает нативные DLL WASDK из каталога публикации. -->
+    <PublishReadyToRunComposite>false</PublishReadyToRunComposite>
     <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
     <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
     <UiLanguageCatalogGeneratedFile>$(IntermediateOutputPath)UiLanguageCatalog.g.cs</UiLanguageCatalogGeneratedFile>
@@ -229,7 +231,10 @@
           IgnoreExitCode="true" />
   </Target>
 
-  <!-- Release: publish в Build\$(Platform)\Release\GlassSettings для MSI (после обычного Build). -->
+  <!-- Release: publish в Build\$(Platform)\Release\GlassSettings для MSI (после обычного Build).
+       Явный /t:Publish обязан передать GlassSettingsSkipPublishForMsi=true.
+       Иначе Build внутри Publish публикует каталог, а второй проход считает
+       single-file свежим и incremental clean удаляет нативные DLL WASDK. -->
   <Target Name="GlassSettingsPublishForMsi"
           AfterTargets="Build"
           Condition="'$(Configuration)' == 'Release' and '$(DesignTimeBuild)' != 'true' and '$(GlassSettingsSkipPublishForMsi)' != 'true' and Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">

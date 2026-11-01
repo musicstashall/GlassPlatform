@@ -2,6 +2,7 @@
 
 #include <GlassControlKind.h>
 #include <cstddef>
+#include <cstdint>
 
 namespace WndCompat::SubclassDiag
 {
@@ -11,4 +12,7 @@ namespace WndCompat::SubclassDiag
 
     /// Обнуляет статистику сабклассов в InjectMap (после DetachAll).
     void ClearAll() noexcept;
+
+    /// После DetachAll должно быть 0; иначе FreeLibrary(WndCompat) = stale proc → CFG fail-fast.
+    std::uint32_t Total() noexcept;
 }

@@ -31,4 +31,20 @@
 | Startup white flash | [docs/GlassSettings-startup-white-flash.md](docs/GlassSettings-startup-white-flash.md) |
 | Мастер ink (TextVisualTuning) | [docs/TextVisualTuningWizard.md](docs/TextVisualTuningWizard.md) |
 
+## Список процессов и остановка платформы
+
+- **Источник данных — карта инжекта и скан процессов** (`Services/InjectRuntimeMonitor.cs`),
+  без собственного кэша отвергнутых записей: карта закрылась — список очистился.
+- **Собственные инструменты не показываются:** `GlassSettings.exe` и `LogViewer.exe`
+  отфильтрованы во всех ветках сборки списка (`IsOwnToolProcess`). Хост платформы
+  (`rundll32` + `GlassCompat`) видим — он и есть предмет наблюдения, но в счётчик остатков
+  не входит.
+- **Выгрузка показывается постепенно:** строка не исчезает мгновенно, индикаторы модулей
+  гаснут по одному (`kFadeTicks`). Догорающие строки не считаются остатком.
+- **«Отвергнутые»** — процессы, которым гейт GlassCompat отказал в загрузке (бит
+  `ModuleCompat` в слоте карты).
+- **Остановка** идёт через общий координатор: `NativeHostInterop.RequestPlatformStop` →
+  `Shared::GlassStop` (`Reason::User`), после чего UI показывает остатки, если они есть.
+  См. [GlassShared/docs/stop-unification.md](../GlassShared/docs/stop-unification.md).
+
 См. также: [GlassCore/docs/glasscore-text.md](../GlassCore/docs/glasscore-text.md) (рендер текста / ink).

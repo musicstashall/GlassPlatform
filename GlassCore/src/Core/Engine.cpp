@@ -235,6 +235,7 @@ namespace GlassCore::Engine
             return;
 
         GlassCore::Animation::ShutdownHostExit();
+        BufferedPaintUnInit();
         GlassCore::Hooks::Uninstall();
         Shared::DXHelper::ReleaseAllLazyGraphicsResources();
         g_module = nullptr;

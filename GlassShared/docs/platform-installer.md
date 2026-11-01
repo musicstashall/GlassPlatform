@@ -1,8 +1,9 @@
-# Установщик платформы Glass (концепт)
+# Установщик платформы Glass: раскладка и реестр
 
 **Связанный код:** [`GlassSettings/Core/Platform/GlassModulePath.cs`](../../GlassSettings/Core/Platform/GlassModulePath.cs), [`GlassSettings/Core/Platform/PlatformInstallRegistry.cs`](../../GlassSettings/Core/Platform/PlatformInstallRegistry.cs), [`GlassShared/src/GlassModulePath.cpp`](../../GlassShared/src/GlassModulePath.cpp)
 
-Документ закрепляет целевую схему установки. Сами MSI в репозитории пока не собираются — это спецификация для будущего установщика и для текущего поиска модулей в GlassSettings.
+Документ описывает раскладку и реестровые ключи, которые используют собранные MSI (`Glass-x64`,
+`Glass-x86`, `GlassSettings-*`, `OpenGlass-x64`) и текущий поиск модулей в GlassSettings.
 
 ## Раскладка на диске (OS x64)
 
@@ -24,47 +25,51 @@ Program Files (x86)\GlassPlatform    ← x86
 
 ## Реестр: `InstallPath` и Wow6432Node
 
-Ключ: `Software\GlassPlatform`, значение `InstallPath` (REG_SZ). Ветка — **HKCU**. Это не ключ настроек `Software\StanislavKa\GlassPlatform`. Разделение x64/x86 — через **registry view** (Wow6432Node), не через подключи `x64`/`x86`.
+Ключ: `Software\GlassPlatform`. Актуальные значения — `InstallPathX64` и `InstallPathX86`
+(REG_SZ), основная ветка — **HKLM** в представлении своей разрядности
+(`KEY_WOW64_64KEY` для x64, `KEY_WOW64_32KEY` для x86). Это не ключ настроек
+`Software\StanislavKa\GlassPlatform`.
 
-### OS x64
+### Порядок чтения (`ReadPlatformInstallPath`, `PlatformInstallRegistry`)
 
-| Кто | Что пишет MSI | Физическое расположение | Кто читает |
-|-----|---------------|-------------------------|------------|
-| **x64 MSI** | `HKCU\Software\GlassPlatform\InstallPath` из 64-bit компонента | 64-bit view (без Wow6432Node) | GS x64 — native-модули из корня GS; этот ключ — путь установки x64 |
-| **x86 MSI** | `HKCU\Software\GlassPlatform\InstallPath` из **32-bit** компонента | Система перенаправляет в `HKCU\Software\Wow6432Node\GlassPlatform\InstallPath` | GS x86 — автоматически (WOW64); **GS x64 для модулей x86 — явно `Software\Wow6432Node\GlassPlatform`** |
+| Приоритет | Ветка и значение | Метка в журнале |
+|---|---|---|
+| 1 | `HKLM\Software\GlassPlatform\InstallPathX64` / `…\InstallPathX86` (view своей разрядности) | `HKLM(64) InstallPathX64` / `HKLM(32) InstallPathX86` |
+| 2 | `HKLM\Software\GlassPlatform\InstallPath` — прежняя схема | `HKLM(64) InstallPath` / `HKLM(32) InstallPath` |
+| 3 | `HKCU\Software\GlassPlatform\InstallPathX64` / `…\InstallPathX86` | `HKCU InstallPathX64` / `HKCU InstallPathX86` |
+| 4 | только x86 на OS x64: `HKCU\Software\Wow6432Node\GlassPlatform\InstallPath` | `HKCU Wow6432Node InstallPath` |
+| 5 | `HKCU\Software\GlassPlatform\InstallPath` | `HKCU InstallPath` |
 
-Два независимых `InstallPath` на одной машине: x64 в native HKCU, x86 в Wow6432Node. Они не перезаписывают друг друга.
+Правила:
 
-### OS x86
+- Машинная ветка всегда проверяется **до** пользовательской; фактические ветка и значение
+  пишутся в журнал (`Startup installation roots: …`), ничего не «исправляется» молча.
+- Признак «платформа arch установлена»: непустой путь и файл `<path>\GlassCompat.dll`.
+- Trailing slash нормализуется.
+- x86-процесс на OS x64 читает 32-битное представление (`KEY_WOW64_32KEY`), без ручного
+  `Wow6432Node` в пути.
 
-Wow6432Node нет. Единственный ключ: `HKCU\Software\GlassPlatform\InstallPath`.
+### OpenGlass
 
-### Правила чтения в коде (`PlatformInstallRegistry`)
+`HKLM\Software\StanislavKa\GlassPlatform\OpenGlassInstallPath`, затем тот же путь в HKCU,
+затем `HKCU\Software\StanislavKa\OpenGlass\InstallPath` (метка источника — в журнале).
 
-- **GS x86** (WOW64 / OS x86): `HKCU\Software\GlassPlatform` — ОС сама отдаёт 32-bit view на OS x64. **Не** открывать `Wow6432Node` из 32-bit процесса (двойное перенаправление).
-- **GS x64, native x64:** `HKCU\Software\GlassPlatform`.
-- **GS x64, cross-arch x86:** `HKCU\Software\Wow6432Node\GlassPlatform` — обязательно явный путь. 64-bit процесс без Wow6432Node прочитает x64-установку.
-- Признак «платформа arch установлена»: непустой `InstallPath` и файл `<path>\GlassCompat.dll`.
-- Trailing slash при чтении нормализуется.
-
-Поиск модулей Debug и Release одинаковый:
-
-| Процесс GS | Целевая arch | Install root |
-|------------|--------------|--------------|
-| GS x86 | x86 | корень GS (`AppContext.BaseDirectory`) |
-| GS x64 | x64 | корень GS |
-| GS x64 | x86 | `InstallPath` из Wow6432Node; нет ключа или нет `GlassCompat.dll` → модулей x86 нет |
-
-GlassCompat / LogViewer / инжект ищут peer-DLL **рядом со своим модулем** (свой install root), без реестра.
+Поиск модулей Debug и Release одинаковый: GlassCompat / LogViewer / инжект ищут peer-DLL
+**рядом со своим модулем** (свой install root), без реестра.
 
 ## MSI: запись реестра
 
-Два пакета (x86 и x64). Каждый кладёт файлы только своей битности и пишет только свой view.
+Два пакета платформы (x86 и x64). Каждый кладёт файлы только своей битности и пишет только
+свой view.
 
-- **x64-пакет:** компонент Registry в 64-bit view (`Win64="yes"`). Ключ в таблице: `Software\GlassPlatform`, значение `InstallPath` = `[INSTALLDIR]`.
-- **x86-пакет на OS x64:** 32-bit MSI, ключ в таблице тоже `Software\GlassPlatform` (без Wow6432Node в компоненте). Система перенаправляет запись в Wow6432Node. **Не** дублировать `Wow6432Node` руками в таблице Registry.
-- **Uninstall:** каждый MSI удаляет только свой ключ/view и свои файлы. Снятие x64 не трогает x86 и наоборот.
-- После установки проверить в `regedit`: native `HKCU\Software\GlassPlatform\InstallPath` и `HKCU\Software\Wow6432Node\GlassPlatform\InstallPath` — два разных пути.
+- **x64-пакет:** компонент Registry в 64-bit view (`Win64="yes"`), значения `InstallPathX64`
+  и (для совместимости) прежний `InstallPath`.
+- **x86-пакет на OS x64:** 32-bit MSI, тот же ключ в таблице, значения `InstallPathX86` /
+  `InstallPath`; система сама перенаправляет запись в 32-битное представление. **Не**
+  дублировать `Wow6432Node` руками в таблице Registry.
+- **Uninstall:** каждый MSI удаляет только свои значения/view и свои файлы.
+- Проверка после установки: `regedit` → `HKLM\Software\GlassPlatform` (значения
+  `InstallPathX64`/`InstallPathX86` в представлении своей разрядности).
 
 ## Задачи планировщика
 
@@ -97,7 +102,11 @@ SETTINGS_PRODUCT_CODE={…5074}
 
 (x86: `5072` / `5075`; OpenGlass — только `PRODUCT_CODE`).
 
-`GlassUnins` (`/MT`, Common Controls v6): копия в `%TEMP%`, `/fromtemp "<installDir>"`, стоп хоста + `/watchGlassModules`, затем `MsiConfigureProductExW` ABSENT для platform, затем для `SETTINGS_PRODUCT_CODE`.
+`GlassUnins` (`/MT`, Common Controls v6): копия в `%WINDIR%\Temp\GlassUnins-<guid>`, запуск
+`/fromtemp "<installDir>"`, остановка платформы через `Shared::GlassStop`
+(`Reason::Uninstaller`), затем `/watchGlassModules` и `MsiConfigureProductExW` ABSENT для
+platform, затем для `SETTINGS_PRODUCT_CODE`. После завершения работы копия и её каталог
+удаляются; хвосты прошлых запусков убираются при следующем старте (`Stale private copies`).
 
 Сборка WiX: `Build\GlassSetup\msi\$(Configuration)\$(ProjectName)\`, промежуточное — `Cache\$(ProjectName)\`.
 

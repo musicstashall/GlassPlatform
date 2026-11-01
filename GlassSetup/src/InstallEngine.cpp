@@ -478,9 +478,19 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             // Settings MSI is registered. Record changes before starting MSI so
             // cancellation or a scan failure takes the normal rollback path.
             if (ok && !self->IsCancelRequested()) ok = self->InstallGlassSettingsEarly();
-            // Even a fresh install can encounter orphaned modules from an
-            // older installation. Always monitor both OS architectures.
-            if (ok && !self->IsCancelRequested()) ok = self->ReleaseLockedModules();
+            // Clean install: on the machine there is neither a platform nor tasks,
+            // services or products that could have loaded Glass modules: nothing to
+            // scan, nothing to release. The stage is skipped (as requested): the scan
+            // used to open Process32/Module32 and, on a mixed x86/x64 machine, the
+            // native monitor, for nothing.
+            // If the picture is not clean, the stage still runs in full.
+            if (ok && !self->IsCancelRequested()) {
+                if (self->cleanInstall_) {
+                    InstallLog::Line(L"Unlocker: clean install - module scan skipped");
+                } else {
+                    ok = self->ReleaseLockedModules();
+                }
+            }
             if (ok && !self->IsCancelRequested() && self->forceClean_) {
                 self->installAttempted_ = true;
                 self->nonSettingsChangesAttempted_ = true;
@@ -875,7 +885,7 @@ bool InstallEngine::StopGlassPlatform(GP::PlatformArch arch, const std::wstring&
     }
     // Residual modules are monitored later in ReleaseLockedModules, with
     // their own visible status and unlock pages.
-    InstallLog::LineFormat(L"%s: stopped via Task Scheduler",logTag);
+    InstallLog::LineFormat(L"%s: host stopped",logTag);
     return true;
 }
 

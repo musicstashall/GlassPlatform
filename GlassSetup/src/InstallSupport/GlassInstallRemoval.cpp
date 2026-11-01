@@ -766,6 +766,18 @@ bool StopValidatedPlatformTask(GP::PlatformArch arch, const std::wstring& fixedR
     stopAttempted=false;
     error.clear();
     if (Cancelled(cancelled)) { SetLastError(ERROR_CANCELLED); return false; }
+    // Хост мог уйти по graceful-сигналу между проверкой «ровно один экземпляр» и этим
+    // вызовом. Тогда останавливать задачу нечего, и требование живого экземпляра дало бы
+    // ложную ошибку «не удалось однозначно связать с задачей» (прогон 16, x86).
+    {
+        HANDLE mutex=OpenMutexW(SYNCHRONIZE,FALSE,GP::InstanceMutexName(arch));
+        if (mutex) { CloseHandle(mutex); }
+        else if (GetLastError()==ERROR_FILE_NOT_FOUND) {
+            GlassInstallLog::LineFormat(L"HostStop: %s gone before task stop; nothing to stop",
+                GP::GlassAutorunTaskName(arch));
+            return true;
+        }
+    }
     if (!ValidatePlatformTask(arch,fixedRoot,true,true,russian,error)) return false;
     if (Cancelled(cancelled)) { SetLastError(ERROR_CANCELLED); return false; }
 

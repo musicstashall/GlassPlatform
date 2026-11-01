@@ -10,3 +10,4 @@
 |--------|----------|
 | GDI и альфа | [docs/gdi-alpha.md](docs/gdi-alpha.md) |
 | InstallPath x86/x64, Wow6432Node | [docs/platform-installer.md](docs/platform-installer.md) |
+| Остановка платформы, `Shared::GlassStop` | [docs/stop-unification.md](docs/stop-unification.md) |

@@ -1,4 +1,4 @@
-#include "CompatPch.h"
+﻿#include "CompatPch.h"
 #include "GlassCompat.h"
 #include <windows.h>
 #include <dwmapi.h>
@@ -12,6 +12,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdarg>
+#include <cstdint>
+#include <cstring>
 
 #include <DebugLog.h>
 
@@ -33,6 +35,8 @@
 #include "CrashGuard.h"
 #include "ShortLivedAgent.h"
 #include <RootBackdropPolicy.h>
+#include <GlassModuleRefCount.h>
+#include <GlassControlKind.h>
 
 // Определён в EXPORTS ниже; watcher polling (H54 WPM).
 extern "C" __declspec(dllexport) volatile LONG GlassCompat_CwForceUnloadFlag;
@@ -863,6 +867,274 @@ namespace
         }
     }
 
+    // выгружаемого модуля. Важно: один только GWLP_WNDPROC ничего не показывает, если субкласс
+    // ставился через SetWindowSubclass — тогда GWLP_WNDPROC = thunk comctl32, а наши проки лежат
+    // в цепочке comctl32 (property "UxSubclassInfo"). Дамп explorer 39284: CFG fail-fast,
+    // цель = WndCompat+0x194240, стек через comctl32 thunk, но proc_inside=0 — ложный «чисто».
+    struct ModuleRangeUl
+    {
+        std::uintptr_t base{};
+        std::uintptr_t end{};
+        wchar_t name[MAX_PATH]{};
+    };
+
+    constexpr unsigned kMaxModuleRanges = 512;
+    ModuleRangeUl g_moduleRangesUl[kMaxModuleRanges]{};
+    unsigned g_moduleRangeCountUl = 0;
+
+    void RefreshModuleRangesUl() noexcept
+    {
+        g_moduleRangeCountUl = 0;
+        HANDLE snap = CreateToolhelp32Snapshot(
+            TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
+        if (snap == INVALID_HANDLE_VALUE)
+            return;
+        MODULEENTRY32W me{};
+        me.dwSize = sizeof(me);
+        if (Module32FirstW(snap, &me))
+        {
+            do
+            {
+                if (g_moduleRangeCountUl >= kMaxModuleRanges)
+                    break;
+                auto& r = g_moduleRangesUl[g_moduleRangeCountUl++];
+                r.base = reinterpret_cast<std::uintptr_t>(me.hModule);
+                r.end = r.base + me.modBaseSize;
+                wcsncpy_s(r.name, me.szModule, _TRUNCATE);
+            } while (Module32NextW(snap, &me));
+        }
+        CloseHandle(snap);
+    }
+
+    [[nodiscard]] const ModuleRangeUl* FindModuleRangeUl(const void* proc) noexcept
+    {
+        const auto a = reinterpret_cast<std::uintptr_t>(proc);
+        for (unsigned i = 0; i < g_moduleRangeCountUl; ++i)
+        {
+            if (a >= g_moduleRangesUl[i].base && a < g_moduleRangesUl[i].end)
+                return &g_moduleRangesUl[i];
+        }
+        return nullptr;
+    }
+
+    // Безопасное чтение чужой (comctl32) структуры: только committed-память, под SEH.
+    bool TryReadBlobUl(const void* p, size_t bytes, unsigned long long* out, unsigned maxOut, unsigned& outCount) noexcept
+    {
+        outCount = 0;
+        if (!p || !bytes || !out || !maxOut)
+            return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(p, &mbi, sizeof(mbi)) == 0 || mbi.State != MEM_COMMIT)
+            return false;
+        if ((mbi.Protect & PAGE_NOACCESS) || (mbi.Protect & PAGE_GUARD))
+            return false;
+        const auto regionEnd =
+            reinterpret_cast<std::uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        const auto start = reinterpret_cast<std::uintptr_t>(p);
+        size_t avail = regionEnd > start ? static_cast<size_t>(regionEnd - start) : 0;
+        size_t n = (bytes < avail ? bytes : avail) / sizeof(unsigned long long);
+        if (n > maxOut)
+            n = maxOut;
+        if (!n)
+            return false;
+        __try
+        {
+            memcpy(out, p, n * sizeof(unsigned long long));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        outCount = static_cast<unsigned>(n);
+        return true;
+    }
+
+    // H91: «внутри диапазона модуля» — ещё не обязательно прок. В blob'е comctl32-цепочки
+    // (и в dwRefData/vtable) лежат указатели на ДАННЫЕ модуля. Настоящий прок обязан лежать
+    // на исполняемой странице: без этого фильтра prop_inside давал 204 «хита» и не позволял
+    // отличить реальную опасность от шума (прогон R2b, explorer 29784).
+    bool IsCodePtrInRangeUl(std::uintptr_t a, std::uintptr_t begin, std::uintptr_t end) noexcept
+    {
+        if (a < begin || a >= end)
+            return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(reinterpret_cast<const void*>(a), &mbi, sizeof(mbi)) == 0)
+            return false;
+        if (mbi.State != MEM_COMMIT)
+            return false;
+        const DWORD prot = mbi.Protect & 0xFFu;
+        return prot == PAGE_EXECUTE || prot == PAGE_EXECUTE_READ ||
+               prot == PAGE_EXECUTE_READWRITE || prot == PAGE_EXECUTE_WRITECOPY;
+    }
+
+    struct StaleCallbackScan
+    {
+        DWORD pid{};
+        std::uintptr_t begin{};
+        std::uintptr_t end{};
+        unsigned windows{};
+        unsigned marked{};
+        unsigned procInside{};      // GWLP_WNDPROC внутри модуля
+        unsigned propInside{};      // любые значения цепочки comctl32 внутри модуля (шумно)
+        unsigned propCodeInside{};  // из них на исполняемых страницах = реальные проки
+        unsigned markedLogged{};
+        unsigned details{};
+        const char* tag{""};
+    };
+
+    void LogMarkedWindowUl(StaleCallbackScan& s, HWND hwnd, GlassShared::GlassControlKind kind,
+        LONG_PTR proc, const HANDLE subclassProp) noexcept
+    {
+        (void)s;
+        (void)hwnd;
+        (void)kind;
+        (void)proc;
+        (void)subclassProp;
+    }
+
+    void NoteWindowCandidate(StaleCallbackScan& s, HWND hwnd) noexcept
+    {
+        DWORD wndPid = 0;
+        (void)GetWindowThreadProcessId(hwnd, &wndPid);
+        if (wndPid != s.pid)
+            return;
+        ++s.windows;
+
+        const LONG_PTR procRaw = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
+        const auto proc = static_cast<std::uintptr_t>(procRaw);
+
+        // Цепочка субклассов comctl32 (SetWindowSubclass): property = указатель на структуру
+        // с {uIdSubclass, pfnSubclass, dwRefData}[]. Точный layout версионный, поэтому
+        // ищем не по полям, а по значениям внутри диапазона модуля.
+        const HANDLE subclassProp = GetPropW(hwnd, L"UxSubclassInfo");
+        unsigned propHits = 0;
+        unsigned propCodeHits = 0;
+        if (subclassProp)
+        {
+            unsigned long long words[48]{};
+            unsigned got = 0;
+            if (TryReadBlobUl(subclassProp, sizeof(words), words, _countof(words), got))
+            {
+                for (unsigned i = 0; i < got; ++i)
+                {
+                    const auto v = static_cast<std::uintptr_t>(words[i]);
+                    if (v < s.begin || v >= s.end)
+                        continue;
+                    ++propHits;
+                    if (IsCodePtrInRangeUl(v, s.begin, s.end))
+                        ++propCodeHits;
+                }
+            }
+        }
+
+        const auto kind = GlassShared::GlassGetWindowKind(hwnd);
+        if (kind != GlassShared::GlassControlKind::None)
+        {
+            ++s.marked;
+            if (s.markedLogged < 16)
+            {
+                ++s.markedLogged;
+                LogMarkedWindowUl(s, hwnd, kind, procRaw, subclassProp);
+            }
+        }
+
+        const bool gwlpInside = (proc >= s.begin && proc < s.end);
+        if (gwlpInside)
+            ++s.procInside;
+        if (propHits)
+            s.propInside += propHits;
+        if (propCodeHits)
+            s.propCodeInside += propCodeHits;
+
+        if (!gwlpInside && !propHits)
+            return;
+        if (s.details >= 12)
+            return;
+        ++s.details;
+    }
+
+    // R12: EnumChildWindows сам рекурсивно обходит всё поддерево и вызывает callback на
+    // каждого потомка. Раньше в callback'е повторно вызывался EnumChildWindows — получался
+    // повторный обход на каждой глубине (прогон 12: mmc.exe → windows=924992 при 184
+    // реальных окнах, 22 с на один скан, выгрузка «замирала»). Теперь callback только
+    // отмечает окно.
+    BOOL CALLBACK ScanChildWindowCb(HWND hwnd, LPARAM lp) noexcept
+    {
+        NoteWindowCandidate(*reinterpret_cast<StaleCallbackScan*>(lp), hwnd);
+        return TRUE;
+    }
+
+    BOOL CALLBACK ScanWindowProcCb(HWND hwnd, LPARAM lp) noexcept
+    {
+        auto* s = reinterpret_cast<StaleCallbackScan*>(lp);
+        NoteWindowCandidate(*s, hwnd);
+        (void)EnumChildWindows(hwnd, ScanChildWindowCb, lp);
+        return TRUE;
+    }
+
+    BOOL CALLBACK ScanThreadWindowCb(HWND hwnd, LPARAM lp) noexcept
+    {
+        NoteWindowCandidate(*reinterpret_cast<StaleCallbackScan*>(lp), hwnd);
+        // Window'ы не-GUI потоков EnumWindows не видит; их детей обходим явно.
+        (void)EnumChildWindows(hwnd, ScanChildWindowCb, lp);
+        return TRUE;
+    }
+
+    // R5b (прогон 6, explorer 20124): AV 0xC0000005 в Windows.UI.Xaml.dll+0x8E122,
+    // чтение по адресу 0x7FF91E2BFBB0 — вне списка модулей (уже размотанный образ).
+    // Точный модуль не определить без его размера, поэтому размер пишем в module_free:
+    // при следующем падении адрес из дампа сверяется с [base, base+size).
+    // Возвращает число найденных «живых» указателей на код модуля (GWLP + comctl32-цепочка).
+    unsigned ScanStaleCallbacksBeforeFree(const char* tag, HMODULE hMod) noexcept
+    {
+        if (!tag || !hMod)
+            return 0;
+        RefreshModuleRangesUl();
+
+        DWORD imageSize = 0;
+        for (unsigned i = 0; i < g_moduleRangeCountUl; ++i)
+        {
+            if (g_moduleRangesUl[i].base == reinterpret_cast<std::uintptr_t>(hMod))
+            {
+                imageSize = static_cast<DWORD>(g_moduleRangesUl[i].end - g_moduleRangesUl[i].base);
+                break;
+            }
+        }
+        if (!imageSize)
+            return 0;
+
+        StaleCallbackScan s;
+        s.pid = GetCurrentProcessId();
+        s.begin = reinterpret_cast<std::uintptr_t>(hMod);
+        s.end = s.begin + imageSize;
+        s.tag = tag;
+
+        (void)EnumWindows(ScanWindowProcCb, reinterpret_cast<LPARAM>(&s));
+
+        // Message-only и окна не-GUI потоков EnumWindows не отдаёт.
+        HANDLE threads = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (threads != INVALID_HANDLE_VALUE)
+        {
+            THREADENTRY32 te{};
+            te.dwSize = sizeof(te);
+            if (Thread32First(threads, &te))
+            {
+                do
+                {
+                    if (te.th32OwnerProcessID != s.pid)
+                        continue;
+                    (void)EnumThreadWindows(
+                        te.th32ThreadID, ScanThreadWindowCb, reinterpret_cast<LPARAM>(&s));
+                } while (Thread32Next(threads, &te));
+            }
+            CloseHandle(threads);
+        }
+
+        // Реальная опасность = наш КОД в GWLP или в comctl32-цепочке. prop_inside без фильтра
+        // по исполняемым страницам содержит указатели на данные и как критерий не годится.
+        return s.procInside + s.propCodeInside;
+    }
+
     // HWND_MESSAGE-классы наших DLL (источники stale WndProc при выгрузке).
     static const wchar_t* const kExplorerStopClasses[] = {
         ExplorerCompatMsg::kExplorerXamlShutdownWndClass,
@@ -879,9 +1151,30 @@ namespace
         L"WndCompat.ControlWindow",
     };
 
+    // R6 (H96): подтверждение «наш ExecuteShutdown в этом процессе выполнялся».
+    // Хост (CoreWindowHostInject::ShutdownAckUl) читает его как разрешение на raw
+    // CreateRemoteThread(FreeLibrary) в этом процессе: только тогда мы знаем, что
+    // UnhookWinEvent/скан колбэков уже прошли и OS не держит указатель на наш код.
+    // Процессы, куда GlassCompat попал лишь через WINEVENT_INCONTEXT-инжект user32,
+    // ack не создают — их добивать нельзя (прогон 6, pid 35444: AV в выгруженном
+    // GlassCompat после sweep'а). Объект живёт до конца процесса (handle не закрываем).
+    static void CreateShutdownAckUl() noexcept
+    {
+        static HANDLE s_ack = nullptr;
+        static bool s_created = false;
+        if (s_created)
+            return;
+        s_created = true;
+        wchar_t name[80]{};
+        swprintf_s(name, L"Local\\GlassCompat_ShutdownDone_%lu",
+            static_cast<unsigned long>(GetCurrentProcessId()));
+        s_ack = CreateMutexW(nullptr, FALSE, name);
+    }
+
     void ExecuteShutdown()
     {
         g_initDone.store(false, std::memory_order_release);
+        CreateShutdownAckUl();
 
         DWORD pid = GetCurrentProcessId();
         DebugLog(L"[GlassCompat][Core] ExecuteShutdown: BEGIN");
@@ -926,10 +1219,11 @@ namespace
                     Shared::InjectProcessMap::ShutdownPhaseUiDetaching);
                 DebugLog(L"[GlassCompat][Core] [Shutdown] Calling UICompat_Shutdown");
                 (void)pUiShutdown();
+                int waitedMs = 0;
+                int complete = 0;
                 if (pUiIsShutdownComplete)
                 {
                     constexpr int kUiShutdownWaitMs = 1500;
-                    int waitedMs = 0;
                     while (waitedMs < kUiShutdownWaitMs)
                     {
                         if (pUiIsShutdownComplete())
@@ -937,6 +1231,7 @@ namespace
                         Sleep(50);
                         waitedMs += 50;
                     }
+                    complete = pUiIsShutdownComplete() ? 1 : 0;
                 }
                 (void)Shared::InjectProcessMap::TrySetShutdownPhase(
                     GetCurrentProcessId(),
@@ -956,10 +1251,11 @@ namespace
             {
                 DebugLog(L"[GlassCompat][Core] [Shutdown] Calling TaskbarCompat_Shutdown (before ExplorerCompat)");
                 (void)pTaskbarShutdown();
+                int waitedMs = 0;
+                int complete = 0;
                 if (pTaskbarIsShutdownComplete)
                 {
                     constexpr int kTaskbarShutdownWaitMs = 1500;
-                    int waitedMs = 0;
                     while (waitedMs < kTaskbarShutdownWaitMs)
                     {
                         if (pTaskbarIsShutdownComplete())
@@ -967,11 +1263,12 @@ namespace
                         Sleep(50);
                         waitedMs += 50;
                     }
+                    complete = pTaskbarIsShutdownComplete() ? 1 : 0;
                     DebugLog(
                         DBG_IMPORTANT,
                         L"[GlassCompat][Core] [Shutdown] TaskbarCompat wait: waitedMs=%d complete=%d",
                         waitedMs,
-                        pTaskbarIsShutdownComplete() ? 1 : 0);
+                        complete);
                 }
             }
         }
@@ -1183,6 +1480,18 @@ namespace
             {
                 AuditGlassMessageWindowsBeforeFree(L"ExplorerCompat", savedExplorer,
                     kExplorerStopClasses, _countof(kExplorerStopClasses));
+                const unsigned staleExplorer = ScanStaleCallbacksBeforeFree("ExplorerCompat", savedExplorer);
+                if (staleExplorer > 0)
+                {
+                    // H91: указатели на код модуля ещё лежат в чужих окнах — выгрузка
+                    // превратила бы их в висячие. Оставляем модуль жить до снятия ссылок.
+                    DebugLog(
+                        DBG_IMPORTANT,
+                        L"[GlassCompat][Core] [Shutdown] ExplorerCompat kept: stale callbacks in %u windows",
+                        staleExplorer);
+                }
+                else
+                {
                 FreeLibrary(savedExplorer);
                 result |= UnloadResult::FreeExplorer_Returned;
                 HMODULE hCheckEx = GetModuleHandleW(L"ExplorerCompat.dll");
@@ -1216,12 +1525,29 @@ namespace
                         hCheckEx2 ? L"STILL LOADED" : L"unloaded OK",
                         residualDropped ? 1 : 0);
                 }
+                } // else (keepModules guard)
             }
             if (savedTaskbar)
             {
                 DebugLog(L"[GlassCompat][Core] [Shutdown] FreeLibrary TaskbarCompat");
                 AuditGlassMessageWindowsBeforeFree(L"TaskbarCompat", savedTaskbar,
                     kTaskbarStopClasses, _countof(kTaskbarStopClasses));
+                // R5b: та же защита, что для WndCompat/ExplorerCompat. Раньше TaskbarCompat и
+                // UICompat выгружались вообще без скана. Падение в XAML (см. комментарий у
+                // ImageSizeUl) указывает именно на «размотали модуль, а указатель на него
+                // остался в чужом коде».
+                const unsigned staleTaskbar =
+                    ScanStaleCallbacksBeforeFree("TaskbarCompat", savedTaskbar);
+                if (staleTaskbar > 0)
+                {
+                    // H91: то же, что для ExplorerCompat — без снятия ссылок модуль не выгружаем.
+                    DebugLog(
+                        DBG_IMPORTANT,
+                        L"[GlassCompat][Core] [Shutdown] TaskbarCompat kept: stale callbacks in %u windows",
+                        staleTaskbar);
+                }
+                else
+                {
                 FreeLibrary(savedTaskbar);
                 CoFreeUnusedLibraries();
                 constexpr int kTaskbarReclaimWaitMs = 2000;
@@ -1270,6 +1596,7 @@ namespace
                         DBG_IMPORTANT,
                         L"[GlassCompat][Core] [Shutdown] TaskbarCompat final unload state: unloaded OK");
                 }
+                } // else (keepModules/stale guard)
             }
             if (savedUICompat)
             {
@@ -1277,6 +1604,17 @@ namespace
                 DebugLog(L"[GlassCompat][Core] [Shutdown] FreeLibrary UICompat");
                 AuditGlassMessageWindowsBeforeFree(L"UICompat", savedUICompat,
                     kUiStopClasses, _countof(kUiStopClasses));
+                const unsigned staleUi = ScanStaleCallbacksBeforeFree("UICompat", savedUICompat);
+                if (staleUi > 0)
+                {
+                    // H91: то же, что для ExplorerCompat — без снятия ссылок модуль не выгружаем.
+                    DebugLog(
+                        DBG_IMPORTANT,
+                        L"[GlassCompat][Core] [Shutdown] UICompat kept: stale callbacks in %u windows",
+                        staleUi);
+                }
+                else
+                {
                 FreeLibrary(savedUICompat);
                 const bool cwUiHost = Shared::RootBackdropPolicy::IsCoreWindowHostProcess();
 
@@ -1347,13 +1685,19 @@ namespace
                     L"[GlassCompat][Core] [Shutdown] UICompat after residual reclaim: %s (dropped=%d)",
                     hCheckUi ? L"STILL LOADED" : L"unloaded OK",
                     residualDropped ? 1 : 0);
+                } // else (keepModules/stale guard)
             }
             if (savedWnd)
             {
                 AuditGlassMessageWindowsBeforeFree(L"WndCompat", savedWnd,
                     kWndStopClasses, _countof(kWndStopClasses));
-                FreeLibrary(savedWnd);
-                result |= UnloadResult::FreeWnd_Returned;
+                // H91: не unmap WndCompat, пока скан видит наш код в GWLP/comctl32-цепочке.
+                const unsigned staleWndProcs = ScanStaleCallbacksBeforeFree("WndCompat", savedWnd);
+                if (staleWndProcs == 0)
+                {
+                    (void)FreeLibrary(savedWnd);
+                    result |= UnloadResult::FreeWnd_Returned;
+                }
             }
         }
 
@@ -1794,8 +2138,6 @@ namespace
         else
         {
             g_hCore = corePath.empty() ? nullptr : LoadOptionalModule(corePath, L"GlassCore");
-            const DWORD coreLoadGle = g_hCore ? 0 : GetLastError();
-            (void)coreLoadGle;
 
             wchar_t thPath[MAX_PATH]{};
             const HMODULE thCore = FindModuleViaToolhelp(L"GlassCore.dll", thPath, MAX_PATH);
@@ -2104,7 +2446,20 @@ namespace
 
         DrainBeforeFreeSelf();
 
-
+        // H82: если loader-refcount выше наших пинов — deferred OS-free ещё не доставлен.
+        // Короткий wake, чтобы idle/PLM успели снять ссылку до FLAET.
+        const unsigned ownRefs = 1u + (hadRemotePin ? 1u : 0u);
+        unsigned rcBeforeFlaet = Shared::ModuleRef::QueryLoadCount(hSelfRef);
+        if (rcBeforeFlaet > ownRefs)
+        {
+            const ULONGLONG waitT0 = GetTickCount64();
+            while (rcBeforeFlaet > ownRefs && GetTickCount64() - waitT0 < 1200)
+            {
+                (void)WakeAllProcessThreadsWmNull();
+                Sleep(150);
+                rcBeforeFlaet = Shared::ModuleRef::QueryLoadCount(hSelfRef);
+            }
+        }
         FreeLibraryAndExitThread(hSelfRef, 0);
     }
 
@@ -2148,7 +2503,6 @@ namespace
         // удалила) — Fallback: периодически проверяем ReadHostPid(). Когда хост
         // завершился и PID исчез, инициируем shutdown самостоятельно.
         HANDLE hPlatformStop = OpenEventW(SYNCHRONIZE, FALSE, kStopEventName);
-        const DWORD gleStop = hPlatformStop ? 0u : GetLastError();
         HANDLE hUnloadRequest = Shared::InjectProcessMap::CreateUnloadRequestEvent(nullptr);
         // H71: HostShutdown открываем СРАЗУ (как BlockList watcher), не после ExecuteShutdown.
         // H70 OpenEvent после COMPLETE → часто WAIT_FAILED: хост уже CloseHostShutdownEvent
@@ -2157,7 +2511,6 @@ namespace
             SYNCHRONIZE,
             FALSE,
             GlassShared::GlassPlatformTask::kHostShutdownEventName);
-        const DWORD gleHostShutdown = hHostShutdownEarly ? 0u : GetLastError();
         // Dead-man switch хоста: живой хост владеет мьютексом всегда, поэтому любой
         // успешный захват (WAIT_OBJECT_0 или WAIT_ABANDONED) означает его смерть.
         // Закрывает дыру, из-за которой CoreWindow-процессы не выгружались после
@@ -2276,7 +2629,9 @@ namespace
             {
                 const DWORD stopWr = WaitForSingleObject(hPlatformStop, 0);
                 if (stopWr == WAIT_OBJECT_0)
+                {
                     break;
+                }
                 // H54: битый handle в AppContainer — переоткрыть named Stop.
                 if (stopWr == WAIT_FAILED)
                 {
@@ -2285,7 +2640,7 @@ namespace
                     if (hPlatformStop &&
                         WaitForSingleObject(hPlatformStop, 0) == WAIT_OBJECT_0)
                     {
-                        break;
+                            break;
                     }
                 }
             }
@@ -2297,8 +2652,8 @@ namespace
                 break;
             }
 
-            // Heartbeat NDJSON убран с GUI-потока: CreateFile в AppContainer мог
-            // блокировать poll Stop (H54: последний hb SEH, затем нет loop_exit).
+            // Файловых операций на GUI-потоке нет: CreateFile в AppContainer мог
+            // блокировать poll Stop (H54: процесс замирал до таймаута).
 
             // Per-PID unload: MsgWait на auto-reset УЖЕ снимает сигнал — нельзя откладывать на poll (H1).
             auto handlePerPidUnload = [&](bool alreadySignaled) -> bool
@@ -2359,7 +2714,9 @@ namespace
             };
 
             if (handlePerPidUnload(false))
+            {
                 break;
+            }
 
             TryOpenReloadRenderSync(
                 hReloadSemaphore, hReloadGenMap, hReloadFlagsMap,
@@ -2433,7 +2790,9 @@ namespace
                 if (i == unloadIdx)
                 {
                     if (handlePerPidUnload(true))
-                        break;
+                    {
+                                break;
+                    }
                     continue;
                 }
                 if (i == reloadIdx)
@@ -2733,7 +3092,10 @@ namespace
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
-            if (quit) break;
+            if (quit)
+            {
+                break;
+            }
 
             // MsgWait при непустой очереди возвращает "есть сообщения" и НЕ сообщает
             // о сигнале wait-объектов. После drain обязательно проверяем StopEvent.
@@ -2769,7 +3131,7 @@ namespace
                     {
                         shutdownByHostLiveness = true;
                         hostDeadReason = lr;
-                        DebugLog(DBG_IMPORTANT,
+                            DebugLog(DBG_IMPORTANT,
                             L"[GlassCompat][HostWatch] host dead detected: reason=%s pid=%lu",
                             HostLivenessReasonToString(lr),
                             static_cast<unsigned long>(hostWatchPid));
@@ -2863,7 +3225,9 @@ namespace
         {
             if (hHostShutdownEarly)
             {
-                if (WaitForSingleObject(hHostShutdownEarly, 0) != WAIT_OBJECT_0)
+                // здесь процесс висит 30 с, держа GlassCompat (наблюдение «модуль остался»).
+                const BOOL already = (WaitForSingleObject(hHostShutdownEarly, 0) == WAIT_OBJECT_0);
+                if (!already)
                     (void)WaitForSingleObject(hHostShutdownEarly, 30000);
                 CloseHandle(hHostShutdownEarly);
                 hHostShutdownEarly = nullptr;
@@ -2973,6 +3337,7 @@ namespace
                         CloseHandle(hStop);
                     if (hForce)
                         CloseHandle(hForce);
+
 
                     // HR3: сначала WM_QUIT, потом лог — CreateFile в AC раньше
                     // блокировал PostThreadMessage (нет stop_seen / residual SEH).
@@ -3119,24 +3484,67 @@ namespace
 
     void StartMinimalUnloadWatcher(ULONGLONG path) noexcept
     {
+        // R12c: регистрация слота отделена от создания потока. Раньше всё лежало внутри
+        // std::call_once, и первый вызов (страховка path=4 из DllMain) навсегда «съедал»
+        // право записать более точный путь. Из-за этого процессы из ProcessBlockList и
+        // Forbidden больше не помечались Rejected* и пропадали из списка «отвергнутых».
+        // Теперь поток создаётся один раз, а слот уточняется при каждом обращении
+        // (path=2/3 перекрывает path=4, обратное — нет).
+        {
+            bool hasSlot = false;
+            Shared::InjectProcessMap::Slot slotProbe{};
+            {
+                static Shared::InjectProcessMap::Slot s_slots[Shared::InjectProcessMap::kSlotCount];
+                DWORD slotCount = 0;
+                if (Shared::InjectProcessMap::TryReadSlots(
+                        s_slots, Shared::InjectProcessMap::kSlotCount, &slotCount))
+                {
+                    const DWORD self = GetCurrentProcessId();
+                    for (DWORD i = 0; i < slotCount; ++i)
+                    {
+                        if (s_slots[i].pid == self)
+                        {
+                            hasSlot = true;
+                            slotProbe = s_slots[i];
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // path=4 пишет только «записи нет вовсе»; 2/3 — точнее страховки и перекрывают её.
+            const bool watcherOnly = (path == 4);
+            const bool slotIsRejected =
+                hasSlot && (slotProbe.kind == Shared::InjectProcessMap::Kind::RejectedBlockList
+                            || slotProbe.kind == Shared::InjectProcessMap::Kind::RejectedForbidden);
+            const bool needWrite = !hasSlot || (!watcherOnly && !slotIsRejected);
+
+            if (needWrite)
+            {
+                const auto kind = watcherOnly
+                    ? Shared::InjectProcessMap::Kind::ActiveGui
+                    : ((path == 3) ? Shared::InjectProcessMap::Kind::RejectedForbidden
+                                   : Shared::InjectProcessMap::Kind::RejectedBlockList);
+                InjectMapUpsert(
+                    kind,
+                    static_cast<std::uint8_t>(watcherOnly ? 1 : path),
+                    Shared::InjectProcessMap::State::Alive,
+                    watcherOnly ? CurrentModuleBits()
+                                : Shared::InjectProcessMap::ModuleCompat);
+            }
+        }
+
         static std::once_flag s_minimalUnloadOnce;
         std::call_once(s_minimalUnloadOnce, [path]() noexcept
         {
-            const auto kind = (path == 3)
-                ? Shared::InjectProcessMap::Kind::RejectedForbidden
-                : Shared::InjectProcessMap::Kind::RejectedBlockList;
-            InjectMapUpsert(
-                kind,
-                static_cast<std::uint8_t>(path),
-                Shared::InjectProcessMap::State::Alive,
-                Shared::InjectProcessMap::ModuleCompat);
-
             HMODULE hRef = nullptr;
             if (!GetModuleHandleExW(
                     GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                     reinterpret_cast<LPCWSTR>(&StartMinimalUnloadWatcher),
                     &hRef))
+            {
                 return;
+            }
 
             auto* pack = new (std::nothrow) MinimalUnloadPack{ hRef, path };
             if (!pack)
@@ -3209,7 +3617,7 @@ namespace
                         {
                             // Передать сигнал следующему ожидающему процессу.
                             (void)ReleaseMutex(hHostAlive);
-                        }
+                                }
 
                         const wchar_t* trigger = L"stop";
                         if (wr == WAIT_FAILED)
@@ -3229,6 +3637,14 @@ namespace
                             CloseHandle(hStop);
                         if (hUnload)
                             CloseHandle(hUnload);
+
+                        // R12: path=4 — страховка на случай, когда Initialize не приходил.
+                        // Если за это время GUI-поток всё-таки поднялся, выгрузкой
+                        // занимается он; watcher отдаёт свою pin-ссылку и уходит.
+                        if (watcherPath == 4 && g_guiThreadId != 0)
+                        {
+                            FreeLibraryAndExitThread(hMod, 0);
+                        }
 
                         (void)Shared::InjectProcessMap::TrySetState(
                             GetCurrentProcessId(),
@@ -3332,11 +3748,13 @@ namespace
             &g_guiThreadId
         );
 
-        const DWORD createThreadError = g_guiThreadHandle ? ERROR_SUCCESS : GetLastError();
-
         if (!g_guiThreadHandle)
         {
             DebugLog(L"[GlassCompat][Core] FAILED to create GlassGuiThread");
+            // R11/5.2: без GUI-потока у процесса не было бы ни ожидания StopEvent,
+            // ни abandoned HostAlive — DLL осталась бы висеть до смерти процесса.
+            // MinimalUnloadWatcher даёт liveness-ожидание любому процессу с нашей DLL.
+            StartMinimalUnloadWatcher(1);
         }
         else
         {
@@ -3364,6 +3782,9 @@ namespace GlassCompat
 
         g_hSelf = hSelf ? hSelf : GetModuleHandleW(L"GlassCompat.dll");
         g_mode = ReadModeFromRegistry();
+
+        // R12: видно, доходил ли процесс до Initialize. В прогоне 12 DllHost 32120 имел
+        // attach_gate + pin_acq и дальше тишину — ни лога о причине, ни watcher'а.
 
         ProcessBlockList::Initialize();
         if (ProcessBlockList::IsBlocked(GetProcessNameLower()))
@@ -3394,8 +3815,55 @@ namespace GlassCompat
 
         StartGuiThreadIfNeeded();
 
+
         DebugLog(L"[GlassCompat][Core] Initialize: END");
         return true;
+    }
+
+    // R12: процесс получил DLL (обычно через глобальный WinEvent-хук), но WinEventProc
+    // ещё ни разу не вызывался — GlassCompat::Initialize не выполнялся, значит нет ни
+    // GUI-потока, ни minimal watcher'а. После стопа такой процесс не выгрузит модули
+    // никогда (прогон 12: DllHost 32120 — attach_gate + pin_acq и тишина до конца лога).
+    // Ставим watcher path=4 здесь же: он ждёт StopEvent/HostAlive и выгружает модуль.
+    void EnsureAttachWatcher() noexcept
+    {
+        if (g_guiThreadId != 0)
+            return;
+
+        // Хост и короткоживущие агенты (rundll32 /stop,/forceUnload) управляют
+        // своей выгрузкой сами — лишний watcher там только мешает (двойной FreeSelf).
+        const DWORD hostPid = ReadHostPid();
+        if (hostPid != 0 && hostPid == GetCurrentProcessId())
+            return;
+        if (IsShortLivedGlassCompatProcess())
+            return;
+
+        // rundll32 — это всегда наш хост (/start) или короткоживущий агент
+        // (/stop,/forceUnload): у них своя выгрузка. В момент DllMain хост
+        // мог ещё не записать HostPid, поэтому проверяем по имени процесса.
+        {
+            wchar_t exePath[MAX_PATH]{};
+            const DWORD exeLen = GetModuleFileNameW(nullptr, exePath, _countof(exePath));
+            const wchar_t* leaf = exePath;
+            for (DWORD i = exeLen; i > 0; --i)
+            {
+                if (exePath[i - 1] == L'\\' || exePath[i - 1] == L'/')
+                {
+                    leaf = exePath + i;
+                    break;
+                }
+            }
+            if (_wcsicmp(leaf, L"rundll32.exe") == 0)
+                return;
+        }
+
+        if (ProcessBlockList::IsBlocked(GetProcessNameLower()))
+        {
+            StartMinimalUnloadWatcher(2);
+            return;
+        }
+
+        StartMinimalUnloadWatcher(4);
     }
 
     bool RequestShutdown()
@@ -3441,12 +3909,11 @@ __declspec(dllexport) DWORD WINAPI GlassCompat_RemoteBootstrap(LPVOID)
         &hSelf);
 
     const bool ok = GlassCompat::Initialize(hSelf);
+    const DWORD exitCode = !ok ? 0u : (g_guiThreadId != 0 ? g_guiThreadId : 1u);
 
     // 1 = init принят (GUI/watcher стартовал или уже был).
     // H54: хост кэширует GUI tid из exit code (AppContainer mapping Local\ ему не виден).
-    if (!ok)
-        return 0u;
-    return g_guiThreadId != 0 ? g_guiThreadId : 1u;
+    return exitCode;
 }
 
 extern "C"

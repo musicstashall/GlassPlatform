@@ -2028,17 +2028,19 @@ public sealed partial class MainWindow : Window
                 ShutdownPhaseTrace.Mark($"RevertOnExitFailed:{ex.GetType().Name}");
             }
 
-            if (NativeHostInterop.IsGlassRuntimeLoaded())
-            {
-                NativeHostInterop.ShutdownGlassRuntime();
-                ShutdownPhaseTrace.Mark("ShutdownGlassRuntime");
-            }
-
+            // GlassCore должен оставаться mapped на время Hide: WinUI рисует caption через uxtheme/D3D
+            // и может попасть в IAT/трамплин GlassCore после FreeLibrary (published close crash).
             ShutdownPhaseTrace.Mark("HideAppWindow");
             AppWindow.Hide();
 
             PrepareForProcessExit();
             ShutdownPhaseTrace.Mark("PrepareForProcessExit");
+
+            if (NativeHostInterop.IsGlassRuntimeLoaded())
+            {
+                NativeHostInterop.ShutdownGlassRuntime();
+                ShutdownPhaseTrace.Mark("ShutdownGlassRuntime");
+            }
 
             FinishAppCloseSequence();
         }

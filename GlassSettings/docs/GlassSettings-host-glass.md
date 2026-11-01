@@ -22,7 +22,7 @@ Host-процесс `GlassSettings.exe` загружает **только GlassC
 | `GlassSettings_InvalidateTextGlowClientsOnTrackedRootsIfEngineLoaded` | InkGlow live: `GlassCore_InvalidateTextGlowClientsOnTrackedRoots` (Moderate/Global, defer через root subclass) |
 | `GlassSettings_ReloadRenderTextInkFromRegistryIfEngineLoaded` | `GlassCore_ReloadRenderTextInkFromRegistry` — GlobalTextGlow / ink globals |
 | `GlassSettings_IsGlassRuntimeLoaded` | `true`, если в процессе загружен GlassCore |
-| `GlassSettings_ShutdownGlassRuntime` | `GlassCore_HostExitShutdown` / `GlassCore_Shutdown` → flush → `FreeLibrary` |
+| `GlassSettings_ShutdownGlassRuntime` | drain → `GlassCore_HostExitShutdown` (IAT + `BufferedPaintUnInit`); **без** `FreeLibrary` в процессе (unmap при `Environment.Exit`) |
 | `GlassSettings_PickExecutableFile` | `IFileOpenDialog` (Win32) без host-glass |
 
 C#-обёртка: [`NativeHostInterop.cs`](../../GlassSettings/Services/NativeHostInterop.cs).
@@ -32,7 +32,7 @@ C#-обёртка: [`NativeHostInterop.cs`](../../GlassSettings/Services/NativeH
 1. **Старт** — [`MainWindow.xaml.cs`](../../GlassSettings/MainWindow.xaml.cs): после готовности shell — `NativeHostInterop.EnsureGlassRuntime()` (только GlassCore).
 2. **Shutdown** — hide-on-close → `PrepareForProcessExit` → `ShutdownGlassRuntime()` (если runtime загружен) или natural close.
 
-Порядок native shutdown: drain + `WM_NULL` → `GlassCore_HostExitShutdown` (IAT + короткий join анимации) → `FreeLibrary(GlassCore)`.
+Порядок native shutdown: `AppWindow.Hide` + `PrepareForProcessExit` (GlassCore ещё mapped) → drain + `WM_NULL` → `GlassCore_HostExitShutdown` (IAT + `BufferedPaintUnInit` + join анимации) → `Environment.Exit` (ОС размапирует GlassCore).
 
 При закрытии с несохранёнными изменениями (`MainWindow.RunAppCloseSequenceAsync`): на **UI-потоке** `CaptureRevertOnExitPlan()` → в фоне `RevertSnapshotOnly()` → снова на UI `ApplyRevertOnExitNotifications(plan)`:
 
