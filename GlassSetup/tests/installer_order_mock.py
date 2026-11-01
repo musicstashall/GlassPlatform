@@ -27,12 +27,17 @@ def function(token):
     raise ValueError(token)
 
 worker = section("DWORD WINAPI InstallEngine::WorkerThread(", "bool InstallEngine::Start(")
-stages = ["CapturePriorHostState()", "ExtractPayload(", "VerifyEmbeddedNativePayload()", "CreateRollbackSnapshot()", "PrepareProductRemoval()",
+stages = ["CapturePriorHostState()", "ExtractPayload(", "VerifyEmbeddedNativePayload()", "CreateRollbackSnapshot()",
           "CloseGlassSettingsProcesses(", "StopRunningHosts()", "InstallGlassSettingsEarly()",
           "ReleaseLockedModules()", "PurgeRemnants()", "RunMsiSequence()", "RegisterSelectedProducts()",
-          "LaunchSelectedProducts()", "GlassInstallRemoval::Commit("]
+          "LaunchSelectedProducts()"]
 positions = [worker.index(stage) for stage in stages]
 assert positions == sorted(positions), stages
+# Setup never removes products: no removal preparation, commit or restore in the worker.
+assert "PrepareProductRemoval" not in source and "removalSession_" not in source
+assert "GlassInstallRemoval::Commit" not in worker and "GlassInstallRemoval::Restore" not in worker
+# Per-user defaults are undone by every rollback branch.
+assert worker.count("undoUserDefaults();") == 4 and "UndoSeededProcessLists" in worker
 assert worker.index("nonSettingsChangesAttempted_ = true") < worker.index("PurgeRemnants()")
 assert "self->PerformRollback()" in worker and "self->UndoCleanInstall()" in worker
 # Commit point: once LaunchSelectedProducts() runs nothing may fail the install any more.
@@ -42,9 +47,11 @@ launch_fn = function("void InstallEngine::LaunchSelectedProducts(")
 assert "SetFailure(" not in launch_fn and "return false" not in launch_fn and "AddFinishWarning(" in launch_fn
 register_fn = function("bool InstallEngine::RegisterSelectedProducts(")
 assert "StartPlatform(" not in register_fn and "StartOpenGlassService" not in register_fn and "SetFailure(" in register_fn
-sequence = section("bool InstallEngine::RunMsiSequence()", "bool InstallEngine::RegisterSelectedProducts()")
+sequence = section("bool InstallEngine::RunMsiSequence()", "void InstallEngine::SeedUserDefaults()")
 assert 'steps.push_back({L"GlassSettings-' not in sequence
-assert "!selection_.glassSettings" in sequence and "kProductSettingsX86" in sequence
+# Only checked products are installed; nothing is uninstalled or pruned.
+for token in ("UninstallProduct(", "removeCode", "kProductSettingsX86", "ClearPlatformInstallPath(", "PruneEmptyDirectories("):
+    assert token not in sequence, token
 
 mutex_fn = function("bool QueryPlatformMutex(")
 stop_fn = function("bool InstallEngine::StopGlassPlatform(")

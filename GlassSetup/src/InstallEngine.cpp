@@ -5,6 +5,7 @@
 #include "InstallSupport/GlassInstallMsi.h"
 #include "InstallSupport/GlassInstallUtil.h"
 #include "InstallSupport/GlassInstallUnlock.h"
+#include "InstallSupport/GlassUserDefaults.h"
 #include "InstallSupport/GlassInstallWatch.h"
 #include "../res/resource.h"
 #include <GlassPlatformTask.h>
@@ -358,7 +359,11 @@ bool InstallEngine::CapturePriorHostState() noexcept {
     return true;
 }
 
-bool InstallEngine::RestorePriorHosts(bool selectedOnly) noexcept {
+// Rollback (keptOnly=false): every host Setup stopped is brought back. Success
+// (keptOnly=true): only the products Setup stopped but did not reinstall are
+// restored, i.e. installed products that were left unchecked and are kept;
+// the selected products are started by the launch phase instead.
+bool InstallEngine::RestorePriorHosts(bool keptOnly) noexcept {
     if (!hostsStopped_) return true;
     bool ok=true;
     auto restoreArch=[&](GP::PlatformArch arch,const std::wstring& root,bool existed,bool enabled,bool running,bool stopAttempted) -> bool {
@@ -392,13 +397,11 @@ bool InstallEngine::RestorePriorHosts(bool selectedOnly) noexcept {
         } while (GetTickCount64()-start<30000);
         return false;
     };
-    // During success only restore manually running *selected* platforms whose
-    // tasks were disabled. Unselected products are being removed, not restarted.
-    if (!selectedOnly || (selection_.platform64 && prior_.x64WasRunning && !prior_.x64TaskEnabled))
+    if (!keptOnly || !selection_.platform64)
         if (!restoreArch(GP::PlatformArch::X64,x64Dir_,prior_.x64TaskExisted,prior_.x64TaskEnabled,prior_.x64WasRunning,x64StopAttempted_)) ok=false;
-    if (!selectedOnly || (selection_.platform32 && prior_.x86WasRunning && !prior_.x86TaskEnabled))
+    if (!keptOnly || !selection_.platform32)
         if (!restoreArch(GP::PlatformArch::X86,x86Dir_,prior_.x86TaskExisted,prior_.x86TaskEnabled,prior_.x86WasRunning,x86StopAttempted_)) ok=false;
-    if (selectedOnly) return ok; // selected OpenGlass is handled by the launch phase
+    if (keptOnly && selection_.openGlass) return ok; // selected OpenGlass is handled by the launch phase
     bool ogPathsSafe=true;
     if (((prior_.ogWasRunning && ogStopSignalled_) || ogServiceStartTypeMayNeedRestore_) &&
         (prior_.ogServiceExisted || prior_.ogLegacyTaskExisted)) {
@@ -457,13 +460,6 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             if (ok) {
                 // Snapshot even on a clean/reinstall path: pre-existing user files must survive cancellation.
                 ok = self->CreateRollbackSnapshot();
-                snapshotFailed = !ok && !self->IsCancelRequested();
-            }
-
-            // Inspect and back up non-MSI auxiliaries before stopping hosts or
-            // touching MSI. Unsupported credentials or foreign tasks fail closed.
-            if (ok && !self->IsCancelRequested()) {
-                ok = self->PrepareProductRemoval();
                 snapshotFailed = !ok && !self->IsCancelRequested();
             }
 
@@ -539,16 +535,6 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                         const ULONGLONG remain = kMinLaunchMs - elapsed;
                         Sleep(remain > 150 ? 150 : static_cast<DWORD>(remain));
                     }
-                    // The last step may delete a service whose credentials cannot
-                    // be snapshotted, which is exactly why it runs after the
-                    // commit point and can only produce a note.
-                    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-                    std::wstring removalError;
-                    if (!GlassInstallRemoval::Commit(self->removalSession_, ru, removalError)) {
-                        self->AddFinishWarning(self->labels_.warnRemovalCommit.empty()
-                            ? L"Could not finish removing previously installed components." : self->labels_.warnRemovalCommit,
-                            removalError);
-                    }
                     self->SetStatus(self->labels_.finalize, 10000);
                 }
             }
@@ -557,19 +543,13 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
 
             const bool cancelled = self->ChooseCancellationOrFailure(!ok);
             bool restored=true;
-            const auto restoreRemovalArtifacts = [&]() {
-                const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-                std::wstring detail;
-                if (!GlassInstallRemoval::Restore(self->removalSession_, ru, detail)) {
-                    restored=false;
-                    InstallLog::LineFormat(L"Could not restore removal auxiliaries: %s", detail.c_str());
-                    AcquireSRWLockExclusive(&self->statusLock_);
-                    if (!detail.empty()) {
-                        if (!self->failureDetail_.empty()) self->failureDetail_ += L"\r\n\r\n";
-                        self->failureDetail_ += detail;
-                    }
-                    ReleaseSRWLockExclusive(&self->statusLock_);
-                }
+            // The per-user default lists are written before the commit point;
+            // a rolled-back installation must not leave them behind.
+            const auto undoUserDefaults = [&]() {
+                if (!self->userDefaults_.attachListCreated && !self->userDefaults_.blockListCreated) return;
+                GlassUserDefaults::UndoSeededProcessLists(self->userDefaults_);
+                InstallLog::Line(L"User defaults: seeded AttachList/BlockList removed by rollback");
+                self->userDefaults_ = GlassUserDefaults::SeedReport{};
             };
             if (!ok || cancelled) {
                 if (cancelled) {
@@ -586,11 +566,11 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                     if (self->installAttempted_) {
                         if (self->rollbackSession_.hadPriorInstall) {
                             restored=self->PerformRollback();
-                            restoreRemovalArtifacts();
+                            undoUserDefaults();
                             if (restored && !self->RestorePriorHosts()) restored=false;
                         } else {
                             restored=self->UndoCleanInstall();
-                            restoreRemovalArtifacts();
+                            undoUserDefaults();
                             if (restored && !self->RestorePriorHosts()) restored=false;
                         }
                     } else {
@@ -608,7 +588,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                             WaitForSingleObject(self->errorPageShown_, 20000);
                         self->rollingBack_.store(true, std::memory_order_release);
                         restored=self->PerformRollback();
-                        restoreRemovalArtifacts();
+                        undoUserDefaults();
                         if (restored && !self->RestorePriorHosts()) restored=false;
                         self->rollingBack_.store(false, std::memory_order_release);
                     } else if (snapshotFailed) {
@@ -620,7 +600,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                             WaitForSingleObject(self->errorPageShown_, 20000);
                         self->rollingBack_.store(true, std::memory_order_release);
                         restored=self->UndoCleanInstall();
-                        restoreRemovalArtifacts();
+                        undoUserDefaults();
                         if (restored && !self->RestorePriorHosts()) restored=false;
                         self->rollingBack_.store(false, std::memory_order_release);
                     } else {
@@ -1434,32 +1414,10 @@ bool InstallEngine::RunMsiSequence() noexcept {
         std::wstring msiFile;
         std::wstring dir;
         std::wstring label;
-        const wchar_t* removeCode = nullptr;
     };
+    // Only the checked products are touched. An installed product that was
+    // left unchecked is kept as it is: Setup never removes products.
     std::vector<Step> steps;
-    const auto addRemoval = [&](const wchar_t* code, const wchar_t* name) {
-        if (!GlassInstallMsi::IsProductInstalled(code)) return true;
-        // A product that appeared after the snapshot has no recoverable backup.
-        if (!ProductWasSnapshotted(rollbackSession_, code)) {
-            SetFailure(ru ? L"Состав установленных продуктов изменился после создания копии. Повторите установку."
-                          : L"Installed products changed after the snapshot. Run Setup again.", 0);
-            return false;
-        }
-        const std::wstring prefix = labels_.removing.empty() ? (ru ? L"Удаление: " : L"Removing: ") : labels_.removing;
-        steps.push_back({L"", L"", prefix + name, code});
-        return true;
-    };
-    // GlassSettings is one UI choice but can have either or both MSI codes.
-    if (!selection_.glassSettings &&
-        (!addRemoval(GlassInstallMsi::kProductSettingsX64, L"GlassSettings (x64)") ||
-         !addRemoval(GlassInstallMsi::kProductSettingsX86, L"GlassSettings (x86)"))) return false;
-    if (is64 && !selection_.openGlass &&
-        (!addRemoval(GlassInstallMsi::kProductOpenGlass, L"OpenGlass") ||
-         !addRemoval(GlassInstallMsi::kLegacyOpenGlass, L"OpenGlass"))) return false;
-    if (!selection_.platform32 &&
-        (!addRemoval(GlassInstallMsi::kProductPlatformX86, L"Glass Platform (x86)") ||
-         !addRemoval(GlassInstallMsi::kLegacyPlatformX86, L"Glass Platform (x86)"))) return false;
-
     if (is64 && selection_.platform64)
         steps.push_back({L"Glass-x64.msi", x64Dir_, labels_.platform64});
     if (selection_.platform32)
@@ -1474,36 +1432,6 @@ bool InstallEngine::RunMsiSequence() noexcept {
     int base = kProgressStart;
     for (const auto& step : steps) {
         if (IsCancelRequested()) return false;
-        if (step.removeCode) {
-            if (!RecheckSnapshottedProduct(step.removeCode)) return false;
-            // Note BEFORE calling MSI: cancellation or an error can still have
-            // partially changed its registration and must be recoverable.
-            GlassInstallRollback::NoteModified(rollbackSession_, step.removeCode);
-            SetStatus(step.label, base);
-            GlassInstallMsi::ProgressSink sink;
-            sink.label=step.label; sink.base=base; sink.span=span; sink.cancelRequested=&cancelRequested_;
-            sink.onError=[this](const std::wstring& text) { RememberMsiMessage(text.c_str()); };
-            sink.onProgress=[this](const std::wstring& text, int units) { SetStatus(text, units); };
-            const std::wstring log=InstallLog::NextMsiVerboseLogPath(step.label.c_str());
-            if (!log.empty()) MsiEnableLogW(INSTALLLOGMODE_VERBOSE, log.c_str(), INSTALLLOGATTRIBUTES_FLUSHEACHLINE);
-            UINT exitCode=ERROR_SUCCESS;
-            const bool removed=GlassInstallMsi::UninstallProduct(step.removeCode, &sink, &exitCode);
-            MsiEnableLogW(0, nullptr, 0);
-            if (IsCancelRequested() || exitCode==ERROR_INSTALL_USEREXIT) {
-                cancelRequested_.store(true, std::memory_order_release);
-                return false;
-            }
-            if (!removed || GlassInstallMsi::IsProductInstalled(step.removeCode)) {
-                const std::wstring detail = (ru ? L"Не удалось удалить продукт: " : L"Could not remove product: ") + step.label;
-                SetFailure(detail, exitCode);
-                InstallLog::LineFormat(L"Remove MSI failed %s (%u); log %s", step.removeCode, exitCode, log.c_str());
-                return false;
-            }
-            base += span;
-            SetStatus(step.label, base);
-            continue;
-        }
-
         if (step.msiFile == L"Glass-x64.msi") RemoveEmptyChildDir(x64Dir_, L"x64");
         else if (step.msiFile == L"Glass-x86.msi") RemoveEmptyChildDir(x86Dir_, L"x86");
 
@@ -1549,48 +1477,11 @@ bool InstallEngine::RunMsiSequence() noexcept {
         (void)GlassInstallUtil::CreateStartMenuShortcut(gsDir + L"\\GlassSettings.exe", gsDir);
     }
 
-    // These exact values were captured in the rollback snapshot. Keep other
-    // registry settings and user files intact, and only prune empty folders.
-    if ((remove_.platform32 && !GlassInstallUtil::ClearPlatformInstallPath(false)) ||
-        (remove_.openGlass && !GlassInstallUtil::ClearOpenGlassInstallPath())) {
-        SetFailure(ru ? L"Не удалось удалить пути снятых продуктов из реестра."
-                      : L"Could not clear the removed products' registry paths.", GetLastError());
-        return false;
-    }
-    std::vector<std::wstring> keptRoots;
-    if (selection_.platform64 && !x64Dir_.empty()) keptRoots.push_back(x64Dir_);
-    if (selection_.platform32 && !x86Dir_.empty()) keptRoots.push_back(x86Dir_);
-    if (selection_.openGlass && !openGlassDir_.empty()) keptRoots.push_back(openGlassDir_);
-    if (selection_.glassSettings) {
-        if (!x64Dir_.empty()) keptRoots.push_back(GlassInstallUtil::TrimTrailingSlashes(x64Dir_) + L"\\GlassSettings");
-        if (!x86Dir_.empty()) keptRoots.push_back(GlassInstallUtil::TrimTrailingSlashes(x86Dir_) + L"\\GlassSettings");
-    }
-    if (remove_.glassSettings) {
-        if (!x64Dir_.empty()) GlassInstallUtil::PruneEmptyDirectories(GlassInstallUtil::TrimTrailingSlashes(x64Dir_) + L"\\GlassSettings", keptRoots);
-        if (!x86Dir_.empty()) GlassInstallUtil::PruneEmptyDirectories(GlassInstallUtil::TrimTrailingSlashes(x86Dir_) + L"\\GlassSettings", keptRoots);
-    }
-    if (remove_.openGlass && !openGlassDir_.empty()) {
-        // A legacy/custom OpenGlass path can coincide with the shared platform root.
-        if (!GlassInstallUtil::SameInstallPath(openGlassDir_, x64Dir_) &&
-            !GlassInstallUtil::SameInstallPath(openGlassDir_, x86Dir_))
-            GlassInstallUtil::PruneEmptyDirectories(openGlassDir_, keptRoots);
-        else InstallLog::Line(L"Empty-directory cleanup skipped shared OpenGlass/platform root");
-    }
-    if (remove_.platform32 && !x86Dir_.empty()) {
-        if (!GlassInstallUtil::SameInstallPath(x86Dir_, x64Dir_))
-            GlassInstallUtil::PruneEmptyDirectories(x86Dir_, keptRoots);
-        else InstallLog::Line(L"Empty-directory cleanup skipped shared platform root");
-    }
-    InstallLog::Line(L"InstallEngine: desired MSI selection applied");
+    InstallLog::Line(L"InstallEngine: selected MSI products applied");
     return true;
 }
 
 namespace {
-
-// Do not re-enable a user-disabled task, even if its host was running before setup.
-bool ShouldStartPlatformArch(bool taskExistedBefore, bool taskEnabledBefore, bool wasRunningBefore) noexcept {
-    return taskExistedBefore ? (wasRunningBefore && taskEnabledBefore) : true;
-}
 
 std::wstring JoinWarningDetail(const std::wstring& hint, const std::wstring& technical) {
     if (technical.empty()) return hint;
@@ -1620,6 +1511,24 @@ std::vector<InstallEngine::FinishWarning> InstallEngine::FinishWarnings() const 
     return copy;
 }
 
+// Per-user defaults of the platform (AttachList/BlockList). Written for the
+// user running Setup, before the platform starts and reads them. Existing
+// lists are kept; only missing or empty lists are filled, so an update never
+// overwrites the user's edits. A failure here is a finish note, not a reason
+// to roll back a complete installation.
+void InstallEngine::SeedUserDefaults() noexcept {
+    if (!GlassUserDefaults::SeedProcessLists(userDefaults_)) {
+        InstallLog::LineFormat(L"User defaults: seeding failed: %s", userDefaults_.detail.c_str());
+        AddFinishWarning(labels_.warnUserDefaults.empty()
+            ? L"The default process lists (AttachList/BlockList) could not be written." : labels_.warnUserDefaults,
+            userDefaults_.detail);
+        return;
+    }
+    InstallLog::LineFormat(L"User defaults: AttachList %s (%u entries), BlockList %s (%u entries)",
+        userDefaults_.attachListCreated ? L"seeded" : L"kept", userDefaults_.attachWritten,
+        userDefaults_.blockListCreated ? L"seeded" : L"kept", userDefaults_.blockWritten);
+}
+
 // Phase B. Everything here runs before the first product start, so the
 // rollback snapshot is still authoritative and any failure is fatal.
 bool InstallEngine::RegisterSelectedProducts() noexcept {
@@ -1627,12 +1536,9 @@ bool InstallEngine::RegisterSelectedProducts() noexcept {
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
 
     SetStatus(labels_.finalize, 9200);
-    auto registerArch = [this, ru](
-        GP::PlatformArch arch,
-        const std::wstring& dir,
-        bool taskExistedBefore,
-        bool taskEnabledBefore,
-        bool wasRunningBefore) -> bool {
+    SeedUserDefaults();
+
+    auto registerArch = [this, ru](GP::PlatformArch arch, const std::wstring& dir, bool taskExistedBefore) -> bool {
         if (!taskExistedBefore) {
             if (!GlassInstallHost::EnsureGlassAutorunTask(arch, dir, true, true)) {
                 InstallLog::LineFormat(L"Autostart: failed to register task for arch %d", static_cast<int>(arch));
@@ -1643,10 +1549,11 @@ bool InstallEngine::RegisterSelectedProducts() noexcept {
             if (arch==GP::PlatformArch::X64) x64TaskCreatedBySetup_=true;
             else x86TaskCreatedBySetup_=true;
         }
-        if (!ShouldStartPlatformArch(taskExistedBefore, taskEnabledBefore, wasRunningBefore)) return true;
+        // Every selected platform is started after the installation, whatever
+        // its state was before Setup. The task that is about to be started must
+        // still be ours while a rollback can remove it; the check is repeated
+        // right before the start.
         if (GP::IsGlassPlatformRunning(arch)) return true;
-        // The task that is about to be started must still be ours while a
-        // rollback can remove it; the check is repeated right before the start.
         std::wstring error;
         if (!GlassInstallRemoval::ValidatePlatformTask(arch,dir,true,false,ru,error)) {
             InstallLog::LineFormat(L"Autostart: refusing changed task for arch %d: %s",static_cast<int>(arch),error.c_str());
@@ -1656,11 +1563,9 @@ bool InstallEngine::RegisterSelectedProducts() noexcept {
         return true;
     };
 
-    if (is64 && selection_.platform64 &&
-        !registerArch(GP::PlatformArch::X64, x64Dir_, prior_.x64TaskExisted, prior_.x64TaskEnabled, prior_.x64WasRunning))
+    if (is64 && selection_.platform64 && !registerArch(GP::PlatformArch::X64, x64Dir_, prior_.x64TaskExisted))
         return false;
-    if (selection_.platform32 &&
-        !registerArch(GP::PlatformArch::X86, x86Dir_, prior_.x86TaskExisted, prior_.x86TaskEnabled, prior_.x86WasRunning))
+    if (selection_.platform32 && !registerArch(GP::PlatformArch::X86, x86Dir_, prior_.x86TaskExisted))
         return false;
 
     if (is64 && selection_.openGlass) {
@@ -1697,6 +1602,9 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
     const bool is64 = scanNativeX64_;
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
 
+    // Policy: a selected platform is always started, whether or not it was
+    // running (or its task was enabled) when Setup began. StartPlatform
+    // re-enables a disabled task itself.
     auto startArch = [this, ru](
         GP::PlatformArch arch,
         const std::wstring& dir,
@@ -1707,11 +1615,8 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         int pct,
         const std::wstring& warnStart,
         const std::wstring& warnTask) {
-        if (!ShouldStartPlatformArch(taskExistedBefore, taskEnabledBefore, wasRunningBefore)) {
-            InstallLog::LineFormat(L"Autostart: task disabled by user prior to upgrade, skip start arch %d",
-                static_cast<int>(arch));
-            return;
-        }
+        InstallLog::LineFormat(L"Autostart: arch %d before setup: task=%d enabled=%d running=%d",
+            static_cast<int>(arch), taskExistedBefore ? 1 : 0, taskEnabledBefore ? 1 : 0, wasRunningBefore ? 1 : 0);
         SetStatus(label, pct);
         if (!GP::IsGlassPlatformRunning(arch)) {
             // Repeat the full action check immediately before starting a task.
@@ -1878,33 +1783,6 @@ bool InstallEngine::CreateRollbackSnapshot() noexcept {
     }
     SetStatus(labels_.backup, 800);
     return ok;
-}
-
-bool InstallEngine::PrepareProductRemoval() noexcept {
-    ComponentSelection installed{false, false, false, false};
-    installed.platform64 = ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductPlatformX64) ||
-        ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kLegacyPlatformX64);
-    installed.platform32 = ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductPlatformX86) ||
-        ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kLegacyPlatformX86);
-    installed.glassSettings = ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductSettingsX64) ||
-        ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductSettingsX86);
-    installed.openGlass = ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kProductOpenGlass) ||
-        ProductWasSnapshotted(rollbackSession_, GlassInstallMsi::kLegacyOpenGlass);
-    remove_ = GlassProducts::RemovalForInstall(selection_, installed, scanNativeX64_);
-    if (!remove_.platform32 && !remove_.openGlass && !remove_.glassSettings) return true;
-    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-    std::wstring error;
-    if (!GlassInstallRemoval::Prepare(removalSession_, remove_.platform32, remove_.openGlass, remove_.glassSettings,
-            x64Dir_, x86Dir_, openGlassDir_, rollbackSession_.workspaceDir, &cancelRequested_, ru, error)) {
-        if (!IsCancelRequested()) SetFailure(error.empty()
-            ? (ru ? L"Не удалось подготовить безопасное удаление компонентов." : L"Could not prepare safe component removal.")
-            : error, 0);
-        return false;
-    }
-    InstallLog::LineFormat(L"Removal plan: x86=%d OpenGlass=%d Settings=%d (task backups=%u)",
-        remove_.platform32 ? 1 : 0, remove_.openGlass ? 1 : 0, remove_.glassSettings ? 1 : 0,
-        static_cast<unsigned>(removalSession_.tasks.size()));
-    return true;
 }
 
 bool InstallEngine::StopHostsForRollback() noexcept {

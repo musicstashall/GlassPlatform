@@ -1591,7 +1591,7 @@ private:
         switch (GlassProducts::ActionForInstall(selected,installed)) {
         case GlassProducts::InstallAction::Install: return IDS_COMP_STATE_INSTALL;
         case GlassProducts::InstallAction::Update: return IDS_COMP_STATE_UPDATE;
-        case GlassProducts::InstallAction::Remove: return IDS_COMP_STATE_REMOVE;
+        case GlassProducts::InstallAction::Keep: return IDS_COMP_STATE_KEEP;
         default: return IDS_COMP_STATE_ABSENT;
         }
     }
@@ -1599,7 +1599,7 @@ private:
         switch (action) {
         case GlassProducts::InstallAction::Install: return IDS_COMP_BADGE_INSTALL;
         case GlassProducts::InstallAction::Update: return IDS_COMP_BADGE_UPDATE;
-        case GlassProducts::InstallAction::Remove: return IDS_COMP_BADGE_REMOVE;
+        case GlassProducts::InstallAction::Keep: return IDS_COMP_BADGE_KEEP;
         default: return 0;
         }
     }
@@ -1607,14 +1607,22 @@ private:
         switch (action) {
         case GlassProducts::InstallAction::Install: return L"install";
         case GlassProducts::InstallAction::Update: return L"update";
-        case GlassProducts::InstallAction::Remove: return L"remove";
+        case GlassProducts::InstallAction::Keep: return L"keep";
         default: return L"";
         }
     }
+    // A product is missing after Setup only when it is neither selected nor
+    // already installed: unchecked installed products are kept.
+    bool X86WarningApplies() const noexcept {
+        return GlassInstallUtil::IsOs64Bit() && !selection_.platform32 && !installedSelection_.platform32;
+    }
+    bool SettingsWarningApplies() const noexcept {
+        return !selection_.glassSettings && !installedSelection_.glassSettings;
+    }
     std::wstring ComponentWarnings() const {
         std::wstring text;
-        if (GlassInstallUtil::IsOs64Bit() && !selection_.platform32) text = Text(IDS_COMP_X86_WARNING);
-        if (!selection_.glassSettings) {
+        if (X86WarningApplies()) text = Text(IDS_COMP_X86_WARNING);
+        if (SettingsWarningApplies()) {
             if (!text.empty()) text += L"\n";
             text += Text(IDS_COMP_GS_WARNING);
         }
@@ -2075,7 +2083,6 @@ private:
         labels.backup = Text(IDS_STATUS_BACKUP);
         labels.glassSettings64 = Text(IDS_STATUS_GS64);
         labels.glassSettings86 = Text(IDS_STATUS_GS86);
-        labels.removing = Text(IDS_STATUS_REMOVE);
         labels.rollback = Text(IDS_STATUS_ROLLBACK);
         labels.purge = Text(IDS_STATUS_PURGE);
         labels.purgeFailed = Text(IDS_ERR_PURGE_FAILED);
@@ -2094,7 +2101,7 @@ private:
         labels.warnPriorHostsHint = Text(IDS_WARN_PRIOR_HOSTS_HINT);
         labels.warnShellConflict = Text(IDS_WARN_SHELL_CONFLICT);
         labels.warnShellHint = Text(IDS_WARN_SHELL_HINT);
-        labels.warnRemovalCommit = Text(IDS_WARN_REMOVAL_COMMIT);
+        labels.warnUserDefaults = Text(IDS_WARN_USER_DEFAULTS);
         labels.rollbackFailed = Text(IDS_ERR_ROLLBACK_FAILED);
         labels.rollbackRestored = Text(IDS_ERR_ROLLBACK_RESTORED);
         labels.rollbackRemoved = Text(IDS_ERR_ROLLBACK_REMOVED);
@@ -2765,8 +2772,8 @@ private:
         COLORREF fill=RGB(28,57,48), border=RGB(86,169,125), ink=RGB(184,244,209);
         if (action==GlassProducts::InstallAction::Update) {
             fill=RGB(62,48,35); border=RGB(194,153,81); ink=RGB(255,223,157);
-        } else if (action==GlassProducts::InstallAction::Remove) {
-            fill=RGB(65,34,45); border=RGB(206,101,119); ink=RGB(255,194,205);
+        } else if (action==GlassProducts::InstallAction::Keep) {
+            fill=RGB(38,46,72); border=RGB(120,140,210); ink=RGB(210,220,255);
         }
         constexpr int width=140, height=24;
         {
@@ -3057,11 +3064,11 @@ private:
             state(selection_.glassSettings,installedSelection_.glassSettings,false,60,328);
             if (os64) state(selection_.openGlass,installedSelection_.openGlass,false,510,328);
             int warningY=398;
-            if (os64 && !selection_.platform32) {
+            if (X86WarningApplies()) {
                 DrawLabel(dc,Text(IDS_COMP_X86_WARNING),Box(48,warningY,840,48),font_,white);
                 warningY+=50;
             }
-            if (!selection_.glassSettings) DrawLabel(dc,Text(IDS_COMP_GS_WARNING),Box(48,warningY,840,88),font_,white);
+            if (SettingsWarningApplies()) DrawLabel(dc,Text(IDS_COMP_GS_WARNING),Box(48,warningY,840,88),font_,white);
         } else if (page_==Page::ConfirmCancel || page_==Page::Cancelled || page_==Page::Cancelling || page_==Page::Launching) {
             DrawBanner(dc,true);
             const UINT title=page_==Page::ConfirmCancel?IDS_CONFIRM_CANCEL_TITLE:page_==Page::Cancelled?IDS_CANCELLED_TITLE:

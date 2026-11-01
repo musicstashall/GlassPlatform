@@ -149,6 +149,7 @@
     <ClCompile Include="src\InstallSupport\GlassInstallHost.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallRemoval.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallUnlock.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassUserDefaults.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\WizardTheme.h" />
@@ -161,6 +162,7 @@
     <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h" />
     <ClInclude Include="src\InstallSupport\GlassRemovalOrder.h" />
     <ClInclude Include="src\InstallSupport\GlassEmptyDirectories.h" />
+    <ClInclude Include="src\InstallSupport\GlassUserDefaults.h" />
     <ClInclude Include="src\InstallLog.h" />
   </ItemGroup>
   <ItemGroup>

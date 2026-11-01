@@ -8,7 +8,7 @@ int main() {
     static_assert(GlassProducts::ActionForInstall(false, false) == InstallAction::None);
     static_assert(GlassProducts::ActionForInstall(true, false) == InstallAction::Install);
     static_assert(GlassProducts::ActionForInstall(true, true) == InstallAction::Update);
-    static_assert(GlassProducts::ActionForInstall(false, true) == InstallAction::Remove);
+    static_assert(GlassProducts::ActionForInstall(false, true) == InstallAction::Keep); // Setup never removes
     using GlassProducts::OpenGlassStartupState;
     static_assert(!GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{false,false,true}));
     static_assert(GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,false,false})); // first install
@@ -27,19 +27,16 @@ int main() {
         }
         for (int present=0;present<16;++present) {
             const Selection exists{bool(present&1),bool(present&2),bool(present&4),bool(present&8)};
-            const auto changed=GlassProducts::RemovalForInstall(raw,exists,os64);
-            assert(!changed.platform64); // the x64 OS platform is mandatory
-            assert(changed.platform32==(os64 && exists.platform32 && !raw.platform32));
-            assert(changed.glassSettings==(exists.glassSettings && !raw.glassSettings));
-            assert(changed.openGlass==(os64 && exists.openGlass && !raw.openGlass));
-            // The action displayed by the wizard must agree with the engine's
-            // removal policy after applying the OS-mandatory selection.
-            assert((GlassProducts::ActionForInstall(installed.platform32,exists.platform32)==InstallAction::Remove)==changed.platform32);
-            assert((GlassProducts::ActionForInstall(installed.glassSettings,exists.glassSettings)==InstallAction::Remove)==changed.glassSettings);
-            if (os64) {
-                assert((GlassProducts::ActionForInstall(installed.platform64,exists.platform64)==InstallAction::Remove)==changed.platform64);
-                assert((GlassProducts::ActionForInstall(installed.openGlass,exists.openGlass)==InstallAction::Remove)==changed.openGlass);
-            }
+            // The wizard never shows a removal: an installed product that is
+            // unchecked after applying the OS-mandatory selection is kept.
+            const auto keptOrAbsent=[](bool selected, bool installed) {
+                const auto action=GlassProducts::ActionForInstall(selected,installed);
+                return selected || action==(installed ? InstallAction::Keep : InstallAction::None);
+            };
+            assert(keptOrAbsent(installed.platform32,exists.platform32));
+            assert(keptOrAbsent(installed.glassSettings,exists.glassSettings));
+            assert(keptOrAbsent(installed.platform64,exists.platform64));
+            assert(keptOrAbsent(installed.openGlass,exists.openGlass));
             const auto removed=GlassProducts::NormalizeRemoval(raw,exists,os64);
             assert(!removed.platform64 || (os64 && exists.platform64));
             assert(!removed.platform32 || exists.platform32);
@@ -56,5 +53,5 @@ int main() {
     const Selection all{true,true,true,true};
     const auto onlySettings=GlassProducts::NormalizeRemoval({false,false,true,false},all,true);
     assert(!onlySettings.platform64 && !onlySettings.platform32 && onlySettings.glassSettings && !onlySettings.openGlass);
-    std::cout << "PASS: desired install set removes unchecked products; native platform mandatory; uninstall dependency cascade\n";
+    std::cout << "PASS: install keeps unchecked products; native platform mandatory; uninstall dependency cascade\n";
 }

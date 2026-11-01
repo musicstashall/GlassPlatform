@@ -6,9 +6,12 @@
 #include <string>
 #include <vector>
 
-// Reversible cleanup for products removed by Setup. The MSI/file snapshot is
-// handled separately by GlassInstallRollback. Do not use the uninstaller's
-// unconditional service/task deletion here: it cannot restore their settings.
+// Validation of managed tasks/service paths (used by Setup and GlassUnins) and
+// a reversible cleanup session for product auxiliaries. Setup no longer removes
+// products, so Prepare/Commit/Restore currently have no caller; they stay for
+// the uninstaller work. The MSI/file snapshot is handled separately by
+// GlassInstallRollback. Do not use the uninstaller's unconditional
+// service/task deletion here: it cannot restore their settings.
 namespace GlassInstallRemoval {
 
 struct TaskSnapshot {

@@ -1,6 +1,7 @@
 #pragma once
 #include "InstallSupport/GlassInstallRollback.h"
 #include "InstallSupport/GlassInstallRemoval.h"
+#include "InstallSupport/GlassUserDefaults.h"
 #include "GlassProducts.h"
 #include "WizardUnlockState.h"
 #include <windows.h>
@@ -47,7 +48,6 @@ public:
         std::wstring nativeScanFailed;
         std::wstring snapshotFailed;
         std::wstring diskFull;
-        std::wstring removing;
         // Pre-commit registration failures (still roll back).
         std::wstring autorunTaskFailed;
         std::wstring ogServiceFailed;
@@ -63,7 +63,7 @@ public:
         std::wstring warnPriorHostsHint;
         std::wstring warnShellConflict;
         std::wstring warnShellHint;
-        std::wstring warnRemovalCommit;
+        std::wstring warnUserDefaults;
     };
 
     // A finishing step that failed after the commit point (first platform
@@ -155,8 +155,7 @@ private:
     bool CapturePriorHostState() noexcept;
     // Synchronize failure handling with the user's open cancel confirmation.
     bool ChooseCancellationOrFailure(bool failed) noexcept;
-    bool RestorePriorHosts(bool selectedOnly = false) noexcept;
-    bool PrepareProductRemoval() noexcept;
+    bool RestorePriorHosts(bool keptOnly = false) noexcept;
     bool StopGlassPlatform(GlassShared::GlassPlatformTask::PlatformArch arch,
         const std::wstring& statusLabel, const wchar_t* logTag,
         const std::function<bool(const wchar_t*)>& fail) noexcept;
@@ -180,6 +179,7 @@ private:
     // shell extension. The first start is the commit point: every failure in
     // here becomes a FinishWarning, never a failure or rollback.
     void LaunchSelectedProducts() noexcept;
+    void SeedUserDefaults() noexcept;
     void AddFinishWarning(const std::wstring& title, const std::wstring& detail) noexcept;
     bool DetermineCleanInstall() noexcept;
     bool CreateRollbackSnapshot() noexcept;
@@ -190,10 +190,9 @@ private:
 
     StatusFn status_;
     GlassInstallRollback::SessionState rollbackSession_;
-    GlassInstallRemoval::Session removalSession_;
     ComponentSelection selection_{};
     GlassProducts::OpenGlassStartupState openGlassStartup_{};
-    ComponentSelection remove_ {false, false, false, false};
+    GlassUserDefaults::SeedReport userDefaults_;
     PriorHostState prior_{};
     PhaseLabels labels_;
     std::wstring tempDir_;

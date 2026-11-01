@@ -1,9 +1,10 @@
 #pragma once
 
-// Shared, platform-neutral component policy. An install selection describes
-// the desired final product set: previously installed, unchecked products are
-// removed. The OS-native platform is mandatory; removing it in the separate
-// uninstaller cascades to the other installed products.
+// Shared, platform-neutral component policy. An install selection names the
+// products to install or update. Setup never removes a product: an installed
+// product that is left unchecked simply stays as it is, and removal is the job
+// of the separate uninstaller. The OS-native platform is mandatory; removing it
+// in the uninstaller cascades to the other installed products.
 namespace GlassProducts {
 struct Selection {
     bool platform64 = true;
@@ -23,11 +24,11 @@ constexpr bool ShouldStartOpenGlass(const OpenGlassStartupState& startup) noexce
 }
 
 // A checked product is installed or updated; an unchecked installed product is
-// removed. An unchecked absent product has no action and needs no badge.
-enum class InstallAction { None, Install, Update, Remove };
+// kept untouched. An unchecked absent product has no action and needs no badge.
+enum class InstallAction { None, Install, Update, Keep };
 constexpr InstallAction ActionForInstall(bool selected, bool installed) noexcept {
     if (selected) return installed ? InstallAction::Update : InstallAction::Install;
-    return installed ? InstallAction::Remove : InstallAction::None;
+    return installed ? InstallAction::Keep : InstallAction::None;
 }
 
 constexpr Selection NormalizeInstall(Selection choice, bool os64) noexcept {
@@ -38,18 +39,6 @@ constexpr Selection NormalizeInstall(Selection choice, bool os64) noexcept {
         choice.openGlass = false;
     }
     return choice;
-}
-
-// Installed products outside the desired set must be removed, never the
-// mandatory platform. Individual MSI architectures can be mapped to one item.
-constexpr Selection RemovalForInstall(Selection choice, Selection installed, bool os64) noexcept {
-    const Selection desired = NormalizeInstall(choice, os64);
-    return {
-        os64 && installed.platform64 && !desired.platform64,
-        installed.platform32 && !desired.platform32,
-        installed.glassSettings && !desired.glassSettings,
-        os64 && installed.openGlass && !desired.openGlass
-    };
 }
 
 constexpr Selection NormalizeRemoval(Selection choice, Selection installed, bool os64) noexcept {

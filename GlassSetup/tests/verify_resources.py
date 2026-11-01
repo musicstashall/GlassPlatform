@@ -166,16 +166,34 @@ assert "selection_.platform64=os64" in setup
 assert "IDS_COMP_GS_WARNING" in setup and "HKCU\\\\Software\\\\StanislavKa\\\\GlassPlatform" in rc
 assert "StartMenuShortcutExists" in util
 assert "QueryPlatformInstallPath" in util and "QueryOpenGlassInstallPath" in util
-# Installation is a desired-state operation, not a skip-only selection.
+# Setup never removes products: checked products are installed or updated,
+# unchecked installed products are kept; removal belongs to GlassUnins.
 policy = read("src/GlassProducts.h")
-assert "RemovalForInstall" in policy and "not an uninstall request" not in policy
-sequence = section(engine, "bool InstallEngine::RunMsiSequence()", "bool InstallEngine::RegisterSelectedProducts()")
-for token in ("kProductSettingsX64", "kProductSettingsX86", "kProductOpenGlass", "kLegacyOpenGlass",
-              "kProductPlatformX86", "kLegacyPlatformX86", "ClearPlatformInstallPath(false)",
-              "ClearOpenGlassInstallPath()", "ProductWasSnapshotted"):
-    assert token in sequence, token
-assert sequence.index("NoteModified(rollbackSession_, step.removeCode)") < sequence.index("UninstallProduct(step.removeCode, &sink")
-assert "cancelRequested=&cancelRequested_" in sequence
+assert "RemovalForInstall" not in policy and "InstallAction::Keep" in policy and "never removes" in policy
+sequence = section(engine, "bool InstallEngine::RunMsiSequence()", "void InstallEngine::SeedUserDefaults()")
+for token in ("UninstallProduct(", "removeCode", "kProductSettingsX86", "kProductPlatformX86",
+              "ClearPlatformInstallPath(", "ClearOpenGlassInstallPath(", "PruneEmptyDirectories("):
+    assert token not in sequence, token
+assert "ProductWasSnapshotted" in sequence  # legacy codes replaced by MajorUpgrade are still snapshot-checked
+assert "PrepareProductRemoval" not in engine and "removalSession_" not in engine and "remove_." not in engine
+# Per-user defaults: seeded before the first platform start, never over existing lists, undone by rollback.
+defaults = read("src/InstallSupport/GlassUserDefaults.cpp")
+default_lists = (repo / "GlassShared/include/DefaultProcessLists.h").read_text(encoding="utf-8")
+assert "GlassUserDefaults.cpp" in project and "GlassUserDefaults.h" in project
+assert "GlassUserDefaults.cpp" in read("GlassSetup.vcxproj.filters")
+assert "hasEntries" in defaults and "RegDeleteTreeW" in defaults and "kBlockListDescription" in defaults
+assert "#include <windows.h>" not in default_lists and "Software\\\\StanislavKa\\\\GlassPlatform\\\\AttachList" in default_lists
+assert default_lists.count("kModeForbidden }") == 2 and default_lists.count("kModePopupOnly }") == 28 and default_lists.count("kModeFull }") == 34
+assert '{ L"explorer.exe", kModeFull }' in default_lists and '{ L"cmd.exe", kModeForbidden }' in default_lists
+assert default_lists.count('        L"') - default_lists.count('        L"BlackWindowManager') == 21
+register = section(engine, "bool InstallEngine::RegisterSelectedProducts()", "void InstallEngine::LaunchSelectedProducts()")
+assert register.index("SeedUserDefaults();") < register.index("EnsureGlassAutorunTask(")
+seed = section(engine, "void InstallEngine::SeedUserDefaults()", "bool InstallEngine::RegisterSelectedProducts()")
+assert "AddFinishWarning(" in seed and "SetFailure(" not in seed and "IDS_WARN_USER_DEFAULTS" in rc
+# Every selected platform is started after the installation, whatever its prior state was.
+assert "ShouldStartPlatformArch" not in engine
+launch = section(engine, "void InstallEngine::LaunchSelectedProducts()", "bool InstallEngine::StopHostsForRollback()")
+assert "GP::StartPlatform(arch)" in launch and "skip start" not in launch and "taskEnabledBefore)" not in launch
 assert "TASK_LOGON_PASSWORD" in removal and "TASK_LOGON_S4U" in removal
 assert all(t in removal for t in ("GetSecurityDescriptor(kTaskSecurity", "SACL_SECURITY_INFORMATION", "ExpectedAction",
                                   "TASK_DONT_ADD_PRINCIPAL_ACE", "TASK_IGNORE_REGISTRATION_TRIGGERS",
@@ -186,22 +204,27 @@ assert all(t in removal for t in ("GetSecurityDescriptor(kTaskSecurity", "SACL_S
 assert "saved.xml != actualXml.value" in removal and "saved.security != actualSecurity.value" in removal
 assert "GlassRemovalOrder::Commit" in removal and removal_order.index("if (!removeShortcut())") < removal_order.index("if (!removeTask(i))") < removal_order.index("return deleteService()")
 worker = section(engine, "DWORD WINAPI InstallEngine::WorkerThread(", "bool InstallEngine::Start(")
-assert worker.index("CreateRollbackSnapshot()") < worker.index("PrepareProductRemoval()") < worker.index("StopRunningHosts()")
-# Commit point: registration (rollback-able) precedes the first start; the removal commit and
-# every later step can only add finish-page notes.
-assert worker.index("RegisterSelectedProducts()") < worker.index("LaunchSelectedProducts()") < worker.index("GlassInstallRemoval::Commit")
+assert worker.index("CreateRollbackSnapshot()") < worker.index("StopRunningHosts()")
+# Commit point: registration (rollback-able) precedes the first start; every
+# later step can only add finish-page notes.
+assert worker.index("RegisterSelectedProducts()") < worker.index("LaunchSelectedProducts()")
 assert "SetFailure(" not in worker[worker.index("LaunchSelectedProducts()"):worker.index("MsiEnableLogW(")]
 assert "FinishWarningsJson()" in setup and "hostState.finishWarnings" in ui and "IDS_DONE_WARN_TAG" in rc
-assert "GlassInstallRemoval::Restore" in worker and "restoreRemovalArtifacts()" in worker
+assert "GlassInstallRemoval::Commit" not in worker and "GlassInstallRemoval::Restore" not in worker
+assert worker.count("undoUserDefaults();") == 4 and "UndoSeededProcessLists" in worker
 success_restore = section(engine, "bool InstallEngine::RestorePriorHosts(", "DWORD WINAPI InstallEngine::WorkerThread(")
-assert "selection_.platform32 && prior_.x86WasRunning" in success_restore and "if (selectedOnly) return ok" in success_restore
+# On success only kept (unselected, installed) products Setup stopped are restored; selected ones are launched.
+assert "if (!keptOnly || !selection_.platform32)" in success_restore and "if (keptOnly && selection_.openGlass) return ok" in success_restore
 purge = engine[engine.index("bool InstallEngine::PurgeRemnants()"):]
 assert "DeleteTree(" not in purge and "RemoveDirectoryTree(" not in purge
 warnings = section(setup, "    std::wstring ComponentWarnings()", "    std::wstring ComponentsJson()")
 assert "IDS_COMP_X86_WARNING" in warnings and "IDS_COMP_GS_WARNING" in warnings and 'L"\\n"' in warnings
-assert "ComponentStateId" in setup and "installedSelection_.platform32" in setup and "IDS_COMP_STATE_REMOVE" in rc
+assert "ComponentStateId" in setup and "installedSelection_.platform32" in setup and "IDS_COMP_STATE_KEEP" in rc
+assert "IDS_COMP_STATE_REMOVE" not in rc and "IDS_COMP_BADGE_REMOVE" not in rc and "IDS_STATUS_REMOVE " not in rc
 assert "ActionForInstall" in policy and "ComponentBadgeId" in setup and "ComponentBadgeTone" in setup
-for action in ("INSTALL", "UPDATE", "REMOVE"):
+# Warnings about a missing product apply only when it is neither selected nor installed.
+assert "X86WarningApplies()" in setup and "SettingsWarningApplies()" in setup and "!installedSelection_.glassSettings" in setup
+for action in ("INSTALL", "UPDATE", "KEEP"):
     assert f"IDS_COMP_BADGE_{action}" in setup and rc.count(f"IDS_COMP_BADGE_{action}") == 2
     assert f".comp-badge.action-{action.lower()}" in ui
 assert "item.badgeTone" in ui and "comp-lock" in ui and "item.lockTitle" in ui
@@ -383,7 +406,7 @@ assert "if (!running)" in og_stop and "StopRunningOpenGlassTasks" in og_stop
 assert "ChooseCancellationOrFailure(!ok)" in worker and "failureFinalizing_" in engine_h
 assert "ShouldStartOpenGlass(openGlassStartup_)" in engine and "Snapshot OpenGlass path unavailable" in rollback
 assert "protectedHandles" in util and "FILE_FLAG_OPEN_REPARSE_POINT" in util and "FileDispositionInfo" in util
-assert "PruneEmptyDirectories(openGlassDir_, keptRoots)" in engine and "PruneEmptyDirectories(openGlassDir_,keptRoots)" in unins
+assert "PruneEmptyDirectories(" not in engine and "PruneEmptyDirectories(openGlassDir_,keptRoots)" in unins  # pruning belongs to the uninstaller
 assert "Page::Launching" in setup and "kMinLaunchMs = 5000" in engine
 assert "--demo-tour" in setup and "debugDemoPending_ = false" in setup
 assert "MsiEnableLogW(0, nullptr, 0)" in engine
