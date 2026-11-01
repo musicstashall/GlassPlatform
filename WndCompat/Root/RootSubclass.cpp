@@ -744,7 +744,6 @@ namespace
         UINT_PTR uIdSubclass, DWORD_PTR dwRefData,
         SUBCLASSPROC selfProc)
     {
-        if (WndCompat::IsWindowClass(hWnd, L"CtrlNotifySink") && uMsg != WM_COMMAND) return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         // Снятие субкласса по запросу из чужого потока (Root_DetachAll → SendMessageTimeout).
         // Обрабатываем до шлюза IsShuttingDown — это и есть цель shutdown-пути.
         // RemoveWindowSubclass здесь безопасен: мы в потоке-владельце окна.
@@ -753,6 +752,19 @@ namespace
             RootHandleDetachRootMessage(hWnd, selfProc, uIdSubclass);
             WndCompat::WinEventHook_SignalDetachComplete();
             return 0;
+        }
+
+        // CtrlNotifySink (DirectUI-контейнеры проводника, в т.ч. top-level с Root_Attach):
+        // root-обработка не нужна, пропускаем только WM_COMMAND (CBN_DROPDOWN → ComboLBox_Attach)
+        // и WM_NCDESTROY (снятие с реестра g_rootWindows). Фильтр обязан стоять НИЖЕ
+        // WM_GLASS_DETACH_ROOT: иначе кросс-поточный detach при Stop не доходит до
+        // RemoveWindowSubclass, субкласс переживает FreeLibrary(WndCompat) и первое же
+        // сообщение окну даёт CFG fast-fail в comctl32!CallNextSubclassProc
+        // (дамп explorer 17660: WM_SETCURSOR, uIdSubclass=1, WndCompat+0x25880 выгружен).
+        if (uMsg != WM_COMMAND && uMsg != WM_NCDESTROY
+            && WndCompat::IsWindowClass(hWnd, L"CtrlNotifySink"))
+        {
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         }
 
         if (uMsg == WndCompat::WM_GLASS_REAPPLY_ROOT_BACKDROP)
