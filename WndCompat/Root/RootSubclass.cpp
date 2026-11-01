@@ -744,7 +744,6 @@ namespace
         UINT_PTR uIdSubclass, DWORD_PTR dwRefData,
         SUBCLASSPROC selfProc)
     {
-        if (WndCompat::IsWindowClass(hWnd, L"CtrlNotifySink") && uMsg != WM_COMMAND) return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         // Снятие субкласса по запросу из чужого потока (Root_DetachAll → SendMessageTimeout).
         // Обрабатываем до шлюза IsShuttingDown — это и есть цель shutdown-пути.
         // RemoveWindowSubclass здесь безопасен: мы в потоке-владельце окна.
@@ -753,6 +752,12 @@ namespace
             RootHandleDetachRootMessage(hWnd, selfProc, uIdSubclass);
             WndCompat::WinEventHook_SignalDetachComplete();
             return 0;
+        }
+
+        if (uMsg != WM_COMMAND && uMsg != WM_NCDESTROY
+            && WndCompat::IsWindowClass(hWnd, L"CtrlNotifySink"))
+        {
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         }
 
         if (uMsg == WndCompat::WM_GLASS_REAPPLY_ROOT_BACKDROP)
