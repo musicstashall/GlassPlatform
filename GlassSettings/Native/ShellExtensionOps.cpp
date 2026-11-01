@@ -627,6 +627,26 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterW(
     ::ExitProcess(ok ? 0u : 1u);
 }
 
+namespace
+{
+    // Exit code of the installer helper after a failed register/unregister.
+    // The installer only shows it in its log and on the finish page, so the
+    // code must stay distinguishable from the no-op sentinels (0x4750xxxx with
+    // non-zero bits 8..15) and from rundll32 loader failures (small values):
+    //   0x8xxxxxxx          - HRESULT of the failed package deployment call;
+    //   0x47500000 | id     - OpMessageId when the failure had no HRESULT
+    //                         (missing artifacts, regsvr32 failure, ...);
+    //   1                   - nothing more specific is known.
+    [[nodiscard]] DWORD SetupHelperFailureExitCode() noexcept
+    {
+        const HRESULT hr = GlassSettings::ShellSparsePackage::GetLastSparseDeploymentHr();
+        if (FAILED(hr)) return static_cast<DWORD>(hr);
+        const int id = g_lastOpMessageId.load(std::memory_order_acquire);
+        if (id <= static_cast<int>(OpMessageId::Success) || id > 0xFF) return 1u;
+        return 0x47500000u | static_cast<DWORD>(id);
+    }
+}
+
 // Versioned entry point: unlike the legacy GlassSettings UI API, the installer
 // must use its resolved InstallPath without searching other candidate folders.
 extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSetupV1W(
@@ -681,5 +701,5 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSet
     const bool ok = unregister ? UnregisterBundledDllQuietImpl(root.c_str())
                                : RegisterBundledDllQuietImpl(false, root.c_str());
     GlassSettings_NotifyShellCachesAfterRegistrationChange();
-    ::ExitProcess(ok ? 0u : 1u);
+    ::ExitProcess(ok ? 0u : SetupHelperFailureExitCode());
 }

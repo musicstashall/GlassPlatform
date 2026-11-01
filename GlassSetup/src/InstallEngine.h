@@ -8,6 +8,7 @@
 #include <atomic>
 #include <functional>
 #include <string>
+#include <vector>
 #include <GlassPlatformTask.h>
 
 // Распаковка встроенных MSI и установка через MsiInstallProduct с кооперативной отменой и откатом.
@@ -47,6 +48,30 @@ public:
         std::wstring snapshotFailed;
         std::wstring diskFull;
         std::wstring removing;
+        // Pre-commit registration failures (still roll back).
+        std::wstring autorunTaskFailed;
+        std::wstring ogServiceFailed;
+        // Post-commit notes shown on the finish page (never roll back).
+        std::wstring warnPlatform64Start;
+        std::wstring warnPlatform32Start;
+        std::wstring warnPlatformStartHint;
+        std::wstring warnPlatform64Task;
+        std::wstring warnPlatform32Task;
+        std::wstring warnOpenGlassStart;
+        std::wstring warnOpenGlassHint;
+        std::wstring warnPriorHosts;
+        std::wstring warnPriorHostsHint;
+        std::wstring warnShellConflict;
+        std::wstring warnShellHint;
+        std::wstring warnRemovalCommit;
+    };
+
+    // A finishing step that failed after the commit point (first platform
+    // start). The installation itself is complete and is never rolled back
+    // because of these; the finish page lists them instead.
+    struct FinishWarning {
+        std::wstring title;   // one localized sentence
+        std::wstring detail;  // optional hint and/or technical reason
     };
 
     InstallEngine() noexcept = default;
@@ -68,6 +93,7 @@ public:
 
     bool Poll() noexcept;
     bool Succeeded() const noexcept { return succeeded_; }
+    std::vector<FinishWarning> FinishWarnings() const noexcept;
     bool WasCancelled() const noexcept { return userCancelled_.load(std::memory_order_acquire); }
     bool RollbackSucceeded() const noexcept { return rollbackSucceeded_.load(std::memory_order_acquire); }
     bool IsCancelRequested() const noexcept { return cancelRequested_.load(std::memory_order_acquire); }
@@ -147,7 +173,14 @@ private:
     bool RemoveCreatedHostsForRollback() noexcept;
     bool RunOneMsi(const std::wstring& msiPath, const std::wstring& installDir,
         const std::wstring& label, int progressBase, int progressSpan) noexcept;
-    bool LaunchAndVerifySelectedProducts() noexcept;
+    // Phase B: autostart tasks / OpenGlass service and their validation.
+    // Runs before anything is started, so a failure still rolls back.
+    bool RegisterSelectedProducts() noexcept;
+    // Phase C: start the selected products, restore prior hosts, register the
+    // shell extension. The first start is the commit point: every failure in
+    // here becomes a FinishWarning, never a failure or rollback.
+    void LaunchSelectedProducts() noexcept;
+    void AddFinishWarning(const std::wstring& title, const std::wstring& detail) noexcept;
     bool DetermineCleanInstall() noexcept;
     bool CreateRollbackSnapshot() noexcept;
     bool PerformRollback() noexcept;
@@ -208,6 +241,7 @@ private:
     HINSTANCE instance_ = nullptr;
     mutable SRWLOCK statusLock_ = SRWLOCK_INIT;
     std::wstring statusLine_;
+    std::vector<FinishWarning> finishWarnings_; // guarded by statusLock_
     std::atomic_int progressUnits_{0};
     std::atomic_bool progressReverse_{false};
     bool marquee_ = false;

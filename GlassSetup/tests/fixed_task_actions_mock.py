@@ -25,11 +25,16 @@ def function(text, token):
 args = function(src, "bool ExpectedPlatformArguments(")
 action = function(src, "bool ExpectedAction(")
 validate = function(src, "bool ValidatePlatformTask(")
+# The task/path checks run both before the commit point (RegisterSelectedProducts,
+# still rolls back) and again immediately before each start (LaunchSelectedProducts,
+# notes only).
 for name in ("bool InstallEngine::CapturePriorHostState(", "bool InstallEngine::StopGlassPlatform(",
-             "bool InstallEngine::RestorePriorHosts(", "bool InstallEngine::LaunchAndVerifySelectedProducts("):
+             "bool InstallEngine::RestorePriorHosts(", "bool InstallEngine::RegisterSelectedProducts(",
+             "void InstallEngine::LaunchSelectedProducts("):
     assert "ValidatePlatformTask(" in function(engine, name)
 for name in ("bool InstallEngine::CapturePriorHostState(", "bool InstallEngine::StopRunningHosts(",
-             "bool InstallEngine::RestorePriorHosts(", "bool InstallEngine::LaunchAndVerifySelectedProducts("):
+             "bool InstallEngine::RestorePriorHosts(", "bool InstallEngine::RegisterSelectedProducts(",
+             "void InstallEngine::LaunchSelectedProducts("):
     assert "ValidateOpenGlassPaths(" in function(engine, name)
 assert "QueryFullProcessImageNameW(process,0,image.data(),&size)" in function(src, "bool ValidateOpenGlassPaths(")
 assert "ValidatePlatformTask(" in function(unins, "int RunOperation(")

@@ -135,9 +135,9 @@ assert '<ResourceCompile Include="res\\GlassSetup.rc"' in project
 assert "VerifyEmbeddedNativePayload()" in engine and "kNativeInstallerProtocolExport" in engine
 native = (repo / "GlassSettings/Native/InjectProcessMapNative.cpp").read_text(encoding="utf-8")
 protocol = (repo / "GlassShared/include/InjectModuleScan.h").read_text(encoding="utf-8")
-assert "GlassSettings_InstallerScanProtocolV1" in native and "GlassSettings_InstallerScanProtocolV1" in protocol
+assert "GlassSettings_InstallerScanProtocolV2" in native and "GlassSettings_InstallerScanProtocolV2" in protocol
 build_guard = read("scripts/Verify-InstallerNative.ps1")
-assert "GlassSettings_InstallerScanProtocolV1" in build_guard
+assert "GlassSettings_InstallerScanProtocolV2" in build_guard
 assert "-X86" in project and "-X64" in project and "Verify-InstallerNative.ps1" in project
 assert "<AdditionalDependencies>GlassShared.lib;" not in project
 solution = (repo / "GlassProject.sln").read_text(encoding="utf-8")
@@ -169,7 +169,7 @@ assert "QueryPlatformInstallPath" in util and "QueryOpenGlassInstallPath" in uti
 # Installation is a desired-state operation, not a skip-only selection.
 policy = read("src/GlassProducts.h")
 assert "RemovalForInstall" in policy and "not an uninstall request" not in policy
-sequence = section(engine, "bool InstallEngine::RunMsiSequence()", "bool InstallEngine::LaunchAndVerifySelectedProducts()")
+sequence = section(engine, "bool InstallEngine::RunMsiSequence()", "bool InstallEngine::RegisterSelectedProducts()")
 for token in ("kProductSettingsX64", "kProductSettingsX86", "kProductOpenGlass", "kLegacyOpenGlass",
               "kProductPlatformX86", "kLegacyPlatformX86", "ClearPlatformInstallPath(false)",
               "ClearOpenGlassInstallPath()", "ProductWasSnapshotted"):
@@ -187,7 +187,11 @@ assert "saved.xml != actualXml.value" in removal and "saved.security != actualSe
 assert "GlassRemovalOrder::Commit" in removal and removal_order.index("if (!removeShortcut())") < removal_order.index("if (!removeTask(i))") < removal_order.index("return deleteService()")
 worker = section(engine, "DWORD WINAPI InstallEngine::WorkerThread(", "bool InstallEngine::Start(")
 assert worker.index("CreateRollbackSnapshot()") < worker.index("PrepareProductRemoval()") < worker.index("StopRunningHosts()")
-assert worker.index("LaunchAndVerifySelectedProducts()") < worker.index("GlassInstallRemoval::Commit")
+# Commit point: registration (rollback-able) precedes the first start; the removal commit and
+# every later step can only add finish-page notes.
+assert worker.index("RegisterSelectedProducts()") < worker.index("LaunchSelectedProducts()") < worker.index("GlassInstallRemoval::Commit")
+assert "SetFailure(" not in worker[worker.index("LaunchSelectedProducts()"):worker.index("MsiEnableLogW(")]
+assert "FinishWarningsJson()" in setup and "hostState.finishWarnings" in ui and "IDS_DONE_WARN_TAG" in rc
 assert "GlassInstallRemoval::Restore" in worker and "restoreRemovalArtifacts()" in worker
 success_restore = section(engine, "bool InstallEngine::RestorePriorHosts(", "DWORD WINAPI InstallEngine::WorkerThread(")
 assert "selection_.platform32 && prior_.x86WasRunning" in success_restore and "if (selectedOnly) return ok" in success_restore

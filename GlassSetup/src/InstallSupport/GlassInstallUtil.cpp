@@ -1427,35 +1427,90 @@ void DeleteStartMenuShortcut() noexcept {
     removeIn(FOLDERID_Programs);
 }
 
+namespace {
+
+// Technical description of a failed GlassSettings_ShellExtRegisterSetupV1W run.
+// Mirrors SetupHelperFailureExitCode() in GlassSettings/Native/ShellExtensionOps.cpp:
+// 0x8xxxxxxx = HRESULT of the deployment call, 0x47500000|id = OpMessageId
+// without an HRESULT, 1 = generic failure.
+std::wstring DescribeShellHelperExit(DWORD exitCode, bool started, bool completed) {
+    if (!started) return L"helper process could not be started";
+    if (!completed) return L"helper process did not finish within 45 s";
+    if ((exitCode & 0xFFFFFF00u)==0x47500000u) {
+        const wchar_t* reason=nullptr;
+        switch (exitCode & 0xFFu) {
+        case 7: reason=L"sparse package artifacts are missing"; break;
+        case 8: reason=L"developer certificate step failed"; break;
+        case 9: reason=L"package deployment failed"; break;
+        case 10: reason=L"registration failed"; break;
+        case 11: reason=L"unregistration failed"; break;
+        case 12: reason=L"external location conflict"; break;
+        default: break;
+        }
+        wchar_t text[160]{};
+        if (reason) swprintf_s(text,L"helper reported: %s (0x%08lX)",reason,exitCode);
+        else swprintf_s(text,L"helper exit code 0x%08lX",exitCode);
+        return text;
+    }
+    if (exitCode & 0x80000000u) {
+        wchar_t message[512]{};
+        const DWORD len=FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,nullptr,exitCode,0,
+            message,static_cast<DWORD>(std::size(message)),nullptr);
+        std::wstring detail=L"HRESULT 0x";
+        wchar_t hex[16]{};
+        swprintf_s(hex,L"%08lX",exitCode);
+        detail+=hex;
+        if (len) {
+            std::wstring system(message,len);
+            while (!system.empty() && (system.back()==L'\r' || system.back()==L'\n' || system.back()==L' ')) system.pop_back();
+            if (!system.empty()) detail+=L" - "+system;
+        }
+        return detail;
+    }
+    wchar_t text[64]{};
+    swprintf_s(text,L"helper exit code %lu",exitCode);
+    return text;
+}
+
+} // namespace
+
 bool InvokeShellExtRegistration(
     bool registerExtension,
     const std::wstring& x64Dir,
     const std::wstring& x86Dir,
     bool* registrationMayHaveChanged,
-    bool* registrationConflict) noexcept {
+    bool* registrationConflict,
+    std::wstring* failureDetail) noexcept {
     if (registrationMayHaveChanged) *registrationMayHaveChanged=false;
     if (registrationConflict) *registrationConflict=false;
+    auto fail=[failureDetail](const wchar_t* detail) noexcept {
+        if (failureDetail) {
+            try { *failureDetail=detail; } catch (...) {}
+        }
+        return false;
+    };
     const bool os64 = IsOs64Bit();
     const auto arch = os64
         ? GlassShared::GlassPlatformTask::PlatformArch::X64
         : GlassShared::GlassPlatformTask::PlatformArch::X86;
     const std::wstring& selectedRoot=os64 ? x64Dir : x86Dir;
     const std::wstring root=TrimTrailingSlashes(selectedRoot);
-    if (root.empty() || root.find(L'"')!=std::wstring::npos || !IsSafeInstallPath(root)) return false;
+    if (root.empty() || root.find(L'"')!=std::wstring::npos || !IsSafeInstallPath(root))
+        return fail(L"install root is empty or unsafe");
     const std::wstring dll = NativeDllForArch(arch, x64Dir, x86Dir);
     const WORD machine=os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386;
     if (dll.empty() || !PeMatches(dll,machine,kInstallerShellExport)) {
         // Windows 11 requires the sparse package; do not silently substitute legacy regsvr32.
         // On 32-bit Windows 10, legacy registration is the supported fallback.
-        if (os64) return false;
+        if (os64) return fail(L"GlassSettings.Native.dll with the setup export was not found");
         const std::wstring shellExt = root + L"\\GlassShellExt.dll";
-        if (!IsSafeInstallPath(shellExt) || !PathFileExistsW(shellExt.c_str())) return false;
+        if (!IsSafeInstallPath(shellExt) || !PathFileExistsW(shellExt.c_str())) return fail(L"GlassShellExt.dll was not found");
         if (HasExistingShellRegistrationKeys()) {
             const bool matches=HasMatchingLegacyShellRegistration(root);
             if (!matches) {
                 GlassInstallLog::Line(L"ShellExt: existing legacy registration does not match the selected root");
                 if (registrationConflict) *registrationConflict=true;
-                return false;
+                return fail(L"existing legacy registration points to another folder");
             }
             if (registerExtension) return true;
         }
@@ -1467,10 +1522,18 @@ bool InvokeShellExtRegistration(
         DWORD exitCode=1;
         const bool result=RunHiddenCommand(command,&exitCode,45000,&started) && exitCode==0;
         if (registrationMayHaveChanged) *registrationMayHaveChanged=started;
-        return result;
+        GlassInstallLog::LineFormat(L"ShellExt %s via regsvr32: started=%d exit=%lu",
+            registerExtension ? L"register" : L"unregister", started ? 1 : 0, exitCode);
+        if (!result) {
+            if (!started) return fail(L"regsvr32 could not be started");
+            wchar_t detail[64]{};
+            swprintf_s(detail,L"regsvr32 exit code %lu",exitCode);
+            return fail(detail);
+        }
+        return true;
     }
     const std::wstring rundll = os64 ? NativeRundll64() : RundllPathForTaskArch(arch);
-    if (rundll.empty()) return false;
+    if (rundll.empty()) return fail(L"rundll32.exe was not found");
     std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\",GlassSettings_ShellExtRegisterSetupV1W ";
     cmd += registerExtension ? L"/register" : L"/unregister";
     cmd += L" /installroot \"" + root + L"\"";
@@ -1482,10 +1545,14 @@ bool InvokeShellExtRegistration(
     const bool alreadyRegistered=registerExtension && completed && exitCode==kShellAlreadyRegistered;
     const bool conflict=completed && exitCode==kShellRegistrationConflict;
     if (registrationMayHaveChanged) *registrationMayHaveChanged=started && !alreadyRegistered && !conflict;
-    GlassInstallLog::LineFormat(L"ShellExt %s via Native.dll: ran=%d exit=%lu existing=%d conflict=%d",
+    GlassInstallLog::LineFormat(L"ShellExt %s via Native.dll: ran=%d exit=0x%08lX existing=%d conflict=%d",
         registerExtension ? L"register" : L"unregister", ran ? 1 : 0, exitCode, alreadyRegistered?1:0, conflict?1:0);
     if (registrationConflict) *registrationConflict=conflict;
-    return alreadyRegistered || (ran && exitCode == 0);
+    if (alreadyRegistered || (ran && exitCode == 0)) return true;
+    if (conflict) return fail(L"an existing or unverifiable registration was preserved");
+    const std::wstring detail=DescribeShellHelperExit(exitCode,started,completed);
+    GlassInstallLog::LineFormat(L"ShellExt %s failed: %s", registerExtension ? L"register" : L"unregister", detail.c_str());
+    return fail(detail.c_str());
 }
 
 } // namespace GlassInstallUtil

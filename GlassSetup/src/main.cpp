@@ -1213,6 +1213,8 @@ private:
     std::wstring updateUrl_;
     std::wstring updateBody_;
     std::wstring errorReason_;
+    // Post-commit notes captured when the Complete page is entered.
+    std::vector<InstallEngine::FinishWarning> finishWarnings_;
     std::wstring holdReport_;
     InstallEngine installEngine_;
     std::wstring userDataFolder_;
@@ -1655,6 +1657,14 @@ private:
         else if (selection_.glassSettings) add(L"SETTINGS",9900);
         return json+L"]";
     }
+    std::wstring FinishWarningsJson() const {
+        std::wstring json=L"[";
+        for (const auto& warning:finishWarnings_) {
+            if (json.size()>1) json+=L",";
+            json+=L"{\"title\":"+JsStringLiteral(warning.title)+L",\"detail\":"+JsStringLiteral(warning.detail)+L"}";
+        }
+        return json+L"]";
+    }
     void SyncWebViewState() {
         if (!web_ || !webReady_ || !webBridgeReady_) return;
         if (!webInitSent_) {
@@ -1688,6 +1698,10 @@ private:
                 L",\"doneBody\":"+JsStringLiteral(Text(doneBodyId))+
                 L",\"doneNote\":"+JsStringLiteral(Text(doneNoteId))+
                 L",\"doneReady\":"+JsStringLiteral(Text(IDS_DONE_READY))+
+                L",\"doneWarnTag\":"+JsStringLiteral(Text(IDS_DONE_WARN_TAG))+
+                L",\"doneWarnTitle\":"+JsStringLiteral(Text(IDS_DONE_WARN_TITLE))+
+                L",\"doneWarnBody\":"+JsStringLiteral(Text(IDS_DONE_WARN_BODY))+
+                L",\"doneWarnLabel\":"+JsStringLiteral(Text(IDS_DONE_WARN_LABEL))+
                 L",\"errorTag\":"+JsStringLiteral(Text(IDS_ERROR_TAG))+
                 L",\"errorTitle\":"+JsStringLiteral(Text(IDS_ERROR_TITLE))+
                 L",\"errorBody\":"+JsStringLiteral(Text(IDS_ERROR_BODY))+
@@ -1727,6 +1741,7 @@ private:
             L",\"blockReason\":"+JsStringLiteral(blockReason_)+
             L",\"downgradeBody\":"+JsStringLiteral(downgradeBody_)+
             L",\"errorReason\":"+JsStringLiteral(errorReason_)+
+            L",\"finishWarnings\":"+FinishWarningsJson()+
             L",\"cancelledDetail\":"+JsStringLiteral(cancelledDetail_)+
             L",\"status\":"+JsStringLiteral(installStatusLine_)+
             L",\"percent\":"+std::to_wstring(percent_)+
@@ -2066,6 +2081,20 @@ private:
         labels.purgeFailed = Text(IDS_ERR_PURGE_FAILED);
         labels.platformDidNotStart = Text(IDS_ERR_PLATFORM_START);
         labels.shellRegisterFailed = Text(IDS_ERR_SHELL_REGISTER);
+        labels.autorunTaskFailed = Text(IDS_ERR_AUTORUN_TASK);
+        labels.ogServiceFailed = Text(IDS_ERR_OG_SERVICE);
+        labels.warnPlatform64Start = Text(IDS_WARN_PLATFORM64_START);
+        labels.warnPlatform32Start = Text(IDS_WARN_PLATFORM32_START);
+        labels.warnPlatformStartHint = Text(IDS_WARN_PLATFORM_START_HINT);
+        labels.warnPlatform64Task = Text(IDS_WARN_PLATFORM64_TASK);
+        labels.warnPlatform32Task = Text(IDS_WARN_PLATFORM32_TASK);
+        labels.warnOpenGlassStart = Text(IDS_WARN_OG_START);
+        labels.warnOpenGlassHint = Text(IDS_WARN_OG_HINT);
+        labels.warnPriorHosts = Text(IDS_WARN_PRIOR_HOSTS);
+        labels.warnPriorHostsHint = Text(IDS_WARN_PRIOR_HOSTS_HINT);
+        labels.warnShellConflict = Text(IDS_WARN_SHELL_CONFLICT);
+        labels.warnShellHint = Text(IDS_WARN_SHELL_HINT);
+        labels.warnRemovalCommit = Text(IDS_WARN_REMOVAL_COMMIT);
         labels.rollbackFailed = Text(IDS_ERR_ROLLBACK_FAILED);
         labels.rollbackRestored = Text(IDS_ERR_ROLLBACK_RESTORED);
         labels.rollbackRemoved = Text(IDS_ERR_ROLLBACK_REMOVED);
@@ -2297,6 +2326,9 @@ private:
             progressTarget_=10000;
             progressReverse_=false;
             progressMarquee_=false;
+            // Preview the "done with notes" variant of the finish page.
+            finishWarnings_={{Text(IDS_ERR_SHELL_REGISTER),Text(IDS_WARN_SHELL_HINT)+L" (HRESULT 0x800B0109)"},
+                             {Text(IDS_WARN_PLATFORM32_START),Text(IDS_WARN_PLATFORM_START_HINT)}};
             break;
         case Page::Error:
             errorReason_=Text(IDS_DEBUG_ERROR_REASON);
@@ -2480,6 +2512,7 @@ private:
             ? Text(IDS_STATUS_ROLLBACK) : installEngine_.StatusLine();
         if (finished && installEngine_.Succeeded() && launchStarted_ && now-launchStarted_>=5000) {
             KillTimer(window,kInstallTimer); progressValue_=displayProgress_=10000; percent_=100;
+            finishWarnings_=installEngine_.FinishWarnings();
             SetPage(Page::Complete); return;
         }
         InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter();
@@ -3039,6 +3072,28 @@ private:
             DrawLabel(dc,Text(title),Box(48,150,540,75),heading_,white);
             DrawLabel(dc,Text(body),Box(48,235,520,140),font_,muted);
             if (page_==Page::Cancelled && !cancelledDetail_.empty()) DrawLabel(dc,cancelledDetail_,Box(48,380,520,80),font_,white);
+            DrawSuccessIllustration(dc);
+        } else if (page_ == Page::Complete && !finishWarnings_.empty()) {
+            // Installed, but some finishing steps failed after the commit point.
+            DrawBanner(dc,true);
+            DrawHeroPanel(dc,32,120,558,408,RGB(226,186,120));
+            DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
+            DrawLabel(dc,Text(IDS_DONE_WARN_TAG),Box(48,139,400,25),small_,RGB(255,214,160));
+            DrawLabel(dc,Text(IDS_DONE_WARN_TITLE),Box(48,177,440,104),title_,white);
+            DrawLabel(dc,Text(IDS_DONE_WARN_BODY),Box(48,286,440,66),font_,muted);
+            DrawLabel(dc,Text(IDS_DONE_WARN_LABEL),Box(48,356,400,18),small_,RGB(255,214,160));
+            int y=376;
+            size_t shown=0;
+            for (const auto& warning:finishWarnings_) {
+                if (shown==3 && finishWarnings_.size()>4) {
+                    DrawLabel(dc,L"+"+std::to_wstring(finishWarnings_.size()-shown),Box(48,y,440,20),small_,muted);
+                    break;
+                }
+                std::wstring line=L"\u2022 "+warning.title;
+                if (!warning.detail.empty()) line+=L" "+warning.detail;
+                DrawLabel(dc,line,Box(48,y,470,36),small_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
+                y+=38; ++shown;
+            }
             DrawSuccessIllustration(dc);
         } else if (page_ == Page::Complete) {
             DrawBanner(dc,true);

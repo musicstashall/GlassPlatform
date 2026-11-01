@@ -96,11 +96,15 @@ bool StartMenuShortcutExists() noexcept;
 bool CreateStartMenuShortcut(const std::wstring& targetExe, const std::wstring& workingDir) noexcept;
 void DeleteStartMenuShortcut() noexcept;
 
+// failureDetail (optional) receives a short technical, language-neutral
+// description of why the helper failed (exit code, decoded HRESULT); it is
+// meant for the log and the finish-page notes, not as a user-facing sentence.
 bool InvokeShellExtRegistration(
     bool registerExtension,
     const std::wstring& x64Dir,
     const std::wstring& x86Dir,
     bool* registrationMayHaveChanged = nullptr,
-    bool* registrationConflict = nullptr) noexcept;
+    bool* registrationConflict = nullptr,
+    std::wstring* failureDetail = nullptr) noexcept;
 
 } // namespace GlassInstallUtil

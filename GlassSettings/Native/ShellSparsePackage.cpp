@@ -791,6 +791,11 @@ namespace GlassSettings::ShellSparsePackage
         return static_cast<SparsePackageError>(g_lastSparsePackageError.load(std::memory_order_acquire));
     }
 
+    HRESULT GetLastSparseDeploymentHr() noexcept
+    {
+        return g_lastDeploymentHr.load(std::memory_order_acquire);
+    }
+
     bool IsSparsePackageInstalledForCurrentUser() noexcept
     {
         WinRtApartmentScope apartment;
@@ -947,6 +952,7 @@ namespace GlassSettings::ShellSparsePackage
     bool RegisterSparsePackageQuiet(bool provisionDevCertificate, const wchar_t* exactPlatformRoot) noexcept
     {
         SetLastSparsePackageError(SparsePackageError::None);
+        g_lastDeploymentHr.store(S_OK, std::memory_order_release);
 
         wchar_t outDir[MAX_PATH]{};
         wchar_t sparseDir[MAX_PATH]{};
@@ -1125,6 +1131,7 @@ namespace GlassSettings::ShellSparsePackage
         {
             DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: 0x%08X %ls",
                 static_cast<unsigned>(ex.code()), ex.message().c_str());
+            g_lastDeploymentHr.store(static_cast<HRESULT>(ex.code()), std::memory_order_release);
             SetLastSparsePackageError(SparsePackageError::DeploymentFailed);
             return false;
         }

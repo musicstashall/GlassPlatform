@@ -522,8 +522,15 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             }
             if (beginLaunch) {
                 const ULONGLONG launchStart = GetTickCount64();
-                ok = self->LaunchAndVerifySelectedProducts();
+                // Phase B still rolls back: tasks and the service are registered
+                // and validated while nothing has been started yet.
+                ok = self->RegisterSelectedProducts();
                 if (ok) {
+                    // Commit point. From here on the products are started and the
+                    // installation is final: no step below may fail the install
+                    // or trigger a rollback; problems become finish-page notes.
+                    InstallLog::Line(L"Launch: commit point reached, rollback is no longer possible");
+                    self->LaunchSelectedProducts();
                     constexpr ULONGLONG kMinLaunchMs = 5000;
                     for (;;) {
                         const ULONGLONG elapsed = GetTickCount64() - launchStart;
@@ -532,16 +539,17 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                         const ULONGLONG remain = kMinLaunchMs - elapsed;
                         Sleep(remain > 150 ? 150 : static_cast<DWORD>(remain));
                     }
-                    // No cancellation is accepted after the launch boundary.
                     // The last step may delete a service whose credentials cannot
-                    // be snapshotted; no fallible work follows that commit.
+                    // be snapshotted, which is exactly why it runs after the
+                    // commit point and can only produce a note.
                     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
                     std::wstring removalError;
-                    ok = GlassInstallRemoval::Commit(self->removalSession_, ru, removalError);
-                    if (!ok) self->SetFailure(removalError.empty()
-                        ? (ru ? L"Не удалось завершить удаление компонентов." : L"Could not finish removing components.")
-                        : removalError, 0);
-                    else self->SetStatus(self->labels_.finalize, 10000);
+                    if (!GlassInstallRemoval::Commit(self->removalSession_, ru, removalError)) {
+                        self->AddFinishWarning(self->labels_.warnRemovalCommit.empty()
+                            ? L"Could not finish removing previously installed components." : self->labels_.warnRemovalCommit,
+                            removalError);
+                    }
+                    self->SetStatus(self->labels_.finalize, 10000);
                 }
             }
 
@@ -1577,77 +1585,85 @@ bool InstallEngine::RunMsiSequence() noexcept {
     return true;
 }
 
-bool InstallEngine::LaunchAndVerifySelectedProducts() noexcept {
+namespace {
+
+// Do not re-enable a user-disabled task, even if its host was running before setup.
+bool ShouldStartPlatformArch(bool taskExistedBefore, bool taskEnabledBefore, bool wasRunningBefore) noexcept {
+    return taskExistedBefore ? (wasRunningBefore && taskEnabledBefore) : true;
+}
+
+std::wstring JoinWarningDetail(const std::wstring& hint, const std::wstring& technical) {
+    if (technical.empty()) return hint;
+    if (hint.empty()) return technical;
+    return hint + L" (" + technical + L")";
+}
+
+} // namespace
+
+void InstallEngine::AddFinishWarning(const std::wstring& title, const std::wstring& detail) noexcept {
+    InstallLog::LineFormat(L"Finish note: %s%s%s", title.c_str(), detail.empty() ? L"" : L" | ", detail.c_str());
+    try {
+        FinishWarning warning{title, detail};
+        AcquireSRWLockExclusive(&statusLock_);
+        try { finishWarnings_.push_back(std::move(warning)); } catch (...) {}
+        ReleaseSRWLockExclusive(&statusLock_);
+    } catch (...) {
+        // The note is already in the log; the finish page simply shows fewer lines.
+    }
+}
+
+std::vector<InstallEngine::FinishWarning> InstallEngine::FinishWarnings() const noexcept {
+    std::vector<FinishWarning> copy;
+    AcquireSRWLockShared(&statusLock_);
+    try { copy = finishWarnings_; } catch (...) { copy.clear(); }
+    ReleaseSRWLockShared(&statusLock_);
+    return copy;
+}
+
+// Phase B. Everything here runs before the first product start, so the
+// rollback snapshot is still authoritative and any failure is fatal.
+bool InstallEngine::RegisterSelectedProducts() noexcept {
     const bool is64 = scanNativeX64_;
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
 
     SetStatus(labels_.finalize, 9200);
-    auto configureAndStartArch = [this](
+    auto registerArch = [this, ru](
         GP::PlatformArch arch,
         const std::wstring& dir,
         bool taskExistedBefore,
         bool taskEnabledBefore,
-        bool wasRunningBefore,
-        const std::wstring& label,
-        int pct) -> bool {
+        bool wasRunningBefore) -> bool {
         if (!taskExistedBefore) {
             if (!GlassInstallHost::EnsureGlassAutorunTask(arch, dir, true, true)) {
                 InstallLog::LineFormat(L"Autostart: failed to register task for arch %d", static_cast<int>(arch));
+                SetFailure(labels_.autorunTaskFailed.empty()
+                    ? L"Could not register the platform autostart task." : labels_.autorunTaskFailed, 0);
                 return false;
             }
             if (arch==GP::PlatformArch::X64) x64TaskCreatedBySetup_=true;
             else x86TaskCreatedBySetup_=true;
         }
-        // Do not re-enable a user-disabled task, even if its host was running before setup.
-        const bool shouldStart = taskExistedBefore ? (wasRunningBefore && taskEnabledBefore) : true;
-        if (!shouldStart) {
-            InstallLog::LineFormat(L"Autostart: task disabled by user prior to upgrade, skip start arch %d",
-                static_cast<int>(arch));
-            return true;
+        if (!ShouldStartPlatformArch(taskExistedBefore, taskEnabledBefore, wasRunningBefore)) return true;
+        if (GP::IsGlassPlatformRunning(arch)) return true;
+        // The task that is about to be started must still be ours while a
+        // rollback can remove it; the check is repeated right before the start.
+        std::wstring error;
+        if (!GlassInstallRemoval::ValidatePlatformTask(arch,dir,true,false,ru,error)) {
+            InstallLog::LineFormat(L"Autostart: refusing changed task for arch %d: %s",static_cast<int>(arch),error.c_str());
+            SetFailure(error,0);
+            return false;
         }
-        SetStatus(label, pct);
-        if (!GP::IsGlassPlatformRunning(arch)) {
-            // Repeat the full action check immediately before starting a task.
-            std::wstring error;
-            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-            if (!GlassInstallRemoval::ValidatePlatformTask(arch,dir,true,false,ru,error)) {
-                InstallLog::LineFormat(L"Autostart: refusing changed task for arch %d: %s",static_cast<int>(arch),error.c_str());
-                return false;
-            }
-            InstallLog::LineFormat(L"Autostart: StartPlatform arch %d", static_cast<int>(arch));
-            GP::StartPlatform(arch);
-            const ULONGLONG start = GetTickCount64();
-            while (!GP::IsGlassPlatformRunning(arch)) {
-                if (GetTickCount64() - start >= GP::kDefaultPlatformShutdownWaitMs)
-                    return false;
-                Sleep(200);
-            }
-        }
-        InstallLog::LineFormat(L"Autostart: platform running arch %d", static_cast<int>(arch));
         return true;
     };
 
-    if (is64 && selection_.platform64) {
-        if (!configureAndStartArch(GP::PlatformArch::X64, x64Dir_,
-                prior_.x64TaskExisted, prior_.x64TaskEnabled, prior_.x64WasRunning,
-                labels_.start64, 9500)) {
-            SetFailure(labels_.platformDidNotStart.empty()
-                ? L"Platform did not start." : labels_.platformDidNotStart, 0);
-            return false;
-        }
-    }
-
-    if (selection_.platform32) {
-        if (!configureAndStartArch(GP::PlatformArch::X86, x86Dir_,
-                prior_.x86TaskExisted, prior_.x86TaskEnabled, prior_.x86WasRunning,
-                labels_.start86, 9750)) {
-            SetFailure(labels_.platformDidNotStart.empty()
-                ? L"Platform did not start." : labels_.platformDidNotStart, 0);
-            return false;
-        }
-    }
+    if (is64 && selection_.platform64 &&
+        !registerArch(GP::PlatformArch::X64, x64Dir_, prior_.x64TaskExisted, prior_.x64TaskEnabled, prior_.x64WasRunning))
+        return false;
+    if (selection_.platform32 &&
+        !registerArch(GP::PlatformArch::X86, x86Dir_, prior_.x86TaskExisted, prior_.x86TaskEnabled, prior_.x86WasRunning))
+        return false;
 
     if (is64 && selection_.openGlass) {
-        SetStatus(labels_.startOg, 9900);
         if (!openGlassStartup_.valid) {
             SetFailure(L"OpenGlass startup state was not captured; no automatic launch was attempted.",0);
             return false;
@@ -1657,21 +1673,91 @@ bool InstallEngine::LaunchAndVerifySelectedProducts() noexcept {
             // introduce automatic startup for that existing installation.
             const DWORD startType=openGlassStartup_.filesPresent ? SERVICE_DEMAND_START : SERVICE_AUTO_START;
             if (!GlassInstallHost::EnsureOpenGlassService(openGlassDir_, startType)) {
-                SetFailure(L"Could not register OpenGlassHost service",0);
+                SetFailure(labels_.ogServiceFailed.empty()
+                    ? L"Could not register the OpenGlassHost service." : labels_.ogServiceFailed,0);
                 return false;
             }
             ogServiceCreatedBySetup_=true;
         }
-        const bool shouldStartOg = GlassProducts::ShouldStartOpenGlass(openGlassStartup_);
-        InstallLog::LineFormat(L"Autostart: OpenGlass files-at-start=%d running-at-start=%d start=%d",
-            openGlassStartup_.filesPresent ? 1 : 0, openGlassStartup_.wasRunning ? 1 : 0, shouldStartOg ? 1 : 0);
-        if (shouldStartOg) {
+        if (GlassProducts::ShouldStartOpenGlass(openGlassStartup_)) {
             std::wstring pathError;
-            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
             if (!GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,&cancelRequested_,ru,pathError)) {
                 if (!IsCancelRequested()) SetFailure(pathError,0);
                 return false;
             }
+        }
+    }
+    return true;
+}
+
+// Phase C. The first StartPlatform call is the commit point of the whole
+// installation: the files, tasks and service are final, so nothing in this
+// routine may fail the install. Each problem is logged and shown as a note.
+void InstallEngine::LaunchSelectedProducts() noexcept {
+    const bool is64 = scanNativeX64_;
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+
+    auto startArch = [this, ru](
+        GP::PlatformArch arch,
+        const std::wstring& dir,
+        bool taskExistedBefore,
+        bool taskEnabledBefore,
+        bool wasRunningBefore,
+        const std::wstring& label,
+        int pct,
+        const std::wstring& warnStart,
+        const std::wstring& warnTask) {
+        if (!ShouldStartPlatformArch(taskExistedBefore, taskEnabledBefore, wasRunningBefore)) {
+            InstallLog::LineFormat(L"Autostart: task disabled by user prior to upgrade, skip start arch %d",
+                static_cast<int>(arch));
+            return;
+        }
+        SetStatus(label, pct);
+        if (!GP::IsGlassPlatformRunning(arch)) {
+            // Repeat the full action check immediately before starting a task.
+            std::wstring error;
+            if (!GlassInstallRemoval::ValidatePlatformTask(arch,dir,true,false,ru,error)) {
+                InstallLog::LineFormat(L"Autostart: refusing changed task for arch %d: %s",static_cast<int>(arch),error.c_str());
+                AddFinishWarning(warnTask.empty()
+                    ? L"The platform autostart task changed during setup; the platform was not started." : warnTask, error);
+                return;
+            }
+            InstallLog::LineFormat(L"Autostart: StartPlatform arch %d", static_cast<int>(arch));
+            GP::StartPlatform(arch);
+            const ULONGLONG start = GetTickCount64();
+            while (!GP::IsGlassPlatformRunning(arch)) {
+                if (GetTickCount64() - start >= GP::kDefaultPlatformShutdownWaitMs) {
+                    InstallLog::LineFormat(L"Autostart: platform did not report running within %lu ms, arch %d",
+                        static_cast<unsigned long>(GP::kDefaultPlatformShutdownWaitMs), static_cast<int>(arch));
+                    AddFinishWarning(warnStart.empty()
+                        ? L"The platform did not start within the time limit." : warnStart, labels_.warnPlatformStartHint);
+                    return;
+                }
+                Sleep(200);
+            }
+        }
+        InstallLog::LineFormat(L"Autostart: platform running arch %d", static_cast<int>(arch));
+    };
+
+    if (is64 && selection_.platform64)
+        startArch(GP::PlatformArch::X64, x64Dir_, prior_.x64TaskExisted, prior_.x64TaskEnabled, prior_.x64WasRunning,
+            labels_.start64, 9500, labels_.warnPlatform64Start, labels_.warnPlatform64Task);
+    if (selection_.platform32)
+        startArch(GP::PlatformArch::X86, x86Dir_, prior_.x86TaskExisted, prior_.x86TaskEnabled, prior_.x86WasRunning,
+            labels_.start86, 9750, labels_.warnPlatform32Start, labels_.warnPlatform32Task);
+
+    if (is64 && selection_.openGlass) {
+        SetStatus(labels_.startOg, 9900);
+        const bool shouldStartOg = GlassProducts::ShouldStartOpenGlass(openGlassStartup_);
+        InstallLog::LineFormat(L"Autostart: OpenGlass files-at-start=%d running-at-start=%d start=%d",
+            openGlassStartup_.filesPresent ? 1 : 0, openGlassStartup_.wasRunning ? 1 : 0, shouldStartOg ? 1 : 0);
+        const std::wstring warnOg = labels_.warnOpenGlassStart.empty() ? L"OpenGlass did not start." : labels_.warnOpenGlassStart;
+        std::wstring pathError;
+        if (shouldStartOg && !GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,nullptr,ru,pathError)) {
+            // Re-checked after the commit point: a changed backend is not started, but
+            // the installation is complete, so this is a note rather than a failure.
+            AddFinishWarning(warnOg, pathError);
+        } else if (shouldStartOg) {
             bool startupAccepted=false;
             const bool serviceBackend=prior_.ogServiceExisted || ogServiceCreatedBySetup_;
             if (serviceBackend && prior_.ogServiceExisted && prior_.ogServiceStartType==SERVICE_DISABLED) {
@@ -1686,46 +1772,49 @@ bool InstallEngine::LaunchAndVerifySelectedProducts() noexcept {
                 startupAccepted=GlassInstallUtil::RunEnabledOpenGlassTask();
             }
             if (!startupAccepted) {
-                SetFailure(L"OpenGlassHost could not be started.",0);
-                return false;
-            }
-            bool running=false, known=true;
-            const ULONGLONG start = GetTickCount64();
-            do {
-                if (serviceBackend) running=GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe");
-                else known=GlassInstallUtil::QueryOpenGlassRunning(running); // legacy task need not use OpenGlassHost.exe
-                if (running || !known || GetTickCount64()-start>=15000) break;
-                Sleep(250);
-            } while (true);
-            InstallLog::LineFormat(L"Autostart: OpenGlass running=%d known=%d",running?1:0,known?1:0);
-            if (!running || !known) {
-                SetFailure(L"OpenGlassHost did not start within the timeout.",0);
-                return false;
+                InstallLog::Line(L"Autostart: OpenGlassHost start request was refused");
+                AddFinishWarning(warnOg, JoinWarningDetail(labels_.warnOpenGlassHint,
+                    serviceBackend ? L"service start request failed" : L"legacy task could not be run"));
+            } else {
+                bool running=false, known=true;
+                const ULONGLONG start = GetTickCount64();
+                do {
+                    if (serviceBackend) running=GlassInstallUtil::ImageRunning(L"OpenGlassHost.exe");
+                    else known=GlassInstallUtil::QueryOpenGlassRunning(running); // legacy task need not use OpenGlassHost.exe
+                    if (running || !known || GetTickCount64()-start>=15000) break;
+                    Sleep(250);
+                } while (true);
+                InstallLog::LineFormat(L"Autostart: OpenGlass running=%d known=%d",running?1:0,known?1:0);
+                if (!running || !known)
+                    AddFinishWarning(warnOg, JoinWarningDetail(labels_.warnOpenGlassHint,
+                        known ? L"OpenGlassHost did not report running within 15 s" : L"running state could not be queried"));
             }
         }
     }
 
     if (!RestorePriorHosts(true)) {
-        SetFailure(L"Could not restart a previously running component.",0);
-        return false;
+        AddFinishWarning(labels_.warnPriorHosts.empty()
+            ? L"A previously running component could not be restarted." : labels_.warnPriorHosts, labels_.warnPriorHostsHint);
     }
     // Register by default on both fresh installs and reinstalls. The helper
-    // preserves an existing registration and reports whether it changed one,
-    // so rollback only removes a registration made by this setup. Never add or
-    // trust a developer certificate on the user's machine.
+    // preserves an existing registration and reports whether it changed one.
+    // Never add or trust a developer certificate on the user's machine. On
+    // systems that reject the package (e.g. no trusted signer) the install is
+    // still complete: the menu is simply unavailable until registered later.
     bool shellConflict=false;
-    if (!GlassInstallUtil::InvokeShellExtRegistration(true,x64Dir_,x86Dir_,&shellRegisteredBySetup_,&shellConflict)) {
+    std::wstring shellDetail;
+    if (!GlassInstallUtil::InvokeShellExtRegistration(true,x64Dir_,x86Dir_,&shellRegisteredBySetup_,&shellConflict,&shellDetail)) {
         if (shellConflict) {
-            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-            SetFailure(ru ? L"Обнаружена существующая или непроверяемая регистрация расширения оболочки. Она сохранена без изменений; проверьте журнал."
-                          : L"An existing or unverifiable shell registration was preserved without changes; check the log.",0);
+            AddFinishWarning(labels_.warnShellConflict.empty()
+                ? L"An existing or unverifiable shell registration was preserved without changes." : labels_.warnShellConflict,
+                shellDetail);
         } else {
-            SetFailure(labels_.shellRegisterFailed.empty()?L"Could not register the Windows shell extension.":labels_.shellRegisterFailed,0);
+            AddFinishWarning(labels_.shellRegisterFailed.empty()
+                ? L"Could not register the Windows shell extension." : labels_.shellRegisterFailed,
+                JoinWarningDetail(labels_.warnShellHint, shellDetail));
         }
-        return false;
     }
     SetStatus(labels_.finalize, 9950);
-    return true;
 }
 
 bool InstallEngine::DetermineCleanInstall() noexcept {

@@ -29,12 +29,20 @@ def function(token):
 worker = section("DWORD WINAPI InstallEngine::WorkerThread(", "bool InstallEngine::Start(")
 stages = ["CapturePriorHostState()", "ExtractPayload(", "VerifyEmbeddedNativePayload()", "CreateRollbackSnapshot()", "PrepareProductRemoval()",
           "CloseGlassSettingsProcesses(", "StopRunningHosts()", "InstallGlassSettingsEarly()",
-          "ReleaseLockedModules()", "PurgeRemnants()", "RunMsiSequence()", "LaunchAndVerifySelectedProducts()"]
+          "ReleaseLockedModules()", "PurgeRemnants()", "RunMsiSequence()", "RegisterSelectedProducts()",
+          "LaunchSelectedProducts()", "GlassInstallRemoval::Commit("]
 positions = [worker.index(stage) for stage in stages]
 assert positions == sorted(positions), stages
 assert worker.index("nonSettingsChangesAttempted_ = true") < worker.index("PurgeRemnants()")
 assert "self->PerformRollback()" in worker and "self->UndoCleanInstall()" in worker
-sequence = section("bool InstallEngine::RunMsiSequence()", "bool InstallEngine::LaunchAndVerifySelectedProducts()")
+# Commit point: once LaunchSelectedProducts() runs nothing may fail the install any more.
+after_commit = worker[worker.index("LaunchSelectedProducts()"):worker.index("MsiEnableLogW(")]
+assert "SetFailure(" not in after_commit and "ok = " not in after_commit and "ok=" not in after_commit, after_commit
+launch_fn = function("void InstallEngine::LaunchSelectedProducts(")
+assert "SetFailure(" not in launch_fn and "return false" not in launch_fn and "AddFinishWarning(" in launch_fn
+register_fn = function("bool InstallEngine::RegisterSelectedProducts(")
+assert "StartPlatform(" not in register_fn and "StartOpenGlassService" not in register_fn and "SetFailure(" in register_fn
+sequence = section("bool InstallEngine::RunMsiSequence()", "bool InstallEngine::RegisterSelectedProducts()")
 assert 'steps.push_back({L"GlassSettings-' not in sequence
 assert "!selection_.glassSettings" in sequence and "kProductSettingsX86" in sequence
 

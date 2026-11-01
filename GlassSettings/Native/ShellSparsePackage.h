@@ -28,6 +28,10 @@ namespace GlassSettings::ShellSparsePackage
     }
 
     [[nodiscard]] SparsePackageError GetLastSparsePackageError() noexcept;
+    // HRESULT of the last failed deployment call (S_OK when the failure had no
+    // HRESULT, e.g. missing artifacts). Lets the installer helper report the
+    // concrete Windows error instead of a bare "failed".
+    [[nodiscard]] HRESULT GetLastSparseDeploymentHr() noexcept;
 
     // A non-null exactPlatformRoot is used only by the installer helper; in
     // that mode missing artifacts fail without falling back to other paths.
