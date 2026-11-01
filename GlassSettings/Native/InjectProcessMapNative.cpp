@@ -2,6 +2,7 @@
 
 #include <ForceUnloadAgent.h>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <ForceUnloadGlassModules.h>
@@ -319,19 +320,6 @@ namespace
         return true;
     }
 
-    [[nodiscard]] bool WriteScanTsv(const wchar_t* outPath, bool forSetup) noexcept
-    {
-        HANDLE file = CreateFileW(outPath, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
-            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file == INVALID_HANDLE_VALUE)
-            return false;
-        bool any = false;
-        const bool ok = WriteScanResultsUtf8(file, &any, forSetup);
-        (void)any;
-        CloseHandle(file);
-        return ok;
-    }
-
     [[nodiscard]] bool WritePipeMarker(HANDLE pipe, const char* marker) noexcept
     {
         if (!marker)
@@ -342,6 +330,40 @@ namespace
             return false;
         FlushFileBuffers(pipe);
         return true;
+    }
+
+    // "#fail stage=... pid=... exe=... gle=... flags=...\n": why the strict scan of
+    // this (native x64) side stopped. Setup logs the line; older Setups treat
+    // any unknown line as an invalid frame, which is still a failure.
+    void WriteScanFailureUtf8(HANDLE dest, bool forSetup) noexcept
+    {
+        if (!forSetup || dest == INVALID_HANDLE_VALUE)
+            return;
+        Shared::InjectModuleScan::ScanDiag diag{};
+        Shared::InjectModuleScan::GetLastScanDiag(diag);
+        wchar_t text[256]{};
+        if (Shared::InjectModuleScan::FormatScanDiag(diag, text, static_cast<DWORD>(_countof(text))) == 0)
+            return;
+        std::string line = "#fail ";
+        if (!AppendUtf8Field(line, text))
+            return;
+        line += '\n';
+        (void)WritePipeMarker(dest, line.c_str());
+    }
+
+    [[nodiscard]] bool WriteScanTsv(const wchar_t* outPath, bool forSetup) noexcept
+    {
+        HANDLE file = CreateFileW(outPath, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return false;
+        bool any = false;
+        const bool ok = WriteScanResultsUtf8(file, &any, forSetup);
+        (void)any;
+        if (!ok)
+            WriteScanFailureUtf8(file, forSetup);
+        CloseHandle(file);
+        return ok;
     }
 
     [[nodiscard]] bool WatchGlassModulesPipe(const wchar_t* pipeName, DWORD timeoutMs, bool forSetup) noexcept
@@ -370,6 +392,7 @@ namespace
             bool any = false;
             if (!WriteScanResultsUtf8(pipe, &any, forSetup))
             {
+                WriteScanFailureUtf8(pipe, forSetup);
                 CloseHandle(pipe);
                 ExitProcess(2);
             }
@@ -707,17 +730,20 @@ extern "C"
     {
 #ifdef _M_IX86
 #pragma comment(linker, "/EXPORT:GlassSettings_ScanGlassModules=_GlassSettings_ScanGlassModules@20")
-#pragma comment(linker, "/EXPORT:GlassSettings_InstallerScanProtocolV1=_GlassSettings_ScanGlassModules@20")
+#pragma comment(linker, "/EXPORT:GlassSettings_InstallerScanProtocolV2=_GlassSettings_ScanGlassModules@20")
 #elif defined(_M_X64)
-#pragma comment(linker, "/EXPORT:GlassSettings_InstallerScanProtocolV1=GlassSettings_ScanGlassModules")
+#pragma comment(linker, "/EXPORT:GlassSettings_InstallerScanProtocolV2=GlassSettings_ScanGlassModules")
 #endif
         // The versioned alias above points to this same existing scan export;
         // it lets Setup reject an older embedded DLL before altering products.
+        // V2 ('GSI2'): kNativeDeferForeignExplorer option + GlassSettings_GetLastScanDiag.
         // Preserve the original public export for GlassSettings. Setup also uses
         // this export, but monitors x64 in its own resident rundll32 process.
         // Its explicit option requests a strict scan of only this architecture.
         const bool installerLocal = (maxResults & Shared::InjectModuleScan::kNativeLocalInstallerScan) != 0;
-        maxResults &= ~Shared::InjectModuleScan::kNativeLocalInstallerScan;
+        const bool deferForeignExplorer =
+            installerLocal && (maxResults & Shared::InjectModuleScan::kNativeDeferForeignExplorer) != 0;
+        maxResults &= ~Shared::InjectModuleScan::kNativeOptionMask;
         if (installerLocal && !pids && pidsCount == 0 && !outResults && maxResults == 0 && outCount) {
             *outCount = Shared::InjectModuleScan::kNativeInstallerScanProtocol;
             return TRUE;
@@ -726,7 +752,9 @@ extern "C"
             return FALSE;
         if (installerLocal)
             return Shared::InjectModuleScan::ScanForSetup(pids, pidsCount,
-                static_cast<Shared::InjectModuleScan::Result*>(outResults), maxResults, outCount) ? TRUE : FALSE;
+                static_cast<Shared::InjectModuleScan::Result*>(outResults), maxResults, outCount,
+                deferForeignExplorer ? Shared::InjectModuleScan::ScanOptionDeferForeignExplorer
+                                     : Shared::InjectModuleScan::ScanOptionNone) ? TRUE : FALSE;
         const BOOL ok = Shared::InjectModuleScan::Scan(
             pids,
             pidsCount,
@@ -743,6 +771,22 @@ extern "C"
         }
 #endif
         return ok;
+    }
+
+    /// Diagnostics of the last strict scan on the calling thread (Setup's local
+    /// x86 monitor). Copies min(cb, sizeof(ScanDiag)) bytes; FALSE on bad args.
+    __declspec(dllexport) BOOL WINAPI GlassSettings_GetLastScanDiag(void* outDiag, DWORD cb) noexcept
+    {
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_GetLastScanDiag=_GlassSettings_GetLastScanDiag@8")
+#endif
+        if (!outDiag || cb == 0)
+            return FALSE;
+        Shared::InjectModuleScan::ScanDiag diag{};
+        Shared::InjectModuleScan::GetLastScanDiag(diag);
+        const DWORD n = cb < sizeof(diag) ? cb : static_cast<DWORD>(sizeof(diag));
+        std::memcpy(outDiag, &diag, n);
+        return TRUE;
     }
 }
 

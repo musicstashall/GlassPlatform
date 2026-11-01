@@ -115,15 +115,18 @@ extern "C"
     /// 0=Idle, 1=Running, 2=Stopping, 3=Residual (GlassPlatformTask::InjectLifecycleUi).
     __declspec(dllexport) int WINAPI GlassSettings_QueryInjectLifecycleUiForArch(int arch) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_RefreshInjectResidualStickyForArch(int arch) noexcept;
-    // Setup may OR Shared::InjectModuleScan::kNativeLocalInstallerScan into
-    // maxResults after the documented capability handshake; normal callers
-    // continue to pass the plain output-buffer capacity.
+    // Setup may OR Shared::InjectModuleScan::kNativeLocalInstallerScan (and,
+    // after the 'GSI2' handshake, kNativeDeferForeignExplorer) into maxResults;
+    // normal callers continue to pass the plain output-buffer capacity.
     __declspec(dllexport) BOOL WINAPI GlassSettings_ScanGlassModules(
         const DWORD* pids,
         DWORD pidsCount,
         void* outResults,
         DWORD maxResults,
         DWORD* outCount) noexcept;
+    /// Shared::InjectModuleScan::ScanDiag of the last strict scan on this thread
+    /// (why it failed, or which explorer.exe was deferred to the x64 scan).
+    __declspec(dllexport) BOOL WINAPI GlassSettings_GetLastScanDiag(void* outDiag, DWORD cb) noexcept;
     void CALLBACK GlassSettings_UnlockerW(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show);
     void CALLBACK GlassSettings_ShellExtRegisterW(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
     void CALLBACK GlassSettings_ShellExtRegisterSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;

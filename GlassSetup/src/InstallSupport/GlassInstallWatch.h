@@ -40,4 +40,10 @@ bool WaitUntilClearOrTimeout(
 
 bool ParseNativePipeUtf8(const std::string& bytes, std::vector<ModuleHolder>& holders);
 
+// "#fail <diag>": the x64 helper's strict scan stopped (its last line before
+// exit). diag receives the UTF-8 text as wide characters ("-" when empty).
+bool ParseNativeFailLine(const std::string& line, std::wstring& diag);
+// Any "#fail" line within a complete helper output (one-shot scan file).
+bool FindNativeFailLine(const std::string& bytes, std::wstring& diag);
+
 } // namespace GlassInstallWatch
