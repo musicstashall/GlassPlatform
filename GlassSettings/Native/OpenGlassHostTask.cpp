@@ -1,6 +1,7 @@
 #include <Windows.h>
 
 #include <GlassPlatformTask.h>
+#include <GlassStop.h>
 #include <OpenGlassHostState.h>
 #include <TaskSchedulerCom.h>
 #include <TrayXamlPolicyMap.h>
@@ -377,6 +378,34 @@ extern "C"
     __declspec(dllexport) BOOL WINAPI GlassSettings_SignalPlatformStopForArch(int arch) noexcept
     {
         return GlassShared::GlassPlatformTask::SignalPlatformStop(ToPlatformArch(arch)) ? TRUE : FALSE;
+    }
+
+    // R11/этап 1: единый механизм остановки для управляемого кода.
+    // arch: 0 = x86, 1 = x64 (как GlassPlatformArch); reason: Shared::GlassStop::Reason.
+    // gracefulMs/hostGoneMs: 0 → значения по умолчанию из Options (поле не переопределяется).
+    // flags: bit0 allowTaskStop, bit1 wakeResiduals. allowForceUnload намеренно отсутствует (R6/R7).
+    __declspec(dllexport) int WINAPI GlassSettings_RequestPlatformStop(
+        int arch, int reason, DWORD gracefulMs, DWORD hostGoneMs, int flags) noexcept
+    {
+        Shared::GlassStop::Options options{};
+        if (reason >= static_cast<int>(Shared::GlassStop::Reason::User)
+            && reason <= static_cast<int>(Shared::GlassStop::Reason::HostDead))
+        {
+            options.reason = static_cast<Shared::GlassStop::Reason>(reason);
+        }
+        if (gracefulMs != 0)
+            options.gracefulMs = gracefulMs;
+        if (hostGoneMs != 0)
+            options.hostGoneMs = hostGoneMs;
+        options.allowTaskStop = (flags & 1) != 0;
+        options.wakeResiduals = (flags & 2) != 0;
+        const Shared::GlassStop::Result r = Shared::GlassStop::Request(ToPlatformArch(arch), options);
+        // Упаковка в int: bit0 hostGone, bit1 hostKilledByTask, остальное — число остатков
+        // (насыщается 0x3FFF). Точные цифры всегда есть в логе stop_result.
+        int packed = (r.hostGone ? 1 : 0) | (r.hostKilledByTask ? 2 : 0);
+        const unsigned residuals = r.residualProcesses > 0x3FFFu ? 0x3FFFu : r.residualProcesses;
+        packed |= static_cast<int>(residuals) << 2;
+        return packed;
     }
 
     __declspec(dllexport) BOOL WINAPI GlassSettings_WaitForPlatformStopped(DWORD timeoutMs) noexcept

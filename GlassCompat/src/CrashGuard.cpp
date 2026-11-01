@@ -1,4 +1,5 @@
 #include "CompatPch.h"
+#include <GlassStop.h>
 #include "CrashGuard.h"
 #include "HostPidHelper.h"
 
@@ -560,19 +561,18 @@ namespace
         return v != 0;
     }
 
+    // R11: единый координатор вместо двух ручных SetEvent по архам.
+    // gracefulMs=0 — при краше не ждём: наш процесс сейчас умрёт.
     static void SignalPlatformStopBothArch() noexcept
     {
-        const wchar_t* names[] = {
-            L"GlassPlatform.StopEvent.x64",
-            L"GlassPlatform.StopEvent.x86",
-        };
-        for (const wchar_t* name : names)
+        for (const auto arch : { Shared::GlassStop::PlatformArch::X64,
+                                 Shared::GlassStop::PlatformArch::X86 })
         {
-            if (HANDLE hStop = OpenEventW(EVENT_MODIFY_STATE, FALSE, name))
-            {
-                (void)SetEvent(hStop);
-                CloseHandle(hStop);
-            }
+            Shared::GlassStop::Options options{};
+            options.reason = Shared::GlassStop::Reason::Crash;
+            options.gracefulMs = 0;
+            options.hostGoneMs = 0;
+            (void)Shared::GlassStop::Request(arch, options);
         }
     }
 
@@ -593,6 +593,14 @@ namespace
             SignalPlatformStopBothArch();
     }
 
+    /// Служебные исключения ntdll, которые не являются падениями процесса.
+    static bool IsDebugPrintException(DWORD code) noexcept
+    {
+        return code == 0x40010006UL   // DBG_PRINTEXCEPTION_C
+            || code == 0x4001000AUL   // DBG_PRINTEXCEPTION_WIDE_C
+            || code == 0x406D1388UL;  // MS_VC_EXCEPTION (имя потока)
+    }
+
     // Первый шанс: многие краши WinUI не доходят до UEF — пишем дамп здесь (explorer по умолчанию).
     LONG NTAPI GlassVectoredDumpHandler(EXCEPTION_POINTERS* info) noexcept
     {
@@ -601,6 +609,13 @@ namespace
 
         const DWORD code = static_cast<DWORD>(info->ExceptionRecord->ExceptionCode);
         const bool explorer = IsCurrentProcessExplorer();
+
+        // R12c: 0x40010006 (DBG_PRINTEXCEPTION_C) и 0x4001000A (DBG_PRINTEXCEPTION_WIDE_C) —
+        // не падения, а транспорт OutputDebugString: ntdll::RaiseException с этими кодами.
+        // В прогоне 14 они дали 72 ложных `crash_seen` и забили общий лог. Отсекаем до всех
+        // логов и проб модуля; 0x406D1388 (имя потока) — тот же класс служебных исключений.
+        if (IsDebugPrintException(code))
+            return EXCEPTION_CONTINUE_SEARCH;
 
         // AutoIt/JIT: first-chance AV вне Glass — без DebugLog/MiniDump (VEH+лог вешали UI).
         if (!explorer && code == STATUS_ACCESS_VIOLATION)
@@ -616,13 +631,6 @@ namespace
         }
 
         LogFaultingModuleProbe(info, "VEH");
-        if (code == 0xC0000409UL)
-        {
-            const ULONGLONG fastFailCode = info->ExceptionRecord->NumberParameters > 0
-                ? static_cast<ULONGLONG>(info->ExceptionRecord->ExceptionInformation[0])
-                : 0;
-            (void)fastFailCode;
-        }
 
         bool wantDump = false;
         if (explorer && IsMiniDumpEnabled() && !IsExplorerVehFatalDumpsDisabled())
@@ -661,6 +669,7 @@ namespace
 
     LONG NTAPI ExplorerCrashGuardFilter(EXCEPTION_POINTERS* info) noexcept
     {
+        // R12b: последний шанс — единственная точка, где падение точно состоялось.
         LogFaultingModuleProbe(info, "UEF");
         // Сначала дамп — пока контекст гарантированно доступен.
         if (IsMiniDumpEnabled())

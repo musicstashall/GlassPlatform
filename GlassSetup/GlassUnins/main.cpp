@@ -126,6 +126,74 @@ std::wstring ProductFromDat(const std::wstring& dir) {
     return WizardTheme::Utf8ToWide(value);
 }
 
+// Временная копия деинсталлятора живёт в %WINDIR%\Temp\GlassUnins-<guid>. Каталог
+// создаётся GlassInstallUtil::CreateSecureTempDirectory, поэтому проверка «мы внутри
+// своей копии» — это строгое совпадение префикса и отсутствие вложенности: чужие
+// каталоги, %TEMP% пользователя и Program Files не удаляются никогда.
+bool IsPrivateTempDirectory(const std::wstring& dir) noexcept {
+    wchar_t windows[MAX_PATH]{};
+    if (!GetWindowsDirectoryW(windows,MAX_PATH)) return false;
+    const std::wstring prefix=std::wstring(windows)+L"\\Temp\\GlassUnins-";
+    if (dir.size()<=prefix.size()) return false;
+    if (_wcsnicmp(dir.c_str(),prefix.c_str(),prefix.size())!=0) return false;
+    return dir.find(L'\\',prefix.size())==std::wstring::npos;
+}
+
+// Убирает копии, оставшиеся от прошлых запусков. Файл, который ещё кем-то занят
+// (второй деинсталлятор работает), не удаляется — его снимет его собственный запуск.
+void CleanupStalePrivateCopies() noexcept {
+    wchar_t windows[MAX_PATH]{};
+    if (!GetWindowsDirectoryW(windows,MAX_PATH)) return;
+    const std::wstring temp=std::wstring(windows)+L"\\Temp";
+    WIN32_FIND_DATAW data{};
+    HANDLE find=FindFirstFileW((temp+L"\\GlassUnins-*").c_str(),&data);
+    if (find==INVALID_HANDLE_VALUE) return;
+    int removed=0,kept=0;
+    do {
+        if (!(data.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (wcscmp(data.cFileName,L".")==0 || wcscmp(data.cFileName,L"..")==0) continue;
+        const std::wstring dir=temp+L"\\"+data.cFileName;
+        if (!DeleteFileW((dir+L"\\unins000.exe").c_str())) { ++kept; continue; }
+        if (RemoveDirectoryW(dir.c_str())) ++removed; else ++kept;
+    } while (FindNextFileW(find,&data));
+    FindClose(find);
+    if (removed||kept)
+        LogLine(L"Stale private copies: removed="+std::to_wstring(removed)+
+                L" busy="+std::to_wstring(kept));
+}
+
+// Свою копию работающий процесс удалить не может, поэтому удаление откладывается на
+// короткоживущий скрытый cmd: он ждёт выхода этого процесса и убирает файл и каталог.
+// Ветка запускается только для собственной копии в %WINDIR%\Temp\GlassUnins-<guid>.
+void SchedulePrivateCopyRemoval() noexcept {
+    wchar_t module[MAX_PATH]{};
+    if (!GetModuleFileNameW(nullptr,module,MAX_PATH)) return;
+    const std::wstring exe=module;
+    const size_t slash=exe.find_last_of(L'\\');
+    if (slash==std::wstring::npos) return;
+    const std::wstring dir=exe.substr(0,slash);
+    if (!IsPrivateTempDirectory(dir)) return;
+    // Полные пути: поиск по PATH в каталоге, куда мы сами себя скопировали, не используется.
+    wchar_t systemDir[MAX_PATH]{};
+    if (!GetSystemDirectoryW(systemDir,MAX_PATH)) return;
+    const std::wstring cmd=std::wstring(systemDir)+L"\\cmd.exe";
+    const std::wstring ping=std::wstring(systemDir)+L"\\ping.exe";
+    // /s — cmd снимает ровно одну внешнюю пару кавычек, поэтому внутренние остаются как есть.
+    std::wstring command=L"\""+cmd+L"\" /d /s /c \""+ping+
+        L"\" -n 4 127.0.0.1 >nul & del /f /q \""+exe+L"\" & rmdir \""+dir+L"\"\"";
+    std::vector<wchar_t> buffer(command.begin(),command.end());
+    buffer.push_back(L'\0');
+    STARTUPINFOW si{}; si.cb=sizeof(si);
+    si.dwFlags=STARTF_USESHOWWINDOW; si.wShowWindow=SW_HIDE;
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr,buffer.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi)) {
+        LogLine(L"Private copy cleanup could not start, error "+std::to_wstring(GetLastError()));
+        return;
+    }
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    LogLine(L"Private copy cleanup scheduled "+dir);
+}
+
 int RelaunchFromPrivateTemp(const Arguments& a) noexcept {
     wchar_t executable[MAX_PATH]{};
     if (!GetModuleFileNameW(nullptr,executable,MAX_PATH)) return 1;
@@ -133,6 +201,7 @@ int RelaunchFromPrivateTemp(const Arguments& a) noexcept {
     if (wcscpy_s(sourceDir,executable)!=0 || !PathRemoveFileSpecW(sourceDir)) return 1;
     const std::wstring product=a.product.empty()?ProductFromDat(sourceDir):a.product;
     if (!product.empty() && !IsKnownCode(product)) { LogLine(L"Unknown product identifier"); return 4; }
+    CleanupStalePrivateCopies();
     std::wstring temp;
     if (!GlassInstallUtil::CreateSecureTempDirectory(L"GlassUnins",temp)) { LogLine(L"Cannot create secure temporary directory"); return 5; }
     const std::wstring dest=temp+L"\\unins000.exe";
@@ -222,7 +291,7 @@ private:
     Page page_=Page::Select;
     UINT dpi_=96;
     bool registered_=false, alreadyRunning_=false, closing_=false;
-    bool webReady_=false, bridgeReady_=false, initSent_=false;
+    bool webReady_=false, bridgeReady_=false, initSent_=false, webFailed_=false;
     HWND back_=nullptr,next_=nullptr,cancel_=nullptr,webHost_=nullptr;
     std::array<HWND,4> check_{};
     HFONT font_=nullptr, heading_=nullptr;
@@ -307,6 +376,7 @@ private:
         webHost_=CreateWindowExW(WS_EX_CONTROLPARENT,L"STATIC",L"",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
             0,0,0,0,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_WEBHOST)),gInstance,nullptr);
         CreateFonts();
+        SetTimer(window,kTimer,40,nullptr);
         for (HWND h:{back_,next_,cancel_}) WizardTheme::AttachButtonScope(h);
         BuildCache();
         if (args_.launchError) {
@@ -340,8 +410,11 @@ private:
         Move(check_[2],60,293,390,32); Move(check_[3],510,293,390,32);
         if (controller_) { RECT bounds=Box(0,0,kWidth,kHtmlHeight); controller_->put_Bounds(bounds); }
     }
+    // R13: нативные чекбоксы — только резерв на случай, когда WebView2 недоступен.
+    // Пока контент грузится, в тех же местах рисуется индикатор ожидания: раньше
+    // пользователь видел четыре белых прямоугольника на месте карточек продуктов.
     void ShowNativeChecks() {
-        const bool show=page_==Page::Select && !webReady_;
+        const bool show=page_==Page::Select && webFailed_;
         const bool core=CoreSelected();
         const bool values[]={selected_.x64,selected_.x86,selected_.settings,selected_.openGlass};
         const bool available[]={installed_.x64,installed_.x86,installed_.settings,installed_.openGlass};
@@ -889,7 +962,8 @@ private:
         return S_OK;
     }
     void WebFailure() {
-        webReady_=false; bridgeReady_=false; initSent_=false; webState_.clear();
+        webReady_=false; bridgeReady_=false; initSent_=false; webState_.clear(); webFailed_=true;
+        if (window) KillTimer(window,kTimer);
         if (controller_) controller_->put_IsVisible(FALSE);
         ShowWindow(webHost_,SW_HIDE); ShowNativeChecks(); InvalidateRect(window,nullptr,FALSE);
     }
@@ -970,7 +1044,8 @@ private:
                 if (closing_) return S_OK;
                 BOOL success=FALSE; args->get_IsSuccess(&success);
                 if (!success) { WebFailure(); return S_OK; }
-                webReady_=true; ShowNativeChecks(); controller_->put_IsVisible(TRUE); ShowWindow(webHost_,SW_SHOWNA); SyncWeb();
+                webReady_=true; ShowNativeChecks(); KillTimer(window,kTimer);
+                controller_->put_IsVisible(TRUE); ShowWindow(webHost_,SW_SHOWNA); SyncWeb();
                 return S_OK;
             }).Get(),&completedToken_);
         const std::wstring url=std::wstring(WizardAssets::kDocumentUrl)+(IsRu()?L"?lang=ru-RU":L"?lang=en-US");
@@ -981,6 +1056,20 @@ private:
         DrawTextW(dc,text.c_str(),static_cast<int>(text.size()),&r,DT_LEFT|DT_WORDBREAK|DT_NOPREFIX);
         SelectObject(dc,old);
     }
+    void DrawLoadingSpinner(HDC dc) {
+        const double phase=static_cast<double>(GetTickCount64()%1200)/1200.0;
+        const Gdiplus::REAL x=static_cast<Gdiplus::REAL>(Scale(473));
+        const Gdiplus::REAL y=static_cast<Gdiplus::REAL>(Scale(243));
+        const Gdiplus::REAL diameter=static_cast<Gdiplus::REAL>(Scale(54));
+        Gdiplus::Graphics g(dc);
+        g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+        Gdiplus::Pen track(Gdiplus::Color(140,77,79,111),static_cast<Gdiplus::REAL>(Scale(3)));
+        Gdiplus::Pen arc(Gdiplus::Color(255,193,180,255),static_cast<Gdiplus::REAL>(Scale(3)));
+        arc.SetStartCap(Gdiplus::LineCapRound); arc.SetEndCap(Gdiplus::LineCapRound);
+        g.DrawEllipse(&track,x,y,diameter,diameter);
+        g.DrawArc(&arc,x,y,diameter,diameter,
+            static_cast<Gdiplus::REAL>(-90.0+phase*360.0),static_cast<Gdiplus::REAL>(268.0));
+    }
     void Paint() {
         PAINTSTRUCT ps{}; HDC dc=BeginPaint(window,&ps);
         RECT client{}; GetClientRect(window,&client);
@@ -988,6 +1077,13 @@ private:
         WizardTheme::PaintFooterBar(dc,client.right,Scale(kContentHeight),client.bottom,kFooterTop,kFooterBottom,RGB(74,71,109));
         std::wstring status,error,report; int progress;
         { std::lock_guard<std::mutex> lock(dataMutex_); status=status_; error=error_; report=holdReport_; progress=progress_; }
+        if (!webReady_ && !webFailed_) {
+            // Загрузка HTML-контента: тот же индикатор, что и в установщике.
+            DrawTextBlock(dc,L"GlassPlatform",Box(48,32,400,28),font_,RGB(245,244,252));
+            DrawLoadingSpinner(dc);
+            EndPaint(window,&ps);
+            return;
+        }
         if (!webReady_) {
             DrawTextBlock(dc,L"GlassPlatform",Box(48,32,400,28),font_,RGB(245,244,252));
             const wchar_t* title=page_==Page::Select?T(L"Выберите продукты для удаления",L"Select products to remove"):
@@ -1039,6 +1135,13 @@ private:
             CreateFonts(); Layout(); BuildCache(); InvalidateRect(window,nullptr,FALSE); return 0;
         }
         case WM_ERASEBKGND: return 1;
+        case WM_TIMER:
+            if (w==kTimer) {
+                if (!webReady_ && !webFailed_) InvalidateRect(window,nullptr,FALSE);
+                else KillTimer(window,kTimer);
+                return 0;
+            }
+            break;
         case WM_PAINT: Paint(); return 0;
         case WM_CTLCOLORBTN: {
             HDC dc=reinterpret_cast<HDC>(w); HWND h=reinterpret_cast<HWND>(l);
@@ -1122,5 +1225,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
     Gdiplus::GdiplusShutdown(token);
     CloseHandle(mutex);
     CoUninitialize();
+    // R13: после удаления в %WINDIR%\Temp не остаётся ни каталога GlassUnins-*, ни копии exe.
+    if (args.fromTemp) SchedulePrivateCopyRemoval();
     return result;
 }

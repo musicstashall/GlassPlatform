@@ -1,4 +1,5 @@
 #include "CompatPch.h"
+#include <GlassStop.h>
 #include "GlassCompat.h"
 #include "CrashGuard.h"
 #include "HostPidHelper.h"
@@ -19,7 +20,10 @@
 #include <ForceUnloadGlassModules.h>
 #include <windows.h>
 #include <sddl.h>
+#include <tlhelp32.h>
 #include <string>
+#include <utility>
+#include <vector>
 
 #ifndef WM_DWMCOLORIZATIONCOLORCHANGED
 #define WM_DWMCOLORIZATIONCOLORCHANGED 0x0320
@@ -457,6 +461,303 @@ namespace
 #endif
     }
 
+    // ── R7 (H97): публикация гейта загрузки ─────────────────────────────────
+    //
+    // Файл читает DllMain каждого процесса (GlassCompat/DllMain.cpp, GateAllowsAttach).
+    // Смысл: если процесс «недоверенный», наш DLL не должна загружаться в него вовсе.
+    // Иначе user32 держит в нём указатель на GlassCompat_WinEventProc, снять ссылку
+    // снаружи нельзя, и после принудительного FreeLibrary процесс падает в чужом стеке
+    // (дамп Яндекс Музыки 35444: AV 0xC0000005 внутри выгруженного GlassCompat).
+    //
+    // Режимы (переменная окружения ХОСТА GLASS_ATTACH_GATE):
+    //   (нет) / deny — не грузимся в процессы из BlockList + AttachList=Forbidden
+    //   allow        — грузимся ТОЛЬКО в перечисленные (строгий режим)
+    //   0 / off      — гейт выключен (файл удаляется)
+    // Дополнительные исключения без правки реестра: GLASS_ATTACH_GATE_EXTRA="a.exe;b.exe".
+
+    std::wstring GateLowerCopy(const std::wstring& in)
+    {
+        std::wstring out = in;
+        if (!out.empty())
+            CharLowerBuffW(out.data(), static_cast<DWORD>(out.size()));
+        return out;
+    }
+
+    void GateAddName(std::wstring& body, const wchar_t* name)
+    {
+        if (!name || !*name)
+            return;
+        std::wstring lower = GateLowerCopy(name);
+        body += L"name=";
+        body += lower;
+        body += L'\n';
+    }
+
+    // Имена из реестрового BlockList (HKCU\...\GlassPlatform\BlockList, DWORD != 0).
+    void GateCollectRegistryBlockList(std::vector<std::wstring>& out)
+    {
+        HKEY hKey = nullptr;
+        if (RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                L"Software\\StanislavKa\\GlassPlatform\\BlockList",
+                0, KEY_READ, &hKey) != ERROR_SUCCESS)
+            return;
+
+        wchar_t name[256]{};
+        DWORD index = 0;
+        for (;; ++index)
+        {
+            DWORD nameSize = _countof(name);
+            DWORD type = 0;
+            DWORD value = 0;
+            DWORD valueSize = sizeof(value);
+            const LONG rc = RegEnumValueW(
+                hKey, index, name, &nameSize, nullptr, &type,
+                reinterpret_cast<BYTE*>(&value), &valueSize);
+            if (rc == ERROR_NO_MORE_ITEMS)
+                break;
+            if (rc == ERROR_SUCCESS && type == REG_DWORD && value != 0 && nameSize > 0)
+                out.emplace_back(name, nameSize);
+        }
+        RegCloseKey(hKey);
+    }
+
+    void WriteAttachGateFile() noexcept
+    {
+        wchar_t modeEnv[16]{};
+        const DWORD modeLen =
+            GetEnvironmentVariableW(L"GLASS_ATTACH_GATE", modeEnv, _countof(modeEnv));
+        const bool gateOff =
+            modeLen > 0 && (modeEnv[0] == L'0' || _wcsicmp(modeEnv, L"off") == 0);
+        const bool allowMode = modeLen > 0 && _wcsicmp(modeEnv, L"allow") == 0;
+
+        wchar_t localAppData[MAX_PATH]{};
+        if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, _countof(localAppData)) == 0)
+        {
+            DebugLog(DBG_WARNING, L"[GlassCompat][Host] attach-gate: no LOCALAPPDATA");
+            return;
+        }
+
+        wchar_t dir[MAX_PATH * 2]{};
+        if (swprintf_s(dir, L"%s\\GlassPlatform", localAppData) <= 0)
+            return;
+        (void)CreateDirectoryW(dir, nullptr);
+
+        wchar_t path[MAX_PATH * 2]{};
+        if (swprintf_s(path, L"%s\\attach-gate.txt", dir) <= 0)
+            return;
+
+        if (gateOff)
+        {
+            (void)DeleteFileW(path);
+            return;
+        }
+
+        std::wstring body = L"v1\n";
+        body += allowMode ? L"mode=allow\n" : L"mode=deny\n";
+        unsigned count = 0;
+
+        // Хост и собственные инструменты грузят DLL всегда — иначе платформа
+        // не сможет ни стартовать, ни показать состояние процессов.
+        const wchar_t* const kGateDefaultDeny[] = {
+            L"Y.Music.exe",
+            L"Яндекс Музыка.exe",
+            L"YMusic.exe",
+        };
+        const wchar_t* const kAlwaysTrusted[] = {
+            L"rundll32.exe",
+            L"GlassPlatform.exe",
+            L"GlassSettings.exe",
+            L"LogViewer.exe",
+            L"explorer.exe",
+        };
+        const wchar_t* const kUiCompatHosts[] = {
+            L"shellexperiencehost.exe",
+            L"shellhost.exe",
+            L"startmenuexperiencehost.exe",
+            L"searchhost.exe",
+            L"searchapp.exe",
+        };
+
+        std::vector<std::wstring> names;
+        if (allowMode)
+        {
+            std::vector<std::pair<std::wstring, DWORD>> entries;
+            AttachList::GetEntries(entries);
+            for (const auto& [name, raw] : entries)
+            {
+                if (raw >= 1)
+                    names.push_back(name);
+            }
+            for (const wchar_t* n : kAlwaysTrusted)
+                names.emplace_back(n);
+            for (const wchar_t* n : kUiCompatHosts)
+                names.emplace_back(n);
+        }
+        else
+        {
+            for (std::size_t i = 0; i < ProcessBlockList::BuiltInCount(); ++i)
+            {
+                if (const wchar_t* n = ProcessBlockList::BuiltInAt(i))
+                    names.emplace_back(n);
+            }
+            GateCollectRegistryBlockList(names);
+
+            // R8: процессы, которые заведомо не нуждаются в нашей DLL, но получают её
+            // от INCONTEXT-хука и не отдают ссылку без обработки сообщений.
+            // `Y.Music.exe` и `Яндекс Музыка.exe` — оба имени приложения Яндекс Музыки
+            // (в логах встречаются оба); падение 31.10 было в `Яндекс Музыка.exe` 35444
+            // внутри уже выгруженного GlassCompat.
+            for (const wchar_t* n : kGateDefaultDeny)
+                names.emplace_back(n);
+
+            // AttachList >= 1 — явное «хочу здесь Glass»: убирает имя из deny.
+            std::vector<std::pair<std::wstring, DWORD>> entries;
+            AttachList::GetEntries(entries);
+            for (const auto& [name, raw] : entries)
+            {
+                if (raw == 0) // Forbidden
+                    names.push_back(name);
+            }
+
+            wchar_t extra[1024]{};
+            if (GetEnvironmentVariableW(
+                    L"GLASS_ATTACH_GATE_EXTRA", extra, _countof(extra)) > 0)
+            {
+                std::wstring rest(extra);
+                size_t pos = 0;
+                while (pos <= rest.size())
+                {
+                    const size_t sep = rest.find(L';', pos);
+                    std::wstring one = rest.substr(
+                        pos, sep == std::wstring::npos ? std::wstring::npos : sep - pos);
+                    if (!one.empty())
+                        names.push_back(one);
+                    if (sep == std::wstring::npos)
+                        break;
+                    pos = sep + 1;
+                }
+            }
+        }
+
+        for (const std::wstring& name : names)
+        {
+            if (name.empty())
+                continue;
+            // В deny-режиме исключаем свои процессы даже если они попали в BlockList,
+            // и уважаем AttachList>=1 как явное разрешение.
+            if (!allowMode)
+            {
+                bool exempt = false;
+                for (const wchar_t* trusted : kAlwaysTrusted)
+                {
+                    if (_wcsicmp(name.c_str(), trusted) == 0)
+                    {
+                        exempt = true;
+                        break;
+                    }
+                }
+                if (!exempt)
+                {
+                    std::vector<std::pair<std::wstring, DWORD>> trustedEntries;
+                    AttachList::GetEntries(trustedEntries);
+                    for (const auto& [tname, raw] : trustedEntries)
+                    {
+                        if (raw >= 1 && _wcsicmp(name.c_str(), tname.c_str()) == 0)
+                        {
+                            exempt = true;
+                            break;
+                        }
+                    }
+                }
+                if (exempt)
+                    continue;
+            }
+            GateAddName(body, name.c_str());
+            ++count;
+        }
+
+        HANDLE hFile = CreateFileW(
+            path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hFile == INVALID_HANDLE_VALUE)
+        {
+            DebugLog(DBG_WARNING,
+                L"[GlassCompat][Host] attach-gate: create failed GLE=%u", GetLastError());
+            return;
+        }
+        DWORD written = 0;
+        const DWORD bytes = static_cast<DWORD>(body.size() * sizeof(wchar_t));
+        const BOOL ok = WriteFile(hFile, body.c_str(), bytes, &written, nullptr);
+        CloseHandle(hFile);
+
+        DebugLog(DBG_IMPORTANT,
+            L"[GlassCompat][Host] attach-gate: mode=%s names=%u path=%s ok=%d",
+            allowMode ? L"allow" : L"deny", count, path, ok ? 1 : 0);
+    }
+
+    // Карта инжекта живёт одну сессию платформы (CreateHostResources обнуляет её), а решение
+    // об отказе у процесса закэшировано в kernel-объекте `Local\GlassCompatGateDeny_<pid>`
+    // и живёт до конца самого процесса. user32 может больше не дёрнуть DllMain в «тихом»
+    // процессе (нет событий — нет INCONTEXT-загрузки), поэтому после рестарта платформы
+    // исключённые процессы оставались без слота и пропадали из списка GlassSettings.
+    // Публикуем их сами: наличие маркера отказа доказывает, что GlassCompat в процесс
+    // отображалась и гейт её отверг.
+    void RepublishCachedAttachDenials() noexcept
+    {
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE)
+            return;
+
+        BOOL selfWow = FALSE;
+        if (!IsWow64Process(GetCurrentProcess(), &selfWow))
+        {
+            CloseHandle(snap);
+            return;
+        }
+        const DWORD self = GetCurrentProcessId();
+
+        PROCESSENTRY32W pe{};
+        pe.dwSize = sizeof(pe);
+        if (Process32FirstW(snap, &pe))
+        {
+            do
+            {
+                const DWORD pid = pe.th32ProcessID;
+                if (pid == 0 || pid == self)
+                    continue;
+                // Свою разрядность публикует свой хост: иначе x64-хост записал бы в x64-карту
+                // и 32-битный процесс, и в списке появилась бы вторая строка того же pid.
+                HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+                if (!process)
+                    continue;
+                BOOL targetWow = FALSE;
+                const BOOL wowOk = IsWow64Process(process, &targetWow);
+                CloseHandle(process);
+                if (!wowOk || ((selfWow != FALSE) != (targetWow != FALSE)))
+                    continue;
+
+                wchar_t denyName[64]{};
+                if (swprintf_s(denyName, L"Local\\GlassCompatGateDeny_%lu",
+                        static_cast<unsigned long>(pid)) <= 0)
+                    continue;
+                HANDLE denied = OpenMutexW(SYNCHRONIZE, FALSE, denyName);
+                if (!denied)
+                    continue;
+                CloseHandle(denied);
+
+                (void)Shared::InjectProcessMap::TryUpsert(
+                    pid,
+                    Shared::InjectProcessMap::Kind::RejectedBlockList,
+                    /*path=*/2,
+                    Shared::InjectProcessMap::State::Alive,
+                    Shared::InjectProcessMap::ModuleCompat,
+                    pe.szExeFile);
+            } while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+    }
+
     static void ClearHostPid() noexcept
     {
         if (!s_hostPidMapping)
@@ -545,12 +846,16 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
     if (isStop)
     {
         StopLogClientForShortLivedMain();
-        HANDLE hEvt = OpenEventW(EVENT_MODIFY_STATE, FALSE, kStopEventName);
-        if (hEvt)
-        {
-            SetEvent(hEvt);
-            CloseHandle(hEvt);
-        }
+        // R11: тот же единый координатор, что и у остальных инициаторов.
+        // Собственный процесс не ждёт: /stop — короткоживущий rundll32.
+        Shared::GlassStop::Options options{};
+        options.reason = Shared::GlassStop::Reason::External;
+        options.gracefulMs = 0;
+        options.hostGoneMs = 0;
+        const auto arch = sizeof(void*) == 8
+            ? GlassShared::GlassPlatformTask::PlatformArch::X64
+            : GlassShared::GlassPlatformTask::PlatformArch::X86;
+        (void)Shared::GlassStop::Request(arch, options);
         return;
     }
 
@@ -703,6 +1008,15 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         return;
     }
 
+    // R11 (унификация остановки): StopEvent — manual-reset и общий на все циклы
+    // старт/стоп. Если он остался сигнальным от прошлого запуска (кто-то держал
+    // хэндл дольше хоста), новый хост немедленно завершится сам. Сбрасываем на старте
+    // ровно один раз и пишем об этом в лог.
+    if (WaitForSingleObject(hStopEvent, 0) == WAIT_OBJECT_0)
+    {
+        (void)ResetEvent(hStopEvent);
+    }
+
     s_hostShutdownEvent = CreateEventW(
         saPtr,
         TRUE,
@@ -812,6 +1126,11 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         reinterpret_cast<LPCWSTR>(&GlassCompat_WinEventProc),
         &hSelf);
 
+    // R7 (H97): публикуем гейт загрузки ДО установки хуков — DllMain читает этот файл
+    // при каждом INCONTEXT-attach в любом процессе, в том числе на стартовом пинге.
+    AttachList::Initialize();
+    WriteAttachGateFile();
+
     // Устанавливаем глобальный INCONTEXT WinEvent-хук для всех процессов.
     // Диапазон CREATE..SHOW: тултип (tooltips_class32) после скрытия получает WM_NCDESTROY
     // и снимает субкласс; при следующем показе часто нет нового EVENT_OBJECT_CREATE —
@@ -863,6 +1182,9 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
         // Broadcast WM_NULL — лёгкий пинок очередей (как при shutdown), без гарантии WinEvent.
         SendNotifyMessageW(HWND_BROADCAST, WM_NULL, 0, 0);
     }
+    // Список «отвергнутых» не должен зависеть от того, дёрнет ли user32 DllMain в процессе
+    // ещё раз: всё, что уже отказано, публикуем в текущую карту сразу после установки хуков.
+    RepublishCachedAttachDenials();
 
     // AppContainer SEH/SMEH: глобальный hook (pid=0,tid=0) DLL не грузит — ACL + per-thread + LoadLibrary.
     GlassCompat::CoreWindowHostInject::GrantPeerDllsAppPackagesAccess();
@@ -970,8 +1292,18 @@ done:
         SignalHostShutdownComplete();
         if (s_stopFromCloseMessage)
         {
-            // Планировщик попросил закрыть задачу: только локальная очистка.
-            // Остатки проверяет отдельный этап мониторинга Setup/Unins.
+            // R12b (§2а/5.4): End задачи — такой же стоп, как кнопка Stop, только без
+            // 20-секундного ForceUnloadResiduals (планировщик после WM_CLOSE быстро
+            // переходит к TerminateProcess). Даём процессам короткое окно и несколько
+            // WM_NULL-пинков: инжектированные сами уходят по StopEvent, а «спящие»
+            // (DllHost) получают шанс обработать deferred free до смерти хоста.
+            // Лог: host_close_ping.
+            for (unsigned i = 0; i < 4; ++i)
+            {
+                (void)SendNotifyMessageW(HWND_BROADCAST, WM_NULL, 0, 0);
+                if (i + 1 < 4)
+                    Sleep(700);
+            }
             GlassCompat::CoreWindowHostInject::FinishTaskStop();
         }
         else

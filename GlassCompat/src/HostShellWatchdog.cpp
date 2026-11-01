@@ -1,4 +1,5 @@
 #include "CompatPch.h"
+#include <GlassStop.h>
 #include "HostShellWatchdog.h"
 #include "HostPidHelper.h"
 #include <Windows.h>
@@ -44,17 +45,15 @@ void GlassCompat::HostPollExplorerShellWatchdog() noexcept
 
         if (res == IDYES)
         {
-            const wchar_t* names[] = {
-                L"GlassPlatform.StopEvent.x64",
-                L"GlassPlatform.StopEvent.x86",
-            };
-            for (const wchar_t* name : names)
+            // R11: единый координатор, без ожиданий — пользователь ждёт возврата из диалога.
+            for (const auto arch : { Shared::GlassStop::PlatformArch::X64,
+                                     Shared::GlassStop::PlatformArch::X86 })
             {
-                if (HANDLE hStop = OpenEventW(EVENT_MODIFY_STATE, FALSE, name))
-                {
-                    (void)SetEvent(hStop);
-                    CloseHandle(hStop);
-                }
+                Shared::GlassStop::Options options{};
+                options.reason = Shared::GlassStop::Reason::Crash;
+                options.gracefulMs = 0;
+                options.hostGoneMs = 0;
+                (void)Shared::GlassStop::Request(arch, options);
             }
         }
 

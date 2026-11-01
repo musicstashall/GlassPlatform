@@ -21,6 +21,8 @@
 - `s_shouldSkip` — определяется один раз через `std::call_once`; `true` для процессов из `ProcessBlockList` или для хост-процесса
 - Заблокированные процессы получают "unload watcher" поток с `GetModuleHandleExW` + `FreeLibraryAndExitThread`
 - **Контракт выгрузки (не ломать):** [docs/GlassCompat-unload.md](docs/GlassCompat-unload.md) — path=1 без HostShutdown; path=2/3 ждут HostShutdown (H58)
+- **Гейт загрузки (R7).** `DllMain` решает, грузиться ли модулю в процесс: встроенный deny-список (`ProcessBlockList` + приложения, падавшие в чужом стеке), затем `GateIsAlwaysTrusted` (хост, `explorer.exe`, shell-хосты), затем файл `%LOCALAPPDATA%\GlassPlatform\attach-gate.txt` с fail-closed. Отказ кэшируется на процесс мьютексом `GlassCompatGateDeny_<pid>`, поэтому повторные `LoadLibrary` от user32 не пересчитывают решение; слот «отвергнут» публикуется при каждом отказе и повторно — хостом на старте (`RepublishCachedAttachDenials`) по маркерам отказа, потому что карта инжекта живёт одну сессию платформы; записи в лог на пути отказа нет (R12i)
+- **Отвергнутые процессы.** Отказ гейта пишет слот карты инжекта с битом `ModuleCompat`, поэтому исключённые процессы видны в GlassSettings как «отвергнутые»
 
 ## Документация
 

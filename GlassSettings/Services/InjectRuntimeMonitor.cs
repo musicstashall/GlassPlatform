@@ -28,6 +28,20 @@ public sealed class InjectRuntimeEntry
     public ulong SubclassKindMask { get; init; }
     public NativeHostInterop.InjectState State { get; init; }
 
+    /// <summary>
+    /// Процесс нашего же инструмента (сам GlassSettings или rundll32-хост платформы).
+    /// Показываем его в списке — иначе картина «кто держит GlassCompat» неполная, — но
+    /// в счётчики остатков/активных не включаем: это не инжектированное приложение.
+    /// </summary>
+    public bool IsToolProcess { get; init; }
+
+    /// <summary>
+    /// Строка доживает последние тики после выгрузки: процесс/модули уже не видны скану,
+    /// но строку держим, чтобы точки в колонках гасли по одной, а не пропадали пачкой
+    /// вместе со всей строкой. В счётчики Active/Rejected/Residual такие строки не входят.
+    /// </summary>
+    public bool IsFading { get; init; }
+
     public string ArchLabel => Arch == NativeHostInterop.InjectArch.X86 ? "x86" : "x64";
 
     /// <summary>
@@ -162,6 +176,9 @@ public sealed class InjectRuntimeMonitor
             _bridgePids.Clear();
             _stickyPids.Clear();
             _residualEmptyStreak = 0;
+            _fadeByPid.Clear();
+            _prevBits.Clear();
+            _prevEntries.Clear();
         }
 
         // Cold-start: только _latest, без SnapshotChanged.
@@ -277,6 +294,11 @@ public sealed class InjectRuntimeMonitor
             _idlePlatformProbePending = true;
             _pendingColdProbeCompletion = false;
             _forceFullCapturePending = false;
+            // Выгорание не переживает переподписку: иначе после возврата на страницу
+            // первые тики показывали бы строки, которых уже нет.
+            _fadeByPid.Clear();
+            _prevBits.Clear();
+            _prevEntries.Clear();
         }
         timer?.Stop();
     }
@@ -399,8 +421,11 @@ public sealed class InjectRuntimeMonitor
 
         // Платформа off: без residual-sweep и без cold-probe — только mutex (дешёвый idle).
         // Первый poll после StartPolling (_forceFullCapturePending) cheap-idle не использует.
+        // Пустой снимок здесь означал «мгновенно убрать все строки»: при выгрузке из
+        // планировщика карта закрывается раньше, чем UI успевает показать выгорание точек.
+        // Поэтому отдаём не пустоту, а остаток прошлого снимка, который догорает по тикам.
         if (!platformRunning && !residualSweep && !runColdProbe)
-            return new InjectRuntimeSnapshot { PlatformRunning = false };
+            return WithFade(new InjectRuntimeSnapshot { PlatformRunning = false }, fadeActive: true);
 
         // Дыра: HostPublish CW off (H47) + map Close до !mutex → slots пусты при ещё «running»
         // или сразу после stop. Bridge PID + CW-host exe дополняют light-scan.
@@ -491,7 +516,160 @@ public sealed class InjectRuntimeMonitor
         _ = NativeHostInterop.RefreshInjectResidualSticky(GlassPlatformArch.X64);
         _ = NativeHostInterop.RefreshInjectResidualSticky(GlassPlatformArch.X86);
 
-        return Merge(platformRunning, residualSweep, slots, scan, selfPid);
+        var merged = Merge(platformRunning, residualSweep, slots, scan, selfPid);
+        // Выгорание точек включаем только когда платформа уже останавливается: при живой
+        // платформе строка исчезает потому, что процесс закрылся сам, — там гасить нечего.
+        return WithFade(merged, fadeActive: !platformRunning || residualSweep);
+    }
+
+    /// <summary>Состояние догорающей строки: сколько ещё битов и сколько тиков осталось.</summary>
+    private sealed class FadeState
+    {
+        public InjectRuntimeEntry Template = null!;
+        public uint Bits;
+        public int TicksLeft;
+    }
+
+    /// <summary>Тиков выгорания (таймер монитора — 1 с): по одному биту-точке за тик.</summary>
+    private const int kFadeTicks = 6;
+
+    /// <summary>Снимок прошлого тика по PID: биты и сама строка (шаблон для догорания).</summary>
+    private readonly Dictionary<uint, uint> _prevBits = [];
+    private readonly Dictionary<uint, InjectRuntimeEntry> _prevEntries = [];
+    private readonly Dictionary<uint, FadeState> _fadeByPid = [];
+
+    /// <summary>
+    /// Постепенное выгорание индикаторов. Строка при выгрузке не исчезает мгновенно: у неё
+    /// по одному гаснут точки модулей, и только после этого убирается строка. Так стоп из
+    /// планировщика выглядит так же, как стоп из меню рабочего стола/GS, где модули
+    /// выгружаются по одному и биты в карте уменьшаются постепенно.
+    /// </summary>
+    private InjectRuntimeSnapshot WithFade(InjectRuntimeSnapshot snapshot, bool fadeActive)
+    {
+        if (!fadeActive)
+        {
+            lock (_gate)
+            {
+                _fadeByPid.Clear();
+                _prevBits.Clear();
+                _prevEntries.Clear();
+            }
+            return snapshot;
+        }
+
+        lock (_gate)
+        {
+            var nextBits = new Dictionary<uint, uint>();
+            foreach (var e in snapshot.Entries)
+            {
+                if (e.Pid != 0 && e.ModuleBits != 0 && !e.IsFading)
+                    nextBits[e.Pid] = e.ModuleBits;
+            }
+
+            // 1) Продолжаем начатые выгорания: один бит за тик. Строка вернулась (модуль
+            //    снова виден) — выгорание отменяем.
+            foreach (var pid in _fadeByPid.Keys.ToList())
+            {
+                var fade = _fadeByPid[pid];
+                if (nextBits.TryGetValue(pid, out var live) && live != 0)
+                {
+                    _fadeByPid.Remove(pid);
+                    continue;
+                }
+                fade.Bits = DropOneBit(fade.Bits);
+                if (--fade.TicksLeft <= 0 || fade.Bits == 0)
+                    _fadeByPid.Remove(pid);
+            }
+
+            // 2) Начинаем выгорание для того, что пропало целиком или частично.
+            foreach (var kv in _prevBits)
+            {
+                var pid = kv.Key;
+                nextBits.TryGetValue(pid, out var live);
+                var lost = kv.Value & ~live;
+                if (lost == 0 || _fadeByPid.ContainsKey(pid))
+                    continue;
+                if (!_prevEntries.TryGetValue(pid, out var template))
+                    continue;
+                _fadeByPid[pid] = new FadeState
+                {
+                    Template = template,
+                    Bits = lost,
+                    TicksLeft = kFadeTicks,
+                };
+            }
+
+            // 3) Сборка: живым строкам возвращаем ещё не догоревшие точки, для исчезнувших
+            //    PID — синтетическую строку с остатком, чтобы строка ушла последней.
+            var list = new List<InjectRuntimeEntry>(snapshot.Entries.Count + _fadeByPid.Count);
+            var present = new HashSet<uint>();
+            foreach (var e in snapshot.Entries)
+            {
+                present.Add(e.Pid);
+                if (e.Pid != 0 && !e.IsFading
+                    && _fadeByPid.TryGetValue(e.Pid, out var fade)
+                    && (fade.Bits & ~e.ModuleBits) != 0)
+                {
+                    list.Add(CloneWithBits(e, e.ModuleBits | fade.Bits, e.Beacon, fading: false));
+                    continue;
+                }
+                list.Add(e);
+            }
+            foreach (var kv in _fadeByPid)
+            {
+                if (present.Contains(kv.Key) || kv.Value.Bits == 0)
+                    continue;
+                // Цвет берём у самой строки: отвергнутый процесс должен догорать жёлтым,
+                // а не превращаться в «остаток DLL» на последних тиках.
+                list.Add(CloneWithBits(
+                    kv.Value.Template, kv.Value.Bits, kv.Value.Template.Beacon, fading: true));
+            }
+
+            _prevBits.Clear();
+            _prevEntries.Clear();
+            foreach (var e in snapshot.Entries)
+            {
+                if (e.Pid == 0 || e.ModuleBits == 0 || e.IsFading)
+                    continue;
+                _prevBits[e.Pid] = e.ModuleBits;
+                _prevEntries[e.Pid] = e;
+            }
+
+            return Build(list, snapshot.PlatformRunning);
+        }
+    }
+
+    /// <summary>Погасить самую старшую оставшуюся точку (визуально — по одной за тик).</summary>
+    private static uint DropOneBit(uint bits)
+    {
+        if (bits == 0)
+            return 0;
+        var highest = 0x80000000u;
+        while ((bits & highest) == 0)
+            highest >>= 1;
+        return bits & ~highest;
+    }
+
+    private static InjectRuntimeEntry CloneWithBits(
+        InjectRuntimeEntry src, uint bits, InjectRuntimeBeacon beacon, bool fading)
+    {
+        return new InjectRuntimeEntry
+        {
+            Pid = src.Pid,
+            ExeName = src.ExeName,
+            Beacon = beacon,
+            ModuleBits = bits,
+            ModulesText = FormatModules(bits),
+            Path = src.Path,
+            Arch = src.Arch,
+            DiagFlags = src.DiagFlags,
+            DiagLifecycle = src.DiagLifecycle,
+            SubclassWindowTotal = src.SubclassWindowTotal,
+            SubclassKindMask = src.SubclassKindMask,
+            State = src.State,
+            IsToolProcess = src.IsToolProcess,
+            IsFading = fading,
+        };
     }
 
     /// <summary>
@@ -528,10 +706,17 @@ public sealed class InjectRuntimeMonitor
         return dropped;
     }
 
-    private static bool IsGlassSettingsProcess(uint pid, string? exe, uint selfPid) =>
+    /// <summary>
+    /// Свои инструменты, которым в списке процессов работы не место: сам GlassSettings
+    /// (в т.ч. текущий процесс — <paramref name="selfPid"/>) и LogViewer. Оба — tool-host'ы
+    /// с локальными модулями, а не инжектированные приложения. Как в master: такие записи
+    /// отбрасываются и из карты, и из скана.
+    /// </summary>
+    private static bool IsOwnToolProcess(uint pid, string? exe, uint selfPid) =>
         pid == selfPid
         || (!string.IsNullOrEmpty(exe)
-            && exe.Equals("GlassSettings.exe", StringComparison.OrdinalIgnoreCase));
+            && (exe.Equals("GlassSettings.exe", StringComparison.OrdinalIgnoreCase)
+                || exe.Equals("LogViewer.exe", StringComparison.OrdinalIgnoreCase)));
 
     private static bool IsGlassPlatformHostPid(uint pid)
     {
@@ -787,10 +972,10 @@ public sealed class InjectRuntimeMonitor
             {
                 if (slot.Pid == 0)
                     continue;
-                if (IsGlassSettingsProcess(slot.Pid, slot.ExeName, selfPid))
-                {
+                // Свои инструменты (GlassSettings, LogViewer) в список не попадают.
+                if (IsOwnToolProcess(slot.Pid, slot.ExeName, selfPid))
                     continue;
-                }
+                var slotIsTool = IsGlassPlatformHostPid(slot.Pid);
 
                 scanByPid.TryGetValue(slot.Pid, out var scanned);
                 // H42: AppContainer Toolhelp часто неполный (только Compat) — не даём scan
@@ -840,6 +1025,7 @@ public sealed class InjectRuntimeMonitor
                     SubclassKindMask = slot.SubclassKindMask,
                     State = slot.State,
                     ModulesText = FormatModules(bits),
+                    IsToolProcess = slotIsTool,
                 });
             }
 
@@ -848,13 +1034,9 @@ public sealed class InjectRuntimeMonitor
             {
                 if (mapped.Contains(s.Pid) || s.ModuleBits == 0)
                     continue;
-                if (IsGlassSettingsProcess(s.Pid, s.ExeName, selfPid))
+                if (IsOwnToolProcess(s.Pid, s.ExeName, selfPid))
                     continue;
-                // Хост платформы (rundll32+GlassCompat) — не residual injectee.
-                if (IsGlassPlatformHostPid(s.Pid))
-                {
-                    continue;
-                }
+                var scanIsTool = IsGlassPlatformHostPid(s.Pid);
                 // Вне карты: при живой платформе и пустых слотах — Residual (платформа выгружается).
                 // При живой платформе с активными слотами — Active (слот может запаздывать при старте).
                 // CFG-fix: residualSweep — sweep уже активен (мьютекс жив, но слоты пустеют),
@@ -872,6 +1054,7 @@ public sealed class InjectRuntimeMonitor
                     ModuleBits = s.ModuleBits,
                     Arch = GuessProcessArch(s.Pid),
                     ModulesText = FormatModules(s.ModuleBits),
+                    IsToolProcess = scanIsTool,
                 });
             }
         }
@@ -881,10 +1064,10 @@ public sealed class InjectRuntimeMonitor
             {
                 if (s.ModuleBits == 0)
                     continue;
-                if (IsGlassSettingsProcess(s.Pid, s.ExeName, selfPid))
+                // Платформа остановлена: свои инструменты тоже не показываем.
+                if (IsOwnToolProcess(s.Pid, s.ExeName, selfPid))
                     continue;
-                if (IsGlassPlatformHostPid(s.Pid))
-                    continue;
+                var scanIsTool = IsGlassPlatformHostPid(s.Pid);
 
                 list.Add(new InjectRuntimeEntry
                 {
@@ -894,22 +1077,37 @@ public sealed class InjectRuntimeMonitor
                     ModuleBits = s.ModuleBits,
                     Arch = GuessProcessArch(s.Pid),
                     ModulesText = FormatModules(s.ModuleBits),
+                    IsToolProcess = scanIsTool,
                 });
             }
         }
 
+        return Build(list, platformRunning);
+    }
+
+    /// <summary>Сортировка + счётчики: единственное место, где считается статус снимка.</summary>
+    private static InjectRuntimeSnapshot Build(List<InjectRuntimeEntry> list, bool platformRunning)
+    {
         list.Sort((a, b) =>
         {
-            var c = a.Beacon.CompareTo(b.Beacon);
+            var c = a.IsToolProcess.CompareTo(b.IsToolProcess);
+            if (c != 0)
+                return c;
+            c = a.Beacon.CompareTo(b.Beacon);
             if (c != 0)
                 return c;
             c = string.Compare(a.ExeName, b.ExeName, StringComparison.OrdinalIgnoreCase);
             return c != 0 ? c : a.Pid.CompareTo(b.Pid);
         });
 
-        var activeCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Active);
-        var rejectedCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Rejected);
-        var residualCount = list.Count(e => e.Beacon == InjectRuntimeBeacon.Residual);
+        // Счётчики — только по инжектированным приложениям. Свои процессы (хост платформы и
+        // сам GlassSettings) видны в списке, но остатком не считаются: GlassSettings держит
+        // GlassCore локально до собственного закрытия, а rundll32-хост — это и есть платформа.
+        // Гасящиеся строки тоже не считаем: их модулей в процессе уже нет.
+        var real = list.Where(static e => !e.IsToolProcess && !e.IsFading).ToList();
+        var activeCount = real.Count(static e => e.Beacon == InjectRuntimeBeacon.Active);
+        var rejectedCount = real.Count(static e => e.Beacon == InjectRuntimeBeacon.Rejected);
+        var residualCount = real.Count(static e => e.Beacon == InjectRuntimeBeacon.Residual);
 
         return new InjectRuntimeSnapshot
         {
@@ -957,6 +1155,7 @@ public sealed class InjectRuntimeMonitor
                     _residualSweepActive = true;
             }
 
+            // Гасящиеся строки не должны держать sticky/bridge: их модулей в процессе уже нет.
             if (!snapshot.PlatformRunning && !snapshot.HasResiduals)
             {
                 ++_residualEmptyStreak;
@@ -978,7 +1177,7 @@ public sealed class InjectRuntimeMonitor
                 _residualEmptyStreak = 0;
                 foreach (var e in snapshot.Entries)
                 {
-                    if (e.Pid == 0)
+                    if (e.Pid == 0 || e.IsFading)
                         continue;
                     _bridgePids.Add(e.Pid);
                     if (e.ModuleBits != 0)
@@ -990,7 +1189,7 @@ public sealed class InjectRuntimeMonitor
                 // Живая платформа / Active без residual: sticky из слотов с модулями.
                 foreach (var e in snapshot.Entries)
                 {
-                    if (e.Pid != 0 && e.ModuleBits != 0)
+                    if (e.Pid != 0 && e.ModuleBits != 0 && !e.IsFading)
                         _stickyPids.Add(e.Pid);
                 }
             }

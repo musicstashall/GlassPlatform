@@ -4,8 +4,10 @@
 #include "HostPidHelper.h"
 
 #include <GlassMessages.h>
+#include <ForceUnloadGlassModules.h>
 #include <InjectProcessMap.h>
 #include <RootBackdropPolicy.h>
+#include <GlassModuleRefCount.h>
 #include <aclapi.h>
 #include <appmodel.h>
 #include <sddl.h>
@@ -550,8 +552,11 @@ namespace
     {
         if (dllPath.empty() || !loadedLeafName || !loadedLeafName[0])
             return false;
-        if (ModuleLoadedInProcess(pid, loadedLeafName))
+        const bool already = ModuleLoadedInProcess(pid, loadedLeafName);
+        if (already)
+        {
             return true;
+        }
         if (IsPlatformStopSignaled())
             return false;
 
@@ -794,7 +799,9 @@ namespace
     // wake-шторма; иначе callback в unmapped образе (dump 18.08).
     [[nodiscard]] bool TryRemoteDropShellHostResidualPin(DWORD pid) noexcept
     {
-        if (ResolveLiveGuiTid(pid) != 0)
+        const DWORD guiTid0 = ResolveLiveGuiTid(pid);
+        const bool loaded0 = ModuleLoadedInProcess(pid, L"GlassCompat.dll");
+        if (guiTid0 != 0)
         {
             DebugLog(
                 DBG_IMPORTANT,
@@ -803,7 +810,7 @@ namespace
             return false;
         }
 
-        if (!ModuleLoadedInProcess(pid, L"GlassCompat.dll"))
+        if (!loaded0)
             return true;
 
         constexpr int kWakeRounds = 8;
@@ -872,7 +879,8 @@ namespace
         {
             Sleep(25);
         }
-        return !ModuleLoadedInProcess(pid, L"GlassCompat.dll");
+        const bool still = ModuleLoadedInProcess(pid, L"GlassCompat.dll");
+        return !still;
     }
 
     bool TryRemoteRequestShutdown(DWORD pid) noexcept
@@ -968,7 +976,8 @@ namespace
             Sleep(50);
         }
 
-        return !ModuleLoadedInProcess(pid, L"GlassCompat.dll");
+        const bool gone = !ModuleLoadedInProcess(pid, L"GlassCompat.dll");
+        return gone;
     }
 
     void InstallProcessHook(HMODULE hSelf, DWORD pid) noexcept
@@ -1029,7 +1038,22 @@ namespace
             g_hooks.emplace(
                 key, ThreadHook{ pid, 0, hook, uncloakHook, locationHook });
         }
-
+        unsigned hooksForPid = 0;
+        {
+            std::lock_guard lock(g_mx);
+            for (const auto& [k, th] : g_hooks)
+            {
+                (void)k;
+                if (th.pid != pid)
+                    continue;
+                if (th.hook)
+                    ++hooksForPid;
+                if (th.uncloakHook)
+                    ++hooksForPid;
+                if (th.locationHook)
+                    ++hooksForPid;
+            }
+        }
     }
 
     struct VisibleCwEnumCtx
@@ -1573,6 +1597,7 @@ namespace GlassCompat::CoreWindowHostInject
 
     void Shutdown(bool wakeProcesses) noexcept
     {
+        const ULONGLONG t0 = GetTickCount64();
         std::vector<DWORD> wakePids;
         std::vector<HWINEVENTHOOK> hooks;
         {
@@ -1637,8 +1662,149 @@ namespace GlassCompat::CoreWindowHostInject
         CloseCwForceEvents();
     }
 
+    // В прогоне 4 после Stop у части процессов оставалась ровно одна чужая ссылка на
+    // GlassCompat (loader-ref инжектора). Наш поток к этому моменту уже вышел
+    // (FreeLibraryAndExitThread), снять ссылку изнутри некому → модуль висит до конца
+    // жизни процесса: msedgewebview2 13912 и DllHost 21396/27684/6852/2872.
+    // Снимок берётся сразу после Stop, чтобы заведомо не зацепить процессы, которые
+    // инжектятся ПОСЛЕ остановки (у свежего инжекта сначала появляется только compat).
+    void CollectCompatCandidates(std::vector<DWORD>& out) noexcept
+    {
+        out.clear();
+        const DWORD self = GetCurrentProcessId();
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE)
+            return;
+        PROCESSENTRY32W pe{};
+        pe.dwSize = sizeof(pe);
+        if (Process32FirstW(snap, &pe))
+        {
+            do
+            {
+                const DWORD pid = pe.th32ProcessID;
+                if (pid == 0 || pid == self)
+                    continue;
+                if ((Shared::ModuleRef::RemoteMask(pid) & 1u) == 0)
+                    continue;
+                out.push_back(pid);
+            } while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+    }
+
+    // Добивание остатка снаружи: остался РОВНО compat (core/wnd/explorer/taskbar/ui уже
+    // выгружены ⇒ наш shutdown завершён).
+    //
+    // R6 (H96): «слепое» CreateRemoteThread(FreeLibrary) по чужим процессам — источник
+    // use-after-unmap. R7 (H97): raw FreeLibrary по умолчанию ВЫКЛЮЧЕН совсем.
+    //
+    // Почему: после нашего FLAET в таких процессах остаётся ровно одна OS-ссылка — это
+    // user32, который держит INCONTEXT-hook DLL и указатель на GlassCompat_WinEventProc.
+    // Снять такую ссылку снаружи нельзя: FreeLibrary просто размапит модуль, а user32
+    // продолжит звать наш код. Итог — дамп `Яндекс Музыка.exe.35444`: AV 0xC0000005
+    // записью по 0x8 внутри уже выгруженного GlassCompat (RVA 0xBB10B), стек вызова —
+    // user32!… 6 копий адреса в стеке потока. Причём в этом процессе наш shutdown
+    // выполнялся штатно (лог 6: attach 11:31:17 → ExecuteShutdown 11:33:21 →
+    // freeself rc=2 expected_rc_after=1), т.е. виноват не «лишний refcount», а именно
+    // принудительное FreeLibrary.
+    //
+    // Порядок сейчас: (1) graceful shutdown в процессе; (2) «пинок» его окон/потоков —
+    // процесс сам обработает снятие хука и ОС выгрузит DLL; (3) короткое ожидание;
+    // (4) если не ушёл — оставляем (лучше остаток, чем AV).
+
+    // Невредные сообщения во все окна и все потоки процесса: поток с очередью обработает
+    // отложенное снятие INCONTEXT-хука, после чего ОС сама снимет ссылку и выгрузит DLL.
+    void NudgeProcessThreadsUl(DWORD pid) noexcept
+    {
+        struct NudgeCtx
+        {
+            DWORD pid;
+            unsigned posted;
+        } ctx{ pid, 0 };
+
+        (void)EnumWindows(
+            [](HWND hwnd, LPARAM lp) -> BOOL
+            {
+                auto* c = reinterpret_cast<NudgeCtx*>(lp);
+                DWORD wpid = 0;
+                (void)GetWindowThreadProcessId(hwnd, &wpid);
+                if (wpid == c->pid && PostMessageW(hwnd, WM_NULL, 0, 0))
+                    ++c->posted;
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&ctx));
+
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snap == INVALID_HANDLE_VALUE)
+            return;
+        THREADENTRY32 te{};
+        te.dwSize = sizeof(te);
+        if (Thread32First(snap, &te))
+        {
+            do
+            {
+                if (te.th32OwnerProcessID != pid)
+                    continue;
+                if (PostThreadMessageW(te.th32ThreadID, WM_NULL, 0, 0))
+                    ++ctx.posted;
+            } while (Thread32Next(snap, &te));
+        }
+        CloseHandle(snap);
+    }
+
+    unsigned SweepCompatLeftoversOnce(
+        const std::vector<DWORD>& candidates,
+        const std::unordered_set<DWORD>& alivePids,
+        unsigned& outTried,
+        unsigned& outGraceful,
+        unsigned& outDenied) noexcept
+    {
+        unsigned unloaded = 0;
+        // R8: ожидание внутри хоста сокращено с 3 с до 0.6 с.
+        constexpr ULONGLONG kWaitMs = 600;
+
+        for (const DWORD pid : candidates)
+        {
+            const unsigned before = Shared::ModuleRef::RemoteMask(pid);
+            if (before != 1u)
+                continue;
+            // Процесс ещё живёт по карте инжекта (Alive) — значит его shutdown мог не
+            // начаться; снаружи не трогаем, это работа path=1/2, а не sweep.
+            if (alivePids.count(pid) != 0)
+                continue;
+            ++outTried;
+
+            (void)TryRemoteRequestShutdown(pid);
+            if ((Shared::ModuleRef::RemoteMask(pid) & 1u) == 0)
+            {
+                ++unloaded;
+                continue;
+            }
+
+            const ULONGLONG tick0 = GetTickCount64();
+            while ((Shared::ModuleRef::RemoteMask(pid) & 1u) != 0
+                && GetTickCount64() - tick0 < kWaitMs)
+            {
+                NudgeProcessThreadsUl(pid);
+                Sleep(200);
+            }
+            if ((Shared::ModuleRef::RemoteMask(pid) & 1u) == 0)
+            {
+                ++outGraceful;
+                ++unloaded;
+            }
+            else
+            {
+                ++outDenied;
+            }
+        }
+        return unloaded;
+    }
+
     void ForceUnloadResiduals() noexcept
     {
+        std::vector<DWORD> sweepCandidates;
+        CollectCompatCandidates(sweepCandidates);
         // После HostShutdown + Unhook: сначала ждём штатный path=1 по StopEvent,
         // затем backup RequestShutdown (не FreeLibrary). Лог: SEH без loop_exit при
         // немедленном remote thread — даём Stop ~2с.
@@ -1827,6 +1993,28 @@ namespace GlassCompat::CoreWindowHostInject
             // EnableDebugging (не freeze с модулем внутри); PLM сам притормозит позже.
             if (!still)
                 TrySehPlmRest(pid, false);
+        }
+
+        {
+            // Alive-слоты карты инжекта: их не трогаем (shutdown ещё/ещё не начался).
+            std::unordered_set<DWORD> alivePids;
+            std::vector<Shared::InjectProcessMap::Slot> slots(
+                Shared::InjectProcessMap::kSlotCount);
+            DWORD slotCount = 0;
+            if (Shared::InjectProcessMap::TryReadSlots(
+                    slots.data(), static_cast<DWORD>(slots.size()), &slotCount))
+            {
+                for (DWORD i = 0; i < slotCount; ++i)
+                {
+                    if (slots[i].state == Shared::InjectProcessMap::State::Alive)
+                        alivePids.insert(slots[i].pid);
+                }
+            }
+            unsigned tried = 0;
+            unsigned graceful = 0;
+            unsigned denied = 0;
+            (void)SweepCompatLeftoversOnce(
+                sweepCandidates, alivePids, tried, graceful, denied);
         }
 
         CloseCwForceEvents();

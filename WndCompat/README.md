@@ -51,3 +51,18 @@
 | Live OFF Root backdrop | [GlassSettings/docs/RootBackdropDisableSequence.md](../GlassSettings/docs/RootBackdropDisableSequence.md) |
 | Explorer XAML hosts | [ExplorerCompat/docs/ExplorerXamlIslands.md](../ExplorerCompat/docs/ExplorerXamlIslands.md) |
 | Выгрузка / detach | [GlassCompat/docs/GlassCompat-unload.md](../GlassCompat/docs/GlassCompat-unload.md) |
+
+### Снятие субклассов при остановке платформы
+
+Порядок: `WndCompat_BeginShutdown` → `ForceDetachAllSubclasses` → `WndCompat_IsShutdownComplete`.
+
+`ForceDetachAllSubclasses` обходит top-level окна и их дочерние окна (`EnumChildWindows`
+вызывается один раз на окно, собственным колбэком — рекурсию по детям делает сама система):
+субклассы снимаются на потоке-владельце окна, чужим потокам уходит `WM_GLASS_DETACH_*`
+через `SendMessageTimeoutW`.
+
+Почему обход обязателен перед `FreeLibrary(WndCompat)`: снятый субкласс — это отсутствие
+`GWLP_WNDPROC` на наш код, а оставшийся указатель даёт CFG fail-fast уже после выгрузки
+модуля. Поэтому `GlassCompat::ExecuteShutdown` перед выгрузкой сканирует окна процесса
+(`ScanStaleCallbacksBeforeFree`) и при остатке колбэков модуль не выгружает — строка
+`[Shutdown] <модуль> kept: stale callbacks in %u windows` в общем логе платформы.

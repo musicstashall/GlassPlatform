@@ -3,6 +3,7 @@
 #include "GlassInstallRemoval.h"
 #include "GlassInstallUtil.h"
 #include <shlwapi.h>
+#include <GlassStop.h>
 #include <winsvc.h>
 #include <vector>
 
@@ -12,7 +13,8 @@ namespace GP = GlassShared::GlassPlatformTask;
 
 bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::wstring& installDir,
     const std::atomic_bool* cancelled, bool* stopAttempted, std::wstring* detail,
-    bool allowRunning) noexcept {
+    bool allowRunning,
+    Shared::GlassStop::Reason reason = Shared::GlassStop::Reason::Installer) noexcept {
     if (stopAttempted) *stopAttempted=false;
     if (detail) detail->clear();
     const auto isCancelled=[&]() { return cancelled && cancelled->load(std::memory_order_acquire); };
@@ -27,6 +29,46 @@ bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::wstring& installDir
         GlassInstallLog::LineFormat(L"HostStop: %s started after its state was captured",GP::GlassAutorunTaskName(arch));
         SetLastError(ERROR_INVALID_STATE);
         return false;
+    }
+
+    // R11/этап 1: единый сигнал стопа (одно место SetEvent — U1) до жёсткой остановки
+    // задачи. Хосту даётся короткое окно на штатную выгрузку; если не успел —
+    // дальше работает прежний проверенный путь IRegisteredTask::Stop + ожидание.
+    bool hostGoneByStop = false;
+    {
+        Shared::GlassStop::Options options{};
+        options.reason = reason;
+        // Хосту нужно время на штатную выгрузку: в прогонах 14/15 он снимал хуки,
+        // рассылал broadcast и дожимал 8-9 процессов ~10-20 с. Пока окно было 5 с,
+        // установщик убивал задачу посреди дренажа (жёсткий Stop), и остатки DLL
+        // доживали сами. 15 с укладываются в типичный таймаут и не меняют логику:
+        // если хост ушёл раньше, ждать не будем (WaitForPlatformStopped выходит сразу).
+        options.gracefulMs = 15000;
+        options.hostGoneMs = 0;
+        options.allowTaskStop = false;
+        options.wakeResiduals = false;
+        const Shared::GlassStop::Result r = Shared::GlassStop::Request(arch, options);
+        hostGoneByStop = r.hostGone;
+        GlassInstallLog::LineFormat(L"HostStop: %s signal hostGone=%d ms=%lu residuals=%u",
+            GP::GlassAutorunTaskName(arch), r.hostGone ? 1 : 0,
+            static_cast<unsigned long>(r.elapsedMs), r.residualProcesses);
+        if (isCancelled()) { SetLastError(ERROR_CANCELLED); return false; }
+    }
+
+    // Штатная выгрузка уже увела хост: останавливать задачу нечего и не у кого
+    // проверять «ровно один экземпляр». Раньше установка падала здесь с «работающий
+    // экземпляр не удалось однозначно связать с задачей» — хост умирал за время
+    // graceful-окна, а следующий шаг требовал живой экземпляр (прогон 16: x86,
+    // hostGone=1 ms=2969, при этом у пользователя платформа действительно остановилась).
+    {
+        bool stillRunning = false;
+        if (!GlassInstallHost::QueryGlassPlatformRunning(arch, stillRunning)) return false;
+        if (hostGoneByStop || !stillRunning) {
+            GlassInstallLog::LineFormat(L"HostStop: %s stopped by GlassStop; task stop not needed",
+                GP::GlassAutorunTaskName(arch));
+            if (stopAttempted) *stopAttempted = false;
+            return true;
+        }
     }
 
     bool attempted=false;
@@ -181,11 +223,14 @@ bool StopAllForUninstall(
     if (stopAttemptedX86) *stopAttemptedX86=false;
     GlassInstallUtil::CloseGlassSettingsProcesses(cancelled);
     if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
+    // R11: удаляльщик идёт тем же путём, отличается только Reason в логе.
     if (stopX64 && !StopGlassPlatformImpl(GP::PlatformArch::X64,x64InstallDir,cancelled,
-            stopAttemptedX64,nullptr,!wasRunningX64 || *wasRunningX64)) return false;
+            stopAttemptedX64,nullptr,!wasRunningX64 || *wasRunningX64,
+            Shared::GlassStop::Reason::Uninstaller)) return false;
     if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
     if (stopX86 && !StopGlassPlatformImpl(GP::PlatformArch::X86,x86InstallDir,cancelled,
-            stopAttemptedX86,nullptr,!wasRunningX86 || *wasRunningX86)) return false;
+            stopAttemptedX86,nullptr,!wasRunningX86 || *wasRunningX86,
+            Shared::GlassStop::Reason::Uninstaller)) return false;
     if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
     return !stopOpenGlass || StopOpenGlassHost(cancelled);
 }

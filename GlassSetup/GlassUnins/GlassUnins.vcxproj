@@ -56,6 +56,9 @@
     <ClCompile Include="..\src\InstallSupport\GlassInstallWatch.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallHost.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallUnlock.cpp" />
+    <ClCompile Include="..\..\GlassShared\src\GlassStop.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
     <ClCompile Include="..\..\GlassShared\src\GlassPlatformTask.cpp">
       <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
     </ClCompile>

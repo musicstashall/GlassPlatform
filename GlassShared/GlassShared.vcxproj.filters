@@ -35,6 +35,9 @@
     <ClCompile Include="src\GlassPlatformTask.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="src\GlassStop.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="src\GlassShellRegistration.cpp">
       <Filter>src</Filter>
     </ClCompile>
@@ -154,7 +157,13 @@
     <ClInclude Include="include\GlassMessages.h">
       <Filter>include</Filter>
     </ClInclude>
+    <ClInclude Include="include\GlassModuleRefCount.h">
+      <Filter>include</Filter>
+    </ClInclude>
     <ClInclude Include="include\GlassPlatformTask.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassStop.h">
       <Filter>include</Filter>
     </ClInclude>
     <ClInclude Include="include\GlassShellMenuConstants.h">
