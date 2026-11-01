@@ -30,7 +30,7 @@
   <PropertyGroup>
     <GlassSignSubject Condition="'$(GlassSignSubject)' == ''">CN=Stanislav K.</GlassSignSubject>
     <!-- SHA-1 thumbprint официального сертификата автора; заполняется после New-GlassSelfSignedCert.ps1. -->
-    <GlassSignThumbprint Condition="'$(GlassSignThumbprint)' == ''"></GlassSignThumbprint>
+    <GlassSignThumbprint Condition="'$(GlassSignThumbprint)' == ''">A801E5F5F430D6D19164C856F79B8EFD23F83EB8</GlassSignThumbprint>
     <GlassSignDescription Condition="'$(GlassSignDescription)' == ''">Glass Platform</GlassSignDescription>
     <GlassSignDescriptionUrl Condition="'$(GlassSignDescriptionUrl)' == ''">https://github.com/musicstashall/GlassPlatform</GlassSignDescriptionUrl>
     <GlassSignScript>$(MSBuildThisFileDirectory)scripts\Invoke-GlassSign.ps1</GlassSignScript>

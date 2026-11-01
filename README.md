@@ -61,15 +61,16 @@ msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64
 
 **Что подписано:** все DLL/EXE платформы (`Build\x64|x86\Release`), `GlassSettings.exe` (publish, single-file), `GlassSettings.Native.dll`, `GlassUnins.exe`, пять MSI и `GlassSetup.exe`. Сторонние файлы (OpenGlass, SecureUxTheme, WinUI/.NET/CRT) сохраняют подписи своих авторов. Sparse MSIX меню оболочки подписан отдельным разработческим сертификатом (см. `GlassSetup/README.md`).
 
-**Официальный сертификат автора** (заполняется после `New-GlassSelfSignedCert.ps1`):
+**Официальный сертификат автора:**
 
 | | |
 |---|---|
 | Subject | `CN=Stanislav K.` |
-| SHA-1 thumbprint | `<pending>` |
-| SHA-256 fingerprint | `<pending>` |
+| SHA-1 thumbprint | `A801E5F5F430D6D19164C856F79B8EFD23F83EB8` |
+| SHA-256 fingerprint | `1295F4BD2E1E7D710B380ECE573E8C3C021AE1E21C0E77174E5307E68A7DC93D` |
 | Публичный сертификат | `Shared/certs/GlassAuthorCodeSigning.cer` |
-| Подписаны сборки | начиная с `<pending>` |
+| Действителен | 2026-11-01 .. 2031-11-01 |
+| Подписаны сборки | начиная с сборок от 2026-11-01 |
 
 **Проверка файла:**
 
