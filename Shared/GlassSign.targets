@@ -4,7 +4,8 @@
     Authenticode-подпись артефактов GlassPlatform. Контракт для пользователей — корневой README.md,
     раздел «Подпись сборок». Импортируется из Directory.Build.targets (после целей самих проектов,
     поэтому IsGlassNativeBinary/GlassWixLockedPlatform уже известны, а порядок AfterTargets=Build
-    детерминирован: сначала цели проекта, затем подпись).
+    детерминирован: сначала цели проекта, затем подпись). Проекты, отключившие Directory.Build.targets
+    (GlassUnins: ImportDirectoryBuildTargets=false), импортируют этот файл сами после Microsoft.Cpp.targets.
 
     Точки подписи (порядок вложенности артефактов комплекта):
       1. PE  — каждый vcxproj Application/DynamicLibrary после Build: $(TargetPath)
@@ -28,6 +29,7 @@
     отладки) передаётся через окружение GLASS_SIGN_PFX_PASSWORD, не через командную строку.
   -->
   <PropertyGroup>
+    <GlassSignTargetsImported>true</GlassSignTargetsImported>
     <GlassSignSubject Condition="'$(GlassSignSubject)' == ''">CN=Stanislav K.</GlassSignSubject>
     <!-- SHA-1 thumbprint официального сертификата автора; заполняется после New-GlassSelfSignedCert.ps1. -->
     <GlassSignThumbprint Condition="'$(GlassSignThumbprint)' == ''">A801E5F5F430D6D19164C856F79B8EFD23F83EB8</GlassSignThumbprint>
@@ -47,6 +49,8 @@
   <!-- Какие проекты подписываются. Отключить для проекта: <GlassSignThisProject>false</GlassSignThisProject>. -->
   <PropertyGroup>
     <_GlassSignIsPe Condition="'$(IsGlassNativeBinary)' == 'true'">true</_GlassSignIsPe>
+    <!-- Без Directory.Build.targets IsGlassNativeBinary не задан — то же правило по ConfigurationType. -->
+    <_GlassSignIsPe Condition="'$(IsGlassNativeBinary)' == '' and ('$(ConfigurationType)' == 'Application' or '$(ConfigurationType)' == 'DynamicLibrary')">true</_GlassSignIsPe>
     <_GlassSignIsMsi Condition="'$(MSBuildProjectExtension)' == '.wixproj' and ('$(GlassWixLockedPlatform)' == '' or '$(Platform)' == '$(GlassWixLockedPlatform)')">true</_GlassSignIsMsi>
     <GlassSignThisProject Condition="'$(GlassSignThisProject)' == '' and ('$(_GlassSignIsPe)' == 'true' or '$(_GlassSignIsMsi)' == 'true')">true</GlassSignThisProject>
     <!-- Пустые аргументы не передаём: powershell.exe может отбросить "" и сдвинуть параметры. -->
