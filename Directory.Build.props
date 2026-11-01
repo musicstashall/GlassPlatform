@@ -36,6 +36,4 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
-
-  <Import Project="$(MSBuildThisFileDirectory)Shared\GlassSign.targets" Condition="Exists('$(MSBuildThisFileDirectory)Shared\GlassSign.targets')" />
 </Project>
