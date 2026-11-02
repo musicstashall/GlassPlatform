@@ -12,19 +12,12 @@
 #include <new>
 #include <string>
 
-#include <versionhelpers.h>
-
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "uuid.lib")
 #pragma comment(lib, "advapi32.lib")
 
 namespace
 {
-    [[nodiscard]] bool IsWindows11OrGreater() noexcept
-    {
-        return IsWindowsVersionOrGreater(10, 0, 22000);
-    }
-
     constexpr HRESULT kSelfRegEClass = static_cast<HRESULT>(0x80040201L);
 
     volatile LONG g_comServerLocks = 0;
@@ -325,13 +318,13 @@ public:
     }
 };
 
+// Классическое Win32-меню (ContextMenuHandlers + CLSID\InprocServer32 в HKCU) создаёт и снимает
+// только сама DLL — здесь, через regsvr32 /s и /u /s. Никакой другой компонент (GlassSettings.Native,
+// Setup, GlassUnins) эти ключи не пишет: Win10 — всегда так; Win11 — только как запасной вариант,
+// когда sparse-пакет (компактное меню) зарегистрировать нельзя, и вызывающая сторона сама следит,
+// чтобы оба варианта не были активны одновременно (иначе пункты дублируются в «Показать дополнительно»).
 STDAPI DllRegisterServer()
 {
-    // Win11: меню регистрирует GlassSettings.Native (sparse AppX, при невозможности — классические ключи
-    // через ту же Shared::GlassShellRegistration); regsvr32 не должен писать HKCU.
-    if (IsWindows11OrGreater())
-        return S_OK;
-
     wchar_t module[MAX_PATH]{};
     if (::GetModuleFileNameW(GlassShellExt::g_module, module, MAX_PATH) == 0 &&
         ::GetModuleFileNameW(nullptr, module, MAX_PATH) == 0)
@@ -343,16 +336,14 @@ STDAPI DllRegisterServer()
     if (!Shared::GlassShellRegistration::RegisterLegacyContextMenuHandler(module))
         return kSelfRegEClass;
 
-    // Win11 compact menu — только sparse AppxManifest; HKCU ExplorerCommandHandler дублирует пункты в legacy.
+    // Компактное меню Win11 (IExplorerCommand) — только sparse AppxManifest; HKCU ExplorerCommandHandler
+    // здесь не пишется, иначе пункты дублируются в классическом меню.
     FlushShellCachesAfterExtensionRegistrationChange();
     return S_OK;
 }
 
 STDAPI DllUnregisterServer()
 {
-    if (IsWindows11OrGreater())
-        return S_OK;
-
     Shared::GlassShellRegistration::RemoveStaleExplorerCommandRegistration();
     Shared::GlassShellRegistration::RemoveLegacyContextMenuHandler();
 

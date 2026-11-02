@@ -428,8 +428,10 @@ payload = (repo / "GlassSetup/msi/GlassSetupPayload.targets").read_text(encoding
 assert "GlassSettings_ShellExtRegisterSetupV1W" in util and "/installroot" in util
 assert "exactPlatformRoot" in shell_ops and "exactPlatformRoot" in shell_sparse
 assert "0x47505245" in util and "0x47505245" in shell_ops
-# H2: the msix is signed by the author certificate only; nothing creates, exports or trusts
-# certificates, neither at build time nor on the user's machine (setup informs, never trusts).
+# H2/H3: the msix is signed by the author certificate only; the build never creates, exports or
+# trusts certificates. On the user's machine the author certificate enters LocalMachine\TrustedPeople
+# in exactly one place (ShellSparsePackage::TrustSparseSigner) and only after an explicit choice:
+# the Setup certificate page or the GlassSettings notice link. The uninstaller never touches it.
 assert "ShellDevCertificate" not in shell_sparse and "ShellDevCertificate" not in shell_ops
 assert not (repo / "GlassSettings/Native/ShellDevCertificate.cpp").exists()
 for forbidden in ("New-SelfSignedCertificate", "Export-PfxCertificate", "TrustedPeople", "signtool", "Import-Certificate"):
@@ -438,11 +440,37 @@ assert "makeappx" in pack.lower() and "GlassShellSparse" in pack
 assert "SignerNotTrusted" in shell_sparse and "IsThumbprintInTrustedPeople" in shell_sparse
 assert "QuerySparseSignerTrust" in shell_sparse and "GlassSettings_GetShellSignerTrustV1" in shell_query
 assert "GlassSettings_GetShellMenuModeV1" in shell_query
-assert "CertAddCertificateContextToStore" not in shell_sparse + shell_ops + util + engine + unins
-assert "RegisterLegacyContextMenuHandler" in shell_ops and "RegisterClassicInProcess" in shell_ops
+trust_impl = section(shell_sparse, "SparseSignerTrustResult TrustSparseSigner(", "InstallerSparseState QueryInstallerSparseState(")
+assert shell_sparse.count("::CertAddCertificateContextToStore(") == 1 and "::CertAddCertificateContextToStore(" in trust_impl
+assert "CERT_STORE_ADD_REPLACE_EXISTING" in trust_impl and "SubjectMismatch" in trust_impl and "CERT_SYSTEM_STORE_LOCAL_MACHINE" in trust_impl
+assert "CertAddCertificateContextToStore" not in shell_ops + util + engine + unins + setup
+assert "CertDeleteCertificateFromStore" not in shell_sparse + shell_ops + util + engine + unins + setup
+assert "TrustedPeople" not in unins  # the uninstaller never removes the author certificate (user decision)
+assert "GlassSettings_TrustShellSignerV1" in shell_ops and "GlassSettings_ShellSignerTrustSetupV1W" in shell_ops
+assert "GlassSettings_ShellSignerTrustSetupV1W" in util and "0x47535400" in util and "0x47535400" in shell_ops
+assert "selection_.trustSigner" in engine and "InvokeShellSignerTrust" in engine and "warnCertInstall" in engine
+assert "Page::Certificate" in setup and "CertificatePageApplies()" in setup and "QuerySelfSignerInfo()" in setup
+assert "postMessage('certificate:'+item.id)" in ui and "renderCertificatePanel" in ui and 'data-mode="certificate"' in ui
+assert "certificate:1" in setup and "certificate:0" in setup  # host side of the web message
+assert "IDS_CERT_TITLE" in setup and "IDS_WARN_CERT_INSTALL" in setup and "IDS_CERT_NOTE" in setup
+for eula in ("res/Eula.ru.txt", "res/Eula.en.txt"):
+    text = read(eula)
+    assert "certlm.msc" in text and "GlassAuthorCodeSigning.txt" in text, eula
+assert "Сертификат автора" in read("res/Eula.ru.txt") and "Author certificate" in read("res/Eula.en.txt")
+# Classic Win32 menu: only regsvr32 /s (DllRegisterServer of the bundled GlassShellExt.dll) — on
+# Windows 10 always, on Windows 11 as the fallback when the sparse package cannot be registered.
+# Nobody writes shellex/ContextMenuHandlers keys by hand (GlassShellExt/README.md, AGENTS.md).
+assert "RegisterClassicViaRegsvr32" in shell_ops and "UnregisterClassicViaRegsvr32" in shell_ops
+assert "RemoveClassicAfterSparseSuccess" in shell_ops and "RegsvrClassicFallback" not in shell_ops
+for forbidden in ("RegisterLegacyContextMenuHandler", "RegisterClassicInProcess", "ContextMenuHandlers\\GlassPlatformDesktopMenu"):
+    assert forbidden not in shell_ops + util + engine + unins + setup, forbidden
+assert "RegCreateKey" not in shell_ops and "RegSetValue" not in shell_ops
 assert "kSetupClassicFallbackBase" in shell_ops and "0x47504C00" in shell_ops and "0x47504C00" in util
 assert "DescribeShellClassicFallback" in util and "classicFallbackReason" in util
 assert "IDS_WARN_SHELL_CLASSIC_CERT" in setup and "warnShellClassicCert" in engine and "GlassAuthorCodeSigning.cer" in engine
+shell_actions = read("../GlassShellExt/DesktopShellActions.cpp")
+assert "GlassProject" not in shell_actions and "GlassShellExt-launch.log" in shell_actions
+assert 'L"%s\\\\GlassPlatform"' in shell_actions and 'L"%s\\\\Logs"' in shell_actions  # %LOCALAPPDATA%\GlassPlatform\Logs
 assert "kShellExtRelativePath" in util and "kShellExtRelativePath" in unins and "kShellHostRelativePath" in setup
 assert "kSparsePublisher[] = L\"CN=Stanislav K.\"" in constants
 for manifest in ("GlassShellExt/Package/AppxManifest.xml", "GlassShellExt/Package/AppxManifest.UnregisterStub.xml"):
@@ -450,6 +478,37 @@ for manifest in ("GlassShellExt/Package/AppxManifest.xml", "GlassShellExt/Packag
 assert (repo / "Shared/certs/GlassAuthorCodeSigning.cer").exists() and (repo / "Shared/certs/GlassAuthorCodeSigning.txt").exists()
 assert "GlassAuthorCodeSigning.cer" in payload and "GlassAuthorCodeSigning.txt" in payload and "GlassShellSparse" in payload
 assert 'm.type===\'init\'||m.type===\'state\'' in ui
+
+# H3 item 5: the SecureUxTheme payload ships inside GlassSettings.MSI
+# (<root>\GlassSettings\SecureUxTheme\; x64 additionally x86\ThemeUiProxy.dll for SysWOW64) —
+# never without GlassSettings. The platform MSIs no longer carry it. GlassUnins deactivates
+# SecureUxTheme "like GlassSettings" through the unified helper before GlassSettings products
+# are removed (GlassSettings removal and full uninstall).
+sut_native = (repo / "GlassSettings/Native/SecureUxThemeNative.cpp").read_text(encoding="utf-8")
+native_host_h = (repo / "GlassSettings/Native/NativeHost.h").read_text(encoding="utf-8")
+sut_service = (repo / "GlassSettings/Services/SecureUxThemeService.cs").read_text(encoding="utf-8")
+assert "'$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86'" in payload
+assert "$(GlassPayloadStage)\\GlassSettings\\SecureUxTheme\\" in payload
+assert "$(GlassPayloadStage)\\SecureUxTheme\\" not in payload  # the platform branch no longer stages it
+assert "GlassSecureUxThemeWowVendorDir" in payload and "'$(GlassNativeArch)'" in payload
+assert "GlassSettings_SecureUxThemeSetupV1W" in sut_native and "GlassSettings_SecureUxThemeSetupV1W" in native_host_h
+assert "kPayloadWowSubdir" in sut_native and "ThisModuleDirectory" in sut_native
+assert "::ExitProcess(" in sut_native  # the rundll helper follows the ShellSignerTrustSetupV1W pattern
+assert "kInstallerSecureUxThemeExport" in util and "InvokeSecureUxThemeDeactivate" in util
+assert "InvokeSecureUxThemeDeactivate" in unins and "Отключение SecureUxTheme" in unins
+assert "kSecureUxThemeExitRebootRequired" in util and "kSecureUxThemeExitExternalInstall" in util
+assert 'Path.Combine(PlatformPaths.AppBase, "SecureUxTheme")' in sut_service
+# H3 item 6: the OpenGlass state query must see the installer's service (not only the legacy
+# task) on every thread: the cheap SCM query runs before the scheduler-UI guard, and only the
+# COM task-tree walk stays background-only. Otherwise Home/System rows show "No task" for a
+# service-based installation.
+og_state = (repo / "GlassShared/src/OpenGlassHostState.cpp").read_text(encoding="utf-8")
+og_start = og_state.index("HostUiState QueryOrchestrationUiState() noexcept")
+og_body = og_state[og_start:og_state.index("HostUiState QueryHostUiState(", og_start) if "HostUiState QueryHostUiState(" in og_state[og_start:] else og_start + 2500]
+assert "QueryServiceUiState()" in og_body and "GlassShared::IsSchedulerUiThread()" in og_body
+assert og_body.index("QueryServiceUiState()") < og_body.index("GlassShared::IsSchedulerUiThread()"), \
+    "the OpenGlass service must be queried before the scheduler-UI guard"
+assert "ServiceInstalled()" in og_state and "OrchestrationInstalled()" in og_state
 
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")

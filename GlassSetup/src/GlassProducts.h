@@ -11,6 +11,10 @@ struct Selection {
     bool platform32 = true;
     bool glassSettings = true;
     bool openGlass = true;
+    // Windows 11 certificate page: the user chose to add the author certificate
+    // (signer of GlassShellSparse.msix) to LocalMachine\TrustedPeople so the
+    // compact menu can be registered. Off when the page was not shown.
+    bool trustSigner = false;
 };
 
 // Recorded at wizard startup, independently of the later rollback snapshot.

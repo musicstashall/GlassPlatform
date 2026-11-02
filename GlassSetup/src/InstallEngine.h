@@ -69,6 +69,10 @@ public:
         std::wstring warnShellClassicCert;
         std::wstring warnShellClassicOther;
         std::wstring warnShellClassicHint;
+        // The user accepted the certificate page but the certificate could not
+        // be added to LocalMachine\TrustedPeople (title + hint).
+        std::wstring warnCertInstall;
+        std::wstring warnCertInstallHint;
         std::wstring warnUserDefaults;
     };
 

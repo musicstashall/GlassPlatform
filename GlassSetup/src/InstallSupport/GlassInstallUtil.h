@@ -26,6 +26,15 @@ bool ExtractResourceToFile(
 bool PeMatches(const std::wstring& path, WORD machine, const char* exportName) noexcept;
 // Protocol marker and rundll32 entry point for exact installer-selected paths.
 inline constexpr char kInstallerShellExport[] = "GlassSettings_ShellExtRegisterSetupV1W";
+inline constexpr char kInstallerSignerTrustExport[] = "GlassSettings_ShellSignerTrustSetupV1W";
+// Uninstaller entry point: SecureUxTheme deactivation «like GlassSettings» (stock style
+// restore + unified GlassSettings_SecureUxThemeDeactivate).
+inline constexpr char kInstallerSecureUxThemeExport[] = "GlassSettings_SecureUxThemeSetupV1W";
+// Exit-code bits of kInstallerSecureUxThemeExport (see NativeHost.h).
+inline constexpr DWORD kSecureUxThemeExitRebootRequired = 2u;
+inline constexpr DWORD kSecureUxThemeExitThemeNotRestored = 4u;
+inline constexpr DWORD kSecureUxThemeExitDeactivateFailed = 8u;
+inline constexpr DWORD kSecureUxThemeExitExternalInstall = 16u;
 std::wstring NativeRundll64();
 std::wstring System64ExePath(const wchar_t* exeName);
 std::wstring RundllPathForTaskArch(GlassShared::GlassPlatformTask::PlatformArch arch);
@@ -114,5 +123,41 @@ bool InvokeShellExtRegistration(
 
 // Technical, language-neutral text for a classic-fallback reason id.
 std::wstring DescribeShellClassicFallback(DWORD reason);
+
+// Windows 11 (build 22000+): the only Windows where the compact menu (sparse
+// package) and therefore the author certificate are used.
+bool IsWindows11OrGreater() noexcept;
+
+// Runs GlassSettings_ShellSignerTrustSetupV1W of the embedded x64 helper: adds
+// the certificate that signs <root>\GlassShellSparse\GlassShellSparse.msix to
+// LocalMachine\TrustedPeople. Called only when the user accepted the Setup
+// certificate page, after the files are in place and before the menu is
+// registered. failureDetail (optional) receives a technical reason. Windows 11
+// x64 only; a failure is a finish-page note, never a rollback.
+bool InvokeShellSignerTrust(
+    const std::wstring& x64Dir,
+    const std::wstring& x86Dir,
+    std::wstring* failureDetail = nullptr) noexcept;
+
+// Result of the SecureUxTheme deactivation helper (kInstallerSecureUxThemeExport).
+struct SecureUxThemeDeactivateRun
+{
+    bool ran = false;                  // the helper reached a decision
+    bool rebootRequired = false;       // one-time System32 cleanup is pending
+    bool themeNotRestored = false;     // custom visual style left active (deactivated anyway)
+    bool skippedExternalInstall = false; // official SecureUxTheme owns the state; nothing changed
+};
+
+// Runs GlassSettings_SecureUxThemeSetupV1W of the helper matching the OS bitness
+// (embedded x64 helper on x64, installed x86 helper on x86) and deactivates
+// SecureUxTheme the way the GlassSettings toggle does. Called before GlassSettings
+// products are removed (GlassSettings removal and full uninstall). Returns false when
+// the helper is unavailable or reported a failure — the caller must abort with
+// nothing removed.
+bool InvokeSecureUxThemeDeactivate(
+    const std::wstring& x64Dir,
+    const std::wstring& x86Dir,
+    SecureUxThemeDeactivateRun* run = nullptr,
+    std::wstring* failureDetail = nullptr) noexcept;
 
 } // namespace GlassInstallUtil

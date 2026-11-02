@@ -21,16 +21,29 @@
 `python GlassSetup/tests/sparse_identity_mock.py`. Отдельного «dev»-сертификата для MSIX нет; сборка без ключа автора
 даёт неподписанный msix (на Win11 — классический fallback меню).
 
-## Компактное меню Windows 11 на машине автора
+## Компактное меню Windows 11: сертификат автора на машине пользователя
 
-Windows регистрирует sparse-пакет только от издателя, сертификат которого есть в «Доверенных лицах». Ни установщик,
-ни GlassSettings, ни сборка этого не делают — на своей машине один раз вручную:
+Windows регистрирует sparse-пакет только от издателя, сертификат которого есть в «Доверенных лицах»
+(`LocalMachine\TrustedPeople`). Установка сертификата — всегда осознанный выбор пользователя:
+
+- **Установщик** (Win11 x64) показывает отдельную страницу «Сертификат автора» с объяснением, что это и зачем;
+  её можно пропустить. При согласии helper (`GlassSettings_ShellSignerTrustSetupV1W`) добавляет сертификат
+  из подписи `GlassShellSparse.msix` в `LocalMachine\TrustedPeople` — единственное место записи
+  (`ShellSparsePackage::TrustSparseSigner`). Отказ — обычный сценарий: меню остаётся классическим.
+- **GlassSettings** → Система: уведомление о непринятом сертификате со ссылкой «Установить сертификат автора
+  и включить компактное меню» и ссылкой на папку с файлом сертификата.
+- **EULA** (RU/EN, раздел «Сертификат автора») описывает сертификат, его назначение и право не устанавливать его.
+- **GlassUnins сертификат никогда не удаляет** — это явное решение пользователя (остаётся в хранилище до ручного
+  удаления через `certlm.msc` → «Доверенные лица»).
+- Сборка ничего не создаёт и не экспортирует (`New-SelfSignedCertificate`, `Import-Certificate` и т. п. запрещены).
+
+Ручной путь (резервный, для автора) — тот же файл:
 
 ```powershell
-Import-Certificate -FilePath .\Shared\certs\GlassAuthorCodeSigning.cer -CertStoreLocation Cert:\CurrentUser\TrustedPeople
+Import-Certificate -FilePath .\Shared\certs\GlassAuthorCodeSigning.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
 ```
 
-Та же инструкция для пользователей — `Shared/certs/GlassAuthorCodeSigning.txt` (ставится в корень платформы).
+Инструкция для пользователей — `Shared/certs/GlassAuthorCodeSigning.txt` (ставится в корень платформы рядом с `.cer`).
 
 ## Смена ПК или переустановка ОС
 

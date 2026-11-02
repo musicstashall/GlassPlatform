@@ -1701,13 +1701,37 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         AddFinishWarning(labels_.warnPriorHosts.empty()
             ? L"A previously running component could not be restarted." : labels_.warnPriorHosts, labels_.warnPriorHostsHint);
     }
+    // Windows 11: the author certificate (signer of GlassShellSparse.msix) is
+    // added to LocalMachine\TrustedPeople only when the user chose so on the
+    // certificate page; it is taken from the msix that was just installed and
+    // trusted before the menu is registered. Declined: nothing is trusted and
+    // the finish page explains the classic menu and where the public copy lies
+    // ({dir}\GlassAuthorCodeSigning.cer + .txt). The uninstaller never removes it.
+    const auto expandInstallDir=[this](std::wstring text) {
+        const std::wstring dir=GlassInstallUtil::TrimTrailingSlashes(x64Dir_.empty() ? x86Dir_ : x64Dir_);
+        for (size_t at=text.find(L"{dir}"); at!=std::wstring::npos; at=text.find(L"{dir}",at+dir.size()))
+            text.replace(at,5,dir);
+        return text;
+    };
+    if (selection_.trustSigner) {
+        std::wstring trustDetail;
+        if (GlassInstallUtil::InvokeShellSignerTrust(x64Dir_,x86Dir_,&trustDetail)) {
+            InstallLog::Line(L"Certificate: author certificate trusted (LocalMachine\\TrustedPeople) by user choice");
+        } else {
+            InstallLog::LineFormat(L"Certificate: trust failed: %s", trustDetail.c_str());
+            AddFinishWarning(labels_.warnCertInstall.empty()
+                ? L"The author certificate could not be installed; the Windows 11 compact menu stays unavailable."
+                : labels_.warnCertInstall, JoinWarningDetail(expandInstallDir(labels_.warnCertInstallHint), trustDetail));
+        }
+    } else {
+        InstallLog::Line(L"Certificate: not requested (page not shown or declined); nothing trusted");
+    }
     // Register by default on both fresh installs and reinstalls. The helper
     // preserves an existing registration and reports whether it changed one.
-    // Never add or trust a certificate on the user's machine: the author
-    // certificate is only shipped next to the files (GlassAuthorCodeSigning.cer
-    // + .txt). On Windows 11 a package rejected for this user (no trusted
-    // signer) makes the helper register the classic Win32 menu instead; the
-    // install is complete and the finish page explains the reduced menu.
+    // On Windows 11 a package rejected for this user (no trusted signer) makes
+    // the helper register the classic Win32 menu instead (regsvr32 of
+    // GlassShellExt.dll); the install is complete and the finish page explains
+    // the reduced menu.
     bool shellConflict=false;
     DWORD shellClassicReason=0;
     std::wstring shellDetail;
@@ -1731,12 +1755,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
                 : L"The Windows 11 compact menu is unavailable; the Glass entry was registered the classic way (\"Show more options\").";
         }
         std::wstring hint;
-        if (certificate) {
-            const std::wstring dir=GlassInstallUtil::TrimTrailingSlashes(x64Dir_.empty() ? x86Dir_ : x64Dir_);
-            hint=labels_.warnShellClassicHint;
-            for (size_t at=hint.find(L"{dir}"); at!=std::wstring::npos; at=hint.find(L"{dir}",at+dir.size()))
-                hint.replace(at,5,dir);
-        }
+        if (certificate) hint=expandInstallDir(labels_.warnShellClassicHint);
         AddFinishWarning(title, JoinWarningDetail(hint, GlassInstallUtil::DescribeShellClassicFallback(shellClassicReason)));
     }
     SetStatus(labels_.finalize, 9950);

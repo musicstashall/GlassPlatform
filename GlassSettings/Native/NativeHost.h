@@ -97,6 +97,12 @@ extern "C"
     /// Доверие подписанту GlassShellSparse.msix: 0 unknown/Win10, 1 trusted, 2 untrusted, 3 msix нет, 4 без подписи;
     /// subjectOut — Subject сертификата («CN=…»). Ничего не пишет в хранилища.
     __declspec(dllexport) DWORD WINAPI GlassSettings_GetShellSignerTrustV1(wchar_t* subjectOut, DWORD cchSubject) noexcept;
+    /// По явному выбору пользователя добавляет сертификат автора (подписант GlassShellSparse.msix) в
+    /// LocalMachine\TrustedPeople — единственная запись в хранилища сертификатов во всей платформе.
+    /// Возвращает ShellSparsePackage::SparseSignerTrustResult: 0 добавлен, 1 уже доверен, 2 msix нет,
+    /// 3 без подписи, 4 подписант не автор, 5 ошибка хранилища (lastErrorOut), 6 неизвестно; 7 — Windows 10.
+    __declspec(dllexport) DWORD WINAPI GlassSettings_TrustShellSignerV1(
+        wchar_t* subjectOut, DWORD cchSubject, DWORD* lastErrorOut) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_TryReadPresenceSnapshot(
         void* snapshotOut) noexcept;
     __declspec(dllexport) HANDLE WINAPI GlassSettings_OpenPresenceChangedEvent() noexcept;
@@ -135,6 +141,9 @@ extern "C"
     void CALLBACK GlassSettings_UnlockerW(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show);
     void CALLBACK GlassSettings_ShellExtRegisterW(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
     void CALLBACK GlassSettings_ShellExtRegisterSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
+    /// Setup (rundll32, с правами администратора): `/installroot "<root>"` — доверие сертификату автора
+    /// из подписи <root>\GlassShellSparse\GlassShellSparse.msix. Код выхода 0 или 0x47535400|результат.
+    void CALLBACK GlassSettings_ShellSignerTrustSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_IsOpenGlassNotificationWindowPresent() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_IsOpenGlassBackdropPipelineActive() noexcept;
     /// Pipeline/модуль OG или служба/задача — можно писать Composition/DWM policy.
@@ -217,6 +226,11 @@ extern "C"
     __declspec(dllexport) BOOL WINAPI GlassSettings_SecureUxThemeEnsureLoaded() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_SecureUxThemeCheckCleanupPending() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_SecureUxThemeTryDeleteSystemFiles() noexcept;
+    /// GlassUnins (rundll32, разрядность ОС): деактивация SecureUxTheme «как в GlassSettings» —
+    /// стандартный стиль при пользовательском, затем GlassSettings_SecureUxThemeDeactivate.
+    /// Код выхода: биты 1 неверные аргументы, 2 перезагрузка, 4 стиль не восстановлен,
+    /// 8 деактивация не удалась, 16 внешний SecureUxTheme (ничего не изменено).
+    void CALLBACK GlassSettings_SecureUxThemeSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
 
     /// Built-in BlockList: единственный список в ProcessBlockList.h.
     __declspec(dllexport) DWORD WINAPI GlassSettings_GetBuiltInBlockListCount() noexcept;

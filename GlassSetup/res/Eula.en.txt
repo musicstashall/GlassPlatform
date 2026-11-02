@@ -47,7 +47,20 @@ This is not a defect the author is obliged to fix. Do not install the program on
 Blur, glass and the extra composition work use CPU and GPU time. Expect a partial loss of performance: the interface and games may run slower, power draw may increase, and battery life may get shorter.
 
 
-5. Disclaimer of warranty
+5. Author certificate (Windows 11)
+
+On Windows 11 the compact desktop menu (the one that opens on right-click) accepts entries only from packages signed with a certificate this computer trusts. The Glass menu package is signed with the personal certificate of the author, "Stanislav K.". It is a self-signed certificate: no certification authority issued it, so Windows does not trust it automatically.
+
+What the certificate is. A certificate is the author's public key together with his name. Installing it into the computer's "Trusted People" store means exactly one thing: Windows will treat signatures made with this particular key as signatures of a known publisher and will admit the Glass menu package. The certificate gives the author no access to the computer, installs no root certification authority and does not affect trust in web sites, drivers or programs of other publishers.
+
+What it is for. Only for the Glass entry in the compact Windows 11 menu. Without the certificate Setup registers the classic Glass menu, which opens via "Show more options". Every other feature of the platform works the same either way.
+
+Your choice. Setup asks on a separate page whether to install the certificate and shows its name, SHA-1 thumbprint and validity period. You may decline; installation continues without it. The thumbprint can be checked against GlassAuthorCodeSigning.txt in the installation folder and against the repository README.
+
+Removal. The Glass Platform uninstaller never removes the certificate. To remove it yourself, open "Manage computer certificates" (certlm.msc), section "Trusted People", and delete the "Stanislav K." certificate. The compact Windows 11 menu then stops showing the Glass entry.
+
+
+6. Disclaimer of warranty
 
 THE PROGRAM IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING ANY WARRANTY OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
 
@@ -56,6 +69,6 @@ THE AUTHORS AND COPYRIGHT HOLDERS SHALL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, 
 You assume the entire risk as to the quality, operation and consequences of installing the program. If you do not agree, close the installer and do not install it.
 
 
-6. Acceptance
+7. Acceptance
 
-Checking "I accept the terms of this agreement" and continuing means that you have read this agreement, that you understand the risks, the partial loss of performance and the disclaimer of warranty, and that you accept GPL-3.0 for Glass and, if you install OpenGlass, GPL-3.0 for OpenGlass.
+Checking "I accept the terms of this agreement" and continuing means that you have read this agreement, that you understand the risks, the partial loss of performance, the purpose of the author certificate and the disclaimer of warranty, and that you accept GPL-3.0 for Glass and, if you install OpenGlass, GPL-3.0 for OpenGlass.

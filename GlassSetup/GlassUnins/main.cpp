@@ -771,6 +771,33 @@ private:
                 L"No packages were removed, but previously running components could not be restarted."));
             return 17;
         };
+        // SecureUxTheme принадлежит GlassSettings: деактивация «как в GlassSettings» — до
+        // удаления продуктов и до остановки компонентов (удаление GlassSettings и полное
+        // удаление). Отказ helper'а останавливает удаление: активный хук winlogon без
+        // интерфейса управления оставаться не должен.
+        const bool fullRemoval=(!installed_.x64 || chosen.x64) && (!installed_.x86 || chosen.x86) &&
+            (!installed_.settings || chosen.settings) && (!installed_.openGlass || chosen.openGlass);
+        bool secureUxThemeReboot=false, secureUxThemeThemeNote=false;
+        if (chosen.settings || fullRemoval) {
+            SetStatus(T(L"Отключение SecureUxTheme…",L"Deactivating SecureUxTheme…"),450);
+            GlassInstallUtil::SecureUxThemeDeactivateRun sutRun;
+            std::wstring sutError;
+            if (!GlassInstallUtil::InvokeSecureUxThemeDeactivate(x64Dir_,x86Dir_,&sutRun,&sutError)) {
+                LogLine(L"SecureUxTheme deactivation failed: "+sutError);
+                if (chosen.settings) {
+                    SetError(T(L"Не удалось отключить SecureUxTheme. Пакеты не удалены.",
+                        L"Could not deactivate SecureUxTheme. No packages were removed."));
+                    return 18;
+                }
+                // Полное удаление без установленного GlassSettings: helper недоступен,
+                // активного состояния обычно и нет — продолжаем с записью в журнал.
+            } else if (sutRun.ran) {
+                secureUxThemeReboot=sutRun.rebootRequired;
+                secureUxThemeThemeNote=sutRun.themeNotRestored;
+                if (sutRun.skippedExternalInstall)
+                    LogLine(L"SecureUxTheme: external installation owns the state; nothing changed");
+            }
+        }
         SetStatus(T(L"Остановка компонентов…",L"Stopping components…"),500);
         if (!GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,platformRemoval,platformRemoval,stopOg,
                 &cancelRequested_,&stopAttempted64,&stopAttempted86,&prior64,&prior86)) {
@@ -897,7 +924,14 @@ private:
                 L"Selected products were removed, but remaining components could not be restarted."));
             return 17;
         }
-        SetStatus(T(L"Удаление завершено.",L"Uninstall complete."),10000);
+        std::wstring complete=T(L"Удаление завершено.",L"Uninstall complete.");
+        if (secureUxThemeReboot)
+            complete+=T(L" Требуется перезагрузка, чтобы завершить очистку SecureUxTheme.",
+                L" Restart Windows to finish the SecureUxTheme cleanup.");
+        if (secureUxThemeThemeNote)
+            complete+=T(L" Пользовательский визуальный стиль не восстановлен: после перезагрузки Windows применит стандартный.",
+                L" The custom visual style was not restored: Windows will use the standard one after restart.");
+        SetStatus(complete,10000);
         return 0;
     }
     void StartRemoval() {

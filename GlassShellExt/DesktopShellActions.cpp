@@ -61,8 +61,15 @@ namespace
         if (FAILED(::SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localAppData)))
             return;
 
+        // The platform owns exactly one per-user folder: %LOCALAPPDATA%\GlassPlatform
+        // (attach-gate.txt, Crashes\, ...). Shell launch diagnostics go to Logs\ inside it.
+        wchar_t root[MAX_PATH]{};
+        if (FAILED(::StringCchPrintfW(root, _countof(root), L"%s\\GlassPlatform", localAppData)))
+            return;
+        (void)::CreateDirectoryW(root, nullptr);
+
         wchar_t dir[MAX_PATH]{};
-        if (FAILED(::StringCchPrintfW(dir, _countof(dir), L"%s\\GlassProject", localAppData)))
+        if (FAILED(::StringCchPrintfW(dir, _countof(dir), L"%s\\Logs", root)))
             return;
         (void)::CreateDirectoryW(dir, nullptr);
 
@@ -107,7 +114,7 @@ namespace
     {
         const DWORD codeValue = static_cast<DWORD>(code);
         AppendShellLaunchLog(
-            L"[GlassShellExt] FAIL code=%u %s (см. %%LOCALAPPDATA%%\\GlassProject\\GlassShellExt-launch.log)",
+            L"[GlassShellExt] FAIL code=%u %s (см. %%LOCALAPPDATA%%\\GlassPlatform\\Logs\\GlassShellExt-launch.log)",
             codeValue,
             detail ? detail : L"");
     }

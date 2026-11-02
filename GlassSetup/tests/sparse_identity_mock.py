@@ -164,12 +164,14 @@ pack = read('GlassShellExt/Package/BuildSparsePackage.ps1')
 for forbidden in ('New-SelfSignedCertificate', 'Export-PfxCertificate', 'Import-Certificate', 'TrustedPeople', 'signtool', 'Cert:\\'):
     assert forbidden not in pack, forbidden
 
-# --- no second identity or trust-store writes anywhere ----------------------
+# --- no second identity anywhere; trust-store writes in exactly one function ---
 scan_dirs = ('GlassShellExt', 'GlassShellHost', 'GlassSettings', 'GlassSetup/src', 'GlassSetup/GlassUnins',
              'GlassSetup/msi', 'GlassSetup/res', 'GlassShared', 'Shared', 'contributing')
-old_identity = ('t6mpd150h6a5c', 'GlassProject Dev', '2F8603BEC098465EED7768AC8FD3BF79E8DF65DF', 'ShellDevCertificate',
-                'CertAddCertificateContextToStore', 'CertAddEncodedCertificateToStore')
+old_identity = ('t6mpd150h6a5c', 'GlassProject Dev', '2F8603BEC098465EED7768AC8FD3BF79E8DF65DF', 'ShellDevCertificate')
+store_writes = ('CertAddCertificateContextToStore(', 'CertAddEncodedCertificateToStore(', 'CertDeleteCertificateFromStore(')
 suffixes = {'.cpp', '.h', '.cs', '.xaml', '.ps1', '.targets', '.props', '.vcxproj', '.wxs', '.xml', '.md', '.txt', '.rc', '.resw'}
+code_suffixes = {'.cpp', '.h', '.cs', '.ps1', '.targets', '.props', '.vcxproj', '.wxs'}
+trust_owner = repo / 'GlassSettings/Native/ShellSparsePackage.cpp'
 for directory in scan_dirs:
     for path in (repo / directory).rglob('*'):
         if not path.is_file() or path.suffix.lower() not in suffixes or 'Build' in path.parts or 'bin' in path.parts or 'obj' in path.parts:
@@ -179,8 +181,17 @@ for directory in scan_dirs:
         text = path.read_text(encoding='utf-8', errors='replace')
         for needle in old_identity:
             assert needle not in text, (path, needle)
-# The only code touching Trusted People is the read-only signer check in ShellSparsePackage.cpp.
+        if path.suffix.lower() in code_suffixes and path != trust_owner:
+            for needle in store_writes:
+                assert needle not in text, (path, needle)
+# H3: the author certificate enters LocalMachine\TrustedPeople only in TrustSparseSigner (explicit
+# user choice: Setup certificate page / GlassSettings link); the signer query itself stays read-only
+# and nothing ever deletes certificates.
 sparse_cpp = read('GlassSettings/Native/ShellSparsePackage.cpp')
 assert 'IsThumbprintInTrustedPeople' in sparse_cpp and 'CERT_STORE_READONLY_FLAG' in sparse_cpp
+trust_fn = sparse_cpp[sparse_cpp.index('SparseSignerTrustResult TrustSparseSigner('):sparse_cpp.index('InstallerSparseState QueryInstallerSparseState(')]
+assert sparse_cpp.count('::CertAddCertificateContextToStore(') == 1 and '::CertAddCertificateContextToStore(' in trust_fn
+assert 'CertDeleteCertificateFromStore' not in sparse_cpp and 'CERT_SYSTEM_STORE_LOCAL_MACHINE' in trust_fn
+assert 'kSparsePublisher' in trust_fn or 'SparsePublisher' in trust_fn  # subject pinned to the package publisher
 
 print('PASS: sparse identity: Publisher == author certificate subject, family name derivation, pin, payload and no second certificate')

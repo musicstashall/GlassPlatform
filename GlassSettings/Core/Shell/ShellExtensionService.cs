@@ -25,6 +25,19 @@ public enum ShellSignerTrust
     Unsigned = 4,
 }
 
+/// <summary>Итог GlassSettings_TrustShellSignerV1 (ShellSparsePackage.h: SparseSignerTrustResult; 7 = Windows 10).</summary>
+public enum ShellSignerTrustResult
+{
+    Added = 0,
+    AlreadyTrusted = 1,
+    MsixMissing = 2,
+    Unsigned = 3,
+    SubjectMismatch = 4,
+    StoreFailed = 5,
+    Unknown = 6,
+    NotWindows11 = 7,
+}
+
 public static class ShellExtensionService
 {
     /// <summary>Publisher sparse-пакета = Subject сертификата автора (GlassShellMenuConstants.h: kSparsePublisher).</summary>
@@ -137,6 +150,64 @@ public static class ShellExtensionService
             await ShowShellExtensionErrorAsync().ConfigureAwait(true);
 
         return ok;
+    }
+
+    /// <summary>
+    /// Один клик на странице «Система» (Windows 11): сертификат автора добавляется в
+    /// LocalMachine\TrustedPeople тем же кодом, что и в установщике, после чего пункт меню
+    /// перерегистрируется — sparse-пакет становится допустимым, классическую регистрацию helper
+    /// снимает сам после успеха. Если переключатель выключен, перерегистрация не нужна: следующее
+    /// включение сразу даст компактное меню. Ошибка показывается диалогом; ничего не откатывается.
+    /// </summary>
+    public static async Task<bool> TrustAuthorCertificateAsync(bool reregister)
+    {
+        if (IsShellExtensionOperationInProgress())
+            return false;
+
+        int result;
+        var lastError = 0;
+        try
+        {
+            result = NativeHostInterop.TrustShellSigner(out _, out lastError);
+        }
+        catch
+        {
+            result = (int)ShellSignerTrustResult.Unknown;
+        }
+
+        if (result is not ((int)ShellSignerTrustResult.Added or (int)ShellSignerTrustResult.AlreadyTrusted))
+        {
+            await ShowCertificateErrorAsync((ShellSignerTrustResult)result, lastError).ConfigureAwait(true);
+            return false;
+        }
+
+        if (!reregister || !IsBundledDllRegistered())
+            return true;
+
+        return await SetShellExtensionRegisteredAsync(true).ConfigureAwait(true);
+    }
+
+    private static async Task ShowCertificateErrorAsync(ShellSignerTrustResult result, int lastError)
+    {
+        if (App.ShellWindow?.WindowXamlRoot is null)
+            return;
+
+        var reason = result switch
+        {
+            ShellSignerTrustResult.MsixMissing or ShellSignerTrustResult.Unsigned =>
+                GlassSettingsResources.Get("System_ShellSparseNoticeMessage"),
+            ShellSignerTrustResult.StoreFailed =>
+                string.Format(GlassSettingsResources.Get("Error_ShellCertStoreFormat"), lastError),
+            _ => string.Format(GlassSettingsResources.Get("Error_ShellCertResultFormat"), (int)result),
+        };
+        var dialog = new ContentDialog
+        {
+            Title = GlassSettingsResources.Get("Error_ShellCertTitle"),
+            Content = GlassSettingsResources.Get("Error_ShellCertFailed") + " " + reason,
+            CloseButtonText = GlassSettingsResources.Get("Dialog_Close"),
+            XamlRoot = App.ShellWindow.WindowXamlRoot
+        };
+        _ = await dialog.ShowAsync();
     }
 
     private static bool GlassAutorunTaskExists() => GlassPlatformService.GlassAutorunTaskExists();

@@ -347,7 +347,9 @@ public sealed partial class SystemPage : Page
     /// <summary>
     /// Windows 11: компактное меню требует sparse-пакет, который Windows регистрирует только от
     /// издателя с доверенным сертификатом. Без доверия переключатель управляет классическим пунктом
-    /// («Показать дополнительные параметры»); здесь — только уведомление, доверие не выставляется.
+    /// («Показать дополнительные параметры»); уведомление объясняет это и даёт ссылку-действие:
+    /// установить сертификат автора одним нажатием (тот же код, что и на странице сертификата
+    /// установщика) и перейти на компактное меню. Сертификат никогда не ставится без этого нажатия.
     /// </summary>
     private void RefreshShellMenuNotice(bool registered)
     {
@@ -378,6 +380,9 @@ public sealed partial class SystemPage : Page
                     return;
                 }
                 AddInlineText(text, GlassSettingsResources.Get("System_ShellClassicNoticeMessage"));
+                AddInlineText(text, " ");
+                AddHyperlink(text, GlassSettingsResources.Get("System_ShellClassicNoticeSwitch"),
+                    () => _ = ApplyAuthorCertificateAsync(trustFirst: false));
                 break;
             case ShellSignerTrust.Untrusted:
                 if (string.IsNullOrWhiteSpace(signerSubject))
@@ -386,10 +391,13 @@ public sealed partial class SystemPage : Page
                     GlassSettingsResources.Get("System_ShellCertNoticeMessage"),
                     signerSubject,
                     ShellExtensionService.AuthorCertificateReadme));
+                AddInlineText(text, " ");
+                AddHyperlink(text, GlassSettingsResources.Get("System_ShellCertNoticeInstall"),
+                    () => _ = ApplyAuthorCertificateAsync(trustFirst: true));
                 var certificatePath = ShellExtensionService.GetAuthorCertificatePath();
                 if (!string.IsNullOrEmpty(certificatePath))
                 {
-                    AddInlineText(text, " ");
+                    AddInlineText(text, " · ");
                     AddHyperlink(text, GlassSettingsResources.Get("System_ShellCertNoticeOpenFolder"),
                         () => RevealInExplorer(certificatePath));
                 }
@@ -399,6 +407,30 @@ public sealed partial class SystemPage : Page
                 break;
         }
         ShellMenuNoticeBlock.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Ссылка-действие из уведомления: при trustFirst сертификат автора добавляется в
+    /// «Доверенные лица» компьютера, затем (если пункт меню включён) регистрация повторяется и
+    /// Windows 11 переходит на компактное меню. Переключатель на время операции блокируется.</summary>
+    private async Task ApplyAuthorCertificateAsync(bool trustFirst)
+    {
+        if (ShellExtensionService.IsShellExtensionOperationInProgress())
+            return;
+
+        _shellSuppress = true;
+        ShellExtensionSwitch.IsEnabled = false;
+        _shellSuppress = false;
+        try
+        {
+            if (trustFirst)
+                await ShellExtensionService.TrustAuthorCertificateAsync(reregister: true).ConfigureAwait(true);
+            else if (ShellExtensionService.IsBundledDllRegistered())
+                await ShellExtensionService.SetShellExtensionRegisteredAsync(true).ConfigureAwait(true);
+        }
+        finally
+        {
+            RefreshShellRow();
+        }
     }
 
     private static void RevealInExplorer(string filePath)

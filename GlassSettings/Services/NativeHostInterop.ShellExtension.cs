@@ -31,6 +31,19 @@ public static partial class NativeHostInterop
         return trust;
     }
 
+    /// <summary>Добавляет подписанта GlassShellSparse.msix в LocalMachine\TrustedPeople (GlassSettings
+    /// работает с правами администратора). Возвращает SparseSignerTrustResult: 0 добавлен, 1 уже доверен,
+    /// 2 msix отсутствует, 3 без подписи, 4 Subject ≠ издателю пакета, 5 ошибка хранилища (lastError),
+    /// 6 неизвестно, 7 Windows 10.</summary>
+    public static int TrustShellSigner(out string signerSubject, out int lastError)
+    {
+        var buffer = new char[512];
+        var result = (int)Native_TrustShellSignerV1(buffer, (uint)buffer.Length, out var error);
+        signerSubject = new string(buffer).TrimEnd('\0');
+        lastError = (int)error;
+        return result;
+    }
+
     [DllImport(Dll, EntryPoint = "GlassSettings_BeginShellExtensionChange")]
     private static extern bool Native_BeginShellExtensionChange(
         bool registerNotUnregister);
@@ -51,4 +64,10 @@ public static partial class NativeHostInterop
     private static extern uint Native_GetShellSignerTrustV1(
         [Out] char[] subjectBuffer,
         uint cchSubject);
+
+    [DllImport(Dll, EntryPoint = "GlassSettings_TrustShellSignerV1", CharSet = CharSet.Unicode)]
+    private static extern uint Native_TrustShellSignerV1(
+        [Out] char[] subjectBuffer,
+        uint cchSubject,
+        out uint lastError);
 }

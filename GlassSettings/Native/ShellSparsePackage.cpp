@@ -398,31 +398,98 @@ namespace GlassSettings::ShellSparsePackage
             return GetFileAttributesW(out) != INVALID_FILE_ATTRIBUTES;
         }
 
-        /// Отпечаток SHA-1 сертификата есть в хранилище TrustedPeople (CU или LM): так доверие
-        /// самоподписанному издателю видит и AppX-развёртывание.
-        [[nodiscard]] bool IsThumbprintInTrustedPeople(const BYTE* hash, DWORD cbHash) noexcept
+        [[nodiscard]] bool IsThumbprintInTrustedPeopleAt(DWORD location, const BYTE* hash, DWORD cbHash) noexcept
         {
             if (!hash || cbHash == 0)
                 return false;
             CRYPT_HASH_BLOB blob{ cbHash, const_cast<BYTE*>(hash) };
-            const DWORD locations[] = { CERT_SYSTEM_STORE_CURRENT_USER, CERT_SYSTEM_STORE_LOCAL_MACHINE };
-            for (const DWORD location : locations)
-            {
-                HCERTSTORE store = ::CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
-                    location | CERT_STORE_OPEN_EXISTING_FLAG | CERT_STORE_READONLY_FLAG, L"TrustedPeople");
-                if (!store)
-                    continue;
-                PCCERT_CONTEXT found = ::CertFindCertificateInStore(
-                    store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SHA1_HASH, &blob, nullptr);
-                const bool hit = found != nullptr;
-                if (found)
-                    ::CertFreeCertificateContext(found);
-                ::CertCloseStore(store, 0);
-                if (hit)
-                    return true;
-            }
-            return false;
+            HCERTSTORE store = ::CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
+                location | CERT_STORE_OPEN_EXISTING_FLAG | CERT_STORE_READONLY_FLAG, L"TrustedPeople");
+            if (!store)
+                return false;
+            PCCERT_CONTEXT found = ::CertFindCertificateInStore(
+                store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SHA1_HASH, &blob, nullptr);
+            const bool hit = found != nullptr;
+            if (found)
+                ::CertFreeCertificateContext(found);
+            ::CertCloseStore(store, 0);
+            return hit;
         }
+
+        /// Отпечаток SHA-1 сертификата есть в хранилище TrustedPeople (CU или LM): так доверие
+        /// самоподписанному издателю видит и AppX-развёртывание.
+        [[nodiscard]] bool IsThumbprintInTrustedPeople(const BYTE* hash, DWORD cbHash) noexcept
+        {
+            return IsThumbprintInTrustedPeopleAt(CERT_SYSTEM_STORE_CURRENT_USER, hash, cbHash) ||
+                   IsThumbprintInTrustedPeopleAt(CERT_SYSTEM_STORE_LOCAL_MACHINE, hash, cbHash);
+        }
+
+        /// Authenticode-состояние msix (AppX SIP) без UI и без сети с доступом к листовому сертификату
+        /// подписанта; состояние WinVerifyTrust закрывается в деструкторе. Самоподписанный издатель из
+        /// TrustedPeople для WINTRUST_ACTION_GENERIC_VERIFY_V2 остаётся «недоверенным корнем», поэтому
+        /// вызывающие дополнительно смотрят отпечаток в TrustedPeople — так доверие видит развёртывание.
+        struct MsixSignerScope
+        {
+            WINTRUST_FILE_INFO fileInfo{};
+            WINTRUST_DATA data{};
+            GUID action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+            LONG verify = static_cast<LONG>(E_FAIL);
+            PCCERT_CONTEXT signer = nullptr; // owned by the WinVerifyTrust state, valid until destruction
+
+            explicit MsixSignerScope(const wchar_t* msixPath) noexcept
+            {
+                fileInfo.cbStruct = sizeof(fileInfo);
+                fileInfo.pcwszFilePath = msixPath;
+                data.cbStruct = sizeof(data);
+                data.dwUIChoice = WTD_UI_NONE;
+                data.fdwRevocationChecks = WTD_REVOKE_NONE;
+                data.dwUnionChoice = WTD_CHOICE_FILE;
+                data.pFile = &fileInfo;
+                data.dwStateAction = WTD_STATEACTION_VERIFY;
+                data.dwProvFlags = WTD_CACHE_ONLY_URL_RETRIEVAL | WTD_REVOCATION_CHECK_NONE;
+                verify = ::WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE), &action, &data);
+                if (CRYPT_PROVIDER_DATA* prov = ::WTHelperProvDataFromStateData(data.hWVTStateData))
+                {
+                    if (CRYPT_PROVIDER_SGNR* sgnr = ::WTHelperGetProvSignerFromChain(prov, 0, FALSE, 0))
+                    {
+                        if (sgnr->csCertChain > 0)
+                        {
+                            if (CRYPT_PROVIDER_CERT* cert = ::WTHelperGetProvCertFromChain(sgnr, 0))
+                                signer = cert->pCert;
+                        }
+                    }
+                }
+            }
+
+            MsixSignerScope(const MsixSignerScope&) = delete;
+            MsixSignerScope& operator=(const MsixSignerScope&) = delete;
+
+            ~MsixSignerScope()
+            {
+                data.dwStateAction = WTD_STATEACTION_CLOSE;
+                (void)::WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE), &action, &data);
+            }
+
+            [[nodiscard]] bool Unsigned() const noexcept { return verify == static_cast<LONG>(kHrNoSignature); }
+
+            void CopySubject(wchar_t* subjectOut, size_t cchSubject) const noexcept
+            {
+                if (!subjectOut || !cchSubject)
+                    return;
+                subjectOut[0] = L'\0';
+                if (!signer)
+                    return;
+                DWORD strType = CERT_X500_NAME_STR;
+                (void)::CertGetNameStringW(signer, CERT_NAME_RDN_TYPE, 0, &strType, subjectOut,
+                    static_cast<DWORD>(cchSubject));
+            }
+
+            [[nodiscard]] bool Sha1(BYTE (&hash)[20], DWORD& cbHash) const noexcept
+            {
+                cbHash = sizeof(hash);
+                return signer && ::CertGetCertificateContextProperty(signer, CERT_SHA1_HASH_PROP_ID, hash, &cbHash);
+            }
+        };
 
         [[nodiscard]] winrtf::Uri UriFromPath(const wchar_t* path) noexcept
         {
@@ -702,74 +769,96 @@ namespace GlassSettings::ShellSparsePackage
         if (!ResolveSparseMsixPath(msixPath, _countof(msixPath), exactPlatformRoot))
             return SparseSignerTrust::MsixMissing;
 
-        // Authenticode-проверка msix (AppX SIP) без UI и без сети. Самоподписанный издатель из TrustedPeople
-        // для WINTRUST_ACTION_GENERIC_VERIFY_V2 остаётся «недоверенным корнем», поэтому отпечаток подписанта
-        // дополнительно ищется в TrustedPeople — именно так доверие видит AppX-развёртывание.
-        WINTRUST_FILE_INFO fileInfo{};
-        fileInfo.cbStruct = sizeof(fileInfo);
-        fileInfo.pcwszFilePath = msixPath;
-
-        WINTRUST_DATA data{};
-        data.cbStruct = sizeof(data);
-        data.dwUIChoice = WTD_UI_NONE;
-        data.fdwRevocationChecks = WTD_REVOKE_NONE;
-        data.dwUnionChoice = WTD_CHOICE_FILE;
-        data.pFile = &fileInfo;
-        data.dwStateAction = WTD_STATEACTION_VERIFY;
-        data.dwProvFlags = WTD_CACHE_ONLY_URL_RETRIEVAL | WTD_REVOCATION_CHECK_NONE;
-
-        GUID action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
-        const LONG verify = ::WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE), &action, &data);
-
+        const MsixSignerScope scope(msixPath);
         SparseSignerTrust trust = SparseSignerTrust::Unknown;
-        if (verify == static_cast<LONG>(kHrNoSignature))
+        if (scope.Unsigned())
         {
             trust = SparseSignerTrust::Unsigned;
         }
-        else
+        else if (scope.signer)
         {
-            PCCERT_CONTEXT signer = nullptr;
-            if (CRYPT_PROVIDER_DATA* prov = ::WTHelperProvDataFromStateData(data.hWVTStateData))
-            {
-                if (CRYPT_PROVIDER_SGNR* sgnr = ::WTHelperGetProvSignerFromChain(prov, 0, FALSE, 0))
-                {
-                    if (sgnr->csCertChain > 0)
-                    {
-                        if (CRYPT_PROVIDER_CERT* cert = ::WTHelperGetProvCertFromChain(sgnr, 0))
-                            signer = cert->pCert;
-                    }
-                }
-            }
-
-            if (signer)
-            {
-                if (subjectOut && cchSubject)
-                {
-                    DWORD strType = CERT_X500_NAME_STR;
-                    (void)::CertGetNameStringW(signer, CERT_NAME_RDN_TYPE, 0, &strType, subjectOut,
-                        static_cast<DWORD>(cchSubject));
-                }
-                bool thumbprintTrusted = false;
-                BYTE hash[20]{};
-                DWORD cbHash = sizeof(hash);
-                if (::CertGetCertificateContextProperty(signer, CERT_SHA1_HASH_PROP_ID, hash, &cbHash))
-                    thumbprintTrusted = IsThumbprintInTrustedPeople(hash, cbHash);
-                trust = (verify == ERROR_SUCCESS || thumbprintTrusted) ? SparseSignerTrust::Trusted
-                                                                       : SparseSignerTrust::Untrusted;
-            }
-            else if (verify == ERROR_SUCCESS)
-            {
-                trust = SparseSignerTrust::Trusted;
-            }
+            scope.CopySubject(subjectOut, cchSubject);
+            bool thumbprintTrusted = false;
+            BYTE hash[20]{};
+            DWORD cbHash = 0;
+            if (scope.Sha1(hash, cbHash))
+                thumbprintTrusted = IsThumbprintInTrustedPeople(hash, cbHash);
+            trust = (scope.verify == ERROR_SUCCESS || thumbprintTrusted) ? SparseSignerTrust::Trusted
+                                                                         : SparseSignerTrust::Untrusted;
+        }
+        else if (scope.verify == ERROR_SUCCESS)
+        {
+            trust = SparseSignerTrust::Trusted;
         }
 
-        data.dwStateAction = WTD_STATEACTION_CLOSE;
-        (void)::WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE), &action, &data);
-
         DebugLog(DBG_NORMAL, L"[GlassSettings][ShellSparse] signer trust: WinVerifyTrust=0x%08X state=%d subject=%ls",
-            static_cast<unsigned>(verify), static_cast<int>(trust),
+            static_cast<unsigned>(scope.verify), static_cast<int>(trust),
             (subjectOut && subjectOut[0]) ? subjectOut : L"-");
         return trust;
+    }
+
+    SparseSignerTrustResult TrustSparseSigner(
+        const wchar_t* exactPlatformRoot, wchar_t* subjectOut, size_t cchSubject, DWORD* lastErrorOut) noexcept
+    {
+        if (lastErrorOut)
+            *lastErrorOut = 0;
+        if (subjectOut && cchSubject)
+            subjectOut[0] = L'\0';
+
+        wchar_t msixPath[MAX_PATH]{};
+        if (!ResolveSparseMsixPath(msixPath, _countof(msixPath), exactPlatformRoot))
+            return SparseSignerTrustResult::MsixMissing;
+
+        const MsixSignerScope scope(msixPath);
+        if (scope.Unsigned())
+            return SparseSignerTrustResult::Unsigned;
+        if (!scope.signer)
+            return SparseSignerTrustResult::Unknown;
+
+        // Only the author certificate the package manifest names as Publisher is ever trusted:
+        // a re-signed msix from somebody else must not make this helper vouch for them.
+        wchar_t subject[512]{};
+        scope.CopySubject(subject, _countof(subject));
+        if (subjectOut && cchSubject)
+            (void)wcscpy_s(subjectOut, cchSubject, subject);
+        if (_wcsicmp(subject, GlassShared::GlassShellMenu::kSparsePublisher) != 0)
+        {
+            DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] trust signer: subject %ls is not %ls — nothing trusted",
+                subject, GlassShared::GlassShellMenu::kSparsePublisher);
+            return SparseSignerTrustResult::SubjectMismatch;
+        }
+
+        BYTE hash[20]{};
+        DWORD cbHash = 0;
+        if (scope.Sha1(hash, cbHash) && IsThumbprintInTrustedPeopleAt(CERT_SYSTEM_STORE_LOCAL_MACHINE, hash, cbHash))
+        {
+            DebugLog(DBG_NORMAL, L"[GlassSettings][ShellSparse] trust signer: %ls already in LocalMachine\\TrustedPeople", subject);
+            return SparseSignerTrustResult::AlreadyTrusted;
+        }
+
+        HCERTSTORE store = ::CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, CERT_SYSTEM_STORE_LOCAL_MACHINE, L"TrustedPeople");
+        if (!store)
+        {
+            const DWORD error = ::GetLastError();
+            if (lastErrorOut)
+                *lastErrorOut = error;
+            DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] trust signer: CertOpenStore(LM\\TrustedPeople) failed %lu", error);
+            return SparseSignerTrustResult::StoreFailed;
+        }
+        const BOOL added = ::CertAddCertificateContextToStore(store, scope.signer, CERT_STORE_ADD_REPLACE_EXISTING, nullptr);
+        const DWORD error = added ? 0 : ::GetLastError();
+        ::CertCloseStore(store, 0);
+        if (!added)
+        {
+            if (lastErrorOut)
+                *lastErrorOut = error;
+            DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] trust signer: CertAddCertificateContextToStore failed %lu", error);
+            return SparseSignerTrustResult::StoreFailed;
+        }
+
+        DebugLog(DBG_IMPORTANT, L"[GlassSettings][ShellSparse] trust signer: %ls added to LocalMachine\\TrustedPeople (%ls)",
+            subject, msixPath);
+        return SparseSignerTrustResult::Added;
     }
 
     InstallerSparseState QueryInstallerSparseState(const wchar_t* exactPlatformRoot) noexcept

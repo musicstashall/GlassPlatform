@@ -83,7 +83,7 @@ constexpr wchar_t kWebView2BootstrapperUrl[] = L"https://go.microsoft.com/fwlink
 constexpr UINT_PTR kDebugDemoTimer = 4;
 constexpr UINT kDebugDemoPageMs = 1800;
 #endif
-enum class Page { RuntimeRequired, RuntimeInstalling, RuntimeError, AlreadyRunning, Welcome, Checking, Update, Conflicts, Downgrade, VersionInvalid, License, Components, Installing, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
+enum class Page { RuntimeRequired, RuntimeInstalling, RuntimeError, AlreadyRunning, Welcome, Checking, Update, Conflicts, Downgrade, VersionInvalid, License, Components, Certificate, Installing, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
 HINSTANCE gInstance = nullptr;
 HBRUSH gWindowClassBrush = nullptr;
 bool gWindowClassRegistered = false;
@@ -556,6 +556,78 @@ bool VerifyMicrosoftSignature(const std::wstring& path, std::wstring& error) {
         return false;
     }
     return true;
+}
+
+// The author certificate as the certificate page shows it. Setup, the MSI
+// payload and GlassShellSparse.msix are signed with the same certificate
+// (Shared/GlassSign.targets, verified by Test-GlassSignatures.ps1), so Setup's
+// own Authenticode signer tells before any file is installed whether Windows
+// already trusts it. Read-only: nothing is written to any store here.
+struct SelfSignerInfo {
+    bool present=false;      // Setup carries a signature with a readable leaf certificate
+    bool trusted=false;      // chain verifies, or the thumbprint is in TrustedPeople (CU or LM)
+    std::wstring subject;    // "CN=Stanislav K."
+    std::wstring thumbprint; // SHA-1, upper-case hex
+    std::wstring validity;   // "YYYY-MM-DD – YYYY-MM-DD"
+};
+
+SelfSignerInfo QuerySelfSignerInfo() {
+    SelfSignerInfo info;
+    wchar_t self[MAX_PATH]{};
+    if (!GetModuleFileNameW(nullptr,self,MAX_PATH)) return info;
+    WINTRUST_FILE_INFO file{};
+    file.cbStruct=sizeof(file);
+    file.pcwszFilePath=self;
+    WINTRUST_DATA trust{};
+    trust.cbStruct=sizeof(trust);
+    trust.dwUIChoice=WTD_UI_NONE;
+    trust.fdwRevocationChecks=WTD_REVOKE_NONE;
+    trust.dwUnionChoice=WTD_CHOICE_FILE;
+    trust.pFile=&file;
+    trust.dwStateAction=WTD_STATEACTION_VERIFY;
+    trust.dwProvFlags=WTD_CACHE_ONLY_URL_RETRIEVAL | WTD_REVOCATION_CHECK_NONE;
+    GUID action=WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    const LONG status=WinVerifyTrust(nullptr,&action,&trust);
+    CRYPT_PROVIDER_DATA* provider=WTHelperProvDataFromStateData(trust.hWVTStateData);
+    CRYPT_PROVIDER_SGNR* signer=provider?WTHelperGetProvSignerFromChain(provider,0,FALSE,0):nullptr;
+    PCCERT_CONTEXT leaf=(signer && signer->csCertChain && signer->pasCertChain)?signer->pasCertChain[0].pCert:nullptr;
+    if (leaf) {
+        info.present=true;
+        wchar_t subject[256]{};
+        DWORD strType=CERT_X500_NAME_STR;
+        if (CertGetNameStringW(leaf,CERT_NAME_RDN_TYPE,0,&strType,subject,static_cast<DWORD>(std::size(subject)))>1)
+            info.subject=subject;
+        BYTE hash[20]{};
+        DWORD cbHash=sizeof(hash);
+        if (CertGetCertificateContextProperty(leaf,CERT_SHA1_HASH_PROP_ID,hash,&cbHash)) {
+            wchar_t hex[48]{};
+            for (DWORD i=0;i<cbHash && i<20;++i) swprintf_s(hex+i*2,3,L"%02X",hash[i]);
+            info.thumbprint=hex;
+            CRYPT_HASH_BLOB blob{cbHash,hash};
+            for (const DWORD location : {CERT_SYSTEM_STORE_CURRENT_USER,CERT_SYSTEM_STORE_LOCAL_MACHINE}) {
+                if (info.trusted) break;
+                HCERTSTORE store=CertOpenStore(CERT_STORE_PROV_SYSTEM_W,0,0,
+                    location | CERT_STORE_OPEN_EXISTING_FLAG | CERT_STORE_READONLY_FLAG,L"TrustedPeople");
+                if (!store) continue;
+                PCCERT_CONTEXT found=CertFindCertificateInStore(store,X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,0,
+                    CERT_FIND_SHA1_HASH,&blob,nullptr);
+                if (found) { info.trusted=true; CertFreeCertificateContext(found); }
+                CertCloseStore(store,0);
+            }
+        }
+        if (status==ERROR_SUCCESS) info.trusted=true;
+        SYSTEMTIME from{},to{};
+        if (FileTimeToSystemTime(&leaf->pCertInfo->NotBefore,&from) && FileTimeToSystemTime(&leaf->pCertInfo->NotAfter,&to)) {
+            wchar_t text[48]{};
+            swprintf_s(text,L"%04u-%02u-%02u \u2013 %04u-%02u-%02u",from.wYear,from.wMonth,from.wDay,to.wYear,to.wMonth,to.wDay);
+            info.validity=text;
+        }
+    }
+    trust.dwStateAction=WTD_STATEACTION_CLOSE;
+    WinVerifyTrust(nullptr,&action,&trust);
+    InstallLog::LineFormat(L"Certificate: setup signer present=%d trusted=%d subject=%s thumbprint=%s (WinVerifyTrust 0x%08lX)",
+        info.present?1:0,info.trusted?1:0,info.subject.c_str(),info.thumbprint.c_str(),static_cast<unsigned long>(status));
+    return info;
 }
 
 bool RunWebView2Bootstrapper(const std::wstring& installerPath,
@@ -1121,6 +1193,7 @@ private:
     HWND updateDownload_ = nullptr, updateSkip_ = nullptr;
     HWND eula_ = nullptr, accept_ = nullptr, progress_ = nullptr, webHost_ = nullptr;
     HWND component64_ = nullptr, component32_ = nullptr, componentSettings_ = nullptr, componentOpenGlass_ = nullptr;
+    HWND certInstall_ = nullptr, certSkip_ = nullptr; // GDI fallback of the certificate page
     HFONT font_ = nullptr, heading_ = nullptr, small_ = nullptr, title_ = nullptr;
     HBRUSH darkBrush_ = nullptr, licenseBrush_ = nullptr, buttonBrush_ = nullptr;
     HBRUSH footerBrush_ = nullptr, footerRuleBrush_ = nullptr;
@@ -1216,6 +1289,9 @@ private:
     std::wstring errorReason_;
     // Post-commit notes captured when the Complete page is entered.
     std::vector<InstallEngine::FinishWarning> finishWarnings_;
+    // Windows 11 certificate page: queried once when leaving Components.
+    bool certQueried_ = false;
+    SelfSignerInfo certSigner_;
     std::wstring holdReport_;
     InstallEngine installEngine_;
     std::wstring userDataFolder_;
@@ -1259,7 +1335,7 @@ private:
         };
         font_ = create(14,FW_NORMAL); small_ = create(12,FW_NORMAL);
         heading_ = create(28,FW_NORMAL); title_ = create(39,FW_LIGHT);
-        for (HWND c : {back_,next_,cancel_,eula_,accept_,updateDownload_,updateSkip_,component64_,component32_,componentSettings_,componentOpenGlass_})
+        for (HWND c : {back_,next_,cancel_,eula_,accept_,updateDownload_,updateSkip_,component64_,component32_,componentSettings_,componentOpenGlass_,certInstall_,certSkip_})
             if (c) SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
     void InitializeLoading() {
@@ -1290,6 +1366,8 @@ private:
         component32_ = Control(L"BUTTON",Text(IDS_COMP_P32_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT32);
         componentSettings_ = Control(L"BUTTON",Text(IDS_COMP_GS_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_SETTINGS);
         componentOpenGlass_ = Control(L"BUTTON",Text(IDS_COMP_OG_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_OG);
+        certInstall_ = Control(L"BUTTON",Text(IDS_CERT_OPT_INSTALL_TITLE),BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP,IDC_CERT_INSTALL);
+        certSkip_ = Control(L"BUTTON",Text(IDS_CERT_OPT_SKIP_TITLE),BS_AUTORADIOBUTTON,IDC_CERT_SKIP);
         // Owner-drawn STATIC avoids the classic PROGRESS control's sunken border,
         // which would consume most/all of a 4 px high strip.
         progress_ = Control(L"STATIC",L"",SS_OWNERDRAW,IDC_PROGRESS);
@@ -1484,6 +1562,7 @@ private:
         // Leave room outside each platform checkbox for the separate mandatory lock.
         Move(component64_,60,203,360,32); Move(component32_,510,203,360,32);
         Move(componentSettings_,60,293,400,32); Move(componentOpenGlass_,510,293,400,32);
+        Move(certInstall_,60,318,560,28); Move(certSkip_,60,386,560,28);
         if (controller_) {
             RECT bounds=Box(0,0,kWidth,kHtmlHeight);
             if (!haveWebBounds_ || !EqualRect(&bounds,&webBounds_)) {
@@ -1528,6 +1607,13 @@ private:
             SendMessageW(componentOpenGlass_,BM_SETCHECK,selection_.openGlass?BST_CHECKED:BST_UNCHECKED,0);
             EnableWindow(component64_,FALSE); EnableWindow(component32_,os64?TRUE:FALSE);
         }
+        const bool nativeCertificate=!webVisible && page_==Page::Certificate && !transitioning_;
+        ShowWindow(certInstall_,nativeCertificate?SW_SHOWNA:SW_HIDE);
+        ShowWindow(certSkip_,nativeCertificate?SW_SHOWNA:SW_HIDE);
+        if (nativeCertificate) {
+            SendMessageW(certInstall_,BM_SETCHECK,selection_.trustSigner?BST_CHECKED:BST_UNCHECKED,0);
+            SendMessageW(certSkip_,BM_SETCHECK,selection_.trustSigner?BST_UNCHECKED:BST_CHECKED,0);
+        }
     }
     [[nodiscard]] bool SlidesVisible() const noexcept {
         // One WebView2 child stays visible for every HTML page. Page changes are
@@ -1551,6 +1637,7 @@ private:
         case Page::VersionInvalid: return L"version-invalid";
         case Page::License: return L"license";
         case Page::Components: return L"components";
+        case Page::Certificate: return L"certificate";
         case Page::ConfirmCancel: return L"confirm-cancel";
         case Page::Cancelling: return L"cancelling";
         case Page::Cancelled: return L"cancelled";
@@ -1666,6 +1753,27 @@ private:
         else if (selection_.glassSettings) add(L"SETTINGS",9900);
         return json+L"]";
     }
+    // Windows 11 x64 only, and only while Windows does not yet trust the author
+    // certificate: a trusted signer needs no page, Windows 10 has no compact menu,
+    // and an unsigned (developer) build has nothing to offer. Queried once.
+    bool CertificatePageApplies() {
+        if (!GlassInstallUtil::IsOs64Bit() || !GlassInstallUtil::IsWindows11OrGreater()) return false;
+        if (!certQueried_) {
+            certQueried_=true;
+            certSigner_=QuerySelfSignerInfo();
+            // Recommended choice is preselected; the user can decline on the page.
+            if (certSigner_.present && !certSigner_.trusted) selection_.trustSigner=true;
+        }
+        return certSigner_.present && !certSigner_.trusted;
+    }
+    std::wstring CertificateJson() {
+        const bool applies=CertificatePageApplies();
+        return L"{\"applies\":"+std::wstring(applies?L"true":L"false")+
+            L",\"install\":"+(selection_.trustSigner?L"true":L"false")+
+            L",\"subject\":"+JsStringLiteral(certSigner_.subject)+
+            L",\"thumbprint\":"+JsStringLiteral(certSigner_.thumbprint)+
+            L",\"validity\":"+JsStringLiteral(certSigner_.validity)+L"}";
+    }
     std::wstring FinishWarningsJson() const {
         std::wstring json=L"[";
         for (const auto& warning:finishWarnings_) {
@@ -1719,6 +1827,22 @@ private:
                 L",\"compTag\":"+JsStringLiteral(Text(IDS_COMP_TAG))+
                 L",\"compTitle\":"+JsStringLiteral(Text(IDS_COMP_TITLE))+
                 L",\"compIntro\":"+JsStringLiteral(Text(IDS_COMP_INTRO))+
+                L",\"certTag\":"+JsStringLiteral(Text(IDS_CERT_TAG))+
+                L",\"certTitle\":"+JsStringLiteral(Text(IDS_CERT_TITLE))+
+                L",\"certIntro\":"+JsStringLiteral(Text(IDS_CERT_INTRO))+
+                L",\"certWhat\":"+JsStringLiteral(Text(IDS_CERT_WHAT))+
+                L",\"certWhy\":"+JsStringLiteral(Text(IDS_CERT_WHY))+
+                L",\"certInstallTitle\":"+JsStringLiteral(Text(IDS_CERT_OPT_INSTALL_TITLE))+
+                L",\"certInstallDesc\":"+JsStringLiteral(Text(IDS_CERT_OPT_INSTALL_DESC))+
+                L",\"certSkipTitle\":"+JsStringLiteral(Text(IDS_CERT_OPT_SKIP_TITLE))+
+                L",\"certSkipDesc\":"+JsStringLiteral(Text(IDS_CERT_OPT_SKIP_DESC))+
+                L",\"certDetailsLabel\":"+JsStringLiteral(Text(IDS_CERT_DETAILS_LABEL))+
+                L",\"certSubjectLabel\":"+JsStringLiteral(Text(IDS_CERT_DETAIL_SUBJECT))+
+                L",\"certThumbprintLabel\":"+JsStringLiteral(Text(IDS_CERT_DETAIL_THUMBPRINT))+
+                L",\"certValidityLabel\":"+JsStringLiteral(Text(IDS_CERT_DETAIL_VALIDITY))+
+                L",\"certStoreLabel\":"+JsStringLiteral(Text(IDS_CERT_DETAIL_STORE))+
+                L",\"certStore\":"+JsStringLiteral(L"LocalMachine\\TrustedPeople")+
+                L",\"certNote\":"+JsStringLiteral(Text(IDS_CERT_NOTE))+
                 L",\"confirmTag\":"+JsStringLiteral(Text(IDS_CONFIRM_CANCEL_TAG))+
                 L",\"confirmTitle\":"+JsStringLiteral(Text(IDS_CONFIRM_CANCEL_TITLE))+
                 L",\"confirmBody\":"+JsStringLiteral(Text(IDS_CONFIRM_CANCEL_BODY))+
@@ -1760,6 +1884,7 @@ private:
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
             L",\"components\":"+ComponentsJson()+
             L",\"componentsWarning\":"+JsStringLiteral(ComponentWarnings())+
+            L",\"certificate\":"+CertificateJson()+
             L",\"launchCards\":"+LaunchCardsJson()+L"}";
         if (json==lastWebState_) return;
         const HRESULT hr=web_->PostWebMessageAsJson(json.c_str());
@@ -1768,7 +1893,7 @@ private:
     }
     void FocusPage() {
         if (page_==Page::ConfirmCancel) { SetFocus(back_); return; }
-        if (webReady_ && (page_==Page::License || page_==Page::Components)) { SetFocus(webHost_); return; }
+        if (webReady_ && (page_==Page::License || page_==Page::Components || page_==Page::Certificate)) { SetFocus(webHost_); return; }
         SetFocus(page_==Page::ModulesBusy || page_==Page::ProcessesStuck || page_==Page::Conflicts ? next_ :
                  page_==Page::Downgrade || page_==Page::VersionInvalid ? cancel_ :
                  page_==Page::Update ? updateSkip_ :
@@ -1843,7 +1968,8 @@ private:
         const UINT nextId = page_==Page::RuntimeRequired?IDS_RUNTIME_INSTALL:
             page_==Page::ConfirmCancel?IDS_CONFIRM_ABORT:
             page_==Page::Conflicts?IDS_RECHECK_CONFLICTS:
-            page_==Page::Components?IDS_INSTALL:
+            page_==Page::Components?(CertificatePageApplies()?IDS_NEXT:IDS_INSTALL):
+            page_==Page::Certificate?IDS_INSTALL:
             terminal?IDS_FINISH:
             page_==Page::ModulesBusy?IDS_HOLD_RETRY:
             page_==Page::ProcessesStuck?IDS_UNLOCK:IDS_NEXT;
@@ -1851,7 +1977,7 @@ private:
         SetWindowTextW(back_,Text(page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
         SetWindowTextW(cancel_,Text(blockedPage?IDS_CLOSE:IDS_CANCEL).c_str());
         const bool confirm=page_==Page::ConfirmCancel;
-        const bool backVisible=page_==Page::License || page_==Page::Components || confirm;
+        const bool backVisible=page_==Page::License || page_==Page::Components || page_==Page::Certificate || confirm;
         const bool nextVisible=!inProgress && !blockedPage;
         const bool cancelVisible=!terminal && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
         const bool demoLocked=demoControlsLocked && !terminal;
@@ -2066,6 +2192,9 @@ private:
         }
         InstallLog::Line(L"User started installation");
         InstallLog::LineFormat(L"Target x64=%s x86=%s OpenGlass=%s", x64Dir.c_str(), x86Dir.c_str(), ogDir.c_str());
+        if (!CertificatePageApplies()) selection_.trustSigner=false;
+        InstallLog::LineFormat(L"Certificate: page shown=%d, trust author certificate=%d",
+            CertificatePageApplies()?1:0, selection_.trustSigner?1:0);
         InstallEngine::PhaseLabels labels;
         labels.stop64 = Text(IDS_STATUS_STOP64);
         labels.stop86 = Text(IDS_STATUS_STOP86);
@@ -2105,6 +2234,8 @@ private:
         labels.warnShellClassicCert = Text(IDS_WARN_SHELL_CLASSIC_CERT);
         labels.warnShellClassicOther = Text(IDS_WARN_SHELL_CLASSIC_OTHER);
         labels.warnShellClassicHint = Text(IDS_WARN_SHELL_CLASSIC_HINT);
+        labels.warnCertInstall = Text(IDS_WARN_CERT_INSTALL);
+        labels.warnCertInstallHint = Text(IDS_WARN_CERT_INSTALL_HINT);
         labels.warnUserDefaults = Text(IDS_WARN_USER_DEFAULTS);
         labels.rollbackFailed = Text(IDS_ERR_ROLLBACK_FAILED);
         labels.rollbackRestored = Text(IDS_ERR_ROLLBACK_RESTORED);
@@ -2297,6 +2428,16 @@ private:
             accepted_=false;
             SendMessageW(accept_,BM_SETCHECK,BST_UNCHECKED,0);
             break;
+        case Page::Certificate:
+            // Preview the Windows 11 certificate page with the author certificate's data.
+            certQueried_=true;
+            certSigner_.present=true;
+            certSigner_.trusted=false;
+            certSigner_.subject=L"CN=Stanislav K.";
+            certSigner_.thumbprint=L"A801E5F5F430D6D19164C856F79B8EFD23F83EB8";
+            certSigner_.validity=L"2026-11-01 \u2013 2031-11-01";
+            selection_.trustSigner=true;
+            break;
         case Page::Installing:
             simulateInstall_=false;
             progressReverse_=false;
@@ -2380,7 +2521,7 @@ private:
     }
     void TickDebugDemo() {
         static constexpr Page sequence[]={Page::Welcome,Page::Checking,Page::Update,
-            Page::Conflicts,Page::Downgrade,Page::VersionInvalid,Page::License,Page::Components,
+            Page::Conflicts,Page::Downgrade,Page::VersionInvalid,Page::License,Page::Components,Page::Certificate,
             Page::Installing,Page::ModulesBusy,Page::ProcessesStuck,Page::ConfirmCancel,Page::Cancelling,Page::Cancelled,Page::Launching,Page::Complete,Page::Error};
         constexpr size_t count=sizeof(sequence)/sizeof(sequence[0]);
         if (!debugDemoActive_) { KillTimer(window,kDebugDemoTimer); return; }
@@ -2608,6 +2749,12 @@ private:
             else if (message==L"component:settings:1" || message==L"component:settings:0") selection_.glassSettings=message.back()==L'1';
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
             selection_.platform64=os64;
+            SyncWebViewState();
+            return S_OK;
+        }
+        if (page_==Page::Certificate && !DebugDemoLocksControls() &&
+            (message==L"certificate:1" || message==L"certificate:0")) {
+            selection_.trustSigner=message==L"certificate:1";
             SyncWebViewState();
             return S_OK;
         }
@@ -3053,6 +3200,18 @@ private:
                 page_==Page::AlreadyRunning?Text(IDS_ALREADY_RUNNING_BODY):runtimeError_;
             DrawLabel(dc,Text(titleId),Box(48,140,620,110),heading_,white);
             DrawLabel(dc,body,Box(48,250,620,190),font_,muted);
+        } else if (page_==Page::Certificate && !webReady_) {
+            DrawBanner(dc,true);
+            DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
+            DrawLabel(dc,Text(IDS_CERT_TITLE),Box(48,90,840,50),heading_,white);
+            DrawLabel(dc,Text(IDS_CERT_INTRO),Box(48,142,840,60),font_,muted);
+            DrawLabel(dc,Text(IDS_CERT_WHAT)+L"\n"+Text(IDS_CERT_WHY),Box(48,204,840,96),small_,white);
+            DrawLabel(dc,Text(IDS_CERT_OPT_INSTALL_DESC),Box(82,348,560,36),small_,muted);
+            DrawLabel(dc,Text(IDS_CERT_OPT_SKIP_DESC),Box(82,416,560,36),small_,muted);
+            DrawLabel(dc,Text(IDS_CERT_DETAIL_SUBJECT)+L": "+certSigner_.subject+L"\n"+
+                Text(IDS_CERT_DETAIL_THUMBPRINT)+L": "+certSigner_.thumbprint+L"\n"+
+                Text(IDS_CERT_DETAIL_VALIDITY)+L": "+certSigner_.validity+L"\n"+
+                Text(IDS_CERT_DETAIL_STORE)+L": LocalMachine\\TrustedPeople",Box(660,318,290,120),small_,accent);
         } else if (page_==Page::Components && !webReady_) {
             DrawBanner(dc,true);
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
@@ -3430,11 +3589,18 @@ private:
                     InvalidateContent();
                 }
                 return 0;
+            case IDC_CERT_INSTALL: case IDC_CERT_SKIP:
+                if (page_==Page::Certificate && HIWORD(w)==BN_CLICKED && !webReady_) {
+                    selection_.trustSigner=SendMessageW(certInstall_,BM_GETCHECK,0,0)==BST_CHECKED;
+                    InvalidateContent();
+                }
+                return 0;
             case IDC_BACK:
                 if (!DebugDemoLocksControls() && page_==Page::ConfirmCancel) {
                     visibleProgress_.Resume();
                     installEngine_.ResumeAfterCancelDecision(); SetPage(beforeCancel_); return 0;
                 }
+                if (!DebugDemoLocksControls() && page_==Page::Certificate) { SetPage(Page::Components); return 0; }
                 if (!DebugDemoLocksControls() && page_==Page::Components) { SetPage(Page::License); return 0; }
                 if (!DebugDemoLocksControls() && !transitioning_ && page_==Page::License) {
                     SetPage(Page::Welcome);
@@ -3495,7 +3661,8 @@ private:
                 }
                 if (page_==Page::Welcome) StartVersionCheck();
                 else if (page_==Page::License && accepted_) SetPage(Page::Components);
-                else if (page_==Page::Components) StartInstallation();
+                else if (page_==Page::Components) { if (CertificatePageApplies()) SetPage(Page::Certificate); else StartInstallation(); }
+                else if (page_==Page::Certificate) StartInstallation();
                 else if (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error || page_==Page::RuntimeError || page_==Page::AlreadyRunning) RequestClose();
                 return 0;
             case IDCANCEL:

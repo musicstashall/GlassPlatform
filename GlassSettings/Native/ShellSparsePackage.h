@@ -14,7 +14,7 @@ namespace GlassSettings::ShellSparsePackage
     };
 
     // Trust state of the signer of GlassShellSparse.msix on this machine for
-    // this user, as the AppX deployment stack will see it. Nothing here ever
+    // this user, as the AppX deployment stack will see it. The query never
     // writes to a certificate store.
     enum class SparseSignerTrust : int
     {
@@ -30,6 +30,30 @@ namespace GlassSettings::ShellSparsePackage
     // folder like RegisterSparsePackageQuiet does for the settings UI.
     [[nodiscard]] SparseSignerTrust QuerySparseSignerTrust(
         const wchar_t* exactPlatformRoot, wchar_t* subjectOut, size_t cchSubject) noexcept;
+
+    // Outcome of TrustSparseSigner. Values are stable: they are returned to
+    // GlassSettings (GlassSettings_TrustShellSignerV1) and, OR-ed into
+    // 0x47535400, as the exit code of the Setup helper entry point.
+    enum class SparseSignerTrustResult : int
+    {
+        Added = 0,            // certificate added to LocalMachine\TrustedPeople
+        AlreadyTrusted = 1,   // thumbprint was already in LocalMachine\TrustedPeople
+        MsixMissing = 2,
+        Unsigned = 3,
+        SubjectMismatch = 4,  // signer is not the author (kSparsePublisher): nothing is trusted
+        StoreFailed = 5,      // LocalMachine\TrustedPeople could not be opened or written (lastErrorOut)
+        Unknown = 6,          // signature present but the signer certificate could not be read
+    };
+
+    // The only place in the platform that writes to a certificate store, and
+    // only on the user's explicit choice (Setup certificate page, GlassSettings
+    // button). Takes the leaf signer straight out of the signature of the
+    // shipped GlassShellSparse.msix — the exact certificate the AppX deployment
+    // checks — verifies that its subject is the author (kSparsePublisher) and
+    // adds it to LocalMachine\TrustedPeople (all users; requires elevation).
+    // Never Root, never TrustedPublisher. The uninstaller never removes it.
+    [[nodiscard]] SparseSignerTrustResult TrustSparseSigner(
+        const wchar_t* exactPlatformRoot, wchar_t* subjectOut, size_t cchSubject, DWORD* lastErrorOut) noexcept;
 
     [[nodiscard]] bool IsSparsePackageInstalledForCurrentUser() noexcept;
 
