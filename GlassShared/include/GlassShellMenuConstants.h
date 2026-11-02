@@ -23,16 +23,34 @@ namespace GlassShared::GlassShellMenu
     /// Identity sparse-пакета (AppxManifest Identity@Name).
     inline constexpr wchar_t kSparsePackageName[] = L"GlassProject.GlassShellMenu";
 
-    /// Package family name (Name + Publisher hash из установленного пакета).
+    /// Package family name = Name + «_» + 13 символов (первые 8 байт SHA-256 от Publisher в UTF-16LE,
+    /// base32 Crockford). Проверка: GlassSetup\tests\sparse_identity_mock.py; на Windows —
+    /// Get-AppxPackage GlassProject.GlassShellMenu.
     inline constexpr wchar_t kSparsePackageFamilyName[] =
-        L"GlassProject.GlassShellMenu_t6mpd150h6a5c";
+        L"GlassProject.GlassShellMenu_83517z3ecdax2";
 
-    /// Подкаталог в output: AppxManifest.xml + Assets.
+    /// Подкаталог платформы с компонентами меню — одновременно ExternalLocation sparse-пакета:
+    /// GlassShellExt.dll, GlassShellHost.exe, GlassShellSparse.msix, AppxManifest*.xml, Assets\.
+    /// Сборка кладёт их туда же (OutDir GlassShellExt/GlassShellHost = Build\<arch>\<cfg>\GlassShellSparse\).
     inline constexpr wchar_t kSparsePackageSubdir[] = L"GlassShellSparse\\";
+
+    /// Имена файлов и пути относительно корня платформы.
+    inline constexpr wchar_t kShellExtFileName[] = L"GlassShellExt.dll";
+    inline constexpr wchar_t kShellHostFileName[] = L"GlassShellHost.exe";
+    inline constexpr wchar_t kSparseMsixFileName[] = L"GlassShellSparse.msix";
+    inline constexpr wchar_t kShellExtRelativePath[] = L"GlassShellSparse\\GlassShellExt.dll";
+    inline constexpr wchar_t kShellHostRelativePath[] = L"GlassShellSparse\\GlassShellHost.exe";
 
     /// Пустой манифест для снятия verb из каталога Win11 перед Remove-AppxPackage.
     inline constexpr wchar_t kSparseUnregisterStubFileName[] = L"AppxManifest.UnregisterStub.xml";
 
-    inline constexpr wchar_t kSparsePublisher[] = L"CN=GlassProject Dev";
+    /// Publisher манифеста = Subject сертификата автора (Shared\certs\GlassAuthorCodeSigning.cer),
+    /// которым подписан msix. Отдельного «dev»-сертификата нет: на чужом ПК без доверия этому
+    /// сертификату sparse-пакет не ставится, и меню регистрируется классически (см. GlassShellExt\README.md).
+    inline constexpr wchar_t kSparsePublisher[] = L"CN=Stanislav K.";
     inline constexpr wchar_t kSparseApplicationId[] = L"GlassShellHost";
+
+    /// Публичный сертификат автора и инструкция, поставляемые в корне платформы.
+    inline constexpr wchar_t kAuthorCertificateFileName[] = L"GlassAuthorCodeSigning.cer";
+    inline constexpr wchar_t kAuthorCertificateReadmeFileName[] = L"GlassAuthorCodeSigning.txt";
 };

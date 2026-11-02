@@ -18,13 +18,16 @@
 #include <GlassShellMenuConstants.h>
 #include <DebugLog.h>
 
-#include "ShellDevCertificate.h"
 #include "ShellSparsePackage.h"
 
 #include <Shlwapi.h>
 #include <ShlObj.h>
 #include <roapi.h>
 #include <wil/resource.h>
+
+#include <wincrypt.h>
+#include <wintrust.h>
+#include <softpub.h>
 
 #include <string>
 #include <vector>
@@ -33,6 +36,8 @@
 #pragma comment(lib, "runtimeobject.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "wintrust.lib")
+#pragma comment(lib, "crypt32.lib")
 
 EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
@@ -47,6 +52,24 @@ namespace GlassSettings::ShellSparsePackage
         std::atomic<HRESULT> g_lastDeploymentHr{ S_OK };
 
         constexpr HRESULT kHrPackageExternalLocationConflict = static_cast<HRESULT>(0x80073D0B);
+        constexpr HRESULT kHrCertUntrustedRoot = static_cast<HRESULT>(0x800B0109);      // CERT_E_UNTRUSTEDROOT
+        constexpr HRESULT kHrCertChainNotTrusted = static_cast<HRESULT>(0x800B010A);    // CERT_E_CHAINING
+        constexpr HRESULT kHrSubjectNotTrusted = static_cast<HRESULT>(0x800B0004);      // TRUST_E_SUBJECT_NOT_TRUSTED
+        constexpr HRESULT kHrNoSignature = static_cast<HRESULT>(0x800B0100);            // TRUST_E_NOSIGNATURE
+
+        [[nodiscard]] bool IsSignerTrustHr(HRESULT hr) noexcept
+        {
+            return hr == kHrCertUntrustedRoot || hr == kHrCertChainNotTrusted || hr == kHrSubjectNotTrusted;
+        }
+
+        [[nodiscard]] SparsePackageError ClassifyDeploymentFailure(HRESULT hr) noexcept
+        {
+            if (hr == kHrPackageExternalLocationConflict)
+                return SparsePackageError::ExternalLocationConflict;
+            if (IsSignerTrustHr(hr))
+                return SparsePackageError::SignerNotTrusted;
+            return SparsePackageError::DeploymentFailed;
+        }
 
         void SetLastSparsePackageError(SparsePackageError error) noexcept
         {
@@ -266,7 +289,9 @@ namespace GlassSettings::ShellSparsePackage
             return readVal(HKEY_CURRENT_USER, L"InstallPath", 0);
         }
 
-        /// Каталог ExternalLocation sparse-пакета: рядом с GlassShellExt.dll (как PackageRootFolder в AppX).
+        /// Корень платформы (каталог с GlassCompat.dll и подкаталогом GlassShellSparse\). ExternalLocation
+        /// sparse-пакета — его подкаталог GlassShellSparse\ (ResolveSparsePackageDirectory), где лежат
+        /// GlassShellExt.dll, GlassShellHost.exe, манифесты и msix.
         [[nodiscard]] bool ResolveGlassPlatformOutputDirectory(
             wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
@@ -280,16 +305,22 @@ namespace GlassSettings::ShellSparsePackage
             if (exactPlatformRoot)
                 return exactPlatformRoot[0] && TryCanonicalizePlatformDir(exactPlatformRoot, out, cch);
 
-            std::wstring shellExt =
-                GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(nullptr, L"GlassShellExt.dll");
+            // GlassShellExt.dll лежит в <root>\GlassShellSparse\ (kShellExtRelativePath); корень платформы —
+            // родитель этого подкаталога.
+            std::wstring shellExt = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
+                nullptr, GlassShared::GlassShellMenu::kShellExtRelativePath);
             if (shellExt.empty())
             {
                 shellExt = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
-                    reinterpret_cast<HMODULE>(&__ImageBase), L"GlassShellExt.dll");
+                    reinterpret_cast<HMODULE>(&__ImageBase), GlassShared::GlassShellMenu::kShellExtRelativePath);
             }
             if (!shellExt.empty())
             {
-                const std::wstring root = GlassShared::GlassModulePath::GetInstallRootFromPath(shellExt.c_str());
+                std::wstring root = GlassShared::GlassModulePath::GetInstallRootFromPath(shellExt.c_str());
+                if (const size_t slash = root.find_last_of(L'\\'); slash != std::wstring::npos && slash > 0)
+                    root.resize(slash);
+                else
+                    root.clear();
                 if (!root.empty())
                 {
                     wchar_t buf[MAX_PATH]{};
@@ -356,22 +387,41 @@ namespace GlassSettings::ShellSparsePackage
             return wcscpy_s(out, cch, dir) == 0;
         }
 
+        /// <root>\GlassShellSparse\GlassShellSparse.msix (PostBuild BuildSparsePackage.ps1 + GlassSign.targets).
         [[nodiscard]] bool ResolveSparseMsixPath(wchar_t* out, size_t cch, const wchar_t* exactPlatformRoot) noexcept
         {
             wchar_t dir[MAX_PATH]{};
-            if (!ResolveGlassPlatformOutputDirectory(dir, _countof(dir), exactPlatformRoot))
+            if (!ResolveSparsePackageDirectory(dir, _countof(dir), exactPlatformRoot))
                 return false;
-
-            // PostBuild BuildSparsePackage.ps1 кладёт msix в корень OutDir, не в GlassShellSparse\.
-            if (wcscpy_s(out, cch, dir) == 0 && wcscat_s(out, cch, L"GlassShellSparse.msix") == 0 &&
-                GetFileAttributesW(out) != INVALID_FILE_ATTRIBUTES)
-                return true;
-
-            if (!AppendSparseSubdir(dir, _countof(dir)))
-                return false;
-            if (wcscpy_s(out, cch, dir) != 0 || wcscat_s(out, cch, L"GlassShellSparse.msix") != 0)
+            if (wcscpy_s(out, cch, dir) != 0 || wcscat_s(out, cch, GlassShared::GlassShellMenu::kSparseMsixFileName) != 0)
                 return false;
             return GetFileAttributesW(out) != INVALID_FILE_ATTRIBUTES;
+        }
+
+        /// Отпечаток SHA-1 сертификата есть в хранилище TrustedPeople (CU или LM): так доверие
+        /// самоподписанному издателю видит и AppX-развёртывание.
+        [[nodiscard]] bool IsThumbprintInTrustedPeople(const BYTE* hash, DWORD cbHash) noexcept
+        {
+            if (!hash || cbHash == 0)
+                return false;
+            CRYPT_HASH_BLOB blob{ cbHash, const_cast<BYTE*>(hash) };
+            const DWORD locations[] = { CERT_SYSTEM_STORE_CURRENT_USER, CERT_SYSTEM_STORE_LOCAL_MACHINE };
+            for (const DWORD location : locations)
+            {
+                HCERTSTORE store = ::CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
+                    location | CERT_STORE_OPEN_EXISTING_FLAG | CERT_STORE_READONLY_FLAG, L"TrustedPeople");
+                if (!store)
+                    continue;
+                PCCERT_CONTEXT found = ::CertFindCertificateInStore(
+                    store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SHA1_HASH, &blob, nullptr);
+                const bool hit = found != nullptr;
+                if (found)
+                    ::CertFreeCertificateContext(found);
+                ::CertCloseStore(store, 0);
+                if (hit)
+                    return true;
+            }
+            return false;
         }
 
         [[nodiscard]] winrtf::Uri UriFromPath(const wchar_t* path) noexcept
@@ -599,10 +649,12 @@ namespace GlassSettings::ShellSparsePackage
             DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] deployment failed: 0x%08X %ls",
                 static_cast<unsigned>(hr),
                 result.ErrorText().c_str());
-            if (hr == static_cast<HRESULT>(0x800B0109))
+            if (IsSignerTrustHr(hr))
             {
                 DebugLog(DBG_ERROR,
-                    L"[GlassSettings][ShellSparse] 0x800B0109: cert подписи msix должен быть в TrustedPeople (MS Learn)");
+                    L"[GlassSettings][ShellSparse] 0x%08X: сертификат подписи msix (%ls) не в TrustedPeople пользователя — "
+                    L"меню будет зарегистрировано классически", static_cast<unsigned>(hr),
+                    GlassShared::GlassShellMenu::kSparsePublisher);
             }
             if (hr == kHrPackageExternalLocationConflict)
             {
@@ -610,179 +662,6 @@ namespace GlassSettings::ShellSparsePackage
                     L"[GlassSettings][ShellSparse] 0x80073D0B: пакет уже зарегистрирован с другим ExternalLocation");
             }
             return false;
-        }
-
-        struct SparseSdkTools
-        {
-            wchar_t makeAppx[MAX_PATH]{};
-            wchar_t signTool[MAX_PATH]{};
-
-            [[nodiscard]] bool Valid() const noexcept
-            {
-                return makeAppx[0] != L'\0' && signTool[0] != L'\0';
-            }
-        };
-
-        [[nodiscard]] bool AppendMaxBinVersionToolPath(
-            const wchar_t* kitsRoot,
-            const wchar_t* toolName,
-            wchar_t* out,
-            size_t cch) noexcept
-        {
-            if (!kitsRoot || !toolName || !out || cch == 0)
-                return false;
-            out[0] = L'\0';
-
-            wchar_t binDir[MAX_PATH]{};
-            if (swprintf_s(binDir, _countof(binDir), L"%s\\bin", kitsRoot) <= 0)
-                return false;
-
-            WIN32_FIND_DATAW fd{};
-            wchar_t search[MAX_PATH]{};
-            if (swprintf_s(search, _countof(search), L"%s\\*", binDir) <= 0)
-                return false;
-
-            wil::unique_hfind hFind{ ::FindFirstFileW(search, &fd) };
-            if (!hFind || hFind.get() == INVALID_HANDLE_VALUE)
-                return false;
-
-            std::wstring bestVersion;
-            do
-            {
-                if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
-                    continue;
-                if (fd.cFileName[0] == L'.')
-                    continue;
-                if (bestVersion.empty() || wcscmp(fd.cFileName, bestVersion.c_str()) > 0)
-                    bestVersion = fd.cFileName;
-            } while (::FindNextFileW(hFind.get(), &fd));
-
-            if (bestVersion.empty())
-                return false;
-
-            const bool ok = swprintf_s(out, cch, L"%s\\bin\\%s\\x64\\%s", kitsRoot, bestVersion.c_str(), toolName) > 0;
-            return ok && GetFileAttributesW(out) != INVALID_FILE_ATTRIBUTES;
-        }
-
-        [[nodiscard]] bool ResolveSparseSdkTools(SparseSdkTools& tools) noexcept
-        {
-            tools.makeAppx[0] = L'\0';
-            tools.signTool[0] = L'\0';
-
-            wchar_t kitsRoot[MAX_PATH]{};
-            HKEY hKey = nullptr;
-            if (::RegOpenKeyExW(
-                    HKEY_LOCAL_MACHINE,
-                    L"SOFTWARE\\WOW6432Node\\Microsoft\\Windows Kits\\Installed Roots",
-                    0,
-                    KEY_READ,
-                    &hKey) == ERROR_SUCCESS)
-            {
-                DWORD cb = sizeof(kitsRoot);
-                DWORD type = REG_SZ;
-                (void)::RegQueryValueExW(hKey, L"KitsRoot10", nullptr, &type, reinterpret_cast<LPBYTE>(kitsRoot), &cb);
-                ::RegCloseKey(hKey);
-            }
-
-            if (kitsRoot[0] == L'\0')
-            {
-                if (FAILED(::SHGetFolderPathW(nullptr, CSIDL_PROGRAM_FILESX86, nullptr, SHGFP_TYPE_CURRENT, kitsRoot)))
-                    return false;
-                if (wcscat_s(kitsRoot, _countof(kitsRoot), L"\\Windows Kits\\10\\") != 0)
-                    return false;
-            }
-
-            const size_t len = wcslen(kitsRoot);
-            if (len > 0 && kitsRoot[len - 1] != L'\\')
-                (void)wcscat_s(kitsRoot, _countof(kitsRoot), L"\\");
-
-            if (!AppendMaxBinVersionToolPath(kitsRoot, L"makeappx.exe", tools.makeAppx, _countof(tools.makeAppx)))
-                return false;
-            if (!AppendMaxBinVersionToolPath(kitsRoot, L"signtool.exe", tools.signTool, _countof(tools.signTool)))
-                return false;
-            return true;
-        }
-
-        [[nodiscard]] bool RunSdkToolCommand(const std::wstring& cmdLine) noexcept
-        {
-            STARTUPINFOW si{};
-            si.cb = sizeof(si);
-            PROCESS_INFORMATION pi{};
-            std::vector<wchar_t> cmdBuf(cmdLine.begin(), cmdLine.end());
-            cmdBuf.push_back(L'\0');
-
-            if (!::CreateProcessW(
-                    nullptr,
-                    cmdBuf.data(),
-                    nullptr,
-                    nullptr,
-                    FALSE,
-                    CREATE_NO_WINDOW,
-                    nullptr,
-                    nullptr,
-                    &si,
-                    &pi))
-            {
-                DebugLog(DBG_WARNING, L"[GlassSettings][ShellSparse] SDK tool CreateProcess failed: %lu", GetLastError());
-                return false;
-            }
-
-            wil::unique_handle process{ pi.hProcess };
-            wil::unique_handle thread{ pi.hThread };
-            (void)thread;
-
-            const DWORD waitResult = ::WaitForSingleObject(process.get(), 120000);
-            if (waitResult != WAIT_OBJECT_0)
-            {
-                DebugLog(DBG_WARNING, L"[GlassSettings][ShellSparse] SDK tool timeout");
-                ::TerminateProcess(process.get(), 1);
-                return false;
-            }
-
-            DWORD exitCode = 1;
-            (void)::GetExitCodeProcess(process.get(), &exitCode);
-            if (exitCode != 0)
-            {
-                DebugLog(DBG_WARNING, L"[GlassSettings][ShellSparse] SDK tool exit=%lu", exitCode);
-                return false;
-            }
-            return true;
-        }
-
-        [[nodiscard]] bool RefreshSignedSparseMsix(
-            const wchar_t* sparseDir,
-            const wchar_t* msixPath,
-            const wchar_t* thumbprint,
-            const SparseSdkTools& tools) noexcept
-        {
-            if (!sparseDir || !msixPath || !thumbprint || !*sparseDir || !*msixPath || !*thumbprint || !tools.Valid())
-                return false;
-
-            std::wstring packCmd = L"\"";
-            packCmd += tools.makeAppx;
-            packCmd += L"\" pack /o /d \"";
-            packCmd += sparseDir;
-            packCmd += L"\" /p \"";
-            packCmd += msixPath;
-            packCmd += L"\" /nv";
-
-            DebugLog(DBG_NORMAL, L"[GlassSettings][ShellSparse] makeappx pack: %ls", msixPath);
-            if (!RunSdkToolCommand(packCmd))
-                return false;
-
-            std::wstring signCmd = L"\"";
-            signCmd += tools.signTool;
-            signCmd += L"\" sign /fd SHA256 /a /sha1 ";
-            signCmd += thumbprint;
-            signCmd += L" \"";
-            signCmd += msixPath;
-            signCmd += L"\"";
-
-            DebugLog(DBG_IMPORTANT, L"[GlassSettings][ShellSparse] signtool sign thumbprint=%ls", thumbprint);
-            if (!RunSdkToolCommand(signCmd))
-                return false;
-
-            return true;
         }
     }
 
@@ -813,13 +692,95 @@ namespace GlassSettings::ShellSparsePackage
         }
     }
 
+    SparseSignerTrust QuerySparseSignerTrust(
+        const wchar_t* exactPlatformRoot, wchar_t* subjectOut, size_t cchSubject) noexcept
+    {
+        if (subjectOut && cchSubject)
+            subjectOut[0] = L'\0';
+
+        wchar_t msixPath[MAX_PATH]{};
+        if (!ResolveSparseMsixPath(msixPath, _countof(msixPath), exactPlatformRoot))
+            return SparseSignerTrust::MsixMissing;
+
+        // Authenticode-проверка msix (AppX SIP) без UI и без сети. Самоподписанный издатель из TrustedPeople
+        // для WINTRUST_ACTION_GENERIC_VERIFY_V2 остаётся «недоверенным корнем», поэтому отпечаток подписанта
+        // дополнительно ищется в TrustedPeople — именно так доверие видит AppX-развёртывание.
+        WINTRUST_FILE_INFO fileInfo{};
+        fileInfo.cbStruct = sizeof(fileInfo);
+        fileInfo.pcwszFilePath = msixPath;
+
+        WINTRUST_DATA data{};
+        data.cbStruct = sizeof(data);
+        data.dwUIChoice = WTD_UI_NONE;
+        data.fdwRevocationChecks = WTD_REVOKE_NONE;
+        data.dwUnionChoice = WTD_CHOICE_FILE;
+        data.pFile = &fileInfo;
+        data.dwStateAction = WTD_STATEACTION_VERIFY;
+        data.dwProvFlags = WTD_CACHE_ONLY_URL_RETRIEVAL | WTD_REVOCATION_CHECK_NONE;
+
+        GUID action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+        const LONG verify = ::WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE), &action, &data);
+
+        SparseSignerTrust trust = SparseSignerTrust::Unknown;
+        if (verify == static_cast<LONG>(kHrNoSignature))
+        {
+            trust = SparseSignerTrust::Unsigned;
+        }
+        else
+        {
+            PCCERT_CONTEXT signer = nullptr;
+            if (CRYPT_PROVIDER_DATA* prov = ::WTHelperProvDataFromStateData(data.hWVTStateData))
+            {
+                if (CRYPT_PROVIDER_SGNR* sgnr = ::WTHelperGetProvSignerFromChain(prov, 0, FALSE, 0))
+                {
+                    if (sgnr->csCertChain > 0)
+                    {
+                        if (CRYPT_PROVIDER_CERT* cert = ::WTHelperGetProvCertFromChain(sgnr, 0))
+                            signer = cert->pCert;
+                    }
+                }
+            }
+
+            if (signer)
+            {
+                if (subjectOut && cchSubject)
+                {
+                    DWORD strType = CERT_X500_NAME_STR;
+                    (void)::CertGetNameStringW(signer, CERT_NAME_RDN_TYPE, 0, &strType, subjectOut,
+                        static_cast<DWORD>(cchSubject));
+                }
+                bool thumbprintTrusted = false;
+                BYTE hash[20]{};
+                DWORD cbHash = sizeof(hash);
+                if (::CertGetCertificateContextProperty(signer, CERT_SHA1_HASH_PROP_ID, hash, &cbHash))
+                    thumbprintTrusted = IsThumbprintInTrustedPeople(hash, cbHash);
+                trust = (verify == ERROR_SUCCESS || thumbprintTrusted) ? SparseSignerTrust::Trusted
+                                                                       : SparseSignerTrust::Untrusted;
+            }
+            else if (verify == ERROR_SUCCESS)
+            {
+                trust = SparseSignerTrust::Trusted;
+            }
+        }
+
+        data.dwStateAction = WTD_STATEACTION_CLOSE;
+        (void)::WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE), &action, &data);
+
+        DebugLog(DBG_NORMAL, L"[GlassSettings][ShellSparse] signer trust: WinVerifyTrust=0x%08X state=%d subject=%ls",
+            static_cast<unsigned>(verify), static_cast<int>(trust),
+            (subjectOut && subjectOut[0]) ? subjectOut : L"-");
+        return trust;
+    }
+
     InstallerSparseState QueryInstallerSparseState(const wchar_t* exactPlatformRoot) noexcept
     {
         if (!exactPlatformRoot || !exactPlatformRoot[0])
             return InstallerSparseState::Unknown;
+        // ExternalLocation пакета — подкаталог GlassShellSparse\ платформы (там же GlassShellExt.dll).
         wchar_t expected[MAX_PATH]{};
         if (wcscpy_s(expected, exactPlatformRoot) != 0 ||
-            !CanonicalizeOutputDirectory(expected, _countof(expected)))
+            !CanonicalizeOutputDirectory(expected, _countof(expected)) ||
+            !AppendSparseSubdir(expected, _countof(expected)))
             return InstallerSparseState::Unknown;
 
         WinRtApartmentScope apartment;
@@ -949,16 +910,16 @@ namespace GlassSettings::ShellSparsePackage
         }
     }
 
-    bool RegisterSparsePackageQuiet(bool provisionDevCertificate, const wchar_t* exactPlatformRoot) noexcept
+    bool RegisterSparsePackageQuiet(const wchar_t* exactPlatformRoot) noexcept
     {
         SetLastSparsePackageError(SparsePackageError::None);
         g_lastDeploymentHr.store(S_OK, std::memory_order_release);
 
-        wchar_t outDir[MAX_PATH]{};
+        // ExternalLocation = <root>\GlassShellSparse\: там GlassShellExt.dll (com:Class Path),
+        // GlassShellHost.exe (Application Executable), манифесты и msix.
         wchar_t sparseDir[MAX_PATH]{};
         wchar_t manifest[MAX_PATH]{};
-        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir), exactPlatformRoot) ||
-            !ResolveSparsePackageDirectory(sparseDir, _countof(sparseDir), exactPlatformRoot) ||
+        if (!ResolveSparsePackageDirectory(sparseDir, _countof(sparseDir), exactPlatformRoot) ||
             !ResolveSparseManifestPath(manifest, _countof(manifest), exactPlatformRoot))
         {
             DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: пути не найдены");
@@ -973,7 +934,17 @@ namespace GlassSettings::ShellSparsePackage
             return false;
         }
 
-        if (!CanonicalizeOutputDirectory(outDir, _countof(outDir)))
+        wchar_t shellExt[MAX_PATH]{};
+        if (wcscpy_s(shellExt, sparseDir) != 0 ||
+            wcscat_s(shellExt, GlassShared::GlassShellMenu::kShellExtFileName) != 0 ||
+            GetFileAttributesW(shellExt) == INVALID_FILE_ATTRIBUTES)
+        {
+            DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: нет GlassShellExt.dll в GlassShellSparse\\");
+            SetLastSparsePackageError(SparsePackageError::ArtifactsMissing);
+            return false;
+        }
+
+        if (!CanonicalizeOutputDirectory(sparseDir, _countof(sparseDir)))
         {
             DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: не удалось нормализовать каталог");
             SetLastSparsePackageError(SparsePackageError::ArtifactsMissing);
@@ -991,7 +962,7 @@ namespace GlassSettings::ShellSparsePackage
         try
         {
             winmd::PackageManager pm;
-            const bool installerMode = !provisionDevCertificate && exactPlatformRoot;
+            const bool installerMode = exactPlatformRoot != nullptr;
             if (installerMode)
             {
                 // Setup never removes or replaces an existing package during
@@ -1009,14 +980,7 @@ namespace GlassSettings::ShellSparsePackage
                 return false;
             }
 
-            if (provisionDevCertificate && !ShellDevCertificate::EnsureGlassShellDevCertificateTrusted())
-            {
-                DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: dev certificate failed");
-                SetLastSparsePackageError(SparsePackageError::DevCertFailed);
-                return false;
-            }
-
-            const winrtf::Uri outDirUri = UriFromPath(outDir);
+            const winrtf::Uri outDirUri = UriFromPath(sparseDir);
             const winrtf::Uri manifestUri = UriFromPath(manifest);
             if (!outDirUri || !manifestUri)
             {
@@ -1055,30 +1019,22 @@ namespace GlassSettings::ShellSparsePackage
                 return DeploymentSucceeded(pm.AddPackageByUriAsync(msixUri, options).get());
             };
 
-            wchar_t thumbprint[64]{};
-            if (provisionDevCertificate)
-                (void)ShellDevCertificate::GetGlassShellDevCertThumbprint(thumbprint, _countof(thumbprint));
-
-            SparseSdkTools sdk{};
-            const bool sdkOk = provisionDevCertificate && ResolveSparseSdkTools(sdk);
-            if (!sdkOk)
-            {
-                DebugLog(DBG_NORMAL, L"[GlassSettings][ShellSparse] Windows SDK tools не найдены, пропуск repack/sign");
-            }
-
             bool registered = false;
             wchar_t msixPath[MAX_PATH]{};
             const bool hasMsix = ResolveSparseMsixPath(msixPath, _countof(msixPath), exactPlatformRoot);
+            if (!hasMsix)
+                DebugLog(DBG_WARNING, L"[GlassSettings][ShellSparse] register: нет GlassShellSparse.msix, только loose-манифест");
 
             if (hasMsix)
                 registered = tryDeployMsix(msixPath);
 
-            if (!registered && sdkOk && thumbprint[0] != L'\0' && hasMsix)
+            // Подписанный msix отклонён из-за недоверия издателю: loose-регистрация того же манифеста
+            // на машине без режима разработчика тоже невозможна; причина должна остаться SignerNotTrusted.
+            const HRESULT msixHr = g_lastDeploymentHr.load(std::memory_order_acquire);
+            if (!registered && hasMsix && IsSignerTrustHr(msixHr))
             {
-                if (RefreshSignedSparseMsix(sparseDir, msixPath, thumbprint, sdk))
-                    registered = tryDeployMsix(msixPath);
-                else
-                    DebugLog(DBG_WARNING, L"[GlassSettings][ShellSparse] pack/sign msix не удался");
+                SetLastSparsePackageError(SparsePackageError::SignerNotTrusted);
+                return false;
             }
 
             if (!registered)
@@ -1104,9 +1060,7 @@ namespace GlassSettings::ShellSparsePackage
             if (!registered)
             {
                 const HRESULT hr = g_lastDeploymentHr.load(std::memory_order_acquire);
-                SetLastSparsePackageError(
-                    hr == kHrPackageExternalLocationConflict ? SparsePackageError::ExternalLocationConflict
-                                                             : SparsePackageError::DeploymentFailed);
+                SetLastSparsePackageError(ClassifyDeploymentFailure(hr));
                 return false;
             }
 
@@ -1132,7 +1086,7 @@ namespace GlassSettings::ShellSparsePackage
             DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] register: 0x%08X %ls",
                 static_cast<unsigned>(ex.code()), ex.message().c_str());
             g_lastDeploymentHr.store(static_cast<HRESULT>(ex.code()), std::memory_order_release);
-            SetLastSparsePackageError(SparsePackageError::DeploymentFailed);
+            SetLastSparsePackageError(ClassifyDeploymentFailure(static_cast<HRESULT>(ex.code())));
             return false;
         }
         catch (...)
@@ -1147,7 +1101,7 @@ namespace GlassSettings::ShellSparsePackage
     {
         wchar_t outDir[MAX_PATH]{};
         wchar_t stubManifest[MAX_PATH]{};
-        if (!ResolveGlassPlatformOutputDirectory(outDir, _countof(outDir), exactPlatformRoot) ||
+        if (!ResolveSparsePackageDirectory(outDir, _countof(outDir), exactPlatformRoot) ||
             !ResolveSparseUnregisterStubManifestPath(stubManifest, _countof(stubManifest), exactPlatformRoot))
         {
             DebugLog(DBG_ERROR, L"[GlassSettings][ShellSparse] unregister: пути не найдены");

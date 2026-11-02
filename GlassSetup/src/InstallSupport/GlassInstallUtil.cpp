@@ -66,7 +66,7 @@ bool HasMatchingLegacyShellRegistration(const std::wstring& root) noexcept {
     const std::wstring key=std::wstring(L"Software\\Classes\\CLSID\\")+kClsidStringBraced+L"\\InprocServer32";
     wchar_t value[32768]{};DWORD bytes=sizeof(value);
     return RegGetValueW(HKEY_CURRENT_USER,key.c_str(),nullptr,RRF_RT_REG_SZ,nullptr,value,&bytes)==ERROR_SUCCESS &&
-        SameInstallPath(value,TrimTrailingSlashes(root)+L"\\GlassShellExt.dll");
+        SameInstallPath(value,TrimTrailingSlashes(root)+L"\\"+kShellExtRelativePath);
 }
 
 enum class RegistryPathRead { Missing, Found, Error };
@@ -1429,24 +1429,29 @@ void DeleteStartMenuShortcut() noexcept {
 
 namespace {
 
+// OpMessageId of GlassSettings/Native/ShellExtensionOps.cpp as technical text.
+const wchar_t* ShellHelperReasonText(DWORD id) noexcept {
+    switch (id) {
+    case 7: return L"sparse package artifacts are missing";
+    case 8: return L"the msix signer certificate is not trusted on this computer";
+    case 9: return L"package deployment failed";
+    case 10: return L"registration failed";
+    case 11: return L"unregistration failed";
+    case 12: return L"external location conflict";
+    default: return nullptr;
+    }
+}
+
 // Technical description of a failed GlassSettings_ShellExtRegisterSetupV1W run.
 // Mirrors SetupHelperFailureExitCode() in GlassSettings/Native/ShellExtensionOps.cpp:
 // 0x8xxxxxxx = HRESULT of the deployment call, 0x47500000|id = OpMessageId
-// without an HRESULT, 1 = generic failure.
+// without an HRESULT, 1 = generic failure. 0x47504C00|id (classic fallback)
+// is a success code and is handled by the caller.
 std::wstring DescribeShellHelperExit(DWORD exitCode, bool started, bool completed) {
     if (!started) return L"helper process could not be started";
     if (!completed) return L"helper process did not finish within 45 s";
     if ((exitCode & 0xFFFFFF00u)==0x47500000u) {
-        const wchar_t* reason=nullptr;
-        switch (exitCode & 0xFFu) {
-        case 7: reason=L"sparse package artifacts are missing"; break;
-        case 8: reason=L"developer certificate step failed"; break;
-        case 9: reason=L"package deployment failed"; break;
-        case 10: reason=L"registration failed"; break;
-        case 11: reason=L"unregistration failed"; break;
-        case 12: reason=L"external location conflict"; break;
-        default: break;
-        }
+        const wchar_t* reason=ShellHelperReasonText(exitCode & 0xFFu);
         wchar_t text[160]{};
         if (reason) swprintf_s(text,L"helper reported: %s (0x%08lX)",reason,exitCode);
         else swprintf_s(text,L"helper exit code 0x%08lX",exitCode);
@@ -1474,15 +1479,25 @@ std::wstring DescribeShellHelperExit(DWORD exitCode, bool started, bool complete
 
 } // namespace
 
+std::wstring DescribeShellClassicFallback(DWORD reason) {
+    const wchar_t* text=ShellHelperReasonText(reason);
+    wchar_t buffer[200]{};
+    if (text) swprintf_s(buffer,L"classic menu registered; sparse package: %s (0x%08lX)",text,0x47504C00u|(reason & 0xFFu));
+    else swprintf_s(buffer,L"classic menu registered; sparse package failed (0x%08lX)",0x47504C00u|(reason & 0xFFu));
+    return buffer;
+}
+
 bool InvokeShellExtRegistration(
     bool registerExtension,
     const std::wstring& x64Dir,
     const std::wstring& x86Dir,
     bool* registrationMayHaveChanged,
     bool* registrationConflict,
-    std::wstring* failureDetail) noexcept {
+    std::wstring* failureDetail,
+    DWORD* classicFallbackReason) noexcept {
     if (registrationMayHaveChanged) *registrationMayHaveChanged=false;
     if (registrationConflict) *registrationConflict=false;
+    if (classicFallbackReason) *classicFallbackReason=0;
     auto fail=[failureDetail](const wchar_t* detail) noexcept {
         if (failureDetail) {
             try { *failureDetail=detail; } catch (...) {}
@@ -1503,8 +1518,8 @@ bool InvokeShellExtRegistration(
         // Windows 11 requires the sparse package; do not silently substitute legacy regsvr32.
         // On 32-bit Windows 10, legacy registration is the supported fallback.
         if (os64) return fail(L"GlassSettings.Native.dll with the setup export was not found");
-        const std::wstring shellExt = root + L"\\GlassShellExt.dll";
-        if (!IsSafeInstallPath(shellExt) || !PathFileExistsW(shellExt.c_str())) return fail(L"GlassShellExt.dll was not found");
+        const std::wstring shellExt = root + L"\\" + GlassShared::GlassShellMenu::kShellExtRelativePath;
+        if (!IsSafeInstallPath(shellExt) || !PathFileExistsW(shellExt.c_str())) return fail(L"GlassShellSparse\\GlassShellExt.dll was not found");
         if (HasExistingShellRegistrationKeys()) {
             const bool matches=HasMatchingLegacyShellRegistration(root);
             if (!matches) {
@@ -1542,12 +1557,20 @@ bool InvokeShellExtRegistration(
     const bool ran = RunHiddenCommand(cmd, &exitCode, 45000, &started, &completed);
     constexpr DWORD kShellAlreadyRegistered=0x47505245; // Verified existing registration.
     constexpr DWORD kShellRegistrationConflict=0x47504346; // Preserved, no change made.
+    constexpr DWORD kShellClassicFallbackBase=0x47504C00; // Registered the classic menu; low byte = reason.
     const bool alreadyRegistered=registerExtension && completed && exitCode==kShellAlreadyRegistered;
     const bool conflict=completed && exitCode==kShellRegistrationConflict;
+    const bool classic=registerExtension && completed && (exitCode & 0xFFFFFF00u)==kShellClassicFallbackBase;
     if (registrationMayHaveChanged) *registrationMayHaveChanged=started && !alreadyRegistered && !conflict;
-    GlassInstallLog::LineFormat(L"ShellExt %s via Native.dll: ran=%d exit=0x%08lX existing=%d conflict=%d",
-        registerExtension ? L"register" : L"unregister", ran ? 1 : 0, exitCode, alreadyRegistered?1:0, conflict?1:0);
+    GlassInstallLog::LineFormat(L"ShellExt %s via Native.dll: ran=%d exit=0x%08lX existing=%d conflict=%d classic=%d",
+        registerExtension ? L"register" : L"unregister", ran ? 1 : 0, exitCode, alreadyRegistered?1:0, conflict?1:0, classic?1:0);
     if (registrationConflict) *registrationConflict=conflict;
+    if (classic) {
+        const DWORD reason=exitCode & 0xFFu;
+        if (classicFallbackReason) *classicFallbackReason=reason ? reason : 10u;
+        GlassInstallLog::LineFormat(L"ShellExt: %s", DescribeShellClassicFallback(reason).c_str());
+        return true;
+    }
     if (alreadyRegistered || (ran && exitCode == 0)) return true;
     if (conflict) return fail(L"an existing or unverifiable registration was preserved");
     const std::wstring detail=DescribeShellHelperExit(exitCode,started,completed);

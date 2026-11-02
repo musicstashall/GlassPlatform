@@ -131,7 +131,6 @@
     <ClCompile Include="ShellExtensionOps.cpp" />
     <ClCompile Include="SymbolModuleInfo.cpp" />
     <ClCompile Include="ShellSparsePackage.cpp" />
-    <ClCompile Include="ShellDevCertificate.cpp" />
     <ClCompile Include="VisualStyleApplyNative.cpp" />
     <ClCompile Include="SecureUxThemeNative.cpp" />
     <ClCompile Include="BlockListNative.cpp" />

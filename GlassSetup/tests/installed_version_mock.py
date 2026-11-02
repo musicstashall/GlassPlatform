@@ -11,6 +11,7 @@ import tempfile
 
 repo = Path(__file__).resolve().parents[2]
 setup = (repo / "GlassSetup/src/main.cpp").read_text(encoding="utf-8")
+constants = (repo / "GlassShared/include/GlassShellMenuConstants.h").read_text(encoding="utf-8").replace("#pragma once", "")
 
 
 def function(text, token):
@@ -63,6 +64,7 @@ prefix = r'''
 using DWORD=uint32_t;using ULONGLONG=uint64_t;
 constexpr DWORD ERROR_FILE_NOT_FOUND=2,ERROR_PATH_NOT_FOUND=3,ERROR_ACCESS_DENIED=5,
  FILE_ATTRIBUTE_DIRECTORY=16,INVALID_FILE_ATTRIBUTES=0xffffffffu;
+'''+constants+r'''
 struct Fake {
  bool roots=true,reg64=true,reg86=false,legacy64=false,legacy86=false;
  std::wstring x64=L"C:\\Program Files\\GlassPlatform",x86=L"C:\\Program Files (x86)\\GlassPlatform";

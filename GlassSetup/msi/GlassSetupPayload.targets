@@ -70,8 +70,6 @@
       <GlassNative Include="$(GlassBuildRelease)\ExplorerCompat.dll" />
       <GlassNative Include="$(GlassBuildRelease)\GlassCompat.dll" />
       <GlassNative Include="$(GlassBuildRelease)\GlassCore.dll" />
-      <GlassNative Include="$(GlassBuildRelease)\GlassShellExt.dll" />
-      <GlassNative Include="$(GlassBuildRelease)\GlassShellHost.exe" />
       <GlassNative Include="$(GlassBuildRelease)\TaskbarCompat.dll" />
       <GlassNative Include="$(GlassBuildRelease)\UICompat.dll" />
       <GlassNative Include="$(GlassBuildRelease)\WndCompat.dll" />
@@ -81,7 +79,18 @@
       <GlassNative Include="$(GlassBuildRelease)\msvcp140_1.dll" Condition="Exists('$(GlassBuildRelease)\msvcp140_1.dll')" />
       <GlassNative Include="$(GlassBuildRelease)\msvcp140_2.dll" Condition="Exists('$(GlassBuildRelease)\msvcp140_2.dll')" />
       <GlassNative Include="$(GlassBuildRelease)\concrt140.dll" Condition="Exists('$(GlassBuildRelease)\concrt140.dll')" />
-      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\**\*.*" />
+      <!-- Контекстное меню: подкаталог GlassShellSparse = OutDir проектов GlassShellExt/GlassShellHost и
+           ExternalLocation sparse-пакета (см. GlassShellExt\README.md). Список явный: рядом лежат pdb/lib/exp. -->
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\GlassShellExt.dll" />
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\GlassShellHost.exe" />
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\GlassShellSparse.msix" />
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\AppxManifest.xml" />
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\AppxManifest.UnregisterStub.xml" />
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\Assets\**\*.png" />
+      <!-- Публичный сертификат автора + инструкция (RU/EN): sparse-пакет ставится только при доверии издателю;
+           сам установщик ничего в хранилища сертификатов не пишет. -->
+      <GlassAuthorCert Include="$(SolutionRoot)Shared\certs\GlassAuthorCodeSigning.cer" />
+      <GlassAuthorCert Include="$(SolutionRoot)Shared\certs\GlassAuthorCodeSigning.txt" />
       <GlassSecureUxTheme Include="$(GlassBuildRelease)\SecureUxTheme\**\*.*" />
       <GlassUnins Include="$(GlassUninsExePath)" Condition="Exists('$(GlassUninsExePath)')" />
     </ItemGroup>
@@ -96,11 +105,14 @@
 
     <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and !Exists('$(GlassBuildRelease)\GlassCompat.dll')"
       Text="Glass $(GlassPayloadArch) MSI: нет $(GlassBuildRelease)\GlassCompat.dll — сначала успешно соберите Release|$(GlassPayloadArch) solution (модули платформы), затем MSI." />
+    <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and (!Exists('$(GlassBuildRelease)\GlassShellSparse\GlassShellExt.dll') or !Exists('$(GlassBuildRelease)\GlassShellSparse\GlassShellHost.exe') or !Exists('$(GlassBuildRelease)\GlassShellSparse\AppxManifest.xml'))"
+      Text="Glass $(GlassPayloadArch) MSI: нет $(GlassBuildRelease)\GlassShellSparse\ (GlassShellExt.dll, GlassShellHost.exe, AppxManifest.xml) — соберите GlassShellExt Release (Win32 для x86, x64 для x64)." />
+    <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and !Exists('$(GlassBuildRelease)\GlassShellSparse\GlassShellSparse.msix')"
+      Text="Glass $(GlassPayloadArch) MSI: нет $(GlassBuildRelease)\GlassShellSparse\GlassShellSparse.msix — нужен makeappx.exe из Windows SDK (PostBuild GlassShellExt, Package\BuildSparsePackage.ps1)." />
     <Copy SourceFiles="@(GlassNative)" DestinationFolder="$(GlassPayloadStage)" SkipUnchangedFiles="true" Condition="'@(GlassNative)' != ''" />
     <Copy SourceFiles="@(GlassShellSparse)" DestinationFiles="@(GlassShellSparse->'$(GlassPayloadStage)\GlassShellSparse\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(GlassShellSparse)' != ''" />
+    <Copy SourceFiles="@(GlassAuthorCert)" DestinationFolder="$(GlassPayloadStage)" SkipUnchangedFiles="true" Condition="'@(GlassAuthorCert)' != ''" />
     <Copy SourceFiles="@(GlassSecureUxTheme)" DestinationFiles="@(GlassSecureUxTheme->'$(GlassPayloadStage)\SecureUxTheme\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(GlassSecureUxTheme)' != ''" />
-    <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and !Exists('$(GlassBuildRelease)\GlassShellSparse\AppxManifest.xml')"
-      Text="Glass $(GlassPayloadArch) MSI: GlassShellSparse missing — соберите GlassShellExt Release (Win32 для x86, x64 для x64)." />
     <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and !Exists('$(GlassPayloadStage)\SecureUxTheme\SecureUxTheme4.dll')"
       Text="Glass $(GlassPayloadArch) MSI: SecureUxTheme не попал в staging." />
     <Copy SourceFiles="@(GlassOg)" DestinationFolder="$(GlassPayloadStage)" SkipUnchangedFiles="true" Condition="'@(GlassOg)' != ''" />

@@ -15,6 +15,23 @@
 
 Файлов `*.pfx` в рабочей копии быть не должно (`.gitignore` их отбрасывает, но и класть не нужно).
 
+Этим же сертификатом подписан sparse MSIX контекстного меню (`GlassShellSparse\GlassShellSparse.msix`), и его Subject
+**равен** `Identity@Publisher` обоих `GlassShellExt/Package/AppxManifest*.xml` (`CN=Stanislav K.`) — правило MSIX.
+Отсюда семейство пакета `GlassProject.GlassShellMenu_83517z3ecdax2` (`GlassShellMenuConstants.h`); проверка —
+`python GlassSetup/tests/sparse_identity_mock.py`. Отдельного «dev»-сертификата для MSIX нет; сборка без ключа автора
+даёт неподписанный msix (на Win11 — классический fallback меню).
+
+## Компактное меню Windows 11 на машине автора
+
+Windows регистрирует sparse-пакет только от издателя, сертификат которого есть в «Доверенных лицах». Ни установщик,
+ни GlassSettings, ни сборка этого не делают — на своей машине один раз вручную:
+
+```powershell
+Import-Certificate -FilePath .\Shared\certs\GlassAuthorCodeSigning.cer -CertStoreLocation Cert:\CurrentUser\TrustedPeople
+```
+
+Та же инструкция для пользователей — `Shared/certs/GlassAuthorCodeSigning.txt` (ставится в корень платформы).
+
 ## Смена ПК или переустановка ОС
 
 Нужны: `GlassAuthorCodeSigning.pfx`, его пароль, клон репозитория. Больше ничего из старой системы не требуется.
@@ -63,8 +80,9 @@ Remove-Item Cert:\CurrentUser\My\A801E5F5F430D6D19164C856F79B8EFD23F83EB8 -Delet
 1. `powershell -NoProfile -ExecutionPolicy Bypass -File .\Shared\scripts\New-GlassSelfSignedCert.ps1` (на машине без старого ключа `-Force` не нужен).
 2. Сразу сделать резервную копию нового ключа (команда печатается скриптом).
 3. Обновить пин: `Shared/GlassSign.targets` → `<GlassSignThumbprint>`; `README.md` → таблица сертификата. Старый отпечаток из README не удалять, а перенести в строку «предыдущие сертификаты» с датами — опубликованные ранее сборки подписаны именно им.
-4. Закоммитить новый `Shared/certs/GlassAuthorCodeSigning.cer` (старый `.cer` можно оставить рядом с суффиксом даты).
-5. Rebuild обеих фаз и `Test-GlassSignatures.ps1`.
+4. Закоммитить новый `Shared/certs/GlassAuthorCodeSigning.cer` (старый `.cer` можно оставить рядом с суффиксом даты) и обновить отпечаток/срок в `Shared/certs/GlassAuthorCodeSigning.txt`.
+5. Если изменился Subject — обновить `Publisher` обоих `AppxManifest*.xml`, `kSparsePublisher` и `kSparsePackageFamilyName` в `GlassShellMenuConstants.h` (новое семейство печатает `sparse_identity_mock.py`); прежний sparse-пакет у пользователей не мигрируется.
+6. Rebuild обеих фаз и `Test-GlassSignatures.ps1`.
 
 ## Истечение срока (2031-11-01)
 
@@ -85,4 +103,4 @@ Remove-Item Cert:\CurrentUser\My\A801E5F5F430D6D19164C856F79B8EFD23F83EB8 -Delet
 
 Точки подписи и проверка не меняются: сборка CI идёт с `GlassSign=Skip`, подписант подписывает те же файлы в том же порядке
 (PE и MSI, затем `GlassSetup.exe`), после чего `Test-GlassSignatures.ps1 -Thumbprint <новый>` проверяет комплект.
-В репозитории меняются только пин в `GlassSign.targets`, таблица README и `.cer`.
+В репозитории меняются только пин в `GlassSign.targets`, таблица README, `.cer`/`.txt` и — при другом Subject — Publisher/семейство sparse-пакета (см. выше).

@@ -1703,12 +1703,15 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
     }
     // Register by default on both fresh installs and reinstalls. The helper
     // preserves an existing registration and reports whether it changed one.
-    // Never add or trust a developer certificate on the user's machine. On
-    // systems that reject the package (e.g. no trusted signer) the install is
-    // still complete: the menu is simply unavailable until registered later.
+    // Never add or trust a certificate on the user's machine: the author
+    // certificate is only shipped next to the files (GlassAuthorCodeSigning.cer
+    // + .txt). On Windows 11 a package rejected for this user (no trusted
+    // signer) makes the helper register the classic Win32 menu instead; the
+    // install is complete and the finish page explains the reduced menu.
     bool shellConflict=false;
+    DWORD shellClassicReason=0;
     std::wstring shellDetail;
-    if (!GlassInstallUtil::InvokeShellExtRegistration(true,x64Dir_,x86Dir_,&shellRegisteredBySetup_,&shellConflict,&shellDetail)) {
+    if (!GlassInstallUtil::InvokeShellExtRegistration(true,x64Dir_,x86Dir_,&shellRegisteredBySetup_,&shellConflict,&shellDetail,&shellClassicReason)) {
         if (shellConflict) {
             AddFinishWarning(labels_.warnShellConflict.empty()
                 ? L"An existing or unverifiable shell registration was preserved without changes." : labels_.warnShellConflict,
@@ -1718,6 +1721,23 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
                 ? L"Could not register the Windows shell extension." : labels_.shellRegisterFailed,
                 JoinWarningDetail(labels_.warnShellHint, shellDetail));
         }
+    } else if (shellClassicReason!=0) {
+        constexpr DWORD kReasonSignerNotTrusted=8; // OpMessageId::SparseSignerNotTrusted
+        const bool certificate=shellClassicReason==kReasonSignerNotTrusted;
+        std::wstring title=certificate ? labels_.warnShellClassicCert : labels_.warnShellClassicOther;
+        if (title.empty()) {
+            title=certificate
+                ? L"The Windows 11 compact menu is unavailable: the author certificate (CN=Stanislav K.) is not trusted on this computer. The Glass entry was registered the classic way (\"Show more options\")."
+                : L"The Windows 11 compact menu is unavailable; the Glass entry was registered the classic way (\"Show more options\").";
+        }
+        std::wstring hint;
+        if (certificate) {
+            const std::wstring dir=GlassInstallUtil::TrimTrailingSlashes(x64Dir_.empty() ? x86Dir_ : x64Dir_);
+            hint=labels_.warnShellClassicHint;
+            for (size_t at=hint.find(L"{dir}"); at!=std::wstring::npos; at=hint.find(L"{dir}",at+dir.size()))
+                hint.replace(at,5,dir);
+        }
+        AddFinishWarning(title, JoinWarningDetail(hint, GlassInstallUtil::DescribeShellClassicFallback(shellClassicReason)));
     }
     SetStatus(labels_.finalize, 9950);
 }

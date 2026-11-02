@@ -482,7 +482,7 @@
   <data name="Error_ShellExtensionInconsistentState" xml:space="preserve"><value>Состояние расширения меню несогласовано. Отключите его и включите снова.</value></data>
   <data name="Error_ShellExtensionNeedsExplorerRestart" xml:space="preserve"><value>Перезапустите проводник Windows, чтобы обновить меню рабочего стола.</value></data>
   <data name="Error_ShellExtensionSparseArtifactsMissing" xml:space="preserve"><value>Не найдены файлы расширения контекстного меню. Переустановите Glass Settings.</value></data>
-  <data name="Error_ShellExtensionSparseCertFailed" xml:space="preserve"><value>Не удалось подготовить сертификат для установки пункта меню.</value></data>
+  <data name="Error_ShellExtensionSparseSignerNotTrusted" xml:space="preserve"><value>Windows 11 регистрирует компактное меню только от издателя, сертификату которого доверяет текущий пользователь, а классическая регистрация тоже не удалась. См. GlassAuthorCodeSigning.txt в папке установки.</value></data>
   <data name="Error_ShellExtensionSparseDeployFailed" xml:space="preserve"><value>Не удалось зарегистрировать расширение в контекстном меню рабочего стола.</value></data>
   <data name="Error_ShellExtensionSparseExternalLocationConflict" xml:space="preserve"><value>Осталась прежняя регистрация расширения контекстного меню рабочего стола. Отключите расширение в настройках Glass Settings и включите снова.</value></data>
   <data name="Error_ShellExtensionTimedOut" xml:space="preserve"><value>Операция не завершилась вовремя. Состояние могло не обновиться до конца.</value></data>
@@ -801,6 +801,12 @@
   <data name="System_UpdateNever" xml:space="preserve"><value>Никогда</value></data>
   <data name="System_RowShellExtension" xml:space="preserve"><value>Расширение контекстного меню</value></data>
   <data name="System_RowShellExtensionDesc" xml:space="preserve"><value>Пункт Glass в меню рабочего стола</value></data>
+  <data name="System_RowShellExtensionDescClassic" xml:space="preserve"><value>Пункт Glass в меню рабочего стола (после «Показать дополнительные параметры»)</value></data>
+  <data name="System_ShellMenuNoticeTitle" xml:space="preserve"><value>Компактное меню Windows 11 недоступно</value></data>
+  <data name="System_ShellCertNoticeMessage" xml:space="preserve"><value>Windows 11 регистрирует компактное контекстное меню только от издателя, сертификату которого доверяет текущий пользователь. Сертификат {0} не входит в «Доверенные лица», поэтому пункт Glass зарегистрирован классическим способом и показывается после «Показать дополнительные параметры» (Shift+F10). Платформа работает полностью; доверие сертификату необязательно и никогда не выставляется автоматически. Инструкция: {1} в папке установки.</value></data>
+  <data name="System_ShellCertNoticeOpenFolder" xml:space="preserve"><value>Открыть папку с сертификатом</value></data>
+  <data name="System_ShellClassicNoticeMessage" xml:space="preserve"><value>Пункт Glass сейчас зарегистрирован классическим способом и показывается после «Показать дополнительные параметры» (Shift+F10). Сертификат издателя уже доверен: выключите и снова включите переключатель, чтобы перейти на компактное меню.</value></data>
+  <data name="System_ShellSparseNoticeMessage" xml:space="preserve"><value>Пакет компактного меню (GlassShellSparse\GlassShellSparse.msix) отсутствует или не подписан, поэтому пункт Glass показывается после «Показать дополнительные параметры» (Shift+F10). Переустановите GlassPlatform, чтобы вернуть компактное меню.</value></data>
   <data name="Taskbar_PageSubtitle" xml:space="preserve"><value>Эффекты и цвета панели задач</value></data>
   <data name="Themes_ActiveBadge" xml:space="preserve"><value>Текущая</value></data>
   <data name="Themes_AllSection" xml:space="preserve"><value>Все темы</value></data>

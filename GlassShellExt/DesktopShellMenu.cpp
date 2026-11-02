@@ -12,7 +12,6 @@
 #include <new>
 #include <string>
 
-#include <strsafe.h>
 #include <versionhelpers.h>
 
 #pragma comment(lib, "ole32.lib")
@@ -37,61 +36,12 @@ namespace
         ::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
     }
 
-    [[nodiscard]] LONG DeleteRegistryTreeRelative(HKEY root, const wchar_t* subkey) noexcept
-    {
-        return ::RegDeleteTreeW(root, subkey);
-    }
-
-    [[nodiscard]] bool WriteClsInprocToHkcu(const wchar_t* clsidBraced, const wchar_t* modulePath) noexcept
-    {
-        wchar_t clsidSubkey[384]{};
-        if (FAILED(::StringCchPrintfW(clsidSubkey, _countof(clsidSubkey),
-                L"Software\\Classes\\CLSID\\%s\\InprocServer32", clsidBraced)))
-            return false;
-
-        const DWORD moduleCb = static_cast<DWORD>((wcslen(modulePath) + 1U) * sizeof(wchar_t));
-        LONG e =
-            ::RegSetKeyValueW(HKEY_CURRENT_USER, clsidSubkey, nullptr, REG_SZ, modulePath, moduleCb);
-        if (e != ERROR_SUCCESS)
-            return false;
-
-        static constexpr wchar_t kApartment[] = L"Apartment";
-        e = ::RegSetKeyValueW(HKEY_CURRENT_USER, clsidSubkey, L"ThreadingModel", REG_SZ, kApartment,
-            static_cast<DWORD>((wcslen(kApartment) + 1U) * sizeof(wchar_t)));
-        return e == ERROR_SUCCESS;
-    }
-
     enum class DesktopFactoryKind : int
     {
         LegacyContextMenu = 0,
         ToggleExplorerCommand = 1,
         OpenConfigExplorerCommand = 2,
     };
-
-    void DeleteStaleExplorerCommandRegistration() noexcept
-    {
-        wchar_t key[384]{};
-        const wchar_t* const shellRoots[] = {L"DesktopBackground", L"Directory\\Background"};
-        for (const wchar_t* root : shellRoots)
-        {
-            for (const wchar_t* verb :
-                {GlassShared::GlassShellMenu::kDesktopToggleVerbSubkey,
-                    GlassShared::GlassShellMenu::kDesktopOpenConfigVerbSubkey})
-            {
-                if (SUCCEEDED(::StringCchPrintfW(key, _countof(key), L"Software\\Classes\\%s\\Shell\\%s", root, verb)))
-                    (void)DeleteRegistryTreeRelative(HKEY_CURRENT_USER, key);
-            }
-        }
-
-        for (const wchar_t* clsid :
-            {GlassShared::GlassShellMenu::kToggleExplorerClsidBraced,
-                GlassShared::GlassShellMenu::kOpenConfigExplorerClsidBraced})
-        {
-            if (SUCCEEDED(::StringCchPrintfW(key, _countof(key), L"Software\\Classes\\CLSID\\%s", clsid)))
-                (void)DeleteRegistryTreeRelative(HKEY_CURRENT_USER, key);
-        }
-    }
-
 }
 
 extern "C" void WINAPI GlassShell_RemoveLegacyContextMenuHandler() noexcept
@@ -377,7 +327,8 @@ public:
 
 STDAPI DllRegisterServer()
 {
-    // Win11: COM и меню — только sparse AppX; regsvr32 не должен писать HKCU.
+    // Win11: меню регистрирует GlassSettings.Native (sparse AppX, при невозможности — классические ключи
+    // через ту же Shared::GlassShellRegistration); regsvr32 не должен писать HKCU.
     if (IsWindows11OrGreater())
         return S_OK;
 
@@ -386,22 +337,10 @@ STDAPI DllRegisterServer()
         ::GetModuleFileNameW(nullptr, module, MAX_PATH) == 0)
         return kSelfRegEClass;
 
-    DeleteStaleExplorerCommandRegistration();
+    Shared::GlassShellRegistration::RemoveStaleExplorerCommandRegistration();
     Shared::GlassShellRegistration::RemoveLegacyContextMenuHandler();
 
-    if (!WriteClsInprocToHkcu(GlassShared::GlassShellMenu::kClsidStringBraced, module))
-        return kSelfRegEClass;
-
-    wchar_t handlerSubkey[384]{};
-    if (FAILED(::StringCchPrintfW(handlerSubkey, _countof(handlerSubkey),
-            L"Software\\Classes\\DesktopBackground\\ShellEx\\ContextMenuHandlers\\%s",
-            GlassShared::GlassShellMenu::kHandlerSubkeyName)))
-        return kSelfRegEClass;
-
-    const wchar_t* clsid = GlassShared::GlassShellMenu::kClsidStringBraced;
-    const DWORD clsidCb = static_cast<DWORD>((wcslen(clsid) + 1U) * sizeof(wchar_t));
-    const LONG e = ::RegSetKeyValueW(HKEY_CURRENT_USER, handlerSubkey, nullptr, REG_SZ, clsid, clsidCb);
-    if (e != ERROR_SUCCESS)
+    if (!Shared::GlassShellRegistration::RegisterLegacyContextMenuHandler(module))
         return kSelfRegEClass;
 
     // Win11 compact menu — только sparse AppxManifest; HKCU ExplorerCommandHandler дублирует пункты в legacy.
@@ -414,7 +353,7 @@ STDAPI DllUnregisterServer()
     if (IsWindows11OrGreater())
         return S_OK;
 
-    DeleteStaleExplorerCommandRegistration();
+    Shared::GlassShellRegistration::RemoveStaleExplorerCommandRegistration();
     Shared::GlassShellRegistration::RemoveLegacyContextMenuHandler();
 
     // IExplorerCommand для Win11 — только sparse AppX; InprocServer32 toggle/config не трогаем.

@@ -92,6 +92,11 @@ extern "C"
     __declspec(dllexport) DWORD WINAPI GlassSettings_CopyShellExtensionLastErrorMessage(
         wchar_t* buffer, DWORD cch) noexcept;
     __declspec(dllexport) void WINAPI GlassSettings_NotifyShellCachesAfterRegistrationChange() noexcept;
+    /// 0 — не зарегистрировано, 1 — классическое меню (HKCU IContextMenu), 2 — компактное меню Win11 (sparse).
+    __declspec(dllexport) DWORD WINAPI GlassSettings_GetShellMenuModeV1() noexcept;
+    /// Доверие подписанту GlassShellSparse.msix: 0 unknown/Win10, 1 trusted, 2 untrusted, 3 msix нет, 4 без подписи;
+    /// subjectOut — Subject сертификата («CN=…»). Ничего не пишет в хранилища.
+    __declspec(dllexport) DWORD WINAPI GlassSettings_GetShellSignerTrustV1(wchar_t* subjectOut, DWORD cchSubject) noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_TryReadPresenceSnapshot(
         void* snapshotOut) noexcept;
     __declspec(dllexport) HANDLE WINAPI GlassSettings_OpenPresenceChangedEvent() noexcept;

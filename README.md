@@ -59,7 +59,7 @@ msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64
 
 Официальные Release-сборки автор подписывает сертификатом Code Signing **`CN=Stanislav K.`**. Сейчас это **временный self-signed сертификат** (закрытый ключ только на машине автора); переход на SignPath в CI запланирован — точки подписи и способ проверки от этого не изменятся, сменится только отпечаток в таблице ниже. Для self-signed SmartScreen и UAC показывают «Неизвестный издатель» — это ожидаемо: подпись подтверждает **авторство и целостность** файла, а не репутацию издателя.
 
-**Что подписано:** все DLL/EXE платформы (`Build\x64|x86\Release`), `GlassSettings.exe` (publish, single-file), `GlassSettings.Native.dll`, `GlassUnins.exe`, пять MSI и `GlassSetup.exe`. Сторонние файлы (OpenGlass, SecureUxTheme, WinUI/.NET/CRT) сохраняют подписи своих авторов. Sparse MSIX меню оболочки подписан отдельным разработческим сертификатом (см. `GlassSetup/README.md`).
+**Что подписано:** все DLL/EXE платформы (`Build\x64|x86\Release`), `GlassSettings.exe` (publish, single-file), `GlassSettings.Native.dll`, `GlassUnins.exe`, пять MSI и `GlassSetup.exe`. Сторонние файлы (OpenGlass, SecureUxTheme, WinUI/.NET/CRT) сохраняют подписи своих авторов. Sparse MSIX меню оболочки (`GlassShellSparse\GlassShellSparse.msix`) подписан тем же сертификатом автора: Windows 11 регистрирует компактное меню только если этот сертификат есть в «Доверенных лицах» пользователя — иначе пункт «Glass» регистрируется классически (после «Показать дополнительные параметры»). Установщик сертификат **не** добавляет; публичный `GlassAuthorCodeSigning.cer` и инструкция `GlassAuthorCodeSigning.txt` лежат в папке установки.
 
 **Официальный сертификат автора:**
 
@@ -101,7 +101,7 @@ Get-AuthenticodeSignature .\GlassSetup.exe |
 | UICompat.dll | CoreWindow / «Пуск», поиск, NC |
 | GlassSettings.exe | Параметры |
 | LogViewer.exe | Управление и журнал (только в Debug) |
-| GlassShellExt.dll | Контекстное меню рабочего стола |
+| GlassShellSparse\GlassShellExt.dll | Контекстное меню рабочего стола (вместе с `GlassShellHost.exe` и sparse-пакетом в подкаталоге `GlassShellSparse\`) |
 | GlassSetup.exe | Установщик платформы |
 
 ## Реестр

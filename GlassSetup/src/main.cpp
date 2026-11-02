@@ -23,6 +23,7 @@
 #include <WebView2.h>
 #include <detours.h>
 #include <Helpers/ThemeHelper.h>
+#include <GlassShellMenuConstants.h>
 #include "WizardTheme.h"
 #include "WizardAssets.h"
 #include "WizardProgress.h"
@@ -758,7 +759,7 @@ InstalledGlassVersionInfo FindInstalledGlassVersion() {
         bool coreExists=false, compatExists=false, shellExists=false;
         const bool coreChecked=InspectInstalledMarker(corePath,coreExists);
         const bool compatChecked=InspectInstalledMarker(root.path+L"\\GlassCompat.dll",compatExists);
-        const bool shellChecked=InspectInstalledMarker(root.path+L"\\GlassShellHost.exe",shellExists);
+        const bool shellChecked=InspectInstalledMarker(root.path+L"\\"+GlassShared::GlassShellMenu::kShellHostRelativePath,shellExists);
         InstallLog::LineFormat(L"Preflight: root=%s core=%d compat=%d shell=%d checked=%d",
             root.path.c_str(),coreExists?1:0,compatExists?1:0,shellExists?1:0,
             coreChecked && compatChecked && shellChecked ? 1 : 0);
@@ -2101,6 +2102,9 @@ private:
         labels.warnPriorHostsHint = Text(IDS_WARN_PRIOR_HOSTS_HINT);
         labels.warnShellConflict = Text(IDS_WARN_SHELL_CONFLICT);
         labels.warnShellHint = Text(IDS_WARN_SHELL_HINT);
+        labels.warnShellClassicCert = Text(IDS_WARN_SHELL_CLASSIC_CERT);
+        labels.warnShellClassicOther = Text(IDS_WARN_SHELL_CLASSIC_OTHER);
+        labels.warnShellClassicHint = Text(IDS_WARN_SHELL_CLASSIC_HINT);
         labels.warnUserDefaults = Text(IDS_WARN_USER_DEFAULTS);
         labels.rollbackFailed = Text(IDS_ERR_ROLLBACK_FAILED);
         labels.rollbackRestored = Text(IDS_ERR_ROLLBACK_RESTORED);
@@ -2334,7 +2338,8 @@ private:
             progressReverse_=false;
             progressMarquee_=false;
             // Preview the "done with notes" variant of the finish page.
-            finishWarnings_={{Text(IDS_ERR_SHELL_REGISTER),Text(IDS_WARN_SHELL_HINT)+L" (HRESULT 0x800B0109)"},
+            finishWarnings_={{Text(IDS_WARN_SHELL_CLASSIC_CERT),
+                              Text(IDS_WARN_SHELL_CLASSIC_HINT)+L" (classic menu registered; sparse package: the msix signer certificate is not trusted on this computer (0x47504C08))"},
                              {Text(IDS_WARN_PLATFORM32_START),Text(IDS_WARN_PLATFORM_START_HINT)}};
             break;
         case Page::Error:

@@ -5,13 +5,14 @@
     Release build (x64 phase + x86 phase) before it is published.
 
 .DESCRIPTION
-    Builds the artifact list (platform DLL/EXE of both architectures, GlassSettings publish exe,
+    Builds the artifact list (platform DLL/EXE of both architectures including the shell-menu
+    components under GlassShellSparse\ and the sparse MSIX, GlassSettings publish exe,
     GlassSettings.Native.dll, GlassUnins.exe, the five MSI and GlassSetup.exe) and runs
     Invoke-GlassSign.ps1 -Mode Verify -Policy Require against it. The expected thumbprint comes from
     -Thumbprint, otherwise from GlassSignThumbprint in Shared\GlassSign.targets, otherwise from the
     author key in the certificate store (subject match). Missing artifacts are errors unless
-    -AllowMissing is given. The sparse MSIX of the shell menu is only reported (separate dev
-    certificate, see GlassSetup\README.md).
+    -AllowMissing is given. The sparse MSIX is signed by the same author certificate as everything
+    else (its manifest Publisher equals the certificate subject), so it is a required artifact.
 
     Provider-agnostic: works unchanged for a SignPath certificate (pass its thumbprint).
     Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less scripts in the ANSI code page.
@@ -52,7 +53,8 @@ if (-not $Subject) { $Subject = 'CN=Stanislav K.' }
 
 $build = Join-Path $SolutionRoot 'Build'
 $platformFiles = @(
-    'ExplorerCompat.dll', 'GlassCompat.dll', 'GlassCore.dll', 'GlassShellExt.dll', 'GlassShellHost.exe',
+    'ExplorerCompat.dll', 'GlassCompat.dll', 'GlassCore.dll',
+    'GlassShellSparse\GlassShellExt.dll', 'GlassShellSparse\GlassShellHost.exe', 'GlassShellSparse\GlassShellSparse.msix',
     'TaskbarCompat.dll', 'UICompat.dll', 'WndCompat.dll', 'GlassSettings.Native.dll',
     'GlassSettings\GlassSettings.exe'
 )
@@ -95,17 +97,6 @@ if (-not $AllowMissing) { $arguments += '-RequireFiles' }
 
 & powershell.exe @arguments
 $verifyExit = $LASTEXITCODE
-
-Write-Host ''
-Write-Host 'Sparse MSIX (shell menu; separate developer certificate, informational only):'
-foreach ($arch in @('x64', 'x86')) {
-    $msix = Join-Path $build "$arch\$Configuration\GlassShellSparse\GlassShellSparse.msix"
-    if (-not (Test-Path -LiteralPath $msix -PathType Leaf)) { Write-Host ("  missing  {0}" -f $msix); continue }
-    $sig = Get-AuthenticodeSignature -LiteralPath $msix
-    $signer = '(none)'
-    if ($sig.SignerCertificate) { $signer = ("{0}  {1}" -f $sig.SignerCertificate.Thumbprint, $sig.SignerCertificate.Subject) }
-    Write-Host ("  {0,-12} {1}  {2}" -f $sig.Status, $signer, $msix)
-}
 
 Write-Host ''
 if ($verifyExit -eq 0) {

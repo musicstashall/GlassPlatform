@@ -6,10 +6,30 @@ namespace GlassSettings::ShellSparsePackage
     {
         None = 0,
         ArtifactsMissing = 1,
-        DevCertFailed = 2,
+        // Deployment rejected the msix signature: the author certificate
+        // (manifest Publisher) is not in the user's TrustedPeople/Root stores.
+        SignerNotTrusted = 2,
         DeploymentFailed = 3,
         ExternalLocationConflict = 4,
     };
+
+    // Trust state of the signer of GlassShellSparse.msix on this machine for
+    // this user, as the AppX deployment stack will see it. Nothing here ever
+    // writes to a certificate store.
+    enum class SparseSignerTrust : int
+    {
+        Unknown = 0,
+        Trusted = 1,
+        Untrusted = 2,
+        MsixMissing = 3,
+        Unsigned = 4,
+    };
+
+    // subjectOut (optional) receives the signer subject ("CN=...") when a
+    // signature is present. exactPlatformRoot == nullptr resolves the platform
+    // folder like RegisterSparsePackageQuiet does for the settings UI.
+    [[nodiscard]] SparseSignerTrust QuerySparseSignerTrust(
+        const wchar_t* exactPlatformRoot, wchar_t* subjectOut, size_t cchSubject) noexcept;
 
     [[nodiscard]] bool IsSparsePackageInstalledForCurrentUser() noexcept;
 
@@ -33,10 +53,11 @@ namespace GlassSettings::ShellSparsePackage
     // concrete Windows error instead of a bare "failed".
     [[nodiscard]] HRESULT GetLastSparseDeploymentHr() noexcept;
 
-    // A non-null exactPlatformRoot is used only by the installer helper; in
-    // that mode missing artifacts fail without falling back to other paths.
-    [[nodiscard]] bool RegisterSparsePackageQuiet(bool provisionDevCertificate = true,
-        const wchar_t* exactPlatformRoot = nullptr) noexcept;
+    // A non-null exactPlatformRoot selects installer mode (Setup/Unins):
+    // missing artifacts fail without falling back to other paths and an
+    // existing package is never removed or replaced. The msix is shipped
+    // signed by the author certificate; nothing is re-signed or trusted here.
+    [[nodiscard]] bool RegisterSparsePackageQuiet(const wchar_t* exactPlatformRoot = nullptr) noexcept;
 
     [[nodiscard]] bool UnregisterSparsePackageQuiet(const wchar_t* exactPlatformRoot = nullptr) noexcept;
 }

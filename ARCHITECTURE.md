@@ -49,7 +49,7 @@ GlassShared (static lib)   — общий код: GlassPlatformTask, GlassModule
 
 Межмодульные вызовы — только runtime: `LoadLibrary` / уже загруженный модуль + `GetProcAddress`, либо загрузка через GlassCompat (`LoadOptionalModule` / `Ensure*Loaded`).
 
-**Допустимо:** `ProjectReference` без линковки (`ReferenceOutputAssembly=false`, без `LinkLibraryDependencies`) исключительно для build-order (пример: GlassShellExt → GlassShellHost).
+**Допустимо:** `ProjectReference` без линковки (`ReferenceOutputAssembly=false`, без `LinkLibraryDependencies`) исключительно для build-order (пример: GlassShellExt → GlassShellHost). Выход обоих — подкаталог `Build\<arch>\<cfg>\GlassShellSparse\` (ExternalLocation sparse-пакета; пути только через `GlassShellMenuConstants.h`).
 
 Общие типы/константы/helpers — только в GlassShared. Не подключать private headers соседней DLL через `AdditionalIncludeDirectories` (legacy header-coupling у WndCompat / GlassSettings.Native к `GlassCore\include` — технический долг, не образец).
 

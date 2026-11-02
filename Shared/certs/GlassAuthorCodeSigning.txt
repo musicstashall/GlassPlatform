@@ -1,0 +1,64 @@
+﻿GlassPlatform — сертификат автора / author's code-signing certificate
+=====================================================================
+
+[RU]
+
+GlassAuthorCodeSigning.cer — публичный сертификат, которым подписаны все исполняемые файлы
+GlassPlatform и sparse-пакет контекстного меню (GlassShellSparse\GlassShellSparse.msix).
+
+    Subject:    CN=Stanislav K.
+    SHA-1:      A801E5F5F430D6D19164C856F79B8EFD23F83EB8
+    Действует:  2026-11-01 — 2031-11-01
+
+Сертификат самоподписанный, Windows по умолчанию ему не доверяет — для работы платформы доверие
+НЕ требуется. Установщик и GlassSettings никогда не добавляют сертификаты в хранилища сами.
+
+На что влияет отсутствие доверия: в Windows 11 пункт «Glass» в контекстном меню рабочего стола
+регистрируется классическим способом и показывается после «Показать дополнительные параметры»
+(Shift+F10). Компактное меню Windows 11 требует регистрации sparse-пакета, а Windows регистрирует
+его только от издателя, сертификат которого есть в «Доверенных лицах» текущего пользователя.
+
+Если вы осознанно хотите включить компактное меню:
+
+  1. Сверьте отпечаток файла с указанным выше (PowerShell):
+       (Get-PfxCertificate "<папка установки>\GlassAuthorCodeSigning.cer").Thumbprint
+  2. Импортируйте сертификат в «Доверенные лица» текущего пользователя:
+       Import-Certificate -FilePath "<папка установки>\GlassAuthorCodeSigning.cer" -CertStoreLocation Cert:\CurrentUser\TrustedPeople
+     (или certmgr.msc → Доверенные лица → Сертификаты → Все задачи → Импорт).
+  3. В GlassSettings → Система выключите и снова включите «Расширение контекстного меню»
+     (либо переустановите GlassPlatform). Проверка: Get-AppxPackage GlassProject.GlassShellMenu
+
+Отозвать доверие:
+       Remove-Item Cert:\CurrentUser\TrustedPeople\A801E5F5F430D6D19164C856F79B8EFD23F83EB8
+После этого снова выключите/включите пункт меню в GlassSettings — он вернётся к классической регистрации.
+
+[EN]
+
+GlassAuthorCodeSigning.cer is the public certificate used to sign every GlassPlatform executable and
+the context-menu sparse package (GlassShellSparse\GlassShellSparse.msix).
+
+    Subject:    CN=Stanislav K.
+    SHA-1:      A801E5F5F430D6D19164C856F79B8EFD23F83EB8
+    Valid:      2026-11-01 — 2031-11-01
+
+The certificate is self-signed and NOT trusted by Windows by default; the platform does not need that
+trust to work. Neither the installer nor GlassSettings ever add certificates to any store.
+
+What the missing trust affects: on Windows 11 the "Glass" desktop context-menu entry is registered the
+classic way and appears under "Show more options" (Shift+F10). The compact Windows 11 menu requires a
+sparse package, which Windows registers only when the publisher's certificate is in the current user's
+Trusted People store.
+
+If you deliberately want the compact menu:
+
+  1. Compare the file's thumbprint with the value above (PowerShell):
+       (Get-PfxCertificate "<install folder>\GlassAuthorCodeSigning.cer").Thumbprint
+  2. Import the certificate into the current user's Trusted People store:
+       Import-Certificate -FilePath "<install folder>\GlassAuthorCodeSigning.cer" -CertStoreLocation Cert:\CurrentUser\TrustedPeople
+     (or certmgr.msc → Trusted People → Certificates → All Tasks → Import).
+  3. In GlassSettings → System turn "Context menu extension" off and on again (or reinstall GlassPlatform).
+     Check: Get-AppxPackage GlassProject.GlassShellMenu
+
+To revoke the trust:
+       Remove-Item Cert:\CurrentUser\TrustedPeople\A801E5F5F430D6D19164C856F79B8EFD23F83EB8
+Then toggle the menu entry in GlassSettings again - it falls back to the classic registration.

@@ -99,12 +99,20 @@ void DeleteStartMenuShortcut() noexcept;
 // failureDetail (optional) receives a short technical, language-neutral
 // description of why the helper failed (exit code, decoded HRESULT); it is
 // meant for the log and the finish-page notes, not as a user-facing sentence.
+// classicFallbackReason (optional, register only): non-zero when the helper
+// succeeded on Windows 11 by registering the classic Win32 menu because the
+// sparse package could not be deployed for this user; the value is the
+// helper's reason id (8 = the msix signer certificate is not trusted).
 bool InvokeShellExtRegistration(
     bool registerExtension,
     const std::wstring& x64Dir,
     const std::wstring& x86Dir,
     bool* registrationMayHaveChanged = nullptr,
     bool* registrationConflict = nullptr,
-    std::wstring* failureDetail = nullptr) noexcept;
+    std::wstring* failureDetail = nullptr,
+    DWORD* classicFallbackReason = nullptr) noexcept;
+
+// Technical, language-neutral text for a classic-fallback reason id.
+std::wstring DescribeShellClassicFallback(DWORD reason);
 
 } // namespace GlassInstallUtil

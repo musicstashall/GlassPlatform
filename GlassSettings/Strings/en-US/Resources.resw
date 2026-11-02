@@ -479,7 +479,7 @@
   <data name="Error_ShellExtensionInconsistentState" xml:space="preserve"><value>The menu extension is in an inconsistent state. Turn it off, then turn it on again.</value></data>
   <data name="Error_ShellExtensionNeedsExplorerRestart" xml:space="preserve"><value>Restart File Explorer to refresh the desktop menu.</value></data>
   <data name="Error_ShellExtensionSparseArtifactsMissing" xml:space="preserve"><value>Context menu extension files are missing. Reinstall Glass Settings.</value></data>
-  <data name="Error_ShellExtensionSparseCertFailed" xml:space="preserve"><value>Could not prepare the certificate needed to install the menu extension.</value></data>
+  <data name="Error_ShellExtensionSparseSignerNotTrusted" xml:space="preserve"><value>Windows 11 registers the compact menu only from a publisher whose certificate is trusted by the current user, and the classic registration also failed. See GlassAuthorCodeSigning.txt in the installation folder.</value></data>
   <data name="Error_ShellExtensionSparseDeployFailed" xml:space="preserve"><value>Could not register the desktop context menu extension.</value></data>
   <data name="Error_ShellExtensionSparseExternalLocationConflict" xml:space="preserve"><value>A previous registration of the desktop context menu extension is still present. Turn the extension off in Glass Settings, then turn it on again.</value></data>
   <data name="Error_ShellExtensionTimedOut" xml:space="preserve"><value>The operation timed out. The state may not have updated completely.</value></data>
@@ -796,6 +796,12 @@
   <data name="System_UpdateNever" xml:space="preserve"><value>Never</value></data>
   <data name="System_RowShellExtension" xml:space="preserve"><value>Context menu extension</value></data>
   <data name="System_RowShellExtensionDesc" xml:space="preserve"><value>Glass item on the desktop context menu</value></data>
+  <data name="System_RowShellExtensionDescClassic" xml:space="preserve"><value>Glass item on the desktop context menu (under “Show more options”)</value></data>
+  <data name="System_ShellMenuNoticeTitle" xml:space="preserve"><value>Windows 11 compact menu is unavailable</value></data>
+  <data name="System_ShellCertNoticeMessage" xml:space="preserve"><value>Windows 11 registers the compact context menu only from a publisher whose certificate the current user trusts. The certificate {0} is not in Trusted People, so the Glass item is registered the classic way and appears under “Show more options” (Shift+F10). The platform works in full; trusting the certificate is optional and is never done automatically. Instructions: {1} in the installation folder.</value></data>
+  <data name="System_ShellCertNoticeOpenFolder" xml:space="preserve"><value>Open certificate folder</value></data>
+  <data name="System_ShellClassicNoticeMessage" xml:space="preserve"><value>The Glass item is currently registered the classic way and appears under “Show more options” (Shift+F10). The publisher certificate is now trusted: turn the switch off and on again to move to the compact menu.</value></data>
+  <data name="System_ShellSparseNoticeMessage" xml:space="preserve"><value>The compact menu package (GlassShellSparse\GlassShellSparse.msix) is missing or unsigned, so the Glass item appears under “Show more options” (Shift+F10). Reinstall GlassPlatform to restore the compact menu.</value></data>
   <data name="Taskbar_PageSubtitle" xml:space="preserve"><value>Taskbar effects and colors</value></data>
   <data name="Themes_ActiveBadge" xml:space="preserve"><value>Current</value></data>
   <data name="Themes_AllSection" xml:space="preserve"><value>All themes</value></data>

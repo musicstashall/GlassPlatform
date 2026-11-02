@@ -269,7 +269,8 @@ namespace
         if (!GlassShellExt::g_module)
             return false;
 
-        // Получить каталог GlassShellExt.dll
+        // Каталог GlassShellExt.dll: <root>\GlassShellSparse\ (ExternalLocation sparse-пакета);
+        // корень платформы — его родитель, GlassSettings.exe — в <root>\GlassSettings\.
         wchar_t dllDir[MAX_PATH]{};
         if (::GetModuleFileNameW(GlassShellExt::g_module, dllDir, MAX_PATH) == 0)
             return false;
@@ -278,21 +279,6 @@ namespace
             return false;
         *(slash + 1) = L'\0';
 
-        // Сначала искать в подпапке GlassSettings\ (новая структура)
-        wchar_t candidate[MAX_PATH]{};
-        if (SUCCEEDED(::StringCchPrintfW(candidate, _countof(candidate), L"%sGlassSettings\\%s", dllDir, kGlassSettingsExe)))
-        {
-            if (::GetFileAttributesW(candidate) != INVALID_FILE_ATTRIBUTES)
-                return ::StringCchCopyW(out, cch, candidate) == S_OK;
-        }
-
-        // Fallback: рядом с GlassShellExt.dll (установленная платформа)
-        const std::wstring path = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
-            GlassShellExt::g_module, kGlassSettingsExe);
-        if (!path.empty())
-            return ::StringCchCopyW(out, cch, path.c_str()) == S_OK;
-
-        // Fallback для 32-bit GlassShellExt на 64-bit ОС (GlassSettings ставится в 64-bit корень)
         auto tryRoot = [&](const wchar_t* rootDir) noexcept -> bool {
             if (!rootDir || !*rootDir)
                 return false;
@@ -315,6 +301,28 @@ namespace
             return false;
         };
 
+        // 1) Корень платформы = родитель каталога DLL (установка и Build\<arch>\<cfg>\).
+        {
+            wchar_t parentDir[MAX_PATH]{};
+            if (::StringCchCopyW(parentDir, _countof(parentDir), dllDir) == S_OK)
+            {
+                size_t len = wcslen(parentDir);
+                while (len > 0 && parentDir[len - 1] == L'\\')
+                    parentDir[--len] = L'\0';
+                if (wchar_t* parentSlash = wcsrchr(parentDir, L'\\'))
+                {
+                    *parentSlash = L'\0';
+                    if (tryRoot(parentDir))
+                        return true;
+                }
+            }
+        }
+
+        // 2) Сам каталог DLL (плоская раскладка прежних сборок).
+        if (tryRoot(dllDir))
+            return true;
+
+        // 3) Fallback для 32-bit GlassShellExt на 64-bit ОС (GlassSettings ставится в 64-bit корень).
         auto tryReg = [&](HKEY hive, const wchar_t* valName, REGSAM sam) noexcept -> bool {
             HKEY key = nullptr;
             if (::RegOpenKeyExW(hive, L"Software\\GlassPlatform", 0, KEY_READ | sam, &key) != ERROR_SUCCESS)

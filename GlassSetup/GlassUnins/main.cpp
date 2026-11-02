@@ -10,6 +10,7 @@
 #include "WizardTheme.h"
 #include "WizardAssets.h"
 #include "GlassProducts.h"
+#include <GlassShellMenuConstants.h>
 
 #include <windows.h>
 #include <commctrl.h>
@@ -648,7 +649,8 @@ private:
                 helperReady=!helper.empty() && GlassInstallUtil::PeMatches(helper,IMAGE_FILE_MACHINE_AMD64,
                     GlassInstallUtil::kInstallerShellExport);
             } else {
-                const std::wstring shell=GlassInstallUtil::TrimTrailingSlashes(x86Dir_)+L"\\GlassShellExt.dll";
+                const std::wstring shell=GlassInstallUtil::TrimTrailingSlashes(x86Dir_)+L"\\"+
+                    GlassShared::GlassShellMenu::kShellExtRelativePath;
                 helperReady=!x86Dir_.empty() && GlassInstallUtil::IsSafeInstallPath(shell) && PathFileExistsW(shell.c_str());
             }
             if (!helperReady) {

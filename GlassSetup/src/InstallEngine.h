@@ -63,6 +63,12 @@ public:
         std::wstring warnPriorHostsHint;
         std::wstring warnShellConflict;
         std::wstring warnShellHint;
+        // Win11 classic fallback (install complete, compact menu unavailable):
+        // title when the msix signer certificate is not trusted / other reason,
+        // and the hint with "{dir}" replaced by the install folder.
+        std::wstring warnShellClassicCert;
+        std::wstring warnShellClassicOther;
+        std::wstring warnShellClassicHint;
         std::wstring warnUserDefaults;
     };
 

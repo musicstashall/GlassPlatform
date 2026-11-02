@@ -4,6 +4,7 @@ from pathlib import Path
 import os,subprocess,tempfile
 repo=Path(__file__).resolve().parents[2]
 src=(repo/'GlassSettings/Native/ShellSparsePackage.cpp').read_text(encoding='utf-8')
+constants=(repo/'GlassShared/include/GlassShellMenuConstants.h').read_text(encoding='utf-8').replace('#pragma once','')
 def function(token):
     start=src.index(token);brace=src.index('{',start);depth=0
     for i in range(brace,len(src)):
@@ -13,6 +14,7 @@ def function(token):
             if not depth:return src[start:i+1]
     raise ValueError(token)
 query=function('InstallerSparseState QueryInstallerSparseState(')
+subdir=function('bool AppendSparseSubdir(')
 remove=function('bool UnregisterInstallerSparsePackageQuiet(')
 prefix=r'''
 #include <algorithm>
@@ -27,12 +29,12 @@ constexpr int MAX_PATH=260;
 #define _wcsicmp wcscasecmp
 template<size_t N>int wcscpy_s(wchar_t (&out)[N],const wchar_t* value){
  if(!value || wcslen(value)>=N)return 1;wcscpy(out,value);return 0;}
-namespace GlassShared::GlassShellMenu{
- constexpr wchar_t kSparsePackageFamilyName[]=L"GlassProject.GlassShellMenu_t6mpd150h6a5c";
- constexpr wchar_t kSparsePackageName[]=L"GlassProject.GlassShellMenu";
-}
+int wcscat_s(wchar_t* out,size_t cch,const wchar_t* value){
+ if(!out||!value||wcslen(out)+wcslen(value)>=cch)return 1;wcscat(out,value);return 0;}
+'''+constants+r'''
 namespace winrt {using hstring=std::wstring;}
-struct FakePackage{std::wstring name=L"GlassProject.GlassShellMenu",full=L"package_v1",root=L"D:\\Glass";bool healthy=true;};
+// ExternalLocation of the sparse package is the GlassShellSparse\ subfolder of the platform root.
+struct FakePackage{std::wstring name=L"GlassProject.GlassShellMenu",full=L"package_v1",root=L"D:\\Glass\\GlassShellSparse";bool healthy=true;};
 struct Fake{std::vector<FakePackage> current,global;bool apartment=true,throwCurrent=false,throwGlobal=false,removeOk=true;
  int removals=0;std::wstring family,removed;} f;
 namespace winmd {
@@ -62,7 +64,10 @@ enum class InstallerSparseState{Absent,Matching,Conflict,Unknown};
 main=r'''
 int main(){using S=InstallerSparseState;auto reset=[](){f=Fake{};};auto q=[](){return QueryInstallerSparseState(L"D:\\Glass");};
  reset();assert(q()==S::Absent && f.family==GlassShared::GlassShellMenu::kSparsePackageFamilyName);
+ assert(f.family==L"GlassProject.GlassShellMenu_83517z3ecdax2"); // Publisher CN=Stanislav K.
  reset();FakePackage p;f.current={p};f.global={p};assert(q()==S::Matching);
+ reset();p.root=L"d:\\glass\\glassshellsparse\\";f.current={p};f.global={p};assert(q()==S::Matching); // case/trailing slash
+ reset();p.root=L"D:\\Glass";f.current={p};f.global={p};assert(q()==S::Conflict); // old flat layout at the root
  reset();p.root=L"E:\\Other";f.current={p};f.global={p};assert(q()==S::Conflict);
  reset();p=FakePackage{};p.healthy=false;f.current={p};f.global={p};assert(q()==S::Conflict);
  reset();p=FakePackage{};f.current={p,p};f.global={p};assert(q()==S::Conflict);
@@ -82,7 +87,7 @@ int main(){using S=InstallerSparseState;auto reset=[](){f=Fake{};};auto q=[](){r
 }
 '''
 with tempfile.TemporaryDirectory(prefix='glass-sparse-state-') as d:
-    cpp=Path(d)/'test.cpp';exe=Path(d)/'test';cpp.write_text(prefix+query+'\n'+remove+'\n'+main,encoding='utf-8')
+    cpp=Path(d)/'test.cpp';exe=Path(d)/'test';cpp.write_text(prefix+subdir+'\n'+query+'\n'+remove+'\n'+main,encoding='utf-8')
     subprocess.run([os.environ.get('CXX','g++'),'-std=c++17','-g','-fsanitize=address,undefined',
                     '-fno-omit-frame-pointer','-no-pie',str(cpp),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)

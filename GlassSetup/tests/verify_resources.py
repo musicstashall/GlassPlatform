@@ -422,12 +422,33 @@ assert "QueryPlatformInstallPath(" not in native_helper and "TryGetAutorunGlassC
 shell_ops = (repo / "GlassSettings/Native/ShellExtensionOps.cpp").read_text(encoding="utf-8")
 shell_sparse = (repo / "GlassSettings/Native/ShellSparsePackage.cpp").read_text(encoding="utf-8")
 pack = (repo / "GlassShellExt/Package/BuildSparsePackage.ps1").read_text(encoding="utf-8")
+shell_query = (repo / "GlassSettings/Native/ShellExtensionQuery.cpp").read_text(encoding="utf-8")
+constants = (repo / "GlassShared/include/GlassShellMenuConstants.h").read_text(encoding="utf-8")
+payload = (repo / "GlassSetup/msi/GlassSetupPayload.targets").read_text(encoding="utf-8")
 assert "GlassSettings_ShellExtRegisterSetupV1W" in util and "/installroot" in util
 assert "exactPlatformRoot" in shell_ops and "exactPlatformRoot" in shell_sparse
 assert "0x47505245" in util and "0x47505245" in shell_ops
-assert "provisionDevCertificate && !ShellDevCertificate::Ensure" in shell_sparse
-assert "provisionDevCertificate && ResolveSparseSdkTools" in shell_sparse
-assert "Export-PfxCertificate" not in pack and "$cert.RawData" in pack
+# H2: the msix is signed by the author certificate only; nothing creates, exports or trusts
+# certificates, neither at build time nor on the user's machine (setup informs, never trusts).
+assert "ShellDevCertificate" not in shell_sparse and "ShellDevCertificate" not in shell_ops
+assert not (repo / "GlassSettings/Native/ShellDevCertificate.cpp").exists()
+for forbidden in ("New-SelfSignedCertificate", "Export-PfxCertificate", "TrustedPeople", "signtool", "Import-Certificate"):
+    assert forbidden not in pack, forbidden
+assert "makeappx" in pack.lower() and "GlassShellSparse" in pack
+assert "SignerNotTrusted" in shell_sparse and "IsThumbprintInTrustedPeople" in shell_sparse
+assert "QuerySparseSignerTrust" in shell_sparse and "GlassSettings_GetShellSignerTrustV1" in shell_query
+assert "GlassSettings_GetShellMenuModeV1" in shell_query
+assert "CertAddCertificateContextToStore" not in shell_sparse + shell_ops + util + engine + unins
+assert "RegisterLegacyContextMenuHandler" in shell_ops and "RegisterClassicInProcess" in shell_ops
+assert "kSetupClassicFallbackBase" in shell_ops and "0x47504C00" in shell_ops and "0x47504C00" in util
+assert "DescribeShellClassicFallback" in util and "classicFallbackReason" in util
+assert "IDS_WARN_SHELL_CLASSIC_CERT" in setup and "warnShellClassicCert" in engine and "GlassAuthorCodeSigning.cer" in engine
+assert "kShellExtRelativePath" in util and "kShellExtRelativePath" in unins and "kShellHostRelativePath" in setup
+assert "kSparsePublisher[] = L\"CN=Stanislav K.\"" in constants
+for manifest in ("GlassShellExt/Package/AppxManifest.xml", "GlassShellExt/Package/AppxManifest.UnregisterStub.xml"):
+    assert 'Publisher="CN=Stanislav K."' in (repo / manifest).read_text(encoding="utf-8"), manifest
+assert (repo / "Shared/certs/GlassAuthorCodeSigning.cer").exists() and (repo / "Shared/certs/GlassAuthorCodeSigning.txt").exists()
+assert "GlassAuthorCodeSigning.cer" in payload and "GlassAuthorCodeSigning.txt" in payload and "GlassShellSparse" in payload
 assert 'm.type===\'init\'||m.type===\'state\'' in ui
 
 # Check the embedded JavaScript syntax when Node is available.
