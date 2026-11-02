@@ -3,6 +3,7 @@
 #include "xaml/XamlComLifetime.hpp"
 #include "xaml/XamlDiagInit.hpp"
 #include "xaml/UiTapSite.hpp"
+#include "xaml/ModuleThread.hpp"
 
 #include <InjectProcessMap.h>
 #include <atomic>
@@ -113,9 +114,10 @@ extern "C" __declspec(dllexport) BOOL WINAPI UICompat_Shutdown()
 
     DebugLog(
         DBG_IMPORTANT,
-        L"[UICompat][Core] Stop: COM refs objectCount=%ld serverLocks=%ld",
+        L"[UICompat][Core] Stop: COM refs objectCount=%ld serverLocks=%ld moduleThreads=%ld",
         static_cast<long>(UICompatCom::g_objectCount.load(std::memory_order_acquire)),
-        static_cast<long>(UICompatCom::g_serverLocks.load(std::memory_order_acquire)));
+        static_cast<long>(UICompatCom::g_serverLocks.load(std::memory_order_acquire)),
+        UICompat::ModuleThread::ActiveCount());
 
     CoFreeUnusedLibraries();
     for (int i = 0; i < 3; ++i)
@@ -145,6 +147,10 @@ extern "C" __declspec(dllexport) BOOL WINAPI UICompat_IsShutdownComplete()
     return g_shutdownComplete.load(std::memory_order_acquire) ? TRUE : FALSE;
 }
 
+// Биты: 0..15 objectCount, 16..31 serverLocks, 32 shutdownDone,
+// 33 — живы потоки модуля (ModuleThread): GlassCompat не снимает остаточную
+// ссылку (TryDropIxdeResidualModule), пока бит установлен — иначе FreeLibrary
+// выгрузит образ под работающим потоком.
 extern "C" __declspec(dllexport) unsigned long long WINAPI UICompat_DebugComState() noexcept
 {
     const unsigned long long oc =
@@ -153,7 +159,9 @@ extern "C" __declspec(dllexport) unsigned long long WINAPI UICompat_DebugComStat
         static_cast<unsigned long long>(UICompatCom::g_serverLocks.load(std::memory_order_acquire)) & 0xFFFFULL;
     const unsigned long long sd =
         UICompatCom::g_shutdownDone.load(std::memory_order_acquire) ? 1ULL : 0ULL;
-    return oc | (sl << 16) | (sd << 32);
+    const unsigned long long th =
+        UICompat::ModuleThread::ActiveCount() > 0 ? 1ULL : 0ULL;
+    return oc | (sl << 16) | (sd << 32) | (th << 33);
 }
 
 extern "C" __declspec(dllexport) void WINAPI UICompat_HandleWinEvent(

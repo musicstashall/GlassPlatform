@@ -245,7 +245,10 @@ namespace
     }
 
     // IXDE делает LoadLibrary(TAP), не CoLoadLibrary — CoFreeUnusedLibraries не снимает pin.
-    // Residual FreeLibrary безопасен только после Shutdown + objectCount==0 + shutdownDone.
+    // Residual FreeLibrary безопасен только после Shutdown + objectCount==0 + shutdownDone
+    // и только если модуль не держат его собственные потоки (бит 33, UICompat ModuleThread):
+    // такой поток сам снимет свою ссылку через FreeLibraryAndExitThread, а принудительный
+    // FreeLibrary выгрузил бы образ под ним (дамп SEH 26100, 01.11.2026).
     [[nodiscard]] bool TryDropIxdeResidualModule(
         HMODULE hModule,
         const char* exportName,
@@ -255,16 +258,35 @@ namespace
         if (!hModule || !exportName)
             return false;
 
+        // Своя ссылка на время опроса: модуль мог быть выгружен последним потоком
+        // между GetModuleHandle и вызовом экспорта.
+        HMODULE pinned = nullptr;
+        if (!GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                reinterpret_cast<LPCWSTR>(hModule),
+                &pinned)
+            || pinned != hModule)
+        {
+            if (pinned)
+                FreeLibrary(pinned);
+            return false;
+        }
+
         auto pDbg = reinterpret_cast<unsigned long long(WINAPI*)()>(
             GetProcAddress(hModule, exportName));
         if (!pDbg)
+        {
+            FreeLibrary(pinned);
             return false;
+        }
 
         comStateOut = pDbg();
         const unsigned long long objectCount = comStateOut & 0xFFFFULL;
         const unsigned long long serverLocks = (comStateOut >> 16) & 0xFFFFULL;
         const bool shutdownDone = ((comStateOut >> 32) & 1ULL) != 0;
-        if (!shutdownDone || objectCount != 0 || serverLocks != 0)
+        const bool moduleThreadsAlive = ((comStateOut >> 33) & 1ULL) != 0;
+        FreeLibrary(pinned);
+        if (!shutdownDone || objectCount != 0 || serverLocks != 0 || moduleThreadsAlive)
             return false;
         return FreeLibrary(hModule) != FALSE;
     }
@@ -1680,11 +1702,14 @@ namespace
                     }
                     hCheckUi = hCheckUi2;
                 }
+                // comState: биты 0..15 objectCount, 16..31 serverLocks, 32 shutdownDone,
+                // 33 живые потоки модуля (ModuleThread) — при 33 drop не делается намеренно.
                 DebugLog(
                     DBG_IMPORTANT,
-                    L"[GlassCompat][Core] [Shutdown] UICompat after residual reclaim: %s (dropped=%d)",
+                    L"[GlassCompat][Core] [Shutdown] UICompat after residual reclaim: %s (dropped=%d comState=0x%016llX)",
                     hCheckUi ? L"STILL LOADED" : L"unloaded OK",
-                    residualDropped ? 1 : 0);
+                    residualDropped ? 1 : 0,
+                    comState);
                 } // else (keepModules/stale guard)
             }
             if (savedWnd)
