@@ -2810,10 +2810,13 @@ private:
         }
         if (page_==Page::Components && !DebugDemoLocksControls()) {
             const bool os64=GlassInstallUtil::IsOs64Bit();
-            if (message==L"component:x86:1" || message==L"component:x86:0") selection_.platform32=!os64 || message.back()==L'1';
+            // Выбор карточки не тянет за собой основную платформу: принудительная
+            // отметка уместна только при установке с нуля/обновлении, где карточка
+            // уже отмечена и заблокирована.
+            if (message==L"component:x64:1" || message==L"component:x64:0") selection_.platform64=os64 && message.back()==L'1';
+            else if (message==L"component:x86:1" || message==L"component:x86:0") selection_.platform32=message.back()==L'1';
             else if (message==L"component:settings:1" || message==L"component:settings:0") selection_.glassSettings=message.back()==L'1';
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
-            selection_.platform64=os64;
             SyncWebViewState();
             return S_OK;
         }
@@ -3648,8 +3651,8 @@ private:
             case IDC_COMPONENT64: case IDC_COMPONENT32: case IDC_COMPONENT_SETTINGS: case IDC_COMPONENT_OG:
                 if (page_==Page::Components && HIWORD(w)==BN_CLICKED && !webReady_) {
                     const bool os64=GlassInstallUtil::IsOs64Bit();
-                    selection_.platform64=os64;
-                    selection_.platform32=!os64 || SendMessageW(component32_,BM_GETCHECK,0,0)==BST_CHECKED;
+                    selection_.platform64=os64 && SendMessageW(component64_,BM_GETCHECK,0,0)==BST_CHECKED;
+                    selection_.platform32=SendMessageW(component32_,BM_GETCHECK,0,0)==BST_CHECKED;
                     selection_.glassSettings=SendMessageW(componentSettings_,BM_GETCHECK,0,0)==BST_CHECKED;
                     selection_.openGlass=os64 && SendMessageW(componentOpenGlass_,BM_GETCHECK,0,0)==BST_CHECKED;
                     InvalidateContent();

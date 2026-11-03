@@ -29,4 +29,9 @@ struct Stats
 // applyFixes=false — только проверка (для обследования установки).
 Stats Validate(bool applyFixes) noexcept;
 
+// Полная очистка настроек текущего пользователя (деинсталлятор, по явному выбору):
+// вся ветка Software\StanislavKa\GlassPlatform и кастомные значения OpenGlass в
+// DWM (HKCU+HKLM). Базовые значения Windows DWM и чужие параметры не трогаются.
+void RemoveUserSettings() noexcept;
+
 } // namespace Shared::RegistrySanity

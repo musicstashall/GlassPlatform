@@ -341,11 +341,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .comp-badge.action-update{border-color:#f4c46d80;background:#f4bd5e20;color:#ffdf9d}
 .comp-badge.action-keep{border-color:#78dda66e;background:#54c88e20;color:#b8f4d1}
 .comp-badge.action-repair{border-color:#e57a7a80;background:#c25b5b26;color:#ffc9c9}
-.comp-reasons-toggle{flex:0 0 auto;margin:6px 0 0;padding:2px 11px;border:1px solid #c7bdff3f;border-radius:999px;background:transparent;color:#b9b3d6;font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;cursor:pointer}
-.comp-reasons-toggle:hover:not(:disabled){border-color:#c1b4ff70;color:#ddd8f4}
-.comp-reasons-toggle:disabled{opacity:.34;cursor:default}
-.comp-reasons{display:none;margin:6px 0 0;padding:0;list-style:none}
-.comp-card.reasons-open .comp-reasons{display:block}
+.comp-reason-line{margin:5px 0 0 18px;color:#f1c7c7;font-size:10.5px;line-height:1.4;min-height:15px}
 .comp-reasons li{position:relative;margin:0 0 2px;padding-left:14px;color:#f1c7c7;font-size:10.5px;line-height:1.4}
 .comp-reasons li:before{content:"";position:absolute;left:1px;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:#e57a7a}
 .comp-badge.muted{border-color:#ffffff22;background:#ffffff0a;color:#a7acc4}
@@ -611,20 +607,9 @@ function renderComponentsPanel(){
    if(item.locked||item.badge)head.append(action);
    const desc=document.createElement('p');desc.className='comp-desc';desc.textContent=String(item.description||'');body.append(head,desc);
    const hasReasons=Array.isArray(item.reasons)&&item.reasons.length>0;
-   const spoiler=document.createElement('button');spoiler.type='button';spoiler.className='comp-reasons-toggle';
-   spoiler.textContent=locale==='ru'?'Причины':'Reasons';spoiler.disabled=!hasReasons;
-   spoiler.setAttribute('aria-expanded','false');
-   spoiler.addEventListener('click',()=>{
-    const open=!label.classList.contains('reasons-open');
-    for(const other of grid.querySelectorAll('.comp-card.reasons-open')){
-     other.classList.remove('reasons-open');
-     const b=other.querySelector('.comp-reasons-toggle');if(b)b.setAttribute('aria-expanded','false');
-    }
-    label.classList.toggle('reasons-open',open);
-    spoiler.setAttribute('aria-expanded',open?'true':'false');
-   });
-   body.append(spoiler);
-   if(hasReasons){const rs=document.createElement('ul');rs.className='comp-reasons';for(const r of item.reasons){const li=document.createElement('li');li.textContent=String(r);rs.append(li);}body.append(rs);}
+   const reasonLine=document.createElement('p');reasonLine.className='comp-reason-line';
+   reasonLine.textContent=hasReasons?item.reasons.join(' \u00b7 '):'';
+   body.append(reasonLine);
    label.append(input,body);grid.append(label);
   }
   if(focusId){const restored=[...grid.querySelectorAll('input')].find(el=>el.dataset.component===focusId&&!el.disabled);if(restored)restored.focus();}

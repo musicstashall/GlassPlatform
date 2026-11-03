@@ -9,6 +9,8 @@ namespace {
 
 enum class ValueKind : DWORD { Dword, DwordBool, Text };
 
+constexpr REGSAM kViews[] = { KEY_WOW64_64KEY, KEY_WOW64_32KEY };
+
 struct Rule
 {
     const wchar_t* valueName;
@@ -173,8 +175,7 @@ void ValidateKeyT(HKEY root, const wchar_t* subKey, REGSAM view, const Rule (&ru
 Stats Validate(bool applyFixes) noexcept
 {
     Stats stats;
-    const REGSAM views[] = { KEY_WOW64_64KEY, KEY_WOW64_32KEY };
-    for (REGSAM view : views)
+    for (REGSAM view : kViews)
     {
         ValidateKeyT(HKEY_CURRENT_USER, L"Software\\StanislavKa\\GlassPlatform\\GlassSettings", view,
             kGlassSettingsRules, applyFixes, stats.glassIssues, stats.glassValueNames);
@@ -195,6 +196,36 @@ Stats Validate(bool applyFixes) noexcept
         std::size(kOpenGlassRootRules) + std::size(kDwmOpenGlassRules));
     stats.removed = applyFixes ? stats.glassIssues + stats.openGlassIssues : 0;
     return stats;
+}
+
+void RemoveKeyTree(HKEY root, const wchar_t* parent, const wchar_t* subKey, REGSAM view) noexcept
+{
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(root, parent, 0, KEY_WRITE | view, &key) != ERROR_SUCCESS)
+        return;
+    RegDeleteTreeW(key, subKey);
+    RegCloseKey(key);
+}
+
+void RemoveUserSettings() noexcept
+{
+    for (REGSAM view : kViews)
+    {
+        // Вся ветка GlassPlatform текущего пользователя (оба представления WOW64 —
+        // 32-битная GlassSettings пишет в зеркало).
+        RemoveKeyTree(HKEY_CURRENT_USER, L"Software", L"StanislavKa\\GlassPlatform", view);
+        // Кастомные значения OpenGlass в DWM (HKCU+HKLM); базовые значения Windows
+        // (Colorization* «без суффиксов», EnableTransparency) не входят в схему.
+        for (HKEY root : { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE })
+        {
+            HKEY dwm = nullptr;
+            if (RegOpenKeyExW(root, L"Software\\Microsoft\\Windows\\DWM", 0, KEY_SET_VALUE | view, &dwm) != ERROR_SUCCESS)
+                continue;
+            for (const auto& rule : kDwmOpenGlassRules)
+                RegDeleteValueW(dwm, rule.valueName);
+            RegCloseKey(dwm);
+        }
+    }
 }
 
 } // namespace Shared::RegistrySanity

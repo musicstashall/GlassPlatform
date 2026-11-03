@@ -21,6 +21,7 @@
 #include <vector>
 
 #pragma comment(lib, "msi.lib")
+#pragma comment(lib, "version.lib")
 #pragma comment(lib, "wintrust.lib")
 #pragma comment(lib, "crypt32.lib")
 
@@ -70,6 +71,66 @@ void AddReason(ProductReport& rep, Reason reason) noexcept
             return;
     rep.reasons.push_back(reason);
     rep.damaged = true;
+}
+
+[[nodiscard]] std::wstring LongFileName(const wchar_t* raw) noexcept
+{
+    std::wstring name = raw ? raw : L"";
+    const auto bar = name.find(L'|');
+    return bar == std::wstring::npos ? name : name.substr(bar + 1);
+}
+
+// Версия файла PE (как её читает GlassSettings: PlatformModuleVersions).
+[[nodiscard]] std::wstring FileVersionOf(const std::wstring& path) noexcept
+{
+    DWORD handle = 0;
+    const DWORD size = GetFileVersionInfoSizeW(path.c_str(), &handle);
+    if (!size)
+        return {};
+    std::vector<BYTE> data(size);
+    if (!GetFileVersionInfoW(path.c_str(), 0, size, data.data()))
+        return {};
+    VS_FIXEDFILEINFO* info = nullptr;
+    UINT len = 0;
+    if (!VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&info), &len) || !info)
+        return {};
+    wchar_t buf[64]{};
+    swprintf_s(buf, L"%u.%u.%u.%u",
+        HIWORD(info->dwFileVersionMS), LOWORD(info->dwFileVersionMS),
+        HIWORD(info->dwFileVersionLS), LOWORD(info->dwFileVersionLS));
+    return buf;
+}
+
+// Версия файла из колонки Version таблицы File построенного MSI.
+[[nodiscard]] std::wstring QueryFileVersion(MSIHANDLE database, const wchar_t* longName) noexcept
+{
+    MSIHANDLE view = 0;
+    if (MsiDatabaseOpenViewW(database, L"SELECT `FileName`, `Version` FROM `File`", &view) != ERROR_SUCCESS)
+        return {};
+    std::wstring version;
+    if (MsiViewExecute(view, 0) == ERROR_SUCCESS)
+    {
+        MSIHANDLE record = 0;
+        while (MsiViewFetch(view, &record) == ERROR_SUCCESS)
+        {
+            wchar_t name[256]{};
+            DWORD cch = _countof(name);
+            if (MsiRecordGetStringW(record, 1, name, &cch) == ERROR_SUCCESS &&
+                _wcsicmp(LongFileName(name).c_str(), longName) == 0)
+            {
+                wchar_t value[64]{};
+                DWORD vcch = _countof(value);
+                if (MsiRecordGetStringW(record, 2, value, &vcch) == ERROR_SUCCESS)
+                    version = value;
+                MsiCloseHandle(record);
+                break;
+            }
+            MsiCloseHandle(record);
+        }
+    }
+    MsiViewClose(view);
+    MsiCloseHandle(view);
+    return version;
 }
 
 // SHA-1 отпечаток подписи файла (тот же приём, что в QuerySelfSignerInfo Setup).
@@ -160,13 +221,6 @@ struct FileCheck
     DWORD hash[4]{};
     bool hasHash = false;
 };
-
-[[nodiscard]] std::wstring LongFileName(const wchar_t* raw) noexcept
-{
-    std::wstring name = raw ? raw : L"";
-    const auto bar = name.find(L'|');
-    return bar == std::wstring::npos ? name : name.substr(bar + 1);
-}
 
 // Пользовательские каталоги OpenGlass (материалы/атласы/отражения) — их пользователь
 // вправе удалять, целостность этих файлов не проверяется.
@@ -376,6 +430,8 @@ Report Run(const Inputs& in)
         return report;
     }
 
+    GlassInstallUtil::InstallRoots roots{};
+    const bool rootsOk = GlassInstallUtil::ResolveInstallRoots(roots);
     std::wstring tempDir;
     if (GlassInstallUtil::CreateSecureTempDirectory(L"GlassInspect", tempDir))
     {
@@ -394,18 +450,30 @@ Report Run(const Inputs& in)
             std::wstring msiPath = tempDir + L"\\inspect-" + std::to_wstring(index++) + L".msi";
             if (!GlassInstallUtil::ExtractResourceToFile(in.instance, job.res, RT_RCDATA, msiPath, nullptr))
                 continue;
-            // Версия: установленная против версии поставляемого пакета. Более
-            // старая версия — это обновление, а не повреждение.
+            // Версия OpenGlass — по файлу OpenGlass.dll (как её читает GlassSettings):
+            // новая версия платформы не означает новую версию OpenGlass. Для остальных
+            // продуктов версия — из MSI. Более старая версия — обновление, не повреждение.
             {
+                const bool ogProduct = wcscmp(job.code, GlassInstallMsi::kProductOpenGlass) == 0;
+                std::wstring packageVersion;
                 MSIHANDLE database = 0;
                 if (MsiOpenDatabaseW(msiPath.c_str(), MSIDBOPEN_READONLY, &database) == ERROR_SUCCESS)
                 {
-                    const std::wstring packageVersion = QueryMsiProperty(database, L"ProductVersion");
+                    packageVersion = ogProduct
+                        ? QueryFileVersion(database, L"OpenGlass.dll")
+                        : QueryMsiProperty(database, L"ProductVersion");
                     MsiCloseHandle(database);
-                    if (!packageVersion.empty() && !job.rep->installedVersion.empty() &&
-                        QuadVersion::Parse(job.rep->installedVersion).Compare(QuadVersion::Parse(packageVersion)) < 0)
-                        job.rep->updateAvailable = true;
                 }
+                std::wstring installedVersion = job.rep->installedVersion;
+                if (ogProduct)
+                {
+                    const std::wstring ogVersion = FileVersionOf(roots.openGlass + L"\\OpenGlass.dll");
+                    if (!ogVersion.empty())
+                        installedVersion = job.rep->installedVersion = ogVersion;
+                }
+                if (!packageVersion.empty() && !installedVersion.empty() &&
+                    QuadVersion::Parse(installedVersion).Compare(QuadVersion::Parse(packageVersion)) < 0)
+                    job.rep->updateAvailable = true;
             }
             // Файловые проверки только для современных кодов продуктов: состав
             // легаси-MSI не соответствует текущему пакету. Эталон целостности —
@@ -426,8 +494,6 @@ Report Run(const Inputs& in)
     }
 
     // Параметры реестра установки: корень каждого продукта должен разрешаться.
-    GlassInstallUtil::InstallRoots roots{};
-    const bool rootsOk = GlassInstallUtil::ResolveInstallRoots(roots);
     const auto rootInvalid = [](const std::wstring& root) noexcept {
         if (root.empty())
             return true;

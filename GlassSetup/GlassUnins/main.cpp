@@ -11,6 +11,7 @@
 #include "WizardAssets.h"
 #include "GlassProducts.h"
 #include <GlassShellMenuConstants.h>
+#include <RegistrySanity.h>
 
 #include <windows.h>
 #include <commctrl.h>
@@ -230,6 +231,8 @@ int RelaunchFromPrivateTemp(const Arguments& a) noexcept {
 
 struct Selection {
     bool x64=false, x86=false, settings=false, openGlass=false;
+    // Не продукт: очистка настроек текущего пользователя по явному выбору.
+    bool cleanupSettings=false;
     bool Any() const noexcept { return x64 || x86 || settings || openGlass; }
 };
 enum class Page { Select, Stopping, UnlockModules, UnlockProcesses, Removing, Cancelled, Complete, Error };
@@ -294,7 +297,7 @@ private:
     bool registered_=false, alreadyRunning_=false, closing_=false;
     bool webReady_=false, bridgeReady_=false, initSent_=false, webFailed_=false;
     HWND back_=nullptr,next_=nullptr,cancel_=nullptr,webHost_=nullptr;
-    std::array<HWND,4> check_{};
+    std::array<HWND,5> check_{};
     HFONT font_=nullptr, heading_=nullptr;
     HBRUSH brush_=nullptr,buttonBrush_=nullptr;
     ComPtr<ICoreWebView2Environment> environment_;
@@ -328,7 +331,7 @@ private:
             OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
         heading_=CreateFontW(-Scale(30),0,0,0,FW_LIGHT,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
-        for (HWND h:{back_,next_,cancel_,check_[0],check_[1],check_[2],check_[3]})
+        for (HWND h:{back_,next_,cancel_,check_[0],check_[1],check_[2],check_[3],check_[4]})
             if (h) SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
     void DetectInstalled() noexcept {
@@ -348,7 +351,7 @@ private:
         const GlassProducts::Selection chosen{selected_.x64,selected_.x86,selected_.settings,selected_.openGlass};
         const GlassProducts::Selection installed{installed_.x64,installed_.x86,installed_.settings,installed_.openGlass};
         const auto safe=GlassProducts::NormalizeRemoval(chosen,installed,GlassInstallUtil::IsOs64Bit());
-        selected_={safe.platform64,safe.platform32,safe.glassSettings,safe.openGlass};
+        selected_={safe.platform64,safe.platform32,safe.glassSettings,safe.openGlass,selected_.cleanupSettings};
     }
     void ResolveRoots() {
         GlassInstallUtil::InstallRoots roots;
@@ -374,6 +377,7 @@ private:
         check_[1]=Button(L"Glass Platform (32-bit)",IDC_COMPONENT32,BS_AUTOCHECKBOX);
         check_[2]=Button(L"GlassSettings",IDC_COMPONENT_SETTINGS,BS_AUTOCHECKBOX);
         check_[3]=Button(L"OpenGlass",IDC_COMPONENT_OG,BS_AUTOCHECKBOX);
+        check_[4]=Button(T(L"Удалить настройки",L"Remove settings"),IDC_UNINS_SETTINGS_CLEANUP,BS_AUTOCHECKBOX);
         webHost_=CreateWindowExW(WS_EX_CONTROLPARENT,L"STATIC",L"",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
             0,0,0,0,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_WEBHOST)),gInstance,nullptr);
         CreateFonts();
@@ -409,6 +413,7 @@ private:
         if (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error) Move(next_,864,kContentHeight+12,104,32);
         Move(check_[0],60,203,390,32); Move(check_[1],510,203,390,32);
         Move(check_[2],60,293,390,32); Move(check_[3],510,293,390,32);
+        Move(check_[4],60,383,840,32);
         if (controller_) { RECT bounds=Box(0,0,kWidth,kHtmlHeight); controller_->put_Bounds(bounds); }
     }
     // R13: нативные чекбоксы — только резерв на случай, когда WebView2 недоступен.
@@ -417,12 +422,12 @@ private:
     void ShowNativeChecks() {
         const bool show=page_==Page::Select && webFailed_;
         const bool core=CoreSelected();
-        const bool values[]={selected_.x64,selected_.x86,selected_.settings,selected_.openGlass};
-        const bool available[]={installed_.x64,installed_.x86,installed_.settings,installed_.openGlass};
-        for (int i=0;i<4;++i) {
+        const bool values[]={selected_.x64,selected_.x86,selected_.settings,selected_.openGlass,selected_.cleanupSettings};
+        const bool available[]={installed_.x64,installed_.x86,installed_.settings,installed_.openGlass,true};
+        for (int i=0;i<5;++i) {
             SendMessageW(check_[i],BM_SETCHECK,values[i]?BST_CHECKED:BST_UNCHECKED,0);
             ShowWindow(check_[i],show && available[i]?SW_SHOWNA:SW_HIDE);
-            const bool dependent=core && ((GlassInstallUtil::IsOs64Bit() && i!=0) || (!GlassInstallUtil::IsOs64Bit() && i!=1));
+            const bool dependent=i<4 && core && ((GlassInstallUtil::IsOs64Bit() && i!=0) || (!GlassInstallUtil::IsOs64Bit() && i!=1));
             EnableWindow(check_[i],available[i] && !dependent);
         }
     }
@@ -442,9 +447,9 @@ private:
         std::wstring json=L"[";
         const bool core=CoreSelected();
         const bool os64=GlassInstallUtil::IsOs64Bit();
-        auto add=[&](const wchar_t* id,const wchar_t* title,const wchar_t* detail,bool checked,bool available,bool locked) {
+        auto add=[&](const wchar_t* id,const wchar_t* title,const wchar_t* detail,bool checked,bool available,bool locked,const wchar_t* badgeOverride=nullptr) {
             if (json.size()>1) json+=L",";
-            const std::wstring badge=locked?T(L"ЗАВИСИМОСТЬ",L"DEPENDENT"):T(L"УСТАНОВЛЕНО",L"INSTALLED");
+            const std::wstring badge=badgeOverride?std::wstring(badgeOverride):(locked?T(L"ЗАВИСИМОСТЬ",L"DEPENDENT"):T(L"УСТАНОВЛЕНО",L"INSTALLED"));
             json+=L"{\"id\":"+Q(id)+L",\"title\":"+Q(title)+L",\"description\":"+Q(detail)+
                 L",\"badge\":"+Q(badge)+L",\"checked\":"+(checked?L"true":L"false")+
                 L",\"locked\":"+(locked?L"true":L"false")+L",\"hidden\":"+(available?L"false":L"true")+L"}";
@@ -453,6 +458,10 @@ private:
         add(L"x86",L"Glass Platform (32-bit)",T(L"Поддержка 32-битных приложений",L"32-bit application support"),selected_.x86,installed_.x86,core&&os64);
         add(L"settings",L"GlassSettings",T(L"Панель управления платформой",L"Platform settings application"),selected_.settings,installed_.settings,core);
         add(L"openglass",L"OpenGlass",T(L"Оформление рамок окон",L"Glass window frame engine"),selected_.openGlass,installed_.openGlass,core);
+        add(L"cleanup",T(L"Удалить настройки",L"Remove settings"),
+            T(L"Раздел GlassPlatform и параметры OpenGlass в DWM текущего пользователя.",
+              L"The GlassPlatform key and the OpenGlass DWM values of the current user."),
+            selected_.cleanupSettings,true,false,L"");
         return json+L"]";
     }
     std::wstring Warning() const {
@@ -513,7 +522,7 @@ private:
         ShowWindow(back_,select?SW_SHOWNA:SW_HIDE);
         ShowWindow(next_,!busy?SW_SHOWNA:SW_HIDE);
         ShowWindow(cancel_,!terminal && page!=Page::Removing?SW_SHOWNA:SW_HIDE);
-        EnableWindow(next_,!select || selected_.Any());
+        EnableWindow(next_,!select || selected_.Any()||selected_.cleanupSettings);
         EnableWindow(cancel_,!cancelRequested_.load());
         if (hold) SendMessageW(window,DM_SETDEFID,IDC_NEXT,0);
         Layout(); ShowNativeChecks();
@@ -919,6 +928,13 @@ private:
             (chosen.x64 || !GlassInstallUtil::SameInstallPath(x86Dir_,x64Dir_)))
             GlassInstallUtil::PruneEmptyDirectories(x86Dir_,keptRoots);
         if (chosen.x64 && !x64Dir_.empty()) GlassInstallUtil::PruneEmptyDirectories(x64Dir_,keptRoots);
+        // Настройки текущего пользователя — только по явному выбору: весь раздел
+        // GlassPlatform и кастомные значения OpenGlass в DWM.
+        if (chosen.cleanupSettings) {
+            SetStatus(T(L"Удаление настроек…",L"Removing settings…"),9200);
+            Shared::RegistrySanity::RemoveUserSettings();
+            LogLine(L"Settings cleanup: HKCU Software\\StanislavKa\\GlassPlatform removed; OpenGlass DWM values removed");
+        }
         if (!restoreRemaining()) {
             SetError(T(L"Выбранные продукты удалены, но не удалось перезапустить оставшиеся компоненты.",
                 L"Selected products were removed, but remaining components could not be restarted."));
@@ -935,7 +951,7 @@ private:
         return 0;
     }
     void StartRemoval() {
-        if (worker_.joinable() || !selected_.Any()) return;
+        if (worker_.joinable() || (!selected_.Any() && !selected_.cleanupSettings)) return;
         NormalizeSelection(); cancelRequested_.store(false); removalStarted_.store(false);
         operationState_.store(OperationState::BeforeRemoval);
         const Selection chosen=selected_;
@@ -977,7 +993,8 @@ private:
         else if (id==L"x86" && installed_.x86 && !(CoreSelected() && GlassInstallUtil::IsOs64Bit())) selected_.x86=checked;
         else if (id==L"settings" && installed_.settings && !CoreSelected()) selected_.settings=checked;
         else if (id==L"openglass" && installed_.openGlass && !CoreSelected()) selected_.openGlass=checked;
-        NormalizeSelection(); EnableWindow(next_,selected_.Any()); ShowNativeChecks(); SyncWeb(); InvalidateRect(window,nullptr,FALSE);
+        else if (id==L"cleanup") selected_.cleanupSettings=checked;
+        NormalizeSelection(); EnableWindow(next_,selected_.Any()||selected_.cleanupSettings); ShowNativeChecks(); SyncWeb(); InvalidateRect(window,nullptr,FALSE);
     }
     HRESULT HandleWebMessage(ICoreWebView2WebMessageReceivedEventArgs* args) {
         if (closing_ || !args) return S_OK;
@@ -1189,12 +1206,17 @@ private:
         case WM_COMMAND: {
             const int id=LOWORD(w);
             if (id==IDC_CANCEL || id==IDCANCEL) { RequestClose(); return 0; }
-            if (id==kSelectAll && page_==Page::Select) { selected_=installed_; NormalizeSelection(); SetPage(Page::Select); return 0; }
+            if (id==kSelectAll && page_==Page::Select) {
+                const bool cleanup=selected_.cleanupSettings;
+                selected_=installed_; selected_.cleanupSettings=cleanup;
+                NormalizeSelection(); SetPage(Page::Select); return 0;
+            }
             if (HIWORD(w)==BN_CLICKED && page_==Page::Select && !webReady_) {
                 if (id==IDC_COMPONENT64) SetComponent(L"x64",SendMessageW(check_[0],BM_GETCHECK,0,0)==BST_CHECKED);
                 else if (id==IDC_COMPONENT32) SetComponent(L"x86",SendMessageW(check_[1],BM_GETCHECK,0,0)==BST_CHECKED);
                 else if (id==IDC_COMPONENT_SETTINGS) SetComponent(L"settings",SendMessageW(check_[2],BM_GETCHECK,0,0)==BST_CHECKED);
                 else if (id==IDC_COMPONENT_OG) SetComponent(L"openglass",SendMessageW(check_[3],BM_GETCHECK,0,0)==BST_CHECKED);
+                else if (id==IDC_UNINS_SETTINGS_CLEANUP) SetComponent(L"cleanup",SendMessageW(check_[4],BM_GETCHECK,0,0)==BST_CHECKED);
             }
             if (id==IDC_NEXT || id==IDOK) {
                 if (page_==Page::Select) StartRemoval();

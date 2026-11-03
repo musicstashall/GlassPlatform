@@ -562,7 +562,7 @@ assert "WriteValidateSettingsOnStartup" in app_cs
 # and the components page is compact (no state line, single-line reasons).
 assert "MsiGetProductInfoW" in inspect_cpp and "LocalPackage" in inspect_cpp
 assert "AddReason(rep, Reason::VersionOutdated)" not in inspect_cpp
-assert "comp-reasons" in ui and "comp-state" not in ui
+assert "comp-reason-line" in ui and "comp-state" not in ui
 assert "if (rep->updateAvailable) return GlassProducts::ProductCondition::UpdateAvailable;" in setup
 
 # 2026-11-03 follow-up 2: schema types match OpenGlass SettingsCatalog v3 and the C#
@@ -573,7 +573,7 @@ assert 'L"LastAppliedThemeDwmFingerprint", ValueKind::Text' in reg_sanity
 assert "MINMAXBUTTONGLOWid" in reg_sanity and "ColorizationGlassReflectionPolicy" in reg_sanity
 assert "trust != ERROR_SUCCESS" in inspect_cpp and "ours" in inspect_cpp
 assert "condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY)" in setup
-assert "comp-reasons li:before" in ui and "item.lockTitle" in ui
+assert "item.reasons.join" in ui and "item.lockTitle" in ui
 
 # 2026-11-03 follow-up 3: card reasons behind a mini-spoiler (accordion, equal heights);
 # the registry reason names the offending values; OpenGlass user resources and
@@ -581,10 +581,21 @@ assert "comp-reasons li:before" in ui and "item.lockTitle" in ui
 # force-selected (mandatory = card lock when action is required).
 assert "AppendName" in reg_sanity and "glassValueNames" in reg_sanity
 assert "IsOpenGlassUserResource" in inspect_cpp and "OpenGlassHost.exe" in inspect_cpp
-assert "registryValueNames" in setup and "comp-reasons-toggle" in ui
-assert "grid-auto-rows:1fr" in ui and "reasons-open" in ui
+assert "registryValueNames" in setup and "comp-reason-line" in ui
+assert "grid-auto-rows:1fr" in ui  # равные высоты карточек
 assert "os64 && GlassProducts::DefaultSelectedFor(" in setup
 assert "ОС-нативная платформа обязательна, но не принудительно отмечена" in gp
+
+# 2026-11-03 follow-up 4: OpenGlass version comes from OpenGlass.dll (independent of the
+# platform version); checking a card never force-checks the main product; the reasons line
+# sits on every card; the uninstaller offers settings cleanup (GlassPlatform key + OpenGlass
+# DWM values of the current user).
+assert "QueryFileVersion" in inspect_cpp and "version.lib" in inspect_cpp
+assert "OpenGlass.dll" in inspect_cpp and "FileVersionOf" in inspect_cpp
+assert "selection_.platform64=os64;" not in setup and "component:x64:1" in setup
+assert "RemoveUserSettings" in reg_sanity and "RemoveUserSettings" in unins
+assert "IDC_UNINS_SETTINGS_CLEANUP" in header_now and "cleanupSettings" in unins
+assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_sanity
 
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")
