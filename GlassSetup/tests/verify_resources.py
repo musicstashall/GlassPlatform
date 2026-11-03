@@ -562,8 +562,18 @@ assert "WriteValidateSettingsOnStartup" in app_cs
 # and the components page is compact (no state line, single-line reasons).
 assert "MsiGetProductInfoW" in inspect_cpp and "LocalPackage" in inspect_cpp
 assert "AddReason(rep, Reason::VersionOutdated)" not in inspect_cpp
-assert "reasons.join" in ui and "comp-state" not in ui
+assert "comp-reasons" in ui and "comp-state" not in ui
 assert "if (rep->updateAvailable) return GlassProducts::ProductCondition::UpdateAvailable;" in setup
+
+# 2026-11-03 follow-up 2: schema types match OpenGlass SettingsCatalog v3 and the C#
+# writers (no false "damaged"); signature accepted when ours OR trusted by Windows;
+# reasons are a bulleted list; the mandatory lock shows only when action is required.
+assert '{ L"CustomThemeReflection", ValueKind::Text }' in reg_sanity
+assert 'L"LastAppliedThemeDwmFingerprint", ValueKind::Text' in reg_sanity
+assert "MINMAXBUTTONGLOWid" in reg_sanity and "ColorizationGlassReflectionPolicy" in reg_sanity
+assert "trust != ERROR_SUCCESS" in inspect_cpp and "ours" in inspect_cpp
+assert "condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY)" in setup
+assert "comp-reasons li:before" in ui and "item.lockTitle" in ui
 
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")

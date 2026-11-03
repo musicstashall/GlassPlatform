@@ -341,7 +341,9 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .comp-badge.action-update{border-color:#f4c46d80;background:#f4bd5e20;color:#ffdf9d}
 .comp-badge.action-keep{border-color:#78dda66e;background:#54c88e20;color:#b8f4d1}
 .comp-badge.action-repair{border-color:#e57a7a80;background:#c25b5b26;color:#ffc9c9}
-.comp-reasons{margin:5px 0 0;color:#f1c7c7;font-size:10.5px;line-height:1.4}
+.comp-reasons{margin:5px 0 0;padding:0;list-style:none}
+.comp-reasons li{position:relative;margin:0 0 2px;padding-left:14px;color:#f1c7c7;font-size:10.5px;line-height:1.4}
+.comp-reasons li:before{content:"";position:absolute;left:1px;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:#e57a7a}
 .comp-badge.muted{border-color:#ffffff22;background:#ffffff0a;color:#a7acc4}
 .comp-desc{margin:0;color:#b2b6cd;font-size:11px;line-height:1.4}
 
@@ -596,7 +598,7 @@ function renderComponentsPanel(){
    const name=document.createElement('span');name.className='comp-name';name.textContent=String(item.title||'');heading.append(name);
    head.append(heading);
    const action=document.createElement('span');action.className='comp-action';
-   if(item.locked)action.append(componentLock(item.lockTitle||item.badge||(locale==='ru'?'Заблокировано':'Locked')));
+   if(item.lockTitle)action.append(componentLock(item.lockTitle));
    if(item.badge){
     const badge=document.createElement('span');
     const tone=['install','update','keep','repair'].includes(item.badgeTone)?' action-'+item.badgeTone:'';
@@ -604,7 +606,7 @@ function renderComponentsPanel(){
    }
    if(item.locked||item.badge)head.append(action);
    const desc=document.createElement('p');desc.className='comp-desc';desc.textContent=String(item.description||'');body.append(head,desc);
-   if(Array.isArray(item.reasons)&&item.reasons.length){const rs=document.createElement('p');rs.className='comp-reasons';rs.textContent=item.reasons.join(' \u00b7 ');body.append(rs);}
+   if(Array.isArray(item.reasons)&&item.reasons.length){const rs=document.createElement('ul');rs.className='comp-reasons';for(const r of item.reasons){const li=document.createElement('li');li.textContent=String(r);rs.append(li);}body.append(rs);}
    label.append(input,body);grid.append(label);
   }
   if(focusId){const restored=[...grid.querySelectorAll('input')].find(el=>el.dataset.component===focusId&&!el.disabled);if(restored)restored.focus();}

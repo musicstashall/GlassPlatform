@@ -1787,7 +1787,7 @@ private:
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
                 L",\"description\":"+JsStringLiteral(Text(desc))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
                 L",\"badgeTone\":"+JsStringLiteral(ComponentBadgeTone(condition))+
-                L",\"lockTitle\":"+JsStringLiteral(locked?Text(IDS_COMP_MANDATORY):L"")+
+                L",\"lockTitle\":"+JsStringLiteral((locked && condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY):L"")+
                 L",\"state\":"+JsStringLiteral(Text(ComponentStateId(checked,condition)))+
                 L",\"reasons\":"+reasons+
                 L",\"checked\":"+(checked?L"true":L"false")+L",\"locked\":"+(locked?L"true":L"false")+

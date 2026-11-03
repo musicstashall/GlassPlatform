@@ -73,7 +73,7 @@ void AddReason(ProductReport& rep, Reason reason) noexcept
 }
 
 // SHA-1 отпечаток подписи файла (тот же приём, что в QuerySelfSignerInfo Setup).
-bool GetFileSignerSha1(const std::wstring& path, std::wstring& hexOut) noexcept
+DWORD GetFileSignerSha1(const std::wstring& path, std::wstring& hexOut) noexcept
 {
     hexOut.clear();
     WINTRUST_FILE_INFO file{};
@@ -89,7 +89,9 @@ bool GetFileSignerSha1(const std::wstring& path, std::wstring& hexOut) noexcept
     trust.dwProvFlags = WTD_CACHE_ONLY_URL_RETRIEVAL | WTD_REVOCATION_CHECK_NONE;
     GUID action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
     const LONG status = WinVerifyTrust(nullptr, &action, &trust);
-    if (status == ERROR_SUCCESS)
+    // Цепочка извлекается независимо от доверия — как в QuerySelfSignerInfo Setup:
+    // самоподписанный сертификат автора на машине без установленного доверия
+    // тоже распознаётся.
     {
         CRYPT_PROVIDER_DATA* provider = WTHelperProvDataFromStateData(trust.hWVTStateData);
         CRYPT_PROVIDER_SGNR* signer = provider ? WTHelperGetProvSignerFromChain(provider, 0, FALSE, 0) : nullptr;
@@ -113,7 +115,7 @@ bool GetFileSignerSha1(const std::wstring& path, std::wstring& hexOut) noexcept
     }
     trust.dwStateAction = WTD_STATEACTION_CLOSE;
     WinVerifyTrust(nullptr, &action, &trust);
-    return !hexOut.empty();
+    return static_cast<DWORD>(status);
 }
 
 std::wstring SelfSignerSha1() noexcept
@@ -289,10 +291,15 @@ void CheckProductFiles(
             AddReason(rep, Reason::FileSizeMismatch);
         if (file.hasHash && !FileHashMatches(path, file.hash))
             AddReason(rep, Reason::FileHashMismatch);
-        if (!signerSha1.empty() && HasPeExtension(path))
+        if (HasPeExtension(path))
         {
             std::wstring signer;
-            if (!GetFileSignerSha1(path, signer) || _wcsicmp(signer.c_str(), signerSha1.c_str()) != 0)
+            const DWORD trust = GetFileSignerSha1(path, signer);
+            // Подпись принимается, если файл подписан издателем установщика (ours)
+            // или цепочка доверена Windows (trusted) — перераспространяемые
+            // библиотеки Microsoft и т. п. Подмена ловится контрольной суммой.
+            const bool ours = !signerSha1.empty() && _wcsicmp(signer.c_str(), signerSha1.c_str()) == 0;
+            if (!ours && trust != ERROR_SUCCESS)
                 AddReason(rep, Reason::SignatureMismatch);
         }
     }
