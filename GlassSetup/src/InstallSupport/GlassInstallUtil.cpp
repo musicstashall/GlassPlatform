@@ -145,6 +145,40 @@ bool DeleteRegistryValue(HKEY root, const wchar_t* subKey, const wchar_t* valueN
     return true;
 }
 
+namespace {
+// Removes the key when no values and no subkeys remain. DeleteRegistryValue keeps
+// empty keys for rollback fidelity; this runs at the end of an uninstall instead:
+// the MSI packages leave HKCU\Software\GlassPlatform (Wow6432Node for the 32-bit
+// package) behind after removing their RegistryValue component, and every
+// install/uninstall cycle would recreate a stray empty key.
+bool DeleteRegistryKeyIfEmpty(HKEY root, const wchar_t* subKey, REGSAM sam) noexcept {
+    HKEY key=nullptr;
+    LSTATUS status=RegOpenKeyExW(root,subKey,0,KEY_READ|sam,&key);
+    if (status==ERROR_FILE_NOT_FOUND || status==ERROR_PATH_NOT_FOUND) return true;
+    if (status!=ERROR_SUCCESS) { SetLastError(status); return false; }
+    wchar_t name[2]{}; DWORD cch=2;
+    const LSTATUS valueEnum=RegEnumValueW(key,0,name,&cch,nullptr,nullptr,nullptr,nullptr);
+    cch=2;
+    const LSTATUS keyEnum=RegEnumKeyExW(key,0,name,&cch,nullptr,nullptr,nullptr,nullptr);
+    RegCloseKey(key);
+    if (valueEnum!=ERROR_NO_MORE_ITEMS || keyEnum!=ERROR_NO_MORE_ITEMS) return true;
+    status=RegDeleteKeyExW(root,subKey,sam,0);
+    if (status!=ERROR_SUCCESS && status!=ERROR_FILE_NOT_FOUND && status!=ERROR_PATH_NOT_FOUND) {
+        SetLastError(status); return false;
+    }
+    return true;
+}
+
+// Best-effort sweep of the install-path keys in every view the writers use.
+void RemoveEmptyInstallPathKeys() noexcept {
+    (void)DeleteRegistryKeyIfEmpty(HKEY_CURRENT_USER,L"Software\\GlassPlatform",KEY_WOW64_64KEY);
+    (void)DeleteRegistryKeyIfEmpty(HKEY_CURRENT_USER,L"Software\\GlassPlatform",KEY_WOW64_32KEY);
+    (void)DeleteRegistryKeyIfEmpty(HKEY_CURRENT_USER,L"Software\\Wow6432Node\\GlassPlatform",KEY_WOW64_64KEY);
+    (void)DeleteRegistryKeyIfEmpty(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",KEY_WOW64_64KEY);
+    (void)DeleteRegistryKeyIfEmpty(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",KEY_WOW64_32KEY);
+}
+} // namespace
+
 std::wstring EnsureExtractedUnlockerX64() noexcept {
     std::lock_guard<std::mutex> lock(g_unlockerMutex);
     if (!g_extractedUnlockerX64Path.empty()
@@ -1342,13 +1376,16 @@ bool ClearPlatformInstallPath(bool x64) noexcept {
     if (!DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", explicitVal, 0) ||
         !DeleteRegistryValue(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", explicitVal, lmSam) ||
         !DeleteRegistryValue(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPath", lmSam)) return false;
+    bool ok=true;
     if (x64 == IsOs64Bit()) {
-        return DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPath", 0);
+        ok=DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPath", 0);
+    } else if (!x64 && IsOs64Bit()) {
+        ok=DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath", 0);
     }
-    if (!x64 && IsOs64Bit()) {
-        return DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath", 0);
-    }
-    return true;
+    // Uninstalling the MSI removes its RegistryValue but leaves the key; drop the
+    // empty install-path keys so no stray HKCU\Software\Wow6432Node\GlassPlatform lingers.
+    RemoveEmptyInstallPathKeys();
+    return ok;
 }
 
 bool QueryOpenGlassInstallPath(std::wstring& out) noexcept {

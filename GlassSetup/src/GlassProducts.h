@@ -29,10 +29,36 @@ constexpr bool ShouldStartOpenGlass(const OpenGlassStartupState& startup) noexce
 
 // A checked product is installed or updated; an unchecked installed product is
 // kept untouched. An unchecked absent product has no action and needs no badge.
-enum class InstallAction { None, Install, Update, Keep };
+enum class InstallAction { None, Install, Update, Keep, Repair };
+
+// Inspection classification of an installed product (Task F stages 1-2).
+// NotInstalled — пакет не установлен; Healthy — целостность не нарушена;
+// UpdateAvailable — версия установщика выше; Damaged — обнаружены повреждения.
+enum class ProductCondition { NotInstalled, Healthy, UpdateAvailable, Damaged };
+
 constexpr InstallAction ActionForInstall(bool selected, bool installed) noexcept {
     if (selected) return installed ? InstallAction::Update : InstallAction::Install;
     return installed ? InstallAction::Keep : InstallAction::None;
+}
+
+// Карточка выбирается по состоянию, а не по галочке: принудительная отметка
+// здорового продукта не меняет этикетку («Установлено» остаётся зелёной).
+constexpr InstallAction ActionForCondition(bool selected, ProductCondition condition) noexcept {
+    if (condition == ProductCondition::NotInstalled)
+        return selected ? InstallAction::Install : InstallAction::None;
+    if (!selected)
+        return InstallAction::Keep;
+    if (condition == ProductCondition::UpdateAvailable)
+        return InstallAction::Update;
+    if (condition == ProductCondition::Damaged)
+        return InstallAction::Repair;
+    return InstallAction::Repair; // Healthy + принудительная отметка
+}
+
+// По умолчанию сняты только неповреждённые установленные продукты;
+// повреждённые и устаревшие отмечены для переустановки/обновления.
+constexpr bool DefaultSelectedFor(ProductCondition condition) noexcept {
+    return condition != ProductCondition::Healthy;
 }
 
 constexpr Selection NormalizeInstall(Selection choice, bool os64) noexcept {

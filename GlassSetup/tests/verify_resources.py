@@ -519,6 +519,28 @@ assert og_body.index("QueryServiceUiState()") < og_body.index("GlassShared::IsSc
     "the OpenGlass service must be queried before the scheduler-UI guard"
 assert "ServiceInstalled()" in og_state and "OrchestrationInstalled()" in og_state
 
+# 2026-11-03 feedback: finish-page wording and bottom gap; stray Wow6432Node key cleanup;
+# classic menu nested with icons; OpenGlass gate removable; inspection cards (Task F 1-2).
+assert "установлена с замечаниями" in rc and "installed with notes" in rc
+assert "--content-bottom-gap" in ui and "inset:0 0 var(--content-bottom-gap) 0" in ui
+util_cpp = (repo / "GlassSetup/src/InstallSupport/GlassInstallUtil.cpp").read_text(encoding="utf-8")
+assert "DeleteRegistryKeyIfEmpty" in util_cpp and "RemoveEmptyInstallPathKeys" in util_cpp
+assert "Software\\\\Wow6432Node\\\\GlassPlatform" in util_cpp
+menu_src = (repo / "GlassShellExt/DesktopShellMenu.cpp").read_text(encoding="utf-8")
+assert "CreatePopupMenu()" in menu_src and "MIIM_SUBMENU" in menu_src
+assert "IDS_GLASSSHELL_ROOT_TITLE" in menu_src and "MenuIcon(IDI_GLASSSHELLEXT" in menu_src
+ogs = (repo / "GlassSettings/Core/Platform/OpenGlassInstallService.cs").read_text(encoding="utf-8")
+assert "OpenGlassHostPath is not null" not in ogs, "uninstall must not gate service removal on the exe path"
+row_src = (repo / "GlassSettings/Controls/PlatformSchedulerRow.cs").read_text(encoding="utf-8")
+assert "Task.Run(() => QueryDirectState().TaskExists)" in row_src
+inspect_cpp = (repo / "GlassSetup/src/InstallSupport/GlassProductInspect.cpp").read_text(encoding="utf-8")
+assert "MsiGetFileHashW" in inspect_cpp and "WinVerifyTrust" in inspect_cpp and "MsiGetComponentPathW" in inspect_cpp
+gp = read("src/GlassProducts.h")
+assert "ProductCondition" in gp and "DefaultSelectedFor" in gp and "ActionForCondition" in gp
+assert "IDS_COMP_BADGE_REPAIR" in setup and "IDS_INSPECT_FILE_HASH" in setup and "IDS_INSPECT_SIGNATURE" in setup
+assert "action-repair" in ui and "comp-reasons" in ui and "reasons" in setup
+assert "GlassProductInspect.cpp" in (repo / "GlassSetup/GlassSetup.vcxproj").read_text(encoding="utf-8")
+
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")
 if node:

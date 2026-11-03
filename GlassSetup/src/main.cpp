@@ -29,6 +29,7 @@
 #include "WizardProgress.h"
 #include "InstallSupport/GlassInstallMsi.h"
 #include "InstallSupport/GlassInstallUtil.h"
+#include "InstallSupport/GlassProductInspect.h"
 #ifdef ShellExecute
 #undef ShellExecute // IShellDispatch2::ShellExecute is a COM method, not the Win32 macro.
 #endif
@@ -1217,6 +1218,7 @@ private:
     struct StartupResult {
         bool ok = false, os64 = false, runtimeInstalled = false;
         InstallEngine::ComponentSelection installed{};
+        GlassProductInspect::Report inspect{};
         GlassProducts::OpenGlassStartupState openGlass{};
         std::wstring openGlassDir, platformVersion, eulaText;
     };
@@ -1236,6 +1238,7 @@ private:
     std::wstring eulaText_;
     std::vector<std::wstring> conflicts_;
     std::wstring installedGlassVersion_;
+    GlassProductInspect::Report inspect_;
     std::wstring setupProductVersion_;
     std::wstring preflightX64Root_,preflightX86Root_,preflightOpenGlassRoot_;
     std::wstring blockReason_;
@@ -1449,6 +1452,23 @@ private:
                     result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass);
                 if (!startupStop_.load(std::memory_order_acquire)) {
+                    // Обследование установленных продуктов (целостность файлов/подписи,
+                    // реестр, службы/задачи, версии) — в фоновом потоке старта.
+                    GlassProductInspect::Inputs inspectIn;
+                    inspectIn.instance=gInstance;
+                    inspectIn.os64=result.os64;
+                    inspectIn.msiResX64=IDR_MSI_X64;
+                    inspectIn.msiResX86=IDR_MSI_X86;
+                    inspectIn.msiResSettings=result.os64?IDR_MSI_GS_X64:IDR_MSI_GS_X86;
+                    inspectIn.msiResOg=IDR_MSI_OPENGLASS;
+                    result.inspect=GlassProductInspect::Run(inspectIn);
+                    InstallLog::LineFormat(L"Inspect: x64(installed=%d damaged=%d update=%d) x86(%d %d %d) GS(%d %d %d) OG(%d %d %d)",
+                        result.inspect.x64.installed?1:0,result.inspect.x64.damaged?1:0,result.inspect.x64.updateAvailable?1:0,
+                        result.inspect.x86.installed?1:0,result.inspect.x86.damaged?1:0,result.inspect.x86.updateAvailable?1:0,
+                        result.inspect.settings.installed?1:0,result.inspect.settings.damaged?1:0,result.inspect.settings.updateAvailable?1:0,
+                        result.inspect.og.installed?1:0,result.inspect.og.damaged?1:0,result.inspect.og.updateAvailable?1:0);
+                }
+                if (!startupStop_.load(std::memory_order_acquire)) {
                     InstallLog::LineFormat(L"Startup MSI registrations: x64=%d x86=%d Settings=%d OpenGlass=%d",
                         result.installed.platform64?1:0,result.installed.platform32?1:0,
                         result.installed.glassSettings?1:0,result.installed.openGlass?1:0);
@@ -1525,15 +1545,19 @@ private:
         eulaText_=std::move(result.eulaText);
         SetWindowTextW(eula_,eulaText_.c_str());
         installedSelection_=result.installed;
+        inspect_=std::move(result.inspect);
         openGlassStartup_=result.openGlass;
         openGlassStartupDir_=std::move(result.openGlassDir);
         const bool os64=result.os64;
-        const bool anyInstalled=installedSelection_.platform64 || installedSelection_.platform32 ||
-            installedSelection_.glassSettings || installedSelection_.openGlass;
+        // По умолчанию отмечены отсутствующие, устаревшие и повреждённые продукты;
+        // неповреждённые установленные остаются снятыми (Setup их не трогает).
         selection_.platform64=os64;
-        selection_.platform32=!os64 || !anyInstalled || installedSelection_.platform32;
-        selection_.glassSettings=!anyInstalled || installedSelection_.glassSettings;
-        selection_.openGlass=os64 && (!anyInstalled || installedSelection_.openGlass);
+        selection_.platform32=!os64 || GlassProducts::DefaultSelectedFor(
+            ConditionOf(&inspect_.x86,installedSelection_.platform32));
+        selection_.glassSettings=GlassProducts::DefaultSelectedFor(
+            ConditionOf(&inspect_.settings,installedSelection_.glassSettings));
+        selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(
+            ConditionOf(&inspect_.og,installedSelection_.openGlass));
         SetPage(result.runtimeInstalled ? Page::Welcome : Page::RuntimeRequired);
         // WebView2 environment and controller creation must stay on the UI STA.
         if (result.runtimeInstalled && !PostMessageW(window,kInitWebView,0,0))
@@ -1675,28 +1699,49 @@ private:
         json+=L"]";
         return json;
     }
-    UINT ComponentStateId(bool selected, bool installed) const noexcept {
-        switch (GlassProducts::ActionForInstall(selected,installed)) {
+    static GlassProducts::ProductCondition ConditionOf(const GlassProductInspect::ProductReport* rep, bool installed) noexcept {
+        if (!installed || !rep || !rep->installed) return GlassProducts::ProductCondition::NotInstalled;
+        if (rep->damaged) return GlassProducts::ProductCondition::Damaged;
+        if (rep->updateAvailable) return GlassProducts::ProductCondition::UpdateAvailable;
+        return GlassProducts::ProductCondition::Healthy;
+    }
+    static UINT InspectReasonId(GlassProductInspect::Reason reason) noexcept {
+        switch (reason) {
+        case GlassProductInspect::Reason::FileMissing: return IDS_INSPECT_FILE_MISSING;
+        case GlassProductInspect::Reason::FileSizeMismatch: return IDS_INSPECT_FILE_SIZE;
+        case GlassProductInspect::Reason::FileHashMismatch: return IDS_INSPECT_FILE_HASH;
+        case GlassProductInspect::Reason::SignatureMismatch: return IDS_INSPECT_SIGNATURE;
+        case GlassProductInspect::Reason::RegistryInvalid: return IDS_INSPECT_REGISTRY;
+        case GlassProductInspect::Reason::AutostartMissing: return IDS_INSPECT_AUTOSTART;
+        case GlassProductInspect::Reason::VersionOutdated: return IDS_INSPECT_VERSION;
+        }
+        return 0;
+    }
+    // Этикетка выводится из состояния продукта (не из галочки): принудительная
+    // отметка здорового продукта не меняет зелёную этикетку «Установлено».
+    UINT ComponentStateId(bool selected, GlassProducts::ProductCondition condition) const noexcept {
+        switch (GlassProducts::ActionForCondition(selected,condition)) {
         case GlassProducts::InstallAction::Install: return IDS_COMP_STATE_INSTALL;
         case GlassProducts::InstallAction::Update: return IDS_COMP_STATE_UPDATE;
         case GlassProducts::InstallAction::Keep: return IDS_COMP_STATE_KEEP;
+        case GlassProducts::InstallAction::Repair: return IDS_COMP_STATE_REPAIR;
         default: return IDS_COMP_STATE_ABSENT;
         }
     }
-    UINT ComponentBadgeId(GlassProducts::InstallAction action) const noexcept {
-        switch (action) {
-        case GlassProducts::InstallAction::Install: return IDS_COMP_BADGE_INSTALL;
-        case GlassProducts::InstallAction::Update: return IDS_COMP_BADGE_UPDATE;
-        case GlassProducts::InstallAction::Keep: return IDS_COMP_BADGE_KEEP;
-        default: return 0;
+    UINT ComponentBadgeId(GlassProducts::ProductCondition condition) const noexcept {
+        switch (condition) {
+        case GlassProducts::ProductCondition::NotInstalled: return IDS_COMP_BADGE_INSTALL;
+        case GlassProducts::ProductCondition::UpdateAvailable: return IDS_COMP_BADGE_UPDATE;
+        case GlassProducts::ProductCondition::Damaged: return IDS_COMP_BADGE_REPAIR;
+        default: return IDS_COMP_BADGE_KEEP;
         }
     }
-    const wchar_t* ComponentBadgeTone(GlassProducts::InstallAction action) const noexcept {
-        switch (action) {
-        case GlassProducts::InstallAction::Install: return L"install";
-        case GlassProducts::InstallAction::Update: return L"update";
-        case GlassProducts::InstallAction::Keep: return L"keep";
-        default: return L"";
+    const wchar_t* ComponentBadgeTone(GlassProducts::ProductCondition condition) const noexcept {
+        switch (condition) {
+        case GlassProducts::ProductCondition::NotInstalled: return L"install";
+        case GlassProducts::ProductCondition::UpdateAvailable: return L"update";
+        case GlassProducts::ProductCondition::Damaged: return L"repair";
+        default: return L"keep";
         }
     }
     // A product is missing after Setup only when it is neither selected nor
@@ -1719,22 +1764,34 @@ private:
     std::wstring ComponentsJson() const {
         const bool os64=GlassInstallUtil::IsOs64Bit();
         std::wstring json=L"[";
-        auto item=[&](const wchar_t* id, UINT title, UINT desc, bool checked, bool locked, bool hidden, bool installed) {
+        auto item=[&](const wchar_t* id, UINT title, UINT desc, bool checked, bool locked, bool hidden, const GlassProductInspect::ProductReport* rep) {
             if (json.size()>1) json+=L",";
-            const auto action=GlassProducts::ActionForInstall(checked,installed);
-            const UINT badgeId=ComponentBadgeId(action);
+            const auto condition=ConditionOf(rep,rep!=nullptr&&rep->installed);
+            const auto action=GlassProducts::ActionForCondition(checked,condition);
+            const UINT badgeId=ComponentBadgeId(condition);
+            std::wstring reasons=L"[";
+            bool firstReason=true;
+            if (rep) for (auto reason : rep->reasons) {
+                const UINT reasonId=InspectReasonId(reason);
+                if (!reasonId) continue;
+                if (!firstReason) reasons+=L",";
+                firstReason=false;
+                reasons+=JsStringLiteral(Text(reasonId));
+            }
+            reasons+=L"]";
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
                 L",\"description\":"+JsStringLiteral(Text(desc))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
-                L",\"badgeTone\":"+JsStringLiteral(ComponentBadgeTone(action))+
+                L",\"badgeTone\":"+JsStringLiteral(ComponentBadgeTone(condition))+
                 L",\"lockTitle\":"+JsStringLiteral(locked?Text(IDS_COMP_MANDATORY):L"")+
-                L",\"state\":"+JsStringLiteral(Text(ComponentStateId(checked,installed)))+
+                L",\"state\":"+JsStringLiteral(Text(ComponentStateId(checked,condition)))+
+                L",\"reasons\":"+reasons+
                 L",\"checked\":"+(checked?L"true":L"false")+L",\"locked\":"+(locked?L"true":L"false")+
                 L",\"hidden\":"+(hidden?L"true":L"false")+L"}";
         };
-        item(L"x64",IDS_COMP_P64_TITLE,IDS_COMP_P64_DESC,selection_.platform64,os64,!os64,installedSelection_.platform64);
-        item(L"x86",IDS_COMP_P32_TITLE,IDS_COMP_P32_DESC,selection_.platform32,!os64,false,installedSelection_.platform32);
-        item(L"settings",IDS_COMP_GS_TITLE,IDS_COMP_GS_DESC,selection_.glassSettings,false,false,installedSelection_.glassSettings);
-        item(L"openglass",IDS_COMP_OG_TITLE,IDS_COMP_OG_DESC,selection_.openGlass,false,!os64,installedSelection_.openGlass);
+        item(L"x64",IDS_COMP_P64_TITLE,IDS_COMP_P64_DESC,selection_.platform64,os64,!os64,&inspect_.x64);
+        item(L"x86",IDS_COMP_P32_TITLE,IDS_COMP_P32_DESC,selection_.platform32,!os64,false,&inspect_.x86);
+        item(L"settings",IDS_COMP_GS_TITLE,IDS_COMP_GS_DESC,selection_.glassSettings,false,false,&inspect_.settings);
+        item(L"openglass",IDS_COMP_OG_TITLE,IDS_COMP_OG_DESC,selection_.openGlass,false,!os64,&inspect_.og);
         return json+L"]";
     }
     std::wstring LaunchCardsJson() const {
@@ -2915,14 +2972,16 @@ private:
         SelectObject(dc,old);
     }
     void DrawComponentActionBadge(HDC dc, bool selected, bool installed, int x, int y) {
-        const auto action=GlassProducts::ActionForInstall(selected,installed);
-        const UINT badgeId=ComponentBadgeId(action);
+        const auto condition=installed?GlassProducts::ProductCondition::Healthy:GlassProducts::ProductCondition::NotInstalled;
+        const UINT badgeId=ComponentBadgeId(condition);
         if (!badgeId) return;
-        COLORREF fill=RGB(28,57,48), border=RGB(86,169,125), ink=RGB(184,244,209);
-        if (action==GlassProducts::InstallAction::Update) {
+        COLORREF fill=RGB(30,52,58), border=RGB(90,150,160), ink=RGB(200,235,240);
+        if (condition==GlassProducts::ProductCondition::UpdateAvailable) {
             fill=RGB(62,48,35); border=RGB(194,153,81); ink=RGB(255,223,157);
-        } else if (action==GlassProducts::InstallAction::Keep) {
-            fill=RGB(38,46,72); border=RGB(120,140,210); ink=RGB(210,220,255);
+        } else if (condition==GlassProducts::ProductCondition::Healthy) {
+            fill=RGB(28,57,48); border=RGB(86,169,125); ink=RGB(184,244,209);
+        } else if (condition==GlassProducts::ProductCondition::Damaged) {
+            fill=RGB(66,32,36); border=RGB(196,92,92); ink=RGB(255,196,196);
         }
         constexpr int width=140, height=24;
         {
@@ -3215,7 +3274,7 @@ private:
             DrawLabel(dc,Text(IDS_COMP_INTRO),Box(48,142,840,42),font_,muted);
             const bool os64=GlassInstallUtil::IsOs64Bit();
             const auto state=[&](bool selected, bool installed, bool mandatory, int x, int y) {
-                DrawLabel(dc,Text(ComponentStateId(selected,installed)),Box(x,y,mandatory?220:250,38),small_,accent);
+                DrawLabel(dc,Text(ComponentStateId(selected,installed?GlassProducts::ProductCondition::Healthy:GlassProducts::ProductCondition::NotInstalled)),Box(x,y,mandatory?220:250,38),small_,accent);
                 if (mandatory) DrawMandatoryLock(dc,x+230,y+1);
                 DrawComponentActionBadge(dc,selected,installed,x+260,y+2);
             };

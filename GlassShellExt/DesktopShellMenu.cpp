@@ -11,6 +11,7 @@
 
 #include <new>
 #include <string>
+#include <vector>
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "uuid.lib")
@@ -45,6 +46,54 @@ extern "C" void WINAPI GlassShell_RemoveLegacyContextMenuHandler() noexcept
 class GlassDesktopShellMenu final : public IShellExtInit, public IContextMenu
 {
     LONG m_cRef = 1;
+    std::vector<HBITMAP> m_bitmaps{};
+
+    ~GlassDesktopShellMenu() noexcept
+    {
+        for (HBITMAP bmp : m_bitmaps)
+            if (bmp) ::DeleteObject(bmp);
+    }
+
+    // Иконка пункта меню: иконка модуля → 16×16 32-битный HBITMAP для MIIM_BITMAP.
+    HBITMAP MenuIcon(UINT iconId) noexcept
+    {
+        constexpr int size = 16;
+        HICON icon = static_cast<HICON>(::LoadImageW(
+            GlassShellExt::g_module, MAKEINTRESOURCEW(iconId), IMAGE_ICON, size, size, LR_DEFAULTCOLOR));
+        if (!icon) return nullptr;
+        BITMAPINFO bmi{};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = size;
+        bmi.bmiHeader.biHeight = -size;
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        void* bits = nullptr;
+        HBITMAP bmp = ::CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (!bmp)
+        {
+            ::DestroyIcon(icon);
+            return nullptr;
+        }
+        HDC dc = ::CreateCompatibleDC(nullptr);
+        if (dc)
+        {
+            HGDIOBJ old = ::SelectObject(dc, bmp);
+            ::DrawIconEx(dc, 0, 0, icon, size, size, 0, nullptr, DI_NORMAL);
+            if (old) ::SelectObject(dc, old);
+            ::DeleteDC(dc);
+        }
+        ::DestroyIcon(icon);
+        // Меню Windows использует альфа-канал HBITMAP: проставляем его по ненулевым пикселям.
+        auto* px = static_cast<DWORD*>(bits);
+        if (px)
+        {
+            for (int i = 0; i < size * size; ++i)
+                px[i] = (px[i] & 0x00FFFFFFu) ? (px[i] | 0xFF000000u) : 0u;
+        }
+        m_bitmaps.push_back(bmp);
+        return bmp;
+    }
 
 public:
     GlassDesktopShellMenu() noexcept { InterlockedIncrement(&g_liveMenuObjects); }
@@ -98,21 +147,29 @@ public:
         if (idCmdFirst + commandCount - 1 > idCmdLast)
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
 
+        // Классическое меню собирается единым вложенным меню «Glass Platform»
+        // (пункт-родитель с иконкой) с иконками дочерних пунктов — структура
+        // повторяет компактное меню Windows 11.
+        HMENU sub = ::CreatePopupMenu();
+        if (!sub)
+            return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
+
         MENUITEMINFOW mii{};
         mii.cbSize = sizeof(mii);
 
-        UINT insertAt = indexMenu;
+        UINT insertAt = 0;
         UINT cmdOffset = 0;
 
         auto insertPlatformToggle = [&](GlassShared::GlassPlatformTask::PlatformArch arch) -> bool
         {
             std::wstring label = GlassDesktopActions::GetPlatformToggleTitle(arch);
-            mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE;
+            mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE | MIIM_BITMAP;
             mii.fType = MFT_STRING;
             mii.wID = idCmdFirst + cmdOffset++;
             mii.fState = GlassDesktopActions::GetPlatformToggleMenuState(arch);
             mii.dwTypeData = label.data();
-            return ::InsertMenuItemW(hmenu, insertAt++, TRUE, &mii) != FALSE;
+            mii.hbmpItem = MenuIcon(IDI_GLASSSHELLEXT_PT);
+            return ::InsertMenuItemW(sub, insertAt++, TRUE, &mii) != FALSE;
         };
 
         auto insertSeparator = [&]() -> bool
@@ -122,18 +179,26 @@ public:
             mii.fState = 0;
             mii.wID = 0;
             mii.dwTypeData = nullptr;
-            return ::InsertMenuItemW(hmenu, insertAt++, TRUE, &mii) != FALSE;
+            mii.hbmpItem = nullptr;
+            return ::InsertMenuItemW(sub, insertAt++, TRUE, &mii) != FALSE;
         };
 
         if (dual)
         {
             if (!insertPlatformToggle(GlassShared::GlassPlatformTask::PlatformArch::X86))
+            {
+                ::DestroyMenu(sub);
                 return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
+            }
             if (!insertPlatformToggle(GlassShared::GlassPlatformTask::PlatformArch::X64))
+            {
+                ::DestroyMenu(sub);
                 return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 1);
+            }
         }
         else if (!insertPlatformToggle(GlassShared::GlassPlatformTask::NativePlatformArch()))
         {
+            ::DestroyMenu(sub);
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
         }
 
@@ -141,30 +206,60 @@ public:
         if (openGlassVisible)
         {
             if (!insertSeparator())
+            {
+                ::DestroyMenu(sub);
                 return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, cmdOffset);
+            }
 
             std::wstring labelOg = GlassDesktopActions::GetOpenGlassToggleTitle();
-            mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE;
+            mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE | MIIM_BITMAP;
             mii.fType = MFT_STRING;
             mii.wID = idCmdFirst + cmdOffset++;
             mii.fState = GlassDesktopActions::GetOpenGlassToggleMenuState();
             mii.dwTypeData = labelOg.data();
-            if (!::InsertMenuItemW(hmenu, insertAt++, TRUE, &mii))
+            mii.hbmpItem = MenuIcon(IDI_GLASSSHELLEXT_OG);
+            if (!::InsertMenuItemW(sub, insertAt++, TRUE, &mii))
+            {
+                ::DestroyMenu(sub);
                 return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, cmdOffset - 1);
+            }
         }
 
         if (!insertSeparator())
+        {
+            ::DestroyMenu(sub);
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, cmdOffset);
+        }
 
         std::wstring labelCfg =
             GlassDesktopActions::LoadMenuString(IDS_GLASSSHELL_OPEN_CONFIG, L"Settings");
-        mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE;
+        mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE | MIIM_BITMAP;
         mii.fType = MFT_STRING;
         mii.wID = idCmdFirst + cmdOffset++;
         mii.fState = MFS_ENABLED;
         mii.dwTypeData = labelCfg.data();
-        if (!::InsertMenuItemW(hmenu, insertAt, TRUE, &mii))
+        mii.hbmpItem = MenuIcon(IDI_GLASSSHELLEXT_ST);
+        if (!::InsertMenuItemW(sub, insertAt, TRUE, &mii))
+        {
+            ::DestroyMenu(sub);
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, cmdOffset - 1);
+        }
+
+        // Родительский пункт поверх общего меню: всё содержимое — внутри sub.
+        std::wstring labelRoot =
+            GlassDesktopActions::LoadMenuString(IDS_GLASSSHELL_ROOT_TITLE, L"Glass Platform");
+        MENUITEMINFOW root{};
+        root.cbSize = sizeof(root);
+        root.fMask = MIIM_SUBMENU | MIIM_STRING | MIIM_BITMAP | MIIM_STATE;
+        root.fState = MFS_ENABLED;
+        root.hSubMenu = sub;
+        root.dwTypeData = labelRoot.data();
+        root.hbmpItem = MenuIcon(IDI_GLASSSHELLEXT);
+        if (!::InsertMenuItemW(hmenu, indexMenu, TRUE, &root))
+        {
+            ::DestroyMenu(sub);
+            return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
+        }
 
         return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, cmdOffset);
     }

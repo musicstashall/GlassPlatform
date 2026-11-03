@@ -149,6 +149,7 @@
     <ClCompile Include="src\InstallSupport\GlassInstallHost.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallRemoval.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallUnlock.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassProductInspect.cpp" />
     <ClCompile Include="src\InstallSupport\GlassUserDefaults.cpp" />
   </ItemGroup>
   <ItemGroup>

@@ -6,7 +6,7 @@
 <!-- Offline installer: embedded font only. -->
 <style>
 @font-face{font-family:HandwrittenOffline;src:url('https://glassplatform.invalid/assets/handwritten.ttf') format('truetype');font-display:swap}
-:root{color-scheme:dark;--background:#101225;--foreground:#f5f4fc;--muted:#a2a6bf;--accent:#c1b4ff}
+:root{color-scheme:dark;--background:#101225;--foreground:#f5f4fc;--muted:#a2a6bf;--accent:#c1b4ff;--content-bottom-gap:36px}
 *{-webkit-user-select:none;user-select:none;caret-color:transparent;cursor:default}
 *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{background:var(--background);font-family:'Segoe UI',Arial,sans-serif;color:var(--foreground)}
 #viewport{width:100%;height:100%;display:grid;place-items:center;background:var(--background)}
@@ -147,7 +147,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 /* "Done with notes": the install is final, but post-commit steps (start, shell menu) left notes. Amber, never coral. */
 .complete-warnings{display:none;margin-top:16px;width:432px;padding:10px 14px 11px;border:1px solid #f0c27a38;border-left:2px solid #f0c27a;border-radius:12px;background:linear-gradient(110deg,#5e462446,#2d263238);box-shadow:inset 0 1px #ffffff08}
 .complete-warn-label{color:#ffd9a6;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase}
-.complete-warn-list{margin:6px 0 0;padding:0 6px 0 0;list-style:none;max-height:150px;overflow:auto;scrollbar-color:#8a7a5e #2a2430;scrollbar-width:thin}
+.complete-warn-list{margin:6px 0 0;padding:0 6px 0 0;list-style:none;max-height:110px;overflow:auto;scrollbar-color:#8a7a5e #2a2430;scrollbar-width:thin}
 .complete-warn-list::-webkit-scrollbar{width:9px}.complete-warn-list::-webkit-scrollbar-track{background:#2a2430;border-radius:8px}.complete-warn-list::-webkit-scrollbar-thumb{background:#8a7a5e;border:2px solid #2a2430;border-radius:8px}
 /* The panel itself ignores the pointer (the host owns the buttons); the lists must still take the wheel. */
 #complete-panel .complete-warnings,#error-panel .error-reason{pointer-events:auto}
@@ -161,6 +161,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .complete-scene.has-warnings .complete-tag:before{background:#f0c27a;box-shadow:0 0 14px #f0c27aa0}
 .complete-scene.has-warnings .complete-title{font-size:36px}
 .complete-scene.has-warnings .complete-body{width:432px;font-size:14px}
+.complete-scene.has-warnings .complete-copy{top:92px}
 .complete-ready svg{width:14px;height:14px;fill:none;stroke:#a7dddf;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
 
@@ -197,7 +198,8 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 
 /* Host-controlled states: the slideshow and every interstitial are strictly offline. */
 #stage:not([data-mode="welcome"]):not([data-mode="installing"]) .slideshow-only{display:none!important}
-.mode-panel{position:absolute;inset:0;display:none;overflow:hidden;pointer-events:none;color:var(--foreground);animation:mode-panel-in .32s ease-out both}
+/* Все страницы держат --content-bottom-gap снизу: контент не наезжает на полосу прогресса. */
+.mode-panel{position:absolute;inset:0 0 var(--content-bottom-gap) 0;display:none;overflow:hidden;pointer-events:none;color:var(--foreground);animation:mode-panel-in .32s ease-out both}
 @keyframes mode-panel-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 #stage[data-mode="loading"] #loading-panel{display:flex}
 #stage[data-mode="checking"] #checking-panel,
@@ -335,9 +337,13 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .comp-lock{display:inline-grid;place-items:center;flex:0 0 auto;width:24px;height:26px;border-radius:7px;background:#a7dddf1f;box-shadow:0 0 12px #a7dddf28}
 .comp-lock svg{display:block;width:20px;height:22px}
 .comp-badge{display:inline-flex;align-items:center;flex:0 0 auto;padding:2px 8px;border-radius:999px;border:1px solid #a7dddf4d;background:#a7dddf14;color:#cdeff0;font-size:8.5px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;white-space:nowrap}
-.comp-badge.action-install{border-color:#78dda66e;background:#54c88e20;color:#b8f4d1}
+.comp-badge.action-install{border-color:#a7dddf66;background:#a7dddf1a;color:#cdeff0}
 .comp-badge.action-update{border-color:#f4c46d80;background:#f4bd5e20;color:#ffdf9d}
-.comp-badge.action-keep{border-color:#9fb6ff66;background:#9fb6ff1a;color:#d2dcff}
+.comp-badge.action-keep{border-color:#78dda66e;background:#54c88e20;color:#b8f4d1}
+.comp-badge.action-repair{border-color:#e57a7a80;background:#c25b5b26;color:#ffc9c9}
+.comp-reasons{margin:6px 0 0;padding:0 0 0 12px;list-style:none}
+.comp-reasons li{position:relative;margin:0 0 3px;padding-left:11px;color:#f1c7c7;font-size:10.5px;line-height:1.45}
+.comp-reasons li:before{content:"";position:absolute;left:0;top:6px;width:5px;height:5px;border-radius:50%;background:#e57a7a}
 .comp-badge.muted{border-color:#ffffff22;background:#ffffff0a;color:#a7acc4}
 .comp-desc{margin:0;color:#b2b6cd;font-size:11.5px;line-height:1.46}
 .comp-state{margin:5px 0 0;color:#c6d7e1;font-size:10.4px;line-height:1.3}
@@ -445,8 +451,9 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 <section id="complete-panel" class="mode-panel complete-scene" role="status" aria-live="polite">
 <img id="complete-banner" class="banner-portrait" alt="" aria-hidden="true"><div class="complete-ambient" aria-hidden="true"></div><div class="complete-sheen" aria-hidden="true"></div><div class="native-brand">GlassPlatform</div>
 <div class="complete-copy"><div id="complete-tag" class="complete-tag"></div><h1 id="complete-title" class="complete-title"></h1><p id="complete-body" class="complete-body"></p>
+<div id="complete-warnings" class="complete-warnings"><div id="complete-warn-label" class="complete-warn-label"></div><ul id="complete-warn-list" class="complete-warn-list"></ul></div>
 <div class="complete-ready"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg><span id="complete-ready-text"></span></div>
-<div id="complete-warnings" class="complete-warnings"><div id="complete-warn-label" class="complete-warn-label"></div><ul id="complete-warn-list" class="complete-warn-list"></ul></div><p id="complete-note" class="complete-note"></p></div>
+<p id="complete-note" class="complete-note"></p></div>
 <div class="complete-visual" aria-hidden="true"><svg class="complete-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"><defs>
 <radialGradient id="completeGlow"><stop offset="0" stop-color="#9180df" stop-opacity=".46"/><stop offset=".62" stop-color="#7062b5" stop-opacity=".16"/><stop offset="1" stop-color="#7062b5" stop-opacity="0"/></radialGradient>
 <linearGradient id="completeRingGradient" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a7dddf"/><stop offset=".54" stop-color="#d7ccff"/><stop offset="1" stop-color="#a995ff"/></linearGradient>
@@ -544,12 +551,12 @@ ru:{title:'GlassPlatform · Установка',tagline:'Новый взгляд
 checkingKicker:'ВЕРСИЯ УСТАНОВЩИКА',checkingTitle:'Проверяем новую версию',checkingCopy:'Сверяем опубликованную версию установщика с версией GlassPlatform. Если обновление не найдено или сервер недоступен, продолжим установку текущей версии.',checkingStatus:'Запрос к GitHub Releases',checkingSub:'Мастер продолжит работу, даже если обновления нет',checkingSource:'GitHub Releases',
 forceKicker:'UNLOCKER · ПОВТОРНАЯ ВЫГРУЗКА',forceTitle:'Освобождаем модули',forceDescription:'Unlocker повторно проверяет процессы. Проводник и установщик освобождают модули без принудительной выгрузки.',forceStatus:'Повторная выгрузка модулей…',forceSubstatus:'Этап 1 из 2 · освобождение модулей',forceHoldersTitle:'Занятые модули и удерживающие их процессы',
 unlockKicker:'UNLOCKER · РАЗБЛОКИРОВКА ПРОЦЕССОВ',unlockTitle:'Закрываем приложения',unlockDescription:'Приложения могут быть завершены принудительно. Проводник не завершается целиком: закрываются только его файловые окна.',unlockStatus:'Закрытие процессов…',unlockSubstatus:'Проводник защищён от принудительного завершения',unlockHoldersTitle:'Процессы, которые удерживают модули',
-doneTag:'ГОТОВО',doneTitle:'Всё готово!',doneBody:'GlassPlatform установлена и запущена.',doneReady:'ГОТОВО К РАБОТЕ',doneNote:'Мастер можно закрыть. Журналы: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).',doneWarnTag:'ГОТОВО, ЕСТЬ ЗАМЕЧАНИЯ',doneWarnTitle:'Установлено, но не всё запустилось',doneWarnBody:'GlassPlatform установлена; откат не выполнялся. Часть завершающих шагов не удалась — подробности ниже и в журнале %WINDIR%\\Temp\\GlassSetupLogs-*.',doneWarnLabel:'ЗАМЕЧАНИЯ',errorTag:'ОШИБКА',errorTitle:'Установка не выполнена',errorBody:'Не удалось завершить установку. Ниже указана возможная причина.',errorDetails:'ДЕТАЛИ',errorReason:'',errorNote:'Подробности: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).'},
+doneTag:'ГОТОВО',doneTitle:'Всё готово!',doneBody:'GlassPlatform установлена и запущена.',doneReady:'ГОТОВО К РАБОТЕ',doneNote:'Мастер можно закрыть. Журналы: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).',doneWarnTag:'ГОТОВО, ЕСТЬ ЗАМЕЧАНИЯ',doneWarnTitle:'Установлено, но не всё запустилось',doneWarnBody:'GlassPlatform установлена с замечаниями — подробности ниже и в журнале %WINDIR%\\Temp\\GlassSetupLogs-*.',doneWarnLabel:'ЗАМЕЧАНИЯ',errorTag:'ОШИБКА',errorTitle:'Установка не выполнена',errorBody:'Не удалось завершить установку. Ниже указана возможная причина.',errorDetails:'ДЕТАЛИ',errorReason:'',errorNote:'Подробности: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).'},
 en:{title:'GlassPlatform · Setup',tagline:'A new perspective',slide:'Slide',slideRole:'slide',carouselRole:'carousel',choose:'Choose a slide',resume:'Resume slideshow',pause:'Pause slideshow',
 checkingKicker:'SETUP VERSION',checkingTitle:'Checking for a newer version',checkingCopy:'Comparing the published setup version with GlassPlatform. If no update is found or the server is unavailable, setup will continue with this version.',checkingStatus:'Requesting GitHub Releases',checkingSub:'Setup continues even when there is no update',checkingSource:'GitHub Releases',
 forceKicker:'UNLOCKER · RETRYING MODULE RELEASE',forceTitle:'Releasing modules',forceDescription:'Unlocker rescans processes. Explorer and Setup release modules without a forced unload.',forceStatus:'Retrying module unload…',forceSubstatus:'Stage 1 of 2 · module release',forceHoldersTitle:'Modules held by these processes',
 unlockKicker:'UNLOCKER · PROCESS RELEASE',unlockTitle:'Closing applications',unlockDescription:'Applications may be terminated if they do not close. Explorer itself is not terminated; only its file windows are closed.',unlockStatus:'Closing processes…',unlockSubstatus:'Explorer is protected from forced termination',unlockHoldersTitle:'Processes still holding modules',
-doneTag:'DONE',doneTitle:'You’re all set!',doneBody:'GlassPlatform is installed and running.',doneReady:'READY TO USE',doneNote:'You can close the wizard. Logs: %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).',doneWarnTag:'DONE WITH NOTES',doneWarnTitle:'Installed, but not everything started',doneWarnBody:'GlassPlatform is installed; nothing was rolled back. Some finishing steps failed — details below and in %WINDIR%\\Temp\\GlassSetupLogs-*.',doneWarnLabel:'NOTES',errorTag:'ERROR',errorTitle:'Setup could not finish',errorBody:'Installation did not complete. A possible reason is shown below.',errorDetails:'DETAILS',errorReason:'',errorNote:'See %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).'}
+doneTag:'DONE',doneTitle:'You’re all set!',doneBody:'GlassPlatform is installed and running.',doneReady:'READY TO USE',doneNote:'You can close the wizard. Logs: %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).',doneWarnTag:'DONE WITH NOTES',doneWarnTitle:'Installed, but not everything started',doneWarnBody:'GlassPlatform was installed with notes — details below and in the %WINDIR%\\Temp\\GlassSetupLogs-* log.',doneWarnLabel:'NOTES',errorTag:'ERROR',errorTitle:'Setup could not finish',errorBody:'Installation did not complete. A possible reason is shown below.',errorDetails:'DETAILS',errorReason:'',errorNote:'See %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).'}
 };
 let locale='ru',index=0,paused=false,timer=null,interval=6500,platformVersion='',mode='loading',completionText=null,errorText=null,hostState={},assetsReady=false,pendingMode='',componentSignature='';function setPlatformVersion(value){platformVersion=String(value||'');const node=document.getElementById('platformVersion');if(node)node.textContent=platformVersion;}
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
@@ -594,12 +601,13 @@ function renderComponentsPanel(){
    if(item.locked)action.append(componentLock(item.lockTitle||item.badge||(locale==='ru'?'Заблокировано':'Locked')));
    if(item.badge){
     const badge=document.createElement('span');
-    const tone=['install','update','keep'].includes(item.badgeTone)?' action-'+item.badgeTone:'';
+    const tone=['install','update','keep','repair'].includes(item.badgeTone)?' action-'+item.badgeTone:'';
     badge.className='comp-badge'+tone+(item.disabled?' muted':'');badge.textContent=String(item.badge);action.append(badge);
    }
    if(item.locked||item.badge)head.append(action);
    const desc=document.createElement('p');desc.className='comp-desc';desc.textContent=String(item.description||'');body.append(head,desc);
    if(item.state){const state=document.createElement('p');state.className='comp-state';state.textContent=String(item.state);body.append(state);}
+   if(Array.isArray(item.reasons)&&item.reasons.length){const rs=document.createElement('ul');rs.className='comp-reasons';for(const r of item.reasons){const li=document.createElement('li');li.textContent=String(r);rs.append(li);}body.append(rs);}
    label.append(input,body);grid.append(label);
   }
   if(focusId){const restored=[...grid.querySelectorAll('input')].find(el=>el.dataset.component===focusId&&!el.disabled);if(restored)restored.focus();}
