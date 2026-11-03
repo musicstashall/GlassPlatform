@@ -62,10 +62,11 @@ constexpr bool DefaultSelectedFor(ProductCondition condition) noexcept {
 }
 
 constexpr Selection NormalizeInstall(Selection choice, bool os64) noexcept {
-    if (os64) choice.platform64 = true;
-    else {
+    // ОС-нативная платформа обязательна, но не принудительно отмечена: исправный
+    // продукт остаётся снятым (Setup его не трогает), а её обязательность держит
+    // замок карточки, когда по ней нужна обработка (установка/обновление/ремонт).
+    if (!os64) {
         choice.platform64 = false;
-        choice.platform32 = true;
         choice.openGlass = false;
     }
     return choice;

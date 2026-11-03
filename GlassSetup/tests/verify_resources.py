@@ -575,6 +575,17 @@ assert "trust != ERROR_SUCCESS" in inspect_cpp and "ours" in inspect_cpp
 assert "condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY)" in setup
 assert "comp-reasons li:before" in ui and "item.lockTitle" in ui
 
+# 2026-11-03 follow-up 3: card reasons behind a mini-spoiler (accordion, equal heights);
+# the registry reason names the offending values; OpenGlass user resources and
+# OpenGlassHost.exe are exempt from integrity; the OS-native platform is no longer
+# force-selected (mandatory = card lock when action is required).
+assert "AppendName" in reg_sanity and "glassValueNames" in reg_sanity
+assert "IsOpenGlassUserResource" in inspect_cpp and "OpenGlassHost.exe" in inspect_cpp
+assert "registryValueNames" in setup and "comp-reasons-toggle" in ui
+assert "grid-auto-rows:1fr" in ui and "reasons-open" in ui
+assert "os64 && GlassProducts::DefaultSelectedFor(" in setup
+assert "ОС-нативная платформа обязательна, но не принудительно отмечена" in gp
+
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")
 if node:

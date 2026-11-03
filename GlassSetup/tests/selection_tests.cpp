@@ -18,13 +18,12 @@ int main() {
     for (int bits=0;bits<16;++bits) for (bool os64:{false,true}) {
         const Selection raw{bool(bits&1),bool(bits&2),bool(bits&4),bool(bits&8)};
         const auto installed=GlassProducts::NormalizeInstall(raw,os64);
-        assert(os64 ? installed.platform64 : installed.platform32);
-        if (!os64) assert(!installed.platform64 && !installed.openGlass);
+        // ОС-нативная платформа не принудительно отмечена: исправный продукт
+        // остаётся снятым, обязательность держит замок карточки при обработке.
+        assert(installed.platform64==(os64 && raw.platform64));
+        assert(installed.platform32==raw.platform32);
+        assert(installed.openGlass==(os64 && raw.openGlass));
         assert(installed.glassSettings==raw.glassSettings);
-        if (os64) {
-            assert(installed.platform32==raw.platform32);
-            assert(installed.openGlass==raw.openGlass);
-        }
         for (int present=0;present<16;++present) {
             const Selection exists{bool(present&1),bool(present&2),bool(present&4),bool(present&8)};
             // The wizard never shows a removal: an installed product that is
@@ -53,5 +52,5 @@ int main() {
     const Selection all{true,true,true,true};
     const auto onlySettings=GlassProducts::NormalizeRemoval({false,false,true,false},all,true);
     assert(!onlySettings.platform64 && !onlySettings.platform32 && onlySettings.glassSettings && !onlySettings.openGlass);
-    std::cout << "PASS: install keeps unchecked products; native platform mandatory; uninstall dependency cascade\n";
+    std::cout << "PASS: install keeps unchecked products; native platform kept and never removed; uninstall dependency cascade\n";
 }

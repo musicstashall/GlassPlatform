@@ -155,20 +155,39 @@ std::wstring QueryMsiProperty(MSIHANDLE database, const wchar_t* name) noexcept
 struct FileCheck
 {
     std::wstring componentId;
+    std::wstring fileName; // длинное имя из колонки FileName (short|long)
     unsigned long long size = 0;
     DWORD hash[4]{};
     bool hasHash = false;
 };
 
+[[nodiscard]] std::wstring LongFileName(const wchar_t* raw) noexcept
+{
+    std::wstring name = raw ? raw : L"";
+    const auto bar = name.find(L'|');
+    return bar == std::wstring::npos ? name : name.substr(bar + 1);
+}
+
+// Пользовательские каталоги OpenGlass (материалы/атласы/отражения) — их пользователь
+// вправе удалять, целостность этих файлов не проверяется.
+[[nodiscard]] bool IsOpenGlassUserResource(const std::wstring& path) noexcept
+{
+    std::wstring lower = path;
+    for (auto& c : lower)
+        c = static_cast<wchar_t>(towlower(c));
+    return lower.find(L"\\resources\\") != std::wstring::npos;
+}
+
 bool EnumProductFiles(MSIHANDLE database, std::vector<FileCheck>& out) noexcept
 {
     out.clear();
     const wchar_t* kSqlWithHash =
-        L"SELECT `Component`.`ComponentId`, `File`.`FileSize`, `MsiFileHash`.`Hash1`, `MsiFileHash`.`Hash2`, "
-        L"`MsiFileHash`.`Hash3`, `MsiFileHash`.`Hash4` FROM `File`, `Component`, `MsiFileHash` "
+        L"SELECT `Component`.`ComponentId`, `File`.`FileSize`, `File`.`FileName`, "
+        L"`MsiFileHash`.`Hash1`, `MsiFileHash`.`Hash2`, `MsiFileHash`.`Hash3`, `MsiFileHash`.`Hash4` "
+        L"FROM `File`, `Component`, `MsiFileHash` "
         L"WHERE `Component`.`Component` = `File`.`Component_` AND `MsiFileHash`.`File_` = `File`.`File`";
     const wchar_t* kSqlPlain =
-        L"SELECT `Component`.`ComponentId`, `File`.`FileSize` FROM `File`, `Component` "
+        L"SELECT `Component`.`ComponentId`, `File`.`FileSize`, `File`.`FileName` FROM `File`, `Component` "
         L"WHERE `Component`.`Component` = `File`.`Component_`";
     for (int attempt = 0; attempt < 2; ++attempt)
     {
@@ -190,11 +209,15 @@ bool EnumProductFiles(MSIHANDLE database, std::vector<FileCheck>& out) noexcept
                     entry.componentId = buf;
                 entry.size = static_cast<unsigned long long>(
                     static_cast<LONG>(MsiRecordGetInteger(record, 2)));
+                wchar_t name[256]{};
+                DWORD nameCch = _countof(name);
+                if (MsiRecordGetStringW(record, 3, name, &nameCch) == ERROR_SUCCESS)
+                    entry.fileName = LongFileName(name);
                 if (withHash)
                 {
                     entry.hasHash = true;
                     for (int i = 0; i < 4; ++i)
-                        entry.hash[i] = static_cast<DWORD>(MsiRecordGetInteger(record, 3 + i));
+                        entry.hash[i] = static_cast<DWORD>(MsiRecordGetInteger(record, 4 + i));
                 }
                 if (!entry.componentId.empty())
                 {
@@ -258,7 +281,8 @@ void CheckProductFiles(
     const std::wstring& msiPath,
     const wchar_t* productCode,
     const std::wstring& signerSha1,
-    ProductReport& rep) noexcept
+    ProductReport& rep,
+    bool openGlassProduct) noexcept
 {
     MSIHANDLE database = 0;
     if (MsiOpenDatabaseW(msiPath.c_str(), MSIDBOPEN_READONLY, &database) != ERROR_SUCCESS)
@@ -275,10 +299,16 @@ void CheckProductFiles(
         if (state != INSTALLSTATE_LOCAL || !path[0])
         {
             // Компонент должен быть установлен локально, но файл недоступен.
+            // Хост службы OpenGlass вправе отсутствовать: старые версии запускаются
+            // задачей без OpenGlassHost.exe.
+            if (openGlassProduct && _wcsicmp(file.fileName.c_str(), L"OpenGlassHost.exe") == 0)
+                continue;
             if (state == INSTALLSTATE_ABSENT || state == INSTALLSTATE_UNKNOWN)
                 AddReason(rep, Reason::FileMissing);
             continue;
         }
+        if (openGlassProduct && IsOpenGlassUserResource(path))
+            continue; // материалы/атласы/отражения пользователь вправе удалять
         WIN32_FILE_ATTRIBUTE_DATA attrs{};
         if (!GetFileAttributesExW(path, GetFileExInfoStandard, &attrs))
         {
@@ -387,7 +417,8 @@ Report Run(const Inputs& in)
                 if (referenceMsi.empty() && !job.rep->updateAvailable)
                     referenceMsi = msiPath; // версии совпадают — пакет идентичен установленному
                 if (!referenceMsi.empty())
-                    CheckProductFiles(referenceMsi, job.code, signerSha1, *job.rep);
+                    CheckProductFiles(referenceMsi, job.code, signerSha1, *job.rep,
+                        wcscmp(job.code, GlassInstallMsi::kProductOpenGlass) == 0);
             }
             DeleteFileW(msiPath.c_str());
         }
@@ -436,9 +467,15 @@ Report Run(const Inputs& in)
     // некорректные значения — признак повреждения; чинит удаление при установке.
     const auto sanity = Shared::RegistrySanity::Validate(false);
     if (sanity.glassIssues)
+    {
         AddReason(report.settings, Reason::RegistryInvalid);
+        report.settings.registryValueNames = sanity.glassValueNames;
+    }
     if (sanity.openGlassIssues)
+    {
         AddReason(report.og, Reason::RegistryInvalid);
+        report.og.registryValueNames = sanity.openGlassValueNames;
+    }
 
     report.ran = true;
     return report;

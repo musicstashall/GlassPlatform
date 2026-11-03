@@ -26,6 +26,7 @@ struct ProductReport {
     bool damaged = false;
     std::wstring installedVersion;
     std::vector<Reason> reasons;
+    std::wstring registryValueNames; // имена некорректных значений реестра (диагностика)
 };
 
 struct Report {

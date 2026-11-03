@@ -1550,9 +1550,12 @@ private:
         openGlassStartupDir_=std::move(result.openGlassDir);
         const bool os64=result.os64;
         // По умолчанию отмечены отсутствующие, устаревшие и повреждённые продукты;
-        // неповреждённые установленные остаются снятыми (Setup их не трогает).
-        selection_.platform64=os64;
-        selection_.platform32=!os64 || GlassProducts::DefaultSelectedFor(
+        // неповреждённые установленные остаются снятыми (Setup их не трогает),
+        // включая ОС-нативную платформу — её обязательность держит замок карточки
+        // только когда по ней нужна обработка.
+        selection_.platform64=os64 && GlassProducts::DefaultSelectedFor(
+            ConditionOf(&inspect_.x64,installedSelection_.platform64));
+        selection_.platform32=GlassProducts::DefaultSelectedFor(
             ConditionOf(&inspect_.x86,installedSelection_.platform32));
         selection_.glassSettings=GlassProducts::DefaultSelectedFor(
             ConditionOf(&inspect_.settings,installedSelection_.glassSettings));
@@ -1781,7 +1784,10 @@ private:
                 if (!reasonId) continue;
                 if (!firstReason) reasons+=L",";
                 firstReason=false;
-                reasons+=JsStringLiteral(Text(reasonId));
+                std::wstring reasonText=Text(reasonId);
+                if (reason==GlassProductInspect::Reason::RegistryInvalid && !rep->registryValueNames.empty())
+                    reasonText+=L": "+rep->registryValueNames;
+                reasons+=JsStringLiteral(reasonText);
             }
             reasons+=L"]";
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
@@ -1790,7 +1796,7 @@ private:
                 L",\"lockTitle\":"+JsStringLiteral((locked && condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY):L"")+
                 L",\"state\":"+JsStringLiteral(Text(ComponentStateId(checked,condition)))+
                 L",\"reasons\":"+reasons+
-                L",\"checked\":"+(checked?L"true":L"false")+L",\"locked\":"+(locked?L"true":L"false")+
+                L",\"checked\":"+(checked?L"true":L"false")+L",\"locked\":"+((locked && condition!=GlassProducts::ProductCondition::Healthy)?L"true":L"false")+
                 L",\"hidden\":"+(hidden?L"true":L"false")+L"}";
         };
         item(L"x64",IDS_COMP_P64_TITLE,IDS_COMP_P64_DESC,selection_.platform64,os64,!os64,&inspect_.x64);

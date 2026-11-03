@@ -104,10 +104,11 @@ constexpr Rule kDwmOpenGlassRules[] = {
 
 bool IsIncorrect(HKEY key, const wchar_t* valueName, ValueKind kind) noexcept
 {
+    // Сначала только тип/размер: длинные строки не должны считаться повреждёнными
+    // из-за нехватки буфера (ERROR_MORE_DATA).
     DWORD type = 0;
-    BYTE data[512]{};
-    DWORD size = sizeof(data);
-    const LSTATUS status = RegQueryValueExW(key, valueName, nullptr, &type, data, &size);
+    DWORD size = 0;
+    const LSTATUS status = RegQueryValueExW(key, valueName, nullptr, &type, nullptr, &size);
     if (status == ERROR_FILE_NOT_FOUND)
         return false; // отсутствие — легальное умолчание
     if (status != ERROR_SUCCESS)
@@ -116,11 +117,25 @@ bool IsIncorrect(HKEY key, const wchar_t* valueName, ValueKind kind) noexcept
         return type != REG_SZ && type != REG_EXPAND_SZ;
     if (type != REG_DWORD)
         return true;
-    const DWORD value = *reinterpret_cast<const DWORD*>(data);
-    return kind == ValueKind::DwordBool && value > 1;
+    if (kind == ValueKind::DwordBool)
+    {
+        DWORD value = 0;
+        DWORD cb = sizeof(value);
+        if (RegQueryValueExW(key, valueName, nullptr, &type, reinterpret_cast<BYTE*>(&value), &cb) != ERROR_SUCCESS)
+            return true;
+        return value > 1;
+    }
+    return false;
 }
 
 // Проверка одной ветки: значения схемы, тип/ограниченный диапазон.
+void AppendName(std::wstring& names, const wchar_t* valueName) noexcept
+{
+    if (!names.empty())
+        names += L", ";
+    names += valueName;
+}
+
 void ValidateKey(
     HKEY root,
     const wchar_t* subKey,
@@ -128,7 +143,8 @@ void ValidateKey(
     const Rule* rules,
     size_t ruleCount,
     bool applyFixes,
-    DWORD& issues) noexcept
+    DWORD& issues,
+    std::wstring& names) noexcept
 {
     HKEY key = nullptr;
     const REGSAM access = applyFixes ? (KEY_QUERY_VALUE | KEY_SET_VALUE) : KEY_QUERY_VALUE;
@@ -139,6 +155,7 @@ void ValidateKey(
         if (!IsIncorrect(key, rules[i].valueName, rules[i].kind))
             continue;
         ++issues;
+        AppendName(names, rules[i].valueName);
         if (applyFixes)
             RegDeleteValueW(key, rules[i].valueName); // умолчания в реестр не пишутся
     }
@@ -146,9 +163,9 @@ void ValidateKey(
 }
 
 template <size_t N>
-void ValidateKeyT(HKEY root, const wchar_t* subKey, REGSAM view, const Rule (&rules)[N], bool applyFixes, DWORD& issues) noexcept
+void ValidateKeyT(HKEY root, const wchar_t* subKey, REGSAM view, const Rule (&rules)[N], bool applyFixes, DWORD& issues, std::wstring& names) noexcept
 {
-    ValidateKey(root, subKey, view, rules, N, applyFixes, issues);
+    ValidateKey(root, subKey, view, rules, N, applyFixes, issues, names);
 }
 
 } // namespace
@@ -159,24 +176,20 @@ Stats Validate(bool applyFixes) noexcept
     const REGSAM views[] = { KEY_WOW64_64KEY, KEY_WOW64_32KEY };
     for (REGSAM view : views)
     {
-        DWORD before = stats.glassIssues;
         ValidateKeyT(HKEY_CURRENT_USER, L"Software\\StanislavKa\\GlassPlatform\\GlassSettings", view,
-            kGlassSettingsRules, applyFixes, stats.glassIssues);
+            kGlassSettingsRules, applyFixes, stats.glassIssues, stats.glassValueNames);
         ValidateKeyT(HKEY_CURRENT_USER, L"Software\\StanislavKa\\GlassPlatform", view,
-            kGlassPlatformRootRules, applyFixes, stats.glassIssues);
+            kGlassPlatformRootRules, applyFixes, stats.glassIssues, stats.glassValueNames);
         ValidateKeyT(HKEY_LOCAL_MACHINE, L"Software\\StanislavKa\\GlassPlatform", view,
-            kGlassPlatformRootRules, applyFixes, stats.glassIssues);
-        DWORD beforeOg = stats.openGlassIssues;
+            kGlassPlatformRootRules, applyFixes, stats.glassIssues, stats.glassValueNames);
         ValidateKeyT(HKEY_CURRENT_USER, L"Software\\StanislavKa\\OpenGlass", view,
-            kOpenGlassRootRules, applyFixes, stats.openGlassIssues);
+            kOpenGlassRootRules, applyFixes, stats.openGlassIssues, stats.openGlassValueNames);
         ValidateKeyT(HKEY_LOCAL_MACHINE, L"Software\\StanislavKa\\OpenGlass", view,
-            kOpenGlassRootRules, applyFixes, stats.openGlassIssues);
+            kOpenGlassRootRules, applyFixes, stats.openGlassIssues, stats.openGlassValueNames);
         ValidateKeyT(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", view,
-            kDwmOpenGlassRules, applyFixes, stats.openGlassIssues);
+            kDwmOpenGlassRules, applyFixes, stats.openGlassIssues, stats.openGlassValueNames);
         ValidateKeyT(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", view,
-            kDwmOpenGlassRules, applyFixes, stats.openGlassIssues);
-        (void)before;
-        (void)beforeOg;
+            kDwmOpenGlassRules, applyFixes, stats.openGlassIssues, stats.openGlassValueNames);
     }
     stats.checked = static_cast<DWORD>(std::size(kGlassSettingsRules) + std::size(kGlassPlatformRootRules) +
         std::size(kOpenGlassRootRules) + std::size(kDwmOpenGlassRules));
