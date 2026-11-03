@@ -1612,7 +1612,7 @@ private:
         const bool nativeLicense = !webVisible && page_==Page::License && !transitioning_;
         ShowWindow(eula_,nativeLicense?SW_SHOWNA:SW_HIDE);
         ShowWindow(accept_,nativeLicense?SW_SHOWNA:SW_HIDE);
-        const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching || page_==Page::RuntimeInstalling || page_==Page::Complete);
+        const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching || page_==Page::RuntimeInstalling);
         ShowWindow(progress_, showProgress ? SW_SHOWNA : SW_HIDE);
         const bool update = page_==Page::Update && !transitioning_;
         ShowWindow(updateDownload_,update?SW_SHOWNA:SW_HIDE);
@@ -3519,6 +3519,14 @@ private:
         bufferedErase_=true;
         SendMessageW(window,WM_ERASEBKGND,reinterpret_cast<WPARAM>(dc),0);
         bufferedErase_=false;
+        // На финальных страницах полоса прогресса скрыта: вместо неё — тонкая
+        // линия, отделяющая футер от контента.
+        if (!transitioning_ && (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error)) {
+            const RECT line=Box(0,kHtmlHeight,kWidth,kHtmlHeight+1);
+            HBRUSH lineBrush=CreateSolidBrush(RGB(58,60,90));
+            FillRect(dc,&line,lineBrush);
+            DeleteObject(lineBrush);
+        }
         RenderFooterText(dc);
         if (buffered) BitBlt(screen,ps.rcPaint.left,ps.rcPaint.top,
             ps.rcPaint.right-ps.rcPaint.left,ps.rcPaint.bottom-ps.rcPaint.top,

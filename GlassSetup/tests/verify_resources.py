@@ -609,6 +609,11 @@ assert "kInspectReady" in setup and "inspectThread_" in setup and "IDS_COMP_ANAL
 assert "componentsLoading" in setup and "comp-loading" in ui and "loading-donut" in ui
 assert "comp-reason-line:before" in ui and "componentsLoading" in ui
 
+# 2026-11-03 follow-up 7: final pages hide the progress strip and draw a thin
+# separator line instead, keeping the footer visually detached.
+assert "kHtmlHeight+1" in setup and "page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error" in setup
+assert "page_==Page::RuntimeInstalling);" in setup and "page_==Page::RuntimeInstalling || page_==Page::Complete" not in setup
+
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")
 if node:
