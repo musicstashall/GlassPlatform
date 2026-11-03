@@ -60,6 +60,7 @@
 - **Сертификат автора — только по явному выбору пользователя.** Единственный код, добавляющий его в `LocalMachine\TrustedPeople`, — `ShellSparsePackage::TrustSparseSigner`; вызывается со страницы «Сертификат автора» установщика или по ссылке в GlassSettings → Система. Сборка ничего не создаёт/не экспортирует (`New-SelfSignedCertificate`, `Import-Certificate` и т. п. запрещены), GlassUnins сертификат не удаляет. Пользователю не предлагать ручные шаги (regedit, certlm, PowerShell) там, где есть кнопка.
 - **Единственная папка платформы в профиле — `%LOCALAPPDATA%\GlassPlatform`** (логи — `Logs\`, дампы — `Crashes\`). `AppData\Local\GlassProject` и другие каталоги не создавать.
 - **SecureUxTheme — только в составе GlassSettings.MSI** (`<корень>\GlassSettings\SecureUxTheme\`, для x64 дополнительно `x86\ThemeUiProxy.dll`). Без GlassSettings не ставится; деактивация — только unified-выгрузками GlassSettings.Native (`GlassSettings_SecureUxThemeDeactivate`, rundll-helper `GlassSettings_SecureUxThemeSetupV1W` у GlassUnins), не собственной логикой реестра в Setup/GlassUnins.
+- **Политика автозапуска OpenGlass в установщике — `!filesPresent || wasRunning`** (решение пользователя 2026-11-03, «оставить текущее правило»): запускать после установки только при свежей установке или если OpenGlass работал раньше; существующую установку «файлы без оркестрации» не автоматизировать. Предложения «всегда запускать» отклоняются.
 
 ## Скиллы проекта
 
