@@ -623,6 +623,9 @@ assert "IDS_COMP_REQUIRED" in setup and "IDS_COMP_RECOMMENDED" in setup
 assert "IDS_COMP_REQUIRED" in header_now and "требуется" in rc and "рекомендуется" in rc
 assert "GlassProducts::ProductCondition::NotInstalled)" in setup
 
+# Строки действия и причин прижаты к низу карточки — один уровень Y на всех карточках.
+assert "comp-foot" in ui and "margin-top:auto" in ui and "comp-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}" in ui
+
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")
 if node:

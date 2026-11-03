@@ -334,7 +334,8 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .comp-check:checked:after{content:"";display:block;width:9px;height:5px;margin:5px 0 0 4px;border-left:2px solid #17162a;border-bottom:2px solid #17162a;transform:rotate(-45deg)}
 .comp-card.is-locked .comp-check:checked{border-color:#a7dddf;background:#7dc4c8;box-shadow:0 0 12px #a7dddf45}
 .comp-check:focus-visible{outline:2px solid #e1d7ff;outline-offset:3px}
-.comp-body{flex:1 1 auto;min-width:0}
+.comp-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
+.comp-foot{margin-top:auto;padding-top:4px}
 .comp-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px}
 .comp-heading{display:flex;align-items:center;min-width:0}
 .comp-action{display:flex;align-items:center;flex:0 0 auto;gap:7px}
@@ -637,11 +638,15 @@ function renderComponentsPanel(){
    }
    if(item.locked||item.badge)head.append(action);
    const desc=document.createElement('p');desc.className='comp-desc';desc.textContent=String(item.description||'');body.append(head,desc);
-   if(item.state){const state=document.createElement('p');state.className='comp-state';state.textContent=String(item.state);body.append(state);}
+   // Строки действия и причин прижаты к низу карточки: высота текста над ними
+   // не сдвигает их — на всех карточках они на одном уровне Y.
+   const foot=document.createElement('div');foot.className='comp-foot';
+   if(item.state){const state=document.createElement('p');state.className='comp-state';state.textContent=String(item.state);foot.append(state);}
    const hasReasons=Array.isArray(item.reasons)&&item.reasons.length>0;
    const reasonLine=document.createElement('p');reasonLine.className='comp-reason-line tone-'+String(item.badgeTone||'');
    reasonLine.textContent=hasReasons?item.reasons.join(' \u00b7 '):(locale==='ru'?'не требуется':'not required');
-   body.append(reasonLine);
+   foot.append(reasonLine);
+   body.append(foot);
    label.append(input,body);grid.append(label);
   }
   if(focusId){const restored=[...document.querySelectorAll('#components-grid input,#components-extra input')].find(el=>el.dataset.component===focusId&&!el.disabled);if(restored)restored.focus();}
