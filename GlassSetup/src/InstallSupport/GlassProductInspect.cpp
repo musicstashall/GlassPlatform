@@ -8,10 +8,13 @@
 #include <RegistrySanity.h>
 
 #include <msi.h>
+#include <msiquery.h>
 #include <softpub.h>
 #include <wintrust.h>
 
 #include <array>
+#include <cstdlib>
+#include <cwctype>
 #include <string>
 #include <vector>
 
@@ -122,7 +125,7 @@ std::wstring SelfSignerSha1() noexcept
     return hex;
 }
 
-std::wstring QueryMsiProperty(HMSI database, const wchar_t* name) noexcept
+std::wstring QueryMsiProperty(MSIHANDLE database, const wchar_t* name) noexcept
 {
     std::wstring sql = std::wstring(L"SELECT `Value` FROM `Property` WHERE `Property`='") + name + L"'";
     MSIHANDLE view = 0;
@@ -154,7 +157,7 @@ struct FileCheck
     bool hasHash = false;
 };
 
-bool EnumProductFiles(HMSI database, std::vector<FileCheck>& out) noexcept
+bool EnumProductFiles(MSIHANDLE database, std::vector<FileCheck>& out) noexcept
 {
     out.clear();
     const wchar_t* kSqlWithHash =
