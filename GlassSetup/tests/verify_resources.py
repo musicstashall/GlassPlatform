@@ -616,6 +616,13 @@ assert "comp-reason-line:before" in ui and "componentsLoading" in ui
 assert "kHtmlHeight+1" in setup and "page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error" in setup
 assert "page_==Page::RuntimeInstalling);" in setup and "page_==Page::RuntimeInstalling || page_==Page::Complete" not in setup
 
+# 2026-11-03 follow-up 8: on a clean install the reason line states requiredness —
+# «требуется» on platform products, «рекомендуется» on OpenGlass (neutral «не требуется»
+# remains for installed/healthy cards).
+assert "IDS_COMP_REQUIRED" in setup and "IDS_COMP_RECOMMENDED" in setup
+assert "IDS_COMP_REQUIRED" in header_now and "требуется" in rc and "рекомендуется" in rc
+assert "GlassProducts::ProductCondition::NotInstalled)" in setup
+
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")
 if node:

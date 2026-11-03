@@ -1781,6 +1781,11 @@ private:
             if (condition==GlassProducts::ProductCondition::UpdateAvailable) {
                 reasons+=JsStringLiteral(Text(IDS_INSPECT_VERSION));
                 firstReason=false;
+            } else if (condition==GlassProducts::ProductCondition::NotInstalled) {
+                // Чистая установка: в причине — требуемость продукта. Продукты
+                // платформы обязательны, OpenGlass рекомендуется.
+                reasons+=JsStringLiteral(Text(wcscmp(id,L"openglass")==0?IDS_COMP_RECOMMENDED:IDS_COMP_REQUIRED));
+                firstReason=false;
             } else if (rep) for (auto reason : rep->reasons) {
                 const UINT reasonId=InspectReasonId(reason);
                 if (!reasonId) continue;
