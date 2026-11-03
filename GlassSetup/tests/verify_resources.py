@@ -229,10 +229,10 @@ for action in ("INSTALL", "UPDATE", "KEEP"):
     assert f".comp-badge.action-{action.lower()}" in ui
 assert "item.badgeTone" in ui and "comp-lock" in ui and "item.lockTitle" in ui
 assert "action.append(componentLock(" in ui and "badge.textContent=String(item.badge);action.append(badge)" in ui
-assert ".comp-action{display:flex" in ui and "top:198px" in ui and "top:440px" in ui
+assert ".comp-action{display:flex" in ui and "components-stack" in ui  # предупреждение и доп. строки — в потоке стека, без абсолютных позиций
 assert "#a7dfff" in ui and "#efb94f" in ui  # independent blue-and-gold lock, not badge-tinted
 assert "DrawComponentActionBadge(dc,selected,installed" in setup and "DrawMandatoryLock(dc," in setup
-assert "item.state" not in ui and "white-space:pre-line" in ui  # state line removed: badge + checkbox communicate the action
+assert "item.state" in ui and "white-space:pre-line" in ui  # строка «что будет выполнено» вернулась
 assert "DrawLabel(dc,Text(IDS_COMP_X86_WARNING)" in setup and "DrawLabel(dc,Text(IDS_COMP_GS_WARNING)" in setup
 
 # The animated unlock screen must stop when the worker exits the unlock phase,
@@ -562,7 +562,7 @@ assert "WriteValidateSettingsOnStartup" in app_cs
 # and the components page is compact (no state line, single-line reasons).
 assert "MsiGetProductInfoW" in inspect_cpp and "LocalPackage" in inspect_cpp
 assert "AddReason(rep, Reason::VersionOutdated)" not in inspect_cpp
-assert "comp-reason-line" in ui and "comp-state" not in ui
+assert "comp-reason-line" in ui and "comp-state" in ui  # обе строки на каждой карточке
 assert "if (rep->updateAvailable) return GlassProducts::ProductCondition::UpdateAvailable;" in setup
 
 # 2026-11-03 follow-up 2: schema types match OpenGlass SettingsCatalog v3 and the C#
@@ -600,7 +600,9 @@ assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_
 # 2026-11-03 follow-up 5: «Установить» disabled with no product selected; the reasons
 # subline stays on every card with neutral grey «не требуется» when there are no reasons.
 assert "HasSelectedComponent" in setup
-assert "не требуется" in ui and "has-reasons" in ui
+assert "не требуется" in ui and "tone-update" in ui and "tone-repair" in ui
+assert "comp-slim" in ui and "components-extra" in ui and "components-stack" in ui
+assert "slim" in unins and "cleanup" in unins and "Будет удалено" in unins and "удалится вместе с основной платформой" in unins
 
 # 2026-11-03 follow-up 6: integrity analysis runs in the background during the first
 # pages; the products page shows the startup-style loading donut until it completes;

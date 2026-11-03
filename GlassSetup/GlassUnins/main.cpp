@@ -447,21 +447,29 @@ private:
         std::wstring json=L"[";
         const bool core=CoreSelected();
         const bool os64=GlassInstallUtil::IsOs64Bit();
-        auto add=[&](const wchar_t* id,const wchar_t* title,const wchar_t* detail,bool checked,bool available,bool locked,const wchar_t* badgeOverride=nullptr) {
+        auto add=[&](const wchar_t* id,const wchar_t* title,const wchar_t* detail,bool checked,bool available,bool locked) {
             if (json.size()>1) json+=L",";
-            const std::wstring badge=badgeOverride?std::wstring(badgeOverride):(locked?T(L"ЗАВИСИМОСТЬ",L"DEPENDENT"):T(L"УСТАНОВЛЕНО",L"INSTALLED"));
+            const std::wstring badge=locked?T(L"ЗАВИСИМОСТЬ",L"DEPENDENT"):T(L"УСТАНОВЛЕНО",L"INSTALLED");
+            // Строка «что будет выполнено» — по фактическим действиям удаления;
+            // причина объясняет зависимость (каскад основной платформы).
+            const std::wstring state=checked?T(L"Будет удалено",L"Will be removed"):T(L"Останется без изменений",L"Will be kept as is");
+            const std::wstring reason=locked
+                ? T(L"удалится вместе с основной платформой",L"removed together with the core platform")
+                : std::wstring(L"\u2014");
             json+=L"{\"id\":"+Q(id)+L",\"title\":"+Q(title)+L",\"description\":"+Q(detail)+
-                L",\"badge\":"+Q(badge)+L",\"checked\":"+(checked?L"true":L"false")+
+                L",\"badge\":"+Q(badge)+L",\"state\":"+Q(state)+L",\"reasons\":["+Q(reason)+L"]"+
+                L",\"checked\":"+(checked?L"true":L"false")+
                 L",\"locked\":"+(locked?L"true":L"false")+L",\"hidden\":"+(available?L"false":L"true")+L"}";
         };
         add(L"x64",L"Glass Platform (64-bit)",T(L"Платформа 64-битных приложений",L"64-bit platform"),selected_.x64,installed_.x64,core&&!os64);
         add(L"x86",L"Glass Platform (32-bit)",T(L"Поддержка 32-битных приложений",L"32-bit application support"),selected_.x86,installed_.x86,core&&os64);
         add(L"settings",L"GlassSettings",T(L"Панель управления платформой",L"Platform settings application"),selected_.settings,installed_.settings,core);
         add(L"openglass",L"OpenGlass",T(L"Оформление рамок окон",L"Glass window frame engine"),selected_.openGlass,installed_.openGlass,core);
-        add(L"cleanup",T(L"Удалить настройки",L"Remove settings"),
-            T(L"Раздел GlassPlatform и параметры OpenGlass в DWM текущего пользователя.",
-              L"The GlassPlatform key and the OpenGlass DWM values of the current user."),
-            selected_.cleanupSettings,true,false,L"");
+        // «Удалить настройки» — отдельный компактный чекбокс, а не карточка.
+        json+=L",{\"id\":\"cleanup\",\"slim\":true,\"title\":"+Q(T(L"Удалить настройки",L"Remove settings"))+
+            L",\"description\":"+Q(T(L"Раздел GlassPlatform и параметры OpenGlass в DWM текущего пользователя.",
+                L"The GlassPlatform key and the OpenGlass DWM values of the current user."))+
+            L",\"checked\":"+(selected_.cleanupSettings?L"true":L"false")+L",\"locked\":\"false\",\"hidden\":\"false\"}";
         return json+L"]";
     }
     std::wstring Warning() const {
