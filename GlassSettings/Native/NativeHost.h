@@ -230,7 +230,7 @@ extern "C"
     /// стандартный стиль при пользовательском, затем GlassSettings_SecureUxThemeDeactivate.
     /// Код выхода: биты 1 неверные аргументы, 2 перезагрузка, 4 стиль не восстановлен,
     /// 8 деактивация не удалась, 16 внешний SecureUxTheme (ничего не изменено).
-    void CALLBACK GlassSettings_SecureUxThemeSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
+    __declspec(dllexport) void CALLBACK GlassSettings_SecureUxThemeSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
 
     /// Built-in BlockList: единственный список в ProcessBlockList.h.
     __declspec(dllexport) DWORD WINAPI GlassSettings_GetBuiltInBlockListCount() noexcept;

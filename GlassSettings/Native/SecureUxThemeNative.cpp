@@ -1291,7 +1291,7 @@ namespace
 // Биты кода выхода: 1 — неверные аргументы; 2 — нужна перезагрузка (отложена очистка
 // файлов); 4 — стандартный стиль не восстановлен (деактивация выполнена); 8 —
 // деактивация не удалась; 16 — установлен внешний SecureUxTheme, ничего не изменено.
-extern "C" __declspec(dllexport) void CALLBACK GlassSettings_SecureUxThemeSetupV1W(
+extern "C" void CALLBACK GlassSettings_SecureUxThemeSetupV1W(
     HWND, HINSTANCE, LPWSTR cmdLine, int) noexcept
 {
 #ifdef _M_IX86
