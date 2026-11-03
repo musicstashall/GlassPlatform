@@ -1698,7 +1698,7 @@ bool InvokeSecureUxThemeDeactivate(
         return fail(L"GlassSettings.Native.dll with the SecureUxTheme export was not found");
     const std::wstring rundll = os64 ? NativeRundll64() : RundllPathForTaskArch(arch);
     if (rundll.empty()) return fail(L"rundll32.exe was not found");
-    const std::wstring cmd = L"\\\"" + rundll + L"\\\" \\\"" + dll + L"\\\",GlassSettings_SecureUxThemeSetupV1W";
+    const std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\",GlassSettings_SecureUxThemeSetupV1W";
     DWORD exitCode = 1;
     bool started=false,completed=false;
     const bool ran = RunHiddenCommand(cmd,&exitCode,45000,&started,&completed);
