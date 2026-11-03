@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Windows.h>
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,7 @@ struct Inputs {
     UINT msiResX86 = 0;
     UINT msiResSettings = 0;
     UINT msiResOg = 0;
+    const std::atomic_bool* cancelled = nullptr; // остановка между проверками продуктов
 };
 
 Report Run(const Inputs& in);

@@ -68,7 +68,7 @@ constexpr ULONGLONG kRollbackFinishMs = 900;
 constexpr UINT kInitWebView = WM_APP + 1;
 constexpr UINT kVersionCheckComplete = WM_APP + 2;
 constexpr UINT kRuntimeStatus = WM_APP + 3, kRuntimeComplete = WM_APP + 4;
-constexpr UINT kBeginStartup = WM_APP + 5, kStartupComplete = WM_APP + 6;
+constexpr UINT kBeginStartup = WM_APP + 5, kStartupComplete = WM_APP + 6, kInspectReady = WM_APP + 7;
 constexpr ULONGLONG kFadeDuration = 280;
 #ifndef GLASS_EMBED_MSI
 constexpr ULONGLONG kDuration = 30000;
@@ -1183,9 +1183,11 @@ public:
             std::lock_guard<std::mutex> lock(startupMutex_);
             startupStop_.store(true,std::memory_order_release);
         }
+        inspectStop_.store(true,std::memory_order_release);
         // Never wait for a slow MSI/registry query in WM_DESTROY: the window is
         // already gone when this is called from the main loop's shutdown path.
         if (startupThread_.joinable()) startupThread_.join();
+        if (inspectThread_.joinable()) inspectThread_.join();
     }
 private:
     Page page_ = Page::Welcome;
@@ -1218,7 +1220,6 @@ private:
     struct StartupResult {
         bool ok = false, os64 = false, runtimeInstalled = false;
         InstallEngine::ComponentSelection installed{};
-        GlassProductInspect::Report inspect{};
         GlassProducts::OpenGlassStartupState openGlass{};
         std::wstring openGlassDir, platformVersion, eulaText;
     };
@@ -1239,6 +1240,10 @@ private:
     std::vector<std::wstring> conflicts_;
     std::wstring installedGlassVersion_;
     GlassProductInspect::Report inspect_;
+    std::thread inspectThread_;
+    std::atomic_bool inspectReady_{false};
+    std::atomic_bool inspectStop_{false};
+    mutable std::mutex inspectMutex_;
     std::wstring setupProductVersion_;
     std::wstring preflightX64Root_,preflightX86Root_,preflightOpenGlassRoot_;
     std::wstring blockReason_;
@@ -1452,23 +1457,6 @@ private:
                     result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass);
                 if (!startupStop_.load(std::memory_order_acquire)) {
-                    // Обследование установленных продуктов (целостность файлов/подписи,
-                    // реестр, службы/задачи, версии) — в фоновом потоке старта.
-                    GlassProductInspect::Inputs inspectIn;
-                    inspectIn.instance=gInstance;
-                    inspectIn.os64=result.os64;
-                    inspectIn.msiResX64=IDR_MSI_X64;
-                    inspectIn.msiResX86=IDR_MSI_X86;
-                    inspectIn.msiResSettings=result.os64?IDR_MSI_GS_X64:IDR_MSI_GS_X86;
-                    inspectIn.msiResOg=IDR_MSI_OPENGLASS;
-                    result.inspect=GlassProductInspect::Run(inspectIn);
-                    InstallLog::LineFormat(L"Inspect: x64(installed=%d damaged=%d update=%d) x86(%d %d %d) GS(%d %d %d) OG(%d %d %d)",
-                        result.inspect.x64.installed?1:0,result.inspect.x64.damaged?1:0,result.inspect.x64.updateAvailable?1:0,
-                        result.inspect.x86.installed?1:0,result.inspect.x86.damaged?1:0,result.inspect.x86.updateAvailable?1:0,
-                        result.inspect.settings.installed?1:0,result.inspect.settings.damaged?1:0,result.inspect.settings.updateAvailable?1:0,
-                        result.inspect.og.installed?1:0,result.inspect.og.damaged?1:0,result.inspect.og.updateAvailable?1:0);
-                }
-                if (!startupStop_.load(std::memory_order_acquire)) {
                     InstallLog::LineFormat(L"Startup MSI registrations: x64=%d x86=%d Settings=%d OpenGlass=%d",
                         result.installed.platform64?1:0,result.installed.platform32?1:0,
                         result.installed.glassSettings?1:0,result.installed.openGlass?1:0);
@@ -1545,22 +1533,35 @@ private:
         eulaText_=std::move(result.eulaText);
         SetWindowTextW(eula_,eulaText_.c_str());
         installedSelection_=result.installed;
-        inspect_=std::move(result.inspect);
         openGlassStartup_=result.openGlass;
         openGlassStartupDir_=std::move(result.openGlassDir);
         const bool os64=result.os64;
-        // По умолчанию отмечены отсутствующие, устаревшие и повреждённые продукты;
-        // неповреждённые установленные остаются снятыми (Setup их не трогает),
-        // включая ОС-нативную платформу — её обязательность держит замок карточки
-        // только когда по ней нужна обработка.
-        selection_.platform64=os64 && GlassProducts::DefaultSelectedFor(
-            ConditionOf(&inspect_.x64,installedSelection_.platform64));
-        selection_.platform32=GlassProducts::DefaultSelectedFor(
-            ConditionOf(&inspect_.x86,installedSelection_.platform32));
-        selection_.glassSettings=GlassProducts::DefaultSelectedFor(
-            ConditionOf(&inspect_.settings,installedSelection_.glassSettings));
-        selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(
-            ConditionOf(&inspect_.og,installedSelection_.openGlass));
+        // Временные отметки до завершения обследования: установленные — сняты,
+        // отсутствующие — отмечены. Точные состояния (обновление/повреждение)
+        // выставляются в OnInspectReady; карточки до анализа показывают загрузку.
+        selection_.platform64=os64 && !installedSelection_.platform64;
+        selection_.platform32=!installedSelection_.platform32;
+        selection_.glassSettings=!installedSelection_.glassSettings;
+        selection_.openGlass=os64 && !installedSelection_.openGlass;
+        // Обследование целостности идёт в фоне, пока пользователь проходит первые
+        // страницы; на странице состава до завершения показывается бублик загрузки.
+        inspectThread_=std::thread([this,os64]() {
+            GlassProductInspect::Inputs inspectIn;
+            inspectIn.instance=gInstance;
+            inspectIn.os64=os64;
+            inspectIn.msiResX64=IDR_MSI_X64;
+            inspectIn.msiResX86=IDR_MSI_X86;
+            inspectIn.msiResSettings=os64?IDR_MSI_GS_X64:IDR_MSI_GS_X86;
+            inspectIn.msiResOg=IDR_MSI_OPENGLASS;
+            inspectIn.cancelled=&inspectStop_;
+            auto report=GlassProductInspect::Run(inspectIn);
+            {
+                std::lock_guard<std::mutex> lock(inspectMutex_);
+                inspect_=std::move(report);
+            }
+            inspectReady_.store(true,std::memory_order_release);
+            if (window) PostMessageW(window,kInspectReady,0,0);
+        });
         SetPage(result.runtimeInstalled ? Page::Welcome : Page::RuntimeRequired);
         // WebView2 environment and controller creation must stay on the UI STA.
         if (result.runtimeInstalled && !PostMessageW(window,kInitWebView,0,0))
@@ -1766,6 +1767,7 @@ private:
         return text;
     }
     std::wstring ComponentsJson() const {
+        std::lock_guard<std::mutex> lock(inspectMutex_);
         const bool os64=GlassInstallUtil::IsOs64Bit();
         std::wstring json=L"[";
         auto item=[&](const wchar_t* id, UINT title, UINT desc, bool checked, bool locked, bool hidden, const GlassProductInspect::ProductReport* rep) {
@@ -1947,6 +1949,7 @@ private:
             L",\"marquee\":"+(progressMarquee_?L"true":L"false")+
             L",\"unlockActive\":"+((page_==Page::Installing && unlock!=WizardUnlock::Phase::None)?L"true":L"false")+
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
+            L",\"componentsLoading\":"+(inspectReady_.load(std::memory_order_acquire)?L"false":L"true")+
             L",\"components\":"+ComponentsJson()+
             L",\"componentsWarning\":"+JsStringLiteral(ComponentWarnings())+
             L",\"certificate\":"+CertificateJson()+
@@ -2002,13 +2005,30 @@ private:
         transitioning_=false;
         ShowContentControls();
         EnableWindow(back_,TRUE);
-        EnableWindow(next_,!failurePending_ && (page_!=Page::License || accepted_) && (page_!=Page::Components || HasSelectedComponent()));
+        EnableWindow(next_,!failurePending_ && (page_!=Page::License || accepted_) && ComponentsReady());
         FocusPage();
         InvalidateContent();
     }
     // «Установить» доступен только с выбранными продуктами: без них делать нечего.
     [[nodiscard]] bool HasSelectedComponent() const noexcept {
         return selection_.platform64 || selection_.platform32 || selection_.glassSettings || selection_.openGlass;
+    }
+    // «Установить» доступен, когда анализ завершён и есть выбранные продукты.
+    [[nodiscard]] bool ComponentsReady() const noexcept {
+        return page_!=Page::Components || (inspectReady_.load(std::memory_order_acquire) && HasSelectedComponent());
+    }
+    void OnInspectReady() {
+        {
+            std::lock_guard<std::mutex> lock(inspectMutex_);
+            const bool os64=GlassInstallUtil::IsOs64Bit();
+            selection_.platform64=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.x64,installedSelection_.platform64));
+            selection_.platform32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.x86,installedSelection_.platform32));
+            selection_.glassSettings=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings,installedSelection_.glassSettings));
+            selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.og,installedSelection_.openGlass));
+        }
+        EnableWindow(next_,!failurePending_ && ComponentsReady());
+        SyncWebViewState();
+        InvalidateContent();
     }
     void SetPage(Page page) {
         const Page oldPage=page_;
@@ -2053,7 +2073,7 @@ private:
         ShowWindow(back_,backVisible?SW_SHOWNA:SW_HIDE);
         ShowWindow(next_,nextVisible?SW_SHOWNA:SW_HIDE);
         ShowWindow(cancel_,cancelVisible && !demoLocked?SW_SHOWNA:SW_HIDE);
-        EnableWindow(next_,!failurePending_ && !demoLocked && (page_!=Page::License || accepted_) && (page_!=Page::Components || HasSelectedComponent()));
+        EnableWindow(next_,!failurePending_ && !demoLocked && (page_!=Page::License || accepted_) && ComponentsReady());
         EnableWindow(back_,!demoLocked);
         EnableWindow(cancel_,!demoLocked && !(page_==Page::RuntimeInstalling && runtimeCancel_.load()));
         EnableWindow(updateDownload_,!demoLocked);
@@ -2821,7 +2841,7 @@ private:
             else if (message==L"component:x86:1" || message==L"component:x86:0") selection_.platform32=message.back()==L'1';
             else if (message==L"component:settings:1" || message==L"component:settings:0") selection_.glassSettings=message.back()==L'1';
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
-            EnableWindow(next_,!failurePending_ && HasSelectedComponent());
+            EnableWindow(next_,!failurePending_ && ComponentsReady());
             SyncWebViewState();
             return S_OK;
         }
@@ -3290,6 +3310,9 @@ private:
             DrawBanner(dc,true);
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
             DrawLabel(dc,Text(IDS_COMP_TITLE),Box(48,90,700,50),heading_,white);
+            if (!inspectReady_.load(std::memory_order_acquire)) {
+                DrawLabel(dc,Text(IDS_COMP_ANALYZING),Box(60,238,800,40),font_,muted);
+            } else {
             DrawLabel(dc,Text(IDS_COMP_INTRO),Box(48,142,840,42),font_,muted);
             const bool os64=GlassInstallUtil::IsOs64Bit();
             const auto state=[&](bool selected, bool installed, bool mandatory, int x, int y) {
@@ -3307,6 +3330,7 @@ private:
                 warningY+=50;
             }
             if (SettingsWarningApplies()) DrawLabel(dc,Text(IDS_COMP_GS_WARNING),Box(48,warningY,840,88),font_,white);
+            }
         } else if (page_==Page::ConfirmCancel || page_==Page::Cancelled || page_==Page::Cancelling || page_==Page::Launching) {
             DrawBanner(dc,true);
             const UINT title=page_==Page::ConfirmCancel?IDS_CONFIRM_CANCEL_TITLE:page_==Page::Cancelled?IDS_CANCELLED_TITLE:
@@ -3537,6 +3561,7 @@ private:
         case WM_CREATE: InitializeLoading(); return 0;
         case kBeginStartup: BeginStartup(); return 0;
         case kStartupComplete: CompleteStartupIfReady(); return 0;
+        case kInspectReady: OnInspectReady(); return 0;
         case WM_ERASEBKGND:
             if (bufferedErase_) Erase(reinterpret_cast<HDC>(w));
             return 1; // Do not clear the on-screen client before the buffered paint.
@@ -3660,7 +3685,7 @@ private:
                     selection_.platform32=SendMessageW(component32_,BM_GETCHECK,0,0)==BST_CHECKED;
                     selection_.glassSettings=SendMessageW(componentSettings_,BM_GETCHECK,0,0)==BST_CHECKED;
                     selection_.openGlass=os64 && SendMessageW(componentOpenGlass_,BM_GETCHECK,0,0)==BST_CHECKED;
-                    EnableWindow(next_,!failurePending_ && HasSelectedComponent());
+                    EnableWindow(next_,!failurePending_ && ComponentsReady());
                     InvalidateContent();
                 }
                 return 0;

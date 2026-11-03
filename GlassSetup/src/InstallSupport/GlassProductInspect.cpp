@@ -445,6 +445,8 @@ Report Run(const Inputs& in)
         int index = 0;
         for (const auto& job : fileJobs)
         {
+            if (in.cancelled && in.cancelled->load(std::memory_order_acquire))
+                break;
             if (!job.rep->installed || job.res == 0)
                 continue;
             std::wstring msiPath = tempDir + L"\\inspect-" + std::to_wstring(index++) + L".msi";
@@ -493,6 +495,8 @@ Report Run(const Inputs& in)
         RemoveDirectoryW(tempDir.c_str());
     }
 
+    if (in.cancelled && in.cancelled->load(std::memory_order_acquire))
+        return report;
     // Параметры реестра установки: корень каждого продукта должен разрешаться.
     const auto rootInvalid = [](const std::wstring& root) noexcept {
         if (root.empty())

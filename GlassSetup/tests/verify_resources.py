@@ -602,6 +602,13 @@ assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_
 assert "HasSelectedComponent" in setup
 assert "не требуется" in ui and "has-reasons" in ui
 
+# 2026-11-03 follow-up 6: integrity analysis runs in the background during the first
+# pages; the products page shows the startup-style loading donut until it completes;
+# the reasons line starts with a bold dot vertically centered.
+assert "kInspectReady" in setup and "inspectThread_" in setup and "IDS_COMP_ANALYZING" in setup
+assert "componentsLoading" in setup and "comp-loading" in ui and "loading-donut" in ui
+assert "comp-reason-line:before" in ui and "componentsLoading" in ui
+
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")
 if node:
