@@ -2002,9 +2002,13 @@ private:
         transitioning_=false;
         ShowContentControls();
         EnableWindow(back_,TRUE);
-        EnableWindow(next_,!failurePending_ && (page_!=Page::License || accepted_));
+        EnableWindow(next_,!failurePending_ && (page_!=Page::License || accepted_) && (page_!=Page::Components || HasSelectedComponent()));
         FocusPage();
         InvalidateContent();
+    }
+    // «Установить» доступен только с выбранными продуктами: без них делать нечего.
+    [[nodiscard]] bool HasSelectedComponent() const noexcept {
+        return selection_.platform64 || selection_.platform32 || selection_.glassSettings || selection_.openGlass;
     }
     void SetPage(Page page) {
         const Page oldPage=page_;
@@ -2049,7 +2053,7 @@ private:
         ShowWindow(back_,backVisible?SW_SHOWNA:SW_HIDE);
         ShowWindow(next_,nextVisible?SW_SHOWNA:SW_HIDE);
         ShowWindow(cancel_,cancelVisible && !demoLocked?SW_SHOWNA:SW_HIDE);
-        EnableWindow(next_,!failurePending_ && !demoLocked && (page_!=Page::License || accepted_));
+        EnableWindow(next_,!failurePending_ && !demoLocked && (page_!=Page::License || accepted_) && (page_!=Page::Components || HasSelectedComponent()));
         EnableWindow(back_,!demoLocked);
         EnableWindow(cancel_,!demoLocked && !(page_==Page::RuntimeInstalling && runtimeCancel_.load()));
         EnableWindow(updateDownload_,!demoLocked);
@@ -2817,6 +2821,7 @@ private:
             else if (message==L"component:x86:1" || message==L"component:x86:0") selection_.platform32=message.back()==L'1';
             else if (message==L"component:settings:1" || message==L"component:settings:0") selection_.glassSettings=message.back()==L'1';
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
+            EnableWindow(next_,!failurePending_ && HasSelectedComponent());
             SyncWebViewState();
             return S_OK;
         }
@@ -3655,6 +3660,7 @@ private:
                     selection_.platform32=SendMessageW(component32_,BM_GETCHECK,0,0)==BST_CHECKED;
                     selection_.glassSettings=SendMessageW(componentSettings_,BM_GETCHECK,0,0)==BST_CHECKED;
                     selection_.openGlass=os64 && SendMessageW(componentOpenGlass_,BM_GETCHECK,0,0)==BST_CHECKED;
+                    EnableWindow(next_,!failurePending_ && HasSelectedComponent());
                     InvalidateContent();
                 }
                 return 0;

@@ -597,6 +597,11 @@ assert "RemoveUserSettings" in reg_sanity and "RemoveUserSettings" in unins
 assert "IDC_UNINS_SETTINGS_CLEANUP" in header_now and "cleanupSettings" in unins
 assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_sanity
 
+# 2026-11-03 follow-up 5: «Установить» disabled with no product selected; the reasons
+# subline stays on every card with neutral grey «не требуется» when there are no reasons.
+assert "HasSelectedComponent" in setup
+assert "не требуется" in ui and "has-reasons" in ui
+
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")
 if node:

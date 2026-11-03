@@ -341,7 +341,8 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .comp-badge.action-update{border-color:#f4c46d80;background:#f4bd5e20;color:#ffdf9d}
 .comp-badge.action-keep{border-color:#78dda66e;background:#54c88e20;color:#b8f4d1}
 .comp-badge.action-repair{border-color:#e57a7a80;background:#c25b5b26;color:#ffc9c9}
-.comp-reason-line{margin:5px 0 0 18px;color:#f1c7c7;font-size:10.5px;line-height:1.4;min-height:15px}
+.comp-reason-line{margin:5px 0 0 18px;color:#8f94ab;font-size:10.5px;line-height:1.4;min-height:15px}
+.comp-reason-line.has-reasons{color:#f1c7c7}
 .comp-reasons li{position:relative;margin:0 0 2px;padding-left:14px;color:#f1c7c7;font-size:10.5px;line-height:1.4}
 .comp-reasons li:before{content:"";position:absolute;left:1px;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:#e57a7a}
 .comp-badge.muted{border-color:#ffffff22;background:#ffffff0a;color:#a7acc4}
@@ -608,7 +609,8 @@ function renderComponentsPanel(){
    const desc=document.createElement('p');desc.className='comp-desc';desc.textContent=String(item.description||'');body.append(head,desc);
    const hasReasons=Array.isArray(item.reasons)&&item.reasons.length>0;
    const reasonLine=document.createElement('p');reasonLine.className='comp-reason-line';
-   reasonLine.textContent=hasReasons?item.reasons.join(' \u00b7 '):'';
+   reasonLine.textContent=hasReasons?item.reasons.join(' \u00b7 '):(locale==='ru'?'не требуется':'not required');
+   if(hasReasons)reasonLine.classList.add('has-reasons');
    body.append(reasonLine);
    label.append(input,body);grid.append(label);
   }
