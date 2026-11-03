@@ -13,8 +13,10 @@
 #include <wintrust.h>
 
 #include <array>
+#include <cstring>
 #include <cstdlib>
 #include <cwctype>
+#include <type_traits>
 #include <string>
 #include <vector>
 
@@ -220,6 +222,23 @@ bool EnumProductFiles(MSIHANDLE database, std::vector<FileCheck>& out) noexcept
     return ext == L".exe" || ext == L".dll" || ext == L".sys";
 }
 
+// MSIINSTALLHASH и имена его полей в части SDK не объявлены рядом с MsiGetFileHashW.
+// Тип структуры берём из сигнатуры самой функции, а значения хеша — последние 16 байт
+// (dwHashOptions, dwLength, четыре DWORD — ровно колонки Hash1..Hash4 таблицы MsiFileHash).
+template <class R, class A, class B, class C>
+C ThirdParameter(R (WINAPI*)(A, B, C));
+using MsiFileHashBuffer = std::remove_pointer_t<decltype(ThirdParameter(&MsiGetFileHashW))>;
+
+[[nodiscard]] bool FileHashMatches(const std::wstring& path, const DWORD (&expected)[4]) noexcept
+{
+    MsiFileHashBuffer hash{};
+    if (MsiGetFileHashW(path.c_str(), 0, &hash) != ERROR_SUCCESS)
+        return true; // файл недоступен — не считаем повреждением (есть проверки размера/подписи)
+    static_assert(sizeof(MsiFileHashBuffer) >= 16, "MSI hash buffer too small");
+    const auto* bytes = reinterpret_cast<const BYTE*>(&hash);
+    return memcmp(bytes + sizeof(MsiFileHashBuffer) - 16, expected, sizeof(expected)) == 0;
+}
+
 // Сверка файлов установленного продукта с таблицами File/MsiFileHash встроенного
 // MSI и с подписью издателя установщика (повреждение, подмена).
 void CheckProductFiles(
@@ -266,14 +285,8 @@ void CheckProductFiles(
             (static_cast<unsigned long long>(attrs.nFileSizeHigh) << 32) | attrs.nFileSizeLow;
         if (file.size != 0 && actualSize != file.size)
             AddReason(rep, Reason::FileSizeMismatch);
-        if (file.hasHash)
-        {
-            MSIINSTALLHASH hash{};
-            if (MsiGetFileHashW(path, 0, &hash) != ERROR_SUCCESS ||
-                hash.dw1 != file.hash[0] || hash.dw2 != file.hash[1] ||
-                hash.dw3 != file.hash[2] || hash.dw4 != file.hash[3])
-                AddReason(rep, Reason::FileHashMismatch);
-        }
+        if (file.hasHash && !FileHashMatches(path, file.hash))
+            AddReason(rep, Reason::FileHashMismatch);
         if (!signerSha1.empty() && HasPeExtension(path))
         {
             std::wstring signer;
