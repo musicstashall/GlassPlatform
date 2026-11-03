@@ -541,6 +541,22 @@ assert "IDS_COMP_BADGE_REPAIR" in setup and "IDS_INSPECT_FILE_HASH" in setup and
 assert "action-repair" in ui and "comp-reasons" in ui and "reasons" in setup
 assert "GlassProductInspect.cpp" in (repo / "GlassSetup/GlassSetup.vcxproj").read_text(encoding="utf-8")
 
+# Registry sanity (2026-11-03 decisions): invalid values are DELETED (defaults are never
+# written to the registry); only known names are touched; base Windows DWM values are not
+# in the schema; optional GlassSettings startup check behind a toggle in app settings.
+reg_sanity = (repo / "GlassShared/src/RegistrySanity.cpp").read_text(encoding="utf-8")
+assert "RegDeleteValueW" in reg_sanity and "ColorizationColorOverride" in reg_sanity
+assert '{ L"ColorizationColor"' not in reg_sanity and '{ L"EnableTransparency"' not in reg_sanity
+assert "ValidateSettingsOnStartup" in reg_sanity
+assert "GlassSettings_ValidateRegistryState" in native_host_h
+assert "RegistrySanity" in inspect_cpp
+settings_reg = (repo / "GlassSettings/Core/Registry/GlassSettingsRegistry.cs").read_text(encoding="utf-8")
+assert "ValidateSettingsOnStartupValue" in settings_reg
+app_panel = (repo / "GlassSettings/Controls/AppSettingsPanel.xaml").read_text(encoding="utf-8")
+assert "ValidateRegistrySwitch" in app_panel
+app_cs = (repo / "GlassSettings/Controls/AppSettingsPanel.xaml.cs").read_text(encoding="utf-8")
+assert "WriteValidateSettingsOnStartup" in app_cs
+
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")
 if node:

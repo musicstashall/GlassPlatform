@@ -36,6 +36,9 @@ public static partial class GlassSettingsRegistry
 
     public const string EnableSystemFontValue = "EnableSystemFont";
 
+    /// <summary>Опциональная проверка настроек при старте GlassSettings (карточка в настройках приложения).</summary>
+    public const string ValidateSettingsOnStartupValue = "ValidateSettingsOnStartup";
+
     public const string AppThemeValue = "AppTheme";
 
     public const string WindowBackdropValue = "WindowBackdrop";
@@ -91,6 +94,15 @@ public static partial class GlassSettingsRegistry
     public static void WriteEnableSystemFont(bool enabled) =>
 
         GlassRegistry.WriteDword(SubKey, EnableSystemFontValue, enabled ? 1u : 0u);
+
+    public static bool ReadValidateSettingsOnStartup(bool defaultValue = false)
+    {
+        var value = GlassRegistry.ReadDword(SubKey, ValidateSettingsOnStartupValue);
+        return value.HasValue ? value.Value != 0 : defaultValue;
+    }
+
+    public static void WriteValidateSettingsOnStartup(bool enabled) =>
+        GlassRegistry.WriteDword(SubKey, ValidateSettingsOnStartupValue, enabled ? 1u : 0u);
 
 
 

@@ -229,6 +229,8 @@
   <data name="AppSettings_BusyOverlayDescription" xml:space="preserve"><value>Вид окна, когда оно недоступно, например под диалогом</value></data>
   <data name="AppSettings_BusyOverlayModeAcrylic" xml:space="preserve"><value>Acrylic</value></data>
   <data name="AppSettings_BusyOverlayModeDim" xml:space="preserve"><value>Затенение</value></data>
+  <data name="AppSettings_ValidateRegistryHeader" xml:space="preserve"><value>Проверять настройки при старте</value></data>
+  <data name="AppSettings_ValidateRegistryDescription" xml:space="preserve"><value>При запуске GlassSettings проверять известные параметры реестра платформы и удалять повреждённые значения.</value></data>
   <data name="AppSettings_LanguageLabel" xml:space="preserve"><value>Язык интерфейса</value></data>
   <data name="AppSettings_LanguageDescription" xml:space="preserve"><value>Выберите предпочитаемый язык для GlassSettings</value></data>
   <data name="AppSettings_LanguageSystem" xml:space="preserve"><value>Системный</value></data>

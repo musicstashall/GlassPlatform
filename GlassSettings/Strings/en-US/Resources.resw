@@ -226,6 +226,8 @@
   <data name="AppSettings_BusyOverlayDescription" xml:space="preserve"><value>Window appearance when unavailable, for example under a dialog</value></data>
   <data name="AppSettings_BusyOverlayModeAcrylic" xml:space="preserve"><value>Acrylic</value></data>
   <data name="AppSettings_BusyOverlayModeDim" xml:space="preserve"><value>Dim</value></data>
+  <data name="AppSettings_ValidateRegistryHeader" xml:space="preserve"><value>Check settings on startup</value></data>
+  <data name="AppSettings_ValidateRegistryDescription" xml:space="preserve"><value>On GlassSettings startup validate the known platform registry values and delete damaged ones.</value></data>
   <data name="AppSettings_LanguageLabel" xml:space="preserve"><value>Display language</value></data>
   <data name="AppSettings_LanguageDescription" xml:space="preserve"><value>Choose your preferred language for GlassSettings</value></data>
   <data name="AppSettings_LanguageSystem" xml:space="preserve"><value>System</value></data>

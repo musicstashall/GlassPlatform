@@ -226,6 +226,9 @@ extern "C"
     __declspec(dllexport) BOOL WINAPI GlassSettings_SecureUxThemeEnsureLoaded() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_SecureUxThemeCheckCleanupPending() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_SecureUxThemeTryDeleteSystemFiles() noexcept;
+    /// Проверка известных параметров реестра платформы (Shared::RegistrySanity).
+    /// Возвращает число некорректных значений; applyFixes — удалить их (умолчания не пишутся).
+    __declspec(dllexport) DWORD WINAPI GlassSettings_ValidateRegistryState(BOOL applyFixes) noexcept;
     /// GlassUnins (rundll32, разрядность ОС): деактивация SecureUxTheme «как в GlassSettings» —
     /// стандартный стиль при пользовательском, затем GlassSettings_SecureUxThemeDeactivate.
     /// Код выхода: биты 1 неверные аргументы, 2 перезагрузка, 4 стиль не восстановлен,

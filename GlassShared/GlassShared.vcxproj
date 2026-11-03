@@ -217,6 +217,7 @@
     <ClCompile Include="src\MenuUtils.cpp" />
     <ClCompile Include="src\WndCompatHostApi.cpp" />
     <ClCompile Include="src\ProcessBlockList.cpp" />
+    <ClCompile Include="src\RegistrySanity.cpp" />
     <ClCompile Include="src\WinApiUtils.cpp" />
     <ClCompile Include="src\OpenGlassDwmPolicy.cpp" />
     <ClCompile Include="src\OpenGlassHostState.cpp" />

@@ -5,6 +5,7 @@
 #include "GlassInstallUtil.h"
 
 #include <GlassPlatformTask.h>
+#include <RegistrySanity.h>
 
 #include <msi.h>
 #include <softpub.h>
@@ -385,6 +386,14 @@ Report Run(const Inputs& in)
         else if (!taskKnown && !serviceKnown)
             AddReason(report.og, Reason::AutostartMissing);
     }
+
+    // Известные параметры реестра платформы (GlassPlatform и DWM-значения OpenGlass):
+    // некорректные значения — признак повреждения; чинит удаление при установке.
+    const auto sanity = Shared::RegistrySanity::Validate(false);
+    if (sanity.glassIssues)
+        AddReason(report.settings, Reason::RegistryInvalid);
+    if (sanity.openGlassIssues)
+        AddReason(report.og, Reason::RegistryInvalid);
 
     report.ran = true;
     return report;
