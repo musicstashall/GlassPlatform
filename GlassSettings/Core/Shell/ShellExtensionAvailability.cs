@@ -11,8 +11,8 @@ internal static class ShellExtensionAvailability
 {
     public const string SparseSubdir = "GlassShellSparse";
     public const string ShellExtDll = "GlassShellExt.dll";
-    public const string AuthorCertificateFile = "GlassAuthorCodeSigning.cer";
-    public const string AuthorCertificateReadme = "GlassAuthorCodeSigning.txt";
+    public const string AuthorCertificateFile = "DeveloperCodeSigning.cer";
+    public const string AuthorCertificateReadme = "DeveloperCodeSigning.txt";
 
     public static bool IsBundledShellExtensionPresent()
     {
@@ -33,7 +33,7 @@ internal static class ShellExtensionAvailability
         return true;
     }
 
-    /// <summary>Путь к GlassAuthorCodeSigning.cer в корне платформы (или пустая строка).</summary>
+    /// <summary>Путь к DeveloperCodeSigning.cer в корне платформы (или пустая строка).</summary>
     public static string GetAuthorCertificatePath()
     {
         var root = GlassModulePath.GetInstallRoot();

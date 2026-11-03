@@ -452,11 +452,20 @@ assert "selection_.trustSigner" in engine and "InvokeShellSignerTrust" in engine
 assert "Page::Certificate" in setup and "CertificatePageApplies()" in setup and "QuerySelfSignerInfo()" in setup
 assert "postMessage('certificate:'+item.id)" in ui and "renderCertificatePanel" in ui and 'data-mode="certificate"' in ui
 assert "certificate:1" in setup and "certificate:0" in setup  # host side of the web message
-assert "IDS_CERT_TITLE" in setup and "IDS_WARN_CERT_INSTALL" in setup and "IDS_CERT_NOTE" in setup
+assert "IDS_CERT_TITLE" in setup and "IDS_WARN_CERT_INSTALL" in setup
+# H3-UI: the certificate page is short (no what/why/note blocks), radios say accept/decline;
+# text is never selectable and the old "GlassAuthorCodeSigning" naming is gone everywhere.
+header_now = read("res/resource.h")
+for removed in ("IDS_CERT_WHAT", "IDS_CERT_WHY", "IDS_CERT_NOTE"):
+    assert removed not in header_now and removed not in setup and removed not in rc, removed
+assert "Принять сертификат" in rc and "Не принимать" in rc and "Принять сертификат разработчика?" in rc
+assert "certificate-what" not in ui and "certificate-note" not in ui and "user-select:none" in ui
+for stale in (rc, util, unins, engine, payload, constants, read("res/Eula.ru.txt"), read("res/Eula.en.txt")):
+    assert "GlassAuthorCodeSigning" not in stale
 for eula in ("res/Eula.ru.txt", "res/Eula.en.txt"):
     text = read(eula)
-    assert "certlm.msc" in text and "GlassAuthorCodeSigning.txt" in text, eula
-assert "Сертификат автора" in read("res/Eula.ru.txt") and "Author certificate" in read("res/Eula.en.txt")
+    assert "certlm.msc" in text and "DeveloperCodeSigning.txt" in text, eula
+assert "Сертификат разработчика" in read("res/Eula.ru.txt") and "Developer certificate" in read("res/Eula.en.txt")
 # Classic Win32 menu: only regsvr32 /s (DllRegisterServer of the bundled GlassShellExt.dll) — on
 # Windows 10 always, on Windows 11 as the fallback when the sparse package cannot be registered.
 # Nobody writes shellex/ContextMenuHandlers keys by hand (GlassShellExt/README.md, AGENTS.md).
@@ -467,7 +476,7 @@ for forbidden in ("RegisterLegacyContextMenuHandler", "RegisterClassicInProcess"
 assert "RegCreateKey" not in shell_ops and "RegSetValue" not in shell_ops
 assert "kSetupClassicFallbackBase" in shell_ops and "0x47504C00" in shell_ops and "0x47504C00" in util
 assert "DescribeShellClassicFallback" in util and "classicFallbackReason" in util
-assert "IDS_WARN_SHELL_CLASSIC_CERT" in setup and "warnShellClassicCert" in engine and "GlassAuthorCodeSigning.cer" in engine
+assert "IDS_WARN_SHELL_CLASSIC_CERT" in setup and "warnShellClassicCert" in engine and "DeveloperCodeSigning.cer" in engine
 shell_actions = read("../GlassShellExt/DesktopShellActions.cpp")
 assert "GlassProject" not in shell_actions and "GlassShellExt-launch.log" in shell_actions
 assert 'L"%s\\\\GlassPlatform"' in shell_actions and 'L"%s\\\\Logs"' in shell_actions  # %LOCALAPPDATA%\GlassPlatform\Logs
@@ -475,8 +484,8 @@ assert "kShellExtRelativePath" in util and "kShellExtRelativePath" in unins and 
 assert "kSparsePublisher[] = L\"CN=Stanislav K.\"" in constants
 for manifest in ("GlassShellExt/Package/AppxManifest.xml", "GlassShellExt/Package/AppxManifest.UnregisterStub.xml"):
     assert 'Publisher="CN=Stanislav K."' in (repo / manifest).read_text(encoding="utf-8"), manifest
-assert (repo / "Shared/certs/GlassAuthorCodeSigning.cer").exists() and (repo / "Shared/certs/GlassAuthorCodeSigning.txt").exists()
-assert "GlassAuthorCodeSigning.cer" in payload and "GlassAuthorCodeSigning.txt" in payload and "GlassShellSparse" in payload
+assert (repo / "Shared/certs/DeveloperCodeSigning.cer").exists() and (repo / "Shared/certs/DeveloperCodeSigning.txt").exists()
+assert "DeveloperCodeSigning.cer" in payload and "DeveloperCodeSigning.txt" in payload and "GlassShellSparse" in payload
 assert 'm.type===\'init\'||m.type===\'state\'' in ui
 
 # H3 item 5: the SecureUxTheme payload ships inside GlassSettings.MSI

@@ -479,13 +479,13 @@
   <data name="Error_ShellExtensionInconsistentState" xml:space="preserve"><value>The menu extension is in an inconsistent state. Turn it off, then turn it on again.</value></data>
   <data name="Error_ShellExtensionNeedsExplorerRestart" xml:space="preserve"><value>Restart File Explorer to refresh the desktop menu.</value></data>
   <data name="Error_ShellExtensionSparseArtifactsMissing" xml:space="preserve"><value>Context menu extension files are missing. Reinstall Glass Settings.</value></data>
-  <data name="Error_ShellExtensionSparseSignerNotTrusted" xml:space="preserve"><value>Windows 11 registers the compact menu only from a publisher with a trusted certificate, and the classic registration also failed. The author certificate can be installed on this page; it is described in GlassAuthorCodeSigning.txt in the installation folder.</value></data>
+  <data name="Error_ShellExtensionSparseSignerNotTrusted" xml:space="preserve"><value>Windows 11 registers the compact menu only from a publisher with a trusted certificate, and the classic registration also failed. The developer certificate can be installed on this page; it is described in DeveloperCodeSigning.txt in the installation folder.</value></data>
   <data name="Error_ShellExtensionSparseDeployFailed" xml:space="preserve"><value>Could not register the desktop context menu extension.</value></data>
   <data name="Error_ShellExtensionSparseExternalLocationConflict" xml:space="preserve"><value>A previous registration of the desktop context menu extension is still present. Turn the extension off in Glass Settings, then turn it on again.</value></data>
   <data name="Error_ShellExtensionTimedOut" xml:space="preserve"><value>The operation timed out. The state may not have updated completely.</value></data>
   <data name="Error_ShellExtensionTitle" xml:space="preserve"><value>Context menu extension</value></data>
-  <data name="Error_ShellCertTitle" xml:space="preserve"><value>Author certificate</value></data>
-  <data name="Error_ShellCertFailed" xml:space="preserve"><value>The author certificate could not be installed into the computer’s Trusted People store.</value></data>
+  <data name="Error_ShellCertTitle" xml:space="preserve"><value>Developer certificate</value></data>
+  <data name="Error_ShellCertFailed" xml:space="preserve"><value>The developer certificate could not be installed into the computer’s Trusted People store.</value></data>
   <data name="Error_ShellCertStoreFormat" xml:space="preserve"><value>Certificate store error: code {0}.</value></data>
   <data name="Error_ShellCertResultFormat" xml:space="preserve"><value>Result code {0}. Details are in the GlassSettings log.</value></data>
   <data name="Flyout_Animation" xml:space="preserve"><value>Animation</value></data>
@@ -802,11 +802,11 @@
   <data name="System_RowShellExtensionDesc" xml:space="preserve"><value>Glass item on the desktop context menu</value></data>
   <data name="System_RowShellExtensionDescClassic" xml:space="preserve"><value>Glass item on the desktop context menu (under “Show more options”)</value></data>
   <data name="System_ShellMenuNoticeTitle" xml:space="preserve"><value>Windows 11 compact menu is unavailable</value></data>
-  <data name="System_ShellCertNoticeMessage" xml:space="preserve"><value>Windows 11 shows the compact context menu only for packages signed with a trusted certificate. The author certificate {0} is not yet in Trusted People on this computer, so the Glass item is registered the classic way and appears under “Show more options” (Shift+F10). The platform works in full; the certificate is needed only for the compact menu, installing it is optional and happens only when you click. What the certificate is and how to remove it: {1} in the installation folder.</value></data>
+  <data name="System_ShellCertNoticeMessage" xml:space="preserve"><value>Windows 11 shows the compact context menu only for packages signed with a trusted certificate. The developer certificate {0} is not yet in Trusted People on this computer, so the Glass item is registered the classic way and appears under “Show more options” (Shift+F10). The platform works in full; the certificate is needed only for the compact menu, installing it is optional and happens only when you click. What the certificate is and how to remove it: {1} in the installation folder.</value></data>
   <data name="System_ShellCertNoticeOpenFolder" xml:space="preserve"><value>Open certificate folder</value></data>
-  <data name="System_ShellCertNoticeInstall" xml:space="preserve"><value>Install the author certificate and enable the compact menu</value></data>
+  <data name="System_ShellCertNoticeInstall" xml:space="preserve"><value>Install the developer certificate and enable the compact menu</value></data>
   <data name="System_ShellClassicNoticeSwitch" xml:space="preserve"><value>Switch to the compact menu</value></data>
-  <data name="System_ShellClassicNoticeMessage" xml:space="preserve"><value>The Glass item is currently registered the classic way and appears under “Show more options” (Shift+F10). The author certificate is already trusted, so you can switch to the compact Windows 11 menu.</value></data>
+  <data name="System_ShellClassicNoticeMessage" xml:space="preserve"><value>The Glass item is currently registered the classic way and appears under “Show more options” (Shift+F10). The developer certificate is already trusted, so you can switch to the compact Windows 11 menu.</value></data>
   <data name="System_ShellSparseNoticeMessage" xml:space="preserve"><value>The compact menu package (GlassShellSparse\GlassShellSparse.msix) is missing or unsigned, so the Glass item appears under “Show more options” (Shift+F10). Reinstall GlassPlatform to restore the compact menu.</value></data>
   <data name="Taskbar_PageSubtitle" xml:space="preserve"><value>Taskbar effects and colors</value></data>
   <data name="Themes_ActiveBadge" xml:space="preserve"><value>Current</value></data>

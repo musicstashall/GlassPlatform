@@ -11,7 +11,7 @@
 
 | Пакет | Каталог по умолчанию | Содержимое |
 |-------|----------------------|------------|
-| x64 MSI | `%ProgramFiles%\GlassPlatform` | `GlassCompat.dll` и peer x64, `GlassAuthorCodeSigning.cer`/`.txt`; UI в подкаталоге `GlassSettings\`; меню рабочего стола в подкаталоге `GlassShellSparse\` (`GlassShellExt.dll`, `GlassShellHost.exe`, `GlassShellSparse.msix`, манифесты) |
+| x64 MSI | `%ProgramFiles%\GlassPlatform` | `GlassCompat.dll` и peer x64, `DeveloperCodeSigning.cer`/`.txt`; UI в подкаталоге `GlassSettings\`; меню рабочего стола в подкаталоге `GlassShellSparse\` (`GlassShellExt.dll`, `GlassShellHost.exe`, `GlassShellSparse.msix`, манифесты) |
 | x86 MSI | `%ProgramFiles(x86)%\GlassPlatform` | то же для x86 |
 
 Пользователь может выбрать другой путь при установке. Фактический путь пишется в `InstallPath`.
@@ -118,4 +118,4 @@ platform, затем для `SETTINGS_PRODUCT_CODE`. После завершен
 
 ## GlassShellExt
 
-Регистрируется с x64-пакетом. Управляет **только задачами** (start/stop через Task Scheduler). Пути `GlassCompat.dll` не резолвит. `GlassSettings.exe` ищет от своего каталога `<root>\GlassShellSparse\` на уровень выше — `<root>\GlassSettings\` (пункт «Настройки»). На Windows 11 без доверия сертификату автора регистрируется классический пункт (после «Показать дополнительные параметры»); подробности — `GlassShellExt/README.md`.
+Регистрируется с x64-пакетом. Управляет **только задачами** (start/stop через Task Scheduler). Пути `GlassCompat.dll` не резолвит. `GlassSettings.exe` ищет от своего каталога `<root>\GlassShellSparse\` на уровень выше — `<root>\GlassSettings\` (пункт «Настройки»). На Windows 11 без доверия сертификату разработчика регистрируется классический пункт (после «Показать дополнительные параметры»); подробности — `GlassShellExt/README.md`.

@@ -9,8 +9,8 @@
 |---|---|
 | Сертификат | `CN=Stanislav K.`, SHA-1 `A801E5F5F430D6D19164C856F79B8EFD23F83EB8`, действует до 2031-11-01 |
 | Закрытый ключ | только в хранилище Windows машины автора: `Cert:\CurrentUser\My\A801E5F5…3EB8` |
-| Резервная копия ключа | `GlassAuthorCodeSigning.pfx` (зашифрован паролем) — вне репозитория, на внешнем носителе/облаке; пароль хранится отдельно |
-| Публичная часть | `Shared/certs/GlassAuthorCodeSigning.cer` — в репозитории, секретов не содержит |
+| Резервная копия ключа | `DeveloperCodeSigning.pfx` (зашифрован паролем) — вне репозитория, на внешнем носителе/облаке; пароль хранится отдельно |
+| Публичная часть | `Shared/certs/DeveloperCodeSigning.cer` — в репозитории, секретов не содержит |
 | Пин отпечатка | `Shared/GlassSign.targets` → `<GlassSignThumbprint>` и таблица в `README.md` |
 
 Файлов `*.pfx` в рабочей копии быть не должно (`.gitignore` их отбрасывает, но и класть не нужно).
@@ -21,18 +21,18 @@
 `python GlassSetup/tests/sparse_identity_mock.py`. Отдельного «dev»-сертификата для MSIX нет; сборка без ключа автора
 даёт неподписанный msix (на Win11 — классический fallback меню).
 
-## Компактное меню Windows 11: сертификат автора на машине пользователя
+## Компактное меню Windows 11: сертификат разработчика на машине пользователя
 
 Windows регистрирует sparse-пакет только от издателя, сертификат которого есть в «Доверенных лицах»
 (`LocalMachine\TrustedPeople`). Установка сертификата — всегда осознанный выбор пользователя:
 
-- **Установщик** (Win11 x64) показывает отдельную страницу «Сертификат автора» с объяснением, что это и зачем;
+- **Установщик** (Win11 x64) показывает отдельную страницу «Сертификат разработчика» с объяснением, что это и зачем;
   её можно пропустить. При согласии helper (`GlassSettings_ShellSignerTrustSetupV1W`) добавляет сертификат
   из подписи `GlassShellSparse.msix` в `LocalMachine\TrustedPeople` — единственное место записи
   (`ShellSparsePackage::TrustSparseSigner`). Отказ — обычный сценарий: меню остаётся классическим.
-- **GlassSettings** → Система: уведомление о непринятом сертификате со ссылкой «Установить сертификат автора
+- **GlassSettings** → Система: уведомление о непринятом сертификате со ссылкой «Установить сертификат разработчика
   и включить компактное меню» и ссылкой на папку с файлом сертификата.
-- **EULA** (RU/EN, раздел «Сертификат автора») описывает сертификат, его назначение и право не устанавливать его.
+- **EULA** (RU/EN, раздел «Сертификат разработчика») описывает сертификат, его назначение и право не устанавливать его.
 - **GlassUnins сертификат никогда не удаляет** — это явное решение пользователя (остаётся в хранилище до ручного
   удаления через `certlm.msc` → «Доверенные лица»).
 - Сборка ничего не создаёт и не экспортирует (`New-SelfSignedCertificate`, `Import-Certificate` и т. п. запрещены).
@@ -40,20 +40,20 @@ Windows регистрирует sparse-пакет только от издат�
 Ручной путь (резервный, для автора) — тот же файл:
 
 ```powershell
-Import-Certificate -FilePath .\Shared\certs\GlassAuthorCodeSigning.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+Import-Certificate -FilePath .\Shared\certs\DeveloperCodeSigning.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
 ```
 
-Инструкция для пользователей — `Shared/certs/GlassAuthorCodeSigning.txt` (ставится в корень платформы рядом с `.cer`).
+Инструкция для пользователей — `Shared/certs/DeveloperCodeSigning.txt` (ставится в корень платформы рядом с `.cer`).
 
 ## Смена ПК или переустановка ОС
 
-Нужны: `GlassAuthorCodeSigning.pfx`, его пароль, клон репозитория. Больше ничего из старой системы не требуется.
+Нужны: `DeveloperCodeSigning.pfx`, его пароль, клон репозитория. Больше ничего из старой системы не требуется.
 
 1. Установить Visual Studio с рабочей нагрузкой C++ и Windows SDK (в SDK входит `signtool.exe`), WiX — как для обычной сборки.
 2. Импортировать ключ в хранилище текущего пользователя (без прав администратора):
 
    ```powershell
-   Import-PfxCertificate -FilePath <путь>\GlassAuthorCodeSigning.pfx `
+   Import-PfxCertificate -FilePath <путь>\DeveloperCodeSigning.pfx `
      -CertStoreLocation Cert:\CurrentUser\My -Exportable -Password (Read-Host -AsSecureString 'PFX password')
    ```
 
@@ -84,7 +84,7 @@ Import-Certificate -FilePath .\Shared\certs\GlassAuthorCodeSigning.cer -CertStor
 Remove-Item Cert:\CurrentUser\My\A801E5F5F430D6D19164C856F79B8EFD23F83EB8 -DeleteKey
 ```
 
-Перед этим убедиться, что `.pfx` открывается паролем (например, `Get-PfxCertificate <путь>\GlassAuthorCodeSigning.pfx`).
+Перед этим убедиться, что `.pfx` открывается паролем (например, `Get-PfxCertificate <путь>\DeveloperCodeSigning.pfx`).
 
 ## Ключ утерян (нет ни хранилища, ни `.pfx`)
 
@@ -93,7 +93,7 @@ Remove-Item Cert:\CurrentUser\My\A801E5F5F430D6D19164C856F79B8EFD23F83EB8 -Delet
 1. `powershell -NoProfile -ExecutionPolicy Bypass -File .\Shared\scripts\New-GlassSelfSignedCert.ps1` (на машине без старого ключа `-Force` не нужен).
 2. Сразу сделать резервную копию нового ключа (команда печатается скриптом).
 3. Обновить пин: `Shared/GlassSign.targets` → `<GlassSignThumbprint>`; `README.md` → таблица сертификата. Старый отпечаток из README не удалять, а перенести в строку «предыдущие сертификаты» с датами — опубликованные ранее сборки подписаны именно им.
-4. Закоммитить новый `Shared/certs/GlassAuthorCodeSigning.cer` (старый `.cer` можно оставить рядом с суффиксом даты) и обновить отпечаток/срок в `Shared/certs/GlassAuthorCodeSigning.txt`.
+4. Закоммитить новый `Shared/certs/DeveloperCodeSigning.cer` (старый `.cer` можно оставить рядом с суффиксом даты) и обновить отпечаток/срок в `Shared/certs/DeveloperCodeSigning.txt`.
 5. Если изменился Subject — обновить `Publisher` обоих `AppxManifest*.xml`, `kSparsePublisher` и `kSparsePackageFamilyName` в `GlassShellMenuConstants.h` (новое семейство печатает `sparse_identity_mock.py`); прежний sparse-пакет у пользователей не мигрируется.
 6. Rebuild обеих фаз и `Test-GlassSignatures.ps1`.
 

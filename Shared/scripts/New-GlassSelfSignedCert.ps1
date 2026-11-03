@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Creates the GlassPlatform author code-signing certificate (self-signed, CurrentUser\My) and
-    exports its public part to Shared\certs\GlassAuthorCodeSigning.cer.
+    exports its public part to Shared\certs\DeveloperCodeSigning.cer.
 
 .DESCRIPTION
     Run once on the author's machine (no administrator rights needed). The private key stays in the
@@ -24,7 +24,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 if (-not $CerOutDir) { $CerOutDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'certs' }
-$cerPath = Join-Path $CerOutDir 'GlassAuthorCodeSigning.cer'
+$cerPath = Join-Path $CerOutDir 'DeveloperCodeSigning.cer'
 
 function Get-Sha256Fingerprint($Certificate) {
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -70,5 +70,5 @@ Write-Host ''
 Write-Host 'Next steps'
 Write-Host '  1. Pin the SHA-1 thumbprint: Shared\GlassSign.targets -> <GlassSignThumbprint>, README.md -> section "... (Authenticode)" table.'
 Write-Host '  2. Back up the private key OUTSIDE the repository (*.pfx is git-ignored, but keep it off the working tree anyway):'
-Write-Host ("     Export-PfxCertificate -Cert Cert:\CurrentUser\My\{0} -FilePath <backup>\GlassAuthorCodeSigning.pfx -Password (Read-Host -AsSecureString 'PFX password')" -f $cert.Thumbprint)
+Write-Host ("     Export-PfxCertificate -Cert Cert:\CurrentUser\My\{0} -FilePath <backup>\DeveloperCodeSigning.pfx -Password (Read-Host -AsSecureString 'PFX password')" -f $cert.Thumbprint)
 Write-Host '  3. Rebuild Release x64, then Release x86 (GlassSetup), and run Shared\scripts\Test-GlassSignatures.ps1.'

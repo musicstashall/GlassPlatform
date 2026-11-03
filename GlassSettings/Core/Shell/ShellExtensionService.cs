@@ -40,7 +40,7 @@ public enum ShellSignerTrustResult
 
 public static class ShellExtensionService
 {
-    /// <summary>Publisher sparse-пакета = Subject сертификата автора (GlassShellMenuConstants.h: kSparsePublisher).</summary>
+    /// <summary>Publisher sparse-пакета = Subject сертификата разработчика (GlassShellMenuConstants.h: kSparsePublisher).</summary>
     public const string SparsePublisher = "CN=Stanislav K.";
 
     public const string AuthorCertificateReadme = ShellExtensionAvailability.AuthorCertificateReadme;
@@ -70,7 +70,7 @@ public static class ShellExtensionService
     }
 
     /// <summary>
-    /// На Windows 11 без доверия сертификату автора sparse-пакет не ставится и переключатель
+    /// На Windows 11 без доверия сертификату разработчика sparse-пакет не ставится и переключатель
     /// управляет классическим меню; страница показывает уведомление об ограничении.
     /// Windows 10 и ошибки запроса → Unknown (уведомление не показывается).
     /// </summary>
@@ -153,7 +153,7 @@ public static class ShellExtensionService
     }
 
     /// <summary>
-    /// Один клик на странице «Система» (Windows 11): сертификат автора добавляется в
+    /// Один клик на странице «Система» (Windows 11): сертификат разработчика добавляется в
     /// LocalMachine\TrustedPeople тем же кодом, что и в установщике, после чего пункт меню
     /// перерегистрируется — sparse-пакет становится допустимым, классическую регистрацию helper
     /// снимает сам после успеха. Если переключатель выключен, перерегистрация не нужна: следующее

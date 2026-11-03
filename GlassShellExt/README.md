@@ -10,7 +10,7 @@
 
 | ОС | Способ | Меню | HKCU `ContextMenuHandlers` |
 |----|--------|------|----------------------------|
-| **Win11** (build ≥ 22000), сертификат автора доверен | sparse package `GlassProject.GlassShellMenu_83517z3ecdax2` (`RegisterSparsePackageQuiet`, `AppxManifest.xml`, ExternalLocation `<root>\GlassShellSparse\`) | `IExplorerCommand` (compact-меню) | **не должны быть** (после успеха sparse `RemoveClassicAfterSparseSuccess` снимает классическую регистрацию через `regsvr32 /u /s`) |
+| **Win11** (build ≥ 22000), сертификат разработчика доверен | sparse package `GlassProject.GlassShellMenu_83517z3ecdax2` (`RegisterSparsePackageQuiet`, `AppxManifest.xml`, ExternalLocation `<root>\GlassShellSparse\`) | `IExplorerCommand` (compact-меню) | **не должны быть** (после успеха sparse `RemoveClassicAfterSparseSuccess` снимает классическую регистрацию через `regsvr32 /u /s`) |
 | **Win11**, сертификат **не** доверен (sparse не регистрируется, `0x800B0109`) | классический fallback: `regsvr32 /s GlassShellExt.dll` → `DllRegisterServer` (`RegisterClassicViaRegsvr32`), `GlassSettings_GetShellMenuModeV1() == 1` | `IContextMenu` после «Показать дополнительные параметры» (Shift+F10) | **штатная схема** — пишет только `DllRegisterServer` |
 | **Win10** (build < 22000) | `regsvr32 /s GlassShellExt.dll` → `DllRegisterServer` | `IContextMenu` (`DesktopBackground`) | **штатная схема** — привязка shell к CLSID `{A91C9F80-7E4B-4D8A-9C16-F304E8B2D601}` |
 
@@ -20,13 +20,13 @@
 
 Оркестрация: `GlassSettings/Native/ShellExtensionOps.cpp` (ветка по `build >= 22000`): sparse → при неудаче (кроме конфликта внешнего каталога `0x47504346`) классический fallback через `regsvr32`; состояние для UI — `GlassSettings_GetShellMenuModeV1` (0 нет / 1 classic / 2 compact) и `GlassSettings_GetShellSignerTrustV1` (`ShellSparsePackage::QuerySparseSignerTrust`: подписант msix в «Доверенных лицах» CurrentUser/LocalMachine; только чтение). Помощник установщика возвращает `0x47504C00|причина` при fallback.
 
-## Сертификат автора («Доверенные лица»)
+## Сертификат разработчика («Доверенные лица»)
 
-Единственное место, где сертификат автора попадает в хранилище, — `ShellSparsePackage::TrustSparseSigner` (`LocalMachine\TrustedPeople`, `CertAddCertificateContextToStore`, Subject обязан совпадать с `kSparsePublisher`): сертификат берётся из подписи установленного `GlassShellSparse.msix`, ничего не создаётся и не экспортируется. Вызывается **только по явному выбору пользователя**:
+Единственное место, где сертификат разработчика попадает в хранилище, — `ShellSparsePackage::TrustSparseSigner` (`LocalMachine\TrustedPeople`, `CertAddCertificateContextToStore`, Subject обязан совпадать с `kSparsePublisher`): сертификат берётся из подписи установленного `GlassShellSparse.msix`, ничего не создаётся и не экспортируется. Вызывается **только по явному выбору пользователя**:
 
-- **Setup** (Win11 x64, если подписант собственного `GlassSetup.exe` ещё не доверен) — отдельная страница «Сертификат автора» (что это, зачем, Subject/отпечаток/срок/хранилище, два варианта; по умолчанию «установить»); после установки файлов — `rundll32 GlassSettings.Native.dll,GlassSettings_ShellSignerTrustSetupV1W /installroot "<root>"` (код `0x47535400|результат` при ошибке → заметка на финальной странице, без отката), затем регистрация меню. Отказ — классическое меню и заметка со ссылкой на `GlassAuthorCodeSigning.cer`/`.txt`. EULA (раздел 5) описывает сертификат и право отказаться.
-- **GlassSettings** (страница «Система», уведомление при `Untrusted`) — ссылка «Установить сертификат автора и включить компактное меню»: `GlassSettings_TrustShellSignerV1` in-process (процесс elevated) → перерегистрация пункта (sparse, классическая снимается). При `Trusted`+classic — ссылка «Перейти на компактное меню».
-- **GlassUnins никогда не удаляет сертификат** — удаление только вручную (`certlm.msc` → «Доверенные лица»), это описано в EULA и `GlassAuthorCodeSigning.txt`.
+- **Setup** (Win11 x64, если подписант собственного `GlassSetup.exe` ещё не доверен) — отдельная страница «Сертификат разработчика» (что это, зачем, Subject/отпечаток/срок/хранилище, два варианта; по умолчанию «установить»); после установки файлов — `rundll32 GlassSettings.Native.dll,GlassSettings_ShellSignerTrustSetupV1W /installroot "<root>"` (код `0x47535400|результат` при ошибке → заметка на финальной странице, без отката), затем регистрация меню. Отказ — классическое меню и заметка со ссылкой на `DeveloperCodeSigning.cer`/`.txt`. EULA (раздел 5) описывает сертификат и право отказаться.
+- **GlassSettings** (страница «Система», уведомление при `Untrusted`) — ссылка «Установить сертификат разработчика и включить компактное меню»: `GlassSettings_TrustShellSignerV1` in-process (процесс elevated) → перерегистрация пункта (sparse, классическая снимается). При `Trusted`+classic — ссылка «Перейти на компактное меню».
+- **GlassUnins никогда не удаляет сертификат** — удаление только вручную (`certlm.msc` → «Доверенные лица»), это описано в EULA и `DeveloperCodeSigning.txt`.
 
 
 ## Compact-меню (Win11)
@@ -37,7 +37,7 @@
 
 `Application@Executable` = `GlassShellHost.exe` (package host, external location); COM/меню — `GlassShellExt.dll`. Deploy/detect/unregister — `GlassSettings::ShellSparsePackage` (WinRT `AddPackageByUriAsync` msix + `ExternalLocationUri`, fallback `RegisterPackageByUriAsync` по loose-манифесту / `RemovePackageAsync`).
 
-Идентичность: `Identity@Publisher` = `CN=Stanislav K.` = Subject сертификата автора (`Shared\certs\GlassAuthorCodeSigning.cer`, pin в `Shared/GlassSign.targets`) — требование MSIX; семейство `GlassProject.GlassShellMenu_83517z3ecdax2` (13 символов = Crockford-base32 первых 8 байт SHA-256 от Publisher в UTF-16LE; проверка — `GlassSetup\tests\sparse_identity_mock.py`, на Windows `Get-AppxPackage GlassProject.GlassShellMenu`). Сборка: `Package\BuildSparsePackage.ps1` (PostBuild) собирает `GlassShellSparse.msix` только `makeappx.exe`; подпись — общий `GlassSignPaths` (`GlassShellExtSignPaths` в `.vcxproj`), т.е. без ключа автора msix остаётся неподписанным (сборка контрибьютора — классический fallback на Win11). Никаких `New-SelfSignedCertificate`/`TrustedPeople` в сборке нет. Смена сертификата = смена Publisher и семейства пакета (старые регистрации не мигрируются).
+Идентичность: `Identity@Publisher` = `CN=Stanislav K.` = Subject сертификата разработчика (`Shared\certs\DeveloperCodeSigning.cer`, pin в `Shared/GlassSign.targets`) — требование MSIX; семейство `GlassProject.GlassShellMenu_83517z3ecdax2` (13 символов = Crockford-base32 первых 8 байт SHA-256 от Publisher в UTF-16LE; проверка — `GlassSetup\tests\sparse_identity_mock.py`, на Windows `Get-AppxPackage GlassProject.GlassShellMenu`). Сборка: `Package\BuildSparsePackage.ps1` (PostBuild) собирает `GlassShellSparse.msix` только `makeappx.exe`; подпись — общий `GlassSignPaths` (`GlassShellExtSignPaths` в `.vcxproj`), т.е. без ключа автора msix остаётся неподписанным (сборка контрибьютора — классический fallback на Win11). Никаких `New-SelfSignedCertificate`/`TrustedPeople` в сборке нет. Смена сертификата = смена Publisher и семейства пакета (старые регистрации не мигрируются).
 
 ## Старт / стоп платформы
 

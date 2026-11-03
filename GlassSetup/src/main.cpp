@@ -1830,8 +1830,6 @@ private:
                 L",\"certTag\":"+JsStringLiteral(Text(IDS_CERT_TAG))+
                 L",\"certTitle\":"+JsStringLiteral(Text(IDS_CERT_TITLE))+
                 L",\"certIntro\":"+JsStringLiteral(Text(IDS_CERT_INTRO))+
-                L",\"certWhat\":"+JsStringLiteral(Text(IDS_CERT_WHAT))+
-                L",\"certWhy\":"+JsStringLiteral(Text(IDS_CERT_WHY))+
                 L",\"certInstallTitle\":"+JsStringLiteral(Text(IDS_CERT_OPT_INSTALL_TITLE))+
                 L",\"certInstallDesc\":"+JsStringLiteral(Text(IDS_CERT_OPT_INSTALL_DESC))+
                 L",\"certSkipTitle\":"+JsStringLiteral(Text(IDS_CERT_OPT_SKIP_TITLE))+
@@ -1842,7 +1840,6 @@ private:
                 L",\"certValidityLabel\":"+JsStringLiteral(Text(IDS_CERT_DETAIL_VALIDITY))+
                 L",\"certStoreLabel\":"+JsStringLiteral(Text(IDS_CERT_DETAIL_STORE))+
                 L",\"certStore\":"+JsStringLiteral(L"LocalMachine\\TrustedPeople")+
-                L",\"certNote\":"+JsStringLiteral(Text(IDS_CERT_NOTE))+
                 L",\"confirmTag\":"+JsStringLiteral(Text(IDS_CONFIRM_CANCEL_TAG))+
                 L",\"confirmTitle\":"+JsStringLiteral(Text(IDS_CONFIRM_CANCEL_TITLE))+
                 L",\"confirmBody\":"+JsStringLiteral(Text(IDS_CONFIRM_CANCEL_BODY))+
@@ -3205,7 +3202,6 @@ private:
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
             DrawLabel(dc,Text(IDS_CERT_TITLE),Box(48,90,840,50),heading_,white);
             DrawLabel(dc,Text(IDS_CERT_INTRO),Box(48,142,840,60),font_,muted);
-            DrawLabel(dc,Text(IDS_CERT_WHAT)+L"\n"+Text(IDS_CERT_WHY),Box(48,204,840,96),small_,white);
             DrawLabel(dc,Text(IDS_CERT_OPT_INSTALL_DESC),Box(82,348,560,36),small_,muted);
             DrawLabel(dc,Text(IDS_CERT_OPT_SKIP_DESC),Box(82,416,560,36),small_,muted);
             DrawLabel(dc,Text(IDS_CERT_DETAIL_SUBJECT)+L": "+certSigner_.subject+L"\n"+

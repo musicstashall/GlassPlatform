@@ -97,10 +97,10 @@
       <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\AppxManifest.xml" />
       <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\AppxManifest.UnregisterStub.xml" />
       <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\Assets\**\*.png" />
-      <!-- Публичный сертификат автора + инструкция (RU/EN): sparse-пакет ставится только при доверии издателю;
+      <!-- Публичный сертификат разработчика + инструкция (RU/EN): sparse-пакет ставится только при доверии издателю;
            сам установщик ничего в хранилища сертификатов не пишет. -->
-      <GlassAuthorCert Include="$(SolutionRoot)Shared\certs\GlassAuthorCodeSigning.cer" />
-      <GlassAuthorCert Include="$(SolutionRoot)Shared\certs\GlassAuthorCodeSigning.txt" />
+      <GlassAuthorCert Include="$(SolutionRoot)Shared\certs\DeveloperCodeSigning.cer" />
+      <GlassAuthorCert Include="$(SolutionRoot)Shared\certs\DeveloperCodeSigning.txt" />
       <GlassUnins Include="$(GlassUninsExePath)" Condition="Exists('$(GlassUninsExePath)')" />
     </ItemGroup>
 

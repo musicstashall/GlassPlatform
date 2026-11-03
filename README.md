@@ -59,16 +59,16 @@ msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64
 
 Официальные Release-сборки автор подписывает сертификатом Code Signing **`CN=Stanislav K.`**. Сейчас это **временный self-signed сертификат** (закрытый ключ только на машине автора); переход на SignPath в CI запланирован — точки подписи и способ проверки от этого не изменятся, сменится только отпечаток в таблице ниже. Для self-signed SmartScreen и UAC показывают «Неизвестный издатель» — это ожидаемо: подпись подтверждает **авторство и целостность** файла, а не репутацию издателя.
 
-**Что подписано:** все DLL/EXE платформы (`Build\x64|x86\Release`), `GlassSettings.exe` (publish, single-file), `GlassSettings.Native.dll`, `GlassUnins.exe`, пять MSI и `GlassSetup.exe`. Сторонние файлы (OpenGlass, SecureUxTheme, WinUI/.NET/CRT) сохраняют подписи своих авторов. Sparse MSIX меню оболочки (`GlassShellSparse\GlassShellSparse.msix`) подписан тем же сертификатом автора: Windows 11 регистрирует компактное меню только если этот сертификат есть в «Доверенных лицах» пользователя — иначе пункт «Glass» регистрируется классически (после «Показать дополнительные параметры»). Установщик сертификат **не** добавляет; публичный `GlassAuthorCodeSigning.cer` и инструкция `GlassAuthorCodeSigning.txt` лежат в папке установки.
+**Что подписано:** все DLL/EXE платформы (`Build\x64|x86\Release`), `GlassSettings.exe` (publish, single-file), `GlassSettings.Native.dll`, `GlassUnins.exe`, пять MSI и `GlassSetup.exe`. Сторонние файлы (OpenGlass, SecureUxTheme, WinUI/.NET/CRT) сохраняют подписи своих авторов. Sparse MSIX меню оболочки (`GlassShellSparse\GlassShellSparse.msix`) подписан тем же сертификатом разработчика: Windows 11 регистрирует компактное меню только если этот сертификат есть в «Доверенных лицах» пользователя — иначе пункт «Glass» регистрируется классически (после «Показать дополнительные параметры»). Установщик сертификат **не** добавляет; публичный `DeveloperCodeSigning.cer` и инструкция `DeveloperCodeSigning.txt` лежат в папке установки.
 
-**Официальный сертификат автора:**
+**Официальный сертификат разработчика:**
 
 | | |
 |---|---|
 | Subject | `CN=Stanislav K.` |
 | SHA-1 thumbprint | `A801E5F5F430D6D19164C856F79B8EFD23F83EB8` |
 | SHA-256 fingerprint | `1295F4BD2E1E7D710B380ECE573E8C3C021AE1E21C0E77174E5307E68A7DC93D` |
-| Публичный сертификат | `Shared/certs/GlassAuthorCodeSigning.cer` |
+| Публичный сертификат | `Shared/certs/DeveloperCodeSigning.cer` |
 | Действителен | 2026-11-01 .. 2031-11-01 |
 | Подписаны сборки | начиная с сборок от 2026-11-01 |
 

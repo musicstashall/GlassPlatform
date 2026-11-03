@@ -7,6 +7,7 @@
 <style>
 @font-face{font-family:HandwrittenOffline;src:url('https://glassplatform.invalid/assets/handwritten.ttf') format('truetype');font-display:swap}
 :root{color-scheme:dark;--background:#101225;--foreground:#f5f4fc;--muted:#a2a6bf;--accent:#c1b4ff}
+*{-webkit-user-select:none;user-select:none;caret-color:transparent;cursor:default}
 *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{background:var(--background);font-family:'Segoe UI',Arial,sans-serif;color:var(--foreground)}
 #viewport{width:100%;height:100%;display:grid;place-items:center;background:var(--background)}
 #stage{width:1000px;height:540px;position:relative;flex-shrink:0;overflow:hidden;isolation:isolate;transform-origin:center;background:var(--background)}
@@ -345,11 +346,8 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .components-warning-dot{flex:0 0 auto;width:8px;height:8px;margin-top:5px;border-radius:50%;background:#f5c984;box-shadow:0 0 12px #f5c984a8}
 .components-warning-text{margin:0;color:#f5e9d4;font-size:11.8px;line-height:1.48;white-space:pre-line}
 /* Windows 11 certificate page: same scene as components; two exclusive choice cards + a facts card. */
-.cert-intro{margin:0;color:#aeb2c9;font-size:12.5px;line-height:1.45;max-width:904px}
-.cert-columns{position:absolute;left:48px;top:186px;width:904px;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;z-index:3;pointer-events:auto}
-.cert-explain{display:flex;flex-direction:column;gap:9px;margin:0 0 4px}
-.cert-explain p{margin:0;color:#c9cbe0;font-size:11.4px;line-height:1.48}
-.cert-explain b{color:#f0eefb;font-weight:600}
+.cert-intro{margin:0 0 13px;color:#aeb2c9;font-size:12.5px;line-height:1.45}
+.cert-columns{position:absolute;left:48px;top:150px;width:904px;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;z-index:3;pointer-events:auto}
 .cert-options{display:grid;grid-template-columns:1fr;gap:10px}
 .cert-card{min-height:auto;align-items:flex-start}
 .cert-card .comp-check{border-radius:50%}
@@ -360,7 +358,6 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .cert-facts dt{color:#8fa0b3;font-size:9.5px;letter-spacing:.6px;text-transform:uppercase}
 .cert-facts dd{margin:1px 0 0;color:#eaf5f6;font-size:11.5px;line-height:1.4;overflow-wrap:anywhere}
 .cert-facts dd.mono{font-family:Consolas,'Cascadia Mono',monospace;font-size:10.5px;letter-spacing:.3px}
-.cert-note{position:absolute;left:48px;right:48px;top:498px;z-index:3;margin:0;color:#9ea3bd;font-size:11px;line-height:1.5}
 
 /* Launch panel: Unlocker orbital composition adapted for platform startup */
 .launch-core{fill:#181b34;stroke:#c8beff;stroke-width:2.1;filter:url(#softGlow)}
@@ -476,10 +473,9 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 <div id="components-warning" class="components-warning" hidden role="status" aria-live="polite"><span class="components-warning-dot" aria-hidden="true"></span><p id="components-warning-text" class="components-warning-text"></p></div></section>
 <section id="certificate-panel" class="mode-panel components-scene" aria-labelledby="certificate-title">
 <img id="certificate-banner" class="components-banner" alt="" aria-hidden="true"><div class="components-overlay"></div><div id="certificate-brand" class="native-brand">GlassPlatform</div>
-<div class="components-heading"><div id="certificate-kicker" class="components-kicker"></div><h1 id="certificate-title" class="components-title"></h1><p id="certificate-intro" class="cert-intro"></p></div>
-<div class="cert-columns"><div><div class="cert-explain"><p id="certificate-what"></p><p id="certificate-why"></p></div><div id="certificate-options" class="cert-options" role="radiogroup" aria-labelledby="certificate-title"></div></div>
-<aside class="cert-facts"><p id="certificate-facts-label" class="cert-facts-label"></p><dl><dt id="certificate-subject-label"></dt><dd id="certificate-subject"></dd><dt id="certificate-thumbprint-label"></dt><dd id="certificate-thumbprint" class="mono"></dd><dt id="certificate-validity-label"></dt><dd id="certificate-validity"></dd><dt id="certificate-store-label"></dt><dd id="certificate-store" class="mono"></dd></dl></aside></div>
-<p id="certificate-note" class="cert-note"></p></section>
+<div class="components-heading"><div id="certificate-kicker" class="components-kicker"></div><h1 id="certificate-title" class="components-title"></h1></div>
+<div class="cert-columns"><div><p id="certificate-intro" class="cert-intro"></p><div id="certificate-options" class="cert-options" role="radiogroup" aria-labelledby="certificate-title"></div></div>
+<aside class="cert-facts"><p id="certificate-facts-label" class="cert-facts-label"></p><dl><dt id="certificate-subject-label"></dt><dd id="certificate-subject"></dd><dt id="certificate-thumbprint-label"></dt><dd id="certificate-thumbprint" class="mono"></dd><dt id="certificate-validity-label"></dt><dd id="certificate-validity"></dd><dt id="certificate-store-label"></dt><dd id="certificate-store" class="mono"></dd></dl></aside></div></section>
 <section id="launch-panel" class="mode-panel unlock-scene" role="status" aria-live="polite">
 <img id="launch-banner" class="unlock-backdrop" alt="" aria-hidden="true"><div class="unlock-shade"></div><div class="native-brand">GlassPlatform</div>
 <div class="unlock-copy"><div id="launch-kicker" class="unlock-kicker"></div><h1 id="launch-title" class="unlock-title"></h1><p id="launch-description" class="unlock-description"></p>
@@ -615,8 +611,8 @@ function renderCertificatePanel(){
  const host=document.getElementById('certificate-options');if(!host)return;
  const hostUi=hostState.ui||{},cert=(hostState.certificate&&typeof hostState.certificate==='object')?hostState.certificate:{};
  const install=cert.install!==false;
- const options=[{id:'1',checked:install,title:hostUi.certInstallTitle||(locale==='ru'?'Установить сертификат (рекомендуется)':'Install the certificate (recommended)'),desc:hostUi.certInstallDesc||''},
-  {id:'0',checked:!install,title:hostUi.certSkipTitle||(locale==='ru'?'Не устанавливать':'Do not install'),desc:hostUi.certSkipDesc||''}];
+ const options=[{id:'1',checked:install,title:hostUi.certInstallTitle||(locale==='ru'?'Принять сертификат':'Accept the certificate'),desc:hostUi.certInstallDesc||''},
+  {id:'0',checked:!install,title:hostUi.certSkipTitle||(locale==='ru'?'Не принимать':'Do not accept'),desc:hostUi.certSkipDesc||''}];
  const signature=JSON.stringify(options);
  if(signature!==certificateSignature){
   const focusId=host.contains(document.activeElement)?document.activeElement.dataset.certificate:null;
@@ -652,7 +648,7 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  setModeText('update-brand',hostUi.brand||'GlassPlatform');setModeText('update-tag',hostUi.updateTag);setModeText('update-title',hostUi.updateTitle);setModeText('update-body',hostState.updateBody);setModeText('update-chip-label',hostUi.updateReady);setModeText('update-current-label',hostUi.updateCurrentLabel);setModeText('update-latest-label',hostUi.updateLatestLabel);setModeText('update-current',hostState.updateCurrent);setModeText('update-latest',hostState.updateLatest);
  setModeText('license-brand',hostUi.brand||'GlassPlatform');setModeText('license-title',hostUi.licenseTitle);setModeText('license-intro',hostUi.licenseIntro);setModeText('license-accept-text',hostUi.licenseAccept);setModeText('eula-content',hostState.eula);
  const accept=document.getElementById('license-accept');if(accept&&typeof hostState.accepted==='boolean')accept.checked=hostState.accepted;
- setModeText('certificate-brand',hostUi.brand||'GlassPlatform');setModeText('certificate-kicker',hostUi.certTag||(locale==='ru'?'СЕРТИФИКАТ АВТОРА':'AUTHOR CERTIFICATE'));setModeText('certificate-title',hostUi.certTitle||(locale==='ru'?'Доверять сертификату автора?':'Trust the author certificate?'));setModeText('certificate-intro',hostUi.certIntro||'');setModeText('certificate-what',hostUi.certWhat||'');setModeText('certificate-why',hostUi.certWhy||'');setModeText('certificate-facts-label',hostUi.certDetailsLabel||'');setModeText('certificate-subject-label',hostUi.certSubjectLabel||'');setModeText('certificate-thumbprint-label',hostUi.certThumbprintLabel||'');setModeText('certificate-validity-label',hostUi.certValidityLabel||'');setModeText('certificate-store-label',hostUi.certStoreLabel||'');setModeText('certificate-note',hostUi.certNote||'');renderCertificatePanel();
+ setModeText('certificate-brand',hostUi.brand||'GlassPlatform');setModeText('certificate-kicker',hostUi.certTag||(locale==='ru'?'СЕРТИФИКАТ РАЗРАБОТЧИКА':'DEVELOPER CERTIFICATE'));setModeText('certificate-title',hostUi.certTitle||(locale==='ru'?'Принять сертификат разработчика?':'Accept the developer certificate?'));setModeText('certificate-intro',hostUi.certIntro||'');setModeText('certificate-facts-label',hostUi.certDetailsLabel||'');setModeText('certificate-subject-label',hostUi.certSubjectLabel||'');setModeText('certificate-thumbprint-label',hostUi.certThumbprintLabel||'');setModeText('certificate-validity-label',hostUi.certValidityLabel||'');setModeText('certificate-store-label',hostUi.certStoreLabel||'');renderCertificatePanel();
  setModeText('components-brand',hostUi.brand||'GlassPlatform');setModeText('components-kicker',hostUi.compTag||(locale==='ru'?'КОМПОНЕНТЫ ПАКЕТА':'PACKAGE COMPONENTS'));setModeText('components-title',hostUi.compTitle||(locale==='ru'?'Выбор продуктов':'Choose products'));setModeText('components-intro',hostUi.compIntro||'');renderComponentsPanel();
  setModeText('launch-kicker',hostUi.launchTag||(locale==='ru'?'ЗАПУСК ПЛАТФОРМЫ':'STARTING PLATFORM'));setModeText('launch-title',hostUi.launchTitle||(locale==='ru'?'Запускаем компоненты':'Starting components'));setModeText('launch-description',hostUi.launchBody||'');setModeText('launch-status',hostState.status||hostUi.launchTitle||'');setModeText('launch-substatus',hostUi.launchSubstatus||'');
  if(Array.isArray(hostState.launchCards)){const ids=[['launch-card-a-title','launch-card-a-sub'],['launch-card-b-title','launch-card-b-sub'],['launch-card-c-title','launch-card-c-sub']];ids.forEach(([a,b],idx)=>{const c=hostState.launchCards[idx];const group=document.getElementById(a).parentNode;group.style.display=c?'':'none';if(c){group.classList.toggle('launch-card-ready',!!c.ready);setModeText(a,c.title);setModeText(b,c.sub);}});}

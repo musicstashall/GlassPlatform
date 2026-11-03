@@ -44,13 +44,13 @@ namespace GlassShared::GlassShellMenu
     /// Пустой манифест для снятия verb из каталога Win11 перед Remove-AppxPackage.
     inline constexpr wchar_t kSparseUnregisterStubFileName[] = L"AppxManifest.UnregisterStub.xml";
 
-    /// Publisher манифеста = Subject сертификата автора (Shared\certs\GlassAuthorCodeSigning.cer),
+    /// Publisher манифеста = Subject сертификата разработчика (Shared\certs\DeveloperCodeSigning.cer),
     /// которым подписан msix. Отдельного «dev»-сертификата нет: на чужом ПК без доверия этому
     /// сертификату sparse-пакет не ставится, и меню регистрируется классически (см. GlassShellExt\README.md).
     inline constexpr wchar_t kSparsePublisher[] = L"CN=Stanislav K.";
     inline constexpr wchar_t kSparseApplicationId[] = L"GlassShellHost";
 
-    /// Публичный сертификат автора и инструкция, поставляемые в корне платформы.
-    inline constexpr wchar_t kAuthorCertificateFileName[] = L"GlassAuthorCodeSigning.cer";
-    inline constexpr wchar_t kAuthorCertificateReadmeFileName[] = L"GlassAuthorCodeSigning.txt";
+    /// Публичный сертификат разработчика и инструкция, поставляемые в корне платформы.
+    inline constexpr wchar_t kAuthorCertificateFileName[] = L"DeveloperCodeSigning.cer";
+    inline constexpr wchar_t kAuthorCertificateReadmeFileName[] = L"DeveloperCodeSigning.txt";
 };

@@ -3,7 +3,7 @@
 
 Checks, from the repository sources only (no Windows, no signtool):
   * both AppxManifest*.xml share Identity Name/Publisher and the executable/COM paths;
-  * manifest Publisher == Subject of Shared/certs/GlassAuthorCodeSigning.cer (MSIX rule);
+  * manifest Publisher == Subject of Shared/certs/DeveloperCodeSigning.cer (MSIX rule);
   * kSparsePackageFamilyName == Name + '_' + Crockford-base32(SHA-256(Publisher UTF-16LE)[:8]);
   * the GlassSign.targets thumbprint pin is the SHA-1 of that certificate;
   * the payload ships the .cer/.txt next to the platform and the menu files under GlassShellSparse\\;

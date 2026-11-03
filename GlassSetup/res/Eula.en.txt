@@ -47,15 +47,13 @@ This is not a defect the author is obliged to fix. Do not install the program on
 Blur, glass and the extra composition work use CPU and GPU time. Expect a partial loss of performance: the interface and games may run slower, power draw may increase, and battery life may get shorter.
 
 
-5. Author certificate (Windows 11)
+5. Developer certificate (Windows 11)
 
-On Windows 11 the compact desktop menu (the one that opens on right-click) accepts entries only from packages signed with a certificate this computer trusts. The Glass menu package is signed with the personal certificate of the author, "Stanislav K.". It is a self-signed certificate: no certification authority issued it, so Windows does not trust it automatically.
+On Windows 11 the compact desktop menu (the one that opens on right-click) accepts entries only from packages signed with a certificate this computer trusts. The Glass menu package is signed with the developer's personal certificate, "Stanislav K.". It is a self-signed certificate: no certification authority issued it, so Windows does not trust it automatically. The certificate is the developer's signature for any of his products and is not tied to a particular program.
 
-What the certificate is. A certificate is the author's public key together with his name. Installing it into the computer's "Trusted People" store means exactly one thing: Windows will treat signatures made with this particular key as signatures of a known publisher and will admit the Glass menu package. The certificate gives the author no access to the computer, installs no root certification authority and does not affect trust in web sites, drivers or programs of other publishers.
+Purpose of the certificate. With the certificate the developer gives the user a guarantee that the product you purchased was released by the stated developer without third-party interference; installing the certificate lets you fully use the developer's products on your computer without the restrictions imposed by Microsoft policy — the only limitation is your trust in the developer. In particular the certificate is needed for the Glass entry in the compact Windows 11 menu: without it Setup registers the classic Glass menu, which opens via "Show more options"; every other feature of the platform works the same either way. The certificate gives the developer no access to your computer, installs no root certification authority and does not affect trust in web sites, drivers or programs of other publishers.
 
-What it is for. Only for the Glass entry in the compact Windows 11 menu. Without the certificate Setup registers the classic Glass menu, which opens via "Show more options". Every other feature of the platform works the same either way.
-
-Your choice. Setup asks on a separate page whether to install the certificate and shows its name, SHA-1 thumbprint and validity period. You may decline; installation continues without it. The thumbprint can be checked against GlassAuthorCodeSigning.txt in the installation folder and against the repository README.
+Your choice. Setup asks on a separate page whether to accept the certificate and shows its name, SHA-1 thumbprint and validity period. You may decline; installation continues without it. The thumbprint can be checked against DeveloperCodeSigning.txt in the installation folder and against the repository README.
 
 Removal. The Glass Platform uninstaller never removes the certificate. To remove it yourself, open "Manage computer certificates" (certlm.msc), section "Trusted People", and delete the "Stanislav K." certificate. The compact Windows 11 menu then stops showing the Glass entry.
 
@@ -71,4 +69,4 @@ You assume the entire risk as to the quality, operation and consequences of inst
 
 7. Acceptance
 
-Checking "I accept the terms of this agreement" and continuing means that you have read this agreement, that you understand the risks, the partial loss of performance, the purpose of the author certificate and the disclaimer of warranty, and that you accept GPL-3.0 for Glass and, if you install OpenGlass, GPL-3.0 for OpenGlass.
+Checking "I accept the terms of this agreement" and continuing means that you have read this agreement, that you understand the risks, the partial loss of performance, the purpose of the developer certificate and the disclaimer of warranty, and that you accept GPL-3.0 for Glass and, if you install OpenGlass, GPL-3.0 for OpenGlass.
