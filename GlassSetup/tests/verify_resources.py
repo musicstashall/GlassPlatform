@@ -232,7 +232,7 @@ assert "action.append(componentLock(" in ui and "badge.textContent=String(item.b
 assert ".comp-action{display:flex" in ui and "top:198px" in ui and "top:440px" in ui
 assert "#a7dfff" in ui and "#efb94f" in ui  # independent blue-and-gold lock, not badge-tinted
 assert "DrawComponentActionBadge(dc,selected,installed" in setup and "DrawMandatoryLock(dc," in setup
-assert "item.state" in ui and "white-space:pre-line" in ui
+assert "item.state" not in ui and "white-space:pre-line" in ui  # state line removed: badge + checkbox communicate the action
 assert "DrawLabel(dc,Text(IDS_COMP_X86_WARNING)" in setup and "DrawLabel(dc,Text(IDS_COMP_GS_WARNING)" in setup
 
 # The animated unlock screen must stop when the worker exits the unlock phase,
@@ -556,6 +556,14 @@ app_panel = (repo / "GlassSettings/Controls/AppSettingsPanel.xaml").read_text(en
 assert "ValidateRegistrySwitch" in app_panel
 app_cs = (repo / "GlassSettings/Controls/AppSettingsPanel.xaml.cs").read_text(encoding="utf-8")
 assert "WriteValidateSettingsOnStartup" in app_cs
+
+# 2026-11-03 follow-up: update is not reinstall (reasons never mix), integrity is
+# measured against the cached MSI the product was installed from (LocalPackage),
+# and the components page is compact (no state line, single-line reasons).
+assert "MsiGetProductInfoW" in inspect_cpp and "LocalPackage" in inspect_cpp
+assert "AddReason(rep, Reason::VersionOutdated)" not in inspect_cpp
+assert "reasons.join" in ui and "comp-state" not in ui
+assert "if (rep->updateAvailable) return GlassProducts::ProductCondition::UpdateAvailable;" in setup
 
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")

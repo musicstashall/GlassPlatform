@@ -69,8 +69,7 @@ void AddReason(ProductReport& rep, Reason reason) noexcept
         if (existing == reason)
             return;
     rep.reasons.push_back(reason);
-    if (reason != Reason::VersionOutdated)
-        rep.damaged = true;
+    rep.damaged = true;
 }
 
 // SHA-1 отпечаток подписи файла (тот же приём, что в QuerySelfSignerInfo Setup).
@@ -229,6 +228,18 @@ template <class R, class A, class B, class C>
 C ThirdParameter(R (WINAPI*)(A, B, C));
 using MsiFileHashBuffer = std::remove_pointer_t<decltype(ThirdParameter(&MsiGetFileHashW))>;
 
+// Кэш MSI, из которого продукт установлен (MsiGetProductInfo LocalPackage). Сверка
+// файлов идёт именно с ним: новый пакет содержит новые сборки и не является
+// эталоном целостности уже установленных файлов.
+[[nodiscard]] std::wstring CachedMsiPath(const wchar_t* productCode) noexcept
+{
+    wchar_t path[MAX_PATH * 2]{};
+    DWORD cch = _countof(path);
+    if (MsiGetProductInfoW(productCode, L"LocalPackage", path, &cch) != ERROR_SUCCESS || !path[0])
+        return {};
+    return path;
+}
+
 [[nodiscard]] bool FileHashMatches(const std::wstring& path, const DWORD (&expected)[4]) noexcept
 {
     MsiFileHashBuffer hash{};
@@ -252,15 +263,6 @@ void CheckProductFiles(
         return;
     std::vector<FileCheck> files;
     EnumProductFiles(database, files);
-    const std::wstring packageVersion = QueryMsiProperty(database, L"ProductVersion");
-    if (!packageVersion.empty() && !rep.installedVersion.empty())
-    {
-        if (QuadVersion::Parse(rep.installedVersion).Compare(QuadVersion::Parse(packageVersion)) < 0)
-        {
-            rep.updateAvailable = true;
-            AddReason(rep, Reason::VersionOutdated);
-        }
-    }
     MsiCloseHandle(database);
 
     for (const auto& file : files)
@@ -352,14 +354,34 @@ Report Run(const Inputs& in)
         {
             if (!job.rep->installed || job.res == 0)
                 continue;
-            // Файловые проверки только для современных кодов продуктов: состав
-            // легаси-MSI не соответствует текущему пакету.
-            if (!GlassInstallMsi::IsProductInstalled(job.code))
-                continue;
             std::wstring msiPath = tempDir + L"\\inspect-" + std::to_wstring(index++) + L".msi";
             if (!GlassInstallUtil::ExtractResourceToFile(in.instance, job.res, RT_RCDATA, msiPath, nullptr))
                 continue;
-            CheckProductFiles(msiPath, job.code, signerSha1, *job.rep);
+            // Версия: установленная против версии поставляемого пакета. Более
+            // старая версия — это обновление, а не повреждение.
+            {
+                MSIHANDLE database = 0;
+                if (MsiOpenDatabaseW(msiPath.c_str(), MSIDBOPEN_READONLY, &database) == ERROR_SUCCESS)
+                {
+                    const std::wstring packageVersion = QueryMsiProperty(database, L"ProductVersion");
+                    MsiCloseHandle(database);
+                    if (!packageVersion.empty() && !job.rep->installedVersion.empty() &&
+                        QuadVersion::Parse(job.rep->installedVersion).Compare(QuadVersion::Parse(packageVersion)) < 0)
+                        job.rep->updateAvailable = true;
+                }
+            }
+            // Файловые проверки только для современных кодов продуктов: состав
+            // легаси-MSI не соответствует текущему пакету. Эталон целостности —
+            // кэш MSI, из которого продукт установлен (LocalPackage): новый пакет
+            // содержит новые сборки и ничего не говорит о старых файлах.
+            if (GlassInstallMsi::IsProductInstalled(job.code))
+            {
+                std::wstring referenceMsi = CachedMsiPath(job.code);
+                if (referenceMsi.empty() && !job.rep->updateAvailable)
+                    referenceMsi = msiPath; // версии совпадают — пакет идентичен установленному
+                if (!referenceMsi.empty())
+                    CheckProductFiles(referenceMsi, job.code, signerSha1, *job.rep);
+            }
             DeleteFileW(msiPath.c_str());
         }
         RemoveDirectoryW(tempDir.c_str());

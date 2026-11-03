@@ -1701,8 +1701,9 @@ private:
     }
     static GlassProducts::ProductCondition ConditionOf(const GlassProductInspect::ProductReport* rep, bool installed) noexcept {
         if (!installed || !rep || !rep->installed) return GlassProducts::ProductCondition::NotInstalled;
-        if (rep->damaged) return GlassProducts::ProductCondition::Damaged;
+        // Новая версия — обновление, а не переустановка: причины не смешиваются.
         if (rep->updateAvailable) return GlassProducts::ProductCondition::UpdateAvailable;
+        if (rep->damaged) return GlassProducts::ProductCondition::Damaged;
         return GlassProducts::ProductCondition::Healthy;
     }
     static UINT InspectReasonId(GlassProductInspect::Reason reason) noexcept {
@@ -1769,9 +1770,13 @@ private:
             const auto condition=ConditionOf(rep,rep!=nullptr&&rep->installed);
             const auto action=GlassProducts::ActionForCondition(checked,condition);
             const UINT badgeId=ComponentBadgeId(condition);
+            // Причины не смешиваются: у обновления своя причина, у повреждений — свои.
             std::wstring reasons=L"[";
             bool firstReason=true;
-            if (rep) for (auto reason : rep->reasons) {
+            if (condition==GlassProducts::ProductCondition::UpdateAvailable) {
+                reasons+=JsStringLiteral(Text(IDS_INSPECT_VERSION));
+                firstReason=false;
+            } else if (rep) for (auto reason : rep->reasons) {
                 const UINT reasonId=InspectReasonId(reason);
                 if (!reasonId) continue;
                 if (!firstReason) reasons+=L",";
