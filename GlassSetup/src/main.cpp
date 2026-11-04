@@ -1654,8 +1654,8 @@ private:
             const bool sutBlocked=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External ||
                 (installedSelection_.glassSettings&&secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict);
             EnableWindow(componentSecureUxTheme_,!sutBlocked);
-            EnableWindow(componentSettings_,!(selection_.secureUxTheme&&!installedSelection_.glassSettings));
-            EnableWindow(component64_,FALSE); EnableWindow(component32_,os64?TRUE:FALSE);
+            EnableWindow(componentSettings_,TRUE);
+            EnableWindow(component64_,os64); EnableWindow(component32_,TRUE);
         }
         const bool nativeCertificate=!webVisible && page_==Page::Certificate && !transitioning_;
         ShowWindow(certInstall_,nativeCertificate?SW_SHOWNA:SW_HIDE);
@@ -1793,20 +1793,20 @@ private:
     bool SecureUxThemeRequiresSettings(bool settingsDamaged) const noexcept {
         return !installedSelection_.glassSettings || settingsDamaged || LegacySecureUxThemePayloadPresent();
     }
+    GlassProductPlan::Plan SelectionPreview() const {
+        const bool active=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Active ||
+            secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::ActivationPending ||
+            secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
+        return GlassProductUiPolicy::Preview(selection_,installedSelection_,GlassInstallUtil::IsOs64Bit(),false,active);
+    }
     std::wstring ComponentWarnings() const {
-        std::wstring text;
-        if (installedSelection_.glassSettings && secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External)
-            text=Text(IDS_COMP_SUT_WARNING_EXTERNAL);
-        else if (installedSelection_.glassSettings && secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict)
-            text=Text(IDS_COMP_SUT_WARNING_CONFLICT);
-        if (X86WarningApplies()) { if(!text.empty())text+=L"\n"; text+=Text(IDS_COMP_X86_WARNING); }
-        if (SettingsWarningApplies()) { if(!text.empty())text+=L"\n"; text+=Text(IDS_COMP_GS_WARNING); }
-        return text;
+        return GlassProductUiPolicy::WarningText(SelectionPreview().warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit());
     }
     std::wstring ComponentsJson() const {
         std::lock_guard<std::mutex> lock(inspectMutex_);
         const bool os64=GlassInstallUtil::IsOs64Bit();
         std::wstring json=L"[";
+        const auto preview=SelectionPreview();
         auto item=[&](const wchar_t* id, UINT title, UINT desc, bool checked, bool locked, bool hidden, const GlassProductInspect::ProductReport* rep, bool disabled=false) {
             if (json.size()>1) json+=L",";
             const auto condition=ConditionOf(rep,rep!=nullptr&&rep->installed);
@@ -1835,7 +1835,7 @@ private:
             }
             reasons+=L"]";
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
-                L",\"description\":"+JsStringLiteral(Text(desc))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
+                L",\"description\":"+JsStringLiteral((desc==IDS_COMP_P64_DESC||desc==IDS_COMP_P32_DESC)?GlassProductUiPolicy::PlatformDescription(Text(desc),desc==IDS_COMP_P64_DESC,os64,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN):Text(desc))+L",\"warning\":"+JsStringLiteral(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit()))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
                 L",\"badgeTone\":"+JsStringLiteral(ComponentBadgeTone(condition))+
                 L",\"lockTitle\":"+JsStringLiteral((locked && condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY):L"")+
                 L",\"state\":"+JsStringLiteral(Text(ComponentStateId(checked,condition)))+
@@ -1844,9 +1844,9 @@ private:
                 L",\"disabled\":"+(disabled?L"true":L"false")+
                 L",\"hidden\":"+(hidden?L"true":L"false")+L"}";
         };
-        const bool sutNeedsSettings=selection_.secureUxTheme&&SecureUxThemeRequiresSettings(inspect_.settings.damaged);
-        item(L"x64",IDS_COMP_P64_TITLE,IDS_COMP_P64_DESC,selection_.platform64,os64,!os64,&inspect_.x64);
-        item(L"x86",IDS_COMP_P32_TITLE,IDS_COMP_P32_DESC,selection_.platform32,!os64,false,&inspect_.x86);
+        const bool sutNeedsSettings=false;
+        item(L"x64",IDS_COMP_P64_TITLE,IDS_COMP_P64_DESC,selection_.platform64,false,!os64,&inspect_.x64);
+        item(L"x86",IDS_COMP_P32_TITLE,IDS_COMP_P32_DESC,selection_.platform32,false,false,&inspect_.x86);
         item(L"settings",IDS_COMP_GS_TITLE,IDS_COMP_GS_DESC,selection_.glassSettings,sutNeedsSettings,false,&inspect_.settings);
         item(L"openglass",IDS_COMP_OG_TITLE,IDS_COMP_OG_DESC,selection_.openGlass,false,!os64,&inspect_.og);
         const auto sutState=secureUxThemeState_;
@@ -1867,7 +1867,7 @@ private:
             (sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending||sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending?IDS_COMP_SUT_STATE_PENDING:
             (sutState==GlassInstallUtil::SecureUxThemeState::Active?IDS_COMP_SUT_STATE_ACTIVE:
             (selection_.secureUxTheme?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF)));
-        const bool sutRequiresSettings=selection_.secureUxTheme&&SecureUxThemeRequiresSettings(inspect_.settings.damaged);
+        const bool sutRequiresSettings=false;
         std::wstring sutReasons=L"[";
         bool firstSutReason=true;
         if(sutUpdate){sutReasons+=JsStringLiteral(Text(IDS_INSPECT_VERSION));firstSutReason=false;}
@@ -1879,6 +1879,7 @@ private:
         if(sutRequiresSettings){if(!firstSutReason)sutReasons+=L",";sutReasons+=JsStringLiteral(Text(IDS_COMP_SUT_REASON_DEPENDENCY));}
         sutReasons+=L"]";
         json+=L",{\"id\":\"secureUxTheme\",\"title\":"+JsStringLiteral(Text(IDS_COMP_SUT_TITLE))+
+            L",\"warning\":"+JsStringLiteral(GlassProductUiPolicy::WarningText(preview.rows[4].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit()))+
             L",\"description\":"+JsStringLiteral(Text(IDS_COMP_SUT_DESC))+
             L",\"badge\":"+JsStringLiteral(Text(sutBadge))+L",\"badgeTone\":"+JsStringLiteral(sutTone)+
             L",\"state\":"+JsStringLiteral(Text(sutStateId))+L",\"reasons\":"+sutReasons+
@@ -2106,15 +2107,7 @@ private:
             selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.og,installedSelection_.openGlass));
             selection_.secureUxTheme=installedSelection_.secureUxTheme &&
                 GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.secureUxTheme,installedSelection_.secureUxTheme));
-            // Keep an active legacy integration when GlassSettings is replaced:
-            // adopt its native payload into the new standalone MSI first.
-            if (!installedSelection_.secureUxTheme &&
-                (secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Active ||
-                 secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::ActivationPending)) {
-                selection_.secureUxTheme=true;
-                selection_.glassSettings=true;
-                settingsAutoSelectedForSut_=true;
-            }
+
         }
         EnableWindow(next_,!failurePending_ && ComponentsReady());
         SyncWebViewState();
@@ -2931,22 +2924,23 @@ private:
             // Выбор карточки не тянет за собой основную платформу: принудительная
             // отметка уместна только при установке с нуля/обновлении, где карточка
             // уже отмечена и заблокирована.
-            if (message==L"component:x64:1" || message==L"component:x64:0") selection_.platform64=os64 && message.back()==L'1';
+            if(message==L"components:select-all") {
+                selection_.platform64=os64;selection_.platform32=true;selection_.glassSettings=true;selection_.openGlass=os64;
+                selection_.secureUxTheme=secureUxThemeState_!=GlassInstallUtil::SecureUxThemeState::External&&secureUxThemeState_!=GlassInstallUtil::SecureUxThemeState::Conflict;
+            }
+            else if (message==L"component:x64:1" || message==L"component:x64:0") selection_.platform64=os64 && message.back()==L'1';
             else if (message==L"component:x86:1" || message==L"component:x86:0") selection_.platform32=message.back()==L'1';
             else if (message==L"component:settings:1" || message==L"component:settings:0") {
                 selection_.glassSettings=message.back()==L'1';
-                if(!selection_.glassSettings){selection_.secureUxTheme=false;settingsAutoSelectedForSut_=false;}
             }
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
             else if (message==L"component:secureUxTheme:1" || message==L"component:secureUxTheme:0") {
                 const bool checked=message.back()==L'1';
-                const bool requiresSettings=SecureUxThemeRequiresSettings(SettingsInspectionDamaged());
                 const bool blocked=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External ||
                     (installedSelection_.glassSettings&&secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict);
                 if(!blocked){
                     selection_.secureUxTheme=checked;
-                    if(checked&&requiresSettings&&!selection_.glassSettings){selection_.glassSettings=true;settingsAutoSelectedForSut_=true;}
-                    else if(!checked&&settingsAutoSelectedForSut_){selection_.glassSettings=false;settingsAutoSelectedForSut_=false;}
+
                 }
             }
             EnableWindow(next_,!failurePending_ && ComponentsReady());
@@ -3413,8 +3407,8 @@ private:
                 if (mandatory) DrawMandatoryLock(dc,x+230,y+1);
                 DrawComponentActionBadge(dc,selected,installed,x+260,y+2);
             };
-            if (os64) state(selection_.platform64,installedSelection_.platform64,true,60,238);
-            state(selection_.platform32,installedSelection_.platform32,!os64,510,238);
+            if (os64) state(selection_.platform64,installedSelection_.platform64,false,60,238);
+            state(selection_.platform32,installedSelection_.platform32,false,510,238);
             state(selection_.glassSettings,installedSelection_.glassSettings,false,60,328);
             if (os64) state(selection_.openGlass,installedSelection_.openGlass,false,510,328);
             const bool sutExternal=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External||secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict;
@@ -3781,11 +3775,9 @@ private:
                     const bool os64=GlassInstallUtil::IsOs64Bit();
                     if(LOWORD(w)==IDC_COMPONENT_SETTINGS){
                         selection_.glassSettings=SendMessageW(componentSettings_,BM_GETCHECK,0,0)==BST_CHECKED;
-                        if(!selection_.glassSettings){selection_.secureUxTheme=false;settingsAutoSelectedForSut_=false;}
                     } else if(LOWORD(w)==IDC_COMPONENT_SUT){
                         selection_.secureUxTheme=SendMessageW(componentSecureUxTheme_,BM_GETCHECK,0,0)==BST_CHECKED;
-                        if(selection_.secureUxTheme&&SecureUxThemeRequiresSettings(SettingsInspectionDamaged())&&!selection_.glassSettings){selection_.glassSettings=true;settingsAutoSelectedForSut_=true;}
-                        else if(!selection_.secureUxTheme&&settingsAutoSelectedForSut_){selection_.glassSettings=false;settingsAutoSelectedForSut_=false;}
+
                     } else {
                         selection_.platform64=os64 && SendMessageW(component64_,BM_GETCHECK,0,0)==BST_CHECKED;
                         selection_.platform32=SendMessageW(component32_,BM_GETCHECK,0,0)==BST_CHECKED;

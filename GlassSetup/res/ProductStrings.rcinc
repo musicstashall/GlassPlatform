@@ -1,0 +1,11 @@
+// Shared by Setup and Unins. Keep the leading space when concatenating.
+LANGUAGE LANG_RUSSIAN, SUBLANG_DEFAULT
+STRINGTABLE
+BEGIN
+  IDS_COMP_SHELL_SUFFIX " и оболочки Windows"
+END
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+STRINGTABLE
+BEGIN
+  IDS_COMP_SHELL_SUFFIX " and the Windows shell"
+END

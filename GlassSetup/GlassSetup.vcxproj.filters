@@ -30,6 +30,7 @@
     <ClInclude Include="src\WizardProgress.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\WizardUnlockState.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\GlassProducts.h"><Filter>src</Filter></ClInclude>
+    <ClInclude Include="src\GlassProductPlan.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\InstallEngine.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClInclude Include="src\InstallSupport\GlassRemovalOrder.h"><Filter>src\InstallSupport</Filter></ClInclude>
@@ -56,6 +57,8 @@
     <None Include="res\app.ico"><Filter>res</Filter></None>
     <None Include="tests\verify_resources.py"><Filter>tests</Filter></None>
     <None Include="tests\selection_tests.cpp"><Filter>tests</Filter></None>
+    <None Include="tests\product_plan_tests.cpp"><Filter>tests</Filter></None>
+    <None Include="tests\run_product_plan_tests.py"><Filter>tests</Filter></None>
     <None Include="tests\removal_order_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\progress_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\unlock_state_tests.cpp"><Filter>tests</Filter></None>

@@ -5,6 +5,7 @@
 #include <Helpers/ThemeHelper.h>
 #include <aclapi.h>
 #include <uxtheme.h>
+#include <SystemVisualStyle.h>
 #include <wil/resource.h>
 
 #pragma comment(lib, "uxtheme.lib")
@@ -1112,34 +1113,6 @@ namespace
             || legacyHook(q.DwmGlobalFlag, q.DwmHasLegacyExact);
     }
 
-    [[nodiscard]] bool IsStockStyleName(const wchar_t* path) noexcept
-    {
-        std::wstring name = path ? path : L"";
-        const auto slash = name.find_last_of(L"\\/");
-        if (slash != std::wstring::npos)
-            name = name.substr(slash + 1);
-        return _wcsicmp(name.c_str(), L"aero.msstyles") == 0
-            || _wcsicmp(name.c_str(), L"aerolite.msstyles") == 0;
-    }
-
-    // Активен ли пользовательский визуальный стиль (не aero/aerolite), как
-    // VisualStyleCatalog.IsCustomVisualStylePath в GlassSettings.
-    [[nodiscard]] bool CustomVisualStyleActive() noexcept
-    {
-        wchar_t value[MAX_PATH]{};
-        DWORD size = sizeof(value);
-        if (::RegGetValueW(
-                HKEY_CURRENT_USER,
-                L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager",
-                L"DllName",
-                RRF_RT_REG_SZ,
-                nullptr,
-                value,
-                &size) != ERROR_SUCCESS)
-            return false;
-        return value[0] && !IsStockStyleName(value) && FileExistsNative(value);
-    }
-
     // Возврат к стандартному стилю до снятия обхода подписи — иначе после перезагрузки
     // пользовательский .msstyles не пройдёт проверку подписи (parity с toggle-off GS).
     [[nodiscard]] bool ApplyStockVisualStyle() noexcept
@@ -1170,7 +1143,7 @@ namespace
 // активен пользовательский, затем выполняет единую деактивацию
 // GlassSettings_SecureUxThemeDeactivate.
 // Биты кода выхода: 1 — неверные аргументы; 2 — нужна перезагрузка (отложена очистка
-// файлов); 4 — стандартный стиль не восстановлен (деактивация выполнена); 8 —
+// файлов); 4 — стандартный стиль не подтверждён (hook сохранён); 8 —
 // деактивация не удалась; 16 — установлен внешний SecureUxTheme, ничего не изменено.
 extern "C" void CALLBACK GlassSettings_SecureUxThemeSetupV1W(
     HWND, HINSTANCE, LPWSTR cmdLine, int) noexcept
@@ -1195,11 +1168,18 @@ extern "C" void CALLBACK GlassSettings_SecureUxThemeSetupV1W(
         || query.LoadedEventPresent
         || query.SystemDll4Present
         || query.ThemeUiProxyPresent;
-    if (oursActive && CustomVisualStyleActive() && !ApplyStockVisualStyle())
+    const auto style=Shared::SystemVisualStyle::Current();
+    if(oursActive&&style==Shared::SystemVisualStyle::State::Unknown) {
+        DebugLog(DBG_ERROR,L"[GlassSettings][SecureUxTheme] active visual style could not be verified; hook retained");
+        ::ExitProcess(kSecureUxExitDeactivateFailed|kSecureUxExitThemeNotRestored);
+    }
+    if (oursActive && style==Shared::SystemVisualStyle::State::ResetRequired &&
+        (!ApplyStockVisualStyle()||Shared::SystemVisualStyle::Current()!=Shared::SystemVisualStyle::State::Stock))
     {
         DebugLog(DBG_WARNING,
             L"[GlassSettings][SecureUxTheme] setup: stock visual style could not be applied");
-        code |= kSecureUxExitThemeNotRestored;
+        // Never remove the hook after a failed safe-style preparation.
+        ::ExitProcess(kSecureUxExitDeactivateFailed | kSecureUxExitThemeNotRestored);
     }
 
     const HRESULT hr = GlassSettings_SecureUxThemeDeactivate();

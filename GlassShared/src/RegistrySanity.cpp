@@ -228,4 +228,65 @@ void RemoveUserSettings() noexcept
     }
 }
 
+
+namespace {
+bool VerifyTreeAccess(HKEY key, unsigned depth) {
+    if(depth>64)return false;
+    for(DWORD index=0;;++index) {
+        wchar_t name[256]{};DWORD size=256;
+        const LONG st=RegEnumKeyExW(key,index,name,&size,nullptr,nullptr,nullptr,nullptr);
+        if(st==ERROR_NO_MORE_ITEMS)return true;
+        if(st!=ERROR_SUCCESS)return false;
+        HKEY child=nullptr;
+        if(RegOpenKeyExW(key,name,0,KEY_ALL_ACCESS,&child)!=ERROR_SUCCESS)return false;
+        const bool ok=VerifyTreeAccess(child,depth+1);RegCloseKey(child);if(!ok)return false;
+    }
+}
+bool InstallMetadata(const wchar_t* name) {
+    for(const auto& rule:kGlassPlatformRootRules)if(_wcsicmp(name,rule.valueName)==0)return true;
+    return false;
+}
+}
+bool CleanOwnedSettings(HKEY root, bool machine, bool apply, std::wstring& detail) {
+    for(REGSAM view:kViews) {
+        HKEY glass=nullptr;
+        LONG st=RegOpenKeyExW(root,L"Software\\StanislavKa\\GlassPlatform",0,KEY_ALL_ACCESS|view,&glass);
+        if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){detail=L"GlassPlatform access: "+std::to_wstring(st);return false;}
+        if(glass) {
+            if(!VerifyTreeAccess(glass,0)){RegCloseKey(glass);detail=L"GlassPlatform child access";return false;}
+            if(apply) {
+                for(;;) {
+                    wchar_t child[256]{};DWORD size=256;
+                    st=RegEnumKeyExW(glass,0,child,&size,nullptr,nullptr,nullptr,nullptr);
+                    if(st==ERROR_NO_MORE_ITEMS)break;
+                    if(st==ERROR_SUCCESS)st=RegDeleteTreeW(glass,child);
+                    if(st!=ERROR_SUCCESS){RegCloseKey(glass);detail=L"GlassPlatform child cleanup: "+std::to_wstring(st);return false;}
+                }
+                for(DWORD index=0;;) {
+                    wchar_t name[16384]{};DWORD size=16384;
+                    st=RegEnumValueW(glass,index,name,&size,nullptr,nullptr,nullptr,nullptr);
+                    if(st==ERROR_NO_MORE_ITEMS)break;
+                    if(st!=ERROR_SUCCESS){RegCloseKey(glass);detail=L"GlassPlatform value enumeration";return false;}
+                    if(InstallMetadata(name)){++index;continue;}
+                    st=RegDeleteValueW(glass,name);
+                    if(st!=ERROR_SUCCESS){RegCloseKey(glass);detail=L"GlassPlatform value cleanup: "+std::to_wstring(st);return false;}
+                }
+            }
+            RegCloseKey(glass);
+        }
+        HKEY dwm=nullptr;
+        st=RegOpenKeyExW(root,L"Software\\Microsoft\\Windows\\DWM",0,KEY_QUERY_VALUE|KEY_SET_VALUE|view,&dwm);
+        if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){detail=L"DWM access: "+std::to_wstring(st);return false;}
+        if(dwm) {
+            if(apply)for(const auto& rule:kDwmOpenGlassRules) {
+                st=RegDeleteValueW(dwm,rule.valueName);
+                if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){RegCloseKey(dwm);detail=L"DWM cleanup: "+std::to_wstring(st);return false;}
+            }
+            RegCloseKey(dwm);
+        }
+    }
+    (void)machine; // Same whitelist; the caller supplies HKLM only once.
+    return true;
+}
+
 } // namespace Shared::RegistrySanity

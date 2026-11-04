@@ -25,7 +25,7 @@ header = read("res/resource.h")
 assert read("res/resource.h.txt") == header, "resource.h.txt is out of sync"
 ids = dict(re.findall(r"#define\s+(\w+)\s+(\d+)", header))
 assert len(ids.values()) == len(set(ids.values())), "duplicate resource/control IDs"
-rc = read("res/GlassSetup.rc")
+rc = read("res/GlassSetup.rc") + "\n" + read("res/ProductStrings.rcinc")
 unins_rc = read("GlassUnins/GlassUnins.rc")
 setup = read("src/main.cpp")
 engine = read("src/InstallEngine.cpp")
@@ -165,7 +165,7 @@ for suffix in ("5071", "5072", "5073", "5074", "5075"):
     assert suffix in read("src/InstallSupport/GlassInstallMsi.h"), suffix
 assert "NormalizeInstall" in engine and "NormalizeRemoval" in unins
 assert "selection_.platform64=os64" in setup
-assert "IDS_COMP_GS_WARNING" in setup and "HKCU\\\\Software\\\\StanislavKa\\\\GlassPlatform" in rc
+assert "GlassProductUiPolicy::WarningText" in setup and "HKCU\\\\Software\\\\StanislavKa\\\\GlassPlatform" in rc
 assert "StartMenuShortcutExists" in util
 assert "QueryPlatformInstallPath" in util and "QueryOpenGlassInstallPath" in util
 # Setup never removes products: checked products are installed or updated,
@@ -220,7 +220,7 @@ assert "if (!keptOnly || !selection_.platform32)" in success_restore and "if (ke
 purge = engine[engine.index("bool InstallEngine::PurgeRemnants()"):]
 assert "DeleteTree(" not in purge and "RemoveDirectoryTree(" not in purge
 warnings = section(setup, "    std::wstring ComponentWarnings()", "    std::wstring ComponentsJson()")
-assert "IDS_COMP_X86_WARNING" in warnings and "IDS_COMP_GS_WARNING" in warnings and 'L"\\n"' in warnings
+assert "SelectionPreview()" in warnings and "GlassProductUiPolicy::WarningText" in warnings
 assert "ComponentStateId" in setup and "installedSelection_.platform32" in setup and "IDS_COMP_STATE_KEEP" in rc
 assert "IDS_COMP_STATE_REMOVE" not in rc and "IDS_COMP_BADGE_REMOVE" not in rc and "IDS_STATUS_REMOVE " not in rc
 assert "ActionForInstall" in policy and "ComponentBadgeId" in setup and "ComponentBadgeTone" in setup
@@ -229,14 +229,14 @@ assert "X86WarningApplies()" in setup and "SettingsWarningApplies()" in setup an
 for action in ("INSTALL", "UPDATE", "KEEP"):
     assert f"IDS_COMP_BADGE_{action}" in setup and rc.count(f"IDS_COMP_BADGE_{action}") == 2
     assert f".comp-badge.action-{action.lower()}" in ui
-assert "item.badgeTone" in ui and "comp-lock" in ui and "item.lockTitle" in ui
-assert "action.append(componentLock(" in ui and "badge.textContent=String(item.badge);action.append(badge)" in ui
+assert "item.warning" in ui and "comp-warning-button" in ui and "item.state||item.badge" in ui
+assert "row.append(input,icons,body)" in ui and "name.htmlFor=input.id" in ui
 assert ".comp-action{display:flex" in ui and "components-stack" in ui  # карточки и информационная полоса в прокручиваемой раскладке
 assert "#a7dfff" in ui and "#efb94f" in ui  # independent blue-and-gold lock, not badge-tinted
 assert "DrawComponentActionBadge(dc,selected,installed" in setup and "DrawMandatoryLock(dc," in setup
 assert "item.state" in ui and "white-space:pre-line" in ui  # строка «что будет выполнено» вернулась
 assert "const auto warnings=ComponentWarnings()" in setup and "DrawLabel(dc,warnings" in setup
-assert "Text(IDS_COMP_X86_WARNING)" in setup and "Text(IDS_COMP_GS_WARNING)" in setup
+assert "GlassProductUiPolicy::WarningText" in setup
 
 # The animated unlock screen must stop when the worker exits the unlock phase,
 # not when a localised status string happens to change.
@@ -617,7 +617,7 @@ assert 'L"LastAppliedThemeDwmFingerprint", ValueKind::Text' in reg_sanity
 assert "MINMAXBUTTONGLOWid" in reg_sanity and "ColorizationGlassReflectionPolicy" in reg_sanity
 assert "trust != ERROR_SUCCESS" in inspect_cpp and "ours" in inspect_cpp
 assert "condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY)" in setup
-assert "item.reasons.join" in ui and "item.lockTitle" in ui
+assert "item.reasons.join" in ui and "item.disabled||item.locked" in ui
 
 # 2026-11-03 follow-up 3: card reasons behind a mini-spoiler (accordion, equal heights);
 # the registry reason names the offending values; OpenGlass user resources and
@@ -636,44 +636,32 @@ assert "ОС-нативная платформа обязательна, но н
 # DWM values of the current user).
 assert "QueryFileVersion" in inspect_cpp and "version.lib" in inspect_cpp
 assert "OpenGlass.dll" in inspect_cpp and "FileVersionOf" in inspect_cpp
-assert "selection_.platform64=os64;" not in setup and "component:x64:1" in setup
-assert "RemoveUserSettings" in reg_sanity and "RemoveUserSettings" in unins
+assert "components:select-all" in setup and "component:x64:1" in setup
+assert "CleanOwnedSettings" in reg_sanity and "cleanupProfiles.Cleanup" in unins
 assert 'L",\\\"locked\\\":false,\\\"hidden\\\":false}"' in unins
-assert "if (locked) reasons+=" in unins and "componentsWarning" in unins
-assert "Only settings cleanup is selected" in ui and "can be removed separately" in ui
+assert "GlassProductUiPolicy::WarningText" in unins and "componentsWarning" in unins
+assert "Clean all user profiles + HKLM" in ui and "Unchecked products and settings are retained" in ui
 assert "IDC_UNINS_SETTINGS_CLEANUP" in header_now and "cleanupSettings" in unins
 assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_sanity
 
 # 2026-11-03 follow-up 5: «Установить» disabled with no product selected; the reasons
 # subline stays on every card with neutral grey «не требуется» when there are no reasons.
 assert "HasSelectedComponent" in setup
-assert "не требуется" in ui and "tone-update" in ui and "tone-repair" in ui
+assert "comp-reason-line" in ui and "item.reasons&&item.reasons.length" in ui
+# Approved 2026-11-04 layout supersedes the lower warning stripe and mandatory locks.
 assert "comp-slim" in ui and "components-extra" in ui and "components-stack" in ui
-assert "components-select-all" in ui and "Снять необязательные" in ui
-assert ".components-list-frame{" in ui and "background:#17192b" in ui
-assert ".components-list{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:18px 0" in ui
-assert "background:transparent;mask-image:linear-gradient(180deg,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%)" in ui
-assert "backdrop-filter:blur(10px)" in ui and "#000 18px,#000 calc(100% - 18px)" in ui
-assert ".components-status{display:flex" in ui and "flex:0 0 78px;height:78px" in ui
-assert ".components-status.is-neutral" in ui and "Ни один компонент не выбран." in ui
-assert "Ни один продукт не выбран для удаления." in ui and "if(!loading&&selectedProducts===0)" in ui
-assert '<div id="components-status"' in ui and '</div><button id="components-select-all"' in ui
-assert '<p id="components-intro" class="components-intro"></p></div>\n<div class="components-stack">' in ui
-assert "components-count" in ui and "availableProducts.length" in ui and "selectedProducts" in ui
-assert "#components-panel{bottom:0}" in ui and "top:188px;bottom:12px" in ui and "gap:14px" in ui
-assert ".banner-portrait{position:absolute;left:240px;top:100px;width:800px;height:447px;object-fit:cover;opacity:.36;" in ui
-assert ".error-scene .banner-portrait{opacity:.36;" in ui and ".components-banner{position:absolute;inset:0 0 0 auto;width:700px;height:540px;object-fit:cover;opacity:.36;" in ui
-assert ".license-banner{position:absolute;inset:0 0 0 auto;width:680px;height:540px;object-fit:cover;opacity:.19;" in ui
-assert "Дополнительные продукты можно продолжить выбирать" in ui
-assert ".components-status.is-warning" in ui and "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
-assert "input.dataset.locked=item.locked?'1':'0'" in ui and "dispatchEvent(new Event('change'" in ui
-assert "button.hidden=false" in ui and "select=uninstaller||selectable.some(input=>!input.checked)" in ui
-assert "input.dataset.component!=='cleanup'" in ui and "Settings cleanup is a separate option." in ui
+assert "grid-template-columns:614px 274px" in ui and "height:330px" in ui
+assert "mask-image:linear-gradient(180deg,transparent,#000 18px" in ui
+assert "has-warning" in ui and ".comp-card.has-warning" in ui
+assert "components:select-all" in ui and "components:select-all" in setup and "components:select-all" in unins
+assert "comp-warning-button" in ui and "components-warning-shade" in ui
+assert "e.stopPropagation();closeProductWarning()" in ui
+assert "plan-warning" in ui and "li.textContent='⚠ '+item.warning" in ui
+assert "selected.length} of ${inputs.length}" in ui
+assert "More products below" in ui and "Products above" in ui
+assert "const bool sutNeedsSettings=false" in setup and "const bool sutRequiresSettings=false" in setup
 assert "select&&!webReady_?SW_SHOWNA:SW_HIDE" in unins and "ShowWindow(back_,SW_HIDE)" in unins
 assert "page_==Page::Select?SW_SHOWNA:SW_HIDE" in unins
-assert "components-status.is-warning" in ui and "secureUxTheme" in ui and "component:secureUxTheme" in setup
-assert "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
-assert "uninstaller" in ui and "MSI SecureUxTheme будет удалён" in ui
 assert "WizardTheme::PaintFooterBar(dc" in setup and "void PaintFooterBar(" in theme and "bufferedErase_" not in setup
 assert "const bool terminalPage=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error" in setup
 assert "const int footerTop=terminalPage?kHtmlHeight:kContentHeight" in setup and "Box(0,kHtmlHeight,kWidth,1)" not in setup
@@ -681,8 +669,8 @@ assert "const bool progressPage=page_==Page::Stopping || page_==Page::Removing" 
 assert "const int footerTop=progressPage?kContentHeight:kHtmlHeight" in unins
 assert "text.find(part)!=std::wstring::npos" in setup  # error detail is not appended twice
 assert "GlassSettings" in unins and "secureUxTheme" in unins and "IDC_UNINS_SECUREUXTHEME" in unins
-assert "SecureUxTheme будет отключён" in unins and "Внешняя установка SecureUxTheme останется без изменений" in unins
-assert "slim" in unins and "cleanup" in unins and "Будет удалено" in unins and "удалится вместе с основной платформой" in unins
+assert "SecureUxTheme retained" in unins and "SecureUxThemeState::External" in unins
+assert "slim" in unins and "cleanup" in unins and "Будет удалено" in unins and "PreflightCleanup" in unins
 
 # 2026-11-03 follow-up 6: integrity analysis runs in the background during the first
 # pages; the products page shows the startup-style loading donut until it completes;
@@ -705,6 +693,36 @@ assert "GlassProducts::ProductCondition::NotInstalled)" in setup
 
 # Строки действия и причин прижаты к низу карточки — один уровень Y на всех карточках.
 assert "comp-foot" in ui and "margin-top:auto" in ui and "align-self:stretch}" in ui  # тело карточки тянется на всю высоту — строки внизу на одном уровне
+
+# Production maintenance safety barriers (source checks, not registry/MSI integration).
+profiles=read("src/InstallSupport/GlassProfileMaintenance.h")
+cache=read("src/InstallSupport/GlassMaintenanceCache.h")
+style=(repo / "GlassShared/include/SystemVisualStyle.h").read_text(encoding="utf-8")
+assert "RegLoadAppKeyW" in profiles and "KEY_ALL_ACCESS,REG_PROCESS_APPKEY" in profiles
+assert "ProfileList" in profiles and "NTUSER.DAT unavailable" in profiles
+assert unins.index("cleanupProfiles.PreflightCleanup") < unins.index("StopAllForUninstall(x64Dir_")
+assert "CleanOwnedSettings(profile.hive,false,false" in profiles and "CleanOwnedSettings(profile.hive,false,true" in profiles
+assert "InstallMetadata(name)" in reg_sanity and "VerifyTreeAccess" in reg_sanity
+assert "kDwmOpenGlassRules" in reg_sanity and "partial cleanup" in profiles
+assert "GetCurrentThemeName" in style and "WinVerifyTrust" in style and "Microsoft Corporation" in style
+assert "FILE_ATTRIBUTE_REPARSE_POINT" in style and "State::Unknown" in style
+assert "IsStockStyleName" not in sut_native and "CustomVisualStyleActive" not in sut_native
+assert "Shared::SystemVisualStyle::Current()" in sut_native
+assert "GLASSSETTINGSINSTALLED" in sut_template  # TODO: system MSI migration still pending; not a completed independence claim.
+assert "GlassMaintenanceCache::Publish" in engine and "IDR_MAINTENANCE_UNINS" in rc
+assert "PROTECTED_DACL_SECURITY_INFORMATION" in cache and "WaitForSingleObject" in cache
+assert "Registrations(code,all)" in cache and "RegistrationState" in cache and "PackageCode" in cache
+assert "MsiSourceListAddSourceExW" in cache and "INSTALLPROPERTY_PACKAGENAME" in cache
+assert "ModifyPath" in msi and "quietCommand.c_str()" in msi and "CurrentFile" in msi
+
+# 2026-11-04 UI review: native-OS shell suffix is shared between both masters.
+assert 'IDS_COMP_SHELL_SUFFIX " и оболочки Windows"' in read("res/ProductStrings.rcinc")
+assert 'IDS_COMP_SHELL_SUFFIX " and the Windows shell"' in read("res/ProductStrings.rcinc")
+assert 'ProductStrings.rcinc' in read("res/GlassSetup.rc") and 'ProductStrings.rcinc' in unins_rc
+assert "platform64==os64" in read("src/GlassProductUiPolicy.h")
+assert "PlatformDescription" in setup and "PlatformDescription" in unins
+assert "ManualOpenGlass" in read("src/GlassProductPlan.h")
+assert "Средство для использования неподписанных визуальных стилей. Установка в System32." in rc
 
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")

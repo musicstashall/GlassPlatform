@@ -1,3 +1,4 @@
+#include "InstallSupport/GlassMaintenanceCache.h"
 #include "InstallEngine.h"
 #include "InstallLog.h"
 #include "WizardProgress.h"
@@ -677,7 +678,7 @@ bool InstallEngine::Start(
                 sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending ||
                 sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
     }
-    if (selection_.secureUxTheme && (!settingsInstalled || legacySutPayload)) selection_.glassSettings=true;
+
     if (selection_.glassSettings && legacySutPayload && !selection_.secureUxTheme)
         selection_.secureUxThemePackageOnly=true;
 
@@ -1634,6 +1635,22 @@ bool InstallEngine::RegisterSelectedProducts() noexcept {
 void InstallEngine::LaunchSelectedProducts() noexcept {
     const bool is64 = scanNativeX64_;
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+#ifdef GLASS_EMBED_MSI
+    const GlassMaintenanceCache::Blob cacheBlobs[]={
+        {IDR_MSI_X64,L"Glass-x64.msi"},{IDR_MSI_X86,L"Glass-x86.msi"},
+        {IDR_MSI_GS_X64,L"GlassSettings-x64.msi"},{IDR_MSI_GS_X86,L"GlassSettings-x86.msi"},
+        {IDR_MSI_SUT_X64,L"SecureUxTheme-x64.msi"},{IDR_MSI_SUT_X86,L"SecureUxTheme-x86.msi"},
+        {IDR_MSI_OPENGLASS,L"OpenGlass-x64.msi"}};
+    if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs,std::size(cacheBlobs),IDR_MAINTENANCE_UNINS))
+        AddFinishWarning(ru?L"Оболочка обслуживания сохранена не полностью":L"Maintenance cache publication is incomplete",ru?L"Сохраните исходный установщик и журнал; повторите обслуживание.":L"Keep the original installer and log; retry maintenance.");
+    const wchar_t* products[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
+        GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass,
+        GlassInstallMsi::kProductSecureUxThemeX64,GlassInstallMsi::kProductSecureUxThemeX86};
+    for(const auto* code:products)if(GlassInstallMsi::IsProductInstalled(code)) {
+        const bool product32=_wcsicmp(code,GlassInstallMsi::kProductPlatformX86)==0||_wcsicmp(code,GlassInstallMsi::kProductSettingsX86)==0||_wcsicmp(code,GlassInstallMsi::kProductSecureUxThemeX86)==0;
+        GlassInstallMsi::PatchArpUninstallString(code,_wcsicmp(code,GlassInstallMsi::kProductOpenGlass)==0?openGlassDir_:product32?x86Dir_:x64Dir_);
+    }
+#endif
 
     if (selection_.secureUxTheme) {
         SetStatus(labels_.secureUxTheme.empty()?L"SecureUxTheme":labels_.secureUxTheme,9300);

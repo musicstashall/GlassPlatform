@@ -10,8 +10,11 @@
 #include "WizardTheme.h"
 #include "WizardAssets.h"
 #include "GlassProducts.h"
+#include "GlassProductPlan.h"
+#include "GlassProductUiPolicy.h"
 #include <GlassShellMenuConstants.h>
 #include <RegistrySanity.h>
+#include "InstallSupport/GlassProfileMaintenance.h"
 
 #include <windows.h>
 #include <commctrl.h>
@@ -251,6 +254,21 @@ public:
         if (!args_.product.empty() && !IsKnownCode(args_.product)) return 4;
         ChooseInitialProduct();
         NormalizeSelection();
+        // Entry-point policy only; do not mistake an unchecked SUT for an
+        // absent one, or silently remove it as a side effect of Settings.
+        // Unknown discovery fails closed. The same rule is used by the planner.
+        const auto sutPresence=installed_.secureUxTheme ? GlassProductPlan::Presence::Installed :
+            (!rootsKnown_ || secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict ||
+             secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External) ?
+                GlassProductPlan::Presence::Unknown : GlassProductPlan::Presence::Absent;
+        const auto sutActivity=SecureUxThemeManaged() ? GlassProductPlan::Activity::Active :
+            secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict ?
+                GlassProductPlan::Activity::Unknown : GlassProductPlan::Activity::Inactive;
+        if (GlassProductPlan::RequiresInteractiveSettingsRemoval(GlassProductPlan::Mode::RemoveSilent,
+                selected_.settings,sutPresence,sutActivity)) {
+            LogLine(L"Silent GlassSettings removal rejected: SecureUxTheme requires an explicit interactive plan. Use Modify.");
+            return ERROR_INSTALL_PACKAGE_REJECTED;
+        }
         if (!selected_.Any()) return 0;
         return RunOperation(selected_);
     }
@@ -365,7 +383,7 @@ private:
         selected_={safe.platform64,safe.platform32,safe.glassSettings,safe.openGlass,
                    safe.secureUxTheme,selected_.cleanupSettings};
         if (!installed_.secureUxTheme) selected_.secureUxTheme=false;
-        else if (selected_.settings || CoreSelected()) selected_.secureUxTheme=true;
+
     }
     void ResolveRoots() {
         GlassInstallUtil::InstallRoots roots;
@@ -396,8 +414,8 @@ private:
         back_=Button(T(L"Выбрать всё",L"Select all"),kSelectAll);
         next_=Button(T(L"Удалить",L"Remove"),IDC_NEXT);
         cancel_=Button(T(L"Отмена",L"Cancel"),IDC_CANCEL);
-        check_[0]=Button(L"Glass Platform (64-bit)",IDC_COMPONENT64,BS_AUTOCHECKBOX);
-        check_[1]=Button(L"Glass Platform (32-bit)",IDC_COMPONENT32,BS_AUTOCHECKBOX);
+        check_[0]=Button(L"Glass Platform x64",IDC_COMPONENT64,BS_AUTOCHECKBOX);
+        check_[1]=Button(L"Glass Platform x86",IDC_COMPONENT32,BS_AUTOCHECKBOX);
         check_[2]=Button(L"GlassSettings",IDC_COMPONENT_SETTINGS,BS_AUTOCHECKBOX);
         check_[3]=Button(L"OpenGlass",IDC_COMPONENT_OG,BS_AUTOCHECKBOX);
         check_[4]=Button(T(L"Удалить настройки",L"Remove settings"),IDC_UNINS_SETTINGS_CLEANUP,BS_AUTOCHECKBOX);
@@ -445,14 +463,12 @@ private:
     // пользователь видел четыре белых прямоугольника на месте карточек продуктов.
     void ShowNativeChecks() {
         const bool show=page_==Page::Select && webFailed_;
-        const bool core=CoreSelected();
         const bool values[]={selected_.x64,selected_.x86,selected_.settings,selected_.openGlass,selected_.cleanupSettings,selected_.secureUxTheme};
         const bool available[]={installed_.x64,installed_.x86,installed_.settings,installed_.openGlass,true,installed_.secureUxTheme};
         for (int i=0;i<6;++i) {
             SendMessageW(check_[i],BM_SETCHECK,values[i]?BST_CHECKED:BST_UNCHECKED,0);
             ShowWindow(check_[i],show && available[i]?SW_SHOWNA:SW_HIDE);
-            const bool dependent=(i<4 && core && ((GlassInstallUtil::IsOs64Bit() && i!=0) || (!GlassInstallUtil::IsOs64Bit() && i!=1)))
-                || (i==5 && (core||selected_.settings));
+            const bool dependent=false;
             EnableWindow(check_[i],available[i] && !dependent);
         }
     }
@@ -470,8 +486,8 @@ private:
     }
     std::wstring ComponentsJson() const {
         std::wstring json=L"[";
-        const bool core=CoreSelected();
         const bool os64=GlassInstallUtil::IsOs64Bit();
+        const auto preview=SelectionPreview();
         auto add=[&](const wchar_t* id,const wchar_t* title,const wchar_t* detail,bool checked,bool available,bool locked) {
             if (json.size()>1) json+=L",";
             const std::wstring badge=locked?T(L"ЗАВИСИМОСТЬ",L"DEPENDENT"):T(L"УСТАНОВЛЕНО",L"INSTALLED");
@@ -481,20 +497,21 @@ private:
             std::wstring reasons=L"[";
             if (locked) reasons+=Q(T(L"удалится вместе с основной платформой",L"removed together with the core platform"));
             reasons+=L"]";
-            json+=L"{\"id\":"+Q(id)+L",\"title\":"+Q(title)+L",\"description\":"+Q(detail)+
+            json+=L"{\"id\":"+Q(id)+L",\"title\":"+Q(title)+L",\"description\":"+Q((std::wstring(id)==L"x64"||std::wstring(id)==L"x86")?GlassProductUiPolicy::PlatformDescription(detail,std::wstring(id)==L"x64",os64,IsRu()):std::wstring(detail))+
+                L",\"warning\":"+Q(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,IsRu(),GlassInstallUtil::IsOs64Bit()))+
                 L",\"badge\":"+Q(badge)+L",\"state\":"+Q(state)+L",\"reasons\":"+reasons+
                 L",\"checked\":"+(checked?L"true":L"false")+
                 L",\"locked\":"+(locked?L"true":L"false")+L",\"hidden\":"+(available?L"false":L"true")+L"}";
         };
-        add(L"x64",L"Glass Platform (64-bit)",T(L"Платформа 64-битных приложений",L"64-bit platform"),selected_.x64,installed_.x64,core&&!os64);
-        add(L"x86",L"Glass Platform (32-bit)",T(L"Поддержка 32-битных приложений",L"32-bit application support"),selected_.x86,installed_.x86,core&&os64);
-        add(L"settings",L"GlassSettings",T(L"Панель управления платформой",L"Platform settings application"),selected_.settings,installed_.settings,core);
-        add(L"openglass",L"OpenGlass",T(L"Оформление рамок окон",L"Glass window frame engine"),selected_.openGlass,installed_.openGlass,core);
+        add(L"x64",L"Glass Platform x64",T(L"Оформление 64-битных приложений",L"Styling for 64-bit applications"),selected_.x64,installed_.x64,false);
+        add(L"x86",L"Glass Platform x86",T(L"Оформление 32-битных приложений",L"Styling for 32-bit applications"),selected_.x86,installed_.x86,false);
+        add(L"settings",L"GlassSettings",T(L"Панель управления платформой",L"Platform settings application"),selected_.settings,installed_.settings,false);
+        add(L"openglass",L"OpenGlass",T(L"Оформление рамок окон",L"Glass window frame engine"),selected_.openGlass,installed_.openGlass,false);
         if(installed_.secureUxTheme){
             const bool active=SecureUxThemeManaged();
             const bool pending=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::ActivationPending||secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
             const bool external=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External;
-            const bool dependent=(core||selected_.settings)&&installed_.secureUxTheme;
+            const bool dependent=false;
             const bool checked=selected_.secureUxTheme||dependent;
             const bool disabled=external||secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict;
             const std::wstring badge=external?T(L"ВНЕШНЯЯ УСТАНОВКА",L"EXTERNAL INSTALL"):pending?T(L"ПЕРЕЗАПУСК",L"RESTART PENDING"):active?T(L"АКТИВЕН",L"ACTIVE"):T(L"УСТАНОВЛЕН",L"INSTALLED");
@@ -505,8 +522,8 @@ private:
                 T(L"Установлен, интеграция выключена",L"Installed, integration is off");
             const std::wstring reason=dependent?T(L"удалится вместе с GlassSettings",L"removed with GlassSettings"):
                 T(L"можно удалить отдельно",L"can be removed separately");
-            json+=L",{\"id\":\"secureUxTheme\",\"title\":\"SecureUxTheme\",\"description\":"+
-                Q(T(L"Отдельный SecureUxTheme MSI, зависящий от GlassSettings.",L"Standalone SecureUxTheme MSI that depends on GlassSettings."))+
+            json+=L",{\"id\":\"secureUxTheme\",\"title\":\"SecureUxTheme\",\"warning\":"+Q(GlassProductUiPolicy::WarningText(preview.rows[4].warnings,IsRu(),GlassInstallUtil::IsOs64Bit()))+L",\"description\":"+
+                Q(T(L"Средство для использования неподписанных визуальных стилей. Установка в System32.",L"A tool for using unsigned visual styles. Installs in System32."))+
                 L",\"badge\":"+Q(badge)+L",\"badgeTone\":"+Q(external?L"repair":pending?L"update":L"keep")+
                 L",\"state\":"+Q(state)+L",\"reasons\":"+(reason.empty()?L"[]":L"["+Q(reason)+L"]")+
                 L",\"checked\":"+(checked?L"true":L"false")+L",\"locked\":"+(dependent?L"true":L"false")+
@@ -515,22 +532,18 @@ private:
         }
         // «Удалить настройки» — отдельный компактный чекбокс, а не карточка.
         json+=L",{\"id\":\"cleanup\",\"slim\":true,\"title\":"+Q(T(L"Удалить настройки",L"Remove settings"))+
-            L",\"description\":"+Q(T(L"Раздел GlassPlatform и параметры OpenGlass в DWM текущего пользователя.",
-                L"The GlassPlatform key and the OpenGlass DWM values of the current user."))+
+            L",\"description\":"+Q(T(L"Все пользовательские профили и общие параметры HKLM/DWM. Настройки сохраняемых продуктов также будут сброшены.",
+                L"All user profiles and shared HKLM/DWM settings. Settings of retained products will also be reset."))+
             L",\"checked\":"+(selected_.cleanupSettings?L"true":L"false")+L",\"locked\":false,\"hidden\":false}";
         return json+L"]";
     }
+    GlassProductPlan::Plan SelectionPreview() const {
+        const GlassProducts::Selection choice{selected_.x64,selected_.x86,selected_.settings,selected_.openGlass,selected_.secureUxTheme};
+        const GlassProducts::Selection installed{installed_.x64,installed_.x86,installed_.settings,installed_.openGlass,installed_.secureUxTheme};
+        return GlassProductUiPolicy::Preview(choice,installed,GlassInstallUtil::IsOs64Bit(),true,SecureUxThemeManaged());
+    }
     std::wstring Warning() const {
-        std::wstring text;
-        const auto append=[&](const std::wstring& value){if(!text.empty())text+=L"\n";text+=value;};
-        if (CoreSelected()) append(T(L"При удалении основной платформы зависимые продукты также будут удалены, а SecureUxTheme будет отключён.",L"Removing the core platform also removes dependent products and disables SecureUxTheme."));
-        else if(selected_.settings&&(installed_.x64||installed_.x86)) append(T(L"GlassSettings и SecureUxTheme будут отключены. Без GlassSettings параметры платформы придётся менять вручную в HKCU\\Software\\StanislavKa\\GlassPlatform.",
-            L"GlassSettings and SecureUxTheme will be disabled. Without GlassSettings, platform settings must be edited manually in HKCU\\Software\\StanislavKa\\GlassPlatform."));
-        if(secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External)
-            append(T(L"Внешняя установка SecureUxTheme останется без изменений.",L"The external SecureUxTheme installation will be left unchanged."));
-        else if(secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict)
-            append(T(L"Состояние SecureUxTheme не удалось проверить; его интеграция не будет изменена.",L"SecureUxTheme could not be inspected; its integration will not be changed."));
-        return text;
+        return GlassProductUiPolicy::WarningText(SelectionPreview().warnings,IsRu(),GlassInstallUtil::IsOs64Bit());
     }
     void SyncWeb() {
         if (!web_ || !webReady_ || !bridgeReady_) return;
@@ -654,6 +667,21 @@ private:
         // not our cleanup directory. Inspect selected products before stopping
         // any host; the agreed safety check prevents touching paths outside
         // the corresponding InstallPath.
+        GlassProfileMaintenance::Inventory cleanupProfiles;
+        if(chosen.secureUxTheme) {
+            std::wstring detail;
+            if(!cleanupProfiles.PreflightStyles(detail)) {
+                SetError(T(L"SecureUxTheme сохранён: подготовка визуальных стилей всех профилей не подтверждена. ",L"SecureUxTheme retained: visual-style preparation for every profile is unverified. ")+detail);
+                return ERROR_INSTALL_FAILURE;
+            }
+        }
+        if(chosen.cleanupSettings) {
+            std::wstring detail;
+            if(!cleanupProfiles.PreflightCleanup(detail)) {
+                SetError(T(L"Очистка всех профилей недоступна. Закройте другие сеансы и повторите: ",L"All-profile cleanup is unavailable. Close other sessions and retry: ")+detail);
+                return ERROR_ACCESS_DENIED;
+            }
+        }
         struct Probe { const wchar_t* code; std::wstring root, cached; bool installed=false; };
         struct ProbeWorkspace {
             std::wstring directory;
@@ -745,10 +773,11 @@ private:
         const bool enabled64=GP::QueryGlassAutorunUiState(GP::PlatformArch::X64)!=GP::AutorunUiState::Disabled;
         const bool enabled86=GP::QueryGlassAutorunUiState(GP::PlatformArch::X86)!=GP::AutorunUiState::Disabled;
         const bool platformRemoval=chosen.x64 || chosen.x86;
-        const bool stopOg=GlassInstallUtil::IsOs64Bit() && (chosen.x64 || chosen.openGlass);
+        const bool stopPlatforms=platformRemoval||chosen.cleanupSettings;
+        const bool stopOg=GlassInstallUtil::IsOs64Bit() && (chosen.openGlass||chosen.cleanupSettings);
         const bool task64=GP::GlassAutorunTaskExists(GP::PlatformArch::X64);
         const bool task86=GP::GlassAutorunTaskExists(GP::PlatformArch::X86);
-        if (platformRemoval) {
+        if (stopPlatforms) {
             std::wstring error;
             if (!GlassInstallRemoval::ValidatePlatformTask(GP::PlatformArch::X64,x64Dir_,task64,prior64,IsRu(),error) ||
                 !GlassInstallRemoval::ValidatePlatformTask(GP::PlatformArch::X86,x86Dir_,task86,prior86,IsRu(),error) ||
@@ -845,33 +874,11 @@ private:
                 L"No packages were removed, but previously running components could not be restarted."));
             return 17;
         };
-        // SecureUxTheme принадлежит GlassSettings: деактивация «как в GlassSettings» — до
-        // удаления продуктов и до остановки компонентов (удаление GlassSettings и полное
-        // удаление). Отказ helper'а останавливает удаление: активный хук winlogon без
-        // интерфейса управления оставаться не должен.
+        // Only an explicit SecureUxTheme removal prepares styles/deactivates the
+        // hook. Removing Settings alone never implicitly removes another product.
         bool secureUxThemeReboot=false, secureUxThemeThemeNote=false;
-        if (chosen.settings || (chosen.secureUxTheme && SecureUxThemeManaged())) {
-            SetStatus(T(L"Отключение SecureUxTheme…",L"Deactivating SecureUxTheme…"),450);
-            GlassInstallUtil::SecureUxThemeDeactivateRun sutRun;
-            std::wstring sutError;
-            if (!GlassInstallUtil::InvokeSecureUxThemeDeactivate(x64Dir_,x86Dir_,&sutRun,&sutError)) {
-                LogLine(L"SecureUxTheme deactivation failed: "+sutError);
-                if (chosen.settings || chosen.secureUxTheme) {
-                    SetError(T(L"Не удалось отключить SecureUxTheme. Пакеты не удалены.",
-                        L"Could not deactivate SecureUxTheme. No packages were removed."));
-                    return 18;
-                }
-                // Полное удаление без установленного GlassSettings: helper недоступен,
-                // активного состояния обычно и нет — продолжаем с записью в журнал.
-            } else if (sutRun.ran) {
-                secureUxThemeReboot=sutRun.rebootRequired;
-                secureUxThemeThemeNote=sutRun.themeNotRestored;
-                if (sutRun.skippedExternalInstall)
-                    LogLine(L"SecureUxTheme: external installation owns the state; nothing changed");
-            }
-        }
         SetStatus(T(L"Остановка компонентов…",L"Stopping components…"),500);
-        if (!GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,platformRemoval,platformRemoval,stopOg,
+        if (!GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,stopPlatforms,stopPlatforms,stopOg,
                 &cancelRequested_,&stopAttempted64,&stopAttempted86,&prior64,&prior86)) {
             if (cancelRequested_.load()) return cancelledResult();
             if (!restoreRemaining()) {
@@ -883,9 +890,9 @@ private:
             return 10;
         }
         if (cancelRequested_.load()) return cancelledResult();
-        if (platformRemoval || chosen.settings)
+        if (stopPlatforms || chosen.settings)
             SetStatus(T(L"Проверка модулей в процессах…",L"Checking modules in processes…"),600);
-        if ((platformRemoval || chosen.settings) && !EnsureModulesReleased()) {
+        if ((stopPlatforms || chosen.settings) && !EnsureModulesReleased()) {
             if (cancelRequested_.load()) return cancelledResult();
             (void)restoreRemaining(); return 11;
         }
@@ -897,6 +904,28 @@ private:
             return cancelledResult();
         removalStarted_.store(true,std::memory_order_release);
         if (window) PostMessageW(window,kWorkerHold,static_cast<WPARAM>(Page::Removing),0);
+        if (chosen.secureUxTheme && SecureUxThemeManaged()) {
+            std::wstring styleDetail;
+            if(!cleanupProfiles.PreflightStyles(styleDetail)) {
+                SetError(T(L"SecureUxTheme сохранён: состояние профилей изменилось. ",L"SecureUxTheme retained: profile state changed. ")+styleDetail);
+                (void)restoreRemaining();return ERROR_INSTALL_FAILURE;
+            }
+            SetStatus(T(L"Отключение SecureUxTheme…",L"Deactivating SecureUxTheme…"),450);
+            GlassInstallUtil::SecureUxThemeDeactivateRun sutRun;
+            std::wstring sutError;
+            if (!GlassInstallUtil::InvokeSecureUxThemeDeactivate(x64Dir_,x86Dir_,&sutRun,&sutError)) {
+                LogLine(L"SecureUxTheme deactivation failed: "+sutError);
+                SetError(T(L"Не удалось отключить SecureUxTheme. Пакеты не удалены.",
+                    L"Could not deactivate SecureUxTheme. No packages were removed."));
+                (void)restoreRemaining();return 18;
+            } else if (sutRun.ran) {
+                secureUxThemeReboot=sutRun.rebootRequired;
+                secureUxThemeThemeNote=sutRun.themeNotRestored;
+                if (sutRun.skippedExternalInstall)
+                    LogLine(L"SecureUxTheme: external installation owns the state; nothing changed");
+            }
+        }
+        bool msiRebootRequired=false;
         int count=(chosen.secureUxTheme?1:0)+(chosen.settings?1:0)+(chosen.openGlass?1:0)+(chosen.x86?1:0)+(chosen.x64?1:0);
         int done=0;
         auto remove=[&](const wchar_t* code,const wchar_t* name) -> bool {
@@ -918,10 +947,12 @@ private:
                 if (!copied) detail=L"Current cached MSI is unavailable";
                 if (paths!=Msi::ProductPathCheck::Safe) return refuse(*it,detail,false);
             }
-            if (!Msi::UninstallProduct(code)) {
+            UINT removalCode=ERROR_SUCCESS;
+            if (!Msi::UninstallProduct(code,nullptr,&removalCode)) {
                 SetError(std::wstring(T(L"Не удалось удалить пакет: ",L"Could not remove package: "))+name);
                 return false;
             }
+            msiRebootRequired=msiRebootRequired || removalCode==ERROR_SUCCESS_REBOOT_REQUIRED || removalCode==ERROR_SUCCESS_REBOOT_INITIATED;
             return true;
         };
         if (chosen.secureUxTheme) {
@@ -996,12 +1027,16 @@ private:
             (chosen.x64 || !GlassInstallUtil::SameInstallPath(x86Dir_,x64Dir_)))
             GlassInstallUtil::PruneEmptyDirectories(x86Dir_,keptRoots);
         if (chosen.x64 && !x64Dir_.empty()) GlassInstallUtil::PruneEmptyDirectories(x64Dir_,keptRoots);
-        // Настройки текущего пользователя — только по явному выбору: весь раздел
-        // GlassPlatform и кастомные значения OpenGlass в DWM.
+        // Explicit cleanup includes all inventoried local profiles and owned
+        // global values, also for retained products. Installation paths survive.
         if (chosen.cleanupSettings) {
             SetStatus(T(L"Удаление настроек…",L"Removing settings…"),9200);
-            Shared::RegistrySanity::RemoveUserSettings();
-            LogLine(L"Settings cleanup: HKCU Software\\StanislavKa\\GlassPlatform removed; OpenGlass DWM values removed");
+            std::wstring detail;
+            if(!cleanupProfiles.Cleanup(detail)) {
+                SetError(T(L"Продукты обработаны, но очистка настроек завершена не полностью: ",L"Products were processed, but settings cleanup is incomplete: ")+detail);
+                (void)restoreRemaining();return ERROR_INSTALL_FAILURE;
+            }
+            LogLine(L"Settings cleanup: all enumerated user profiles and owned HKLM/DWM values; installation metadata preserved");
         }
         if (!restoreRemaining()) {
             SetError(T(L"Выбранные продукты удалены, но не удалось перезапустить оставшиеся компоненты.",
@@ -1016,7 +1051,7 @@ private:
             complete+=T(L" Пользовательский визуальный стиль не восстановлен: после перезагрузки Windows применит стандартный.",
                 L" The custom visual style was not restored: Windows will use the standard one after restart.");
         SetStatus(complete,10000);
-        return 0;
+        return (secureUxThemeReboot || msiRebootRequired) ? ERROR_SUCCESS_REBOOT_REQUIRED : ERROR_SUCCESS;
     }
     void StartRemoval() {
         if (worker_.joinable() || (!selected_.Any() && !selected_.cleanupSettings)) return;
@@ -1040,7 +1075,7 @@ private:
         int result; { std::lock_guard<std::mutex> lock(dataMutex_); result=resultCode_; }
         LogLine(L"Removal worker finished; result="+std::to_wstring(result));
         if (result==ERROR_INSTALL_USEREXIT) SetPage(Page::Cancelled);
-        else if (result==0) SetPage(Page::Complete);
+        else if (result==0 || result==ERROR_SUCCESS_REBOOT_REQUIRED) SetPage(Page::Complete);
         else SetPage(Page::Error);
     }
     void RequestClose() {
@@ -1058,10 +1093,10 @@ private:
     void SetComponent(const std::wstring& id,bool checked) {
         if (page_!=Page::Select) return;
         if (id==L"x64" && installed_.x64) selected_.x64=checked;
-        else if (id==L"x86" && installed_.x86 && !(CoreSelected() && GlassInstallUtil::IsOs64Bit())) selected_.x86=checked;
-        else if (id==L"settings" && installed_.settings && !CoreSelected()) selected_.settings=checked;
-        else if (id==L"openglass" && installed_.openGlass && !CoreSelected()) selected_.openGlass=checked;
-        else if (id==L"secureUxTheme" && installed_.secureUxTheme && !selected_.settings && !CoreSelected()) selected_.secureUxTheme=checked;
+        else if (id==L"x86" && installed_.x86) selected_.x86=checked;
+        else if (id==L"settings" && installed_.settings) selected_.settings=checked;
+        else if (id==L"openglass" && installed_.openGlass) selected_.openGlass=checked;
+        else if (id==L"secureUxTheme" && installed_.secureUxTheme) selected_.secureUxTheme=checked;
         else if (id==L"cleanup") selected_.cleanupSettings=checked;
         NormalizeSelection(); EnableWindow(next_,selected_.Any()||selected_.cleanupSettings); ShowNativeChecks(); SyncWeb(); InvalidateRect(window,nullptr,FALSE);
     }
@@ -1076,6 +1111,11 @@ private:
         const std::wstring message(raw); CoTaskMemFree(raw);
         if (message==L"cancel") { RequestClose(); return S_OK; }
         if (message==L"ready") { bridgeReady_=true; SyncWeb(); return S_OK; }
+        if(message==L"components:select-all" && page_==Page::Select) {
+            selected_.x64=installed_.x64;selected_.x86=installed_.x86;selected_.settings=installed_.settings;selected_.openGlass=installed_.openGlass;
+            selected_.secureUxTheme=installed_.secureUxTheme&&secureUxThemeState_!=GlassInstallUtil::SecureUxThemeState::External&&secureUxThemeState_!=GlassInstallUtil::SecureUxThemeState::Conflict;
+            NormalizeSelection();ShowNativeChecks();EnableWindow(next_,selected_.Any()||selected_.cleanupSettings);SyncWeb();return S_OK;
+        }
         if (message.size()>64 || page_!=Page::Select || message.rfind(L"component:",0)!=0) return S_OK;
         const auto colon=message.find(L':',10);
         if (colon==std::wstring::npos || colon+2!=message.size()) return S_OK;
@@ -1340,7 +1380,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
     if (!mutex) { CoUninitialize(); return 4; }
     const bool already=GetLastError()==ERROR_ALREADY_EXISTS;
     if (already && args.silent) { CloseHandle(mutex); CoUninitialize(); return ERROR_INSTALL_ALREADY_RUNNING; }
-    GlassInstallUtil::ConfigureEmbeddedUnlocker(instance,IDR_UNLOCKER_X64);
+    GlassInstallUtil::ConfigureEmbeddedUnlocker(instance,IDR_UNLOCKER_X64,IDR_UNLOCKER_X86);
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_STANDARD_CLASSES}; InitCommonControlsEx(&controls);
     ULONG_PTR token=0; Gdiplus::GdiplusStartupInput input;
     if (Gdiplus::GdiplusStartup(&token,&input,nullptr)!=Gdiplus::Ok) { CloseHandle(mutex); CoUninitialize(); return 3; }

@@ -3,8 +3,8 @@
 // Shared, platform-neutral component policy. An install selection names the
 // products to install or update. Setup never removes a product: an installed
 // product that is left unchecked simply stays as it is, and removal is the job
-// of the separate uninstaller. The OS-native platform is mandatory; removing it
-// in the uninstaller cascades to the other installed products.
+// of the separate uninstaller. All products are independently selectable; warnings do not imply a removal
+// cascade. SecureUxTheme without Settings requires explicit interactive consent.
 namespace GlassProducts {
 struct Selection {
     bool platform64 = true;
@@ -82,12 +82,7 @@ constexpr Selection NormalizeRemoval(Selection choice, Selection installed, bool
     choice.platform32 = choice.platform32 && installed.platform32;
     choice.glassSettings = choice.glassSettings && installed.glassSettings;
     choice.openGlass = os64 && choice.openGlass && installed.openGlass;
-    const bool coreSelected = os64 ? choice.platform64 : choice.platform32;
-    if (coreSelected) {
-        choice.platform32 = installed.platform32;
-        choice.glassSettings = installed.glassSettings;
-        choice.openGlass = os64 && installed.openGlass;
-    }
+    choice.secureUxTheme = choice.secureUxTheme && installed.secureUxTheme;
     return choice;
 }
 } // namespace GlassProducts

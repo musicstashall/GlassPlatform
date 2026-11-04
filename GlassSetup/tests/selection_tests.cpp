@@ -44,16 +44,14 @@ int main() {
             assert(!removed.platform32 || exists.platform32);
             assert(!removed.glassSettings || exists.glassSettings);
             assert(!removed.openGlass || (os64 && exists.openGlass));
-            const bool core=os64?removed.platform64:removed.platform32;
-            if (core) {
-                assert(removed.platform32==exists.platform32);
-                assert(removed.glassSettings==exists.glassSettings);
-                assert(removed.openGlass==(os64 && exists.openGlass));
-            }
+            assert(removed.platform64==(raw.platform64&&os64&&exists.platform64));
+            assert(removed.platform32==(raw.platform32&&exists.platform32));
+            assert(removed.glassSettings==(raw.glassSettings&&exists.glassSettings));
+            assert(removed.openGlass==(raw.openGlass&&os64&&exists.openGlass));
         }
     }
     const Selection all{true,true,true,true};
     const auto onlySettings=GlassProducts::NormalizeRemoval({false,false,true,false},all,true);
     assert(!onlySettings.platform64 && !onlySettings.platform32 && onlySettings.glassSettings && !onlySettings.openGlass);
-    std::cout << "PASS: install keeps unchecked products; native platform kept and never removed; uninstall dependency cascade\n";
+    std::cout << "PASS: install keeps unchecked products; independent products; removal only intersects explicit selection with presence\n";
 }

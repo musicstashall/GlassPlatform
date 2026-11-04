@@ -1741,8 +1741,9 @@ bool QuerySecureUxThemeState(const std::wstring& x64Dir,const std::wstring& x86D
     if(state)*state=SecureUxThemeState::Conflict;
     const bool os64=IsOs64Bit();
     const auto arch=os64?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
-    const std::wstring dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,kInstallerSecureUxThemeQueryExport);
-    if(dll.empty())return fail(L"installed GlassSettings.Native.dll query helper was not found");
+    const std::wstring dll=NativeDllForArch(arch,x64Dir,x86Dir);
+    if(dll.empty()||!PeMatches(dll,os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386,kInstallerSecureUxThemeQueryExport))
+        return fail(L"embedded GlassSettings.Native.dll query helper was not found");
     const std::wstring rundll=os64?NativeRundll64():RundllPathForTaskArch(arch);
     if(rundll.empty())return fail(L"native rundll32.exe was not found");
     const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemeQueryStateV1W";

@@ -110,6 +110,7 @@
   </PropertyGroup>
   <!-- MSI собирает solution: x64 WiX только в Release|x64, x86 WiX только в Release|x86. GlassSetup (Win32, шаг x86) только проверяет, что файлы уже лежат в Build. -->
   <Target Name="GlassSetupVerifyEmbeddedMsi" BeforeTargets="BeforeResourceCompile" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\Build\GlassUnins\Release\GlassUnins.exe')" Text="Нет GlassUnins.exe для постоянной оболочки обслуживания. Сначала соберите GlassUnins Release|Win32." />
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll')" Text="Нет Build\x64\Release\GlassSettings.Native.dll (IDR_UNLOCKER_X64). Сначала выполните сборку solution Release|x64." />
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\Build\x86\Release\GlassSettings.Native.dll')" Text="Нет Build\x86\Release\GlassSettings.Native.dll (IDR_UNLOCKER_X86). Сначала соберите GlassSettings.Native Release|Win32." />
     <Error Condition="!Exists('$(GlassMsiPayloadDir)GlassSettings-x64\GlassSettings-x64.msi')" Text="Нет $(GlassMsiPayloadDir)GlassSettings-x64\GlassSettings-x64.msi. Сначала полная сборка solution Release|x64 (GlassSettings-x64, Glass-x64, OpenGlass-x64), затем Release|x86." />
@@ -155,12 +156,15 @@
     <ClCompile Include="src\InstallSupport\GlassUserDefaults.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\InstallSupport\GlassMaintenanceCache.h" />
     <ClInclude Include="src\WizardTheme.h" />
     <ClInclude Include="src\GdiPlusCompat.h" />
     <ClInclude Include="src\WizardAssets.h" />
     <ClInclude Include="src\WizardProgress.h" />
     <ClInclude Include="src\WizardUnlockState.h" />
     <ClInclude Include="src\GlassProducts.h" />
+    <ClInclude Include="src\GlassProductPlan.h" />
+    <ClInclude Include="src\GlassProductUiPolicy.h" />
     <ClInclude Include="src\InstallEngine.h" />
     <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h" />
     <ClInclude Include="src\InstallSupport\GlassRemovalOrder.h" />
@@ -187,6 +191,8 @@
     <None Include="res\app.ico" />
     <None Include="tests\verify_resources.py" />
     <None Include="tests\selection_tests.cpp" />
+    <None Include="tests\product_plan_tests.cpp" />
+    <None Include="tests\run_product_plan_tests.py" />
     <None Include="tests\removal_order_tests.cpp" />
     <None Include="tests\progress_tests.cpp" />
     <None Include="tests\unlock_state_tests.cpp" />

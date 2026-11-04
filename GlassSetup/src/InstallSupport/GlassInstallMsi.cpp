@@ -1,6 +1,7 @@
 #include "GlassInstallMsi.h"
 #include "GlassInstallLog.h"
 #include "GlassInstallUtil.h"
+#include "GlassMaintenanceCache.h"
 #include <msi.h>
 #include <msiquery.h>
 #include <shlwapi.h>
@@ -206,10 +207,13 @@ std::wstring UninsExePathForProduct(const std::wstring& productCode, const std::
 // и снимаем WindowsInstaller, чтобы Параметры Windows вызывали наш WebView2-деинсталлятор.
 void PatchArpUninstallString(const std::wstring& productCode, const std::wstring& installDir) noexcept {
     if (productCode.empty() || installDir.empty()) return;
-    const std::wstring exe = UninsExePathForProduct(productCode, installDir);
+    std::wstring exe = GlassMaintenanceCache::CurrentFile(L"GlassUnins.exe");
+    if(exe.empty())exe=UninsExePathForProduct(productCode, installDir);
     if (exe.empty()) return;
     const std::wstring command = L"\"" + exe + L"\" --product \"" + productCode + L"\"";
     const std::wstring quietCommand = command + L" --silent";
+    const auto setup=GlassMaintenanceCache::CurrentFile(L"GlassSetup.exe");
+    const auto modify=setup.empty()?L"\""+exe+L"\" --interactive --product \""+productCode+L"\"":L"\""+setup+L"\" --modify --product \""+productCode+L"\"";
     const std::wstring displayIcon = exe + L",0";
     const std::wstring keyPath =
         L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + productCode;
@@ -218,17 +222,20 @@ void PatchArpUninstallString(const std::wstring& productCode, const std::wstring
         if (RegOpenKeyExW(root, keyPath.c_str(), 0, KEY_SET_VALUE | sam, &key) != ERROR_SUCCESS)
             return false;
         const LONG st1 = RegSetValueExW(key, L"UninstallString", 0, REG_SZ,
-            reinterpret_cast<const BYTE*>(command.c_str()),
-            static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
+            reinterpret_cast<const BYTE*>(quietCommand.c_str()),
+            static_cast<DWORD>((quietCommand.size() + 1) * sizeof(wchar_t)));
         const LONG st2 = RegSetValueExW(key, L"QuietUninstallString", 0, REG_SZ,
             reinterpret_cast<const BYTE*>(quietCommand.c_str()),
             static_cast<DWORD>((quietCommand.size() + 1) * sizeof(wchar_t)));
         (void)RegSetValueExW(key, L"DisplayIcon", 0, REG_SZ,
             reinterpret_cast<const BYTE*>(displayIcon.c_str()),
             static_cast<DWORD>((displayIcon.size() + 1) * sizeof(wchar_t)));
-        const DWORD one = 1;
-        (void)RegSetValueExW(key, L"NoModify", 0, REG_DWORD,
-            reinterpret_cast<const BYTE*>(&one), sizeof(one));
+        const DWORD one = 1,zero=0;
+        (void)RegSetValueExW(key,L"ModifyPath",0,REG_SZ,reinterpret_cast<const BYTE*>(modify.c_str()),static_cast<DWORD>((modify.size()+1)*sizeof(wchar_t)));
+        (void)RegSetValueExW(key,L"NoModify",0,REG_DWORD,reinterpret_cast<const BYTE*>(&zero),sizeof(zero));
+        const bool settings=_wcsicmp(productCode.c_str(),kProductSettingsX64)==0||_wcsicmp(productCode.c_str(),kProductSettingsX86)==0;
+        const DWORD noRemove=settings&&(IsProductInstalled(kProductSecureUxThemeX64)||IsProductInstalled(kProductSecureUxThemeX86))?1:0;
+        (void)RegSetValueExW(key,L"NoRemove",0,REG_DWORD,reinterpret_cast<const BYTE*>(&noRemove),sizeof(noRemove));
         (void)RegSetValueExW(key, L"NoRepair", 0, REG_DWORD,
             reinterpret_cast<const BYTE*>(&one), sizeof(one));
         (void)RegDeleteValueW(key, L"WindowsInstaller");
