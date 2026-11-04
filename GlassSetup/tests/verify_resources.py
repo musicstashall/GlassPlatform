@@ -513,6 +513,7 @@ activation = section(sut_native, 'extern "C" HRESULT WINAPI GlassSettings_Secure
 assert "kProxyDllName" in activation and "NativeSysWow64" not in activation
 assert "if (FileExistsNative(proxyWowPath)" in sut_native  # old cross-architecture proxy cleanup only
 assert "GLASSSETTINGSINSTALLED" in sut_template and "GlassSettingsProductCode" in sut_template
+assert "GLASSSETTINGSINSTALLED=1" in engine and "secureUxThemeMsi && selection_.glassSettings" in engine  # only after the prerequisite MSI stage is selected
 assert 'Key="Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{' in sut_template
 assert 'Key="Software\\\\Microsoft' not in sut_template
 assert "Launch Condition=\"Installed OR GLASSSETTINGSINSTALLED\"" in sut_template
@@ -652,12 +653,18 @@ assert "components-select-all" in ui and "Снять необязательны�
 assert "components-list{flex:1 1 auto;min-height:0;overflow-y:auto" in ui
 assert ".components-status{display:flex" in ui and "flex:0 0 78px;height:78px" in ui
 assert "components-count" in ui and "availableProducts.length" in ui and "selectedProducts" in ui
-assert "top:188px;bottom:24px" in ui and "Дополнительные продукты можно продолжить выбирать" in ui
+assert "#components-panel{bottom:0}" in ui and "top:188px;bottom:12px" in ui and "gap:14px" in ui
+assert ".banner-portrait{position:absolute;left:240px;top:100px;width:800px;height:447px;object-fit:cover;opacity:.36;" in ui
+assert ".error-scene .banner-portrait{opacity:.36;" in ui and ".components-banner{position:absolute;inset:0 0 0 auto;width:700px;height:540px;object-fit:cover;opacity:.36;" in ui
+assert ".license-banner{position:absolute;inset:0 0 0 auto;width:680px;height:540px;object-fit:cover;opacity:.19;" in ui
+assert "Дополнительные продукты можно продолжить выбирать" in ui
 assert ".components-status.is-warning" in ui and "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
 assert "input.dataset.locked=item.locked?'1':'0'" in ui and "dispatchEvent(new Event('change'" in ui
 assert "components-status.is-warning" in ui and "secureUxTheme" in ui and "component:secureUxTheme" in setup
 assert "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
 assert "uninstaller" in ui and "MSI SecureUxTheme будет удалён" in ui
+assert "WizardTheme::PaintFooterBar(dc" in setup and "void PaintFooterBar(" in theme and "bufferedErase_" not in setup
+assert "text.find(part)!=std::wstring::npos" in setup  # error detail is not appended twice
 assert "GlassSettings" in unins and "secureUxTheme" in unins and "IDC_UNINS_SECUREUXTHEME" in unins
 assert "SecureUxTheme будет отключён" in unins and "Внешняя установка SecureUxTheme останется без изменений" in unins
 assert "slim" in unins and "cleanup" in unins and "Будет удалено" in unins and "удалится вместе с основной платформой" in unins

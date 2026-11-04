@@ -1332,7 +1332,17 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
     }
 
     if (!RecheckRelatedProducts(productCode.c_str()) || !targetSafe()) { MsiEnableLogW(0,nullptr,0);return false; }
-    const std::wstring props = GlassInstallMsi::BuildInstallPropertyString(installDir, false);
+    std::wstring props = GlassInstallMsi::BuildInstallPropertyString(installDir, false);
+    const wchar_t* msiName=PathFindFileNameW(msiPath.c_str());
+    const bool secureUxThemeMsi=msiName &&
+        (_wcsicmp(msiName,L"SecureUxTheme-x64.msi")==0 || _wcsicmp(msiName,L"SecureUxTheme-x86.msi")==0);
+    if (secureUxThemeMsi && selection_.glassSettings) {
+        // Setup installs matching GlassSettings first, within the same MSI
+        // transaction; the dependent package's RegistrySearch cannot see that
+        // uncommitted registration yet. When Setup is not installing Settings,
+        // the package's registry prerequisite search must validate it instead.
+        props+=L" GLASSSETTINGSINSTALLED=1";
+    }
     InstallLog::LineFormat(L"MsiInstallProduct %s", msiPath.c_str());
     InstallLog::LineFormat(L"  %s", props.c_str());
 

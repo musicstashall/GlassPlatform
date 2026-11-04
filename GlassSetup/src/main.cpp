@@ -1199,7 +1199,6 @@ private:
     HWND certInstall_ = nullptr, certSkip_ = nullptr; // GDI fallback of the certificate page
     HFONT font_ = nullptr, heading_ = nullptr, small_ = nullptr, title_ = nullptr;
     HBRUSH darkBrush_ = nullptr, licenseBrush_ = nullptr, buttonBrush_ = nullptr;
-    HBRUSH footerBrush_ = nullptr, footerRuleBrush_ = nullptr;
     HBRUSH progressFill_ = nullptr, progressTrack_ = nullptr;
     ComPtr<IStream> bannerStream_;
     std::unique_ptr<Gdiplus::Bitmap> banner_;
@@ -1266,7 +1265,7 @@ private:
     bool versionCheckStarted_ = false, versionCheckHandled_ = false;
     bool updateAvailable_ = false, updateSkipped_ = false;
     bool failurePending_ = false;
-    bool transitioning_ = false, bufferedErase_ = false;
+    bool transitioning_ = false;
     ULONGLONG fadeStarted_ = 0;
     Surface frame_, fadeFrame_;
     RECT webBounds_{};
@@ -1352,8 +1351,6 @@ private:
     void InitializeLoading() {
         dpi_=GetDpiForWindow(window);
         darkBrush_=CreateSolidBrush(kDark);
-        footerBrush_=CreateSolidBrush(kFooterTop);
-        footerRuleBrush_=CreateSolidBrush(RGB(74,71,109));
         WizardTheme::ApplyDarkWindowChrome(window);
         BOOL animationsEnabled=TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
@@ -2266,7 +2263,7 @@ private:
         }
         std::wstring text = id ? Text(id) : L"";
         const auto append = [&](const std::wstring& part) {
-            if (part.empty() || part == text) return;
+            if (part.empty() || part == text || (!text.empty() && text.find(part)!=std::wstring::npos)) return;
             if (!text.empty()) text += L"\r\n\r\n";
             text += part;
         };
@@ -3099,21 +3096,6 @@ private:
         HRESULT nav = web_->Navigate(url.c_str());
         if (FAILED(nav)) WebFailure(nav);
     }
-    void Erase(HDC dc) {
-        // Paint the footer into the existing back buffer: no system-grey Win32 strip.
-        RECT footer=Box(0,kContentHeight,kWidth,kFooterHeight);
-        FillRect(dc,&footer,footerBrush_);
-        Gdiplus::Graphics g(dc);
-        g.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
-        Gdiplus::LinearGradientBrush fill(
-            Gdiplus::Point(footer.left,footer.top),Gdiplus::Point(footer.left,footer.bottom),
-            Gdiplus::Color(255,GetRValue(kFooterTop),GetGValue(kFooterTop),GetBValue(kFooterTop)),
-            Gdiplus::Color(255,GetRValue(kFooterBottom),GetGValue(kFooterBottom),GetBValue(kFooterBottom)));
-        g.FillRectangle(&fill,GdiInt(footer.left),GdiInt(footer.top),
-            GdiInt(footer.right-footer.left),GdiInt(footer.bottom-footer.top));
-        RECT rule{footer.left,footer.top,footer.right,footer.top+Scale(1)};
-        FillRect(dc,&rule,footerRuleBrush_);
-    }
     void DrawLabel(HDC dc, const std::wstring& s, RECT rect, HFONT font, COLORREF color,
                    UINT format = DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX) {
         HGDIOBJ old = SelectObject(dc,font);
@@ -3629,9 +3611,10 @@ private:
                            0,0,fadeFrame_.width,fadeFrame_.height,blend);
             } else RenderContent(dc);
         }
-        bufferedErase_=true;
-        SendMessageW(window,WM_ERASEBKGND,reinterpret_cast<WPARAM>(dc),0);
-        bufferedErase_=false;
+        // Paint the footer as part of the same back-buffer pass as the page.
+        // Do not rely on WM_ERASEBKGND: Windows may give it a clipped update region.
+        WizardTheme::PaintFooterBar(dc,Scale(kWidth),Scale(kContentHeight),Scale(kHeight),
+            kFooterTop,kFooterBottom,RGB(74,71,109));
         // На финальных страницах полоса прогресса скрыта: вместо неё — тонкая
         // линия, отделяющая футер от контента.
         if (!transitioning_ && (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error)) {
@@ -3672,8 +3655,6 @@ private:
         if (darkBrush_) DeleteObject(darkBrush_);
         if (licenseBrush_) DeleteObject(licenseBrush_);
         if (buttonBrush_) DeleteObject(buttonBrush_);
-        if (footerBrush_) DeleteObject(footerBrush_);
-        if (footerRuleBrush_) DeleteObject(footerRuleBrush_);
         if (progressFill_) DeleteObject(progressFill_);
         if (progressTrack_) DeleteObject(progressTrack_);
     }
@@ -3684,8 +3665,8 @@ private:
         case kStartupComplete: CompleteStartupIfReady(); return 0;
         case kInspectReady: OnInspectReady(); return 0;
         case WM_ERASEBKGND:
-            if (bufferedErase_) Erase(reinterpret_cast<HDC>(w));
-            return 1; // Do not clear the on-screen client before the buffered paint.
+            // Paint() composes both content and footer into the back buffer.
+            return 1;
         case kInitWebView: if (!closing_) InitializeWebView(); return 0;
         case kVersionCheckComplete: if (!closing_) CompleteVersionCheck(); return 0;
         case kRuntimeStatus: {
