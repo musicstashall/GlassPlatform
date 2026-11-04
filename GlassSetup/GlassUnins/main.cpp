@@ -580,7 +580,7 @@ private:
         SetWindowTextW(next_,select?T(L"Удалить",L"Remove"):
             page==Page::UnlockModules?T(L"Повторить",L"Retry"):
             page==Page::UnlockProcesses?T(L"Разблокировать",L"Unlock"):T(L"Закрыть",L"Close"));
-        ShowWindow(back_,select?SW_SHOWNA:SW_HIDE);
+        ShowWindow(back_,select&&!webReady_?SW_SHOWNA:SW_HIDE);
         ShowWindow(next_,!busy?SW_SHOWNA:SW_HIDE);
         ShowWindow(cancel_,!terminal && page!=Page::Removing?SW_SHOWNA:SW_HIDE);
         EnableWindow(next_,!select || selected_.Any()||selected_.cleanupSettings);
@@ -1087,7 +1087,9 @@ private:
         webReady_=false; bridgeReady_=false; initSent_=false; webState_.clear(); webFailed_=true;
         if (window) KillTimer(window,kTimer);
         if (controller_) controller_->put_IsVisible(FALSE);
-        ShowWindow(webHost_,SW_HIDE); ShowNativeChecks(); InvalidateRect(window,nullptr,FALSE);
+        ShowWindow(webHost_,SW_HIDE);
+        ShowWindow(back_,page_==Page::Select?SW_SHOWNA:SW_HIDE);
+        ShowNativeChecks(); InvalidateRect(window,nullptr,FALSE);
     }
     void InitializeWebView() {
         LPWSTR version=nullptr;
@@ -1167,6 +1169,7 @@ private:
                 BOOL success=FALSE; args->get_IsSuccess(&success);
                 if (!success) { WebFailure(); return S_OK; }
                 webReady_=true; ShowNativeChecks(); KillTimer(window,kTimer);
+                ShowWindow(back_,SW_HIDE);
                 controller_->put_IsVisible(TRUE); ShowWindow(webHost_,SW_SHOWNA); SyncWeb();
                 return S_OK;
             }).Get(),&completedToken_);

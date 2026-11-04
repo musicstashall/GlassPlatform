@@ -650,10 +650,13 @@ assert "HasSelectedComponent" in setup
 assert "не требуется" in ui and "tone-update" in ui and "tone-repair" in ui
 assert "comp-slim" in ui and "components-extra" in ui and "components-stack" in ui
 assert "components-select-all" in ui and "Снять необязательные" in ui
-assert ".components-list{" in ui and "overflow-y:auto;overflow-x:hidden;padding:18px 0" in ui
+assert ".components-list-frame{" in ui and "background:#17192b" in ui
+assert ".components-list{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:18px 0" in ui
+assert "background:transparent;mask-image:linear-gradient(180deg,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%)" in ui
 assert "backdrop-filter:blur(10px)" in ui and "#000 18px,#000 calc(100% - 18px)" in ui
 assert ".components-status{display:flex" in ui and "flex:0 0 78px;height:78px" in ui
 assert ".components-status.is-neutral" in ui and "Ни один компонент не выбран." in ui
+assert "Ни один продукт не выбран для удаления." in ui and "if(!loading&&selectedProducts===0)" in ui
 assert '<div id="components-status"' in ui and '</div><button id="components-select-all"' in ui
 assert '<p id="components-intro" class="components-intro"></p></div>\n<div class="components-stack">' in ui
 assert "components-count" in ui and "availableProducts.length" in ui and "selectedProducts" in ui
@@ -664,6 +667,10 @@ assert ".license-banner{position:absolute;inset:0 0 0 auto;width:680px;height:54
 assert "Дополнительные продукты можно продолжить выбирать" in ui
 assert ".components-status.is-warning" in ui and "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
 assert "input.dataset.locked=item.locked?'1':'0'" in ui and "dispatchEvent(new Event('change'" in ui
+assert "button.hidden=false" in ui and "select=uninstaller||selectable.some(input=>!input.checked)" in ui
+assert "input.dataset.component!=='cleanup'" in ui and "Settings cleanup is a separate option." in ui
+assert "select&&!webReady_?SW_SHOWNA:SW_HIDE" in unins and "ShowWindow(back_,SW_HIDE)" in unins
+assert "page_==Page::Select?SW_SHOWNA:SW_HIDE" in unins
 assert "components-status.is-warning" in ui and "secureUxTheme" in ui and "component:secureUxTheme" in setup
 assert "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
 assert "uninstaller" in ui and "MSI SecureUxTheme будет удалён" in ui
