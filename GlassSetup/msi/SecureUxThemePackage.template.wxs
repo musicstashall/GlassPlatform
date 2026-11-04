@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="$(var.GlassPlatformTitle)"
+           Manufacturer="Glass"
+           Version="$(var.GlassMsiVersion)"
+           UpgradeCode="$(var.GlassUpgradeCode)"
+           ProductCode="$(var.GlassProductCode)"
+           Scope="perUser"
+           Compressed="yes">
+    <MajorUpgrade AllowDowngrades="no" AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Установлена более новая версия SecureUxTheme." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="GlassProductIcon" SourceFile="$(var.GlassSetupIcon)" />
+    <Property Id="ARPPRODUCTICON" Value="GlassProductIcon" />
+    <Property Id="GLASSBUNDLEVERSION" Value="$(var.GlassMsiBundleVersion)" Hidden="yes" />
+    <Property Id="GLASSSETTINGSINSTALLED">
+      <RegistrySearch Id="GlassSettingsProductSearch" Root="HKCU"
+                      Key="Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{$(var.GlassSettingsProductCode)}"
+                      Name="DisplayName" Type="raw" />
+    </Property>
+    <Launch Condition="Installed OR GLASSSETTINGSINSTALLED"
+            Message="SecureUxTheme requires the matching-architecture GlassSettings product." />
+
+    <Feature Id="MainFeature" Title="$(var.GlassPlatformTitle)" Level="1">
+      <ComponentGroupRef Id="GlassPayloadFiles" />
+    </Feature>
+
+    <!-- Payload stays beside GlassSettings.Native.dll so that the native helper
+         resolves <INSTALLDIR>\GlassSettings\SecureUxTheme at activation time. -->
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLDIR" Name="GlassPlatform" />
+    </StandardDirectory>
+
+    <InstallExecuteSequence>
+      <InstallFiles />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

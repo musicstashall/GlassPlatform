@@ -1195,6 +1195,19 @@ bool PeMatches(const std::wstring& path, WORD machine, const char* exportName) n
     return ok;
 }
 
+namespace {
+std::wstring InstalledSecureUxThemeNativeDll(
+    GlassShared::GlassPlatformTask::PlatformArch arch,
+    const std::wstring& x64Dir,const std::wstring& x86Dir,const char* exportName) noexcept {
+    const bool x64=arch==GlassShared::GlassPlatformTask::PlatformArch::X64;
+    const WORD machine=x64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386;
+    const std::wstring& root=x64?x64Dir:x86Dir;
+    if(root.empty())return {};
+    const std::wstring dll=TrimTrailingSlashes(root)+L"\\GlassSettings\\GlassSettings.Native.dll";
+    return PeMatches(dll,machine,exportName)?dll:std::wstring();
+}
+}
+
 std::wstring NativeDllForArch(
     GlassShared::GlassPlatformTask::PlatformArch arch,
     const std::wstring& x64Dir,
@@ -1719,6 +1732,51 @@ bool InvokeSecureUxThemeDeactivate(
         run->themeNotRestored=(exitCode & kSecureUxThemeExitThemeNotRestored)!=0;
         run->skippedExternalInstall=(exitCode & kSecureUxThemeExitExternalInstall)!=0;
     }
+    return true;
+}
+
+bool QuerySecureUxThemeState(const std::wstring& x64Dir,const std::wstring& x86Dir,
+    SecureUxThemeState* state,std::wstring* failureDetail) noexcept {
+    auto fail=[failureDetail](const wchar_t* detail) noexcept { if(failureDetail)try{*failureDetail=detail;}catch(...){} return false; };
+    if(state)*state=SecureUxThemeState::Conflict;
+    const bool os64=IsOs64Bit();
+    const auto arch=os64?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
+    const std::wstring dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,kInstallerSecureUxThemeQueryExport);
+    if(dll.empty())return fail(L"installed GlassSettings.Native.dll query helper was not found");
+    const std::wstring rundll=os64?NativeRundll64():RundllPathForTaskArch(arch);
+    if(rundll.empty())return fail(L"native rundll32.exe was not found");
+    const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemeQueryStateV1W";
+    DWORD exitCode=MAXDWORD;bool started=false,completed=false;
+    const bool ran=RunHiddenCommand(cmd,&exitCode,20000,&started,&completed);
+    GlassInstallLog::LineFormat(L"SecureUxTheme: query via Native.dll: ran=%d exit=%lu",ran?1:0,exitCode);
+    if(!ran||!started)return fail(L"query helper process could not be started");
+    if(!completed)return fail(L"query helper did not finish within 20 s");
+    if(exitCode>static_cast<DWORD>(SecureUxThemeState::Conflict))return fail(L"query helper returned an unknown state");
+    if(state)*state=static_cast<SecureUxThemeState>(exitCode);
+    return true;
+}
+
+bool InvokeSecureUxThemeActivate(const std::wstring& x64Dir,const std::wstring& x86Dir,
+    SecureUxThemeActivateRun* run,std::wstring* failureDetail) noexcept {
+    auto fail=[failureDetail](const wchar_t* detail) noexcept { if(failureDetail)try{*failureDetail=detail;}catch(...){} return false; };
+    if(run)*run=SecureUxThemeActivateRun{};
+    const bool os64=IsOs64Bit();
+    const auto arch=os64?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
+    const std::wstring dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,kInstallerSecureUxThemeActivateExport);
+    if(dll.empty())return fail(L"installed GlassSettings.Native.dll activation helper was not found");
+    const std::wstring rundll=os64?NativeRundll64():RundllPathForTaskArch(arch);
+    if(rundll.empty())return fail(L"native rundll32.exe was not found");
+    const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemeActivateSetupV1W";
+    DWORD exitCode=MAXDWORD;bool started=false,completed=false;
+    const bool ran=RunHiddenCommand(cmd,&exitCode,45000,&started,&completed);
+    GlassInstallLog::LineFormat(L"SecureUxTheme: activate via Native.dll: ran=%d exit=%lu",ran?1:0,exitCode);
+    if(!ran||!started)return fail(L"activation helper process could not be started");
+    if(!completed)return fail(L"activation helper did not finish within 45 s");
+    if(exitCode==kSecureUxThemeExitExternalInstall){if(run){run->ran=true;run->skippedExternalInstall=true;}return true;}
+    if(exitCode!=0&&exitCode!=kSecureUxThemeExitRebootRequired){
+        wchar_t text[80]{};swprintf_s(text,L"activation helper exit code 0x%08lX",exitCode);return fail(text);
+    }
+    if(run){run->ran=true;run->rebootRequired=exitCode==kSecureUxThemeExitRebootRequired;}
     return true;
 }
 

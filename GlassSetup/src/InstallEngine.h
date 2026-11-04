@@ -37,6 +37,10 @@ public:
         std::wstring backup;
         std::wstring glassSettings64;
         std::wstring glassSettings86;
+        std::wstring secureUxTheme;
+        std::wstring warnSecureUxTheme;
+        std::wstring warnSecureUxThemeHint;
+        std::wstring warnSecureUxThemeRestart;
         std::wstring rollback;
         std::wstring purge;
         std::wstring purgeFailed;

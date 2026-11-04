@@ -314,11 +314,18 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .components-banner{position:absolute;inset:0 0 0 auto;width:700px;height:540px;object-fit:cover;opacity:.22;mask-image:linear-gradient(90deg,transparent 0%,#000 52%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 52%,#000 100%)}
 .components-overlay{position:absolute;inset:0;background:linear-gradient(90deg,#101225 0%,#101225ee 54%,#1012258a 100%)}
 .components-heading{position:absolute;left:48px;top:78px;width:904px;z-index:2}
+.components-select-all{position:absolute;right:0;top:28px;min-height:28px;pointer-events:auto;padding:0 12px;border:1px solid #a7dddf55;border-radius:8px;background:#a7dddf12;color:#cdeff0;font:600 10.5px 'Segoe UI',Arial,sans-serif;letter-spacing:.2px;cursor:pointer;transition:background .18s,border-color .18s}
+.components-select-all:hover:not(:disabled){border-color:#a7dddf99;background:#a7dddf24}
+.components-select-all:focus-visible{outline:2px solid #d8ffff;outline-offset:2px}
+.components-select-all:disabled{opacity:.48;cursor:default}
+.components-select-all[hidden]{display:none!important}
 .components-kicker{display:flex;align-items:center;gap:10px;margin:0 0 10px;color:#c1b4ff;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
 .components-kicker:before{content:"";width:20px;height:1px;background:#c1b4ff}
 .components-title{margin:0 0 6px;color:#f5f4fc;font-size:29px;line-height:1.16;font-weight:350;letter-spacing:-.55px}
 .components-intro{margin:0;color:#aeb2c9;font-size:12.5px;line-height:1.45;max-width:820px}
-.components-stack{position:absolute;left:48px;top:188px;width:904px;display:flex;flex-direction:column;gap:8px;z-index:3;pointer-events:auto}
+.components-stack{position:absolute;left:48px;top:166px;bottom:64px;width:904px;display:flex;flex-direction:column;gap:8px;z-index:3;pointer-events:auto;min-height:0}
+.components-list{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-color:#777296 #191b30;scrollbar-width:thin}
+.components-list::-webkit-scrollbar{width:8px}.components-list::-webkit-scrollbar-track{background:#191b30;border-radius:8px}.components-list::-webkit-scrollbar-thumb{background:#777296;border:2px solid #191b30;border-radius:8px}
 .components-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr;gap:8px}
 .components-extra{display:flex;flex-direction:column;gap:8px}
 .comp-slim{display:flex;align-items:center;gap:12px;padding:7px 14px;border:1px solid #c7bdff28;border-radius:12px;background:linear-gradient(145deg,#1d2038eb,#131528f2);cursor:pointer}
@@ -361,10 +368,13 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .comp-badge.muted{border-color:#ffffff22;background:#ffffff0a;color:#a7acc4}
 .comp-desc{margin:0;color:#b2b6cd;font-size:11px;line-height:1.4}
 
-.components-warning{display:flex;align-items:flex-start;gap:12px;padding:8px 14px;border:1px solid #f2c0784d;border-left:3px solid #f2c078;border-radius:12px;background:linear-gradient(120deg,#3d2d22cf,#1d1a2ee8);box-shadow:inset 0 1px #ffffff0a,0 10px 24px #05060f44;pointer-events:auto}
-.components-warning[hidden]{display:none!important}
-.components-warning-dot{flex:0 0 auto;width:8px;height:8px;margin-top:5px;border-radius:50%;background:#f5c984;box-shadow:0 0 12px #f5c984a8}
-.components-warning-text{margin:0;color:#f5e9d4;font-size:11.8px;line-height:1.48;white-space:pre-line}
+.components-status{display:flex;align-items:center;flex:0 0 86px;height:86px;min-height:86px;gap:12px;padding:7px 14px;border:1px solid #83d9a64d;border-left:3px solid #83d9a6;border-radius:12px;background:linear-gradient(120deg,#1b3b31c9,#171d2be8);box-shadow:inset 0 1px #ffffff0a,0 10px 24px #05060f44;pointer-events:auto;overflow:hidden}
+.components-status.is-warning{border-color:#f2c0784d;border-left-color:#f2c078;background:linear-gradient(120deg,#3d2d22cf,#1d1a2ee8)}
+.components-status[hidden]{display:none!important}
+.components-status-dot{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:#83d9a6;box-shadow:0 0 12px #83d9a6a8}
+.components-status.is-warning .components-status-dot{background:#f5c984;box-shadow:0 0 12px #f5c984a8}
+.components-status-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;margin:0;color:#d8f3e3;font-size:11.8px;line-height:1.45;white-space:pre-line}
+.components-status.is-warning .components-status-text{color:#f5e9d4}
 /* Windows 11 certificate page: same scene as components; two exclusive choice cards + a facts card. */
 .cert-intro{margin:0 0 13px;color:#aeb2c9;font-size:12.5px;line-height:1.45}
 .cert-columns{position:absolute;left:48px;top:150px;width:904px;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;z-index:3;pointer-events:auto}
@@ -489,11 +499,11 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 <circle class="error-spark" cx="91" cy="146" r="3.4"/><circle class="error-spark s2" cx="310" cy="119" r="3"/><circle class="error-spark s3" cx="319" cy="269" r="2.6"/><circle cx="96" cy="273" r="1.8" fill="#ffc2cc" opacity=".65"/><circle cx="277" cy="324" r="1.6" fill="#ff9bad" opacity=".55"/></svg></div></section>
 <section id="components-panel" class="mode-panel components-scene" aria-labelledby="components-title">
 <img id="components-banner" class="components-banner" alt="" aria-hidden="true"><div class="components-overlay"></div><div id="components-brand" class="native-brand">GlassPlatform</div>
-<div class="components-heading"><div id="components-kicker" class="components-kicker"></div><h1 id="components-title" class="components-title"></h1><p id="components-intro" class="components-intro"></p></div>
+<div class="components-heading"><div id="components-kicker" class="components-kicker"></div><h1 id="components-title" class="components-title"></h1><p id="components-intro" class="components-intro"></p><button id="components-select-all" class="components-select-all" type="button">Выбрать всё</button></div>
 <div class="components-stack">
-<div id="components-grid" class="components-grid" role="group" aria-labelledby="components-title"></div>
-<div id="components-extra" class="components-extra"></div>
-<div id="components-warning" class="components-warning" hidden role="status" aria-live="polite"><span class="components-warning-dot" aria-hidden="true"></span><p id="components-warning-text" class="components-warning-text"></p></div>
+<div id="components-status" class="components-status" role="status" aria-live="polite" aria-atomic="true"><span class="components-status-dot" aria-hidden="true"></span><p id="components-status-text" class="components-status-text"></p></div>
+<div class="components-list"><div id="components-grid" class="components-grid" role="group" aria-labelledby="components-title"></div>
+<div id="components-extra" class="components-extra"></div></div>
 </div></section>
 <section id="certificate-panel" class="mode-panel components-scene" aria-labelledby="certificate-title">
 <img id="certificate-banner" class="components-banner" alt="" aria-hidden="true"><div class="components-overlay"></div><div id="certificate-brand" class="native-brand">GlassPlatform</div>
@@ -590,9 +600,26 @@ function componentLock(title){
  lock.innerHTML='<svg viewBox="0 0 24 26" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3" fill="none" stroke="#a7dfff" stroke-width="2.8" stroke-linecap="round"/><rect x="4" y="10" width="16" height="13" rx="3" fill="#efb94f" stroke="#ffe2a3" stroke-width="1.2"/><path d="M7 12h10" fill="none" stroke="#fff1bd" stroke-width="1" stroke-linecap="round" opacity=".8"/><circle cx="12" cy="16" r="1.5" fill="#573c38"/><path d="M12 17.2v2.2" stroke="#573c38" stroke-width="1.5" stroke-linecap="round"/></svg>';
  return lock;
 }
+function updateComponentsStatus(){
+ const status=document.getElementById('components-status'),text=document.getElementById('components-status-text'),button=document.getElementById('components-select-all');
+ if(!status||!text)return;
+ const inputs=[...document.querySelectorAll('#components-grid input.comp-check,#components-extra input.comp-check')];
+ const selectable=inputs.filter(input=>!input.disabled),allSelected=selectable.length>0&&selectable.every(input=>input.checked),uninstaller=hostState.appMode==='unins';
+ if(button){button.hidden=uninstaller;button.disabled=selectable.length===0;button.textContent=allSelected?(locale==='ru'?'Снять необязательные':'Clear optional'):(locale==='ru'?'Выбрать всё':'Select all');}
+ status.classList.remove('is-warning');
+ const warning=String(hostState.componentsWarning||'').trim();if(warning){status.classList.add('is-warning');text.textContent=warning;text.title=warning;return;}text.title='';
+ if(uninstaller){const products=selectable.filter(input=>input.dataset.component!=='cleanup'&&input.dataset.component!=='secureUxTheme'),productsSelected=products.some(input=>input.checked),sutSelected=selectable.some(input=>input.dataset.component==='secureUxTheme'&&input.checked),cleanupSelected=selectable.some(input=>input.dataset.component==='cleanup'&&input.checked);text.textContent=locale==='ru'?(productsSelected&&sutSelected?'Отмеченные продукты будут удалены; MSI SecureUxTheme будет удалён и его интеграция отключена. Неотмеченные продукты останутся.':productsSelected?'Выбранные продукты будут удалены. Неотмеченные останутся без изменений.':sutSelected&&cleanupSelected?'MSI SecureUxTheme будет удалён, настройки очищены. Прочие продукты останутся без изменений.':sutSelected?'Продукт SecureUxTheme будет удалён. GlassSettings останется установленным.':cleanupSelected?'Выбрана только отдельная очистка настроек. Продукты останутся без изменений.':'Отметьте продукты для удаления. Очистка настроек выбирается отдельно.'):(productsSelected&&sutSelected?'Selected products will be removed; the SecureUxTheme MSI will be removed and its integration disabled. Unchecked products will remain.':productsSelected?'Selected products will be removed. Unchecked products will remain unchanged.':sutSelected&&cleanupSelected?'The SecureUxTheme MSI will be removed and settings cleaned. Other products will remain unchanged.':sutSelected?'The SecureUxTheme product will be removed. GlassSettings will remain installed.':cleanupSelected?'Only settings cleanup is selected. Products will remain unchanged.':'Select products to remove. Settings cleanup is a separate option.');return;}
+ const selectedOptional=selectable.filter(input=>input.checked).length;
+ const hasLocked=inputs.some(input=>input.dataset.locked==='1'&&input.checked);
+ if(hostState.componentsLoading===true){text.textContent=locale==='ru'?'Подготавливаем список компонентов…':'Preparing the component list…';return;}
+ if(allSelected){text.textContent=locale==='ru'?'Выбран полный комплект компонентов.':'The complete set of components is selected.';}
+ else if(hasLocked&&selectedOptional===0){text.textContent=locale==='ru'?'Выбран минимальный комплект, а не полный набор продуктов. Дополнительные компоненты можно выбрать выше.':'The minimal set is selected, not the full product set. Add components above if needed.';}
+ else{text.textContent=locale==='ru'?'Выбран неполный комплект компонентов. Дополнительные продукты можно отметить выше.':'A partial component set is selected. Select additional products above if needed.';}
+}
 function renderComponentsPanel(){
- const grid=document.getElementById('components-grid'),extra=document.getElementById('components-extra'),warn=document.getElementById('components-warning'),warnText=document.getElementById('components-warning-text');
+ const grid=document.getElementById('components-grid'),extra=document.getElementById('components-extra'),status=document.getElementById('components-status'),statusText=document.getElementById('components-status-text'),selectAll=document.getElementById('components-select-all');
  if(!grid)return;
+ if(selectAll&&!selectAll.dataset.bound){selectAll.dataset.bound='1';selectAll.addEventListener('click',()=>{if(hostState.appMode==='unins')return;const inputs=[...document.querySelectorAll('#components-grid input.comp-check,#components-extra input.comp-check')],selectable=inputs.filter(input=>!input.disabled),select=selectable.some(input=>!input.checked);for(const input of selectable)if(input.checked!==select){input.checked=select;input.dispatchEvent(new Event('change',{bubbles:true}));}updateComponentsStatus();});}
  const items=Array.isArray(hostState.components)?hostState.components:[];
  const loading=hostState.componentsLoading===true;
  const signature=JSON.stringify([loading,items]);
@@ -607,12 +634,12 @@ function renderComponentsPanel(){
    wrap.append(ring,label);grid.append(wrap);
   } else for(const item of items){
    if(!item||item.hidden)continue;
-   const input=document.createElement('input');input.type='checkbox';input.className='comp-check';input.dataset.component=String(item.id||'');
+   const input=document.createElement('input');input.type='checkbox';input.className='comp-check';input.dataset.component=String(item.id||'');input.dataset.locked=item.locked?'1':'0';
    input.checked=!!item.checked;input.disabled=!!(item.locked||item.disabled);
    const post=()=>{if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('component:'+String(item.id||'')+':'+(input.checked?'1':'0'));};
    if(item.slim){
     const row=document.createElement('label');row.className='comp-slim'+(item.checked?' is-checked':'');
-    input.addEventListener('change',()=>{if(item.locked||item.disabled){input.checked=!!item.checked;return;}row.classList.toggle('is-checked',input.checked);post();});
+    input.addEventListener('change',()=>{if(item.locked||item.disabled){input.checked=!!item.checked;return;}row.classList.toggle('is-checked',input.checked);post();updateComponentsStatus();});
     const slimTitle=document.createElement('span');slimTitle.className='comp-slim-title';slimTitle.textContent=String(item.title||'');
     const slimDesc=document.createElement('span');slimDesc.className='comp-slim-desc';slimDesc.textContent=String(item.description||'');
     row.append(input,slimTitle,slimDesc);(extra||grid).append(row);
@@ -622,7 +649,7 @@ function renderComponentsPanel(){
    label.className='comp-card'+(item.checked?' is-checked':'')+(item.locked?' is-locked':'')+(item.disabled?' is-disabled':'');
    input.addEventListener('change',()=>{
     if(item.locked||item.disabled){input.checked=!!item.checked;return;}
-    label.classList.toggle('is-checked',input.checked);post();
+    label.classList.toggle('is-checked',input.checked);post();updateComponentsStatus();
    });
    const body=document.createElement('div');body.className='comp-body';
    const head=document.createElement('div');head.className='comp-head';
@@ -644,14 +671,14 @@ function renderComponentsPanel(){
    if(item.state){const state=document.createElement('p');state.className='comp-state';state.textContent=String(item.state);foot.append(state);}
    const hasReasons=Array.isArray(item.reasons)&&item.reasons.length>0;
    const reasonLine=document.createElement('p');reasonLine.className='comp-reason-line tone-'+String(item.badgeTone||'');
-   reasonLine.textContent=hasReasons?item.reasons.join(' \u00b7 '):(locale==='ru'?'не требуется':'not required');
+   reasonLine.textContent=hasReasons?item.reasons.join(' \u00b7 '):(hostState.appMode==='unins'?(locale==='ru'?'можно удалить отдельно':'can be removed separately'):(locale==='ru'?'не требуется':'not required'));
    foot.append(reasonLine);
    body.append(foot);
    label.append(input,body);grid.append(label);
   }
   if(focusId){const restored=[...document.querySelectorAll('#components-grid input,#components-extra input')].find(el=>el.dataset.component===focusId&&!el.disabled);if(restored)restored.focus();}
  }
- if(warn&&warnText){const msg=String(hostState.componentsWarning||'').trim();warn.hidden=!msg;warnText.textContent=msg;}
+ if(status&&statusText)updateComponentsStatus();
 }
 let certificateSignature='';
 function renderCertificatePanel(){

@@ -277,6 +277,8 @@ bool VerifyProductRegistrations(GlassInstallRollback::SessionState& state,
         {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5030}",GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass},
         {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5040}",GlassInstallMsi::kProductSettingsX64,nullptr},
         {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5050}",GlassInstallMsi::kProductSettingsX86,nullptr},
+        {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5080}",GlassInstallMsi::kProductSecureUxThemeX64,nullptr},
+        {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5090}",GlassInstallMsi::kProductSecureUxThemeX86,nullptr},
     };
     const auto isCancelled=[&]() { return cancelled && cancelled->load(std::memory_order_acquire); };
     const auto refuse=[&](const wchar_t* code,const std::wstring& detail) {
@@ -405,6 +407,8 @@ bool CreateSnapshot(
 
     if (!TrySnapshotProduct(state, GlassInstallMsi::kProductSettingsX64, x64Dir, cancelled) ||
         !TrySnapshotProduct(state, GlassInstallMsi::kProductSettingsX86, x86Dir, cancelled) ||
+        !TrySnapshotProduct(state, GlassInstallMsi::kProductSecureUxThemeX64, x64Dir, cancelled) ||
+        !TrySnapshotProduct(state, GlassInstallMsi::kProductSecureUxThemeX86, x86Dir, cancelled) ||
         !TrySnapshotProduct(state, GlassInstallMsi::kProductPlatformX64, x64Dir, cancelled) ||
         !TrySnapshotProduct(state, GlassInstallMsi::kProductPlatformX86, x86Dir, cancelled) ||
         !TrySnapshotProduct(state, GlassInstallMsi::kProductOpenGlass, openGlassDir, cancelled) ||
@@ -501,9 +505,11 @@ bool UninstallSessionProductSafely(SessionState& state,const wchar_t* productCod
     if (!GlassInstallMsi::IsProductInstalled(productCode)) return true;
     const std::wstring* root=nullptr;
     if (_wcsicmp(productCode,GlassInstallMsi::kProductPlatformX64)==0 ||
-        _wcsicmp(productCode,GlassInstallMsi::kProductSettingsX64)==0) root=&state.x64Dir;
+        _wcsicmp(productCode,GlassInstallMsi::kProductSettingsX64)==0 ||
+        _wcsicmp(productCode,GlassInstallMsi::kProductSecureUxThemeX64)==0) root=&state.x64Dir;
     else if (_wcsicmp(productCode,GlassInstallMsi::kProductPlatformX86)==0 ||
-             _wcsicmp(productCode,GlassInstallMsi::kProductSettingsX86)==0) root=&state.x86Dir;
+             _wcsicmp(productCode,GlassInstallMsi::kProductSettingsX86)==0 ||
+             _wcsicmp(productCode,GlassInstallMsi::kProductSecureUxThemeX86)==0) root=&state.x86Dir;
     else if (_wcsicmp(productCode,GlassInstallMsi::kProductOpenGlass)==0) root=&state.openGlassDir;
     if (!root || root->empty() || state.workspaceDir.empty()) return false;
     const std::wstring cached=state.workspaceDir+L"\\rollback-check-"+productCode+L".msi";
@@ -537,8 +543,10 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
     // or relocated products instead of letting that operation remove them.
     if (!VerifyProductRegistrations(state,nullptr)) return false;
     const wchar_t* known[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
-        GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass,
-        GlassInstallMsi::kLegacyPlatformX64,GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
+        GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,
+        GlassInstallMsi::kProductSecureUxThemeX64,GlassInstallMsi::kProductSecureUxThemeX86,
+        GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyPlatformX64,
+        GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
     for (const auto* product:known) {
         if (!GlassInstallMsi::IsProductInstalled(product)) continue;
         const ProductSnapshot* snapshot=nullptr;
@@ -649,6 +657,8 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
         GlassInstallMsi::kProductPlatformX86,
         GlassInstallMsi::kProductSettingsX64,
         GlassInstallMsi::kProductSettingsX86,
+        GlassInstallMsi::kProductSecureUxThemeX64,
+        GlassInstallMsi::kProductSecureUxThemeX86,
         GlassInstallMsi::kProductOpenGlass,
         L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5061}",
         L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5062}",

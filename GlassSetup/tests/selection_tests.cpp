@@ -9,6 +9,9 @@ int main() {
     static_assert(GlassProducts::ActionForInstall(true, false) == InstallAction::Install);
     static_assert(GlassProducts::ActionForInstall(true, true) == InstallAction::Update);
     static_assert(GlassProducts::ActionForInstall(false, true) == InstallAction::Keep); // Setup never removes
+    constexpr Selection sutOnly{false,false,false,false,true};
+    static_assert(GlassProducts::NormalizeInstall(sutOnly,true).secureUxTheme); // optional toggle survives platform normalization
+    static_assert(GlassProducts::NormalizeInstall(sutOnly,false).secureUxTheme);
     using GlassProducts::OpenGlassStartupState;
     static_assert(!GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{false,false,true}));
     static_assert(GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,false,false})); // first install

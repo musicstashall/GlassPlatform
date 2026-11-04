@@ -664,6 +664,22 @@ bool InstallEngine::Start(
     launchingPhase_.store(false, std::memory_order_relaxed);
 
     selection_=GlassProducts::NormalizeInstall(selection_,GlassInstallUtil::IsOs64Bit());
+    const bool settingsInstalled=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64)
+        || GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86);
+    const bool sutMsiInstalled=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX64)
+        || GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX86);
+    bool legacySutPayload=false;
+    if ((selection_.secureUxTheme || selection_.glassSettings) && settingsInstalled && !sutMsiInstalled) {
+        GlassInstallUtil::SecureUxThemeState sutState=GlassInstallUtil::SecureUxThemeState::Unavailable;
+        if (GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,sutState,nullptr))
+            legacySutPayload=sutState==GlassInstallUtil::SecureUxThemeState::Active ||
+                sutState==GlassInstallUtil::SecureUxThemeState::Inactive ||
+                sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending ||
+                sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
+    }
+    if (selection_.secureUxTheme && (!settingsInstalled || legacySutPayload)) selection_.glassSettings=true;
+    if (selection_.glassSettings && legacySutPayload && !selection_.secureUxTheme)
+        selection_.secureUxThemePackageOnly=true;
 
     GlassInstallUtil::ConfigureEmbeddedUnlocker(instance, IDR_UNLOCKER_X64, IDR_UNLOCKER_X86);
 
@@ -679,8 +695,8 @@ bool InstallEngine::Start(
     InstallLog::Line(L"InstallEngine::Start");
     InstallLog::LineFormat(L"  x64Dir=%s (sel=%d)", x64Dir_.c_str(), selection_.platform64 ? 1 : 0);
     InstallLog::LineFormat(L"  x86Dir=%s (sel=%d)", x86Dir_.c_str(), selection_.platform32 ? 1 : 0);
-    InstallLog::LineFormat(L"  glassSettings=%d openGlass=%d (%s)",
-        selection_.glassSettings ? 1 : 0, selection_.openGlass ? 1 : 0, openGlassDir_.c_str());
+    InstallLog::LineFormat(L"  glassSettings=%d openGlass=%d SecureUxTheme=%d (%s)",
+        selection_.glassSettings ? 1 : 0, selection_.openGlass ? 1 : 0,selection_.secureUxTheme?1:0,openGlassDir_.c_str());
     progressUnits_ = 0;
     statusLine_ = labels_.extract;
 
@@ -1107,6 +1123,8 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
         {IDR_MSI_X86,       L"Glass-x86.msi",         selection_.platform32},
         {IDR_MSI_GS_X64,    L"GlassSettings-x64.msi", os64 && selection_.glassSettings},
         {IDR_MSI_GS_X86,    L"GlassSettings-x86.msi", !os64 && selection_.glassSettings},
+        {IDR_MSI_SUT_X64,   L"SecureUxTheme-x64.msi", os64 && (selection_.secureUxTheme || selection_.secureUxThemePackageOnly)},
+        {IDR_MSI_SUT_X86,   L"SecureUxTheme-x86.msi", !os64 && (selection_.secureUxTheme || selection_.secureUxThemePackageOnly)},
         {IDR_MSI_OPENGLASS, L"OpenGlass-x64.msi",     os64 && selection_.openGlass},
     };
     int neededTotal = 0;
@@ -1224,6 +1242,8 @@ bool InstallEngine::RecheckRelatedProducts(const wchar_t* productCode) noexcept 
         {GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5030}"},
         {GlassInstallMsi::kProductSettingsX64,nullptr,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5040}"},
         {GlassInstallMsi::kProductSettingsX86,nullptr,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5050}"},
+        {GlassInstallMsi::kProductSecureUxThemeX64,nullptr,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5080}"},
+        {GlassInstallMsi::kProductSecureUxThemeX86,nullptr,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5090}"},
     };
     const Family* family=nullptr;
     for (const auto& item:families) if (_wcsicmp(item.code,productCode)==0) { family=&item;break; }
@@ -1422,6 +1442,9 @@ bool InstallEngine::RunMsiSequence() noexcept {
         steps.push_back({L"Glass-x64.msi", x64Dir_, labels_.platform64});
     if (selection_.platform32)
         steps.push_back({L"Glass-x86.msi", x86Dir_, labels_.platform32});
+    if (selection_.secureUxTheme || selection_.secureUxThemePackageOnly)
+        steps.push_back({is64 ? L"SecureUxTheme-x64.msi" : L"SecureUxTheme-x86.msi",
+                         is64 ? x64Dir_ : x86Dir_, labels_.secureUxTheme});
     // The selected GlassSettings MSI has already run before monitoring.
     if (is64 && selection_.openGlass)
         steps.push_back({L"OpenGlass-x64.msi", openGlassDir_, labels_.openGlass});
@@ -1602,6 +1625,21 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
     const bool is64 = scanNativeX64_;
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
 
+    if (selection_.secureUxTheme) {
+        SetStatus(labels_.secureUxTheme.empty()?L"SecureUxTheme":labels_.secureUxTheme,9300);
+        GlassInstallUtil::SecureUxThemeActivateRun sutRun;
+        std::wstring sutError;
+        if (!GlassInstallUtil::InvokeSecureUxThemeActivate(x64Dir_,x86Dir_,&sutRun,&sutError)) {
+            const std::wstring hint=labels_.warnSecureUxThemeHint.empty()?sutError:labels_.warnSecureUxThemeHint+L" "+sutError;
+            AddFinishWarning(labels_.warnSecureUxTheme.empty()?L"SecureUxTheme could not be enabled.":labels_.warnSecureUxTheme,hint);
+        } else if (sutRun.skippedExternalInstall) {
+            AddFinishWarning(labels_.warnSecureUxTheme.empty()?L"SecureUxTheme is managed by another installation.":labels_.warnSecureUxTheme,
+                labels_.warnSecureUxThemeHint.empty()?L"The external installation was left untouched.":labels_.warnSecureUxThemeHint);
+        } else if (sutRun.rebootRequired) {
+            AddFinishWarning(labels_.warnSecureUxThemeRestart.empty()?L"Restart Windows to finish enabling SecureUxTheme.":labels_.warnSecureUxThemeRestart,L"");
+        }
+    }
+
     // Policy: a selected platform is always started, whether or not it was
     // running (or its task was enabled) when Setup began. StartPlatform
     // re-enables a disabled task itself.
@@ -1766,9 +1804,11 @@ bool InstallEngine::DetermineCleanInstall() noexcept {
     const ArchPresence x86 = ClassifyArch(GP::PlatformArch::X86,x86Dir_);
     const bool gsInstalled = GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64)
         || GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86);
+    const bool sutInstalled = GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX64)
+        || GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX86);
     const bool openGlass = OpenGlassPresent(openGlassDir_) || prior_.ogLegacyTaskExisted;
     cleanInstall_ = x64 == ArchPresence::Absent && x86 == ArchPresence::Absent
-        && !gsInstalled && !openGlass && !prior_.x64TaskExisted && !prior_.x86TaskExisted
+        && !gsInstalled && !sutInstalled && !openGlass && !prior_.x64TaskExisted && !prior_.x86TaskExisted
         && !prior_.ogServiceExisted && !prior_.ogLegacyTaskExisted && !prior_.ogWasRunning;
     // Setup is x86; on x64 Windows the embedded x64 helper is required even
     // when product registration/files are missing or the install looks clean.
@@ -1926,8 +1966,10 @@ bool InstallEngine::UndoCleanInstall() noexcept {
         // recorded as successfully installed. Do not call a partial cleanup a
         // successful clean rollback or guess which product owns it.
         const wchar_t* known[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
-            GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass,
-            GlassInstallMsi::kLegacyPlatformX64,GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
+            GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,
+            GlassInstallMsi::kProductSecureUxThemeX64,GlassInstallMsi::kProductSecureUxThemeX86,
+            GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyPlatformX64,
+            GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
         for (const auto* code:known) {
             std::wstring detail;
             if (GlassInstallMsi::CheckProductContexts(code,detail)!=GlassInstallMsi::ProductPathCheck::Safe ||
@@ -1971,6 +2013,8 @@ bool InstallEngine::PurgeRemnants() noexcept {
     const bool is64 = scanNativeX64_;
     const wchar_t* installedSettings = is64 ? GlassInstallMsi::kProductSettingsX64 : GlassInstallMsi::kProductSettingsX86;
     const wchar_t* codes[] = {
+        GlassInstallMsi::kProductSecureUxThemeX64,
+        GlassInstallMsi::kProductSecureUxThemeX86,
         GlassInstallMsi::kProductSettingsX64,
         GlassInstallMsi::kProductSettingsX86,
         GlassInstallMsi::kProductPlatformX64,

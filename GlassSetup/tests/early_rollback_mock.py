@@ -66,7 +66,7 @@ namespace GlassInstallUtil {
 namespace GlassInstallLog { template<class... T>void LineFormat(const wchar_t*,T...){} void Line(const wchar_t*){} }
 namespace GlassInstallMsi {
  constexpr wchar_t kProductPlatformX64[]=L"p64",kProductPlatformX86[]=L"p86",kProductSettingsX64[]=L"gs64",
-  kProductSettingsX86[]=L"gs86",kProductOpenGlass[]=L"og",kLegacyPlatformX64[]=L"old64",
+  kProductSettingsX86[]=L"gs86",kProductSecureUxThemeX64[]=L"sut64",kProductSecureUxThemeX86[]=L"sut86",kProductOpenGlass[]=L"og",kLegacyPlatformX64[]=L"old64",
   kLegacyPlatformX86[]=L"old86",kLegacyOpenGlass[]=L"oldog";
  enum class ProductPathCheck {Safe,OutsideRoot,Unverifiable,Cancelled};
  ProductPathCheck CheckProductFileRoots(const wchar_t*,const std::wstring&,const std::wstring&,std::wstring&){return ProductPathCheck::Safe;}

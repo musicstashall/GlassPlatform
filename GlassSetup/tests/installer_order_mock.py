@@ -149,7 +149,8 @@ namespace GlassInstallHost {
   if(fake.cancelDuringOgStop)const_cast<std::atomic_bool*>(cancel)->store(true);return fake.ogStopOk;}
 }
 namespace GlassInstallMsi {
- constexpr wchar_t kProductSettingsX64[]=L"gs64",kProductSettingsX86[]=L"gs86",kProductPlatformX64[]=L"p64",
+ constexpr wchar_t kProductSettingsX64[]=L"gs64",kProductSettingsX86[]=L"gs86",
+  kProductSecureUxThemeX64[]=L"sut64",kProductSecureUxThemeX86[]=L"sut86",kProductPlatformX64[]=L"p64",
   kProductPlatformX86[]=L"p86",kProductOpenGlass[]=L"og";
  struct ProgressSink {
   std::wstring label;int base=0,span=0;std::atomic_bool* cancelRequested=nullptr;

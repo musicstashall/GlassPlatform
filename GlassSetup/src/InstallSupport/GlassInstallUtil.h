@@ -30,6 +30,9 @@ inline constexpr char kInstallerSignerTrustExport[] = "GlassSettings_ShellSigner
 // Uninstaller entry point: SecureUxTheme deactivation «like GlassSettings» (stock style
 // restore + unified GlassSettings_SecureUxThemeDeactivate).
 inline constexpr char kInstallerSecureUxThemeExport[] = "GlassSettings_SecureUxThemeSetupV1W";
+inline constexpr char kInstallerSecureUxThemeQueryExport[] = "GlassSettings_SecureUxThemeQueryStateV1W";
+inline constexpr char kInstallerSecureUxThemeActivateExport[] = "GlassSettings_SecureUxThemeActivateSetupV1W";
+enum class SecureUxThemeState : DWORD { Unavailable=0, Inactive=1, Active=2, ActivationPending=3, DeactivationPending=4, External=5, Conflict=6 };
 // Exit-code bits of kInstallerSecureUxThemeExport (see NativeHost.h).
 inline constexpr DWORD kSecureUxThemeExitRebootRequired = 2u;
 inline constexpr DWORD kSecureUxThemeExitThemeNotRestored = 4u;
@@ -147,6 +150,12 @@ struct SecureUxThemeDeactivateRun
     bool themeNotRestored = false;     // custom visual style left active (deactivated anyway)
     bool skippedExternalInstall = false; // official SecureUxTheme owns the state; nothing changed
 };
+struct SecureUxThemeActivateRun
+{
+    bool ran = false;
+    bool rebootRequired = false;       // activation is registered and awaits process/system restart
+    bool skippedExternalInstall = false;
+};
 
 // Runs GlassSettings_SecureUxThemeSetupV1W of the helper matching the OS bitness
 // (embedded x64 helper on x64, installed x86 helper on x86) and deactivates
@@ -159,5 +168,13 @@ bool InvokeSecureUxThemeDeactivate(
     const std::wstring& x86Dir,
     SecureUxThemeDeactivateRun* run = nullptr,
     std::wstring* failureDetail = nullptr) noexcept;
+// Query/activate through the installed Native.dll matching the OS bitness, via rundll32;
+// keeping it in GlassSettings\ lets the native callback resolve its MSI payload beside it.
+bool QuerySecureUxThemeState(
+    const std::wstring& x64Dir,const std::wstring& x86Dir,
+    SecureUxThemeState* state,std::wstring* failureDetail=nullptr) noexcept;
+bool InvokeSecureUxThemeActivate(
+    const std::wstring& x64Dir,const std::wstring& x86Dir,
+    SecureUxThemeActivateRun* run=nullptr,std::wstring* failureDetail=nullptr) noexcept;
 
 } // namespace GlassInstallUtil

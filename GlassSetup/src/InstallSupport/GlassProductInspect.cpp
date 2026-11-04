@@ -408,6 +408,8 @@ Report Run(const Inputs& in)
         { GlassInstallMsi::kProductPlatformX86, GlassInstallMsi::kLegacyPlatformX86, in.msiResX86, &report.x86 },
         { GlassInstallMsi::kProductSettingsX64, nullptr, in.msiResSettings, &report.settings },
         { GlassInstallMsi::kProductSettingsX86, nullptr, in.msiResSettings, &report.settings },
+        { GlassInstallMsi::kProductSecureUxThemeX64, nullptr, in.msiResSecureUxTheme, &report.secureUxTheme },
+        { GlassInstallMsi::kProductSecureUxThemeX86, nullptr, in.msiResSecureUxTheme, &report.secureUxTheme },
         { GlassInstallMsi::kProductOpenGlass, GlassInstallMsi::kLegacyOpenGlass, in.msiResOg, &report.og },
     };
 
@@ -424,7 +426,8 @@ Report Run(const Inputs& in)
                 modern ? product.modernCode : product.legacyCode);
     }
 
-    if (!report.x64.installed && !report.x86.installed && !report.settings.installed && !report.og.installed)
+    if (!report.x64.installed && !report.x86.installed && !report.settings.installed &&
+        !report.secureUxTheme.installed && !report.og.installed)
     {
         report.ran = true;
         return report;
@@ -435,12 +438,14 @@ Report Run(const Inputs& in)
     std::wstring tempDir;
     if (GlassInstallUtil::CreateSecureTempDirectory(L"GlassInspect", tempDir))
     {
-        const struct { UINT res; ProductReport* rep; const wchar_t* code; } fileJobs[] = {
-            { in.msiResX64, &report.x64, GlassInstallMsi::kProductPlatformX64 },
-            { in.msiResX86, &report.x86, GlassInstallMsi::kProductPlatformX86 },
+        const struct { UINT res; ProductReport* rep; const wchar_t* code; bool verifyFiles; } fileJobs[] = {
+            { in.msiResX64, &report.x64, GlassInstallMsi::kProductPlatformX64, true },
+            { in.msiResX86, &report.x86, GlassInstallMsi::kProductPlatformX86, true },
             { in.msiResSettings, &report.settings,
-                in.os64 ? GlassInstallMsi::kProductSettingsX64 : GlassInstallMsi::kProductSettingsX86 },
-            { in.msiResOg, &report.og, GlassInstallMsi::kProductOpenGlass },
+                in.os64 ? GlassInstallMsi::kProductSettingsX64 : GlassInstallMsi::kProductSettingsX86, true },
+            { in.msiResSecureUxTheme, &report.secureUxTheme,
+                in.os64 ? GlassInstallMsi::kProductSecureUxThemeX64 : GlassInstallMsi::kProductSecureUxThemeX86, false },
+            { in.msiResOg, &report.og, GlassInstallMsi::kProductOpenGlass, true },
         };
         int index = 0;
         for (const auto& job : fileJobs)
@@ -481,7 +486,7 @@ Report Run(const Inputs& in)
             // легаси-MSI не соответствует текущему пакету. Эталон целостности —
             // кэш MSI, из которого продукт установлен (LocalPackage): новый пакет
             // содержит новые сборки и ничего не говорит о старых файлах.
-            if (GlassInstallMsi::IsProductInstalled(job.code))
+            if (job.verifyFiles && GlassInstallMsi::IsProductInstalled(job.code))
             {
                 std::wstring referenceMsi = CachedMsiPath(job.code);
                 if (referenceMsi.empty() && !job.rep->updateAvailable)
@@ -510,6 +515,8 @@ Report Run(const Inputs& in)
         AddReason(report.x86, Reason::RegistryInvalid);
     if (report.settings.installed && (!rootsOk || rootInvalid(in.os64 ? roots.x64 : roots.x86)))
         AddReason(report.settings, Reason::RegistryInvalid);
+    if (report.secureUxTheme.installed && (!rootsOk || rootInvalid(in.os64 ? roots.x64 : roots.x86)))
+        AddReason(report.secureUxTheme, Reason::RegistryInvalid);
     if (report.og.installed && (!rootsOk || rootInvalid(roots.openGlass)))
         AddReason(report.og, Reason::RegistryInvalid);
 

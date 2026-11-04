@@ -1195,7 +1195,7 @@ private:
     HWND back_ = nullptr, next_ = nullptr, cancel_ = nullptr;
     HWND updateDownload_ = nullptr, updateSkip_ = nullptr;
     HWND eula_ = nullptr, accept_ = nullptr, progress_ = nullptr, webHost_ = nullptr;
-    HWND component64_ = nullptr, component32_ = nullptr, componentSettings_ = nullptr, componentOpenGlass_ = nullptr;
+    HWND component64_ = nullptr, component32_ = nullptr, componentSettings_ = nullptr, componentOpenGlass_ = nullptr, componentSecureUxTheme_ = nullptr;
     HWND certInstall_ = nullptr, certSkip_ = nullptr; // GDI fallback of the certificate page
     HFONT font_ = nullptr, heading_ = nullptr, small_ = nullptr, title_ = nullptr;
     HBRUSH darkBrush_ = nullptr, licenseBrush_ = nullptr, buttonBrush_ = nullptr;
@@ -1212,6 +1212,8 @@ private:
     std::wstring lastWebState_;
     InstallEngine::ComponentSelection selection_{};
     InstallEngine::ComponentSelection installedSelection_{};
+    GlassInstallUtil::SecureUxThemeState secureUxThemeState_=GlassInstallUtil::SecureUxThemeState::Unavailable;
+    bool settingsAutoSelectedForSut_=false;
     GlassProducts::OpenGlassStartupState openGlassStartup_{};
     std::wstring openGlassStartupDir_;
     ULONGLONG lastWebPush_=0;
@@ -1220,6 +1222,7 @@ private:
     struct StartupResult {
         bool ok = false, os64 = false, runtimeInstalled = false;
         InstallEngine::ComponentSelection installed{};
+        GlassInstallUtil::SecureUxThemeState secureUxThemeState=GlassInstallUtil::SecureUxThemeState::Unavailable;
         GlassProducts::OpenGlassStartupState openGlass{};
         std::wstring openGlassDir, platformVersion, eulaText;
     };
@@ -1343,7 +1346,7 @@ private:
         };
         font_ = create(14,FW_NORMAL); small_ = create(12,FW_NORMAL);
         heading_ = create(28,FW_NORMAL); title_ = create(39,FW_LIGHT);
-        for (HWND c : {back_,next_,cancel_,eula_,accept_,updateDownload_,updateSkip_,component64_,component32_,componentSettings_,componentOpenGlass_,certInstall_,certSkip_})
+        for (HWND c : {back_,next_,cancel_,eula_,accept_,updateDownload_,updateSkip_,component64_,component32_,componentSettings_,componentOpenGlass_,componentSecureUxTheme_,certInstall_,certSkip_})
             if (c) SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
     void InitializeLoading() {
@@ -1374,6 +1377,7 @@ private:
         component32_ = Control(L"BUTTON",Text(IDS_COMP_P32_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT32);
         componentSettings_ = Control(L"BUTTON",Text(IDS_COMP_GS_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_SETTINGS);
         componentOpenGlass_ = Control(L"BUTTON",Text(IDS_COMP_OG_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_OG);
+        componentSecureUxTheme_ = Control(L"BUTTON",Text(IDS_COMP_SUT_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_SUT);
         certInstall_ = Control(L"BUTTON",Text(IDS_CERT_OPT_INSTALL_TITLE),BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP,IDC_CERT_INSTALL);
         certSkip_ = Control(L"BUTTON",Text(IDS_CERT_OPT_SKIP_TITLE),BS_AUTORADIOBUTTON,IDC_CERT_SKIP);
         // Owner-drawn STATIC avoids the classic PROGRESS control's sunken border,
@@ -1456,6 +1460,17 @@ private:
                 if (!startupStop_.load(std::memory_order_acquire))
                     result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass);
+                if (!startupStop_.load(std::memory_order_acquire))
+                    result.installed.secureUxTheme=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX64) ||
+                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX86);
+                if (!startupStop_.load(std::memory_order_acquire) && result.installed.glassSettings) {
+                    std::wstring sutError;
+                    if (!rootsChecked || !GlassInstallUtil::QuerySecureUxThemeState(startupRoots.x64,startupRoots.x86,
+                            &result.secureUxThemeState,&sutError)) {
+                        result.secureUxThemeState=GlassInstallUtil::SecureUxThemeState::Conflict;
+                        InstallLog::Line(L"SecureUxTheme state query failed: "+sutError);
+                    }
+                }
                 if (!startupStop_.load(std::memory_order_acquire)) {
                     InstallLog::LineFormat(L"Startup MSI registrations: x64=%d x86=%d Settings=%d OpenGlass=%d",
                         result.installed.platform64?1:0,result.installed.platform32?1:0,
@@ -1533,6 +1548,7 @@ private:
         eulaText_=std::move(result.eulaText);
         SetWindowTextW(eula_,eulaText_.c_str());
         installedSelection_=result.installed;
+        secureUxThemeState_=result.secureUxThemeState;
         openGlassStartup_=result.openGlass;
         openGlassStartupDir_=std::move(result.openGlassDir);
         const bool os64=result.os64;
@@ -1552,6 +1568,7 @@ private:
             inspectIn.msiResX64=IDR_MSI_X64;
             inspectIn.msiResX86=IDR_MSI_X86;
             inspectIn.msiResSettings=os64?IDR_MSI_GS_X64:IDR_MSI_GS_X86;
+            inspectIn.msiResSecureUxTheme=os64?IDR_MSI_SUT_X64:IDR_MSI_SUT_X86;
             inspectIn.msiResOg=IDR_MSI_OPENGLASS;
             inspectIn.cancelled=&inspectStop_;
             auto report=GlassProductInspect::Run(inspectIn);
@@ -1590,6 +1607,7 @@ private:
         // Leave room outside each platform checkbox for the separate mandatory lock.
         Move(component64_,60,203,360,32); Move(component32_,510,203,360,32);
         Move(componentSettings_,60,293,400,32); Move(componentOpenGlass_,510,293,400,32);
+        Move(componentSecureUxTheme_,60,378,420,28);
         Move(certInstall_,60,318,560,28); Move(certSkip_,60,386,560,28);
         if (controller_) {
             RECT bounds=Box(0,0,kWidth,kHtmlHeight);
@@ -1625,6 +1643,7 @@ private:
         ShowWindow(component32_,nativeComponents?SW_SHOWNA:SW_HIDE);
         ShowWindow(componentSettings_,nativeComponents?SW_SHOWNA:SW_HIDE);
         ShowWindow(componentOpenGlass_,nativeComponents && os64?SW_SHOWNA:SW_HIDE);
+        ShowWindow(componentSecureUxTheme_,nativeComponents?SW_SHOWNA:SW_HIDE);
         if (nativeComponents) {
             const std::wstring mandatory=L" ("+Text(IDS_COMP_MANDATORY)+L")";
             SetWindowTextW(component64_,(Text(IDS_COMP_P64_TITLE)+(os64?mandatory:L"")).c_str());
@@ -1633,6 +1652,12 @@ private:
             SendMessageW(component32_,BM_SETCHECK,selection_.platform32?BST_CHECKED:BST_UNCHECKED,0);
             SendMessageW(componentSettings_,BM_SETCHECK,selection_.glassSettings?BST_CHECKED:BST_UNCHECKED,0);
             SendMessageW(componentOpenGlass_,BM_SETCHECK,selection_.openGlass?BST_CHECKED:BST_UNCHECKED,0);
+            SendMessageW(componentSecureUxTheme_,BM_SETCHECK,selection_.secureUxTheme?BST_CHECKED:BST_UNCHECKED,0);
+            SetWindowTextW(componentSecureUxTheme_,Text(IDS_COMP_SUT_TITLE).c_str());
+            const bool sutBlocked=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External ||
+                (installedSelection_.glassSettings&&secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict);
+            EnableWindow(componentSecureUxTheme_,!sutBlocked);
+            EnableWindow(componentSettings_,!(selection_.secureUxTheme&&!installedSelection_.glassSettings));
             EnableWindow(component64_,FALSE); EnableWindow(component32_,os64?TRUE:FALSE);
         }
         const bool nativeCertificate=!webVisible && page_==Page::Certificate && !transitioning_;
@@ -1757,20 +1782,35 @@ private:
     bool SettingsWarningApplies() const noexcept {
         return !selection_.glassSettings && !installedSelection_.glassSettings;
     }
+    bool SettingsInspectionDamaged() const {
+        std::lock_guard<std::mutex> lock(inspectMutex_);
+        return inspect_.settings.damaged;
+    }
+    bool LegacySecureUxThemePayloadPresent() const noexcept {
+        if (installedSelection_.secureUxTheme) return false;
+        return secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Active ||
+            secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Inactive ||
+            secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::ActivationPending ||
+            secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
+    }
+    bool SecureUxThemeRequiresSettings(bool settingsDamaged) const noexcept {
+        return !installedSelection_.glassSettings || settingsDamaged || LegacySecureUxThemePayloadPresent();
+    }
     std::wstring ComponentWarnings() const {
         std::wstring text;
-        if (X86WarningApplies()) text = Text(IDS_COMP_X86_WARNING);
-        if (SettingsWarningApplies()) {
-            if (!text.empty()) text += L"\n";
-            text += Text(IDS_COMP_GS_WARNING);
-        }
+        if (installedSelection_.glassSettings && secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External)
+            text=Text(IDS_COMP_SUT_WARNING_EXTERNAL);
+        else if (installedSelection_.glassSettings && secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict)
+            text=Text(IDS_COMP_SUT_WARNING_CONFLICT);
+        if (X86WarningApplies()) { if(!text.empty())text+=L"\n"; text+=Text(IDS_COMP_X86_WARNING); }
+        if (SettingsWarningApplies()) { if(!text.empty())text+=L"\n"; text+=Text(IDS_COMP_GS_WARNING); }
         return text;
     }
     std::wstring ComponentsJson() const {
         std::lock_guard<std::mutex> lock(inspectMutex_);
         const bool os64=GlassInstallUtil::IsOs64Bit();
         std::wstring json=L"[";
-        auto item=[&](const wchar_t* id, UINT title, UINT desc, bool checked, bool locked, bool hidden, const GlassProductInspect::ProductReport* rep) {
+        auto item=[&](const wchar_t* id, UINT title, UINT desc, bool checked, bool locked, bool hidden, const GlassProductInspect::ProductReport* rep, bool disabled=false) {
             if (json.size()>1) json+=L",";
             const auto condition=ConditionOf(rep,rep!=nullptr&&rep->installed);
             const auto action=GlassProducts::ActionForCondition(checked,condition);
@@ -1804,12 +1844,50 @@ private:
                 L",\"state\":"+JsStringLiteral(Text(ComponentStateId(checked,condition)))+
                 L",\"reasons\":"+reasons+
                 L",\"checked\":"+(checked?L"true":L"false")+L",\"locked\":"+((locked && condition!=GlassProducts::ProductCondition::Healthy)?L"true":L"false")+
+                L",\"disabled\":"+(disabled?L"true":L"false")+
                 L",\"hidden\":"+(hidden?L"true":L"false")+L"}";
         };
+        const bool sutNeedsSettings=selection_.secureUxTheme&&SecureUxThemeRequiresSettings(inspect_.settings.damaged);
         item(L"x64",IDS_COMP_P64_TITLE,IDS_COMP_P64_DESC,selection_.platform64,os64,!os64,&inspect_.x64);
         item(L"x86",IDS_COMP_P32_TITLE,IDS_COMP_P32_DESC,selection_.platform32,!os64,false,&inspect_.x86);
-        item(L"settings",IDS_COMP_GS_TITLE,IDS_COMP_GS_DESC,selection_.glassSettings,false,false,&inspect_.settings);
+        item(L"settings",IDS_COMP_GS_TITLE,IDS_COMP_GS_DESC,selection_.glassSettings,sutNeedsSettings,false,&inspect_.settings);
         item(L"openglass",IDS_COMP_OG_TITLE,IDS_COMP_OG_DESC,selection_.openGlass,false,!os64,&inspect_.og);
+        const auto sutState=secureUxThemeState_;
+        const auto sutCondition=ConditionOf(&inspect_.secureUxTheme,installedSelection_.secureUxTheme);
+        const bool sutExternal=sutState==GlassInstallUtil::SecureUxThemeState::External;
+        const bool sutConflict=installedSelection_.glassSettings&&sutState==GlassInstallUtil::SecureUxThemeState::Conflict;
+        const bool sutUpdate=sutCondition==GlassProducts::ProductCondition::UpdateAvailable;
+        const bool sutDamaged=sutCondition==GlassProducts::ProductCondition::Damaged;
+        const bool sutDisabled=sutExternal||sutConflict;
+        const UINT sutBadge=sutExternal?IDS_COMP_SUT_BADGE_EXTERNAL:sutConflict?IDS_COMP_SUT_BADGE_CONFLICT:
+            sutUpdate?IDS_COMP_BADGE_UPDATE:sutDamaged?IDS_COMP_BADGE_REPAIR:
+            (sutState==GlassInstallUtil::SecureUxThemeState::Active?IDS_COMP_SUT_BADGE_ACTIVE:
+            (sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending||sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending?IDS_COMP_SUT_BADGE_PENDING:IDS_COMP_SUT_BADGE_AVAILABLE));
+        const wchar_t* sutTone=sutExternal||sutConflict||sutDamaged?L"repair":sutUpdate?L"update":
+            sutState==GlassInstallUtil::SecureUxThemeState::Active?L"keep":
+            (sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending||sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending?L"update":L"install");
+        const UINT sutStateId=sutExternal||sutConflict?IDS_COMP_SUT_STATE_EXTERNAL:
+            sutUpdate?IDS_INSPECT_VERSION:
+            (sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending||sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending?IDS_COMP_SUT_STATE_PENDING:
+            (sutState==GlassInstallUtil::SecureUxThemeState::Active?IDS_COMP_SUT_STATE_ACTIVE:
+            (selection_.secureUxTheme?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF)));
+        const bool sutRequiresSettings=selection_.secureUxTheme&&SecureUxThemeRequiresSettings(inspect_.settings.damaged);
+        std::wstring sutReasons=L"[";
+        bool firstSutReason=true;
+        if(sutUpdate){sutReasons+=JsStringLiteral(Text(IDS_INSPECT_VERSION));firstSutReason=false;}
+        else if(sutDamaged)for(auto reason:inspect_.secureUxTheme.reasons){
+            const UINT reasonId=InspectReasonId(reason);if(!reasonId)continue;
+            if(!firstSutReason)sutReasons+=L",";firstSutReason=false;
+            sutReasons+=JsStringLiteral(Text(reasonId));
+        }
+        if(sutRequiresSettings){if(!firstSutReason)sutReasons+=L",";sutReasons+=JsStringLiteral(Text(IDS_COMP_SUT_REASON_DEPENDENCY));}
+        sutReasons+=L"]";
+        json+=L",{\"id\":\"secureUxTheme\",\"title\":"+JsStringLiteral(Text(IDS_COMP_SUT_TITLE))+
+            L",\"description\":"+JsStringLiteral(Text(IDS_COMP_SUT_DESC))+
+            L",\"badge\":"+JsStringLiteral(Text(sutBadge))+L",\"badgeTone\":"+JsStringLiteral(sutTone)+
+            L",\"state\":"+JsStringLiteral(Text(sutStateId))+L",\"reasons\":"+sutReasons+
+            L",\"checked\":"+(selection_.secureUxTheme?L"true":L"false")+
+            L",\"locked\":false,\"disabled\":"+(sutDisabled?L"true":L"false")+L",\"hidden\":false}";
         return json+L"]";
     }
     std::wstring LaunchCardsJson() const {
@@ -2016,7 +2094,7 @@ private:
     }
     // «Установить» доступен только с выбранными продуктами: без них делать нечего.
     [[nodiscard]] bool HasSelectedComponent() const noexcept {
-        return selection_.platform64 || selection_.platform32 || selection_.glassSettings || selection_.openGlass;
+        return selection_.platform64 || selection_.platform32 || selection_.glassSettings || selection_.openGlass || selection_.secureUxTheme;
     }
     // «Установить» доступен, когда анализ завершён и есть выбранные продукты.
     [[nodiscard]] bool ComponentsReady() const noexcept {
@@ -2030,6 +2108,17 @@ private:
             selection_.platform32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.x86,installedSelection_.platform32));
             selection_.glassSettings=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings,installedSelection_.glassSettings));
             selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.og,installedSelection_.openGlass));
+            selection_.secureUxTheme=installedSelection_.secureUxTheme &&
+                GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.secureUxTheme,installedSelection_.secureUxTheme));
+            // Keep an active legacy integration when GlassSettings is replaced:
+            // adopt its native payload into the new standalone MSI first.
+            if (!installedSelection_.secureUxTheme &&
+                (secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Active ||
+                 secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::ActivationPending)) {
+                selection_.secureUxTheme=true;
+                selection_.glassSettings=true;
+                settingsAutoSelectedForSut_=true;
+            }
         }
         EnableWindow(next_,!failurePending_ && ComponentsReady());
         SyncWebViewState();
@@ -2307,6 +2396,10 @@ private:
         labels.backup = Text(IDS_STATUS_BACKUP);
         labels.glassSettings64 = Text(IDS_STATUS_GS64);
         labels.glassSettings86 = Text(IDS_STATUS_GS86);
+        labels.secureUxTheme = Text(IDS_COMP_SUT_TITLE);
+        labels.warnSecureUxTheme = Text(IDS_WARN_SUT_ACTIVATE);
+        labels.warnSecureUxThemeHint = Text(IDS_WARN_SUT_ACTIVATE_HINT);
+        labels.warnSecureUxThemeRestart = Text(IDS_WARN_SUT_RESTART);
         labels.rollback = Text(IDS_STATUS_ROLLBACK);
         labels.purge = Text(IDS_STATUS_PURGE);
         labels.purgeFailed = Text(IDS_ERR_PURGE_FAILED);
@@ -2844,8 +2937,22 @@ private:
             // уже отмечена и заблокирована.
             if (message==L"component:x64:1" || message==L"component:x64:0") selection_.platform64=os64 && message.back()==L'1';
             else if (message==L"component:x86:1" || message==L"component:x86:0") selection_.platform32=message.back()==L'1';
-            else if (message==L"component:settings:1" || message==L"component:settings:0") selection_.glassSettings=message.back()==L'1';
+            else if (message==L"component:settings:1" || message==L"component:settings:0") {
+                selection_.glassSettings=message.back()==L'1';
+                if(!selection_.glassSettings){selection_.secureUxTheme=false;settingsAutoSelectedForSut_=false;}
+            }
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
+            else if (message==L"component:secureUxTheme:1" || message==L"component:secureUxTheme:0") {
+                const bool checked=message.back()==L'1';
+                const bool requiresSettings=SecureUxThemeRequiresSettings(SettingsInspectionDamaged());
+                const bool blocked=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External ||
+                    (installedSelection_.glassSettings&&secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict);
+                if(!blocked){
+                    selection_.secureUxTheme=checked;
+                    if(checked&&requiresSettings&&!selection_.glassSettings){selection_.glassSettings=true;settingsAutoSelectedForSut_=true;}
+                    else if(!checked&&settingsAutoSelectedForSut_){selection_.glassSettings=false;settingsAutoSelectedForSut_=false;}
+                }
+            }
             EnableWindow(next_,!failurePending_ && ComponentsReady());
             SyncWebViewState();
             return S_OK;
@@ -3329,12 +3436,14 @@ private:
             state(selection_.platform32,installedSelection_.platform32,!os64,510,238);
             state(selection_.glassSettings,installedSelection_.glassSettings,false,60,328);
             if (os64) state(selection_.openGlass,installedSelection_.openGlass,false,510,328);
-            int warningY=398;
-            if (X86WarningApplies()) {
-                DrawLabel(dc,Text(IDS_COMP_X86_WARNING),Box(48,warningY,840,48),font_,white);
-                warningY+=50;
-            }
-            if (SettingsWarningApplies()) DrawLabel(dc,Text(IDS_COMP_GS_WARNING),Box(48,warningY,840,88),font_,white);
+            const bool sutExternal=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External||secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict;
+            const bool sutPending=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::ActivationPending||secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
+            const UINT sutStateId=sutExternal?IDS_COMP_SUT_STATE_EXTERNAL:sutPending?IDS_COMP_SUT_STATE_PENDING:
+                secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Active?IDS_COMP_SUT_STATE_ACTIVE:
+                selection_.secureUxTheme?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF;
+            DrawLabel(dc,Text(sutStateId),Box(60,408,380,22),small_,accent);
+            const auto warnings=ComponentWarnings();
+            if(!warnings.empty())DrawLabel(dc,warnings,Box(48,432,840,88),font_,white);
             }
         } else if (page_==Page::ConfirmCancel || page_==Page::Cancelled || page_==Page::Cancelling || page_==Page::Launching) {
             DrawBanner(dc,true);
@@ -3691,15 +3800,23 @@ private:
                     SetPage(Page::License);
                 }
                 return 0;
-            case IDC_COMPONENT64: case IDC_COMPONENT32: case IDC_COMPONENT_SETTINGS: case IDC_COMPONENT_OG:
+            case IDC_COMPONENT64: case IDC_COMPONENT32: case IDC_COMPONENT_SETTINGS: case IDC_COMPONENT_OG: case IDC_COMPONENT_SUT:
                 if (page_==Page::Components && HIWORD(w)==BN_CLICKED && !webReady_) {
                     const bool os64=GlassInstallUtil::IsOs64Bit();
-                    selection_.platform64=os64 && SendMessageW(component64_,BM_GETCHECK,0,0)==BST_CHECKED;
-                    selection_.platform32=SendMessageW(component32_,BM_GETCHECK,0,0)==BST_CHECKED;
-                    selection_.glassSettings=SendMessageW(componentSettings_,BM_GETCHECK,0,0)==BST_CHECKED;
-                    selection_.openGlass=os64 && SendMessageW(componentOpenGlass_,BM_GETCHECK,0,0)==BST_CHECKED;
+                    if(LOWORD(w)==IDC_COMPONENT_SETTINGS){
+                        selection_.glassSettings=SendMessageW(componentSettings_,BM_GETCHECK,0,0)==BST_CHECKED;
+                        if(!selection_.glassSettings){selection_.secureUxTheme=false;settingsAutoSelectedForSut_=false;}
+                    } else if(LOWORD(w)==IDC_COMPONENT_SUT){
+                        selection_.secureUxTheme=SendMessageW(componentSecureUxTheme_,BM_GETCHECK,0,0)==BST_CHECKED;
+                        if(selection_.secureUxTheme&&SecureUxThemeRequiresSettings(SettingsInspectionDamaged())&&!selection_.glassSettings){selection_.glassSettings=true;settingsAutoSelectedForSut_=true;}
+                        else if(!selection_.secureUxTheme&&settingsAutoSelectedForSut_){selection_.glassSettings=false;settingsAutoSelectedForSut_=false;}
+                    } else {
+                        selection_.platform64=os64 && SendMessageW(component64_,BM_GETCHECK,0,0)==BST_CHECKED;
+                        selection_.platform32=SendMessageW(component32_,BM_GETCHECK,0,0)==BST_CHECKED;
+                        selection_.openGlass=os64 && SendMessageW(componentOpenGlass_,BM_GETCHECK,0,0)==BST_CHECKED;
+                    }
                     EnableWindow(next_,!failurePending_ && ComponentsReady());
-                    InvalidateContent();
+                    ShowContentControls(); InvalidateContent();
                 }
                 return 0;
             case IDC_CERT_INSTALL: case IDC_CERT_SKIP:

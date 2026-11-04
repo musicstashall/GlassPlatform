@@ -110,7 +110,9 @@ for manifest in (root / "res/app.manifest", root / "GlassUnins/app.manifest"):
     assert dpi is not None and dpi.text == "PerMonitorV2", manifest
 for project in (root / "GlassSetup.vcxproj", root / "GlassUnins/GlassUnins.vcxproj",
                 root / "msi/PlatformPackage.template.wxs", root / "msi/OpenGlassPackage.template.wxs",
-                root / "msi/GlassSettingsPackage.template.wxs", root / "msi/GlassSetupPayload.targets"):
+                root / "msi/GlassSettingsPackage.template.wxs", root / "msi/SecureUxThemePackage.template.wxs",
+                root / "msi/SecureUxTheme-x64.wixproj", root / "msi/SecureUxTheme-x86.wixproj",
+                root / "msi/GlassSetupPayload.targets"):
     ET.parse(project)
 
 project = read("GlassSetup.vcxproj")
@@ -147,7 +149,7 @@ assert f"{setup_guid}.Debug|Any CPU.Build.0" not in solution
 assert f"{setup_guid}.Debug|x86.Build.0 = Debug|Win32" in solution
 assert f"{setup_guid}.Release|x86.Build.0 = Release|Win32" in solution
 
-# Four user-visible products, individual product code routing and no legacy forced settings removal.
+# MSI products, individual product-code routing, and no legacy forced settings removal.
 settings_wxs = read("msi/GlassSettingsPackage.template.wxs")
 platform_wxs = read("msi/PlatformPackage.template.wxs")
 og_wxs = read("msi/OpenGlassPackage.template.wxs")
@@ -229,11 +231,12 @@ for action in ("INSTALL", "UPDATE", "KEEP"):
     assert f".comp-badge.action-{action.lower()}" in ui
 assert "item.badgeTone" in ui and "comp-lock" in ui and "item.lockTitle" in ui
 assert "action.append(componentLock(" in ui and "badge.textContent=String(item.badge);action.append(badge)" in ui
-assert ".comp-action{display:flex" in ui and "components-stack" in ui  # предупреждение и доп. строки — в потоке стека, без абсолютных позиций
+assert ".comp-action{display:flex" in ui and "components-stack" in ui  # карточки и информационная полоса в прокручиваемой раскладке
 assert "#a7dfff" in ui and "#efb94f" in ui  # independent blue-and-gold lock, not badge-tinted
 assert "DrawComponentActionBadge(dc,selected,installed" in setup and "DrawMandatoryLock(dc," in setup
 assert "item.state" in ui and "white-space:pre-line" in ui  # строка «что будет выполнено» вернулась
-assert "DrawLabel(dc,Text(IDS_COMP_X86_WARNING)" in setup and "DrawLabel(dc,Text(IDS_COMP_GS_WARNING)" in setup
+assert "const auto warnings=ComponentWarnings()" in setup and "DrawLabel(dc,warnings" in setup
+assert "Text(IDS_COMP_X86_WARNING)" in setup and "Text(IDS_COMP_GS_WARNING)" in setup
 
 # The animated unlock screen must stop when the worker exits the unlock phase,
 # not when a localised status string happens to change.
@@ -488,25 +491,57 @@ assert (repo / "Shared/certs/DeveloperCodeSigning.cer").exists() and (repo / "Sh
 assert "DeveloperCodeSigning.cer" in payload and "DeveloperCodeSigning.txt" in payload and "GlassShellSparse" in payload
 assert 'm.type===\'init\'||m.type===\'state\'' in ui
 
-# H3 item 5: the SecureUxTheme payload ships inside GlassSettings.MSI
-# (<root>\GlassSettings\SecureUxTheme\; x64 additionally x86\ThemeUiProxy.dll for SysWOW64) —
-# never without GlassSettings. The platform MSIs no longer carry it. GlassUnins deactivates
-# SecureUxTheme "like GlassSettings" through the unified helper before GlassSettings products
-# are removed (GlassSettings removal and full uninstall).
+# SecureUxTheme is a standalone product with per-architecture MSI payloads,
+# each containing only that architecture's patcher and UI proxy. GlassSettings
+# owns no SecureUxTheme payload; Setup installs the matching MSI after Settings,
+# and GlassUnins removes it first when cascading through the dependency.
 sut_native = (repo / "GlassSettings/Native/SecureUxThemeNative.cpp").read_text(encoding="utf-8")
+sut_inspect = read("src/InstallSupport/GlassProductInspect.cpp")
 native_host_h = (repo / "GlassSettings/Native/NativeHost.h").read_text(encoding="utf-8")
 sut_service = (repo / "GlassSettings/Services/SecureUxThemeService.cs").read_text(encoding="utf-8")
-assert "'$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86'" in payload
-assert "$(GlassPayloadStage)\\GlassSettings\\SecureUxTheme\\" in payload
-assert "$(GlassPayloadStage)\\SecureUxTheme\\" not in payload  # the platform branch no longer stages it
-assert "GlassSecureUxThemeWowVendorDir" in payload and "'$(GlassNativeArch)'" in payload
-assert "GlassSettings_SecureUxThemeSetupV1W" in sut_native and "GlassSettings_SecureUxThemeSetupV1W" in native_host_h
-assert "kPayloadWowSubdir" in sut_native and "ThisModuleDirectory" in sut_native
-assert "::ExitProcess(" in sut_native  # the rundll helper follows the ShellSignerTrustSetupV1W pattern
-assert "kInstallerSecureUxThemeExport" in util and "InvokeSecureUxThemeDeactivate" in util
-assert "InvokeSecureUxThemeDeactivate" in unins and "Отключение SecureUxTheme" in unins
-assert "kSecureUxThemeExitRebootRequired" in util and "kSecureUxThemeExitExternalInstall" in util
+sut_template = read("msi/SecureUxThemePackage.template.wxs")
+sut_stage = section(payload, '<!-- Standalone SecureUxTheme MSI', '</Target>')
+assert "SecureUxTheme-x64" in payload and "SecureUxTheme-x86" in payload
+assert "GlassSettings\\SecureUxTheme\\%(Filename)%(Extension)" in sut_stage
+assert "GlassBuildRelease)\\SecureUxTheme\\SecureUxTheme4.dll" in sut_stage
+assert "GlassBuildRelease)\\SecureUxTheme\\ThemeUiProxy.dll" in sut_stage
+assert "GlassSettings\\SecureUxTheme\\**\\*.*" in payload  # explicitly excluded from GlassSettings MSI
+assert "GlassSecureUxThemeWowVendorDir" not in payload
+assert "SecureUxTheme4.dll" in sut_native and "ThemeUiProxy.dll" in sut_native
+assert "Wow64DisableWow64FsRedirection" in sut_native
+activation = section(sut_native, 'extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(', "[[nodiscard]] bool TryDeleteSystemFiles")
+assert "kProxyDllName" in activation and "NativeSysWow64" not in activation
+assert "if (FileExistsNative(proxyWowPath)" in sut_native  # old cross-architecture proxy cleanup only
+assert "GLASSSETTINGSINSTALLED" in sut_template and "GlassSettingsProductCode" in sut_template
+assert "Launch Condition=\"Installed OR GLASSSETTINGSINSTALLED\"" in sut_template
+for path, code in (("msi/SecureUxTheme-x64.wixproj", "5076"), ("msi/SecureUxTheme-x86.wixproj", "5077")):
+    project_text=read(path)
+    assert code in project_text and "GlassSettingsProductCode" in project_text
+    ET.parse(root / path)
+for suffix in ("5076", "5077"):
+    assert suffix in read("src/InstallSupport/GlassInstallMsi.h")
+for suffix in ("5080", "5090"):
+    assert suffix in sut_template or suffix in read("msi/SecureUxTheme-x64.wixproj") or suffix in read("msi/SecureUxTheme-x86.wixproj")
+assert "IDR_MSI_SUT_X64" in header and "IDR_MSI_SUT_X86" in header and "IDR_MSI_SUT_X64" in rc and "IDR_MSI_SUT_X86" in rc
+assert "msiResSecureUxTheme" in setup and "report.secureUxTheme" in sut_inspect
+assert "kProductSecureUxThemeX64" in engine and "kProductSecureUxThemeX86" in rollback and "kProductSecureUxThemeX64" in unins
+assert "InvokeSecureUxThemeDeactivate" in util and "InvokeSecureUxThemeDeactivate" in unins
+assert "SecureUxTheme-x64.msi" in engine and "SecureUxTheme-x86.msi" in engine
 assert 'Path.Combine(PlatformPaths.AppBase, "SecureUxTheme")' in sut_service
+assert "SecureUxTheme-x64.msi" in rc and "SecureUxTheme-x86.msi" in rc
+assert "SecureUxTheme-x64.msi" in project and "SecureUxTheme-x86.msi" in project
+solution=read("../GlassProject.sln")
+assert '"SecureUxTheme-x64"' in solution and '"SecureUxTheme-x86"' in solution
+assert "{0CD1A2BE-2C39-4404-A026-34642B517428}.Release|x64.Build.0 = Release|x64" in solution
+assert "{81FE634A-DB11-4759-B76D-D1119AC2CF13}.Release|x86.Build.0 = Release|x86" in solution
+run_sequence=section(engine, "bool InstallEngine::RunMsiSequence()", "void InstallEngine::SeedUserDefaults()")
+assert worker.index("InstallGlassSettingsEarly()") < worker.index("RunMsiSequence()")
+assert "selection_.secureUxThemePackageOnly" in engine
+assert "kProductSecureUxThemeX64" in engine and "kProductSecureUxThemeX86" in engine
+assert "kProductSecureUxThemeX64" in rollback and "kProductSecureUxThemeX86" in rollback
+unins_remove=section(unins, "int count=(chosen.secureUxTheme?1:0)", "if (chosen.openGlass)")
+assert unins_remove.index("SecureUxTheme x64") < unins_remove.index("GlassSettings x64")
+assert "SecureUxTheme" in read("../README.md") and "семь MSI" in read("../README.md")
 # H3 item 6: the OpenGlass state query must see the installer's service (not only the legacy
 # task) on every thread: the cheap SCM query runs before the scheduler-UI guard, and only the
 # COM task-tree walk stays background-only. Otherwise Home/System rows show "No task" for a
@@ -594,6 +629,9 @@ assert "QueryFileVersion" in inspect_cpp and "version.lib" in inspect_cpp
 assert "OpenGlass.dll" in inspect_cpp and "FileVersionOf" in inspect_cpp
 assert "selection_.platform64=os64;" not in setup and "component:x64:1" in setup
 assert "RemoveUserSettings" in reg_sanity and "RemoveUserSettings" in unins
+assert 'L",\\\"locked\\\":false,\\\"hidden\\\":false}"' in unins
+assert "if (locked) reasons+=" in unins and "componentsWarning" in unins
+assert "Only settings cleanup is selected" in ui and "can be removed separately" in ui
 assert "IDC_UNINS_SETTINGS_CLEANUP" in header_now and "cleanupSettings" in unins
 assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_sanity
 
@@ -602,6 +640,16 @@ assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_
 assert "HasSelectedComponent" in setup
 assert "не требуется" in ui and "tone-update" in ui and "tone-repair" in ui
 assert "comp-slim" in ui and "components-extra" in ui and "components-stack" in ui
+assert "components-select-all" in ui and "Снять необязательные" in ui
+assert "components-list{flex:1 1 auto;min-height:0;overflow-y:auto" in ui
+assert ".components-status{display:flex" in ui and "flex:0 0 86px;height:86px" in ui
+assert ".components-status.is-warning" in ui and "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
+assert "input.dataset.locked=item.locked?'1':'0'" in ui and "dispatchEvent(new Event('change'" in ui
+assert "components-status.is-warning" in ui and "secureUxTheme" in ui and "component:secureUxTheme" in setup
+assert "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
+assert "uninstaller" in ui and "MSI SecureUxTheme будет удалён" in ui
+assert "GlassSettings" in unins and "secureUxTheme" in unins and "IDC_UNINS_SECUREUXTHEME" in unins
+assert "SecureUxTheme будет отключён" in unins and "Внешняя установка SecureUxTheme останется без изменений" in unins
 assert "slim" in unins and "cleanup" in unins and "Будет удалено" in unins and "удалится вместе с основной платформой" in unins
 
 # 2026-11-03 follow-up 6: integrity analysis runs in the background during the first

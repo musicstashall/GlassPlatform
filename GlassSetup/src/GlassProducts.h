@@ -11,6 +11,11 @@ struct Selection {
     bool platform32 = true;
     bool glassSettings = true;
     bool openGlass = true;
+    // Optional SecureUxTheme product selection and activation request.
+    bool secureUxTheme = false;
+    // Preserve legacy inactive/active payload in its new standalone MSI when a
+    // selected GlassSettings update removes the old co-shipped files.
+    bool secureUxThemePackageOnly = false;
     // Windows 11 certificate page: the user chose to add the author certificate
     // (signer of GlassShellSparse.msix) to LocalMachine\TrustedPeople so the
     // compact menu can be registered. Off when the page was not shown.

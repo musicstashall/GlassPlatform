@@ -35,6 +35,7 @@ struct Report {
     ProductReport x64;
     ProductReport x86;
     ProductReport settings;
+    ProductReport secureUxTheme;
     ProductReport og;
 };
 
@@ -46,6 +47,7 @@ struct Inputs {
     UINT msiResX64 = 0;
     UINT msiResX86 = 0;
     UINT msiResSettings = 0;
+    UINT msiResSecureUxTheme = 0;
     UINT msiResOg = 0;
     const std::atomic_bool* cancelled = nullptr; // остановка между проверками продуктов
 };
