@@ -21,6 +21,7 @@
     <ClCompile Include="src\InstallSupport\GlassInstallHost.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
     <ClCompile Include="src\InstallSupport\GlassInstallRemoval.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
     <ClCompile Include="src\InstallSupport\GlassInstallUnlock.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
+    <ClCompile Include="src\InstallSupport\GlassUserDefaults.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\WizardTheme.h"><Filter>src</Filter></ClInclude>
@@ -33,6 +34,7 @@
     <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClInclude Include="src\InstallSupport\GlassRemovalOrder.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClInclude Include="src\InstallSupport\GlassEmptyDirectories.h"><Filter>src\InstallSupport</Filter></ClInclude>
+    <ClInclude Include="src\InstallSupport\GlassUserDefaults.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClInclude Include="src\InstallLog.h"><Filter>src</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -1,6 +1,7 @@
 #pragma once
 #include "InstallSupport/GlassInstallRollback.h"
 #include "InstallSupport/GlassInstallRemoval.h"
+#include "InstallSupport/GlassUserDefaults.h"
 #include "GlassProducts.h"
 #include "WizardUnlockState.h"
 #include <windows.h>
@@ -8,6 +9,7 @@
 #include <atomic>
 #include <functional>
 #include <string>
+#include <vector>
 #include <GlassPlatformTask.h>
 
 // Распаковка встроенных MSI и установка через MsiInstallProduct с кооперативной отменой и откатом.
@@ -35,6 +37,10 @@ public:
         std::wstring backup;
         std::wstring glassSettings64;
         std::wstring glassSettings86;
+        std::wstring secureUxTheme;
+        std::wstring warnSecureUxTheme;
+        std::wstring warnSecureUxThemeHint;
+        std::wstring warnSecureUxThemeRestart;
         std::wstring rollback;
         std::wstring purge;
         std::wstring purgeFailed;
@@ -46,7 +52,40 @@ public:
         std::wstring nativeScanFailed;
         std::wstring snapshotFailed;
         std::wstring diskFull;
-        std::wstring removing;
+        // Pre-commit registration failures (still roll back).
+        std::wstring autorunTaskFailed;
+        std::wstring ogServiceFailed;
+        // Post-commit notes shown on the finish page (never roll back).
+        std::wstring warnPlatform64Start;
+        std::wstring warnPlatform32Start;
+        std::wstring warnPlatformStartHint;
+        std::wstring warnPlatform64Task;
+        std::wstring warnPlatform32Task;
+        std::wstring warnOpenGlassStart;
+        std::wstring warnOpenGlassHint;
+        std::wstring warnPriorHosts;
+        std::wstring warnPriorHostsHint;
+        std::wstring warnShellConflict;
+        std::wstring warnShellHint;
+        // Win11 classic fallback (install complete, compact menu unavailable):
+        // title when the msix signer certificate is not trusted / other reason,
+        // and the hint with "{dir}" replaced by the install folder.
+        std::wstring warnShellClassicCert;
+        std::wstring warnShellClassicOther;
+        std::wstring warnShellClassicHint;
+        // The user accepted the certificate page but the certificate could not
+        // be added to LocalMachine\TrustedPeople (title + hint).
+        std::wstring warnCertInstall;
+        std::wstring warnCertInstallHint;
+        std::wstring warnUserDefaults;
+    };
+
+    // A finishing step that failed after the commit point (first platform
+    // start). The installation itself is complete and is never rolled back
+    // because of these; the finish page lists them instead.
+    struct FinishWarning {
+        std::wstring title;   // one localized sentence
+        std::wstring detail;  // optional hint and/or technical reason
     };
 
     InstallEngine() noexcept = default;
@@ -68,6 +107,7 @@ public:
 
     bool Poll() noexcept;
     bool Succeeded() const noexcept { return succeeded_; }
+    std::vector<FinishWarning> FinishWarnings() const noexcept;
     bool WasCancelled() const noexcept { return userCancelled_.load(std::memory_order_acquire); }
     bool RollbackSucceeded() const noexcept { return rollbackSucceeded_.load(std::memory_order_acquire); }
     bool IsCancelRequested() const noexcept { return cancelRequested_.load(std::memory_order_acquire); }
@@ -129,8 +169,7 @@ private:
     bool CapturePriorHostState() noexcept;
     // Synchronize failure handling with the user's open cancel confirmation.
     bool ChooseCancellationOrFailure(bool failed) noexcept;
-    bool RestorePriorHosts(bool selectedOnly = false) noexcept;
-    bool PrepareProductRemoval() noexcept;
+    bool RestorePriorHosts(bool keptOnly = false) noexcept;
     bool StopGlassPlatform(GlassShared::GlassPlatformTask::PlatformArch arch,
         const std::wstring& statusLabel, const wchar_t* logTag,
         const std::function<bool(const wchar_t*)>& fail) noexcept;
@@ -147,7 +186,15 @@ private:
     bool RemoveCreatedHostsForRollback() noexcept;
     bool RunOneMsi(const std::wstring& msiPath, const std::wstring& installDir,
         const std::wstring& label, int progressBase, int progressSpan) noexcept;
-    bool LaunchAndVerifySelectedProducts() noexcept;
+    // Phase B: autostart tasks / OpenGlass service and their validation.
+    // Runs before anything is started, so a failure still rolls back.
+    bool RegisterSelectedProducts() noexcept;
+    // Phase C: start the selected products, restore prior hosts, register the
+    // shell extension. The first start is the commit point: every failure in
+    // here becomes a FinishWarning, never a failure or rollback.
+    void LaunchSelectedProducts() noexcept;
+    void SeedUserDefaults() noexcept;
+    void AddFinishWarning(const std::wstring& title, const std::wstring& detail) noexcept;
     bool DetermineCleanInstall() noexcept;
     bool CreateRollbackSnapshot() noexcept;
     bool PerformRollback() noexcept;
@@ -157,10 +204,9 @@ private:
 
     StatusFn status_;
     GlassInstallRollback::SessionState rollbackSession_;
-    GlassInstallRemoval::Session removalSession_;
     ComponentSelection selection_{};
     GlassProducts::OpenGlassStartupState openGlassStartup_{};
-    ComponentSelection remove_ {false, false, false, false};
+    GlassUserDefaults::SeedReport userDefaults_;
     PriorHostState prior_{};
     PhaseLabels labels_;
     std::wstring tempDir_;
@@ -208,6 +254,7 @@ private:
     HINSTANCE instance_ = nullptr;
     mutable SRWLOCK statusLock_ = SRWLOCK_INIT;
     std::wstring statusLine_;
+    std::vector<FinishWarning> finishWarnings_; // guarded by statusLock_
     std::atomic_int progressUnits_{0};
     std::atomic_bool progressReverse_{false};
     bool marquee_ = false;

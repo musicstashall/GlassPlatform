@@ -27,7 +27,8 @@ namespace InstallLog{void Line(const wchar_t*){} template<class... T>void LineFo
 namespace WizardProgress{constexpr int kMaxUnits=10000;}
 namespace GlassInstallMsi {
  constexpr wchar_t kProductPlatformX64[]=L"p64",kProductPlatformX86[]=L"p86",kProductSettingsX64[]=L"gs64",
-  kProductSettingsX86[]=L"gs86",kProductOpenGlass[]=L"og",kLegacyPlatformX64[]=L"old64",
+  kProductSettingsX86[]=L"gs86",kProductSecureUxThemeX64[]=L"sut64",kProductSecureUxThemeX86[]=L"sut86",
+  kProductOpenGlass[]=L"og",kLegacyPlatformX64[]=L"old64",
   kLegacyPlatformX86[]=L"old86",kLegacyOpenGlass[]=L"oldog";
  enum class ProductPathCheck {Safe,Unverifiable};
  ProductPathCheck CheckProductContexts(const wchar_t*,std::wstring&){return fake.ambiguous?ProductPathCheck::Unverifiable:ProductPathCheck::Safe;}

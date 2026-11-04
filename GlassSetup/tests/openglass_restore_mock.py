@@ -67,11 +67,11 @@ public:
  struct Prior{bool x64WasRunning=false,x86WasRunning=false,x64TaskExisted=false,x86TaskExisted=false,
   x64TaskEnabled=true,x86TaskEnabled=true,ogServiceExisted=false,ogLegacyTaskExisted=false,
   ogWasRunning=false,ogLegacyTaskEnabled=true;DWORD ogServiceStartType=SERVICE_DEMAND_START;} prior_;
- struct Selection{bool platform64=true,platform32=true;} selection_;
+ struct Selection{bool platform64=true,platform32=true,openGlass=true;} selection_;
  bool hostsStopped_=true,x64StopAttempted_=false,x86StopAttempted_=false,ogStopSignalled_=false,
   ogServiceStartTypeMayNeedRestore_=false;
  std::wstring x64Dir_=L"x64",x86Dir_=L"x86",openGlassDir_=L"og";
- bool RestorePriorHosts(bool selectedOnly=false) noexcept;
+ bool RestorePriorHosts(bool keptOnly=false) noexcept;
 };
 '''
 main = r'''
@@ -97,7 +97,13 @@ int main(){
  {reset();InstallEngine e;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;e.ogStopSignalled_=true;s.startOk=false;
   assert(!e.RestorePriorHosts());assert(s.serviceStarts==1);}
  {reset();InstallEngine e;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;e.ogStopSignalled_=true;
-  assert(e.RestorePriorHosts(true));assert(s.serviceStarts==0);} // normal launch phase handles OG
+  assert(e.RestorePriorHosts(true));assert(s.serviceStarts==0);} // normal launch phase handles selected OG
+ {reset();InstallEngine e;e.selection_.openGlass=false;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;e.ogStopSignalled_=true;
+  assert(e.RestorePriorHosts(true));assert(s.serviceStarts==1);} // kept (unchecked) OG that was running is restarted
+ {reset();InstallEngine e;e.selection_.platform32=false;e.prior_.x86WasRunning=true;e.prior_.x86TaskExisted=true;e.x86StopAttempted_=true;
+  assert(e.RestorePriorHosts(true));assert(s.platformStarts==1);} // kept x86 platform that was running is restarted
+ {reset();InstallEngine e;e.prior_.x86WasRunning=true;e.prior_.x86TaskExisted=true;e.x86StopAttempted_=true;
+  assert(e.RestorePriorHosts(true));assert(s.platformStarts==0);} // selected x86 is started by the launch phase
  {reset();InstallEngine e;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;e.ogStopSignalled_=true;s.pathsOk=false;
   assert(!e.RestorePriorHosts());assert(s.serviceStarts==0 && s.taskStarts==0);} // changed backend cannot be started
  std::cout<<"PASS: real host rollback: stopped OpenGlass stays stopped, running service/task restored; changed path blocked\n";

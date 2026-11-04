@@ -165,6 +165,8 @@ std::wstring KnownProductCodeFromFileName(const std::wstring& msiPath) {
     if (_wcsicmp(name, L"OpenGlass-x64.msi") == 0) return kProductOpenGlass;
     if (_wcsicmp(name, L"GlassSettings-x64.msi") == 0) return kProductSettingsX64;
     if (_wcsicmp(name, L"GlassSettings-x86.msi") == 0) return kProductSettingsX86;
+    if (_wcsicmp(name, L"SecureUxTheme-x64.msi") == 0) return kProductSecureUxThemeX64;
+    if (_wcsicmp(name, L"SecureUxTheme-x86.msi") == 0) return kProductSecureUxThemeX86;
     return L"";
 }
 
@@ -187,7 +189,9 @@ std::wstring UninsExePathForProduct(const std::wstring& productCode, const std::
     while (!root.empty() && (root.back() == L'\\' || root.back() == L'/'))
         root.pop_back();
     if (_wcsicmp(productCode.c_str(), kProductSettingsX64) == 0 ||
-        _wcsicmp(productCode.c_str(), kProductSettingsX86) == 0) {
+        _wcsicmp(productCode.c_str(), kProductSettingsX86) == 0 ||
+        _wcsicmp(productCode.c_str(), kProductSecureUxThemeX64) == 0 ||
+        _wcsicmp(productCode.c_str(), kProductSecureUxThemeX86) == 0) {
         const std::wstring sub = root + L"\\GlassSettings\\unins000.exe";
         if (GetFileAttributesW(sub.c_str()) != INVALID_FILE_ATTRIBUTES)
             return sub;

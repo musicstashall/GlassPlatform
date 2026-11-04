@@ -21,8 +21,6 @@
     </ClCompile>
     <ClCompile Include="ShellSparsePackage.cpp">
     </ClCompile>
-    <ClCompile Include="ShellDevCertificate.cpp">
-    </ClCompile>
     <ClCompile Include="VisualStyleApplyNative.cpp">
     </ClCompile>
     <ClCompile Include="SecureUxThemeNative.cpp">

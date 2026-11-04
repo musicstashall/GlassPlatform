@@ -11,9 +11,7 @@
 
 #include <new>
 #include <string>
-
-#include <strsafe.h>
-#include <versionhelpers.h>
+#include <vector>
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "uuid.lib")
@@ -21,11 +19,6 @@
 
 namespace
 {
-    [[nodiscard]] bool IsWindows11OrGreater() noexcept
-    {
-        return IsWindowsVersionOrGreater(10, 0, 22000);
-    }
-
     constexpr HRESULT kSelfRegEClass = static_cast<HRESULT>(0x80040201L);
 
     volatile LONG g_comServerLocks = 0;
@@ -37,61 +30,12 @@ namespace
         ::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
     }
 
-    [[nodiscard]] LONG DeleteRegistryTreeRelative(HKEY root, const wchar_t* subkey) noexcept
-    {
-        return ::RegDeleteTreeW(root, subkey);
-    }
-
-    [[nodiscard]] bool WriteClsInprocToHkcu(const wchar_t* clsidBraced, const wchar_t* modulePath) noexcept
-    {
-        wchar_t clsidSubkey[384]{};
-        if (FAILED(::StringCchPrintfW(clsidSubkey, _countof(clsidSubkey),
-                L"Software\\Classes\\CLSID\\%s\\InprocServer32", clsidBraced)))
-            return false;
-
-        const DWORD moduleCb = static_cast<DWORD>((wcslen(modulePath) + 1U) * sizeof(wchar_t));
-        LONG e =
-            ::RegSetKeyValueW(HKEY_CURRENT_USER, clsidSubkey, nullptr, REG_SZ, modulePath, moduleCb);
-        if (e != ERROR_SUCCESS)
-            return false;
-
-        static constexpr wchar_t kApartment[] = L"Apartment";
-        e = ::RegSetKeyValueW(HKEY_CURRENT_USER, clsidSubkey, L"ThreadingModel", REG_SZ, kApartment,
-            static_cast<DWORD>((wcslen(kApartment) + 1U) * sizeof(wchar_t)));
-        return e == ERROR_SUCCESS;
-    }
-
     enum class DesktopFactoryKind : int
     {
         LegacyContextMenu = 0,
         ToggleExplorerCommand = 1,
         OpenConfigExplorerCommand = 2,
     };
-
-    void DeleteStaleExplorerCommandRegistration() noexcept
-    {
-        wchar_t key[384]{};
-        const wchar_t* const shellRoots[] = {L"DesktopBackground", L"Directory\\Background"};
-        for (const wchar_t* root : shellRoots)
-        {
-            for (const wchar_t* verb :
-                {GlassShared::GlassShellMenu::kDesktopToggleVerbSubkey,
-                    GlassShared::GlassShellMenu::kDesktopOpenConfigVerbSubkey})
-            {
-                if (SUCCEEDED(::StringCchPrintfW(key, _countof(key), L"Software\\Classes\\%s\\Shell\\%s", root, verb)))
-                    (void)DeleteRegistryTreeRelative(HKEY_CURRENT_USER, key);
-            }
-        }
-
-        for (const wchar_t* clsid :
-            {GlassShared::GlassShellMenu::kToggleExplorerClsidBraced,
-                GlassShared::GlassShellMenu::kOpenConfigExplorerClsidBraced})
-        {
-            if (SUCCEEDED(::StringCchPrintfW(key, _countof(key), L"Software\\Classes\\CLSID\\%s", clsid)))
-                (void)DeleteRegistryTreeRelative(HKEY_CURRENT_USER, key);
-        }
-    }
-
 }
 
 extern "C" void WINAPI GlassShell_RemoveLegacyContextMenuHandler() noexcept
@@ -102,6 +46,54 @@ extern "C" void WINAPI GlassShell_RemoveLegacyContextMenuHandler() noexcept
 class GlassDesktopShellMenu final : public IShellExtInit, public IContextMenu
 {
     LONG m_cRef = 1;
+    std::vector<HBITMAP> m_bitmaps{};
+
+    ~GlassDesktopShellMenu() noexcept
+    {
+        for (HBITMAP bmp : m_bitmaps)
+            if (bmp) ::DeleteObject(bmp);
+    }
+
+    // Иконка пункта меню: иконка модуля → 16×16 32-битный HBITMAP для MIIM_BITMAP.
+    HBITMAP MenuIcon(UINT iconId) noexcept
+    {
+        constexpr int size = 16;
+        HICON icon = static_cast<HICON>(::LoadImageW(
+            GlassShellExt::g_module, MAKEINTRESOURCEW(iconId), IMAGE_ICON, size, size, LR_DEFAULTCOLOR));
+        if (!icon) return nullptr;
+        BITMAPINFO bmi{};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = size;
+        bmi.bmiHeader.biHeight = -size;
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        void* bits = nullptr;
+        HBITMAP bmp = ::CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (!bmp)
+        {
+            ::DestroyIcon(icon);
+            return nullptr;
+        }
+        HDC dc = ::CreateCompatibleDC(nullptr);
+        if (dc)
+        {
+            HGDIOBJ old = ::SelectObject(dc, bmp);
+            ::DrawIconEx(dc, 0, 0, icon, size, size, 0, nullptr, DI_NORMAL);
+            if (old) ::SelectObject(dc, old);
+            ::DeleteDC(dc);
+        }
+        ::DestroyIcon(icon);
+        // Меню Windows использует альфа-канал HBITMAP: проставляем его по ненулевым пикселям.
+        auto* px = static_cast<DWORD*>(bits);
+        if (px)
+        {
+            for (int i = 0; i < size * size; ++i)
+                px[i] = (px[i] & 0x00FFFFFFu) ? (px[i] | 0xFF000000u) : 0u;
+        }
+        m_bitmaps.push_back(bmp);
+        return bmp;
+    }
 
 public:
     GlassDesktopShellMenu() noexcept { InterlockedIncrement(&g_liveMenuObjects); }
@@ -155,21 +147,29 @@ public:
         if (idCmdFirst + commandCount - 1 > idCmdLast)
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
 
+        // Классическое меню собирается единым вложенным меню «Glass Platform»
+        // (пункт-родитель с иконкой) с иконками дочерних пунктов — структура
+        // повторяет компактное меню Windows 11.
+        HMENU sub = ::CreatePopupMenu();
+        if (!sub)
+            return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
+
         MENUITEMINFOW mii{};
         mii.cbSize = sizeof(mii);
 
-        UINT insertAt = indexMenu;
+        UINT insertAt = 0;
         UINT cmdOffset = 0;
 
         auto insertPlatformToggle = [&](GlassShared::GlassPlatformTask::PlatformArch arch) -> bool
         {
             std::wstring label = GlassDesktopActions::GetPlatformToggleTitle(arch);
-            mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE;
+            mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE | MIIM_BITMAP;
             mii.fType = MFT_STRING;
             mii.wID = idCmdFirst + cmdOffset++;
             mii.fState = GlassDesktopActions::GetPlatformToggleMenuState(arch);
             mii.dwTypeData = label.data();
-            return ::InsertMenuItemW(hmenu, insertAt++, TRUE, &mii) != FALSE;
+            mii.hbmpItem = MenuIcon(IDI_GLASSSHELLEXT_PT);
+            return ::InsertMenuItemW(sub, insertAt++, TRUE, &mii) != FALSE;
         };
 
         auto insertSeparator = [&]() -> bool
@@ -179,18 +179,26 @@ public:
             mii.fState = 0;
             mii.wID = 0;
             mii.dwTypeData = nullptr;
-            return ::InsertMenuItemW(hmenu, insertAt++, TRUE, &mii) != FALSE;
+            mii.hbmpItem = nullptr;
+            return ::InsertMenuItemW(sub, insertAt++, TRUE, &mii) != FALSE;
         };
 
         if (dual)
         {
             if (!insertPlatformToggle(GlassShared::GlassPlatformTask::PlatformArch::X86))
+            {
+                ::DestroyMenu(sub);
                 return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
+            }
             if (!insertPlatformToggle(GlassShared::GlassPlatformTask::PlatformArch::X64))
+            {
+                ::DestroyMenu(sub);
                 return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 1);
+            }
         }
         else if (!insertPlatformToggle(GlassShared::GlassPlatformTask::NativePlatformArch()))
         {
+            ::DestroyMenu(sub);
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
         }
 
@@ -198,30 +206,60 @@ public:
         if (openGlassVisible)
         {
             if (!insertSeparator())
+            {
+                ::DestroyMenu(sub);
                 return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, cmdOffset);
+            }
 
             std::wstring labelOg = GlassDesktopActions::GetOpenGlassToggleTitle();
-            mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE;
+            mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE | MIIM_BITMAP;
             mii.fType = MFT_STRING;
             mii.wID = idCmdFirst + cmdOffset++;
             mii.fState = GlassDesktopActions::GetOpenGlassToggleMenuState();
             mii.dwTypeData = labelOg.data();
-            if (!::InsertMenuItemW(hmenu, insertAt++, TRUE, &mii))
+            mii.hbmpItem = MenuIcon(IDI_GLASSSHELLEXT_OG);
+            if (!::InsertMenuItemW(sub, insertAt++, TRUE, &mii))
+            {
+                ::DestroyMenu(sub);
                 return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, cmdOffset - 1);
+            }
         }
 
         if (!insertSeparator())
+        {
+            ::DestroyMenu(sub);
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, cmdOffset);
+        }
 
         std::wstring labelCfg =
             GlassDesktopActions::LoadMenuString(IDS_GLASSSHELL_OPEN_CONFIG, L"Settings");
-        mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE;
+        mii.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE | MIIM_BITMAP;
         mii.fType = MFT_STRING;
         mii.wID = idCmdFirst + cmdOffset++;
         mii.fState = MFS_ENABLED;
         mii.dwTypeData = labelCfg.data();
-        if (!::InsertMenuItemW(hmenu, insertAt, TRUE, &mii))
+        mii.hbmpItem = MenuIcon(IDI_GLASSSHELLEXT_ST);
+        if (!::InsertMenuItemW(sub, insertAt, TRUE, &mii))
+        {
+            ::DestroyMenu(sub);
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, cmdOffset - 1);
+        }
+
+        // Родительский пункт поверх общего меню: всё содержимое — внутри sub.
+        std::wstring labelRoot =
+            GlassDesktopActions::LoadMenuString(IDS_GLASSSHELL_ROOT_TITLE, L"Glass Platform");
+        MENUITEMINFOW root{};
+        root.cbSize = sizeof(root);
+        root.fMask = MIIM_SUBMENU | MIIM_STRING | MIIM_BITMAP | MIIM_STATE;
+        root.fState = MFS_ENABLED;
+        root.hSubMenu = sub;
+        root.dwTypeData = labelRoot.data();
+        root.hbmpItem = MenuIcon(IDI_GLASSSHELLEXT);
+        if (!::InsertMenuItemW(hmenu, indexMenu, TRUE, &root))
+        {
+            ::DestroyMenu(sub);
+            return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
+        }
 
         return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, cmdOffset);
     }
@@ -375,46 +413,33 @@ public:
     }
 };
 
+// Классическое Win32-меню (ContextMenuHandlers + CLSID\InprocServer32 в HKCU) создаёт и снимает
+// только сама DLL — здесь, через regsvr32 /s и /u /s. Никакой другой компонент (GlassSettings.Native,
+// Setup, GlassUnins) эти ключи не пишет: Win10 — всегда так; Win11 — только как запасной вариант,
+// когда sparse-пакет (компактное меню) зарегистрировать нельзя, и вызывающая сторона сама следит,
+// чтобы оба варианта не были активны одновременно (иначе пункты дублируются в «Показать дополнительно»).
 STDAPI DllRegisterServer()
 {
-    // Win11: COM и меню — только sparse AppX; regsvr32 не должен писать HKCU.
-    if (IsWindows11OrGreater())
-        return S_OK;
-
     wchar_t module[MAX_PATH]{};
     if (::GetModuleFileNameW(GlassShellExt::g_module, module, MAX_PATH) == 0 &&
         ::GetModuleFileNameW(nullptr, module, MAX_PATH) == 0)
         return kSelfRegEClass;
 
-    DeleteStaleExplorerCommandRegistration();
+    Shared::GlassShellRegistration::RemoveStaleExplorerCommandRegistration();
     Shared::GlassShellRegistration::RemoveLegacyContextMenuHandler();
 
-    if (!WriteClsInprocToHkcu(GlassShared::GlassShellMenu::kClsidStringBraced, module))
+    if (!Shared::GlassShellRegistration::RegisterLegacyContextMenuHandler(module))
         return kSelfRegEClass;
 
-    wchar_t handlerSubkey[384]{};
-    if (FAILED(::StringCchPrintfW(handlerSubkey, _countof(handlerSubkey),
-            L"Software\\Classes\\DesktopBackground\\ShellEx\\ContextMenuHandlers\\%s",
-            GlassShared::GlassShellMenu::kHandlerSubkeyName)))
-        return kSelfRegEClass;
-
-    const wchar_t* clsid = GlassShared::GlassShellMenu::kClsidStringBraced;
-    const DWORD clsidCb = static_cast<DWORD>((wcslen(clsid) + 1U) * sizeof(wchar_t));
-    const LONG e = ::RegSetKeyValueW(HKEY_CURRENT_USER, handlerSubkey, nullptr, REG_SZ, clsid, clsidCb);
-    if (e != ERROR_SUCCESS)
-        return kSelfRegEClass;
-
-    // Win11 compact menu — только sparse AppxManifest; HKCU ExplorerCommandHandler дублирует пункты в legacy.
+    // Компактное меню Win11 (IExplorerCommand) — только sparse AppxManifest; HKCU ExplorerCommandHandler
+    // здесь не пишется, иначе пункты дублируются в классическом меню.
     FlushShellCachesAfterExtensionRegistrationChange();
     return S_OK;
 }
 
 STDAPI DllUnregisterServer()
 {
-    if (IsWindows11OrGreater())
-        return S_OK;
-
-    DeleteStaleExplorerCommandRegistration();
+    Shared::GlassShellRegistration::RemoveStaleExplorerCommandRegistration();
     Shared::GlassShellRegistration::RemoveLegacyContextMenuHandler();
 
     // IExplorerCommand для Win11 — только sparse AppX; InprocServer32 toggle/config не трогаем.

@@ -525,12 +525,15 @@ public sealed class PlatformSchedulerRow
                 await Task.Run(DeleteTask).ConfigureAwait(true);
                 if (Kind == PlatformSchedulerKind.OpenGlass)
                     await ApplyOpenGlassStopPolicyAfterDeleteAsync().ConfigureAwait(true);
-                operationOk = !QueryDirectState().TaskExists;
+                // Проверка вне UI-потока: прямой запрос задачи/службы на UI-потоке читает
+                // кэш планировщика и может вернуть уже удалённое состояние.
+                operationOk = !await Task.Run(() => QueryDirectState().TaskExists).ConfigureAwait(true);
             }
 
             PlatformPresenceService.Instance.RefreshSnapshotSynchronouslyFromDirectQueries();
             PlatformPresenceService.Instance.NotifyLifecycleChanged();
-            if (!operationOk || QueryDirectState().TaskExists != install)
+            var finalExists = await Task.Run(() => QueryDirectState().TaskExists).ConfigureAwait(true);
+            if (!operationOk || finalExists != install)
                 RestoreInstallGateFromDirectState();
         }
         finally

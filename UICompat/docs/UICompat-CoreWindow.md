@@ -275,10 +275,12 @@ Windhawk injects at process create (CREATE_SUSPENDED + APC) — без PLM cycle
 
 На CoreWindow-хостах:
 
-1. `UICompat_Shutdown` (Unadvise panels, stop TAP).
+1. `UICompat_Shutdown` (Unadvise panels, stop TAP), в конце `UICompat_StopXamlDiagnostics` — `ModuleThread::JoinAll(8000)`: ждём выхода всех фоновых потоков модуля (IXDE-install STA, retry SEH tall / ShellHost sized, Advise и delayed CatchUp из `UiTapSite`). Retry-потоки спят в `InterruptibleSleepMs` и просыпаются по `g_xamlStopRequested` за ≤50 мс.
 2. `FreeLibrary(UICompat)` без долгого `CoFreeUnusedLibraries`.
-3. При residual — `TryDropIxdeResidualModule`.
+3. При residual — `TryDropIxdeResidualModule`: GlassCompat пинит модуль на время опроса `UICompat_DebugComState` и **не** снимает остаточную ссылку, пока установлен бит 33 (живые `ModuleThread`) — каждый такой поток держит свою ссылку и снимет её сам через `FreeLibraryAndExitThread`.
 4. GlassCompat FreeSelf path=1 (GUI) **без** ожидания HostShutdown.
+
+Фон: дамп ShellExperienceHost 26100 (01.11.2026) — retry-поток `ScheduleSehTallIxdeRetry` (`CreateThread`+`CloseHandle`, `Sleep(3000)`) проснулся после `FreeLibrary(UICompat)` → c0000005 по RIP в выгруженном образе. Stop ждал только флаг `g_installThreadActive` и не видел retry-потоки.
 
 ## Anti-patterns
 
@@ -293,6 +295,7 @@ Windhawk injects at process create (CREATE_SUSPENDED + APC) — без PLM cycle
 - Поднимать IXDE для Start/Search с чужого потока / без фильтра tid (регрессия H49).
 - Субклассировать CoreWindow ради marshal (только `WH_CALLWNDPROC` / PostMessage).
 - `Sleep(500)` в Advise / «подождать дерево» — late custom после uncloak; использовать tall HWND + короткий CatchUp (50 ms).
+- Голый `CreateThread`+`CloseHandle` в UICompat — поток переживает `FreeLibrary` (дамп SEH 26100). Только `ModuleThread::Start`; в retry-циклах `InterruptibleSleepMs` + `ShouldAbortInstall()` вместо `Sleep`.
 - Подмена EffectType Acrylic→Blur «ради первого кадра».
 - ClearValue-Recapture на UICompat Reload (общий TaskbarXaml) — только TaskbarCompat; UICompat = UpdateSettings/Reapply.
 - Вешать `UiThemeBrushRefresh` на GS commit / обычный XAML reload — theme force-rebrush только с host visual-style debounce.

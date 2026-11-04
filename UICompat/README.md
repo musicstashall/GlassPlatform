@@ -49,6 +49,7 @@
 | `UICompat.cpp`, `dllmain.cpp`, `UICompat.def` | Экспорты lifecycle / Notify |
 | `config/UiRegistry.*` | Чтение `Tray\` / `Tray\Xaml\` (+ AppContainer map) |
 | `xaml/XamlDiagInit.*` | IXDE NC (STA) / ShellSurface (UI-thread) |
+| `xaml/ModuleThread.*` | Фоновые потоки модуля: pin DLL + `FreeLibraryAndExitThread`, `JoinAll` в Stop, бит 33 `UICompat_DebugComState` |
 | `xaml/UiTapSite.*` | `IXamlDiagnostics` TAP site |
 | `xaml/UiVisualTreeWatcher.*` | VTC → panel registries |
 | `xaml/NotificationCenterPanelRegistry.*` | NC Grids: Background + Border*/CornerRadius + L1Chrome |
@@ -87,3 +88,4 @@
 - Media QS: backdrop на `MediaTransportControlsRegion`; Root Transparent; Stop ClearValue + acrylic fallback при theme hole.
 - При новом XAML-макете сначала временный дамп дерева, затем точечное расширение allow-list; дамп в финальном коде не оставлять.
 - Shutdown: Taskbar-style (без долгого `CoFreeUnusedLibraries` на CW); path=1 FreeSelf без ожидания HostShutdown.
+- Фоновые потоки (IXDE-install, retry SEH/ShellHost, Advise/CatchUp) — **только** `ModuleThread::Start`; голый `CreateThread`+`CloseHandle` пережил `FreeLibrary(UICompat)` (дамп SEH 26100: `Sleep(3000)` → c0000005 в выгруженном образе). Задержки в retry — `InterruptibleSleepMs`, Stop ждёт `ModuleThread::JoinAll` (8 с) до выхода из `UICompat_StopXamlDiagnostics`.

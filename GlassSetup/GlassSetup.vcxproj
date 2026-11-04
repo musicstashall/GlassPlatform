@@ -116,8 +116,14 @@
     <Error Condition="!Exists('$(GlassMsiPayloadDir)Glass-x64\Glass-x64.msi')" Text="Нет Glass-x64.msi. Сначала solution Release|x64." />
     <Error Condition="!Exists('$(GlassMsiPayloadDir)OpenGlass-x64\OpenGlass-x64.msi')" Text="Нет OpenGlass-x64.msi. Сначала solution Release|x64." />
     <Error Condition="!Exists('$(GlassMsiPayloadDir)GlassSettings-x86\GlassSettings-x86.msi')" Text="Нет GlassSettings-x86.msi. Его собирает solution Release|x86 до GlassSetup." />
+    <Error Condition="!Exists('$(GlassMsiPayloadDir)SecureUxTheme-x64\SecureUxTheme-x64.msi')" Text="Нет SecureUxTheme-x64.msi. Сначала соберите solution Release|x64." />
+    <Error Condition="!Exists('$(GlassMsiPayloadDir)SecureUxTheme-x86\SecureUxTheme-x86.msi')" Text="Нет SecureUxTheme-x86.msi. Его собирает solution Release|x86 до GlassSetup." />
     <Error Condition="!Exists('$(GlassMsiPayloadDir)Glass-x86\Glass-x86.msi')" Text="Нет Glass-x86.msi. Его собирает solution Release|x86 до GlassSetup." />
     <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(ProjectDir)scripts\Verify-InstallerNative.ps1&quot; -X86 &quot;$(MSBuildThisFileDirectory)..\Build\x86\Release\GlassSettings.Native.dll&quot; -X64 &quot;$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll&quot;" />
+    <!-- First-party MSI and Native DLL payloads are signed before embedding.
+         Third-party product MSI (OpenGlass/SecureUxTheme) are intentionally unsigned by Glass. -->
+    <Exec Condition="'$(GlassSign)' != 'Skip'"
+          Command="$(GlassSignCommand) -Mode Verify -Context &quot;GlassSetup first-party payload&quot; -Paths &quot;$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll;$(MSBuildThisFileDirectory)..\Build\x86\Release\GlassSettings.Native.dll;$(GlassMsiPayloadDir)GlassSettings-x64\GlassSettings-x64.msi;$(GlassMsiPayloadDir)GlassSettings-x86\GlassSettings-x86.msi;$(GlassMsiPayloadDir)Glass-x64\Glass-x64.msi;$(GlassMsiPayloadDir)Glass-x86\Glass-x86.msi&quot;" />
     <Touch Files="$(ProjectDir)res\GlassSetup.rc" />
   </Target>
   <ItemGroup>
@@ -145,6 +151,8 @@
     <ClCompile Include="src\InstallSupport\GlassInstallHost.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallRemoval.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallUnlock.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassProductInspect.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassUserDefaults.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\WizardTheme.h" />
@@ -157,6 +165,7 @@
     <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h" />
     <ClInclude Include="src\InstallSupport\GlassRemovalOrder.h" />
     <ClInclude Include="src\InstallSupport\GlassEmptyDirectories.h" />
+    <ClInclude Include="src\InstallSupport\GlassUserDefaults.h" />
     <ClInclude Include="src\InstallLog.h" />
   </ItemGroup>
   <ItemGroup>

@@ -5,7 +5,9 @@
     <GlassPayloadArch Condition="'$(MSBuildProjectName)' == 'OpenGlass-x64'">OpenGlass</GlassPayloadArch>
     <GlassPayloadArch Condition="'$(MSBuildProjectName)' == 'GlassSettings-x64'">GlassSettings-x64</GlassPayloadArch>
     <GlassPayloadArch Condition="'$(MSBuildProjectName)' == 'GlassSettings-x86'">GlassSettings-x86</GlassPayloadArch>
-    <GlassNativeArch Condition="'$(GlassPayloadArch)' == 'x86' or '$(GlassPayloadArch)' == 'GlassSettings-x86'">x86</GlassNativeArch>
+    <GlassPayloadArch Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x64'">SecureUxTheme-x64</GlassPayloadArch>
+    <GlassPayloadArch Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x86'">SecureUxTheme-x86</GlassPayloadArch>
+    <GlassNativeArch Condition="'$(GlassPayloadArch)' == 'x86' or '$(GlassPayloadArch)' == 'GlassSettings-x86' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86'">x86</GlassNativeArch>
     <GlassNativeArch Condition="'$(GlassNativeArch)' == ''">x64</GlassNativeArch>
     <GlassBuildRelease>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', '$(GlassNativeArch)', 'Release'))</GlassBuildRelease>
     <GlassPayloadStage>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'SetupPayload', '$(GlassPayloadArch)'))</GlassPayloadStage>
@@ -20,7 +22,7 @@
     <GlassMsiBundleVersion Condition="'$(GlassMsiBundleVersion)' == ''">$(GlassMsiVersion)</GlassMsiBundleVersion>
     <GlassUninsExePath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassUnins', 'Release', 'GlassUnins.exe'))</GlassUninsExePath>
     <GlassSetupIconPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'GlassSetup', 'res', 'app.ico'))</GlassSetupIconPath>
-    <GlassSecureUxThemeVendorDir>$([System.IO.Path]::Combine('$(SolutionRoot)', 'GlassSetup', 'third_party', 'SecureUxTheme', '$(GlassPayloadArch)'))</GlassSecureUxThemeVendorDir>
+    <GlassSecureUxThemeVendorDir>$([System.IO.Path]::Combine('$(SolutionRoot)', 'GlassSetup', 'third_party', 'SecureUxTheme', '$(GlassNativeArch)'))</GlassSecureUxThemeVendorDir>
   </PropertyGroup>
 
   <!--
@@ -45,15 +47,16 @@
            Text="Нет $(_GsPublishExe). Сначала соберите GlassSettings Release|$(GlassNativeArch): он публикует каталог для MSI." />
   </Target>
 
-  <!-- SecureUxTheme: vendored в репо → Build\…\Release\SecureUxTheme перед staging (Build\ в git нет). -->
+  <!-- SecureUxTheme is a standalone, architecture-specific MSI product. -->
   <Target Name="GlassMaterializeSecureUxTheme"
           BeforeTargets="GlassStagePayload"
-          Condition="'$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86'">
+          Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86'">
     <PropertyGroup>
       <_SutReleaseDir>$(GlassBuildRelease)\SecureUxTheme\</_SutReleaseDir>
     </PropertyGroup>
-    <Error Condition="!Exists('$(GlassSecureUxThemeVendorDir)\SecureUxTheme4.dll')"
-      Text="SecureUxTheme missing: $(GlassSecureUxThemeVendorDir)\SecureUxTheme4.dll and ThemeUiProxy.dll (see GlassSetup\third_party\SecureUxTheme)." />
+    <Error Condition="!Exists('$(GlassSecureUxThemeVendorDir)\SecureUxTheme4.dll') or !Exists('$(GlassSecureUxThemeVendorDir)\ThemeUiProxy.dll')"
+      Text="SecureUxTheme payload requires SecureUxTheme4.dll and ThemeUiProxy.dll for $(GlassNativeArch) (see GlassSetup\third_party\SecureUxTheme)." />
+    <RemoveDir Directories="$(_SutReleaseDir)" Condition="Exists('$(_SutReleaseDir)')" />
     <MakeDir Directories="$(_SutReleaseDir)" />
     <Copy SourceFiles="$(GlassSecureUxThemeVendorDir)\SecureUxTheme4.dll;$(GlassSecureUxThemeVendorDir)\ThemeUiProxy.dll"
           DestinationFolder="$(_SutReleaseDir)"
@@ -70,8 +73,6 @@
       <GlassNative Include="$(GlassBuildRelease)\ExplorerCompat.dll" />
       <GlassNative Include="$(GlassBuildRelease)\GlassCompat.dll" />
       <GlassNative Include="$(GlassBuildRelease)\GlassCore.dll" />
-      <GlassNative Include="$(GlassBuildRelease)\GlassShellExt.dll" />
-      <GlassNative Include="$(GlassBuildRelease)\GlassShellHost.exe" />
       <GlassNative Include="$(GlassBuildRelease)\TaskbarCompat.dll" />
       <GlassNative Include="$(GlassBuildRelease)\UICompat.dll" />
       <GlassNative Include="$(GlassBuildRelease)\WndCompat.dll" />
@@ -81,8 +82,18 @@
       <GlassNative Include="$(GlassBuildRelease)\msvcp140_1.dll" Condition="Exists('$(GlassBuildRelease)\msvcp140_1.dll')" />
       <GlassNative Include="$(GlassBuildRelease)\msvcp140_2.dll" Condition="Exists('$(GlassBuildRelease)\msvcp140_2.dll')" />
       <GlassNative Include="$(GlassBuildRelease)\concrt140.dll" Condition="Exists('$(GlassBuildRelease)\concrt140.dll')" />
-      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\**\*.*" />
-      <GlassSecureUxTheme Include="$(GlassBuildRelease)\SecureUxTheme\**\*.*" />
+      <!-- Контекстное меню: подкаталог GlassShellSparse = OutDir проектов GlassShellExt/GlassShellHost и
+           ExternalLocation sparse-пакета (см. GlassShellExt\README.md). Список явный: рядом лежат pdb/lib/exp. -->
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\GlassShellExt.dll" />
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\GlassShellHost.exe" />
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\GlassShellSparse.msix" />
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\AppxManifest.xml" />
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\AppxManifest.UnregisterStub.xml" />
+      <GlassShellSparse Include="$(GlassBuildRelease)\GlassShellSparse\Assets\**\*.png" />
+      <!-- Публичный сертификат разработчика + инструкция (RU/EN): sparse-пакет ставится только при доверии издателю;
+           сам установщик ничего в хранилища сертификатов не пишет. -->
+      <GlassAuthorCert Include="$(SolutionRoot)Shared\certs\DeveloperCodeSigning.cer" />
+      <GlassAuthorCert Include="$(SolutionRoot)Shared\certs\DeveloperCodeSigning.txt" />
       <GlassUnins Include="$(GlassUninsExePath)" Condition="Exists('$(GlassUninsExePath)')" />
     </ItemGroup>
 
@@ -96,13 +107,13 @@
 
     <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and !Exists('$(GlassBuildRelease)\GlassCompat.dll')"
       Text="Glass $(GlassPayloadArch) MSI: нет $(GlassBuildRelease)\GlassCompat.dll — сначала успешно соберите Release|$(GlassPayloadArch) solution (модули платформы), затем MSI." />
+    <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and (!Exists('$(GlassBuildRelease)\GlassShellSparse\GlassShellExt.dll') or !Exists('$(GlassBuildRelease)\GlassShellSparse\GlassShellHost.exe') or !Exists('$(GlassBuildRelease)\GlassShellSparse\AppxManifest.xml'))"
+      Text="Glass $(GlassPayloadArch) MSI: нет $(GlassBuildRelease)\GlassShellSparse\ (GlassShellExt.dll, GlassShellHost.exe, AppxManifest.xml) — соберите GlassShellExt Release (Win32 для x86, x64 для x64)." />
+    <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and !Exists('$(GlassBuildRelease)\GlassShellSparse\GlassShellSparse.msix')"
+      Text="Glass $(GlassPayloadArch) MSI: нет $(GlassBuildRelease)\GlassShellSparse\GlassShellSparse.msix — нужен makeappx.exe из Windows SDK (PostBuild GlassShellExt, Package\BuildSparsePackage.ps1)." />
     <Copy SourceFiles="@(GlassNative)" DestinationFolder="$(GlassPayloadStage)" SkipUnchangedFiles="true" Condition="'@(GlassNative)' != ''" />
     <Copy SourceFiles="@(GlassShellSparse)" DestinationFiles="@(GlassShellSparse->'$(GlassPayloadStage)\GlassShellSparse\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(GlassShellSparse)' != ''" />
-    <Copy SourceFiles="@(GlassSecureUxTheme)" DestinationFiles="@(GlassSecureUxTheme->'$(GlassPayloadStage)\SecureUxTheme\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(GlassSecureUxTheme)' != ''" />
-    <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and !Exists('$(GlassBuildRelease)\GlassShellSparse\AppxManifest.xml')"
-      Text="Glass $(GlassPayloadArch) MSI: GlassShellSparse missing — соберите GlassShellExt Release (Win32 для x86, x64 для x64)." />
-    <Error Condition="('$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86') and !Exists('$(GlassPayloadStage)\SecureUxTheme\SecureUxTheme4.dll')"
-      Text="Glass $(GlassPayloadArch) MSI: SecureUxTheme не попал в staging." />
+    <Copy SourceFiles="@(GlassAuthorCert)" DestinationFolder="$(GlassPayloadStage)" SkipUnchangedFiles="true" Condition="'@(GlassAuthorCert)' != ''" />
     <Copy SourceFiles="@(GlassOg)" DestinationFolder="$(GlassPayloadStage)" SkipUnchangedFiles="true" Condition="'@(GlassOg)' != ''" />
     <Copy SourceFiles="@(GlassOgResources)" DestinationFiles="@(GlassOgResources->'$(GlassPayloadStage)\Resources\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(GlassOgResources)' != ''" />
     <MakeDir Directories="$(GlassPayloadStage)\Resources\ThemeMaterial" Condition="'$(GlassPayloadArch)' == 'OpenGlass' and !Exists('$(GlassPayloadStage)\Resources\ThemeMaterial')" />
@@ -113,7 +124,7 @@
     <!-- GlassSettings MSI: каталог GlassSettings + собственный unins000.exe/dat (4-я запись в Установленных приложениях) -->
     <ItemGroup Condition="'$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86'">
       <GlassSettingsOnly Include="$(GlassBuildRelease)\GlassSettings\**\*.*"
-        Exclude="$(GlassBuildRelease)\GlassSettings\**\*.pdb;$(GlassBuildRelease)\GlassSettings\**\*.xaml;$(GlassBuildRelease)\GlassSettings\Package.appxmanifest;$(GlassBuildRelease)\GlassSettings\app.manifest;$(GlassBuildRelease)\GlassSettings\Properties\**\*.*;$(GlassBuildRelease)\GlassSettings\Microsoft.UI.Designer.dll;$(GlassBuildRelease)\GlassSettings\Microsoft.UI.Xaml\Assets\map.html;$(GlassBuildRelease)\GlassSettings\Microsoft.Windows.Workloads.pri;$(GlassBuildRelease)\GlassSettings\Assets\StoreLogo.png;$(GlassBuildRelease)\GlassSettings\Assets\SplashScreen.*;$(GlassBuildRelease)\GlassSettings\Assets\Square150x150Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\Square44x44Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\Wide310x150Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\LockScreenLogo.*" />
+        Exclude="$(GlassBuildRelease)\GlassSettings\**\*.pdb;$(GlassBuildRelease)\GlassSettings\SecureUxTheme\**\*.*;$(GlassBuildRelease)\GlassSettings\**\SecureUxTheme4.dll;$(GlassBuildRelease)\GlassSettings\**\ThemeUiProxy.dll;$(GlassBuildRelease)\GlassSettings\**\*.xaml;$(GlassBuildRelease)\GlassSettings\Package.appxmanifest;$(GlassBuildRelease)\GlassSettings\app.manifest;$(GlassBuildRelease)\GlassSettings\Properties\**\*.*;$(GlassBuildRelease)\GlassSettings\Microsoft.UI.Designer.dll;$(GlassBuildRelease)\GlassSettings\Microsoft.UI.Xaml\Assets\map.html;$(GlassBuildRelease)\GlassSettings\Microsoft.Windows.Workloads.pri;$(GlassBuildRelease)\GlassSettings\Assets\StoreLogo.png;$(GlassBuildRelease)\GlassSettings\Assets\SplashScreen.*;$(GlassBuildRelease)\GlassSettings\Assets\Square150x150Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\Square44x44Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\Wide310x150Logo.*;$(GlassBuildRelease)\GlassSettings\Assets\LockScreenLogo.*" />
       <GlassNativeExtraGs Include="$(GlassBuildRelease)\GlassSettings.Native.dll"
         Condition="!Exists('$(GlassBuildRelease)\GlassSettings\GlassSettings.Native.dll')" />
       <GlassSettingsUnins Include="$(GlassUninsExePath)" Condition="Exists('$(GlassUninsExePath)')" />
@@ -125,6 +136,19 @@
     <Copy SourceFiles="@(GlassNativeExtraGs)" DestinationFolder="$(GlassPayloadStage)\GlassSettings" SkipUnchangedFiles="true" Condition="'@(GlassNativeExtraGs)' != ''" />
     <Copy SourceFiles="@(GlassSettingsUnins)" DestinationFiles="$(GlassPayloadStage)\GlassSettings\unins000.exe" SkipUnchangedFiles="true" Condition="'@(GlassSettingsUnins)' != ''" />
     <WriteLinesToFile File="$(GlassPayloadStage)\GlassSettings\unins000.dat" Lines="PRODUCT_CODE={$(GlassMsiProductCode)}" Overwrite="true" Condition="('$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86') and '$(GlassMsiProductCode)' != ''" />
+
+    <!-- Standalone SecureUxTheme MSI: exactly two native files, no uninstaller copy or cross-architecture proxy. -->
+    <ItemGroup Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86'">
+      <GlassSecureUxTheme Include="$(GlassBuildRelease)\SecureUxTheme\SecureUxTheme4.dll;$(GlassBuildRelease)\SecureUxTheme\ThemeUiProxy.dll" />
+    </ItemGroup>
+    <MakeDir Directories="$(GlassPayloadStage)\GlassSettings\SecureUxTheme"
+             Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86'" />
+    <Copy Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86'"
+          SourceFiles="@(GlassSecureUxTheme)"
+          DestinationFiles="@(GlassSecureUxTheme->'$(GlassPayloadStage)\GlassSettings\SecureUxTheme\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Error Condition="('$(GlassPayloadArch)' == 'SecureUxTheme-x64' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86') and (!Exists('$(GlassPayloadStage)\GlassSettings\SecureUxTheme\SecureUxTheme4.dll') or !Exists('$(GlassPayloadStage)\GlassSettings\SecureUxTheme\ThemeUiProxy.dll'))"
+      Text="SecureUxTheme $(GlassNativeArch) MSI must stage exactly SecureUxTheme4.dll and ThemeUiProxy.dll." />
   </Target>
 
   <PropertyGroup>
@@ -132,7 +156,8 @@
     <GlassPlatformWxs>$(BaseIntermediateOutputPath)$(MSBuildProjectName).PlatformPackage.wxs</GlassPlatformWxs>
     <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' == 'OpenGlass-x64'">$(MSBuildThisFileDirectory)OpenGlassPackage.template.wxs</GlassPlatformTemplate>
     <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' == 'GlassSettings-x64' or '$(MSBuildProjectName)' == 'GlassSettings-x86'">$(MSBuildThisFileDirectory)GlassSettingsPackage.template.wxs</GlassPlatformTemplate>
-    <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' != 'OpenGlass-x64' and '$(MSBuildProjectName)' != 'GlassSettings-x64' and '$(MSBuildProjectName)' != 'GlassSettings-x86'">$(MSBuildThisFileDirectory)PlatformPackage.template.wxs</GlassPlatformTemplate>
+    <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x64' or '$(MSBuildProjectName)' == 'SecureUxTheme-x86'">$(MSBuildThisFileDirectory)SecureUxThemePackage.template.wxs</GlassPlatformTemplate>
+    <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' != 'OpenGlass-x64' and '$(MSBuildProjectName)' != 'GlassSettings-x64' and '$(MSBuildProjectName)' != 'GlassSettings-x86' and '$(MSBuildProjectName)' != 'SecureUxTheme-x64' and '$(MSBuildProjectName)' != 'SecureUxTheme-x86'">$(MSBuildThisFileDirectory)PlatformPackage.template.wxs</GlassPlatformTemplate>
     <GlassPlatformScript>$(MSBuildThisFileDirectory)scripts\Generate-PlatformWxs.ps1</GlassPlatformScript>
   </PropertyGroup>
 
@@ -158,6 +183,7 @@
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassMsiBundleVersion = &quot;$(_GlassMsiBundleVersion)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassUpgradeCode = &quot;$(GlassUpgradeCode)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassProductCode = &quot;$(GlassProductCode)&quot; ?&gt;" Overwrite="false" />
+    <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassSettingsProductCode = &quot;$(GlassSettingsProductCode)&quot; ?&gt;" Overwrite="false" Condition="'$(GlassSettingsProductCode)' != ''" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassPlatformTitle = &quot;$(_GlassPlatformTitle)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassInstallPathValueName = &quot;$(_GlassInstallPathValueName)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassPayloadStage = &quot;$(GlassPayloadStage)&quot; ?&gt;" Overwrite="false" />

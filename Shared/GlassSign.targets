@@ -1,15 +1,110 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project>
+  <!--
+    Authenticode-подпись артефактов GlassPlatform. Контракт для пользователей — корневой README.md,
+    раздел «Подпись сборок». Импортируется из Directory.Build.targets (после целей самих проектов,
+    поэтому IsGlassNativeBinary/GlassWixLockedPlatform уже известны, а порядок AfterTargets=Build
+    детерминирован: сначала цели проекта, затем подпись). Проекты, отключившие Directory.Build.targets
+    (GlassUnins: ImportDirectoryBuildTargets=false), импортируют этот файл сами после Microsoft.Cpp.targets.
+
+    Точки подписи (порядок вложенности артефактов комплекта):
+      1. PE  — каждый vcxproj Application/DynamicLibrary после Build: $(TargetPath)
+              (модули платформы, GlassSettings.Native, GlassUnins, LogViewer, GlassSetup).
+      2. GlassSettings.exe (single-file publish) — после Publish: $(PublishDir)GlassSettings.exe.
+      3. MSI — каждый .wixproj на своей платформе после Build: $(TargetPath).
+      4. GlassSetup.exe — п.1; перед встраиванием payload GlassSetupVerifyEmbeddedMsi проверяет подписи
+         MSI и GlassSettings.Native.dll (Invoke-GlassSign.ps1 -Mode Verify).
+
+    GlassSign (свойство MSBuild или переменная окружения GLASS_SIGN):
+      Local   — Release по умолчанию: подписать, если ключ автора есть в CurrentUser\My; без ключа —
+                предупреждение GSIGN001 и неподписанная сборка (сборка контрибьютора). С найденным ключом
+                любая ошибка подписи — ошибка сборки.
+      Require — ключ обязателен (официальная сборка).
+      Skip    — ничего не делать. Debug всегда Skip.
+
+    Пин сертификата: GlassSignThumbprint (SHA-1). Пусто — поиск по GlassSignSubject. Пин обновляется
+    вместе с README при смене ключа (в т.ч. при переходе на SignPath: CI собирает с GlassSign=Skip,
+    внешняя подпись выполняется в тех же точках, проверка — Shared\scripts\Test-GlassSignatures.ps1).
+    Офлайн: GlassSignNoTimestamp=true — подпись без метки времени. Пароль PFX (только для ручной
+    отладки) передаётся через окружение GLASS_SIGN_PFX_PASSWORD, не через командную строку.
+  -->
   <PropertyGroup>
-    <GlassSign Condition="'$(GlassSign)' == '' and '$(Configuration)' == 'Release'">Local</GlassSign>
-    <GlassSign Condition="'$(GlassSign)' == ''">Skip</GlassSign>
+    <GlassSignTargetsImported>true</GlassSignTargetsImported>
     <GlassSignSubject Condition="'$(GlassSignSubject)' == ''">CN=Stanislav K.</GlassSignSubject>
+    <!-- SHA-1 thumbprint официального сертификата автора; заполняется после New-GlassSelfSignedCert.ps1. -->
+    <GlassSignThumbprint Condition="'$(GlassSignThumbprint)' == ''">A801E5F5F430D6D19164C856F79B8EFD23F83EB8</GlassSignThumbprint>
+    <GlassSignDescription Condition="'$(GlassSignDescription)' == ''">Glass Platform</GlassSignDescription>
+    <GlassSignDescriptionUrl Condition="'$(GlassSignDescriptionUrl)' == ''">https://github.com/musicstashall/GlassPlatform</GlassSignDescriptionUrl>
     <GlassSignScript>$(MSBuildThisFileDirectory)scripts\Invoke-GlassSign.ps1</GlassSignScript>
+    <GlassSignPowerShell Condition="'$(GlassSignPowerShell)' == ''">powershell.exe</GlassSignPowerShell>
   </PropertyGroup>
 
-  <Target Name="GlassSignAfterBuild" AfterTargets="Build"
-          Condition="'$(GlassSign)' == 'Local' and '$(GlassSignPaths)' != ''">
-    <Exec IgnoreExitCode="true"
-          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(GlassSignScript)&quot; -Paths &quot;$(GlassSignPaths)&quot; -Subject &quot;$(GlassSignSubject)&quot; -Thumbprint &quot;$(GlassSignThumbprint)&quot; -PfxPath &quot;$(GlassSignPfxPath)&quot; -PfxPassword &quot;$(GlassSignPfxPassword)&quot;" />
+  <PropertyGroup>
+    <GlassSign Condition="'$(GlassSign)' == '' and '$(GLASS_SIGN)' != ''">$(GLASS_SIGN)</GlassSign>
+    <GlassSign Condition="'$(GlassSign)' == '' and '$(Configuration)' == 'Release'">Local</GlassSign>
+    <GlassSign Condition="'$(GlassSign)' == ''">Skip</GlassSign>
+    <GlassSign Condition="'$(Configuration)' != 'Release'">Skip</GlassSign>
+  </PropertyGroup>
+
+  <!-- Какие проекты подписываются. Отключить для проекта: <GlassSignThisProject>false</GlassSignThisProject>. -->
+  <PropertyGroup>
+    <_GlassSignIsPe Condition="'$(IsGlassNativeBinary)' == 'true'">true</_GlassSignIsPe>
+    <!-- Без Directory.Build.targets IsGlassNativeBinary не задан — то же правило по ConfigurationType. -->
+    <_GlassSignIsPe Condition="'$(IsGlassNativeBinary)' == '' and ('$(ConfigurationType)' == 'Application' or '$(ConfigurationType)' == 'DynamicLibrary')">true</_GlassSignIsPe>
+    <_GlassSignIsMsi Condition="'$(MSBuildProjectExtension)' == '.wixproj' and ('$(GlassWixLockedPlatform)' == '' or '$(Platform)' == '$(GlassWixLockedPlatform)')">true</_GlassSignIsMsi>
+    <GlassSignThisProject Condition="'$(GlassSignThisProject)' == '' and ('$(_GlassSignIsPe)' == 'true' or '$(_GlassSignIsMsi)' == 'true')">true</GlassSignThisProject>
+    <!-- Пустые аргументы не передаём: powershell.exe может отбросить "" и сдвинуть параметры. -->
+    <GlassSignCommand>$(GlassSignPowerShell) -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(GlassSignScript)&quot; -Policy $(GlassSign) -Subject &quot;$(GlassSignSubject)&quot;</GlassSignCommand>
+    <GlassSignCommand Condition="'$(GlassSignThumbprint)' != ''">$(GlassSignCommand) -Thumbprint &quot;$(GlassSignThumbprint)&quot;</GlassSignCommand>
+    <_GlassSignSignArgs>-Mode Sign</_GlassSignSignArgs>
+    <_GlassSignSignArgs Condition="'$(GlassSignPfxPath)' != ''">$(_GlassSignSignArgs) -PfxPath &quot;$(GlassSignPfxPath)&quot;</_GlassSignSignArgs>
+    <_GlassSignSignArgs Condition="'$(GlassSignDescription)' != ''">$(_GlassSignSignArgs) -Description &quot;$(GlassSignDescription)&quot;</_GlassSignSignArgs>
+    <_GlassSignSignArgs Condition="'$(GlassSignDescriptionUrl)' != ''">$(_GlassSignSignArgs) -DescriptionUrl &quot;$(GlassSignDescriptionUrl)&quot;</_GlassSignSignArgs>
+    <!-- Офлайн-сборка: GlassSignNoTimestamp=true (или GLASS_SIGN_NO_TIMESTAMP=true) — подпись без метки времени, без ожидания TSA. -->
+    <_GlassSignSignArgs Condition="'$(GlassSignNoTimestamp)' == 'true' or '$(GLASS_SIGN_NO_TIMESTAMP)' == 'true'">$(_GlassSignSignArgs) -NoTimestamp</_GlassSignSignArgs>
+  </PropertyGroup>
+
+  <Target Name="GlassSignValidateMode" Condition="'$(GlassSign)' != 'Skip'">
+    <Error Condition="'$(GlassSign)' != 'Local' and '$(GlassSign)' != 'Require'"
+           Text="GlassSign='$(GlassSign)' не поддерживается. Допустимо: Local, Require, Skip." />
+  </Target>
+
+  <!-- Пути и штамп инкрементальности: подпись повторяется только после перелинковки выхода
+       (Inputs/Outputs). Поэтому после создания или смены ключа нужен Rebuild обеих фаз. -->
+  <Target Name="GlassSignPrepare" Condition="'$(GlassSign)' != 'Skip' and '$(GlassSignThisProject)' == 'true'">
+    <PropertyGroup>
+      <_GlassSignPaths>$(GlassSignPaths)</_GlassSignPaths>
+      <_GlassSignPaths Condition="'$(_GlassSignPaths)' == ''">$(TargetPath)</_GlassSignPaths>
+      <_GlassSignStampDir>$(IntDir)</_GlassSignStampDir>
+      <_GlassSignStampDir Condition="'$(_GlassSignStampDir)' == ''">$(IntermediateOutputPath)</_GlassSignStampDir>
+      <_GlassSignStampDir Condition="'$(_GlassSignStampDir)' == ''">$(MSBuildProjectDirectory)\obj\</_GlassSignStampDir>
+      <_GlassSignStampDir Condition="!HasTrailingSlash('$(_GlassSignStampDir)')">$(_GlassSignStampDir)\</_GlassSignStampDir>
+      <_GlassSignStamp>$(_GlassSignStampDir)GlassSign.$(MSBuildProjectName).$(Platform).stamp</_GlassSignStamp>
+    </PropertyGroup>
+    <ItemGroup>
+      <_GlassSignInput Include="$(_GlassSignPaths)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Точки 1 и 3: выход проекта после Build. GlassSignPaths (список через ';') переопределяет $(TargetPath). -->
+  <Target Name="GlassSignAfterBuild" AfterTargets="Build" DependsOnTargets="GlassSignValidateMode;GlassSignPrepare"
+          Inputs="@(_GlassSignInput)" Outputs="$(_GlassSignStamp)"
+          Condition="'$(GlassSign)' != 'Skip' and '$(GlassSignThisProject)' == 'true'">
+    <Exec Condition="'$(_GlassSignPaths)' != ''"
+          EnvironmentVariables="GLASS_SIGN_PFX_PASSWORD=$(GlassSignPfxPassword)"
+          Command="$(GlassSignCommand) $(_GlassSignSignArgs) -Paths &quot;$(_GlassSignPaths)&quot; -Context &quot;$(MSBuildProjectName)&quot;" />
+    <MakeDir Directories="$(_GlassSignStampDir)" Condition="!Exists('$(_GlassSignStampDir)')" />
+    <Touch Files="$(_GlassSignStamp)" AlwaysCreate="true" />
+  </Target>
+
+  <!-- Точка 2: single-file publish GlassSettings (каталог MSI берёт именно его). -->
+  <Target Name="GlassSignAfterPublish" AfterTargets="Publish" DependsOnTargets="GlassSignValidateMode"
+          Condition="'$(GlassSign)' != 'Skip' and '$(MSBuildProjectName)' == 'GlassSettings' and '$(GlassSignThisProject)' != 'false'">
+    <PropertyGroup>
+      <_GlassSignPublishExe>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(PublishDir)', '$(AssemblyName).exe'))</_GlassSignPublishExe>
+    </PropertyGroup>
+    <Exec Condition="'$(PublishDir)' != ''"
+          EnvironmentVariables="GLASS_SIGN_PFX_PASSWORD=$(GlassSignPfxPassword)"
+          Command="$(GlassSignCommand) $(_GlassSignSignArgs) -Paths &quot;$(_GlassSignPublishExe)&quot; -Context &quot;GlassSettings publish&quot;" />
   </Target>
 </Project>

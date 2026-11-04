@@ -54,6 +54,14 @@
 
 - `ExplorerCompat/docs/frozen/**`
 
+## Запрещённые решения (не предлагать повторно)
+
+- **Пункт контекстного меню рабочего стола — только регистрацией DLL.** Классическое Win32-меню (`IContextMenu`) создаётся/снимается исключительно `DllRegisterServer`/`DllUnregisterServer` `GlassShellExt.dll` через `regsvr32 /s` / `regsvr32 /u /s` (Win10 всегда; Win11 — только fallback, когда sparse-пакет зарегистрировать нельзя). Компактное меню Win11 — только sparse-пакет (`AppxManifest.xml`). Записывать вручную ключи `…\DesktopBackground\shellex\ContextMenuHandlers\…`, `CLSID\…\InprocServer32`, `ExplorerCommandHandler` и подобные из GlassSettings.Native, Setup, GlassUnins или скриптов **запрещено** — такие предложения отклоняются. Подробности: [GlassShellExt/README.md](GlassShellExt/README.md), проверка — `GlassSetup/tests/verify_resources.py`.
+- **Сертификат разработчика — только по явному выбору пользователя.** Единственный код, добавляющий его в `LocalMachine\TrustedPeople`, — `ShellSparsePackage::TrustSparseSigner`; вызывается со страницы «Сертификат разработчика» установщика или по ссылке в GlassSettings → Система. Сборка ничего не создаёт/не экспортирует (`New-SelfSignedCertificate`, `Import-Certificate` и т. п. запрещены), GlassUnins сертификат не удаляет. Пользователю не предлагать ручные шаги (regedit, certlm, PowerShell) там, где есть кнопка.
+- **Единственная папка платформы в профиле — `%LOCALAPPDATA%\GlassPlatform`** (логи — `Logs\`, дампы — `Crashes\`). `AppData\Local\GlassProject` и другие каталоги не создавать.
+- **SecureUxTheme — только в составе GlassSettings.MSI** (`<корень>\GlassSettings\SecureUxTheme\`, для x64 дополнительно `x86\ThemeUiProxy.dll`). Без GlassSettings не ставится; деактивация — только unified-выгрузками GlassSettings.Native (`GlassSettings_SecureUxThemeDeactivate`, rundll-helper `GlassSettings_SecureUxThemeSetupV1W` у GlassUnins), не собственной логикой реестра в Setup/GlassUnins.
+- **Политика автозапуска OpenGlass в установщике — `!filesPresent || wasRunning`** (решение пользователя 2026-11-03, «оставить текущее правило»): запускать после установки только при свежей установке или если OpenGlass работал раньше; существующую установку «файлы без оркестрации» не автоматизировать. Предложения «всегда запускать» отклоняются.
+
 ## Скиллы проекта
 
 `glass-workflow`, `glass-hooks`, `glass-bwm-port`, `glass-wndcompat`, `glass-explorer-xaml`, `crashdump` — см. `.cursor/skills/`.

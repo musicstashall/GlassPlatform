@@ -119,9 +119,16 @@ std::vector<GlassInstallUnlock::ModuleHolder> ScanNativeOneShot(
         } else {
             std::string bytes(static_cast<size_t>(size.QuadPart), '\0');
             DWORD got = 0;
-            if (!bytes.empty() && (!ReadFile(out, bytes.data(), static_cast<DWORD>(bytes.size()), &got, nullptr) || got != bytes.size()))
+            std::wstring failDiag;
+            if (!bytes.empty() && (!ReadFile(out, bytes.data(), static_cast<DWORD>(bytes.size()), &got, nullptr) || got != bytes.size())) {
                 failed = true;
-            if (!failed && !GlassInstallWatch::ParseNativePipeUtf8(bytes, holders)) failed = true;
+            } else if (GlassInstallWatch::FindNativeFailLine(bytes, failDiag)) {
+                // The helper appends "#fail <diag>" after the rows it managed to write.
+                failed = true;
+                GlassInstallLog::LineFormat(L"Unlocker: x64 scan failed: %s", failDiag.c_str());
+            } else if (!failed && !GlassInstallWatch::ParseNativePipeUtf8(bytes, holders)) {
+                failed = true;
+            }
         }
         CloseHandle(out);
     } else {

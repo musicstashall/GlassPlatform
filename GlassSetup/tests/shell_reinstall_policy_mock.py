@@ -15,10 +15,15 @@ def function(text,token):
             depth-=1
             if not depth:return text[start:i+1]
     raise ValueError(token)
-launch=function(engine,'bool InstallEngine::LaunchAndVerifySelectedProducts(')
+launch=function(engine,'void InstallEngine::LaunchSelectedProducts(')
 reg=launch[launch.index('bool shellConflict=false;'):]
 assert 'InvokeShellExtRegistration(true,x64Dir_,x86Dir_' in reg
 assert 'cleanInstall_' not in reg # also during reinstalls
+# Registration runs after the commit point: a refused or conflicting registration is a
+# finish-page note with the helper diagnostics, never a failure/rollback.
+assert 'SetFailure(' not in reg and 'AddFinishWarning(' in reg and '&shellDetail' in reg
+assert 'SetupHelperFailureExitCode()' in function(ops,'void CALLBACK GlassSettings_ShellExtRegisterSetupV1W(')
+assert 'GetLastSparseDeploymentHr()' in function(ops,'DWORD SetupHelperFailureExitCode(')
 entry=function(ops,'void CALLBACK GlassSettings_ShellExtRegisterSetupV1W(')
 assert 'QueryInstallerSparseState' in entry and 'InstallerSparseHasVerifiedMenu' in entry
 assert '0x47504346u' in entry and 'HasMatchingLegacyShellRegistration' in entry

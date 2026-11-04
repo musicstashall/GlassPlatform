@@ -37,7 +37,7 @@ namespace
         FailedToApply = 5,
         NeedsExplorerRestart = 6,
         SparseArtifactsMissing = 7,
-        SparseDevCertFailed = 8,
+        SparseSignerNotTrusted = 8,
         SparseDeploymentFailed = 9,
         FailedToRegister = 10,
         FailedToUnregister = 11,
@@ -50,6 +50,22 @@ namespace
     {
         bool registerNotUnregister = false;
     };
+
+    // Result of a register call. Win10: regsvr32 (Registered). Win11: sparse
+    // package (Registered) or, when it cannot be deployed for this user —
+    // typically the msix signer is not trusted on this machine — the classic
+    // Win32 IContextMenu keys (ClassicFallback; the sparse reason stays in
+    // g_lastOpMessageId for diagnostics).
+    enum class RegisterOutcome : int
+    {
+        Failed = 0,
+        Registered = 1,
+        ClassicFallback = 2,
+    };
+
+    // Installer helper exit code for a successful classic fallback: 'GPL\0' | OpMessageId
+    // of the sparse failure (see SetupHelperFailureExitCode and GlassInstallUtil.cpp).
+    constexpr DWORD kSetupClassicFallbackBase = 0x47504C00u;
 
     void SetLastOpMessage(OpMessageId id) noexcept
     {
@@ -83,15 +99,18 @@ namespace
             // different file near rundll32, the temporary helper, or another
             // registry value when this exact path is unavailable.
             const std::wstring exact = GlassShared::GlassModulePath::ResolveGlassModulePath(
-                exactPlatformRoot, L"GlassShellExt.dll", GlassShared::GlassModulePath::NativeModuleArch());
+                exactPlatformRoot, GlassShared::GlassShellMenu::kShellExtRelativePath,
+                GlassShared::GlassModulePath::NativeModuleArch());
             return !exact.empty() && wcscpy_s(out, cch, exact.c_str()) == 0;
         }
-        std::wstring path =
-            GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(nullptr, L"GlassShellExt.dll");
+        // <root>\GlassShellSparse\GlassShellExt.dll: рядом с процессом (платформа), у родителя
+        // (GlassSettings\ → корень) или по InstallPath из реестра.
+        std::wstring path = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
+            nullptr, GlassShared::GlassShellMenu::kShellExtRelativePath);
         if (path.empty())
         {
             path = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
-                reinterpret_cast<HMODULE>(&__ImageBase), L"GlassShellExt.dll");
+                reinterpret_cast<HMODULE>(&__ImageBase), GlassShared::GlassShellMenu::kShellExtRelativePath);
         }
         if (path.empty())
         {
@@ -114,7 +133,8 @@ namespace
                 ::RegCloseKey(key);
                 if (status == ERROR_SUCCESS && type == REG_SZ && value[0])
                     path = GlassShared::GlassModulePath::ResolveGlassModulePath(
-                        value, L"GlassShellExt.dll", GlassShared::GlassModulePath::NativeModuleArch());
+                        value, GlassShared::GlassShellMenu::kShellExtRelativePath,
+                        GlassShared::GlassModulePath::NativeModuleArch());
             };
             tryValue(HKEY_LOCAL_MACHINE, machineView, valName);
             if (path.empty()) tryValue(HKEY_LOCAL_MACHINE, machineView, L"InstallPath");
@@ -209,7 +229,7 @@ namespace
         if (!root || !root[0] || !IsRegistryShellExtensionRegistered())
             return false;
         const std::wstring expected=GlassShared::GlassModulePath::ResolveGlassModulePath(
-            root,L"GlassShellExt.dll",GlassShared::GlassModulePath::NativeModuleArch());
+            root,GlassShared::GlassShellMenu::kShellExtRelativePath,GlassShared::GlassModulePath::NativeModuleArch());
         if (expected.empty())
             return false;
         const std::wstring key=std::wstring(L"Software\\Classes\\CLSID\\")+
@@ -239,21 +259,68 @@ namespace
         return false;
     }
 
-    void RemoveLegacyContextMenuHandlerOnly() noexcept
-    {
-        Shared::GlassShellRegistration::RemoveLegacyContextMenuHandler();
-    }
-
-    void RemoveLegacyContextMenuHandlerForUnregister(const wchar_t* exactPlatformRoot = nullptr) noexcept
-    {
-        RemoveLegacyContextMenuHandlerOnly();
-        (void)RunRegsvr32(true, exactPlatformRoot);
-        RemoveLegacyContextMenuHandlerOnly();
-    }
-
     [[nodiscard]] bool IsWindows11OrGreater() noexcept
     {
         return Shared::SystemHelper::g_buildNumber >= 22000;
+    }
+
+    // Rule: the classic Win32 menu (HKCU ContextMenuHandlers + CLSID\InprocServer32) is
+    // created and removed only by GlassShellExt.dll itself — DllRegisterServer /
+    // DllUnregisterServer run through regsvr32. This helper launches regsvr32 for the
+    // bundled DLL under the install root and reads the keys back; it never writes them.
+    // Win10: the only registration. Win11: fallback when the sparse package cannot be
+    // registered; the caller keeps the two variants mutually exclusive.
+    [[nodiscard]] bool RegisterClassicViaRegsvr32(const wchar_t* exactPlatformRoot) noexcept
+    {
+        wchar_t dllPath[MAX_PATH]{};
+        if (!ResolveBundledGlassShellExtDll(dllPath, _countof(dllPath), exactPlatformRoot))
+        {
+            DebugLog(DBG_ERROR, L"[GlassSettings][ShellExt] classic: GlassShellExt.dll не найден");
+            return false;
+        }
+
+        if (!RunRegsvr32(false, exactPlatformRoot))
+        {
+            DebugLog(DBG_ERROR, L"[GlassSettings][ShellExt] classic: regsvr32 /s вернул ошибку (%ls)", dllPath);
+            return false;
+        }
+
+        wchar_t actual[MAX_PATH]{};
+        const bool verified = IsRegistryShellExtensionRegistered() &&
+            Shared::GlassShellRegistration::TryGetLegacyContextMenuHandlerModule(actual, _countof(actual)) &&
+            _wcsicmp(actual, dllPath) == 0;
+        DebugLog(verified ? DBG_IMPORTANT : DBG_ERROR, L"[GlassSettings][ShellExt] classic: %ls (%ls)",
+            verified ? L"зарегистрировано через regsvr32" : L"не подтверждено после regsvr32", dllPath);
+        return verified;
+    }
+
+    // Removes the classic registration through DllUnregisterServer of the bundled DLL.
+    // regsvr32 is never run for the module the keys point to: HKCU is user-writable and
+    // this helper runs elevated. The single exception to "only the DLL touches the keys"
+    // is a dangling registration with no bundled DLL to run — those keys of our own
+    // CLSID are deleted directly, because nothing else could ever remove them.
+    [[nodiscard]] bool UnregisterClassicViaRegsvr32(const wchar_t* exactPlatformRoot = nullptr) noexcept
+    {
+        if (!IsRegistryShellExtensionRegistered())
+            return true;
+
+        wchar_t dllPath[MAX_PATH]{};
+        if (ResolveBundledGlassShellExtDll(dllPath, _countof(dllPath), exactPlatformRoot))
+        {
+            if (!RunRegsvr32(true, exactPlatformRoot))
+                DebugLog(DBG_WARNING, L"[GlassSettings][ShellExt] classic: regsvr32 /u /s вернул ошибку (%ls)", dllPath);
+        }
+        else
+        {
+            DebugLog(DBG_WARNING,
+                L"[GlassSettings][ShellExt] classic: GlassShellExt.dll отсутствует — висячие ключи нашего CLSID удаляются напрямую");
+            Shared::GlassShellRegistration::RemoveLegacyContextMenuHandler();
+        }
+
+        const bool gone = !IsRegistryShellExtensionRegistered();
+        if (!gone)
+            DebugLog(DBG_ERROR, L"[GlassSettings][ShellExt] classic: регистрация осталась после снятия");
+        return gone;
     }
 
     void CleanupLegacySparseKnownFlags() noexcept
@@ -283,15 +350,18 @@ namespace
         return sparsePm && !IsRegistryShellExtensionRegistered();
     }
 
-    void VerifyWin11RegistrationHasNoLegacyHandlers() noexcept
+    // Compact menu is live: a classic registration (our own fallback from an earlier run
+    // without certificate trust) would duplicate the items in the legacy menu.
+    void RemoveClassicAfterSparseSuccess(const wchar_t* exactPlatformRoot) noexcept
     {
         if (!IsRegistryShellExtensionRegistered())
             return;
 
-        DebugLog(
-            DBG_WARNING,
-            L"[GlassSettings][ShellExt] Win11: после register остались legacy ContextMenuHandlers");
-        RemoveLegacyContextMenuHandlerOnly();
+        DebugLog(DBG_IMPORTANT,
+            L"[GlassSettings][ShellExt] Win11: sparse зарегистрирован — снимаем классическую регистрацию (regsvr32 /u)");
+        if (!UnregisterClassicViaRegsvr32(exactPlatformRoot))
+            DebugLog(DBG_WARNING,
+                L"[GlassSettings][ShellExt] Win11: после register остались legacy ContextMenuHandlers");
     }
 
     [[nodiscard]] bool IsWin11SparseUnregisterComplete() noexcept
@@ -306,7 +376,8 @@ namespace
                !GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser();
     }
 
-    [[nodiscard]] bool WaitForBundledRegistrationState(bool expectedRegistered, DWORD timeoutMs, DWORD pollMs) noexcept
+    [[nodiscard]] bool WaitForBundledRegistrationState(bool expectedRegistered, bool classicOnWin11,
+        DWORD timeoutMs, DWORD pollMs) noexcept
     {
         const DWORD step = pollMs == 0 ? 250 : pollMs;
         const DWORD started = GetTickCount();
@@ -315,9 +386,13 @@ namespace
             const bool win11RegisterWait = expectedRegistered && IsWindows11OrGreater();
             const bool win11UnregisterWait = !expectedRegistered && IsWindows11OrGreater();
 
-            if (win11RegisterWait)
+            if (win11RegisterWait && classicOnWin11)
             {
-                RemoveLegacyContextMenuHandlerOnly();
+                if (IsRegistryShellExtensionRegistered())
+                    return true;
+            }
+            else if (win11RegisterWait)
+            {
                 if (IsWin11SparseRegistrationHealthy(
                         GlassSettings::ShellSparsePackage::IsSparsePackageInstalledForCurrentUser()))
                     return true;
@@ -356,8 +431,8 @@ namespace
         case GlassSettings::ShellSparsePackage::SparsePackageError::ArtifactsMissing:
             SetLastOpMessage(OpMessageId::SparseArtifactsMissing);
             break;
-        case GlassSettings::ShellSparsePackage::SparsePackageError::DevCertFailed:
-            SetLastOpMessage(OpMessageId::SparseDevCertFailed);
+        case GlassSettings::ShellSparsePackage::SparsePackageError::SignerNotTrusted:
+            SetLastOpMessage(OpMessageId::SparseSignerNotTrusted);
             break;
         case GlassSettings::ShellSparsePackage::SparsePackageError::DeploymentFailed:
             SetLastOpMessage(OpMessageId::SparseDeploymentFailed);
@@ -371,37 +446,45 @@ namespace
         }
     }
 
-    [[nodiscard]] bool RegisterBundledDllQuietImpl(bool provisionDevCertificate = true,
-        const wchar_t* exactPlatformRoot = nullptr) noexcept
+    [[nodiscard]] RegisterOutcome RegisterBundledDllQuietImpl(const wchar_t* exactPlatformRoot = nullptr) noexcept
     {
         SetLastOpMessage(OpMessageId::None);
         if (IsWindows11OrGreater())
         {
-            if (!GlassSettings::ShellSparsePackage::RegisterSparsePackageQuiet(provisionDevCertificate, exactPlatformRoot))
+            if (GlassSettings::ShellSparsePackage::RegisterSparsePackageQuiet(exactPlatformRoot))
             {
-                DebugLog(
-                    DBG_ERROR,
-                    L"[GlassSettings][ShellExt] register: sparse package failed (Win11, без regsvr32 fallback)");
-                SetLastOpMessageFromSparseError();
-                return false;
+                RemoveClassicAfterSparseSuccess(exactPlatformRoot);
+                SetLastOpMessage(OpMessageId::Success);
+                return RegisterOutcome::Registered;
             }
 
-            if (provisionDevCertificate) {
-                RemoveLegacyContextMenuHandlerOnly();
-                VerifyWin11RegistrationHasNoLegacyHandlers();
+            SetLastOpMessageFromSparseError();
+            const auto sparseReason = static_cast<OpMessageId>(g_lastOpMessageId.load(std::memory_order_acquire));
+            if (sparseReason == OpMessageId::SparseExternalLocationConflict)
+            {
+                // The package exists for another root/user: a classic entry would hide the conflict.
+                DebugLog(DBG_ERROR, L"[GlassSettings][ShellExt] register: sparse conflict, без classic fallback");
+                return RegisterOutcome::Failed;
             }
-            SetLastOpMessage(OpMessageId::Success);
-            return true;
+
+            DebugLog(DBG_WARNING,
+                L"[GlassSettings][ShellExt] register: sparse package failed (id=%d, hr=0x%08X) — classic fallback",
+                static_cast<int>(sparseReason),
+                static_cast<unsigned>(GlassSettings::ShellSparsePackage::GetLastSparseDeploymentHr()));
+            if (!RegisterClassicViaRegsvr32(exactPlatformRoot))
+                return RegisterOutcome::Failed;
+            // g_lastOpMessageId keeps the sparse reason (why the compact menu is unavailable).
+            return RegisterOutcome::ClassicFallback;
         }
 
         if (!RunRegsvr32(false, exactPlatformRoot))
         {
             SetLastOpMessage(OpMessageId::FailedToRegister);
-            return false;
+            return RegisterOutcome::Failed;
         }
 
         SetLastOpMessage(OpMessageId::Success);
-        return true;
+        return RegisterOutcome::Registered;
     }
 
     [[nodiscard]] bool UnregisterBundledDllQuietImpl(const wchar_t* exactPlatformRoot = nullptr) noexcept
@@ -413,7 +496,14 @@ namespace
             // The versioned Setup/Unins route must never use the general
             // cross-user/package-stub cleanup used by the Settings UI.
             if (IsWindows11OrGreater())
-                return GlassSettings::ShellSparsePackage::UnregisterInstallerSparsePackageQuiet(exactPlatformRoot);
+            {
+                const bool sparseOk =
+                    GlassSettings::ShellSparsePackage::UnregisterInstallerSparsePackageQuiet(exactPlatformRoot);
+                // Classic fallback of this root (the pre-check refused foreign keys).
+                if (HasMatchingLegacyShellRegistration(exactPlatformRoot))
+                    (void)UnregisterClassicViaRegsvr32(exactPlatformRoot);
+                return sparseOk && !HasMatchingLegacyShellRegistration(exactPlatformRoot);
+            }
             if (!HasExistingShellRegistrationKeys())
                 return true;
             return HasMatchingLegacyShellRegistration(exactPlatformRoot) &&
@@ -436,7 +526,7 @@ namespace
                 }
             }
 
-            RemoveLegacyContextMenuHandlerOnly();
+            (void)UnregisterClassicViaRegsvr32(exactPlatformRoot);
 
             if (IsRegistryShellExtensionRegistered())
             {
@@ -468,8 +558,7 @@ namespace
             }
         }
 
-        if (IsRegistryShellExtensionRegistered())
-            RemoveLegacyContextMenuHandlerForUnregister(exactPlatformRoot);
+        (void)UnregisterClassicViaRegsvr32(exactPlatformRoot);
 
         if (IsRegistryShellExtensionRegistered())
         {
@@ -497,11 +586,22 @@ namespace
             return 1;
         }
 
-        bool ok = params->registerNotUnregister ? RegisterBundledDllQuietImpl() : UnregisterBundledDllQuietImpl();
+        bool ok = false;
+        bool classic = false;
+        if (params->registerNotUnregister)
+        {
+            const RegisterOutcome outcome = RegisterBundledDllQuietImpl();
+            ok = outcome != RegisterOutcome::Failed;
+            classic = outcome == RegisterOutcome::ClassicFallback;
+        }
+        else
+        {
+            ok = UnregisterBundledDllQuietImpl();
+        }
         if (ok && params->registerNotUnregister)
-            ok = WaitForBundledRegistrationState(true, 15000, 250);
+            ok = WaitForBundledRegistrationState(true, classic, 15000, 250);
         else if (ok && !params->registerNotUnregister)
-            ok = WaitForBundledRegistrationState(false, 3000, 250);
+            ok = WaitForBundledRegistrationState(false, false, 3000, 250);
 
         if (!ok && static_cast<OpMessageId>(g_lastOpMessageId.load(std::memory_order_acquire)) == OpMessageId::None)
             SetLastOpMessage(params->registerNotUnregister ? OpMessageId::FailedToRegister : OpMessageId::FailedToUnregister);
@@ -622,9 +722,32 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterW(
         // Explicit sentinel: distinguish an intentional no-op from rundll32 loader errors.
         ::ExitProcess(0x47505245u);
     }
-    const bool ok = unregister ? UnregisterBundledDllQuietImpl() : RegisterBundledDllQuietImpl(!setup);
+    const bool ok = unregister ? UnregisterBundledDllQuietImpl()
+                               : RegisterBundledDllQuietImpl() != RegisterOutcome::Failed;
     GlassSettings_NotifyShellCachesAfterRegistrationChange();
     ::ExitProcess(ok ? 0u : 1u);
+}
+
+namespace
+{
+    // Exit code of the installer helper after a failed register/unregister.
+    // The installer only shows it in its log and on the finish page, so the
+    // code must stay distinguishable from the no-op sentinels (0x4750xxxx with
+    // non-zero bits 8..15), from the classic-fallback success code
+    // (0x47504C00 | OpMessageId, see kSetupClassicFallbackBase) and from
+    // rundll32 loader failures (small values):
+    //   0x8xxxxxxx          - HRESULT of the failed package deployment call;
+    //   0x47500000 | id     - OpMessageId when the failure had no HRESULT
+    //                         (missing artifacts, regsvr32 failure, ...);
+    //   1                   - nothing more specific is known.
+    [[nodiscard]] DWORD SetupHelperFailureExitCode() noexcept
+    {
+        const HRESULT hr = GlassSettings::ShellSparsePackage::GetLastSparseDeploymentHr();
+        if (FAILED(hr)) return static_cast<DWORD>(hr);
+        const int id = g_lastOpMessageId.load(std::memory_order_acquire);
+        if (id <= static_cast<int>(OpMessageId::Success) || id > 0xFF) return 1u;
+        return 0x47500000u | static_cast<DWORD>(id);
+    }
 }
 
 // Versioned entry point: unlike the legacy GlassSettings UI API, the installer
@@ -652,7 +775,11 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSet
             if (sparse==InstallerSparseState::Matching && !keys && !ExplorerCommandsBlockedOrUnknown() &&
                 GlassSettings::ShellSparsePackage::InstallerSparseHasVerifiedMenu(root.c_str()))
                 ::ExitProcess(kExisting);
-            if (sparse!=InstallerSparseState::Absent || keys)
+            // Our own classic fallback for this exact root (earlier run without certificate
+            // trust) is not a conflict: the sparse package is attempted again and, on success,
+            // replaces the classic keys; otherwise they are rewritten in place.
+            const bool classicOurs=keys && HasMatchingLegacyShellRegistration(root.c_str());
+            if (sparse!=InstallerSparseState::Absent || (keys && !classicOurs))
                 ::ExitProcess(kConflict);
         }
         else if (keys)
@@ -670,7 +797,9 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSet
         {
             using GlassSettings::ShellSparsePackage::InstallerSparseState;
             const auto sparse=GlassSettings::ShellSparsePackage::QueryInstallerSparseState(root.c_str());
-            if ((sparse!=InstallerSparseState::Absent && sparse!=InstallerSparseState::Matching) || keys)
+            const bool classicOurs=keys && HasMatchingLegacyShellRegistration(root.c_str());
+            if ((sparse!=InstallerSparseState::Absent && sparse!=InstallerSparseState::Matching) ||
+                (keys && !classicOurs))
                 ::ExitProcess(kConflict);
         }
         else if (keys && !HasMatchingLegacyShellRegistration(root.c_str()))
@@ -678,8 +807,96 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSet
             ::ExitProcess(kConflict);
         }
     }
-    const bool ok = unregister ? UnregisterBundledDllQuietImpl(root.c_str())
-                               : RegisterBundledDllQuietImpl(false, root.c_str());
+    DWORD exitCode = 0;
+    if (unregister)
+    {
+        if (!UnregisterBundledDllQuietImpl(root.c_str()))
+            exitCode = SetupHelperFailureExitCode();
+    }
+    else
+    {
+        switch (RegisterBundledDllQuietImpl(root.c_str()))
+        {
+        case RegisterOutcome::Registered:
+            break;
+        case RegisterOutcome::ClassicFallback:
+            // Success with a reduced menu: the installer reports why the compact menu is unavailable.
+            exitCode = kSetupClassicFallbackBase |
+                (static_cast<DWORD>(g_lastOpMessageId.load(std::memory_order_acquire)) & 0xFFu);
+            break;
+        default:
+            exitCode = SetupHelperFailureExitCode();
+            break;
+        }
+    }
     GlassSettings_NotifyShellCachesAfterRegistrationChange();
-    ::ExitProcess(ok ? 0u : 1u);
+    ::ExitProcess(exitCode);
+}
+
+// Trusts the author certificate that signs GlassShellSparse.msix (LocalMachine\TrustedPeople) on the
+// user's explicit choice — the GlassSettings notice button. Returns
+// ShellSparsePackage::SparseSignerTrustResult (0 added, 1 already trusted, 2 msix missing, 3 unsigned,
+// 4 signer is not the author, 5 store failed — lastErrorOut, 6 unknown) or 7 on Windows 10, where the
+// sparse package and therefore the certificate are not used. subjectOut (optional) receives the signer.
+extern "C" __declspec(dllexport) DWORD WINAPI GlassSettings_TrustShellSignerV1(
+    wchar_t* subjectOut, DWORD cchSubject, DWORD* lastErrorOut) noexcept
+{
+    if (subjectOut && cchSubject)
+        subjectOut[0] = L'\0';
+    if (lastErrorOut)
+        *lastErrorOut = 0;
+    if (!IsWindows11OrGreater())
+        return 7u;
+    return static_cast<DWORD>(
+        GlassSettings::ShellSparsePackage::TrustSparseSigner(nullptr, subjectOut, cchSubject, lastErrorOut));
+}
+
+namespace
+{
+    // Exit code base of GlassSettings_ShellSignerTrustSetupV1W failures: 0x47535400 | SparseSignerTrustResult.
+    constexpr DWORD kSetupSignerTrustFailureBase = 0x47535400u;
+
+    bool ParseInstallerRootArgument(LPWSTR cmdLine, std::wstring& root) noexcept
+    {
+        root.clear();
+        try
+        {
+            const std::wstring args = L"GlassShellHelper " + ReadRundllCommand(cmdLine);
+            int count = 0;
+            LPWSTR* values = ::CommandLineToArgvW(args.c_str(), &count);
+            if (!values) return false;
+            struct Guard { LPWSTR* p; ~Guard() { ::LocalFree(p); } } guard{values};
+            if (count != 3 || _wcsicmp(values[1], L"/installroot") != 0 || !values[2][0] ||
+                ::PathIsRelativeW(values[2])) return false;
+            root = values[2];
+            return true;
+        }
+        catch (...) { root.clear(); return false; }
+    }
+}
+
+// Setup entry point (rundll32, elevated): the user accepted the certificate page, so the signer of
+// <root>\GlassShellSparse\GlassShellSparse.msix is added to LocalMachine\TrustedPeople before the
+// menu is registered. Exit code 0 = added or already trusted; 0x47535400 | result otherwise; 1 = bad
+// arguments. Setup turns a failure into a finish-page note, never into a rollback.
+extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellSignerTrustSetupV1W(
+    HWND, HINSTANCE, LPWSTR cmdLine, int) noexcept
+{
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_ShellSignerTrustSetupV1W=_GlassSettings_ShellSignerTrustSetupV1W@16")
+#endif
+    std::wstring root;
+    if (!ParseInstallerRootArgument(cmdLine, root)) ::ExitProcess(1u);
+    using GlassSettings::ShellSparsePackage::SparseSignerTrustResult;
+    wchar_t subject[256]{};
+    DWORD lastError = 0;
+    const SparseSignerTrustResult result =
+        GlassSettings::ShellSparsePackage::TrustSparseSigner(root.c_str(), subject, _countof(subject), &lastError);
+    DebugLog(result == SparseSignerTrustResult::Added || result == SparseSignerTrustResult::AlreadyTrusted
+                 ? DBG_IMPORTANT : DBG_ERROR,
+        L"[GlassSettings][ShellSparse] setup trust signer: result=%d lastError=%lu subject=%ls root=%ls",
+        static_cast<int>(result), lastError, subject[0] ? subject : L"-", root.c_str());
+    if (result == SparseSignerTrustResult::Added || result == SparseSignerTrustResult::AlreadyTrusted)
+        ::ExitProcess(0u);
+    ::ExitProcess(kSetupSignerTrustFailureBase | (static_cast<DWORD>(result) & 0xFFu));
 }

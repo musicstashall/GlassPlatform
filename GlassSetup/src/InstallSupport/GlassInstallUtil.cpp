@@ -66,7 +66,7 @@ bool HasMatchingLegacyShellRegistration(const std::wstring& root) noexcept {
     const std::wstring key=std::wstring(L"Software\\Classes\\CLSID\\")+kClsidStringBraced+L"\\InprocServer32";
     wchar_t value[32768]{};DWORD bytes=sizeof(value);
     return RegGetValueW(HKEY_CURRENT_USER,key.c_str(),nullptr,RRF_RT_REG_SZ,nullptr,value,&bytes)==ERROR_SUCCESS &&
-        SameInstallPath(value,TrimTrailingSlashes(root)+L"\\GlassShellExt.dll");
+        SameInstallPath(value,TrimTrailingSlashes(root)+L"\\"+kShellExtRelativePath);
 }
 
 enum class RegistryPathRead { Missing, Found, Error };
@@ -144,6 +144,40 @@ bool DeleteRegistryValue(HKEY root, const wchar_t* subKey, const wchar_t* valueN
     RegCloseKey(key);
     return true;
 }
+
+namespace {
+// Removes the key when no values and no subkeys remain. DeleteRegistryValue keeps
+// empty keys for rollback fidelity; this runs at the end of an uninstall instead:
+// the MSI packages leave HKCU\Software\GlassPlatform (Wow6432Node for the 32-bit
+// package) behind after removing their RegistryValue component, and every
+// install/uninstall cycle would recreate a stray empty key.
+bool DeleteRegistryKeyIfEmpty(HKEY root, const wchar_t* subKey, REGSAM sam) noexcept {
+    HKEY key=nullptr;
+    LSTATUS status=RegOpenKeyExW(root,subKey,0,KEY_READ|sam,&key);
+    if (status==ERROR_FILE_NOT_FOUND || status==ERROR_PATH_NOT_FOUND) return true;
+    if (status!=ERROR_SUCCESS) { SetLastError(status); return false; }
+    wchar_t name[2]{}; DWORD cch=2;
+    const LSTATUS valueEnum=RegEnumValueW(key,0,name,&cch,nullptr,nullptr,nullptr,nullptr);
+    cch=2;
+    const LSTATUS keyEnum=RegEnumKeyExW(key,0,name,&cch,nullptr,nullptr,nullptr,nullptr);
+    RegCloseKey(key);
+    if (valueEnum!=ERROR_NO_MORE_ITEMS || keyEnum!=ERROR_NO_MORE_ITEMS) return true;
+    status=RegDeleteKeyExW(root,subKey,sam,0);
+    if (status!=ERROR_SUCCESS && status!=ERROR_FILE_NOT_FOUND && status!=ERROR_PATH_NOT_FOUND) {
+        SetLastError(status); return false;
+    }
+    return true;
+}
+
+// Best-effort sweep of the install-path keys in every view the writers use.
+void RemoveEmptyInstallPathKeys() noexcept {
+    (void)DeleteRegistryKeyIfEmpty(HKEY_CURRENT_USER,L"Software\\GlassPlatform",KEY_WOW64_64KEY);
+    (void)DeleteRegistryKeyIfEmpty(HKEY_CURRENT_USER,L"Software\\GlassPlatform",KEY_WOW64_32KEY);
+    (void)DeleteRegistryKeyIfEmpty(HKEY_CURRENT_USER,L"Software\\Wow6432Node\\GlassPlatform",KEY_WOW64_64KEY);
+    (void)DeleteRegistryKeyIfEmpty(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",KEY_WOW64_64KEY);
+    (void)DeleteRegistryKeyIfEmpty(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",KEY_WOW64_32KEY);
+}
+} // namespace
 
 std::wstring EnsureExtractedUnlockerX64() noexcept {
     std::lock_guard<std::mutex> lock(g_unlockerMutex);
@@ -304,6 +338,18 @@ bool IsOs64Bit() noexcept {
     BOOL wow = FALSE;
     return IsWow64Process(GetCurrentProcess(), &wow) && wow != FALSE;
 #endif
+}
+
+bool IsWindows11OrGreater() noexcept {
+    // RtlGetVersion is not subject to the manifest-based GetVersionEx lie.
+    using RtlGetVersionFn = LONG (WINAPI*)(PRTL_OSVERSIONINFOW);
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    const auto fn = ntdll ? reinterpret_cast<RtlGetVersionFn>(GetProcAddress(ntdll, "RtlGetVersion")) : nullptr;
+    if (!fn) return false;
+    RTL_OSVERSIONINFOW vi{};
+    vi.dwOSVersionInfoSize = sizeof(vi);
+    if (fn(&vi) != 0) return false;
+    return vi.dwMajorVersion > 10 || (vi.dwMajorVersion == 10 && vi.dwBuildNumber >= 22000);
 }
 
 std::wstring TrimTrailingSlashes(std::wstring path) {
@@ -1149,6 +1195,19 @@ bool PeMatches(const std::wstring& path, WORD machine, const char* exportName) n
     return ok;
 }
 
+namespace {
+std::wstring InstalledSecureUxThemeNativeDll(
+    GlassShared::GlassPlatformTask::PlatformArch arch,
+    const std::wstring& x64Dir,const std::wstring& x86Dir,const char* exportName) noexcept {
+    const bool x64=arch==GlassShared::GlassPlatformTask::PlatformArch::X64;
+    const WORD machine=x64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386;
+    const std::wstring& root=x64?x64Dir:x86Dir;
+    if(root.empty())return {};
+    const std::wstring dll=TrimTrailingSlashes(root)+L"\\GlassSettings\\GlassSettings.Native.dll";
+    return PeMatches(dll,machine,exportName)?dll:std::wstring();
+}
+}
+
 std::wstring NativeDllForArch(
     GlassShared::GlassPlatformTask::PlatformArch arch,
     const std::wstring& x64Dir,
@@ -1330,13 +1389,16 @@ bool ClearPlatformInstallPath(bool x64) noexcept {
     if (!DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", explicitVal, 0) ||
         !DeleteRegistryValue(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", explicitVal, lmSam) ||
         !DeleteRegistryValue(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPath", lmSam)) return false;
+    bool ok=true;
     if (x64 == IsOs64Bit()) {
-        return DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPath", 0);
+        ok=DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPath", 0);
+    } else if (!x64 && IsOs64Bit()) {
+        ok=DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath", 0);
     }
-    if (!x64 && IsOs64Bit()) {
-        return DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath", 0);
-    }
-    return true;
+    // Uninstalling the MSI removes its RegistryValue but leaves the key; drop the
+    // empty install-path keys so no stray HKCU\Software\Wow6432Node\GlassPlatform lingers.
+    RemoveEmptyInstallPathKeys();
+    return ok;
 }
 
 bool QueryOpenGlassInstallPath(std::wstring& out) noexcept {
@@ -1427,35 +1489,105 @@ void DeleteStartMenuShortcut() noexcept {
     removeIn(FOLDERID_Programs);
 }
 
+namespace {
+
+// OpMessageId of GlassSettings/Native/ShellExtensionOps.cpp as technical text.
+const wchar_t* ShellHelperReasonText(DWORD id) noexcept {
+    switch (id) {
+    case 7: return L"sparse package artifacts are missing";
+    case 8: return L"the msix signer certificate is not trusted on this computer";
+    case 9: return L"package deployment failed";
+    case 10: return L"registration failed";
+    case 11: return L"unregistration failed";
+    case 12: return L"external location conflict";
+    default: return nullptr;
+    }
+}
+
+// Technical description of a failed GlassSettings_ShellExtRegisterSetupV1W run.
+// Mirrors SetupHelperFailureExitCode() in GlassSettings/Native/ShellExtensionOps.cpp:
+// 0x8xxxxxxx = HRESULT of the deployment call, 0x47500000|id = OpMessageId
+// without an HRESULT, 1 = generic failure. 0x47504C00|id (classic fallback)
+// is a success code and is handled by the caller.
+std::wstring DescribeShellHelperExit(DWORD exitCode, bool started, bool completed) {
+    if (!started) return L"helper process could not be started";
+    if (!completed) return L"helper process did not finish within 45 s";
+    if ((exitCode & 0xFFFFFF00u)==0x47500000u) {
+        const wchar_t* reason=ShellHelperReasonText(exitCode & 0xFFu);
+        wchar_t text[160]{};
+        if (reason) swprintf_s(text,L"helper reported: %s (0x%08lX)",reason,exitCode);
+        else swprintf_s(text,L"helper exit code 0x%08lX",exitCode);
+        return text;
+    }
+    if (exitCode & 0x80000000u) {
+        wchar_t message[512]{};
+        const DWORD len=FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,nullptr,exitCode,0,
+            message,static_cast<DWORD>(std::size(message)),nullptr);
+        std::wstring detail=L"HRESULT 0x";
+        wchar_t hex[16]{};
+        swprintf_s(hex,L"%08lX",exitCode);
+        detail+=hex;
+        if (len) {
+            std::wstring system(message,len);
+            while (!system.empty() && (system.back()==L'\r' || system.back()==L'\n' || system.back()==L' ')) system.pop_back();
+            if (!system.empty()) detail+=L" - "+system;
+        }
+        return detail;
+    }
+    wchar_t text[64]{};
+    swprintf_s(text,L"helper exit code %lu",exitCode);
+    return text;
+}
+
+} // namespace
+
+std::wstring DescribeShellClassicFallback(DWORD reason) {
+    const wchar_t* text=ShellHelperReasonText(reason);
+    wchar_t buffer[200]{};
+    if (text) swprintf_s(buffer,L"classic menu registered; sparse package: %s (0x%08lX)",text,0x47504C00u|(reason & 0xFFu));
+    else swprintf_s(buffer,L"classic menu registered; sparse package failed (0x%08lX)",0x47504C00u|(reason & 0xFFu));
+    return buffer;
+}
+
 bool InvokeShellExtRegistration(
     bool registerExtension,
     const std::wstring& x64Dir,
     const std::wstring& x86Dir,
     bool* registrationMayHaveChanged,
-    bool* registrationConflict) noexcept {
+    bool* registrationConflict,
+    std::wstring* failureDetail,
+    DWORD* classicFallbackReason) noexcept {
     if (registrationMayHaveChanged) *registrationMayHaveChanged=false;
     if (registrationConflict) *registrationConflict=false;
+    if (classicFallbackReason) *classicFallbackReason=0;
+    auto fail=[failureDetail](const wchar_t* detail) noexcept {
+        if (failureDetail) {
+            try { *failureDetail=detail; } catch (...) {}
+        }
+        return false;
+    };
     const bool os64 = IsOs64Bit();
     const auto arch = os64
         ? GlassShared::GlassPlatformTask::PlatformArch::X64
         : GlassShared::GlassPlatformTask::PlatformArch::X86;
     const std::wstring& selectedRoot=os64 ? x64Dir : x86Dir;
     const std::wstring root=TrimTrailingSlashes(selectedRoot);
-    if (root.empty() || root.find(L'"')!=std::wstring::npos || !IsSafeInstallPath(root)) return false;
+    if (root.empty() || root.find(L'"')!=std::wstring::npos || !IsSafeInstallPath(root))
+        return fail(L"install root is empty or unsafe");
     const std::wstring dll = NativeDllForArch(arch, x64Dir, x86Dir);
     const WORD machine=os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386;
     if (dll.empty() || !PeMatches(dll,machine,kInstallerShellExport)) {
         // Windows 11 requires the sparse package; do not silently substitute legacy regsvr32.
         // On 32-bit Windows 10, legacy registration is the supported fallback.
-        if (os64) return false;
-        const std::wstring shellExt = root + L"\\GlassShellExt.dll";
-        if (!IsSafeInstallPath(shellExt) || !PathFileExistsW(shellExt.c_str())) return false;
+        if (os64) return fail(L"GlassSettings.Native.dll with the setup export was not found");
+        const std::wstring shellExt = root + L"\\" + GlassShared::GlassShellMenu::kShellExtRelativePath;
+        if (!IsSafeInstallPath(shellExt) || !PathFileExistsW(shellExt.c_str())) return fail(L"GlassShellSparse\\GlassShellExt.dll was not found");
         if (HasExistingShellRegistrationKeys()) {
             const bool matches=HasMatchingLegacyShellRegistration(root);
             if (!matches) {
                 GlassInstallLog::Line(L"ShellExt: existing legacy registration does not match the selected root");
                 if (registrationConflict) *registrationConflict=true;
-                return false;
+                return fail(L"existing legacy registration points to another folder");
             }
             if (registerExtension) return true;
         }
@@ -1467,10 +1599,18 @@ bool InvokeShellExtRegistration(
         DWORD exitCode=1;
         const bool result=RunHiddenCommand(command,&exitCode,45000,&started) && exitCode==0;
         if (registrationMayHaveChanged) *registrationMayHaveChanged=started;
-        return result;
+        GlassInstallLog::LineFormat(L"ShellExt %s via regsvr32: started=%d exit=%lu",
+            registerExtension ? L"register" : L"unregister", started ? 1 : 0, exitCode);
+        if (!result) {
+            if (!started) return fail(L"regsvr32 could not be started");
+            wchar_t detail[64]{};
+            swprintf_s(detail,L"regsvr32 exit code %lu",exitCode);
+            return fail(detail);
+        }
+        return true;
     }
     const std::wstring rundll = os64 ? NativeRundll64() : RundllPathForTaskArch(arch);
-    if (rundll.empty()) return false;
+    if (rundll.empty()) return fail(L"rundll32.exe was not found");
     std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\",GlassSettings_ShellExtRegisterSetupV1W ";
     cmd += registerExtension ? L"/register" : L"/unregister";
     cmd += L" /installroot \"" + root + L"\"";
@@ -1479,13 +1619,165 @@ bool InvokeShellExtRegistration(
     const bool ran = RunHiddenCommand(cmd, &exitCode, 45000, &started, &completed);
     constexpr DWORD kShellAlreadyRegistered=0x47505245; // Verified existing registration.
     constexpr DWORD kShellRegistrationConflict=0x47504346; // Preserved, no change made.
+    constexpr DWORD kShellClassicFallbackBase=0x47504C00; // Registered the classic menu; low byte = reason.
     const bool alreadyRegistered=registerExtension && completed && exitCode==kShellAlreadyRegistered;
     const bool conflict=completed && exitCode==kShellRegistrationConflict;
+    const bool classic=registerExtension && completed && (exitCode & 0xFFFFFF00u)==kShellClassicFallbackBase;
     if (registrationMayHaveChanged) *registrationMayHaveChanged=started && !alreadyRegistered && !conflict;
-    GlassInstallLog::LineFormat(L"ShellExt %s via Native.dll: ran=%d exit=%lu existing=%d conflict=%d",
-        registerExtension ? L"register" : L"unregister", ran ? 1 : 0, exitCode, alreadyRegistered?1:0, conflict?1:0);
+    GlassInstallLog::LineFormat(L"ShellExt %s via Native.dll: ran=%d exit=0x%08lX existing=%d conflict=%d classic=%d",
+        registerExtension ? L"register" : L"unregister", ran ? 1 : 0, exitCode, alreadyRegistered?1:0, conflict?1:0, classic?1:0);
     if (registrationConflict) *registrationConflict=conflict;
-    return alreadyRegistered || (ran && exitCode == 0);
+    if (classic) {
+        const DWORD reason=exitCode & 0xFFu;
+        if (classicFallbackReason) *classicFallbackReason=reason ? reason : 10u;
+        GlassInstallLog::LineFormat(L"ShellExt: %s", DescribeShellClassicFallback(reason).c_str());
+        return true;
+    }
+    if (alreadyRegistered || (ran && exitCode == 0)) return true;
+    if (conflict) return fail(L"an existing or unverifiable registration was preserved");
+    const std::wstring detail=DescribeShellHelperExit(exitCode,started,completed);
+    GlassInstallLog::LineFormat(L"ShellExt %s failed: %s", registerExtension ? L"register" : L"unregister", detail.c_str());
+    return fail(detail.c_str());
+}
+
+bool InvokeShellSignerTrust(
+    const std::wstring& x64Dir,
+    const std::wstring& x86Dir,
+    std::wstring* failureDetail) noexcept {
+    auto fail=[failureDetail](const wchar_t* detail) noexcept {
+        if (failureDetail) {
+            try { *failureDetail=detail; } catch (...) {}
+        }
+        return false;
+    };
+    if (!IsOs64Bit() || !IsWindows11OrGreater()) return fail(L"not applicable: the author certificate is used only on Windows 11 x64");
+    const std::wstring root=TrimTrailingSlashes(x64Dir);
+    if (root.empty() || root.find(L'"')!=std::wstring::npos || !IsSafeInstallPath(root))
+        return fail(L"install root is empty or unsafe");
+    const std::wstring dll = NativeDllForArch(GlassShared::GlassPlatformTask::PlatformArch::X64, x64Dir, x86Dir);
+    if (dll.empty() || !PeMatches(dll,IMAGE_FILE_MACHINE_AMD64,kInstallerSignerTrustExport))
+        return fail(L"GlassSettings.Native.dll with the certificate export was not found");
+    const std::wstring rundll = NativeRundll64();
+    if (rundll.empty()) return fail(L"rundll32.exe was not found");
+    const std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\",GlassSettings_ShellSignerTrustSetupV1W /installroot \"" + root + L"\"";
+    DWORD exitCode = 1;
+    bool started=false,completed=false;
+    const bool ran = RunHiddenCommand(cmd, &exitCode, 45000, &started, &completed);
+    GlassInstallLog::LineFormat(L"Certificate: trust msix signer via Native.dll: ran=%d exit=0x%08lX", ran ? 1 : 0, exitCode);
+    if (ran && completed && exitCode == 0) return true;
+    if (!started) return fail(L"helper process could not be started");
+    if (!completed) return fail(L"helper process did not finish within 45 s");
+    // 0x47535400 | SparseSignerTrustResult (GlassSettings/Native/ShellSparsePackage.h).
+    constexpr DWORD kTrustFailureBase=0x47535400u;
+    if ((exitCode & 0xFFFFFF00u)==kTrustFailureBase) {
+        const wchar_t* reason=nullptr;
+        switch (exitCode & 0xFFu) {
+        case 2: reason=L"GlassShellSparse.msix was not found"; break;
+        case 3: reason=L"GlassShellSparse.msix is not signed"; break;
+        case 4: reason=L"the msix signer is not the author certificate; nothing was trusted"; break;
+        case 5: reason=L"LocalMachine\\TrustedPeople could not be opened or written"; break;
+        default: reason=L"the signer certificate could not be read"; break;
+        }
+        wchar_t text[200]{};
+        swprintf_s(text,L"helper reported: %s (0x%08lX)",reason,exitCode);
+        return fail(text);
+    }
+    wchar_t text[64]{};
+    swprintf_s(text,L"helper exit code 0x%08lX",exitCode);
+    return fail(text);
+}
+
+bool InvokeSecureUxThemeDeactivate(
+    const std::wstring& x64Dir,
+    const std::wstring& x86Dir,
+    SecureUxThemeDeactivateRun* run,
+    std::wstring* failureDetail) noexcept {
+    auto fail=[failureDetail](const wchar_t* detail) noexcept {
+        if (failureDetail) {
+            try { *failureDetail=detail; } catch (...) {}
+        }
+        return false;
+    };
+    if (run) *run=SecureUxThemeDeactivateRun{};
+    // The deactivation entry refuses WOW64, so the helper must match the OS bitness:
+    // the embedded x64 helper on x64, the installed x86 helper on 32-bit Windows.
+    const bool os64 = IsOs64Bit();
+    const auto arch = os64
+        ? GlassShared::GlassPlatformTask::PlatformArch::X64
+        : GlassShared::GlassPlatformTask::PlatformArch::X86;
+    const std::wstring dll = NativeDllForArch(arch, x64Dir, x86Dir);
+    const WORD machine=os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386;
+    if (dll.empty() || !PeMatches(dll,machine,kInstallerSecureUxThemeExport))
+        return fail(L"GlassSettings.Native.dll with the SecureUxTheme export was not found");
+    const std::wstring rundll = os64 ? NativeRundll64() : RundllPathForTaskArch(arch);
+    if (rundll.empty()) return fail(L"rundll32.exe was not found");
+    const std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\",GlassSettings_SecureUxThemeSetupV1W";
+    DWORD exitCode = 1;
+    bool started=false,completed=false;
+    const bool ran = RunHiddenCommand(cmd,&exitCode,45000,&started,&completed);
+    GlassInstallLog::LineFormat(L"SecureUxTheme: deactivate via Native.dll: ran=%d exit=0x%08lX",
+        ran?1:0,exitCode);
+    if (!ran) return fail(L"helper process could not be started");
+    if (!completed) return fail(L"helper process did not finish within 45 s");
+    // Bit 0 (bad arguments) and bit 3 (deactivation failed) are hard failures; the
+    // remaining bits are outcomes of a completed deactivation.
+    if ((exitCode & (1u|kSecureUxThemeExitDeactivateFailed)) != 0) {
+        wchar_t text[64]{};
+        swprintf_s(text,L"helper exit code 0x%08lX",exitCode);
+        return fail(text);
+    }
+    if (run) {
+        run->ran=true;
+        run->rebootRequired=(exitCode & kSecureUxThemeExitRebootRequired)!=0;
+        run->themeNotRestored=(exitCode & kSecureUxThemeExitThemeNotRestored)!=0;
+        run->skippedExternalInstall=(exitCode & kSecureUxThemeExitExternalInstall)!=0;
+    }
+    return true;
+}
+
+bool QuerySecureUxThemeState(const std::wstring& x64Dir,const std::wstring& x86Dir,
+    SecureUxThemeState* state,std::wstring* failureDetail) noexcept {
+    auto fail=[failureDetail](const wchar_t* detail) noexcept { if(failureDetail)try{*failureDetail=detail;}catch(...){} return false; };
+    if(state)*state=SecureUxThemeState::Conflict;
+    const bool os64=IsOs64Bit();
+    const auto arch=os64?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
+    const std::wstring dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,kInstallerSecureUxThemeQueryExport);
+    if(dll.empty())return fail(L"installed GlassSettings.Native.dll query helper was not found");
+    const std::wstring rundll=os64?NativeRundll64():RundllPathForTaskArch(arch);
+    if(rundll.empty())return fail(L"native rundll32.exe was not found");
+    const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemeQueryStateV1W";
+    DWORD exitCode=MAXDWORD;bool started=false,completed=false;
+    const bool ran=RunHiddenCommand(cmd,&exitCode,20000,&started,&completed);
+    GlassInstallLog::LineFormat(L"SecureUxTheme: query via Native.dll: ran=%d exit=%lu",ran?1:0,exitCode);
+    if(!ran||!started)return fail(L"query helper process could not be started");
+    if(!completed)return fail(L"query helper did not finish within 20 s");
+    if(exitCode>static_cast<DWORD>(SecureUxThemeState::Conflict))return fail(L"query helper returned an unknown state");
+    if(state)*state=static_cast<SecureUxThemeState>(exitCode);
+    return true;
+}
+
+bool InvokeSecureUxThemeActivate(const std::wstring& x64Dir,const std::wstring& x86Dir,
+    SecureUxThemeActivateRun* run,std::wstring* failureDetail) noexcept {
+    auto fail=[failureDetail](const wchar_t* detail) noexcept { if(failureDetail)try{*failureDetail=detail;}catch(...){} return false; };
+    if(run)*run=SecureUxThemeActivateRun{};
+    const bool os64=IsOs64Bit();
+    const auto arch=os64?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
+    const std::wstring dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,kInstallerSecureUxThemeActivateExport);
+    if(dll.empty())return fail(L"installed GlassSettings.Native.dll activation helper was not found");
+    const std::wstring rundll=os64?NativeRundll64():RundllPathForTaskArch(arch);
+    if(rundll.empty())return fail(L"native rundll32.exe was not found");
+    const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemeActivateSetupV1W";
+    DWORD exitCode=MAXDWORD;bool started=false,completed=false;
+    const bool ran=RunHiddenCommand(cmd,&exitCode,45000,&started,&completed);
+    GlassInstallLog::LineFormat(L"SecureUxTheme: activate via Native.dll: ran=%d exit=%lu",ran?1:0,exitCode);
+    if(!ran||!started)return fail(L"activation helper process could not be started");
+    if(!completed)return fail(L"activation helper did not finish within 45 s");
+    if(exitCode==kSecureUxThemeExitExternalInstall){if(run){run->ran=true;run->skippedExternalInstall=true;}return true;}
+    if(exitCode!=0&&exitCode!=kSecureUxThemeExitRebootRequired){
+        wchar_t text[80]{};swprintf_s(text,L"activation helper exit code 0x%08lX",exitCode);return fail(text);
+    }
+    if(run){run->ran=true;run->rebootRequired=exitCode==kSecureUxThemeExitRebootRequired;}
+    return true;
 }
 
 } // namespace GlassInstallUtil

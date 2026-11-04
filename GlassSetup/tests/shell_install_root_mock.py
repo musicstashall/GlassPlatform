@@ -16,6 +16,8 @@ util = (repo / 'GlassSetup/src/InstallSupport/GlassInstallUtil.cpp').read_text(e
 unins = (repo / 'GlassSetup/GlassUnins/main.cpp').read_text(encoding='utf-8')
 engine = (repo / 'GlassSetup/src/InstallEngine.cpp').read_text(encoding='utf-8')
 script = (repo / 'GlassSetup/scripts/Verify-InstallerNative.ps1').read_text(encoding='utf-8')
+constants = (repo / 'GlassShared/include/GlassShellMenuConstants.h').read_text(encoding='utf-8')
+constants = constants.replace('#pragma once', '')
 
 def function(text, token):
     start = text.index(token)
@@ -35,6 +37,9 @@ parse_cmd = function(ops, 'bool ParseInstallerShellArguments(')
 resolve_shell = function(ops, 'bool ResolveBundledGlassShellExtDll(')
 resolve_sparse = function(sparse, 'bool ResolveGlassPlatformOutputDirectory(')
 invoke = function(util, 'bool InvokeShellExtRegistration(')
+reason_text = function(util, 'const wchar_t* ShellHelperReasonText(')
+describe = function(util, 'std::wstring DescribeShellHelperExit(')
+describe_classic = function(util, 'std::wstring DescribeShellClassicFallback(')
 operation = function(unins, 'int RunOperation(')
 preflight = function(engine, 'bool InstallEngine::VerifyEmbeddedNativePayload(')
 assert operation.index('kInstallerShellExport') < operation.index('StopAllForUninstall(')
@@ -60,6 +65,7 @@ prefix = r'''
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <iterator>
 using DWORD=unsigned long; using WORD=unsigned short; using UINT=unsigned;
 using LSTATUS=long; using REGSAM=unsigned long; using LPBYTE=unsigned char*;
 using LPWSTR=wchar_t*; using HKEY=void*; using HMODULE=void*; using BYTE=unsigned char;
@@ -69,6 +75,7 @@ HKEY const HKEY_LOCAL_MACHINE=reinterpret_cast<HKEY>(1), HKEY_CURRENT_USER=reint
 constexpr int MAX_PATH=260;
 #define _countof(a) (sizeof(a)/sizeof((a)[0]))
 int __ImageBase=0;
+''' + constants + r'''
 struct Fake {
  std::set<std::wstring> files,sparseRoots,unsafe;
  std::wstring nextExe,nextDll,registry,exeDir=L"C:\\Windows\\System32",command;
@@ -123,10 +130,15 @@ bool ResolveExeOutputDirectory(wchar_t* out,size_t cch){return wcscpy_s(out,cch,
 namespace GlassShared::GlassPlatformTask {enum class PlatformArch{X64,X86};}
 using namespace GlassShared::GlassPlatformTask;
 namespace GlassInstallLog {void Line(const wchar_t*){} template<class... T>void LineFormat(const wchar_t*,T...) {}}
+// MSVC wide printf treats %s as wchar_t*; glibc needs %ls. FormatMessageW is unavailable here.
+template<size_t N,class... A> int swprintf_s(wchar_t (&out)[N],const wchar_t* fmt,A... a){
+ std::wstring f=fmt;for(size_t i=0;(i=f.find(L"%s",i))!=std::wstring::npos;i+=3)f.replace(i,2,L"%ls");return std::swprintf(out,N,f.c_str(),a...);}
+constexpr DWORD FORMAT_MESSAGE_FROM_SYSTEM=0x1000,FORMAT_MESSAGE_IGNORE_INSERTS=0x200;
+DWORD FormatMessageW(DWORD,const void*,DWORD,DWORD,wchar_t*,DWORD,void*){return 0;}
 bool HasExistingShellRegistrationKeys(){return fake.existingShell;}
 bool HasMatchingLegacyShellRegistration(const std::wstring&){return fake.matchingShell;}
 namespace GlassInstallUtil {
- bool InvokeShellExtRegistration(bool,const std::wstring&,const std::wstring&,bool*,bool* = nullptr) noexcept;
+ bool InvokeShellExtRegistration(bool,const std::wstring&,const std::wstring&,bool*,bool* = nullptr,std::wstring* = nullptr,DWORD* = nullptr) noexcept;
  constexpr char kInstallerShellExport[]="GlassSettings_ShellExtRegisterSetupV1W";
  bool IsOs64Bit(){return fake.os64;}
  std::wstring TrimTrailingSlashes(std::wstring s){while(!s.empty()&&(s.back()==L'\\'||s.back()==L'/'))s.pop_back();return s;}
@@ -164,8 +176,8 @@ int main(){
  assert(ParseInstallerShellArguments(bytes.data(),unregister,root) && root==L"D:\\Glass" && fake.argvLive==0);
  // No fallback to rundll32, temp or a second registry value when an exact root is supplied.
  reset();fake.nextExe=L"C:\\Windows\\System32\\GlassShellExt.dll";fake.nextDll=L"C:\\Windows\\Temp\\GlassShellExt.dll";
- fake.files.insert(L"D:\\Apps\\GlassShellExt.dll");wchar_t output[512]{};
- assert(ResolveBundledGlassShellExtDll(output,512,L"D:\\Apps") && std::wstring(output)==L"D:\\Apps\\GlassShellExt.dll");
+ fake.files.insert(L"D:\\Apps\\GlassShellSparse\\GlassShellExt.dll");wchar_t output[512]{};
+ assert(ResolveBundledGlassShellExtDll(output,512,L"D:\\Apps") && std::wstring(output)==L"D:\\Apps\\GlassShellSparse\\GlassShellExt.dll");
  assert(!ResolveBundledGlassShellExtDll(output,512,L"E:\\Missing") && fake.nextCalls==0 && fake.registryCalls==0);
  assert(ResolveBundledGlassShellExtDll(output,512,nullptr) && std::wstring(output)==fake.nextExe && fake.nextCalls==1);
  reset();fake.nextExe=L"C:\\Elsewhere\\GlassShellExt.dll";fake.sparseRoots.insert(L"D:\\Apps");
@@ -179,9 +191,9 @@ int main(){
  reset();fake.nativeProtocol=false;assert(!GlassInstallUtil::InvokeShellExtRegistration(false,L"D:\\64",L"E:\\32",nullptr) && fake.commandCalls==0);
  reset();assert(!GlassInstallUtil::InvokeShellExtRegistration(false,L"D:\\Bad\"Name",L"E:\\32",nullptr) && fake.commandCalls==0);
  // On x86 an old/missing Native helper falls back only to regsvr32 at the selected root.
- reset();fake.os64=false;fake.nativeProtocol=false;fake.files.insert(L"E:\\32\\GlassShellExt.dll");
+ reset();fake.os64=false;fake.nativeProtocol=false;fake.files.insert(L"E:\\32\\GlassShellSparse\\GlassShellExt.dll");
  assert(GlassInstallUtil::InvokeShellExtRegistration(false,L"",L"E:\\32",&changed));
- assert(fake.command.find(L"/u /s \"E:\\32\\GlassShellExt.dll\"")!=std::wstring::npos);
+ assert(fake.command.find(L"/u /s \"E:\\32\\GlassShellSparse\\GlassShellExt.dll\"")!=std::wstring::npos);
  reset();fake.os64=false;fake.nativePresent=false;assert(!GlassInstallUtil::InvokeShellExtRegistration(false,L"",L"E:\\32",nullptr));
  reset();fake.exitCode=0x47505245;assert(GlassInstallUtil::InvokeShellExtRegistration(true,L"D:\\64",L"E:\\32",&changed) && !changed);
  bool conflict=false;
@@ -190,25 +202,50 @@ int main(){
  reset();fake.exitCode=0x47504346;assert(!GlassInstallUtil::InvokeShellExtRegistration(false,L"D:\\64",L"E:\\32",&changed,&conflict));
  assert(conflict && !changed);
  reset();fake.os64=false;fake.nativePresent=false;fake.existingShell=true;fake.matchingShell=false;
- fake.files.insert(L"E:\\32\\GlassShellExt.dll");
+ fake.files.insert(L"E:\\32\\GlassShellSparse\\GlassShellExt.dll");
  assert(!GlassInstallUtil::InvokeShellExtRegistration(true,L"",L"E:\\32",&changed,&conflict) && conflict && !changed && fake.commandCalls==0);
  reset();fake.os64=false;fake.nativePresent=false;fake.existingShell=true;fake.matchingShell=true;
- fake.files.insert(L"E:\\32\\GlassShellExt.dll");
+ fake.files.insert(L"E:\\32\\GlassShellSparse\\GlassShellExt.dll");
  assert(GlassInstallUtil::InvokeShellExtRegistration(true,L"",L"E:\\32",&changed,&conflict) && !conflict && !changed && fake.commandCalls==0);
  reset();fake.os64=false;fake.nativePresent=false;fake.existingShell=true;fake.matchingShell=false;
- fake.files.insert(L"E:\\32\\GlassShellExt.dll");
+ fake.files.insert(L"E:\\32\\GlassShellSparse\\GlassShellExt.dll");
  assert(!GlassInstallUtil::InvokeShellExtRegistration(false,L"",L"E:\\32",&changed,&conflict) && conflict && !changed && fake.commandCalls==0);
  reset();fake.os64=false;fake.nativePresent=false;fake.existingShell=true;fake.matchingShell=true;
- fake.files.insert(L"E:\\32\\GlassShellExt.dll");
+ fake.files.insert(L"E:\\32\\GlassShellSparse\\GlassShellExt.dll");
  assert(GlassInstallUtil::InvokeShellExtRegistration(false,L"",L"E:\\32",&changed,&conflict) && changed && fake.commandCalls==1);
- std::cout<<"PASS: exact selected root, preserved conflicts, verified legacy registration and compatible x86 fallback\n";
+ // Failure details for the finish-page note: deployment HRESULT, helper category, conflict, helper not started.
+ std::wstring detail;
+ reset();fake.exitCode=0x80073CF3;assert(!GlassInstallUtil::InvokeShellExtRegistration(true,L"D:\\64",L"E:\\32",&changed,&conflict,&detail));
+ assert(changed && !conflict && detail.find(L"HRESULT 0x80073CF3")!=std::wstring::npos);
+ reset();fake.exitCode=0x47500009;assert(!GlassInstallUtil::InvokeShellExtRegistration(true,L"D:\\64",L"E:\\32",&changed,&conflict,&detail));
+ assert(detail.find(L"package deployment failed")!=std::wstring::npos && detail.find(L"0x47500009")!=std::wstring::npos);
+ reset();fake.exitCode=0x47504346;detail.clear();assert(!GlassInstallUtil::InvokeShellExtRegistration(true,L"D:\\64",L"E:\\32",&changed,&conflict,&detail));
+ assert(conflict && !detail.empty());
+ reset();fake.ran=false;fake.started=false;fake.completed=false;fake.exitCode=1;detail.clear();
+ assert(!GlassInstallUtil::InvokeShellExtRegistration(true,L"D:\\64",L"E:\\32",&changed,&conflict,&detail) && !changed && detail.find(L"could not be started")!=std::wstring::npos);
+ reset();fake.nativeProtocol=false;detail.clear();assert(!GlassInstallUtil::InvokeShellExtRegistration(true,L"D:\\64",L"E:\\32",nullptr,nullptr,&detail) && !detail.empty());
+ reset();detail=L"stale";assert(GlassInstallUtil::InvokeShellExtRegistration(true,L"D:\\64",L"E:\\32",&changed,&conflict,&detail) && detail==L"stale");
+ // Windows 11 classic fallback (0x47504C00|reason) is a success with a reason for the finish-page note, never a conflict.
+ DWORD classicReason=0;
+ reset();fake.exitCode=0x47504C08;detail=L"stale";
+ assert(GlassInstallUtil::InvokeShellExtRegistration(true,L"D:\\64",L"E:\\32",&changed,&conflict,&detail,&classicReason));
+ assert(changed && !conflict && detail==L"stale" && classicReason==8);
+ assert(GlassInstallUtil::DescribeShellClassicFallback(classicReason).find(L"signer certificate is not trusted")!=std::wstring::npos);
+ assert(GlassInstallUtil::DescribeShellClassicFallback(classicReason).find(L"0x47504C08")!=std::wstring::npos);
+ reset();fake.exitCode=0x47504C00;classicReason=99;
+ assert(GlassInstallUtil::InvokeShellExtRegistration(true,L"D:\\64",L"E:\\32",&changed,&conflict,nullptr,&classicReason) && classicReason==10);
+ reset();fake.exitCode=0x47504C09;classicReason=0; // Unregister never reports a classic fallback: the code is treated as a failure.
+ assert(!GlassInstallUtil::InvokeShellExtRegistration(false,L"D:\\64",L"E:\\32",&changed,&conflict,&detail,&classicReason) && classicReason==0);
+ reset();fake.exitCode=0x47500008;detail.clear();assert(!GlassInstallUtil::InvokeShellExtRegistration(true,L"D:\\64",L"E:\\32",&changed,&conflict,&detail));
+ assert(detail.find(L"signer certificate is not trusted")!=std::wstring::npos && detail.find(L"0x47500008")!=std::wstring::npos);
+ std::cout<<"PASS: exact selected root, preserved conflicts, verified legacy registration, compatible x86 fallback, classic fallback and failure details\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='glass-shell-install-root-') as directory:
     cpp = Path(directory) / 'test.cpp'
     exe = Path(directory) / 'test'
     code = prefix + '\n' + read_cmd + '\n' + parse_cmd + '\n' + resolve_shell + '\n' + resolve_sparse
-    code += '\nnamespace GlassInstallUtil {\n' + invoke + '\n}\n' + main
+    code += '\nnamespace GlassInstallUtil {\n' + reason_text + '\n' + describe + '\n' + describe_classic + '\n' + invoke + '\n}\n' + main
     cpp.write_text(code, encoding='utf-8')
     subprocess.run([os.environ.get('CXX', 'g++'), '-std=c++17', '-g', '-fsanitize=address,undefined',
                     '-fno-omit-frame-pointer', '-no-pie', str(cpp), '-o', str(exe)], check=True)

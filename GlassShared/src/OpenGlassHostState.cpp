@@ -365,15 +365,27 @@ namespace Shared::OpenGlassHostState
         if (cached.timeMs != 0 && now - cached.timeMs < kCacheTtlMs)
             return cached.state;
 
-        if (GlassShared::IsSchedulerUiThread())
-            return cached.state;
-
+        // Службу спрашиваем на любом потоке: это дешёвый SCM-вызов. Без него UI-поток
+        // (App: NoteUiThread) читал пустой кэш и не видел установку через службу —
+        // Setup/Unins создают сервис OpenGlassHost, а строки Home/Systems показывали
+        // «Нет задачи» до первого фонового опроса.
         const HostUiState svc = QueryServiceUiState();
         // Running не зависит от задачи: не сканировать дерево.
         if (svc == HostUiState::Running)
         {
             g_orchestrationCache.store({ svc, now }, std::memory_order_release);
             return svc;
+        }
+
+        // Холодный обход дерева планировщика (COM) с UI держит прокрутку — только фон.
+        if (GlassShared::IsSchedulerUiThread())
+        {
+            if (svc != HostUiState::NoTask)
+            {
+                g_orchestrationCache.store({ svc, now }, std::memory_order_release);
+                return svc;
+            }
+            return cached.state;
         }
 
         const HostUiState task = QueryTaskUiState();

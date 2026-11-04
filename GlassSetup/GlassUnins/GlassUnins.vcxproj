@@ -56,6 +56,9 @@
     <ClCompile Include="..\src\InstallSupport\GlassInstallWatch.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallHost.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallUnlock.cpp" />
+    <ClCompile Include="..\..\GlassShared\src\RegistrySanity.cpp">
+      <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
+    </ClCompile>
     <ClCompile Include="..\..\GlassShared\src\GlassStop.cpp">
       <ForcedIncludeFiles>$(MSBuildThisFileDirectory)..\..\GlassShared\SharedPch.h</ForcedIncludeFiles>
     </ClCompile>
@@ -115,6 +118,8 @@
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\..\packages\Detours.4.0.1\build\native\Detours.targets" Condition="Exists('..\..\packages\Detours.4.0.1\build\native\Detours.targets')" />
   </ImportGroup>
+  <!-- Directory.Build.targets здесь отключён (Directory.Build.props: ImportDirectoryBuildTargets=false), поэтому Authenticode-подпись подключается напрямую. -->
+  <Import Project="$(MSBuildThisFileDirectory)..\..\Shared\GlassSign.targets" Condition="'$(GlassSignTargetsImported)' != 'true'" />
   <Target Name="GlassUninsEnsureDetours" BeforeTargets="PrepareForBuild">
     <Error Condition="!Exists('..\..\packages\Detours.4.0.1\build\native\Detours.targets')" Text="GlassUnins: восстановите NuGet-пакет Detours 4.0.1." />
   </Target>

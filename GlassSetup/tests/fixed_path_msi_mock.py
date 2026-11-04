@@ -153,7 +153,8 @@ namespace GlassInstallMsi {
  std::wstring ProductCodeFromMsiPath(const std::wstring&){return fake.cachedCode;}
  constexpr wchar_t kProductPlatformX64[]=L"p64",kLegacyPlatformX64[]=L"old64",kProductPlatformX86[]=L"p86",
   kLegacyPlatformX86[]=L"old86",kProductOpenGlass[]=L"og",kLegacyOpenGlass[]=L"oldog",
-  kProductSettingsX64[]=L"gs64",kProductSettingsX86[]=L"gs86";
+  kProductSettingsX64[]=L"gs64",kProductSettingsX86[]=L"gs86",
+  kProductSecureUxThemeX64[]=L"sut64",kProductSecureUxThemeX86[]=L"sut86";
  ProductPathCheck CheckProductContexts(const wchar_t*,std::wstring&,const std::atomic_bool* = nullptr) noexcept;
  ProductPathCheck CheckProductFileRoots(const wchar_t*,const std::wstring&,const std::wstring&,std::wstring&,const std::atomic_bool* = nullptr) noexcept;
  bool CopyLocalPackage(const wchar_t*,const std::wstring&,const std::atomic_bool* = nullptr){++fake.copyCalls;return fake.copyOk;}

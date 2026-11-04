@@ -1,0 +1,27 @@
+<Project Sdk="WixToolset.Sdk">
+  <PropertyGroup>
+    <ProjectGuid>{0CD1A2BE-2C39-4404-A026-34642B517428}</ProjectGuid>
+    <Configurations>Debug;Release</Configurations>
+    <OutputName>SecureUxTheme-x64</OutputName>
+    <OutputType>Package</OutputType>
+    <Cultures>neutral</Cultures>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <GlassUpgradeCode>B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5080</GlassUpgradeCode>
+    <GlassProductCode>B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5076</GlassProductCode>
+    <GlassSettingsProductCode>B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5074</GlassSettingsProductCode>
+    <GlassPlatformTitle>SecureUxTheme</GlassPlatformTitle>
+    <GlassMsiProductCode>$(GlassProductCode)</GlassMsiProductCode>
+    <!-- Third-party product MSI: do not sign with the Glass developer certificate. -->
+    <GlassSignThisProject>false</GlassSignThisProject>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' != 'Release'">
+    <BuildProject>false</BuildProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="SecureUxThemePackage.template.wxs" />
+    <None Include="GlassSetupPayload.targets" />
+    <None Include="scripts\Generate-HarvestWxs.ps1" />
+    <None Include="scripts\Generate-PlatformWxs.ps1" />
+  </ItemGroup>
+  <Import Project="GlassSetupPayload.targets" />
+</Project>

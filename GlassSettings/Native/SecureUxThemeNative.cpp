@@ -1,10 +1,13 @@
 #include "NativeHost.h"
 
 #include <TaskSchedulerCom.h>
-#include <GlassModulePath.h>
-#include <GlassPlatformTask.h>
+#include <DebugLog.h>
+#include <Helpers/ThemeHelper.h>
 #include <aclapi.h>
+#include <uxtheme.h>
 #include <wil/resource.h>
+
+#pragma comment(lib, "uxtheme.lib")
 
 #include <string>
 #include <vector>
@@ -26,6 +29,8 @@ namespace
 
     constexpr wchar_t kThemeManager2[] = L"{9324DA94-50EC-4A14-A770-E90CA03E7C8F}";
     constexpr wchar_t kThemeManagerShared[] = L"{C04B329E-5823-4415-9C93-BA44688947B0}";
+    // Payload is a separate architecture-specific MSI installed beside GlassSettings:
+    // <root>\GlassSettings\SecureUxTheme\ with only native-architecture files.
     constexpr wchar_t kPayloadFolderName[] = L"SecureUxTheme";
     constexpr wchar_t kPatcherDll[] = L"SecureUxTheme4.dll";
     constexpr wchar_t kProxyDll[] = L"ThemeUiProxy.dll";
@@ -463,81 +468,26 @@ namespace
         return local;
     }
 
-    [[nodiscard]] std::wstring TrimTrailingSlashes(const std::wstring& s) noexcept
+    // Directory of GlassSettings.Native.dll itself: the payload lives next to it
+    // (<root>\GlassSettings\SecureUxTheme\) and the process may be rundll32 (the
+    // uninstaller entry point below), so the exe directory is no anchor there.
+    [[nodiscard]] std::wstring ThisModuleDirectory() noexcept
     {
-        auto end = s.find_last_not_of(L"\\/");
-        return end == std::wstring::npos ? s : s.substr(0, end + 1);
-    }
-
-    [[nodiscard]] std::wstring TryReadRegInstallValue(
-        HKEY root,
-        const wchar_t* subKey,
-        const wchar_t* valueName,
-        REGSAM extraSam = 0) noexcept
-    {
-        HKEY hKey = nullptr;
-        if (RegOpenKeyExW(root, subKey, 0, KEY_READ | extraSam, &hKey) != ERROR_SUCCESS)
+        HMODULE module = nullptr;
+        if (!GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&ThisModuleDirectory),
+                &module))
             return {};
-
-        wchar_t buf[MAX_PATH * 4]{};
-        DWORD cb = sizeof(buf);
-        DWORD type = 0;
-        const LSTATUS st = RegQueryValueExW(
-            hKey, valueName, nullptr, &type,
-            reinterpret_cast<LPBYTE>(buf), &cb);
-        RegCloseKey(hKey);
-
-        if (st != ERROR_SUCCESS || type != REG_SZ || !buf[0])
+        wchar_t modulePath[MAX_PATH]{};
+        if (GetModuleFileNameW(module, modulePath, MAX_PATH) == 0)
             return {};
-
-        return TrimTrailingSlashes(buf);
-    }
-
-    [[nodiscard]] std::wstring TryReadInstallPathFromRegistry() noexcept
-    {
-        if (auto v = TryReadRegInstallValue(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPathX86", KEY_WOW64_32KEY); !v.empty())
-            return v;
-        if (auto v = TryReadRegInstallValue(HKEY_LOCAL_MACHINE, L"Software\\GlassPlatform", L"InstallPath", KEY_WOW64_32KEY); !v.empty())
-            return v;
-        if (auto v = TryReadRegInstallValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPathX86"); !v.empty())
-            return v;
-#if defined(_WIN64)
-        return TryReadRegInstallValue(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath");
-#else
-        if (GlassShared::GlassModulePath::IsOs64Bit())
-        {
-            if (auto v = TryReadRegInstallValue(HKEY_CURRENT_USER, L"Software\\Wow6432Node\\GlassPlatform", L"InstallPath"); !v.empty())
-                return v;
-        }
-        return TryReadRegInstallValue(HKEY_CURRENT_USER, L"Software\\GlassPlatform", L"InstallPath");
-#endif
-    }
-
-    [[nodiscard]] std::wstring TryGetAutorunInstallRoot() noexcept
-    {
-        return GlassShared::GlassPlatformTask::TryGetAutorunGlassCompatInstallRoot(
-            GlassShared::GlassPlatformTask::PlatformArch::X86);
-    }
-
-    [[nodiscard]] std::wstring ResolveX86InstallRoot() noexcept
-    {
-        auto root = TryReadInstallPathFromRegistry();
-        if (!root.empty())
-        {
-            const auto compat = JoinPath(root, L"GlassCompat.dll");
-            if (FileExistsNative(compat))
-                return root;
-        }
-
-        root = TryGetAutorunInstallRoot();
-        if (!root.empty())
-        {
-            const auto compat = JoinPath(root, L"GlassCompat.dll");
-            if (FileExistsNative(compat))
-                return root;
-        }
-
-        return {};
+        std::wstring local = modulePath;
+        const auto slash = local.find_last_of(L"\\/");
+        if (slash == std::wstring::npos)
+            return {};
+        local.resize(slash);
+        return local;
     }
 
     [[nodiscard]] std::wstring ResolvePayloadFolder(const wchar_t* payloadFolder) noexcept
@@ -545,47 +495,37 @@ namespace
         if (payloadFolder && *payloadFolder)
             return payloadFolder;
 
-        const auto exeDir = ExeDirectory();
-        if (exeDir.empty())
+        // GlassSettings MSI layout: <root>\GlassSettings\SecureUxTheme\ (both bitnesses).
+        auto dir = ThisModuleDirectory();
+        if (dir.empty())
+            dir = ExeDirectory();
+        if (dir.empty())
             return {};
+        const auto current = JoinPath(dir, kPayloadFolderName);
+        if (FileExistsNative(JoinPath(current, kPatcherDll)))
+            return current;
 
-        if (IsNative64())
-        {
-            return JoinPath(DirectoryName(exeDir), kPayloadFolderName);
-        }
+        // Старая раскладка платформенных MSI: <root>\SecureUxTheme\ (каталог выше GlassSettings).
+        const auto legacy = JoinPath(DirectoryName(dir), kPayloadFolderName);
+        if (FileExistsNative(JoinPath(legacy, kPatcherDll)))
+            return legacy;
 
-        return JoinPath(exeDir, kPayloadFolderName);
+        return current;
     }
 
     [[nodiscard]] bool PayloadComplete(
         const std::wstring& folder,
         std::wstring& patcherSrc,
-        std::wstring& proxyNativeSrc,
-        std::wstring& proxyWowSrc) noexcept
+        std::wstring& proxyNativeSrc) noexcept
     {
         patcherSrc.clear();
         proxyNativeSrc.clear();
-        proxyWowSrc.clear();
         if (folder.empty())
             return false;
 
         patcherSrc = JoinPath(folder, kPatcherDll);
         proxyNativeSrc = JoinPath(folder, kProxyDll);
-        if (!FileExistsNative(patcherSrc) || !FileExistsNative(proxyNativeSrc))
-            return false;
-
-        if (IsNative64())
-        {
-            const auto x86Root = ResolveX86InstallRoot();
-            if (x86Root.empty())
-                return false;
-
-            const auto x86Payload = JoinPath(x86Root, kPayloadFolderName);
-            proxyWowSrc = JoinPath(x86Payload, kProxyDll);
-            return FileExistsNative(proxyWowSrc);
-        }
-
-        return true;
+        return FileExistsNative(patcherSrc) && FileExistsNative(proxyNativeSrc);
     }
 
     void EnablePrivilege(const wchar_t* name) noexcept
@@ -943,8 +883,7 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeQuery(
 
     std::wstring patcherSrc;
     std::wstring proxyNativeSrc;
-    std::wstring proxyWowSrc;
-    const bool complete = PayloadComplete(folder, patcherSrc, proxyNativeSrc, proxyWowSrc);
+    const bool complete = PayloadComplete(folder, patcherSrc, proxyNativeSrc);
     out->LocalDllPresent = complete ? TRUE : FALSE;
     if (complete)
     {
@@ -1010,8 +949,7 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(
     const auto folder = ResolvePayloadFolder(payloadFolder);
     std::wstring patcherSrc;
     std::wstring proxyNativeSrc;
-    std::wstring proxyWowSrc;
-    if (!PayloadComplete(folder, patcherSrc, proxyNativeSrc, proxyWowSrc))
+    if (!PayloadComplete(folder, patcherSrc, proxyNativeSrc))
         return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
 
     if (ReadPeMachine(patcherSrc) != static_cast<int>(nativeMachine))
@@ -1022,10 +960,8 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(
     const auto system32 = NativeSystem32();
     const auto destPatcher = JoinPath(system32, kOurDllName);
     const auto destProxy = JoinPath(system32, kProxyDllName);
-    std::wstring destProxyWow;
     bool patcherExisted = false;
     bool proxyExisted = false;
-    bool proxyWowExisted = false;
 
     HRESULT hr = CopyRenamed(patcherSrc, destPatcher, patcherExisted);
     if (FAILED(hr))
@@ -1041,21 +977,6 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(
         return hr;
     }
 
-    if (!proxyWowSrc.empty())
-    {
-        destProxyWow = JoinPath(NativeSysWow64(), kProxyDllName);
-        hr = CopyRenamed(proxyWowSrc, destProxyWow, proxyWowExisted);
-        if (FAILED(hr))
-        {
-            Wow64FsRedirectGuard guard;
-            if (!patcherExisted)
-                DeleteFileW(destPatcher.c_str());
-            if (!proxyExisted)
-                DeleteFileW(destProxy.c_str());
-            return hr;
-        }
-    }
-
     DWORD globalFlag = 0;
     wchar_t verifier[512]{};
     ReadIfeo(L"winlogon.exe", globalFlag, verifier, _countof(verifier));
@@ -1069,8 +990,6 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(
             DeleteFileW(destPatcher.c_str());
         if (!proxyExisted)
             DeleteFileW(destProxy.c_str());
-        if (!destProxyWow.empty() && !proxyWowExisted)
-            DeleteFileW(destProxyWow.c_str());
         return hr;
     }
 
@@ -1158,4 +1077,186 @@ extern "C" BOOL WINAPI GlassSettings_SecureUxThemeCheckCleanupPending() noexcept
 extern "C" BOOL WINAPI GlassSettings_SecureUxThemeTryDeleteSystemFiles() noexcept
 {
     return TryDeleteSystemFiles() ? TRUE : FALSE;
+}
+
+namespace
+{
+    // Биты кода выхода GlassSettings_SecureUxThemeSetupV1W (helper деинсталлятора).
+    constexpr DWORD kSecureUxExitBadArgs = 1u;
+    constexpr DWORD kSecureUxExitRebootRequired = 2u;
+    constexpr DWORD kSecureUxExitThemeNotRestored = 4u;
+    constexpr DWORD kSecureUxExitDeactivateFailed = 8u;
+    constexpr DWORD kSecureUxExitExternalInstall = 16u;
+    constexpr DWORD kSecureUxStateUnavailable = 0u;
+    constexpr DWORD kSecureUxStateInactive = 1u;
+    constexpr DWORD kSecureUxStateActive = 2u;
+    constexpr DWORD kSecureUxStateActivationPending = 3u;
+    constexpr DWORD kSecureUxStateDeactivationPending = 4u;
+    constexpr DWORD kSecureUxStateExternal = 5u;
+    constexpr DWORD kSecureUxStateConflict = 6u;
+
+    // Официальные установки SecureUxTheme (MSI v4 или старые хуки) своими файлами и
+    // ключами управляет сам продукт — деактивация GlassSettings их не трогает.
+    [[nodiscard]] bool IsExternalSecureUxTheme(
+        const GlassSettings_SecureUxThemeNativeQuery& q) noexcept
+    {
+        if (q.OfficialMsiPresent || q.SystemLegacyDllPresent)
+            return true;
+        const auto legacyHook = [](DWORD globalFlag, BOOL exact) noexcept {
+            return exact != FALSE && (globalFlag & kFlgApplicationVerifier) != 0;
+        };
+        return legacyHook(q.WinlogonGlobalFlag, q.WinlogonHasLegacyExact)
+            || legacyHook(q.ExplorerGlobalFlag, q.ExplorerHasLegacyExact)
+            || legacyHook(q.SettingsGlobalFlag, q.SettingsHasLegacyExact)
+            || legacyHook(q.LogonUiGlobalFlag, q.LogonUiHasLegacyExact)
+            || legacyHook(q.DwmGlobalFlag, q.DwmHasLegacyExact);
+    }
+
+    [[nodiscard]] bool IsStockStyleName(const wchar_t* path) noexcept
+    {
+        std::wstring name = path ? path : L"";
+        const auto slash = name.find_last_of(L"\\/");
+        if (slash != std::wstring::npos)
+            name = name.substr(slash + 1);
+        return _wcsicmp(name.c_str(), L"aero.msstyles") == 0
+            || _wcsicmp(name.c_str(), L"aerolite.msstyles") == 0;
+    }
+
+    // Активен ли пользовательский визуальный стиль (не aero/aerolite), как
+    // VisualStyleCatalog.IsCustomVisualStylePath в GlassSettings.
+    [[nodiscard]] bool CustomVisualStyleActive() noexcept
+    {
+        wchar_t value[MAX_PATH]{};
+        DWORD size = sizeof(value);
+        if (::RegGetValueW(
+                HKEY_CURRENT_USER,
+                L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager",
+                L"DllName",
+                RRF_RT_REG_SZ,
+                nullptr,
+                value,
+                &size) != ERROR_SUCCESS)
+            return false;
+        return value[0] && !IsStockStyleName(value) && FileExistsNative(value);
+    }
+
+    // Возврат к стандартному стилю до снятия обхода подписи — иначе после перезагрузки
+    // пользовательский .msstyles не пройдёт проверку подписи (parity с toggle-off GS).
+    [[nodiscard]] bool ApplyStockVisualStyle() noexcept
+    {
+        wchar_t windows[MAX_PATH]{};
+        if (GetWindowsDirectoryW(windows, MAX_PATH) == 0)
+            return false;
+        const std::wstring stock = JoinPath(windows, L"Resources\\Themes\\Aero\\aero.msstyles");
+        if (!FileExistsNative(stock))
+            return false;
+        DWORD fonts = 0;
+        DWORD size = sizeof(fonts);
+        (void)::RegGetValueW(
+            HKEY_CURRENT_USER,
+            L"Software\\StanislavKa\\GlassPlatform\\GlassSettings",
+            L"EnableSystemFont",
+            RRF_RT_REG_DWORD,
+            nullptr,
+            &fonts,
+            &size);
+        return SUCCEEDED(Shared::ThemeHelper::SetSystemVisualStyle(
+            stock.c_str(), L"NormalColor", L"NormalSize", fonts ? 65 : 0));
+    }
+}
+
+// Точка входа GlassUnins (rundll32, разрядность ОС): деактивирует SecureUxTheme так же,
+// как это делает GlassSettings — сначала возвращает стандартный визуальный стиль, если
+// активен пользовательский, затем выполняет единую деактивацию
+// GlassSettings_SecureUxThemeDeactivate.
+// Биты кода выхода: 1 — неверные аргументы; 2 — нужна перезагрузка (отложена очистка
+// файлов); 4 — стандартный стиль не восстановлен (деактивация выполнена); 8 —
+// деактивация не удалась; 16 — установлен внешний SecureUxTheme, ничего не изменено.
+extern "C" void CALLBACK GlassSettings_SecureUxThemeSetupV1W(
+    HWND, HINSTANCE, LPWSTR cmdLine, int) noexcept
+{
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_SecureUxThemeSetupV1W=_GlassSettings_SecureUxThemeSetupV1W@16")
+#endif
+    if (cmdLine && *cmdLine)
+        ::ExitProcess(kSecureUxExitBadArgs);
+    if (IsWow64ProcessNow())
+        ::ExitProcess(kSecureUxExitDeactivateFailed);
+
+    GlassSettings_SecureUxThemeNativeQuery query{};
+    if (FAILED(GlassSettings_SecureUxThemeQuery(&query)))
+        ::ExitProcess(kSecureUxExitDeactivateFailed);
+    if (IsExternalSecureUxTheme(query))
+        ::ExitProcess(kSecureUxExitExternalInstall);
+
+    DWORD code = 0;
+    const bool oursActive = query.WinlogonHasOurToken
+        || query.ComProxyHijacked
+        || query.LoadedEventPresent
+        || query.SystemDll4Present
+        || query.ThemeUiProxyPresent;
+    if (oursActive && CustomVisualStyleActive() && !ApplyStockVisualStyle())
+    {
+        DebugLog(DBG_WARNING,
+            L"[GlassSettings][SecureUxTheme] setup: stock visual style could not be applied");
+        code |= kSecureUxExitThemeNotRestored;
+    }
+
+    const HRESULT hr = GlassSettings_SecureUxThemeDeactivate();
+    if (FAILED(hr))
+    {
+        DebugLog(DBG_ERROR,
+            L"[GlassSettings][SecureUxTheme] setup: deactivate failed hr=0x%08lX", hr);
+        ::ExitProcess(kSecureUxExitDeactivateFailed);
+    }
+    if (GlassSettings_SecureUxThemeCheckCleanupPending())
+        code |= kSecureUxExitRebootRequired;
+    ::ExitProcess(code);
+}
+
+// Небольшие протоколы для карточки SecureUxTheme в GlassSetup/GlassUnins.
+// Значение состояния передаётся кодом завершения процесса rundll32, чтобы
+// Setup любой разрядности мог вызвать нативную DLL, соответствующую ОС.
+extern "C" void CALLBACK GlassSettings_SecureUxThemeQueryStateV1W(
+    HWND, HINSTANCE, LPWSTR cmdLine, int) noexcept
+{
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_SecureUxThemeQueryStateV1W=_GlassSettings_SecureUxThemeQueryStateV1W@16")
+#endif
+    if (cmdLine && *cmdLine) ::ExitProcess(kSecureUxStateConflict);
+    if (IsWow64ProcessNow()) ::ExitProcess(kSecureUxStateConflict);
+    GlassSettings_SecureUxThemeNativeQuery q{};
+    if (FAILED(GlassSettings_SecureUxThemeQuery(&q))) ::ExitProcess(kSecureUxStateConflict);
+    if (IsExternalSecureUxTheme(q)) ::ExitProcess(kSecureUxStateExternal);
+    const bool ourIfeo=q.WinlogonHasOurToken && (q.WinlogonGlobalFlag&kFlgApplicationVerifier)!=0;
+    if (ourIfeo && q.LoadedEventPresent) ::ExitProcess(kSecureUxStateActive);
+    if (ourIfeo) ::ExitProcess(kSecureUxStateActivationPending);
+    if (q.LoadedEventPresent) ::ExitProcess(kSecureUxStateDeactivationPending);
+    if (q.ComProxyHijacked || q.SystemDll4Present || q.ThemeUiProxyPresent)
+        ::ExitProcess(kSecureUxStateConflict);
+    if (q.LocalDllPresent) ::ExitProcess(kSecureUxStateInactive);
+    ::ExitProcess(kSecureUxStateUnavailable);
+}
+
+extern "C" void CALLBACK GlassSettings_SecureUxThemeActivateSetupV1W(
+    HWND, HINSTANCE, LPWSTR cmdLine, int) noexcept
+{
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_SecureUxThemeActivateSetupV1W=_GlassSettings_SecureUxThemeActivateSetupV1W@16")
+#endif
+    if (cmdLine && *cmdLine) ::ExitProcess(kSecureUxExitBadArgs);
+    if (IsWow64ProcessNow()) ::ExitProcess(kSecureUxExitDeactivateFailed);
+    GlassSettings_SecureUxThemeNativeQuery before{};
+    if (FAILED(GlassSettings_SecureUxThemeQuery(&before))) ::ExitProcess(kSecureUxExitDeactivateFailed);
+    if (IsExternalSecureUxTheme(before)) ::ExitProcess(kSecureUxExitExternalInstall);
+    const HRESULT hr=GlassSettings_SecureUxThemeActivate(nullptr,FALSE);
+    if (FAILED(hr)) {
+        DebugLog(DBG_ERROR,L"[GlassSettings][SecureUxTheme] setup: activate failed hr=0x%08lX",hr);
+        ::ExitProcess(kSecureUxExitDeactivateFailed);
+    }
+    GlassSettings_SecureUxThemeNativeQuery after{};
+    if (FAILED(GlassSettings_SecureUxThemeQuery(&after))) ::ExitProcess(kSecureUxExitDeactivateFailed);
+    const bool active=after.WinlogonHasOurToken && (after.WinlogonGlobalFlag&kFlgApplicationVerifier)!=0;
+    if(!active)::ExitProcess(kSecureUxExitDeactivateFailed);
+    ::ExitProcess(!after.LoadedEventPresent ? kSecureUxExitRebootRequired : 0u);
 }

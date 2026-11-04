@@ -121,4 +121,7 @@
   <Target Name="GlassWixSkipForeignPlatform" Condition="'$(MSBuildProjectExtension)' == '.wixproj' and '$(GlassWixLockedPlatform)' != '' and '$(Platform)' != '$(GlassWixLockedPlatform)'">
     <Message Importance="high" Text="Glass $(MSBuildProjectName): платформа $(Platform) пропущена, MSI собирается только как $(GlassWixLockedPlatform)." />
   </Target>
+
+  <!-- Authenticode: после целей проектов и IsGlassNativeBinary/GlassWixLockedPlatform (см. Shared\GlassSign.targets). -->
+  <Import Project="$(MSBuildThisFileDirectory)Shared\GlassSign.targets" />
 </Project>

@@ -6,7 +6,8 @@
 <!-- Offline installer: embedded font only. -->
 <style>
 @font-face{font-family:HandwrittenOffline;src:url('https://glassplatform.invalid/assets/handwritten.ttf') format('truetype');font-display:swap}
-:root{color-scheme:dark;--background:#101225;--foreground:#f5f4fc;--muted:#a2a6bf;--accent:#c1b4ff}
+:root{color-scheme:dark;--background:#101225;--foreground:#f5f4fc;--muted:#a2a6bf;--accent:#c1b4ff;--content-bottom-gap:36px}
+*{-webkit-user-select:none;user-select:none;caret-color:transparent;cursor:default}
 *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{background:var(--background);font-family:'Segoe UI',Arial,sans-serif;color:var(--foreground)}
 #viewport{width:100%;height:100%;display:grid;place-items:center;background:var(--background)}
 #stage{width:1000px;height:540px;position:relative;flex-shrink:0;overflow:hidden;isolation:isolate;transform-origin:center;background:var(--background)}
@@ -35,7 +36,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 /* Rounded-corner alpha baked into res/notification-final.png: 100px top-left corner and soft left side; no top, right or bottom fade. */
 .notification .image{mask-image:none;-webkit-mask-image:none}
 
-.banner-portrait{position:absolute;left:240px;top:100px;width:800px;height:447px;object-fit:cover;opacity:.25;mask-image:linear-gradient(90deg,transparent 0%,#000 38%,#000 100%),linear-gradient(180deg,transparent 0%,#000 14%,#000 100%);mask-composite:intersect;-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 38%,#000 100%),linear-gradient(180deg,transparent 0%,#000 14%,#000 100%);-webkit-mask-composite:source-in;pointer-events:none}
+.banner-portrait{position:absolute;left:240px;top:100px;width:800px;height:447px;object-fit:cover;opacity:.36;mask-image:linear-gradient(90deg,transparent 0%,#000 38%,#000 100%),linear-gradient(180deg,transparent 0%,#000 14%,#000 100%);mask-composite:intersect;-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 38%,#000 100%),linear-gradient(180deg,transparent 0%,#000 14%,#000 100%);-webkit-mask-composite:source-in;pointer-events:none}
 
 .native-brand{position:absolute;left:48px;top:34px;color:#f5f4fc;font-size:16px;font-weight:600;letter-spacing:.1px;z-index:2}
 
@@ -143,11 +144,29 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 
 .complete-tag{display:inline-flex;align-items:center;gap:8px;margin:0;color:#bfe9d7;letter-spacing:2px;font-size:10px;text-transform:uppercase;font-weight:600}
 .complete-tag:before{content:"";width:7px;height:7px;border-radius:50%;background:#91e3c4;box-shadow:0 0 14px #91e3c4a0}
+/* "Done with notes": the install is final, but post-commit steps (start, shell menu) left notes. Amber, never coral. */
+.complete-warnings{display:none;margin-top:16px;width:432px;padding:10px 14px 11px;border:1px solid #f0c27a38;border-left:2px solid #f0c27a;border-radius:12px;background:linear-gradient(110deg,#5e462446,#2d263238);box-shadow:inset 0 1px #ffffff08}
+.complete-warn-label{color:#ffd9a6;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase}
+.complete-warn-list{margin:6px 0 0;padding:0 6px 0 0;list-style:none;max-height:110px;overflow:auto;scrollbar-color:#8a7a5e #2a2430;scrollbar-width:thin}
+.complete-warn-list::-webkit-scrollbar{width:9px}.complete-warn-list::-webkit-scrollbar-track{background:#2a2430;border-radius:8px}.complete-warn-list::-webkit-scrollbar-thumb{background:#8a7a5e;border:2px solid #2a2430;border-radius:8px}
+/* The panel itself ignores the pointer (the host owns the buttons); the lists must still take the wheel. */
+#complete-panel .complete-warnings,#error-panel .error-reason{pointer-events:auto}
+.complete-warn-item{position:relative;margin:0 0 7px;padding-left:14px;color:#f3ecdf;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.complete-warn-item:last-child{margin-bottom:0}
+.complete-warn-item:before{content:"";position:absolute;left:0;top:7px;width:6px;height:6px;border-radius:50%;background:#f0c27a;box-shadow:0 0 8px #f0c27a80}
+.complete-warn-detail{display:block;margin-top:1px;color:#b8b3c6;font-size:11px;line-height:1.45}
+.complete-scene.has-warnings .complete-warnings{display:block}
+.complete-scene.has-warnings .complete-ready,.complete-scene.has-warnings .complete-note{display:none}
+.complete-scene.has-warnings .complete-tag{color:#ffd9a6}
+.complete-scene.has-warnings .complete-tag:before{background:#f0c27a;box-shadow:0 0 14px #f0c27aa0}
+.complete-scene.has-warnings .complete-title{font-size:36px}
+.complete-scene.has-warnings .complete-body{width:432px;font-size:14px}
+.complete-scene.has-warnings .complete-copy{top:92px}
 .complete-ready svg{width:14px;height:14px;fill:none;stroke:#a7dddf;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
 
 /* Failure is the success composition in a restrained coral palette, with a clear reason card. */
-.error-scene .banner-portrait{opacity:.25;filter:saturate(.62) hue-rotate(320deg)}
+.error-scene .banner-portrait{opacity:.36;filter:saturate(.62) hue-rotate(320deg)}
 .error-ambient{position:absolute;right:36px;top:30px;width:505px;height:465px;border-radius:50%;background:radial-gradient(ellipse,#ff6c8a20 0%,#b94b6930 37%,transparent 72%);filter:blur(9px);animation:error-breathe 5.8s ease-in-out infinite alternate;z-index:1;pointer-events:none}
 @keyframes error-breathe{to{transform:scale(1.055);opacity:.62}}
 .error-sheen{background:linear-gradient(112deg,transparent 40%,#ff819a0b 49%,#ffc2cc16 51%,transparent 61%)}
@@ -159,7 +178,8 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .error-body{margin:0;width:410px;color:#d0c3cb;font-size:15px;line-height:1.6}
 .error-reason{margin-top:18px;width:430px;padding:11px 14px 12px;border:1px solid #ff829a38;border-left:2px solid #ff829a;border-radius:12px;background:linear-gradient(110deg,#70283c46,#2d1e3238);box-shadow:inset 0 1px #ffffff08}
 .error-reason-label{color:#ffb6c1;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase}
-.error-detail{margin:7px 0 0;max-height:168px;overflow:auto;color:#f3e6e9;font-size:12px;line-height:1.52;white-space:pre-wrap;overflow-wrap:anywhere}
+.error-detail{margin:7px 0 0;padding-right:6px;max-height:168px;overflow:auto;color:#f3e6e9;font-size:12px;line-height:1.52;white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-color:#8d6472 #2d1e32;scrollbar-width:thin}
+.error-detail::-webkit-scrollbar{width:9px}.error-detail::-webkit-scrollbar-track{background:#2d1e32;border-radius:8px}.error-detail::-webkit-scrollbar-thumb{background:#8d6472;border:2px solid #2d1e32;border-radius:8px}
 .error-note{margin:17px 0 0;max-width:420px;color:#aaa6b6;font-size:11px;line-height:1.55;white-space:pre-wrap}
 .error-visual{position:absolute;right:52px;top:64px;width:435px;height:435px;z-index:4;display:grid;place-items:center;opacity:0;transform:scale(.92);animation:complete-pop .92s .13s cubic-bezier(.18,.8,.25,1) forwards;pointer-events:none}
 .error-svg{width:100%;height:100%;overflow:visible;filter:drop-shadow(0 20px 38px #0005)}
@@ -178,7 +198,8 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 
 /* Host-controlled states: the slideshow and every interstitial are strictly offline. */
 #stage:not([data-mode="welcome"]):not([data-mode="installing"]) .slideshow-only{display:none!important}
-.mode-panel{position:absolute;inset:0;display:none;overflow:hidden;pointer-events:none;color:var(--foreground);animation:mode-panel-in .32s ease-out both}
+/* Все страницы держат --content-bottom-gap снизу: контент не наезжает на полосу прогресса. */
+.mode-panel{position:absolute;inset:0 0 var(--content-bottom-gap) 0;display:none;overflow:hidden;pointer-events:none;color:var(--foreground);animation:mode-panel-in .32s ease-out both}
 @keyframes mode-panel-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 #stage[data-mode="loading"] #loading-panel{display:flex}
 #stage[data-mode="checking"] #checking-panel,
@@ -191,6 +212,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 #stage[data-mode="unlock-processes"] #unlock-panel,
 #stage[data-mode="components"] #components-panel,
 #stage[data-mode="uninstall-select"] #components-panel,
+#stage[data-mode="certificate"] #certificate-panel,
 #stage[data-mode="launching"] #launch-panel,
 #stage[data-mode="uninstalling"] #uninstalling-panel,
 #stage[data-mode="confirm-cancel"] #confirm-panel,
@@ -289,15 +311,29 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 
 /* Product selection & selective uninstall scene */
 .components-scene{background:#101225}
-.components-banner{position:absolute;inset:0 0 0 auto;width:700px;height:540px;object-fit:cover;opacity:.22;mask-image:linear-gradient(90deg,transparent 0%,#000 52%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 52%,#000 100%)}
-.components-overlay{position:absolute;inset:0;background:linear-gradient(90deg,#101225 0%,#101225ee 54%,#1012258a 100%)}
+#components-panel{bottom:0}
+.components-banner{position:absolute;inset:0 0 0 auto;width:700px;height:540px;object-fit:cover;opacity:.36;mask-image:linear-gradient(90deg,transparent 0%,#000 52%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 52%,#000 100%)}
+.components-overlay{position:absolute;inset:0;background:linear-gradient(90deg,#10122500 0%,#10122510 54%,#10122528 100%)}
 .components-heading{position:absolute;left:48px;top:78px;width:904px;z-index:2}
+.components-select-all{position:relative;flex:0 0 auto;align-self:center;min-height:30px;margin-left:8px;white-space:nowrap;pointer-events:auto;padding:0 12px;border:1px solid #a7dddf55;border-radius:8px;background:#a7dddf12;color:#cdeff0;font:600 10.5px 'Segoe UI',Arial,sans-serif;letter-spacing:.2px;cursor:pointer;transition:background .18s,border-color .18s}
+.components-select-all:hover:not(:disabled){border-color:#a7dddf99;background:#a7dddf24}
+.components-select-all:focus-visible{outline:2px solid #d8ffff;outline-offset:2px}
+.components-select-all:disabled{opacity:.48;cursor:default}
+.components-select-all[hidden]{display:none!important}
 .components-kicker{display:flex;align-items:center;gap:10px;margin:0 0 10px;color:#c1b4ff;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
 .components-kicker:before{content:"";width:20px;height:1px;background:#c1b4ff}
 .components-title{margin:0 0 6px;color:#f5f4fc;font-size:29px;line-height:1.16;font-weight:350;letter-spacing:-.55px}
 .components-intro{margin:0;color:#aeb2c9;font-size:12.5px;line-height:1.45;max-width:820px}
-.components-grid{position:absolute;left:48px;top:198px;width:904px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;z-index:3;pointer-events:auto}
-.comp-card{position:relative;display:flex;align-items:flex-start;gap:13px;min-height:104px;padding:14px 16px;border:1px solid #c7bdff28;border-radius:13px;background:linear-gradient(145deg,#1d2038eb,#131528f2);box-shadow:inset 0 1px #ffffff0c,0 10px 26px #07081336;cursor:pointer;user-select:none;transition:border-color .2s ease,background .2s ease,transform .15s ease}
+.components-stack{position:absolute;left:48px;top:188px;bottom:12px;width:904px;display:flex;flex-direction:column;gap:14px;z-index:3;pointer-events:auto;min-height:0}
+.components-list-frame{position:relative;isolation:isolate;flex:1 1 auto;min-height:0;overflow:hidden;border:1px solid #c7bdff18;border-radius:14px;background:#17192b;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.components-list{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:18px 0;border:0;border-radius:inherit;background:transparent;mask-image:linear-gradient(180deg,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%);-webkit-mask-image:linear-gradient(180deg,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%);scrollbar-color:#777296 #191b30;scrollbar-width:thin}
+.components-list::-webkit-scrollbar{width:8px}.components-list::-webkit-scrollbar-track{background:#191b30;border-radius:8px}.components-list::-webkit-scrollbar-thumb{background:#777296;border:2px solid #191b30;border-radius:8px}
+.components-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr;gap:8px}
+.components-extra{display:flex;flex-direction:column;gap:8px}
+.comp-slim{display:flex;align-items:center;gap:12px;padding:7px 14px;border:1px solid #c7bdff28;border-radius:12px;background:linear-gradient(145deg,#1d2038eb,#131528f2);cursor:pointer}
+.comp-slim-title{color:#f5f4fc;font-size:12.5px;font-weight:600;letter-spacing:-.1px}
+.comp-slim-desc{color:#b2b6cd;font-size:10.5px}
+.comp-card{position:relative;display:flex;align-items:flex-start;gap:12px;min-height:auto;padding:8px 14px;border:1px solid #c7bdff28;border-radius:13px;background:linear-gradient(145deg,#1d2038eb,#131528f2);box-shadow:inset 0 1px #ffffff0c,0 10px 26px #07081336;cursor:pointer;user-select:none;transition:border-color .2s ease,background .2s ease,transform .15s ease}
 .comp-card:hover:not(.is-locked):not(.is-disabled){border-color:#c1b4ff6e;background:linear-gradient(145deg,#242846f0,#171a31f5)}
 .comp-card.is-checked{border-color:#c1b4ff66;background:linear-gradient(145deg,#252647f2,#16182ff5);box-shadow:inset 0 1px #ffffff12,0 10px 28px #08091848}
 .comp-card.is-locked{cursor:default;border-color:#a7dddf52}
@@ -307,24 +343,61 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .comp-check:checked:after{content:"";display:block;width:9px;height:5px;margin:5px 0 0 4px;border-left:2px solid #17162a;border-bottom:2px solid #17162a;transform:rotate(-45deg)}
 .comp-card.is-locked .comp-check:checked{border-color:#a7dddf;background:#7dc4c8;box-shadow:0 0 12px #a7dddf45}
 .comp-check:focus-visible{outline:2px solid #e1d7ff;outline-offset:3px}
-.comp-body{flex:1 1 auto;min-width:0}
-.comp-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+.comp-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-self:stretch}
+.comp-foot{margin-top:auto;padding-top:4px}
+.comp-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px}
 .comp-heading{display:flex;align-items:center;min-width:0}
 .comp-action{display:flex;align-items:center;flex:0 0 auto;gap:7px}
 .comp-name{color:#f5f4fc;font-size:14px;font-weight:600;letter-spacing:-.1px}
 .comp-lock{display:inline-grid;place-items:center;flex:0 0 auto;width:24px;height:26px;border-radius:7px;background:#a7dddf1f;box-shadow:0 0 12px #a7dddf28}
 .comp-lock svg{display:block;width:20px;height:22px}
 .comp-badge{display:inline-flex;align-items:center;flex:0 0 auto;padding:2px 8px;border-radius:999px;border:1px solid #a7dddf4d;background:#a7dddf14;color:#cdeff0;font-size:8.5px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;white-space:nowrap}
-.comp-badge.action-install{border-color:#78dda66e;background:#54c88e20;color:#b8f4d1}
+.comp-badge.action-install{border-color:#a7dddf66;background:#a7dddf1a;color:#cdeff0}
 .comp-badge.action-update{border-color:#f4c46d80;background:#f4bd5e20;color:#ffdf9d}
-.comp-badge.action-remove{border-color:#ff859780;background:#f2647a20;color:#ffc2cd}
+.comp-badge.action-keep{border-color:#78dda66e;background:#54c88e20;color:#b8f4d1}
+.comp-badge.action-repair{border-color:#e57a7a80;background:#c25b5b26;color:#ffc9c9}
+.comp-reason-line{position:relative;margin:5px 0 0 18px;padding-left:14px;color:#8f94ab;font-size:10.5px;line-height:1.4;min-height:15px}
+.comp-reason-line:before{content:"";position:absolute;left:1px;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:#8f94ab}
+.comp-reason-line.tone-update{color:#ffdf9d}
+.comp-reason-line.tone-update:before{background:#f4bd5e}
+.comp-reason-line.tone-repair{color:#f1c7c7}
+.comp-reason-line.tone-repair:before{background:#e57a7a}
+.comp-state{margin:4px 0 0;color:#c6d7e1;font-size:10.4px;line-height:1.3}
+.comp-loading{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;min-height:220px}
+.comp-loading-text{color:#a2a6bf;font-size:12px;letter-spacing:.4px}
+.comp-reasons li{position:relative;margin:0 0 2px;padding-left:14px;color:#f1c7c7;font-size:10.5px;line-height:1.4}
+.comp-reasons li:before{content:"";position:absolute;left:1px;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:#e57a7a}
 .comp-badge.muted{border-color:#ffffff22;background:#ffffff0a;color:#a7acc4}
-.comp-desc{margin:0;color:#b2b6cd;font-size:11.5px;line-height:1.46}
-.comp-state{margin:5px 0 0;color:#c6d7e1;font-size:10.4px;line-height:1.3}
-.components-warning{position:absolute;left:48px;right:48px;top:440px;z-index:3;display:flex;align-items:flex-start;gap:12px;padding:12px 15px;border:1px solid #f2c0784d;border-left:3px solid #f2c078;border-radius:12px;background:linear-gradient(120deg,#3d2d22cf,#1d1a2ee8);box-shadow:inset 0 1px #ffffff0a,0 10px 24px #05060f44;pointer-events:auto}
-.components-warning[hidden]{display:none!important}
-.components-warning-dot{flex:0 0 auto;width:8px;height:8px;margin-top:5px;border-radius:50%;background:#f5c984;box-shadow:0 0 12px #f5c984a8}
-.components-warning-text{margin:0;color:#f5e9d4;font-size:11.8px;line-height:1.48;white-space:pre-line}
+.comp-desc{margin:0;color:#b2b6cd;font-size:11px;line-height:1.4}
+
+.components-status{display:flex;align-items:center;flex:0 0 78px;height:78px;min-height:78px;gap:12px;padding:5px 14px;border:1px solid #83d9a64d;border-left:3px solid #83d9a6;border-radius:12px;background:linear-gradient(120deg,#1b3b31c9,#171d2be8);box-shadow:inset 0 1px #ffffff0a,0 10px 24px #05060f44;pointer-events:auto;overflow:hidden}
+.components-status.is-warning{border-color:#f2c0784d;border-left-color:#f2c078;background:linear-gradient(120deg,#3d2d22cf,#1d1a2ee8)}
+.components-status.is-neutral{border-color:#9da4ba45;border-left-color:#9da4ba;background:linear-gradient(120deg,#292d3dc9,#1a1d2be8)}
+.components-status[hidden]{display:none!important}
+.components-status-dot{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:#83d9a6;box-shadow:0 0 12px #83d9a6a8}
+.components-status.is-warning .components-status-dot{background:#f5c984;box-shadow:0 0 12px #f5c984a8}
+.components-status.is-neutral .components-status-dot{background:#aab1c5;box-shadow:0 0 10px #aab1c566}
+.components-status-copy{display:flex;flex:1 1 auto;min-width:0;flex-direction:column;gap:3px}
+.components-status-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;margin:0;color:#d8f3e3;font-size:11.6px;line-height:1.3;white-space:pre-line}
+.components-status.is-warning .components-status-text{color:#f5e9d4}
+.components-status.is-neutral .components-status-text{color:#e0e3ec}
+.components-count{margin:0;color:#a8ddbd;font-size:9.5px;font-weight:700;line-height:1.2;letter-spacing:.15px}
+.components-status.is-warning .components-count{color:#f3d39e}
+.components-status.is-neutral .components-count{color:#b8bfd1}
+.components-count[hidden]{display:none!important}
+/* Windows 11 certificate page: same scene as components; two exclusive choice cards + a facts card. */
+.cert-intro{margin:0 0 13px;color:#aeb2c9;font-size:12.5px;line-height:1.45}
+.cert-columns{position:absolute;left:48px;top:150px;width:904px;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;z-index:3;pointer-events:auto}
+.cert-options{display:grid;grid-template-columns:1fr;gap:10px}
+.cert-card{min-height:auto;align-items:flex-start}
+.cert-card .comp-check{border-radius:50%}
+.cert-card .comp-check:checked:after{width:8px;height:8px;margin:5px;border:0;border-radius:50%;background:#17162a;transform:none}
+.cert-facts{align-self:start;padding:14px 16px 13px;border:1px solid #a7dddf38;border-left:2px solid #a7dddf;border-radius:13px;background:linear-gradient(145deg,#19253aeb,#121a2cf2);box-shadow:inset 0 1px #ffffff0c,0 10px 26px #07081336}
+.cert-facts-label{margin:0 0 9px;color:#a7dddf;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase}
+.cert-facts dl{margin:0;display:grid;grid-template-columns:1fr;gap:7px}
+.cert-facts dt{color:#8fa0b3;font-size:9.5px;letter-spacing:.6px;text-transform:uppercase}
+.cert-facts dd{margin:1px 0 0;color:#eaf5f6;font-size:11.5px;line-height:1.4;overflow-wrap:anywhere}
+.cert-facts dd.mono{font-family:Consolas,'Cascadia Mono',monospace;font-size:10.5px;letter-spacing:.3px}
 
 /* Launch panel: Unlocker orbital composition adapted for platform startup */
 .launch-core{fill:#181b34;stroke:#c8beff;stroke-width:2.1;filter:url(#softGlow)}
@@ -412,7 +485,9 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 <section id="complete-panel" class="mode-panel complete-scene" role="status" aria-live="polite">
 <img id="complete-banner" class="banner-portrait" alt="" aria-hidden="true"><div class="complete-ambient" aria-hidden="true"></div><div class="complete-sheen" aria-hidden="true"></div><div class="native-brand">GlassPlatform</div>
 <div class="complete-copy"><div id="complete-tag" class="complete-tag"></div><h1 id="complete-title" class="complete-title"></h1><p id="complete-body" class="complete-body"></p>
-<div class="complete-ready"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg><span id="complete-ready-text"></span></div><p id="complete-note" class="complete-note"></p></div>
+<div id="complete-warnings" class="complete-warnings"><div id="complete-warn-label" class="complete-warn-label"></div><ul id="complete-warn-list" class="complete-warn-list"></ul></div>
+<div class="complete-ready"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg><span id="complete-ready-text"></span></div>
+<p id="complete-note" class="complete-note"></p></div>
 <div class="complete-visual" aria-hidden="true"><svg class="complete-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"><defs>
 <radialGradient id="completeGlow"><stop offset="0" stop-color="#9180df" stop-opacity=".46"/><stop offset=".62" stop-color="#7062b5" stop-opacity=".16"/><stop offset="1" stop-color="#7062b5" stop-opacity="0"/></radialGradient>
 <linearGradient id="completeRingGradient" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a7dddf"/><stop offset=".54" stop-color="#d7ccff"/><stop offset="1" stop-color="#a995ff"/></linearGradient>
@@ -435,8 +510,16 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 <section id="components-panel" class="mode-panel components-scene" aria-labelledby="components-title">
 <img id="components-banner" class="components-banner" alt="" aria-hidden="true"><div class="components-overlay"></div><div id="components-brand" class="native-brand">GlassPlatform</div>
 <div class="components-heading"><div id="components-kicker" class="components-kicker"></div><h1 id="components-title" class="components-title"></h1><p id="components-intro" class="components-intro"></p></div>
-<div id="components-grid" class="components-grid" role="group" aria-labelledby="components-title"></div>
-<div id="components-warning" class="components-warning" hidden role="status" aria-live="polite"><span class="components-warning-dot" aria-hidden="true"></span><p id="components-warning-text" class="components-warning-text"></p></div></section>
+<div class="components-stack">
+<div id="components-status" class="components-status" role="status" aria-live="polite" aria-atomic="true"><span class="components-status-dot" aria-hidden="true"></span><div class="components-status-copy"><p id="components-status-text" class="components-status-text"></p><p id="components-count" class="components-count" hidden></p></div><button id="components-select-all" class="components-select-all" type="button">Выбрать всё</button></div>
+<div class="components-list-frame"><div class="components-list"><div id="components-grid" class="components-grid" role="group" aria-labelledby="components-title"></div>
+<div id="components-extra" class="components-extra"></div></div></div>
+</div></section>
+<section id="certificate-panel" class="mode-panel components-scene" aria-labelledby="certificate-title">
+<img id="certificate-banner" class="components-banner" alt="" aria-hidden="true"><div class="components-overlay"></div><div id="certificate-brand" class="native-brand">GlassPlatform</div>
+<div class="components-heading"><div id="certificate-kicker" class="components-kicker"></div><h1 id="certificate-title" class="components-title"></h1></div>
+<div class="cert-columns"><div><p id="certificate-intro" class="cert-intro"></p><div id="certificate-options" class="cert-options" role="radiogroup" aria-labelledby="certificate-title"></div></div>
+<aside class="cert-facts"><p id="certificate-facts-label" class="cert-facts-label"></p><dl><dt id="certificate-subject-label"></dt><dd id="certificate-subject"></dd><dt id="certificate-thumbprint-label"></dt><dd id="certificate-thumbprint" class="mono"></dd><dt id="certificate-validity-label"></dt><dd id="certificate-validity"></dd><dt id="certificate-store-label"></dt><dd id="certificate-store" class="mono"></dd></dl></aside></div></section>
 <section id="launch-panel" class="mode-panel unlock-scene" role="status" aria-live="polite">
 <img id="launch-banner" class="unlock-backdrop" alt="" aria-hidden="true"><div class="unlock-shade"></div><div class="native-brand">GlassPlatform</div>
 <div class="unlock-copy"><div id="launch-kicker" class="unlock-kicker"></div><h1 id="launch-title" class="unlock-title"></h1><p id="launch-description" class="unlock-description"></p>
@@ -505,12 +588,12 @@ ru:{title:'GlassPlatform · Установка',tagline:'Новый взгляд
 checkingKicker:'ВЕРСИЯ УСТАНОВЩИКА',checkingTitle:'Проверяем новую версию',checkingCopy:'Сверяем опубликованную версию установщика с версией GlassPlatform. Если обновление не найдено или сервер недоступен, продолжим установку текущей версии.',checkingStatus:'Запрос к GitHub Releases',checkingSub:'Мастер продолжит работу, даже если обновления нет',checkingSource:'GitHub Releases',
 forceKicker:'UNLOCKER · ПОВТОРНАЯ ВЫГРУЗКА',forceTitle:'Освобождаем модули',forceDescription:'Unlocker повторно проверяет процессы. Проводник и установщик освобождают модули без принудительной выгрузки.',forceStatus:'Повторная выгрузка модулей…',forceSubstatus:'Этап 1 из 2 · освобождение модулей',forceHoldersTitle:'Занятые модули и удерживающие их процессы',
 unlockKicker:'UNLOCKER · РАЗБЛОКИРОВКА ПРОЦЕССОВ',unlockTitle:'Закрываем приложения',unlockDescription:'Приложения могут быть завершены принудительно. Проводник не завершается целиком: закрываются только его файловые окна.',unlockStatus:'Закрытие процессов…',unlockSubstatus:'Проводник защищён от принудительного завершения',unlockHoldersTitle:'Процессы, которые удерживают модули',
-doneTag:'ГОТОВО',doneTitle:'Всё готово!',doneBody:'GlassPlatform установлена и запущена.',doneReady:'ГОТОВО К РАБОТЕ',doneNote:'Мастер можно закрыть. Журналы: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).',errorTag:'ОШИБКА',errorTitle:'Установка не выполнена',errorBody:'Не удалось завершить установку. Ниже указана возможная причина.',errorDetails:'ДЕТАЛИ',errorReason:'',errorNote:'Подробности: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).'},
+doneTag:'ГОТОВО',doneTitle:'Всё готово!',doneBody:'GlassPlatform установлена и запущена.',doneReady:'ГОТОВО К РАБОТЕ',doneNote:'Мастер можно закрыть. Журналы: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).',doneWarnTag:'ГОТОВО, ЕСТЬ ЗАМЕЧАНИЯ',doneWarnTitle:'Установлено, но не всё запустилось',doneWarnBody:'GlassPlatform установлена с замечаниями — подробности ниже и в журнале %WINDIR%\\Temp\\GlassSetupLogs-*.',doneWarnLabel:'ЗАМЕЧАНИЯ',errorTag:'ОШИБКА',errorTitle:'Установка не выполнена',errorBody:'Не удалось завершить установку. Ниже указана возможная причина.',errorDetails:'ДЕТАЛИ',errorReason:'',errorNote:'Подробности: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).'},
 en:{title:'GlassPlatform · Setup',tagline:'A new perspective',slide:'Slide',slideRole:'slide',carouselRole:'carousel',choose:'Choose a slide',resume:'Resume slideshow',pause:'Pause slideshow',
 checkingKicker:'SETUP VERSION',checkingTitle:'Checking for a newer version',checkingCopy:'Comparing the published setup version with GlassPlatform. If no update is found or the server is unavailable, setup will continue with this version.',checkingStatus:'Requesting GitHub Releases',checkingSub:'Setup continues even when there is no update',checkingSource:'GitHub Releases',
 forceKicker:'UNLOCKER · RETRYING MODULE RELEASE',forceTitle:'Releasing modules',forceDescription:'Unlocker rescans processes. Explorer and Setup release modules without a forced unload.',forceStatus:'Retrying module unload…',forceSubstatus:'Stage 1 of 2 · module release',forceHoldersTitle:'Modules held by these processes',
 unlockKicker:'UNLOCKER · PROCESS RELEASE',unlockTitle:'Closing applications',unlockDescription:'Applications may be terminated if they do not close. Explorer itself is not terminated; only its file windows are closed.',unlockStatus:'Closing processes…',unlockSubstatus:'Explorer is protected from forced termination',unlockHoldersTitle:'Processes still holding modules',
-doneTag:'DONE',doneTitle:'You’re all set!',doneBody:'GlassPlatform is installed and running.',doneReady:'READY TO USE',doneNote:'You can close the wizard. Logs: %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).',errorTag:'ERROR',errorTitle:'Setup could not finish',errorBody:'Installation did not complete. A possible reason is shown below.',errorDetails:'DETAILS',errorReason:'',errorNote:'See %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).'}
+doneTag:'DONE',doneTitle:'You’re all set!',doneBody:'GlassPlatform is installed and running.',doneReady:'READY TO USE',doneNote:'You can close the wizard. Logs: %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).',doneWarnTag:'DONE WITH NOTES',doneWarnTitle:'Installed, but not everything started',doneWarnBody:'GlassPlatform was installed with notes — details below and in the %WINDIR%\\Temp\\GlassSetupLogs-* log.',doneWarnLabel:'NOTES',errorTag:'ERROR',errorTitle:'Setup could not finish',errorBody:'Installation did not complete. A possible reason is shown below.',errorDetails:'DETAILS',errorReason:'',errorNote:'See %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).'}
 };
 let locale='ru',index=0,paused=false,timer=null,interval=6500,platformVersion='',mode='loading',completionText=null,errorText=null,hostState={},assetsReady=false,pendingMode='',componentSignature='';function setPlatformVersion(value){platformVersion=String(value||'');const node=document.getElementById('platformVersion');if(node)node.textContent=platformVersion;}
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
@@ -527,24 +610,64 @@ function componentLock(title){
  lock.innerHTML='<svg viewBox="0 0 24 26" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3" fill="none" stroke="#a7dfff" stroke-width="2.8" stroke-linecap="round"/><rect x="4" y="10" width="16" height="13" rx="3" fill="#efb94f" stroke="#ffe2a3" stroke-width="1.2"/><path d="M7 12h10" fill="none" stroke="#fff1bd" stroke-width="1" stroke-linecap="round" opacity=".8"/><circle cx="12" cy="16" r="1.5" fill="#573c38"/><path d="M12 17.2v2.2" stroke="#573c38" stroke-width="1.5" stroke-linecap="round"/></svg>';
  return lock;
 }
+function updateComponentsStatus(){
+ const status=document.getElementById('components-status'),text=document.getElementById('components-status-text'),count=document.getElementById('components-count'),button=document.getElementById('components-select-all');
+ if(!status||!text)return;
+ const inputs=[...document.querySelectorAll('#components-grid input.comp-check,#components-extra input.comp-check')];
+ const uninstaller=hostState.appMode==='unins',products=inputs.filter(input=>input.dataset.component!=='cleanup');
+ const selectable=(uninstaller?products:inputs).filter(input=>!input.disabled);
+ const allSelected=selectable.length>0&&selectable.every(input=>input.checked);
+ const availableProducts=products.filter(input=>!input.disabled||input.dataset.locked==='1');
+ const selectedProducts=availableProducts.filter(input=>input.checked).length;
+ const loading=hostState.componentsLoading===true;
+ if(button){button.hidden=false;button.disabled=selectable.length===0||(uninstaller&&allSelected);button.textContent=uninstaller?(allSelected?(locale==='ru'?'Все продукты выбраны':'All products selected'):(locale==='ru'?'Выбрать всё':'Select all')):(allSelected?(locale==='ru'?'Снять необязательные':'Clear optional'):(locale==='ru'?'Выбрать всё':'Select all'));}
+ if(count){count.hidden=loading||availableProducts.length===0;count.textContent=uninstaller?(locale==='ru'?`К удалению: ${selectedProducts} из ${availableProducts.length} продуктов`:`To remove: ${selectedProducts} of ${availableProducts.length} products`):(locale==='ru'?`Выбрано: ${selectedProducts} из ${availableProducts.length} продуктов`:`Selected: ${selectedProducts} of ${availableProducts.length} products`);}
+ status.classList.remove('is-warning','is-neutral');
+ const warning=String(hostState.componentsWarning||'').trim();
+ if(!loading&&selectedProducts===0){status.classList.add('is-neutral');text.textContent=(uninstaller?(locale==='ru'?'Ни один продукт не выбран для удаления.':'No products are selected for removal.'):(locale==='ru'?'Ни один компонент не выбран.':'No components are selected.'))+(warning?'\n'+warning:'');text.title=warning;return;}
+ if(warning){status.classList.add('is-warning');text.textContent=warning;text.title=warning;return;}text.title='';
+ if(uninstaller){const removable=availableProducts.filter(input=>input.dataset.component!=='secureUxTheme'),productsSelected=removable.some(input=>input.checked),sutSelected=availableProducts.some(input=>input.dataset.component==='secureUxTheme'&&input.checked),cleanupSelected=inputs.some(input=>input.dataset.component==='cleanup'&&input.checked);text.textContent=locale==='ru'?(productsSelected&&sutSelected?'Отмеченные продукты будут удалены; MSI SecureUxTheme будет удалён и его интеграция отключена. Неотмеченные продукты останутся.':productsSelected?'Выбранные продукты будут удалены. Неотмеченные останутся без изменений.':sutSelected&&cleanupSelected?'MSI SecureUxTheme будет удалён, настройки очищены. Прочие продукты останутся без изменений.':sutSelected?'Продукт SecureUxTheme будет удалён. GlassSettings останется установленным.':cleanupSelected?'Выбрана только отдельная очистка настроек. Продукты останутся без изменений.':'Отметьте продукты для удаления. Очистка настроек выбирается отдельно.'):(productsSelected&&sutSelected?'Selected products will be removed; the SecureUxTheme MSI will be removed and its integration disabled. Unchecked products will remain.':productsSelected?'Selected products will be removed. Unchecked products will remain unchanged.':sutSelected&&cleanupSelected?'The SecureUxTheme MSI will be removed and settings cleaned. Other products will remain unchanged.':sutSelected?'The SecureUxTheme product will be removed. GlassSettings will remain installed.':cleanupSelected?'Only settings cleanup is selected. Products will remain unchanged.':'Select products to remove. Settings cleanup is a separate option.');return;}
+ const selectedOptional=selectable.filter(input=>input.checked).length;
+ const hasLocked=inputs.some(input=>input.dataset.locked==='1'&&input.checked);
+ if(hostState.componentsLoading===true){text.textContent=locale==='ru'?'Подготавливаем список компонентов…':'Preparing the component list…';return;}
+ if(allSelected){text.textContent=locale==='ru'?'Выбран полный комплект компонентов.':'The complete set of components is selected.';}
+ else if(hasLocked&&selectedOptional===0){text.textContent=locale==='ru'?'Выбран минимальный комплект, а не полный набор продуктов. Дополнительные продукты можно продолжить выбирать.':'The minimal set is selected, not the full product set. You can continue selecting additional products.';}
+ else{text.textContent=locale==='ru'?'Выбран неполный комплект компонентов. Дополнительные продукты можно продолжить выбирать.':'A partial component set is selected. You can continue selecting additional products.';}
+}
 function renderComponentsPanel(){
- const grid=document.getElementById('components-grid'),warn=document.getElementById('components-warning'),warnText=document.getElementById('components-warning-text');
+ const grid=document.getElementById('components-grid'),extra=document.getElementById('components-extra'),status=document.getElementById('components-status'),statusText=document.getElementById('components-status-text'),selectAll=document.getElementById('components-select-all');
  if(!grid)return;
+ if(selectAll&&!selectAll.dataset.bound){selectAll.dataset.bound='1';selectAll.addEventListener('click',()=>{const uninstaller=hostState.appMode==='unins',inputs=[...document.querySelectorAll('#components-grid input.comp-check,#components-extra input.comp-check')].filter(input=>!uninstaller||input.dataset.component!=='cleanup'),selectable=inputs.filter(input=>!input.disabled),select=uninstaller||selectable.some(input=>!input.checked);for(const input of selectable)if(input.checked!==select){input.checked=select;input.dispatchEvent(new Event('change',{bubbles:true}));}updateComponentsStatus();});}
  const items=Array.isArray(hostState.components)?hostState.components:[];
- const signature=JSON.stringify(items);
+ const loading=hostState.componentsLoading===true;
+ const signature=JSON.stringify([loading,items]);
  if(signature!==componentSignature){
   const focusId=grid.contains(document.activeElement)?document.activeElement.dataset.component:null;
-  componentSignature=signature;grid.replaceChildren();
-  for(const item of items){
+  componentSignature=signature;grid.replaceChildren();if(extra)extra.replaceChildren();
+  if(loading){
+   const wrap=document.createElement('div');wrap.className='comp-loading';
+   const ring=document.createElement('div');ring.className='loading-donut';
+   const label=document.createElement('span');label.className='comp-loading-text';
+   label.textContent=locale==='ru'?'Анализ установки…':'Analyzing installation…';
+   wrap.append(ring,label);grid.append(wrap);
+  } else for(const item of items){
    if(!item||item.hidden)continue;
+   const input=document.createElement('input');input.type='checkbox';input.className='comp-check';input.dataset.component=String(item.id||'');input.dataset.locked=item.locked?'1':'0';
+   input.checked=!!item.checked;input.disabled=!!(item.locked||item.disabled);
+   const post=()=>{if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('component:'+String(item.id||'')+':'+(input.checked?'1':'0'));};
+   if(item.slim){
+    const row=document.createElement('label');row.className='comp-slim'+(item.checked?' is-checked':'');
+    input.addEventListener('change',()=>{if(item.locked||item.disabled){input.checked=!!item.checked;return;}row.classList.toggle('is-checked',input.checked);post();updateComponentsStatus();});
+    const slimTitle=document.createElement('span');slimTitle.className='comp-slim-title';slimTitle.textContent=String(item.title||'');
+    const slimDesc=document.createElement('span');slimDesc.className='comp-slim-desc';slimDesc.textContent=String(item.description||'');
+    row.append(input,slimTitle,slimDesc);(extra||grid).append(row);
+    continue;
+   }
    const label=document.createElement('label');
    label.className='comp-card'+(item.checked?' is-checked':'')+(item.locked?' is-locked':'')+(item.disabled?' is-disabled':'');
-   const input=document.createElement('input');input.type='checkbox';input.className='comp-check';input.dataset.component=String(item.id||'');
-   input.checked=!!item.checked;input.disabled=!!(item.locked||item.disabled);
    input.addEventListener('change',()=>{
     if(item.locked||item.disabled){input.checked=!!item.checked;return;}
-    label.classList.toggle('is-checked',input.checked);
-    if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('component:'+String(item.id||'')+':'+(input.checked?'1':'0'));
+    label.classList.toggle('is-checked',input.checked);post();updateComponentsStatus();
    });
    const body=document.createElement('div');body.className='comp-body';
    const head=document.createElement('div');head.className='comp-head';
@@ -552,27 +675,61 @@ function renderComponentsPanel(){
    const name=document.createElement('span');name.className='comp-name';name.textContent=String(item.title||'');heading.append(name);
    head.append(heading);
    const action=document.createElement('span');action.className='comp-action';
-   if(item.locked)action.append(componentLock(item.lockTitle||item.badge||(locale==='ru'?'Заблокировано':'Locked')));
+   if(item.lockTitle)action.append(componentLock(item.lockTitle));
    if(item.badge){
     const badge=document.createElement('span');
-    const tone=['install','update','remove'].includes(item.badgeTone)?' action-'+item.badgeTone:'';
+    const tone=['install','update','keep','repair'].includes(item.badgeTone)?' action-'+item.badgeTone:'';
     badge.className='comp-badge'+tone+(item.disabled?' muted':'');badge.textContent=String(item.badge);action.append(badge);
    }
    if(item.locked||item.badge)head.append(action);
    const desc=document.createElement('p');desc.className='comp-desc';desc.textContent=String(item.description||'');body.append(head,desc);
-   if(item.state){const state=document.createElement('p');state.className='comp-state';state.textContent=String(item.state);body.append(state);}
+   // Строки действия и причин прижаты к низу карточки: высота текста над ними
+   // не сдвигает их — на всех карточках они на одном уровне Y.
+   const foot=document.createElement('div');foot.className='comp-foot';
+   if(item.state){const state=document.createElement('p');state.className='comp-state';state.textContent=String(item.state);foot.append(state);}
+   const hasReasons=Array.isArray(item.reasons)&&item.reasons.length>0;
+   const reasonLine=document.createElement('p');reasonLine.className='comp-reason-line tone-'+String(item.badgeTone||'');
+   reasonLine.textContent=hasReasons?item.reasons.join(' \u00b7 '):(hostState.appMode==='unins'?(locale==='ru'?'можно удалить отдельно':'can be removed separately'):(locale==='ru'?'не требуется':'not required'));
+   foot.append(reasonLine);
+   body.append(foot);
    label.append(input,body);grid.append(label);
   }
-  if(focusId){const restored=[...grid.querySelectorAll('input')].find(el=>el.dataset.component===focusId&&!el.disabled);if(restored)restored.focus();}
+  if(focusId){const restored=[...document.querySelectorAll('#components-grid input,#components-extra input')].find(el=>el.dataset.component===focusId&&!el.disabled);if(restored)restored.focus();}
  }
- if(warn&&warnText){const msg=String(hostState.componentsWarning||'').trim();warn.hidden=!msg;warnText.textContent=msg;}
+ if(status&&statusText)updateComponentsStatus();
+}
+let certificateSignature='';
+function renderCertificatePanel(){
+ const host=document.getElementById('certificate-options');if(!host)return;
+ const hostUi=hostState.ui||{},cert=(hostState.certificate&&typeof hostState.certificate==='object')?hostState.certificate:{};
+ const install=cert.install!==false;
+ const options=[{id:'1',checked:install,title:hostUi.certInstallTitle||(locale==='ru'?'Принять сертификат':'Accept the certificate'),desc:hostUi.certInstallDesc||''},
+  {id:'0',checked:!install,title:hostUi.certSkipTitle||(locale==='ru'?'Не принимать':'Do not accept'),desc:hostUi.certSkipDesc||''}];
+ const signature=JSON.stringify(options);
+ if(signature!==certificateSignature){
+  const focusId=host.contains(document.activeElement)?document.activeElement.dataset.certificate:null;
+  certificateSignature=signature;host.replaceChildren();
+  for(const item of options){
+   const label=document.createElement('label');label.className='comp-card cert-card'+(item.checked?' is-checked':'');
+   const input=document.createElement('input');input.type='radio';input.name='certificate-choice';input.className='comp-check';input.dataset.certificate=item.id;input.checked=item.checked;
+   input.addEventListener('change',()=>{for(const card of host.querySelectorAll('.cert-card'))card.classList.toggle('is-checked',card.contains(input)&&input.checked);if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('certificate:'+item.id);});
+   const body=document.createElement('div');body.className='comp-body';
+   const head=document.createElement('div');head.className='comp-head';const name=document.createElement('span');name.className='comp-name';name.textContent=item.title;head.append(name);
+   const desc=document.createElement('p');desc.className='comp-desc';desc.textContent=item.desc;body.append(head,desc);
+   label.append(input,body);host.append(label);
+  }
+  if(focusId){const restored=[...host.querySelectorAll('input')].find(el=>el.dataset.certificate===focusId);if(restored)restored.focus();}
+ }
+ setModeText('certificate-subject',cert.subject||'');setModeText('certificate-thumbprint',cert.thumbprint||'');setModeText('certificate-validity',cert.validity||'');setModeText('certificate-store',hostUi.certStore||'LocalMachine\\TrustedPeople');
 }
 function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done=completionText||hostUi||x,failed=errorText||hostUi||x;
- for(const id of ['checking-banner','unlock-banner','complete-banner','error-banner','update-banner','license-banner','conflicts-banner','downgrade-banner','version-invalid-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}for(const id of ['components-banner','launch-banner','uninstalling-banner','confirm-banner','cancelling-banner','cancelled-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}
+ for(const id of ['checking-banner','unlock-banner','complete-banner','error-banner','update-banner','license-banner','conflicts-banner','downgrade-banner','version-invalid-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}for(const id of ['components-banner','certificate-banner','launch-banner','uninstalling-banner','confirm-banner','cancelling-banner','cancelled-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}
  document.getElementById('checking-kicker').textContent=x.checkingKicker;document.getElementById('checking-title').textContent=x.checkingTitle;document.getElementById('checking-copy').textContent=x.checkingCopy;document.getElementById('checking-status').textContent=x.checkingStatus;document.getElementById('checking-sub').textContent=x.checkingSub;document.getElementById('checking-source').textContent=x.checkingSource;
  const processMode=mode==='unlock-processes';unlockPanel.classList.toggle('processes',processMode);unlockPanel.classList.toggle('is-idle',hostState.unlockActive!==true);
  document.getElementById('unlock-kicker').textContent=hostUi.unlockKickerOverride||(processMode?x.unlockKicker:x.forceKicker);document.getElementById('unlock-title').textContent=hostUi.unlockTitleOverride||(processMode?x.unlockTitle:x.forceTitle);document.getElementById('unlock-description').textContent=hostUi.unlockDescOverride||(processMode?x.unlockDescription:x.forceDescription);document.getElementById('unlock-status').textContent=(hostState.unlockActive&&hostState.status)?hostState.status:(processMode?x.unlockStatus:x.forceStatus);document.getElementById('unlock-substatus').textContent=processMode?x.unlockSubstatus:x.forceSubstatus;renderHolderReport(processMode);
- document.getElementById('complete-tag').textContent=done.doneTag||x.doneTag;document.getElementById('complete-title').textContent=done.doneTitle||x.doneTitle;document.getElementById('complete-body').textContent=done.doneBody||x.doneBody;document.getElementById('complete-ready-text').textContent=done.doneReady||x.doneReady;document.getElementById('complete-note').textContent=done.doneNote||x.doneNote;
+ const finishWarnings=Array.isArray(hostState.finishWarnings)?hostState.finishWarnings.filter(w=>w&&typeof w.title==='string'&&w.title):[],hasWarnings=finishWarnings.length>0;document.getElementById('complete-panel').classList.toggle('has-warnings',hasWarnings);
+ document.getElementById('complete-tag').textContent=hasWarnings?(hostUi.doneWarnTag||x.doneWarnTag):(done.doneTag||x.doneTag);document.getElementById('complete-title').textContent=hasWarnings?(hostUi.doneWarnTitle||x.doneWarnTitle):(done.doneTitle||x.doneTitle);document.getElementById('complete-body').textContent=hasWarnings?(hostUi.doneWarnBody||x.doneWarnBody):(done.doneBody||x.doneBody);document.getElementById('complete-ready-text').textContent=done.doneReady||x.doneReady;document.getElementById('complete-note').textContent=done.doneNote||x.doneNote;
+ document.getElementById('complete-warn-label').textContent=hostUi.doneWarnLabel||x.doneWarnLabel;const warnList=document.getElementById('complete-warn-list');warnList.replaceChildren();for(const w of finishWarnings){const li=document.createElement('li');li.className='complete-warn-item';li.append(document.createTextNode(w.title));if(typeof w.detail==='string'&&w.detail){const d=document.createElement('span');d.className='complete-warn-detail';d.textContent=w.detail;li.append(d);}warnList.append(li);}
  document.getElementById('error-tag').textContent=failed.errorTag||x.errorTag;document.getElementById('error-title').textContent=failed.errorTitle||x.errorTitle;document.getElementById('error-body').textContent=failed.errorBody||x.errorBody;document.getElementById('error-reason-label').textContent=failed.errorDetails||x.errorDetails;document.getElementById('error-detail').textContent=hostState.errorReason||failed.errorReason||x.errorReason;document.getElementById('error-note').textContent=(hostState.page==='error'&&hostState.status)?(hostState.status+'\n'+(failed.errorNote||x.errorNote)):(failed.errorNote||x.errorNote);
  setModeText('conflicts-kicker',hostUi.conflictsTag);setModeText('conflicts-title',hostUi.conflictsTitle);setModeText('conflicts-body',hostUi.conflictsBody);setModeText('conflicts-instructions',hostUi.conflictsInstructions);
  const conflictList=document.getElementById('conflict-list');conflictList.replaceChildren();for(const item of Array.isArray(hostState.conflicts)?hostState.conflicts:[]){if(!item||typeof item.name!=='string'||typeof item.detail!=='string')continue;const li=document.createElement('li');li.className='conflict-item';const dot=document.createElement('span');dot.className='conflict-dot';dot.setAttribute('aria-hidden','true');const copy=document.createElement('div');copy.className='conflict-copy';const name=document.createElement('strong');name.className='conflict-name';name.textContent=item.name;const detail=document.createElement('span');detail.className='conflict-detail';detail.textContent=item.detail;copy.append(name,detail);li.append(dot,copy);conflictList.append(li)}
@@ -583,6 +740,7 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  setModeText('update-brand',hostUi.brand||'GlassPlatform');setModeText('update-tag',hostUi.updateTag);setModeText('update-title',hostUi.updateTitle);setModeText('update-body',hostState.updateBody);setModeText('update-chip-label',hostUi.updateReady);setModeText('update-current-label',hostUi.updateCurrentLabel);setModeText('update-latest-label',hostUi.updateLatestLabel);setModeText('update-current',hostState.updateCurrent);setModeText('update-latest',hostState.updateLatest);
  setModeText('license-brand',hostUi.brand||'GlassPlatform');setModeText('license-title',hostUi.licenseTitle);setModeText('license-intro',hostUi.licenseIntro);setModeText('license-accept-text',hostUi.licenseAccept);setModeText('eula-content',hostState.eula);
  const accept=document.getElementById('license-accept');if(accept&&typeof hostState.accepted==='boolean')accept.checked=hostState.accepted;
+ setModeText('certificate-brand',hostUi.brand||'GlassPlatform');setModeText('certificate-kicker',hostUi.certTag||(locale==='ru'?'СЕРТИФИКАТ РАЗРАБОТЧИКА':'DEVELOPER CERTIFICATE'));setModeText('certificate-title',hostUi.certTitle||(locale==='ru'?'Принять сертификат разработчика?':'Accept the developer certificate?'));setModeText('certificate-intro',hostUi.certIntro||'');setModeText('certificate-facts-label',hostUi.certDetailsLabel||'');setModeText('certificate-subject-label',hostUi.certSubjectLabel||'');setModeText('certificate-thumbprint-label',hostUi.certThumbprintLabel||'');setModeText('certificate-validity-label',hostUi.certValidityLabel||'');setModeText('certificate-store-label',hostUi.certStoreLabel||'');renderCertificatePanel();
  setModeText('components-brand',hostUi.brand||'GlassPlatform');setModeText('components-kicker',hostUi.compTag||(locale==='ru'?'КОМПОНЕНТЫ ПАКЕТА':'PACKAGE COMPONENTS'));setModeText('components-title',hostUi.compTitle||(locale==='ru'?'Выбор продуктов':'Choose products'));setModeText('components-intro',hostUi.compIntro||'');renderComponentsPanel();
  setModeText('launch-kicker',hostUi.launchTag||(locale==='ru'?'ЗАПУСК ПЛАТФОРМЫ':'STARTING PLATFORM'));setModeText('launch-title',hostUi.launchTitle||(locale==='ru'?'Запускаем компоненты':'Starting components'));setModeText('launch-description',hostUi.launchBody||'');setModeText('launch-status',hostState.status||hostUi.launchTitle||'');setModeText('launch-substatus',hostUi.launchSubstatus||'');
  if(Array.isArray(hostState.launchCards)){const ids=[['launch-card-a-title','launch-card-a-sub'],['launch-card-b-title','launch-card-b-sub'],['launch-card-c-title','launch-card-c-sub']];ids.forEach(([a,b],idx)=>{const c=hostState.launchCards[idx];const group=document.getElementById(a).parentNode;group.style.display=c?'':'none';if(c){group.classList.toggle('launch-card-ready',!!c.ready);setModeText(a,c.title);setModeText(b,c.sub);}});}
@@ -592,7 +750,7 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  setModeText('cancelled-tag',hostUi.cancelledTag||(locale==='ru'?'УСТАНОВКА ОТМЕНЕНА':'SETUP CANCELLED'));setModeText('cancelled-title',hostUi.cancelledTitle||(locale==='ru'?'Установка прервана':'Setup was cancelled'));setModeText('cancelled-body',hostUi.cancelledBody||'');setModeText('cancelled-detail',hostState.cancelledDetail||hostUi.cancelledDetail||'');
 }
 function isCarouselMode(value=mode){return value==='welcome'||value==='installing'}
-function setMode(value){const raw=String(value),alias=raw==='slideshow'?'welcome':raw;const valid=['loading','welcome','checking','update','conflicts','downgrade','version-invalid','license','components','uninstall-select','installing','uninstalling','unlock-modules','unlock-processes','launching','confirm-cancel','cancelling','cancelled','complete','error'];const next=valid.includes(alias)?alias:'welcome';if(next==='welcome'&&!assetsReady){pendingMode='welcome';mode='loading';stage.dataset.mode='loading';syncModeText();clearTimeout(timer);return}if(next!=='welcome')pendingMode='';if(mode===next&&stage.dataset.mode===next){syncModeText();return}mode=next;stage.dataset.mode=mode;syncModeText();if(isCarouselMode())schedule();else clearTimeout(timer);}
+function setMode(value){const raw=String(value),alias=raw==='slideshow'?'welcome':raw;const valid=['loading','welcome','checking','update','conflicts','downgrade','version-invalid','license','components','certificate','uninstall-select','installing','uninstalling','unlock-modules','unlock-processes','launching','confirm-cancel','cancelling','cancelled','complete','error'];const next=valid.includes(alias)?alias:'welcome';if(next==='welcome'&&!assetsReady){pendingMode='welcome';mode='loading';stage.dataset.mode='loading';syncModeText();clearTimeout(timer);return}if(next!=='welcome')pendingMode='';if(mode===next&&stage.dataset.mode===next){syncModeText();return}mode=next;stage.dataset.mode=mode;syncModeText();if(isCarouselMode())schedule();else clearTimeout(timer);}
 function setCompletionText(tag,title,body,note,ready){completionText={doneTag:String(tag||''),doneTitle:String(title||''),doneBody:String(body||''),doneNote:String(note||''),doneReady:String(ready||'')};syncModeText();}
 function setErrorText(tag,title,body,details,reason,note){errorText={errorTag:String(tag||''),errorTitle:String(title||''),errorBody:String(body||''),errorDetails:String(details||''),errorReason:String(reason||''),errorNote:String(note||'')};syncModeText();}
 function update(){[...root.children].forEach((el,i)=>{el.classList.toggle('active',i===index);el.setAttribute('aria-hidden',i!==index)});[...dots.children].forEach((b,i)=>b.setAttribute('aria-current',i===index));pauseButton.innerHTML=paused?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';pauseButton.setAttribute('aria-label',paused?uiResources[locale].resume:uiResources[locale].pause);pauseButton.setAttribute('aria-pressed',String(paused));}

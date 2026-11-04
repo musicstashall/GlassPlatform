@@ -110,7 +110,9 @@ for manifest in (root / "res/app.manifest", root / "GlassUnins/app.manifest"):
     assert dpi is not None and dpi.text == "PerMonitorV2", manifest
 for project in (root / "GlassSetup.vcxproj", root / "GlassUnins/GlassUnins.vcxproj",
                 root / "msi/PlatformPackage.template.wxs", root / "msi/OpenGlassPackage.template.wxs",
-                root / "msi/GlassSettingsPackage.template.wxs", root / "msi/GlassSetupPayload.targets"):
+                root / "msi/GlassSettingsPackage.template.wxs", root / "msi/SecureUxThemePackage.template.wxs",
+                root / "msi/SecureUxTheme-x64.wixproj", root / "msi/SecureUxTheme-x86.wixproj",
+                root / "msi/GlassSetupPayload.targets"):
     ET.parse(project)
 
 project = read("GlassSetup.vcxproj")
@@ -135,9 +137,9 @@ assert '<ResourceCompile Include="res\\GlassSetup.rc"' in project
 assert "VerifyEmbeddedNativePayload()" in engine and "kNativeInstallerProtocolExport" in engine
 native = (repo / "GlassSettings/Native/InjectProcessMapNative.cpp").read_text(encoding="utf-8")
 protocol = (repo / "GlassShared/include/InjectModuleScan.h").read_text(encoding="utf-8")
-assert "GlassSettings_InstallerScanProtocolV1" in native and "GlassSettings_InstallerScanProtocolV1" in protocol
+assert "GlassSettings_InstallerScanProtocolV2" in native and "GlassSettings_InstallerScanProtocolV2" in protocol
 build_guard = read("scripts/Verify-InstallerNative.ps1")
-assert "GlassSettings_InstallerScanProtocolV1" in build_guard
+assert "GlassSettings_InstallerScanProtocolV2" in build_guard
 assert "-X86" in project and "-X64" in project and "Verify-InstallerNative.ps1" in project
 assert "<AdditionalDependencies>GlassShared.lib;" not in project
 solution = (repo / "GlassProject.sln").read_text(encoding="utf-8")
@@ -147,7 +149,7 @@ assert f"{setup_guid}.Debug|Any CPU.Build.0" not in solution
 assert f"{setup_guid}.Debug|x86.Build.0 = Debug|Win32" in solution
 assert f"{setup_guid}.Release|x86.Build.0 = Release|Win32" in solution
 
-# Four user-visible products, individual product code routing and no legacy forced settings removal.
+# MSI products, individual product-code routing, and no legacy forced settings removal.
 settings_wxs = read("msi/GlassSettingsPackage.template.wxs")
 platform_wxs = read("msi/PlatformPackage.template.wxs")
 og_wxs = read("msi/OpenGlassPackage.template.wxs")
@@ -166,16 +168,34 @@ assert "selection_.platform64=os64" in setup
 assert "IDS_COMP_GS_WARNING" in setup and "HKCU\\\\Software\\\\StanislavKa\\\\GlassPlatform" in rc
 assert "StartMenuShortcutExists" in util
 assert "QueryPlatformInstallPath" in util and "QueryOpenGlassInstallPath" in util
-# Installation is a desired-state operation, not a skip-only selection.
+# Setup never removes products: checked products are installed or updated,
+# unchecked installed products are kept; removal belongs to GlassUnins.
 policy = read("src/GlassProducts.h")
-assert "RemovalForInstall" in policy and "not an uninstall request" not in policy
-sequence = section(engine, "bool InstallEngine::RunMsiSequence()", "bool InstallEngine::LaunchAndVerifySelectedProducts()")
-for token in ("kProductSettingsX64", "kProductSettingsX86", "kProductOpenGlass", "kLegacyOpenGlass",
-              "kProductPlatformX86", "kLegacyPlatformX86", "ClearPlatformInstallPath(false)",
-              "ClearOpenGlassInstallPath()", "ProductWasSnapshotted"):
-    assert token in sequence, token
-assert sequence.index("NoteModified(rollbackSession_, step.removeCode)") < sequence.index("UninstallProduct(step.removeCode, &sink")
-assert "cancelRequested=&cancelRequested_" in sequence
+assert "RemovalForInstall" not in policy and "InstallAction::Keep" in policy and "never removes" in policy
+sequence = section(engine, "bool InstallEngine::RunMsiSequence()", "void InstallEngine::SeedUserDefaults()")
+for token in ("UninstallProduct(", "removeCode", "kProductSettingsX86", "kProductPlatformX86",
+              "ClearPlatformInstallPath(", "ClearOpenGlassInstallPath(", "PruneEmptyDirectories("):
+    assert token not in sequence, token
+assert "ProductWasSnapshotted" in sequence  # legacy codes replaced by MajorUpgrade are still snapshot-checked
+assert "PrepareProductRemoval" not in engine and "removalSession_" not in engine and "remove_." not in engine
+# Per-user defaults: seeded before the first platform start, never over existing lists, undone by rollback.
+defaults = read("src/InstallSupport/GlassUserDefaults.cpp")
+default_lists = (repo / "GlassShared/include/DefaultProcessLists.h").read_text(encoding="utf-8")
+assert "GlassUserDefaults.cpp" in project and "GlassUserDefaults.h" in project
+assert "GlassUserDefaults.cpp" in read("GlassSetup.vcxproj.filters")
+assert "hasEntries" in defaults and "RegDeleteTreeW" in defaults and "kBlockListDescription" in defaults
+assert "#include <windows.h>" not in default_lists and "Software\\\\StanislavKa\\\\GlassPlatform\\\\AttachList" in default_lists
+assert default_lists.count("kModeForbidden }") == 2 and default_lists.count("kModePopupOnly }") == 28 and default_lists.count("kModeFull }") == 34
+assert '{ L"explorer.exe", kModeFull }' in default_lists and '{ L"cmd.exe", kModeForbidden }' in default_lists
+assert default_lists.count('        L"') - default_lists.count('        L"BlackWindowManager') == 21
+register = section(engine, "bool InstallEngine::RegisterSelectedProducts()", "void InstallEngine::LaunchSelectedProducts()")
+assert register.index("SeedUserDefaults();") < register.index("EnsureGlassAutorunTask(")
+seed = section(engine, "void InstallEngine::SeedUserDefaults()", "bool InstallEngine::RegisterSelectedProducts()")
+assert "AddFinishWarning(" in seed and "SetFailure(" not in seed and "IDS_WARN_USER_DEFAULTS" in rc
+# Every selected platform is started after the installation, whatever its prior state was.
+assert "ShouldStartPlatformArch" not in engine
+launch = section(engine, "void InstallEngine::LaunchSelectedProducts()", "bool InstallEngine::StopHostsForRollback()")
+assert "GP::StartPlatform(arch)" in launch and "skip start" not in launch and "taskEnabledBefore)" not in launch
 assert "TASK_LOGON_PASSWORD" in removal and "TASK_LOGON_S4U" in removal
 assert all(t in removal for t in ("GetSecurityDescriptor(kTaskSecurity", "SACL_SECURITY_INFORMATION", "ExpectedAction",
                                   "TASK_DONT_ADD_PRINCIPAL_ACE", "TASK_IGNORE_REGISTRATION_TRIGGERS",
@@ -186,27 +206,37 @@ assert all(t in removal for t in ("GetSecurityDescriptor(kTaskSecurity", "SACL_S
 assert "saved.xml != actualXml.value" in removal and "saved.security != actualSecurity.value" in removal
 assert "GlassRemovalOrder::Commit" in removal and removal_order.index("if (!removeShortcut())") < removal_order.index("if (!removeTask(i))") < removal_order.index("return deleteService()")
 worker = section(engine, "DWORD WINAPI InstallEngine::WorkerThread(", "bool InstallEngine::Start(")
-assert worker.index("CreateRollbackSnapshot()") < worker.index("PrepareProductRemoval()") < worker.index("StopRunningHosts()")
-assert worker.index("LaunchAndVerifySelectedProducts()") < worker.index("GlassInstallRemoval::Commit")
-assert "GlassInstallRemoval::Restore" in worker and "restoreRemovalArtifacts()" in worker
+assert worker.index("CreateRollbackSnapshot()") < worker.index("StopRunningHosts()")
+# Commit point: registration (rollback-able) precedes the first start; every
+# later step can only add finish-page notes.
+assert worker.index("RegisterSelectedProducts()") < worker.index("LaunchSelectedProducts()")
+assert "SetFailure(" not in worker[worker.index("LaunchSelectedProducts()"):worker.index("MsiEnableLogW(")]
+assert "FinishWarningsJson()" in setup and "hostState.finishWarnings" in ui and "IDS_DONE_WARN_TAG" in rc
+assert "GlassInstallRemoval::Commit" not in worker and "GlassInstallRemoval::Restore" not in worker
+assert worker.count("undoUserDefaults();") == 4 and "UndoSeededProcessLists" in worker
 success_restore = section(engine, "bool InstallEngine::RestorePriorHosts(", "DWORD WINAPI InstallEngine::WorkerThread(")
-assert "selection_.platform32 && prior_.x86WasRunning" in success_restore and "if (selectedOnly) return ok" in success_restore
+# On success only kept (unselected, installed) products Setup stopped are restored; selected ones are launched.
+assert "if (!keptOnly || !selection_.platform32)" in success_restore and "if (keptOnly && selection_.openGlass) return ok" in success_restore
 purge = engine[engine.index("bool InstallEngine::PurgeRemnants()"):]
 assert "DeleteTree(" not in purge and "RemoveDirectoryTree(" not in purge
 warnings = section(setup, "    std::wstring ComponentWarnings()", "    std::wstring ComponentsJson()")
 assert "IDS_COMP_X86_WARNING" in warnings and "IDS_COMP_GS_WARNING" in warnings and 'L"\\n"' in warnings
-assert "ComponentStateId" in setup and "installedSelection_.platform32" in setup and "IDS_COMP_STATE_REMOVE" in rc
+assert "ComponentStateId" in setup and "installedSelection_.platform32" in setup and "IDS_COMP_STATE_KEEP" in rc
+assert "IDS_COMP_STATE_REMOVE" not in rc and "IDS_COMP_BADGE_REMOVE" not in rc and "IDS_STATUS_REMOVE " not in rc
 assert "ActionForInstall" in policy and "ComponentBadgeId" in setup and "ComponentBadgeTone" in setup
-for action in ("INSTALL", "UPDATE", "REMOVE"):
+# Warnings about a missing product apply only when it is neither selected nor installed.
+assert "X86WarningApplies()" in setup and "SettingsWarningApplies()" in setup and "!installedSelection_.glassSettings" in setup
+for action in ("INSTALL", "UPDATE", "KEEP"):
     assert f"IDS_COMP_BADGE_{action}" in setup and rc.count(f"IDS_COMP_BADGE_{action}") == 2
     assert f".comp-badge.action-{action.lower()}" in ui
 assert "item.badgeTone" in ui and "comp-lock" in ui and "item.lockTitle" in ui
 assert "action.append(componentLock(" in ui and "badge.textContent=String(item.badge);action.append(badge)" in ui
-assert ".comp-action{display:flex" in ui and "top:198px" in ui and "top:440px" in ui
+assert ".comp-action{display:flex" in ui and "components-stack" in ui  # карточки и информационная полоса в прокручиваемой раскладке
 assert "#a7dfff" in ui and "#efb94f" in ui  # independent blue-and-gold lock, not badge-tinted
 assert "DrawComponentActionBadge(dc,selected,installed" in setup and "DrawMandatoryLock(dc," in setup
-assert "item.state" in ui and "white-space:pre-line" in ui
-assert "DrawLabel(dc,Text(IDS_COMP_X86_WARNING)" in setup and "DrawLabel(dc,Text(IDS_COMP_GS_WARNING)" in setup
+assert "item.state" in ui and "white-space:pre-line" in ui  # строка «что будет выполнено» вернулась
+assert "const auto warnings=ComponentWarnings()" in setup and "DrawLabel(dc,warnings" in setup
+assert "Text(IDS_COMP_X86_WARNING)" in setup and "Text(IDS_COMP_GS_WARNING)" in setup
 
 # The animated unlock screen must stop when the worker exits the unlock phase,
 # not when a localised status string happens to change.
@@ -379,7 +409,7 @@ assert "if (!running)" in og_stop and "StopRunningOpenGlassTasks" in og_stop
 assert "ChooseCancellationOrFailure(!ok)" in worker and "failureFinalizing_" in engine_h
 assert "ShouldStartOpenGlass(openGlassStartup_)" in engine and "Snapshot OpenGlass path unavailable" in rollback
 assert "protectedHandles" in util and "FILE_FLAG_OPEN_REPARSE_POINT" in util and "FileDispositionInfo" in util
-assert "PruneEmptyDirectories(openGlassDir_, keptRoots)" in engine and "PruneEmptyDirectories(openGlassDir_,keptRoots)" in unins
+assert "PruneEmptyDirectories(" not in engine and "PruneEmptyDirectories(openGlassDir_,keptRoots)" in unins  # pruning belongs to the uninstaller
 assert "Page::Launching" in setup and "kMinLaunchMs = 5000" in engine
 assert "--demo-tour" in setup and "debugDemoPending_ = false" in setup
 assert "MsiEnableLogW(0, nullptr, 0)" in engine
@@ -395,13 +425,286 @@ assert "QueryPlatformInstallPath(" not in native_helper and "TryGetAutorunGlassC
 shell_ops = (repo / "GlassSettings/Native/ShellExtensionOps.cpp").read_text(encoding="utf-8")
 shell_sparse = (repo / "GlassSettings/Native/ShellSparsePackage.cpp").read_text(encoding="utf-8")
 pack = (repo / "GlassShellExt/Package/BuildSparsePackage.ps1").read_text(encoding="utf-8")
+shell_query = (repo / "GlassSettings/Native/ShellExtensionQuery.cpp").read_text(encoding="utf-8")
+constants = (repo / "GlassShared/include/GlassShellMenuConstants.h").read_text(encoding="utf-8")
+payload = (repo / "GlassSetup/msi/GlassSetupPayload.targets").read_text(encoding="utf-8")
 assert "GlassSettings_ShellExtRegisterSetupV1W" in util and "/installroot" in util
 assert "exactPlatformRoot" in shell_ops and "exactPlatformRoot" in shell_sparse
 assert "0x47505245" in util and "0x47505245" in shell_ops
-assert "provisionDevCertificate && !ShellDevCertificate::Ensure" in shell_sparse
-assert "provisionDevCertificate && ResolveSparseSdkTools" in shell_sparse
-assert "Export-PfxCertificate" not in pack and "$cert.RawData" in pack
+# H2/H3: the msix is signed by the author certificate only; the build never creates, exports or
+# trusts certificates. On the user's machine the author certificate enters LocalMachine\TrustedPeople
+# in exactly one place (ShellSparsePackage::TrustSparseSigner) and only after an explicit choice:
+# the Setup certificate page or the GlassSettings notice link. The uninstaller never touches it.
+assert "ShellDevCertificate" not in shell_sparse and "ShellDevCertificate" not in shell_ops
+assert not (repo / "GlassSettings/Native/ShellDevCertificate.cpp").exists()
+for forbidden in ("New-SelfSignedCertificate", "Export-PfxCertificate", "TrustedPeople", "signtool", "Import-Certificate"):
+    assert forbidden not in pack, forbidden
+assert "makeappx" in pack.lower() and "GlassShellSparse" in pack
+assert "SignerNotTrusted" in shell_sparse and "IsThumbprintInTrustedPeople" in shell_sparse
+assert "QuerySparseSignerTrust" in shell_sparse and "GlassSettings_GetShellSignerTrustV1" in shell_query
+assert "GlassSettings_GetShellMenuModeV1" in shell_query
+trust_impl = section(shell_sparse, "SparseSignerTrustResult TrustSparseSigner(", "InstallerSparseState QueryInstallerSparseState(")
+assert shell_sparse.count("::CertAddCertificateContextToStore(") == 1 and "::CertAddCertificateContextToStore(" in trust_impl
+assert "CERT_STORE_ADD_REPLACE_EXISTING" in trust_impl and "SubjectMismatch" in trust_impl and "CERT_SYSTEM_STORE_LOCAL_MACHINE" in trust_impl
+assert "CertAddCertificateContextToStore" not in shell_ops + util + engine + unins + setup
+assert "CertDeleteCertificateFromStore" not in shell_sparse + shell_ops + util + engine + unins + setup
+assert "TrustedPeople" not in unins  # the uninstaller never removes the author certificate (user decision)
+assert "GlassSettings_TrustShellSignerV1" in shell_ops and "GlassSettings_ShellSignerTrustSetupV1W" in shell_ops
+assert "GlassSettings_ShellSignerTrustSetupV1W" in util and "0x47535400" in util and "0x47535400" in shell_ops
+assert "selection_.trustSigner" in engine and "InvokeShellSignerTrust" in engine and "warnCertInstall" in engine
+assert "Page::Certificate" in setup and "CertificatePageApplies()" in setup and "QuerySelfSignerInfo()" in setup
+assert "postMessage('certificate:'+item.id)" in ui and "renderCertificatePanel" in ui and 'data-mode="certificate"' in ui
+assert "certificate:1" in setup and "certificate:0" in setup  # host side of the web message
+assert "IDS_CERT_TITLE" in setup and "IDS_WARN_CERT_INSTALL" in setup
+# H3-UI: the certificate page is short (no what/why/note blocks), radios say accept/decline;
+# text is never selectable and the old "GlassAuthorCodeSigning" naming is gone everywhere.
+header_now = read("res/resource.h")
+for removed in ("IDS_CERT_WHAT", "IDS_CERT_WHY", "IDS_CERT_NOTE"):
+    assert removed not in header_now and removed not in setup and removed not in rc, removed
+assert "Принять сертификат" in rc and "Не принимать" in rc and "Принять сертификат разработчика?" in rc
+assert "certificate-what" not in ui and "certificate-note" not in ui and "user-select:none" in ui
+for stale in (rc, util, unins, engine, payload, constants, read("res/Eula.ru.txt"), read("res/Eula.en.txt")):
+    assert "GlassAuthorCodeSigning" not in stale
+for eula in ("res/Eula.ru.txt", "res/Eula.en.txt"):
+    text = read(eula)
+    assert "certlm.msc" in text and "DeveloperCodeSigning.txt" in text, eula
+assert "Сертификат разработчика" in read("res/Eula.ru.txt") and "Developer certificate" in read("res/Eula.en.txt")
+# Classic Win32 menu: only regsvr32 /s (DllRegisterServer of the bundled GlassShellExt.dll) — on
+# Windows 10 always, on Windows 11 as the fallback when the sparse package cannot be registered.
+# Nobody writes shellex/ContextMenuHandlers keys by hand (GlassShellExt/README.md, AGENTS.md).
+assert "RegisterClassicViaRegsvr32" in shell_ops and "UnregisterClassicViaRegsvr32" in shell_ops
+assert "RemoveClassicAfterSparseSuccess" in shell_ops and "RegsvrClassicFallback" not in shell_ops
+for forbidden in ("RegisterLegacyContextMenuHandler", "RegisterClassicInProcess", "ContextMenuHandlers\\GlassPlatformDesktopMenu"):
+    assert forbidden not in shell_ops + util + engine + unins + setup, forbidden
+assert "RegCreateKey" not in shell_ops and "RegSetValue" not in shell_ops
+assert "kSetupClassicFallbackBase" in shell_ops and "0x47504C00" in shell_ops and "0x47504C00" in util
+assert "DescribeShellClassicFallback" in util and "classicFallbackReason" in util
+assert "IDS_WARN_SHELL_CLASSIC_CERT" in setup and "warnShellClassicCert" in engine and "DeveloperCodeSigning.cer" in engine
+shell_actions = read("../GlassShellExt/DesktopShellActions.cpp")
+assert "GlassProject" not in shell_actions and "GlassShellExt-launch.log" in shell_actions
+assert 'L"%s\\\\GlassPlatform"' in shell_actions and 'L"%s\\\\Logs"' in shell_actions  # %LOCALAPPDATA%\GlassPlatform\Logs
+assert "kShellExtRelativePath" in util and "kShellExtRelativePath" in unins and "kShellHostRelativePath" in setup
+assert "kSparsePublisher[] = L\"CN=Stanislav K.\"" in constants
+for manifest in ("GlassShellExt/Package/AppxManifest.xml", "GlassShellExt/Package/AppxManifest.UnregisterStub.xml"):
+    assert 'Publisher="CN=Stanislav K."' in (repo / manifest).read_text(encoding="utf-8"), manifest
+assert (repo / "Shared/certs/DeveloperCodeSigning.cer").exists() and (repo / "Shared/certs/DeveloperCodeSigning.txt").exists()
+assert "DeveloperCodeSigning.cer" in payload and "DeveloperCodeSigning.txt" in payload and "GlassShellSparse" in payload
 assert 'm.type===\'init\'||m.type===\'state\'' in ui
+
+# SecureUxTheme is a standalone product with per-architecture MSI payloads,
+# each containing only that architecture's patcher and UI proxy. GlassSettings
+# owns no SecureUxTheme payload; Setup installs the matching MSI after Settings,
+# and GlassUnins removes it first when cascading through the dependency.
+sut_native = (repo / "GlassSettings/Native/SecureUxThemeNative.cpp").read_text(encoding="utf-8")
+sut_inspect = read("src/InstallSupport/GlassProductInspect.cpp")
+native_host_h = (repo / "GlassSettings/Native/NativeHost.h").read_text(encoding="utf-8")
+sut_service = (repo / "GlassSettings/Services/SecureUxThemeService.cs").read_text(encoding="utf-8")
+sut_template = read("msi/SecureUxThemePackage.template.wxs")
+sut_stage = section(payload, '<!-- Standalone SecureUxTheme MSI', '</Target>')
+assert "SecureUxTheme-x64" in payload and "SecureUxTheme-x86" in payload
+assert "GlassSettings\\SecureUxTheme\\%(Filename)%(Extension)" in sut_stage
+assert "GlassBuildRelease)\\SecureUxTheme\\SecureUxTheme4.dll" in sut_stage
+assert "GlassBuildRelease)\\SecureUxTheme\\ThemeUiProxy.dll" in sut_stage
+assert "GlassSettings\\SecureUxTheme\\**\\*.*" in payload  # explicitly excluded from GlassSettings MSI
+assert "GlassSecureUxThemeWowVendorDir" not in payload
+assert "SecureUxTheme4.dll" in sut_native and "ThemeUiProxy.dll" in sut_native
+assert "Wow64DisableWow64FsRedirection" in sut_native
+activation = section(sut_native, 'extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(', "[[nodiscard]] bool TryDeleteSystemFiles")
+assert "kProxyDllName" in activation and "NativeSysWow64" not in activation
+assert "if (FileExistsNative(proxyWowPath)" in sut_native  # old cross-architecture proxy cleanup only
+assert "GLASSSETTINGSINSTALLED" in sut_template and "GlassSettingsProductCode" in sut_template
+assert "GLASSSETTINGSINSTALLED=1" in engine and "secureUxThemeMsi && selection_.glassSettings" in engine  # only after the prerequisite MSI stage is selected
+assert 'Key="Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{' in sut_template
+assert 'Key="Software\\\\Microsoft' not in sut_template
+assert "Launch Condition=\"Installed OR GLASSSETTINGSINSTALLED\"" in sut_template
+for third_party_project in ("msi/OpenGlass-x64.wixproj", "msi/SecureUxTheme-x64.wixproj", "msi/SecureUxTheme-x86.wixproj"):
+    assert "<GlassSignThisProject>false</GlassSignThisProject>" in read(third_party_project)
+signature_list=read("../Shared/scripts/Test-GlassSignatures.ps1")
+assert "'SecureUxTheme-x64'" not in signature_list and "'OpenGlass-x64'" not in signature_list
+setup_signature_command=next(line for line in project.splitlines() if 'Context &quot;GlassSetup first-party payload&quot;' in line)
+assert "SecureUxTheme-x64" not in setup_signature_command and "OpenGlass-x64" not in setup_signature_command
+for path, code in (("msi/SecureUxTheme-x64.wixproj", "5076"), ("msi/SecureUxTheme-x86.wixproj", "5077")):
+    project_text=read(path)
+    assert code in project_text and "GlassSettingsProductCode" in project_text
+    ET.parse(root / path)
+for suffix in ("5076", "5077"):
+    assert suffix in read("src/InstallSupport/GlassInstallMsi.h")
+for suffix in ("5080", "5090"):
+    assert suffix in sut_template or suffix in read("msi/SecureUxTheme-x64.wixproj") or suffix in read("msi/SecureUxTheme-x86.wixproj")
+assert "IDR_MSI_SUT_X64" in header and "IDR_MSI_SUT_X86" in header and "IDR_MSI_SUT_X64" in rc and "IDR_MSI_SUT_X86" in rc
+assert "msiResSecureUxTheme" in setup and "report.secureUxTheme" in sut_inspect
+assert "kProductSecureUxThemeX64" in engine and "kProductSecureUxThemeX86" in rollback and "kProductSecureUxThemeX64" in unins
+assert "InvokeSecureUxThemeDeactivate" in util and "InvokeSecureUxThemeDeactivate" in unins
+assert "SecureUxTheme-x64.msi" in engine and "SecureUxTheme-x86.msi" in engine
+assert 'Path.Combine(PlatformPaths.AppBase, "SecureUxTheme")' in sut_service
+assert "SecureUxTheme-x64.msi" in rc and "SecureUxTheme-x86.msi" in rc
+assert "SecureUxTheme-x64.msi" in project and "SecureUxTheme-x86.msi" in project
+solution=read("../GlassProject.sln")
+assert '"SecureUxTheme-x64"' in solution and '"SecureUxTheme-x86"' in solution
+assert "{0CD1A2BE-2C39-4404-A026-34642B517428}.Release|x64.Build.0 = Release|x64" in solution
+assert "{81FE634A-DB11-4759-B76D-D1119AC2CF13}.Release|x86.Build.0 = Release|x86" in solution
+run_sequence=section(engine, "bool InstallEngine::RunMsiSequence()", "void InstallEngine::SeedUserDefaults()")
+assert worker.index("InstallGlassSettingsEarly()") < worker.index("RunMsiSequence()")
+assert "selection_.secureUxThemePackageOnly" in engine
+assert "kProductSecureUxThemeX64" in engine and "kProductSecureUxThemeX86" in engine
+assert "kProductSecureUxThemeX64" in rollback and "kProductSecureUxThemeX86" in rollback
+unins_remove=section(unins, "int count=(chosen.secureUxTheme?1:0)", "if (chosen.openGlass)")
+assert unins_remove.index("SecureUxTheme x64") < unins_remove.index("GlassSettings x64")
+assert "SecureUxTheme" in read("../README.md") and "четыре first-party MSI" in read("../README.md")
+# H3 item 6: the OpenGlass state query must see the installer's service (not only the legacy
+# task) on every thread: the cheap SCM query runs before the scheduler-UI guard, and only the
+# COM task-tree walk stays background-only. Otherwise Home/System rows show "No task" for a
+# service-based installation.
+og_state = (repo / "GlassShared/src/OpenGlassHostState.cpp").read_text(encoding="utf-8")
+og_start = og_state.index("HostUiState QueryOrchestrationUiState() noexcept")
+og_body = og_state[og_start:og_state.index("HostUiState QueryHostUiState(", og_start) if "HostUiState QueryHostUiState(" in og_state[og_start:] else og_start + 2500]
+assert "QueryServiceUiState()" in og_body and "GlassShared::IsSchedulerUiThread()" in og_body
+assert og_body.index("QueryServiceUiState()") < og_body.index("GlassShared::IsSchedulerUiThread()"), \
+    "the OpenGlass service must be queried before the scheduler-UI guard"
+assert "ServiceInstalled()" in og_state and "OrchestrationInstalled()" in og_state
+
+# 2026-11-03 feedback: finish-page wording and bottom gap; stray Wow6432Node key cleanup;
+# classic menu nested with icons; OpenGlass gate removable; inspection cards (Task F 1-2).
+assert "установлена с замечаниями" in rc and "installed with notes" in rc
+assert "--content-bottom-gap" in ui and "inset:0 0 var(--content-bottom-gap) 0" in ui
+util_cpp = (repo / "GlassSetup/src/InstallSupport/GlassInstallUtil.cpp").read_text(encoding="utf-8")
+assert "DeleteRegistryKeyIfEmpty" in util_cpp and "RemoveEmptyInstallPathKeys" in util_cpp
+assert "Software\\\\Wow6432Node\\\\GlassPlatform" in util_cpp
+menu_src = (repo / "GlassShellExt/DesktopShellMenu.cpp").read_text(encoding="utf-8")
+assert "CreatePopupMenu()" in menu_src and "MIIM_SUBMENU" in menu_src
+assert "IDS_GLASSSHELL_ROOT_TITLE" in menu_src and "MenuIcon(IDI_GLASSSHELLEXT" in menu_src
+ogs = (repo / "GlassSettings/Core/Platform/OpenGlassInstallService.cs").read_text(encoding="utf-8")
+assert "OpenGlassHostPath is not null" not in ogs, "uninstall must not gate service removal on the exe path"
+row_src = (repo / "GlassSettings/Controls/PlatformSchedulerRow.cs").read_text(encoding="utf-8")
+assert "Task.Run(() => QueryDirectState().TaskExists)" in row_src
+inspect_cpp = (repo / "GlassSetup/src/InstallSupport/GlassProductInspect.cpp").read_text(encoding="utf-8")
+assert "MsiGetFileHashW" in inspect_cpp and "WinVerifyTrust" in inspect_cpp and "MsiGetComponentPathW" in inspect_cpp
+gp = read("src/GlassProducts.h")
+assert "ProductCondition" in gp and "DefaultSelectedFor" in gp and "ActionForCondition" in gp
+assert "IDS_COMP_BADGE_REPAIR" in setup and "IDS_INSPECT_FILE_HASH" in setup and "IDS_INSPECT_SIGNATURE" in setup
+assert "action-repair" in ui and "comp-reasons" in ui and "reasons" in setup
+assert "GlassProductInspect.cpp" in (repo / "GlassSetup/GlassSetup.vcxproj").read_text(encoding="utf-8")
+
+# Registry sanity (2026-11-03 decisions): invalid values are DELETED (defaults are never
+# written to the registry); only known names are touched; base Windows DWM values are not
+# in the schema; optional GlassSettings startup check behind a toggle in app settings.
+reg_sanity = (repo / "GlassShared/src/RegistrySanity.cpp").read_text(encoding="utf-8")
+assert "RegDeleteValueW" in reg_sanity and "ColorizationColorOverride" in reg_sanity
+assert '{ L"ColorizationColor"' not in reg_sanity and '{ L"EnableTransparency"' not in reg_sanity
+assert "ValidateSettingsOnStartup" in reg_sanity
+assert "GlassSettings_ValidateRegistryState" in native_host_h
+assert "RegistrySanity" in inspect_cpp
+settings_reg = (repo / "GlassSettings/Core/Registry/GlassSettingsRegistry.cs").read_text(encoding="utf-8")
+assert "ValidateSettingsOnStartupValue" in settings_reg
+app_panel = (repo / "GlassSettings/Controls/AppSettingsPanel.xaml").read_text(encoding="utf-8")
+assert "ValidateRegistrySwitch" in app_panel
+app_cs = (repo / "GlassSettings/Controls/AppSettingsPanel.xaml.cs").read_text(encoding="utf-8")
+assert "WriteValidateSettingsOnStartup" in app_cs
+
+# 2026-11-03 follow-up: update is not reinstall (reasons never mix), integrity is
+# measured against the cached MSI the product was installed from (LocalPackage),
+# and the components page is compact (no state line, single-line reasons).
+assert "MsiGetProductInfoW" in inspect_cpp and "LocalPackage" in inspect_cpp
+assert "AddReason(rep, Reason::VersionOutdated)" not in inspect_cpp
+assert "comp-reason-line" in ui and "comp-state" in ui  # обе строки на каждой карточке
+assert "if (rep->updateAvailable) return GlassProducts::ProductCondition::UpdateAvailable;" in setup
+
+# 2026-11-03 follow-up 2: schema types match OpenGlass SettingsCatalog v3 and the C#
+# writers (no false "damaged"); signature accepted when ours OR trusted by Windows;
+# reasons are a bulleted list; the mandatory lock shows only when action is required.
+assert '{ L"CustomThemeReflection", ValueKind::Text }' in reg_sanity
+assert 'L"LastAppliedThemeDwmFingerprint", ValueKind::Text' in reg_sanity
+assert "MINMAXBUTTONGLOWid" in reg_sanity and "ColorizationGlassReflectionPolicy" in reg_sanity
+assert "trust != ERROR_SUCCESS" in inspect_cpp and "ours" in inspect_cpp
+assert "condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY)" in setup
+assert "item.reasons.join" in ui and "item.lockTitle" in ui
+
+# 2026-11-03 follow-up 3: card reasons behind a mini-spoiler (accordion, equal heights);
+# the registry reason names the offending values; OpenGlass user resources and
+# OpenGlassHost.exe are exempt from integrity; the OS-native platform is no longer
+# force-selected (mandatory = card lock when action is required).
+assert "AppendName" in reg_sanity and "glassValueNames" in reg_sanity
+assert "IsOpenGlassUserResource" in inspect_cpp and "OpenGlassHost.exe" in inspect_cpp
+assert "registryValueNames" in setup and "comp-reason-line" in ui
+assert "grid-auto-rows:1fr" in ui  # равные высоты карточек
+assert "os64 && GlassProducts::DefaultSelectedFor(" in setup
+assert "ОС-нативная платформа обязательна, но не принудительно отмечена" in gp
+
+# 2026-11-03 follow-up 4: OpenGlass version comes from OpenGlass.dll (independent of the
+# platform version); checking a card never force-checks the main product; the reasons line
+# sits on every card; the uninstaller offers settings cleanup (GlassPlatform key + OpenGlass
+# DWM values of the current user).
+assert "QueryFileVersion" in inspect_cpp and "version.lib" in inspect_cpp
+assert "OpenGlass.dll" in inspect_cpp and "FileVersionOf" in inspect_cpp
+assert "selection_.platform64=os64;" not in setup and "component:x64:1" in setup
+assert "RemoveUserSettings" in reg_sanity and "RemoveUserSettings" in unins
+assert 'L",\\\"locked\\\":false,\\\"hidden\\\":false}"' in unins
+assert "if (locked) reasons+=" in unins and "componentsWarning" in unins
+assert "Only settings cleanup is selected" in ui and "can be removed separately" in ui
+assert "IDC_UNINS_SETTINGS_CLEANUP" in header_now and "cleanupSettings" in unins
+assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_sanity
+
+# 2026-11-03 follow-up 5: «Установить» disabled with no product selected; the reasons
+# subline stays on every card with neutral grey «не требуется» when there are no reasons.
+assert "HasSelectedComponent" in setup
+assert "не требуется" in ui and "tone-update" in ui and "tone-repair" in ui
+assert "comp-slim" in ui and "components-extra" in ui and "components-stack" in ui
+assert "components-select-all" in ui and "Снять необязательные" in ui
+assert ".components-list-frame{" in ui and "background:#17192b" in ui
+assert ".components-list{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:18px 0" in ui
+assert "background:transparent;mask-image:linear-gradient(180deg,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%)" in ui
+assert "backdrop-filter:blur(10px)" in ui and "#000 18px,#000 calc(100% - 18px)" in ui
+assert ".components-status{display:flex" in ui and "flex:0 0 78px;height:78px" in ui
+assert ".components-status.is-neutral" in ui and "Ни один компонент не выбран." in ui
+assert "Ни один продукт не выбран для удаления." in ui and "if(!loading&&selectedProducts===0)" in ui
+assert '<div id="components-status"' in ui and '</div><button id="components-select-all"' in ui
+assert '<p id="components-intro" class="components-intro"></p></div>\n<div class="components-stack">' in ui
+assert "components-count" in ui and "availableProducts.length" in ui and "selectedProducts" in ui
+assert "#components-panel{bottom:0}" in ui and "top:188px;bottom:12px" in ui and "gap:14px" in ui
+assert ".banner-portrait{position:absolute;left:240px;top:100px;width:800px;height:447px;object-fit:cover;opacity:.36;" in ui
+assert ".error-scene .banner-portrait{opacity:.36;" in ui and ".components-banner{position:absolute;inset:0 0 0 auto;width:700px;height:540px;object-fit:cover;opacity:.36;" in ui
+assert ".license-banner{position:absolute;inset:0 0 0 auto;width:680px;height:540px;object-fit:cover;opacity:.19;" in ui
+assert "Дополнительные продукты можно продолжить выбирать" in ui
+assert ".components-status.is-warning" in ui and "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
+assert "input.dataset.locked=item.locked?'1':'0'" in ui and "dispatchEvent(new Event('change'" in ui
+assert "button.hidden=false" in ui and "select=uninstaller||selectable.some(input=>!input.checked)" in ui
+assert "input.dataset.component!=='cleanup'" in ui and "Settings cleanup is a separate option." in ui
+assert "select&&!webReady_?SW_SHOWNA:SW_HIDE" in unins and "ShowWindow(back_,SW_HIDE)" in unins
+assert "page_==Page::Select?SW_SHOWNA:SW_HIDE" in unins
+assert "components-status.is-warning" in ui and "secureUxTheme" in ui and "component:secureUxTheme" in setup
+assert "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
+assert "uninstaller" in ui and "MSI SecureUxTheme будет удалён" in ui
+assert "WizardTheme::PaintFooterBar(dc" in setup and "void PaintFooterBar(" in theme and "bufferedErase_" not in setup
+assert "const bool terminalPage=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error" in setup
+assert "const int footerTop=terminalPage?kHtmlHeight:kContentHeight" in setup and "Box(0,kHtmlHeight,kWidth,1)" not in setup
+assert "const bool progressPage=page_==Page::Stopping || page_==Page::Removing" in unins
+assert "const int footerTop=progressPage?kContentHeight:kHtmlHeight" in unins
+assert "text.find(part)!=std::wstring::npos" in setup  # error detail is not appended twice
+assert "GlassSettings" in unins and "secureUxTheme" in unins and "IDC_UNINS_SECUREUXTHEME" in unins
+assert "SecureUxTheme будет отключён" in unins and "Внешняя установка SecureUxTheme останется без изменений" in unins
+assert "slim" in unins and "cleanup" in unins and "Будет удалено" in unins and "удалится вместе с основной платформой" in unins
+
+# 2026-11-03 follow-up 6: integrity analysis runs in the background during the first
+# pages; the products page shows the startup-style loading donut until it completes;
+# the reasons line starts with a bold dot vertically centered.
+assert "kInspectReady" in setup and "inspectThread_" in setup and "IDS_COMP_ANALYZING" in setup
+assert "componentsLoading" in setup and "comp-loading" in ui and "loading-donut" in ui
+assert "comp-reason-line:before" in ui and "componentsLoading" in ui
+
+# 2026-11-03 follow-up 7: final pages hide the progress strip and align one
+# footer divider with the HTML content edge.
+assert "const int footerTop=terminalPage?kHtmlHeight:kContentHeight" in setup and "Box(0,kHtmlHeight,kWidth,1)" not in setup
+assert "page_==Page::RuntimeInstalling);" in setup and "page_==Page::RuntimeInstalling || page_==Page::Complete" not in setup
+
+# 2026-11-03 follow-up 8: on a clean install the reason line states requiredness —
+# «требуется» on platform products, «рекомендуется» on OpenGlass (neutral «не требуется»
+# remains for installed/healthy cards).
+assert "IDS_COMP_REQUIRED" in setup and "IDS_COMP_RECOMMENDED" in setup
+assert "IDS_COMP_REQUIRED" in header_now and "требуется" in rc and "рекомендуется" in rc
+assert "GlassProducts::ProductCondition::NotInstalled)" in setup
+
+# Строки действия и причин прижаты к низу карточки — один уровень Y на всех карточках.
+assert "comp-foot" in ui and "margin-top:auto" in ui and "align-self:stretch}" in ui  # тело карточки тянется на всю высоту — строки внизу на одном уровне
 
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")

@@ -229,6 +229,8 @@
   <data name="AppSettings_BusyOverlayDescription" xml:space="preserve"><value>Вид окна, когда оно недоступно, например под диалогом</value></data>
   <data name="AppSettings_BusyOverlayModeAcrylic" xml:space="preserve"><value>Acrylic</value></data>
   <data name="AppSettings_BusyOverlayModeDim" xml:space="preserve"><value>Затенение</value></data>
+  <data name="AppSettings_ValidateRegistryHeader" xml:space="preserve"><value>Проверять настройки при старте</value></data>
+  <data name="AppSettings_ValidateRegistryDescription" xml:space="preserve"><value>При запуске GlassSettings проверять известные параметры реестра платформы и удалять повреждённые значения.</value></data>
   <data name="AppSettings_LanguageLabel" xml:space="preserve"><value>Язык интерфейса</value></data>
   <data name="AppSettings_LanguageDescription" xml:space="preserve"><value>Выберите предпочитаемый язык для GlassSettings</value></data>
   <data name="AppSettings_LanguageSystem" xml:space="preserve"><value>Системный</value></data>
@@ -482,11 +484,15 @@
   <data name="Error_ShellExtensionInconsistentState" xml:space="preserve"><value>Состояние расширения меню несогласовано. Отключите его и включите снова.</value></data>
   <data name="Error_ShellExtensionNeedsExplorerRestart" xml:space="preserve"><value>Перезапустите проводник Windows, чтобы обновить меню рабочего стола.</value></data>
   <data name="Error_ShellExtensionSparseArtifactsMissing" xml:space="preserve"><value>Не найдены файлы расширения контекстного меню. Переустановите Glass Settings.</value></data>
-  <data name="Error_ShellExtensionSparseCertFailed" xml:space="preserve"><value>Не удалось подготовить сертификат для установки пункта меню.</value></data>
+  <data name="Error_ShellExtensionSparseSignerNotTrusted" xml:space="preserve"><value>Windows 11 регистрирует компактное меню только от издателя с доверенным сертификатом, а классическая регистрация тоже не удалась. Сертификат разработчика можно установить на этой странице; описание — DeveloperCodeSigning.txt в папке установки.</value></data>
   <data name="Error_ShellExtensionSparseDeployFailed" xml:space="preserve"><value>Не удалось зарегистрировать расширение в контекстном меню рабочего стола.</value></data>
   <data name="Error_ShellExtensionSparseExternalLocationConflict" xml:space="preserve"><value>Осталась прежняя регистрация расширения контекстного меню рабочего стола. Отключите расширение в настройках Glass Settings и включите снова.</value></data>
   <data name="Error_ShellExtensionTimedOut" xml:space="preserve"><value>Операция не завершилась вовремя. Состояние могло не обновиться до конца.</value></data>
   <data name="Error_ShellExtensionTitle" xml:space="preserve"><value>Расширение контекстного меню</value></data>
+  <data name="Error_ShellCertTitle" xml:space="preserve"><value>Сертификат разработчика</value></data>
+  <data name="Error_ShellCertFailed" xml:space="preserve"><value>Не удалось установить сертификат разработчика в «Доверенные лица» компьютера.</value></data>
+  <data name="Error_ShellCertStoreFormat" xml:space="preserve"><value>Ошибка хранилища сертификатов: код {0}.</value></data>
+  <data name="Error_ShellCertResultFormat" xml:space="preserve"><value>Код результата {0}. Подробности — в журнале GlassSettings.</value></data>
   <data name="Flyout_Animation" xml:space="preserve"><value>Анимация</value></data>
   <data name="Flyout_AnimationDesc" xml:space="preserve"><value>Тайминги в миллисекундах, стиль появления и немедленное прерывание предыдущей анимации при открытии нового flyout.</value></data>
   <data name="Flyout_AnimationSubtitle" xml:space="preserve"><value>Тайминги затухания, стиль появления и прерывание анимации.</value></data>
@@ -801,6 +807,14 @@
   <data name="System_UpdateNever" xml:space="preserve"><value>Никогда</value></data>
   <data name="System_RowShellExtension" xml:space="preserve"><value>Расширение контекстного меню</value></data>
   <data name="System_RowShellExtensionDesc" xml:space="preserve"><value>Пункт Glass в меню рабочего стола</value></data>
+  <data name="System_RowShellExtensionDescClassic" xml:space="preserve"><value>Пункт Glass в меню рабочего стола (после «Показать дополнительные параметры»)</value></data>
+  <data name="System_ShellMenuNoticeTitle" xml:space="preserve"><value>Компактное меню Windows 11 недоступно</value></data>
+  <data name="System_ShellCertNoticeMessage" xml:space="preserve"><value>Windows 11 показывает компактное контекстное меню только для пакетов, подписанных доверенным сертификатом. Сертификат разработчика {0} пока не входит в «Доверенные лица» этого компьютера, поэтому пункт Glass зарегистрирован классическим способом и показывается после «Показать дополнительные параметры» (Shift+F10). Платформа работает полностью; сертификат нужен только для компактного меню, его установка необязательна и выполняется только по вашему нажатию. Что это за сертификат и как его удалить — {1} в папке установки.</value></data>
+  <data name="System_ShellCertNoticeOpenFolder" xml:space="preserve"><value>Открыть папку с сертификатом</value></data>
+  <data name="System_ShellCertNoticeInstall" xml:space="preserve"><value>Установить сертификат разработчика и включить компактное меню</value></data>
+  <data name="System_ShellClassicNoticeSwitch" xml:space="preserve"><value>Перейти на компактное меню</value></data>
+  <data name="System_ShellClassicNoticeMessage" xml:space="preserve"><value>Пункт Glass сейчас зарегистрирован классическим способом и показывается после «Показать дополнительные параметры» (Shift+F10). Сертификат разработчика уже доверен, поэтому можно перейти на компактное меню Windows 11.</value></data>
+  <data name="System_ShellSparseNoticeMessage" xml:space="preserve"><value>Пакет компактного меню (GlassShellSparse\GlassShellSparse.msix) отсутствует или не подписан, поэтому пункт Glass показывается после «Показать дополнительные параметры» (Shift+F10). Переустановите GlassPlatform, чтобы вернуть компактное меню.</value></data>
   <data name="Taskbar_PageSubtitle" xml:space="preserve"><value>Эффекты и цвета панели задач</value></data>
   <data name="Themes_ActiveBadge" xml:space="preserve"><value>Текущая</value></data>
   <data name="Themes_AllSection" xml:space="preserve"><value>Все темы</value></data>

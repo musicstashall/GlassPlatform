@@ -1,15 +1,25 @@
 #pragma once
 
-// Shared, platform-neutral component policy. An install selection describes
-// the desired final product set: previously installed, unchecked products are
-// removed. The OS-native platform is mandatory; removing it in the separate
-// uninstaller cascades to the other installed products.
+// Shared, platform-neutral component policy. An install selection names the
+// products to install or update. Setup never removes a product: an installed
+// product that is left unchecked simply stays as it is, and removal is the job
+// of the separate uninstaller. The OS-native platform is mandatory; removing it
+// in the uninstaller cascades to the other installed products.
 namespace GlassProducts {
 struct Selection {
     bool platform64 = true;
     bool platform32 = true;
     bool glassSettings = true;
     bool openGlass = true;
+    // Optional SecureUxTheme product selection and activation request.
+    bool secureUxTheme = false;
+    // Preserve legacy inactive/active payload in its new standalone MSI when a
+    // selected GlassSettings update removes the old co-shipped files.
+    bool secureUxThemePackageOnly = false;
+    // Windows 11 certificate page: the user chose to add the author certificate
+    // (signer of GlassShellSparse.msix) to LocalMachine\TrustedPeople so the
+    // compact menu can be registered. Off when the page was not shown.
+    bool trustSigner = false;
 };
 
 // Recorded at wizard startup, independently of the later rollback snapshot.
@@ -23,33 +33,48 @@ constexpr bool ShouldStartOpenGlass(const OpenGlassStartupState& startup) noexce
 }
 
 // A checked product is installed or updated; an unchecked installed product is
-// removed. An unchecked absent product has no action and needs no badge.
-enum class InstallAction { None, Install, Update, Remove };
+// kept untouched. An unchecked absent product has no action and needs no badge.
+enum class InstallAction { None, Install, Update, Keep, Repair };
+
+// Inspection classification of an installed product (Task F stages 1-2).
+// NotInstalled — пакет не установлен; Healthy — целостность не нарушена;
+// UpdateAvailable — версия установщика выше; Damaged — обнаружены повреждения.
+enum class ProductCondition { NotInstalled, Healthy, UpdateAvailable, Damaged };
+
 constexpr InstallAction ActionForInstall(bool selected, bool installed) noexcept {
     if (selected) return installed ? InstallAction::Update : InstallAction::Install;
-    return installed ? InstallAction::Remove : InstallAction::None;
+    return installed ? InstallAction::Keep : InstallAction::None;
+}
+
+// Карточка выбирается по состоянию, а не по галочке: принудительная отметка
+// здорового продукта не меняет этикетку («Установлено» остаётся зелёной).
+constexpr InstallAction ActionForCondition(bool selected, ProductCondition condition) noexcept {
+    if (condition == ProductCondition::NotInstalled)
+        return selected ? InstallAction::Install : InstallAction::None;
+    if (!selected)
+        return InstallAction::Keep;
+    if (condition == ProductCondition::UpdateAvailable)
+        return InstallAction::Update;
+    if (condition == ProductCondition::Damaged)
+        return InstallAction::Repair;
+    return InstallAction::Repair; // Healthy + принудительная отметка
+}
+
+// По умолчанию сняты только неповреждённые установленные продукты;
+// повреждённые и устаревшие отмечены для переустановки/обновления.
+constexpr bool DefaultSelectedFor(ProductCondition condition) noexcept {
+    return condition != ProductCondition::Healthy;
 }
 
 constexpr Selection NormalizeInstall(Selection choice, bool os64) noexcept {
-    if (os64) choice.platform64 = true;
-    else {
+    // ОС-нативная платформа обязательна, но не принудительно отмечена: исправный
+    // продукт остаётся снятым (Setup его не трогает), а её обязательность держит
+    // замок карточки, когда по ней нужна обработка (установка/обновление/ремонт).
+    if (!os64) {
         choice.platform64 = false;
-        choice.platform32 = true;
         choice.openGlass = false;
     }
     return choice;
-}
-
-// Installed products outside the desired set must be removed, never the
-// mandatory platform. Individual MSI architectures can be mapped to one item.
-constexpr Selection RemovalForInstall(Selection choice, Selection installed, bool os64) noexcept {
-    const Selection desired = NormalizeInstall(choice, os64);
-    return {
-        os64 && installed.platform64 && !desired.platform64,
-        installed.platform32 && !desired.platform32,
-        installed.glassSettings && !desired.glassSettings,
-        os64 && installed.openGlass && !desired.openGlass
-    };
 }
 
 constexpr Selection NormalizeRemoval(Selection choice, Selection installed, bool os64) noexcept {

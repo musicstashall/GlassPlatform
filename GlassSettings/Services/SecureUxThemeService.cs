@@ -270,7 +270,7 @@ public static class SecureUxThemeService
 
     private static string ExpectedLocalDllPath()
     {
-        var root = PlatformPaths.PlatformRoot;
-        return Path.Combine(root, "SecureUxTheme");
+        // Payload теперь живёт в GlassSettings.MSI: <root>\GlassSettings\SecureUxTheme\.
+        return Path.Combine(PlatformPaths.AppBase, "SecureUxTheme");
     }
 }

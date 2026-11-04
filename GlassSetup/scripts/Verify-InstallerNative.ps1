@@ -8,7 +8,7 @@ param(
 # the scan protocol handshake runs after the Settings MSI step.
 $ErrorActionPreference = 'Stop'
 $markers = @(
-    ('GlassSettings_InstallerScanProtocolV1' + [char]0),
+    ('GlassSettings_InstallerScanProtocolV2' + [char]0),
     ('GlassSettings_ShellExtRegisterSetupV1W' + [char]0)
 )
 

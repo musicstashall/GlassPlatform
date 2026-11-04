@@ -159,11 +159,11 @@ Host bar / chrome ExplorerCompat не вызывает `SetWindowCompositionAttr
    **Приложение** — записи с источником *Application Error* / *Windows Error
    Reporting* по `explorer.exe`; в тексте события обычно указаны *Faulting
    application name*, *Faulting module name*, *Fault offset*.
-2. **Полный дамп (WER LocalDumps):** из каталога репозитория, **от имени
-   администратора**:
-   `powershell -ExecutionPolicy Bypass -File scripts\ExplorerCrashDiagnostics.ps1 -Action Enable`  
-   Дампы сохраняются в `%ProgramData%\GlassProject\CrashDumps\` (полный дамп,
-   до 10 файлов). После воспроизведения откройте `.dmp` в Visual Studio
+2. **Дамп CrashGuard:** платформа сама пишет минидампы процессов, в которые
+   внедрена, в `%LOCALAPPDATA%\GlassPlatform\Crashes\{exe}.{pid}.dmp`
+   (ключ `HKCU\Software\StanislavKa\GlassPlatform\Crashes`: `DumpFolder`,
+   `MiniDumpWithFullMemory=1` для полного дампа — см. `GlassCompat/Include/CrashGuard.h`
+   и корневой `README.md`). После воспроизведения откройте `.dmp` в Visual Studio
    (**Открыть → файл**) или WinDbg Preview — стек вызовов и загрузочный модуль
    будут в отчёте об исключении.
 3. **Живой отладчик:** присоединиться к `explorer.exe` в Visual Studio,

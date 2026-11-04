@@ -22,6 +22,8 @@
 
             </ctrl:SettingsOptionRow>
 
+            <ctrl:SettingsInfoBlock x:Name="ShellMenuNoticeBlock" IconGlyph="&#xE7BA;" Visibility="Collapsed" />
+
             <ctrl:SettingsOptionRow x:Name="UpdateIntervalRow">
 
                 <ComboBox

@@ -8,6 +8,7 @@ using GlassSettings.Strings;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
+using System.Diagnostics;
 
 namespace GlassSettings.Pages;
 
@@ -134,6 +135,7 @@ public sealed partial class SystemPage : Page
     {
         ShellExtensionRow.Title = GlassSettingsResources.Get("System_RowShellExtension");
         ShellExtensionRow.Description = GlassSettingsResources.Get("System_RowShellExtensionDesc");
+        ShellMenuNoticeBlock.Title = GlassSettingsResources.Get("System_ShellMenuNoticeTitle");
         UpdateIntervalRow.Title = GlassSettingsResources.Get("System_UpdateIntervalTitle");
         UpdateIntervalRow.Description = GlassSettingsResources.Get("System_UpdateIntervalDesc");
     }
@@ -326,6 +328,8 @@ public sealed partial class SystemPage : Page
             _shellSuppress = false;
         }
 
+        RefreshShellMenuNotice(registered);
+
         _ogNav!.CanNavigate = _ogRow!.TaskExists;
         if (_glassDualControls is not null && _glassNav is not null)
         {
@@ -337,6 +341,107 @@ public sealed partial class SystemPage : Page
         else if (_glassNav is not null)
         {
             _glassNav.CanNavigate = _glassRow!.TaskExists;
+        }
+    }
+
+    /// <summary>
+    /// Windows 11: компактное меню требует sparse-пакет, который Windows регистрирует только от
+    /// издателя с доверенным сертификатом. Без доверия переключатель управляет классическим пунктом
+    /// («Показать дополнительные параметры»); уведомление объясняет это и даёт ссылку-действие:
+    /// установить сертификат разработчика одним нажатием (тот же код, что и на странице сертификата
+    /// установщика) и перейти на компактное меню. Сертификат никогда не ставится без этого нажатия.
+    /// </summary>
+    private void RefreshShellMenuNotice(bool registered)
+    {
+        var mode = registered ? ShellExtensionService.GetMenuMode() : ShellMenuMode.None;
+        var trust = ShellExtensionService.GetSignerTrust(out var signerSubject);
+        var classicDescription = mode == ShellMenuMode.Classic
+            || (trust != ShellSignerTrust.Unknown && trust != ShellSignerTrust.Trusted);
+        ShellExtensionRow.Description = GlassSettingsResources.Get(
+            classicDescription ? "System_RowShellExtensionDescClassic" : "System_RowShellExtensionDesc");
+
+        // Windows 10 / ошибка запроса → Unknown; компактное меню уже стоит → без уведомления.
+        if (trust == ShellSignerTrust.Unknown || mode == ShellMenuMode.Compact
+            || (!ShellExtensionSwitch.IsEnabled && mode == ShellMenuMode.None))
+        {
+            ShellMenuNoticeBlock.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var text = ShellMenuNoticeBlock.MessageTextBlock;
+        text.Inlines.Clear();
+        switch (trust)
+        {
+            case ShellSignerTrust.Trusted:
+                // Сертификат уже доверен, но пункт зарегистрирован классически (до импорта сертификата).
+                if (mode != ShellMenuMode.Classic)
+                {
+                    ShellMenuNoticeBlock.Visibility = Visibility.Collapsed;
+                    return;
+                }
+                AddInlineText(text, GlassSettingsResources.Get("System_ShellClassicNoticeMessage"));
+                AddInlineText(text, " ");
+                AddHyperlink(text, GlassSettingsResources.Get("System_ShellClassicNoticeSwitch"),
+                    () => _ = ApplyAuthorCertificateAsync(trustFirst: false));
+                break;
+            case ShellSignerTrust.Untrusted:
+                if (string.IsNullOrWhiteSpace(signerSubject))
+                    signerSubject = ShellExtensionService.SparsePublisher;
+                AddInlineText(text, string.Format(
+                    GlassSettingsResources.Get("System_ShellCertNoticeMessage"),
+                    signerSubject,
+                    ShellExtensionService.AuthorCertificateReadme));
+                AddInlineText(text, " ");
+                AddHyperlink(text, GlassSettingsResources.Get("System_ShellCertNoticeInstall"),
+                    () => _ = ApplyAuthorCertificateAsync(trustFirst: true));
+                var certificatePath = ShellExtensionService.GetAuthorCertificatePath();
+                if (!string.IsNullOrEmpty(certificatePath))
+                {
+                    AddInlineText(text, " · ");
+                    AddHyperlink(text, GlassSettingsResources.Get("System_ShellCertNoticeOpenFolder"),
+                        () => RevealInExplorer(certificatePath));
+                }
+                break;
+            default:
+                AddInlineText(text, GlassSettingsResources.Get("System_ShellSparseNoticeMessage"));
+                break;
+        }
+        ShellMenuNoticeBlock.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Ссылка-действие из уведомления: при trustFirst сертификат разработчика добавляется в
+    /// «Доверенные лица» компьютера, затем (если пункт меню включён) регистрация повторяется и
+    /// Windows 11 переходит на компактное меню. Переключатель на время операции блокируется.</summary>
+    private async Task ApplyAuthorCertificateAsync(bool trustFirst)
+    {
+        if (ShellExtensionService.IsShellExtensionOperationInProgress())
+            return;
+
+        _shellSuppress = true;
+        ShellExtensionSwitch.IsEnabled = false;
+        _shellSuppress = false;
+        try
+        {
+            if (trustFirst)
+                await ShellExtensionService.TrustAuthorCertificateAsync(reregister: true).ConfigureAwait(true);
+            else if (ShellExtensionService.IsBundledDllRegistered())
+                await ShellExtensionService.SetShellExtensionRegisteredAsync(true).ConfigureAwait(true);
+        }
+        finally
+        {
+            RefreshShellRow();
+        }
+    }
+
+    private static void RevealInExplorer(string filePath)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + filePath + "\"") { UseShellExecute = true });
+        }
+        catch
+        {
+            // Только удобство: без Проводника путь остаётся в тексте уведомления.
         }
     }
 

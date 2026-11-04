@@ -17,8 +17,10 @@ public static class OpenGlassInstallService
 
     public static void Uninstall()
     {
-        if (NativeHostInterop.OpenGlassOrchestrationInstalled()
-            && PlatformPaths.OpenGlassHostPath is not null)
+        // Служба удаляется всегда, когда оркестрация установлена: имя службы известно,
+        // путь к exe для DeleteService не нужен. Прежняя проверка OpenGlassHostPath
+        // оставляла службу на месте — тумблер на странице «Система» не выключался.
+        if (NativeHostInterop.OpenGlassOrchestrationInstalled())
         {
             NativeHostInterop.StopOpenGlassService();
             _ = NativeHostInterop.RemoveOpenGlassService();

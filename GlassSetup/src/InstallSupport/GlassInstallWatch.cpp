@@ -20,9 +20,11 @@ namespace GP = GlassShared::GlassPlatformTask;
 #ifdef GLASS_SETUP_NATIVE_MONITOR
 using NativeScan = BOOL (WINAPI*)(const DWORD*, DWORD, void*, DWORD, DWORD*);
 using NativeForceUnload = BOOL (WINAPI*)(DWORD);
+using NativeScanDiag = BOOL (WINAPI*)(void*, DWORD);
 HMODULE g_localNative = nullptr;
 NativeScan g_localScan = nullptr;
 NativeForceUnload g_localForceUnload = nullptr;
+NativeScanDiag g_localDiag = nullptr;
 
 FARPROC FindNativeExport(HMODULE dll, const char* undecorated,
     const char* stdcallName, const char* stdcallUnderscoreName) noexcept {
@@ -93,18 +95,68 @@ void AppendScanResults(std::vector<GlassInstallWatch::ModuleHolder>& holders,
     }
 }
 
+// Why the last strict local scan on this thread stopped, or which explorer.exe
+// it left to the x64 scan. Setup asks the embedded DLL that performed the scan;
+// the uninstaller links the scanner itself.
+bool ReadLocalScanDiag(Shared::InjectModuleScan::ScanDiag& diag) noexcept {
+    diag = {};
+#ifdef GLASS_SETUP_NATIVE_MONITOR
+    return g_localDiag && g_localDiag(&diag, static_cast<DWORD>(sizeof(diag))) != FALSE;
+#else
+    Shared::InjectModuleScan::GetLastScanDiag(diag);
+    return true;
+#endif
+}
+
+void LogLocalScanDiag(const wchar_t* message) noexcept {
+    Shared::InjectModuleScan::ScanDiag diag{};
+    wchar_t text[256]{};
+    if (!ReadLocalScanDiag(diag) ||
+        !Shared::InjectModuleScan::FormatScanDiag(diag, text, static_cast<DWORD>(std::size(text)))) {
+        GlassInstallLog::LineFormat(L"%s: diagnostics unavailable", message);
+        return;
+    }
+    GlassInstallLog::LineFormat(L"%s: %s", message, text);
+}
+
+// The x86 side cannot open a foreign (other account/session) explorer.exe and
+// leaves it to the x64 scan running alongside. Log each distinct note once;
+// the watch loop repeats the scan every 300 ms.
+void LogDeferredExplorerOnce() noexcept {
+    using namespace Shared::InjectModuleScan;
+    ScanDiag diag{};
+    if (!ReadLocalScanDiag(diag) || (diag.flags & ScanDiagDeferred) == 0) return;
+    static DWORD s_pid = 0;
+    static DWORD s_error = 0;
+    static ScanDiagStage s_stage = ScanDiagStage::None;
+    if (diag.pid == s_pid && diag.error == s_error && diag.stage == s_stage) return;
+    s_pid = diag.pid;
+    s_error = diag.error;
+    s_stage = diag.stage;
+    wchar_t text[256]{};
+    if (FormatScanDiag(diag, text, static_cast<DWORD>(std::size(text))))
+        GlassInstallLog::LineFormat(L"Watch: x86 side left explorer.exe to the x64 scan: %s", text);
+}
+
+// Strict scan of this (x86) architecture. All callers that run under WOW64
+// also scan the native side (resident helper or one-shot), which is why an
+// unopenable explorer.exe may be deferred to it instead of failing here.
 bool ScanLocalNative(const DWORD* pids, DWORD pidsCount,
     Shared::InjectModuleScan::Result* results, DWORD capacity, DWORD* count) noexcept {
+    using namespace Shared::InjectModuleScan;
 #ifdef GLASS_SETUP_NATIVE_MONITOR
-    if (!g_localScan || !capacity || !count || capacity >= Shared::InjectModuleScan::kNativeLocalInstallerScan)
+    if (!g_localScan || !capacity || !count || (capacity & kNativeOptionMask) != 0)
         return false;
     *count = 0;
-    return g_localScan(pids, pidsCount, results,
-        capacity | Shared::InjectModuleScan::kNativeLocalInstallerScan, count) != FALSE && *count <= capacity;
+    // The defer option is only sent after BeginLocalNativeMonitor accepted 'GSI2'.
+    const bool ok = g_localScan(pids, pidsCount, results,
+        capacity | kNativeLocalInstallerScan | kNativeDeferForeignExplorer, count) != FALSE && *count <= capacity;
 #else
     // The separately packaged uninstaller still links its local implementation.
-    return Shared::InjectModuleScan::ScanForSetup(pids, pidsCount, results, capacity, count);
+    const bool ok = ScanForSetup(pids, pidsCount, results, capacity, count, ScanOptionDeferForeignExplorer);
 #endif
+    if (ok) LogDeferredExplorerOnce();
+    return ok;
 }
 
 bool ScanInjectMapInto(std::vector<GlassInstallWatch::ModuleHolder>& holders, const wchar_t* mapName) {
@@ -123,9 +175,24 @@ bool ScanInjectMapInto(std::vector<GlassInstallWatch::ModuleHolder>& holders, co
     Shared::InjectModuleScan::Result results[Shared::InjectModuleScan::kMaxResults]{};
     DWORD count = 0;
     if (!ScanLocalNative(pids.data(), static_cast<DWORD>(pids.size()), results,
-            Shared::InjectModuleScan::kMaxResults, &count)) return false;
+            Shared::InjectModuleScan::kMaxResults, &count)) {
+        wchar_t message[160]{};
+        swprintf_s(message, L"Watch: tracked scan of %s failed", mapName);
+        LogLocalScanDiag(message);
+        return false;
+    }
     AppendScanResults(holders, results, count);
     return true;
+}
+
+std::wstring Utf8ToWideLossy(const std::string& bytes) {
+    if (bytes.empty()) return {};
+    const int wideCount = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
+    if (wideCount <= 0) return L"?";
+    std::wstring text(static_cast<size_t>(wideCount), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), text.data(), wideCount) != wideCount)
+        return L"?";
+    return text;
 }
 
 bool NeedNativeX64Helper() noexcept {
@@ -143,9 +210,13 @@ bool ConsumeNextPipeEvent(
     std::vector<GlassInstallWatch::ModuleHolder>& pendingRows,
     bool& gotEmpty,
     bool& gotEnd,
+    bool& gotFail,
+    std::wstring& failText,
     bool& malformed) {
     gotEmpty = false;
     gotEnd = false;
+    gotFail = false;
+    failText.clear();
     malformed = false;
     bool progressed = false;
     for (;;) {
@@ -155,6 +226,11 @@ bool ConsumeNextPipeEvent(
         std::string line = buffer.substr(0, nl);
         buffer.erase(0, nl + 1);
         if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (GlassInstallWatch::ParseNativeFailLine(line, failText)) {
+            // The helper's strict scan stopped; it exits right after this line.
+            gotFail = true;
+            return true;
+        }
         if (line == "#empty") {
             malformed = !pendingRows.empty();
             gotEmpty = !malformed;
@@ -233,9 +309,15 @@ bool BeginLocalNativeMonitor() noexcept {
         return false;
     }
     GlassInstallLog::LineFormat(L"Watch: x86 Native protocol 0x%08lX accepted", protocol);
+    // Same DLL generation as the V2 alias; only affects what the log can say.
+    const FARPROC diagExport = FindNativeExport(dll, Shared::InjectModuleScan::kNativeScanDiagExport,
+        "GlassSettings_GetLastScanDiag@8", "_GlassSettings_GetLastScanDiag@8");
+    if (!diagExport)
+        GlassInstallLog::Line(L"Watch: x86 Native has no scan diagnostics export");
     g_localNative = dll;
     g_localScan = scan;
     g_localForceUnload = unload;
+    g_localDiag = reinterpret_cast<NativeScanDiag>(diagExport);
     GlassInstallLog::Line(L"Watch: loaded embedded x86 GlassSettings.Native.dll into Setup");
     return true;
 }
@@ -243,6 +325,7 @@ bool BeginLocalNativeMonitor() noexcept {
 void EndLocalNativeMonitor() noexcept {
     g_localScan = nullptr;
     g_localForceUnload = nullptr;
+    g_localDiag = nullptr;
     if (g_localNative) {
         FreeLibrary(g_localNative);
         g_localNative = nullptr;
@@ -268,6 +351,30 @@ void MergeModuleTokens(std::wstring& into, const std::wstring& add) {
         if (comma == std::wstring::npos) break;
         pos = comma + 1;
     }
+}
+
+bool ParseNativeFailLine(const std::string& line, std::wstring& diag) {
+    static constexpr char kMarker[] = "#fail";
+    static constexpr size_t kMarkerLength = sizeof(kMarker) - 1;
+    if (line.compare(0, kMarkerLength, kMarker) != 0) return false;
+    if (line.size() > kMarkerLength && line[kMarkerLength] != ' ') return false;
+    std::string text = line.size() > kMarkerLength + 1 ? line.substr(kMarkerLength + 1) : std::string();
+    if (!text.empty() && text.back() == '\r') text.pop_back();
+    if (text.size() > 1024) text.resize(1024);
+    diag = text.empty() ? std::wstring(L"-") : Utf8ToWideLossy(text);
+    return true;
+}
+
+bool FindNativeFailLine(const std::string& bytes, std::wstring& diag) {
+    size_t pos = 0;
+    while (pos < bytes.size()) {
+        const size_t end = bytes.find('\n', pos);
+        const std::string line = bytes.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+        if (ParseNativeFailLine(line, diag)) return true;
+        if (end == std::string::npos) break;
+        pos = end + 1;
+    }
+    return false;
 }
 
 bool ParseNativePipeUtf8(const std::string& bytes, std::vector<ModuleHolder>& holders) {
@@ -307,8 +414,15 @@ bool CollectInProcessHolders(std::vector<ModuleHolder>& holders) noexcept {
     Shared::InjectModuleScan::Result results[Shared::InjectModuleScan::kMaxResults]{};
     DWORD count = 0;
     if (!ScanLocalNative(nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count)) {
-        GlassInstallLog::Line(L"Watch: local process scan was incomplete (including Explorer)");
-        return false;
+        // Process snapshots and handles fail transiently while the shell or
+        // another session (re)starts; retry once before failing closed.
+        LogLocalScanDiag(L"Watch: local process scan was incomplete, retrying");
+        Sleep(500);
+        count = 0;
+        if (!ScanLocalNative(nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count)) {
+            LogLocalScanDiag(L"Watch: local process scan was incomplete (including Explorer)");
+            return false;
+        }
     }
     AppendScanResults(holders, results, count);
     // The shared Toolhelp scanner skips itself. The wizard can be injected
@@ -493,8 +607,14 @@ bool WaitUntilClearOrTimeout(
                 if (pipeBuffer.size() > 1024 * 1024) { nativeScanFailed=true; break; }
             }
             for (;;) {
-                bool emptyMark = false, endMark = false, malformed = false;
-                if (!ConsumeNextPipeEvent(pipeBuffer, pendingRows, emptyMark, endMark, malformed)) break;
+                bool emptyMark = false, endMark = false, failMark = false, malformed = false;
+                std::wstring failText;
+                if (!ConsumeNextPipeEvent(pipeBuffer, pendingRows, emptyMark, endMark, failMark, failText, malformed)) break;
+                if (failMark) {
+                    nativeScanFailed=true;
+                    GlassInstallLog::LineFormat(L"Watch: x64 helper scan failed: %s", failText.c_str());
+                    break;
+                }
                 if (malformed) {
                     nativeScanFailed=true;
                     GlassInstallLog::Line(L"Watch: invalid x64 helper frame");

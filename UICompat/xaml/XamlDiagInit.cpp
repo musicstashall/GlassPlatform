@@ -3,6 +3,7 @@
 #include "xaml/XamlGlassIds.hpp"
 #include "xaml/UiTapSite.hpp"
 #include "xaml/XamlComLifetime.hpp"
+#include "xaml/ModuleThread.hpp"
 
 #include <DebugLog.h>
 #include <GlassMessages.h>
@@ -69,6 +70,7 @@ namespace
     wchar_t g_tapDllFullPath[MAX_PATH]{};
 
     DWORD WINAPI IxdeInstallThreadProc(LPVOID) noexcept;
+    void IxdeInstallThreadEntry(void*) noexcept;
     void ScheduleIxdeThreadIfPossible() noexcept;
     void InitShellSurfaceIxdeOnUiThread(HWND hwnd) noexcept;
 
@@ -232,15 +234,12 @@ namespace
                 std::memory_order_acq_rel))
             return;
 
-        const HANDLE th = CreateThread(nullptr, 0, IxdeInstallThreadProc, nullptr, 0, nullptr);
-        if (!th)
+        if (!UICompat::ModuleThread::Start(&IxdeInstallThreadEntry, nullptr, L"IXDE-install"))
         {
-            const DWORD gle = GetLastError();
-            DebugLog(DBG_ERROR, L"[UICompat][XamlDiag] CreateThread(IXDE) failed GLE=%u", static_cast<unsigned>(gle));
+            DebugLog(DBG_ERROR, L"[UICompat][XamlDiag] ModuleThread::Start(IXDE) failed");
             g_installThreadPosted.store(false, std::memory_order_release);
             return;
         }
-        CloseHandle(th);
     }
 
     void BumpSurfaceInterest(HWND hwndLog, const wchar_t* tag) noexcept
@@ -582,48 +581,43 @@ namespace
         return ctx.best;
     }
 
+    // Retry-потоки SEH/ShellHost: только ModuleThread::Start + InterruptibleSleepMs —
+    // Stop ждёт их в JoinAll до FreeLibrary (дамп SEH 26100: Sleep(3000) пережил выгрузку).
+    void SehTallIxdeRetryThread(void*) noexcept
+    {
+        constexpr int kDelaysMs[] = { 100, 400, 1200, 3000 };
+        for (const int delayMs : kDelaysMs)
+        {
+            InterruptibleSleepMs(delayMs);
+            if (ShouldAbortInstall()
+                || g_ixdeSucceeded.load(std::memory_order_acquire))
+                break;
+            const HWND tall = FindTallSehCoreWindowHwnd();
+            if (!tall || ShouldAbortInstall())
+                continue;
+            (void)RunFromWindowThread(
+                tall,
+                [](PVOID p) noexcept {
+                    InitShellSurfaceIxdeOnUiThread(static_cast<HWND>(p));
+                },
+                tall);
+            if (g_ixdeSucceeded.load(std::memory_order_acquire))
+                break;
+        }
+    }
+
     void ScheduleSehTallIxdeRetry() noexcept
     {
         if (!Shared::RootBackdropPolicy::IsShellExperienceHostProcess())
             return;
-        if (g_ixdeSucceeded.load(std::memory_order_acquire))
+        if (ShouldAbortInstall() || g_ixdeSucceeded.load(std::memory_order_acquire))
             return;
         bool expected = false;
         if (!g_sehTallIxdeRetryArmed.compare_exchange_strong(
                 expected, true, std::memory_order_acq_rel))
             return;
 
-        HANDLE th = CreateThread(
-            nullptr,
-            0,
-            [](LPVOID) -> DWORD {
-                constexpr DWORD kDelaysMs[] = { 100u, 400u, 1200u, 3000u };
-                for (const DWORD delayMs : kDelaysMs)
-                {
-                    Sleep(delayMs);
-                    if (ShouldAbortInstall()
-                        || g_ixdeSucceeded.load(std::memory_order_acquire))
-                        break;
-                    const HWND tall = FindTallSehCoreWindowHwnd();
-                    if (!tall)
-                        continue;
-                    (void)RunFromWindowThread(
-                        tall,
-                        [](PVOID p) noexcept {
-                            InitShellSurfaceIxdeOnUiThread(static_cast<HWND>(p));
-                        },
-                        tall);
-                    if (g_ixdeSucceeded.load(std::memory_order_acquire))
-                        break;
-                }
-                return 0;
-            },
-            nullptr,
-            0,
-            nullptr);
-        if (th)
-            CloseHandle(th);
-        else
+        if (!UICompat::ModuleThread::Start(&SehTallIxdeRetryThread, nullptr, L"SEH-tall-retry"))
             g_sehTallIxdeRetryArmed.store(false, std::memory_order_release);
     }
 
@@ -670,48 +664,41 @@ namespace
         return ctx.best;
     }
 
+    void ShellHostSizedIxdeRetryThread(void*) noexcept
+    {
+        constexpr int kDelaysMs[] = { 100, 400, 1200, 3000, 8000 };
+        for (const int delayMs : kDelaysMs)
+        {
+            InterruptibleSleepMs(delayMs);
+            if (ShouldAbortInstall()
+                || g_ixdeSucceeded.load(std::memory_order_acquire))
+                break;
+            const HWND sized = FindSizedControlCenterWindowHwnd();
+            if (!sized || ShouldAbortInstall())
+                continue;
+            (void)RunFromWindowThread(
+                sized,
+                [](PVOID p) noexcept {
+                    InitShellSurfaceIxdeOnUiThread(static_cast<HWND>(p));
+                },
+                sized);
+            if (g_ixdeSucceeded.load(std::memory_order_acquire))
+                break;
+        }
+    }
+
     void ScheduleShellHostSizedIxdeRetry() noexcept
     {
         if (!Shared::RootBackdropPolicy::IsShellHostProcess())
             return;
-        if (g_ixdeSucceeded.load(std::memory_order_acquire))
+        if (ShouldAbortInstall() || g_ixdeSucceeded.load(std::memory_order_acquire))
             return;
         bool expected = false;
         if (!g_shellHostSizedIxdeRetryArmed.compare_exchange_strong(
                 expected, true, std::memory_order_acq_rel))
             return;
 
-        HANDLE th = CreateThread(
-            nullptr,
-            0,
-            [](LPVOID) -> DWORD {
-                constexpr DWORD kDelaysMs[] = { 100u, 400u, 1200u, 3000u, 8000u };
-                for (const DWORD delayMs : kDelaysMs)
-                {
-                    Sleep(delayMs);
-                    if (ShouldAbortInstall()
-                        || g_ixdeSucceeded.load(std::memory_order_acquire))
-                        break;
-                    const HWND sized = FindSizedControlCenterWindowHwnd();
-                    if (!sized)
-                        continue;
-                    (void)RunFromWindowThread(
-                        sized,
-                        [](PVOID p) noexcept {
-                            InitShellSurfaceIxdeOnUiThread(static_cast<HWND>(p));
-                        },
-                        sized);
-                    if (g_ixdeSucceeded.load(std::memory_order_acquire))
-                        break;
-                }
-                return 0;
-            },
-            nullptr,
-            0,
-            nullptr);
-        if (th)
-            CloseHandle(th);
-        else
+        if (!UICompat::ModuleThread::Start(&ShellHostSizedIxdeRetryThread, nullptr, L"ShellHost-sized-retry"))
             g_shellHostSizedIxdeRetryArmed.store(false, std::memory_order_release);
     }
 
@@ -1122,6 +1109,11 @@ namespace
 
         return SUCCEEDED(lastHrAllBursts) ? 0 : 1;
     }
+
+    void IxdeInstallThreadEntry(void*) noexcept
+    {
+        (void)IxdeInstallThreadProc(nullptr);
+    }
 }
 
 extern "C" {
@@ -1137,6 +1129,9 @@ HRESULT UICompat_PrepareXamlDiagnostics() noexcept
     g_shellSurfaceIxdePath.store(false, std::memory_order_release);
     g_shellSurfaceThreadId.store(0, std::memory_order_release);
     g_searchDeferPosted.store(false, std::memory_order_release);
+    // Retry-потоки прошлого сеанса завершены в Stop (JoinAll) — разрешаем взвести снова.
+    g_sehTallIxdeRetryArmed.store(false, std::memory_order_release);
+    g_shellHostSizedIxdeRetryArmed.store(false, std::memory_order_release);
 
     // TAP / IXDE / VTC — только Windows 11; backdrop трея (TaskbarHost) остаётся на Win10 через WndCompat.
     if (Shared::SystemHelper::g_buildNumber < 22000)
@@ -1302,20 +1297,22 @@ void UICompat_StopXamlDiagnostics() noexcept
             L"[UICompat][XamlDiag] TAP не был в diagRunning — без ActiveWatcher или IXDE не поднят");
     }
 
-    constexpr int kThreadDrainMs = 8000;
-    for (int w = 0; w < kThreadDrainMs; w += 50)
+    // Все потоки модуля (IXDE-install, retry SEH/ShellHost, Advise/CatchUp из UiTapSite)
+    // должны выйти до FreeLibrary(UICompat) в GlassCompat — ожидание по хэндлам, а не по
+    // флагу g_installThreadActive (прежний drain не видел retry-потоки: дамп SEH 26100).
+    // После g_xamlStopRequested retry-потоки просыпаются из InterruptibleSleepMs за ≤50 мс;
+    // RunFromWindowThread ограничен SendMessageTimeout 5 с; бюджет 8 с — как у прежнего drain.
+    // При таймауте образ удерживают ссылки самих потоков (ModuleThread), а
+    // UICompat_DebugComState сообщает GlassCompat, что остаточную ссылку снимать нельзя.
+    constexpr DWORD kModuleThreadJoinMs = 8000;
+    if (!UICompat::ModuleThread::JoinAll(kModuleThreadJoinMs, L"Stop"))
     {
-        if (g_installThreadActive.load(std::memory_order_acquire))
-        {
-            Sleep(50);
-            continue;
-        }
-        break;
+        DebugLog(DBG_WARNING, L"[UICompat][XamlDiag] Stop: потоки модуля ещё живы (%ld, IXDE-install=%d)",
+            UICompat::ModuleThread::ActiveCount(),
+            g_installThreadActive.load(std::memory_order_acquire) ? 1 : 0);
     }
-    if (g_installThreadActive.load(std::memory_order_acquire))
-    {
-        DebugLog(DBG_WARNING, L"[UICompat][XamlDiag] Stop: поток IXDE-install ещё активен");
-    }
+    g_sehTallIxdeRetryArmed.store(false, std::memory_order_release);
+    g_shellHostSizedIxdeRetryArmed.store(false, std::memory_order_release);
 
     // Агрессивный COM drain: ShellHost держит internal proxy-ссылки на UICompat-объекты,
     // которые не отслеживаются g_objectCount/g_serverLocks.
