@@ -9,6 +9,7 @@
     <Filter Include="scripts"><UniqueIdentifier>{4E17814D-2BEC-4AA1-B142-7C6A96F16A4B}</UniqueIdentifier></Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\InstallSupport\GlassCacheDiagnostics.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClCompile Include="src\main.cpp"><Filter>src</Filter></ClCompile>
     <ClCompile Include="src\InstallEngine.cpp"><Filter>src</Filter></ClCompile>
     <ClCompile Include="src\InstallLog.cpp"><Filter>src</Filter></ClCompile>
@@ -59,6 +60,7 @@
     <None Include="tests\selection_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\product_plan_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\run_product_plan_tests.py"><Filter>tests</Filter></None>
+    <None Include="tests\cache_diagnostics_mock.py"><Filter>tests</Filter></None>
     <None Include="tests\removal_order_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\progress_tests.cpp"><Filter>tests</Filter></None>
     <None Include="tests\unlock_state_tests.cpp"><Filter>tests</Filter></None>

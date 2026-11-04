@@ -574,7 +574,7 @@ assert "ServiceInstalled()" in og_state and "OrchestrationInstalled()" in og_sta
 
 # 2026-11-03 feedback: finish-page wording and bottom gap; stray Wow6432Node key cleanup;
 # classic menu nested with icons; OpenGlass gate removable; inspection cards (Task F 1-2).
-assert "установлена с замечаниями" in rc and "installed with notes" in rc
+assert "Установка завершена с замечаниями" in rc and "Installation completed with notes" in rc
 assert "--content-bottom-gap" in ui and "inset:0 0 var(--content-bottom-gap) 0" in ui
 util_cpp = (repo / "GlassSetup/src/InstallSupport/GlassInstallUtil.cpp").read_text(encoding="utf-8")
 assert "DeleteRegistryKeyIfEmpty" in util_cpp and "RemoveEmptyInstallPathKeys" in util_cpp
@@ -739,10 +739,22 @@ assert "IDR_UNLOCKER_X86 RCDATA" not in unins_rc
 assert "IDR_UNLOCKER_X64 RCDATA" in unins_rc
 assert r"Build\x86\Release\GlassSettings.Native.dll" not in unins_project
 assert "ConfigureEmbeddedUnlocker(instance,IDR_UNLOCKER_X64);" in unins
-assert "IDR_MAINTENANCE_UNINS,IDR_UNLOCKER_X86)" in engine
-assert "nativeX86Resource,RT_RCDATA" in cache and "GlassSettings.Native.x86.dll" in cache
+assert "IDR_MAINTENANCE_UNINS,IDR_UNLOCKER_X86,&cacheFailure)" in engine
+assert 'extract(nativeX86Resource,L"GlassSettings.Native.x86.dll")' in cache and "GlassSettings.Native.x86.dll" in cache
 assert 'CurrentFile(L"GlassSettings.Native.x86.dll")' in util
 assert "Первичная подготовка этой ветки" not in read("README.md")
+
+# Generic notes are not proof of a startup failure. Cache errors are attributed.
+assert "не всё запустилось" not in rc+ui and "not everything started" not in rc+ui
+assert "завершающим действиям установщика" in rc and "завершающим действиям установщика" in ui
+cache_diag=read("src/InstallSupport/GlassCacheDiagnostics.h")
+assert "Diag::Publication publication(failureDetail)" in cache
+assert 'L"validate-packages-parent"' in cache and 'L"create-owned-root"' in cache
+assert 'L"ValidateOwnerAndDacl"' in cache and 'L"Policy"' in cache
+assert "SID=" in cache and "mask=" in cache and "owner=" in cache
+assert "stage=" in cache_diag and "operation=" in cache_diag and "CodeText" in cache_diag
+assert "context.first" in cache_diag and "first failure" in cache_diag
+assert "ERROR_CANCELLED" in util and "DeleteFileW(destPath.c_str());SetLastError(failure)" in util
 
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")

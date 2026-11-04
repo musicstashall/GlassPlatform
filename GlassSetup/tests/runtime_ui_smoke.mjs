@@ -31,4 +31,17 @@ for(const os64 of [true,false]) for(const removal of [false,true]) {
  if(removal&&await frame.locator('#product-cleanup').isChecked())throw Error('bulk cleanup');
  console.log('PASS runtime '+(os64?'OS x64 ':'OS x86 ')+(removal?'Unins':'Setup')+`: host messages, 330px list, ${os64?5:3} independent cards, warning/Esc, select-all excluding cleanup`);
 }
+for(const locale of ['ru','en'])for(const note of ['cache','startup','none']) {
+ await page.goto((process.env.GLASS_PREVIEW_URL||'http://127.0.0.1:8080')+'/runtime-products-preview.html?page=complete&locale='+locale+'&note='+note);
+ const frame=page.frameLocator('#runtime');await frame.locator('#complete-panel').waitFor({state:'visible'});
+ const title=await frame.locator('#complete-title').textContent(),body=await frame.locator('#complete-body').textContent();
+ if(note!=='none') {
+  if(title!==(locale==='ru'?'Установка завершена с замечаниями':'Installation completed with notes'))throw Error('neutral completion title: '+title);
+  if(!body.includes(locale==='ru'?'завершающим действиям установщика':'final setup actions'))throw Error('neutral completion description');
+  const detail=await frame.locator('#complete-warn-list').textContent();
+  if(note==='cache'&&(!detail.includes('validate-packages-parent')||!detail.includes('C:\\ProgramData\\Packages')||!detail.includes('0x00000005')))throw Error('cache details missing');
+  const fits=await frame.locator('#complete-panel .complete-copy').evaluate(el=>{const r=el.getBoundingClientRect();return r.bottom<=540&&r.right<=1000;});if(!fits)throw Error('completion copy clipped');
+ } else if((await frame.locator('#complete-panel').getAttribute('class')||'').includes('has-warnings')||title.includes('notes')||title.includes('замечаниями'))throw Error('clean completion gained warning');
+ console.log('PASS completion '+locale+' '+note+': neutral title/body, details and 1000x540 content');
+}
 if(errors.length)throw Error(errors.join('\n'));await browser.close();

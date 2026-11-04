@@ -299,36 +299,39 @@ bool ExtractResourceToFile(
     const wchar_t* resourceType,
     const std::wstring& destPath,
     const std::atomic_bool* cancelled) noexcept {
-    if (!instance || resourceId == 0 || destPath.empty())
-        return false;
+    if (!instance || resourceId == 0 || destPath.empty()) {
+        SetLastError(ERROR_INVALID_PARAMETER);return false;
+    }
     HRSRC res = FindResourceW(instance, MAKEINTRESOURCEW(resourceId), resourceType);
     if (!res)
         return false;
     const DWORD size = SizeofResource(instance, res);
-    if (size == 0)
-        return false;
+    if (size == 0) {SetLastError(ERROR_RESOURCE_DATA_NOT_FOUND);return false;}
     HGLOBAL loaded = LoadResource(instance, res);
     if (!loaded)
         return false;
     const void* bytes = LockResource(loaded);
-    if (!bytes)
-        return false;
+    if (!bytes) {SetLastError(ERROR_RESOURCE_DATA_NOT_FOUND);return false;}
     HANDLE file = CreateFileW(destPath.c_str(), GENERIC_WRITE, 0, nullptr,
         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
         return false;
     DWORD offset=0;
-    bool ok=true;
+    DWORD failure=ERROR_SUCCESS;
     const auto* data=static_cast<const BYTE*>(bytes);
     while (offset<size) {
-        if (cancelled && cancelled->load(std::memory_order_acquire)) { ok=false; break; }
+        if (cancelled && cancelled->load(std::memory_order_acquire)) { failure=ERROR_CANCELLED; break; }
         const DWORD chunk=(size-offset)>1024*1024 ? 1024*1024 : size-offset;
         DWORD written=0;
-        if (!WriteFile(file,data+offset,chunk,&written,nullptr) || written==0) { ok=false; break; }
+        if (!WriteFile(file,data+offset,chunk,&written,nullptr)) { failure=GetLastError();break; }
+        if(written==0){failure=ERROR_WRITE_FAULT;break;}
         offset+=written;
     }
-    CloseHandle(file);
-    if (!ok || offset!=size) { DeleteFileW(destPath.c_str()); return false; }
+    if(!CloseHandle(file)&&failure==ERROR_SUCCESS)failure=GetLastError();
+    if(failure!=ERROR_SUCCESS||offset!=size) {
+        if(failure==ERROR_SUCCESS)failure=ERROR_WRITE_FAULT;
+        DeleteFileW(destPath.c_str());SetLastError(failure);return false;
+    }
     return true;
 }
 
