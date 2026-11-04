@@ -114,8 +114,7 @@
     <ClInclude Include="..\src\GlassProductUiPolicy.h" />
   </ItemGroup>
   <Target Name="GlassUninsVerifyNativeHelper" BeforeTargets="BeforeResourceCompile">
-    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\..\Build\x64\Release\GlassSettings.Native.dll')" Text="GlassUnins: сначала соберите GlassSettings.Native Release|x64 (IDR_UNLOCKER_X64)." />
-    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\..\Build\x86\Release\GlassSettings.Native.dll')" Text="GlassUnins: сначала соберите GlassSettings.Native Release|Win32 (IDR_UNLOCKER_X86)." />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\..\Build\x64\Release\GlassSettings.Native.dll')" Text="GlassUnins: отсутствует x64 helper зависимости GlassSettings.Native (IDR_UNLOCKER_X64). Соберите решение Release|x64." />
     <Touch Files="$(MSBuildThisFileDirectory)GlassUnins.rc" />
   </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

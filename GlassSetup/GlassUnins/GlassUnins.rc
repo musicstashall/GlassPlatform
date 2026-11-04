@@ -14,6 +14,4 @@ IDR_SLIDE_CONTEXT_MENU RCDATA "..\\res\\assets\\slide_context_menu.jpg"
 IDR_SLIDE_EXPLORER RCDATA "..\\res\\assets\\slide_explorer.jpg"
 IDR_UNLOCKER_X64 RCDATA "..\\..\\Build\\x64\\Release\\GlassSettings.Native.dll"
 
-IDR_UNLOCKER_X86 RCDATA "..\\..\\Build\\x86\\Release\\GlassSettings.Native.dll"
-
 #include "../res/ProductStrings.rcinc"

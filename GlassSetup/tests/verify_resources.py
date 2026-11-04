@@ -733,6 +733,17 @@ assert "PlatformDescription" in setup and "PlatformDescription" in unins
 assert "ManualOpenGlass" in read("src/GlassProductPlan.h")
 assert "Средство для использования неподписанных визуальных стилей. Установка в System32." in rc
 
+# Fixed clean build order: Release x64 -> Release x86. First-pass Unins
+# must not consume a Native DLL that is produced only by the second pass.
+assert "IDR_UNLOCKER_X86 RCDATA" not in unins_rc
+assert "IDR_UNLOCKER_X64 RCDATA" in unins_rc
+assert r"Build\x86\Release\GlassSettings.Native.dll" not in unins_project
+assert "ConfigureEmbeddedUnlocker(instance,IDR_UNLOCKER_X64);" in unins
+assert "IDR_MAINTENANCE_UNINS,IDR_UNLOCKER_X86)" in engine
+assert "nativeX86Resource,RT_RCDATA" in cache and "GlassSettings.Native.x86.dll" in cache
+assert 'CurrentFile(L"GlassSettings.Native.x86.dll")' in util
+assert "Первичная подготовка этой ветки" not in read("README.md")
+
 # Check the embedded JavaScript syntax when Node is available.
 node = shutil.which("node")
 if node:

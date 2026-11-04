@@ -174,7 +174,7 @@ inline bool GarbageCollect() {
 struct Blob {UINT id;const wchar_t* file;};
 // Invoked only after successful MSI commit. Failed publication leaves Previous
 // intact; recovery restores it on the next attempt. Never prunes system MSI cache.
-inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT uninstallerResource) {
+inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT uninstallerResource,UINT nativeX86Resource) {
     struct CacheLock {
         HANDLE handle=nullptr;bool acquired=false;
         CacheLock(){
@@ -196,6 +196,10 @@ inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT 
     if(!RemoveFlat(stage)||!SecureDirectory(stage))return false;
     wchar_t exe[32768]{};if(!GetModuleFileNameW(nullptr,exe,32768)||!CopyFileW(exe,(stage+L"\\GlassSetup.exe").c_str(),TRUE))return false;
     if(!GlassInstallUtil::ExtractResourceToFile(instance,uninstallerResource,RT_RCDATA,stage+L"\\GlassUnins.exe"))return false;
+    // The final Setup is built in the x86 pass and already embeds both helpers.
+    // Publish x86 Native for maintenance without making the first-pass Unins
+    // resource compiler depend on an artifact of the future x86 pass.
+    if(!GlassInstallUtil::ExtractResourceToFile(instance,nativeX86Resource,RT_RCDATA,stage+L"\\GlassSettings.Native.x86.dll"))return false;
     for(std::size_t i=0;i<count;++i)
         if(!GlassInstallUtil::ExtractResourceToFile(instance,blobs[i].id,RT_RCDATA,stage+L"\\"+blobs[i].file))return false;
     WIN32_FIND_DATAW staged{};HANDLE stagedFind=FindFirstFileW((stage+L"\\*").c_str(),&staged);

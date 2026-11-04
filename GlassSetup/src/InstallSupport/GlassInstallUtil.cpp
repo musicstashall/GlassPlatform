@@ -1,5 +1,6 @@
 #include "GlassInstallUtil.h"
 #include "GlassInstallLog.h"
+#include "GlassMaintenanceCache.h"
 #include "GlassEmptyDirectories.h"
 #include <shlobj.h>
 #include <GlassShellMenuConstants.h>
@@ -1224,6 +1225,11 @@ std::wstring NativeDllForArch(
     // Setup also embeds x86; prefer that resource over an installed helper.
     // The resource is trusted only to the extent the Setup executable is trusted.
     if (g_unlockerX86ResId) return EmbeddedNativeDllX86();
+    // Unins is built in the x64 pass, before x86 Native exists. Its x86
+    // maintenance helper is published from the final Setup into protected
+    // Current, so it survives removal of the Settings product.
+    const auto cached=GlassMaintenanceCache::CurrentFile(L"GlassSettings.Native.x86.dll");
+    if(!cached.empty())return PeMatches(cached,machine,"GlassSettings_UnlockerW")?cached:std::wstring();
     const std::wstring root = x86Dir;
     if (!root.empty()) {
         const std::wstring dll = TrimTrailingSlashes(root) + L"\\GlassSettings\\GlassSettings.Native.dll";

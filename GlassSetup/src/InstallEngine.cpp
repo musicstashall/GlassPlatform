@@ -1641,7 +1641,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         {IDR_MSI_GS_X64,L"GlassSettings-x64.msi"},{IDR_MSI_GS_X86,L"GlassSettings-x86.msi"},
         {IDR_MSI_SUT_X64,L"SecureUxTheme-x64.msi"},{IDR_MSI_SUT_X86,L"SecureUxTheme-x86.msi"},
         {IDR_MSI_OPENGLASS,L"OpenGlass-x64.msi"}};
-    if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs,std::size(cacheBlobs),IDR_MAINTENANCE_UNINS))
+    if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs,std::size(cacheBlobs),IDR_MAINTENANCE_UNINS,IDR_UNLOCKER_X86))
         AddFinishWarning(ru?L"Оболочка обслуживания сохранена не полностью":L"Maintenance cache publication is incomplete",ru?L"Сохраните исходный установщик и журнал; повторите обслуживание.":L"Keep the original installer and log; retry maintenance.");
     const wchar_t* products[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
         GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass,
