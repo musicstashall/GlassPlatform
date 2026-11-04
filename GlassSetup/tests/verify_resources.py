@@ -650,8 +650,12 @@ assert "HasSelectedComponent" in setup
 assert "не требуется" in ui and "tone-update" in ui and "tone-repair" in ui
 assert "comp-slim" in ui and "components-extra" in ui and "components-stack" in ui
 assert "components-select-all" in ui and "Снять необязательные" in ui
-assert "components-list{flex:1 1 auto;min-height:0;overflow-y:auto" in ui
+assert ".components-list{" in ui and "overflow-y:auto;overflow-x:hidden;padding:18px 0" in ui
+assert "backdrop-filter:blur(10px)" in ui and "#000 18px,#000 calc(100% - 18px)" in ui
 assert ".components-status{display:flex" in ui and "flex:0 0 78px;height:78px" in ui
+assert ".components-status.is-neutral" in ui and "Ни один компонент не выбран." in ui
+assert '<div id="components-status"' in ui and '</div><button id="components-select-all"' in ui
+assert '<p id="components-intro" class="components-intro"></p></div>\n<div class="components-stack">' in ui
 assert "components-count" in ui and "availableProducts.length" in ui and "selectedProducts" in ui
 assert "#components-panel{bottom:0}" in ui and "top:188px;bottom:12px" in ui and "gap:14px" in ui
 assert ".banner-portrait{position:absolute;left:240px;top:100px;width:800px;height:447px;object-fit:cover;opacity:.36;" in ui

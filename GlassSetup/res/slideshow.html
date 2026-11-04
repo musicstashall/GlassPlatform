@@ -315,7 +315,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .components-banner{position:absolute;inset:0 0 0 auto;width:700px;height:540px;object-fit:cover;opacity:.36;mask-image:linear-gradient(90deg,transparent 0%,#000 52%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 52%,#000 100%)}
 .components-overlay{position:absolute;inset:0;background:linear-gradient(90deg,#10122500 0%,#10122510 54%,#10122528 100%)}
 .components-heading{position:absolute;left:48px;top:78px;width:904px;z-index:2}
-.components-select-all{position:absolute;right:0;top:28px;min-height:28px;pointer-events:auto;padding:0 12px;border:1px solid #a7dddf55;border-radius:8px;background:#a7dddf12;color:#cdeff0;font:600 10.5px 'Segoe UI',Arial,sans-serif;letter-spacing:.2px;cursor:pointer;transition:background .18s,border-color .18s}
+.components-select-all{position:relative;flex:0 0 auto;align-self:center;min-height:30px;margin-left:8px;white-space:nowrap;pointer-events:auto;padding:0 12px;border:1px solid #a7dddf55;border-radius:8px;background:#a7dddf12;color:#cdeff0;font:600 10.5px 'Segoe UI',Arial,sans-serif;letter-spacing:.2px;cursor:pointer;transition:background .18s,border-color .18s}
 .components-select-all:hover:not(:disabled){border-color:#a7dddf99;background:#a7dddf24}
 .components-select-all:focus-visible{outline:2px solid #d8ffff;outline-offset:2px}
 .components-select-all:disabled{opacity:.48;cursor:default}
@@ -325,7 +325,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .components-title{margin:0 0 6px;color:#f5f4fc;font-size:29px;line-height:1.16;font-weight:350;letter-spacing:-.55px}
 .components-intro{margin:0;color:#aeb2c9;font-size:12.5px;line-height:1.45;max-width:820px}
 .components-stack{position:absolute;left:48px;top:188px;bottom:12px;width:904px;display:flex;flex-direction:column;gap:14px;z-index:3;pointer-events:auto;min-height:0}
-.components-list{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-color:#777296 #191b30;scrollbar-width:thin}
+.components-list{position:relative;isolation:isolate;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:18px 0;border:1px solid #c7bdff18;border-radius:14px;background:#10122570;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);mask-image:linear-gradient(180deg,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%);-webkit-mask-image:linear-gradient(180deg,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%);scrollbar-color:#777296 #191b30;scrollbar-width:thin}
 .components-list::-webkit-scrollbar{width:8px}.components-list::-webkit-scrollbar-track{background:#191b30;border-radius:8px}.components-list::-webkit-scrollbar-thumb{background:#777296;border:2px solid #191b30;border-radius:8px}
 .components-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr;gap:8px}
 .components-extra{display:flex;flex-direction:column;gap:8px}
@@ -371,14 +371,18 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 
 .components-status{display:flex;align-items:center;flex:0 0 78px;height:78px;min-height:78px;gap:12px;padding:5px 14px;border:1px solid #83d9a64d;border-left:3px solid #83d9a6;border-radius:12px;background:linear-gradient(120deg,#1b3b31c9,#171d2be8);box-shadow:inset 0 1px #ffffff0a,0 10px 24px #05060f44;pointer-events:auto;overflow:hidden}
 .components-status.is-warning{border-color:#f2c0784d;border-left-color:#f2c078;background:linear-gradient(120deg,#3d2d22cf,#1d1a2ee8)}
+.components-status.is-neutral{border-color:#9da4ba45;border-left-color:#9da4ba;background:linear-gradient(120deg,#292d3dc9,#1a1d2be8)}
 .components-status[hidden]{display:none!important}
 .components-status-dot{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:#83d9a6;box-shadow:0 0 12px #83d9a6a8}
 .components-status.is-warning .components-status-dot{background:#f5c984;box-shadow:0 0 12px #f5c984a8}
+.components-status.is-neutral .components-status-dot{background:#aab1c5;box-shadow:0 0 10px #aab1c566}
 .components-status-copy{display:flex;flex:1 1 auto;min-width:0;flex-direction:column;gap:3px}
 .components-status-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;margin:0;color:#d8f3e3;font-size:11.6px;line-height:1.3;white-space:pre-line}
 .components-status.is-warning .components-status-text{color:#f5e9d4}
+.components-status.is-neutral .components-status-text{color:#e0e3ec}
 .components-count{margin:0;color:#a8ddbd;font-size:9.5px;font-weight:700;line-height:1.2;letter-spacing:.15px}
 .components-status.is-warning .components-count{color:#f3d39e}
+.components-status.is-neutral .components-count{color:#b8bfd1}
 .components-count[hidden]{display:none!important}
 /* Windows 11 certificate page: same scene as components; two exclusive choice cards + a facts card. */
 .cert-intro{margin:0 0 13px;color:#aeb2c9;font-size:12.5px;line-height:1.45}
@@ -504,9 +508,9 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 <circle class="error-spark" cx="91" cy="146" r="3.4"/><circle class="error-spark s2" cx="310" cy="119" r="3"/><circle class="error-spark s3" cx="319" cy="269" r="2.6"/><circle cx="96" cy="273" r="1.8" fill="#ffc2cc" opacity=".65"/><circle cx="277" cy="324" r="1.6" fill="#ff9bad" opacity=".55"/></svg></div></section>
 <section id="components-panel" class="mode-panel components-scene" aria-labelledby="components-title">
 <img id="components-banner" class="components-banner" alt="" aria-hidden="true"><div class="components-overlay"></div><div id="components-brand" class="native-brand">GlassPlatform</div>
-<div class="components-heading"><div id="components-kicker" class="components-kicker"></div><h1 id="components-title" class="components-title"></h1><p id="components-intro" class="components-intro"></p><button id="components-select-all" class="components-select-all" type="button">Выбрать всё</button></div>
+<div class="components-heading"><div id="components-kicker" class="components-kicker"></div><h1 id="components-title" class="components-title"></h1><p id="components-intro" class="components-intro"></p></div>
 <div class="components-stack">
-<div id="components-status" class="components-status" role="status" aria-live="polite" aria-atomic="true"><span class="components-status-dot" aria-hidden="true"></span><div class="components-status-copy"><p id="components-status-text" class="components-status-text"></p><p id="components-count" class="components-count" hidden></p></div></div>
+<div id="components-status" class="components-status" role="status" aria-live="polite" aria-atomic="true"><span class="components-status-dot" aria-hidden="true"></span><div class="components-status-copy"><p id="components-status-text" class="components-status-text"></p><p id="components-count" class="components-count" hidden></p></div><button id="components-select-all" class="components-select-all" type="button">Выбрать всё</button></div>
 <div class="components-list"><div id="components-grid" class="components-grid" role="group" aria-labelledby="components-title"></div>
 <div id="components-extra" class="components-extra"></div></div>
 </div></section>
@@ -613,10 +617,13 @@ function updateComponentsStatus(){
  const products=inputs.filter(input=>input.dataset.component!=='cleanup');
  const availableProducts=products.filter(input=>!input.disabled||input.dataset.locked==='1');
  const selectedProducts=availableProducts.filter(input=>input.checked).length;
+ const loading=hostState.componentsLoading===true;
  if(button){button.hidden=uninstaller;button.disabled=selectable.length===0;button.textContent=allSelected?(locale==='ru'?'Снять необязательные':'Clear optional'):(locale==='ru'?'Выбрать всё':'Select all');}
- if(count){const loading=hostState.componentsLoading===true;count.hidden=loading||availableProducts.length===0;count.textContent=uninstaller?(locale==='ru'?`К удалению: ${selectedProducts} из ${availableProducts.length} продуктов`:`To remove: ${selectedProducts} of ${availableProducts.length} products`):(locale==='ru'?`Выбрано: ${selectedProducts} из ${availableProducts.length} продуктов`:`Selected: ${selectedProducts} of ${availableProducts.length} products`);}
- status.classList.remove('is-warning');
- const warning=String(hostState.componentsWarning||'').trim();if(warning){status.classList.add('is-warning');text.textContent=warning;text.title=warning;return;}text.title='';
+ if(count){count.hidden=loading||availableProducts.length===0;count.textContent=uninstaller?(locale==='ru'?`К удалению: ${selectedProducts} из ${availableProducts.length} продуктов`:`To remove: ${selectedProducts} of ${availableProducts.length} products`):(locale==='ru'?`Выбрано: ${selectedProducts} из ${availableProducts.length} продуктов`:`Selected: ${selectedProducts} of ${availableProducts.length} products`);}
+ status.classList.remove('is-warning','is-neutral');
+ const warning=String(hostState.componentsWarning||'').trim();
+ if(!uninstaller&&!loading&&selectedProducts===0){status.classList.add('is-neutral');text.textContent=(locale==='ru'?'Ни один компонент не выбран.':'No components are selected.')+(warning?'\n'+warning:'');text.title=warning;return;}
+ if(warning){status.classList.add('is-warning');text.textContent=warning;text.title=warning;return;}text.title='';
  if(uninstaller){const removable=selectable.filter(input=>input.dataset.component!=='cleanup'&&input.dataset.component!=='secureUxTheme'),productsSelected=removable.some(input=>input.checked),sutSelected=selectable.some(input=>input.dataset.component==='secureUxTheme'&&input.checked),cleanupSelected=selectable.some(input=>input.dataset.component==='cleanup'&&input.checked);text.textContent=locale==='ru'?(productsSelected&&sutSelected?'Отмеченные продукты будут удалены; MSI SecureUxTheme будет удалён и его интеграция отключена. Неотмеченные продукты останутся.':productsSelected?'Выбранные продукты будут удалены. Неотмеченные останутся без изменений.':sutSelected&&cleanupSelected?'MSI SecureUxTheme будет удалён, настройки очищены. Прочие продукты останутся без изменений.':sutSelected?'Продукт SecureUxTheme будет удалён. GlassSettings останется установленным.':cleanupSelected?'Выбрана только отдельная очистка настроек. Продукты останутся без изменений.':'Отметьте продукты для удаления. Очистка настроек выбирается отдельно.'):(productsSelected&&sutSelected?'Selected products will be removed; the SecureUxTheme MSI will be removed and its integration disabled. Unchecked products will remain.':productsSelected?'Selected products will be removed. Unchecked products will remain unchanged.':sutSelected&&cleanupSelected?'The SecureUxTheme MSI will be removed and settings cleaned. Other products will remain unchanged.':sutSelected?'The SecureUxTheme product will be removed. GlassSettings will remain installed.':cleanupSelected?'Only settings cleanup is selected. Products will remain unchanged.':'Select products to remove. Settings cleanup is a separate option.');return;}
  const selectedOptional=selectable.filter(input=>input.checked).length;
  const hasLocked=inputs.some(input=>input.dataset.locked==='1'&&input.checked);
