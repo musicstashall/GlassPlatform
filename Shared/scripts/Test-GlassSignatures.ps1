@@ -7,7 +7,7 @@
 .DESCRIPTION
     Builds the artifact list (platform DLL/EXE of both architectures including the shell-menu
     components under GlassShellSparse\ and the sparse MSIX, GlassSettings publish exe,
-    GlassSettings.Native.dll, GlassUnins.exe, the seven MSI and GlassSetup.exe) and runs
+    GlassSettings.Native.dll, GlassUnins.exe, the four first-party MSI and GlassSetup.exe) and runs
     Invoke-GlassSign.ps1 -Mode Verify -Policy Require against it. The expected thumbprint comes from
     -Thumbprint, otherwise from GlassSignThumbprint in Shared\GlassSign.targets, otherwise from the
     author key in the certificate store (subject match). Missing artifacts are errors unless
@@ -64,7 +64,7 @@ foreach ($arch in @('x64', 'x86')) {
     foreach ($name in $platformFiles) { $required.Add((Join-Path $build "$arch\$Configuration\$name")) }
 }
 $required.Add((Join-Path $build "GlassUnins\$Configuration\GlassUnins.exe"))
-foreach ($msi in @('GlassSettings-x64', 'GlassSettings-x86', 'SecureUxTheme-x64', 'SecureUxTheme-x86', 'Glass-x64', 'Glass-x86', 'OpenGlass-x64')) {
+foreach ($msi in @('GlassSettings-x64', 'GlassSettings-x86', 'Glass-x64', 'Glass-x86')) {
     $required.Add((Join-Path $build "GlassSetup\msi\$Configuration\$msi\$msi.msi"))
 }
 $required.Add((Join-Path $build "GlassSetup\$Configuration\GlassSetup.exe"))

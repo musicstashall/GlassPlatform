@@ -11,6 +11,8 @@
     <GlassSettingsProductCode>B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5074</GlassSettingsProductCode>
     <GlassPlatformTitle>SecureUxTheme</GlassPlatformTitle>
     <GlassMsiProductCode>$(GlassProductCode)</GlassMsiProductCode>
+    <!-- Third-party product MSI: do not sign with the Glass developer certificate. -->
+    <GlassSignThisProject>false</GlassSignThisProject>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' != 'Release'">
     <BuildProject>false</BuildProject>

@@ -16,7 +16,7 @@
     <Property Id="GLASSBUNDLEVERSION" Value="$(var.GlassMsiBundleVersion)" Hidden="yes" />
     <Property Id="GLASSSETTINGSINSTALLED">
       <RegistrySearch Id="GlassSettingsProductSearch" Root="HKCU"
-                      Key="Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{$(var.GlassSettingsProductCode)}"
+                      Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\{$(var.GlassSettingsProductCode)}"
                       Name="DisplayName" Type="raw" />
     </Property>
     <Launch Condition="Installed OR GLASSSETTINGSINSTALLED"

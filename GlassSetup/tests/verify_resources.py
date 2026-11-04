@@ -513,7 +513,15 @@ activation = section(sut_native, 'extern "C" HRESULT WINAPI GlassSettings_Secure
 assert "kProxyDllName" in activation and "NativeSysWow64" not in activation
 assert "if (FileExistsNative(proxyWowPath)" in sut_native  # old cross-architecture proxy cleanup only
 assert "GLASSSETTINGSINSTALLED" in sut_template and "GlassSettingsProductCode" in sut_template
+assert 'Key="Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{' in sut_template
+assert 'Key="Software\\\\Microsoft' not in sut_template
 assert "Launch Condition=\"Installed OR GLASSSETTINGSINSTALLED\"" in sut_template
+for third_party_project in ("msi/OpenGlass-x64.wixproj", "msi/SecureUxTheme-x64.wixproj", "msi/SecureUxTheme-x86.wixproj"):
+    assert "<GlassSignThisProject>false</GlassSignThisProject>" in read(third_party_project)
+signature_list=read("../Shared/scripts/Test-GlassSignatures.ps1")
+assert "'SecureUxTheme-x64'" not in signature_list and "'OpenGlass-x64'" not in signature_list
+setup_signature_command=next(line for line in project.splitlines() if 'Context &quot;GlassSetup first-party payload&quot;' in line)
+assert "SecureUxTheme-x64" not in setup_signature_command and "OpenGlass-x64" not in setup_signature_command
 for path, code in (("msi/SecureUxTheme-x64.wixproj", "5076"), ("msi/SecureUxTheme-x86.wixproj", "5077")):
     project_text=read(path)
     assert code in project_text and "GlassSettingsProductCode" in project_text
@@ -541,7 +549,7 @@ assert "kProductSecureUxThemeX64" in engine and "kProductSecureUxThemeX86" in en
 assert "kProductSecureUxThemeX64" in rollback and "kProductSecureUxThemeX86" in rollback
 unins_remove=section(unins, "int count=(chosen.secureUxTheme?1:0)", "if (chosen.openGlass)")
 assert unins_remove.index("SecureUxTheme x64") < unins_remove.index("GlassSettings x64")
-assert "SecureUxTheme" in read("../README.md") and "семь MSI" in read("../README.md")
+assert "SecureUxTheme" in read("../README.md") and "четыре first-party MSI" in read("../README.md")
 # H3 item 6: the OpenGlass state query must see the installer's service (not only the legacy
 # task) on every thread: the cheap SCM query runs before the scheduler-UI guard, and only the
 # COM task-tree walk stays background-only. Otherwise Home/System rows show "No task" for a
