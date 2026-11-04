@@ -1199,7 +1199,9 @@ private:
         PAINTSTRUCT ps{}; HDC dc=BeginPaint(window,&ps);
         RECT client{}; GetClientRect(window,&client);
         RECT content=Box(0,0,kWidth,kContentHeight); FillRect(dc,&content,brush_);
-        WizardTheme::PaintFooterBar(dc,client.right,Scale(kContentHeight),client.bottom,kFooterTop,kFooterBottom,RGB(74,71,109));
+        const bool progressPage=page_==Page::Stopping || page_==Page::Removing;
+        const int footerTop=progressPage?kContentHeight:kHtmlHeight;
+        WizardTheme::PaintFooterBar(dc,client.right,Scale(footerTop),client.bottom,kFooterTop,kFooterBottom,RGB(74,71,109));
         std::wstring status,error,report; int progress;
         { std::lock_guard<std::mutex> lock(dataMutex_); status=status_; error=error_; report=holdReport_; progress=progress_; }
         if (!webReady_ && !webFailed_) {

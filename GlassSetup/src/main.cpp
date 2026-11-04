@@ -3613,16 +3613,12 @@ private:
         }
         // Paint the footer as part of the same back-buffer pass as the page.
         // Do not rely on WM_ERASEBKGND: Windows may give it a clipped update region.
-        WizardTheme::PaintFooterBar(dc,Scale(kWidth),Scale(kContentHeight),Scale(kHeight),
+        // Terminal pages have no progress strip, so align the footer's single divider
+        // with the bottom edge of the HTML content instead of drawing a second line.
+        const bool terminalPage=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
+        const int footerTop=terminalPage?kHtmlHeight:kContentHeight;
+        WizardTheme::PaintFooterBar(dc,Scale(kWidth),Scale(footerTop),Scale(kHeight),
             kFooterTop,kFooterBottom,RGB(74,71,109));
-        // На финальных страницах полоса прогресса скрыта: вместо неё — тонкая
-        // линия, отделяющая футер от контента.
-        if (!transitioning_ && (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error)) {
-            const RECT line=Box(0,kHtmlHeight,kWidth,1);
-            HBRUSH lineBrush=CreateSolidBrush(RGB(58,60,90));
-            FillRect(dc,&line,lineBrush);
-            DeleteObject(lineBrush);
-        }
         RenderFooterText(dc);
         if (buffered) BitBlt(screen,ps.rcPaint.left,ps.rcPaint.top,
             ps.rcPaint.right-ps.rcPaint.left,ps.rcPaint.bottom-ps.rcPaint.top,

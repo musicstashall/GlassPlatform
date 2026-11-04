@@ -675,7 +675,10 @@ assert "components-status.is-warning" in ui and "secureUxTheme" in ui and "compo
 assert "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
 assert "uninstaller" in ui and "MSI SecureUxTheme будет удалён" in ui
 assert "WizardTheme::PaintFooterBar(dc" in setup and "void PaintFooterBar(" in theme and "bufferedErase_" not in setup
-assert "Box(0,kHtmlHeight,kWidth,1)" in setup  # separator is one pixel high, not a footer-sized rectangle
+assert "const bool terminalPage=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error" in setup
+assert "const int footerTop=terminalPage?kHtmlHeight:kContentHeight" in setup and "Box(0,kHtmlHeight,kWidth,1)" not in setup
+assert "const bool progressPage=page_==Page::Stopping || page_==Page::Removing" in unins
+assert "const int footerTop=progressPage?kContentHeight:kHtmlHeight" in unins
 assert "text.find(part)!=std::wstring::npos" in setup  # error detail is not appended twice
 assert "GlassSettings" in unins and "secureUxTheme" in unins and "IDC_UNINS_SECUREUXTHEME" in unins
 assert "SecureUxTheme будет отключён" in unins and "Внешняя установка SecureUxTheme останется без изменений" in unins
@@ -688,9 +691,9 @@ assert "kInspectReady" in setup and "inspectThread_" in setup and "IDS_COMP_ANAL
 assert "componentsLoading" in setup and "comp-loading" in ui and "loading-donut" in ui
 assert "comp-reason-line:before" in ui and "componentsLoading" in ui
 
-# 2026-11-03 follow-up 7: final pages hide the progress strip and draw a thin
-# separator line instead, keeping the footer visually detached.
-assert "Box(0,kHtmlHeight,kWidth,1)" in setup and "page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error" in setup
+# 2026-11-03 follow-up 7: final pages hide the progress strip and align one
+# footer divider with the HTML content edge.
+assert "const int footerTop=terminalPage?kHtmlHeight:kContentHeight" in setup and "Box(0,kHtmlHeight,kWidth,1)" not in setup
 assert "page_==Page::RuntimeInstalling);" in setup and "page_==Page::RuntimeInstalling || page_==Page::Complete" not in setup
 
 # 2026-11-03 follow-up 8: on a clean install the reason line states requiredness —
