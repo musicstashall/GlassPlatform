@@ -28,6 +28,15 @@ assert len(ids.values()) == len(set(ids.values())), "duplicate resource/control 
 rc = read("res/GlassSetup.rc") + "\n" + read("res/ProductStrings.rcinc")
 unins_rc = read("GlassUnins/GlassUnins.rc")
 setup = read("src/main.cpp")
+# Project items do not import C++ declarations. Each UI translation unit must
+# include the policy headers itself, before using their namespaces.
+for source in (setup, read("GlassUnins/main.cpp")):
+    for policy_header, namespace in (("GlassProductPlan.h", "GlassProductPlan::"),
+                                     ("GlassProductUiPolicy.h", "GlassProductUiPolicy::")):
+        directive = '#include "' + policy_header + '"'
+        assert directive in source, f"Missing direct include: {policy_header}"
+        assert source.index(directive) < source.index(namespace), policy_header
+
 engine = read("src/InstallEngine.cpp")
 engine_h = read("src/InstallEngine.h")
 rollback = read("src/InstallSupport/GlassInstallRollback.cpp")

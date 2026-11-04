@@ -27,6 +27,8 @@
 #include "WizardTheme.h"
 #include "WizardAssets.h"
 #include "WizardProgress.h"
+#include "GlassProductPlan.h"
+#include "GlassProductUiPolicy.h"
 #include "InstallSupport/GlassInstallMsi.h"
 #include "InstallSupport/GlassInstallUtil.h"
 #include "InstallSupport/GlassProductInspect.h"
