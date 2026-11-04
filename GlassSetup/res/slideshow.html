@@ -323,7 +323,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .components-kicker:before{content:"";width:20px;height:1px;background:#c1b4ff}
 .components-title{margin:0 0 6px;color:#f5f4fc;font-size:29px;line-height:1.16;font-weight:350;letter-spacing:-.55px}
 .components-intro{margin:0;color:#aeb2c9;font-size:12.5px;line-height:1.45;max-width:820px}
-.components-stack{position:absolute;left:48px;top:166px;bottom:64px;width:904px;display:flex;flex-direction:column;gap:8px;z-index:3;pointer-events:auto;min-height:0}
+.components-stack{position:absolute;left:48px;top:188px;bottom:24px;width:904px;display:flex;flex-direction:column;gap:7px;z-index:3;pointer-events:auto;min-height:0}
 .components-list{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-color:#777296 #191b30;scrollbar-width:thin}
 .components-list::-webkit-scrollbar{width:8px}.components-list::-webkit-scrollbar-track{background:#191b30;border-radius:8px}.components-list::-webkit-scrollbar-thumb{background:#777296;border:2px solid #191b30;border-radius:8px}
 .components-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr;gap:8px}
@@ -368,13 +368,17 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .comp-badge.muted{border-color:#ffffff22;background:#ffffff0a;color:#a7acc4}
 .comp-desc{margin:0;color:#b2b6cd;font-size:11px;line-height:1.4}
 
-.components-status{display:flex;align-items:center;flex:0 0 86px;height:86px;min-height:86px;gap:12px;padding:7px 14px;border:1px solid #83d9a64d;border-left:3px solid #83d9a6;border-radius:12px;background:linear-gradient(120deg,#1b3b31c9,#171d2be8);box-shadow:inset 0 1px #ffffff0a,0 10px 24px #05060f44;pointer-events:auto;overflow:hidden}
+.components-status{display:flex;align-items:center;flex:0 0 78px;height:78px;min-height:78px;gap:12px;padding:5px 14px;border:1px solid #83d9a64d;border-left:3px solid #83d9a6;border-radius:12px;background:linear-gradient(120deg,#1b3b31c9,#171d2be8);box-shadow:inset 0 1px #ffffff0a,0 10px 24px #05060f44;pointer-events:auto;overflow:hidden}
 .components-status.is-warning{border-color:#f2c0784d;border-left-color:#f2c078;background:linear-gradient(120deg,#3d2d22cf,#1d1a2ee8)}
 .components-status[hidden]{display:none!important}
 .components-status-dot{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:#83d9a6;box-shadow:0 0 12px #83d9a6a8}
 .components-status.is-warning .components-status-dot{background:#f5c984;box-shadow:0 0 12px #f5c984a8}
-.components-status-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;margin:0;color:#d8f3e3;font-size:11.8px;line-height:1.45;white-space:pre-line}
+.components-status-copy{display:flex;flex:1 1 auto;min-width:0;flex-direction:column;gap:3px}
+.components-status-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;margin:0;color:#d8f3e3;font-size:11.6px;line-height:1.3;white-space:pre-line}
 .components-status.is-warning .components-status-text{color:#f5e9d4}
+.components-count{margin:0;color:#a8ddbd;font-size:9.5px;font-weight:700;line-height:1.2;letter-spacing:.15px}
+.components-status.is-warning .components-count{color:#f3d39e}
+.components-count[hidden]{display:none!important}
 /* Windows 11 certificate page: same scene as components; two exclusive choice cards + a facts card. */
 .cert-intro{margin:0 0 13px;color:#aeb2c9;font-size:12.5px;line-height:1.45}
 .cert-columns{position:absolute;left:48px;top:150px;width:904px;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;z-index:3;pointer-events:auto}
@@ -501,7 +505,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 <img id="components-banner" class="components-banner" alt="" aria-hidden="true"><div class="components-overlay"></div><div id="components-brand" class="native-brand">GlassPlatform</div>
 <div class="components-heading"><div id="components-kicker" class="components-kicker"></div><h1 id="components-title" class="components-title"></h1><p id="components-intro" class="components-intro"></p><button id="components-select-all" class="components-select-all" type="button">Выбрать всё</button></div>
 <div class="components-stack">
-<div id="components-status" class="components-status" role="status" aria-live="polite" aria-atomic="true"><span class="components-status-dot" aria-hidden="true"></span><p id="components-status-text" class="components-status-text"></p></div>
+<div id="components-status" class="components-status" role="status" aria-live="polite" aria-atomic="true"><span class="components-status-dot" aria-hidden="true"></span><div class="components-status-copy"><p id="components-status-text" class="components-status-text"></p><p id="components-count" class="components-count" hidden></p></div></div>
 <div class="components-list"><div id="components-grid" class="components-grid" role="group" aria-labelledby="components-title"></div>
 <div id="components-extra" class="components-extra"></div></div>
 </div></section>
@@ -601,20 +605,24 @@ function componentLock(title){
  return lock;
 }
 function updateComponentsStatus(){
- const status=document.getElementById('components-status'),text=document.getElementById('components-status-text'),button=document.getElementById('components-select-all');
+ const status=document.getElementById('components-status'),text=document.getElementById('components-status-text'),count=document.getElementById('components-count'),button=document.getElementById('components-select-all');
  if(!status||!text)return;
  const inputs=[...document.querySelectorAll('#components-grid input.comp-check,#components-extra input.comp-check')];
  const selectable=inputs.filter(input=>!input.disabled),allSelected=selectable.length>0&&selectable.every(input=>input.checked),uninstaller=hostState.appMode==='unins';
+ const products=inputs.filter(input=>input.dataset.component!=='cleanup');
+ const availableProducts=products.filter(input=>!input.disabled||input.dataset.locked==='1');
+ const selectedProducts=availableProducts.filter(input=>input.checked).length;
  if(button){button.hidden=uninstaller;button.disabled=selectable.length===0;button.textContent=allSelected?(locale==='ru'?'Снять необязательные':'Clear optional'):(locale==='ru'?'Выбрать всё':'Select all');}
+ if(count){const loading=hostState.componentsLoading===true;count.hidden=loading||availableProducts.length===0;count.textContent=uninstaller?(locale==='ru'?`К удалению: ${selectedProducts} из ${availableProducts.length} продуктов`:`To remove: ${selectedProducts} of ${availableProducts.length} products`):(locale==='ru'?`Выбрано: ${selectedProducts} из ${availableProducts.length} продуктов`:`Selected: ${selectedProducts} of ${availableProducts.length} products`);}
  status.classList.remove('is-warning');
  const warning=String(hostState.componentsWarning||'').trim();if(warning){status.classList.add('is-warning');text.textContent=warning;text.title=warning;return;}text.title='';
- if(uninstaller){const products=selectable.filter(input=>input.dataset.component!=='cleanup'&&input.dataset.component!=='secureUxTheme'),productsSelected=products.some(input=>input.checked),sutSelected=selectable.some(input=>input.dataset.component==='secureUxTheme'&&input.checked),cleanupSelected=selectable.some(input=>input.dataset.component==='cleanup'&&input.checked);text.textContent=locale==='ru'?(productsSelected&&sutSelected?'Отмеченные продукты будут удалены; MSI SecureUxTheme будет удалён и его интеграция отключена. Неотмеченные продукты останутся.':productsSelected?'Выбранные продукты будут удалены. Неотмеченные останутся без изменений.':sutSelected&&cleanupSelected?'MSI SecureUxTheme будет удалён, настройки очищены. Прочие продукты останутся без изменений.':sutSelected?'Продукт SecureUxTheme будет удалён. GlassSettings останется установленным.':cleanupSelected?'Выбрана только отдельная очистка настроек. Продукты останутся без изменений.':'Отметьте продукты для удаления. Очистка настроек выбирается отдельно.'):(productsSelected&&sutSelected?'Selected products will be removed; the SecureUxTheme MSI will be removed and its integration disabled. Unchecked products will remain.':productsSelected?'Selected products will be removed. Unchecked products will remain unchanged.':sutSelected&&cleanupSelected?'The SecureUxTheme MSI will be removed and settings cleaned. Other products will remain unchanged.':sutSelected?'The SecureUxTheme product will be removed. GlassSettings will remain installed.':cleanupSelected?'Only settings cleanup is selected. Products will remain unchanged.':'Select products to remove. Settings cleanup is a separate option.');return;}
+ if(uninstaller){const removable=selectable.filter(input=>input.dataset.component!=='cleanup'&&input.dataset.component!=='secureUxTheme'),productsSelected=removable.some(input=>input.checked),sutSelected=selectable.some(input=>input.dataset.component==='secureUxTheme'&&input.checked),cleanupSelected=selectable.some(input=>input.dataset.component==='cleanup'&&input.checked);text.textContent=locale==='ru'?(productsSelected&&sutSelected?'Отмеченные продукты будут удалены; MSI SecureUxTheme будет удалён и его интеграция отключена. Неотмеченные продукты останутся.':productsSelected?'Выбранные продукты будут удалены. Неотмеченные останутся без изменений.':sutSelected&&cleanupSelected?'MSI SecureUxTheme будет удалён, настройки очищены. Прочие продукты останутся без изменений.':sutSelected?'Продукт SecureUxTheme будет удалён. GlassSettings останется установленным.':cleanupSelected?'Выбрана только отдельная очистка настроек. Продукты останутся без изменений.':'Отметьте продукты для удаления. Очистка настроек выбирается отдельно.'):(productsSelected&&sutSelected?'Selected products will be removed; the SecureUxTheme MSI will be removed and its integration disabled. Unchecked products will remain.':productsSelected?'Selected products will be removed. Unchecked products will remain unchanged.':sutSelected&&cleanupSelected?'The SecureUxTheme MSI will be removed and settings cleaned. Other products will remain unchanged.':sutSelected?'The SecureUxTheme product will be removed. GlassSettings will remain installed.':cleanupSelected?'Only settings cleanup is selected. Products will remain unchanged.':'Select products to remove. Settings cleanup is a separate option.');return;}
  const selectedOptional=selectable.filter(input=>input.checked).length;
  const hasLocked=inputs.some(input=>input.dataset.locked==='1'&&input.checked);
  if(hostState.componentsLoading===true){text.textContent=locale==='ru'?'Подготавливаем список компонентов…':'Preparing the component list…';return;}
  if(allSelected){text.textContent=locale==='ru'?'Выбран полный комплект компонентов.':'The complete set of components is selected.';}
- else if(hasLocked&&selectedOptional===0){text.textContent=locale==='ru'?'Выбран минимальный комплект, а не полный набор продуктов. Дополнительные компоненты можно выбрать выше.':'The minimal set is selected, not the full product set. Add components above if needed.';}
- else{text.textContent=locale==='ru'?'Выбран неполный комплект компонентов. Дополнительные продукты можно отметить выше.':'A partial component set is selected. Select additional products above if needed.';}
+ else if(hasLocked&&selectedOptional===0){text.textContent=locale==='ru'?'Выбран минимальный комплект, а не полный набор продуктов. Дополнительные продукты можно продолжить выбирать.':'The minimal set is selected, not the full product set. You can continue selecting additional products.';}
+ else{text.textContent=locale==='ru'?'Выбран неполный комплект компонентов. Дополнительные продукты можно продолжить выбирать.':'A partial component set is selected. You can continue selecting additional products.';}
 }
 function renderComponentsPanel(){
  const grid=document.getElementById('components-grid'),extra=document.getElementById('components-extra'),status=document.getElementById('components-status'),statusText=document.getElementById('components-status-text'),selectAll=document.getElementById('components-select-all');

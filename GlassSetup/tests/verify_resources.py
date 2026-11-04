@@ -650,7 +650,9 @@ assert "не требуется" in ui and "tone-update" in ui and "tone-repair"
 assert "comp-slim" in ui and "components-extra" in ui and "components-stack" in ui
 assert "components-select-all" in ui and "Снять необязательные" in ui
 assert "components-list{flex:1 1 auto;min-height:0;overflow-y:auto" in ui
-assert ".components-status{display:flex" in ui and "flex:0 0 86px;height:86px" in ui
+assert ".components-status{display:flex" in ui and "flex:0 0 78px;height:78px" in ui
+assert "components-count" in ui and "availableProducts.length" in ui and "selectedProducts" in ui
+assert "top:188px;bottom:24px" in ui and "Дополнительные продукты можно продолжить выбирать" in ui
 assert ".components-status.is-warning" in ui and "Выбран минимальный комплект" in ui and "Выбран неполный комплект" in ui
 assert "input.dataset.locked=item.locked?'1':'0'" in ui and "dispatchEvent(new Event('change'" in ui
 assert "components-status.is-warning" in ui and "secureUxTheme" in ui and "component:secureUxTheme" in setup

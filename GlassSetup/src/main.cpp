@@ -1859,13 +1859,12 @@ private:
         const bool sutUpdate=sutCondition==GlassProducts::ProductCondition::UpdateAvailable;
         const bool sutDamaged=sutCondition==GlassProducts::ProductCondition::Damaged;
         const bool sutDisabled=sutExternal||sutConflict;
+        // SecureUxTheme is a regular selectable product: use the same localized
+        // action badge as other products instead of a special "optional add-on" tag.
+        // Keep exceptional badges only when an external install/conflict blocks action.
         const UINT sutBadge=sutExternal?IDS_COMP_SUT_BADGE_EXTERNAL:sutConflict?IDS_COMP_SUT_BADGE_CONFLICT:
-            sutUpdate?IDS_COMP_BADGE_UPDATE:sutDamaged?IDS_COMP_BADGE_REPAIR:
-            (sutState==GlassInstallUtil::SecureUxThemeState::Active?IDS_COMP_SUT_BADGE_ACTIVE:
-            (sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending||sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending?IDS_COMP_SUT_BADGE_PENDING:IDS_COMP_SUT_BADGE_AVAILABLE));
-        const wchar_t* sutTone=sutExternal||sutConflict||sutDamaged?L"repair":sutUpdate?L"update":
-            sutState==GlassInstallUtil::SecureUxThemeState::Active?L"keep":
-            (sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending||sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending?L"update":L"install");
+            ComponentBadgeId(sutCondition);
+        const wchar_t* sutTone=sutExternal||sutConflict?L"repair":ComponentBadgeTone(sutCondition);
         const UINT sutStateId=sutExternal||sutConflict?IDS_COMP_SUT_STATE_EXTERNAL:
             sutUpdate?IDS_INSPECT_VERSION:
             (sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending||sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending?IDS_COMP_SUT_STATE_PENDING:
