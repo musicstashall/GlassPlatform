@@ -1468,7 +1468,7 @@ private:
                     if (!rootsChecked || !GlassInstallUtil::QuerySecureUxThemeState(startupRoots.x64,startupRoots.x86,
                             &result.secureUxThemeState,&sutError)) {
                         result.secureUxThemeState=GlassInstallUtil::SecureUxThemeState::Conflict;
-                        InstallLog::Line(L"SecureUxTheme state query failed: "+sutError);
+                        InstallLog::LineFormat(L"SecureUxTheme state query failed: %s",sutError.c_str());
                     }
                 }
                 if (!startupStop_.load(std::memory_order_acquire)) {

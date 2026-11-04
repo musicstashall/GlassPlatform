@@ -671,7 +671,7 @@ bool InstallEngine::Start(
     bool legacySutPayload=false;
     if ((selection_.secureUxTheme || selection_.glassSettings) && settingsInstalled && !sutMsiInstalled) {
         GlassInstallUtil::SecureUxThemeState sutState=GlassInstallUtil::SecureUxThemeState::Unavailable;
-        if (GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,sutState,nullptr))
+        if (GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&sutState,nullptr))
             legacySutPayload=sutState==GlassInstallUtil::SecureUxThemeState::Active ||
                 sutState==GlassInstallUtil::SecureUxThemeState::Inactive ||
                 sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending ||
