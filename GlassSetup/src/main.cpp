@@ -3618,7 +3618,7 @@ private:
         // На финальных страницах полоса прогресса скрыта: вместо неё — тонкая
         // линия, отделяющая футер от контента.
         if (!transitioning_ && (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error)) {
-            const RECT line=Box(0,kHtmlHeight,kWidth,kHtmlHeight+1);
+            const RECT line=Box(0,kHtmlHeight,kWidth,1);
             HBRUSH lineBrush=CreateSolidBrush(RGB(58,60,90));
             FillRect(dc,&line,lineBrush);
             DeleteObject(lineBrush);
