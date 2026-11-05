@@ -177,7 +177,8 @@ public sealed class PlatformPresenceService : IDisposable
                     Autorun: (GlassAutorunUiState)(arch == GlassPlatformArch.X64
                         ? snap.GlassAutorunStateX64 : snap.GlassAutorunStateX86)),
                 PlatformSchedulerKind.OpenGlass => new PlatformTaskState(
-                    TaskExists: snap.OgLegacyTaskExists != 0 || snap.OgCurrentTaskExists != 0,
+                    TaskExists: snap.OgLegacyTaskExists != 0 || snap.OgCurrentTaskExists != 0
+                        || snap.OpenGlassOrchestration != (int)NativeHostInterop.NativeOpenGlassHostUiState.NoTask,
                     Lifecycle: snap.OpenGlassOrchestration == (int)NativeHostInterop.NativeOpenGlassHostUiState.Running
                         ? NativeHostInterop.InjectLifecycleUi.Running
                         : NativeHostInterop.InjectLifecycleUi.Idle,
@@ -200,7 +201,7 @@ public sealed class PlatformPresenceService : IDisposable
                 Lifecycle: NativeHostInterop.QueryInjectLifecycleUi(arch),
                 Autorun: GlassPlatformService.QueryGlassAutorunUiState(arch)),
             PlatformSchedulerKind.OpenGlass => new PlatformTaskState(
-                TaskExists: NativeHostInterop.LegacyHostTaskExists(),
+                TaskExists: NativeHostInterop.OpenGlassOrchestrationInstalled(),
                 Lifecycle: NativeHostInterop.QueryInjectLifecycleUi(GlassPlatformNames.NativeArch),
                 Autorun: MapOgOrchestrationToAutorun(NativeHostInterop.QueryOpenGlassHostUiState())),
             _ => PlatformTaskState.Default

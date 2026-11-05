@@ -1263,16 +1263,14 @@ public sealed partial class HomePage : Page
     private bool _glassPlatformSuppress;
     private bool _openGlassBusy;
     private bool _glassPlatformBusy;
-    private DateTime _lastRefreshSystemCardUtc = DateTime.MinValue;
 
     private void RefreshSystemCard()
     {
         if (_systemCard is null) return;
         ApplyPlatformHomeVisibility();
 
-        if ((DateTime.UtcNow - _lastRefreshSystemCardUtc).TotalMilliseconds < 2000)
-            return;
-        _lastRefreshSystemCardUtc = DateTime.UtcNow;
+        // Presence events may be delivered only once per state change. Do not
+        // drop them behind a timer throttle; the fingerprint already deduplicates UI.
 
         var ogLine = HomeStatusSummary.OpenGlassLine();
         var ogColor = HomeStatusSummary.OpenGlassStatusColor();
@@ -1281,13 +1279,14 @@ public sealed partial class HomePage : Page
         bool ogRunning;
         if (presence.Revision > 0)
         {
-            ogTaskExists = presence.OgLegacyTaskExists != 0 || presence.OgCurrentTaskExists != 0;
+            ogTaskExists = presence.OgLegacyTaskExists != 0 || presence.OgCurrentTaskExists != 0
+                || presence.OpenGlassOrchestration != (int)NativeHostInterop.NativeOpenGlassHostUiState.NoTask;
             ogRunning = presence.OpenGlassOrchestration
                 == (int)NativeHostInterop.NativeOpenGlassHostUiState.Running;
         }
         else
         {
-            ogTaskExists = OpenGlassHostService.LegacyHostTaskExists();
+            ogTaskExists = OpenGlassHostService.OrchestrationInstalled();
             ogRunning = OpenGlassHostService.QueryOpenGlassHostUiState() == OpenGlassHostUiState.Running;
         }
 
@@ -1492,7 +1491,7 @@ public sealed partial class HomePage : Page
         var want = _openGlassSwitch.IsOn;
         var st = OpenGlassHostService.QueryOpenGlassHostUiState();
 
-        if (!OpenGlassHostService.LegacyHostTaskExists())
+        if (!OpenGlassHostService.OrchestrationInstalled())
         {
             _openGlassSuppress = true;
             _openGlassSwitch.IsOn = st == OpenGlassHostUiState.Running;
@@ -1504,7 +1503,7 @@ public sealed partial class HomePage : Page
         {
             if (st == OpenGlassHostUiState.Running)
                 return;
-            if (st != OpenGlassHostUiState.Ready)
+            if (st is not OpenGlassHostUiState.Ready and not OpenGlassHostUiState.Disabled)
             {
                 _openGlassSuppress = true;
                 _openGlassSwitch.IsOn = false;

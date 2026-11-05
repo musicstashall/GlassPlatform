@@ -358,7 +358,7 @@ public sealed class PlatformSchedulerRow
                 return;
             }
 
-            if (st == OpenGlassHostUiState.Ready)
+            if (st is OpenGlassHostUiState.Ready or OpenGlassHostUiState.Disabled)
             {
                 _ = RunOpenGlassStartAsync();
                 return;
@@ -522,12 +522,12 @@ public sealed class PlatformSchedulerRow
             }
             else
             {
-                await Task.Run(DeleteTask).ConfigureAwait(true);
-                if (Kind == PlatformSchedulerKind.OpenGlass)
+                operationOk = await Task.Run(DeleteTask).ConfigureAwait(true);
+                if (Kind == PlatformSchedulerKind.OpenGlass && operationOk)
                     await ApplyOpenGlassStopPolicyAfterDeleteAsync().ConfigureAwait(true);
                 // Проверка вне UI-потока: прямой запрос задачи/службы на UI-потоке читает
                 // кэш планировщика и может вернуть уже удалённое состояние.
-                operationOk = !await Task.Run(() => QueryDirectState().TaskExists).ConfigureAwait(true);
+                operationOk = operationOk && !await Task.Run(() => QueryDirectState().TaskExists).ConfigureAwait(true);
             }
 
             PlatformPresenceService.Instance.RefreshSnapshotSynchronouslyFromDirectQueries();
@@ -557,15 +557,11 @@ public sealed class PlatformSchedulerRow
         }
     }
 
-    private void DeleteTask()
+    private bool DeleteTask()
     {
         if (Kind == PlatformSchedulerKind.Glass)
-        {
-            GlassPlatformService.TryRemoveGlassAutorunTaskWithStop(EffectiveGlassArch);
-            return;
-        }
-
-        OpenGlassInstallService.Uninstall();
+            return GlassPlatformService.TryRemoveGlassAutorunTaskWithStop(EffectiveGlassArch);
+        return OpenGlassInstallService.Uninstall();
     }
 
     private void OnMenuToggleClick()
@@ -588,10 +584,10 @@ public sealed class PlatformSchedulerRow
             return;
         }
 
-        OpenGlassInstallService.Uninstall();
-        _ = ApplyOpenGlassStopPolicyAfterDeleteAsync();
-        Refresh();
+        if (_busy) return;
+        BeginInstallGateOperation(false);
         StateChanged?.Invoke(this, EventArgs.Empty);
+        _ = ApplyInstallToggleAsync(false);
     }
 
     private async Task RemoveGlassTaskAsync()

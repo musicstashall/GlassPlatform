@@ -15,18 +15,16 @@ public static class OpenGlassInstallService
         return OpenGlassHostService.TryInstallLegacyHost();
     }
 
-    public static void Uninstall()
+    public static bool Uninstall()
     {
-        // Служба удаляется всегда, когда оркестрация установлена: имя службы известно,
-        // путь к exe для DeleteService не нужен. Прежняя проверка OpenGlassHostPath
-        // оставляла службу на месте — тумблер на странице «Система» не выключался.
-        if (NativeHostInterop.OpenGlassOrchestrationInstalled())
-        {
-            NativeHostInterop.StopOpenGlassService();
-            _ = NativeHostInterop.RemoveOpenGlassService();
-        }
-
+        using var busy = OpenGlassLifecycleBusy.TryBegin();
+        if (busy is null) return false;
+        // The Native call waits for SERVICE_STOPPED before DeleteService and
+        // closes its handle before waiting for actual removal from SCM.
+        var serviceRemoved = NativeHostInterop.RemoveOpenGlassService();
         OpenGlassHostService.StopAndRemoveLegacyHostTask();
+        NativeHostInterop.InvalidateOGCache();
+        return serviceRemoved && !OpenGlassHostService.OrchestrationInstalled();
     }
 
     private static bool TryInstallService(string exePath)

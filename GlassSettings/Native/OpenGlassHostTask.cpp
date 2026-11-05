@@ -15,6 +15,9 @@
 
 #pragma comment(lib, "oleaut32.lib")
 
+extern "C" BOOL WINAPI GlassSettings_StartOpenGlassService() noexcept;
+extern "C" BOOL WINAPI GlassSettings_StopOpenGlassService() noexcept;
+
 namespace
 {
     constexpr wchar_t kOgHostTaskNameCurrent[] = L"OpenGlass Host";
@@ -137,19 +140,7 @@ namespace
         if (Shared::OpenGlassHostState::IsServiceRunning()
             || Shared::OpenGlassHostState::ServiceInstalled())
         {
-            SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-            if (!scm)
-                return false;
-            SC_HANDLE svc = OpenServiceW(
-                scm,
-                Shared::OpenGlassHostState::kOpenGlassHostServiceName,
-                SERVICE_START | SERVICE_QUERY_STATUS);
-            CloseServiceHandle(scm);
-            if (!svc)
-                return false;
-            const BOOL started = StartServiceW(svc, 0, nullptr);
-            CloseServiceHandle(svc);
-            return started || GetLastError() == ERROR_SERVICE_ALREADY_RUNNING;
+            return GlassSettings_StartOpenGlassService() != FALSE;
         }
 
         ComInitGuard com;
@@ -216,23 +207,7 @@ extern "C"
     {
         if (Shared::OpenGlassHostState::ServiceInstalled())
         {
-            SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-            if (scm)
-            {
-                SC_HANDLE svc = OpenServiceW(
-                    scm,
-                    Shared::OpenGlassHostState::kOpenGlassHostServiceName,
-                    SERVICE_STOP | SERVICE_QUERY_STATUS);
-                CloseServiceHandle(scm);
-                if (svc)
-                {
-                    SERVICE_STATUS status{};
-                    (void)ControlService(svc, SERVICE_CONTROL_STOP, &status);
-                    CloseServiceHandle(svc);
-                    if (WaitForOpenGlassState(false, 7000))
-                        return TRUE;
-                }
-            }
+            return GlassSettings_StopOpenGlassService() != FALSE;
         }
 
         ComInitGuard com;
