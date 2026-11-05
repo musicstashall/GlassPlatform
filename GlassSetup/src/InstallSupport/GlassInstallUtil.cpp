@@ -1126,17 +1126,9 @@ std::wstring RundllPathForTaskArch(GlassShared::GlassPlatformTask::PlatformArch 
     return std::wstring(winDir) + L"\\System32\\rundll32.exe";
 }
 
-bool PeMatches(const std::wstring& path, WORD machine, const char* exportName) noexcept {
-    HANDLE file=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
-        nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
-    if (file==INVALID_HANDLE_VALUE) return false;
-    LARGE_INTEGER size{};
-    if (!GetFileSizeEx(file,&size) || size.QuadPart<512 || size.QuadPart>64ll*1024*1024) { CloseHandle(file); return false; }
-    const size_t length=static_cast<size_t>(size.QuadPart);
-    HANDLE map=CreateFileMappingW(file,nullptr,PAGE_READONLY,0,0,nullptr); CloseHandle(file);
-    if (!map) return false;
-    const auto* base=static_cast<const BYTE*>(MapViewOfFile(map,FILE_MAP_READ,0,0,0)); CloseHandle(map);
-    if (!base) return false;
+bool PeBufferMatches(const void* data, size_t length, WORD machine, const char* exportName) noexcept {
+    if (!data || length<512 || length>64u*1024*1024) return false;
+    const auto* base=static_cast<const BYTE*>(data);
     auto bounds=[&](size_t offset,size_t bytes) { return offset<=length && bytes<=length-offset; };
     bool ok=false;
     if (bounds(0,sizeof(IMAGE_DOS_HEADER))) {
@@ -1195,8 +1187,39 @@ bool PeMatches(const std::wstring& path, WORD machine, const char* exportName) n
             }
         }
     }
+    return ok;
+}
+
+bool PeMatches(const std::wstring& path, WORD machine, const char* exportName) noexcept {
+    HANDLE file=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+        nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if (file==INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(file,&size) || size.QuadPart<512 || size.QuadPart>64ll*1024*1024) { CloseHandle(file); return false; }
+    const size_t length=static_cast<size_t>(size.QuadPart);
+    HANDLE map=CreateFileMappingW(file,nullptr,PAGE_READONLY,0,0,nullptr); CloseHandle(file);
+    if (!map) return false;
+    const auto* base=static_cast<const BYTE*>(MapViewOfFile(map,FILE_MAP_READ,0,0,0)); CloseHandle(map);
+    if (!base) return false;
+    const bool ok=PeBufferMatches(base,length,machine,exportName);
     UnmapViewOfFile(base);
     return ok;
+}
+
+bool ResourcePeMatches(HINSTANCE instance, UINT resourceId, WORD machine, const char* exportName) noexcept {
+    // RCDATA contains the raw on-disk PE layout (not an executable image).
+    // Do not extract it, load a DLL, or consult any installed Settings path.
+    if (!instance || !resourceId) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
+    HRSRC resource=FindResourceW(instance,MAKEINTRESOURCEW(resourceId),RT_RCDATA);
+    if (!resource) return false;
+    const DWORD length=SizeofResource(instance,resource);
+    if (length<512 || length>64u*1024*1024) { SetLastError(ERROR_INVALID_DATA); return false; }
+    HGLOBAL loaded=LoadResource(instance,resource);
+    if (!loaded) return false;
+    const void* data=LockResource(loaded);
+    if (!data) { SetLastError(ERROR_RESOURCE_DATA_NOT_FOUND); return false; }
+    if (!PeBufferMatches(data,length,machine,exportName)) { SetLastError(ERROR_BAD_EXE_FORMAT); return false; }
+    return true;
 }
 
 namespace {

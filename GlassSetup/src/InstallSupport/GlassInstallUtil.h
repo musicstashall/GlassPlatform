@@ -23,7 +23,10 @@ bool ExtractResourceToFile(
     const std::wstring& destPath,
     const std::atomic_bool* cancelled = nullptr) noexcept;
 
+// Both file and embedded-resource checks use the same bounds-checked raw PE parser.
+bool PeBufferMatches(const void* data, size_t length, WORD machine, const char* exportName) noexcept;
 bool PeMatches(const std::wstring& path, WORD machine, const char* exportName) noexcept;
+bool ResourcePeMatches(HINSTANCE instance, UINT resourceId, WORD machine, const char* exportName) noexcept;
 // Protocol marker and rundll32 entry point for exact installer-selected paths.
 inline constexpr char kInstallerShellExport[] = "GlassSettings_ShellExtRegisterSetupV1W";
 inline constexpr char kInstallerSignerTrustExport[] = "GlassSettings_ShellSignerTrustSetupV1W";

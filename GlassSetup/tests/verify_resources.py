@@ -143,6 +143,13 @@ native_reference = section(project, '<ProjectReference Include="..\\GlassSetting
 assert "<LinkLibraryDependencies>false</LinkLibraryDependencies>" in native_reference
 assert '<ResourceCompile Include="res\\GlassSetup.rc"' in project
 assert "VerifyEmbeddedNativePayload()" in engine and "kNativeInstallerProtocolExport" in engine
+preflight=section(engine,"bool InstallEngine::VerifyEmbeddedNativePayload()", "bool InstallEngine::RecheckSnapshottedProduct")
+assert "ResourcePeMatches(instance_,resource,machine,marker)" in preflight
+assert "IDR_UNLOCKER_X86" in preflight and "IDR_UNLOCKER_X64" in preflight
+assert "NativeDllForArch(" not in preflight and "EmbeddedNativeDllX86(" not in preflight
+assert "ExtractResourceToFile(" not in preflight
+assert "bool PeBufferMatches(" in util and "bool ResourcePeMatches(" in util
+
 native = (repo / "GlassSettings/Native/InjectProcessMapNative.cpp").read_text(encoding="utf-8")
 protocol = (repo / "GlassShared/include/InjectModuleScan.h").read_text(encoding="utf-8")
 assert "GlassSettings_InstallerScanProtocolV2" in native and "GlassSettings_InstallerScanProtocolV2" in protocol

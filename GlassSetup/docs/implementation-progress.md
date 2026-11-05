@@ -1,3 +1,11 @@
+# Исправление preflight встроенного Native — 2026-11-05
+
+Найдена регрессия после installed-only ограничения NativeDllForArch: VerifyEmbeddedNativePayload проверял x86 из bundle, а x64 через resolver уже установленного Settings. На чистой системе или при старом установленном helper получалась ложная ошибка «встроенная DLL отсутствует/несовместима», независимо от наличия свежих Build/x64 и Build/x86 DLL и правильного порядка сборки.
+
+Теперь обе архитектуры проверяются напрямую из RCDATA IDR_UNLOCKER_X86/X64 запущенного GlassSetup.exe, без извлечения/исполнения DLL и без install-root зависимости. Файловый и ресурсный путь используют один ограниченный по размерам PE/export parser. Installed-only resolver для SecureUxTheme не ослаблен. Проверки всё ещё идут до snapshot/остановки хостов/запуска MSI; добавлены resource ID, ожидаемая architecture, конкретный PE/export check и Win32 error в журнале вместо безусловного совета пересобрать решение.
+
+Регрессионные тесты: настоящий preflight с mock только встроенных ресурсов (никакого установленного resolver в тесте), обе архитектуры, отсутствие/ошибочный PE/экспорты, отмена; настоящий PE parser через file/buffer/resource на x86/x64 synthetic fixtures с ASan/UBSan, включая случай «строка есть, но не экспортируется». Resource/source smoke PASS. InstallEngine и InstallUtil скомпилированы в Windows GNU x86 objects. Это не MSVC/WiX сборка и не Windows runtime проверка итогового EXE. Порядок Release|x64 → Release|x86 не изменён.
+
 # Settings: регистрация вместо MSI install/remove — 2026-11-05
 
 В существующем GlassSettings.Native восстановлены только операции включения/отключения IFEO/COM. Новых DLL/CA нет. Settings больше не запускает msiexec, не меняет MSI/ARP, не копирует/не удаляет системные DLL и не планирует cleanup task. Доступ к WRP registry values — scoped backup/restore privileges, без takeover owner/DACL. До записи проверяются все значения; rollback сохраняет исходные типы/данные и не затирает конкурентные чужие правки. Он in-process, не crash-durable. Включение проверяет/удерживает полный native/WOW payload; отключение активного механизма требует фактического stock style. До reboot уже загруженные хуки могут продолжать работать.

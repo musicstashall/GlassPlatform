@@ -454,7 +454,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             bool ok = priorStateOk && !self->IsCancelRequested() && self->ExtractPayload(self->instance_);
             bool snapshotFailed = !priorStateOk && !self->IsCancelRequested();
 
-            // Check the embedded helper files without loading or executing them.
+            // Check the embedded helper resources without extraction or DLL execution.
             // A stale DLL must be diagnosed before stopping hosts or changing MSI.
             if (ok && !self->IsCancelRequested()) ok = self->VerifyEmbeddedNativePayload();
 
@@ -1160,36 +1160,32 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
 
 bool InstallEngine::VerifyEmbeddedNativePayload() noexcept {
     const bool ru = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
-    auto check = [&](const std::wstring& path, WORD machine, const wchar_t* arch) {
-        if (IsCancelRequested()) return false;
-        // Parsing the export table does not load the DLL or run DllMain. The
-        // normal monitoring session still begins only after the Settings MSI.
-        if (!path.empty() && GlassInstallUtil::PeMatches(path, machine,
-                Shared::InjectModuleScan::kNativeInstallerProtocolExport) &&
-            GlassInstallUtil::PeMatches(path, machine, GlassInstallUtil::kInstallerShellExport)) {
-            InstallLog::LineFormat(L"Native preflight %s: scan and installer-shell exports present (%s)", arch, path.c_str());
-            return true;
+    auto check = [&](UINT resource, WORD machine, const wchar_t* arch) {
+        const char* checks[]={nullptr,Shared::InjectModuleScan::kNativeInstallerProtocolExport,
+            GlassInstallUtil::kInstallerShellExport};
+        for (const char* marker:checks) {
+            if (IsCancelRequested()) return false;
+            if (GlassInstallUtil::ResourcePeMatches(instance_,resource,machine,marker)) continue;
+            const DWORD error=GetLastError();
+            InstallLog::LineFormat(L"Native preflight %s: resource=%u expectedMachine=0x%04x check=%hs failed, error=%lu",
+                arch,resource,machine,marker?marker:"PE architecture/header",error);
+            if (!IsCancelRequested()) {
+                const std::wstring message = ru
+                    ? std::wstring(L"Не удалось проверить встроенный ресурс GlassSettings.Native ") + arch +
+                        L" (ID " + std::to_wstring(resource) + L"). Подробности проверки PE/экспортов — в журнале. Установленные продукты не изменялись."
+                    : std::wstring(L"Could not validate the embedded GlassSettings.Native ") + arch +
+                        L" resource (ID " + std::to_wstring(resource) + L"). See the log for the PE/export check details. Installed products were not changed.";
+                SetFailure(message,error);
+            }
+            return false;
         }
-        InstallLog::LineFormat(L"Native preflight %s: embedded DLL missing, unreadable or missing an installer export (path=%s)",
-            arch, path.empty() ? L"<none>" : path.c_str());
-        if (!IsCancelRequested()) {
-            const std::wstring message = ru
-                ? std::wstring(L"Встроенная библиотека GlassSettings.Native ") + arch +
-                    L" отсутствует или несовместима с установщиком. Проверьте журнал и пересоберите решение: Release | x64, затем Release | x86. Установленные продукты не изменялись."
-                : std::wstring(L"The embedded GlassSettings.Native ") + arch +
-                    L" is missing or incompatible with this installer. Check the log and rebuild the solution: Release | x64, then Release | x86. Installed products were not changed.";
-            SetFailure(message, 0);
-        }
-        return false;
+        InstallLog::LineFormat(L"Native preflight %s: embedded resource=%u, PE architecture and installer exports OK",arch,resource);
+        return true;
     };
-
-    const std::wstring x86 = GlassInstallUtil::EmbeddedNativeDllX86();
-    if (!check(x86, IMAGE_FILE_MACHINE_I386, L"x86")) return false;
-    if (scanNativeX64_) {
-        if (IsCancelRequested()) return false;
-        const std::wstring x64 = GlassInstallUtil::NativeDllForArch(GP::PlatformArch::X64, x64Dir_, x86Dir_);
-        if (!check(x64, IMAGE_FILE_MACHINE_AMD64, L"x64")) return false;
-    }
+    // Validate the installer bundle, not the target installation. In particular,
+    // a clean machine has no installed x64 Settings helper before its MSI runs.
+    if (!check(IDR_UNLOCKER_X86,IMAGE_FILE_MACHINE_I386,L"x86")) return false;
+    if (scanNativeX64_ && !check(IDR_UNLOCKER_X64,IMAGE_FILE_MACHINE_AMD64,L"x64")) return false;
     return !IsCancelRequested();
 }
 
