@@ -63,7 +63,7 @@ inline std::wstring WarningText(GlassProductPlan::Warning warning, bool ru, bool
     platformWarning(W::NoPlatform64,true);
     platformWarning(W::NoPlatform32,false);
     add(W::ManualSettings,L"Без GlassSettings потребуется вручную редактировать реестр и управлять службами и задачами. Продолжение разрешено.",L"Without GlassSettings, registry settings, services and scheduled tasks must be managed manually. You can continue.");
-    add(W::ManualOpenGlass,L"Без GlassSettings параметры OpenGlass потребуется редактировать вручную в реестре, а службами и задачами — управлять вручную. Продолжение разрешено.",L"Without GlassSettings, OpenGlass registry settings, services and scheduled tasks must be managed manually. You can continue.");
+    add(W::ManualOpenGlass,L"Без GlassSettings настройка OpenGlass и управление его службами и задачами выполняются вручную. Продолжение разрешено.",L"Without GlassSettings, OpenGlass registry settings, services and scheduled tasks must be managed manually. You can continue.");
     add(W::ManualVisualStyles,L"SecureUxTheme остаётся без GlassSettings. Вы принимаете ответственность за ручной контроль визуальных стилей и перезапуск Windows. Перед удалением SecureUxTheme необходимо вернуть штатный визуальный стиль.",L"SecureUxTheme will operate without GlassSettings. You accept responsibility for managing visual styles and restarting Windows manually. Restore a stock visual style before removing SecureUxTheme.");
     add(W::DamageRetained,L"Повреждённый продукт остаётся без восстановления.",L"A damaged product is being retained without repair.");
     return text;

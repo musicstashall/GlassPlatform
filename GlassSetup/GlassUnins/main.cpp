@@ -394,13 +394,17 @@ private:
             return;
         }
         x64Dir_=roots.x64; x86Dir_=roots.x86; openGlassDir_=roots.openGlass;
-        if(installed_.settings || installed_.secureUxTheme){
+        if(installed_.settings){
             std::wstring sutError;
             if(!GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&secureUxThemeState_,&sutError)){
                 secureUxThemeState_=GlassInstallUtil::SecureUxThemeState::Conflict;
                 LogLine(L"SecureUxTheme state query failed: "+sutError);
             }
             installed_.secureUxTheme=installed_.secureUxTheme||SecureUxThemeManaged();
+        }
+        if(!installed_.settings && installed_.secureUxTheme) {
+            secureUxThemeState_=GlassInstallUtil::SecureUxThemeState::Unavailable;
+            LogLine(L"SecureUxTheme: GlassSettings absent; MSI removal without visual-style helper/preflight by user policy");
         }
         NormalizeSelection();
         LogLine(L"Roots x64="+x64Dir_+L" ("+roots.sourceX64+L") x86="+x86Dir_+L" ("+
@@ -668,7 +672,7 @@ private:
         // any host; the agreed safety check prevents touching paths outside
         // the corresponding InstallPath.
         GlassProfileMaintenance::Inventory cleanupProfiles;
-        if(chosen.secureUxTheme) {
+        if(chosen.secureUxTheme && installed_.settings) {
             std::wstring detail;
             if(!cleanupProfiles.PreflightStyles(detail)) {
                 SetError(T(L"SecureUxTheme сохранён: подготовка визуальных стилей всех профилей не подтверждена. ",L"SecureUxTheme retained: visual-style preparation for every profile is unverified. ")+detail);
@@ -906,7 +910,7 @@ private:
             return cancelledResult();
         removalStarted_.store(true,std::memory_order_release);
         if (window) PostMessageW(window,kWorkerHold,static_cast<WPARAM>(Page::Removing),0);
-        if (chosen.secureUxTheme && SecureUxThemeManaged()) {
+        if (chosen.secureUxTheme && installed_.settings && SecureUxThemeManaged()) {
             std::wstring styleDetail;
             if(!cleanupProfiles.PreflightStyles(styleDetail)) {
                 SetError(T(L"SecureUxTheme сохранён: состояние профилей изменилось. ",L"SecureUxTheme retained: profile state changed. ")+styleDetail);

@@ -55,6 +55,7 @@ struct ACL {DWORD AceCount=0;};using PACL=ACL*;
 struct SECURITY_ATTRIBUTES {DWORD length;PSECURITY_DESCRIPTOR descriptor;BOOL inherit;};
 DWORD lastError=0;DWORD ownerSid=2;ACL acl;ACCESS_ALLOWED_ACE ace;
 std::map<std::wstring,DWORD> files;
+std::map<std::wstring,bool> createdWithPrivateAcl;
 std::wstring denied;int ownedCreateCalls=0;
 DWORD GetLastError(){return lastError;}void SetLastError(DWORD e){lastError=e;}
 int swprintf_s(wchar_t* p,std::size_t n,const wchar_t* f,...){va_list a;va_start(a,f);int r=vswprintf(p,n,f,a);va_end(a);return r;}
@@ -65,7 +66,11 @@ bool ConvertSidToStringSidW(PSID,LPWSTR* out){static wchar_t sid[]=L"S-1-test-us
 HRESULT SHGetKnownFolderPath(int,DWORD,void*,LPWSTR* out){static wchar_t p[]=L"C:\\ProgramData";*out=p;return 0;}
 bool FAILED(HRESULT h){return h<0;}
 DWORD GetFileAttributesW(const wchar_t* p){auto i=files.find(p);if(i==files.end()){lastError=2;return INVALID_FILE_ATTRIBUTES;}return i->second;}
-DWORD GetNamedSecurityInfoW(LPWSTR,DWORD,DWORD,PSID* owner,void*,PACL* out,void*,PSECURITY_DESCRIPTOR* sd){*owner=&ownerSid;*out=&acl;*sd=nullptr;return 0;}
+DWORD GetNamedSecurityInfoW(LPWSTR path,DWORD,DWORD,PSID* owner,void*,PACL* out,void*,PSECURITY_DESCRIPTOR* sd){
+ static DWORD admin=1;static ACL protectedAcl;
+ if(createdWithPrivateAcl[path]){*owner=&admin;*out=&protectedAcl;}else{*owner=&ownerSid;*out=&acl;}
+ *sd=nullptr;return 0;
+}
 bool CreateWellKnownSid(DWORD kind,void*,void* p,DWORD*){*static_cast<DWORD*>(p)=kind;return true;}
 bool EqualSid(PSID a,PSID b){return *static_cast<DWORD*>(a)==*static_cast<DWORD*>(b);}
 bool GetAce(PACL,DWORD,void** p){*p=&ace;return true;}
@@ -74,7 +79,7 @@ bool CreateDirectoryW(const wchar_t* p,SECURITY_ATTRIBUTES*) {
  if(std::wstring(p)==L"C:\\ProgramData\\Packages\\GlassPlatform")++ownedCreateCalls;
  if(denied==p){lastError=ERROR_ACCESS_DENIED;return false;}
  if(files.count(p)){lastError=ERROR_ALREADY_EXISTS;return false;}
- files[p]=FILE_ATTRIBUTE_DIRECTORY;return true;
+ files[p]=FILE_ATTRIBUTE_DIRECTORY;createdWithPrivateAcl[p]=true;return true;
 }
 namespace GlassInstallLog {void Line(const wchar_t*){}void LineFormat(const wchar_t*,...) {}}
 '''
@@ -99,7 +104,7 @@ bool DeleteFileW(const wchar_t*){SetLastError(5);return false;}
 
 checks = r''' 
 namespace D=GlassMaintenanceCache::Diagnostics;
-void reset(){files={{L"C:\\ProgramData",FILE_ATTRIBUTE_DIRECTORY},{L"C:\\ProgramData\\Packages",FILE_ATTRIBUTE_DIRECTORY}};denied.clear();ownerSid=2;acl.AceCount=0;ace={};ownedCreateCalls=0;lastError=999;}
+void reset(){createdWithPrivateAcl.clear();files={{L"C:\\ProgramData",FILE_ATTRIBUTE_DIRECTORY},{L"C:\\ProgramData\\Packages",FILE_ATTRIBUTE_DIRECTORY}};denied.clear();ownerSid=2;acl.AceCount=0;ace={};ownedCreateCalls=0;lastError=999;}
 int main(){
  using namespace GlassMaintenanceCache;
  const std::wstring parent=L"C:\\ProgramData\\Packages",root=parent+L"\\GlassPlatform";
@@ -108,10 +113,13 @@ int main(){
  // create only our GlassPlatform child with a hardened ACL.
  reset();acl.AceCount=1;ace.Mask=FILE_APPEND_DATA;ace.Header.AceFlags=3;
  {D::Publication report(&detail);assert(EnsureRoot());assert(!report.context.failed);report.succeeded=true;}
- assert(ownedCreateCalls==1&&detail.find(L"validate-packages-parent")!=std::wstring::npos&&files.count(root));
+ assert(ownedCreateCalls==1&&detail.empty()&&files.count(root));
  reset();ownerSid=3;
  {D::Publication report(&detail);assert(EnsureRoot());assert(!report.context.failed);report.succeeded=true;}
  assert(ownedCreateCalls==1&&files.count(root));
+ reset();files[root]=FILE_ATTRIBUTE_DIRECTORY;ownerSid=3;
+ {D::Publication report(&detail);assert(!EnsureRoot());assert(report.context.first.operation==L"ValidateOwnerAndDacl");assert(report.context.first.path==root);}
+ assert(detail.find(L"create-owned-root")!=std::wstring::npos);
  // Actual API access failure creating OUR child: distinguish it from policy.
  reset();denied=root;
  {D::Publication report(&detail);assert(!EnsureRoot());assert(report.context.first.domain==L"Win32");assert(report.context.first.operation==L"CreateDirectoryW");assert(report.context.first.path==root);assert(report.context.first.code==5);}

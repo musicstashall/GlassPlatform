@@ -1476,7 +1476,7 @@ private:
                 if (!startupStop_.load(std::memory_order_acquire))
                     result.installed.secureUxTheme=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX64) ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX86);
-                if (!startupStop_.load(std::memory_order_acquire) && result.os64) {
+                if (!startupStop_.load(std::memory_order_acquire) && result.installed.glassSettings) {
                     std::wstring sutError;
                     const bool queried=rootsChecked && GlassInstallUtil::QuerySecureUxThemeState(startupRoots.x64,startupRoots.x86,
                         &result.secureUxThemeState,&sutError);

@@ -292,7 +292,8 @@ ProductPathCheck CheckProductContexts(const wchar_t* productCode, std::wstring& 
             count=0;
             for (DWORD i=0;;++i) {
                 if (isCancelled()) return false;
-                const UINT rc=MsiEnumProductsExW(productCode,sid,MSIINSTALLCONTEXT_ALL,i,nullptr,nullptr,nullptr,nullptr);
+                wchar_t installedCode[39]{};
+                const UINT rc=MsiEnumProductsExW(productCode,sid,MSIINSTALLCONTEXT_ALL,i,installedCode,nullptr,nullptr,nullptr);
                 if (rc==ERROR_NO_MORE_ITEMS || (rc==ERROR_UNKNOWN_PRODUCT && i==0)) return true;
                 if (rc!=ERROR_SUCCESS) { detail=L"MSI context enumeration error "+std::to_wstring(rc);return false; }
                 ++count;
@@ -399,6 +400,7 @@ ProductPathCheck CheckProductFileRoots(const wchar_t* productCode, const std::ws
                 path[0]=L'\0';
                 DWORD size=static_cast<DWORD>(path.size());
                 const INSTALLSTATE state=MsiGetComponentPathW(productCode,id,path.data(),&size);
+                if (state==INSTALLSTATE_ABSENT) continue; // Not installed: no component resource to remove.
                 if (state!=INSTALLSTATE_LOCAL || !path[0] || size>=path.size()) {
                     detail=std::wstring(L"component ")+id+L" (state="+std::to_wstring(static_cast<int>(state))+L")";
                     return ProductPathCheck::Unverifiable;

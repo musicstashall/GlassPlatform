@@ -217,10 +217,6 @@ public static class PlatformPaths
 
     private static string ReadBlackWindowManagerInstallPath()
     {
-        var hkcu = ReadInstallPath(Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Default);
-        if (!string.IsNullOrEmpty(hkcu))
-            return hkcu;
-
         if (Environment.Is64BitOperatingSystem)
         {
             var hklm64 = ReadInstallPath(Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64);

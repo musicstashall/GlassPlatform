@@ -138,8 +138,6 @@ namespace
             };
             tryValue(HKEY_LOCAL_MACHINE, machineView, valName);
             if (path.empty()) tryValue(HKEY_LOCAL_MACHINE, machineView, L"InstallPath");
-            if (path.empty()) tryValue(HKEY_CURRENT_USER, 0, valName);
-            if (path.empty()) tryValue(HKEY_CURRENT_USER, 0, L"InstallPath");
         }
         if (path.empty())
             return false;

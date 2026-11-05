@@ -930,49 +930,11 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(
     return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
 }
 
-[[nodiscard]] bool TryDeleteSystemFiles() noexcept
-{
-    const auto system32 = NativeSystem32();
-    if (system32.empty())
-        return false;
-
-    const auto patcherPath = JoinPath(system32, kOurDllName);
-    const auto proxyPath = JoinPath(system32, kProxyDllName);
-
-    bool allDeleted = true;
-    {
-        Wow64FsRedirectGuard guard;
-
-        if (FileExistsNative(patcherPath) && !DeleteFileW(patcherPath.c_str()))
-            allDeleted = false;
-
-        if (FileExistsNative(proxyPath) && !DeleteFileW(proxyPath.c_str()))
-            allDeleted = false;
-
-        const auto syswow64 = NativeSysWow64();
-        if (!syswow64.empty())
-        {
-            const auto proxyWowPath = JoinPath(syswow64, kProxyDllName);
-            if (FileExistsNative(proxyWowPath) && !DeleteFileW(proxyWowPath.c_str()))
-                allDeleted = false;
-        }
-    }
-    return allDeleted;
-}
-
+// Kept as an ABI entry point for older callers, but registration and files
+// belong exclusively to the MSI. No native helper may uninstall the hook.
 extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeDeactivate() noexcept
 {
-    if (IsWow64ProcessNow())
-        return HRESULT_FROM_WIN32(ERROR_INSTALL_WRONG_PROCESSOR_ARCHITECTURE);
-
-    if (g_loadedPatcher)
-    {
-        FreeLibrary(g_loadedPatcher);
-        g_loadedPatcher = nullptr;
-    }
-
-    // Снятие hook и файлов — только удалением MSI; helper не пишет реестр и не удаляет DLL.
-    return Shared::SecureUxThemeHook::Uninstall() ? S_OK : E_FAIL;
+    return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
 }
 
 extern "C" BOOL WINAPI GlassSettings_SecureUxThemeEnsureLoaded() noexcept
@@ -993,7 +955,7 @@ extern "C" BOOL WINAPI GlassSettings_SecureUxThemeCheckCleanupPending() noexcept
 
 extern "C" BOOL WINAPI GlassSettings_SecureUxThemeTryDeleteSystemFiles() noexcept
 {
-    return TryDeleteSystemFiles() ? TRUE : FALSE;
+    return FALSE; // MSI owns these files; never delete them outside its transaction.
 }
 
 namespace

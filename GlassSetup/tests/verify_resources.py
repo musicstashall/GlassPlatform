@@ -429,7 +429,8 @@ assert 'CreateSecureTempDirectory(L"GlassSetupLogs"' in read("src/InstallLog.cpp
 assert 'CreateSecureTempDirectory(L"GlassUninsLogs"' in read("src/InstallSupport/GlassInstallLog.cpp")
 assert "SecureLogDirectory()" in unins and 'GetEnvironmentVariableW(L"ProgramW6432"' not in setup + unins + engine
 native_helper = section(util, "std::wstring NativeDllForArch(", "bool QueryPlatformInstallPath(")
-assert "if (x64)" in native_helper and "return EnsureExtractedUnlockerX64();" in native_helper
+assert "return InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir" in native_helper
+assert "EnsureExtractedUnlockerX64()" not in native_helper
 assert "QueryPlatformInstallPath(" not in native_helper and "TryGetAutorunGlassCompatInstallRoot(" not in native_helper
 shell_ops = (repo / "GlassSettings/Native/ShellExtensionOps.cpp").read_text(encoding="utf-8")
 shell_sparse = (repo / "GlassSettings/Native/ShellSparsePackage.cpp").read_text(encoding="utf-8")
@@ -509,23 +510,16 @@ sut_inspect = read("src/InstallSupport/GlassProductInspect.cpp")
 native_host_h = (repo / "GlassSettings/Native/NativeHost.h").read_text(encoding="utf-8")
 sut_service = (repo / "GlassSettings/Services/SecureUxThemeService.cs").read_text(encoding="utf-8")
 sut_template = read("msi/SecureUxThemePackage.template.wxs")
-sut_stage = section(payload, '<!-- Standalone SecureUxTheme MSI', '</Target>')
+sut_stage = section(payload, '<!-- Per-machine SecureUxTheme MSI', '</Target>')
 assert "SecureUxTheme-x64" in payload and "SecureUxTheme-x86" in payload
-assert "GlassSettings\\SecureUxTheme\\%(Filename)%(Extension)" in sut_stage
-assert "GlassBuildRelease)\\SecureUxTheme\\SecureUxTheme4.dll" in sut_stage
-assert "GlassBuildRelease)\\SecureUxTheme\\ThemeUiProxy.dll" in sut_stage
-assert "GlassSettings\\SecureUxTheme\\**\\*.*" in payload  # explicitly excluded from GlassSettings MSI
-assert "GlassSecureUxThemeWowVendorDir" not in payload
-assert "SecureUxTheme4.dll" in sut_native and "ThemeUiProxy.dll" in sut_native
-assert "Wow64DisableWow64FsRedirection" in sut_native
-activation = section(sut_native, 'extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(', "[[nodiscard]] bool TryDeleteSystemFiles")
-assert "kProxyDllName" in activation and "NativeSysWow64" not in activation
-assert "if (FileExistsNative(proxyWowPath)" in sut_native  # old cross-architecture proxy cleanup only
-assert "GLASSSETTINGSINSTALLED" in sut_template and "GlassSettingsProductCode" in sut_template
-assert "GLASSSETTINGSINSTALLED=1" in engine and "secureUxThemeMsi && selection_.glassSettings" in engine  # only after the prerequisite MSI stage is selected
-assert 'Key="Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{' in sut_template
-assert 'Key="Software\\\\Microsoft' not in sut_template
-assert "Launch Condition=\"Installed OR GLASSSETTINGSINSTALLED\"" in sut_template
+assert "SecureUxTheme4.dll" in sut_stage and "ThemeUiProxy.dll" in sut_stage
+assert 'Scope="perMachine"' in sut_template and 'Id="System6432Folder"' in sut_template
+assert "GLASSSETTINGSINSTALLED" not in sut_template and "GLASSSETTINGSINSTALLED=1" not in engine
+assert 'Execute="deferred"' in sut_template and 'Execute="commit"' not in sut_template
+assert 'REMOVE~=&quot;ALL&quot;' in sut_template
+activation = section(sut_native, 'extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(', 'extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeDeactivate(')
+assert "CopyFile" not in activation and "DeleteFile" not in activation
+assert "SecureUxThemeMsiService.InstallFromCache" in sut_service and "SecureUxThemeMsiService.UninstallProduct" in sut_service
 for third_party_project in ("msi/OpenGlass-x64.wixproj", "msi/SecureUxTheme-x64.wixproj", "msi/SecureUxTheme-x86.wixproj"):
     assert "<GlassSignThisProject>false</GlassSignThisProject>" in read(third_party_project)
 signature_list=read("../Shared/scripts/Test-GlassSignatures.ps1")
@@ -545,7 +539,7 @@ assert "msiResSecureUxTheme" in setup and "report.secureUxTheme" in sut_inspect
 assert "kProductSecureUxThemeX64" in engine and "kProductSecureUxThemeX86" in rollback and "kProductSecureUxThemeX64" in unins
 assert "InvokeSecureUxThemeDeactivate" in util and "InvokeSecureUxThemeDeactivate" in unins
 assert "SecureUxTheme-x64.msi" in engine and "SecureUxTheme-x86.msi" in engine
-assert 'Path.Combine(PlatformPaths.AppBase, "SecureUxTheme")' in sut_service
+assert "ExpectedSystemDllPath" in sut_service
 assert "SecureUxTheme-x64.msi" in rc and "SecureUxTheme-x86.msi" in rc
 assert "SecureUxTheme-x64.msi" in project and "SecureUxTheme-x86.msi" in project
 solution=read("../GlassProject.sln")
@@ -716,8 +710,8 @@ assert "kDwmOpenGlassRules" in reg_sanity and "partial cleanup" in profiles
 assert "GetCurrentThemeName" in style and "WinVerifyTrust" in style and "Microsoft Corporation" in style
 assert "FILE_ATTRIBUTE_REPARSE_POINT" in style and "State::Unknown" in style
 assert "IsStockStyleName" not in sut_native and "CustomVisualStyleActive" not in sut_native
-assert "Shared::SystemVisualStyle::Current()" in sut_native
-assert "GLASSSETTINGSINSTALLED" in sut_template  # TODO: system MSI migration still pending; not a completed independence claim.
+assert "Shared::SystemVisualStyle::CurrentForMaintenance()" in sut_native
+assert "GLASSSETTINGSINSTALLED" not in sut_template
 assert "GlassMaintenanceCache::Publish" in engine and "IDR_MAINTENANCE_UNINS" in rc
 assert "PROTECTED_DACL_SECURITY_INFORMATION" in cache and "WaitForSingleObject" in cache
 assert "Registrations(code,all)" in cache and "RegistrationState" in cache and "PackageCode" in cache
@@ -741,8 +735,26 @@ assert r"Build\x86\Release\GlassSettings.Native.dll" not in unins_project
 assert "ConfigureEmbeddedUnlocker(instance,IDR_UNLOCKER_X64);" in unins
 assert "IDR_MAINTENANCE_UNINS,IDR_UNLOCKER_X86,&cacheFailure)" in engine
 assert 'extract(nativeX86Resource,L"GlassSettings.Native.x86.dll")' in cache and "GlassSettings.Native.x86.dll" in cache
-assert 'CurrentFile(L"GlassSettings.Native.x86.dll")' in util
+assert 'CurrentFile(L"GlassSettings.Native.x86.dll")' not in util
 assert "Первичная подготовка этой ветки" not in read("README.md")
+
+# Maintenance fixes: machine installation facts, installed-only helpers,
+# explicit MSI absent-state handling and failure propagation to HRESULT UI.
+platform_registry=read("../GlassSettings/Core/Platform/PlatformInstallRegistry.cs")
+assert "RegistryHive.CurrentUser" not in platform_registry
+for start,end in (("RegistryPathRead ReadPlatformInstallPath", "DWORD ValidateRegisteredInstallRoot"),
+                  ("bool WritePlatformInstallPath", "bool ClearPlatformInstallPath"),
+                  ("bool WriteOpenGlassInstallPath", "bool ClearOpenGlassInstallPath")):
+    assert "HKEY_CURRENT_USER" not in section(util,start,end)
+assert "state==INSTALLSTATE_ABSENT) continue" in msi
+assert "i,installedCode,nullptr,nullptr,nullptr" in msi
+assert "chosen.secureUxTheme && installed_.settings" in unins
+assert "chosen.secureUxTheme && installed_.settings && SecureUxThemeManaged()" in unins
+assert "SecureUxThemeHook::Uninstall" not in sut_native
+assert "DeleteFileW(patcherPath" not in sut_native
+assert "ErrorHResult(result.ExitCode)" in sut_service
+msi_service=read("../GlassSettings/Services/SecureUxThemeMsiService.cs")
+assert "0x80070000u" in msi_service and "if (IsInstalled())" in msi_service
 
 # Generic notes are not proof of a startup failure. Cache errors are attributed.
 assert "не всё запустилось" not in rc+ui and "not everything started" not in rc+ui

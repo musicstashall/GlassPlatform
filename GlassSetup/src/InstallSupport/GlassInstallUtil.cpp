@@ -1216,33 +1216,7 @@ std::wstring NativeDllForArch(
     GlassShared::GlassPlatformTask::PlatformArch arch,
     const std::wstring& x64Dir,
     const std::wstring& x86Dir) noexcept {
-    const bool x64 = arch == GlassShared::GlassPlatformTask::PlatformArch::X64;
-    const WORD machine = x64 ? IMAGE_FILE_MACHINE_AMD64 : IMAGE_FILE_MACHINE_I386;
-    if (x64) {
-        // The x64 helper is embedded in Setup/Unins and extracted to a
-        // restricted temporary directory. A missing resource fails closed.
-        if (!g_unlockerInstance || !g_unlockerX64ResId ||
-            !FindResourceW(g_unlockerInstance,MAKEINTRESOURCEW(g_unlockerX64ResId),RT_RCDATA)) return {};
-        return EnsureExtractedUnlockerX64();
-    }
-    // Setup also embeds x86; prefer that resource over an installed helper.
-    // The resource is trusted only to the extent the Setup executable is trusted.
-    if (g_unlockerX86ResId) return EmbeddedNativeDllX86();
-    // Unins is built in the x64 pass, before x86 Native exists. Its x86
-    // maintenance helper is published from the final Setup into protected
-    // Current, so it survives removal of the Settings product.
-    const auto cached=GlassMaintenanceCache::CurrentFile(L"GlassSettings.Native.x86.dll");
-    if(!cached.empty())return PeMatches(cached,machine,"GlassSettings_UnlockerW")?cached:std::wstring();
-    const std::wstring root = x86Dir;
-    if (!root.empty()) {
-        const std::wstring dll = TrimTrailingSlashes(root) + L"\\GlassSettings\\GlassSettings.Native.dll";
-        if (PeMatches(dll, machine, "GlassSettings_UnlockerW"))
-            return dll;
-    }
-    // Unins without an embedded x86 resource can use the resolved product
-    // root, which may be registry-derived. PeMatches checks format and export,
-    // not the origin or signature of that DLL.
-    return {};
+    return InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,"GlassSettings_UnlockerW");
 }
 
 namespace {
@@ -1259,22 +1233,14 @@ RegistryPathRead ReadPlatformInstallPath(bool x64, bool os64,
         if (result==RegistryPathRead::Found) source=label;
         return result;
     };
-    // Preserve the established machine-before-user precedence. The view and
-    // value actually used are reported, rather than comparing or repairing
-    // other registry copies.
+    // Installation facts are machine-wide, independent of the interactive account.
     auto status=read(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",explicitValue,machineView,
         x64?L"HKLM(64) InstallPathX64":L"HKLM(32) InstallPathX86");
     if (status!=RegistryPathRead::Missing) return status;
     status=read(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",L"InstallPath",machineView,
         x64?L"HKLM(64) InstallPath":L"HKLM(32) InstallPath");
     if (status!=RegistryPathRead::Missing) return status;
-    status=read(HKEY_CURRENT_USER,L"Software\\GlassPlatform",explicitValue,0,
-        x64?L"HKCU InstallPathX64":L"HKCU InstallPathX86");
-    if (status!=RegistryPathRead::Missing) return status;
-    if (!x64 && os64)
-        return read(HKEY_CURRENT_USER,L"Software\\Wow6432Node\\GlassPlatform",L"InstallPath",0,
-            L"HKCU Wow6432Node InstallPath");
-    return read(HKEY_CURRENT_USER,L"Software\\GlassPlatform",L"InstallPath",0,L"HKCU InstallPath");
+    return RegistryPathRead::Missing;
 }
 
 RegistryPathRead ReadOpenGlassInstallPath(std::wstring& path, std::wstring& source) {
@@ -1288,11 +1254,7 @@ RegistryPathRead ReadOpenGlassInstallPath(std::wstring& path, std::wstring& sour
     auto status=read(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",
         L"OpenGlassInstallPath",KEY_WOW64_64KEY,L"HKLM(64) OpenGlassInstallPath");
     if (status!=RegistryPathRead::Missing) return status;
-    status=read(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform",
-        L"OpenGlassInstallPath",0,L"HKCU OpenGlassInstallPath");
-    if (status!=RegistryPathRead::Missing) return status;
-    return read(HKEY_CURRENT_USER,L"Software\\StanislavKa\\OpenGlass",
-        L"InstallPath",0,L"HKCU legacy OpenGlass InstallPath");
+    return RegistryPathRead::Missing;
 }
 
 DWORD ValidateRegisteredInstallRoot(std::wstring& path) {
@@ -1373,15 +1335,8 @@ bool WritePlatformInstallPath(bool x64, const std::wstring& installDir) noexcept
         if (!QueryNativeOs64Bit(os64)) return false;
         const wchar_t* explicitVal=x64?L"InstallPathX64":L"InstallPathX86";
         const REGSAM lmSam=x64?KEY_WOW64_64KEY:KEY_WOW64_32KEY;
-        if (!WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\GlassPlatform",explicitVal,0,dir) ||
-            !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",explicitVal,lmSam,dir) ||
+        if (!WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",explicitVal,lmSam,dir) ||
             !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",L"InstallPath",lmSam,dir)) return false;
-        if (x64==os64 &&
-            !WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\GlassPlatform",L"InstallPath",0,dir)) return false;
-        if (!x64 && os64 &&
-            !WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\Wow6432Node\\GlassPlatform",L"InstallPath",0,dir)) return false;
-        // Only the authoritative value is rechecked. Conflicting copies are
-        // neither compared with each other nor rewritten to match it.
         std::wstring effective,source;
         const auto status=ReadPlatformInstallPath(x64,os64,effective,source);
         if (status==RegistryPathRead::Error) return false;
@@ -1422,9 +1377,7 @@ bool WriteOpenGlassInstallPath(const std::wstring& x64RootDir, const std::wstrin
         const std::wstring root=TrimTrailingSlashes(x64RootDir);
         const std::wstring og=TrimTrailingSlashes(openGlassDir);
         if (root.empty() || og.empty()) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
-        if (!WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform",L"InstallPath",0,root) ||
-            !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",L"InstallPath",KEY_WOW64_64KEY,root) ||
-            !WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform",L"OpenGlassInstallPath",0,og) ||
+        if (!WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",L"InstallPath",KEY_WOW64_64KEY,root) ||
             !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",L"OpenGlassInstallPath",KEY_WOW64_64KEY,og)) return false;
         std::wstring effective,source;
         const auto status=ReadOpenGlassInstallPath(effective,source);
@@ -1714,7 +1667,7 @@ bool InvokeSecureUxThemeDeactivate(
     const auto arch = os64
         ? GlassShared::GlassPlatformTask::PlatformArch::X64
         : GlassShared::GlassPlatformTask::PlatformArch::X86;
-    const std::wstring dll = NativeDllForArch(arch, x64Dir, x86Dir);
+    const std::wstring dll = InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,kInstallerSecureUxThemeExport);
     const WORD machine=os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386;
     if (dll.empty() || !PeMatches(dll,machine,kInstallerSecureUxThemeExport))
         return fail(L"GlassSettings.Native.dll with the SecureUxTheme export was not found");

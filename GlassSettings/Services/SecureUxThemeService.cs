@@ -162,11 +162,11 @@ public static class SecureUxThemeService
         _ = snapshot;
         _ = reactivate;
         var result = SecureUxThemeMsiService.InstallFromCache();
-        return result.Success ? 0 : result.ExitCode;
+        return result.Success ? 0 : SecureUxThemeMsiService.ErrorHResult(result.ExitCode);
     }
 
     public static int Deactivate() =>
-        SecureUxThemeMsiService.UninstallProduct().ExitCode;
+        SecureUxThemeMsiService.ErrorHResult(SecureUxThemeMsiService.UninstallProduct().ExitCode);
 
     public sealed record DeactivateResult(int Hr, bool RebootRequired);
 
@@ -174,7 +174,7 @@ public static class SecureUxThemeService
     {
         var result = SecureUxThemeMsiService.UninstallProduct();
         if (!result.Success)
-            return new DeactivateResult(result.ExitCode, false);
+            return new DeactivateResult(SecureUxThemeMsiService.ErrorHResult(result.ExitCode), false);
 
         return new DeactivateResult(0, result.RebootRequired);
     }

@@ -248,16 +248,12 @@ bool CaptureRegistryValues(GlassInstallRollback::SessionState& state) noexcept {
     state.registryValues.clear();
     const wchar_t* platform=L"Software\\GlassPlatform";
     for (const wchar_t* value:{L"InstallPath",L"InstallPathX64",L"InstallPathX86"}) {
-        if (!CaptureRegistryValue(state,HKEY_CURRENT_USER,0,platform,value)) return false;
         if (!CaptureRegistryValue(state,HKEY_LOCAL_MACHINE,KEY_WOW64_32KEY,platform,value)) return false;
         if (GlassInstallUtil::IsOs64Bit() && !CaptureRegistryValue(state,HKEY_LOCAL_MACHINE,KEY_WOW64_64KEY,platform,value)) return false;
     }
-    if (!CaptureRegistryValue(state,HKEY_CURRENT_USER,0,L"Software\\Wow6432Node\\GlassPlatform",L"InstallPath")) return false;
     for (const wchar_t* value:{L"InstallPath",L"OpenGlassInstallPath"}) {
-        if (!CaptureRegistryValue(state,HKEY_CURRENT_USER,0,L"Software\\StanislavKa\\GlassPlatform",value)) return false;
         if (GlassInstallUtil::IsOs64Bit() && !CaptureRegistryValue(state,HKEY_LOCAL_MACHINE,KEY_WOW64_64KEY,L"Software\\StanislavKa\\GlassPlatform",value)) return false;
     }
-    if (!CaptureRegistryValue(state,HKEY_CURRENT_USER,0,L"Software\\StanislavKa\\OpenGlass",L"InstallPath")) return false;
     // Sparse-shell registration temporarily changes these Explorer block-list values.
     constexpr wchar_t blocked[]=L"Software\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Blocked";
     for (const wchar_t* clsid:{GlassShared::GlassShellMenu::kToggleExplorerClsidBraced,
@@ -678,13 +674,13 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
 bool PreservePlatformUserPath(const SessionState& state, bool x64) noexcept {
     const wchar_t* name=x64?L"InstallPathX64":L"InstallPathX86";
     for (const auto& item:state.registryValues) {
-        if (item.hive!=HKEY_CURRENT_USER || item.view!=0 ||
+        if (item.hive!=HKEY_LOCAL_MACHINE || item.view!=(x64?KEY_WOW64_64KEY:KEY_WOW64_32KEY) ||
             _wcsicmp(item.key.c_str(),L"Software\\GlassPlatform")!=0 ||
             _wcsicmp(item.name.c_str(),name)!=0) continue;
         if (!item.existed) return true; // MSI may register the new value.
         HKEY key=nullptr;
         LSTATUS status=RegCreateKeyExW(item.hive,item.key.c_str(),0,nullptr,0,
-            KEY_SET_VALUE,nullptr,&key,nullptr);
+            KEY_SET_VALUE|item.view,nullptr,&key,nullptr);
         if (status==ERROR_SUCCESS) {
             status=RegSetValueExW(key,item.name.c_str(),0,item.type,
                 item.data.empty()?nullptr:item.data.data(),static_cast<DWORD>(item.data.size()));

@@ -19,9 +19,9 @@
     <Binary Id="SecureUxThemeCa" SourceFile="$(var.SecureUxThemeCaDll)" />
 
     <CustomAction Id="SecureUxThemeCaInstall" BinaryRef="SecureUxThemeCa" DllEntry="SecureUxThemeCaInstall"
-                  Execute="commit" Impersonate="no" Return="check" />
+                  Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="SecureUxThemeCaUninstall" BinaryRef="SecureUxThemeCa" DllEntry="SecureUxThemeCaUninstall"
-                  Execute="commit" Impersonate="no" Return="check" />
+                  Execute="deferred" Impersonate="no" Return="check" />
 
     <Feature Id="MainFeature" Title="$(var.GlassPlatformTitle)" Level="1">
       <ComponentRef Id="SecureUxThemePatcher" />
@@ -39,8 +39,8 @@
 
     <InstallExecuteSequence>
       <InstallFiles Condition="GLASS_RESTORE_NO_CAB &lt;&gt; 1" />
-      <Custom Action="SecureUxThemeCaInstall" After="InstallFiles" Condition="NOT Installed" />
-      <Custom Action="SecureUxThemeCaUninstall" Before="RemoveFiles" Condition="Installed AND NOT REINSTALL" />
+      <Custom Action="SecureUxThemeCaInstall" After="InstallFiles" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="SecureUxThemeCaUninstall" Before="RemoveFiles" Condition="Installed AND REMOVE~=&quot;ALL&quot;" />
     </InstallExecuteSequence>
   </Package>
 </Wix>

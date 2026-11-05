@@ -41,8 +41,13 @@ public static class SecureUxThemeMsiService
 
         var exit = RunMsiexec($"/x {code} /qn REBOOT=ReallySuppress");
         if (exit is 0 or 3010 or 1641 or 1605)
+        {
+            if (IsInstalled())
+                return new InstallResult(1603, RebootRequired(exit));
             RemoveOrphanUninstallEntry(code);
-        return new InstallResult(exit, RebootRequired(exit));
+            return new InstallResult(0, RebootRequired(exit));
+        }
+        return new InstallResult(exit, false);
     }
 
     private static void RemoveOrphanUninstallEntry(string productCode)
@@ -74,6 +79,10 @@ public static class SecureUxThemeMsiService
         process.WaitForExit();
         return process.ExitCode;
     }
+
+    // UI callers test HRESULT < 0, not a positive Win32/MSI exit code.
+    public static int ErrorHResult(int exitCode) => exitCode is 0 or 3010 or 1641
+        ? 0 : exitCode < 0 ? exitCode : unchecked((int)(0x80070000u | ((uint)exitCode & 0xffffu)));
 
     private static bool RebootRequired(int exitCode) =>
         exitCode is 3010 or 1641;
