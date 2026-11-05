@@ -108,8 +108,19 @@ Project("{B7DD6F7E-DEF8-4E67-B5B7-07EF123DB6F0}") = "GlassSettings-x86", "GlassS
 	EndProjectSection
 EndProject
 Project("{B7DD6F7E-DEF8-4E67-B5B7-07EF123DB6F0}") = "SecureUxTheme-x64", "GlassSetup\msi\SecureUxTheme-x64.wixproj", "{0CD1A2BE-2C39-4404-A026-34642B517428}"
+	ProjectSection(ProjectDependencies) = postProject
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+	EndProjectSection
 EndProject
 Project("{B7DD6F7E-DEF8-4E67-B5B7-07EF123DB6F0}") = "SecureUxTheme-x86", "GlassSetup\msi\SecureUxTheme-x86.wixproj", "{81FE634A-DB11-4759-B76D-D1119AC2CF13}"
+	ProjectSection(ProjectDependencies) = postProject
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SecureUxThemeCa", "GlassSetup\msi\SecureUxThemeCa\SecureUxThemeCa.vcxproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
+	ProjectSection(ProjectDependencies) = postProject
+		{2591BB0C-7C14-42FC-A888-D9A7F4D2A723} = {2591BB0C-7C14-42FC-A888-D9A7F4D2A723}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GlassUnins", "GlassSetup\GlassUnins\GlassUnins.vcxproj", "{A3B4C5D6-E7F8-9012-3456-789ABCDEF012}"
 	ProjectSection(ProjectDependencies) = postProject
@@ -344,6 +355,14 @@ Global
 		{81FE634A-DB11-4759-B76D-D1119AC2CF13}.Release|x64.ActiveCfg = Release|x86
 		{81FE634A-DB11-4759-B76D-D1119AC2CF13}.Release|x86.ActiveCfg = Release|x86
 		{81FE634A-DB11-4759-B76D-D1119AC2CF13}.Release|x86.Build.0 = Release|x86
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|Any CPU.ActiveCfg = Release|x64
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|x64.ActiveCfg = Release|x64
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|x86.ActiveCfg = Release|Win32
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|Any CPU.ActiveCfg = Release|x64
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x64.ActiveCfg = Release|x64
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x64.Build.0 = Release|x64
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x86.ActiveCfg = Release|Win32
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

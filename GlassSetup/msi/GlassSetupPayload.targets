@@ -78,9 +78,15 @@
       <_SutCaMsbuildPlatform Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x64'">x64</_SutCaMsbuildPlatform>
       <_SutCaMsbuildPlatform Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x86'">Win32</_SutCaMsbuildPlatform>
     </PropertyGroup>
-    <MSBuild Projects="$(MSBuildThisFileDirectory)SecureUxThemeCa\SecureUxThemeCa.vcxproj"
+    <!-- Full solution owns native scheduling: never recursively build its
+         GlassShared dependency while the solution may be building it too. -->
+    <MSBuild Condition="'$(BuildingSolutionFile)' != 'true' and '$(BuildingInsideVisualStudio)' != 'true'"
+             Projects="$(MSBuildThisFileDirectory)SecureUxThemeCa\SecureUxThemeCa.vcxproj"
              Targets="Build"
              Properties="Configuration=Release;Platform=$(_SutCaMsbuildPlatform)" />
+    <Error Condition="!Exists('$(GlassBuildRelease)\SecureUxThemeCa.dll')"
+           Code="GSUT001"
+           Text="$(MSBuildProjectName): custom-action DLL missing: $(GlassBuildRelease)\SecureUxThemeCa.dll. The solution must build GlassShared then SecureUxThemeCa for this architecture before this MSI; inspect the FIRST error from these projects in Build Output." />
   </Target>
 
   <Target Name="GlassStagePayload" BeforeTargets="GlassGenerateHarvest" DependsOnTargets="GlassEnsureGlassSettingsPublish;GlassMaterializeSecureUxTheme" Condition="'$(GlassPayloadArch)' != ''">

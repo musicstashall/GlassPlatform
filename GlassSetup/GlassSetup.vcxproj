@@ -117,8 +117,8 @@
     <Error Condition="!Exists('$(GlassMsiPayloadDir)Glass-x64\Glass-x64.msi')" Text="Нет Glass-x64.msi. Сначала solution Release|x64." />
     <Error Condition="!Exists('$(GlassMsiPayloadDir)OpenGlass-x64\OpenGlass-x64.msi')" Text="Нет OpenGlass-x64.msi. Сначала solution Release|x64." />
     <Error Condition="!Exists('$(GlassMsiPayloadDir)GlassSettings-x86\GlassSettings-x86.msi')" Text="Нет GlassSettings-x86.msi. Его собирает solution Release|x86 до GlassSetup." />
-    <Error Condition="!Exists('$(GlassMsiPayloadDir)SecureUxTheme-x64\SecureUxTheme-x64.msi')" Text="Нет SecureUxTheme-x64.msi. Сначала соберите solution Release|x64." />
-    <Error Condition="!Exists('$(GlassMsiPayloadDir)SecureUxTheme-x86\SecureUxTheme-x86.msi')" Text="Нет SecureUxTheme-x86.msi. Его собирает solution Release|x86 до GlassSetup." />
+    <Error Condition="!Exists('$(GlassMsiPayloadDir)SecureUxTheme-x64\SecureUxTheme-x64.msi')" Text="Не получен $(GlassMsiPayloadDir)SecureUxTheme-x64\SecureUxTheme-x64.msi. Проверьте первую ошибку или пропуск проектов SecureUxTheme-x64 / SecureUxThemeCa / GlassShared в выводе прохода Release|x64. Это проверка результата, не первичная ошибка сборки MSI." />
+    <Error Condition="!Exists('$(GlassMsiPayloadDir)SecureUxTheme-x86\SecureUxTheme-x86.msi')" Text="Не получен $(GlassMsiPayloadDir)SecureUxTheme-x86\SecureUxTheme-x86.msi. Проверьте первую ошибку или пропуск проектов SecureUxTheme-x86 / SecureUxThemeCa / GlassShared в выводе прохода Release|x86. Это проверка результата, не первичная ошибка сборки MSI." />
     <Error Condition="!Exists('$(GlassMsiPayloadDir)Glass-x86\Glass-x86.msi')" Text="Нет Glass-x86.msi. Его собирает solution Release|x86 до GlassSetup." />
     <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(ProjectDir)scripts\Verify-InstallerNative.ps1&quot; -X86 &quot;$(MSBuildThisFileDirectory)..\Build\x86\Release\GlassSettings.Native.dll&quot; -X64 &quot;$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll&quot;" />
     <!-- First-party MSI and Native DLL payloads are signed before embedding.
