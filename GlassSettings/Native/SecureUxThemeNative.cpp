@@ -6,6 +6,7 @@
 #include <aclapi.h>
 #include <uxtheme.h>
 #include <SystemVisualStyle.h>
+#include <SecureUxThemeHookRegistry.h>
 #include <wil/resource.h>
 
 #pragma comment(lib, "uxtheme.lib")
@@ -385,9 +386,7 @@ namespace
     [[nodiscard]] bool LoadedEventPresent() noexcept
     {
         const wil::unique_handle event(OpenEventW(SYNCHRONIZE, FALSE, kLoadedEventName));
-        if (event)
-            return true;
-        return GetLastError() == ERROR_ACCESS_DENIED;
+        return static_cast<bool>(event);
     }
 
     [[nodiscard]] bool InProcIsProxy(HKEY root, const wchar_t* clsid, REGSAM wow) noexcept
@@ -879,16 +878,11 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeQuery(
     out->ThemeUiProxyPresent = FileExistsNative(proxy) ? TRUE : FALSE;
     out->LoadedEventPresent = LoadedEventPresent() ? TRUE : FALSE;
 
-    const auto folder = ResolvePayloadFolder(nullptr);
-    CopyW(out->LocalDllPath, _countof(out->LocalDllPath), folder.c_str());
-
-    std::wstring patcherSrc;
-    std::wstring proxyNativeSrc;
-    const bool complete = PayloadComplete(folder, patcherSrc, proxyNativeSrc);
-    out->LocalDllPresent = complete ? TRUE : FALSE;
-    if (complete)
+    CopyW(out->LocalDllPath, _countof(out->LocalDllPath), systemDll4.c_str());
+    out->LocalDllPresent = out->SystemDll4Present;
+    if (out->SystemDll4Present)
     {
-        out->LocalDllMachine = ReadPeMachine(patcherSrc);
+        out->LocalDllMachine = ReadPeMachine(systemDll4);
         out->LocalDllArchMatchesOs =
             (out->LocalDllMachine != 0 && out->LocalDllMachine == nativeMachine) ? TRUE : FALSE;
     }
@@ -930,72 +924,10 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(
     if (nativeMachine != IMAGE_FILE_MACHINE_AMD64 && nativeMachine != IMAGE_FILE_MACHINE_I386)
         return HRESULT_FROM_WIN32(ERROR_INSTALL_WRONG_PROCESSOR_ARCHITECTURE);
 
-    if (reactivate)
-    {
-        CancelFileCleanup();
-
-        DWORD globalFlag = 0;
-        wchar_t verifier[512]{};
-        ReadIfeo(L"winlogon.exe", globalFlag, verifier, _countof(verifier));
-        const auto nextList = AddVerifierToken(verifier, kOurDllName);
-        globalFlag |= kFlgApplicationVerifier;
-        const HRESULT hr = WriteIfeo(L"winlogon.exe", globalFlag, nextList.c_str());
-        if (FAILED(hr))
-            return hr;
-
-        (void)SetAllInProcDefaults(kInProcProxy);
-        return S_OK;
-    }
-
-    const auto folder = ResolvePayloadFolder(payloadFolder);
-    std::wstring patcherSrc;
-    std::wstring proxyNativeSrc;
-    if (!PayloadComplete(folder, patcherSrc, proxyNativeSrc))
-        return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
-
-    if (ReadPeMachine(patcherSrc) != static_cast<int>(nativeMachine))
-        return HRESULT_FROM_WIN32(ERROR_INSTALL_WRONG_PROCESSOR_ARCHITECTURE);
-
-    CancelFileCleanup();
-
-    const auto system32 = NativeSystem32();
-    const auto destPatcher = JoinPath(system32, kOurDllName);
-    const auto destProxy = JoinPath(system32, kProxyDllName);
-    bool patcherExisted = false;
-    bool proxyExisted = false;
-
-    HRESULT hr = CopyRenamed(patcherSrc, destPatcher, patcherExisted);
-    if (FAILED(hr))
-        return hr;
-    hr = CopyRenamed(proxyNativeSrc, destProxy, proxyExisted);
-    if (FAILED(hr))
-    {
-        if (!patcherExisted)
-        {
-            Wow64FsRedirectGuard guard;
-            DeleteFileW(destPatcher.c_str());
-        }
-        return hr;
-    }
-
-    DWORD globalFlag = 0;
-    wchar_t verifier[512]{};
-    ReadIfeo(L"winlogon.exe", globalFlag, verifier, _countof(verifier));
-    const auto nextList = AddVerifierToken(verifier, kOurDllName);
-    globalFlag |= kFlgApplicationVerifier;
-    hr = WriteIfeo(L"winlogon.exe", globalFlag, nextList.c_str());
-    if (FAILED(hr))
-    {
-        Wow64FsRedirectGuard guard;
-        if (!patcherExisted)
-            DeleteFileW(destPatcher.c_str());
-        if (!proxyExisted)
-            DeleteFileW(destProxy.c_str());
-        return hr;
-    }
-
-    (void)SetAllInProcDefaults(kInProcProxy);
-    return S_OK;
+    // Файлы и IFEO/COM ставит per-machine MSI; legacy Native activate отключён.
+    (void)payloadFolder;
+    (void)reactivate;
+    return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
 }
 
 [[nodiscard]] bool TryDeleteSystemFiles() noexcept
@@ -1039,24 +971,8 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeDeactivate() noexcept
         g_loadedPatcher = nullptr;
     }
 
-    DWORD globalFlag = 0;
-    wchar_t verifier[512]{};
-    ReadIfeo(L"winlogon.exe", globalFlag, verifier, _countof(verifier));
-    const auto nextList = RemoveVerifierToken(verifier, kOurDllName);
-    if (nextList.empty())
-        globalFlag &= ~kFlgApplicationVerifier;
-
-    const HRESULT ifeoHr = WriteIfeo(L"winlogon.exe", globalFlag, nextList.c_str());
-    if (FAILED(ifeoHr))
-        return ifeoHr;
-    const HRESULT comHr = SetAllInProcDefaults(kInProcThemeUi);
-    if (FAILED(comHr))
-        return comHr;
-
-    if (TryDeleteSystemFiles())
-        return S_OK;
-
-    return ScheduleFileCleanup();
+    // Снятие hook и файлов — только удалением MSI; helper не пишет реестр и не удаляет DLL.
+    return Shared::SecureUxThemeHook::Uninstall() ? S_OK : E_FAIL;
 }
 
 extern "C" BOOL WINAPI GlassSettings_SecureUxThemeEnsureLoaded() noexcept
@@ -1072,7 +988,7 @@ extern "C" BOOL WINAPI GlassSettings_SecureUxThemeEnsureLoaded() noexcept
 
 extern "C" BOOL WINAPI GlassSettings_SecureUxThemeCheckCleanupPending() noexcept
 {
-    return IsCleanupTaskPending() ? TRUE : FALSE;
+    return FALSE;
 }
 
 extern "C" BOOL WINAPI GlassSettings_SecureUxThemeTryDeleteSystemFiles() noexcept
@@ -1168,29 +1084,19 @@ extern "C" void CALLBACK GlassSettings_SecureUxThemeSetupV1W(
         || query.LoadedEventPresent
         || query.SystemDll4Present
         || query.ThemeUiProxyPresent;
-    const auto style=Shared::SystemVisualStyle::Current();
+    const auto style=Shared::SystemVisualStyle::CurrentForMaintenance();
     if(oursActive&&style==Shared::SystemVisualStyle::State::Unknown) {
         DebugLog(DBG_ERROR,L"[GlassSettings][SecureUxTheme] active visual style could not be verified; hook retained");
         ::ExitProcess(kSecureUxExitDeactivateFailed|kSecureUxExitThemeNotRestored);
     }
     if (oursActive && style==Shared::SystemVisualStyle::State::ResetRequired &&
-        (!ApplyStockVisualStyle()||Shared::SystemVisualStyle::Current()!=Shared::SystemVisualStyle::State::Stock))
+        (!ApplyStockVisualStyle()||Shared::SystemVisualStyle::CurrentForMaintenance()!=Shared::SystemVisualStyle::State::Stock))
     {
         DebugLog(DBG_WARNING,
             L"[GlassSettings][SecureUxTheme] setup: stock visual style could not be applied");
-        // Never remove the hook after a failed safe-style preparation.
         ::ExitProcess(kSecureUxExitDeactivateFailed | kSecureUxExitThemeNotRestored);
     }
-
-    const HRESULT hr = GlassSettings_SecureUxThemeDeactivate();
-    if (FAILED(hr))
-    {
-        DebugLog(DBG_ERROR,
-            L"[GlassSettings][SecureUxTheme] setup: deactivate failed hr=0x%08lX", hr);
-        ::ExitProcess(kSecureUxExitDeactivateFailed);
-    }
-    if (GlassSettings_SecureUxThemeCheckCleanupPending())
-        code |= kSecureUxExitRebootRequired;
+    // IFEO/COM/System32 снимает MSI SecureUxTheme; helper только готовит стиль.
     ::ExitProcess(code);
 }
 
@@ -1229,11 +1135,6 @@ extern "C" void CALLBACK GlassSettings_SecureUxThemeActivateSetupV1W(
     GlassSettings_SecureUxThemeNativeQuery before{};
     if (FAILED(GlassSettings_SecureUxThemeQuery(&before))) ::ExitProcess(kSecureUxExitDeactivateFailed);
     if (IsExternalSecureUxTheme(before)) ::ExitProcess(kSecureUxExitExternalInstall);
-    const HRESULT hr=GlassSettings_SecureUxThemeActivate(nullptr,FALSE);
-    if (FAILED(hr)) {
-        DebugLog(DBG_ERROR,L"[GlassSettings][SecureUxTheme] setup: activate failed hr=0x%08lX",hr);
-        ::ExitProcess(kSecureUxExitDeactivateFailed);
-    }
     GlassSettings_SecureUxThemeNativeQuery after{};
     if (FAILED(GlassSettings_SecureUxThemeQuery(&after))) ::ExitProcess(kSecureUxExitDeactivateFailed);
     const bool active=after.WinlogonHasOurToken && (after.WinlogonGlobalFlag&kFlgApplicationVerifier)!=0;

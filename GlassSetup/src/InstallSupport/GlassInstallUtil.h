@@ -177,4 +177,7 @@ bool InvokeSecureUxThemeActivate(
     const std::wstring& x64Dir,const std::wstring& x86Dir,
     SecureUxThemeActivateRun* run=nullptr,std::wstring* failureDetail=nullptr) noexcept;
 
+// Корень файлов per-machine SecureUxTheme MSI (System32 / SysWOW64), не каталог GlassPlatform.
+[[nodiscard]] std::wstring SecureUxThemeInstalledFileRoot(bool x64Product) noexcept;
+
 } // namespace GlassInstallUtil

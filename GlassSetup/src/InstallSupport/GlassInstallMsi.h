@@ -21,6 +21,8 @@ inline constexpr wchar_t kLegacyOpenGlass[]   = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3
 struct ProgressSink;
 bool MsiSuccess(UINT code) noexcept;
 bool IsProductInstalled(const wchar_t* productCode) noexcept;
+// Снимает запись «Установка и удаление», если MSI продукта уже не зарегистрирован (хвост после PatchArp).
+void RemoveOrphanUninstallEntry(const wchar_t* productCode) noexcept;
 // Progress/cancellation are optional; rollback always uses the non-cancellable form.
 bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress = nullptr,
     UINT* resultCode = nullptr) noexcept;

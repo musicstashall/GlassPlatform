@@ -240,6 +240,10 @@ extern "C"
     /// Activation exit values: 0 active, 2 restart pending, 8 activation failed, 16 external installation (untouched).
     __declspec(dllexport) void CALLBACK GlassSettings_SecureUxThemeActivateSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
 
+    /// Одноразовый билет HKLM для запуска GlassSetup.exe --modify из GlassSettings (UAC).
+    __declspec(dllexport) void CALLBACK GlassSettings_IssueMaintenanceSetupTicketV1W(
+        HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
+
     /// Built-in BlockList: единственный список в ProcessBlockList.h.
     __declspec(dllexport) DWORD WINAPI GlassSettings_GetBuiltInBlockListCount() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_CopyBuiltInBlockListAt(

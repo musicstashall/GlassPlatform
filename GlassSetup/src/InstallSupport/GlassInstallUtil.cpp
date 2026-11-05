@@ -1766,6 +1766,23 @@ bool QuerySecureUxThemeState(const std::wstring& x64Dir,const std::wstring& x86D
     return true;
 }
 
+std::wstring SecureUxThemeInstalledFileRoot(bool x64Product) noexcept {
+    wchar_t buffer[MAX_PATH + 1]{};
+    if (x64Product) {
+        if (GetSystemDirectoryW(buffer, MAX_PATH) == 0)
+            return {};
+        return buffer;
+    }
+    if (IsOs64Bit()) {
+        if (GetSystemWow64DirectoryW(buffer, MAX_PATH) == 0)
+            return {};
+        return buffer;
+    }
+    if (GetSystemDirectoryW(buffer, MAX_PATH) == 0)
+        return {};
+    return buffer;
+}
+
 bool InvokeSecureUxThemeActivate(const std::wstring& x64Dir,const std::wstring& x86Dir,
     SecureUxThemeActivateRun* run,std::wstring* failureDetail) noexcept {
     auto fail=[failureDetail](const wchar_t* detail) noexcept { if(failureDetail)try{*failureDetail=detail;}catch(...){} return false; };

@@ -32,6 +32,8 @@
 #include "InstallSupport/GlassInstallMsi.h"
 #include "InstallSupport/GlassInstallUtil.h"
 #include "InstallSupport/GlassProductInspect.h"
+#include "InstallSupport/GlassMaintenanceLaunch.h"
+#include <GlassInstallerLaunch.h>
 #ifdef ShellExecute
 #undef ShellExecute // IShellDispatch2::ShellExecute is a COM method, not the Win32 macro.
 #endif
@@ -670,6 +672,11 @@ bool RunWebView2Bootstrapper(const std::wstring& installerPath,
     return true;
 }
 
+[[nodiscard]] bool AnyGlassProductInstalled(const InstallEngine::ComponentSelection& installed) noexcept {
+    return installed.platform64 || installed.platform32 || installed.glassSettings ||
+        installed.openGlass || installed.secureUxTheme;
+}
+
 bool HasCommandLineSwitch(const wchar_t* name) {
     int argc=0;
     LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);
@@ -1217,6 +1224,9 @@ private:
     bool settingsAutoSelectedForSut_=false;
     GlassProducts::OpenGlassStartupState openGlassStartup_{};
     std::wstring openGlassStartupDir_;
+    const SetupCommandLine launchCmd_{ParseSetupCommandLine()};
+    bool maintenanceMode_ = false;
+    std::wstring maintenanceFocusProduct_;
     ULONGLONG lastWebPush_=0;
     Page beforeCancel_ = Page::Installing;
     ULONGLONG launchStarted_ = 0;
@@ -1459,14 +1469,22 @@ private:
                 if (!startupStop_.load(std::memory_order_acquire))
                     result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass);
+                if (!startupStop_.load(std::memory_order_acquire)) {
+                    GlassInstallMsi::RemoveOrphanUninstallEntry(GlassInstallMsi::kProductSecureUxThemeX64);
+                    GlassInstallMsi::RemoveOrphanUninstallEntry(GlassInstallMsi::kProductSecureUxThemeX86);
+                }
                 if (!startupStop_.load(std::memory_order_acquire))
                     result.installed.secureUxTheme=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX64) ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX86);
-                if (!startupStop_.load(std::memory_order_acquire) && result.installed.glassSettings) {
+                if (!startupStop_.load(std::memory_order_acquire) && result.os64) {
                     std::wstring sutError;
-                    if (!rootsChecked || !GlassInstallUtil::QuerySecureUxThemeState(startupRoots.x64,startupRoots.x86,
-                            &result.secureUxThemeState,&sutError)) {
-                        result.secureUxThemeState=GlassInstallUtil::SecureUxThemeState::Conflict;
+                    const bool queried=rootsChecked && GlassInstallUtil::QuerySecureUxThemeState(startupRoots.x64,startupRoots.x86,
+                        &result.secureUxThemeState,&sutError);
+                    if (!queried) {
+                        if (!result.installed.secureUxTheme)
+                            result.secureUxThemeState=GlassInstallUtil::SecureUxThemeState::Unavailable;
+                        else
+                            result.secureUxThemeState=GlassInstallUtil::SecureUxThemeState::Conflict;
                         InstallLog::LineFormat(L"SecureUxTheme state query failed: %s",sutError.c_str());
                     }
                 }
@@ -1558,6 +1576,14 @@ private:
         selection_.platform32=!installedSelection_.platform32;
         selection_.glassSettings=!installedSelection_.glassSettings;
         selection_.openGlass=os64 && !installedSelection_.openGlass;
+        selection_.secureUxTheme=false;
+        ClampSecureUxThemeSelection();
+        if (launchCmd_.modify) {
+            maintenanceMode_ = AuthorizeMaintenanceModifyLaunch();
+            maintenanceFocusProduct_ = launchCmd_.productCode;
+            if (!maintenanceMode_)
+                InstallLog::Line(L"--modify was not authorized; continuing with the full setup wizard");
+        }
         // Обследование целостности идёт в фоне, пока пользователь проходит первые
         // страницы; на странице состава до завершения показывается бублик загрузки.
         inspectThread_=std::thread([this,os64]() {
@@ -1578,7 +1604,21 @@ private:
             inspectReady_.store(true,std::memory_order_release);
             if (window) PostMessageW(window,kInspectReady,0,0);
         });
-        SetPage(result.runtimeInstalled ? Page::Welcome : Page::RuntimeRequired);
+        if (maintenanceMode_) {
+            const bool skipEula=AnyGlassProductInstalled(installedSelection_) &&
+                Shared::GlassInstallerLaunch::IsEulaAccepted();
+            if (skipEula) {
+                accepted_=true;
+                SendMessageW(accept_,BM_SETCHECK,BST_CHECKED,0);
+                SetPage(Page::Components);
+            } else {
+                SetPage(Page::License);
+            }
+            if (!maintenanceFocusProduct_.empty())
+                InstallLog::LineFormat(L"Maintenance focus product: %s",maintenanceFocusProduct_.c_str());
+        } else {
+            SetPage(result.runtimeInstalled ? Page::Welcome : Page::RuntimeRequired);
+        }
         // WebView2 environment and controller creation must stay on the UI STA.
         if (result.runtimeInstalled && !PostMessageW(window,kInitWebView,0,0))
             WebFailure(HRESULT_FROM_WIN32(GetLastError()));
@@ -1653,9 +1693,8 @@ private:
             SendMessageW(componentOpenGlass_,BM_SETCHECK,selection_.openGlass?BST_CHECKED:BST_UNCHECKED,0);
             SendMessageW(componentSecureUxTheme_,BM_SETCHECK,selection_.secureUxTheme?BST_CHECKED:BST_UNCHECKED,0);
             SetWindowTextW(componentSecureUxTheme_,Text(IDS_COMP_SUT_TITLE).c_str());
-            const bool sutBlocked=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External ||
-                (installedSelection_.glassSettings&&secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict);
-            EnableWindow(componentSecureUxTheme_,!sutBlocked);
+            ClampSecureUxThemeSelection();
+            EnableWindow(componentSecureUxTheme_,!SecureUxThemeSelectionBlocked());
             EnableWindow(componentSettings_,TRUE);
             EnableWindow(component64_,os64); EnableWindow(component32_,TRUE);
         }
@@ -1773,6 +1812,14 @@ private:
         default: return L"keep";
         }
     }
+    [[nodiscard]] bool SecureUxThemeSelectionBlocked() const noexcept {
+        return secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External
+            || secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict;
+    }
+    void ClampSecureUxThemeSelection() noexcept {
+        if (SecureUxThemeSelectionBlocked())
+            selection_.secureUxTheme=false;
+    }
     // A product is missing after Setup only when it is neither selected nor
     // already installed: unchecked installed products are kept.
     bool X86WarningApplies() const noexcept {
@@ -1854,21 +1901,23 @@ private:
         const auto sutState=secureUxThemeState_;
         const auto sutCondition=ConditionOf(&inspect_.secureUxTheme,installedSelection_.secureUxTheme);
         const bool sutExternal=sutState==GlassInstallUtil::SecureUxThemeState::External;
-        const bool sutConflict=installedSelection_.glassSettings&&sutState==GlassInstallUtil::SecureUxThemeState::Conflict;
+        const bool sutConflict=sutState==GlassInstallUtil::SecureUxThemeState::Conflict;
         const bool sutUpdate=sutCondition==GlassProducts::ProductCondition::UpdateAvailable;
         const bool sutDamaged=sutCondition==GlassProducts::ProductCondition::Damaged;
         const bool sutDisabled=sutExternal||sutConflict;
+        const bool sutChecked=selection_.secureUxTheme&&!sutDisabled;
         // SecureUxTheme is a regular selectable product: use the same localized
         // action badge as other products instead of a special "optional add-on" tag.
         // Keep exceptional badges only when an external install/conflict blocks action.
         const UINT sutBadge=sutExternal?IDS_COMP_SUT_BADGE_EXTERNAL:sutConflict?IDS_COMP_SUT_BADGE_CONFLICT:
             ComponentBadgeId(sutCondition);
         const wchar_t* sutTone=sutExternal||sutConflict?L"repair":ComponentBadgeTone(sutCondition);
-        const UINT sutStateId=sutExternal||sutConflict?IDS_COMP_SUT_STATE_EXTERNAL:
+        const UINT sutStateId=sutExternal?IDS_COMP_SUT_STATE_EXTERNAL:
+            sutConflict?IDS_COMP_SUT_STATE_CONFLICT:
             sutUpdate?IDS_INSPECT_VERSION:
             (sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending||sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending?IDS_COMP_SUT_STATE_PENDING:
             (sutState==GlassInstallUtil::SecureUxThemeState::Active?IDS_COMP_SUT_STATE_ACTIVE:
-            (selection_.secureUxTheme?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF)));
+            (sutChecked?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF)));
         const bool sutRequiresSettings=false;
         std::wstring sutReasons=L"[";
         bool firstSutReason=true;
@@ -1885,7 +1934,7 @@ private:
             L",\"description\":"+JsStringLiteral(Text(IDS_COMP_SUT_DESC))+
             L",\"badge\":"+JsStringLiteral(Text(sutBadge))+L",\"badgeTone\":"+JsStringLiteral(sutTone)+
             L",\"state\":"+JsStringLiteral(Text(sutStateId))+L",\"reasons\":"+sutReasons+
-            L",\"checked\":"+(selection_.secureUxTheme?L"true":L"false")+
+            L",\"checked\":"+(sutChecked?L"true":L"false")+
             L",\"locked\":false,\"disabled\":"+(sutDisabled?L"true":L"false")+L",\"hidden\":false}";
         return json+L"]";
     }
@@ -1909,6 +1958,7 @@ private:
     // certificate: a trusted signer needs no page, Windows 10 has no compact menu,
     // and an unsigned (developer) build has nothing to offer. Queried once.
     bool CertificatePageApplies() {
+        if (!selection_.platform64 && !selection_.platform32) return false;
         if (!GlassInstallUtil::IsOs64Bit() || !GlassInstallUtil::IsWindows11OrGreater()) return false;
         if (!certQueried_) {
             certQueried_=true;
@@ -2109,7 +2159,7 @@ private:
             selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.og,installedSelection_.openGlass));
             selection_.secureUxTheme=installedSelection_.secureUxTheme &&
                 GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.secureUxTheme,installedSelection_.secureUxTheme));
-
+            ClampSecureUxThemeSelection();
         }
         EnableWindow(next_,!failurePending_ && ComponentsReady());
         SyncWebViewState();
@@ -2151,7 +2201,8 @@ private:
         SetWindowTextW(back_,Text(page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
         SetWindowTextW(cancel_,Text(blockedPage?IDS_CLOSE:IDS_CANCEL).c_str());
         const bool confirm=page_==Page::ConfirmCancel;
-        const bool backVisible=page_==Page::License || page_==Page::Components || page_==Page::Certificate || confirm;
+        const bool backVisible=(page_==Page::License || page_==Page::Components || page_==Page::Certificate || confirm)
+            && !(maintenanceMode_ && page_==Page::Components);
         const bool nextVisible=!inProgress && !blockedPage;
         const bool cancelVisible=!terminal && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
         const bool demoLocked=demoControlsLocked && !terminal;
@@ -2844,6 +2895,7 @@ private:
         if (finished && installEngine_.Succeeded() && launchStarted_ && now-launchStarted_>=5000) {
             KillTimer(window,kInstallTimer); progressValue_=displayProgress_=10000; percent_=100;
             finishWarnings_=installEngine_.FinishWarnings();
+            (void)Shared::GlassInstallerLaunch::MarkEulaAccepted();
             SetPage(Page::Complete); return;
         }
         InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter();
@@ -2938,12 +2990,10 @@ private:
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
             else if (message==L"component:secureUxTheme:1" || message==L"component:secureUxTheme:0") {
                 const bool checked=message.back()==L'1';
-                const bool blocked=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External ||
-                    (installedSelection_.glassSettings&&secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict);
-                if(!blocked){
+                if (!SecureUxThemeSelectionBlocked())
                     selection_.secureUxTheme=checked;
-
-                }
+                else
+                    ClampSecureUxThemeSelection();
             }
             EnableWindow(next_,!failurePending_ && ComponentsReady());
             SyncWebViewState();
@@ -2958,6 +3008,8 @@ private:
         if (page_==Page::License && !DebugDemoLocksControls() &&
             (message==L"accept:1" || message==L"accept:0")) {
             accepted_=message==L"accept:1";
+            if (accepted_)
+                (void)Shared::GlassInstallerLaunch::MarkEulaAccepted();
             SendMessageW(accept_,BM_SETCHECK,accepted_?BST_CHECKED:BST_UNCHECKED,0);
             EnableWindow(next_,accepted_);
             SyncWebViewState();
@@ -3413,11 +3465,13 @@ private:
             state(selection_.platform32,installedSelection_.platform32,false,510,238);
             state(selection_.glassSettings,installedSelection_.glassSettings,false,60,328);
             if (os64) state(selection_.openGlass,installedSelection_.openGlass,false,510,328);
-            const bool sutExternal=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External||secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict;
+            const bool sutExternal=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External;
+            const bool sutConflict=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict;
             const bool sutPending=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::ActivationPending||secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
-            const UINT sutStateId=sutExternal?IDS_COMP_SUT_STATE_EXTERNAL:sutPending?IDS_COMP_SUT_STATE_PENDING:
+            const bool sutChecked=selection_.secureUxTheme&&!sutExternal&&!sutConflict;
+            const UINT sutStateId=sutExternal?IDS_COMP_SUT_STATE_EXTERNAL:sutConflict?IDS_COMP_SUT_STATE_CONFLICT:sutPending?IDS_COMP_SUT_STATE_PENDING:
                 secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Active?IDS_COMP_SUT_STATE_ACTIVE:
-                selection_.secureUxTheme?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF;
+                sutChecked?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF;
             DrawLabel(dc,Text(sutStateId),Box(60,408,380,22),small_,accent);
             const auto warnings=ComponentWarnings();
             if(!warnings.empty())DrawLabel(dc,warnings,Box(48,432,840,88),font_,white);
@@ -3754,6 +3808,8 @@ private:
             case IDC_ACCEPT:
                 if (HIWORD(w)==BN_CLICKED && page_==Page::License && !DebugDemoLocksControls()) {
                     accepted_ = SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED;
+                    if (accepted_)
+                        (void)Shared::GlassInstallerLaunch::MarkEulaAccepted();
                     EnableWindow(next_,accepted_);
                     InvalidateRect(accept_,nullptr,FALSE);
                     SyncWebViewState();

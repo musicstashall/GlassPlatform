@@ -61,6 +61,26 @@
     <Copy SourceFiles="$(GlassSecureUxThemeVendorDir)\SecureUxTheme4.dll;$(GlassSecureUxThemeVendorDir)\ThemeUiProxy.dll"
           DestinationFolder="$(_SutReleaseDir)"
           SkipUnchangedFiles="true" />
+    <PropertyGroup Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64'">
+      <_SutWowVendorDir>$([System.IO.Path]::Combine('$(SolutionRoot)', 'GlassSetup', 'third_party', 'SecureUxTheme', 'x86'))</_SutWowVendorDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_SutReleaseDir)SysWOW64" Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64' and Exists('$(_SutWowVendorDir)\ThemeUiProxy.dll')" />
+    <Copy Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64' and Exists('$(_SutWowVendorDir)\ThemeUiProxy.dll')"
+          SourceFiles="$(_SutWowVendorDir)\ThemeUiProxy.dll"
+          DestinationFolder="$(_SutReleaseDir)SysWOW64"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="GlassBuildSecureUxThemeCa"
+          BeforeTargets="GlassWriteProductMetadata"
+          Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x64' or '$(MSBuildProjectName)' == 'SecureUxTheme-x86'">
+    <PropertyGroup>
+      <_SutCaMsbuildPlatform Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x64'">x64</_SutCaMsbuildPlatform>
+      <_SutCaMsbuildPlatform Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x86'">Win32</_SutCaMsbuildPlatform>
+    </PropertyGroup>
+    <MSBuild Projects="$(MSBuildThisFileDirectory)SecureUxThemeCa\SecureUxThemeCa.vcxproj"
+             Targets="Build"
+             Properties="Configuration=Release;Platform=$(_SutCaMsbuildPlatform)" />
   </Target>
 
   <Target Name="GlassStagePayload" BeforeTargets="GlassGenerateHarvest" DependsOnTargets="GlassEnsureGlassSettingsPublish;GlassMaterializeSecureUxTheme" Condition="'$(GlassPayloadArch)' != ''">
@@ -137,18 +157,20 @@
     <Copy SourceFiles="@(GlassSettingsUnins)" DestinationFiles="$(GlassPayloadStage)\GlassSettings\unins000.exe" SkipUnchangedFiles="true" Condition="'@(GlassSettingsUnins)' != ''" />
     <WriteLinesToFile File="$(GlassPayloadStage)\GlassSettings\unins000.dat" Lines="PRODUCT_CODE={$(GlassMsiProductCode)}" Overwrite="true" Condition="('$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86') and '$(GlassMsiProductCode)' != ''" />
 
-    <!-- Standalone SecureUxTheme MSI: exactly two native files, no uninstaller copy or cross-architecture proxy. -->
+    <!-- Per-machine SecureUxTheme MSI: payload at stage root (+ SysWOW64 proxy on x64). -->
     <ItemGroup Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86'">
       <GlassSecureUxTheme Include="$(GlassBuildRelease)\SecureUxTheme\SecureUxTheme4.dll;$(GlassBuildRelease)\SecureUxTheme\ThemeUiProxy.dll" />
     </ItemGroup>
-    <MakeDir Directories="$(GlassPayloadStage)\GlassSettings\SecureUxTheme"
-             Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86'" />
     <Copy Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86'"
           SourceFiles="@(GlassSecureUxTheme)"
-          DestinationFiles="@(GlassSecureUxTheme->'$(GlassPayloadStage)\GlassSettings\SecureUxTheme\%(Filename)%(Extension)')"
+          DestinationFolder="$(GlassPayloadStage)"
           SkipUnchangedFiles="true" />
-    <Error Condition="('$(GlassPayloadArch)' == 'SecureUxTheme-x64' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86') and (!Exists('$(GlassPayloadStage)\GlassSettings\SecureUxTheme\SecureUxTheme4.dll') or !Exists('$(GlassPayloadStage)\GlassSettings\SecureUxTheme\ThemeUiProxy.dll'))"
-      Text="SecureUxTheme $(GlassNativeArch) MSI must stage exactly SecureUxTheme4.dll and ThemeUiProxy.dll." />
+    <Copy Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64' and Exists('$(GlassBuildRelease)\SecureUxTheme\SysWOW64\ThemeUiProxy.dll')"
+          SourceFiles="$(GlassBuildRelease)\SecureUxTheme\SysWOW64\ThemeUiProxy.dll"
+          DestinationFiles="$(GlassPayloadStage)\SysWOW64\ThemeUiProxy.dll"
+          SkipUnchangedFiles="true" />
+    <Error Condition="('$(GlassPayloadArch)' == 'SecureUxTheme-x64' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86') and (!Exists('$(GlassPayloadStage)\SecureUxTheme4.dll') or !Exists('$(GlassPayloadStage)\ThemeUiProxy.dll'))"
+      Text="SecureUxTheme $(GlassNativeArch) MSI must stage SecureUxTheme4.dll and ThemeUiProxy.dll at payload root." />
   </Target>
 
   <PropertyGroup>
@@ -156,7 +178,8 @@
     <GlassPlatformWxs>$(BaseIntermediateOutputPath)$(MSBuildProjectName).PlatformPackage.wxs</GlassPlatformWxs>
     <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' == 'OpenGlass-x64'">$(MSBuildThisFileDirectory)OpenGlassPackage.template.wxs</GlassPlatformTemplate>
     <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' == 'GlassSettings-x64' or '$(MSBuildProjectName)' == 'GlassSettings-x86'">$(MSBuildThisFileDirectory)GlassSettingsPackage.template.wxs</GlassPlatformTemplate>
-    <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x64' or '$(MSBuildProjectName)' == 'SecureUxTheme-x86'">$(MSBuildThisFileDirectory)SecureUxThemePackage.template.wxs</GlassPlatformTemplate>
+    <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x64'">$(MSBuildThisFileDirectory)SecureUxThemePackage.template.wxs</GlassPlatformTemplate>
+    <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x86'">$(MSBuildThisFileDirectory)SecureUxThemePackage-x86.template.wxs</GlassPlatformTemplate>
     <GlassPlatformTemplate Condition="'$(MSBuildProjectName)' != 'OpenGlass-x64' and '$(MSBuildProjectName)' != 'GlassSettings-x64' and '$(MSBuildProjectName)' != 'GlassSettings-x86' and '$(MSBuildProjectName)' != 'SecureUxTheme-x64' and '$(MSBuildProjectName)' != 'SecureUxTheme-x86'">$(MSBuildThisFileDirectory)PlatformPackage.template.wxs</GlassPlatformTemplate>
     <GlassPlatformScript>$(MSBuildThisFileDirectory)scripts\Generate-PlatformWxs.ps1</GlassPlatformScript>
   </PropertyGroup>
@@ -189,15 +212,25 @@
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassPayloadStage = &quot;$(GlassPayloadStage)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassUninsExe = &quot;$(GlassUninsExePath)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassSetupIcon = &quot;$(GlassSetupIconPath)&quot; ?&gt;" Overwrite="false" />
+    <WriteLinesToFile File="$(GlassProductMetadataWxi)"
+      Lines="&lt;?define SecureUxThemeCaDll = &quot;$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', '$(GlassNativeArch)', 'Release', 'SecureUxThemeCa.dll'))&quot; ?&gt;"
+      Overwrite="false"
+      Condition="'$(MSBuildProjectName)' == 'SecureUxTheme-x64' or '$(MSBuildProjectName)' == 'SecureUxTheme-x86'" />
   </Target>
 
-  <Target Name="GlassGenerateHarvest" BeforeTargets="BeforeCompile" DependsOnTargets="GlassWriteProductMetadata" Condition="'$(GlassPayloadArch)' != ''">
+  <PropertyGroup>
+    <_GlassSkipHarvest Condition="'$(GlassPayloadArch)' == 'SecureUxTheme-x64' or '$(GlassPayloadArch)' == 'SecureUxTheme-x86'">true</_GlassSkipHarvest>
+    <_GlassSkipHarvest Condition="'$(_GlassSkipHarvest)' == ''">false</_GlassSkipHarvest>
+  </PropertyGroup>
+
+  <Target Name="GlassGenerateHarvest" BeforeTargets="BeforeCompile" DependsOnTargets="GlassWriteProductMetadata;GlassBuildSecureUxThemeCa" Condition="'$(GlassPayloadArch)' != ''">
     <MakeDir Directories="$(BaseIntermediateOutputPath)" Condition="!Exists('$(BaseIntermediateOutputPath)')" />
     <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(GlassPlatformScript)&quot; -MetadataWxi &quot;$(GlassProductMetadataWxi)&quot; -TemplateWxs &quot;$(GlassPlatformTemplate)&quot; -OutWxs &quot;$(GlassPlatformWxs)&quot;" />
-    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(GlassHarvestScript)&quot; -StagingDir &quot;$(GlassPayloadStage)&quot; -OutFile &quot;$(GlassHarvestWxs)&quot; -ComponentGroupId &quot;GlassPayloadFiles&quot; -RootDirectoryId &quot;INSTALLDIR&quot;" />
+    <Exec Condition="'$(_GlassSkipHarvest)' != 'true'"
+      Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(GlassHarvestScript)&quot; -StagingDir &quot;$(GlassPayloadStage)&quot; -OutFile &quot;$(GlassHarvestWxs)&quot; -ComponentGroupId &quot;GlassPayloadFiles&quot; -RootDirectoryId &quot;INSTALLDIR&quot;" />
     <ItemGroup>
       <Compile Include="$(GlassPlatformWxs)" />
-      <Compile Include="$(GlassHarvestWxs)" />
+      <Compile Include="$(GlassHarvestWxs)" Condition="'$(_GlassSkipHarvest)' != 'true'" />
     </ItemGroup>
   </Target>
 

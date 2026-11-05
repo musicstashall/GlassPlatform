@@ -85,6 +85,20 @@ inline bool SecureDirectory(const std::wstring& path) {
     if(Diag::active)GlassInstallLog::LineFormat(L"Maintenance cache: directory %s path=%s",created?L"created":L"already exists",path.c_str());
     return TrustedDirectory(path);
 }
+// Shared ProgramData\Packages may carry foreign ACEs. Never harden or reject it;
+// only ensure the path is a real directory without reparse tricks.
+inline bool ValidateSharedParentDirectory(const std::wstring& path) {
+    const DWORD attr=GetFileAttributesW(path.c_str());
+    if(attr==INVALID_FILE_ATTRIBUTES) {
+        Diag::Step(L"create-shared-parent",path);
+        return SecureDirectory(path);
+    }
+    if(!(attr&FILE_ATTRIBUTE_DIRECTORY))
+        return Diag::Fail(L"ValidateObjectType",path,ERROR_INVALID_DATA,L"Expected directory",L"Policy");
+    if(attr&FILE_ATTRIBUTE_REPARSE_POINT)
+        return Diag::Fail(L"ValidateReparsePoint",path,ERROR_ACCESS_DENIED,L"Reparse point refused",L"Policy");
+    return true;
+}
 inline bool EnsureRoot() {
     Diag::Step(L"resolve-root",L"FOLDERID_ProgramData");
     const std::wstring root=Root();if(root.empty())return false;
@@ -92,7 +106,7 @@ inline bool EnsureRoot() {
     // Do not rewrite ACLs on this shared Windows folder. Diagnose policy
     // refusals separately from CreateDirectory failures before touching our root.
     Diag::Step(L"validate-packages-parent",parent);
-    if(!SecureDirectory(parent))return false;
+    if(!ValidateSharedParentDirectory(parent))return false;
     Diag::Step(L"validate-ancestors",parent);
     for(std::size_t i=3;i<=parent.size();++i)if(i==parent.size()||parent[i]==L'\\') {
         const auto ancestor=parent.substr(0,i);const DWORD a=GetFileAttributesW(ancestor.c_str());

@@ -27,6 +27,14 @@ inline bool ReadString(HKEY key,const wchar_t* name,std::wstring& out) {
     if(RegQueryValueExW(key,name,nullptr,&type,reinterpret_cast<BYTE*>(data.data()),&size)!=ERROR_SUCCESS)return false;
     out=data.data();return true;
 }
+inline bool ProfileSidHasLiveAccount(const wchar_t* sidString) noexcept {
+    PSID sid=nullptr;
+    if(!ConvertStringSidToSidW(sidString,&sid))return false;
+    wchar_t name[256]{},domain[256]{};DWORD nameC=256,domainC=256;SID_NAME_USE use{};
+    const bool ok=LookupAccountSidW(nullptr,sid,name,&nameC,domain,&domainC,&use)!=FALSE;
+    LocalFree(sid);
+    return ok;
+}
 inline bool SafePath(const std::wstring& path) {
     if(path.size()<3||path[1]!=L':'||path[2]!=L'\\')return false;
     for(std::size_t i=3;i<=path.size();++i) {
@@ -79,6 +87,11 @@ public:
             wchar_t expanded[32768]{};
             const DWORD chars=got?ExpandEnvironmentStringsW(raw.c_str(),expanded,32768):0;
             if(!chars||chars>32768){detail=sid+L": invalid profile path";ok=false;break;}
+            if(!ProfileSidHasLiveAccount(name))continue;
+            const DWORD pathAttr=GetFileAttributesW(expanded);
+            if(pathAttr==INVALID_FILE_ATTRIBUTES||(pathAttr&FILE_ATTRIBUTE_REPARSE_POINT))continue;
+            const std::wstring ntuser=std::wstring(expanded)+L"\\NTUSER.DAT";
+            if(GetFileAttributesW(ntuser.c_str())==INVALID_FILE_ATTRIBUTES)continue;
             Profile profile;profile.sid=sid;profile.path=expanded;
             st=RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ|KEY_WRITE,&profile.hive);
             if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){detail=sid+L": loaded hive unavailable: "+std::to_wstring(st);ok=false;break;}
@@ -99,7 +112,7 @@ public:
     // authorize hook removal. No logout or registry reset is performed here.
     bool PreflightStyles(std::wstring& detail) {
         if(OtherUserSessions(detail)){detail=L"Cannot verify the actual active style of another session: "+detail;return false;}
-        if(Shared::SystemVisualStyle::Current()==Shared::SystemVisualStyle::State::Unknown){detail=L"Actual current visual style is unknown; no reset is authorized";return false;}
+        if(Shared::SystemVisualStyle::CurrentForMaintenance()==Shared::SystemVisualStyle::State::Unknown){detail=L"Actual current visual style is unknown; no reset is authorized";return false;}
         if(!OpenAll(detail))return false;
         HANDLE token=nullptr;
         if(!OpenProcessToken(GetCurrentProcess(),TOKEN_QUERY,&token)){detail=L"Cannot identify current user";return false;}
@@ -133,7 +146,7 @@ public:
             const LONG status=RegOpenKeyExW(profile.hive,L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager",0,KEY_READ,&theme);
             if(status!=ERROR_SUCCESS){detail=profile.sid+L": offline visual style is unknown";return false;}
             std::wstring path;const bool got=ReadString(theme,L"DllName",path);RegCloseKey(theme);
-            if(!got||Shared::SystemVisualStyle::ClassifyPath(path.c_str())!=Shared::SystemVisualStyle::State::Stock) {
+            if(!got||!Shared::SystemVisualStyle::IsStockMsStylesFileName(path.c_str())) {
                 detail=profile.sid+L": custom/unknown offline style; verified offline reset is required before SecureUxTheme removal";return false;
             }
         }

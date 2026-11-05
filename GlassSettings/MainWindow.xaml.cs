@@ -2295,10 +2295,15 @@ public sealed partial class MainWindow : Window
         AddNav("attach", GlassSettingsResources.Get("NavAttach"), "\uE77B");
         NavView.ItemInvoked += NavView_OnItemInvoked;
         ApplyOpenGlassNavVisibility();
+        ApplyPlatformNavVisibility();
     }
 
     private void OnOpenGlassUiPolicyChanged(object? sender, EventArgs e) =>
-        DispatcherQueue.TryEnqueue(ApplyOpenGlassNavVisibility);
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            ApplyOpenGlassNavVisibility();
+            ApplyPlatformNavVisibility();
+        });
 
     private void ApplyOpenGlassNavVisibility()
     {
@@ -2316,6 +2321,25 @@ public sealed partial class MainWindow : Window
         {
             NavigateTo("home", force: true);
             SelectNavItem("home");
+        }
+    }
+
+    private void ApplyPlatformNavVisibility()
+    {
+        var expose = GlassPlatformUiPolicy.ShouldExposePlatformSections();
+        foreach (var tag in new[] { "glass", "text", "attach" })
+        {
+            if (!_navItems.TryGetValue(tag, out var item))
+                continue;
+            item.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+            if (expose)
+                continue;
+            if (string.Equals(_currentTag, tag, StringComparison.Ordinal)
+                || string.Equals(_nav.CurrentSidebarTag, tag, StringComparison.Ordinal))
+            {
+                NavigateTo("home", force: true);
+                SelectNavItem("home");
+            }
         }
     }
 

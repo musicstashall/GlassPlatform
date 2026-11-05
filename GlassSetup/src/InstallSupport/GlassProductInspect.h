@@ -54,4 +54,7 @@ struct Inputs {
 
 Report Run(const Inputs& in);
 
+[[nodiscard]] std::wstring QuerySelfSignerSha1() noexcept;
+[[nodiscard]] bool FileHasSameSignerAsSetup(const std::wstring& path) noexcept;
+
 } // namespace GlassProductInspect

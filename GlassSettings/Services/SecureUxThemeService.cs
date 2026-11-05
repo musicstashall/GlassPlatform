@@ -57,17 +57,18 @@ public static class SecureUxThemeService
                 false,
                 false,
                 false,
-                ExpectedLocalDllPath(),
+                ExpectedSystemDllPath(),
                 unchecked((uint)hr).ToString("X8"));
         }
 
         var localPresent = raw.LocalDllPresent != 0;
         var localPath = string.IsNullOrWhiteSpace(raw.LocalDllPath)
-            ? ExpectedLocalDllPath()
+            ? ExpectedSystemDllPath()
             : raw.LocalDllPath;
 
         var ourIfeo = raw.WinlogonHasOurToken != 0 && (raw.WinlogonGlobalFlag & FlgApplicationVerifier) != 0;
         var loaded = raw.LoadedEventPresent != 0;
+        var msiInstalled = SecureUxThemeMsiService.IsInstalled();
 
         SecureUxThemeState state;
         SecureUxThemeObstacle obstacle;
@@ -96,7 +97,7 @@ public static class SecureUxThemeService
             state = SecureUxThemeState.DeactivationPendingRestart;
             obstacle = SecureUxThemeObstacle.None;
         }
-        else if (localPresent)
+        else if (localPresent || msiInstalled)
         {
             state = SecureUxThemeState.Inactive;
             obstacle = SecureUxThemeObstacle.None;
@@ -107,9 +108,10 @@ public static class SecureUxThemeService
             obstacle = SecureUxThemeObstacle.MissingDll;
         }
 
-        var isActive = ourIfeo || loaded;
-        var switchEnabled = localPresent || isActive;
-        var switchOn = obstacle == SecureUxThemeObstacle.None && ourIfeo;
+        var externalInstall = obstacle is SecureUxThemeObstacle.OfficialV4 or SecureUxThemeObstacle.LegacyInstall;
+        var switchEnabled = !externalInstall
+            && (SecureUxThemeMsiService.CacheMsiAvailable() || localPresent || msiInstalled || ourIfeo || loaded);
+        var switchOn = !externalInstall && obstacle == SecureUxThemeObstacle.None && (ourIfeo || msiInstalled);
         var blocksCustom = state is SecureUxThemeState.ActivationPendingRestart
             or SecureUxThemeState.DeactivationPendingRestart;
 
@@ -133,7 +135,7 @@ public static class SecureUxThemeService
             return snapshot.Obstacle;
         }
 
-        if (!snapshot.LocalDllPresent && !CheckCleanupPending())
+        if (!SecureUxThemeMsiService.CacheMsiAvailable() && !snapshot.LocalDllPresent && !SecureUxThemeMsiService.IsInstalled())
             return SecureUxThemeObstacle.MissingDll;
 
         var hr = NativeHostInterop.SecureUxThemeQuery(out var raw);
@@ -143,7 +145,7 @@ public static class SecureUxThemeService
         if (raw.Wow64Process != 0)
             return SecureUxThemeObstacle.Wow64Process;
 
-        if (raw.LocalDllArchMatchesOs == 0)
+        if (raw.LocalDllArchMatchesOs == 0 && raw.LocalDllPresent != 0)
             return SecureUxThemeObstacle.WrongArchitecture;
 
         if (raw.NativeMachine != NativeHostInterop.ImageFileMachineI386
@@ -157,25 +159,24 @@ public static class SecureUxThemeService
 
     public static int Activate(SecureUxThemeSnapshot snapshot, bool reactivate = false)
     {
-        if (!reactivate && (string.IsNullOrWhiteSpace(snapshot.LocalDllPath) || !Directory.Exists(snapshot.LocalDllPath)))
-            return unchecked((int)0x80070002);
-
-        return NativeHostInterop.SecureUxThemeActivate(snapshot.LocalDllPath, reactivate);
+        _ = snapshot;
+        _ = reactivate;
+        var result = SecureUxThemeMsiService.InstallFromCache();
+        return result.Success ? 0 : result.ExitCode;
     }
 
     public static int Deactivate() =>
-        NativeHostInterop.SecureUxThemeDeactivate();
+        SecureUxThemeMsiService.UninstallProduct().ExitCode;
 
     public sealed record DeactivateResult(int Hr, bool RebootRequired);
 
     public static DeactivateResult DeactivateWithCleanup()
     {
-        var hr = NativeHostInterop.SecureUxThemeDeactivate();
-        if (hr < 0)
-            return new DeactivateResult(hr, false);
+        var result = SecureUxThemeMsiService.UninstallProduct();
+        if (!result.Success)
+            return new DeactivateResult(result.ExitCode, false);
 
-        var pending = CheckCleanupPending();
-        return new DeactivateResult(hr, pending);
+        return new DeactivateResult(0, result.RebootRequired);
     }
 
     public static bool ActivationRequiresRestart(SecureUxThemeSnapshot snapshot, bool reactivate)
@@ -183,27 +184,12 @@ public static class SecureUxThemeService
         if (reactivate)
             return false;
 
-        // Состояния, когда IFEO-хук уже установлен и перезагрузка НЕ нужна:
-        // Active — DLL загружена, хук действует;
-        // ActivationPendingRestart — хук записан, DLL загрузится при следующем входе;
-        // DeactivationPendingRestart — хук снят, но DLL ещё загружена (переактивация без перезагрузки).
         return snapshot.State is not SecureUxThemeState.Active
             and not SecureUxThemeState.ActivationPendingRestart
             and not SecureUxThemeState.DeactivationPendingRestart;
     }
 
-    public static bool CheckCleanupPending()
-    {
-        try
-        {
-            return NativeHostInterop.SecureUxThemeCheckCleanupPending();
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"GlassSettings SecureUxTheme.CheckCleanupPending: {ex}");
-            return false;
-        }
-    }
+    public static bool CheckCleanupPending() => false;
 
     public static bool TryEnsureLoaded()
     {
@@ -253,10 +239,6 @@ public static class SecureUxThemeService
             _ => GlassSettingsResources.Get("Dialog_SignatureConflictBody"),
         };
 
-    /// <summary>
-    /// Старый портативный ThemeTool: <c>SecureUxTheme.dll</c> (без 4) и/или IFEO с этим токеном.
-    /// <c>SecureUxTheme4.dll</c> / наш IFEO winlogon сюда не входят.
-    /// </summary>
     private static bool HasLegacyOfficialInstall(NativeHostInterop.SecureUxThemeNativeQuery raw) =>
         raw.SystemLegacyDllPresent != 0
         || IsOfficialHook(raw.WinlogonGlobalFlag, raw.WinlogonHasLegacyExact)
@@ -268,9 +250,9 @@ public static class SecureUxThemeService
     private static bool IsOfficialHook(uint globalFlag, int exactToken) =>
         exactToken != 0 && (globalFlag & FlgApplicationVerifier) != 0;
 
-    private static string ExpectedLocalDllPath()
+    private static string ExpectedSystemDllPath()
     {
-        // Payload теперь живёт в GlassSettings.MSI: <root>\GlassSettings\SecureUxTheme\.
-        return Path.Combine(PlatformPaths.AppBase, "SecureUxTheme");
+        var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        return Path.Combine(system, "SecureUxTheme4.dll");
     }
 }

@@ -218,6 +218,7 @@
     <ClCompile Include="src\WndCompatHostApi.cpp" />
     <ClCompile Include="src\ProcessBlockList.cpp" />
     <ClCompile Include="src\RegistrySanity.cpp" />
+    <ClCompile Include="src\SecureUxThemeHookRegistry.cpp" />
     <ClCompile Include="src\WinApiUtils.cpp" />
     <ClCompile Include="src\OpenGlassDwmPolicy.cpp" />
     <ClCompile Include="src\OpenGlassHostState.cpp" />
@@ -247,6 +248,7 @@
     <ClCompile Include="src\PartRegistryQuery.cpp" />
     <ClCompile Include="src\RootRegistryMigration.cpp" />
     <ClCompile Include="src\GlassHostRegistry.cpp" />
+    <ClCompile Include="src\GlassInstallerLaunch.cpp" />
     <ClCompile Include="src\RootNcActiveCache.cpp" />
     <ClCompile Include="src\GlassShellRegistration.cpp" />
   </ItemGroup>

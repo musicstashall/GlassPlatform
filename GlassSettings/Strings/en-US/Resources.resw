@@ -663,6 +663,9 @@
   <data name="Home_RowShellExtension" xml:space="preserve"><value>Context menu extension</value></data>
   <data name="Home_RowShellExtensionSub" xml:space="preserve"><value>Manage from the desktop context menu</value></data>
   <data name="Home_RowSystemManagement" xml:space="preserve"><value>System management</value></data>
+  <data name="Home_RowInstallationMaintenance" xml:space="preserve"><value>Installation maintenance</value></data>
+  <data name="Home_InstallationMaintenanceMissing" xml:space="preserve"><value>GlassSetup.exe was not found in the ProgramData maintenance cache. Run Glass Setup once to populate the cache.</value></data>
+  <data name="Home_InstallationMaintenanceLaunchFailed" xml:space="preserve"><value>Could not open installation maintenance. Approve the UAC prompt, or use Change for a Glass product in Windows Settings.</value></data>
   <data name="Home_RowTaskbar" xml:space="preserve"><value>Taskbar</value></data>
   <data name="Home_RowTextFonts" xml:space="preserve"><value>Text and fonts</value></data>
   <data name="Home_RowViewAllProcesses" xml:space="preserve"><value>View all processes</value></data>

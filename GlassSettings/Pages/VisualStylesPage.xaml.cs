@@ -66,6 +66,9 @@ public sealed partial class VisualStylesPage : Page
         base.OnNavigatedTo(e);
         ThemesExpander.IsExpanded = true;
         HookEnvironmentWatcher();
+        TextFontsCard.Visibility = GlassPlatformUiPolicy.ShouldExposePlatformSections()
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         LoadThemes();
         if (ThemesExpander.IsLoaded)
             ThemesExpander_OnLoaded(ThemesExpander, new RoutedEventArgs());

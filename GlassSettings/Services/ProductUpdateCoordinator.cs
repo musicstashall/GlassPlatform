@@ -87,7 +87,8 @@ public static class ProductUpdateCoordinator
         if (OpenGlassReleaseUpdateService.ShouldRefreshNetworkCheck())
             await CheckNetworkForOpenGlassAsync().ConfigureAwait(false);
 
-        if (GlassReleaseUpdateService.ShouldRefreshNetworkCheck())
+        if (GlassPlatformUiPolicy.ShouldExposePlatformSections()
+            && GlassReleaseUpdateService.ShouldRefreshNetworkCheck())
             await CheckNetworkForGlassAsync().ConfigureAwait(false);
 
         NotifyChanged();
@@ -114,6 +115,9 @@ public static class ProductUpdateCoordinator
 
     public static async Task RefreshGlassFromNetworkAsync()
     {
+        if (!GlassPlatformUiPolicy.ShouldExposePlatformSections())
+            return;
+
         await CheckNetworkForGlassAsync().ConfigureAwait(false);
         NotifyChanged();
     }

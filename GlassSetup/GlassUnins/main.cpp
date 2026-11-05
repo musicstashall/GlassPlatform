@@ -696,8 +696,10 @@ private:
             probes.push_back({Msi::kProductSettingsX86,x86Dir_,{}});
         }
         if (chosen.secureUxTheme) {
-            probes.push_back({Msi::kProductSecureUxThemeX64,x64Dir_,{}});
-            probes.push_back({Msi::kProductSecureUxThemeX86,x86Dir_,{}});
+            const bool os64 = GlassInstallUtil::IsOs64Bit();
+            if (os64)
+                probes.push_back({Msi::kProductSecureUxThemeX64, GlassInstallUtil::SecureUxThemeInstalledFileRoot(true), {}});
+            probes.push_back({Msi::kProductSecureUxThemeX86, GlassInstallUtil::SecureUxThemeInstalledFileRoot(os64 ? false : true), {}});
         }
         if (chosen.openGlass) probes.push_back({Msi::kProductOpenGlass,openGlassDir_,{}});
         SetStatus(T(L"Проверка путей установленных продуктов…",L"Checking installed product paths…"),100);

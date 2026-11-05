@@ -391,6 +391,21 @@ void CheckProductFiles(
 
 } // namespace
 
+std::wstring QuerySelfSignerSha1() noexcept
+{
+    return SelfSignerSha1();
+}
+
+bool FileHasSameSignerAsSetup(const std::wstring& path) noexcept
+{
+    const std::wstring self = SelfSignerSha1();
+    if (self.empty() || path.empty())
+        return false;
+    std::wstring hex;
+    GetFileSignerSha1(path, hex);
+    return !hex.empty() && _wcsicmp(hex.c_str(), self.c_str()) == 0;
+}
+
 Report Run(const Inputs& in)
 {
     Report report;

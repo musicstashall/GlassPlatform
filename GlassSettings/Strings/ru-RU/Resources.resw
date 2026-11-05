@@ -669,6 +669,9 @@
   <data name="Home_RowShellExtension" xml:space="preserve"><value>Расширение контекстного меню</value></data>
   <data name="Home_RowShellExtensionSub" xml:space="preserve"><value>Управление в меню рабочего стола</value></data>
   <data name="Home_RowSystemManagement" xml:space="preserve"><value>Управление системой</value></data>
+  <data name="Home_RowInstallationMaintenance" xml:space="preserve"><value>Обслуживание установки</value></data>
+  <data name="Home_InstallationMaintenanceMissing" xml:space="preserve"><value>GlassSetup.exe не найден в кэше обслуживания ProgramData. Запустите установщик Glass хотя бы один раз, чтобы заполнить кэш.</value></data>
+  <data name="Home_InstallationMaintenanceLaunchFailed" xml:space="preserve"><value>Не удалось открыть обслуживание установки. Подтвердите запрос UAC или запустите «Изменить» для продукта Glass в параметрах Windows.</value></data>
   <data name="Home_RowTaskbar" xml:space="preserve"><value>Панель задач</value></data>
   <data name="Home_RowTextFonts" xml:space="preserve"><value>Текст и шрифты</value></data>
   <data name="Home_RowViewAllProcesses" xml:space="preserve"><value>Просмотреть все процессы</value></data>

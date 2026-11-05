@@ -11,6 +11,7 @@ using GlassSettings.Pages.Dwm;
 using GlassSettings.Pages.Glass;
 using GlassSettings.Services;
 using GlassSettings.Strings;
+using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -349,6 +350,7 @@ public sealed partial class HomePage : Page
         Refresh();
         HookEnvironmentWatcher();
         ApplyOpenGlassUiVisibility();
+        ApplyPlatformHomeVisibility();
         OpenGlassUiPolicy.Changed += OnOpenGlassUiPolicyChanged;
         OpenGlassBorderPolicyCoordinator.Changed += OnOpenGlassBorderPolicyChanged;
         // Presence subscription on every load — ensures toggle updates when navigating back.
@@ -563,9 +565,61 @@ public sealed partial class HomePage : Page
 
         var manageRow = _systemCard.AddRow();
         manageRow.Title = GlassSettingsResources.Get("Home_RowSystemManagement");
-        manageRow.ShowDivider = false;
         manageRow.NavigateRequested += (_, _) => RaiseNav(HomeNavTarget.Section("system"));
+
+        var maintenanceRow = _systemCard.AddRow();
+        maintenanceRow.Title = GlassSettingsResources.Get("Home_RowInstallationMaintenance");
+        maintenanceRow.ShowDivider = false;
+        maintenanceRow.NavigateRequested += (_, _) => LaunchInstallationMaintenanceSetup();
         _systemCard.UpdateLastDivider();
+    }
+
+    private static void LaunchInstallationMaintenanceSetup()
+    {
+        var setup = GlassMaintenanceSetupPaths.SetupExecutablePath();
+        if (string.IsNullOrEmpty(setup))
+        {
+            _ = HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("Home_RowInstallationMaintenance"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Get("Home_InstallationMaintenanceMissing")),
+                Footer = HostedConfirmationDialogService.CreateFooter(
+                    GlassSettingsResources.Get("Dialog_Close"))
+            });
+            return;
+        }
+
+        if (!GlassMaintenanceSetupLaunchService.TryLaunch())
+        {
+            _ = HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("Home_RowInstallationMaintenance"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Get("Home_InstallationMaintenanceLaunchFailed")),
+                Footer = HostedConfirmationDialogService.CreateFooter(
+                    GlassSettingsResources.Get("Dialog_Close"))
+            });
+        }
+    }
+
+    private void ApplyPlatformHomeVisibility()
+    {
+        var expose = GlassPlatformUiPolicy.ShouldExposePlatformSections();
+        if (_glassCard is not null)
+            _glassCard.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_processesCard is not null)
+            _processesCard.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_placeholdersCard is not null)
+            _placeholdersCard.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_componentsCard is not null)
+            _componentsCard.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_glassPlatformDualRow is not null)
+            _glassPlatformDualRow.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_glassPlatformRow is not null)
+            _glassPlatformRow.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_shellRow is not null)
+            _shellRow.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void BuildProcessesCard()
@@ -1214,6 +1268,7 @@ public sealed partial class HomePage : Page
     private void RefreshSystemCard()
     {
         if (_systemCard is null) return;
+        ApplyPlatformHomeVisibility();
 
         if ((DateTime.UtcNow - _lastRefreshSystemCardUtc).TotalMilliseconds < 2000)
             return;
@@ -1657,6 +1712,9 @@ public sealed partial class HomePage : Page
     private void RefreshPlatformComponentGroup()
     {
         if (_platformComponentGroup is null)
+            return;
+
+        if (!GlassPlatformUiPolicy.ShouldExposePlatformSections())
             return;
 
         var detailed = PlatformModuleVersions.GetAllDetailed();

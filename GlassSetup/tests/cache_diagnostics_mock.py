@@ -104,15 +104,14 @@ int main(){
  using namespace GlassMaintenanceCache;
  const std::wstring parent=L"C:\\ProgramData\\Packages",root=parent+L"\\GlassPlatform";
  std::wstring detail;
- // Existing shared parent with an ordinary user's write/create ACE. Reject
- // BEFORE CreateDirectory of our child and explain a policy refusal, not a
- // made-up CreateDirectory Win32 failure. Never rewrite the parent's ACL.
+ // Existing shared parent with foreign ACEs: skip TrustedPath on Packages,
+ // create only our GlassPlatform child with a hardened ACL.
  reset();acl.AceCount=1;ace.Mask=FILE_APPEND_DATA;ace.Header.AceFlags=3;
- {D::Publication report(&detail);assert(!EnsureRoot());assert(report.context.first.domain==L"Policy");assert(report.context.first.path==parent);assert(report.context.first.operation==L"ValidateOwnerAndDacl");assert(report.context.first.reason.find(L"SID=")!=std::wstring::npos);assert(report.context.first.reason.find(L"mask=")!=std::wstring::npos);}
- assert(ownedCreateCalls==0&&detail.find(L"validate-packages-parent")!=std::wstring::npos);
+ {D::Publication report(&detail);assert(EnsureRoot());assert(!report.context.failed);report.succeeded=true;}
+ assert(ownedCreateCalls==1&&detail.find(L"validate-packages-parent")!=std::wstring::npos&&files.count(root));
  reset();ownerSid=3;
- {D::Publication report(&detail);assert(!EnsureRoot());assert(report.context.first.reason.find(L"owner=")!=std::wstring::npos);}
- assert(ownedCreateCalls==0);
+ {D::Publication report(&detail);assert(EnsureRoot());assert(!report.context.failed);report.succeeded=true;}
+ assert(ownedCreateCalls==1&&files.count(root));
  // Actual API access failure creating OUR child: distinguish it from policy.
  reset();denied=root;
  {D::Publication report(&detail);assert(!EnsureRoot());assert(report.context.first.domain==L"Win32");assert(report.context.first.operation==L"CreateDirectoryW");assert(report.context.first.path==root);assert(report.context.first.code==5);}
@@ -136,14 +135,14 @@ int main(){
  // Unknown internal failures are explicit, never reported as API success 0.
  {D::Publication report(&detail);D::Step(L"test-stage",root);}
  assert(detail.find(L"Policy=")!=std::wstring::npos&&detail.find(L"(31)")!=std::wstring::npos);
- std::cout<<"PASS: real cache preflight distinguishes parent ACL policy, owner and child API failures; first-error/stage/path/code diagnostics and resource I/O error preservation\n";
+ std::cout<<"PASS: shared Packages parent tolerated; child create failures and diagnostics preserved; resource I/O error preservation\n";
 }
 '''
 
 code = stubs + diag + "\nnamespace GlassMaintenanceCache {namespace Diag=Diagnostics;\n"
 for token in ("inline std::wstring Root()", "inline bool TrustedPath(",
               "inline bool TrustedDirectory(", "inline bool SecureDirectory(",
-              "inline bool EnsureRoot()"):
+              "inline bool ValidateSharedParentDirectory(", "inline bool EnsureRoot()"):
     code += function(token) + "\n"
 util = (repo / "GlassSetup/src/InstallSupport/GlassInstallUtil.cpp").read_text(encoding="utf-8")
 code += "}\n" + resource_stubs + "\nnamespace GlassInstallUtil {\n"

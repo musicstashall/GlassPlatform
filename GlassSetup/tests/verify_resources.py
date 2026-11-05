@@ -554,7 +554,7 @@ assert "{0CD1A2BE-2C39-4404-A026-34642B517428}.Release|x64.Build.0 = Release|x64
 assert "{81FE634A-DB11-4759-B76D-D1119AC2CF13}.Release|x86.Build.0 = Release|x86" in solution
 run_sequence=section(engine, "bool InstallEngine::RunMsiSequence()", "void InstallEngine::SeedUserDefaults()")
 assert worker.index("InstallGlassSettingsEarly()") < worker.index("RunMsiSequence()")
-assert "selection_.secureUxThemePackageOnly" in engine
+assert "selection_.secureUxThemePackageOnly" not in engine
 assert "kProductSecureUxThemeX64" in engine and "kProductSecureUxThemeX86" in engine
 assert "kProductSecureUxThemeX64" in rollback and "kProductSecureUxThemeX86" in rollback
 unins_remove=section(unins, "int count=(chosen.secureUxTheme?1:0)", "if (chosen.openGlass)")

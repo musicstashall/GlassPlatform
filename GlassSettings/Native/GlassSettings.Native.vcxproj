@@ -134,6 +134,7 @@
     <ClCompile Include="ShellSparsePackage.cpp" />
     <ClCompile Include="VisualStyleApplyNative.cpp" />
     <ClCompile Include="SecureUxThemeNative.cpp" />
+    <ClCompile Include="MaintenanceSetupTicketNative.cpp" />
     <ClCompile Include="BlockListNative.cpp" />
   </ItemGroup>
   <ItemGroup>

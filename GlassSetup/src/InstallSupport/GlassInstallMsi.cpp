@@ -115,6 +115,19 @@ bool IsProductInstalled(const wchar_t* productCode) noexcept {
     return MsiQueryProductStateW(productCode) == INSTALLSTATE_DEFAULT;
 }
 
+void RemoveOrphanUninstallEntry(const wchar_t* productCode) noexcept {
+    if (!productCode || !productCode[0]) return;
+    if (IsProductInstalled(productCode)) return;
+    const std::wstring sub =
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + std::wstring(productCode);
+    HKEY probe = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, sub.c_str(), 0, KEY_READ | KEY_WOW64_64KEY, &probe) != ERROR_SUCCESS)
+        return;
+    RegCloseKey(probe);
+    const LONG st = RegDeleteTreeW(HKEY_LOCAL_MACHINE, sub.c_str());
+    GlassInstallLog::LineFormat(L"Removed orphan ARP uninstall key %s (0x%08lX)", productCode, st);
+}
+
 bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress, UINT* resultCode) noexcept {
     if (resultCode) *resultCode = ERROR_SUCCESS;
     if (!productCode || !productCode[0]) return true;
@@ -190,9 +203,7 @@ std::wstring UninsExePathForProduct(const std::wstring& productCode, const std::
     while (!root.empty() && (root.back() == L'\\' || root.back() == L'/'))
         root.pop_back();
     if (_wcsicmp(productCode.c_str(), kProductSettingsX64) == 0 ||
-        _wcsicmp(productCode.c_str(), kProductSettingsX86) == 0 ||
-        _wcsicmp(productCode.c_str(), kProductSecureUxThemeX64) == 0 ||
-        _wcsicmp(productCode.c_str(), kProductSecureUxThemeX86) == 0) {
+        _wcsicmp(productCode.c_str(), kProductSettingsX86) == 0) {
         const std::wstring sub = root + L"\\GlassSettings\\unins000.exe";
         if (GetFileAttributesW(sub.c_str()) != INVALID_FILE_ATTRIBUTES)
             return sub;
@@ -206,7 +217,11 @@ std::wstring UninsExePathForProduct(const std::wstring& productCode, const std::
 // PublishProduct пишет msiexec + WindowsInstaller=1. Переключаем ARP на unins000.exe --product "{GUID}"
 // и снимаем WindowsInstaller, чтобы Параметры Windows вызывали наш WebView2-деинсталлятор.
 void PatchArpUninstallString(const std::wstring& productCode, const std::wstring& installDir) noexcept {
-    if (productCode.empty() || installDir.empty()) return;
+    if (productCode.empty()) return;
+    const bool secureUxThemeProduct =
+        _wcsicmp(productCode.c_str(), kProductSecureUxThemeX64) == 0 ||
+        _wcsicmp(productCode.c_str(), kProductSecureUxThemeX86) == 0;
+    if (installDir.empty() && !secureUxThemeProduct) return;
     std::wstring exe = GlassMaintenanceCache::CurrentFile(L"GlassUnins.exe");
     if(exe.empty())exe=UninsExePathForProduct(productCode, installDir);
     if (exe.empty()) return;
@@ -242,9 +257,9 @@ void PatchArpUninstallString(const std::wstring& productCode, const std::wstring
         RegCloseKey(key);
         return st1 == ERROR_SUCCESS && st2 == ERROR_SUCCESS;
     };
-    const bool ok = writeRoot(HKEY_CURRENT_USER, 0)
-        || writeRoot(HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY)
-        || writeRoot(HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY);
+    const bool ok = writeRoot(HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY)
+        || writeRoot(HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY)
+        || writeRoot(HKEY_CURRENT_USER, 0);
     GlassInstallLog::LineFormat(L"ARP UninstallString -> unins000 (%s) %s",
         productCode.c_str(), ok ? L"ok" : L"skip");
 }

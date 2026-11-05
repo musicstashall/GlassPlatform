@@ -5,7 +5,7 @@
            Version="$(var.GlassMsiVersion)"
            UpgradeCode="$(var.GlassUpgradeCode)"
            ProductCode="$(var.GlassProductCode)"
-           Scope="perUser"
+           Scope="perMachine"
            Compressed="yes">
     <MajorUpgrade AllowDowngrades="no" AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="Установлена более новая версия SecureUxTheme." />
@@ -14,26 +14,41 @@
     <Icon Id="GlassProductIcon" SourceFile="$(var.GlassSetupIcon)" />
     <Property Id="ARPPRODUCTICON" Value="GlassProductIcon" />
     <Property Id="GLASSBUNDLEVERSION" Value="$(var.GlassMsiBundleVersion)" Hidden="yes" />
-    <Property Id="GLASSSETTINGSINSTALLED">
-      <RegistrySearch Id="GlassSettingsProductSearch" Root="HKCU"
-                      Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\{$(var.GlassSettingsProductCode)}"
-                      Name="DisplayName" Type="raw" />
-    </Property>
-    <Launch Condition="Installed OR GLASSSETTINGSINSTALLED"
-            Message="SecureUxTheme requires the matching-architecture GlassSettings product." />
+    <Property Id="GLASS_RESTORE_NO_CAB" Value="0" Hidden="yes" />
+
+    <Binary Id="SecureUxThemeCa" SourceFile="$(var.SecureUxThemeCaDll)" />
+
+    <CustomAction Id="SecureUxThemeCaInstall" BinaryRef="SecureUxThemeCa" DllEntry="SecureUxThemeCaInstall"
+                  Execute="commit" Impersonate="no" Return="check" />
+    <CustomAction Id="SecureUxThemeCaUninstall" BinaryRef="SecureUxThemeCa" DllEntry="SecureUxThemeCaUninstall"
+                  Execute="commit" Impersonate="no" Return="check" />
 
     <Feature Id="MainFeature" Title="$(var.GlassPlatformTitle)" Level="1">
-      <ComponentGroupRef Id="GlassPayloadFiles" />
+      <ComponentRef Id="SecureUxThemePatcher" />
+      <ComponentRef Id="SecureUxThemeProxyNative" />
+      <ComponentRef Id="SecureUxThemeProxyWow" />
     </Feature>
 
-    <!-- Payload stays beside GlassSettings.Native.dll so that the native helper
-         resolves <INSTALLDIR>\GlassSettings\SecureUxTheme at activation time. -->
-    <StandardDirectory Id="ProgramFiles6432Folder">
-      <Directory Id="INSTALLDIR" Name="GlassPlatform" />
+    <!-- x64 MSI: System6432Folder → System32; SystemFolder → SysWOW64. -->
+    <StandardDirectory Id="System6432Folder">
+      <Component Id="SecureUxThemePatcher" Guid="*">
+        <File Id="SecureUxTheme4Dll" Source="$(var.GlassPayloadStage)\SecureUxTheme4.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="SecureUxThemeProxyNative" Guid="*">
+        <File Id="ThemeUiProxyNative" Source="$(var.GlassPayloadStage)\ThemeUiProxy.dll" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="SystemFolder">
+      <Component Id="SecureUxThemeProxyWow" Guid="*" Bitness="always32" Condition="VersionNT64">
+        <File Id="ThemeUiProxyWow" Source="$(var.GlassPayloadStage)\SysWOW64\ThemeUiProxy.dll" KeyPath="yes" />
+      </Component>
     </StandardDirectory>
 
     <InstallExecuteSequence>
-      <InstallFiles />
+      <InstallFiles Condition="GLASS_RESTORE_NO_CAB &lt;&gt; 1" />
+      <Custom Action="SecureUxThemeCaInstall" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="SecureUxThemeCaUninstall" Before="RemoveFiles" Condition="Installed AND NOT REINSTALL" />
     </InstallExecuteSequence>
   </Package>
 </Wix>

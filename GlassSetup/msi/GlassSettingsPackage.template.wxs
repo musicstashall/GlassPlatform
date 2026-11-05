@@ -5,7 +5,7 @@
            Version="$(var.GlassMsiVersion)"
            UpgradeCode="$(var.GlassUpgradeCode)"
            ProductCode="$(var.GlassProductCode)"
-           Scope="perUser"
+           Scope="perMachine"
            Compressed="yes">
     <MajorUpgrade AllowDowngrades="no" AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="Установлена более новая версия GlassSettings." />

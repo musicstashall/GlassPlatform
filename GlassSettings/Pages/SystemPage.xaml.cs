@@ -182,6 +182,10 @@ public sealed partial class SystemPage : Page
         var exposed = OpenGlassUiPolicy.IsFeatureExposedInUi();
         if (_ogNav is not null)
             _ogNav.Visibility = exposed ? Visibility.Visible : Visibility.Collapsed;
+        var platform = GlassPlatformUiPolicy.ShouldExposePlatformSections();
+        if (_glassNav is not null)
+            _glassNav.Visibility = platform ? Visibility.Visible : Visibility.Collapsed;
+        ShellExtensionRow.Visibility = platform ? Visibility.Visible : Visibility.Collapsed;
         BuildInfoBanner();
     }
 

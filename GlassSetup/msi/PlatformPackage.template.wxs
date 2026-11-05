@@ -5,7 +5,7 @@
            Version="$(var.GlassMsiVersion)"
            UpgradeCode="$(var.GlassUpgradeCode)"
            ProductCode="$(var.GlassProductCode)"
-           Scope="perUser"
+           Scope="perMachine"
            Compressed="yes">
     <MajorUpgrade AllowDowngrades="no" AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="Установлена более новая версия Glass Platform." />
@@ -29,7 +29,7 @@
     </StandardDirectory>
 
     <Component Id="GlassInstallPathRegistry" Directory="INSTALLDIR" Guid="*">
-      <RegistryKey Root="HKCU" Key="Software\GlassPlatform">
+      <RegistryKey Root="HKLM" Key="Software\GlassPlatform">
         <RegistryValue Name="$(var.GlassInstallPathValueName)" Type="string" Value="[INSTALLDIR]" KeyPath="yes" />
       </RegistryKey>
     </Component>

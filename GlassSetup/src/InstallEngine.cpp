@@ -665,23 +665,6 @@ bool InstallEngine::Start(
     launchingPhase_.store(false, std::memory_order_relaxed);
 
     selection_=GlassProducts::NormalizeInstall(selection_,GlassInstallUtil::IsOs64Bit());
-    const bool settingsInstalled=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64)
-        || GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86);
-    const bool sutMsiInstalled=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX64)
-        || GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX86);
-    bool legacySutPayload=false;
-    if ((selection_.secureUxTheme || selection_.glassSettings) && settingsInstalled && !sutMsiInstalled) {
-        GlassInstallUtil::SecureUxThemeState sutState=GlassInstallUtil::SecureUxThemeState::Unavailable;
-        if (GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&sutState,nullptr))
-            legacySutPayload=sutState==GlassInstallUtil::SecureUxThemeState::Active ||
-                sutState==GlassInstallUtil::SecureUxThemeState::Inactive ||
-                sutState==GlassInstallUtil::SecureUxThemeState::ActivationPending ||
-                sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
-    }
-
-    if (selection_.glassSettings && legacySutPayload && !selection_.secureUxTheme)
-        selection_.secureUxThemePackageOnly=true;
-
     GlassInstallUtil::ConfigureEmbeddedUnlocker(instance, IDR_UNLOCKER_X64, IDR_UNLOCKER_X86);
 
     holdGate_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -1124,8 +1107,8 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
         {IDR_MSI_X86,       L"Glass-x86.msi",         selection_.platform32},
         {IDR_MSI_GS_X64,    L"GlassSettings-x64.msi", os64 && selection_.glassSettings},
         {IDR_MSI_GS_X86,    L"GlassSettings-x86.msi", !os64 && selection_.glassSettings},
-        {IDR_MSI_SUT_X64,   L"SecureUxTheme-x64.msi", os64 && (selection_.secureUxTheme || selection_.secureUxThemePackageOnly)},
-        {IDR_MSI_SUT_X86,   L"SecureUxTheme-x86.msi", !os64 && (selection_.secureUxTheme || selection_.secureUxThemePackageOnly)},
+        {IDR_MSI_SUT_X64,   L"SecureUxTheme-x64.msi", os64 && selection_.secureUxTheme},
+        {IDR_MSI_SUT_X86,   L"SecureUxTheme-x86.msi", !os64 && selection_.secureUxTheme},
         {IDR_MSI_OPENGLASS, L"OpenGlass-x64.msi",     os64 && selection_.openGlass},
     };
     int neededTotal = 0;
@@ -1337,13 +1320,6 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
     const wchar_t* msiName=PathFindFileNameW(msiPath.c_str());
     const bool secureUxThemeMsi=msiName &&
         (_wcsicmp(msiName,L"SecureUxTheme-x64.msi")==0 || _wcsicmp(msiName,L"SecureUxTheme-x86.msi")==0);
-    if (secureUxThemeMsi && selection_.glassSettings) {
-        // Setup installs matching GlassSettings first, within the same MSI
-        // transaction; the dependent package's RegistrySearch cannot see that
-        // uncommitted registration yet. When Setup is not installing Settings,
-        // the package's registry prerequisite search must validate it instead.
-        props+=L" GLASSSETTINGSINSTALLED=1";
-    }
     InstallLog::LineFormat(L"MsiInstallProduct %s", msiPath.c_str());
     InstallLog::LineFormat(L"  %s", props.c_str());
 
@@ -1453,7 +1429,7 @@ bool InstallEngine::RunMsiSequence() noexcept {
         steps.push_back({L"Glass-x64.msi", x64Dir_, labels_.platform64});
     if (selection_.platform32)
         steps.push_back({L"Glass-x86.msi", x86Dir_, labels_.platform32});
-    if (selection_.secureUxTheme || selection_.secureUxThemePackageOnly)
+    if (selection_.secureUxTheme)
         steps.push_back({is64 ? L"SecureUxTheme-x64.msi" : L"SecureUxTheme-x86.msi",
                          is64 ? x64Dir_ : x86Dir_, labels_.secureUxTheme});
     // The selected GlassSettings MSI has already run before monitoring.
@@ -1654,21 +1630,6 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         GlassInstallMsi::PatchArpUninstallString(code,_wcsicmp(code,GlassInstallMsi::kProductOpenGlass)==0?openGlassDir_:product32?x86Dir_:x64Dir_);
     }
 #endif
-
-    if (selection_.secureUxTheme) {
-        SetStatus(labels_.secureUxTheme.empty()?L"SecureUxTheme":labels_.secureUxTheme,9300);
-        GlassInstallUtil::SecureUxThemeActivateRun sutRun;
-        std::wstring sutError;
-        if (!GlassInstallUtil::InvokeSecureUxThemeActivate(x64Dir_,x86Dir_,&sutRun,&sutError)) {
-            const std::wstring hint=labels_.warnSecureUxThemeHint.empty()?sutError:labels_.warnSecureUxThemeHint+L" "+sutError;
-            AddFinishWarning(labels_.warnSecureUxTheme.empty()?L"SecureUxTheme could not be enabled.":labels_.warnSecureUxTheme,hint);
-        } else if (sutRun.skippedExternalInstall) {
-            AddFinishWarning(labels_.warnSecureUxTheme.empty()?L"SecureUxTheme is managed by another installation.":labels_.warnSecureUxTheme,
-                labels_.warnSecureUxThemeHint.empty()?L"The external installation was left untouched.":labels_.warnSecureUxThemeHint);
-        } else if (sutRun.rebootRequired) {
-            AddFinishWarning(labels_.warnSecureUxThemeRestart.empty()?L"Restart Windows to finish enabling SecureUxTheme.":labels_.warnSecureUxThemeRestart,L"");
-        }
-    }
 
     // Policy: a selected platform is always started, whether or not it was
     // running (or its task was enabled) when Setup began. StartPlatform

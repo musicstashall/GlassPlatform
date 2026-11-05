@@ -18,7 +18,7 @@
     <BuildProject>false</BuildProject>
   </PropertyGroup>
   <ItemGroup>
-    <None Include="SecureUxThemePackage.template.wxs" />
+    <None Include="SecureUxThemePackage-x86.template.wxs" />
     <None Include="GlassSetupPayload.targets" />
     <None Include="scripts\Generate-HarvestWxs.ps1" />
     <None Include="scripts\Generate-PlatformWxs.ps1" />

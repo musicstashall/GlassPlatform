@@ -50,6 +50,19 @@ inline State ClassifyPath(const wchar_t* path) {
     trust.dwStateAction=WTD_STATEACTION_CLOSE;(void)WinVerifyTrust(nullptr,&policy,&trust);
     return status==ERROR_SUCCESS&&microsoft?State::Stock:State::Unknown;
 }
+inline bool IsStockMsStylesFileName(const wchar_t* path) noexcept {
+    if(!path||!*path)return true;
+    const wchar_t* name=path;
+    for(const wchar_t* p=path;*p;++p)if(*p==L'\\')name=p+1;
+    return _wcsicmp(name,L"aero.msstyles")==0||_wcsicmp(name,L"aerolite.msstyles")==0;
+}
+// GlassSettings parity: stock by base name; no Authenticode gate for apply/reset.
+inline State CurrentForMaintenance() noexcept {
+    if(!IsThemeActive())return State::Stock;
+    wchar_t style[32768]{},color[256]{},size[256]{};
+    if(FAILED(GetCurrentThemeName(style,32768,color,256,size,256)))return State::Unknown;
+    return IsStockMsStylesFileName(style)?State::Stock:State::ResetRequired;
+}
 inline State Current() {
     if(!IsThemeActive())return State::Stock;
     wchar_t style[32768]{},color[256]{},size[256]{};
