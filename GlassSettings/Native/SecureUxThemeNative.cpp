@@ -6,7 +6,6 @@
 #include <aclapi.h>
 #include <uxtheme.h>
 #include <SystemVisualStyle.h>
-#include <SecureUxThemeHookRegistry.h>
 #include <wil/resource.h>
 
 #pragma comment(lib, "uxtheme.lib")

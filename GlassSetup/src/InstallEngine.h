@@ -2,6 +2,7 @@
 #include "InstallSupport/GlassInstallRollback.h"
 #include "InstallSupport/GlassInstallRemoval.h"
 #include "InstallSupport/GlassUserDefaults.h"
+#include "InstallSupport/GlassSecureUxPackage.h"
 #include "GlassProducts.h"
 #include "WizardUnlockState.h"
 #include <windows.h>
@@ -180,6 +181,8 @@ private:
     bool VerifyEmbeddedNativePayload() noexcept;
     bool InstallGlassSettingsEarly() noexcept;
     bool RunMsiSequence() noexcept;
+    bool InstallOriginalSecureUxTheme() noexcept;
+    GlassSecureUxPackage::Package secureUxPackage_;
     bool RecheckSnapshottedProduct(const wchar_t* productCode) noexcept;
     bool RecheckRelatedProducts(const wchar_t* productCode) noexcept;
     bool StopHostsForRollback() noexcept;
@@ -189,9 +192,9 @@ private:
     // Phase B: autostart tasks / OpenGlass service and their validation.
     // Runs before anything is started, so a failure still rolls back.
     bool RegisterSelectedProducts() noexcept;
-    // Phase C: start the selected products, restore prior hosts, register the
-    // shell extension. The first start is the commit point: every failure in
-    // here becomes a FinishWarning, never a failure or rollback.
+    // Phase C: after worker commit (including the final vendor transaction),
+    // start selected products, restore prior hosts, register shell extension.
+    // Every failure here becomes a FinishWarning, never a rollback.
     void LaunchSelectedProducts() noexcept;
     void SeedUserDefaults() noexcept;
     void AddFinishWarning(const std::wstring& title, const std::wstring& detail) noexcept;

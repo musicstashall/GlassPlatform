@@ -1593,7 +1593,7 @@ private:
             inspectIn.msiResX64=IDR_MSI_X64;
             inspectIn.msiResX86=IDR_MSI_X86;
             inspectIn.msiResSettings=os64?IDR_MSI_GS_X64:IDR_MSI_GS_X86;
-            inspectIn.msiResSecureUxTheme=os64?IDR_MSI_SUT_X64:IDR_MSI_SUT_X86;
+            inspectIn.msiResSecureUxTheme=0; // Original vendor MSI is not embedded.
             inspectIn.msiResOg=IDR_MSI_OPENGLASS;
             inspectIn.cancelled=&inspectStop_;
             auto report=GlassProductInspect::Run(inspectIn);

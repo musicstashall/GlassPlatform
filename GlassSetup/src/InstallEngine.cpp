@@ -522,6 +522,10 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                 // Phase B still rolls back: tasks and the service are registered
                 // and validated while nothing has been started yet.
                 ok = self->RegisterSelectedProducts();
+                // The original vendor transaction is last: all rollbackable
+                // Glass registration is complete and UI cancellation is closed.
+                // Failure rolls back Glass; vendor success is the commit point.
+                if (ok) ok = self->InstallOriginalSecureUxTheme();
                 if (ok) {
                     // Commit point. From here on the products are started and the
                     // installation is final: no step below may fail the install
@@ -1107,8 +1111,6 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
         {IDR_MSI_X86,       L"Glass-x86.msi",         selection_.platform32},
         {IDR_MSI_GS_X64,    L"GlassSettings-x64.msi", os64 && selection_.glassSettings},
         {IDR_MSI_GS_X86,    L"GlassSettings-x86.msi", !os64 && selection_.glassSettings},
-        {IDR_MSI_SUT_X64,   L"SecureUxTheme-x64.msi", os64 && selection_.secureUxTheme},
-        {IDR_MSI_SUT_X86,   L"SecureUxTheme-x86.msi", !os64 && selection_.secureUxTheme},
         {IDR_MSI_OPENGLASS, L"OpenGlass-x64.msi",     os64 && selection_.openGlass},
     };
     int neededTotal = 0;
@@ -1137,6 +1139,16 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
         SetStatus(labels_.extract, (step * 400) / neededTotal);
     }
     SetStatus(labels_.extract, 400);
+    if (selection_.secureUxTheme) {
+        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+        SetStatus(ru?L"SecureUxTheme: проверка MSI рядом с установщиком / загрузка":
+                     L"SecureUxTheme: checking adjacent MSI / downloading",400);
+        std::wstring error;
+        if (!GlassSecureUxPackage::Prepare(tempDir_,cancelRequested_,secureUxPackage_,error)) {
+            if (!IsCancelRequested()) SetFailure(error,0);
+            return false;
+        }
+    }
     return true;
 #else
     (void)instance;
@@ -1414,6 +1426,42 @@ bool InstallEngine::InstallGlassSettingsEarly() noexcept {
     return RunOneMsi(path, dir, label, 800, 1200);
 }
 
+bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
+    if (!selection_.secureUxTheme) return true;
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    std::wstring error;
+    // Recheck immediately before MSI to avoid implicitly repairing/upgrading a
+    // product installed by another process while Glass was being installed.
+    if (secureUxPackage_.path.empty() || !GlassSecureUxPackage::CheckNoInstalledProduct(error)) {
+        SetFailure(error.empty()?L"Official SecureUxTheme MSI was not prepared.":error,0);
+        return false;
+    }
+    GlassInstallMsi::ProgressSink sink{};
+    sink.label=labels_.secureUxTheme.empty()?L"SecureUxTheme":labels_.secureUxTheme;
+    sink.base=9200; sink.span=300;
+    sink.onProgress=[this](const std::wstring& label,int progress){SetStatus(label,progress);};
+    // launchingPhase_ has closed UI cancellation. No INSTALLDIR, custom
+    // properties, ARP rewriting or Glass product/root validation is applied.
+    SetStatus(sink.label,9200);
+    const auto log=InstallLog::NextMsiVerboseLogPath(L"SecureUxTheme-original");
+    if (!log.empty()) MsiEnableLogW(INSTALLLOGMODE_VERBOSE,log.c_str(),INSTALLLOGATTRIBUTES_FLUSHEACHLINE);
+    const UINT result=GlassInstallMsi::InstallProduct(secureUxPackage_.path,L"REBOOT=ReallySuppress",&sink);
+    InstallLog::LineFormat(L"Original SecureUxTheme MSI returned %u (ProductCode %s)",result,secureUxPackage_.productCode.c_str());
+    if (!GlassInstallMsi::MsiSuccess(result)) {
+        SetFailure(ru?L"Не удалось установить оригинальный MSI SecureUxTheme.":
+                      L"Could not install the original SecureUxTheme MSI.",result);
+        return false;
+    }
+    // Do not put the vendor ProductCode into Glass rollback's fixed-root list.
+    // There are no failing/cancellable steps after this vendor transaction.
+    if (result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED)
+        AddFinishWarning(ru?L"SecureUxTheme: требуется перезагрузка Windows":
+                            L"SecureUxTheme: Windows restart required",
+            ru?L"MSI установлен. Автоматическая перезагрузка подавлена; перезагрузите Windows самостоятельно.":
+               L"The MSI is installed. Automatic restart was suppressed; restart Windows yourself.");
+    return true;
+}
+
 bool InstallEngine::RunMsiSequence() noexcept {
     const bool is64 = scanNativeX64_;
     const bool ru = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
@@ -1429,9 +1477,6 @@ bool InstallEngine::RunMsiSequence() noexcept {
         steps.push_back({L"Glass-x64.msi", x64Dir_, labels_.platform64});
     if (selection_.platform32)
         steps.push_back({L"Glass-x86.msi", x86Dir_, labels_.platform32});
-    if (selection_.secureUxTheme)
-        steps.push_back({is64 ? L"SecureUxTheme-x64.msi" : L"SecureUxTheme-x86.msi",
-                         is64 ? x64Dir_ : x86Dir_, labels_.secureUxTheme});
     // The selected GlassSettings MSI has already run before monitoring.
     if (is64 && selection_.openGlass)
         steps.push_back({L"OpenGlass-x64.msi", openGlassDir_, labels_.openGlass});
@@ -1605,9 +1650,9 @@ bool InstallEngine::RegisterSelectedProducts() noexcept {
     return true;
 }
 
-// Phase C. The first StartPlatform call is the commit point of the whole
-// installation: the files, tasks and service are final, so nothing in this
-// routine may fail the install. Each problem is logged and shown as a note.
+// Phase C. The worker has already crossed the commit boundary (including
+// the final original vendor MSI, when selected). Nothing in this routine may
+// fail the install. Each problem is logged and shown as a finish note.
 void InstallEngine::LaunchSelectedProducts() noexcept {
     const bool is64 = scanNativeX64_;
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
@@ -1615,7 +1660,6 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
     const GlassMaintenanceCache::Blob cacheBlobs[]={
         {IDR_MSI_X64,L"Glass-x64.msi"},{IDR_MSI_X86,L"Glass-x86.msi"},
         {IDR_MSI_GS_X64,L"GlassSettings-x64.msi"},{IDR_MSI_GS_X86,L"GlassSettings-x86.msi"},
-        {IDR_MSI_SUT_X64,L"SecureUxTheme-x64.msi"},{IDR_MSI_SUT_X86,L"SecureUxTheme-x86.msi"},
         {IDR_MSI_OPENGLASS,L"OpenGlass-x64.msi"}};
     std::wstring cacheFailure;
     if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs,std::size(cacheBlobs),IDR_MAINTENANCE_UNINS,IDR_UNLOCKER_X86,&cacheFailure))
@@ -1623,10 +1667,9 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
             (ru?L"Не удалось полностью сохранить комплект обслуживания. Это не сообщение о сбое запуска. Сохраните исходный установщик и журнал.\n":
                 L"The maintenance bundle was not fully saved. This does not indicate a component startup failure. Keep the original installer and log.\n")+cacheFailure);
     const wchar_t* products[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
-        GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass,
-        GlassInstallMsi::kProductSecureUxThemeX64,GlassInstallMsi::kProductSecureUxThemeX86};
+        GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass};
     for(const auto* code:products)if(GlassInstallMsi::IsProductInstalled(code)) {
-        const bool product32=_wcsicmp(code,GlassInstallMsi::kProductPlatformX86)==0||_wcsicmp(code,GlassInstallMsi::kProductSettingsX86)==0||_wcsicmp(code,GlassInstallMsi::kProductSecureUxThemeX86)==0;
+        const bool product32=_wcsicmp(code,GlassInstallMsi::kProductPlatformX86)==0||_wcsicmp(code,GlassInstallMsi::kProductSettingsX86)==0;
         GlassInstallMsi::PatchArpUninstallString(code,_wcsicmp(code,GlassInstallMsi::kProductOpenGlass)==0?openGlassDir_:product32?x86Dir_:x64Dir_);
     }
 #endif

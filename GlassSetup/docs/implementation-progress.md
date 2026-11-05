@@ -1,6 +1,16 @@
-## Исправление графа сборки SUT MSI
+# Оригинальные MSI SecureUxTheme — 2026-11-05
 
-SecureUxThemeCa включён в solution с Release x64/Win32 mappings и зависимостью от GlassShared; оба WiX-проекта зависят от CA. Вложенный MSBuild CA отключён при сборке solution/Visual Studio, чтобы не пересобирать общую библиотеку параллельно планировщику solution. Прямой MSBuild отдельного WiX-проекта сохраняет внутреннюю сборку CA. Добавлена проверка GSUT001 и уточнены сообщения проверки отсутствующего MSI. Порядок Release x64 → Release x86 неизменен. `tests/verify_sut_build_graph.py` проверяет граф, конфигурации, отсутствие циклов и рекурсивной solution-сборки; это статическая проверка, не доказательство успешной MSVC/WiX сборки и не подтверждение единственной причины пустых каталогов пользователя.
+Вместо перепаковки реализованы runtime release discovery / adjacent local-first download / первичная фоновая установка оригинального MSI. См. `README.md`, раздел «Оригинальный MSI SecureUxTheme». CA, собственные SUT WiX-проекты, ресурсы и build dependencies удалены. Неиспользуемая собственная IFEO/COM-регистрация также удалена из GlassShared; Native больше не ссылается на неё. Официальные permanent proxy semantics сохраняются.
+
+Подробности: native-architecture asset; строгий JSON parser, HTTPS/allowlisted redirects, SHA-256 из GitHub API, offline pinned v4, fail-closed без замены существующего MSI, защищённый snapshot и MSI metadata. Vendor MSI идёт последней транзакцией перед commit, без Glass INSTALLDIR/ARP/rollback product adoption. Уже установленный оригинальный продукт и старый Glass SUT требуют явного отдельного обслуживания.
+
+Это **не завершение всего maintenance**. Settings/Unins ещё не переведены на динамическую идентичность оригинального MSI; существующая инвентаризация официального продукта требует обновления. Старый механизм установки SUT из Glass cache не считается рабочим для оригинальных пакетов. Windows/MSVC/WiX runtime здесь отсутствуют; фактические загрузка через GitHub redirects, MSI ProductCode/metadata, install/reboot/rollback должны быть проверены в VM. В песочнице GitHub asset download ограничен сетевым redirect; бинарник MSI не исследован и установка не выполнена.
+
+Проверки текущего изменения: portable C++ parser tests (три архитектуры, offline pins, 42 invalid manifests), source/resource smoke, статический build graph без SUT CA/repack, Windows GNU object compilation provider/engine. Это не успешная MSVC/WiX сборка и не Windows runtime тест. Попытка GNU-компиляции полного main.cpp остановилась на отсутствующем восстановленном Detours header; это не тест успешной линковки EXE.
+
+## Исторические правки до перехода на оригинальные MSI
+
+Ниже сохранён журнал частичного обслуживания. Упоминания собственной CA относятся к старой реализации и больше не являются планом её развития.
 
 # Правки обслуживания после аудита 233b21c — 2026-11-05
 
@@ -12,9 +22,9 @@ SecureUxThemeCa включён в solution с Release x64/Win32 mappings и за
 
 **До завершения остаются блокирующие части:**
 - Реальный maintenance plan с явными действиями Keep/Install/Repair/Update/Remove и единым выполнением GUI/CLI; сейчас Setup по-прежнему не умеет удалять.
-- Проверка системного SUT MSI: текущий generic inspector всё ещё запрещает CustomAction и System32 за пределами install root. Нельзя обходить это без проверки доверия и схемы пакета.
+- Полное Settings/Unins обслуживание оригинального SUT: новый install-path использует отдельную проверку доверия и не обходит общие fixed-root ограничения для продуктов Glass.
 - Автономные stop/delete собственной службы и задач OpenGlass в MSI, обработка оставшейся отключённой службы; сейчас этот сценарий ещё не исправлен.
-- Транзакционные snapshot/rollback IFEO/COM для SUT CA и сохранение чужих значений/токенов; изменение Execute на deferred само по себе этого не завершает.
+- Собственная SUT CA отменена; IFEO/COM устанавливаются только оригинальным пакетом автора. Не реализовывать собственную замену permanent proxy semantics.
 - Полный обзор остальных install metadata читателей, raw registry cleanup и ARP после частичного удаления; native fallback/UI/CLI parity.
 - Безопасность исполнения кэша под общим Packages с writable-parent ACL; отсутствие reparse и protected child ACL не доказывают защиту от замены через родителя.
 - Полная Release x64 -> Release x86 MSVC/WiX сборка и Windows VM matrix.
@@ -57,7 +67,7 @@ SecureUxThemeCa включён в solution с Release x64/Win32 mappings и за
 ## Обязательное завершение перед передачей полного проекта
 
 1. Реальный discovery adapter + Build/revalidation в execution, общий для GUI/CLI. Сейчас Preview не решает эту задачу.
-2. **SecureUxTheme (2026-11):** per-machine MSI в System32/SysWOW64; IFEO/COM — custom action `SecureUxThemeCa`; Glass Platform / GlassSettings / SecureUxTheme — `Scope="perMachine"` (миграция: uninstall per-user, затем install per-machine на том же ProductCode). Кэш ProgramData не трогает ACL общего `Packages`. GlassSettings: тумблер ставит/снимает MSI из кэша; без платформы скрыты разделы Glass/текст/процессы. Страница сертификата Setup — только при выбранной платформе.
+2. **SecureUxTheme:** завершить explicit maintenance оригинального MSI и обновить инвентаризацию в Settings/Unins. Системными ресурсами владеет только пакет автора, visual style — установленный helper. Миграция со старых Glass ProductCodes — только явным безопасным планом.
 3. Session style broker для подтверждения фактического stock style чужого активного пользователя без ожидания logout. Проверенный targeted offline theme reset + policy assessment + post-reset checks. Сейчас такие случаи безопасно блокируются, но не реализованы полностью.
 4. Cache: durable manifest/journal и recovery/reboot/rollback pins; точная source identity с SHA-256, обработка same-version/same-PackageCode, гарантия наличия source каждого kept продукта, миграция отсутствующих legacy sources, atomic source/manifest commit и удаление устаревших owned source-list ссылок. Требуется закрыть все crash windows, не выдавать текущий header за законченный cache controller.
 5. ARP после частичного removal должен перепроверять remaining registrations и NoRemove. Native fallback должен соответствовать реальному HTML, локализация старых SUT dependency descriptions требует обновления вместе с MSI.

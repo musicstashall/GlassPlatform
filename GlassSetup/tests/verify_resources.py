@@ -119,8 +119,7 @@ for manifest in (root / "res/app.manifest", root / "GlassUnins/app.manifest"):
     assert dpi is not None and dpi.text == "PerMonitorV2", manifest
 for project in (root / "GlassSetup.vcxproj", root / "GlassUnins/GlassUnins.vcxproj",
                 root / "msi/PlatformPackage.template.wxs", root / "msi/OpenGlassPackage.template.wxs",
-                root / "msi/GlassSettingsPackage.template.wxs", root / "msi/SecureUxThemePackage.template.wxs",
-                root / "msi/SecureUxTheme-x64.wixproj", root / "msi/SecureUxTheme-x86.wixproj",
+                root / "msi/GlassSettingsPackage.template.wxs",
                 root / "msi/GlassSetupPayload.targets"):
     ET.parse(project)
 
@@ -501,59 +500,39 @@ assert (repo / "Shared/certs/DeveloperCodeSigning.cer").exists() and (repo / "Sh
 assert "DeveloperCodeSigning.cer" in payload and "DeveloperCodeSigning.txt" in payload and "GlassShellSparse" in payload
 assert 'm.type===\'init\'||m.type===\'state\'' in ui
 
-# SecureUxTheme is a standalone product with per-architecture MSI payloads,
-# each containing only that architecture's patcher and UI proxy. GlassSettings
-# owns no SecureUxTheme payload; Setup installs the matching MSI after Settings,
-# and GlassUnins removes it first when cascading through the dependency.
+# SecureUxTheme uses the original author's MSI, not our payload or custom action.
+native_host_h = (repo / "GlassSettings/Native/NativeHost.h").read_text(encoding="utf-8")
 sut_native = (repo / "GlassSettings/Native/SecureUxThemeNative.cpp").read_text(encoding="utf-8")
 sut_inspect = read("src/InstallSupport/GlassProductInspect.cpp")
-native_host_h = (repo / "GlassSettings/Native/NativeHost.h").read_text(encoding="utf-8")
 sut_service = (repo / "GlassSettings/Services/SecureUxThemeService.cs").read_text(encoding="utf-8")
-sut_template = read("msi/SecureUxThemePackage.template.wxs")
-sut_stage = section(payload, '<!-- Per-machine SecureUxTheme MSI', '</Target>')
-assert "SecureUxTheme-x64" in payload and "SecureUxTheme-x86" in payload
-assert "SecureUxTheme4.dll" in sut_stage and "ThemeUiProxy.dll" in sut_stage
-assert 'Scope="perMachine"' in sut_template and 'Id="System6432Folder"' in sut_template
-assert "GLASSSETTINGSINSTALLED" not in sut_template and "GLASSSETTINGSINSTALLED=1" not in engine
-assert 'Execute="deferred"' in sut_template and 'Execute="commit"' not in sut_template
-assert 'REMOVE~=&quot;ALL&quot;' in sut_template
-activation = section(sut_native, 'extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(', 'extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeDeactivate(')
-assert "CopyFile" not in activation and "DeleteFile" not in activation
-assert "SecureUxThemeMsiService.InstallFromCache" in sut_service and "SecureUxThemeMsiService.UninstallProduct" in sut_service
-for third_party_project in ("msi/OpenGlass-x64.wixproj", "msi/SecureUxTheme-x64.wixproj", "msi/SecureUxTheme-x86.wixproj"):
-    assert "<GlassSignThisProject>false</GlassSignThisProject>" in read(third_party_project)
-signature_list=read("../Shared/scripts/Test-GlassSignatures.ps1")
-assert "'SecureUxTheme-x64'" not in signature_list and "'OpenGlass-x64'" not in signature_list
-setup_signature_command=next(line for line in project.splitlines() if 'Context &quot;GlassSetup first-party payload&quot;' in line)
-assert "SecureUxTheme-x64" not in setup_signature_command and "OpenGlass-x64" not in setup_signature_command
-for path, code in (("msi/SecureUxTheme-x64.wixproj", "5076"), ("msi/SecureUxTheme-x86.wixproj", "5077")):
-    project_text=read(path)
-    assert code in project_text and "GlassSettingsProductCode" in project_text
-    ET.parse(root / path)
+sut_package = read("src/InstallSupport/GlassSecureUxPackage.cpp")
+sut_release = read("src/InstallSupport/GlassSecureUxRelease.h")
+assert "releases/latest" in sut_package and "browser_download_url" in sut_release and "sha256:" in sut_release
+assert "GetModuleFileNameW" in sut_package and "CREATE_NEW" in sut_package
+assert "WINHTTP_FLAG_SECURE" in sut_package and "CryptHashData" in sut_package
+assert "GlassSecureUxPackage::Prepare" in engine and "InstallOriginalSecureUxTheme" in worker
+assert worker.index("RegisterSelectedProducts()") < worker.index("InstallOriginalSecureUxTheme()") < worker.index("LaunchSelectedProducts()")
+original_msi=section(engine, "bool InstallEngine::InstallOriginalSecureUxTheme()", "bool InstallEngine::RunMsiSequence()")
+assert 'L"REBOOT=ReallySuppress"' in original_msi
+assert "PatchArpUninstallString(" not in original_msi and "NoteInstalled(" not in original_msi
+assert "ERROR_SUCCESS_REBOOT_REQUIRED" in original_msi
+run_sequence=section(engine, "bool InstallEngine::RunMsiSequence()", "void InstallEngine::SeedUserDefaults()")
+assert "SecureUxTheme-" not in run_sequence
+assert "IDR_MSI_SUT_" not in rc and "IDR_MSI_SUT_" not in header
+assert "SecureUxThemeCa" not in payload and "SecureUxTheme-" not in payload
+assert "SecureUxTheme-x64.msi" not in rc and "SecureUxTheme-x86.msi" not in project
+solution=read("../GlassProject.sln")
+assert '"SecureUxTheme-x64"' not in solution and '"SecureUxThemeCa"' not in solution
+assert "<GlassSignThisProject>false</GlassSignThisProject>" in read("msi/OpenGlass-x64.wixproj")
+assert worker.index("InstallGlassSettingsEarly()") < worker.index("RunMsiSequence()")
+# Retain recognition and explicit removal of legacy Glass-owned products.
 for suffix in ("5076", "5077"):
     assert suffix in read("src/InstallSupport/GlassInstallMsi.h")
-for suffix in ("5080", "5090"):
-    assert suffix in sut_template or suffix in read("msi/SecureUxTheme-x64.wixproj") or suffix in read("msi/SecureUxTheme-x86.wixproj")
-assert "IDR_MSI_SUT_X64" in header and "IDR_MSI_SUT_X86" in header and "IDR_MSI_SUT_X64" in rc and "IDR_MSI_SUT_X86" in rc
-assert "msiResSecureUxTheme" in setup and "report.secureUxTheme" in sut_inspect
+assert "msiResSecureUxTheme=0" in setup and "report.secureUxTheme" in sut_inspect
 assert "kProductSecureUxThemeX64" in engine and "kProductSecureUxThemeX86" in rollback and "kProductSecureUxThemeX64" in unins
+activation = section(sut_native, 'extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(', 'extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeDeactivate(')
+assert "CopyFile" not in activation and "DeleteFile" not in activation
 assert "InvokeSecureUxThemeDeactivate" in util and "InvokeSecureUxThemeDeactivate" in unins
-assert "SecureUxTheme-x64.msi" in engine and "SecureUxTheme-x86.msi" in engine
-assert "ExpectedSystemDllPath" in sut_service
-assert "SecureUxTheme-x64.msi" in rc and "SecureUxTheme-x86.msi" in rc
-assert "SecureUxTheme-x64.msi" in project and "SecureUxTheme-x86.msi" in project
-solution=read("../GlassProject.sln")
-assert '"SecureUxTheme-x64"' in solution and '"SecureUxTheme-x86"' in solution
-assert "{0CD1A2BE-2C39-4404-A026-34642B517428}.Release|x64.Build.0 = Release|x64" in solution
-assert "{81FE634A-DB11-4759-B76D-D1119AC2CF13}.Release|x86.Build.0 = Release|x86" in solution
-run_sequence=section(engine, "bool InstallEngine::RunMsiSequence()", "void InstallEngine::SeedUserDefaults()")
-assert worker.index("InstallGlassSettingsEarly()") < worker.index("RunMsiSequence()")
-assert "selection_.secureUxThemePackageOnly" not in engine
-assert "kProductSecureUxThemeX64" in engine and "kProductSecureUxThemeX86" in engine
-assert "kProductSecureUxThemeX64" in rollback and "kProductSecureUxThemeX86" in rollback
-unins_remove=section(unins, "int count=(chosen.secureUxTheme?1:0)", "if (chosen.openGlass)")
-assert unins_remove.index("SecureUxTheme x64") < unins_remove.index("GlassSettings x64")
-assert "SecureUxTheme" in read("../README.md") and "четыре first-party MSI" in read("../README.md")
 # H3 item 6: the OpenGlass state query must see the installer's service (not only the legacy
 # task) on every thread: the cheap SCM query runs before the scheduler-UI guard, and only the
 # COM task-tree walk stays background-only. Otherwise Home/System rows show "No task" for a
@@ -711,7 +690,7 @@ assert "GetCurrentThemeName" in style and "WinVerifyTrust" in style and "Microso
 assert "FILE_ATTRIBUTE_REPARSE_POINT" in style and "State::Unknown" in style
 assert "IsStockStyleName" not in sut_native and "CustomVisualStyleActive" not in sut_native
 assert "Shared::SystemVisualStyle::CurrentForMaintenance()" in sut_native
-assert "GLASSSETTINGSINSTALLED" not in sut_template
+assert "GLASSSETTINGSINSTALLED=1" not in engine
 assert "GlassMaintenanceCache::Publish" in engine and "IDR_MAINTENANCE_UNINS" in rc
 assert "PROTECTED_DACL_SECURITY_INFORMATION" in cache and "WaitForSingleObject" in cache
 assert "Registrations(code,all)" in cache and "RegistrationState" in cache and "PackageCode" in cache
