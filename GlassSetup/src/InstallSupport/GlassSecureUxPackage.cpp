@@ -1,5 +1,6 @@
 #include "GlassSecureUxPackage.h"
 #include "GlassSecureUxRelease.h"
+#include <SecureUxThemeInventory.h>
 #include "GlassInstallMsi.h"
 #include "../InstallLog.h"
 #include <winhttp.h>
@@ -172,15 +173,10 @@ bool CopySnapshot(File& source,const std::wstring& path,const std::atomic<bool>&
     return FlushFileBuffers(dest.h)?true:Fail(error,L"Flushing MSI snapshot");
 }
 }
-bool CheckNoInstalledProduct(std::wstring& error) noexcept {
+bool CheckLegacyRepackAbsent(std::wstring& error) noexcept {
     try {
         for(const wchar_t* code:{GlassInstallMsi::kProductSecureUxThemeX64,GlassInstallMsi::kProductSecureUxThemeX86}){
             if(GlassInstallMsi::IsProductInstalled(code)){error=L"Remove the old Glass-repacked SecureUxTheme explicitly before installing the author's original MSI.";return false;}
-        }
-        for(auto arch:{Architecture::X86,Architecture::X64,Architecture::Arm64}){
-            wchar_t product[39]{};const UINT rc=MsiEnumRelatedProductsW(UpgradeCode(arch),0,0,product);
-            if(rc==ERROR_SUCCESS){error=L"An official SecureUxTheme MSI is already installed. It was left unchanged; manage it explicitly in Windows Installed apps.";return false;}
-            if(rc!=ERROR_NO_MORE_ITEMS)return Fail(error,L"Checking existing official SecureUxTheme",rc);
         }
         return true;
     }catch(...){return Fail(error,L"Checking SecureUxTheme",ERROR_NOT_ENOUGH_MEMORY);}
@@ -188,7 +184,15 @@ bool CheckNoInstalledProduct(std::wstring& error) noexcept {
 bool Prepare(const std::wstring& privateDirectory,const std::atomic<bool>& cancel,Package& package,std::wstring& error) noexcept {
     package={};std::wstring partial,staged;
     try {
-        if(Cancelled(cancel,error)||!CheckNoInstalledProduct(error))return false;
+        if(Cancelled(cancel,error)||!CheckLegacyRepackAbsent(error))return false;
+        std::vector<std::wstring> installed;
+        const UINT inventory=Shared::SecureUxThemeInventory::Query(installed);
+        if(inventory!=ERROR_SUCCESS)return Fail(error,L"SecureUxTheme MSI inventory",inventory);
+        if(!installed.empty()){
+            package.alreadyInstalled=true;error.clear();
+            InstallLog::Line(L"SecureUxTheme: existing official MSI retained; no download, repair or activation");
+            return true;
+        }
         const auto arch=NativeArchitecture();Asset asset=OfflineV4(arch);
         std::vector<wchar_t> exe(32768);const DWORD count=GetModuleFileNameW(nullptr,exe.data(),static_cast<DWORD>(exe.size()));
         if(!count||count>=exe.size())return Fail(error,L"Locating GlassSetup.exe");

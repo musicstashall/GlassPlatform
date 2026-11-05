@@ -48,3 +48,10 @@
   См. [GlassShared/docs/stop-unification.md](../GlassShared/docs/stop-unification.md).
 
 См. также: [GlassCore/docs/glasscore-text.md](../GlassCore/docs/glasscore-text.md) (рендер текста / ink).
+
+
+## SecureUxTheme: роль Settings
+
+Переключатель управляет регистрацией IFEO/COM, а не MSI. Отключение возвращает штатные COM InProcServer32 и убирает токены загрузки SecureUxTheme4.dll; файлы, MSI и его запись удаления сохраняются. Перед отключением активного механизма проверяется штатный visual style, после изменения регистрации нужна перезагрузка для уже загруженных хуков. MSI устанавливает GlassSetup, удаляет Windows Installer/удалятор.
+
+После штатного удаления авторского MSI могут остаться permanent ThemeUiProxy и COM-перенаправления. Неактивные файлы — не конфликт и не признак установленного продукта. Оставшуюся COM-регистрацию можно отключить без патчера; включение требует полного установленного набора native/WOW модулей. Чужие COM значения и активные несовместимые старые hooks не перезаписываются. Подробности и незавершённое обслуживание: [GlassSetup README](../GlassSetup/README.md).

@@ -731,9 +731,20 @@ assert "chosen.secureUxTheme && installed_.settings" in unins
 assert "chosen.secureUxTheme && installed_.settings && SecureUxThemeManaged()" in unins
 assert "SecureUxThemeHook::Uninstall" not in sut_native
 assert "DeleteFileW(patcherPath" not in sut_native
-assert "ErrorHResult(result.ExitCode)" in sut_service
+assert "NativeHostInterop.SecureUxThemeActivate(string.Empty, reactivate)" in sut_service
+assert "NativeHostInterop.SecureUxThemeDeactivate()" in sut_service
+assert "InstallFromCache" not in sut_service and "UninstallProduct" not in sut_service
 msi_service=read("../GlassSettings/Services/SecureUxThemeMsiService.cs")
-assert "0x80070000u" in msi_service and "if (IsInstalled())" in msi_service
+assert "MsiEnumRelatedProductsW" in msi_service
+assert "RunMsiexec" not in msi_service and "UninstallProduct" not in msi_service
+assert "REG_OPTION_BACKUP_RESTORE" in sut_native and "RegSetKeySecurity(" not in sut_native
+assert "SameRegistrationValue" in sut_native and "registration rollback incomplete" in sut_native
+assert "CopyFileW(" not in sut_native and "DeleteFileW(" not in sut_native
+assert "schtasks" not in sut_native and "Cleanup.cmd" not in sut_native
+assert "q.ComProxyHijacked || q.SystemDll4Present || q.ThemeUiProxyPresent || q.OfficialMsiPresent" in sut_native
+assert "glassRepackedSut &&" in sut_inspect
+assert "Shared::SecureUxThemeInventory::IsInstalled()" in setup
+assert "LegacySecureUxThemePayloadPresent" not in setup
 
 # Generic notes are not proof of a startup failure. Cache errors are attributed.
 assert "не всё запустилось" not in rc+ui and "not everything started" not in rc+ui

@@ -1,4 +1,5 @@
 #include "GlassProductInspect.h"
+#include <SecureUxThemeInventory.h>
 
 #include "GlassInstallHost.h"
 #include "GlassInstallMsi.h"
@@ -441,6 +442,13 @@ Report Run(const Inputs& in)
                 modern ? product.modernCode : product.legacyCode);
     }
 
+    const bool glassRepackedSut=report.secureUxTheme.installed;
+    std::vector<std::wstring> officialSut;
+    if (Shared::SecureUxThemeInventory::Query(officialSut)==ERROR_SUCCESS && !officialSut.empty()) {
+        report.secureUxTheme.installed=true;
+        report.secureUxTheme.installedVersion=GlassInstallMsi::QueryDisplayVersion(officialSut.front().c_str());
+    }
+
     if (!report.x64.installed && !report.x86.installed && !report.settings.installed &&
         !report.secureUxTheme.installed && !report.og.installed)
     {
@@ -530,7 +538,7 @@ Report Run(const Inputs& in)
         AddReason(report.x86, Reason::RegistryInvalid);
     if (report.settings.installed && (!rootsOk || rootInvalid(in.os64 ? roots.x64 : roots.x86)))
         AddReason(report.settings, Reason::RegistryInvalid);
-    if (report.secureUxTheme.installed && (!rootsOk || rootInvalid(in.os64 ? roots.x64 : roots.x86)))
+    if (glassRepackedSut && (!rootsOk || rootInvalid(in.os64 ? roots.x64 : roots.x86)))
         AddReason(report.secureUxTheme, Reason::RegistryInvalid);
     if (report.og.installed && (!rootsOk || rootInvalid(roots.openGlass)))
         AddReason(report.og, Reason::RegistryInvalid);

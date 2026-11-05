@@ -833,7 +833,7 @@
   <data name="Themes_SignatureCardTitle" xml:space="preserve"><value>Цифровая подпись</value></data>
   <data name="Themes_SignatureCardDesc" xml:space="preserve"><value>Обход проверки цифровой подписи</value></data>
   <data name="Themes_SignatureActivated" xml:space="preserve"><value>Обход подписи успешно активирован.</value></data>
-  <data name="Themes_SignatureDeactivated" xml:space="preserve"><value>Обход подписи успешно деактивирован.</value></data>
+  <data name="Themes_SignatureDeactivated" xml:space="preserve"><value>Регистрация SecureUxTheme отключена. Файлы и MSI-продукт не удалены.</value></data>
   <data name="Themes_RestartRequired" xml:space="preserve"><value>Требуется перезагрузка.</value></data>
   <data name="Themes_RestartNotRequired" xml:space="preserve"><value>Перезагрузка не требуется.</value></data>
   <data name="Themes_SignatureActivateFailedFormat" xml:space="preserve"><value>Не удалось включить обход подписи (0x{0:X8})</value></data>
@@ -847,7 +847,7 @@
   <data name="Dialog_SignatureWrongArchBody" xml:space="preserve"><value>Архитектура модуля не совпадает с системой. Откройте GlassSettings той же разрядности, что и Windows.</value></data>
   <data name="Dialog_SignatureWow64Body" xml:space="preserve"><value>x86-сборка GlassSettings не может активировать патчер на 64-разрядной Windows. Откройте x64 GlassSettings.</value></data>
   <data name="Dialog_SignatureActivateConfirm" xml:space="preserve"><value>Включение изменит параметры загрузки winlogon.exe и потребует перезагрузки компьютера. Продолжить?</value></data>
-  <data name="Dialog_SignatureDeactivateConfirm" xml:space="preserve"><value>Отключение потребует перезагрузки. При активной сторонней теме будет применена штатная тема Windows. Продолжить?</value></data>
+  <data name="Dialog_SignatureDeactivateConfirm" xml:space="preserve"><value>Отключение снимет загрузку SecureUxTheme и COM-перенаправления на ThemeUiProxy. Файлы и MSI-продукт останутся; удалить продукт можно через «Установленные приложения» Windows. При активной сторонней теме будет применена штатная тема Windows. Для полного отключения в уже запущенных процессах нужна перезагрузка. Продолжить?</value></data>
   <data name="Dialog_SignatureConfirm" xml:space="preserve"><value>Продолжить</value></data>
   <data name="Themes_SignatureRebootButton" xml:space="preserve"><value>Перезагрузить</value></data>
   <data name="Home_FooterRebootRequired" xml:space="preserve"><value>Требуется перезагрузка</value></data>
@@ -1101,4 +1101,5 @@
   <data name="Dwm_ParallelConflictSuffixLocalValue" xml:space="preserve"><value>; конфликт с L-значением</value></data>
   <data name="Dwm_DefaultReflectionTile" xml:space="preserve"><value>Системное отражение (по умолчанию)</value></data>
   <data name="Dwm_DefaultMaterialTile" xml:space="preserve"><value>Системный материал (по умолчанию)</value></data>
+  <data name="Dialog_SignatureMissingPayloadBody" xml:space="preserve"><value>Полный комплект модулей SecureUxTheme не найден. Установите оригинальный MSI через GlassSetup. Наличие оставшегося ThemeUiProxy.dll само по себе не позволяет включить SecureUxTheme.</value></data>
 </root>

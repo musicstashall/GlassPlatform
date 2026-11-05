@@ -70,7 +70,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>msi.lib;ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -85,7 +85,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>msi.lib;ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -101,7 +101,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>msi.lib;ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -116,7 +116,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>msi.lib;ntdll.lib;ole32.lib;oleaut32.lib;shell32.lib;comctl32.lib;runtimeobject.lib;crypt32.lib;shlwapi.lib;DbgHelp.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\..\Build\$(PlatformShortName)\$(Configuration)\;$(MSBuildThisFileDirectory)..\..\GlassShared\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>

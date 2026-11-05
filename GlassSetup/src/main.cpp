@@ -55,6 +55,7 @@
 #include <vector>
 #include "resource.h"
 #include "InstallEngine.h"
+#include <SecureUxThemeInventory.h>
 #include "InstallLog.h"
 
 using Microsoft::WRL::ComPtr;
@@ -1474,7 +1475,8 @@ private:
                     GlassInstallMsi::RemoveOrphanUninstallEntry(GlassInstallMsi::kProductSecureUxThemeX86);
                 }
                 if (!startupStop_.load(std::memory_order_acquire))
-                    result.installed.secureUxTheme=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX64) ||
+                    result.installed.secureUxTheme=Shared::SecureUxThemeInventory::IsInstalled() ||
+                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX64) ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX86);
                 if (!startupStop_.load(std::memory_order_acquire) && result.installed.glassSettings) {
                     std::wstring sutError;
@@ -1831,16 +1833,6 @@ private:
     bool SettingsInspectionDamaged() const {
         std::lock_guard<std::mutex> lock(inspectMutex_);
         return inspect_.settings.damaged;
-    }
-    bool LegacySecureUxThemePayloadPresent() const noexcept {
-        if (installedSelection_.secureUxTheme) return false;
-        return secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Active ||
-            secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Inactive ||
-            secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::ActivationPending ||
-            secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
-    }
-    bool SecureUxThemeRequiresSettings(bool settingsDamaged) const noexcept {
-        return !installedSelection_.glassSettings || settingsDamaged || LegacySecureUxThemePayloadPresent();
     }
     GlassProductPlan::Plan SelectionPreview() const {
         const bool active=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Active ||

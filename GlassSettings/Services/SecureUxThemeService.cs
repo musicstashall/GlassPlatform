@@ -11,7 +11,8 @@ public enum SecureUxThemeState
     ActivationPendingRestart,
     Active,
     DeactivationPendingRestart,
-    OfficialV4External,
+    ResidualRegistration,
+    OfficialV4External, // Legacy enum value; official v4 is no longer external.
     LegacyOfficialInstall,
     PartialOrConflict,
 }
@@ -38,8 +39,8 @@ public sealed record SecureUxThemeSnapshot(
     string? Detail);
 
 /// <summary>
-/// Детект официальных v4 (Installer\Products) и старого портативного ThemeTool.
-/// ThemeUiProxy и IFEO <c>SecureUxTheme4.dll</c> официальной установкой не считаются.
+/// MSI presence, payload availability and enabled registration are independent.
+/// Files retained by the author are not an active hook or an installation conflict.
 /// </summary>
 public static class SecureUxThemeService
 {
@@ -72,12 +73,7 @@ public static class SecureUxThemeService
 
         SecureUxThemeState state;
         SecureUxThemeObstacle obstacle;
-        if (raw.OfficialMsiPresent != 0)
-        {
-            state = SecureUxThemeState.OfficialV4External;
-            obstacle = SecureUxThemeObstacle.OfficialV4;
-        }
-        else if (HasLegacyOfficialInstall(raw))
+        if (HasLegacyOfficialInstall(raw))
         {
             state = SecureUxThemeState.LegacyOfficialInstall;
             obstacle = SecureUxThemeObstacle.LegacyInstall;
@@ -97,7 +93,12 @@ public static class SecureUxThemeService
             state = SecureUxThemeState.DeactivationPendingRestart;
             obstacle = SecureUxThemeObstacle.None;
         }
-        else if (localPresent || msiInstalled)
+        else if (raw.ComProxyHijacked != 0)
+        {
+            state = SecureUxThemeState.ResidualRegistration;
+            obstacle = SecureUxThemeObstacle.None;
+        }
+        else if (localPresent || msiInstalled || raw.ThemeUiProxyPresent != 0)
         {
             state = SecureUxThemeState.Inactive;
             obstacle = SecureUxThemeObstacle.None;
@@ -110,10 +111,11 @@ public static class SecureUxThemeService
 
         var externalInstall = obstacle is SecureUxThemeObstacle.OfficialV4 or SecureUxThemeObstacle.LegacyInstall;
         var switchEnabled = !externalInstall
-            && (SecureUxThemeMsiService.CacheMsiAvailable() || localPresent || msiInstalled || ourIfeo || loaded);
-        var switchOn = !externalInstall && obstacle == SecureUxThemeObstacle.None && (ourIfeo || msiInstalled);
+            && (localPresent || ourIfeo || loaded || raw.ComProxyHijacked != 0);
+        var switchOn = !externalInstall && obstacle == SecureUxThemeObstacle.None && (ourIfeo || raw.ComProxyHijacked != 0);
         var blocksCustom = state is SecureUxThemeState.ActivationPendingRestart
-            or SecureUxThemeState.DeactivationPendingRestart;
+            or SecureUxThemeState.DeactivationPendingRestart
+            or SecureUxThemeState.ResidualRegistration;
 
         return new SecureUxThemeSnapshot(
             state,
@@ -135,7 +137,7 @@ public static class SecureUxThemeService
             return snapshot.Obstacle;
         }
 
-        if (!SecureUxThemeMsiService.CacheMsiAvailable() && !snapshot.LocalDllPresent && !SecureUxThemeMsiService.IsInstalled())
+        if (!snapshot.LocalDllPresent)
             return SecureUxThemeObstacle.MissingDll;
 
         var hr = NativeHostInterop.SecureUxThemeQuery(out var raw);
@@ -161,22 +163,20 @@ public static class SecureUxThemeService
     {
         _ = snapshot;
         _ = reactivate;
-        var result = SecureUxThemeMsiService.InstallFromCache();
-        return result.Success ? 0 : SecureUxThemeMsiService.ErrorHResult(result.ExitCode);
+        return NativeHostInterop.SecureUxThemeActivate(string.Empty, reactivate);
     }
 
-    public static int Deactivate() =>
-        SecureUxThemeMsiService.ErrorHResult(SecureUxThemeMsiService.UninstallProduct().ExitCode);
+    public static int Deactivate() => NativeHostInterop.SecureUxThemeDeactivate();
 
     public sealed record DeactivateResult(int Hr, bool RebootRequired);
 
+    // Compatibility name: cleanup now means registration cleanup, never MSI/files.
     public static DeactivateResult DeactivateWithCleanup()
     {
-        var result = SecureUxThemeMsiService.UninstallProduct();
-        if (!result.Success)
-            return new DeactivateResult(SecureUxThemeMsiService.ErrorHResult(result.ExitCode), false);
-
-        return new DeactivateResult(0, result.RebootRequired);
+        var before = Query();
+        var hr = Deactivate();
+        return new DeactivateResult(hr, hr >= 0 &&
+            (before.SwitchOn || before.State == SecureUxThemeState.DeactivationPendingRestart));
     }
 
     public static bool ActivationRequiresRestart(SecureUxThemeSnapshot snapshot, bool reactivate)
@@ -235,13 +235,12 @@ public static class SecureUxThemeService
             SecureUxThemeObstacle.WrongArchitecture =>
                 GlassSettingsResources.Get("Dialog_SignatureWrongArchBody"),
             SecureUxThemeObstacle.MissingDll =>
-                GlassSettingsResources.Get("Dialog_SignatureConflictBody"),
+                GlassSettingsResources.Get("Dialog_SignatureMissingPayloadBody"),
             _ => GlassSettingsResources.Get("Dialog_SignatureConflictBody"),
         };
 
     private static bool HasLegacyOfficialInstall(NativeHostInterop.SecureUxThemeNativeQuery raw) =>
-        raw.SystemLegacyDllPresent != 0
-        || IsOfficialHook(raw.WinlogonGlobalFlag, raw.WinlogonHasLegacyExact)
+        IsOfficialHook(raw.WinlogonGlobalFlag, raw.WinlogonHasLegacyExact)
         || IsOfficialHook(raw.ExplorerGlobalFlag, raw.ExplorerHasLegacyExact)
         || IsOfficialHook(raw.SettingsGlobalFlag, raw.SettingsHasLegacyExact)
         || IsOfficialHook(raw.LogonUiGlobalFlag, raw.LogonUiHasLegacyExact)

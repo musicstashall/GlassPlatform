@@ -1,3 +1,15 @@
+# Settings: регистрация вместо MSI install/remove — 2026-11-05
+
+В существующем GlassSettings.Native восстановлены только операции включения/отключения IFEO/COM. Новых DLL/CA нет. Settings больше не запускает msiexec, не меняет MSI/ARP, не копирует/не удаляет системные DLL и не планирует cleanup task. Доступ к WRP registry values — scoped backup/restore privileges, без takeover owner/DACL. До записи проверяются все значения; rollback сохраняет исходные типы/данные и не затирает конкурентные чужие правки. Он in-process, не crash-durable. Включение проверяет/удерживает полный native/WOW payload; отключение активного механизма требует фактического stock style. До reboot уже загруженные хуки могут продолжать работать.
+
+MSI, файлы, регистрация и loaded state разделены: MSI сам по себе не включает переключатель; inert DLL/proxy не дают Conflict; оставшийся COM proxy доступен для explicit off, но proxy без патчера не даёт включить механизм. Официальный MSI определяется по трём UpgradeCode, независимо от того, кто его установил. Setup сохраняет существующий официальный продукт, без ошибки «внешняя установка», скачивания или неявной повторной активации. Общий inspector не требует Glass install root для официального SUT. Отдельно блокируются активные несовместимые pre-v4 hooks, чужие COM значения и старые Glass-repacked MSI для неявного перехода.
+
+Проверено: actual Native registration code на fake registry (on/off, native/WOW, чужие tokens/bits/COM, остаточная регистрация, ошибки на каждом из 6 шагов записи, rollback при конкурентной правке); полный SecureUxThemeNative.cpp — Windows GNU object x64/x86 с upstream WIL headers; provider/engine/inspector source smoke и portable suites. Это не MSVC/WiX, не managed build и не реальные Windows privileges/COM/reboot. Платформа не запускалась/не останавливалась.
+
+**Незавершённое:** GlassUnins ещё не удаляет оригинальный продукт по динамическому ProductCode. Предложенный каталог ProgramData/SecureUxTheme и предварительная проверка доступности для карточки также ещё не внедрены: актуальный download пока adjacent. Не считать переработку maintenance завершённой. Матрица реального Windows runtime обязательна.
+
+## Предыдущий этап (история)
+
 # Оригинальные MSI SecureUxTheme — 2026-11-05
 
 Вместо перепаковки реализованы runtime release discovery / adjacent local-first download / первичная фоновая установка оригинального MSI. См. `README.md`, раздел «Оригинальный MSI SecureUxTheme». CA, собственные SUT WiX-проекты, ресурсы и build dependencies удалены. Неиспользуемая собственная IFEO/COM-регистрация также удалена из GlassShared; Native больше не ссылается на неё. Официальные permanent proxy semantics сохраняются.

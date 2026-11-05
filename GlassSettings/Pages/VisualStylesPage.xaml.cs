@@ -782,10 +782,7 @@ public sealed partial class VisualStylesPage : Page
             SignatureToggle.IsOn = snapshot.SwitchOn;
             SignatureToggle.SyncInnerEnabled();
 
-            var cardBlocked = !snapshot.LocalDllPresent
-                && snapshot.State is not SecureUxThemeState.Active
-                    and not SecureUxThemeState.ActivationPendingRestart
-                    and not SecureUxThemeState.DeactivationPendingRestart;
+            var cardBlocked = !snapshot.SwitchEnabled;
             SignatureCard.IsEnabled = !cardBlocked && !_signatureBusy;
 
             GlassSettingsToolTipService.SetToolTip(SignatureCard, null);

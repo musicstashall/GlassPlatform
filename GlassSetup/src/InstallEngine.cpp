@@ -1,5 +1,6 @@
 #include "InstallSupport/GlassMaintenanceCache.h"
 #include "InstallEngine.h"
+#include <SecureUxThemeInventory.h>
 #include "InstallLog.h"
 #include "WizardProgress.h"
 #include "InstallSupport/GlassInstallHost.h"
@@ -1428,11 +1429,22 @@ bool InstallEngine::InstallGlassSettingsEarly() noexcept {
 
 bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
     if (!selection_.secureUxTheme) return true;
+    std::vector<std::wstring> officialProducts;
+    const UINT inventory=Shared::SecureUxThemeInventory::Query(officialProducts);
+    if (inventory!=ERROR_SUCCESS) { SetFailure(L"SecureUxTheme MSI inventory failed.",inventory); return false; }
+    if (!officialProducts.empty()) {
+        InstallLog::Line(L"SecureUxTheme: official MSI appeared during setup; left unchanged");
+        return true;
+    }
+    if (secureUxPackage_.alreadyInstalled) {
+        SetFailure(L"SecureUxTheme MSI registration changed during setup; retry installation.",ERROR_RETRY);
+        return false;
+    }
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
     std::wstring error;
     // Recheck immediately before MSI to avoid implicitly repairing/upgrading a
     // product installed by another process while Glass was being installed.
-    if (secureUxPackage_.path.empty() || !GlassSecureUxPackage::CheckNoInstalledProduct(error)) {
+    if (secureUxPackage_.path.empty() || !GlassSecureUxPackage::CheckLegacyRepackAbsent(error)) {
         SetFailure(error.empty()?L"Official SecureUxTheme MSI was not prepared.":error,0);
         return false;
     }

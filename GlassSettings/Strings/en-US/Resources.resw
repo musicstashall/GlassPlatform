@@ -828,7 +828,7 @@
   <data name="Themes_SignatureCardTitle" xml:space="preserve"><value>Digital signature</value></data>
   <data name="Themes_SignatureCardDesc" xml:space="preserve"><value>Bypass digital signature checks</value></data>
   <data name="Themes_SignatureActivated" xml:space="preserve"><value>Signature bypass activated.</value></data>
-  <data name="Themes_SignatureDeactivated" xml:space="preserve"><value>Signature bypass deactivated.</value></data>
+  <data name="Themes_SignatureDeactivated" xml:space="preserve"><value>SecureUxTheme registration disabled. Files and the MSI product were not removed.</value></data>
   <data name="Themes_RestartRequired" xml:space="preserve"><value>Restart required.</value></data>
   <data name="Themes_RestartNotRequired" xml:space="preserve"><value>No restart required.</value></data>
   <data name="Themes_SignatureActivateFailedFormat" xml:space="preserve"><value>Could not enable signature bypass (0x{0:X8})</value></data>
@@ -842,7 +842,7 @@
   <data name="Dialog_SignatureWrongArchBody" xml:space="preserve"><value>The module architecture does not match this system. Open the GlassSettings build that matches Windows.</value></data>
   <data name="Dialog_SignatureWow64Body" xml:space="preserve"><value>The x86 GlassSettings build cannot activate the patcher on 64-bit Windows. Open x64 GlassSettings.</value></data>
   <data name="Dialog_SignatureActivateConfirm" xml:space="preserve"><value>Turning this on changes winlogon.exe load settings and requires a computer restart. Continue?</value></data>
-  <data name="Dialog_SignatureDeactivateConfirm" xml:space="preserve"><value>Turning this off requires a restart. If a custom theme is active, the built-in Windows theme will be applied. Continue?</value></data>
+  <data name="Dialog_SignatureDeactivateConfirm" xml:space="preserve"><value>Turning this off removes SecureUxTheme loading and the ThemeUiProxy COM redirects. Files and the MSI product remain; use Windows Installed apps to remove the product. A stock Windows style will be applied if a custom style is active. Restart Windows to fully disable hooks in already running processes. Continue?</value></data>
   <data name="Dialog_SignatureConfirm" xml:space="preserve"><value>Continue</value></data>
   <data name="Themes_SignatureRebootButton" xml:space="preserve"><value>Restart</value></data>
   <data name="Home_FooterRebootRequired" xml:space="preserve"><value>Restart required</value></data>
@@ -1096,4 +1096,5 @@
   <data name="Dwm_ParallelConflictSuffixLocalValue" xml:space="preserve"><value>; conflict with L value</value></data>
   <data name="Dwm_DefaultReflectionTile" xml:space="preserve"><value>System reflection (default)</value></data>
   <data name="Dwm_DefaultMaterialTile" xml:space="preserve"><value>System material (default)</value></data>
+  <data name="Dialog_SignatureMissingPayloadBody" xml:space="preserve"><value>The complete SecureUxTheme modules are not available. Install the original MSI using GlassSetup. A retained ThemeUiProxy.dll alone cannot enable SecureUxTheme.</value></data>
 </root>
