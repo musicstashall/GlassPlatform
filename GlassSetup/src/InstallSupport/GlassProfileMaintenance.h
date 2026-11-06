@@ -20,20 +20,18 @@ struct Profile {
     ~Profile(){if(hive)RegCloseKey(hive);}
 };
 inline bool ReadString(HKEY key,const wchar_t* name,std::wstring& out) {
+    out.clear();
     DWORD type=0,size=0;
     if(RegQueryValueExW(key,name,nullptr,&type,nullptr,&size)!=ERROR_SUCCESS ||
-       (type!=REG_SZ&&type!=REG_EXPAND_SZ)||size>65536||size<sizeof(wchar_t))return false;
+       (type!=REG_SZ&&type!=REG_EXPAND_SZ)||size>65536||size<sizeof(wchar_t)||size%sizeof(wchar_t))return false;
     std::vector<wchar_t> data(size/sizeof(wchar_t)+1,0);
-    if(RegQueryValueExW(key,name,nullptr,&type,reinterpret_cast<BYTE*>(data.data()),&size)!=ERROR_SUCCESS)return false;
-    out=data.data();return true;
-}
-inline bool ProfileSidHasLiveAccount(const wchar_t* sidString) noexcept {
-    PSID sid=nullptr;
-    if(!ConvertStringSidToSidW(sidString,&sid))return false;
-    wchar_t name[256]{},domain[256]{};DWORD nameC=256,domainC=256;SID_NAME_USE use{};
-    const bool ok=LookupAccountSidW(nullptr,sid,name,&nameC,domain,&domainC,&use)!=FALSE;
-    LocalFree(sid);
-    return ok;
+    if(RegQueryValueExW(key,name,nullptr,&type,reinterpret_cast<BYTE*>(data.data()),&size)!=ERROR_SUCCESS ||
+       (type!=REG_SZ&&type!=REG_EXPAND_SZ)||size<sizeof(wchar_t)||size%sizeof(wchar_t))return false;
+    const std::size_t chars=size/sizeof(wchar_t);
+    if(chars>=data.size() || data[chars-1]!=0)return false;
+    // Embedded NUL/trailing payload must not truncate a profile path silently.
+    for(std::size_t i=0;i+1<chars;++i)if(data[i]==0)return false;
+    out.assign(data.data(),chars-1);return !out.empty();
 }
 inline bool SafePath(const std::wstring& path) {
     if(path.size()<3||path[1]!=L':'||path[2]!=L'\\')return false;
@@ -61,11 +59,13 @@ inline bool OtherUserSessions(std::wstring& detail) {
 }
 class Inventory {
     std::vector<Profile> profiles_;
+    bool cleanupPrepared_=false;
 public:
     const std::vector<Profile>& Profiles() const noexcept{return profiles_;}
     // All hives stay open between preflight and commit. We never unload a system
     // mount; RegLoadAppKey handles unload only our private offline mapping.
     bool OpenAll(std::wstring& detail) {
+        cleanupPrepared_=false;
         profiles_.clear();
         HKEY list=nullptr;
         LONG st=RegOpenKeyExW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList",0,KEY_READ|KEY_WOW64_64KEY,&list);
@@ -87,11 +87,20 @@ public:
             wchar_t expanded[32768]{};
             const DWORD chars=got?ExpandEnvironmentStringsW(raw.c_str(),expanded,32768):0;
             if(!chars||chars>32768){detail=sid+L": invalid profile path";ok=false;break;}
-            if(!ProfileSidHasLiveAccount(name))continue;
+            // ProfileList is the inventory, not account-name lookup: deleted,
+            // disconnected-domain and temporarily unresolvable users can still
+            // own local data. Never silently exclude their hives.
             const DWORD pathAttr=GetFileAttributesW(expanded);
-            if(pathAttr==INVALID_FILE_ATTRIBUTES||(pathAttr&FILE_ATTRIBUTE_REPARSE_POINT))continue;
+            if(pathAttr==INVALID_FILE_ATTRIBUTES || !(pathAttr&FILE_ATTRIBUTE_DIRECTORY) ||
+               (pathAttr&FILE_ATTRIBUTE_REPARSE_POINT) || !SafePath(expanded)) {
+                detail=sid+L": profile directory unavailable or unsafe";ok=false;break;
+            }
             const std::wstring ntuser=std::wstring(expanded)+L"\\NTUSER.DAT";
-            if(GetFileAttributesW(ntuser.c_str())==INVALID_FILE_ATTRIBUTES)continue;
+            const DWORD hiveAttr=GetFileAttributesW(ntuser.c_str());
+            if(hiveAttr==INVALID_FILE_ATTRIBUTES || (hiveAttr&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) ||
+               !SafePath(ntuser)) {
+                detail=sid+L": NTUSER.DAT unavailable or unsafe";ok=false;break;
+            }
             Profile profile;profile.sid=sid;profile.path=expanded;
             st=RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ|KEY_WRITE,&profile.hive);
             if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){detail=sid+L": loaded hive unavailable: "+std::to_wstring(st);ok=false;break;}
@@ -105,7 +114,9 @@ public:
             }
             profiles_.push_back(std::move(profile));
         }
-        RegCloseKey(list);return ok;
+        RegCloseKey(list);
+        if(!ok) profiles_.clear(); // A partial inventory must never become a cleanup target.
+        return ok;
     }
     // Conservative safety barrier until a per-session style broker and verified
     // offline theme writer are available. Unknown/custom offline styles do not
@@ -153,12 +164,16 @@ public:
         return true;
     }
     bool PreflightCleanup(std::wstring& detail) {
+        cleanupPrepared_=false;
         if(OtherUserSessions(detail)||!OpenAll(detail))return false;
         for(const auto& profile:profiles_)
             if(!Shared::RegistrySanity::CleanOwnedSettings(profile.hive,false,false,detail)){detail=profile.sid+L": "+detail;return false;}
-        return Shared::RegistrySanity::CleanOwnedSettings(HKEY_LOCAL_MACHINE,true,false,detail);
+        cleanupPrepared_=Shared::RegistrySanity::CleanOwnedSettings(HKEY_LOCAL_MACHINE,true,false,detail);
+        return cleanupPrepared_;
     }
     bool Cleanup(std::wstring& detail) {
+        if(!cleanupPrepared_) {detail=L"Successful all-profile cleanup preflight is required";return false;}
+        cleanupPrepared_=false; // One-shot commit; partial errors require a fresh inventory/preflight.
         if(OtherUserSessions(detail))return false;
         for(const auto& profile:profiles_) {
             if(!Shared::RegistrySanity::CleanOwnedSettings(profile.hive,false,true,detail)){detail=profile.sid+L": partial cleanup: "+detail;return false;}
