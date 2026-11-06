@@ -651,8 +651,8 @@ assert "plan-warning" in ui and "li.textContent='⚠ '+item.warning" in ui
 assert "selected.length} of ${inputs.length}" in ui
 assert "More products below" in ui and "Products above" in ui
 assert "const bool sutNeedsSettings=false" in setup and "const bool sutRequiresSettings=false" in setup
-assert "select&&!webReady_?SW_SHOWNA:SW_HIDE" in unins and "ShowWindow(back_,SW_HIDE)" in unins
-assert "page_==Page::Select?SW_SHOWNA:SW_HIDE" in unins
+assert "(page==Page::Cleanup || (select&&!webReady_))?SW_SHOWNA:SW_HIDE" in unins and "ShowWindow(back_,SW_HIDE)" in unins
+assert "(page_==Page::Select || page_==Page::Cleanup)?SW_SHOWNA:SW_HIDE" in unins
 assert "WizardTheme::PaintFooterBar(dc" in setup and "void PaintFooterBar(" in theme and "bufferedErase_" not in setup
 assert "const bool terminalPage=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error" in setup
 assert "const int footerTop=terminalPage?kHtmlHeight:kContentHeight" in setup and "Box(0,kHtmlHeight,kWidth,1)" not in setup

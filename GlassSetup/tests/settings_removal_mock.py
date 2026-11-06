@@ -28,7 +28,7 @@ namespace GlassInstallUtil {bool IsOs64Bit(){return true;}}
 bool SameCode(const std::wstring& code,const wchar_t* expected){return code==expected;}
 enum class Page {Select,SettingsRisk};
 '''
-methods='\n'.join(function(t) for t in ['void ChooseInitialProduct(', 'void NormalizeSelection(', 'unsigned SettingsRemovalRisk(', 'bool ConfirmSettingsRemovalRisk('])
+methods='\n'.join(function(t) for t in ['bool RemovesAllInstalled(', 'void ChooseInitialProduct(', 'void NormalizeSelection(', 'unsigned SettingsRemovalRisk(', 'bool ConfirmSettingsRemovalRisk('])
 body=prefix+selection+'''\nstruct Test {
 struct Args {std::wstring product;bool acceptSettingsRemovalRisk=false;} args_;
 Selection installed_,selected_;
