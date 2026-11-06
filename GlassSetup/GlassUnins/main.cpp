@@ -43,6 +43,7 @@ constexpr int kWidth=1000, kHtmlHeight=540, kContentHeight=544, kHeight=600;
 constexpr COLORREF kDark=RGB(16,18,37), kFooterTop=RGB(26,27,50), kFooterBottom=RGB(17,18,35);
 constexpr UINT kWebInit=WM_APP+1, kWorkerStatus=WM_APP+2, kWorkerHold=WM_APP+3, kWorkerFinished=WM_APP+4;
 constexpr int kSelectAll=1100;
+constexpr int kSettings32=1101;
 constexpr UINT_PTR kTimer=11;
 HINSTANCE gInstance=nullptr;
 LANGID gLanguage=MAKELANGID(LANG_ENGLISH,SUBLANG_ENGLISH_US);
@@ -84,6 +85,7 @@ bool IsKnownCode(const std::wstring& code) noexcept {
 struct Arguments {
     bool fromTemp=false;
     bool silent=false;
+    bool acceptSettingsRemovalRisk=false;
     int launchError=0;
     std::wstring originalDir;
     std::wstring product;
@@ -97,6 +99,7 @@ Arguments ParseArguments() {
         if (_wcsicmp(args[i],L"/fromtemp")==0 && i+1<count) { a.fromTemp=true; a.originalDir=args[++i]; }
         else if (_wcsicmp(args[i],L"--product")==0 && i+1<count) a.product=args[++i];
         else if (_wcsicmp(args[i],L"--silent")==0) a.silent=true;
+        else if (_wcsicmp(args[i],L"--accept-settings-removal-risk")==0) a.acceptSettingsRemovalRisk=true;
     }
     LocalFree(args);
     return a;
@@ -215,6 +218,7 @@ int RelaunchFromPrivateTemp(const Arguments& a) noexcept {
     std::wstring command=L"\""+dest+L"\" /fromtemp \""+std::wstring(sourceDir)+L"\"";
     if (!product.empty()) command+=L" --product \""+product+L"\"";
     if (a.silent) command+=L" --silent";
+    if (a.acceptSettingsRemovalRisk) command+=L" --accept-settings-removal-risk";
     STARTUPINFOW si{}; si.cb=sizeof(si);
     PROCESS_INFORMATION pi{};
     if (!CreateProcessW(dest.c_str(),command.data(),nullptr,nullptr,FALSE,0,nullptr,temp.c_str(),&si,&pi)) {
@@ -237,9 +241,10 @@ struct Selection {
     bool x64=false, x86=false, settings=false, openGlass=false, secureUxTheme=false;
     // Не продукт: очистка настроек текущего пользователя по явному выбору.
     bool cleanupSettings=false;
+    bool settings64=false, settings32=false;
     bool Any() const noexcept { return x64 || x86 || settings || openGlass || secureUxTheme; }
 };
-enum class Page { Select, Stopping, UnlockModules, UnlockProcesses, Removing, Cancelled, Complete, Error };
+enum class Page { Select, SettingsRisk, Stopping, UnlockModules, UnlockProcesses, Removing, Cancelled, Complete, Error };
 enum class Action { None, Retry, Unlock, Cancel };
 enum class OperationState { BeforeRemoval, CancelRequested, Removing, Finished };
 
@@ -310,6 +315,7 @@ public:
 
 private:
     Arguments args_;
+    unsigned confirmedSettingsRisk_=0, pendingSettingsRisk_=0;
     Selection installed_{}, selected_{};
     GlassInstallUtil::SecureUxThemeState secureUxThemeState_=GlassInstallUtil::SecureUxThemeState::Unavailable;
     Page page_=Page::Select;
@@ -317,7 +323,7 @@ private:
     bool registered_=false, alreadyRunning_=false, closing_=false;
     bool webReady_=false, bridgeReady_=false, initSent_=false, webFailed_=false;
     HWND back_=nullptr,next_=nullptr,cancel_=nullptr,webHost_=nullptr;
-    std::array<HWND,6> check_{};
+    std::array<HWND,7> check_{};
     HFONT font_=nullptr, heading_=nullptr;
     HBRUSH brush_=nullptr,buttonBrush_=nullptr;
     ComPtr<ICoreWebView2Environment> environment_;
@@ -351,13 +357,15 @@ private:
             OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
         heading_=CreateFontW(-Scale(30),0,0,0,FW_LIGHT,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
-        for (HWND h:{back_,next_,cancel_,check_[0],check_[1],check_[2],check_[3],check_[4],check_[5]})
+        for (HWND h:{back_,next_,cancel_,check_[0],check_[1],check_[2],check_[3],check_[4],check_[5],check_[6]})
             if (h) SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
     void DetectInstalled() noexcept {
         installed_.x64=Msi::IsProductInstalled(Msi::kProductPlatformX64);
         installed_.x86=Msi::IsProductInstalled(Msi::kProductPlatformX86);
-        installed_.settings=Msi::IsProductInstalled(Msi::kProductSettingsX64) || Msi::IsProductInstalled(Msi::kProductSettingsX86);
+        installed_.settings64=Msi::IsProductInstalled(Msi::kProductSettingsX64);
+        installed_.settings32=Msi::IsProductInstalled(Msi::kProductSettingsX86);
+        installed_.settings=installed_.settings64 || installed_.settings32;
         installed_.openGlass=Msi::IsProductInstalled(Msi::kProductOpenGlass);
         installed_.secureUxTheme=Msi::IsProductInstalled(Msi::kProductSecureUxThemeX64) ||
             Msi::IsProductInstalled(Msi::kProductSecureUxThemeX86);
@@ -365,7 +373,8 @@ private:
     void ChooseInitialProduct() noexcept {
         if (SameCode(args_.product,Msi::kProductPlatformX64)) selected_.x64=installed_.x64;
         else if (SameCode(args_.product,Msi::kProductPlatformX86)) selected_.x86=installed_.x86;
-        else if (SameCode(args_.product,Msi::kProductSettingsX64) || SameCode(args_.product,Msi::kProductSettingsX86)) selected_.settings=installed_.settings;
+        else if (SameCode(args_.product,Msi::kProductSettingsX64)) selected_.settings64=installed_.settings64;
+        else if (SameCode(args_.product,Msi::kProductSettingsX86)) selected_.settings32=installed_.settings32;
         else if (SameCode(args_.product,Msi::kProductOpenGlass)) selected_.openGlass=installed_.openGlass;
         else if (SameCode(args_.product,Msi::kProductSecureUxThemeX64) || SameCode(args_.product,Msi::kProductSecureUxThemeX86))
             selected_.secureUxTheme=installed_.secureUxTheme;
@@ -377,11 +386,14 @@ private:
             secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
     }
     void NormalizeSelection() noexcept {
+        selected_.settings64=selected_.settings64 && installed_.settings64;
+        selected_.settings32=selected_.settings32 && installed_.settings32;
+        selected_.settings=selected_.settings64 || selected_.settings32;
         const GlassProducts::Selection chosen{selected_.x64,selected_.x86,selected_.settings,selected_.openGlass,selected_.secureUxTheme};
         const GlassProducts::Selection installed{installed_.x64,installed_.x86,installed_.settings,installed_.openGlass,installed_.secureUxTheme};
         const auto safe=GlassProducts::NormalizeRemoval(chosen,installed,GlassInstallUtil::IsOs64Bit());
         selected_={safe.platform64,safe.platform32,safe.glassSettings,safe.openGlass,
-                   safe.secureUxTheme,selected_.cleanupSettings};
+                   safe.secureUxTheme,selected_.cleanupSettings,selected_.settings64,selected_.settings32};
         if (!installed_.secureUxTheme) selected_.secureUxTheme=false;
 
     }
@@ -420,7 +432,8 @@ private:
         cancel_=Button(T(L"Отмена",L"Cancel"),IDC_CANCEL);
         check_[0]=Button(L"Glass Platform x64",IDC_COMPONENT64,BS_AUTOCHECKBOX);
         check_[1]=Button(L"Glass Platform x86",IDC_COMPONENT32,BS_AUTOCHECKBOX);
-        check_[2]=Button(L"GlassSettings",IDC_COMPONENT_SETTINGS,BS_AUTOCHECKBOX);
+        check_[2]=Button(L"GlassSettings x64",IDC_COMPONENT_SETTINGS,BS_AUTOCHECKBOX);
+        check_[6]=Button(L"GlassSettings x86",kSettings32,BS_AUTOCHECKBOX);
         check_[3]=Button(L"OpenGlass",IDC_COMPONENT_OG,BS_AUTOCHECKBOX);
         check_[4]=Button(T(L"Удалить настройки",L"Remove settings"),IDC_UNINS_SETTINGS_CLEANUP,BS_AUTOCHECKBOX);
         check_[5]=Button(L"SecureUxTheme",IDC_UNINS_SECUREUXTHEME,BS_AUTOCHECKBOX);
@@ -455,10 +468,12 @@ private:
         Move(back_,644,kContentHeight+12,160,32);
         Move(next_,page_==Page::Select?814:750,kContentHeight+12,page_==Page::Select?130:104,32);
         Move(cancel_,864,kContentHeight+12,104,32);
+        if (page_==Page::SettingsRisk) Move(next_,600,kContentHeight+12,248,32);
         if (page_==Page::Select) { Move(next_,750,kContentHeight+12,104,32); Move(back_,574,kContentHeight+12,160,32); }
         if (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error) Move(next_,864,kContentHeight+12,104,32);
         Move(check_[0],60,203,390,32); Move(check_[1],510,203,390,32);
-        Move(check_[2],60,293,390,32); Move(check_[3],510,293,390,32);
+        Move(check_[2],60,273,390,32); Move(check_[6],510,273,390,32);
+        Move(check_[3],510,343,390,32);
         Move(check_[5],60,373,390,32); Move(check_[4],60,417,840,32);
         if (controller_) { RECT bounds=Box(0,0,kWidth,kHtmlHeight); controller_->put_Bounds(bounds); }
     }
@@ -467,9 +482,9 @@ private:
     // пользователь видел четыре белых прямоугольника на месте карточек продуктов.
     void ShowNativeChecks() {
         const bool show=page_==Page::Select && webFailed_;
-        const bool values[]={selected_.x64,selected_.x86,selected_.settings,selected_.openGlass,selected_.cleanupSettings,selected_.secureUxTheme};
-        const bool available[]={installed_.x64,installed_.x86,installed_.settings,installed_.openGlass,true,installed_.secureUxTheme};
-        for (int i=0;i<6;++i) {
+        const bool values[]={selected_.x64,selected_.x86,selected_.settings64,selected_.openGlass,selected_.cleanupSettings,selected_.secureUxTheme,selected_.settings32};
+        const bool available[]={installed_.x64,installed_.x86,installed_.settings64,installed_.openGlass,true,installed_.secureUxTheme,installed_.settings32};
+        for (int i=0;i<7;++i) {
             SendMessageW(check_[i],BM_SETCHECK,values[i]?BST_CHECKED:BST_UNCHECKED,0);
             ShowWindow(check_[i],show && available[i]?SW_SHOWNA:SW_HIDE);
             const bool dependent=false;
@@ -479,6 +494,7 @@ private:
     const wchar_t* WebPage() const noexcept {
         switch (page_) {
         case Page::Select: return L"uninstall-select";
+        case Page::SettingsRisk: return L"settings-removal-risk";
         case Page::Stopping: case Page::Removing: return L"uninstalling";
         case Page::UnlockModules: return L"unlock-modules";
         case Page::UnlockProcesses: return L"unlock-processes";
@@ -502,14 +518,15 @@ private:
             if (locked) reasons+=Q(T(L"удалится вместе с основной платформой",L"removed together with the core platform"));
             reasons+=L"]";
             json+=L"{\"id\":"+Q(id)+L",\"title\":"+Q(title)+L",\"description\":"+Q((std::wstring(id)==L"x64"||std::wstring(id)==L"x86")?GlassProductUiPolicy::PlatformDescription(detail,std::wstring(id)==L"x64",os64,IsRu()):std::wstring(detail))+
-                L",\"warning\":"+Q(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,IsRu(),GlassInstallUtil::IsOs64Bit()))+
+                L",\"warning\":"+Q(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index((std::wstring(id)==L"settings64" || std::wstring(id)==L"settings32")?L"settings":id)].warnings,IsRu(),GlassInstallUtil::IsOs64Bit()))+
                 L",\"badge\":"+Q(badge)+L",\"state\":"+Q(state)+L",\"reasons\":"+reasons+
                 L",\"checked\":"+(checked?L"true":L"false")+
                 L",\"locked\":"+(locked?L"true":L"false")+L",\"hidden\":"+(available?L"false":L"true")+L"}";
         };
         add(L"x64",L"Glass Platform x64",T(L"Оформление 64-битных приложений",L"Styling for 64-bit applications"),selected_.x64,installed_.x64,false);
         add(L"x86",L"Glass Platform x86",T(L"Оформление 32-битных приложений",L"Styling for 32-bit applications"),selected_.x86,installed_.x86,false);
-        add(L"settings",L"GlassSettings",T(L"Панель управления платформой",L"Platform settings application"),selected_.settings,installed_.settings,false);
+        add(L"settings64",L"GlassSettings x64",T(L"64-битная панель управления платформой",L"64-bit platform settings application"),selected_.settings64,installed_.settings64,false);
+        add(L"settings32",L"GlassSettings x86",T(L"32-битная панель управления платформой",L"32-bit platform settings application"),selected_.settings32,installed_.settings32,false);
         add(L"openglass",L"OpenGlass",T(L"Оформление рамок окон",L"Glass window frame engine"),selected_.openGlass,installed_.openGlass,false);
         if(installed_.secureUxTheme){
             const bool active=SecureUxThemeManaged();
@@ -581,7 +598,7 @@ private:
         const std::wstring json=L"{\"type\":\"state\",\"page\":"+Q(WebPage())+
             L",\"components\":"+ComponentsJson()+L",\"componentsWarning\":"+Q(Warning())+
             L",\"status\":"+Q(status)+L",\"errorReason\":"+Q(error)+L",\"holdReport\":"+Q(report)+
-            L",\"unlockActive\":false,\"progress\":"+std::to_wstring(progress)+L"}";
+            L",\"settingsRiskBody\":"+Q(SettingsRiskText())+L",\"unlockActive\":false,\"progress\":"+std::to_wstring(progress)+L"}";
         if (json==webState_) return;
         if (SUCCEEDED(web_->PostWebMessageAsJson(json.c_str()))) webState_=json;
     }
@@ -594,7 +611,7 @@ private:
         WizardTheme::ApplyDarkWindowChrome(window);
         WizardTheme::SetSystemCloseEnabled(window,!(page==Page::Removing));
         SetWindowTextW(back_,T(L"Выбрать всё",L"Select all"));
-        SetWindowTextW(next_,select?T(L"Удалить",L"Remove"):
+        SetWindowTextW(next_,page==Page::SettingsRisk?T(L"Продолжить на свой риск",L"Continue at risk"):select?T(L"Удалить",L"Remove"):
             page==Page::UnlockModules?T(L"Повторить",L"Retry"):
             page==Page::UnlockProcesses?T(L"Разблокировать",L"Unlock"):T(L"Закрыть",L"Close"));
         ShowWindow(back_,select&&!webReady_?SW_SHOWNA:SW_HIDE);
@@ -602,7 +619,10 @@ private:
         ShowWindow(cancel_,!terminal && page!=Page::Removing?SW_SHOWNA:SW_HIDE);
         EnableWindow(next_,!select || selected_.Any()||selected_.cleanupSettings);
         EnableWindow(cancel_,!cancelRequested_.load());
-        if (hold) SendMessageW(window,DM_SETDEFID,IDC_NEXT,0);
+        if (page==Page::SettingsRisk) {
+            SendMessageW(window,DM_SETDEFID,IDC_CANCEL,0);
+            SetFocus(cancel_);
+        } else if (hold) SendMessageW(window,DM_SETDEFID,IDC_NEXT,0);
         Layout(); ShowNativeChecks();
         if (controller_) controller_->put_IsVisible(webReady_?TRUE:FALSE);
         ShowWindow(webHost_,webReady_?SW_SHOWNA:SW_HIDE);
@@ -653,7 +673,37 @@ private:
             if (cancelRequested_.load()) return false;
         }
     }
+    unsigned SettingsRemovalRisk(const Selection& chosen) const noexcept {
+        return GlassProductPlan::SettingsRemovalRiskMask(chosen.settings64,chosen.settings32,
+            Msi::IsProductInstalled(Msi::kProductPlatformX64),Msi::IsProductInstalled(Msi::kProductPlatformX86),
+            chosen.x64,chosen.x86);
+    }
+    std::wstring SettingsRiskText() const {
+        std::wstring text=T(L"После удаления GlassSettings дальнейшая выгрузка соответствующей Platform останется без helper и контроля модулей. Это может привести к падению процессов.\n\n",
+            L"Removing GlassSettings leaves the matching Platform without its helper and module monitoring for subsequent unloading. Processes may crash.\n\n");
+        if (pendingSettingsRisk_&1u) text+=L"GlassSettings x64 ↔ Platform x64\n";
+        if (pendingSettingsRisk_&2u) text+=L"GlassSettings x86 ↔ Platform x86\n";
+        text+=T(L"\nДля удаления всего комплекта сначала удалите Platform, затем GlassSettings, либо отмените эту операцию и откройте «Изменить» для общего плана обслуживания.\n\nПродолжить удаление только выбранных продуктов на свой риск?",
+            L"\nTo remove the whole installation, remove Platform first, then GlassSettings; or cancel and use Modify for a shared maintenance plan.\n\nContinue removing only the selected products at your own risk?");
+        return text;
+    }
+    bool ConfirmSettingsRemovalRisk(const Selection& chosen) {
+        const unsigned risk=SettingsRemovalRisk(chosen);
+        if (!risk || args_.acceptSettingsRemovalRisk || !(risk & ~confirmedSettingsRisk_)) return true;
+        pendingSettingsRisk_=risk;
+        SetPage(Page::SettingsRisk);
+        return false;
+    }
     int RunOperation(Selection chosen) {
+        // Re-read presence at the execution boundary: a Platform registered after
+        // the dialog must not inherit consent for a different architecture.
+        const unsigned risk=SettingsRemovalRisk(chosen);
+        if (!args_.acceptSettingsRemovalRisk && (risk & ~confirmedSettingsRisk_)) {
+            LogLine(L"GlassSettings removal refused: matching Platform retained; explicit risk consent required. CLI: --accept-settings-removal-risk");
+            SetError(T(L"Удаление GlassSettings не начато: соответствующая Platform останется без helper. Используйте «Изменить» или явно подтвердите риск.",
+                L"GlassSettings removal did not start: the matching Platform would lose its helper. Use Modify or explicitly accept the risk."));
+            return ERROR_INSTALL_USEREXIT;
+        }
         GlassInstallUtil::InstallRoots current;
         const bool rootsNow=GlassInstallUtil::ResolveInstallRoots(current);
         const bool same64=(current.x64.empty() && x64Dir_.empty()) ||
@@ -695,10 +745,8 @@ private:
         std::vector<Probe> probes;
         if (chosen.x64) probes.push_back({Msi::kProductPlatformX64,x64Dir_,{}});
         if (chosen.x86) probes.push_back({Msi::kProductPlatformX86,x86Dir_,{}});
-        if (chosen.settings) {
-            probes.push_back({Msi::kProductSettingsX64,x64Dir_,{}});
-            probes.push_back({Msi::kProductSettingsX86,x86Dir_,{}});
-        }
+        if (chosen.settings64) probes.push_back({Msi::kProductSettingsX64,x64Dir_,{}});
+        if (chosen.settings32) probes.push_back({Msi::kProductSettingsX86,x86Dir_,{}});
         if (chosen.secureUxTheme) {
             const bool os64 = GlassInstallUtil::IsOs64Bit();
             if (os64)
@@ -932,7 +980,7 @@ private:
             }
         }
         bool msiRebootRequired=false;
-        int count=(chosen.secureUxTheme?1:0)+(chosen.settings?1:0)+(chosen.openGlass?1:0)+(chosen.x86?1:0)+(chosen.x64?1:0);
+        int count=(chosen.secureUxTheme?1:0)+(chosen.settings64?1:0)+(chosen.settings32?1:0)+(chosen.openGlass?1:0)+(chosen.x86?1:0)+(chosen.x64?1:0);
         int done=0;
         auto remove=[&](const wchar_t* code,const wchar_t* name) -> bool {
             SetStatus(std::wstring(T(L"Удаление ",L"Removing "))+name+L"…",1000+(done*8500/std::max(1,count)));
@@ -965,10 +1013,6 @@ private:
             if (!remove(Msi::kProductSecureUxThemeX64,L"SecureUxTheme x64") ||
                 !remove(Msi::kProductSecureUxThemeX86,L"SecureUxTheme x86")) { restoreRemaining(); return 12; }
             ++done;
-        }
-        if (chosen.settings) {
-            if (!remove(Msi::kProductSettingsX64,L"GlassSettings x64") || !remove(Msi::kProductSettingsX86,L"GlassSettings x86")) { restoreRemaining(); return 12; }
-            GlassInstallUtil::DeleteStartMenuShortcut(); ++done;
         }
         if (chosen.openGlass) {
             if (!remove(Msi::kProductOpenGlass,L"OpenGlass")) { restoreRemaining(); return 13; }
@@ -1011,20 +1055,31 @@ private:
             }
             GlassInstallUtil::ClearPlatformInstallPath(true); ++done;
         }
+        // Finish all Platform/helper work before removing either Settings MSI.
+        if (chosen.settings64) {
+            if (!remove(Msi::kProductSettingsX64,L"GlassSettings x64")) { restoreRemaining(); return 12; }
+            ++done;
+        }
+        if (chosen.settings32) {
+            if (!remove(Msi::kProductSettingsX86,L"GlassSettings x86")) { restoreRemaining(); return 12; }
+            ++done;
+        }
+        if (chosen.settings && !Msi::IsProductInstalled(Msi::kProductSettingsX64) &&
+            !Msi::IsProductInstalled(Msi::kProductSettingsX86)) GlassInstallUtil::DeleteStartMenuShortcut();
         // Pin retained product directories, including nested/aliased roots,
         // while pruning only empty directories of removed products.
         std::vector<std::wstring> keptRoots;
         if (installed_.x64 && !chosen.x64 && !x64Dir_.empty()) keptRoots.push_back(x64Dir_);
         if (installed_.x86 && !chosen.x86 && !x86Dir_.empty()) keptRoots.push_back(x86Dir_);
         if (installed_.openGlass && !chosen.openGlass && !openGlassDir_.empty()) keptRoots.push_back(openGlassDir_);
-        if (installed_.settings && !chosen.settings) {
-            if (!x64Dir_.empty()) keptRoots.push_back(GlassInstallUtil::TrimTrailingSlashes(x64Dir_)+L"\\GlassSettings");
-            if (!x86Dir_.empty()) keptRoots.push_back(GlassInstallUtil::TrimTrailingSlashes(x86Dir_)+L"\\GlassSettings");
-        }
-        if (chosen.settings) {
-            if (!x64Dir_.empty()) GlassInstallUtil::PruneEmptyDirectories(GlassInstallUtil::TrimTrailingSlashes(x64Dir_)+L"\\GlassSettings",keptRoots);
-            if (!x86Dir_.empty()) GlassInstallUtil::PruneEmptyDirectories(GlassInstallUtil::TrimTrailingSlashes(x86Dir_)+L"\\GlassSettings",keptRoots);
-        }
+        if (installed_.settings64 && !chosen.settings64 && !x64Dir_.empty())
+            keptRoots.push_back(GlassInstallUtil::TrimTrailingSlashes(x64Dir_)+L"\\GlassSettings");
+        if (installed_.settings32 && !chosen.settings32 && !x86Dir_.empty())
+            keptRoots.push_back(GlassInstallUtil::TrimTrailingSlashes(x86Dir_)+L"\\GlassSettings");
+        if (chosen.settings64 && !x64Dir_.empty())
+            GlassInstallUtil::PruneEmptyDirectories(GlassInstallUtil::TrimTrailingSlashes(x64Dir_)+L"\\GlassSettings",keptRoots);
+        if (chosen.settings32 && !x86Dir_.empty())
+            GlassInstallUtil::PruneEmptyDirectories(GlassInstallUtil::TrimTrailingSlashes(x86Dir_)+L"\\GlassSettings",keptRoots);
         if (chosen.openGlass && !openGlassDir_.empty() &&
             !GlassInstallUtil::SameInstallPath(openGlassDir_,x64Dir_) &&
             !GlassInstallUtil::SameInstallPath(openGlassDir_,x86Dir_))
@@ -1064,6 +1119,7 @@ private:
         NormalizeSelection(); cancelRequested_.store(false); removalStarted_.store(false);
         operationState_.store(OperationState::BeforeRemoval);
         const Selection chosen=selected_;
+        if (!ConfirmSettingsRemovalRisk(chosen)) return;
         SetPage(Page::Stopping);
         try {
             worker_=std::thread([this,chosen]() {
@@ -1094,13 +1150,15 @@ private:
             EnableWindow(cancel_,FALSE);
             return;
         }
+        if (page_==Page::SettingsRisk) { pendingSettingsRisk_=0; SetPage(Page::Select); return; }
         DestroyWindow(window);
     }
     void SetComponent(const std::wstring& id,bool checked) {
         if (page_!=Page::Select) return;
         if (id==L"x64" && installed_.x64) selected_.x64=checked;
         else if (id==L"x86" && installed_.x86) selected_.x86=checked;
-        else if (id==L"settings" && installed_.settings) selected_.settings=checked;
+        else if (id==L"settings64" && installed_.settings64) selected_.settings64=checked;
+        else if (id==L"settings32" && installed_.settings32) selected_.settings32=checked;
         else if (id==L"openglass" && installed_.openGlass) selected_.openGlass=checked;
         else if (id==L"secureUxTheme" && installed_.secureUxTheme) selected_.secureUxTheme=checked;
         else if (id==L"cleanup") selected_.cleanupSettings=checked;
@@ -1118,7 +1176,7 @@ private:
         if (message==L"cancel") { RequestClose(); return S_OK; }
         if (message==L"ready") { bridgeReady_=true; SyncWeb(); return S_OK; }
         if(message==L"components:select-all" && page_==Page::Select) {
-            selected_.x64=installed_.x64;selected_.x86=installed_.x86;selected_.settings=installed_.settings;selected_.openGlass=installed_.openGlass;
+            selected_.x64=installed_.x64;selected_.x86=installed_.x86;selected_.settings64=installed_.settings64;selected_.settings32=installed_.settings32;selected_.openGlass=installed_.openGlass;
             selected_.secureUxTheme=installed_.secureUxTheme&&secureUxThemeState_!=GlassInstallUtil::SecureUxThemeState::External&&secureUxThemeState_!=GlassInstallUtil::SecureUxThemeState::Conflict;
             NormalizeSelection();ShowNativeChecks();EnableWindow(next_,selected_.Any()||selected_.cleanupSettings);SyncWeb();return S_OK;
         }
@@ -1259,7 +1317,7 @@ private:
         }
         if (!webReady_) {
             DrawTextBlock(dc,L"GlassPlatform",Box(48,32,400,28),font_,RGB(245,244,252));
-            const wchar_t* title=page_==Page::Select?T(L"Выберите продукты для удаления",L"Select products to remove"):
+            const wchar_t* title=page_==Page::SettingsRisk?T(L"GlassSettings: риск для Platform",L"GlassSettings: Platform risk"):page_==Page::Select?T(L"Выберите продукты для удаления",L"Select products to remove"):
                 page_==Page::UnlockModules?T(L"Модули заняты процессами",L"Processes are holding modules"):
                 page_==Page::UnlockProcesses?T(L"Процессы удерживают модули",L"Processes are holding modules"):
                 page_==Page::Cancelled?T(L"Удаление отменено",L"Uninstall cancelled"):
@@ -1267,10 +1325,10 @@ private:
                 page_==Page::Error?T(L"Удаление не завершено",L"Uninstall did not finish"):
                 T(L"Удаление компонентов…",L"Removing components…");
             DrawTextBlock(dc,title,Box(48,94,890,55),heading_,RGB(245,244,252));
-            const std::wstring body=page_==Page::Select?Warning():
+            const std::wstring body=page_==Page::SettingsRisk?SettingsRiskText():page_==Page::Select?Warning():
                 page_==Page::UnlockModules || page_==Page::UnlockProcesses?report:
                 page_==Page::Error?error:status;
-            DrawTextBlock(dc,body,Box(48,page_==Page::Select?390:190,880,220),font_,RGB(196,198,219));
+            DrawTextBlock(dc,body,Box(48,page_==Page::Select?390:190,880,page_==Page::SettingsRisk?300:220),font_,RGB(196,198,219));
         }
         if (page_==Page::Stopping || page_==Page::Removing) {
             RECT track=Box(0,kHtmlHeight,kWidth,4); HBRUSH b=CreateSolidBrush(RGB(42,45,67)); FillRect(dc,&track,b); DeleteObject(b);
@@ -1334,13 +1392,19 @@ private:
             if (HIWORD(w)==BN_CLICKED && page_==Page::Select && !webReady_) {
                 if (id==IDC_COMPONENT64) SetComponent(L"x64",SendMessageW(check_[0],BM_GETCHECK,0,0)==BST_CHECKED);
                 else if (id==IDC_COMPONENT32) SetComponent(L"x86",SendMessageW(check_[1],BM_GETCHECK,0,0)==BST_CHECKED);
-                else if (id==IDC_COMPONENT_SETTINGS) SetComponent(L"settings",SendMessageW(check_[2],BM_GETCHECK,0,0)==BST_CHECKED);
+                else if (id==IDC_COMPONENT_SETTINGS) SetComponent(L"settings64",SendMessageW(check_[2],BM_GETCHECK,0,0)==BST_CHECKED);
+                else if (id==kSettings32) SetComponent(L"settings32",SendMessageW(check_[6],BM_GETCHECK,0,0)==BST_CHECKED);
                 else if (id==IDC_COMPONENT_OG) SetComponent(L"openglass",SendMessageW(check_[3],BM_GETCHECK,0,0)==BST_CHECKED);
                 else if (id==IDC_UNINS_SETTINGS_CLEANUP) SetComponent(L"cleanup",SendMessageW(check_[4],BM_GETCHECK,0,0)==BST_CHECKED);
                 else if (id==IDC_UNINS_SECUREUXTHEME) SetComponent(L"secureUxTheme",SendMessageW(check_[5],BM_GETCHECK,0,0)==BST_CHECKED);
             }
             if (id==IDC_NEXT || id==IDOK) {
-                if (page_==Page::Select) StartRemoval();
+                if (page_==Page::SettingsRisk) {
+                    confirmedSettingsRisk_|=pendingSettingsRisk_;
+                    pendingSettingsRisk_=0;
+                    StartRemoval();
+                }
+                else if (page_==Page::Select) StartRemoval();
                 else if (page_==Page::UnlockModules || page_==Page::UnlockProcesses) {
                     action_.store(page_==Page::UnlockModules?Action::Retry:Action::Unlock);
                     if (gate_) SetEvent(gate_); SetPage(Page::Stopping);

@@ -102,6 +102,13 @@ constexpr void AddWarning(Plan& plan, Product product, Warning warning) noexcept
     plan.rows[Index(product)].warnings = plan.rows[Index(product)].warnings | warning;
     plan.warnings = plan.warnings | warning;
 }
+// Architecture pairs are independent. A stopped but registered Platform still
+// needs its helper for subsequent removal; the other architecture is irrelevant.
+constexpr unsigned SettingsRemovalRiskMask(bool settings64, bool settings32,
+    bool platform64Present, bool platform32Present, bool removesPlatform64, bool removesPlatform32) noexcept {
+    return (settings64 && platform64Present && !removesPlatform64 ? 1u : 0u) |
+        (settings32 && platform32Present && !removesPlatform32 ? 2u : 0u);
+}
 constexpr bool RequiresInteractiveSettingsRemoval(Mode mode, bool removesSettings,
     Presence sutPresence, Activity sutActivity) noexcept {
     return mode == Mode::RemoveSilent && removesSettings &&
