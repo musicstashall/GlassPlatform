@@ -14,8 +14,8 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(GlassWixLockedPlatform)' != ''">
-    <BaseOutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassSetup', 'msi', '$(Configuration)', '$(MSBuildProjectName)'))\</BaseOutputPath>
-    <OutputPath>$(BaseOutputPath)</OutputPath>
+    <BaseOutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Cache', '$(MSBuildProjectName)', 'Output'))\</BaseOutputPath>
+    <OutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassSetup', '$(Configuration)'))\</OutputPath>
     <AppendPlatformToOutputPath>false</AppendPlatformToOutputPath>
     <BaseIntermediateOutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Cache', '$(MSBuildProjectName)'))\</BaseIntermediateOutputPath>
     <IntermediateOutputPath>$(BaseIntermediateOutputPath)$(Platform)\$(Configuration)\</IntermediateOutputPath>

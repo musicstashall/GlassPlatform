@@ -429,6 +429,60 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .components-summary{position:absolute;left:60px;right:350px;top:174px;display:flex;justify-content:space-between;color:#aeb1ca;font-size:10px;line-height:14px;z-index:4}
 #components-panel .components-count,#components-count{color:#aeb1ca;font-size:10px;letter-spacing:0;font-weight:400}
 #components-panel .components-list{position:relative;inset:auto;height:330px;overflow-y:scroll;overflow-x:hidden;padding:18px 12px;background:transparent;mask-image:linear-gradient(180deg,transparent,#000 18px,#000 calc(100% - 18px),transparent);-webkit-mask-image:linear-gradient(180deg,transparent,#000 18px,#000 calc(100% - 18px),transparent);overscroll-behavior:contain}
+.c-slot{position:absolute;top:156px;height:372px;overflow:hidden;transition:width .34s cubic-bezier(.4,0,.2,1)}
+.c-slot-left{left:48px;width:302px}
+.c-slot-right{right:48px;width:268px}
+.c-slot-left.is-hidden,.c-slot-right.is-hidden{width:0}
+.c-lip{position:absolute;top:0;height:100%;width:10px;pointer-events:none;opacity:0;transition:opacity .18s ease,transform .26s cubic-bezier(.4,0,.2,1);background:linear-gradient(150deg,rgba(255,255,255,.13),rgba(255,255,255,0) 46%),linear-gradient(165deg,rgba(78,80,122,.92),rgba(30,33,58,.96));border:1px solid #ffffff3d;box-shadow:0 0 22px #c1b4ff3d,0 10px 24px #04050e66}
+.c-lip-left{left:48px;border-radius:0 10px 10px 0;transform:translateX(-5px);box-shadow:inset -1px 0 #ded5ff,inset -10px 0 22px -12px #c1b4ffb3,0 0 22px #c1b4ff33}
+.c-lip-right{right:48px;border-radius:10px 0 0 10px;transform:translateX(5px);box-shadow:inset 1px 0 #ded5ff,inset 10px 0 22px -12px #c1b4ffb3,0 0 22px #c1b4ff33}
+.c-edge.is-hot .c-lip{opacity:1;transform:none}
+.c-edge{position:absolute;top:156px;height:372px;width:56px;z-index:5}
+.c-edge-left{left:0}
+.c-edge-right{right:0}
+.c-edge.is-off{pointer-events:none}
+.c-peek{position:absolute;top:134px;width:24px;height:104px;display:grid;place-items:center;padding:0;border:1px solid #c1b4ff66;background:linear-gradient(180deg,rgba(74,66,118,.9),rgba(24,26,45,.94));backdrop-filter:blur(14px) saturate(150%);-webkit-backdrop-filter:blur(14px) saturate(150%);color:#cfc7f5;cursor:pointer;box-shadow:inset 0 1px #ffffff1f,0 0 22px #c1b4ff2e,0 12px 26px #04050e5c;transition:opacity .16s,color .16s,border-color .16s,box-shadow .16s,background .16s}
+.c-peek-left{left:24px;border-right:0;border-radius:10px 0 0 10px}
+.c-peek-right{right:24px;border-left:0;border-radius:0 10px 10px 0}
+.c-peek:hover{color:#f2ecff;border-color:#c1b4ff8c;background:linear-gradient(180deg,rgba(84,74,134,.94),rgba(31,29,55,.96));box-shadow:inset 0 1px #ffffff1f,0 0 30px #c1b4ff3d,0 12px 26px #04050e5c}
+.c-peek.is-off{opacity:0;visibility:hidden;pointer-events:none}
+.c-peek-chip{display:grid;place-items:center;width:18px;height:32px;border:1px solid #c1b4ff4d;border-radius:7px;background:#c1b4ff26}
+.c-peek svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round;animation:peek-nudge-l 2.8s ease-in-out infinite}
+.c-peek-right svg{animation-name:peek-nudge-r}
+.c-peek:hover svg{animation:none}
+@keyframes peek-nudge-r{0%,100%{transform:translateX(0);opacity:.72}50%{transform:translateX(1.6px);opacity:1}}
+@keyframes peek-nudge-l{0%,100%{transform:translateX(0);opacity:.72}50%{transform:translateX(-1.6px);opacity:1}}
+@media (prefers-reduced-motion: reduce){.c-peek svg{animation:none}}
+.c-pin{display:inline-grid;place-items:center;width:18px;height:18px;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:#aaadc6;cursor:pointer;opacity:.72;transition:opacity .16s,color .16s,background .16s,border-color .16s,box-shadow .16s}
+.c-pin:hover{opacity:1;color:#e2dbff;background:#c1b4ff1f;border-color:#c1b4ff3d}
+.c-pin.is-on{opacity:1;color:#efe9ff;background:#c1b4ff2e;border-color:#c1b4ff6b;box-shadow:0 0 14px #c1b4ff33,inset 0 1px #ffffff26}
+.c-pin svg{width:12px;height:12px;display:block}
+.c-lane.available .c-pin{margin-left:auto}
+.c-lane.available .c-view{margin-left:0}
+.c-pin-corner{position:absolute;top:9px;right:10px;z-index:2}
+
+/* Workspace interaction overrides: local ghost keeps the production card styling
+   and uses stage-space coordinates, including WebView/DPI scaling. */
+#components-panel .c-slot{transition:width .34s cubic-bezier(.4,0,.2,1)}
+#components-panel .c-slot.is-hidden{width:0}
+#components-panel .c-card:not(.is-disabled){cursor:grab}
+#components-panel .c-card.dragging{opacity:.45;border-style:dashed;cursor:grabbing}
+#components-panel .c-card.drag-ghost{position:absolute;left:0;top:0;z-index:100;pointer-events:none;opacity:1;cursor:grabbing;border:1px solid #c1b4ffa6;background:linear-gradient(130deg,#2a2d4a,#1c1f34);box-shadow:0 18px 40px #04050e99,0 0 0 1px #c1b4ff40;transform-origin:0 0;will-change:transform;border-radius:10px}
+#components-panel .c-card.drag-ghost *{pointer-events:none}
+#components-panel .c-lane.drop-denied{border-color:#e57a7a77}
+#components-panel .c-lane.drop-denied .c-veil{background:#331d2a52;opacity:1;visibility:visible}
+#components-panel .components-summary{position:static;left:auto;right:auto;top:auto;width:auto;flex-shrink:0;font-size:8px;line-height:12px}
+#components-panel .c-edge{pointer-events:auto}
+#components-panel .c-edge.is-off{pointer-events:none}
+#components-panel .c-plan .c-pin-corner{top:9px;right:10px}
+@media (prefers-reduced-motion:reduce){#components-panel .c-slot,#components-panel .c-lane{transition:none}}
+.component-toast{position:absolute;left:50%;top:22px;z-index:85;max-width:420px;padding:7px 12px;border:1px solid #83d9a655;border-radius:8px;background:#173129f2;color:#cdeedd;font-size:9.5px;line-height:1.4;text-align:center;box-shadow:0 12px 30px #0007;opacity:0;visibility:hidden;transform:translateX(-50%) translateY(-5px);transition:opacity .2s,transform .2s,visibility .2s;pointer-events:none}
+.component-toast.show{opacity:1;visibility:visible;transform:translateX(-50%)}
+.component-toast.neutral{border-color:#9da4ba55;background:#232638f2;color:#d8dbe9}
+.component-toast.warn{border-color:#f4c46d55;background:#3a2d22f2;color:#f5e9d4}
+#components-panel.is-dragging .c-veil{opacity:1;visibility:visible}
+#components-panel.is-dragging .c-lane.is-source .c-veil{opacity:0;visibility:hidden}
+#components-panel.is-dragging,#components-panel.is-dragging *{cursor:grabbing!important}
 /* Approved concept C: shelf geometry and skins copied from the reference. */
 .c-lane{position:absolute;top:156px;width:302px;height:372px;border:1px solid #ffffff1f;border-radius:13px;background:linear-gradient(150deg,rgba(255,255,255,.07),rgba(255,255,255,0) 38%),linear-gradient(165deg,rgba(46,49,78,.52),rgba(20,22,40,.74));backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);box-shadow:inset 0 1px #ffffff1a,inset 0 0 0 1px #ffffff05,0 14px 34px #04050e4d;display:flex;flex-direction:column;overflow:hidden;transition:border-color .16s,background .16s}
 .c-lane{transition:border-color .16s,background .16s}
@@ -607,7 +661,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 #components-panel .components-plan li span:nth-child(2){font-size:7.4px;max-width:90px}
 #components-panel .components-plan li.plan-warning{color:#f0d4a1;border-color:#f4c46d4d;background:#f4bd5e10;font-size:8px}
 #components-panel .components-plan-empty{font-size:8.4px;color:#8b90aa;min-height:118px;text-align:center;align-items:center;justify-content:center;border-style:dashed!important;background:none!important}
-#components-panel #components-plan-note{font-size:7.4px;line-height:1.4;color:#8b90a9;margin:7px 0 16px;padding-top:6px;border-top:1px solid #ffffff0d}
+#components-panel #components-plan-note{font-size:7.4px;line-height:1.4;color:#8b90a9;margin:7px 0 4px;padding-top:6px;border-top:1px solid #ffffff0d}
 #components-panel .components-select-all{position:static;align-self:stretch;height:26px;min-height:26px;margin:0 0 8px;padding:0 10px;border:1px solid #c1b4ff59;border-radius:7px;background:#c1b4ff12;color:#ded7ff;font-size:9px;letter-spacing:0}
 .comp-action-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 #components-panel .comp-slim{display:flex;align-items:flex-start;gap:9px;padding:9px 0 0;margin-top:9px;border:0;border-top:1px solid #ffffff14;border-radius:0;background:none;min-height:0}
@@ -635,6 +689,8 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 #stage[data-mode="cleanup-review"] #components-select-all,
 #stage[data-mode="cleanup-review"] #components-count{display:none}
 #stage[data-mode="cleanup-review"] .comp-slim{border:1px solid #f4be7240;padding:14px}
+#components-panel .c-card:not(.is-disabled){cursor:grab}
+#components-panel .components-summary{position:static;left:auto;right:auto;top:auto;width:auto}
 </style></head>
 <body><main id="viewport"><div id="stage" data-mode="loading" role="region" aria-roledescription="carousel" aria-label="GlassPlatform">
 <div class="ambient slideshow-only"></div>
@@ -724,13 +780,13 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 <img id="components-banner" class="components-banner" alt="" aria-hidden="true"><div class="components-overlay"></div><div id="components-brand" class="native-brand">GlassPlatform</div>
 <div class="components-heading"><div id="components-kicker" class="components-kicker"></div><h1 id="components-title" class="components-title"></h1><p id="components-intro" class="components-intro"></p></div>
 
-<div class="components-summary"><span id="components-count" aria-live="polite"></span></div>
+
 <div class="components-stack">
-<div class="c-slot c-slot-left"><section class="c-lane available" aria-labelledby="available-title"><div class="c-lane-head"><span id="available-title" class="c-lane-title"></span><span id="available-count" class="c-lane-count"></span><div class="c-view" role="group" data-shelf="available"><button type="button" class="c-view-btn" data-view="all"></button><button type="button" class="c-view-btn" data-view="needed"></button></div></div><div class="components-list c-lane-body"><div id="components-grid" class="components-grid" role="group" aria-labelledby="available-title"></div></div><div class="c-lane-foot"><span id="available-foot"></span><span id="components-scroll-hint" class="c-more"></span></div></section></div>
-<section class="c-lane installed" aria-labelledby="installed-title"><div class="c-lane-head"><span id="installed-title" class="c-lane-title"></span><span id="installed-count" class="c-lane-count"></span><div class="c-view" role="group" data-shelf="installed"><button type="button" class="c-view-btn" data-view="all"></button><button type="button" class="c-view-btn" data-view="needed"></button></div></div><div class="components-installed-list c-lane-body"><div id="components-installed-grid" class="components-grid" role="group" aria-labelledby="installed-title"></div></div><div class="c-lane-foot" id="installed-foot"></div></section>
-<div class="c-slot c-slot-right"><aside class="components-plan c-plan"><h2 id="components-plan-title"></h2><div id="components-plan-totals" class="components-plan-totals" aria-live="polite"></div><button id="components-select-all" class="components-select-all" type="button">Выбрать всё</button><ul id="components-plan-items" class="plan-items" aria-live="polite"></ul><div id="components-extra" class="components-extra"></div><p id="components-plan-note"></p></aside></div>
+<div class="c-slot c-slot-left"><section data-component-drop="available" class="c-lane available" aria-labelledby="available-title"><div class="c-lane-head"><span id="available-title" class="c-lane-title"></span><span id="available-count" class="c-lane-count"></span><button class="c-pin" type="button" data-component-pin="available" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M15.95 8.6V4.1h1.07a1.15 1.15 0 0 0 0-2.3H6.98a1.15 1.15 0 0 0 0 2.3h1.07v4.5c0 1.72-1.35 3.1-3.05 3.1v2.3h6.1v7.55a.9.9 0 0 0 1.8 0V11.9h6.1v-2.3c-1.7 0-3.05-1.38-3.05-3.1z"/></svg></button><div class="c-view" role="group" data-shelf="available"><button type="button" class="c-view-btn" data-view="all"></button><button type="button" class="c-view-btn" data-view="needed"></button></div></div><div class="components-list c-lane-body"><div id="components-grid" class="components-grid" role="group" aria-labelledby="available-title"></div></div><div class="c-veil" aria-hidden="true"><span class="c-veil-ico"><svg viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4M5 19h14"/></svg></span><b data-drop-title></b><span data-drop-copy></span></div><div class="c-lane-foot"><span id="available-foot"></span><span id="components-scroll-hint" class="c-more"></span></div></section></div>
+<section data-component-drop="installed" tabindex="-1" class="c-lane installed" aria-labelledby="installed-title"><div class="c-lane-head"><span id="installed-title" class="c-lane-title"></span><span id="installed-count" class="c-lane-count"></span><div class="c-view" role="group" data-shelf="installed"><button type="button" class="c-view-btn" data-view="all"></button><button type="button" class="c-view-btn" data-view="needed"></button></div></div><div class="components-installed-list c-lane-body"><div id="components-installed-grid" class="components-grid" role="group" aria-labelledby="installed-title"></div></div><div class="c-veil" aria-hidden="true"><span class="c-veil-ico"><svg viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4M5 19h14"/></svg></span><b data-drop-title></b><span data-drop-copy></span></div><div class="c-lane-foot" id="installed-foot"></div></section>
+<div class="c-slot c-slot-right"><aside class="components-plan c-plan"><button class="c-pin c-pin-corner" type="button" data-component-pin="plan" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M15.95 8.6V4.1h1.07a1.15 1.15 0 0 0 0-2.3H6.98a1.15 1.15 0 0 0 0 2.3h1.07v4.5c0 1.72-1.35 3.1-3.05 3.1v2.3h6.1v7.55a.9.9 0 0 0 1.8 0V11.9h6.1v-2.3c-1.7 0-3.05-1.38-3.05-3.1z"/></svg></button><h2 id="components-plan-title"></h2><div id="components-plan-totals" class="components-plan-totals" aria-live="polite"></div><button id="components-select-all" class="components-select-all" type="button">Выбрать всё</button><ul id="components-plan-items" class="plan-items" aria-live="polite"></ul><div id="components-extra" class="components-extra"></div><p id="components-plan-note"></p><div class="components-summary"><span id="components-count" aria-live="polite"></span></div></aside></div>
 </div>
-<div id="components-status" hidden><span id="components-status-text"></span></div>
+<div class="c-edge c-edge-left is-off" data-component-edge="available" aria-hidden="true"><span class="c-lip c-lip-left"></span><button type="button" class="c-peek c-peek-left is-off" data-component-peek="available"><span class="c-peek-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6l-6 6 6 6"/></svg></span></button></div><div class="c-edge c-edge-right is-off" data-component-edge="plan" aria-hidden="true"><span class="c-lip c-lip-right"></span><button type="button" class="c-peek c-peek-right is-off" data-component-peek="plan"><span class="c-peek-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6l6 6-6 6"/></svg></span></button></div><div id="components-gesture-status" class="component-toast" role="status" aria-live="polite"></div><div id="components-status" hidden><span id="components-status-text"></span></div>
 <div id="components-warning-dialog" class="components-warning-shade" hidden><section role="dialog" aria-modal="true" aria-labelledby="components-warning-title"><button id="components-warning-close" type="button" aria-label="Close">×</button><h2 id="components-warning-title"></h2><p id="components-warning-text"></p></section></div>
 </section>
 <section id="certificate-panel" class="mode-panel components-scene" aria-labelledby="certificate-title">
@@ -830,9 +886,188 @@ function componentLock(title){
 }
 let warningReturnFocus=null;
 function closeProductWarning(){document.getElementById('components-warning-dialog').hidden=true;if(warningReturnFocus&&warningReturnFocus.isConnected)warningReturnFocus.focus();}
-function showProductWarning(item,button){warningReturnFocus=button;document.getElementById('components-warning-dialog').classList.toggle('is-info',!!item.information);document.getElementById('components-warning-title').textContent=item.title||'';document.getElementById('components-warning-text').textContent=item.warning||'';document.getElementById('components-warning-close').setAttribute('aria-label',locale==='ru'?'Закрыть':'Close');document.getElementById('components-warning-dialog').hidden=false;document.getElementById('components-warning-close').focus();}
+function showProductWarning(item,button){endComponentDrag();clearTimeout(componentHideTimer);clearComponentEdge();warningReturnFocus=button;document.getElementById('components-warning-dialog').classList.toggle('is-info',!!item.information);document.getElementById('components-warning-title').textContent=item.title||'';document.getElementById('components-warning-text').textContent=item.warning||'';document.getElementById('components-warning-close').setAttribute('aria-label',locale==='ru'?'Закрыть':'Close');document.getElementById('components-warning-dialog').hidden=false;document.getElementById('components-warning-close').focus();}
 const componentShelfViews={available:'all',installed:'all'};
+// Concept C panel lifecycle. Session-local layout state never changes product intents.
+const componentSides={visible:{available:true,plan:true},pinned:{available:false,plan:false}};
+let componentHideTimer=0,componentEdgeTimer=0,componentNoteTimer=0,componentLastUnpinned=null;
+let componentPress=null,componentDrag=null,componentSuppressClickUntil=0;
+const componentPanel=()=>document.getElementById('components-panel');
+const componentSlot=name=>componentPanel().querySelector(name==='available'?'.c-slot-left':'.c-slot-right');
+const componentEdge=name=>componentPanel().querySelector('[data-component-edge="'+name+'"]');
+const componentOther=name=>name==='available'?'plan':'available';
+function componentWorkspaceActive(){return mode==='components'||mode==='uninstall-select';}
+function componentGestureNote(text,warn=false){
+ const note=document.getElementById('components-gesture-status');note.textContent=text;
+ note.className='component-toast show '+(warn?'warn':'neutral');clearTimeout(componentNoteTimer);
+ componentNoteTimer=setTimeout(()=>{note.className='component-toast';},3600);
+}
+function applyComponentPanels(){
+ const panel=componentPanel(),a=componentSides.visible.available,p=componentSides.visible.plan;
+ const lane=panel.querySelector('.c-lane.installed');
+ for(const name of ['available','plan']){
+  const slot=componentSlot(name),visible=componentSides.visible[name],edge=componentEdge(name);
+  if(!visible&&slot.contains(document.activeElement)&&componentWorkspaceActive())lane.focus({preventScroll:true});
+  slot.classList.toggle('is-hidden',!visible);slot.inert=!visible;slot.setAttribute('aria-hidden',String(!visible));
+  edge.classList.toggle('is-off',visible);edge.setAttribute('aria-hidden',String(visible));
+  const peek=edge.querySelector('button');peek.classList.toggle('is-off',visible);
+  const title=name==='available'?(locale==='ru'?'Доступно':'Available'):(locale==='ru'?'План':'Plan');
+  peek.setAttribute('aria-label',(locale==='ru'?'Показать панель: ':'Show panel: ')+title);
+  peek.title=locale==='ru'?'Нажмите или задержите указатель у края на 2 секунды':'Click or hover at the edge for 2 seconds';
+  const pin=panel.querySelector('[data-component-pin="'+name+'"]'),on=componentSides.pinned[name];
+  pin.classList.toggle('is-on',on);pin.setAttribute('aria-pressed',String(on));
+  pin.setAttribute('aria-label',(on?(locale==='ru'?'Открепить: ':'Unpin: '):(locale==='ru'?'Закрепить: ':'Pin: '))+title);
+  pin.title=on?(locale==='ru'?'Открепить панель':'Unpin panel'):(locale==='ru'?'Закрепить панель':'Pin panel');
+ }
+ lane.classList.toggle('is-wide-left',!a);lane.classList.toggle('is-wide-right',a&&!p);
+ lane.classList.toggle('is-a-edge',!a&&componentEdge('available').classList.contains('is-hot'));
+ lane.classList.toggle('is-p-edge',!p&&componentEdge('plan').classList.contains('is-hot'));
+}
+function clearComponentEdge(){
+ clearTimeout(componentEdgeTimer);
+ for(const name of ['available','plan'])componentEdge(name).classList.remove('is-hot');
+ applyComponentPanels();
+}
+function openComponentSide(name){
+ clearTimeout(componentHideTimer);clearComponentEdge();
+ componentSides.visible[name]=true;const other=componentOther(name);
+ if(!componentSides.pinned[other])componentSides.visible[other]=false;
+ applyComponentPanels();
+}
+function armComponentHide(target){
+ clearTimeout(componentHideTimer);
+ if(!componentWorkspaceActive()||componentPress||componentDrag)return;
+ const candidates=['available','plan'].filter(n=>componentSides.visible[n]&&!componentSides.pinned[n]&&(!target||!componentSlot(n).contains(target)));
+ if(!candidates.length)return;
+ componentHideTimer=setTimeout(()=>{
+  if(!componentWorkspaceActive()||componentDrag||componentPress||!document.getElementById('components-warning-dialog').hidden)return;
+  const free=candidates.filter(n=>componentSides.visible[n]&&!componentSides.pinned[n]&&!componentSlot(n).matches(':hover')&&!componentSlot(n).contains(document.activeElement));
+  if(!free.length)return;
+  const pick=free.includes(componentLastUnpinned)?componentLastUnpinned:free[0];
+  if(!componentSides.visible[componentOther(pick)])return; // Keep at least one side available.
+  componentSides.visible[pick]=false;componentLastUnpinned=null;clearComponentEdge();
+ },1000);
+}
+function enterComponentEdge(name){
+ if(!componentWorkspaceActive()||componentSides.visible[name])return;
+ if(componentEdge(name).classList.contains('is-hot'))return;
+ clearComponentEdge();componentEdge(name).classList.add('is-hot');applyComponentPanels();
+ componentEdgeTimer=setTimeout(()=>{if(componentWorkspaceActive()&&componentEdge(name).classList.contains('is-hot'))openComponentSide(name);},2000);
+}
+function leaveComponentEdge(name){
+ if(!componentSides.visible[name]&&componentEdge(name).classList.contains('is-hot'))clearComponentEdge();
+}
+// A drop uses the same single checkbox/IPC as the buttons. In Setup, dropping
+// back to Available only undoes a selected intent; it NEVER invents Remove.
+function componentDropValue(drag,lane){
+ if(!lane||lane===drag.source)return null;
+ if(hostState.appMode==='unins')return lane==='available'?true:false;
+ if(lane==='installed')return true;
+ return drag.input.checked?false:null;
+}
+function componentDropText(drag,lane){
+ const ru=locale==='ru',value=componentDropValue(drag,lane);
+ if(value===null)return lane===drag.source?(ru?'Исходная панель — без изменений':'Original shelf — no changes'):(ru?'Удаление в этом режиме не поддерживается':'Removal is not supported in this mode');
+ if(hostState.appMode==='unins')return value?(ru?'Отпустите, чтобы запланировать удаление':'Release to plan removal'):(ru?'Отпустите, чтобы оставить продукт':'Release to keep the product');
+ return value?(ru?'Отпустите, чтобы добавить действие в план':'Release to add the action to the plan'):(ru?'Отпустите, чтобы отменить выбранное действие':'Release to undo the selected action');
+}
+function placeComponentGhost(x,y){
+ if(!componentDrag)return;
+ const panel=componentPanel(),rect=panel.getBoundingClientRect(),scale=rect.width/panel.offsetWidth;
+ componentDrag.ghost.style.transform=`translate3d(${(x-rect.left-componentDrag.dx)/scale}px,${(y-rect.top-componentDrag.dy)/scale}px,0)`;
+}
+function hoverComponentDrop(x,y){
+ const hit=document.elementFromPoint(x,y),zone=hit&&hit.closest('[data-component-drop]');
+ for(const lane of componentPanel().querySelectorAll('[data-component-drop]')){
+  const name=lane.dataset.componentDrop,value=componentDropValue(componentDrag,name);
+  lane.classList.toggle('drop-hover',lane===zone&&value!==null);
+  lane.classList.toggle('drop-denied',lane===zone&&name!==componentDrag.source&&value===null);
+ }
+ // Pointer capture keeps release/cancel reliable outside a card. Hit-testing
+ // still opens a hidden shelf at its real edge while the ghost is being carried.
+ for(const name of ['available','plan']){
+  if(hit&&componentEdge(name).contains(hit))enterComponentEdge(name);else leaveComponentEdge(name);
+ }
+ return zone;
+}
+function endComponentDrag(refresh=true){
+ const active=componentDrag||componentPress;componentDrag=null;componentPress=null;
+ if(active){
+  if(active.ghost)active.ghost.remove();
+  if(componentPanel().hasPointerCapture?.(active.pointerId))componentPanel().releasePointerCapture(active.pointerId);
+ }
+ componentPanel().classList.remove('is-dragging');
+ for(const node of componentPanel().querySelectorAll('.dragging,.drop-hover,.drop-denied,.is-source'))node.classList.remove('dragging','drop-hover','drop-denied','is-source');
+ clearComponentEdge();
+ if(refresh&&active)syncComponentShelves();
+}
+function bindComponentWorkspace(){
+ const panel=componentPanel();
+ for(const name of ['available','plan']){
+  componentEdge(name).addEventListener('mouseenter',()=>enterComponentEdge(name));
+  componentEdge(name).addEventListener('mouseleave',()=>leaveComponentEdge(name));
+  const peek=componentEdge(name).querySelector('button');
+  peek.onclick=()=>{openComponentSide(name);panel.querySelector('[data-component-pin="'+name+'"]').focus({preventScroll:true});};peek.onfocus=()=>enterComponentEdge(name);peek.onblur=()=>leaveComponentEdge(name);
+  panel.querySelector('[data-component-pin="'+name+'"]').onclick=()=>{
+   clearTimeout(componentHideTimer);componentSides.pinned[name]=!componentSides.pinned[name];
+   if(componentSides.pinned[name]){componentSides.visible[name]=true;componentLastUnpinned=null;}else componentLastUnpinned=name;
+   applyComponentPanels();
+  };
+ }
+ for(const type of ['pointerdown','pointerup','click'])document.addEventListener(type,e=>{
+  if(componentWorkspaceActive()&&panel.contains(e.target))armComponentHide(e.target);
+ },true);
+ panel.addEventListener('pointerdown',e=>{
+  if(e.button!==0||e.pointerType!=='mouse'||!componentWorkspaceActive()||hostState.componentsLoading||e.target.closest('button,input,a')||!document.getElementById('components-warning-dialog').hidden)return;
+  const card=e.target.closest('.c-card:not(.drag-ghost)'),input=card&&document.getElementById('product-'+card.dataset.product);
+  if(!input||input.disabled)return;
+  clearTimeout(componentHideTimer);
+  componentPress={card,input,id:card.dataset.product,source:card.closest('[data-component-drop]').dataset.componentDrop,x:e.clientX,y:e.clientY,pointerId:e.pointerId,signature:componentSignature};
+ });
+ document.addEventListener('pointermove',e=>{
+  if(componentPress&&e.pointerId!==componentPress.pointerId)return;
+  if(!componentDrag&&componentPress){
+   if(Math.hypot(e.clientX-componentPress.x,e.clientY-componentPress.y)<5)return;
+   const rect=componentPress.card.getBoundingClientRect(),ghost=componentPress.card.cloneNode(true);
+   ghost.querySelector('input')?.remove();ghost.removeAttribute('data-catalog-alias');ghost.removeAttribute('data-product');
+   for(const node of [ghost,...ghost.querySelectorAll('[id]')])node.removeAttribute('id');
+   for(const button of ghost.querySelectorAll('button'))button.tabIndex=-1;
+   ghost.classList.remove('dragging');ghost.classList.add('drag-ghost');ghost.setAttribute('aria-hidden','true');
+   ghost.style.width=componentPress.card.offsetWidth+'px';ghost.style.height=componentPress.card.offsetHeight+'px';
+   componentDrag={...componentPress,ghost,dx:componentPress.x-rect.left,dy:componentPress.y-rect.top};
+   panel.append(ghost);componentPress.card.classList.add('dragging');componentPress.card.closest('.c-lane').classList.add('is-source');panel.classList.add('is-dragging');
+   panel.setPointerCapture?.(e.pointerId);
+   for(const lane of panel.querySelectorAll('[data-component-drop]')){
+    lane.querySelector('[data-drop-title]').textContent=componentDropText(componentDrag,lane.dataset.componentDrop);
+    lane.querySelector('[data-drop-copy]').textContent=locale==='ru'?'Esc — отмена без изменения плана':'Esc cancels without changing the plan';
+   }
+  }
+  if(!componentDrag)return;
+  e.preventDefault();placeComponentGhost(e.clientX,e.clientY);hoverComponentDrop(e.clientX,e.clientY);
+ },{passive:false});
+ document.addEventListener('pointerup',e=>{
+  if(!componentPress||e.pointerId!==componentPress.pointerId)return;
+  if(!componentDrag){componentPress=null;return;}
+  const drag=componentDrag,zone=hoverComponentDrop(e.clientX,e.clientY),lane=zone&&zone.dataset.componentDrop;
+  const value=componentDropValue(drag,lane),valid=componentWorkspaceActive()&&drag.signature===componentSignature&&drag.input.isConnected&&!drag.input.disabled;
+  componentSuppressClickUntil=performance.now()+300;endComponentDrag();
+  if(!valid||!zone)return;
+  if(value===null){componentGestureNote(componentDropText(drag,lane),lane!==drag.source);return;}
+  if(value!==drag.input.checked){drag.input.checked=value;drag.input.dispatchEvent(new Event('change',{bubbles:true}));}
+  armComponentHide(zone);
+ });
+ document.addEventListener('click',e=>{if(e.detail>0&&performance.now()<componentSuppressClickUntil&&panel.contains(e.target)){e.preventDefault();e.stopImmediatePropagation();}},true);
+ document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&(componentDrag||componentPress)){e.preventDefault();e.stopImmediatePropagation();endComponentDrag();}
+ },true);
+ document.addEventListener('pointercancel',()=>endComponentDrag());
+ panel.addEventListener('lostpointercapture',()=>{if(componentDrag)endComponentDrag();});
+ window.addEventListener('blur',()=>{endComponentDrag();clearTimeout(componentHideTimer);clearComponentEdge();});
+ document.addEventListener('visibilitychange',()=>{if(document.hidden){endComponentDrag();clearTimeout(componentHideTimer);clearComponentEdge();}});
+ applyComponentPanels();
+}
 function syncComponentShelves(){
+ if(componentDrag)return; // Stable host ticks must not replace the card being carried.
  const ru=locale==='ru',catalog=document.getElementById('components-grid'),installed=document.getElementById('components-installed-grid');
  for(const old of document.querySelectorAll('#components-panel [data-catalog-alias],#components-panel .c-drop'))old.remove();
  // Concept C's left shelf is the whole catalogue, not merely absent products.
@@ -894,7 +1129,7 @@ function renderComponentsPanel(){
  const grid=document.getElementById('components-grid'),installedGrid=document.getElementById('components-installed-grid'),extra=document.getElementById('components-extra'),button=document.getElementById('components-select-all');
  if(!button.dataset.bound){button.dataset.bound='1';button.onclick=()=>{if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('components:select-all');};const shade=document.getElementById('components-warning-dialog');shade.onclick=e=>{if(e.target===shade)closeProductWarning();};document.getElementById('components-warning-close').onclick=closeProductWarning;shade.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeProductWarning();}if(e.key==='Tab'){e.preventDefault();document.getElementById('components-warning-close').focus();}};document.querySelector('#components-panel .components-list').onscroll=updateComponentsStatus;}
  const items=Array.isArray(hostState.components)?hostState.components:[],loading=hostState.componentsLoading===true,signature=JSON.stringify([locale,hostState.appMode,loading,items]);
- if(signature!==componentSignature){const focusId=document.activeElement&&document.activeElement.dataset.component,scroll=document.querySelector('#components-panel .components-list').scrollTop;componentSignature=signature;grid.replaceChildren();installedGrid.replaceChildren();extra.replaceChildren();
+ if(signature!==componentSignature){endComponentDrag(false);const focusId=document.activeElement&&document.activeElement.dataset.component,scroll=document.querySelector('#components-panel .components-list').scrollTop;componentSignature=signature;grid.replaceChildren();installedGrid.replaceChildren();extra.replaceChildren();
  if(loading){const label=document.createElement('div');label.className='comp-loading';label.textContent=locale==='ru'?'Анализ установки…':'Analyzing installation…';grid.append(label);}
  else for(const item of items){if(!item||item.hidden)continue;const input=document.createElement('input');input.type='checkbox';input.className='comp-check';input.dataset.component=String(item.id);input.id='product-'+String(item.id);input.checked=!!item.checked;input.disabled=!!(item.disabled||item.locked);input.onchange=()=>{const card=input.closest('.comp-card');if(card){card.classList.toggle('is-checked',input.checked);card.classList.toggle('active',input.checked&&hostState.appMode!=='unins');card.classList.toggle('pending-remove',input.checked&&hostState.appMode==='unins');card.classList.toggle('pending-install',!item.installed&&input.checked&&hostState.appMode!=='unins');(hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid).append(card);}if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('component:'+String(item.id)+':'+(input.checked?'1':'0'));updateComponentsStatus();};
  if(item.slim){const row=document.createElement('label');row.className='comp-slim';const body=document.createElement('span'),title=document.createElement('span'),desc=document.createElement('span');title.className='comp-slim-title';title.textContent=item.title;desc.className='comp-slim-desc';desc.textContent=item.description;body.append(title,desc);row.append(input,body);extra.append(row);continue;}
@@ -910,7 +1145,7 @@ function renderComponentsPanel(){
 
  if(item.reasons&&item.reasons.length){const reason=document.createElement('p');reason.className='comp-reason-line';reason.textContent=item.reasons.join(' · ');body.append(reason);}const top=document.createElement('div');top.className='c-card-top';top.append(icons,name);const meta=document.createElement('div');meta.className='c-meta';const versions=body.querySelector('.comp-version-line');if(versions)meta.append(versions);else meta.textContent=item.state||'';const foot=document.createElement('div');foot.className='c-foot';state.classList.add('c-chip');const spacer=document.createElement('span');spacer.className='spacer';decision.classList.add('c-move');foot.append(state,spacer,decision);row.append(input,top,meta,foot);(hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid).append(row);}
  document.querySelector('#components-panel .components-list').scrollTop=scroll;if(focusId){const restored=document.getElementById('product-'+focusId);if(restored&&!restored.disabled)restored.focus();}}
- updateComponentsStatus();
+ updateComponentsStatus();applyComponentPanels();
 }
 let certificateSignature='';
 function renderCertificatePanel(){
@@ -964,7 +1199,7 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  setModeText('cancelled-tag',hostUi.cancelledTag||(locale==='ru'?'УСТАНОВКА ОТМЕНЕНА':'SETUP CANCELLED'));setModeText('cancelled-title',hostUi.cancelledTitle||(locale==='ru'?'Установка прервана':'Setup was cancelled'));setModeText('cancelled-body',hostUi.cancelledBody||'');setModeText('cancelled-detail',hostState.cancelledDetail||hostUi.cancelledDetail||'');
 }
 function isCarouselMode(value=mode){return value==='welcome'||value==='installing'}
-function setMode(value){const raw=String(value),alias=raw==='slideshow'?'welcome':raw;const valid=['loading','welcome','checking','update','conflicts','downgrade','version-invalid','license','components','certificate','cleanup-review','uninstall-select','installing','uninstalling','unlock-modules','unlock-processes','launching','settings-removal-risk','confirm-cancel','cancelling','cancelled','complete','error'];const next=valid.includes(alias)?alias:'welcome';if(next==='welcome'&&!assetsReady){pendingMode='welcome';mode='loading';stage.dataset.mode='loading';syncModeText();clearTimeout(timer);return}if(next!=='welcome')pendingMode='';if(mode===next&&stage.dataset.mode===next){syncModeText();return}mode=next;stage.dataset.mode=mode;syncModeText();if(isCarouselMode())schedule();else clearTimeout(timer);}
+function setMode(value){const raw=String(value),alias=raw==='slideshow'?'welcome':raw;const valid=['loading','welcome','checking','update','conflicts','downgrade','version-invalid','license','components','certificate','cleanup-review','uninstall-select','installing','uninstalling','unlock-modules','unlock-processes','launching','settings-removal-risk','confirm-cancel','cancelling','cancelled','complete','error'];const next=valid.includes(alias)?alias:'welcome';if(next!==mode){endComponentDrag(false);clearTimeout(componentHideTimer);clearTimeout(componentNoteTimer);document.getElementById('components-gesture-status').className='component-toast';clearComponentEdge();}if(next==='welcome'&&!assetsReady){pendingMode='welcome';mode='loading';stage.dataset.mode='loading';syncModeText();clearTimeout(timer);return}if(next!=='welcome')pendingMode='';if(mode===next&&stage.dataset.mode===next){syncModeText();return}mode=next;stage.dataset.mode=mode;syncModeText();if(isCarouselMode())schedule();else clearTimeout(timer);}
 function setCompletionText(tag,title,body,note,ready){completionText={doneTag:String(tag||''),doneTitle:String(title||''),doneBody:String(body||''),doneNote:String(note||''),doneReady:String(ready||'')};syncModeText();}
 function setErrorText(tag,title,body,details,reason,note){errorText={errorTag:String(tag||''),errorTitle:String(title||''),errorBody:String(body||''),errorDetails:String(details||''),errorReason:String(reason||''),errorNote:String(note||'')};syncModeText();}
 function update(){[...root.children].forEach((el,i)=>{el.classList.toggle('active',i===index);el.setAttribute('aria-hidden',i!==index)});[...dots.children].forEach((b,i)=>b.setAttribute('aria-current',i===index));pauseButton.innerHTML=paused?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';pauseButton.setAttribute('aria-label',paused?uiResources[locale].resume:uiResources[locale].pause);pauseButton.setAttribute('aria-pressed',String(paused));}
@@ -978,6 +1213,7 @@ stage.addEventListener('keydown',e=>{if(!isCarouselMode()||!dots.children.length
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&window.chrome&&window.chrome.webview){e.preventDefault();window.chrome.webview.postMessage('cancel');}});
 document.addEventListener('visibilitychange',schedule);
 function resize(){const v=document.getElementById('viewport');stage.style.transform=`scale(${Math.min(v.clientWidth/1000,v.clientHeight/540)})`;}window.addEventListener('resize',resize);resize();
+bindComponentWorkspace();
 const params=new URLSearchParams(location.search);paused=reduced.matches;
 // A host-injected OS UI locale takes priority over the browser language.
 setLocale(params.get('lang')||window.GLASSPLATFORM_LOCALE||'ru');

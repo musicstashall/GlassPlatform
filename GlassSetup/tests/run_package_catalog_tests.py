@@ -1,4 +1,4 @@
-"""Production portable headers, plus build publication graph guards. No platform operations."""
+"""Production portable headers, plus direct MSI output graph guards. No platform operations."""
 from pathlib import Path
 import shutil
 import sys
@@ -25,17 +25,34 @@ with tempfile.TemporaryDirectory(prefix='GlassPackageTests-') as temp:
     subprocess.run([str(exe)], cwd=temp, check=True)
 
 targets = ET.parse(root / 'GlassSetup/msi/GlassSetupPayload.targets').getroot()
-publish = targets.find("Target[@Name='GlassPublishLocalMsi']")
-assert publish is not None and publish.get('AfterTargets') == 'Build'
-assert publish.get('DependsOnTargets') == 'GlassSignAfterBuild'
-assert "$(BuildProject)' != 'false'" in publish.get('Condition')
-copy = publish.find('Copy')
-assert copy.get('SourceFiles') == '$(TargetPath)'
-assert "'Build', 'GlassSetup', 'Release'" in publish.find('PropertyGroup/GlassLocalPackageDir').text
+assert targets.find("Target[@Name='GlassPublishLocalMsi']") is None
+assert not any(copy.get('SourceFiles') == '$(TargetPath)' for copy in targets.iter('Copy'))
+# Check BOTH early props and late SDK overrides; checking only the copy destination
+# hid the old double-output build. Keep Clean/obj scope private to each project.
+for build_file in ('GlassSetup/msi/Directory.Build.props','Directory.Build.targets'):
+    tree=ET.parse(root/build_file).getroot()
+    groups=[g for g in tree.findall('PropertyGroup') if g.find('BaseOutputPath') is not None and 'GlassWixLockedPlatform' in g.get('Condition','')]
+    assert len(groups)==1,build_file
+    group=groups[0]
+    assert "'Build', 'GlassSetup', '$(Configuration)'" in group.findtext('OutputPath')
+    assert "'Cache', '$(MSBuildProjectName)', 'Output'" in group.findtext('BaseOutputPath')
+    assert group.findtext('AppendPlatformToOutputPath')=='false'
+    assert "'msi'" not in group.findtext('OutputPath')
+late=ET.parse(root/'Directory.Build.targets').getroot()
+assert any(g.findtext('TargetPath')=='$(OutputPath)$(OutputName).msi' for g in late.findall('PropertyGroup'))
+assert any(g.findtext('CleanDependsOn')=='GlassWixSkipForeignPlatform' for g in late.findall('PropertyGroup'))
+assert targets.find("Target[@Name='GlassVerifyBuiltMsi']") is not None
+signing=ET.parse(root/'Shared/GlassSign.targets').getroot()
+sign_after=signing.find("Target[@Name='GlassSignAfterBuild']")
+assert sign_after is not None and sign_after.get('AfterTargets')=='Build'
+assert '$(TargetPath)' in (root/'Shared/GlassSign.targets').read_text(encoding='utf-8')
+output_names=set()
 for name in ('Glass-x64', 'Glass-x86', 'GlassSettings-x64', 'GlassSettings-x86', 'OpenGlass-x64'):
     project = ET.parse(root / f'GlassSetup/msi/{name}.wixproj').getroot()
     assert any(item.get('Project') == 'GlassSetupPayload.targets' for item in project.findall('Import'))
-    assert project.find('PropertyGroup/OutputName').text == name
+    output_name=project.find('PropertyGroup/OutputName').text
+    assert output_name == name and output_name not in output_names
+    output_names.add(output_name)
 # Production uses external acquisition; no stale transitional embedded runtime.
 assert 'GLASS_EMBED_MSI' not in (root / 'GlassSetup/GlassSetup.vcxproj').read_text(encoding='utf-8')
 engine=(root / 'GlassSetup/src/InstallEngine.cpp').read_text(encoding='utf-8')

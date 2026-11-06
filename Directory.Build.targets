@@ -101,10 +101,12 @@
     <Message Importance="low" Text="Glass $(MSBuildProjectName): FileVersion=$(GlassFileVersionDot), ProductVersion=$(GlassBundleVersionEffective)" />
   </Target>
 
-  <!-- После WiX SDK. BaseOutputPath — каталог одного проекта: общий родительский msi\ Clean одного пакета стирает соседние. Жёсткие ссылки не использовать: удаление промежуточного MSI снимает и выходной файл. -->
+  <!-- После WiX SDK: конечный MSI сразу рядом с Setup. BaseOutputPath и obj остаются
+       project-private в Cache: Clean одного пакета не владеет общей папкой EXE/MSI.
+       Ни промежуточного Build\GlassSetup\msi, ни post-build Copy, ни hard links. -->
   <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.wixproj' and '$(GlassWixLockedPlatform)' != ''">
-    <BaseOutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassSetup', 'msi', '$(Configuration)', '$(MSBuildProjectName)'))\</BaseOutputPath>
-    <OutputPath>$(BaseOutputPath)</OutputPath>
+    <BaseOutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Cache', '$(MSBuildProjectName)', 'Output'))\</BaseOutputPath>
+    <OutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassSetup', '$(Configuration)'))\</OutputPath>
     <OutDir>$(OutputPath)</OutDir>
     <TargetDir>$(OutputPath)</TargetDir>
     <TargetPath>$(OutputPath)$(OutputName).msi</TargetPath>

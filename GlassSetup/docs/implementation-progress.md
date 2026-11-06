@@ -1,3 +1,48 @@
+# Исправление drag/panels C и прямого MSI output — 2026-11-06
+
+## Production UI, не mock handlers
+
+- Карточки действительно перетаскиваются мышью: threshold 5 px, исходная карточка затеняется,
+  ghost сохраняет grip, размеры и SVG/skin C, цель подсвечивается с анимированным veil.
+  Ghost живёт внутри production panel, координаты переводятся из client в stage units;
+  fit/DPI scaling не масштабирует его дважды. Кнопки/имя/⚠ не становятся drag handles.
+- Drop использует единственный настоящий checkbox и существующий `component:<id>:0|1` IPC,
+  включая зеркала каталога. Setup: вперёд — выбрать install/update/repair, назад — только
+  отменить уже выбранное действие. **Remove сохранённого продукта в Setup не имитируется:**
+  отказ показывается в цели/кратком сообщении, IPC не отправляется. В direct Unins используется
+  его существующий реальный remove intent; здесь не заявлено выполнение Windows removal.
+- Escape/outside drop/blur/pointercancel/lost capture/смена страницы или discovery facts
+  отменяют жест без изменения плана. Неизменённый native tick не пересоздаёт source alias
+  посреди drag. Disabled/locked/loading gates сохраняются; ghost не содержит inputs/IDs.
+- Обе крайние панели имеют настоящие pin buttons. Незакреплённая панель плавно сворачивается
+  после действий (1 s), минимум одна крайняя панель остаётся видимой. Центральная полка
+  расширяется как в C. Скрытая панель inert/aria-hidden; возвращается кнопкой края/Enter
+  либо hover 2 s, в том числе **во время drag**; уход от края отменяет таймер. Закрепление
+  исключает автоскрытие. Фокус не оставляется внутри скрываемой панели. Учитывается
+  prefers-reduced-motion; таймеры/drag очищаются при уходе, blur и открытии info/warning.
+- Обе панели первоначально видимы; кнопки, фильтры, выбор всех, popup и независимые
+  Settings x64/x86 остаются production controls, не демонстрационной моделью C.
+
+## MSI: конечный выход, а не публикационная копия
+
+- И ранний `GlassSetup/msi/Directory.Build.props`, и поздний override `Directory.Build.targets`
+  задают настоящий OutputPath `Build\GlassSetup\$(Configuration)\`. Для Release все пять
+  уникальных MSI лежат непосредственно рядом с Setup. OutDir/TargetDir/TargetPath совпадают;
+  `GlassPublishLocalMsi` и его post-build Copy удалены. Подпись работает с конечным TargetPath.
+- BaseOutputPath и obj/tracking остаются project-private в Cache; foreign-platform
+  Build/Clean/Rebuild guard сохранён. Обычные внутренние Cache intermediates WiX SDK
+  не являются вторым release output. Payload staging и проверки построенного MSI сохранены.
+- Portable package/ASan/UBSan, XML output/signing/source guards, planner/executor tests,
+  resource smoke, jsdom и real Chromium production/reference tests: PASS.
+  Browser regression выполняет реальные pointer gestures, pins/hover/keyboard, проверяет
+  geometry/skins C, единственность IPC, cancellation и scale 0.8. Screenshots — внешние
+  fixture artifacts, в Git не добавляются. **MSVC/WiX Build/Clean/Rebuild/signing на Windows
+  здесь не выполнялись**; сохранность соседних outputs при реальном Clean ещё нужна в VM.
+
+Это исправление двух замечаний, не завершение всего п.2/п.3. Общий mixed Remove в Setup,
+полный rollback Unins и Current-only migration остаются незавершёнными; подробности ниже.
+Платформа не запускалась/не останавливалась, MSI/Setup/Unins не исполнялись.
+
 # Возврат к утверждённому варианту C; продолжение п.2/п.3 — 2026-11-06
 
 Исправление после замечания пользователя: одноколоночная страница d6e2187 была отступлением
@@ -24,7 +69,7 @@
 и исходный утверждённый HTML, сравнивает реальные rectangles и CSS skins блоков/карточек,
 проверяет Settings IPC/перенос и info/Escape. Есть реальные screenshots обоих HTML.
 Это Linux Chromium + fixture discovery, **не Windows WebView/native footer** и не утверждение
-полного pixel parity: pin/auto-collapse/drag UI из concept пока не подключены, mixed Remove
+полного pixel parity. Pin/auto-collapse/drag UI подключены в исправлении ниже; mixed Remove
 в Setup по-прежнему не включён до работающего Windows backend. Не объявлять весь UI готовым.
 
 Запуск browser regression с внешним браузером:
