@@ -184,4 +184,15 @@
     <Exec Condition="'$(GlassPayloadArch)' == 'OpenGlass'"
       Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -Command &quot;$n=(New-Object -ComObject WindowsInstaller.Installer).OpenDatabase('$(_GlassBuiltMsi)',0); $v=$n.OpenView('SELECT Value FROM Property WHERE Property=''ProductName'''); $v.Execute(); if($v.Fetch().StringData(1) -ne 'OpenGlass'){ throw 'OpenGlass-x64.msi has wrong ProductName (WiX obj collision?)' }&quot;" />
   </Target>
+  <!-- Lightweight installer test kit. Keep WiX intermediates and the old
+       resource input paths until the engine switches to file acquisition. -->
+  <Target Name="GlassPublishLocalMsi" AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release' and '$(BuildProject)' != 'false' and '$(GlassPayloadArch)' != ''">
+    <PropertyGroup>
+      <GlassLocalPackageDir>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassSetup', 'Release'))</GlassLocalPackageDir>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(TargetPath)')" Text="Glass MSI output missing: $(TargetPath)" />
+    <MakeDir Directories="$(GlassLocalPackageDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(GlassLocalPackageDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

@@ -1,3 +1,29 @@
+# Лёгкий установщик: первая реализация контрактов и build output — 2026-11-06
+
+Начат R0 и portable policy R2. Это **не подключённый файловый resolver и не завершённый refactoring**.
+
+- `GlassPackageRules.h`: числовые версии 3/4 компонента, запрет downgrade, cache только для совпадающих installed/target,
+  выбор максимальной доступной local/release версии, tie Current (только repair) → packages → adjacent → release.
+  Выбор источника не разрешает запуск MSI: acquisition обязан проверить фактические identity/PackageCode/hash/architecture.
+- `GlassPackageCatalog.h`: общий каталог пяти MSI (две независимые архитектуры Settings), независимые версии и ссылки
+  на разные релизы. Bounded JSON parser, duplicate keys/product IDs, filenames/URLs/hash/size/types, depth/length limits;
+  metadata старого формата читаются без превращения неподтверждённой ссылки в downloadable EXE. Отсутствие digest/size
+  делает release source недоступным. SecureUxTheme остаётся отдельным оригинальным vendor provider.
+- WiX AfterBuild публикует пять MSI рядом с EXE в `Build\GlassSetup\Release`. Исходные WiX output/staging/resource inputs
+  сохранены на время перехода: новый файл-копия — build artifact, не второй runtime cache. Порядок x64 → x86 не изменён.
+- `scripts/New-ReleaseCatalog.ps1`: read-only Windows Installer COM inspection версии, UpgradeCode, архитектуры,
+  ProductCode/PackageCode; SHA-256/size; initial full manifest или merge отдельного MSI в прошлый каталог без потери
+  записей остальных продуктов. Optional EXE entry по его ProductVersion. UTF-8 no BOM, временный файл и atomic replace.
+  Не устанавливает пакеты, не подписывает и не публикует релиз. Реальные COM/MSI и PS execution требуют Windows проверки.
+- В план внесены последние согласованные правила: очистка на отдельной странице полного удаления, без ссылок очистки
+  на странице обслуживания; остатки только перечисляются; `.theme` учитывается; простые уведомления Settings без центра обновлений.
+
+Проверки portable parser/rules и build graph guards PASS; resource smoke, 4096 product plan cases и original SUT parser PASS.
+Полной MSVC/WiX сборки и Windows runtime проверки пока нет. Платформа/службы не запускались и не останавливались.
+Следующие этапы: WinHTTP/acquisition + защищённый Current/staging, подключение к движку и removal, шесть продуктов,
+production UI/cleanup/license entry, self-update handoff и единые Settings notices. В текущем runtime по-прежнему встроенные
+MSI и Native, новый каталог пока не используется движком; ресурсы удаляются только при готовом replacement path.
+
 # OpenGlass: состояние SCM и управление из Settings — 2026-11-05
 
 - Состояние выполнения отделено от start type: SERVICE_RUNNING всегда Running, даже при SERVICE_DISABLED; Disabled только для SERVICE_STOPPED + SERVICE_DISABLED. START_PENDING/STOP_PENDING не считаются Running. При наличии службы она имеет приоритет над оставшейся legacy задачей, одинаково на UI и worker threads.

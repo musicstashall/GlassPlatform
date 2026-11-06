@@ -156,7 +156,14 @@
     <ClCompile Include="src\InstallSupport\GlassMaintenanceLaunch.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="scripts\New-ReleaseCatalog.ps1" />
+    <None Include="tests\package_catalog_tests.cpp" />
+    <None Include="tests\run_package_catalog_tests.py" />
+  </ItemGroup>
+  <ItemGroup>
     <ClInclude Include="src\InstallSupport\GlassMaintenanceCache.h" />
+    <ClInclude Include="src\InstallSupport\GlassPackageRules.h" />
+    <ClInclude Include="src\InstallSupport\GlassPackageCatalog.h" />
     <ClInclude Include="src\InstallSupport\GlassMaintenanceLaunch.h" />
     <ClInclude Include="src\InstallSupport\GlassCacheDiagnostics.h" />
     <ClInclude Include="src\WizardTheme.h" />

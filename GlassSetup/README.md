@@ -19,6 +19,32 @@
 - [Детали движка](#дополнительные-детали-движка)
 - [OpenGlass и реестр](#openglass-владение-установкой-реестр-и-диагностика)
 
+## Переход на лёгкий установщик: build output и каталог релиза
+
+Первый этап: после сборки **Release|x64 → Release|x86** проекты MSI дополнительно публикуют
+`Glass-x64.msi`, `Glass-x86.msi`, `GlassSettings-x64.msi`, `GlassSettings-x86.msi`, `OpenGlass-x64.msi`
+рядом с EXE в `Build\GlassSetup\Release`. Старые WiX output/resource inputs пока сохранены для работающего движка.
+Это ещё **не переход runtime на скачиваемые пакеты**: новый portable каталог/правила готовы, acquisition не подключён.
+
+В Windows PowerShell из корня solution, после подписи финальных файлов:
+
+```powershell
+# Первый каталог: все пять MSI и EXE; версии MSI и EXE читаются из самих файлов.
+.\GlassSetup\scripts\New-ReleaseCatalog.ps1 -ReleaseTag v1.4.3 -IncludeSetup
+# Отдельный MSI в другом релизе: остальные версии/ссылки и EXE metadata сохраняются.
+.\GlassSetup\scripts\New-ReleaseCatalog.ps1 -ReleaseTag settings-hotfix -Products settings64 `
+    -BaseManifest .\Build\GlassSetup\Release\version.json
+```
+
+Скрипт создаёт `version.json` в том же output каталоге; проверяет MSI UpgradeCode/архитектуру, пишет ProductCode/PackageCode,
+размеры и SHA-256. Не выполняет MSI, не подписывает файлы и не загружает их в GitHub. После изменения каталога нужно
+опубликовать актуальный общий manifest и соответствующие assets. Исходный `BaseManifest` должен быть проверенным
+последним каталогом; скрипт не получает его из сети и не подтверждает Authenticode доверие. Windows COM/MSI сценарий
+генерации и новая публикация output ещё требуют проверки полной MSVC/WiX сборкой.
+
+Portable проверки: `python GlassSetup/tests/run_package_catalog_tests.py` (для GCC/Clang также `--sanitize`).
+Поддержка локального `packages\`, сети и Current в рабочем движке будет добавлена следующими этапами, не считается готовой сейчас.
+
 ## Работа с исходниками в Visual Studio
 
 1. Сохраните свою работу и проверьте **Изменения Git**. Не обновляйте файлы поверх несохранённых изменений и не применяйте Reset для получения обновлений.
