@@ -1,3 +1,41 @@
+# Файловое получение пакетов подключено к движку — 2026-11-06
+
+Рефакторинг **не завершён**. Продолжена реализация без запроса подтверждать отдельные этапы.
+
+- Общий `GlassReleaseClient` обслуживает каталог Glass и оригинальный SecureUxTheme: WinHTTP HTTPS, ручной allowlist
+  redirects, limits, bounded waits/cancel checks, streamed CryptoAPI SHA-256. Private files создаются с явным
+  Administrators/SYSTEM owner/DACL, CREATE_NEW, без writers; ошибки hash сохраняются через cleanup handles.
+- `GlassPackageAcquisition` проверяет реальные MSI ProductCode/UpgradeCode/ProductVersion/architecture. Current используется
+  только для установленной версии/PackageCode; packages/adjacent — по trusted release digest или сертификату издателя
+  текущего Setup, release downloads — по размеру и SHA-256. Неподписанный локальный MSI не становится доверенным по GUID.
+- Рабочий `ExtractPayload` теперь приобретает выбранные MSI из файлов/релиза, а не извлекает их из ресурсов. Имена staged
+  файлов сохранены для существующих MSI/rollback стадий. Workspace расположен под защищённым ProgramData Glass root,
+  не в TEMP. Network/catalog failure не запрещает проверку независимых локальных источников.
+- Cache publisher принимает файловые источники: сохраняет фактически acquired MSI, а не старые embedded payloads;
+  источники неизменяемых продуктов переносятся из Current. Native/Unins resource publication пока сохранена.
+- Original SUT provider использует общий клиент, проверяет packages/adjacent/Current, скачивает только в protected workspace;
+  локальные файлы не перезаписываются. Оригинальный MSI не перепаковывается, existing official product по-прежнему сохраняется.
+- Исправлен порядок build publication: GlassPublishLocalMsi зависит от GlassSignAfterBuild, чтобы копия рядом с EXE
+  не оказалась неподписанной из-за порядка AfterTargets.
+
+Проверено: реальные Prepare/CopyLocked на fake FS/network/inventory, реальные streamed hash guards на fake CryptoAPI,
+ASan/UBSan; source/graph/installer order/cache diagnostics/catalog/SUT parser suites PASS. Engine, acquisition, client,
+SUT provider скомпилированы в Windows GNU x86 objects. Это не MSVC/WiX сборка, не managed build, не WinHTTP/MSI/COM
+runtime: работа реального MsiGetFileSignatureInformation и доверие сертификату требуют Windows проверки.
+
+**Открытый конкретный выбор:** OpenGlass-x64.wixproj намеренно содержит GlassSignThisProject=false, тогда как тестовый
+комплект должен работать offline до публикации release hashes. Варианты: подписывать наш MSI-контейнер существующим
+Glass сертификатом (не DLL автора) либо отдельное explicit trust consent для неподписанных local MSI, с отдельным CLI flag.
+Без согласования подпись проекта не изменена, не добавлен неявный trust bypass. Такой локальный OpenGlass сейчас
+блокируется до продуктовых изменений. Это ограничение нельзя выдавать за готовую офлайн-установку.
+
+**Оставшийся объём всего поручения:** ресурсный inspector и удаление embedded MSI/Native; соответствующие safe fallback
+и GUI/CLI consent; общая mixed-action maintenance транзакция; шесть продуктов и production UI; license routing;
+предупреждение Unins Settings; отдельная cleanup page/профили/.theme; self-update handoff/backup/recovery;
+простые независимые Settings update notices; миграция cache/retained и полноценная Windows matrix. Старые resource inputs
+ещё нужны inspector/native preflight, поэтому их изъятие пока не выполнено. Полное поручение не считается исполненным.
+Платформа/службы здесь не запускались/не останавливались.
+
 # Лёгкий установщик: первая реализация контрактов и build output — 2026-11-06
 
 Начат R0 и portable policy R2. Это **не подключённый файловый resolver и не завершённый refactoring**.

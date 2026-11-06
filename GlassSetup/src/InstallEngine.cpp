@@ -1,4 +1,5 @@
 #include "InstallSupport/GlassMaintenanceCache.h"
+#include "InstallSupport/GlassPackageAcquisition.h"
 #include "InstallEngine.h"
 #include <SecureUxThemeInventory.h>
 #include "InstallLog.h"
@@ -1093,69 +1094,56 @@ bool InstallEngine::ReleaseLockedModules() noexcept {
 
 bool InstallEngine::EnsureTempWorkspace() noexcept {
     if (!tempDir_.empty()) return true;
-    if (!GlassInstallUtil::CreateSecureTempDirectory(L"GlassSetup",tempDir_)) return false;
-    InstallLog::LineFormat(L"Temp workspace: %s", tempDir_.c_str());
+    if (!GlassPackageAcquisition::CreateWorkspace(tempDir_)) return false;
+    InstallLog::LineFormat(L"Protected package workspace: %s", tempDir_.c_str());
     return true;
 }
 
 bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
+    (void)instance; // Legacy method name; no MSI resource extraction remains here.
     if (!EnsureTempWorkspace()) {
-        SetFailure(L"Не удалось создать каталог во временной папке.", 0);
+        SetFailure(L"Cannot create the protected ProgramData package workspace.", GetLastError());
         return false;
     }
-
     SetStatus(labels_.extract, 0);
-#ifdef GLASS_EMBED_MSI
-    const bool os64 = scanNativeX64_; // verified before this worker stage
-    const ResourceBlob blobs[] = {
-        {IDR_MSI_X64,       L"Glass-x64.msi",         os64 && selection_.platform64},
-        {IDR_MSI_X86,       L"Glass-x86.msi",         selection_.platform32},
-        {IDR_MSI_GS_X64,    L"GlassSettings-x64.msi", os64 && selection_.glassSettings},
-        {IDR_MSI_GS_X86,    L"GlassSettings-x86.msi", !os64 && selection_.glassSettings},
-        {IDR_MSI_OPENGLASS, L"OpenGlass-x64.msi",     os64 && selection_.openGlass},
-    };
-    int neededTotal = 0;
-    for (const auto& b : blobs) if (b.needed) ++neededTotal;
-    if (neededTotal < 1) neededTotal = 1;
-
-    int step = 0;
-    for (const auto& blob : blobs) {
-        if (!blob.needed) continue;
+    GlassPackageCatalog::Catalog catalog;
+    std::wstring diagnostic;
+    if (!GlassPackageAcquisition::FetchCatalog(cancelRequested_,catalog,diagnostic)) {
         if (IsCancelRequested()) return false;
-        wchar_t dest[MAX_PATH]{};
-        if (!PathCombineW(dest, tempDir_.c_str(), blob.fileName)) return false;
-        if (!GlassInstallUtil::ExtractResourceToFile(instance, blob.id, RT_RCDATA, dest, &cancelRequested_)) {
-            if (IsCancelRequested()) return false;
-            std::wstring msg = L"Missing embedded MSI: ";
-            msg += blob.fileName;
-            SetFailure(msg, 0);
+        InstallLog::LineFormat(L"Release catalog unavailable; checking independent local/cache sources: %s",diagnostic.c_str());
+    }
+    using Product=GlassPackageCatalog::Product;
+    const bool os64=scanNativeX64_;
+    const struct {Product product;bool selected;} packages[]={
+        {Product::Platform64,os64&&selection_.platform64},
+        {Product::Platform32,selection_.platform32},
+        {Product::Settings64,os64&&selection_.glassSettings},
+        {Product::Settings32,!os64&&selection_.glassSettings},
+        {Product::OpenGlass,os64&&selection_.openGlass}
+    };
+    int total=0,done=0;
+    for(const auto& p:packages)if(p.selected)++total;
+    for(const auto& p:packages) {
+        if(!p.selected)continue;
+        if(IsCancelRequested())return false;
+        std::wstring error;
+        if(!GlassPackageAcquisition::Prepare(p.product,catalog,tempDir_,cancelRequested_,error)) {
+            if(!IsCancelRequested())SetFailure(error,0);
             return false;
         }
-        WIN32_FILE_ATTRIBUTE_DATA info{};
-        if (GetFileAttributesExW(dest, GetFileExInfoStandard, &info)) {
-            const ULONGLONG size = (static_cast<ULONGLONG>(info.nFileSizeHigh) << 32) | info.nFileSizeLow;
-            InstallLog::LineFormat(L"Extracted %s (%llu bytes) -> %s", blob.fileName, size, dest);
-        }
-        ++step;
-        SetStatus(labels_.extract, (step * 400) / neededTotal);
+        SetStatus(labels_.extract,(++done*400)/(total?total:1));
     }
-    SetStatus(labels_.extract, 400);
     if (selection_.secureUxTheme) {
         const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-        SetStatus(ru?L"SecureUxTheme: проверка MSI рядом с установщиком / загрузка":
-                     L"SecureUxTheme: checking adjacent MSI / downloading",400);
+        SetStatus(ru?L"SecureUxTheme: проверка локального MSI / загрузка":
+                     L"SecureUxTheme: checking local MSI / downloading",400);
         std::wstring error;
         if (!GlassSecureUxPackage::Prepare(tempDir_,cancelRequested_,secureUxPackage_,error)) {
             if (!IsCancelRequested()) SetFailure(error,0);
             return false;
         }
     }
-    return true;
-#else
-    (void)instance;
-    SetFailure(L"Release build required (embedded MSI missing).", 0);
-    return false;
-#endif
+    return !IsCancelRequested();
 }
 
 bool InstallEngine::VerifyEmbeddedNativePayload() noexcept {
@@ -1664,13 +1652,22 @@ bool InstallEngine::RegisterSelectedProducts() noexcept {
 void InstallEngine::LaunchSelectedProducts() noexcept {
     const bool is64 = scanNativeX64_;
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-#ifdef GLASS_EMBED_MSI
-    const GlassMaintenanceCache::Blob cacheBlobs[]={
-        {IDR_MSI_X64,L"Glass-x64.msi"},{IDR_MSI_X86,L"Glass-x86.msi"},
-        {IDR_MSI_GS_X64,L"GlassSettings-x64.msi"},{IDR_MSI_GS_X86,L"GlassSettings-x86.msi"},
-        {IDR_MSI_OPENGLASS,L"OpenGlass-x64.msi"}};
+    // Publish the actual acquired sources, not stale embedded packages. Keep
+    // sources for unmodified installed products in Current across partial updates.
+    const wchar_t* names[]={L"Glass-x64.msi",L"Glass-x86.msi",L"GlassSettings-x64.msi",
+        L"GlassSettings-x86.msi",L"OpenGlass-x64.msi",is64?L"SecureUxTheme_x64.msi":L"SecureUxTheme_x86.msi"};
+    std::vector<std::wstring> sources;
+    sources.reserve(std::size(names));
+    for(const auto* name:names) {
+        const auto acquired=tempDir_+L"\\"+name;
+        sources.push_back(GetFileAttributesW(acquired.c_str())!=INVALID_FILE_ATTRIBUTES?
+            acquired:GlassMaintenanceCache::CurrentFile(name));
+    }
+    std::vector<GlassMaintenanceCache::Blob> cacheBlobs;
+    for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty())
+        cacheBlobs.push_back({0,names[i],sources[i].c_str()});
     std::wstring cacheFailure;
-    if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs,std::size(cacheBlobs),IDR_MAINTENANCE_UNINS,IDR_UNLOCKER_X86,&cacheFailure))
+    if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs.data(),cacheBlobs.size(),IDR_MAINTENANCE_UNINS,IDR_UNLOCKER_X86,&cacheFailure))
         AddFinishWarning(ru?L"Оболочка обслуживания сохранена не полностью":L"Maintenance cache publication is incomplete",
             (ru?L"Не удалось полностью сохранить комплект обслуживания. Это не сообщение о сбое запуска. Сохраните исходный установщик и журнал.\n":
                 L"The maintenance bundle was not fully saved. This does not indicate a component startup failure. Keep the original installer and log.\n")+cacheFailure);
@@ -1680,7 +1677,6 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         const bool product32=_wcsicmp(code,GlassInstallMsi::kProductPlatformX86)==0||_wcsicmp(code,GlassInstallMsi::kProductSettingsX86)==0;
         GlassInstallMsi::PatchArpUninstallString(code,_wcsicmp(code,GlassInstallMsi::kProductOpenGlass)==0?openGlassDir_:product32?x86Dir_:x64Dir_);
     }
-#endif
 
     // Policy: a selected platform is always started, whether or not it was
     // running (or its task was enabled) when Setup began. StartPlatform

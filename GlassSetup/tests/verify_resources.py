@@ -515,8 +515,10 @@ sut_service = (repo / "GlassSettings/Services/SecureUxThemeService.cs").read_tex
 sut_package = read("src/InstallSupport/GlassSecureUxPackage.cpp")
 sut_release = read("src/InstallSupport/GlassSecureUxRelease.h")
 assert "releases/latest" in sut_package and "browser_download_url" in sut_release and "sha256:" in sut_release
-assert "GetModuleFileNameW" in sut_package and "CREATE_NEW" in sut_package
-assert "WINHTTP_FLAG_SECURE" in sut_package and "CryptHashData" in sut_package
+assert "GetModuleFileNameW" in sut_package and "CreatePrivateFile" in sut_package
+release_client = read("src/InstallSupport/GlassReleaseClient.cpp")
+assert "WINHTTP_FLAG_SECURE" in release_client and "CryptHashData" in release_client
+assert "GlassReleaseClient::VerifyHash" in sut_package and "using GlassReleaseClient::Get" in sut_package
 assert "GlassSecureUxPackage::Prepare" in engine and "InstallOriginalSecureUxTheme" in worker
 assert worker.index("RegisterSelectedProducts()") < worker.index("InstallOriginalSecureUxTheme()") < worker.index("LaunchSelectedProducts()")
 original_msi=section(engine, "bool InstallEngine::InstallOriginalSecureUxTheme()", "bool InstallEngine::RunMsiSequence()")

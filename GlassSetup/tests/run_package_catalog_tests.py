@@ -27,6 +27,7 @@ with tempfile.TemporaryDirectory(prefix='GlassPackageTests-') as temp:
 targets = ET.parse(root / 'GlassSetup/msi/GlassSetupPayload.targets').getroot()
 publish = targets.find("Target[@Name='GlassPublishLocalMsi']")
 assert publish is not None and publish.get('AfterTargets') == 'Build'
+assert publish.get('DependsOnTargets') == 'GlassSignAfterBuild'
 assert "$(BuildProject)' != 'false'" in publish.get('Condition')
 copy = publish.find('Copy')
 assert copy.get('SourceFiles') == '$(TargetPath)'

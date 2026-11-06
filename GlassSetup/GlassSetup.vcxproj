@@ -145,6 +145,8 @@
     <ClCompile Include="src\InstallSupport\GlassInstallLog.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallMsi.cpp" />
     <ClCompile Include="src\InstallSupport\GlassSecureUxPackage.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassReleaseClient.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassPackageAcquisition.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallRollback.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallUtil.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallWatch.cpp" />
@@ -163,6 +165,8 @@
   <ItemGroup>
     <ClInclude Include="src\InstallSupport\GlassMaintenanceCache.h" />
     <ClInclude Include="src\InstallSupport\GlassPackageRules.h" />
+    <ClInclude Include="src\InstallSupport\GlassReleaseClient.h" />
+    <ClInclude Include="src\InstallSupport\GlassPackageAcquisition.h" />
     <ClInclude Include="src\InstallSupport\GlassPackageCatalog.h" />
     <ClInclude Include="src\InstallSupport\GlassMaintenanceLaunch.h" />
     <ClInclude Include="src\InstallSupport\GlassCacheDiagnostics.h" />

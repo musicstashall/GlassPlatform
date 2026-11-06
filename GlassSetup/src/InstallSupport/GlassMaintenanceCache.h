@@ -118,7 +118,10 @@ inline bool EnsureRoot() {
 }
 inline std::wstring CurrentFile(const wchar_t* name) {
     const auto root=Root();const auto current=root+L"\\Current";
-    if(root.empty()||!TrustedDirectory(root)||!TrustedDirectory(current))return {};
+    if(root.empty())return {};
+    const DWORD currentAttributes=GetFileAttributesW(current.c_str());
+    if(currentAttributes==INVALID_FILE_ATTRIBUTES)return {}; // Normal before first installation.
+    if(!TrustedDirectory(root)||!TrustedDirectory(current))return {};
     const auto path=current+L"\\"+name;
     const DWORD a=GetFileAttributesW(path.c_str());
     if(a==INVALID_FILE_ATTRIBUTES||(a&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))||!TrustedPath(path,false))return {};
@@ -260,7 +263,7 @@ inline bool GarbageCollect() {
     }
     FindClose(find);return ok;
 }
-struct Blob {UINT id;const wchar_t* file;};
+struct Blob {UINT id;const wchar_t* file;const wchar_t* source=nullptr;};
 // Invoked only after successful MSI commit. Failed publication leaves Previous
 // intact; recovery restores it on the next attempt. Never prunes system MSI cache.
 inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT uninstallerResource,UINT nativeX86Resource,
@@ -321,7 +324,13 @@ inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT 
     // The final Setup is built in the x86 pass and already embeds both helpers.
     // Publish x86 Native without a reverse build dependency in first-pass Unins.
     if(!extract(nativeX86Resource,L"GlassSettings.Native.x86.dll"))return false;
-    for(std::size_t i=0;i<count;++i)if(!extract(blobs[i].id,blobs[i].file))return false;
+    for(std::size_t i=0;i<count;++i) {
+        if(blobs[i].source) {
+            const std::wstring source=blobs[i].source,destination=stage+L"\\"+blobs[i].file;
+            if(!TrustedPath(source,false)||!CopyFileW(source.c_str(),destination.c_str(),TRUE))
+                return Diag::Fail(L"CopyVerifiedSource",destination,GetLastError(),L"source="+source);
+        } else if(!extract(blobs[i].id,blobs[i].file))return false;
+    }
     Diag::Step(L"harden-staging",stage);
     WIN32_FIND_DATAW staged{};HANDLE stagedFind=FindFirstFileW((stage+L"\\*").c_str(),&staged);
     if(stagedFind==INVALID_HANDLE_VALUE)return Diag::Fail(L"FindFirstFileW",stage,GetLastError());

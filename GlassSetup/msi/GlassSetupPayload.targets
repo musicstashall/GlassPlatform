@@ -186,7 +186,7 @@
   </Target>
   <!-- Lightweight installer test kit. Keep WiX intermediates and the old
        resource input paths until the engine switches to file acquisition. -->
-  <Target Name="GlassPublishLocalMsi" AfterTargets="Build"
+  <Target Name="GlassPublishLocalMsi" AfterTargets="Build" DependsOnTargets="GlassSignAfterBuild"
           Condition="'$(Configuration)' == 'Release' and '$(BuildProject)' != 'false' and '$(GlassPayloadArch)' != ''">
     <PropertyGroup>
       <GlassLocalPackageDir>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassSetup', 'Release'))</GlassLocalPackageDir>

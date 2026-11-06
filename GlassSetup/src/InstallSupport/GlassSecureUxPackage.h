@@ -9,8 +9,8 @@ struct Package {
     bool alreadyInstalled=false;
 };
 // Runs on InstallEngine's worker before any system changes. Checks next to
-// GetModuleFileName(NULL), never CWD. The returned MSI is a verified private
-// snapshot, not the user-writable adjacent download.
+// GetModuleFileName(NULL)/packages and Current, never CWD. Downloads and the
+// returned immutable snapshot stay in the protected ProgramData workspace.
 bool Prepare(const std::wstring& privateDirectory, const std::atomic<bool>& cancel,
     Package& package, std::wstring& error) noexcept;
 // Refuses legacy Glass-repacked products. Existing official versions are kept

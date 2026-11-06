@@ -2,6 +2,10 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClInclude Include="src\InstallSupport\GlassPackageRules.h" />
+    <ClInclude Include="src\InstallSupport\GlassReleaseClient.h" />
+    <ClCompile Include="src\InstallSupport\GlassReleaseClient.cpp" />
+    <ClInclude Include="src\InstallSupport\GlassPackageAcquisition.h" />
+    <ClCompile Include="src\InstallSupport\GlassPackageAcquisition.cpp" />
     <ClInclude Include="src\InstallSupport\GlassPackageCatalog.h" />
     <Filter Include="src"><UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier></Filter>
     <Filter Include="src\InstallSupport"><UniqueIdentifier>{BD4925A4-C5E2-4FDB-A577-DBB59DA45E11}</UniqueIdentifier></Filter>
