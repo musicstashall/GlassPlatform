@@ -1,4 +1,59 @@
-# Первый рабочий UI с независимыми Settings x64/x86 — 2026-11-06
+# Production product workspace: заметная переработка страницы — 2026-11-06
+
+Пользователь подтвердил сборки **22b7822**, но не увидел нового UI. Это подтверждение
+не распространяется на текущую ревизию; предыдущая сетка не была полноценным redesign.
+
+- Переработан именно `res/slideshow.html`, который встраивается ресурсом IDR_HTML в Setup
+  и Unins, а не демонстрационный/временный HTML. Вместо двухколоночной сетки — одноколоночные
+  продуктовые строки слева и живой план справа. Сохранены окно 1000×600, HTML 540 px,
+  внутренний список 330 px, scroll/edge masks и предупреждения с popup без нижних кнопок.
+- В каждой строке архитектура, установленная версия, версия проверенного target (если известна),
+  выделение выбора и кнопка действия. Кнопки вызывают существующий checkbox IPC отдельно для
+  Settings x64 и x86; это не декоративные controls. В Setup предлагается текущая операция
+  Install/Update/Repair либо Skip/Keep, в Unins — Remove/Keep. Счётчики изменений/сохраняемых
+  продуктов и пустой план пересчитываются сразу. Заголовки fresh/maintenance/uninstall и RU/EN
+  переключаются независимо от изменения метаданных продуктов.
+- Native startup log помечает `Product workspace UI ... (revision 3)` для идентификации EXE.
+  WebView получает ресурс в памяти с `Cache-Control: no-store`; устаревший browser-cache
+  причиной прежней жалобы не установлен. Native fallback не объявляется переработанным workspace.
+- Общий `GlassRegisteredMsi.h` теперь используется Setup и Unins непосредственно на границе
+  MSI операции: registration context/presence, проверка SHA-256 исходного снимка и заново
+  скопированного зарегистрированного LocalPackage, затем file roots. Замена MSI между preflight
+  и выполнением блокирует шаг даже при прежнем ProductCode. Hash читает pinned single-link
+  regular file, проверяет отмену между блоками; временная копия удаляется при отказе/успехе.
+  Имя MSI в workspace формируется только из проверенной GUID-формы ProductCode.
+- Исправлена Unins SUT ветка на 32-битной Windows: она не требует отсутствующий x64 probe.
+
+**Пункт 2 остаётся незавершённым:** общий preflight guard — следующий подключённый кусок,
+не общий transactional Windows executor. Discovery→Build→worker, mixed Install/Remove в Setup,
+общий MSI rollback для Unins, подключение removal session и SUT/shell optional-helper preflight
+ещё требуют реализации. Неработающие Remove actions в Setup не включены. Остальной согласованный
+lightweight план также не объявляется готовым.
+
+Проверки текущей ревизии:
+
+- `maintenance_ui_dom_test.cjs` исполняет настоящий production HTML в jsdom@26: шесть строк,
+  одноколоночное CSS-правило/список 330 px, отдельные Settings IPC, версии/выбор/план, warnings/Escape,
+  переключение RU/EN, заголовки Setup/Unins, disabled gates. Запуск:
+  `NODE_PATH=/home/user/.cache/glass-dom/node_modules node GlassSetup/tests/maintenance_ui_dom_test.cjs`.
+  jsdom установлен только во внешнем cache; новой runtime dependency проекта нет.
+- `registered_msi_mock.py` исполняет реальный shared Recheck с fake Hash/MSI APIs:
+  digest mismatch, copy/hash/path/context/presence errors, cancellation, отсутствие продукта,
+  unsafe identity и cleanup. Это не проверка криптографии Windows API на реальных файлах.
+- Все 21 regression suites PASS, включая 16384 policy +4096 mixed scheduler случаев,
+  fixed-path/rollback/cleanup/profile/theme/license/trust/module gate/build graph. Fixed-path mock
+  актуализирован под общий guard и существующую семантику optional component ABSENT; UNKNOWN
+  по-прежнему отклоняется, следующий установленный компонент обязательно проверяется.
+- Текущий InstallEngine компилируется в GNU Windows x86 object. Полный Unins GNU object не собран:
+  MinGW WRL не содержит Callback для существующего WebView кода; production shims не добавлялись.
+  **MSVC/WiX/link и реальный Windows/WebView layout/installer runtime здесь не проверены**;
+  jsdom не измеряет реальную раскладку, браузера для screenshot в окружении нет.
+
+Платформа/службы не запускались/не останавливались. Новых EXE/DLL нет.
+
+---
+
+# История 22b7822: независимые Settings x64/x86, ещё без заметного redesign — 2026-11-06
 
 По запросу «на следующем коммите первый результат с новым интерфейсом»:
 

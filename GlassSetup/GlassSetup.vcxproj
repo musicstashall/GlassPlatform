@@ -111,6 +111,7 @@
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\Build\GlassUnins\Release\GlassUnins.exe')" Text="Нет GlassUnins.exe для оболочки обслуживания. Сначала соберите solution Release|x64, затем Release|x86." />
   </Target>
   <ItemGroup>
+    <ClInclude Include="src\InstallSupport\GlassRegisteredMsi.h" />
     <ClInclude Include="src\GlassMaintenanceExecutor.h" />
     <ProjectReference Include="..\GlassShared\GlassShared.vcxproj">
       <Project>{2591bb0c-7c14-42fc-a888-d9a7f4d2a723}</Project>

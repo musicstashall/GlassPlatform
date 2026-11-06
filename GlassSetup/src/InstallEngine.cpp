@@ -2,6 +2,7 @@
 #include "InstallSupport/GlassPackageAcquisition.h"
 #include "InstallEngine.h"
 #include "GlassMaintenanceExecutor.h"
+#include "InstallSupport/GlassRegisteredMsi.h"
 #include <SecureUxThemeInventory.h>
 #include "InstallLog.h"
 #include "WizardProgress.h"
@@ -1054,29 +1055,10 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
 bool InstallEngine::RecheckSnapshottedProduct(const wchar_t* productCode) noexcept {
     if (!productCode || !*productCode || IsCancelRequested()) return false;
     std::wstring detail;
-    const auto context=GlassInstallMsi::CheckProductContexts(productCode,detail,&cancelRequested_);
-    if (context==GlassInstallMsi::ProductPathCheck::Cancelled) return false;
     for (const auto& snap:rollbackSession_.oldProducts) {
         if (_wcsicmp(snap.productCode.c_str(),productCode)!=0) continue;
-        auto paths=context;
-        if (context==GlassInstallMsi::ProductPathCheck::Safe &&
-            GlassInstallMsi::IsProductInstalled(productCode) && !rollbackSession_.workspaceDir.empty()) {
-            // Check the currently registered LocalPackage, not only the copy
-            // from the original snapshot: it may have changed in the meantime.
-            const std::wstring current=rollbackSession_.workspaceDir+L"\\recheck-"+productCode+L".msi";
-            if (GlassInstallMsi::CopyLocalPackage(productCode,current,&cancelRequested_))
-                paths=GlassInstallMsi::CheckProductFileRoots(productCode,current,snap.installDir,detail,&cancelRequested_);
-            else {
-                paths=IsCancelRequested()?GlassInstallMsi::ProductPathCheck::Cancelled:GlassInstallMsi::ProductPathCheck::Unverifiable;
-                detail=L"Current cached MSI is unavailable";
-            }
-            DeleteFileW(current.c_str());
-        } else if (context==GlassInstallMsi::ProductPathCheck::Safe) {
-            paths=GlassInstallMsi::ProductPathCheck::Unverifiable;
-            detail=L"Snapshotted MSI is no longer installed or its workspace is unavailable";
-        }
-        if (paths==GlassInstallMsi::ProductPathCheck::Cancelled) return false;
-        if (paths==GlassInstallMsi::ProductPathCheck::Safe) return true;
+        if(GlassRegisteredMsi::Recheck(productCode,snap.installDir,true,snap.cachedMsiPath,
+            rollbackSession_.workspaceDir,detail,&cancelRequested_))return true;
         break;
     }
     if (!IsCancelRequested()) {

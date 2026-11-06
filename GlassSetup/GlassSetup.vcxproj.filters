@@ -16,6 +16,7 @@
     <Filter Include="scripts"><UniqueIdentifier>{4E17814D-2BEC-4AA1-B142-7C6A96F16A4B}</UniqueIdentifier></Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\InstallSupport\GlassRegisteredMsi.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClInclude Include="src\InstallSupport\GlassCacheDiagnostics.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClCompile Include="src\main.cpp"><Filter>src</Filter></ClCompile>
     <ClCompile Include="src\InstallEngine.cpp"><Filter>src</Filter></ClCompile>

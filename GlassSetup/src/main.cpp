@@ -1465,6 +1465,7 @@ private:
             // This is the first logger user on the successful startup path.
             // UI interactions are locked until this worker has been joined.
             InstallLog::Initialize();
+            InstallLog::Line(L"Product workspace UI: single-column rows, architecture decisions and version/plan summary (revision 3)");
             InstallLog::Line(themed ? L"Theme Detours installed" : L"Theme Detours unavailable");
             if (rootsChecked) {
                 InstallLog::LineFormat(L"Startup installation roots: x64=%s (%s) x86=%s (%s) error=%lu",
@@ -1906,6 +1907,11 @@ private:
             reasons+=L"]";
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
                 L",\"description\":"+JsStringLiteral((desc==IDS_COMP_P64_DESC||desc==IDS_COMP_P32_DESC)?GlassProductUiPolicy::PlatformDescription(Text(desc),desc==IDS_COMP_P64_DESC,os64,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN):Text(desc))+L",\"warning\":"+JsStringLiteral(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit()))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
+                L",\"installed\":"+((rep&&rep->installed)?L"true":L"false")+
+                L",\"installedVersion\":"+JsStringLiteral(rep?rep->installedVersion:L"")+
+                L",\"installedPackageVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
+                L",\"targetVersion\":"+JsStringLiteral(rep&&rep->sourceVerified?rep->targetVersion:L"")+
+                L",\"operation\":"+JsStringLiteral(condition==GlassProducts::ProductCondition::NotInstalled?L"install":condition==GlassProducts::ProductCondition::UpdateAvailable?L"update":L"repair")+
                 L",\"badgeTone\":"+JsStringLiteral(ComponentBadgeTone(condition))+
                 L",\"lockTitle\":"+JsStringLiteral((locked && condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY):L"")+
                 L",\"state\":"+JsStringLiteral(Text(ComponentStateId(checked,condition)))+
@@ -1955,6 +1961,9 @@ private:
             L",\"warning\":"+JsStringLiteral(GlassProductUiPolicy::WarningText(preview.rows[4].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit()))+
             L",\"description\":"+JsStringLiteral(Text(IDS_COMP_SUT_DESC))+
             L",\"badge\":"+JsStringLiteral(Text(sutBadge))+L",\"badgeTone\":"+JsStringLiteral(sutTone)+
+            L",\"installed\":"+(inspect_.secureUxTheme.installed?L"true":L"false")+
+            L",\"installedVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedVersion)+
+            L",\"operation\":"+JsStringLiteral(sutCondition==GlassProducts::ProductCondition::NotInstalled?L"install":sutUpdate?L"update":L"repair")+
             L",\"state\":"+JsStringLiteral(Text(sutStateId))+L",\"reasons\":"+sutReasons+
             L",\"checked\":"+(sutChecked?L"true":L"false")+
             L",\"locked\":false,\"disabled\":"+(sutDisabled?L"true":L"false")+L",\"hidden\":false}";

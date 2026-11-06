@@ -26,6 +26,7 @@
 #include <wrl.h>
 #include <WebView2.h>
 #include "GlassMaintenanceExecutor.h"
+#include "InstallSupport/GlassRegisteredMsi.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -1036,20 +1037,8 @@ private:
             const auto it=std::find_if(probes.begin(),probes.end(),[&](const Probe& p){return _wcsicmp(p.code,code)==0;});
             if (it==probes.end()) return false;
             std::wstring detail;
-            if (Msi::CheckProductContexts(code,detail)!=Msi::ProductPathCheck::Safe ||
-                Msi::IsProductInstalled(code)!=it->installed)
-                return refuse(*it,detail,false);
-            if (it->installed) {
-                // Re-read the current cached package: the registration may
-                // have changed since the protected preflight copy was made.
-                const std::wstring current=workspace.directory+L"\\current-"+code+L".msi";
-                const bool copied=Msi::CopyLocalPackage(code,current);
-                const auto paths=copied ? Msi::CheckProductFileRoots(code,current,it->root,detail)
-                                        : Msi::ProductPathCheck::Unverifiable;
-                DeleteFileW(current.c_str());
-                if (!copied) detail=L"Current cached MSI is unavailable";
-                if (paths!=Msi::ProductPathCheck::Safe) return refuse(*it,detail,false);
-            }
+            if(!GlassRegisteredMsi::Recheck(code,it->root,it->installed,it->cached,
+                workspace.directory,detail,&cancelRequested_))return refuse(*it,detail,false);
             UINT removalCode=ERROR_SUCCESS;
             if (!Msi::UninstallProduct(code,nullptr,&removalCode)) {
                 SetError(std::wstring(T(L"Не удалось удалить пакет: ",L"Could not remove package: "))+name);
@@ -1078,7 +1067,7 @@ private:
                     shellRemoved=true;
                 }
         if (product==P::Product::SecureUxTheme) {
-            if (!remove(Msi::kProductSecureUxThemeX64,L"SecureUxTheme x64") ||
+            if ((os64 && !remove(Msi::kProductSecureUxThemeX64,L"SecureUxTheme x64")) ||
                 !remove(Msi::kProductSecureUxThemeX86,L"SecureUxTheme x86")) { restoreRemaining(); return 12; }
             ++done;
         }

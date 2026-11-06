@@ -39,9 +39,11 @@ assert "args_.originalDir" not in unins_roots
 assert 'ogDir=roots.openGlass' in start_install
 # Workspace paths use one Windows separator at the junction, not a doubled
 # literal that depends on Win32 path normalization.
-assert r'workspace.directory+L"\\current-' in unins
+registered=(repo/'GlassSetup/src/InstallSupport/GlassRegisteredMsi.h').read_text(encoding='utf-8')
+assert 'GlassRegisteredMsi::Recheck' in unins
 assert r'workspaceDir+L"\\rollback-prior-' in rollback_src
-assert r'workspaceDir+L"\\recheck-' in engine
+assert 'GlassRegisteredMsi::Recheck' in engine
+assert r'workspace+L"\\recheck-' in registered
 worker = function(engine, "DWORD WINAPI InstallEngine::WorkerThread(")
 assert worker.index("CreateRollbackSnapshot()") < worker.index("StopRunningHosts()") < worker.index("InstallGlassSettingsEarly()")
 assert worker.index("CapturePriorHostState()") < worker.index("CreateRollbackSnapshot()")
@@ -55,7 +57,9 @@ for stage in ("bool InstallEngine::RunOneMsi(", "bool InstallEngine::RunMsiSeque
 retry = function(engine, "bool InstallEngine::RunOneMsi(").split("exitCode == ERROR_PRODUCT_VERSION", 1)[1]
 assert retry.index("RecheckRelatedProducts(") < retry.index("GlassInstallMsi::InstallProduct(")
 recheck = function(engine, "bool InstallEngine::RecheckSnapshottedProduct(")
-assert recheck.index("CopyLocalPackage(") < recheck.index("CheckProductFileRoots(")
+assert "GlassRegisteredMsi::Recheck" in recheck
+assert registered.index("CopyLocalPackage(") < registered.index("CheckProductFileRoots(")
+assert "before==now" in registered
 
 # Keep UpgradeCodes used by the guard synchronized with the actual projects.
 family_section = function(rollback_src, "bool VerifyProductRegistrations(")
@@ -223,7 +227,12 @@ int main(){
  reset();fake.rows={{L"",L"C:\\fixed\\a.dll"}};
  assert(CheckProductFileRoots(L"p",L"cached",L"C:\\fixed",detail,&cancelled)==ProductPathCheck::Unverifiable);
  reset();fake.rows={{L"{one}",L"C:\\fixed\\a.dll",INSTALLSTATE_ABSENT}};
+ assert(CheckProductFileRoots(L"p",L"cached",L"C:\\fixed",detail,&cancelled)==ProductPathCheck::Safe);
+ // A confirmed absent optional component has no resource to remove; Unknown is not absence.
+ reset();fake.rows={{L"{one}",L"C:\\fixed\\a.dll",INSTALLSTATE_UNKNOWN}};
  assert(CheckProductFileRoots(L"p",L"cached",L"C:\\fixed",detail,&cancelled)==ProductPathCheck::Unverifiable);
+ reset();fake.rows={{L"{one}",L"",INSTALLSTATE_ABSENT},{L"{two}",L"D:\\outside\\a.dll"}};
+ assert(CheckProductFileRoots(L"p",L"cached",L"C:\\fixed",detail,&cancelled)==ProductPathCheck::OutsideRoot);
  reset();fake.rows={{L"{one}",L"C:\\fixed\\a.dll",INSTALLSTATE_SOURCE}};
  assert(CheckProductFileRoots(L"p",L"cached",L"C:\\fixed",detail,&cancelled)==ProductPathCheck::Unverifiable);
  reset();fake.rows={{L"{one}",L"",INSTALLSTATE_LOCAL}};
