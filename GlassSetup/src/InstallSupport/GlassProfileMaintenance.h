@@ -118,6 +118,49 @@ public:
         if(!ok) profiles_.clear(); // A partial inventory must never become a cleanup target.
         return ok;
     }
+    // Re-enumerate metadata without reopening NTUSER.DAT: existing private
+    // hive handles remain pinned. Enumeration order is not an identity.
+    bool VerifyInventory(std::wstring& detail) const {
+        HKEY list=nullptr;
+        const LONG opened=RegOpenKeyExW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList",0,KEY_READ|KEY_WOW64_64KEY,&list);
+        if(opened!=ERROR_SUCCESS){detail=L"Cannot recheck ProfileList: "+std::to_wstring(opened);return false;}
+        struct CloseKey { HKEY key; ~CloseKey(){RegCloseKey(key);} } close{list};
+        std::vector<bool> seen(profiles_.size(),false);
+        for(DWORD index=0;;++index) {
+            wchar_t name[256]{};DWORD length=256;
+            const LONG status=RegEnumKeyExW(list,index,name,&length,nullptr,nullptr,nullptr,nullptr);
+            if(status==ERROR_NO_MORE_ITEMS)break;
+            if(status!=ERROR_SUCCESS){detail=L"Cannot re-enumerate profiles";return false;}
+            const std::wstring sid=name;
+            if(sid.rfind(L"S-1-5-21-",0)!=0&&sid.rfind(L"S-1-12-1-",0)!=0)continue;
+            std::size_t found=0;
+            while(found<profiles_.size() && profiles_[found].sid!=sid)++found;
+            if(found==profiles_.size() || seen[found]) {
+                detail=sid+L": profile inventory changed; a fresh preflight is required";return false;
+            }
+            HKEY entry=nullptr;
+            if(RegOpenKeyExW(list,name,0,KEY_READ,&entry)!=ERROR_SUCCESS){detail=sid+L": profile entry unavailable during recheck";return false;}
+            std::wstring raw;
+            const bool got=ReadString(entry,L"ProfileImagePath",raw);RegCloseKey(entry);
+            wchar_t expanded[32768]{};
+            const DWORD chars=got?ExpandEnvironmentStringsW(raw.c_str(),expanded,32768):0;
+            if(!chars || chars>32768 || profiles_[found].path!=expanded) {
+                detail=sid+L": profile path changed or unavailable; a fresh preflight is required";return false;
+            }
+            const DWORD pathAttr=GetFileAttributesW(expanded);
+            const std::wstring hivePath=profiles_[found].path+L"\\NTUSER.DAT";
+            const DWORD hiveAttr=GetFileAttributesW(hivePath.c_str());
+            if(pathAttr==INVALID_FILE_ATTRIBUTES || !(pathAttr&FILE_ATTRIBUTE_DIRECTORY) ||
+               (pathAttr&FILE_ATTRIBUTE_REPARSE_POINT) || !SafePath(expanded) ||
+               hiveAttr==INVALID_FILE_ATTRIBUTES || (hiveAttr&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) ||
+               !SafePath(hivePath)) {
+                detail=sid+L": profile paths became unavailable or unsafe";return false;
+            }
+            seen[found]=true;
+        }
+        for(bool present:seen)if(!present){detail=L"A profile disappeared; a fresh preflight is required";return false;}
+        return true;
+    }
     // Conservative safety barrier until a per-session style broker and verified
     // offline theme writer are available. Unknown/custom offline styles do not
     // authorize hook removal. No logout or registry reset is performed here.
@@ -168,13 +211,13 @@ public:
         if(OtherUserSessions(detail)||!OpenAll(detail))return false;
         for(const auto& profile:profiles_)
             if(!Shared::RegistrySanity::CleanOwnedSettings(profile.hive,false,false,detail)){detail=profile.sid+L": "+detail;return false;}
-        cleanupPrepared_=Shared::RegistrySanity::CleanOwnedSettings(HKEY_LOCAL_MACHINE,true,false,detail);
+        cleanupPrepared_=Shared::RegistrySanity::CleanOwnedSettings(HKEY_LOCAL_MACHINE,true,false,detail) && VerifyInventory(detail);
         return cleanupPrepared_;
     }
     bool Cleanup(std::wstring& detail) {
         if(!cleanupPrepared_) {detail=L"Successful all-profile cleanup preflight is required";return false;}
         cleanupPrepared_=false; // One-shot commit; partial errors require a fresh inventory/preflight.
-        if(OtherUserSessions(detail))return false;
+        if(OtherUserSessions(detail)||!VerifyInventory(detail))return false;
         for(const auto& profile:profiles_) {
             if(!Shared::RegistrySanity::CleanOwnedSettings(profile.hive,false,true,detail)){detail=profile.sid+L": partial cleanup: "+detail;return false;}
         }

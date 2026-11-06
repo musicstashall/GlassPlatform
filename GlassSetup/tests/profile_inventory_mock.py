@@ -32,7 +32,7 @@ std::vector<Entry> entries;
 struct Handle{int kind,index;};std::map<HKEY,Handle> handles;std::uintptr_t serial=10;
 std::map<std::wstring,DWORD> attributes;
 bool enumFail=false,openListFail=false,openEntryFail=false,openHiveFail=false,loadFail=false,invalidSid=false,badPathValue=false,otherSession=false;
-int malformed=0;
+int malformed=0,changeOnCheck=0;
 int offlineLoads=0,cleanChecks=0,cleanWrites=0;int failCheckAt=0,failWriteAt=0;
 HKEY create(int kind,int index){HKEY h=reinterpret_cast<HKEY>(++serial);handles[h]={kind,index};return h;}
 LONG RegCloseKey(HKEY h){assert(handles.erase(h)==1);return 0;}
@@ -63,18 +63,20 @@ LONG RegLoadAppKeyW(const wchar_t* path,HKEY* out,DWORD,DWORD,DWORD){++offlineLo
 bool OtherUserSessions(std::wstring& detail){if(otherSession)detail=L"Other session";return otherSession;}
 namespace Shared::RegistrySanity {
 bool CleanOwnedSettings(HKEY,bool,bool commit,std::wstring& detail){
- int n=commit?++cleanWrites:++cleanChecks;if(n==(commit?failWriteAt:failCheckAt)){detail=L"failure";return false;}return true;
+ int n=commit?++cleanWrites:++cleanChecks;
+ if(!commit&&changeOnCheck==n)entries.push_back({L"S-1-5-21-333",L"C:\\Users\\C"});
+ if(n==(commit?failWriteAt:failCheckAt)){detail=L"failure";return false;}return true;
 }}
 '''
 profile=s[s.index('struct Profile {'):s.index('inline bool ReadString(')]
-methods='\n'.join(function(token) for token in ('bool OpenAll(', 'bool PreflightCleanup(', 'bool Cleanup('))
+methods='\n'.join(function(token) for token in ('bool OpenAll(', 'bool VerifyInventory(', 'bool PreflightCleanup(', 'bool Cleanup('))
 body=prefix+profile+function('inline bool ReadString(')+function('inline bool SafePath(')+'''\nclass Inventory {
  std::vector<Profile> profiles_;bool cleanupPrepared_=false;
  public:
  const std::vector<Profile>& Profiles() const {return profiles_;}
 '''+methods+'\n};\n'
 main=r'''
-void reset(){assert(handles.empty());entries={{L"S-1-5-21-111",L"C:\\Users\\A"},{L"S-1-12-1-222",L"C:\\Users\\B"}};attributes.clear();enumFail=openListFail=openEntryFail=openHiveFail=loadFail=invalidSid=badPathValue=otherSession=false;offlineLoads=cleanChecks=cleanWrites=failCheckAt=failWriteAt=malformed=0;}
+void reset(){assert(handles.empty());entries={{L"S-1-5-21-111",L"C:\\Users\\A"},{L"S-1-12-1-222",L"C:\\Users\\B"}};attributes.clear();enumFail=openListFail=openEntryFail=openHiveFail=loadFail=invalidSid=badPathValue=otherSession=false;offlineLoads=cleanChecks=cleanWrites=failCheckAt=failWriteAt=malformed=changeOnCheck=0;}
 int main(){
  std::wstring detail;
  reset();{Inventory i;assert(!i.Cleanup(detail));assert(cleanWrites==0);assert(i.PreflightCleanup(detail));assert(i.Profiles().size()==2&&offlineLoads==2);assert(cleanChecks==3);assert(i.Cleanup(detail));assert(cleanWrites==3);assert(!i.Cleanup(detail));assert(cleanWrites==3);}
@@ -97,6 +99,24 @@ int main(){
  reset();{Inventory i;assert(i.PreflightCleanup(detail));otherSession=true;assert(!i.Cleanup(detail));assert(cleanWrites==0);otherSession=false;assert(!i.Cleanup(detail));}
  reset();{Inventory i;assert(i.PreflightCleanup(detail));failWriteAt=2;assert(!i.Cleanup(detail));assert(cleanWrites==2);assert(!i.Cleanup(detail));assert(cleanWrites==2);assert(i.PreflightCleanup(detail));failWriteAt=0;assert(i.Cleanup(detail));}
  reset();{Inventory i;assert(i.PreflightCleanup(detail));assert(i.OpenAll(detail));assert(!i.Cleanup(detail));assert(cleanWrites==0);}
+ reset();{Inventory i;changeOnCheck=3;assert(!i.PreflightCleanup(detail));assert(!i.Cleanup(detail));assert(cleanWrites==0);}
+ // Reordering is benign; metadata changes require a new preflight and no writes.
+ reset();{Inventory i;assert(i.PreflightCleanup(detail));std::swap(entries[0],entries[1]);assert(i.Cleanup(detail));assert(cleanWrites==3);}
+ for(int mutation=0;mutation<10;++mutation){
+  reset();Inventory i;assert(i.PreflightCleanup(detail));const auto pinned=handles.size();
+  if(mutation==0)entries.push_back({L"S-1-5-21-333",L"C:\\Users\\C"});
+  if(mutation==1)entries.pop_back();
+  if(mutation==2)entries[1].path=L"C:\\Users\\Moved";
+  if(mutation==3)enumFail=true;
+  if(mutation==4)attributes[L"C:\\Users\\B"]=FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT;
+  if(mutation==5)attributes[L"C:\\Users\\B\\NTUSER.DAT"]=INVALID_FILE_ATTRIBUTES;
+  if(mutation==6)entries[1].sid=entries[0].sid;
+  if(mutation==7)badPathValue=true;
+  if(mutation==8)openListFail=true;
+  if(mutation==9)openEntryFail=true;
+  assert(!i.Cleanup(detail));assert(cleanWrites==0);assert(handles.size()==pinned);
+  assert(!i.Cleanup(detail));assert(cleanWrites==0); // Consent is not reusable after failed revalidation.
+ }
  assert(handles.empty());
 }
 '''
@@ -107,4 +127,4 @@ with tempfile.TemporaryDirectory() as d:
     binary=Path(d)/'profiles'
     subprocess.run(['g++','-std=c++17','-fsanitize=address,undefined','-fno-pie','-no-pie',str(source),'-o',str(binary)],check=True)
     subprocess.run([str(binary)],check=True)
-print('PASS: actual all-profile inventory/preflight/one-shot cleanup; inaccessible hives, unsafe paths, partial inventories, sessions, errors and handle release (fake APIs)')
+print('PASS: actual all-profile inventory/preflight/one-shot cleanup; inaccessible hives, unsafe paths, partial inventories, inventory changes before commit, sessions, errors and handle release (fake APIs)')
