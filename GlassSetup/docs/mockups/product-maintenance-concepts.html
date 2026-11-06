@@ -1,0 +1,1696 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>GlassSetup — концепции страницы продуктов</title>
+<style>
+:root{
+  --page:#080a14;
+  --bg:#101225;
+  --panel:#17192b;
+  --panel-2:#1d2038;
+  --ink:#f5f4fc;
+  --muted:#a2a6bf;
+  --soft:#c3c7dc;
+  --purple:#c1b4ff;
+  --purple-2:#9b88e5;
+  --cyan:#a7dddf;
+  --green:#83d9a6;
+  --amber:#f4c46d;
+  --amber-soft:#ffdf9d;
+  --red:#e57a7a;
+  --line:rgba(199,189,255,.16);
+  --line-soft:rgba(255,255,255,.06);
+  --footer-top:#1a1b32;
+  --footer-bottom:#111223;
+  --footer-line:#4a476d;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{
+  background:
+    radial-gradient(900px 520px at 50% -180px,rgba(87,73,150,.18),transparent 70%),
+    var(--page);
+  color:var(--ink);
+  font-family:'Segoe UI','Inter',Roboto,'Helvetica Neue',Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+button{font:inherit}
+button:focus-visible{outline:2px solid #e1d7ff;outline-offset:2px}
+[hidden]{display:none!important}
+
+/* ---------- page chrome ---------- */
+.page{max-width:1180px;margin:0 auto;padding:22px 24px 34px}
+.page-top{display:flex;align-items:flex-start;justify-content:space-between;gap:22px;margin-bottom:18px}
+.page-title{min-width:0}
+.page-eyebrow{display:flex;align-items:center;gap:9px;color:#8f93ad;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
+.page-eyebrow:before{content:"";width:18px;height:1px;background:#8f93ad}
+.page-title h1{margin:7px 0 0;font-size:19px;line-height:1.25;font-weight:500;letter-spacing:-.2px}
+.page-title p{margin:6px 0 0;max-width:690px;color:#8f93ad;font-size:11.5px;line-height:1.5}
+.page-side{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.spec-pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid #242744;border-radius:7px;background:#0f1120;color:#9da2bc;font-size:9.5px;white-space:nowrap}
+.spec-pill b{color:#d9d6ea;font-weight:600}
+.icon-toggle{display:inline-grid;place-items:center;width:28px;height:28px;border:1px solid #242744;border-radius:7px;background:#0f1120;color:#aeb2c9;cursor:pointer}
+.icon-toggle:hover{color:#f5f4fc;border-color:#3c3f6b}
+
+.stage-holder{position:relative;width:100%;display:flex;justify-content:center;overflow:auto}
+.stage-fit{zoom:var(--zoom,1);flex:0 0 auto;width:1000px;height:600px}
+.stage{position:relative;width:1000px;height:600px;overflow:hidden;overflow:clip;overflow-clip-margin:0;isolation:isolate;background:var(--bg);border-radius:3px;box-shadow:0 0 0 1px #262a49,0 32px 80px #0008,0 0 0 1px #ffffff05 inset}
+.stage:after{content:"";position:absolute;inset:0;pointer-events:none;border-radius:2px;box-shadow:inset 0 0 80px #0003;z-index:70}
+
+/* ---------- shared stage chrome ---------- */
+.stage-brand{position:absolute;left:48px;top:29px;display:flex;align-items:center;gap:9px;z-index:5}
+.brandmark{width:23px;height:25px;position:relative;flex:0 0 23px}
+.brandmark:before,.brandmark:after{content:"";position:absolute;width:15px;height:19px;border-radius:4px;background:linear-gradient(140deg,#b1e8ff75,#8d6eff35);border:1px solid #d2e9ff99;transform:skewY(-13deg)}
+.brandmark:after{left:7px;top:4px;background:linear-gradient(140deg,#e8c1ff70,#759cff30)}
+.brand-name{font-size:14px;font-weight:600;letter-spacing:.1px}
+.brand-ver{color:#8f93ad;font-size:8.5px;letter-spacing:1.8px;font-weight:400;text-transform:uppercase;margin-left:2px}
+.stage-source{position:absolute;right:48px;top:30px;display:flex;align-items:center;gap:6px;z-index:5;color:#9da2bc;font-size:9px;letter-spacing:.15px}
+.stage-source .sep{color:#4d5170}
+.stage-source b{color:#cdeff0;font-weight:600}
+.gh-glyph{display:grid;place-items:center;width:17px;height:17px;border:1px solid #a7dddf3d;border-radius:5px;background:#a7dddf10;color:#a7dddf}
+.gh-glyph svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+.ambient{position:absolute;pointer-events:none;z-index:0;border-radius:50%;filter:blur(6px)}
+.ambient.one{width:620px;height:440px;right:-120px;top:48px;background:radial-gradient(ellipse,rgba(73,53,140,.26),transparent 68%)}
+.ambient.two{width:340px;height:300px;left:-130px;bottom:-70px;background:radial-gradient(ellipse,rgba(45,104,117,.16),transparent 70%)}
+.stage-banner{position:absolute;right:0;top:0;width:820px;height:540px;object-fit:cover;opacity:.34;z-index:1;pointer-events:none;mask-image:linear-gradient(94deg,#0000 0%,#00000047 34%,#000 78%,#000 100%);-webkit-mask-image:linear-gradient(94deg,#0000 0%,#00000047 34%,#000 78%,#000 100%);}
+.stage-overlay{position:absolute;left:0;top:0;width:1000px;height:540px;z-index:1;pointer-events:none;background:linear-gradient(90deg,#10122508 0%,#10122512 46%,#1012252e 100%)}
+
+.variant{position:absolute;inset:0;z-index:2}
+.stage.is-applying .variant{pointer-events:none}
+.v-head{position:absolute;left:48px;top:65px;width:904px}
+.v-kicker{display:flex;align-items:center;gap:9px;margin:0 0 8px;color:var(--purple);font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
+.v-kicker:before{content:"";width:18px;height:1px;background:var(--purple)}
+.v-title-row{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.v-title{margin:0;font-size:27px;line-height:1.13;font-weight:350;letter-spacing:-.65px;color:var(--ink)}
+.v-intro{margin:5px 0 0;max-width:904px;color:#aeb2c9;font-size:11.8px;line-height:1.45}
+.ghost-btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:1px solid #f4c46d55;border-radius:7px;background:#f4bd5e10;color:var(--amber-soft);font-size:9.5px;font-weight:600;white-space:nowrap;cursor:pointer;transition:background .18s,border-color .18s}
+.ghost-btn:before{content:"↻";font-size:12px;line-height:1;color:var(--amber)}
+.ghost-btn:hover:not(:disabled){background:#f4bd5e1f;border-color:#f4c46d88}
+.ghost-btn:disabled{opacity:.5;cursor:default}
+.ghost-btn.is-clean{border-color:#83d9a655;background:#83d9a610;color:#b8f4d1}
+.ghost-btn.is-clean:before{content:"✓";color:var(--green)}
+
+/* ---------- common bits ---------- */
+.dot{width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:#8f93ad}
+.dot.good{background:var(--green);box-shadow:0 0 9px #83d9a680}
+.dot.warn{background:var(--amber);box-shadow:0 0 9px #f4c46d80}
+.dot.accent{background:var(--purple);box-shadow:0 0 9px #c1b4ff80}
+.dot.cyan{background:var(--cyan);box-shadow:0 0 9px #a7dddf80}
+.count{display:inline-grid;place-items:center;min-width:18px;height:16px;padding:0 5px;border-radius:5px;background:#ffffff0b;color:#b9bdd3;font-size:8.5px;font-weight:700}
+.badge{display:inline-flex;align-items:center;flex:0 0 auto;height:15px;padding:0 6px;border:1px solid transparent;border-radius:999px;font-size:7.6px;font-weight:700;letter-spacing:.65px;text-transform:uppercase;white-space:nowrap}
+.badge.req{border-color:#a7dddf55;background:#a7dddf12;color:#cdeff0}
+.badge.dep{border-color:#a7dddf38;background:#a7dddf0c;color:#a9d9db}
+.badge.dep.off{border-color:#f4c46d4d;background:#f4bd5e14;color:#ffdf9d}
+.badge.soft{border-color:#c1b4ff33;background:#c1b4ff0c;color:#cfc5f4}
+.badge.pending{border-color:#c1b4ff66;background:#c1b4ff14;color:#ded7ff}
+.badge.remove{border-color:#f4c46d55;background:#f4bd5e14;color:#ffdf9d}
+
+.badge.role{border-color:#ffffff1f;background:#ffffff08;color:#b9bdd3}
+.badge.upd{border-color:#f4c46d4d;background:#f4bd5e12;color:#ffdf9d}
+.warn-btn{display:grid;place-items:center;flex:0 0 auto;width:17px;height:17px;padding:0;border:1px solid #f4c46d55;border-radius:5px;background:#f4bd5e14;color:var(--amber);cursor:pointer}
+.warn-btn:hover{background:#f4bd5e28;border-color:#f4c46d88}
+.warn-btn svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.icon-action{display:grid;place-items:center;flex:0 0 auto;width:26px;height:26px;padding:0;border:1px solid #ffffff1a;border-radius:7px;background:#ffffff08;color:#c9cce0;cursor:pointer;transition:background .16s,border-color .16s,color .16s}
+.icon-action:hover{background:#c1b4ff1c;border-color:#c1b4ff66;color:#f0ebff}
+.icon-action.locked{color:#f4c46d;border-color:#f4c46d3d;background:#f4bd5e10;cursor:help}
+.icon-action svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.p-icon{display:grid;place-items:center;width:30px;height:30px;flex:0 0 30px;border-radius:8px}
+.p-icon svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+.grip{width:8px;flex:0 0 8px;display:flex;align-items:center;justify-content:center;color:#5b607c;cursor:grab}
+.grip svg{width:7px;height:15px;fill:currentColor}
+[data-drag-id]{cursor:grab}
+[data-drag-id].dragging{opacity:.35;cursor:grabbing}
+.drop-hover{outline:1px dashed #c1b4ff99;outline-offset:-3px;background-color:#c1b4ff0a}
+.is-dragging .drop-hint{opacity:1!important}
+
+/* ---------- plan panel bits ---------- */
+.side-kicker{color:#c1b4ff;font-size:8px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase}
+.c-pin{display:inline-grid;place-items:center;width:18px;height:18px;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:#aaadc6;cursor:pointer;opacity:.72;transition:opacity .16s,color .16s,background .16s,border-color .16s,box-shadow .16s}
+.c-pin:hover{opacity:1;color:#e2dbff;background:#c1b4ff1f;border-color:#c1b4ff3d}
+.c-pin.is-on{opacity:1;color:#efe9ff;background:#c1b4ff2e;border-color:#c1b4ff6b;box-shadow:0 0 14px #c1b4ff33,inset 0 1px #ffffff26}
+.c-pin svg{width:12px;height:12px;display:block}
+.c-lane.available .c-pin{margin-left:auto}
+.c-lane.available .c-view{margin-left:0}
+.c-pin-corner{position:absolute;top:9px;right:10px;z-index:2}
+.side-big{display:flex;align-items:baseline;gap:6px;margin-top:2px}
+.side-big b{color:#ded7ff;font-size:30px;line-height:1.05;font-weight:350;letter-spacing:-1px}
+.side-big b.clean{color:#9fd9b6;font-size:24px;letter-spacing:0}
+.side-big span{color:#c9c3a7;font-size:8.8px}
+.side-copy{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin:4px 0 7px;color:#a2a6bf;font-size:8.6px;line-height:1.45}
+.side-copy b{color:#e6e2f6;font-weight:600}
+.side-primary{display:flex;align-items:center;justify-content:center;gap:5px;height:26px;border:1px solid #c1b4ff59;border-radius:7px;background:#c1b4ff12;color:#ded7ff;font-size:9px;font-weight:600;cursor:pointer;transition:background .16s,border-color .16s,color .16s}
+.side-primary:before{content:"↻";font-size:11px;line-height:1}
+.side-primary:hover:not(:disabled){background:#c1b4ff22;border-color:#c1b4ff91}
+.side-primary:disabled{opacity:.5;cursor:default}
+.side-primary.is-clean{border-color:#83d9a655;background:#83d9a610;color:#b8f4d1}
+.side-primary.is-clean:before{content:"✓"}
+.side-divider{height:1px;flex:0 0 1px;margin:8px 0 7px;background:#ffffff0d}
+.side-label{margin-bottom:4px;color:#8e93ab;font-size:7.4px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase}
+.dep-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+.dep-list li{display:flex;align-items:center;gap:4px;min-width:0;color:#c8cbe0;font-size:8.1px;white-space:nowrap}
+.dep-node{color:#cdeff0}
+.dep-arrow{color:#5f647f}
+.dep-list em{margin-left:auto;color:#7f849e;font-size:7.1px;font-style:normal;letter-spacing:.5px;text-transform:uppercase}
+.dep-list em.ok{color:#8fd3ab}
+.dep-list em.bad{color:#efc775}
+.side-note{margin:5px 0 0;color:#8b90aa;font-size:7.6px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.side-status{display:flex;align-items:flex-start;gap:6px;margin-top:7px;padding:6px 7px;border:1px solid #83d9a63d;border-radius:7px;background:#83d9a60d;color:#bfe9cf;font-size:8px;line-height:1.4}
+.side-status.warn{border-color:#f4c46d4d;background:#f4bd5e10;color:#f0d4a1}
+.side-status.idle{border-color:#ffffff1a;background:#ffffff08;color:#9aa0bb}
+.side-status.accent{border-color:#c1b4ff3d;background:#c1b4ff0d;color:#d6cff5}
+.side-status .status-dot{width:6px;height:6px;border-radius:50%;flex:0 0 6px;margin-top:4px;background:#8f93ad}
+.side-status .status-dot.good{background:var(--green);box-shadow:0 0 9px #83d9a680}
+.side-status .status-dot.warn{background:var(--amber);box-shadow:0 0 9px #f4c46d80}
+.side-status .status-dot.idle{background:#8f93ad}
+.c-drop.ok{border-color:#83d9a64d;color:#a9dcc0}
+.c-drop.ok svg{opacity:.75}
+.side-status-copy{display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;min-width:0;flex:1}
+.side-status-copy p{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin:0}
+.mini-link{padding:1px 6px;border:1px solid #ffffff24;border-radius:5px;background:#ffffff0d;color:#ded7ff;font-size:7.8px;font-weight:600;text-decoration:none;cursor:pointer;transition:background .14s,border-color .14s}
+.mini-link:hover{background:#ffffff1a;border-color:#ffffff33}
+.plan-list{flex:1 0 100%;list-style:none;margin:3px 0 0;padding:0;display:flex;flex-direction:column;gap:2px}
+.plan-list li{display:flex;align-items:center;gap:4px;min-width:0;color:#cfd2e2;font-size:7.9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plan-list svg{width:8px;height:8px;flex:0 0 8px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.plan-list li.update{color:#ffdf9d}
+.plan-list li.install{color:#ded7ff}
+.plan-list li.remove{color:#f0b6b6}
+.side-remove{display:flex;align-items:center;gap:4px;margin-top:7px;padding:0;border:0;background:none;color:#c9a86a;font-size:8.1px;font-weight:600;white-space:nowrap;cursor:pointer;align-self:flex-start}
+.side-remove[hidden]{display:none}
+.side-remove:hover{color:#ffe7b8;text-decoration:underline;text-underline-offset:2px}
+.side-remove svg{width:9px;height:9px;flex:0 0 9px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.side-source{margin-top:auto;padding-top:6px;border-top:1px solid #ffffff0d;color:#8b90a9;font-size:7.4px;line-height:1.4}
+.side-source b{color:#cdeff0;font-weight:600}
+.side-source .src-row{display:flex;align-items:center;gap:5px}
+.side-source svg{width:10px;height:10px;flex:0 0 10px;fill:none;stroke:#a7dddf;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+/* ---------- C: shelf lanes + plan panel ---------- */
+.c-slot{position:absolute;top:156px;height:372px;overflow:hidden;transition:width .34s cubic-bezier(.4,0,.2,1)}
+.c-slot-left{left:48px;width:302px}
+.c-slot-right{right:48px;width:268px}
+.c-slot-left.is-hidden,.c-slot-right.is-hidden{width:0}
+.c-lip{position:absolute;top:0;height:100%;width:10px;pointer-events:none;opacity:0;transition:opacity .18s ease,transform .26s cubic-bezier(.4,0,.2,1);background:linear-gradient(150deg,rgba(255,255,255,.13),rgba(255,255,255,0) 46%),linear-gradient(165deg,rgba(78,80,122,.92),rgba(30,33,58,.96));border:1px solid #ffffff3d;box-shadow:0 0 22px #c1b4ff3d,0 10px 24px #04050e66}
+.c-lip-left{left:48px;border-radius:0 10px 10px 0;transform:translateX(-5px);box-shadow:inset -1px 0 #ded5ff,inset -10px 0 22px -12px #c1b4ffb3,0 0 22px #c1b4ff33}
+.c-lip-right{right:48px;border-radius:10px 0 0 10px;transform:translateX(5px);box-shadow:inset 1px 0 #ded5ff,inset 10px 0 22px -12px #c1b4ffb3,0 0 22px #c1b4ff33}
+.c-edge.is-hot .c-lip{opacity:1;transform:none}
+.c-edge{position:absolute;top:156px;height:372px;width:56px;z-index:5}
+.c-edge-left{left:0}
+.c-edge-right{right:0}
+.c-edge.is-off{pointer-events:none}
+.c-peek{position:absolute;top:134px;width:24px;height:104px;display:grid;place-items:center;padding:0;border:1px solid #c1b4ff66;background:linear-gradient(180deg,rgba(74,66,118,.9),rgba(24,26,45,.94));backdrop-filter:blur(14px) saturate(150%);-webkit-backdrop-filter:blur(14px) saturate(150%);color:#cfc7f5;cursor:pointer;box-shadow:inset 0 1px #ffffff1f,0 0 22px #c1b4ff2e,0 12px 26px #04050e5c;transition:opacity .16s,color .16s,border-color .16s,box-shadow .16s,background .16s}
+.c-peek-left{left:24px;border-right:0;border-radius:10px 0 0 10px}
+.c-peek-right{right:24px;border-left:0;border-radius:0 10px 10px 0}
+.c-peek:hover{color:#f2ecff;border-color:#c1b4ff8c;background:linear-gradient(180deg,rgba(84,74,134,.94),rgba(31,29,55,.96));box-shadow:inset 0 1px #ffffff1f,0 0 30px #c1b4ff3d,0 12px 26px #04050e5c}
+.c-peek.is-off{opacity:0;visibility:hidden;pointer-events:none}
+.c-peek-chip{display:grid;place-items:center;width:18px;height:32px;border:1px solid #c1b4ff4d;border-radius:7px;background:#c1b4ff26}
+.c-peek svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round;animation:peek-nudge-l 2.8s ease-in-out infinite}
+.c-peek-right svg{animation-name:peek-nudge-r}
+.c-peek:hover svg{animation:none}
+@keyframes peek-nudge-r{0%,100%{transform:translateX(0);opacity:.72}50%{transform:translateX(1.6px);opacity:1}}
+@keyframes peek-nudge-l{0%,100%{transform:translateX(0);opacity:.72}50%{transform:translateX(-1.6px);opacity:1}}
+@media (prefers-reduced-motion: reduce){.c-peek svg{animation:none}}
+.c-lane{position:absolute;top:156px;width:302px;height:372px;border:1px solid #ffffff1f;border-radius:13px;background:linear-gradient(150deg,rgba(255,255,255,.07),rgba(255,255,255,0) 38%),linear-gradient(165deg,rgba(46,49,78,.52),rgba(20,22,40,.74));backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);box-shadow:inset 0 1px #ffffff1a,inset 0 0 0 1px #ffffff05,0 14px 34px #04050e4d;display:flex;flex-direction:column;overflow:hidden;transition:border-color .16s,background .16s}
+.c-lane{transition:border-color .16s,background .16s}
+.c-lane.available{top:0;right:0;left:auto;width:302px}
+.c-veil{position:absolute;top:26px;bottom:22px;left:0;right:0;z-index:7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:0 18px;border-radius:0;text-align:center;background:#0a0d1a3d;backdrop-filter:blur(5px) saturate(108%);-webkit-backdrop-filter:blur(5px) saturate(108%);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s,visibility .15s,background .15s,box-shadow .15s}
+.stage.is-dragging .c-veil{opacity:1;visibility:visible}
+.stage.is-dragging .c-lane.is-source .c-veil{opacity:0;visibility:hidden}
+.c-veil-ico{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;border:1px solid #ffffff26;background:#10132673;color:#cdd1e4;backdrop-filter:blur(3px)}
+.c-veil-ico svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.c-veil b{font-size:10.4px;font-weight:600;color:#ece9f8;text-shadow:0 1px 6px #05060ecc}
+.c-veil>span:last-child{font-size:8.2px;color:#a4a9c0;line-height:1.4;text-shadow:0 1px 6px #05060ecc}
+.c-lane.drop-hover .c-veil{background:#12152a52;box-shadow:inset 0 0 0 1px #c1b4ff40,0 0 30px #c1b4ff14}
+.c-lane.drop-hover .c-veil-ico{border-color:#c1b4ff4d;background:#c1b4ff1f;color:#dcd3ff}
+.c-lane.drop-hover .c-veil b{color:#f0ecff}
+.c-lane.drop-hover{border-color:#c1b4ff66}
+.c-lane.installed{left:366px;transition:left .34s cubic-bezier(.4,0,.2,1),width .34s cubic-bezier(.4,0,.2,1),border-color .16s,background .16s}
+.c-lane.installed.is-wide-left{left:58px;width:610px}
+.c-lane.installed.is-wide-left.is-a-edge{left:68px;width:600px}
+.c-lane.installed.is-wide-right{width:576px}
+.c-lane.installed.is-wide-right.is-p-edge{width:566px}
+.c-lane-head{flex:0 0 26px;display:flex;align-items:center;gap:6px;padding:0 11px;border-bottom:1px solid var(--line-soft);white-space:nowrap}
+.c-lane-title{color:#aeb2c9;font-size:8.2px;font-weight:700;letter-spacing:1.15px;text-transform:uppercase}
+.c-lane-count{display:inline-grid;place-items:center;min-width:15px;height:14px;padding:0 4px;border-radius:4px;background:#ffffff0b;color:#b9bdd3;font-size:7.5px;font-weight:700}
+.c-lane-hint{margin-left:auto;color:#7f849e;font-size:7.6px;transition:color .16s}
+.c-view{margin-left:auto;display:flex;gap:1px;padding:1px;border:1px solid #ffffff14;border-radius:5px;background:#0d0f1f73}
+.c-view-btn{padding:2px 5px;border:0;border-radius:4px;background:none;color:#83879f;font-size:7.4px;font-weight:600;letter-spacing:.25px;cursor:pointer;transition:background .14s,color .14s}
+.c-view-btn:hover{color:#c3c7dc}
+.c-view-btn.is-on{background:#c1b4ff2e;color:#e4ddff}
+.is-dragging .c-lane-hint{color:#c1b4ff}
+.c-lane-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:7px;padding:6px 10px;overflow-y:auto;overflow-x:hidden;scrollbar-color:#8f88ab #191b30;scrollbar-width:thin;mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),#0000);-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),#0000)}
+.c-lane-body::-webkit-scrollbar{width:8px}
+.c-lane-body::-webkit-scrollbar-track{background:#191b30;border-radius:8px}
+.c-lane-body::-webkit-scrollbar-thumb{background:#8f88ab;border:2px solid #191b30;border-radius:8px}
+.c-lane-foot-text{display:flex;align-items:center;gap:5px;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden}
+.c-more{margin-left:auto;color:#c1b4ff;font-size:7.8px;white-space:nowrap}
+.c-lane-foot{flex:0 0 22px;display:flex;align-items:center;gap:5px;padding:0 12px;border-top:1px solid var(--line-soft);color:#8f93ad;font-size:8.2px;white-space:nowrap}
+.c-card{position:relative;display:flex;flex-direction:column;flex:0 0 auto;width:100%;height:72px;padding:6px 8px;border:1px solid rgba(199,189,255,.19);border-radius:10px;background:linear-gradient(130deg,#22253c,#181b2d);box-shadow:inset 0 1px #ffffff05,0 2px 6px #04050e33;cursor:grab;-webkit-user-select:none;user-select:none;transition:border-color .16s,background .16s,box-shadow .16s}
+.c-card:hover{border-color:rgba(193,180,255,.42);background:linear-gradient(130deg,#262942,#1b1e31)}
+.c-card:active{cursor:grabbing}
+.c-card.dragging{cursor:grabbing;opacity:.92;border-color:#c1b4ff8c;box-shadow:0 0 0 1px #c1b4ff5e,0 14px 30px #04050e66}
+.c-card button{cursor:pointer}
+.c-card.is-broken{border-color:#e57a7a70;background:linear-gradient(130deg,rgba(126,72,86,.34),rgba(38,26,36,.56))}
+.c-card.is-broken:hover{border-color:#e57a7a9e}
+.c-card.pending-install{border:1px dashed #9f90ea;background:linear-gradient(130deg,#252444,#191b31)}
+.c-card.has-offer{border-color:#f4bd5e5c;background:linear-gradient(130deg,rgba(124,95,42,.32),rgba(33,30,42,.62))}
+.c-card.has-offer:hover{border-color:#f4bd5e8c}
+.c-card.has-offer .c-chip{background:#f4bd5e21;color:#ffdf9d}
+.c-card.has-offer .c-chip svg{color:#f4bd5e}
+.c-card.pending-remove{border:1px dashed #d0a866;background:linear-gradient(130deg,#2f2739,#1f1d2c)}
+.c-card.active{border-color:#b3a6f566;background:linear-gradient(130deg,#2a2749,#1c1e33);box-shadow:inset 0 1px #ffffff08,0 0 0 1px #b3a6f51f,0 3px 10px #04050e3d}
+.c-card.active:hover{border-color:#c1b4ffa6;background:linear-gradient(130deg,#2e2b50,#1f2138)}
+.c-card.has-newer{border-color:#83d9a659;background:linear-gradient(130deg,#1f3a34,#17252c);box-shadow:inset 0 1px #ffffff08,0 0 0 1px #83d9a61a,0 3px 10px #04050e3d}
+.c-card.has-newer:hover{border-color:#83d9a68c}
+.c-card.has-newer .c-meta{color:#9fdcb9}
+.c-card.has-newer .c-meta b{color:#c6f0d8;font-weight:600}
+.c-card.has-newer .c-move{color:#9fdcb9}
+.c-card.idle.has-newer{opacity:.72}
+.c-src{display:flex;align-items:center;gap:4px;min-width:0;color:#8f94ae;font-size:7.4px;white-space:nowrap;overflow:hidden}
+.src-bit{display:inline-flex;align-items:center;gap:3px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.src-bit i{width:5px;height:5px;border-radius:50%;flex:0 0 5px;background:#6f7590}
+.src-bit.local i{background:#9fdcb9;box-shadow:0 0 6px #83d9a680}
+.src-bit.remote i{background:#a7dddf;box-shadow:0 0 6px #a7dddf66}
+.src-bit.remote{color:#a9d7da}
+.src-sep{color:#4d526b}
+.c-card.idle{opacity:.5;border-color:#ffffff12;background:linear-gradient(130deg,#1c1f31,#161929);box-shadow:none}
+.c-card.idle .c-name{color:#c2c6da}
+.c-card.idle .c-meta{color:#7f849e}
+.c-card.idle .c-move{color:#8f93ad}
+.c-card.idle:hover{opacity:.92;border-color:rgba(193,180,255,.38);background:linear-gradient(130deg,#232640,#191c2e)}
+.c-card.is-activated{border-color:#83d9a685;background:linear-gradient(130deg,rgba(31,61,52,.62),rgba(17,32,35,.78));box-shadow:inset 0 1px #ffffff0f,0 0 0 1px #83d9a626,0 3px 10px #04050e3d}
+.c-card.is-activated:hover{border-color:#83d9a6b8;background:linear-gradient(130deg,rgba(36,72,60,.7),rgba(19,38,41,.84))}
+.c-card.is-activated .c-meta{color:#a9e0c2}
+.c-card.is-activated .c-meta b{color:#d5f6e3}
+.c-card.is-activated .c-chip{border-color:#83d9a659;background:#83d9a61a;color:#d5f6e3}
+.c-card.is-activated .c-chip svg{color:#83d9a6}
+.c-card.is-activated .c-move.repair.is-on{border-color:#83d9a67d;background:#83d9a61f;color:#d5f6e3}
+.c-card.is-activated .c-move.repair.is-on:hover{background:#83d9a633;border-color:#83d9a6b3}
+.c-card.offer-update{border-color:#a99bef4a}
+.c-card.recommended{border-color:#b3a6f570;background:linear-gradient(130deg,#282648,#1b1d31);box-shadow:inset 0 1px #ffffff08,0 0 0 1px #b3a6f51f,0 3px 10px #04050e3d}
+.c-card.recommended:hover{border-color:#c1b4ffa6}
+.c-card.dragging{cursor:grabbing;opacity:.45;border-style:dashed;border-color:#c1b4ff8c;box-shadow:none}
+.c-card.drag-ghost{position:fixed;left:0;top:0;z-index:300;pointer-events:none;opacity:1!important;cursor:grabbing;border:1px solid #c1b4ffa6;background:linear-gradient(130deg,#2a2d4a,#1c1f34);box-shadow:0 18px 40px #04050e99,0 0 0 1px #c1b4ff40;transform-origin:0 0;will-change:transform;border-radius:10px}
+.c-card.has-warning{border-color:#ddb77770}
+.c-card-top{display:flex;align-items:center;gap:5px;min-width:0}
+.c-icon{display:grid;place-items:center;width:20px;height:20px;flex:0 0 20px;border-radius:6px}
+.c-icon svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.c-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink);font-size:11px;font-weight:600}
+.c-card-top .warn-btn{margin-left:auto;width:16px;height:16px}
+.c-meta{margin-top:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#a3a7bf;font-size:8.2px}
+.c-foot{margin-top:auto;display:flex;align-items:center;gap:4px;min-height:18px}
+.c-foot .spacer{flex:1}
+.c-chip{display:inline-flex;align-items:center;gap:3px;height:16px;padding:0 5px;border:1px solid #c1b4ff52;border-radius:5px;background:#c1b4ff12;color:#ded7ff;font-size:7.4px;font-weight:600;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.c-chip svg{width:9px;height:9px;flex:0 0 9px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.c-chip.current{border-color:#83d9a63d;background:#83d9a60d;color:#9fd9b6}
+.c-chip.pending{border-color:#c1b4ff55;background:#c1b4ff12;color:#ded7ff}
+.c-chip.download{border-color:#a7dddf45;background:#a7dddf0d;color:#cdeff0}
+.c-chip.remove{border-color:#f4c46d4d;background:#f4bd5e12;color:#ffdf9d}
+.c-chip.broken{border-color:#e57a7a66;background:#e57a7a14;color:#ffc9c9}
+.c-move{display:grid;place-items:center;flex:0 0 auto;width:19px;height:19px;padding:0;border:1px solid #ffffff1a;border-radius:5px;background:#ffffff08;color:#c9cce0;cursor:pointer;transition:background .16s,border-color .16s,color .16s}
+.c-move:hover{background:#c1b4ff1c;border-color:#c1b4ff66;color:#f0ebff}
+.c-move.danger:hover{background:#e57a7a24;border-color:#e57a7a77;color:#f6b8b8}
+.c-move.repair{border-color:#ffffff1a;background:#ffffff08;color:#c9cce0}
+.c-move.repair:hover{background:#a7dddf1c;border-color:#a7dddf66;color:#cdeff0}
+.c-move.repair.is-on{border-color:#a7dddf70;background:#a7dddf16;color:#cdeff0}
+.c-move svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.c-move.danger svg{width:12px;height:12px}
+.c-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;flex:1 1 auto;min-height:120px;padding:10px;border:1px dashed #c1b4ff33;border-radius:10px;background:#c1b4ff04;color:#8b90aa;font-size:8.4px;line-height:1.35;text-align:center;transition:border-color .16s,background .16s,color .16s}
+.c-drop svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.is-dragging .c-drop{border-color:#c1b4ff99;background:#c1b4ff0d;color:#c1b4ff}
+.is-dragging .c-drop{border-color:#c1b4ff99;background:#c1b4ff0d;color:#c1b4ff}
+
+.c-plan{position:absolute;left:0;top:0;right:auto;width:268px;height:372px;padding:12px 13px;border:1px solid #ffffff21;border-radius:14px;background:linear-gradient(150deg,rgba(255,255,255,.08),rgba(255,255,255,0) 40%),linear-gradient(165deg,rgba(52,55,86,.56),rgba(19,21,38,.78));backdrop-filter:blur(22px) saturate(165%);-webkit-backdrop-filter:blur(22px) saturate(165%);box-shadow:inset 0 1px #ffffff1f,inset 0 0 0 1px #ffffff05,0 16px 36px #04050e52;display:flex;flex-direction:column;overflow:hidden;transition:border-color .2s,background .2s}
+.c-plan.accent{border-color:#c1b4ff45}
+.c-plan.warn{border-color:#f4c46d66}
+.c-plan.warn .side-big b{color:#ffdf9d}
+.c-plan.broken .side-big b{color:#ffb3b3}
+.c-plan.broken{border-color:#e57a7a85}
+.plan-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;max-height:127px;overflow-y:auto;scrollbar-color:#8f88ab #191b30;scrollbar-width:thin}
+.plan-items.is-scroll{mask-image:linear-gradient(to bottom,#000 calc(100% - 16px),#0000);-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 16px),#0000)}
+.plan-items.is-empty{flex:1 1 auto;max-height:none;overflow:hidden}
+.plan-items::-webkit-scrollbar{width:8px}
+.plan-items::-webkit-scrollbar-track{background:#191b30;border-radius:8px}
+.plan-items::-webkit-scrollbar-thumb{background:#777296;border:2px solid #191b30;border-radius:8px}
+.plan-items li{display:flex;align-items:center;gap:5px;min-width:0;padding:3px 5px;border:1px solid #ffffff0f;border-radius:6px;background:#ffffff05;font-size:8.1px;color:#cfd2e2}
+.plan-items li.update{color:#ded7ff;border-color:#c1b4ff30;background:#c1b4ff0a}
+.plan-items li.install{color:#ded7ff;border-color:#c1b4ff30;background:#c1b4ff0a}
+.plan-items li.remove{color:#ffdf9d;border-color:#f4c46d2e;background:#f4bd5e08}
+.plan-items li.repair{color:#cdeff0;border-color:#a7dddf30;background:#a7dddf08}
+.plan-items li.plan-empty{display:flex;flex:1 1 auto;align-items:center;justify-content:center;text-align:center;min-height:118px;padding:12px 10px;color:#8b90aa;border-style:dashed;border-color:#ffffff17;background:transparent;line-height:1.45;white-space:normal}
+.plan-items .item-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plan-items > li > svg{width:9px;height:9px;flex:0 0 9px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.plan-cancel{display:grid;place-items:center;flex:0 0 auto;width:15px;height:15px;padding:0;border:1px solid #ffffff1a;border-radius:4px;background:#ffffff08;color:#a9aec6;cursor:pointer;transition:background .16s,border-color .16s,color .16s}
+.plan-cancel:hover{background:#e57a7a22;border-color:#e57a7a66;color:#f0b6b6}
+.plan-cancel svg{width:8px;height:8px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.c-plan-bottom{display:flex;flex-direction:column;gap:6px;margin-top:auto;padding-top:8px}
+.c-plan .plan-items{flex:0 0 auto}
+.plan-total{color:#9aa0b8;font-size:8.2px;line-height:1.4}
+.plan-total b{color:#e9e6f7;font-weight:600}
+.c-plan-bottom .side-status{margin-top:0}
+.c-plan-bottom .side-remove{margin-top:0}
+/* ---------- native footer ---------- */
+.progress-strip{position:absolute;left:0;right:0;top:540px;height:4px;background:#0d0f1e;z-index:60}
+.progress-fill{height:100%;width:0;background:linear-gradient(90deg,#7f6bd6,#c1b4ff);box-shadow:0 0 10px #c1b4ff66;transition:width .12s linear}
+.native-footer{position:absolute;left:0;right:0;bottom:0;height:56px;background:linear-gradient(180deg,var(--footer-top),var(--footer-bottom));border-top:1px solid var(--footer-line);z-index:65}
+.footer-status{position:absolute;left:30px;top:0;width:590px;height:56px;display:flex;align-items:center;gap:8px;overflow:hidden;color:#a2a6bf;font-size:9.6px;white-space:nowrap}
+.footer-status .status-dot{width:7px;height:7px;border-radius:50%;flex:0 0 7px;background:#8f93ad}
+.footer-status .status-dot.good{background:var(--green);box-shadow:0 0 10px #83d9a680}
+.footer-status .status-dot.accent{background:var(--purple);box-shadow:0 0 10px #c1b4ff80}
+.footer-status .status-dot.warn{background:var(--amber);box-shadow:0 0 10px #f4c46d80}
+.footer-status .status-dot.crit{background:#e57a7a;box-shadow:0 0 10px #e57a7a80}
+.footer-status-text{overflow:hidden;text-overflow:ellipsis}
+.footer-status b{color:#e9e6f7;font-weight:600}
+.nbtn{position:absolute;top:12px;height:32px;border:1px solid #3d4064;border-radius:4px;background:linear-gradient(180deg,#242643,#181a30);color:#efeef8;font-size:11.5px;letter-spacing:.1px;cursor:pointer;box-shadow:inset 0 1px #ffffff0d;transition:background .15s,border-color .15s}
+.nbtn:hover{background:linear-gradient(180deg,#2d3054,#1d2039);border-color:#565a8b}
+.nbtn:active{background:#14162a}
+.nbtn[disabled]{opacity:.55;cursor:default}
+.nbtn.back{left:644px;width:96px}
+.nbtn.primary{left:750px;width:104px;border-color:#7663c7;background:linear-gradient(180deg,#5e4fa6,#453a7d);color:#fff;font-weight:600;text-shadow:0 1px #0005}
+.nbtn.primary:hover{background:linear-gradient(180deg,#6b5ab8,#4e428c);border-color:#9a87e0}
+.nbtn.primary.attention{border-color:#b89456;background:linear-gradient(180deg,#6b5731,#4c3e27);color:#fff2d8}
+.nbtn.primary.attention:hover{background:linear-gradient(180deg,#7d6539,#5b4a2d)}
+.nbtn.cancel{left:864px;width:104px}
+
+/* ---------- overlay, modal, toast ---------- */
+.warn-shade{position:absolute;inset:0;z-index:90;display:grid;place-items:center;background:#06070f66;backdrop-filter:blur(4px) saturate(108%);-webkit-backdrop-filter:blur(4px) saturate(108%)}
+.warn-dialog{position:relative;display:flex;flex-direction:column;width:556px;max-height:452px;border:1px solid #ffffff26;border-radius:16px;background:linear-gradient(150deg,rgba(255,255,255,.09),rgba(255,255,255,0) 42%),linear-gradient(165deg,rgba(58,61,94,.62),rgba(19,21,38,.72));backdrop-filter:blur(26px) saturate(170%);-webkit-backdrop-filter:blur(26px) saturate(170%);box-shadow:inset 0 1px #ffffff26,inset 0 0 0 1px #ffffff08,0 34px 78px #03040bc7;overflow:hidden;animation:dialog-in .24s cubic-bezier(.22,.72,.3,1) both}
+@keyframes dialog-in{from{opacity:0;transform:translateY(7px) scale(.988)}to{opacity:1;transform:none}}
+.warn-dialog::before{content:'';position:absolute;left:22px;right:22px;top:0;height:1px;background:linear-gradient(90deg,#f4bd5ecc,#f4bd5e1f 44%,#f4bd5e00)}
+.warn-dialog[data-tone="info"]::before{background:linear-gradient(90deg,#c1b4ffcc,#c1b4ff1f 44%,#c1b4ff00)}
+.warn-head{padding:24px 58px 15px 24px}
+.warn-kicker{display:flex;align-items:center;gap:7px;margin:0 0 10px;color:#eec48d;font-size:7.6px;font-weight:700;letter-spacing:1.9px;text-transform:uppercase}
+.warn-kicker::before{content:'';width:12px;height:1px;background:currentColor;opacity:.8}
+.warn-dialog[data-tone="info"] .warn-kicker{color:#bcb0f6}
+.warn-dialog h3{margin:0;color:#f6f4fd;font-size:17px;line-height:1.34;font-weight:500;letter-spacing:-.22px}
+.warn-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 24px 4px;scrollbar-color:#5b5f7c #1a1c30;scrollbar-width:thin}
+.warn-body::-webkit-scrollbar{width:8px}
+.warn-body::-webkit-scrollbar-track{background:#1a1c30;border-radius:8px}
+.warn-body::-webkit-scrollbar-thumb{background:#5b5f7c;border:2px solid #1a1c30;border-radius:8px}
+.warn-lead{margin:0 0 16px;padding-top:15px;border-top:1px solid #ffffff1a;color:#c2c6da;font-size:10.6px;line-height:1.78}
+.warn-rows{list-style:none;margin:0 0 15px;padding:0;display:flex;flex-direction:column}
+.warn-rows li{display:grid;grid-template-columns:104px 1fr;gap:16px;padding:11px 0;border-top:1px solid #ffffff16}
+.warn-rows li:last-child{border-bottom:1px solid #ffffff16}
+.warn-row-label{display:flex;align-items:flex-start;gap:6px;color:#969bb2;font-size:7.5px;font-weight:600;letter-spacing:1.1px;text-transform:uppercase;line-height:1.55;padding-top:2px}
+.warn-row-label i{width:4px;height:4px;flex:0 0 4px;margin-top:5px;border-radius:50%;background:#71768f}
+.warn-rows li[data-tone="warn"] .warn-row-label{color:#e0b984}
+.warn-rows li[data-tone="warn"] .warn-row-label i{background:var(--amber);box-shadow:0 0 8px #f4bd5e80}
+.warn-rows li[data-tone="crit"] .warn-row-label{color:#e89f9f}
+.warn-rows li[data-tone="crit"] .warn-row-label i{background:#e57a7a;box-shadow:0 0 8px #e57a7a80}
+.warn-rows li[data-tone="ok"] .warn-row-label{color:#97d7b1}
+.warn-rows li[data-tone="ok"] .warn-row-label i{background:var(--green);box-shadow:0 0 8px #83d9a680}
+.warn-rows li[data-tone="accent"] .warn-row-label{color:#bcb0f6}
+.warn-rows li[data-tone="accent"] .warn-row-label i{background:var(--purple);box-shadow:0 0 8px #c1b4ff80}
+.warn-rows li.is-stacked{grid-template-columns:1fr;gap:4px;padding:12px 0}
+.warn-rows li.is-stacked .warn-row-label{text-transform:none;letter-spacing:0;font-size:10px;font-weight:600;color:#eeeaf9;align-items:center;padding-top:0;line-height:1.5}
+.warn-rows li.is-stacked .warn-row-label i{margin-top:0}
+.warn-rows li.is-stacked[data-tone="warn"] .warn-row-label{color:#f4dcb6}
+.warn-rows li.is-stacked .warn-row-text{padding-left:10px}
+.warn-row-text{color:#c8ccdd;font-size:9.9px;line-height:1.68}
+.warn-note{margin:2px 0 14px;color:#8d92a9;font-size:8.9px;line-height:1.66}
+.warn-foot{display:flex;align-items:center;gap:10px;margin-top:auto;padding:15px 24px 17px;border-top:1px solid #ffffff14;background:linear-gradient(180deg,#ffffff04,#ffffff00)}
+.warn-esc{color:#868ba2;font-size:8.1px;letter-spacing:.2px}
+.warn-esc .kbd{opacity:.85}
+.warn-ok{margin-left:auto;height:27px;padding:0 16px;border:1px solid #ffffff30;border-radius:8px;background:#ffffff12;color:#f0edf9;font-size:9.1px;font-weight:600;letter-spacing:.2px;cursor:pointer;transition:background .14s,border-color .14s,color .14s,box-shadow .14s}
+.warn-ok:hover{background:#ffffff22;border-color:#ffffff4d;box-shadow:0 0 18px #ffffff12}
+.warn-dialog[data-tone="warn"] .warn-ok:hover{border-color:#f4bd5e7a;color:#ffe6bb;box-shadow:0 0 18px #f4bd5e26}
+.warn-close{position:absolute;right:13px;top:13px;display:grid;place-items:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:7px;background:transparent;color:#9297ae;cursor:pointer;transition:background .14s,color .14s,border-color .14s}
+.warn-close svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2.1;stroke-linecap:round}
+.warn-close:hover{background:#ffffff16;border-color:#ffffff26;color:#f0edf9}
+.toast{position:absolute;left:50%;top:22px;z-index:85;max-width:420px;padding:7px 12px;border:1px solid #83d9a655;border-radius:8px;background:#173129f2;color:#cdeedd;font-size:9.5px;line-height:1.4;text-align:center;box-shadow:0 12px 30px #0007;opacity:0;visibility:hidden;transform:translateX(-50%) translateY(-5px);transition:opacity .2s,transform .2s,visibility .2s;pointer-events:none}
+.toast.show{opacity:1;visibility:visible;transform:translateX(-50%)}
+.toast.neutral{border-color:#9da4ba55;background:#232638f2;color:#d8dbe9}
+.toast.warn{border-color:#f4c46d55;background:#3a2d22f2;color:#f5e9d4}
+
+/* ---------- icon tones ---------- */
+.tone-purple{background:#a795ff14;border:1px solid #b9a6ff38;color:#c9baff}
+.tone-cyan{background:#a7dddf10;border:1px solid #a7dddf38;color:#a7dddf}
+.tone-amber{background:#f4bd5e10;border:1px solid #f4c46d38;color:#f4c46d}
+.tone-green{background:#83d9a610;border:1px solid #83d9a638;color:#9fd9b6}
+
+/* ---------- legend ---------- */
+.legend{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:18px}
+.legend-card{padding:11px 13px 12px;border:1px solid #1d2038;border-radius:10px;background:#0d0f1c}
+.legend-head{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.legend-key{display:grid;place-items:center;width:17px;height:17px;border-radius:5px;background:#c1b4ff14;color:#c1b4ff;font-size:8.5px;font-weight:700}
+.legend-card b{font-size:10.5px;font-weight:600;color:#e4e1f1}
+.legend-card p{margin:0;color:#8f93ad;font-size:9.5px;line-height:1.5}
+.legend-hint{margin:10px 0 0;color:#7f849e;font-size:9.5px;line-height:1.5;text-align:center}
+.legend-hint b{color:#b9bdd3;font-weight:600}
+.legend-hint .kbd{display:inline-block;padding:1px 4px;border:1px solid #2a2e4c;border-radius:4px;background:#111424;color:#c1b4ff;font-size:8.5px}
+
+
+/* ---------- universal state chip ---------- */
+.v-state{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;height:22px;padding:0 9px;border:1px solid #83d9a655;border-radius:999px;background:#83d9a612;color:#b8f4d1;font-size:9px;font-weight:600;letter-spacing:.2px;white-space:nowrap;transition:border-color .2s,background .2s,color .2s}
+.v-state .dot{width:6px;height:6px}
+.v-state.accent{border-color:#c1b4ff5e;background:#c1b4ff14;color:#ded7ff}
+.v-state.warn{border-color:#f4c46d66;background:#f4bd5e14;color:#ffdf9d}
+.v-state.broken{border-color:#e57a7a66;background:#e57a7a14;color:#ffc9c9}
+
+/* ---------- load animation: product cards only ---------- */
+@keyframes card-in{from{opacity:0;transform:translateY(-9px)}to{opacity:1;transform:none}}
+.stage.is-intro .c-card{animation:card-in .38s cubic-bezier(.22,.7,.28,1) both;animation-delay:calc(var(--i,0)*55ms)}
+.stage.is-intro .c-lane.installed .c-card{animation-delay:calc(32ms + var(--i,0)*55ms)}
+@media (prefers-reduced-motion:reduce){
+  .stage.is-intro .c-card{animation:none}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
+@media (max-width:900px){
+  .page{padding:16px 14px 24px}
+  .page-top{flex-direction:column;gap:12px}
+  .page-side{justify-content:flex-start}
+  .legend{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="page-top">
+    <div class="page-title">
+      <div class="page-eyebrow">GlassSetup · концепция страницы продуктов</div>
+      <h1>Продукты GlassPlatform: установка и обслуживание</h1>
+      <p>Одна страница на две ситуации: первый запуск, когда не установлено ничего, и обслуживание уже установленных продуктов. Доступное слева, установленное в центре, план действий справа: что именно изменится, сколько скачается и чем это обернётся для зависимостей.</p>
+    </div>
+    <div class="page-side">
+      <span class="spec-pill"><b>1000 × 600</b> · контент 540 + 4 + футер 56</span>
+      <select class="icon-toggle" id="zoomToggle" aria-label="Масштаб макета" title="Масштаб макета" style="width:auto;padding:0 9px;font-size:9.5px;color:#aeb2c9">
+        <option value="fit">По ширине</option>
+        <option value="full">1:1</option>
+      </select>
+    </div>
+  </header>
+
+  <div class="stage-holder" id="stageHolder">
+    <div class="stage-fit" id="stageFit">
+      <div class="stage is-intro" id="stage" data-variant="c">
+        <div class="ambient one"></div>
+        <div class="ambient two"></div>
+        <img class="stage-banner" src="../../res/welcome_banner.png" alt="" aria-hidden="true">
+        <div class="stage-overlay" aria-hidden="true"></div>
+        <div class="stage-brand">
+          <span class="brandmark" aria-hidden="true"></span>
+          <span class="brand-name">GlassPlatform</span>
+          <span class="brand-ver">Setup 1.5.0</span>
+        </div>
+        <div class="stage-source">
+          <span class="gh-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M6 12c0-3 3-4 6-4h4"/></svg></span>
+          <b>GitHub Releases</b><span class="sep">·</span>v1.5.0<span class="sep">·</span>5 продуктов
+        </div>
+
+        <section class="variant" id="variant-c" data-variant="c" aria-labelledby="c-title">
+          <div class="v-head">
+            <div class="v-kicker" id="cKicker">Установка · первый запуск</div>
+            <div class="v-title-row">
+              <h2 class="v-title" id="c-title">Продукты GlassPlatform</h2>
+              <span class="v-state" id="cState"><span class="dot good"></span><span id="cStateText">каталог проверен</span></span>
+            </div>
+            <p class="v-intro" id="cIntro">Выберите доступные продукты в панели слева или удалите установленные; в панели справа формируйте план действий.</p>
+          </div>
+
+          <div class="c-slot c-slot-left">
+          <section class="c-lane available" data-drop="available" aria-label="Доступные продукты">
+            <div class="c-lane-head">
+              <span class="dot cyan"></span>
+              <span class="c-lane-title">Доступно</span>
+              <span class="c-lane-count" id="cAvailableCount">5</span>
+              <button class="c-pin" type="button" data-pin="available" aria-pressed="false" aria-label="Закрепить «Доступно»" title="Закрепить панель"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M15.95 8.6V4.1h1.07a1.15 1.15 0 0 0 0-2.3H6.98a1.15 1.15 0 0 0 0 2.3h1.07v4.5c0 1.72-1.35 3.1-3.05 3.1v2.3h6.1v7.55a.9.9 0 0 0 1.8 0V11.9h6.1v-2.3c-1.7 0-3.05-1.38-3.05-3.1z"/></svg></button>
+              <div class="c-view" data-view-target="available" role="group" aria-label="Обзор доступных">
+                <button class="c-view-btn is-on" type="button" data-view="all">все</button>
+                <button class="c-view-btn" type="button" data-view="needed">нужно</button>
+              </div>
+            </div>
+            <div class="c-lane-body" id="cAvailableCards"></div>
+            <div class="c-veil" aria-hidden="true">
+              <span class="c-veil-ico"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13"/></svg></span>
+              <b>Отпустите, чтобы удалить</b>
+              <span>продукт уйдёт из установленных</span>
+            </div>
+            <div class="c-lane-foot"><span class="dot cyan"></span><span class="c-lane-foot-text" id="cAvailableFoot">4 карточки · 31,3 МБ</span></div>
+          </section>
+          </div>
+
+          <section class="c-lane installed" data-drop="installed" aria-label="Установленные продукты">
+            <div class="c-lane-head">
+              <span class="dot good"></span>
+              <span class="c-lane-title">Установлено</span>
+              <span class="c-lane-count" id="cInstalledCount">3</span>
+              <div class="c-view" data-view-target="installed" role="group" aria-label="Обзор установленных">
+                <button class="c-view-btn is-on" type="button" data-view="all">все</button>
+                <button class="c-view-btn" type="button" data-view="needed">нужно</button>
+              </div>
+            </div>
+            <div class="c-lane-body" id="cInstalledCards"></div>
+            <div class="c-veil" aria-hidden="true">
+              <span class="c-veil-ico"><svg viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4M5 19h14"/></svg></span>
+              <b>Отпустите, чтобы установить</b>
+              <span>обновление, переустановка или возврат</span>
+            </div>
+            <div class="c-lane-foot"><span class="dot good"></span><span class="c-lane-foot-text" id="cInstalledFoot">3 продукта · 19,7 МБ</span></div>
+          </section>
+
+          <div class="c-slot c-slot-right">
+          <aside class="c-plan" id="cPlan" aria-label="План и рекомендации">
+            <button class="c-pin c-pin-corner" type="button" data-pin="plan" aria-pressed="false" aria-label="Закрепить «План и рекомендации»" title="Закрепить панель"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M15.95 8.6V4.1h1.07a1.15 1.15 0 0 0 0-2.3H6.98a1.15 1.15 0 0 0 0 2.3h1.07v4.5c0 1.72-1.35 3.1-3.05 3.1v2.3h6.1v7.55a.9.9 0 0 0 1.8 0V11.9h6.1v-2.3c-1.7 0-3.05-1.38-3.05-3.1z"/></svg></button>
+            <div class="side-kicker">План и рекомендации</div>
+            <div class="side-big"><b id="cPlanBig">2</b><span id="cPlanUnit">обновления</span></div>
+            <p class="side-copy" id="cPlanCopy">В релизе GitHub версии новее установленных. Загрузка — <b>14,6 МБ</b>.</p>
+            <button class="side-primary" id="cPlanPrimary" type="button" data-accept-all>Принять все рекомендации</button>
+            <div class="side-divider"></div>
+            <div class="side-label">Действия к применению</div>
+            <ul class="plan-items" id="cPlanItems"></ul>
+            <div class="c-plan-bottom">
+              <div class="plan-total" id="cPlanTotal">Изменений нет</div>
+              <div class="side-status" id="cPlanStatus">
+                <span class="status-dot good"></span>
+                <div class="side-status-copy"><p id="cPlanStatusText">Зависимости соблюдены</p><button class="mini-link" id="cPlanStatusLink" data-warn-all type="button" hidden>Подробнее</button></div>
+              </div>
+              <button class="side-remove" type="button" data-remove-all>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13"/></svg>Удалить все продукты
+              </button>
+            </div>
+          </aside>
+          </div>
+
+          <div class="c-edge c-edge-left" data-edge="available">
+            <span class="c-lip c-lip-left" aria-hidden="true"></span>
+            <button class="c-peek c-peek-left" type="button" data-peek="available" aria-label="Открыть «Доступно»" title="Открыть «Доступно»">
+              <span class="c-peek-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6l-6 6 6 6"/></svg></span>
+            </button>
+          </div>
+          <div class="c-edge c-edge-right is-off" data-edge="plan">
+            <span class="c-lip c-lip-right" aria-hidden="true"></span>
+            <button class="c-peek c-peek-right is-off" type="button" data-peek="plan" aria-label="Открыть «План и рекомендации»" title="Открыть «План и рекомендации»">
+              <span class="c-peek-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6l6 6-6 6"/></svg></span>
+            </button>
+          </div>
+        </section>
+<!-- shared modal + toast -->
+        <div class="warn-shade" id="warnShade" hidden>
+          <section class="warn-dialog" id="warnDialog" role="dialog" aria-modal="true" aria-labelledby="warnTitle">
+            <button class="warn-close" id="warnClose" type="button" aria-label="Закрыть">
+              <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+            <header class="warn-head">
+              <p class="warn-kicker" id="warnKicker">Предупреждение</p>
+              <h3 id="warnTitle"></h3>
+            </header>
+            <div class="warn-body" id="warnText"></div>
+            <footer class="warn-foot">
+              <span class="warn-esc"><span class="kbd">Esc</span> закрыть</span>
+              <button class="warn-ok" id="warnOk" type="button">Понятно</button>
+            </footer>
+          </section>
+        </div>
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+        <div class="progress-strip" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
+        <footer class="native-footer">
+          <div class="footer-status">
+            <span class="status-dot" id="footerDot"></span>
+            <span class="footer-status-text" id="footerStatusText">Загрузка каталога…</span>
+          </div>
+          <button class="nbtn back" type="button" data-back>Назад</button>
+          <button class="nbtn primary" id="applyBtn" type="button" data-apply>Применить</button>
+          <button class="nbtn cancel" type="button" data-cancel>Отмена</button>
+        </footer>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-card wide">
+      <div class="legend-head"><span class="legend-key">C</span><b>Доступное · установленное · план</b></div>
+      <p>Слева — весь каталог релиза: карточки из него не пропадают, меняется только вид. Активные — те, где есть что делать (установка, обновление, переустановка после повреждения, уже выбранное действие); приглушённые — установленные без изменений, но тянуть и нажимать можно любую. Переключатель «все / нужно» оставляет только продукты, требующие действия. В центре — установленное: обновить, переустановить, удалить. Выбранное действие делает карточку зелёной, кнопка ↻ на ней нажата; повторное нажатие ↻ или перетаскивание карточки в «Доступно» действие отменяет, а корзина сбрасывает его вместе с удалением. Справа — план с рекомендацией, списком действий и объёмом загрузки. Боковые панели уезжают за границу контента и возвращаются из-за кромки к центру. По умолчанию открыт план, «Доступно» убрано за левый край, а средней панели отдано освободившееся место. Шеврон открывает скрытую панель — вторая при этом убирается, если не закреплена булавкой.</p>
+    </div>
+  </div>
+  <p class="legend-hint"><b>Проверьте сценарии:</b> перетащите Platform x64 из «Доступно» вправо и нажмите «Применить» — пойдёт загрузка обновления. Перетащите уже установленный Platform x86 вправо или нажмите ↻ — тот же пакет скачается заново, файлы будут переустановлены. Корзина в «Установлено» помечает удаление, карточка остаётся на месте до применения. Переключатель «нужно» оставляет в «Доступно» только то, что ждёт действия. Подведите курсор к краю контента или наведите на шеврон — у края появится подсвеченная кромка, а средний список подожмётся, сохраняя отступ. Подержите две секунды или нажмите шеврон — панель выедет целиком, от края к центру. Булавка в шапке панели держит её на экране: закреплённые панели не скрываются, а незакреплённая уходит через секунду после действия в другой области, если курсор не вернулся в неё. Если снять обе булавки, после следующего действия уходит та панель, с которой булавку сняли последней, — но экран без панелей не остаётся. <span class="kbd">Esc</span> закрывает пояснение.</p>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+  const stage = $('#stage');
+
+  /* ---------------- icons ---------------- */
+  const ICONS = {
+    platform64: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="11" height="14" rx="2.2"/><rect x="9.5" y="8" width="11" height="14" rx="2.2"/></svg>',
+    platform32: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="10" height="12" rx="2"/><rect x="10" y="9" width="10" height="12" rx="2"/></svg>',
+    settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14"/><circle cx="9" cy="7" r="1.9"/><circle cx="15" cy="12" r="1.9"/><circle cx="8" cy="17" r="1.9"/></svg>',
+    openglass: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 9.5h18"/><circle cx="6.2" cy="7.3" r=".8"/><circle cx="9" cy="7.3" r=".8"/></svg>',
+    secureuxtheme: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>',
+    grip: '<svg viewBox="0 0 8 18" aria-hidden="true"><circle cx="2" cy="4" r="1.1"/><circle cx="6" cy="4" r="1.1"/><circle cx="2" cy="9" r="1.1"/><circle cx="6" cy="9" r="1.1"/><circle cx="2" cy="14" r="1.1"/><circle cx="6" cy="14" r="1.1"/></svg>',
+    warn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l9 17H3z"/><path d="M12 9v4.6"/><circle cx="12" cy="17" r=".9"/></svg>',
+    arrowRight: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg>',
+    arrowLeft: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H5M11 6l-6 6 6 6"/></svg>',
+    arrowUp: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
+    check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4L19 6"/></svg>',
+    update: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/></svg>',
+    download: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 20h16"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13"/></svg>',
+    spark: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>',
+    plan: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h8M5 12h8M5 17h5"/><path d="M16 15.5l1.8 1.8 3-3.4"/></svg>',
+    cross: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    repair: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.7"/><path d="M20 12a8 8 0 0 1-13.7 5.7"/><path d="M18 3v4h-4"/><path d="M6 21v-4h4"/></svg>'
+  };
+
+  /* ---------------- catalog ---------------- */
+  const products = [
+    { id:'platform64', name:'Glass Platform x64', shortName:'Platform x64', role:'платформа', short:'оформление 64-бит', desc:'Оформление 64-битных приложений и оболочки Windows.', availableVersion:'1.5.0', size:8.4, tone:'tone-purple' },
+    { id:'platform32', name:'Glass Platform x86', shortName:'Platform x86', role:'32-бит', short:'оформление 32-бит', desc:'Оформление 32-битных приложений на Windows x64.', availableVersion:'1.5.0', size:5.1, tone:'tone-cyan' },
+    { id:'settings', name:'GlassSettings', shortName:'GlassSettings', role:'панель', short:'панель управления', desc:'Прозрачность, темы, акрил и автозапуск.', availableVersion:'1.5.0', size:6.2, tone:'tone-purple' },
+    { id:'openglass', name:'OpenGlass', shortName:'OpenGlass', role:'', short:'Aero Glass', desc:'Классические рамки Aero Glass для окон проводника.', availableVersion:'1.0.0', size:12.8, tone:'tone-cyan', deps:['settings'] },
+    { id:'secureuxtheme', name:'SecureUxTheme', shortName:'SecureUxTheme', role:'', short:'визуальные стили', desc:'Неподписанные визуальные стили, установка в System32.', availableVersion:'4.0.0', size:3.9, tone:'tone-amber', deps:['settings'] }
+  ];
+  const byId = Object.fromEntries(products.map(p => [p.id, p]));
+
+  /* committed = what is really installed; target = what the plan wants installed */
+  let committed = { platform64:'1.4.2', platform32:'1.5.0', settings:'1.4.0', openglass:null, secureuxtheme:null };
+  let target = { ...committed };
+  /* installed products whose files no longer match the SHA-256 from the release */
+  const broken = new Set(['platform32', 'settings']);
+  /* products queued for a repair (re-download + reinstall) */
+  const reinstall = new Set();
+  const freshAdd = new Set();   /* возвращённые после удаления: ставятся заново, без активации */
+  let applying = false;
+  let applyTimer = null;
+
+  /* ---------------- helpers ---------------- */
+  const fmtMB = n => n.toFixed(1).replace('.', ',') + ' МБ';
+  const plural = (n, one, few, many) => {
+    const a = Math.abs(n) % 100, b = a % 10;
+    if (a > 10 && a < 20) return many;
+    if (b > 1 && b < 5) return few;
+    if (b === 1) return one;
+    return many;
+  };
+  const productsWord = n => plural(n, 'продукт', 'продукта', 'продуктов');
+  const updatesWord = n => plural(n, 'обновление', 'обновления', 'обновлений');
+  const warningsWord = n => plural(n, 'предупреждение', 'предупреждения', 'предупреждений');
+  const installWord = n => plural(n, 'установка', 'установки', 'установок');
+  const removeWord = n => plural(n, 'удаление', 'удаления', 'удалений');
+  const repairWord = n => plural(n, 'переустановка', 'переустановки', 'переустановок');
+  const recommendedWord = n => n === 1 ? 'рекомендуется' : 'рекомендуются';
+  const parseVer = v => String(v).split('.').map(x => parseInt(x, 10) || 0);
+  const cmpVer = (a, b) => {
+    const x = parseVer(a), y = parseVer(b);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+      if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0) ? -1 : 1;
+    }
+    return 0;
+  };
+
+  const hasNewer = p => !!committed[p.id] && cmpVer(committed[p.id], p.availableVersion) < 0;
+  /* damaged while it stays installed at the version that failed the check */
+  const isBroken = id => broken.has(id) && !!target[id] && target[id] === committed[id] && !reinstall.has(id);
+  /* активированная карточка: нужное действие выбрано и стоит в плане */
+  const isActivated = p => {
+    if (freshAdd.has(p.id)) return false;
+    const c = committed[p.id], t = target[p.id];
+    if (!c || !t) return false;
+    return reinstall.has(p.id) || cmpVer(t, c) > 0;
+  };
+  const brokenList = () => products.filter(p => isBroken(p.id));
+  /* update only in target state: still installed at the older version */
+  const updOffered = p => hasNewer(p) && target[p.id] === committed[p.id];
+
+  const committedList = () => products.filter(p => committed[p.id]);
+  /* в «Установлено» остаются только те, кто остаётся в составе: помеченные на удаление скрываются */
+  const laneInstalled = () => products.filter(p => target[p.id]);
+
+  function getChanges(){
+    const installs = [], updates = [], reinstalls = [], removals = [];
+    for (const p of products){
+      const c = committed[p.id], t = target[p.id];
+      if (!c && t) installs.push(p.id);
+      else if (c && !t) removals.push(p.id);
+      else if (c && t && reinstall.has(p.id)) reinstalls.push(p.id);
+      else if (c && t && cmpVer(t, c) > 0) updates.push(p.id);
+    }
+    const mb = [...installs, ...updates, ...reinstalls].reduce((s, id) => s + byId[id].size, 0);
+    return { installs, updates, reinstalls, removals,
+      total: installs.length + updates.length + reinstalls.length + removals.length, mb };
+  }
+
+  function getWarnings(){
+    const out = [];
+    const anyTarget = products.some(p => target[p.id]);
+    const anyCommitted = products.some(p => committed[p.id]);
+    if (!anyTarget && anyCommitted){
+      out.push({
+        id:'all', title:'Полное удаление Glass Platform',
+        text:'Будут удалены все продукты: оформление, панель GlassSettings, OpenGlass и SecureUxTheme. MSI снимаются с регистрации, файлы, службы и задачи удаляются.'
+      });
+      return out;
+    }
+    if (anyTarget && !target.platform64) out.push({
+      id:'platform64', title:'Без Platform x64 оформление не работает',
+      text:'Platform x64 рисует оформление: остальные продукты установятся, но без неё визуального эффекта не дадут.'
+    });
+    if (target.platform64 && !target.platform32) out.push({
+      id:'platform32', title:'32-битные приложения без оформления',
+      text:'Platform x86 будет отсутствовать: 32-битные приложения потеряют эффекты Glass Platform, 64-битные продолжат работать.'
+    });
+    if (anyTarget && !target.settings){
+      out.push({
+        id:'settings', title:'GlassSettings не будет установлен',
+        text:'Параметры прозрачности, акрила и автозапуска придётся менять вручную в HKCU\\Software\\StanislavKa\\GlassPlatform, а службами и задачами управлять средствами системы.'
+      });
+      if (target.openglass) out.push({
+        id:'openglass', title:'OpenGlass останется без панели управления',
+        text:'OpenGlass работает, но его службы, задачи и параметры реестра придётся обслуживать вручную: автоматическая настройка через GlassSettings недоступна.'
+      });
+      if (target.secureuxtheme) out.push({
+        id:'secureuxtheme', title:'SecureUxTheme без GlassSettings',
+        text:'Визуальные стили и перезапуск Windows придётся контролировать вручную. Перед удалением SecureUxTheme нужно вернуть штатный стиль.'
+      });
+    }
+    return out;
+  }
+  const warnIds = () => new Set(getWarnings().map(w => w.id));
+
+  /* ---------------- small pieces ---------------- */
+  function badges(p, extra){
+    const out = [];
+    if (p.role) out.push(`<span class="badge role">${p.role}</span>`);
+    if (p.deps && p.deps.length){
+      const ok = p.deps.every(d => !!target[d]);
+      out.push(`<span class="badge dep${ok ? '' : ' off'}">${ok ? 'требует GlassSettings' : 'без GlassSettings'}</span>`);
+    }
+    if (extra) out.push(extra);
+    return out.join('');
+  }
+  function warnBtn(p){
+    const w = getWarnings().find(x => x.id === p.id);
+    const title = w ? w.title : 'Зависимости';
+    return `<button class="warn-btn" type="button" data-warn="${p.id}" title="${title}" aria-label="${title}">${ICONS.warn}</button>`;
+  }
+  function moveBtn(id, action, label, cls){
+    const icon = action === 'remove' ? ICONS.arrowLeft : ICONS.arrowRight;
+    return `<button class="${cls || 'icon-action sm'}" type="button" data-id="${id}" data-act="${action}" title="${label}" aria-label="${label}">${icon}</button>`;
+  }
+  function changesSummary(ch){
+    const parts = [];
+    if (ch.installs.length) parts.push(`${ch.installs.length} ${installWord(ch.installs.length)}`);
+    if (ch.updates.length) parts.push(`${ch.updates.length} ${updatesWord(ch.updates.length)}`);
+    if (ch.reinstalls.length) parts.push(`${ch.reinstalls.length} ${repairWord(ch.reinstalls.length)}`);
+    if (ch.removals.length) parts.push(`${ch.removals.length} ${removeWord(ch.removals.length)}`);
+    return parts.join(' · ');
+  }
+  /* ---------------- cards ---------------- */
+  function cCardShell(o){
+    const { p, cls, lane, meta, chip, actions, i } = o;
+    const classes = ['c-card'].concat(cls || []);
+    return `<article class="${classes.join(' ')}" style="--i:${i}" draggable="false" data-id="${p.id}" data-act="${o.act}" data-lane="${lane}">
+      <div class="c-card-top">
+        <span class="c-icon ${p.tone}">${ICONS[p.id]}</span>
+        <span class="c-name">${p.shortName}</span>
+        ${warnIds().has(p.id) ? warnBtn(p) : ''}
+      </div>
+      <div class="c-meta">${meta}</div>
+      <div class="c-foot">${chip}<span class="spacer"></span>${actions}</div>
+    </article>`;
+  }
+
+  /* «Доступно» is the whole release: the cards carry no action labels, only «есть что делать / нечего» */
+  const isNeeded = p => {
+    const c = committed[p.id], t = target[p.id];
+    if (!c && !t) return true;
+    if (!t) return true;            /* помечен на удаление — в составе его сейчас нет */
+    if (!c) return false;           /* уже выбран к установке */
+    if (updOffered(p)) return true;
+    return isBroken(p.id) && !reinstall.has(p.id);
+  };
+  const isPlanned = p => {
+    const c = committed[p.id], t = target[p.id];
+    if (!c) return !!t;
+    if (!t) return true;
+    return t !== c || reinstall.has(p.id);
+  };
+
+  /* where the product lives right now: on disk, on the release server, or both */
+  function srcMark(p){
+    const c = committed[p.id];
+    const onServer = !c || hasNewer(p);
+    const bits = [];
+    if (c) bits.push(`<span class="src-bit local"><i></i>локально ${c}</span>`);
+    if (onServer) bits.push(`<span class="src-bit remote"><i></i>на сервере ${p.availableVersion}</span>`);
+    return `<span class="c-src">${bits.join('<span class="src-sep">·</span>')}</span>`;
+  }
+
+  /* действие уже в плане: продукт ушёл в «Установлено» и в списке доступных сразу гаснет */
+  const plannedInto = p => {
+    const c = committed[p.id], t = target[p.id];
+    return !!t && (t !== c || reinstall.has(p.id));
+  };
+
+  function cAvailableCard(p, i){
+    const c = committed[p.id], t = target[p.id];
+    const classes = [plannedInto(p) ? 'idle' : (isNeeded(p) || isPlanned(p) ? 'active' : 'idle')];
+    if (c && hasNewer(p) && !plannedInto(p)) classes.push('has-newer');
+    let meta = '', act = 'install', label = '';
+
+    if (!c && !t){
+      meta = `${p.availableVersion} · ${fmtMB(p.size)}`;
+      act = 'install'; label = 'Установить ' + p.shortName;
+    } else if (!c && t){
+      meta = `<b>${t}</b> · ${fmtMB(p.size)}`;
+      act = 'install'; label = 'Установить ' + p.shortName;
+    } else if (!t && broken.has(p.id)){
+      meta = `${c} · ${fmtMB(p.size)}`;
+      act = 'repair'; label = 'Переустановить ' + c;
+    } else if (!t && !hasNewer(p)){
+      meta = `${c} · ${fmtMB(p.size)}`;
+      act = 'restore'; label = 'Вернуть в «Установлено»';
+    } else if (hasNewer(p)){
+      meta = `${c} → <b>${p.availableVersion}</b> · ${fmtMB(p.size)}`;
+      act = 'update'; label = 'Обновить до ' + p.availableVersion;
+    } else {
+      meta = `${c} · ${fmtMB(p.size)}`;
+      act = 'repair'; label = 'Переустановить ' + c;
+    }
+    if (warnIds().has(p.id)) classes.push('has-warning');
+    return cCardShell({ p, cls:classes, lane:'available', meta, chip: srcMark(p), actions: moveBtn(p.id, act, label, 'c-move'), i, act });
+  }
+
+  /* «Установлено» keeps every product that is installed (or planned) and marks removal there */
+  function cInstalledCard(p, i){
+    const c = committed[p.id], t = target[p.id];
+    const classes = [];
+    let meta = '', chip = '', actions = '';
+    const repairBtn = (on) => {
+      const label = on ? 'Отменить переустановку'
+        : (isBroken(p.id) ? 'Переустановить: файлы не совпадают с SHA-256' : `Переустановить ${c}`);
+      return `<button class="c-move repair${on ? ' is-on' : ''}" type="button" data-id="${p.id}" data-act="${on ? 'unrepair' : 'repair'}" title="${label}" aria-label="${label}">${ICONS.repair}</button>`;
+    };
+    /* a newer release exists: the same button moves the product forward instead of reinstalling the old build */
+    const updateBtn = (on) => {
+      const label = on ? 'Отменить обновление' : `Обновить до ${p.availableVersion}`;
+      return `<button class="c-move repair${on ? ' is-on' : ''}" type="button" data-id="${p.id}" data-act="${on ? 'undo' : 'update'}" title="${label}" aria-label="${label}">${ICONS.repair}</button>`;
+    };
+    const offerAction = () => hasNewer(p) ? updateBtn(false) : repairBtn(false);
+    const delBtn = `<button class="c-move danger" type="button" data-id="${p.id}" data-act="remove" title="Удалить" aria-label="Удалить">${ICONS.trash}</button>`;
+    const undoBtn = `<button class="c-move repair is-on" type="button" data-id="${p.id}" data-act="restore" title="Оставить установленным" aria-label="Оставить установленным">${ICONS.arrowLeft}</button>`;
+
+    if (!c && t){
+      classes.push('pending-install');
+      meta = `${t} · ${fmtMB(p.size)}`;
+      chip = `<span class="c-chip pending">${ICONS.download}Будет установлено</span>`;
+      actions = delBtn;
+    } else if (c && !t){
+      classes.push('pending-remove');
+      meta = `${c} · ${fmtMB(p.size)}`;
+      chip = `<span class="c-chip remove">${ICONS.trash}Будет удалено</span>`;
+      actions = undoBtn + delBtn;
+    } else if (freshAdd.has(p.id) && t){
+      classes.push('pending-install');
+      meta = `${t} · ${fmtMB(p.size)}`;
+      chip = `<span class="c-chip pending">${ICONS.download}скачается заново</span>`;
+      actions = delBtn;
+    } else if (reinstall.has(p.id)){
+      classes.push('is-activated');
+      meta = `${c} · ${fmtMB(p.size)} заново`;
+      chip = `<span class="c-chip download">${ICONS.repair}переустановится</span>`;
+      actions = repairBtn(true) + delBtn;
+    } else if (isBroken(p.id)){
+      classes.push('is-broken');
+      meta = `${c} · файлы не совпадают с SHA-256`;
+      chip = `<span class="c-chip broken">${ICONS.warn}целостность нарушена</span>`;
+      actions = offerAction() + delBtn;
+    } else if (cmpVer(t, c) > 0){
+      classes.push('is-activated');
+      meta = `${c} → ${t}`;
+      chip = `<span class="c-chip">${ICONS.arrowUp}обновится до ${t}</span>`;
+      actions = updateBtn(true) + delBtn;
+    } else if (hasNewer(p)){
+      classes.push('has-offer');
+      meta = `${c} · ${fmtMB(p.size)}`;
+      chip = `<span class="c-chip">${ICONS.arrowUp}${p.availableVersion} в «Доступно»</span>`;
+      actions = updateBtn(false) + delBtn;
+    } else {
+      meta = `${c} · ${fmtMB(p.size)}`;
+      chip = `<span class="c-chip current">${ICONS.check}${c}</span>`;
+      actions = repairBtn(false) + delBtn;
+    }
+    if (warnIds().has(p.id)) classes.push('has-warning');
+    return cCardShell({ p, cls:classes, lane:'installed', meta, chip, actions, i, act:'remove' });
+  }
+
+  /* «нужно» in the installed lane: everything that asks for attention or is already marked */
+  const instNeeded = p => {
+    const c = committed[p.id], t = target[p.id];
+    if (!c || !t) return true;
+    if (reinstall.has(p.id) || isBroken(p.id)) return true;
+    if (cmpVer(t, c) > 0) return true;
+    return hasNewer(p);
+  };
+
+  function renderC(){
+    const all = laneInstalled();
+    const lane = instView === 'needed' ? all.filter(instNeeded) : all;
+    const avail = availView === 'needed' ? products.filter(isNeeded) : products;
+    $('#cAvailableCount').textContent = avail.length;
+    $('#cInstalledCount').textContent = lane.length;
+    $$('.c-view').forEach(v => {
+      const state = v.dataset.viewTarget === 'available' ? availView : instView;
+      v.querySelectorAll('.c-view-btn').forEach(b => b.classList.toggle('is-on', b.dataset.view === state));
+    });
+
+    $('#cAvailableCards').innerHTML = avail.length
+      ? avail.map((p, n) => cAvailableCard(p, n)).join('')
+      : `<div class="c-drop ok">${ICONS.check}<span>Нужных действий нет —<br>${committedList().length === products.length ? 'всё установлено' : 'всё уже в плане'}</span></div>`;
+    $('#cInstalledCards').innerHTML = lane.length
+      ? lane.map((p, n) => cInstalledCard(p, n)).join('')
+      : `<div class="c-drop${all.length ? ' ok' : ''}">${ICONS[all.length ? 'check' : 'download']}<span>${all.length
+        ? 'Внимания не требует<br>ни один продукт'
+        : 'Перетащите продукт сюда,<br>чтобы установить'}</span></div>`;
+
+    const laneCap = 4;
+    const more = n => n > laneCap ? `<span class="c-more">↓ ещё ${n - laneCap}</span>` : '';
+    $('#cAvailableFoot').innerHTML = avail.length
+      ? `<span>${avail.length} ${productsWord(avail.length)} · ${fmtMB(avail.reduce((s, p) => s + p.size, 0))}</span>` + more(avail.length)
+      : `<span>${availView === 'needed' ? 'требований нет' : 'каталог пуст'}</span>`;
+    $('#cInstalledFoot').innerHTML = lane.length
+      ? `<span>${lane.length} ${productsWord(lane.length)} · ${fmtMB(lane.reduce((s, p) => s + p.size, 0))}</span>` + more(lane.length)
+      : `<span>${instView === 'needed' ? 'требований нет' : 'ничего не установлено'}</span>`;
+
+    renderHead();
+    renderPlanPanel();
+  }
+
+  /* one universal heading block that works for the first run and for maintenance */
+  function renderHead(){
+    const inst = committedList();
+    const damaged = inst.filter(p => isBroken(p.id));
+    const offered = products.filter(updOffered);
+    const kicker = $('#cKicker'), intro = $('#cIntro'), state = $('#cState'), stateText = $('#cStateText');
+
+    if (!inst.length){
+      kicker.textContent = 'Установка · первый запуск';
+      intro.textContent = 'Продуктов пока нет: выберите доступное в панели слева — пакет скачается напрямую, а справа сформируется план.';
+    } else {
+      kicker.textContent = `Обслуживание · ${inst.length} из ${products.length} установлено`;
+      intro.textContent = 'Выберите доступные продукты в панели слева или удалите установленные; в панели справа формируйте план действий.';
+    }
+
+    const ch = getChanges();
+    state.className = 'v-state';
+    if (ch.total){
+      state.classList.add('accent');
+      stateText.textContent = `${ch.total} ${plural(ch.total, 'действие', 'действия', 'действий')} в плане`;
+    } else if (damaged.length){
+      state.classList.add('broken');
+      stateText.textContent = `${damaged.length} ${plural(damaged.length, 'продукт', 'продукта', 'продуктов')} с нарушенной целостностью`;
+    } else if (offered.length){
+      state.classList.add('accent');
+      stateText.textContent = `${offered.length} ${updatesWord(offered.length)} ${recommendedWord(offered.length)}`;
+    } else if (inst.length){
+      stateText.textContent = 'всё актуально';
+    } else {
+      stateText.textContent = `каталог проверен · ${products.length} продуктов`;
+    }
+  }
+
+  function renderPlanPanel(){
+    const ch = getChanges(), w = getWarnings();
+    const damaged = committedList().filter(p => isBroken(p.id));
+    const offered = products.filter(updOffered);
+    const panel = $('#cPlan'), big = $('#cPlanBig'), unit = $('#cPlanUnit'), copy = $('#cPlanCopy'), primary = $('#cPlanPrimary');
+    panel.classList.toggle('warn', !!w.length);
+    panel.classList.toggle('broken', !w.length && !!damaged.length);
+    panel.classList.toggle('accent', !w.length && !damaged.length && !!ch.total);
+
+    if (damaged.length){
+      big.textContent = damaged.length; big.className = '';
+      unit.textContent = plural(damaged.length, 'переустановка', 'переустановки', 'переустановок');
+      copy.innerHTML = `Нарушена целостность: файлы не совпадают с SHA-256 релиза. Переустановка скачает <b>${fmtMB(damaged.reduce((s, p) => s + p.size, 0))}</b> заново.`;
+      primary.disabled = false; primary.classList.remove('is-clean'); primary.textContent = 'Принять все рекомендации';
+      primary.setAttribute('data-accept-all', '');
+    } else if (offered.length){
+      big.textContent = offered.length; big.className = '';
+      unit.textContent = updatesWord(offered.length);
+      copy.innerHTML = `В релизе GitHub версии новее установленных. Загрузка — <b>${fmtMB(offered.reduce((s, p) => s + p.size, 0))}</b>.`;
+      primary.disabled = false; primary.classList.remove('is-clean'); primary.textContent = 'Принять все рекомендации';
+      primary.setAttribute('data-accept-all', '');
+    } else if (ch.total){
+      big.textContent = ch.total; big.className = '';
+      unit.textContent = plural(ch.total, 'действие', 'действия', 'действий');
+      copy.innerHTML = ch.mb > 0
+        ? `Проверьте состав ниже и нажмите «Применить» — загрузка <b>${fmtMB(ch.mb)}</b> с GitHub.`
+        : 'Проверьте состав ниже и нажмите «Применить» — удаление не требует загрузки.';
+      primary.disabled = true; primary.removeAttribute('data-accept-all');
+      if (ch.total){ primary.classList.remove('is-clean'); primary.textContent = 'Всё выбрано'; }
+      else { primary.classList.add('is-clean'); primary.textContent = 'Обновлять нечего'; }
+    } else if (!committedList().length){
+      big.textContent = '0'; big.className = 'clean';
+      unit.textContent = 'продуктов установлено';
+      copy.innerHTML = 'Выберите продукты в «Доступно» — действия появятся здесь, до нажатия «Применить».';
+      primary.disabled = true; primary.classList.add('is-clean'); primary.textContent = 'Нечего применять';
+      primary.removeAttribute('data-accept-all');
+    } else {
+      big.textContent = '✓'; big.className = 'clean';
+      unit.textContent = 'всё актуально';
+      copy.innerHTML = 'Версии совпадают с релизом <b>v1.5.0</b>, файлы прошли проверку SHA-256.';
+      primary.disabled = true; primary.classList.add('is-clean'); primary.textContent = 'Обновлять нечего';
+      primary.removeAttribute('data-accept-all');
+    }
+
+    const items = [];
+    for (const id of ch.reinstalls) items.push({ id, cls:'repair', icon:ICONS.repair, text:`Переустановить ${byId[id].shortName} ${committed[id]} · ${fmtMB(byId[id].size)}`, act:'unrepair', label:'Отменить переустановку' });
+    for (const id of ch.updates) items.push({ id, cls:'update', icon:ICONS.update, text:`${byId[id].shortName} ${committed[id]} → ${byId[id].availableVersion}`, act:'undo', label:'Отменить обновление' });
+    for (const id of ch.installs) items.push({ id, cls:'install', icon:ICONS.download, text:`Установить ${byId[id].shortName}`, act:'remove', label:'Отменить установку' });
+    for (const id of ch.removals) items.push({ id, cls:'remove', icon:ICONS.trash, text:`Удалить ${byId[id].shortName}`, act:'restore', label:'Отменить удаление' });
+    const list = $('#cPlanItems');
+    list.classList.toggle('is-empty', items.length === 0);
+    list.innerHTML = items.length
+      ? items.map((it, n) => `<li class="${it.cls}" style="--i:${n}">${it.icon}<span class="item-text">${it.text}</span><button class="plan-cancel" type="button" data-id="${it.id}" data-act="${it.act}" title="${it.label}" aria-label="${it.label}">${ICONS.cross}</button></li>`).join('')
+      : (damaged.length
+        ? '<li class="plan-empty">Целостность нарушена — переустановите повреждённые продукты, файлы скачаются заново</li>'
+        : (committedList().length
+          ? '<li class="plan-empty">Изменений нет — состав и версии совпадают с установленными</li>'
+          : '<li class="plan-empty">Пока ничего не выбрано — перетащите продукт из «Доступно»</li>'));
+
+    list.classList.toggle('is-scroll', list.scrollHeight > list.clientHeight + 1);
+
+    $('#cPlanTotal').innerHTML = ch.total
+      ? `<b>К применению: ${changesSummary(ch)}</b> · ${ch.mb > 0 ? fmtMB(ch.mb) + ' с GitHub' : 'загрузка не нужна'}`
+      : 'Применять нечего · изменения появятся здесь';
+
+    const status = $('#cPlanStatus');
+    const nothing = !committedList().length && !ch.total;
+    $('[data-remove-all]').hidden = !committedList().length;
+    status.className = 'side-status' + (w.length ? ' warn' : ' idle');
+    status.querySelector('.status-dot').className = 'status-dot ' + (w.length ? 'warn' : 'idle');
+    $('#cPlanStatusText').textContent = w.length
+      ? `${w.length} ${warningsWord(w.length)} · ${w[0].title}`
+      : (nothing ? 'Зависимости проверим после установки' : 'Зависимости соблюдены');
+    const link = $('#cPlanStatusLink');
+    link.hidden = !w.length;
+    if (w.length){ link.setAttribute('data-warn-all', ''); link.removeAttribute('data-plan'); link.textContent = 'Подробнее'; }
+    else { link.removeAttribute('data-warn-all'); link.removeAttribute('data-plan'); }
+  }
+
+  /* ---------------- footer ---------------- */
+  function renderFooter(){
+    if (applying) return;
+    const ch = getChanges(), w = getWarnings(), inst = committedList();
+    const damaged = inst.filter(p => isBroken(p.id));
+    const dot = $('#footerDot'), text = $('#footerStatusText'), apply = $('#applyBtn');
+    apply.disabled = ch.total === 0;
+    apply.classList.toggle('attention', w.length > 0);
+    if (w.length){
+      dot.className = 'status-dot warn';
+      text.innerHTML = `<b>${w.length} ${warningsWord(w.length)}</b> · ${w[0].title} · ${ch.total ? 'изменения можно применить с предупреждением' : 'текущее состояние'}`;
+    } else if (ch.total){
+      dot.className = 'status-dot accent';
+      text.innerHTML = `<b>К применению: ${changesSummary(ch)}</b> · ${ch.mb > 0 ? fmtMB(ch.mb) + ' будет скачано с GitHub' : 'удаление не требует загрузки'}`;
+    } else if (damaged.length){
+      dot.className = 'status-dot crit';
+      text.innerHTML = `<b>Нарушена целостность: ${damaged.length}</b> · переустановка скачает ${fmtMB(damaged.reduce((s, p) => s + p.size, 0))} заново`;
+    } else {
+      const offered = products.filter(updOffered);
+      if (offered.length){
+        dot.className = 'status-dot accent';
+        text.innerHTML = `<b>${offered.length} ${updatesWord(offered.length)} ${recommendedWord(offered.length)}</b> · ${fmtMB(offered.reduce((s, p) => s + p.size, 0))} · ${inst.length} установлено`;
+      } else {
+        dot.className = 'status-dot good';
+        text.innerHTML = `<b>Всё актуально</b> · ${inst.length} установлено · ${products.length} в каталоге`;
+      }
+    }
+  }
+
+  function pinStage(){
+    stage.scrollLeft = 0;
+    stage.scrollTop = 0;
+  }
+
+  function render(){
+    renderC();
+    renderFooter();
+    applyPanelState();
+    pinStage();
+  }
+
+  /* ---------------- side panels: pins, sliding edges ---------------- */
+  const SIDE = { available: '.c-slot-left', plan: '.c-slot-right' };
+  const ZONE = { available: '.c-edge-left', plan: '.c-edge-right' };
+  const SIDE_NAME = { available: '«Доступно»', plan: '«План и рекомендации»' };
+  const slotOf = name => $(SIDE[name]);
+  const zoneOf = name => $(ZONE[name]);
+  const otherOf = name => (name === 'available' ? 'plan' : 'available');
+  const side = {
+    visible: { available: false, plan: true },
+    pinned: { available: false, plan: false }
+  };
+  let edgeTimer = 0;
+  let hideTimer = 0;
+  let lastUnpinned = null;   /* панель, с которой булавку сняли последней */
+
+  function applyPanelState(){
+    const a = side.visible.available;
+    const p = side.visible.plan;
+    const leftSlot = $('.c-slot-left');
+    const rightSlot = $('.c-slot-right');
+    const lane = $('.c-lane.installed');
+    leftSlot.classList.toggle('is-hidden', !a);
+    rightSlot.classList.toggle('is-hidden', !p);
+    lane.classList.toggle('is-wide-left', !a);
+    lane.classList.toggle('is-wide-right', a && !p);
+    lane.classList.toggle('is-a-edge', !a && zoneOf('available').classList.contains('is-hot'));
+    lane.classList.toggle('is-p-edge', !p && zoneOf('plan').classList.contains('is-hot'));
+    $('.c-peek-left').classList.toggle('is-off', a);
+    $('.c-peek-right').classList.toggle('is-off', p);
+    $('.c-edge-left').classList.toggle('is-off', a);
+    $('.c-edge-right').classList.toggle('is-off', p);
+    $('.c-edge-left').setAttribute('aria-hidden', String(a));
+    $('.c-edge-right').setAttribute('aria-hidden', String(p));
+    $$('[data-pin]').forEach(btn => {
+      const on = side.pinned[btn.dataset.pin];
+      btn.classList.toggle('is-on', on);
+      btn.setAttribute('aria-pressed', String(on));
+      btn.title = on ? 'Открепить панель' : 'Закрепить панель';
+    });
+  }
+
+  function clearEdge(){
+    clearTimeout(edgeTimer);
+    zoneOf('available').classList.remove('is-hot');
+    zoneOf('plan').classList.remove('is-hot');
+    applyPanelState();
+  }
+
+  function openSide(name){
+    clearEdge();
+    clearTimeout(hideTimer);
+    const other = otherOf(name);
+    side.visible[name] = true;
+    if (!side.pinned[other]) side.visible[other] = false;
+    applyPanelState();
+    pinStage();
+  }
+
+  function togglePin(name){
+    clearTimeout(hideTimer);
+    side.pinned[name] = !side.pinned[name];
+    if (side.pinned[name]){
+      side.visible[name] = true;
+      if (lastUnpinned === name) lastUnpinned = null;
+    } else {
+      lastUnpinned = name;
+    }
+    applyPanelState();
+    pinStage();
+    noteAction($('[data-pin="' + name + '"]'));
+    showToast(side.pinned[name]
+      ? SIDE_NAME[name] + ' закреплено — панель больше не уезжает за край.'
+      : SIDE_NAME[name] + ' откреплено — панель снова можно убрать.', 'neutral');
+  }
+
+  /* любая незакреплённая и при этом видимая панель — кандидат на уход */
+  function loosePanels(){
+    return ['available', 'plan'].filter(n => side.visible[n] && !side.pinned[n]);
+  }
+
+  function armAutoHide(candidates){
+    clearTimeout(hideTimer);
+    if (!candidates || !candidates.length) return;
+    hideTimer = setTimeout(() => {
+      const free = candidates.filter(n => side.visible[n] && !side.pinned[n] && !slotOf(n).matches(':hover'));
+      if (!free.length) return;                     /* курсор вернулся — панель остаётся */
+      const pick = (lastUnpinned && free.includes(lastUnpinned)) ? lastUnpinned : free[0];
+      if (!side.visible[otherOf(pick)]) return;     /* экран не остаётся пустым */
+      side.visible[pick] = false;
+      lastUnpinned = null;
+      clearEdge();
+      applyPanelState();
+      pinStage();
+    }, 1000);
+  }
+
+  function edgeIn(name){
+    if (side.visible[name]) return;
+    zoneOf(name).classList.add('is-hot');
+    applyPanelState();
+    clearTimeout(edgeTimer);
+    edgeTimer = setTimeout(() => {
+      if (!side.visible[name] && zoneOf(name).classList.contains('is-hot')) openSide(name);
+    }, 2000);
+  }
+
+  function edgeOut(name){
+    if (side.visible[name]) return;
+    clearTimeout(edgeTimer);
+    zoneOf(name).classList.remove('is-hot');
+    applyPanelState();
+  }
+
+  $$('.c-edge').forEach(zone => {
+    const name = zone.dataset.edge;
+    zone.addEventListener('mouseenter', () => edgeIn(name));
+    zone.addEventListener('mouseleave', () => edgeOut(name));
+  });
+  $$('.c-peek').forEach(btn => {
+    const name = btn.dataset.peek;
+    btn.addEventListener('click', () => openSide(name));
+    btn.addEventListener('focus', () => edgeIn(name));
+    btn.addEventListener('blur', () => edgeOut(name));
+  });
+  $$('[data-pin]').forEach(btn => btn.addEventListener('click', () => togglePin(btn.dataset.pin)));
+
+  /* any action on the page starts the 1 s countdown for the free panels it did not touch */
+  function noteAction(target){
+    const loose = loosePanels();
+    if (!loose.length) return;
+    const inside = (target && target.nodeType === 1)
+      ? loose.find(n => slotOf(n).contains(target)) || null
+      : null;
+    const candidates = loose.filter(n => n !== inside);
+    if (!candidates.length) return;                 /* действие внутри самой свободной панели */
+    armAutoHide(candidates);
+  }
+  ['pointerdown', 'pointerup', 'click'].forEach(type => {
+    document.addEventListener(type, e => noteAction(e.target), true);
+  });
+
+  /* ---------------- interactions ---------------- */
+  function act(id, action){
+    if (applying) return;
+    const p = byId[id];
+    if (!p) return;
+    if (action === 'deactivate'){
+      reinstall.delete(id);
+      freshAdd.delete(id);
+      target[id] = committed[id];
+      render();
+      return;
+    }
+    if (action === 'repair'){
+      reinstall.add(id);
+      target[id] = committed[id];
+      render();
+      showToast(`Переустановка ${p.name}: ${fmtMB(p.size)} скачается заново, файлы заменятся.`, 'warn');
+      return;
+    }
+    freshAdd.delete(id);
+    if (action === 'install' || action === 'update'){
+      reinstall.delete(id);
+      target[id] = p.availableVersion;
+    }
+    else if (action === 'restore' || action === 'undo' || action === 'unrepair'){
+      reinstall.delete(id);
+      target[id] = committed[id];
+    }
+    else if (action === 'remove'){
+      reinstall.delete(id);
+      target[id] = null;
+    }
+    else return;
+    render();
+  }
+
+  function removeAll(){
+    if (applying) return;
+    const n = laneInstalled().length;
+    if (!n){ showToast('Список установленных уже пуст.', 'neutral'); return; }
+    for (const p of products){ target[p.id] = null; reinstall.delete(p.id); freshAdd.delete(p.id); }
+    render();
+    showToast(`К удалению: ${n} ${productsWord(n)} · «Применить» очистит регистрацию MSI`, 'warn');
+  }
+
+  /* «принять все рекомендации»: обновить всё, что новее в релизе, и переустановить повреждённое без обновления */
+  function acceptAll(){
+    if (applying) return;
+    const offered = products.filter(updOffered);
+    const damaged = committedList().filter(p => isBroken(p.id) && !hasNewer(p) && !reinstall.has(p.id));
+    if (!offered.length && !damaged.length){
+      showToast('Все рекомендации уже приняты: версии и файлы совпадают с релизом.', 'neutral');
+      return;
+    }
+    for (const p of offered){ reinstall.delete(p.id); freshAdd.delete(p.id); target[p.id] = p.availableVersion; }
+    for (const p of damaged){ reinstall.add(p.id); freshAdd.delete(p.id); target[p.id] = committed[p.id]; }
+    const mb = offered.concat(damaged).reduce((s2, p) => s2 + p.size, 0);
+    const bits = [];
+    if (offered.length) bits.push(`${offered.length} ${updatesWord(offered.length)}`);
+    if (damaged.length) bits.push(`${damaged.length} ${repairWord(damaged.length)}`);
+    render();
+    showToast(`Принято: ${bits.join(' · ')} — ${fmtMB(mb)} будет скачано с GitHub.`, 'good');
+  }
+
+  function resetTarget(){
+    target = { ...committed };
+    reinstall.clear();
+    freshAdd.clear();
+    applying = false;
+    clearInterval(applyTimer);
+    $('#progressFill').style.width = '0%';
+    $$('.drop-hover').forEach(el => el.classList.remove('drop-hover'));
+    stage.classList.remove('is-dragging');
+    stage.classList.remove('is-applying');
+  }
+
+  function applyChanges(){
+    if (applying) return;
+    const ch = getChanges();
+    if (!ch.total){
+      showToast('Изменений нет — целевое состояние совпадает с установленным.', 'neutral');
+      return;
+    }
+    applying = true;
+    if (warnShade && !warnShade.hidden) closeInfo();
+    const total = ch.mb;
+    let pct = 0;
+    const text = $('#footerStatusText');
+    $('#footerDot').className = 'status-dot accent';
+    $$('[data-apply]').forEach(btn => { btn.disabled = true; });
+    stage.classList.add('is-applying');
+    clearInterval(applyTimer);
+    // Removal needs no download: separate honest stage instead of 0 % of 0 MB.
+    if (total <= 0){
+      text.innerHTML = '<b>Удаление продуктов</b> · остановка служб и удаление регистрации MSI…';
+      $('#progressFill').style.width = '34%';
+      applyTimer = setTimeout(() => {
+        $('#progressFill').style.width = '78%';
+        applyTimer = setTimeout(() => commitChanges(ch), 520);
+      }, 320);
+      return;
+    }
+    const head = ch.reinstalls.length && !ch.installs.length && !ch.updates.length
+      ? 'Проверка SHA-256 и переустановка'
+      : 'Скачивание с GitHub';
+    text.innerHTML = `<b>${head}</b> · 0% · 0 из ${fmtMB(total)}`;
+    $('#progressFill').style.width = '0%';
+    applyTimer = setInterval(() => {
+      pct = Math.min(100, pct + 9);
+      $('#progressFill').style.width = pct + '%';
+      text.innerHTML = `<b>${head}</b> · ${pct}% · ${fmtMB(total * pct / 100)} из ${fmtMB(total)}`;
+      if (pct >= 100){
+        clearInterval(applyTimer);
+        setTimeout(() => commitChanges(ch), 260);
+      }
+    }, 95);
+  }
+
+  function commitChanges(ch){
+    for (const id of ch.installs) committed[id] = byId[id].availableVersion;
+    for (const id of ch.updates) committed[id] = byId[id].availableVersion;
+    /* a fresh package replaces the damaged files too */
+    for (const id of ch.reinstalls.concat(ch.installs, ch.updates)) broken.delete(id);
+    for (const id of ch.removals){ committed[id] = null; broken.delete(id); }
+    reinstall.clear();
+    freshAdd.clear();
+    applying = false;
+    target = { ...committed };
+    $('#progressFill').style.width = '0%';
+    stage.classList.remove('is-applying');
+    render();
+    const bits = [];
+    if (ch.installs.length) bits.push(`${ch.installs.length} ${installWord(ch.installs.length)}`);
+    if (ch.updates.length) bits.push(`${ch.updates.length} ${updatesWord(ch.updates.length)}`);
+    if (ch.reinstalls.length) bits.push(`${ch.reinstalls.length} ${repairWord(ch.reinstalls.length)}`);
+    if (ch.removals.length) bits.push(`${ch.removals.length} ${removeWord(ch.removals.length)}`);
+    let suffix = '';
+    if (ch.mb > 0) suffix += ' Пакеты скачаны с GitHub, размер и SHA-256 сверены.';
+    if (ch.reinstalls.length) suffix += ' Файлы заменены, SHA-256 совпадает с релизом.';
+    if (ch.removals.length) suffix += ' Регистрация и файлы удалённых продуктов очищены.';
+    showToast(`Готово: ${bits.join(', ')}.${suffix}`, 'good');
+  }
+
+  function cancelChanges(){
+    if (applying) return;
+    resetTarget();
+    render();
+    showToast('Изменения отменены. Списки возвращены к установленному состоянию.', 'neutral');
+  }
+
+  /* ---------------- modal ---------------- */
+  const warnShade = $('#warnShade');
+  let lastFocus = null;
+  function openInfo(o){
+    lastFocus = document.activeElement;
+    const dialog = $('#warnDialog');
+    const tone = o.tone || 'info';
+    dialog.dataset.tone = tone;
+    $('#warnKicker').textContent = o.kicker || 'Сведения';
+    $('#warnTitle').textContent = o.title;
+    const body = [];
+    if (o.lead) body.push(`<p class="warn-lead">${o.lead}</p>`);
+    if (o.rows && o.rows.length){
+      body.push(`<ul class="warn-rows">${o.rows.map(r =>
+        `<li class="${r.stack ? 'is-stacked' : 'is-field'}"${r.tone ? ` data-tone="${r.tone}"` : ''}><span class="warn-row-label"><i></i>${r.label}</span><span class="warn-row-text">${r.text}</span></li>`
+      ).join('')}</ul>`);
+    }
+    if (o.note) body.push(`<p class="warn-note">${o.note}</p>`);
+    $('#warnText').innerHTML = body.join('');
+    warnShade.hidden = false;
+    $('#warnText').scrollTop = 0;
+    setTimeout(() => $('#warnClose').focus(), 20);
+  }
+  $('#warnOk').addEventListener('click', closeInfo);
+  function closeInfo(){
+    warnShade.hidden = true;
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+  function openProductInfo(p){
+    const c = committed[p.id], t = target[p.id];
+    let state, stateTone;
+    if (!c && t){ state = `Будет установлено из релиза ${p.availableVersion} — ${fmtMB(p.size)} скачивается с GitHub.`; stateTone = 'accent'; }
+    else if (c && !t){ state = 'Будет удалено: MSI снимается с регистрации, файлы, службы и задачи удаляются.'; stateTone = 'warn'; }
+    else if (c && t && cmpVer(t, c) > 0){ state = `Будет обновлено: ${c} → ${t}. Настройки продукта сохраняются.`; stateTone = 'warn'; }
+    else if (c){ state = `Установлено ${c}${hasNewer(p) ? `, в релизе доступна ${p.availableVersion}` : ' — актуальная версия'}.`; stateTone = hasNewer(p) ? 'warn' : 'ok'; }
+    else { state = 'Не установлено и не выбрано к установке.'; stateTone = 'accent'; }
+    const depsOn = !(p.deps || []).length || !!target.settings;
+    const deps = (p.deps || []).length
+      ? (target.settings
+        ? 'Зависит от GlassSettings — панель управления будет доступна.'
+        : 'Зависит от GlassSettings, сейчас он не установлен: панель управления будет недоступна, параметры придётся менять вручную.')
+      : 'Других продуктов не требует.';
+    openInfo({
+      kicker: 'Продукт', tone: 'info', title: p.name,
+      lead: p.desc,
+      rows: [
+        { label: 'Состояние', text: state, tone: stateTone },
+        { label: 'Зависимости', text: deps, tone: (p.deps || []).length ? (depsOn ? 'ok' : 'warn') : '' },
+        { label: 'Пакет', text: `${fmtMB(p.size)} · релиз v${p.availableVersion}, размер и SHA-256 сверяются после загрузки.`, tone: '' }
+      ]
+    });
+  }
+  function openAllWarnings(){
+    const w = getWarnings();
+    if (!w.length){ openPlan(); return; }
+    if (w.length === 1){
+      openInfo({
+        kicker: 'Зависимость', tone: 'warn',
+        title: w[0].title, lead: w[0].text,
+        note: 'Предупреждение исчезнет, когда нужный продукт вернётся в состав.'
+      });
+      return;
+    }
+    openInfo({
+      kicker: 'Предупреждение', tone: 'warn',
+      title: 'Зависимости затронуты',
+      lead: `${w.length} ${warningsWord(w.length)}. Это информация, а не блокировка: применить изменения можно всё равно.`,
+      rows: w.map(x => ({ label: x.title, text: x.text, tone: 'warn', stack: true })),
+      note: 'Предупреждения исчезнут, когда нужный продукт вернётся в состав.'
+    });
+  }
+  function openPlan(){
+    const ch = getChanges(), w = getWarnings();
+    const rows = [];
+    if (ch.installs.length) rows.push({ label: `Установить · ${ch.installs.length}`, text: ch.installs.map(id => `${byId[id].name} ${byId[id].availableVersion}`).join(', ') + ' — загрузка с GitHub.', tone: 'accent' });
+    if (ch.updates.length) rows.push({ label: `Обновить · ${ch.updates.length}`, text: ch.updates.map(id => `${byId[id].name} ${committed[id]} → ${byId[id].availableVersion}`).join(', ') + ' — настройки сохраняются.', tone: 'warn' });
+    if (ch.reinstalls.length) rows.push({ label: `Переустановить · ${ch.reinstalls.length}`, text: ch.reinstalls.map(id => byId[id].name).join(', ') + ' — файлы не совпали с SHA-256, пакеты скачиваются и проверяются заново.', tone: 'warn' });
+    if (ch.removals.length) rows.push({ label: `Удалить · ${ch.removals.length}`, text: ch.removals.map(id => byId[id].name).join(', ') + ' — MSI снимается с регистрации, файлы и службы удаляются.', tone: 'warn' });
+    if (!ch.total){
+      const offered = products.filter(updOffered);
+      const damaged = committedList().filter(p => isBroken(p.id));
+      if (damaged.length) rows.push({ label: 'Требуется переустановка', text: `${damaged.map(p => p.shortName).join(', ')} — файлы не совпадают с SHA-256 релиза.`, tone: 'crit' });
+      else if (offered.length) rows.push({ label: 'Доступны обновления', text: `${offered.map(p => `${p.shortName} → ${p.availableVersion}`).join(', ')} — выбираются на карточках в «Доступно».`, tone: 'ok' });
+      else rows.push({ label: 'Изменений нет', text: 'Целевое состояние совпадает с установленным.', tone: 'ok' });
+    }
+    openInfo({
+      kicker: w.length ? 'Предупреждение' : 'План', tone: w.length ? 'warn' : 'info', title: 'Что будет применено',
+      lead: ch.total
+        ? `К применению: ${changesSummary(ch)}. `
+          + (ch.mb > 0 ? `Загрузка с GitHub — ${fmtMB(ch.mb)}; размер и SHA-256 сверяются с релизом.` : 'Загрузка не требуется: удаление не скачивает пакеты.')
+        : 'План пуст — выберите действия в списках слева.',
+      rows,
+      note: w.length ? `Замечания (${w.length}): ${w.map(x => x.title).join('; ')}. Применение доступно.` : ''
+    });
+  }
+
+  /* ---------------- toast ---------------- */
+  let toastTimer = null;
+  function showToast(message, tone){
+    const toast = $('#toast');
+    toast.textContent = message;
+    toast.className = 'toast show ' + (tone === 'warn' ? 'warn' : tone === 'neutral' ? 'neutral' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.className = 'toast ' + (tone === 'warn' ? 'warn' : tone === 'neutral' ? 'neutral' : ''); }, 3600);
+  }
+
+  /* ---------------- drag & drop ---------------- */
+  /* Native HTML5 drag paints a nearly transparent snapshot, so the card is carried by a real element. */
+  let drag = null, press = null;
+  let availView = 'all', instView = 'all';
+
+  function ghostFor(card){
+    const rect = card.getBoundingClientRect();
+    /* the stage can be zoomed to fit the window, so the ghost is scaled to the card's on-screen size */
+    const z = rect.width / (card.offsetWidth || rect.width);
+    const ghost = card.cloneNode(true);
+    ghost.classList.add('drag-ghost');
+    ghost.classList.remove('dragging');
+    ghost.removeAttribute('style');
+    ghost.style.width = (card.offsetWidth || rect.width) + 'px';
+    ghost.style.height = (card.offsetHeight || rect.height) + 'px';
+    ghost.querySelectorAll('button').forEach(b => b.setAttribute('tabindex', '-1'));
+    document.body.appendChild(ghost);
+    return { ghost, dx: press.x - rect.left, dy: press.y - rect.top, z };
+  }
+  function placeGhost(x, y){
+    if (!drag) return;
+    drag.ghost.style.transform = `translate3d(${Math.round(x - drag.dx)}px, ${Math.round(y - drag.dy)}px, 0) scale(${drag.z})`;
+  }
+  function hoverZone(x, y){
+    const zone = document.elementFromPoint(x, y) && document.elementFromPoint(x, y).closest('[data-drop]');
+    $$('.drop-hover').forEach(el => { if (el !== zone) el.classList.remove('drop-hover'); });
+    if (zone) zone.classList.add('drop-hover');
+    return zone;
+  }
+  function endDrag(){
+    if (drag && drag.ghost) drag.ghost.remove();
+    drag = null;
+    press = null;
+    stage.classList.remove('is-dragging');
+    $$('.dragging').forEach(el => el.classList.remove('dragging'));
+    $$('.drop-hover').forEach(el => el.classList.remove('drop-hover'));
+    $$('.c-lane.is-source').forEach(el => el.classList.remove('is-source'));
+    pinStage();
+  }
+
+  stage.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.pointerType !== 'mouse' || applying) return;
+    const card = e.target.closest('.c-card');
+    if (!card || e.target.closest('button')) return;
+    press = { card, x: e.clientX, y: e.clientY };
+  });
+
+  document.addEventListener('pointermove', e => {
+    if (!drag && press){
+      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < 5) return;
+      const made = ghostFor(press.card);
+      drag = {
+        id: press.card.dataset.id, act: press.card.dataset.act, lane: press.card.dataset.lane,
+        ghost: made.ghost, dx: made.dx, dy: made.dy, z: made.z
+      };
+      press.card.classList.add('dragging');
+      stage.classList.add('is-dragging');
+      const srcLane = press.card.closest('.c-lane');
+      if (srcLane) srcLane.classList.add('is-source');
+    }
+    if (!drag) return;
+    e.preventDefault();
+    placeGhost(e.clientX, e.clientY);
+    hoverZone(e.clientX, e.clientY);
+  }, { passive: false });
+
+  document.addEventListener('pointerup', e => {
+    if (!drag){ press = null; return; }
+    const zone = hoverZone(e.clientX, e.clientY);
+    const zoneName = zone ? zone.dataset.drop : null;
+    const { id, act: action, lane } = drag;
+    endDrag();
+    if (!zoneName) return;
+    if (zoneName === lane){
+      showToast(lane === 'installed'
+        ? 'Продукт уже в «Установлено»: обновление и переустановка — кнопками на карточке.'
+        : 'Продукт уже в «Доступно»: удаление — корзиной на карточке в «Установлено».', 'neutral');
+      return;
+    }
+    const prod = byId[id];
+    if (zoneName === 'installed'){
+      if (action === 'remove'){ showToast('Эта карточка уже в «Установлено».', 'neutral'); return; }
+      /* возвращаем удалённый продукт: он ставится заново, без активации и без нажатой ↻ */
+      if (target[id] === null){
+        freshAdd.add(id);
+        reinstall.delete(id);
+        target[id] = prod.availableVersion;
+        if (cmpVer(prod.availableVersion, committed[id]) <= 0) reinstall.add(id);
+        render();
+        showToast(`${prod.name} возвращается: ${prod.availableVersion} скачается и встанет заново.`, 'neutral');
+        return;
+      }
+      act(id, action);
+      return;
+    }
+    /* dropped into «Доступно»: активированную карточку это деактивирует, остальные — удаляет */
+    if (action === 'remove'){
+      if (isActivated(prod)){
+        act(id, 'deactivate');
+        showToast(`Действие с ${prod.name} отменено — карточка вернулась в исходное состояние.`, 'neutral');
+        return;
+      }
+      act(id, 'remove');
+    }
+    else showToast('Продукт уже есть в «Доступно».', 'neutral');
+  });
+
+  document.addEventListener('pointercancel', () => endDrag());
+  window.addEventListener('blur', () => endDrag());
+
+  /* ---------------- delegated controls ---------------- */
+  $$('.c-view-btn').forEach(btn => btn.addEventListener('click', () => {
+    const lane = btn.closest('.c-view').dataset.viewTarget;
+    if (lane === 'available'){ if (btn.dataset.view === availView) return; availView = btn.dataset.view; }
+    else { if (btn.dataset.view === instView) return; instView = btn.dataset.view; }
+    renderC();
+  }));
+
+  stage.addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    if (btn.dataset.act && btn.dataset.id) act(btn.dataset.id, btn.dataset.act);
+    else if (btn.hasAttribute('data-accept-all')) acceptAll();
+    else if (btn.hasAttribute('data-remove-all')) removeAll();
+    else if (btn.hasAttribute('data-warn')) openProductInfo(byId[btn.dataset.warn]);
+    else if (btn.hasAttribute('data-warn-all')) openAllWarnings();
+    else if (btn.hasAttribute('data-plan')) openPlan();
+    else if (btn.hasAttribute('data-apply')) applyChanges();
+    else if (btn.hasAttribute('data-cancel')) cancelChanges();
+    else if (btn.hasAttribute('data-back')) showToast('Возврат к предыдущему шагу — в макете не выполняется.', 'neutral');
+    else if (btn.hasAttribute('data-recheck')) showToast('Каталог GitHub проверен: релиз v1.5.0, 5 продуктов. Обновлений нет.', 'neutral');
+    else if (btn.id === 'warnClose') closeInfo();
+    pinStage();
+  });
+  document.addEventListener('focusin', () => pinStage());
+  warnShade.addEventListener('mousedown', e => { if (e.target === warnShade) closeInfo(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !warnShade.hidden){ e.stopPropagation(); closeInfo(); }
+  });
+
+  /* ---------------- zoom ---------------- */
+  const stageFit = $('#stageFit'), holder = $('#stageHolder'), zoomToggle = $('#zoomToggle');
+  function layoutStage(){
+    const scale = zoomToggle.value === 'full' ? 1 : Math.min(1, Math.max(0.5, (holder.clientWidth - 2) / 1000));
+    stageFit.style.setProperty('--zoom', scale);
+  }
+  zoomToggle.addEventListener('change', layoutStage);
+  window.addEventListener('resize', layoutStage);
+
+  /* ---------------- init ---------------- */
+  render();
+  layoutStage();
+  let introTimer = setTimeout(() => stage.classList.remove('is-intro'), 1600);
+  ['pointerdown', 'keydown', 'wheel'].forEach(evt => stage.addEventListener(evt, () => {
+    clearTimeout(introTimer);
+    stage.classList.remove('is-intro');
+  }, { once:true, passive:true }));
+})();
+</script>
+</body>
+</html>
