@@ -7,7 +7,7 @@
 // Portable policy only: no registry/MSI/filesystem side effects. Discovery must
 // supply verified facts; UI and workers must consume the same resulting plan.
 namespace GlassProductPlan {
-enum class Product : std::size_t { Platform64, Platform32, Settings, OpenGlass, SecureUxTheme, Count };
+enum class Product : std::size_t { Platform64, Platform32, Settings, OpenGlass, SecureUxTheme, Settings32, Count, Settings64=Settings };
 constexpr std::size_t kProductCount = static_cast<std::size_t>(Product::Count);
 constexpr std::size_t Index(Product p) noexcept { return static_cast<std::size_t>(p); }
 
@@ -28,7 +28,7 @@ enum class Error {
 enum class Warning : std::uint32_t {
     None = 0, NoPlatform64 = 1u << 0, NoPlatform32 = 1u << 1,
     ManualSettings = 1u << 2, ManualVisualStyles = 1u << 3,
-    DamageRetained = 1u << 4, GlobalSettingsCleanup = 1u << 5, ManualOpenGlass = 1u << 6
+    DamageRetained = 1u << 4, GlobalSettingsCleanup = 1u << 5, ManualOpenGlass = 1u << 6, NoHelper64 = 1u << 7, NoHelper32 = 1u << 8
 };
 constexpr Warning operator|(Warning a, Warning b) noexcept {
     return static_cast<Warning>(static_cast<std::uint32_t>(a) | static_cast<std::uint32_t>(b));
@@ -52,6 +52,8 @@ struct Request {
     Mode mode = Mode::Install;
     bool os64 = true;
     std::array<bool, kProductCount> selected{};
+    // Explicit per-product intents allow mixed maintenance; None uses selected/mode.
+    std::array<Action,kProductCount> actions{};
     // Separate explicit consent; SelectAll never changes it.
     bool cleanupAllProfiles = false;
 };
@@ -96,7 +98,7 @@ constexpr Error MutationError(const Facts& f, bool install) noexcept {
     return Error::None;
 }
 constexpr bool SupportedOnOs(Product p, bool os64) noexcept {
-    return os64 || (p != Product::Platform64 && p != Product::OpenGlass);
+    return os64 || (p != Product::Platform64 && p != Product::OpenGlass && p != Product::Settings64);
 }
 constexpr void AddWarning(Plan& plan, Product product, Warning warning) noexcept {
     plan.rows[Index(product)].warnings = plan.rows[Index(product)].warnings | warning;
@@ -124,18 +126,21 @@ constexpr Plan Build(const std::array<Facts, kProductCount>& facts, const Reques
         auto& row = result.rows[i];
         row.after = f.presence;
         row.action = f.presence == Presence::Installed ? Action::Keep : Action::None;
-        if (!request.selected[i]) continue;
+        const auto intent=request.actions[i];
+        const bool explicitMutation=IsMutation(intent);
+        if ((!request.selected[i] && !explicitMutation) || intent==Action::Keep) continue;
+        const bool rowInstall=explicitMutation?intent!=Action::Remove:install;
         ++result.selectedCount;
         // Known absent removal is an idempotent no-op, not a source check.
-        if (!install && f.presence == Presence::Absent) continue;
+        if (!rowInstall && f.presence == Presence::Absent) continue;
         row.error = !SupportedOnOs(static_cast<Product>(i), request.os64)
-            ? Error::Unsupported : MutationError(f, install);
+            ? Error::Unsupported : MutationError(f, rowInstall);
         if (row.error != Error::None) {
             row.action = Action::Blocked;
             result.valid = false;
             continue;
         }
-        if (!install) {
+        if (!rowInstall) {
             row.action = Action::Remove;
             row.after = Presence::Absent;
         } else {
@@ -148,12 +153,13 @@ constexpr Plan Build(const std::array<Facts, kProductCount>& facts, const Reques
     // request to remove both is refused: the user must see an explicit UI plan.
     const auto settings = Index(Product::Settings);
     const auto sut = Index(Product::SecureUxTheme);
-    if (RequiresInteractiveSettingsRemoval(request.mode, result.rows[settings].action == Action::Remove,
+    for(const auto settingsRow:{settings,Index(Product::Settings32)})
+    if (RequiresInteractiveSettingsRemoval(request.mode, result.rows[settingsRow].action == Action::Remove,
         facts[sut].presence, facts[sut].activity)) {
-        auto& row = result.rows[settings];
+        auto& row = result.rows[settingsRow];
         row.action = Action::Blocked;
         row.error = Error::SettingsRemovalNeedsInteractivePlan;
-        row.after = facts[settings].presence;
+        row.after = facts[settingsRow].presence;
         result.valid = false;
     }
     // Warnings describe the proposed after-state. An invalid plan must never be
@@ -162,15 +168,28 @@ constexpr Plan Build(const std::array<Facts, kProductCount>& facts, const Reques
         AddWarning(result, Product::Platform64, Warning::NoPlatform64);
     if (result.rows[Index(Product::Platform32)].after == Presence::Absent)
         AddWarning(result, Product::Platform32, Warning::NoPlatform32);
-    if (result.rows[settings].after == Presence::Absent)
+    if(request.os64 && result.rows[Index(Product::Platform64)].after==Presence::Installed &&
+       result.rows[Index(Product::Settings64)].after==Presence::Absent) {
+        AddWarning(result,Product::Platform64,Warning::NoHelper64);
+        AddWarning(result,Product::Settings64,Warning::NoHelper64);
+    }
+    if(result.rows[Index(Product::Platform32)].after==Presence::Installed &&
+       result.rows[Index(Product::Settings32)].after==Presence::Absent) {
+        AddWarning(result,Product::Platform32,Warning::NoHelper32);
+        AddWarning(result,Product::Settings32,Warning::NoHelper32);
+    }
+    const bool noSettings=result.rows[settings].after==Presence::Absent && result.rows[Index(Product::Settings32)].after==Presence::Absent;
+    if (noSettings) {
         AddWarning(result, Product::Settings, Warning::ManualSettings);
+        AddWarning(result, Product::Settings32, Warning::ManualSettings);
+    }
     if (result.rows[Index(Product::OpenGlass)].after == Presence::Installed &&
-        result.rows[settings].after == Presence::Absent)
+        noSettings)
         AddWarning(result, Product::OpenGlass, Warning::ManualOpenGlass);
     const bool sutWillBeUsed = result.rows[sut].action != Action::Remove &&
         (facts[sut].activity != Activity::Inactive ||
-         (install && request.selected[sut] && result.rows[sut].action != Action::Blocked));
-    if (sutWillBeUsed && result.rows[settings].after == Presence::Absent)
+         (IsMutation(result.rows[sut].action) && result.rows[sut].action != Action::Remove));
+    if (sutWillBeUsed && noSettings)
         AddWarning(result, Product::SecureUxTheme, Warning::ManualVisualStyles);
     for (std::size_t i = 0; i < kProductCount; ++i) {
         if (result.rows[i].action == Action::Keep && facts[i].condition == Condition::Damaged)
@@ -185,6 +204,7 @@ constexpr Plan Build(const std::array<Facts, kProductCount>& facts, const Reques
 constexpr Request SelectAll(const std::array<Facts, kProductCount>& facts, Request request) noexcept {
     const bool install = request.mode == Mode::Install;
     for (std::size_t i = 0; i < kProductCount; ++i) {
+        request.actions[i]=Action::None;
         request.selected[i] = SupportedOnOs(static_cast<Product>(i), request.os64) &&
             (install || facts[i].presence == Presence::Installed) &&
             MutationError(facts[i], install) == Error::None;
@@ -192,13 +212,13 @@ constexpr Request SelectAll(const std::array<Facts, kProductCount>& facts, Reque
     // Honor the entry point guard for bulk headless callers as well.
     if (RequiresInteractiveSettingsRemoval(request.mode, true,
         facts[Index(Product::SecureUxTheme)].presence, facts[Index(Product::SecureUxTheme)].activity))
-        request.selected[Index(Product::Settings)] = false;
+        {request.selected[Index(Product::Settings)] = false;request.selected[Index(Product::Settings32)] = false;}
     return request;
 }
 constexpr Request FreshInstall(bool os64) noexcept {
     Request request;
     request.os64 = os64;
-    request.selected = {os64, true, true, os64, false};
+    request.selected = {os64, true, os64, os64, false, true};
     return request;
 }
 

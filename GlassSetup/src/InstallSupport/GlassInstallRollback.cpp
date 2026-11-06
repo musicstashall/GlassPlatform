@@ -575,7 +575,8 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
         // only the Settings directory affected by the early MSI. The chosen
         // architecture is captured before any changes; do not re-detect it
         // during rollback, where a query error could select the wrong folder.
-        const bool is64 = scope == RestoreScope::SettingsX64;
+        for(bool is64:{true,false}) {
+        if(scope!=RestoreScope::SettingsBoth && is64!=(scope==RestoreScope::SettingsX64))continue;
         const std::wstring& backup = is64 ? state.backupX64 : state.backupX86;
         const std::wstring& target = is64 ? state.x64Dir : state.x86Dir;
         if (!backup.empty() && !target.empty()) {
@@ -596,6 +597,7 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
                 if (!total) total = 1;
                 if (!CopyTree(from, to, {}, copied, total, onProgress, copyError)) ok = false;
             }
+        }
         }
     } else {
         uint64_t total = DirBytes(state.backupX64) + DirBytes(state.backupX86) + DirBytes(state.backupOpenGlass);

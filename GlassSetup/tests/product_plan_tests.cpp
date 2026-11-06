@@ -20,7 +20,7 @@ int main() {
     static_assert(fresh.selected[0] && fresh.selected[1] && fresh.selected[2] && fresh.selected[3]);
     static_assert(!fresh.selected[4]);
     constexpr auto fresh32 = P::FreshInstall(false);
-    static_assert(!fresh32.selected[0] && fresh32.selected[1] && fresh32.selected[2] && !fresh32.selected[3]);
+    static_assert(!fresh32.selected[0] && fresh32.selected[1] && !fresh32.selected[2] && !fresh32.selected[3] && fresh32.selected[5]);
     static_assert(P::AssessStyle({P::Style::TrustedSystem, P::Session::OtherLive, false, false}) == P::StyleStep::Preserve);
     static_assert(P::AssessStyle({P::Style::Unknown, P::Session::OtherLive, false, false}) == P::StyleStep::Inspect);
     static_assert(P::AssessStyle({P::Style::ResetRequired, P::Session::OtherLive, false, false}) == P::StyleStep::WaitForLogoff);
@@ -29,11 +29,11 @@ int main() {
     static_assert(P::AssessStyle({P::Style::ResetRequired, P::Session::Offline, false, false}) == P::StyleStep::Inspect);
     static_assert(P::AssessStyle({P::Style::ResetRequired, P::Session::Current, false, false}) == P::StyleStep::ApplyAndVerify);
 
-    // Exhaustive five-product presence/selection matrix. No automatic cascade,
+    // Exhaustive six-product presence/selection matrix. No automatic cascade,
     // including Settings/SUT, and Keep means still installed after Setup.
     std::size_t cases = 0;
     for (bool os64 : {false, true}) for (auto mode : {P::Mode::Install, P::Mode::RemoveInteractive})
-    for (unsigned present = 0; present < 32; ++present) for (unsigned selected = 0; selected < 32; ++selected) {
+    for (unsigned present = 0; present < 64; ++present) for (unsigned selected = 0; selected < 64; ++selected) {
         Facts facts = KnownFacts();
         P::Request request;
         request.os64 = os64;
@@ -49,7 +49,7 @@ int main() {
             if (!request.selected[i]) {
                 assert(row.after == facts[i].presence);
                 assert(!P::IsMutation(row.action));
-            } else if (!os64 && (i == 0 || i == 3) &&
+            } else if (!os64 && (i == 0 || i == 2 || i == 3) &&
                 (mode == P::Mode::Install || facts[i].presence == P::Presence::Installed)) {
                 assert(row.error == P::Error::Unsupported);
             } else if (mode == P::Mode::Install) {
@@ -65,9 +65,9 @@ int main() {
         assert(P::Has(plan.rows[1].warnings, P::Warning::NoPlatform32) ==
             (plan.rows[1].after == P::Presence::Absent));
         assert(P::Has(plan.rows[2].warnings, P::Warning::ManualSettings) ==
-            (plan.rows[2].after == P::Presence::Absent));
+            (plan.rows[2].after == P::Presence::Absent && plan.rows[5].after == P::Presence::Absent));
         assert(P::Has(plan.rows[3].warnings, P::Warning::ManualOpenGlass) ==
-            (plan.rows[3].after == P::Presence::Installed && plan.rows[2].after == P::Presence::Absent));
+            (plan.rows[3].after == P::Presence::Installed && plan.rows[2].after == P::Presence::Absent && plan.rows[5].after == P::Presence::Absent));
         assert(plan.prepareVisualStyleReset == (plan.valid && plan.rows[4].action == P::Action::Remove));
         ++cases;
     }

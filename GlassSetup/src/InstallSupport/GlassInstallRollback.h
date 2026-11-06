@@ -63,7 +63,7 @@ void NoteInstalled(SessionState& state, const wchar_t* productCode) noexcept;
 // a concurrently changed/foreign registration is never removed speculatively.
 bool UninstallSessionProductSafely(SessionState& state, const wchar_t* productCode) noexcept;
 
-enum class RestoreScope { AllProducts, SettingsX86, SettingsX64 };
+enum class RestoreScope { AllProducts, SettingsX86, SettingsX64, SettingsBoth };
 
 bool ExecuteRollback(
     SessionState& state,

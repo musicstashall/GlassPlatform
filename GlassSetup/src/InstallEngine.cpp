@@ -1,6 +1,7 @@
 #include "InstallSupport/GlassMaintenanceCache.h"
 #include "InstallSupport/GlassPackageAcquisition.h"
 #include "InstallEngine.h"
+#include "GlassMaintenanceExecutor.h"
 #include <SecureUxThemeInventory.h>
 #include "InstallLog.h"
 #include "WizardProgress.h"
@@ -1021,8 +1022,8 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
     const struct {Product product;bool selected;} packages[]={
         {Product::Platform64,os64&&selection_.platform64},
         {Product::Platform32,selection_.platform32},
-        {Product::Settings64,os64&&selection_.glassSettings},
-        {Product::Settings32,!os64&&selection_.glassSettings},
+        {Product::Settings64,selection_.Settings64(os64)},
+        {Product::Settings32,selection_.Settings32(os64)},
         {Product::OpenGlass,os64&&selection_.openGlass}
     };
     int total=0,done=0;
@@ -1268,20 +1269,23 @@ bool InstallEngine::InstallGlassSettingsEarly() noexcept {
             settingsQueryError);
         return false;
     }
-    const bool is64 = scanNativeX64_; // checked before extraction and host changes
-    const std::wstring file = is64 ? L"GlassSettings-x64.msi" : L"GlassSettings-x86.msi";
-    const std::wstring& dir = is64 ? x64Dir_ : x86Dir_;
-    const std::wstring& label = is64 ? labels_.glassSettings64 : labels_.glassSettings86;
-    wchar_t path[MAX_PATH]{};
-    if (!PathCombineW(path, tempDir_.c_str(), file.c_str())) {
-        SetFailure(L"GlassSettings MSI path is too long.", 0);
-        return false;
+    const bool os64=scanNativeX64_;
+    const struct {bool selected;const wchar_t* file;const std::wstring* dir;const std::wstring* label;} steps[]={
+        {selection_.Settings64(os64),L"GlassSettings-x64.msi",&x64Dir_,&labels_.glassSettings64},
+        {selection_.Settings32(os64),L"GlassSettings-x86.msi",&x86Dir_,&labels_.glassSettings86}};
+    int base=800;
+    unsigned bit=0;
+    for(const auto& step:steps) {
+        const unsigned attempt=1u<<bit++;
+        if(!step.selected)continue;
+        if(IsCancelRequested())return false;
+        earlySettingsAttemptMask_|=attempt;
+        const auto path=tempDir_+L"\\"+step.file;
+        installAttempted_=true;
+        if(!RunOneMsi(path,*step.dir,*step.label,base,600))return false;
+        base+=600;
     }
-    // RunOneMsi records a previous product before removal and a newly
-    // installed product before checking cancellation. Rollback therefore also
-    // works if the monitor or a later package fails.
-    installAttempted_ = true;
-    return RunOneMsi(path, dir, label, 800, 1200);
+    return true;
 }
 
 bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
@@ -1342,13 +1346,19 @@ bool InstallEngine::RunMsiSequence() noexcept {
     // Only the checked products are touched. An installed product that was
     // left unchecked is kept as it is: Setup never removes products.
     std::vector<Step> steps;
-    if (is64 && selection_.platform64)
-        steps.push_back({L"Glass-x64.msi", x64Dir_, labels_.platform64});
-    if (selection_.platform32)
-        steps.push_back({L"Glass-x86.msi", x86Dir_, labels_.platform32});
-    // The selected GlassSettings MSI has already run before monitoring.
-    if (is64 && selection_.openGlass)
-        steps.push_back({L"OpenGlass-x64.msi", openGlassDir_, labels_.openGlass});
+    namespace P=GlassProductPlan;
+    P::Plan plan;
+    if(is64 && selection_.platform64)plan.rows[P::Index(P::Product::Platform64)].action=P::Action::Install;
+    if(selection_.platform32)plan.rows[P::Index(P::Product::Platform32)].action=P::Action::Install;
+    if(is64 && selection_.openGlass)plan.rows[P::Index(P::Product::OpenGlass)].action=P::Action::Install;
+    const auto scheduled=GlassMaintenanceExecutor::RunPhase(plan,GlassMaintenanceExecutor::Phase::Products,
+        [&](P::Product product,P::Action)->unsigned {
+            if(product==P::Product::Platform64)steps.push_back({L"Glass-x64.msi",x64Dir_,labels_.platform64});
+            if(product==P::Product::Platform32)steps.push_back({L"Glass-x86.msi",x86Dir_,labels_.platform32});
+            if(product==P::Product::OpenGlass)steps.push_back({L"OpenGlass-x64.msi",openGlassDir_,labels_.openGlass});
+            return ERROR_SUCCESS;
+        });
+    if(!scheduled.ok)return false;
 
     constexpr int kProgressStart = 2200;
     constexpr int kProgressEnd = 9000;
@@ -1396,7 +1406,7 @@ bool InstallEngine::RunMsiSequence() noexcept {
 
     // Do not replace an existing customised shortcut without a backup.
     if (selection_.glassSettings && !prior_.shortcutExisted) {
-        const std::wstring& gsRoot = is64 ? x64Dir_ : x86Dir_;
+        const std::wstring& gsRoot = selection_.Settings64(is64) ? x64Dir_ : x86Dir_;
         const std::wstring gsDir = GlassInstallUtil::TrimTrailingSlashes(gsRoot) + L"\\GlassSettings";
         (void)GlassInstallUtil::CreateStartMenuShortcut(gsDir + L"\\GlassSettings.exe", gsDir);
     }
@@ -1829,8 +1839,10 @@ bool InstallEngine::PerformRollback() noexcept {
         rollbackSession_, [this](int units) {
             SetStatus(labels_.rollback, WizardProgress::RollbackRemaining(units));
         }, nonSettingsChangesAttempted_ ? GlassInstallRollback::RestoreScope::AllProducts
-            : (scanNativeX64_ ? GlassInstallRollback::RestoreScope::SettingsX64
-                              : GlassInstallRollback::RestoreScope::SettingsX86));
+            : (earlySettingsAttemptMask_==3
+                ? GlassInstallRollback::RestoreScope::SettingsBoth
+                : (earlySettingsAttemptMask_&1)?GlassInstallRollback::RestoreScope::SettingsX64
+                    :GlassInstallRollback::RestoreScope::SettingsX86));
     const bool ok=lifecycleOk && filesOk;
     std::wstring note;
     if (!ok)
@@ -1922,24 +1934,19 @@ bool InstallEngine::UndoCleanInstall() noexcept {
 bool InstallEngine::PurgeRemnants() noexcept {
     SetStatus(labels_.purge.empty() ? L"…" : labels_.purge, 2000);
     const bool is64 = scanNativeX64_;
-    const wchar_t* installedSettings = is64 ? GlassInstallMsi::kProductSettingsX64 : GlassInstallMsi::kProductSettingsX86;
-    const wchar_t* codes[] = {
-        GlassInstallMsi::kProductSecureUxThemeX64,
-        GlassInstallMsi::kProductSecureUxThemeX86,
-        GlassInstallMsi::kProductSettingsX64,
-        GlassInstallMsi::kProductSettingsX86,
-        GlassInstallMsi::kProductPlatformX64,
-        GlassInstallMsi::kProductPlatformX86,
-        GlassInstallMsi::kProductOpenGlass,
-        L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5061}",
-        L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5062}",
-        L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5063}",
+    const struct {const wchar_t* code;bool selected;} products[] = {
+        {GlassInstallMsi::kProductPlatformX64,is64&&selection_.platform64},
+        {GlassInstallMsi::kProductPlatformX86,selection_.platform32},
+        {GlassInstallMsi::kProductOpenGlass,is64&&selection_.openGlass},
+        {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5061}",is64&&selection_.platform64},
+        {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5062}",selection_.platform32},
+        {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5063}",is64&&selection_.openGlass},
     };
-    for (const wchar_t* code : codes) {
-        // This Settings MSI was installed before monitoring. A clean reinstall
-        // must not immediately uninstall it again; the other architecture, if
-        // present, is still purged normally.
-        if (selection_.glassSettings && _wcsicmp(code, installedSettings) == 0) continue;
+    for (const auto& product : products) {
+        if(!product.selected)continue;
+        const auto* code=product.code;
+        // Settings already ran in the helper phase. Unselected architectures
+        // and SecureUxTheme are retained, including a clean reinstall request.
         if (!GlassInstallMsi::IsProductInstalled(code)) continue;
         if (IsCancelRequested()) return false;
         if (!ProductWasSnapshotted(rollbackSession_,code)) {
@@ -1969,9 +1976,9 @@ bool InstallEngine::PurgeRemnants() noexcept {
     // MSI owns its installed files. Never recursively delete an installation
     // directory: it can contain unrelated or user-created files. Keep tasks,
     // service and shell registration intact until the reversible commit phase.
-    if ((is64 && !GlassInstallUtil::ClearPlatformInstallPath(true)) ||
-        !GlassInstallUtil::ClearPlatformInstallPath(false) ||
-        (is64 && !GlassInstallUtil::ClearOpenGlassInstallPath())) {
+    if ((is64 && selection_.platform64 && !GlassInstallUtil::ClearPlatformInstallPath(true)) ||
+        (selection_.platform32 && !GlassInstallUtil::ClearPlatformInstallPath(false)) ||
+        (is64 && selection_.openGlass && !GlassInstallUtil::ClearOpenGlassInstallPath())) {
         SetFailure(labels_.purgeFailed.empty() ? L"Could not clear installation paths." : labels_.purgeFailed, GetLastError());
         return false;
     }

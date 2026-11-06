@@ -47,6 +47,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\src\GlassMaintenanceExecutor.h" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="..\src\WizardTheme.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallLog.cpp" />

@@ -588,6 +588,10 @@ Report Run(const Inputs& in)
     {
         AddReason(report.settings, Reason::RegistryInvalid);
         report.settings.registryValueNames = sanity.glassValueNames;
+        for(auto* settings:{&report.settings64,&report.settings32})if(settings->installed) {
+            AddReason(*settings,Reason::RegistryInvalid);
+            settings->registryValueNames=sanity.glassValueNames;
+        }
     }
     if (sanity.openGlassIssues)
     {

@@ -25,8 +25,10 @@ def main():
         else:
             command = [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pedantic",
                        str(source), "-o", str(executable)]
-        subprocess.run(command, cwd=directory, check=True)
-        subprocess.run([str(executable)], cwd=directory, check=True)
+        for test in ("product_plan_tests.cpp","maintenance_executor_tests.cpp"):
+            current=source.with_name(test)
+            subprocess.run([str(current) if arg==str(source) else arg for arg in command],cwd=directory,check=True)
+            subprocess.run([str(executable)],cwd=directory,check=True)
 
 
 if __name__ == "__main__":

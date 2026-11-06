@@ -17,6 +17,16 @@ struct Selection {
     // (signer of GlassShellSparse.msix) to LocalMachine\TrustedPeople so the
     // compact menu can be registered. Off when the page was not shown.
     bool trustSigner = false;
+    // Explicit per-architecture choices. Legacy callers keep OS-native semantics.
+    bool independentSettings = false;
+    bool settings64 = false;
+    bool settings32 = false;
+    constexpr bool Settings64(bool os64) const noexcept { return os64 && (independentSettings?settings64:glassSettings); }
+    constexpr bool Settings32(bool os64) const noexcept { return independentSettings?settings32:(!os64&&glassSettings); }
+    constexpr void SyncSettings(bool os64) noexcept {
+        if(!os64)settings64=false;
+        if(independentSettings)glassSettings=settings64||settings32;
+    }
 };
 
 // Recorded at wizard startup, independently of the later rollback snapshot.
@@ -71,6 +81,7 @@ constexpr Selection NormalizeInstall(Selection choice, bool os64) noexcept {
         choice.platform64 = false;
         choice.openGlass = false;
     }
+    choice.SyncSettings(os64);
     return choice;
 }
 

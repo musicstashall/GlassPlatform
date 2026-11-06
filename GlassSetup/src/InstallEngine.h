@@ -246,6 +246,7 @@ private:
     bool hostsStopped_ = false;
     bool x64StopAttempted_ = false, x86StopAttempted_ = false, ogStopSignalled_ = false;
     bool installAttempted_ = false;
+    unsigned earlySettingsAttemptMask_ = 0;
     // Before this boundary only the early GlassSettings MSI can have changed.
     bool nonSettingsChangesAttempted_ = false;
     bool scanNativeX64_ = false;

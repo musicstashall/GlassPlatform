@@ -66,8 +66,9 @@ int main(){
 '''
 operation=function('int RunOperation(')
 assert operation.index('SettingsRemovalRisk(chosen)') < operation.index('ResolveInstallRoots')
-assert operation.index('if (chosen.x64) {\n            if (!remove(') < operation.index('if (chosen.settings64) {\n            if (!remove(')
-assert operation.index('if (chosen.x86) {\n            if (!remove(') < operation.index('if (chosen.settings32) {\n            if (!remove(')
+assert operation.index('if (product==P::Product::Platform64) {') < operation.index('if (product==P::Product::Settings64) {')
+assert 'GlassMaintenanceExecutor::RunPhase' in operation
+assert operation.index('if (product==P::Product::Platform32) {') < operation.index('if (product==P::Product::Settings32) {')
 assert 'if (chosen.settings64) probes.push_back({Msi::kProductSettingsX64' in operation
 assert 'if (chosen.settings32) probes.push_back({Msi::kProductSettingsX86' in operation
 assert 'RequiresInteractiveSettingsRemoval' in function('int RunSilent(') # Existing SUT silent prohibition preserved.

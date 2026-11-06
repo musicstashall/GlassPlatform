@@ -1,3 +1,41 @@
+# Первый рабочий UI с независимыми Settings x64/x86 — 2026-11-06
+
+По запросу «на следующем коммите первый результат с новым интерфейсом»:
+
+- Production HTML и native fallback показывают две независимые Settings cards, с отдельными
+  inspection reports/default selection/IPC/checkbox controls. На x86 Windows карточка x64 скрыта.
+  Первая установка и Modify имеют разные заголовки. Сохранены layout 1000×600, список 330 px,
+  внутренний scroll/edge masks, отдельный план и существующие warning popups.
+- На чистой x64 установке выбираются обе Settings; в maintenance — независимо по состоянию
+  каждой архитектуры. Выбор проходит через acquisition и две реальные MSI операции early-helper phase.
+  Ярлык при установке только x86 Settings не указывает на отсутствующий x64 EXE.
+- Planner переведён на шесть независимых продуктов; поддерживает explicit per-row mixed intents.
+  Раздельные предупреждения о Platform без Settings соответствующей архитектуры. Unins preview
+  также использует реальные Settings64/32 presence/selection, не агрегированный флаг.
+- `GlassMaintenanceExecutor.h` задаёт общий порядок/фазы продуктовых шагов и stop-on-error;
+  Setup main MSI sequence и Unins removal dispatch используют его. Это header существующих EXE,
+  не новый DLL/EXE. Он не расширяет набор выбранных продуктов.
+- Ранний rollback восстанавливает обе Settings директории, если были затронуты обе архитектуры,
+  либо только фактически начатую архитектуру; Platform-файлы на module hold не перезаписываются.
+- Исправлен legacy clean-reinstall purge: невыбранные продукты и Settings/SUT не удаляются каскадом;
+  install-path metadata очищается только для действительно выбранных Platform/OpenGlass.
+
+**Пункт 2 ещё не закрыт полностью:** общий scheduler/portable mixed planner подключены, но Windows
+transaction orchestration/preflight/rollback остаются специализированными для Setup и Unins.
+Смешанные install+remove в самом Setup UI пока не предлагаются: нельзя выдавать tested portable
+mixed intents за готовый Windows runtime. Единый lifecycle и SUT/shell-specific preflight ещё нужно
+довести перед включением removal actions в новом UI. Остальные пункты lightweight плана также не объявлены готовыми.
+
+Проверки этой ревизии: 16 384 policy cases + 4 096 mixed executor cases; actual early MSI/purge,
+SettingsBoth rollback, Settings-removal consent, module gate, Native trust/loader, saved-theme/profile,
+cleanup/license/source/build-graph regression suites PASS. Production JS node --check, project XML,
+UTF-8/resource checks, git diff --check PASS. GNU Windows x86 object compile InstallEngine,
+ProductInspect и InstallRollback PASS; **это не MSVC/WiX/link/Windows runtime**.
+Пользователь подтвердил успешные сборки предыдущей ревизии 0e4449a, не этой новой UI ревизии.
+Платформа и службы не запускались/не останавливались.
+
+---
+
 # Удаление embedded MSI/Native: реализация, общий executor ещё не завершён — 2026-11-06
 
 Это промежуточное изменение по поручению «1 и 2, затем проверка сборки», **не готовность обоих пунктов**.

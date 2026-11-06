@@ -46,7 +46,7 @@ DWORD GetFileAttributesW(const wchar_t*){
 }
 int DeleteFileW(const wchar_t*){return 1;}
 namespace GlassInstallRollback {
- enum class RestoreScope { AllProducts, SettingsX86, SettingsX64 };
+ enum class RestoreScope { AllProducts, SettingsX86, SettingsX64, SettingsBoth };
  struct ProductSnapshot{std::wstring productCode,installDir,cachedMsiPath,displayVersion;};
  struct SessionState {
   std::wstring workspaceDir=L"workspace",x64Dir=L"root64",x86Dir=L"root86",openGlassDir=L"rootOG";
@@ -108,6 +108,9 @@ int main(){
   assert(fake.installs.size()==1 && fake.installs[0].find(code)!=std::wstring::npos);
   assert(fake.registryCalls==1 && last==10000);
  }
+ {reset();SessionState s;fake.otherFilesLocked=true;
+  assert(ExecuteRollback(s,nullptr,RestoreScope::SettingsBoth));assert(fake.copies.size()==2);
+  assert(fake.copies[0].find(L"GlassSettings")!=std::wstring::npos && fake.copies[1].find(L"GlassSettings")!=std::wstring::npos);}
  {reset();SessionState s;fake.settingDirExists=false;int last=0;
   assert(ExecuteRollback(s,[&](int p){last=p;},RestoreScope::SettingsX64));assert(fake.copies.empty() && fake.registryCalls==1 && last==10000);}
  {reset();SessionState s;fake.settingDirExists=false;fake.attrError=ERROR_GEN_FAILURE;

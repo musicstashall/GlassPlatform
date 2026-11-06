@@ -11,13 +11,13 @@ namespace GlassProductUiPolicy {
 inline GlassProductPlan::Plan Preview(const GlassProducts::Selection& choice,
     const GlassProducts::Selection& installed, bool os64, bool removal, bool sutActive) {
     namespace P = GlassProductPlan;
-    const std::array<bool, 5> present{installed.platform64, installed.platform32,
-        installed.glassSettings, installed.openGlass, installed.secureUxTheme};
+    const std::array<bool, P::kProductCount> present{installed.platform64, installed.platform32,
+        installed.Settings64(os64), installed.openGlass, installed.secureUxTheme, installed.Settings32(os64)};
     P::Request request;
     request.os64=os64;
     request.mode=removal?P::Mode::RemoveInteractive:P::Mode::Install;
-    request.selected={choice.platform64,choice.platform32,choice.glassSettings,choice.openGlass,choice.secureUxTheme};
-    std::array<P::Facts,5> facts{};
+    request.selected={choice.platform64,choice.platform32,choice.Settings64(os64),choice.openGlass,choice.secureUxTheme,choice.Settings32(os64)};
+    std::array<P::Facts,P::kProductCount> facts{};
     for (std::size_t i=0;i<facts.size();++i) {
         auto& f=facts[i];
         f.supported=P::SupportedOnOs(static_cast<P::Product>(i),os64);
@@ -62,6 +62,8 @@ inline std::wstring WarningText(GlassProductPlan::Warning warning, bool ru, bool
     };
     platformWarning(W::NoPlatform64,true);
     platformWarning(W::NoPlatform32,false);
+    add(W::NoHelper64,L"Platform x64 остаётся без GlassSettings x64. При последующем обслуживании может быть недоступен доверенный Native x64 для контроля и выгрузки модулей. Разрядности независимы; установка Settings x86 не заменяет helper x64.",L"Platform x64 will remain without GlassSettings x64. A trusted Native x64 helper for module monitoring and unloading may be unavailable during later maintenance. Architectures are independent; Settings x86 does not replace the x64 helper.");
+    add(W::NoHelper32,L"Platform x86 остаётся без GlassSettings x86. При последующем обслуживании может быть недоступен доверенный Native x86 для контроля и выгрузки модулей. Разрядности независимы; установка Settings x64 не заменяет helper x86.",L"Platform x86 will remain without GlassSettings x86. A trusted Native x86 helper for module monitoring and unloading may be unavailable during later maintenance. Architectures are independent; Settings x64 does not replace the x86 helper.");
     add(W::ManualSettings,L"Без GlassSettings потребуется вручную редактировать реестр и управлять службами и задачами. Продолжение разрешено.",L"Without GlassSettings, registry settings, services and scheduled tasks must be managed manually. You can continue.");
     add(W::ManualOpenGlass,L"Без GlassSettings настройка OpenGlass и управление его службами и задачами выполняются вручную. Продолжение разрешено.",L"Without GlassSettings, OpenGlass registry settings, services and scheduled tasks must be managed manually. You can continue.");
     add(W::ManualVisualStyles,L"SecureUxTheme остаётся без GlassSettings. Вы принимаете ответственность за ручной контроль визуальных стилей и перезапуск Windows. Перед удалением SecureUxTheme необходимо вернуть штатный визуальный стиль.",L"SecureUxTheme will operate without GlassSettings. You accept responsibility for managing visual styles and restarting Windows manually. Restore a stock visual style before removing SecureUxTheme.");
@@ -71,7 +73,8 @@ inline std::wstring WarningText(GlassProductPlan::Warning warning, bool ru, bool
 inline std::size_t Index(const wchar_t* id) {
     if (std::wstring(id)==L"x64") return 0;
     if (std::wstring(id)==L"x86") return 1;
-    if (std::wstring(id)==L"settings") return 2;
+    if (std::wstring(id)==L"settings" || std::wstring(id)==L"settings64") return 2;
+    if (std::wstring(id)==L"settings32") return 5;
     if (std::wstring(id)==L"openglass") return 3;
     return 4;
 }
