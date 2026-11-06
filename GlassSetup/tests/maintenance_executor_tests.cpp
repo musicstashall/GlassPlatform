@@ -38,6 +38,10 @@ int main(){
         unsigned count=0;
         result=E::RunPhase(plan,E::Phase::Products,[&](P::Product,P::Action)->unsigned {return count++==fail?1603:0;});
         assert(!result.ok && result.completed==fail && result.error==1603 && count==fail+1);
+        std::uint32_t attempted=0,completed=0;
+        for(unsigned i=0;i<=fail;++i)attempted|=1u<<P::Index(E::kRemovalOrder[i]);
+        for(unsigned i=0;i<fail;++i)completed|=1u<<P::Index(E::kRemovalOrder[i]);
+        assert(result.attemptedMask==attempted && result.completedMask==completed);
     }
     plan.valid=false;unsigned calls=0;
     result=E::RunPhase(plan,E::Phase::Products,[&](P::Product,P::Action)->unsigned {++calls;return 0;});

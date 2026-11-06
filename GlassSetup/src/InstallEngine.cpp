@@ -1333,20 +1333,18 @@ bool InstallEngine::RunMsiSequence() noexcept {
     if(is64 && selection_.platform64)plan.rows[P::Index(P::Product::Platform64)].action=P::Action::Install;
     if(selection_.platform32)plan.rows[P::Index(P::Product::Platform32)].action=P::Action::Install;
     if(is64 && selection_.openGlass)plan.rows[P::Index(P::Product::OpenGlass)].action=P::Action::Install;
-    const auto scheduled=GlassMaintenanceExecutor::RunPhase(plan,GlassMaintenanceExecutor::Phase::Products,
-        [&](P::Product product,P::Action)->unsigned {
-            if(product==P::Product::Platform64)steps.push_back({L"Glass-x64.msi",x64Dir_,labels_.platform64});
-            if(product==P::Product::Platform32)steps.push_back({L"Glass-x86.msi",x86Dir_,labels_.platform32});
-            if(product==P::Product::OpenGlass)steps.push_back({L"OpenGlass-x64.msi",openGlassDir_,labels_.openGlass});
-            return ERROR_SUCCESS;
-        });
-    if(!scheduled.ok)return false;
+    for(auto product:GlassMaintenanceExecutor::kInstallOrder) {
+        if(!P::IsMutation(plan.rows[P::Index(product)].action))continue;
+        if(product==P::Product::Platform64)steps.push_back({L"Glass-x64.msi",x64Dir_,labels_.platform64});
+        if(product==P::Product::Platform32)steps.push_back({L"Glass-x86.msi",x86Dir_,labels_.platform32});
+        if(product==P::Product::OpenGlass)steps.push_back({L"OpenGlass-x64.msi",openGlassDir_,labels_.openGlass});
+    }
 
     constexpr int kProgressStart = 2200;
     constexpr int kProgressEnd = 9000;
     const int span = steps.empty() ? 0 : (kProgressEnd - kProgressStart) / static_cast<int>(steps.size());
     int base = kProgressStart;
-    for (const auto& step : steps) {
+    const auto applyStep=[&](const Step& step)->bool {
         if (IsCancelRequested()) return false;
         if (step.msiFile == L"Glass-x64.msi") RemoveEmptyChildDir(x64Dir_, L"x64");
         else if (step.msiFile == L"Glass-x86.msi") RemoveEmptyChildDir(x86Dir_, L"x86");
@@ -1384,6 +1382,18 @@ bool InstallEngine::RunMsiSequence() noexcept {
                           : L"Could not save the installation path in the registry.",error);
             return false;
         }
+        return true;
+    };
+    std::size_t stepIndex=0;
+    const auto scheduled=GlassMaintenanceExecutor::RunPhase(plan,GlassMaintenanceExecutor::Phase::Products,
+        [&](P::Product,P::Action)->unsigned {
+            return applyStep(steps[stepIndex++])?ERROR_SUCCESS:
+                IsCancelRequested()?ERROR_INSTALL_USEREXIT:ERROR_INSTALL_FAILURE;
+        });
+    if(!scheduled.ok) {
+        InstallLog::LineFormat(L"MSI phase failed: error=%u attempted=0x%X completed=0x%X",
+            scheduled.error,scheduled.attemptedMask,scheduled.completedMask);
+        return false; // The worker retains the failed row's snapshot/journal for rollback.
     }
 
     // Do not replace an existing customised shortcut without a backup.
@@ -1530,7 +1540,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
     }
     std::vector<GlassMaintenanceCache::Blob> cacheBlobs;
     for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty())
-        cacheBlobs.push_back({0,names[i],sources[i].c_str()});
+        cacheBlobs.push_back({0,names[i],sources[i].c_str(),sources[i]==tempDir_+L"\\"+names[i]});
     std::wstring cacheFailure;
     if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs.data(),cacheBlobs.size(),IDR_MAINTENANCE_UNINS,&cacheFailure))
         AddFinishWarning(ru?L"Оболочка обслуживания сохранена не полностью":L"Maintenance cache publication is incomplete",

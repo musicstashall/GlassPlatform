@@ -50,7 +50,7 @@ assert worker.index("CapturePriorHostState()") < worker.index("CreateRollbackSna
 create = function(rollback_src, "bool CreateSnapshot(")
 assert create.index("VerifyProductRegistrations(") < create.index("TrySnapshotProduct(")
 operation = function(unins, "int RunOperation(")
-assert operation.index("CheckProductFileRoots(") < operation.index("StopAllForUninstall(") < operation.index("UninstallProduct(")
+assert operation.index("CheckProductFileRoots(") < operation.index("P::Build(facts,request)") < operation.index("StopAllForUninstall(") < operation.index("UninstallProduct(")
 assert "ValidatePlatformTask(" in operation and "ValidateOpenGlassPaths(" in operation
 for stage in ("bool InstallEngine::RunOneMsi(", "bool InstallEngine::RunMsiSequence(", "bool InstallEngine::PurgeRemnants("):
     assert "RecheckSnapshottedProduct(" in function(engine, stage), stage

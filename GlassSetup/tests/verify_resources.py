@@ -241,7 +241,9 @@ for action in ("INSTALL", "UPDATE", "KEEP"):
     assert f"IDS_COMP_BADGE_{action}" in setup and rc.count(f"IDS_COMP_BADGE_{action}") == 2
     assert f".comp-badge.action-{action.lower()}" in ui
 assert "item.warning" in ui and "comp-warning-button" in ui and "item.state||item.badge" in ui
-assert "row.append(input,icons,body)" in ui and "name.htmlFor=input.id" in ui
+assert "row.append(input,top,meta,foot)" in ui and "name.onclick=()=>showProductWarning" in ui
+assert 'components-installed-grid' in ui and 'class="c-lane installed"' in ui
+assert "productActionLabel(item)" in ui and "input.dispatchEvent(new Event('change'" in ui
 assert ".comp-action{display:flex" in ui and "components-stack" in ui  # карточки и информационная полоса в прокручиваемой раскладке
 assert "#a7dfff" in ui and "#efb94f" in ui  # independent blue-and-gold lock, not badge-tinted
 assert "DrawComponentActionBadge(dc,selected,installed" in setup and "DrawMandatoryLock(dc," in setup
@@ -637,9 +639,9 @@ assert "HasSelectedComponent" in setup
 assert "comp-reason-line" in ui and "item.reasons&&item.reasons.length" in ui
 # Approved 2026-11-04 layout supersedes the lower warning stripe and mandatory locks.
 assert "comp-slim" in ui and "components-extra" in ui and "components-stack" in ui
-assert "grid-template-columns:614px 274px" in ui and "height:330px" in ui
+assert "left:48px;width:302px" in ui and "right:48px;width:268px" in ui and "height:330px" in ui
 assert "mask-image:linear-gradient(180deg,transparent,#000 18px" in ui
-assert "has-warning" in ui and ".comp-card.has-warning" in ui
+assert "has-warning" in ui and ".c-card.has-warning" in ui
 assert "components:select-all" in ui and "components:select-all" in setup and "components:select-all" in unins
 assert "comp-warning-button" in ui and "components-warning-shade" in ui
 assert "e.stopPropagation();closeProductWarning()" in ui

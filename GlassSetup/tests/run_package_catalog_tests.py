@@ -36,6 +36,11 @@ for name in ('Glass-x64', 'Glass-x86', 'GlassSettings-x64', 'GlassSettings-x86',
     project = ET.parse(root / f'GlassSetup/msi/{name}.wixproj').getroot()
     assert any(item.get('Project') == 'GlassSetupPayload.targets' for item in project.findall('Import'))
     assert project.find('PropertyGroup/OutputName').text == name
-# Transitional build must still feed the current runtime until AcquirePackages is wired.
-assert 'GLASS_EMBED_MSI' in (root / 'GlassSetup/GlassSetup.vcxproj').read_text(encoding='utf-8')
-print('PASS: five MSI build outputs published beside EXE; existing embedded inputs preserved')
+# Production uses external acquisition; no stale transitional embedded runtime.
+assert 'GLASS_EMBED_MSI' not in (root / 'GlassSetup/GlassSetup.vcxproj').read_text(encoding='utf-8')
+engine=(root / 'GlassSetup/src/InstallEngine.cpp').read_text(encoding='utf-8')
+assert 'GlassPackageAcquisition::Prepare(' in engine
+cache=(root / 'GlassSetup/src/InstallSupport/GlassMaintenanceCache.h').read_text(encoding='utf-8')
+assert 'PublishedDigestMatches(file)' in cache and 'InstalledCacheDigest(file,installed)' in cache
+assert 'blobs[i].verifiedSource || PublishedDigestMatches(source)' in cache
+print('PASS: five MSI outputs beside EXE; external runtime acquisition; protected distribution and installed-cache digest binding')

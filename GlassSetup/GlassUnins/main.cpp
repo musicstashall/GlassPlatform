@@ -557,6 +557,7 @@ private:
             json+=L"{\"id\":"+Q(id)+L",\"title\":"+Q(title)+L",\"description\":"+Q((std::wstring(id)==L"x64"||std::wstring(id)==L"x86")?GlassProductUiPolicy::PlatformDescription(detail,std::wstring(id)==L"x64",os64,IsRu()):std::wstring(detail))+
                 L",\"warning\":"+Q(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,IsRu(),GlassInstallUtil::IsOs64Bit()))+
                 L",\"badge\":"+Q(badge)+L",\"state\":"+Q(state)+L",\"reasons\":"+reasons+
+                L",\"installed\":"+(available?L"true":L"false")+L",\"operation\":\"remove\""+
                 L",\"checked\":"+(checked?L"true":L"false")+
                 L",\"locked\":"+((locked || page_==Page::Cleanup)?L"true":L"false")+L",\"hidden\":"+(available?L"false":L"true")+L"}";
         };
@@ -842,6 +843,58 @@ private:
             if (checked==Msi::ProductPathCheck::Cancelled) return ERROR_INSTALL_USEREXIT;
             if (checked!=Msi::ProductPathCheck::Safe) { refuse(p,detail);return 9; }
         }
+        // Build the worker plan from the completed context/cache/root probes,
+        // not by manually marking rows executable after hosts have stopped.
+        namespace P=GlassProductPlan;
+        std::array<P::Facts,P::kProductCount> facts{};
+        P::Request request;
+        request.os64=GlassInstallUtil::IsOs64Bit();
+        request.mode=args_.silent?P::Mode::RemoveSilent:P::Mode::RemoveInteractive;
+        request.cleanupAllProfiles=chosen.cleanupSettings;
+        const auto authorize=[&](P::Product product,const wchar_t* code,bool selected) {
+            request.selected[P::Index(product)]=selected;
+            if(!selected)return;
+            for(const auto& probe:probes)if(_wcsicmp(probe.code,code)==0) {
+                facts[P::Index(product)]={true,probe.installed?P::Presence::Installed:P::Presence::Absent,
+                    P::Ownership::Managed,P::Condition::Healthy,P::Version::Unknown,P::Source::Missing,
+                    P::Transition::Idle,P::Activity::Unknown};
+                break;
+            }
+        };
+        authorize(P::Product::Platform64,Msi::kProductPlatformX64,chosen.x64);
+        authorize(P::Product::Platform32,Msi::kProductPlatformX86,chosen.x86);
+        authorize(P::Product::Settings64,Msi::kProductSettingsX64,chosen.settings64);
+        authorize(P::Product::Settings32,Msi::kProductSettingsX86,chosen.settings32);
+        authorize(P::Product::OpenGlass,Msi::kProductOpenGlass,chosen.openGlass);
+        auto& sut=facts[P::Index(P::Product::SecureUxTheme)];
+        request.selected[P::Index(P::Product::SecureUxTheme)]=chosen.secureUxTheme;
+        // Repeat silent Settings/SUT policy at the worker boundary. Neither a
+        // stale discovery result nor explicit module-risk consent bypasses it.
+        bool sutKnown=true,sutPresent=false;
+        for(const auto* code:{Msi::kProductSecureUxThemeX64,Msi::kProductSecureUxThemeX86}) {
+            std::wstring detail;
+            if(Msi::CheckProductContexts(code,detail,&cancelRequested_)!=Msi::ProductPathCheck::Safe)sutKnown=false;
+            sutPresent=sutPresent||Msi::IsProductInstalled(code);
+        }
+        auto sutState=GlassInstallUtil::SecureUxThemeState::Conflict;
+        std::wstring sutDetail;
+        const bool sutStateKnown=args_.silent && (chosen.settings64||chosen.settings32) && installed_.settings &&
+            GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&sutState,&sutDetail);
+        sut.supported=true;
+        sut.presence=sutPresent?P::Presence::Installed:sutKnown?P::Presence::Absent:P::Presence::Unknown;
+        sut.activity=sutStateKnown && (sutState==GlassInstallUtil::SecureUxThemeState::Inactive ||
+            sutState==GlassInstallUtil::SecureUxThemeState::Unavailable)?P::Activity::Inactive:P::Activity::Unknown;
+        if(chosen.secureUxTheme) {
+            sut.ownership=P::Ownership::Managed;sut.condition=P::Condition::Healthy;
+            // Selected SUT packages already passed all per-architecture probes.
+            if(!sutKnown)sut.presence=P::Presence::Unknown;
+        }
+        const auto removalPlan=P::Build(facts,request);
+        if(!removalPlan.valid) {
+            SetError(T(L"План удаления больше нельзя безопасно выполнить. Продукты не изменены; откройте обслуживание повторно.",
+                L"The removal plan is no longer safe to execute. Products were not changed; reopen maintenance."));
+            return ERROR_INSTALL_PACKAGE_REJECTED;
+        }
         // Native x64 must understand the exact-root installer protocol. Check
         // before stopping hosts or deleting any MSI, not after partial removal.
         // On 32-bit Windows the supported fallback is regsvr32 of ShellExt from
@@ -1047,14 +1100,6 @@ private:
             msiRebootRequired=msiRebootRequired || removalCode==ERROR_SUCCESS_REBOOT_REQUIRED || removalCode==ERROR_SUCCESS_REBOOT_INITIATED;
             return true;
         };
-        namespace P=GlassProductPlan;
-        P::Plan removalPlan;
-        if(chosen.secureUxTheme)removalPlan.rows[P::Index(P::Product::SecureUxTheme)].action=P::Action::Remove;
-        if(chosen.openGlass)removalPlan.rows[P::Index(P::Product::OpenGlass)].action=P::Action::Remove;
-        if(chosen.x86)removalPlan.rows[P::Index(P::Product::Platform32)].action=P::Action::Remove;
-        if(chosen.x64)removalPlan.rows[P::Index(P::Product::Platform64)].action=P::Action::Remove;
-        if(chosen.settings64)removalPlan.rows[P::Index(P::Product::Settings64)].action=P::Action::Remove;
-        if(chosen.settings32)removalPlan.rows[P::Index(P::Product::Settings32)].action=P::Action::Remove;
         bool shellRemoved=false;
         const auto result=GlassMaintenanceExecutor::RunPhase(removalPlan,GlassMaintenanceExecutor::Phase::Products,
             [&](P::Product product,P::Action)->unsigned {

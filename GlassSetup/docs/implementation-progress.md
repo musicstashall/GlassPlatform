@@ -1,3 +1,90 @@
+# Возврат к утверждённому варианту C; продолжение п.2/п.3 — 2026-11-06
+
+Исправление после замечания пользователя: одноколоночная страница d6e2187 была отступлением
+от утверждённого макета, а не его production-реализацией. Её собственная компоновка убрана.
+
+## Интерфейс
+
+- В production `res/slideshow.html` перенесены shelf/card/plan skins именно из варианта C:
+  слева каталог 302 px (x=48), установленный/запланированный состав 302 px (x=366), справа
+  план 268 px (x=684). Все три блока y=156, высота 372; карточки 72 px. Заголовок y=65,
+  шрифт 27 px; фон 820×540 с reference mask; логотип и SVG продуктов соответствуют макету.
+- «Доступно» показывает весь каталог, не только отсутствующие продукты. Зеркала установленных
+  карточек не создают второй checkbox/intent: один authoritative control на продукт и отдельные
+  Settings x64/x86 IPC. «Все / нужно», выбор из обеих полок и отмена строки плана работают.
+  Установленное и запланированное различаются dashed-карточками, подписью/счётчиком в footer.
+- Описание/причины скрыты в карточке, но доступны по имени продукта. ⚠ остаётся под иконкой;
+  предупреждение повторяется в плане. Info/warning popup закрывается X/outside/Escape, без
+  нижних кнопок. Никакие mock handlers/демонстрационные install/remove операции не перенесены.
+- Select all находится в плане и не включает cleanup/cert. План сразу показывает выбранное
+  действие (а не устаревшую server-state подпись), имеет реальную отмену через тот же IPC.
+
+**Визуальная проверка теперь есть:** внешний Chromium 153 установлен через npm в cache, без
+новой зависимости приложения. `maintenance_ui_browser_test.cjs` открывает production HTML
+и исходный утверждённый HTML, сравнивает реальные rectangles и CSS skins блоков/карточек,
+проверяет Settings IPC/перенос и info/Escape. Есть реальные screenshots обоих HTML.
+Это Linux Chromium + fixture discovery, **не Windows WebView/native footer** и не утверждение
+полного pixel parity: pin/auto-collapse/drag UI из concept пока не подключены, mixed Remove
+в Setup по-прежнему не включён до работающего Windows backend. Не объявлять весь UI готовым.
+
+Запуск browser regression с внешним браузером:
+`NODE_PATH=<external playwright-core modules> CHROMIUM_PATH=<chrome> node GlassSetup/tests/maintenance_ui_browser_test.cjs`.
+Для packaged Chromium использовался внешний `@sparticuz/chromium`, его bundled al2023 libs
+в LD_LIBRARY_PATH. `GLASS_UI_SCREENSHOT_DIR` задаёт внешний каталог screenshots; в Git они не добавляются.
+jsdom regression дополнительно проверяет зеркала каталога, один intent/счётчик, фильтры, Undo,
+RU/EN, independent Settings и disabled gates.
+
+## П.2 — реальный execution path, ещё не общая транзакция
+
+- Unins вызывает `GlassProductPlan::Build` **до остановки хостов**, после реальных MSI context/
+  cached-file/root probes. Строки исполнения больше не выставляются вручную после остановки.
+  Состояние/политика SUT повторно проверяются на worker boundary, в том числе для silent
+  удаления Settings; module-risk consent не отменяет этот запрет.
+- Setup product phase теперь вызывает реальные MSI/registry шаги внутри общего RunPhase,
+  а не использует scheduler лишь для наполнения vector. Result различает attempted/completed
+  masks; неуспешный шаг включён в attempted, потому что он мог уже изменить MSI. Отмена/ошибка
+  прерывает фазу, сохранённые rollback boundaries не расширены. Маски пишутся в журнал отказа.
+- Это не завершает п.2: Setup всё ещё создаёт install-only worker rows; общий discovery→Build
+  для Setup, mixed Remove, единый transactional lifecycle и MSI rollback Unins остаются в работе.
+  Не выдавать in-memory masks за persistent recovery journal.
+
+## П.3 — привязка Current к identity и двум SHA-256
+
+- Для вновь acquired/verified source публикация сохраняет защищённую sidecar `.sha256`:
+  128 ASCII hex bytes — отдельные SHA-256 **исходного distribution MSI** и зарегистрированного
+  Windows Installer LocalPackage. Их нельзя сравнивать друг с другом: Windows может удалить
+  embedded cabinets в своей кэшированной копии.
+- Автоматическое доверие Current теперь требует version/PackageCode, единственного machine
+  registration, совпадения source digest и installed-cache digest. Проверяется и private staged
+  copy. Отсутствующий/malformed/linked/reparse record либо изменённый MSI не считается baseline.
+- Новый record можно создать только для acquired source с флагом подтверждённой верификации
+  либо источника с уже проверенным record. Legacy Current не получает доверие из одного ACL/
+  ProductCode/PackageCode: остаётся независимая signature/manifest проверка acquisition.
+  Автоматический RegisterRepairSource тоже требует эту привязку; непроверенный legacy
+  source не становится repair source лишь из-за совпадения PackageCode.
+  Изменённые upstream DLL и original SUT MSI не переподписывались/не модифицировались.
+- **П.3 не закрыт целиком:** миграция Previous/Retained в единственный постоянный Current,
+  безопасное сохранение/перерегистрация всех kept sources, EXE updater/неограниченные user bak
+  и persistent recovery ещё требуют завершения. Старая retention логика не объявляется удалённой. Старый Retained без record может дать явный incomplete-cache
+  finish warning: это fail-closed, а не подтверждённая миграция таких repair sources.
+
+## Проверки и ограничения
+
+Production DOM и Chromium layout/skin/IPC tests PASS. Текущие Engine и PackageAcquisition
+компилируются в GNU Windows x86 objects; это не MSVC/WiX/link/runtime.
+Полный запуск 55 Python suites дал 43 PASS / 12 FAIL. Все 12 отказов отдельно воспроизведены
+на чистом **d6e2187** в временном git-archive test tree: устаревшие source expectations и fake
+Win32 stubs/definitions. После актуализации относящегося к этому этапу package-catalog теста
+(он ошибочно требовал GLASS_EMBED_MSI) он также PASS, включая ASan/UBSan; остаются 11 baseline
+отказов: module_scan, platform_mutex, preserve_registry, registered_paths, scan_protocol,
+shell_install_root, task_close_cleanup, task_scheduler_stop, unins_close_state, unins_task_stop,
+watch_lifecycle. Не заявлять, что весь репозиторный suite зелёный. Новые cache digest tests,
+16384 policy +4096 scheduler, fixed-path order, installer order и остальные ранее зелёные suites PASS.
+
+Платформа/службы не запускались/не останавливались. Новых EXE/DLL в проекте нет.
+
+---
+
 # Production product workspace: заметная переработка страницы — 2026-11-06
 
 Пользователь подтвердил сборки **22b7822**, но не увидел нового UI. Это подтверждение

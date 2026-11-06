@@ -11,6 +11,7 @@
 #include "GlassInstallMsi.h"
 #include <cwctype>
 #include "GlassCacheDiagnostics.h"
+#include "GlassRegisteredMsi.h"
 
 // One current bundle, not a version archive. All executable cache paths are
 // fixed, administrator-owned and checked for writable/untrusted ACLs/reparse.
@@ -214,8 +215,71 @@ inline int RegistrationState(const std::wstring& file,const std::wstring& code,c
     }
     return match?1:0;
 }
+// Bind a published source to the exact installed per-machine cache baseline.
+// Additional per-user/ambiguous registrations are not implicit proof of ownership.
+inline bool InstalledCacheDigest(const std::wstring& file,std::array<BYTE,32>& digest) {
+    std::wstring code,version;
+    if(!Identity(file,code,version))return false;
+    std::vector<Registration> all;
+    if(!Registrations(code,all) || all.size()!=1 || all[0].context!=MSIINSTALLCONTEXT_MACHINE)return false;
+    const auto package=PackageCode(file),cached=PackageCode(all[0].local);
+    return !package.empty() && !cached.empty() && version==all[0].version &&
+        _wcsicmp(package.c_str(),cached.c_str())==0 && GlassRegisteredMsi::Hash(all[0].local,digest);
+}
+// Distribution MSI bytes are NOT the bytes of Windows Installer's LocalPackage:
+// Windows may strip embedded cabinets from its cache. Bind distribution bytes
+// to our protected publication record, and compare MSI identity to LocalPackage
+// separately. Never hash the stripped cache and call it a distribution digest.
+inline bool PublishedDigestMatches(const std::wstring& file) {
+    const auto slash=file.find_last_of(L"\\/");
+    const auto name=file.substr(slash==std::wstring::npos?0:slash+1)+L".sha256";
+    const auto record=CurrentFile(name.c_str());
+    if(record.empty())return false; // Legacy ACL/identity alone is not provenance.
+    HANDLE handle=CreateFileW(record.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    if(handle==INVALID_HANDLE_VALUE)return false;
+    BY_HANDLE_FILE_INFORMATION info{};LARGE_INTEGER length{};
+    char text[128]{};DWORD read=0;
+    const bool loaded=GetFileInformationByHandle(handle,&info) && GetFileSizeEx(handle,&length) &&
+        !(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) &&
+        info.nNumberOfLinks==1 && length.QuadPart==sizeof(text) &&
+        ReadFile(handle,text,sizeof(text),&read,nullptr) && read==sizeof(text);
+    CloseHandle(handle);
+    if(!loaded)return false;
+    const auto hex=[](char c)->int{return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:-1;};
+    std::array<BYTE,64> expected{};
+    std::array<BYTE,32> actual{},installed{};
+    for(std::size_t i=0;i<expected.size();++i) {
+        const int high=hex(text[i*2]),low=hex(text[i*2+1]);
+        if(high<0||low<0)return false;
+        expected[i]=static_cast<BYTE>((high<<4)|low);
+    }
+    if(!GlassRegisteredMsi::Hash(file,actual) || !InstalledCacheDigest(file,installed))return false;
+    for(std::size_t i=0;i<actual.size();++i)
+        if(actual[i]!=expected[i] || installed[i]!=expected[i+32])return false;
+    return true;
+}
+// Record format: 128 lowercase ASCII hex bytes: source SHA256, then LocalPackage SHA256.
+inline bool WritePublishedDigest(const std::wstring& file) {
+    std::array<BYTE,32> digest{},installed{};
+    if(!GlassRegisteredMsi::Hash(file,digest) || !InstalledCacheDigest(file,installed))return Diag::Fail(L"HashPublishedPackage",file,ERROR_INVALID_DATA);
+    constexpr char hex[]="0123456789abcdef";
+    char text[128]{};
+    for(std::size_t i=0;i<digest.size();++i){
+        text[i*2]=hex[digest[i]>>4];text[i*2+1]=hex[digest[i]&15];
+        text[64+i*2]=hex[installed[i]>>4];text[64+i*2+1]=hex[installed[i]&15];
+    }
+    const auto record=file+L".sha256";
+    HANDLE handle=CreateFileW(record.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(handle==INVALID_HANDLE_VALUE)return Diag::Fail(L"CreatePackageDigest",record,GetLastError());
+    DWORD written=0;
+    bool ok=WriteFile(handle,text,sizeof(text),&written,nullptr) && written==sizeof(text) && FlushFileBuffers(handle);
+    DWORD error=ok?ERROR_SUCCESS:GetLastError();
+    if(!CloseHandle(handle)){if(ok)error=GetLastError();ok=false;}
+    if(!ok){DeleteFileW(record.c_str());return Diag::Fail(L"WritePackageDigest",record,error?error:ERROR_WRITE_FAULT);}
+    return true; // The publication hardening pass protects MSI and record together.
+}
 inline bool MatchesInstalled(const std::wstring& file,const std::wstring& code,const std::wstring& version) {
-    return RegistrationState(file,code,version)==1;
+    return RegistrationState(file,code,version)==1 && PublishedDigestMatches(file);
 }
 inline bool RegisterRepairSource(const std::wstring& file) {
     std::wstring code,version;if(!TrustedPath(file,false)||!Identity(file,code,version))return false;
@@ -224,6 +288,8 @@ inline bool RegisterRepairSource(const std::wstring& file) {
     for(const auto& reg:all) {
         const auto registered=PackageCode(reg.local);if(registered.empty())return false;
         if(version!=reg.version||_wcsicmp(package.c_str(),registered.c_str())!=0)continue;
+        if(!PublishedDigestMatches(file))return Diag::Fail(L"ValidateRepairSourceDigest",file,ERROR_INVALID_DATA,
+            L"No verified distribution/installed-cache binding; legacy source is not registered automatically",L"Policy");
         const wchar_t* user=reg.context==MSIINSTALLCONTEXT_MACHINE?nullptr:reg.sid.c_str();
         const auto slash=file.find_last_of(L'\\');const auto folder=file.substr(0,slash+1),name=file.substr(slash+1);
         const auto registration=L"product="+code+L" SID="+reg.sid+L" context="+std::to_wstring(reg.context);
@@ -263,7 +329,12 @@ inline bool GarbageCollect() {
     }
     FindClose(find);return ok;
 }
-struct Blob {UINT id;const wchar_t* file;const wchar_t* source=nullptr;};
+struct Blob {
+    UINT id;const wchar_t* file;const wchar_t* source=nullptr;
+    // Only the acquisition adapter can assert this after signature/manifest
+    // validation of its private copy. A legacy Current file is never blessed.
+    bool verifiedSource=false;
+};
 // Invoked only after successful MSI commit. Failed publication leaves Previous
 // intact; recovery restores it on the next attempt. Never prunes system MSI cache.
 inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT uninstallerResource,
@@ -326,6 +397,9 @@ inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT 
             const std::wstring source=blobs[i].source,destination=stage+L"\\"+blobs[i].file;
             if(!TrustedPath(source,false)||!CopyFileW(source.c_str(),destination.c_str(),TRUE))
                 return Diag::Fail(L"CopyVerifiedSource",destination,GetLastError(),L"source="+source);
+            if(blobs[i].verifiedSource || PublishedDigestMatches(source)) {
+                if(!WritePublishedDigest(destination))return false;
+            }
         } else if(!extract(blobs[i].id,blobs[i].file))return false;
     }
     Diag::Step(L"harden-staging",stage);
@@ -355,7 +429,7 @@ inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT 
             std::wstring code,version,newCode,newVersion;
             if(!TrustedPath(old,false)||!Identity(old,code,version)||!Identity(newer,newCode,newVersion))return false;
             if(RegistrationState(old,code,version)<0||RegistrationState(newer,newCode,newVersion)<0)return false;
-            if(code==newCode&&MatchesInstalled(old,code,version)&&
+            if(code==newCode&&RegistrationState(old,code,version)==1&&
                (version!=newVersion||_wcsicmp(PackageCode(old).c_str(),PackageCode(newer).c_str())!=0)) {
                 const auto package=PackageCode(old);
                 if(package.size()!=38)return Diag::Fail(L"ValidatePackageCode",old,ERROR_INVALID_DATA,package,L"Policy");

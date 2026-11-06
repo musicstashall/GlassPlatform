@@ -24,6 +24,10 @@ struct Result {
     unsigned error=0;
     P::Product product=P::Product::Count;
     std::size_t completed=0;
+    // The failed callback may already have changed MSI/registry state. Adapters
+    // must include it in recovery, not only rows that returned success.
+    std::uint32_t attemptedMask=0;
+    std::uint32_t completedMask=0;
 };
 // Validation/snapshots for the entire request must finish before any phase is
 // entered. A failed callback may have mutated MSI state: retain its journal and
@@ -37,8 +41,11 @@ Result RunPhase(const P::Plan& plan,Phase phase,Apply apply) {
         for(auto product:order) {
             const auto action=plan.rows[P::Index(product)].action;
             if(!P::IsMutation(action) || (action==P::Action::Remove)!=removal || PhaseOf(product,action)!=phase)continue;
+            const auto bit=std::uint32_t{1}<<P::Index(product);
+            result.attemptedMask|=bit;
             const unsigned code=apply(product,action);
             if(code){result.ok=false;result.error=code;result.product=product;return result;}
+            result.completedMask|=bit;
             ++result.completed;
         }
     }
