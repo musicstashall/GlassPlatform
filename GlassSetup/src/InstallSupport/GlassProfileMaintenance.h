@@ -7,16 +7,18 @@
 #include <utility>
 #include <RegistrySanity.h>
 #include <SystemVisualStyle.h>
+#include "GlassSavedThemeCleanup.h"
 #pragma comment(lib,"Wtsapi32.lib")
 
 namespace GlassProfileMaintenance {
 struct Profile {
     std::wstring sid, path;
     HKEY hive=nullptr;
+    GlassSavedThemeCleanup::Batch savedThemes;
     Profile()=default;
     Profile(const Profile&)=delete;
     Profile& operator=(const Profile&)=delete;
-    Profile(Profile&& other) noexcept : sid(std::move(other.sid)),path(std::move(other.path)),hive(other.hive) {other.hive=nullptr;}
+    Profile(Profile&& other) noexcept : sid(std::move(other.sid)),path(std::move(other.path)),hive(other.hive),savedThemes(std::move(other.savedThemes)) {other.hive=nullptr;}
     ~Profile(){if(hive)RegCloseKey(hive);}
 };
 inline bool ReadString(HKEY key,const wchar_t* name,std::wstring& out) {
@@ -57,15 +59,41 @@ inline bool OtherUserSessions(std::wstring& detail) {
     }
     WTSFreeMemory(sessions);return blocked;
 }
+inline bool IsDesktopProfile(const std::wstring& sid) {
+    DWORD session=0;
+    if(!ProcessIdToSessionId(GetCurrentProcessId(),&session)||!session)return false;
+    LPWSTR user=nullptr,domain=nullptr;DWORD userSize=0,domainSize=0;
+    const bool gotUser=WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE,session,WTSUserName,&user,&userSize)!=FALSE;
+    const bool gotDomain=WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE,session,WTSDomainName,&domain,&domainSize)!=FALSE;
+    std::wstring account;
+    if(gotUser&&gotDomain&&user&&*user)account=(domain&&*domain?std::wstring(domain)+L"\\":L"")+user;
+    if(user)WTSFreeMemory(user);if(domain)WTSFreeMemory(domain);
+    if(account.empty())return false;
+    DWORD bytes=0,chars=0;SID_NAME_USE use{};
+    LookupAccountNameW(nullptr,account.c_str(),nullptr,&bytes,nullptr,&chars,&use);
+    std::vector<BYTE> desktop(bytes);std::vector<wchar_t> desktopDomain(chars);
+    if(!bytes||!LookupAccountNameW(nullptr,account.c_str(),desktop.data(),&bytes,desktopDomain.data(),&chars,&use))return false;
+    LPWSTR text=nullptr;
+    if(!ConvertSidToStringSidW(desktop.data(),&text))return false;
+    const bool matching=sid==text;LocalFree(text);if(!matching)return false;
+    HANDLE token=nullptr;if(!OpenProcessToken(GetCurrentProcess(),TOKEN_QUERY,&token))return false;
+    DWORD size=0;GetTokenInformation(token,TokenUser,nullptr,0,&size);
+    std::vector<BYTE> process(size);
+    const bool got=size&&GetTokenInformation(token,TokenUser,process.data(),size,&size);CloseHandle(token);
+    return got&&EqualSid(desktop.data(),reinterpret_cast<TOKEN_USER*>(process.data())->User.Sid);
+}
 class Inventory {
     std::vector<Profile> profiles_;
     bool cleanupPrepared_=false;
+    bool savedThemeRegistryFallback_=false;
 public:
+    bool SavedThemeRegistryFallback() const noexcept{return savedThemeRegistryFallback_;}
     const std::vector<Profile>& Profiles() const noexcept{return profiles_;}
     // All hives stay open between preflight and commit. We never unload a system
     // mount; RegLoadAppKey handles unload only our private offline mapping.
     bool OpenAll(std::wstring& detail) {
         cleanupPrepared_=false;
+        savedThemeRegistryFallback_=false;
         profiles_.clear();
         HKEY list=nullptr;
         LONG st=RegOpenKeyExW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList",0,KEY_READ|KEY_WOW64_64KEY,&list);
@@ -209,8 +237,10 @@ public:
     bool PreflightCleanup(std::wstring& detail) {
         cleanupPrepared_=false;
         if(OtherUserSessions(detail)||!OpenAll(detail))return false;
-        for(const auto& profile:profiles_)
-            if(!Shared::RegistrySanity::CleanOwnedSettings(profile.hive,false,false,detail)){detail=profile.sid+L": "+detail;return false;}
+        for(auto& profile:profiles_) {
+            if(!profile.savedThemes.Prepare(profile.path,profile.hive,SafePath,detail) ||
+               !Shared::RegistrySanity::CleanOwnedSettings(profile.hive,false,false,detail)){detail=profile.sid+L": "+detail;return false;}
+        }
         cleanupPrepared_=Shared::RegistrySanity::CleanOwnedSettings(HKEY_LOCAL_MACHINE,true,false,detail) && VerifyInventory(detail);
         return cleanupPrepared_;
     }
@@ -218,7 +248,11 @@ public:
         if(!cleanupPrepared_) {detail=L"Successful all-profile cleanup preflight is required";return false;}
         cleanupPrepared_=false; // One-shot commit; partial errors require a fresh inventory/preflight.
         if(OtherUserSessions(detail)||!VerifyInventory(detail))return false;
-        for(const auto& profile:profiles_) {
+        savedThemeRegistryFallback_=false;
+        for(auto& profile:profiles_) {
+            if(!profile.savedThemes.Cleanup(profile.hive,IsDesktopProfile(profile.sid),savedThemeRegistryFallback_,detail)) {
+                detail=profile.sid+L": partial saved-theme cleanup: "+detail;return false;
+            }
             if(!Shared::RegistrySanity::CleanOwnedSettings(profile.hive,false,true,detail)){detail=profile.sid+L": partial cleanup: "+detail;return false;}
         }
         return Shared::RegistrySanity::CleanOwnedSettings(HKEY_LOCAL_MACHINE,true,true,detail);

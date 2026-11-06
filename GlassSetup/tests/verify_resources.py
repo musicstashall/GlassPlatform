@@ -631,7 +631,7 @@ assert "components:select-all" in setup and "component:x64:1" in setup
 assert "CleanOwnedSettings" in reg_sanity and "cleanupProfiles.Cleanup" in unins
 assert 'L",\\\"locked\\\":false,\\\"hidden\\\":false}"' in unins
 assert "GlassProductUiPolicy::WarningText" in unins and "componentsWarning" in unins
-assert "Clean all user profiles + HKLM" in ui and "Unchecked products and settings are retained" in ui
+assert "Clean all user profiles, HKLM and saved Glass themes" in ui and "Unchecked products and settings are retained" in ui
 assert "IDC_UNINS_SETTINGS_CLEANUP" in header_now and "cleanupSettings" in unins
 assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_sanity
 

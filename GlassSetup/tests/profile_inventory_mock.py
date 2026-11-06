@@ -68,15 +68,20 @@ bool CleanOwnedSettings(HKEY,bool,bool commit,std::wstring& detail){
  if(n==(commit?failWriteAt:failCheckAt)){detail=L"failure";return false;}return true;
 }}
 '''
+prefix+=r'''
+int themeChecks=0,themeCommits=0,failThemeCheck=0,failThemeCommit=0;
+namespace GlassSavedThemeCleanup {struct Batch {bool Prepare(const std::wstring&,HKEY,bool (*)(const std::wstring&),std::wstring&){return ++themeChecks!=failThemeCheck;}bool Cleanup(HKEY,bool,bool&,std::wstring&){return ++themeCommits!=failThemeCommit;}};}
+bool IsDesktopProfile(const std::wstring&){return false;}
+'''
 profile=s[s.index('struct Profile {'):s.index('inline bool ReadString(')]
 methods='\n'.join(function(token) for token in ('bool OpenAll(', 'bool VerifyInventory(', 'bool PreflightCleanup(', 'bool Cleanup('))
 body=prefix+profile+function('inline bool ReadString(')+function('inline bool SafePath(')+'''\nclass Inventory {
- std::vector<Profile> profiles_;bool cleanupPrepared_=false;
+ std::vector<Profile> profiles_;bool cleanupPrepared_=false;bool savedThemeRegistryFallback_=false;
  public:
  const std::vector<Profile>& Profiles() const {return profiles_;}
 '''+methods+'\n};\n'
 main=r'''
-void reset(){assert(handles.empty());entries={{L"S-1-5-21-111",L"C:\\Users\\A"},{L"S-1-12-1-222",L"C:\\Users\\B"}};attributes.clear();enumFail=openListFail=openEntryFail=openHiveFail=loadFail=invalidSid=badPathValue=otherSession=false;offlineLoads=cleanChecks=cleanWrites=failCheckAt=failWriteAt=malformed=changeOnCheck=0;}
+void reset(){assert(handles.empty());entries={{L"S-1-5-21-111",L"C:\\Users\\A"},{L"S-1-12-1-222",L"C:\\Users\\B"}};attributes.clear();enumFail=openListFail=openEntryFail=openHiveFail=loadFail=invalidSid=badPathValue=otherSession=false;offlineLoads=cleanChecks=cleanWrites=failCheckAt=failWriteAt=malformed=changeOnCheck=0;themeChecks=themeCommits=failThemeCheck=failThemeCommit=0;}
 int main(){
  std::wstring detail;
  reset();{Inventory i;assert(!i.Cleanup(detail));assert(cleanWrites==0);assert(i.PreflightCleanup(detail));assert(i.Profiles().size()==2&&offlineLoads==2);assert(cleanChecks==3);assert(i.Cleanup(detail));assert(cleanWrites==3);assert(!i.Cleanup(detail));assert(cleanWrites==3);}
@@ -100,6 +105,8 @@ int main(){
  reset();{Inventory i;assert(i.PreflightCleanup(detail));failWriteAt=2;assert(!i.Cleanup(detail));assert(cleanWrites==2);assert(!i.Cleanup(detail));assert(cleanWrites==2);assert(i.PreflightCleanup(detail));failWriteAt=0;assert(i.Cleanup(detail));}
  reset();{Inventory i;assert(i.PreflightCleanup(detail));assert(i.OpenAll(detail));assert(!i.Cleanup(detail));assert(cleanWrites==0);}
  reset();{Inventory i;changeOnCheck=3;assert(!i.PreflightCleanup(detail));assert(!i.Cleanup(detail));assert(cleanWrites==0);}
+ reset();{Inventory i;failThemeCheck=2;assert(!i.PreflightCleanup(detail));assert(!i.Cleanup(detail));assert(cleanWrites==0&&themeCommits==0);}
+ reset();{Inventory i;assert(i.PreflightCleanup(detail));failThemeCommit=2;assert(!i.Cleanup(detail));assert(cleanWrites==1);assert(!i.Cleanup(detail));assert(cleanWrites==1);}
  // Reordering is benign; metadata changes require a new preflight and no writes.
  reset();{Inventory i;assert(i.PreflightCleanup(detail));std::swap(entries[0],entries[1]);assert(i.Cleanup(detail));assert(cleanWrites==3);}
  for(int mutation=0;mutation<10;++mutation){

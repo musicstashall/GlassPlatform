@@ -336,6 +336,7 @@ private:
     bool rootsKnown_=false;
     std::mutex dataMutex_;
     std::wstring status_,error_,holdReport_;
+    bool savedThemeFallbackWarning_=false;
     int progress_=0, resultCode_=0;
     HANDLE gate_=nullptr;
     std::thread worker_;
@@ -584,8 +585,8 @@ private:
         // Cleanup is offered only on the separate full-removal review page.
         if (page_==Page::Cleanup && RemovesAllInstalled(selected_)) {
         json+=L",{\"id\":\"cleanup\",\"slim\":true,\"title\":"+Q(T(L"Удалить настройки",L"Remove settings"))+
-            L",\"description\":"+Q(T(L"Все локальные профили и принадлежащие продуктам параметры HKLM/DWM. По умолчанию данные сохраняются.",
-                L"All local profiles and product-owned HKLM/DWM settings. Data is kept by default."))+
+            L",\"description\":"+Q(T(L"Все локальные профили, параметры HKLM/DWM и сохранённые .theme с разделами Glass в пользовательском каталоге тем. Активные темы переключаются на стандартную; при неудаче меняется реестр. По умолчанию данные сохраняются.",
+                L"All local profiles, product-owned HKLM/DWM settings and saved .theme files with Glass sections in the user themes folder. Active themes switch to stock, with a registry fallback if needed. Data is kept by default."))+
             L",\"checked\":"+(selected_.cleanupSettings?L"true":L"false")+L",\"locked\":false,\"hidden\":false}";
         }
         return json+L"]";
@@ -611,6 +612,10 @@ private:
                 L",\"doneTag\":"+Q(T(L"УДАЛЕНИЕ ЗАВЕРШЕНО",L"UNINSTALL COMPLETE"))+
                 L",\"doneTitle\":"+Q(T(L"Готово",L"Finished"))+
                 L",\"doneBody\":"+Q(T(L"Выбранные продукты удалены.",L"The selected products have been removed."))+
+                L",\"doneWarnTag\":"+Q(T(L"УДАЛЕНИЕ С ПРИМЕЧАНИЕМ",L"REMOVAL WITH A NOTE"))+
+                L",\"doneWarnTitle\":"+Q(T(L"Продукты удалены",L"Products removed"))+
+                L",\"doneWarnBody\":"+Q(T(L"Очистка выполнена. Для оформления профилей использован резервный путь.",L"Cleanup completed using the fallback for profile appearance."))+
+                L",\"doneWarnLabel\":"+Q(T(L"СВЕДЕНИЯ ОБ ОЧИСТКЕ",L"CLEANUP DETAILS"))+
                 L",\"doneReady\":"+Q(T(L"ГОТОВО",L"DONE"))+
                 L",\"doneNote\":"+Q(T(L"Журнал: %WINDIR%\\Temp\\GlassUninsLogs-*\\GlassUnins.log",L"Log: %WINDIR%\\Temp\\GlassUninsLogs-*\\GlassUnins.log"))+
                 L",\"cancelledTag\":"+Q(T(L"УДАЛЕНИЕ ОТМЕНЕНО",L"UNINSTALL CANCELLED"))+
@@ -625,10 +630,12 @@ private:
             if (FAILED(web_->PostWebMessageAsJson(init.c_str()))) return;
             initSent_=true;
         }
-        std::wstring status,error,report; int progress;
-        { std::lock_guard<std::mutex> lock(dataMutex_); status=status_; error=error_; report=holdReport_; progress=progress_; }
+        std::wstring status,error,report; int progress;bool themeFallback=false;
+        { std::lock_guard<std::mutex> lock(dataMutex_); status=status_; error=error_; report=holdReport_; progress=progress_; themeFallback=savedThemeFallbackWarning_; }
+        const std::wstring finishWarnings=themeFallback?L"[{\"title\":"+Q(T(L"Стандартная тема записана в реестр",L"Standard theme configured in the registry"))+
+            L",\"detail\":"+Q(T(L"В отдельных профилях оформление обновится при следующем входе. Немедленное переключение работающего сеанса не подтверждено.",L"Some profiles will apply it at next sign-in. An immediate switch in a running session was not confirmed."))+L"}]":L"[]";
         const std::wstring json=L"{\"type\":\"state\",\"page\":"+Q(WebPage())+
-            L",\"components\":"+ComponentsJson()+L",\"componentsWarning\":"+Q(Warning())+
+            L",\"finishWarnings\":"+finishWarnings+L",\"components\":"+ComponentsJson()+L",\"componentsWarning\":"+Q(Warning())+
             L",\"status\":"+Q(status)+L",\"errorReason\":"+Q(error)+L",\"holdReport\":"+Q(report)+
             L",\"settingsRiskBody\":"+Q(SettingsRiskText())+L",\"unlockActive\":false,\"progress\":"+std::to_wstring(progress)+L"}";
         if (json==webState_) return;
@@ -1147,6 +1154,12 @@ private:
             return 17;
         }
         std::wstring complete=T(L"Удаление завершено.",L"Uninstall complete.");
+        if (cleanupProfiles.SavedThemeRegistryFallback()) {
+            {std::lock_guard<std::mutex> lock(dataMutex_);savedThemeFallbackWarning_=true;}
+            complete+=T(L" Для сохранённых тем стандартная тема записана в реестр профилей. В отдельных сеансах оформление обновится при следующем входе; немедленное переключение не подтверждено.",
+                L" Saved-theme links were reset to the standard theme in profile registries. Some sessions will apply it at next sign-in; an immediate live switch was not confirmed.");
+            LogLine(L"Saved theme cleanup: registry fallback used; live session appearance not claimed as reset");
+        }
         if (secureUxThemeReboot)
             complete+=T(L" Требуется перезагрузка, чтобы завершить очистку SecureUxTheme.",
                 L" Restart Windows to finish the SecureUxTheme cleanup.");

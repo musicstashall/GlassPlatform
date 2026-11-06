@@ -1,3 +1,45 @@
+# Сохранённые .theme включены в добровольную очистку — 2026-11-06
+
+**Новое прямое уточнение пользователя:** критерий — `.theme` с секциями Glass в специальном пользовательском каталоге
+сохранённых тем, у всех локальных профилей, не `Windows\Resources\Themes`. Если активна такая тема, сначала пытаться
+переключить на стандартную; при неудаче разрешена прямая правка реестра соответствующего профиля. Ledger происхождения
+для этого критерия не требуется. Это уточняет/заменяет прежнее открытое решение о file ownership.
+
+- `GlassSavedThemeCleanup.h` выполняется в существующем GlassUnins, новых EXE/DLL нет. Batch каждого профиля
+  подключён к имеющемуся Inventory и отдельной добровольной cleanup странице. Без согласия cleanup ничего не запускается.
+- Сканируются только файлы верхнего уровня `LocalAppData\Microsoft\Windows\Themes\*.theme` с секциями
+  `[Glass]`/`[Glass.*]` (case-insensitive). UTF-8/ANSI с ASCII headers, UTF-16 LE/BE с BOM, whitespace/comments учтены;
+  упоминания в комментариях/значениях и похожие имена секций не являются критерием удаления.
+  Темы без разделов Glass, `.msstyles`/wallpaper/libraries, системный каталог и пользовательские `.bak` не удаляются.
+- Preflight проверяет доступ/DELETE rights, размер/число файлов, single-link/no-reparse и final canonical path;
+  держит identity handles без разрешения rename/delete, но допускает Windows style preparation writes.
+  Перед commit отдельный read seal исключает writers, содержимое читается заново. Если Glass секции исчезли,
+  файл сохраняется. Другой активный writer, read-only/повреждённые файлы или unsafe paths дают отказ, не скрытый kill.
+- Активная ссылка определяется по file identity, а не только по строке пути (в том числе aliases).
+  Live SetSystemVisualStyle допускается только при совпадении SID профиля, process token и desktop user.
+  Записываются стандартные CurrentTheme/ThemeManager значения в нужный HKU/private hive, не в произвольный HKCU.
+  Для offline/несовпадающего desktop либо неудачного live apply используется явно разрешённый registry fallback.
+- Registry fallback отражён в RU/EN finish warning HTML, native status и журнале. Запись конфигурации не выдаётся
+  за подтверждённую live смену оформления; возможное применение при следующем входе не сопровождается logout/kill.
+  Если запись stock links не удалась, соответствующий файл не удаляется. Поздняя ошибка удаления — partial result,
+  повторного скрытого commit нет.
+- Local AppData читается из hive профиля. Redirect внутри профиля поддерживается; redirect за его границы и неизвестные
+  пользовательские environment variables блокируют preflight для ручной проверки, а не разрешают удаление чужих путей.
+  Стандартные Windows resource paths проверяются на наличие/no-reparse перед переключением.
+
+Проверено: `saved_theme_cleanup_mock.py` исполняет реальный parser/Batch с fake Win32 sharing/FS/registry/style APIs,
+ASan/UBSan: encodings, false positives, multi-profile hives, active aliases, failed live apply → registry,
+changed content, competing writer, hardlinks/reparse/final-path mismatch, readonly, partial deletion и handle lifetime.
+`profile_inventory_mock.py` отдельно проверяет wiring theme preflight/commit failures через adapter stub;
+не подменять эту проверку заявлением о Windows API runtime. Новый header и Inventory compile check собираются в
+Windows GNU x86 object. MSVC/WiX/реальный Windows theme apply/delete здесь не выполнялись.
+
+**Оставшиеся ограничения:** это не завершение всего cleanup/lightweight scope. Очистка профильных папок/логов/дампов,
+остатки «только состав/пути», новый maintenance UI и общая транзакция ещё не завершены. Консервативные SUT preflight/
+Native deactivate ограничения для неизвестных/кастомных стилей других профилей этим кодом не обходятся: весь совместный
+SUT+cleanup сценарий с новым registry fallback требует дальнейшего подключения к общему порядку операций и Windows проверки.
+Платформа/службы здесь не запускались/не останавливались.
+
 # Повторная проверка состава профилей перед cleanup commit — 2026-11-06
 
 - Inventory повторно читает ProfileList в конце preflight и непосредственно перед первой записью cleanup.
