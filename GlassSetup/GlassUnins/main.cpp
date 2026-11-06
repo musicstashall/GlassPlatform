@@ -86,6 +86,7 @@ struct Arguments {
     bool fromTemp=false;
     bool silent=false;
     bool acceptSettingsRemovalRisk=false;
+    bool acceptModuleMonitorRisk=false;
     int launchError=0;
     std::wstring originalDir;
     std::wstring product;
@@ -99,6 +100,7 @@ Arguments ParseArguments() {
         if (_wcsicmp(args[i],L"/fromtemp")==0 && i+1<count) { a.fromTemp=true; a.originalDir=args[++i]; }
         else if (_wcsicmp(args[i],L"--product")==0 && i+1<count) a.product=args[++i];
         else if (_wcsicmp(args[i],L"--silent")==0) a.silent=true;
+        else if (_wcsicmp(args[i],L"--accept-module-monitor-risk")==0) a.acceptModuleMonitorRisk=true;
         else if (_wcsicmp(args[i],L"--accept-settings-removal-risk")==0) a.acceptSettingsRemovalRisk=true;
     }
     LocalFree(args);
@@ -218,6 +220,7 @@ int RelaunchFromPrivateTemp(const Arguments& a) noexcept {
     std::wstring command=L"\""+dest+L"\" /fromtemp \""+std::wstring(sourceDir)+L"\"";
     if (!product.empty()) command+=L" --product \""+product+L"\"";
     if (a.silent) command+=L" --silent";
+    if (a.acceptModuleMonitorRisk) command+=L" --accept-module-monitor-risk";
     if (a.acceptSettingsRemovalRisk) command+=L" --accept-settings-removal-risk";
     STARTUPINFOW si{}; si.cb=sizeof(si);
     PROCESS_INFORMATION pi{};
@@ -245,7 +248,7 @@ struct Selection {
     bool Any() const noexcept { return x64 || x86 || settings || openGlass || secureUxTheme; }
 };
 enum class Page { Select, Cleanup, SettingsRisk, Stopping, UnlockModules, UnlockProcesses, Removing, Cancelled, Complete, Error };
-enum class Action { None, Retry, Unlock, Cancel };
+enum class Action { None, Retry, Unlock, ContinueRisk, Cancel };
 enum class OperationState { BeforeRemoval, CancelRequested, Removing, Finished };
 
 class Uninstaller {
@@ -315,6 +318,7 @@ public:
 
 private:
     Arguments args_;
+    std::atomic_bool monitorUnknown_{false};
     unsigned confirmedSettingsRisk_=0, pendingSettingsRisk_=0;
     bool cleanupReviewed_=false;
     Selection installed_{}, selected_{};
@@ -495,7 +499,7 @@ private:
     }
     void Layout() {
         Move(webHost_,0,0,kWidth,kHtmlHeight);
-        Move(back_,644,kContentHeight+12,160,32);
+        Move(back_,page_==Page::UnlockModules?510:644,kContentHeight+12,page_==Page::UnlockModules?230:160,32);
         Move(next_,page_==Page::Select?814:750,kContentHeight+12,page_==Page::Select?130:104,32);
         Move(cancel_,864,kContentHeight+12,104,32);
         if (page_==Page::SettingsRisk) Move(next_,600,kContentHeight+12,248,32);
@@ -637,6 +641,9 @@ private:
         const std::wstring json=L"{\"type\":\"state\",\"page\":"+Q(WebPage())+
             L",\"finishWarnings\":"+finishWarnings+L",\"components\":"+ComponentsJson()+L",\"componentsWarning\":"+Q(Warning())+
             L",\"status\":"+Q(status)+L",\"errorReason\":"+Q(error)+L",\"holdReport\":"+Q(report)+
+            L",\"monitorRisk\":"+(monitorUnknown_.load()?L"true":L"false")+
+            L",\"monitorRiskTitle\":"+Q(T(L"Выгрузка модулей не подтверждена",L"Module unloading is not verified"))+
+            L",\"monitorRiskBody\":"+Q(report)+
             L",\"settingsRiskBody\":"+Q(SettingsRiskText())+L",\"unlockActive\":false,\"progress\":"+std::to_wstring(progress)+L"}";
         if (json==webState_) return;
         if (SUCCEEDED(web_->PostWebMessageAsJson(json.c_str()))) webState_=json;
@@ -649,11 +656,11 @@ private:
         const bool busy=page==Page::Stopping || page==Page::Removing;
         WizardTheme::ApplyDarkWindowChrome(window);
         WizardTheme::SetSystemCloseEnabled(window,!(page==Page::Removing));
-        SetWindowTextW(back_,page==Page::Cleanup?T(L"Назад",L"Back"):T(L"Выбрать всё",L"Select all"));
+        SetWindowTextW(back_,page==Page::UnlockModules?T(L"Продолжить на свой риск",L"Continue at risk"):page==Page::Cleanup?T(L"Назад",L"Back"):T(L"Выбрать всё",L"Select all"));
         SetWindowTextW(next_,page==Page::SettingsRisk?T(L"Продолжить на свой риск",L"Continue at risk"):(select || page==Page::Cleanup)?T(L"Удалить",L"Remove"):
             page==Page::UnlockModules?T(L"Повторить",L"Retry"):
             page==Page::UnlockProcesses?T(L"Разблокировать",L"Unlock"):T(L"Закрыть",L"Close"));
-        ShowWindow(back_,(page==Page::Cleanup || (select&&!webReady_))?SW_SHOWNA:SW_HIDE);
+        ShowWindow(back_,(page==Page::UnlockModules || page==Page::Cleanup || (select&&!webReady_))?SW_SHOWNA:SW_HIDE);
         ShowWindow(next_,!busy?SW_SHOWNA:SW_HIDE);
         ShowWindow(cancel_,!terminal && page!=Page::Removing?SW_SHOWNA:SW_HIDE);
         EnableWindow(next_,!select || selected_.Any()||selected_.cleanupSettings);
@@ -687,29 +694,23 @@ private:
         return cancelRequested_.load()?Action::Cancel:action_.load();
     }
     bool EnsureModulesReleased() {
-        bool nativeFailed=false;
-        auto holders=GlassInstallUnlock::CollectHolders(x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),nativeFailed,&cancelRequested_);
-        if (nativeFailed) { SetError(T(L"Не удалось проверить модули в процессах.",L"Could not check modules in processes.")); return false; }
-        if (holders.empty()) return true;
-        const bool clear=GlassInstallWatch::WaitUntilClearOrTimeout(30000,x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),holders,nativeFailed,&cancelRequested_);
-        if (cancelRequested_.load()) return false;
-        if (nativeFailed) { SetError(T(L"Не удалось проверить модули в процессах.",L"Could not check modules in processes.")); return false; }
-        if (clear && holders.empty()) return true;
-        for (;;) {
-            holders=GlassInstallUnlock::CollectHolders(x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),nativeFailed,&cancelRequested_);
-            if (nativeFailed) { SetError(T(L"Не удалось проверить модули в процессах.",L"Could not check modules in processes.")); return false; }
-            if (holders.empty()) return true;
-            Action choice=AskUser(Page::UnlockModules,GlassInstallUnlock::FormatHolders(holders));
-            if (choice==Action::Cancel) { cancelRequested_.store(true); return false; }
-            for (const auto& h:holders) (void)GlassInstallUnlock::ForceUnloadHolder(h,x64Dir_,x86Dir_);
-            if (cancelRequested_.load()) return false;
-            holders=GlassInstallUnlock::CollectHolders(x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),nativeFailed,&cancelRequested_);
-            if (nativeFailed) { SetError(T(L"Не удалось проверить модули в процессах.",L"Could not check modules in processes.")); return false; }
-            if (holders.empty()) return true;
-            choice=AskUser(Page::UnlockProcesses,GlassInstallUnlock::FormatHolders(holders));
-            if (choice==Action::Cancel) { cancelRequested_.store(true); return false; }
-            for (const auto& h:holders) GlassInstallUnlock::UnlockProcess(h.pid,h.exe.c_str());
-            if (cancelRequested_.load()) return false;
+        for(;;) {
+            bool failed=false;
+            std::vector<GlassInstallUnlock::ModuleHolder> holders;
+            const bool clear=GlassInstallWatch::WaitUntilClearOrTimeout(30000,x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),holders,failed,&cancelRequested_);
+            if(cancelRequested_.load())return false;
+            if(!failed && clear && holders.empty())return true;
+            monitorUnknown_.store(failed);
+            if(args_.silent && args_.acceptModuleMonitorRisk) {
+                LogLine(L"Explicit CLI module-monitor risk accepted; unloading is not verified");return true;
+            }
+            const auto choice=AskUser(Page::UnlockModules,failed?T(
+                L"Доверенный совместимый Native недоступен или проверка модулей не удалась. Состояние модулей неизвестно. Установите подходящий GlassSettings и повторите проверку, явно продолжите на свой риск или отмените. Может потребоваться перезагрузка. Проверки MSI не отключены.",
+                L"Trusted compatible Native is unavailable or the module check failed. Module state is unknown. Install matching GlassSettings and retry, explicitly continue at risk, or cancel. A restart may be required. MSI checks remain enabled."):
+                GlassInstallUnlock::FormatHolders(holders));
+            if(choice==Action::Cancel){cancelRequested_.store(true);return false;}
+            if(choice==Action::ContinueRisk){LogLine(L"Explicit GUI module-monitor risk accepted; unloading is not verified");return true;}
+            // Retry never unloads modules or terminates their host processes.
         }
     }
     unsigned SettingsRemovalRisk(const Selection& chosen) const noexcept {
@@ -1458,6 +1459,9 @@ private:
         case WM_COMMAND: {
             const int id=LOWORD(w);
             if (id==IDC_CANCEL || id==IDCANCEL) { RequestClose(); return 0; }
+            if (id==kSelectAll && page_==Page::UnlockModules) {
+                action_.store(Action::ContinueRisk);if(gate_)SetEvent(gate_);SetPage(Page::Stopping);return 0;
+            }
             if (id==kSelectAll && page_==Page::Cleanup) { RequestClose(); return 0; }
             if (id==kSelectAll && page_==Page::Select) {
                 cleanupReviewed_=false;
@@ -1532,7 +1536,6 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
     if (!mutex) { CoUninitialize(); return 4; }
     const bool already=GetLastError()==ERROR_ALREADY_EXISTS;
     if (already && args.silent) { CloseHandle(mutex); CoUninitialize(); return ERROR_INSTALL_ALREADY_RUNNING; }
-    GlassInstallUtil::ConfigureEmbeddedUnlocker(instance,IDR_UNLOCKER_X64);
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_STANDARD_CLASSES}; InitCommonControlsEx(&controls);
     ULONG_PTR token=0; Gdiplus::GdiplusStartupInput input;
     if (Gdiplus::GdiplusStartup(&token,&input,nullptr)!=Gdiplus::Ok) { CloseHandle(mutex); CoUninitialize(); return 3; }
@@ -1546,7 +1549,6 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
         }
     }
     WizardTheme::UninstallDetours();
-    GlassInstallUtil::CleanupEmbeddedUnlocker();
     Gdiplus::GdiplusShutdown(token);
     CloseHandle(mutex);
     CoUninitialize();

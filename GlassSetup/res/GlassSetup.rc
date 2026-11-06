@@ -477,19 +477,8 @@ BEGIN
   IDS_WARN_CERT_INSTALL_HINT "Retry in GlassSettings: System → Context menu → “Install the developer certificate”. Certificate file and description: {dir}\\DeveloperCodeSigning.cer, DeveloperCodeSigning.txt."
   IDS_ERR_OG_SERVICE_DELETE "Windows has marked the OpenGlassHost service for deletion; it cannot be used until the computer restarts. Restart the computer and run Setup again. No changes were made."
 END
-#ifdef GLASS_HAVE_UNLOCKER_X64
-IDR_UNLOCKER_X64 RCDATA "..\\..\\Build\\x64\\Release\\GlassSettings.Native.dll"
-#endif
-#ifdef GLASS_HAVE_UNLOCKER_X86
-IDR_UNLOCKER_X86 RCDATA "..\\..\\Build\\x86\\Release\\GlassSettings.Native.dll"
-#endif
-#ifdef GLASS_EMBED_MSI
-IDR_MSI_GS_X64 RCDATA "..\\..\\Build\\GlassSetup\\msi\\Release\\GlassSettings-x64\\GlassSettings-x64.msi"
-IDR_MSI_GS_X86 RCDATA "..\\..\\Build\\GlassSetup\\msi\\Release\\GlassSettings-x86\\GlassSettings-x86.msi"
+#ifdef GLASS_EMBED_MAINTENANCE
 IDR_MAINTENANCE_UNINS RCDATA "..\\..\\Build\\GlassUnins\\Release\\GlassUnins.exe"
-IDR_MSI_X64 RCDATA "..\\..\\Build\\GlassSetup\\msi\\Release\\Glass-x64\\Glass-x64.msi"
-IDR_MSI_X86 RCDATA "..\\..\\Build\\GlassSetup\\msi\\Release\\Glass-x86\\Glass-x86.msi"
-IDR_MSI_OPENGLASS RCDATA "..\\..\\Build\\GlassSetup\\msi\\Release\\OpenGlass-x64\\OpenGlass-x64.msi"
 #endif
 
 #include "ProductStrings.rcinc"

@@ -27,7 +27,7 @@ def function(token):
     raise ValueError(token)
 
 worker = section("DWORD WINAPI InstallEngine::WorkerThread(", "bool InstallEngine::Start(")
-stages = ["CapturePriorHostState()", "ExtractPayload(", "VerifyEmbeddedNativePayload()", "CreateRollbackSnapshot()",
+stages = ["CapturePriorHostState()", "ExtractPayload(", "CreateRollbackSnapshot()",
           "CloseGlassSettingsProcesses(", "StopRunningHosts()", "InstallGlassSettingsEarly()",
           "ReleaseLockedModules()", "PurgeRemnants()", "RunMsiSequence()", "RegisterSelectedProducts()",
           "LaunchSelectedProducts()"]

@@ -37,11 +37,12 @@ export_prefix = r'''
 using DWORD=std::uint32_t;using BOOL=int;
 constexpr BOOL TRUE=1,FALSE=0;
 namespace Shared::InjectModuleScan {
- constexpr DWORD kNativeLocalInstallerScan=0x80000000u,kNativeInstallerScanProtocol=0x31495347u;
+ constexpr DWORD kNativeLocalInstallerScan=0x80000000u,kNativeDeferForeignExplorer=0x40000000u,kNativeOptionMask=0xc0000000u,kNativeInstallerScanProtocol=0x31495347u;
+ constexpr unsigned ScanOptionNone=0,ScanOptionDeferForeignExplorer=1;
  struct Result {DWORD pid=0;};
  int normalCalls=0, strictCalls=0;bool normalResult=true,strictResult=true;
  bool Scan(const DWORD*,DWORD,Result*,DWORD capacity,DWORD* count){++normalCalls;assert(capacity==4);*count=1;return normalResult;}
- bool ScanForSetup(const DWORD*,DWORD,Result*,DWORD capacity,DWORD* count){++strictCalls;assert(capacity==4);*count=1;return strictResult;}
+ bool ScanForSetup(const DWORD*,DWORD,Result*,DWORD capacity,DWORD* count,unsigned=0){++strictCalls;assert(capacity==4);*count=1;return strictResult;}
 }
 int mergeCalls=0;bool mergeResult=true;
 bool MergeOppositeX64Scan(Shared::InjectModuleScan::Result*,DWORD,DWORD*,const DWORD*,DWORD){++mergeCalls;return mergeResult;}
@@ -90,7 +91,9 @@ using DWORD=std::uint32_t;using BOOL=int;using FARPROC=void(*)();using HMODULE=v
 constexpr BOOL FALSE=0,TRUE=1;
 constexpr DWORD LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR=1,LOAD_LIBRARY_SEARCH_SYSTEM32=2;
 namespace Shared::InjectModuleScan {
- constexpr DWORD kNativeLocalInstallerScan=0x80000000u,kNativeInstallerScanProtocol=0x31495347u;
+ constexpr DWORD kNativeLocalInstallerScan=0x80000000u,kNativeDeferForeignExplorer=0x40000000u,kNativeOptionMask=0xc0000000u,kNativeInstallerScanProtocol=0x31495347u;
+ constexpr unsigned ScanOptionNone=0,ScanOptionDeferForeignExplorer=1;
+ constexpr char kNativeScanDiagExport[]="GlassSettings_GetLastScanDiag";
  constexpr char kNativeInstallerProtocolExport[]="GlassSettings_InstallerScanProtocolV1";
  struct Result {DWORD pid=0;};
 }
@@ -101,10 +104,11 @@ struct Fake {
 BOOL scanImpl(const DWORD*,DWORD,void* results,DWORD cap,DWORD* count){
  using namespace Shared::InjectModuleScan;
  if(!results){++fake.handshakes;if(!fake.capable)return FALSE;*count=fake.wrongProtocol?0:kNativeInstallerScanProtocol;return TRUE;}
- ++fake.strictScans;assert(cap==(4|kNativeLocalInstallerScan));*count=fake.overCount?5:1;return fake.scanSucceeds;
+ ++fake.strictScans;assert(cap==(4|kNativeLocalInstallerScan|kNativeDeferForeignExplorer));*count=fake.overCount?5:1;return fake.scanSucceeds;
 }
 BOOL unloadImpl(DWORD pid){++fake.unloadCalls;return pid==42;}
-namespace GlassInstallUtil { std::wstring EmbeddedNativeDllX86(){return fake.path?L"trusted-temp/Native.dll":L"";} }
+namespace GlassInstallUtil { std::wstring InstalledNativeDllX86(){return fake.path?L"trusted-temp/Native.dll":L"";} }
+void LogDeferredExplorerOnce(){}
 namespace GlassInstallLog { void Line(const wchar_t*){} template<class... T>void LineFormat(const wchar_t*,T...){} }
 DWORD GetLastError(){return 5;}
 HMODULE LoadLibraryExW(const wchar_t*,void*,DWORD flags){fake.flags=flags;return fake.load?reinterpret_cast<HMODULE>(1):nullptr;}

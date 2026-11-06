@@ -28,12 +28,6 @@ namespace {
 
 namespace GP = GlassShared::GlassPlatformTask;
 
-struct ResourceBlob {
-    UINT id = 0;
-    const wchar_t* fileName = nullptr;
-    bool needed = false;
-};
-
 bool ProductWasSnapshotted(const GlassInstallRollback::SessionState& state, const wchar_t* code) noexcept {
     if (!code) return false;
     for (const auto& product : state.oldProducts)
@@ -455,10 +449,6 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             bool ok = priorStateOk && !self->IsCancelRequested() && self->ExtractPayload(self->instance_);
             bool snapshotFailed = !priorStateOk && !self->IsCancelRequested();
 
-            // Check the embedded helper resources without extraction or DLL execution.
-            // A stale DLL must be diagnosed before stopping hosts or changing MSI.
-            if (ok && !self->IsCancelRequested()) ok = self->VerifyEmbeddedNativePayload();
-
             // Снимок до стопа хостов: если на диске нет места или нажата Отмена, система не затрагивается.
             if (ok) {
                 // Snapshot even on a clean/reinstall path: pre-existing user files must survive cancellation.
@@ -473,7 +463,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
 
             // The chosen Settings product is installed after the snapshot and
             // platform-stop/mutex wait, but before the two Native monitors.
-            // If it is not chosen, only embedded helpers are used; no temporary
+            // If it is not chosen, only trusted installed helpers are used; no temporary
             // Settings MSI is registered. Record changes before starting MSI so
             // cancellation or a scan failure takes the normal rollback path.
             if (ok && !self->IsCancelRequested()) ok = self->InstallGlassSettingsEarly();
@@ -635,7 +625,6 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             }
             // The local Native module has been released before rollback and no
             // helper process is needed beyond this point.
-            GlassInstallUtil::CleanupEmbeddedUnlocker();
 
             self->succeeded_ = ok && !self->userCancelled_.load(std::memory_order_acquire);
             self->finished_.store(true,std::memory_order_release);
@@ -671,7 +660,6 @@ bool InstallEngine::Start(
     launchingPhase_.store(false, std::memory_order_relaxed);
 
     selection_=GlassProducts::NormalizeInstall(selection_,GlassInstallUtil::IsOs64Bit());
-    GlassInstallUtil::ConfigureEmbeddedUnlocker(instance, IDR_UNLOCKER_X64, IDR_UNLOCKER_X86);
 
     holdGate_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     decisionGate_ = CreateEventW(nullptr, TRUE, TRUE, nullptr);
@@ -963,132 +951,48 @@ bool InstallEngine::StopRunningHosts() noexcept {
 }
 
 bool InstallEngine::ReleaseLockedModules() noexcept {
-    using ModuleHolder = GlassInstallUnlock::ModuleHolder;
     WizardUnlock::EndOnExit finishUnlock(unlockActivity_);
-    auto publish = [&](HoldKind kind, const std::vector<ModuleHolder>& holders) {
-        AcquireSRWLockExclusive(&statusLock_);
-        if (!cancelRequested_.load(std::memory_order_acquire)) {
-            // A new prompt replaces the previous active unlock animation.
-            unlockActivity_.End();
-            if (holdGate_) ResetEvent(holdGate_);
-            holdKind_ = kind;
-            holdReport_ = GlassInstallUnlock::FormatHolders(holders);
-            holdAction_ = HoldAction::None;
-        }
-        ReleaseSRWLockExclusive(&statusLock_);
-    };
-
-    const ULONGLONG scanStarted=GetTickCount64();
-    SetStatus(labels_.unload.empty() ? L"…" : labels_.unload, -1);
-    bool nativeFailed = false;
-    const auto failScan = [&]() {
-        if (!IsCancelRequested()) SetFailure(labels_.nativeScanFailed.empty()
-            ? L"Process module scan failed." : labels_.nativeScanFailed, 0);
-        return false;
-    };
 #ifdef GLASS_SETUP_NATIVE_MONITOR
-    if (!GlassInstallWatch::BeginLocalNativeMonitor()) return failScan();
-    struct LocalMonitorScope {
-        ~LocalMonitorScope() { GlassInstallWatch::EndLocalNativeMonitor(); }
-    } localMonitorScope;
+    struct MonitorScope { ~MonitorScope(){GlassInstallWatch::EndLocalNativeMonitor();} } monitor;
 #endif
-    std::vector<DWORD> settingsClosed;
-    auto nudgeSettings = [&](const std::vector<ModuleHolder>& list) {
-        for (const auto& holder : list) {
-            if (_wcsicmp(holder.exe.c_str(), L"GlassSettings.exe") != 0) continue;
-            bool seen = false;
-            for (DWORD pid : settingsClosed) {
-                if (pid == holder.pid) { seen = true; break; }
+    for(;;) {
+        if(IsCancelRequested())return false;
+        bool failed=false;
+#ifdef GLASS_SETUP_NATIVE_MONITOR
+        failed=!GlassInstallWatch::BeginLocalNativeMonitor();
+#endif
+        std::vector<GlassInstallUnlock::ModuleHolder> holders;
+        if(!failed) {
+            const bool clear=GlassInstallWatch::WaitUntilClearOrTimeout(30000,x64Dir_,x86Dir_,scanNativeX64_,holders,failed,&cancelRequested_);
+            if(IsCancelRequested())return false;
+            if(!failed && clear && holders.empty()) {
+                InstallLog::Line(L"Module scan verified: all Glass modules unloaded");return true;
             }
-            if (seen) continue;
-            settingsClosed.push_back(holder.pid);
-            InstallLog::LineFormat(L"Unlocker: GlassSettings pid %lu — WM_CLOSE before MSI", holder.pid);
-            GlassInstallUnlock::CloseMatchingProcessWindows(holder.pid, holder.exe.c_str());
         }
-    };
-
-    std::vector<ModuleHolder> holders;
-    // Start the resident x64 rundll32 monitor before the first local x86 scan;
-    // the watcher keeps both results current while modules unload naturally.
-    const bool cleared = GlassInstallWatch::WaitUntilClearOrTimeout(
-        30000, x64Dir_, x86Dir_, scanNativeX64_, holders, nativeFailed, &cancelRequested_);
-    if (IsCancelRequested()) return false;
-    if (nativeFailed) return failScan();
-    if (cleared) holders.clear();
-    nudgeSettings(holders);
-    // A very fast empty scan must still be visible to the user. Remain
-    // cancellable while the UI receives and paints the real scanning status.
-    while (GetTickCount64()-scanStarted < 600) {
-        if (IsCancelRequested()) return false;
-        Sleep(50);
-    }
-    if (!holders.empty()) {
-        InstallLog::LineFormat(L"Unlocker: %u processes still hold Glass modules after stop",
-            static_cast<unsigned>(holders.size()));
-        for (const auto& holder : holders) {
-            InstallLog::LineFormat(L"  holder %s pid %lu%s: %s",
-                holder.exe.c_str(), holder.pid,
-                GlassInstallUnlock::TargetIsWow64(holder.pid) ? L" wow64" : L"",
-                holder.modules.c_str());
+        AcquireSRWLockExclusive(&statusLock_);
+        unlockActivity_.End();
+        if(holdGate_)ResetEvent(holdGate_);
+        holdKind_=failed?HoldKind::MissingHelper:HoldKind::Modules;
+        holdReport_=failed?L"":GlassInstallUnlock::FormatHolders(holders);
+        holdAction_=HoldAction::None;
+        ReleaseSRWLockExclusive(&statusLock_);
+        InstallLog::Line(failed?L"Module scan unavailable: explicit risk consent required":L"Modules remain loaded: Retry / Continue at risk / Cancel");
+        if(IsCancelRequested())return false;
+        WaitForSingleObject(holdGate_,INFINITE);
+        AcquireSRWLockShared(&statusLock_);const auto action=holdAction_.load(std::memory_order_acquire);ReleaseSRWLockShared(&statusLock_);
+        if(action==HoldAction::Cancel || IsCancelRequested()){quietClose_=true;return false;}
+        if(action==HoldAction::ContinueRisk) {
+            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+            AddFinishWarning(ru?L"Продолжено без подтверждённой выгрузки модулей":L"Continued without verified module unloading",
+                ru?L"Вы явно приняли риск. Проверки безопасности MSI не отключены; может потребоваться перезагрузка.":
+                   L"You explicitly accepted the risk. MSI security checks remain enabled; a restart may be required.");
+            InstallLog::Line(L"Explicit module-monitor risk accepted; state remains unknown/loaded, not unloaded");return true;
         }
-    }
-    if (holders.empty()) {
-        InstallLog::Line(L"Unlocker: all Glass modules unloaded");
-        return true;
-    }
-
-    for (;;) {
-        if (IsCancelRequested())
-            return false;
-        InstallLog::Line(L"Unlocker: asking user to force-unload");
-        publish(HoldKind::Modules, holders);
-        if (IsCancelRequested()) return false;
-        WaitForSingleObject(holdGate_, INFINITE);
-        if (holdAction_ == HoldAction::Cancel || IsCancelRequested()) {
-            quietClose_ = true;
-            return false;
-        }
-        SetStatus(labels_.forceUnload.empty() ?
-            (labels_.unload.empty() ? L"…" : labels_.unload) : labels_.forceUnload, -1);
-        for (const auto& holder : holders)
-            (void)GlassInstallUnlock::ForceUnloadHolder(holder, x64Dir_, x86Dir_);
-        const ULONGLONG retryStart = GetTickCount64();
-        do {
-            if (IsCancelRequested()) return false;
-            Sleep(1000);
-            holders = GlassInstallUnlock::CollectHolders(x64Dir_, x86Dir_, scanNativeX64_, nativeFailed, &cancelRequested_);
-            if (IsCancelRequested()) return false;
-            if (nativeFailed) return failScan();
-        } while (!holders.empty() && GetTickCount64() - retryStart < 8000);
-        if (holders.empty()) {
-            InstallLog::Line(L"Unlocker: force unload cleared modules");
-            return true;
-        }
-
-        InstallLog::Line(L"Unlocker: modules remain after force unload");
-        publish(HoldKind::Processes, holders);
-        if (IsCancelRequested()) return false;
-        WaitForSingleObject(holdGate_, INFINITE);
-        if (holdAction_ == HoldAction::Cancel || IsCancelRequested()) {
-            quietClose_ = true;
-            return false;
-        }
-        SetStatus(labels_.unlockProcesses.empty() ?
-            (labels_.unload.empty() ? L"…" : labels_.unload) : labels_.unlockProcesses, -1);
-        for (const auto& holder : holders) {
-            if (IsProtectedProcessName(holder.exe.c_str())) {
-                InstallLog::LineFormat(L"Unlocker: skip protected %s", holder.exe.c_str());
-                continue;
-            }
-            GlassInstallUnlock::UnlockProcess(holder.pid, holder.exe.c_str());
-        }
-        holders = GlassInstallUnlock::CollectHolders(x64Dir_, x86Dir_, scanNativeX64_, nativeFailed, &cancelRequested_);
-        if (IsCancelRequested()) return false;
-        if (nativeFailed) return failScan();
-        if (holders.empty()) {
-            InstallLog::Line(L"Unlocker: processes released modules");
-            return true;
-        }
+#ifdef GLASS_SETUP_NATIVE_MONITOR
+        GlassInstallWatch::EndLocalNativeMonitor();
+#endif
+        // Retry only observes again. Never inject/unload/terminate a holder as
+        // a hidden side effect of retrying an unavailable or nonempty scan.
     }
 }
 
@@ -1143,37 +1047,6 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
             return false;
         }
     }
-    return !IsCancelRequested();
-}
-
-bool InstallEngine::VerifyEmbeddedNativePayload() noexcept {
-    const bool ru = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
-    auto check = [&](UINT resource, WORD machine, const wchar_t* arch) {
-        const char* checks[]={nullptr,Shared::InjectModuleScan::kNativeInstallerProtocolExport,
-            GlassInstallUtil::kInstallerShellExport};
-        for (const char* marker:checks) {
-            if (IsCancelRequested()) return false;
-            if (GlassInstallUtil::ResourcePeMatches(instance_,resource,machine,marker)) continue;
-            const DWORD error=GetLastError();
-            InstallLog::LineFormat(L"Native preflight %s: resource=%u expectedMachine=0x%04x check=%hs failed, error=%lu",
-                arch,resource,machine,marker?marker:"PE architecture/header",error);
-            if (!IsCancelRequested()) {
-                const std::wstring message = ru
-                    ? std::wstring(L"Не удалось проверить встроенный ресурс GlassSettings.Native ") + arch +
-                        L" (ID " + std::to_wstring(resource) + L"). Подробности проверки PE/экспортов — в журнале. Установленные продукты не изменялись."
-                    : std::wstring(L"Could not validate the embedded GlassSettings.Native ") + arch +
-                        L" resource (ID " + std::to_wstring(resource) + L"). See the log for the PE/export check details. Installed products were not changed.";
-                SetFailure(message,error);
-            }
-            return false;
-        }
-        InstallLog::LineFormat(L"Native preflight %s: embedded resource=%u, PE architecture and installer exports OK",arch,resource);
-        return true;
-    };
-    // Validate the installer bundle, not the target installation. In particular,
-    // a clean machine has no installed x64 Settings helper before its MSI runs.
-    if (!check(IDR_UNLOCKER_X86,IMAGE_FILE_MACHINE_I386,L"x86")) return false;
-    if (scanNativeX64_ && !check(IDR_UNLOCKER_X64,IMAGE_FILE_MACHINE_AMD64,L"x64")) return false;
     return !IsCancelRequested();
 }
 
@@ -1379,7 +1252,7 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
 
 bool InstallEngine::InstallGlassSettingsEarly() noexcept {
     if (!selection_.glassSettings) {
-        InstallLog::Line(L"GlassSettings not selected: monitor will use embedded temporary Native DLLs");
+        InstallLog::Line(L"GlassSettings not selected: monitoring requires trusted installed Native helpers");
         return true;
     }
     bool settingsRunning = false;
@@ -1667,7 +1540,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
     for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty())
         cacheBlobs.push_back({0,names[i],sources[i].c_str()});
     std::wstring cacheFailure;
-    if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs.data(),cacheBlobs.size(),IDR_MAINTENANCE_UNINS,IDR_UNLOCKER_X86,&cacheFailure))
+    if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs.data(),cacheBlobs.size(),IDR_MAINTENANCE_UNINS,&cacheFailure))
         AddFinishWarning(ru?L"Оболочка обслуживания сохранена не полностью":L"Maintenance cache publication is incomplete",
             (ru?L"Не удалось полностью сохранить комплект обслуживания. Это не сообщение о сбое запуска. Сохраните исходный установщик и журнал.\n":
                 L"The maintenance bundle was not fully saved. This does not indicate a component startup failure. Keep the original installer and log.\n")+cacheFailure);
@@ -1848,7 +1721,7 @@ bool InstallEngine::DetermineCleanInstall() noexcept {
     cleanInstall_ = x64 == ArchPresence::Absent && x86 == ArchPresence::Absent
         && !gsInstalled && !sutInstalled && !openGlass && !prior_.x64TaskExisted && !prior_.x86TaskExisted
         && !prior_.ogServiceExisted && !prior_.ogLegacyTaskExisted && !prior_.ogWasRunning;
-    // Setup is x86; on x64 Windows the embedded x64 helper is required even
+    // Setup is x86; on x64 Windows a trusted installed x64 helper is required even
     // when product registration/files are missing or the install looks clean.
     // Failure to determine WOW64 must not silently skip the x64 monitor.
 #if defined(_WIN64)

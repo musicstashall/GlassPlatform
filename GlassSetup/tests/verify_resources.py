@@ -95,9 +95,9 @@ for filename, expected in expected_assets.items():
 
 for resource_id in ("IDR_HTML", "IDR_WELCOME", "IDR_FONT_HANDWRITTEN", "IDR_SLIDE_START",
                     "IDR_SLIDE_TASKBAR", "IDR_SLIDE_NOTIFICATION", "IDR_SLIDE_CONTEXT_MENU",
-                    "IDR_SLIDE_EXPLORER", "IDR_UNLOCKER_X64"):
+                    "IDR_SLIDE_EXPLORER"):
     assert resource_id in ids and resource_id in rc and resource_id in unins_rc, resource_id
-assert "IDR_UNLOCKER_X86" in ids and "IDR_UNLOCKER_X86" in rc
+assert "IDR_UNLOCKER_X86" not in rc and "IDR_UNLOCKER_X64" not in rc
 for filename in expected_assets:
     assert filename in rc and filename in unins_rc and filename in assets, filename
 for token in ("data:image/jpeg;base64,", "data:image/png;base64,", "data:font/ttf;base64,"):
@@ -135,19 +135,15 @@ assert "progress_tests.cpp" in project and "removal_order_tests.cpp" in project 
 assert "GlassInstallRemoval.cpp" in project and "GlassRemovalOrder.h" in project
 assert project.count("taskschd.lib") >= 2
 assert 'ResourceCompile Include="GlassUnins.rc"' in unins_project
-assert "GLASS_HAVE_UNLOCKER_X64" in project and "GLASS_HAVE_UNLOCKER_X86" in project
-assert "GLASS_SETUP_NATIVE_MONITOR" in project and "IDR_UNLOCKER_X86" in project
-assert "GlassSettings.Native.dll" in project and "GlassSettings.Native.dll" in unins_rc
-assert "<LinkLibraryDependencies>true</LinkLibraryDependencies>" in project
-native_reference = section(project, '<ProjectReference Include="..\\GlassSettings\\Native\\GlassSettings.Native.vcxproj"', '</ProjectReference>')
-assert "<LinkLibraryDependencies>false</LinkLibraryDependencies>" in native_reference
-assert '<ResourceCompile Include="res\\GlassSetup.rc"' in project
-assert "VerifyEmbeddedNativePayload()" in engine and "kNativeInstallerProtocolExport" in engine
-preflight=section(engine,"bool InstallEngine::VerifyEmbeddedNativePayload()", "bool InstallEngine::RecheckSnapshottedProduct")
-assert "ResourcePeMatches(instance_,resource,machine,marker)" in preflight
-assert "IDR_UNLOCKER_X86" in preflight and "IDR_UNLOCKER_X64" in preflight
-assert "NativeDllForArch(" not in preflight and "EmbeddedNativeDllX86(" not in preflight
-assert "ExtractResourceToFile(" not in preflight
+assert "GLASS_HAVE_UNLOCKER" not in project and "GLASS_EMBED_MSI" not in project
+assert "GLASS_SETUP_NATIVE_MONITOR" in project
+assert "IDR_MSI_" not in rc and "IDR_UNLOCKER_" not in unins_rc
+assert "GlassSettings.Native.vcxproj" not in project
+assert "GLASS_EMBED_MAINTENANCE" in project and "IDR_MAINTENANCE_UNINS RCDATA" in rc
+assert "VerifyEmbeddedNativePayload" not in engine
+assert "InstalledNativeDllX86" in util and "SignedPublisher" in util
+assert "WinVerifyTrust" in util and "expected==actual" in util
+assert "kNativeInstallerProtocolExport" in util
 assert "bool PeBufferMatches(" in util and "bool ResourcePeMatches(" in util
 
 native = (repo / "GlassSettings/Native/InjectProcessMapNative.cpp").read_text(encoding="utf-8")
@@ -155,7 +151,7 @@ protocol = (repo / "GlassShared/include/InjectModuleScan.h").read_text(encoding=
 assert "GlassSettings_InstallerScanProtocolV2" in native and "GlassSettings_InstallerScanProtocolV2" in protocol
 build_guard = read("scripts/Verify-InstallerNative.ps1")
 assert "GlassSettings_InstallerScanProtocolV2" in build_guard
-assert "-X86" in project and "-X64" in project and "Verify-InstallerNative.ps1" in project
+assert "-File &quot;$(ProjectDir)scripts\\Verify-InstallerNative.ps1" not in project
 assert "<AdditionalDependencies>GlassShared.lib;" not in project
 solution = (repo / "GlassProject.sln").read_text(encoding="utf-8")
 setup_guid = "{7E4C1A90-6B2D-4F58-9C31-0A6E5D4B2F18}"
@@ -435,7 +431,7 @@ assert 'CreateSecureTempDirectory(L"GlassSetupLogs"' in read("src/InstallLog.cpp
 assert 'CreateSecureTempDirectory(L"GlassUninsLogs"' in read("src/InstallSupport/GlassInstallLog.cpp")
 assert "SecureLogDirectory()" in unins and 'GetEnvironmentVariableW(L"ProgramW6432"' not in setup + unins + engine
 native_helper = section(util, "std::wstring NativeDllForArch(", "bool QueryPlatformInstallPath(")
-assert "return InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir" in native_helper
+assert "InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir" in native_helper and "kNativeInstallerProtocolExport" in native_helper
 assert "EnsureExtractedUnlockerX64()" not in native_helper
 assert "QueryPlatformInstallPath(" not in native_helper and "TryGetAutorunGlassCompatInstallRoot(" not in native_helper
 shell_ops = (repo / "GlassSettings/Native/ShellExtensionOps.cpp").read_text(encoding="utf-8")
@@ -537,7 +533,7 @@ assert worker.index("InstallGlassSettingsEarly()") < worker.index("RunMsiSequenc
 # Retain recognition and explicit removal of legacy Glass-owned products.
 for suffix in ("5076", "5077"):
     assert suffix in read("src/InstallSupport/GlassInstallMsi.h")
-assert "msiResSecureUxTheme=0" in setup and "report.secureUxTheme" in sut_inspect
+assert "msiResSecureUxTheme" not in setup and "report.secureUxTheme" in sut_inspect
 assert "kProductSecureUxThemeX64" in engine and "kProductSecureUxThemeX86" in rollback and "kProductSecureUxThemeX64" in unins
 activation = section(sut_native, 'extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(', 'extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeDeactivate(')
 assert "CopyFile" not in activation and "DeleteFile" not in activation
@@ -651,7 +647,7 @@ assert "plan-warning" in ui and "li.textContent='⚠ '+item.warning" in ui
 assert "selected.length} of ${inputs.length}" in ui
 assert "More products below" in ui and "Products above" in ui
 assert "const bool sutNeedsSettings=false" in setup and "const bool sutRequiresSettings=false" in setup
-assert "(page==Page::Cleanup || (select&&!webReady_))?SW_SHOWNA:SW_HIDE" in unins and "ShowWindow(back_,SW_HIDE)" in unins
+assert "(page==Page::UnlockModules || page==Page::Cleanup || (select&&!webReady_))?SW_SHOWNA:SW_HIDE" in unins and "ShowWindow(back_,SW_HIDE)" in unins
 assert "(page_==Page::Select || page_==Page::Cleanup)?SW_SHOWNA:SW_HIDE" in unins
 assert "WizardTheme::PaintFooterBar(dc" in setup and "void PaintFooterBar(" in theme and "bufferedErase_" not in setup
 assert "const bool terminalPage=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error" in setup
@@ -717,13 +713,11 @@ assert "Средство для использования неподписан�
 
 # Fixed clean build order: Release x64 -> Release x86. First-pass Unins
 # must not consume a Native DLL that is produced only by the second pass.
-assert "IDR_UNLOCKER_X86 RCDATA" not in unins_rc
-assert "IDR_UNLOCKER_X64 RCDATA" in unins_rc
-assert r"Build\x86\Release\GlassSettings.Native.dll" not in unins_project
-assert "ConfigureEmbeddedUnlocker(instance,IDR_UNLOCKER_X64);" in unins
-assert "IDR_MAINTENANCE_UNINS,IDR_UNLOCKER_X86,&cacheFailure)" in engine
-assert 'extract(nativeX86Resource,L"GlassSettings.Native.x86.dll")' in cache and "GlassSettings.Native.x86.dll" in cache
-assert 'CurrentFile(L"GlassSettings.Native.x86.dll")' not in util
+assert "IDR_UNLOCKER_" not in unins_rc
+assert "ConfigureEmbeddedUnlocker" not in unins
+assert "IDR_MAINTENANCE_UNINS,&cacheFailure)" in engine
+assert "nativeX86Resource" not in cache and "GlassSettings.Native.x86.dll" not in cache
+assert "EmbeddedNativeDll" not in util
 assert "Первичная подготовка этой ветки" not in read("README.md")
 
 # Maintenance fixes: machine installation facts, installed-only helpers,

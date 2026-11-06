@@ -96,7 +96,7 @@ void AppendScanResults(std::vector<GlassInstallWatch::ModuleHolder>& holders,
 }
 
 // Why the last strict local scan on this thread stopped, or which explorer.exe
-// it left to the x64 scan. Setup asks the embedded DLL that performed the scan;
+// it left to the x64 scan. Setup asks the trusted installed DLL that performed the scan;
 // the uninstaller links the scanner itself.
 bool ReadLocalScanDiag(Shared::InjectModuleScan::ScanDiag& diag) noexcept {
     diag = {};
@@ -258,9 +258,9 @@ namespace GlassInstallWatch {
 #ifdef GLASS_SETUP_NATIVE_MONITOR
 bool BeginLocalNativeMonitor() noexcept {
     if (g_localNative) return g_localScan && g_localForceUnload;
-    const std::wstring path = GlassInstallUtil::EmbeddedNativeDllX86();
+    const std::wstring path = GlassInstallUtil::InstalledNativeDllX86();
     if (path.empty()) {
-        GlassInstallLog::Line(L"Watch: embedded x86 GlassSettings.Native.dll is unavailable");
+        GlassInstallLog::Line(L"Watch: trusted installed x86 GlassSettings.Native.dll is unavailable");
         return false;
     }
     // Do not search the current working directory or a user-selected install
@@ -282,7 +282,7 @@ bool BeginLocalNativeMonitor() noexcept {
     }
     GlassInstallLog::LineFormat(L"Watch: x86 Native requested=%s loaded=%s", path.c_str(), loadedPath);
     if (_wcsicmp(path.c_str(), loadedPath) != 0) {
-        GlassInstallLog::Line(L"Watch: loaded x86 Native path differs from the embedded file");
+        GlassInstallLog::Line(L"Watch: loaded x86 Native path differs from the verified installed file");
         FreeLibrary(dll);
         return false;
     }
@@ -318,7 +318,7 @@ bool BeginLocalNativeMonitor() noexcept {
     g_localScan = scan;
     g_localForceUnload = unload;
     g_localDiag = reinterpret_cast<NativeScanDiag>(diagExport);
-    GlassInstallLog::Line(L"Watch: loaded embedded x86 GlassSettings.Native.dll into Setup");
+    GlassInstallLog::Line(L"Watch: loaded trusted installed x86 GlassSettings.Native.dll into Setup");
     return true;
 }
 

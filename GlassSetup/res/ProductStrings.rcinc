@@ -2,10 +2,18 @@
 LANGUAGE LANG_RUSSIAN, SUBLANG_DEFAULT
 STRINGTABLE
 BEGIN
+  IDS_INSPECT_UNAVAILABLE "Целостность не подтверждена: нет проверенного MSI установленного продукта"
+  IDS_NATIVE_RISK_TITLE "Выгрузка модулей не подтверждена"
+  IDS_NATIVE_RISK_BODY "Нет доверенного совместимого установленного Native для нужной архитектуры либо проверка модулей не удалась. Это не означает, что модули выгружены. Установите подходящий GlassSettings и повторите проверку или явно продолжите на свой риск. Может потребоваться перезагрузка. Проверки безопасности MSI остаются включёнными."
+  IDS_CONTINUE_RISK "Продолжить на свой риск"
   IDS_COMP_SHELL_SUFFIX " и оболочки Windows"
 END
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 STRINGTABLE
 BEGIN
+  IDS_INSPECT_UNAVAILABLE "Integrity is unverified: no verified installed-product MSI baseline"
+  IDS_NATIVE_RISK_TITLE "Module unloading is not verified"
+  IDS_NATIVE_RISK_BODY "No trusted compatible installed Native helper is available for the required architecture, or the module check failed. This does not mean modules are unloaded. Install matching GlassSettings and retry, or explicitly continue at your own risk. A restart may be required. MSI security checks remain enabled."
+  IDS_CONTINUE_RISK "Continue at risk"
   IDS_COMP_SHELL_SUFFIX " and the Windows shell"
 END

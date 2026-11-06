@@ -3,6 +3,11 @@
 #include "GlassMaintenanceCache.h"
 #include "GlassEmptyDirectories.h"
 #include <shlobj.h>
+#include <wintrust.h>
+#include <softpub.h>
+#include <wincrypt.h>
+#include <InjectModuleScan.h>
+#include <array>
 #include <GlassShellMenuConstants.h>
 #include <objbase.h>
 #include <oleauto.h>
@@ -21,15 +26,6 @@
 namespace GlassInstallUtil {
 
 namespace {
-
-std::mutex g_unlockerMutex;
-HINSTANCE g_unlockerInstance = nullptr;
-UINT g_unlockerX64ResId = 0;
-UINT g_unlockerX86ResId = 0;
-std::wstring g_extractedUnlockerDir;
-std::wstring g_extractedUnlockerX64Path;
-std::wstring g_extractedUnlockerX86Dir;
-std::wstring g_extractedUnlockerX86Path;
 
 // Fail closed: do not overwrite an orphaned legacy shell registration on a clean install.
 bool HasExistingShellRegistrationKeys() noexcept {
@@ -180,97 +176,87 @@ void RemoveEmptyInstallPathKeys() noexcept {
 }
 } // namespace
 
-std::wstring EnsureExtractedUnlockerX64() noexcept {
-    std::lock_guard<std::mutex> lock(g_unlockerMutex);
-    if (!g_extractedUnlockerX64Path.empty()
-        && PeMatches(g_extractedUnlockerX64Path, IMAGE_FILE_MACHINE_AMD64, "GlassSettings_UnlockerW")) {
-        return g_extractedUnlockerX64Path;
-    }
-    if (!g_unlockerInstance || g_unlockerX64ResId == 0)
-        return {};
-    std::wstring dir;
-    if (!CreateSecureTempDirectory(L"GlassUnlocker",dir)) return {};
-    const std::wstring dllPath = dir + L"\\GlassSettings.Native.dll";
-    if (!ExtractResourceToFile(g_unlockerInstance, g_unlockerX64ResId, RT_RCDATA, dllPath)) {
-        RemoveDirectoryW(dir.c_str());
-        return {};
-    }
-    if (!PeMatches(dllPath, IMAGE_FILE_MACHINE_AMD64, "GlassSettings_UnlockerW")) {
-        DeleteFileW(dllPath.c_str());
-        RemoveDirectoryW(dir.c_str());
-        return {};
-    }
-    g_extractedUnlockerDir = dir;
-    g_extractedUnlockerX64Path = dllPath;
-    return g_extractedUnlockerX64Path;
-}
-
 } // namespace
 
-void ConfigureEmbeddedUnlocker(HINSTANCE instance, UINT x64ResourceId, UINT x86ResourceId) noexcept {
-    std::lock_guard<std::mutex> lock(g_unlockerMutex);
-    g_unlockerInstance = instance;
-    g_unlockerX64ResId = x64ResourceId;
-    g_unlockerX86ResId = x86ResourceId;
+namespace {
+bool SignedPublisher(const std::wstring& path,std::array<BYTE,32>& digest) noexcept {
+    WINTRUST_FILE_INFO file{sizeof(file)};file.pcwszFilePath=path.c_str();
+    WINTRUST_DATA data{sizeof(data)};data.dwUIChoice=WTD_UI_NONE;data.fdwRevocationChecks=WTD_REVOKE_NONE;
+    data.dwUnionChoice=WTD_CHOICE_FILE;data.pFile=&file;data.dwStateAction=WTD_STATEACTION_VERIFY;
+    data.dwProvFlags=WTD_CACHE_ONLY_URL_RETRIEVAL;
+    GUID policy=WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    const LONG status=WinVerifyTrust(nullptr,&policy,&data);
+    // A pinned self-signed Glass certificate is supported offline, but invalid
+    // file digests/signatures, expiry, revocation and wrong usage are not.
+    bool ok=status==ERROR_SUCCESS || status==CERT_E_UNTRUSTEDROOT || status==CERT_E_CHAINING;
+    auto* provider=WTHelperProvDataFromStateData(data.hWVTStateData);
+    auto* signer=provider?WTHelperGetProvSignerFromChain(provider,0,FALSE,0):nullptr;
+    if(!signer || !signer->csCertChain || !signer->pasCertChain || !signer->pasCertChain[0].pCert)ok=false;
+    if(ok) {
+        const auto* cert=signer->pasCertChain[0].pCert;
+        DWORD size=static_cast<DWORD>(digest.size());
+        ok=CryptHashCertificate2(BCRYPT_SHA256_ALGORITHM,0,nullptr,cert->pbCertEncoded,cert->cbCertEncoded,digest.data(),&size) && size==digest.size();
+    }
+    data.dwStateAction=WTD_STATEACTION_CLOSE;WinVerifyTrust(nullptr,&policy,&data);
+    return ok;
+}
+// Protect against renaming an admin-owned leaf through a user-writable ancestor.
+// Ancestors may be owned/written by Windows servicing (TrustedInstaller), but
+// the installed product leaf and DLL still use the stricter admin/SYSTEM policy.
+bool NativeAncestorsProtected(std::wstring path) noexcept {
+    if(path.size()<3 || path[1]!=L':' || path[2]!=L'\\')return false;
+    BYTE admins[SECURITY_MAX_SID_SIZE]{},system[SECURITY_MAX_SID_SIZE]{};
+    DWORD na=sizeof(admins),ns=sizeof(system);PSID servicing=nullptr;
+    if(!CreateWellKnownSid(WinBuiltinAdministratorsSid,nullptr,admins,&na) ||
+       !CreateWellKnownSid(WinLocalSystemSid,nullptr,system,&ns) ||
+       !ConvertStringSidToSidW(L"S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",&servicing))return false;
+    const auto privileged=[&](PSID sid){return sid && (EqualSid(sid,admins)||EqualSid(sid,system)||EqualSid(sid,servicing));};
+    bool ok=true;
+    while(ok) {
+        const DWORD attr=GetFileAttributesW(path.c_str());
+        if(attr==INVALID_FILE_ATTRIBUTES || !(attr&FILE_ATTRIBUTE_DIRECTORY) || (attr&FILE_ATTRIBUTE_REPARSE_POINT)){ok=false;break;}
+        PSID owner=nullptr;PACL acl=nullptr;PSECURITY_DESCRIPTOR sd=nullptr;
+        const DWORD security=GetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()),SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,&owner,nullptr,&acl,nullptr,&sd);
+        if(security!=ERROR_SUCCESS){if(sd)LocalFree(sd);ok=false;break;}
+        ok=privileged(owner) && acl;
+        for(DWORD i=0;ok && i<acl->AceCount;++i) {
+            void* raw=nullptr;if(!GetAce(acl,i,&raw)){ok=false;break;}
+            const auto* header=static_cast<ACE_HEADER*>(raw);
+            if(header->AceFlags&INHERIT_ONLY_ACE)continue;
+            if(header->AceType==ACCESS_DENIED_ACE_TYPE)continue;
+            if(header->AceType!=ACCESS_ALLOWED_ACE_TYPE){ok=false;break;}
+            auto* ace=static_cast<ACCESS_ALLOWED_ACE*>(raw);
+            constexpr DWORD replace=GENERIC_ALL|GENERIC_WRITE|DELETE|WRITE_DAC|WRITE_OWNER|FILE_DELETE_CHILD|FILE_WRITE_DATA;
+            if((ace->Mask&replace) && !privileged(&ace->SidStart))ok=false;
+        }
+        LocalFree(sd);
+        if(path.size()==3)break;
+        const auto slash=path.find_last_of(L'\\');if(slash==std::wstring::npos){ok=false;break;}
+        path.resize(slash==2?3:slash);
+    }
+    LocalFree(servicing);return ok;
 }
 
-std::wstring EmbeddedNativeDllX86() noexcept {
-    std::lock_guard<std::mutex> lock(g_unlockerMutex);
-    if (!g_extractedUnlockerX86Path.empty() &&
-        PeMatches(g_extractedUnlockerX86Path, IMAGE_FILE_MACHINE_I386, "GlassSettings_UnlockerW"))
-        return g_extractedUnlockerX86Path;
-    if (!g_unlockerInstance || !g_unlockerX86ResId) return {};
-    std::wstring dir;
-    if (!CreateSecureTempDirectory(L"GlassUnlocker86", dir)) return {};
-    // Use a distinct temporary basename so a previously loaded Settings DLL
-    // cannot be mistaken for this installer's bundled x86 Native module.
-    const std::wstring path = dir + L"\\GlassSetup.Native.x86.dll";
-    if (!ExtractResourceToFile(g_unlockerInstance, g_unlockerX86ResId, RT_RCDATA, path) ||
-        !PeMatches(path, IMAGE_FILE_MACHINE_I386, "GlassSettings_UnlockerW")) {
-        DeleteFileW(path.c_str());
-        RemoveDirectoryW(dir.c_str());
-        return {};
-    }
-    g_extractedUnlockerX86Dir = dir;
-    g_extractedUnlockerX86Path = path;
-    return path;
+bool TrustedInstalledNative(const std::wstring& path,const std::wstring& root) noexcept {
+    const auto parent=TrimTrailingSlashes(root)+L"\\GlassSettings";
+    if(!NativeAncestorsProtected(parent))return false;
+    if(!GlassMaintenanceCache::TrustedDirectory(TrimTrailingSlashes(root)) ||
+       !GlassMaintenanceCache::TrustedDirectory(parent) || !GlassMaintenanceCache::TrustedPath(path,false))return false;
+    // Pin the file while validating. Installed roots/files are admin-only; no
+    // executable is copied/extracted to Temp or loaded from a writable source.
+    HANDLE pin=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(pin==INVALID_HANDLE_VALUE)return false;
+    wchar_t self[32768]{};const DWORD n=GetModuleFileNameW(nullptr,self,_countof(self));
+    std::array<BYTE,32> expected{},actual{};
+    const bool ok=n && n<_countof(self) && SignedPublisher(self,expected) && SignedPublisher(path,actual) && expected==actual;
+    CloseHandle(pin);return ok;
 }
+} // namespace
 
-void CleanupEmbeddedUnlocker() noexcept {
-    std::lock_guard<std::mutex> lock(g_unlockerMutex);
-    // The in-process x86 module must have been FreeLibrary'd first.
-    if (!g_extractedUnlockerX86Path.empty()) {
-        if (!DeleteFileW(g_extractedUnlockerX86Path.c_str())) {
-            const DWORD error = GetLastError();
-            const bool deferred = MoveFileExW(g_extractedUnlockerX86Path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
-            GlassInstallLog::LineFormat(L"x86 Native cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
-        }
-        g_extractedUnlockerX86Path.clear();
-    }
-    if (!g_extractedUnlockerX86Dir.empty()) {
-        if (!RemoveDirectoryW(g_extractedUnlockerX86Dir.c_str())) {
-            const DWORD error = GetLastError();
-            const bool deferred = MoveFileExW(g_extractedUnlockerX86Dir.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
-            GlassInstallLog::LineFormat(L"x86 Native temp directory cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
-        }
-        g_extractedUnlockerX86Dir.clear();
-    }
-    if (!g_extractedUnlockerX64Path.empty()) {
-        if (!DeleteFileW(g_extractedUnlockerX64Path.c_str())) {
-            const DWORD error = GetLastError();
-            const bool deferred = MoveFileExW(g_extractedUnlockerX64Path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
-            GlassInstallLog::LineFormat(L"x64 Native cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
-        }
-        g_extractedUnlockerX64Path.clear();
-    }
-    if (!g_extractedUnlockerDir.empty()) {
-        if (!RemoveDirectoryW(g_extractedUnlockerDir.c_str())) {
-            const DWORD error = GetLastError();
-            const bool deferred = MoveFileExW(g_extractedUnlockerDir.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
-            GlassInstallLog::LineFormat(L"x64 Native temp directory cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
-        }
-        g_extractedUnlockerDir.clear();
-    }
+std::wstring InstalledNativeDllX86() noexcept {
+    InstallRoots roots;if(!ResolveInstallRoots(roots))return {};
+    return NativeDllForArch(GlassShared::GlassPlatformTask::PlatformArch::X86,roots.x64,roots.x86);
 }
 
 bool CreateSecureTempDirectory(const wchar_t* prefix, std::wstring& out) noexcept {
@@ -1231,7 +1217,7 @@ std::wstring InstalledSecureUxThemeNativeDll(
     const std::wstring& root=x64?x64Dir:x86Dir;
     if(root.empty())return {};
     const std::wstring dll=TrimTrailingSlashes(root)+L"\\GlassSettings\\GlassSettings.Native.dll";
-    return PeMatches(dll,machine,exportName)?dll:std::wstring();
+    return PeMatches(dll,machine,exportName) && TrustedInstalledNative(dll,root)?dll:std::wstring();
 }
 }
 
@@ -1239,7 +1225,9 @@ std::wstring NativeDllForArch(
     GlassShared::GlassPlatformTask::PlatformArch arch,
     const std::wstring& x64Dir,
     const std::wstring& x86Dir) noexcept {
-    return InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,"GlassSettings_UnlockerW");
+    const auto dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,"GlassSettings_UnlockerW");
+    const WORD machine=arch==GlassShared::GlassPlatformTask::PlatformArch::X64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386;
+    return !dll.empty() && PeMatches(dll,machine,Shared::InjectModuleScan::kNativeInstallerProtocolExport)?dll:std::wstring();
 }
 
 namespace {

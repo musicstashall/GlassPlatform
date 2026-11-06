@@ -8,11 +8,9 @@
 
 namespace GlassInstallUtil {
 
-void ConfigureEmbeddedUnlocker(HINSTANCE instance, UINT x64ResourceId, UINT x86ResourceId = 0) noexcept;
-void CleanupEmbeddedUnlocker() noexcept;
-// Only the installer embeds an x86 Native helper; never fall back to a
-// potentially user-writable installed path for an elevated in-process DLL.
-std::wstring EmbeddedNativeDllX86() noexcept;
+// Optional installed helper, validated for architecture, publisher and protocol.
+// Empty means unavailable/unknown, never a successful unloaded-module scan.
+std::wstring InstalledNativeDllX86() noexcept;
 // Creates a new, administrator/SYSTEM-only directory under Windows Temp.
 bool CreateSecureTempDirectory(const wchar_t* prefix, std::wstring& out) noexcept;
 

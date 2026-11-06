@@ -1621,13 +1621,8 @@ private:
         // страницы; на странице состава до завершения показывается бублик загрузки.
         inspectThread_=std::thread([this,os64]() {
             GlassProductInspect::Inputs inspectIn;
-            inspectIn.instance=gInstance;
+            inspectIn.signerSha1=GlassProductInspect::QuerySelfSignerSha1();
             inspectIn.os64=os64;
-            inspectIn.msiResX64=IDR_MSI_X64;
-            inspectIn.msiResX86=IDR_MSI_X86;
-            inspectIn.msiResSettings=os64?IDR_MSI_GS_X64:IDR_MSI_GS_X86;
-            inspectIn.msiResSecureUxTheme=0; // Original vendor MSI is not embedded.
-            inspectIn.msiResOg=IDR_MSI_OPENGLASS;
             inspectIn.cancelled=&inspectStop_;
             auto report=GlassProductInspect::Run(inspectIn);
             {
@@ -1649,7 +1644,7 @@ private:
             WebFailure(HRESULT_FROM_WIN32(GetLastError()));
     }
     void Layout() {
-        Move(back_,644,kContentHeight+12,96,32);
+        Move(back_,page_==Page::ModulesBusy?510:644,kContentHeight+12,page_==Page::ModulesBusy?230:96,32);
         // Complete uses the exact rectangle previously occupied by Cancel.
         const bool unlock = page_==Page::ProcessesStuck;
         const bool conflictCheck = page_==Page::Conflicts;
@@ -1800,6 +1795,7 @@ private:
     }
     static UINT InspectReasonId(GlassProductInspect::Reason reason) noexcept {
         switch (reason) {
+        case GlassProductInspect::Reason::InspectionUnavailable: return IDS_INSPECT_UNAVAILABLE;
         case GlassProductInspect::Reason::FileMissing: return IDS_INSPECT_FILE_MISSING;
         case GlassProductInspect::Reason::FileSizeMismatch: return IDS_INSPECT_FILE_SIZE;
         case GlassProductInspect::Reason::FileHashMismatch: return IDS_INSPECT_FILE_HASH;
@@ -2095,6 +2091,9 @@ private:
             L",\"progress\":"+std::to_wstring(WizardProgress::ClampUnits(progressValue_))+
             L",\"marquee\":"+(progressMarquee_?L"true":L"false")+
             L",\"unlockActive\":"+((page_==Page::Installing && unlock!=WizardUnlock::Phase::None)?L"true":L"false")+
+            L",\"monitorRisk\":"+(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?L"true":L"false")+
+            L",\"monitorRiskTitle\":"+JsStringLiteral(Text(IDS_NATIVE_RISK_TITLE))+
+            L",\"monitorRiskBody\":"+JsStringLiteral(Text(IDS_NATIVE_RISK_BODY))+
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
             L",\"componentsLoading\":"+(inspectReady_.load(std::memory_order_acquire)?L"false":L"true")+
             L",\"components\":"+ComponentsJson()+
@@ -2213,10 +2212,10 @@ private:
             page_==Page::ModulesBusy?IDS_HOLD_RETRY:
             page_==Page::ProcessesStuck?IDS_UNLOCK:IDS_NEXT;
         SetWindowTextW(next_,Text(nextId).c_str());
-        SetWindowTextW(back_,Text(page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
+        SetWindowTextW(back_,Text(page_==Page::ModulesBusy?IDS_CONTINUE_RISK:page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
         SetWindowTextW(cancel_,Text(blockedPage?IDS_CLOSE:IDS_CANCEL).c_str());
         const bool confirm=page_==Page::ConfirmCancel;
-        const bool backVisible=(page_==Page::License || page_==Page::Components || page_==Page::Certificate || confirm)
+        const bool backVisible=(page_==Page::License || page_==Page::Components || page_==Page::Certificate || page_==Page::ModulesBusy || confirm)
             && !(maintenanceMode_ && page_==Page::Components);
         const bool nextVisible=!inProgress && !blockedPage;
         const bool cancelVisible=!terminal && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
@@ -2871,7 +2870,7 @@ private:
             if (page_!=Page::Launching) SetPage(Page::Launching);
         } else if (page_!=Page::ConfirmCancel && page_!=Page::Cancelling) {
             const auto hold=installEngine_.CurrentHold();
-            if (hold==InstallEngine::HoldKind::Modules && page_!=Page::ModulesBusy) {
+            if ((hold==InstallEngine::HoldKind::Modules || hold==InstallEngine::HoldKind::MissingHelper) && page_!=Page::ModulesBusy) {
                 holdReport_=installEngine_.HoldReport(); SetPage(Page::ModulesBusy);
             } else if (hold==InstallEngine::HoldKind::Processes && page_!=Page::ProcessesStuck) {
                 holdReport_=installEngine_.HoldReport(); SetPage(Page::ProcessesStuck);
@@ -3557,8 +3556,8 @@ private:
             DrawBanner(dc,true);
             const bool kill=page_==Page::ProcessesStuck;
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
-            DrawLabel(dc,Text(kill?IDS_KILL_TITLE:IDS_HOLD_TITLE),Box(48,139,520,70),heading_,white);
-            DrawLabel(dc,Text(kill?IDS_KILL_BODY:IDS_HOLD_BODY),Box(48,220,460,136),font_,muted);
+            DrawLabel(dc,Text(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?IDS_NATIVE_RISK_TITLE:kill?IDS_KILL_TITLE:IDS_HOLD_TITLE),Box(48,139,520,70),heading_,white);
+            DrawLabel(dc,Text(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?IDS_NATIVE_RISK_BODY:kill?IDS_KILL_BODY:IDS_HOLD_BODY),Box(48,220,460,136),font_,muted);
             DrawLabel(dc,holdReport_,Box(48,365,520,165),font_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
         } else if (page_ == Page::Update) {
             DrawBannerFull(dc);
@@ -3867,6 +3866,10 @@ private:
                 }
                 return 0;
             case IDC_BACK:
+                if(page_==Page::ModulesBusy && !DebugDemoLocksControls()) {
+                    installEngine_.SignalHold(InstallEngine::HoldAction::ContinueRisk);
+                    SetPage(Page::Installing);return 0;
+                }
                 if (!DebugDemoLocksControls() && page_==Page::ConfirmCancel) {
                     visibleProgress_.Resume();
                     installEngine_.ResumeAfterCancelDecision(); SetPage(beforeCancel_); return 0;
@@ -3917,7 +3920,7 @@ private:
                     return 0;
                 }
                 if (page_==Page::ModulesBusy) {
-                    installStatusLine_ = Text(IDS_STATUS_FORCE_UNLOAD);
+                    installStatusLine_ = Text(IDS_HOLD_RETRY);
                     installEngine_.SetStatus(installStatusLine_,-1);
                     installEngine_.SignalHold(InstallEngine::HoldAction::Retry);
                     SetPage(Page::Installing);
@@ -4032,7 +4035,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         gWindowClassBrush=nullptr;
     }
     WizardTheme::UninstallDetours();
-    GlassInstallUtil::CleanupEmbeddedUnlocker();
     Gdiplus::GdiplusShutdown(gdiplusToken);
     CloseHandle(instanceMutex);
     InstallLog::Shutdown();

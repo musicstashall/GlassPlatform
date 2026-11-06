@@ -40,6 +40,11 @@ constexpr int INFINITE=-1;
 struct SRWLOCK { std::mutex mutex; };
 void AcquireSRWLockExclusive(SRWLOCK* p){p->mutex.lock();}
 void ReleaseSRWLockExclusive(SRWLOCK* p){p->mutex.unlock();}
+void AcquireSRWLockShared(SRWLOCK* p){p->mutex.lock();}
+void ReleaseSRWLockShared(SRWLOCK* p){p->mutex.unlock();}
+#define PRIMARYLANGID(x) (x)
+constexpr int LANG_RUSSIAN=25;
+int GetUserDefaultUILanguage(){return 0;}
 struct Event { std::mutex mutex; std::condition_variable cv; bool signaled=false; };
 using HANDLE=Event*;
 void SetEvent(HANDLE e){std::lock_guard<std::mutex> l(e->mutex);e->signaled=true;e->cv.notify_all();}
@@ -88,7 +93,7 @@ namespace GlassInstallWatch {
 bool IsProtectedProcessName(const wchar_t*){return false;}
 class InstallEngine {
 public:
- enum class HoldKind {None,Modules,Processes}; enum class HoldAction {None,Retry,Unlock,Cancel};
+ enum class HoldKind {None,Modules,Processes,MissingHelper}; enum class HoldAction {None,Retry,Unlock,ContinueRisk,Cancel};
  struct Labels {std::wstring unload=L"scan",forceUnload=L"force",unlockProcesses=L"process",nativeScanFailed=L"error";} labels_;
  SRWLOCK statusLock_; std::atomic_bool cancelRequested_{false},quietClose_{false},failed_{false};
  HoldKind holdKind_=HoldKind::None; std::atomic<HoldAction> holdAction_{HoldAction::None};
@@ -96,6 +101,8 @@ public:
  std::wstring holdReport_,x64Dir_=L"x64",x86Dir_=L"x86"; bool scanNativeX64_=true,forceClean_=false;
  bool IsCancelRequested()const{return cancelRequested_.load(std::memory_order_acquire);}
  void SetFailure(const std::wstring&,unsigned){failed_.store(true);}
+ int warnings=0;
+ void AddFinishWarning(const std::wstring&,const std::wstring&){++warnings;}
  void SetStatus(const std::wstring&,int){}
  void SignalHold(HoldAction action) noexcept;
  bool ReleaseLockedModules() noexcept;
@@ -107,67 +114,24 @@ template<class F>void until(F predicate){
  auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
  while(!predicate()){assert(std::chrono::steady_clock::now()<deadline);std::this_thread::yield();}
 }
-bool page(const InstallEngine& engine,const wchar_t* expected){
- return std::wstring_view(WizardUnlock::InstallingPage(engine.unlockActivity_.Current()))==expected;
-}
 int main(){
- for(bool retrySuccess:{true,false}){
-   Harness h;h.retrySucceeds=retrySuccess;harness=&h;fakeTime=0;
-   InstallEngine e;bool result=false;std::thread worker([&]{result=e.ReleaseLockedModules();});
-   until([&]{return e.CurrentHold()==InstallEngine::HoldKind::Modules;});
-   assert(page(e,L"installing")); e.SignalHold(InstallEngine::HoldAction::Retry);
-   until([&]{return h.forceEntered.load(std::memory_order_acquire);}); assert(page(e,L"unlock-modules"));
-   SetEvent(&h.forceGate);
-   if(!retrySuccess){
-     until([&]{return e.CurrentHold()==InstallEngine::HoldKind::Processes;}); assert(page(e,L"installing"));
-     e.SignalHold(InstallEngine::HoldAction::Unlock);
-     until([&]{return h.processEntered.load(std::memory_order_acquire);}); assert(page(e,L"unlock-processes"));
-     SetEvent(&h.processGate);
-   }
-   worker.join();assert(result);assert(!e.failed_);assert(page(e,L"installing"));
-   assert(h.loads==1 && h.unloads==1);
- }
- {
-   Harness h;harness=&h;fakeTime=0;InstallEngine e;bool result=true;
+ for(int scenario=0;scenario<4;++scenario) for(auto action:{InstallEngine::HoldAction::Retry,InstallEngine::HoldAction::ContinueRisk,InstallEngine::HoldAction::Cancel}) {
+   Harness h;h.retrySucceeds=false;h.failNativeLoad=scenario==0;h.failWatch=scenario==1;h.emptyInitially=scenario==3;
+   harness=&h;InstallEngine e;bool result=false;
    std::thread worker([&]{result=e.ReleaseLockedModules();});
-   until([&]{return e.CurrentHold()==InstallEngine::HoldKind::Modules;});e.SignalHold(InstallEngine::HoldAction::Retry);
-   until([&]{return h.forceEntered.load(std::memory_order_acquire);});
-   e.cancelRequested_.store(true,std::memory_order_release);SetEvent(&h.forceGate);worker.join();
-   assert(!result);assert(!e.failed_);assert(page(e,L"installing"));assert(h.loads==1 && h.unloads==1);
+   if(scenario==3){worker.join();assert(result && e.warnings==0);continue;}
+   const auto kind=scenario<2?InstallEngine::HoldKind::MissingHelper:InstallEngine::HoldKind::Modules;
+   until([&]{return e.CurrentHold()==kind;});
+   assert(e.unlockActivity_.Current()==WizardUnlock::Phase::None);
+   if(action==InstallEngine::HoldAction::Retry) {h.failNativeLoad=false;h.failWatch=false;h.emptyInitially=true;}
+   e.SignalHold(action);worker.join();
+   assert(result==(action!=InstallEngine::HoldAction::Cancel));
+   assert(e.warnings==(action==InstallEngine::HoldAction::ContinueRisk?1:0));
+   assert(!e.failed_ && !h.forceEntered && !h.processEntered);
+   assert(e.unlockActivity_.Current()==WizardUnlock::Phase::None);
+   if(action==InstallEngine::HoldAction::Retry)assert(h.loads==2);
  }
- {
-   Harness h;h.failNativeLoad=true;harness=&h;fakeTime=0;InstallEngine e;
-   assert(!e.ReleaseLockedModules());assert(e.failed_);assert(h.loads==1 && h.unloads==0 && h.scans==0);
- }
- for(bool clean:{false,true}){
-   Harness h;h.failAt=1;harness=&h;fakeTime=0;InstallEngine e;e.forceClean_=clean;
-   assert(!e.ReleaseLockedModules());assert(e.failed_);assert(e.CurrentHold()==InstallEngine::HoldKind::None);
- }
- {
-   Harness h;h.failWatch=true;harness=&h;fakeTime=0;InstallEngine e;
-   assert(!e.ReleaseLockedModules());assert(e.failed_);assert(e.CurrentHold()==InstallEngine::HoldKind::None);
- }
- {
-   Harness h;h.failAt=2;harness=&h;fakeTime=0;InstallEngine e;bool result=true;
-   std::thread worker([&]{result=e.ReleaseLockedModules();});
-   until([&]{return e.CurrentHold()==InstallEngine::HoldKind::Modules;});e.SignalHold(InstallEngine::HoldAction::Retry);
-   until([&]{return h.forceEntered.load(std::memory_order_acquire);});SetEvent(&h.forceGate);worker.join();
-   assert(!result);assert(e.failed_);assert(page(e,L"installing"));
- }
- {
-   Harness h;h.retrySucceeds=false;h.failAfterProcess=true;harness=&h;fakeTime=0;InstallEngine e;bool result=true;
-   std::thread worker([&]{result=e.ReleaseLockedModules();});
-   until([&]{return e.CurrentHold()==InstallEngine::HoldKind::Modules;});e.SignalHold(InstallEngine::HoldAction::Retry);
-   until([&]{return h.forceEntered.load(std::memory_order_acquire);});SetEvent(&h.forceGate);
-   until([&]{return e.CurrentHold()==InstallEngine::HoldKind::Processes;});e.SignalHold(InstallEngine::HoldAction::Unlock);
-   until([&]{return h.processEntered.load(std::memory_order_acquire);});SetEvent(&h.processGate);worker.join();
-   assert(!result);assert(e.failed_);assert(page(e,L"installing"));
- }
- {
-   Harness h;h.emptyInitially=true;harness=&h;fakeTime=0;InstallEngine e;
-   assert(e.ReleaseLockedModules());assert(!e.failed_);assert(fakeTime.load()>=600);
- }
- std::cout<<"PASS: real unlock worker: retry, process release, cancellation, visibility and fail-closed scans\n";
+ std::cout<<"PASS: actual module gate: known empty, holders, unavailable helper, failed scan; Retry / explicit risk / Cancel; no hidden unload or kill\n";
 }
 '''
 

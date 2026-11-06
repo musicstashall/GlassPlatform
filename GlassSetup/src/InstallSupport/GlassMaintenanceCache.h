@@ -266,7 +266,7 @@ inline bool GarbageCollect() {
 struct Blob {UINT id;const wchar_t* file;const wchar_t* source=nullptr;};
 // Invoked only after successful MSI commit. Failed publication leaves Previous
 // intact; recovery restores it on the next attempt. Never prunes system MSI cache.
-inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT uninstallerResource,UINT nativeX86Resource,
+inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT uninstallerResource,
     std::wstring* failureDetail=nullptr) {
     Diag::Publication publication(failureDetail);
     Diag::Step(L"acquire-lock",L"Global\\GlassPlatform.MaintenanceCache.V1");
@@ -321,9 +321,6 @@ inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT 
             Diag::Fail(L"ExtractResourceToFile",path,GetLastError(),L"resourceId="+std::to_wstring(id));
     };
     if(!extract(uninstallerResource,L"GlassUnins.exe"))return false;
-    // The final Setup is built in the x86 pass and already embeds both helpers.
-    // Publish x86 Native without a reverse build dependency in first-pass Unins.
-    if(!extract(nativeX86Resource,L"GlassSettings.Native.x86.dll"))return false;
     for(std::size_t i=0;i<count;++i) {
         if(blobs[i].source) {
             const std::wstring source=blobs[i].source,destination=stage+L"\\"+blobs[i].file;

@@ -1,4 +1,7 @@
 #include "GlassProductInspect.h"
+#include "GlassPackageAcquisition.h"
+#include "GlassPackageCatalog.h"
+#include "GlassMaintenanceCache.h"
 #include <SecureUxThemeInventory.h>
 
 #include "GlassInstallHost.h"
@@ -330,9 +333,30 @@ using MsiFileHashBuffer = std::remove_pointer_t<decltype(ThirdParameter(&MsiGetF
     return memcmp(bytes + sizeof(MsiFileHashBuffer) - 16, expected, sizeof(expected)) == 0;
 }
 
-// Сверка файлов установленного продукта с таблицами File/MsiFileHash встроенного
+// Windows Installer strips cached signatures/cabinets. Trust its protected
+// cache and exact registered identity, not the version of a replacement MSI.
+bool InstalledBaselineMatches(const std::wstring& path,const wchar_t* code) noexcept {
+    wchar_t windows[32768]{};const UINT length=GetWindowsDirectoryW(windows,_countof(windows));
+    if(!length || length>=_countof(windows))return false;
+    const auto parent=std::wstring(windows)+L"\\Installer";
+    const auto slash=path.find_last_of(L"\\/");
+    if(slash==std::wstring::npos || _wcsicmp(path.substr(0,slash).c_str(),parent.c_str()) ||
+       !GlassMaintenanceCache::TrustedDirectory(parent) || !GlassMaintenanceCache::TrustedPath(path,false))return false;
+    MSIHANDLE db=0,summary=0;
+    if(MsiOpenDatabaseW(path.c_str(),MSIDBOPEN_READONLY,&db)!=ERROR_SUCCESS)return false;
+    bool ok=_wcsicmp(QueryMsiProperty(db,L"ProductCode").c_str(),code)==0;
+    wchar_t registered[256]{},package[256]{};DWORD n=_countof(registered),size=_countof(package);
+    UINT type=0;INT number=0;FILETIME time{};
+    ok=ok && MsiGetProductInfoW(code,INSTALLPROPERTY_PACKAGECODE,registered,&n)==ERROR_SUCCESS &&
+        MsiGetSummaryInformationW(db,nullptr,0,&summary)==ERROR_SUCCESS;
+    if(ok)ok=MsiSummaryInfoGetPropertyW(summary,9,&type,&number,&time,package,&size)==ERROR_SUCCESS &&
+        registered[0] && _wcsicmp(registered,package)==0;
+    if(summary)MsiCloseHandle(summary);MsiCloseHandle(db);return ok;
+}
+
+// Сверка файлов установленного продукта с таблицами File/MsiFileHash установленного
 // MSI и с подписью издателя установщика (повреждение, подмена).
-void CheckProductFiles(
+bool CheckProductFiles(
     const std::wstring& msiPath,
     const wchar_t* productCode,
     const std::wstring& signerSha1,
@@ -341,10 +365,11 @@ void CheckProductFiles(
 {
     MSIHANDLE database = 0;
     if (MsiOpenDatabaseW(msiPath.c_str(), MSIDBOPEN_READONLY, &database) != ERROR_SUCCESS)
-        return;
+        return false;
     std::vector<FileCheck> files;
-    EnumProductFiles(database, files);
+    const bool enumerated=EnumProductFiles(database, files);
     MsiCloseHandle(database);
+    if(!enumerated)return false;
 
     for (const auto& file : files)
     {
@@ -388,6 +413,7 @@ void CheckProductFiles(
                 AddReason(rep, Reason::SignatureMismatch);
         }
     }
+    return true;
 }
 
 } // namespace
@@ -416,17 +442,16 @@ Report Run(const Inputs& in)
     {
         const wchar_t* modernCode;
         const wchar_t* legacyCode;
-        UINT msiResource;
         ProductReport* report;
     };
     const ProductInputs products[] = {
-        { GlassInstallMsi::kProductPlatformX64, GlassInstallMsi::kLegacyPlatformX64, in.msiResX64, &report.x64 },
-        { GlassInstallMsi::kProductPlatformX86, GlassInstallMsi::kLegacyPlatformX86, in.msiResX86, &report.x86 },
-        { GlassInstallMsi::kProductSettingsX64, nullptr, in.msiResSettings, &report.settings },
-        { GlassInstallMsi::kProductSettingsX86, nullptr, in.msiResSettings, &report.settings },
-        { GlassInstallMsi::kProductSecureUxThemeX64, nullptr, in.msiResSecureUxTheme, &report.secureUxTheme },
-        { GlassInstallMsi::kProductSecureUxThemeX86, nullptr, in.msiResSecureUxTheme, &report.secureUxTheme },
-        { GlassInstallMsi::kProductOpenGlass, GlassInstallMsi::kLegacyOpenGlass, in.msiResOg, &report.og },
+        { GlassInstallMsi::kProductPlatformX64, GlassInstallMsi::kLegacyPlatformX64, &report.x64 },
+        { GlassInstallMsi::kProductPlatformX86, GlassInstallMsi::kLegacyPlatformX86, &report.x86 },
+        { GlassInstallMsi::kProductSettingsX64, nullptr, &report.settings64 },
+        { GlassInstallMsi::kProductSettingsX86, nullptr, &report.settings32 },
+        { GlassInstallMsi::kProductSecureUxThemeX64, nullptr, &report.secureUxTheme },
+        { GlassInstallMsi::kProductSecureUxThemeX86, nullptr, &report.secureUxTheme },
+        { GlassInstallMsi::kProductOpenGlass, GlassInstallMsi::kLegacyOpenGlass, &report.og },
     };
 
     for (const auto& product : products)
@@ -442,6 +467,7 @@ Report Run(const Inputs& in)
                 modern ? product.modernCode : product.legacyCode);
     }
 
+    report.settings=report.settings64.installed?report.settings64:report.settings32;
     const bool glassRepackedSut=report.secureUxTheme.installed;
     std::vector<std::wstring> officialSut;
     if (Shared::SecureUxThemeInventory::Query(officialSut)==ERROR_SUCCESS && !officialSut.empty()) {
@@ -456,72 +482,64 @@ Report Run(const Inputs& in)
         return report;
     }
 
+    for(auto* rep:{&report.x64,&report.x86,&report.settings64,&report.settings32,&report.og})
+        rep->installedPackageVersion=rep->installedVersion;
     GlassInstallUtil::InstallRoots roots{};
     const bool rootsOk = GlassInstallUtil::ResolveInstallRoots(roots);
-    std::wstring tempDir;
-    if (GlassInstallUtil::CreateSecureTempDirectory(L"GlassInspect", tempDir))
-    {
-        const struct { UINT res; ProductReport* rep; const wchar_t* code; bool verifyFiles; } fileJobs[] = {
-            { in.msiResX64, &report.x64, GlassInstallMsi::kProductPlatformX64, true },
-            { in.msiResX86, &report.x86, GlassInstallMsi::kProductPlatformX86, true },
-            { in.msiResSettings, &report.settings,
-                in.os64 ? GlassInstallMsi::kProductSettingsX64 : GlassInstallMsi::kProductSettingsX86, true },
-            { in.msiResSecureUxTheme, &report.secureUxTheme,
-                in.os64 ? GlassInstallMsi::kProductSecureUxThemeX64 : GlassInstallMsi::kProductSecureUxThemeX86, false },
-            { in.msiResOg, &report.og, GlassInstallMsi::kProductOpenGlass, true },
-        };
-        int index = 0;
-        for (const auto& job : fileJobs)
-        {
-            if (in.cancelled && in.cancelled->load(std::memory_order_acquire))
-                break;
-            if (!job.rep->installed || job.res == 0)
-                continue;
-            std::wstring msiPath = tempDir + L"\\inspect-" + std::to_wstring(index++) + L".msi";
-            if (!GlassInstallUtil::ExtractResourceToFile(in.instance, job.res, RT_RCDATA, msiPath, nullptr))
-                continue;
-            // Версия OpenGlass — по файлу OpenGlass.dll (как её читает GlassSettings):
-            // новая версия платформы не означает новую версию OpenGlass. Для остальных
-            // продуктов версия — из MSI. Более старая версия — обновление, не повреждение.
-            {
-                const bool ogProduct = wcscmp(job.code, GlassInstallMsi::kProductOpenGlass) == 0;
-                std::wstring packageVersion;
-                MSIHANDLE database = 0;
-                if (MsiOpenDatabaseW(msiPath.c_str(), MSIDBOPEN_READONLY, &database) == ERROR_SUCCESS)
-                {
-                    packageVersion = ogProduct
-                        ? QueryFileVersion(database, L"OpenGlass.dll")
-                        : QueryMsiProperty(database, L"ProductVersion");
-                    MsiCloseHandle(database);
-                }
-                std::wstring installedVersion = job.rep->installedVersion;
-                if (ogProduct)
-                {
-                    const std::wstring ogVersion = FileVersionOf(roots.openGlass + L"\\OpenGlass.dll");
-                    if (!ogVersion.empty())
-                        installedVersion = job.rep->installedVersion = ogVersion;
-                }
-                if (!packageVersion.empty() && !installedVersion.empty() &&
-                    QuadVersion::Parse(installedVersion).Compare(QuadVersion::Parse(packageVersion)) < 0)
-                    job.rep->updateAvailable = true;
-            }
-            // Файловые проверки только для современных кодов продуктов: состав
-            // легаси-MSI не соответствует текущему пакету. Эталон целостности —
-            // кэш MSI, из которого продукт установлен (LocalPackage): новый пакет
-            // содержит новые сборки и ничего не говорит о старых файлах.
-            if (job.verifyFiles && GlassInstallMsi::IsProductInstalled(job.code))
-            {
-                std::wstring referenceMsi = CachedMsiPath(job.code);
-                if (referenceMsi.empty() && !job.rep->updateAvailable)
-                    referenceMsi = msiPath; // версии совпадают — пакет идентичен установленному
-                if (!referenceMsi.empty())
-                    CheckProductFiles(referenceMsi, job.code, signerSha1, *job.rep,
-                        wcscmp(job.code, GlassInstallMsi::kProductOpenGlass) == 0);
-            }
-            DeleteFileW(msiPath.c_str());
-        }
-        RemoveDirectoryW(tempDir.c_str());
+    if(report.og.installed && rootsOk) {
+        const auto version=FileVersionOf(roots.openGlass+L"\\OpenGlass.dll");
+        if(!version.empty())report.og.installedVersion=version;
     }
+    std::atomic_bool neverCancel{false};
+    const auto& cancel=in.cancelled?*in.cancelled:neverCancel;
+    GlassPackageCatalog::Catalog catalog;
+    std::wstring diagnostic,workspace;
+    GlassPackageAcquisition::FetchCatalog(cancel,catalog,diagnostic);
+    const bool workspaceReady=GlassPackageAcquisition::CreateWorkspace(workspace);
+    struct InspectionWorkspace {
+        std::wstring path;
+        ~InspectionWorkspace() {
+            if(path.empty())return;
+            for(const auto* file:GlassPackageCatalog::kFiles) {
+                std::wstring name;for(const char* c=file;*c;++c)name+=static_cast<wchar_t>(*c);
+                DeleteFileW((path+L"\\"+name).c_str());DeleteFileW((path+L"\\"+name+L".part").c_str());
+            }
+            RemoveDirectoryW(path.c_str());
+        }
+    } cleanup{workspace};
+    const struct { GlassPackageCatalog::Product product; ProductReport* rep; const wchar_t* code; } jobs[]={
+        {GlassPackageCatalog::Product::Platform64,&report.x64,GlassInstallMsi::kProductPlatformX64},
+        {GlassPackageCatalog::Product::Platform32,&report.x86,GlassInstallMsi::kProductPlatformX86},
+        {GlassPackageCatalog::Product::Settings64,&report.settings64,GlassInstallMsi::kProductSettingsX64},
+        {GlassPackageCatalog::Product::Settings32,&report.settings32,GlassInstallMsi::kProductSettingsX86},
+        {GlassPackageCatalog::Product::OpenGlass,&report.og,GlassInstallMsi::kProductOpenGlass}};
+    for(const auto& job:jobs) {
+        if(cancel.load())break;
+        if(!job.rep->installed)continue;
+        const auto index=static_cast<std::size_t>(job.product);
+        if(workspaceReady && GlassPackageAcquisition::Prepare(job.product,catalog,workspace,cancel,diagnostic)) {
+            std::wstring name;for(const char* c=GlassPackageCatalog::kFiles[index];*c;++c)name+=static_cast<wchar_t>(*c);
+            const auto source=workspace+L"\\"+name;
+            MSIHANDLE db=0;
+            if(MsiOpenDatabaseW(source.c_str(),MSIDBOPEN_READONLY,&db)==ERROR_SUCCESS) {
+                job.rep->targetVersion=QueryMsiProperty(db,L"ProductVersion");
+                job.rep->sourceVerified=true;
+                MsiCloseHandle(db);
+                if(!job.rep->targetVersion.empty() && !job.rep->installedVersion.empty())
+                    job.rep->updateAvailable=QuadVersion::Parse(job.rep->installedPackageVersion).Compare(QuadVersion::Parse(job.rep->targetVersion))<0;
+            }
+        }
+        // Integrity always uses the installed package, never a same-version
+        // replacement guessed to have identical bytes/PackageCode.
+        const auto reference=CachedMsiPath(job.code);
+        std::wstring contextDetail;
+        if(!reference.empty() && InstalledBaselineMatches(reference,job.code) && GlassInstallMsi::CheckProductContexts(job.code,contextDetail)==GlassInstallMsi::ProductPathCheck::Safe)
+            job.rep->integrityKnown=CheckProductFiles(reference,job.code,signerSha1,*job.rep,job.product==GlassPackageCatalog::Product::OpenGlass);
+        if(!job.rep->integrityKnown)AddReason(*job.rep,Reason::InspectionUnavailable);
+    }
+    report.settings=report.settings64.installed?report.settings64:report.settings32;
+    report.settings.damaged=report.settings64.damaged||report.settings32.damaged;
+    report.settings.updateAvailable=report.settings64.updateAvailable||report.settings32.updateAvailable;
 
     if (in.cancelled && in.cancelled->load(std::memory_order_acquire))
         return report;

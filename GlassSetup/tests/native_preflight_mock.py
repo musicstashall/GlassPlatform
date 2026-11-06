@@ -1,117 +1,60 @@
 #!/usr/bin/env python3
-"""Exercise the actual preflight on a clean machine with only EXE resources.
-No installed Settings resolver, extraction, DLL execution or Windows APIs.
-Does not replace an MSVC/WiX build or Windows VM test.
-"""
+"""Actual installed-helper publisher verifier with fake WinTrust (not Windows trust validation)."""
 from pathlib import Path
-import os
-import subprocess
-import tempfile
-
-root = Path(__file__).resolve().parents[2]
-source = (root / "GlassSetup/src/InstallEngine.cpp").read_text(encoding="utf-8")
-
-def function(token):
-    start = source.index(token)
-    brace = source.index("{", start)
-    depth = 0
-    for pos in range(brace, len(source)):
-        if source[pos] == "{": depth += 1
-        if source[pos] == "}":
-            depth -= 1
-            if depth == 0: return source[start:pos + 1]
-    raise ValueError(token)
-
-preflight = function("bool InstallEngine::VerifyEmbeddedNativePayload(")
-worker = source[source.index("DWORD WINAPI InstallEngine::WorkerThread("):source.index("bool InstallEngine::Start(")]
-assert worker.index("ExtractPayload(") < worker.index("VerifyEmbeddedNativePayload()") < worker.index("CreateRollbackSnapshot()")
-assert worker.index("VerifyEmbeddedNativePayload()") < worker.index("StopRunningHosts()") < worker.index("InstallGlassSettingsEarly()")
-assert worker.index("InstallGlassSettingsEarly()") < worker.index("ReleaseLockedModules()")
-for forbidden in ("LoadLibrary", "ScanGlassModules", "NativeDllForArch(", "EmbeddedNativeDllX86(", "ExtractResourceToFile("):
-    assert forbidden not in preflight
-
-prefix = r'''
-#include <atomic>
+import os, subprocess, tempfile
+root=Path(__file__).resolve().parents[2]
+s=(root/'GlassSetup/src/InstallSupport/GlassInstallUtil.cpp').read_text()
+a=s.index('bool SignedPublisher('); b=s.index('// Protect against renaming',a)
+method=s[a:b]
+prefix=r'''
+#include <array>
+#include <string>
 #include <cassert>
 #include <cstdint>
 #include <iostream>
-#include <string>
-#include <vector>
-using WORD=std::uint16_t;using DWORD=std::uint32_t;using UINT=unsigned;using HINSTANCE=void*;
-constexpr WORD IMAGE_FILE_MACHINE_I386=0x14c, IMAGE_FILE_MACHINE_AMD64=0x8664;
-constexpr int LANG_RUSSIAN=25;
-constexpr UINT IDR_UNLOCKER_X86=217,IDR_UNLOCKER_X64=216;
-#define PRIMARYLANGID(x) (x)
-int GetUserDefaultUILanguage(){return LANG_RUSSIAN;}
-namespace Shared::InjectModuleScan {constexpr char kNativeInstallerProtocolExport[]="GlassSettings_InstallerScanProtocolV2";}
-namespace InstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
-struct Mock {
- bool x86Present=true,x86Protocol=true,x86Shell=true,x64Present=true,x64Protocol=true,x64Shell=true;
- bool x86Machine=true,x64Machine=true;
- int cancelOnCheck=0;DWORD error=0;std::vector<UINT> checked;
- std::atomic_bool* cancelled=nullptr;
-} fake;
-DWORD GetLastError(){return fake.error;}
-namespace GlassInstallUtil {
- constexpr char kInstallerShellExport[]="GlassSettings_ShellExtRegisterSetupV1W";
- bool ResourcePeMatches(HINSTANCE instance,UINT resource,WORD machine,const char* marker){
-  assert(instance==reinterpret_cast<HINSTANCE>(1));
-  const bool x86=resource==IDR_UNLOCKER_X86;assert(x86 || resource==IDR_UNLOCKER_X64);
-  assert(machine==(x86?IMAGE_FILE_MACHINE_I386:IMAGE_FILE_MACHINE_AMD64));
-  fake.checked.push_back(resource);
-  if(fake.cancelOnCheck==static_cast<int>(fake.checked.size()) && fake.cancelled)fake.cancelled->store(true);
-  const bool present=x86?fake.x86Present:fake.x64Present;
-  if(!present){fake.error=1814;return false;}
-  bool valid=x86?fake.x86Machine:fake.x64Machine;
-  if(marker){
-   const bool scan=std::string(marker)==Shared::InjectModuleScan::kNativeInstallerProtocolExport;
-   assert(scan || std::string(marker)==kInstallerShellExport);
-   valid=valid && (scan?(x86?fake.x86Protocol:fake.x64Protocol):(x86?fake.x86Shell:fake.x64Shell));
-  }
-  fake.error=valid?0:193;return valid;
- }
+using BYTE=unsigned char;using DWORD=unsigned;using UINT=unsigned;using LONG=std::int32_t;
+constexpr LONG ERROR_SUCCESS=0,CERT_E_UNTRUSTEDROOT=-1,CERT_E_CHAINING=-2;
+constexpr int WTD_UI_NONE=0,WTD_REVOKE_NONE=0,WTD_CHOICE_FILE=1,WTD_STATEACTION_VERIFY=1,WTD_STATEACTION_CLOSE=2,WTD_CACHE_ONLY_URL_RETRIEVAL=4;
+constexpr bool FALSE=false;
+constexpr auto BCRYPT_SHA256_ALGORITHM=L"SHA256";
+struct GUID{};const GUID WINTRUST_ACTION_GENERIC_VERIFY_V2{};
+struct WINTRUST_FILE_INFO {unsigned cbStruct;const wchar_t* pcwszFilePath=nullptr;};
+struct WINTRUST_DATA {unsigned cbStruct;unsigned dwUIChoice=0,fdwRevocationChecks=0,dwUnionChoice=0;WINTRUST_FILE_INFO* pFile=nullptr;unsigned dwStateAction=0,dwProvFlags=0;void* hWVTStateData=nullptr;};
+struct Cert {BYTE* pbCertEncoded=nullptr;unsigned cbCertEncoded=0;};
+struct Chain {Cert* pCert=nullptr;};struct Signer {unsigned csCertChain=1;Chain* pasCertChain=nullptr;};
+Cert cert;Chain chain{&cert};Signer signer{1,&chain};
+struct Fake {LONG status=0;bool provider=true,signer=true,hash=true;unsigned bytes=32;int closes=0;};Fake fake;
+LONG WinVerifyTrust(void*,GUID*,WINTRUST_DATA* d){
+ if(d->dwStateAction==WTD_STATEACTION_CLOSE){++fake.closes;return 0;}
+ assert(d->dwProvFlags==WTD_CACHE_ONLY_URL_RETRIEVAL && d->dwUIChoice==WTD_UI_NONE);
+ d->hWVTStateData=&fake;return fake.status;
 }
-class InstallEngine {
-public:
- HINSTANCE instance_=reinterpret_cast<HINSTANCE>(1);
- bool scanNativeX64_=true;std::atomic_bool cancel{false};std::wstring error_;DWORD errorCode=0;
- bool IsCancelRequested()const{return cancel.load();}
- void SetFailure(const std::wstring& message,DWORD code){error_=message;errorCode=code;}
- bool VerifyEmbeddedNativePayload() noexcept;
-};
+void* WTHelperProvDataFromStateData(void* p){return fake.provider?p:nullptr;}
+Signer* WTHelperGetProvSignerFromChain(void*,int,bool,int){return fake.signer?&signer:nullptr;}
+bool CryptHashCertificate2(const wchar_t*,int,void*,BYTE*,unsigned,BYTE* out,DWORD* size){
+ *size=fake.bytes;for(unsigned i=0;i<32;++i)out[i]=static_cast<BYTE>(i);return fake.hash;
+}
 '''
-main = r'''
+main=r'''
 int main(){
- auto reset=[](){fake=Mock{};};
- reset();{InstallEngine e;assert(e.VerifyEmbeddedNativePayload());assert(e.error_.empty());
-  assert(fake.checked==std::vector<UINT>({217,217,217,216,216,216}));}
- reset();{InstallEngine e;e.scanNativeX64_=false;assert(e.VerifyEmbeddedNativePayload());
-  assert(fake.checked==std::vector<UINT>({217,217,217}));}
- reset();{InstallEngine e;fake.x86Present=false;assert(!e.VerifyEmbeddedNativePayload());
-  assert(e.error_.find(L"x86")!=std::wstring::npos&&e.errorCode==1814&&fake.checked.size()==1);}
- reset();{InstallEngine e;fake.x64Present=false;assert(!e.VerifyEmbeddedNativePayload());
-  assert(e.error_.find(L"x64")!=std::wstring::npos&&e.errorCode==1814&&fake.checked.size()==4);}
- for(int arch=0;arch<2;++arch)for(int stage=0;stage<3;++stage){
-  reset();InstallEngine e;
-  if(!arch){if(!stage)fake.x86Machine=false;else if(stage==1)fake.x86Protocol=false;else fake.x86Shell=false;}
-  else{if(!stage)fake.x64Machine=false;else if(stage==1)fake.x64Protocol=false;else fake.x64Shell=false;}
-  assert(!e.VerifyEmbeddedNativePayload());assert(!e.error_.empty()&&e.errorCode==193);
-  assert(fake.checked.size()==static_cast<unsigned>(arch*3+stage+1));
+ for(LONG status:{0,-1,-2,-3,-4,-5,-6,-7,-8}) {
+  fake={};fake.status=status;std::array<BYTE,32> hash{};
+  assert(SignedPublisher(L"installed.dll",hash)==(status>=-2));assert(fake.closes==1);
  }
- reset();{InstallEngine e;e.cancel.store(true);assert(!e.VerifyEmbeddedNativePayload());assert(e.error_.empty()&&fake.checked.empty());}
- for(int at=1;at<=6;++at){reset();InstallEngine e;fake.cancelled=&e.cancel;fake.cancelOnCheck=at;
-  assert(!e.VerifyEmbeddedNativePayload());assert(e.error_.empty());assert(fake.checked.size()==static_cast<unsigned>(at));}
- reset();{InstallEngine e;fake.cancelled=&e.cancel;fake.cancelOnCheck=2;fake.x86Protocol=false;
-  assert(!e.VerifyEmbeddedNativePayload());assert(e.error_.empty()&&fake.checked.size()==2);}
- std::cout<<"PASS: clean-machine embedded-resource preflight, x86/x64 header/exports, missing/corrupt resources, error codes, cancellation; no installed helper or temp extraction\n";
+ for(int missing=0;missing<6;++missing){
+  fake={};chain.pCert=&cert;signer.csCertChain=1;signer.pasCertChain=&chain;
+  if(missing==0)fake.provider=false;if(missing==1)fake.signer=false;
+  if(missing==2)signer.csCertChain=0;if(missing==3)chain.pCert=nullptr;
+  if(missing==4)fake.hash=false;if(missing==5)fake.bytes=20;
+  std::array<BYTE,32> hash{};assert(!SignedPublisher(L"installed.dll",hash));assert(fake.closes==1);
+ }
+ std::cout<<"PASS: actual helper signature verifier: valid/pinned-chain statuses, other trust failures, missing provider/chain, hash errors and unconditional trust-state closure\n";
 }
 '''
-
-with tempfile.TemporaryDirectory(prefix="glass-native-preflight-") as directory:
-    cpp = Path(directory) / "test.cpp"
-    exe = Path(directory) / "test"
-    cpp.write_text(prefix + preflight + "\n" + main, encoding="utf-8")
-    compiler = os.environ.get("CXX", "g++")
-    subprocess.run([compiler, "-std=c++17", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
-                    "-no-pie", str(cpp), "-o", str(exe)], check=True)
-    subprocess.run([str(exe)], check=True)
+with tempfile.TemporaryDirectory(prefix='glass-installed-native-') as d:
+ cpp=Path(d)/'test.cpp';exe=Path(d)/'test';cpp.write_text(prefix+method+main)
+ subprocess.run([os.environ.get('CXX','g++'),'-std=c++17','-fsanitize=address,undefined','-fno-omit-frame-pointer',str(cpp),'-o',str(exe)],check=True)
+ subprocess.run([str(exe)],check=True)
+assert 'SignedPublisher(self,expected) && SignedPublisher(path,actual) && expected==actual' in s
+assert 'TrustedDirectory(parent)' in s and 'TrustedPath(path,false)' in s
+assert 'FILE_SHARE_READ,nullptr,OPEN_EXISTING' in s

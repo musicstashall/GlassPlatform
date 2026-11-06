@@ -141,8 +141,8 @@ public:
     bool IsMarquee() const noexcept;
     void SetStatus(const std::wstring& line, int percent) noexcept;
 
-    enum class HoldKind { None, Modules, Processes };
-    enum class HoldAction { None, Retry, Unlock, Cancel };
+    enum class HoldKind { None, Modules, Processes, MissingHelper };
+    enum class HoldAction { None, Retry, Unlock, ContinueRisk, Cancel };
 
     HoldKind CurrentHold() const noexcept;
     WizardUnlock::Phase ActiveUnlock() const noexcept { return unlockActivity_.Current(); }
@@ -178,7 +178,6 @@ private:
     bool ReleaseLockedModules() noexcept;
     bool EnsureTempWorkspace() noexcept;
     bool ExtractPayload(HINSTANCE instance) noexcept;
-    bool VerifyEmbeddedNativePayload() noexcept;
     bool InstallGlassSettingsEarly() noexcept;
     bool RunMsiSequence() noexcept;
     bool InstallOriginalSecureUxTheme() noexcept;

@@ -1,3 +1,36 @@
+# Удаление embedded MSI/Native: реализация, общий executor ещё не завершён — 2026-11-06
+
+Это промежуточное изменение по поручению «1 и 2, затем проверка сборки», **не готовность обоих пунктов**.
+
+- Setup и Unins больше не содержат ресурсов MSI/Native. Embedded Unins EXE сохранён отдельно.
+  Удалены конфигурация/extraction/cleanup embedded Native, обязательный ресурсный preflight,
+  публикация x86 Native в maintenance cache и обратная project dependency Setup → Native.
+  Пять подписанных MSI публикуются существующим targets рядом с Setup; acquisition не ослаблена.
+- Inspector использует acquisition для проверенных внешних target MSI и отдельные Settings64/32 reports.
+  Integrity baseline — защищённый Windows Installer cache с совпадающими ProductCode/PackageCode;
+  нет подстановки нового MSI по совпадению версии. Неизвестная integrity отображается отдельной причиной.
+  Версия OpenGlass.dll для отображения сохранена, package update сравнивается по MSI ProductVersion.
+- Исполняемые установленные Native проверяются WinVerifyTrust, SHA256 publisher pin к подписанному
+  текущему EXE, PE/экспортам/protocol; отклоняются writable/reparse пути и заменяемые предки.
+  Допускается совпадающий pinned self-signed publisher offline, но не bad digest/прочие trust errors.
+  x86 loader сохраняет loaded-path/export-alias/capability/protocol handshake. Native не извлекается в TEMP.
+- Module hold в Setup/Unins: Retry / явный Continue at risk / Cancel. Неизвестный scan не считается
+  пустым; Retry не вызывает force-unload/kill. Silent Unins требует отдельный
+  `--accept-module-monitor-risk` (не отменяет запрет silent Settings+SUT или проверки MSI).
+
+**Осталось по текущему поручению:** общий смешанный planner/executor и независимые Settings через весь
+Setup engine ещё не реализованы. Unins removal executor и install-only engine пока раздельные.
+SUT/shell-specific preflight может по-прежнему блокировать раньше module-risk страницы; это нельзя
+выдавать за законченную интеграцию optional helper со всеми операциями. Полная миграция Current — отдельная задача.
+
+Проверки: 16 regression/source/actual-method mock suites PASS, включая обновлённые Native loader,
+signature-status и module-gate тесты; production JS node --check, XML/resource checks, git diff --check PASS.
+GNU Windows x86 object compile: InstallEngine, ProductInspect, InstallUtil, InstallWatch PASS.
+Это **не MSVC/WiX/link/Windows runtime**, Unins целиком в этом окружении не собран.
+Платформа и службы не запускались/не останавливались. Новых бинарных модулей нет.
+
+---
+
 # Сохранённые .theme включены в добровольную очистку — 2026-11-06
 
 **Новое прямое уточнение пользователя:** критерий — `.theme` с секциями Glass в специальном пользовательском каталоге
