@@ -119,10 +119,10 @@
     <Error Condition="!Exists('$(GlassMsiPayloadDir)GlassSettings-x86\GlassSettings-x86.msi')" Text="Нет GlassSettings-x86.msi. Его собирает solution Release|x86 до GlassSetup." />
     <Error Condition="!Exists('$(GlassMsiPayloadDir)Glass-x86\Glass-x86.msi')" Text="Нет Glass-x86.msi. Его собирает solution Release|x86 до GlassSetup." />
     <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(ProjectDir)scripts\Verify-InstallerNative.ps1&quot; -X86 &quot;$(MSBuildThisFileDirectory)..\Build\x86\Release\GlassSettings.Native.dll&quot; -X64 &quot;$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll&quot;" />
-    <!-- First-party MSI and Native DLL payloads are signed before embedding.
-         Third-party product MSI (OpenGlass) are intentionally unsigned by Glass. -->
+    <!-- Our five MSI containers and Native DLLs are signed before use.
+         Signing OpenGlass MSI does not re-sign the upstream payload DLLs. -->
     <Exec Condition="'$(GlassSign)' != 'Skip'"
-          Command="$(GlassSignCommand) -Mode Verify -Context &quot;GlassSetup first-party payload&quot; -Paths &quot;$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll;$(MSBuildThisFileDirectory)..\Build\x86\Release\GlassSettings.Native.dll;$(GlassMsiPayloadDir)GlassSettings-x64\GlassSettings-x64.msi;$(GlassMsiPayloadDir)GlassSettings-x86\GlassSettings-x86.msi;$(GlassMsiPayloadDir)Glass-x64\Glass-x64.msi;$(GlassMsiPayloadDir)Glass-x86\Glass-x86.msi&quot;" />
+          Command="$(GlassSignCommand) -Mode Verify -Context &quot;GlassSetup first-party payload&quot; -Paths &quot;$(MSBuildThisFileDirectory)..\Build\x64\Release\GlassSettings.Native.dll;$(MSBuildThisFileDirectory)..\Build\x86\Release\GlassSettings.Native.dll;$(GlassMsiPayloadDir)GlassSettings-x64\GlassSettings-x64.msi;$(GlassMsiPayloadDir)GlassSettings-x86\GlassSettings-x86.msi;$(GlassMsiPayloadDir)Glass-x64\Glass-x64.msi;$(GlassMsiPayloadDir)Glass-x86\Glass-x86.msi;$(GlassMsiPayloadDir)OpenGlass-x64\OpenGlass-x64.msi&quot;" />
     <Touch Files="$(ProjectDir)res\GlassSetup.rc" />
   </Target>
   <ItemGroup>

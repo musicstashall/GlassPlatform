@@ -487,7 +487,7 @@ struct Selection {
 
 - Только HTTPS, allowlist `github.com/musicstashall/GlassPlatform/releases/...`, без кодированных разделителей/`..`.
 - Скачанное: лимит размера, SHA-256 из манифеста, `WinVerifyTrust` + сверка издателя с текущим `GlassSetup.exe`.
-  Для сторонних пакетов (OpenGlass, SecureUxTheme) подпись Glass не требуется — только ProductCode/UpgradeCode/разрядность и хэш из манифеста.
+  Собираемый нами MSI-контейнер OpenGlass подписывается существующим Glass сертификатом для offline source trust; upstream DLL не переподписываются. Оригинальный MSI SecureUxTheme не изменяется и не подписывается Glass: проверяются его официальные identity/architecture/hash.
 - Запись только в `.part` в защищённом staging и проверенная атомарная публикация. Пользовательские MSI/backup не перезаписываются. Замена управляемого `Current`/cached EXE — отдельная разрешённая commit-операция с rollback, а не запрет на обновление кэша.
 - Каталоги кэша — существующие проверки `TrustedPath`: владелец Administrators/SYSTEM, без writable-ACE для прочих,
   без reparse-точек.

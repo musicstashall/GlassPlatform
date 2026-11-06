@@ -532,7 +532,7 @@ assert "SecureUxThemeCa" not in payload and "SecureUxTheme-" not in payload
 assert "SecureUxTheme-x64.msi" not in rc and "SecureUxTheme-x86.msi" not in project
 solution=read("../GlassProject.sln")
 assert '"SecureUxTheme-x64"' not in solution and '"SecureUxThemeCa"' not in solution
-assert "<GlassSignThisProject>false</GlassSignThisProject>" in read("msi/OpenGlass-x64.wixproj")
+assert "<GlassSignThisProject>true</GlassSignThisProject>" in read("msi/OpenGlass-x64.wixproj")
 assert worker.index("InstallGlassSettingsEarly()") < worker.index("RunMsiSequence()")
 # Retain recognition and explicit removal of legacy Glass-owned products.
 for suffix in ("5076", "5077"):

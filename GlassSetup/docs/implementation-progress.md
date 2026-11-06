@@ -23,14 +23,28 @@ ASan/UBSan; source/graph/installer order/cache diagnostics/catalog/SUT parser su
 SUT provider скомпилированы в Windows GNU x86 objects. Это не MSVC/WiX сборка, не managed build, не WinHTTP/MSI/COM
 runtime: работа реального MsiGetFileSignatureInformation и доверие сертификату требуют Windows проверки.
 
-**Открытый конкретный выбор:** OpenGlass-x64.wixproj намеренно содержит GlassSignThisProject=false, тогда как тестовый
-комплект должен работать offline до публикации release hashes. Варианты: подписывать наш MSI-контейнер существующим
-Glass сертификатом (не DLL автора) либо отдельное explicit trust consent для неподписанных local MSI, с отдельным CLI flag.
-Без согласования подпись проекта не изменена, не добавлен неявный trust bypass. Такой локальный OpenGlass сейчас
-блокируется до продуктовых изменений. Это ограничение нельзя выдавать за готовую офлайн-установку.
+**Решение о локальном OpenGlass принято:** наш MSI-контейнер подписывается существующим Glass сертификатом.
+DLL автора не изменяются/не переподписываются, оригинальный SecureUxTheme MSI не подписывается Glass.
+Неподписанный fallback не добавлен. Build verification теперь включает OpenGlass MSI; Windows signature runtime ещё не проверен.
+
+Лицензия: вместо старого глобального DWORD используется HKCU-отметка по ProductVersion Setup и SHA-256 обоих
+переводов EULA + GPL. Modify и обычное продолжение используют одну проверку; старый DWORD, handoff и успешная
+установка не создают согласие. Отметка сохраняется только нажатием «Далее» с принятием, предыдущие версии не забываются.
+Проверка Windows UI/registry ещё требуется.
+
+Существующие Settings notification/спойлер Glass/OpenGlass теперь открывают обслуживание вместо страницы download.
+Никакой MSI не скачивается/не устанавливается Settings. Ошибки запуска/timeout helper обрабатываются, DLL из CWD
+больше не выбирается. Это ещё не независимый product/architecture catalog и не полный Settings update scope.
+
+Новые проверки `setup_license_mock.py` исполняют реальные identity/registry функции на fake CryptoAPI/registry
+с ASan/UBSan: старые DWORD не принимают условия, версии/редакции разделены, старые согласия сохраняются,
+ошибки и пустые identities закрыты, handles освобождаются. Это не проверка криптографического примитива/Windows.
+`settings_maintenance_notice_mock.py` проверяет только source-контракты маршрутов/timeout/CWD/RU-EN.
+Повторно PASS: release hash, acquisition, catalog sanitizer, resources, SUT graph/release, installer order,
+cache diagnostics и 4096 planner cases. MSVC/WiX/.NET/реального Windows runtime здесь нет.
 
 **Оставшийся объём всего поручения:** ресурсный inspector и удаление embedded MSI/Native; соответствующие safe fallback
-и GUI/CLI consent; общая mixed-action maintenance транзакция; шесть продуктов и production UI; license routing;
+и GUI/CLI consent; общая mixed-action maintenance транзакция; шесть продуктов и production UI; полная Windows проверка license routing;
 предупреждение Unins Settings; отдельная cleanup page/профили/.theme; self-update handoff/backup/recovery;
 простые независимые Settings update notices; миграция cache/retained и полноценная Windows matrix. Старые resource inputs
 ещё нужны inspector/native preflight, поэтому их изъятие пока не выполнено. Полное поручение не считается исполненным.

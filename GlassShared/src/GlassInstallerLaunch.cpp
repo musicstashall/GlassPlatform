@@ -11,7 +11,13 @@ namespace {
 constexpr wchar_t kKeyPath[] = L"Software\\StanislavKa\\GlassPlatform\\Installer";
 constexpr wchar_t kValueTicket[] = L"MaintenanceTicket";
 constexpr wchar_t kValueTicketExpiry[] = L"MaintenanceTicketExpiryUtc";
-constexpr wchar_t kValueEulaAccepted[] = L"EulaAccepted";
+// Keep one value per identity so returning to an older user-owned EXE does not
+// forget its consent. Tickets remain machine-scoped and never grant consent.
+[[nodiscard]] std::wstring EulaValueName(const wchar_t* identity)
+{
+    if (!identity || !*identity || wcslen(identity) > 256) return {};
+    return std::wstring(L"AcceptedSetupLicense:") + identity;
+}
 constexpr ULONGLONG kTicketLifetime100Ns = 120ULL * 10'000'000ULL;
 
 [[nodiscard]] ULONGLONG FileTimeUtcNow() noexcept
@@ -30,18 +36,6 @@ constexpr ULONGLONG kTicketLifetime100Ns = 120ULL * 10'000'000ULL;
     return RegOpenKeyExW(root, kKeyPath, 0, sam, &key) == ERROR_SUCCESS;
 }
 
-[[nodiscard]] bool WriteEulaAcceptedTo(HKEY root) noexcept
-{
-    wil::unique_hkey key;
-    const REGSAM sam = KEY_SET_VALUE | (root == HKEY_LOCAL_MACHINE ? KEY_WOW64_64KEY : 0);
-    if (RegCreateKeyExW(root, kKeyPath, 0, nullptr, REG_OPTION_NON_VOLATILE, sam, nullptr, &key, nullptr)
-        != ERROR_SUCCESS)
-        return false;
-    const DWORD one = 1;
-    return RegSetValueExW(key.get(), kValueEulaAccepted, 0, REG_DWORD,
-               reinterpret_cast<const BYTE*>(&one), sizeof(one))
-        == ERROR_SUCCESS;
-}
 
 } // namespace
 
@@ -136,40 +130,33 @@ bool TryConsumeMaintenanceTicket() noexcept
     }
 }
 
-bool IsEulaAccepted() noexcept
+bool IsEulaAccepted(const wchar_t* identity) noexcept
 {
     try {
-        for (HKEY root : {HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER}) {
-            wil::unique_hkey key;
-            if (!OpenInstallerKey(root, KEY_READ, key))
-                continue;
-            DWORD accepted = 0;
-            DWORD bytes = sizeof(accepted);
-            if (RegGetValueW(
-                    key.get(),
-                    nullptr,
-                    kValueEulaAccepted,
-                    RRF_RT_REG_DWORD,
-                    nullptr,
-                    &accepted,
-                    &bytes)
-                != ERROR_SUCCESS)
-                continue;
-            if (accepted != 0)
-                return true;
-        }
-        return false;
+        const auto name = EulaValueName(identity);
+        if (name.empty()) return false;
+        wil::unique_hkey key;
+        if (!OpenInstallerKey(HKEY_CURRENT_USER, KEY_QUERY_VALUE, key)) return false;
+        DWORD accepted = 0, bytes = sizeof(accepted);
+        return RegGetValueW(key.get(), nullptr, name.c_str(), RRF_RT_REG_DWORD,
+                   nullptr, &accepted, &bytes) == ERROR_SUCCESS && accepted == 1;
     } catch (...) {
         return false;
     }
 }
 
-bool MarkEulaAccepted() noexcept
+bool MarkEulaAccepted(const wchar_t* identity) noexcept
 {
     try {
-        if (WriteEulaAcceptedTo(HKEY_LOCAL_MACHINE))
-            return true;
-        return WriteEulaAcceptedTo(HKEY_CURRENT_USER);
+        const auto name = EulaValueName(identity);
+        if (name.empty()) return false;
+        wil::unique_hkey key;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, kKeyPath, 0, nullptr,
+                REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+            return false;
+        const DWORD one = 1;
+        return RegSetValueExW(key.get(), name.c_str(), 0, REG_DWORD,
+                   reinterpret_cast<const BYTE*>(&one), sizeof(one)) == ERROR_SUCCESS;
     } catch (...) {
         return false;
     }

@@ -770,7 +770,7 @@
   <data name="System_OpenGlassUpdateTitle" xml:space="preserve"><value>A new OpenGlass version {0} is available. Installed: {1}.</value></data>
   <data name="System_GlassUpdateTitle" xml:space="preserve"><value>A new Glass version {0} is available. Installed: {1}.</value></data>
   <data name="System_OpenGlassUpdateMessage" xml:space="preserve"><value>Consider updating OpenGlass to the latest legacy release.</value></data>
-  <data name="System_OpenGlassUpdateAction" xml:space="preserve"><value>Download</value></data>
+  <data name="System_OpenGlassUpdateAction" xml:space="preserve"><value>Open maintenance</value></data>
   <data name="Notice_OpenGlassBorderBody" xml:space="preserve"><value>Window borders are drawn by the Desktop Window Manager (DWM). When OpenGlass is active, it takes precedence over DWM and overrides border color. You cannot change border colors while OpenGlass is running. Stop OpenGlass if colored borders are important to you.</value></data>
   <data name="Notice_OpenGlassBorderTitle" xml:space="preserve"><value>Border color changes are limited</value></data>
   <data name="Notice_OpenGlassBorderTraySuffix" xml:space="preserve"><value>For the taskbar, it remains possible to customize colors in the XAML rendering path.</value></data>

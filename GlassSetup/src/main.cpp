@@ -18,6 +18,7 @@
 #include <winhttp.h>
 #include <winver.h>
 #include <wintrust.h>
+#include <wincrypt.h>
 #include <softpub.h>
 #include <wrl.h>
 #include <WebView2.h>
@@ -191,6 +192,36 @@ std::wstring SelfProductVersion() {
     if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return L"";
     ULONGLONG key = 0;
     return ReadProductVersionString(exe, key);
+}
+
+// Both translations and the GPL appendix contribute in a fixed order. Changing
+// UI language alone must not repeat consent; changed terms must repeat it even
+// if a publisher accidentally keeps ProductVersion unchanged. No handoff token
+// or legacy machine-wide boolean is allowed to accept these terms.
+std::wstring SetupLicenseIdentity() {
+    const auto version=SelfProductVersion();
+    if (version.empty() || version.size()>128) return {};
+    HCRYPTPROV provider=0;
+    HCRYPTHASH hash=0;
+    if (!CryptAcquireContextW(&provider,nullptr,nullptr,PROV_RSA_AES,CRYPT_VERIFYCONTEXT)) return {};
+    bool ok=CryptCreateHash(provider,CALG_SHA_256,0,0,&hash)!=FALSE;
+    const Bytes texts[]={Resource(IDR_EULA,MAKELANGID(LANG_RUSSIAN,SUBLANG_DEFAULT)),
+        Resource(IDR_EULA,MAKELANGID(LANG_ENGLISH,SUBLANG_ENGLISH_US)),Resource(IDR_GPL)};
+    for (const auto& text:texts) {
+        // Hash lengths too, to avoid ambiguous concatenations of distinct terms.
+        ok=ok && text.data && text.size &&
+            CryptHashData(hash,reinterpret_cast<const BYTE*>(&text.size),sizeof(text.size),0) &&
+            CryptHashData(hash,text.data,text.size,0);
+    }
+    BYTE digest[32]{}; DWORD size=sizeof(digest);
+    ok=ok && CryptGetHashParam(hash,HP_HASHVAL,digest,&size,0) && size==sizeof(digest);
+    if (hash) CryptDestroyHash(hash);
+    CryptReleaseContext(provider,0);
+    if (!ok) return {};
+    std::wstring identity=version+L":";
+    constexpr wchar_t hex[]=L"0123456789abcdef";
+    for (BYTE value:digest) { identity+=hex[value>>4]; identity+=hex[value&15]; }
+    return identity;
 }
 
 struct ParsedVersion {
@@ -1607,15 +1638,7 @@ private:
             if (window) PostMessageW(window,kInspectReady,0,0);
         });
         if (maintenanceMode_) {
-            const bool skipEula=AnyGlassProductInstalled(installedSelection_) &&
-                Shared::GlassInstallerLaunch::IsEulaAccepted();
-            if (skipEula) {
-                accepted_=true;
-                SendMessageW(accept_,BM_SETCHECK,BST_CHECKED,0);
-                SetPage(Page::Components);
-            } else {
-                SetPage(Page::License);
-            }
+            ContinueAfterLicenseCheck();
             if (!maintenanceFocusProduct_.empty())
                 InstallLog::LineFormat(L"Maintenance focus product: %s",maintenanceFocusProduct_.c_str());
         } else {
@@ -2518,11 +2541,16 @@ private:
         downgradeBody_.clear();
         return true;
     }
+    void ContinueAfterLicenseCheck() {
+        accepted_=Shared::GlassInstallerLaunch::IsEulaAccepted(SetupLicenseIdentity().c_str());
+        SendMessageW(accept_,BM_SETCHECK,accepted_?BST_CHECKED:BST_UNCHECKED,0);
+        SetPage(accepted_?Page::Components:Page::License);
+    }
     void ContinueVersionCheck() {
         if (versionCheckStarted_) {
             if (!versionCheckHandled_) SetPage(Page::Checking);
             else if (updateAvailable_ && !updateSkipped_) SetPage(Page::Update);
-            else SetPage(Page::License);
+            else ContinueAfterLicenseCheck();
             return;
         }
         versionCheckStarted_ = true;
@@ -2581,7 +2609,7 @@ private:
         if (!result.fetched) {
             InstallLog::Line(L"Version check: fetch failed or skipped; continuing with this setup");
             updateAvailable_ = false;
-            SetPage(Page::License);
+            ContinueAfterLicenseCheck();
             return;
         }
         InstallLog::LineFormat(L"Version check: local=%s remote=%s",
@@ -2589,7 +2617,7 @@ private:
         if (result.self.empty() || !result.newer) {
             InstallLog::Line(L"Version check: no newer setup; continuing with this setup");
             updateAvailable_ = false;
-            SetPage(Page::License);
+            ContinueAfterLicenseCheck();
             return;
         }
         updateAvailable_ = true;
@@ -2887,7 +2915,6 @@ private:
         if (finished && installEngine_.Succeeded() && launchStarted_ && now-launchStarted_>=5000) {
             KillTimer(window,kInstallTimer); progressValue_=displayProgress_=10000; percent_=100;
             finishWarnings_=installEngine_.FinishWarnings();
-            (void)Shared::GlassInstallerLaunch::MarkEulaAccepted();
             SetPage(Page::Complete); return;
         }
         InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter();
@@ -3000,8 +3027,6 @@ private:
         if (page_==Page::License && !DebugDemoLocksControls() &&
             (message==L"accept:1" || message==L"accept:0")) {
             accepted_=message==L"accept:1";
-            if (accepted_)
-                (void)Shared::GlassInstallerLaunch::MarkEulaAccepted();
             SendMessageW(accept_,BM_SETCHECK,accepted_?BST_CHECKED:BST_UNCHECKED,0);
             EnableWindow(next_,accepted_);
             SyncWebViewState();
@@ -3800,8 +3825,6 @@ private:
             case IDC_ACCEPT:
                 if (HIWORD(w)==BN_CLICKED && page_==Page::License && !DebugDemoLocksControls()) {
                     accepted_ = SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED;
-                    if (accepted_)
-                        (void)Shared::GlassInstallerLaunch::MarkEulaAccepted();
                     EnableWindow(next_,accepted_);
                     InvalidateRect(accept_,nullptr,FALSE);
                     SyncWebViewState();
@@ -3817,7 +3840,7 @@ private:
                 if (!DebugDemoLocksControls() && page_==Page::Update) {
                     InstallLog::Line(L"Update skipped; continuing with this setup");
                     updateSkipped_ = true;
-                    SetPage(Page::License);
+                    ContinueAfterLicenseCheck();
                 }
                 return 0;
             case IDC_COMPONENT64: case IDC_COMPONENT32: case IDC_COMPONENT_SETTINGS: case IDC_COMPONENT_OG: case IDC_COMPONENT_SUT:
@@ -3890,7 +3913,7 @@ private:
                 if (w==IDOK && page_==Page::Update) {
                     InstallLog::Line(L"Update skipped by keyboard; continuing with this setup");
                     updateSkipped_ = true;
-                    SetPage(Page::License);
+                    ContinueAfterLicenseCheck();
                     return 0;
                 }
                 if (page_==Page::ModulesBusy) {
@@ -3908,7 +3931,12 @@ private:
                     return 0;
                 }
                 if (page_==Page::Welcome) StartVersionCheck();
-                else if (page_==Page::License && accepted_) SetPage(Page::Components);
+                else if (page_==Page::License && accepted_) {
+                    // Persist only the explicit Next action, not a transient
+                    // checkbox toggle, ticket handoff or install completion.
+                    (void)Shared::GlassInstallerLaunch::MarkEulaAccepted(SetupLicenseIdentity().c_str());
+                    SetPage(Page::Components);
+                }
                 else if (page_==Page::Components) { if (CertificatePageApplies()) SetPage(Page::Certificate); else StartInstallation(); }
                 else if (page_==Page::Certificate) StartInstallation();
                 else if (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error || page_==Page::RuntimeError || page_==Page::AlreadyRunning) RequestClose();

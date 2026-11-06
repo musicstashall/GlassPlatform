@@ -775,7 +775,7 @@
   <data name="System_OpenGlassUpdateTitle" xml:space="preserve"><value>Доступна новая версия OpenGlass {0}. Установлена: {1}.</value></data>
   <data name="System_GlassUpdateTitle" xml:space="preserve"><value>Доступна новая версия Glass {0}. Установлена: {1}.</value></data>
   <data name="System_OpenGlassUpdateMessage" xml:space="preserve"><value>Рекомендуется обновить библиотеку OpenGlass до последнего legacy-релиза.</value></data>
-  <data name="System_OpenGlassUpdateAction" xml:space="preserve"><value>Скачать</value></data>
+  <data name="System_OpenGlassUpdateAction" xml:space="preserve"><value>Открыть обслуживание</value></data>
   <data name="Notice_OpenGlassBorderBody" xml:space="preserve"><value>Так как бордюры создаются Диспетчером окон (DWM), активный OpenGlass имеет инициативу над DWM и поглощает цвет бордюров. В связи с этим вы не сможете изменить цвет бордюров, пока система OpenGlass приведена в действие. Выполните остановку OpenGlass, если для вас важно иметь цветные бордюры.</value></data>
   <data name="Notice_OpenGlassBorderTitle" xml:space="preserve"><value>Ограничено изменение цвета бордюров</value></data>
   <data name="Notice_OpenGlassBorderTraySuffix" xml:space="preserve"><value>Для панели задач остается возможным кастомизировать цвета в режиме XAML-пути отрисовки.</value></data>

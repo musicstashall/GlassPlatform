@@ -1,7 +1,7 @@
 using GlassSettings.Core.Platform;
 using GlassSettings.Core.Registry;
 
-using Windows.System;
+
 
 
 
@@ -124,23 +124,14 @@ public static class ProductUpdateCoordinator
 
 
 
-    public static async Task OpenPendingOpenGlassDownloadAsync()
-
+    // Compatibility entry points for existing notification/spoiler bindings.
+    // Settings never downloads MSI or computes a trusted maintenance plan.
+    public static Task OpenPendingOpenGlassDownloadAsync()
     {
-
-        var url = GetPendingOpenGlassDownloadUrl();
-
-        if (string.IsNullOrWhiteSpace(url))
-
-            return;
-
-
-
-        await Launcher.LaunchUriAsync(new Uri(url));
-
+        if (HasPendingOpenGlassUpdate())
+            GlassMaintenanceSetupLaunchService.TryLaunch();
+        return Task.CompletedTask;
     }
-
-
 
     private static void MigrateLegacyDismissedTag()
 
@@ -313,13 +304,11 @@ public static class ProductUpdateCoordinator
             DismissGlassNotice();
     }
 
-    public static async Task OpenPendingGlassDownloadAsync()
+    public static Task OpenPendingGlassDownloadAsync()
     {
-        var url = GlassSettingsRegistry.ReadGlassUpdatePendingUrl();
-        if (string.IsNullOrWhiteSpace(url))
-            return;
-
-        await Launcher.LaunchUriAsync(new Uri(url));
+        if (HasPendingGlassUpdate())
+            GlassMaintenanceSetupLaunchService.TryLaunch();
+        return Task.CompletedTask;
     }
 
     public static async Task OpenVisibleUpdateDownloadAsync()

@@ -18,12 +18,18 @@ public static class GlassMaintenanceSetupLaunchService
         if (!TryIssueMaintenanceTicket())
             return false;
 
-        Process.Start(new ProcessStartInfo(setup)
+        try
         {
-            Arguments = "--modify",
-            UseShellExecute = true
-        });
-        return true;
+            using var process = Process.Start(new ProcessStartInfo(setup)
+            {
+                Arguments = "--modify",
+                UseShellExecute = true
+            });
+            return process is not null;
+        }
+        catch (System.ComponentModel.Win32Exception) { return false; }
+        catch (InvalidOperationException) { return false; }
+        catch (IOException) { return false; }
     }
 
     private static bool TryIssueMaintenanceTicket()
@@ -46,7 +52,8 @@ public static class GlassMaintenanceSetupLaunchService
             });
             if (process is null)
                 return false;
-            process.WaitForExit(60_000);
+            if (!process.WaitForExit(60_000))
+                return false;
             return process.ExitCode == 0;
         }
         catch (System.ComponentModel.Win32Exception)
@@ -60,6 +67,7 @@ public static class GlassMaintenanceSetupLaunchService
         var nextToExe = Path.Combine(PlatformPaths.AppBase, NativeDllName);
         if (File.Exists(nextToExe))
             return nextToExe;
-        return File.Exists(NativeDllName) ? Path.GetFullPath(NativeDllName) : null;
+        // Never execute a helper selected from the process working directory.
+        return null;
     }
 }

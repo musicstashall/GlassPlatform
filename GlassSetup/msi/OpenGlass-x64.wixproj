@@ -9,8 +9,9 @@
     <GlassUpgradeCode>B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5030</GlassUpgradeCode>
     <GlassProductCode>B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5073</GlassProductCode>
     <GlassMsiProductCode>$(GlassProductCode)</GlassMsiProductCode>
-    <!-- Third-party product MSI: do not sign with the Glass developer certificate. -->
-    <GlassSignThisProject>false</GlassSignThisProject>
+    <!-- Our MSI container is signed for offline source verification. The
+         upstream OpenGlass payload binaries are not changed or re-signed. -->
+    <GlassSignThisProject>true</GlassSignThisProject>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' != 'Release'">
     <BuildProject>false</BuildProject>
