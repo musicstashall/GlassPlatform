@@ -2540,7 +2540,7 @@ private:
                         const auto& v=result.catalog.setupVersion->parts;
                         result.latest=std::to_wstring(v[0])+L"."+std::to_wstring(v[1])+L"."+std::to_wstring(v[2])+L"."+std::to_wstring(v[3]);
                     }
-                    if(!diagnostic.empty())InstallLog::Line(diagnostic);
+                    if(!diagnostic.empty())InstallLog::Line(diagnostic.c_str());
                     if (result.fetched) {
                         result.self = SelfProductVersion();
                         result.newer = !result.self.empty() && VersionOlder(result.self, result.latest);
@@ -2556,7 +2556,7 @@ private:
                                     diagnostic=L"Downloaded Setup ProductVersion differs from release catalog";
                                 }
                             }
-                            if(!diagnostic.empty())InstallLog::Line(diagnostic);
+                            if(!diagnostic.empty())InstallLog::Line(diagnostic.c_str());
                         }
                     }
                 } catch (...) {

@@ -17,6 +17,8 @@ assert 'GlassPackageAcquisition::FetchCatalog' in check and 'GlassPackageAcquisi
 assert 'actualVersion.fields!=expectedVersion.fields' in check
 assert 'ShellExecute' not in check and 'CreateProcess' not in check  # unfinished handoff must not be improvised
 assert 'versionCheckCancel_.store(true' in main
+assert check.count('InstallLog::Line(diagnostic.c_str())')==2
+assert 'InstallLog::Line(diagnostic)' not in check
 assert 'update-panel' not in (root/'GlassSetup/res/slideshow.html').read_text()
 prefix=r'''
 #include <cassert>
