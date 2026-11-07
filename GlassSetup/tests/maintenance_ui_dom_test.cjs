@@ -48,10 +48,10 @@ assert.equal(d.querySelector('#components-warning-dialog').hidden,true);assert.e
 // English state must regenerate decision labels even when product metadata is unchanged.
 receive({data:{type:'state',locale:'en',page:'components',maintenance:false,components:rows}});
 assert.equal(d.querySelector('#components-title').textContent,'GlassPlatform products');
-assert.match(d.querySelector('#product-settings64').closest('.comp-card').querySelector('.comp-decision').textContent,/Update/);
+assert.equal(d.querySelector('#product-settings64').closest('.comp-card').querySelector('.comp-decision').title,'Undo update');
 receive({data:{type:'state',appMode:'unins',page:'uninstall-select',components:rows}});
 assert.equal(d.querySelector('#components-title').textContent,'Remove products');
-assert.match(d.querySelector('#product-settings64').closest('.comp-card').querySelector('.comp-decision').textContent,/Remove/);
+assert.equal(d.querySelector('#product-settings64').closest('.comp-card').querySelector('.comp-decision').title,'Keep installed');
 // Cancelling a planned row must use the same real checkbox IPC and move a fresh product back.
 receive({data:{type:'state',appMode:'setup',page:'components',components:rows.map(r=>({...r,checked:r.id==='settings32'}))}});
 const fresh=d.querySelector('#components-installed-grid #product-settings32');assert.ok(fresh);
@@ -90,6 +90,19 @@ assert.equal(d.querySelectorAll('#components-installed-grid .c-card:not([hidden]
 assert.equal(catalogueCard('x64').hidden,true,'warning alone is not a product action');
 assert.equal(catalogueCard('settings32').hidden,true,'already in plan must leave Available/needed');
 assert.equal(installedCard('settings32').hidden,false,'pending install stays in Installed/needed');
+// Labels are action-specific C labels, not a generic Keep/Skip/Undo toggle.
+assert.equal(installedCard('settings64').querySelector('.comp-decision').title,'Обновить до 1.1.0.0');
+assert.equal(installedCard('secureUxTheme').querySelector('.comp-decision').title,'Отменить переустановку');
+assert.equal(installedCard('settings32').querySelector('.comp-decision').title,'Удалить');
+assert.ok(installedCard('settings32').querySelector('.comp-decision').classList.contains('danger'));
+assert.equal(catalogueCard('settings32').querySelector('.comp-decision').title,'Установить GlassSettings x86');
+assert.equal(catalogueCard('settings32').querySelector('.comp-decision').classList.contains('danger'),false);
+assert.equal(d.querySelector('#installed-title').textContent,'Установлено');
+const cardName=catalogueCard('settings32').querySelector('.comp-name');
+assert.equal(cardName.tagName,'SPAN');assert.equal(cardName.getAttribute('role'),'button');
+cardName.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+assert.equal(d.querySelector('#components-warning-dialog').hidden,false);
+d.querySelector('#components-warning-close').click();
 receive({data:{type:'state',page:'checking',checkingStatus:'Downloading and verifying new Setup'}});
 assert.equal(d.querySelector('#checking-status').textContent,'Downloading and verifying new Setup');
 assert.equal(d.querySelector('#update-panel'),null);

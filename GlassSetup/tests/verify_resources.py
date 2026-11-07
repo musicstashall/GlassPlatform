@@ -678,7 +678,8 @@ assert "page_==Page::RuntimeInstalling);" in setup and "page_==Page::RuntimeInst
 # 2026-11-03 follow-up 8: on a clean install the reason line states requiredness —
 # «требуется» on platform products, «рекомендуется» on OpenGlass (neutral «не требуется»
 # remains for installed/healthy cards).
-assert "IDS_COMP_REQUIRED" in setup and "IDS_COMP_RECOMMENDED" in setup
+assert "IDS_COMP_RECOMMENDED" in setup
+assert "wcscmp(id,L\"openglass\")==0?IDS_COMP_RECOMMENDED:IDS_COMP_REQUIRED" not in setup  # defaults are recommendations, never mandatory locks
 assert "IDS_COMP_REQUIRED" in header_now and "требуется" in rc and "рекомендуется" in rc
 assert "GlassProducts::ProductCondition::NotInstalled)" in setup
 

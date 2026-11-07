@@ -1843,9 +1843,9 @@ private:
                 reasons+=JsStringLiteral(Text(IDS_INSPECT_VERSION));
                 firstReason=false;
             } else if (condition==GlassProducts::ProductCondition::NotInstalled) {
-                // Чистая установка: в причине — требуемость продукта. Продукты
-                // платформы обязательны, OpenGlass рекомендуется.
-                reasons+=JsStringLiteral(Text(wcscmp(id,L"openglass")==0?IDS_COMP_RECOMMENDED:IDS_COMP_REQUIRED));
+                // Initial selection is a recommendation, not a mandatory install lock.
+                // Returning a pending card to Available must remain an explicit choice.
+                reasons+=JsStringLiteral(Text(IDS_COMP_RECOMMENDED));
                 firstReason=false;
             } else if (rep) for (auto reason : rep->reasons) {
                 const UINT reasonId=InspectReasonId(reason);
@@ -1919,6 +1919,9 @@ private:
             L",\"badge\":"+JsStringLiteral(Text(sutBadge))+L",\"badgeTone\":"+JsStringLiteral(sutTone)+
             L",\"installed\":"+(inspect_.secureUxTheme.installed?L"true":L"false")+
             L",\"installedVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedVersion)+
+            L",\"installedPackageVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedPackageVersion)+
+            L",\"targetVersion\":"+JsStringLiteral(inspect_.secureUxTheme.sourceVerified?inspect_.secureUxTheme.targetVersion:L"")+
+            L",\"broken\":"+(inspect_.secureUxTheme.damaged?L"true":L"false")+
             L",\"operation\":"+JsStringLiteral(sutCondition==GlassProducts::ProductCondition::NotInstalled?L"install":sutUpdate?L"update":L"repair")+
             L",\"state\":"+JsStringLiteral(Text(sutStateId))+L",\"reasons\":"+sutReasons+
             L",\"checked\":"+(sutChecked?L"true":L"false")+
