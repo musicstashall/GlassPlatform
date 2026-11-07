@@ -1,5 +1,127 @@
 # Повторный аудит C: возврат при первичной установке и кнопки — 2026-11-07
 
+## 2026-11-07 — явное удаление неактивного оригинального SUT из Setup
+
+Пользователь подтвердил сборку предыдущего discovery/Build этапа. Новые изменения
+ниже ещё НЕ подтверждены Windows/MSVC/WiX/runtime проверкой.
+
+- Добавлен отдельный explicit `secureUxThemeRemove` intent. Production HTML отправляет
+  `component:secureUxTheme:remove`, native receiver принимает его только после
+  inspection, для единственного original vendor ProductCode и состояния Inactive.
+  ProductCode фиксируется на native стороне, не принимается из WebView. `:0`
+  отменяет удаление; Select All его не создаёт и не подменяет на установку.
+- Для этого capability в C-карточке появилась настоящая корзина. Drag idle installed
+  SUT в Available добавляет Remove; pending update/install по-прежнему сначала
+  отменяется. Как в C, committed карточка остаётся на Installed с «Будет удалено» до
+  Apply, каталог/«нужно» и план отражают removal. Restore/крестик отменяют его через
+  native IPC, без локального скрытия продукта. Added RU/EN Apply caption, обновляемый
+  при выборе/отмене. GDI fallback также предлагает явно подписанный «удалить MSI»
+  checkbox, а не выдаёт удаление за снятие install-отметки.
+- Unsupported repair/upgrade уже зарегистрированного SUT больше не выглядит рабочей
+  операцией: native `applySupported=false`, disabled repair, no automatic selection,
+  запрет direct checkbox/IPC и Select All. Установка отсутствующего SUT остаётся opt-in.
+- `PrepareRemoval` требует единственный machine original MSI, отсутствие старого
+  Glass repack, безопасные contexts, protected Windows Installer LocalPackage без
+  reparse/hardlinks. Проверяются vendor name/family/native architecture, точный
+  ProductCode и registered PackageCode; private baseline фиксируется SHA-256.
+  `RecheckRemoval` перед MSI повторяет inventory/context/identity и сравнивает оба
+  private snapshots с pinned digest. Никакие System32-файлы вручную не удаляются.
+- Vendor uninstall — одна последняя MSI-транзакция с закрытой UI cancellation,
+  после всех fallible Glass registration шагов. При отказе до неё vendor не
+  затрагивается, ранее изменённые Glass продукты идут по существующему rollback.
+  У vendor MSI собственная MSI-транзакция: это НЕ общий persistent atomic rollback
+  Glass+vendor, и cached baseline НЕ выдаётся за полноценный reinstall source.
+- Если выбран только SUT Remove, actual worker НЕ закрывает Settings, НЕ делает
+  Glass snapshot/stop/scan/MSI/purge/registration/cache publication и НЕ запускает
+  хосты после commit. Execution не скачивает каталог/пакеты: создаётся только
+  private workspace и baseline из Windows Installer cache. Если есть выбранные
+  Glass изменения, сохранён обычный lifecycle и ранний vendor preflight до stop.
+- Actual-source C++ fake tests: `secure_ux_removal_mock.py`,
+  `secure_ux_remove_worker_mock.py`, `secure_ux_remove_ipc_mock.py`,
+  `vendor_only_stages_mock.py` PASS. Покрыты singleton/machine/context/cache identity,
+  PackageCode/bytes tampering, active/pending/unknown rejection, consent binding,
+  cancellation, vendor errors/reboot, no-stop vendor-only и прежний mixed path.
+  Production DOM/Chromium PASS: explicit Remove drag, native echo, two controls,
+  no fake repair, plan/cancel/keep, files-only pending-install cancellation и
+  прежние C geometry/gesture/panel checks.
+- Финальный полный Python-прогон: **53 PASS / 11 прежних baseline FAIL** (те же
+  module/task/path/watch suites, перечисленные в предыдущей записи). DOM и Chromium
+  повторно PASS на итоговом production HTML; `git diff --check` PASS.
+- Границы: только один original vendor MSI и подтверждённый Inactive. Active,
+  pending, unknown/no compatible helper, legacy repack, ambiguous/foreign inventory
+  и неподтверждённый cache остаются заблокированы. General Glass mixed Remove,
+  original SUT repair/upgrade, active-style/profile workflow и перенос original
+  vendor удаления в standalone Unins ещё не завершены. Полного C parity/общей
+  транзакции/persistent recovery/self-update handoff эта запись не заявляет.
+
+
+## 2026-11-07 — реальный discovery → Build в worker Setup (продолжение п.2)
+
+- После acquisition и rollback snapshot, но ДО закрытия Settings/остановки хостов,
+  worker вызывает `BuildExecutionPlan`. Ручное присваивание Install трём строкам
+  в `RunMsiSequence` удалено. План строится через `GlassProductPlan::Build` для
+  Platform x64/x86, Settings x64/x86 и OpenGlass из свежего installed inspection,
+  состояний MSI, защищённых staged MSI и проверенных rollback baselines.
+- Проверяются точный ProductCode подготовленного MSI, численная версия каждого
+  modern/legacy installed baseline (downgrade запрещён по любому из них), контексты,
+  root/cache identity recheck и related products. Изменившаяся presence, неизвестная
+  целостность выбранного installed продукта, отсутствующий baseline/media и
+  невалидный план блокируют выполнение до остановки/изменений продуктов.
+  Unchecked/kept строки не получают mutation authority и не требуют media.
+- Обе Settings-разрядности теперь исполняются общей Helpers-фазой того же плана;
+  сохраняются независимые early-attempt rollback bits и остановка после первого
+  отказа. Products-фаза сопоставляет callback с Product, а не индексом вектора.
+  Неожиданный Remove явно отвергается, а не превращается в установку.
+- Добавлен `Inputs::inspectSources=false` для повторного execution inspection:
+  не загружает каталог/MSI повторно и не создаёт acquisition workspace. Обычный
+  UI inspection сохраняет source discovery. Исправлена проверка legacy integrity:
+  baseline/компоненты берутся по реально установленному legacy ProductCode,
+  а не отсутствующему modern code.
+- Новые `setup_execution_plan_mock.py` и `inspection_preflight_mock.py` компилируют
+  и исполняют actual adapter / actual inspector loop с fake API; PASS. Расширен
+  actual early-Settings тест: нет/невалидный план, обе архитектуры, attempt masks,
+  отказ первого MSI; ASan/UBSan PASS. Planner 16384/4096, fixed-path, acquisition,
+  Setup download, source/resources и DOM PASS.
+- Полный Python-прогон: 49 PASS / 11 FAIL после обновления source assertion на
+  корректный installedCode. Имена оставшихся 11 совпадают с ранее зафиксированным
+  baseline: module_scan, platform_mutex, preserve_registry, registered_paths,
+  scan_protocol, shell_install_root, task_close_cleanup, task_scheduler_stop,
+  unins_close_state, unins_task_stop, watch_lifecycle (суффикс `_mock.py`).
+- Это НЕ завершение п.2 или mixed Remove: original SUT сохраняет отдельный последний
+  vendor transaction/commit protocol; его repair/remove не авторизованы новым планом.
+  GUI/worker version-intent parity, единая транзакция Setup/Unins и persistent
+  recovery/removal rollback остаются в работе. Полная Windows/MSVC/WiX проверка
+  текущих изменений не выполнялась; платформа/службы не запускались/останавливались.
+
+
+## 2026-11-07 — SecureUxTheme residual-files investigation
+
+- Traced the actual Native `GlassSettings_SecureUxThemeQueryStateV1W` export:
+  inert System32 v4/proxy files yield Inactive; a legacy DLL alone does not
+  yield External. Active legacy IFEO tokens and failed queries retain their guards.
+- Found and fixed an independent native presence-classification gap in shared
+  `SecureUxThemeInventory::Query`: related-product enumeration includes advertised
+  products and stale family references, not just installed packages. UNKNOWN and
+  ADVERTISED now do not mark a product installed; duplicate ProductCodes are
+  deduplicated. DEFAULT remains installed; ABSENT remains conservatively present
+  because it can represent a different user's installation. Broken configuration
+  returns an error (the installation executor rejects inventory errors).
+- Added portable tests compiling the ACTUAL shared inventory and Native query-state
+  export with fake MSI/observations, not replacement policy implementations:
+  `secure_ux_inventory_mock.py` and `secure_ux_state_mock.py` PASS. Actual Native
+  registration fake-registry regression also PASS.
+- Added Chromium SUT-specific files-only scenario: selected pending installation
+  drags by title to Available, emits exactly `component:secureUxTheme:0`, and stays
+  there after native echo. DOM, Chromium and resource/source checks PASS.
+- Scope/remaining limitation: this fixes stale/advertised MSI presence, not removal
+  of a genuinely registered inactive MSI. Such a product still belongs to Installed;
+  returning it requires the real mixed Remove operation still outstanding below.
+  No local-only shelving/hiding, falsified installed flag, MSI deletion, or file
+  cleanup was added. User's Windows case is not yet reproduced on Windows and this
+  change is not claimed as confirmation that their exact machine is fixed.
+  Residual author-owned files are allowed and are never deleted by this change.
+
+
 ## Воспроизведённый дефект и исправление
 
 Новый реальный Chromium test с fresh defaults (5 выбранных продуктов, SUT opt-in) **сначала
@@ -681,3 +803,15 @@ MSI, файлы, регистрация и loaded state разделены: MSI 
 - Planner помечает OpenGlass предупреждением ManualOpenGlass, если продукт будет использоваться без GlassSettings. В плане, карточке и popup указано ручное редактирование реестра/управление службами и задачами; принудительная зависимость не вводится.
 - Макеты и runtime fixture обновлены для обеих архитектур. UI smoke покрывает четыре случая OS x64/x86 × Setup/Unins.
 - Порядок сборки неизменен: **Release|x64 → Release|x86**, без предварительной сборки проектов. Ошибочное требование x86 Native в ресурсах Unins удалено. Для 32-битного обслуживания финальный Setup публикует свой встроенный x86 helper в защищённый Current; это не добавляет обратной build dependency первого прохода на второй. Полная Windows-сборка в этой среде не проверялась.
+
+
+## Files-only SecureUxTheme: разделение presence и ownership (2026-11-07)
+
+- Найдено воспроизводимое противоречие в исходниках: `Query` сохранял `INSTALLSTATE_ABSENT` как ownership candidate, а `IsInstalled` и inspector принимали любой непустой результат за installed presence. Причина конкретного Windows-наблюдения пользователя ещё не подтверждена; нельзя исключать настоящую DEFAULT-регистрацию или старый EXE без MSI evidence.
+- `QueryInstalled` и startup `IsInstalled` теперь учитывают только DEFAULT. Консервативный `Query` по умолчанию **по-прежнему сохраняет ABSENT** для проверок контекста/владельца. DEFAULT не скрывается; DLL в System32 и Inactive сами по себе не являются установленным MSI.
+- Provider Prepare и финальная граница InstallOriginalSecureUxTheme используют общий `QueryInstallPresence`: все family candidates проходят read-only context safety; ABSENT без контекстов не даёт ложный alreadyInstalled/no-op; чужой/непроверенный контекст блокирует операцию. Регистрации/файлы не удаляются и не «исправляются» для косметического соответствия UI.
+- Inspector выводит MSI evidence в InstallLog и `presenceDetail` JSON, доступный через информацию о продукте (клик по имени): результат family query, итог presence, известные repack ProductCodes и состояния, family candidates и состояния. Числа состояния Windows Installer: DEFAULT=5, ABSENT=2, UNKNOWN=-1, ADVERTISED=1. Диагностический повторный query — отдельное read-only наблюдение, не atomic MSI snapshot.
+- Available сохраняет визуальные состояния C. Добавлены независимые aria-label/data-catalog-state: доступен/не выбран, действие в плане, уже установлен/без изменений, запланировано удаление. Idle у kept Installed и planned больше не означает одинаковую семантику для доступности.
+- Новая regression выполняет actual shared header + actual inspector presence projection: none/ABSENT/DEFAULT/repack/mixed/query error. Native provider test выполняет actual QueryInstallPresence: DEFAULT kept, ABSENT без контекстов отсутствует, foreign ABSENT rejected, enumeration failure/cancel/неожиданное состояние rejected. API context evidence здесь подменено, реальная Windows enumeration не проверена.
+- Production DOM и Chromium покрывают исходное состояние **все отсутствуют, все unchecked**, SUT Available/active, пустой план; реальный drag Available→Installed даёт install IPC `:1`, обратный drag отменяет `:0`, без Remove/unsupported dialog. Отдельные registered removal cases сохранены. UI discovery/IPC response — fixture, не запущенный Windows backend.
+- После изменений: **54 PASS / 11 прежних FAIL / 65 Python scripts**, DOM PASS, Chromium PASS, resource smoke PASS, diff-check PASS. Имена прежних 11 failures не изменились. Windows/MSVC/WiX/WebView runtime не выполнены; общий mixed Remove, rollback/recovery и standalone original SUT Unins этим не завершены. Платформа не запускалась/не останавливалась.

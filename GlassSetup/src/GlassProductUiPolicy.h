@@ -17,6 +17,7 @@ inline GlassProductPlan::Plan Preview(const GlassProducts::Selection& choice,
     request.os64=os64;
     request.mode=removal?P::Mode::RemoveInteractive:P::Mode::Install;
     request.selected={choice.platform64,choice.platform32,choice.Settings64(os64),choice.openGlass,choice.secureUxTheme,choice.Settings32(os64)};
+    if(!removal && choice.secureUxThemeRemove)request.actions[P::Index(P::Product::SecureUxTheme)]=P::Action::Remove;
     std::array<P::Facts,P::kProductCount> facts{};
     for (std::size_t i=0;i<facts.size();++i) {
         auto& f=facts[i];

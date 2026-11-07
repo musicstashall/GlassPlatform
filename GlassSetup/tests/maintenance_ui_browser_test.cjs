@@ -52,6 +52,77 @@ async function freshInstallReturn(page,products,out){
  assert.equal(await page.locator('#components-warning-dialog').isVisible(),true);await page.keyboard.press('Escape');
  console.log('PASS: fresh-install defaults: drag by product title back to Available, native echo, needed visibility, re-add/cancel via card controls, independent Settings, no spurious info popup.');
 }
+async function inactiveSutReturn(page,products){
+ // Native export/inventory observations are tested separately in the C++ fakes.
+ // This is their files-only UI result: inactive, no installed MSI, no conflict.
+ const rows=products.map(r=>({...r,checked:false,installed:false,installedVersion:'',installedPackageVersion:'',operation:'install',disabled:false,locked:false,warning:'',registrationState:r.id==='secureUxTheme'?'inactive':undefined}));
+ await page.evaluate(components=>window.__receive({data:{type:'state',locale:'ru',appMode:'setup',maintenance:true,page:'components',components}}),rows);
+ // The reported starting state: nothing installed or selected, only inert files.
+ assert.equal(await page.locator('#components-installed-grid #product-secureUxTheme').count(),0);
+ const absent=page.locator('#components-grid #product-secureUxTheme');
+ assert.equal(await absent.isChecked(),false);
+ assert.equal(await absent.locator('..').getAttribute('data-catalog-state'),'available');
+ assert.equal(await absent.locator('..').evaluate(c=>c.classList.contains('active')),true);
+ assert.equal(await absent.locator('..').locator('.comp-decision').isEnabled(),true);
+ assert.equal(await page.locator('#components-plan-items li:not(.plan-warning):not(.components-plan-empty)').count(),0);
+ const beforeInstall=await page.evaluate(()=>window.__messages.length);
+ await absent.locator('..').scrollIntoViewIfNeeded();
+ const from=await absent.locator('..').locator('.comp-name').boundingBox();
+ const target=await page.locator('[data-component-drop="installed"]').boundingBox();
+ await page.mouse.move(from.x+20,from.y+5);await page.mouse.down();await page.mouse.move(from.x+40,from.y+5,{steps:3});
+ await page.mouse.move(target.x+150,target.y+100,{steps:12});await page.mouse.up();
+ assert.equal(await page.evaluate(()=>window.__messages.length),beforeInstall+1);
+ assert.equal(await page.evaluate(()=>window.__messages.at(-1)),'component:secureUxTheme:1');
+ assert.equal(await page.locator('#components-warning-dialog').isVisible(),false);
+ assert.equal(await page.locator('#components-plan-items li:not(.plan-warning):not(.components-plan-empty)').count(),1);
+ rows.find(r=>r.id==='secureUxTheme').checked=true;
+ await page.evaluate(components=>window.__receive({data:{type:'state',components}}),rows);
+ const initial=await page.evaluate(()=>window.__messages.length);
+ const card=page.locator('#product-secureUxTheme').locator('..');await card.scrollIntoViewIfNeeded();
+ const title=await card.locator('.comp-name').boundingBox();
+ await page.mouse.move(title.x+20,title.y+5);await page.mouse.down();await page.mouse.move(title.x+40,title.y+5,{steps:3});
+ assert.equal(await page.locator('.drag-ghost').count(),1);
+ const lane=await page.locator('[data-component-drop="available"]').boundingBox();
+ await page.mouse.move(lane.x+150,lane.y+120,{steps:12});await page.mouse.up();
+ assert.equal(await page.evaluate(()=>window.__messages.length),initial+1);
+ assert.equal(await page.evaluate(()=>window.__messages.at(-1)),'component:secureUxTheme:0');
+ assert.equal(await page.locator('#components-grid #product-secureUxTheme').count(),1);
+ rows.find(r=>r.id==='secureUxTheme').checked=false;
+ await page.evaluate(components=>window.__receive({data:{type:'state',components}}),rows);
+ assert.equal(await page.locator('#components-grid #product-secureUxTheme').count(),1);
+ console.log('PASS: files-only inactive SUT: initially Available/unchecked, active catalogue and empty plan; real title drag adds installation, then cancels it without removal warning; native echo preserves Available.');
+}
+async function registeredSutRemoval(page,products){
+ const rows=products.map(r=>({...r,checked:false,installed:r.id==='secureUxTheme',installedVersion:r.id==='secureUxTheme'?'4.0.0':'',operation:'repair',warning:'',disabled:false,locked:false,removeSupported:r.id==='secureUxTheme',applySupported:r.id!=='secureUxTheme'}));
+ await page.evaluate(components=>window.__receive({data:{type:'state',locale:'ru',appMode:'setup',page:'components',components}}),rows);
+ let initial=await page.evaluate(()=>window.__messages.length);
+ let card=page.locator('#product-secureUxTheme').locator('..');await card.scrollIntoViewIfNeeded();
+ assert.equal(await card.locator('.comp-remove').count(),1);
+ assert.equal(await card.locator('.comp-decision').isDisabled(),true);
+ const title=await card.locator('.comp-name').boundingBox();
+ await page.mouse.move(title.x+20,title.y+5);await page.mouse.down();await page.mouse.move(title.x+40,title.y+5,{steps:3});
+ assert.equal(await page.locator('.drag-ghost').count(),1);
+ const lane=await page.locator('[data-component-drop="available"]').boundingBox();
+ await page.mouse.move(lane.x+150,lane.y+120,{steps:12});await page.mouse.up();
+ assert.equal(await page.evaluate(()=>window.__messages.length),initial+1);
+ assert.equal(await page.evaluate(()=>window.__messages.at(-1)),'component:secureUxTheme:remove');
+ assert.equal(await card.evaluate(c=>c.classList.contains('pending-remove')),true);
+ assert.equal(await page.locator('#components-plan-items li.remove').count(),1);
+ // Concept C retains the committed card on Installed until Apply, marking removal.
+ assert.equal(await page.locator('#components-installed-grid #product-secureUxTheme').count(),1);
+ rows.find(r=>r.id==='secureUxTheme').checked=true;rows.find(r=>r.id==='secureUxTheme').operation='remove';
+ await page.evaluate(components=>window.__receive({data:{type:'state',components}}),rows);
+ card=page.locator('#product-secureUxTheme').locator('..');
+ assert.equal(await card.locator('.comp-decision').getAttribute('title'),'Оставить установленным');
+ await page.locator('#components-plan-items .plan-cancel').click();
+ assert.equal(await page.evaluate(()=>window.__messages.at(-1)),'component:secureUxTheme:0');
+ assert.equal(await card.evaluate(c=>c.classList.contains('pending-remove')),false);
+ await card.locator('.comp-remove').click();
+ assert.equal(await page.evaluate(()=>window.__messages.at(-1)),'component:secureUxTheme:remove');
+ await card.locator('.comp-decision').click();
+ assert.equal(await page.evaluate(()=>window.__messages.at(-1)),'component:secureUxTheme:0');
+ console.log('PASS: registered inactive SUT: actual removal capability, title drag emits explicit Remove IPC, C pending-removal/native echo, trash and keep/cancel; no fake repair.');
+}
 async function workspaceGestures(page,products,out){
  let epoch=0;
  const pin=async(name,on)=>{const b=page.locator('[data-component-pin="'+name+'"]');if(await b.getAttribute('aria-pressed')!==String(on))await b.click();};
@@ -203,6 +274,8 @@ async function workspaceGestures(page,products,out){
   await page.evaluate(()=>document.activeElement.blur());
   if(out){fs.mkdirSync(out,{recursive:true});await page.locator('#stage').screenshot({path:path.join(out,'production-maintenance.png')});}
   await freshInstallReturn(page,products,out);
+  await inactiveSutReturn(page,products);
+  await registeredSutRemoval(page,products);
   await workspaceGestures(page,products,out);
   // Compare actual card content/control geometry with C, not only outer skins.
   await page.evaluate(components=>window.__receive({data:{type:'state',locale:'ru',page:'components',appMode:'setup',components}}),[

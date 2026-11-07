@@ -4,6 +4,7 @@
 #include "InstallSupport/GlassUserDefaults.h"
 #include "InstallSupport/GlassSecureUxPackage.h"
 #include "GlassProducts.h"
+#include "GlassProductPlan.h"
 #include "WizardUnlockState.h"
 #include <windows.h>
 #include <winsvc.h>
@@ -13,7 +14,8 @@
 #include <vector>
 #include <GlassPlatformTask.h>
 
-// Распаковка встроенных MSI и установка через MsiInstallProduct с кооперативной отменой и откатом.
+// Protected MSI acquisition/install with cooperative cancellation and Glass rollback.
+// Original vendor MSI install/removal is a separate, last transaction.
 class InstallEngine {
 public:
     using StatusFn = std::function<void(const std::wstring& line, int percent)>;
@@ -104,7 +106,8 @@ public:
         GlassProducts::OpenGlassStartupState openGlassStartup,
         bool forceClean,
         PhaseLabels labels,
-        StatusFn onStatus) noexcept;
+        StatusFn onStatus,
+        const std::wstring& secureUxRemovalCode = {}) noexcept;
 
     bool Poll() noexcept;
     bool Succeeded() const noexcept { return succeeded_; }
@@ -179,9 +182,16 @@ private:
     bool EnsureTempWorkspace() noexcept;
     bool ExtractPayload(HINSTANCE instance) noexcept;
     bool InstallGlassSettingsEarly() noexcept;
+    bool BuildExecutionPlan() noexcept;
+    GlassProductPlan::Plan executionPlan_{};
+    bool executionPlanReady_=false;
     bool RunMsiSequence() noexcept;
     bool InstallOriginalSecureUxTheme() noexcept;
     GlassSecureUxPackage::Package secureUxPackage_;
+    GlassSecureUxPackage::Removal secureUxRemoval_;
+    std::wstring secureUxRemovalCode_;
+    bool PrepareSecureUxRemoval() noexcept;
+    bool RemoveOriginalSecureUxTheme() noexcept;
     bool RecheckSnapshottedProduct(const wchar_t* productCode) noexcept;
     bool RecheckRelatedProducts(const wchar_t* productCode) noexcept;
     bool StopHostsForRollback() noexcept;

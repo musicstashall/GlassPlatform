@@ -7,7 +7,7 @@
 namespace Shared::SecureUxThemeInventory {
 // Read-only official MSI family inventory. ProductCode varies between releases;
 // neither a retained DLL nor a packed GUID guessed from WiX is product presence.
-inline UINT Query(std::vector<std::wstring>& products) noexcept {
+inline UINT Query(std::vector<std::wstring>& products, bool installedOnly=false) noexcept {
     products.clear();
     try {
         for (const wchar_t* family:{L"{965B5B74-4040-4E89-947F-AF8D99A76706}",
@@ -17,14 +17,33 @@ inline UINT Query(std::vector<std::wstring>& products) noexcept {
                 const UINT rc=MsiEnumRelatedProductsW(family,0,index,product);
                 if (rc==ERROR_NO_MORE_ITEMS) break;
                 if (rc!=ERROR_SUCCESS) { products.clear(); return rc; }
-                products.emplace_back(product);
+                // Related-product enumeration also returns advertisements and
+                // stale family references. Neither is an installed payload.
+                const INSTALLSTATE state=MsiQueryProductStateW(product);
+                if (state==INSTALLSTATE_UNKNOWN || state==INSTALLSTATE_ADVERTISED) continue;
+                // ABSENT can mean installed for another user: keep that ownership
+                // guard rather than authorizing an install over a foreign product.
+                if (state!=INSTALLSTATE_DEFAULT && state!=INSTALLSTATE_ABSENT) {
+                    products.clear(); return ERROR_BAD_CONFIGURATION;
+                }
+                // Ownership candidates are not the same as installed products.
+                // ABSENT must stay in the conservative inventory for context
+                // checks, but must never put a card on the Installed shelf.
+                if(installedOnly && state!=INSTALLSTATE_DEFAULT)continue;
+                bool duplicate=false;
+                for (const auto& existing:products)
+                    if (_wcsicmp(existing.c_str(),product)==0) { duplicate=true; break; }
+                if (!duplicate) products.emplace_back(product);
             }
         }
         return ERROR_SUCCESS;
     } catch (...) { products.clear(); return ERROR_NOT_ENOUGH_MEMORY; }
 }
+inline UINT QueryInstalled(std::vector<std::wstring>& products) noexcept {
+    return Query(products,true);
+}
 inline bool IsInstalled() noexcept {
     std::vector<std::wstring> products;
-    return Query(products)==ERROR_SUCCESS && !products.empty();
+    return QueryInstalled(products)==ERROR_SUCCESS && !products.empty();
 }
 }

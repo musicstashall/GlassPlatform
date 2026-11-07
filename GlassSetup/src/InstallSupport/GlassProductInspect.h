@@ -37,6 +37,9 @@ struct ProductReport {
 
 struct Report {
     bool ran = false;
+    // UI capability hint only; execution re-enumerates and verifies the cache.
+    std::wstring officialSecureUxThemeCode;
+    std::wstring secureUxThemePresenceDetail;
     ProductReport x64;
     ProductReport x86;
     ProductReport settings; // compatibility view for the current UI
@@ -48,6 +51,9 @@ struct Report {
 struct Inputs {
     std::wstring signerSha1;
     bool os64 = false;
+    // Execution preflight already acquired its media: inspect installed facts
+    // without fetching the catalogue or preparing/downloading packages again.
+    bool inspectSources = true;
     const std::atomic_bool* cancelled = nullptr; // остановка между проверками продуктов
 };
 

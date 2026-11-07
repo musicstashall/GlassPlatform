@@ -931,16 +931,19 @@ function leaveComponentEdge(name){
  if(!componentSides.visible[name]&&componentEdge(name).classList.contains('is-hot'))clearComponentEdge();
 }
 // A drop uses the same single checkbox/IPC as the buttons. In Setup, dropping
-// back to Available only undoes a selected intent; it NEVER invents Remove.
+// back to Available cancels an install intent or uses an explicit backend removal capability.
 function componentDropValue(drag,lane){
  if(!lane||lane===drag.source)return null;
  if(hostState.appMode==='unins')return lane==='available'?true:false;
- if(lane==='installed')return true;
- return drag.input.checked?false:null;
+ if(lane==='installed'){const item=(hostState.components||[]).find(item=>item.id===drag.id);return drag.input.dataset.intent==='remove'?false:item?.applySupported===false?null:true;}
+ if(drag.input.checked)return drag.input.dataset.intent==='remove'?null:false;
+ const item=(hostState.components||[]).find(item=>item.id===drag.id);
+ return componentRemovalSupported(item)?'remove':null;
 }
 function componentDropText(drag,lane){
  const ru=locale==='ru',value=componentDropValue(drag,lane);
  if(value===null)return lane===drag.source?(ru?'Исходная панель — без изменений':'Original shelf — no changes'):(ru?'Удаление в этом режиме не поддерживается':'Removal is not supported in this mode');
+ if(value==='remove')return ru?'Отпустите, чтобы запланировать удаление MSI; постоянные файлы сохранятся':'Release to plan MSI removal; permanent files are retained';
  if(hostState.appMode==='unins')return value?(ru?'Отпустите, чтобы запланировать удаление':'Release to plan removal'):(ru?'Отпустите, чтобы оставить продукт':'Release to keep the product');
  return value?(ru?'Отпустите, чтобы добавить действие в план':'Release to add the action to the plan'):(ru?'Отпустите, чтобы отменить выбранное действие':'Release to undo the selected action');
 }
@@ -1027,7 +1030,7 @@ function bindComponentWorkspace(){
   componentSuppressClickUntil=performance.now()+300;endComponentDrag();
   if(!valid||!zone)return;
   if(value===null){componentGestureNote(componentDropText(drag,lane),lane!==drag.source);return;}
-  if(value!==drag.input.checked){drag.input.checked=value;drag.input.dispatchEvent(new Event('change',{bubbles:true}));}
+  if(value==='remove')commitComponentRemoval(drag.input);else commitComponentChoice(drag.input,value);
   armComponentHide(zone);
  });
  document.addEventListener('click',e=>{if(e.detail>0&&(componentSuppressPointerClick||performance.now()<componentSuppressClickUntil)&&panel.contains(e.target)){componentSuppressPointerClick=false;e.preventDefault();e.stopImmediatePropagation();}},true);
@@ -1044,11 +1047,11 @@ function bindComponentWorkspace(){
 // of one intent, not clones with the same action/status content (concept C).
 function componentSize(bytes){return new Intl.NumberFormat(locale==='ru'?'ru':'en',{minimumFractionDigits:1,maximumFractionDigits:1}).format(bytes/1048576)+(locale==='ru'?' МБ':' MB');}
 function componentCardFacts(item,input){
- const selected=input.checked,remove=hostState.appMode==='unins'&&selected;
+ const selected=input.checked,remove=selected&&(hostState.appMode==='unins'||input.dataset.intent==='remove');
  const newer=!!(item.installed&&item.operation==='update'&&item.targetVersion);
  const broken=item.badgeTone==='repair'||item.broken===true;
  return {selected,remove,newer,broken,
-  availableNeeded:hostState.appMode==='unins'?selected:!selected&&(!item.installed||newer||broken),
+  availableNeeded:hostState.appMode==='unins'?selected:remove||!selected&&(!item.installed||newer||broken),
   installedNeeded:selected||newer||broken};
 }
 function bindComponentName(name,item){
@@ -1056,15 +1059,23 @@ function bindComponentName(name,item){
  // without making the whole header a native button excluded from pointer drag.
  name.tabIndex=0;name.setAttribute('role','button');
  name.title=locale==='ru'?'Сведения о продукте':'Product information';
- name.onclick=()=>showProductWarning({...item,information:true,warning:[item.description,item.state,...(item.reasons||[])].filter(Boolean).join('\n\n')},name);
+ name.onclick=()=>showProductWarning({...item,information:true,warning:[item.description,item.state,...(item.reasons||[]),item.presenceDetail].filter(Boolean).join('\n\n')},name);
  name.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();name.click();}};
 }
+function componentRemovalSupported(item){return hostState.appMode!=='unins'&&item?.id==='secureUxTheme'&&item.installed&&item.removeSupported===true&&!item.disabled&&!item.locked;}
+function commitComponentRemoval(input){
+ const item=(hostState.components||[]).find(item=>item.id===input.dataset.component);
+ if(input.disabled||hostState.componentsLoading||!componentRemovalSupported(item)||input.checked&&input.dataset.intent==='remove')return false;
+ input.dataset.intent='remove';input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));return true;
+}
 function commitComponentChoice(input,checked){
- if(input.disabled||hostState.componentsLoading||input.checked===checked)return false;
- input.checked=checked;input.dispatchEvent(new Event('change',{bubbles:true}));return true;
+ const item=(hostState.components||[]).find(item=>item.id===input.dataset.component);
+ if(input.disabled||hostState.componentsLoading||input.checked===checked||checked&&item?.applySupported===false)return false;
+ input.dataset.intent='apply';input.checked=checked;input.dispatchEvent(new Event('change',{bubbles:true}));return true;
 }
 function componentCardAction(item,input,shelf){
  const ru=locale==='ru',f=componentCardFacts(item,input),current=item.installedVersion||item.installedPackageVersion||'',target=item.targetVersion||'';
+ if(f.remove&&hostState.appMode!=='unins')return {act:'restore',value:false,label:ru?'Оставить установленным':'Keep installed'};
  if(shelf==='available')return {act:!item.installed?'install':f.newer?'update':'repair',value:true,
   label:!item.installed?(ru?'Установить ':'Install ')+item.title:f.newer?(ru?'Обновить до ':'Update to ')+target:(ru?'Переустановить ':'Reinstall ')+current};
  if(hostState.appMode==='unins')return {act:f.selected?'restore':'remove',value:!f.selected,
@@ -1082,6 +1093,10 @@ function paintComponentCard(card,item,input,shelf){
  const size=Number(item.packageSize||0);const suffix=size>0?' · '+componentSize(size):'';
  for(const cls of ['active','idle','has-newer','has-offer','is-activated','is-broken','pending-install','pending-remove'])card.classList.remove(cls);
  let chipClass='',chipText='',icon='';
+  const status=f.remove?'removal-planned':f.selected?'planned':item.installed?'installed':'available';
+  card.dataset.catalogState=status;
+  const statusText=status==='removal-planned'?(ru?'запланировано удаление':'removal planned'):status==='planned'?(ru?'действие добавлено в план':'action planned'):status==='installed'?(ru?'уже установлен, без изменений':'already installed, kept'):(ru?'доступен, не выбран':'available, not selected');
+  card.setAttribute('aria-label',item.title+': '+statusText);
  if(available){
   card.classList.add(f.availableNeeded?'active':'idle');if(f.newer&&!f.selected)card.classList.add('has-newer');
   if(f.newer){text(current);line.append(' → ');text(target,true);}else text(item.installed?current:target,f.selected);
@@ -1118,14 +1133,21 @@ function paintComponentCard(card,item,input,shelf){
  }else{
   marks.className='c-chip '+chipClass;if(icon)marks.append(svg(icon));marks.append(document.createTextNode(chipText));
   action.disabled=input.disabled;action.classList.toggle('repair',hostState.appMode==='unins'?f.selected:!!item.installed);action.classList.toggle('is-on',f.selected&&!!item.installed);
-  action.replaceChildren(svg(hostState.appMode==='unins'?(f.selected?'arrowLeft':'trash'):!item.installed?'trash':'repair'));
+  action.replaceChildren(svg(hostState.appMode==='unins'?(f.selected?'arrowLeft':'trash'):f.remove?'arrowLeft':!item.installed?'trash':'repair'));
   action.classList.toggle('danger',!item.installed||hostState.appMode==='unins'&&!f.selected);
  }
  const definition=componentCardAction(item,input,shelf),label=document.createElement('span');label.className='comp-action-label';label.textContent=definition.label;action.prepend(label);
+ if(definition.value===true&&item.applySupported===false)action.disabled=true;
  action.title=definition.label;action.setAttribute('aria-label',definition.label);action.dataset.componentAction=definition.act;
  if(definition.act==='repair'||definition.act==='update'||definition.act==='undo'||definition.act==='unrepair')action.setAttribute('aria-pressed',String(f.selected));else action.removeAttribute('aria-pressed');
  action.onclick=()=>commitComponentChoice(input,definition.value);
  const spacer=document.createElement('span');spacer.className='spacer';foot.replaceChildren(marks,spacer,action);
+ if(!available&&componentRemovalSupported(item)){
+  const remove=document.createElement('button');remove.type='button';remove.className='c-move comp-remove danger';
+  remove.title=ru?'Удалить':'Remove';remove.setAttribute('aria-label',remove.title);remove.disabled=input.disabled;
+  remove.append(svg('trash'));remove.onclick=()=>commitComponentRemoval(input);foot.append(remove);
+ }
+
 }
 function syncComponentShelves(){
  if(componentDrag)return; // Stable host ticks must not replace the card being carried.
@@ -1177,7 +1199,7 @@ function syncComponentShelves(){
 }
 function productActionLabel(item){return hostState.appMode==='unins'?(locale==='ru'?'Удалить':'Remove'):item.operation==='update'?(locale==='ru'?'Обновить':'Update'):item.operation==='repair'?(locale==='ru'?'Переустановить':'Reinstall'):(locale==='ru'?'Установить':'Install');}
 function updateComponentsStatus(){
- const inputs=[...document.querySelectorAll('#components-panel .c-card input.comp-check')],selected=inputs.filter(x=>x.checked),available=inputs.filter(x=>!x.disabled),all=available.length>0&&available.every(x=>x.checked),ru=locale==='ru';
+ const inputs=[...document.querySelectorAll('#components-panel .c-card input.comp-check')],selected=inputs.filter(x=>x.checked),available=inputs.filter(x=>!x.disabled&&(x.checked||(hostState.components||[]).find(item=>item.id===x.dataset.component)?.applySupported!==false)),all=available.length>0&&available.every(x=>x.checked),ru=locale==='ru';
  for(const [id,title] of [['available',ru?'Доступно':'Available'],['installed',ru?'Установлено':'Installed']])document.getElementById(id+'-title').textContent=title;
  const button=document.getElementById('components-select-all');button.disabled=all||available.length===0;button.textContent=ru?'Выбрать всё':'Select all';
  const count=document.getElementById('components-count');count.hidden=false;count.textContent=ru?`Выбрано: ${selected.length} из ${inputs.length} продуктов`:`Selected: ${selected.length} of ${inputs.length} products`;
@@ -1188,7 +1210,7 @@ function updateComponentsStatus(){
  for(const [value,label] of [[selected.length,ru?'изменений':'changes'],[keep,ru?'без изменений':'kept']]){const cell=document.createElement('div');cell.className='components-plan-total';const number=document.createElement('strong');number.textContent=String(value);const caption=document.createElement('span');caption.textContent=label;cell.append(number,caption);totals.append(cell);}
  if(!selected.length){const empty=document.createElement('li');empty.className='components-plan-empty';empty.textContent=ru?'Изменения не выбраны. Отметьте продукт слева, чтобы добавить его в план.':'No changes selected. Choose a product on the left to add it to the plan.';plan.append(empty);}
 
- for(const input of selected){const item=items.find(x=>x.id===input.dataset.component);if(!item)continue;const li=document.createElement('li'),name=document.createElement('span'),action=document.createElement('span');name.textContent=item.title;action.textContent=hostState.appMode==='unins'?(ru?'Удалить':'Remove'):productActionLabel(item);li.className=hostState.appMode==='unins'?'remove':item.operation||'install';const cancel=document.createElement('button');cancel.type='button';cancel.className='plan-cancel';cancel.textContent='×';cancel.setAttribute('aria-label',(ru?'Отменить: ':'Undo: ')+item.title);cancel.onclick=()=>{commitComponentChoice(input,false);input.closest('.c-card').querySelector('.comp-decision').focus();};li.append(name,action,cancel);plan.append(li);}
+ for(const input of selected){const item=items.find(x=>x.id===input.dataset.component);if(!item)continue;const li=document.createElement('li'),name=document.createElement('span'),action=document.createElement('span');name.textContent=item.title;const removes=componentCardFacts(item,input).remove;action.textContent=removes?(ru?'Удалить':'Remove'):productActionLabel(item);li.className=removes?'remove':item.operation||'install';const cancel=document.createElement('button');cancel.type='button';cancel.className='plan-cancel';cancel.textContent='×';cancel.setAttribute('aria-label',(ru?'Отменить: ':'Undo: ')+item.title);cancel.onclick=()=>{commitComponentChoice(input,false);input.closest('.c-card').querySelector('.comp-decision:not(:disabled),.comp-remove:not(:disabled),.comp-name').focus();};li.append(name,action,cancel);plan.append(li);}
  const cleanup=document.querySelector('#components-extra input');if(cleanup&&cleanup.checked){const li=document.createElement('li');li.textContent=ru?'Очистить настройки всех пользователей, HKLM и сохранённые темы Glass':'Clean all user profiles, HKLM and saved Glass themes';plan.append(li);}
  for(const item of items){if(!item||!item.warning||item.hidden)continue;const li=document.createElement('li');li.className='plan-warning';li.textContent='⚠ '+item.warning;plan.append(li);}
  document.getElementById('components-plan-title').textContent=hostState.appMode==='unins'?(ru?'План удаления':'Removal plan'):(ru?'План изменений':'Change plan');
@@ -1201,7 +1223,7 @@ function renderComponentsPanel(){
  const items=Array.isArray(hostState.components)?hostState.components:[],loading=hostState.componentsLoading===true,signature=JSON.stringify([locale,hostState.appMode,loading,items]);
  if(signature!==componentSignature){endComponentDrag(false);const focusId=document.activeElement&&document.activeElement.dataset.component,scroll=document.querySelector('#components-panel .components-list').scrollTop;componentSignature=signature;grid.replaceChildren();installedGrid.replaceChildren();extra.replaceChildren();
  if(loading){const label=document.createElement('div');label.className='comp-loading';label.textContent=locale==='ru'?'Анализ установки…':'Analyzing installation…';grid.append(label);}
- else for(const item of items){if(!item||item.hidden)continue;const input=document.createElement('input');input.type='checkbox';input.className='comp-check';input.dataset.component=String(item.id);input.id='product-'+String(item.id);input.checked=!!item.checked;input.disabled=!!(item.disabled||item.locked);input.onchange=()=>{const card=input.closest('.comp-card');if(card){card.classList.toggle('is-checked',input.checked);card.classList.toggle('active',input.checked&&hostState.appMode!=='unins');card.classList.toggle('pending-remove',input.checked&&hostState.appMode==='unins');card.classList.toggle('pending-install',!item.installed&&input.checked&&hostState.appMode!=='unins');(hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid).append(card);}if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('component:'+String(item.id)+':'+(input.checked?'1':'0'));updateComponentsStatus();};
+ else for(const item of items){if(!item||item.hidden)continue;const input=document.createElement('input');input.type='checkbox';input.className='comp-check';input.dataset.component=String(item.id);input.id='product-'+String(item.id);input.checked=!!item.checked;input.dataset.intent=item.operation==='remove'?'remove':'apply';input.disabled=!!(item.disabled||item.locked);input.onchange=()=>{if(!input.checked)input.dataset.intent='apply';if(input.checked&&input.dataset.intent!=='remove'&&item.applySupported===false){input.checked=false;return;}const card=input.closest('.comp-card');if(card){card.classList.toggle('is-checked',input.checked);card.classList.toggle('active',input.checked&&hostState.appMode!=='unins');card.classList.toggle('pending-remove',input.checked&&hostState.appMode==='unins');card.classList.toggle('pending-install',!item.installed&&input.checked&&hostState.appMode!=='unins');(hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid).append(card);}if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('component:'+String(item.id)+':'+(input.checked&&input.dataset.intent==='remove'?'remove':input.checked?'1':'0'));updateComponentsStatus();};
  if(item.slim){const row=document.createElement('label');row.className='comp-slim';const body=document.createElement('span'),title=document.createElement('span'),desc=document.createElement('span');title.className='comp-slim-title';title.textContent=item.title;desc.className='comp-slim-desc';desc.textContent=item.description;body.append(title,desc);row.append(input,body);extra.append(row);continue;}
  const row=document.createElement('article');row.dataset.product=String(item.id);row.className='comp-card c-card'+(input.checked?(hostState.appMode==='unins'?' pending-remove':' active'):'')+(input.checked?' is-checked':'')+(item.warning?' has-warning has-offer':item.installed&&item.operation==='update'?' has-offer':'')+(!item.installed&&input.checked&&hostState.appMode!=='unins'?' pending-install':'')+(input.disabled?' is-disabled':'');const icons=document.createElement('div');icons.className='comp-icons';const icon=document.createElement('span');icon.className='comp-icon '+(item.id==='x86'||item.id==='openglass'?'tone-cyan':item.id==='secureUxTheme'?'tone-amber':'tone-purple');icon.setAttribute('aria-hidden','true');icon.innerHTML=({"x64": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3.5\" y=\"5\" width=\"11\" height=\"14\" rx=\"2.2\"/><rect x=\"9.5\" y=\"8\" width=\"11\" height=\"14\" rx=\"2.2\"/></svg>", "x86": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"4\" y=\"6\" width=\"10\" height=\"12\" rx=\"2\"/><rect x=\"10\" y=\"9\" width=\"10\" height=\"12\" rx=\"2\"/></svg>", "settings64": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/><circle cx=\"9\" cy=\"7\" r=\"1.9\"/><circle cx=\"15\" cy=\"12\" r=\"1.9\"/><circle cx=\"8\" cy=\"17\" r=\"1.9\"/></svg>", "settings32": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/><circle cx=\"9\" cy=\"7\" r=\"1.9\"/><circle cx=\"15\" cy=\"12\" r=\"1.9\"/><circle cx=\"8\" cy=\"17\" r=\"1.9\"/></svg>", "openglass": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"3\"/><path d=\"M3 9.5h18\"/><circle cx=\"6.2\" cy=\"7.3\" r=\".8\"/><circle cx=\"9\" cy=\"7.3\" r=\".8\"/></svg>", "secureUxTheme": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z\"/><path d=\"M9 12l2 2 4-4\"/></svg>"})[item.id]||'';icons.append(icon);if(item.warning){const warn=document.createElement('button');warn.type='button';warn.className='comp-warning-button';warn.textContent='⚠';warn.setAttribute('aria-label',(locale==='ru'?'Предупреждение: ':'Warning: ')+item.title);warn.onclick=()=>showProductWarning(item,warn);icons.append(warn);}
  const name=document.createElement('span');name.className='comp-name c-name';name.textContent=item.title;bindComponentName(name,item);

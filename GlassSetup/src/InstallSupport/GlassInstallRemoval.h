@@ -7,9 +7,9 @@
 #include <vector>
 
 // Validation of managed tasks/service paths (used by Setup and GlassUnins) and
-// a reversible cleanup session for product auxiliaries. Setup no longer removes
-// products, so Prepare/Commit/Restore currently have no caller; they stay for
-// the uninstaller work. The MSI/file snapshot is handled separately by
+// a reversible cleanup session for Glass product auxiliaries. General mixed
+// Glass removal is not yet wired, so Prepare/Commit/Restore have no caller.
+// Setup's original-vendor SUT removal uses a separate commit-last MSI path. The MSI/file snapshot is handled separately by
 // GlassInstallRollback. Do not use the uninstaller's unconditional
 // service/task deletion here: it cannot restore their settings.
 namespace GlassInstallRemoval {

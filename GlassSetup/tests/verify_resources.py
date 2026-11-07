@@ -182,7 +182,8 @@ assert "QueryPlatformInstallPath" in util and "QueryOpenGlassInstallPath" in uti
 # Setup never removes products: checked products are installed or updated,
 # unchecked installed products are kept; removal belongs to GlassUnins.
 policy = read("src/GlassProducts.h")
-assert "RemovalForInstall" not in policy and "InstallAction::Keep" in policy and "never removes" in policy
+assert "RemovalForInstall" not in policy and "InstallAction::Keep" in policy
+assert "bool secureUxThemeRemove = false" in policy and "OnlySecureUxThemeRemoval" in policy
 sequence = section(engine, "bool InstallEngine::RunMsiSequence()", "void InstallEngine::SeedUserDefaults()")
 for token in ("UninstallProduct(", "removeCode", "kProductSettingsX86", "kProductPlatformX86",
               "ClearPlatformInstallPath(", "ClearOpenGlassInstallPath(", "PruneEmptyDirectories("):
@@ -533,6 +534,30 @@ assert "SecureUxTheme-x64.msi" not in rc and "SecureUxTheme-x86.msi" not in proj
 solution=read("../GlassProject.sln")
 assert '"SecureUxTheme-x64"' not in solution and '"SecureUxThemeCa"' not in solution
 assert "<GlassSignThisProject>true</GlassSignThisProject>" in read("msi/OpenGlass-x64.wixproj")
+# Actual discovered plan is built before any process shutdown or MSI mutation.
+assert worker.index("CreateRollbackSnapshot()") < worker.index("BuildExecutionPlan()") < worker.index("CloseGlassSettingsProcesses(")
+execution_plan=section(engine,"bool InstallEngine::BuildExecutionPlan()", "bool InstallEngine::RunMsiSequence()")
+for token in ("GlassProductInspect::Run", "input.inspectSources=false", "CheckProductContexts", "RecheckSnapshottedProduct", "RecheckRelatedProducts", "GlassMaintenanceCache::Identity", "P::Build(facts,request)"):
+    assert token in execution_plan, token
+assert "const auto& plan=executionPlan_" in run_sequence
+assert "steps[stepIndex++]" not in run_sequence
+assert "if(action==P::Action::Remove)return ERROR_INVALID_PARAMETER" in run_sequence
+helper_phase=section(engine,"bool InstallEngine::InstallGlassSettingsEarly()", "bool InstallEngine::InstallOriginalSecureUxTheme()")
+assert "RunPhase(executionPlan_,GlassMaintenanceExecutor::Phase::Helpers" in helper_phase
+assert "executionPlanReady_" in helper_phase
+assert "PrepareSecureUxRemoval()" in worker
+assert worker.index("PrepareSecureUxRemoval()") < worker.index("StopRunningHosts()")
+assert 'message==L"component:secureUxTheme:remove"' in setup
+assert "SecureUxThemeRemovalSupportedLocked" in setup and "secureUxRemovalCode_=inspect_.officialSecureUxThemeCode" in setup
+assert "selection_.secureUxThemeRemove)return RemoveOriginalSecureUxTheme()" in engine
+assert "PrepareRemoval" in sut_package and "RecheckRemoval" in sut_package
+assert "MSIINSTALLCONTEXT_MACHINE" in sut_package and "Vendor cached PackageCode differs from registration" in sut_package
+assert "before==removal.digest && now==removal.digest" in sut_package
+assert "if(!vendorOnly)ok = self->RegisterSelectedProducts()" in worker
+assert "if(!vendorOnly)self->LaunchSelectedProducts()" in worker
+assert "IDS_APPLY" in setup and 'IDS_APPLY "Применить"' in read("res/ProductStrings.rcinc")
+
+assert "if(in.inspectSources)GlassPackageAcquisition::FetchCatalog" in sut_inspect
 assert worker.index("InstallGlassSettingsEarly()") < worker.index("RunMsiSequence()")
 # Retain recognition and explicit removal of legacy Glass-owned products.
 for suffix in ("5076", "5077"):

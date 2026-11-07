@@ -26,7 +26,7 @@ assert.equal(d.querySelector('#product-settings64').checked,true);
 assert.equal(d.querySelector('#product-settings32').checked,true);
 assert.equal(d.querySelectorAll('#components-panel .c-card:not([data-catalog-alias]).is-checked').length,2);
 assert.match(d.querySelector('#components-count').textContent,/2 из 6/);
-assert.equal(d.querySelectorAll('#components-plan-items li:not(.plan-warning)').length,2);
+assert.equal(d.querySelectorAll('#components-plan-items li:not(.plan-warning):not(.components-plan-empty)').length,2);
 // Catalogue mirrors share a single authoritative intent and do not duplicate counts.
 assert.equal(d.querySelectorAll('#components-grid .c-card').length,6);
 const alias=d.querySelector('[data-catalog-alias="settings64"]');assert.ok(alias);assert.equal(alias.querySelector('input'),null);
@@ -60,6 +60,33 @@ assert.ok(d.querySelector('#components-grid #product-settings32'));
 // A disabled product has no actionable shortcut around the checkbox gate.
 receive({data:{type:'state',appMode:'setup',page:'components',components:rows.map(r=>({...r,disabled:r.id==='settings32'}))}});
 assert.equal(d.querySelector('#product-settings32').closest('.comp-card').querySelector('.comp-decision').disabled,true);
+// Real Setup removal capability is opt-in and distinct from an install checkbox.
+const sutRows=rows.map(r=>({...r,checked:false,installed:r.id==='secureUxTheme',installedVersion:'4.0.0',operation:'repair',disabled:false,removeSupported:r.id==='secureUxTheme',applySupported:r.id!=='secureUxTheme'}));
+receive({data:{type:'state',appMode:'setup',page:'components',locale:'ru',components:sutRows}});
+let sut=d.querySelector('#product-secureUxTheme'),sutCard=sut.closest('.c-card');
+assert.equal(sutCard.querySelector('.comp-decision').disabled,true,'unsupported vendor repair must not look actionable');
+const beforeUnsupported=messages.length;sut.checked=true;sut.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+assert.equal(sut.checked,false);assert.equal(messages.length,beforeUnsupported);
+assert.ok(sutCard.querySelector('.comp-remove'));const beforeRemove=messages.length;
+sutCard.querySelector('.comp-remove').click();
+assert.equal(messages.length,beforeRemove+1);assert.equal(messages.at(-1),'component:secureUxTheme:remove');
+assert.equal(sut.checked,true);assert.ok(sutCard.classList.contains('pending-remove'));
+assert.match(d.querySelector('#components-plan-items li.remove').textContent,/Удалить/);
+assert.equal(d.querySelector('#product-settings64').checked,false);
+sutCard.querySelector('.comp-remove').click();assert.equal(messages.length,beforeRemove+1,'duplicate removal is a no-op');
+const nativeRemove=sutRows.map(r=>({...r,checked:r.id==='secureUxTheme',operation:r.id==='secureUxTheme'?'remove':r.operation}));
+receive({data:{type:'state',components:nativeRemove}});
+sut=d.querySelector('#product-secureUxTheme');sutCard=sut.closest('.c-card');
+assert.equal(sut.dataset.intent,'remove');assert.ok(sutCard.classList.contains('pending-remove'));
+assert.equal(sutCard.querySelector('.comp-decision').title,'Оставить установленным');
+d.querySelector('#components-plan-items .plan-cancel').click();
+assert.equal(messages.at(-1),'component:secureUxTheme:0');assert.equal(sut.checked,false);
+assert.equal(sutCard.classList.contains('pending-remove'),false);
+assert.ok(sutCard.contains(d.activeElement),'cancel must leave a keyboard focus target');
+receive({data:{type:'state',components:sutRows.map(r=>({...r,removeSupported:false}))}});
+assert.equal(d.querySelector('#product-secureUxTheme').closest('.c-card').querySelector('.comp-remove'),null);
+receive({data:{type:'state',appMode:'unins',page:'uninstall-select',components:sutRows}});
+assert.equal(d.querySelector('#product-secureUxTheme').closest('.c-card').querySelector('.comp-remove'),null);
 // Concept C content/state matrix, including warning-only healthy products.
 const matrix=rows.map((r,i)=>({...r,warning:i===0?'Manual configuration':'',disabled:false,checked:i===3||i===5,
  installed:i!==3&&i!==4,installedVersion:i===3||i===4?'':'1.0.0.0',targetVersion:i===2||i===3||i===4?'1.1.0.0':'1.0.0.0',
@@ -103,6 +130,25 @@ assert.equal(cardName.tagName,'SPAN');assert.equal(cardName.getAttribute('role')
 cardName.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
 assert.equal(d.querySelector('#components-warning-dialog').hidden,false);
 d.querySelector('#components-warning-close').click();
+// No MSI or chosen action: inert SUT payloads must not produce Installed/removal.
+const absentRows=rows.map(r=>({...r,installed:false,checked:false,operation:'install',installedVersion:'',installedPackageVersion:'',disabled:false,locked:false,applySupported:true,removeSupported:false,warning:'',presenceDetail:r.id==='secureUxTheme'?'Installed MSI inventory rc=0; installed=false; candidate state=2':''}));
+receive({data:{type:'state',locale:'ru',appMode:'setup',page:'components',maintenance:true,components:absentRows}});
+const absentSut=d.querySelector('#product-secureUxTheme');
+assert.equal(absentSut.checked,false);assert.ok(d.querySelector('#components-grid').contains(absentSut));
+assert.equal(absentSut.closest('.c-card').dataset.catalogState,'available');
+assert.ok(absentSut.closest('.c-card').classList.contains('active'));
+assert.equal(absentSut.closest('.c-card').querySelector('.comp-decision').disabled,false);
+assert.equal(d.querySelectorAll('#components-plan-items li:not(.plan-warning):not(.components-plan-empty)').length,0);
+absentSut.closest('.c-card').querySelector('.comp-name').click();
+assert.match(d.querySelector('#components-warning-dialog').textContent,/candidate state=2/);
+d.querySelector('#components-warning-close').click();
+const beforeAbsent=messages.length;absentSut.closest('.c-card').querySelector('.comp-decision').click();
+assert.equal(messages.length,beforeAbsent+1);assert.equal(messages.at(-1),'component:secureUxTheme:1');
+assert.equal(d.querySelectorAll('#components-plan-items li:not(.plan-warning):not(.components-plan-empty)').length,1);
+assert.equal(d.querySelector('[data-catalog-alias="secureUxTheme"]').dataset.catalogState,'planned');
+absentSut.closest('.c-card').querySelector('.comp-decision').click();
+assert.equal(messages.at(-1),'component:secureUxTheme:0');assert.ok(d.querySelector('#components-grid').contains(absentSut));
+assert.equal(d.querySelectorAll('#components-plan-items li:not(.plan-warning):not(.components-plan-empty)').length,0);
 receive({data:{type:'state',page:'checking',checkingStatus:'Downloading and verifying new Setup'}});
 assert.equal(d.querySelector('#checking-status').textContent,'Downloading and verifying new Setup');
 assert.equal(d.querySelector('#update-panel'),null);

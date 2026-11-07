@@ -6,6 +6,7 @@
 
 #include "GlassInstallHost.h"
 #include "GlassInstallMsi.h"
+#include "GlassInstallLog.h"
 #include "GlassInstallUtil.h"
 
 #include <GlassPlatformTask.h>
@@ -470,10 +471,25 @@ Report Run(const Inputs& in)
     report.settings=report.settings64.installed?report.settings64:report.settings32;
     const bool glassRepackedSut=report.secureUxTheme.installed;
     std::vector<std::wstring> officialSut;
-    if (Shared::SecureUxThemeInventory::Query(officialSut)==ERROR_SUCCESS && !officialSut.empty()) {
+    const UINT sutInventoryStatus=Shared::SecureUxThemeInventory::QueryInstalled(officialSut);
+    if (sutInventoryStatus==ERROR_SUCCESS && !officialSut.empty()) {
         report.secureUxTheme.installed=true;
+        if(officialSut.size()==1 && !glassRepackedSut)report.officialSecureUxThemeCode=officialSut.front();
         report.secureUxTheme.installedVersion=GlassInstallMsi::QueryDisplayVersion(officialSut.front().c_str());
     }
+
+    // Evidence is available even on the all-products-absent early return.
+    // Never infer installation from System32 payloads or native Inactive state.
+    report.secureUxThemePresenceDetail=L"Installed MSI inventory rc="+std::to_wstring(sutInventoryStatus)+
+        L"; installed="+(report.secureUxTheme.installed?std::wstring(L"true"):std::wstring(L"false"));
+    for(const auto* code:{GlassInstallMsi::kProductSecureUxThemeX64,GlassInstallMsi::kProductSecureUxThemeX86})
+        report.secureUxThemePresenceDetail+=L"; "+std::wstring(code)+L" state="+std::to_wstring(static_cast<int>(MsiQueryProductStateW(code)));
+    std::vector<std::wstring> sutCandidates;
+    const UINT candidatesStatus=Shared::SecureUxThemeInventory::Query(sutCandidates);
+    report.secureUxThemePresenceDetail+=L"; family candidates rc="+std::to_wstring(candidatesStatus);
+    for(const auto& code:sutCandidates)
+        report.secureUxThemePresenceDetail+=L"; "+code+L" state="+std::to_wstring(static_cast<int>(MsiQueryProductStateW(code.c_str())));
+    GlassInstallLog::LineFormat(L"SecureUxTheme presence: %s",report.secureUxThemePresenceDetail.c_str());
 
     if (!report.x64.installed && !report.x86.installed && !report.settings.installed &&
         !report.secureUxTheme.installed && !report.og.installed)
@@ -494,8 +510,8 @@ Report Run(const Inputs& in)
     const auto& cancel=in.cancelled?*in.cancelled:neverCancel;
     GlassPackageCatalog::Catalog catalog;
     std::wstring diagnostic,workspace;
-    GlassPackageAcquisition::FetchCatalog(cancel,catalog,diagnostic);
-    const bool workspaceReady=GlassPackageAcquisition::CreateWorkspace(workspace);
+    if(in.inspectSources)GlassPackageAcquisition::FetchCatalog(cancel,catalog,diagnostic);
+    const bool workspaceReady=in.inspectSources && GlassPackageAcquisition::CreateWorkspace(workspace);
     struct InspectionWorkspace {
         std::wstring path;
         ~InspectionWorkspace() {
@@ -507,12 +523,12 @@ Report Run(const Inputs& in)
             RemoveDirectoryW(path.c_str());
         }
     } cleanup{workspace};
-    const struct { GlassPackageCatalog::Product product; ProductReport* rep; const wchar_t* code; } jobs[]={
-        {GlassPackageCatalog::Product::Platform64,&report.x64,GlassInstallMsi::kProductPlatformX64},
-        {GlassPackageCatalog::Product::Platform32,&report.x86,GlassInstallMsi::kProductPlatformX86},
-        {GlassPackageCatalog::Product::Settings64,&report.settings64,GlassInstallMsi::kProductSettingsX64},
-        {GlassPackageCatalog::Product::Settings32,&report.settings32,GlassInstallMsi::kProductSettingsX86},
-        {GlassPackageCatalog::Product::OpenGlass,&report.og,GlassInstallMsi::kProductOpenGlass}};
+    const struct { GlassPackageCatalog::Product product; ProductReport* rep; const wchar_t* code; const wchar_t* legacy; } jobs[]={
+        {GlassPackageCatalog::Product::Platform64,&report.x64,GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kLegacyPlatformX64},
+        {GlassPackageCatalog::Product::Platform32,&report.x86,GlassInstallMsi::kProductPlatformX86,GlassInstallMsi::kLegacyPlatformX86},
+        {GlassPackageCatalog::Product::Settings64,&report.settings64,GlassInstallMsi::kProductSettingsX64,nullptr},
+        {GlassPackageCatalog::Product::Settings32,&report.settings32,GlassInstallMsi::kProductSettingsX86,nullptr},
+        {GlassPackageCatalog::Product::OpenGlass,&report.og,GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass}};
     for(const auto& job:jobs) {
         if(cancel.load())break;
         if(!job.rep->installed)continue;
@@ -531,10 +547,12 @@ Report Run(const Inputs& in)
         }
         // Integrity always uses the installed package, never a same-version
         // replacement guessed to have identical bytes/PackageCode.
-        const auto reference=CachedMsiPath(job.code);
+        const auto* installedCode=GlassInstallMsi::IsProductInstalled(job.code)?job.code:
+            job.legacy && GlassInstallMsi::IsProductInstalled(job.legacy)?job.legacy:job.code;
+        const auto reference=CachedMsiPath(installedCode);
         std::wstring contextDetail;
-        if(!reference.empty() && InstalledBaselineMatches(reference,job.code) && GlassInstallMsi::CheckProductContexts(job.code,contextDetail)==GlassInstallMsi::ProductPathCheck::Safe)
-            job.rep->integrityKnown=CheckProductFiles(reference,job.code,signerSha1,*job.rep,job.product==GlassPackageCatalog::Product::OpenGlass);
+        if(!reference.empty() && InstalledBaselineMatches(reference,installedCode) && GlassInstallMsi::CheckProductContexts(installedCode,contextDetail)==GlassInstallMsi::ProductPathCheck::Safe)
+            job.rep->integrityKnown=CheckProductFiles(reference,installedCode,signerSha1,*job.rep,job.product==GlassPackageCatalog::Product::OpenGlass);
         if(!job.rep->integrityKnown)AddReason(*job.rep,Reason::InspectionUnavailable);
     }
     report.settings=report.settings64.installed?report.settings64:report.settings32;

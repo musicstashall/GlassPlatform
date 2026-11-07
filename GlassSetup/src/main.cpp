@@ -1201,6 +1201,7 @@ private:
     std::wstring lastWebState_;
     InstallEngine::ComponentSelection selection_{};
     InstallEngine::ComponentSelection installedSelection_{};
+    std::wstring secureUxRemovalCode_;
     GlassInstallUtil::SecureUxThemeState secureUxThemeState_=GlassInstallUtil::SecureUxThemeState::Unavailable;
     bool settingsAutoSelectedForSut_=false;
     GlassProducts::OpenGlassStartupState openGlassStartup_{};
@@ -1658,6 +1659,7 @@ private:
         ShowWindow(componentOpenGlass_,nativeComponents && os64?SW_SHOWNA:SW_HIDE);
         ShowWindow(componentSecureUxTheme_,nativeComponents?SW_SHOWNA:SW_HIDE);
         if (nativeComponents) {
+            SetWindowTextW(next_,Text(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()).c_str());
             const std::wstring mandatory=L" ("+Text(IDS_COMP_MANDATORY)+L")";
             SetWindowTextW(component64_,(Text(IDS_COMP_P64_TITLE)+(os64?mandatory:L"")).c_str());
             SetWindowTextW(component32_,(Text(IDS_COMP_P32_TITLE)+(!os64?mandatory:L"")).c_str());
@@ -1666,10 +1668,14 @@ private:
             SendMessageW(componentSettings32_,BM_SETCHECK,selection_.settings32?BST_CHECKED:BST_UNCHECKED,0);
             SendMessageW(componentSettings_,BM_SETCHECK,selection_.settings64?BST_CHECKED:BST_UNCHECKED,0);
             SendMessageW(componentOpenGlass_,BM_SETCHECK,selection_.openGlass?BST_CHECKED:BST_UNCHECKED,0);
-            SendMessageW(componentSecureUxTheme_,BM_SETCHECK,selection_.secureUxTheme?BST_CHECKED:BST_UNCHECKED,0);
-            SetWindowTextW(componentSecureUxTheme_,Text(IDS_COMP_SUT_TITLE).c_str());
+            SendMessageW(componentSecureUxTheme_,BM_SETCHECK,(selection_.secureUxTheme||selection_.secureUxThemeRemove)?BST_CHECKED:BST_UNCHECKED,0);
+            bool sutCanRemove=false,sutInstalled=false;
+            {std::lock_guard<std::mutex> lock(inspectMutex_);sutCanRemove=SecureUxThemeRemovalSupportedLocked();sutInstalled=inspect_.secureUxTheme.installed;}
+            const auto sutLabel=Text(IDS_COMP_SUT_TITLE)+(sutCanRemove?
+                (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L" — удалить MSI":L" — remove MSI"):L"");
+            SetWindowTextW(componentSecureUxTheme_,sutLabel.c_str());
             ClampSecureUxThemeSelection();
-            EnableWindow(componentSecureUxTheme_,!SecureUxThemeSelectionBlocked());
+            EnableWindow(componentSecureUxTheme_,!SecureUxThemeSelectionBlocked()&&(!sutInstalled||sutCanRemove||selection_.secureUxThemeRemove));
             EnableWindow(componentSettings_,TRUE); EnableWindow(componentSettings32_,TRUE);
             EnableWindow(component64_,os64); EnableWindow(component32_,TRUE);
         }
@@ -1791,6 +1797,12 @@ private:
         return secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External
             || secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict;
     }
+    // UI capability only. Caller holds inspectMutex_ when reading inspection.
+    [[nodiscard]] bool SecureUxThemeRemovalSupportedLocked() const noexcept {
+        return inspectReady_.load(std::memory_order_acquire) && inspect_.secureUxTheme.installed &&
+            !inspect_.officialSecureUxThemeCode.empty() &&
+            secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Inactive;
+    }
     void ClampSecureUxThemeSelection() noexcept {
         if (SecureUxThemeSelectionBlocked())
             selection_.secureUxTheme=false;
@@ -1889,7 +1901,8 @@ private:
         const bool sutUpdate=sutCondition==GlassProducts::ProductCondition::UpdateAvailable;
         const bool sutDamaged=sutCondition==GlassProducts::ProductCondition::Damaged;
         const bool sutDisabled=sutExternal||sutConflict;
-        const bool sutChecked=selection_.secureUxTheme&&!sutDisabled;
+        const bool sutChecked=(selection_.secureUxTheme||selection_.secureUxThemeRemove)&&!sutDisabled;
+        const bool sutRemoveSupported=SecureUxThemeRemovalSupportedLocked();
         // SecureUxTheme is a regular selectable product: use the same localized
         // action badge as other products instead of a special "optional add-on" tag.
         // Keep exceptional badges only when an external install/conflict blocks action.
@@ -1918,12 +1931,17 @@ private:
             L",\"description\":"+JsStringLiteral(Text(IDS_COMP_SUT_DESC))+
             L",\"badge\":"+JsStringLiteral(Text(sutBadge))+L",\"badgeTone\":"+JsStringLiteral(sutTone)+
             L",\"installed\":"+(inspect_.secureUxTheme.installed?L"true":L"false")+
+            L",\"presenceDetail\":"+JsStringLiteral(inspect_.secureUxThemePresenceDetail)+
             L",\"installedVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedVersion)+
             L",\"installedPackageVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedPackageVersion)+
             L",\"targetVersion\":"+JsStringLiteral(inspect_.secureUxTheme.sourceVerified?inspect_.secureUxTheme.targetVersion:L"")+
             L",\"broken\":"+(inspect_.secureUxTheme.damaged?L"true":L"false")+
-            L",\"operation\":"+JsStringLiteral(sutCondition==GlassProducts::ProductCondition::NotInstalled?L"install":sutUpdate?L"update":L"repair")+
-            L",\"state\":"+JsStringLiteral(Text(sutStateId))+L",\"reasons\":"+sutReasons+
+            L",\"applySupported\":"+(inspect_.secureUxTheme.installed?L"false":L"true")+
+            L",\"removeSupported\":"+(sutRemoveSupported?L"true":L"false")+
+            L",\"operation\":"+JsStringLiteral(selection_.secureUxThemeRemove?L"remove":sutCondition==GlassProducts::ProductCondition::NotInstalled?L"install":sutUpdate?L"update":L"repair")+
+            L",\"state\":"+JsStringLiteral(selection_.secureUxThemeRemove?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                L"Будет удалён оригинальный MSI. Постоянные файлы автора сохранятся.":
+                L"The original MSI will be removed. Author-owned permanent files are retained."):Text(sutStateId))+L",\"reasons\":"+sutReasons+
             L",\"checked\":"+(sutChecked?L"true":L"false")+
             L",\"locked\":false,\"disabled\":"+(sutDisabled?L"true":L"false")+L",\"hidden\":false}";
         return json+L"]";
@@ -2133,8 +2151,11 @@ private:
         InvalidateContent();
     }
     // «Установить» доступен только с выбранными продуктами: без них делать нечего.
+    [[nodiscard]] UINT ProductApplyTextId() const noexcept {
+        return selection_.secureUxThemeRemove || maintenanceMode_?IDS_APPLY:IDS_INSTALL;
+    }
     [[nodiscard]] bool HasSelectedComponent() const noexcept {
-        return selection_.platform64 || selection_.platform32 || selection_.glassSettings || selection_.openGlass || selection_.secureUxTheme;
+        return selection_.platform64 || selection_.platform32 || selection_.glassSettings || selection_.openGlass || selection_.secureUxTheme || selection_.secureUxThemeRemove;
     }
     // «Установить» доступен, когда анализ завершён и есть выбранные продукты.
     [[nodiscard]] bool ComponentsReady() const noexcept {
@@ -2150,8 +2171,13 @@ private:
             selection_.settings32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings32,installedSelection_.settings32));
             selection_.SyncSettings(os64);
             selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.og,installedSelection_.openGlass));
-            selection_.secureUxTheme=installedSelection_.secureUxTheme &&
-                GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.secureUxTheme,installedSelection_.secureUxTheme));
+            // Original vendor repair/upgrade is not implemented; never select a
+            // no-op reinstall automatically. Fresh SUT remains explicit opt-in.
+            selection_.secureUxTheme=false;
+            if(selection_.secureUxThemeRemove && (!SecureUxThemeRemovalSupportedLocked() ||
+                secureUxRemovalCode_!=inspect_.officialSecureUxThemeCode)){
+                selection_.secureUxThemeRemove=false;secureUxRemovalCode_.clear();
+            }
             ClampSecureUxThemeSelection();
         }
         EnableWindow(next_,!failurePending_ && ComponentsReady());
@@ -2185,8 +2211,8 @@ private:
         const UINT nextId = page_==Page::RuntimeRequired?IDS_RUNTIME_INSTALL:
             page_==Page::ConfirmCancel?IDS_CONFIRM_ABORT:
             page_==Page::Conflicts?IDS_RECHECK_CONFLICTS:
-            page_==Page::Components?(CertificatePageApplies()?IDS_NEXT:IDS_INSTALL):
-            page_==Page::Certificate?IDS_INSTALL:
+            page_==Page::Components?(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()):
+            page_==Page::Certificate?ProductApplyTextId():
             terminal?IDS_FINISH:
             page_==Page::ModulesBusy?IDS_HOLD_RETRY:
             page_==Page::ProcessesStuck?IDS_UNLOCK:IDS_NEXT;
@@ -2463,7 +2489,7 @@ private:
         labels.nativeScanFailed = Text(IDS_ERR_NATIVE_SCAN);
         labels.snapshotFailed = Text(IDS_ERR_SNAPSHOT);
         labels.diskFull = Text(IDS_MSI_DISK_FULL);
-        installEngine_.Start(gInstance, x64Dir, x86Dir, ogDir, selection_, openGlassStartup_, false, std::move(labels), nullptr);
+        installEngine_.Start(gInstance, x64Dir, x86Dir, ogDir, selection_, openGlassStartup_, false, std::move(labels), nullptr, secureUxRemovalCode_);
         SetTimer(window, kInstallTimer, kInstallTimerMs, nullptr);
 #endif
     }
@@ -2985,7 +3011,8 @@ private:
             // уже отмечена и заблокирована.
             if(message==L"components:select-all") {
                 selection_.platform64=os64;selection_.platform32=true;selection_.settings64=os64;selection_.settings32=true;selection_.SyncSettings(os64);selection_.openGlass=os64;
-                selection_.secureUxTheme=secureUxThemeState_!=GlassInstallUtil::SecureUxThemeState::External&&secureUxThemeState_!=GlassInstallUtil::SecureUxThemeState::Conflict;
+                std::lock_guard<std::mutex> lock(inspectMutex_);
+                if(!selection_.secureUxThemeRemove)selection_.secureUxTheme=!inspect_.secureUxTheme.installed && !SecureUxThemeSelectionBlocked();
             }
             else if (message==L"component:x64:1" || message==L"component:x64:0") selection_.platform64=os64 && message.back()==L'1';
             else if (message==L"component:x86:1" || message==L"component:x86:0") selection_.platform32=message.back()==L'1';
@@ -2996,14 +3023,24 @@ private:
                 selection_.settings32=message.back()==L'1';selection_.SyncSettings(os64);
             }
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
+            else if(message==L"component:secureUxTheme:remove") {
+                std::lock_guard<std::mutex> lock(inspectMutex_);
+                if(SecureUxThemeRemovalSupportedLocked()) {
+                    selection_.secureUxTheme=false;selection_.secureUxThemeRemove=true;
+                    secureUxRemovalCode_=inspect_.officialSecureUxThemeCode;
+                }
+            }
             else if (message==L"component:secureUxTheme:1" || message==L"component:secureUxTheme:0") {
+                selection_.secureUxThemeRemove=false;secureUxRemovalCode_.clear();
                 const bool checked=message.back()==L'1';
+                std::lock_guard<std::mutex> lock(inspectMutex_);
                 if (!SecureUxThemeSelectionBlocked())
-                    selection_.secureUxTheme=checked;
+                    selection_.secureUxTheme=checked && !inspect_.secureUxTheme.installed;
                 else
                     ClampSecureUxThemeSelection();
             }
             EnableWindow(next_,!failurePending_ && ComponentsReady());
+            SetWindowTextW(next_,Text(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()).c_str());
             SyncWebViewState();
             return S_OK;
         }
@@ -3439,7 +3476,8 @@ private:
             const UINT sutStateId=sutExternal?IDS_COMP_SUT_STATE_EXTERNAL:sutConflict?IDS_COMP_SUT_STATE_CONFLICT:sutPending?IDS_COMP_SUT_STATE_PENDING:
                 secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Active?IDS_COMP_SUT_STATE_ACTIVE:
                 sutChecked?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF;
-            DrawLabel(dc,Text(sutStateId),Box(510,377,380,38),small_,accent);
+            DrawLabel(dc,selection_.secureUxThemeRemove?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                L"Будет удалён MSI; постоянные файлы сохранятся":L"MSI will be removed; permanent files are retained"):Text(sutStateId),Box(510,377,380,38),small_,accent);
             const auto warnings=ComponentWarnings();
             if(!warnings.empty())DrawLabel(dc,warnings,Box(48,432,840,88),font_,white);
             }
@@ -3783,7 +3821,13 @@ private:
                         selection_.settings32=SendMessageW(componentSettings32_,BM_GETCHECK,0,0)==BST_CHECKED;
                         selection_.SyncSettings(GlassInstallUtil::IsOs64Bit());
                     } else if(LOWORD(w)==IDC_COMPONENT_SUT){
-                        selection_.secureUxTheme=SendMessageW(componentSecureUxTheme_,BM_GETCHECK,0,0)==BST_CHECKED;
+                        const bool checked=SendMessageW(componentSecureUxTheme_,BM_GETCHECK,0,0)==BST_CHECKED;
+                        std::lock_guard<std::mutex> lock(inspectMutex_);
+                        selection_.secureUxThemeRemove=false;secureUxRemovalCode_.clear();
+                        selection_.secureUxTheme=checked && !inspect_.secureUxTheme.installed && !SecureUxThemeSelectionBlocked();
+                        if(checked && SecureUxThemeRemovalSupportedLocked()){
+                            selection_.secureUxThemeRemove=true;secureUxRemovalCode_=inspect_.officialSecureUxThemeCode;
+                        }
 
                     } else {
                         selection_.platform64=os64 && SendMessageW(component64_,BM_GETCHECK,0,0)==BST_CHECKED;

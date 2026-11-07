@@ -13,7 +13,7 @@ for path in ['src/InstallEngine.cpp','src/InstallSupport/GlassInstallUtil.cpp','
 s=(root/'src/InstallSupport/GlassProductInspect.cpp').read_text()
 assert 'GlassPackageAcquisition::Prepare' in s and 'GlassPackageAcquisition::CreateWorkspace' in s
 assert 'ExtractResourceToFile' not in s and 'GetTempPath' not in s
-assert 'InstalledBaselineMatches(reference,job.code)' in s and 'INSTALLPROPERTY_PACKAGECODE' in s
+assert 'InstalledBaselineMatches(reference,installedCode)' in s and 'INSTALLPROPERTY_PACKAGECODE' in s
 assert 'report.settings64' in s and 'report.settings32' in s
 cache=(root/'src/InstallSupport/GlassMaintenanceCache.h').read_text()
 assert 'nativeX86Resource' not in cache and 'GlassSettings.Native.x86.dll' not in cache

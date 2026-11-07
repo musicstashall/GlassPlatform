@@ -1,9 +1,10 @@
 #pragma once
 
 // Shared, platform-neutral component policy. An install selection names the
-// products to install or update. Setup never removes a product: an installed
-// product that is left unchecked simply stays as it is, and removal is the job
-// of the separate uninstaller. All products are independently selectable; warnings do not imply a removal
+// products to install or update. An unchecked installed product is kept. General
+// Glass product removal remains in Unins; Setup additionally supports an explicit
+// commit-last removal of a verified inactive original SecureUxTheme MSI.
+// All products are independently selectable; warnings do not imply a removal
 // cascade. SecureUxTheme without Settings requires explicit interactive consent.
 namespace GlassProducts {
 struct Selection {
@@ -13,6 +14,8 @@ struct Selection {
     bool openGlass = true;
     // Optional SecureUxTheme product selection (per-machine MSI).
     bool secureUxTheme = false;
+    // Explicit original-MSI removal, not an unchecked install selection.
+    bool secureUxThemeRemove = false;
     // Windows 11 certificate page: the user chose to add the author certificate
     // (signer of GlassShellSparse.msix) to LocalMachine\TrustedPeople so the
     // compact menu can be registered. Off when the page was not shown.
@@ -28,6 +31,13 @@ struct Selection {
         if(independentSettings)glassSettings=settings64||settings32;
     }
 };
+
+// Removing an already inactive vendor MSI does not modify any Glass product.
+constexpr bool OnlySecureUxThemeRemoval(const Selection& choice) noexcept {
+    return choice.secureUxThemeRemove && !choice.secureUxTheme &&
+        !choice.platform64 && !choice.platform32 && !choice.openGlass &&
+        !choice.glassSettings && !choice.settings64 && !choice.settings32;
+}
 
 // Recorded at wizard startup, independently of the later rollback snapshot.
 struct OpenGlassStartupState {
