@@ -46,6 +46,7 @@ async function workspaceGestures(page,products,out){
  assert.equal(await page.locator('[data-catalog-alias="x64"].dragging').count(),1);
  const aliasTo=await target('installed');await page.mouse.move(aliasTo.x,aliasTo.y,{steps:10});await page.mouse.up();
  assert.equal(await count(),aliasBefore+1);assert.equal(await page.evaluate(()=>window.__messages.at(-1)),'component:x64:1');
+ assert.equal(await page.locator('#product-x64').locator('..').locator('.comp-decision.repair.is-on svg path').count(),4,'drop must retain the reference repair glyph, not a stale X refresh');
  // Escape, outside drop, blur, pointercancel and changed native facts never commit.
  for(const cancel of ['escape','outside','blur','pointercancel','changed','page','loading']){
   await seed();const before=await count();await carry('settings32');
@@ -124,7 +125,7 @@ async function workspaceGestures(page,products,out){
    await route.fulfill({path:file});
   });
   await page.goto('https://glassplatform.invalid/');
-  const products=[['x64','GlassPlatform x64'],['x86','GlassPlatform x86'],['settings64','GlassSettings x64'],['settings32','GlassSettings x86'],['openglass','OpenGlass'],['secureUxTheme','SecureUxTheme']].map(([id,title],i)=>({id,title,description:'Product information',installed:i<3,installedVersion:i<3?'1.0.0.0':'',targetVersion:'1.1.0.0',checked:i===2,operation:i<3?'update':'install',warning:i===1?'Architecture-specific warning':'',state:i===2?'Обновить':'Без изменений',reasons:[]}));
+  const products=[['x64','GlassPlatform x64'],['x86','GlassPlatform x86'],['settings64','GlassSettings x64'],['settings32','GlassSettings x86'],['openglass','OpenGlass'],['secureUxTheme','SecureUxTheme']].map(([id,title],i)=>({id,title,description:'Product information',installed:i<3,installedVersion:i<3?'1.0.0.0':'',targetVersion:'1.1.0.0',remoteVersion:'1.1.0.0',packageSize:16*1048576,checked:i===2,operation:i<3?'update':'install',warning:i===1?'Architecture-specific warning':'',state:i===2?'Обновить':'Без изменений',reasons:[]}));
   await page.evaluate(components=>window.__receive({data:{type:'state',locale:'ru',page:'components',maintenance:true,components}}),products);
   await page.locator('#components-panel').waitFor({state:'visible'});
   await page.waitForFunction(()=>Math.abs(document.querySelector('.c-lane.available').getBoundingClientRect().y-document.querySelector('#stage').getBoundingClientRect().y-156)<.1);

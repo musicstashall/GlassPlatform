@@ -240,7 +240,7 @@ assert "X86WarningApplies()" in setup and "SettingsWarningApplies()" in setup an
 for action in ("INSTALL", "UPDATE", "KEEP"):
     assert f"IDS_COMP_BADGE_{action}" in setup and rc.count(f"IDS_COMP_BADGE_{action}") == 2
     assert f".comp-badge.action-{action.lower()}" in ui
-assert "item.warning" in ui and "comp-warning-button" in ui and "item.state||item.badge" in ui
+assert "item.warning" in ui and "comp-warning-button" in ui and "function paintComponentCard(" in ui and "c-src" in ui
 assert "row.append(input,top,meta,foot)" in ui and "name.onclick=()=>showProductWarning" in ui
 assert 'components-installed-grid' in ui and 'class="c-lane installed"' in ui
 assert "productActionLabel(item)" in ui and "input.dispatchEvent(new Event('change'" in ui
@@ -295,7 +295,7 @@ assert "EnsureAndDraw" in theme and "AddState(destination, width, height, normal
 assert "PrewarmButtonCache" not in setup
 
 # One-document UI, static initialization and user-driven cancel controls.
-for mode in ("welcome", "checking", "update", "conflicts", "downgrade", "version-invalid", "license",
+for mode in ("welcome", "checking", "conflicts", "downgrade", "version-invalid", "license",
              "components", "installing", "unlock-modules", "unlock-processes", "confirm-cancel",
              "cancelling", "cancelled", "launching", "complete", "error", "uninstall-select", "uninstalling"):
     assert mode in ui, mode
@@ -426,7 +426,9 @@ assert "PruneEmptyDirectories(" not in engine and "PruneEmptyDirectories(openGla
 assert "Page::Launching" in setup and "kMinLaunchMs = 5000" in engine
 assert "--demo-tour" in setup and "debugDemoPending_ = false" in setup
 assert "MsiEnableLogW(0, nullptr, 0)" in engine
-assert "CERT_CHAIN_POLICY_MICROSOFT_ROOT" in setup and "httpStatus==200" in setup
+assert "CERT_CHAIN_POLICY_MICROSOFT_ROOT" in setup
+assert "GlassPackageAcquisition::FetchCatalog" in setup
+assert "status!=200" in read("src/InstallSupport/GlassReleaseClient.cpp")
 assert "IsAllowedReleaseUrl" in setup and "IShellDispatch2" in setup
 assert "CreateSecureTempDirectory" in util
 assert 'CreateSecureTempDirectory(L"GlassSetupLogs"' in read("src/InstallLog.cpp")
@@ -606,7 +608,7 @@ assert 'L"LastAppliedThemeDwmFingerprint", ValueKind::Text' in reg_sanity
 assert "MINMAXBUTTONGLOWid" in reg_sanity and "ColorizationGlassReflectionPolicy" in reg_sanity
 assert "trust != ERROR_SUCCESS" in inspect_cpp and "ours" in inspect_cpp
 assert "condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY)" in setup
-assert "item.reasons.join" in ui and "item.disabled||item.locked" in ui
+assert "...(item.reasons||[])" in ui and "item.disabled||item.locked" in ui
 
 # 2026-11-03 follow-up 3: card reasons behind a mini-spoiler (accordion, equal heights);
 # the registry reason names the offending values; OpenGlass user resources and
@@ -636,7 +638,7 @@ assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_
 # 2026-11-03 follow-up 5: «Установить» disabled with no product selected; the reasons
 # subline stays on every card with neutral grey «не требуется» when there are no reasons.
 assert "HasSelectedComponent" in setup
-assert "comp-reason-line" in ui and "item.reasons&&item.reasons.length" in ui
+assert "...(item.reasons||[])" in ui and "showProductWarning" in ui  # details live in the popup, not in C cards
 # Approved 2026-11-04 layout supersedes the lower warning stripe and mandatory locks.
 assert "comp-slim" in ui and "components-extra" in ui and "components-stack" in ui
 assert "left:48px;width:302px" in ui and "right:48px;width:268px" in ui and "height:330px" in ui

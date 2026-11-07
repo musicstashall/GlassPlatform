@@ -10,5 +10,9 @@ bool FetchCatalog(const std::atomic<bool>& cancel, GlassPackageCatalog::Catalog&
     std::wstring& diagnostic) noexcept;
 bool Prepare(GlassPackageCatalog::Product product, const GlassPackageCatalog::Catalog& catalog,
     const std::wstring& workspace, const std::atomic<bool>& cancel, std::wstring& error) noexcept;
+// Prepare only; publication/restart must independently implement the handoff journal.
+// Never execute the user-writable release path or silently accept a new license.
+bool PrepareSetup(const GlassPackageCatalog::Asset& asset, const std::wstring& workspace,
+    const std::atomic<bool>& cancel, std::wstring& prepared, std::wstring& error) noexcept;
 bool CreateWorkspace(std::wstring& directory) noexcept;
 }

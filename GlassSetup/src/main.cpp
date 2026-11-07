@@ -34,6 +34,8 @@
 #include "InstallSupport/GlassInstallUtil.h"
 #include "InstallSupport/GlassProductInspect.h"
 #include "InstallSupport/GlassMaintenanceLaunch.h"
+#include "InstallSupport/GlassPackageAcquisition.h"
+#include "InstallSupport/GlassMaintenanceCache.h"
 #include <GlassInstallerLaunch.h>
 #ifdef ShellExecute
 #undef ShellExecute // IShellDispatch2::ShellExecute is a COM method, not the Win32 macro.
@@ -73,6 +75,7 @@ constexpr double kProgressSmoothTauMs = 120.0;
 constexpr ULONGLONG kRollbackFinishMs = 900;
 constexpr UINT kInitWebView = WM_APP + 1;
 constexpr UINT kVersionCheckComplete = WM_APP + 2;
+constexpr UINT kSetupDownloadStarted = WM_APP + 8;
 constexpr UINT kRuntimeStatus = WM_APP + 3, kRuntimeComplete = WM_APP + 4;
 constexpr UINT kBeginStartup = WM_APP + 5, kStartupComplete = WM_APP + 6, kInspectReady = WM_APP + 7;
 constexpr ULONGLONG kFadeDuration = 280;
@@ -90,7 +93,7 @@ constexpr wchar_t kWebView2BootstrapperUrl[] = L"https://go.microsoft.com/fwlink
 constexpr UINT_PTR kDebugDemoTimer = 4;
 constexpr UINT kDebugDemoPageMs = 1800;
 #endif
-enum class Page { RuntimeRequired, RuntimeInstalling, RuntimeError, AlreadyRunning, Welcome, Checking, Update, Conflicts, Downgrade, VersionInvalid, License, Components, Certificate, Installing, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
+enum class Page { RuntimeRequired, RuntimeInstalling, RuntimeError, AlreadyRunning, Welcome, Checking, Conflicts, Downgrade, VersionInvalid, License, Components, Certificate, Installing, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
 HINSTANCE gInstance = nullptr;
 HBRUSH gWindowClassBrush = nullptr;
 bool gWindowClassRegistered = false;
@@ -343,60 +346,7 @@ bool OpenReleaseInUserBrowser(const std::wstring& url) noexcept {
     return SUCCEEDED(hr);
 }
 
-bool FetchLatestSetupVersion(std::wstring& latest, std::wstring& url) {
-    latest.clear();
-    url.clear();
-    HINTERNET session = WinHttpOpen(L"GlassSetup", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!session) return false;
-    WinHttpSetTimeouts(session, 4000, 4000, 4000, 8000);
-    HINTERNET connect = WinHttpConnect(session, L"github.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
-    if (!connect) { WinHttpCloseHandle(session); return false; }
-    HINTERNET request = WinHttpOpenRequest(connect, L"GET",
-        L"/musicstashall/GlassPlatform/releases/latest/download/version.json",
-        nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
-    if (!request) {
-        WinHttpCloseHandle(connect);
-        WinHttpCloseHandle(session);
-        return false;
-    }
-    DWORD redirect = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
-    WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &redirect, sizeof(redirect));
-    bool ok = WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-        WINHTTP_NO_REQUEST_DATA, 0, 0, 0) && WinHttpReceiveResponse(request, nullptr);
-    DWORD httpStatus=0, httpStatusSize=sizeof(httpStatus);
-    ok = ok && WinHttpQueryHeaders(request,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,
-        WINHTTP_HEADER_NAME_BY_INDEX,&httpStatus,&httpStatusSize,WINHTTP_NO_HEADER_INDEX) && httpStatus==200;
-    std::string body;
-    if (ok) {
-        for (;;) {
-            DWORD available = 0;
-            if (!WinHttpQueryDataAvailable(request, &available)) { ok=false; break; }
-            if (available == 0) break;
-            if (available>256*1024 || body.size()+available>256*1024) { ok=false; break; }
-            std::string chunk(available, '\0');
-            DWORD read = 0;
-            if (!WinHttpReadData(request, chunk.data(), available, &read) || read == 0) { ok=false; break; }
-            body.append(chunk.data(), read);
-        }
-    }
-    WinHttpCloseHandle(request);
-    WinHttpCloseHandle(connect);
-    WinHttpCloseHandle(session);
-    if (!ok || body.empty()) return false;
-    const std::string glass = JsonStringField(body, "glass");
-    if (glass.empty()) {
-        const std::string setup = JsonStringField(body, "setup");
-        if (setup.empty()) return false;
-        latest = Utf8ToWide(setup);
-    } else {
-        latest = Utf8ToWide(glass);
-    }
-    const std::string page = JsonStringField(body, "url");
-    if (page.empty()) return false;
-    url = Utf8ToWide(page);
-    return IsAllowedReleaseUrl(url);
-}
+
 
 bool IsWebView2RuntimeInstalled(std::wstring* versionOut=nullptr) {
     LPWSTR version=nullptr;
@@ -1234,7 +1184,6 @@ private:
     Page page_ = Page::Welcome;
     UINT dpi_ = 96;
     HWND back_ = nullptr, next_ = nullptr, cancel_ = nullptr;
-    HWND updateDownload_ = nullptr, updateSkip_ = nullptr;
     HWND eula_ = nullptr, accept_ = nullptr, progress_ = nullptr, webHost_ = nullptr;
     HWND component64_ = nullptr, component32_ = nullptr, componentSettings_ = nullptr, componentSettings32_ = nullptr, componentOpenGlass_ = nullptr, componentSecureUxTheme_ = nullptr;
     HWND certInstall_ = nullptr, certSkip_ = nullptr; // GDI fallback of the certificate page
@@ -1302,12 +1251,17 @@ private:
         std::wstring latest;
         std::wstring url;
         std::wstring self;
+        GlassPackageCatalog::Catalog catalog;
+        std::wstring workspace, preparedSetup;
     };
     std::mutex versionCheckMutex_;
     std::thread versionCheckThread_;
     VersionCheckResult versionCheckResult_;
+    std::atomic_bool versionCheckCancel_{false};
+    GlassPackageCatalog::Catalog releaseCatalog_;
+    std::wstring checkingStatus_;
     bool versionCheckStarted_ = false, versionCheckHandled_ = false;
-    bool updateAvailable_ = false, updateSkipped_ = false;
+
     bool failurePending_ = false;
     bool transitioning_ = false;
     ULONGLONG fadeStarted_ = 0;
@@ -1336,10 +1290,7 @@ private:
     size_t debugDemoStep_ = 0;
 #endif
     std::wstring installStatusLine_;
-    std::wstring updateCurrent_;
-    std::wstring updateLatest_;
-    std::wstring updateUrl_;
-    std::wstring updateBody_;
+
     std::wstring errorReason_;
     // Post-commit notes captured when the Complete page is entered.
     std::vector<InstallEngine::FinishWarning> finishWarnings_;
@@ -1361,11 +1312,11 @@ private:
             0,0,0,0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), gInstance, nullptr);
     }
     void AttachButtonSubclasses() {
-        for (HWND button : {back_,next_,cancel_,updateDownload_,updateSkip_})
+        for (HWND button : {back_,next_,cancel_})
             WizardTheme::AttachButtonScope(button);
     }
     void InvalidatePushButtons() {
-        for (HWND button:{back_,next_,cancel_,updateDownload_,updateSkip_})
+        for (HWND button:{back_,next_,cancel_})
             if (button && IsWindow(button)) InvalidateRect(button,nullptr,FALSE);
     }
     void Move(HWND control, int x, int y, int w, int h) {
@@ -1389,7 +1340,7 @@ private:
         };
         font_ = create(14,FW_NORMAL); small_ = create(12,FW_NORMAL);
         heading_ = create(28,FW_NORMAL); title_ = create(39,FW_LIGHT);
-        for (HWND c : {back_,next_,cancel_,eula_,accept_,updateDownload_,updateSkip_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,certInstall_,certSkip_})
+        for (HWND c : {back_,next_,cancel_,eula_,accept_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,certInstall_,certSkip_})
             if (c) SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
     void InitializeLoading() {
@@ -1409,8 +1360,6 @@ private:
         back_ = Control(L"BUTTON",Text(IDS_BACK),BS_PUSHBUTTON | WS_TABSTOP,IDC_BACK);
         next_ = Control(L"BUTTON",Text(IDS_NEXT),BS_PUSHBUTTON | WS_TABSTOP,IDC_NEXT);
         cancel_ = Control(L"BUTTON",Text(IDS_CANCEL),BS_PUSHBUTTON | WS_TABSTOP,IDC_CANCEL);
-        updateDownload_ = Control(L"BUTTON",Text(IDS_UPDATE_DOWNLOAD),BS_PUSHBUTTON | WS_TABSTOP,IDC_UPDATE_DOWNLOAD);
-        updateSkip_ = Control(L"BUTTON",Text(IDS_UPDATE_SKIP),BS_PUSHBUTTON | WS_TABSTOP,IDC_UPDATE_SKIP);
         eula_ = Control(L"EDIT",L"",WS_BORDER | WS_TABSTOP | ES_MULTILINE | ES_READONLY |
                          ES_AUTOVSCROLL | ES_LEFT | WS_VSCROLL,IDC_EULA);
         accept_ = Control(L"BUTTON",Text(IDS_ACCEPT),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_ACCEPT);
@@ -1642,7 +1591,7 @@ private:
             if (window) PostMessageW(window,kInspectReady,0,0);
         });
         if (maintenanceMode_) {
-            ContinueAfterLicenseCheck();
+            ContinueVersionCheck();
             if (!maintenanceFocusProduct_.empty())
                 InstallLog::LineFormat(L"Maintenance focus product: %s",maintenanceFocusProduct_.c_str());
         } else {
@@ -1666,8 +1615,6 @@ private:
             (unlock || conflictCheck)?694:750;
         Move(next_,nextX,kContentHeight+12,nextWidth,32);
         Move(cancel_,864,kContentHeight+12,104,32);
-        Move(updateDownload_,644,kContentHeight+12,104,32);
-        Move(updateSkip_,750,kContentHeight+12,104,32);
         Move(eula_,48,142,904,285);
         Move(accept_,48,447,904,32);
         Move(progress_,0,kHtmlHeight,kWidth,kProgressHeight);
@@ -1700,9 +1647,6 @@ private:
         ShowWindow(accept_,nativeLicense?SW_SHOWNA:SW_HIDE);
         const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching || page_==Page::RuntimeInstalling);
         ShowWindow(progress_, showProgress ? SW_SHOWNA : SW_HIDE);
-        const bool update = page_==Page::Update && !transitioning_;
-        ShowWindow(updateDownload_,update?SW_SHOWNA:SW_HIDE);
-        ShowWindow(updateSkip_,update?SW_SHOWNA:SW_HIDE);
         if (controller_) controller_->put_IsVisible(webVisible ? TRUE : FALSE);
         ShowWindow(webHost_,webVisible?SW_SHOWNA:SW_HIDE);
         const bool nativeComponents=!webVisible && page_==Page::Components && !transitioning_;
@@ -1753,7 +1697,6 @@ private:
         switch (page_) {
         case Page::Welcome: return L"welcome";
         case Page::Checking: return L"checking";
-        case Page::Update: return L"update";
         case Page::Conflicts: return L"conflicts";
         case Page::Downgrade: return L"downgrade";
         case Page::VersionInvalid: return L"version-invalid";
@@ -1880,7 +1823,17 @@ private:
         const auto preview=SelectionPreview();
         auto item=[&](const wchar_t* id, UINT title, UINT desc, bool checked, bool locked, bool hidden, const GlassProductInspect::ProductReport* rep, bool disabled=false) {
             if (json.size()>1) json+=L",";
-            const auto condition=ConditionOf(rep,rep!=nullptr&&rep->installed);
+            auto condition=ConditionOf(rep,rep!=nullptr&&rep->installed);
+            const int catalogIndex=wcscmp(id,L"x64")==0?0:wcscmp(id,L"x86")==0?1:wcscmp(id,L"settings64")==0?2:wcscmp(id,L"settings32")==0?3:wcscmp(id,L"openglass")==0?4:-1;
+            std::wstring remoteVersion,targetVersion=rep&&rep->sourceVerified?rep->targetVersion:L"";
+            std::uint64_t packageSize=0;
+            if(catalogIndex>=0){const auto& asset=releaseCatalog_.products[catalogIndex];if(asset&&asset->downloadable){
+                const auto& v=asset->version.parts;
+                remoteVersion=std::to_wstring(v[0])+L"."+std::to_wstring(v[1])+L"."+std::to_wstring(v[2])+L"."+std::to_wstring(v[3]);
+                packageSize=asset->size;
+                if(targetVersion.empty()||VersionOlder(targetVersion,remoteVersion))targetVersion=remoteVersion;
+                if(rep&&rep->installed&&!rep->installedPackageVersion.empty()&&VersionOlder(rep->installedPackageVersion,targetVersion))condition=GlassProducts::ProductCondition::UpdateAvailable;
+            }}
             const auto action=GlassProducts::ActionForCondition(checked,condition);
             const UINT badgeId=ComponentBadgeId(condition);
             // Причины не смешиваются: у обновления своя причина, у повреждений — свои.
@@ -1908,9 +1861,12 @@ private:
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
                 L",\"description\":"+JsStringLiteral((desc==IDS_COMP_P64_DESC||desc==IDS_COMP_P32_DESC)?GlassProductUiPolicy::PlatformDescription(Text(desc),desc==IDS_COMP_P64_DESC,os64,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN):Text(desc))+L",\"warning\":"+JsStringLiteral(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit()))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
                 L",\"installed\":"+((rep&&rep->installed)?L"true":L"false")+
+                L",\"broken\":"+((rep&&rep->damaged)?L"true":L"false")+
                 L",\"installedVersion\":"+JsStringLiteral(rep?rep->installedVersion:L"")+
                 L",\"installedPackageVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
-                L",\"targetVersion\":"+JsStringLiteral(rep&&rep->sourceVerified?rep->targetVersion:L"")+
+                L",\"targetVersion\":"+JsStringLiteral(targetVersion)+
+                L",\"remoteVersion\":"+JsStringLiteral(remoteVersion)+
+                L",\"packageSize\":"+std::to_wstring(packageSize)+
                 L",\"operation\":"+JsStringLiteral(condition==GlassProducts::ProductCondition::NotInstalled?L"install":condition==GlassProducts::ProductCondition::UpdateAvailable?L"update":L"repair")+
                 L",\"badgeTone\":"+JsStringLiteral(ComponentBadgeTone(condition))+
                 L",\"lockTitle\":"+JsStringLiteral((locked && condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY):L"")+
@@ -2094,9 +2050,7 @@ private:
         std::wstring json=L"{\"type\":\"state\",\"page\":"+JsStringLiteral(WebPageName(unlock))+
             L",\"accepted\":"+(accepted_?L"true":L"false")+
             L",\"platformVersion\":"+JsStringLiteral(platformVersion_)+
-            L",\"updateCurrent\":"+JsStringLiteral(updateCurrent_)+
-            L",\"updateLatest\":"+JsStringLiteral(updateLatest_)+
-            L",\"updateBody\":"+JsStringLiteral(updateBody_)+
+            L",\"checkingStatus\":"+JsStringLiteral(checkingStatus_)+
             L",\"conflicts\":"+ConflictsJson()+
             L",\"installedGlassVersion\":"+JsStringLiteral(installedGlassVersion_)+
             L",\"setupProductVersion\":"+JsStringLiteral(setupProductVersion_)+
@@ -2131,7 +2085,6 @@ private:
         if (webReady_ && (page_==Page::License || page_==Page::Components || page_==Page::Certificate)) { SetFocus(webHost_); return; }
         SetFocus(page_==Page::ModulesBusy || page_==Page::ProcessesStuck || page_==Page::Conflicts ? next_ :
                  page_==Page::Downgrade || page_==Page::VersionInvalid ? cancel_ :
-                 page_==Page::Update ? updateSkip_ :
                  page_==Page::Checking ? cancel_ :
                  page_==Page::License && !accepted_ ? accept_ :
                  page_==Page::Installing || page_==Page::RuntimeInstalling ? cancel_ : next_);
@@ -2211,7 +2164,7 @@ private:
         loadingAnimationsEnabled_=animationsEnabled!=FALSE;
         const bool nativeLoading=page_==Page::Welcome && !webReady_ && SUCCEEDED(webError_);
         if (animationsEnabled && !webReady_ &&
-            (nativeLoading || page_==Page::Update || page_==Page::Error || page_==Page::RuntimeInstalling))
+            (nativeLoading || page_==Page::Error || page_==Page::RuntimeInstalling))
             SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
         else KillTimer(window,kHeroTimer);
         WizardTheme::ApplyDarkWindowChrome(window);
@@ -2225,7 +2178,7 @@ private:
         const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error ||
             page_==Page::RuntimeError || page_==Page::AlreadyRunning;
         const bool inProgress=page_==Page::Checking || page_==Page::Installing || page_==Page::Cancelling ||
-            page_==Page::Launching || page_==Page::RuntimeInstalling || page_==Page::Update;
+            page_==Page::Launching || page_==Page::RuntimeInstalling;
         const UINT nextId = page_==Page::RuntimeRequired?IDS_RUNTIME_INSTALL:
             page_==Page::ConfirmCancel?IDS_CONFIRM_ABORT:
             page_==Page::Conflicts?IDS_RECHECK_CONFLICTS:
@@ -2249,12 +2202,10 @@ private:
         EnableWindow(next_,!failurePending_ && !demoLocked && (page_!=Page::License || accepted_) && ComponentsReady());
         EnableWindow(back_,!demoLocked);
         EnableWindow(cancel_,!demoLocked && !(page_==Page::RuntimeInstalling && runtimeCancel_.load()));
-        EnableWindow(updateDownload_,!demoLocked);
-        EnableWindow(updateSkip_,!demoLocked);
-        const int defaultId=confirm?IDC_BACK:page_==Page::Update?IDC_UPDATE_SKIP:blockedPage?IDC_CANCEL:IDC_NEXT;
+        const int defaultId=confirm?IDC_BACK:blockedPage?IDC_CANCEL:IDC_NEXT;
         SendMessageW(window,DM_SETDEFID,defaultId,0);
         if (!webReady_ && ((oldPage==Page::Welcome && (page_==Page::Checking || page_==Page::License)) ||
-            (oldPage==Page::Checking && (page_==Page::Update || page_==Page::License)))) BeginTransition();
+            (oldPage==Page::Checking && page_==Page::License))) BeginTransition();
         ShowContentControls();
         if (!transitioning_) FocusPage();
         SyncWebViewState();
@@ -2571,7 +2522,6 @@ private:
     void ContinueVersionCheck() {
         if (versionCheckStarted_) {
             if (!versionCheckHandled_) SetPage(Page::Checking);
-            else if (updateAvailable_ && !updateSkipped_) SetPage(Page::Update);
             else ContinueAfterLicenseCheck();
             return;
         }
@@ -2579,14 +2529,35 @@ private:
         InstallLog::Line(L"Checking for newer setup on GitHub…");
         SetPage(Page::Checking);
         const HWND target = window;
+        const bool allowSetupDownload=!HasCommandLineSwitch(L"--no-self-update");
         try {
-            versionCheckThread_ = std::thread([this, target]() {
+            versionCheckThread_ = std::thread([this, target, allowSetupDownload]() {
                 VersionCheckResult result;
                 try {
-                    result.fetched = FetchLatestSetupVersion(result.latest, result.url);
+                    std::wstring diagnostic;
+                    result.fetched = GlassPackageAcquisition::FetchCatalog(versionCheckCancel_,result.catalog,diagnostic);
+                    if(result.fetched&&result.catalog.setupVersion){
+                        const auto& v=result.catalog.setupVersion->parts;
+                        result.latest=std::to_wstring(v[0])+L"."+std::to_wstring(v[1])+L"."+std::to_wstring(v[2])+L"."+std::to_wstring(v[3]);
+                    }
+                    if(!diagnostic.empty())InstallLog::Line(diagnostic);
                     if (result.fetched) {
                         result.self = SelfProductVersion();
                         result.newer = !result.self.empty() && VersionOlder(result.self, result.latest);
+                        if(allowSetupDownload&&result.newer&&result.catalog.setup&&result.catalog.setup->downloadable&&!versionCheckCancel_.load()){
+                            PostMessageW(target,kSetupDownloadStarted,0,0);
+                            if(GlassPackageAcquisition::CreateWorkspace(result.workspace)&&
+                               GlassPackageAcquisition::PrepareSetup(*result.catalog.setup,result.workspace,versionCheckCancel_,result.preparedSetup,diagnostic)){
+                                ULONGLONG key=0;
+                                ParsedVersion actualVersion{},expectedVersion{};
+                                if(!TryParseVersion(ReadProductVersionString(result.preparedSetup,key),actualVersion)||
+                                   !TryParseVersion(result.latest,expectedVersion)||actualVersion.fields!=expectedVersion.fields){
+                                    DeleteFileW(result.preparedSetup.c_str());result.preparedSetup.clear();
+                                    diagnostic=L"Downloaded Setup ProductVersion differs from release catalog";
+                                }
+                            }
+                            if(!diagnostic.empty())InstallLog::Line(diagnostic);
+                        }
                     }
                 } catch (...) {
                     result.fetched = false;
@@ -2627,10 +2598,11 @@ private:
             if (!versionCheckResult_.completed) return;
             result = versionCheckResult_;
         }
+        releaseCatalog_=result.catalog;
         versionCheckHandled_ = true;
         if (!result.fetched) {
             InstallLog::Line(L"Version check: fetch failed or skipped; continuing with this setup");
-            updateAvailable_ = false;
+
             ContinueAfterLicenseCheck();
             return;
         }
@@ -2638,17 +2610,16 @@ private:
             result.self.c_str(), result.latest.c_str());
         if (result.self.empty() || !result.newer) {
             InstallLog::Line(L"Version check: no newer setup; continuing with this setup");
-            updateAvailable_ = false;
+
             ContinueAfterLicenseCheck();
             return;
         }
-        updateAvailable_ = true;
-        updateCurrent_ = result.self;
-        updateLatest_ = result.latest;
-        updateUrl_ = result.url;
-        updateBody_ = FormatUpdateBody(result.self, result.latest);
-        InstallLog::Line(L"Version check: showing update page");
-        SetPage(Page::Update);
+        // The check/download stage owns network work; no product-version offer page.
+        // Do not launch until durable replacement/rollback/handoff is implemented.
+
+        InstallLog::Line(result.preparedSetup.empty()?L"New Setup preparation unavailable; continuing current Setup":
+            L"New Setup downloaded and verified; automatic publication/handoff not yet enabled");
+        ContinueAfterLicenseCheck();
     }
 #ifdef _DEBUG
     void MaybeStartDebugDemo() {
@@ -2659,8 +2630,8 @@ private:
         debugDemoStep_=0;
         accepted_=false;
         SendMessageW(accept_,BM_SETCHECK,BST_UNCHECKED,0);
-        updateAvailable_=false;
-        updateSkipped_=false;
+
+
         simulateInstall_=false;
         InstallLog::Line(L"Debug page tour started; no update or installation actions will run");
         SetPage(Page::Welcome);
@@ -2668,14 +2639,6 @@ private:
     }
     void SetDebugDemoPage(Page page) {
         switch (page) {
-        case Page::Update:
-            updateCurrent_=SelfProductVersion();
-            if (updateCurrent_.empty()) updateCurrent_=L"1.0.0.0";
-            updateLatest_=L"1.0.1.0";
-            updateUrl_=L"https://github.com/musicstashall/GlassPlatform/releases/latest";
-            updateBody_=FormatUpdateBody(updateCurrent_,updateLatest_);
-            updateAvailable_=true;
-            break;
         case Page::Conflicts:
             conflicts_={L"explorerblurmica",L"translucentflyouts",L"translucenttb"};
             blockReason_.clear();
@@ -2769,8 +2732,8 @@ private:
         accepted_=false;
         SendMessageW(accept_,BM_SETCHECK,BST_UNCHECKED,0);
         simulateInstall_=false;
-        updateAvailable_=false;
-        updateSkipped_=false;
+
+
         versionInvalidNote_.clear();
         errorReason_.clear();
         holdReport_.clear();
@@ -2791,7 +2754,7 @@ private:
         SetPage(Page::Welcome);
     }
     void TickDebugDemo() {
-        static constexpr Page sequence[]={Page::Welcome,Page::Checking,Page::Update,
+        static constexpr Page sequence[]={Page::Welcome,Page::Checking,
             Page::Conflicts,Page::Downgrade,Page::VersionInvalid,Page::License,Page::Components,Page::Certificate,
             Page::Installing,Page::ModulesBusy,Page::ProcessesStuck,Page::ConfirmCancel,Page::Cancelling,Page::Cancelled,Page::Launching,Page::Complete,Page::Error};
         constexpr size_t count=sizeof(sequence)/sizeof(sequence[0]);
@@ -2981,8 +2944,6 @@ private:
             debugDemoPending_=false;
             EnableWindow(back_,TRUE);
             EnableWindow(next_,page_!=Page::License || accepted_);
-            EnableWindow(updateDownload_,TRUE);
-            EnableWindow(updateSkip_,TRUE);
         }
 #endif
         if (controller_) controller_->put_IsVisible(FALSE);
@@ -3335,47 +3296,7 @@ private:
         DrawLabel(dc,displayVersion,versionRect,heading_,RGB(247,245,255),
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
     }
-    void DrawUpdateComparison(HDC dc) {
-        const ULONGLONG now=GetTickCount64();
-        const double phase=static_cast<double>(now%4200)/4200.0;
-        const double wave=0.5+0.5*std::sin(phase*6.283185307179586);
-        const int currentX=426, latestX=732, cardY=164, cardW=220, cardH=218;
-        const Gdiplus::REAL glowX=static_cast<Gdiplus::REAL>(Scale(latestX+cardW/2));
-        const Gdiplus::REAL glowY=static_cast<Gdiplus::REAL>(Scale(cardY+cardH/2));
-        {
-            Gdiplus::Graphics g(dc);
-            g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-            Gdiplus::SolidBrush glow(Gdiplus::Color(static_cast<BYTE>(16+11*wave),133,116,211));
-            g.FillEllipse(&glow,GdiReal(glowX-Scale(112)),GdiReal(glowY-Scale(112)),
-                GdiReal(Scale(224)),GdiReal(Scale(224)));
-        }
-        DrawVersionCard(dc,currentX,cardY,cardW,cardH,
-            Text(IDS_UPDATE_CURRENT),updateCurrent_,RGB(161,164,195));
-        DrawVersionCard(dc,latestX,cardY,cardW,cardH,
-            Text(IDS_UPDATE_LATEST),updateLatest_,RGB(193,180,255));
-        {
-            Gdiplus::Graphics g(dc);
-            g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-            const Gdiplus::REAL left=static_cast<Gdiplus::REAL>(Scale(666));
-            const Gdiplus::REAL top=static_cast<Gdiplus::REAL>(Scale(249));
-            const Gdiplus::REAL diameter=static_cast<Gdiplus::REAL>(Scale(46));
-            Gdiplus::SolidBrush halo(Gdiplus::Color(static_cast<BYTE>(22+15*wave),145,127,222));
-            g.FillEllipse(&halo,GdiReal(left-Scale(9)),GdiReal(top-Scale(9)),
-                GdiReal(diameter+Scale(18)),GdiReal(diameter+Scale(18)));
-            Gdiplus::SolidBrush disc(Gdiplus::Color(238,32,31,54));
-            g.FillEllipse(&disc,GdiReal(left),GdiReal(top),GdiReal(diameter),GdiReal(diameter));
-            Gdiplus::Pen border(Gdiplus::Color(170,202,190,255),static_cast<Gdiplus::REAL>(Scale(1)));
-            g.DrawEllipse(&border,GdiReal(left),GdiReal(top),GdiReal(diameter),GdiReal(diameter));
-            Gdiplus::Pen arrow(Gdiplus::Color(245,225,219,255),static_cast<Gdiplus::REAL>(Scale(2)));
-            arrow.SetStartCap(Gdiplus::LineCapRound); arrow.SetEndCap(Gdiplus::LineCapRound);
-            const Gdiplus::REAL x1=static_cast<Gdiplus::REAL>(Scale(678));
-            const Gdiplus::REAL x2=static_cast<Gdiplus::REAL>(Scale(699));
-            const Gdiplus::REAL y=static_cast<Gdiplus::REAL>(Scale(272));
-            g.DrawLine(&arrow,x1,y,x2,y);
-            g.DrawLine(&arrow,GdiReal(x2-Scale(7)),GdiReal(y-Scale(7)),x2,y);
-            g.DrawLine(&arrow,GdiReal(x2-Scale(7)),GdiReal(y+Scale(7)),x2,y);
-        }
-    }
+
     void DrawFailureIllustration(HDC dc) {
         const ULONGLONG now=GetTickCount64();
         const double phase=static_cast<double>(now%6100)/6100.0;
@@ -3586,19 +3507,6 @@ private:
             DrawLabel(dc,Text(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?IDS_NATIVE_RISK_TITLE:kill?IDS_KILL_TITLE:IDS_HOLD_TITLE),Box(48,139,520,70),heading_,white);
             DrawLabel(dc,Text(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?IDS_NATIVE_RISK_BODY:kill?IDS_KILL_BODY:IDS_HOLD_BODY),Box(48,220,460,136),font_,muted);
             DrawLabel(dc,holdReport_,Box(48,365,520,165),font_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
-        } else if (page_ == Page::Update) {
-            DrawBannerFull(dc);
-            DrawLeftTextMask(dc,480);
-            DrawBrandMark(dc,48,29);
-            DrawLabel(dc,Text(IDS_BRAND),Box(82,27,340,30),font_,white,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-            DrawLabel(dc,Text(IDS_UPDATE_TAG),Box(48,137,340,24),small_,accent,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            DrawLabel(dc,Text(IDS_UPDATE_TITLE),Box(48,171,344,100),title_,white,
-                DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
-            DrawLabel(dc,updateBody_,Box(48,286,340,142),font_,muted,
-                DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
-            DrawUpdateComparison(dc);
         } else if (page_ == Page::Checking) {
             DrawBanner(dc,true);
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
@@ -3611,6 +3519,7 @@ private:
             const int x=Scale(49),y=Scale(392),d=Scale(24);
             g.DrawEllipse(&track,GdiInt(x),GdiInt(y),GdiInt(d),GdiInt(d));
             g.DrawArc(&active,GdiInt(x),GdiInt(y),GdiInt(d),GdiInt(d),GdiReal(-90),GdiReal(265));
+            DrawLabel(dc,checkingStatus_,Box(84,386,800,42),font_,white);
         } else if (page_ == Page::License) {
             Gdiplus::Graphics g(dc);
             g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
@@ -3731,13 +3640,15 @@ private:
 #endif
         runtimeCancel_.store(true);
         if (runtimeThread_.joinable()) runtimeThread_.join();
+        versionCheckCancel_.store(true,std::memory_order_release);
         if (versionCheckThread_.joinable()) versionCheckThread_.join();
+        if(!versionCheckResult_.workspace.empty())GlassMaintenanceCache::RemoveFlat(versionCheckResult_.workspace);
         frame_.Reset(); fadeFrame_.Reset();
         if (web_ && webMessageToken_.value) web_->remove_WebMessageReceived(webMessageToken_);
         if (controller_) controller_->Close();
         web_.Reset(); controller_.Reset(); environment_.Reset();
         banner_.reset(); bannerStream_.Reset();
-        for (HWND button : {back_,next_,cancel_,updateDownload_,updateSkip_})
+        for (HWND button : {back_,next_,cancel_})
             if (button && IsWindow(button)) WizardTheme::DetachButtonScope(button);
         WizardTheme::ResetButtonCache();
         for (HFONT f : {font_,heading_,small_,title_}) if (f) DeleteObject(f);
@@ -3757,6 +3668,12 @@ private:
             // Paint() composes both content and footer into the back buffer.
             return 1;
         case kInitWebView: if (!closing_) InitializeWebView(); return 0;
+        case kSetupDownloadStarted:
+            if(!closing_&&page_==Page::Checking){
+                checkingStatus_=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Скачиваем и проверяем новый Setup":L"Downloading and verifying new Setup";
+                SyncWebViewState();InvalidateRect(window,nullptr,FALSE);
+            }
+            return 0;
         case kVersionCheckComplete: if (!closing_) CompleteVersionCheck(); return 0;
         case kRuntimeStatus: {
             std::lock_guard<std::mutex> lock(runtimeMutex_); runtimeStatus_=Text(static_cast<UINT>(w));
@@ -3825,8 +3742,7 @@ private:
         case WM_CTLCOLORBTN: {
             HDC dc=reinterpret_cast<HDC>(w);
             HWND button=reinterpret_cast<HWND>(l);
-            const bool footerButton=button==back_ || button==next_ || button==cancel_ ||
-                                    button==updateDownload_ || button==updateSkip_;
+            const bool footerButton=button==back_ || button==next_ || button==cancel_;
             SetBkMode(dc,TRANSPARENT);
             SetBkColor(dc,footerButton?kButtonBase:kDark);
             // Footer captions are drawn by the DrawThemeTextEx detour.
@@ -3854,19 +3770,6 @@ private:
                     EnableWindow(next_,accepted_);
                     InvalidateRect(accept_,nullptr,FALSE);
                     SyncWebViewState();
-                }
-                return 0;
-            case IDC_UPDATE_DOWNLOAD:
-                if (!DebugDemoLocksControls() && page_==Page::Update && !updateUrl_.empty()) {
-                    InstallLog::LineFormat(L"Update download page: %s", updateUrl_.c_str());
-                    if (!OpenReleaseInUserBrowser(updateUrl_)) InstallLog::Line(L"Could not open release page as desktop user");
-                }
-                return 0;
-            case IDC_UPDATE_SKIP:
-                if (!DebugDemoLocksControls() && page_==Page::Update) {
-                    InstallLog::Line(L"Update skipped; continuing with this setup");
-                    updateSkipped_ = true;
-                    ContinueAfterLicenseCheck();
                 }
                 return 0;
             case IDC_COMPONENT64: case IDC_COMPONENT32: case IDC_COMPONENT_SETTINGS32: case IDC_COMPONENT_SETTINGS: case IDC_COMPONENT_OG: case IDC_COMPONENT_SUT:
@@ -3942,12 +3845,6 @@ private:
                 if (page_==Page::Conflicts) { RecheckConflicts(); return 0; }
                 if (page_==Page::Downgrade) return 0;
                 if (page_==Page::VersionInvalid) return 0;
-                if (w==IDOK && page_==Page::Update) {
-                    InstallLog::Line(L"Update skipped by keyboard; continuing with this setup");
-                    updateSkipped_ = true;
-                    ContinueAfterLicenseCheck();
-                    return 0;
-                }
                 if (page_==Page::ModulesBusy) {
                     installStatusLine_ = Text(IDS_HOLD_RETRY);
                     installEngine_.SetStatus(installStatusLine_,-1);
@@ -3987,7 +3884,7 @@ private:
                 if (GetTickCount64()-fadeStarted_>=kFadeDuration) EndTransition();
                 else InvalidateContent();
             } else if (w==kHeroTimer && !webReady_ &&
-                       (page_==Page::Welcome || page_==Page::Update || page_==Page::Error || page_==Page::RuntimeInstalling)) {
+                       (page_==Page::Welcome || page_==Page::Error || page_==Page::RuntimeInstalling)) {
                 if (page_==Page::RuntimeInstalling) { progressMarquee_=true; marqueePhase_=static_cast<double>(GetTickCount64()%kMarqueePeriodMs)/kMarqueePeriodMs; InvalidateRect(progress_,nullptr,FALSE); }
                 InvalidateContent();
             }

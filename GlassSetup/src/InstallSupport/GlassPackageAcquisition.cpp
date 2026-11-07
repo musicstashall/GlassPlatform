@@ -7,6 +7,8 @@
 #include <msidefs.h>
 #include <objbase.h>
 #include <array>
+#include <wintrust.h>
+#include <softpub.h>
 
 namespace GlassPackageAcquisition {
 namespace {
@@ -98,6 +100,44 @@ bool CreateWorkspace(std::wstring& directory) noexcept {
         if(!GlassMaintenanceCache::SecureDirectory(path))return false;
         directory=path;return true;
     }catch(...){return false;}
+}
+bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& workspace,
+    const std::atomic<bool>& cancel,std::wstring& prepared,std::wstring& error) noexcept {
+    prepared.clear();error.clear();
+    const auto part=workspace+L"\\GlassSetup.exe.part",file=workspace+L"\\GlassSetup.exe";
+    try {
+        if(!asset.downloadable||asset.file!="GlassSetup.exe"||
+           !GlassPackageCatalog::ReleaseUrl(asset.url,asset.file)||!GlassPackageCatalog::Digest(asset.sha256)||
+           asset.size<512||asset.size>1024ull*1024*1024||!GlassMaintenanceCache::TrustedDirectory(workspace)||cancel.load())
+            return Fail(error,L"Setup download metadata/workspace unavailable");
+        bool ok=false;
+        {
+            Handle out;out.h=GlassReleaseClient::CreatePrivateFile(part);
+            if(out.h==INVALID_HANDLE_VALUE)return Fail(error,L"Cannot create private Setup staging file");
+            ok=GlassReleaseClient::Get(Wide(asset.url),out.h,nullptr,asset.size,cancel,error)&&FlushFileBuffers(out.h);
+        }
+        if(ok){
+            Handle locked;locked.h=CreateFileW(part.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+            ok=locked.h!=INVALID_HANDLE_VALUE&&GlassReleaseClient::VerifyHash(locked.h,asset.size,asset.sha256,cancel,error);
+            if(ok){
+                WINTRUST_FILE_INFO info{};info.cbStruct=sizeof(info);info.pcwszFilePath=part.c_str();info.hFile=locked.h;
+                WINTRUST_DATA trust{};trust.cbStruct=sizeof(trust);trust.dwUIChoice=WTD_UI_NONE;
+                trust.dwUnionChoice=WTD_CHOICE_FILE;trust.pFile=&info;trust.dwStateAction=WTD_STATEACTION_VERIFY;
+                trust.dwProvFlags=WTD_CACHE_ONLY_URL_RETRIEVAL|WTD_REVOCATION_CHECK_NONE;
+                GUID policy=WINTRUST_ACTION_GENERIC_VERIFY_V2;
+                const LONG status=WinVerifyTrust(nullptr,&policy,&trust);
+                trust.dwStateAction=WTD_STATEACTION_CLOSE;WinVerifyTrust(nullptr,&policy,&trust);
+                ok=status==ERROR_SUCCESS&&GlassProductInspect::FileHasSameSignerAsSetup(part);
+                if(!ok)error=L"Downloaded Setup failed Authenticode/expected publisher verification";
+            }
+        }
+        if(ok&&!cancel.load()&&MoveFileExW(part.c_str(),file.c_str(),MOVEFILE_WRITE_THROUGH)){
+            prepared=file;return true;
+        }
+    }catch(...){error=L"Cannot prepare new Setup";}
+    DeleteFileW(part.c_str()); // Only this freshly-created workspace's .part.
+    if(error.empty())error=L"Setup preparation failed or cancelled";
+    return false;
 }
 bool FetchCatalog(const std::atomic<bool>& cancel,GlassPackageCatalog::Catalog& catalog,std::wstring& diagnostic) noexcept {
     catalog={};

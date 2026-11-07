@@ -203,7 +203,6 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 @keyframes mode-panel-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 #stage[data-mode="loading"] #loading-panel{display:flex}
 #stage[data-mode="checking"] #checking-panel,
-#stage[data-mode="update"] #update-panel,
 #stage[data-mode="conflicts"] #conflicts-panel,
 #stage[data-mode="downgrade"] #downgrade-panel,
 #stage[data-mode="version-invalid"] #version-invalid-panel,
@@ -241,30 +240,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 @media(prefers-reduced-motion:reduce){.spinner{animation:none;border-top-color:#c1b4ff}}
 
 
-/* Update and license are host-driven panels in this same offline document. */
-.update-scene{background:#101225}
-.update-banner{position:absolute;inset:0 0 0 auto;width:780px;height:540px;object-fit:cover;opacity:.42;mask-image:linear-gradient(90deg,transparent 0%,#000 31%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 31%,#000 100%)}
-.update-overlay{position:absolute;inset:0;background:linear-gradient(90deg,#101225 0%,#101225ef 39%,#10122555 100%)}
-.update-brand{position:absolute;left:48px;top:34px;color:#f5f4fc;font-size:16px;font-weight:600;letter-spacing:.1px;z-index:4}
-.update-copy-block{position:absolute;left:48px;top:137px;width:338px;z-index:2}
-.update-tag{display:flex;align-items:center;gap:10px;color:#c1b4ff;font-size:10px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase}
-.update-tag:before{content:'';width:20px;height:1px;background:#c1b4ff}
-.update-title{max-width:360px;margin:19px 0 14px;color:#f5f4fc;font-size:35px;line-height:1.13;font-weight:350;letter-spacing:-1px}
-.update-copy{max-width:338px;margin:0;color:#b8bad0;font-size:14px;line-height:1.62;white-space:pre-wrap}
-.update-comparison{position:absolute;left:421px;right:48px;top:165px;height:218px;display:grid;grid-template-columns:minmax(0,1fr) 50px minmax(0,1fr);align-items:center;gap:12px;z-index:2}
-.update-version-card{position:relative;min-width:0;height:100%;padding:25px 22px;display:flex;flex-direction:column;justify-content:center;gap:13px;overflow:hidden;border:1px solid #ffffff22;border-radius:18px;background:linear-gradient(145deg,#22243be8,#141629ee 76%);box-shadow:0 18px 42px #07081355,inset 0 1px #ffffff12}
-.update-version-card.current{border-color:#aab1d12e}
-.update-version-card.latest{border-color:#c1b4ff68;background:linear-gradient(145deg,#302b4beF,#191a30f2 78%);box-shadow:0 18px 48px #8172d522,inset 0 1px #ffffff1b;animation:update-card-glow 4.2s ease-in-out infinite}
-.update-version-card.latest:after{content:'';position:absolute;left:16px;right:16px;top:0;height:1px;background:linear-gradient(90deg,transparent,#d2c7ff9c,transparent);opacity:.65}
-.update-version-label{color:#a0a3bd;font-size:9px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase}
-.update-version-value{overflow:hidden;color:#f4f1ff;font-size:22px;font-weight:550;letter-spacing:-.3px;text-overflow:ellipsis;white-space:nowrap}
-.update-version-card.latest .update-version-value{color:#d3c7ff;font-size:25px}
-.update-ready{display:inline-flex;align-items:center;gap:7px;width:max-content;max-width:100%;padding:6px 9px;border:1px solid #c1b4ff35;border-radius:999px;background:#c1b4ff0d;color:#cfc5ff;font-size:8px;font-weight:700;letter-spacing:1px;line-height:1.25;text-transform:uppercase}
-.update-ready:before{content:'';width:6px;height:6px;flex:0 0 auto;border-radius:50%;background:#c1b4ff;box-shadow:0 0 10px #c1b4ff9c}
-.update-change-arrow{width:46px;height:46px;display:grid;place-items:center;border:1px solid #cbbfff61;border-radius:50%;background:#201f37e8;color:#e4dcff;font-size:23px;box-shadow:0 0 28px #9b88ff24;animation:update-arrow-nudge 2.6s ease-in-out infinite}
-@keyframes update-arrow-nudge{50%{transform:translateX(4px);box-shadow:0 0 35px #9b88ff3d}}
-@keyframes update-card-glow{50%{box-shadow:0 20px 54px #8172d533,inset 0 1px #ffffff20}}
-@media(prefers-reduced-motion:reduce){.update-change-arrow,.update-version-card.latest{animation:none}}
+/* Host-driven offline panels. */
 .conflicts-scene{background:#101225}
 .conflicts-banner{position:absolute;right:0;top:0;width:790px;height:540px;object-fit:cover;opacity:.24;mask-image:linear-gradient(90deg,transparent 0%,#000 44%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 44%,#000 100%)}
 .conflicts-shade{position:absolute;inset:0;background:linear-gradient(90deg,#101225 0%,#101225f2 47%,#1012255c 100%)}
@@ -308,7 +284,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .license-accept input:checked:after{content:'';display:block;width:9px;height:5px;margin:5px 0 0 4px;border-left:2px solid #17162a;border-bottom:2px solid #17162a;transform:rotate(-45deg)}
 .license-accept input:focus-visible{outline:2px solid #e1d7ff;outline-offset:3px}
 #license-panel .license-paper,#license-panel .eula-content,#license-panel .license-accept{pointer-events:auto}
-@media(prefers-reduced-motion:reduce){.mode-panel,.update-change-arrow,.update-version-card.latest{animation-duration:.01ms!important;animation-iteration-count:1!important}}
+@media(prefers-reduced-motion:reduce){.mode-panel{animation-duration:.01ms!important;animation-iteration-count:1!important}}
 
 
 /* Product selection & selective uninstall scene */
@@ -724,14 +700,7 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 <g class="module-c"><rect class="module-card" x="190" y="264" width="100" height="56" rx="13"/><circle class="process-pulse p3" cx="205" cy="279" r="3"/><text class="module-label" x="216" y="287">UNLOCKER</text><text class="module-sub" x="205" y="307">RESCAN</text></g>
 <g class="lock-icon"><path class="lock-shackle" d="M215 174v-25a25 25 0 0 1 50 0v25"/><rect class="lock-body" x="194" y="163" width="92" height="79" rx="20"/><rect class="lock-face" x="204" y="173" width="72" height="59" rx="14"/><circle class="lock-keyhole" cx="240" cy="193" r="8"/><path class="lock-keyhole-stem" d="M240 201v13"/><path d="M222 224h36" fill="none" stroke="#a7dddf" stroke-opacity=".62" stroke-width="1.3" stroke-linecap="round"/></g>
 </svg></div></section>
-<section id="update-panel" class="mode-panel update-scene" role="status" aria-live="polite">
-<img id="update-banner" class="update-banner" alt="" aria-hidden="true"><div class="update-overlay"></div><div id="update-brand" class="update-brand">GlassPlatform</div>
-<div class="update-copy-block"><div id="update-tag" class="update-tag"></div><h1 id="update-title" class="update-title"></h1><p id="update-body" class="update-copy"></p></div>
-<div class="update-comparison" role="group" aria-labelledby="update-title">
-<div class="update-version-card current"><span id="update-current-label" class="update-version-label"></span><strong id="update-current" class="update-version-value"></strong></div>
-<div class="update-change-arrow" aria-hidden="true">→</div>
-<div class="update-version-card latest"><span id="update-chip-label" class="update-ready"></span><span id="update-latest-label" class="update-version-label"></span><strong id="update-latest" class="update-version-value"></strong></div>
-</div></section>
+
 <section id="conflicts-panel" class="mode-panel conflicts-scene" role="alert" aria-live="assertive">
 <img id="conflicts-banner" class="conflicts-banner" alt="" aria-hidden="true"><div class="conflicts-shade"></div><div class="native-brand">GlassPlatform</div>
 <div id="conflicts-kicker" class="conflicts-kicker"></div><h1 id="conflicts-title" class="conflicts-title"></h1><p id="conflicts-body" class="conflicts-body"></p>
@@ -859,12 +828,12 @@ const slides=[
 ];
 const uiResources={
 ru:{title:'GlassPlatform · Установка',tagline:'Новый взгляд',slide:'Слайд',slideRole:'слайд',carouselRole:'слайд-шоу',choose:'Выбрать слайд',resume:'Продолжить слайд-шоу',pause:'Приостановить слайд-шоу',
-checkingKicker:'ВЕРСИЯ УСТАНОВЩИКА',checkingTitle:'Проверяем новую версию',checkingCopy:'Сверяем опубликованную версию установщика с версией GlassPlatform. Если обновление не найдено или сервер недоступен, продолжим установку текущей версии.',checkingStatus:'Запрос к GitHub Releases',checkingSub:'Мастер продолжит работу, даже если обновления нет',checkingSource:'GitHub Releases',
+checkingKicker:'ВЕРСИЯ УСТАНОВЩИКА',checkingTitle:'Проверяем новую версию',checkingCopy:'Проверяем версию Setup и каталог продуктов. Здесь же скачиваем и проверяем новый Setup. Если сервер недоступен, продолжим текущей версией.',checkingStatus:'Запрос к GitHub Releases',checkingSub:'Мастер продолжит работу, даже если обновления нет',checkingSource:'GitHub Releases',
 forceKicker:'UNLOCKER · ПОВТОРНАЯ ВЫГРУЗКА',forceTitle:'Освобождаем модули',forceDescription:'Закройте указанные приложения и повторите проверку или явно продолжите на свой риск. Установщик не будет принудительно выгружать модули или завершать эти процессы. Может потребоваться перезагрузка.',forceStatus:'Повторная выгрузка модулей…',forceSubstatus:'Этап 1 из 2 · освобождение модулей',forceHoldersTitle:'Занятые модули и удерживающие их процессы',
 unlockKicker:'UNLOCKER · РАЗБЛОКИРОВКА ПРОЦЕССОВ',unlockTitle:'Закрываем приложения',unlockDescription:'Приложения могут быть завершены принудительно. Проводник не завершается целиком: закрываются только его файловые окна.',unlockStatus:'Закрытие процессов…',unlockSubstatus:'Проводник защищён от принудительного завершения',unlockHoldersTitle:'Процессы, которые удерживают модули',
 doneTag:'ГОТОВО',doneTitle:'Всё готово!',doneBody:'GlassPlatform установлена и запущена.',doneReady:'ГОТОВО К РАБОТЕ',doneNote:'Мастер можно закрыть. Журналы: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).',doneWarnTag:'ГОТОВО, ЕСТЬ ЗАМЕЧАНИЯ',doneWarnTitle:'Установка завершена с замечаниями',doneWarnBody:'Есть замечания к завершающим действиям установщика. Подробности приведены ниже и в журнале %WINDIR%\\Temp\\GlassSetupLogs-*.',doneWarnLabel:'ЗАМЕЧАНИЯ',errorTag:'ОШИБКА',errorTitle:'Установка не выполнена',errorBody:'Не удалось завершить установку. Ниже указана возможная причина.',errorDetails:'ДЕТАЛИ',errorReason:'',errorNote:'Подробности: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).'},
 en:{title:'GlassPlatform · Setup',tagline:'A new perspective',slide:'Slide',slideRole:'slide',carouselRole:'carousel',choose:'Choose a slide',resume:'Resume slideshow',pause:'Pause slideshow',
-checkingKicker:'SETUP VERSION',checkingTitle:'Checking for a newer version',checkingCopy:'Comparing the published setup version with GlassPlatform. If no update is found or the server is unavailable, setup will continue with this version.',checkingStatus:'Requesting GitHub Releases',checkingSub:'Setup continues even when there is no update',checkingSource:'GitHub Releases',
+checkingKicker:'SETUP VERSION',checkingTitle:'Checking for a newer version',checkingCopy:'Checking Setup and the product catalogue. New Setup is downloaded and verified here. If the server is unavailable, setup continues with this version.',checkingStatus:'Requesting GitHub Releases',checkingSub:'Setup continues even when there is no update',checkingSource:'GitHub Releases',
 forceKicker:'UNLOCKER · RETRYING MODULE RELEASE',forceTitle:'Releasing modules',forceDescription:'Close the listed applications and retry, or explicitly continue at your own risk. Setup will not force-unload modules or terminate these processes. A restart may be required.',forceStatus:'Retrying module unload…',forceSubstatus:'Stage 1 of 2 · module release',forceHoldersTitle:'Modules held by these processes',
 unlockKicker:'UNLOCKER · PROCESS RELEASE',unlockTitle:'Closing applications',unlockDescription:'Applications may be terminated if they do not close. Explorer itself is not terminated; only its file windows are closed.',unlockStatus:'Closing processes…',unlockSubstatus:'Explorer is protected from forced termination',unlockHoldersTitle:'Processes still holding modules',
 doneTag:'DONE',doneTitle:'You’re all set!',doneBody:'GlassPlatform is installed and running.',doneReady:'READY TO USE',doneNote:'You can close the wizard. Logs: %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).',doneWarnTag:'DONE WITH NOTES',doneWarnTitle:'Installation completed with notes',doneWarnBody:'Some final setup actions need attention. Details are listed below and in the %WINDIR%\\Temp\\GlassSetupLogs-* log.',doneWarnLabel:'NOTES',errorTag:'ERROR',errorTitle:'Setup could not finish',errorBody:'Installation did not complete. A possible reason is shown below.',errorDetails:'DETAILS',errorReason:'',errorNote:'See %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).'}
@@ -1066,6 +1035,69 @@ function bindComponentWorkspace(){
  document.addEventListener('visibilitychange',()=>{if(document.hidden){endComponentDrag();clearTimeout(componentHideTimer);clearComponentEdge();}});
  applyComponentPanels();
 }
+// A release catalogue card and an installed-composition card are different views
+// of one intent, not clones with the same action/status content (concept C).
+function componentSize(bytes){return new Intl.NumberFormat(locale==='ru'?'ru':'en',{minimumFractionDigits:1,maximumFractionDigits:1}).format(bytes/1048576)+(locale==='ru'?' МБ':' MB');}
+function componentCardFacts(item,input){
+ const selected=input.checked,remove=hostState.appMode==='unins'&&selected;
+ const newer=!!(item.installed&&item.operation==='update'&&item.targetVersion);
+ const broken=item.badgeTone==='repair'||item.broken===true;
+ return {selected,remove,newer,broken,
+  availableNeeded:hostState.appMode==='unins'?selected:!selected&&(!item.installed||newer||broken),
+  installedNeeded:selected||newer||broken};
+}
+function paintComponentCard(card,item,input,shelf){
+ const ru=locale==='ru',f=componentCardFacts(item,input),available=shelf==='available';
+ const current=item.installedVersion||item.installedPackageVersion||'',target=item.targetVersion||'';
+ const meta=card.querySelector('.c-meta'),foot=card.querySelector('.c-foot'),action=card.querySelector('.comp-decision');
+ const line=document.createElement('span');line.className='comp-version-line';
+ const text=(value,bold=false)=>{const node=document.createElement(bold?'b':'span');node.className='comp-version-tag';node.textContent=value;line.append(node);};
+ const size=Number(item.packageSize||0);const suffix=size>0?' · '+componentSize(size):'';
+ for(const cls of ['active','idle','has-newer','has-offer','is-activated','is-broken','pending-install','pending-remove'])card.classList.remove(cls);
+ let chipClass='',chipText='',icon='';
+ if(available){
+  card.classList.add(f.availableNeeded?'active':'idle');if(f.newer&&!f.selected)card.classList.add('has-newer');
+  if(f.newer){text(current);line.append(' → ');text(target,true);}else text(item.installed?current:target,f.selected);
+  if(suffix)line.append(suffix);
+ }else if(f.remove){
+  card.classList.add('pending-remove');text(current);if(suffix)line.append(suffix);chipClass='remove';chipText=ru?'Будет удалено':'Will be removed';icon='trash';
+ }else if(!item.installed&&f.selected){
+  card.classList.add('pending-install');text(target);if(suffix)line.append(suffix);chipClass='pending';chipText=ru?'Будет установлено':'Will be installed';icon='download';
+ }else if(f.selected){
+  card.classList.add('is-activated');text(current);
+  if(f.newer){line.append(' → ');text(target);chipText=(ru?'обновится до ':'will update to ')+target;icon='update';}
+  else {if(suffix)line.append(suffix);line.append(ru?' заново':' again');chipClass='download';chipText=ru?'переустановится':'will reinstall';icon='repair';}
+ }else if(f.broken){
+  card.classList.add('is-broken');text(current);line.append(item.integrityMismatch?(ru?' · файлы не совпадают с SHA-256':' · files differ from SHA-256'):(ru?' · требуется восстановление':' · repair required'));chipClass='broken';chipText=item.integrityMismatch?(ru?'целостность нарушена':'integrity damaged'):(ru?'требуется восстановление':'repair required');icon='warn';
+ }else if(f.newer){
+  card.classList.add('has-offer');text(current);if(suffix)line.append(suffix);chipText=target+(ru?' в «Доступно»':' in Available');icon='update';
+ }else{
+  text(current);if(suffix)line.append(suffix);chipClass='current';chipText=current;icon='check';
+ }
+ meta.replaceChildren(line);
+ const marks=document.createElement('span');
+ const icons={"check": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12l4 4L19 6\"/></svg>", "update": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 19V5M6 11l6-6 6 6\"/></svg>", "download": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3v12M7 10l5 5 5-5\"/><path d=\"M4 20h16\"/></svg>", "trash": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13\"/></svg>", "repair": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12a8 8 0 0 1 13.7-5.7\"/><path d=\"M20 12a8 8 0 0 1-13.7 5.7\"/><path d=\"M18 3v4h-4\"/><path d=\"M6 21v-4h4\"/></svg>", "warn": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3.5l9 17H3z\"/><path d=\"M12 9v4.6\"/><circle cx=\"12\" cy=\"17\" r=\".9\"/></svg>", "arrowRight": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h15M13 6l6 6-6 6\"/></svg>", "arrowLeft": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M20 12H5M11 6l-6 6 6 6\"/></svg>"};
+ const svg=key=>{const template=document.createElement('template');template.innerHTML=icons[key];return template.content.firstElementChild;};
+ if(available){
+  marks.className='c-src';
+  const source=(kind,label,version)=>{if(marks.childNodes.length){const sep=document.createElement('span');sep.className='src-sep';sep.textContent='·';marks.append(sep);}const bit=document.createElement('span');bit.className='src-bit '+kind;bit.append(document.createElement('i'),document.createTextNode(label+' '+version));marks.append(bit);};
+  if(item.installed)source('local',ru?'локально':'local',current);
+  // A verified adjacent MSI isn't evidence of a release-server asset.
+  if(item.remoteVersion&&item.remoteVersion===target&&(!item.installed||f.newer))source('remote',ru?'на сервере':'on server',item.remoteVersion);
+  else if(!item.installed&&target)source('local',ru?'пакет':'package',target);
+  action.disabled=input.disabled;action.classList.remove('repair','is-on');
+  action.replaceChildren();const label=document.createElement('span');label.className='comp-action-label';label.textContent=productActionLabel(item);action.append(label);
+  action.append(svg('arrowRight'));
+ }else{
+  marks.className='c-chip '+chipClass;if(icon)marks.append(svg(icon));marks.append(document.createTextNode(chipText));
+  action.disabled=input.disabled;action.classList.toggle('repair',!!item.installed&&hostState.appMode!=='unins');action.classList.toggle('is-on',f.selected);
+  const label=document.createElement('span');label.className='comp-action-label';label.textContent=f.selected?(ru?'Отменить: ':'Undo: ')+productActionLabel(item):productActionLabel(item);
+  action.replaceChildren(label,svg(hostState.appMode==='unins'?(f.selected?'arrowLeft':'trash'):!item.installed?'trash':'repair'));
+  action.classList.toggle('danger',!item.installed||hostState.appMode==='unins'&&!f.selected);
+ }
+ const label=action.querySelector('.comp-action-label').textContent;action.title=label;action.setAttribute('aria-label',item.title+': '+label);action.setAttribute('aria-pressed',String(f.selected));
+ const spacer=document.createElement('span');spacer.className='spacer';foot.replaceChildren(marks,spacer,action);
+}
 function syncComponentShelves(){
  if(componentDrag)return; // Stable host ticks must not replace the card being carried.
  const ru=locale==='ru',catalog=document.getElementById('components-grid'),installed=document.getElementById('components-installed-grid');
@@ -1079,14 +1111,16 @@ function syncComponentShelves(){
   const name=mirror.querySelector('.comp-name');name.onclick=()=>showProductWarning({...item,information:true,warning:[item.description,item.state,...(item.reasons||[])].filter(Boolean).join('\n\n')},name);
   const warn=mirror.querySelector('.comp-warning-button');if(warn)warn.onclick=()=>showProductWarning(item,warn);
   const action=mirror.querySelector('.comp-decision');action.title=input.checked?(ru?'Отменить действие':'Undo action'):productActionLabel(item);action.setAttribute('aria-pressed',String(input.checked));
-  action.onclick=()=>{if(input.disabled)return;input.checked=!input.checked;input.dispatchEvent(new Event('change',{bubbles:true}));document.getElementById(input.id)?.closest('.c-card').querySelector('.comp-decision').focus();};
+  action.onclick=()=>{if(input.disabled||input.checked)return;input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));document.getElementById(input.id)?.closest('.c-card').querySelector('.comp-decision').focus();};
   catalog.append(mirror);
  }
  const order=new Map((hostState.components||[]).map((item,i)=>[String(item.id),i]));catalog.append(...[...catalog.querySelectorAll('.c-card')].sort((a,b)=>(order.get(a.dataset.product)||0)-(order.get(b.dataset.product)||0)));
  for(const [id,grid] of [['available',catalog],['installed',installed]]){
   for(const card of grid.querySelectorAll('.c-card')){
    const item=(hostState.components||[]).find(x=>x.id===card.dataset.product),input=item&&document.getElementById('product-'+item.id);
-   const needs=item&&input&&(input.checked||item.warning||(hostState.appMode!=='unins'&&(!item.installed||item.badgeTone==='update'||item.badgeTone==='repair'||item.operation==='update')));
+   const facts=item&&input&&componentCardFacts(item,input);
+   if(facts)paintComponentCard(card,item,input,id);
+   const needs=facts&&(id==='available'?facts.availableNeeded:facts.installedNeeded);
    card.hidden=componentShelfViews[id]==='needed'&&!needs;
   }
   for(const view of document.querySelectorAll('[data-shelf="'+id+'"] button')){
@@ -1095,8 +1129,23 @@ function syncComponentShelves(){
   }
   const count=grid.querySelectorAll('.c-card:not([hidden])').length;
   document.getElementById(id+'-count').textContent=String(count);
-  if(id==='available')document.getElementById('available-foot').textContent=(ru?'Продуктов: ':'Products: ')+count;
-  if(!count){const empty=document.createElement('div');empty.className='c-drop';empty.textContent=componentShelfViews[id]==='needed'?(ru?'Нужных действий нет':'No actions needed'):(ru?'Продуктов пока нет':'No products yet');grid.append(empty);}
+  const shown=[...grid.querySelectorAll('.c-card:not([hidden])')].map(card=>(hostState.components||[]).find(item=>item.id===card.dataset.product));
+  const sizes=shown.map(item=>Number(item?.packageSize||0));
+  const total=sizes.length&&sizes.every(value=>value>0)?' · '+componentSize(sizes.reduce((a,b)=>a+b,0)):'';
+  const countLabel=count?(ru?count+' '+(count%100>10&&count%100<20?'продуктов':count%10===1?'продукт':count%10>=2&&count%10<=4?'продукта':'продуктов'):count+' product'+(count===1?'':'s'))+total:(componentShelfViews[id]==='needed'?(ru?'требований нет':'no requirements'):(ru?'продуктов пока нет':'no products yet'));
+  if(id==='available'){
+   document.getElementById('available-foot').textContent=countLabel;
+   document.getElementById('components-scroll-hint').textContent=count>4?(ru?'↓ ещё ':'↓ more ')+(count-4):'';
+  }else{
+   const foot=document.getElementById('installed-foot'),label=document.createElement('span');label.textContent=countLabel;foot.replaceChildren(label);
+   if(count>4){const more=document.createElement('span');more.className='c-more';more.textContent=(ru?'↓ ещё ':'↓ more ')+(count-4);foot.append(more);}
+  }
+  if(!count&&!hostState.componentsLoading){
+   const empty=document.createElement('div');empty.className='c-drop';
+   const ok=componentShelfViews[id]==='needed';if(ok)empty.classList.add('ok');
+   const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');icon.setAttribute('viewBox','0 0 24 24');icon.setAttribute('aria-hidden','true');const path=document.createElementNS(icon.namespaceURI,'path');path.setAttribute('d',ok?'M5 12l4 4L19 6':'M12 3v12M7 10l5 5 5-5M4 20h16');icon.append(path);
+   const text=document.createElement('span');text.append(ok?(id==='available'?(ru?'Нужных действий нет —':'No actions needed —'):(ru?'Внимания не требует':'No attention needed')):(ru?'Перетащите продукт сюда,':'Drag a product here,'),document.createElement('br'),ok?(id==='available'?(ru?'всё уже в плане или установлено':'everything is planned or installed'):(ru?'ни один продукт':'for any product')):(hostState.appMode==='unins'?(ru?'чтобы запланировать удаление':'to plan removal'):(ru?'чтобы установить':'to install')));empty.append(icon,text);grid.append(empty);
+  }
  }
 }
 function productActionLabel(item){return hostState.appMode==='unins'?(locale==='ru'?'Удалить':'Remove'):item.operation==='update'?(locale==='ru'?'Обновить':'Update'):item.operation==='repair'?(locale==='ru'?'Восстановить':'Repair'):(locale==='ru'?'Установить':'Install');}
@@ -1134,16 +1183,15 @@ function renderComponentsPanel(){
  else for(const item of items){if(!item||item.hidden)continue;const input=document.createElement('input');input.type='checkbox';input.className='comp-check';input.dataset.component=String(item.id);input.id='product-'+String(item.id);input.checked=!!item.checked;input.disabled=!!(item.disabled||item.locked);input.onchange=()=>{const card=input.closest('.comp-card');if(card){card.classList.toggle('is-checked',input.checked);card.classList.toggle('active',input.checked&&hostState.appMode!=='unins');card.classList.toggle('pending-remove',input.checked&&hostState.appMode==='unins');card.classList.toggle('pending-install',!item.installed&&input.checked&&hostState.appMode!=='unins');(hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid).append(card);}if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('component:'+String(item.id)+':'+(input.checked?'1':'0'));updateComponentsStatus();};
  if(item.slim){const row=document.createElement('label');row.className='comp-slim';const body=document.createElement('span'),title=document.createElement('span'),desc=document.createElement('span');title.className='comp-slim-title';title.textContent=item.title;desc.className='comp-slim-desc';desc.textContent=item.description;body.append(title,desc);row.append(input,body);extra.append(row);continue;}
  const row=document.createElement('article');row.dataset.product=String(item.id);row.className='comp-card c-card'+(input.checked?(hostState.appMode==='unins'?' pending-remove':' active'):'')+(input.checked?' is-checked':'')+(item.warning?' has-warning has-offer':item.installed&&item.operation==='update'?' has-offer':'')+(!item.installed&&input.checked&&hostState.appMode!=='unins'?' pending-install':'')+(input.disabled?' is-disabled':'');const icons=document.createElement('div');icons.className='comp-icons';const icon=document.createElement('span');icon.className='comp-icon';icon.setAttribute('aria-hidden','true');icon.innerHTML=({"x64": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3.5\" y=\"5\" width=\"11\" height=\"14\" rx=\"2.2\"/><rect x=\"9.5\" y=\"8\" width=\"11\" height=\"14\" rx=\"2.2\"/></svg>", "x86": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"4\" y=\"6\" width=\"10\" height=\"12\" rx=\"2\"/><rect x=\"10\" y=\"9\" width=\"10\" height=\"12\" rx=\"2\"/></svg>", "settings64": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/><circle cx=\"9\" cy=\"7\" r=\"1.9\"/><circle cx=\"15\" cy=\"12\" r=\"1.9\"/><circle cx=\"8\" cy=\"17\" r=\"1.9\"/></svg>", "settings32": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/><circle cx=\"9\" cy=\"7\" r=\"1.9\"/><circle cx=\"15\" cy=\"12\" r=\"1.9\"/><circle cx=\"8\" cy=\"17\" r=\"1.9\"/></svg>", "openglass": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"3\"/><path d=\"M3 9.5h18\"/><circle cx=\"6.2\" cy=\"7.3\" r=\".8\"/><circle cx=\"9\" cy=\"7.3\" r=\".8\"/></svg>", "secureUxTheme": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z\"/><path d=\"M9 12l2 2 4-4\"/></svg>"})[item.id]||'';icons.append(icon);if(item.warning){const warn=document.createElement('button');warn.type='button';warn.className='comp-warning-button';warn.textContent='⚠';warn.setAttribute('aria-label',(locale==='ru'?'Предупреждение: ':'Warning: ')+item.title);warn.onclick=()=>showProductWarning(item,warn);icons.append(warn);}
- const body=document.createElement('div');body.className='comp-body';const name=document.createElement('button');name.type='button';name.className='comp-name c-name';name.textContent=item.title;name.title=locale==='ru'?'Сведения о продукте':'Product information';name.onclick=()=>showProductWarning({...item,information:true,warning:[item.description,item.state,...(item.reasons||[])].filter(Boolean).join('\n\n')},name);const desc=document.createElement('p');desc.className='comp-desc';desc.textContent=item.description;const state=document.createElement('p');state.className='comp-state';state.textContent=item.state||item.badge||'';body.append(name,desc,state);
+ const name=document.createElement('button');name.type='button';name.className='comp-name c-name';name.textContent=item.title;name.title=locale==='ru'?'Сведения о продукте':'Product information';name.onclick=()=>showProductWarning({...item,information:true,warning:[item.description,item.state,...(item.reasons||[])].filter(Boolean).join('\n\n')},name);
  const arch=String(item.id).endsWith('64')||item.id==='x64'?'x64':String(item.id).endsWith('32')||item.id==='x86'?'x86':'';
  if(arch){name.textContent=String(item.title).replace(/\s+x(?:64|86)$/,'');const tag=document.createElement('span');tag.className='comp-architecture';tag.textContent=arch;name.append(tag);}
- if(item.installedVersion||item.targetVersion){const versions=document.createElement('div');versions.className='comp-version-line';if(item.installedVersion){const installed=document.createElement('span');installed.className='comp-version-tag';installed.textContent=item.installedVersion;installed.title=locale==='ru'?'Установленная версия':'Installed version';versions.append(installed);}if(item.targetVersion&&item.targetVersion!==item.installedPackageVersion){if(item.installedVersion)versions.append(document.createTextNode('→'));const target=document.createElement('span');target.className='comp-version-tag comp-version-target';target.textContent=item.targetVersion;target.title=locale==='ru'?'Проверенная версия MSI':'Verified MSI version';versions.append(target);}body.append(versions);}
  const decision=document.createElement('button');decision.type='button';decision.className='comp-decision';decision.disabled=input.disabled;
- const actionLabel=productActionLabel(item);
- const refreshDecision=()=>{const text=input.checked?'✓ '+actionLabel:(item.installed||hostState.appMode==='unins'?(locale==='ru'?'Оставить':'Keep'):(locale==='ru'?'Пропустить':'Skip'));decision.replaceChildren();const label=document.createElement('span');label.className='comp-action-label';label.textContent=text;const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d',input.checked?'M18 6L6 18M6 6l12 12':'M5 12h14M13 6l6 6-6 6');svg.append(path);decision.append(label,svg);decision.title=text;decision.setAttribute('aria-label',item.title+': '+text);decision.setAttribute('aria-pressed',String(input.checked));};
- decision.onclick=()=>{input.checked=!input.checked;input.onchange();refreshDecision();};input.addEventListener('change',refreshDecision);refreshDecision();
+ decision.onclick=()=>{if(input.disabled)return;input.checked=!input.checked;input.dispatchEvent(new Event('change',{bubbles:true}));};
+ const top=document.createElement('div');top.className='c-card-top';top.append(icons,name);
+ const meta=document.createElement('div');meta.className='c-meta';const foot=document.createElement('div');foot.className='c-foot';decision.classList.add('c-move');foot.append(decision);
+ row.append(input,top,meta,foot);(hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid).append(row);}
 
- if(item.reasons&&item.reasons.length){const reason=document.createElement('p');reason.className='comp-reason-line';reason.textContent=item.reasons.join(' · ');body.append(reason);}const top=document.createElement('div');top.className='c-card-top';top.append(icons,name);const meta=document.createElement('div');meta.className='c-meta';const versions=body.querySelector('.comp-version-line');if(versions)meta.append(versions);else meta.textContent=item.state||'';const foot=document.createElement('div');foot.className='c-foot';state.classList.add('c-chip');const spacer=document.createElement('span');spacer.className='spacer';decision.classList.add('c-move');foot.append(state,spacer,decision);row.append(input,top,meta,foot);(hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid).append(row);}
  document.querySelector('#components-panel .components-list').scrollTop=scroll;if(focusId){const restored=document.getElementById('product-'+focusId);if(restored&&!restored.disabled)restored.focus();}}
  updateComponentsStatus();applyComponentPanels();
 }
@@ -1172,8 +1220,8 @@ function renderCertificatePanel(){
  setModeText('certificate-subject',cert.subject||'');setModeText('certificate-thumbprint',cert.thumbprint||'');setModeText('certificate-validity',cert.validity||'');setModeText('certificate-store',hostUi.certStore||'LocalMachine\\TrustedPeople');
 }
 function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done=completionText||hostUi||x,failed=errorText||hostUi||x;
- for(const id of ['checking-banner','unlock-banner','complete-banner','error-banner','update-banner','license-banner','conflicts-banner','downgrade-banner','version-invalid-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}for(const id of ['components-banner','certificate-banner','launch-banner','uninstalling-banner','confirm-banner','cancelling-banner','cancelled-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}
- document.getElementById('checking-kicker').textContent=x.checkingKicker;document.getElementById('checking-title').textContent=x.checkingTitle;document.getElementById('checking-copy').textContent=x.checkingCopy;document.getElementById('checking-status').textContent=x.checkingStatus;document.getElementById('checking-sub').textContent=x.checkingSub;document.getElementById('checking-source').textContent=x.checkingSource;
+ for(const id of ['checking-banner','unlock-banner','complete-banner','error-banner','license-banner','conflicts-banner','downgrade-banner','version-invalid-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}for(const id of ['components-banner','certificate-banner','launch-banner','uninstalling-banner','confirm-banner','cancelling-banner','cancelled-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}
+ document.getElementById('checking-kicker').textContent=x.checkingKicker;document.getElementById('checking-title').textContent=x.checkingTitle;document.getElementById('checking-copy').textContent=x.checkingCopy;document.getElementById('checking-status').textContent=hostState.checkingStatus||x.checkingStatus;document.getElementById('checking-sub').textContent=x.checkingSub;document.getElementById('checking-source').textContent=x.checkingSource;
  const processMode=mode==='unlock-processes';unlockPanel.classList.toggle('processes',processMode);unlockPanel.classList.toggle('is-idle',hostState.unlockActive!==true);
  document.getElementById('unlock-kicker').textContent=hostUi.unlockKickerOverride||(processMode?x.unlockKicker:x.forceKicker);document.getElementById('unlock-title').textContent=hostState.monitorRisk?hostState.monitorRiskTitle:hostUi.unlockTitleOverride||(processMode?x.unlockTitle:x.forceTitle);document.getElementById('unlock-description').textContent=hostState.monitorRisk?hostState.monitorRiskBody:hostUi.unlockDescOverride||(processMode?x.unlockDescription:x.forceDescription);document.getElementById('unlock-status').textContent=(hostState.unlockActive&&hostState.status)?hostState.status:(processMode?x.unlockStatus:x.forceStatus);document.getElementById('unlock-substatus').textContent=processMode?x.unlockSubstatus:x.forceSubstatus;renderHolderReport(processMode);
  const finishWarnings=Array.isArray(hostState.finishWarnings)?hostState.finishWarnings.filter(w=>w&&typeof w.title==='string'&&w.title):[],hasWarnings=finishWarnings.length>0;document.getElementById('complete-panel').classList.toggle('has-warnings',hasWarnings);
@@ -1186,7 +1234,6 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  setModeText('version-invalid-kicker',hostUi.versionInvalidTag);setModeText('version-invalid-title',hostUi.versionInvalidTitle);setModeText('version-invalid-body',hostState.blockReason||hostUi.versionInvalidBody);setModeText('version-invalid-note',hostState.versionInvalidNote||hostUi.versionInvalidNote);
  setModeText('installed-version-label',hostUi.versionLabel);setModeText('installed-version',hostState.installedGlassVersion||'—');setModeText('setup-version-label',hostUi.setupVersionLabel);setModeText('setup-version',hostState.setupProductVersion||'—');
  setModeText('invalid-installed-version-label',hostUi.versionLabel);setModeText('invalid-installed-version',hostState.installedGlassVersion||'—');setModeText('invalid-setup-version-label',hostUi.setupVersionLabel);setModeText('invalid-setup-version',hostState.setupProductVersion||'—');
- setModeText('update-brand',hostUi.brand||'GlassPlatform');setModeText('update-tag',hostUi.updateTag);setModeText('update-title',hostUi.updateTitle);setModeText('update-body',hostState.updateBody);setModeText('update-chip-label',hostUi.updateReady);setModeText('update-current-label',hostUi.updateCurrentLabel);setModeText('update-latest-label',hostUi.updateLatestLabel);setModeText('update-current',hostState.updateCurrent);setModeText('update-latest',hostState.updateLatest);
  setModeText('license-brand',hostUi.brand||'GlassPlatform');setModeText('license-title',hostUi.licenseTitle);setModeText('license-intro',hostUi.licenseIntro);setModeText('license-accept-text',hostUi.licenseAccept);setModeText('eula-content',hostState.eula);
  const accept=document.getElementById('license-accept');if(accept&&typeof hostState.accepted==='boolean')accept.checked=hostState.accepted;
  setModeText('certificate-brand',hostUi.brand||'GlassPlatform');setModeText('certificate-kicker',hostUi.certTag||(locale==='ru'?'СЕРТИФИКАТ РАЗРАБОТЧИКА':'DEVELOPER CERTIFICATE'));setModeText('certificate-title',hostUi.certTitle||(locale==='ru'?'Принять сертификат разработчика?':'Accept the developer certificate?'));setModeText('certificate-intro',hostUi.certIntro||'');setModeText('certificate-facts-label',hostUi.certDetailsLabel||'');setModeText('certificate-subject-label',hostUi.certSubjectLabel||'');setModeText('certificate-thumbprint-label',hostUi.certThumbprintLabel||'');setModeText('certificate-validity-label',hostUi.certValidityLabel||'');setModeText('certificate-store-label',hostUi.certStoreLabel||'');renderCertificatePanel();
@@ -1199,7 +1246,7 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  setModeText('cancelled-tag',hostUi.cancelledTag||(locale==='ru'?'УСТАНОВКА ОТМЕНЕНА':'SETUP CANCELLED'));setModeText('cancelled-title',hostUi.cancelledTitle||(locale==='ru'?'Установка прервана':'Setup was cancelled'));setModeText('cancelled-body',hostUi.cancelledBody||'');setModeText('cancelled-detail',hostState.cancelledDetail||hostUi.cancelledDetail||'');
 }
 function isCarouselMode(value=mode){return value==='welcome'||value==='installing'}
-function setMode(value){const raw=String(value),alias=raw==='slideshow'?'welcome':raw;const valid=['loading','welcome','checking','update','conflicts','downgrade','version-invalid','license','components','certificate','cleanup-review','uninstall-select','installing','uninstalling','unlock-modules','unlock-processes','launching','settings-removal-risk','confirm-cancel','cancelling','cancelled','complete','error'];const next=valid.includes(alias)?alias:'welcome';if(next!==mode){endComponentDrag(false);clearTimeout(componentHideTimer);clearTimeout(componentNoteTimer);document.getElementById('components-gesture-status').className='component-toast';clearComponentEdge();}if(next==='welcome'&&!assetsReady){pendingMode='welcome';mode='loading';stage.dataset.mode='loading';syncModeText();clearTimeout(timer);return}if(next!=='welcome')pendingMode='';if(mode===next&&stage.dataset.mode===next){syncModeText();return}mode=next;stage.dataset.mode=mode;syncModeText();if(isCarouselMode())schedule();else clearTimeout(timer);}
+function setMode(value){const raw=String(value),alias=raw==='slideshow'?'welcome':raw;const valid=['loading','welcome','checking','conflicts','downgrade','version-invalid','license','components','certificate','cleanup-review','uninstall-select','installing','uninstalling','unlock-modules','unlock-processes','launching','settings-removal-risk','confirm-cancel','cancelling','cancelled','complete','error'];const next=valid.includes(alias)?alias:'welcome';if(next!==mode){endComponentDrag(false);clearTimeout(componentHideTimer);clearTimeout(componentNoteTimer);document.getElementById('components-gesture-status').className='component-toast';clearComponentEdge();}if(next==='welcome'&&!assetsReady){pendingMode='welcome';mode='loading';stage.dataset.mode='loading';syncModeText();clearTimeout(timer);return}if(next!=='welcome')pendingMode='';if(mode===next&&stage.dataset.mode===next){syncModeText();return}mode=next;stage.dataset.mode=mode;syncModeText();if(isCarouselMode())schedule();else clearTimeout(timer);}
 function setCompletionText(tag,title,body,note,ready){completionText={doneTag:String(tag||''),doneTitle:String(title||''),doneBody:String(body||''),doneNote:String(note||''),doneReady:String(ready||'')};syncModeText();}
 function setErrorText(tag,title,body,details,reason,note){errorText={errorTag:String(tag||''),errorTitle:String(title||''),errorBody:String(body||''),errorDetails:String(details||''),errorReason:String(reason||''),errorNote:String(note||'')};syncModeText();}
 function update(){[...root.children].forEach((el,i)=>{el.classList.toggle('active',i===index);el.setAttribute('aria-hidden',i!==index)});[...dots.children].forEach((b,i)=>b.setAttribute('aria-current',i===index));pauseButton.innerHTML=paused?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';pauseButton.setAttribute('aria-label',paused?uiResources[locale].resume:uiResources[locale].pause);pauseButton.setAttribute('aria-pressed',String(paused));}

@@ -1,3 +1,48 @@
+# Карточки C / фильтры и проверка нового Setup — 2026-11-07
+
+## Исправлено по повторному UI review
+
+- Карточки двух полок больше не имеют одинакового контента. «Доступно» — каталог релиза:
+  version/size и маркеры «локально / на сервере», без installed/action chip. Выбранное действие
+  приглушает каталоговую карточку; повторная стрелка не отменяет его. «Установлено» — текущий
+  состав: текущая версия, предложение новой версии «в Доступно», planned install, update,
+  reinstall, damage и (в direct Unins) removal. Update/reinstall в плане зелёные, кнопка ↻ нажата.
+  SVG glyphs действий/статусов взяты из C; сохранены 72 px, skins, warning под иконкой, info popup.
+- «Доступно / нужно»: отсутствующие невыбранные, непланированное обновление или восстановление;
+  уже выбранные скрыты. «Установлено / нужно»: внимание или действие в плане. Само предупреждение
+  о ручной настройке не делает исправный продукт требующим установки/переустановки.
+  «Все» сохраняет весь каталог. Footer/count/объёмы и empty states пересчитываются по видимым
+  карточкам. Размер показывается только при известных данных, серверный источник не выдумывается
+  из наличия соседнего MSI. Registry/unknown failure не подписывается как SHA-256 mismatch.
+- Удалён старый refresh handler: после pointer drop он перезаписывал новый ↻ старым X.
+  Intent по-прежнему один, Settings x64/x86 независимы. **Mixed Remove в Setup не реализован**:
+  не добавлена фиктивная работающая корзина. Поэтому полный UI/backend parity ещё не заявлен.
+
+## П.6: рабочая стадия Checking, но ещё не завершённое самопродление
+
+- Legacy `Page::Update`, отдельный HTML panel и маршрут Download/Skip удалены из кода мастера
+  (включая debug tour). Проверка получает bounded catalogue через существующий ReleaseClient;
+  версии/размеры продуктов из него поступают на страницу обслуживания, а не отдельное предложение.
+  Maintenance пропускает Welcome, но тоже проходит Checking перед лицензией/продуктами;
+  `--no-self-update` запрещает загрузку Setup, не отключая discovery версий продуктов.
+- Новейший downloadable setupPackage скачивается **на Checking**, с отдельным статусом в WebView
+  и GDI fallback. Используется private Work staging, CREATE_NEW .part, размер/SHA-256,
+  strict WinVerifyTrust + совпадение signer с текущим Setup, PE ProductVersion == manifest.
+  Cancel закрытия передаётся worker до join; временный workspace удаляется при завершении мастера.
+- **Publication/handoff ещё НЕ подключены.** Проверенный EXE не запускается: текущая версия
+  продолжает мастер, в логе это явно указано. Durable replacement/recovery, unlimited user .bak,
+  cached EXE/HKLM rebinding и аргументы/мьютекс при перезапуске остаются обязательным продолжением.
+  Лицензия не принимается автоматически. Не выдавать скачивание за завершение всего п.6.
+
+## Проверки
+
+PASS: expanded production jsdom state/content/filter matrix; actual Chromium geometry/skins C
+и pointer/panel regression; production PrepareSetup failure injection с ASan/UBSan (fake Win32,
+не реальный WinTrust); package acquisition и version-scoped EULA mocks; portable planner/executor;
+package catalog/output guards; resource smoke. Windows GNU x86 object compilation обновлённого
+GlassPackageAcquisition.cpp — PASS. MSVC/WiX, сеть Windows/сертификаты/реальный EXE handoff не
+проверялись. Платформа и Windows Setup/Unins не запускались. П.2/3 также остаются незавершёнными.
+
 # Исправление drag/panels C и прямого MSI output — 2026-11-06
 
 ## Production UI, не mock handlers
