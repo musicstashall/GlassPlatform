@@ -1082,6 +1082,17 @@ private:
                     LogLine(L"SecureUxTheme: external installation owns the state; nothing changed");
             }
         }
+        struct RemainingArpRefresh {
+            const std::wstring &x64,&x86,&og;
+            bool refreshed=false;
+            bool Refresh() noexcept {refreshed=true;return Msi::RefreshManagedArp(x64,x86,og);}
+            ~RemainingArpRefresh() noexcept {
+                try {
+                    if(!refreshed && !Msi::RefreshManagedArp(x64,x86,og))
+                        LogLine(L"Remaining ARP commands/policy could not be fully refreshed; primary removal result preserved");
+                }catch(...){/* Preserve the primary removal result, including on allocation failure. */}
+            }
+        } arpRefresh{x64Dir_,x86Dir_,openGlassDir_};
         bool msiRebootRequired=false;
         int count=(chosen.secureUxTheme?1:0)+(chosen.settings64?1:0)+(chosen.settings32?1:0)+(chosen.openGlass?1:0)+(chosen.x86?1:0)+(chosen.x64?1:0);
         int done=0;
@@ -1164,6 +1175,11 @@ private:
                 return ERROR_SUCCESS;
             });
         if(!result.ok)return static_cast<int>(result.error);
+        if(!arpRefresh.Refresh()) {
+            SetError(T(L"Выбранные MSI обработаны, но не все записи обслуживания оставшихся продуктов удалось обновить. Подробности в журнале.",
+                L"Selected MSI operations completed, but some remaining maintenance entries could not be refreshed. See the log."));
+            (void)restoreRemaining();return ERROR_INSTALL_FAILURE;
+        }
         if (chosen.settings && !Msi::IsProductInstalled(Msi::kProductSettingsX64) &&
             !Msi::IsProductInstalled(Msi::kProductSettingsX86)) GlassInstallUtil::DeleteStartMenuShortcut();
         // Pin retained product directories, including nested/aliased roots,

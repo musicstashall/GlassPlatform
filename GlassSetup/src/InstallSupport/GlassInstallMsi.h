@@ -18,6 +18,9 @@ inline constexpr wchar_t kLegacyPlatformX64[] = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3
 inline constexpr wchar_t kLegacyPlatformX86[] = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5062}";
 inline constexpr wchar_t kLegacyOpenGlass[]   = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5063}";
 
+// Re-enumerates only fixed managed families; never patches the vendor MSI.
+bool RefreshManagedArp(const std::wstring& x64Dir,const std::wstring& x86Dir,
+    const std::wstring& openGlassDir) noexcept;
 struct ProgressSink;
 bool MsiSuccess(UINT code) noexcept;
 bool IsProductInstalled(const wchar_t* productCode) noexcept;
@@ -33,7 +36,7 @@ std::wstring ResolveProductCode(const std::wstring& msiPath);
 
 std::wstring BuildInstallPropertyString(const std::wstring& installDir, bool restoreNoCab);
 std::wstring UninsExePathForProduct(const std::wstring& productCode, const std::wstring& installDir);
-void PatchArpUninstallString(const std::wstring& productCode, const std::wstring& installDir) noexcept;
+bool PatchArpUninstallString(const std::wstring& productCode, const std::wstring& installDir) noexcept;
 
 bool CopyLocalPackage(const wchar_t* productCode, const std::wstring& destPath,
     const std::atomic_bool* cancelled = nullptr) noexcept;

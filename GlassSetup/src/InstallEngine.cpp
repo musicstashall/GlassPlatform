@@ -1331,6 +1331,10 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
     InstallLog::LineFormat(L"Original SecureUxTheme removal returned %u (ProductCode %s)",result,secureUxRemoval_.productCode.c_str());
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
     if(!removed){SetFailure(ru?L"Не удалось удалить оригинальный MSI SecureUxTheme.":L"Could not remove the original SecureUxTheme MSI.",result);return false;}
+    if(!GlassInstallMsi::RefreshManagedArp(x64Dir_,x86Dir_,openGlassDir_))
+        AddFinishWarning(ru?L"Записи обслуживания обновлены не полностью":L"Maintenance entries were not fully refreshed",
+            ru?L"SecureUxTheme удалён. Не все ограничения удаления оставшихся продуктов обновлены; подробности в журнале.":
+               L"SecureUxTheme was removed. Some remaining removal policies could not be refreshed; see the log.");
     if(result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED)
         AddFinishWarning(ru?L"SecureUxTheme: требуется перезагрузка":L"SecureUxTheme: restart required",
             ru?L"Оригинальный MSI запросил перезагрузку. Постоянные файлы автора сохраняются.":
@@ -1775,12 +1779,10 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         AddFinishWarning(ru?L"Оболочка обслуживания сохранена не полностью":L"Maintenance cache publication is incomplete",
             (ru?L"Не удалось полностью сохранить комплект обслуживания. Это не сообщение о сбое запуска. Сохраните исходный установщик и журнал.\n":
                 L"The maintenance bundle was not fully saved. This does not indicate a component startup failure. Keep the original installer and log.\n")+cacheFailure);
-    const wchar_t* products[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
-        GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass};
-    for(const auto* code:products)if(GlassInstallMsi::IsProductInstalled(code)) {
-        const bool product32=_wcsicmp(code,GlassInstallMsi::kProductPlatformX86)==0||_wcsicmp(code,GlassInstallMsi::kProductSettingsX86)==0;
-        GlassInstallMsi::PatchArpUninstallString(code,_wcsicmp(code,GlassInstallMsi::kProductOpenGlass)==0?openGlassDir_:product32?x86Dir_:x64Dir_);
-    }
+    if(!GlassInstallMsi::RefreshManagedArp(x64Dir_,x86Dir_,openGlassDir_))
+        AddFinishWarning(ru?L"Записи обслуживания обновлены не полностью":L"Maintenance entries were not fully refreshed",
+            ru?L"Не удалось обновить команды или ограничения удаления оставшихся продуктов. Подробности в журнале.":
+               L"Commands or removal policy for remaining products could not be refreshed. See the log.");
 
     // Policy: a selected platform is always started, whether or not it was
     // running (or its task was enabled) when Setup began. StartPlatform

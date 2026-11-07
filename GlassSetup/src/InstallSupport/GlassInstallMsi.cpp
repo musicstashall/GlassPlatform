@@ -2,6 +2,7 @@
 #include "GlassInstallLog.h"
 #include "GlassInstallUtil.h"
 #include "GlassMaintenanceCache.h"
+#include <SecureUxThemeInventory.h>
 #include <msi.h>
 #include <msiquery.h>
 #include <shlwapi.h>
@@ -216,52 +217,111 @@ std::wstring UninsExePathForProduct(const std::wstring& productCode, const std::
 
 // PublishProduct пишет msiexec + WindowsInstaller=1. Переключаем ARP на unins000.exe --product "{GUID}"
 // и снимаем WindowsInstaller, чтобы Параметры Windows вызывали наш WebView2-деинсталлятор.
-void PatchArpUninstallString(const std::wstring& productCode, const std::wstring& installDir) noexcept {
-    if (productCode.empty()) return;
-    const bool secureUxThemeProduct =
-        _wcsicmp(productCode.c_str(), kProductSecureUxThemeX64) == 0 ||
-        _wcsicmp(productCode.c_str(), kProductSecureUxThemeX86) == 0;
-    if (installDir.empty() && !secureUxThemeProduct) return;
-    std::wstring exe = GlassMaintenanceCache::CurrentFile(L"GlassUnins.exe");
-    if(exe.empty())exe=UninsExePathForProduct(productCode, installDir);
-    if (exe.empty()) return;
-    const std::wstring command = L"\"" + exe + L"\" --product \"" + productCode + L"\"";
-    const std::wstring quietCommand = command + L" --silent";
-    const auto setup=GlassMaintenanceCache::CurrentFile(L"GlassSetup.exe");
-    const auto modify=setup.empty()?L"\""+exe+L"\" --interactive --product \""+productCode+L"\"":L"\""+setup+L"\" --modify --product \""+productCode+L"\"";
-    const std::wstring displayIcon = exe + L",0";
-    const std::wstring keyPath =
-        L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + productCode;
-    auto writeRoot = [&](HKEY root, REGSAM sam) {
-        HKEY key = nullptr;
-        if (RegOpenKeyExW(root, keyPath.c_str(), 0, KEY_SET_VALUE | sam, &key) != ERROR_SUCCESS)
-            return false;
-        const LONG st1 = RegSetValueExW(key, L"UninstallString", 0, REG_SZ,
-            reinterpret_cast<const BYTE*>(quietCommand.c_str()),
-            static_cast<DWORD>((quietCommand.size() + 1) * sizeof(wchar_t)));
-        const LONG st2 = RegSetValueExW(key, L"QuietUninstallString", 0, REG_SZ,
-            reinterpret_cast<const BYTE*>(quietCommand.c_str()),
-            static_cast<DWORD>((quietCommand.size() + 1) * sizeof(wchar_t)));
-        (void)RegSetValueExW(key, L"DisplayIcon", 0, REG_SZ,
-            reinterpret_cast<const BYTE*>(displayIcon.c_str()),
-            static_cast<DWORD>((displayIcon.size() + 1) * sizeof(wchar_t)));
-        const DWORD one = 1,zero=0;
-        (void)RegSetValueExW(key,L"ModifyPath",0,REG_SZ,reinterpret_cast<const BYTE*>(modify.c_str()),static_cast<DWORD>((modify.size()+1)*sizeof(wchar_t)));
-        (void)RegSetValueExW(key,L"NoModify",0,REG_DWORD,reinterpret_cast<const BYTE*>(&zero),sizeof(zero));
+bool PatchArpUninstallString(const std::wstring& productCode, const std::wstring& installDir) noexcept {
+    try {
+        bool managed=false;
+        for(const auto* code:{kProductPlatformX64,kProductPlatformX86,kProductSettingsX64,kProductSettingsX86,
+            kProductOpenGlass,kLegacyPlatformX64,kLegacyPlatformX86,kLegacyOpenGlass,kProductSecureUxThemeX64,kProductSecureUxThemeX86})
+            managed=managed||_wcsicmp(productCode.c_str(),code)==0;
+        std::wstring contextDetail;
+        if(!managed || !IsProductInstalled(productCode.c_str()) ||
+           CheckProductContexts(productCode.c_str(),contextDetail)!=ProductPathCheck::Safe)return false;
+        wchar_t registered[39]{};MSIINSTALLCONTEXT context=MSIINSTALLCONTEXT_NONE;
+        if(MsiEnumProductsExW(productCode.c_str(),nullptr,MSIINSTALLCONTEXT_ALL,0,registered,&context,nullptr,nullptr)!=ERROR_SUCCESS)return false;
+        if(context!=MSIINSTALLCONTEXT_MACHINE && context!=MSIINSTALLCONTEXT_USERMANAGED && context!=MSIINSTALLCONTEXT_USERUNMANAGED)return false;
+        const bool secureUxThemeProduct =
+            _wcsicmp(productCode.c_str(), kProductSecureUxThemeX64) == 0 ||
+            _wcsicmp(productCode.c_str(), kProductSecureUxThemeX86) == 0;
+        if (installDir.empty() && !secureUxThemeProduct) return false;
+        std::wstring exe = GlassMaintenanceCache::CurrentFile(L"GlassUnins.exe");
+        if(exe.empty())exe=UninsExePathForProduct(productCode, installDir);
+        if (exe.empty()) return false;
+        const std::wstring command = L"\"" + exe + L"\" --product \"" + productCode + L"\"";
+        const std::wstring quietCommand = command + L" --silent";
+        const auto setup=GlassMaintenanceCache::CurrentFile(L"GlassSetup.exe");
+        const auto modify=setup.empty()?L"\""+exe+L"\" --interactive --product \""+productCode+L"\"":L"\""+setup+L"\" --modify --product \""+productCode+L"\"";
+        const std::wstring displayIcon = exe + L",0";
+        const std::wstring keyPath =
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + productCode;
         const bool settings=_wcsicmp(productCode.c_str(),kProductSettingsX64)==0||_wcsicmp(productCode.c_str(),kProductSettingsX86)==0;
-        const DWORD noRemove=settings&&(IsProductInstalled(kProductSecureUxThemeX64)||IsProductInstalled(kProductSecureUxThemeX86))?1:0;
-        (void)RegSetValueExW(key,L"NoRemove",0,REG_DWORD,reinterpret_cast<const BYTE*>(&noRemove),sizeof(noRemove));
-        (void)RegSetValueExW(key, L"NoRepair", 0, REG_DWORD,
-            reinterpret_cast<const BYTE*>(&one), sizeof(one));
-        (void)RegDeleteValueW(key, L"WindowsInstaller");
-        RegCloseKey(key);
-        return st1 == ERROR_SUCCESS && st2 == ERROR_SUCCESS;
-    };
-    const bool ok = writeRoot(HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY)
-        || writeRoot(HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY)
-        || writeRoot(HKEY_CURRENT_USER, 0);
-    GlassInstallLog::LineFormat(L"ARP UninstallString -> unins000 (%s) %s",
-        productCode.c_str(), ok ? L"ok" : L"skip");
+        std::vector<std::wstring> sutCandidates;
+        const bool sutGuard=Shared::SecureUxThemeInventory::Query(sutCandidates)!=ERROR_SUCCESS || !sutCandidates.empty() ||
+            MsiQueryProductStateW(kProductSecureUxThemeX64)!=INSTALLSTATE_UNKNOWN ||
+            MsiQueryProductStateW(kProductSecureUxThemeX86)!=INSTALLSTATE_UNKNOWN;
+        bool opened=false;
+        auto writeRoot = [&](HKEY root, REGSAM sam) {
+            HKEY key = nullptr;
+            const LONG status=RegOpenKeyExW(root,keyPath.c_str(),0,KEY_SET_VALUE|sam,&key);
+            if(status!=ERROR_SUCCESS) {
+                // Only a missing key permits trying the other registry view.
+                // An access failure must not redirect writes to a stale key.
+                opened=status!=ERROR_FILE_NOT_FOUND && status!=ERROR_PATH_NOT_FOUND;
+                return false;
+            }
+            opened=true;
+            wchar_t currentCode[39]{};MSIINSTALLCONTEXT currentContext=MSIINSTALLCONTEXT_NONE;
+            if(!IsProductInstalled(productCode.c_str()) ||
+               CheckProductContexts(productCode.c_str(),contextDetail)!=ProductPathCheck::Safe ||
+               MsiEnumProductsExW(productCode.c_str(),nullptr,MSIINSTALLCONTEXT_ALL,0,currentCode,&currentContext,nullptr,nullptr)!=ERROR_SUCCESS ||
+               currentContext!=context){RegCloseKey(key);return false;}
+            const LONG st1 = RegSetValueExW(key, L"UninstallString", 0, REG_SZ,
+                reinterpret_cast<const BYTE*>(quietCommand.c_str()),
+                static_cast<DWORD>((quietCommand.size() + 1) * sizeof(wchar_t)));
+            const LONG st2 = RegSetValueExW(key, L"QuietUninstallString", 0, REG_SZ,
+                reinterpret_cast<const BYTE*>(quietCommand.c_str()),
+                static_cast<DWORD>((quietCommand.size() + 1) * sizeof(wchar_t)));
+            bool valuesOk=true;
+            valuesOk=RegSetValueExW(key, L"DisplayIcon", 0, REG_SZ,
+                reinterpret_cast<const BYTE*>(displayIcon.c_str()),
+                static_cast<DWORD>((displayIcon.size() + 1) * sizeof(wchar_t)))==ERROR_SUCCESS && valuesOk;
+            const DWORD one = 1,zero=0;
+            valuesOk=RegSetValueExW(key,L"ModifyPath",0,REG_SZ,reinterpret_cast<const BYTE*>(modify.c_str()),static_cast<DWORD>((modify.size()+1)*sizeof(wchar_t)))==ERROR_SUCCESS && valuesOk;
+            valuesOk=RegSetValueExW(key,L"NoModify",0,REG_DWORD,reinterpret_cast<const BYTE*>(&zero),sizeof(zero))==ERROR_SUCCESS && valuesOk;
+            const DWORD noRemove=settings&&sutGuard?1:0;
+            valuesOk=RegSetValueExW(key,L"NoRemove",0,REG_DWORD,reinterpret_cast<const BYTE*>(&noRemove),sizeof(noRemove))==ERROR_SUCCESS && valuesOk;
+            valuesOk=RegSetValueExW(key, L"NoRepair", 0, REG_DWORD,
+                reinterpret_cast<const BYTE*>(&one), sizeof(one))==ERROR_SUCCESS && valuesOk;
+            if(st1==ERROR_SUCCESS && st2==ERROR_SUCCESS && valuesOk) {
+                const LONG deleted=RegDeleteValueW(key,L"WindowsInstaller");
+                valuesOk=deleted==ERROR_SUCCESS || deleted==ERROR_FILE_NOT_FOUND;
+            }
+            if(st1!=ERROR_SUCCESS || st2!=ERROR_SUCCESS || !valuesOk)
+                GlassInstallLog::LineFormat(L"ARP write incomplete: product=%s view=%u uninstall=%ld quiet=%ld policyOk=%d",
+                    productCode.c_str(),static_cast<unsigned>(sam),st1,st2,valuesOk?1:0);
+            RegCloseKey(key);
+            return st1 == ERROR_SUCCESS && st2 == ERROR_SUCCESS && valuesOk;
+        };
+        // Do not fall through from a machine instance to an unrelated HKCU key.
+        const HKEY root=context==MSIINSTALLCONTEXT_MACHINE?HKEY_LOCAL_MACHINE:HKEY_CURRENT_USER;
+        bool ok=writeRoot(root,KEY_WOW64_64KEY);
+        if(!opened)ok=writeRoot(root,KEY_WOW64_32KEY);
+        GlassInstallLog::LineFormat(L"ARP UninstallString -> unins000 (%s) %s",
+            productCode.c_str(), ok ? L"ok" : L"skip");
+        return ok;
+    }catch(...){return false;}
+}
+
+bool RefreshManagedArp(const std::wstring& x64Dir,const std::wstring& x86Dir,const std::wstring& openGlassDir) noexcept {
+    try {
+        bool ok=true;
+        for(const auto* code:{kProductPlatformX64,kProductPlatformX86,kProductSettingsX64,kProductSettingsX86,
+            kProductOpenGlass,kLegacyPlatformX64,kLegacyPlatformX86,kLegacyOpenGlass,kProductSecureUxThemeX64,kProductSecureUxThemeX86}) {
+            const auto state=MsiQueryProductStateW(code);
+            if(state==INSTALLSTATE_UNKNOWN)continue;
+            if(state!=INSTALLSTATE_DEFAULT){
+                GlassInstallLog::LineFormat(L"Remaining ARP skipped: product=%s MSI state=%d",code,static_cast<int>(state));
+                ok=false;continue;
+            }
+            const bool product32=_wcsicmp(code,kProductPlatformX86)==0||_wcsicmp(code,kLegacyPlatformX86)==0||
+                _wcsicmp(code,kProductSettingsX86)==0||_wcsicmp(code,kProductSecureUxThemeX86)==0;
+            const bool og=_wcsicmp(code,kProductOpenGlass)==0||_wcsicmp(code,kLegacyOpenGlass)==0;
+            if(!PatchArpUninstallString(code,og?openGlassDir:product32?x86Dir:x64Dir)) {
+                GlassInstallLog::LineFormat(L"Remaining ARP refresh refused/failed: product=%s",code);ok=false;
+            }
+        }
+        GlassInstallLog::LineFormat(L"Remaining managed ARP refresh: %s",ok?L"ok":L"incomplete");
+        return ok;
+    }catch(...){return false;}
 }
 
 DWORD CALLBACK SnapshotCopyProgress(LARGE_INTEGER,LARGE_INTEGER,LARGE_INTEGER,LARGE_INTEGER,

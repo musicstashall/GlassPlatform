@@ -55,6 +55,8 @@ namespace GlassMaintenanceCache {
  bool Identity(const std::wstring&,std::wstring& outCode,std::wstring& outVersion){outCode=code;outVersion=version;return valid;}
 }
 namespace GlassInstallMsi {
+ bool arpRefreshOk=true;
+ bool RefreshManagedArp(const std::wstring&,const std::wstring&,const std::wstring&){return arpRefreshOk;}
  struct ProgressSink {std::wstring label;int base=0,span=0;const std::atomic_bool* cancelRequested=nullptr;
   std::function<void(const std::wstring&,int)> onProgress;};
  UINT result=0;int uninstalls=0,installs=0;
@@ -72,7 +74,7 @@ struct InstallEngine {
  GlassSecureUxPackage::Removal secureUxRemoval_;
  GlassSecureUxPackage::Package secureUxPackage_;
  struct {std::wstring secureUxTheme;}labels_;
- std::wstring secureUxRemovalCode_=L"official",tempDir_=L"work",x64Dir_=L"x64",x86Dir_=L"x86";
+ std::wstring secureUxRemovalCode_=L"official",tempDir_=L"work",x64Dir_=L"x64",x86Dir_=L"x86",openGlassDir_=L"og";
  std::atomic_bool cancelRequested_{false};int failures=0,warnings=0;
  bool IsCancelRequested()const{return cancelRequested_.load();}
  void SetFailure(const std::wstring&,unsigned){++failures;}
@@ -81,12 +83,14 @@ struct InstallEngine {
  bool PrepareSecureUxRemoval() noexcept;bool RemoveOriginalSecureUxTheme() noexcept;bool InstallOriginalSecureUxTheme() noexcept;
 };
 // METHODS
-void Reset(){GlassSecureUxPackage::presenceSafe=GlassSecureUxPackage::legacyAbsent=true;GlassSecureUxPackage::installed.clear();
+void Reset(){GlassInstallMsi::arpRefreshOk=true;GlassSecureUxPackage::presenceSafe=GlassSecureUxPackage::legacyAbsent=true;GlassSecureUxPackage::installed.clear();
  GlassMaintenanceCache::valid=true;GlassMaintenanceCache::code=L"official";GlassMaintenanceCache::version=L"4.0.0";
  GlassInstallMsi::installs=0;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Inactive;GlassInstallUtil::query=true;
  GlassSecureUxPackage::prepare=GlassSecureUxPackage::recheck=true;
  GlassSecureUxPackage::prepares=GlassSecureUxPackage::rechecks=0;GlassInstallMsi::uninstalls=0;GlassInstallMsi::result=0;}
 int main(){
+ {Reset();InstallEngine e;assert(e.PrepareSecureUxRemoval());GlassInstallMsi::arpRefreshOk=false;
+  assert(e.RemoveOriginalSecureUxTheme());assert(e.failures==0&&e.warnings==1&&GlassInstallMsi::uninstalls==1);}
  for(int n=0;n<16;++n){Reset();InstallEngine e;e.selection_.secureUxTheme=true;e.selection_.secureUxThemeRemove=false;
   e.executionPlan_.rows[GlassProductPlan::Index(GlassProductPlan::Product::SecureUxTheme)].action=GlassProductPlan::Action::Install;
   if(n==1)e.executionPlanReady_=false;
