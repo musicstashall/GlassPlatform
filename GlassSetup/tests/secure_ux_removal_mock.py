@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess, shutil, tempfile
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallSupport/GlassSecureUxPackage.cpp').read_text()
+legacy=source[source.index('bool CheckLegacyRepackAbsent('):source.index('bool QueryInstallPresence(')]
 presence=source[source.index('bool QueryInstallPresence('):source.index('bool Prepare(const std::wstring& privateDirectory')]
 removal=source[source.index('namespace {\nbool RemovalInventory'):source.rfind('\n}')]
 harness=r'''
@@ -30,7 +31,7 @@ struct FileData {std::string bytes="vendor";std::wstring code=L"official",versio
 struct State {
  std::vector<std::wstring> inventory{L"official"};std::map<std::wstring,FileData> files;
  std::wstring cache=L"C:\\Windows\\Installer\\vendor.msi",registeredPackage=L"package";
- bool query=true,legacy=false,contextSafe=true,machine=true,trusted=true,copy=true,metadata=true,hash=true,clean=true;
+ bool query=true,legacy=false,contextSafe=true,legacyContextSafe=true,machine=true,trusted=true,copy=true,metadata=true,hash=true,clean=true;
  int installed=INSTALLSTATE_DEFAULT,handles=0,queries=0,copies=0;
  DWORD attributes=0,links=1;
 } s;
@@ -47,7 +48,9 @@ bool GetFileInformationByHandle(HANDLE,BY_HANDLE_FILE_INFORMATION* info){info->d
 namespace Shared::SecureUxThemeInventory {UINT Query(std::vector<std::wstring>& out){++s.queries;out=s.inventory;return s.query?0:5;}}
 namespace GlassInstallMsi {
  enum class ProductPathCheck {Safe,Unsafe};
- ProductPathCheck CheckProductContexts(const wchar_t*,std::wstring&,const std::atomic_bool*){return s.contextSafe?ProductPathCheck::Safe:ProductPathCheck::Unsafe;}
+ constexpr const wchar_t* kProductSecureUxThemeX64=L"legacy64",*kProductSecureUxThemeX86=L"legacy32";
+ bool IsProductInstalled(const wchar_t*){return s.legacy;}
+ ProductPathCheck CheckProductContexts(const wchar_t* code,std::wstring&,const std::atomic_bool* =nullptr){return ((std::wstring(code)==L"legacy64"||std::wstring(code)==L"legacy32")?s.legacyContextSafe:s.contextSafe)?ProductPathCheck::Safe:ProductPathCheck::Unsafe;}
 }
 namespace GlassMaintenanceCache {
  bool TrustedDirectory(const std::wstring&){return s.trusted;}
@@ -64,7 +67,7 @@ struct Package {std::wstring productCode,version;};
 struct File {int h=-1;~File(){if(h!=-1)--s.handles;}};
 bool Fail(std::wstring& error,const wchar_t* operation,DWORD=0){error=operation;return false;}
 bool Cancelled(const std::atomic_bool& c,std::wstring& error){if(c.load()){error=L"cancel";return true;}return false;}
-bool CheckLegacyRepackAbsent(std::wstring& error){return !s.legacy || Fail(error,L"legacy");}
+
 int NativeArchitecture(){return 0;}
 bool Metadata(const std::wstring& path,int,Package& out,std::wstring& error){
  if(!s.metadata)return Fail(error,L"metadata");out.productCode=s.files.at(path).code;out.version=s.files.at(path).version;return true;
@@ -77,6 +80,9 @@ bool CopySnapshot(File&,const std::wstring& path,const std::atomic_bool& c,std::
 void Reset(){s={};s.files[s.cache]={};cancel=false;}
 int main(){
  using namespace GlassSecureUxPackage;std::wstring error;
+ {Reset();s.legacyContextSafe=false;assert(!CheckLegacyRepackAbsent(error));
+  Removal r;assert(!PrepareRemoval(L"work",L"official",cancel,r,error));assert(s.copies==0);
+ }
  {std::vector<std::wstring> installed;
   Reset();assert(QueryInstallPresence(installed,cancel,error)&&installed==s.inventory);
   Reset();s.installed=INSTALLSTATE_ABSENT;assert(QueryInstallPresence(installed,cancel,error)&&installed.empty());assert(s.copies==0);
@@ -116,7 +122,7 @@ int main(){
   assert(!RecheckRemoval(L"other-work",cancel,r,error));}
  std::cout<<"PASS: actual vendor removal snapshot/recheck: exact single machine MSI, protected cache, context/metadata/PackageCode, links, pinned digest, inventory changes, cancellation and cleanup\n";
 }
-'''.replace('// SOURCE',presence+removal)
+'''.replace('// SOURCE',legacy+presence+removal)
 compiler=shutil.which('clang++') or shutil.which('g++')
 if not compiler:raise SystemExit('clang++ or g++ required')
 with tempfile.TemporaryDirectory(prefix='GlassSutRemoval-') as directory:

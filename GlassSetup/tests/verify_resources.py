@@ -539,7 +539,9 @@ assert worker.index("CreateRollbackSnapshot()") < worker.index("BuildExecutionPl
 execution_plan=section(engine,"bool InstallEngine::BuildExecutionPlan()", "bool InstallEngine::RunMsiSequence()")
 for token in ("GlassProductInspect::Run", "input.inspectSources=false", "CheckProductContexts", "RecheckSnapshottedProduct", "RecheckRelatedProducts", "GlassMaintenanceCache::Identity", "P::Build(facts,request)"):
     assert token in execution_plan, token
-assert "const auto& plan=executionPlan_" in run_sequence
+assert "auto plan=executionPlan_" in run_sequence
+assert "plan.rows[P::Index(P::Product::SecureUxTheme)].action=P::Action::Keep" in run_sequence
+assert "RunPhase(plan,GlassMaintenanceExecutor::Phase::Products" in run_sequence
 assert "steps[stepIndex++]" not in run_sequence
 assert "if(action==P::Action::Remove)return ERROR_INVALID_PARAMETER" in run_sequence
 helper_phase=section(engine,"bool InstallEngine::InstallGlassSettingsEarly()", "bool InstallEngine::InstallOriginalSecureUxTheme()")

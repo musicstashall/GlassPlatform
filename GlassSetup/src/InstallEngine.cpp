@@ -1302,6 +1302,13 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
     // The single vendor transaction is the last fallible step, with cancellation
     // already closed. Failure takes the existing Glass rollback path; vendor MSI
     // owns its transaction and all permanent files. Never add it to Glass rollback.
+    namespace P=GlassProductPlan;
+    if(!executionPlanReady_ || !executionPlan_.valid ||
+       executionPlan_.rows[P::Index(P::Product::SecureUxTheme)].action!=P::Action::Remove) {
+        SetFailure(PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?
+            L"План выполнения не разрешает удаление SecureUxTheme.":
+            L"SecureUxTheme removal is not authorized by the execution plan.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+    }
     std::wstring error;auto state=GlassInstallUtil::SecureUxThemeState::Conflict;
     if(!selection_.secureUxThemeRemove || selection_.secureUxTheme || !GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error) ||
        state!=GlassInstallUtil::SecureUxThemeState::Inactive ||
@@ -1334,6 +1341,12 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
 bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
     if(selection_.secureUxThemeRemove)return RemoveOriginalSecureUxTheme();
     if (!selection_.secureUxTheme) return true;
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    namespace P=GlassProductPlan;
+    if(!executionPlanReady_ || !executionPlan_.valid ||
+       executionPlan_.rows[P::Index(P::Product::SecureUxTheme)].action!=P::Action::Install) {
+        SetFailure(ru?L"План выполнения не разрешает установку SecureUxTheme.":L"SecureUxTheme installation is not authorized by the execution plan.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+    }
     std::vector<std::wstring> officialProducts;
     std::wstring presenceError;
     if(!GlassSecureUxPackage::QueryInstallPresence(officialProducts,cancelRequested_,presenceError)) {
@@ -1341,19 +1354,22 @@ bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
         SetFailure(L"SecureUxTheme MSI inventory or ownership could not be verified.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
     }
     if (!officialProducts.empty()) {
-        InstallLog::Line(L"SecureUxTheme: official MSI appeared during setup; left unchanged");
-        return true;
+        SetFailure(ru?L"MSI SecureUxTheme появился после проверки плана; повторите установку.":L"SecureUxTheme MSI appeared after plan validation; retry installation.",ERROR_RETRY);
+        return false;
     }
     if (secureUxPackage_.alreadyInstalled) {
         SetFailure(L"SecureUxTheme MSI registration changed during setup; retry installation.",ERROR_RETRY);
         return false;
     }
-    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
     std::wstring error;
     // Recheck immediately before MSI to avoid implicitly repairing/upgrading a
     // product installed by another process while Glass was being installed.
-    if (secureUxPackage_.path.empty() || !GlassSecureUxPackage::CheckLegacyRepackAbsent(error)) {
-        SetFailure(error.empty()?L"Official SecureUxTheme MSI was not prepared.":error,0);
+    std::wstring currentCode,currentVersion;
+    if (secureUxPackage_.path.empty() || !GlassSecureUxPackage::CheckLegacyRepackAbsent(error) ||
+        !GlassMaintenanceCache::Identity(secureUxPackage_.path,currentCode,currentVersion) ||
+        _wcsicmp(currentCode.c_str(),secureUxPackage_.productCode.c_str())!=0 ||
+        currentVersion!=secureUxPackage_.version) {
+        SetFailure(error.empty()?(ru?L"Оригинальный MSI SecureUxTheme не подготовлен или его идентификатор/версия изменились.":L"Official SecureUxTheme MSI was not prepared or its identity changed."):error,ERROR_INSTALL_PACKAGE_REJECTED);
         return false;
     }
     GlassInstallMsi::ProgressSink sink{};
@@ -1475,8 +1491,44 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
             // guards above authorize only these fixed Glass product families.
             fact.source=P::Source::Verified;fact.ownership=P::Ownership::Managed;
         }
-        // Original vendor MSI retains its separate, last-transaction commit
-        // protocol. Do not falsely authorize its repair/removal through this plan.
+        // Represent the vendor row in the same discovered plan, but keep its
+        // transaction commit-last: no Glass INSTALLDIR, rollback or file cleanup.
+        const auto sutIndex=P::Index(P::Product::SecureUxTheme);
+        auto& sut=facts[sutIndex];sut.supported=true;
+        sut.presence=report.secureUxTheme.installed?P::Presence::Installed:P::Presence::Absent;
+        if(selection_.secureUxTheme && selection_.secureUxThemeRemove)
+            return refuse(L"Contradictory SecureUxTheme intents");
+        if(selection_.secureUxThemeRemove) {
+            std::wstring error;auto state=GlassInstallUtil::SecureUxThemeState::Conflict;
+            if(!report.secureUxTheme.installed || report.officialSecureUxThemeCode.empty() ||
+               _wcsicmp(report.officialSecureUxThemeCode.c_str(),secureUxRemovalCode_.c_str())!=0 ||
+               !secureUxRemoval_.ready ||
+               !GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error) ||
+               state!=GlassInstallUtil::SecureUxThemeState::Inactive ||
+               !GlassSecureUxPackage::RecheckRemoval(tempDir_,cancelRequested_,secureUxRemoval_,error))
+                return refuse(L"SecureUxTheme removal baseline, consent or inactive state changed");
+            // Authority is for this exact vendor MSI, not ownership of its files.
+            sut.ownership=P::Ownership::Managed;sut.condition=P::Condition::Healthy;
+            sut.activity=P::Activity::Inactive;
+            request.actions[sutIndex]=P::Action::Remove;
+        }else if(selection_.secureUxTheme) {
+            std::vector<std::wstring> installed;std::wstring error;
+            if(!GlassSecureUxPackage::QueryInstallPresence(installed,cancelRequested_,error) ||
+               !GlassSecureUxPackage::CheckLegacyRepackAbsent(error) ||
+               !installed.empty() || report.secureUxTheme.installed || secureUxPackage_.alreadyInstalled)
+                return refuse(L"SecureUxTheme installation presence or ownership changed");
+            std::wstring code,version;GlassPackageRules::Version parsed{};
+            if(secureUxPackage_.path.empty() ||
+               !GlassMaintenanceCache::Identity(secureUxPackage_.path,code,version) ||
+               _wcsicmp(code.c_str(),secureUxPackage_.productCode.c_str())!=0 ||
+               version!=secureUxPackage_.version ||
+               !GlassPackageRules::ParseVersion(std::string(version.begin(),version.end()),parsed))
+                return refuse(L"Prepared SecureUxTheme MSI identity changed");
+            sut.ownership=P::Ownership::Managed;sut.condition=P::Condition::Healthy;
+            sut.source=P::Source::Verified;sut.version=P::Version::Same;
+            request.actions[sutIndex]=P::Action::Install;
+        }
+        if(IsCancelRequested())return false;
         executionPlan_=P::Build(facts,request);
         if(!executionPlan_.valid) {
             for(std::size_t i=0;i<P::kProductCount;++i)if(executionPlan_.rows[i].error!=P::Error::None)
@@ -1502,7 +1554,10 @@ bool InstallEngine::RunMsiSequence() noexcept {
     std::vector<Step> steps;
     namespace P=GlassProductPlan;
     if(!executionPlanReady_ || !executionPlan_.valid)return false;
-    const auto& plan=executionPlan_;
+    // Setup's original vendor removal is commit-last, unlike Unins' regular
+    // managed removal order. Exclude only that row from the Glass MSI phase.
+    auto plan=executionPlan_;
+    plan.rows[P::Index(P::Product::SecureUxTheme)].action=P::Action::Keep;
     for(auto product:GlassMaintenanceExecutor::kInstallOrder) {
         if(!P::IsMutation(plan.rows[P::Index(product)].action))continue;
         if(product==P::Product::Platform64)steps.push_back({P::Product::Platform64,L"Glass-x64.msi",x64Dir_,labels_.platform64});

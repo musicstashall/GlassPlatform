@@ -86,6 +86,9 @@ bool CopySnapshot(File& source,const std::wstring& path,const std::atomic<bool>&
 bool CheckLegacyRepackAbsent(std::wstring& error) noexcept {
     try {
         for(const wchar_t* code:{GlassInstallMsi::kProductSecureUxThemeX64,GlassInstallMsi::kProductSecureUxThemeX86}){
+            // ABSENT is not installed presence, but can still belong to another
+            // user. Never allow original MSI acquisition over a foreign repack.
+            if(GlassInstallMsi::CheckProductContexts(code,error)!=GlassInstallMsi::ProductPathCheck::Safe)return false;
             if(GlassInstallMsi::IsProductInstalled(code)){error=L"Remove the old Glass-repacked SecureUxTheme explicitly before installing the author's original MSI.";return false;}
         }
         return true;

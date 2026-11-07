@@ -28,7 +28,7 @@ unsigned GetUserDefaultUILanguage(){return 0;}
 namespace InstallLog {template<class... Args>void LineFormat(const wchar_t*,Args...) {}}
 namespace GlassProductInspect {
 struct ProductReport {bool installed=false,integrityKnown=false,damaged=false;};
-struct Report {bool ran=true;ProductReport x64,x86,settings64,settings32,og;};
+struct Report {bool ran=true;ProductReport x64,x86,settings64,settings32,og,secureUxTheme;std::wstring officialSecureUxThemeCode;};
 struct Inputs {bool os64=false,inspectSources=true;const std::atomic_bool* cancelled=nullptr;};
 Report observation;
 Report Run(const Inputs& input){assert(!input.inspectSources);return observation;}
@@ -56,10 +56,26 @@ bool Identity(const std::wstring& path,std::wstring& code,std::wstring& version)
  code=it->second.first;version=it->second.second;return true;
 }
 }
+namespace GlassInstallUtil {
+ enum class SecureUxThemeState {Conflict,Inactive,Active};
+ SecureUxThemeState state=SecureUxThemeState::Inactive;bool query=true;
+ bool QuerySecureUxThemeState(const std::wstring&,const std::wstring&,SecureUxThemeState* out,std::wstring*){*out=state;return query;}
+}
+namespace GlassSecureUxPackage {
+ struct Package {std::wstring path,productCode,version;bool alreadyInstalled=false;};
+ struct Removal {bool ready=false;};
+ bool presenceSafe=true,legacyAbsent=true,recheck=true;std::vector<std::wstring> installed;
+ bool QueryInstallPresence(std::vector<std::wstring>& out,const std::atomic_bool&,std::wstring&){out=installed;return presenceSafe;}
+ bool CheckLegacyRepackAbsent(std::wstring&){return legacyAbsent;}
+ bool RecheckRemoval(const std::wstring&,const std::atomic_bool&,const Removal& r,std::wstring&){return recheck&&r.ready;}
+}
 struct Old {std::wstring productCode,cachedMsiPath;};
 struct InstallEngine {
  GlassProductPlan::Plan executionPlan_{};bool executionPlanReady_=true,scanNativeX64_=true,cancelled=false;
  std::atomic_bool cancelRequested_{false};GlassProducts::Selection selection_{};
+ GlassSecureUxPackage::Package secureUxPackage_;
+ GlassSecureUxPackage::Removal secureUxRemoval_;
+ std::wstring secureUxRemovalCode_=L"vendor",x64Dir_=L"x64",x86Dir_=L"x86";
  std::wstring tempDir_=L"work",badBaseline,badFamily;
  struct {std::vector<Old> oldProducts;}rollbackSession_;
  int failures=0,baselineChecks=0,familyChecks=0;
@@ -80,6 +96,9 @@ void Reset(InstallEngine& e){
   {L"work\\GlassSettings-x64.msi",{L"s64",L"2.0.0"}},
   {L"work\\GlassSettings-x86.msi",{L"s32",L"2.0.0"}},
   {L"work\\OpenGlass-x64.msi",{L"og",L"2.0.0"}}};
+ GlassSecureUxPackage::presenceSafe=GlassSecureUxPackage::legacyAbsent=GlassSecureUxPackage::recheck=true;
+ GlassSecureUxPackage::installed.clear();GlassInstallUtil::query=true;
+ GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Inactive;
  stateReads=0;concurrent=false;
 }
 void Installed(InstallEngine& e,const wchar_t* code,const wchar_t* version){
@@ -128,7 +147,41 @@ int main(){
  {InstallEngine e;Reset(e);GlassProductInspect::observation.ran=false;assert(!e.BuildExecutionPlan());}
  {InstallEngine e;Reset(e);e.selection_.platform64=true;concurrent=true;assert(!e.BuildExecutionPlan());}
  {InstallEngine e;Reset(e);e.selection_.platform64=true;Installed(e,L"p64",L"2.0.0");e.badBaseline=L"p64";assert(!e.BuildExecutionPlan());}
- std::cout<<"PASS: actual Setup discovery/Build: install/update/repair, legacy, independent helpers, downgrade, unknown integrity, missing/wrong media, context/family/baseline/presence changes, cancellation\n";
+ // Actual adapter: selected vendor install is in the plan, never an implicit repair.
+ for(int n=0;n<10;++n){
+  InstallEngine e;Reset(e);e.selection_.secureUxTheme=true;
+  e.secureUxPackage_={L"vendor.msi",L"vendor",L"4.0.0",false};
+  GlassMaintenanceCache::media[L"vendor.msi"]={L"vendor",L"4.0.0"};
+  if(n==1)GlassSecureUxPackage::presenceSafe=false;
+  if(n==2)GlassSecureUxPackage::legacyAbsent=false;
+  if(n==3)GlassSecureUxPackage::installed={L"vendor"};
+  if(n==4)GlassProductInspect::observation.secureUxTheme.installed=true;
+  if(n==5)e.secureUxPackage_.alreadyInstalled=true;
+  if(n==6)GlassMaintenanceCache::media.erase(L"vendor.msi");
+  if(n==7)GlassMaintenanceCache::media[L"vendor.msi"].first=L"foreign";
+  if(n==8)GlassMaintenanceCache::media[L"vendor.msi"].second=L"4.1.0";
+  if(n==9)e.selection_.secureUxThemeRemove=true;
+  assert(e.BuildExecutionPlan()==(n==0));assert(e.executionPlanReady_==(n==0));
+  if(n==0)assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Install&&e.executionPlan_.actionCount==1);
+ }
+ // Exact captured original MSI + prepared baseline + inactive helper are required.
+ for(int n=0;n<9;++n){
+  InstallEngine e;Reset(e);e.selection_.secureUxThemeRemove=true;e.secureUxRemoval_.ready=true;
+  auto& r=GlassProductInspect::observation;r.secureUxTheme.installed=true;r.officialSecureUxThemeCode=L"vendor";
+  if(n==1)r.secureUxTheme.installed=false;
+  if(n==2)r.officialSecureUxThemeCode.clear();
+  if(n==3)e.secureUxRemovalCode_=L"other";
+  if(n==4)e.secureUxRemoval_.ready=false;
+  if(n==5)GlassInstallUtil::query=false;
+  if(n==6)GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;
+  if(n==7)GlassSecureUxPackage::recheck=false;
+  if(n==8)e.selection_.secureUxTheme=true;
+  assert(e.BuildExecutionPlan()==(n==0));assert(e.executionPlanReady_==(n==0));
+  if(n==0)assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Remove&&e.executionPlan_.actionCount==1);
+ }
+ {InstallEngine e;Reset(e);GlassProductInspect::observation.secureUxTheme.installed=true;
+  assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Keep);}
+ std::cout<<"PASS: actual Setup discovery/Build: install/update/repair, legacy, independent helpers, downgrade, unknown integrity, missing/wrong media, context/family/baseline/presence changes, cancellation; vendor install/remove/keep and 19 authority/revalidation cases\n";
 }
 '''.replace('// ADAPTER',adapter)
 compiler=shutil.which('clang++') or shutil.which('g++')

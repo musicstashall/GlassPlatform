@@ -91,7 +91,7 @@ assert.equal(d.querySelector('#product-secureUxTheme').closest('.c-card').queryS
 const matrix=rows.map((r,i)=>({...r,warning:i===0?'Manual configuration':'',disabled:false,checked:i===3||i===5,
  installed:i!==3&&i!==4,installedVersion:i===3||i===4?'':'1.0.0.0',targetVersion:i===2||i===3||i===4?'1.1.0.0':'1.0.0.0',
  remoteVersion:i===2||i===3||i===4?'1.1.0.0':'',packageSize:16*1048576,
- operation:i===2?'update':i===3||i===4?'install':'repair',badgeTone:i===1?'repair':'keep'}));
+ operation:i===2?'update':i===3||i===4?'install':'repair',broken:i===1,badgeTone:i===1?'repair':'keep'}));
 receive({data:{type:'state',locale:'ru',appMode:'setup',page:'components',components:matrix}});
 const installedCard=id=>d.querySelector('#product-'+id).closest('.c-card');
 const catalogueCard=id=>d.querySelector('#components-grid [data-product="'+id+'"]');
@@ -130,6 +130,28 @@ assert.equal(cardName.tagName,'SPAN');assert.equal(cardName.getAttribute('role')
 cardName.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
 assert.equal(d.querySelector('#components-warning-dialog').hidden,false);
 d.querySelector('#components-warning-close').click();
+// Needed is the actionable subset of All, never a badge-tone proxy.
+const filterRows=rows.map(r=>({...r,installed:true,checked:false,broken:false,operation:'repair',badgeTone:'repair',warning:'Warning only',applySupported:false,disabled:false,locked:false}));
+receive({data:{type:'state',locale:'ru',appMode:'setup',page:'components',components:filterRows}});
+for(const shelf of ['available','installed']){
+ d.querySelector('[data-shelf="'+shelf+'"] [data-view="all"]').click();
+ const grid=d.querySelector(shelf==='available'?'#components-grid':'#components-installed-grid');
+ assert.equal(grid.querySelectorAll('.c-card:not([hidden])').length,6);
+ if(shelf==='available')assert.equal(grid.querySelectorAll('.c-card.active').length,0);
+ d.querySelector('[data-shelf="'+shelf+'"] [data-view="needed"]').click();
+ assert.equal(grid.querySelectorAll('.c-card:not([hidden])').length,0);
+}
+// Disabled/locked/unsupported offers cannot leak into Available/needed.
+filterRows[0]={...filterRows[0],installed:false,applySupported:true,disabled:true,operation:'install'};
+filterRows[1]={...filterRows[1],installed:false,applySupported:true,locked:true,operation:'install'};
+filterRows[2]={...filterRows[2],applySupported:true,operation:'update',targetVersion:'2.0.0'};
+filterRows[3]={...filterRows[3],installed:false,applySupported:true,checked:true,operation:'install'};
+filterRows[4]={...filterRows[4],applySupported:true,broken:true};
+filterRows[5]={...filterRows[5],broken:true}; // Maintenance unsupported, not an executable offer.
+receive({data:{type:'state',components:filterRows}});
+assert.deepEqual([...d.querySelectorAll('#components-grid .c-card:not([hidden])')].map(c=>c.dataset.product),['settings64','openglass']);
+assert.deepEqual([...d.querySelectorAll('#components-installed-grid .c-card:not([hidden])')].map(c=>c.dataset.product),['settings64','settings32','openglass']);
+for(const shelf of ['available','installed'])d.querySelector('[data-shelf="'+shelf+'"] [data-view="all"]').click();
 // No MSI or chosen action: inert SUT payloads must not produce Installed/removal.
 const absentRows=rows.map(r=>({...r,installed:false,checked:false,operation:'install',installedVersion:'',installedPackageVersion:'',disabled:false,locked:false,applySupported:true,removeSupported:false,warning:'',presenceDetail:r.id==='secureUxTheme'?'Installed MSI inventory rc=0; installed=false; candidate state=2':''}));
 receive({data:{type:'state',locale:'ru',appMode:'setup',page:'components',maintenance:true,components:absentRows}});

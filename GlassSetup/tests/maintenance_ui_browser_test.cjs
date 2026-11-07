@@ -17,6 +17,33 @@ async function cardContentSpec(page,selector){
    metaInset:Math.round(meta.getBoundingClientRect().left-card.getBoundingClientRect().left),metaPadding:m.paddingLeft,metaFont:m.fontSize};
  });
 }
+async function neededFilterParity(page,products){
+ const rows=products.map(r=>({...r,installed:true,checked:false,broken:false,operation:'repair',badgeTone:'repair',warning:'Warning only',applySupported:false,disabled:false,locked:false}));
+ const seed=async()=>page.evaluate(components=>window.__receive({data:{type:'state',locale:'ru',appMode:'setup',page:'components',components}}),rows);
+ const view=async(shelf,mode)=>page.locator(`[data-shelf="${shelf}"] [data-view="${mode}"]`).click();
+ await seed();
+ for(const shelf of ['available','installed']){
+  const grid=page.locator(shelf==='available'?'#components-grid':'#components-installed-grid');
+  await view(shelf,'all');assert.equal(await grid.locator('.c-card:visible').count(),6);
+  if(shelf==='available')assert.equal(await grid.locator('.c-card.active').count(),0);
+  await view(shelf,'needed');assert.equal(await grid.locator('.c-card:visible').count(),0);
+ }
+ rows[0]={...rows[0],installed:false,applySupported:true,disabled:true,operation:'install'};
+ rows[1]={...rows[1],installed:false,applySupported:true,locked:true,operation:'install'};
+ rows[2]={...rows[2],applySupported:true,operation:'update',targetVersion:'2.0.0'};
+ rows[3]={...rows[3],installed:false,applySupported:true,checked:true,operation:'install'};
+ rows[4]={...rows[4],applySupported:true,broken:true};
+ rows[5]={...rows[5],broken:true};
+ await seed();
+ const ids=selector=>page.locator(selector+' .c-card:visible').evaluateAll(cards=>cards.map(c=>c.dataset.product));
+ assert.deepEqual(await ids('#components-grid'),['settings64','openglass']);
+ assert.deepEqual(await ids('#components-installed-grid'),['settings64','settings32','openglass']);
+ // Filter changes are view-only, not native install/remove requests.
+ const before=await page.evaluate(()=>window.__messages.length);
+ for(const shelf of ['available','installed'])await view(shelf,'all');
+ assert.equal(await page.evaluate(()=>window.__messages.length),before);
+ console.log('PASS: both Needed filters: zero actionable offers means empty; no warning-tone false damage, disabled/locked/unsupported offers; update/repair and pending install retained; no filter IPC.');
+}
 async function freshInstallReturn(page,products,out){
  const fresh=products.map(r=>({...r,installed:false,installedVersion:'',installedPackageVersion:'',operation:'install',badgeTone:'install',checked:r.id!=='secureUxTheme',locked:false,disabled:false,warning:''}));
  await page.evaluate(components=>window.__receive({data:{type:'state',locale:'ru',appMode:'setup',maintenance:false,page:'components',components}}),fresh);
@@ -273,6 +300,7 @@ async function workspaceGestures(page,products,out){
   const out=process.env.GLASS_UI_SCREENSHOT_DIR;
   await page.evaluate(()=>document.activeElement.blur());
   if(out){fs.mkdirSync(out,{recursive:true});await page.locator('#stage').screenshot({path:path.join(out,'production-maintenance.png')});}
+  await neededFilterParity(page,products);
   await freshInstallReturn(page,products,out);
   await inactiveSutReturn(page,products);
   await registeredSutRemoval(page,products);

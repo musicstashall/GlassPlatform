@@ -815,3 +815,26 @@ MSI, файлы, регистрация и loaded state разделены: MSI 
 - Новая regression выполняет actual shared header + actual inspector presence projection: none/ABSENT/DEFAULT/repack/mixed/query error. Native provider test выполняет actual QueryInstallPresence: DEFAULT kept, ABSENT без контекстов отсутствует, foreign ABSENT rejected, enumeration failure/cancel/неожиданное состояние rejected. API context evidence здесь подменено, реальная Windows enumeration не проверена.
 - Production DOM и Chromium покрывают исходное состояние **все отсутствуют, все unchecked**, SUT Available/active, пустой план; реальный drag Available→Installed даёт install IPC `:1`, обратный drag отменяет `:0`, без Remove/unsupported dialog. Отдельные registered removal cases сохранены. UI discovery/IPC response — fixture, не запущенный Windows backend.
 - После изменений: **54 PASS / 11 прежних FAIL / 65 Python scripts**, DOM PASS, Chromium PASS, resource smoke PASS, diff-check PASS. Имена прежних 11 failures не изменились. Windows/MSVC/WiX/WebView runtime не выполнены; общий mixed Remove, rollback/recovery и standalone original SUT Unins этим не завершены. Платформа не запускалась/не останавливалась.
+
+
+## Фильтры «нужно» и vendor row execution plan (2026-11-07)
+
+**Уточнение пользователя:** SecureUxTheme действительно был установлен на его ПК. Его расположение в Installed корректно; больше не трактуем этот случай как files-only ошибку и не скрываем действующую регистрацию. Правила DEFAULT/ABSENT и MSI diagnostics сохраняются.
+
+### Production UI
+
+- Найдена отдельная фактическая CSS-ошибка: author `display:flex` у карточек перекрывал UA `[hidden]`. JS менял hidden/count, но браузер продолжал рисовать карточки. Scoped `.c-card[hidden] {display:none!important}` теперь исключает их и из layout, и из keyboard navigation.
+- Available/needed = активные исполнимые предложения: не выбранные install/update/repair, либо отмена поддержанного pending Remove. Disabled/locked/applySupported=false не создают активное install/update/repair предложение. Pending Install остаётся только в Installed/needed, его catalogue alias idle и не проходит Available/needed.
+- Installed/needed = запланированные действия и доступные update/repair по фактам продукта. В direct Unins фильтр показывает выбранное удаление. Healthy/kept и warning-only не проходят. `badgeTone=repair` больше не является доказательством повреждения: используем явный native `broken`.
+- Production DOM и Chromium проверяют отсутствие видимых карточек при нуле активных предложений, disabled/locked/unsupported, warning-only, update/repair, pending install, сохранение All и отсутствие IPC при переключении фильтров. Chromium проверяет реальную видимость, а не только hidden attribute. Старые drag/pins/panels/geometry/content/removal tests сохранены.
+
+### Нативный execution plan
+
+- SUT больше не отсутствует в discovery→Build adapter: его Keep/Install/Remove представлен строкой в общем плане. Install допускается только при подтверждённом отсутствии installed original/repack и проверенной identity подготовленного MSI. Изменение регистрации не превращает выбранный Install в молчаливый Keep или Repair.
+- Поддержанный оригинальный Remove повторно проверяет singleton inspected ProductCode, точный captured consent code, готовый baseline, strictly Inactive и RecheckRemoval **до остановки хостов/изменений Glass**. Противоречивые intents блокируются.
+- Финальные vendor entry points требуют ready/valid план и точное действие своей строки. Install дополнительно повторно проверяет ProductCode/ProductVersion источника перед MSI; появившаяся после Build регистрация приводит к безопасному отказу, не к неявному upgrade/repair.
+- Vendor row исключается из копии плана для обычной Glass Products-фазы: оригинальный MSI по-прежнему выполняется отдельно последней fallible транзакцией. Общий scheduler/порядок managed удаления в Unins не менялись. Это НЕ реализация общего mixed Remove/общего rollback vendor MSI.
+- CheckLegacyRepackAbsent теперь проверяет контексты обоих старых Glass ProductCodes, прежде чем трактовать отсутствие DEFAULT как отсутствие препятствия. Чужой ABSENT repack не разрешает установку поверх его ресурсов. Автоматическая миграция/удаление чужого MSI не добавлялись.
+- Actual-source tests расширены: 19 Build cases vendor install/remove с отказами identity/presence/context/activity/consent/baseline; финальный Install с проверками plan authority, changed MSI/source identity, success/failure/reboot; final Remove с invalid/missing/wrong-action plan; actual legacy context guard. Windows APIs здесь fake, не реальная проверка ACL/contexts/installer transactions.
+
+Проверки после изменений: **54 PASS / те же 11 FAIL / 65 Python scripts**, production DOM PASS, Chromium PASS, resources PASS, git diff-check PASS. Windows/MSVC/WiX не запускались, платформа не запускалась/не останавливалась. Общие mixed Install/Update/Repair/Remove, shared rollback/recovery, original SUT standalone Unins, durable Current-only publication, self-renewal handoff и Windows acceptance остаются незавершёнными.
