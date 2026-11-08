@@ -79,10 +79,6 @@ constexpr UINT kSetupDownloadStarted = WM_APP + 8;
 constexpr UINT kRuntimeStatus = WM_APP + 3, kRuntimeComplete = WM_APP + 4;
 constexpr UINT kBeginStartup = WM_APP + 5, kStartupComplete = WM_APP + 6, kInspectReady = WM_APP + 7;
 constexpr ULONGLONG kFadeDuration = 280;
-#ifndef GLASS_EMBED_MSI
-constexpr ULONGLONG kDuration = 30000;
-constexpr ULONGLONG kSimulatedRollbackDuration = 5000;
-#endif
 constexpr COLORREF kDark = RGB(16,18,37), kLicensePanel = RGB(27,29,52);
 constexpr COLORREF kFooterTop = RGB(26,27,50), kFooterBottom = RGB(17,18,35);
 constexpr COLORREF kButtonBase = RGB(24,25,47);
@@ -1270,7 +1266,6 @@ private:
     RECT webBounds_{};
     bool haveWebBounds_ = false;
     HRESULT webError_ = S_OK;
-    ULONGLONG started_ = 0;
     int percent_ = 0, progressValue_ = 0, progressTarget_ = 0, displayProgress_ = 0;
     WizardProgress::VisibleProgress visibleProgress_;
     bool progressReverse_ = false;
@@ -1281,11 +1276,6 @@ private:
     bool rollbackFinishing_ = false;
     ULONGLONG rollbackFinishStarted_ = 0;
     int rollbackFinishFrom_ = 0;
-    bool simulateInstall_ = false;
-#ifndef GLASS_EMBED_MSI
-    bool simulateRollback_ = false;
-    ULONGLONG simulateRollbackStarted_ = 0;
-#endif
 #ifdef _DEBUG
     bool debugDemoPending_ = false, debugDemoStarted_ = false, debugDemoActive_ = false;
     size_t debugDemoStep_ = 0;
@@ -1453,10 +1443,8 @@ private:
                 if (!startupStop_.load(std::memory_order_acquire))
                     result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass);
-                if (!startupStop_.load(std::memory_order_acquire)) {
-                    GlassInstallMsi::RemoveOrphanUninstallEntry(GlassInstallMsi::kProductSecureUxThemeX64);
-                    GlassInstallMsi::RemoveOrphanUninstallEntry(GlassInstallMsi::kProductSecureUxThemeX86);
-                }
+                // Discovery is read-only: orphan ARP cleanup must not run before
+                // user consent, including during the explicit debug page tour.
                 if (!startupStop_.load(std::memory_order_acquire))
                     result.installed.secureUxTheme=Shared::SecureUxThemeInventory::IsInstalled() ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSecureUxThemeX64) ||
@@ -1694,7 +1682,7 @@ private:
     }
     [[nodiscard]] bool DebugDemoLocksControls() const noexcept {
 #ifdef _DEBUG
-        return debugDemoActive_ || (debugDemoPending_ && page_==Page::Welcome);
+        return debugDemoActive_ || debugDemoPending_;
 #else
         return false;
 #endif
@@ -1995,11 +1983,8 @@ private:
     void SyncWebViewState() {
         if (!web_ || !webReady_ || !webBridgeReady_) return;
         if (!webInitSent_) {
-#ifdef GLASS_EMBED_MSI
-            const UINT doneBodyId=IDS_DONE_BODY, doneNoteId=IDS_DONE_NOTE;
-#else
-            const UINT doneBodyId=IDS_DONE_BODY_DEMO, doneNoteId=IDS_DONE_NOTE_DEMO;
-#endif
+            const UINT doneBodyId=DebugDemoLocksControls()?IDS_DONE_BODY_DEMO:IDS_DONE_BODY;
+            const UINT doneNoteId=DebugDemoLocksControls()?IDS_DONE_NOTE_DEMO:IDS_DONE_NOTE;
             std::wstring labels=L"{\"brand\":"+JsStringLiteral(Text(IDS_BRAND))+
                 L",\"licenseTitle\":"+JsStringLiteral(Text(IDS_EULA_TITLE))+
                 L",\"licenseIntro\":"+JsStringLiteral(Text(IDS_EULA_BODY))+
@@ -2027,7 +2012,7 @@ private:
                 L",\"doneReady\":"+JsStringLiteral(Text(IDS_DONE_READY))+
                 L",\"doneWarnTag\":"+JsStringLiteral(Text(IDS_DONE_WARN_TAG))+
                 L",\"doneWarnTitle\":"+JsStringLiteral(Text(IDS_DONE_WARN_TITLE))+
-                L",\"doneWarnBody\":"+JsStringLiteral(Text(IDS_DONE_WARN_BODY))+
+                L",\"doneWarnBody\":"+JsStringLiteral(Text(DebugDemoLocksControls()?IDS_DONE_BODY_DEMO:IDS_DONE_WARN_BODY))+
                 L",\"doneWarnLabel\":"+JsStringLiteral(Text(IDS_DONE_WARN_LABEL))+
                 L",\"errorTag\":"+JsStringLiteral(Text(IDS_ERROR_TAG))+
                 L",\"errorTitle\":"+JsStringLiteral(Text(IDS_ERROR_TITLE))+
@@ -2381,9 +2366,13 @@ private:
         }
     }
     void StartInstallation() {
-        if (!accepted_ || transitioning_) return;
+        // External MSI acquisition is the normal engine path in Debug and Release.
+        // Only the explicit debug page tour is presentation-only.
+        if (!accepted_ || transitioning_ || DebugDemoLocksControls()) return;
+        if ((page_!=Page::Components && page_!=Page::Certificate) ||
+            !inspectReady_.load(std::memory_order_acquire) || !HasSelectedComponent()) return;
         if (!RunPreflightChecks()) return;
-        started_ = GetTickCount64();
+        finishWarnings_.clear();
         percent_ = 0;
         progressValue_ = 0;
         progressTarget_ = 0;
@@ -2398,15 +2387,6 @@ private:
         installStatusLine_ = Text(IDS_STATUS_EXTRACT);
         InvalidateRect(progress_, nullptr, FALSE);
         SetPage(Page::Installing);
-#ifndef GLASS_EMBED_MSI
-        simulateInstall_ = true;
-        simulateRollback_ = false;
-        simulateRollbackStarted_ = 0;
-        installStatusLine_ = Text(IDS_SIMULATION_NOTE);
-        InstallLog::Line(L"Debug build: simulated installation, platform is not stopped");
-        SetTimer(window, kInstallTimer, kInstallTimerMs, nullptr);
-        return;
-#else
         GlassInstallUtil::InstallRoots roots;
         if (!GlassInstallUtil::ResolveInstallRoots(roots)) {
             InstallLog::LineFormat(L"Install path resolution failed (error %lu)",GetLastError());
@@ -2489,9 +2469,16 @@ private:
         labels.nativeScanFailed = Text(IDS_ERR_NATIVE_SCAN);
         labels.snapshotFailed = Text(IDS_ERR_SNAPSHOT);
         labels.diskFull = Text(IDS_MSI_DISK_FULL);
-        installEngine_.Start(gInstance, x64Dir, x86Dir, ogDir, selection_, openGlassStartup_, false, std::move(labels), nullptr, secureUxRemovalCode_);
-        SetTimer(window, kInstallTimer, kInstallTimerMs, nullptr);
-#endif
+        // Never launch real work without the GUI poll/error/cancellation loop.
+        if(!SetTimer(window,kInstallTimer,kInstallTimerMs,nullptr)) {
+            InstallLog::LineFormat(L"Could not create GUI polling timer; engine was not started (error %lu)",GetLastError());
+            ShowInstallError(Text(IDS_ERR_INSTALL_FAILED));
+            return;
+        }
+        if(!installEngine_.Start(gInstance,x64Dir,x86Dir,ogDir,selection_,openGlassStartup_,false,std::move(labels),nullptr,secureUxRemovalCode_)) {
+            ShowFailurePage(true);
+            return;
+        }
     }
     bool RunPreflightChecks() {
         conflicts_=DetectConflictingApps();
@@ -2661,7 +2648,7 @@ private:
         SendMessageW(accept_,BM_SETCHECK,BST_UNCHECKED,0);
 
 
-        simulateInstall_=false;
+        webInitSent_=false;
         InstallLog::Line(L"Debug page tour started; no update or installation actions will run");
         SetPage(Page::Welcome);
         SetTimer(window,kDebugDemoTimer,kDebugDemoPageMs,nullptr);
@@ -2702,7 +2689,6 @@ private:
             selection_.trustSigner=true;
             break;
         case Page::Installing:
-            simulateInstall_=false;
             progressReverse_=false;
             progressMarquee_=false;
             rollbackFinishing_=false;
@@ -2758,9 +2744,13 @@ private:
         KillTimer(window,kDebugDemoTimer);
         debugDemoActive_=false;
         debugDemoPending_=false;
+        certQueried_=false;
+        certSigner_={};
+        selection_.trustSigner=false;
+        finishWarnings_.clear();
         accepted_=false;
         SendMessageW(accept_,BM_SETCHECK,BST_UNCHECKED,0);
-        simulateInstall_=false;
+        webInitSent_=false;
 
 
         versionInvalidNote_.clear();
@@ -2793,48 +2783,7 @@ private:
         SetDebugDemoPage(sequence[debugDemoStep_]);
     }
 #endif
-#ifndef GLASS_EMBED_MSI
-    void TickSimulation() {
-        const ULONGLONG now=GetTickCount64();
-        if (simulateRollback_) {
-            const ULONGLONG elapsed=now-simulateRollbackStarted_;
-            progressMarquee_=false;
-            progressValue_=displayProgress_=progressTarget_=WizardProgress::FadeToZero(
-                rollbackProgress_.Start(),elapsed,kSimulatedRollbackDuration);
-            percent_=WizardProgress::Percent(progressValue_);
-            if (elapsed>=kSimulatedRollbackDuration) {
-                simulateInstall_=false;
-                simulateRollback_=false;
-                cancelledDetail_=Text(IDS_SIMULATION_CANCELLED);
-                KillTimer(window,kInstallTimer);
-                SetPage(Page::Cancelled);
-                return;
-            }
-            InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter(); SyncWebViewState();
-            return;
-        }
-        // The bar is hidden on the confirmation page: retain exactly the value
-        // that was visible when the cancellation command was issued.
-        if (page_==Page::ConfirmCancel) return;
-        const ULONGLONG elapsed=now-started_;
-        if (elapsed>=kDuration-5000 && page_!=Page::Launching) {
-            launchStarted_=now;
-            installStatusLine_=Text(IDS_LAUNCH_TITLE);
-            SetPage(Page::Launching);
-        }
-        progressMarquee_=false;
-        progressValue_=elapsed>=kDuration ? 10000 : static_cast<int>(elapsed*10000/kDuration);
-        displayProgress_=progressValue_; percent_=WizardProgress::Percent(progressValue_);
-        if (elapsed>=kDuration && launchStarted_ && now-launchStarted_>=5000) {
-            simulateInstall_=false; KillTimer(window,kInstallTimer); SetPage(Page::Complete); return;
-        }
-        InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter(); SyncWebViewState();
-    }
-#endif
     void Tick() {
-#ifndef GLASS_EMBED_MSI
-        if (simulateInstall_) { TickSimulation(); return; }
-#endif
         if (installEngine_.TakeErrorPageRequest()) {
             ShowFailurePage(false);
             installEngine_.NotifyErrorPageShown();
@@ -2950,12 +2899,6 @@ private:
             (page_==Page::Error && failurePending_)) return;
         if (page_==Page::Installing || page_==Page::ModulesBusy || page_==Page::ProcessesStuck) {
             const int visibleAtRequest=visibleProgress_.PaintedOr(progressValue_);
-#ifndef GLASS_EMBED_MSI
-            if (simulateInstall_) {
-                visibleProgress_.Capture(visibleAtRequest);
-                beforeCancel_=page_; SetPage(Page::ConfirmCancel); return;
-            }
-#endif
             if (installEngine_.PauseForCancelDecision()) {
                 visibleProgress_.Capture(visibleAtRequest);
                 beforeCancel_=page_; SetPage(Page::ConfirmCancel);
@@ -3499,7 +3442,7 @@ private:
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
             DrawLabel(dc,Text(IDS_DONE_WARN_TAG),Box(48,139,400,25),small_,RGB(255,214,160));
             DrawLabel(dc,Text(IDS_DONE_WARN_TITLE),Box(48,177,440,104),title_,white);
-            DrawLabel(dc,Text(IDS_DONE_WARN_BODY),Box(48,286,440,66),font_,muted);
+            DrawLabel(dc,Text(DebugDemoLocksControls()?IDS_DONE_BODY_DEMO:IDS_DONE_WARN_BODY),Box(48,286,440,66),font_,muted);
             DrawLabel(dc,Text(IDS_DONE_WARN_LABEL),Box(48,356,400,18),small_,RGB(255,214,160));
             int y=376;
             size_t shown=0;
@@ -3520,13 +3463,8 @@ private:
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
             DrawLabel(dc,Text(IDS_DONE_TAG),Box(48,139,400,25),small_,RGB(190,226,218));
             DrawLabel(dc,Text(IDS_DONE_TITLE),Box(48,177,440,104),title_,white);
-#ifdef GLASS_EMBED_MSI
-            DrawLabel(dc,Text(IDS_DONE_BODY),Box(48,301,390,78),font_,muted);
-            DrawLabel(dc,Text(IDS_DONE_NOTE),Box(48,474,450,52),small_,muted);
-#else
-            DrawLabel(dc,Text(IDS_DONE_BODY_DEMO),Box(48,301,390,90),font_,muted);
-            DrawLabel(dc,Text(IDS_DONE_NOTE_DEMO),Box(48,474,450,52),small_,muted);
-#endif
+            DrawLabel(dc,Text(DebugDemoLocksControls()?IDS_DONE_BODY_DEMO:IDS_DONE_BODY),Box(48,301,390,78),font_,muted);
+            DrawLabel(dc,Text(DebugDemoLocksControls()?IDS_DONE_NOTE_DEMO:IDS_DONE_NOTE),Box(48,474,450,52),small_,muted);
             DrawBrandMark(dc,48,408);
             DrawLabel(dc,Text(IDS_DONE_READY),Box(80,408,260,26),small_,RGB(205,235,225),
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
@@ -3871,16 +3809,6 @@ private:
                 if (transitioning_) return 0;
                 if (page_==Page::RuntimeRequired) { StartRuntimeInstallation(); return 0; }
                 if (page_==Page::ConfirmCancel) {
-#ifndef GLASS_EMBED_MSI
-                    if (simulateInstall_) {
-                        simulateRollback_=true;
-                        simulateRollbackStarted_=GetTickCount64();
-                        BeginRollbackVisual(simulateRollbackStarted_);
-                        installStatusLine_=Text(IDS_SIMULATION_ROLLBACK);
-                        ShowCancelling();
-                        return 0;
-                    }
-#endif
                     installEngine_.RequestCancel();
                     if (installEngine_.IsCancelRequested()) {
                         BeginRollbackVisual(GetTickCount64());
