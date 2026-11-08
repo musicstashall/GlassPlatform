@@ -3,11 +3,28 @@
 
 // Shared, platform-neutral component policy. An install selection names the
 // products to install or update. An unchecked installed product is kept. Explicit
-// managed removal has independent row intents; the original inactive vendor MSI
+// managed removal has independent row intents; the original unloaded vendor MSI
 // retains its separate commit-last protocol.
 // All products are independently selectable; warnings do not imply a removal
 // cascade. SecureUxTheme without Settings requires explicit interactive consent.
 namespace GlassProducts {
+// ActivationPending means registration exists but the native loaded event is
+// absent. It is not an obstacle to cancelling that installation via vendor MSI.
+template<class State> constexpr bool SecureUxUnloadedRemoval(State state) noexcept {
+    return state==State::Inactive || state==State::ActivationPending;
+}
+// The author's MSI schedules reboot unconditionally. Refine its advisory 3010
+// only with a verified post-operation runtime state; unknown states retain it.
+template<class State> constexpr bool SecureUxRestartAfter(bool installing,State state,bool vendorRestart) noexcept {
+    if(installing) {
+        if(state==State::Active)return false;
+        if(state==State::ActivationPending)return true;
+    }else {
+        if(state==State::Inactive || state==State::Unavailable)return false;
+        if(state==State::Active || state==State::DeactivationPending)return true;
+    }
+    return vendorRestart;
+}
 struct Selection {
     bool platform64 = true;
     bool platform32 = true;
@@ -45,7 +62,7 @@ constexpr bool OnlyManagedRemoval(const Selection& choice) noexcept {
         !choice.glassSettings && !choice.settings64 && !choice.settings32;
 }
 
-// Removing an already inactive vendor MSI does not modify any Glass product.
+// Removing an unloaded vendor MSI does not modify any Glass product.
 constexpr bool OnlySecureUxThemeRemoval(const Selection& choice) noexcept {
     return !choice.removeMask && choice.secureUxThemeRemove && !choice.secureUxTheme &&
         !choice.platform64 && !choice.platform32 && !choice.openGlass &&

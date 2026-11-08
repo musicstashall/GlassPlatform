@@ -57,7 +57,7 @@ bool Identity(const std::wstring& path,std::wstring& code,std::wstring& version)
 }
 }
 namespace GlassInstallUtil {
- enum class SecureUxThemeState {Conflict,Inactive,Active};
+ enum class SecureUxThemeState {Conflict,Inactive,Active,ActivationPending};
  SecureUxThemeState state=SecureUxThemeState::Inactive;bool query=true;
  bool QuerySecureUxThemeState(const std::wstring&,const std::wstring&,SecureUxThemeState* out,std::wstring*){*out=state;return query;}
 }
@@ -164,7 +164,12 @@ int main(){
   assert(e.BuildExecutionPlan()==(n==0));assert(e.executionPlanReady_==(n==0));
   if(n==0)assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Install&&e.executionPlan_.actionCount==1);
  }
- // Exact captured original MSI + prepared baseline + inactive helper are required.
+ {InstallEngine e;Reset(e);e.selection_.secureUxThemeRemove=true;e.secureUxRemoval_.ready=true;
+  auto& r=GlassProductInspect::observation;r.secureUxTheme.installed=true;r.officialSecureUxThemeCode=L"vendor";
+  GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::ActivationPending;
+  assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Remove);
+ }
+ // Exact original MSI + baseline + unloaded hook are required.
  for(int n=0;n<9;++n){
   InstallEngine e;Reset(e);e.selection_.secureUxThemeRemove=true;e.secureUxRemoval_.ready=true;
   auto& r=GlassProductInspect::observation;r.secureUxTheme.installed=true;r.officialSecureUxThemeCode=L"vendor";

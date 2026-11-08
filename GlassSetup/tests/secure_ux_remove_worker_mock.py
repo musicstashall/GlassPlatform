@@ -38,6 +38,8 @@ namespace InstallLog {
 namespace GlassInstallUtil {
  enum class SecureUxThemeState {Unavailable,Inactive,Active,ActivationPending,DeactivationPending,External,Conflict};
  SecureUxThemeState state=SecureUxThemeState::Inactive;bool query=true;
+ bool pending=false,pendingKnown=true,overrideAfter=false;SecureUxThemeState after=SecureUxThemeState::Inactive;
+ bool QueryPendingFileOperations(bool& out){out=pending;return pendingKnown;}
  bool QuerySecureUxThemeState(const std::wstring&,const std::wstring&,SecureUxThemeState* out,std::wstring*){*out=state;return query;}
 }
 namespace GlassSecureUxPackage {
@@ -61,9 +63,9 @@ namespace GlassInstallMsi {
   std::function<void(const std::wstring&,int)> onProgress;};
  UINT result=0;int uninstalls=0,installs=0;
  bool MsiSuccess(UINT code){return code==0||code==3010||code==1641;}
- UINT InstallProduct(const std::wstring&,const std::wstring& properties,ProgressSink* sink){assert(properties==L"REBOOT=ReallySuppress"&&sink->cancelRequested==nullptr);++installs;return result;}
+ UINT InstallProduct(const std::wstring&,const std::wstring& properties,ProgressSink* sink){assert(properties==L"REBOOT=ReallySuppress"&&sink->cancelRequested==nullptr);++installs;if(GlassInstallUtil::overrideAfter)GlassInstallUtil::state=GlassInstallUtil::after;return result;}
  bool UninstallProduct(const wchar_t* code,ProgressSink* sink,UINT* out){
-  assert(std::wstring(code)==L"official"&&sink->cancelRequested==nullptr);++uninstalls;*out=result;
+  assert(std::wstring(code)==L"official"&&sink->cancelRequested==nullptr);++uninstalls;*out=result;if(GlassInstallUtil::overrideAfter)GlassInstallUtil::state=GlassInstallUtil::after;
   return result==0||result==3010||result==1641;
  }
 }
@@ -83,12 +85,41 @@ struct InstallEngine {
  bool PrepareSecureUxRemoval() noexcept;bool RemoveOriginalSecureUxTheme() noexcept;bool InstallOriginalSecureUxTheme() noexcept;
 };
 // METHODS
-void Reset(){GlassInstallMsi::arpRefreshOk=true;GlassSecureUxPackage::presenceSafe=GlassSecureUxPackage::legacyAbsent=true;GlassSecureUxPackage::installed.clear();
+void Reset(){GlassInstallUtil::overrideAfter=false;GlassInstallUtil::pending=false;GlassInstallUtil::pendingKnown=true;GlassInstallMsi::arpRefreshOk=true;GlassSecureUxPackage::presenceSafe=GlassSecureUxPackage::legacyAbsent=true;GlassSecureUxPackage::installed.clear();
  GlassMaintenanceCache::valid=true;GlassMaintenanceCache::code=L"official";GlassMaintenanceCache::version=L"4.0.0";
  GlassInstallMsi::installs=0;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Inactive;GlassInstallUtil::query=true;
  GlassSecureUxPackage::prepare=GlassSecureUxPackage::recheck=true;
  GlassSecureUxPackage::prepares=GlassSecureUxPackage::rechecks=0;GlassInstallMsi::uninstalls=0;GlassInstallMsi::result=0;}
 int main(){
+ // Fresh registration requires restart even if MSI reports success without 3010.
+ for(unsigned result:{0u,3010u}){Reset();InstallEngine e;e.selection_.secureUxThemeRemove=false;e.selection_.secureUxTheme=true;
+  e.executionPlan_.rows[GlassProductPlan::Index(GlassProductPlan::Product::SecureUxTheme)].action=GlassProductPlan::Action::Install;
+  GlassInstallUtil::overrideAfter=true;GlassInstallUtil::after=GlassInstallUtil::SecureUxThemeState::ActivationPending;GlassInstallMsi::result=result;
+  assert(e.InstallOriginalSecureUxTheme());assert(e.warnings==1);
+ }
+
+ // Install -> remove before reboot: registration disappears, hook never loaded.
+ for(unsigned result:{0u,3010u}){Reset();InstallEngine e;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::ActivationPending;
+  assert(e.PrepareSecureUxRemoval());GlassInstallUtil::overrideAfter=true;GlassInstallUtil::after=GlassInstallUtil::SecureUxThemeState::Inactive;GlassInstallMsi::result=result;
+  assert(e.RemoveOriginalSecureUxTheme());assert(e.warnings==0);
+ }
+ // Reinstall while already loaded: advisory vendor reboot does not force reload.
+ for(unsigned result:{0u,3010u}){Reset();InstallEngine e;e.selection_.secureUxThemeRemove=false;e.selection_.secureUxTheme=true;
+  e.executionPlan_.rows[GlassProductPlan::Index(GlassProductPlan::Product::SecureUxTheme)].action=GlassProductPlan::Action::Install;
+  GlassInstallUtil::overrideAfter=true;GlassInstallUtil::after=GlassInstallUtil::SecureUxThemeState::Active;GlassInstallMsi::result=result;
+  assert(e.InstallOriginalSecureUxTheme());assert(e.warnings==0);
+ }
+ for(bool pendingKnown:{false,true}){Reset();InstallEngine e;assert(e.PrepareSecureUxRemoval());
+  GlassInstallMsi::result=3010;GlassInstallUtil::pendingKnown=pendingKnown;GlassInstallUtil::pending=true;
+  assert(e.RemoveOriginalSecureUxTheme());assert(e.warnings==1);
+ }
+ {Reset();InstallEngine e;assert(e.PrepareSecureUxRemoval());GlassInstallUtil::overrideAfter=true;
+  GlassInstallUtil::after=GlassInstallUtil::SecureUxThemeState::DeactivationPending;
+  assert(e.RemoveOriginalSecureUxTheme());assert(e.warnings==1);}
+
+ {Reset();InstallEngine e;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::ActivationPending;
+  assert(e.PrepareSecureUxRemoval());assert(e.RemoveOriginalSecureUxTheme());assert(GlassInstallMsi::uninstalls==1);}
+
  {Reset();InstallEngine e;assert(e.PrepareSecureUxRemoval());GlassInstallMsi::arpRefreshOk=false;
   assert(e.RemoveOriginalSecureUxTheme());assert(e.failures==0&&e.warnings==1&&GlassInstallMsi::uninstalls==1);}
  for(int n=0;n<16;++n){Reset();InstallEngine e;e.selection_.secureUxTheme=true;e.selection_.secureUxThemeRemove=false;
@@ -126,7 +157,7 @@ int main(){
   assert(GlassProducts::OnlySecureUxThemeRemoval(choice)==(mask==0));
  }
  {Reset();InstallEngine e;assert(e.PrepareSecureUxRemoval());assert(e.RemoveOriginalSecureUxTheme());assert(GlassInstallMsi::uninstalls==1&&e.failures==0);}
- for(int n:{0,2,3,4,5,6}){
+ for(int n:{0,2,4,5,6}){
   Reset();InstallEngine e;GlassInstallUtil::state=static_cast<GlassInstallUtil::SecureUxThemeState>(n);
   assert(!e.PrepareSecureUxRemoval());assert(!e.RemoveOriginalSecureUxTheme());assert(GlassInstallMsi::uninstalls==0);
  }
@@ -142,9 +173,9 @@ int main(){
  for(unsigned code:{0u,1603u,3010u,1641u}){
   Reset();InstallEngine e;assert(e.PrepareSecureUxRemoval());GlassInstallMsi::result=code;
   assert(e.RemoveOriginalSecureUxTheme()==(code!=1603));assert(GlassInstallMsi::uninstalls==1);
-  assert(e.failures==int(code==1603));assert(e.warnings==int(code==3010||code==1641));
+  assert(e.failures==int(code==1603));assert(e.warnings==int(code==1641));
  }
- std::cout<<"PASS: actual vendor install/removal worker: plan authority, source identity, presence changes, explicit removal, inactive-only, MSI failure/reboot; last-transaction order\n";
+ std::cout<<"PASS: actual vendor install/removal worker: plan authority, source identity, presence changes, explicit removal, unloaded-only, MSI failure/reboot; last-transaction order\n";
 }
 '''.replace('// METHODS',methods)
 compiler=shutil.which('clang++') or shutil.which('g++')

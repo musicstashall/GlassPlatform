@@ -124,7 +124,7 @@ const assert=require('node:assert/strict');
    await assertDialogLayout(true);await page.keyboard.press('Escape');
   }
   // Blocked SUT deletion explains the real prerequisite without posting Remove.
-  for(const scenario of ['sut-active','sut-pending']){
+  for(const scenario of ['sut-active','sut-unloading']){
    await page.locator('#scenario').selectOption(scenario);
    const info=ui.locator('#components-installed-grid .comp-remove.removal-info');await info.waitFor();
    assert.equal(await ui.locator('#components-remove-all').isVisible(),false);
@@ -134,6 +134,11 @@ const assert=require('node:assert/strict');
    assert.doesNotMatch(await page.locator('#messages').textContent(),/component:secureUxTheme:remove/);
    await page.keyboard.press('Escape');assert.equal(await info.evaluate(n=>n===document.activeElement),true);
   }
+  await page.locator('#scenario').selectOption('sut-pending');
+  const pendingTrash=ui.locator('#components-installed-grid .comp-remove:not(.removal-info)');await pendingTrash.waitFor();
+  assert.equal(await ui.locator('#components-remove-all').isVisible(),true);
+  await pendingTrash.click();await ui.locator('#components-plan-items li.remove').waitFor();
+  assert.match(await page.locator('#messages').textContent(),/component:secureUxTheme:remove/);
   const concept=await browser.newPage();concept.on('pageerror',error=>errors.push(error.message));
   await concept.goto(new URL('product-maintenance-concepts.html',base).href);
   assert.ok(await concept.locator('.stage-banner').first().evaluate(img=>img.complete&&img.naturalWidth>0));

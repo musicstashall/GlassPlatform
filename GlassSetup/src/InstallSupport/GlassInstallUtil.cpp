@@ -1783,6 +1783,24 @@ bool InvokeSecureUxThemeDeactivate(
     return true;
 }
 
+bool QueryPendingFileOperations(bool& pending) noexcept {
+    pending=true; // Unreadable/invalid data must not suppress an MSI reboot request.
+    try {
+        constexpr auto key=L"SYSTEM\\CurrentControlSet\\Control\\Session Manager";
+        constexpr auto value=L"PendingFileRenameOperations";
+        DWORD bytes=0;
+        LONG rc=RegGetValueW(HKEY_LOCAL_MACHINE,key,value,RRF_RT_REG_MULTI_SZ,nullptr,nullptr,&bytes);
+        if(rc==ERROR_FILE_NOT_FOUND){pending=false;return true;}
+        if(rc!=ERROR_SUCCESS || bytes<2*sizeof(wchar_t) || bytes>1024*1024 || bytes%sizeof(wchar_t))return false;
+        std::vector<wchar_t> data(bytes/sizeof(wchar_t));
+        rc=RegGetValueW(HKEY_LOCAL_MACHINE,key,value,RRF_RT_REG_MULTI_SZ,nullptr,data.data(),&bytes);
+        if(rc!=ERROR_SUCCESS || bytes<2*sizeof(wchar_t) || bytes%sizeof(wchar_t) || bytes/sizeof(wchar_t)>data.size())return false;
+        const auto count=bytes/sizeof(wchar_t);
+        if(data[count-1]!=0 || data[count-2]!=0)return false;
+        pending=std::any_of(data.begin(),data.begin()+count,[](wchar_t c){return c!=0;});return true;
+    }catch(...){return false;}
+}
+
 bool QuerySecureUxThemeState(const std::wstring& x64Dir,const std::wstring& x86Dir,
     SecureUxThemeState* state,std::wstring* failureDetail) noexcept {
     auto fail=[failureDetail](const wchar_t* detail) noexcept { if(failureDetail)try{*failureDetail=detail;}catch(...){} return false; };

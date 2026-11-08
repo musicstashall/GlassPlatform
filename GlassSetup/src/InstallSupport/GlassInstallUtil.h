@@ -175,6 +175,8 @@ bool InvokeSecureUxThemeDeactivate(
     std::wstring* failureDetail = nullptr) noexcept;
 // Query/activate through the installed Native.dll matching the OS bitness, via rundll32;
 // keeping it in GlassSettings\ lets the native callback resolve its MSI payload beside it.
+// Conservative guard before refining a vendor advisory reboot result.
+bool QueryPendingFileOperations(bool& pending) noexcept;
 bool QuerySecureUxThemeState(
     const std::wstring& x64Dir,const std::wstring& x86Dir,
     SecureUxThemeState* state,std::wstring* failureDetail=nullptr) noexcept;

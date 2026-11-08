@@ -1309,14 +1309,14 @@ bool InstallEngine::PrepareSecureUxRemoval() noexcept {
     if(IsCancelRequested())return false;
     std::wstring error;
     auto state=GlassInstallUtil::SecureUxThemeState::Conflict;
-    const bool inactive=GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error) &&
-        state==GlassInstallUtil::SecureUxThemeState::Inactive;
-    if(!selection_.secureUxTheme && inactive &&
+    const bool unloaded=GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error) &&
+        GlassProducts::SecureUxUnloadedRemoval(state);
+    if(!selection_.secureUxTheme && unloaded &&
        GlassSecureUxPackage::PrepareRemoval(tempDir_,secureUxRemovalCode_,cancelRequested_,secureUxRemoval_,error))return true;
     InstallLog::LineFormat(L"Vendor removal preflight refused: %s",error.c_str());
     if(!IsCancelRequested())SetFailure(PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?
-        L"Удаление SecureUxTheme остановлено до изменений: MSI или неактивное состояние не подтверждены.":
-        L"SecureUxTheme removal stopped before changes: its MSI or inactive state could not be verified.",ERROR_INSTALL_PACKAGE_REJECTED);
+        L"Удаление SecureUxTheme остановлено до изменений: MSI или отсутствие загруженного hook не подтверждены.":
+        L"SecureUxTheme removal stopped before changes: its MSI or unloaded hook state could not be verified.",ERROR_INSTALL_PACKAGE_REJECTED);
     return false;
 }
 
@@ -1333,7 +1333,7 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
     }
     std::wstring error;auto state=GlassInstallUtil::SecureUxThemeState::Conflict;
     if(!selection_.secureUxThemeRemove || selection_.secureUxTheme || !GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error) ||
-       state!=GlassInstallUtil::SecureUxThemeState::Inactive ||
+       !GlassProducts::SecureUxUnloadedRemoval(state) ||
        !GlassSecureUxPackage::RecheckRemoval(tempDir_,cancelRequested_,secureUxRemoval_,error)) {
         InstallLog::LineFormat(L"Vendor removal revalidation refused: %s",error.c_str());
         SetFailure(PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?
@@ -1357,10 +1357,18 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
         AddFinishWarning(ru?L"Записи обслуживания обновлены не полностью":L"Maintenance entries were not fully refreshed",
             ru?L"SecureUxTheme удалён. Не все ограничения удаления оставшихся продуктов обновлены; подробности в журнале.":
                L"SecureUxTheme was removed. Some remaining removal policies could not be refreshed; see the log.");
-    if(result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED)
+    bool restart=result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED;
+    auto after=GlassInstallUtil::SecureUxThemeState::Conflict;
+    if(GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&after,&error) && result!=ERROR_SUCCESS_REBOOT_INITIATED) {
+        const bool runtimeRestart=GlassProducts::SecureUxRestartAfter(false,after,restart);
+        bool pending=true;
+        if(runtimeRestart || !restart || (GlassInstallUtil::QueryPendingFileOperations(pending)&&!pending))restart=runtimeRestart;
+    }
+    InstallLog::LineFormat(L"SecureUxTheme after removal: state=%u; restart=%d; MSI=%u",static_cast<unsigned>(after),restart?1:0,result);
+    if(restart)
         AddFinishWarning(ru?L"SecureUxTheme: требуется перезагрузка":L"SecureUxTheme: restart required",
-            ru?L"Оригинальный MSI запросил перезагрузку. Постоянные файлы автора сохраняются.":
-               L"The vendor MSI requests a restart. Author-owned permanent files are retained.");
+            ru?L"Для завершения изменения состояния SecureUxTheme требуется перезагрузка. Постоянные файлы автора сохраняются.":
+               L"A restart is required to complete the SecureUxTheme state change. Author-owned permanent files are retained.");
     return true;
 }
 
@@ -1416,7 +1424,15 @@ bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
     }
     // Do not put the vendor ProductCode into Glass rollback's fixed-root list.
     // There are no failing/cancellable steps after this vendor transaction.
-    if (result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED)
+    bool restart=result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED;
+    auto after=GlassInstallUtil::SecureUxThemeState::Conflict;
+    if(GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&after,&error) && result!=ERROR_SUCCESS_REBOOT_INITIATED) {
+        const bool runtimeRestart=GlassProducts::SecureUxRestartAfter(true,after,restart);
+        bool pending=true;
+        if(runtimeRestart || !restart || (GlassInstallUtil::QueryPendingFileOperations(pending)&&!pending))restart=runtimeRestart;
+    }
+    InstallLog::LineFormat(L"SecureUxTheme after install: state=%u; restart=%d; MSI=%u",static_cast<unsigned>(after),restart?1:0,result);
+    if (restart)
         AddFinishWarning(ru?L"SecureUxTheme: требуется перезагрузка Windows":
                             L"SecureUxTheme: Windows restart required",
             ru?L"MSI установлен. Автоматическая перезагрузка подавлена; перезагрузите Windows самостоятельно.":
@@ -1563,9 +1579,9 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
                _wcsicmp(report.officialSecureUxThemeCode.c_str(),secureUxRemovalCode_.c_str())!=0 ||
                !secureUxRemoval_.ready ||
                !GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error) ||
-               state!=GlassInstallUtil::SecureUxThemeState::Inactive ||
+               !GlassProducts::SecureUxUnloadedRemoval(state) ||
                !GlassSecureUxPackage::RecheckRemoval(tempDir_,cancelRequested_,secureUxRemoval_,error))
-                return refuse(L"SecureUxTheme removal baseline, consent or inactive state changed");
+                return refuse(L"SecureUxTheme removal baseline, consent or unloaded state changed");
             // Authority is for this exact vendor MSI, not ownership of its files.
             sut.ownership=P::Ownership::Managed;sut.condition=P::Condition::Healthy;
             sut.activity=P::Activity::Inactive;

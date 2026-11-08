@@ -1817,11 +1817,11 @@ private:
             L"The original SecureUxTheme MSI could not be uniquely verified. Removal is blocked to protect another installation.";
         using S=GlassInstallUtil::SecureUxThemeState;
         switch(secureUxThemeState_) {
-        case S::Inactive:return nullptr;
+        case S::Inactive:case S::ActivationPending:return nullptr;
         case S::Active:return ru?
             L"SecureUxTheme активен. Безопасное удаление активного компонента в Setup пока не реализовано; изменений не выполнено.":
             L"SecureUxTheme is active. Safe removal of the active component is not yet implemented in Setup; no changes were made.";
-        case S::ActivationPending:case S::DeactivationPending:return ru?
+        case S::DeactivationPending:return ru?
             L"Изменение состояния SecureUxTheme ожидает перезагрузки. После перезагрузки требуется повторная проверка; она не гарантирует доступность удаления активного компонента.":
             L"A SecureUxTheme state change is pending restart. Inspection must run again after restarting; this does not guarantee that active-component removal will be available.";
         case S::External:return ru?

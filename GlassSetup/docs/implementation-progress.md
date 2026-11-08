@@ -1225,3 +1225,31 @@ MSI, файлы, регистрация и loaded state разделены: MSI 
   cache handoff, per-file snapshot, mixed atomicity, exact shell rollback,
   native parity, profile/unknown-root пункты остаются открыты. Windows/MSVC/WiX
   и реальные MSI/COM/reboot проверки этого этапа не выполнялись.
+
+### SecureUxTheme: distinguish pending first load from a loaded hook
+
+- Исправлено предыдущее слишком строгое Inactive-only правило: оригинальный MSI
+  разрешено удалять в Inactive **или ActivationPending**, то есть до первой загрузки
+  hook. Одинаковое условие действует в capability, Prepare, Build и непосредственно
+  перед vendor MSI. Это не снятие identity/context/baseline/conflict guards.
+- Проверены GlassSettings `ActivationRequiresRestart` / `LoadedEventPresent` и
+  native state projection. Original v4.0.0 Package.wxs задаёт безусловный
+  ScheduleReboot; один код 3010 не доказывает runtime-необходимость перезагрузки.
+- Успешные install/remove уточняют restart notice по свежему helper state: fresh
+  ActivationPending требует restart даже при MSI 0; удаление до загрузки не требует;
+  установленный и уже Active не требует новой перезагрузки. Raw MSI result логируется.
+  При unknown state сохраняется vendor request; 1641 никогда не подавляется.
+- Перед подавлением advisory 3010 read-only проверяется Session Manager
+  PendingFileRenameOperations. Наличие операций, ошибки доступа/типа/формата,
+  изменение размера/слишком большой payload сохраняют запрос. Registry не меняется.
+- Actual-source worker tests: install→remove-before-reboot, already-loaded reinstall,
+  runtime restart even with MSI 0, 3010/1641, pending file queue/unreadable guard;
+  новый actual-source registry guard test; native IPC и Build проверяют ActivationPending.
+  Chromium fixture sut-pending теперь действительно планирует Remove; loaded
+  refusal демонстрируется отдельно sut-active / sut-unloading.
+- PASS: **84 Python / 74 PASS / прежние 10 FAIL**, новых нет; три DOM и Chromium,
+  resources/diff-check. Logs: `.cache/sut-runtime-restart-final` (не Git artifact).
+- **Остаётся:** полное удаление уже загруженного Active/DeactivationPending hook
+  со style/session/reboot/rollback lifecycle и standalone migration. Модель restart
+  не является доказательством Windows integration; MSVC/WiX и VM install/remove/
+  reinstall/locked-file acceptance ещё не выполнялись. Остальной backlog не закрыт.
