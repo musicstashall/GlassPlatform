@@ -1184,3 +1184,20 @@ MSI, файлы, регистрация и loaded state разделены: MSI 
   сведений о продукте, нижний Esc/«Понятно», keyboard focus trap и возврат фокуса.
 - Production DOM, Chromium, source resources и diff-check проверяются portable;
   новой Windows/MSVC/WiX или DPI-приёмки нет.
+
+### Product dialog footer overlap and MSI diagnostic noise
+
+- Причина пересечения: глобальный `footer` слайда задавал absolute positioning
+  также footer диалога. Стиль ограничен `footer.slideshow-only`; footer диалога
+  находится в обычном flex flow. Header/footer не сжимаются, длинный body имеет
+  собственный scroll и не пересекает нижний разделитель/кнопку.
+- `presenceDetail` (MSI inventory, GUID, rc/state) больше не отображается в
+  пользовательском описании продукта. Диагностика сохраняется в исходном журнале
+  `SecureUxTheme presence`; правила detection/removal этим не изменены.
+- PASS: production DOM, actual-source presence mock, resources, Chromium geometry
+  для короткого описания и длинных product/warning dialogs RU/EN, diff-check.
+  Это не новая Windows/MSVC/WiX/DPI приёмка.
+- Уточнение backlog: удаление оригинального SUT из Setup сейчас разрешено только
+  для подтверждённого Inactive. Полное удаление Active/ActivationPending/
+  DeactivationPending с безопасным handling стиля/reboot ещё не реализовано;
+  также требуется конкретная причина недоступности удаления вместо общей подсказки.

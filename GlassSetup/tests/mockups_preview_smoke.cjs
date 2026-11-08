@@ -96,6 +96,33 @@ const assert=require('node:assert/strict');
   assert.match(await sut.locator('.comp-version-line').textContent(),/релиз 4.1.0/);assert.doesNotMatch(await sut.locator('.c-src').textContent(),/пакет/);
   await sut.locator('.comp-decision').click();await ui.locator('#components-installed-grid #product-secureUxTheme').waitFor({state:'attached'});
   assert.match(await sut.locator('.comp-version-line').textContent(),/релиз 4.1.0/);
+  // Product details and long warnings must reserve footer space, not inherit
+  // the slideshow's absolutely positioned footer (the reported Windows overlap).
+  await sut.locator('.comp-name').click();
+  const dialog=ui.locator('#components-warning-dialog');await dialog.waitFor({state:'visible'});
+  async function assertDialogLayout(scrolls){
+   const g=await dialog.evaluate(shade=>{
+    const section=shade.querySelector('section'),body=shade.querySelector('#components-warning-text'),footer=shade.querySelector('footer'),ok=shade.querySelector('#components-warning-ok');
+    const b=body.getBoundingClientRect(),f=footer.getBoundingClientRect(),s=section.getBoundingClientRect(),k=ok.getBoundingClientRect();
+    return {bodyBottom:b.bottom,footerTop:f.top,footerBottom:f.bottom,sectionBottom:s.bottom,buttonBottom:k.bottom,position:getComputedStyle(footer).position,scrolls:body.scrollHeight>body.clientHeight+1};
+   });
+   assert.equal(g.position,'static');assert.ok(g.bodyBottom<=g.footerTop+1,JSON.stringify(g));
+   assert.ok(g.footerBottom<=g.sectionBottom+1,JSON.stringify(g));assert.ok(g.buttonBottom<g.sectionBottom,JSON.stringify(g));
+   if(scrolls)assert.ok(g.scrolls,JSON.stringify(g));
+  }
+  await assertDialogLayout(false);await ui.locator('#components-warning-ok').click();
+  for(const language of ['ru','en']){
+   await ui.locator('#stage').evaluate((stage,language)=>{
+    setLocale(language);
+    showProductWarning({id:'secureUxTheme',title:'SecureUxTheme',information:true,description:'Product description. '.repeat(30),state:'Restart required',targetVersion:'4.0.0',presenceDetail:'Installed MSI inventory rc=0; {GUID} state=5',reasons:Array(15).fill('Long readable product note. '.repeat(8))},document.querySelector('#product-secureUxTheme').closest('.c-card').querySelector('.comp-name'));
+   },language);
+   await assertDialogLayout(true);
+   assert.doesNotMatch(await ui.locator('#components-warning-text').innerText(),/Installed MSI inventory|GUID/);
+   await ui.locator('#components-warning-text').evaluate(n=>{n.scrollTop=n.scrollHeight;});await assertDialogLayout(true);
+   await ui.locator('#components-warning-ok').click();
+   await ui.locator('#stage').evaluate(()=>showProductWarning({title:'Dependencies affected',planWarnings:Array(20).fill('Long warning. '.repeat(20))},document.getElementById('components-select-all')));
+   await assertDialogLayout(true);await page.keyboard.press('Escape');
+  }
   const concept=await browser.newPage();concept.on('pageerror',error=>errors.push(error.message));
   await concept.goto(new URL('product-maintenance-concepts.html',base).href);
   assert.ok(await concept.locator('.stage-banner').first().evaluate(img=>img.complete&&img.naturalWidth>0));
