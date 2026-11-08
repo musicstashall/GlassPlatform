@@ -1741,6 +1741,7 @@ private:
         return json;
     }
     static GlassProducts::ProductCondition ConditionOf(const GlassProductInspect::ProductReport* rep, bool installed) noexcept {
+        if (rep && rep->residual) return GlassProducts::ProductCondition::Damaged;
         if (!installed || !rep || !rep->installed) return GlassProducts::ProductCondition::NotInstalled;
         // Новая версия — обновление, а не переустановка: причины не смешиваются.
         if (rep->updateAvailable) return GlassProducts::ProductCondition::UpdateAvailable;
@@ -1863,6 +1864,14 @@ private:
                 // Returning a pending card to Available must remain an explicit choice.
                 reasons+=JsStringLiteral(Text(IDS_COMP_RECOMMENDED));
                 firstReason=false;
+            } else if (rep && rep->residual) {
+                reasons+=JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                    L"MSI не зарегистрирован; осталась служба или задача OpenGlass. Можно переустановить продукт или удалить проверенные остатки.":
+                    L"MSI is not registered; an OpenGlass service or task remains. Reinstall the product or remove verified remnants.");
+                if(!rep->residualSafe)reasons+=L","+JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                    L"Принадлежность остатков каталогу не подтверждена; автоматическое удаление заблокировано.":
+                    L"The remnants could not be verified against the installation directory; automatic removal is blocked.");
+                firstReason=false;
             } else if (rep) for (auto reason : rep->reasons) {
                 const UINT reasonId=InspectReasonId(reason);
                 if (!reasonId) continue;
@@ -1876,8 +1885,8 @@ private:
             reasons+=L"]";
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
                 L",\"description\":"+JsStringLiteral((desc==IDS_COMP_P64_DESC||desc==IDS_COMP_P32_DESC)?GlassProductUiPolicy::PlatformDescription(Text(desc),desc==IDS_COMP_P64_DESC,os64,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN):Text(desc))+L",\"warning\":"+JsStringLiteral(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit()))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
-                L",\"installed\":"+((rep&&rep->installed)?L"true":L"false")+
-                L",\"removeSupported\":"+((rep&&rep->installed&&!disabled&&!hidden)?L"true":L"false")+
+                L",\"installed\":"+((rep&&(rep->installed||rep->residual))?L"true":L"false")+
+                L",\"removeSupported\":"+((rep&&(rep->installed||(rep->residual&&rep->residualSafe))&&!disabled&&!hidden)?L"true":L"false")+
                 L",\"broken\":"+((rep&&rep->damaged)?L"true":L"false")+
                 L",\"installedVersion\":"+JsStringLiteral(rep?rep->installedVersion:L"")+
                 L",\"installedPackageVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
@@ -2174,6 +2183,7 @@ private:
             selection_.settings64=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings64,installedSelection_.settings64));
             selection_.settings32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings32,installedSelection_.settings32));
             selection_.SyncSettings(os64);
+            installedSelection_.openGlass=inspect_.og.installed||inspect_.og.residual;
             selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.og,installedSelection_.openGlass));
             // Original vendor repair/upgrade is not implemented; never select a
             // no-op reinstall automatically. Fresh SUT remains explicit opt-in.
@@ -2197,7 +2207,7 @@ private:
         BOOL animationsEnabled=TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
         loadingAnimationsEnabled_=animationsEnabled!=FALSE;
-        const bool nativeLoading=page_==Page::Welcome && !webReady_ && SUCCEEDED(webError_);
+        const bool nativeLoading=(page_==Page::Welcome || (maintenanceMode_ && page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_);
         if (animationsEnabled && !webReady_ &&
             (nativeLoading || page_==Page::Error || page_==Page::RuntimeInstalling))
             SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
@@ -3096,7 +3106,7 @@ private:
                 if(message==L"component:"+std::wstring(managedRow==0?L"x64":managedRow==1?L"x86":managedRow==2?L"settings64":managedRow==3?L"openglass":L"settings32")+L":remove") {
                     bool present=false;
                     {std::lock_guard<std::mutex> lock(inspectMutex_);
-                        present=managedRow==0?inspect_.x64.installed:managedRow==1?inspect_.x86.installed:managedRow==2?inspect_.settings64.installed:managedRow==3?inspect_.og.installed:inspect_.settings32.installed;}
+                        present=managedRow==0?inspect_.x64.installed:managedRow==1?inspect_.x86.installed:managedRow==2?inspect_.settings64.installed:managedRow==3?(inspect_.og.installed||(inspect_.og.residual&&inspect_.og.residualSafe)):inspect_.settings32.installed;}
                     if(inspectReady_.load(std::memory_order_acquire)&&present&&(os64||(managedRow!=0&&managedRow!=2&&managedRow!=3))) {
                         selection_.removeMask|=1u<<managedRow;
                         if(managedRow==0)selection_.platform64=false;
@@ -3527,6 +3537,12 @@ private:
         RECT content=Box(0,0,kWidth,kContentHeight);
         FillRect(dc,&content,darkBrush_);
         const COLORREF white=RGB(245,244,252), muted=RGB(163,168,191), accent=RGB(193,180,255);
+        // Do not paint a second, native Checking page while the maintenance
+        // WebView is still loading. Retain the native fallback on WebView error.
+        if (maintenanceMode_ && page_==Page::Checking && !webReady_ && SUCCEEDED(webError_)) {
+            DrawLoadingScreen(dc);
+            return;
+        }
         if (page_==Page::RuntimeRequired || page_==Page::RuntimeInstalling || page_==Page::RuntimeError || page_==Page::AlreadyRunning) {
             DrawBanner(dc,true);
             DrawBrandMark(dc,48,29);
@@ -3711,7 +3727,7 @@ private:
             DrawLabel(dc,Text(IDS_INSTALLED_VERSION_LABEL)+L": "+(installedGlassVersion_.empty()?L"—":installedGlassVersion_),Box(48,382,520,30),font_,white);
             DrawLabel(dc,Text(IDS_SETUP_VERSION_LABEL)+L": "+(setupProductVersion_.empty()?L"—":setupProductVersion_),Box(48,420,520,30),font_,white);
             DrawLabel(dc,versionInvalidNote_,Box(48,489,520,34),small_,muted);
-        } else if (page_==Page::Welcome && !webReady_ && SUCCEEDED(webError_)) {
+        } else if ((page_==Page::Welcome || (maintenanceMode_ && page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_)) {
             DrawLoadingScreen(dc);
         } else if (!webReady_ && FAILED(webError_)) {
             wchar_t code[16]{};
@@ -3830,7 +3846,7 @@ private:
         case WM_THEMECHANGED:
             EndTransition(); InvalidateRect(window,nullptr,FALSE); return 0;
         case WM_SETTINGCHANGE:
-            if (page_==Page::Welcome && !webReady_ && SUCCEEDED(webError_)) {
+            if ((page_==Page::Welcome || (maintenanceMode_ && page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_)) {
                 BOOL enabled=TRUE;
                 SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&enabled,0);
                 loadingAnimationsEnabled_=enabled!=FALSE;
@@ -4043,7 +4059,7 @@ private:
                 if (GetTickCount64()-fadeStarted_>=kFadeDuration) EndTransition();
                 else InvalidateContent();
             } else if (w==kHeroTimer && !webReady_ &&
-                       (page_==Page::Welcome || page_==Page::Error || page_==Page::RuntimeInstalling)) {
+                       (page_==Page::Welcome || (maintenanceMode_ && page_==Page::Checking) || page_==Page::Error || page_==Page::RuntimeInstalling)) {
                 if (page_==Page::RuntimeInstalling) { progressMarquee_=true; marqueePhase_=static_cast<double>(GetTickCount64()%kMarqueePeriodMs)/kMarqueePeriodMs; InvalidateRect(progress_,nullptr,FALSE); }
                 InvalidateContent();
             }

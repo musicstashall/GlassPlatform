@@ -1414,6 +1414,7 @@ bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
 bool InstallEngine::BuildExecutionPlan() noexcept {
     namespace P=GlassProductPlan;
     executionPlanReady_=false;
+    openGlassResidualRemoval_=false;
     const auto refuse=[&](const wchar_t* detail)->bool {
         InstallLog::LineFormat(L"Execution plan preflight refused: %s",detail);
         if(!IsCancelRequested()) {
@@ -1472,7 +1473,9 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
             fact.condition=!present?P::Condition::Healthy:!probe.report->integrityKnown?P::Condition::Unverifiable:
                 probe.report->damaged?P::Condition::Damaged:P::Condition::Healthy;
             if(removing) {
-                if(!present)return refuse(L"Removal target disappeared");
+                const bool residual=probe.product==P::Product::OpenGlass && !present &&
+                    probe.report->residual && probe.report->residualSafe;
+                if(!present&&!residual)return refuse(L"Removal target disappeared");
                 for(const auto* code:{probe.code,probe.legacy}) {
                     if(!code)continue;
                     std::wstring detail;
@@ -1480,6 +1483,12 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
                        (MsiQueryProductStateW(code)==INSTALLSTATE_DEFAULT && !RecheckSnapshottedProduct(code)))return refuse(L"Removal baseline or context changed");
                 }
                 if(!RecheckRelatedProducts(probe.code))return false;
+                if(residual) {
+                    // This authorizes ONLY auxiliary cleanup. No MSI presence or
+                    // rollback package is fabricated for the missing product.
+                    fact.presence=P::Presence::Installed;
+                    openGlassResidualRemoval_=true;
+                }
                 fact.condition=P::Condition::Healthy; // Snapshot authorizes MSI identity/paths, not file integrity.
                 fact.ownership=P::Ownership::Managed;
                 continue;
@@ -1633,7 +1642,19 @@ bool InstallEngine::RemoveManagedProduct(GlassProductPlan::Product product) noex
             return false;
         }
     }
-    if(!hasBaseline){SetFailure(L"No installed removal baseline",ERROR_INSTALL_PACKAGE_REJECTED);return false;}
+    if(!hasBaseline) {
+        if(product==P::Product::OpenGlass && openGlassResidualRemoval_) {
+            // Family/context/presence were rechecked above. Prepare captured
+            // service configuration and task XML before stopping hosts; Commit
+            // rechecks those exact objects and deletes the service last.
+            std::wstring detail;
+            if(GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,&cancelRequested_,
+                PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN,detail))return true;
+            if(!IsCancelRequested())SetFailure(detail,ERROR_INSTALL_PACKAGE_REJECTED);
+            return false;
+        }
+        SetFailure(L"No installed removal baseline",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+    }
     // The native helper is still installed here: all Settings removals are last.
     // Do not unregister a foreign root or bypass an unavailable helper.
     if(row==(scanNativeX64_?0u:1u)) {

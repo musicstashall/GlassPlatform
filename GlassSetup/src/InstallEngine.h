@@ -185,6 +185,7 @@ private:
     bool BuildExecutionPlan() noexcept;
     GlassProductPlan::Plan executionPlan_{};
     bool executionPlanReady_=false;
+    bool openGlassResidualRemoval_=false;
     bool RunMsiSequence() noexcept;
     bool InstallOriginalSecureUxTheme() noexcept;
     GlassSecureUxPackage::Package secureUxPackage_;

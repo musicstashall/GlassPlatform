@@ -26,6 +26,7 @@
 #include <wrl.h>
 #include <WebView2.h>
 #include "GlassMaintenanceExecutor.h"
+#include "InstallSupport/GlassMaintenanceCache.h"
 #include "InstallSupport/GlassRegisteredMsi.h"
 #include <algorithm>
 #include <array>
@@ -231,9 +232,16 @@ int RelaunchFromPrivateTemp(const Arguments& a) noexcept {
         DeleteFileW(dest.c_str()); RemoveDirectoryW(temp.c_str()); return 7;
     }
     CloseHandle(pi.hThread);
-    if (a.silent) {
-        WaitForSingleObject(pi.hProcess,INFINITE);
-        DWORD exitCode=1; GetExitCodeProcess(pi.hProcess,&exitCode);
+    // ARP must observe completion, not merely the creation of the GUI child.
+    // Only the protected maintenance-cache launcher may wait interactively:
+    // holding a product-local MSI-owned unins000.exe would prevent its removal.
+    const auto cachedLauncher=GlassMaintenanceCache::CurrentFile(L"GlassUnins.exe");
+    const bool cacheParent=!cachedLauncher.empty() &&
+        GlassInstallUtil::SameInstallPath(executable,cachedLauncher);
+    if (a.silent || cacheParent) {
+        const DWORD wait=WaitForSingleObject(pi.hProcess,INFINITE);
+        DWORD exitCode=1;
+        if (wait==WAIT_OBJECT_0) (void)GetExitCodeProcess(pi.hProcess,&exitCode);
         CloseHandle(pi.hProcess);
         DeleteFileW(dest.c_str()); RemoveDirectoryW(temp.c_str());
         return static_cast<int>(exitCode);
@@ -1131,9 +1139,20 @@ private:
             if (!remove(Msi::kProductOpenGlass,L"OpenGlass")) { restoreRemaining(); return 13; }
             removedOg=true;
             std::wstring backendError;bool serviceExists=false;DWORD serviceType=0;GlassInstallUtil::OpenGlassTaskState currentTasks;
-            if (!GlassInstallHost::QueryOpenGlassServiceStartType(serviceExists,serviceType) ||
-                !GlassInstallUtil::QueryOpenGlassTasks(currentTasks) || serviceExists!=ogServiceExisted || currentTasks.found!=ogTasks.found ||
-                !GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,nullptr,IsRu(),backendError)) {
+            const bool serviceKnown=GlassInstallHost::QueryOpenGlassServiceStartType(serviceExists,serviceType);
+            const DWORD serviceError=serviceKnown?ERROR_SUCCESS:GetLastError();
+            const bool tasksKnown=GlassInstallUtil::QueryOpenGlassTasks(currentTasks);
+            const DWORD tasksError=tasksKnown?ERROR_SUCCESS:GetLastError();
+            // A backend already removed by MSI needs no deletion. Refuse new
+            // unexpected objects, not the disappearance we are trying to achieve.
+            const bool newBackend=(!ogServiceExisted&&serviceExists)||(!ogTasks.found&&currentTasks.found);
+            const bool pathsSafe=serviceKnown && tasksKnown && !newBackend &&
+                GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,nullptr,IsRu(),backendError);
+            LogLine(L"OpenGlass post-MSI: service="+std::to_wstring(serviceExists)+
+                L" prior="+std::to_wstring(ogServiceExisted)+L" queryError="+std::to_wstring(serviceError)+
+                L" tasks="+std::to_wstring(currentTasks.found)+L" prior="+std::to_wstring(ogTasks.found)+
+                L" queryError="+std::to_wstring(tasksError)+L" pathsSafe="+std::to_wstring(pathsSafe));
+            if (!pathsSafe) {
                 SetError(T(L"OpenGlass MSI удалён, но служба или задача изменилась и не будет удалена.",
                     L"OpenGlass MSI was removed, but the service or task changed and will not be deleted."));
                 LogLine(L"OpenGlass cleanup refused: "+backendError);(void)restoreRemaining();return 17;

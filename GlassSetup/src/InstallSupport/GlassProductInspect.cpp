@@ -5,6 +5,7 @@
 #include <SecureUxThemeInventory.h>
 
 #include "GlassInstallHost.h"
+#include "GlassInstallRemoval.h"
 #include "GlassInstallMsi.h"
 #include "GlassInstallLog.h"
 #include "GlassInstallUtil.h"
@@ -490,6 +491,26 @@ Report Run(const Inputs& in)
     for(const auto& code:sutCandidates)
         report.secureUxThemePresenceDetail+=L"; "+code+L" state="+std::to_wstring(static_cast<int>(MsiQueryProductStateW(code.c_str())));
     GlassInstallLog::LineFormat(L"SecureUxTheme presence: %s",report.secureUxThemePresenceDetail.c_str());
+
+    // Probe physical backends BEFORE the all-MSI-absent return. Keep registration
+    // and residual evidence separate: a residual has no installed MSI baseline.
+    if (in.os64 && !report.og.installed) {
+        bool serviceExists=false;DWORD startType=SERVICE_AUTO_START;
+        const bool serviceKnown=GlassInstallHost::QueryOpenGlassServiceStartType(serviceExists,startType);
+        const DWORD serviceError=serviceKnown?ERROR_SUCCESS:GetLastError();
+        GlassInstallUtil::OpenGlassTaskState tasks;
+        const bool tasksKnown=GlassInstallUtil::QueryOpenGlassTasks(tasks);
+        report.og.residual=serviceExists || tasks.found;
+        if (report.og.residual) {
+            report.og.damaged=true;
+            GlassInstallUtil::InstallRoots residualRoots{};std::wstring detail;
+            report.og.residualSafe=serviceKnown && tasksKnown &&
+                GlassInstallUtil::ResolveInstallRoots(residualRoots) &&
+                GlassInstallRemoval::ValidateOpenGlassPaths(residualRoots.openGlass,in.cancelled,false,detail);
+            GlassInstallLog::LineFormat(L"OpenGlass residual: service=%d tasks=%d serviceError=%lu safe=%d detail=%s",
+                serviceExists?1:0,tasks.found?1:0,serviceError,report.og.residualSafe?1:0,detail.c_str());
+        }
+    }
 
     if (!report.x64.installed && !report.x86.installed && !report.settings.installed &&
         !report.secureUxTheme.installed && !report.og.installed)

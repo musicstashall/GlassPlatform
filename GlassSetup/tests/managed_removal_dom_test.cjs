@@ -19,6 +19,21 @@ for(const row of rows){
  assert.equal(card.querySelector('.comp-decision').dataset.componentAction,'restore');
  card.querySelector('.comp-decision').click();assert.equal(messages.at(-1),'component:'+row.id+':0');
 }
+// Residual entity: Installed + damaged, not a fresh dashed installation.
+for(const checked of [false,true]){
+ const residual={...rows.at(-1),checked,broken:true,installedVersion:'',targetVersion:'2.0.0'};
+ send([residual]);const input=d.querySelector('#product-openglass'),card=input.closest('.c-card');
+ assert.ok(d.querySelector('#components-installed-grid').contains(card));
+ assert.equal(card.classList.contains('pending-install'),false);
+ if(!checked)assert.ok(card.classList.contains('is-broken'));
+ const drop=dom.window.eval('componentDropValue')({id:'openglass',input,source:'installed'},'available');
+ assert.equal(drop,'remove');
+ dom.window.eval('commitComponentRemoval')(input);
+ assert.equal(messages.at(-1),'component:openglass:remove');
+}
+// Fresh planned installation still returns to Available as deselection.
+send([{...rows[0],installed:false,checked:true}]);
+assert.equal(dom.window.eval('componentDropValue')({id:'x64',input:d.querySelector('#product-x64'),source:'installed'},'available'),false);
 send(rows.map(x=>({...x,removeSupported:false})));assert.equal(d.querySelectorAll('.comp-remove').length,0);
 assert.deepEqual(errors.map(x=>x.message),[]);dom.window.close();
 process.stdout.write('PASS: five installed Glass cards: explicit removal IPC, host echo/plan, undo-to-Keep, capability refusal\n');

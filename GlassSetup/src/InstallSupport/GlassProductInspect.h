@@ -23,7 +23,9 @@ enum class Reason {
 };
 
 struct ProductReport {
-    bool installed = false;
+    bool installed = false; // MSI registration only; never inferred from a service.
+    bool residual = false; // Physical OpenGlass service/tasks without a registered MSI.
+    bool residualSafe = false; // Read-only root/action/account validation succeeded.
     bool updateAvailable = false;
     bool damaged = false;
     bool sourceVerified = false;

@@ -7,7 +7,7 @@ root=Path(__file__).resolve().parents[2]
 base=runpy.run_path(str(root/'GlassSetup/tests/secure_ux_inventory_mock.py'))['harness']
 base=base[:base.index('int main(){')]
 source=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
-projection=source[source.index('    struct ProductInputs'):source.index('    if (!report.x64.installed && !report.x86.installed && !report.settings.installed &&')]
+projection=source[source.index('    struct ProductInputs'):source.index('    // Probe physical backends BEFORE')]
 header=(root/'GlassSetup/src/InstallSupport/GlassInstallMsi.h').read_text()
 codes='\n'.join(re.findall(r'inline constexpr wchar_t k(?:Product|Legacy)\w+\[\]\s*=\s*L"[^"\n]+";',header))
 assert codes

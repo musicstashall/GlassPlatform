@@ -425,7 +425,10 @@ bool RemoveOpenGlassServiceAndTasks(bool removeTasks) noexcept {
     const SC_HANDLE svc=OpenServiceW(scm,L"OpenGlassHost",SERVICE_STOP|SERVICE_QUERY_STATUS|DELETE);
     const DWORD openError=svc?ERROR_SUCCESS:GetLastError();
     CloseServiceHandle(scm);
-    if (!svc) return ok && (openError==ERROR_SERVICE_DOES_NOT_EXIST || openError==ERROR_SERVICE_MARKED_FOR_DELETE);
+    if (!svc) {
+        GlassInstallLog::LineFormat(L"OpenGlass cleanup: OpenService error=%lu",openError);
+        return ok && (openError==ERROR_SERVICE_DOES_NOT_EXIST || openError==ERROR_SERVICE_MARKED_FOR_DELETE);
+    }
     SERVICE_STATUS status{};
     ControlService(svc,SERVICE_CONTROL_STOP,&status);
     const ULONGLONG start=GetTickCount64();
@@ -440,6 +443,7 @@ bool RemoveOpenGlassServiceAndTasks(bool removeTasks) noexcept {
         const DWORD error=GetLastError();
         if (error!=ERROR_SERVICE_MARKED_FOR_DELETE) { GlassInstallLog::LineFormat(L"HostStop: DeleteService failed %lu",error); ok=false; }
     }
+    else GlassInstallLog::Line(L"OpenGlass cleanup: DeleteService accepted; final deletion waits for other open service handles");
     CloseServiceHandle(svc);
     return ok;
 }

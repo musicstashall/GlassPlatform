@@ -27,7 +27,7 @@ constexpr int INSTALLSTATE_DEFAULT=5,INSTALLSTATE_UNKNOWN=-1,INSTALLSTATE_ADVERT
 unsigned GetUserDefaultUILanguage(){return 0;}
 namespace InstallLog {template<class... Args>void LineFormat(const wchar_t*,Args...) {}}
 namespace GlassProductInspect {
-struct ProductReport {bool installed=false,integrityKnown=false,damaged=false;};
+struct ProductReport {bool installed=false,integrityKnown=false,damaged=false,residual=false,residualSafe=false;};
 struct Report {bool ran=true;ProductReport x64,x86,settings64,settings32,og,secureUxTheme;std::wstring officialSecureUxThemeCode;};
 struct Inputs {bool os64=false,inspectSources=true;const std::atomic_bool* cancelled=nullptr;};
 Report observation;
@@ -71,7 +71,7 @@ namespace GlassSecureUxPackage {
 }
 struct Old {std::wstring productCode,cachedMsiPath;};
 struct InstallEngine {
- GlassProductPlan::Plan executionPlan_{};bool executionPlanReady_=true,scanNativeX64_=true,cancelled=false,forceClean_=false;
+ GlassProductPlan::Plan executionPlan_{};bool executionPlanReady_=true,openGlassResidualRemoval_=false,scanNativeX64_=true,cancelled=false,forceClean_=false;
  std::atomic_bool cancelRequested_{false};GlassProducts::Selection selection_{};
  GlassSecureUxPackage::Package secureUxPackage_;
  GlassSecureUxPackage::Removal secureUxRemoval_;
@@ -198,6 +198,21 @@ int main(){
   GlassProductInspect::observation.settings64.installed=true;GlassProductInspect::observation.x64.installed=true;
   assert(!e.BuildExecutionPlan());e.selection_.confirmedSettingsRemovalRisk=2;assert(!e.BuildExecutionPlan());
   e.selection_.confirmedSettingsRemovalRisk=1;assert(e.BuildExecutionPlan());}
+ // A residual authorizes auxiliary-only Remove, never a fabricated MSI baseline.
+ for(bool safe:{false,true}){InstallEngine e;Reset(e);e.selection_.removeMask=8;
+  auto& og=GlassProductInspect::observation.og;og.residual=true;og.residualSafe=safe;
+  GlassMaintenanceCache::media.clear();assert(e.BuildExecutionPlan()==safe);
+  assert(e.openGlassResidualRemoval_==safe);if(safe)assert(e.executionPlan_.rows[Index(Product::OpenGlass)].action==Action::Remove);
+  assert(e.rollbackSession_.oldProducts.empty());}
+ {InstallEngine e;Reset(e);e.selection_.openGlass=true;
+  auto& og=GlassProductInspect::observation.og;og.residual=true;og.residualSafe=true;og.damaged=true;
+  assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[Index(Product::OpenGlass)].action==Action::Install);
+  assert(!e.openGlassResidualRemoval_);}
+ {InstallEngine e;Reset(e);e.selection_.removeMask=8;auto& og=GlassProductInspect::observation.og;
+  og.residual=og.residualSafe=true;assert(e.BuildExecutionPlan());og.residualSafe=false;
+  assert(!e.BuildExecutionPlan());assert(!e.openGlassResidualRemoval_);}
+ {InstallEngine e;Reset(e);e.selection_.removeMask=8;auto& og=GlassProductInspect::observation.og;
+  og.residual=og.residualSafe=true;GlassInstallMsi::unsafe=L"og";assert(!e.BuildExecutionPlan());}
  std::cout<<"PASS: actual Setup discovery/Build: install/update/repair, legacy, independent helpers, downgrade, unknown integrity, missing/wrong media, context/family/baseline/presence changes, cancellation; vendor install/remove/keep and 19 authority/revalidation cases\n";
 }
 '''.replace('// ADAPTER',adapter)

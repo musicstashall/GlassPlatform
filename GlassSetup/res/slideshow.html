@@ -939,9 +939,12 @@ function componentDropValue(drag,lane){
  if(!lane||lane===drag.source)return null;
  if(hostState.appMode==='unins')return lane==='available'?true:false;
  if(lane==='installed'){const item=(hostState.components||[]).find(item=>item.id===drag.id);return drag.input.dataset.intent==='remove'?false:item?.applySupported===false?null:true;}
- if(drag.input.checked)return drag.input.dataset.intent==='remove'?null:false;
  const item=(hostState.components||[]).find(item=>item.id===drag.id);
- return componentRemovalSupported(item)?'remove':null;
+ // An installed card moves to Available as explicit removal, even when its
+ // repair/update was selected. Only a fresh pending installation becomes Keep.
+ if(componentRemovalSupported(item))return drag.input.dataset.intent==='remove'?null:'remove';
+ if(drag.input.checked)return drag.input.dataset.intent==='remove'?null:false;
+ return null;
 }
 function componentDropText(drag,lane){
  const ru=locale==='ru',value=componentDropValue(drag,lane);
