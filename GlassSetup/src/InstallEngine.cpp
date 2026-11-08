@@ -1654,7 +1654,7 @@ bool InstallEngine::RemoveManagedProduct(GlassProductPlan::Product product) noex
         if(!GlassInstallMsi::IsProductInstalled(code))continue;
         if(!RecheckSnapshottedProduct(code))return false;
         GlassInstallRollback::NoteModified(rollbackSession_,code); // Before MSI, including its failure path.
-        const auto log=InstallLog::NextMsiVerboseLogPath(sink.label);
+        const auto log=InstallLog::NextMsiVerboseLogPath(sink.label.c_str());
         if(!log.empty())MsiEnableLogW(INSTALLLOGMODE_VERBOSE|INSTALLLOGMODE_ERROR|INSTALLLOGMODE_WARNING,log.c_str(),INSTALLLOGATTRIBUTES_FLUSHEACHLINE);
         UINT result=ERROR_SUCCESS;
         const bool removed=GlassInstallMsi::UninstallProduct(code,&sink,&result);

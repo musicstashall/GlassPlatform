@@ -55,7 +55,7 @@ namespace GlassInstallUtil{
  bool InvokeShellExtRegistration(bool registration,const std::wstring&,const std::wstring&,bool* changed,bool* conflict,std::wstring*){
  assert(!registration);s.calls.push_back(L"shell");*changed=s.shell;*conflict=s.conflict;return s.shell;
  }}
-namespace InstallLog{std::wstring NextMsiVerboseLogPath(const std::wstring&){return L"log";}
+namespace InstallLog{std::wstring NextMsiVerboseLogPath(const wchar_t*) noexcept{return L"log";}
  template<class... T>void LineFormat(const wchar_t*,T...){} }
 void MsiEnableLogW(unsigned,const wchar_t*,unsigned){}
 struct InstallEngine{
