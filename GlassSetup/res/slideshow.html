@@ -938,7 +938,7 @@ function leaveComponentEdge(name){
 function componentDropValue(drag,lane){
  if(!lane||lane===drag.source)return null;
  if(hostState.appMode==='unins')return lane==='available'?true:false;
- if(lane==='installed'){const item=(hostState.components||[]).find(item=>item.id===drag.id);return drag.input.dataset.intent==='remove'?false:item?.applySupported===false?null:true;}
+ if(lane==='installed'){const item=(hostState.components||[]).find(item=>item.id===drag.id);return drag.input.dataset.intent==='remove'?(item?.applySupported===false?false:true):item?.applySupported===false?null:true;}
  const item=(hostState.components||[]).find(item=>item.id===drag.id);
  // An installed card moves to Available as explicit removal, even when its
  // repair/update was selected. Only a fresh pending installation becomes Keep.
@@ -1079,11 +1079,12 @@ function commitComponentRemoval(input){
 }
 function commitComponentChoice(input,checked){
  const item=(hostState.components||[]).find(item=>item.id===input.dataset.component);
- if(input.disabled||hostState.componentsLoading||input.checked===checked||checked&&item?.applySupported===false)return false;
+ if(input.disabled||hostState.componentsLoading||input.checked===checked&&input.dataset.intent!=='remove'||checked&&item?.applySupported===false)return false;
  input.dataset.intent='apply';input.checked=checked;input.dispatchEvent(new Event('change',{bubbles:true}));return true;
 }
 function componentCardAction(item,input,shelf){
  const ru=locale==='ru',f=componentCardFacts(item,input),current=item.installedVersion||item.installedPackageVersion||'',target=item.targetVersion||'';
+ if(f.remove&&hostState.appMode!=='unins'&&shelf==='available'&&item.applySupported!==false)return {act:'install',value:true,label:(ru?'Установить ':'Install ')+item.title};
  if(f.remove&&hostState.appMode!=='unins')return {act:'restore',value:false,label:ru?'Оставить установленным':'Keep installed'};
  if(shelf==='available')return {act:!item.installed?'install':f.newer?'update':'repair',value:true,
   label:!item.installed?(ru?'Установить ':'Install ')+item.title:f.newer?(ru?'Обновить до ':'Update to ')+target:(ru?'Переустановить ':'Reinstall ')+current};
@@ -1102,13 +1103,13 @@ function paintComponentCard(card,item,input,shelf){
  const size=Number(item.packageSize||0);const suffix=size>0?' · '+componentSize(size):'';
  for(const cls of ['active','idle','has-newer','has-offer','is-activated','is-broken','pending-install','pending-remove'])card.classList.remove(cls);
  let chipClass='',chipText='',icon='';
-  const status=f.remove?'removal-planned':f.selected?'planned':item.installed?'installed':'available';
+  const status=f.remove?(available?'available':'removal-planned'):f.selected?'planned':item.installed?'installed':'available';
   card.dataset.catalogState=status;
   const statusText=status==='removal-planned'?(ru?'запланировано удаление':'removal planned'):status==='planned'?(ru?'действие добавлено в план':'action planned'):status==='installed'?(ru?'уже установлен, без изменений':'already installed, kept'):(ru?'доступен, не выбран':'available, not selected');
   card.setAttribute('aria-label',item.title+': '+statusText);
  if(available){
   card.classList.add(f.availableNeeded?'active':'idle');if(f.newer&&!f.selected)card.classList.add('has-newer');
-  if(f.newer){text(current);line.append(' → ');text(target,true);}else text(item.installed?current:target,f.selected);
+  if(f.newer){text(current);line.append(' → ');text(target,true);}else text(item.installed&&!f.remove?current:target,f.selected&&!f.remove);
   if(suffix)line.append(suffix);
  }else if(f.remove){
   card.classList.add('pending-remove');text(current);if(suffix)line.append(suffix);chipClass='remove';chipText=ru?'Будет удалено':'Will be removed';icon='trash';
@@ -1132,7 +1133,7 @@ function paintComponentCard(card,item,input,shelf){
  if(available){
   marks.className='c-src';
   const source=(kind,label,version)=>{if(marks.childNodes.length){const sep=document.createElement('span');sep.className='src-sep';sep.textContent='·';marks.append(sep);}const bit=document.createElement('span');bit.className='src-bit '+kind;bit.append(document.createElement('i'),document.createTextNode(label+' '+version));marks.append(bit);};
-  if(item.installed)source('local',ru?'локально':'local',current);
+  if(item.installed&&!f.remove)source('local',ru?'локально':'local',current);
   // A verified adjacent MSI isn't evidence of a release-server asset.
   if(item.remoteVersion&&item.remoteVersion===target&&(!item.installed||f.newer))source('remote',ru?'на сервере':'on server',item.remoteVersion);
   else if(!item.installed&&target)source('local',ru?'пакет':'package',target);
@@ -1162,6 +1163,15 @@ function syncComponentShelves(){
  if(componentDrag)return; // Stable host ticks must not replace the card being carried.
  const ru=locale==='ru',catalog=document.getElementById('components-grid'),installed=document.getElementById('components-installed-grid');
  for(const old of document.querySelectorAll('#components-panel [data-catalog-alias],#components-panel .c-drop'))old.remove();
+ // Place the authoritative card by planned composition, not physical MSI
+ // presence. Keep the removal intent/input alive in Available and in the plan.
+ if(hostState.appMode!=='unins')for(const card of document.querySelectorAll('#components-panel .c-card')){
+  const input=card.querySelector('input.comp-check');if(!input)continue;
+  const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);if(!item)continue;
+  const f=componentCardFacts(item,input);
+  (f.remove?catalog:item.installed||input.checked?installed:catalog).append(card);
+ }
+
  // Concept C's left shelf is the whole catalogue, not merely absent products.
  // Mirrors have no checkbox/id of their own: one authoritative intent per product.
  if(hostState.appMode!=='unins')for(const card of [...installed.querySelectorAll('.c-card')]){

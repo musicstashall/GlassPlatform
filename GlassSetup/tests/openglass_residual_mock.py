@@ -48,6 +48,11 @@ GlassProductInspect::Report Inspect(bool registered=false,bool os64=true,const s
 // CONDITION
 int main(){
  using C=GlassProducts::ProductCondition;
+ static_assert(!GlassProducts::DefaultSelectedFor(C::Damaged));
+ static_assert(!GlassProducts::DefaultSelectedFor(C::UpdateAvailable));
+ static_assert(!GlassProducts::DefaultSelectedFor(C::Healthy));
+ static_assert(GlassProducts::DefaultSelectedFor(C::NotInstalled));
+ static_assert(!GlassProducts::DefaultSelectedFor(C::NotInstalled,true));
  {s={};auto r=Inspect();assert(!r.og.installed&&!r.og.residual&&!r.og.damaged);assert(s.validations==0);}
  for(bool taskOnly:{false,true}){s={};s.service=!taskOnly;s.tasks=taskOnly;auto r=Inspect();
   assert(!r.og.installed&&r.og.residual&&r.og.damaged&&r.og.residualSafe);

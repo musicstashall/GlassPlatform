@@ -2178,13 +2178,13 @@ private:
         {
             std::lock_guard<std::mutex> lock(inspectMutex_);
             const bool os64=GlassInstallUtil::IsOs64Bit();
-            selection_.platform64=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.x64,installedSelection_.platform64));
-            selection_.platform32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.x86,installedSelection_.platform32));
-            selection_.settings64=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings64,installedSelection_.settings64));
-            selection_.settings32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings32,installedSelection_.settings32));
+            selection_.platform64=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.x64,installedSelection_.platform64),maintenanceMode_);
+            selection_.platform32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.x86,installedSelection_.platform32),maintenanceMode_);
+            selection_.settings64=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings64,installedSelection_.settings64),maintenanceMode_);
+            selection_.settings32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings32,installedSelection_.settings32),maintenanceMode_);
             selection_.SyncSettings(os64);
             installedSelection_.openGlass=inspect_.og.installed||inspect_.og.residual;
-            selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.og,installedSelection_.openGlass));
+            selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.og,installedSelection_.openGlass),maintenanceMode_);
             // Original vendor repair/upgrade is not implemented; never select a
             // no-op reinstall automatically. Fresh SUT remains explicit opt-in.
             selection_.secureUxTheme=false;

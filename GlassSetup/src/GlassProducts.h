@@ -90,10 +90,10 @@ constexpr InstallAction ActionForCondition(bool selected, ProductCondition condi
     return InstallAction::Repair; // Healthy + принудительная отметка
 }
 
-// По умолчанию сняты только неповреждённые установленные продукты;
-// повреждённые и устаревшие отмечены для переустановки/обновления.
-constexpr bool DefaultSelectedFor(ProductCondition condition) noexcept {
-    return condition != ProductCondition::Healthy;
+// Installed health is information, not consent to mutate. Repair/update must
+// be chosen explicitly; retain the existing recommendation for a fresh install.
+constexpr bool DefaultSelectedFor(ProductCondition condition, bool maintenance = false) noexcept {
+    return !maintenance && condition == ProductCondition::NotInstalled;
 }
 
 constexpr Selection NormalizeInstall(Selection choice, bool os64) noexcept {
