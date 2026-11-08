@@ -32,6 +32,7 @@ struct InstallEngine {
  bool CreateRollbackSnapshot(){return Call("snapshot");}
  bool PrepareSecureUxRemoval(){return Call("prepare-vendor");}
  bool BuildExecutionPlan(){return Call("build");}
+ bool PrepareManagedRemoval(){return !selection_.removeMask || Call("prepare-managed");}
  bool StopRunningHosts(){return Call("stop");}
  bool InstallGlassSettingsEarly(){return Call("helpers");}
  bool ReleaseLockedModules(){return Call("scan");}

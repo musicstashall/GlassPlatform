@@ -750,6 +750,8 @@ namespace
 
 // Versioned entry point: unlike the legacy GlassSettings UI API, the installer
 // must use its resolved InstallPath without searching other candidate folders.
+namespace { bool g_reportSetupRemovalNoop=false; }
+
 extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSetupV1W(
     HWND, HINSTANCE, LPWSTR cmdLine, int) noexcept
 {
@@ -795,11 +797,13 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSet
         {
             using GlassSettings::ShellSparsePackage::InstallerSparseState;
             const auto sparse=GlassSettings::ShellSparsePackage::QueryInstallerSparseState(root.c_str());
+            if(!keys && sparse==InstallerSparseState::Absent)::ExitProcess(g_reportSetupRemovalNoop?0x47504E4Fu:0u); // Preserve old export ABI.
             const bool classicOurs=keys && HasMatchingLegacyShellRegistration(root.c_str());
             if ((sparse!=InstallerSparseState::Absent && sparse!=InstallerSparseState::Matching) ||
                 (keys && !classicOurs))
                 ::ExitProcess(kConflict);
         }
+        else if(!keys)::ExitProcess(g_reportSetupRemovalNoop?0x47504E4Fu:0u);
         else if (keys && !HasMatchingLegacyShellRegistration(root.c_str()))
         {
             ::ExitProcess(kConflict);
@@ -829,6 +833,17 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSet
     }
     GlassSettings_NotifyShellCachesAfterRegistrationChange();
     ::ExitProcess(exitCode);
+}
+
+// Opt-in reporting ABI. Old Setup/Unins callers keep the old success code 0.
+extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtUnregisterReportSetupV1W(
+    HWND hwnd,HINSTANCE instance,LPWSTR cmdLine,int show) noexcept
+{
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_ShellExtUnregisterReportSetupV1W=_GlassSettings_ShellExtUnregisterReportSetupV1W@16")
+#endif
+    g_reportSetupRemovalNoop=true;
+    GlassSettings_ShellExtRegisterSetupV1W(hwnd,instance,cmdLine,show);
 }
 
 // Trusts the author certificate that signs GlassShellSparse.msix (LocalMachine\TrustedPeople) on the

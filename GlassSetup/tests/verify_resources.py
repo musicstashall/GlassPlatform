@@ -189,7 +189,9 @@ for token in ("UninstallProduct(", "removeCode", "kProductSettingsX86", "kProduc
               "ClearPlatformInstallPath(", "ClearOpenGlassInstallPath(", "PruneEmptyDirectories("):
     assert token not in sequence, token
 assert "ProductWasSnapshotted" in sequence  # legacy codes replaced by MajorUpgrade are still snapshot-checked
-assert "PrepareProductRemoval" not in engine and "removalSession_" not in engine and "remove_." not in engine
+assert "PrepareManagedRemoval" in engine and "removalSession_" in engine
+assert "GlassInstallRemoval::Commit" in engine and "GlassInstallRemoval::Restore" in engine
+assert "RemoveManagedProduct(product)" in sequence
 # Per-user defaults: seeded before the first platform start, never over existing lists, undone by rollback.
 defaults = read("src/InstallSupport/GlassUserDefaults.cpp")
 default_lists = (repo / "GlassShared/include/DefaultProcessLists.h").read_text(encoding="utf-8")
@@ -224,11 +226,12 @@ assert worker.index("CreateRollbackSnapshot()") < worker.index("StopRunningHosts
 assert worker.index("RegisterSelectedProducts()") < worker.index("LaunchSelectedProducts()")
 assert "SetFailure(" not in worker[worker.index("LaunchSelectedProducts()"):worker.index("MsiEnableLogW(")]
 assert "FinishWarningsJson()" in setup and "hostState.finishWarnings" in ui and "IDS_DONE_WARN_TAG" in rc
-assert "GlassInstallRemoval::Commit" not in worker and "GlassInstallRemoval::Restore" not in worker
+assert worker.index("PrepareManagedRemoval()") < worker.index("StopRunningHosts()")
+assert worker.index("RegisterSelectedProducts()") < worker.index("GlassInstallRemoval::Commit") < worker.index("LaunchSelectedProducts()")
 assert worker.count("undoUserDefaults();") == 4 and "UndoSeededProcessLists" in worker
 success_restore = section(engine, "bool InstallEngine::RestorePriorHosts(", "DWORD WINAPI InstallEngine::WorkerThread(")
 # On success only kept (unselected, installed) products Setup stopped are restored; selected ones are launched.
-assert "if (!keptOnly || !selection_.platform32)" in success_restore and "if (keptOnly && selection_.openGlass) return ok" in success_restore
+assert "!selection_.platform32 && !selection_.Removes(1)" in success_restore and "selection_.openGlass||selection_.Removes(3)" in success_restore
 purge = engine[engine.index("bool InstallEngine::PurgeRemnants()"):]
 assert "DeleteTree(" not in purge and "RemoveDirectoryTree(" not in purge
 warnings = section(setup, "    std::wstring ComponentWarnings()", "    std::wstring ComponentsJson()")
@@ -544,7 +547,7 @@ assert "auto plan=executionPlan_" in run_sequence
 assert "plan.rows[P::Index(P::Product::SecureUxTheme)].action=P::Action::Keep" in run_sequence
 assert "RunPhase(plan,GlassMaintenanceExecutor::Phase::Products" in run_sequence
 assert "steps[stepIndex++]" not in run_sequence
-assert "if(action==P::Action::Remove)return ERROR_INVALID_PARAMETER" in run_sequence
+assert "if(action==P::Action::Remove)return RemoveManagedProduct(product)" in run_sequence
 helper_phase=section(engine,"bool InstallEngine::InstallGlassSettingsEarly()", "bool InstallEngine::InstallOriginalSecureUxTheme()")
 assert "RunPhase(executionPlan_,GlassMaintenanceExecutor::Phase::Helpers" in helper_phase
 assert "executionPlanReady_" in helper_phase
@@ -584,7 +587,7 @@ assert "ServiceInstalled()" in og_state and "OrchestrationInstalled()" in og_sta
 
 # 2026-11-03 feedback: finish-page wording and bottom gap; stray Wow6432Node key cleanup;
 # classic menu nested with icons; OpenGlass gate removable; inspection cards (Task F 1-2).
-assert "Установка завершена с замечаниями" in rc and "Installation completed with notes" in rc
+assert "Операции завершены с замечаниями" in rc and "Operations completed with notes" in rc
 assert "--content-bottom-gap" in ui and "inset:0 0 var(--content-bottom-gap) 0" in ui
 util_cpp = (repo / "GlassSetup/src/InstallSupport/GlassInstallUtil.cpp").read_text(encoding="utf-8")
 assert "DeleteRegistryKeyIfEmpty" in util_cpp and "RemoveEmptyInstallPathKeys" in util_cpp

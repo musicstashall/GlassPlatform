@@ -8,7 +8,7 @@ import tempfile
 
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
-adapter=source[source.index('bool InstallEngine::BuildExecutionPlan() noexcept {'):source.index('bool InstallEngine::RunMsiSequence() noexcept {')]
+adapter=source[source.index('bool InstallEngine::BuildExecutionPlan() noexcept {'):source.index('bool InstallEngine::PrepareManagedRemoval() noexcept {')]
 harness=r'''
 #include "GlassProductPlan.h"
 #include "GlassProducts.h"
@@ -71,7 +71,7 @@ namespace GlassSecureUxPackage {
 }
 struct Old {std::wstring productCode,cachedMsiPath;};
 struct InstallEngine {
- GlassProductPlan::Plan executionPlan_{};bool executionPlanReady_=true,scanNativeX64_=true,cancelled=false;
+ GlassProductPlan::Plan executionPlan_{};bool executionPlanReady_=true,scanNativeX64_=true,cancelled=false,forceClean_=false;
  std::atomic_bool cancelRequested_{false};GlassProducts::Selection selection_{};
  GlassSecureUxPackage::Package secureUxPackage_;
  GlassSecureUxPackage::Removal secureUxRemoval_;
@@ -181,6 +181,23 @@ int main(){
  }
  {InstallEngine e;Reset(e);GlassProductInspect::observation.secureUxTheme.installed=true;
   assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Keep);}
+
+ // Managed removal needs no adjacent/release media, but retains exact installed authority.
+ for(auto p:{Product::Platform64,Product::Platform32,Product::Settings64,Product::Settings32,Product::OpenGlass}){
+  InstallEngine e;Reset(e);const auto row=Index(p);e.selection_.removeMask=1u<<row;
+  const wchar_t* code=row==0?L"p64":row==1?L"p32":row==2?L"s64":row==5?L"s32":L"og";
+  Installed(e,code,L"1.0.0");
+  auto& report=GlassProductInspect::observation;
+  (row==0?report.x64:row==1?report.x86:row==2?report.settings64:row==5?report.settings32:report.og).installed=true;
+  GlassMaintenanceCache::media.clear();assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[row].action==Action::Remove);
+ }
+ {InstallEngine e;Reset(e);e.selection_.removeMask=1;e.selection_.platform64=true;assert(!e.BuildExecutionPlan());}
+ {InstallEngine e;Reset(e);e.selection_.removeMask=16;assert(!e.BuildExecutionPlan());}
+ {InstallEngine e;Reset(e);e.selection_.removeMask=1;e.selection_.secureUxTheme=true;assert(!e.BuildExecutionPlan());}
+ {InstallEngine e;Reset(e);e.selection_.removeMask=4;Installed(e,L"s64",L"1.0.0");Installed(e,L"p64",L"1.0.0");
+  GlassProductInspect::observation.settings64.installed=true;GlassProductInspect::observation.x64.installed=true;
+  assert(!e.BuildExecutionPlan());e.selection_.confirmedSettingsRemovalRisk=2;assert(!e.BuildExecutionPlan());
+  e.selection_.confirmedSettingsRemovalRisk=1;assert(e.BuildExecutionPlan());}
  std::cout<<"PASS: actual Setup discovery/Build: install/update/repair, legacy, independent helpers, downgrade, unknown integrity, missing/wrong media, context/family/baseline/presence changes, cancellation; vendor install/remove/keep and 19 authority/revalidation cases\n";
 }
 '''.replace('// ADAPTER',adapter)

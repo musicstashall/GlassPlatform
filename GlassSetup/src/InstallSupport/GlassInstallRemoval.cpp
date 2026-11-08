@@ -172,7 +172,7 @@ bool WriteTextBackup(const std::wstring& path, const std::wstring& text) noexcep
 }
 
 bool CaptureTask(IRegisteredTask* task, bool platform, const std::wstring& expected,
-    Session& session, const std::wstring& workspace, bool ru, std::wstring& error) noexcept {
+    Session& session, const std::wstring& workspace, bool ru, std::wstring& error, GP::PlatformArch arch=GP::PlatformArch::X86) noexcept {
     Bstr path, xml, security;
     VARIANT_BOOL enabled = VARIANT_FALSE;
     ComPtr<ITaskDefinition> definition;
@@ -193,7 +193,7 @@ bool CaptureTask(IRegisteredTask* task, bool platform, const std::wstring& expec
             L"This task's account cannot be reliably restored without credentials. Setup stopped before making changes.", path.value);
         return false;
     }
-    if (!ExpectedAction(definition.Get(), platform, expected)) {
+    if (!ExpectedAction(definition.Get(), platform, expected,arch)) {
         error = Problem(ru,
             L"Задача с именем продукта запускает другую программу или содержит дополнительные действия. Она не будет изменена.",
             L"A task with the product's name starts another program or has additional actions. It will not be changed.", path.value);
@@ -227,7 +227,7 @@ bool CaptureTask(IRegisteredTask* task, bool platform, const std::wstring& expec
 bool ScanTasks(ITaskFolder* folder, bool x86, bool og, const std::wstring& x86Exe,
     const std::wstring& ogExe, Session& session, const std::wstring& workspace,
     const std::atomic_bool* cancel, bool ru, std::wstring& error, unsigned depth = 0,
-    bool validateOnly = false) noexcept {
+    bool validateOnly = false, const std::wstring& x64Exe={}) noexcept {
     if (Cancelled(cancel)) return false;
     if (depth > 64) {
         error = Problem(ru, L"Слишком большая вложенность папок планировщика.", L"Task Scheduler folder nesting is too deep.");
@@ -252,17 +252,18 @@ bool ScanTasks(ITaskFolder* folder, bool x86, bool og, const std::wstring& x86Ex
             error = Problem(ru, L"Не удалось прочитать задачу планировщика.", L"Could not read a scheduled task.");
             return false;
         }
-        const bool isX86 = x86 && _wcsicmp(name.value, GP::GlassAutorunTaskName(GP::PlatformArch::X86)) == 0;
+        const bool isX64 = depth==0 && !x64Exe.empty() && _wcsicmp(name.value, GP::GlassAutorunTaskName(GP::PlatformArch::X64))==0;
+        const bool isX86 = depth==0 && x86 && _wcsicmp(name.value, GP::GlassAutorunTaskName(GP::PlatformArch::X86)) == 0;
         const bool isOg = og && (_wcsicmp(name.value, L"OpenGlass Host") == 0 ||
                                 _wcsicmp(name.value, L"OpenGlass Legacy Host") == 0);
-        if (isX86 || isOg) {
+        if (isX64 || isX86 || isOg) {
             if (!validateOnly) {
-                if (!CaptureTask(task.Get(),isX86,isX86?x86Exe:ogExe,session,workspace,ru,error)) return false;
+                if (!CaptureTask(task.Get(),isX64||isX86,isX64?x64Exe:isX86?x86Exe:ogExe,session,workspace,ru,error,isX64?GP::PlatformArch::X64:GP::PlatformArch::X86)) return false;
             } else {
                 ComPtr<ITaskDefinition> definition; Bstr taskPath;
                 if (FAILED(task->get_Path(taskPath.out())) || !taskPath.value ||
                     FAILED(task->get_Definition(definition.GetAddressOf())) || !definition ||
-                    !ExpectedAction(definition.Get(),isX86,isX86?x86Exe:ogExe)) {
+                    !ExpectedAction(definition.Get(),isX64||isX86,isX64?x64Exe:isX86?x86Exe:ogExe,isX64?GP::PlatformArch::X64:GP::PlatformArch::X86)) {
                     error=Problem(ru,L"Задача запускает программу вне каталога установки или содержит неизвестные действия. Она не будет запущена.",
                         L"A task runs a program outside the installation directory or has unsupported actions. It will not be started.",
                         taskPath.value?taskPath.value:L"");
@@ -877,7 +878,7 @@ bool ValidateOpenGlassPaths(const std::wstring& fixedRoot, const std::atomic_boo
 bool Prepare(Session& session, bool removeX86, bool removeOpenGlass, bool removeSettings,
     const std::wstring& x64Dir, const std::wstring& x86Dir, const std::wstring& openGlassDir,
     const std::wstring& secureWorkspace, const std::atomic_bool* cancelled,
-    bool russian, std::wstring& error) noexcept {
+    bool russian, std::wstring& error, bool removeX64) noexcept {
     session = {}; error.clear();
     if (Cancelled(cancelled)) return false;
     if (removeSettings && !PrepareShortcut(session, secureWorkspace, x64Dir, x86Dir, russian, error)) return false;
@@ -886,7 +887,7 @@ bool Prepare(Session& session, bool removeX86, bool removeOpenGlass, bool remove
         if (!InspectService(session, true, russian, error)) return false;
         if (session.serviceExisted && !BackupServiceRegistry(secureWorkspace, russian, error)) return false;
     }
-    if (removeX86 || removeOpenGlass) {
+    if (removeX64 || removeX86 || removeOpenGlass) {
         ComGuard com; ScopedPrivilege privilege(SE_SECURITY_NAME);
         ComPtr<ITaskService> service; ComPtr<ITaskFolder> root;
         if (!com.ok() || !privilege.enabled || !Connect(service) || !GetFolder(service.Get(), L"\\", root)) {
@@ -897,7 +898,7 @@ bool Prepare(Session& session, bool removeX86, bool removeOpenGlass, bool remove
         const std::wstring x86Exe = GlassInstallUtil::TrimTrailingSlashes(x86Dir) + L"\\GlassCompat.dll";
         const std::wstring ogExe = GlassInstallUtil::TrimTrailingSlashes(openGlassDir) + L"\\OpenGlassHost.exe";
         if (!ScanTasks(root.Get(), removeX86, removeOpenGlass, x86Exe, ogExe, session,
-                secureWorkspace, cancelled, russian, error)) return false;
+                secureWorkspace, cancelled, russian, error,0,false,removeX64?GlassInstallUtil::TrimTrailingSlashes(x64Dir)+L"\\GlassCompat.dll":L"")) return false;
     }
     return !Cancelled(cancelled);
 }

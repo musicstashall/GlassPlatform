@@ -1,9 +1,10 @@
 #pragma once
+#include <cstdint>
 
 // Shared, platform-neutral component policy. An install selection names the
-// products to install or update. An unchecked installed product is kept. General
-// Glass product removal remains in Unins; Setup additionally supports an explicit
-// commit-last removal of a verified inactive original SecureUxTheme MSI.
+// products to install or update. An unchecked installed product is kept. Explicit
+// managed removal has independent row intents; the original inactive vendor MSI
+// retains its separate commit-last protocol.
 // All products are independently selectable; warnings do not imply a removal
 // cascade. SecureUxTheme without Settings requires explicit interactive consent.
 namespace GlassProducts {
@@ -16,6 +17,11 @@ struct Selection {
     bool secureUxTheme = false;
     // Explicit original-MSI removal, not an unchecked install selection.
     bool secureUxThemeRemove = false;
+    // Same row indices as GlassProductPlan::Product. SUT has its separate protocol.
+    std::uint32_t removeMask = 0;
+    unsigned confirmedSettingsRemovalRisk = 0;
+    constexpr bool Removes(unsigned row) const noexcept { return (removeMask & (1u<<row))!=0; }
+    static constexpr std::uint32_t kManagedRemovalMask = 0x2Fu;
     // Windows 11 certificate page: the user chose to add the author certificate
     // (signer of GlassShellSparse.msix) to LocalMachine\TrustedPeople so the
     // compact menu can be registered. Off when the page was not shown.
@@ -32,9 +38,16 @@ struct Selection {
     }
 };
 
+// Pure managed removal needs the installed MSI baseline, not new release media.
+constexpr bool OnlyManagedRemoval(const Selection& choice) noexcept {
+    return choice.removeMask && !choice.secureUxTheme && !choice.secureUxThemeRemove &&
+        !choice.platform64 && !choice.platform32 && !choice.openGlass &&
+        !choice.glassSettings && !choice.settings64 && !choice.settings32;
+}
+
 // Removing an already inactive vendor MSI does not modify any Glass product.
 constexpr bool OnlySecureUxThemeRemoval(const Selection& choice) noexcept {
-    return choice.secureUxThemeRemove && !choice.secureUxTheme &&
+    return !choice.removeMask && choice.secureUxThemeRemove && !choice.secureUxTheme &&
         !choice.platform64 && !choice.platform32 && !choice.openGlass &&
         !choice.glassSettings && !choice.settings64 && !choice.settings32;
 }

@@ -33,9 +33,10 @@ stages = ["CapturePriorHostState()", "ExtractPayload(", "CreateRollbackSnapshot(
           "LaunchSelectedProducts()"]
 positions = [worker.index(stage) for stage in stages]
 assert positions == sorted(positions), stages
-# Setup never removes products: no removal preparation, commit or restore in the worker.
-assert "PrepareProductRemoval" not in source and "removalSession_" not in source
-assert "GlassInstallRemoval::Commit" not in worker and "GlassInstallRemoval::Restore" not in worker
+# Removal snapshots precede stopping; irreversible service deletion is last.
+assert worker.index("PrepareManagedRemoval()") < worker.index("StopRunningHosts()")
+assert worker.index("RegisterSelectedProducts()") < worker.index("GlassInstallRemoval::Commit") < worker.index("LaunchSelectedProducts()")
+assert "GlassInstallRemoval::Restore" in function("bool InstallEngine::PerformRollback(")
 # Per-user defaults are undone by every rollback branch.
 assert worker.count("undoUserDefaults();") == 4 and "UndoSeededProcessLists" in worker
 assert worker.index("nonSettingsChangesAttempted_ = true") < worker.index("PurgeRemnants()")

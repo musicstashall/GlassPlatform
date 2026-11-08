@@ -196,6 +196,8 @@ private:
     bool RecheckRelatedProducts(const wchar_t* productCode) noexcept;
     bool StopHostsForRollback() noexcept;
     bool RemoveCreatedHostsForRollback() noexcept;
+    bool PrepareManagedRemoval() noexcept;
+    bool RemoveManagedProduct(GlassProductPlan::Product product) noexcept;
     bool RunOneMsi(const std::wstring& msiPath, const std::wstring& installDir,
         const std::wstring& label, int progressBase, int progressSpan) noexcept;
     // Phase B: autostart tasks / OpenGlass service and their validation.
@@ -216,6 +218,8 @@ private:
 
     StatusFn status_;
     GlassInstallRollback::SessionState rollbackSession_;
+    GlassInstallRemoval::Session removalSession_;
+    bool shellRemovedForMaintenance_=false;
     ComponentSelection selection_{};
     GlassProducts::OpenGlassStartupState openGlassStartup_{};
     GlassUserDefaults::SeedReport userDefaults_;

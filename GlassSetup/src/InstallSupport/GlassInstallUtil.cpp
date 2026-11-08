@@ -1617,7 +1617,10 @@ bool InvokeShellExtRegistration(
     }
     const std::wstring rundll = os64 ? NativeRundll64() : RundllPathForTaskArch(arch);
     if (rundll.empty()) return fail(L"rundll32.exe was not found");
-    std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\",GlassSettings_ShellExtRegisterSetupV1W ";
+    constexpr char reportExport[]="GlassSettings_ShellExtUnregisterReportSetupV1W";
+    const bool reportsNoop=!registerExtension && PeMatches(dll,machine,reportExport);
+    std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\","+
+        (reportsNoop?L"GlassSettings_ShellExtUnregisterReportSetupV1W ":L"GlassSettings_ShellExtRegisterSetupV1W ");
     cmd += registerExtension ? L"/register" : L"/unregister";
     cmd += L" /installroot \"" + root + L"\"";
     DWORD exitCode = 1;
@@ -1626,7 +1629,9 @@ bool InvokeShellExtRegistration(
     constexpr DWORD kShellAlreadyRegistered=0x47505245; // Verified existing registration.
     constexpr DWORD kShellRegistrationConflict=0x47504346; // Preserved, no change made.
     constexpr DWORD kShellClassicFallbackBase=0x47504C00; // Registered the classic menu; low byte = reason.
-    const bool alreadyRegistered=registerExtension && completed && exitCode==kShellAlreadyRegistered;
+    constexpr DWORD kShellNothingToUnregister=0x47504E4Fu;
+    const bool alreadyRegistered=completed && ((registerExtension && exitCode==kShellAlreadyRegistered)||
+        (!registerExtension && reportsNoop && exitCode==kShellNothingToUnregister));
     const bool conflict=completed && exitCode==kShellRegistrationConflict;
     const bool classic=registerExtension && completed && (exitCode & 0xFFFFFF00u)==kShellClassicFallbackBase;
     if (registrationMayHaveChanged) *registrationMayHaveChanged=started && !alreadyRegistered && !conflict;

@@ -7,8 +7,8 @@
 #include <vector>
 
 // Validation of managed tasks/service paths (used by Setup and GlassUnins) and
-// a reversible cleanup session for Glass product auxiliaries. General mixed
-// Glass removal is not yet wired, so Prepare/Commit/Restore have no caller.
+// a reversible cleanup session for Glass product auxiliaries in mixed Setup
+// plans. Snapshot before stopping hosts, commit last, restore on rollback.
 // Setup's original-vendor SUT removal uses a separate commit-last MSI path. The MSI/file snapshot is handled separately by
 // GlassInstallRollback. Do not use the uninstaller's unconditional
 // service/task deletion here: it cannot restore their settings.
@@ -53,7 +53,7 @@ bool ValidateOpenGlassPaths(const std::wstring& fixedRoot, const std::atomic_boo
 bool Prepare(Session& session, bool removeX86, bool removeOpenGlass, bool removeSettings,
     const std::wstring& x64Dir, const std::wstring& x86Dir, const std::wstring& openGlassDir,
     const std::wstring& secureWorkspace, const std::atomic_bool* cancelled,
-    bool russian, std::wstring& error) noexcept;
+    bool russian, std::wstring& error, bool removeX64=false) noexcept;
 
 // Called after launching/verifying selected products, with cancellation closed.
 // Deleting the service is the LAST fallible operation: DeleteService cannot

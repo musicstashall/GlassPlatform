@@ -56,5 +56,5 @@ with tempfile.TemporaryDirectory(prefix='glass-installed-native-') as d:
  subprocess.run([os.environ.get('CXX','g++'),'-std=c++17','-fsanitize=address,undefined','-fno-omit-frame-pointer',str(cpp),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)
 assert 'SignedPublisher(self,expected) && SignedPublisher(path,actual) && expected==actual' in s
-assert 'TrustedDirectory(parent)' in s and 'TrustedPath(path,false)' in s
+assert 'NativeAncestorsProtected(path,false)' in s  # Installed MSI ACL policy, not private-cache ACLs
 assert 'FILE_SHARE_READ,nullptr,OPEN_EXISTING' in s

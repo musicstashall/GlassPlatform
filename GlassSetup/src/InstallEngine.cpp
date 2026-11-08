@@ -398,11 +398,11 @@ bool InstallEngine::RestorePriorHosts(bool keptOnly) noexcept {
         } while (GetTickCount64()-start<30000);
         return false;
     };
-    if (!keptOnly || !selection_.platform64)
+    if (!keptOnly || (!selection_.platform64 && !selection_.Removes(0)))
         if (!restoreArch(GP::PlatformArch::X64,x64Dir_,prior_.x64TaskExisted,prior_.x64TaskEnabled,prior_.x64WasRunning,x64StopAttempted_)) ok=false;
-    if (!keptOnly || !selection_.platform32)
+    if (!keptOnly || (!selection_.platform32 && !selection_.Removes(1)))
         if (!restoreArch(GP::PlatformArch::X86,x86Dir_,prior_.x86TaskExisted,prior_.x86TaskEnabled,prior_.x86WasRunning,x86StopAttempted_)) ok=false;
-    if (keptOnly && selection_.openGlass) return ok; // selected OpenGlass is handled by the launch phase
+    if (keptOnly && (selection_.openGlass||selection_.Removes(3))) return ok; // selected OpenGlass is handled by the launch phase
     bool ogPathsSafe=true;
     if (((prior_.ogWasRunning && ogStopSignalled_) || ogServiceStartTypeMayNeedRestore_) &&
         (prior_.ogServiceExisted || prior_.ogLegacyTaskExisted)) {
@@ -464,6 +464,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
 
             if (ok && !self->IsCancelRequested()) ok = self->PrepareSecureUxRemoval();
             if (ok && !self->IsCancelRequested()) ok = self->BuildExecutionPlan();
+            if(ok && !self->IsCancelRequested())ok=self->PrepareManagedRemoval();
 
             if (ok && !vendorOnly && !self->IsCancelRequested()) {
                 GlassInstallUtil::CloseGlassSettingsProcesses(&self->cancelRequested_);
@@ -526,6 +527,11 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                 // The original vendor transaction is last: all rollbackable
                 // Glass registration is complete and UI cancellation is closed.
                 // Failure rolls back Glass; vendor success is the commit point.
+                if(ok && self->selection_.removeMask) {
+                    std::wstring detail;
+                    ok=GlassInstallRemoval::Commit(self->removalSession_,PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN,detail);
+                    if(!ok)self->SetFailure(detail,ERROR_INSTALL_FAILURE);
+                }
                 if (ok) ok = self->InstallOriginalSecureUxTheme();
                 if (ok) {
                     // Commit point. From here on the products are started and the
@@ -1020,6 +1026,7 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
         return false;
     }
     if(GlassProducts::OnlySecureUxThemeRemoval(selection_))return true; // Private vendor baseline only; no release IO.
+    if(GlassProducts::OnlyManagedRemoval(selection_))return true; // Installed snapshot only; no release IO.
     SetStatus(labels_.extract, 0);
     GlassPackageCatalog::Catalog catalog;
     std::wstring diagnostic;
@@ -1418,6 +1425,10 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
     };
     try {
         if(IsCancelRequested())return false;
+        if(selection_.removeMask && forceClean_)return refuse(L"Clean purge cannot accompany managed removal");
+        if(selection_.removeMask & ~GlassProducts::Selection::kManagedRemovalMask)return refuse(L"Invalid managed removal mask");
+        if(selection_.removeMask && (selection_.secureUxTheme||selection_.secureUxThemeRemove))
+            return refuse(L"Vendor transaction and managed removal require separate operations");
         GlassProductInspect::Inputs input;
         input.os64=scanNativeX64_;input.cancelled=&cancelRequested_;input.inspectSources=false;
         const auto report=GlassProductInspect::Run(input);
@@ -1440,7 +1451,10 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
             if(IsCancelRequested())return false;
             const auto i=P::Index(probe.product);auto& fact=facts[i];
             fact.supported=P::SupportedOnOs(probe.product,scanNativeX64_);
+            const bool removing=selection_.Removes(static_cast<unsigned>(i));
+            if(removing&&probe.selected)return refuse(L"Contradictory apply/remove intents");
             request.selected[i]=probe.selected;
+            if(removing)request.actions[i]=P::Action::Remove;
             bool present=false,presenceKnown=true;
             std::array<bool,2> wasInstalled{};std::size_t codeIndex=0;
             for(const auto* code:{probe.code,probe.legacy}) {
@@ -1452,11 +1466,24 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
             }
             fact.presence=!presenceKnown?P::Presence::Unknown:present?P::Presence::Installed:P::Presence::Absent;
             // Kept products do not need installation media or mutation authority.
-            if(!probe.selected)continue;
+            if(!probe.selected&&!removing)continue;
             if(!presenceKnown)return refuse(L"Ambiguous or foreign MSI registration");
             if(present!=probe.report->installed)return refuse(L"MSI presence changed during inspection");
             fact.condition=!present?P::Condition::Healthy:!probe.report->integrityKnown?P::Condition::Unverifiable:
                 probe.report->damaged?P::Condition::Damaged:P::Condition::Healthy;
+            if(removing) {
+                if(!present)return refuse(L"Removal target disappeared");
+                for(const auto* code:{probe.code,probe.legacy}) {
+                    if(!code)continue;
+                    std::wstring detail;
+                    if(GlassInstallMsi::CheckProductContexts(code,detail,&cancelRequested_)!=GlassInstallMsi::ProductPathCheck::Safe ||
+                       (MsiQueryProductStateW(code)==INSTALLSTATE_DEFAULT && !RecheckSnapshottedProduct(code)))return refuse(L"Removal baseline or context changed");
+                }
+                if(!RecheckRelatedProducts(probe.code))return false;
+                fact.condition=P::Condition::Healthy; // Snapshot authorizes MSI identity/paths, not file integrity.
+                fact.ownership=P::Ownership::Managed;
+                continue;
+            }
             std::wstring targetCode,targetVersion;
             if(!GlassMaintenanceCache::Identity(tempDir_+L"\\"+probe.file,targetCode,targetVersion) ||
                _wcsicmp(targetCode.c_str(),probe.code)!=0)return refuse(L"Prepared MSI identity does not match its row");
@@ -1495,6 +1522,10 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
             // guards above authorize only these fixed Glass product families.
             fact.source=P::Source::Verified;fact.ownership=P::Ownership::Managed;
         }
+        const unsigned settingsRisk=P::SettingsRemovalRiskMask(selection_.Removes(2),selection_.Removes(5),
+            facts[0].presence==P::Presence::Installed,facts[1].presence==P::Presence::Installed,
+            selection_.Removes(0),selection_.Removes(1));
+        if(settingsRisk & ~selection_.confirmedSettingsRemovalRisk)return refuse(L"Settings removal needs architecture-specific risk consent");
         // Represent the vendor row in the same discovered plan, but keep its
         // transaction commit-last: no Glass INSTALLDIR, rollback or file cleanup.
         const auto sutIndex=P::Index(P::Product::SecureUxTheme);
@@ -1542,6 +1573,106 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
         executionPlanReady_=true;
         return true;
     }catch(...){return refuse(L"Cannot allocate execution plan");}
+}
+
+bool InstallEngine::PrepareManagedRemoval() noexcept {
+    if(!selection_.removeMask)return true;
+    std::wstring detail;
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    const auto nativeArch=scanNativeX64_?GP::PlatformArch::X64:GP::PlatformArch::X86;
+    const bool removesNative=selection_.Removes(scanNativeX64_?0u:1u);
+    const bool preparesNative=scanNativeX64_?selection_.Settings64(true):selection_.Settings32(false);
+    if(removesNative&&!preparesNative) {
+        const auto helper=GlassInstallUtil::NativeDllForArch(nativeArch,x64Dir_,x86Dir_);
+        if(helper.empty() || !GlassInstallUtil::PeMatches(helper,scanNativeX64_?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386,GlassInstallUtil::kInstallerShellExport)) {
+            SetFailure(ru?L"Для безопасного удаления Platform нужен совместимый GlassSettings той же разрядности. Добавьте его установку или восстановление в план, затем повторите операцию.":
+                L"Safe Platform removal requires compatible GlassSettings of the same architecture. Add its installation or repair to the plan and retry.",ERROR_INSTALL_PACKAGE_REJECTED);
+            return false;
+        }
+    }
+    // Remove the shared Settings shortcut only if neither architecture survives.
+    const bool removeShortcut=(selection_.Removes(2)||selection_.Removes(5)) &&
+        !selection_.Settings64(scanNativeX64_) && !selection_.Settings32(scanNativeX64_) &&
+        (!GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64)||selection_.Removes(2)) &&
+        (!GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86)||selection_.Removes(5));
+    if(!GlassInstallRemoval::Prepare(removalSession_,selection_.Removes(1),selection_.Removes(3),removeShortcut,
+        x64Dir_,x86Dir_,openGlassDir_,rollbackSession_.workspaceDir,&cancelRequested_,ru,detail,selection_.Removes(0))) {
+        if(!IsCancelRequested())SetFailure(detail,ERROR_INSTALL_PACKAGE_REJECTED);
+        return false;
+    }
+    return true;
+}
+
+bool InstallEngine::RemoveManagedProduct(GlassProductPlan::Product product) noexcept {
+    namespace P=GlassProductPlan;
+    const unsigned row=static_cast<unsigned>(P::Index(product));
+    if(!executionPlanReady_ || !selection_.Removes(row) ||
+       executionPlan_.rows[row].action!=P::Action::Remove || IsCancelRequested())return false;
+    const wchar_t* current=nullptr;const wchar_t* legacy=nullptr;const wchar_t* title=nullptr;
+    switch(product) {
+    case P::Product::Platform64:current=GlassInstallMsi::kProductPlatformX64;legacy=GlassInstallMsi::kLegacyPlatformX64;title=L"Platform x64";break;
+    case P::Product::Platform32:current=GlassInstallMsi::kProductPlatformX86;legacy=GlassInstallMsi::kLegacyPlatformX86;title=L"Platform x86";break;
+    case P::Product::Settings64:current=GlassInstallMsi::kProductSettingsX64;title=L"GlassSettings x64";break;
+    case P::Product::Settings32:current=GlassInstallMsi::kProductSettingsX86;title=L"GlassSettings x86";break;
+    case P::Product::OpenGlass:current=GlassInstallMsi::kProductOpenGlass;legacy=GlassInstallMsi::kLegacyOpenGlass;title=L"OpenGlass";break;
+    default:return false;
+    }
+    if(!RecheckRelatedProducts(current))return false;
+    bool hasBaseline=false;
+    for(const auto* code:{current,legacy}) {
+        if(!code)continue;
+        bool expected=false;
+        for(const auto& old:rollbackSession_.oldProducts)
+            if(_wcsicmp(old.productCode.c_str(),code)==0){expected=true;break;}
+        hasBaseline=hasBaseline||expected;
+        std::wstring detail;
+        if(GlassInstallMsi::IsProductInstalled(code)!=expected ||
+           GlassInstallMsi::CheckProductContexts(code,detail,&cancelRequested_)!=GlassInstallMsi::ProductPathCheck::Safe ||
+           (expected&&!RecheckSnapshottedProduct(code))) {
+            if(!IsCancelRequested())SetFailure(L"Removal registration changed after snapshot",ERROR_INSTALL_PACKAGE_REJECTED);
+            return false;
+        }
+    }
+    if(!hasBaseline){SetFailure(L"No installed removal baseline",ERROR_INSTALL_PACKAGE_REJECTED);return false;}
+    // The native helper is still installed here: all Settings removals are last.
+    // Do not unregister a foreign root or bypass an unavailable helper.
+    if(row==(scanNativeX64_?0u:1u)) {
+        bool conflict=false;std::wstring detail;
+        if(!GlassInstallUtil::InvokeShellExtRegistration(false,x64Dir_,x86Dir_,&shellRemovedForMaintenance_,&conflict,&detail)) {
+            SetFailure(detail,ERROR_INSTALL_FAILURE);return false;
+        }
+    }
+    GlassInstallMsi::ProgressSink sink{};
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    sink.label=std::wstring(ru?L"Удаление ":L"Removing ")+title;
+    sink.base=2200;sink.span=6700;sink.cancelRequested=&cancelRequested_;
+    sink.onError=[this](const std::wstring& text){RememberMsiMessage(text.c_str());};
+    sink.onProgress=[this](const std::wstring& text,int value){SetStatus(text,value);};
+    for(const auto* code:{current,legacy}) {
+        if(!code)continue;
+        if(IsCancelRequested())return false;
+        if(!GlassInstallMsi::IsProductInstalled(code))continue;
+        if(!RecheckSnapshottedProduct(code))return false;
+        GlassInstallRollback::NoteModified(rollbackSession_,code); // Before MSI, including its failure path.
+        const auto log=InstallLog::NextMsiVerboseLogPath(sink.label);
+        if(!log.empty())MsiEnableLogW(INSTALLLOGMODE_VERBOSE|INSTALLLOGMODE_ERROR|INSTALLLOGMODE_WARNING,log.c_str(),INSTALLLOGATTRIBUTES_FLUSHEACHLINE);
+        UINT result=ERROR_SUCCESS;
+        const bool removed=GlassInstallMsi::UninstallProduct(code,&sink,&result);
+        InstallLog::LineFormat(L"Managed removal %s exit=%u",code,result);
+        if(!removed) {
+            if(result==ERROR_INSTALL_USEREXIT)cancelRequested_.store(true,std::memory_order_release);
+            if(!IsCancelRequested())SetFailure(sink.label,result);
+            return false;
+        }
+        std::wstring contextDetail;
+        if(GlassInstallMsi::IsProductInstalled(code) ||
+           GlassInstallMsi::CheckProductContexts(code,contextDetail,&cancelRequested_)!=GlassInstallMsi::ProductPathCheck::Safe) {
+            SetFailure(L"MSI removal did not safely remove the selected registration",ERROR_INSTALL_FAILURE);return false;
+        }
+        if(result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED)
+            AddFinishWarning(ru?L"Для завершения удаления нужна перезагрузка":L"Restart required to complete removal",title);
+    }
+    return true;
 }
 
 bool InstallEngine::RunMsiSequence() noexcept {
@@ -1615,9 +1746,8 @@ bool InstallEngine::RunMsiSequence() noexcept {
     };
     const auto scheduled=GlassMaintenanceExecutor::RunPhase(plan,GlassMaintenanceExecutor::Phase::Products,
         [&](P::Product product,P::Action action)->unsigned {
-            // Removal remains unsupported here until its transaction adapter is
-            // complete. Never turn a future Remove row into an installation.
-            if(action==P::Action::Remove)return ERROR_INVALID_PARAMETER;
+            if(action==P::Action::Remove)return RemoveManagedProduct(product)?ERROR_SUCCESS:
+                IsCancelRequested()?ERROR_INSTALL_USEREXIT:ERROR_INSTALL_FAILURE;
             for(const auto& step:steps)if(step.product==product)
                 return applyStep(step)?ERROR_SUCCESS:
                     IsCancelRequested()?ERROR_INSTALL_USEREXIT:ERROR_INSTALL_FAILURE;
@@ -1695,7 +1825,7 @@ bool InstallEngine::RegisterSelectedProducts() noexcept {
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
 
     SetStatus(labels_.finalize, 9200);
-    SeedUserDefaults();
+    if(selection_.platform64||selection_.platform32)SeedUserDefaults();
 
     auto registerArch = [this, ru](GP::PlatformArch arch, const std::wstring& dir, bool taskExistedBefore) -> bool {
         if (!taskExistedBefore) {
@@ -1772,7 +1902,8 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
             acquired:GlassMaintenanceCache::CurrentFile(name));
     }
     std::vector<GlassMaintenanceCache::Blob> cacheBlobs;
-    for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty())
+    constexpr unsigned sourceRows[]={0,1,2,5,3,4};
+    for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty() && !selection_.Removes(sourceRows[i]))
         cacheBlobs.push_back({0,names[i],sources[i].c_str(),sources[i]==tempDir_+L"\\"+names[i]});
     std::wstring cacheFailure;
     if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs.data(),cacheBlobs.size(),IDR_MAINTENANCE_UNINS,&cacheFailure))
@@ -1883,6 +2014,8 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         AddFinishWarning(labels_.warnPriorHosts.empty()
             ? L"A previously running component could not be restarted." : labels_.warnPriorHosts, labels_.warnPriorHostsHint);
     }
+    // Removal must not recreate the native menu or require an already removed helper.
+    if(selection_.removeMask && !(is64?selection_.platform64:selection_.platform32))return;
     // Windows 11: the developer certificate (signer of GlassShellSparse.msix) is
     // added to LocalMachine\TrustedPeople only when the user chose so on the
     // certificate page; it is taken from the msix that was just installed and
@@ -1976,7 +2109,7 @@ bool InstallEngine::DetermineCleanInstall() noexcept {
 bool InstallEngine::CreateRollbackSnapshot() noexcept {
     SetStatus(labels_.backup.empty() ? L"…" : labels_.backup, 450);
     const bool ok = GlassInstallRollback::CreateSnapshot(
-        rollbackSession_, x64Dir_, x86Dir_, openGlassDir_, selection_.openGlass,
+        rollbackSession_, x64Dir_, x86Dir_, openGlassDir_, selection_.openGlass||selection_.Removes(3),
         [this](int units) {
             SetStatus(labels_.backup, 450 + (units * 350) / 10000);
         }, &cancelRequested_);
@@ -2066,7 +2199,13 @@ bool InstallEngine::PerformRollback() noexcept {
                 ? GlassInstallRollback::RestoreScope::SettingsBoth
                 : (earlySettingsAttemptMask_&1)?GlassInstallRollback::RestoreScope::SettingsX64
                     :GlassInstallRollback::RestoreScope::SettingsX86));
-    const bool ok=lifecycleOk && filesOk;
+    std::wstring removalDetail;
+    const bool removalOk=filesOk && GlassInstallRemoval::Restore(removalSession_,PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN,removalDetail);
+    bool shellOk=true;
+    if(filesOk && shellRemovedForMaintenance_)
+        shellOk=GlassInstallUtil::InvokeShellExtRegistration(true,x64Dir_,x86Dir_);
+    const bool ok=lifecycleOk && filesOk && removalOk && shellOk;
+    if(!removalOk)InstallLog::LineFormat(L"Removal rollback auxiliaries failed: %s",removalDetail.c_str());
     std::wstring note;
     if (!ok)
         note = labels_.rollbackFailed;
