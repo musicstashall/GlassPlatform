@@ -39,7 +39,7 @@ namespace GlassInstallUtil {
  enum class SecureUxThemeState {Unavailable,Inactive,Active,ActivationPending,DeactivationPending,External,Conflict};
  SecureUxThemeState state=SecureUxThemeState::Inactive;bool query=true;
  bool pending=false,pendingKnown=true,overrideAfter=false;SecureUxThemeState after=SecureUxThemeState::Inactive;
- bool QueryPendingFileOperations(bool& out){out=pending;return pendingKnown;}
+ bool QuerySecureUxPendingFileOperations(bool& out){out=pending;return pendingKnown;}
  bool QuerySecureUxThemeState(const std::wstring&,const std::wstring&,SecureUxThemeState* out,std::wstring*){*out=state;return query;}
 }
 namespace GlassSecureUxPackage {

@@ -1253,3 +1253,26 @@ MSI, файлы, регистрация и loaded state разделены: MSI 
   со style/session/reboot/rollback lifecycle и standalone migration. Модель restart
   не является доказательством Windows integration; MSVC/WiX и VM install/remove/
   reinstall/locked-file acceptance ещё не выполнялись. Остальной backlog не закрыт.
+
+### Log-confirmed unloaded removal: scope reboot queue to SecureUxTheme files
+
+- Пользовательский GlassSetup-8: native state 3 до удаления, 1 после; MSI 3010,
+  restart=1. Hook не был загружен. MSI-журнал показывает MsiSystemRebootPending=1
+  до удаления и ScheduleReboot после завершения. Содержимое общей очереди и ошибки
+  её чтения старый Setup не логировал; её конкретные записи по этим логам неизвестны.
+- Ошибка предыдущего guard: любая общая pending-file запись сохраняла reboot notice
+  именно SecureUxTheme. Guard заменён на QuerySecureUxPendingFileOperations: read-only
+  source/destination пары, системные SecureUxTheme4.dll / ThemeUiProxy.dll в System32
+  и SysWOW64; NT DOS, extended DOS, SystemRoot и overwrite-marker. Однозначно чужие
+  операции не учитываются; неизвестные SUT namespaces/short paths, некорректный формат,
+  inaccessible/changed data по-прежнему сохраняют запрос консервативно.
+- Queue не изменяется. В лог добавлены read/failure reason, число пар и наличие
+  релевантных операций, сами потенциально относящиеся к SUT пары. MSI 1641, loaded
+  state и общая Windows необходимость reboot не скрываются этой правкой.
+- Actual-source parser tests: native/WOW, source и destination, deletion/overwrite,
+  mixed queue, unrelated DLL и одноимённый файл в Temp, unknown namespace, malformed
+  pairs/tail/termination, unreadable/oversized/racing registry и Windows directory failure.
+- PASS: 84 Python / 74 PASS / прежние 10 FAIL, новых нет; resources и diff-check.
+  Logs: `.cache/sut-scoped-reboot-final`. Windows/MSVC/WiX и повторение именно
+  пользовательского сценария на Windows не выполнены. Cache controller/self-update,
+  обновление unins и удаление loaded SUT этим этапом не реализуются.

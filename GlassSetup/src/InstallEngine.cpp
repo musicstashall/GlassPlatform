@@ -1362,7 +1362,7 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
     if(GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&after,&error) && result!=ERROR_SUCCESS_REBOOT_INITIATED) {
         const bool runtimeRestart=GlassProducts::SecureUxRestartAfter(false,after,restart);
         bool pending=true;
-        if(runtimeRestart || !restart || (GlassInstallUtil::QueryPendingFileOperations(pending)&&!pending))restart=runtimeRestart;
+        if(runtimeRestart || !restart || (GlassInstallUtil::QuerySecureUxPendingFileOperations(pending)&&!pending))restart=runtimeRestart;
     }
     InstallLog::LineFormat(L"SecureUxTheme after removal: state=%u; restart=%d; MSI=%u",static_cast<unsigned>(after),restart?1:0,result);
     if(restart)
@@ -1429,7 +1429,7 @@ bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
     if(GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&after,&error) && result!=ERROR_SUCCESS_REBOOT_INITIATED) {
         const bool runtimeRestart=GlassProducts::SecureUxRestartAfter(true,after,restart);
         bool pending=true;
-        if(runtimeRestart || !restart || (GlassInstallUtil::QueryPendingFileOperations(pending)&&!pending))restart=runtimeRestart;
+        if(runtimeRestart || !restart || (GlassInstallUtil::QuerySecureUxPendingFileOperations(pending)&&!pending))restart=runtimeRestart;
     }
     InstallLog::LineFormat(L"SecureUxTheme after install: state=%u; restart=%d; MSI=%u",static_cast<unsigned>(after),restart?1:0,result);
     if (restart)

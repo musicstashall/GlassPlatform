@@ -1784,22 +1784,56 @@ bool InvokeSecureUxThemeDeactivate(
     return true;
 }
 
-bool QueryPendingFileOperations(bool& pending) noexcept {
+bool QuerySecureUxPendingFileOperations(bool& pending) noexcept {
     pending=true; // Unreadable/invalid data must not suppress an MSI reboot request.
+    const auto fail=[](const wchar_t* reason) {
+        GlassInstallLog::LineFormat(L"SecureUxTheme pending file operations: unverified (%s)",reason);return false;
+    };
     try {
         constexpr auto key=L"SYSTEM\\CurrentControlSet\\Control\\Session Manager";
         constexpr auto value=L"PendingFileRenameOperations";
         DWORD bytes=0;
         LONG rc=RegGetValueW(HKEY_LOCAL_MACHINE,key,value,RRF_RT_REG_MULTI_SZ,nullptr,nullptr,&bytes);
-        if(rc==ERROR_FILE_NOT_FOUND){pending=false;return true;}
-        if(rc!=ERROR_SUCCESS || bytes<2*sizeof(wchar_t) || bytes>1024*1024 || bytes%sizeof(wchar_t))return false;
+        if(rc==ERROR_FILE_NOT_FOUND){pending=false;GlassInstallLog::Line(L"SecureUxTheme pending file operations: none (value absent)");return true;}
+        if(rc!=ERROR_SUCCESS || bytes<2*sizeof(wchar_t) || bytes>1024*1024 || bytes%sizeof(wchar_t))return fail(L"registry size/type/access");
         std::vector<wchar_t> data(bytes/sizeof(wchar_t));
         rc=RegGetValueW(HKEY_LOCAL_MACHINE,key,value,RRF_RT_REG_MULTI_SZ,nullptr,data.data(),&bytes);
-        if(rc!=ERROR_SUCCESS || bytes<2*sizeof(wchar_t) || bytes%sizeof(wchar_t) || bytes/sizeof(wchar_t)>data.size())return false;
+        if(rc!=ERROR_SUCCESS || bytes<2*sizeof(wchar_t) || bytes%sizeof(wchar_t) || bytes/sizeof(wchar_t)>data.size())return fail(L"registry read/size changed");
         const auto count=bytes/sizeof(wchar_t);
-        if(data[count-1]!=0 || data[count-2]!=0)return false;
-        pending=std::any_of(data.begin(),data.begin()+count,[](wchar_t c){return c!=0;});return true;
-    }catch(...){return false;}
+        if(data[count-1]!=0 || data[count-2]!=0)return fail(L"unterminated queue");
+        wchar_t windows[32768]{};const UINT length=GetSystemWindowsDirectoryW(windows,32768);
+        if(!length || length>=32768)return fail(L"Windows directory unavailable");
+        std::wstring root(windows,length);while(!root.empty()&&root.back()==L'\\')root.pop_back();
+        const auto relevant=[&](std::wstring path) {
+            // Session Manager uses NT DOS paths and an optional overwrite marker.
+            if(!path.empty()&&path.front()==L'!')path.erase(0,1);
+            if(path.rfind(L"\\??\\",0)==0 || path.rfind(L"\\?\\",0)==0)path.erase(0,4);
+            if(_wcsnicmp(path.c_str(),L"\\SystemRoot\\",12)==0)path=root+L"\\"+path.substr(12);
+            for(const wchar_t* folder:{L"\\System32\\",L"\\SysWOW64\\"})
+                for(const wchar_t* file:{L"SecureUxTheme4.dll",L"ThemeUiProxy.dll"})
+                    if(_wcsicmp(path.c_str(),(root+folder+file).c_str())==0)return true;
+            // A non-DOS namespace/short path cannot safely prove unrelatedness
+            // for a named SUT file. Keep its reboot request conservatively.
+            const auto slash=path.find_last_of(L"\\/");const auto name=path.substr(slash==std::wstring::npos?0:slash+1);
+            const bool sutName=_wcsicmp(name.c_str(),L"SecureUxTheme4.dll")==0 || _wcsicmp(name.c_str(),L"ThemeUiProxy.dll")==0;
+            return path.find(L'~')!=std::wstring::npos || (sutName && (path.size()<3 || path[1]!=L':' ||
+                path.find(L"\\..\\")!=std::wstring::npos || path.find(L"\\.\\")!=std::wstring::npos));
+        };
+        std::size_t at=0,pairs=0;bool found=false;
+        while(at<count && data[at]!=0) {
+            const std::wstring source(data.data()+at);at+=source.size()+1;
+            if(at>=count)return fail(L"missing destination");
+            const std::wstring destination(data.data()+at);at+=destination.size()+1;++pairs;
+            if(relevant(source)||relevant(destination)) {
+                found=true;
+                GlassInstallLog::LineFormat(L"SecureUxTheme pending file operation: %s -> %s",source.c_str(),destination.c_str());
+            }
+        }
+        if(at>=count || std::any_of(data.begin()+at,data.begin()+count,[](wchar_t c){return c!=0;}))return fail(L"invalid queue tail");
+        pending=found;
+        GlassInstallLog::LineFormat(L"SecureUxTheme pending file operations: read=ok pairs=%u relevant=%d",static_cast<unsigned>(pairs),found?1:0);
+        return true;
+    }catch(...){return fail(L"exception");}
 }
 
 bool QuerySecureUxThemeState(const std::wstring& x64Dir,const std::wstring& x86Dir,
