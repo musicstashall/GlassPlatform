@@ -202,8 +202,8 @@ bool SignedPublisher(const std::wstring& path,std::array<BYTE,32>& digest) noexc
 }
 // Protect against renaming an admin-owned leaf through a user-writable ancestor.
 // Ancestors may be owned/written by Windows servicing (TrustedInstaller), but
-// the installed product leaf and DLL still use the stricter admin/SYSTEM policy.
-bool NativeAncestorsProtected(std::wstring path) noexcept {
+// installed MSI leaves/files permit the same privileged Windows servicing SID.
+bool NativeAncestorsProtected(std::wstring path, bool directory=true) noexcept {
     if(path.size()<3 || path[1]!=L':' || path[2]!=L'\\')return false;
     BYTE admins[SECURITY_MAX_SID_SIZE]{},system[SECURITY_MAX_SID_SIZE]{};
     DWORD na=sizeof(admins),ns=sizeof(system);PSID servicing=nullptr;
@@ -214,11 +214,18 @@ bool NativeAncestorsProtected(std::wstring path) noexcept {
     bool ok=true;
     while(ok) {
         const DWORD attr=GetFileAttributesW(path.c_str());
-        if(attr==INVALID_FILE_ATTRIBUTES || !(attr&FILE_ATTRIBUTE_DIRECTORY) || (attr&FILE_ATTRIBUTE_REPARSE_POINT)){ok=false;break;}
+        if(attr==INVALID_FILE_ATTRIBUTES || ((attr&FILE_ATTRIBUTE_DIRECTORY)!=0)!=directory || (attr&FILE_ATTRIBUTE_REPARSE_POINT)){
+            GlassInstallLog::LineFormat(L"Native trust: invalid type, missing or reparse path: %s",path.c_str());
+            ok=false;break;
+        }
         PSID owner=nullptr;PACL acl=nullptr;PSECURITY_DESCRIPTOR sd=nullptr;
         const DWORD security=GetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()),SE_FILE_OBJECT,
             OWNER_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,&owner,nullptr,&acl,nullptr,&sd);
-        if(security!=ERROR_SUCCESS){if(sd)LocalFree(sd);ok=false;break;}
+        if(security!=ERROR_SUCCESS){
+            GlassInstallLog::LineFormat(L"Native trust: GetNamedSecurityInfoW failed (%lu): %s",security,path.c_str());
+            if(sd)LocalFree(sd);
+            ok=false;break;
+        }
         ok=privileged(owner) && acl;
         for(DWORD i=0;ok && i<acl->AceCount;++i) {
             void* raw=nullptr;if(!GetAce(acl,i,&raw)){ok=false;break;}
@@ -227,30 +234,48 @@ bool NativeAncestorsProtected(std::wstring path) noexcept {
             if(header->AceType==ACCESS_DENIED_ACE_TYPE)continue;
             if(header->AceType!=ACCESS_ALLOWED_ACE_TYPE){ok=false;break;}
             auto* ace=static_cast<ACCESS_ALLOWED_ACE*>(raw);
-            constexpr DWORD replace=GENERIC_ALL|GENERIC_WRITE|DELETE|WRITE_DAC|WRITE_OWNER|FILE_DELETE_CHILD|FILE_WRITE_DATA;
-            if((ace->Mask&replace) && !privileged(&ace->SidStart))ok=false;
+            // For directories, creating a new subdirectory alone cannot replace
+            // this already-existing pinned DLL. In particular C:\ may grant
+            // FILE_ADD_SUBDIRECTORY to users. Mutating/deleting an existing
+            // child, or changing its ACL/owner, must remain privileged.
+            const DWORD replace=GENERIC_ALL|GENERIC_WRITE|DELETE|WRITE_DAC|WRITE_OWNER|FILE_DELETE_CHILD|FILE_WRITE_DATA|
+                (directory?0u:(FILE_APPEND_DATA|FILE_WRITE_EA|FILE_WRITE_ATTRIBUTES));
+            if((ace->Mask&replace) && !privileged(&ace->SidStart)) {
+                GlassInstallLog::LineFormat(L"Native trust: non-privileged write ACE mask=0x%08lX: %s",ace->Mask,path.c_str());
+                ok=false;
+            }
         }
+        if(!ok)GlassInstallLog::LineFormat(L"Native trust: owner/DACL validation failed: %s",path.c_str());
         LocalFree(sd);
         if(path.size()==3)break;
         const auto slash=path.find_last_of(L'\\');if(slash==std::wstring::npos){ok=false;break;}
         path.resize(slash==2?3:slash);
+        directory=true;
     }
     LocalFree(servicing);return ok;
 }
 
 bool TrustedInstalledNative(const std::wstring& path,const std::wstring& root) noexcept {
     const auto parent=TrimTrailingSlashes(root)+L"\\GlassSettings";
-    if(!NativeAncestorsProtected(parent))return false;
-    if(!GlassMaintenanceCache::TrustedDirectory(TrimTrailingSlashes(root)) ||
-       !GlassMaintenanceCache::TrustedDirectory(parent) || !GlassMaintenanceCache::TrustedPath(path,false))return false;
+    if(path!=parent+L"\\GlassSettings.Native.dll")return false;
+    // Installed MSI directories retain normal Windows ACLs: TrustedInstaller
+    // and inherit-only CREATOR OWNER ACEs are legitimate here. Do not apply the
+    // private ProgramData cache's Administrators/SYSTEM-only policy, and never
+    // rewrite MSI-owned ACLs just to make the executable pass validation.
+    if(!NativeAncestorsProtected(path,false))return false;
     // Pin the file while validating. Installed roots/files are admin-only; no
     // executable is copied/extracted to Temp or loaded from a writable source.
     HANDLE pin=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
-    if(pin==INVALID_HANDLE_VALUE)return false;
+    if(pin==INVALID_HANDLE_VALUE) {
+        GlassInstallLog::LineFormat(L"Native trust: cannot pin DLL for reading (%lu): %s",GetLastError(),path.c_str());
+        return false;
+    }
     wchar_t self[32768]{};const DWORD n=GetModuleFileNameW(nullptr,self,_countof(self));
     std::array<BYTE,32> expected{},actual{};
     const bool ok=n && n<_countof(self) && SignedPublisher(self,expected) && SignedPublisher(path,actual) && expected==actual;
-    CloseHandle(pin);return ok;
+    CloseHandle(pin);
+    if(!ok)GlassInstallLog::LineFormat(L"Native trust: Setup/DLL Authenticode publisher verification failed: %s",path.c_str());
+    return ok;
 }
 } // namespace
 
@@ -1217,7 +1242,11 @@ std::wstring InstalledSecureUxThemeNativeDll(
     const std::wstring& root=x64?x64Dir:x86Dir;
     if(root.empty())return {};
     const std::wstring dll=TrimTrailingSlashes(root)+L"\\GlassSettings\\GlassSettings.Native.dll";
-    return PeMatches(dll,machine,exportName) && TrustedInstalledNative(dll,root)?dll:std::wstring();
+    if(!PeMatches(dll,machine,exportName)) {
+        GlassInstallLog::LineFormat(L"Native helper: file, architecture or required export %S failed: %s",exportName,dll.c_str());
+        return {};
+    }
+    return TrustedInstalledNative(dll,root)?dll:std::wstring();
 }
 }
 
@@ -1227,7 +1256,11 @@ std::wstring NativeDllForArch(
     const std::wstring& x86Dir) noexcept {
     const auto dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,"GlassSettings_UnlockerW");
     const WORD machine=arch==GlassShared::GlassPlatformTask::PlatformArch::X64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386;
-    return !dll.empty() && PeMatches(dll,machine,Shared::InjectModuleScan::kNativeInstallerProtocolExport)?dll:std::wstring();
+    if(!dll.empty() && !PeMatches(dll,machine,Shared::InjectModuleScan::kNativeInstallerProtocolExport)) {
+        GlassInstallLog::LineFormat(L"Native helper: required installer scan protocol export missing: %s",dll.c_str());
+        return {};
+    }
+    return dll;
 }
 
 namespace {
@@ -1552,7 +1585,7 @@ bool InvokeShellExtRegistration(
     if (dll.empty() || !PeMatches(dll,machine,kInstallerShellExport)) {
         // Windows 11 requires the sparse package; do not silently substitute legacy regsvr32.
         // On 32-bit Windows 10, legacy registration is the supported fallback.
-        if (os64) return fail(L"GlassSettings.Native.dll with the setup export was not found");
+        if (os64) return fail(L"Installed GlassSettings.Native.dll is missing or failed architecture, export, ACL or publisher verification; see Native helper/trust log entries");
         const std::wstring shellExt = root + L"\\" + GlassShared::GlassShellMenu::kShellExtRelativePath;
         if (!IsSafeInstallPath(shellExt) || !PathFileExistsW(shellExt.c_str())) return fail(L"GlassShellSparse\\GlassShellExt.dll was not found");
         if (HasExistingShellRegistrationKeys()) {

@@ -1906,7 +1906,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
                 : labels_.warnCertInstall, JoinWarningDetail(expandInstallDir(labels_.warnCertInstallHint), trustDetail));
         }
     } else {
-        InstallLog::Line(L"Certificate: not requested (page not shown or declined); nothing trusted");
+        InstallLog::Line(L"Certificate: no additional trust requested (already trusted / page not applicable / declined); existing certificate stores unchanged");
     }
     // Register by default on both fresh installs and reinstalls. The helper
     // preserves an existing registration and reports whether it changed one.

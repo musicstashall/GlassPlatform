@@ -132,7 +132,7 @@ std::wstring DescribeShellClassicFallback(DWORD reason);
 // package) and therefore the author certificate are used.
 bool IsWindows11OrGreater() noexcept;
 
-// Runs GlassSettings_ShellSignerTrustSetupV1W of the embedded x64 helper: adds
+// Runs GlassSettings_ShellSignerTrustSetupV1W of the verified installed x64 helper: adds
 // the certificate that signs <root>\GlassShellSparse\GlassShellSparse.msix to
 // LocalMachine\TrustedPeople. Called only when the user accepted the Setup
 // certificate page, after the files are in place and before the menu is

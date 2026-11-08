@@ -41,10 +41,11 @@ reason_text = function(util, 'const wchar_t* ShellHelperReasonText(')
 describe = function(util, 'std::wstring DescribeShellHelperExit(')
 describe_classic = function(util, 'std::wstring DescribeShellClassicFallback(')
 operation = function(unins, 'int RunOperation(')
-preflight = function(engine, 'bool InstallEngine::VerifyEmbeddedNativePayload(')
 assert operation.index('kInstallerShellExport') < operation.index('StopAllForUninstall(')
 assert operation.index('kInstallerShellExport') < operation.index('UninstallProduct(')
-assert 'kInstallerShellExport' in preflight
+# External MSI builds no longer have an embedded-Native preflight. Check the
+# actual installed-helper invocation gate below, not the removed method.
+assert 'kInstallerShellExport' in invoke and 'PeMatches(dll,machine' in invoke
 assert 'GlassSettings_ShellExtRegisterSetupV1W' in script
 assert 'GlassSettings_ShellExtRegisterSetupV1W' in ops
 assert '/EXPORT:GlassSettings_ShellExtRegisterSetupV1W=_GlassSettings_ShellExtRegisterSetupV1W@16' in ops
