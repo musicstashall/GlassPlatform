@@ -6,7 +6,7 @@ import subprocess, tempfile
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
 start=source.index('    if (in.os64 && !report.og.installed)')
-end=source.index('    if (!report.x64.installed &&',start)
+end=source.index('    GlassInstallUtil::InstallRoots roots{};',start)
 probe=source[start:end]
 main=(root/'GlassSetup/src/main.cpp').read_text()
 condition=main[main.index('    static GlassProducts::ProductCondition ConditionOf('):main.index('    static UINT InspectReasonId(')]

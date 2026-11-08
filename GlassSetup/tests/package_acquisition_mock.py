@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallSupport/GlassPackageAcquisition.cpp').read_text()
-prepare=source[source.index('bool Prepare('):source.rfind('\n}')]
+prepare=source[source.index('static bool Discover('):source.rfind('\n}')]
 start=source.index('bool CopyLocked(')
 copy=source[start:source.index('\n}\n}',start)+2]
 prefix=r'''
@@ -102,7 +102,16 @@ int main(){
  reset();s.files[L"C:\\kit\\Glass-x64.msi"].bytes=Package("2.0.0","");assert(!run());assert(error.find(L"signature/publisher")!=std::wstring::npos); // Unsigned/unhashed local is not implicitly trusted.
  reset();s.files[L"C:\\kit\\Glass-x64.msi"]={Package("2.0.0"),FILE_ATTRIBUTE_REPARSE_POINT};assert(!run());
  reset();s.files[L"C:\\kit\\Glass-x64.msi"]={Package("2.0.0"),0,2};assert(!run());
+ // Read-only discovery uses actual ProductVersion candidates for all five rows.
+ reset();
+ for(unsigned i=0;i<5;++i){const auto file=GlassReleaseClient::Wide(GlassPackageCatalog::kFiles[i]);
+  s.files[L"C:\\kit\\packages\\"+file].bytes=Package((std::to_string(i+2)+".3.4").c_str());}
+ for(unsigned i=0;i<5;++i){std::wstring v;bool verified=false;
+  assert(GlassPackageAcquisition::Describe(static_cast<Product>(i),catalog,cancelled,v,verified));
+  assert(v==std::to_wstring(i+2)+L".3.4"&&verified&&s.files.size()==5&&s.downloads==0&&s.handles==0);}
+ reset();{std::wstring v;bool verified=true;assert(!GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified));assert(v.empty()&&!verified&&s.files.empty());}
  auto& remote=catalog.products[0];remote=GlassPackageCatalog::Asset{};remote->version.parts={3,0,0,0};remote->downloadable=true;remote->size=1024;remote->sha256=std::string(64,'a');remote->url="https://github.com/release";
+ reset();{std::wstring v;bool verified=true;assert(GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified));assert(v==L"3.0.0.0"&&!verified&&s.downloads==0&&s.files.empty());}
  reset();s.download=Package("3.0.0","|HASH|");assert(run());assert(s.downloads==1&&s.files.at(dest).bytes==s.download&&!s.files.count(part));
  reset();s.download=Package("3.0.0","");assert(!run());assert(!s.files.count(dest)&&!s.files.count(part));
  reset();s.download=Package("2.0.0","|HASH|");assert(!run());assert(!s.files.count(dest)&&!s.files.count(part)); // digest isn't enough without target metadata.

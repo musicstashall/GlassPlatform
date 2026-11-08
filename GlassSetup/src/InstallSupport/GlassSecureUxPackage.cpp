@@ -60,6 +60,10 @@ bool Metadata(const std::wstring& path,Architecture arch,Package& package,std::w
         !Property(db.h,L"ProductCode",package.productCode)||!Property(db.h,L"ProductVersion",package.version)||
         name!=L"SecureUxTheme"||_wcsicmp(upgrade.c_str(),UpgradeCode(arch))||
         FAILED(CLSIDFromString(package.productCode.c_str(),&product)))return Fail(error,L"Unexpected official MSI identity",ERROR_INVALID_DATA);
+    GlassPackageRules::Version numeric;
+    if(std::any_of(package.version.begin(),package.version.end(),[](wchar_t c){return static_cast<unsigned>(c)>127;}) ||
+       !GlassPackageRules::ParseVersion(std::string(package.version.begin(),package.version.end()),numeric))
+        return Fail(error,L"Invalid official MSI ProductVersion",ERROR_INVALID_DATA);
     MsiHandle summary;
     if(MsiGetSummaryInformationW(db.h,nullptr,0,&summary.h)!=ERROR_SUCCESS)return Fail(error,L"MSI summary",ERROR_INVALID_DATA);
     UINT type=0;INT number=0;FILETIME time{};wchar_t text[256]{};DWORD count=256;
@@ -68,6 +72,41 @@ bool Metadata(const std::wstring& path,Architecture arch,Package& package,std::w
     const wchar_t* expected=arch==Architecture::X64?L"x64":arch==Architecture::Arm64?L"Arm64":L"Intel";
     if(_wcsicmp(machine.c_str(),expected))return Fail(error,L"MSI architecture differs from native OS",ERROR_BAD_EXE_FORMAT);
     return true;
+}
+std::vector<std::wstring> CandidatePaths(const Asset& asset) {
+    wchar_t exe[32768]{};const DWORD count=GetModuleFileNameW(nullptr,exe,32768);
+    if(!count||count>=32768)throw std::runtime_error("Cannot locate GlassSetup.exe");
+    const std::wstring module(exe,count);const auto slash=module.find_last_of(L"\\/");
+    if(slash==std::wstring::npos)throw std::runtime_error("Cannot locate installer directory");
+    const auto directory=module.substr(0,slash+1);const auto name=Wide(asset.name);
+    return {directory+L"packages\\"+name,directory+name,
+        GlassMaintenanceCache::CurrentFile(name.c_str())};
+}
+bool FetchAsset(Architecture arch,const std::atomic<bool>& cancel,Asset& asset,std::wstring& error) {
+    std::string json,parseError;
+    if(!Get(L"https://api.github.com/repos/namazso/SecureUxTheme/releases/latest",INVALID_HANDLE_VALUE,&json,
+        4*1024*1024,cancel,error))return false;
+    if(!Select(json,arch,asset,parseError)){error=L"SecureUxTheme release discovery: "+Wide(parseError);return false;}
+    return true;
+}
+bool FindLocal(const Asset& asset,Architecture arch,const std::atomic<bool>& cancel,
+    File& file,std::wstring& selected,Package& metadata,std::wstring& error) {
+    for(const auto& path:CandidatePaths(asset)) {
+        if(cancel.load())return false;
+        if(path.empty())continue;
+        if(file.h!=INVALID_HANDLE_VALUE){CloseHandle(file.h);file.h=INVALID_HANDLE_VALUE;}
+        file.h=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+        if(file.h==INVALID_HANDLE_VALUE)continue;
+        Package candidate;
+        // The locked handle denies concurrent writes/deletes. Verify exact
+        // official bytes, type/link count and native MSI identity before display.
+        if(Hash(file,asset,cancel,error)&&Metadata(path,arch,candidate,error)) {
+            selected=path;metadata=std::move(candidate);error.clear();return true;
+        }
+        InstallLog::LineFormat(L"SecureUxTheme local MSI rejected: %s: %s",path.c_str(),error.c_str());
+    }
+    if(file.h!=INVALID_HANDLE_VALUE){CloseHandle(file.h);file.h=INVALID_HANDLE_VALUE;}
+    return false;
 }
 bool CopySnapshot(File& source,const std::wstring& path,const std::atomic<bool>& cancel,std::wstring& error){
     File dest;dest.h=GlassReleaseClient::CreatePrivateFile(path);
@@ -109,6 +148,28 @@ bool QueryInstallPresence(std::vector<std::wstring>& installed,const std::atomic
         error.clear();return !Cancelled(cancel,error);
     }catch(...){installed.clear();return Fail(error,L"Reading SecureUxTheme installation state",ERROR_NOT_ENOUGH_MEMORY);}
 }
+bool Describe(const std::atomic<bool>& cancel,Offer& offer,std::wstring& diagnostic) noexcept {
+    offer={};diagnostic.clear();
+    try {
+        if(Cancelled(cancel,diagnostic))return false;
+        const auto arch=NativeArchitecture();const auto known=OfflineV4(arch);
+        File local;Package metadata;std::wstring selected,error;
+        bool found=FindLocal(known,arch,cancel,local,selected,metadata,error);
+        Asset remote;const bool online=!cancel.load()&&FetchAsset(arch,cancel,remote,diagnostic);
+        if(cancel.load()){offer={};return false;}
+        if(online) {
+            offer.releaseTag=Wide(remote.tag);offer.releaseVersion=Wide(ReleaseVersion(remote.tag));offer.releaseSize=remote.size;
+            if(!found)found=FindLocal(remote,arch,cancel,local,selected,metadata,error);
+        }
+        if(cancel.load()){offer={};return false;}
+        if(found) {
+            offer.localVerified=true;offer.localVersion=metadata.version;offer.localPath=selected;
+            LARGE_INTEGER size{};if(GetFileSizeEx(local.h,&size)&&size.QuadPart>0)offer.localSize=static_cast<std::uint64_t>(size.QuadPart);
+            InstallLog::LineFormat(L"SecureUxTheme offer: local MSI %s; ProductVersion %s",selected.c_str(),metadata.version.c_str());
+        }
+        return found||online;
+    }catch(...){offer={};return Fail(diagnostic,L"Describing SecureUxTheme",ERROR_INVALID_DATA);}
+}
 bool Prepare(const std::wstring& privateDirectory,const std::atomic<bool>& cancel,Package& package,std::wstring& error) noexcept {
     package={};std::wstring partial,staged;
     try {
@@ -121,33 +182,15 @@ bool Prepare(const std::wstring& privateDirectory,const std::atomic<bool>& cance
             return true;
         }
         const auto arch=NativeArchitecture();Asset asset=OfflineV4(arch);
-        std::vector<wchar_t> exe(32768);const DWORD count=GetModuleFileNameW(nullptr,exe.data(),static_cast<DWORD>(exe.size()));
-        if(!count||count>=exe.size())return Fail(error,L"Locating GlassSetup.exe");
-        const std::wstring module(exe.data(),count);const auto slash=module.find_last_of(L"\\/");
-        if(slash==std::wstring::npos)return Fail(error,L"Locating installer directory",ERROR_INVALID_NAME);
         if(!GlassMaintenanceCache::TrustedDirectory(privateDirectory))return Fail(error,L"Untrusted package workspace",ERROR_ACCESS_DENIED);
-        const auto directory=module.substr(0,slash+1);
-        const std::vector<std::wstring> candidates={directory+L"packages\\"+Wide(asset.name),
-            directory+Wide(asset.name),GlassMaintenanceCache::CurrentFile(Wide(asset.name).c_str())};
-        File local;std::wstring selected;
-        const auto findLocal=[&]() {
-            for(const auto& path:candidates) {
-                if(path.empty())continue;
-                if(local.h!=INVALID_HANDLE_VALUE){CloseHandle(local.h);local.h=INVALID_HANDLE_VALUE;}
-                local.h=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
-                if(local.h!=INVALID_HANDLE_VALUE&&Hash(local,asset,cancel,error)){selected=path;return true;}
-                if(cancel.load())return false;
-            }
-            if(local.h!=INVALID_HANDLE_VALUE){CloseHandle(local.h);local.h=INVALID_HANDLE_VALUE;}
-            return false;
-        };
+        File local;std::wstring selected;Package localMetadata;
+        const auto findLocal=[&]() { return FindLocal(asset,arch,cancel,local,selected,localMetadata,error); };
         // Known official v4 assets remain usable offline. Unknown local files
         // are never modified; a missing/invalid source can use a private download.
         if(!findLocal()) {
             if(Cancelled(cancel,error))return false;
-            error.clear();std::string json,parseError;
-            if(!Get(L"https://api.github.com/repos/namazso/SecureUxTheme/releases/latest",INVALID_HANDLE_VALUE,&json,4*1024*1024,cancel,error))return false;
-            if(!Select(json,arch,asset,parseError)){error=L"SecureUxTheme release discovery: "+Wide(parseError);return false;}
+            error.clear();
+            if(!FetchAsset(arch,cancel,asset,error))return false;
             if(!findLocal()) {
                 if(Cancelled(cancel,error))return false;
                 error.clear();partial=privateDirectory+L"\\"+Wide(asset.name)+L".part";
@@ -164,9 +207,10 @@ bool Prepare(const std::wstring& privateDirectory,const std::atomic<bool>& cance
         staged=privateDirectory+L"\\"+Wide(asset.name);
         if(!CopySnapshot(local,staged,cancel,error)||!Metadata(staged,arch,package,error))
             throw std::runtime_error("Cannot prepare verified original MSI snapshot");
+        const wchar_t* source=partial.empty()?L"local":L"download";
         package.path=staged;error.clear();
         if(!partial.empty()){CloseHandle(local.h);local.h=INVALID_HANDLE_VALUE;DeleteFileW(partial.c_str());partial.clear();}
-        InstallLog::LineFormat(L"SecureUxTheme original MSI: %s; release %s; ProductCode %s; version %s",selected.c_str(),Wide(asset.tag).c_str(),package.productCode.c_str(),package.version.c_str());
+        InstallLog::LineFormat(L"SecureUxTheme original MSI: %s; release %s; ProductCode %s; version %s; source=%s",selected.c_str(),Wide(asset.tag).c_str(),package.productCode.c_str(),package.version.c_str(),source);
         return true;
     }catch(const std::exception& e){error=L"SecureUxTheme: "+Wide(e.what());}
     catch(...){Fail(error,L"Preparing official SecureUxTheme",ERROR_NOT_ENOUGH_MEMORY);}

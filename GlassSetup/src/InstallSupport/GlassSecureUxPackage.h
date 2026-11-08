@@ -4,12 +4,21 @@
 #include <string>
 #include <array>
 #include <vector>
+#include <cstdint>
 
 namespace GlassSecureUxPackage {
 struct Package {
     std::wstring path, productCode, version;
     bool alreadyInstalled=false;
 };
+struct Offer {
+    std::wstring localVersion,localPath,releaseVersion,releaseTag;
+    std::uint64_t localSize=0,releaseSize=0;
+    bool localVerified=false;
+};
+// Read-only discovery: official release metadata + hash/identity-verified local
+// MSI ProductVersion. No product download, staging, installation or publication.
+bool Describe(const std::atomic<bool>& cancel,Offer& offer,std::wstring& diagnostic) noexcept;
 // Only one original vendor MSI is supported by this commit-last removal path.
 // This is not a Glass rollback product and never authorizes file/registry cleanup.
 struct Removal {

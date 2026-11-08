@@ -14,6 +14,7 @@
 #include "GlassProductUiPolicy.h"
 #include <GlassShellMenuConstants.h>
 #include <RegistrySanity.h>
+#include <SecureUxThemeInventory.h>
 #include "InstallSupport/GlassProfileMaintenance.h"
 
 #include <windows.h>
@@ -549,6 +550,27 @@ private:
         }
         return L"error";
     }
+    std::wstring InstalledMsiVersion(const wchar_t* id) const {
+        using namespace GlassInstallMsi;
+        const struct {const wchar_t* id;const wchar_t* code;const wchar_t* legacy;} products[]={
+            {L"x64",kProductPlatformX64,kLegacyPlatformX64},{L"x86",kProductPlatformX86,kLegacyPlatformX86},
+            {L"settings64",kProductSettingsX64,nullptr},{L"settings32",kProductSettingsX86,nullptr},
+            {L"openglass",kProductOpenGlass,kLegacyOpenGlass}};
+        for(const auto& product:products)if(wcscmp(id,product.id)==0) {
+            const bool modern=IsProductInstalled(product.code);
+            const bool legacy=product.legacy&&IsProductInstalled(product.legacy);
+            if(modern&&legacy)return {}; // Multiple registrations are not one version.
+            return modern?QueryDisplayVersion(product.code):legacy?QueryDisplayVersion(product.legacy):L"";
+        }
+        if(wcscmp(id,L"secureUxTheme")==0) {
+            std::vector<std::wstring> codes;
+            if(Shared::SecureUxThemeInventory::QueryInstalled(codes)!=ERROR_SUCCESS)return {};
+            for(const auto* code:{kProductSecureUxThemeX64,kProductSecureUxThemeX86})
+                if(IsProductInstalled(code))codes.emplace_back(code);
+            return codes.size()==1?QueryDisplayVersion(codes.front().c_str()):L"";
+        }
+        return {};
+    }
     std::wstring ComponentsJson() const {
         std::wstring json=L"[";
         const bool os64=GlassInstallUtil::IsOs64Bit();
@@ -565,6 +587,7 @@ private:
             json+=L"{\"id\":"+Q(id)+L",\"title\":"+Q(title)+L",\"description\":"+Q((std::wstring(id)==L"x64"||std::wstring(id)==L"x86")?GlassProductUiPolicy::PlatformDescription(detail,std::wstring(id)==L"x64",os64,IsRu()):std::wstring(detail))+
                 L",\"warning\":"+Q(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,IsRu(),GlassInstallUtil::IsOs64Bit()))+
                 L",\"badge\":"+Q(badge)+L",\"state\":"+Q(state)+L",\"reasons\":"+reasons+
+                L",\"installedPackageVersion\":"+Q(InstalledMsiVersion(id))+
                 L",\"installed\":"+(available?L"true":L"false")+L",\"operation\":\"remove\""+
                 L",\"checked\":"+(checked?L"true":L"false")+
                 L",\"locked\":"+((locked || page_==Page::Cleanup)?L"true":L"false")+L",\"hidden\":"+(available?L"false":L"true")+L"}";
@@ -593,6 +616,7 @@ private:
                 Q(T(L"Средство для использования неподписанных визуальных стилей. Установка в System32.",L"A tool for using unsigned visual styles. Installs in System32."))+
                 L",\"badge\":"+Q(badge)+L",\"badgeTone\":"+Q(external?L"repair":pending?L"update":L"keep")+
                 L",\"state\":"+Q(state)+L",\"reasons\":"+(reason.empty()?L"[]":L"["+Q(reason)+L"]")+
+                L",\"installed\":true,\"installedPackageVersion\":"+Q(InstalledMsiVersion(L"secureUxTheme"))+
                 L",\"checked\":"+(checked?L"true":L"false")+L",\"locked\":"+((dependent || page_==Page::Cleanup)?L"true":L"false")+
                 L",\"lockTitle\":"+Q(dependent?T(L"Удаляется вместе с GlassSettings",L"Removed with GlassSettings"):L"")+
                 L",\"disabled\":"+(disabled?L"true":L"false")+L",\"hidden\":false}";
@@ -799,13 +823,21 @@ private:
         struct ProbeWorkspace {
             std::wstring directory;
             std::vector<std::wstring> files;
-            ~ProbeWorkspace() { for (const auto& file:files) DeleteFileW(file.c_str()); if (!directory.empty()) RemoveDirectoryW(directory.c_str()); }
+            bool preserve=false; // Retain secured recovery data after a failed shortcut restore.
+            ~ProbeWorkspace() { if(preserve)return; for (const auto& file:files) DeleteFileW(file.c_str()); if (!directory.empty()) RemoveDirectoryW(directory.c_str()); }
         } workspace;
         std::vector<Probe> probes;
         if (chosen.x64) probes.push_back({Msi::kProductPlatformX64,x64Dir_,{}});
         if (chosen.x86) probes.push_back({Msi::kProductPlatformX86,x86Dir_,{}});
         if (chosen.settings64) probes.push_back({Msi::kProductSettingsX64,x64Dir_,{}});
         if (chosen.settings32) probes.push_back({Msi::kProductSettingsX86,x86Dir_,{}});
+        // Probe the unselected Settings architecture too, even when absent: a
+        // concurrently registered/disappearing survivor must not inherit a link.
+        const wchar_t* keptSettingsCode=chosen.settings64&&!chosen.settings32?Msi::kProductSettingsX86:
+            chosen.settings32&&!chosen.settings64?Msi::kProductSettingsX64:nullptr;
+        const wchar_t* removedSettingsCode=chosen.settings64&&!chosen.settings32?Msi::kProductSettingsX64:
+            chosen.settings32&&!chosen.settings64?Msi::kProductSettingsX86:nullptr;
+        if(keptSettingsCode)probes.push_back({keptSettingsCode,chosen.settings64?x86Dir_:x64Dir_,{}});
         if (chosen.secureUxTheme) {
             const bool os64 = GlassInstallUtil::IsOs64Bit();
             if (os64)
@@ -903,6 +935,30 @@ private:
                 L"The removal plan is no longer safe to execute. Products were not changed; reopen maintenance."));
             return ERROR_INSTALL_PACKAGE_REJECTED;
         }
+        GlassInstallRemoval::Session settingsShortcut;
+        const Probe* keptSettingsProbe=nullptr;
+        if(keptSettingsCode)for(const auto& probe:probes)
+            if(_wcsicmp(probe.code,keptSettingsCode)==0){keptSettingsProbe=&probe;break;}
+        if(keptSettingsProbe && keptSettingsProbe->installed) {
+            // These names are created only in our private secured workspace.
+            for(const auto* name:{L"GlassSettings.lnk",L"GlassSettings.security.bin",L"GlassSettings-retarget.lnk"})
+                workspace.files.push_back(workspace.directory+L"\\"+name);
+            std::wstring detail;
+            if(!GlassInstallRemoval::PrepareSettingsShortcutRetarget(settingsShortcut,keptSettingsProbe->root,
+                x64Dir_,x86Dir_,workspace.directory,IsRu(),detail)) {
+                SetError(T(L"Не удалось безопасно подготовить ярлык оставшегося Settings. Пакеты не удалены. ",
+                    L"Could not safely prepare the retained Settings shortcut. No packages were removed. ")+detail);
+                return ERROR_INSTALL_PACKAGE_REJECTED;
+            }
+        }
+        bool shortcutCommitted=false,settingsMsiAttempted=false;
+        const auto recheckKeptSettings=[&](std::wstring& detail,const std::atomic_bool* cancel) -> bool {
+            return !keptSettingsProbe || GlassRegisteredMsi::Recheck(keptSettingsProbe->code,keptSettingsProbe->root,
+                keptSettingsProbe->installed,keptSettingsProbe->cached,workspace.directory,detail,cancel);
+        };
+        // All returns in the mutation phase pass through the shortcut finalizer.
+        // If an exception escapes it, preserve=true leaves secured backups intact.
+        const auto runRemoval=[&]() -> int {
         // Native x64 must understand the exact-root installer protocol. Check
         // before stopping hosts or deleting any MSI, not after partial removal.
         // On 32-bit Windows the supported fallback is regsvr32 of ShellExt from
@@ -1070,6 +1126,23 @@ private:
             return cancelledResult();
         removalStarted_.store(true,std::memory_order_release);
         if (window) PostMessageW(window,kWorkerHold,static_cast<WPARAM>(Page::Removing),0);
+        if(keptSettingsProbe) {
+            std::wstring detail;
+            if(!recheckKeptSettings(detail,nullptr)) {
+                SetError(T(L"Состояние сохраняемого Settings изменилось. Пакеты не удалены. ",
+                    L"The retained Settings state changed. No packages were removed. ")+detail);
+                (void)restoreRemaining();return ERROR_INSTALL_PACKAGE_REJECTED;
+            }
+            if(keptSettingsProbe->installed) {
+                workspace.preserve=true;
+                if(!GlassInstallRemoval::Commit(settingsShortcut,IsRu(),detail)) {
+                    SetError(T(L"Не удалось переназначить ярлык Settings. Пакеты не удалены. ",
+                        L"Could not retarget the Settings shortcut. No packages were removed. ")+detail);
+                    (void)restoreRemaining();return ERROR_INSTALL_FAILURE;
+                }
+                shortcutCommitted=true;
+            }
+        }
         if (chosen.secureUxTheme && installed_.settings && SecureUxThemeManaged()) {
             std::wstring styleDetail;
             if(!cleanupProfiles.PreflightStyles(styleDetail)) {
@@ -1110,6 +1183,10 @@ private:
             const auto it=std::find_if(probes.begin(),probes.end(),[&](const Probe& p){return _wcsicmp(p.code,code)==0;});
             if (it==probes.end()) return false;
             std::wstring detail;
+            if(!recheckKeptSettings(detail,nullptr)) {
+                SetError(T(L"Регистрация сохраняемого Settings изменилась во время удаления. ",
+                    L"The retained Settings registration changed during removal. ")+detail);return false;
+            }
             if(!GlassRegisteredMsi::Recheck(code,it->root,it->installed,it->cached,
                 workspace.directory,detail,&cancelRequested_))return refuse(*it,detail,false);
             UINT removalCode=ERROR_SUCCESS;
@@ -1185,10 +1262,12 @@ private:
         }
         // Finish all Platform/helper work before removing either Settings MSI.
         if (product==P::Product::Settings64) {
+            settingsMsiAttempted=true;
             if (!remove(Msi::kProductSettingsX64,L"GlassSettings x64")) { restoreRemaining(); return 12; }
             ++done;
         }
         if (product==P::Product::Settings32) {
+            settingsMsiAttempted=true;
             if (!remove(Msi::kProductSettingsX86,L"GlassSettings x86")) { restoreRemaining(); return 12; }
             ++done;
         }
@@ -1260,6 +1339,34 @@ private:
                 L" The custom visual style was not restored: Windows will use the standard one after restart.");
         SetStatus(complete,10000);
         return (secureUxThemeReboot || msiRebootRequired) ? ERROR_SUCCESS_REBOOT_REQUIRED : ERROR_SUCCESS;
+        };
+        const auto finishSettingsShortcut=[&]() -> bool {
+            if(!keptSettingsProbe || (!settingsShortcut.shortcutRetargetAttempted&&!settingsMsiAttempted)) {
+                workspace.preserve=false;return true;
+            }
+            std::wstring detail;
+            // Never restore a link to a successfully removed architecture, even
+            // when a later ARP/cleanup step failed. Keep the valid retained target.
+            const bool removed=shortcutCommitted&&settingsMsiAttempted&&removedSettingsCode&&
+                !Msi::IsProductInstalled(removedSettingsCode);
+            bool ok=!settingsShortcut.shortcutRetargetAttempted || removed ||
+                GlassInstallRemoval::Restore(settingsShortcut,IsRu(),detail);
+            if(ok)ok=recheckKeptSettings(detail,nullptr); // Finalization ignores accepted cancellation.
+            if(!ok) {
+                workspace.preserve=true;
+                LogLine(L"Settings shortcut finalization failed; recovery workspace retained: "+workspace.directory+L" "+detail);
+                SetError(T(L"Не удалось завершить восстановление или проверку ярлыка Settings. Сохранены данные восстановления: ",
+                    L"Could not finish restoring or verifying the Settings shortcut. Recovery data retained at: ")+workspace.directory+L"\r\n"+detail);
+                return false;
+            }
+            workspace.preserve=false;
+            return true;
+        };
+        int result=ERROR_INSTALL_FAILURE;
+        try { result=runRemoval(); }
+        catch(...) { (void)finishSettingsShortcut();throw; }
+        if(!finishSettingsShortcut())return ERROR_INSTALL_FAILURE;
+        return result;
     }
     void StartRemoval() {
         if (worker_.joinable()) return;

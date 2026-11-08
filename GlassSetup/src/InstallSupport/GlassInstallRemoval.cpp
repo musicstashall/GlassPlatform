@@ -703,6 +703,59 @@ bool RemoveShortcut(Session& session, bool ru, std::wstring& error) noexcept {
     session.shortcutRemoved = true;
     return true;
 }
+// Only the default stream is changed: object identity, ACL/owner, ADS and other
+// custom link metadata remain on the original locked file. No path replacement.
+bool RewriteShortcutStream(HANDLE target,const std::wstring& source) noexcept {
+    const HANDLE input=CreateFileW(source.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,
+        OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    if(input==INVALID_HANDLE_VALUE)return false;
+    BY_HANDLE_FILE_INFORMATION info{};LARGE_INTEGER size{},zero{};
+    bool ok=GetFileInformationByHandle(input,&info) && info.nNumberOfLinks==1 &&
+        !(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) &&
+        GetFileSizeEx(input,&size) && size.QuadPart>0 && size.QuadPart<=1024*1024 &&
+        SetFilePointerEx(target,zero,nullptr,FILE_BEGIN);
+    BYTE bytes[4096];DWORD count=0;
+    while(ok) {
+        if(!ReadFile(input,bytes,sizeof(bytes),&count,nullptr)){ok=false;break;}
+        if(!count)break;
+        DWORD written=0;
+        if(!WriteFile(target,bytes,count,&written,nullptr)||written!=count){ok=false;break;}
+    }
+    if(ok)ok=SetEndOfFile(target)&&FlushFileBuffers(target);
+    CloseHandle(input);return ok;
+}
+
+bool LockedShortcutMatches(Session& session,const std::wstring& backup,bool compareBytes) {
+    if(session.shortcutLock.file==INVALID_HANDLE_VALUE)return false;
+    std::vector<BYTE> security;
+    if(!ReadFileSecurity(session.shortcutLock.file,security)||security!=session.shortcutSecurity)return false;
+    if(!compareBytes)return true; // Our exclusive write/delete lock protects edited bytes.
+    const HANDLE input=CreateFileW(backup.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,
+        OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    if(input==INVALID_HANDLE_VALUE)return false;
+    LARGE_INTEGER zero{};
+    const bool same=SetFilePointerEx(session.shortcutLock.file,zero,nullptr,FILE_BEGIN)&&
+        SameOpenFiles(session.shortcutLock.file,input);
+    CloseHandle(input);return same;
+}
+
+bool CommitShortcut(Session& session,bool ru,std::wstring& error) {
+    if(!session.shortcutPreserved)return RemoveShortcut(session,ru,error);
+    if(session.shortcutRetargetBackup.empty())return true;
+    ScopedPrivilege security(SE_SECURITY_NAME);
+    const DWORD attr=GetFileAttributesW(session.shortcutRetargetExe.c_str());
+    if(!security.enabled || attr==INVALID_FILE_ATTRIBUTES || (attr&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) ||
+       !GlassInstallUtil::IsSafeInstallPath(session.shortcutRetargetExe) ||
+       !LockedShortcutMatches(session,session.shortcutBackup,true)) {
+        error=Problem(ru,L"Ярлык или оставшийся Settings изменился; переназначение отменено.",
+            L"The shortcut or retained Settings changed; retargeting was refused.");return false;
+    }
+    session.shortcutRetargetAttempted=true; // Includes partial writes: rollback uses the held object.
+    if(RewriteShortcutStream(session.shortcutLock.file,session.shortcutRetargetBackup))return true;
+    error=Problem(ru,L"Не удалось переназначить ярлык Settings; требуется откат.",
+        L"Could not retarget the Settings shortcut; rollback is required.");return false;
+}
+
 } // namespace
 
 namespace GlassInstallRemoval {
@@ -906,11 +959,61 @@ bool Prepare(Session& session, bool removeX86, bool removeOpenGlass, bool remove
     return !Cancelled(cancelled);
 }
 
+bool PrepareSettingsShortcutRetarget(Session& session,const std::wstring& survivingRoot,
+    const std::wstring& x64Dir,const std::wstring& x86Dir,const std::wstring& workspace,
+    bool ru,std::wstring& error) noexcept {
+    try {
+        session.shortcutPreserved=true;
+        if(!x64Dir.empty()&&!x86Dir.empty()&&SamePath(x64Dir,x86Dir)) {
+            error=Problem(ru,L"Пути Settings x64 и x86 совпадают; раздельное удаление небезопасно.",
+                L"Settings x64 and x86 share a root; separate removal is unsafe.");return false;
+        }
+        if(survivingRoot.empty() || (!SamePath(survivingRoot,x64Dir)&&!SamePath(survivingRoot,x86Dir)))return false;
+        if(!PrepareShortcut(session,workspace,x64Dir,x86Dir,ru,error))return false;
+        if(!session.shortcutExisted)return true; // Respect a deliberately absent shortcut.
+        ComGuard com;ComPtr<IShellLinkW> link;ComPtr<IPersistFile> persist;
+        wchar_t oldTarget[32768]{},working[32768]{},icon[32768]{};int iconIndex=0;
+        if(!com.ok() || FAILED(CoCreateInstance(CLSID_ShellLink,nullptr,CLSCTX_INPROC_SERVER,
+            IID_IShellLinkW,reinterpret_cast<void**>(link.GetAddressOf()))) || !link ||
+            FAILED(link->QueryInterface(IID_IPersistFile,reinterpret_cast<void**>(persist.GetAddressOf()))) || !persist ||
+            FAILED(persist->Load(session.shortcutBackup.c_str(),STGM_READ)) ||
+            FAILED(link->GetPath(oldTarget,static_cast<int>(std::size(oldTarget)),nullptr,SLGP_RAWPATH)))return false;
+        const auto target=GlassInstallUtil::TrimTrailingSlashes(survivingRoot)+L"\\GlassSettings\\GlassSettings.exe";
+        if(SamePath(oldTarget,target))return true; // Already points at the kept architecture.
+        if(FAILED(link->GetWorkingDirectory(working,static_cast<int>(std::size(working)))) ||
+           FAILED(link->GetIconLocation(icon,static_cast<int>(std::size(icon)),&iconIndex)))return false;
+        const std::wstring oldExe=oldTarget;
+        const auto oldParent=oldExe.substr(0,oldExe.find_last_of(L"\\/"));
+        const auto newParent=target.substr(0,target.find_last_of(L"\\/"));
+        if(FAILED(link->SetPath(target.c_str())) ||
+           (SamePath(working,oldParent)&&FAILED(link->SetWorkingDirectory(newParent.c_str()))) ||
+           (SamePath(icon,oldExe)&&FAILED(link->SetIconLocation(target.c_str(),iconIndex))))return false;
+        // Arguments, description, custom icon/working directory, hotkey/show mode
+        // and extra data are preserved by loading/modifying the original link.
+        session.shortcutRetargetBackup=workspace+L"\\GlassSettings-retarget.lnk";
+        if(FAILED(persist->Save(session.shortcutRetargetBackup.c_str(),TRUE)))return false;
+        ScopedPrivilege security(SE_SECURITY_NAME);
+        if(!security.enabled)return false;
+        session.shortcutLock.file=CreateFileW(session.shortcutPath.c_str(),GENERIC_READ|GENERIC_WRITE|READ_CONTROL|ACCESS_SYSTEM_SECURITY,
+            FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+        BY_HANDLE_FILE_INFORMATION info{};LARGE_INTEGER size{};
+        if(session.shortcutLock.file==INVALID_HANDLE_VALUE ||
+           !GetFileInformationByHandle(session.shortcutLock.file,&info) || info.nNumberOfLinks!=1 ||
+           (info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) ||
+           !GetFileSizeEx(session.shortcutLock.file,&size) || size.QuadPart<=0 || size.QuadPart>1024*1024 ||
+           !GetFileInformationByHandleEx(session.shortcutLock.file,FileBasicInfo,&session.shortcutBasic,sizeof(session.shortcutBasic)) ||
+           !LockedShortcutMatches(session,session.shortcutBackup,true))return false;
+        session.shortcutRetargetExe=target;
+        return true;
+    }catch(...){error=Problem(ru,L"Не удалось подготовить переназначение ярлыка Settings.",
+        L"Could not prepare Settings shortcut retargeting.");return false;}
+}
+
 bool Commit(Session& session, bool russian, std::wstring& error) noexcept {
     error.clear();
     const auto orderedCommit = [&](ITaskService* service) {
         return GlassRemovalOrder::Commit(session.tasks.size(),
-            [&] { return RemoveShortcut(session, russian, error); },
+            [&] { return CommitShortcut(session, russian, error); },
             [&](size_t i) { return service && RemoveTask(service, session.tasks[i], russian, error); },
             [&] {
                 // The service is never recreated: credentials and arbitrary
@@ -946,6 +1049,15 @@ bool Restore(Session& session, bool russian, std::wstring& error) noexcept {
                 if (!RestoreTask(service.Get(), *it, russian, detail)) { ok = false; if (error.empty()) error = detail; }
             }
         }
+    }
+    if(session.shortcutRetargetAttempted) {
+        ScopedPrivilege security(SE_SECURITY_NAME);
+        const bool restored=security.enabled && LockedShortcutMatches(session,session.shortcutBackup,false) &&
+            RewriteShortcutStream(session.shortcutLock.file,session.shortcutBackup) &&
+            SetFileInformationByHandle(session.shortcutLock.file,FileBasicInfo,&session.shortcutBasic,sizeof(session.shortcutBasic));
+        if(restored)session.shortcutRetargetAttempted=false;
+        else {ok=false;if(error.empty())error=Problem(russian,L"Не удалось восстановить исходный ярлык Settings.",
+            L"Could not restore the original Settings shortcut.");}
     }
     if (session.shortcutRemoved) {
         if (!CopyFileW(session.shortcutBackup.c_str(), session.shortcutPath.c_str(), TRUE)) {

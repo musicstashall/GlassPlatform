@@ -45,6 +45,51 @@ const warn=d.querySelector('.comp-warning-button');warn.click();assert.equal(d.q
 const before=messages.length;
 d.querySelector('#components-warning-close').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
 assert.equal(d.querySelector('#components-warning-dialog').hidden,true);assert.equal(messages.length,before);
+// Warnings live only on cards/popups, never in the plan (including mirror).
+assert.equal(d.querySelectorAll('#components-plan-items .plan-warning').length,0);
+assert.doesNotMatch(d.querySelector('#components-plan-items').textContent,/Architecture-specific warning/);
+// Plan contains only a brief notice summary; full text belongs to Details.
+assert.equal(d.querySelector('#components-plan-notices').hidden,false);
+assert.doesNotMatch(d.querySelector('#components-plan-notices').textContent,/Architecture-specific warning/);
+d.querySelector('#components-plan-notices button').click();
+assert.match(d.querySelector('#components-warning-text').textContent,/Architecture-specific warning/);
+d.querySelector('#components-warning-ok').click();
+assert.equal(d.querySelector('#components-warning-dialog').hidden,true);
+assert.equal(d.activeElement,d.querySelector('#components-plan-notices button'));
+
+for(const card of d.querySelectorAll('[data-product="x86"]')){
+ const triangle=card.querySelector('.comp-warning-button');assert.ok(triangle);
+ assert.equal(triangle.parentElement.className,'c-card-top');assert.ok(triangle.querySelector('svg'));
+ triangle.click();assert.equal(d.querySelector('#components-warning-text').textContent,'Architecture-specific warning');
+ d.querySelector('#components-warning-close').click();assert.equal(d.activeElement,triangle);
+}
+// The cascade must not grey out idle newer Available cards; damage stays red.
+const newerCard=d.querySelector('[data-catalog-alias="x86"]');assert.ok(newerCard.classList.contains('has-newer'));
+assert.equal(dom.window.getComputedStyle(newerCard).borderTopColor,'rgba(131, 217, 166, 0.35)');
+assert.match(dom.window.getComputedStyle(newerCard).background,/#1f3a34|31, 58, 52/);
+receive({data:{type:'state',page:'components',components:rows.map(r=>({...r,checked:false,broken:r.id==='x86'}))}});
+assert.ok(d.querySelector('[data-catalog-alias="x86"]').classList.contains('is-broken'));
+assert.equal(d.querySelector('[data-catalog-alias="x86"]').classList.contains('has-newer'),false);
+assert.equal(d.querySelector('#product-x86').checked,false);
+// Empty states occupy their list plane; checking copy contains no implementation tutorial.
+receive({data:{type:'state',appMode:'setup',locale:'ru',page:'components',components:[]}});
+for(const id of ['components-grid','components-installed-grid']){
+ const grid=d.getElementById(id);assert.ok(grid.classList.contains('is-empty'));assert.ok(grid.closest('.c-lane-body').classList.contains('is-empty'));
+ assert.equal(dom.window.getComputedStyle(grid.querySelector('.c-drop')).justifyContent,'center');
+}
+assert.equal(dom.window.getComputedStyle(d.querySelector('.components-plan-empty')).flexGrow,'1');
+receive({data:{type:'state',page:'checking'}});assert.equal(d.querySelector('#checking-copy').textContent,'Ищем обновление GlassSetup.');
+receive({data:{type:'state',locale:'en',page:'checking'}});assert.equal(d.querySelector('#checking-copy').textContent,'Looking for a GlassSetup update.');
+// Vendor local ProductVersion has priority; release-tag metadata is labelled.
+for(const local of [true,false]){
+ const sutOffer={id:'secureUxTheme',title:'SecureUxTheme',installed:false,checked:false,operation:'install',targetVersion:local?'4.0.0':'4.1.0',targetVersionKind:local?'msi':'release',localPackageVersion:local?'4.0.0':'',remoteVersion:'4.1.0',releaseTag:'v4.1.0'};
+ receive({data:{type:'state',appMode:'setup',locale:'ru',page:'components',components:[sutOffer]}});
+ const card=d.querySelector('#product-secureUxTheme').closest('.c-card');
+ assert.equal(card.querySelector('.comp-version-line').textContent,local?'4.0.0':'релиз 4.1.0');
+ assert.match(card.querySelector('.c-src').textContent,/релиз 4.1.0/);
+ if(local)assert.match(card.querySelector('.c-src').textContent,/пакет 4.0.0/);
+ else assert.doesNotMatch(card.querySelector('.c-src').textContent,/пакет/);
+}
 // English state must regenerate decision labels even when product metadata is unchanged.
 receive({data:{type:'state',locale:'en',page:'components',maintenance:false,components:rows}});
 assert.equal(d.querySelector('#components-title').textContent,'GlassPlatform products');
@@ -171,9 +216,47 @@ assert.equal(d.querySelector('[data-catalog-alias="secureUxTheme"]').dataset.cat
 absentSut.closest('.c-card').querySelector('.comp-decision').click();
 assert.equal(messages.at(-1),'component:secureUxTheme:0');assert.ok(d.querySelector('#components-grid').contains(absentSut));
 assert.equal(d.querySelectorAll('#components-plan-items li:not(.plan-warning):not(.components-plan-empty)').length,0);
+// MSI package versions win over obsolete PE/bundle display fields. Available
+// shows its own candidate, not the installed version copied onto both panels.
+const versions=rows.map((r,i)=>({...r,checked:false,installed:i<5,operation:'repair',disabled:false,
+ installedVersion:'99.0.0.999',installedPackageVersion:(i+1)+'.2.3',targetVersion:(i+2)+'.4.5',
+ updateAvailable:i===0,broken:i===0,applySupported:true}));
+receive({data:{type:'state',page:'components',appMode:'setup',locale:'en',components:versions}});
+for(let i=0;i<5;i++){
+ const card=d.querySelector('#product-'+rows[i].id).closest('.c-card');
+ assert.match(card.querySelector('.c-meta').textContent,new RegExp((i+1)+'\\.2\\.3'));
+ assert.doesNotMatch(card.querySelector('.c-meta').textContent,/99\.0\.0/);
+ const offer=d.querySelector('[data-catalog-alias="'+rows[i].id+'"]');
+ assert.ok(offer);assert.ok(offer.querySelector('.c-meta').textContent.includes((i+2)+'.4.5'));
+}
+assert.ok(d.querySelector('#product-x64').closest('.c-card').classList.contains('is-broken'));
+assert.equal(d.querySelector('[data-catalog-alias="x64"] .comp-decision').title,'Update to 2.4.5');
+receive({data:{type:'state',components:[{...versions[2],installed:true,installedVersion:'99.0.0',installedPackageVersion:'',targetVersion:'',applySupported:false}]}});
+assert.equal(d.querySelector('#product-settings64').closest('.c-card').querySelector('.c-meta').textContent,'—');
+receive({data:{type:'state',components:[{...versions[5],installed:false,installedVersion:'',installedPackageVersion:'',targetVersion:''}]}});
+assert.equal(d.querySelector('#product-secureUxTheme').closest('.c-card').querySelector('.c-meta').textContent,'—');
 receive({data:{type:'state',page:'checking',checkingStatus:'Downloading and verifying new Setup'}});
 assert.equal(d.querySelector('#checking-status').textContent,'Downloading and verifying new Setup');
 assert.equal(d.querySelector('#update-panel'),null);
 assert.deepEqual(errors.map(e=>e.message),[]);
+// Recommendations are not "select every product": only verified need/explicit recommendation.
+const healthy=rows.map(r=>({...r,installed:true,checked:false,broken:false,operation:'repair',updateAvailable:false,warning:'',disabled:false,locked:false,applySupported:true,removeSupported:false}));
+receive({data:{type:'state',locale:'ru',page:'components',appMode:'setup',components:healthy}});
+assert.equal(d.querySelector('#components-select-all').disabled,true);
+assert.equal(d.querySelector('#components-remove-all').hidden,true);
+const recommended=healthy.map(r=>({...r}));
+recommended[0].broken=true;
+recommended[2].installed=false;recommended[2].operation='install';
+recommended[3].operation='update';recommended[3].updateAvailable=true;
+recommended[4].broken=true;recommended[4].locked=true;
+recommended[5].broken=true;recommended[5].applySupported=false;
+receive({data:{type:'state',locale:'ru',page:'components',appMode:'setup',components:recommended}});
+assert.equal(d.querySelector('#components-select-all').disabled,false);
+const start=messages.length;d.querySelector('#components-select-all').click();
+assert.deepEqual(messages.slice(start),['component:x64:1','component:settings32:1']);
+assert.equal(d.querySelector('#product-x86').checked,false,'healthy products remain manual');
+assert.equal(d.querySelector('#product-settings64').checked,false,'absent products are not implicit recommendations');
+assert.equal(d.querySelector('#components-select-all').disabled,true);
+assert.equal(errors.length,0);
 dom.window.close();
 process.stdout.write('PASS: separate catalogue/composition content, planned catalogue idle/needed exclusion; actual production DOM: six rows, real per-architecture IPC, version metadata, live plan/counts, warnings/Escape, RU/EN, setup/uninstall titles and disabled-action gate\n');

@@ -24,10 +24,11 @@ harness=base+r'''
 namespace GlassInstallMsi {
 // CODES
 bool IsProductInstalled(const wchar_t* code){return MsiQueryProductStateW(code)==INSTALLSTATE_DEFAULT;}
-std::wstring QueryDisplayVersion(const wchar_t*){return L"4.0.0";}
+std::map<std::wstring,std::wstring> versions;
+std::wstring QueryDisplayVersion(const wchar_t* code){auto it=versions.find(code);return it==versions.end()?L"4.0.0":it->second;}
 }
 namespace GlassProductInspect {
-struct ProductReport {bool installed=false;std::wstring installedVersion;};
+struct ProductReport {bool installed=false;std::wstring installedVersion,installedPackageVersion;};
 struct Report {ProductReport x64,x86,settings64,settings32,settings,og,secureUxTheme;
  std::wstring officialSecureUxThemeCode,secureUxThemePresenceDetail;};
 }
@@ -57,6 +58,16 @@ int main(){
  families.clear();states.clear();enumerationError=ERROR_ACCESS_DENIED;
  r=InspectPresence();assert(!r.secureUxTheme.installed&&r.officialSecureUxThemeCode.empty());
  assert(r.secureUxThemePresenceDetail.find(L"rc=5")!=std::wstring::npos);
+ // Distinct MSI registrations must remain distinct; no bundle/PE substitution.
+ families.clear();states.clear();enumerationError=0;
+ const wchar_t* codes[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
+  GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass};
+ for(unsigned i=0;i<5;++i){states[codes[i]]=INSTALLSTATE_DEFAULT;GlassInstallMsi::versions[codes[i]]=std::to_wstring(i+1)+L".2.3";}
+ r=InspectPresence();unsigned n=0;
+ for(auto* product:{&r.x64,&r.x86,&r.settings64,&r.settings32,&r.og}){
+  assert(product->installedVersion==std::to_wstring(++n)+L".2.3");
+  assert(product->installedPackageVersion==product->installedVersion);
+ }
  std::cout<<"PASS: actual native presence projection: none, ABSENT not installed, DEFAULT installed, repack, mixed, failed inventory; diagnostic evidence\n";
 }
 '''.replace('// CODES',codes).replace('// PROJECTION',projection)

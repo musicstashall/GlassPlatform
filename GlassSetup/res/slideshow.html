@@ -504,8 +504,6 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .c-card:active{cursor:grabbing}
 .c-card.dragging{cursor:grabbing;opacity:.92;border-color:#c1b4ff8c;box-shadow:0 0 0 1px #c1b4ff5e,0 14px 30px #04050e66}
 .c-card button{cursor:pointer}
-.c-card.is-broken{border-color:#e57a7a70;background:linear-gradient(130deg,rgba(126,72,86,.34),rgba(38,26,36,.56))}
-.c-card.is-broken:hover{border-color:#e57a7a9e}
 .c-card.pending-install{border:1px dashed #9f90ea;background:linear-gradient(130deg,#252444,#191b31)}
 .c-card.has-offer{border-color:#f4bd5e5c;background:linear-gradient(130deg,rgba(124,95,42,.32),rgba(33,30,42,.62))}
 .c-card.has-offer:hover{border-color:#f4bd5e8c}
@@ -514,12 +512,6 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .c-card.pending-remove{border:1px dashed #d0a866;background:linear-gradient(130deg,#2f2739,#1f1d2c)}
 .c-card.active{border-color:#b3a6f566;background:linear-gradient(130deg,#2a2749,#1c1e33);box-shadow:inset 0 1px #ffffff08,0 0 0 1px #b3a6f51f,0 3px 10px #04050e3d}
 .c-card.active:hover{border-color:#c1b4ffa6;background:linear-gradient(130deg,#2e2b50,#1f2138)}
-.c-card.has-newer{border-color:#83d9a659;background:linear-gradient(130deg,#1f3a34,#17252c);box-shadow:inset 0 1px #ffffff08,0 0 0 1px #83d9a61a,0 3px 10px #04050e3d}
-.c-card.has-newer:hover{border-color:#83d9a68c}
-.c-card.has-newer .c-meta{color:#9fdcb9}
-.c-card.has-newer .c-meta b{color:#c6f0d8;font-weight:600}
-.c-card.has-newer .c-move{color:#9fdcb9}
-.c-card.idle.has-newer{opacity:.72}
 .c-src{display:flex;align-items:center;gap:4px;min-width:0;color:#8f94ae;font-size:7.4px;white-space:nowrap;overflow:hidden}
 .src-bit{display:inline-flex;align-items:center;gap:3px;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .src-bit i{width:5px;height:5px;border-radius:50%;flex:0 0 5px;background:#6f7590}
@@ -612,6 +604,11 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 #components-panel .c-slot-right{right:48px;width:268px}
 #components-panel .components-list{position:relative;inset:auto;height:330px;padding:6px 10px;overflow-y:auto;mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),#0000);-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),#0000)}
 #components-panel .components-grid{display:flex;flex-direction:column;gap:7px;grid-template-columns:none}
+/* Fill the usable list plane, retaining the lane's 6px/10px insets. */
+#components-panel .components-grid.is-empty{flex:1 1 auto;min-height:0}
+#components-panel .c-lane-body.is-empty{mask-image:none;-webkit-mask-image:none}
+#components-panel .components-grid.is-empty .c-drop{flex:1 1 auto;min-height:0;width:100%;box-sizing:border-box}
+
 #components-panel .comp-card{gap:0;align-items:stretch;cursor:default}
 #components-panel .comp-check{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);margin:0;opacity:0}
 #components-panel .comp-card:focus-within{outline:1px solid #c1b4ff;outline-offset:1px}
@@ -620,12 +617,15 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 #components-panel .comp-icon.tone-purple{background:#a795ff14;border:1px solid #b9a6ff38;color:#c9baff}
 #components-panel .comp-icon.tone-cyan{background:#a7dddf10;border:1px solid #a7dddf38;color:#a7dddf}
 #components-panel .comp-icon.tone-amber{background:#f4bd5e10;border:1px solid #f4c46d38;color:#f4c46d}
-#components-panel .comp-warning-button{position:absolute;top:24px;left:2px;width:16px;height:16px;font-size:10px;padding:0;border-radius:5px}
+#components-panel .comp-warning-button{position:static;flex:0 0 16px;margin-left:auto;width:16px;height:16px;padding:1px;border:0;background:transparent;color:#f4bd5e;border-radius:4px;display:grid;place-items:center}
+#components-panel .comp-warning-button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+#components-panel .comp-warning-button:focus-visible{outline:2px solid #ffdf9d;outline-offset:2px}
+#components-panel .c-card-top .comp-name{min-width:0;flex:1 1 auto}
 #components-panel .comp-name{padding:0;border:0;background:none;text-align:left;font-family:inherit;cursor:pointer;display:block}
 #components-panel .comp-name:hover{color:#ded7ff;text-decoration:underline;text-underline-offset:2px}
 #components-panel .comp-state{margin:0;max-width:225px;color:inherit;font-size:7.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #components-panel .c-meta{padding-left:0}
-#components-panel .has-warning .c-meta{padding-left:25px}
+#components-panel .has-warning .c-meta{padding-left:0}
 #components-panel .comp-version-line{margin:0;font:inherit;display:block}
 #components-panel .comp-version-tag{padding:0;border:0;background:none}
 #components-panel .comp-version-target{color:#a3a7bf}
@@ -643,9 +643,24 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 #components-panel .components-plan ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;flex:1;min-height:0;max-height:none;gap:2px}
 #components-panel .components-plan li{display:flex;align-items:center;justify-content:space-between;gap:5px;font-size:8.1px;padding:3px 5px;border:1px solid #ffffff0f;border-radius:6px;background:#ffffff05;line-height:1.4}
 #components-panel .components-plan li span:nth-child(2){font-size:7.4px;max-width:90px}
-#components-panel .components-plan li.plan-warning{color:#f0d4a1;border-color:#f4c46d4d;background:#f4bd5e10;font-size:8px}
-#components-panel .components-plan-empty{font-size:8.4px;color:#8b90aa;min-height:118px;text-align:center;align-items:center;justify-content:center;border-style:dashed!important;background:none!important}
+#components-panel .components-plan li.components-plan-empty{flex:1 1 auto;min-width:0;font-size:8.4px;color:#8b90aa;min-height:0;text-align:center;align-items:center;justify-content:center;border-style:dashed!important;background:none!important}
 #components-panel #components-plan-note{font-size:7.4px;line-height:1.4;color:#8b90a9;margin:7px 0 4px;padding-top:6px;border-top:1px solid #ffffff0d}
+/* Semantic tones follow neutral states and outrank legacy hover; no automatic Apply. */
+#components-panel .c-card.has-offer,#components-panel .c-card.has-warning{border-color:#f4bd5e5c;background:linear-gradient(130deg,rgba(124,95,42,.32),rgba(33,30,42,.62))}
+#components-panel .c-card.has-offer:hover,#components-panel .c-card.has-warning:hover{border-color:#f4bd5e8c;background:linear-gradient(130deg,rgba(148,111,45,.42),rgba(46,38,39,.72))}
+#components-panel .c-card.is-activated{border-color:#83d9a685;background:linear-gradient(130deg,rgba(31,61,52,.62),rgba(17,32,35,.78))}
+#components-panel .c-card.is-activated:hover{border-color:#83d9a6b8;background:linear-gradient(130deg,rgba(36,72,60,.7),rgba(19,38,41,.84))}
+#components-panel .c-card.is-broken{border-color:#e57a7a70;background:linear-gradient(130deg,rgba(126,72,86,.34),rgba(38,26,36,.56))}
+#components-panel .c-card.is-broken:hover{border-color:#e57a7a9e;background:linear-gradient(130deg,rgba(148,70,83,.46),rgba(51,29,40,.72))}
+#components-panel .c-card.has-newer{opacity:.92;border-color:#83d9a659;background:linear-gradient(130deg,#1f3a34,#17252c);box-shadow:inset 0 1px #ffffff08,0 0 0 1px #83d9a61a,0 3px 10px #04050e3d}
+#components-panel .c-card.has-newer:hover{opacity:1;border-color:#83d9a68c;background:linear-gradient(130deg,#24473c,#1b3032)}
+#components-panel .c-card.has-newer .c-meta{color:#9fdcb9}
+#components-panel .c-card.has-newer .c-meta b{color:#c6f0d8;font-weight:600}
+#components-panel .c-card.has-newer .c-move{color:#9fdcb9}
+#components-panel .components-plan-actions{display:flex;gap:6px}
+#components-panel .components-plan-actions .components-select-all{flex:1;min-width:0;padding:0 4px}
+#components-panel #components-remove-all{color:#ffcfbc;border-color:#e7987959;background:#e7987912}
+#stage[data-mode="cleanup-review"] .components-plan-actions{display:none}
 #components-panel .components-select-all{position:static;align-self:stretch;height:26px;min-height:26px;margin:0 0 8px;padding:0 10px;border:1px solid #c1b4ff59;border-radius:7px;background:#c1b4ff12;color:#ded7ff;font-size:9px;letter-spacing:0}
 .comp-action-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 #components-panel .comp-slim{display:flex;align-items:flex-start;gap:9px;padding:9px 0 0;margin-top:9px;border:0;border-top:1px solid #ffffff14;border-radius:0;background:none;min-height:0}
@@ -664,6 +679,39 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .components-warning-shade h2{color:#edd0a0;font-size:18px;font-weight:500;margin:0 0 12px}
 .components-warning-shade p{color:#d0c2b6;font-size:12px;line-height:1.65;white-space:pre-line;margin:0}
 #components-warning-close{position:absolute;right:10px;top:10px;width:26px;height:26px;border:0;background:transparent;color:#dcc7aa;font-size:19px;cursor:pointer}
+
+#components-panel .components-plan-totals{flex-shrink:0}
+#components-panel .components-plan-actions{display:block}
+#components-panel .components-plan-actions .components-select-all{width:100%;font-weight:600}
+#components-panel .plan-section-heading{font-size:7.5px;letter-spacing:1.2px;color:#9297b0;margin:3px 0 5px;flex-shrink:0}
+#components-panel .components-plan ul{overflow-y:auto}
+#components-panel .components-plan li.remove{color:#ffaaaa;border-color:#e57a7a55;background:#e57a7a0d}
+#components-panel .components-plan li.update,#components-panel .components-plan li.repair,#components-panel .components-plan li.install{color:#b1e6c7;border-color:#83d9a64d;background:#83d9a60b}
+#components-panel #components-remove-all{display:flex;align-items:center;gap:5px;width:100%;flex-shrink:0;margin:6px 0 0;padding:2px 0;border:0;border-radius:0;background:transparent;color:#f197a0;font:500 8px 'Segoe UI',sans-serif;cursor:pointer;text-align:left}
+#components-panel #components-remove-all:hover{color:#ffb6bd;text-decoration:underline}
+#components-panel #components-remove-all[hidden],#components-plan-notices[hidden]{display:none!important}
+#components-remove-all svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.6}
+#components-plan-notices{flex-shrink:0;padding:7px 8px;margin-top:5px;border:1px solid #e8bb6455;border-radius:7px;background:#e8bb640b;color:#efcf95;font-size:8px;line-height:1.5}
+#components-plan-notices span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#components-plan-notices button{display:block;margin-top:4px;padding:2px 6px;border:1px solid #ffffff25;border-radius:4px;background:#ffffff09;color:inherit;font:inherit;cursor:pointer}
+.components-warning-shade{background:#080b1b65;backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+.components-warning-shade section,.components-warning-shade.is-info section{width:560px;max-height:460px;padding:24px;border:1px solid #b5b5d14d;border-radius:16px;background:linear-gradient(135deg,#35384eea,#151827f5);box-shadow:inset 0 1px #ffffff12,0 24px 65px #0007;display:flex;flex-direction:column;overflow:hidden}
+.components-warning-shade .dialog-kicker{font-size:8px;letter-spacing:2px;font-weight:700;color:#edc17b;margin:0 0 14px}
+.components-warning-shade.is-info .dialog-kicker{color:#c1b4ff}
+.components-warning-shade h2,.components-warning-shade.is-info h2{font-size:17px;font-weight:600;color:#efedf9;margin:0;padding-bottom:16px;border-bottom:1px solid #ffffff20}
+#components-warning-text{overflow-y:auto;min-height:0;padding:4px 0 18px}
+.components-warning-shade p,.components-warning-shade.is-info p{color:#d1d3e2;font-size:10.5px;line-height:1.75;margin:0;white-space:pre-line}
+.dialog-description{padding:14px 0!important}
+.dialog-detail-row{display:grid;grid-template-columns:110px 1fr;gap:12px;padding:12px 0;border-top:1px solid #ffffff1a}
+.dialog-detail-row>span{font-size:8px;letter-spacing:1px;color:#9399b0;font-weight:600}
+.dialog-detail-row:first-of-type>span{color:#edc17b}
+.dialog-warning-entry{padding:15px 0!important;border-bottom:1px solid #ffffff1a}
+.dialog-warning-entry::before{content:'•  ';color:#edc17b}
+.dialog-diagnostic{padding-top:8px!important;overflow-wrap:anywhere}
+.components-warning-shade footer{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;margin:0 -24px -24px;padding:16px 24px;border-top:1px solid #ffffff20;color:#8d93ad;font-size:9px}
+#components-warning-ok{padding:7px 18px;border:1px solid #ffffff38;border-radius:8px;background:#ffffff0b;color:#e7e4f3;font:600 10px 'Segoe UI',sans-serif;cursor:pointer}
+#components-warning-ok:hover{background:#ffffff19}
+#components-warning-close{color:#a8abc0;right:12px;top:12px}
 
 #stage[data-mode="settings-removal-risk"] .error-copy{top:78px;width:880px}
 #stage[data-mode="settings-removal-risk"] .complete-visual{display:none}
@@ -761,10 +809,10 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 <div class="components-stack">
 <div class="c-slot c-slot-left"><section data-component-drop="available" class="c-lane available" aria-labelledby="available-title"><div class="c-lane-head"><span id="available-title" class="c-lane-title"></span><span id="available-count" class="c-lane-count"></span><button class="c-pin" type="button" data-component-pin="available" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M15.95 8.6V4.1h1.07a1.15 1.15 0 0 0 0-2.3H6.98a1.15 1.15 0 0 0 0 2.3h1.07v4.5c0 1.72-1.35 3.1-3.05 3.1v2.3h6.1v7.55a.9.9 0 0 0 1.8 0V11.9h6.1v-2.3c-1.7 0-3.05-1.38-3.05-3.1z"/></svg></button><div class="c-view" role="group" data-shelf="available"><button type="button" class="c-view-btn" data-view="all"></button><button type="button" class="c-view-btn" data-view="needed"></button></div></div><div class="components-list c-lane-body"><div id="components-grid" class="components-grid" role="group" aria-labelledby="available-title"></div></div><div class="c-veil" aria-hidden="true"><span class="c-veil-ico"><svg viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4M5 19h14"/></svg></span><b data-drop-title></b><span data-drop-copy></span></div><div class="c-lane-foot"><span id="available-foot"></span><span id="components-scroll-hint" class="c-more"></span></div></section></div>
 <section data-component-drop="installed" tabindex="-1" class="c-lane installed" aria-labelledby="installed-title"><div class="c-lane-head"><span id="installed-title" class="c-lane-title"></span><span id="installed-count" class="c-lane-count"></span><div class="c-view" role="group" data-shelf="installed"><button type="button" class="c-view-btn" data-view="all"></button><button type="button" class="c-view-btn" data-view="needed"></button></div></div><div class="components-installed-list c-lane-body"><div id="components-installed-grid" class="components-grid" role="group" aria-labelledby="installed-title"></div></div><div class="c-veil" aria-hidden="true"><span class="c-veil-ico"><svg viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4M5 19h14"/></svg></span><b data-drop-title></b><span data-drop-copy></span></div><div class="c-lane-foot" id="installed-foot"></div></section>
-<div class="c-slot c-slot-right"><aside class="components-plan c-plan"><button class="c-pin c-pin-corner" type="button" data-component-pin="plan" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M15.95 8.6V4.1h1.07a1.15 1.15 0 0 0 0-2.3H6.98a1.15 1.15 0 0 0 0 2.3h1.07v4.5c0 1.72-1.35 3.1-3.05 3.1v2.3h6.1v7.55a.9.9 0 0 0 1.8 0V11.9h6.1v-2.3c-1.7 0-3.05-1.38-3.05-3.1z"/></svg></button><h2 id="components-plan-title"></h2><div id="components-plan-totals" class="components-plan-totals" aria-live="polite"></div><button id="components-select-all" class="components-select-all" type="button">Выбрать всё</button><ul id="components-plan-items" class="plan-items" aria-live="polite"></ul><div id="components-extra" class="components-extra"></div><p id="components-plan-note"></p><div class="components-summary"><span id="components-count" aria-live="polite"></span></div></aside></div>
+<div class="c-slot c-slot-right"><aside class="components-plan c-plan"><button class="c-pin c-pin-corner" type="button" data-component-pin="plan" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M15.95 8.6V4.1h1.07a1.15 1.15 0 0 0 0-2.3H6.98a1.15 1.15 0 0 0 0 2.3h1.07v4.5c0 1.72-1.35 3.1-3.05 3.1v2.3h6.1v7.55a.9.9 0 0 0 1.8 0V11.9h6.1v-2.3c-1.7 0-3.05-1.38-3.05-3.1z"/></svg></button><h2 id="components-plan-title"></h2><div id="components-plan-totals" class="components-plan-totals" aria-live="polite"></div><div class="components-plan-actions"><button id="components-select-all" class="components-select-all" type="button">Выбрать всё</button></div><div id="components-plan-heading" class="plan-section-heading"></div><ul id="components-plan-items" class="plan-items" aria-live="polite"></ul><div id="components-extra" class="components-extra"></div><p id="components-plan-note"></p><div class="components-summary"><span id="components-count" aria-live="polite"></span></div><div id="components-plan-notices" hidden></div><button id="components-remove-all" type="button" hidden></button></aside></div>
 </div>
 <div class="c-edge c-edge-left is-off" data-component-edge="available" aria-hidden="true"><span class="c-lip c-lip-left"></span><button type="button" class="c-peek c-peek-left is-off" data-component-peek="available"><span class="c-peek-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6l-6 6 6 6"/></svg></span></button></div><div class="c-edge c-edge-right is-off" data-component-edge="plan" aria-hidden="true"><span class="c-lip c-lip-right"></span><button type="button" class="c-peek c-peek-right is-off" data-component-peek="plan"><span class="c-peek-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6l6 6-6 6"/></svg></span></button></div><div id="components-gesture-status" class="component-toast" role="status" aria-live="polite"></div><div id="components-status" hidden><span id="components-status-text"></span></div>
-<div id="components-warning-dialog" class="components-warning-shade" hidden><section role="dialog" aria-modal="true" aria-labelledby="components-warning-title"><button id="components-warning-close" type="button" aria-label="Close">×</button><h2 id="components-warning-title"></h2><p id="components-warning-text"></p></section></div>
+<div id="components-warning-dialog" class="components-warning-shade" hidden><section role="dialog" aria-modal="true" aria-labelledby="components-warning-title"><button id="components-warning-close" type="button" aria-label="Close">×</button><div id="components-warning-kicker" class="dialog-kicker"></div><h2 id="components-warning-title"></h2><div id="components-warning-text"></div><footer><span id="components-warning-hint"></span><button id="components-warning-ok" type="button"></button></footer></section></div>
 </section>
 <section id="certificate-panel" class="mode-panel components-scene" aria-labelledby="certificate-title">
 <img id="certificate-banner" class="components-banner" alt="" aria-hidden="true"><div class="components-overlay"></div><div id="certificate-brand" class="native-brand">GlassPlatform</div>
@@ -836,12 +884,12 @@ const slides=[
 ];
 const uiResources={
 ru:{title:'GlassPlatform · Установка',tagline:'Новый взгляд',slide:'Слайд',slideRole:'слайд',carouselRole:'слайд-шоу',choose:'Выбрать слайд',resume:'Продолжить слайд-шоу',pause:'Приостановить слайд-шоу',
-checkingKicker:'ВЕРСИЯ УСТАНОВЩИКА',checkingTitle:'Проверяем новую версию',checkingCopy:'Проверяем версию Setup и каталог продуктов. Здесь же скачиваем и проверяем новый Setup. Если сервер недоступен, продолжим текущей версией.',checkingStatus:'Запрос к GitHub Releases',checkingSub:'Мастер продолжит работу, даже если обновления нет',checkingSource:'GitHub Releases',
+checkingKicker:'ВЕРСИЯ УСТАНОВЩИКА',checkingTitle:'Проверяем новую версию',checkingCopy:'Ищем обновление GlassSetup.',checkingStatus:'Запрос к GitHub Releases',checkingSub:'Это займёт несколько секунд',checkingSource:'GitHub Releases',
 forceKicker:'UNLOCKER · ПОВТОРНАЯ ВЫГРУЗКА',forceTitle:'Освобождаем модули',forceDescription:'Закройте указанные приложения и повторите проверку или явно продолжите на свой риск. Установщик не будет принудительно выгружать модули или завершать эти процессы. Может потребоваться перезагрузка.',forceStatus:'Повторная выгрузка модулей…',forceSubstatus:'Этап 1 из 2 · освобождение модулей',forceHoldersTitle:'Занятые модули и удерживающие их процессы',
 unlockKicker:'UNLOCKER · РАЗБЛОКИРОВКА ПРОЦЕССОВ',unlockTitle:'Закрываем приложения',unlockDescription:'Приложения могут быть завершены принудительно. Проводник не завершается целиком: закрываются только его файловые окна.',unlockStatus:'Закрытие процессов…',unlockSubstatus:'Проводник защищён от принудительного завершения',unlockHoldersTitle:'Процессы, которые удерживают модули',
 doneTag:'ГОТОВО',doneTitle:'Всё готово!',doneBody:'Выбранные операции выполнены.',doneReady:'ГОТОВО К РАБОТЕ',doneNote:'Мастер можно закрыть. Журналы: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).',doneWarnTag:'ГОТОВО, ЕСТЬ ЗАМЕЧАНИЯ',doneWarnTitle:'Операции завершены с замечаниями',doneWarnBody:'Есть замечания к завершающим действиям установщика. Подробности приведены ниже и в журнале %WINDIR%\\Temp\\GlassSetupLogs-*.',doneWarnLabel:'ЗАМЕЧАНИЯ',errorTag:'ОШИБКА',errorTitle:'Установка не выполнена',errorBody:'Не удалось завершить установку. Ниже указана возможная причина.',errorDetails:'ДЕТАЛИ',errorReason:'',errorNote:'Подробности: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).'},
 en:{title:'GlassPlatform · Setup',tagline:'A new perspective',slide:'Slide',slideRole:'slide',carouselRole:'carousel',choose:'Choose a slide',resume:'Resume slideshow',pause:'Pause slideshow',
-checkingKicker:'SETUP VERSION',checkingTitle:'Checking for a newer version',checkingCopy:'Checking Setup and the product catalogue. New Setup is downloaded and verified here. If the server is unavailable, setup continues with this version.',checkingStatus:'Requesting GitHub Releases',checkingSub:'Setup continues even when there is no update',checkingSource:'GitHub Releases',
+checkingKicker:'SETUP VERSION',checkingTitle:'Checking for a newer version',checkingCopy:'Looking for a GlassSetup update.',checkingStatus:'Requesting GitHub Releases',checkingSub:'This should only take a few seconds',checkingSource:'GitHub Releases',
 forceKicker:'UNLOCKER · RETRYING MODULE RELEASE',forceTitle:'Releasing modules',forceDescription:'Close the listed applications and retry, or explicitly continue at your own risk. Setup will not force-unload modules or terminate these processes. A restart may be required.',forceStatus:'Retrying module unload…',forceSubstatus:'Stage 1 of 2 · module release',forceHoldersTitle:'Modules held by these processes',
 unlockKicker:'UNLOCKER · PROCESS RELEASE',unlockTitle:'Closing applications',unlockDescription:'Applications may be terminated if they do not close. Explorer itself is not terminated; only its file windows are closed.',unlockStatus:'Closing processes…',unlockSubstatus:'Explorer is protected from forced termination',unlockHoldersTitle:'Processes still holding modules',
 doneTag:'DONE',doneTitle:'You’re all set!',doneBody:'The selected operations have completed.',doneReady:'READY TO USE',doneNote:'You can close the wizard. Logs: %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).',doneWarnTag:'DONE WITH NOTES',doneWarnTitle:'Operations completed with notes',doneWarnBody:'Some final setup actions need attention. Details are listed below and in the %WINDIR%\\Temp\\GlassSetupLogs-* log.',doneWarnLabel:'NOTES',errorTag:'ERROR',errorTitle:'Setup could not finish',errorBody:'Installation did not complete. A possible reason is shown below.',errorDetails:'DETAILS',errorReason:'',errorNote:'See %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).'}
@@ -863,7 +911,42 @@ function componentLock(title){
 }
 let warningReturnFocus=null;
 function closeProductWarning(){document.getElementById('components-warning-dialog').hidden=true;if(warningReturnFocus&&warningReturnFocus.isConnected)warningReturnFocus.focus();}
-function showProductWarning(item,button){endComponentDrag();clearTimeout(componentHideTimer);clearComponentEdge();warningReturnFocus=button;document.getElementById('components-warning-dialog').classList.toggle('is-info',!!item.information);document.getElementById('components-warning-title').textContent=item.title||'';document.getElementById('components-warning-text').textContent=item.warning||'';document.getElementById('components-warning-close').setAttribute('aria-label',locale==='ru'?'Закрыть':'Close');document.getElementById('components-warning-dialog').hidden=false;document.getElementById('components-warning-close').focus();}
+function dialogParagraph(parent,text,className=''){const p=document.createElement('p');p.className=className;p.textContent=text||'—';parent.append(p);return p;}
+function componentPlanWarnings(){return [...new Set((hostState.components||[]).filter(x=>!x.hidden).map(x=>x.warning).filter(Boolean))];}
+function showProductWarning(item,button){
+ endComponentDrag();clearTimeout(componentHideTimer);clearComponentEdge();warningReturnFocus=button;
+ const ru=locale==='ru',shade=document.getElementById('components-warning-dialog'),body=document.getElementById('components-warning-text');
+ shade.classList.toggle('is-info',!!item.information);body.replaceChildren();
+ document.getElementById('components-warning-kicker').textContent=item.information?(ru?'—  ПРОДУКТ':'—  PRODUCT'):(ru?'—  ПРЕДУПРЕЖДЕНИЕ':'—  WARNING');
+ document.getElementById('components-warning-title').textContent=item.title||'';
+ if(item.information){
+  dialogParagraph(body,item.description,'dialog-description');
+  const input=document.getElementById('product-'+item.id),f=input&&componentCardFacts(item,input);
+  const state=f?.remove?(ru?'Будет удалено: MSI снимается с регистрации; удаляются файлы, службы и задачи продукта согласно правилам пакета.':'Will be removed: MSI registration, files, services and tasks are removed according to package rules.'):item.state;
+  const version=item.targetVersionKind==='release'?(ru?'релиз ':'release ')+(item.targetVersion||item.releaseTag||'—'):(item.targetVersion||'—');
+  const pkg=[item.packageSize?componentSize(item.packageSize):'',version,ru?'Размер и SHA-256 сверяются перед установкой.':'Size and SHA-256 are checked before installation.'].filter(Boolean).join(' · ');
+  for(const [label,text] of [[ru?'СОСТОЯНИЕ':'STATE',state],[ru?'ЗАВИСИМОСТИ':'DEPENDENCIES',item.warning||(ru?'Нет предупреждений о составе.':'No composition warnings.')],[ru?'ПАКЕТ':'PACKAGE',pkg]]){
+   const row=document.createElement('div');row.className='dialog-detail-row';const key=document.createElement('span');key.textContent='•  '+label;row.append(key);dialogParagraph(row,text);body.append(row);
+  }
+  if(item.presenceDetail)dialogParagraph(body,item.presenceDetail,'dialog-diagnostic');
+  for(const reason of item.reasons||[])dialogParagraph(body,reason,'dialog-diagnostic');
+ }else if(item.planWarnings){
+  dialogParagraph(body,ru?'Проверьте сведения перед применением изменений.':'Review these notes before applying changes.','dialog-description');
+  for(const warning of item.planWarnings)dialogParagraph(body,warning,'dialog-warning-entry');
+ }else dialogParagraph(body,item.warning,'dialog-warning-entry');
+ document.getElementById('components-warning-hint').textContent=ru?'Esc закрыть':'Esc to close';
+ document.getElementById('components-warning-ok').textContent=ru?'Понятно':'Got it';
+ document.getElementById('components-warning-close').setAttribute('aria-label',ru?'Закрыть':'Close');shade.hidden=false;document.getElementById('components-warning-close').focus();
+}
+function componentRecommendations(){
+ if(hostState.appMode==='unins'||hostState.componentsLoading)return [];
+ return [...document.querySelectorAll('#components-panel .c-card input.comp-check')].filter(input=>{
+  const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);if(!item||item.hidden)return false;
+  const f=componentCardFacts(item,input);return !input.disabled&&item.applySupported!==false&&!f.remove&&(f.newer||f.broken||item.recommended===true);
+ });
+}
+function acceptComponentRecommendations(){for(const input of componentRecommendations())if(!input.checked)commitComponentChoice(input,true);}
+
 const componentShelfViews={available:'all',installed:'all'};
 // Concept C panel lifecycle. Session-local layout state never changes product intents.
 const componentSides={visible:{available:false,plan:true},pinned:{available:false,plan:false}};
@@ -1053,9 +1136,10 @@ function bindComponentWorkspace(){
 // A release catalogue card and an installed-composition card are different views
 // of one intent, not clones with the same action/status content (concept C).
 function componentSize(bytes){return new Intl.NumberFormat(locale==='ru'?'ru':'en',{minimumFractionDigits:1,maximumFractionDigits:1}).format(bytes/1048576)+(locale==='ru'?' МБ':' MB');}
+function componentMsiVersion(item){return typeof item.installedPackageVersion==='string'?(item.installedPackageVersion||'—'):(item.installedVersion||'—');}
 function componentCardFacts(item,input){
  const selected=input.checked,remove=selected&&(hostState.appMode==='unins'||input.dataset.intent==='remove');
- const newer=!!(item.installed&&item.operation==='update'&&item.targetVersion);
+ const newer=!!(item.installed&&(item.operation==='update'||item.updateAvailable===true)&&item.targetVersion);
  // A warning/conflict tone is not evidence of damaged installed payloads.
  const broken=!!(item.installed&&item.broken===true);
  const interactive=!input.disabled&&!hostState.componentsLoading;
@@ -1069,7 +1153,7 @@ function bindComponentName(name,item){
  // without making the whole header a native button excluded from pointer drag.
  name.tabIndex=0;name.setAttribute('role','button');
  name.title=locale==='ru'?'Сведения о продукте':'Product information';
- name.onclick=()=>showProductWarning({...item,information:true,warning:[item.description,item.state,...(item.reasons||[]),item.presenceDetail].filter(Boolean).join('\n\n')},name);
+ name.onclick=()=>showProductWarning({...item,information:true},name);
  name.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();name.click();}};
 }
 function componentRemovalSupported(item){return hostState.appMode!=='unins'&&item?.installed&&item.removeSupported===true&&!item.disabled&&!item.locked;}
@@ -1084,7 +1168,7 @@ function commitComponentChoice(input,checked){
  input.dataset.intent='apply';input.checked=checked;input.dispatchEvent(new Event('change',{bubbles:true}));return true;
 }
 function componentCardAction(item,input,shelf){
- const ru=locale==='ru',f=componentCardFacts(item,input),current=item.installedVersion||item.installedPackageVersion||'',target=item.targetVersion||'';
+ const ru=locale==='ru',f=componentCardFacts(item,input),current=componentMsiVersion(item),target=item.targetVersion||'';
  if(f.remove&&hostState.appMode!=='unins'&&shelf==='available'&&item.applySupported!==false)return {act:'install',value:true,label:(ru?'Установить ':'Install ')+item.title};
  if(f.remove&&hostState.appMode!=='unins')return {act:'restore',value:false,label:ru?'Оставить установленным':'Keep installed'};
  if(shelf==='available')return {act:!item.installed?'install':f.newer?'update':'repair',value:true,
@@ -1097,10 +1181,10 @@ function componentCardAction(item,input,shelf){
 }
 function paintComponentCard(card,item,input,shelf){
  const ru=locale==='ru',f=componentCardFacts(item,input),available=shelf==='available';
- const current=item.installedVersion||item.installedPackageVersion||'',target=item.targetVersion||'';
+ const current=componentMsiVersion(item),target=item.targetVersion||'';
  const meta=card.querySelector('.c-meta'),foot=card.querySelector('.c-foot'),action=card.querySelector('.comp-decision');
  const line=document.createElement('span');line.className='comp-version-line';
- const text=(value,bold=false)=>{const node=document.createElement(bold?'b':'span');node.className='comp-version-tag';node.textContent=value;line.append(node);};
+ const text=(value,bold=false)=>{const node=document.createElement(bold?'b':'span');node.className='comp-version-tag';node.textContent=value||'—';line.append(node);};
  const size=Number(item.packageSize||0);const suffix=size>0?' · '+componentSize(size):'';
  for(const cls of ['active','idle','has-newer','has-offer','is-activated','is-broken','pending-install','pending-remove'])card.classList.remove(cls);
  let chipClass='',chipText='',icon='';
@@ -1109,13 +1193,13 @@ function paintComponentCard(card,item,input,shelf){
   const statusText=status==='removal-planned'?(ru?'запланировано удаление':'removal planned'):status==='planned'?(ru?'действие добавлено в план':'action planned'):status==='installed'?(ru?'уже установлен, без изменений':'already installed, kept'):(ru?'доступен, не выбран':'available, not selected');
   card.setAttribute('aria-label',item.title+': '+statusText);
  if(available){
-  card.classList.add(f.availableNeeded?'active':'idle');if(f.newer&&!f.selected)card.classList.add('has-newer');
-  if(f.newer){text(current);line.append(' → ');text(target,true);}else text(item.installed&&!f.remove?current:target,f.selected&&!f.remove);
+  card.classList.add(f.availableNeeded?'active':'idle');if(f.broken)card.classList.add('is-broken');else if(f.newer&&!f.selected)card.classList.add('has-newer');
+  if(f.newer){text(current);line.append(' → ');text(target,true);}else {if(item.targetVersionKind==='release'&&target)line.append(ru?'релиз ':'release ');text(target,f.selected&&!f.remove);}
   if(suffix)line.append(suffix);
  }else if(f.remove){
   card.classList.add('pending-remove');text(current);if(suffix)line.append(suffix);chipClass='remove';chipText=ru?'Будет удалено':'Will be removed';icon='trash';
  }else if(!item.installed&&f.selected){
-  card.classList.add('pending-install');text(target);if(suffix)line.append(suffix);chipClass='pending';chipText=ru?'Будет установлено':'Will be installed';icon='download';
+  card.classList.add('pending-install');if(item.targetVersionKind==='release'&&target)line.append(ru?'релиз ':'release ');text(target);if(suffix)line.append(suffix);chipClass='pending';chipText=ru?'Будет установлено':'Will be installed';icon='download';
  }else if(f.selected){
   card.classList.add('is-activated');text(current);
   if(f.newer){line.append(' → ');text(target);chipText=(ru?'обновится до ':'will update to ')+target;icon='update';}
@@ -1135,9 +1219,16 @@ function paintComponentCard(card,item,input,shelf){
   marks.className='c-src';
   const source=(kind,label,version)=>{if(marks.childNodes.length){const sep=document.createElement('span');sep.className='src-sep';sep.textContent='·';marks.append(sep);}const bit=document.createElement('span');bit.className='src-bit '+kind;bit.append(document.createElement('i'),document.createTextNode(label+' '+version));marks.append(bit);};
   if(item.installed&&!f.remove)source('local',ru?'локально':'local',current);
-  // A verified adjacent MSI isn't evidence of a release-server asset.
-  if(item.remoteVersion&&item.remoteVersion===target&&(!item.installed||f.newer))source('remote',ru?'на сервере':'on server',item.remoteVersion);
-  else if(!item.installed&&target)source('local',ru?'пакет':'package',target);
+  // Original vendor release tags are explicitly labelled, never disguised as
+  // a verified MSI ProductVersion. Local-first target mirrors acquisition.
+  if(item.id==='secureUxTheme'){
+   if(item.localPackageVersion)source('local',ru?'пакет':'package',item.localPackageVersion);
+   if(item.releaseTag)source('remote',ru?'релиз':'release',item.remoteVersion||item.releaseTag);
+  }else{
+   // A verified adjacent MSI isn't evidence of a release-server asset.
+   if(item.remoteVersion&&item.remoteVersion===target&&(!item.installed||f.newer))source('remote',ru?'на сервере':'on server',item.remoteVersion);
+   else if(!item.installed&&target)source('local',ru?'пакет':'package',target);
+  }
   action.disabled=input.disabled;action.classList.remove('repair','is-on','danger');
   action.replaceChildren();
   action.append(svg('arrowRight'));
@@ -1209,7 +1300,8 @@ function syncComponentShelves(){
    const foot=document.getElementById('installed-foot'),label=document.createElement('span');label.textContent=countLabel;foot.replaceChildren(label);
    if(count>4){const more=document.createElement('span');more.className='c-more';more.textContent=(ru?'↓ ещё ':'↓ more ')+(count-4);foot.append(more);}
   }
-  if(!count&&!hostState.componentsLoading){
+  const emptyList=!count&&!hostState.componentsLoading;grid.classList.toggle('is-empty',emptyList);grid.closest('.c-lane-body').classList.toggle('is-empty',emptyList);
+  if(emptyList){
    const empty=document.createElement('div');empty.className='c-drop';
    const ok=componentShelfViews[id]==='needed';if(ok)empty.classList.add('ok');
    const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');icon.setAttribute('viewBox','0 0 24 24');icon.setAttribute('aria-hidden','true');const path=document.createElementNS(icon.namespaceURI,'path');path.setAttribute('d',ok?'M5 12l4 4L19 6':'M12 3v12M7 10l5 5 5-5M4 20h16');icon.append(path);
@@ -1221,34 +1313,47 @@ function productActionLabel(item){return hostState.appMode==='unins'?(locale==='
 function updateComponentsStatus(){
  const inputs=[...document.querySelectorAll('#components-panel .c-card input.comp-check')],selected=inputs.filter(x=>x.checked),available=inputs.filter(x=>!x.disabled&&(x.checked||(hostState.components||[]).find(item=>item.id===x.dataset.component)?.applySupported!==false)),all=available.length>0&&available.every(x=>x.checked),ru=locale==='ru';
  for(const [id,title] of [['available',ru?'Доступно':'Available'],['installed',ru?'Установлено':'Installed']])document.getElementById(id+'-title').textContent=title;
- const button=document.getElementById('components-select-all');button.disabled=all||available.length===0;button.textContent=ru?'Выбрать всё':'Select all';
+ const button=document.getElementById('components-select-all'),recommendations=componentRecommendations();button.disabled=!recommendations.some(input=>!input.checked);button.textContent=ru?'↻  Принять все рекомендации':'↻  Accept all recommendations';
+ const removable=inputs.filter(input=>{const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);return !input.disabled&&item?.installed&&(hostState.appMode==='unins'||item.removeSupported===true);});
+ const removeAll=document.getElementById('components-remove-all');removeAll.replaceChildren();const trash=document.createElement('span');trash.setAttribute('aria-hidden','true');trash.innerHTML='<svg viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>';removeAll.append(trash,ru?'Удалить все продукты':'Remove all products');removeAll.title=ru?'Добавить в план удаление всех установленных продуктов, для которых удаление поддерживается.':'Plan removal of all installed products that support removal.';
+ removeAll.hidden=hostState.componentsLoading===true||!removable.some(input=>!componentCardFacts((hostState.components||[]).find(x=>x.id===input.dataset.component),input).remove);removeAll.disabled=removeAll.hidden;
  const count=document.getElementById('components-count');count.hidden=false;count.textContent=ru?`Выбрано: ${selected.length} из ${inputs.length} продуктов`:`Selected: ${selected.length} of ${inputs.length} products`;
  const list=document.querySelector('#components-panel .components-list');document.getElementById('components-scroll-hint').textContent=list.scrollHeight>list.clientHeight+1?(list.scrollTop+list.clientHeight<list.scrollHeight-2?(ru?'Ещё продукты ниже ↓':'More products below ↓'):(ru?'Начало списка выше ↑':'Products above ↑')):'';
  const plan=document.getElementById('components-plan-items');plan.replaceChildren();const items=hostState.components||[];
  const totals=document.getElementById('components-plan-totals');totals.replaceChildren();
- const keep=inputs.length-selected.length;
+ const keep=inputs.length-selected.length;document.getElementById('components-plan-heading').textContent=ru?'ДЕЙСТВИЯ К ПРИМЕНЕНИЮ':'ACTIONS TO APPLY';
  for(const [value,label] of [[selected.length,ru?'изменений':'changes'],[keep,ru?'без изменений':'kept']]){const cell=document.createElement('div');cell.className='components-plan-total';const number=document.createElement('strong');number.textContent=String(value);const caption=document.createElement('span');caption.textContent=label;cell.append(number,caption);totals.append(cell);}
  if(!selected.length){const empty=document.createElement('li');empty.className='components-plan-empty';empty.textContent=ru?'Изменения не выбраны. Отметьте продукт слева, чтобы добавить его в план.':'No changes selected. Choose a product on the left to add it to the plan.';plan.append(empty);}
 
  for(const input of selected){const item=items.find(x=>x.id===input.dataset.component);if(!item)continue;const li=document.createElement('li'),name=document.createElement('span'),action=document.createElement('span');name.textContent=item.title;const removes=componentCardFacts(item,input).remove;action.textContent=removes?(ru?'Удалить':'Remove'):productActionLabel(item);li.className=removes?'remove':item.operation||'install';const cancel=document.createElement('button');cancel.type='button';cancel.className='plan-cancel';cancel.textContent='×';cancel.setAttribute('aria-label',(ru?'Отменить: ':'Undo: ')+item.title);cancel.onclick=()=>{commitComponentChoice(input,false);input.closest('.c-card').querySelector('.comp-decision:not(:disabled),.comp-remove:not(:disabled),.comp-name').focus();};li.append(name,action,cancel);plan.append(li);}
  const cleanup=document.querySelector('#components-extra input');if(cleanup&&cleanup.checked){const li=document.createElement('li');li.textContent=ru?'Очистить настройки всех пользователей, HKLM и сохранённые темы Glass':'Clean all user profiles, HKLM and saved Glass themes';plan.append(li);}
- for(const item of items){if(!item||!item.warning||item.hidden)continue;const li=document.createElement('li');li.className='plan-warning';li.textContent='⚠ '+item.warning;plan.append(li);}
- document.getElementById('components-plan-title').textContent=hostState.appMode==='unins'?(ru?'План удаления':'Removal plan'):(ru?'План изменений':'Change plan');
+ document.getElementById('components-plan-title').textContent=hostState.appMode==='unins'?(ru?'План удаления':'Removal plan'):(ru?'План и рекомендации':'Plan and recommendations');
  document.getElementById('components-plan-note').textContent=hostState.appMode==='unins'?(ru?'Неотмеченные продукты и настройки сохраняются.':'Unchecked products and settings are retained.'):(ru?'Снятие отметки не удаляет установленный продукт.':'Unchecking an installed product does not remove it.');
+ const notices=document.getElementById('components-plan-notices'),warnings=componentPlanWarnings();notices.replaceChildren();notices.hidden=!warnings.length;
+ if(warnings.length){const text=document.createElement('span');text.textContent=(ru?'●  Предупреждений: ':'●  Warnings: ')+warnings.length+(ru?' · Проверьте состав продуктов.':' · Review product composition.');const details=document.createElement('button');details.type='button';details.textContent=ru?'Подробнее':'Details';details.onclick=()=>showProductWarning({title:ru?'Зависимости затронуты':'Dependencies affected',planWarnings:componentPlanWarnings()},details);notices.append(text,details);}
  syncComponentShelves();
+}
+function planRemoveAllComponents(){
+ if(hostState.componentsLoading)return;
+ if(hostState.appMode==='unins'){if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('components:select-all');return;}
+ // Reuse the per-row intent protocol: no MSI operation, cleanup or bypass of
+ // native capability/conflict checks. Clear Apply intents, then stage Remove.
+ const inputs=[...document.querySelectorAll('#components-panel .c-card input.comp-check')];
+ for(const input of inputs)if(input.checked&&input.dataset.intent!=='remove')commitComponentChoice(input,false);
+ for(const input of inputs)commitComponentRemoval(input);
 }
 function renderComponentsPanel(){
  const grid=document.getElementById('components-grid'),installedGrid=document.getElementById('components-installed-grid'),extra=document.getElementById('components-extra'),button=document.getElementById('components-select-all');
- if(!button.dataset.bound){button.dataset.bound='1';button.onclick=()=>{if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('components:select-all');};const shade=document.getElementById('components-warning-dialog');shade.onclick=e=>{if(e.target===shade)closeProductWarning();};document.getElementById('components-warning-close').onclick=closeProductWarning;shade.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeProductWarning();}if(e.key==='Tab'){e.preventDefault();document.getElementById('components-warning-close').focus();}};document.querySelector('#components-panel .components-list').onscroll=updateComponentsStatus;}
+ if(!button.dataset.bound){button.dataset.bound='1';document.getElementById('components-remove-all').onclick=planRemoveAllComponents;button.onclick=acceptComponentRecommendations;const shade=document.getElementById('components-warning-dialog');shade.onclick=e=>{if(e.target===shade)closeProductWarning();};document.getElementById('components-warning-close').onclick=closeProductWarning;document.getElementById('components-warning-ok').onclick=closeProductWarning;shade.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeProductWarning();}if(e.key==='Tab'){const first=document.getElementById('components-warning-close'),last=document.getElementById('components-warning-ok');if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}};document.querySelector('#components-panel .components-list').onscroll=updateComponentsStatus;}
  const items=Array.isArray(hostState.components)?hostState.components:[],loading=hostState.componentsLoading===true,signature=JSON.stringify([locale,hostState.appMode,loading,items]);
  if(signature!==componentSignature){endComponentDrag(false);const focusId=document.activeElement&&document.activeElement.dataset.component,scroll=document.querySelector('#components-panel .components-list').scrollTop;componentSignature=signature;grid.replaceChildren();installedGrid.replaceChildren();extra.replaceChildren();
  if(loading){const label=document.createElement('div');label.className='comp-loading';label.textContent=locale==='ru'?'Анализ установки…':'Analyzing installation…';grid.append(label);}
  else for(const item of items){if(!item||item.hidden)continue;const input=document.createElement('input');input.type='checkbox';input.className='comp-check';input.dataset.component=String(item.id);input.id='product-'+String(item.id);input.checked=!!item.checked;input.dataset.intent=item.operation==='remove'?'remove':'apply';input.disabled=!!(item.disabled||item.locked);input.onchange=()=>{if(!input.checked)input.dataset.intent='apply';if(input.checked&&input.dataset.intent!=='remove'&&item.applySupported===false){input.checked=false;return;}const card=input.closest('.comp-card');if(card){card.classList.toggle('is-checked',input.checked);card.classList.toggle('active',input.checked&&hostState.appMode!=='unins');card.classList.toggle('pending-remove',input.checked&&hostState.appMode==='unins');card.classList.toggle('pending-install',!item.installed&&input.checked&&hostState.appMode!=='unins');(hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid).append(card);}if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('component:'+String(item.id)+':'+(input.checked&&input.dataset.intent==='remove'?'remove':input.checked?'1':'0'));updateComponentsStatus();};
  if(item.slim){const row=document.createElement('label');row.className='comp-slim';const body=document.createElement('span'),title=document.createElement('span'),desc=document.createElement('span');title.className='comp-slim-title';title.textContent=item.title;desc.className='comp-slim-desc';desc.textContent=item.description;body.append(title,desc);row.append(input,body);extra.append(row);continue;}
- const row=document.createElement('article');row.dataset.product=String(item.id);row.className='comp-card c-card'+(input.checked?(hostState.appMode==='unins'?' pending-remove':' active'):'')+(input.checked?' is-checked':'')+(item.warning?' has-warning has-offer':item.installed&&item.operation==='update'?' has-offer':'')+(!item.installed&&input.checked&&hostState.appMode!=='unins'?' pending-install':'')+(input.disabled?' is-disabled':'');const icons=document.createElement('div');icons.className='comp-icons';const icon=document.createElement('span');icon.className='comp-icon '+(item.id==='x86'||item.id==='openglass'?'tone-cyan':item.id==='secureUxTheme'?'tone-amber':'tone-purple');icon.setAttribute('aria-hidden','true');icon.innerHTML=({"x64": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3.5\" y=\"5\" width=\"11\" height=\"14\" rx=\"2.2\"/><rect x=\"9.5\" y=\"8\" width=\"11\" height=\"14\" rx=\"2.2\"/></svg>", "x86": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"4\" y=\"6\" width=\"10\" height=\"12\" rx=\"2\"/><rect x=\"10\" y=\"9\" width=\"10\" height=\"12\" rx=\"2\"/></svg>", "settings64": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/><circle cx=\"9\" cy=\"7\" r=\"1.9\"/><circle cx=\"15\" cy=\"12\" r=\"1.9\"/><circle cx=\"8\" cy=\"17\" r=\"1.9\"/></svg>", "settings32": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/><circle cx=\"9\" cy=\"7\" r=\"1.9\"/><circle cx=\"15\" cy=\"12\" r=\"1.9\"/><circle cx=\"8\" cy=\"17\" r=\"1.9\"/></svg>", "openglass": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"3\"/><path d=\"M3 9.5h18\"/><circle cx=\"6.2\" cy=\"7.3\" r=\".8\"/><circle cx=\"9\" cy=\"7.3\" r=\".8\"/></svg>", "secureUxTheme": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z\"/><path d=\"M9 12l2 2 4-4\"/></svg>"})[item.id]||'';icons.append(icon);if(item.warning){const warn=document.createElement('button');warn.type='button';warn.className='comp-warning-button';warn.textContent='⚠';warn.setAttribute('aria-label',(locale==='ru'?'Предупреждение: ':'Warning: ')+item.title);warn.onclick=()=>showProductWarning(item,warn);icons.append(warn);}
+ const row=document.createElement('article');row.dataset.product=String(item.id);row.className='comp-card c-card'+(input.checked?(hostState.appMode==='unins'?' pending-remove':' active'):'')+(input.checked?' is-checked':'')+(item.warning?' has-warning has-offer':item.installed&&item.operation==='update'?' has-offer':'')+(!item.installed&&input.checked&&hostState.appMode!=='unins'?' pending-install':'')+(input.disabled?' is-disabled':'');const icons=document.createElement('div');icons.className='comp-icons';const icon=document.createElement('span');icon.className='comp-icon '+(item.id==='x86'||item.id==='openglass'?'tone-cyan':item.id==='secureUxTheme'?'tone-amber':'tone-purple');icon.setAttribute('aria-hidden','true');icon.innerHTML=({"x64": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3.5\" y=\"5\" width=\"11\" height=\"14\" rx=\"2.2\"/><rect x=\"9.5\" y=\"8\" width=\"11\" height=\"14\" rx=\"2.2\"/></svg>", "x86": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"4\" y=\"6\" width=\"10\" height=\"12\" rx=\"2\"/><rect x=\"10\" y=\"9\" width=\"10\" height=\"12\" rx=\"2\"/></svg>", "settings64": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/><circle cx=\"9\" cy=\"7\" r=\"1.9\"/><circle cx=\"15\" cy=\"12\" r=\"1.9\"/><circle cx=\"8\" cy=\"17\" r=\"1.9\"/></svg>", "settings32": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/><circle cx=\"9\" cy=\"7\" r=\"1.9\"/><circle cx=\"15\" cy=\"12\" r=\"1.9\"/><circle cx=\"8\" cy=\"17\" r=\"1.9\"/></svg>", "openglass": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"3\"/><path d=\"M3 9.5h18\"/><circle cx=\"6.2\" cy=\"7.3\" r=\".8\"/><circle cx=\"9\" cy=\"7.3\" r=\".8\"/></svg>", "secureUxTheme": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z\"/><path d=\"M9 12l2 2 4-4\"/></svg>"})[item.id]||'';icons.append(icon);if(item.warning){const warn=document.createElement('button');warn.type='button';warn.className='comp-warning-button';warn.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.5a2 2 0 0 1 3.4 0l7.5 13a2 2 0 0 1-1.7 3H4.5a2 2 0 0 1-1.7-3z"/><path d="M12 9v4m0 3v.2"/></svg>';warn.setAttribute('aria-label',(locale==='ru'?'Предупреждение: ':'Warning: ')+item.title);warn.onclick=()=>showProductWarning(item,warn);icons.append(warn);}
  const name=document.createElement('span');name.className='comp-name c-name';name.textContent=item.title;bindComponentName(name,item);
  const decision=document.createElement('button');decision.type='button';decision.className='comp-decision';decision.disabled=input.disabled;
- const top=document.createElement('div');top.className='c-card-top';top.append(icons,name);
+ const top=document.createElement('div');top.className='c-card-top';top.append(icons,name);const warning=icons.querySelector('.comp-warning-button');if(warning)top.append(warning);
  const meta=document.createElement('div');meta.className='c-meta';const foot=document.createElement('div');foot.className='c-foot';decision.classList.add('c-move');foot.append(decision);
  row.append(input,top,meta,foot);(hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid).append(row);}
 

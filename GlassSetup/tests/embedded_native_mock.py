@@ -11,7 +11,7 @@ for path in ['src/InstallEngine.cpp','src/InstallSupport/GlassInstallUtil.cpp','
  for obsolete in ['ConfigureEmbeddedUnlocker','CleanupEmbeddedUnlocker','EnsureExtractedUnlocker','EmbeddedNativeDll','VerifyEmbeddedNativePayload','IDR_UNLOCKER_','IDR_MSI_']:
   assert obsolete not in s,(path,obsolete)
 s=(root/'src/InstallSupport/GlassProductInspect.cpp').read_text()
-assert 'GlassPackageAcquisition::Prepare' in s and 'GlassPackageAcquisition::CreateWorkspace' in s
+assert 'GlassPackageAcquisition::Describe' in s and 'GlassPackageAcquisition::CreateWorkspace' not in s
 assert 'ExtractResourceToFile' not in s and 'GetTempPath' not in s
 assert 'InstalledBaselineMatches(reference,installedCode)' in s and 'INSTALLPROPERTY_PACKAGECODE' in s
 assert 'report.settings64' in s and 'report.settings32' in s

@@ -175,32 +175,21 @@ bool FetchCatalog(const std::atomic<bool>& cancel,GlassPackageCatalog::Catalog& 
         diagnostic.clear();return true;
     }catch(...){return Fail(diagnostic,L"Cannot read release package catalog");}
 }
-bool Prepare(GlassPackageCatalog::Product product,const GlassPackageCatalog::Catalog& catalog,
-    const std::wstring& workspace,const std::atomic<bool>& cancel,std::wstring& error) noexcept {
-    std::wstring staged,part;
-    try {
+// Shared read-only discovery: identical identity/trust policy for UI and Apply.
+// Holds each file against write/delete while checking metadata and its trust.
+static bool Discover(GlassPackageCatalog::Product product,const GlassPackageCatalog::Catalog& catalog,
+    const std::atomic<bool>& cancel,std::vector<Candidate>& candidates,
+    std::vector<std::wstring>& sources,std::wstring& diagnostics,std::wstring& error,
+    std::vector<std::wstring>* labels=nullptr) {
         const auto i=static_cast<std::size_t>(product);
-        if(i>=GlassPackageCatalog::kCount||!GlassMaintenanceCache::TrustedDirectory(workspace))
-            return Fail(error,L"Invalid package workspace/product");
-        if(cancel.load())return Fail(error,L"Package acquisition cancelled");
+        if(i>=GlassPackageCatalog::kCount||cancel.load())return false;
         const auto& spec=specs[i];const auto& remote=catalog.products[i];
         const auto name=Wide(GlassPackageCatalog::kFiles[i]);
-        staged=workspace+L"\\"+name;part=staged+L".part";
         wchar_t exe[32768]{};const DWORD length=GetModuleFileNameW(nullptr,exe,32768);
         if(!length||length>=32768)return Fail(error,L"Cannot locate installer directory");
         std::wstring parent(exe,length);parent=parent.substr(0,parent.find_last_of(L"\\/"));
         const std::array<std::wstring,3> paths={GlassMaintenanceCache::CurrentFile(name.c_str()),
             parent+L"\\packages\\"+name,parent+L"\\"+name};
-        std::vector<Candidate> candidates;
-        std::vector<std::wstring> sources;
-        Request request;
-        Version installed;
-        if(GlassInstallMsi::IsProductInstalled(spec.code)) {
-            if(!ParseVersion(Narrow(GlassInstallMsi::QueryDisplayVersion(spec.code)),installed))
-                return Fail(error,L"Installed product version is unknown");
-            request.installed=installed;
-        }
-        std::wstring diagnostics;
         const auto rejected=[&](const std::wstring& path,const std::wstring& reason) {
             InstallLog::LineFormat(L"Local MSI rejected: %s: %s",path.c_str(),reason.c_str());
             diagnostics+=L"\n"+path+L": "+reason;
@@ -224,8 +213,61 @@ bool Prepare(GlassPackageCatalog::Product product,const GlassPackageCatalog::Cat
                 continue;
             }
             candidates.push_back({static_cast<Source>(n),v,true});sources.push_back(paths[n]);
+            if(labels)labels->push_back(display);
         }
-        if(remote&&remote->downloadable){candidates.push_back({Source::Release,remote->version,true});sources.push_back({});}
+        if(remote&&remote->downloadable){
+            candidates.push_back({Source::Release,remote->version,true});sources.push_back({});
+            if(labels){const auto& v=remote->version.parts;labels->push_back(std::to_wstring(v[0])+L"."+
+                std::to_wstring(v[1])+L"."+std::to_wstring(v[2])+L"."+std::to_wstring(v[3]));}
+        }
+        return !cancel.load();
+}
+
+bool Describe(GlassPackageCatalog::Product product,const GlassPackageCatalog::Catalog& catalog,
+    const std::atomic<bool>& cancel,std::wstring& version,bool& verifiedLocal) noexcept {
+    version.clear();verifiedLocal=false;
+    try {
+        std::vector<Candidate> candidates;std::vector<std::wstring> sources,labels;
+        std::wstring diagnostics,error;
+        if(!Discover(product,catalog,cancel,candidates,sources,diagnostics,error,&labels))return false;
+        Request request;const auto& spec=specs[static_cast<std::size_t>(product)];
+        if(GlassInstallMsi::IsProductInstalled(spec.code)) {
+            Version installed;
+            if(!ParseVersion(Narrow(GlassInstallMsi::QueryDisplayVersion(spec.code)),installed))return false;
+            request.installed=installed;
+            bool newer=false;
+            for(const auto& c:candidates)if(c.source!=Source::Current&&Compare(c.version,installed)>0)newer=true;
+            if(!newer)request.target=installed;
+        }
+        const auto choice=Select(request,candidates);
+        if(!choice.index||!choice.target)return false;
+        version=labels[*choice.index];
+        verifiedLocal=candidates[*choice.index].source!=Source::Release;
+        return true;
+    }catch(...){version.clear();verifiedLocal=false;return false;}
+}
+
+bool Prepare(GlassPackageCatalog::Product product,const GlassPackageCatalog::Catalog& catalog,
+    const std::wstring& workspace,const std::atomic<bool>& cancel,std::wstring& error) noexcept {
+    std::wstring staged,part;
+    try {
+        const auto i=static_cast<std::size_t>(product);
+        if(i>=GlassPackageCatalog::kCount||!GlassMaintenanceCache::TrustedDirectory(workspace))
+            return Fail(error,L"Invalid package workspace/product");
+        if(cancel.load())return Fail(error,L"Package acquisition cancelled");
+        const auto& spec=specs[i];const auto& remote=catalog.products[i];
+        const auto name=Wide(GlassPackageCatalog::kFiles[i]);
+        staged=workspace+L"\\"+name;part=staged+L".part";
+        Request request;
+        Version installed;
+        if(GlassInstallMsi::IsProductInstalled(spec.code)) {
+            if(!ParseVersion(Narrow(GlassInstallMsi::QueryDisplayVersion(spec.code)),installed))
+                return Fail(error,L"Installed product version is unknown");
+            request.installed=installed;
+        }
+        std::vector<Candidate> candidates;std::vector<std::wstring> sources;
+        std::wstring diagnostics;
+        if(!Discover(product,catalog,cancel,candidates,sources,diagnostics,error))return false;
         // Repair fallback to Current is valid only if there is no higher target.
         bool newer=false;
         if(request.installed) {

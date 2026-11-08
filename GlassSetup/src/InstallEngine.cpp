@@ -509,7 +509,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                 ok = self->RunMsiSequence();
             }
 
-            // Финальная стадия запуска компонентов (Page::Launching >= 5 секунд).
+            // Финальная стадия запуска компонентов: commit всегда, Page::Launching >= 5 секунд только при запуске.
             bool beginLaunch=false;
             while (ok) {
                 if (self->decisionGate_) WaitForSingleObject(self->decisionGate_,INFINITE);
@@ -520,6 +520,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                 }
                 const bool ready=!self->decisionGate_ || WaitForSingleObject(self->decisionGate_,0)==WAIT_OBJECT_0;
                 if (ready) {
+                    self->hostLaunchExpected_.store(GlassProducts::NeedsHostLaunch(self->selection_,self->openGlassStartup_),std::memory_order_release);
                     self->launchingPhase_.store(true,std::memory_order_release);
                     beginLaunch=true;
                 }
@@ -547,7 +548,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                     InstallLog::Line(L"Launch: commit point reached, rollback is no longer possible");
                     if(!vendorOnly && !self->auxiliaryOnly_)self->LaunchSelectedProducts();
                     constexpr ULONGLONG kMinLaunchMs = 5000;
-                    for (;!self->auxiliaryOnly_;) {
+                    for (;self->HasHostLaunchWork();) {
                         const ULONGLONG elapsed = GetTickCount64() - launchStart;
                         if (elapsed >= kMinLaunchMs)
                             break;
@@ -681,6 +682,7 @@ bool InstallEngine::Start(
     rollingBack_.store(false, std::memory_order_relaxed);
     failureFinalizing_.store(false, std::memory_order_relaxed);
     launchingPhase_.store(false, std::memory_order_relaxed);
+    hostLaunchExpected_.store(false, std::memory_order_relaxed);
 
     selection_=GlassProducts::NormalizeInstall(selection_,GlassInstallUtil::IsOs64Bit());
     procedureMask_=GlassProcedurePlan::MutationMask(selection_,GlassInstallUtil::IsOs64Bit());
@@ -1612,14 +1614,22 @@ bool InstallEngine::PrepareManagedRemoval() noexcept {
             return false;
         }
     }
-    // Remove the shared Settings shortcut only if neither architecture survives.
-    const bool removeShortcut=(selection_.Removes(2)||selection_.Removes(5)) &&
-        !selection_.Settings64(scanNativeX64_) && !selection_.Settings32(scanNativeX64_) &&
-        (!GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64)||selection_.Removes(2)) &&
-        (!GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86)||selection_.Removes(5));
+    const bool survives64=selection_.Settings64(scanNativeX64_) ||
+        (GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64)&&!selection_.Removes(2));
+    const bool survives32=selection_.Settings32(scanNativeX64_) ||
+        (GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86)&&!selection_.Removes(5));
+    const bool removingSettings=selection_.Removes(2)||selection_.Removes(5);
+    const bool removeShortcut=removingSettings&&!survives64&&!survives32;
     if(!GlassInstallRemoval::Prepare(removalSession_,selection_.Removes(1),selection_.Removes(3),removeShortcut,
         x64Dir_,x86Dir_,openGlassDir_,rollbackSession_.workspaceDir,&cancelRequested_,ru,detail,selection_.Removes(0))) {
         if(!IsCancelRequested())SetFailure(detail,ERROR_INSTALL_PACKAGE_REJECTED);
+        return false;
+    }
+    if(removingSettings&&!removeShortcut &&
+       !GlassInstallRemoval::PrepareSettingsShortcutRetarget(removalSession_,survives64?x64Dir_:x86Dir_,
+           x64Dir_,x86Dir_,rollbackSession_.workspaceDir,ru,detail)) {
+        SetFailure(detail.empty()?(ru?L"Не удалось безопасно подготовить ярлык оставшегося Settings.":
+            L"Could not safely prepare the retained Settings shortcut."):detail,ERROR_INSTALL_PACKAGE_REJECTED);
         return false;
     }
     return true;
@@ -1924,26 +1934,30 @@ bool InstallEngine::RegisterSelectedProducts() noexcept {
 void InstallEngine::LaunchSelectedProducts() noexcept {
     const bool is64 = scanNativeX64_;
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-    // Publish the actual acquired sources, not stale embedded packages. Keep
-    // sources for unmodified installed products in Current across partial updates.
-    const wchar_t* names[]={L"Glass-x64.msi",L"Glass-x86.msi",L"GlassSettings-x64.msi",
-        L"GlassSettings-x86.msi",L"OpenGlass-x64.msi",is64?L"SecureUxTheme_x64.msi":L"SecureUxTheme_x86.msi"};
-    std::vector<std::wstring> sources;
-    sources.reserve(std::size(names));
-    for(const auto* name:names) {
-        const auto acquired=tempDir_+L"\\"+name;
-        sources.push_back(GetFileAttributesW(acquired.c_str())!=INVALID_FILE_ATTRIBUTES?
-            acquired:GlassMaintenanceCache::CurrentFile(name));
+    if(GlassProducts::HasPackageApply(selection_)) {
+        // Publish the actual acquired sources, not stale embedded packages. Keep
+        // sources for unmodified installed products in Current across partial updates.
+        const wchar_t* names[]={L"Glass-x64.msi",L"Glass-x86.msi",L"GlassSettings-x64.msi",
+            L"GlassSettings-x86.msi",L"OpenGlass-x64.msi",is64?L"SecureUxTheme_x64.msi":L"SecureUxTheme_x86.msi"};
+        std::vector<std::wstring> sources;
+        sources.reserve(std::size(names));
+        for(const auto* name:names) {
+            const auto acquired=tempDir_+L"\\"+name;
+            sources.push_back(GetFileAttributesW(acquired.c_str())!=INVALID_FILE_ATTRIBUTES?
+                acquired:GlassMaintenanceCache::CurrentFile(name));
+        }
+        std::vector<GlassMaintenanceCache::Blob> cacheBlobs;
+        constexpr unsigned sourceRows[]={0,1,2,5,3,4};
+        for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty() && !selection_.Removes(sourceRows[i]))
+            cacheBlobs.push_back({0,names[i],sources[i].c_str(),sources[i]==tempDir_+L"\\"+names[i]});
+        std::wstring cacheFailure;
+        if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs.data(),cacheBlobs.size(),IDR_MAINTENANCE_UNINS,&cacheFailure))
+            AddFinishWarning(ru?L"Оболочка обслуживания сохранена не полностью":L"Maintenance cache publication is incomplete",
+                (ru?L"Не удалось полностью сохранить комплект обслуживания. Это не сообщение о сбое запуска. Сохраните исходный установщик и журнал.\n":
+                    L"The maintenance bundle was not fully saved. This does not indicate a component startup failure. Keep the original installer and log.\n")+cacheFailure);
+    } else {
+        InstallLog::Line(L"Removal-only: maintenance cache left unchanged; no controller rotation or publication");
     }
-    std::vector<GlassMaintenanceCache::Blob> cacheBlobs;
-    constexpr unsigned sourceRows[]={0,1,2,5,3,4};
-    for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty() && !selection_.Removes(sourceRows[i]))
-        cacheBlobs.push_back({0,names[i],sources[i].c_str(),sources[i]==tempDir_+L"\\"+names[i]});
-    std::wstring cacheFailure;
-    if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs.data(),cacheBlobs.size(),IDR_MAINTENANCE_UNINS,&cacheFailure))
-        AddFinishWarning(ru?L"Оболочка обслуживания сохранена не полностью":L"Maintenance cache publication is incomplete",
-            (ru?L"Не удалось полностью сохранить комплект обслуживания. Это не сообщение о сбое запуска. Сохраните исходный установщик и журнал.\n":
-                L"The maintenance bundle was not fully saved. This does not indicate a component startup failure. Keep the original installer and log.\n")+cacheFailure);
     if(!GlassInstallMsi::RefreshManagedArp(x64Dir_,x86Dir_,openGlassDir_))
         AddFinishWarning(ru?L"Записи обслуживания обновлены не полностью":L"Maintenance entries were not fully refreshed",
             ru?L"Не удалось обновить команды или ограничения удаления оставшихся продуктов. Подробности в журнале.":

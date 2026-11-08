@@ -8,6 +8,12 @@
 
 **Статус текущей ветки:** рабочая незавершённая переработка для проверки сборки, не готовый выпуск. Подробности и обязательные ограничения: [implementation-progress.md](docs/implementation-progress.md). Первичная установка оригинального MSI SecureUxTheme и переключение регистрации через Settings реализованы в исходниках; удаление оригинального продукта через GlassUnins, session/offline style reset и транзакционный cache controller ещё не завершены. Падения Explorer вне текущего scope.
 
+Общий ярлык Settings при частичном удалении Setup/GlassUnins: [протокол и границы](docs/settings-shortcut-maintenance.md).
+
+Макеты и UI-проверка без системных операций: [каталог и запуск preview](docs/mockups/README.md).
+
+Версии карточек и независимый MSI ProductVersion: [контракт MSI-версий](docs/msi-product-versions.md).
+
 ## Содержание
 
 - [Исходники в Visual Studio](#работа-с-исходниками-в-visual-studio)
@@ -377,3 +383,15 @@ reg query "HKCU\Software\GlassPlatform" /v InstallPathX86 /reg:32
 ### Дамп Explorer и совместная отладка
 
 Сохраните оригинальный `.dmp`, журналы за тот же запуск, версии Windows и пути реально запущенного Setup. Перед пересборкой скопируйте соответствующие x64 DLL и PDB из `Build\x64\Release` (TaskbarCompat, WndCompat, GlassCompat, GlassCore, ExplorerCompat). PDB от другой сборки нельзя подставлять как совпадающий: сравниваются CodeView GUID/Age. Контекст исключения и таблицы загруженных/выгруженных модулей важнее одного имени «сбойного модуля»; слова, похожие на адреса на стеке, без unwind не являются достоверным стеком вызовов. Дамп может содержать персональные данные — передавайте его только доверенному получателю, не добавляйте в публичный Git.
+
+### SecureUxTheme: версия доступного предложения
+
+Checking показывает проверенную ProductVersion соседнего canonical MSI
+(для x64 — `SecureUxTheme_x64.msi`) и отдельно GitHub release. Если локального
+пакета нет, числовая версия из GitHub подписана «релиз» и не считается проверенной
+MSI ProductVersion. Checking не скачивает MSI и не создаёт рабочую копию;
+Prepare повторно проверяет защищённый snapshot после явного Apply.
+Подробнее: [версии отдельных MSI](docs/msi-product-versions.md).
+Красные, жёлтые и зелёные HTML-карточки сохраняют доминирующий цвет при hover.
+Макеты с демонстрационными версиями: [каталог GlassSetup](docs/mockups/index.html).
+Новые изменения не проверены сборкой MSVC/WiX или установкой на Windows.

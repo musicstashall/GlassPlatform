@@ -117,6 +117,8 @@ public:
     bool RollbackSucceeded() const noexcept { return rollbackSucceeded_.load(std::memory_order_acquire); }
     bool IsCancelRequested() const noexcept { return cancelRequested_.load(std::memory_order_acquire); }
     bool IsRollingBack() const noexcept { return rollingBack_.load(std::memory_order_acquire); }
+    // Explicitly selected startup products only; retained-host restoration is finalization.
+    bool HasHostLaunchWork() const noexcept { return hostLaunchExpected_.load(std::memory_order_acquire); }
     bool IsLaunchingPhase() const noexcept { return launchingPhase_.load(std::memory_order_acquire); }
     bool CanRequestCancel() const noexcept {
         return started_ && !finished_
@@ -250,6 +252,7 @@ private:
     std::atomic<bool> userCancelled_{false};
     std::atomic<bool> rollingBack_{false};
     std::atomic<bool> failureFinalizing_{false};
+    std::atomic<bool> hostLaunchExpected_{false}; // UI only; launchingPhase_ still closes cancellation.
     std::atomic<bool> launchingPhase_{false};
     std::atomic_bool rollbackSucceeded_{true};
     bool preserveSnapshot_ = false;

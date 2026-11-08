@@ -22,6 +22,9 @@
     <GlassSetupIconPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'GlassSetup', 'res', 'app.ico'))</GlassSetupIconPath>
   </PropertyGroup>
 
+  <Import Project="ProductVersions.props" />
+  <ItemGroup><None Include="$(MSBuildThisFileDirectory)ProductVersions.props" /></ItemGroup>
+
   <!--
     Publish для MSI делает проект GlassSettings (GlassSettingsPublishForMsi).
     Повторный MSBuild отсюда во время сборки solution идёт параллельно с Clean GlassSettings.Native
@@ -137,6 +140,12 @@
       <_GlassBundleBuild Condition="'$(GlassBundleBuildNumber)' != ''">$(GlassBundleBuildNumber)</_GlassBundleBuild>
       <_GlassBundleBuild Condition="'$(_GlassBundleBuild)' == ''">0</_GlassBundleBuild>
       <_GlassMsiVersion>$(_GlassProductBase3).$(_GlassBundleBuild)</_GlassMsiVersion>
+      <_GlassMsiVersion Condition="'$(MSBuildProjectName)' == 'Glass-x64' and '$(GlassPlatform64MsiVersion)' != ''">$(GlassPlatform64MsiVersion)</_GlassMsiVersion>
+      <_GlassMsiVersion Condition="'$(MSBuildProjectName)' == 'Glass-x86' and '$(GlassPlatform32MsiVersion)' != ''">$(GlassPlatform32MsiVersion)</_GlassMsiVersion>
+      <_GlassMsiVersion Condition="'$(MSBuildProjectName)' == 'GlassSettings-x64' and '$(GlassSettings64MsiVersion)' != ''">$(GlassSettings64MsiVersion)</_GlassMsiVersion>
+      <_GlassMsiVersion Condition="'$(MSBuildProjectName)' == 'GlassSettings-x86' and '$(GlassSettings32MsiVersion)' != ''">$(GlassSettings32MsiVersion)</_GlassMsiVersion>
+      <_GlassMsiVersion Condition="'$(MSBuildProjectName)' == 'OpenGlass-x64' and '$(GlassOpenGlassMsiVersion)' != ''">$(GlassOpenGlassMsiVersion)</_GlassMsiVersion>
+      <GlassMsiVersion>$(_GlassMsiVersion)</GlassMsiVersion>
       <_GlassMsiBundleVersion Condition="'$(GlassBundleVersion)' != ''">$(GlassBundleVersion)</_GlassMsiBundleVersion>
       <_GlassMsiBundleVersion Condition="'$(_GlassMsiBundleVersion)' == ''">$(_GlassMsiVersion)</_GlassMsiBundleVersion>
       <_GlassPlatformTitle Condition="'$(GlassPlatformTitle)' == ''">Glass Platform</_GlassPlatformTitle>
@@ -147,6 +156,8 @@
     </PropertyGroup>
     <Error Condition="'$(GlassPayloadArch)' != 'OpenGlass' and '$(GlassBundlePackagingEnabled)' == 'true' and '$(_GlassBundleBuild)' == '0'"
       Text="Glass MSI $(GlassPayloadArch): номер комплекта не задан. Сначала Release|x64 solution, затем x86 с активной сессией." />
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(_GlassMsiVersion)', '^\d+\.\d+\.\d+(\.\d+)?$'))"
+           Text="Invalid MSI ProductVersion for $(MSBuildProjectName): $(_GlassMsiVersion). Use a numeric three- or four-part version." />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Overwrite="true" Lines="&lt;?define GlassMsiVersion = &quot;$(_GlassMsiVersion)&quot; ?&gt;" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassMsiBundleVersion = &quot;$(_GlassMsiBundleVersion)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassUpgradeCode = &quot;$(GlassUpgradeCode)&quot; ?&gt;" Overwrite="false" />

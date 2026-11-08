@@ -6,7 +6,7 @@ import subprocess, shutil, tempfile
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallSupport/GlassSecureUxPackage.cpp').read_text()
 legacy=source[source.index('bool CheckLegacyRepackAbsent('):source.index('bool QueryInstallPresence(')]
-presence=source[source.index('bool QueryInstallPresence('):source.index('bool Prepare(const std::wstring& privateDirectory')]
+presence=source[source.index('bool QueryInstallPresence('):source.index('bool Describe(')]
 removal=source[source.index('namespace {\nbool RemovalInventory'):source.rfind('\n}')]
 harness=r'''
 #include <array>

@@ -9,6 +9,7 @@ root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
 loop=source[source.index('    std::atomic_bool neverCancel{false};'):source.index('    report.settings=report.settings64.installed?report.settings64:report.settings32;',source.index('    std::atomic_bool neverCancel{false};'))]
 harness=r'''
+#include "GlassSetup/src/InstallSupport/GlassPackageRules.h"
 #include <atomic>
 #include <cassert>
 #include <iostream>
@@ -34,8 +35,7 @@ const char* kFiles[]={"Glass-x64.msi","Glass-x86.msi","GlassSettings-x64.msi","G
 }
 namespace GlassPackageAcquisition {
 bool FetchCatalog(const std::atomic_bool&,GlassPackageCatalog::Catalog&,std::wstring&){++fetches;return true;}
-bool CreateWorkspace(std::wstring& out){++workspaces;out=L"workspace";return true;}
-bool Prepare(GlassPackageCatalog::Product,const GlassPackageCatalog::Catalog&,const std::wstring&,const std::atomic_bool&,std::wstring&){++prepares;return false;}
+bool Describe(GlassPackageCatalog::Product,const GlassPackageCatalog::Catalog&,const std::atomic_bool&,std::wstring& out,bool& local){++prepares;out=L"2.0.0";local=true;return true;}
 }
 namespace GlassInstallMsi {
 constexpr const wchar_t* kProductPlatformX64=L"p64",*kLegacyPlatformX64=L"old64",*kProductPlatformX86=L"p32",
@@ -49,8 +49,7 @@ bool RemoveDirectoryW(const wchar_t*){++cleanups;return true;}
 unsigned MsiOpenDatabaseW(const wchar_t*,unsigned,MSIHANDLE*){return 5;}
 void MsiCloseHandle(MSIHANDLE){}
 std::wstring QueryMsiProperty(MSIHANDLE,const wchar_t*){return L"2.0.0";}
-struct QuadVersion {static QuadVersion Parse(const std::wstring&){return {};}
- int Compare(const QuadVersion&)const{return 0;}};
+
 std::wstring CachedMsiPath(const wchar_t* code){return installed.count(code)?std::wstring(code)+L".msi":L"";}
 bool InstalledBaselineMatches(const std::wstring& path,const wchar_t* code){assert(path==std::wstring(code)+L".msi");return baseline;}
 bool CheckProductFiles(const std::wstring& path,const wchar_t* code,const std::wstring&,ProductReport&,bool){
@@ -74,7 +73,7 @@ int main(){
  {Reset();installed={L"p64",L"old64"};Report r;r.x64.installed=true;Inputs in;in.inspectSources=false;Inspect(in,r);
   assert(checked==std::vector<std::wstring>{L"p64"});}
  {Reset();installed={L"s32"};Report r;r.settings32.installed=true;Inputs in;Inspect(in,r);
-  assert(fetches==1&&workspaces==1&&prepares==1&&cleanups==11&&r.settings32.integrityKnown);}
+  assert(fetches==1&&workspaces==0&&prepares==5&&cleanups==0&&r.settings32.integrityKnown);}
  for(bool unsafe:{false,true}){
   Reset();installed={L"p64"};baseline=unsafe;context=!unsafe;Report r;r.x64.installed=true;Inputs in;in.inspectSources=false;Inspect(in,r);
   assert(!r.x64.integrityKnown&&r.x64.unavailable==1&&checked.empty());
@@ -91,5 +90,5 @@ if not compiler:raise SystemExit('clang++ or g++ required')
 with tempfile.TemporaryDirectory(prefix='GlassInspectionPreflight-') as directory:
     path=Path(directory)/'inspect.cpp';exe=Path(directory)/'inspect'
     path.write_text(harness)
-    subprocess.run([compiler,'-std=c++17','-Wall','-Wextra','-Werror','-pedantic',str(path),'-o',str(exe)],check=True)
+    subprocess.run([compiler,'-std=c++17','-Wall','-Wextra','-Werror','-pedantic','-I',str(root),str(path),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)

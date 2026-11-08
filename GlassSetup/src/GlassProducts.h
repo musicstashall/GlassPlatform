@@ -62,6 +62,17 @@ constexpr bool ShouldStartOpenGlass(const OpenGlassStartupState& startup) noexce
     return startup.valid && (!startup.filesPresent || startup.wasRunning);
 }
 
+// Removal has no new media/controller to publish. Keep the running cache intact.
+constexpr bool HasPackageApply(const Selection& s) noexcept {
+    return s.platform64||s.platform32||s.glassSettings||s.settings64||s.settings32||s.openGlass||s.secureUxTheme;
+}
+// Only an explicitly selected startup-capable product owns the launch page.
+// Restoring a previously running, temporarily stopped retained host is part of
+// maintenance finalization, not a new launch choice or a five-second UI phase.
+constexpr bool NeedsHostLaunch(const Selection& s,const OpenGlassStartupState& og) noexcept {
+    return s.platform64||s.platform32||(s.openGlass&&ShouldStartOpenGlass(og));
+}
+
 // A checked product is installed or updated; an unchecked installed product is
 // kept untouched. An unchecked absent product has no action and needs no badge.
 enum class InstallAction { None, Install, Update, Keep, Repair };

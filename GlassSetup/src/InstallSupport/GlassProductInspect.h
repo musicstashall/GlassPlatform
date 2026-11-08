@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Windows.h>
+#include "GlassSecureUxPackage.h"
 #include <atomic>
 #include <string>
 #include <vector>
@@ -31,7 +32,8 @@ struct ProductReport {
     bool sourceVerified = false;
     bool integrityKnown = false;
     std::wstring targetVersion;
-    std::wstring installedVersion;
+    // MSI ProductVersion only. Never replace either field with a PE/bundle version.
+    std::wstring installedVersion; // Compatibility alias for old UI consumers.
     std::wstring installedPackageVersion;
     std::vector<Reason> reasons;
     std::wstring registryValueNames; // имена некорректных значений реестра (диагностика)
@@ -47,6 +49,7 @@ struct Report {
     ProductReport settings; // compatibility view for the current UI
     ProductReport settings64,settings32;
     ProductReport secureUxTheme;
+    GlassSecureUxPackage::Offer secureUxOffer;
     ProductReport og;
 };
 

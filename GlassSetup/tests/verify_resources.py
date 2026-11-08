@@ -639,7 +639,7 @@ assert 'L"LastAppliedThemeDwmFingerprint", ValueKind::Text' in reg_sanity
 assert "MINMAXBUTTONGLOWid" in reg_sanity and "ColorizationGlassReflectionPolicy" in reg_sanity
 assert "trust != ERROR_SUCCESS" in inspect_cpp and "ours" in inspect_cpp
 assert "condition!=GlassProducts::ProductCondition::Healthy)?Text(IDS_COMP_MANDATORY)" in setup
-assert "...(item.reasons||[])" in ui and "item.disabled||item.locked" in ui
+assert "for(const reason of item.reasons||[])" in ui and "item.disabled||item.locked" in ui
 
 # 2026-11-03 follow-up 3: card reasons behind a mini-spoiler (accordion, equal heights);
 # the registry reason names the offending values; OpenGlass user resources and
@@ -657,7 +657,7 @@ assert "ОС-нативная платформа обязательна, но н
 # sits on every card; the uninstaller offers settings cleanup (GlassPlatform key + OpenGlass
 # DWM values of the current user).
 assert "QueryFileVersion" in inspect_cpp and "version.lib" in inspect_cpp
-assert "OpenGlass.dll" in inspect_cpp and "FileVersionOf" in inspect_cpp
+assert "FileVersionOf" not in inspect_cpp and "rep.installedPackageVersion=rep.installedVersion" in inspect_cpp
 assert "components:select-all" in setup and "component:x64:1" in setup
 assert "CleanOwnedSettings" in reg_sanity and "cleanupProfiles.Cleanup" in unins
 assert 'L",\\\"locked\\\":false,\\\"hidden\\\":false}"' in unins
@@ -669,7 +669,7 @@ assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_
 # 2026-11-03 follow-up 5: «Установить» disabled with no product selected; the reasons
 # subline stays on every card with neutral grey «не требуется» when there are no reasons.
 assert "HasSelectedComponent" in setup
-assert "...(item.reasons||[])" in ui and "showProductWarning" in ui  # details live in the popup, not in C cards
+assert "for(const reason of item.reasons||[])" in ui and "showProductWarning" in ui  # details live in the popup, not in C cards
 # Approved 2026-11-04 layout supersedes the lower warning stripe and mandatory locks.
 assert "comp-slim" in ui and "components-extra" in ui and "components-stack" in ui
 assert "left:48px;width:302px" in ui and "right:48px;width:268px" in ui and "height:330px" in ui
@@ -678,7 +678,8 @@ assert "has-warning" in ui and ".c-card.has-warning" in ui
 assert "components:select-all" in ui and "components:select-all" in setup and "components:select-all" in unins
 assert "comp-warning-button" in ui and "components-warning-shade" in ui
 assert "e.stopPropagation();closeProductWarning()" in ui
-assert "plan-warning" in ui and "li.textContent='⚠ '+item.warning" in ui
+assert "li.textContent='⚠ '+item.warning" not in ui
+assert "components-remove-all" in ui and "function planRemoveAllComponents()" in ui
 assert "selected.length} of ${inputs.length}" in ui
 assert "More products below" in ui and "Products above" in ui
 assert "const bool sutNeedsSettings=false" in setup and "const bool sutRequiresSettings=false" in setup

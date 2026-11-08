@@ -28,7 +28,7 @@ constexpr unsigned IMAGE_FILE_MACHINE_AMD64=0x8664,IMAGE_FILE_MACHINE_I386=0x14c
 unsigned GetUserDefaultUILanguage(){return 0;}
 struct State{std::map<std::wstring,bool> installed;std::vector<std::wstring> calls,modified;
  std::wstring baselineBad;bool prepare=true,shell=true,conflict=false,contexts=true,cancel=false,msi=true,stillPresent=false;
- bool x86=false,x64=false,og=false,shortcut=false,helper=true,pathsSafe=true;unsigned result=0;}s;
+ bool x86=false,x64=false,og=false,shortcut=false,helper=true,pathsSafe=true,retargetOk=true;std::wstring retarget;unsigned result=0;}s;
 namespace GlassInstallMsi{
  constexpr const wchar_t* kProductPlatformX64=L"p64",*kLegacyPlatformX64=L"old64",*kProductPlatformX86=L"p32",*kLegacyPlatformX86=L"old32",
  *kProductSettingsX64=L"s64",*kProductSettingsX86=L"s32",*kProductOpenGlass=L"og",*kLegacyOpenGlass=L"oldog";
@@ -45,6 +45,9 @@ namespace GlassInstallMsi{
 namespace GlassInstallRollback{struct Snapshot{std::wstring productCode;};struct SessionState{std::wstring workspaceDir=L"backup";std::vector<Snapshot> oldProducts;};
  void NoteModified(SessionState&,const wchar_t* code){s.modified.emplace_back(code);}}
 namespace GlassInstallRemoval{struct Session{};
+ bool PrepareSettingsShortcutRetarget(Session&,const std::wstring& target,const std::wstring&,const std::wstring&,
+  const std::wstring&,bool,std::wstring&){s.retarget=target;return s.retargetOk;}
+
  bool ValidateOpenGlassPaths(const std::wstring&,const std::atomic_bool*,bool,std::wstring&){return s.pathsSafe;}
  bool Prepare(Session&,bool x86,bool og,bool shortcut,const std::wstring&,const std::wstring&,const std::wstring&,const std::wstring&,const std::atomic_bool*,bool,std::wstring&,bool x64){
   s.x86=x86;s.x64=x64;s.og=og;s.shortcut=shortcut;return s.prepare;
@@ -95,8 +98,10 @@ int main(){
  {InstallEngine e;reset(e,Product::OpenGlass);s.installed[L"og"]=true;s.result=3010;assert(Run(e,Product::OpenGlass));assert(e.warnings==1);}
  {InstallEngine e;reset(e,Product::Platform64);assert(e.PrepareManagedRemoval());assert(s.x64&&!s.x86&&!s.og);}
  {InstallEngine e;reset(e,Product::Platform64);s.helper=false;assert(!e.PrepareManagedRemoval());assert(e.failures==1&&s.calls.empty());}
- {InstallEngine e;reset(e,Product::Settings64);s.installed[L"s64"]=s.installed[L"s32"]=true;assert(e.PrepareManagedRemoval());assert(!s.shortcut);}
+ {InstallEngine e;reset(e,Product::Settings64);s.installed[L"s64"]=s.installed[L"s32"]=true;assert(e.PrepareManagedRemoval());assert(!s.shortcut&&s.retarget==L"32");}
  {InstallEngine e;reset(e,Product::Settings64);s.installed[L"s64"]=true;assert(e.PrepareManagedRemoval());assert(s.shortcut);}
+ {InstallEngine e;reset(e,Product::Settings32);s.installed[L"s64"]=s.installed[L"s32"]=true;assert(e.PrepareManagedRemoval());assert(!s.shortcut&&s.retarget==L"64");}
+ {InstallEngine e;reset(e,Product::Settings32);s.installed[L"s64"]=true;s.retargetOk=false;assert(!e.PrepareManagedRemoval());assert(e.failures==1&&s.calls.empty());}
  {InstallEngine e;reset(e,Product::Settings64);s.prepare=false;assert(!e.PrepareManagedRemoval());assert(e.failures==1);}
  {InstallEngine e;reset(e,Product::OpenGlass);e.openGlassResidualRemoval_=true;
   assert(e.PrepareManagedRemoval());assert(s.og);assert(Run(e,Product::OpenGlass));assert(s.calls.empty()&&s.modified.empty());}

@@ -272,8 +272,12 @@ int CompareVersions(const ParsedVersion& left, const ParsedVersion& right) noexc
 }
 
 bool VersionOlder(const std::wstring& installed, const std::wstring& latest) {
-    ParsedVersion a{}, b{};
-    return TryParseVersion(installed,a) && TryParseVersion(latest,b) && CompareVersions(a,b) < 0;
+    for(const auto* text:{&installed,&latest})for(wchar_t c:*text)
+        if(static_cast<unsigned>(c)>127)return false;
+    GlassPackageRules::Version a{},b{};
+    return GlassPackageRules::ParseVersion(std::string(installed.begin(),installed.end()),a) &&
+        GlassPackageRules::ParseVersion(std::string(latest.begin(),latest.end()),b) &&
+        GlassPackageRules::Compare(a,b)<0;
 }
 
 std::string JsonStringField(const std::string& json, const char* name) {
@@ -1656,8 +1660,16 @@ private:
             SendMessageW(componentOpenGlass_,BM_SETCHECK,selection_.openGlass?BST_CHECKED:BST_UNCHECKED,0);
             SendMessageW(componentSecureUxTheme_,BM_SETCHECK,(selection_.secureUxTheme||selection_.secureUxThemeRemove)?BST_CHECKED:BST_UNCHECKED,0);
             bool sutCanRemove=false,sutInstalled=false;
-            {std::lock_guard<std::mutex> lock(inspectMutex_);sutCanRemove=SecureUxThemeRemovalSupportedLocked();sutInstalled=inspect_.secureUxTheme.installed;}
-            const auto sutLabel=Text(IDS_COMP_SUT_TITLE)+(sutCanRemove?
+            std::wstring sutVersion;
+            {std::lock_guard<std::mutex> lock(inspectMutex_);
+                sutCanRemove=SecureUxThemeRemovalSupportedLocked();sutInstalled=inspect_.secureUxTheme.installed;
+                const auto& offer=inspect_.secureUxOffer;
+                if(sutInstalled)sutVersion=inspect_.secureUxTheme.installedPackageVersion;
+                else if(offer.localVerified)sutVersion=L"MSI "+offer.localVersion;
+                else if(!offer.releaseTag.empty())sutVersion=(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"релиз ":L"release ")+offer.releaseTag;
+            }
+            if(sutVersion.empty())sutVersion=L"—";
+            const auto sutLabel=Text(IDS_COMP_SUT_TITLE)+L" — "+sutVersion+(sutCanRemove?
                 (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L" — удалить MSI":L" — remove MSI"):L"");
             SetWindowTextW(componentSecureUxTheme_,sutLabel.c_str());
             ClampSecureUxThemeSelection();
@@ -1743,9 +1755,9 @@ private:
     static GlassProducts::ProductCondition ConditionOf(const GlassProductInspect::ProductReport* rep, bool installed) noexcept {
         if (rep && rep->residual) return GlassProducts::ProductCondition::Damaged;
         if (!installed || !rep || !rep->installed) return GlassProducts::ProductCondition::NotInstalled;
-        // Новая версия — обновление, а не переустановка: причины не смешиваются.
-        if (rep->updateAvailable) return GlassProducts::ProductCondition::UpdateAvailable;
+        // Damage stays red even when a newer MSI is also available.
         if (rep->damaged) return GlassProducts::ProductCondition::Damaged;
+        if (rep->updateAvailable) return GlassProducts::ProductCondition::UpdateAvailable;
         return GlassProducts::ProductCondition::Healthy;
     }
     static UINT InspectReasonId(GlassProductInspect::Reason reason) noexcept {
@@ -1849,8 +1861,12 @@ private:
                 remoteVersion=std::to_wstring(v[0])+L"."+std::to_wstring(v[1])+L"."+std::to_wstring(v[2])+L"."+std::to_wstring(v[3]);
                 packageSize=asset->size;
                 if(targetVersion.empty()||VersionOlder(targetVersion,remoteVersion))targetVersion=remoteVersion;
-                if(rep&&rep->installed&&!rep->installedPackageVersion.empty()&&VersionOlder(rep->installedPackageVersion,targetVersion))condition=GlassProducts::ProductCondition::UpdateAvailable;
+                if(rep&&rep->installed&&!rep->damaged&&!rep->installedPackageVersion.empty()&&VersionOlder(rep->installedPackageVersion,targetVersion))condition=GlassProducts::ProductCondition::UpdateAvailable;
             }}
+            const bool hasUpdate=rep&&rep->installed&&!rep->installedPackageVersion.empty()&&
+                !targetVersion.empty()&&VersionOlder(rep->installedPackageVersion,targetVersion);
+            const bool applySupported=!targetVersion.empty() && (!rep||!rep->installed||
+                (!rep->installedPackageVersion.empty()&&!VersionOlder(targetVersion,rep->installedPackageVersion)));
             const auto action=GlassProducts::ActionForCondition(checked,condition);
             const UINT badgeId=ComponentBadgeId(condition);
             // Причины не смешиваются: у обновления своя причина, у повреждений — свои.
@@ -1887,8 +1903,10 @@ private:
                 L",\"description\":"+JsStringLiteral((desc==IDS_COMP_P64_DESC||desc==IDS_COMP_P32_DESC)?GlassProductUiPolicy::PlatformDescription(Text(desc),desc==IDS_COMP_P64_DESC,os64,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN):Text(desc))+L",\"warning\":"+JsStringLiteral(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit()))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
                 L",\"installed\":"+((rep&&(rep->installed||rep->residual))?L"true":L"false")+
                 L",\"removeSupported\":"+((rep&&(rep->installed||(rep->residual&&rep->residualSafe))&&!disabled&&!hidden)?L"true":L"false")+
+                L",\"updateAvailable\":"+(hasUpdate?L"true":L"false")+
+                L",\"applySupported\":"+(applySupported?L"true":L"false")+
                 L",\"broken\":"+((rep&&rep->damaged)?L"true":L"false")+
-                L",\"installedVersion\":"+JsStringLiteral(rep?rep->installedVersion:L"")+
+                L",\"installedVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
                 L",\"installedPackageVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
                 L",\"targetVersion\":"+JsStringLiteral(targetVersion)+
                 L",\"remoteVersion\":"+JsStringLiteral(remoteVersion)+
@@ -1908,6 +1926,9 @@ private:
         item(L"settings64",IDS_COMP_GS64_TITLE,IDS_COMP_GS_DESC,selection_.settings64,false,!os64,&inspect_.settings64);
         item(L"settings32",IDS_COMP_GS32_TITLE,IDS_COMP_GS_DESC,selection_.settings32,false,false,&inspect_.settings32);
         item(L"openglass",IDS_COMP_OG_TITLE,IDS_COMP_OG_DESC,selection_.openGlass,false,!os64,&inspect_.og);
+        const auto& sutOffer=inspect_.secureUxOffer;
+        const bool sutLocal=sutOffer.localVerified&&!sutOffer.localVersion.empty();
+        const auto& sutTarget=sutLocal?sutOffer.localVersion:sutOffer.releaseVersion;
         const auto sutState=secureUxThemeState_;
         const auto sutCondition=ConditionOf(&inspect_.secureUxTheme,installedSelection_.secureUxTheme);
         const bool sutExternal=sutState==GlassInstallUtil::SecureUxThemeState::External;
@@ -1946,9 +1967,14 @@ private:
             L",\"badge\":"+JsStringLiteral(Text(sutBadge))+L",\"badgeTone\":"+JsStringLiteral(sutTone)+
             L",\"installed\":"+(inspect_.secureUxTheme.installed?L"true":L"false")+
             L",\"presenceDetail\":"+JsStringLiteral(inspect_.secureUxThemePresenceDetail)+
-            L",\"installedVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedVersion)+
+            L",\"installedVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedPackageVersion)+
             L",\"installedPackageVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedPackageVersion)+
-            L",\"targetVersion\":"+JsStringLiteral(inspect_.secureUxTheme.sourceVerified?inspect_.secureUxTheme.targetVersion:L"")+
+            L",\"targetVersion\":"+JsStringLiteral(sutTarget)+
+            L",\"targetVersionKind\":"+JsStringLiteral(sutLocal?L"msi":L"release")+
+            L",\"localPackageVersion\":"+JsStringLiteral(sutLocal?sutOffer.localVersion:L"")+
+            L",\"remoteVersion\":"+JsStringLiteral(sutOffer.releaseVersion)+
+            L",\"releaseTag\":"+JsStringLiteral(sutOffer.releaseTag)+
+            L",\"packageSize\":"+std::to_wstring(sutLocal?sutOffer.localSize:sutOffer.releaseSize)+
             L",\"broken\":"+(inspect_.secureUxTheme.damaged?L"true":L"false")+
             L",\"applySupported\":"+(inspect_.secureUxTheme.installed?L"false":L"true")+
             L",\"removeSupported\":"+(sutRemoveSupported?L"true":L"false")+
@@ -2555,42 +2581,21 @@ private:
             SetPage(Page::Conflicts);
             return false;
         }
-        const InstalledGlassVersionInfo installed=FindInstalledGlassVersion();
-        installedGlassVersion_=installed.version;
+        // Setup is a controller, not a version baseline for all products.
+        // BuildExecutionPlan compares each prepared MSI to its registered MSI.
+        GlassInstallUtil::InstallRoots roots{};
         setupProductVersion_=SelfProductVersion();
-        ParsedVersion setupParsed{};
-        const bool setupVersionValid=TryParseVersion(setupProductVersion_,setupParsed);
-        if (!installed.rootsResolved || (installed.detected && !installed.valid)) {
-            // Missing paths, inaccessible files, and unreadable metadata do not
-            // prove corruption. Never offer destructive clean reinstall here.
-            blockReason_=Text(installed.rootsResolved?IDS_VERSION_INVALID_BODY:IDS_ERR_INSTALL_PATH);
+        installedGlassVersion_.clear();
+        if(!GlassInstallUtil::ResolveInstallRoots(roots)) {
+            blockReason_=Text(IDS_ERR_INSTALL_PATH);
             versionInvalidNote_=Text(IDS_VERSION_INVALID_NOTE);
             downgradeBody_.clear();
-            InstallLog::LineFormat(L"Preflight blocked: installed location or version cannot be verified (%s); no changes made",
-                installed.modulePath.empty()?L"no readable installed module":installed.modulePath.c_str());
-            SetPage(Page::VersionInvalid);
-            return false;
+            InstallLog::Line(L"Preflight blocked: installation roots unavailable; no changes made");
+            SetPage(Page::VersionInvalid);return false;
         }
-        if (installed.detected && !setupVersionValid) {
-            blockReason_=Text(IDS_SETUP_VERSION_INVALID_BODY);
-            versionInvalidNote_=Text(IDS_SETUP_VERSION_INVALID_NOTE);
-            downgradeBody_.clear();
-            InstallLog::Line(L"Preflight blocked: this setup's ProductVersion is missing or invalid; safe comparison is impossible");
-            SetPage(Page::VersionInvalid);
-            return false;
-        }
-        if (installed.detected && CompareVersions(installed.parsed,setupParsed)>0) {
-            downgradeBody_=FormatVersionPairText(IDS_DOWNGRADE_BODY,
-                setupProductVersion_,installed.version);
-            blockReason_.clear();
-            InstallLog::LineFormat(L"Preflight blocked: refusing downgrade from GlassPlatform %s to Setup %s",
-                installed.version.c_str(),setupProductVersion_.c_str());
-            SetPage(Page::Downgrade);
-            return false;
-        }
-        preflightX64Root_=installed.x64Root;
-        preflightX86Root_=installed.x86Root;
-        preflightOpenGlassRoot_=installed.openGlassRoot;
+        preflightX64Root_=roots.x64;
+        preflightX86Root_=roots.x86;
+        preflightOpenGlassRoot_=roots.openGlass;
         blockReason_.clear();
         versionInvalidNote_.clear();
         downgradeBody_.clear();
@@ -2966,7 +2971,7 @@ private:
         }
         if (finished && !installEngine_.Succeeded()) { ShowFailurePage(true); return; }
         if (page_==Page::ConfirmCancel) { progressTickMs_=now; return; }
-        if (installEngine_.IsLaunchingPhase() || (finished && installEngine_.Succeeded())) {
+        if (installEngine_.HasHostLaunchWork() && (installEngine_.IsLaunchingPhase() || (finished && installEngine_.Succeeded()))) {
             if (!launchStarted_) launchStarted_=now;
             if (page_!=Page::Launching) SetPage(Page::Launching);
         } else if (page_!=Page::ConfirmCancel && page_!=Page::Cancelling) {
@@ -3012,7 +3017,7 @@ private:
         // installation, not overall rollback progress.
         installStatusLine_=page_==Page::Cancelling && !engineReverse
             ? Text(IDS_STATUS_ROLLBACK) : installEngine_.StatusLine();
-        if (finished && installEngine_.Succeeded() && launchStarted_ && now-launchStarted_>=5000) {
+        if (finished && installEngine_.Succeeded() && (!installEngine_.HasHostLaunchWork() || (launchStarted_ && now-launchStarted_>=5000))) {
             KillTimer(window,kInstallTimer); progressValue_=displayProgress_=10000; percent_=100;
             finishWarnings_=installEngine_.FinishWarnings();
             SetPage(Page::Complete); return;

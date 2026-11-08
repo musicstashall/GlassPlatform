@@ -34,42 +34,6 @@
 namespace GlassProductInspect {
 namespace {
 
-struct QuadVersion
-{
-    unsigned v[4]{};
-
-    static QuadVersion Parse(const std::wstring& text) noexcept
-    {
-        QuadVersion out;
-        size_t start = 0;
-        for (int i = 0; i < 4 && start < text.size(); ++i)
-        {
-            const size_t end = text.find(L'.', start);
-            const std::wstring part = text.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
-            out.v[i] = static_cast<unsigned>(_wtoi(part.c_str()));
-            if (end == std::wstring::npos)
-                break;
-            start = end + 1;
-        }
-        return out;
-    }
-
-    [[nodiscard]] int Compare(const QuadVersion& other) const noexcept
-    {
-        for (int i = 0; i < 4; ++i)
-        {
-            if (v[i] != other.v[i])
-                return v[i] < other.v[i] ? -1 : 1;
-        }
-        return 0;
-    }
-
-    [[nodiscard]] bool IsZero() const noexcept
-    {
-        return v[0] == 0 && v[1] == 0 && v[2] == 0 && v[3] == 0;
-    }
-};
-
 void AddReason(ProductReport& rep, Reason reason) noexcept
 {
     for (Reason existing : rep.reasons)
@@ -84,27 +48,6 @@ void AddReason(ProductReport& rep, Reason reason) noexcept
     std::wstring name = raw ? raw : L"";
     const auto bar = name.find(L'|');
     return bar == std::wstring::npos ? name : name.substr(bar + 1);
-}
-
-// Версия файла PE (как её читает GlassSettings: PlatformModuleVersions).
-[[nodiscard]] std::wstring FileVersionOf(const std::wstring& path) noexcept
-{
-    DWORD handle = 0;
-    const DWORD size = GetFileVersionInfoSizeW(path.c_str(), &handle);
-    if (!size)
-        return {};
-    std::vector<BYTE> data(size);
-    if (!GetFileVersionInfoW(path.c_str(), 0, size, data.data()))
-        return {};
-    VS_FIXEDFILEINFO* info = nullptr;
-    UINT len = 0;
-    if (!VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&info), &len) || !info)
-        return {};
-    wchar_t buf[64]{};
-    swprintf_s(buf, L"%u.%u.%u.%u",
-        HIWORD(info->dwFileVersionMS), LOWORD(info->dwFileVersionMS),
-        HIWORD(info->dwFileVersionLS), LOWORD(info->dwFileVersionLS));
-    return buf;
 }
 
 // Версия файла из колонки Version таблицы File построенного MSI.
@@ -467,6 +410,7 @@ Report Run(const Inputs& in)
         if (rep.installedVersion.empty())
             rep.installedVersion = GlassInstallMsi::QueryDisplayVersion(
                 modern ? product.modernCode : product.legacyCode);
+        rep.installedPackageVersion=rep.installedVersion;
     }
 
     report.settings=report.settings64.installed?report.settings64:report.settings32;
@@ -476,7 +420,9 @@ Report Run(const Inputs& in)
     if (sutInventoryStatus==ERROR_SUCCESS && !officialSut.empty()) {
         report.secureUxTheme.installed=true;
         if(officialSut.size()==1 && !glassRepackedSut)report.officialSecureUxThemeCode=officialSut.front();
-        report.secureUxTheme.installedVersion=GlassInstallMsi::QueryDisplayVersion(officialSut.front().c_str());
+        report.secureUxTheme.installedVersion=officialSut.size()==1 && !glassRepackedSut?
+            GlassInstallMsi::QueryDisplayVersion(officialSut.front().c_str()):L"";
+        report.secureUxTheme.installedPackageVersion=report.secureUxTheme.installedVersion;
     }
 
     // Evidence is available even on the all-products-absent early return.
@@ -512,38 +458,13 @@ Report Run(const Inputs& in)
         }
     }
 
-    if (!report.x64.installed && !report.x86.installed && !report.settings.installed &&
-        !report.secureUxTheme.installed && !report.og.installed)
-    {
-        report.ran = true;
-        return report;
-    }
-
-    for(auto* rep:{&report.x64,&report.x86,&report.settings64,&report.settings32,&report.og})
-        rep->installedPackageVersion=rep->installedVersion;
     GlassInstallUtil::InstallRoots roots{};
     const bool rootsOk = GlassInstallUtil::ResolveInstallRoots(roots);
-    if(report.og.installed && rootsOk) {
-        const auto version=FileVersionOf(roots.openGlass+L"\\OpenGlass.dll");
-        if(!version.empty())report.og.installedVersion=version;
-    }
     std::atomic_bool neverCancel{false};
     const auto& cancel=in.cancelled?*in.cancelled:neverCancel;
     GlassPackageCatalog::Catalog catalog;
-    std::wstring diagnostic,workspace;
+    std::wstring diagnostic;
     if(in.inspectSources)GlassPackageAcquisition::FetchCatalog(cancel,catalog,diagnostic);
-    const bool workspaceReady=in.inspectSources && GlassPackageAcquisition::CreateWorkspace(workspace);
-    struct InspectionWorkspace {
-        std::wstring path;
-        ~InspectionWorkspace() {
-            if(path.empty())return;
-            for(const auto* file:GlassPackageCatalog::kFiles) {
-                std::wstring name;for(const char* c=file;*c;++c)name+=static_cast<wchar_t>(*c);
-                DeleteFileW((path+L"\\"+name).c_str());DeleteFileW((path+L"\\"+name+L".part").c_str());
-            }
-            RemoveDirectoryW(path.c_str());
-        }
-    } cleanup{workspace};
     const struct { GlassPackageCatalog::Product product; ProductReport* rep; const wchar_t* code; const wchar_t* legacy; } jobs[]={
         {GlassPackageCatalog::Product::Platform64,&report.x64,GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kLegacyPlatformX64},
         {GlassPackageCatalog::Product::Platform32,&report.x86,GlassInstallMsi::kProductPlatformX86,GlassInstallMsi::kLegacyPlatformX86},
@@ -552,20 +473,18 @@ Report Run(const Inputs& in)
         {GlassPackageCatalog::Product::OpenGlass,&report.og,GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass}};
     for(const auto& job:jobs) {
         if(cancel.load())break;
-        if(!job.rep->installed)continue;
-        const auto index=static_cast<std::size_t>(job.product);
-        if(workspaceReady && GlassPackageAcquisition::Prepare(job.product,catalog,workspace,cancel,diagnostic)) {
-            std::wstring name;for(const char* c=GlassPackageCatalog::kFiles[index];*c;++c)name+=static_cast<wchar_t>(*c);
-            const auto source=workspace+L"\\"+name;
-            MSIHANDLE db=0;
-            if(MsiOpenDatabaseW(source.c_str(),MSIDBOPEN_READONLY,&db)==ERROR_SUCCESS) {
-                job.rep->targetVersion=QueryMsiProperty(db,L"ProductVersion");
-                job.rep->sourceVerified=true;
-                MsiCloseHandle(db);
-                if(!job.rep->targetVersion.empty() && !job.rep->installedVersion.empty())
-                    job.rep->updateAvailable=QuadVersion::Parse(job.rep->installedPackageVersion).Compare(QuadVersion::Parse(job.rep->targetVersion))<0;
-            }
+        if(in.inspectSources && GlassPackageAcquisition::Describe(job.product,catalog,cancel,
+            job.rep->targetVersion,job.rep->sourceVerified)) {
+            GlassPackageRules::Version installed,target;
+            const auto numeric=[](const std::wstring& text,GlassPackageRules::Version& out) {
+                for(wchar_t c:text)if(static_cast<unsigned>(c)>127)return false;
+                return GlassPackageRules::ParseVersion(std::string(text.begin(),text.end()),out);
+            };
+            job.rep->updateAvailable=job.rep->installed &&
+                numeric(job.rep->installedPackageVersion,installed) && numeric(job.rep->targetVersion,target) &&
+                GlassPackageRules::Compare(installed,target)<0;
         }
+        if(!job.rep->installed)continue;
         // Integrity always uses the installed package, never a same-version
         // replacement guessed to have identical bytes/PackageCode.
         const auto* installedCode=GlassInstallMsi::IsProductInstalled(job.code)?job.code:
@@ -638,6 +557,11 @@ Report Run(const Inputs& in)
         report.og.registryValueNames = sanity.openGlassValueNames;
     }
 
+    if(in.inspectSources&&!cancel.load()) {
+        std::wstring sutDiagnostic;
+        GlassSecureUxPackage::Describe(cancel,report.secureUxOffer,sutDiagnostic);
+        if(!sutDiagnostic.empty())GlassInstallLog::LineFormat(L"SecureUxTheme offer discovery: %s",sutDiagnostic.c_str());
+    }
     report.ran = true;
     return report;
 }

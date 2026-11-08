@@ -49,7 +49,7 @@ struct InstallEngine {
 // LABELS
 struct FinishWarning {std::wstring title,detail;};
 enum class HoldKind {None,Modules,MissingHelper,Processes};
-int starts=0;bool startOk=true,finished=false,success=false,cancelled=false,rollbackOk=true;
+int starts=0;bool startOk=true,finished=false,success=false,cancelled=false,rollbackOk=true,launchWork=true,launchPhase=false;
 GlassProducts::Selection captured;std::wstring capturedCode;
 bool Start(int,const std::wstring& x64,const std::wstring& x86,const std::wstring& og,
  GlassProducts::Selection selection,GlassProducts::OpenGlassStartupState,bool clean,PhaseLabels labels,void*,const std::wstring& code){
@@ -59,7 +59,7 @@ bool Start(int,const std::wstring& x64,const std::wstring& x86,const std::wstrin
 bool TakeErrorPageRequest(){return false;}void NotifyErrorPageShown(){}
 bool Poll(){return finished;}bool WasCancelled(){return cancelled;}bool Succeeded(){return success;}
 bool RollbackSucceeded(){return rollbackOk;}std::wstring RollbackNote(){return L"restored";}
-bool IsLaunchingPhase(){return false;}HoldKind CurrentHold(){return HoldKind::None;}
+bool HasHostLaunchWork(){return launchWork;}bool IsLaunchingPhase(){return launchPhase;}HoldKind CurrentHold(){return HoldKind::None;}
 std::wstring HoldReport(){return {};}
 int ProgressUnits(){return 5000;}bool IsProgressReverse(){return cancelled;}bool IsMarquee(){return false;}
 std::wstring StatusLine(){return L"actual worker";}std::vector<FinishWarning> FinishWarnings(){return {};}
@@ -143,6 +143,12 @@ int main(){
   now=20000;w.Tick();assert(w.progressValue_==4300&&w.page_==Page::ConfirmCancel);
   w.simulateRollback_=true;w.simulateRollbackStarted_=now;w.page_=Page::Cancelling;
   now+=5001;w.Tick();assert(w.page_==Page::Cancelled&&!w.simulateInstall_&&w.installEngine_.starts==0);}
+#endif
+#ifndef _DEBUG
+ {Wizard w;now=100;w.StartInstallation();w.installEngine_.launchWork=false;w.installEngine_.launchPhase=true;
+  now=150;w.Tick();assert(w.page_==Page::Installing&&w.launchStarted_==0);
+  w.installEngine_.finished=w.installEngine_.success=true;now=200;w.Tick();
+  assert(w.page_==Page::Complete&&w.launchStarted_==0);}
 #endif
  std::cout<<"PASS: actual GUI entry/tick: Debug simulation / Release real engine independent of embedded flag; consent/inspection/demo/path/preflight/start failure guards; captured selection; completion only from engine\n";
 }

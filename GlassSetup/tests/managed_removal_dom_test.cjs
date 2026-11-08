@@ -43,5 +43,23 @@ for(const checked of [false,true]){
 send([{...rows[0],installed:false,checked:true}]);
 assert.equal(dom.window.eval('componentDropValue')({id:'x64',input:d.querySelector('#product-x64'),source:'installed'},'available'),false);
 send(rows.map(x=>({...x,removeSupported:false})));assert.equal(d.querySelectorAll('.comp-remove').length,0);
+// Bulk removal is only the same per-row plan intent; no engine/cleanup command.
+send(rows);let beforeBulk=messages.length;d.querySelector('#components-remove-all').click();
+assert.deepEqual(messages.slice(beforeBulk),rows.map(x=>'component:'+x.id+':remove'));
+assert.equal(d.querySelectorAll('#components-installed-grid .c-card').length,0);
+assert.equal(d.querySelectorAll('#components-plan-items li.remove').length,5);
+assert.equal(d.querySelector('#components-remove-all').disabled,true);
+beforeBulk=messages.length;d.querySelector('#components-remove-all').click();assert.equal(messages.length,beforeBulk);
+// Locked/unsupported rows stay installed; pending fresh Apply is cancelled.
+send([...rows.map((x,i)=>({...x,removeSupported:i!==1,disabled:i===2})),{id:'fresh',title:'Fresh',installed:false,checked:true,operation:'install'}]);
+beforeBulk=messages.length;d.querySelector('#components-remove-all').click();
+assert.deepEqual(messages.slice(beforeBulk),['component:fresh:0','component:x64:remove','component:settings32:remove','component:openglass:remove']);
+assert.equal(d.querySelector('#product-x86').checked,false);assert.equal(d.querySelector('#product-settings64').checked,false);
+assert.equal(d.querySelector('#product-fresh').checked,false);
+send(rows.map(x=>({...x,removeSupported:false})));assert.equal(d.querySelector('#components-remove-all').disabled,true);
+receive({data:{type:'state',appMode:'setup',page:'components',components:rows,componentsLoading:true}});
+assert.equal(d.querySelector('#components-remove-all').disabled,true);
+receive({data:{type:'state',appMode:'unins',page:'uninstall-select',components:rows,componentsLoading:false}});
+beforeBulk=messages.length;d.querySelector('#components-remove-all').click();assert.deepEqual(messages.slice(beforeBulk),['components:select-all']);
 assert.deepEqual(errors.map(x=>x.message),[]);dom.window.close();
 process.stdout.write('PASS: five installed Glass cards: explicit removal IPC, host echo/plan, undo-to-Keep, capability refusal\n');

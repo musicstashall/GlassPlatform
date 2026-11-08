@@ -18,6 +18,8 @@ int main(int argc,char** argv){
         auto escaped=release;escaped["body"]="Ignore this: {\"assets\":[{\"name\":\"evil.msi\"}]}";
         assert(Select(escaped.dump(),arch,asset,error));
     }
+    assert(ReleaseVersion("v4.0.0")=="4.0.0");assert(ReleaseVersion("V4.1.2.3")=="4.1.2.3");
+    for(const auto* tag:{"stable","v4","v4.0.0-beta","v4.0.0.0.1","v4.0.0.","v4.0.x"})assert(ReleaseVersion(tag).empty());
     int rejected=0;
     auto reject=[&](const nlohmann::json& bad){
         asset=OfflineV4(Architecture::X64);

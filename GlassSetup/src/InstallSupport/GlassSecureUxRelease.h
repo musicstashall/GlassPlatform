@@ -1,5 +1,6 @@
 #pragma once
 #include "../../third_party/nlohmann/json.hpp"
+#include "GlassPackageRules.h"
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -11,6 +12,12 @@ struct Asset {
     std::string tag, name, url, sha256;
     std::uint64_t size=0;
 };
+// Display metadata only: a release tag is not the MSI Property.ProductVersion.
+inline std::string ReleaseVersion(const std::string& tag) {
+    const auto text=!tag.empty()&&(tag[0]=='v'||tag[0]=='V')?tag.substr(1):tag;
+    GlassPackageRules::Version parsed;
+    return GlassPackageRules::ParseVersion(text,parsed)?text:std::string{};
+}
 inline const char* FileName(Architecture arch) {
     return arch==Architecture::X64?"SecureUxTheme_x64.msi":
         arch==Architecture::Arm64?"SecureUxTheme_ARM64.msi":"SecureUxTheme_x86.msi";

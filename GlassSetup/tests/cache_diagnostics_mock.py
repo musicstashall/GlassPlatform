@@ -102,7 +102,7 @@ bool CloseHandle(HANDLE){SetLastError(6);return resourceCase!=CloseFail;}
 bool DeleteFileW(const wchar_t*){SetLastError(5);return false;}
 '''
 
-checks = r''' 
+checks = r'''
 namespace D=GlassMaintenanceCache::Diagnostics;
 void reset(){createdWithPrivateAcl.clear();files={{L"C:\\ProgramData",FILE_ATTRIBUTE_DIRECTORY},{L"C:\\ProgramData\\Packages",FILE_ATTRIBUTE_DIRECTORY}};denied.clear();ownerSid=2;acl.AceCount=0;ace={};ownedCreateCalls=0;lastError=999;}
 int main(){

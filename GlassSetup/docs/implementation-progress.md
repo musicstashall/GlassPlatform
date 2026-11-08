@@ -1,3 +1,175 @@
+# Текущий этап: пустые панели, Settings-only без Launching, ярлык в GlassUnins
+
+Пользователь подтвердил успешную Windows-сборку **предыдущей** ревизии и работу
+проверки нарушения целостности. Новые изменения ниже Windows-сборкой/реальным
+MSI-удалением пока не подтверждены.
+
+## Реализовано
+
+- В пустых Available/Installed рамка растягивается на всю usable list plane с
+  отступами 6px по вертикали / 10px по горизонтали. Маска скролла отключается,
+  чтобы не обрезать нижнюю границу. Empty state плана занимает всю свободную
+  область своего списка; надписи центрированы. Исправлена специфичность CSS,
+  иначе общий `li { justify-content:space-between }` перебивал центрирование.
+- Checking copy RU/EN сокращён до «Ищем обновление GlassSetup.» / «Looking for a
+  GlassSetup update.» в HTML и native fallback; убрано описание стадий скачивания.
+- Launch-page policy зависит только от явно выбранных Platform/OpenGlass с
+  действующим startup intent. Settings-only и vendor-only не открывают Launching
+  и не получают искусственные пять секунд, независимо от prior host state.
+  Восстановление временно остановленного **ранее работавшего** retained host
+  остаётся служебной финализацией: новые невыбранные host не стартуют, прежний
+  работающий host не оставляется выключенным ради сокрытия страницы.
+- Частичный Settings Remove в standalone GlassUnins теперь подключён к общему
+  locked-link retarget механизму: дополнительный MSI/context/cache/root baseline
+  сохранённой (либо ожидаемо отсутствующей) архитектуры, private serialization до
+  остановок, commit после закрытия отмены до MSI, повторная проверка baseline.
+  Финализатор охватывает обычные выходы/исключения: до удаления выбранной Settings
+  восстанавливает исходный link; после фактического снятия MSI не возвращает link
+  на удалённый EXE даже при последующем отказе ARP/cleanup. Ошибка restore/recheck
+  сохраняет защищённый recovery workspace и сообщает его путь.
+- Протокол и Windows acceptance: [settings-shortcut-maintenance.md](settings-shortcut-maintenance.md).
+  Историческое ограничение «только Setup» в разделах ниже заменено этим этапом.
+- В постоянном preview добавлены «Пустые панели» и «Проверка версии Setup».
+
+## Проверки
+
+- Полный прогон: **82 Python scripts / 72 PASS / те же 10 исторических FAIL**,
+  новых отказов нет: `.cache/settings-unins-final/summary.json`.
+- 3 production DOM-suite PASS. Chromium smoke PASS, в том числе реальные bounding
+  rectangles/insets пустых Available/Installed/plan, центрирование, отсутствие
+  fade-mask на пустом списке и короткий RU/EN checking copy. Прежние update-green,
+  damage-red, popup/Escape/focus и bulk-plan/undo регрессии тоже PASS.
+- Реальные production policy/Tick: Settings-only policy=false; commit gate может
+  быть закрыт, UI остаётся Installing, затем сразу Complete без launch timer.
+- Новый `unins_shortcut_retarget_mock.py`: настоящие commit/finalizer блоки Unins
+  с fake MSI/link API. `shortcut_retarget_mock.py`: настоящий stream/restore/RAII
+  механизм с fake file APIs. Это не COM/ACL/locking и не Windows Installer тест.
+
+## Не закрыто этим этапом
+
+- Durable journal/автоматическое crash/reboot recovery; это не полная atomic
+  транзакция MSI+shortcut. GlassUnins не переустанавливает уже удалённые MSI.
+- Безопасный post-exit cache cleanup/self-renewal handoff; публикация Apply из
+  исполняемого cache всё ещё может встретить занятый Previous.
+- Общая vendor/managed atomicity и force-clean+Remove, fully per-file Platform
+  snapshot, точный shell rollback, full native/C parity, standalone SUT migration,
+  оставшиеся profile notices и unknown-root residual recovery.
+- Новая Windows VM-проверка обоих направлений Settings retarget, нестандартных
+  параметров/ACL/ADS ярлыка, отказа MSI/ARP/link write и Settings-only UI требуется.
+
+---
+
+# Текущий этап: удаление без ложного запуска, план и предупреждения карточек
+
+## Диагноз по пользовательскому `GlassSetup-6.log`
+
+Все четыре MSI удаления завершились `exit=0`. Setup был запущен из
+`C:\ProgramData\Packages\GlassPlatform\Current\GlassSetup.exe`. После удаления
+он ненужно опубликовал новый bundle: переименовал Current в Previous, активировал
+новый Current, затем получил `Win32=5` при удалении `Previous\GlassSetup.exe`.
+Это ошибка финализации cache, не ошибка MSI удаления. Путь указывает на
+перемещённый исполняемый controller; отдельный Windows handle/ACL-тест здесь
+не выполнялся, любые AccessDenied не объявляются безусловно безопасными.
+
+## Изменения
+
+- При отсутствии Package Apply финализация не публикует/не вращает bundle.
+  Существующий cache и источники оставшихся продуктов сохраняются, ARP refresh
+  выполняется по-прежнему. Реальные ошибки ARP и публикации при Apply не скрываются;
+  ACL/reparse/trusted-directory проверки cache не ослаблены.
+- Отдельный atomic `hostLaunchExpected_` управляет только страницей запуска и её
+  минимальной длительностью. Старый commit gate `launchingPhase_` по-прежнему
+  закрывает отмену под status lock, даже когда launch page не нужна. Полное
+  удаление → Complete без Launching и искусственных пяти секунд. При частичном
+  обслуживании ранее работавший сохранённый host может требовать перезапуска.
+- «Удалить всё» в панели плана переиспользует поштучный IPC Remove, снимает Apply
+  intents и планирует поддерживаемые удаления. Установленные locked/disabled/
+  unsupported продукты не обходят прежние gates, очистка данных не выбирается.
+  В Unins используется существующий `components:select-all`, тоже только план.
+- Предупреждения убраны из списка плана; popup доступен через жёлтый SVG-треугольник
+  в правом верхнем углу основной и зеркальной карточек, с Escape/возвратом фокуса.
+- Available update-карточки зелёные также в idle и hover: исправлена специфичность
+  относительно legacy/idle/has-warning CSS. Повреждение остаётся красным, без
+  автоматического Apply.
+- Постоянный каталог и read-only preview «Макеты GlassSetup»: настоящий HTML с
+  mock host, существующие концепции, предоставленный PNG-образец. Инструкция:
+  [mockups/README.md](mockups/README.md).
+
+## Проверки и границы
+
+- Все **81** Python-тест: **71 PASS / 10 прежних FAIL**, новых отказов нет.
+  Полный отчёт текущего прогона: `.cache/removal-ui-final/summary.json`.
+- 3 production DOM-suite PASS; Chromium smoke PASS: RU/EN, Setup/Unins,
+  bulk-plan/undo, triangle popup/Escape/focus, green idle/hover, red damage,
+  отсутствие предупреждений в плане, финальная страница, исходный образец.
+- `removal_completion_mock.py` исполняет настоящий maintenance prefix с fake
+  cache/ARP API; `setup_real_entry_mock.py` исполняет настоящий GUI Tick и проверяет
+  прямой Complete без launch timer; cancel-gate regression подтверждает запрет
+  отмены после commit без привязки к наличию launch page.
+- **Windows/MSVC/WiX сборка и новое реальное MSI-удаление не выполнялись.**
+- Это не полная очистка cache после выхода работающего controller: безопасный
+  post-exit cleanup/handoff ещё нужен. Публикация при Apply из исполняемого cache
+  может по-прежнему упереться в занятый Previous; здесь такие ошибки не маскируются.
+- Прежний запрет совместного managed Remove и original vendor SUT в одной
+  транзакции сохранён: bulk-план не делает эту комбинацию исполнимой. Durable
+  journal, standalone shortcut retarget и остальные ограничения ниже не закрыты.
+
+---
+
+# Текущий этап: версии MSI и переназначение общего ярлыка Settings
+
+Пользователь подтвердил сборку **предыдущего** состояния. Изменения этого этапа
+ещё НЕ проверены Windows/MSVC/WiX сборкой или исполнением.
+
+## Реализовано в этом этапе
+
+- Installed/Available используют версии отдельных MSI: registration VersionString,
+  read-only Property.ProductVersion проверенного локального MSI либо metadata
+  конкретного release asset. OpenGlass.dll больше не подменяет MSI baseline.
+- Общий read-only discovery для Checking и acquisition: отсутствующие продукты
+  обследуются тоже, без workspace, копирования/скачивания MSI и cache publication.
+- Сравнение числовое, включая major=0; ошибочные версии не превращаются в нули.
+  Удалён глобальный preflight downgrade по Setup EXE vs максимум PE версий платформы.
+  Корни и per-product downgrade/context/baseline guards сохранены. В UI Installed
+  показывает текущий MSI, Available — целевой; повреждение остаётся красным при
+  одновременном наличии обновления, Apply не выбирается автоматически.
+- Пять независимых MSI version overrides в `msi/ProductVersions.props`; пустые
+  сохраняют старую bundle base/build политику. Оригинальный vendor SUT не перепаковывается.
+  Его неизвестная доступная MSI версия не угадывается по release tag. Контракт и
+  пределы 3/4-польного versioning: [msi-product-versions.md](msi-product-versions.md).
+- Setup partial Settings Remove переназначает существующий owned общий .lnk на
+  оставшуюся/устанавливаемую архитектуру. Чужая цель отвергается до MSI. Уже верная
+  цель/отсутствующий ярлык не заменяются. Сериализация меняет target и только старые
+  стандартные working-dir/icon ссылки, сохраняя custom параметры, description,
+  hotkey/show-mode. Оригинальный файл удерживается от writers/deleters; commit
+  перепроверяет bytes/security и наличие безопасного retained EXE. В отличие от
+  delete/create, изменяется только default stream того же объекта: ACL/owner/ADS
+  не заменяются. Откат через удерживаемый handle возвращает backup bytes и basic
+  metadata, включая случаи short/failed write, truncate/flush failure. Изменившаяся
+  security не перезаписывается; при ошибке остаётся rollback failure и backup.
+  Это **не** crash-safe journal: авария процесса посередине записи ещё не покрыта.
+- Portable проверки: **80 Python / 70 PASS / те же 10 исторических FAIL**; три
+  production DOM suites PASS. Добавлены actual MSI reader/Unins projection,
+  пять разных локальных ProductVersion без downloads/workspace, source-loop
+  inspection и Installed/Available DOM с отличающейся PE версией, locked-link
+  stream commit/rollback и real Session move/reset ownership tests. Это API seams
+  и source/build wiring, не Windows locks/COM/MSI/ACL или исполнение MSBuild/WiX.
+
+## Остаётся
+
+- Общий vendor/managed lifecycle, force-clean+Remove, durable recovery/journal,
+  self-update handoff, полный пофайловый Platform snapshot и exact shell rollback.
+- Полный native/C parity, standalone original SUT migration, завершение профильной
+  очистки/уведомлений, unknown-root residual recovery.
+- Shared shortcut retarget подключён **только к Setup**; standalone Unins ещё
+  не переведён на этот reversible session protocol. Нельзя объявлять весь пункт
+  про ярлык завершённым или обещать восстановление после crash/reboot.
+- Windows acceptance: разные реальные MSI ProductVersion, offline fresh/maintenance,
+  kept product новее Setup, отказ выбранному downgrade; partial Settings Remove
+  обоих направлений, custom shortcut, cancelled Apply и commit/rollback failures.
+
+---
+
 # Повторный аудит C: возврат при первичной установке и кнопки — 2026-11-07
 
 ## 2026-11-07 — явное удаление неактивного оригинального SUT из Setup
@@ -969,3 +1141,46 @@ MSI, файлы, регистрация и loaded state разделены: MSI 
 - **Реализовано, но ещё не проверено на Windows:** package titles and old ARP-name refresh; scoped WM_CLOSE/query/wait in Setup, rollback and Unins; revised standalone stop/scan map. Previous procedure-map, service/ARP, Native/menu and error-page runtime acceptance remain open.
 - **Остаётся нереализованным (пользовательский пункт «оставшиеся» ещё НЕ завершён целиком):** fully per-file Platform snapshot, general vendor/managed transaction and force-clean+Remove, durable recovery/journal, self-renewal handoff, exact shell rollback, complete native/C parity, standalone original SUT migration, completion of profile cleanup/notices, shared shortcut retarget and unknown-root residual recovery. These are not enabled by removing safety guards; destructive mixed operations continue to refuse until their lifecycle/recovery exists.
 - ARP refresh now tries the known product architecture's registry view first (32-bit products use KEY_WOW64_32KEY), including on 32-bit Windows. The old missing-key-only alternate-view fallback and context recheck remain. Test verifies that an existing correct 32-bit key is updated without touching a stale same-code 64-bit key.
+
+### SecureUxTheme offer versions and semantic hover
+
+- Красные/жёлтые/зелёные HTML-карточки сохраняют доминирующий цвет при hover,
+  включая warning/offer, damaged, activated и доступное обновление. Подтверждено
+  production DOM и реальным Chromium, не только статическим чтением CSS.
+- SUT Checking выполняет read-only Describe: hash/identity-verified локальная
+  ProductVersion приоритетна, GitHub release metadata показаны отдельно. Без
+  локального MSI целевая версия явно подписана «релиз». Numeric tag не выдаётся
+  за MSI ProductVersion. Describe/Prepare делят canonical native lookup; общий
+  alias не добавлен. Prepare сохраняет immutable snapshot/recheck и installed skip.
+- Нативный fallback дополнен подписью версии SUT: для установленного — регистрация,
+  для отсутствующего — проверенный local MSI либо явно подписанный release tag.
+  Это частичное продвижение native parity, не завершение всего native/C backlog.
+- Пользовательские журналы подтверждают соседний `SecureUxTheme_x64.msi` 4.0.0,
+  затем защищённый Work snapshot; успешный MSI exit 3010 требует reboot.
+  Snapshot в Work не означает сетевое скачивание.
+- Добавлен actual-source `secure_ux_offer_mock.py`; расширены release parser,
+  production DOM и Chromium проверки. Removal mock теперь ограничивает извлечение
+  QueryInstallPresence до Describe; удаление по-прежнему тестируется прежним телом.
+- Проверки: **83 Python scripts / 73 PASS / прежние 10 FAIL** после исправления
+  границы removal harness; три production DOM и Chromium PASS, diff --check PASS.
+  Детали локального прогона: `.cache/sut-offer-final/summary.json` (не Git artifact).
+  Никакой новой Windows/MSVC/WiX сборки, MSI integration или native/DPI приёмки нет.
+- Открыты: per-file Platform snapshot, durable journal/reboot recovery, self-update
+  handoff/locked Previous cleanup, общая vendor/managed atomicity и force-clean+Remove,
+  exact shell rollback, полная native/C parity, standalone original SUT migration,
+  оставшиеся profile notices/cleanup и unknown-root recovery. Settings shortcut
+  retarget выполнен отдельным предыдущим этапом; это больше не missing feature.
+
+### Панель плана и диалоги: новый визуальный запрос
+
+- «Удалить все продукты» — красная нижняя строка с SVG-корзиной; скрыта при отсутствии
+  доступных для планирования удалений. Backend capability gates не обходятся.
+- «Принять все рекомендации» вместо выбора всех: только обновления/повреждения или
+  явная рекомендация, с per-row IPC; здоровые продукты остаются ручным выбором.
+- Строки удаления красные, установки/обновления/переустановки зелёные. Панель содержит
+  лишь краткую сводку и «Подробнее», без полных текстов уведомлений. Это явно заменяет
+  прежнее пользовательское ограничение «предупреждения только на карточках».
+- Диалоги: нейтральная glass-поверхность, размытие фона, kicker, разделители, строки
+  сведений о продукте, нижний Esc/«Понятно», keyboard focus trap и возврат фокуса.
+- Production DOM, Chromium, source resources и diff-check проверяются portable;
+  новой Windows/MSVC/WiX или DPI-приёмки нет.
