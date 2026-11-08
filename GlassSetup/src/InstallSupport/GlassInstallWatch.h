@@ -14,7 +14,7 @@ struct ModuleHolder {
 };
 
 #ifdef GLASS_SETUP_NATIVE_MONITOR
-// Load the embedded x86 GlassSettings.Native into Setup for this monitoring
+// Load the trusted installed x86 GlassSettings.Native into Setup for this monitoring
 // session. Free it before any later MSI removal or rollback.
 bool BeginLocalNativeMonitor() noexcept;
 void EndLocalNativeMonitor() noexcept;
@@ -28,7 +28,8 @@ bool CollectInProcessHolders(std::vector<ModuleHolder>& holders) noexcept;
 void MergeModuleTokens(std::wstring& into, const std::wstring& add);
 
 // Один resident /watchGlassModules + локальный скан до timeoutMs или пока держателей нет.
-// nativeScanFailed also reports an incomplete local scan or a broken helper protocol.
+// nativeScanFailed also reports an incomplete selected-architecture scan or a broken helper protocol.
+// scanLocal controls the x86 Setup-side scan independently of the x64 resident helper.
 bool WaitUntilClearOrTimeout(
     DWORD timeoutMs,
     const std::wstring& x64Dir,
@@ -36,7 +37,7 @@ bool WaitUntilClearOrTimeout(
     bool scanNativeX64,
     std::vector<ModuleHolder>& lastHolders,
     bool& nativeScanFailed,
-    const std::atomic<bool>* cancelRequested = nullptr) noexcept;
+    const std::atomic<bool>* cancelRequested = nullptr, bool scanLocal = true) noexcept;
 
 bool ParseNativePipeUtf8(const std::string& bytes, std::vector<ModuleHolder>& holders);
 

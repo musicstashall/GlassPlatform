@@ -21,6 +21,7 @@ release = extract("bool InstallEngine::ReleaseLockedModules(", "bool InstallEngi
 header = (root / "GlassSetup/src/WizardUnlockState.h").as_posix()
 prefix = r'''
 #include "HEADER_PATH"
+#include "/home/user/GlassPlatform/GlassSetup/src/GlassProcedurePlan.h"
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -57,7 +58,7 @@ namespace InstallLog { void Line(const wchar_t*){} template<class... A>void Line
 struct Harness {
  std::atomic_bool retrySucceeds{true},released{false},forceEntered{false},processEntered{false};
  std::atomic_bool failAfterProcess{false};
- bool emptyInitially=false,failWatch=false,failNativeLoad=false; int failAt=0;
+ bool emptyInitially=false,failWatch=false,failNativeLoad=false,expectedLocal=true,expected64=true; int failAt=0;
  Event forceGate,processGate; std::atomic_int scans{0},loads{0},unloads{0};
 };
 static Harness* harness=nullptr;
@@ -84,7 +85,8 @@ namespace GlassInstallWatch {
  bool BeginLocalNativeMonitor(){++harness->loads;return !harness->failNativeLoad;}
  void EndLocalNativeMonitor(){++harness->unloads;}
  bool WaitUntilClearOrTimeout(int,const std::wstring& x64,const std::wstring& x86,bool need64,
-     std::vector<GlassInstallUnlock::ModuleHolder>& rows,bool& failed,const std::atomic_bool* cancel){
+     std::vector<GlassInstallUnlock::ModuleHolder>& rows,bool& failed,const std::atomic_bool* cancel,bool scanLocal){
+   assert(scanLocal==harness->expectedLocal);assert(need64==harness->expected64);
    if(harness->failWatch){failed=true;return false;}
    rows=GlassInstallUnlock::CollectHolders(x64,x86,need64,failed,cancel);
    return !failed && rows.empty();
@@ -93,6 +95,7 @@ namespace GlassInstallWatch {
 bool IsProtectedProcessName(const wchar_t*){return false;}
 class InstallEngine {
 public:
+ unsigned procedureMask_=0x2Fu;
  enum class HoldKind {None,Modules,Processes,MissingHelper}; enum class HoldAction {None,Retry,Unlock,ContinueRisk,Cancel};
  struct Labels {std::wstring unload=L"scan",forceUnload=L"force",unlockProcesses=L"process",nativeScanFailed=L"error";} labels_;
  SRWLOCK statusLock_; std::atomic_bool cancelRequested_{false},quietClose_{false},failed_{false};
@@ -130,6 +133,12 @@ int main(){
    assert(!e.failed_ && !h.forceEntered && !h.processEntered);
    assert(e.unlockActivity_.Current()==WizardUnlock::Phase::None);
    if(action==InstallEngine::HoldAction::Retry)assert(h.loads==2);
+ }
+ for(unsigned mask:{1u,2u,4u,32u}) {
+  Harness h;h.emptyInitially=true;harness=&h;
+  h.expectedLocal=bool(mask&34u);h.expected64=bool(mask&5u);
+  InstallEngine e;e.procedureMask_=mask;assert(e.ReleaseLockedModules());
+  assert(h.loads==(h.expectedLocal?1:0));
  }
  std::cout<<"PASS: actual module gate: known empty, holders, unavailable helper, failed scan; Retry / explicit risk / Cancel; no hidden unload or kill\n";
 }

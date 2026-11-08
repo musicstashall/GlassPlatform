@@ -61,7 +61,7 @@ determine_fn = function("bool InstallEngine::DetermineCleanInstall(")
 early_fn = function("bool InstallEngine::InstallGlassSettingsEarly(")
 purge_fn = function("bool InstallEngine::PurgeRemnants(")
 
-prefix = '#include "'+str(root / "GlassSetup/src/GlassMaintenanceExecutor.h")+'"\n' + r'''
+prefix = '#include "/home/user/GlassPlatform/GlassSetup/src/GlassProcedurePlan.h"\n' + '#include "'+str(root / "GlassSetup/src/GlassMaintenanceExecutor.h")+'"\n' + r'''
 #include <algorithm>
 #include <atomic>
 #include <cassert>
@@ -166,6 +166,7 @@ namespace GlassInstallMsi {
 }
 class InstallEngine {
 public:
+ unsigned procedureMask_=0x2Fu;
  struct Selection {bool glassSettings=true; bool platform64=true,platform32=true,openGlass=true,independentSettings=false,settings64=false,settings32=false; bool Settings64(bool os64)const{return os64 && (independentSettings?settings64:glassSettings);} bool Settings32(bool os64)const{return independentSettings?settings32:(!os64&&glassSettings);}} selection_;
  GlassProductPlan::Plan executionPlan_{};bool executionPlanReady_=false;
  void AuthorizeHelpers(){
@@ -274,6 +275,9 @@ int main(){
   assert(!e.StopRunningHosts());assert(e.error_.empty() && e.cancelRequested_ && e.ogStopSignalled_);}
  {reset();InstallEngine e;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;fake.ogRunning=true;fake.ogStopOk=false;
   assert(!e.StopRunningHosts());assert(!e.error_.empty());}
+ {reset();InstallEngine e;e.procedureMask_=8;fake.denyMutex=true;e.prior_.ogServiceExisted=true;
+  assert(e.StopRunningHosts());assert(fake.signals==0&&fake.ogStopCalls==0);}
+ {reset();InstallEngine e;e.procedureMask_=1;fake.ogQueryOk=false;assert(e.StopRunningHosts());assert(fake.ogQueries==0);}
  std::cout<<"PASS: real stage functions: MSI, purge, mutexes, stopped/running OpenGlass and cancellation\n";
 }
 '''

@@ -5,6 +5,7 @@
 #include "InstallSupport/GlassSecureUxPackage.h"
 #include "GlassProducts.h"
 #include "GlassProductPlan.h"
+#include "GlassProcedurePlan.h"
 #include "WizardUnlockState.h"
 #include <windows.h>
 #include <winsvc.h>
@@ -184,6 +185,8 @@ private:
     bool InstallGlassSettingsEarly() noexcept;
     bool BuildExecutionPlan() noexcept;
     GlassProductPlan::Plan executionPlan_{};
+    unsigned procedureMask_=0x2Fu;
+    bool auxiliaryOnly_=false;
     bool executionPlanReady_=false;
     bool openGlassResidualRemoval_=false;
     bool RunMsiSequence() noexcept;

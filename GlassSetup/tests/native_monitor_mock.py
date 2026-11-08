@@ -151,8 +151,13 @@ int main(){
  assert(!GlassInstallWatch::ForceUnloadInLocalNative(0));
  assert(GlassInstallWatch::ForceUnloadInLocalNative(42));assert(fake.unloadCalls==1);
  GlassInstallWatch::EndLocalNativeMonitor();assert(fake.frees==1);
- assert(!ScanLocalNative(nullptr,0,rows,4,&count));assert(!GlassInstallWatch::ForceUnloadInLocalNative(42));
- GlassInstallWatch::EndLocalNativeMonitor();assert(fake.frees==1);
+ assert(!ScanLocalNative(nullptr,0,rows,4,&count));
+ // x64-only scans do not eagerly load the x86 controller. Explicit unload
+ // loads it on demand, through exactly the same trust/protocol checks.
+ assert(GlassInstallWatch::ForceUnloadInLocalNative(42));assert(fake.unloadCalls==2);
+ GlassInstallWatch::EndLocalNativeMonitor();assert(fake.frees==2);
+ fake.capable=false;assert(!GlassInstallWatch::ForceUnloadInLocalNative(42));assert(fake.unloadCalls==2);
+ GlassInstallWatch::EndLocalNativeMonitor();assert(fake.frees==3);
  std::cout<<"PASS: Setup's x86 Native loader: trusted path, export aliases, old DLL rejection, local scan and unload\n";
 }
 '''

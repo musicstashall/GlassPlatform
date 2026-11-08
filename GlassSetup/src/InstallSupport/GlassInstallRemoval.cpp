@@ -415,7 +415,10 @@ bool DeleteServiceLast(const Session& session, bool ru, std::wstring& error) noe
     const DWORD openError = svc ? ERROR_SUCCESS : GetLastError();
     CloseServiceHandle(scm);
     if (!svc) {
-        if (!session.serviceExisted && openError == ERROR_SERVICE_DOES_NOT_EXIST) return true;
+        // The explicit Remove postcondition is already satisfied. There is no
+        // object to mutate; never roll back MSI/tasks just because a prior
+        // deferred service deletion completed between inspection and commit.
+        if (openError == ERROR_SERVICE_DOES_NOT_EXIST) return true;
         error = Problem(ru, L"Служба OpenGlassHost изменилась во время установки.", L"OpenGlassHost changed during setup.", {}, openError);
         return false;
     }

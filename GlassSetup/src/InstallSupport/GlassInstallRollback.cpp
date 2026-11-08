@@ -247,19 +247,31 @@ bool CaptureRegistryValue(GlassInstallRollback::SessionState& state, HKEY hive, 
 bool CaptureRegistryValues(GlassInstallRollback::SessionState& state) noexcept {
     state.registryValues.clear();
     const wchar_t* platform=L"Software\\GlassPlatform";
-    for (const wchar_t* value:{L"InstallPath",L"InstallPathX64",L"InstallPathX86"}) {
-        if (!CaptureRegistryValue(state,HKEY_LOCAL_MACHINE,KEY_WOW64_32KEY,platform,value)) return false;
-        if (GlassInstallUtil::IsOs64Bit() && !CaptureRegistryValue(state,HKEY_LOCAL_MACHINE,KEY_WOW64_64KEY,platform,value)) return false;
+    for(bool x64:{false,true}) {
+        if(!(state.productMask & (x64?1u:2u)))continue;
+        const REGSAM view=x64?KEY_WOW64_64KEY:KEY_WOW64_32KEY;
+        for(const wchar_t* value:{L"InstallPath",x64?L"InstallPathX64":L"InstallPathX86"})
+            if(!CaptureRegistryValue(state,HKEY_LOCAL_MACHINE,view,platform,value))return false;
     }
-    for (const wchar_t* value:{L"InstallPath",L"OpenGlassInstallPath"}) {
+    if(state.productMask & 8u)for (const wchar_t* value:{L"InstallPath",L"OpenGlassInstallPath"}) {
         if (GlassInstallUtil::IsOs64Bit() && !CaptureRegistryValue(state,HKEY_LOCAL_MACHINE,KEY_WOW64_64KEY,L"Software\\StanislavKa\\GlassPlatform",value)) return false;
     }
     // Sparse-shell registration temporarily changes these Explorer block-list values.
     constexpr wchar_t blocked[]=L"Software\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Blocked";
-    for (const wchar_t* clsid:{GlassShared::GlassShellMenu::kToggleExplorerClsidBraced,
+    if(state.productMask & 3u)for (const wchar_t* clsid:{GlassShared::GlassShellMenu::kToggleExplorerClsidBraced,
                                GlassShared::GlassShellMenu::kOpenConfigExplorerClsidBraced})
         if (!CaptureRegistryValue(state,HKEY_CURRENT_USER,0,blocked,clsid)) return false;
     return true;
+}
+
+unsigned SnapshotProductMask(const wchar_t* code) noexcept {
+    using namespace GlassInstallMsi;
+    const struct {const wchar_t* code;unsigned mask;} rows[]={
+        {kProductPlatformX64,1},{kLegacyPlatformX64,1},{kProductPlatformX86,2},{kLegacyPlatformX86,2},
+        {kProductSettingsX64,4},{kProductSettingsX86,32},{kProductOpenGlass,8},{kLegacyOpenGlass,8},
+        {kProductSecureUxThemeX64,16},{kProductSecureUxThemeX86,16}};
+    for(const auto& row:rows)if(code && _wcsicmp(code,row.code)==0)return row.mask;
+    return 0x7Fu; // Generic callers still require the old strict checks.
 }
 
 bool VerifyProductRegistrations(GlassInstallRollback::SessionState& state,
@@ -284,6 +296,7 @@ bool VerifyProductRegistrations(GlassInstallRollback::SessionState& state,
         return false;
     };
     for (const auto& family:families) {
+        if(!(state.productMask & SnapshotProductMask(family.primary)))continue;
         for (const wchar_t* product:{family.primary,family.legacy}) {
             if (!product) continue;
             std::wstring detail;
@@ -311,7 +324,7 @@ bool TrySnapshotProduct(GlassInstallRollback::SessionState& state,
     const std::wstring& installDir,
     const std::atomic_bool* cancelled) noexcept {
     if (cancelled && cancelled->load(std::memory_order_acquire)) { state.copyError=ERROR_CANCELLED; return false; }
-    if (!productCode) return true;
+    if (!productCode || !(state.productMask & SnapshotProductMask(productCode))) return true;
     const INSTALLSTATE st = MsiQueryProductStateW(productCode);
     if (st != INSTALLSTATE_DEFAULT) return true;
     if (installDir.empty()) { state.copyError=ERROR_PATH_NOT_FOUND; return false; }
@@ -362,8 +375,9 @@ bool CreateSnapshot(
     const std::wstring& openGlassDir,
     bool includeOpenGlass,
     CopyProgressFn onProgress,
-    const std::atomic_bool* cancelled) noexcept {
+    const std::atomic_bool* cancelled, unsigned productMask) noexcept {
     CleanupSnapshot(state);
+    state.productMask=productMask;
     state.oldProducts.clear();
     state.installedThisSession.clear();
     state.modifiedProducts.clear();
@@ -378,8 +392,10 @@ bool CreateSnapshot(
     state.productPathUnverified = false;
     state.productPathCode.clear();
     state.productPathDetail.clear();
-    for (const auto* root:{&x64Dir,&x86Dir,&openGlassDir}) {
-        if (root->empty()) continue; // x64/OpenGlass do not exist on 32-bit Windows
+    const struct {const std::wstring* root;unsigned rows;} roots[]={{&x64Dir,5u},{&x86Dir,34u},{&openGlassDir,8u}};
+    for (const auto& entry:roots) {
+        const auto* root=entry.root;
+        if (!(state.productMask & entry.rows) || root->empty()) continue; // x64/OpenGlass do not exist on 32-bit Windows
         if (cancelled && cancelled->load(std::memory_order_acquire)) { state.copyError=ERROR_CANCELLED;return false; }
         if (!GlassInstallUtil::IsSafeInstallPath(*root)) {
             state.copyError=ERROR_INVALID_DATA;
@@ -419,7 +435,7 @@ bool CreateSnapshot(
     // The OpenGlass subdirectory can contain user data even when no MSI is
     // registered. Access errors are not evidence that it is absent.
     bool ogDirectoryExists = false;
-    if (!openGlassDir.empty()) {
+    if ((state.productMask&8u) && !openGlassDir.empty()) {
         const DWORD attributes = GetFileAttributesW(openGlassDir.c_str());
         if (attributes != INVALID_FILE_ATTRIBUTES) ogDirectoryExists = true;
         else {
@@ -431,9 +447,11 @@ bool CreateSnapshot(
             }
         }
     }
-    const bool backupOg = includeOpenGlass || ogDirectoryExists;
+    const bool backupOg = (state.productMask&8u) && (includeOpenGlass || ogDirectoryExists);
 
-    uint64_t total = DirBytes(x64Dir, skipInX64, cancelled) + DirBytes(x86Dir, {}, cancelled)
+    const auto source64=(state.productMask&1u)?x64Dir:(state.productMask&4u)?x64Dir+L"\\GlassSettings":std::wstring{};
+    const auto source32=(state.productMask&2u)?x86Dir:(state.productMask&32u)?x86Dir+L"\\GlassSettings":std::wstring{};
+    uint64_t total = DirBytes(source64, skipInX64, cancelled) + DirBytes(source32, {}, cancelled)
         + (backupOg ? DirBytes(openGlassDir, {}, cancelled) : 0);
     if (cancelled && cancelled->load(std::memory_order_acquire)) { state.copyError=ERROR_CANCELLED; return false; }
     uint64_t copied = 0;
@@ -467,8 +485,22 @@ bool CreateSnapshot(
             }
         }
     };
-    bump(x64Dir, L"x64", skipInX64, state.backupX64);
-    bump(x86Dir, L"x86", {}, state.backupX86);
+    const auto architectureBackup=[&](bool is64,const std::wstring& source,unsigned platformBit,std::wstring& backup) {
+        if(source.empty())return;
+        const std::wstring folderName=is64?L"x64":L"x86";
+        if(state.productMask&platformBit)bump(source,folderName,is64?skipInX64:std::wstring{},backup);
+        else {
+            const auto parent=folder+L"\\"+folderName;
+            if(!CreateDirectoryW(parent.c_str(),nullptr) && GetLastError()!=ERROR_ALREADY_EXISTS) {
+                state.copyError=GetLastError();copiedOk=false;return;
+            }
+            std::wstring leaf;
+            bump(source,folderName+L"\\GlassSettings",{},leaf);
+            if(!leaf.empty())backup=parent; // Existing restore paths retain their root/GlassSettings layout.
+        }
+    };
+    architectureBackup(true,source64,1u,state.backupX64);
+    architectureBackup(false,source32,2u,state.backupX86);
     if (backupOg)
         bump(openGlassDir, L"OpenGlass", {}, state.backupOpenGlass);
 
@@ -544,6 +576,7 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
         GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyPlatformX64,
         GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
     for (const auto* product:known) {
+        if (!(state.productMask & SnapshotProductMask(product))) continue;
         if (!GlassInstallMsi::IsProductInstalled(product)) continue;
         const ProductSnapshot* snapshot=nullptr;
         for (const auto& item:state.oldProducts)

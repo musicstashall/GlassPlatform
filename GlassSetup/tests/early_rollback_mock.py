@@ -49,6 +49,7 @@ namespace GlassInstallRollback {
  enum class RestoreScope { AllProducts, SettingsX86, SettingsX64, SettingsBoth };
  struct ProductSnapshot{std::wstring productCode,installDir,cachedMsiPath,displayVersion;};
  struct SessionState {
+  unsigned productMask=0x7Fu;
   std::wstring workspaceDir=L"workspace",x64Dir=L"root64",x86Dir=L"root86",openGlassDir=L"rootOG";
   std::wstring backupX64=L"backup64",backupX86=L"backup86",backupOpenGlass=L"backupOG";
   std::vector<ProductSnapshot> oldProducts;std::vector<std::wstring> installedThisSession,modifiedProducts;
@@ -132,7 +133,7 @@ int main(){
 with tempfile.TemporaryDirectory(prefix="glass-rollback-test-") as directory:
     cpp = Path(directory) / "rollback.cpp"
     exe = Path(directory) / "rollback"
-    cpp.write_text(prefix + "\nnamespace GlassInstallRollback {\n" + rollback + "\n}\n" + main, encoding="utf-8")
+    cpp.write_text(prefix + function("unsigned SnapshotProductMask(") + "\nnamespace GlassInstallRollback {\n" + rollback + "\n}\n" + main, encoding="utf-8")
     compiler = os.environ.get("CXX", "g++")
     subprocess.run([compiler, "-std=c++17", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                     str(cpp), "-o", str(exe)], check=True)

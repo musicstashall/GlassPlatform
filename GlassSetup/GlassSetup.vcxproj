@@ -158,6 +158,7 @@
     <ClInclude Include="src\WizardUnlockState.h" />
     <ClInclude Include="src\GlassProducts.h" />
     <ClInclude Include="src\GlassProductPlan.h" />
+    <ClInclude Include="src\GlassProcedurePlan.h" />
     <ClInclude Include="src\GlassProductUiPolicy.h" />
     <ClInclude Include="src\InstallEngine.h" />
     <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h" />

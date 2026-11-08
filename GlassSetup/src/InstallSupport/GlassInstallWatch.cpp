@@ -333,7 +333,7 @@ void EndLocalNativeMonitor() noexcept {
 }
 
 bool ForceUnloadInLocalNative(DWORD pid) noexcept {
-    return pid && g_localForceUnload && g_localForceUnload(pid) != FALSE;
+    return pid && (g_localForceUnload || BeginLocalNativeMonitor()) && g_localForceUnload && g_localForceUnload(pid) != FALSE;
 }
 #endif
 
@@ -478,7 +478,7 @@ bool WaitUntilClearOrTimeout(
     bool scanNativeX64,
     std::vector<ModuleHolder>& lastHolders,
     bool& nativeScanFailed,
-    const std::atomic<bool>* cancelRequested) noexcept {
+    const std::atomic<bool>* cancelRequested, bool scanLocal) noexcept {
     nativeScanFailed = false;
     lastHolders.clear();
 
@@ -647,7 +647,7 @@ bool WaitUntilClearOrTimeout(
             break;
         }
         lastHolders.clear();
-        if (!CollectInProcessHolders(lastHolders)) {
+        if (scanLocal && !CollectInProcessHolders(lastHolders)) {
             nativeScanFailed=true;
             break;
         }

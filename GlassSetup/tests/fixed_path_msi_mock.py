@@ -171,6 +171,7 @@ middle = r'''
 namespace GlassInstallRollback {
  struct ProductSnapshot{std::wstring productCode,installDir,cachedMsiPath,displayVersion;};
  struct SessionState{
+  unsigned productMask=0x7Fu;
   std::wstring workspaceDir=L"secure",x64Dir=L"root",x86Dir=L"root",openGlassDir=L"root";std::vector<ProductSnapshot> oldProducts;
   unsigned copyError=0;bool hadPriorInstall=false,productPathUnverified=false;std::wstring productPathCode,productPathDetail;
  };
@@ -183,6 +184,15 @@ int main(){
  reset();assert(CheckProductContexts(L"p",detail,&cancelled)==ProductPathCheck::Safe);
  reset();fake.all=fake.current=1;fake.productState=INSTALLSTATE_DEFAULT;
  assert(CheckProductContexts(L"p",detail,&cancelled)==ProductPathCheck::Safe);
+ // A foreign family outside the transaction is not snapshotted/mutated.
+ {GlassInstallRollback::SessionState onlyOg;onlyOg.productMask=8;
+  assert(VerifyProductRegistrations(onlyOg,&cancelled));}
+ reset();fake.all=fake.current=1;fake.productState=INSTALLSTATE_DEFAULT;
+ fake.related[L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5030}"]={L"foreign-og"};
+ {GlassInstallRollback::SessionState onlyOg;onlyOg.productMask=8;
+  assert(!VerifyProductRegistrations(onlyOg,&cancelled));}
+ {GlassInstallRollback::SessionState onlyOg;onlyOg.productMask=8;
+  assert(TrySnapshotProduct(onlyOg,L"p64",L"root",&cancelled));assert(fake.copyCalls==0);}
  reset();fake.all=1;fake.current=0;fake.productState=INSTALLSTATE_UNKNOWN;
  assert(CheckProductContexts(L"p",detail,&cancelled)==ProductPathCheck::Unverifiable);
  reset();fake.all=fake.current=2;fake.productState=INSTALLSTATE_DEFAULT;
@@ -290,7 +300,7 @@ int main(){
 with tempfile.TemporaryDirectory(prefix="glass-fixed-msi-") as directory:
     cpp = Path(directory) / "fixed.cpp"
     exe = Path(directory) / "fixed"
-    cpp.write_text(prefix + contexts + "\n" + file_roots + middle + verify_registrations + "\n" + snapshot +
+    cpp.write_text(prefix + contexts + "\n" + file_roots + middle + function(rollback_src, "unsigned SnapshotProductMask(") + verify_registrations + "\n" + snapshot +
                    "\nnamespace GlassInstallRollback {\n" + safe_uninstall + "\n}\n" + main, encoding="utf-8")
     compiler = os.environ.get("CXX", "g++")
     subprocess.run([compiler, "-std=c++17", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-no-pie",

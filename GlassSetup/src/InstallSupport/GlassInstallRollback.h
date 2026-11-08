@@ -26,6 +26,7 @@ struct RegistryValueSnapshot {
 };
 
 struct SessionState {
+    unsigned productMask = 0x7Fu; // Product rows eligible for this transaction only.
     std::wstring workspaceDir;
     std::wstring x64Dir;
     std::wstring x86Dir;
@@ -55,7 +56,7 @@ bool CreateSnapshot(
     const std::wstring& openGlassDir,
     bool includeOpenGlass,
     CopyProgressFn onProgress,
-    const std::atomic_bool* cancelled = nullptr) noexcept;
+    const std::atomic_bool* cancelled = nullptr, unsigned productMask = 0x7Fu) noexcept;
 
 void NoteModified(SessionState& state, const wchar_t* productCode) noexcept;
 void NoteInstalled(SessionState& state, const wchar_t* productCode) noexcept;

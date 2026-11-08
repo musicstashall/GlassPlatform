@@ -264,97 +264,101 @@ bool InstallEngine::ChooseCancellationOrFailure(bool failed) noexcept {
 
 bool InstallEngine::CapturePriorHostState() noexcept {
     prior_ = {};
-    GP::InvalidateGlassAutorunTaskCache();
-    prior_.x64TaskExisted = GP::GlassAutorunTaskExists(GP::PlatformArch::X64);
-    prior_.x64TaskEnabled = GP::QueryGlassAutorunUiState(GP::PlatformArch::X64) != GP::AutorunUiState::Disabled;
-    prior_.x86TaskExisted = GP::GlassAutorunTaskExists(GP::PlatformArch::X86);
-    prior_.x86TaskEnabled = GP::QueryGlassAutorunUiState(GP::PlatformArch::X86) != GP::AutorunUiState::Disabled;
-    if (!QueryPlatformMutex(GP::PlatformArch::X64, prior_.x64WasRunning) ||
-        !QueryPlatformMutex(GP::PlatformArch::X86, prior_.x86WasRunning)) {
-        const DWORD error = GetLastError();
-        InstallLog::LineFormat(L"Could not inspect platform mutex before changes (%lu)", error);
-        SetFailure(labels_.snapshotFailed.empty() ? L"Could not inspect the platform; no changes were made."
-                                                 : labels_.snapshotFailed, error);
-        return false;
-    }
-
-    // Existing definitions are preserved, never replaced. Inspect every
-    // action, executable and argument instead of trusting a task name or just
-    // the first parsed DLL path.
-    const auto checkTask = [this](GP::PlatformArch arch, bool existed, bool running, const std::wstring& fixedRoot) {
-        std::wstring error;
-        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-        if (GlassInstallRemoval::ValidatePlatformTask(arch,fixedRoot,existed,running,ru,error)) return true;
-        InstallLog::LineFormat(L"Conflicting or unreadable platform task %s: %s",
-            GP::GlassAutorunTaskName(arch),error.c_str());
-        SetFailure(error,0);
-        return false;
-    };
-    if (!checkTask(GP::PlatformArch::X64,prior_.x64TaskExisted,prior_.x64WasRunning,x64Dir_) ||
-        !checkTask(GP::PlatformArch::X86,prior_.x86TaskExisted,prior_.x86WasRunning,x86Dir_)) return false;
-    if ((prior_.x64WasRunning && (!prior_.x64TaskExisted || !prior_.x64TaskEnabled)) ||
-        (prior_.x86WasRunning && (!prior_.x86TaskExisted || !prior_.x86TaskEnabled))) {
-        // We cannot infer a manually launched host's DLL path from the resolved
-        // install destination. Stopping it would make rollback guess what to run.
-        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-        InstallLog::Line(L"Running platform has no enabled autorun task; refusing to guess its rollback path");
-        SetFailure(ru ? L"Платформа запущена вручную или с отключённой задачей. Остановите её и повторите установку: безопасно определить путь для отката не удалось. Изменения не внесены."
-                      : L"A platform is running manually or with a disabled task. Stop it and run Setup again: its rollback path cannot be determined safely. No changes were made.", 0);
-        return false;
-    }
-
-    if (!GlassInstallHost::QueryOpenGlassServiceStartType(prior_.ogServiceExisted, prior_.ogServiceStartType)) {
-        const DWORD error=GetLastError();
-        InstallLog::LineFormat(L"Could not inspect prior OpenGlass service state (%lu)",error);
-        SetFailure(labels_.snapshotFailed.empty()?L"Could not inspect the existing service; no changes were made.":labels_.snapshotFailed,error);
-        return false;
-    }
-    GlassInstallUtil::OpenGlassTaskState openGlassTasks;
-    if (!GlassInstallUtil::QueryOpenGlassTasks(openGlassTasks)) {
-        const DWORD error=GetLastError();
-        InstallLog::LineFormat(L"Could not inspect OpenGlass tasks before changes (%lu)",error);
-        SetFailure(labels_.snapshotFailed.empty()?L"Could not inspect OpenGlass tasks; no changes were made.":labels_.snapshotFailed,error);
-        return false;
-    }
-    prior_.ogLegacyTaskExisted = openGlassTasks.found;
-    prior_.ogLegacyTaskEnabled = !openGlassTasks.anyDisabled;
-    if (prior_.ogServiceExisted || prior_.ogLegacyTaskExisted) {
-        std::wstring error;
-        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-        if (!GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,&cancelRequested_,ru,error)) {
-            if (!IsCancelRequested()) {
-                InstallLog::LineFormat(L"Conflicting or unreadable OpenGlass backend: %s",error.c_str());
-                SetFailure(error,0);
-            }
+    if(GlassProcedurePlan::ModuleScan(procedureMask_)) {
+        GP::InvalidateGlassAutorunTaskCache();
+        prior_.x64TaskExisted = GlassProcedurePlan::Platform64(procedureMask_) && GP::GlassAutorunTaskExists(GP::PlatformArch::X64);
+        prior_.x64TaskEnabled = GlassProcedurePlan::Platform64(procedureMask_) && GP::QueryGlassAutorunUiState(GP::PlatformArch::X64) != GP::AutorunUiState::Disabled;
+        prior_.x86TaskExisted = GlassProcedurePlan::Platform32(procedureMask_) && GP::GlassAutorunTaskExists(GP::PlatformArch::X86);
+        prior_.x86TaskEnabled = GlassProcedurePlan::Platform32(procedureMask_) && GP::QueryGlassAutorunUiState(GP::PlatformArch::X86) != GP::AutorunUiState::Disabled;
+        if ((GlassProcedurePlan::Platform64(procedureMask_) && !QueryPlatformMutex(GP::PlatformArch::X64, prior_.x64WasRunning)) ||
+            (GlassProcedurePlan::Platform32(procedureMask_) && !QueryPlatformMutex(GP::PlatformArch::X86, prior_.x86WasRunning))) {
+            const DWORD error = GetLastError();
+            InstallLog::LineFormat(L"Could not inspect platform mutex before changes (%lu)", error);
+            SetFailure(labels_.snapshotFailed.empty() ? L"Could not inspect the platform; no changes were made."
+                                                     : labels_.snapshotFailed, error);
             return false;
         }
+
+        // Existing definitions are preserved, never replaced. Inspect every
+        // action, executable and argument instead of trusting a task name or just
+        // the first parsed DLL path.
+        const auto checkTask = [this](GP::PlatformArch arch, bool existed, bool running, const std::wstring& fixedRoot) {
+            std::wstring error;
+            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+            if (GlassInstallRemoval::ValidatePlatformTask(arch,fixedRoot,existed,running,ru,error)) return true;
+            InstallLog::LineFormat(L"Conflicting or unreadable platform task %s: %s",
+                GP::GlassAutorunTaskName(arch),error.c_str());
+            SetFailure(error,0);
+            return false;
+        };
+        if ((GlassProcedurePlan::Platform64(procedureMask_) && !checkTask(GP::PlatformArch::X64,prior_.x64TaskExisted,prior_.x64WasRunning,x64Dir_)) ||
+            (GlassProcedurePlan::Platform32(procedureMask_) && !checkTask(GP::PlatformArch::X86,prior_.x86TaskExisted,prior_.x86WasRunning,x86Dir_))) return false;
+        if ((prior_.x64WasRunning && (!prior_.x64TaskExisted || !prior_.x64TaskEnabled)) ||
+            (prior_.x86WasRunning && (!prior_.x86TaskExisted || !prior_.x86TaskEnabled))) {
+            // We cannot infer a manually launched host's DLL path from the resolved
+            // install destination. Stopping it would make rollback guess what to run.
+            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+            InstallLog::Line(L"Running platform has no enabled autorun task; refusing to guess its rollback path");
+            SetFailure(ru ? L"Платформа запущена вручную или с отключённой задачей. Остановите её и повторите установку: безопасно определить путь для отката не удалось. Изменения не внесены."
+                          : L"A platform is running manually or with a disabled task. Stop it and run Setup again: its rollback path cannot be determined safely. No changes were made.", 0);
+            return false;
+        }
+
     }
-    // This later state is for rollback only; launch policy uses the separate
-    // snapshot taken when the wizard was opened.
-    if (!GlassInstallUtil::QueryOpenGlassRunning(prior_.ogWasRunning, &openGlassTasks)) {
-        const DWORD error=GetLastError();
-        InstallLog::LineFormat(L"Could not inspect running OpenGlass state before changes (%lu)",error);
-        SetFailure(labels_.snapshotFailed.empty()?L"Could not inspect OpenGlass; no changes were made.":labels_.snapshotFailed,error);
-        return false;
-    }
-    // Do not stop an externally managed or ambiguous running instance when
-    // rollback cannot know which backend must be restarted.
-    if (prior_.ogWasRunning && ((!prior_.ogServiceExisted && !prior_.ogLegacyTaskExisted) ||
-        (prior_.ogServiceExisted && openGlassTasks.anyRunning) ||
-        (openGlassTasks.anyRunning && (openGlassTasks.multipleTasks || openGlassTasks.multipleRunningInstances)))) {
-        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-        SetFailure(ru ? L"Текущее состояние OpenGlass нельзя безопасно восстановить. Остановите OpenGlass и снова запустите установщик; изменений не внесено."
-                      : L"The current OpenGlass state cannot be safely restored. Stop OpenGlass and restart Setup; no changes were made.",0);
-        return false;
-    }
-    // A disabled legacy task cannot be started without enabling it. Do not
-    // silently change that preference or stop an instance we cannot restore.
-    if (!prior_.ogServiceExisted && prior_.ogLegacyTaskExisted && !prior_.ogLegacyTaskEnabled &&
-        (prior_.ogWasRunning || (selection_.openGlass && GlassProducts::ShouldStartOpenGlass(openGlassStartup_)))) {
-        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-        SetFailure(ru ? L"OpenGlass работает с отключённой старой задачей. Остановите OpenGlass или включите задачу и заново откройте установщик; изменений не внесено."
-                      : L"OpenGlass uses a disabled legacy task. Stop OpenGlass or enable the task, then restart Setup; no changes were made.", 0);
-        return false;
+    if(GlassProcedurePlan::OpenGlass(procedureMask_)) {
+        if (!GlassInstallHost::QueryOpenGlassServiceStartType(prior_.ogServiceExisted, prior_.ogServiceStartType)) {
+            const DWORD error=GetLastError();
+            InstallLog::LineFormat(L"Could not inspect prior OpenGlass service state (%lu)",error);
+            SetFailure(labels_.snapshotFailed.empty()?L"Could not inspect the existing service; no changes were made.":labels_.snapshotFailed,error);
+            return false;
+        }
+        GlassInstallUtil::OpenGlassTaskState openGlassTasks;
+        if (!GlassInstallUtil::QueryOpenGlassTasks(openGlassTasks)) {
+            const DWORD error=GetLastError();
+            InstallLog::LineFormat(L"Could not inspect OpenGlass tasks before changes (%lu)",error);
+            SetFailure(labels_.snapshotFailed.empty()?L"Could not inspect OpenGlass tasks; no changes were made.":labels_.snapshotFailed,error);
+            return false;
+        }
+        prior_.ogLegacyTaskExisted = openGlassTasks.found;
+        prior_.ogLegacyTaskEnabled = !openGlassTasks.anyDisabled;
+        if (prior_.ogServiceExisted || prior_.ogLegacyTaskExisted) {
+            std::wstring error;
+            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+            if (!GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,&cancelRequested_,ru,error)) {
+                if (!IsCancelRequested()) {
+                    InstallLog::LineFormat(L"Conflicting or unreadable OpenGlass backend: %s",error.c_str());
+                    SetFailure(error,0);
+                }
+                return false;
+            }
+        }
+        // This later state is for rollback only; launch policy uses the separate
+        // snapshot taken when the wizard was opened.
+        if (!GlassInstallUtil::QueryOpenGlassRunning(prior_.ogWasRunning, &openGlassTasks)) {
+            const DWORD error=GetLastError();
+            InstallLog::LineFormat(L"Could not inspect running OpenGlass state before changes (%lu)",error);
+            SetFailure(labels_.snapshotFailed.empty()?L"Could not inspect OpenGlass; no changes were made.":labels_.snapshotFailed,error);
+            return false;
+        }
+        // Do not stop an externally managed or ambiguous running instance when
+        // rollback cannot know which backend must be restarted.
+        if (prior_.ogWasRunning && ((!prior_.ogServiceExisted && !prior_.ogLegacyTaskExisted) ||
+            (prior_.ogServiceExisted && openGlassTasks.anyRunning) ||
+            (openGlassTasks.anyRunning && (openGlassTasks.multipleTasks || openGlassTasks.multipleRunningInstances)))) {
+            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+            SetFailure(ru ? L"Текущее состояние OpenGlass нельзя безопасно восстановить. Остановите OpenGlass и снова запустите установщик; изменений не внесено."
+                          : L"The current OpenGlass state cannot be safely restored. Stop OpenGlass and restart Setup; no changes were made.",0);
+            return false;
+        }
+        // A disabled legacy task cannot be started without enabling it. Do not
+        // silently change that preference or stop an instance we cannot restore.
+        if (!prior_.ogServiceExisted && prior_.ogLegacyTaskExisted && !prior_.ogLegacyTaskEnabled &&
+            (prior_.ogWasRunning || (selection_.openGlass && GlassProducts::ShouldStartOpenGlass(openGlassStartup_)))) {
+            const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+            SetFailure(ru ? L"OpenGlass работает с отключённой старой задачей. Остановите OpenGlass или включите задачу и заново откройте установщик; изменений не внесено."
+                          : L"OpenGlass uses a disabled legacy task. Stop OpenGlass or enable the task, then restart Setup; no changes were made.", 0);
+            return false;
+        }
     }
     prior_.shortcutExisted = GlassInstallUtil::StartMenuShortcutExists();
     return true;
@@ -447,7 +451,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             auto* self = static_cast<InstallEngine*>(p);
             const bool vendorOnly=GlassProducts::OnlySecureUxThemeRemoval(self->selection_);
             bool priorStateOk=vendorOnly || self->CapturePriorHostState();
-            if(vendorOnly)self->scanNativeX64_=GlassInstallUtil::IsOs64Bit();
+            if(vendorOnly || self->auxiliaryOnly_)self->scanNativeX64_=GlassInstallUtil::IsOs64Bit();
             else if (priorStateOk) priorStateOk=self->DetermineCleanInstall();
             if (self->forceClean_)
                 InstallLog::Line(L"Clean reinstall: remnants will be removed before install");
@@ -467,7 +471,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             if(ok && !self->IsCancelRequested())ok=self->PrepareManagedRemoval();
 
             if (ok && !vendorOnly && !self->IsCancelRequested()) {
-                GlassInstallUtil::CloseGlassSettingsProcesses(&self->cancelRequested_);
+                if(GlassProcedurePlan::Settings(self->procedureMask_))GlassInstallUtil::CloseGlassSettingsProcesses(&self->cancelRequested_);
                 if (!self->IsCancelRequested()) ok = self->StopRunningHosts();
             }
 
@@ -484,8 +488,8 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             // native monitor, for nothing.
             // If the picture is not clean, the stage still runs in full.
             if (ok && !vendorOnly && !self->IsCancelRequested()) {
-                if (self->cleanInstall_) {
-                    InstallLog::Line(L"Unlocker: clean install - module scan skipped");
+                if (self->cleanInstall_ || !GlassProcedurePlan::ModuleScan(self->procedureMask_)) {
+                    InstallLog::Line(L"Unlocker: no planned platform/helper module mutation, or clean install - scan skipped");
                 } else {
                     ok = self->ReleaseLockedModules();
                 }
@@ -530,7 +534,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                 if(ok && self->selection_.removeMask) {
                     std::wstring detail;
                     ok=GlassInstallRemoval::Commit(self->removalSession_,PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN,detail);
-                    if(!ok)self->SetFailure(detail,ERROR_INSTALL_FAILURE);
+                    if(!ok)self->SetFailure(detail,0);
                 }
                 if (ok) ok = self->InstallOriginalSecureUxTheme();
                 if (ok) {
@@ -538,9 +542,9 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                     // installation is final: no step below may fail the install
                     // or trigger a rollback; problems become finish-page notes.
                     InstallLog::Line(L"Launch: commit point reached, rollback is no longer possible");
-                    if(!vendorOnly)self->LaunchSelectedProducts();
+                    if(!vendorOnly && !self->auxiliaryOnly_)self->LaunchSelectedProducts();
                     constexpr ULONGLONG kMinLaunchMs = 5000;
-                    for (;;) {
+                    for (;!self->auxiliaryOnly_;) {
                         const ULONGLONG elapsed = GetTickCount64() - launchStart;
                         if (elapsed >= kMinLaunchMs)
                             break;
@@ -676,6 +680,11 @@ bool InstallEngine::Start(
     launchingPhase_.store(false, std::memory_order_relaxed);
 
     selection_=GlassProducts::NormalizeInstall(selection_,GlassInstallUtil::IsOs64Bit());
+    procedureMask_=GlassProcedurePlan::MutationMask(selection_,GlassInstallUtil::IsOs64Bit());
+    auxiliaryOnly_=procedureMask_==8u && selection_.Removes(3) && !forceClean_ &&
+        MsiQueryProductStateW(GlassInstallMsi::kProductOpenGlass)==INSTALLSTATE_UNKNOWN &&
+        MsiQueryProductStateW(GlassInstallMsi::kLegacyOpenGlass)==INSTALLSTATE_UNKNOWN;
+    InstallLog::LineFormat(L"Procedure map: rows=0x%X auxiliaryOnly=%d",procedureMask_,auxiliaryOnly_?1:0);
 
     holdGate_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     decisionGate_ = CreateEventW(nullptr, TRUE, TRUE, nullptr);
@@ -897,12 +906,13 @@ bool InstallEngine::StopRunningHosts() noexcept {
     };
 
     hostsStopped_ = true;
-    // Recheck both mutexes even on a seemingly clean install: a host may have
-    // appeared after the initial snapshot. Unknown mutex state fails closed.
-    if (!StopGlassPlatform(GP::PlatformArch::X64, labels_.stop64, L"x64", fail)) return false;
-    if (!StopGlassPlatform(GP::PlatformArch::X86, labels_.stop86, L"x86", fail)) return false;
+    // Recheck only affected hosts, even on a seemingly clean install.
+    // A newly appeared or unknown affected host fails closed.
+    if (GlassProcedurePlan::Platform64(procedureMask_) && !StopGlassPlatform(GP::PlatformArch::X64, labels_.stop64, L"x64", fail)) return false;
+    if (GlassProcedurePlan::Platform32(procedureMask_) && !StopGlassPlatform(GP::PlatformArch::X86, labels_.stop86, L"x86", fail)) return false;
     if (IsCancelRequested()) return false;
 
+    if(!GlassProcedurePlan::OpenGlass(procedureMask_))return true;
     bool openGlassRunning = false;
     const bool openGlassKnown = GlassInstallUtil::QueryOpenGlassRunning(openGlassRunning);
     const DWORD stateError = openGlassKnown ? ERROR_SUCCESS : GetLastError();
@@ -975,11 +985,11 @@ bool InstallEngine::ReleaseLockedModules() noexcept {
         if(IsCancelRequested())return false;
         bool failed=false;
 #ifdef GLASS_SETUP_NATIVE_MONITOR
-        failed=!GlassInstallWatch::BeginLocalNativeMonitor();
+        failed=GlassProcedurePlan::Platform32(procedureMask_) && !GlassInstallWatch::BeginLocalNativeMonitor();
 #endif
         std::vector<GlassInstallUnlock::ModuleHolder> holders;
         if(!failed) {
-            const bool clear=GlassInstallWatch::WaitUntilClearOrTimeout(30000,x64Dir_,x86Dir_,scanNativeX64_,holders,failed,&cancelRequested_);
+            const bool clear=GlassInstallWatch::WaitUntilClearOrTimeout(30000,x64Dir_,x86Dir_,scanNativeX64_&&GlassProcedurePlan::Platform64(procedureMask_),holders,failed,&cancelRequested_,GlassProcedurePlan::Platform32(procedureMask_));
             if(IsCancelRequested())return false;
             if(!failed && clear && holders.empty()) {
                 InstallLog::Line(L"Module scan verified: all Glass modules unloaded");return true;
@@ -1787,7 +1797,7 @@ bool InstallEngine::RunMsiSequence() noexcept {
         (void)GlassInstallUtil::CreateStartMenuShortcut(gsDir + L"\\GlassSettings.exe", gsDir);
     }
 
-    InstallLog::Line(L"InstallEngine: selected MSI products applied");
+    InstallLog::Line(L"InstallEngine: planned product actions completed (MSI or verified auxiliary removal)");
     return true;
 }
 
@@ -2036,7 +2046,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
             ? L"A previously running component could not be restarted." : labels_.warnPriorHosts, labels_.warnPriorHostsHint);
     }
     // Removal must not recreate the native menu or require an already removed helper.
-    if(selection_.removeMask && !(is64?selection_.platform64:selection_.platform32))return;
+    if(!(is64?selection_.platform64:selection_.platform32))return;
     // Windows 11: the developer certificate (signer of GlassShellSparse.msix) is
     // added to LocalMachine\TrustedPeople only when the user chose so on the
     // certificate page; it is taken from the msix that was just installed and
@@ -2128,12 +2138,18 @@ bool InstallEngine::DetermineCleanInstall() noexcept {
 }
 
 bool InstallEngine::CreateRollbackSnapshot() noexcept {
+    if(auxiliaryOnly_) {
+        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+        SetStatus(ru?L"Сохранение состояния службы и задач OpenGlass":L"Saving OpenGlass service and task state",450);
+        if(GlassInstallUtil::CreateSecureTempDirectory(L"GlassRollback",rollbackSession_.workspaceDir))return true;
+        SetFailure(L"Could not create the auxiliary rollback workspace",GetLastError());return false;
+    }
     SetStatus(labels_.backup.empty() ? L"…" : labels_.backup, 450);
     const bool ok = GlassInstallRollback::CreateSnapshot(
         rollbackSession_, x64Dir_, x86Dir_, openGlassDir_, selection_.openGlass||selection_.Removes(3),
         [this](int units) {
             SetStatus(labels_.backup, 450 + (units * 350) / 10000);
-        }, &cancelRequested_);
+        }, &cancelRequested_, procedureMask_);
     if (IsCancelRequested())
         return false;
     if (!ok) {
@@ -2166,6 +2182,7 @@ bool InstallEngine::StopHostsForRollback() noexcept {
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
     std::wstring error;
     for (const auto arch:{GP::PlatformArch::X64,GP::PlatformArch::X86}) {
+        if(arch==GP::PlatformArch::X64?!GlassProcedurePlan::Platform64(procedureMask_):!GlassProcedurePlan::Platform32(procedureMask_))continue;
         bool running=false;
         if (!QueryPlatformMutex(arch,running)) return false;
         GP::InvalidateGlassAutorunTaskCache();
@@ -2175,10 +2192,10 @@ bool InstallEngine::StopHostsForRollback() noexcept {
             InstallLog::LineFormat(L"Rollback refused to stop changed platform: %s",error.c_str());return false;
         }
     }
-    if (scanNativeX64_ && !GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,nullptr,ru,error)) {
+    if (GlassProcedurePlan::OpenGlass(procedureMask_) && !GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,nullptr,ru,error)) {
         InstallLog::LineFormat(L"Rollback refused to stop changed OpenGlass backend: %s",error.c_str());return false;
     }
-    return GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,true,true,scanNativeX64_);
+    return GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,GlassProcedurePlan::Platform64(procedureMask_),GlassProcedurePlan::Platform32(procedureMask_),GlassProcedurePlan::OpenGlass(procedureMask_));
 }
 
 bool InstallEngine::RemoveCreatedHostsForRollback() noexcept {
@@ -2201,6 +2218,12 @@ bool InstallEngine::RemoveCreatedHostsForRollback() noexcept {
 }
 
 bool InstallEngine::PerformRollback() noexcept {
+    if(auxiliaryOnly_) {
+        std::wstring detail;
+        const bool ok=GlassInstallRemoval::Restore(removalSession_,PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN,detail);
+        if(!ok)InstallLog::LineFormat(L"Auxiliary restore failed: %s",detail.c_str());
+        return ok;
+    }
     // The stop/uninstall stages have no reliable percentage. Publish marquee
     // before exposing the reverse flag so the UI never uses stale MSI progress.
     SetStatus(labels_.rollback.empty() ? L"…" : labels_.rollback, -1);
@@ -2210,7 +2233,7 @@ bool InstallEngine::PerformRollback() noexcept {
     if (stopped) {
         if (shellRegisteredBySetup_ && !GlassInstallUtil::InvokeShellExtRegistration(false,x64Dir_,x86Dir_)) lifecycleOk=false;
         if (lifecycleOk && !RemoveCreatedHostsForRollback()) lifecycleOk=false;
-        if (lifecycleOk && !prior_.shortcutExisted) GlassInstallUtil::DeleteStartMenuShortcut();
+        if (lifecycleOk && selection_.glassSettings && !prior_.shortcutExisted) GlassInstallUtil::DeleteStartMenuShortcut();
     }
     const bool filesOk = lifecycleOk && GlassInstallRollback::ExecuteRollback(
         rollbackSession_, [this](int units) {
@@ -2250,6 +2273,12 @@ bool InstallEngine::PerformRollback() noexcept {
 }
 
 bool InstallEngine::UndoCleanInstall() noexcept {
+    if(auxiliaryOnly_) {
+        std::wstring detail;
+        const bool ok=GlassInstallRemoval::Restore(removalSession_,PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN,detail);
+        if(!ok)InstallLog::LineFormat(L"Auxiliary restore failed: %s",detail.c_str());
+        return ok;
+    }
     // Individual MSI operations do not expose reliable continuous progress.
     SetStatus(labels_.rollback.empty() ? L"…" : labels_.rollback, -1);
     progressReverse_.store(true,std::memory_order_release);
@@ -2276,7 +2305,10 @@ bool InstallEngine::UndoCleanInstall() noexcept {
             GlassInstallMsi::kProductSecureUxThemeX64,GlassInstallMsi::kProductSecureUxThemeX86,
             GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyPlatformX64,
             GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
-        for (const auto* code:known) {
+        constexpr unsigned rows[]={1,2,4,32,16,16,8,1,2,8};
+        for (unsigned index=0;index<std::size(known);++index) {
+            const auto* code=known[index];
+            if(!(procedureMask_&rows[index]))continue;
             std::wstring detail;
             if (GlassInstallMsi::CheckProductContexts(code,detail)!=GlassInstallMsi::ProductPathCheck::Safe ||
                 GlassInstallMsi::IsProductInstalled(code)) {
@@ -2290,10 +2322,10 @@ bool InstallEngine::UndoCleanInstall() noexcept {
         // leave the remaining state untouched if any MSI was unsafe to remove.
         if (!RemoveCreatedHostsForRollback()) ok=false;
         if (ok) {
-            if (!openGlassDir_.empty()) RemoveDirectoryW(openGlassDir_.c_str());
-            if (!x64Dir_.empty()) RemoveDirectoryW(x64Dir_.c_str());
-            if (!x86Dir_.empty()) RemoveDirectoryW(x86Dir_.c_str());
-            if (!prior_.shortcutExisted) GlassInstallUtil::DeleteStartMenuShortcut();
+            if (GlassProcedurePlan::OpenGlass(procedureMask_) && !openGlassDir_.empty()) RemoveDirectoryW(openGlassDir_.c_str());
+            if (GlassProcedurePlan::Platform64(procedureMask_) && !x64Dir_.empty()) RemoveDirectoryW(x64Dir_.c_str());
+            if (GlassProcedurePlan::Platform32(procedureMask_) && !x86Dir_.empty()) RemoveDirectoryW(x86Dir_.c_str());
+            if (selection_.glassSettings && !prior_.shortcutExisted) GlassInstallUtil::DeleteStartMenuShortcut();
             if (!GlassInstallRollback::RestoreRegistryValues(rollbackSession_)) ok=false;
         }
     } else InstallLog::Line(L"Clean rollback left remaining state untouched; backup retained");

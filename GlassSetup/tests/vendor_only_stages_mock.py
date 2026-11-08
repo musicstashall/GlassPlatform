@@ -8,7 +8,7 @@ initial=source[a:source.index('            // Финальная стадия з
 extract=source[source.index('bool InstallEngine::ExtractPayload('):source.index('bool InstallEngine::RecheckSnapshottedProduct(')]
 assert extract.index('EnsureTempWorkspace()')<extract.index('OnlySecureUxThemeRemoval(selection_)')<extract.index('FetchCatalog(')
 harness=r'''
-#include "GlassProducts.h"
+#include "GlassProcedurePlan.h"
 #include <atomic>
 #include <cassert>
 #include <iostream>
@@ -22,6 +22,7 @@ namespace GlassInstallUtil {
  void CloseGlassSettingsProcesses(const std::atomic_bool*){Call("close");}
 }
 struct InstallEngine {
+ unsigned procedureMask_=0x2Fu;bool auxiliaryOnly_=false;
  GlassProducts::Selection selection_;
  bool forceClean_=false,cleanInstall_=false,scanNativeX64_=false,installAttempted_=false,nonSettingsChangesAttempted_=false;
  std::atomic_bool cancelRequested_{false};int instance_=0;
@@ -62,6 +63,11 @@ int main(){
   assert(e.installAttempted_&&e.nonSettingsChangesAttempted_);}
  {calls.clear();failAt="prepare-vendor";InstallEngine e;VendorOnly(e);e.selection_.platform32=true;
   assert(!Initial(&e));assert(calls==std::vector<std::string>({"capture","determine","extract","snapshot","prepare-vendor"}));assert(!e.installAttempted_);}
+ {calls.clear();failAt.clear();InstallEngine e;VendorOnly(e);e.selection_.secureUxThemeRemove=false;
+  e.selection_.removeMask=8;e.procedureMask_=8;e.auxiliaryOnly_=true;
+  assert(Initial(&e));
+  assert(calls==std::vector<std::string>({"capture","extract","snapshot","prepare-vendor","build","prepare-managed","stop","helpers","msi"}));
+  assert(e.scanNativeX64_);}
  std::cout<<"PASS: actual worker stages: vendor-only skips Glass snapshot/stop/helpers/scan/MSI/purge; mixed path retained; vendor preflight failure before stops; cancellation\n";
 }
 '''.replace('// INITIAL',initial)

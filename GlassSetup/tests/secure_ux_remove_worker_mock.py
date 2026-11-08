@@ -9,7 +9,7 @@ assert worker.index('CreateRollbackSnapshot()')<worker.index('PrepareSecureUxRem
 assert worker.index('RegisterSelectedProducts()')<worker.index('InstallOriginalSecureUxTheme()')<worker.index('LaunchSelectedProducts()')
 assert 'vendorOnly || self->CapturePriorHostState()' in worker
 assert 'if(!vendorOnly)ok = self->RegisterSelectedProducts()' in worker
-assert 'if(!vendorOnly)self->LaunchSelectedProducts()' in worker
+assert 'if(!vendorOnly && !self->auxiliaryOnly_)self->LaunchSelectedProducts()' in worker
 assert 'if (ok && !vendorOnly)' in worker
 assert 'if (ok && !vendorOnly && !self->IsCancelRequested())' in worker
 assert 'PerformRollback()' in worker and 'UndoCleanInstall()' in worker

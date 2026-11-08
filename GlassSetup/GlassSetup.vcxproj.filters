@@ -40,6 +40,7 @@
     <ClInclude Include="src\WizardUnlockState.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\GlassProducts.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\GlassProductPlan.h"><Filter>src</Filter></ClInclude>
+    <ClInclude Include="src\GlassProcedurePlan.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\InstallEngine.h"><Filter>src</Filter></ClInclude>
     <ClInclude Include="src\InstallSupport\GlassInstallRemoval.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClInclude Include="src\InstallSupport\GlassRemovalOrder.h"><Filter>src\InstallSupport</Filter></ClInclude>

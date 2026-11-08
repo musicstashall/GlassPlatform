@@ -560,7 +560,7 @@ assert "PrepareRemoval" in sut_package and "RecheckRemoval" in sut_package
 assert "MSIINSTALLCONTEXT_MACHINE" in sut_package and "Vendor cached PackageCode differs from registration" in sut_package
 assert "before==removal.digest && now==removal.digest" in sut_package
 assert "if(!vendorOnly)ok = self->RegisterSelectedProducts()" in worker
-assert "if(!vendorOnly)self->LaunchSelectedProducts()" in worker
+assert "if(!vendorOnly && !self->auxiliaryOnly_)self->LaunchSelectedProducts()" in worker
 assert "IDS_APPLY" in setup and 'IDS_APPLY "Применить"' in read("res/ProductStrings.rcinc")
 
 assert "if(in.inspectSources)GlassPackageAcquisition::FetchCatalog" in sut_inspect

@@ -170,17 +170,18 @@ footer{position:absolute;bottom:25px;left:48px;right:48px;display:flex;align-ite
 .error-ambient{position:absolute;right:36px;top:30px;width:505px;height:465px;border-radius:50%;background:radial-gradient(ellipse,#ff6c8a20 0%,#b94b6930 37%,transparent 72%);filter:blur(9px);animation:error-breathe 5.8s ease-in-out infinite alternate;z-index:1;pointer-events:none}
 @keyframes error-breathe{to{transform:scale(1.055);opacity:.62}}
 .error-sheen{background:linear-gradient(112deg,transparent 40%,#ff819a0b 49%,#ffc2cc16 51%,transparent 61%)}
-.error-copy{position:absolute;left:48px;top:124px;width:445px;z-index:5;opacity:0;transform:translateY(13px);animation:complete-enter .72s .08s cubic-bezier(.2,.75,.25,1) forwards}
+.error-copy{position:absolute;left:48px;top:96px;bottom:18px;width:445px;display:flex;flex-direction:column;min-height:0;z-index:5;opacity:0;transform:translateY(13px);animation:complete-enter .72s .08s cubic-bezier(.2,.75,.25,1) forwards}
 .error-tag{display:inline-flex;align-items:center;gap:8px;margin:0;color:#ffb0bc;letter-spacing:2px;font-size:10px;text-transform:uppercase;font-weight:650}
 .error-tag:before{content:"";width:7px;height:7px;border-radius:50%;background:#ff829a;box-shadow:0 0 14px #ff829a99;animation:error-beacon 2.6s ease-in-out infinite}
 @keyframes error-beacon{50%{opacity:.48;box-shadow:0 0 5px #ff829955}}
+.error-copy>.error-tag,.error-copy>.error-title,.error-copy>.error-body{flex-shrink:0}
 .error-title{margin:20px 0 15px;color:#fff2f4;font-size:42px;line-height:1.08;font-weight:350;letter-spacing:-1.2px}
 .error-body{margin:0;width:410px;color:#d0c3cb;font-size:15px;line-height:1.6}
-.error-reason{margin-top:18px;width:430px;padding:11px 14px 12px;border:1px solid #ff829a38;border-left:2px solid #ff829a;border-radius:12px;background:linear-gradient(110deg,#70283c46,#2d1e3238);box-shadow:inset 0 1px #ffffff08}
+.error-reason{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;margin-top:18px;width:430px;padding:11px 14px 12px;border:1px solid #ff829a38;border-left:2px solid #ff829a;border-radius:12px;background:linear-gradient(110deg,#70283c46,#2d1e3238);box-shadow:inset 0 1px #ffffff08}
 .error-reason-label{color:#ffb6c1;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase}
-.error-detail{margin:7px 0 0;padding-right:6px;max-height:168px;overflow:auto;color:#f3e6e9;font-size:12px;line-height:1.52;white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-color:#8d6472 #2d1e32;scrollbar-width:thin}
+.error-detail{flex:1 1 auto;min-height:0;margin:7px 0 0;padding-right:6px;max-height:168px;overflow:auto;color:#f3e6e9;font-size:12px;line-height:1.52;white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-color:#8d6472 #2d1e32;scrollbar-width:thin}
 .error-detail::-webkit-scrollbar{width:9px}.error-detail::-webkit-scrollbar-track{background:#2d1e32;border-radius:8px}.error-detail::-webkit-scrollbar-thumb{background:#8d6472;border:2px solid #2d1e32;border-radius:8px}
-.error-note{margin:17px 0 0;max-width:420px;color:#aaa6b6;font-size:11px;line-height:1.55;white-space:pre-wrap}
+.error-note{flex-shrink:0;max-height:52px;overflow:auto;overflow-wrap:anywhere;pointer-events:auto;margin:12px 0 0;max-width:420px;color:#aaa6b6;font-size:11px;line-height:1.55;white-space:pre-wrap}
 .error-visual{position:absolute;right:52px;top:64px;width:435px;height:435px;z-index:4;display:grid;place-items:center;opacity:0;transform:scale(.92);animation:complete-pop .92s .13s cubic-bezier(.18,.8,.25,1) forwards;pointer-events:none}
 .error-svg{width:100%;height:100%;overflow:visible;filter:drop-shadow(0 20px 38px #0005)}
 .error-halo{fill:url(#errorGlow);opacity:.84}
