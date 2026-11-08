@@ -1804,11 +1804,39 @@ private:
         return secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External
             || secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict;
     }
-    // UI capability only. Caller holds inspectMutex_ when reading inspection.
+    // One read-only policy for capability and its user-facing refusal reason.
+    // Caller holds inspectMutex_. This never changes style/MSI registration.
+    [[nodiscard]] const wchar_t* SecureUxThemeRemovalBlockReasonLocked() const noexcept {
+        const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
+        if(!inspectReady_.load(std::memory_order_acquire))return ru?
+            L"Проверка установки ещё не завершена.":L"Installation inspection has not finished.";
+        if(!inspect_.secureUxTheme.installed)return ru?
+            L"Установленный MSI SecureUxTheme не обнаружен.":L"No installed SecureUxTheme MSI was found.";
+        if(inspect_.officialSecureUxThemeCode.empty())return ru?
+            L"Не удалось однозначно подтвердить оригинальный MSI SecureUxTheme. Удаление заблокировано, чтобы не затронуть другую установку.":
+            L"The original SecureUxTheme MSI could not be uniquely verified. Removal is blocked to protect another installation.";
+        using S=GlassInstallUtil::SecureUxThemeState;
+        switch(secureUxThemeState_) {
+        case S::Inactive:return nullptr;
+        case S::Active:return ru?
+            L"SecureUxTheme активен. Безопасное удаление активного компонента в Setup пока не реализовано; изменений не выполнено.":
+            L"SecureUxTheme is active. Safe removal of the active component is not yet implemented in Setup; no changes were made.";
+        case S::ActivationPending:case S::DeactivationPending:return ru?
+            L"Изменение состояния SecureUxTheme ожидает перезагрузки. После перезагрузки требуется повторная проверка; она не гарантирует доступность удаления активного компонента.":
+            L"A SecureUxTheme state change is pending restart. Inspection must run again after restarting; this does not guarantee that active-component removal will be available.";
+        case S::External:return ru?
+            L"Обнаружена сторонняя или неподдерживаемая установка SecureUxTheme. Setup не будет изменять её автоматически.":
+            L"A foreign or unsupported SecureUxTheme installation was detected. Setup will not modify it automatically.";
+        case S::Conflict:return ru?
+            L"Состояние SecureUxTheme не подтверждено или содержит конфликт. Удаление заблокировано; подробности находятся в журнале.":
+            L"SecureUxTheme state could not be verified or is conflicting. Removal is blocked; see the log for diagnostic details.";
+        default:return ru?
+            L"MSI SecureUxTheme зарегистрирован, но состояние компонента не подтверждено. Удаление заблокировано; подробности находятся в журнале.":
+            L"SecureUxTheme MSI is registered, but component state could not be verified. Removal is blocked; see the log for diagnostic details.";
+        }
+    }
     [[nodiscard]] bool SecureUxThemeRemovalSupportedLocked() const noexcept {
-        return inspectReady_.load(std::memory_order_acquire) && inspect_.secureUxTheme.installed &&
-            !inspect_.officialSecureUxThemeCode.empty() &&
-            secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Inactive;
+        return SecureUxThemeRemovalBlockReasonLocked()==nullptr;
     }
     void ClampSecureUxThemeSelection() noexcept {
         if (SecureUxThemeSelectionBlocked())
@@ -1937,7 +1965,8 @@ private:
         const bool sutDamaged=sutCondition==GlassProducts::ProductCondition::Damaged;
         const bool sutDisabled=sutExternal||sutConflict;
         const bool sutChecked=(selection_.secureUxTheme||selection_.secureUxThemeRemove)&&!sutDisabled;
-        const bool sutRemoveSupported=SecureUxThemeRemovalSupportedLocked();
+        const auto* sutRemoveReason=SecureUxThemeRemovalBlockReasonLocked();
+        const bool sutRemoveSupported=sutRemoveReason==nullptr;
         // SecureUxTheme is a regular selectable product: use the same localized
         // action badge as other products instead of a special "optional add-on" tag.
         // Keep exceptional badges only when an external install/conflict blocks action.
@@ -1978,6 +2007,7 @@ private:
             L",\"broken\":"+(inspect_.secureUxTheme.damaged?L"true":L"false")+
             L",\"applySupported\":"+(inspect_.secureUxTheme.installed?L"false":L"true")+
             L",\"removeSupported\":"+(sutRemoveSupported?L"true":L"false")+
+            L",\"removeBlockedReason\":"+JsStringLiteral(inspect_.secureUxTheme.installed&&sutRemoveReason?sutRemoveReason:L"")+
             L",\"operation\":"+JsStringLiteral(selection_.secureUxThemeRemove?L"remove":sutCondition==GlassProducts::ProductCondition::NotInstalled?L"install":sutUpdate?L"update":L"repair")+
             L",\"state\":"+JsStringLiteral(selection_.secureUxThemeRemove?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
                 L"Будет удалён оригинальный MSI. Постоянные файлы автора сохранятся.":

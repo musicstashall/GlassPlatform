@@ -123,6 +123,17 @@ const assert=require('node:assert/strict');
    await ui.locator('#stage').evaluate(()=>showProductWarning({title:'Dependencies affected',planWarnings:Array(20).fill('Long warning. '.repeat(20))},document.getElementById('components-select-all')));
    await assertDialogLayout(true);await page.keyboard.press('Escape');
   }
+  // Blocked SUT deletion explains the real prerequisite without posting Remove.
+  for(const scenario of ['sut-active','sut-pending']){
+   await page.locator('#scenario').selectOption(scenario);
+   const info=ui.locator('#components-installed-grid .comp-remove.removal-info');await info.waitFor();
+   assert.equal(await ui.locator('#components-remove-all').isVisible(),false);
+   await info.focus();await page.keyboard.press('Enter');await dialog.waitFor({state:'visible'});
+   assert.match(await ui.locator('#components-warning-text').innerText(),scenario==='sut-active'?/не реализовано/:/перезагрузки/);
+   assert.equal(await ui.locator('#product-secureUxTheme').isChecked(),false);
+   assert.doesNotMatch(await page.locator('#messages').textContent(),/component:secureUxTheme:remove/);
+   await page.keyboard.press('Escape');assert.equal(await info.evaluate(n=>n===document.activeElement),true);
+  }
   const concept=await browser.newPage();concept.on('pageerror',error=>errors.push(error.message));
   await concept.goto(new URL('product-maintenance-concepts.html',base).href);
   assert.ok(await concept.locator('.stage-banner').first().evaluate(img=>img.complete&&img.naturalWidth>0));

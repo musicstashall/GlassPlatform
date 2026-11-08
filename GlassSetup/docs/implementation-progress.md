@@ -1201,3 +1201,27 @@ MSI, файлы, регистрация и loaded state разделены: MSI 
   для подтверждённого Inactive. Полное удаление Active/ActivationPending/
   DeactivationPending с безопасным handling стиля/reboot ещё не реализовано;
   также требуется конкретная причина недоступности удаления вместо общей подсказки.
+
+### SecureUxTheme removal availability: explicit refusal rather than a demo-like stub
+
+- Единая read-only native policy возвращает и capability, и RU/EN причину отказа:
+  checking not ready, missing/ambiguous original MSI, active, pending restart,
+  foreign, conflicting/unverified state. Разрешён по-прежнему только точный
+  установленный original MSI + Inactive; мутационные предохранители не ослаблены.
+- JSON `removeBlockedReason` передаёт понятное объяснение без inventory GUID/rc.
+  У установленного SUT корзинка остаётся видимой при блокировке, но открывает
+  объяснение (также с клавиатуры), а не отправляет Remove. Причина доступна в
+  продуктовой информации и drop feedback. Bulk Remove не включает заблокированный SUT.
+- Durable fixtures `sut-active` / `sut-pending` — демонстрации, не результаты
+  обследования Windows. Actual-source native tests исполняют policy/IPC для всех
+  семи состояний RU/EN и отсутствия MSI/identity/readiness. DOM проверяет отказ
+  без IPC и без изменения намерения, в том числе для disabled карточки; Chromium
+  проверяет настоящий Enter/Escape/focus и отсутствие bulk удаления.
+- PASS: **83 Python / 73 PASS / те же 10 historical FAIL**, без новых падений;
+  три production DOM и Chromium; source resources и diff-check. Полный Python log
+  находится в локальном `.cache/sut-removal-reasons-final`, не Git artifact.
+- **Не закрыто этим этапом:** полное удаление активного/pending SUT, safe style
+  reset/reboot/rollback и standalone original MSI migration; остальные journal,
+  cache handoff, per-file snapshot, mixed atomicity, exact shell rollback,
+  native parity, profile/unknown-root пункты остаются открыты. Windows/MSVC/WiX
+  и реальные MSI/COM/reboot проверки этого этапа не выполнялись.

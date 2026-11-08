@@ -11,6 +11,7 @@ def function(token):
             depth-=1
             if not depth:return source[a:i+1]
     raise ValueError(token)
+reason=function('[[nodiscard]] const wchar_t* SecureUxThemeRemovalBlockReasonLocked()')
 capability=function('[[nodiscard]] bool SecureUxThemeRemovalSupportedLocked()')
 blocked=function('[[nodiscard]] bool SecureUxThemeSelectionBlocked()')
 clamp=function('void ClampSecureUxThemeSelection()')
@@ -24,6 +25,8 @@ harness=r'''
 #include <iostream>
 #include <mutex>
 #include <string>
+constexpr int LANG_RUSSIAN=25;int gLanguage=0;
+#define PRIMARYLANGID(x) (x)
 using UINT=unsigned;constexpr UINT IDS_APPLY=1909,IDS_INSTALL=103;
 namespace GlassInstallUtil {enum class SecureUxThemeState {Unavailable,Inactive,Active,ActivationPending,DeactivationPending,External,Conflict};}
 struct Wizard {
@@ -33,6 +36,7 @@ struct Wizard {
  GlassInstallUtil::SecureUxThemeState secureUxThemeState_=GlassInstallUtil::SecureUxThemeState::Inactive;
  std::wstring secureUxRemovalCode_;bool maintenanceMode_=false;
 // CAPTION
+// REASON
 // CAPABILITY
 // BLOCKED
 // CLAMP
@@ -41,6 +45,17 @@ struct Wizard {
  }
 };
 int main(){
+ for(int language:{0,LANG_RUSSIAN}){gLanguage=language;
+  for(int state=0;state<=6;++state){Wizard w;w.secureUxThemeState_=static_cast<GlassInstallUtil::SecureUxThemeState>(state);
+   assert(w.SecureUxThemeRemovalSupportedLocked()==(state==1));
+   const auto* reason=w.SecureUxThemeRemovalBlockReasonLocked();assert((reason==nullptr)==(state==1));
+   if(reason)assert(std::wstring(reason).size()>15);
+  }
+  Wizard w;w.inspectReady_=false;assert(w.SecureUxThemeRemovalBlockReasonLocked());
+  w.inspectReady_=true;w.inspect_.secureUxTheme.installed=false;assert(w.SecureUxThemeRemovalBlockReasonLocked());
+  w.inspect_.secureUxTheme.installed=true;w.inspect_.officialSecureUxThemeCode.clear();assert(w.SecureUxThemeRemovalBlockReasonLocked());
+ }
+
  {Wizard w;assert(w.ProductApplyTextId()==IDS_INSTALL);w.maintenanceMode_=true;assert(w.ProductApplyTextId()==IDS_APPLY);}
  {Wizard w;w.selection_.secureUxTheme=true;w.Receive(L"component:secureUxTheme:remove");
   assert(w.selection_.secureUxThemeRemove&&!w.selection_.secureUxTheme&&w.secureUxRemovalCode_==L"official");assert(w.ProductApplyTextId()==IDS_APPLY);
@@ -60,7 +75,7 @@ int main(){
   w.Receive(L"component:secureUxTheme:0");assert(!w.selection_.secureUxThemeRemove&&!w.selection_.secureUxTheme);}
  std::cout<<"PASS: actual native removal IPC/capability: inspected single vendor/inactive only, exact ProductCode captured, explicit cancellation, select-all preservation, no unsupported repair\n";
 }
-'''.replace('// CAPABILITY',capability).replace('// BLOCKED',blocked).replace('// CLAMP',clamp).replace('// SELECTION',selection).replace('// CAPTION',caption)
+'''.replace('// REASON',reason).replace('// CAPABILITY',capability).replace('// BLOCKED',blocked).replace('// CLAMP',clamp).replace('// SELECTION',selection).replace('// CAPTION',caption)
 compiler=shutil.which('clang++') or shutil.which('g++')
 if not compiler:raise SystemExit('clang++ or g++ required')
 with tempfile.TemporaryDirectory(prefix='GlassSutRemoveIpc-') as directory:

@@ -925,7 +925,7 @@ function showProductWarning(item,button){
   const state=f?.remove?(ru?'Будет удалено: MSI снимается с регистрации; удаляются файлы, службы и задачи продукта согласно правилам пакета.':'Will be removed: MSI registration, files, services and tasks are removed according to package rules.'):item.state;
   const version=item.targetVersionKind==='release'?(ru?'релиз ':'release ')+(item.targetVersion||item.releaseTag||'—'):(item.targetVersion||'—');
   const pkg=[item.packageSize?componentSize(item.packageSize):'',version,ru?'Размер и SHA-256 сверяются перед установкой.':'Size and SHA-256 are checked before installation.'].filter(Boolean).join(' · ');
-  for(const [label,text] of [[ru?'СОСТОЯНИЕ':'STATE',state],[ru?'ЗАВИСИМОСТИ':'DEPENDENCIES',item.warning||(ru?'Нет предупреждений о составе.':'No composition warnings.')],[ru?'ПАКЕТ':'PACKAGE',pkg]]){
+  for(const [label,text] of [[ru?'СОСТОЯНИЕ':'STATE',state],[ru?'ЗАВИСИМОСТИ':'DEPENDENCIES',item.warning||(ru?'Нет предупреждений о составе.':'No composition warnings.')],[ru?'ПАКЕТ':'PACKAGE',pkg],...(item.removeBlockedReason?[[ru?'УДАЛЕНИЕ':'REMOVAL',item.removeBlockedReason]]:[])]){
    const row=document.createElement('div');row.className='dialog-detail-row';const key=document.createElement('span');key.textContent='•  '+label;row.append(key);dialogParagraph(row,text);body.append(row);
   }
   for(const reason of item.reasons||[])dialogParagraph(body,reason,'dialog-diagnostic');
@@ -1031,6 +1031,8 @@ function componentDropValue(drag,lane){
 }
 function componentDropText(drag,lane){
  const ru=locale==='ru',value=componentDropValue(drag,lane);
+ const refusal=(hostState.components||[]).find(item=>item.id===drag.id)?.removeBlockedReason;
+ if(value===null&&lane==='available'&&lane!==drag.source&&refusal)return refusal;
  if(value===null)return lane===drag.source?(ru?'Исходная панель — без изменений':'Original shelf — no changes'):(ru?'Удаление в этом режиме не поддерживается':'Removal is not supported in this mode');
  if(value==='remove')return ru?'Отпустите, чтобы запланировать удаление MSI; постоянные файлы сохранятся':'Release to plan MSI removal; permanent files are retained';
  if(hostState.appMode==='unins')return value?(ru?'Отпустите, чтобы запланировать удаление':'Release to plan removal'):(ru?'Отпустите, чтобы оставить продукт':'Release to keep the product');
@@ -1243,10 +1245,13 @@ function paintComponentCard(card,item,input,shelf){
  if(definition.act==='repair'||definition.act==='update'||definition.act==='undo'||definition.act==='unrepair')action.setAttribute('aria-pressed',String(f.selected));else action.removeAttribute('aria-pressed');
  action.onclick=()=>commitComponentChoice(input,definition.value);
  const spacer=document.createElement('span');spacer.className='spacer';foot.replaceChildren(marks,spacer,action);
- if(!available&&componentRemovalSupported(item)){
+ const removalInfo=hostState.appMode!=='unins'&&item.installed&&!!item.removeBlockedReason;
+ if(!available&&(componentRemovalSupported(item)||removalInfo)){
   const remove=document.createElement('button');remove.type='button';remove.className='c-move comp-remove danger';
   remove.title=ru?'Удалить':'Remove';remove.setAttribute('aria-label',remove.title);remove.disabled=input.disabled;
-  remove.append(svg('trash'));remove.onclick=()=>commitComponentRemoval(input);foot.append(remove);
+  remove.append(svg('trash'));
+  if(removalInfo){remove.disabled=false;remove.classList.add('removal-info');remove.dataset.componentAction='removal-info';remove.title=(ru?'Удаление недоступно: ':'Removal unavailable: ')+item.removeBlockedReason;remove.setAttribute('aria-label',remove.title);remove.onclick=()=>showProductWarning({title:ru?'Удаление SecureUxTheme':'Remove SecureUxTheme',warning:item.removeBlockedReason},remove);}
+  else remove.onclick=()=>commitComponentRemoval(input);foot.append(remove);
  }
 
 }

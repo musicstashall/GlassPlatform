@@ -130,6 +130,20 @@ assert.equal(sutCard.classList.contains('pending-remove'),false);
 assert.ok(sutCard.contains(d.activeElement),'cancel must leave a keyboard focus target');
 receive({data:{type:'state',components:sutRows.map(r=>({...r,removeSupported:false}))}});
 assert.equal(d.querySelector('#product-secureUxTheme').closest('.c-card').querySelector('.comp-remove'),null);
+// A blocked installed SUT retains an explanatory trash affordance, not a mutation.
+for(const disabled of [false,true]){
+ const reason='SecureUxTheme is active; safe active removal is not implemented.';
+ receive({data:{type:'state',appMode:'setup',page:'components',components:sutRows.map(r=>({...r,disabled:r.id==='secureUxTheme'&&disabled,removeSupported:false,removeBlockedReason:r.id==='secureUxTheme'?reason:''}))}});
+ const input=d.querySelector('#product-secureUxTheme'),card=input.closest('.c-card'),info=card.querySelector('.comp-remove.removal-info');
+ assert.ok(info);assert.equal(info.disabled,false);
+ const before=messages.length;info.click();assert.equal(messages.length,before);assert.equal(input.checked,false);
+ assert.equal(d.querySelector('#components-warning-text').textContent,reason);
+ d.querySelector('#components-warning-ok').click();assert.equal(d.activeElement,info);
+ assert.equal(dom.window.componentDropText({id:'secureUxTheme',source:'installed',input},'available'),reason);
+ assert.equal(d.querySelector('#components-remove-all').hidden,true);
+ card.querySelector('.comp-name').click();assert.match(d.querySelector('#components-warning-text').textContent,/safe active removal/);
+ d.querySelector('#components-warning-ok').click();
+}
 receive({data:{type:'state',appMode:'unins',page:'uninstall-select',components:sutRows}});
 assert.equal(d.querySelector('#product-secureUxTheme').closest('.c-card').querySelector('.comp-remove'),null);
 // Concept C content/state matrix, including warning-only healthy products.
