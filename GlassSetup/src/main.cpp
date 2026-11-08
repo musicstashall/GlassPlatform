@@ -1239,6 +1239,7 @@ private:
     GlassProductInspect::Report inspect_;
     std::thread inspectThread_;
     std::atomic_bool inspectReady_{false};
+    bool inspectionApplied_=false;
     std::atomic_bool inspectStop_{false};
     mutable std::mutex inspectMutex_;
     std::wstring setupProductVersion_;
@@ -1558,7 +1559,7 @@ private:
         const bool os64=result.os64;
         // Временные отметки до завершения обследования: установленные — сняты,
         // отсутствующие — отмечены. Точные состояния (обновление/повреждение)
-        // выставляются в OnInspectReady; карточки до анализа показывают загрузку.
+        // выставляются в OnInspectReady; до завершения анализа остаёмся на Checking.
         selection_.platform64=os64 && !installedSelection_.platform64;
         selection_.platform32=!installedSelection_.platform32;
         selection_.settings64=os64 && !installedSelection_.settings64;
@@ -1573,21 +1574,6 @@ private:
             if (!maintenanceMode_)
                 InstallLog::Line(L"--modify was not authorized; continuing with the full setup wizard");
         }
-        // Обследование целостности идёт в фоне, пока пользователь проходит первые
-        // страницы; на странице состава до завершения показывается бублик загрузки.
-        inspectThread_=std::thread([this,os64]() {
-            GlassProductInspect::Inputs inspectIn;
-            inspectIn.signerSha1=GlassProductInspect::QuerySelfSignerSha1();
-            inspectIn.os64=os64;
-            inspectIn.cancelled=&inspectStop_;
-            auto report=GlassProductInspect::Run(inspectIn);
-            {
-                std::lock_guard<std::mutex> lock(inspectMutex_);
-                inspect_=std::move(report);
-            }
-            inspectReady_.store(true,std::memory_order_release);
-            if (window) PostMessageW(window,kInspectReady,0,0);
-        });
         if (maintenanceMode_) {
             ContinueVersionCheck();
             if (!maintenanceFocusProduct_.empty())
@@ -2181,9 +2167,11 @@ private:
             }
             ClampSecureUxThemeSelection();
         }
+        inspectionApplied_=true;
         EnableWindow(next_,!failurePending_ && ComponentsReady());
         SyncWebViewState();
         InvalidateContent();
+        if(page_==Page::Checking)CompleteVersionCheck();
     }
     void SetPage(Page page) {
         const Page oldPage=page_;
@@ -2564,6 +2552,32 @@ private:
         SendMessageW(accept_,BM_SETCHECK,accepted_?BST_CHECKED:BST_UNCHECKED,0);
         SetPage(accepted_?Page::Components:Page::License);
     }
+    bool BeginProductInspection() {
+        if(inspectThread_.joinable() || inspectReady_.load(std::memory_order_acquire))return true;
+        InstallLog::Line(L"Checking: analyzing installed MSI products before maintenance");
+        const bool os64=GlassInstallUtil::IsOs64Bit();
+        try {
+        inspectThread_=std::thread([this,os64]() {
+            GlassProductInspect::Inputs inspectIn;
+            inspectIn.signerSha1=GlassProductInspect::QuerySelfSignerSha1();
+            inspectIn.os64=os64;
+            inspectIn.cancelled=&inspectStop_;
+            auto report=GlassProductInspect::Run(inspectIn);
+            {
+                std::lock_guard<std::mutex> lock(inspectMutex_);
+                inspect_=std::move(report);
+            }
+            inspectReady_.store(true,std::memory_order_release);
+            if (window) PostMessageW(window,kInspectReady,0,0);
+        });
+        } catch(...) {
+            errorReason_=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                L"Не удалось запустить анализ установленных продуктов.":L"Could not start installed product inspection.";
+            SetPage(Page::Error);
+            return false;
+        }
+        return true;
+    }
     void ContinueVersionCheck() {
         if (versionCheckStarted_) {
             if (!versionCheckHandled_) SetPage(Page::Checking);
@@ -2573,6 +2587,7 @@ private:
         versionCheckStarted_ = true;
         InstallLog::Line(L"Checking for newer setup on GitHub…");
         SetPage(Page::Checking);
+        if(!BeginProductInspection())return;
         const HWND target = window;
         const bool allowSetupDownload=!HasCommandLineSwitch(L"--no-self-update");
         try {
@@ -2643,6 +2658,9 @@ private:
             if (!versionCheckResult_.completed) return;
             result = versionCheckResult_;
         }
+        // Network completion and inspection can arrive in either order. Do not
+        // expose maintenance until both the report and default choices are applied.
+        if(!inspectionApplied_)return;
         releaseCatalog_=result.catalog;
         versionCheckHandled_ = true;
         if (!result.fetched) {
