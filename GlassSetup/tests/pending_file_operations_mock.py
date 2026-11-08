@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil, subprocess, tempfile
 root=Path(__file__).resolve().parents[2]
 s=(root/'GlassSetup/src/InstallSupport/GlassInstallUtil.cpp').read_text()
+assert '#include <algorithm>' in s, 'Production TU must declare std::any_of directly'
 body=s[s.index('bool QueryPendingFileOperations('):s.index('bool QuerySecureUxThemeState(')]
 harness=r'''
 #include <algorithm>

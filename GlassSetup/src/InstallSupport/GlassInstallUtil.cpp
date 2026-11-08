@@ -7,6 +7,7 @@
 #include <softpub.h>
 #include <wincrypt.h>
 #include <InjectModuleScan.h>
+#include <algorithm>
 #include <array>
 #include <GlassShellMenuConstants.h>
 #include <objbase.h>
