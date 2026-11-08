@@ -471,8 +471,11 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             if(ok && !self->IsCancelRequested())ok=self->PrepareManagedRemoval();
 
             if (ok && !vendorOnly && !self->IsCancelRequested()) {
-                if(GlassProcedurePlan::Settings(self->procedureMask_))GlassInstallUtil::CloseGlassSettingsProcesses(&self->cancelRequested_);
-                if (!self->IsCancelRequested()) ok = self->StopRunningHosts();
+                if(GlassProcedurePlan::Settings(self->procedureMask_)) {
+                    ok=GlassInstallUtil::CloseSelectedSettingsProcesses(self->x64Dir_,self->x86Dir_,self->procedureMask_&36u,&self->cancelRequested_);
+                    if(!ok&&!self->IsCancelRequested())self->SetFailure(PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?L"Не удалось закрыть выбранную версию GlassSettings. Закройте её и повторите операцию.":L"Could not close the selected GlassSettings version. Close it and retry.",GetLastError());
+                }
+                if (ok && !self->IsCancelRequested()) ok = self->StopRunningHosts();
             }
 
             // The chosen Settings product is installed after the snapshot and
@@ -1265,7 +1268,7 @@ bool InstallEngine::InstallGlassSettingsEarly() noexcept {
         return true;
     }
     bool settingsRunning = false;
-    const bool settingsKnown = GlassInstallUtil::QueryImageRunning(L"GlassSettings.exe", settingsRunning);
+    const bool settingsKnown = GlassInstallUtil::QuerySelectedSettingsRunning(x64Dir_,x86Dir_,procedureMask_&36u,settingsRunning);
     const DWORD settingsQueryError = settingsKnown ? 0 : GetLastError();
     if (!settingsKnown || settingsRunning) {
         const bool ru = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
@@ -2195,7 +2198,7 @@ bool InstallEngine::StopHostsForRollback() noexcept {
     if (GlassProcedurePlan::OpenGlass(procedureMask_) && !GlassInstallRemoval::ValidateOpenGlassPaths(openGlassDir_,nullptr,ru,error)) {
         InstallLog::LineFormat(L"Rollback refused to stop changed OpenGlass backend: %s",error.c_str());return false;
     }
-    return GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,GlassProcedurePlan::Platform64(procedureMask_),GlassProcedurePlan::Platform32(procedureMask_),GlassProcedurePlan::OpenGlass(procedureMask_));
+    return GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,GlassProcedurePlan::Platform64(procedureMask_),GlassProcedurePlan::Platform32(procedureMask_),GlassProcedurePlan::OpenGlass(procedureMask_),nullptr,nullptr,nullptr,nullptr,nullptr,procedureMask_&36u);
 }
 
 bool InstallEngine::RemoveCreatedHostsForRollback() noexcept {

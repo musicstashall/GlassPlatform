@@ -28,7 +28,7 @@ def function(token):
 
 worker = section("DWORD WINAPI InstallEngine::WorkerThread(", "bool InstallEngine::Start(")
 stages = ["CapturePriorHostState()", "ExtractPayload(", "CreateRollbackSnapshot()", "BuildExecutionPlan()",
-          "CloseGlassSettingsProcesses(", "StopRunningHosts()", "InstallGlassSettingsEarly()",
+          "CloseSelectedSettingsProcesses(", "StopRunningHosts()", "InstallGlassSettingsEarly()",
           "ReleaseLockedModules()", "PurgeRemnants()", "RunMsiSequence()", "RegisterSelectedProducts()",
           "LaunchSelectedProducts()"]
 positions = [worker.index(stage) for stage in stages]
@@ -128,7 +128,7 @@ namespace GlassInstallUtil {
  bool IsSafeInstallPath(const std::wstring&){return true;}
  struct OpenGlassTaskState{bool found=false,anyDisabled=false,anyRunning=false,multipleTasks=false,multipleRunningInstances=false;};
  bool IsOs64Bit(){return fake.is64;}
- bool QueryImageRunning(const wchar_t*,bool& found){++fake.queries;found=fake.settingsRunning;return fake.queryOk;}
+ bool QuerySelectedSettingsRunning(const std::wstring&,const std::wstring&,unsigned,bool& found){++fake.queries;found=fake.settingsRunning;return fake.queryOk;}
  bool QueryOpenGlassRunning(bool& running){++fake.ogQueries;running=fake.ogRunning;return fake.ogQueryOk;}
  bool QueryOpenGlassTasks(OpenGlassTaskState& state){state.found=fake.ogTaskFound;state.anyRunning=fake.ogTaskRunning;
   state.anyDisabled=fake.ogTaskDisabled;return fake.backendOk;}

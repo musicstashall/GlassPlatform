@@ -271,6 +271,14 @@ bool PatchArpUninstallString(const std::wstring& productCode, const std::wstring
                 reinterpret_cast<const BYTE*>(quietCommand.c_str()),
                 static_cast<DWORD>((quietCommand.size() + 1) * sizeof(wchar_t)));
             bool valuesOk=true;
+            // Upgrade old same-name registrations as well as new MSI metadata.
+            // Write only after the existing context/ownership recheck above.
+            if(settings) {
+                const std::wstring title=_wcsicmp(productCode.c_str(),kProductSettingsX64)==0?
+                    L"GlassSettings (64-bit)":L"GlassSettings (32-bit)";
+                valuesOk=RegSetValueExW(key,L"DisplayName",0,REG_SZ,
+                    reinterpret_cast<const BYTE*>(title.c_str()),static_cast<DWORD>((title.size()+1)*sizeof(wchar_t)))==ERROR_SUCCESS;
+            }
             valuesOk=RegSetValueExW(key, L"DisplayIcon", 0, REG_SZ,
                 reinterpret_cast<const BYTE*>(displayIcon.c_str()),
                 static_cast<DWORD>((displayIcon.size() + 1) * sizeof(wchar_t)))==ERROR_SUCCESS && valuesOk;
@@ -293,8 +301,14 @@ bool PatchArpUninstallString(const std::wstring& productCode, const std::wstring
         };
         // Do not fall through from a machine instance to an unrelated HKCU key.
         const HKEY root=context==MSIINSTALLCONTEXT_MACHINE?HKEY_LOCAL_MACHINE:HKEY_CURRENT_USER;
-        bool ok=writeRoot(root,KEY_WOW64_64KEY);
-        if(!opened)ok=writeRoot(root,KEY_WOW64_32KEY);
+        const bool product32=_wcsicmp(productCode.c_str(),kProductSettingsX86)==0 ||
+            _wcsicmp(productCode.c_str(),kProductPlatformX86)==0 ||
+            _wcsicmp(productCode.c_str(),kLegacyPlatformX86)==0 ||
+            _wcsicmp(productCode.c_str(),kProductSecureUxThemeX86)==0;
+        const REGSAM primaryView=product32?KEY_WOW64_32KEY:KEY_WOW64_64KEY;
+        const REGSAM legacyView=product32?KEY_WOW64_64KEY:KEY_WOW64_32KEY;
+        bool ok=writeRoot(root,primaryView);
+        if(!opened)ok=writeRoot(root,legacyView);
         GlassInstallLog::LineFormat(L"ARP UninstallString -> unins000 (%s) %s",
             productCode.c_str(), ok ? L"ok" : L"skip");
         return ok;

@@ -707,11 +707,11 @@ private:
         WaitForSingleObject(gate_,INFINITE);
         return cancelRequested_.load()?Action::Cancel:action_.load();
     }
-    bool EnsureModulesReleased() {
+    bool EnsureModulesReleased(bool scan64,bool scan32) {
         for(;;) {
             bool failed=false;
             std::vector<GlassInstallUnlock::ModuleHolder> holders;
-            const bool clear=GlassInstallWatch::WaitUntilClearOrTimeout(30000,x64Dir_,x86Dir_,GlassInstallUtil::IsOs64Bit(),holders,failed,&cancelRequested_);
+            const bool clear=GlassInstallWatch::WaitUntilClearOrTimeout(30000,x64Dir_,x86Dir_,scan64,holders,failed,&cancelRequested_,scan32);
             if(cancelRequested_.load())return false;
             if(!failed && clear && holders.empty())return true;
             monitorUnknown_.store(failed);
@@ -927,25 +927,26 @@ private:
                 return 9;
             }
         }
+        const bool stop64=os64 && (chosen.x64||chosen.settings64||chosen.cleanupSettings);
+        const bool stop32=chosen.x86||chosen.settings32||chosen.cleanupSettings;
         bool prior64=false,prior86=false;
-        if (!GlassInstallHost::QueryGlassPlatformRunning(GP::PlatformArch::X64,prior64) ||
-            !GlassInstallHost::QueryGlassPlatformRunning(GP::PlatformArch::X86,prior86)) {
+        if ((stop64&&!GlassInstallHost::QueryGlassPlatformRunning(GP::PlatformArch::X64,prior64)) ||
+            (stop32&&!GlassInstallHost::QueryGlassPlatformRunning(GP::PlatformArch::X86,prior86))) {
             LogLine(L"Could not inspect platform mutex state before removal");
             SetError(T(L"Не удалось проверить состояние платформы. Пакеты не удалены.",
                 L"Could not inspect the platform state. No packages were removed."));
             return 10;
         }
-        const bool enabled64=GP::QueryGlassAutorunUiState(GP::PlatformArch::X64)!=GP::AutorunUiState::Disabled;
-        const bool enabled86=GP::QueryGlassAutorunUiState(GP::PlatformArch::X86)!=GP::AutorunUiState::Disabled;
-        const bool platformRemoval=chosen.x64 || chosen.x86;
-        const bool stopPlatforms=platformRemoval||chosen.cleanupSettings;
+        const bool enabled64=stop64 && GP::QueryGlassAutorunUiState(GP::PlatformArch::X64)!=GP::AutorunUiState::Disabled;
+        const bool enabled86=stop32 && GP::QueryGlassAutorunUiState(GP::PlatformArch::X86)!=GP::AutorunUiState::Disabled;
+        const bool stopPlatforms=stop64||stop32;
         const bool stopOg=GlassInstallUtil::IsOs64Bit() && (chosen.openGlass||chosen.cleanupSettings);
-        const bool task64=GP::GlassAutorunTaskExists(GP::PlatformArch::X64);
-        const bool task86=GP::GlassAutorunTaskExists(GP::PlatformArch::X86);
+        const bool task64=stop64 && GP::GlassAutorunTaskExists(GP::PlatformArch::X64);
+        const bool task86=stop32 && GP::GlassAutorunTaskExists(GP::PlatformArch::X86);
         if (stopPlatforms) {
             std::wstring error;
-            if (!GlassInstallRemoval::ValidatePlatformTask(GP::PlatformArch::X64,x64Dir_,task64,prior64,IsRu(),error) ||
-                !GlassInstallRemoval::ValidatePlatformTask(GP::PlatformArch::X86,x86Dir_,task86,prior86,IsRu(),error) ||
+            if ((stop64&&!GlassInstallRemoval::ValidatePlatformTask(GP::PlatformArch::X64,x64Dir_,task64,prior64,IsRu(),error)) ||
+                (stop32&&!GlassInstallRemoval::ValidatePlatformTask(GP::PlatformArch::X86,x86Dir_,task86,prior86,IsRu(),error)) ||
                 (prior64 && (!task64 || !enabled64)) || (prior86 && (!task86 || !enabled86))) {
                 if (error.empty()) error=T(L"Работающую платформу невозможно безопасно восстановить. Остановите её и повторите удаление.",
                     L"The running platform cannot be restored safely. Stop it and retry removal.");
@@ -1043,8 +1044,8 @@ private:
         // hook. Removing Settings alone never implicitly removes another product.
         bool secureUxThemeReboot=false, secureUxThemeThemeNote=false;
         SetStatus(T(L"Остановка компонентов…",L"Stopping components…"),500);
-        if (!GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,stopPlatforms,stopPlatforms,stopOg,
-                &cancelRequested_,&stopAttempted64,&stopAttempted86,&prior64,&prior86)) {
+        if (!GlassInstallHost::StopAllForUninstall(x64Dir_,x86Dir_,stop64,stop32,stopOg,
+                &cancelRequested_,&stopAttempted64,&stopAttempted86,&prior64,&prior86,chosen.cleanupSettings?36u:((chosen.settings64?4u:0u)|(chosen.settings32?32u:0u)))) {
             if (cancelRequested_.load()) return cancelledResult();
             if (!restoreRemaining()) {
                 SetError(T(L"Не удалось остановить компоненты или восстановить их прежнее состояние. Пакеты не удалены.",
@@ -1057,7 +1058,7 @@ private:
         if (cancelRequested_.load()) return cancelledResult();
         if (stopPlatforms || chosen.settings)
             SetStatus(T(L"Проверка модулей в процессах…",L"Checking modules in processes…"),600);
-        if ((stopPlatforms || chosen.settings) && !EnsureModulesReleased()) {
+        if ((stopPlatforms || chosen.settings) && !EnsureModulesReleased(stop64,stop32)) {
             if (cancelRequested_.load()) return cancelledResult();
             (void)restoreRemaining(); return 11;
         }

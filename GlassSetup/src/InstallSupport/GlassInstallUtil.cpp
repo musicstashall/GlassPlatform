@@ -1064,32 +1064,69 @@ BOOL CALLBACK CloseWindowsForPid(HWND hwnd, LPARAM param) {
     return TRUE;
 }
 
-void CloseGlassSettingsProcesses(const std::atomic_bool* cancelled) noexcept {
-    const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return;
-    PROCESSENTRY32W entry{};
-    entry.dwSize = sizeof(entry);
-    if (Process32FirstW(snap, &entry)) {
+// Unknown image identity fails closed. Never send WM_CLOSE by basename alone.
+namespace {
+bool VisitSelectedSettings(const std::wstring& root64,const std::wstring& root32,
+    unsigned mask,bool close,bool& running,const std::atomic_bool* cancelled) {
+    running=false;
+    if(!(mask&36u))return true;
+    if(((mask&4u)&&root64.empty()) || ((mask&32u)&&root32.empty())) {SetLastError(ERROR_INVALID_PARAMETER);return false;}
+    const auto exe64=TrimTrailingSlashes(root64)+L"\\GlassSettings\\GlassSettings.exe";
+    const auto exe32=TrimTrailingSlashes(root32)+L"\\GlassSettings\\GlassSettings.exe";
+    const HANDLE snap=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
+    if(snap==INVALID_HANDLE_VALUE)return false;
+    PROCESSENTRY32W entry{};entry.dwSize=sizeof(entry);bool ok=true;DWORD error=ERROR_SUCCESS;
+    if(Process32FirstW(snap,&entry)) {
         do {
-            if (cancelled && cancelled->load(std::memory_order_acquire)) break;
-            if (_wcsicmp(entry.szExeFile, L"GlassSettings.exe") != 0) continue;
-            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, entry.th32ProcessID);
-            if (!process) continue;
-            wchar_t path[32768]{};
-            DWORD length = static_cast<DWORD>(std::size(path));
-            const bool alive = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
-            if (alive && QueryFullProcessImageNameW(process, 0, path, &length)) {
-                const wchar_t* name = wcsrchr(path, L'\\');
-                if (_wcsicmp(name ? name + 1 : path, L"GlassSettings.exe") == 0)
-                    EnumWindows(CloseWindowsForPid, static_cast<LPARAM>(entry.th32ProcessID));
+            if(cancelled&&cancelled->load(std::memory_order_acquire)){ok=false;error=ERROR_CANCELLED;break;}
+            if(_wcsicmp(entry.szExeFile,L"GlassSettings.exe")!=0)continue;
+            const HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,entry.th32ProcessID);
+            if(!process) {
+                error=GetLastError();
+                if(error==ERROR_INVALID_PARAMETER)continue; // Process exited after snapshot.
+                ok=false;break;
+            }
+            const DWORD wait=WaitForSingleObject(process,0);
+            if(wait==WAIT_OBJECT_0){CloseHandle(process);continue;}
+            wchar_t path[32768]{};DWORD length=static_cast<DWORD>(std::size(path));
+            if(wait!=WAIT_TIMEOUT || !QueryFullProcessImageNameW(process,0,path,&length)) {
+                error=GetLastError();CloseHandle(process);ok=false;break;
+            }
+            const bool selected=((mask&4u)&&SameInstallPath(path,exe64)) || ((mask&32u)&&SameInstallPath(path,exe32));
+            if(selected) {
+                running=true;
+                if(close)EnumWindows(CloseWindowsForPid,static_cast<LPARAM>(entry.th32ProcessID));
             }
             CloseHandle(process);
-        } while (Process32NextW(snap, &entry));
-    }
+        } while(Process32NextW(snap,&entry));
+        if(ok&&GetLastError()!=ERROR_NO_MORE_FILES){ok=false;error=GetLastError();}
+    } else if(GetLastError()!=ERROR_NO_MORE_FILES){ok=false;error=GetLastError();}
     CloseHandle(snap);
-    const ULONGLONG start = GetTickCount64();
-    while ((!cancelled || !cancelled->load(std::memory_order_acquire)) &&
-        ImageRunning(L"GlassSettings.exe") && GetTickCount64() - start < 8000) Sleep(200);
+    if(!ok)SetLastError(error?error:ERROR_GEN_FAILURE);
+    return ok;
+}
+}
+
+bool QuerySelectedSettingsRunning(const std::wstring& root64,const std::wstring& root32,
+    unsigned mask,bool& running) noexcept {
+    try{return VisitSelectedSettings(root64,root32,mask,false,running,nullptr);}
+    catch(...){running=false;SetLastError(ERROR_NOT_ENOUGH_MEMORY);return false;}
+}
+
+bool CloseSelectedSettingsProcesses(const std::wstring& root64,const std::wstring& root32,
+    unsigned mask,const std::atomic_bool* cancelled) noexcept {
+    try {
+        bool running=false;
+        if(!VisitSelectedSettings(root64,root32,mask,true,running,cancelled))return false;
+        const ULONGLONG start=GetTickCount64();
+        while(running) {
+            if(cancelled&&cancelled->load(std::memory_order_acquire)){SetLastError(ERROR_CANCELLED);return false;}
+            if(GetTickCount64()-start>=8000){SetLastError(ERROR_TIMEOUT);return false;}
+            Sleep(200);
+            if(!VisitSelectedSettings(root64,root32,mask,false,running,cancelled))return false;
+        }
+        return true;
+    }catch(...){SetLastError(ERROR_NOT_ENOUGH_MEMORY);return false;}
 }
 
 std::wstring NativeRundll64() {

@@ -16,15 +16,21 @@ harness=r'''
 #include <vector>
 std::vector<std::string> calls;std::string failAt;
 bool Call(const char* op){calls.emplace_back(op);return failAt!=op;}
+#define PRIMARYLANGID(x) (x)
+constexpr unsigned LANG_RUSSIAN=25;
+unsigned GetUserDefaultUILanguage(){return 0;}
+unsigned GetLastError(){return 5;}
 namespace InstallLog {void Line(const wchar_t*){}}
 namespace GlassInstallUtil {
  bool IsOs64Bit(){return true;}
- void CloseGlassSettingsProcesses(const std::atomic_bool*){Call("close");}
+ bool CloseSelectedSettingsProcesses(const std::wstring&,const std::wstring&,unsigned,const std::atomic_bool*){return Call("close");}
 }
 struct InstallEngine {
  unsigned procedureMask_=0x2Fu;bool auxiliaryOnly_=false;
  GlassProducts::Selection selection_;
  bool forceClean_=false,cleanInstall_=false,scanNativeX64_=false,installAttempted_=false,nonSettingsChangesAttempted_=false;
+ std::wstring x64Dir_=L"64",x86Dir_=L"32";
+ void SetFailure(const std::wstring&,unsigned){}
  std::atomic_bool cancelRequested_{false};int instance_=0;
  bool IsCancelRequested()const{return cancelRequested_.load();}
  bool CapturePriorHostState(){return Call("capture");}

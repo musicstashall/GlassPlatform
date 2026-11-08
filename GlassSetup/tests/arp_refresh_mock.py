@@ -8,6 +8,11 @@ s=(root/'GlassSetup/src/InstallSupport/GlassInstallMsi.cpp').read_text()
 code=s[s.index('bool PatchArpUninstallString('):s.index('DWORD CALLBACK SnapshotCopyProgress')]
 h=(root/'GlassSetup/src/InstallSupport/GlassInstallMsi.h').read_text()
 constants='\n'.join(re.findall(r'inline constexpr wchar_t k(?:Product|Legacy)\w+\[\]\s*=\s*L"[^"\n]+";',h))
+# New package metadata and repair of old ARP entries must agree.
+import xml.etree.ElementTree as ET
+for arch,bits in [('x64','64'),('x86','32')]:
+    project=ET.parse(root/f'GlassSetup/msi/GlassSettings-{arch}.wixproj')
+    assert project.findtext('.//GlassPlatformTitle')==f'GlassSettings ({bits}-bit)'
 unins=(root/'GlassSetup/GlassUnins/main.cpp').read_text()
 guard=unins[unins.index('        struct RemainingArpRefresh {'):unins.index('        bool msiRebootRequired=false;')]
 harness=r'''
@@ -63,9 +68,16 @@ int main(){using namespace GlassInstallMsi;
   if(n==3)states[kProductSecureUxThemeX86]=5;
   if(n==4)states[kProductSecureUxThemeX86]=2;
   assert(PatchArpUninstallString(kProductSettingsX64,L"x64"));
+  assert(registry[164][L"DisplayName"]==L"GlassSettings (64-bit)");
   assert(registry[164][L"NoRemove"]==(n?L"1":L"0"));
   assert(registry[164][L"ModifyPath"].find(L"--modify --product")!=std::wstring::npos);
  }
+ {Reset();states[kProductSettingsX86]=5;assert(PatchArpUninstallString(kProductSettingsX86,L"x86"));
+  assert(registry[164][L"DisplayName"]==L"GlassSettings (32-bit)");}
+ {Reset();states[kProductSettingsX86]=5;registry.clear();registry[132]={};registry[164]={{L"DisplayName",L"stale"}};
+  assert(PatchArpUninstallString(kProductSettingsX86,L"x86"));assert(registry[132][L"DisplayName"]==L"GlassSettings (32-bit)");
+  assert(registry[164][L"DisplayName"]==L"stale"&&opens==1);}
+ {Reset();states[kProductSettingsX64]=5;failValue=L"DisplayName";assert(!PatchArpUninstallString(kProductSettingsX64,L"x64"));}
  for(int n=0;n<4;++n){Reset();states[kProductSettingsX64]=5;
   if(n==0)safe=false;
   if(n==1)states[kProductSettingsX64]=2;
@@ -90,9 +102,9 @@ int main(){using namespace GlassInstallMsi;
   assert(PatchArpUninstallString(kProductSettingsX64,L"x64"));assert(registry[164][L"ModifyPath"].find(L"--interactive --product")!=std::wstring::npos);}
  {Reset();states[kLegacyPlatformX86]=5;assert(RefreshManagedArp(L"x64",L"x86",L"og"));assert(writes>0);}
  {Reset();states[kProductPlatformX64]=2;assert(!RefreshManagedArp(L"x64",L"x86",L"og"));assert(writes==0);}
- {Reset();states[kProductSettingsX64]=5;assert(ExecuteWithActualGuard(true)==42);assert(registry[164][L"NoRemove"]==L"0"&&writes==7);}
- {Reset();states[kProductSettingsX64]=5;assert(ExecuteWithActualGuard(false)==0);assert(writes==7);}
- {Reset();states[kProductSettingsX64]=5;failValue=L"NoRemove";assert(ExecuteWithActualGuard(false)==9);assert(writes==7);}
+ {Reset();states[kProductSettingsX64]=5;assert(ExecuteWithActualGuard(true)==42);assert(registry[164][L"NoRemove"]==L"0"&&writes==8);}
+ {Reset();states[kProductSettingsX64]=5;assert(ExecuteWithActualGuard(false)==0);assert(writes==8);}
+ {Reset();states[kProductSettingsX64]=5;failValue=L"NoRemove";assert(ExecuteWithActualGuard(false)==9);assert(writes==8);}
  std::cout<<"PASS: actual ARP refresh: remaining/legacy products, vendor exclusion, original/repack/unknown NoRemove, context/root isolation, write failure, stale-policy reset\n";
 }
 '''.replace('// CONSTANTS',constants).replace('// SOURCE',code).replace('// GUARD',guard)

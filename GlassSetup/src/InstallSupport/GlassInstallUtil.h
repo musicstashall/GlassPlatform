@@ -53,7 +53,11 @@ bool RunHiddenCommand(const std::wstring& commandLine, DWORD* exitCode, DWORD ti
     const std::atomic_bool* cancelled = nullptr) noexcept;
 bool RunHidden(const wchar_t* file, const std::wstring& args) noexcept;
 
-void CloseGlassSettingsProcesses(const std::atomic_bool* cancelled = nullptr) noexcept;
+// Row bits 4/32 select protected Settings roots, not every same-named process.
+bool QuerySelectedSettingsRunning(const std::wstring& root64,const std::wstring& root32,
+    unsigned settingsMask,bool& running) noexcept;
+bool CloseSelectedSettingsProcesses(const std::wstring& root64,const std::wstring& root32,
+    unsigned settingsMask,const std::atomic_bool* cancelled = nullptr) noexcept;
 bool QueryImageRunning(const wchar_t* imageName, bool& found) noexcept;
 bool ImageRunning(const wchar_t* imageName) noexcept;
 // A disabled legacy task can still have a running instance. Failure to inspect

@@ -218,10 +218,10 @@ bool StopAllForUninstall(
     bool* stopAttemptedX64,
     bool* stopAttemptedX86,
     const bool* wasRunningX64,
-    const bool* wasRunningX86) noexcept {
+    const bool* wasRunningX86, unsigned settingsMask) noexcept {
     if (stopAttemptedX64) *stopAttemptedX64=false;
     if (stopAttemptedX86) *stopAttemptedX86=false;
-    GlassInstallUtil::CloseGlassSettingsProcesses(cancelled);
+    if(!GlassInstallUtil::CloseSelectedSettingsProcesses(x64InstallDir,x86InstallDir,settingsMask,cancelled))return false;
     if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
     // R11: удаляльщик идёт тем же путём, отличается только Reason в логе.
     if (stopX64 && !StopGlassPlatformImpl(GP::PlatformArch::X64,x64InstallDir,cancelled,

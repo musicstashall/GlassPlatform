@@ -539,7 +539,7 @@ solution=read("../GlassProject.sln")
 assert '"SecureUxTheme-x64"' not in solution and '"SecureUxThemeCa"' not in solution
 assert "<GlassSignThisProject>true</GlassSignThisProject>" in read("msi/OpenGlass-x64.wixproj")
 # Actual discovered plan is built before any process shutdown or MSI mutation.
-assert worker.index("CreateRollbackSnapshot()") < worker.index("BuildExecutionPlan()") < worker.index("CloseGlassSettingsProcesses(")
+assert worker.index("CreateRollbackSnapshot()") < worker.index("BuildExecutionPlan()") < worker.index("CloseSelectedSettingsProcesses(")
 execution_plan=section(engine,"bool InstallEngine::BuildExecutionPlan()", "bool InstallEngine::RunMsiSequence()")
 for token in ("GlassProductInspect::Run", "input.inspectSources=false", "CheckProductContexts", "RecheckSnapshottedProduct", "RecheckRelatedProducts", "GlassMaintenanceCache::Identity", "P::Build(facts,request)"):
     assert token in execution_plan, token
