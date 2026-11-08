@@ -868,3 +868,14 @@ MSI, файлы, регистрация и loaded state разделены: MSI 
 - Полный Python suite: **56 PASS / те же 11 FAIL / 67 scripts**. Production DOM PASS, resources PASS, diff-check PASS. Windows/MSVC/WiX сборка этого изменения не выполнена; продукты/платформа здесь не запускались и не останавливались.
 
 **Это критическая точка для новой Windows-сборки и smoke в изолированной VM:** впервые нормальный GUI действительно доходит до изменяющего систему worker вместо скрытой симуляции. Обе конфигурации теперь реальны; Debug без --demo-tour больше НЕ безопасный dry-run. До runtime proof нельзя объявлять real install/rollback готовыми. Рекомендуемая первая проверка — внешний MSI acquisition/preflight, затем один продукт, cancel/ошибка до MSI и успешное завершение с реальной регистрацией; журнал должен содержать InstallEngine::Start и конкретные acquisition/MSI результаты, а не simulated installation. Остальные незавершённые пункты общего плана остаются открытыми.
+
+
+## Исправление ошибочного изменения режима Debug (2026-11-07)
+
+Пользователь уточнил обязательный исходный контракт: **Debug — симуляция, Release — реальная установка.** В checkpoint 8b15042 я ошибочно распространил устранение неявной симуляции на Debug. Требование проверять реальный worker относится к Release; предупреждение предыдущего раздела о реальном Debug отменено.
+
+- Восстановлены 30-секундная Debug-симуляция, её отмена/подтверждение/возврат и пятисекундный визуальный rollback. Все ветки ограничены `_DEBUG`, а не старым `GLASS_EMBED_MSI`. Debug не вызывает InstallEngine::Start даже при наличии legacy define.
+- Release сохраняет реальный внешний MSI path, проверки consent/inspection/roots, timer-before-worker и обработку Start failure. Отсутствие embedded payload больше не превращает Release в симуляцию.
+- Обычный Debug получает demo completion body/note и без --demo-tour. Автоматический page tour остаётся отдельным явным Debug-режимом. Native/WebView completion используют единое config-based правило.
+- Регрессия actual StartInstallation/Tick/TickSimulation компилируется Debug/Release × legacy define present/absent: Debug — ноль engine starts, simulated completion/cancel/rollback, timer failure; Release — настоящий adapter entry, отказы и completion только по engine outcome. Используются fake APIs/engine, Windows runtime не запускался.
+- Targeted entry tests (4 варианта) PASS, resources PASS, diff-check PASS. Windows/MSVC сборка исправления не выполнена. Полный проект/оставшиеся maintenance задачи этим не объявляются завершёнными.

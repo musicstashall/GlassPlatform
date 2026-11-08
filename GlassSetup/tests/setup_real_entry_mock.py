@@ -14,7 +14,7 @@ start=fn(s,'void StartInstallation()')
 tick=fn(s,'void Tick()')
 h=(root/'GlassSetup/src/InstallEngine.h').read_text()
 labels=fn(h,'struct PhaseLabels')+';'
-for obsolete in ('GLASS_EMBED_MSI','TickSimulation','simulateInstall_','simulateRollback_'):
+for obsolete in ('GLASS_EMBED_MSI',):
  assert obsolete not in s,obsolete
 assert 'installEngine_.Start(' in start and 'RequestCancel()' in s
 assert 'HasCommandLineSwitch(L"--demo-tour")' in s
@@ -34,6 +34,7 @@ harness=r'''
 #include <vector>
 using ULONGLONG=unsigned long long;constexpr int FALSE=0,kInstallTimer=1,kInstallTimerMs=16,kRollbackFinishMs=900;
 constexpr double kProgressSmoothTauMs=180;
+constexpr ULONGLONG kDuration=30000,kSimulatedRollbackDuration=5000;
 int gInstance=1,timers=0;bool timerAvailable=true;ULONGLONG now=100;
 ULONGLONG GetTickCount64(){return now;}unsigned GetLastError(){return 5;}
 void InvalidateRect(int,void*,int){}int SetTimer(int,int,int,void*){timers=timerAvailable?1:0;return timers;}void KillTimer(int,int){timers=0;}
@@ -66,6 +67,7 @@ std::wstring StatusLine(){return L"actual worker";}std::vector<FinishWarning> Fi
 enum class Page {Welcome,Components,Certificate,Installing,Error,ConfirmCancel,Cancelling,Cancelled,Launching,Complete,ModulesBusy,ProcessesStuck};
 struct Wizard {
  Page page_=Page::Components;
+ bool simulateInstall_=false,simulateRollback_=false;ULONGLONG started_=0,simulateRollbackStarted_=0;
  bool accepted_=true,transitioning_=false,debugDemoActive_=false,debugDemoPending_=false;
  std::atomic_bool inspectReady_{true};bool preflight=true,certificate=false;
  int window=1,progress_=2,percent_=0,progressValue_=0,progressTarget_=0,displayProgress_=0,rollbackFinishFrom_=0;
@@ -88,6 +90,11 @@ struct Wizard {
 // METHODS
 };
 int main(){
+#ifdef _DEBUG
+ static_assert(Wizard::SimulationBuild());
+#else
+ static_assert(!Wizard::SimulationBuild());
+#endif
  for(int n=0;n<14;++n){Wizard w;timers=0;timerAvailable=true;GlassInstallUtil::rootsOk=true;GlassInstallUtil::observation={};
   if(n==1)w.accepted_=false;
   if(n==2)w.transitioning_=true;
@@ -103,15 +110,23 @@ int main(){
   if(n==12)timerAvailable=false;
   if(n==13)w.certificate=true;
   w.selection_.trustSigner=true;w.StartInstallation();
+#ifdef _DEBUG
+  assert(w.installEngine_.starts==0);
+  const bool simulated=n==0||n==5||n==6||n==7||n==8||n==11||n==13;
+  assert(timers==(simulated?1:0));assert(w.simulateInstall_==simulated);
+  if(n==12)assert(w.page_==Page::Error&&w.errors==1);
+#else
   assert(w.installEngine_.starts==((n==0||n==8||n==11||n==13)?1:0));
   assert(timers==((n==0||n==11||n==13)?1:0));
   if(n==8||n==12)assert(w.page_==Page::Error&&w.errors==1);
   if(n==0||n==11||n==13){assert(w.page_==Page::Installing);assert(w.installEngine_.captured.trustSigner==(n==13));}
+#endif
  }
 #ifdef _DEBUG
  {Wizard w;w.debugDemoActive_=true;w.StartInstallation();assert(w.installEngine_.starts==0);}
  {Wizard w;w.page_=Page::Certificate;w.debugDemoPending_=true;w.StartInstallation();assert(w.installEngine_.starts==0);}
 #endif
+#ifndef _DEBUG
  {Wizard w;w.selection_.secureUxThemeRemove=true;w.StartInstallation();assert(w.installEngine_.captured.secureUxThemeRemove&&w.installEngine_.capturedCode==L"vendor");}
  // Passing time cannot complete installation without an engine success result.
  {Wizard w;w.page_=Page::Installing;now=60000;w.Tick();assert(w.page_==Page::Installing);
@@ -120,9 +135,17 @@ int main(){
   now=100;w.Tick();assert(w.page_==Page::Launching);now=5101;w.Tick();assert(w.page_==Page::Complete);}
  {Wizard w;w.page_=Page::Installing;w.installEngine_.finished=w.installEngine_.cancelled=true;
   w.installEngine_.rollbackOk=false;w.Tick();assert(w.page_==Page::Error);}
- std::cout<<"PASS: actual GUI entry/tick: real engine without embedded flag; consent/inspection/demo/path/preflight/start failure guards; captured selection; completion only from engine\n";
+#else
+ {Wizard w;timerAvailable=true;now=100;w.StartInstallation();assert(w.simulateInstall_&&w.installEngine_.starts==0);
+  now=30100;w.Tick();assert(w.page_==Page::Launching);now=35101;w.Tick();assert(w.page_==Page::Complete&&w.installEngine_.starts==0);}
+ {Wizard w;now=100;w.StartInstallation();w.page_=Page::ConfirmCancel;w.progressValue_=4300;
+  now=20000;w.Tick();assert(w.progressValue_==4300&&w.page_==Page::ConfirmCancel);
+  w.simulateRollback_=true;w.simulateRollbackStarted_=now;w.page_=Page::Cancelling;
+  now+=5001;w.Tick();assert(w.page_==Page::Cancelled&&!w.simulateInstall_&&w.installEngine_.starts==0);}
+#endif
+ std::cout<<"PASS: actual GUI entry/tick: Debug simulation / Release real engine independent of embedded flag; consent/inspection/demo/path/preflight/start failure guards; captured selection; completion only from engine\n";
 }
-'''.replace('// LABELS',labels).replace('// METHODS','\n'.join([fn(s,'[[nodiscard]] bool DebugDemoLocksControls()'),fn(s,'[[nodiscard]] bool HasSelectedComponent()'),start,tick]))
+'''.replace('// LABELS',labels).replace('// METHODS','\n'.join([fn(s,'static constexpr bool SimulationBuild()'),fn(s,'[[nodiscard]] bool DebugDemoLocksControls()'),fn(s,'[[nodiscard]] bool HasSelectedComponent()'),start,'#ifdef _DEBUG\n'+fn(s,'void TickSimulation()')+'\n#endif',tick]))
 compiler=shutil.which('clang++') or shutil.which('g++')
 with tempfile.TemporaryDirectory(prefix='GlassRealEntry-') as d:
  p=Path(d)/'test.cpp';p.write_text(harness);exe=Path(d)/'test'

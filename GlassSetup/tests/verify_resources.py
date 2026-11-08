@@ -357,7 +357,7 @@ assert "rollbackProgress_.Begin(visibleProgress_.RollbackStart(progressValue_))"
 assert "progressMarquee_=false" in begin_rollback
 assert "visibleProgress_.Reset()" in section(setup, "void StartInstallation()", "bool RunPreflightChecks()")
 assert 'L"<1%"' in section(setup, "void RenderFooterText(", "void Paint()")
-assert "TickSimulation" not in setup and "GLASS_EMBED_MSI" not in setup
+assert "TickSimulation" in setup and "GLASS_EMBED_MSI" not in setup
 start_install=section(setup,"void StartInstallation()","bool RunPreflightChecks()")
 assert "if(!installEngine_.Start(" in start_install and "ShowFailurePage(true)" in start_install
 assert "DebugDemoLocksControls()" in start_install and "inspectReady_.load" in start_install
@@ -379,7 +379,7 @@ confirm = section(setup, "case IDC_NEXT:", "case IDCANCEL:")
 assert "BeginRollbackVisual(GetTickCount64())" in confirm and "ShowCancelling()" in confirm
 show_cancel = section(setup, "void ShowCancelling()", "void StartInstallation()")
 assert "SetPage(Page::Cancelling)" in show_cancel and "UpdateWindow(progress_)" in show_cancel
-assert "simulateRollback_" not in setup and "installEngine_.RequestCancel()" in confirm
+assert "simulateRollback_" in setup and "installEngine_.RequestCancel()" in confirm
 assert "WM_CLOSE" in setup and "SC_CLOSE" in setup and "SetSystemCloseEnabled" in setup
 assert "cancelRequested_.store(true" in engine and "return IDCANCEL" in msi and "cancellationSent" in msi
 assert engine.index("GlassInstallRollback::NoteInstalled(rollbackSession_,productCode.c_str())") < engine.index("if (exitCode == ERROR_INSTALL_USEREXIT")

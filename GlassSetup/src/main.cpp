@@ -79,6 +79,11 @@ constexpr UINT kSetupDownloadStarted = WM_APP + 8;
 constexpr UINT kRuntimeStatus = WM_APP + 3, kRuntimeComplete = WM_APP + 4;
 constexpr UINT kBeginStartup = WM_APP + 5, kStartupComplete = WM_APP + 6, kInspectReady = WM_APP + 7;
 constexpr ULONGLONG kFadeDuration = 280;
+#ifdef _DEBUG
+constexpr ULONGLONG kDuration = 30000;
+constexpr ULONGLONG kSimulatedRollbackDuration = 5000;
+#endif
+
 constexpr COLORREF kDark = RGB(16,18,37), kLicensePanel = RGB(27,29,52);
 constexpr COLORREF kFooterTop = RGB(26,27,50), kFooterBottom = RGB(17,18,35);
 constexpr COLORREF kButtonBase = RGB(24,25,47);
@@ -1277,6 +1282,10 @@ private:
     ULONGLONG rollbackFinishStarted_ = 0;
     int rollbackFinishFrom_ = 0;
 #ifdef _DEBUG
+    ULONGLONG started_ = 0;
+    bool simulateInstall_ = false;
+    bool simulateRollback_ = false;
+    ULONGLONG simulateRollbackStarted_ = 0;
     bool debugDemoPending_ = false, debugDemoStarted_ = false, debugDemoActive_ = false;
     size_t debugDemoStep_ = 0;
 #endif
@@ -1680,6 +1689,13 @@ private:
         // DOM state changes, never child-window hide/show or document navigation.
         return webReady_;
     }
+    static constexpr bool SimulationBuild() noexcept {
+#ifdef _DEBUG
+        return true;
+#else
+        return false;
+#endif
+    }
     [[nodiscard]] bool DebugDemoLocksControls() const noexcept {
 #ifdef _DEBUG
         return debugDemoActive_ || debugDemoPending_;
@@ -1983,8 +1999,8 @@ private:
     void SyncWebViewState() {
         if (!web_ || !webReady_ || !webBridgeReady_) return;
         if (!webInitSent_) {
-            const UINT doneBodyId=DebugDemoLocksControls()?IDS_DONE_BODY_DEMO:IDS_DONE_BODY;
-            const UINT doneNoteId=DebugDemoLocksControls()?IDS_DONE_NOTE_DEMO:IDS_DONE_NOTE;
+            const UINT doneBodyId=SimulationBuild()?IDS_DONE_BODY_DEMO:IDS_DONE_BODY;
+            const UINT doneNoteId=SimulationBuild()?IDS_DONE_NOTE_DEMO:IDS_DONE_NOTE;
             std::wstring labels=L"{\"brand\":"+JsStringLiteral(Text(IDS_BRAND))+
                 L",\"licenseTitle\":"+JsStringLiteral(Text(IDS_EULA_TITLE))+
                 L",\"licenseIntro\":"+JsStringLiteral(Text(IDS_EULA_BODY))+
@@ -2012,7 +2028,7 @@ private:
                 L",\"doneReady\":"+JsStringLiteral(Text(IDS_DONE_READY))+
                 L",\"doneWarnTag\":"+JsStringLiteral(Text(IDS_DONE_WARN_TAG))+
                 L",\"doneWarnTitle\":"+JsStringLiteral(Text(IDS_DONE_WARN_TITLE))+
-                L",\"doneWarnBody\":"+JsStringLiteral(Text(DebugDemoLocksControls()?IDS_DONE_BODY_DEMO:IDS_DONE_WARN_BODY))+
+                L",\"doneWarnBody\":"+JsStringLiteral(Text(SimulationBuild()?IDS_DONE_BODY_DEMO:IDS_DONE_WARN_BODY))+
                 L",\"doneWarnLabel\":"+JsStringLiteral(Text(IDS_DONE_WARN_LABEL))+
                 L",\"errorTag\":"+JsStringLiteral(Text(IDS_ERROR_TAG))+
                 L",\"errorTitle\":"+JsStringLiteral(Text(IDS_ERROR_TITLE))+
@@ -2366,8 +2382,7 @@ private:
         }
     }
     void StartInstallation() {
-        // External MSI acquisition is the normal engine path in Debug and Release.
-        // Only the explicit debug page tour is presentation-only.
+        // Debug retains its original simulation contract; Release uses external MSI.
         if (!accepted_ || transitioning_ || DebugDemoLocksControls()) return;
         if ((page_!=Page::Components && page_!=Page::Certificate) ||
             !inspectReady_.load(std::memory_order_acquire) || !HasSelectedComponent()) return;
@@ -2387,6 +2402,19 @@ private:
         installStatusLine_ = Text(IDS_STATUS_EXTRACT);
         InvalidateRect(progress_, nullptr, FALSE);
         SetPage(Page::Installing);
+#ifdef _DEBUG
+        started_=GetTickCount64();
+        simulateInstall_ = true;
+        simulateRollback_ = false;
+        simulateRollbackStarted_ = 0;
+        installStatusLine_ = Text(IDS_SIMULATION_NOTE);
+        InstallLog::Line(L"Debug build: simulated installation, platform is not stopped");
+        if(!SetTimer(window,kInstallTimer,kInstallTimerMs,nullptr)) {
+            simulateInstall_=false;
+            ShowInstallError(Text(IDS_ERR_INSTALL_FAILED));
+        }
+        return;
+#else
         GlassInstallUtil::InstallRoots roots;
         if (!GlassInstallUtil::ResolveInstallRoots(roots)) {
             InstallLog::LineFormat(L"Install path resolution failed (error %lu)",GetLastError());
@@ -2479,6 +2507,7 @@ private:
             ShowFailurePage(true);
             return;
         }
+#endif
     }
     bool RunPreflightChecks() {
         conflicts_=DetectConflictingApps();
@@ -2783,7 +2812,48 @@ private:
         SetDebugDemoPage(sequence[debugDemoStep_]);
     }
 #endif
+#ifdef _DEBUG
+    void TickSimulation() {
+        const ULONGLONG now=GetTickCount64();
+        if (simulateRollback_) {
+            const ULONGLONG elapsed=now-simulateRollbackStarted_;
+            progressMarquee_=false;
+            progressValue_=displayProgress_=progressTarget_=WizardProgress::FadeToZero(
+                rollbackProgress_.Start(),elapsed,kSimulatedRollbackDuration);
+            percent_=WizardProgress::Percent(progressValue_);
+            if (elapsed>=kSimulatedRollbackDuration) {
+                simulateInstall_=false;
+                simulateRollback_=false;
+                cancelledDetail_=Text(IDS_SIMULATION_CANCELLED);
+                KillTimer(window,kInstallTimer);
+                SetPage(Page::Cancelled);
+                return;
+            }
+            InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter(); SyncWebViewState();
+            return;
+        }
+        // The bar is hidden on the confirmation page: retain exactly the value
+        // that was visible when the cancellation command was issued.
+        if (page_==Page::ConfirmCancel) return;
+        const ULONGLONG elapsed=now-started_;
+        if (elapsed>=kDuration-5000 && page_!=Page::Launching) {
+            launchStarted_=now;
+            installStatusLine_=Text(IDS_LAUNCH_TITLE);
+            SetPage(Page::Launching);
+        }
+        progressMarquee_=false;
+        progressValue_=elapsed>=kDuration ? 10000 : static_cast<int>(elapsed*10000/kDuration);
+        displayProgress_=progressValue_; percent_=WizardProgress::Percent(progressValue_);
+        if (elapsed>=kDuration && launchStarted_ && now-launchStarted_>=5000) {
+            simulateInstall_=false; KillTimer(window,kInstallTimer); SetPage(Page::Complete); return;
+        }
+        InvalidateRect(progress_,nullptr,FALSE); InvalidateFooter(); SyncWebViewState();
+    }
+#endif
     void Tick() {
+#ifdef _DEBUG
+        if(simulateInstall_){TickSimulation();return;}
+#endif
         if (installEngine_.TakeErrorPageRequest()) {
             ShowFailurePage(false);
             installEngine_.NotifyErrorPageShown();
@@ -2899,6 +2969,13 @@ private:
             (page_==Page::Error && failurePending_)) return;
         if (page_==Page::Installing || page_==Page::ModulesBusy || page_==Page::ProcessesStuck) {
             const int visibleAtRequest=visibleProgress_.PaintedOr(progressValue_);
+#ifdef _DEBUG
+            if (simulateInstall_) {
+                visibleProgress_.Capture(visibleAtRequest);
+                beforeCancel_=page_; SetPage(Page::ConfirmCancel); return;
+            }
+#endif
+
             if (installEngine_.PauseForCancelDecision()) {
                 visibleProgress_.Capture(visibleAtRequest);
                 beforeCancel_=page_; SetPage(Page::ConfirmCancel);
@@ -3442,7 +3519,7 @@ private:
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
             DrawLabel(dc,Text(IDS_DONE_WARN_TAG),Box(48,139,400,25),small_,RGB(255,214,160));
             DrawLabel(dc,Text(IDS_DONE_WARN_TITLE),Box(48,177,440,104),title_,white);
-            DrawLabel(dc,Text(DebugDemoLocksControls()?IDS_DONE_BODY_DEMO:IDS_DONE_WARN_BODY),Box(48,286,440,66),font_,muted);
+            DrawLabel(dc,Text(SimulationBuild()?IDS_DONE_BODY_DEMO:IDS_DONE_WARN_BODY),Box(48,286,440,66),font_,muted);
             DrawLabel(dc,Text(IDS_DONE_WARN_LABEL),Box(48,356,400,18),small_,RGB(255,214,160));
             int y=376;
             size_t shown=0;
@@ -3463,8 +3540,8 @@ private:
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
             DrawLabel(dc,Text(IDS_DONE_TAG),Box(48,139,400,25),small_,RGB(190,226,218));
             DrawLabel(dc,Text(IDS_DONE_TITLE),Box(48,177,440,104),title_,white);
-            DrawLabel(dc,Text(DebugDemoLocksControls()?IDS_DONE_BODY_DEMO:IDS_DONE_BODY),Box(48,301,390,78),font_,muted);
-            DrawLabel(dc,Text(DebugDemoLocksControls()?IDS_DONE_NOTE_DEMO:IDS_DONE_NOTE),Box(48,474,450,52),small_,muted);
+            DrawLabel(dc,Text(SimulationBuild()?IDS_DONE_BODY_DEMO:IDS_DONE_BODY),Box(48,301,390,78),font_,muted);
+            DrawLabel(dc,Text(SimulationBuild()?IDS_DONE_NOTE_DEMO:IDS_DONE_NOTE),Box(48,474,450,52),small_,muted);
             DrawBrandMark(dc,48,408);
             DrawLabel(dc,Text(IDS_DONE_READY),Box(80,408,260,26),small_,RGB(205,235,225),
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
@@ -3789,6 +3866,9 @@ private:
                 }
                 if (!DebugDemoLocksControls() && page_==Page::ConfirmCancel) {
                     visibleProgress_.Resume();
+#ifdef _DEBUG
+                    if(simulateInstall_){SetPage(beforeCancel_);return 0;}
+#endif
                     installEngine_.ResumeAfterCancelDecision(); SetPage(beforeCancel_); return 0;
                 }
                 if (!DebugDemoLocksControls() && page_==Page::Certificate) { SetPage(Page::Components); return 0; }
@@ -3809,6 +3889,16 @@ private:
                 if (transitioning_) return 0;
                 if (page_==Page::RuntimeRequired) { StartRuntimeInstallation(); return 0; }
                 if (page_==Page::ConfirmCancel) {
+#ifdef _DEBUG
+                    if (simulateInstall_) {
+                        simulateRollback_=true;
+                        simulateRollbackStarted_=GetTickCount64();
+                        BeginRollbackVisual(simulateRollbackStarted_);
+                        installStatusLine_=Text(IDS_SIMULATION_ROLLBACK);
+                        ShowCancelling();
+                        return 0;
+                    }
+#endif
                     installEngine_.RequestCancel();
                     if (installEngine_.IsCancelRequested()) {
                         BeginRollbackVisual(GetTickCount64());
