@@ -64,17 +64,43 @@ bool Metadata(const std::wstring& path,const Spec& spec,Version& version,std::ws
 }
 bool SameMsiPublisher(const std::wstring& path) {
     const auto expected=GlassProductInspect::QuerySelfSignerSha1();
-    if(expected.empty())return false; // Never implicitly trust unsigned adjacent MSI.
-    PCCERT_CONTEXT cert=nullptr;BYTE hash[64]{};DWORD bytes=sizeof(hash);
-    const HRESULT hr=MsiGetFileSignatureInformationW(path.c_str(),MSI_INVALID_HASH_IS_FATAL,&cert,hash,&bytes);
-    if(FAILED(hr)||!cert){if(cert)CertFreeCertificateContext(cert);return false;}
-    BYTE digest[20]{};bytes=sizeof(digest);
-    const bool ok=CertGetCertificateContextProperty(cert,CERT_SHA1_HASH_PROP_ID,digest,&bytes)&&bytes==20;
-    CertFreeCertificateContext(cert);
-    std::wstring value;constexpr wchar_t digits[]=L"0123456789ABCDEF";
-    if(ok)for(BYTE b:digest){value+=digits[b>>4];value+=digits[b&15];}
-    return ok&&!_wcsicmp(value.c_str(),expected.c_str());
+    if(expected.empty()) {
+        InstallLog::LineFormat(L"Local MSI publisher unavailable: running Setup has no identifiable signer: %s",path.c_str());
+        return false; // Never implicitly trust unsigned adjacent MSI.
+    }
+    // Validate the MSI SIP signature, not merely the embedded certificate. A
+    // fresh machine need not trust our self-signed author certificate globally:
+    // the exact leaf is pinned to the running Setup instead. No store mutation.
+    WINTRUST_FILE_INFO info{};info.cbStruct=sizeof(info);info.pcwszFilePath=path.c_str();
+    WINTRUST_DATA trust{};trust.cbStruct=sizeof(trust);trust.dwUIChoice=WTD_UI_NONE;
+    trust.fdwRevocationChecks=WTD_REVOKE_NONE;trust.dwUnionChoice=WTD_CHOICE_FILE;
+    trust.pFile=&info;trust.dwStateAction=WTD_STATEACTION_VERIFY;
+    trust.dwProvFlags=WTD_CACHE_ONLY_URL_RETRIEVAL|WTD_REVOCATION_CHECK_NONE;
+    GUID policy=WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    const LONG status=WinVerifyTrust(nullptr,&policy,&trust);
+    struct CloseTrust {
+        WINTRUST_DATA& data;GUID& policy;
+        ~CloseTrust(){data.dwStateAction=WTD_STATEACTION_CLOSE;WinVerifyTrust(nullptr,&policy,&data);}
+    } closeTrust{trust,policy};
+    bool ok=false;
+    // Do not accept generic trust failures, expiry, wrong usage, missing chains,
+    // absent signatures or a bad digest just because a certificate was extracted.
+    if(status==ERROR_SUCCESS||status==static_cast<LONG>(CERT_E_UNTRUSTEDROOT)) {
+        auto* provider=WTHelperProvDataFromStateData(trust.hWVTStateData);
+        auto* signer=provider?WTHelperGetProvSignerFromChain(provider,0,FALSE,0):nullptr;
+        PCCERT_CONTEXT cert=signer&&signer->csCertChain&&signer->pasCertChain?signer->pasCertChain[0].pCert:nullptr;
+        BYTE digest[20]{};DWORD bytes=sizeof(digest);
+        if(cert&&CertGetCertificateContextProperty(cert,CERT_SHA1_HASH_PROP_ID,digest,&bytes)&&bytes==20) {
+            std::wstring value;constexpr wchar_t digits[]=L"0123456789ABCDEF";
+            for(BYTE byte:digest){value+=digits[byte>>4];value+=digits[byte&15];}
+            ok=!_wcsicmp(value.c_str(),expected.c_str());
+        }
+    }
+    InstallLog::LineFormat(L"Local MSI Authenticode: status=0x%08lX, Setup publisher match=%u: %s",
+        static_cast<unsigned long>(status),ok?1u:0u,path.c_str());
+    return ok;
 }
+
 bool CopyLocked(HANDLE source,const std::wstring& destination,const std::atomic<bool>& cancel) {
     Handle out;out.h=GlassReleaseClient::CreatePrivateFile(destination);
     if(out.h==INVALID_HANDLE_VALUE)return false;
@@ -174,22 +200,27 @@ bool Prepare(GlassPackageCatalog::Product product,const GlassPackageCatalog::Cat
                 return Fail(error,L"Installed product version is unknown");
             request.installed=installed;
         }
+        std::wstring diagnostics;
+        const auto rejected=[&](const std::wstring& path,const std::wstring& reason) {
+            InstallLog::LineFormat(L"Local MSI rejected: %s: %s",path.c_str(),reason.c_str());
+            diagnostics+=L"\n"+path+L": "+reason;
+        };
         for(std::size_t n=0;n<paths.size();++n) {
             if(paths[n].empty())continue;
             Handle file;file.h=CreateFileW(paths[n].c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
-            if(file.h==INVALID_HANDLE_VALUE)continue;
+            if(file.h==INVALID_HANDLE_VALUE){rejected(paths[n],L"cannot open file (Win32 "+std::to_wstring(GetLastError())+L")");continue;}
             BY_HANDLE_FILE_INFORMATION info{};LARGE_INTEGER size{};
             if(!GetFileInformationByHandle(file.h,&info)||!GetFileSizeEx(file.h,&size)||
                 (info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))||info.nNumberOfLinks!=1||
-                size.QuadPart<512||size.QuadPart>1024ll*1024*1024)continue;
+                size.QuadPart<512||size.QuadPart>1024ll*1024*1024){rejected(paths[n],L"unsafe file attributes, links or size");continue;}
             Version v;std::wstring code,display;
-            if(!Metadata(paths[n],spec,v,code,display))continue;
+            if(!Metadata(paths[n],spec,v,code,display)){rejected(paths[n],L"MSI identity, architecture or version mismatch (or unreadable MSI)");continue;}
             bool trusted=n==0&&GlassMaintenanceCache::MatchesInstalled(paths[n],code,display);
             if(!trusted&&remote&&remote->downloadable&&Compare(v,remote->version)==0)
                 trusted=GlassReleaseClient::VerifyHash(file.h,remote->size,remote->sha256,cancel,error);
             if(!trusted)trusted=SameMsiPublisher(paths[n]);
             if(!trusted) {
-                InstallLog::LineFormat(L"Local MSI rejected: no matching signed publisher or trusted release hash: %s",paths[n].c_str());
+                rejected(paths[n],L"signature/publisher or release hash verification failed (see log); unsigned local MSI is not trusted");
                 continue;
             }
             candidates.push_back({static_cast<Source>(n),v,true});sources.push_back(paths[n]);
@@ -203,7 +234,8 @@ bool Prepare(GlassPackageCatalog::Product product,const GlassPackageCatalog::Cat
         }
         const auto choice=Select(request,candidates);
         if(!choice.index)return Fail(error,choice.failure==Failure::Downgrade?
-            L"Refusing package downgrade: "+name:L"No verified package in Current, packages, installer directory or release: "+name);
+            L"Refusing package downgrade: "+name:L"No verified package in Current, packages, installer directory or release: "+name+diagnostics+
+                (remote&&remote->downloadable?L"":L"\nRelease catalog: no downloadable asset for this product."));
         const auto index=*choice.index;
         error.clear();
         if(candidates[index].source==Source::Release) {

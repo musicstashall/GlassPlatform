@@ -37,6 +37,7 @@ HANDLE CreateFileW(const wchar_t* path,DWORD,DWORD,void*,DWORD mode,DWORD,void*)
  auto found=s.files.find(path);if((mode==OPEN_EXISTING && found==s.files.end()) || (mode==CREATE_NEW && found!=s.files.end()))return INVALID_HANDLE_VALUE;
  if(mode==CREATE_NEW)s.files[path]={};++s.handles;return new Open{path,0};
 }
+DWORD GetLastError(){return 2;}
 BOOL CloseHandle(HANDLE h){delete static_cast<Open*>(h);--s.handles;return 1;}
 BOOL GetFileInformationByHandle(HANDLE h,BY_HANDLE_FILE_INFORMATION* out){out->dwFileAttributes=F(h).attr;out->nNumberOfLinks=F(h).links;return 1;}
 BOOL GetFileSizeEx(HANDLE h,LARGE_INTEGER* out){out->QuadPart=F(h).bytes.size();return 1;}
@@ -91,13 +92,14 @@ int main(){
  GlassPackageCatalog::Catalog catalog;std::wstring error;
  auto run=[&]{return GlassPackageAcquisition::Prepare(Product::Platform64,catalog,L"C:\\cache\\Work",cancelled,error);};
  const auto dest=L"C:\\cache\\Work\\Glass-x64.msi",part=L"C:\\cache\\Work\\Glass-x64.msi.part";
+ reset();assert(!run());assert(error.find(L"cannot open file (Win32 2)")!=std::wstring::npos);assert(error.find(L"no downloadable asset")!=std::wstring::npos);
  reset();s.files[L"C:\\kit\\packages\\Glass-x64.msi"].bytes=Package("2.0.0");assert(run());assert(s.files.at(dest).bytes==Package("2.0.0")&&s.downloads==0);
  reset();s.files[L"C:\\kit\\Glass-x64.msi"].bytes=Package("2.0.0");assert(run());
  reset();s.files[L"C:\\kit\\packages\\Glass-x64.msi"].bytes=Package("2.0.0");s.files[L"C:\\kit\\Glass-x64.msi"].bytes=Package("3.0.0");assert(run());assert(s.files.at(dest).bytes==Package("3.0.0"));
  reset();s.installed=true;s.files[L"C:\\cache\\Current\\Glass-x64.msi"].bytes=Package("1.0.0","|INSTALLED|");assert(run());
  reset();s.files[L"C:\\cache\\Current\\Glass-x64.msi"].bytes=Package("1.0.0","|INSTALLED|");assert(!run());assert(!s.files.count(dest));
  reset();s.installed=true;s.installedVersion=L"5.0.0";s.files[L"C:\\kit\\Glass-x64.msi"].bytes=Package("1.0.0");assert(!run());
- reset();s.files[L"C:\\kit\\Glass-x64.msi"].bytes=Package("2.0.0","");assert(!run()); // Unsigned/unhashed local is not implicitly trusted.
+ reset();s.files[L"C:\\kit\\Glass-x64.msi"].bytes=Package("2.0.0","");assert(!run());assert(error.find(L"signature/publisher")!=std::wstring::npos); // Unsigned/unhashed local is not implicitly trusted.
  reset();s.files[L"C:\\kit\\Glass-x64.msi"]={Package("2.0.0"),FILE_ATTRIBUTE_REPARSE_POINT};assert(!run());
  reset();s.files[L"C:\\kit\\Glass-x64.msi"]={Package("2.0.0"),0,2};assert(!run());
  auto& remote=catalog.products[0];remote=GlassPackageCatalog::Asset{};remote->version.parts={3,0,0,0};remote->downloadable=true;remote->size=1024;remote->sha256=std::string(64,'a');remote->url="https://github.com/release";

@@ -879,3 +879,13 @@ MSI, файлы, регистрация и loaded state разделены: MSI 
 - Обычный Debug получает demo completion body/note и без --demo-tour. Автоматический page tour остаётся отдельным явным Debug-режимом. Native/WebView completion используют единое config-based правило.
 - Регрессия actual StartInstallation/Tick/TickSimulation компилируется Debug/Release × legacy define present/absent: Debug — ноль engine starts, simulated completion/cancel/rollback, timer failure; Release — настоящий adapter entry, отказы и completion только по engine outcome. Используются fake APIs/engine, Windows runtime не запускался.
 - Targeted entry tests (4 варианта) PASS, resources PASS, diff-check PASS. Windows/MSVC сборка исправления не выполнена. Полный проект/оставшиеся maintenance задачи этим не объявляются завершёнными.
+
+
+### Fresh Release: локальные MSI и self-signed издатель
+
+- Ошибка `No verified package ... Glass-x64.msi` на чистом ПК относится к acquisition, а не к наличию установленных продуктов. Конкретный исходный отказ на пользовательской машине без журнала ещё не установлен.
+- `SameMsiPublisher` теперь проверяет MSI через WinVerifyTrust/SIP и разрешает `CERT_E_UNTRUSTEDROOT` **только** при точном совпадении сертификата с подписантом запущенного Setup; другие ошибки остаются фатальными. Сертификаты не импортируются. Это устраняет зависимость источника локального MSI от предварительного системного доверия к self-signed сертификату автора, которое устанавливается только отдельно по согласию.
+- Отсутствующий/неоткрываемый файл, небезопасные атрибуты, несовместимые метаданные и отказ подписи/хэша теперь различаются в ошибке и журнале. Authenticode status записывается в журнал; неподписанный MSI не принимается автоматически.
+- Read-only `gh release view`: текущий latest `v2.0.0.0070` содержит только Setup и version.json, без MSI. Внешний комплект для локальной проверки должен содержать MSI рядом с EXE; публикация нового полного каталога и MSI в scope этой правки не выполнялась.
+- PASS: новый actual-source `package_publisher_mock.py` (успех, unknown root + exact leaf, отказ чужому/отсутствующему издателю, bad digest, no signature, expired, wrong usage, incomplete chain, generic trust failure, cleanup); `package_acquisition_mock.py`, `cache_digest_mock.py`, четыре конфигурации `setup_real_entry_mock.py`, resources smoke. Это portable API-seam тесты, не проверка реальных криптографических подписей Windows.
+- Windows/MSVC/WiX и fresh VM runtime ещё не проверены. Следующая критическая проверка: подписанный Release-комплект с MSI в соседнем каталоге, чистая VM без сертификата автора, затем tampered/foreign/unsigned MSI; при отказе нужен новый GlassSetup.log. Debug simulation не менялась.
