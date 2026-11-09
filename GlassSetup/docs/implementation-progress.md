@@ -1777,3 +1777,38 @@ Native fallback — WM_MOUSEWHEEL/WM_MOUSEHWHEEL/WM_VSCROLL/WM_HSCROLL.
 Регрессии: реальный HTML RU/EN — wheel до минимума и native scroll после
 минимума; actual native observer — вертикальная/горизонтальная прокрутка,
 дочерние контролы, отсутствие дублирования WebView/чужих окон.
+
+### Log17: исправлена неполная реализация stock-style Native export
+
+Проанализированы GlassSetup-17.log и все четыре MSI-лога сессии 20261109_135954.
+Оба Settings и обе Platform установлены успешно (MSI MainEngineThread return 0).
+При удалении SUT в 14:01:57.512 реально запущен OS-native x64 DLL
+C:\Program Files\GlassPlatform\GlassSettings\GlassSettings.Native.dll;
+ran/started/completed=1, exit=0x0000000C. Отсутствующие HKU1008/1011/1012
+пропущены как требуется. Vendor MSI removal ещё не запускался. После отказа
+Glass products успешно восстановлены из rollback baseline. GitHub403 discovery
+не является причиной отказа. Внутренний HRESULT по этим логам неизвестен.
+
+Причина расхождения исходников: после исправления WOW64 routing V2 оставался
+alias V1, чей ApplyStockVisualStyle вызывал только ordinal 65; рабочая Settings
+кнопка сначала вызывает ThemeManager2.AddAndSelectTheme(.theme). Это упущение
+предыдущего исправления, а не неустановленная зависимость/ошибка MSI.
+
+Теперь Native StockVisualStyle helper воспроизводит primary-путь Settings на
+собственном STA: тот же COM ABI/CLSID/IID/context, Init(0), .theme, flags32/4,
+без IgnoreColor; ordinal65 только для EnableSystemFont после COM. Строгая
+проверка HRESULT всех стадий и точного текущего stock-path. V2 вызывает helper
+непосредственно и возвращает фактический HRESULT вместо generic 0xC; V1 сохраняет
+bitmask ABI и использует helper в reset-path. No fallback к x86 Setup, ослабления
+проверки по basename/ошибке HRESULT или попытки снять SUT registration нет.
+
+Подробный контракт: GlassSettings/docs/stock-theme-maintenance.md.
+Windows/MSVC/WiX acceptance остаётся обязательным; точную причину старого
+внутреннего отказа без HRESULT не объявляем установленной. Загруженные исходные
+логи после анализа удалены; image-21 сохранён.
+
+Проверки Log17 fix: 85 mock scripts — 75 PASS / 10 прежних известных FAIL;
+все четыре production DOM suites, resources, SUT build graph и diff-check PASS.
+Новые actual-source тесты покрывают Native COM pipeline (ASan/UBSan), паритет
+ABI/flags с C#, порядок ThemeManager→fonts→readback, cleanup/error paths и V2
+HRESULT propagation/native-bitness/legacy/query guards. Windows runtime не проверен.

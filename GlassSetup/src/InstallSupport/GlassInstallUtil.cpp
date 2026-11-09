@@ -1814,7 +1814,7 @@ bool PrepareSecureUxRemovalVisualStyle(const std::wstring& x64Dir,const std::wst
         if(!ran||!started)return fail(L"Visual-style helper could not be started.");
         if(!completed)return fail(L"Visual-style helper did not finish within 45 s; the style may already have changed.");
         if(exitCode!=0) {
-            wchar_t text[160]{};swprintf_s(text,L"Native visual-style preparation or verification failed (exit=0x%08lX); SecureUxTheme MSI was not removed.",exitCode);
+            wchar_t text[160]{};swprintf_s(text,L"Native stock .theme preparation or verification failed (HRESULT/legacy exit=0x%08lX); SecureUxTheme MSI was not removed.",exitCode);
             return fail(text);
         }
         if(run)run->ran=true;

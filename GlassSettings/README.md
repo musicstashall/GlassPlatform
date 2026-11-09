@@ -8,6 +8,7 @@
 
 | Задача | Документ |
 |--------|----------|
+| Stock theme перед удалением SecureUxTheme | [docs/stock-theme-maintenance.md](docs/stock-theme-maintenance.md) |
 | Обзор WinUI | [docs/GlassSettings-WinUI.md](docs/GlassSettings-WinUI.md) |
 | Page operation pipeline | [docs/GlassSettings-page-pipeline.md](docs/GlassSettings-page-pipeline.md) |
 | Notice / defer / external-sync | [docs/GlassSettings-notices.md](docs/GlassSettings-notices.md) |

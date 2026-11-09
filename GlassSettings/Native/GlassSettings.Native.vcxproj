@@ -121,6 +121,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="StockVisualStyle.h" />
+  </ItemGroup>
+  <ItemGroup>
     <ClCompile Include="AtlasPreviewGenerator.cpp" />
     <ClCompile Include="PartRegistryNative.cpp" />
     <ClCompile Include="GlassHost.cpp" />

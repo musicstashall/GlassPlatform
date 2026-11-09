@@ -231,3 +231,12 @@ MSI identity/version проверки acquisition и выполнения не �
 численное сравнение .9/.10, older/unknown/malformed DLL, настоящее повреждение;
 C++ helper tests — равенство, нормализация, порядок, неизвестная/невалидная версия.
 Windows/MSVC/WiX/runtime проверка здесь не выполнялась.
+
+### Log17: parity с применением темы Settings
+
+OS-native routing недостаточен без правильного apply pipeline. V2 подготовки
+использует теперь ThemeManager2 (.theme) на STA, а не alias V1 с ordinal-only
+применением .msstyles. HRESULT и точный текущий путь обязательны; одинаковый
+путь при отказе API не разрешает MSI removal. V1 bitmask ABI сохранён.
+См. GlassSettings/docs/stock-theme-maintenance.md. Оригинальный MSI, loaded-HKU
+проверки, skip warnings и dependency/manual-risk политика остаются без изменений.

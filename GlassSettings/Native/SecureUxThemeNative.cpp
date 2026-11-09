@@ -1,4 +1,5 @@
 #include "NativeHost.h"
+#include "StockVisualStyle.h"
 
 #include <DebugLog.h>
 #include <Helpers/ThemeHelper.h>
@@ -702,31 +703,16 @@ namespace
     // пользовательский .msstyles не пройдёт проверку подписи (parity с toggle-off GS).
     [[nodiscard]] bool ApplyStockVisualStyle() noexcept
     {
-        wchar_t windows[MAX_PATH]{};
-        if (GetWindowsDirectoryW(windows, MAX_PATH) == 0)
-            return false;
-        const std::wstring stock = JoinPath(windows, L"Resources\\Themes\\Aero\\aero.msstyles");
-        if (!FileExistsNative(stock))
-            return false;
-        DWORD fonts = 0;
-        DWORD size = sizeof(fonts);
-        (void)::RegGetValueW(
-            HKEY_CURRENT_USER,
-            L"Software\\StanislavKa\\GlassPlatform\\GlassSettings",
-            L"EnableSystemFont",
-            RRF_RT_REG_DWORD,
-            nullptr,
-            &fonts,
-            &size);
-        return SUCCEEDED(Shared::ThemeHelper::SetSystemVisualStyle(
-            stock.c_str(), L"NormalColor", L"NormalSize", fonts ? 65 : 0));
+        NativeStockVisualStyle::Result result{};
+        const HRESULT hr=NativeStockVisualStyle::Apply(result);
+        DebugLog(DBG_NORMAL,L"[GlassSettings][SecureUxTheme] stock theme: hr=0x%08lX COM=0x%08lX font=0x%08lX read=0x%08lX verified=%d",
+            static_cast<unsigned long>(hr),static_cast<unsigned long>(result.comHr),static_cast<unsigned long>(result.fontHr),static_cast<unsigned long>(result.readHr),result.verified?1:0);
+        return SUCCEEDED(hr)&&result.verified;
     }
 }
 
-// Точка входа GlassUnins (rundll32, разрядность ОС): деактивирует SecureUxTheme так же,
-// как это делает GlassSettings — сначала возвращает стандартный визуальный стиль, если
-// активен пользовательский, затем выполняет единую деактивацию
-// GlassSettings_SecureUxThemeDeactivate.
+// Legacy GlassUnins entry: stock-style preparation only. The explicit Settings
+// toggle uses GlassSettings_SecureUxThemeDeactivate separately. MSI owns removal.
 // Биты кода выхода: 1 — неверные аргументы; 2 — нужна перезагрузка (отложена очистка
 // файлов); 4 — стандартный стиль не подтверждён (hook сохранён); 8 —
 // деактивация не удалась; 16 — установлен внешний SecureUxTheme, ничего не изменено.
@@ -776,7 +762,23 @@ extern "C" void CALLBACK GlassSettings_SecureUxThemePrepareRemovalV2W(
 #ifdef _M_IX86
 #pragma comment(linker, "/EXPORT:GlassSettings_SecureUxThemePrepareRemovalV2W=_GlassSettings_SecureUxThemePrepareRemovalV2W@16")
 #endif
-    GlassSettings_SecureUxThemeSetupV1W(hwnd,instance,cmdLine,show);
+    (void)hwnd;(void)instance;(void)show;
+    if(cmdLine&&*cmdLine)::ExitProcess(static_cast<UINT>(E_INVALIDARG));
+    if(IsWow64ProcessNow())::ExitProcess(static_cast<UINT>(HRESULT_FROM_WIN32(ERROR_INSTALL_PLATFORM_UNSUPPORTED)));
+    GlassSettings_SecureUxThemeNativeQuery query{};
+    const HRESULT queried=GlassSettings_SecureUxThemeQuery(&query);
+    if(FAILED(queried))::ExitProcess(static_cast<UINT>(queried));
+    if(HasUnsupportedLegacySecureUxTheme(query))::ExitProcess(static_cast<UINT>(HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED)));
+    const bool active=query.WinlogonHasOurToken||query.LoadedEventPresent||
+        (query.ComProxyHijacked&&query.SystemDll4Present);
+    if(!active)::ExitProcess(0);
+    NativeStockVisualStyle::Result result{};
+    const HRESULT hr=NativeStockVisualStyle::Apply(result);
+    DebugLog(DBG_NORMAL,L"[GlassSettings][SecureUxTheme] removal theme: hr=0x%08lX COM=0x%08lX font=0x%08lX read=0x%08lX verified=%d",
+        static_cast<unsigned long>(hr),static_cast<unsigned long>(result.comHr),static_cast<unsigned long>(result.fontHr),static_cast<unsigned long>(result.readHr),result.verified?1:0);
+    // V2's caller accepts only zero; keep V1's legacy bitmask unchanged, but
+    // return the actual HRESULT here instead of collapsing every failure to 0xC.
+    ::ExitProcess(static_cast<UINT>(FAILED(hr)?hr:result.verified?S_OK:HRESULT_FROM_WIN32(ERROR_INVALID_STATE)));
 }
 
 // Небольшие протоколы для карточки SecureUxTheme в GlassSetup/GlassUnins.
