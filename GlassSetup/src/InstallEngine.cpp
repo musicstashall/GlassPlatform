@@ -1372,7 +1372,7 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
                 L"SecureUxTheme MSI was not removed. The visual style may already be reset; no automatic custom-style restore is attempted.\n")+error,ERROR_INSTALL_PACKAGE_REJECTED);
             return false;
         }
-        InstallLog::Line(L"Loaded SecureUxTheme removal: single desktop profile/style and original MSI revalidated; invoking vendor MSI");
+        InstallLog::Line(L"Loaded SecureUxTheme removal: all profile selectors/current-session style and original MSI revalidated; invoking vendor MSI");
     }
     GlassInstallMsi::ProgressSink sink{};
     sink.label=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?L"Удаление SecureUxTheme":L"Removing SecureUxTheme";

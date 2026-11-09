@@ -87,7 +87,6 @@ class Inventory {
     bool cleanupPrepared_=false;
     bool removalStylePrepared_=false;
     bool removalStyleCommitted_=false;
-    std::wstring removalTheme_;
     bool savedThemeRegistryFallback_=false;
 public:
     bool SavedThemeRegistryFallback() const noexcept{return savedThemeRegistryFallback_;}
@@ -193,67 +192,79 @@ public:
         for(bool present:seen)if(!present){detail=L"A profile disappeared; a fresh preflight is required";return false;}
         return true;
     }
-    // First loaded-hook removal scope: exactly one local desktop profile.
-    // No offline profile reset or cross-account HKCU mutation is authorized.
+    // Persist stock selectors for every inventoried profile, including offline
+    // hives. Other live sessions finish switching at restart; no logoff is forced.
     bool PreflightLoadedRemoval(std::wstring& detail) {
-        removalStylePrepared_=false;removalStyleCommitted_=false;removalTheme_.clear();
-        if(OtherUserSessions(detail)||!OpenAll(detail))return false;
-        if(profiles_.size()!=1){detail=L"Loaded SecureUxTheme removal currently requires exactly one user profile; multi-profile style preparation is not implemented.";return false;}
-        if(!IsDesktopProfile(profiles_[0].sid)){detail=L"The elevated user must be the current desktop user; no other account's style will be changed.";return false;}
-        if(Shared::SystemVisualStyle::CurrentForMaintenance()==Shared::SystemVisualStyle::State::Unknown){detail=L"Current visual style cannot be verified.";return false;}
-        HKEY key=nullptr;
-        if(RegOpenKeyExW(profiles_[0].hive,L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes",0,KEY_READ|KEY_WRITE,&key)!=ERROR_SUCCESS){detail=L"Current theme selector is not accessible for preparation.";return false;}
-        const bool got=ReadString(key,L"CurrentTheme",removalTheme_);RegCloseKey(key);
-        if(!got){detail=L"CurrentTheme is missing or invalid; no style change is authorized.";return false;}
+        removalStylePrepared_=false;removalStyleCommitted_=false;
+        if(!OpenAll(detail))return false;
+        if(profiles_.empty()){detail=L"No user profiles could be inventoried.";return false;}
+        for(const auto& profile:profiles_) {
+            for(const auto* path:{L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes",L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager"}) {
+                HKEY key=nullptr;
+                const LONG status=RegOpenKeyExW(profile.hive,path,0,KEY_READ|KEY_WRITE,&key);
+                if(key)RegCloseKey(key);
+                if(status!=ERROR_SUCCESS&&status!=ERROR_FILE_NOT_FOUND){detail=profile.sid+L": theme selector is not writable ("+std::to_wstring(status)+L")";return false;}
+            }
+        }
         removalStylePrepared_=VerifyInventory(detail);return removalStylePrepared_;
     }
+    bool StockRemovalPaths(std::wstring& theme,std::wstring& style,std::wstring& detail) const {
+        wchar_t windows[32768]{};const UINT n=GetWindowsDirectoryW(windows,32768);
+        if(!n||n>=32768){detail=L"Cannot resolve the Windows directory.";return false;}
+        theme=std::wstring(windows)+L"\\Resources\\Themes\\aero.theme";
+        style=std::wstring(windows)+L"\\Resources\\Themes\\Aero\\aero.msstyles";
+        if(!SafePath(theme)||!SafePath(style)){detail=L"Windows stock theme/style files are missing or inaccessible.";return false;}
+        return true;
+    }
     bool VerifyLoadedRemovalStock(std::wstring& detail) const {
+        std::wstring theme,style;if(!StockRemovalPaths(theme,style,detail))return false;
         wchar_t actual[32768]{},color[256]{},size[256]{};
+        const auto lite=style.substr(0,style.find_last_of(L'\\')+1)+L"aerolite.msstyles";
         if(FAILED(GetCurrentThemeName(actual,32768,color,256,size,256))||
-            Shared::SystemVisualStyle::ClassifyPath(actual)!=Shared::SystemVisualStyle::State::Stock){detail=L"Live Windows stock style cannot be verified.";return false;}
-        HKEY key=nullptr;
-        if(RegOpenKeyExW(profiles_[0].hive,L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager",0,KEY_READ,&key)!=ERROR_SUCCESS){detail=L"Cannot verify the persisted visual-style selector.";return false;}
-        std::wstring dll;const bool got=ReadString(key,L"DllName",dll);RegCloseKey(key);
-        if(!got||Shared::SystemVisualStyle::ClassifyPath(dll.c_str())!=Shared::SystemVisualStyle::State::Stock){detail=L"Persisted ThemeManager DllName is not a verified Windows stock style.";return false;}
+            (_wcsicmp(actual,style.c_str())&&_wcsicmp(actual,lite.c_str()))){detail=L"Current session did not switch to the Windows stock visual style.";return false;}
+        for(const auto& profile:profiles_) {
+            const struct {const wchar_t* path;const wchar_t* name;const std::wstring* expected;} values[]={
+                {L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes",L"CurrentTheme",&theme},
+                {L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager",L"DllName",&style}};
+            for(const auto& value:values) {
+                HKEY key=nullptr;
+                const LONG status=RegOpenKeyExW(profile.hive,value.path,0,KEY_READ,&key);
+                std::wstring current;const bool ok=status==ERROR_SUCCESS&&ReadString(key,value.name,current)&&!_wcsicmp(current.c_str(),value.expected->c_str());
+                if(key)RegCloseKey(key);
+                if(!ok){detail=profile.sid+L": stock selector verification failed: "+value.name;return false;}
+            }
+        }
         return true;
     }
     bool RecheckLoadedRemoval(std::wstring& detail) const {
-        if(!removalStylePrepared_||profiles_.size()!=1){detail=L"Loaded-removal style preflight is required.";return false;}
-        if(OtherUserSessions(detail)||!VerifyInventory(detail))return false;
-        if(!IsDesktopProfile(profiles_[0].sid)){detail=L"Desktop user changed after style preflight.";return false;}
-        if(Shared::SystemVisualStyle::CurrentForMaintenance()==Shared::SystemVisualStyle::State::Unknown){detail=L"Current visual style became unknown.";return false;}
-        if(removalStyleCommitted_&&!VerifyLoadedRemovalStock(detail)){detail=L"The prepared stock style changed; MSI removal is blocked.";return false;}
-        HKEY key=nullptr;
-        if(RegOpenKeyExW(profiles_[0].hive,L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes",0,KEY_READ,&key)!=ERROR_SUCCESS){detail=L"Cannot recheck CurrentTheme.";return false;}
-        std::wstring current;const bool got=ReadString(key,L"CurrentTheme",current);RegCloseKey(key);
-        if(!got||current!=removalTheme_){detail=L"CurrentTheme changed after preflight; rebuild the removal plan.";return false;}
-        return true;
+        if(!removalStylePrepared_){detail=L"Loaded-removal profile preflight is required.";return false;}
+        if(!VerifyInventory(detail))return false;
+        return !removalStyleCommitted_||VerifyLoadedRemovalStock(detail);
     }
-    // Called only after the explicit native style-only helper. Do not apply an
-    // entire stock theme (wallpaper/sounds/colors), erase themes, or restore a
-    // custom style automatically if the later vendor MSI fails.
+    // Native helper switches the current session only. These writes deliberately
+    // leave wallpaper, sounds, colors and custom .theme/.msstyles files untouched.
+    // Partial failure is not rolled back into an unsafe custom style.
     bool CommitLoadedRemovalStyle(std::wstring& detail) {
         if(removalStyleCommitted_){detail=L"Style preparation already committed; a fresh preflight is required.";return false;}
         if(!RecheckLoadedRemoval(detail))return false;
-        removalStylePrepared_=false; // One-shot, including partial failure.
-        if(!VerifyLoadedRemovalStock(detail))return false;
-        wchar_t windows[32768]{},actual[32768]{},color[256]{},size[256]{};
-        const UINT n=GetWindowsDirectoryW(windows,32768);
-        if(!n||n>=32768||FAILED(GetCurrentThemeName(actual,32768,color,256,size,256))){detail=L"Cannot verify stock style after preparation.";return false;}
-        const std::wstring root=windows,stock=root+L"\\Resources\\Themes\\Aero\\aero.msstyles",lite=root+L"\\Resources\\Themes\\aero\\aerolite.msstyles";
-        const auto theme=root+L"\\Resources\\Themes\\aero.theme";
-        if((_wcsicmp(actual,stock.c_str())&&_wcsicmp(actual,lite.c_str()))||!SafePath(actual)||!SafePath(theme)){detail=L"The native helper did not confirm a safe Windows stock style.";return false;}
-        HKEY key=nullptr;
-        if(RegOpenKeyExW(profiles_[0].hive,L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes",0,KEY_READ|KEY_WRITE,&key)!=ERROR_SUCCESS){detail=L"Cannot persist the stock theme selector.";return false;}
-        std::wstring before;
-        bool ok=ReadString(key,L"CurrentTheme",before)&&before==removalTheme_;
-        if(ok)ok=RegSetValueExW(key,L"CurrentTheme",0,REG_SZ,reinterpret_cast<const BYTE*>(theme.c_str()),static_cast<DWORD>((theme.size()+1)*sizeof(wchar_t)))==ERROR_SUCCESS;
-        std::wstring after;if(ok)ok=ReadString(key,L"CurrentTheme",after)&&after==theme;
-        RegCloseKey(key);
-        if(!ok){detail=L"Stock CurrentTheme selector could not be written/verified; live style may already be reset.";return false;}
-        if(OtherUserSessions(detail)||!VerifyInventory(detail)||!IsDesktopProfile(profiles_[0].sid)||Shared::SystemVisualStyle::CurrentForMaintenance()!=Shared::SystemVisualStyle::State::Stock){detail=L"User/profile/style changed during preparation; MSI removal is not authorized.";return false;}
-        removalTheme_=theme;removalStylePrepared_=true;removalStyleCommitted_=true;
-        return true;
+        removalStylePrepared_=false; // One-shot even after a partial write.
+        std::wstring theme,style;if(!StockRemovalPaths(theme,style,detail))return false;
+        for(const auto& profile:profiles_) {
+            const struct {const wchar_t* path;const wchar_t* name;const std::wstring* target;} values[]={
+                {L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes",L"CurrentTheme",&theme},
+                {L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager",L"DllName",&style}};
+            for(const auto& value:values) {
+                HKEY key=nullptr;
+                LONG status=RegCreateKeyExW(profile.hive,value.path,0,nullptr,0,KEY_READ|KEY_WRITE,nullptr,&key,nullptr);
+                if(status==ERROR_SUCCESS)status=RegSetValueExW(key,value.name,0,REG_SZ,reinterpret_cast<const BYTE*>(value.target->c_str()),static_cast<DWORD>((value.target->size()+1)*sizeof(wchar_t)));
+                std::wstring current;
+                const bool verified=status==ERROR_SUCCESS&&ReadString(key,value.name,current)&&!_wcsicmp(current.c_str(),value.target->c_str());
+                if(key)RegCloseKey(key);
+                if(!verified){detail=profile.sid+L": cannot write/verify "+value.name+L" ("+std::to_wstring(status)+L"). Some profile selectors or the live style may already be reset.";return false;}
+            }
+        }
+        if(!VerifyInventory(detail)||!VerifyLoadedRemovalStock(detail))return false;
+        removalStylePrepared_=true;removalStyleCommitted_=true;return true;
     }
     // Conservative safety barrier until a per-session style broker and verified
     // offline theme writer are available. Unknown/custom offline styles do not

@@ -104,18 +104,27 @@ Offline-reset должен согласованно учитывать ThemeMana
 
 Это технические исследования, а не повторное согласование уже принятых пользовательских правил. Дамп/экспорт пользователя в репозиторий не скопирован; production-код не изменён.
 
-#### Restricted loaded SecureUxTheme removal implementation
+#### Loaded SecureUxTheme removal: all-profile selectors
 
-The first loaded-removal path authorizes only one inventoried desktop-user
-profile with no other user sessions, retaining OS-native GlassSettings through
-the vendor transaction. It requires the installed style-only V2 native export,
-rechecks selectors/inventory/session identity, applies stock style, verifies live
-and persisted DllName stock resources, and writes/verifies the current user's
-CurrentTheme link to Windows aero.theme before the original MSI. The operation
-is one-shot; partial style reset is reported and never rolled back into a custom
-style automatically. Loaded removal preserves the reboot requirement.
+Loaded removal inventories all ProfileList user profiles and pins their loaded
+or privately opened offline hives. It no longer requires exactly one profile,
+matching elevated/desktop SIDs or an absence of other sessions. Before the original
+MSI, the installed OS-native style-only V2 helper switches the current session;
+Setup then writes/verifies each profile's `Themes/CurrentTheme` to Windows
+`Resources/Themes/aero.theme` and `ThemeManager/DllName` to Windows
+`Resources/Themes/Aero/aero.msstyles`. Missing selector keys can be created.
+Preflight does not change registry values. Stock file existence/non-reparse checks
+remain; Authenticode checks are not required for this reset.
 
-This does **not** implement the broader offline/multiuser lifecycle described
-above or eliminate concurrent-logon races. More than one profile, unknown style,
-missing V2 helper and same-plan removal of OS-native Settings are refused. See
-implementation-progress.md for validation and Windows limitations.
+Wallpaper/sound/color settings and custom theme/style files are not modified by
+these writes. Other active sessions are not forcibly switched or logged off:
+their persisted selectors are prepared for the next logon/restart. Loaded removal
+retains its reboot requirement. Profile inventory and written selectors are
+rechecked before the vendor MSI. An inaccessible profile or failed write/readback
+blocks that MSI and reports the profile SID/value; earlier style/selector changes
+can remain. There is no automatic custom-style restore or atomic multi-profile
+rollback. Concurrent profile creation/theme changes are not locked globally.
+
+The installed OS-native V2 helper must remain available through the last vendor
+transaction, so its same-plan Settings removal is still refused. This is distinct
+from restrictions on profile count or other sessions, which are removed.

@@ -1346,3 +1346,31 @@ runners plus resource/build-graph checks pass. Targeted tests rerun after final
 stock-selector/reboot checks. **No Windows/MSVC/WiX build or real loaded uninstall
 was performed in this Linux environment.** The previous Windows install/reboot
 result is not evidence for this new path.
+
+
+### All-profile loaded SecureUxTheme removal (supersedes the restricted scope above)
+
+Following the requested simplification, removed the single-profile, desktop-SID,
+other-session and Authenticode gates from the loaded-removal profile preparation.
+All inventoried loaded/offline user hives now receive stock `CurrentTheme` and
+`ThemeManager/DllName` references, with per-value readback. Missing selectors can
+be created; existing custom links need not be readable during preflight. The
+native V2 helper still switches the current session visually. Other sessions are
+not forcibly switched: reboot/next logon completes their transition. No wallpaper,
+sound/color values or custom theme/style files are edited by the selector writer.
+
+Inventory/write failures continue to stop the vendor MSI with profile/value
+context; partial changes are retained and reported rather than restoring custom
+styles. Rechecks cover all written selectors, current-session stock path and
+profile inventory. Stock paths must exist without reparse traversal, but do not
+require signature validation. No global logon/theme-setting lock or atomic
+multi-profile recovery is claimed. The installed V2 helper and retaining its
+OS-native Settings MSI through the final transaction remain requirements.
+
+Validation: all 80 mock scripts rerun, 70 PASS, the same 10 previously documented
+failures, zero new failures. Replaced the restricted style harness with actual-source
+all-profile tests (1/3/7 profiles, both selector writes, missing values, each partial
+write failure, inaccessible profile, create/readback errors, changed inventory and
+selectors, stock aero/aerolite paths). ASan/UBSan enabled. Worker, plan, IPC,
+profile-inventory, resources, build-graph and package/product/release runners pass.
+No Windows/MSVC/WiX build or real all-profile removal was run here.

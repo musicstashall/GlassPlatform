@@ -1980,8 +1980,8 @@ private:
         if(sutState==GlassInstallUtil::SecureUxThemeState::Active || sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending){
             if(!sutRemovalNotice.empty())sutRemovalNotice+=L"\n";
             sutRemovalNotice+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                L"Перед удалением загруженного SecureUxTheme будет применён штатный визуальный стиль. Сейчас поддержан только один профиль текущего пользователя без других сеансов; требуется обновлённый native helper GlassSettings.":
-                L"Before removing loaded SecureUxTheme, the stock visual style will be applied. Currently requires a single desktop-user profile, no other sessions and the updated GlassSettings native helper.";
+                L"Перед удалением загруженного SecureUxTheme будет применён штатный визуальный стиль. Ссылки на тему и стиль будут заменены для всех профилей; обои, звуки и файлы тем сохраняются. Другие сеансы завершат переключение после перезагрузки.":
+                L"Before removing loaded SecureUxTheme, the stock visual style will be applied. Theme/style selectors will be reset for all profiles; wallpapers, sounds and theme files are retained. Other sessions finish switching after restart.";
         }
         std::wstring sutReasons=L"[";
         bool firstSutReason=true;
