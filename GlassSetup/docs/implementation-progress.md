@@ -1388,3 +1388,22 @@ modified. Added a source regression assertion to the native IPC harness.
 Validation: IPC/card source assertions, actual removal worker, all-profile style
 harness and resource invariants PASS; git diff --check PASS. No Windows build or
 browser/Windows visual acceptance performed for this change.
+
+### Windows removal attempt: installed helper V2 dependency failure
+
+Analyzed uploaded GlassSetup-10.log (session 2026-11-09 10:10–10:11).
+Native query returned 2 (Active), original MSI ProductCode
+{D686CD0E-139E-4599-A4E2-1B9BC0B72F73} was installed (state 5), local x64 MSI
+ProductVersion 4.0.0 was found. Removal stopped before MSI changes because the
+installed OS-native GlassSettings.Native.dll did not export
+GlassSettings_SecureUxThemePrepareRemovalV2W. No profile/style preparation or
+vendor uninstall was attempted. This is a Setup-introduced helper version
+requirement, not a failed Windows style switch or vendor MSI uninstall.
+
+The V2 export currently forwards to SetupV1W; requiring it adds no new switching
+implementation. This dependency must be reconsidered: publishing a new Setup
+alone should not require replacing installed Settings just to remove the vendor
+MSI. A standalone Setup-owned preparation implementation/helper is preferable
+to blindly invoking an older installed deactivation export with potentially
+different registration/file side effects. This entry records diagnosis only,
+not removal of the dependency. Uploaded source log deleted after analysis.
