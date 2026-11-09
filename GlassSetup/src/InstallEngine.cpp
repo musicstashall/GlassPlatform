@@ -2041,10 +2041,18 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty() && !selection_.Removes(sourceRows[i]))
             cacheBlobs.push_back({0,names[i],sources[i].c_str(),sources[i]==tempDir_+L"\\"+names[i]});
         std::wstring cacheFailure;
-        if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs.data(),cacheBlobs.size(),IDR_MAINTENANCE_UNINS,&cacheFailure))
+        std::vector<std::wstring> needsOriginal;
+        if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs.data(),cacheBlobs.size(),IDR_MAINTENANCE_UNINS,&cacheFailure,&needsOriginal))
             AddFinishWarning(ru?L"Оболочка обслуживания сохранена не полностью":L"Maintenance cache publication is incomplete",
                 (ru?L"Не удалось полностью сохранить комплект обслуживания. Это не сообщение о сбое запуска. Сохраните исходный установщик и журнал.\n":
                     L"The maintenance bundle was not fully saved. This does not indicate a component startup failure. Keep the original installer and log.\n")+cacheFailure);
+        if(!needsOriginal.empty()) {
+            std::wstring detail=ru?
+                L"Для восстановления следующих продуктов нужен проверенный исходный MSI с полным содержимым поставки. Существующие кандидаты сохранены, но не зарегистрированы как доверенные источники. Это не ошибка сохранения оболочки и не отмена выполненной операции:":
+                L"Repair of the following products needs a verified original MSI and its complete source payload. Existing candidates were retained but were not registered as trusted sources. This is not a controller publication failure or a rollback of the completed operation:";
+            for(const auto& source:needsOriginal)detail+=L"\n"+source;
+            AddFinishWarning(ru?L"Не для всех продуктов доступен источник восстановления":L"Repair sources are unavailable for some products",detail);
+        }
     } else {
         InstallLog::Line(L"Removal-only: maintenance cache left unchanged; no controller rotation or publication");
     }

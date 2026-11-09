@@ -752,7 +752,8 @@ assert "Средство для использования неподписан�
 # must not consume a Native DLL that is produced only by the second pass.
 assert "IDR_UNLOCKER_" not in unins_rc
 assert "ConfigureEmbeddedUnlocker" not in unins
-assert "IDR_MAINTENANCE_UNINS,&cacheFailure)" in engine
+assert "IDR_MAINTENANCE_UNINS,&cacheFailure,&needsOriginal)" in engine
+assert "Repair sources are unavailable for some products" in engine
 assert "nativeX86Resource" not in cache and "GlassSettings.Native.x86.dll" not in cache
 assert "EmbeddedNativeDll" not in util
 assert "Первичная подготовка этой ветки" not in read("README.md")

@@ -26,15 +26,18 @@ harness = r'''
 constexpr unsigned INVALID_FILE_ATTRIBUTES=~0u;
 constexpr unsigned LANG_RUSSIAN=25,IDR_MAINTENANCE_UNINS=1;
 #define PRIMARYLANGID(x) (x)
-unsigned GetUserDefaultUILanguage(){return 0;}
+unsigned language=0;
+unsigned GetUserDefaultUILanguage(){return language;}
 int probes=0,publishes=0,arps=0;bool publishOk=true,arpOk=true;
-std::vector<std::wstring> published;
+bool coverageGap=false;
+std::vector<std::wstring> published,warningTitles;
 unsigned GetFileAttributesW(const wchar_t*){++probes;return INVALID_FILE_ATTRIBUTES;}
 namespace InstallLog {void Line(const wchar_t*){}}
 namespace GlassMaintenanceCache {
 struct Blob {unsigned id;const wchar_t* name;const wchar_t* path;bool required;};
 std::wstring CurrentFile(const wchar_t* name){return std::wstring(L"cache/")+name;}
-bool Publish(int,const Blob* blobs,std::size_t count,unsigned,std::wstring*){
+bool Publish(int,const Blob* blobs,std::size_t count,unsigned,std::wstring*,std::vector<std::wstring>* missing){
+ if(coverageGap)missing->push_back(L"cache/Glass-x64.msi");
  ++publishes;for(std::size_t i=0;i<count;++i)published.emplace_back(blobs[i].name);return publishOk;
 }
 }
@@ -45,7 +48,7 @@ struct InstallEngine {
  GlassProducts::Selection selection_;
  bool scanNativeX64_=true;int instance_=0,warnings=0;
  std::wstring tempDir_=L"temp",x64Dir_,x86Dir_,openGlassDir_;
- void AddFinishWarning(const std::wstring&,const std::wstring&){++warnings;}
+ void AddFinishWarning(const std::wstring& title,const std::wstring&){++warnings;warningTitles.push_back(title);}
  void LaunchSelectedProducts() noexcept;
 };
 // REAL_PREFIX
@@ -53,7 +56,7 @@ GlassProducts::Selection Removal(unsigned mask){
  GlassProducts::Selection s;s.platform64=s.platform32=s.glassSettings=s.openGlass=false;
  s.independentSettings=true;s.removeMask=mask;return s;
 }
-void Reset(){probes=publishes=arps=0;publishOk=arpOk=true;published.clear();}
+void Reset(){language=0;warningTitles.clear();coverageGap=false;probes=publishes=arps=0;publishOk=arpOk=true;published.clear();}
 int main(){
  using namespace GlassProducts;
  const OpenGlassStartupState existing{true,true,false},fresh{true,false,false};
@@ -77,6 +80,9 @@ int main(){
    case 4:e.selection_.openGlass=true;break;case 5:e.selection_.secureUxTheme=true;break;}
   assert(HasPackageApply(e.selection_));e.LaunchSelectedProducts();assert(publishes==1&&arps==1&&e.warnings==0);
  }
+ for(unsigned lang:{0u,25u}){Reset();language=lang;coverageGap=true;InstallEngine e;e.selection_=Removal(0);e.selection_.settings64=true;
+  e.LaunchSelectedProducts();assert(publishes==1&&arps==1&&e.warnings==1);
+  assert(warningTitles[0]==(lang==25?L"Не для всех продуктов доступен источник восстановления":L"Repair sources are unavailable for some products"));}
  // Genuine publication/ARP failures remain visible; do not mask AccessDenied.
  {Reset();publishOk=false;InstallEngine e;e.selection_=Removal(0);e.selection_.settings64=true;
   e.LaunchSelectedProducts();assert(publishes==1&&arps==1&&e.warnings==1);}

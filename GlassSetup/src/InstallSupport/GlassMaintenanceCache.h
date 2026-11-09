@@ -281,15 +281,21 @@ inline bool WritePublishedDigest(const std::wstring& file) {
 inline bool MatchesInstalled(const std::wstring& file,const std::wstring& code,const std::wstring& version) {
     return RegistrationState(file,code,version)==1 && PublishedDigestMatches(file);
 }
-inline bool RegisterRepairSource(const std::wstring& file) {
+// Coverage is independent of publication. An unbound legacy source is retained,
+// but never registered as trusted and never labelled an I/O/publication failure.
+inline bool RegisterRepairSource(const std::wstring& file,std::vector<std::wstring>* needsOriginal=nullptr) {
     std::wstring code,version;if(!TrustedPath(file,false)||!Identity(file,code,version))return false;
     std::vector<Registration> all;if(!Registrations(code,all))return false;
     const auto package=PackageCode(file);if(package.empty())return false;
     for(const auto& reg:all) {
         const auto registered=PackageCode(reg.local);if(registered.empty())return false;
         if(version!=reg.version||_wcsicmp(package.c_str(),registered.c_str())!=0)continue;
-        if(!PublishedDigestMatches(file))return Diag::Fail(L"ValidateRepairSourceDigest",file,ERROR_INVALID_DATA,
-            L"No verified distribution/installed-cache binding; legacy source is not registered automatically",L"Policy");
+        if(!PublishedDigestMatches(file)) {
+            if(needsOriginal)needsOriginal->push_back(file);
+            GlassInstallLog::LineFormat(L"Maintenance source coverage: NeedsOriginalSource product=%s context=%u SID=%s source=%s; no verified distribution/installed-cache binding; source retained, not registered",
+                code.c_str(),static_cast<unsigned>(reg.context),reg.sid.c_str(),file.c_str());
+            continue;
+        }
         const wchar_t* user=reg.context==MSIINSTALLCONTEXT_MACHINE?nullptr:reg.sid.c_str();
         const auto slash=file.find_last_of(L'\\');const auto folder=file.substr(0,slash+1),name=file.substr(slash+1);
         const auto registration=L"product="+code+L" SID="+reg.sid+L" context="+std::to_wstring(reg.context);
@@ -338,7 +344,8 @@ struct Blob {
 // Invoked only after successful MSI commit. Failed publication leaves Previous
 // intact; recovery restores it on the next attempt. Never prunes system MSI cache.
 inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT uninstallerResource,
-    std::wstring* failureDetail=nullptr) {
+    std::wstring* failureDetail=nullptr,std::vector<std::wstring>* needsOriginal=nullptr) {
+    if(needsOriginal)needsOriginal->clear();
     Diag::Publication publication(failureDetail);
     Diag::Step(L"acquire-lock",L"Global\\GlassPlatform.MaintenanceCache.V1");
     struct CacheLock {
@@ -454,20 +461,22 @@ inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT 
     }
     Diag::Step(L"register-repair-sources",current);
     bool registered=true;
-    for(std::size_t i=0;i<count;++i)if(!RegisterRepairSource(current+L"\\"+blobs[i].file))registered=false;
+    for(std::size_t i=0;i<count;++i)if(!RegisterRepairSource(current+L"\\"+blobs[i].file,needsOriginal))registered=false;
     WIN32_FIND_DATAW source{};HANDLE sources=FindFirstFileW((retained+L"\\*.msi").c_str(),&source);
     if(sources==INVALID_HANDLE_VALUE) {
         const DWORD error=GetLastError();if(error!=ERROR_FILE_NOT_FOUND)registered=Diag::Fail(L"FindFirstFileW",retained,error);
     } else {
         for(;;) {
-            if(!RegisterRepairSource(retained+L"\\"+source.cFileName))registered=false;
+            if(!RegisterRepairSource(retained+L"\\"+source.cFileName,needsOriginal))registered=false;
             if(!FindNextFileW(sources,&source)) {
                 const DWORD error=GetLastError();if(error!=ERROR_NO_MORE_FILES)registered=Diag::Fail(L"FindNextFileW",retained,error);break;
             }
         }
         FindClose(sources);
     }
-    // Do not release the old bundle until all installed sources have registered.
+    // Do not release the old bundle on a real registration failure. Unbound
+    // legacy candidates have already been copied/retained; missing coverage alone
+    // does not pin an entire historical controller bundle indefinitely.
     if(!registered)return false;
     Diag::Step(L"release-previous",previous);
     const bool cleaned=RemoveFlat(previous);

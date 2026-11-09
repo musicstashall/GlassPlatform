@@ -2,6 +2,8 @@
 
 Статус: целевая архитектура по запросу пользователя; не отчёт о реализованном self-update.
 Реализация текущего handoff отсутствует. Не включать его одним ShellExecute.
+Первый runtime-инкремент: разделены repair-source coverage и ошибка публикации
+существующего комплекта; controller/source-store физически ещё не разделены.
 
 ## 1. Основание и границы
 
@@ -206,3 +208,23 @@ health отдельно не проверяется, поэтому нельзя
 
 Эта спецификация сама по себе не выполняет ни один runtime migration/handoff.
 Не включать небезопасный промежуточный автозапуск ради демонстрации UX.
+
+
+## 9. Реализованный первый инкремент
+
+RegisterRepairSource теперь возвращает отдельно список NeedsOriginalSource для
+подходящих установленных identities без проверенной binding. Он не вызывает
+MSI SourceList API для таких файлов и не заявляет их доверенными. Candidates
+продолжают копироваться/удерживаться согласно прежней installed identity policy.
+Реальные ошибки trust/identity/context/MSI SourceList API остаются ошибками.
+
+Publish передаёт coverage отдельно от publication error: legacy coverage gap сам
+по себе больше не удерживает полный Previous. Current/Retained candidates уже
+сохранены до удаления Previous. При реальном registration failure Previous
+сохраняется как раньше. Final RU/EN warning называет отсутствие repair sources,
+не ложный отказ оболочки. Выполненные продукты не откатываются из-за этого.
+
+Это не завершённый controller lifecycle: self-update/ACK/автоперезапуск по-прежнему
+отключены, независимая публикация controller до MSI и migration entrypoints/GC
+ещё не реализованы. Старые registration/GC политики не объявлены полноценным
+reference-counted source-store. Последующие этапы раздела 8 остаются обязательны.

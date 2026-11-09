@@ -2106,3 +2106,25 @@ publication с post-product-commit. В этом этапе подготовле�
 receipt/journal и child ACK. Следующий этап: controller transition model и secure
 publisher/handoff, затем ARP/Settings entrypoints и независимый source-store.
 Проверка документационных изменений: git diff --check; Windows тесты неприменимы.
+
+
+## Реализация единой политики: первый runtime-инкремент
+
+Сделано: coverage результата RegisterRepairSource/Publish отделено от ошибок
+публикации. Отсутствие подтверждённой legacy binding означает NeedsOriginalSource,
+не регистрацию неподтверждённого MSI и не ложную ошибку сохранения controller.
+Кандидаты сохраняются; Previous можно освободить при успехе копирования/реальных
+регистраций, не удерживая полный bundle только из-за отсутствия receipt.
+Final RU/EN показывает специальный coverage warning; настоящие Win32/MSI ошибки
+продолжают выводить publication failure. Actual-source ASan/UBSan тестирует границу
+регистрации (включая отсутствие любых SourceList API для legacy), UI completion
+mock — отдельные RU/EN предупреждения, реальные ошибки и removal-only поведение.
+
+НЕ завершено: защищённый controller store, журнал/ACK/handoff и автоматический
+перезапуск, ранняя независимая controller publication, ARP/Settings migration,
+полноценный source refs/GC. CompleteVersionCheck заглушка намеренно не снята.
+Нельзя выдавать этот инкремент за выполненный запрос целиком. Windows/MSVC/WiX
+проверка недоступна. См. installer-servicing-policy.md, разделы 8–9.
+
+Проверки первого runtime-инкремента: 88 mocks — 78 PASS / 10 прежних baseline
+failures; verify_resources и diff --check PASS. Это не Windows acceptance.
