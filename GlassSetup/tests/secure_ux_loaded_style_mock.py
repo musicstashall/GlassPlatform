@@ -11,6 +11,7 @@ def fn(token):
    d-=1
    if not d:return s[a:i+1]
  raise ValueError(token)
+assert 'RegCreateKeyExW' not in fn('bool CommitLoadedRemovalStyle(')
 harness=r'''
 #include <cassert>
 #include <cwchar>
@@ -19,16 +20,17 @@ harness=r'''
 #include <map>
 #include <iostream>
 using HKEY=void*;using LONG=long;using DWORD=unsigned;using UINT=unsigned;using BYTE=unsigned char;
-constexpr int KEY_READ=1,KEY_WRITE=2,REG_SZ=1,ERROR_SUCCESS=0,ERROR_FILE_NOT_FOUND=2;
+constexpr int KEY_READ=1,KEY_WRITE=2,KEY_QUERY_VALUE=4,KEY_SET_VALUE=8,REG_SZ=1,ERROR_SUCCESS=0,ERROR_FILE_NOT_FOUND=2;
 #define _wcsicmp wcscasecmp
 #define FAILED(x) ((x)<0)
 bool missingKeys=false;bool openAllOk=true,inventoryOk=true,windowsOk=true,pathSafe=true,actualOk=true,readOk=true;
+int absentProfile=0;
 int profileCount=3,openKeys=0,writes=0,failWriteAt=0,denyProfile=0,failCreateAt=0,creates=0,inventoryCalls=0,failInventoryAt=0;
 std::wstring actual=L"C:\\Windows\\Resources\\Themes\\Aero\\aero.msstyles";
 std::map<std::pair<int,std::wstring>,std::wstring> registry;
 int number(HKEY key){return static_cast<int>(reinterpret_cast<size_t>(key));}
 bool SafePath(const std::wstring&){return pathSafe;}
-LONG RegOpenKeyExW(HKEY hive,const wchar_t*,int,int,HKEY* out){if(missingKeys)return ERROR_FILE_NOT_FOUND;if(number(hive)==denyProfile)return 5;*out=hive;++openKeys;return 0;}
+LONG RegOpenKeyExW(HKEY hive,const wchar_t*,int,int access,HKEY* out){assert(access==KEY_QUERY_VALUE||access==(KEY_QUERY_VALUE|KEY_SET_VALUE));if(missingKeys||number(hive)==absentProfile)return ERROR_FILE_NOT_FOUND;if(number(hive)==denyProfile||++creates==failCreateAt)return 5;*out=hive;++openKeys;return 0;}
 LONG RegCreateKeyExW(HKEY hive,const wchar_t*,int,void*,int,int,void*,HKEY* out,void*){if(++creates==failCreateAt)return 5;if(number(hive)==denyProfile)return 5;*out=hive;++openKeys;return 0;}
 int RegCloseKey(HKEY){--openKeys;return 0;}
 bool ReadString(HKEY key,const wchar_t* name,std::wstring& out){out=registry[{number(key),name}];return readOk&&!out.empty();}
@@ -38,6 +40,7 @@ LONG RegSetValueExW(HKEY key,const wchar_t* name,int,int type,const BYTE* value,
 }
 UINT GetWindowsDirectoryW(wchar_t* out,UINT){if(!windowsOk)return 0;std::wcscpy(out,L"C:\\Windows");return 10;}
 int GetCurrentThemeName(wchar_t* out,int,wchar_t*,int,wchar_t*,int){if(!actualOk)return -1;std::wcscpy(out,actual.c_str());return 0;}
+namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
 class Inventory {
  struct Profile {std::wstring sid;HKEY hive;};
  std::vector<Profile> profiles_;
@@ -47,7 +50,7 @@ class Inventory {
 public:
 // METHODS
 };
-void reset(){assert(openKeys==0);missingKeys=false;openAllOk=inventoryOk=windowsOk=pathSafe=actualOk=readOk=true;profileCount=3;writes=creates=inventoryCalls=0;failWriteAt=denyProfile=failCreateAt=failInventoryAt=0;
+void reset(){assert(openKeys==0);absentProfile=0;missingKeys=false;openAllOk=inventoryOk=windowsOk=pathSafe=actualOk=readOk=true;profileCount=3;writes=creates=inventoryCalls=0;failWriteAt=denyProfile=failCreateAt=failInventoryAt=0;
  actual=L"C:\\Windows\\Resources\\Themes\\Aero\\aero.msstyles";registry.clear();}
 int main(){std::wstring detail;
  for(int count:{0,1,3,7}){reset();profileCount=count;Inventory i;assert(i.PreflightLoadedRemoval(detail));assert(writes==0);assert(i.RecheckLoadedRemoval(detail));
@@ -55,11 +58,12 @@ int main(){std::wstring detail;
   for(int p=1;p<=count;++p){assert((registry[{p,L"CurrentTheme"}]==L"C:\\Windows\\Resources\\Themes\\aero.theme"));assert((registry[{p,L"DllName"}]==L"C:\\Windows\\Resources\\Themes\\Aero\\aero.msstyles"));}
   if(count){registry[{count,L"DllName"}]=L"custom.msstyles";assert(!i.RecheckLoadedRemoval(detail));}
  }
- {reset();Inventory i;missingKeys=true;assert(i.PreflightLoadedRemoval(detail));assert(writes==0);missingKeys=false;assert(i.CommitLoadedRemovalStyle(detail));assert(writes==6);}
+ {reset();Inventory i;missingKeys=true;assert(i.PreflightLoadedRemoval(detail));assert(writes==0);assert(i.CommitLoadedRemovalStyle(detail));assert(writes==0);assert(i.RecheckLoadedRemoval(detail));missingKeys=false;registry[{1,L"CurrentTheme"}]=L"custom.theme";assert(!i.RecheckLoadedRemoval(detail));}
+ {reset();absentProfile=1;Inventory i;assert(i.PreflightLoadedRemoval(detail));assert(i.CommitLoadedRemovalStyle(detail));assert(writes==4);assert(i.RecheckLoadedRemoval(detail));assert(registry.count({1,L"CurrentTheme"})==0);}
  for(int failure:{0,2}){reset();Inventory i;if(failure==0)openAllOk=false;if(failure==1)profileCount=0;if(failure==2)denyProfile=2;assert(!i.PreflightLoadedRemoval(detail));assert(writes==0);}
  for(int at=1;at<=6;++at){reset();Inventory i;assert(i.PreflightLoadedRemoval(detail));failWriteAt=at;assert(!i.CommitLoadedRemovalStyle(detail));assert(writes==at);assert(detail.find(L"SID-")!=std::wstring::npos);assert(!i.CommitLoadedRemovalStyle(detail));}
  for(int failure=0;failure<7;++failure){reset();Inventory i;assert(i.PreflightLoadedRemoval(detail));
-  if(failure==0)inventoryOk=false;if(failure==1)windowsOk=false;if(failure==2)pathSafe=false;if(failure==3)failCreateAt=3;
+  if(failure==0)inventoryOk=false;if(failure==1)windowsOk=false;if(failure==2)pathSafe=false;if(failure==3)failCreateAt=creates+3;
   if(failure==4)readOk=false;if(failure==5)actual=L"C:\\ThirdParty\\custom.msstyles";if(failure==6)failInventoryAt=inventoryCalls+2;
   assert(!i.CommitLoadedRemovalStyle(detail));assert(!i.RecheckLoadedRemoval(detail)||failure==0);
  }

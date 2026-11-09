@@ -259,7 +259,7 @@ public:
         for(const auto& profile:profiles_) {
             for(const auto* path:{L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes",L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager"}) {
                 HKEY key=nullptr;
-                const LONG status=RegOpenKeyExW(profile.hive,path,0,KEY_READ|KEY_WRITE,&key);
+                const LONG status=RegOpenKeyExW(profile.hive,path,0,KEY_QUERY_VALUE|KEY_SET_VALUE,&key);
                 if(key)RegCloseKey(key);
                 if(status!=ERROR_SUCCESS&&status!=ERROR_FILE_NOT_FOUND){detail=profile.sid+L": theme selector is not writable ("+std::to_wstring(status)+L")";return false;}
             }
@@ -286,7 +286,8 @@ public:
                 {L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager",L"DllName",&style}};
             for(const auto& value:values) {
                 HKEY key=nullptr;
-                const LONG status=RegOpenKeyExW(profile.hive,value.path,0,KEY_READ,&key);
+                const LONG status=RegOpenKeyExW(profile.hive,value.path,0,KEY_QUERY_VALUE,&key);
+                if(status==ERROR_FILE_NOT_FOUND)continue; // No selector key means no custom reference.
                 std::wstring current;const bool ok=status==ERROR_SUCCESS&&ReadString(key,value.name,current)&&!_wcsicmp(current.c_str(),value.expected->c_str());
                 if(key)RegCloseKey(key);
                 if(!ok){detail=profile.sid+L": stock selector verification failed: "+value.name;return false;}
@@ -313,12 +314,23 @@ public:
                 {L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager",L"DllName",&style}};
             for(const auto& value:values) {
                 HKEY key=nullptr;
-                LONG status=RegCreateKeyExW(profile.hive,value.path,0,nullptr,0,KEY_READ|KEY_WRITE,nullptr,&key,nullptr);
-                if(status==ERROR_SUCCESS)status=RegSetValueExW(key,value.name,0,REG_SZ,reinterpret_cast<const BYTE*>(value.target->c_str()),static_cast<DWORD>((value.target->size()+1)*sizeof(wchar_t)));
+                // Match preflight: absent selector keys are safe, not a request
+                // to create personalization trees in retained/deleted-user hives.
+                LONG status=RegOpenKeyExW(profile.hive,value.path,0,KEY_QUERY_VALUE|KEY_SET_VALUE,&key);
+                if(status==ERROR_FILE_NOT_FOUND) {
+                    GlassInstallLog::LineFormat(L"SecureUxTheme selector absent: SID=%s key=%s; no key created",profile.sid.c_str(),value.path);
+                    continue;
+                }
+                const wchar_t* stage=L"open";
+                if(status==ERROR_SUCCESS) {
+                    stage=L"set";
+                    status=RegSetValueExW(key,value.name,0,REG_SZ,reinterpret_cast<const BYTE*>(value.target->c_str()),static_cast<DWORD>((value.target->size()+1)*sizeof(wchar_t)));
+                    if(status==ERROR_SUCCESS)stage=L"readback";
+                }
                 std::wstring current;
                 const bool verified=status==ERROR_SUCCESS&&ReadString(key,value.name,current)&&!_wcsicmp(current.c_str(),value.target->c_str());
                 if(key)RegCloseKey(key);
-                if(!verified){detail=profile.sid+L": cannot write/verify "+value.name+L" ("+std::to_wstring(status)+L"). Some profile selectors or the live style may already be reset.";return false;}
+                if(!verified){detail=profile.sid+L": cannot write/verify "+value.name+L" ("+std::to_wstring(status)+L", stage="+stage+L"). Some profile selectors or the live style may already be reset.";return false;}
             }
         }
         if(!VerifyInventory(detail)||!VerifyLoadedRemovalStock(detail))return false;

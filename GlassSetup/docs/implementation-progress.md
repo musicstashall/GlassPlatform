@@ -2008,3 +2008,41 @@ root write denied/read allowed, enum failure, unload race, появление sk
 Проверки Log22 fix: 87 mocks — 77 PASS, 10 прежних baseline failures (перечень
 выше); profile inventory ASan/UBSan, worker/native routing, resources, SUT build
 graph и diff --check PASS. Windows/MSVC/WiX/визуальная проверка не выполнялись.
+
+
+### Log23: live style подтверждён; создание отсутствующих selector keys
+
+Session20261109_162939: обе GS .103 установились exit0 (16:30:22.120,
+16:30:29.010). В16:30:41.708 x64 style helper exit0, trace active1,
+hr/COM/force/font/read=0, pathVerified1. Пользователь **подтвердил видимое
+переключение стиля**. Это первая проверка, где есть и stage trace, и визуальное
+подтверждение; не следует снова менять работающий COM-путь.
+
+Следующий этап завершился отказом записи CurrentTheme для1008 (код5).
+Vendor MSI не запускался, GS откатились (16:30:53.511). Прежняя диагностика
+объединяла create/set/readback и не доказывает, какой вызов вернул ошибку.
+Но в коде найдено несоответствие: preflight разрешает ERROR_FILE_NOT_FOUND для
+selector key, commit безусловно RegCreateKeyEx, а verify требовал созданный ключ.
+Отсутствие theme key не означает наличие custom-ссылки и не даёт оснований
+создавать персонализацию удерживаемого профиля удалённого пользователя.
+
+Теперь existing selector key открывается KEY_QUERY_VALUE|KEY_SET_VALUE в
+preflight/commit; никаких RegCreateKeyEx на этом пути. Missing key пропускается
+и при проверке, с явным no-key-created log; остальные существующие ключи/ссылки
+всё равно заменяются и проверяются. ERROR_ACCESS_DENIED для существующего ключа
+не игнорируется. Readback использует KEY_QUERY_VALUE. Запись значения в existing
+key по-прежнему проверяется; отсутствие самого hive обрабатывается отдельной
+inventory policy. General cleanup и live style helper не изменялись, offline
+mount/unload, ACL bypass и account deletion proof не добавлялись.
+
+В error detail теперь stage=open/set/readback, чтобы не выдавать оставшиеся
+ошибки прав доступа за проблемы создания ключа без доказательств. Предположение,
+что именно create дало5 в Log23, остаётся выводом по коду, а не API trace.
+Mock исполняет реальные методы: absent theme keys не создаются и не записываются,
+смешанные existing/absent профили, минимум прав, ошибки open/set/readback,
+проверка существующих stock-ссылок и one-shot commit. Windows/MSVC/WiX acceptance
+этой правки не выполнялся. Исходные три журнала Log23 удалены после анализа.
+
+Проверки Log23 fix: 87 mocks — 77 PASS, 10 прежних baseline failures;
+verify_resources и diff --check PASS. Дополнительно проверено, что появившаяся
+custom-ссылка в ранее отсутствующем key блокирует последующую revalidation.
