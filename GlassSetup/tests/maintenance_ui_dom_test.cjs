@@ -297,5 +297,11 @@ for(const lang of ['ru','en'])for(const installed of [false,true]){
 }
 receive({data:{type:'state',locale:'ru',page:'components',components:[{id:'x64',title:'Platform',installed:false,targetVersion:'2.0.0',operation:'install',applySupported:true}]}});
 assert.equal(d.querySelector('#product-x64').closest('.c-card').querySelectorAll('.c-src .src-bit').length,0,'unknown origins are not invented from target version');
+for(const lang of ['ru','en']) {
+ receive({data:{type:'state',locale:lang,page:'error',ui:{},errorReason:'SecureUxTheme removal failed'}});
+ assert.equal(d.querySelector('#error-title').textContent,lang==='ru'?'Не удалось выполнить операции':'Operations could not be completed');
+ assert.doesNotMatch(d.querySelector('#error-body').textContent,/установк|installation/i);
+ assert.equal(d.querySelector('#error-detail').textContent,'SecureUxTheme removal failed');
+}
 dom.window.close();
 process.stdout.write('PASS: separate catalogue/composition content, planned catalogue idle/needed exclusion; actual production DOM: six rows, real per-architecture IPC, version metadata, live plan/counts, warnings/Escape, RU/EN, setup/uninstall titles and disabled-action gate\n');

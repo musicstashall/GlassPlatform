@@ -1641,3 +1641,33 @@ opened users. Worker harness verifies original MSI execution plus one warning pe
 skipped SID/path and reboot warning, with no warnings during preflight. Production
 DOM/resource/build-graph/diff checks PASS. No Windows/MSVC build or actual vendor
 uninstall verification performed here. Uploaded source log deleted after analysis.
+
+
+### Log16: native-architecture stock-style preparation
+
+Log16 confirms missing-HKU profile skipping works (1008/1011/1012).
+Removal stopped before vendor MSI: the x86 Setup-owned SetSystemVisualStyle
+returned 0x8007041D (service request timeout), not an MSI policy rejection.
+The user reproduced incomplete visual-style application from GlassSettings-x86
+on x64 Windows (error notice and incorrect scrollbar/background color pairing).
+A matching msstyles path alone is not proof of complete color application.
+
+Setup now delegates preparation to OS-native rundll32 and the trusted installed
+GlassSettings.Native.dll export GlassSettings_SecureUxThemePrepareRemovalV2W.
+On x64, only AMD64 Native is accepted; on 32-bit Windows, I386. This existing
+export prepares/verifies stock style without unregistering SUT. Publisher/ACL,
+PE architecture/export, launch, timeout and exit result are checked; worker
+profile/style/runtime/vendor checks remain before MSI. There is no in-process
+x86 apply fallback. IMPORTANT: NativeDllForArch in the current tree resolves an
+installed DLL, not an embedded DLL. Missing/old native-architecture Settings is
+therefore a remaining prerequisite; a self-contained bundled helper is NOT
+implemented by this change. No new exports or Settings update is required if
+PrepareRemovalV2W is already present. General GlassSettings-x86 theme application
+is not changed here.
+
+The temporary ThemeManager2/STA experiment was withdrawn after the architecture
+clarification. Error title/body/generic detail are operation-neutral in RU/EN
+resources and HTML (native fallback uses the resources). Preparation failures
+no longer receive ERROR_INSTALL_PACKAGE_REJECTED and its false policy message.
+Targeted production-source mocks, resources/build graph and production DOM pass;
+Windows/MSVC/WiX and actual theme color/removal validation remain outstanding.

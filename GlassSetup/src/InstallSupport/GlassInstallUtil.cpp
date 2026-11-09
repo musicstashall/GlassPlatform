@@ -1787,26 +1787,32 @@ bool InvokeSecureUxThemeDeactivate(
 
 bool PrepareSecureUxRemovalVisualStyle(const std::wstring& x64Dir,const std::wstring& x86Dir,
     SecureUxThemeDeactivateRun* run,std::wstring* detail) noexcept {
-    (void)x64Dir;(void)x86Dir; // No dependency on installed Settings or Native exports.
     if(run)*run={};
+    auto fail=[detail](const wchar_t* text) noexcept {if(detail)try{*detail=text;}catch(...){}return false;};
     try {
-        wchar_t windows[32768]{};const UINT n=GetWindowsDirectoryW(windows,32768);
-        if(!n||n>=32768){if(detail)*detail=L"Cannot resolve the Windows stock visual style.";return false;}
-        const std::wstring stock=std::wstring(windows)+L"\\Resources\\Themes\\Aero\\aero.msstyles";
-        const DWORD attributes=GetFileAttributesW(stock.c_str());
-        if(attributes==INVALID_FILE_ATTRIBUTES||(attributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))){if(detail)*detail=L"Windows stock aero.msstyles is unavailable.";return false;}
-        DWORD fonts=0,bytes=sizeof(fonts);
-        (void)RegGetValueW(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform\\GlassSettings",L"EnableSystemFont",RRF_RT_REG_DWORD,nullptr,&fonts,&bytes);
-        // Same style-only operation as Settings: no full theme application,
-        // registration changes, system file deletion or installed DLL invocation.
-        const HRESULT hr=Shared::ThemeHelper::SetSystemVisualStyle(stock.c_str(),L"NormalColor",L"NormalSize",fonts?65:0);
-        wchar_t actual[32768]{},color[256]{},size[256]{};
-        const bool verified=SUCCEEDED(hr)&&SUCCEEDED(GetCurrentThemeName(actual,32768,color,256,size,256))&&!_wcsicmp(actual,stock.c_str());
-        GlassInstallLog::LineFormat(L"SecureUxTheme Setup-owned stock style: hr=0x%08lX verified=%d",static_cast<unsigned long>(hr),verified?1:0);
-        if(!verified){if(detail)*detail=L"Setup could not apply/verify the Windows stock visual style; MSI has not been removed. The style may already have changed.";return false;}
+        // Never apply a system style in the x86 Setup process on x64 Windows.
+        // Validate the installed OS-native DLL, its publisher/ACLs and style export.
+        const bool os64=IsOs64Bit();
+        const auto arch=os64?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
+        constexpr auto entry="GlassSettings_SecureUxThemePrepareRemovalV2W";
+        const std::wstring dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,entry);
+        if(dll.empty()||!PeMatches(dll,os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386,entry))
+            return fail(L"Installed native-architecture visual-style helper is unavailable.");
+        const std::wstring rundll=os64?NativeRundll64():RundllPathForTaskArch(arch);
+        if(rundll.empty())return fail(L"Native-architecture rundll32.exe was not found.");
+        const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemePrepareRemovalV2W";
+        DWORD exitCode=MAXDWORD;bool started=false,completed=false;
+        const bool ran=RunHiddenCommand(cmd,&exitCode,45000,&started,&completed);
+        GlassInstallLog::LineFormat(L"SecureUxTheme stock-style native helper: os64=%d ran=%d started=%d completed=%d exit=0x%08lX DLL=%s",os64?1:0,ran?1:0,started?1:0,completed?1:0,exitCode,dll.c_str());
+        if(!ran||!started)return fail(L"Visual-style helper could not be started.");
+        if(!completed)return fail(L"Visual-style helper did not finish within 45 s; the style may already have changed.");
+        if(exitCode!=0) {
+            wchar_t text[160]{};swprintf_s(text,L"Native visual-style preparation or verification failed (exit=0x%08lX); SecureUxTheme MSI was not removed.",exitCode);
+            return fail(text);
+        }
         if(run)run->ran=true;
         return true;
-    }catch(...){if(detail)*detail=L"Setup stock-style preparation failed; the style may already have changed.";return false;}
+    }catch(...){return fail(L"Native visual-style preparation failed; the style may already have changed.");}
 }
 
 bool QuerySecureUxPendingFileOperations(bool& pending) noexcept {

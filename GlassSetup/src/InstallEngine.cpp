@@ -1369,7 +1369,7 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
         if(!prepared) {
             InstallLog::LineFormat(L"Loaded SecureUxTheme removal refused after style preparation: %s",error.c_str());
             SetFailure((ru?L"MSI SecureUxTheme не удалён. При подготовке визуальный стиль мог быть сброшен; автоматического возврата custom style нет.\n":
-                L"SecureUxTheme MSI was not removed. The visual style may already be reset; no automatic custom-style restore is attempted.\n")+error,ERROR_INSTALL_PACKAGE_REJECTED);
+                L"SecureUxTheme MSI was not removed. The visual style may already be reset; no automatic custom-style restore is attempted.\n")+error,ERROR_INVALID_STATE);
             return false;
         }
         InstallLog::Line(L"Loaded SecureUxTheme removal: all profile selectors/current-session style and original MSI revalidated; invoking vendor MSI");

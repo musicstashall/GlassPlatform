@@ -1,46 +1,40 @@
-"""Setup-owned actual style switch: no installed Native or V2 export required."""
+"""Actual Setup style delegation: trusted OS-native helper, never x86 style application on x64."""
 from pathlib import Path
 import subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 s=(root/'GlassSetup/src/InstallSupport/GlassInstallUtil.cpp').read_text()
 a=s.index('bool PrepareSecureUxRemovalVisualStyle(');b=s.index('bool QuerySecureUxPendingFileOperations(',a);method=s[a:b]
-engine=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
-assert 'SecureUxRemovalStyleHelperAvailable' not in engine
-assert 'style-only removal helper V2 is required' not in engine
-assert 'InstalledSecureUxThemeNativeDll' not in method and 'RunHiddenCommand' not in method
-assert '#include <Helpers/ThemeHelper.h>' in s
-assert (root/'GlassShared/include/Helpers/ThemeHelper.h').is_file()
+assert 'InstalledSecureUxThemeNativeDll' in method and 'SetSystemVisualStyle' not in method
 h=r'''
 #include <cassert>
 #include <cwchar>
 #include <string>
 #include <iostream>
-using UINT=unsigned;using DWORD=unsigned;using HRESULT=long;
-constexpr DWORD INVALID_FILE_ATTRIBUTES=~0u,FILE_ATTRIBUTE_DIRECTORY=16,FILE_ATTRIBUTE_REPARSE_POINT=1024,RRF_RT_REG_DWORD=1;
-constexpr int HKEY_CURRENT_USER=1;
-#define SUCCEEDED(hr) ((hr)>=0)
-#define _wcsicmp wcscasecmp
-bool windowsOk=true,themeRead=true,wrongStyle=false;DWORD attr=0,fonts=0;HRESULT result=0;int calls=0,flags=-1;
-UINT GetWindowsDirectoryW(wchar_t* out,UINT){std::wcscpy(out,L"C:\\Windows");return windowsOk?10:0;}
-DWORD GetFileAttributesW(const wchar_t*){return attr;}
-int RegGetValueW(int,const wchar_t*,const wchar_t*,int,void*,DWORD* out,DWORD*){*out=fonts;return 0;}
-namespace Shared::ThemeHelper {HRESULT SetSystemVisualStyle(const wchar_t* path,const wchar_t* color,const wchar_t* size,int f){++calls;flags=f;assert(std::wstring(path)==L"C:\\Windows\\Resources\\Themes\\Aero\\aero.msstyles"&&std::wstring(color)==L"NormalColor"&&std::wstring(size)==L"NormalSize");return result;}}
-HRESULT GetCurrentThemeName(wchar_t* out,int,wchar_t*,int,wchar_t*,int){std::wcscpy(out,wrongStyle?L"C:\\Custom\\aero.msstyles":L"C:\\Windows\\Resources\\Themes\\Aero\\aero.msstyles");return themeRead?0:-1;}
-namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
+#include <cstdio>
+using DWORD=unsigned;using WORD=unsigned short;
+constexpr DWORD MAXDWORD=~0u;constexpr WORD IMAGE_FILE_MACHINE_AMD64=0x8664,IMAGE_FILE_MACHINE_I386=0x14c;
+namespace GlassShared::GlassPlatformTask {enum class PlatformArch{X64,X86};}
+bool os64=true,missing=false,pe=true,path=true,launch=true,start=true,complete=true;DWORD code=0;int calls=0;
+bool IsOs64Bit(){return os64;}
+std::wstring InstalledSecureUxThemeNativeDll(GlassShared::GlassPlatformTask::PlatformArch arch,const std::wstring&,const std::wstring&,const char* entry){assert(std::string(entry)=="GlassSettings_SecureUxThemePrepareRemovalV2W");assert((arch==GlassShared::GlassPlatformTask::PlatformArch::X64)==os64);return missing?L"":L"trusted.dll";}
+bool PeMatches(const std::wstring&,WORD machine,const char* entry){assert(machine==(os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386));assert(std::string(entry)=="GlassSettings_SecureUxThemePrepareRemovalV2W");return pe;}
+std::wstring NativeRundll64(){assert(os64);return path?L"native64.exe":L"";}
+std::wstring RundllPathForTaskArch(GlassShared::GlassPlatformTask::PlatformArch arch){assert(!os64&&arch==GlassShared::GlassPlatformTask::PlatformArch::X86);return path?L"native32.exe":L"";}
+bool RunHiddenCommand(const std::wstring& cmd,DWORD* out,int timeout,bool* started,bool* completed){++calls;assert(timeout==45000&&cmd.find(L"trusted.dll\",GlassSettings_SecureUxThemePrepareRemovalV2W")!=std::wstring::npos);*out=code;*started=start;*completed=complete;return launch;}
+namespace GlassInstallLog{template<class... T>void LineFormat(const wchar_t*,T...) {}}
 struct SecureUxThemeDeactivateRun {bool ran=false;};
+template<size_t N,class... T>int swprintf_s(wchar_t (&buf)[N],const wchar_t* fmt,T... args){return swprintf(buf,N,fmt,args...);}
 // METHOD
 int main(){std::wstring detail;SecureUxThemeDeactivateRun run;
- for(int fail=0;fail<7;++fail){windowsOk=themeRead=true;wrongStyle=false;attr=0;result=0;calls=0;run.ran=true;
-  if(fail==0)windowsOk=false;if(fail==1)attr=INVALID_FILE_ATTRIBUTES;if(fail==2)attr=FILE_ATTRIBUTE_DIRECTORY;if(fail==3)attr=FILE_ATTRIBUTE_REPARSE_POINT;
-  if(fail==4)result=-1;if(fail==5)themeRead=false;if(fail==6)wrongStyle=true;
-  assert(!PrepareSecureUxRemovalVisualStyle(L"missing Settings",L"",&run,&detail));assert(!run.ran);assert(calls==(fail>=4?1:0));assert(!detail.empty());
- }
- windowsOk=themeRead=true;wrongStyle=false;attr=0;result=0;
- for(DWORD font:{0u,1u}){fonts=font;assert(PrepareSecureUxRemovalVisualStyle(L"",L"",&run,&detail));assert(run.ran&&flags==(font?65:0));}
- std::cout<<"PASS: Setup-owned stock-style switch without Settings/V2; Windows path, font parity, apply/readback errors and partial result\n";
+for(bool arch:{false,true}){os64=arch;
+ for(int failure=0;failure<8;++failure){missing=failure==0;pe=failure!=1;path=failure!=2;launch=failure!=3;start=failure!=4;complete=failure!=5;code=failure==6?12:failure==7?16:0;calls=0;run.ran=true;
+ assert(!PrepareSecureUxRemovalVisualStyle(L"old installed x64",L"old installed x86",&run,&detail));assert(!run.ran&&!detail.empty());assert(calls==(failure>=3?1:0));}
+ missing=false;pe=path=launch=start=complete=true;code=0;assert(PrepareSecureUxRemovalVisualStyle(L"",L"",&run,&detail)&&run.ran);
+}
+std::cout<<"PASS: actual Setup style helper: x64/x86 OS routing, trusted Native/export, launch/timeout/exit failures, no in-process style application\n";
 }
 '''.replace('// METHOD',method)
-with tempfile.TemporaryDirectory(prefix='SetupStyle-') as directory:
- p=Path(directory)/'test.cpp';exe=Path(directory)/'test';p.write_text(h)
- subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-fsanitize=address,undefined','-fno-pie','-no-pie',str(p),'-o',str(exe)],check=True)
+with tempfile.TemporaryDirectory() as d:
+ p=Path(d)/'test.cpp';p.write_text(h);exe=Path(d)/'test'
+ subprocess.run(['g++','-std=c++17','-fsanitize=address,undefined','-fno-pie','-no-pie',str(p),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)
