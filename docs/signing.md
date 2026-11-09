@@ -1,0 +1,35 @@
+# Подпись сборок Glass Platform
+
+Кратко для страницы репозитория — в [README](../README.md). Здесь — полный состав подписи и то, как она включается при сборке.
+
+Официальные Release-сборки автор подписывает сертификатом Code Signing **`CN=Stanislav K.`**. Сейчас это **временный self-signed сертификат** (закрытый ключ только на машине автора); переход на SignPath в CI запланирован — точки подписи и способ проверки от этого не изменятся, сменится только отпечаток в таблице ниже. Для self-signed SmartScreen и UAC показывают «Неизвестный издатель» — это ожидаемо: подпись подтверждает **авторство и целостность** файла, а не репутацию издателя.
+
+**Что подписано:** все DLL/EXE платформы (`Build\x64|x86\Release`), `GlassSettings.exe` (publish, single-file), `GlassSettings.Native.dll`, `GlassUnins.exe`, четыре first-party MSI (Glass и GlassSettings, x64/x86) и `GlassSetup.exe`. MSI-пакеты OpenGlass и SecureUxTheme относятся к сторонним продуктам и не подписываются сертификатом Glass; сторонние файлы внутри пакетов (OpenGlass, SecureUxTheme, WinUI/.NET/CRT) сохраняют подписи своих авторов. Sparse MSIX меню оболочки (`GlassShellSparse\GlassShellSparse.msix`) подписан тем же сертификатом разработчика: Windows 11 регистрирует компактное меню только если этот сертификат есть в «Доверенных лицах» пользователя — иначе пункт «Glass» регистрируется классически (после «Показать дополнительные параметры»). Установщик сертификат **не** добавляет; публичный `DeveloperCodeSigning.cer` и инструкция `DeveloperCodeSigning.txt` лежат в папке установки.
+
+**Официальный сертификат разработчика:**
+
+| | |
+|---|---|
+| Subject | `CN=Stanislav K.` |
+| SHA-1 thumbprint | `A801E5F5F430D6D19164C856F79B8EFD23F83EB8` |
+| SHA-256 fingerprint | `1295F4BD2E1E7D710B380ECE573E8C3C021AE1E21C0E77174E5307E68A7DC93D` |
+| Публичный сертификат | `Shared/certs/DeveloperCodeSigning.cer` |
+| Действителен | 2026-11-01 .. 2031-11-01 |
+| Подписаны сборки | начиная с сборок от 2026-11-01 |
+
+**Проверка файла:**
+
+```powershell
+Get-AuthenticodeSignature .\GlassSetup.exe |
+  Format-List Status, StatusMessage,
+    @{n='Thumbprint'; e={$_.SignerCertificate.Thumbprint}},
+    @{n='Subject';    e={$_.SignerCertificate.Subject}},
+    @{n='Timestamp';  e={$_.TimeStamperCertificate.Subject}}
+```
+
+- Подлинность определяется совпадением **Thumbprint** с таблицей. Для self-signed `Status` будет не `Valid`, а `UnknownError` с сообщением о недоверенном корневом сертификате — это норма: Windows не знает издателя, но подпись цела и принадлежит этому ключу.
+- `HashMismatch` — файл изменён после подписи; `NotSigned` — файл не из авторской сборки. В обоих случаях не запускайте его.
+- Проводник: свойства файла → «Цифровые подписи» → «Сведения» → «Просмотр сертификата» → «Состав» → **Отпечаток**.
+- Устанавливать `.cer` в «Доверенные корневые центры сертификации» **не нужно** и не рекомендуется.
+
+**Как это устроено в сборке:** `Shared/GlassSign.targets` (импорт из `Directory.Build.targets`; `GlassUnins`, где он отключён, импортирует файл напрямую) и `Shared/scripts/Invoke-GlassSign.ps1` — единая точка входа для всех артефактов. Режимы `GlassSign` (свойство MSBuild или переменная окружения `GLASS_SIGN`): `Local` — по умолчанию в Release: подпись, если ключ автора есть в `CurrentUser\My`, иначе предупреждение `GSIGN001` и неподписанная сборка (сборка контрибьютора); `Require` — ключ обязателен; `Skip` — без подписи (Debug всегда `Skip`). При найденном ключе любая ошибка подписи — ошибка сборки, а `GlassSetup` перед встраиванием проверяет подписи MSI и Native DLL. Проверка всего комплекта перед публикацией: `powershell -NoProfile -ExecutionPolicy Bypass -File Shared\scripts\Test-GlassSignatures.ps1`.

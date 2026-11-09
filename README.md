@@ -4,30 +4,24 @@
 
 # Glass Platform
 
-Glass Platform — глубокая кастомизация внешнего вида Windows 10 и 11: прозрачность, «стекло», согласованные цвета и мягкий свет в окнах, на панели задач, в меню «Пуск», в центре уведомлений и в контекстных меню. Это те же окна и те же элементы системы, но с другой отрисовкой.
+Glass Platform меняет отрисовку Windows 10 и 11: прозрачность, стекло, общие цвета и мягкий свет в окнах, на панели задач, в меню «Пуск», в центре уведомлений и в контекстных меню.
 
-Платформа **не** рисует второй слой «поверх» рабочего стола. Хост подключается к графическим процессам, перехватывает штатную отрисовку (GDI и связанные пути) и подменяет то, **как** рисуются рамки, фоны, кнопки, полосы прокрутки, всплывающие окна и текст: кисти, цвета, порядок закраски, отдельные эффекты материала. Логика окон, меню и ярлыков не заменяется — меняется только визуальный результат.
+Хост подключается к графическим процессам и подменяет отрисовку рамок, фонов, кнопок, полос прокрутки, всплывающих окон и текста: кисти, цвета, порядок закраски и эффекты материала. Окна, меню и ярлыки остаются теми же.
 
-Облик частично вдохновлён [TranslucentFlyouts](https://github.com/ALTaleX531/TranslucentFlyouts). Установщик по желанию может положить [OpenGlass](https://github.com/ALTaleX531/OpenGlass) в каталог Glass. **GlassPlatform является продолжением легендарного, но устаревшего BlackWindowManager, однако GlassPlatform не совместима с BlackWindowManager** и не использует его настройки как источник истины.
+Glass Platform is experimental theming for Windows 10 and 11. It hooks GUI processes and replaces how controls and shell surfaces are painted. License: [GNU GPL v3](LICENSE).
 
-Glass Platform is experimental desktop theming for Windows 10/11: it hooks into GUI processes and replaces how controls and shell surfaces are painted. License: GNU GPL v3.
+## Что меняется
 
-## Для разработчиков и ИИ-агентов
+- **Окна и диалоги** — рамки и фоны в цвете рабочего стола.
+- **Стандартные элементы** — кнопки, списки, комбобоксы, панели инструментов и прочие common controls в одном стеклянном стиле.
+- **Панель задач** — полоса и её элементы рисуются по отдельным зонам.
+- **Меню «Пуск», поиск и вылетающие панели** — в общей палитре с остальной оболочкой.
+- **Центр уведомлений и календарь** — то же оформление.
+- **Контекстные меню** — Win32 и часть меню на панели задач.
+- **Рабочий стол** — пункт управления платформой в контекстном меню.
+- **Проводник** — окна папок в одной палитре с остальной оболочкой.
 
-Инструкции по архитектуре, модулям и сборке — в [AGENTS.md](AGENTS.md) и README каталогов проектов (`GlassCore/`, `GlassCompat/`, `GlassSettings/` и т.д.). Сквозная схема платформы: [ARCHITECTURE.md](ARCHITECTURE.md).
-
-## Что вы получаете
-
-- **Окна и диалоги** — нестандартные рамки и фоны, согласованные с цветом рабочего стола.
-- **Стандартные элементы** — кнопки, списки, комбобоксы, панели инструментов и прочие common controls в едином стеклянном стиле.
-- **Панель задач** — сегментированная отрисовка полосы и её элементов.
-- **Меню «Пуск», поиск, flyout-окна** — через модули оболочки (в том числе XAML-острова проводника, где это применимо).
-- **Центр уведомлений и календарь** — оформление в общей стеклянной логике.
-- **Контекстные меню** — стеклянные меню только Win32 и некоторые UWP на панели задач.
-- **Расширение в контекстное меню** — пункты управления платформой с рабочего стола.
-- **Проводник** — окна папок и связанные поверхности в одной палитре с остальной оболочкой.
-
-Параметры хранятся в **GlassSettings** (WinUI). Включение и выключение — **LogViewer** или контекстное меню; платформа не требует править реестр вручную для повседневной работы. Справочник ключей — в разделе [Реестр](#реестр).
+Параметры задаются в **GlassSettings**. Включение и выключение — **LogViewer** или контекстное меню рабочего стола. Повседневная работа идёт через эти программы. Справочник ключей — [docs/registry.md](docs/registry.md).
 
 ## Прежде чем включать
 
@@ -35,17 +29,19 @@ Glass Platform is experimental desktop theming for Windows 10/11: it hooks into 
 
 Подробнее о рисках и отказе от гарантии — [LICENSE](LICENSE).
 
-## Требования
+## Запуск
 
-- Windows 10 или 11 (основная разработка и запуск — x64; x86 собирается отдельно)
-- права администратора для старта хоста платформы
-- Visual Studio 2022 — только для сборки из исходников
+- Windows 10 или 11. Основная сборка и запуск — x64; x86 собирается отдельно.
+- Для старта хоста нужны права администратора.
+- **Включение:** LogViewer → START, или `Rundll32.exe "путь\GlassCompat.dll",Main /start`.
+- **Выключение:** STOP в LogViewer, `Main /stop`, или `stop.vbs` в каталоге сборки, если платформа уже запущена. Если сборка сообщает, что DLL занята, сначала остановите платформу штатно.
+- **Параметры:** GlassSettings.exe. Пункт контекстного меню рабочего стола регистрируется оттуда.
 
-## Сборка из исходников
+Готового выпуска нет: платформу собирают из исходников. Установщик описан в [GlassSetup/README.md](GlassSetup/README.md); известное падение Explorer при обновлении остаётся открытым дефектом. Переключатель SecureUxTheme в GlassSettings включает и выключает только регистрацию IFEO/COM. Удаление продукта и оставшиеся файлы ThemeUiProxy описаны там же; перевод GlassUnins на оригинальный ProductCode ещё в работе.
 
-Установщик и деинсталлятор: [единая инструкция GlassSetup](GlassSetup/README.md) — сборка Release x64 → x86, пути, откат, журналы и оставшаяся нереализованная логика. Завершение рефакторинга не означает готовности установочного комплекта к выпуску; известное падение Explorer при обновлении остаётся открытым дефектом.
+## Сборка
 
-Заголовки библиотеки [gtl](https://github.com/greg7mdp/gtl) положите в каталог `gtl` в корне решения, рядом с `GlassProject.sln`. Сборка подключает этот каталог и читает из него `phmap.hpp` (`gtl\phmap.hpp`). В репозиторий каталог не входит. Каталог `tools` тоже локальный и на GitHub не публикуется.
+Нужен Visual Studio 2022. Заголовки библиотеки [gtl](https://github.com/greg7mdp/gtl) положите в каталог `gtl` в корне решения, рядом с `GlassProject.sln`. Сборка читает оттуда `phmap.hpp` (`gtl\phmap.hpp`). Каталог в репозиторий не входит. Каталог `tools` тоже локальный и на GitHub не публикуется.
 
 ```bat
 msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64
@@ -53,19 +49,11 @@ msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64
 
 Результат: `Build\x64\Debug\`.
 
-**Запуск:** LogViewer → START, или `Rundll32.exe "путь\GlassCompat.dll",Main /start`.
+Сборка установщика, порядок Release x64 → x86, откат и журналы — [GlassSetup/README.md](GlassSetup/README.md).
 
-**Остановка:** STOP в LogViewer, `Main /stop`, или `stop.vbs` в каталоге сборки, если платформа уже запущена. Если MSBuild пишет, что DLL занята — сначала остановите платформу штатно, не убивайте процессы без нужды.
+## Подпись
 
-**Настройки:** GlassSettings.exe. Регистрация пункта контекстного меню рабочего стола — из GlassSettings.
-
-### Подпись сборок (Authenticode)
-
-Официальные Release-сборки автор подписывает сертификатом Code Signing **`CN=Stanislav K.`**. Сейчас это **временный self-signed сертификат** (закрытый ключ только на машине автора); переход на SignPath в CI запланирован — точки подписи и способ проверки от этого не изменятся, сменится только отпечаток в таблице ниже. Для self-signed SmartScreen и UAC показывают «Неизвестный издатель» — это ожидаемо: подпись подтверждает **авторство и целостность** файла, а не репутацию издателя.
-
-**Что подписано:** все DLL/EXE платформы (`Build\x64|x86\Release`), `GlassSettings.exe` (publish, single-file), `GlassSettings.Native.dll`, `GlassUnins.exe`, четыре first-party MSI (Glass и GlassSettings, x64/x86) и `GlassSetup.exe`. MSI-пакеты OpenGlass и SecureUxTheme относятся к сторонним продуктам и не подписываются сертификатом Glass; сторонние файлы внутри пакетов (OpenGlass, SecureUxTheme, WinUI/.NET/CRT) сохраняют подписи своих авторов. Sparse MSIX меню оболочки (`GlassShellSparse\GlassShellSparse.msix`) подписан тем же сертификатом разработчика: Windows 11 регистрирует компактное меню только если этот сертификат есть в «Доверенных лицах» пользователя — иначе пункт «Glass» регистрируется классически (после «Показать дополнительные параметры»). Установщик сертификат **не** добавляет; публичный `DeveloperCodeSigning.cer` и инструкция `DeveloperCodeSigning.txt` лежат в папке установки.
-
-**Официальный сертификат разработчика:**
+Официальные Release-сборки подписаны сертификатом **`CN=Stanislav K.`**. Сейчас это временный self-signed сертификат. SmartScreen и UAC показывают «Неизвестный издатель»: подпись подтверждает авторство и целостность файла. Для self-signed `Status` будет `UnknownError` с сообщением о недоверенном корне — при совпавшем отпечатке подпись цела.
 
 | | |
 |---|---|
@@ -76,22 +64,11 @@ msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64
 | Действителен | 2026-11-01 .. 2031-11-01 |
 | Подписаны сборки | начиная с сборок от 2026-11-01 |
 
-**Проверка файла:**
+- Отпечаток совпал с таблицей — файл авторский, подпись цела.
+- `HashMismatch` — файл изменён после подписи.
+- `NotSigned` — файл не из авторской сборки.
 
-```powershell
-Get-AuthenticodeSignature .\GlassSetup.exe |
-  Format-List Status, StatusMessage,
-    @{n='Thumbprint'; e={$_.SignerCertificate.Thumbprint}},
-    @{n='Subject';    e={$_.SignerCertificate.Subject}},
-    @{n='Timestamp';  e={$_.TimeStamperCertificate.Subject}}
-```
-
-- Подлинность определяется совпадением **Thumbprint** с таблицей. Для self-signed `Status` будет не `Valid`, а `UnknownError` с сообщением о недоверенном корневом сертификате — это норма: Windows не знает издателя, но подпись цела и принадлежит этому ключу.
-- `HashMismatch` — файл изменён после подписи; `NotSigned` — файл не из авторской сборки. В обоих случаях не запускайте его.
-- Проводник: свойства файла → «Цифровые подписи» → «Сведения» → «Просмотр сертификата» → «Состав» → **Отпечаток**.
-- Устанавливать `.cer` в «Доверенные корневые центры сертификации» **не нужно** и не рекомендуется.
-
-**Как это устроено в сборке:** `Shared/GlassSign.targets` (импорт из `Directory.Build.targets`; `GlassUnins`, где он отключён, импортирует файл напрямую) и `Shared/scripts/Invoke-GlassSign.ps1` — единая точка входа для всех артефактов. Режимы `GlassSign` (свойство MSBuild или переменная окружения `GLASS_SIGN`): `Local` — по умолчанию в Release: подпись, если ключ автора есть в `CurrentUser\My`, иначе предупреждение `GSIGN001` и неподписанная сборка (сборка контрибьютора); `Require` — ключ обязателен; `Skip` — без подписи (Debug всегда `Skip`). При найденном ключе любая ошибка подписи — ошибка сборки, а `GlassSetup` перед встраиванием проверяет подписи MSI и Native DLL. Проверка всего комплекта перед публикацией: `powershell -NoProfile -ExecutionPolicy Bypass -File Shared\scripts\Test-GlassSignatures.ps1`.
+В двух последних случаях файл запускать не следует. Устанавливать `.cer` в доверенные корневые центры не нужно. Что именно подписано, команда проверки и режимы сборки — [docs/signing.md](docs/signing.md).
 
 ## Состав
 
@@ -108,213 +85,14 @@ Get-AuthenticodeSignature .\GlassSetup.exe |
 | GlassShellSparse\GlassShellExt.dll | Контекстное меню рабочего стола (вместе с `GlassShellHost.exe` и sparse-пакетом в подкаталоге `GlassShellSparse\`) |
 | GlassSetup.exe | Установщик платформы |
 
-## Реестр
+## Документация
 
-Настройки платформы лежат в **`HKCU\Software\StanislavKa\GlassPlatform`**. Тот же путь в `HKLM` используется только как запасное чтение для `InstallPath` и бинарников свечения текста. Прежний ключ `Software\StanislavKa\BlackWindowManager` больше не читается и не пишется; значения из него сами не переносятся.
+- Архитектура: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Сборка модулей и правила для разработчиков: [AGENTS.md](AGENTS.md), README каталогов `GlassCore/`, `GlassCompat/`, `GlassSettings/` и остальных проектов
+- Реестр: [docs/registry.md](docs/registry.md)
+- Установщик: [GlassSetup/README.md](GlassSetup/README.md)
+- Подпись: [docs/signing.md](docs/signing.md)
 
-Нет значения — действует умолчание. GlassSettings в этом случае обычно удаляет параметр, а не записывает заводское число. Цвета ниже — `DWORD` в формате **AARRGGBB**.
+## Связанные проекты
 
-### Параметры DWM (OpenGlass)
-
-Параметры DWM здесь не перечисляются. У OpenGlass их больше, чем у страниц Glass, и описание каждого значения — в оригинале: [Configuration and registry reference](https://github.com/ALTaleX531/OpenGlass/wiki/Configuration-and-registry-reference).
-
-GlassSettings пишет часть этих значений в `HKCU\Software\Microsoft\Windows\DWM` со страниц цвета, стекла и темы. Полный набор, типы и смысл смотрите по ссылке выше, а не в таблицах этого файла.
-
-### Popup: общие настройки и подразделы
-
-Два режима. Раздельный включается, когда параметры оформления уже есть хотя бы в одном из разделов `Menu`, `DropDown`, `ToolTip`.
-
-**Общие настройки.** Эффект, градиент, обводка, углы и анимация лежат в корне `HKCU\Software\StanislavKa\GlassPlatform`. Анимация — в `Animation`. Один набор действует на меню, выпадающие списки и подсказки. Разделы `Menu`, `DropDown` и `ToolTip` в этом режиме не заполняются.
-
-**Раздельные настройки.** Те же группы пишутся в `Menu`, `DropDown` и `ToolTip`. Анимация — в `{раздел}\Animation`.
-
-Группа в разделе перекрывает одноимённую группу в корне. Если в разделе группы нет, а в корне она есть, берётся корень. В интерфейсе это пометка «Задан общий параметр».
-
-| Группа | Свой набор в разделе, если есть хотя бы одно из значений |
-|--------|----------------------------------------------------------|
-| Эффект | `EffectType` |
-| Градиент | `DarkMode_GradientColor`, `LightMode_GradientColor` |
-| Обводка | `DarkMode_BorderColor`, `LightMode_BorderColor`, `NoBorderColor` |
-| Углы | `CornerType`, `EnableDropShadow` |
-| Анимация | любой параметр в `{раздел}\Animation` |
-
-Пункты меню, тень и фон иконок меню, цвет и отступы подсказки есть только в раздельном режиме: `Menu`, `Menu\Hot`, `Menu\DisabledHot`, `Menu\Focusing`, `Menu\Separator`, `ToolTip`.
-
-### Root: один набор и состояние окна
-
-`SeparateActiveInactive` в `Root`: `0` — без учёта состояния, `1` — по состоянию окна. Нет ключа — по состоянию, если в `Root\Inactive` уже есть параметры оформления.
-
-**Без учёта состояния.** Эффект, градиент, обводка и `GlassDrawThemeConstantAlpha` лежат в `Root` и применяются и к активному, и к неактивному окну.
-
-**По состоянию окна.** Эффект, градиент и обводка — в `Root\Active` и `Root\Inactive`. Нет своего значения в состоянии — берётся одноимённый параметр из `Root`. `GlassDrawThemeConstantAlpha` в этом режиме пишется в `Root\Active` и `Root\Inactive`.
-
-`NoBackdrop` и `CornerType` всегда в `Root`. В `Root\Active` и `Root\Inactive` углы не пишутся.
-
-Тот же набор эффекта, градиента, обводки, углов и анимации, что в таблицах ниже, ещё используется панелью задач: `Tray`, `Tray\Xaml` и `Tray\Xaml\Popup`, `Preview`, `Menu`, `Tooltip`. У соседнего окна XAML нет своего цвета — берётся значение из `Tray\Xaml`. Анимация раздела — в `{раздел}\Animation`.
-
-### Оформление
-
-| Параметр | Описание |
-|----------|----------|
-| `EffectType` | Вид фона. `0` отключить, `1` прозрачный (SWCA), `2` сплошная, `3` размытие, `4` классический акрил, `5` современный акрил, `6` акрил (DWM), `7` Mica, `8` Mica Alt. Отсутствие ключа — это не «отключить» |
-| `DarkMode_GradientColor` | Цвет фона в тёмной теме. Не применяется при `EffectType` 6–8 |
-| `LightMode_GradientColor` | То же для светлой темы |
-| `DarkMode_BorderColor` | Цвет обводки в тёмной теме. На Windows 11 при скруглённых углах альфа может игнорироваться |
-| `LightMode_BorderColor` | То же для светлой темы |
-| `NoBorderColor` | `1` — не задавать свой цвет обводки |
-| `CornerType` | Форма углов: `0` системные, `1` прямые, `2` крупное скругление, `3` мелкое. Для XAML-панели задач шкала длиннее, см. примечание 1. На `Root` пишется в сам раздел `Root` и только на Windows 11 |
-| `EnableDropShadow` | `1` — тень |
-
-### Анимация (`Animation`)
-
-| Параметр | Описание |
-|----------|----------|
-| `EnableFluentAnimation` | `1` — fluent-анимация раздела. В ползунках страницы не показывается |
-| `PopInStyle` | Стиль появления: `0` сдвиг вниз, `1` волна, `2` сдвиг вправо, `3` масштабирование. По умолчанию `0` |
-| `FadeOutTime` | Затухание, мс. По умолчанию 350 |
-| `PopInTime` | Появление, мс. По умолчанию 250 |
-| `FadeInTime` | Проявление, мс. По умолчанию 87 |
-| `StartRatio` | Начальный масштаб или сдвиг, 0–100 %. По умолчанию 50 |
-| `ImmediateInterrupting` | `1` — сразу прервать предыдущую анимацию. По умолчанию `0` |
-
-### Меню (`Menu`)
-
-| Параметр | Описание |
-|----------|----------|
-| `EnableCustomRendering` | `1` — своя отрисовка пунктов. Выключение стирает параметры видов пункта |
-| `NoSystemDropShadow` | `1` — без системной тени. По умолчанию `0` |
-| `EnableImmersiveStyle` | `1` — современный стиль меню. По умолчанию `1` |
-| `NoModernAppBackgroundColor` | `1` — без фона UWP-иконок. По умолчанию `1` |
-| `ColorTreatAsTransparent` | Цвет фона иконки, который вырезается от углов к центру. Наличие значения включает удаление |
-| `ColorTreatAsTransparentThreshold` | Насколько близкий цвет ещё считается тем же. По умолчанию 50 |
-
-Виды пункта — `Menu\Hot` (наведение), `Menu\DisabledHot` (наведение на неактивный пункт), `Menu\Focusing` (рамка клавиатурного фокуса), `Menu\Separator` (разделитель). Имена значений общие.
-
-| Параметр | Описание |
-|----------|----------|
-| `Disabled` | `1` — не рисовать этот вид. По умолчанию `0` |
-| `CornerRadius` | Скругление подложки или рамки. По умолчанию 8 |
-| `EnableThemeColorization` | `1` — цвет из акцента Windows вместо пикера |
-| `DarkMode_Color` | Цвет в тёмной теме |
-| `LightMode_Color` | Цвет в светлой теме |
-| `Width` | Толщина штриха у `Focusing` и `Separator`. 1000 ≈ 1 px. По умолчанию 1000 |
-| `DarkMode_ThemeColorizationType` | Строка типа цвета темы. По умолчанию `ImmersiveStartHoverBackground`; такое значение в реестр не пишется |
-| `LightMode_ThemeColorizationType` | То же для светлой темы |
-
-### Подсказки (`ToolTip`)
-
-Помимо общего оформления:
-
-| Параметр | Описание |
-|----------|----------|
-| `DarkMode_Color` | Цвет подсказки в тёмной теме. Заводской `0xFFFFFFFF`, пока ключ не записан |
-| `LightMode_Color` | Цвет в светлой теме. Заводской `0xFF1A1A1A` |
-| `MarginsType` | `0` добавить отступы, `1` заменить |
-| `Margins_cxLeftWidth` | Левый отступ. По умолчанию 6 |
-| `Margins_cxRightWidth` | Правый отступ. По умолчанию 6 |
-| `Margins_cyTopHeight` | Верхний отступ. По умолчанию 6 |
-| `Margins_cyBottomHeight` | Нижний отступ. По умолчанию 6 |
-
-### Окна (`Root`)
-
-| Параметр | Описание |
-|----------|----------|
-| `NoBackdrop` | `1` — не применять backdrop (переключатель «Сплошное стекло» выключен). Нет ключа — backdrop разрешён |
-| `SeparateActiveInactive` | `0` — один набор для активного и неактивного окна, `1` — раздельно (`Root\Active` и `Root\Inactive`). Нет ключа — раздельный режим, если в `Root\Inactive` уже есть параметры |
-| `CornerType` | Углы окна на Windows 11. Шкала как в таблице оформления |
-| `GlassDrawThemeConstantAlpha` | В `Root\Active` и `Root\Inactive`: непрозрачность DrawTheme, 0–255. Нет ключа — 255 |
-
-Удаление фона иконок — `Root\Control\Ribbon`, `ListView`, `TreeView`, `Toolbar`, `Button`, `Static`. В каждом разделе два значения, как у иконок меню: `ColorTreatAsTransparent` и `ColorTreatAsTransparentThreshold` (по умолчанию цвет `0xFFFFFFFF`, порог 50).
-
-### Панель задач (`Tray`)
-
-Общее оформление панели — в `Tray`. Путь XAML — в `Tray\Xaml` и в `Tray\Xaml\Popup`, `Preview`, `Menu`, `Tooltip`.
-
-| Параметр | Где | Описание |
-|----------|-----|----------|
-| `BorderDrawMode` | `Tray` | `0` — бордюр DWM, ненулевое — обводка XAML |
-| `SeparateZones` | `Tray\Xaml` | `1` — панель из отдельных групп |
-| `CornerTypeSchema` | `Tray\Xaml` | Служебная метка шкалы углов. Текущая схема — `3`. См. примечание 1 |
-| `CachedSystemFillArgb` | `Tray\Xaml` | Снимок системной заливки. Не настройка |
-| `CachedSystemStrokeArgb` | `Tray\Xaml` | Снимок системной обводки для «По умолчанию». Не настройка |
-
-### Текст
-
-В корне ключа, отдельно для тёмной и светлой темы. Нет значения или значение равно заводскому — ключ удаляется.
-
-| Параметр | Описание |
-|----------|----------|
-| `DarkMode_GlobalTextGlow` | Свечение текста, `REG_BINARY` 16 байт. См. примечание 2 |
-| `LightMode_GlobalTextGlow` | То же для светлой темы |
-| `GlassInkAlphaCapsule` | Профиль чернил текста, `REG_BINARY` 100 байт. См. примечание 3 |
-
-Системные шрифты страница «Текст» читает и пишет как `REG_BINARY` в `HKCU\Control Panel\Desktop\WindowMetrics`: `CaptionFont`, `SmCaptionFont`, `MenuFont`, `StatusFont`, `MessageFont`, `IconFont`.
-
-### Процессы и служебные разделы
-
-| Раздел | Описание |
-|--------|----------|
-| `AttachList` | Имя значения — имя exe. `DWORD`: `0` не внедрять, `1` только всплывающие окна, `2` полностью |
-| `BlockList` | Имя значения — имя exe. `DWORD` `1` — процесс в пользовательском списке блокировки. Встроенный список в реестр не пишется |
-| `DisabledList` | GlassSettings не редактирует и не включает в снимок настроек |
-| `Crashes\DumpFolder` | Строка: каталог минидампов. Если пусто, то же значение ищется в корне ключа, затем в `HKCU\Software\Glass\CrashGuard`. Иначе `%LOCALAPPDATA%\GlassPlatform\Crashes` |
-| `GlassSettings\MainWindowPlacement` | Положение окна GlassSettings, не параметр оформления |
-
-### Окно GlassSettings (`GlassSettings`)
-
-| Параметр | Описание |
-|----------|----------|
-| `EnableSystemFont` | `1` — системный шрифт интерфейса |
-| `AppTheme` | Тема окна: `0` как в системе, `1` светлая, `2` тёмная. `0` не хранится |
-| `WindowBackdrop` | Фон окна: `0` системный, `1` акрил, `2` Mica, `3` Mica Alt. `0` не хранится |
-| `WindowBusyOverlayMode` | Штора ожидания: `0` акрил, `1` затемнение. `0` не хранится |
-| `AppUiLanguage` | Строка BCP-47 (`ru-RU`, `en-US`). Нет значения — язык системы |
-| `UpdateCheckInterval` | Проверка обновлений: `0` каждый день, `1` неделю, `2` месяц, `3` никогда |
-| `ExecutableFilePickerLastPath` | Последняя папка выбора exe |
-| `LastAppliedThemeFilePath` | Последний применённый файл `.theme` |
-| `LastAppliedThemeAccentColor` | Акцент этой темы, база для «По умолчанию» на странице цветов |
-| `LastAppliedThemeDwmFingerprint` | Отпечаток DWM после применения темы; от него считается кнопка «Сохранить» |
-| `OpenGlassUpdateLastCheckUtc` | Время последней проверки обновления OpenGlass |
-| `OpenGlassUpdatePendingVersion` | Версия, которую можно поставить |
-| `OpenGlassUpdatePendingUrl` | Адрес этой версии |
-| `OpenGlassUpdateNoticeDismissedVersion` | Версия, для которой баннер уже закрыт |
-
-### Каталог установки
-
-| Ключ | Описание |
-|------|----------|
-| `HKCU\Software\GlassPlatform\InstallPath` и `HKCU\Software\Wow6432Node\GlassPlatform\InstallPath` | Каталог установки, который записывает установщик. Для x86 из 64-разрядного процесса читается ветка Wow6432Node |
-| `HKCU` и `HKLM` `\Software\StanislavKa\GlassPlatform\InstallPath` | Запасной путь, по которому GlassSettings ищет OpenGlass, если каталог установки не задан первым ключом |
-
-### Ключи Windows
-
-GlassSettings меняет их вместе с обоями, акцентом и темой. Это ключи системы, не ключ платформы. Улей — `HKCU`.
-
-| Ключ | Параметры |
-|------|-----------|
-| `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` | `AppsUseLightTheme`, `SystemUsesLightTheme` (`1` светлая тема), `EnableTransparency`, `ColorPrevalence` (`1` — акцент на заголовках и панели задач) |
-| `Software\Microsoft\Windows\CurrentVersion\Explorer\Accent` | `AccentColorMenu`, `StartColorMenu` — акцент меню |
-| `Software\Microsoft\Windows\CurrentVersion\Themes\History\Colors` | `ColorHistory0` … недавние акценты |
-| `Software\Microsoft\Windows\DWM` | `AccentColor`, `ColorPrevalence` — акцент Windows. Остальные значения DWM — параметры OpenGlass; их больше, чем в таблицах Glass, см. [справочник OpenGlass](https://github.com/ALTaleX531/OpenGlass/wiki/Configuration-and-registry-reference) |
-| `Control Panel\Desktop` | `Wallpaper`; `AutoColorization` (`1` — акцент с обоев); `WallpaperStyle` и `TileWallpaper` задают кадрирование, см. примечание 4 |
-| `Control Panel\Colors` | `Background` — цвет сплошного фона, строка `R G B` |
-| `Control Panel\Personalization\Desktop Slideshow` | `ImagesRootPath`, `Shuffle` (`1` — перемешать), `Interval` (мс: 60000, 600000, 1800000, 3600000, 21600000, 86400000) |
-| `Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers` | `BackgroundType`: `0` фото, `1` сплошной цвет, `2` слайд-шоу, `3` Spotlight. `GlassLastSlideshowFolder` — папка альбома. `GlassLastSlideshowKind`: `Folder` или `WindowsDesktopBackgrounds`. `SlideshowSourceDirectoriesSet` — служебный флаг |
-| `Software\Microsoft\Windows\CurrentVersion\DesktopSpotlight\Settings` | `EnabledState` — Spotlight включён |
-
-### Примечания
-
-1. **Углы XAML-панели.** `CornerType` в `Tray\Xaml` и соседних разделах: `0` системные, `1` прямые, `2` крупное, `3` мелкое, `4` увеличенное, `5` максимальное. `CornerTypeSchema` = `3` означает эту шкалу. Если метка схемы меньше 2, старое значение `4` (тогда это было максимальное скругление) переписывается в `5`.
-
-2. **`GlobalTextGlow`.** Четыре `DWORD` подряд: включено (`0`/`1`), радиус в тысячных долях (0–1000, заводской 300), цвет AARRGGBB, режим распространения (`0` только popup, `1` умеренно на окнах, `2` глобально).
-
-3. **`GlassInkAlphaCapsule`.** `DWORD` сигнатуры `GVT1` (`0x31545647`), режим (`0` авто, `1` один профиль, `2` два), зарезервированный `DWORD`, затем два профиля по 44 байта. Поля профиля, по порядку: гамма покрытия в тысячных, `PreserveClearTypeTint`, масштаб альфы в тысячных, усиление бахромы в тысячных, добавка альфы, целевая альфа смешения, уровень серого фона, смягчение бахромы в тысячных, псевдосвечение (`0`/`1`), его радиус в тысячных, его интенсивность. Часть старых полей интерфейс записывает нейтральными: сохранение ClearType `0`, оба масштаба `1000`, добавка альфы `0`, серый фон `0`.
-
-4. **Кадрирование обоев.** Пара (`WallpaperStyle`, `TileWallpaper`): заполнить `10`/`0`, вписать `6`/`0`, растянуть `2`/`0`, замостить `0`/`1`, по центру `0`/`0`, на несколько мониторов `22`/`0`.
-
-
-### SecureUxTheme: переключение и удаление
-
-GlassSetup устанавливает оригинальный MSI SecureUxTheme. Переключатель GlassSettings **включает/отключает только регистрацию IFEO/COM**, не удаляя файлы или MSI-продукт. Полное отключение уже загруженных хуков требует перезагрузки Windows. Удаление продукта выполняется через MSI/Windows «Установленные приложения»; перевод GlassUnins на оригинальный ProductCode ещё в работе.
-
-**Авторский MSI намеренно может оставлять постоянные файлы ThemeUiProxy и COM-перенаправления после удаления.** Сами по себе оставшиеся DLL не означают активный hook или установленный MSI. Settings позволяет снять оставшуюся регистрацию; один proxy без полного комплекта патчера не позволяет включить механизм. Автоматического ручного удаления этих файлов нет. Актуальные роли, ограничения и фактический каталог поиска MSI: [GlassSetup/README.md](GlassSetup/README.md).
+Облик частично вдохновлён [TranslucentFlyouts](https://github.com/ALTaleX531/TranslucentFlyouts). Установщик по желанию кладёт [OpenGlass](https://github.com/ALTaleX531/OpenGlass) в каталог Glass. Glass Platform продолжает BlackWindowManager. Совместная работа не поддерживается: ключ `Software\StanislavKa\BlackWindowManager` не читается и не пишется, значения из него сами не переносятся.
