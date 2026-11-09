@@ -60,6 +60,7 @@
 #include "resource.h"
 #include "InstallEngine.h"
 #include <SecureUxThemeInventory.h>
+#include "InstallSupport/GlassOpenGlassRelease.h"
 #include "InstallLog.h"
 
 using Microsoft::WRL::ComPtr;
@@ -1959,8 +1960,15 @@ private:
                 if(targetVersion.empty()||VersionOlder(targetVersion,remoteVersion))targetVersion=remoteVersion;
                 if(rep&&rep->installed&&!rep->damaged&&!rep->installedPackageVersion.empty()&&VersionOlder(rep->installedPackageVersion,targetVersion))condition=GlassProducts::ProductCondition::UpdateAvailable;
             }}
-            const bool hasUpdate=rep&&rep->installed&&!rep->installedPackageVersion.empty()&&
-                !targetVersion.empty()&&VersionOlder(rep->installedPackageVersion,targetVersion);
+            const bool openGlass=wcscmp(id,L"openglass")==0;
+            // A local MSI's DLL version belongs only to that exact offer, not a
+            // newer remote MSI whose payload has not been inspected yet.
+            const std::wstring targetPayloadVersion=rep&&rep->sourceVerified&&targetVersion==rep->targetVersion?rep->targetPayloadVersion:L"";
+            const bool hasUpdate=rep&&rep->installed&&(openGlass?
+                GlassOpenGlassRelease::PayloadUpdateAvailable(rep->installedPayloadVersion,targetPayloadVersion):
+                (!rep->installedPackageVersion.empty()&&!targetVersion.empty()&&VersionOlder(rep->installedPackageVersion,targetVersion)));
+            if(openGlass&&rep&&rep->installed&&!rep->damaged)
+                condition=hasUpdate?GlassProducts::ProductCondition::UpdateAvailable:GlassProducts::ProductCondition::Healthy;
             const bool applySupported=!targetVersion.empty() && (!rep||!rep->installed||
                 (!rep->installedPackageVersion.empty()&&!VersionOlder(targetVersion,rep->installedPackageVersion)));
             const auto action=GlassProducts::ActionForCondition(checked,condition);
@@ -2007,7 +2015,7 @@ private:
                 L",\"installedPayloadVersion\":"+JsStringLiteral(rep?rep->installedPayloadVersion:L"")+
                 L",\"remotePayloadVersion\":"+JsStringLiteral(rep?rep->remotePayloadVersion:L"")+
                 L",\"upstreamUpdateAvailable\":"+((rep&&!rep->installedPayloadVersion.empty()&&!rep->remotePayloadVersion.empty()&&VersionOlder(rep->installedPayloadVersion,rep->remotePayloadVersion))?L"true":L"false")+
-                L",\"targetPayloadVersion\":"+JsStringLiteral(rep&&targetVersion==rep->targetVersion?rep->targetPayloadVersion:L"")+
+                L",\"targetPayloadVersion\":"+JsStringLiteral(targetPayloadVersion)+
                 L",\"targetVersion\":"+JsStringLiteral(targetVersion)+
                 L",\"remoteVersion\":"+JsStringLiteral(remoteVersion)+
                 L",\"localPackageVersion\":"+JsStringLiteral(rep&&rep->sourceVerified?rep->targetVersion:L"")+

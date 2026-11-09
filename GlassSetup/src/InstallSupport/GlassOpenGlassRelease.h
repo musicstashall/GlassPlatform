@@ -4,6 +4,14 @@
 #include <string>
 
 namespace GlassOpenGlassRelease {
+// Product update indication compares DLL payloads, never the Glass MSI wrapper.
+inline bool PayloadUpdateAvailable(const std::wstring& installed,const std::wstring& offered) {
+    for(const auto* text:{&installed,&offered})for(wchar_t c:*text)if(static_cast<unsigned>(c)>127)return false;
+    GlassPackageRules::Version current{},target{};
+    return GlassPackageRules::ParseVersion(std::string(installed.begin(),installed.end()),current)&&
+        GlassPackageRules::ParseVersion(std::string(offered.begin(),offered.end()),target)&&
+        GlassPackageRules::Compare(current,target)<0;
+}
 // Metadata only: release tags do not authorize installing a different MSI or EXE.
 inline bool Parse(const std::string& text,std::string& version) noexcept {
     version.clear();

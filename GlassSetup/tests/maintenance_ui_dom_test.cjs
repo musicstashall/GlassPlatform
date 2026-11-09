@@ -297,6 +297,23 @@ for(const lang of ['ru','en'])for(const installed of [false,true]){
 }
 receive({data:{type:'state',locale:'ru',page:'components',components:[{id:'x64',title:'Platform',installed:false,targetVersion:'2.0.0',operation:'install',applySupported:true}]}});
 assert.equal(d.querySelector('#product-x64').closest('.c-card').querySelectorAll('.c-src .src-bit').length,0,'unknown origins are not invented from target version');
+// OpenGlass product badges must not inherit the Glass MSI wrapper update.
+for(const lang of ['ru','en'])for(const [current,target,newer] of [
+ ['3.0.2.3749','3.0.2.3749',false],['3.0.2','3.0.2.0',false],
+ ['3.0.2.3750','3.0.2.3749',false],['3.0.2.9','3.0.2.10',true],
+ ['3.0.2.3749','',false],['','3.0.2.3749',false],['bad','3.0.2.3749',false]])for(const checked of [false,true]){
+ const og={id:'openglass',title:'OpenGlass',installed:true,checked,operation:'update',updateAvailable:true,
+  installedPackageVersion:'2.0.0.98',targetVersion:'2.0.0.99',installedPayloadVersion:current,targetPayloadVersion:target,
+  remotePayloadVersion:'3.0.3.0',upstreamUpdateAvailable:true,applySupported:true,removeSupported:true};
+ receive({data:{type:'state',appMode:'setup',locale:lang,page:'components',components:[og]}});
+ const card=d.querySelector('#product-openglass').closest('.c-card');
+ assert.equal(card.classList.contains('has-offer'),newer&&!checked);
+ assert.equal(card.querySelector('.c-meta').textContent.includes('→'),newer&&checked);
+ if(!newer){assert.doesNotMatch(card.querySelector('.c-chip').textContent,/обновится|will update|Доступно|Available/);if(checked)assert.match(d.querySelector('#components-plan-items').textContent,/Переустановить|Reinstall/);}
+}
+// Equal payload does not suppress genuine damage/repair information.
+receive({data:{type:'state',appMode:'setup',locale:'ru',page:'components',components:[{id:'openglass',title:'OpenGlass',installed:true,broken:true,checked:false,operation:'update',updateAvailable:true,installedPayloadVersion:'3.0.2.3749',targetPayloadVersion:'3.0.2.3749',targetVersion:'2.0.0.99'}]}});
+assert.ok(d.querySelector('#product-openglass').closest('.c-card').classList.contains('is-broken'));
 for(const lang of ['ru','en']) {
  receive({data:{type:'state',locale:lang,page:'error',ui:{},errorReason:'SecureUxTheme removal failed'}});
  assert.equal(d.querySelector('#error-title').textContent,lang==='ru'?'Не удалось выполнить операции':'Operations could not be completed');

@@ -1737,3 +1737,30 @@ programmatic click не закрывают; click/auxclick и footer закры�
 drag click исключён; минимум 1000 мс); actual native click observer mock
 (client/child/nonclient/footer, foreign window/drag/keyboard/command exclusions).
 Resources/diff checks PASS. Windows runtime validation remains outstanding.
+
+
+### OpenGlass: версия payload отдельно от MSI-оболочки
+
+Скриншот image-20 выявил рассогласование: отображается OpenGlass.dll 3.0.2.3749,
+но жёлтый статус формировался по более новой версии Glass MSI. Теперь признак
+обновления продукта OpenGlass определяется **только** численным сравнением
+фактического установленного DLL и DLL в проверенном предлагаемом MSI. Равные
+версии (включая 3-компонентную и эквивалентную 4-компонентную), более старая
+или неизвестная версия предлагаемого DLL не дают статус обновления. Более
+новая версия оболочки сама по себе не является обновлением OpenGlass.
+
+Inspection, native JSON badge/state/action и HTML facts/recommendations согласованы.
+Для remote MSI без проверенного payload не используется версия DLL из другого,
+локального MSI. Upstream release metadata остаётся отдельной строкой «на сервере»;
+она не разрешает установку upstream EXE и не подменяет доступный MSI payload.
+Явная переустановка остаётся доступна; повреждение сохраняет статус восстановления.
+MSI identity/version проверки acquisition и выполнения не изменены: новая оболочка
+по-прежнему обслуживается штатным MSI, но не выдаётся за новую версию OpenGlass.
+
+Регрессии: production DOM RU/EN — новая оболочка/тот же DLL, selected/unselected,
+численное сравнение .9/.10, older/unknown/malformed DLL, настоящее повреждение;
+C++ helper tests — равенство, нормализация, порядок, неизвестная/невалидная версия.
+Windows/MSVC/WiX/runtime проверка здесь не выполнялась.
+
+Итог проверок этой правки: 83 mock scripts — 73 PASS / 10 прежних известных
+FAIL; все 4 production DOM suites, resources, SUT build graph и diff-check PASS.

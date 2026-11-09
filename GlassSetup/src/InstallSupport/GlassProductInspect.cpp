@@ -520,6 +520,10 @@ Report Run(const Inputs& in)
     }
     if(report.og.installed&&rootsOk&&!roots.openGlass.empty())
         report.og.installedPayloadVersion=OpenGlassDllVersion(roots.openGlass+L"\\OpenGlass.dll");
+    // Package releases may update installer plumbing without changing OpenGlass.
+    // Keep MSI version authority for acquisition/execution, not the product badge.
+    report.og.updateAvailable=report.og.installed&&report.og.sourceVerified&&GlassOpenGlassRelease::PayloadUpdateAvailable(
+        report.og.installedPayloadVersion,report.og.targetPayloadVersion);
     if(in.inspectSources&&!cancel.load()) {
         std::string text,version;std::wstring error;
         if(GlassReleaseClient::Get(L"https://api.github.com/repos/ALTaleX531/OpenGlass/releases/latest",INVALID_HANDLE_VALUE,&text,1024*1024,cancel,error)&&

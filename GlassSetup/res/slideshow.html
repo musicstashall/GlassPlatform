@@ -1175,9 +1175,16 @@ function bindComponentWorkspace(){
 // of one intent, not clones with the same action/status content (concept C).
 function componentSize(bytes){return new Intl.NumberFormat(locale==='ru'?'ru':'en',{minimumFractionDigits:1,maximumFractionDigits:1}).format(bytes/1048576)+(locale==='ru'?' МБ':' MB');}
 function componentMsiVersion(item){if(item.id==='openglass'&&typeof item.installedPayloadVersion==='string')return item.installedPayloadVersion||'—';return typeof item.installedPackageVersion==='string'?(item.installedPackageVersion||'—'):(item.installedVersion||'—');}
+function openGlassPayloadUpdate(item){
+ const parse=value=>{if(typeof value!=='string'||!/^\d{1,10}\.\d{1,10}\.\d{1,10}(?:\.\d{1,10})?$/.test(value))return null;const parts=value.split('.').map(Number);if(parts.some(x=>x>4294967295))return null;while(parts.length<4)parts.push(0);return parts;};
+ const current=parse(item.installedPayloadVersion),target=parse(item.targetPayloadVersion);
+ if(!current||!target)return false;
+ for(let i=0;i<4;i++){if(current[i]!==target[i])return current[i]<target[i];}
+ return false;
+}
 function componentCardFacts(item,input){
  const selected=input.checked,remove=selected&&(hostState.appMode==='unins'||input.dataset.intent==='remove');
- const newer=!!(item.installed&&(item.operation==='update'||item.updateAvailable===true)&&item.targetVersion);
+ const newer=!!(item.installed&&(item.id==='openglass'?openGlassPayloadUpdate(item):(item.operation==='update'||item.updateAvailable===true)&&item.targetVersion));
  // A warning/conflict tone is not evidence of damaged installed payloads.
  const broken=!!(item.installed&&item.broken===true);
  const interactive=!input.disabled&&!hostState.componentsLoading;
@@ -1367,7 +1374,7 @@ function syncComponentShelves(){
   }
  }
 }
-function productActionLabel(item){return hostState.appMode==='unins'?(locale==='ru'?'Удалить':'Remove'):item.operation==='update'?(locale==='ru'?'Обновить':'Update'):item.operation==='repair'?(locale==='ru'?'Переустановить':'Reinstall'):(locale==='ru'?'Установить':'Install');}
+function productActionLabel(item){if(item.id==='openglass'&&item.installed&&hostState.appMode!=='unins')return openGlassPayloadUpdate(item)?(locale==='ru'?'Обновить':'Update'):(locale==='ru'?'Переустановить':'Reinstall');return hostState.appMode==='unins'?(locale==='ru'?'Удалить':'Remove'):item.operation==='update'?(locale==='ru'?'Обновить':'Update'):item.operation==='repair'?(locale==='ru'?'Переустановить':'Reinstall'):(locale==='ru'?'Установить':'Install');}
 function updateComponentsStatus(){
  const inputs=[...document.querySelectorAll('#components-panel .c-card input.comp-check')],selected=inputs.filter(x=>x.checked),available=inputs.filter(x=>!x.disabled&&(x.checked||(hostState.components||[]).find(item=>item.id===x.dataset.component)?.applySupported!==false)),all=available.length>0&&available.every(x=>x.checked),ru=locale==='ru';
  for(const [id,title] of [['available',ru?'Доступно':'Available'],['installed',ru?'Установлено':'Installed']])document.getElementById(id+'-title').textContent=title;

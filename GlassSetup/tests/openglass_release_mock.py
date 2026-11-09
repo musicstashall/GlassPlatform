@@ -20,6 +20,12 @@ bool GetFileVersionInfoW(const wchar_t*,int,DWORD,void*){return read;}
 bool VerQueryValueW(void*,const wchar_t*,void** out,UINT* n){*out=&info;*n=shortInfo?1:sizeof(info);return query;}
 // READER
 int main(){
+ for(const auto& pair:std::vector<std::pair<std::wstring,std::wstring>>{
+  {L"3.0.2.3749",L"3.0.2.3749"},{L"3.0.2",L"3.0.2.0"},{L"3.0.2.3750",L"3.0.2.3749"},
+  {L"",L"3.0.2.3749"},{L"3.0.2.3749",L""},{L"oops",L"3.0.2.3749"},{L"3.0.2.4294967296",L"3.0.3.0"}})
+  assert(!GlassOpenGlassRelease::PayloadUpdateAvailable(pair.first,pair.second));
+ assert(GlassOpenGlassRelease::PayloadUpdateAvailable(L"3.0.2.9",L"3.0.2.10"));
+ assert(GlassOpenGlassRelease::PayloadUpdateAvailable(L"3.0.2.3749",L"3.0.3.0"));
  std::string version;
  assert(GlassOpenGlassRelease::Parse(R"({"tag_name":"v3.0.2.3749","draft":false,"prerelease":false})",version));assert(version=="3.0.2.3749");
  for(auto text:{"{}","[]","oops",R"({"tag_name":"v3.x"})",R"({"tag_name":"v3.0","draft":true})",R"({"tag_name":"v3.0","prerelease":true})"}){assert(!GlassOpenGlassRelease::Parse(text,version));assert(version.empty());}
