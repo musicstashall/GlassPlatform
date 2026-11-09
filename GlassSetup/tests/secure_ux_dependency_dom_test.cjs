@@ -23,13 +23,16 @@ function dragSut(){const target=d.querySelector('[data-component-drop="available
 for(const lang of ['ru','en']){
  send([settings,sut],lang);let before=messages.length;card('secureUxTheme').querySelector('.comp-remove').click();
  assert.equal(messages.length,before);assert.equal(input('secureUxTheme').checked,false);assert.ok(d.querySelector('#components-installed-grid').contains(card('secureUxTheme')));assert.ok(note().classList.contains('warn'));
- assert.match(note().textContent,/GlassSettings x64/);advance(5000);assert.ok(note().classList.contains('show'),'no activity: no timer expiry');for(const type of ['pointermove','pointerdown','keydown','wheel'])activity(type);advance(5000);assert.ok(note().classList.contains('show'),'movement, press, keyboard and wheel are not clicks');d.dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:0}));advance(0);assert.ok(note().classList.contains('show'),'keyboard/programmatic click is ignored');receive({data:{type:'component-notice-click'}});advance(0);assert.ok(!note().classList.contains('show'),'native footer click dismisses HTML notice');
+ assert.match(note().textContent,/GlassSettings x64/);advance(5000);assert.ok(note().classList.contains('show'),'no activity: no timer expiry');for(const type of ['pointermove','pointerdown','keydown'])activity(type);advance(5000);assert.ok(note().classList.contains('show'),'movement, press and keyboard are not clicks');d.dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:0}));advance(0);assert.ok(note().classList.contains('show'),'keyboard/programmatic click is ignored');receive({data:{type:'component-notice-click'}});advance(0);assert.ok(!note().classList.contains('show'),'native footer click dismisses HTML notice');
  // The browser's trailing click after pointerup is part of the same drag,
  // not the NEXT user click; it must not arm an automatic one-second expiry.
  dragSut();card('secureUxTheme').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));advance(5000);assert.ok(note().classList.contains('show'));
  activity('auxclick');advance(0);assert.ok(!note().classList.contains('show'));
  // Real drag repeats the refusal and starts a fresh one-second minimum.
  dragSut();assert.equal(messages.length,before);assert.ok(note().classList.contains('warn'));activity('auxclick');advance(999);assert.ok(note().classList.contains('show'));advance(1);assert.ok(!note().classList.contains('show'));
+ // Wheel/trackpad has detail=0, but is activity; minimum still applies.
+ dragSut();d.dispatchEvent(new w.WheelEvent('wheel',{bubbles:true,deltaY:80}));advance(999);assert.ok(note().classList.contains('show'));advance(1);assert.ok(!note().classList.contains('show'));
+ dragSut();advance(1500);receive({data:{type:'component-notice-scroll'}});advance(0);assert.ok(!note().classList.contains('show'),'native scroll bridge');
  // Wrong-architecture Settings does not satisfy the prerequisite.
  send([{...settings,id:'settings32',title:'GlassSettings x86',checked:true},settings,sut],lang);before=messages.length;card('secureUxTheme').querySelector('.comp-remove').click();assert.equal(messages.length,before);
  // No auto selection; explicitly update Settings, then remove SUT.
@@ -57,4 +60,4 @@ for(const lang of ['ru','en']){
  card('secureUxTheme').querySelector('.comp-remove').click();assert.equal(d.querySelector('#components-plan-notices').hidden,true);
 }
 assert.deepEqual(errors,[]);dom.window.close();
-console.log('PASS: production dependency UI: RU/EN click/drag refusal, OS architecture, explicit prerequisite/order/undo, no-Settings red risk + pinned Details, pointer clicks only/minimum 1000ms');
+console.log('PASS: production dependency UI: RU/EN click/drag refusal, OS architecture, explicit prerequisite/order/undo, no-Settings red risk + pinned Details, clicks + scrolling/minimum 1000ms');

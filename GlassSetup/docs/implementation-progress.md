@@ -1764,3 +1764,16 @@ Windows/MSVC/WiX/runtime проверка здесь не выполнялась
 
 Итог проверок этой правки: 83 mock scripts — 73 PASS / 10 прежних известных
 FAIL; все 4 production DOM suites, resources, SUT build graph и diff-check PASS.
+
+
+### Уточнение: прокрутка тоже закрывает уведомления
+
+По последнему уточнению пользователя к кликам добавлена прокрутка. HTML
+учитывает wheel (мышь/тачпад, включая detail=0 и горизонтальную прокрутку);
+Native fallback — WM_MOUSEWHEEL/WM_MOUSEHWHEEL/WM_VSCROLL/WM_HSCROLL.
+Прокрутка вне WebView передаётся в HTML через component-notice-scroll.
+Минимум 1000 мс сохранён; движение мыши и клавиатура остаются исключены.
+Предыдущее правило «только клики» выше описывает историческое состояние.
+Регрессии: реальный HTML RU/EN — wheel до минимума и native scroll после
+минимума; actual native observer — вертикальная/горизонтальная прокрутка,
+дочерние контролы, отсутствие дублирования WebView/чужих окон.

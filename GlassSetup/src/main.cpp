@@ -1192,6 +1192,12 @@ public:
     void ObserveComponentNoticeClick(const MSG& message) noexcept {
         if(message.hwnd!=window&&!IsChild(window,message.hwnd))return;
         const UINT msg=message.message;
+        if(msg==WM_MOUSEWHEEL||msg==WM_MOUSEHWHEEL||msg==WM_VSCROLL||msg==WM_HSCROLL) {
+            if(!nativeComponentNotice_.empty())nativeComponentNoticeActivity_=true;
+            if(webReady_&&web_&&message.hwnd!=webHost_&&!IsChild(webHost_,message.hwnd))
+                (void)web_->PostWebMessageAsJson(L"{\"type\":\"component-notice-scroll\"}");
+            return;
+        }
         const bool down=msg==WM_LBUTTONDOWN||msg==WM_RBUTTONDOWN||msg==WM_MBUTTONDOWN||msg==WM_XBUTTONDOWN||
             msg==WM_NCLBUTTONDOWN||msg==WM_NCRBUTTONDOWN||msg==WM_NCMBUTTONDOWN||msg==WM_NCXBUTTONDOWN;
         const bool up=msg==WM_LBUTTONUP||msg==WM_RBUTTONUP||msg==WM_MBUTTONUP||msg==WM_XBUTTONUP||

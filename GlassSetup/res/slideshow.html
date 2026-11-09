@@ -989,15 +989,15 @@ function componentGestureNote(text,warn=false,untilActivity=false){
  if(!untilActivity)componentNoteTimer=setTimeout(()=>{note.className='component-toast';},3600);
 }
 function dismissComponentNoticeOnActivity(event){
- // detail=0 is keyboard/programmatic activation, not a pointer click.
- if(!event||event.detail<=0||!componentNoticeWaitsForActivity)return;
+ // Wheel/trackpad scrolling counts even with detail=0; keyboard clicks do not.
+ if(!event||(event.type!=='wheel'&&event.detail<=0)||!componentNoticeWaitsForActivity)return;
  // A drag's trailing click belongs to the gesture that created the notice.
  if(event.type==='click'&&(componentSuppressPointerClick||performance.now()<componentSuppressClickUntil)&&componentPanel().contains(event.target))return;
  componentNoticeWaitsForActivity=false;
  componentNoteTimer=setTimeout(()=>{document.getElementById('components-gesture-status').className='component-toast';},Math.max(0,componentNoticeUntil-Date.now()));
 }
 // Capture sees the triggering event BEFORE its handler creates a new notice.
-for(const type of ['click','auxclick'])document.addEventListener(type,dismissComponentNoticeOnActivity,{capture:true,passive:true});
+for(const type of ['click','auxclick','wheel'])document.addEventListener(type,dismissComponentNoticeOnActivity,{capture:true,passive:true});
 function applyComponentPanels(){
  const panel=componentPanel(),a=componentSides.visible.available,p=componentSides.visible.plan;
  const lane=panel.querySelector('.c-lane.installed');
@@ -1516,6 +1516,6 @@ setLocale(params.get('lang')||window.GLASSPLATFORM_LOCALE||'ru');
 
 window.GlassSlideshow={setLocale,goTo,setPaused,setPlatformVersion,setMode,setCompletionText,setErrorText,setBackground(color){if(CSS.supports('color',color))document.documentElement.style.setProperty('--background',color)},setInterval(ms){if(Number.isFinite(ms)&&ms>=1500){interval=ms;schedule()}},getState(){return{index,locale,paused,interval,mode}}};
 // WebView2 host can send JSON objects, without executing scripts.
-if(window.chrome&&window.chrome.webview){window.chrome.webview.addEventListener('message',event=>{const m=event.data;if(!m||typeof m!=='object')return;if(m.type==='component-notice-click'){dismissComponentNoticeOnActivity({detail:1});return;}if(m.type==='init'||m.type==='state'){hostState={...hostState,...m,ui:{...(hostState.ui||{}),...(m.ui||{})}};if(m.locale&&m.locale!==locale)setLocale(m.locale);if(typeof m.platformVersion==='string')setPlatformVersion(m.platformVersion);if(typeof m.page==='string')setMode(m.page);syncModeText();}});const accept=document.getElementById('license-accept');accept.addEventListener('change',()=>window.chrome.webview.postMessage('accept:'+(accept.checked?'1':'0')));window.chrome.webview.postMessage('ready');}
+if(window.chrome&&window.chrome.webview){window.chrome.webview.addEventListener('message',event=>{const m=event.data;if(!m||typeof m!=='object')return;if(m.type==='component-notice-click'){dismissComponentNoticeOnActivity({detail:1});return;}if(m.type==='component-notice-scroll'){dismissComponentNoticeOnActivity({type:'wheel',detail:0});return;}if(m.type==='init'||m.type==='state'){hostState={...hostState,...m,ui:{...(hostState.ui||{}),...(m.ui||{})}};if(m.locale&&m.locale!==locale)setLocale(m.locale);if(typeof m.platformVersion==='string')setPlatformVersion(m.platformVersion);if(typeof m.page==='string')setMode(m.page);syncModeText();}});const accept=document.getElementById('license-accept');accept.addEventListener('change',()=>window.chrome.webview.postMessage('accept:'+(accept.checked?'1':'0')));window.chrome.webview.postMessage('ready');}
 Promise.all([...document.images].map(img=>img.decode?img.decode().catch(()=>{}):Promise.resolve())).then(()=>{assetsReady=true;const pending=pendingMode;pendingMode='';if(pending)setMode(pending);else schedule();});
 </script></body></html>
