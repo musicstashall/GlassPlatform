@@ -3,6 +3,15 @@ from pathlib import Path
 import subprocess, shutil, tempfile
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/main.cpp').read_text()
+# Healthy/active SUT must not receive a generic warning merely because removal
+# prepares stock selectors. Runtime/reboot labels and worker behavior stay intact.
+start=source.index('        const bool sutRequiresSettings=false;')
+end=source.index('    std::wstring LaunchCardsJson()',start)
+card=source[start:end]
+assert 'JsStringLiteral(L"")' in card and 'sutRemovalNotice' not in card
+assert 'Перед удалением загруженного SecureUxTheme' not in source
+assert 'Text(sutStateId)' in card
+
 def function(token):
     a=source.index(token);b=source.index('{',a);depth=0
     for i in range(b,len(source)):

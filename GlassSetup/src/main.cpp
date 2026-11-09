@@ -1976,13 +1976,8 @@ private:
             (sutState==GlassInstallUtil::SecureUxThemeState::Active?IDS_COMP_SUT_STATE_ACTIVE:
             (sutChecked?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF)));
         const bool sutRequiresSettings=false;
-        std::wstring sutRemovalNotice=GlassProductUiPolicy::WarningText(preview.rows[4].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit());
-        if(sutState==GlassInstallUtil::SecureUxThemeState::Active || sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending){
-            if(!sutRemovalNotice.empty())sutRemovalNotice+=L"\n";
-            sutRemovalNotice+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                L"Перед удалением загруженного SecureUxTheme будет применён штатный визуальный стиль. Ссылки на тему и стиль будут заменены для всех профилей; обои, звуки и файлы тем сохраняются. Другие сеансы завершат переключение после перезагрузки.":
-                L"Before removing loaded SecureUxTheme, the stock visual style will be applied. Theme/style selectors will be reset for all profiles; wallpapers, sounds and theme files are retained. Other sessions finish switching after restart.";
-        }
+        // Runtime activity is status, not a product warning. Stock-style reset
+        // is automatic removal preparation and must not turn a healthy card yellow.
         std::wstring sutReasons=L"[";
         bool firstSutReason=true;
         if(sutUpdate){sutReasons+=JsStringLiteral(Text(IDS_INSPECT_VERSION));firstSutReason=false;}
@@ -1994,7 +1989,7 @@ private:
         if(sutRequiresSettings){if(!firstSutReason)sutReasons+=L",";sutReasons+=JsStringLiteral(Text(IDS_COMP_SUT_REASON_DEPENDENCY));}
         sutReasons+=L"]";
         json+=L",{\"id\":\"secureUxTheme\",\"title\":"+JsStringLiteral(Text(IDS_COMP_SUT_TITLE))+
-            L",\"warning\":"+JsStringLiteral(sutRemovalNotice)+
+            L",\"warning\":"+JsStringLiteral(L"")+
             L",\"description\":"+JsStringLiteral(Text(IDS_COMP_SUT_DESC))+
             L",\"badge\":"+JsStringLiteral(Text(sutBadge))+L",\"badgeTone\":"+JsStringLiteral(sutTone)+
             L",\"installed\":"+(inspect_.secureUxTheme.installed?L"true":L"false")+

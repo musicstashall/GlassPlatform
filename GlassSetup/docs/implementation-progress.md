@@ -1374,3 +1374,17 @@ write failure, inaccessible profile, create/readback errors, changed inventory a
 selectors, stock aero/aerolite paths). ASan/UBSan enabled. Worker, plan, IPC,
 profile-inventory, resources, build-graph and package/product/release runners pass.
 No Windows/MSVC/WiX build or real all-profile removal was run here.
+
+### SecureUxTheme card: no stock-style preparation warning
+
+Removed the automatic stock-style/profile-reset notice from SecureUxTheme's
+product-card warning payload. Active runtime is not a warning and must not make
+an otherwise healthy installed card yellow or offer that warning popup. The SUT
+card now emits an empty generic warning; runtime activity/pending-restart labels,
+inspection condition, removal blocking diagnostics and actual worker stock-style
+preparation/reboot handling are unchanged. Other products' plan warnings are not
+modified. Added a source regression assertion to the native IPC harness.
+
+Validation: IPC/card source assertions, actual removal worker, all-profile style
+harness and resource invariants PASS; git diff --check PASS. No Windows build or
+browser/Windows visual acceptance performed for this change.
