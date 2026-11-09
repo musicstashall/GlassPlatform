@@ -1200,12 +1200,12 @@ function paintComponentCard(card,item,input,shelf){
   card.setAttribute('aria-label',item.title+': '+statusText);
  if(available){
   card.classList.add(f.availableNeeded?'active':'idle');if(f.broken)card.classList.add('is-broken');else if(f.newer&&!f.selected)card.classList.add('has-newer');
-  if(f.newer){text(current);line.append(' → ');text(target,true);}else {if(item.targetVersionKind==='release'&&target)line.append(ru?'релиз ':'release ');text(target,f.selected&&!f.remove);}
+  if(f.newer){text(current);line.append(' → ');text(target,true);}else {text(target,f.selected&&!f.remove);}
   if(suffix)line.append(suffix);
  }else if(f.remove){
   card.classList.add('pending-remove');text(current);if(suffix)line.append(suffix);chipClass='remove';chipText=ru?'Будет удалено':'Will be removed';icon='trash';
  }else if(!item.installed&&f.selected){
-  card.classList.add('pending-install');if(item.targetVersionKind==='release'&&target)line.append(ru?'релиз ':'release ');text(target);if(suffix)line.append(suffix);chipClass='pending';chipText=ru?'Будет установлено':'Will be installed';icon='download';
+  card.classList.add('pending-install');text(target);if(suffix)line.append(suffix);chipClass='pending';chipText=ru?'Будет установлено':'Will be installed';icon='download';
  }else if(f.selected){
   card.classList.add('is-activated');text(current);
   if(f.newer){line.append(' → ');text(target);chipText=(ru?'обновится до ':'will update to ')+target;icon='update';}
@@ -1224,20 +1224,14 @@ function paintComponentCard(card,item,input,shelf){
  if(available){
   marks.className='c-src';
   const source=(kind,label,version)=>{if(marks.childNodes.length){const sep=document.createElement('span');sep.className='src-sep';sep.textContent='·';marks.append(sep);}const bit=document.createElement('span');bit.className='src-bit '+kind;bit.append(document.createElement('i'),document.createTextNode(label+' '+version));marks.append(bit);};
-  if(item.installed&&!f.remove)source('local',ru?'локально':'local',current);
-  // Original vendor release tags are explicitly labelled, never disguised as
-  // a verified MSI ProductVersion. Local-first target mirrors acquisition.
-  if(item.id==='secureUxTheme'){
-   if(item.localPackageVersion)source('local',ru?'пакет':'package',item.localPackageVersion);
-   if(item.releaseTag)source('remote',ru?'релиз':'release',item.remoteVersion||item.releaseTag);
-  }else if(item.id==='openglass'){
-   if(item.targetPayloadVersion)source('local',ru?'пакет':'package',item.targetPayloadVersion);
-   if(item.remotePayloadVersion){source('remote',ru?'на сервере':'on server',item.remotePayloadVersion);marks.lastElementChild.title=ru?'Версия официального релиза OpenGlass':'Official OpenGlass release version';if(item.upstreamUpdateAvailable)marks.lastElementChild.style.fontWeight='700';}
-  }else{
-   // A verified adjacent MSI isn't evidence of a release-server asset.
-   if(item.remoteVersion&&item.remoteVersion===target&&(!item.installed||f.newer))source('remote',ru?'на сервере':'on server',item.remoteVersion);
-   else if(!item.installed&&target)source('local',ru?'пакет':'package',target);
-  }
+  // Exactly two source categories for every product, in server/local order.
+  // Vendor release metadata stays separate internally from MSI identity.
+  const server=item.id==='openglass'?item.remotePayloadVersion:
+   item.id==='secureUxTheme'?(item.remoteVersion||item.releaseTag):item.remoteVersion;
+  const local=item.installed?(current==='—'?'':current):
+   item.id==='openglass'?item.targetPayloadVersion:item.localPackageVersion;
+  if(server){source('remote',ru?'на сервере':'on server',server);if(item.id==='openglass'&&item.upstreamUpdateAvailable)marks.lastElementChild.style.fontWeight='700';}
+  if(local)source('local',ru?'локально':'local',local);
   action.disabled=input.disabled;action.classList.remove('repair','is-on','danger');
   action.replaceChildren();
   action.append(svg('arrowRight'));

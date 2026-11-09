@@ -1548,3 +1548,23 @@ Actual-source OpenGlass parser/PE-reader tests cover numeric tags, drafts,
 prereleases, malformed responses and version-read failures. Production DOM test
 checks independent local/package/server versions. Inspector-loop, resources and
 diff checks PASS. No Windows/MSVC build or real Windows network/UI validation.
+
+### Uniform Available-card version sources: server, then local
+
+Removed the third “package” category from source rows. All six product cards now
+use one renderer: “на сервере” / “on server” first, then “локально” / “local”.
+SecureUxTheme no longer labels its server source “релиз”; removed the release
+prefix from its card version line as well. Underlying release/MSI types remain
+separate internally. OpenGlass keeps independent upstream release metadata.
+
+When installed, local means the installed version (actual DLL version for
+OpenGlass); otherwise it means a known local MSI offer (payload version for
+OpenGlass). Do not invent local availability from targetVersion: generic product
+JSON now includes the independently discovered localPackageVersion. Known server
+versions are displayed regardless of whether that source is the selected target.
+Unknown sources are omitted, and no local/server/package triplet is emitted.
+
+Validation: production DOM covers all six products, RU/EN, installed and absent,
+exact two-source order/labels, distinct installed/local-offer/server versions and
+unknown-origin omission. Managed-removal DOM, resource invariants and diff check
+PASS. No Windows build or visual Windows acceptance performed.

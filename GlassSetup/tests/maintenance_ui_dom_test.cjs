@@ -85,9 +85,9 @@ for(const local of [true,false]){
  const sutOffer={id:'secureUxTheme',title:'SecureUxTheme',installed:false,checked:false,operation:'install',targetVersion:local?'4.0.0':'4.1.0',targetVersionKind:local?'msi':'release',localPackageVersion:local?'4.0.0':'',remoteVersion:'4.1.0',releaseTag:'v4.1.0'};
  receive({data:{type:'state',appMode:'setup',locale:'ru',page:'components',components:[sutOffer]}});
  const card=d.querySelector('#product-secureUxTheme').closest('.c-card');
- assert.equal(card.querySelector('.comp-version-line').textContent,local?'4.0.0':'релиз 4.1.0');
- assert.match(card.querySelector('.c-src').textContent,/релиз 4.1.0/);
- if(local)assert.match(card.querySelector('.c-src').textContent,/пакет 4.0.0/);
+ assert.equal(card.querySelector('.comp-version-line').textContent,local?'4.0.0':'4.1.0');
+ assert.match(card.querySelector('.c-src').textContent,/на сервере 4.1.0/);
+ if(local)assert.match(card.querySelector('.c-src').textContent,/локально 4.0.0/);
  else assert.doesNotMatch(card.querySelector('.c-src').textContent,/пакет/);
 }
 // English state must regenerate decision labels even when product metadata is unchanged.
@@ -280,5 +280,22 @@ d.querySelector('#product-x64').checked=false;d.querySelector('#product-x64').di
 assert.match(d.querySelector('#components-select-all').textContent,/Принять все рекомендации/);
 assert.equal(d.querySelector('#components-select-all').disabled,false);
 assert.equal(errors.length,0);
+// All six product rows share exactly server/local source order in RU and EN.
+for(const lang of ['ru','en'])for(const installed of [false,true]){
+ const sourceRows=rows.map(r=>({...r,installed,checked:false,disabled:false,locked:false,applySupported:true,
+  operation:installed?'repair':'install',installedPackageVersion:'1.0.0',installedPayloadVersion:r.id==='openglass'?'1.0.0':undefined,
+  targetVersion:'2.0.0',targetPayloadVersion:r.id==='openglass'?'2.0.0':undefined,
+  localPackageVersion:'2.0.0',remoteVersion:'3.0.0',remotePayloadVersion:r.id==='openglass'?'3.0.0':undefined,releaseTag:'v3.0.0'}));
+ receive({data:{type:'state',locale:lang,page:'components',appMode:'setup',components:sourceRows}});
+ for(const row of sourceRows){
+  const card=installed?d.querySelector('[data-catalog-alias="'+row.id+'"]'):d.querySelector('#product-'+row.id).closest('.c-card');
+  const bits=[...card.querySelectorAll('.c-src .src-bit')];assert.equal(bits.length,2);
+  assert.equal(bits[0].textContent,(lang==='ru'?'на сервере ':'on server ')+'3.0.0');
+  assert.equal(bits[1].textContent,(lang==='ru'?'локально ':'local ')+(installed?'1.0.0':'2.0.0'));
+  assert.doesNotMatch(card.querySelector('.c-src').textContent,/пакет|релиз|package|release/i);
+ }
+}
+receive({data:{type:'state',locale:'ru',page:'components',components:[{id:'x64',title:'Platform',installed:false,targetVersion:'2.0.0',operation:'install',applySupported:true}]}});
+assert.equal(d.querySelector('#product-x64').closest('.c-card').querySelectorAll('.c-src .src-bit').length,0,'unknown origins are not invented from target version');
 dom.window.close();
 process.stdout.write('PASS: separate catalogue/composition content, planned catalogue idle/needed exclusion; actual production DOM: six rows, real per-architecture IPC, version metadata, live plan/counts, warnings/Escape, RU/EN, setup/uninstall titles and disabled-action gate\n');

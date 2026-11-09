@@ -1938,6 +1938,7 @@ private:
                 L",\"targetPayloadVersion\":"+JsStringLiteral(rep&&targetVersion==rep->targetVersion?rep->targetPayloadVersion:L"")+
                 L",\"targetVersion\":"+JsStringLiteral(targetVersion)+
                 L",\"remoteVersion\":"+JsStringLiteral(remoteVersion)+
+                L",\"localPackageVersion\":"+JsStringLiteral(rep&&rep->sourceVerified?rep->targetVersion:L"")+
                 L",\"packageSize\":"+std::to_wstring(packageSize)+
                 L",\"operation\":"+JsStringLiteral(removing?L"remove":condition==GlassProducts::ProductCondition::NotInstalled?L"install":condition==GlassProducts::ProductCondition::UpdateAvailable?L"update":L"repair")+
                 L",\"badgeTone\":"+JsStringLiteral(ComponentBadgeTone(condition))+
