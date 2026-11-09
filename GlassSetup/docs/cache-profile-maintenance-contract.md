@@ -428,3 +428,43 @@ Mock исполняет реальные методы: absent theme keys не с
 смешанные existing/absent профили, минимум прав, ошибки open/set/readback,
 проверка существующих stock-ссылок и one-shot commit. Windows/MSVC/WiX acceptance
 этой правки не выполнялся. Исходные три журнала Log23 удалены после анализа.
+
+
+### Log24: SUT removal успешен; post-commit repair-source warning
+
+Session20261109_163708: GS64/32 установлены exit0; stock helper exit0;
+пользователь подтвердил успешное переключение и удаление. Vendor SUT MSI3010,
+after-state4/restart1 — требуется перезагрузка. Это успешная основная операция,
+не rollback и не сбой старта компонентов.
+
+Затем Phase C LaunchSelectedProducts вызвала maintenance Publish, потому что
+в плане были package apply GS (rows0x24). Реализация берёт acquired GS sources,
+но для неизменённых продуктов переносит sources из прежнего Current. Setup и
+Unins были скопированы/extracted в Staging; hardened stage активирован как Current.
+Регистрация repair sources для Current/Glass-x64.msi и Glass-x86.msi отказала:
+ValidateRepairSourceDigest, Policy13, no verified distribution/installed-cache
+binding; legacy source is not registered automatically. Это отказ политики
+проверки, не access denied. Для повторно использованных legacy MSI нет принятой
+проверяемой привязки distribution SHA256 + installed LocalPackage SHA256.
+Одна подпись/версия или PackageCode не заменяет эту привязку.
+
+Код RegisterRepairSource сначала сопоставляет version/PackageCode регистрации,
+затем проверяет PublishedDigestMatches, и только затем меняет MSI SourceList.
+В Log24 source registration отказала после activate-current; предыдущий комплект
+не освобождён из-за ошибки. Поэтому общее сообщение «оболочка сохранена не
+полностью» не означает, что Setup/Unins не скопированы или что Current вообще
+не появился. Работоспособность launcher отдельно этим журналом не проверена.
+Не заявляем точное отсутствие sidecar: binding может отсутствовать/не совпадать.
+
+На запрос пользователя новая runtime политика НЕ внедряется. Общие ограничения
+актуальный controller + только необходимые старые sources ранее записаны, но
+детальная публикация оболочки при частичном составе и legacy migration требуют
+отдельного согласования. Предложение (не утверждено): отделить состояние controller
+от покрытия offline repair по фактически установленным products; publish latest
+controller независимо от изменения платформы, сохранять только доверенные exact
+sources оставшихся продуктов; unknown legacy coverage не превращать в доверенный
+source и явно показывать ограничение конкретного продукта, отдельно от ошибки
+сохранения оболочки. Ограничить Previous/recovery retention подтверждёнными pins,
+не держать полные исторические комплекты постоянно. Конкретная migration/GC
+реализация, UI статусы и границы atomicity этим обсуждением не утверждены.
+Исходные Log24 и три MSI-лога удалены после фиксации анализа. Runtime code не менялся.
