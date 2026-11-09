@@ -45,6 +45,17 @@ inline bool SafePath(const std::wstring& path) {
     }
     return true;
 }
+// Test namespace membership without requesting write access to a SID's root.
+// An open error alone is not proof that an HKU key exists (or is absent).
+inline LONG LoadedSidPresence(const std::wstring& sid) {
+    for(DWORD index=0;;++index) {
+        wchar_t name[256]{};DWORD length=256;
+        const LONG status=RegEnumKeyExW(HKEY_USERS,index,name,&length,nullptr,nullptr,nullptr,nullptr);
+        if(status==ERROR_NO_MORE_ITEMS)return ERROR_FILE_NOT_FOUND;
+        if(status!=ERROR_SUCCESS)return status;
+        if(!_wcsicmp(name,sid.c_str()))return ERROR_SUCCESS;
+    }
+}
 inline bool OtherUserSessions(std::wstring& detail) {
     DWORD own=0; if(!ProcessIdToSessionId(GetCurrentProcessId(),&own)){detail=L"Cannot inspect current session";return true;}
     PWTS_SESSION_INFOW sessions=nullptr;DWORD count=0;
@@ -116,7 +127,14 @@ public:
             if(sid.rfind(L"S-1-5-21-",0)!=0&&sid.rfind(L"S-1-12-1-",0)!=0)continue;
             Profile profile;profile.sid=sid;
             if(loadedUsersOnly_) {
-                const LONG loaded=RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ|KEY_WRITE,&profile.hive);
+                LONG loaded=LoadedSidPresence(sid);
+                if(loaded==ERROR_SUCCESS) {
+                    loaded=RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ,&profile.hive);
+                    // A profile can unload between enumeration and open. Never
+                    // reinterpret access denied as absent without re-enumeration.
+                    if(loaded!=ERROR_SUCCESS&&LoadedSidPresence(sid)==ERROR_FILE_NOT_FOUND)
+                        loaded=ERROR_FILE_NOT_FOUND;
+                }
                 if(loaded==ERROR_FILE_NOT_FOUND) {
                     HKEY metadata=nullptr;std::wstring path;
                     if(RegOpenKeyExW(list,name,0,KEY_READ,&metadata)==ERROR_SUCCESS){ReadString(metadata,L"ProfileImagePath",path);RegCloseKey(metadata);}
@@ -124,7 +142,10 @@ public:
                     GlassInstallLog::LineFormat(L"SecureUxTheme profile skipped: HKEY_USERS\\%s missing; profile=%s; no offline hive load",sid.c_str(),path.c_str());
                     continue;
                 }
-                if(loaded!=ERROR_SUCCESS){detail=sid+L": cannot access existing HKEY_USERS key: "+std::to_wstring(loaded);ok=false;break;}
+                if(loaded!=ERROR_SUCCESS){
+                    GlassInstallLog::LineFormat(L"SecureUxTheme HKU inspection refused: SID=%s status=%ld; namespace enumeration/read-only open failed; no offline hive load",sid.c_str(),loaded);
+                    detail=sid+L": cannot enumerate/open loaded HKEY_USERS profile for reading: "+std::to_wstring(loaded);ok=false;break;
+                }
                 PSID binary=nullptr;
                 if(!ConvertStringSidToSidW(name,&binary)){detail=L"Invalid loaded profile SID";ok=false;break;}
                 LocalFree(binary);
@@ -190,8 +211,7 @@ public:
             if(sid.rfind(L"S-1-5-21-",0)!=0&&sid.rfind(L"S-1-12-1-",0)!=0)continue;
             bool skipped=false;
             if(loadedUsersOnly_)for(const auto& entry:skippedProfiles_)if(entry.first==sid){
-                HKEY now=nullptr;const LONG status=RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ,&now);
-                if(now)RegCloseKey(now);
+                const LONG status=LoadedSidPresence(sid);
                 if(status!=ERROR_FILE_NOT_FOUND){detail=sid+L": previously missing HKEY_USERS key appeared or became inaccessible; rebuild the plan";return false;}
                 skipped=true;break;
             }

@@ -156,3 +156,37 @@ callback и строгая проверка имени mapping сохранен�
 ожидается строка stock-style stages с результатами COM/force/read, но видимое
 переключение требует Windows acceptance. Исходные три журнала Log21 удалены
 после фиксации анализа.
+
+
+### Log22: rollback loop и неоднозначный HKU open
+
+Session20261109_161821 повторно увидела installed GS MSI .101 / offered .103
+и те же Native hashes, что Log21. Это согласуется с завершённым откатом Log21,
+не с непрерывным успешным сохранением .103. Обе GS опять установились exit0
+в16:19:13.803 и16:19:20.856; затем revalidation остановилась на SID1008:
+RegOpenKeyEx HKU KEY_READ|KEY_WRITE вернул5. Style helper **не запускался**,
+vendor SUT MSI также не запускался. В16:19:31.731 прежняя установка восстановлена.
+Поэтому следующий запуск снова может законно предложить .103: отменять rollback
+или скрывать действительно откатившуюся зависимость ради устранения badge нельзя.
+
+Log22 не содержит namespace enumeration HKU и не доказывает, был ли1008 реально
+перечисляемым loaded key с запрещённым чтением, отсутствующим ключом с отказом
+доступа на open либо лишь корнем с запрещённой записью. Нельзя утверждать, что
+это обязательно missing hive, или blanket-skip любой ERROR_ACCESS_DENIED.
+
+Loaded-users-only inventory теперь сначала перечисляет имена непосредственно
+HKU (read-only, без открытия SID). Отсутствующий SID пропускается с тем же finish
+warning; неизвестный результат перечисления блокирует удаление. Перечисляемый
+SID открывается только KEY_READ: изменения делаются в отдельно открываемых
+дочерних theme/selector ключах, не в корне hive. Если ключ исчез между enum/open,
+повторная enum должна подтвердить отсутствие до skip. Если он всё ещё существует
+и недоступен для чтения — блокировка сохранена. Revalidation skipped SID также
+использует namespace enumeration, а не open с неоднозначным результатом.
+Не используются account deletion lookup, offline mount, unload, ACL rewrite,
+privilege bypass или удаление профиля. General cleanup offline inventory не изменён.
+
+Фактический profile_inventory mock проверяет absent+open-denied, present+denied,
+root write denied/read allowed, enum failure, unload race, появление skipped SID
+и повторную проверку; ASan/UBSan PASS. Это исправление inventory/probe, не доказанное
+исправление рендеринга: последняя Windows-проверка вообще не достигла theme apply.
+Три исходных журнала Log22 удалены после сохранения выводов.

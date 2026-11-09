@@ -22,6 +22,7 @@ prefix=r'''
 #include <string>
 #include <vector>
 #include <utility>
+#define _wcsicmp wcscasecmp
 using DWORD=std::uint32_t;using BYTE=unsigned char;using LONG=int;using HKEY=void*;using PSID=void*;
 HKEY HKEY_LOCAL_MACHINE=reinterpret_cast<HKEY>(1),HKEY_USERS=reinterpret_cast<HKEY>(2);
 constexpr LONG ERROR_SUCCESS=0,ERROR_BADDB=1009,ERROR_FILE_NOT_FOUND=2,ERROR_NO_MORE_ITEMS=259;
@@ -31,20 +32,21 @@ struct Entry{std::wstring sid,path;bool loaded=false;};
 std::vector<Entry> entries;
 struct Handle{int kind,index;};std::map<HKEY,Handle> handles;std::uintptr_t serial=10;
 std::map<std::wstring,DWORD> attributes;
-bool loadBadDb=false;
+bool loadBadDb=false,hkuEnumFail=false,rootWriteDenied=false,unloadOnOpen=false;
 bool enumFail=false,openListFail=false,openEntryFail=false,openHiveFail=false,loadFail=false,invalidSid=false,badPathValue=false,otherSession=false;
 int malformed=0,changeOnCheck=0;
 int offlineLoads=0,cleanChecks=0,cleanWrites=0;int failCheckAt=0,failWriteAt=0;
 HKEY create(int kind,int index){HKEY h=reinterpret_cast<HKEY>(++serial);handles[h]={kind,index};return h;}
 LONG RegCloseKey(HKEY h){assert(handles.erase(h)==1);return 0;}
-LONG RegOpenKeyExW(HKEY root,const wchar_t* name,DWORD,DWORD,HKEY* out){
+LONG RegOpenKeyExW(HKEY root,const wchar_t* name,DWORD,DWORD access,HKEY* out){
  if(root==HKEY_LOCAL_MACHINE){if(openListFail)return 5;*out=create(0,0);return 0;}
  for(std::size_t i=0;i<entries.size();++i)if(entries[i].sid==name){
-  if(root==HKEY_USERS){if(openHiveFail)return 5;if(!entries[i].loaded)return 2;*out=create(2,i);return 0;}
+  if(root==HKEY_USERS){if(unloadOnOpen){entries[i].loaded=false;return 5;}if(rootWriteDenied&&(access&KEY_WRITE))return 5;if(openHiveFail)return 5;if(!entries[i].loaded)return 2;*out=create(2,i);return 0;}
   assert(handles.at(root).kind==0);if(openEntryFail)return 5;*out=create(1,i);return 0;
  }return 2;
 }
 LONG RegEnumKeyExW(HKEY key,DWORD index,wchar_t* name,DWORD* size,void*,void*,void*,void*){
+ if(key==HKEY_USERS){if(hkuEnumFail)return 5;DWORD n=0;for(const auto& e:entries)if(e.loaded){if(n++==index){assert(e.sid.size()<*size);std::wcscpy(name,e.sid.c_str());*size=e.sid.size();return 0;}}return ERROR_NO_MORE_ITEMS;}
  assert(handles.at(key).kind==0);if(enumFail)return 5;if(index>=entries.size())return ERROR_NO_MORE_ITEMS;
  assert(entries[index].sid.size()<*size);std::wcscpy(name,entries[index].sid.c_str());*size=entries[index].sid.size();return 0;
 }
@@ -77,14 +79,14 @@ bool IsDesktopProfile(const std::wstring&){return false;}
 prefix+=r'namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}'
 profile=s[s.index('struct Profile {'):s.index('inline bool ReadString(')]
 methods='\n'.join(function(token) for token in ('bool OpenAll(', 'bool VerifyInventory(', 'bool PreflightCleanup(', 'bool Cleanup('))
-body=prefix+profile+function('inline bool ReadString(')+function('inline bool SafePath(')+'''\nclass Inventory {
+body=prefix+profile+function('inline bool ReadString(')+function('inline bool SafePath(')+function('inline LONG LoadedSidPresence(')+'''\nclass Inventory {
  std::vector<Profile> profiles_;bool loadedUsersOnly_=false;std::vector<std::pair<std::wstring,std::wstring>> skippedProfiles_;bool removalStylePrepared_=false,removalStyleCommitted_=false;bool cleanupPrepared_=false;bool savedThemeRegistryFallback_=false;
  public:
  const std::vector<Profile>& Profiles() const {return profiles_;}
  const auto& SkippedLoadedProfiles() const{return skippedProfiles_;}
 '''+methods+'\n};\n'
 main=r'''
-void reset(){loadBadDb=false;assert(handles.empty());entries={{L"S-1-5-21-111",L"C:\\Users\\A"},{L"S-1-12-1-222",L"C:\\Users\\B"}};attributes.clear();enumFail=openListFail=openEntryFail=openHiveFail=loadFail=invalidSid=badPathValue=otherSession=false;offlineLoads=cleanChecks=cleanWrites=failCheckAt=failWriteAt=malformed=changeOnCheck=0;themeChecks=themeCommits=failThemeCheck=failThemeCommit=0;}
+void reset(){hkuEnumFail=rootWriteDenied=unloadOnOpen=false;loadBadDb=false;assert(handles.empty());entries={{L"S-1-5-21-111",L"C:\\Users\\A"},{L"S-1-12-1-222",L"C:\\Users\\B"}};attributes.clear();enumFail=openListFail=openEntryFail=openHiveFail=loadFail=invalidSid=badPathValue=otherSession=false;offlineLoads=cleanChecks=cleanWrites=failCheckAt=failWriteAt=malformed=changeOnCheck=0;themeChecks=themeCommits=failThemeCheck=failThemeCommit=0;}
 int main(){
  std::wstring orphanDetail;
  reset();{loadBadDb=true;entries[0].loaded=true;Inventory i;assert(i.OpenAll(orphanDetail,true));
@@ -93,7 +95,13 @@ int main(){
   assert(i.VerifyInventory(orphanDetail));entries[1].loaded=true;assert(!i.VerifyInventory(orphanDetail));}
  reset();{loadFail=true;Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.Profiles().empty()&&i.SkippedLoadedProfiles().size()==2&&offlineLoads==0);assert(i.VerifyInventory(orphanDetail));}
  reset();{loadFail=true;Inventory i;assert(!i.OpenAll(orphanDetail));} // General cleanup still opens offline hives.
- reset();{openHiveFail=true;Inventory i;assert(!i.OpenAll(orphanDetail,true));} // Access denied is not an absent key.
+ reset();{openHiveFail=true;entries[0].loaded=true;Inventory i;assert(!i.OpenAll(orphanDetail,true));} // Access denied is not an absent key.
+ reset();{openHiveFail=true;Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.SkippedLoadedProfiles().size()==2&&offlineLoads==0);assert(i.VerifyInventory(orphanDetail));} // Absent even if an attempted open would return access denied.
+ reset();{rootWriteDenied=true;entries[0].loaded=true;Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.Profiles().size()==1&&i.VerifyInventory(orphanDetail));}
+ reset();{hkuEnumFail=true;Inventory i;assert(!i.OpenAll(orphanDetail,true));assert(i.Profiles().empty()&&offlineLoads==0);}
+ reset();{unloadOnOpen=true;entries[0].loaded=true;Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.SkippedLoadedProfiles().size()==2&&offlineLoads==0);assert(i.VerifyInventory(orphanDetail));}
+ reset();{Inventory i;assert(i.OpenAll(orphanDetail,true));hkuEnumFail=true;assert(!i.VerifyInventory(orphanDetail));}
+
  reset();{entries[0].loaded=true;attributes[L"C:\\Users\\A\\NTUSER.DAT"]=INVALID_FILE_ATTRIBUTES;Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.VerifyInventory(orphanDetail));assert(offlineLoads==0);} // Loaded registry needs no NTUSER file access.
  reset();{entries[1].sid+=L".bak";Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.SkippedLoadedProfiles().size()==2&&offlineLoads==0);}
 
