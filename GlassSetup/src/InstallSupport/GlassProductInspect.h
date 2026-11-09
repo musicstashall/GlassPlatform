@@ -31,6 +31,10 @@ struct ProductReport {
     bool damaged = false;
     bool sourceVerified = false;
     bool integrityKnown = false;
+    // Dependency freshness, NOT integrity against the installed baseline.
+    // Same ProductVersion may contain a rebuilt Native helper.
+    bool nativeSourceCompared = false;
+    bool nativeSourceDiffers = false;
     std::wstring targetVersion;
     // MSI ProductVersion only. Never replace either field with a PE/bundle version.
     std::wstring installedVersion; // Compatibility alias for old UI consumers.

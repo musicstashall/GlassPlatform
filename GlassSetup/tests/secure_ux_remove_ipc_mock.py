@@ -49,7 +49,7 @@ struct Wizard {
  struct {std::array<std::optional<Asset>,5> products;}releaseCatalog_;
 
  std::atomic_bool inspectReady_{true};std::mutex inspectMutex_;
- struct {struct Settings {bool installed=true,sourceVerified=true,damaged=false;std::wstring installedPackageVersion=L"2.0.0",targetVersion=L"2.0.0";}settings64,settings32;struct {bool installed=true;}secureUxTheme;std::wstring officialSecureUxThemeCode=L"official";}inspect_;
+ struct {struct Settings {bool installed=true,sourceVerified=true,damaged=false,nativeSourceDiffers=false;std::wstring installedPackageVersion=L"2.0.0",targetVersion=L"2.0.0";}settings64,settings32;struct {bool installed=true;}secureUxTheme;std::wstring officialSecureUxThemeCode=L"official";}inspect_;
  GlassInstallUtil::SecureUxThemeState secureUxThemeState_=GlassInstallUtil::SecureUxThemeState::Inactive;
  std::wstring secureUxRemovalCode_;bool maintenanceMode_=false;
 // DEPENDENCY
@@ -63,6 +63,11 @@ struct Wizard {
  }
 };
 int main(){
+ {Wizard w;w.selection_.independentSettings=true;w.inspect_.settings64.nativeSourceDiffers=true;
+  assert(w.SecureUxRemovalNeedsSettingsUpdateLocked());w.Receive(L"component:secureUxTheme:remove");assert(!w.selection_.secureUxThemeRemove);
+  w.selection_.settings64=true;w.Receive(L"component:secureUxTheme:remove");assert(w.selection_.secureUxThemeRemove);
+ }
+
  {Wizard w;w.selection_.independentSettings=true;w.inspect_.settings64.targetVersion=L"3.0.0";
   assert(w.SecureUxRemovalNeedsSettingsUpdateLocked());w.Receive(L"component:secureUxTheme:remove");assert(!w.selection_.secureUxThemeRemove);
   w.selection_.settings32=true;assert(!w.SecureUxRemovalDependencySatisfiedLocked());

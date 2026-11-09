@@ -59,5 +59,13 @@ for(const lang of ['ru','en']){
  send([{...settings,installed:false,checked:true,operation:'install'},{...sut,removalDependencyRequired:false,removalWithoutSettings:true}],lang);
  card('secureUxTheme').querySelector('.comp-remove').click();assert.equal(d.querySelector('#components-plan-notices').hidden,true);
 }
+for(const lang of ['ru','en']){
+ send([{...settings,targetVersion:settings.installedVersion,nativeSourceDiffers:true,recommended:true,operation:'repair'},sut],lang);
+ const before=messages.length;card('secureUxTheme').querySelector('.comp-remove').click();assert.equal(messages.length,before);
+ assert.ok(card('settings64').classList.contains('has-offer'));assert.match(card('settings64').querySelector('.c-chip').textContent,/Native/);
+ assert.doesNotMatch(card('settings64').querySelector('.c-meta').textContent,/→/,'same MSI version is not a version update');
+ card('settings64').querySelector('.comp-decision').click();card('secureUxTheme').querySelector('.comp-remove').click();
+ assert.equal(messages.at(-1),'component:secureUxTheme:remove');
+}
 assert.deepEqual(errors,[]);dom.window.close();
 console.log('PASS: production dependency UI: RU/EN click/drag refusal, OS architecture, explicit prerequisite/order/undo, no-Settings red risk + pinned Details, clicks + scrolling/minimum 1000ms');

@@ -280,6 +280,34 @@ using MsiFileHashBuffer = std::remove_pointer_t<decltype(ThirdParameter(&MsiGetF
     return memcmp(bytes + sizeof(MsiFileHashBuffer) - 16, expected, sizeof(expected)) == 0;
 }
 
+// Compare only Native's bytes against a verified OFFER, independently of the
+// installed-baseline integrity check. Equal MSI ProductVersion is not equal DLL.
+void CompareNativeWithOffer(const std::wstring& offer,const std::wstring& installed,
+    bool& compared,bool& differs) {
+    compared=false;differs=false;
+    MSIHANDLE database=0;
+    if(MsiOpenDatabaseW(offer.c_str(),MSIDBOPEN_READONLY,&database)!=ERROR_SUCCESS)return;
+    std::vector<FileCheck> files;
+    const bool enumerated=EnumProductFiles(database,files);MsiCloseHandle(database);
+    if(!enumerated)return;
+    const FileCheck* native=nullptr;
+    for(const auto& file:files)if(!_wcsicmp(file.fileName.c_str(),L"GlassSettings.Native.dll")) {
+        if(native)return; // ambiguous package metadata cannot establish identity
+        native=&file;
+    }
+    if(!native||!native->hasHash)return;
+    MsiFileHashBuffer hash{};hash.dwFileHashInfoSize=sizeof(hash);
+    const UINT status=MsiGetFileHashW(installed.c_str(),0,&hash);
+    if(status!=ERROR_SUCCESS) {
+        GlassInstallLog::LineFormat(L"Native offer comparison: unreadable (%u): %s",status,installed.c_str());return;
+    }
+    const auto* actual=reinterpret_cast<const BYTE*>(&hash)+sizeof(hash)-16;
+    compared=true;differs=memcmp(actual,native->hash,16)!=0;
+    DWORD words[4]{};memcpy(words,actual,sizeof(words));
+    GlassInstallLog::LineFormat(L"Native offer comparison: differs=%d installed=%s MSI=%s MsiHash128=%08lX-%08lX-%08lX-%08lX offered=%08lX-%08lX-%08lX-%08lX",
+        differs?1:0,installed.c_str(),offer.c_str(),words[0],words[1],words[2],words[3],native->hash[0],native->hash[1],native->hash[2],native->hash[3]);
+}
+
 // Windows Installer strips cached signatures/cabinets. Trust its protected
 // cache and exact registered identity, not the version of a replacement MSI.
 bool InstalledBaselineMatches(const std::wstring& path,const wchar_t* code) noexcept {
@@ -506,6 +534,15 @@ Report Run(const Inputs& in)
             if(MsiOpenDatabaseW(offerPath.c_str(),MSIDBOPEN_READONLY,&db)==ERROR_SUCCESS) {
                 job.rep->targetPayloadVersion=QueryFileVersion(db,L"OpenGlass.dll");MsiCloseHandle(db);
             }
+        }
+        if(job.rep->installed&&job.rep->sourceVerified&&!offerPath.empty()&&rootsOk&&
+            (job.product==GlassPackageCatalog::Product::Settings64||job.product==GlassPackageCatalog::Product::Settings32)) {
+            const auto& root=job.product==GlassPackageCatalog::Product::Settings64?roots.x64:roots.x86;
+            if(!root.empty())CompareNativeWithOffer(offerPath,root+L"\\GlassSettings\\GlassSettings.Native.dll",
+                job.rep->nativeSourceCompared,job.rep->nativeSourceDiffers);
+            GlassInstallLog::LineFormat(L"Native dependency freshness: product=%s compared=%d differs=%d installedMSI=%s offeredMSI=%s",
+                job.code,job.rep->nativeSourceCompared?1:0,job.rep->nativeSourceDiffers?1:0,
+                job.rep->installedPackageVersion.c_str(),job.rep->targetVersion.c_str());
         }
         if(!job.rep->installed)continue;
         // Integrity always uses the installed package, never a same-version

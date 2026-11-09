@@ -20,9 +20,13 @@ using MSIHANDLE=unsigned;
 constexpr unsigned ERROR_SUCCESS=0,MSIDBOPEN_READONLY=0;
 int fetches=0,workspaces=0,prepares=0,cleanups=0;
 bool baseline=true,context=true;
+bool rootsOk=true;
+struct Roots {std::wstring x64=L"root64",x86=L"root32";} roots;
+namespace GlassInstallLog {template<class... T> void LineFormat(const wchar_t*,T...) {}}
+void CompareNativeWithOffer(const std::wstring&,const std::wstring&,bool& compared,bool& differs){compared=true;differs=false;}
 std::set<std::wstring> installed;
 std::vector<std::wstring> checked;
-struct ProductReport {bool installed=false,integrityKnown=false,sourceVerified=false,updateAvailable=false;
+struct ProductReport {bool installed=false,integrityKnown=false,sourceVerified=false,updateAvailable=false,nativeSourceCompared=false,nativeSourceDiffers=false;
  std::wstring targetVersion,installedVersion,installedPackageVersion,targetPayloadVersion;int unavailable=0;};
 struct Report {ProductReport x64,x86,settings64,settings32,og;};
 struct Inputs {bool inspectSources=true;const std::atomic_bool* cancelled=nullptr;};
@@ -74,7 +78,7 @@ int main(){
  {Reset();installed={L"p64",L"old64"};Report r;r.x64.installed=true;Inputs in;in.inspectSources=false;Inspect(in,r);
   assert(checked==std::vector<std::wstring>{L"p64"});}
  {Reset();installed={L"s32"};Report r;r.settings32.installed=true;Inputs in;Inspect(in,r);
-  assert(fetches==1&&workspaces==0&&prepares==5&&cleanups==0&&r.settings32.integrityKnown);
+  assert(fetches==1&&workspaces==0&&prepares==5&&cleanups==0&&r.settings32.integrityKnown&&r.settings32.nativeSourceCompared&&!r.settings32.nativeSourceDiffers);
   assert(r.og.targetPayloadVersion==L"1.5.0"&&r.og.targetVersion==L"2.0.0");
   assert(r.x64.targetPayloadVersion.empty());}
  for(bool unsafe:{false,true}){

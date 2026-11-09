@@ -1844,3 +1844,44 @@ GlassSettings/docs/stock-theme-maintenance.md. Нужна Windows runtime про
 resources/build graph/diff PASS. Actual-source tests требуют GetCurrentTheme →
 SetCurrentTheme(applyNow=1) до fonts/readback и broadcasts до teardown; ошибки
 индекса/force HRESULT блокируют success. Реальный внешний вид на Windows не проверен.
+
+
+### Log19: проверка изменившегося Native при той же версии MSI
+
+Log19 (20261109_145021) — vendor-only removal: rows0x0, glassSettings0,
+Settings не обновлялся. Выполнен установленный Native x64, exit0; оригинальный
+MSI SUT завершился3010, послеоперационное состояние4/reboot pending. Отсутствующие
+HKU1008/1011/1012 пропущены как требуется. Пользователь сообщает, что активный
+визуальный стиль не переключился. В логах нет fingerprint/version исполняемой
+Native DLL и stage results, поэтому нельзя доказать ни наличие последнего
+force-apply исправления, ни точную причину отсутствия видимого сброса.
+
+Обнаружен пробел доставки action dependency: ProductVersion не идентифицирует
+пересобранный Native внутри MSI с той же версией (здесь Setup2.0.0.0100).
+Inspection теперь отдельно сравнивает установленный GlassSettings.Native.dll с
+MsiFileHash для этого файла из **проверенного предлагаемого MSI**. Учитывается
+правильный dwFileHashInfoSize; ошибка хеширования/отсутствующие или неоднозначные
+метаданные означают unknown, не equality. Это сравнение свежести зависимости,
+не переопределение integrity baseline старого установленного продукта.
+
+При подтверждённом отличии OS-native Native требуется явно запланированная
+переустановка/обновление соответствующего GlassSettings перед удалением SUT,
+даже если ProductVersion тот же. Карточка сообщает «Native изменён · переустановить»,
+без выдуманной стрелки обновления между одинаковыми версиями; попадает в needed
+и рекомендации. Зависимость остаётся action-specific, не выбирается автоматически.
+Неустановленный GlassSettings сохраняет прежнее manual-risk исключение.
+
+В журнал добавлены compared/differs, ProductVersion обоих MSI и фактические/
+предлагаемые MsiHash128. Это MSI content hash, **не SHA-256** и не самостоятельная
+проверка доверия: подпись предлагаемого MSI и проверки installed helper сохранены.
+Недоступное сравнение не заявляется доказательством совпадения. Remote MSI без
+локально проверенного содержимого пока обслуживается по version policy.
+Алгоритм переключения темы по одному Log19 повторно не менялся; visible Windows
+acceptance по-прежнему отсутствует. Исходные загруженные логи удалены после анализа.
+
+Проверки log19 fix: 86 native mock scripts — 76 PASS после обновления
+inspection_preflight harness, 10 прежних baseline failures (module_scan,
+platform_mutex, preserve_registry, registered_paths, scan_protocol,
+task_close_cleanup, task_scheduler_stop, unins_close_state, unins_task_stop,
+watch_lifecycle). Все четыре DOM suite, verify_resources, verify_sut_build_graph
+и diff --check PASS. Windows/MSVC/WiX и реальное переключение темы не проверены.

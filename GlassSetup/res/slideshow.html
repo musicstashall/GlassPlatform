@@ -1187,11 +1187,12 @@ function componentCardFacts(item,input){
  const newer=!!(item.installed&&(item.id==='openglass'?openGlassPayloadUpdate(item):(item.operation==='update'||item.updateAvailable===true)&&item.targetVersion));
  // A warning/conflict tone is not evidence of damaged installed payloads.
  const broken=!!(item.installed&&item.broken===true);
+ const helperChanged=!!(item.installed&&item.nativeSourceDiffers===true);
  const interactive=!input.disabled&&!hostState.componentsLoading;
  const canApply=interactive&&item.applySupported!==false;
- return {selected,remove,newer,broken,
-  availableNeeded:interactive&&(hostState.appMode==='unins'?selected:remove||canApply&&!selected&&(!item.installed||newer||broken)),
-  installedNeeded:hostState.appMode==='unins'?selected:selected||canApply&&(newer||broken)};
+ return {selected,remove,newer,broken,helperChanged,
+  availableNeeded:interactive&&(hostState.appMode==='unins'?selected:remove||canApply&&!selected&&(!item.installed||newer||broken||helperChanged)),
+  installedNeeded:hostState.appMode==='unins'?selected:selected||canApply&&(newer||broken||helperChanged)};
 }
 function bindComponentName(name,item){
  // The title is a drag surface in C. Keep click/keyboard information access,
@@ -1271,6 +1272,8 @@ function paintComponentCard(card,item,input,shelf){
   else {if(suffix)line.append(suffix);line.append(ru?' заново':' again');chipClass='download';chipText=ru?'переустановится':'will reinstall';icon='repair';}
  }else if(f.broken){
   card.classList.add('is-broken');text(current);line.append(item.integrityMismatch?(ru?' · файлы не совпадают с SHA-256':' · files differ from SHA-256'):(ru?' · требуется восстановление':' · repair required'));chipClass='broken';chipText=item.integrityMismatch?(ru?'целостность нарушена':'integrity damaged'):(ru?'требуется восстановление':'repair required');icon='warn';
+ }else if(f.helperChanged&&!f.newer){
+  card.classList.add('has-offer');text(current);chipText=ru?'Native изменён · переустановить':'Native changed · reinstall';icon='repair';
  }else if(f.newer){
   card.classList.add('has-offer');text(current);if(suffix)line.append(suffix);chipText=target+(ru?' в «Доступно»':' in Available');icon='update';
  }else{

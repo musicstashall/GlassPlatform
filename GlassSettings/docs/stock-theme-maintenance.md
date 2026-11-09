@@ -70,3 +70,13 @@ WM_THEMECHANGED/WM_SYSCOLORCHANGE с SendMessageTimeout/SMTO_ABORTIFHUNG, что
 Отдельная перезагрузка нужна для выгрузки уже загруженного SUT (state4), но
 она не заменяет штатное переключение стиля перед удалением. Mocks подтверждают
 вызовы/порядок/отказы, не визуальное применение на реальной Windows.
+
+
+## Доставка исправлений при одинаковой версии пакета
+
+Изменённый Native должен попасть в **установленный** GlassSettings: vendor-only
+removal не запускает DLL из исходной папки сборки Setup. Начиная с Log19 fix,
+inspection сравнивает MsiFileHash установленного Native с проверенным предлагаемым
+MSI и требует переустановку OS-native Settings при различии, даже при одинаковом
+ProductVersion. В логе фиксируются compared/differs и оба MSI content hash.
+Log19 без такой информации не доказывает, какая сборка helper выполнялась.

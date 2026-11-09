@@ -1863,7 +1863,7 @@ private:
             const auto remote=std::to_wstring(v[0])+L"."+std::to_wstring(v[1])+L"."+std::to_wstring(v[2])+L"."+std::to_wstring(v[3]);
             if(target.empty()||VersionOlder(target,remote))target=remote;
         }
-        return rep.damaged||(!target.empty()&&VersionOlder(rep.installedPackageVersion,target));
+        return rep.damaged||rep.nativeSourceDiffers||(!target.empty()&&VersionOlder(rep.installedPackageVersion,target));
         }catch(...){return true;} // never silently waive an unverifiable prerequisite
     }
     bool SecureUxRemovalDependencySatisfiedLocked() const {
@@ -2008,11 +2008,20 @@ private:
                     reasonText+=L": "+rep->registryValueNames;
                 reasons+=JsStringLiteral(reasonText);
             }
+            if(rep&&rep->nativeSourceDiffers) {
+                if(!firstReason)reasons+=L",";
+                reasons+=JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                    L"Доступен изменённый Native. Для использующих его операций запланируйте обновление или переустановку GlassSettings, даже если версия MSI совпадает.":
+                    L"A changed Native helper is available. Plan a GlassSettings update or reinstall for dependent operations, even when the MSI version is unchanged.");
+            }
             reasons+=L"]";
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
                 L",\"description\":"+JsStringLiteral((desc==IDS_COMP_P64_DESC||desc==IDS_COMP_P32_DESC)?GlassProductUiPolicy::PlatformDescription(Text(desc),desc==IDS_COMP_P64_DESC,os64,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN):Text(desc))+L",\"warning\":"+JsStringLiteral(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit()))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
                 L",\"installed\":"+((rep&&(rep->installed||rep->residual))?L"true":L"false")+
                 L",\"removeSupported\":"+((rep&&(rep->installed||(rep->residual&&rep->residualSafe))&&!disabled&&!hidden)?L"true":L"false")+
+                L",\"recommended\":"+((rep&&rep->nativeSourceDiffers)?L"true":L"false")+
+                L",\"nativeSourceCompared\":"+((rep&&rep->nativeSourceCompared)?L"true":L"false")+
+                L",\"nativeSourceDiffers\":"+((rep&&rep->nativeSourceDiffers)?L"true":L"false")+
                 L",\"updateAvailable\":"+(hasUpdate?L"true":L"false")+
                 L",\"applySupported\":"+(applySupported?L"true":L"false")+
                 L",\"broken\":"+((rep&&rep->damaged)?L"true":L"false")+
