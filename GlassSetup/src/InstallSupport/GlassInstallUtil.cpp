@@ -1784,6 +1784,25 @@ bool InvokeSecureUxThemeDeactivate(
     return true;
 }
 
+bool SecureUxRemovalStyleHelperAvailable(const std::wstring& x64Dir,const std::wstring& x86Dir) noexcept {
+    const auto arch=IsOs64Bit()?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
+    return !InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,"GlassSettings_SecureUxThemePrepareRemovalV2W").empty();
+}
+bool PrepareSecureUxRemovalVisualStyle(const std::wstring& x64Dir,const std::wstring& x86Dir,
+    SecureUxThemeDeactivateRun* run,std::wstring* detail) noexcept {
+    if(run)*run={};
+    const auto arch=IsOs64Bit()?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
+    const auto dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,"GlassSettings_SecureUxThemePrepareRemovalV2W");
+    const auto rundll=IsOs64Bit()?NativeRundll64():RundllPathForTaskArch(arch);
+    if(dll.empty()||rundll.empty()){if(detail)*detail=L"Update the OS-native GlassSettings MSI: its trusted style-only removal helper V2 is required.";return false;}
+    const auto command=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemePrepareRemovalV2W";
+    DWORD code=MAXDWORD;bool started=false,completed=false;
+    const bool ok=RunHiddenCommand(command,&code,45000,&started,&completed);
+    GlassInstallLog::LineFormat(L"SecureUxTheme style-only removal helper V2: ran=%d started=%d completed=%d code=%lu",ok?1:0,started?1:0,completed?1:0,code);
+    if(!ok||!started||!completed||code!=0){if(detail)*detail=L"Style-only removal preparation failed or did not complete; MSI has not been removed. The live style may already be reset.";return false;}
+    if(run)run->ran=true;return true;
+}
+
 bool QuerySecureUxPendingFileOperations(bool& pending) noexcept {
     pending=true; // Unreadable/invalid data must not suppress an MSI reboot request.
     const auto fail=[](const wchar_t* reason) {

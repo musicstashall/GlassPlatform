@@ -57,7 +57,7 @@ bool Identity(const std::wstring& path,std::wstring& code,std::wstring& version)
 }
 }
 namespace GlassInstallUtil {
- enum class SecureUxThemeState {Conflict,Inactive,Active,ActivationPending};
+ enum class SecureUxThemeState {Conflict,Inactive,Active,ActivationPending,DeactivationPending};
  SecureUxThemeState state=SecureUxThemeState::Inactive;bool query=true;
  bool QuerySecureUxThemeState(const std::wstring&,const std::wstring&,SecureUxThemeState* out,std::wstring*){*out=state;return query;}
 }
@@ -75,6 +75,7 @@ struct InstallEngine {
  std::atomic_bool cancelRequested_{false};GlassProducts::Selection selection_{};
  GlassSecureUxPackage::Package secureUxPackage_;
  GlassSecureUxPackage::Removal secureUxRemoval_;
+ bool secureUxLoadedRemoval_=false;struct {bool RecheckLoadedRemoval(std::wstring&)const{return true;}}secureUxRemovalProfiles_;
  std::wstring secureUxRemovalCode_=L"vendor",x64Dir_=L"x64",x86Dir_=L"x86";
  std::wstring tempDir_=L"work",badBaseline,badFamily;
  struct {std::vector<Old> oldProducts;}rollbackSession_;
@@ -167,6 +168,11 @@ int main(){
  {InstallEngine e;Reset(e);e.selection_.secureUxThemeRemove=true;e.secureUxRemoval_.ready=true;
   auto& r=GlassProductInspect::observation;r.secureUxTheme.installed=true;r.officialSecureUxThemeCode=L"vendor";
   GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::ActivationPending;
+  assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Remove);
+ }
+ {InstallEngine e;Reset(e);e.selection_.secureUxThemeRemove=true;e.secureUxRemoval_.ready=true;e.secureUxLoadedRemoval_=true;
+  auto& r=GlassProductInspect::observation;r.secureUxTheme.installed=true;r.officialSecureUxThemeCode=L"vendor";
+  GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;
   assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Remove);
  }
  // Exact original MSI + baseline + unloaded hook are required.

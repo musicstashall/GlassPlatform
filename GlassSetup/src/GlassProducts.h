@@ -3,7 +3,7 @@
 
 // Shared, platform-neutral component policy. An install selection names the
 // products to install or update. An unchecked installed product is kept. Explicit
-// managed removal has independent row intents; the original unloaded vendor MSI
+// managed removal has independent row intents; the original vendor MSI
 // retains its separate commit-last protocol.
 // All products are independently selectable; warnings do not imply a removal
 // cascade. SecureUxTheme without Settings requires explicit interactive consent.
@@ -12,6 +12,9 @@ namespace GlassProducts {
 // absent. It is not an obstacle to cancelling that installation via vendor MSI.
 template<class State> constexpr bool SecureUxUnloadedRemoval(State state) noexcept {
     return state==State::Inactive || state==State::ActivationPending;
+}
+template<class State> constexpr bool SecureUxKnownRemoval(State state) noexcept {
+    return SecureUxUnloadedRemoval(state)||state==State::Active||state==State::DeactivationPending;
 }
 // The author's MSI schedules reboot unconditionally. Refine its advisory 3010
 // only with a verified post-operation runtime state; unknown states retain it.
@@ -62,7 +65,8 @@ constexpr bool OnlyManagedRemoval(const Selection& choice) noexcept {
         !choice.glassSettings && !choice.settings64 && !choice.settings32;
 }
 
-// Removing an unloaded vendor MSI does not modify any Glass product.
+// Vendor-only removal does not modify any Glass product (loaded style preparation
+// is separately authorized and may reset the current user style).
 constexpr bool OnlySecureUxThemeRemoval(const Selection& choice) noexcept {
     return !choice.removeMask && choice.secureUxThemeRemove && !choice.secureUxTheme &&
         !choice.platform64 && !choice.platform32 && !choice.openGlass &&

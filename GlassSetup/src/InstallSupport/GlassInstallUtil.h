@@ -147,13 +147,14 @@ bool InvokeShellSignerTrust(
     const std::wstring& x86Dir,
     std::wstring* failureDetail = nullptr) noexcept;
 
-// Result of the SecureUxTheme deactivation helper (kInstallerSecureUxThemeExport).
+// Legacy result bits shared with the current style-preparation helper.
+// Current helpers do not deactivate original-MSI hook registrations.
 struct SecureUxThemeDeactivateRun
 {
     bool ran = false;                  // the helper reached a decision
-    bool rebootRequired = false;       // one-time System32 cleanup is pending
-    bool themeNotRestored = false;     // custom visual style left active (deactivated anyway)
-    bool skippedExternalInstall = false; // official SecureUxTheme owns the state; nothing changed
+    bool rebootRequired = false;       // legacy helper restart bit
+    bool themeNotRestored = false;     // stock visual style was not confirmed
+    bool skippedExternalInstall = false; // unsupported/external legacy installation
 };
 struct SecureUxThemeActivateRun
 {
@@ -162,12 +163,9 @@ struct SecureUxThemeActivateRun
     bool skippedExternalInstall = false;
 };
 
-// Runs GlassSettings_SecureUxThemeSetupV1W of the helper matching the OS bitness
-// (embedded x64 helper on x64, installed x86 helper on x86) and deactivates
-// SecureUxTheme the way the GlassSettings toggle does. Called before GlassSettings
-// products are removed (GlassSettings removal and full uninstall). Returns false when
-// the helper is unavailable or reported a failure — the caller must abort with
-// nothing removed.
+// Runs the trusted installed OS-native SetupV1W helper (historical name).
+// Current Native prepares the visual style only; it is not Settings toggle-off.
+// Does not imply persisted selector verification or authorize vendor MSI removal.
 bool InvokeSecureUxThemeDeactivate(
     const std::wstring& x64Dir,
     const std::wstring& x86Dir,
@@ -175,6 +173,10 @@ bool InvokeSecureUxThemeDeactivate(
     std::wstring* failureDetail = nullptr) noexcept;
 // Query/activate through the installed Native.dll matching the OS bitness, via rundll32;
 // keeping it in GlassSettings\ lets the native callback resolve its MSI payload beside it.
+// Requires the new style-only contract; never reuse an older deactivation export.
+bool SecureUxRemovalStyleHelperAvailable(const std::wstring& x64Dir,const std::wstring& x86Dir) noexcept;
+bool PrepareSecureUxRemovalVisualStyle(const std::wstring& x64Dir,const std::wstring& x86Dir,
+    SecureUxThemeDeactivateRun* run,std::wstring* detail) noexcept;
 // Read-only SUT-file queue guard; unrelated Windows operations do not count.
 bool QuerySecureUxPendingFileOperations(bool& pending) noexcept;
 bool QuerySecureUxThemeState(

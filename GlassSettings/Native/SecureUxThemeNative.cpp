@@ -768,6 +768,17 @@ extern "C" void CALLBACK GlassSettings_SecureUxThemeSetupV1W(
     ::ExitProcess(code);
 }
 
+// Versioned contract: prepares only the current visual style, never removes
+// IFEO/COM registrations or system files. Old installed DLLs lack this export.
+extern "C" void CALLBACK GlassSettings_SecureUxThemePrepareRemovalV2W(
+    HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept
+{
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_SecureUxThemePrepareRemovalV2W=_GlassSettings_SecureUxThemePrepareRemovalV2W@16")
+#endif
+    GlassSettings_SecureUxThemeSetupV1W(hwnd,instance,cmdLine,show);
+}
+
 // Небольшие протоколы для карточки SecureUxTheme в GlassSetup/GlassUnins.
 // Значение состояния передаётся кодом завершения процесса rundll32, чтобы
 // Setup любой разрядности мог вызвать нативную DLL, соответствующую ОС.

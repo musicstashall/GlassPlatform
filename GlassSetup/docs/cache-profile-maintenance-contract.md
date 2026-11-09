@@ -103,3 +103,19 @@ Offline-reset должен согласованно учитывать ThemeMana
 - Владение и поведение конкретного SecureUxTheme MSI, миграция legacy и прямой uninstall в обход controller.
 
 Это технические исследования, а не повторное согласование уже принятых пользовательских правил. Дамп/экспорт пользователя в репозиторий не скопирован; production-код не изменён.
+
+#### Restricted loaded SecureUxTheme removal implementation
+
+The first loaded-removal path authorizes only one inventoried desktop-user
+profile with no other user sessions, retaining OS-native GlassSettings through
+the vendor transaction. It requires the installed style-only V2 native export,
+rechecks selectors/inventory/session identity, applies stock style, verifies live
+and persisted DllName stock resources, and writes/verifies the current user's
+CurrentTheme link to Windows aero.theme before the original MSI. The operation
+is one-shot; partial style reset is reported and never rolled back into a custom
+style automatically. Loaded removal preserves the reboot requirement.
+
+This does **not** implement the broader offline/multiuser lifecycle described
+above or eliminate concurrent-logon races. More than one profile, unknown style,
+missing V2 helper and same-plan removal of OS-native Settings are refused. See
+implementation-progress.md for validation and Windows limitations.

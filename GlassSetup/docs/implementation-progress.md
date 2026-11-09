@@ -1299,3 +1299,50 @@ MSI, файлы, регистрация и loaded state разделены: MSI 
 - Загруженные три исходных журнала удалены после анализа по пользовательскому
   правилу; выводы сохранены здесь без копий журналов. Изменений removal capability
   и разрешения Active-удаления в этом checkpoint нет.
+
+### Loaded SecureUxTheme removal — first restricted implementation
+
+Replaces the blanket loaded-runtime UI refusal with an intent that must pass
+worker-side authorization. Scope is deliberately **exactly one ProfileList user
+profile**, matching the elevated/current desktop user, with no other user sessions.
+Unknown runtime/style, incomplete/changed profile inventory, external/legacy MSI,
+missing CurrentTheme, or inaccessible selectors refuse before vendor removal.
+
+The installed OS-native GlassSettings DLL must expose the trusted **style-only
+`GlassSettings_SecureUxThemePrepareRemovalV2W`** contract. Older DLLs are not called
+under an assumed new contract: update that GlassSettings MSI first. Removing that
+OS-native Settings product in the same loaded-removal plan is refused before
+mutations; retain it until the vendor transaction finishes. No new native helper
+is downloaded for vendor-only removal.
+
+Before the last original-MSI transaction, Setup rechecks profiles/sessions and the
+CurrentTheme snapshot, runs the native stock-style helper, verifies both the live
+style and persisted ThemeManager/DllName as exact, non-reparse, trusted Windows
+stock resources, then writes/verifies only this user's Themes/CurrentTheme link to
+Windows Resources/Themes/aero.theme. It does not apply an entire theme or directly
+change wallpaper/sounds/colors, edit custom theme files or other profiles. A later
+check revalidates stock style, selectors, desktop identity, profile inventory and
+original MSI identity before invoking the vendor. Loaded removal always keeps a
+restart requirement even when the MSI returns 0 or a later query appears inactive.
+Unloaded ActivationPending cancellation retains its existing no-restart refinement.
+
+Failures after style preparation explicitly warn that style may already be reset;
+MSI failure does not automatically restore the unsafe custom style. This is **not
+an atomic multi-product transaction**: earlier Glass steps may already have run.
+Profile/WTS rechecks do not prevent a new concurrent logon after the last check;
+there is no session broker, durable recovery journal or offline/multiuser style
+lifecycle yet. Strict stock-resource trust checks can conservatively refuse an
+otherwise usable style; never interpret such a refusal as vendor MSI failure.
+
+Portable validation: 80 `*_mock.py` tests, 70 pass, the same 10 known failures
+(module_scan, platform_mutex, preserve_registry, registered_paths, scan_protocol,
+task_close_cleanup, task_scheduler_stop, unins_close_state, unins_task_stop,
+watch_lifecycle); no new failures. New actual-source profile/style harness uses
+ASan/UBSan and covers profile/session/SID/selector changes, stock verification,
+no preflight writes, one-shot commit and partial write failures. Worker/IPC/plan
+harnesses cover loaded authorization, missing helper, helper/selector refusal,
+retained-Settings requirement, MSI failure and reboot. Three package/product/release
+runners plus resource/build-graph checks pass. Targeted tests rerun after final
+stock-selector/reboot checks. **No Windows/MSVC/WiX build or real loaded uninstall
+was performed in this Linux environment.** The previous Windows install/reboot
+result is not evidence for this new path.

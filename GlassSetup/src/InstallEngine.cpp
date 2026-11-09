@@ -1309,14 +1309,24 @@ bool InstallEngine::PrepareSecureUxRemoval() noexcept {
     if(IsCancelRequested())return false;
     std::wstring error;
     auto state=GlassInstallUtil::SecureUxThemeState::Conflict;
-    const bool unloaded=GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error) &&
-        GlassProducts::SecureUxUnloadedRemoval(state);
-    if(!selection_.secureUxTheme && unloaded &&
-       GlassSecureUxPackage::PrepareRemoval(tempDir_,secureUxRemovalCode_,cancelRequested_,secureUxRemoval_,error))return true;
+    secureUxLoadedRemoval_=false;
+    const bool known=GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error) && GlassProducts::SecureUxKnownRemoval(state);
+    if(!selection_.secureUxTheme&&known) {
+        secureUxLoadedRemoval_=!GlassProducts::SecureUxUnloadedRemoval(state);
+        try {
+            if(secureUxLoadedRemoval_) {
+                if(selection_.Removes(GlassInstallUtil::IsOs64Bit()?2u:5u))error=L"Remove SecureUxTheme first while retaining OS-native GlassSettings; its style-only helper must remain installed through the last vendor transaction.";
+                else if(!GlassInstallUtil::SecureUxRemovalStyleHelperAvailable(x64Dir_,x86Dir_))error=L"Update the OS-native GlassSettings MSI: style-only removal helper V2 is required for loaded SecureUxTheme.";
+                else if(secureUxRemovalProfiles_.PreflightLoadedRemoval(error)) {
+                    if(GlassSecureUxPackage::PrepareRemoval(tempDir_,secureUxRemovalCode_,cancelRequested_,secureUxRemoval_,error))return true;
+                }
+            }else if(GlassSecureUxPackage::PrepareRemoval(tempDir_,secureUxRemovalCode_,cancelRequested_,secureUxRemoval_,error))return true;
+        }catch(...){error=L"Cannot prepare the user/profile safety baseline.";}
+    }
     InstallLog::LineFormat(L"Vendor removal preflight refused: %s",error.c_str());
     if(!IsCancelRequested())SetFailure(PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?
-        L"Удаление SecureUxTheme остановлено до изменений: MSI или отсутствие загруженного hook не подтверждены.":
-        L"SecureUxTheme removal stopped before changes: its MSI or unloaded hook state could not be verified.",ERROR_INSTALL_PACKAGE_REJECTED);
+        L"Удаление SecureUxTheme остановлено до изменений. Проверка MSI, профиля или helper не пройдена. "+error:
+        L"SecureUxTheme removal stopped before changes. MSI/profile/helper preflight failed. "+error,ERROR_INSTALL_PACKAGE_REJECTED);
     return false;
 }
 
@@ -1333,13 +1343,36 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
     }
     std::wstring error;auto state=GlassInstallUtil::SecureUxThemeState::Conflict;
     if(!selection_.secureUxThemeRemove || selection_.secureUxTheme || !GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error) ||
-       !GlassProducts::SecureUxUnloadedRemoval(state) ||
+       !GlassProducts::SecureUxKnownRemoval(state) ||
+       (!GlassProducts::SecureUxUnloadedRemoval(state)&&!secureUxLoadedRemoval_) ||
        !GlassSecureUxPackage::RecheckRemoval(tempDir_,cancelRequested_,secureUxRemoval_,error)) {
         InstallLog::LineFormat(L"Vendor removal revalidation refused: %s",error.c_str());
         SetFailure(PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?
             L"MSI или активность SecureUxTheme изменились после проверки; удаление отменено.":
             L"SecureUxTheme MSI or activity changed after preflight; removal was refused.",ERROR_INSTALL_PACKAGE_REJECTED);
         return false;
+    }
+    if(secureUxLoadedRemoval_) {
+        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+        bool prepared=false;
+        try {
+            GlassInstallUtil::SecureUxThemeDeactivateRun run{};
+            prepared=secureUxRemovalProfiles_.RecheckLoadedRemoval(error) &&
+                GlassInstallUtil::PrepareSecureUxRemovalVisualStyle(x64Dir_,x86Dir_,&run,&error) && run.ran &&
+                !run.themeNotRestored && !run.skippedExternalInstall &&
+                secureUxRemovalProfiles_.CommitLoadedRemovalStyle(error) &&
+                secureUxRemovalProfiles_.RecheckLoadedRemoval(error) &&
+                GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error) && GlassProducts::SecureUxKnownRemoval(state) &&
+                GlassSecureUxPackage::RecheckRemoval(tempDir_,cancelRequested_,secureUxRemoval_,error) &&
+                secureUxRemovalProfiles_.RecheckLoadedRemoval(error);
+        }catch(...){error=L"Style preparation could not complete.";}
+        if(!prepared) {
+            InstallLog::LineFormat(L"Loaded SecureUxTheme removal refused after style preparation: %s",error.c_str());
+            SetFailure((ru?L"MSI SecureUxTheme не удалён. При подготовке визуальный стиль мог быть сброшен; автоматического возврата custom style нет.\n":
+                L"SecureUxTheme MSI was not removed. The visual style may already be reset; no automatic custom-style restore is attempted.\n")+error,ERROR_INSTALL_PACKAGE_REJECTED);
+            return false;
+        }
+        InstallLog::Line(L"Loaded SecureUxTheme removal: single desktop profile/style and original MSI revalidated; invoking vendor MSI");
     }
     GlassInstallMsi::ProgressSink sink{};
     sink.label=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?L"Удаление SecureUxTheme":L"Removing SecureUxTheme";
@@ -1352,15 +1385,17 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
     const bool removed=GlassInstallMsi::UninstallProduct(secureUxRemoval_.productCode.c_str(),&sink,&result);
     InstallLog::LineFormat(L"Original SecureUxTheme removal returned %u (ProductCode %s)",result,secureUxRemoval_.productCode.c_str());
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-    if(!removed){SetFailure(ru?L"Не удалось удалить оригинальный MSI SecureUxTheme.":L"Could not remove the original SecureUxTheme MSI.",result);return false;}
+    if(!removed){SetFailure(secureUxLoadedRemoval_?
+        (ru?L"Не удалось удалить оригинальный MSI SecureUxTheme. При подготовке применён штатный визуальный стиль; custom style автоматически не восстанавливается.":L"Could not remove the original SecureUxTheme MSI. The stock style was applied during preparation; the custom style is not restored automatically."):
+        (ru?L"Не удалось удалить оригинальный MSI SecureUxTheme.":L"Could not remove the original SecureUxTheme MSI."),result);return false;}
     if(!GlassInstallMsi::RefreshManagedArp(x64Dir_,x86Dir_,openGlassDir_))
         AddFinishWarning(ru?L"Записи обслуживания обновлены не полностью":L"Maintenance entries were not fully refreshed",
             ru?L"SecureUxTheme удалён. Не все ограничения удаления оставшихся продуктов обновлены; подробности в журнале.":
                L"SecureUxTheme was removed. Some remaining removal policies could not be refreshed; see the log.");
-    bool restart=result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED;
+    bool restart=secureUxLoadedRemoval_ || result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED;
     auto after=GlassInstallUtil::SecureUxThemeState::Conflict;
     if(GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&after,&error) && result!=ERROR_SUCCESS_REBOOT_INITIATED) {
-        const bool runtimeRestart=GlassProducts::SecureUxRestartAfter(false,after,restart);
+        const bool runtimeRestart=secureUxLoadedRemoval_ || GlassProducts::SecureUxRestartAfter(false,after,restart);
         bool pending=true;
         if(runtimeRestart || !restart || (GlassInstallUtil::QuerySecureUxPendingFileOperations(pending)&&!pending))restart=runtimeRestart;
     }
@@ -1579,12 +1614,14 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
                _wcsicmp(report.officialSecureUxThemeCode.c_str(),secureUxRemovalCode_.c_str())!=0 ||
                !secureUxRemoval_.ready ||
                !GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error) ||
-               !GlassProducts::SecureUxUnloadedRemoval(state) ||
+               !GlassProducts::SecureUxKnownRemoval(state) ||
+               (!GlassProducts::SecureUxUnloadedRemoval(state)&&!secureUxLoadedRemoval_) ||
+               (secureUxLoadedRemoval_&&!secureUxRemovalProfiles_.RecheckLoadedRemoval(error)) ||
                !GlassSecureUxPackage::RecheckRemoval(tempDir_,cancelRequested_,secureUxRemoval_,error))
-                return refuse(L"SecureUxTheme removal baseline, consent or unloaded state changed");
+                return refuse(L"SecureUxTheme removal baseline, consent or profile/runtime state changed");
             // Authority is for this exact vendor MSI, not ownership of its files.
             sut.ownership=P::Ownership::Managed;sut.condition=P::Condition::Healthy;
-            sut.activity=P::Activity::Inactive;
+            sut.activity=GlassProducts::SecureUxUnloadedRemoval(state)?P::Activity::Inactive:P::Activity::Active;
             request.actions[sutIndex]=P::Action::Remove;
         }else if(selection_.secureUxTheme) {
             std::vector<std::wstring> installed;std::wstring error;

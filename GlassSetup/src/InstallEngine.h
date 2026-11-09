@@ -4,6 +4,7 @@
 #include "InstallSupport/GlassUserDefaults.h"
 #include "InstallSupport/GlassSecureUxPackage.h"
 #include "GlassProducts.h"
+#include "InstallSupport/GlassProfileMaintenance.h"
 #include "GlassProductPlan.h"
 #include "GlassProcedurePlan.h"
 #include "WizardUnlockState.h"
@@ -195,6 +196,8 @@ private:
     bool InstallOriginalSecureUxTheme() noexcept;
     GlassSecureUxPackage::Package secureUxPackage_;
     GlassSecureUxPackage::Removal secureUxRemoval_;
+    GlassProfileMaintenance::Inventory secureUxRemovalProfiles_;
+    bool secureUxLoadedRemoval_=false;
     std::wstring secureUxRemovalCode_;
     bool PrepareSecureUxRemoval() noexcept;
     bool RemoveOriginalSecureUxTheme() noexcept;

@@ -47,8 +47,8 @@ struct Wizard {
 int main(){
  for(int language:{0,LANG_RUSSIAN}){gLanguage=language;
   for(int state=0;state<=6;++state){Wizard w;w.secureUxThemeState_=static_cast<GlassInstallUtil::SecureUxThemeState>(state);
-   assert(w.SecureUxThemeRemovalSupportedLocked()==(state==1||state==3));
-   const auto* reason=w.SecureUxThemeRemovalBlockReasonLocked();assert((reason==nullptr)==(state==1||state==3));
+   assert(w.SecureUxThemeRemovalSupportedLocked()==(state>=1&&state<=4));
+   const auto* reason=w.SecureUxThemeRemovalBlockReasonLocked();assert((reason==nullptr)==(state>=1&&state<=4));
    if(reason)assert(std::wstring(reason).size()>15);
   }
   Wizard w;w.inspectReady_=false;assert(w.SecureUxThemeRemovalBlockReasonLocked());
@@ -61,7 +61,7 @@ int main(){
   assert(w.selection_.secureUxThemeRemove&&!w.selection_.secureUxTheme&&w.secureUxRemovalCode_==L"official");assert(w.ProductApplyTextId()==IDS_APPLY);
   w.Receive(L"components:select-all");assert(w.selection_.secureUxThemeRemove&&!w.selection_.secureUxTheme);
   w.Receive(L"component:secureUxTheme:0");assert(!w.selection_.secureUxThemeRemove&&!w.selection_.secureUxTheme&&w.secureUxRemovalCode_.empty());}
- for(int state:{0,2,4,5,6}){
+ for(int state:{0,5,6}){
   Wizard w;w.secureUxThemeState_=static_cast<GlassInstallUtil::SecureUxThemeState>(state);
   w.Receive(L"component:secureUxTheme:remove");assert(!w.selection_.secureUxThemeRemove&&w.secureUxRemovalCode_.empty());
  }
@@ -75,7 +75,7 @@ int main(){
   w.Receive(L"components:select-all");assert(!w.selection_.secureUxTheme&&!w.selection_.secureUxThemeRemove);}
  {Wizard w;w.Receive(L"component:secureUxTheme:remove");w.secureUxThemeState_=GlassInstallUtil::SecureUxThemeState::Conflict;
   w.Receive(L"component:secureUxTheme:0");assert(!w.selection_.secureUxThemeRemove&&!w.selection_.secureUxTheme);}
- std::cout<<"PASS: actual native removal IPC/capability: inspected single vendor/unloaded only, exact ProductCode captured, explicit cancellation, select-all preservation, no unsupported repair\n";
+ std::cout<<"PASS: actual native removal IPC/capability: inspected single vendor/runtime known; loaded preflight deferred to Apply, exact ProductCode captured, explicit cancellation, select-all preservation, no unsupported repair\n";
 }
 '''.replace('// REASON',reason).replace('// CAPABILITY',capability).replace('// BLOCKED',blocked).replace('// CLAMP',clamp).replace('// SELECTION',selection).replace('// CAPTION',caption)
 compiler=shutil.which('clang++') or shutil.which('g++')

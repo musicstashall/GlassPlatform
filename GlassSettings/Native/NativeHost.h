@@ -236,6 +236,7 @@ extern "C"
     __declspec(dllexport) void CALLBACK GlassSettings_SecureUxThemeSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
     /// GlassSetup/GlassUnins helpers: query or activate our bundled SecureUxTheme via rundll32.
     /// Query exit values: 0 unavailable, 1 inactive, 2 active, 3 activation pending, 4 deactivation pending, 5 external, 6 conflict.
+    __declspec(dllexport) void CALLBACK GlassSettings_SecureUxThemePrepareRemovalV2W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
     __declspec(dllexport) void CALLBACK GlassSettings_SecureUxThemeQueryStateV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
     /// Activation exit values: 0 active, 2 restart pending, 8 activation failed, 16 external installation (untouched).
     __declspec(dllexport) void CALLBACK GlassSettings_SecureUxThemeActivateSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;

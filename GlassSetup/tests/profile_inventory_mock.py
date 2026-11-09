@@ -76,7 +76,7 @@ bool IsDesktopProfile(const std::wstring&){return false;}
 profile=s[s.index('struct Profile {'):s.index('inline bool ReadString(')]
 methods='\n'.join(function(token) for token in ('bool OpenAll(', 'bool VerifyInventory(', 'bool PreflightCleanup(', 'bool Cleanup('))
 body=prefix+profile+function('inline bool ReadString(')+function('inline bool SafePath(')+'''\nclass Inventory {
- std::vector<Profile> profiles_;bool cleanupPrepared_=false;bool savedThemeRegistryFallback_=false;
+ std::vector<Profile> profiles_;bool removalStylePrepared_=false,removalStyleCommitted_=false;bool cleanupPrepared_=false;bool savedThemeRegistryFallback_=false;
  public:
  const std::vector<Profile>& Profiles() const {return profiles_;}
 '''+methods+'\n};\n'

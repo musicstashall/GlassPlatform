@@ -1817,13 +1817,9 @@ private:
             L"The original SecureUxTheme MSI could not be uniquely verified. Removal is blocked to protect another installation.";
         using S=GlassInstallUtil::SecureUxThemeState;
         switch(secureUxThemeState_) {
-        case S::Inactive:case S::ActivationPending:return nullptr;
-        case S::Active:return ru?
-            L"SecureUxTheme активен. Безопасное удаление активного компонента в Setup пока не реализовано; изменений не выполнено.":
-            L"SecureUxTheme is active. Safe removal of the active component is not yet implemented in Setup; no changes were made.";
-        case S::DeactivationPending:return ru?
-            L"Изменение состояния SecureUxTheme ожидает перезагрузки. После перезагрузки требуется повторная проверка; она не гарантирует доступность удаления активного компонента.":
-            L"A SecureUxTheme state change is pending restart. Inspection must run again after restarting; this does not guarantee that active-component removal will be available.";
+        // Loaded removal is authorized only after profile/session/style preflight
+        // at Apply. The card creates an intent, not permission to run MSI.
+        case S::Inactive:case S::ActivationPending:case S::Active:case S::DeactivationPending:return nullptr;
         case S::External:return ru?
             L"Обнаружена сторонняя или неподдерживаемая установка SecureUxTheme. Setup не будет изменять её автоматически.":
             L"A foreign or unsupported SecureUxTheme installation was detected. Setup will not modify it automatically.";
@@ -1980,6 +1976,13 @@ private:
             (sutState==GlassInstallUtil::SecureUxThemeState::Active?IDS_COMP_SUT_STATE_ACTIVE:
             (sutChecked?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF)));
         const bool sutRequiresSettings=false;
+        std::wstring sutRemovalNotice=GlassProductUiPolicy::WarningText(preview.rows[4].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit());
+        if(sutState==GlassInstallUtil::SecureUxThemeState::Active || sutState==GlassInstallUtil::SecureUxThemeState::DeactivationPending){
+            if(!sutRemovalNotice.empty())sutRemovalNotice+=L"\n";
+            sutRemovalNotice+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                L"Перед удалением загруженного SecureUxTheme будет применён штатный визуальный стиль. Сейчас поддержан только один профиль текущего пользователя без других сеансов; требуется обновлённый native helper GlassSettings.":
+                L"Before removing loaded SecureUxTheme, the stock visual style will be applied. Currently requires a single desktop-user profile, no other sessions and the updated GlassSettings native helper.";
+        }
         std::wstring sutReasons=L"[";
         bool firstSutReason=true;
         if(sutUpdate){sutReasons+=JsStringLiteral(Text(IDS_INSPECT_VERSION));firstSutReason=false;}
@@ -1991,7 +1994,7 @@ private:
         if(sutRequiresSettings){if(!firstSutReason)sutReasons+=L",";sutReasons+=JsStringLiteral(Text(IDS_COMP_SUT_REASON_DEPENDENCY));}
         sutReasons+=L"]";
         json+=L",{\"id\":\"secureUxTheme\",\"title\":"+JsStringLiteral(Text(IDS_COMP_SUT_TITLE))+
-            L",\"warning\":"+JsStringLiteral(GlassProductUiPolicy::WarningText(preview.rows[4].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit()))+
+            L",\"warning\":"+JsStringLiteral(sutRemovalNotice)+
             L",\"description\":"+JsStringLiteral(Text(IDS_COMP_SUT_DESC))+
             L",\"badge\":"+JsStringLiteral(Text(sutBadge))+L",\"badgeTone\":"+JsStringLiteral(sutTone)+
             L",\"installed\":"+(inspect_.secureUxTheme.installed?L"true":L"false")+
