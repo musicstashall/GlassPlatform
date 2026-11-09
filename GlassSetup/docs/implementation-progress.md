@@ -1812,3 +1812,35 @@ Windows/MSVC/WiX acceptance остаётся обязательным; точн�
 Новые actual-source тесты покрывают Native COM pipeline (ASan/UBSan), паритет
 ABI/flags с C#, порядок ThemeManager→fonts→readback, cleanup/error paths и V2
 HRESULT propagation/native-bitness/legacy/query guards. Windows runtime не проверен.
+
+
+### Log18: MSI удалён, визуальное переключение не подтверждено пользователем
+
+Проверены GlassSetup-18.log и 3 MSI-лога сессии 20261109_142857:
+Settings x64/x86 версии 2.0.0.100 успешно переустановлены, Platform не выбрана,
+её stop/scan пропущены (rows0x24). В 14:30:00.238 x64 stock-style helper вернул0;
+после профилей/requery vendor MSI вызван и завершился3010. Состояние SUT стало4
+(deactivation pending), предупреждение о reboot выдано; HKU1008/1011/1012 пропущены.
+Пользователь сообщает отсутствие видимого переключения, поэтому success API/path
+не объявляем Windows visual acceptance. Данных для точной причины в логе нет.
+
+Закрыт путь «только выбор уже выбранной темы»: после AddAndSelectTheme helper
+обязательно запрашивает текущий index и вызывает SetCurrentTheme(applyNow=1),
+проверяя HRESULT обеих стадий. Перед COM teardown/выходом rundown добавлены
+WM_THEMECHANGED/WM_SYSCOLORCHANGE broadcasts с защитой от зависших окон.
+forceHr доступен в DebugLog. Это целевая мера против повторного выбора/старых
+window caches, не доказанное по Log18 объяснение и не гарантия Windows-результата.
+
+Отдельное замечание Log18: публикация maintenance cache частично отказала на
+ValidateRepairSourceDigest для сохранённых Glass-x64/x86.msi (Policy13: нет
+verified binding legacy sources). Это post-commit note, не причина отсутствия
+переключения; проверки доверия источников не ослаблены этой правкой.
+
+Исходные загруженные логи после сохранения выводов удалены. См. уточнённый
+GlassSettings/docs/stock-theme-maintenance.md. Нужна Windows runtime проверка;
+перезагрузка для pending SUT не считается заменой pre-removal style application.
+
+Проверки Log18 fix: 85 mocks — 75 PASS / 10 прежних известных FAIL;
+resources/build graph/diff PASS. Actual-source tests требуют GetCurrentTheme →
+SetCurrentTheme(applyNow=1) до fonts/readback и broadcasts до teardown; ошибки
+индекса/force HRESULT блокируют success. Реальный внешний вид на Windows не проверен.

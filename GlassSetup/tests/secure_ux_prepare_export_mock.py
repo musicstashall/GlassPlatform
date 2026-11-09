@@ -19,7 +19,7 @@ bool IsWow64ProcessNow(){return wow;}
 bool HasUnsupportedLegacySecureUxTheme(const GlassSettings_SecureUxThemeNativeQuery&){return legacy;}
 HRESULT GlassSettings_SecureUxThemeQuery(GlassSettings_SecureUxThemeNativeQuery* out){*out=observed;return queried;}
 namespace NativeStockVisualStyle {
- struct Result {HRESULT comHr=0,fontHr=0,readHr=0;bool verified=false;};
+ struct Result {HRESULT comHr=0,forceHr=0,fontHr=0,readHr=0;bool verified=false;};
  HRESULT hr=0;bool verified=true;
  HRESULT Apply(Result& r){++calls;r.verified=verified;return hr;}
 }

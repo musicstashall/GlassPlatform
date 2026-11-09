@@ -240,3 +240,13 @@ OS-native routing недостаточен без правильного apply p
 путь при отказе API не разрешает MSI removal. V1 bitmask ABI сохранён.
 См. GlassSettings/docs/stock-theme-maintenance.md. Оригинальный MSI, loaded-HKU
 проверки, skip warnings и dependency/manual-risk политика остаются без изменений.
+
+
+### Принудительное применение выбранной штатной темы (Log18)
+
+После выбора aero.theme maintenance Native обязан вызвать GetCurrentTheme и
+SetCurrentTheme(applyNow=1); только AddAndSelectTheme и stock path недостаточны
+для этого протокола. Ошибки этих стадий запрещают vendor MSI. До завершения
+помощника посылаются theme/system-color notifications для обновления окон.
+Это не глобальная проверка отрисовки: Windows visual acceptance остаётся отдельной
+проверкой, а state4/reboot означает лишь необходимость выгрузить загруженный SUT.

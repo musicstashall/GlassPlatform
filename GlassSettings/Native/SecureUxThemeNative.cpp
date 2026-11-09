@@ -705,8 +705,8 @@ namespace
     {
         NativeStockVisualStyle::Result result{};
         const HRESULT hr=NativeStockVisualStyle::Apply(result);
-        DebugLog(DBG_NORMAL,L"[GlassSettings][SecureUxTheme] stock theme: hr=0x%08lX COM=0x%08lX font=0x%08lX read=0x%08lX verified=%d",
-            static_cast<unsigned long>(hr),static_cast<unsigned long>(result.comHr),static_cast<unsigned long>(result.fontHr),static_cast<unsigned long>(result.readHr),result.verified?1:0);
+        DebugLog(DBG_NORMAL,L"[GlassSettings][SecureUxTheme] stock theme: hr=0x%08lX COM=0x%08lX force=0x%08lX font=0x%08lX read=0x%08lX verified=%d",
+            static_cast<unsigned long>(hr),static_cast<unsigned long>(result.comHr),static_cast<unsigned long>(result.forceHr),static_cast<unsigned long>(result.fontHr),static_cast<unsigned long>(result.readHr),result.verified?1:0);
         return SUCCEEDED(hr)&&result.verified;
     }
 }
@@ -774,8 +774,8 @@ extern "C" void CALLBACK GlassSettings_SecureUxThemePrepareRemovalV2W(
     if(!active)::ExitProcess(0);
     NativeStockVisualStyle::Result result{};
     const HRESULT hr=NativeStockVisualStyle::Apply(result);
-    DebugLog(DBG_NORMAL,L"[GlassSettings][SecureUxTheme] removal theme: hr=0x%08lX COM=0x%08lX font=0x%08lX read=0x%08lX verified=%d",
-        static_cast<unsigned long>(hr),static_cast<unsigned long>(result.comHr),static_cast<unsigned long>(result.fontHr),static_cast<unsigned long>(result.readHr),result.verified?1:0);
+    DebugLog(DBG_NORMAL,L"[GlassSettings][SecureUxTheme] removal theme: hr=0x%08lX COM=0x%08lX force=0x%08lX font=0x%08lX read=0x%08lX verified=%d",
+        static_cast<unsigned long>(hr),static_cast<unsigned long>(result.comHr),static_cast<unsigned long>(result.forceHr),static_cast<unsigned long>(result.fontHr),static_cast<unsigned long>(result.readHr),result.verified?1:0);
     // V2's caller accepts only zero; keep V1's legacy bitmask unchanged, but
     // return the actual HRESULT here instead of collapsing every failure to 0xC.
     ::ExitProcess(static_cast<UINT>(FAILED(hr)?hr:result.verified?S_OK:HRESULT_FROM_WIN32(ERROR_INVALID_STATE)));

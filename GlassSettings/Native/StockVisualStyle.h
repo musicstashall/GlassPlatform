@@ -6,11 +6,11 @@
 #include <string>
 #include <thread>
 
-// Native equivalent of VisualStyleThemeManager.ApplyTheme's PRIMARY path.
+// Based on Settings primary path, with explicit immediate apply for maintenance.
 // Maintenance must run this in an OS-native process, not WOW64.
 namespace NativeStockVisualStyle {
 struct Result {
-    HRESULT comHr=E_PENDING,fontHr=E_PENDING,readHr=E_PENDING;
+    HRESULT comHr=E_PENDING,forceHr=E_PENDING,fontHr=E_PENDING,readHr=E_PENDING;
     bool verified=false;
 };
 namespace Detail {
@@ -62,6 +62,15 @@ inline HRESULT ApplyOnSta(Result& result) {
     // do NOT IgnoreColor: that can retain custom system colors after style reset.
     result.comHr=manager->AddAndSelectTheme(nullptr,theme.c_str(),1u<<5,1u<<2);
     if(FAILED(result.comHr))return result.comHr;
+    // AddAndSelectTheme may only select an already-current entry. Registry/path
+    // readback cannot prove that the session's old theme handles were replaced.
+    // Explicitly request immediate application even when Aero is already selected.
+    int current=-1;
+    result.forceHr=manager->GetCurrentTheme(&current);
+    if(FAILED(result.forceHr))return result.forceHr;
+    if(current<0)return HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
+    result.forceHr=manager->SetCurrentTheme(nullptr,current,1,1u<<5,1u<<2);
+    if(FAILED(result.forceHr))return result.forceHr;
     DWORD fonts=0,bytes=sizeof(fonts);
     (void)RegGetValueW(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform\\GlassSettings",
         L"EnableSystemFont",RRF_RT_REG_DWORD,nullptr,&fonts,&bytes);
@@ -74,6 +83,14 @@ inline HRESULT ApplyOnSta(Result& result) {
     result.readHr=GetCurrentThemeName(actual,32768,color,256,size,256);
     if(FAILED(result.readHr))return result.readHr;
     result.verified=_wcsicmp(actual,style.c_str())==0;
+    if(result.verified) {
+        // The short-lived rundll32 process must not leave existing windows with
+        // old theme/color caches. Bounded synchronous notifications run before
+        // COM/apartment teardown. A hung foreign window must not hang removal.
+        DWORD_PTR ignored=0;
+        (void)SendMessageTimeoutW(HWND_BROADCAST,WM_THEMECHANGED,0,0,SMTO_ABORTIFHUNG,1000,&ignored);
+        (void)SendMessageTimeoutW(HWND_BROADCAST,WM_SYSCOLORCHANGE,0,0,SMTO_ABORTIFHUNG,1000,&ignored);
+    }
     // A matching filename alone never overrides a failed ThemeManager/font call.
     return result.verified?S_OK:HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
 }
