@@ -21,7 +21,7 @@ Glass Platform is experimental theming for Windows 10 and 11. It hooks GUI proce
 - **Рабочий стол** — пункт управления платформой в контекстном меню.
 - **Проводник** — окна папок в одной палитре с остальной оболочкой.
 
-Параметры задаются в **GlassSettings**. Включение и выключение — **LogViewer** или контекстное меню рабочего стола. Повседневная работа идёт через эти программы. Справочник ключей — [docs/registry.md](docs/registry.md).
+Параметры, включение и выключение платформы задаются в **GlassSettings**. Те же действия есть в контекстном меню рабочего стола. Справочник ключей — [docs/registry.md](docs/registry.md).
 
 ## Прежде чем включать
 
@@ -33,11 +33,10 @@ Glass Platform is experimental theming for Windows 10 and 11. It hooks GUI proce
 
 - Windows 10 или 11. Основная сборка и запуск — x64; x86 собирается отдельно.
 - Для старта хоста нужны права администратора.
-- **Включение:** LogViewer → START, или `Rundll32.exe "путь\GlassCompat.dll",Main /start`.
-- **Выключение:** STOP в LogViewer, `Main /stop`, или `stop.vbs` в каталоге сборки, если платформа уже запущена. Если сборка сообщает, что DLL занята, сначала остановите платформу штатно.
-- **Параметры:** GlassSettings.exe. Пункт контекстного меню рабочего стола регистрируется оттуда.
+- **GlassSettings** — единый центр: включение и выключение платформы и все параметры. Программа — `GlassSettings.exe`.
+- **Контекстное меню рабочего стола** — те же действия с рабочего стола: включить, остановить и открыть GlassSettings. Пункт регистрируется из GlassSettings.
 
-Готового выпуска нет: платформу собирают из исходников. Установщик описан в [GlassSetup/README.md](GlassSetup/README.md); известное падение Explorer при обновлении остаётся открытым дефектом. Переключатель SecureUxTheme в GlassSettings включает и выключает только регистрацию IFEO/COM. Удаление продукта и оставшиеся файлы ThemeUiProxy описаны там же; перевод GlassUnins на оригинальный ProductCode ещё в работе.
+Готового выпуска нет: платформу собирают из исходников. Установщик описан в [GlassSetup/README.md](GlassSetup/README.md); известное падение Explorer при обновлении остаётся открытым дефектом. Переключатель [SecureUxTheme](https://github.com/namazso/SecureUxTheme) в GlassSettings включает и выключает только регистрацию IFEO/COM. Удаление продукта и оставшиеся файлы ThemeUiProxy описаны там же; перевод GlassUnins на оригинальный ProductCode ещё в работе.
 
 ## Сборка
 
@@ -47,7 +46,7 @@ Glass Platform is experimental theming for Windows 10 and 11. It hooks GUI proce
 msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64
 ```
 
-Результат: `Build\x64\Debug\`.
+Результат: `Build\x64\Debug\`. Если сборка сообщает, что DLL занята, сначала остановите платформу в GlassSettings.
 
 Сборка установщика, порядок Release x64 → x86, откат и журналы — [GlassSetup/README.md](GlassSetup/README.md).
 
@@ -80,8 +79,8 @@ msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64
 | ExplorerCompat.dll | Проводник |
 | TaskbarCompat.dll | Панель задач |
 | UICompat.dll | CoreWindow / «Пуск», поиск, NC |
-| GlassSettings.exe | Параметры |
-| LogViewer.exe | Управление и журнал (только в Debug) |
+| GlassSettings.exe | Параметры, включение и выключение |
+| LogViewer.exe | Журнал для разработки (только в Debug) |
 | GlassShellSparse\GlassShellExt.dll | Контекстное меню рабочего стола (вместе с `GlassShellHost.exe` и sparse-пакетом в подкаталоге `GlassShellSparse\`) |
 | GlassSetup.exe | Установщик платформы |
 
@@ -95,4 +94,4 @@ msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64
 
 ## Связанные проекты
 
-Облик частично вдохновлён [TranslucentFlyouts](https://github.com/ALTaleX531/TranslucentFlyouts). Установщик по желанию кладёт [OpenGlass](https://github.com/ALTaleX531/OpenGlass) в каталог Glass. Glass Platform продолжает BlackWindowManager. Совместная работа не поддерживается: ключ `Software\StanislavKa\BlackWindowManager` не читается и не пишется, значения из него сами не переносятся.
+Облик частично вдохновлён [TranslucentFlyouts](https://github.com/ALTaleX531/TranslucentFlyouts). Установщик по желанию ставит два сторонних продукта: [OpenGlass](https://github.com/ALTaleX531/OpenGlass) в каталог Glass и [SecureUxTheme](https://github.com/namazso/SecureUxTheme) для системных тем Windows. Glass Platform продолжает BlackWindowManager. Совместная работа не поддерживается: ключ `Software\StanislavKa\BlackWindowManager` не читается и не пишется, значения из него сами не переносятся.
