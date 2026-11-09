@@ -1885,3 +1885,52 @@ platform_mutex, preserve_registry, registered_paths, scan_protocol,
 task_close_cleanup, task_scheduler_stop, unins_close_state, unins_task_stop,
 watch_lifecycle). Все четыре DOM suite, verify_resources, verify_sut_build_graph
 и diff --check PASS. Windows/MSVC/WiX и реальное переключение темы не проверены.
+
+
+## Log20: недоступный hash и отсутствующая Release-диагностика
+
+В запуске 20261109_145957 Settings64/32 installed/offered MSI=2.0.0.101,
+но Native freshness compared=0/differs=0. Это unknown, не подтверждение совпадения.
+План опять rows0x0/glassSettings0. В15:00:36.000 x64 helper exit0; vendor
+MSI3010 в15:00:37.098, state4/restart1. Три missing HKU пропущены корректно.
+Пользователь снова подтверждает отсутствие видимого переключения темы.
+
+Исправлена ошибка предыдущего подхода: версионные PE-файлы обычно отсутствуют
+в MsiFileHash; кроме того, существующий inner join может вернуть только прочие
+неверсионные файлы MSI. Только этой таблицей нельзя обеспечивать свежесть Native.
+Harvest теперь вызывает MsiGetFileHashW для **реального staged файла** с size=20
+и сохраняет четыре DWORD в GLASSNATIVEMSIHASH внутри подписанного MSI. Для
+Settings отсутствующая/неоднозначная Native или ошибка вычисления останавливает
+сборку; старый табличный путь остаётся резервным для прежних пакетов. Плохое
+свойство не заменяется старым hash и даёт unknown. При отсутствии метаданных
+теперь есть явная строка причины, а не только compared=0. Политика явного
+prerequisite, baseline integrity и ProductVersion не изменены.
+
+Подробные HRESULT раньше шли через DebugLog, отключённый в Release. Добавлен
+неавторизующий diagnostic mapping между Setup и OS-native helper: fixed-width
+32-byte payload без указателей, локальное имя PID/tick, default same-user DACL,
+отдельные результаты active/hr/COM/force/font/read/pathVerified. Setup пишет их
+в обычный журнал после завершения процесса. Данные не заменяют exit code и
+существующие проверки стиля/профилей. Нет записей на диск/в реестр. Старый Native
+отклонит новый диагностический аргумент, и удаление остановится; требуется
+установить пересобранный Native, а не обходить проверку. Отсутствующие результаты
+явно логируются. pathVerified означает только совпавший путь, **не визуальный**
+результат и не доказательство правильных цветов. Inactive no-op также различим.
+
+Active query exit2 в log20 не подтверждает гипотезу inactive no-op; нет оснований
+считать её причиной. Существующие profile preflight проверки сверяют desktop SID
+с process token SID; запуск от другого UAC account также не установлен причиной.
+Рендеринг/COM-алгоритм в этой итерации не менялся. Причина ложного визуального
+успеха остаётся не установлена; новые stage results должны отделить реальное
+выполнение COM/force от старой DLL/no-op и дать данные для следующего исправления.
+Windows/MSVC/WiX-проверка недоступна; mock PASS не является visual acceptance.
+Исходные log20 и vendor MSI log удалены после сохранения анализа.
+
+
+Log20 fix validation: 87 native mocks — 77 PASS после обновления Setup diagnostic
+harness, 10 прежних baseline failures (перечень выше). Четыре DOM suite,
+verify_resources, verify_sut_build_graph, diff --check PASS. Новый trace mock
+исполняет фактический shared header и проверяет ABI, validation/collision,
+cleanup/error branches; comparator проверяет authored hash при полностью
+отсутствующей MsiFileHash metadata. PowerShell Add-Type/MSI/WiX binding требует
+отдельной Windows-проверки, Linux source assertions её не заменяют.

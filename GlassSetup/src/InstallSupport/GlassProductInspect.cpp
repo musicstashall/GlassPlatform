@@ -287,25 +287,42 @@ void CompareNativeWithOffer(const std::wstring& offer,const std::wstring& instal
     compared=false;differs=false;
     MSIHANDLE database=0;
     if(MsiOpenDatabaseW(offer.c_str(),MSIDBOPEN_READONLY,&database)!=ERROR_SUCCESS)return;
-    std::vector<FileCheck> files;
-    const bool enumerated=EnumProductFiles(database,files);MsiCloseHandle(database);
-    if(!enumerated)return;
-    const FileCheck* native=nullptr;
-    for(const auto& file:files)if(!_wcsicmp(file.fileName.c_str(),L"GlassSettings.Native.dll")) {
-        if(native)return; // ambiguous package metadata cannot establish identity
-        native=&file;
+    DWORD expected[4]{};
+    const auto authored=QueryMsiProperty(database,L"GLASSNATIVEMSIHASH");
+    if(!authored.empty()) {
+        bool valid=authored.size()==32;
+        if(valid)for(size_t i=0;i<32;++i) {
+            const wchar_t c=authored[i];
+            const int digit=c>=L'0'&&c<=L'9'?c-L'0':c>=L'A'&&c<=L'F'?c-L'A'+10:c>=L'a'&&c<=L'f'?c-L'a'+10:-1;
+            if(digit<0){valid=false;break;}
+            expected[i/8]=(expected[i/8]<<4)|static_cast<DWORD>(digit);
+        }
+        MsiCloseHandle(database);
+        if(!valid){GlassInstallLog::LineFormat(L"Native offer comparison: malformed authored hash: %s",offer.c_str());return;}
+    } else {
+        std::vector<FileCheck> files;
+        const bool enumerated=EnumProductFiles(database,files);MsiCloseHandle(database);
+        if(!enumerated){GlassInstallLog::LineFormat(L"Native offer comparison: no file metadata: %s",offer.c_str());return;}
+        const FileCheck* native=nullptr;
+        for(const auto& file:files)if(!_wcsicmp(file.fileName.c_str(),L"GlassSettings.Native.dll")) {
+            if(native){GlassInstallLog::LineFormat(L"Native offer comparison: ambiguous Native metadata: %s",offer.c_str());return;}
+            native=&file;
+        }
+        if(!native||!native->hasHash) {
+            GlassInstallLog::LineFormat(L"Native offer comparison: no Native hash (versioned files may lack MsiFileHash); rebuild offered Settings MSI: %s",offer.c_str());return;
+        }
+        memcpy(expected,native->hash,sizeof(expected));
     }
-    if(!native||!native->hasHash)return;
     MsiFileHashBuffer hash{};hash.dwFileHashInfoSize=sizeof(hash);
     const UINT status=MsiGetFileHashW(installed.c_str(),0,&hash);
     if(status!=ERROR_SUCCESS) {
         GlassInstallLog::LineFormat(L"Native offer comparison: unreadable (%u): %s",status,installed.c_str());return;
     }
     const auto* actual=reinterpret_cast<const BYTE*>(&hash)+sizeof(hash)-16;
-    compared=true;differs=memcmp(actual,native->hash,16)!=0;
+    compared=true;differs=memcmp(actual,expected,16)!=0;
     DWORD words[4]{};memcpy(words,actual,sizeof(words));
     GlassInstallLog::LineFormat(L"Native offer comparison: differs=%d installed=%s MSI=%s MsiHash128=%08lX-%08lX-%08lX-%08lX offered=%08lX-%08lX-%08lX-%08lX",
-        differs?1:0,installed.c_str(),offer.c_str(),words[0],words[1],words[2],words[3],native->hash[0],native->hash[1],native->hash[2],native->hash[3]);
+        differs?1:0,installed.c_str(),offer.c_str(),words[0],words[1],words[2],words[3],expected[0],expected[1],expected[2],expected[3]);
 }
 
 // Windows Installer strips cached signatures/cabinets. Trust its protected

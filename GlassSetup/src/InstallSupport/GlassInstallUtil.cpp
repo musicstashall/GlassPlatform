@@ -1,4 +1,5 @@
 #include "GlassInstallUtil.h"
+#include <StockThemeMaintenanceTrace.h>
 #include "GlassInstallMsi.h"
 #include <msi.h>
 #include "GlassInstallLog.h"
@@ -1807,10 +1808,18 @@ bool PrepareSecureUxRemovalVisualStyle(const std::wstring& x64Dir,const std::wst
             return fail(L"Installed native-architecture visual-style helper is unavailable.");
         const std::wstring rundll=os64?NativeRundll64():RundllPathForTaskArch(arch);
         if(rundll.empty())return fail(L"Native-architecture rundll32.exe was not found.");
-        const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemePrepareRemovalV2W";
+        StockThemeMaintenanceTrace::Reader trace;
+        const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemePrepareRemovalV2W"+
+            (*trace.Name()?L" "+std::wstring(trace.Name()):L"");
         DWORD exitCode=MAXDWORD;bool started=false,completed=false;
         const bool ran=RunHiddenCommand(cmd,&exitCode,45000,&started,&completed);
         GlassInstallLog::LineFormat(L"SecureUxTheme stock-style native helper: os64=%d ran=%d started=%d completed=%d exit=0x%08lX DLL=%s",os64?1:0,ran?1:0,started?1:0,completed?1:0,exitCode,dll.c_str());
+        if(completed) {
+            if(const auto* data=trace.Result()) {
+                GlassInstallLog::LineFormat(L"SecureUxTheme stock-style stages: active=%lu hr=0x%08lX COM=0x%08lX force=0x%08lX font=0x%08lX read=0x%08lX pathVerified=%lu",
+                    data->active,static_cast<unsigned long>(data->hr),static_cast<unsigned long>(data->comHr),static_cast<unsigned long>(data->forceHr),static_cast<unsigned long>(data->fontHr),static_cast<unsigned long>(data->readHr),data->verified);
+            } else GlassInstallLog::Line(L"SecureUxTheme stock-style stages: unavailable (helper did not publish diagnostics)");
+        }
         if(!ran||!started)return fail(L"Visual-style helper could not be started.");
         if(!completed)return fail(L"Visual-style helper did not finish within 45 s; the style may already have changed.");
         if(exitCode!=0) {

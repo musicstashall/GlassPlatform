@@ -1,5 +1,6 @@
 #include "NativeHost.h"
 #include "StockVisualStyle.h"
+#include <StockThemeMaintenanceTrace.h>
 
 #include <DebugLog.h>
 #include <Helpers/ThemeHelper.h>
@@ -763,7 +764,9 @@ extern "C" void CALLBACK GlassSettings_SecureUxThemePrepareRemovalV2W(
 #pragma comment(linker, "/EXPORT:GlassSettings_SecureUxThemePrepareRemovalV2W=_GlassSettings_SecureUxThemePrepareRemovalV2W@16")
 #endif
     (void)hwnd;(void)instance;(void)show;
-    if(cmdLine&&*cmdLine)::ExitProcess(static_cast<UINT>(E_INVALIDARG));
+    if(cmdLine&&*cmdLine&&!StockThemeMaintenanceTrace::ValidName(cmdLine))::ExitProcess(static_cast<UINT>(E_INVALIDARG));
+    StockThemeMaintenanceTrace::Writer trace(cmdLine);
+    if(cmdLine&&*cmdLine&&!trace.Ready())::ExitProcess(static_cast<UINT>(HRESULT_FROM_WIN32(ERROR_INVALID_HANDLE)));
     if(IsWow64ProcessNow())::ExitProcess(static_cast<UINT>(HRESULT_FROM_WIN32(ERROR_INSTALL_PLATFORM_UNSUPPORTED)));
     GlassSettings_SecureUxThemeNativeQuery query{};
     const HRESULT queried=GlassSettings_SecureUxThemeQuery(&query);
@@ -771,11 +774,18 @@ extern "C" void CALLBACK GlassSettings_SecureUxThemePrepareRemovalV2W(
     if(HasUnsupportedLegacySecureUxTheme(query))::ExitProcess(static_cast<UINT>(HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED)));
     const bool active=query.WinlogonHasOurToken||query.LoadedEventPresent||
         (query.ComProxyHijacked&&query.SystemDll4Present);
-    if(!active)::ExitProcess(0);
+    if(!active) {
+        StockThemeMaintenanceTrace::Data data{};data.hr=S_OK;trace.Complete(data);
+        ::ExitProcess(0);
+    }
     NativeStockVisualStyle::Result result{};
     const HRESULT hr=NativeStockVisualStyle::Apply(result);
     DebugLog(DBG_NORMAL,L"[GlassSettings][SecureUxTheme] removal theme: hr=0x%08lX COM=0x%08lX force=0x%08lX font=0x%08lX read=0x%08lX verified=%d",
         static_cast<unsigned long>(hr),static_cast<unsigned long>(result.comHr),static_cast<unsigned long>(result.forceHr),static_cast<unsigned long>(result.fontHr),static_cast<unsigned long>(result.readHr),result.verified?1:0);
+    StockThemeMaintenanceTrace::Data data{};
+    data.active=1;data.hr=hr;data.comHr=result.comHr;data.forceHr=result.forceHr;
+    data.fontHr=result.fontHr;data.readHr=result.readHr;data.verified=result.verified?1:0;
+    trace.Complete(data);
     // V2's caller accepts only zero; keep V1's legacy bitmask unchanged, but
     // return the actual HRESULT here instead of collapsing every failure to 0xC.
     ::ExitProcess(static_cast<UINT>(FAILED(hr)?hr:result.verified?S_OK:HRESULT_FROM_WIN32(ERROR_INVALID_STATE)));

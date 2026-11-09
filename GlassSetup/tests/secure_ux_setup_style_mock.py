@@ -20,17 +20,28 @@ std::wstring InstalledSecureUxThemeNativeDll(GlassShared::GlassPlatformTask::Pla
 bool PeMatches(const std::wstring&,WORD machine,const char* entry){assert(machine==(os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386));assert(std::string(entry)=="GlassSettings_SecureUxThemePrepareRemovalV2W");return pe;}
 std::wstring NativeRundll64(){assert(os64);return path?L"native64.exe":L"";}
 std::wstring RundllPathForTaskArch(GlassShared::GlassPlatformTask::PlatformArch arch){assert(!os64&&arch==GlassShared::GlassPlatformTask::PlatformArch::X86);return path?L"native32.exe":L"";}
-bool RunHiddenCommand(const std::wstring& cmd,DWORD* out,int timeout,bool* started,bool* completed){++calls;assert(timeout==45000&&cmd.find(L"trusted.dll\",GlassSettings_SecureUxThemePrepareRemovalV2W")!=std::wstring::npos);*out=code;*started=start;*completed=complete;return launch;}
-namespace GlassInstallLog{template<class... T>void LineFormat(const wchar_t*,T...) {}}
+bool RunHiddenCommand(const std::wstring& cmd,DWORD* out,int timeout,bool* started,bool* completed){++calls;assert(timeout==45000&&cmd.find(L"trusted.dll\",GlassSettings_SecureUxThemePrepareRemovalV2W")!=std::wstring::npos);assert(cmd.find(L" Local\\GlassStockTheme-1-2")!=std::wstring::npos);*out=code;*started=start;*completed=complete;return launch;}
+namespace StockThemeMaintenanceTrace {
+struct Data {unsigned active=1;long hr=0,comHr=0,forceHr=0,fontHr=0,readHr=0;unsigned verified=1;};
+bool available=true;Data data;
+struct Reader {const wchar_t* Name(){return L"Local\\GlassStockTheme-1-2";}const Data* Result(){return available?&data:nullptr;}};
+}
+int stageLogs=0,missingLogs=0;
+namespace GlassInstallLog{
+template<class... T>void LineFormat(const wchar_t* fmt,T...) {if(std::wstring(fmt).find(L"stock-style stages:")!=std::wstring::npos)++stageLogs;}
+void Line(const wchar_t*){++missingLogs;}
+}
 struct SecureUxThemeDeactivateRun {bool ran=false;};
 template<size_t N,class... T>int swprintf_s(wchar_t (&buf)[N],const wchar_t* fmt,T... args){return swprintf(buf,N,fmt,args...);}
 // METHOD
 int main(){std::wstring detail;SecureUxThemeDeactivateRun run;
+for(bool diag:{false,true}){StockThemeMaintenanceTrace::available=diag;
 for(bool arch:{false,true}){os64=arch;
  for(int failure=0;failure<8;++failure){missing=failure==0;pe=failure!=1;path=failure!=2;launch=failure!=3;start=failure!=4;complete=failure!=5;code=failure==6?12:failure==7?16:0;calls=0;run.ran=true;
  assert(!PrepareSecureUxRemovalVisualStyle(L"old installed x64",L"old installed x86",&run,&detail));assert(!run.ran&&!detail.empty());assert(calls==(failure>=3?1:0));}
  missing=false;pe=path=launch=start=complete=true;code=0;assert(PrepareSecureUxRemovalVisualStyle(L"",L"",&run,&detail)&&run.ran);
 }
+}assert(stageLogs>0&&missingLogs>0);
 std::cout<<"PASS: actual Setup style helper: x64/x86 OS routing, trusted Native/export, launch/timeout/exit failures, no in-process style application\n";
 }
 '''.replace('// METHOD',method)
