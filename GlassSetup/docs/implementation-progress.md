@@ -1276,3 +1276,26 @@ MSI, файлы, регистрация и loaded state разделены: MSI 
   Logs: `.cache/sut-scoped-reboot-final`. Windows/MSVC/WiX и повторение именно
   пользовательского сценария на Windows не выполнены. Cache controller/self-update,
   обновление unins и удаление loaded SUT этим этапом не реализуются.
+
+### Windows evidence: fresh install, restart, loaded hook, blocked Setup removal
+
+- Пользовательский тест: начальный reboot → установка локального original SUT MSI
+  4.0.0 → restart notice → reboot → custom styles работают, GlassSettings показывает
+  включённое состояние без reboot notice → вход в Setup maintenance.
+- GlassSetup-9 подтверждает source=local и ProductVersion 4.0.0, успешный original
+  MSI result 3010, native post-install state 3 (ActivationPending). MSI log подтверждает
+  успешную установку и ScheduleReboot. GlassSetup[2] после reboot: native state 2
+  (Active), original vendor MSI зарегистрирован; сеанс заканчивается без запуска
+  InstallEngine/MSI удаления. Это штатно сработавший незавершённый Active guard,
+  не отказ vendor MSI и не ошибка определения loaded state.
+- Подтверждены пользователем нормальная установка, переход Pending→Active через
+  reboot и работа custom styles. Удаление loaded SUT этим тестом не проверено:
+  доступ к нему пока закрыт в коде. Повторять такой же тест до реализации смысла нет.
+- Нужна реализация lifecycle, а не снятие одного UI guard: подготовка/проверка
+  visual style и исходного пользовательского контекста, обработка других профилей/
+  сеансов и частичного reset, повторная MSI-авторизация, vendor uninstall с reboot
+  suppressed, проверка after-state/restart. Существующий style-preparation Native
+  helper текущего пользователя не равен реализации всего этого lifecycle.
+- Загруженные три исходных журнала удалены после анализа по пользовательскому
+  правилу; выводы сохранены здесь без копий журналов. Изменений removal capability
+  и разрешения Active-удаления в этом checkpoint нет.
