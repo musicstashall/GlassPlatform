@@ -1607,3 +1607,37 @@ strict cleanup isolation, unavailable fallback and handle release. Resource/buil
 graph/diff checks PASS. No Windows/MSVC build or real NTUSER load/removal was run.
 This implements the missing alternate loader, not proof that the user's specific
 hive will be recoverable. Uploaded GlassSetup-14.log deleted after analysis.
+
+### Explicit missing-HKU-key skip policy replaces offline preparation
+
+GlassSetup-15.log (2026-11-09 12:29): Active=2 and original MSI present. SID -1008
+is logged as deleted-local and ignored. SID -1011 (C:/Users/WsiAccount) returns
+lookup 122, then RegLoadAppKey 1009. The new RegLoadKey fallback succeeds (0),
+but opening its mounted key fails with access denied (5); owned mount cleanup
+succeeds (0). No visual switch or vendor MSI uninstall occurs. This is now a
+registry-access barrier in preparation, not vendor uninstall failure.
+
+Implemented the user's simpler policy: for SUT loaded removal, use only existing
+HKU/<SID> keys. If missing, skip before validating profile paths/files and record
+folder/SID for finish warnings. No NTUSER file probing/loading, SID-account lookup,
+Backup/Restore privilege changes or global hive mounts. Removed the earlier
+fallback header and deleted-account classifier. Strict general settings cleanup
+retains its existing offline AppKey path; it is not changed into best-effort cleanup.
+Access denied on an existing user key is still distinguished from an absent key.
+
+Finish warnings are emitted separately for each skipped entry after successful
+original MSI removal, alongside the loaded-hook restart requirement. They say
+which profile/SID was skipped, that HKU is absent, and that its theme settings were
+not modified. Missing keys are not described as proof of deleted accounts. Current
+session stock-style application and opened users' selector reset remain. Recheck
+allows stable skipped entries, but refuses if a skipped registry key appears
+before removal. No profile directory deletion or forced system-hive unload.
+
+Validation: 82 mock scripts (two obsolete helper tests removed), 72 PASS, same 10
+known failures, no new failures. Actual inventory tests cover one/all missing HKU
+keys, no offline loads, missing NTUSER with existing HKU, .bak residue, key arrival,
+access denied and unchanged strict cleanup. Style harness covers zero/multiple
+opened users. Worker harness verifies original MSI execution plus one warning per
+skipped SID/path and reboot warning, with no warnings during preflight. Production
+DOM/resource/build-graph/diff checks PASS. No Windows/MSVC build or actual vendor
+uninstall verification performed here. Uploaded source log deleted after analysis.

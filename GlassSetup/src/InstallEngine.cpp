@@ -1388,6 +1388,12 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
     if(!removed){SetFailure(secureUxLoadedRemoval_?
         (ru?L"Не удалось удалить оригинальный MSI SecureUxTheme. При подготовке применён штатный визуальный стиль; custom style автоматически не восстанавливается.":L"Could not remove the original SecureUxTheme MSI. The stock style was applied during preparation; the custom style is not restored automatically."):
         (ru?L"Не удалось удалить оригинальный MSI SecureUxTheme.":L"Could not remove the original SecureUxTheme MSI."),result);return false;}
+    if(secureUxLoadedRemoval_)for(const auto& skipped:secureUxRemovalProfiles_.SkippedLoadedProfiles()) {
+        const std::wstring user=(skipped.second.empty()?L"":skipped.second+L" ")+L"["+skipped.first+L"]";
+        AddFinishWarning(ru?L"SecureUxTheme: профиль пропущен":L"SecureUxTheme: profile skipped",
+            user+(ru?L" — ключ HKEY_USERS отсутствует. Настройки темы этого пользователя не изменены; NTUSER.DAT не подключался.":
+                     L" — HKEY_USERS key is absent. This user's theme settings were not changed; NTUSER.DAT was not loaded."));
+    }
     if(!GlassInstallMsi::RefreshManagedArp(x64Dir_,x86Dir_,openGlassDir_))
         AddFinishWarning(ru?L"Записи обслуживания обновлены не полностью":L"Maintenance entries were not fully refreshed",
             ru?L"SecureUxTheme удалён. Не все ограничения удаления оставшихся продуктов обновлены; подробности в журнале.":

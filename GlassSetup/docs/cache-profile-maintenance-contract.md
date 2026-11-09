@@ -104,46 +104,32 @@ Offline-reset должен согласованно учитывать ThemeMana
 
 Это технические исследования, а не повторное согласование уже принятых пользовательских правил. Дамп/экспорт пользователя в репозиторий не скопирован; production-код не изменён.
 
-#### Loaded SecureUxTheme removal: all-profile selectors
+#### Loaded SecureUxTheme removal: loaded-user registry keys only
 
-Loaded removal inventories all ProfileList user profiles and pins their loaded
-or privately opened offline hives. It no longer requires exactly one profile,
-matching elevated/desktop SIDs or an absence of other sessions. Before the original
-MSI, Setup switches the current session itself through the shared
-ThemeHelper::SetSystemVisualStyle implementation (no installed V2 export);
-Setup then writes/verifies each profile's `Themes/CurrentTheme` to Windows
-`Resources/Themes/aero.theme` and `ThemeManager/DllName` to Windows
-`Resources/Themes/Aero/aero.msstyles`. Missing selector keys can be created.
-Preflight does not change registry values. Stock file existence/non-reparse checks
-remain; Authenticode checks are not required for this reset.
+The implementation now follows the explicit missing-key skip policy. Enumerate
+ProfileList user entries; open existing `HKEY_USERS/<SID>` keys and pin their
+handles for selector reset. If that key is absent, record SID and best-effort
+ProfileImagePath, log the skip, and do not inspect/load/mount NTUSER.DAT. No local
+account lookup or proof of account deletion is required. An absent key is not a
+claim that the account is deleted. Access denied on an existing key remains an
+error rather than silently pretending that it was processed.
 
-Wallpaper/sound/color settings and custom theme/style files are not modified by
-these writes. Other active sessions are not forcibly switched or logged off:
-their persisted selectors are prepared for the next logon/restart. Loaded removal
-retains its reboot requirement. Profile inventory and written selectors are
-rechecked before the vendor MSI. An inaccessible profile or failed write/readback
-blocks that MSI and reports the profile SID/value; earlier style/selector changes
-can remain. There is no automatic custom-style restore or atomic multi-profile
-rollback. Concurrent profile creation/theme changes are not locked globally.
+Setup applies/verifies stock style in the current session, and writes/verifies
+CurrentTheme and ThemeManager/DllName for the opened registry users only. Missing
+selector subkeys inside an existing user key can be created. Skipped profiles are
+not changed; each receives a separate finish warning after successful vendor MSI
+removal, identifying folder (when available), SID, absent HKU key and unchanged
+theme settings. Loaded removal retains its restart requirement. Other sessions
+are not logged off or forcibly switched. Wallpaper/sound/color values and custom
+theme/style files are untouched by these registry writes.
 
-Runtime queries still use the installed OS-native Settings helper, so its
-same-plan removal is still refused. Stock-style preparation itself no longer
-requires a particular installed Settings version or any V2 export. Restrictions
-on profile count or other sessions remain removed.
+Rechecks verify opened user keys and processed selectors. If a previously absent
+user key appears before the last check, require a fresh plan rather than apply
+to an unexpected newly loaded profile. No global logon lock or atomic multi-profile
+rollback is implemented. General optional profile cleanup retains its separate
+strict offline inventory path and is not broadened by this SUT skip policy.
 
-For SecureUxTheme style preparation only, confirmed deleted **local SAM account**
-residues in ProfileList are not live user profiles: compare the account SID prefix
-to LSA PolicyAccountDomainInformation and require ERROR_NONE_MAPPED from account
-lookup before ignoring that entry. Recheck classification with inventory before
-commit. A foreign-domain/cloud SID or any other lookup failure is not deletion
-evidence. Ignore residues before attempting NTUSER.DAT; do not unload system hives,
-repair/delete profile data or make general settings cleanup skip such entries.
-
-SUT removal's offline loader now falls back from RegLoadAppKey ERROR_BADDB=1009
-to RegLoadKey under a GUID-named HKU GlassSetup-Offline mount with scoped
-Backup/Restore privileges. Only successful loads confer mount ownership; existing
-SID mounts are never unloaded. Profile handle/move/destructor lifetime owns close
-and private-name unmount. Both loader failures stop preparation and report codes.
-This is the normal Windows loader, not custom hive repair. Mount cleanup failures
-are logged; crash recovery of owned mounts is not yet journaled. General settings
-cleanup remains on its original application-hive loader path.
+This supersedes the earlier deleted-local-account classifier and RegLoadKey
+fallback; both have been removed from production, along with their obsolete
+helper tests. No temporary global hive mounts or Backup/Restore privilege
+changes are performed for SecureUxTheme removal.

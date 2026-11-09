@@ -1,4 +1,4 @@
-"""Actual all-profile loaded-removal methods with fake registry/theme APIs."""
+"""Actual loaded-user registry-only removal methods with fake registry/theme APIs."""
 from pathlib import Path
 import subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
@@ -50,13 +50,13 @@ public:
 void reset(){assert(openKeys==0);missingKeys=false;openAllOk=inventoryOk=windowsOk=pathSafe=actualOk=readOk=true;profileCount=3;writes=creates=inventoryCalls=0;failWriteAt=denyProfile=failCreateAt=failInventoryAt=0;
  actual=L"C:\\Windows\\Resources\\Themes\\Aero\\aero.msstyles";registry.clear();}
 int main(){std::wstring detail;
- for(int count:{1,3,7}){reset();profileCount=count;Inventory i;assert(i.PreflightLoadedRemoval(detail));assert(writes==0);assert(i.RecheckLoadedRemoval(detail));
+ for(int count:{0,1,3,7}){reset();profileCount=count;Inventory i;assert(i.PreflightLoadedRemoval(detail));assert(writes==0);assert(i.RecheckLoadedRemoval(detail));
   assert(i.CommitLoadedRemovalStyle(detail));assert(writes==2*count);assert(i.RecheckLoadedRemoval(detail));assert(!i.CommitLoadedRemovalStyle(detail));
   for(int p=1;p<=count;++p){assert((registry[{p,L"CurrentTheme"}]==L"C:\\Windows\\Resources\\Themes\\aero.theme"));assert((registry[{p,L"DllName"}]==L"C:\\Windows\\Resources\\Themes\\Aero\\aero.msstyles"));}
-  registry[{count,L"DllName"}]=L"custom.msstyles";assert(!i.RecheckLoadedRemoval(detail));
+  if(count){registry[{count,L"DllName"}]=L"custom.msstyles";assert(!i.RecheckLoadedRemoval(detail));}
  }
  {reset();Inventory i;missingKeys=true;assert(i.PreflightLoadedRemoval(detail));assert(writes==0);missingKeys=false;assert(i.CommitLoadedRemovalStyle(detail));assert(writes==6);}
- for(int failure=0;failure<3;++failure){reset();Inventory i;if(failure==0)openAllOk=false;if(failure==1)profileCount=0;if(failure==2)denyProfile=2;assert(!i.PreflightLoadedRemoval(detail));assert(writes==0);}
+ for(int failure:{0,2}){reset();Inventory i;if(failure==0)openAllOk=false;if(failure==1)profileCount=0;if(failure==2)denyProfile=2;assert(!i.PreflightLoadedRemoval(detail));assert(writes==0);}
  for(int at=1;at<=6;++at){reset();Inventory i;assert(i.PreflightLoadedRemoval(detail));failWriteAt=at;assert(!i.CommitLoadedRemovalStyle(detail));assert(writes==at);assert(detail.find(L"SID-")!=std::wstring::npos);assert(!i.CommitLoadedRemovalStyle(detail));}
  for(int failure=0;failure<7;++failure){reset();Inventory i;assert(i.PreflightLoadedRemoval(detail));
   if(failure==0)inventoryOk=false;if(failure==1)windowsOk=false;if(failure==2)pathSafe=false;if(failure==3)failCreateAt=3;
@@ -64,7 +64,7 @@ int main(){std::wstring detail;
   assert(!i.CommitLoadedRemovalStyle(detail));assert(!i.RecheckLoadedRemoval(detail)||failure==0);
  }
  {reset();Inventory i;assert(i.PreflightLoadedRemoval(detail));actual=L"C:\\Windows\\Resources\\Themes\\Aero\\aerolite.msstyles";assert(i.CommitLoadedRemovalStyle(detail));}
- assert(openKeys==0);std::cout<<"PASS: actual all-profile SUT selectors: multiple/offline hives, no session/SID restriction, no preflight writes, two stock selectors per profile, partial failures and rechecks\n";
+ assert(openKeys==0);std::cout<<"PASS: actual loaded-user SUT selectors: zero/multiple loaded hives, no session/SID restriction, no preflight writes, two stock selectors per profile, partial failures and rechecks\n";
 }
 '''.replace('// METHODS','\n'.join(fn(t) for t in ['bool PreflightLoadedRemoval(','bool StockRemovalPaths(','bool VerifyLoadedRemovalStock(','bool RecheckLoadedRemoval(','bool CommitLoadedRemovalStyle(']))
 with tempfile.TemporaryDirectory(prefix='GlassLoadedStyle-') as directory:

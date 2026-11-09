@@ -76,7 +76,9 @@ namespace GlassInstallMsi {
 }
 namespace GlassProfileMaintenance {
  bool preflight=true,recheckStyles=true,commitStyles=true;int preflights=0,commits=0,styleRechecks=0,failStyleAt=0;
+ std::vector<std::pair<std::wstring,std::wstring>> skipped;
  struct Inventory {
+ const auto& SkippedLoadedProfiles()const{return skipped;}
  bool PreflightLoadedRemoval(std::wstring&){++preflights;return preflight;}
  bool RecheckLoadedRemoval(std::wstring&)const{return recheckStyles&&++styleRechecks!=failStyleAt;}
  bool CommitLoadedRemovalStyle(std::wstring&){++commits;return commitStyles;}
@@ -94,18 +96,26 @@ struct InstallEngine {
  std::atomic_bool cancelRequested_{false};int failures=0,warnings=0;
  bool IsCancelRequested()const{return cancelRequested_.load();}
  void SetFailure(const std::wstring&,unsigned){++failures;}
- void AddFinishWarning(const wchar_t*,const wchar_t*){++warnings;}
+ std::vector<std::wstring> warningDetails;
+ void AddFinishWarning(const std::wstring&,const std::wstring& detail){++warnings;warningDetails.push_back(detail);}
  void SetStatus(const std::wstring&,int){}
  bool PrepareSecureUxRemoval() noexcept;bool RemoveOriginalSecureUxTheme() noexcept;bool InstallOriginalSecureUxTheme() noexcept;
 };
 // METHODS
-void Reset(){GlassInstallUtil::lateExternal=false;GlassSecureUxPackage::failRecheckAt=0;GlassProfileMaintenance::styleRechecks=GlassProfileMaintenance::failStyleAt=0;GlassInstallUtil::helperSuccess=true;GlassInstallUtil::styleCalls=0;
+void Reset(){GlassProfileMaintenance::skipped.clear();GlassInstallUtil::lateExternal=false;GlassSecureUxPackage::failRecheckAt=0;GlassProfileMaintenance::styleRechecks=GlassProfileMaintenance::failStyleAt=0;GlassInstallUtil::helperSuccess=true;GlassInstallUtil::styleCalls=0;
  GlassProfileMaintenance::preflight=GlassProfileMaintenance::recheckStyles=GlassProfileMaintenance::commitStyles=true;GlassProfileMaintenance::preflights=GlassProfileMaintenance::commits=0;GlassInstallUtil::overrideAfter=false;GlassInstallUtil::pending=false;GlassInstallUtil::pendingKnown=true;GlassInstallMsi::arpRefreshOk=true;GlassSecureUxPackage::presenceSafe=GlassSecureUxPackage::legacyAbsent=true;GlassSecureUxPackage::installed.clear();
  GlassMaintenanceCache::valid=true;GlassMaintenanceCache::code=L"official";GlassMaintenanceCache::version=L"4.0.0";
  GlassInstallMsi::installs=0;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Inactive;GlassInstallUtil::query=true;
  GlassSecureUxPackage::prepare=GlassSecureUxPackage::recheck=true;
  GlassSecureUxPackage::prepares=GlassSecureUxPackage::rechecks=0;GlassInstallMsi::uninstalls=0;GlassInstallMsi::result=0;}
 int main(){
+ {Reset();InstallEngine e;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;
+  GlassProfileMaintenance::skipped={{L"SID-1008",L"C:\\Users\\OldUser"},{L"SID-1011",L"C:\\Users\\WsiAccount"}};
+  assert(e.PrepareSecureUxRemoval());assert(e.warnings==0);assert(e.RemoveOriginalSecureUxTheme());
+  assert(e.warnings==3&&GlassInstallMsi::uninstalls==1);
+  assert(e.warningDetails[0].find(L"SID-1008")!=std::wstring::npos&&e.warningDetails[1].find(L"WsiAccount")!=std::wstring::npos);
+ }
+
  for(auto state:{GlassInstallUtil::SecureUxThemeState::Active,GlassInstallUtil::SecureUxThemeState::DeactivationPending}){
   for(unsigned result:{0u,3010u}){Reset();InstallEngine e;GlassInstallUtil::state=state;
    assert(e.PrepareSecureUxRemoval());assert(e.secureUxLoadedRemoval_&&GlassInstallUtil::styleCalls==0);

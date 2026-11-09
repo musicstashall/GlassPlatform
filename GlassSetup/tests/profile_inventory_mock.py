@@ -31,7 +31,7 @@ struct Entry{std::wstring sid,path;bool loaded=false;};
 std::vector<Entry> entries;
 struct Handle{int kind,index;};std::map<HKEY,Handle> handles;std::uintptr_t serial=10;
 std::map<std::wstring,DWORD> attributes;
-bool loadBadDb=false,fallbackOk=false;int fallbackCalls=0,ownedUnloads=0;
+bool loadBadDb=false;
 bool enumFail=false,openListFail=false,openEntryFail=false,openHiveFail=false,loadFail=false,invalidSid=false,badPathValue=false,otherSession=false;
 int malformed=0,changeOnCheck=0;
 int offlineLoads=0,cleanChecks=0,cleanWrites=0;int failCheckAt=0,failWriteAt=0;
@@ -74,35 +74,28 @@ int themeChecks=0,themeCommits=0,failThemeCheck=0,failThemeCommit=0;
 namespace GlassSavedThemeCleanup {struct Batch {bool Prepare(const std::wstring&,HKEY,bool (*)(const std::wstring&),std::wstring&){return ++themeChecks!=failThemeCheck;}bool Cleanup(HKEY,bool,bool&,std::wstring&){return ++themeCommits!=failThemeCommit;}};}
 bool IsDesktopProfile(const std::wstring&){return false;}
 '''
-prefix+='\nbool deletedLocal=false;bool DeletedLocalProfile(const std::wstring& sid){return deletedLocal&&sid==L"S-1-5-21-222";}\n'
-prefix+=r'''
-namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
-namespace GlassOfflineUserHive {
- bool Unmount(const std::wstring& name){assert(name==L"owned-test");++ownedUnloads;return true;}
- bool LoadMounted(const std::wstring& path,HKEY& hive,std::wstring& mount,std::wstring&){++fallbackCalls;if(!fallbackOk)return false;
-  for(std::size_t n=0;n<entries.size();++n)if(entries[n].path+L"\\NTUSER.DAT"==path){hive=create(2,n);mount=L"owned-test";return true;}return false;}
-}
-'''
+prefix+=r'namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}'
 profile=s[s.index('struct Profile {'):s.index('inline bool ReadString(')]
 methods='\n'.join(function(token) for token in ('bool OpenAll(', 'bool VerifyInventory(', 'bool PreflightCleanup(', 'bool Cleanup('))
 body=prefix+profile+function('inline bool ReadString(')+function('inline bool SafePath(')+'''\nclass Inventory {
- std::vector<Profile> profiles_;bool skipDeletedLocal_=false;bool removalStylePrepared_=false,removalStyleCommitted_=false;bool cleanupPrepared_=false;bool savedThemeRegistryFallback_=false;
+ std::vector<Profile> profiles_;bool loadedUsersOnly_=false;std::vector<std::pair<std::wstring,std::wstring>> skippedProfiles_;bool removalStylePrepared_=false,removalStyleCommitted_=false;bool cleanupPrepared_=false;bool savedThemeRegistryFallback_=false;
  public:
  const std::vector<Profile>& Profiles() const {return profiles_;}
+ const auto& SkippedLoadedProfiles() const{return skippedProfiles_;}
 '''+methods+'\n};\n'
 main=r'''
-void reset(){loadBadDb=fallbackOk=false;fallbackCalls=ownedUnloads=0;deletedLocal=false;assert(handles.empty());entries={{L"S-1-5-21-111",L"C:\\Users\\A"},{L"S-1-12-1-222",L"C:\\Users\\B"}};attributes.clear();enumFail=openListFail=openEntryFail=openHiveFail=loadFail=invalidSid=badPathValue=otherSession=false;offlineLoads=cleanChecks=cleanWrites=failCheckAt=failWriteAt=malformed=changeOnCheck=0;themeChecks=themeCommits=failThemeCheck=failThemeCommit=0;}
+void reset(){loadBadDb=false;assert(handles.empty());entries={{L"S-1-5-21-111",L"C:\\Users\\A"},{L"S-1-12-1-222",L"C:\\Users\\B"}};attributes.clear();enumFail=openListFail=openEntryFail=openHiveFail=loadFail=invalidSid=badPathValue=otherSession=false;offlineLoads=cleanChecks=cleanWrites=failCheckAt=failWriteAt=malformed=changeOnCheck=0;themeChecks=themeCommits=failThemeCheck=failThemeCommit=0;}
 int main(){
  std::wstring orphanDetail;
- reset();{loadBadDb=fallbackOk=true;entries[0].loaded=true;Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.Profiles().size()==2);assert(fallbackCalls==1);assert(i.VerifyInventory(orphanDetail));}assert(ownedUnloads==1&&handles.empty());
- reset();{loadBadDb=fallbackOk=true;Inventory i;assert(!i.OpenAll(orphanDetail));assert(fallbackCalls==0);} // Never broaden general cleanup loader.
- reset();{loadBadDb=true;fallbackOk=false;Inventory i;assert(!i.OpenAll(orphanDetail,true));assert(fallbackCalls==1&&handles.empty());}
-
- reset();{entries[1].sid=L"S-1-5-21-222";deletedLocal=true;loadFail=true;entries[0].loaded=true;
-  Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.Profiles().size()==1);assert(offlineLoads==0);assert(i.VerifyInventory(orphanDetail));
-  deletedLocal=false;assert(!i.VerifyInventory(orphanDetail));}
- reset();{entries[1].sid=L"S-1-5-21-222";deletedLocal=true;loadFail=true;entries[0].loaded=true;
-  Inventory i;assert(!i.OpenAll(orphanDetail));} // Cleanup remains strict.
+ reset();{loadBadDb=true;entries[0].loaded=true;Inventory i;assert(i.OpenAll(orphanDetail,true));
+  assert(i.Profiles().size()==1&&i.SkippedLoadedProfiles().size()==1&&offlineLoads==0);
+  assert(i.SkippedLoadedProfiles()[0].first==entries[1].sid&&i.SkippedLoadedProfiles()[0].second==entries[1].path);
+  assert(i.VerifyInventory(orphanDetail));entries[1].loaded=true;assert(!i.VerifyInventory(orphanDetail));}
+ reset();{loadFail=true;Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.Profiles().empty()&&i.SkippedLoadedProfiles().size()==2&&offlineLoads==0);assert(i.VerifyInventory(orphanDetail));}
+ reset();{loadFail=true;Inventory i;assert(!i.OpenAll(orphanDetail));} // General cleanup still opens offline hives.
+ reset();{openHiveFail=true;Inventory i;assert(!i.OpenAll(orphanDetail,true));} // Access denied is not an absent key.
+ reset();{entries[0].loaded=true;attributes[L"C:\\Users\\A\\NTUSER.DAT"]=INVALID_FILE_ATTRIBUTES;Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.VerifyInventory(orphanDetail));assert(offlineLoads==0);} // Loaded registry needs no NTUSER file access.
+ reset();{entries[1].sid+=L".bak";Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.SkippedLoadedProfiles().size()==2&&offlineLoads==0);}
 
  std::wstring detail;
  reset();{Inventory i;assert(!i.Cleanup(detail));assert(cleanWrites==0);assert(i.PreflightCleanup(detail));assert(i.Profiles().size()==2&&offlineLoads==2);assert(cleanChecks==3);assert(i.Cleanup(detail));assert(cleanWrites==3);assert(!i.Cleanup(detail));assert(cleanWrites==3);}

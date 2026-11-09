@@ -2,55 +2,25 @@
 #include <windows.h>
 #include <wtsapi32.h>
 #include <sddl.h>
-#include <ntsecapi.h>
-#include <cstring>
 #include <string>
 #include <vector>
 #include <utility>
 #include <RegistrySanity.h>
 #include <SystemVisualStyle.h>
 #include "GlassSavedThemeCleanup.h"
-#include "GlassOfflineUserHive.h"
+#include "GlassInstallLog.h"
 #pragma comment(lib,"Wtsapi32.lib")
 
 namespace GlassProfileMaintenance {
-// Only a confirmed missing account from this machine's SAM may be ignored.
-// Domain lookup failures and cloud identities are never proof of deletion.
-inline bool DeletedLocalProfile(const std::wstring& text) {
-    PSID sid=nullptr;if(!ConvertStringSidToSidW(text.c_str(),&sid))return false;
-    struct FreeSid {PSID p;~FreeSid(){LocalFree(p);}} free{sid};
-    LSA_OBJECT_ATTRIBUTES attributes{};attributes.Length=sizeof(attributes);
-    LSA_HANDLE policy=nullptr;
-    if(LsaOpenPolicy(nullptr,&attributes,POLICY_VIEW_LOCAL_INFORMATION,&policy)!=0)return false;
-    PPOLICY_ACCOUNT_DOMAIN_INFO info=nullptr;
-    const auto status=LsaQueryInformationPolicy(policy,PolicyAccountDomainInformation,reinterpret_cast<void**>(&info));
-    LsaClose(policy);
-    if(status!=0||!info)return false;
-    bool local=false;
-    if(info->DomainSid&&IsValidSid(info->DomainSid)&&IsValidSid(sid)) {
-        const BYTE count=*GetSidSubAuthorityCount(info->DomainSid);
-        local=*GetSidSubAuthorityCount(sid)==count+1 &&
-            std::memcmp(GetSidIdentifierAuthority(sid),GetSidIdentifierAuthority(info->DomainSid),sizeof(SID_IDENTIFIER_AUTHORITY))==0;
-        for(BYTE i=0;local&&i<count;++i)local=*GetSidSubAuthority(sid,i)==*GetSidSubAuthority(info->DomainSid,i);
-    }
-    LsaFreeMemory(info);
-    if(!local){GlassInstallLog::LineFormat(L"Profile account: %s is not confirmed machine-local SAM",text.c_str());return false;}
-    DWORD nameSize=0,domainSize=0;SID_NAME_USE use{};
-    SetLastError(ERROR_SUCCESS);
-    const bool mapped=LookupAccountSidW(nullptr,sid,nullptr,&nameSize,nullptr,&domainSize,&use)!=FALSE;
-    const DWORD lookup=GetLastError();
-    GlassInstallLog::LineFormat(L"Profile account: %s machine-local=1 lookup=%lu deleted=%d",text.c_str(),lookup,!mapped&&lookup==ERROR_NONE_MAPPED?1:0);
-    return !mapped&&lookup==ERROR_NONE_MAPPED;
-}
 struct Profile {
-    std::wstring sid, path, ownedMount;
+    std::wstring sid, path;
     HKEY hive=nullptr;
     GlassSavedThemeCleanup::Batch savedThemes;
     Profile()=default;
     Profile(const Profile&)=delete;
     Profile& operator=(const Profile&)=delete;
-    Profile(Profile&& other) noexcept : sid(std::move(other.sid)),path(std::move(other.path)),ownedMount(std::move(other.ownedMount)),hive(other.hive),savedThemes(std::move(other.savedThemes)) {other.hive=nullptr;other.ownedMount.clear();}
-    ~Profile(){if(hive)RegCloseKey(hive);if(!ownedMount.empty())GlassOfflineUserHive::Unmount(ownedMount);}
+    Profile(Profile&& other) noexcept : sid(std::move(other.sid)),path(std::move(other.path)),hive(other.hive),savedThemes(std::move(other.savedThemes)) {other.hive=nullptr;}
+    ~Profile(){if(hive)RegCloseKey(hive);}
 };
 inline bool ReadString(HKEY key,const wchar_t* name,std::wstring& out) {
     out.clear();
@@ -115,22 +85,24 @@ inline bool IsDesktopProfile(const std::wstring& sid) {
 }
 class Inventory {
     std::vector<Profile> profiles_;
-    bool skipDeletedLocal_=false;
+    bool loadedUsersOnly_=false;
+    std::vector<std::pair<std::wstring,std::wstring>> skippedProfiles_;
     bool cleanupPrepared_=false;
     bool removalStylePrepared_=false;
     bool removalStyleCommitted_=false;
     bool savedThemeRegistryFallback_=false;
 public:
+    const auto& SkippedLoadedProfiles() const noexcept{return skippedProfiles_;}
     bool SavedThemeRegistryFallback() const noexcept{return savedThemeRegistryFallback_;}
     const std::vector<Profile>& Profiles() const noexcept{return profiles_;}
-    // Hives stay open between preflight and commit. Existing SID mounts are
-    // never unloaded; private app hives/owned fallback mounts have scoped cleanup.
-    bool OpenAll(std::wstring& detail,bool skipDeletedLocal=false) {
-        skipDeletedLocal_=skipDeletedLocal;
+    // Existing HKU handles stay pinned through commit. SUT loaded-users-only
+    // mode skips missing HKU keys; general cleanup keeps its offline inventory.
+    bool OpenAll(std::wstring& detail,bool loadedUsersOnly=false) {
+        loadedUsersOnly_=loadedUsersOnly;
         cleanupPrepared_=false;
         removalStylePrepared_=false;removalStyleCommitted_=false;
         savedThemeRegistryFallback_=false;
-        profiles_.clear();
+        profiles_.clear();skippedProfiles_.clear();
         HKEY list=nullptr;
         LONG st=RegOpenKeyExW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList",0,KEY_READ|KEY_WOW64_64KEY,&list);
         if(st!=ERROR_SUCCESS){detail=L"Cannot read ProfileList: "+std::to_wstring(st);return false;}
@@ -142,10 +114,28 @@ public:
             if(st!=ERROR_SUCCESS){detail=L"Cannot enumerate profiles";ok=false;break;}
             const std::wstring sid=name;
             if(sid.rfind(L"S-1-5-21-",0)!=0&&sid.rfind(L"S-1-12-1-",0)!=0)continue;
+            Profile profile;profile.sid=sid;
+            if(loadedUsersOnly_) {
+                const LONG loaded=RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ|KEY_WRITE,&profile.hive);
+                if(loaded==ERROR_FILE_NOT_FOUND) {
+                    HKEY metadata=nullptr;std::wstring path;
+                    if(RegOpenKeyExW(list,name,0,KEY_READ,&metadata)==ERROR_SUCCESS){ReadString(metadata,L"ProfileImagePath",path);RegCloseKey(metadata);}
+                    skippedProfiles_.push_back({sid,path});
+                    GlassInstallLog::LineFormat(L"SecureUxTheme profile skipped: HKEY_USERS\\%s missing; profile=%s; no offline hive load",sid.c_str(),path.c_str());
+                    continue;
+                }
+                if(loaded!=ERROR_SUCCESS){detail=sid+L": cannot access existing HKEY_USERS key: "+std::to_wstring(loaded);ok=false;break;}
+                PSID binary=nullptr;
+                if(!ConvertStringSidToSidW(name,&binary)){detail=L"Invalid loaded profile SID";ok=false;break;}
+                LocalFree(binary);
+                HKEY metadata=nullptr;
+                if(RegOpenKeyExW(list,name,0,KEY_READ,&metadata)==ERROR_SUCCESS){ReadString(metadata,L"ProfileImagePath",profile.path);RegCloseKey(metadata);}
+                profiles_.push_back(std::move(profile));
+                continue; // Registry-only preparation: never inspect NTUSER.DAT.
+            }
             PSID binary=nullptr;
             if(!ConvertStringSidToSidW(name,&binary)){detail=L"Invalid profile SID";ok=false;break;}
             LocalFree(binary);
-            if(skipDeletedLocal_&&DeletedLocalProfile(sid)){GlassInstallLog::LineFormat(L"SecureUxTheme profile: deleted local-account residue ignored: %s",sid.c_str());continue;}
             HKEY entry=nullptr;
             if(RegOpenKeyExW(list,name,0,KEY_READ,&entry)!=ERROR_SUCCESS){detail=sid+L": profile entry unavailable";ok=false;break;}
             std::wstring raw;const bool got=ReadString(entry,L"ProfileImagePath",raw);RegCloseKey(entry);
@@ -166,8 +156,8 @@ public:
                !SafePath(ntuser)) {
                 detail=sid+L": NTUSER.DAT unavailable or unsafe";ok=false;break;
             }
-            Profile profile;profile.sid=sid;profile.path=expanded;
-            st=RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ|KEY_WRITE,&profile.hive);
+            profile.path=expanded;
+            st=profile.hive?ERROR_SUCCESS:RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ|KEY_WRITE,&profile.hive);
             if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){detail=sid+L": loaded hive unavailable: "+std::to_wstring(st);ok=false;break;}
             if(!profile.hive) {
                 const std::wstring file=profile.path+L"\\NTUSER.DAT";
@@ -175,15 +165,7 @@ public:
                 if(attr==INVALID_FILE_ATTRIBUTES){detail=sid+L": NTUSER.DAT unavailable";ok=false;break;}
                 if(!SafePath(file)){detail=sid+L": unsafe or unavailable NTUSER.DAT";ok=false;break;}
                 st=RegLoadAppKeyW(file.c_str(),&profile.hive,KEY_ALL_ACCESS,REG_PROCESS_APPKEY,0);
-                if(st!=ERROR_SUCCESS){
-                    GlassInstallLog::LineFormat(L"Offline user hive: SID=%s path=%s RegLoadAppKey=%ld",sid.c_str(),file.c_str(),st);
-                    std::wstring fallback;
-                    if(st!=ERROR_BADDB||!skipDeletedLocal_||!GlassOfflineUserHive::LoadMounted(file,profile.hive,profile.ownedMount,fallback)) {
-                        detail=sid+L": cannot open offline hive: RegLoadAppKey="+std::to_wstring(st);
-                        if(!fallback.empty())detail+=L"; "+fallback;
-                        ok=false;break;
-                    }
-                }
+                if(st!=ERROR_SUCCESS){detail=sid+L": cannot open offline hive: "+std::to_wstring(st);ok=false;break;}
             }
             profiles_.push_back(std::move(profile));
         }
@@ -206,11 +188,24 @@ public:
             if(status!=ERROR_SUCCESS){detail=L"Cannot re-enumerate profiles";return false;}
             const std::wstring sid=name;
             if(sid.rfind(L"S-1-5-21-",0)!=0&&sid.rfind(L"S-1-12-1-",0)!=0)continue;
-            if(skipDeletedLocal_&&DeletedLocalProfile(sid))continue;
+            bool skipped=false;
+            if(loadedUsersOnly_)for(const auto& entry:skippedProfiles_)if(entry.first==sid){
+                HKEY now=nullptr;const LONG status=RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ,&now);
+                if(now)RegCloseKey(now);
+                if(status!=ERROR_FILE_NOT_FOUND){detail=sid+L": previously missing HKEY_USERS key appeared or became inaccessible; rebuild the plan";return false;}
+                skipped=true;break;
+            }
+            if(skipped)continue;
             std::size_t found=0;
             while(found<profiles_.size() && profiles_[found].sid!=sid)++found;
             if(found==profiles_.size() || seen[found]) {
                 detail=sid+L": profile inventory changed; a fresh preflight is required";return false;
+            }
+            if(loadedUsersOnly_) {
+                HKEY now=nullptr;const LONG current=RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ,&now);
+                if(now)RegCloseKey(now);
+                if(current!=ERROR_SUCCESS){detail=sid+L": loaded user registry key changed; rebuild the plan";return false;}
+                seen[found]=true;continue;
             }
             HKEY entry=nullptr;
             if(RegOpenKeyExW(list,name,0,KEY_READ,&entry)!=ERROR_SUCCESS){detail=sid+L": profile entry unavailable during recheck";return false;}
@@ -235,12 +230,12 @@ public:
         for(bool present:seen)if(!present){detail=L"A profile disappeared; a fresh preflight is required";return false;}
         return true;
     }
-    // Persist stock selectors for every inventoried profile, including offline
-    // hives. Other live sessions finish switching at restart; no logoff is forced.
+    // SUT removal touches only already-loaded HKU profiles. Missing keys are
+    // skipped with finish warnings; never mount offline NTUSER files here.
     bool PreflightLoadedRemoval(std::wstring& detail) {
         removalStylePrepared_=false;removalStyleCommitted_=false;
         if(!OpenAll(detail,true))return false;
-        if(profiles_.empty()){detail=L"No user profiles could be inventoried.";return false;}
+
         for(const auto& profile:profiles_) {
             for(const auto* path:{L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes",L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager"}) {
                 HKEY key=nullptr;
