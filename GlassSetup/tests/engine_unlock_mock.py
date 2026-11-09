@@ -136,7 +136,7 @@ int main(){
  }
  for(unsigned mask:{1u,2u,4u,32u}) {
   Harness h;h.emptyInitially=true;harness=&h;
-  h.expectedLocal=bool(mask&34u);h.expected64=bool(mask&5u);
+  h.expectedLocal=bool(mask&2u);h.expected64=bool(mask&1u);
   InstallEngine e;e.procedureMask_=mask;assert(e.ReleaseLockedModules());
   assert(h.loads==(h.expectedLocal?1:0));
  }

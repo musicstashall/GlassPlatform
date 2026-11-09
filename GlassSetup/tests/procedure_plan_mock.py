@@ -2,6 +2,11 @@
 from pathlib import Path
 import subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
+host=(root/'GlassSetup/src/InstallSupport/GlassInstallHost.cpp').read_text()
+assert 'options.wakeResiduals = true;' in host
+assert 'residualOptions.reason=Shared::GlassStop::Reason::HostDead;' in host
+assert 'residualOptions.wakeResiduals=true;' in host
+# No remote unload/kill is introduced: Request only wakes cooperative queues.
 unins=(root/'GlassSetup/GlassUnins/main.cpp').read_text()
 start=unins.index('        const bool stop64=os64 &&')
 flags=unins[start:unins.index('        bool prior64=',start)]
@@ -30,11 +35,11 @@ int main(){CheckUninsMap();unsigned cases=0;
    if(!os64&&(row==0||row==2||row==3))continue;
    if(action){expected|=bits[row];if(action==1)*choices[row]=true;else s.removeMask|=bits[row];}}
   s.SyncSettings(os64);const auto mask=GlassProcedurePlan::MutationMask(s,os64);assert(mask==expected);
-  assert(GlassProcedurePlan::Platform64(mask)==bool(expected&5));
-  assert(GlassProcedurePlan::Platform32(mask)==bool(expected&34));
+  assert(GlassProcedurePlan::Platform64(mask)==bool(expected&1));
+  assert(GlassProcedurePlan::Platform32(mask)==bool(expected&2));
   assert(GlassProcedurePlan::OpenGlass(mask)==bool(expected&8));
   assert(GlassProcedurePlan::Settings(mask)==bool(expected&36));
-  assert(GlassProcedurePlan::ModuleScan(mask)==bool(expected&39));
+  assert(GlassProcedurePlan::ModuleScan(mask)==bool(expected&3));
   ++cases;
  }
  std::cout<<"PASS: "<<cases<<" Keep/Apply/Remove procedure maps on both OS architectures; no unrelated host expansion\n";

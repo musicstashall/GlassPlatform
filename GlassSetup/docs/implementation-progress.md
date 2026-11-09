@@ -1407,3 +1407,39 @@ MSI. A standalone Setup-owned preparation implementation/helper is preferable
 to blindly invoking an older installed deactivation export with potentially
 different registration/file side effects. This entry records diagnosis only,
 not removal of the dependency. Uploaded source log deleted after analysis.
+
+### Settings-only setup: retained platforms are not stop/scan targets; Unlocker layout
+
+Windows evidence from GlassSetup-11.log and both 20261109_102935 Settings MSI
+logs: selection x64=0/x86=0, mutation mask 0x24 (Settings x64+x86 only).
+Nevertheless both platform tasks were stopped: each graceful wait expired after
+15 seconds; x86 reported 8 residual processes. Both Settings MSI replacements
+completed with code 0. The subsequent module monitor timed out twice with 5
+holders; at 10:39:02 it finally verified all modules unloaded. Thus the supplied
+logs show an unnecessary platform lifecycle operation and persistent residuals,
+not Settings MSI failure. They do not prove a Native unloading implementation
+regression; user reports Settings/context-menu stop succeeds promptly.
+
+Fixed the procedure-map bug: Platform64/Platform32 and ModuleScan now depend
+only on their corresponding platform mutation bits (including explicit removal),
+not Settings bits. Settings-only replacement still closes selected Settings
+processes, but neither stops/restarts retained platforms nor scans their injected
+modules. Selected platform x64/x86 operations remain architecture-scoped; existing
+selected-platform startup logic is unchanged. Exhaustive 486-map test updated.
+
+A concrete stop-path discrepancy was also fixed: Setup disabled wakeResiduals
+while Settings enables it. Setup now requests the same cooperative window/thread
+queue wake, and repeats it after validated Scheduler fallback with HostDead reason.
+No remote FreeLibrary, process kill, Native hook/unload-path or path=1/2/3 change
+was introduced. Added phase/wake diagnostics. This correction is not a Windows
+confirmation that all unload failures are fixed.
+
+Unlocker copy/list now occupy separate vertical lanes; copy has bounded scrolling
+for unusually long localized/host messages. Holder report moved down to y=416,
+row padding/gaps/module spacing reduced. Actual production HTML Chromium tests
+verify RU/EN modules/process modes, no overlap, scrolling and compact row height.
+
+Validation: 80 mock scripts, 70 PASS, same 10 documented failures, no new failures;
+resource source invariants, targeted module-gate/procedure-map and Chromium layout
+checks PASS. No Windows/MSVC build or stop/reinstall runtime validation here.
+Analyzed uploaded log originals removed; screenshots retained.

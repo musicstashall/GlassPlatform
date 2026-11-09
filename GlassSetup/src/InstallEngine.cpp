@@ -492,7 +492,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             // If the picture is not clean, the stage still runs in full.
             if (ok && !vendorOnly && !self->IsCancelRequested()) {
                 if (self->cleanInstall_ || !GlassProcedurePlan::ModuleScan(self->procedureMask_)) {
-                    InstallLog::Line(L"Unlocker: no planned platform/helper module mutation, or clean install - scan skipped");
+                    InstallLog::Line(L"Unlocker: no planned platform module mutation, or clean install - scan skipped");
                 } else {
                     ok = self->ReleaseLockedModules();
                 }
