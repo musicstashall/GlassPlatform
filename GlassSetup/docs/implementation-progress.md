@@ -2086,3 +2086,23 @@ source и явно показывать ограничение конкретн�
 не держать полные исторические комплекты постоянно. Конкретная migration/GC
 реализация, UI статусы и границы atomicity этим обсуждением не утверждены.
 Исходные Log24 и три MSI-лога удалены после фиксации анализа. Runtime code не менялся.
+
+
+## Единая политика Installer по поручению пользователя после Log24
+
+Изучены Microsoft Learn: Visual Studio bootstrapper/installed Installer,
+command-line self-update/cache policy; Windows Installer Best Practices и
+системный cache; MSI SourceList API; MSRC DLL planting guidance. Принята целевая
+архитектура в installer-servicing-policy.md без требования к пользователю выбирать
+технические механизмы. Microsoft не предписывает стороннему EXE конкретную папку
+или handoff protocol; эти части честно помечены нашими engineering decisions.
+
+Аудит обнаружил disabled automatic handoff в CompleteVersionCheck и связь controller
+publication с post-product-commit. В этом этапе подготовлены политика, crash-safe
+порядок обновления, offline/legacy миграция, независимые результаты и последовательность
+реализации. Runtime code НЕ менялся: self-update/restart ещё не реализованы,
+общий maintenance warning пока не устранён. Нельзя объявлять задачу «привести все
+процедуры» завершённой одной документацией или включать ShellExecute без updater,
+receipt/journal и child ACK. Следующий этап: controller transition model и secure
+publisher/handoff, затем ARP/Settings entrypoints и независимый source-store.
+Проверка документационных изменений: git diff --check; Windows тесты неприменимы.
