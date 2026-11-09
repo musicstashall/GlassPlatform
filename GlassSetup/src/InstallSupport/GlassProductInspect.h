@@ -36,7 +36,7 @@ struct ProductReport {
     std::wstring installedVersion; // Compatibility alias for old UI consumers.
     std::wstring installedPackageVersion;
     // Payload version for OpenGlass display only; MSI ordering stays independent.
-    std::wstring installedPayloadVersion,targetPayloadVersion;
+    std::wstring installedPayloadVersion,targetPayloadVersion,remotePayloadVersion;
     std::vector<Reason> reasons;
     std::wstring registryValueNames; // имена некорректных значений реестра (диагностика)
 };

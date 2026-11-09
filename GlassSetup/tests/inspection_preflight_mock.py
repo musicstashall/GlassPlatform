@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
-loop=source[source.index('    std::atomic_bool neverCancel{false};'):source.index('    report.settings=report.settings64.installed?report.settings64:report.settings32;',source.index('    std::atomic_bool neverCancel{false};'))]
+loop=source[source.index('    std::atomic_bool neverCancel{false};'):source.index('    if(report.og.installed&&rootsOk',source.index('    std::atomic_bool neverCancel{false};'))]
 harness=r'''
 #include "GlassSetup/src/InstallSupport/GlassPackageRules.h"
 #include <atomic>

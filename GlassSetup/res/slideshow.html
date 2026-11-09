@@ -1230,6 +1230,9 @@ function paintComponentCard(card,item,input,shelf){
   if(item.id==='secureUxTheme'){
    if(item.localPackageVersion)source('local',ru?'пакет':'package',item.localPackageVersion);
    if(item.releaseTag)source('remote',ru?'релиз':'release',item.remoteVersion||item.releaseTag);
+  }else if(item.id==='openglass'){
+   if(item.targetPayloadVersion)source('local',ru?'пакет':'package',item.targetPayloadVersion);
+   if(item.remotePayloadVersion){source('remote',ru?'на сервере':'on server',item.remotePayloadVersion);marks.lastElementChild.title=ru?'Версия официального релиза OpenGlass':'Official OpenGlass release version';if(item.upstreamUpdateAvailable)marks.lastElementChild.style.fontWeight='700';}
   }else{
    // A verified adjacent MSI isn't evidence of a release-server asset.
    if(item.remoteVersion&&item.remoteVersion===target&&(!item.installed||f.newer))source('remote',ru?'на сервере':'on server',item.remoteVersion);

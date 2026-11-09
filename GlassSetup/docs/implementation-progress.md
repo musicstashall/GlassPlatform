@@ -1519,3 +1519,32 @@ versions. Actual production DOM tests cover OpenGlass display and recommendation
 label after accept/cancel. Managed-removal DOM, Chromium Unlocker, resources and
 build graph pass. No Windows/MSVC/WiX build or real removal validation here.
 Uploaded GlassSetup-13.log removed after analysis; screenshots retained.
+
+### OpenGlass: actual installed DLL and independent upstream release discovery
+
+Clarification: the previous change only displayed File-table payload metadata; it
+still did not discover OpenGlass upstream releases. Implemented independent
+read-only discovery at api.github.com/repos/ALTaleX531/OpenGlass/releases/latest.
+Stable numeric tag versions are parsed separately from GlassPlatform's MSI catalog;
+draft/prerelease/malformed/oversized responses are rejected. Discovery failure is
+logged and never falls back to a bundle version labelled as an OpenGlass release.
+
+Installed “local” version is now read directly from the registered OpenGlass root's
+OpenGlass.dll fixed file-version resource, without loading/executing that DLL.
+The local MSI offer's payload version remains read from its OpenGlass.dll File
+entry. Available-card sources display installed local DLL, local package payload
+(if known) and independent upstream “on server” release version. Newer upstream
+version is compared numerically and its source label emphasized. A newer remote
+GlassPlatform MSI no longer stands in for the upstream OpenGlass version.
+
+Release tags are metadata, not verified downloaded DLL bytes; tooltip identifies
+them as official release versions. Upstream release information does not authorize
+silently installing OpenGlass's separate EXE or relabelling an older local MSI as
+containing a newer upstream version. Existing MSI identity/update/downgrade gates
+are unchanged. No upstream payload installer integration is added by this change.
+
+Validation: 83 mock scripts, 73 PASS, same 10 known failures, no new failures.
+Actual-source OpenGlass parser/PE-reader tests cover numeric tags, drafts,
+prereleases, malformed responses and version-read failures. Production DOM test
+checks independent local/package/server versions. Inspector-loop, resources and
+diff checks PASS. No Windows/MSVC build or real Windows network/UI validation.

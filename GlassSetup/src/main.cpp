@@ -1933,6 +1933,8 @@ private:
                 L",\"installedVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
                 L",\"installedPackageVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
                 L",\"installedPayloadVersion\":"+JsStringLiteral(rep?rep->installedPayloadVersion:L"")+
+                L",\"remotePayloadVersion\":"+JsStringLiteral(rep?rep->remotePayloadVersion:L"")+
+                L",\"upstreamUpdateAvailable\":"+((rep&&!rep->installedPayloadVersion.empty()&&!rep->remotePayloadVersion.empty()&&VersionOlder(rep->installedPayloadVersion,rep->remotePayloadVersion))?L"true":L"false")+
                 L",\"targetPayloadVersion\":"+JsStringLiteral(rep&&targetVersion==rep->targetVersion?rep->targetPayloadVersion:L"")+
                 L",\"targetVersion\":"+JsStringLiteral(targetVersion)+
                 L",\"remoteVersion\":"+JsStringLiteral(remoteVersion)+

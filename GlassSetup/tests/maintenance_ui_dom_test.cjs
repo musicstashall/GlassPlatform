@@ -234,7 +234,7 @@ assert.equal(d.querySelectorAll('#components-plan-items li:not(.plan-warning):no
 // MSI package versions win over obsolete PE/bundle display fields. Available
 // shows its own candidate, not the installed version copied onto both panels.
 const versions=rows.map((r,i)=>({...r,checked:false,installed:i<5,operation:'repair',disabled:false,
- installedPayloadVersion:r.id==='openglass'?'1.5.0':undefined,targetPayloadVersion:r.id==='openglass'?'1.6.0':undefined,
+ remotePayloadVersion:r.id==='openglass'?'3.0.2.3749':undefined,installedPayloadVersion:r.id==='openglass'?'1.5.0':undefined,targetPayloadVersion:r.id==='openglass'?'1.6.0':undefined,
  installedVersion:'99.0.0.999',installedPackageVersion:(i+1)+'.2.3',targetVersion:(i+2)+'.4.5',
  updateAvailable:i===0,broken:i===0,applySupported:true}));
 receive({data:{type:'state',page:'components',appMode:'setup',locale:'en',components:versions}});
@@ -245,6 +245,8 @@ for(let i=0;i<5;i++){
  const offer=d.querySelector('[data-catalog-alias="'+rows[i].id+'"]');
  assert.ok(offer);assert.ok(offer.querySelector('.c-meta').textContent.includes(rows[i].id==='openglass'?'1.6.0':(i+2)+'.4.5'));
 }
+assert.match(d.querySelector('[data-catalog-alias="openglass"] .c-src').textContent,/local 1\.5\.0/);
+assert.match(d.querySelector('[data-catalog-alias="openglass"] .c-src').textContent,/on server 3\.0\.2\.3749/);
 assert.ok(d.querySelector('#product-x64').closest('.c-card').classList.contains('is-broken'));
 assert.equal(d.querySelector('[data-catalog-alias="x64"] .comp-decision').title,'Update to 2.4.5');
 receive({data:{type:'state',components:[{...versions[2],installed:true,installedVersion:'99.0.0',installedPackageVersion:'',targetVersion:'',applySupported:false}]}});

@@ -1,6 +1,8 @@
 #include "GlassProductInspect.h"
 #include "GlassPackageAcquisition.h"
 #include "GlassPackageCatalog.h"
+#include "GlassOpenGlassRelease.h"
+#include "GlassReleaseClient.h"
 #include "GlassMaintenanceCache.h"
 #include <SecureUxThemeInventory.h>
 
@@ -379,6 +381,19 @@ bool FileHasSameSignerAsSetup(const std::wstring& path) noexcept
     return !hex.empty() && _wcsicmp(hex.c_str(), self.c_str()) == 0;
 }
 
+// Read the installed DLL's fixed file version without loading/executing it.
+static std::wstring OpenGlassDllVersion(const std::wstring& path) {
+    DWORD ignored=0;const DWORD bytes=GetFileVersionInfoSizeW(path.c_str(),&ignored);
+    if(!bytes||bytes>1024*1024)return {};
+    std::vector<BYTE> data(bytes);
+    if(!GetFileVersionInfoW(path.c_str(),0,bytes,data.data()))return {};
+    VS_FIXEDFILEINFO* info=nullptr;UINT size=0;
+    if(!VerQueryValueW(data.data(),L"\\",reinterpret_cast<void**>(&info),&size)||
+       size<sizeof(*info)||!info||info->dwSignature!=0xfeef04bd)return {};
+    return std::to_wstring(HIWORD(info->dwFileVersionMS))+L"."+std::to_wstring(LOWORD(info->dwFileVersionMS))+L"."+
+        std::to_wstring(HIWORD(info->dwFileVersionLS))+L"."+std::to_wstring(LOWORD(info->dwFileVersionLS));
+}
+
 Report Run(const Inputs& in)
 {
     Report report;
@@ -502,6 +517,16 @@ Report Run(const Inputs& in)
         if(!reference.empty() && InstalledBaselineMatches(reference,installedCode) && GlassInstallMsi::CheckProductContexts(installedCode,contextDetail)==GlassInstallMsi::ProductPathCheck::Safe)
             job.rep->integrityKnown=CheckProductFiles(reference,installedCode,signerSha1,*job.rep,job.product==GlassPackageCatalog::Product::OpenGlass);
         if(!job.rep->integrityKnown)AddReason(*job.rep,Reason::InspectionUnavailable);
+    }
+    if(report.og.installed&&rootsOk&&!roots.openGlass.empty())
+        report.og.installedPayloadVersion=OpenGlassDllVersion(roots.openGlass+L"\\OpenGlass.dll");
+    if(in.inspectSources&&!cancel.load()) {
+        std::string text,version;std::wstring error;
+        if(GlassReleaseClient::Get(L"https://api.github.com/repos/ALTaleX531/OpenGlass/releases/latest",INVALID_HANDLE_VALUE,&text,1024*1024,cancel,error)&&
+           GlassOpenGlassRelease::Parse(text,version)) {
+            report.og.remotePayloadVersion=GlassReleaseClient::Wide(version);
+            GlassInstallLog::LineFormat(L"OpenGlass upstream release: %s; local DLL: %s",report.og.remotePayloadVersion.c_str(),report.og.installedPayloadVersion.c_str());
+        }else GlassInstallLog::LineFormat(L"OpenGlass upstream release unavailable: %s",error.c_str());
     }
     report.settings=report.settings64.installed?report.settings64:report.settings32;
     report.settings.damaged=report.settings64.damaged||report.settings32.damaged;
