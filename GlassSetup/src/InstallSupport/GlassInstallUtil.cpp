@@ -7,6 +7,7 @@
 #include <softpub.h>
 #include <wincrypt.h>
 #include <InjectModuleScan.h>
+#include <Helpers/ThemeHelper.h>
 #include <algorithm>
 #include <array>
 #include <GlassShellMenuConstants.h>
@@ -1784,23 +1785,28 @@ bool InvokeSecureUxThemeDeactivate(
     return true;
 }
 
-bool SecureUxRemovalStyleHelperAvailable(const std::wstring& x64Dir,const std::wstring& x86Dir) noexcept {
-    const auto arch=IsOs64Bit()?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
-    return !InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,"GlassSettings_SecureUxThemePrepareRemovalV2W").empty();
-}
 bool PrepareSecureUxRemovalVisualStyle(const std::wstring& x64Dir,const std::wstring& x86Dir,
     SecureUxThemeDeactivateRun* run,std::wstring* detail) noexcept {
+    (void)x64Dir;(void)x86Dir; // No dependency on installed Settings or Native exports.
     if(run)*run={};
-    const auto arch=IsOs64Bit()?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
-    const auto dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,"GlassSettings_SecureUxThemePrepareRemovalV2W");
-    const auto rundll=IsOs64Bit()?NativeRundll64():RundllPathForTaskArch(arch);
-    if(dll.empty()||rundll.empty()){if(detail)*detail=L"Update the OS-native GlassSettings MSI: its trusted style-only removal helper V2 is required.";return false;}
-    const auto command=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemePrepareRemovalV2W";
-    DWORD code=MAXDWORD;bool started=false,completed=false;
-    const bool ok=RunHiddenCommand(command,&code,45000,&started,&completed);
-    GlassInstallLog::LineFormat(L"SecureUxTheme style-only removal helper V2: ran=%d started=%d completed=%d code=%lu",ok?1:0,started?1:0,completed?1:0,code);
-    if(!ok||!started||!completed||code!=0){if(detail)*detail=L"Style-only removal preparation failed or did not complete; MSI has not been removed. The live style may already be reset.";return false;}
-    if(run)run->ran=true;return true;
+    try {
+        wchar_t windows[32768]{};const UINT n=GetWindowsDirectoryW(windows,32768);
+        if(!n||n>=32768){if(detail)*detail=L"Cannot resolve the Windows stock visual style.";return false;}
+        const std::wstring stock=std::wstring(windows)+L"\\Resources\\Themes\\Aero\\aero.msstyles";
+        const DWORD attributes=GetFileAttributesW(stock.c_str());
+        if(attributes==INVALID_FILE_ATTRIBUTES||(attributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))){if(detail)*detail=L"Windows stock aero.msstyles is unavailable.";return false;}
+        DWORD fonts=0,bytes=sizeof(fonts);
+        (void)RegGetValueW(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform\\GlassSettings",L"EnableSystemFont",RRF_RT_REG_DWORD,nullptr,&fonts,&bytes);
+        // Same style-only operation as Settings: no full theme application,
+        // registration changes, system file deletion or installed DLL invocation.
+        const HRESULT hr=Shared::ThemeHelper::SetSystemVisualStyle(stock.c_str(),L"NormalColor",L"NormalSize",fonts?65:0);
+        wchar_t actual[32768]{},color[256]{},size[256]{};
+        const bool verified=SUCCEEDED(hr)&&SUCCEEDED(GetCurrentThemeName(actual,32768,color,256,size,256))&&!_wcsicmp(actual,stock.c_str());
+        GlassInstallLog::LineFormat(L"SecureUxTheme Setup-owned stock style: hr=0x%08lX verified=%d",static_cast<unsigned long>(hr),verified?1:0);
+        if(!verified){if(detail)*detail=L"Setup could not apply/verify the Windows stock visual style; MSI has not been removed. The style may already have changed.";return false;}
+        if(run)run->ran=true;
+        return true;
+    }catch(...){if(detail)*detail=L"Setup stock-style preparation failed; the style may already have changed.";return false;}
 }
 
 bool QuerySecureUxPendingFileOperations(bool& pending) noexcept {

@@ -25,7 +25,7 @@ harness=r'''
 using UINT=unsigned;
 #define _wcsicmp wcscasecmp
 #include <cwchar>
-constexpr UINT ERROR_RETRY=1237,ERROR_SUCCESS=0,ERROR_INSTALL_PACKAGE_REJECTED=1625,ERROR_SUCCESS_REBOOT_REQUIRED=3010,
+constexpr UINT ERROR_INVALID_STATE=5023,ERROR_RETRY=1237,ERROR_SUCCESS=0,ERROR_INSTALL_PACKAGE_REJECTED=1625,ERROR_SUCCESS_REBOOT_REQUIRED=3010,
  ERROR_SUCCESS_REBOOT_INITIATED=1641,INSTALLLOGMODE_VERBOSE=1,INSTALLLOGATTRIBUTES_FLUSHEACHLINE=1;
 constexpr int LANG_RUSSIAN=25;
 #define PRIMARYLANGID(x) (x)
@@ -40,9 +40,8 @@ namespace GlassInstallUtil {
  enum class SecureUxThemeState {Unavailable,Inactive,Active,ActivationPending,DeactivationPending,External,Conflict};
  SecureUxThemeState state=SecureUxThemeState::Inactive;bool query=true;
  bool IsOs64Bit(){return true;}
- bool helperAvailable=true,helperSuccess=true,lateExternal=false;int styleCalls=0;
+ bool helperSuccess=true,lateExternal=false;int styleCalls=0;
  struct SecureUxThemeDeactivateRun {bool ran=false,themeNotRestored=false,skippedExternalInstall=false;};
- bool SecureUxRemovalStyleHelperAvailable(const std::wstring&,const std::wstring&){return helperAvailable;}
  bool PrepareSecureUxRemovalVisualStyle(const std::wstring&,const std::wstring&,SecureUxThemeDeactivateRun* run,std::wstring*){++styleCalls;if(lateExternal)state=SecureUxThemeState::External;run->ran=helperSuccess;return helperSuccess;}
  bool pending=false,pendingKnown=true,overrideAfter=false;SecureUxThemeState after=SecureUxThemeState::Inactive;
  bool QuerySecureUxPendingFileOperations(bool& out){out=pending;return pendingKnown;}
@@ -100,7 +99,7 @@ struct InstallEngine {
  bool PrepareSecureUxRemoval() noexcept;bool RemoveOriginalSecureUxTheme() noexcept;bool InstallOriginalSecureUxTheme() noexcept;
 };
 // METHODS
-void Reset(){GlassInstallUtil::lateExternal=false;GlassSecureUxPackage::failRecheckAt=0;GlassProfileMaintenance::styleRechecks=GlassProfileMaintenance::failStyleAt=0;GlassInstallUtil::helperAvailable=GlassInstallUtil::helperSuccess=true;GlassInstallUtil::styleCalls=0;
+void Reset(){GlassInstallUtil::lateExternal=false;GlassSecureUxPackage::failRecheckAt=0;GlassProfileMaintenance::styleRechecks=GlassProfileMaintenance::failStyleAt=0;GlassInstallUtil::helperSuccess=true;GlassInstallUtil::styleCalls=0;
  GlassProfileMaintenance::preflight=GlassProfileMaintenance::recheckStyles=GlassProfileMaintenance::commitStyles=true;GlassProfileMaintenance::preflights=GlassProfileMaintenance::commits=0;GlassInstallUtil::overrideAfter=false;GlassInstallUtil::pending=false;GlassInstallUtil::pendingKnown=true;GlassInstallMsi::arpRefreshOk=true;GlassSecureUxPackage::presenceSafe=GlassSecureUxPackage::legacyAbsent=true;GlassSecureUxPackage::installed.clear();
  GlassMaintenanceCache::valid=true;GlassMaintenanceCache::code=L"official";GlassMaintenanceCache::version=L"4.0.0";
  GlassInstallMsi::installs=0;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Inactive;GlassInstallUtil::query=true;
@@ -124,8 +123,7 @@ int main(){
  {Reset();InstallEngine e;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;assert(e.PrepareSecureUxRemoval());
   GlassInstallUtil::overrideAfter=true;GlassInstallUtil::after=GlassInstallUtil::SecureUxThemeState::Inactive;
   assert(e.RemoveOriginalSecureUxTheme());assert(e.warnings==1);}
- for(int failure=0;failure<6;++failure){Reset();InstallEngine e;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;
-  if(failure==0)GlassInstallUtil::helperAvailable=false;
+ for(int failure=1;failure<6;++failure){Reset();InstallEngine e;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;
   if(failure==1)GlassProfileMaintenance::preflight=false;
   if(failure<2){assert(!e.PrepareSecureUxRemoval());assert(GlassInstallUtil::styleCalls==0&&GlassSecureUxPackage::prepares==0);continue;}
   assert(e.PrepareSecureUxRemoval());

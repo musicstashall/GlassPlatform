@@ -109,7 +109,8 @@ Offline-reset должен согласованно учитывать ThemeMana
 Loaded removal inventories all ProfileList user profiles and pins their loaded
 or privately opened offline hives. It no longer requires exactly one profile,
 matching elevated/desktop SIDs or an absence of other sessions. Before the original
-MSI, the installed OS-native style-only V2 helper switches the current session;
+MSI, Setup switches the current session itself through the shared
+ThemeHelper::SetSystemVisualStyle implementation (no installed V2 export);
 Setup then writes/verifies each profile's `Themes/CurrentTheme` to Windows
 `Resources/Themes/aero.theme` and `ThemeManager/DllName` to Windows
 `Resources/Themes/Aero/aero.msstyles`. Missing selector keys can be created.
@@ -125,6 +126,7 @@ blocks that MSI and reports the profile SID/value; earlier style/selector change
 can remain. There is no automatic custom-style restore or atomic multi-profile
 rollback. Concurrent profile creation/theme changes are not locked globally.
 
-The installed OS-native V2 helper must remain available through the last vendor
-transaction, so its same-plan Settings removal is still refused. This is distinct
-from restrictions on profile count or other sessions, which are removed.
+Runtime queries still use the installed OS-native Settings helper, so its
+same-plan removal is still refused. Stock-style preparation itself no longer
+requires a particular installed Settings version or any V2 export. Restrictions
+on profile count or other sessions remain removed.

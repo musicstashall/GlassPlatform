@@ -1443,3 +1443,36 @@ Validation: 80 mock scripts, 70 PASS, same 10 documented failures, no new failur
 resource source invariants, targeted module-gate/procedure-map and Chromium layout
 checks PASS. No Windows/MSVC build or stop/reinstall runtime validation here.
 Analyzed uploaded log originals removed; screenshots retained.
+
+
+### Windows retry and removal of the installed V2 style dependency
+
+GlassSetup-12.log (2026-11-09 10:56–10:57): native runtime query succeeds with
+Active=2, original vendor MSI installed state=5, local original x64 MSI 4.0.0
+found. Removal again stops at the combined file/architecture/required-export
+validation for installed GlassSettings.Native.dll and PrepareRemovalV2W. This
+log does not independently distinguish an absent export from the other checks.
+There is no style-switch attempt or vendor uninstall. GitHub discovery HTTP 403
+is unrelated to this local preflight failure. Error 1625 was raised by Setup,
+causing a misleading Windows-policy caption; no Windows policy denial is proven.
+User reports having updated Settings; another Settings reinstall is not a fix
+we should require. Uploaded original log deleted after analysis.
+
+Implemented Setup-owned stock-style preparation using the same linked shared
+ThemeHelper::SetSystemVisualStyle used by Settings (NormalColor/NormalSize,
+EnableSystemFont flag parity), followed by exact live-style path verification.
+No installed DLL, rundll32 or V2 export is used for this operation. Removed the
+V2 capability gate. All-profile selector preparation, original vendor MSI
+revalidation and loaded-runtime reboot handling remain. Preflight failures now
+use ERROR_INVALID_STATE, not the Windows-policy/MSI-rejection code 1625.
+
+Existing runtime queries still use the installed helper; the same-plan removal
+of OS-native Settings remains blocked for that separate reason. This change
+fixes the specific reported V2 barrier, not every possible profile/MSI failure.
+
+Validation: 81 mock scripts, 71 PASS, the same 10 documented known failures,
+zero new failures. New actual-source ASan/UBSan harness covers no installed
+Settings path, missing stock file, invalid attributes, apply HRESULT/readback
+failure, wrong live path and font-flag parity. Worker, resources and build graph
+checks PASS. Shared helper include path verified. No Windows/MSVC/WiX build or
+real loaded vendor uninstall was performed in this Linux environment.

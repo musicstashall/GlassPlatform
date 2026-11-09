@@ -1315,8 +1315,7 @@ bool InstallEngine::PrepareSecureUxRemoval() noexcept {
         secureUxLoadedRemoval_=!GlassProducts::SecureUxUnloadedRemoval(state);
         try {
             if(secureUxLoadedRemoval_) {
-                if(selection_.Removes(GlassInstallUtil::IsOs64Bit()?2u:5u))error=L"Remove SecureUxTheme first while retaining OS-native GlassSettings; its style-only helper must remain installed through the last vendor transaction.";
-                else if(!GlassInstallUtil::SecureUxRemovalStyleHelperAvailable(x64Dir_,x86Dir_))error=L"Update the OS-native GlassSettings MSI: style-only removal helper V2 is required for loaded SecureUxTheme.";
+                if(selection_.Removes(GlassInstallUtil::IsOs64Bit()?2u:5u))error=L"Remove SecureUxTheme first while retaining OS-native GlassSettings; its runtime-query helper must remain installed through the last vendor transaction.";
                 else if(secureUxRemovalProfiles_.PreflightLoadedRemoval(error)) {
                     if(GlassSecureUxPackage::PrepareRemoval(tempDir_,secureUxRemovalCode_,cancelRequested_,secureUxRemoval_,error))return true;
                 }
@@ -1325,8 +1324,8 @@ bool InstallEngine::PrepareSecureUxRemoval() noexcept {
     }
     InstallLog::LineFormat(L"Vendor removal preflight refused: %s",error.c_str());
     if(!IsCancelRequested())SetFailure(PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?
-        L"Удаление SecureUxTheme остановлено до изменений. Проверка MSI, профиля или helper не пройдена. "+error:
-        L"SecureUxTheme removal stopped before changes. MSI/profile/helper preflight failed. "+error,ERROR_INSTALL_PACKAGE_REJECTED);
+        L"Удаление SecureUxTheme остановлено до изменений. Проверка MSI или профилей не пройдена. "+error:
+        L"SecureUxTheme removal stopped before changes. MSI/profile preflight failed. "+error,ERROR_INVALID_STATE);
     return false;
 }
 
