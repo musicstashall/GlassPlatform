@@ -1,3 +1,25 @@
+# Controller store/handoff — 2026-11-04
+
+Подключена независимая публикация Setup/Unins до продуктовых действий, выбор
+версии без downgrade, проверка Authenticode, READY/COMMIT child handoff, startup
+rollback/GC, ARP migration и Settings Active resolver. Exact MSI sources остаются
+отдельно; локальный layout передаётся только как недоверенная discovery hint.
+Подробности и ограничения: [installer-servicing-policy.md §10](installer-servicing-policy.md#10-подключённый-runtime-controller-2026-11-04).
+
+Проверки: четыре новых actual-source controller mock, resource smoke, SUT build
+graph и четыре production DOM теста PASS. Финальная полная регрессия:
+**92 теста, 82 PASS, 10 известных baseline FAIL** (module_scan,
+platform_mutex, preserve_registry, registered_paths, scan_protocol,
+task_close_cleanup, task_scheduler_stop, unins_close_state, unins_task_stop,
+watch_lifecycle). Новых сбоев в этом прогоне нет.
+
+Windows/MSVC/WiX/.NET сборка недоступна в этом Linux sandbox. Реальные ACL,
+подписи, процессный handoff и Windows acceptance не подтверждены. Нет final
+postcommit ACK, полного crash-journal replay, отдельного удаления controller и
+reference-counted source GC. Не считать реализацию всей servicing policy принятой.
+
+---
+
 # Текущий этап: пустые панели, Settings-only без Launching, ярлык в GlassUnins
 
 Пользователь подтвердил успешную Windows-сборку **предыдущей** ревизии и работу

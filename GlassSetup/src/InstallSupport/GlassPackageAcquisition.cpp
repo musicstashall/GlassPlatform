@@ -1,3 +1,4 @@
+#include "GlassSetupSourceLayout.h"
 #include "GlassPackageAcquisition.h"
 #include "GlassReleaseClient.h"
 #include "GlassMaintenanceCache.h"
@@ -188,6 +189,7 @@ static bool Discover(GlassPackageCatalog::Product product,const GlassPackageCata
         wchar_t exe[32768]{};const DWORD length=GetModuleFileNameW(nullptr,exe,32768);
         if(!length||length>=32768)return Fail(error,L"Cannot locate installer directory");
         std::wstring parent(exe,length);parent=parent.substr(0,parent.find_last_of(L"\\/"));
+        if(!GlassSetupSourceLayout::directory.empty())parent=GlassSetupSourceLayout::directory;
         const std::array<std::wstring,3> paths={GlassMaintenanceCache::CurrentFile(name.c_str()),
             parent+L"\\packages\\"+name,parent+L"\\"+name};
         const auto rejected=[&](const std::wstring& path,const std::wstring& reason) {

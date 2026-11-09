@@ -21,6 +21,7 @@ assert 'GlassSecureUxPackage::Describe(cancel,report.secureUxOffer' in (root/'Gl
 h=r'''
 #include "GlassSetup/src/InstallSupport/GlassSecureUxRelease.h"
 #include <atomic>
+#include "GlassSetup/src/InstallSupport/GlassSetupSourceLayout.h"
 #include <cassert>
 #include <cwchar>
 #include <fstream>

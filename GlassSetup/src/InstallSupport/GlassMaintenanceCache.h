@@ -117,7 +117,53 @@ inline bool EnsureRoot() {
     Diag::Step(L"create-owned-root",root);
     return SecureDirectory(root);
 }
+// Independent controller store. The record contains Setup SHA256 + Unins SHA256,
+// not paths. Immutable code folders are addressed by the Setup digest.
+inline bool ControllerRecordValid(const std::string& record) {
+    if(record.size()!=128)return false;
+    for(char c:record)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')))return false;
+    return true;
+}
+inline std::string ReadControllerRecord(const wchar_t* name=L"Active") {
+    const auto root=Root(),store=root+L"\\Installer";
+    if(root.empty()||!TrustedDirectory(root)||!TrustedDirectory(store))return {};
+    const auto path=store+L"\\"+name;
+    if(!GlassInstallUtil::IsSafeInstallPath(path)||!TrustedPath(path,false))return {};
+    HANDLE file=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return {};
+    char bytes[129]{};DWORD count=0;
+    const bool ok=ReadFile(file,bytes,sizeof(bytes),&count,nullptr)!=FALSE;
+    CloseHandle(file);
+    const std::string record(bytes,count);
+    return ok&&ControllerRecordValid(record)?record:std::string{};
+}
+inline std::string ControllerDigest(const std::wstring& path) {
+    std::array<BYTE,32> hash{};if(!GlassRegisteredMsi::Hash(path,hash))return {};
+    constexpr char hex[]="0123456789abcdef";std::string out;
+    for(BYTE b:hash){out+=hex[b>>4];out+=hex[b&15];}return out;
+}
+inline std::wstring ControllerFileForRecord(const std::string& record,const wchar_t* name) {
+    if(!ControllerRecordValid(record)||(wcscmp(name,L"GlassSetup.exe")&&wcscmp(name,L"GlassUnins.exe")))return {};
+    const auto root=Root(),store=root+L"\\Installer";
+    const auto hash=record.substr(0,64);
+    const auto folder=store+L"\\"+std::wstring(hash.begin(),hash.end());
+    if(!TrustedDirectory(root)||!TrustedDirectory(store)||!TrustedDirectory(folder))return {};
+    const auto file=folder+L"\\"+name;
+    if(!GlassInstallUtil::IsSafeInstallPath(file)||!TrustedPath(file,false))return {};
+    const auto expected=record.substr(wcscmp(name,L"GlassSetup.exe")?64:0,64);
+    return ControllerDigest(file)==expected?file:std::wstring{};
+}
+inline std::wstring ControllerFile(const wchar_t* name) {
+    const auto root=Root();
+    if(root.empty()||GetFileAttributesW((root+L"\\Installer\\Active").c_str())==INVALID_FILE_ATTRIBUTES)return {};
+    return ControllerFileForRecord(ReadControllerRecord(),name);
+}
 inline std::wstring CurrentFile(const wchar_t* name) {
+    if(!wcscmp(name,L"GlassSetup.exe")||!wcscmp(name,L"GlassUnins.exe")) {
+        const auto root=Root();
+        if(!root.empty()&&GetFileAttributesW((root+L"\\Installer\\Active").c_str())!=INVALID_FILE_ATTRIBUTES)
+            return ControllerFile(name); // Do not downgrade to legacy on a corrupt active record.
+    }
     const auto root=Root();const auto current=root+L"\\Current";
     if(root.empty())return {};
     const DWORD currentAttributes=GetFileAttributesW(current.c_str());
@@ -387,18 +433,22 @@ inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT 
     }
     Diag::Step(L"prepare-staging",stage);
     if(!RemoveFlat(stage)||!SecureDirectory(stage))return false;
-    Diag::Step(L"copy-setup",stage+L"\\GlassSetup.exe");
-    wchar_t exe[32768]{};const DWORD length=GetModuleFileNameW(nullptr,exe,32768);
-    if(!length)return Diag::Fail(L"GetModuleFileNameW",L"current Setup",GetLastError());
-    if(length>=32768)return Diag::Fail(L"GetModuleFileNameW",L"current Setup",ERROR_INSUFFICIENT_BUFFER);
-    if(!CopyFileW(exe,(stage+L"\\GlassSetup.exe").c_str(),TRUE))return Diag::Fail(L"CopyFileW",stage+L"\\GlassSetup.exe",GetLastError(),L"source="+std::wstring(exe));
-    const auto extract=[&](UINT id,const wchar_t* file) {
-        const auto path=stage+L"\\"+file;
-        Diag::Step(L"extract-resource",path);
-        return GlassInstallUtil::ExtractResourceToFile(instance,id,RT_RCDATA,path)?true:
-            Diag::Fail(L"ExtractResourceToFile",path,GetLastError(),L"resourceId="+std::to_wstring(id));
-    };
-    if(!extract(uninstallerResource,L"GlassUnins.exe"))return false;
+    // The immutable controller is committed before MSI work. Keep executable
+    // publication here only for compatibility with older callers/installations.
+    if(ControllerFile(L"GlassSetup.exe").empty()) {
+        Diag::Step(L"copy-setup",stage+L"\\GlassSetup.exe");
+        wchar_t exe[32768]{};const DWORD length=GetModuleFileNameW(nullptr,exe,32768);
+        if(!length)return Diag::Fail(L"GetModuleFileNameW",L"current Setup",GetLastError());
+        if(length>=32768)return Diag::Fail(L"GetModuleFileNameW",L"current Setup",ERROR_INSUFFICIENT_BUFFER);
+        if(!CopyFileW(exe,(stage+L"\\GlassSetup.exe").c_str(),TRUE))return Diag::Fail(L"CopyFileW",stage+L"\\GlassSetup.exe",GetLastError(),L"source="+std::wstring(exe));
+        const auto extract=[&](UINT id,const wchar_t* file) {
+            const auto path=stage+L"\\"+file;
+            Diag::Step(L"extract-resource",path);
+            return GlassInstallUtil::ExtractResourceToFile(instance,id,RT_RCDATA,path)?true:
+                Diag::Fail(L"ExtractResourceToFile",path,GetLastError(),L"resourceId="+std::to_wstring(id));
+        };
+        if(!extract(uninstallerResource,L"GlassUnins.exe"))return false;
+    }
     for(std::size_t i=0;i<count;++i) {
         if(blobs[i].source) {
             const std::wstring source=blobs[i].source,destination=stage+L"\\"+blobs[i].file;

@@ -34,6 +34,7 @@
 #include "InstallSupport/GlassInstallUtil.h"
 #include "InstallSupport/GlassProductInspect.h"
 #include "InstallSupport/GlassMaintenanceLaunch.h"
+#include "InstallSupport/GlassSetupSourceLayout.h"
 #include "InstallSupport/GlassPackageAcquisition.h"
 #include "InstallSupport/GlassMaintenanceCache.h"
 #include <GlassInstallerLaunch.h>
@@ -1588,11 +1589,13 @@ private:
         KillTimer(window,kStartupPollTimer);
         startupPending_=false;
         if (!result.ok) {
+            FinalizeControllerStartup(false);
             errorReason_=Text(IDS_STARTUP_FAILED);
             SetPage(Page::Error);
             return;
         }
         if (gAlreadyRunning) { SetPage(Page::AlreadyRunning); return; }
+        FinalizeControllerStartup(true);
         platformVersion_=std::move(result.platformVersion);
         eulaText_=std::move(result.eulaText);
         SetWindowTextW(eula_,eulaText_.c_str());
@@ -1627,8 +1630,14 @@ private:
             ContinueVersionCheck();
             if (!maintenanceFocusProduct_.empty())
                 InstallLog::LineFormat(L"Maintenance focus product: %s",maintenanceFocusProduct_.c_str());
+        } else if(result.runtimeInstalled) {
+#ifdef _DEBUG
+            if(debugDemoPending_)SetPage(Page::Welcome);
+            else
+#endif
+                ContinueVersionCheck(); // Update the controller before exposing product choices.
         } else {
-            SetPage(result.runtimeInstalled ? Page::Welcome : Page::RuntimeRequired);
+            SetPage(Page::RuntimeRequired);
         }
         // WebView2 environment and controller creation must stay on the UI STA.
         if (result.runtimeInstalled && !PostMessageW(window,kInitWebView,0,0))
@@ -2844,6 +2853,22 @@ private:
         InstallLog::Line(L"Conflict recheck passed; resuming setup version check");
         ContinueVersionCheck();
     }
+    bool TransitionController(const std::wstring& prepared) {
+        std::wstring error;
+        const auto result=EnsureCurrentController(prepared,maintenanceMode_,maintenanceFocusProduct_,error);
+        if(result==ControllerTransition::Transferred) {
+            DestroyWindow(window);return true;
+        }
+        if(result==ControllerTransition::Failed) {
+            InstallLog::LineFormat(L"Controller update failed; current compatible Setup retained: %s",error.c_str());
+            const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
+            ShowInstallError(std::wstring(ru?
+                L"Не удалось обновить оболочку обслуживания. Продукты не изменены.\n":
+                L"The maintenance controller could not be updated. Products have not been changed.\n")+error);
+            return true;
+        }
+        return false;
+    }
     void CompleteVersionCheck() {
         if (page_ != Page::Checking) return;
         VersionCheckResult result;
@@ -2857,6 +2882,8 @@ private:
         if(!inspectionApplied_)return;
         releaseCatalog_=result.catalog;
         versionCheckHandled_ = true;
+        if(TransitionController(result.preparedSetup))return;
+        if(!RunPreflightChecks())return;
         if (!result.fetched) {
             InstallLog::Line(L"Version check: fetch failed or skipped; continuing with this setup");
 
@@ -2871,11 +2898,7 @@ private:
             ContinueAfterLicenseCheck();
             return;
         }
-        // The check/download stage owns network work; no product-version offer page.
-        // Do not launch until durable replacement/rollback/handoff is implemented.
-
-        InstallLog::Line(result.preparedSetup.empty()?L"New Setup preparation unavailable; continuing current Setup":
-            L"New Setup downloaded and verified; automatic publication/handoff not yet enabled");
+        InstallLog::Line(L"Controller transition completed or current compatible Setup retained");
         ContinueAfterLicenseCheck();
     }
 #ifdef _DEBUG
@@ -4270,9 +4293,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         InstallLog::Shutdown();
         return 4;
     }
+    std::wstring handoffError;
+    if(!BeginControllerChild(handoffError)) {
+        InstallLog::Line(handoffError.c_str());CoUninitialize();InstallLog::Shutdown();return 4;
+    }
     HANDLE instanceMutex=CreateMutexW(nullptr,FALSE,L"Local\\GlassSetup.Instance.Mutex");
     if (!instanceMutex) { InstallLog::Line(L"CreateMutex failed"); CoUninitialize(); InstallLog::Shutdown(); return 4; }
-    gAlreadyRunning=GetLastError()==ERROR_ALREADY_EXISTS;
+    gAlreadyRunning=GetLastError()==ERROR_ALREADY_EXISTS&&!IsControllerChild();
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS};
     InitCommonControlsEx(&controls);
     ULONG_PTR gdiplusToken = 0;
@@ -4287,6 +4314,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     if (!gInstaller.Create(show)) {
         InstallLog::Line(L"Could not create setup window");
         exitCode = 4;
+    } else if(!CompleteControllerChild(true)) {
+        InstallLog::Line(L"Controller commit handshake failed; no product messages dispatched");
+        DestroyWindow(gInstaller.window);exitCode=4;
     } else {
         MSG message{};
         BOOL result = 0;

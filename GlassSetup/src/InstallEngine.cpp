@@ -2043,9 +2043,9 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         std::wstring cacheFailure;
         std::vector<std::wstring> needsOriginal;
         if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs.data(),cacheBlobs.size(),IDR_MAINTENANCE_UNINS,&cacheFailure,&needsOriginal))
-            AddFinishWarning(ru?L"Оболочка обслуживания сохранена не полностью":L"Maintenance cache publication is incomplete",
-                (ru?L"Не удалось полностью сохранить комплект обслуживания. Это не сообщение о сбое запуска. Сохраните исходный установщик и журнал.\n":
-                    L"The maintenance bundle was not fully saved. This does not indicate a component startup failure. Keep the original installer and log.\n")+cacheFailure);
+            AddFinishWarning(ru?L"Источники обслуживания сохранены не полностью":L"Maintenance sources were not fully saved",
+                (ru?L"Не удалось полностью сохранить источники обслуживания продуктов. Это не ошибка обновления оболочки или запуска компонентов. Сохраните исходный установщик и журнал.\n":
+                    L"Product maintenance sources were not fully saved. This is not a controller update or component startup failure. Keep the original installer and log.\n")+cacheFailure);
         if(!needsOriginal.empty()) {
             std::wstring detail=ru?
                 L"Для восстановления следующих продуктов нужен проверенный исходный MSI с полным содержимым поставки. Существующие кандидаты сохранены, но не зарегистрированы как доверенные источники. Это не ошибка сохранения оболочки и не отмена выполненной операции:":

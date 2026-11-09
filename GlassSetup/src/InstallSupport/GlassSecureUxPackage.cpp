@@ -1,3 +1,4 @@
+#include "GlassSetupSourceLayout.h"
 #include "GlassSecureUxPackage.h"
 #include "GlassSecureUxRelease.h"
 #include "GlassReleaseClient.h"
@@ -78,7 +79,9 @@ std::vector<std::wstring> CandidatePaths(const Asset& asset) {
     if(!count||count>=32768)throw std::runtime_error("Cannot locate GlassSetup.exe");
     const std::wstring module(exe,count);const auto slash=module.find_last_of(L"\\/");
     if(slash==std::wstring::npos)throw std::runtime_error("Cannot locate installer directory");
-    const auto directory=module.substr(0,slash+1);const auto name=Wide(asset.name);
+    auto directory=module.substr(0,slash+1);
+    if(!GlassSetupSourceLayout::directory.empty())directory=GlassSetupSourceLayout::directory+L"\\";
+    const auto name=Wide(asset.name);
     return {directory+L"packages\\"+name,directory+name,
         GlassMaintenanceCache::CurrentFile(name.c_str())};
 }

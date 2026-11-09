@@ -13,6 +13,7 @@ prefix=r'''
 #include "GlassSetup/src/InstallSupport/GlassPackageCatalog.h"
 #include <cassert>
 #include <atomic>
+#include "GlassSetup/src/InstallSupport/GlassSetupSourceLayout.h"
 #include <cstring>
 #include <cwchar>
 #include <iostream>

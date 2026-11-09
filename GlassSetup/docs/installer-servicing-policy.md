@@ -224,7 +224,44 @@ Publish передаёт coverage отдельно от publication error: legac
 сохраняется как раньше. Final RU/EN warning называет отсутствие repair sources,
 не ложный отказ оболочки. Выполненные продукты не откатываются из-за этого.
 
-Это не завершённый controller lifecycle: self-update/ACK/автоперезапуск по-прежнему
-отключены, независимая публикация controller до MSI и migration entrypoints/GC
-ещё не реализованы. Старые registration/GC политики не объявлены полноценным
-reference-counted source-store. Последующие этапы раздела 8 остаются обязательны.
+Этот первый инкремент сам по себе не включал controller lifecycle. Следующий
+runtime-этап описан ниже; Windows acceptance раздела 8 остаётся обязательным.
+Старые registration/GC политики не объявлены полноценным reference-counted source-store.
+
+## 10. Подключённый runtime controller (2026-11-04)
+
+- До продуктовых действий Checking выбирает максимальную доверенную совместимую
+  версию self/Active/download. При равенстве остаётся установленный Active.
+  Повреждённый существующий Active и недоверенный скачанный EXE — отказ, а не downgrade.
+- Защищённый `Installer/<SetupSHA256>` содержит только Setup и извлечённый из его
+  ресурса Unins. Оба проходят hash/publisher/Authenticode и проверку архитектуры.
+  `Active`, `Previous`, `Pending` — строгие 128 ASCII hex (два SHA256), атомарная
+  публикация через flush + rename. MSI Current/Retained и receipts независимы.
+- Новый процесс запускается только из store, через CreateProcess с whitelist трёх
+  inherited handles. Проверяются реальный родитель, его publisher, canonical self,
+  handles и record. READY означает созданное окно; родитель ждёт до 30 секунд,
+  публикует Active и разрешает COMMIT. До COMMIT message loop не запускается.
+  Финального ACK успешного startup после COMMIT протокол пока не содержит.
+- В child передаются только служебный протокол, разрешённый modify/product intent,
+  no-self-update и source-layout hint. Согласие EULA и продуктовые действия не
+  пересылаются. Hint не отменяет независимую проверку каждого MSI.
+- Cache resolver, ARP refresh и Settings используют независимый Active; legacy
+  Current допускается только при отсутствии Active. Старые entrypoint EXE
+  удаляются после успешного ARP refresh; MSI/CAB/receipts не удаляются этой очисткой.
+- Успешный canonical startup удаляет старые плоские code directories; занятые
+  файлы получают CleanupPending и повторную попытку при следующем запуске.
+  При startup failure восстанавливается проверенный Previous, если он есть.
+  Pending не является авторитетным указателем и очищается при успешном startup.
+  Если lock ещё у родителя, finalizer откладывается до следующего запуска.
+- Offline работает с доверенным локальным controller; доверие к сертификату должно
+  быть уже установлено. Authenticode использует cache-only chain retrieval без
+  сетевой revocation проверки. Автоматического добавления сертификатов нет.
+- Последний product removal не удаляет независимый controller: отдельная команда
+  его удаления пока не реализована. Первый startup failure без Previous не имеет
+  rollback-target. Полного crash-journal replay и reference-counted source GC нет.
+
+Проверено actual-source mock-тестами с поддельными Win32 API, включая staging,
+atomic pointers, handoff, child barrier, trust gate, rollback и locked-code GC.
+Это **не** Windows/MSVC/WiX/.NET сборка и **не** проверка реальных ACL/AuthentiCode,
+UAC, process races, reboot/crash recovery или MSI acceptance. Полную политику
+нельзя считать принятой до выполнения Windows-матрицы раздела 8.

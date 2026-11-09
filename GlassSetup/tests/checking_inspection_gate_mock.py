@@ -26,7 +26,9 @@ struct VersionCheckResult{bool completed=false,fetched=false,newer=false;int cat
  std::wstring self=L"2.0.0.90",latest=L"2.0.0.70",preparedSetup;};
 struct App{Page page_=Page::Checking;std::mutex versionCheckMutex_;
  VersionCheckResult versionCheckResult_;bool versionCheckHandled_=false,inspectionApplied_=false;
- int releaseCatalog_=0,advances=0;
+ int releaseCatalog_=0,advances=0,transitions=0;bool transfer=false;
+ bool TransitionController(const std::wstring&){++transitions;return transfer;}
+ bool RunPreflightChecks(){return true;}
  void ContinueAfterLicenseCheck(){++advances;page_=Page::Components;}
 '''
 main=r'''
@@ -41,6 +43,8 @@ int main(){
   a.versionCheckResult_.completed=true;a.versionCheckResult_.fetched=fetched;a.versionCheckResult_.newer=newer;
   a.CompleteVersionCheck();assert(a.advances==1&&a.versionCheckHandled_);
  }
+ {App a;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;a.transfer=true;
+  a.CompleteVersionCheck();assert(a.transitions==1&&a.advances==0);}
  std::cout<<"PASS: actual Checking completion gate: inspection/network in both orders, failed/offline catalog, one advance\n";
 }
 '''
