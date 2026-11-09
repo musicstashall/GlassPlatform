@@ -928,7 +928,7 @@ function showProductWarning(item,button){
   dialogParagraph(body,item.description,'dialog-description');
   const input=document.getElementById('product-'+item.id),f=input&&componentCardFacts(item,input);
   const state=f?.remove?(ru?'Будет удалено: MSI снимается с регистрации; удаляются файлы, службы и задачи продукта согласно правилам пакета.':'Will be removed: MSI registration, files, services and tasks are removed according to package rules.'):item.state;
-  const version=item.targetVersionKind==='release'?(ru?'релиз ':'release ')+(item.targetVersion||item.releaseTag||'—'):(item.targetVersion||'—');
+  const version=item.targetVersionKind==='release'?(ru?'релиз ':'release ')+(item.targetVersion||item.releaseTag||'—'):((item.id==='openglass'?item.targetPayloadVersion:item.targetVersion)||'—');
   const pkg=[item.packageSize?componentSize(item.packageSize):'',version,ru?'Размер и SHA-256 сверяются перед установкой.':'Size and SHA-256 are checked before installation.'].filter(Boolean).join(' · ');
   for(const [label,text] of [[ru?'СОСТОЯНИЕ':'STATE',state],[ru?'ЗАВИСИМОСТИ':'DEPENDENCIES',item.warning||(ru?'Нет предупреждений о составе.':'No composition warnings.')],[ru?'ПАКЕТ':'PACKAGE',pkg],...(item.removeBlockedReason?[[ru?'УДАЛЕНИЕ':'REMOVAL',item.removeBlockedReason]]:[])]){
    const row=document.createElement('div');row.className='dialog-detail-row';const key=document.createElement('span');key.textContent='•  '+label;row.append(key);dialogParagraph(row,text);body.append(row);
@@ -1142,7 +1142,7 @@ function bindComponentWorkspace(){
 // A release catalogue card and an installed-composition card are different views
 // of one intent, not clones with the same action/status content (concept C).
 function componentSize(bytes){return new Intl.NumberFormat(locale==='ru'?'ru':'en',{minimumFractionDigits:1,maximumFractionDigits:1}).format(bytes/1048576)+(locale==='ru'?' МБ':' MB');}
-function componentMsiVersion(item){return typeof item.installedPackageVersion==='string'?(item.installedPackageVersion||'—'):(item.installedVersion||'—');}
+function componentMsiVersion(item){if(item.id==='openglass'&&typeof item.installedPayloadVersion==='string')return item.installedPayloadVersion||'—';return typeof item.installedPackageVersion==='string'?(item.installedPackageVersion||'—'):(item.installedVersion||'—');}
 function componentCardFacts(item,input){
  const selected=input.checked,remove=selected&&(hostState.appMode==='unins'||input.dataset.intent==='remove');
  const newer=!!(item.installed&&(item.operation==='update'||item.updateAvailable===true)&&item.targetVersion);
@@ -1174,7 +1174,7 @@ function commitComponentChoice(input,checked){
  input.dataset.intent='apply';input.checked=checked;input.dispatchEvent(new Event('change',{bubbles:true}));return true;
 }
 function componentCardAction(item,input,shelf){
- const ru=locale==='ru',f=componentCardFacts(item,input),current=componentMsiVersion(item),target=item.targetVersion||'';
+ const ru=locale==='ru',f=componentCardFacts(item,input),current=componentMsiVersion(item),target=(item.id==='openglass'?item.targetPayloadVersion:item.targetVersion)||'';
  if(f.remove&&hostState.appMode!=='unins'&&shelf==='available'&&item.applySupported!==false)return {act:'install',value:true,label:(ru?'Установить ':'Install ')+item.title};
  if(f.remove&&hostState.appMode!=='unins')return {act:'restore',value:false,label:ru?'Оставить установленным':'Keep installed'};
  if(shelf==='available')return {act:!item.installed?'install':f.newer?'update':'repair',value:true,
@@ -1187,7 +1187,7 @@ function componentCardAction(item,input,shelf){
 }
 function paintComponentCard(card,item,input,shelf){
  const ru=locale==='ru',f=componentCardFacts(item,input),available=shelf==='available';
- const current=componentMsiVersion(item),target=item.targetVersion||'';
+ const current=componentMsiVersion(item),target=(item.id==='openglass'?item.targetPayloadVersion:item.targetVersion)||'';
  const meta=card.querySelector('.c-meta'),foot=card.querySelector('.c-foot'),action=card.querySelector('.comp-decision');
  const line=document.createElement('span');line.className='comp-version-line';
  const text=(value,bold=false)=>{const node=document.createElement(bold?'b':'span');node.className='comp-version-tag';node.textContent=value||'—';line.append(node);};
@@ -1322,7 +1322,7 @@ function productActionLabel(item){return hostState.appMode==='unins'?(locale==='
 function updateComponentsStatus(){
  const inputs=[...document.querySelectorAll('#components-panel .c-card input.comp-check')],selected=inputs.filter(x=>x.checked),available=inputs.filter(x=>!x.disabled&&(x.checked||(hostState.components||[]).find(item=>item.id===x.dataset.component)?.applySupported!==false)),all=available.length>0&&available.every(x=>x.checked),ru=locale==='ru';
  for(const [id,title] of [['available',ru?'Доступно':'Available'],['installed',ru?'Установлено':'Installed']])document.getElementById(id+'-title').textContent=title;
- const button=document.getElementById('components-select-all'),recommendations=componentRecommendations();button.disabled=!recommendations.some(input=>!input.checked);button.textContent=ru?'↻  Принять все рекомендации':'↻  Accept all recommendations';
+ const button=document.getElementById('components-select-all'),recommendations=componentRecommendations();button.disabled=!recommendations.some(input=>!input.checked);const recommendationsSelected=recommendations.length>0&&recommendations.every(input=>input.checked);button.textContent=recommendationsSelected?(ru?'Всё выбрано':'All selected'):(ru?'↻  Принять все рекомендации':'↻  Accept all recommendations');
  const removable=inputs.filter(input=>{const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);return !input.disabled&&item?.installed&&(hostState.appMode==='unins'||item.removeSupported===true);});
  const removeAll=document.getElementById('components-remove-all');removeAll.replaceChildren();const trash=document.createElement('span');trash.setAttribute('aria-hidden','true');trash.innerHTML='<svg viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>';removeAll.append(trash,ru?'Удалить все продукты':'Remove all products');removeAll.title=ru?'Добавить в план удаление всех установленных продуктов, для которых удаление поддерживается.':'Plan removal of all installed products that support removal.';
  removeAll.hidden=hostState.componentsLoading===true||!removable.some(input=>!componentCardFacts((hostState.components||[]).find(x=>x.id===input.dataset.component),input).remove);removeAll.disabled=removeAll.hidden;

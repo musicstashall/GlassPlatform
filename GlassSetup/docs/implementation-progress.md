@@ -1476,3 +1476,46 @@ Settings path, missing stock file, invalid attributes, apply HRESULT/readback
 failure, wrong live path and font-flag parity. Worker, resources and build graph
 checks PASS. Shared helper include path verified. No Windows/MSVC/WiX build or
 real loaded vendor uninstall was performed in this Linux environment.
+
+### Recommendations label, OpenGlass payload version and deleted-local profile residues
+
+1. The recommendations button now reads RU “Всё выбрано” / EN “All selected”
+when the nonempty recommendation set is fully selected. Cancelling a recommended
+plan action restores the original label and enables the button. No recommendations
+still means disabled, not an arbitrary bulk reinstall.
+
+2. OpenGlass display now has independent installed/target payload-version fields,
+read from the OpenGlass.dll File-table entry in the verified installed MSI baseline
+and selected local MSI offer respectively. Card/action display uses these fields;
+MSI ProductVersion remains unchanged for identity, downgrade/update ordering and
+execution. A release-only/unreadable payload version displays unknown rather than
+misrepresenting the platform/bundle version as OpenGlass's version. If the UI
+chooses a newer remote offer, a different local offer's payload version is not reused.
+The old shared UI/uninstaller protocol retains its existing fallback when no new
+payload-version field is supplied. No MSI version migration/downgrade is introduced.
+
+3. GlassSetup-13.log (session 2026-11-09 11:44): Active=2, original MSI installed
+state=5, local original MSI 4.0.0 found; refusal is now an offline hive open error
+1009 for SID ending -1008, not the V2 helper gate. No style switch or vendor
+uninstall occurred. User reports two deleted local profile directories whose
+NTUSER.DAT files remain held open. The log alone does not prove file-lock ownership
+or that this SID is one of those accounts; 1009 is not a sharing-violation code.
+
+Loaded-removal inventory now excludes residues only when LSA proves the SID
+belongs to this machine's local SAM and LookupAccountSid returns NONE_MAPPED.
+This happens before accessing the directory/NTUSER.DAT and is rechecked against
+ProfileList before commit. Domain/cloud/unresolved accounts are not silently
+excluded. Confirmed deleted-account residues are logged. Other profile access
+failures still report their SID; no system hive unload, profile deletion or
+registry repair is attempted. General all-profile settings cleanup remains strict:
+this exception is explicitly enabled for SecureUxTheme style preparation only.
+
+Validation: 82 mock scripts, 72 PASS, same 10 known failures, zero new failures.
+New actual-source ASan/UBSan local-account classifier tests cover local deletion,
+existing/foreign/unreachable/unknown identities. Inventory harness tests ignored
+unopenable deleted-local hive, account reappearance, and strict cleanup behavior.
+Inspection/acquisition tests cover local offer metadata and independent payload/MSI
+versions. Actual production DOM tests cover OpenGlass display and recommendations
+label after accept/cancel. Managed-removal DOM, Chromium Unlocker, resources and
+build graph pass. No Windows/MSVC/WiX build or real removal validation here.
+Uploaded GlassSetup-13.log removed after analysis; screenshots retained.

@@ -1317,6 +1317,7 @@ bool InstallEngine::PrepareSecureUxRemoval() noexcept {
             if(secureUxLoadedRemoval_) {
                 if(selection_.Removes(GlassInstallUtil::IsOs64Bit()?2u:5u))error=L"Remove SecureUxTheme first while retaining OS-native GlassSettings; its runtime-query helper must remain installed through the last vendor transaction.";
                 else if(secureUxRemovalProfiles_.PreflightLoadedRemoval(error)) {
+                    if(!error.empty())InstallLog::LineFormat(L"SecureUxTheme profile preparation: %s",error.c_str());
                     if(GlassSecureUxPackage::PrepareRemoval(tempDir_,secureUxRemovalCode_,cancelRequested_,secureUxRemoval_,error))return true;
                 }
             }else if(GlassSecureUxPackage::PrepareRemoval(tempDir_,secureUxRemovalCode_,cancelRequested_,secureUxRemoval_,error))return true;

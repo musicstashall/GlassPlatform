@@ -234,15 +234,16 @@ assert.equal(d.querySelectorAll('#components-plan-items li:not(.plan-warning):no
 // MSI package versions win over obsolete PE/bundle display fields. Available
 // shows its own candidate, not the installed version copied onto both panels.
 const versions=rows.map((r,i)=>({...r,checked:false,installed:i<5,operation:'repair',disabled:false,
+ installedPayloadVersion:r.id==='openglass'?'1.5.0':undefined,targetPayloadVersion:r.id==='openglass'?'1.6.0':undefined,
  installedVersion:'99.0.0.999',installedPackageVersion:(i+1)+'.2.3',targetVersion:(i+2)+'.4.5',
  updateAvailable:i===0,broken:i===0,applySupported:true}));
 receive({data:{type:'state',page:'components',appMode:'setup',locale:'en',components:versions}});
 for(let i=0;i<5;i++){
  const card=d.querySelector('#product-'+rows[i].id).closest('.c-card');
- assert.match(card.querySelector('.c-meta').textContent,new RegExp((i+1)+'\\.2\\.3'));
+ assert.match(card.querySelector('.c-meta').textContent,new RegExp(rows[i].id==='openglass'?'1\\.5\\.0':(i+1)+'\\.2\\.3'));
  assert.doesNotMatch(card.querySelector('.c-meta').textContent,/99\.0\.0/);
  const offer=d.querySelector('[data-catalog-alias="'+rows[i].id+'"]');
- assert.ok(offer);assert.ok(offer.querySelector('.c-meta').textContent.includes((i+2)+'.4.5'));
+ assert.ok(offer);assert.ok(offer.querySelector('.c-meta').textContent.includes(rows[i].id==='openglass'?'1.6.0':(i+2)+'.4.5'));
 }
 assert.ok(d.querySelector('#product-x64').closest('.c-card').classList.contains('is-broken'));
 assert.equal(d.querySelector('[data-catalog-alias="x64"] .comp-decision').title,'Update to 2.4.5');
@@ -272,6 +273,10 @@ assert.deepEqual(messages.slice(start),['component:x64:1','component:settings32:
 assert.equal(d.querySelector('#product-x86').checked,false,'healthy products remain manual');
 assert.equal(d.querySelector('#product-settings64').checked,false,'absent products are not implicit recommendations');
 assert.equal(d.querySelector('#components-select-all').disabled,true);
+assert.equal(d.querySelector('#components-select-all').textContent,'Всё выбрано');
+d.querySelector('#product-x64').checked=false;d.querySelector('#product-x64').dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+assert.match(d.querySelector('#components-select-all').textContent,/Принять все рекомендации/);
+assert.equal(d.querySelector('#components-select-all').disabled,false);
 assert.equal(errors.length,0);
 dom.window.close();
 process.stdout.write('PASS: separate catalogue/composition content, planned catalogue idle/needed exclusion; actual production DOM: six rows, real per-architecture IPC, version metadata, live plan/counts, warnings/Escape, RU/EN, setup/uninstall titles and disabled-action gate\n');

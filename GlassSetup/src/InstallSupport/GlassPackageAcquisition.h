@@ -10,8 +10,10 @@ bool FetchCatalog(const std::atomic<bool>& cancel, GlassPackageCatalog::Catalog&
     std::wstring& diagnostic) noexcept;
 // Read-only offer discovery: no workspace, package downloads, installation or
 // publication. A release offer is metadata, not yet verified downloaded bytes.
+// localPath optionally identifies the selected local MSI for payload metadata;
+// it is empty for a release-only offer and is not install authorization.
 bool Describe(GlassPackageCatalog::Product product,const GlassPackageCatalog::Catalog& catalog,
-    const std::atomic<bool>& cancel,std::wstring& version,bool& verifiedLocal) noexcept;
+    const std::atomic<bool>& cancel,std::wstring& version,bool& verifiedLocal,std::wstring* localPath=nullptr) noexcept;
 bool Prepare(GlassPackageCatalog::Product product, const GlassPackageCatalog::Catalog& catalog,
     const std::wstring& workspace, const std::atomic<bool>& cancel, std::wstring& error) noexcept;
 // Prepare only; publication/restart must independently implement the handoff journal.

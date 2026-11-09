@@ -130,3 +130,11 @@ Runtime queries still use the installed OS-native Settings helper, so its
 same-plan removal is still refused. Stock-style preparation itself no longer
 requires a particular installed Settings version or any V2 export. Restrictions
 on profile count or other sessions remain removed.
+
+For SecureUxTheme style preparation only, confirmed deleted **local SAM account**
+residues in ProfileList are not live user profiles: compare the account SID prefix
+to LSA PolicyAccountDomainInformation and require ERROR_NONE_MAPPED from account
+lookup before ignoring that entry. Recheck classification with inventory before
+commit. A foreign-domain/cloud SID or any other lookup failure is not deletion
+evidence. Ignore residues before attempting NTUSER.DAT; do not unload system hives,
+repair/delete profile data or make general settings cleanup skip such entries.

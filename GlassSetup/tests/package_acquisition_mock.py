@@ -107,11 +107,11 @@ int main(){
  for(unsigned i=0;i<5;++i){const auto file=GlassReleaseClient::Wide(GlassPackageCatalog::kFiles[i]);
   s.files[L"C:\\kit\\packages\\"+file].bytes=Package((std::to_string(i+2)+".3.4").c_str());}
  for(unsigned i=0;i<5;++i){std::wstring v;bool verified=false;
-  assert(GlassPackageAcquisition::Describe(static_cast<Product>(i),catalog,cancelled,v,verified));
+  assert(GlassPackageAcquisition::Describe(static_cast<Product>(i),catalog,cancelled,v,verified,nullptr));
   assert(v==std::to_wstring(i+2)+L".3.4"&&verified&&s.files.size()==5&&s.downloads==0&&s.handles==0);}
- reset();{std::wstring v;bool verified=true;assert(!GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified));assert(v.empty()&&!verified&&s.files.empty());}
+ reset();{std::wstring v;bool verified=true;assert(!GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified,nullptr));assert(v.empty()&&!verified&&s.files.empty());}
  auto& remote=catalog.products[0];remote=GlassPackageCatalog::Asset{};remote->version.parts={3,0,0,0};remote->downloadable=true;remote->size=1024;remote->sha256=std::string(64,'a');remote->url="https://github.com/release";
- reset();{std::wstring v;bool verified=true;assert(GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified));assert(v==L"3.0.0.0"&&!verified&&s.downloads==0&&s.files.empty());}
+ reset();{std::wstring v;bool verified=true;assert(GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified,nullptr));assert(v==L"3.0.0.0"&&!verified&&s.downloads==0&&s.files.empty());}
  reset();s.download=Package("3.0.0","|HASH|");assert(run());assert(s.downloads==1&&s.files.at(dest).bytes==s.download&&!s.files.count(part));
  reset();s.download=Package("3.0.0","");assert(!run());assert(!s.files.count(dest)&&!s.files.count(part));
  reset();s.download=Package("2.0.0","|HASH|");assert(!run());assert(!s.files.count(dest)&&!s.files.count(part)); // digest isn't enough without target metadata.

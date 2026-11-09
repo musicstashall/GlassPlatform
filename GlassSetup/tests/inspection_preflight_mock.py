@@ -23,7 +23,7 @@ bool baseline=true,context=true;
 std::set<std::wstring> installed;
 std::vector<std::wstring> checked;
 struct ProductReport {bool installed=false,integrityKnown=false,sourceVerified=false,updateAvailable=false;
- std::wstring targetVersion,installedVersion,installedPackageVersion;int unavailable=0;};
+ std::wstring targetVersion,installedVersion,installedPackageVersion,targetPayloadVersion;int unavailable=0;};
 struct Report {ProductReport x64,x86,settings64,settings32,og;};
 struct Inputs {bool inspectSources=true;const std::atomic_bool* cancelled=nullptr;};
 enum class Reason {InspectionUnavailable};
@@ -33,9 +33,10 @@ enum class Product {Platform64,Platform32,Settings64,Settings32,OpenGlass};
 struct Catalog {};
 const char* kFiles[]={"Glass-x64.msi","Glass-x86.msi","GlassSettings-x64.msi","GlassSettings-x86.msi","OpenGlass-x64.msi"};
 }
+std::wstring QueryFileVersion(MSIHANDLE,const wchar_t*){return L"1.5.0";}
 namespace GlassPackageAcquisition {
 bool FetchCatalog(const std::atomic_bool&,GlassPackageCatalog::Catalog&,std::wstring&){++fetches;return true;}
-bool Describe(GlassPackageCatalog::Product,const GlassPackageCatalog::Catalog&,const std::atomic_bool&,std::wstring& out,bool& local){++prepares;out=L"2.0.0";local=true;return true;}
+bool Describe(GlassPackageCatalog::Product,const GlassPackageCatalog::Catalog&,const std::atomic_bool&,std::wstring& out,bool& local,std::wstring* path){if(path)*path=L"offer.msi";++prepares;out=L"2.0.0";local=true;return true;}
 }
 namespace GlassInstallMsi {
 constexpr const wchar_t* kProductPlatformX64=L"p64",*kLegacyPlatformX64=L"old64",*kProductPlatformX86=L"p32",
@@ -46,7 +47,7 @@ ProductPathCheck CheckProductContexts(const wchar_t*,std::wstring&){return conte
 }
 bool DeleteFileW(const wchar_t*){++cleanups;return true;}
 bool RemoveDirectoryW(const wchar_t*){++cleanups;return true;}
-unsigned MsiOpenDatabaseW(const wchar_t*,unsigned,MSIHANDLE*){return 5;}
+unsigned MsiOpenDatabaseW(const wchar_t*,unsigned,MSIHANDLE* out){*out=1;return 0;}
 void MsiCloseHandle(MSIHANDLE){}
 std::wstring QueryMsiProperty(MSIHANDLE,const wchar_t*){return L"2.0.0";}
 
@@ -73,7 +74,9 @@ int main(){
  {Reset();installed={L"p64",L"old64"};Report r;r.x64.installed=true;Inputs in;in.inspectSources=false;Inspect(in,r);
   assert(checked==std::vector<std::wstring>{L"p64"});}
  {Reset();installed={L"s32"};Report r;r.settings32.installed=true;Inputs in;Inspect(in,r);
-  assert(fetches==1&&workspaces==0&&prepares==5&&cleanups==0&&r.settings32.integrityKnown);}
+  assert(fetches==1&&workspaces==0&&prepares==5&&cleanups==0&&r.settings32.integrityKnown);
+  assert(r.og.targetPayloadVersion==L"1.5.0"&&r.og.targetVersion==L"2.0.0");
+  assert(r.x64.targetPayloadVersion.empty());}
  for(bool unsafe:{false,true}){
   Reset();installed={L"p64"};baseline=unsafe;context=!unsafe;Report r;r.x64.installed=true;Inputs in;in.inspectSources=false;Inspect(in,r);
   assert(!r.x64.integrityKnown&&r.x64.unavailable==1&&checked.empty());

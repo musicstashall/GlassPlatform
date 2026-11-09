@@ -42,7 +42,7 @@ class Inventory {
  struct Profile {std::wstring sid;HKEY hive;};
  std::vector<Profile> profiles_;
  bool removalStylePrepared_=false,removalStyleCommitted_=false;
- bool OpenAll(std::wstring&){profiles_.clear();for(int i=1;i<=profileCount;++i)profiles_.push_back({L"SID-"+std::to_wstring(i),reinterpret_cast<HKEY>(static_cast<size_t>(i))});return openAllOk;}
+ bool OpenAll(std::wstring&,bool skipDeleted=false){assert(skipDeleted);profiles_.clear();for(int i=1;i<=profileCount;++i)profiles_.push_back({L"SID-"+std::to_wstring(i),reinterpret_cast<HKEY>(static_cast<size_t>(i))});return openAllOk;}
  bool VerifyInventory(std::wstring&)const{return inventoryOk&&++inventoryCalls!=failInventoryAt;}
 public:
 // METHODS

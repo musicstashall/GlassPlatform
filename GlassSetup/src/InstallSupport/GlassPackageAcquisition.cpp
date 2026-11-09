@@ -224,7 +224,8 @@ static bool Discover(GlassPackageCatalog::Product product,const GlassPackageCata
 }
 
 bool Describe(GlassPackageCatalog::Product product,const GlassPackageCatalog::Catalog& catalog,
-    const std::atomic<bool>& cancel,std::wstring& version,bool& verifiedLocal) noexcept {
+    const std::atomic<bool>& cancel,std::wstring& version,bool& verifiedLocal,std::wstring* localPath) noexcept {
+    if(localPath)localPath->clear();
     version.clear();verifiedLocal=false;
     try {
         std::vector<Candidate> candidates;std::vector<std::wstring> sources,labels;
@@ -243,6 +244,7 @@ bool Describe(GlassPackageCatalog::Product product,const GlassPackageCatalog::Ca
         if(!choice.index||!choice.target)return false;
         version=labels[*choice.index];
         verifiedLocal=candidates[*choice.index].source!=Source::Release;
+        if(localPath&&verifiedLocal)*localPath=sources[*choice.index];
         return true;
     }catch(...){version.clear();verifiedLocal=false;return false;}
 }

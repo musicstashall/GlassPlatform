@@ -1932,6 +1932,8 @@ private:
                 L",\"broken\":"+((rep&&rep->damaged)?L"true":L"false")+
                 L",\"installedVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
                 L",\"installedPackageVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
+                L",\"installedPayloadVersion\":"+JsStringLiteral(rep?rep->installedPayloadVersion:L"")+
+                L",\"targetPayloadVersion\":"+JsStringLiteral(rep&&targetVersion==rep->targetVersion?rep->targetPayloadVersion:L"")+
                 L",\"targetVersion\":"+JsStringLiteral(targetVersion)+
                 L",\"remoteVersion\":"+JsStringLiteral(remoteVersion)+
                 L",\"packageSize\":"+std::to_wstring(packageSize)+

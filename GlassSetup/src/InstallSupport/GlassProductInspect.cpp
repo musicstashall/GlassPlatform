@@ -312,6 +312,7 @@ bool CheckProductFiles(
     if (MsiOpenDatabaseW(msiPath.c_str(), MSIDBOPEN_READONLY, &database) != ERROR_SUCCESS)
         return false;
     std::vector<FileCheck> files;
+    if(openGlassProduct)rep.installedPayloadVersion=QueryFileVersion(database,L"OpenGlass.dll");
     const bool enumerated=EnumProductFiles(database, files);
     MsiCloseHandle(database);
     if(!enumerated)return false;
@@ -473,8 +474,9 @@ Report Run(const Inputs& in)
         {GlassPackageCatalog::Product::OpenGlass,&report.og,GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass}};
     for(const auto& job:jobs) {
         if(cancel.load())break;
+        std::wstring offerPath;
         if(in.inspectSources && GlassPackageAcquisition::Describe(job.product,catalog,cancel,
-            job.rep->targetVersion,job.rep->sourceVerified)) {
+            job.rep->targetVersion,job.rep->sourceVerified,&offerPath)) {
             GlassPackageRules::Version installed,target;
             const auto numeric=[](const std::wstring& text,GlassPackageRules::Version& out) {
                 for(wchar_t c:text)if(static_cast<unsigned>(c)>127)return false;
@@ -483,6 +485,12 @@ Report Run(const Inputs& in)
             job.rep->updateAvailable=job.rep->installed &&
                 numeric(job.rep->installedPackageVersion,installed) && numeric(job.rep->targetVersion,target) &&
                 GlassPackageRules::Compare(installed,target)<0;
+        }
+        if(job.product==GlassPackageCatalog::Product::OpenGlass&&!offerPath.empty()) {
+            MSIHANDLE db=0;
+            if(MsiOpenDatabaseW(offerPath.c_str(),MSIDBOPEN_READONLY,&db)==ERROR_SUCCESS) {
+                job.rep->targetPayloadVersion=QueryFileVersion(db,L"OpenGlass.dll");MsiCloseHandle(db);
+            }
         }
         if(!job.rep->installed)continue;
         // Integrity always uses the installed package, never a same-version

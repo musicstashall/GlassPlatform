@@ -2,6 +2,8 @@
 #include <windows.h>
 #include <wtsapi32.h>
 #include <sddl.h>
+#include <ntsecapi.h>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <utility>
@@ -11,6 +13,32 @@
 #pragma comment(lib,"Wtsapi32.lib")
 
 namespace GlassProfileMaintenance {
+// Only a confirmed missing account from this machine's SAM may be ignored.
+// Domain lookup failures and cloud identities are never proof of deletion.
+inline bool DeletedLocalProfile(const std::wstring& text) {
+    PSID sid=nullptr;if(!ConvertStringSidToSidW(text.c_str(),&sid))return false;
+    struct FreeSid {PSID p;~FreeSid(){LocalFree(p);}} free{sid};
+    LSA_OBJECT_ATTRIBUTES attributes{};attributes.Length=sizeof(attributes);
+    LSA_HANDLE policy=nullptr;
+    if(LsaOpenPolicy(nullptr,&attributes,POLICY_VIEW_LOCAL_INFORMATION,&policy)!=0)return false;
+    PPOLICY_ACCOUNT_DOMAIN_INFO info=nullptr;
+    const auto status=LsaQueryInformationPolicy(policy,PolicyAccountDomainInformation,reinterpret_cast<void**>(&info));
+    LsaClose(policy);
+    if(status!=0||!info)return false;
+    bool local=false;
+    if(info->DomainSid&&IsValidSid(info->DomainSid)&&IsValidSid(sid)) {
+        const BYTE count=*GetSidSubAuthorityCount(info->DomainSid);
+        local=*GetSidSubAuthorityCount(sid)==count+1 &&
+            std::memcmp(GetSidIdentifierAuthority(sid),GetSidIdentifierAuthority(info->DomainSid),sizeof(SID_IDENTIFIER_AUTHORITY))==0;
+        for(BYTE i=0;local&&i<count;++i)local=*GetSidSubAuthority(sid,i)==*GetSidSubAuthority(info->DomainSid,i);
+    }
+    LsaFreeMemory(info);
+    if(!local)return false;
+    DWORD nameSize=0,domainSize=0;SID_NAME_USE use{};
+    SetLastError(ERROR_SUCCESS);
+    if(LookupAccountSidW(nullptr,sid,nullptr,&nameSize,nullptr,&domainSize,&use))return false;
+    return GetLastError()==ERROR_NONE_MAPPED;
+}
 struct Profile {
     std::wstring sid, path;
     HKEY hive=nullptr;
@@ -84,6 +112,7 @@ inline bool IsDesktopProfile(const std::wstring& sid) {
 }
 class Inventory {
     std::vector<Profile> profiles_;
+    bool skipDeletedLocal_=false;
     bool cleanupPrepared_=false;
     bool removalStylePrepared_=false;
     bool removalStyleCommitted_=false;
@@ -93,7 +122,8 @@ public:
     const std::vector<Profile>& Profiles() const noexcept{return profiles_;}
     // All hives stay open between preflight and commit. We never unload a system
     // mount; RegLoadAppKey handles unload only our private offline mapping.
-    bool OpenAll(std::wstring& detail) {
+    bool OpenAll(std::wstring& detail,bool skipDeletedLocal=false) {
+        skipDeletedLocal_=skipDeletedLocal;
         cleanupPrepared_=false;
         removalStylePrepared_=false;removalStyleCommitted_=false;
         savedThemeRegistryFallback_=false;
@@ -112,6 +142,7 @@ public:
             PSID binary=nullptr;
             if(!ConvertStringSidToSidW(name,&binary)){detail=L"Invalid profile SID";ok=false;break;}
             LocalFree(binary);
+            if(skipDeletedLocal_&&DeletedLocalProfile(sid)){detail+=sid+L": deleted local-account residue ignored; ";continue;}
             HKEY entry=nullptr;
             if(RegOpenKeyExW(list,name,0,KEY_READ,&entry)!=ERROR_SUCCESS){detail=sid+L": profile entry unavailable";ok=false;break;}
             std::wstring raw;const bool got=ReadString(entry,L"ProfileImagePath",raw);RegCloseKey(entry);
@@ -164,6 +195,7 @@ public:
             if(status!=ERROR_SUCCESS){detail=L"Cannot re-enumerate profiles";return false;}
             const std::wstring sid=name;
             if(sid.rfind(L"S-1-5-21-",0)!=0&&sid.rfind(L"S-1-12-1-",0)!=0)continue;
+            if(skipDeletedLocal_&&DeletedLocalProfile(sid))continue;
             std::size_t found=0;
             while(found<profiles_.size() && profiles_[found].sid!=sid)++found;
             if(found==profiles_.size() || seen[found]) {
@@ -196,7 +228,7 @@ public:
     // hives. Other live sessions finish switching at restart; no logoff is forced.
     bool PreflightLoadedRemoval(std::wstring& detail) {
         removalStylePrepared_=false;removalStyleCommitted_=false;
-        if(!OpenAll(detail))return false;
+        if(!OpenAll(detail,true))return false;
         if(profiles_.empty()){detail=L"No user profiles could be inventoried.";return false;}
         for(const auto& profile:profiles_) {
             for(const auto* path:{L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes",L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager"}) {
