@@ -28,6 +28,7 @@ harness=r'''
 #include "../res/resource.h"
 #include <algorithm>
 #include <atomic>
+#include <mutex>
 #include <cassert>
 #include <iostream>
 #include <string>
@@ -39,7 +40,7 @@ int gInstance=1,timers=0;bool timerAvailable=true;ULONGLONG now=100;
 ULONGLONG GetTickCount64(){return now;}unsigned GetLastError(){return 5;}
 void InvalidateRect(int,void*,int){}int SetTimer(int,int,int,void*){timers=timerAvailable?1:0;return timers;}void KillTimer(int,int){timers=0;}
 namespace InstallLog {void Line(const wchar_t*){}template<class... A>void LineFormat(const wchar_t*,A...) {}}
-namespace GlassInstallUtil {
+namespace GlassInstallUtil {bool IsOs64Bit(){return true;}
 struct InstallRoots {std::wstring x64=L"x64",x86=L"x86",openGlass=L"og";};
 bool rootsOk=true;InstallRoots observation;
 bool ResolveInstallRoots(InstallRoots& out){out=observation;return rootsOk;}
@@ -66,6 +67,11 @@ std::wstring StatusLine(){return L"actual worker";}std::vector<FinishWarning> Fi
 };
 enum class Page {Welcome,Components,Certificate,Installing,Error,ConfirmCancel,Cancelling,Cancelled,Launching,Complete,ModulesBusy,ProcessesStuck};
 struct Wizard {
+ std::mutex inspectMutex_;
+ bool SecureUxThemeRemovalSupportedLocked(){return true;}
+ bool SecureUxRemovalDependencySatisfiedLocked(){return true;}
+ bool NoSettingsInstalledLocked(){return false;}
+
  Page page_=Page::Components;
  bool simulateInstall_=false,simulateRollback_=false;ULONGLONG started_=0,simulateRollbackStarted_=0;
  bool accepted_=true,transitioning_=false,debugDemoActive_=false,debugDemoPending_=false;

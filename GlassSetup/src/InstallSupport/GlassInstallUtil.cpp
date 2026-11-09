@@ -1,4 +1,6 @@
 #include "GlassInstallUtil.h"
+#include "GlassInstallMsi.h"
+#include <msi.h>
 #include "GlassInstallLog.h"
 #include "GlassMaintenanceCache.h"
 #include "GlassEmptyDirectories.h"
@@ -1783,6 +1785,11 @@ bool InvokeSecureUxThemeDeactivate(
         run->skippedExternalInstall=(exitCode & kSecureUxThemeExitExternalInstall)!=0;
     }
     return true;
+}
+
+bool GlassSettingsAbsentForSecureUxRemoval() noexcept {
+    return MsiQueryProductStateW(GlassInstallMsi::kProductSettingsX64)==INSTALLSTATE_UNKNOWN &&
+        MsiQueryProductStateW(GlassInstallMsi::kProductSettingsX86)==INSTALLSTATE_UNKNOWN;
 }
 
 bool PrepareSecureUxRemovalVisualStyle(const std::wstring& x64Dir,const std::wstring& x86Dir,

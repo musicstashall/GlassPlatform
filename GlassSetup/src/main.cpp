@@ -69,7 +69,7 @@ namespace {
 constexpr int kWidth = 1000, kHtmlHeight = 540, kProgressHeight = 4;
 constexpr int kContentHeight = kHtmlHeight + kProgressHeight;
 constexpr int kFooterHeight = 56, kHeight = 600;
-constexpr UINT_PTR kInstallTimer = 1, kFadeTimer = 2, kHeroTimer = 3, kStartupPollTimer = 5;
+constexpr UINT_PTR kInstallTimer = 1, kFadeTimer = 2, kHeroTimer = 3, kStartupPollTimer = 5, kComponentNoticeTimer = 6;
 constexpr UINT kInstallTimerMs = 16, kHeroTimerMs = 50;
 constexpr ULONGLONG kMarqueePeriodMs = 1400;
 constexpr double kProgressSmoothTauMs = 120.0;
@@ -1299,6 +1299,14 @@ private:
 #endif
     std::wstring installStatusLine_;
 
+    std::wstring nativeComponentNotice_;
+    ULONGLONG nativeComponentNoticeSince_=0;
+    bool nativeComponentNoticeActivity_=false,nativeComponentNoticeDanger_=false;
+    void SetNativeComponentNotice(const wchar_t* text,bool danger) {
+        nativeComponentNotice_=text;nativeComponentNoticeSince_=GetTickCount64();
+        nativeComponentNoticeActivity_=false;nativeComponentNoticeDanger_=danger;
+        SetTimer(window,kComponentNoticeTimer,50,nullptr);InvalidateContent();
+    }
     std::wstring errorReason_;
     // Post-commit notes captured when the Complete page is entered.
     std::vector<InstallEngine::FinishWarning> finishWarnings_;
@@ -1673,7 +1681,7 @@ private:
                 (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L" — удалить MSI":L" — remove MSI"):L"");
             SetWindowTextW(componentSecureUxTheme_,sutLabel.c_str());
             ClampSecureUxThemeSelection();
-            EnableWindow(componentSecureUxTheme_,!SecureUxThemeSelectionBlocked()&&(!sutInstalled||sutCanRemove||selection_.secureUxThemeRemove));
+            EnableWindow(componentSecureUxTheme_,(!SecureUxThemeSelectionBlocked()||sutCanRemove)&&(!sutInstalled||sutCanRemove||selection_.secureUxThemeRemove));
             EnableWindow(componentSettings_,TRUE); EnableWindow(componentSettings32_,TRUE);
             EnableWindow(component64_,os64); EnableWindow(component32_,TRUE);
         }
@@ -1804,6 +1812,32 @@ private:
         return secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::External
             || secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict;
     }
+    bool NoSettingsInstalledLocked() const noexcept {
+        return !installedSelection_.glassSettings&&!inspect_.settings64.installed&&!inspect_.settings32.installed;
+    }
+    // Action-specific prerequisite; never auto-select Settings or a Platform.
+    bool SecureUxRemovalNeedsSettingsUpdateLocked() const noexcept {
+        try {
+        if(NoSettingsInstalledLocked())return false;
+        const bool os64=GlassInstallUtil::IsOs64Bit();
+        const auto& rep=os64?inspect_.settings64:inspect_.settings32;
+        if(!rep.installed)return true; // the other architecture cannot apply styles
+        std::wstring target=rep.sourceVerified?rep.targetVersion:L"";
+        const auto& asset=releaseCatalog_.products[os64?2:3];
+        if(asset&&asset->downloadable) {
+            const auto& v=asset->version.parts;
+            const auto remote=std::to_wstring(v[0])+L"."+std::to_wstring(v[1])+L"."+std::to_wstring(v[2])+L"."+std::to_wstring(v[3]);
+            if(target.empty()||VersionOlder(target,remote))target=remote;
+        }
+        return rep.damaged||(!target.empty()&&VersionOlder(rep.installedPackageVersion,target));
+        }catch(...){return true;} // never silently waive an unverifiable prerequisite
+    }
+    bool SecureUxRemovalDependencySatisfiedLocked() const {
+        const bool os64=GlassInstallUtil::IsOs64Bit();
+        const bool nativeSelected=os64?selection_.Settings64(true):selection_.Settings32(false);
+        if(NoSettingsInstalledLocked()&&(selection_.Settings64(os64)||selection_.Settings32(os64)))return nativeSelected;
+        return !SecureUxRemovalNeedsSettingsUpdateLocked()||nativeSelected;
+    }
     // One read-only policy for capability and its user-facing refusal reason.
     // Caller holds inspectMutex_. This never changes style/MSI registration.
     [[nodiscard]] const wchar_t* SecureUxThemeRemovalBlockReasonLocked() const noexcept {
@@ -1815,6 +1849,10 @@ private:
         if(inspect_.officialSecureUxThemeCode.empty())return ru?
             L"Не удалось однозначно подтвердить оригинальный MSI SecureUxTheme. Удаление заблокировано, чтобы не затронуть другую установку.":
             L"The original SecureUxTheme MSI could not be uniquely verified. Removal is blocked to protect another installation.";
+        // Missing Settings is an explicit manual-risk path, not a fake runtime
+        // query success. A planned update may provide a previously missing query.
+        if(secureUxThemeState_!=GlassInstallUtil::SecureUxThemeState::External&&
+            (NoSettingsInstalledLocked()||SecureUxRemovalNeedsSettingsUpdateLocked()))return nullptr;
         using S=GlassInstallUtil::SecureUxThemeState;
         switch(secureUxThemeState_) {
         // Loaded removal is authorized only after profile/session/style preflight
@@ -1858,6 +1896,13 @@ private:
     }
     std::wstring ComponentWarnings() const {
         auto text=GlassProductUiPolicy::WarningText(SelectionPreview().warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit());
+        if(selection_.secureUxThemeRemove) {
+            const bool os64=GlassInstallUtil::IsOs64Bit();
+            if(os64?selection_.Settings64(true):selection_.Settings32(false))
+                text+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"\n1. Обновление GlassSettings. 2. Удаление SecureUxTheme.":L"\n1. Update GlassSettings. 2. Remove SecureUxTheme.";
+            if(selection_.secureUxRemovalWithoutSettings)
+                text+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"\nБез GlassSettings: верните штатную тему вручную. Ответственность за последствия удаления принимаете вы. Перезагрузите Windows.":L"\nWithout GlassSettings: restore a stock theme yourself. You accept responsibility for removal consequences. Restart Windows.";
+        }
         if(selection_.removeMask && (selection_.secureUxTheme||selection_.secureUxThemeRemove)) {
             if(!text.empty())text+=L"\n";
             text+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
@@ -1964,7 +2009,7 @@ private:
         const bool sutConflict=sutState==GlassInstallUtil::SecureUxThemeState::Conflict;
         const bool sutUpdate=sutCondition==GlassProducts::ProductCondition::UpdateAvailable;
         const bool sutDamaged=sutCondition==GlassProducts::ProductCondition::Damaged;
-        const bool sutDisabled=sutExternal||sutConflict;
+        const bool sutDisabled=sutExternal||(sutConflict&&!NoSettingsInstalledLocked()&&!SecureUxRemovalNeedsSettingsUpdateLocked());
         const bool sutChecked=(selection_.secureUxTheme||selection_.secureUxThemeRemove)&&!sutDisabled;
         const auto* sutRemoveReason=SecureUxThemeRemovalBlockReasonLocked();
         const bool sutRemoveSupported=sutRemoveReason==nullptr;
@@ -2009,6 +2054,9 @@ private:
             L",\"packageSize\":"+std::to_wstring(sutLocal?sutOffer.localSize:sutOffer.releaseSize)+
             L",\"broken\":"+(inspect_.secureUxTheme.damaged?L"true":L"false")+
             L",\"applySupported\":"+(inspect_.secureUxTheme.installed?L"false":L"true")+
+            L",\"removalDependencyId\":"+JsStringLiteral(os64?L"settings64":L"settings32")+
+            L",\"removalDependencyRequired\":"+(SecureUxRemovalNeedsSettingsUpdateLocked()?L"true":L"false")+
+            L",\"removalWithoutSettings\":"+(NoSettingsInstalledLocked()?L"true":L"false")+
             L",\"removeSupported\":"+(sutRemoveSupported?L"true":L"false")+
             L",\"removeBlockedReason\":"+JsStringLiteral(inspect_.secureUxTheme.installed&&sutRemoveReason?sutRemoveReason:L"")+
             L",\"operation\":"+JsStringLiteral(selection_.secureUxThemeRemove?L"remove":sutCondition==GlassProducts::ProductCondition::NotInstalled?L"install":sutUpdate?L"update":L"repair")+
@@ -2481,6 +2529,15 @@ private:
         if (!accepted_ || transitioning_ || DebugDemoLocksControls()) return;
         if ((page_!=Page::Components && page_!=Page::Certificate) ||
             !inspectReady_.load(std::memory_order_acquire) || !HasSelectedComponent()) return;
+        {std::lock_guard<std::mutex> lock(inspectMutex_);
+            if(selection_.secureUxThemeRemove) {
+                if(!SecureUxThemeRemovalSupportedLocked()||!SecureUxRemovalDependencySatisfiedLocked())return;
+                const bool os64=GlassInstallUtil::IsOs64Bit();
+                const bool manual=NoSettingsInstalledLocked()&&!(os64?selection_.Settings64(true):selection_.Settings32(false));
+                if(manual&&!selection_.secureUxRemovalWithoutSettings)return; // no silent auto -> manual downgrade
+                selection_.secureUxRemovalWithoutSettings=manual;
+            }
+        }
         if (!RunPreflightChecks()) return;
         if(!ConfirmManagedSettingsRemoval())return;
         finishWarnings_.clear();
@@ -3173,19 +3230,26 @@ private:
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
             else if(message==L"component:secureUxTheme:remove") {
                 std::lock_guard<std::mutex> lock(inspectMutex_);
-                if(SecureUxThemeRemovalSupportedLocked()) {
+                if(SecureUxThemeRemovalSupportedLocked()&&SecureUxRemovalDependencySatisfiedLocked()) {
+                    selection_.secureUxRemovalWithoutSettings=NoSettingsInstalledLocked()&&!(os64?selection_.Settings64(true):selection_.Settings32(false));
                     selection_.secureUxTheme=false;selection_.secureUxThemeRemove=true;
                     secureUxRemovalCode_=inspect_.officialSecureUxThemeCode;
                 }
             }
             else if (message==L"component:secureUxTheme:1" || message==L"component:secureUxTheme:0") {
-                selection_.secureUxThemeRemove=false;secureUxRemovalCode_.clear();
+                selection_.secureUxThemeRemove=false;selection_.secureUxRemovalWithoutSettings=false;secureUxRemovalCode_.clear();
                 const bool checked=message.back()==L'1';
                 std::lock_guard<std::mutex> lock(inspectMutex_);
                 if (!SecureUxThemeSelectionBlocked())
                     selection_.secureUxTheme=checked && !inspect_.secureUxTheme.installed;
                 else
                     ClampSecureUxThemeSelection();
+            }
+            {std::lock_guard<std::mutex> lock(inspectMutex_);
+                if(selection_.secureUxThemeRemove&&(!SecureUxRemovalDependencySatisfiedLocked()||
+                    (NoSettingsInstalledLocked()&&!selection_.secureUxRemovalWithoutSettings&&!(os64?selection_.Settings64(true):selection_.Settings32(false))))) {
+                    selection_.secureUxThemeRemove=false;selection_.secureUxRemovalWithoutSettings=false;secureUxRemovalCode_.clear();
+                }
             }
             EnableWindow(next_,!failurePending_ && ComponentsReady());
             SetWindowTextW(next_,Text(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()).c_str());
@@ -3611,7 +3675,7 @@ private:
             if (!inspectReady_.load(std::memory_order_acquire)) {
                 DrawLabel(dc,Text(IDS_COMP_ANALYZING),Box(60,238,800,40),font_,muted);
             } else {
-            DrawLabel(dc,Text(IDS_COMP_INTRO),Box(48,142,840,42),font_,muted);
+            DrawLabel(dc,nativeComponentNotice_.empty()?Text(IDS_COMP_INTRO):nativeComponentNotice_,Box(48,142,840,58),small_,nativeComponentNotice_.empty()?muted:nativeComponentNoticeDanger_?RGB(255,160,177):RGB(245,207,130));
             const bool os64=GlassInstallUtil::IsOs64Bit();
             const auto state=[&](bool selected, bool installed, bool mandatory, int x, int y) {
                 DrawLabel(dc,Text(ComponentStateId(selected,installed?GlassProducts::ProductCondition::Healthy:GlassProducts::ProductCondition::NotInstalled)),Box(x,y,mandatory?220:250,38),small_,accent);
@@ -3852,6 +3916,8 @@ private:
         if (progressTrack_) DeleteObject(progressTrack_);
     }
     LRESULT Handle(UINT msg, WPARAM w, LPARAM l) {
+        if(!nativeComponentNotice_.empty()&&(msg==WM_MOUSEMOVE||msg==WM_MOUSEWHEEL||msg==WM_LBUTTONDOWN||msg==WM_KEYDOWN||msg==WM_COMMAND))
+            nativeComponentNoticeActivity_=true;
         switch (msg) {
         case WM_CREATE: InitializeLoading(); return 0;
         case kBeginStartup: BeginStartup(); return 0;
@@ -3983,14 +4049,28 @@ private:
                         std::lock_guard<std::mutex> lock(inspectMutex_);
                         selection_.secureUxThemeRemove=false;secureUxRemovalCode_.clear();
                         selection_.secureUxTheme=checked && !inspect_.secureUxTheme.installed && !SecureUxThemeSelectionBlocked();
-                        if(checked && SecureUxThemeRemovalSupportedLocked()){
+                        if(checked && SecureUxThemeRemovalSupportedLocked()&&SecureUxRemovalDependencySatisfiedLocked()){
+                            selection_.secureUxRemovalWithoutSettings=NoSettingsInstalledLocked()&&!(os64?selection_.Settings64(true):selection_.Settings32(false));
                             selection_.secureUxThemeRemove=true;secureUxRemovalCode_=inspect_.officialSecureUxThemeCode;
+                            if(selection_.secureUxRemovalWithoutSettings)SetNativeComponentNotice(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                                L"GlassSettings не установлен. Автоматическая подготовка штатной темы и проверка активности недоступны. Верните штатную тему вручную; ответственность за последствия удаления принимаете вы. Может потребоваться перезагрузка.":
+                                L"GlassSettings is not installed. Automatic stock-theme preparation and runtime verification are unavailable. Restore a stock theme yourself; you accept responsibility for removal consequences. A restart may be required.",true);
+                        }else if(checked&&inspect_.secureUxTheme.installed&&!SecureUxRemovalDependencySatisfiedLocked()) {
+                            SetNativeComponentNotice(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                                L"Для удаления SecureUxTheme сначала запланируйте обновление GlassSettings разрядности ОС.":
+                                L"To remove SecureUxTheme, first plan an update of GlassSettings matching the OS architecture.",false);
                         }
 
                     } else {
                         selection_.platform64=os64 && SendMessageW(component64_,BM_GETCHECK,0,0)==BST_CHECKED;
                         selection_.platform32=SendMessageW(component32_,BM_GETCHECK,0,0)==BST_CHECKED;
                         selection_.openGlass=os64 && SendMessageW(componentOpenGlass_,BM_GETCHECK,0,0)==BST_CHECKED;
+                    }
+                    {std::lock_guard<std::mutex> lock(inspectMutex_);
+                        if(selection_.secureUxThemeRemove&&(!SecureUxRemovalDependencySatisfiedLocked()||
+                            (NoSettingsInstalledLocked()&&!selection_.secureUxRemovalWithoutSettings&&!(os64?selection_.Settings64(true):selection_.Settings32(false))))) {
+                            selection_.secureUxThemeRemove=false;selection_.secureUxRemovalWithoutSettings=false;secureUxRemovalCode_.clear();
+                        }
                     }
                     EnableWindow(next_,!failurePending_ && ComponentsReady());
                     ShowContentControls(); InvalidateContent();
@@ -4088,7 +4168,12 @@ private:
             }
             break;
         case WM_TIMER:
-            if (w==kStartupPollTimer) CompleteStartupIfReady();
+            if(w==kComponentNoticeTimer) {
+                if(page_!=Page::Components||(nativeComponentNoticeActivity_&&GetTickCount64()-nativeComponentNoticeSince_>=1000)) {
+                    nativeComponentNotice_.clear();KillTimer(window,kComponentNoticeTimer);InvalidateContent();
+                }
+            }
+            else if (w==kStartupPollTimer) CompleteStartupIfReady();
             else if (w==kInstallTimer) Tick();
 #ifdef _DEBUG
             else if (w==kDebugDemoTimer) TickDebugDemo();

@@ -8,6 +8,9 @@
 
 namespace GlassInstallUtil {
 
+// MSI absence only, not DLL availability; ambiguous/broken registration refuses the exception.
+[[nodiscard]] bool GlassSettingsAbsentForSecureUxRemoval() noexcept;
+
 // Optional installed helper, validated for architecture, publisher and protocol.
 // Empty means unavailable/unknown, never a successful unloaded-module scan.
 std::wstring InstalledNativeDllX86() noexcept;

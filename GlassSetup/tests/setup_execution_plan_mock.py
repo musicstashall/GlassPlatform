@@ -9,6 +9,9 @@ import tempfile
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
 adapter=source[source.index('bool InstallEngine::BuildExecutionPlan() noexcept {'):source.index('bool InstallEngine::PrepareManagedRemoval() noexcept {')]
+util=(root/'GlassSetup/src/InstallSupport/GlassInstallUtil.cpp').read_text()
+a=util.index('bool GlassSettingsAbsentForSecureUxRemoval()');b=util.index('bool PrepareSecureUxRemovalVisualStyle(',a)
+absence=util[a:b]
 harness=r'''
 #include "GlassProductPlan.h"
 #include "GlassProducts.h"
@@ -57,6 +60,8 @@ bool Identity(const std::wstring& path,std::wstring& code,std::wstring& version)
 }
 }
 namespace GlassInstallUtil {
+// ACTUAL ABSENCE
+
  enum class SecureUxThemeState {Conflict,Inactive,Active,ActivationPending,DeactivationPending};
  SecureUxThemeState state=SecureUxThemeState::Inactive;bool query=true;
  bool QuerySecureUxThemeState(const std::wstring&,const std::wstring&,SecureUxThemeState* out,std::wstring*){*out=state;return query;}
@@ -110,6 +115,11 @@ void Installed(InstallEngine& e,const wchar_t* code,const wchar_t* version){
  auto& r=GlassProductInspect::observation.x64;r.installed=true;r.integrityKnown=true;
 }
 int main(){
+ for(int left:{INSTALLSTATE_UNKNOWN,INSTALLSTATE_DEFAULT,INSTALLSTATE_ADVERTISED})for(int right:{INSTALLSTATE_UNKNOWN,INSTALLSTATE_DEFAULT,INSTALLSTATE_ADVERTISED}) {
+  GlassInstallMsi::states[L"s64"]=left;GlassInstallMsi::states[L"s32"]=right;
+  assert(GlassInstallUtil::GlassSettingsAbsentForSecureUxRemoval()==(left==INSTALLSTATE_UNKNOWN&&right==INSTALLSTATE_UNKNOWN));
+ }
+
  {InstallEngine e;Reset(e);e.selection_.platform64=true;assert(e.BuildExecutionPlan());
   assert(e.executionPlanReady_&&e.executionPlan_.rows[Index(Product::Platform64)].action==Action::Install);}
  for(const auto version:{L"1.0.0",L"2.0.0",L"3.0.0"}){
@@ -175,6 +185,12 @@ int main(){
   GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;
   assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Remove);
  }
+ // Manual exception still requires exact original MSI and absent Settings.
+ for(bool absent:{false,true}) {InstallEngine e;Reset(e);e.selection_.secureUxThemeRemove=true;e.selection_.secureUxRemovalWithoutSettings=true;e.secureUxRemoval_.ready=true;
+  auto& r=GlassProductInspect::observation;r.secureUxTheme.installed=true;r.officialSecureUxThemeCode=L"vendor";
+  GlassInstallUtil::query=false;if(!absent)GlassInstallMsi::states[L"s64"]=INSTALLSTATE_DEFAULT;
+  assert(e.BuildExecutionPlan()==absent);
+ }
  // Exact original MSI + baseline + unloaded hook are required.
  for(int n=0;n<9;++n){
   InstallEngine e;Reset(e);e.selection_.secureUxThemeRemove=true;e.secureUxRemoval_.ready=true;
@@ -226,7 +242,7 @@ int main(){
   og.residual=og.residualSafe=true;GlassInstallMsi::unsafe=L"og";assert(!e.BuildExecutionPlan());}
  std::cout<<"PASS: actual Setup discovery/Build: install/update/repair, legacy, independent helpers, downgrade, unknown integrity, missing/wrong media, context/family/baseline/presence changes, cancellation; vendor install/remove/keep and 19 authority/revalidation cases\n";
 }
-'''.replace('// ADAPTER',adapter)
+'''.replace('// ADAPTER',adapter).replace('// ACTUAL ABSENCE',absence)
 compiler=shutil.which('clang++') or shutil.which('g++')
 if not compiler:raise SystemExit('clang++ or g++ required')
 with tempfile.TemporaryDirectory(prefix='GlassSetupExecutionPlan-') as directory:

@@ -461,6 +461,8 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .component-toast{position:absolute;left:50%;top:22px;z-index:85;max-width:420px;padding:7px 12px;border:1px solid #83d9a655;border-radius:8px;background:#173129f2;color:#cdeedd;font-size:9.5px;line-height:1.4;text-align:center;box-shadow:0 12px 30px #0007;opacity:0;visibility:hidden;transform:translateX(-50%) translateY(-5px);transition:opacity .2s,transform .2s,visibility .2s;pointer-events:none}
 .component-toast.show{opacity:1;visibility:visible;transform:translateX(-50%)}
 .component-toast.neutral{border-color:#9da4ba55;background:#232638f2;color:#d8dbe9}
+.component-toast.danger{background:#602330f2;border-color:#ff8596;color:#fff0f2}
+#components-plan-notices.danger{border-color:#ff859680;background:#b9364b22;color:#ffb3bf}
 .component-toast.warn{border-color:#f4c46d55;background:#3a2d22f2;color:#f5e9d4}
 #components-panel.is-dragging .c-veil{opacity:1;visibility:visible}
 #components-panel.is-dragging .c-lane.is-source .c-veil{opacity:0;visibility:hidden}
@@ -917,7 +919,25 @@ function componentLock(title){
 let warningReturnFocus=null;
 function closeProductWarning(){document.getElementById('components-warning-dialog').hidden=true;if(warningReturnFocus&&warningReturnFocus.isConnected)warningReturnFocus.focus();}
 function dialogParagraph(parent,text,className=''){const p=document.createElement('p');p.className=className;p.textContent=text||'—';parent.append(p);return p;}
-function componentPlanWarnings(){return [...new Set((hostState.components||[]).filter(x=>!x.hidden).map(x=>x.warning).filter(Boolean))];}
+function secureUxManualRiskText(){return locale==='ru'?'GlassSettings не установлен. Автоматическое переключение на штатную тему и проверка состояния SecureUxTheme недоступны. Перед удалением самостоятельно верните штатную тему Windows. Возможны некорректное оформление и сбои сеанса. Вы принимаете ответственность за последствия; может потребоваться перезагрузка.':'GlassSettings is not installed. Automatic stock-theme switching and SecureUxTheme runtime verification are unavailable. Restore a stock Windows theme yourself before removal. Incorrect styling and session failures are possible. You accept responsibility for the consequences; a restart may be required.';}
+function secureUxRemovalIsManual(item){
+ const native=document.getElementById('product-'+item?.removalDependencyId);
+ return !!item?.removalWithoutSettings&&!(native?.checked&&native.dataset.intent!=='remove');
+}
+function componentPlanWarnings(){
+ const warnings=(hostState.components||[]).filter(x=>!x.hidden).map(x=>x.warning).filter(Boolean);
+ const item=(hostState.components||[]).find(x=>x.id==='secureUxTheme'),input=document.getElementById('product-secureUxTheme');
+ if(secureUxRemovalIsManual(item)&&input?.checked&&input.dataset.intent==='remove')warnings.push(secureUxManualRiskText());
+ return [...new Set(warnings)];
+}
+function secureUxDependencyReady(item){
+ const anySettings=(hostState.components||[]).filter(x=>x.id==='settings64'||x.id==='settings32').some(x=>{const input=document.getElementById('product-'+x.id);return input?.checked&&input.dataset.intent!=='remove';});
+ if(!item?.removalDependencyRequired&&!(item?.removalWithoutSettings&&anySettings))return true;
+ const input=document.getElementById('product-'+item.removalDependencyId);
+ return !!input?.checked&&input.dataset.intent!=='remove';
+}
+function secureUxDependencyText(item){const arch=item.removalDependencyId==='settings64'?'x64':'x86';return locale==='ru'?'Для удаления SecureUxTheme сначала запланируйте обновление GlassSettings '+arch+'. Обновление будет выполнено перед удалением.':'To remove SecureUxTheme, first plan an update of GlassSettings '+arch+'. The update will run before removal.';}
+
 function showProductWarning(item,button){
  endComponentDrag();clearTimeout(componentHideTimer);clearComponentEdge();warningReturnFocus=button;
  const ru=locale==='ru',shade=document.getElementById('components-warning-dialog'),body=document.getElementById('components-warning-text');
@@ -961,11 +981,20 @@ const componentSlot=name=>componentPanel().querySelector(name==='available'?'.c-
 const componentEdge=name=>componentPanel().querySelector('[data-component-edge="'+name+'"]');
 const componentOther=name=>name==='available'?'plan':'available';
 function componentWorkspaceActive(){return mode==='components'||mode==='uninstall-select';}
-function componentGestureNote(text,warn=false){
- const note=document.getElementById('components-gesture-status');note.textContent=text;
- note.className='component-toast show '+(warn?'warn':'neutral');clearTimeout(componentNoteTimer);
- componentNoteTimer=setTimeout(()=>{note.className='component-toast';},3600);
+let componentNoticeUntil=0,componentNoticeWaitsForActivity=false;
+function componentGestureNote(text,warn=false,untilActivity=false){
+ const note=document.getElementById('components-gesture-status');note.textContent=text;note.setAttribute('role',warn==='danger'?'alert':'status');note.setAttribute('aria-live',warn==='danger'?'assertive':'polite');
+ note.className='component-toast show '+(warn==='danger'?'danger':warn?'warn':'neutral');clearTimeout(componentNoteTimer);
+ componentNoticeWaitsForActivity=untilActivity;componentNoticeUntil=Date.now()+1000;
+ if(!untilActivity)componentNoteTimer=setTimeout(()=>{note.className='component-toast';},3600);
 }
+function dismissComponentNoticeOnActivity(){
+ if(!componentNoticeWaitsForActivity)return;
+ componentNoticeWaitsForActivity=false;
+ componentNoteTimer=setTimeout(()=>{document.getElementById('components-gesture-status').className='component-toast';},Math.max(0,componentNoticeUntil-Date.now()));
+}
+// Capture sees the triggering event BEFORE its handler creates a new notice.
+for(const type of ['pointerdown','pointermove','keydown','wheel'])document.addEventListener(type,dismissComponentNoticeOnActivity,{capture:true,passive:true});
 function applyComponentPanels(){
  const panel=componentPanel(),a=componentSides.visible.available,p=componentSides.visible.plan;
  const lane=panel.querySelector('.c-lane.installed');
@@ -1163,15 +1192,35 @@ function bindComponentName(name,item){
  name.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();name.click();}};
 }
 function componentRemovalSupported(item){return hostState.appMode!=='unins'&&item?.installed&&item.removeSupported===true&&!item.disabled&&!item.locked;}
+function cancelSecureUxDependentRemoval(item){
+ const sut=(hostState.components||[]).find(x=>x.id==='secureUxTheme'),dependent=document.getElementById('product-secureUxTheme');
+ if((sut?.removalDependencyRequired||sut?.removalWithoutSettings)&&sut.removalDependencyId===item?.id&&dependent?.checked&&dependent.dataset.intent==='remove'){
+  dependent.checked=false;dependent.dataset.intent='apply';dependent.dispatchEvent(new Event('change',{bubbles:true}));
+  componentGestureNote(secureUxDependencyText(sut),true,true);
+ }
+}
 function commitComponentRemoval(input){
  const item=(hostState.components||[]).find(item=>item.id===input.dataset.component);
  if(input.disabled||hostState.componentsLoading||!componentRemovalSupported(item)||input.checked&&input.dataset.intent==='remove')return false;
- input.dataset.intent='remove';input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));return true;
+ if(item.id==='secureUxTheme'&&!secureUxDependencyReady(item)){
+  componentGestureNote(secureUxDependencyText(item),true,true);return false;
+ }
+ cancelSecureUxDependentRemoval(item);
+ input.dataset.intent='remove';input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));
+ if(item.id==='secureUxTheme'&&secureUxRemovalIsManual(item))componentGestureNote(secureUxManualRiskText(),'danger',true);
+ return true;
 }
 function commitComponentChoice(input,checked){
  const item=(hostState.components||[]).find(item=>item.id===input.dataset.component);
  if(input.disabled||hostState.componentsLoading||input.checked===checked&&input.dataset.intent!=='remove'||checked&&item?.applySupported===false)return false;
- input.dataset.intent='apply';input.checked=checked;input.dispatchEvent(new Event('change',{bubbles:true}));return true;
+ if(!checked)cancelSecureUxDependentRemoval(item);
+ input.dataset.intent='apply';input.checked=checked;input.dispatchEvent(new Event('change',{bubbles:true}));
+ const sut=(hostState.components||[]).find(x=>x.id==='secureUxTheme'),dependent=document.getElementById('product-secureUxTheme');
+ if(dependent?.checked&&dependent.dataset.intent==='remove'&&!secureUxDependencyReady(sut)){
+  dependent.checked=false;dependent.dataset.intent='apply';dependent.dispatchEvent(new Event('change',{bubbles:true}));
+  componentGestureNote(secureUxDependencyText(sut),true,true);
+ }
+ return true;
 }
 function componentCardAction(item,input,shelf){
  const ru=locale==='ru',f=componentCardFacts(item,input),current=componentMsiVersion(item),target=(item.id==='openglass'?item.targetPayloadVersion:item.targetVersion)||'';
@@ -1331,11 +1380,15 @@ function updateComponentsStatus(){
  for(const [value,label] of [[selected.length,ru?'изменений':'changes'],[keep,ru?'без изменений':'kept']]){const cell=document.createElement('div');cell.className='components-plan-total';const number=document.createElement('strong');number.textContent=String(value);const caption=document.createElement('span');caption.textContent=label;cell.append(number,caption);totals.append(cell);}
  if(!selected.length){const empty=document.createElement('li');empty.className='components-plan-empty';empty.textContent=ru?'Изменения не выбраны. Отметьте продукт слева, чтобы добавить его в план.':'No changes selected. Choose a product on the left to add it to the plan.';plan.append(empty);}
 
- for(const input of selected){const item=items.find(x=>x.id===input.dataset.component);if(!item)continue;const li=document.createElement('li'),name=document.createElement('span'),action=document.createElement('span');name.textContent=item.title;const removes=componentCardFacts(item,input).remove;action.textContent=removes?(ru?'Удалить':'Remove'):productActionLabel(item);li.className=removes?'remove':item.operation||'install';const cancel=document.createElement('button');cancel.type='button';cancel.className='plan-cancel';cancel.textContent='×';cancel.setAttribute('aria-label',(ru?'Отменить: ':'Undo: ')+item.title);cancel.onclick=()=>{commitComponentChoice(input,false);input.closest('.c-card').querySelector('.comp-decision:not(:disabled),.comp-remove:not(:disabled),.comp-name').focus();};li.append(name,action,cancel);plan.append(li);}
+ const executionRank=input=>input.dataset.component==='secureUxTheme'?100:
+  (input.dataset.component.startsWith('settings')&&input.dataset.intent!=='remove'?0:
+   input.dataset.intent==='remove'?10+['openglass','x86','x64','settings64','settings32'].indexOf(input.dataset.component):30+['x64','x86','openglass'].indexOf(input.dataset.component));
+ const ordered=selected.slice().sort((a,b)=>executionRank(a)-executionRank(b));
+ for(const [step,input] of ordered.entries()){const item=items.find(x=>x.id===input.dataset.component);if(!item)continue;const li=document.createElement('li'),name=document.createElement('span'),action=document.createElement('span');name.textContent=(step+1)+'. '+item.title;const removes=componentCardFacts(item,input).remove;action.textContent=removes?(ru?'Удалить':'Remove'):productActionLabel(item);li.className=removes?'remove':item.operation||'install';const cancel=document.createElement('button');cancel.type='button';cancel.className='plan-cancel';cancel.textContent='×';cancel.setAttribute('aria-label',(ru?'Отменить: ':'Undo: ')+item.title);cancel.onclick=()=>{commitComponentChoice(input,false);input.closest('.c-card').querySelector('.comp-decision:not(:disabled),.comp-remove:not(:disabled),.comp-name').focus();};li.append(name,action,cancel);plan.append(li);}
  const cleanup=document.querySelector('#components-extra input');if(cleanup&&cleanup.checked){const li=document.createElement('li');li.textContent=ru?'Очистить настройки всех пользователей, HKLM и сохранённые темы Glass':'Clean all user profiles, HKLM and saved Glass themes';plan.append(li);}
  document.getElementById('components-plan-title').textContent=hostState.appMode==='unins'?(ru?'План удаления':'Removal plan'):(ru?'План и рекомендации':'Plan and recommendations');
  document.getElementById('components-plan-note').textContent=hostState.appMode==='unins'?(ru?'Неотмеченные продукты и настройки сохраняются.':'Unchecked products and settings are retained.'):(ru?'Снятие отметки не удаляет установленный продукт.':'Unchecking an installed product does not remove it.');
- const notices=document.getElementById('components-plan-notices'),warnings=componentPlanWarnings();notices.replaceChildren();notices.hidden=!warnings.length;
+ const notices=document.getElementById('components-plan-notices'),warnings=componentPlanWarnings();notices.replaceChildren();notices.hidden=!warnings.length;notices.classList.toggle('danger',!!items.find(x=>x.id==='secureUxTheme'&&secureUxRemovalIsManual(x))&&selected.some(x=>x.dataset.component==='secureUxTheme'&&x.dataset.intent==='remove'));
  if(warnings.length){const text=document.createElement('span');text.textContent=(ru?'●  Предупреждений: ':'●  Warnings: ')+warnings.length+(ru?' · Проверьте состав продуктов.':' · Review product composition.');const details=document.createElement('button');details.type='button';details.textContent=ru?'Подробнее':'Details';details.onclick=()=>showProductWarning({title:ru?'Зависимости затронуты':'Dependencies affected',planWarnings:componentPlanWarnings()},details);notices.append(text,details);}
  syncComponentShelves();
 }
@@ -1432,7 +1485,7 @@ function animateComponentEntrance(){
    {duration:360,delay:index*65,easing:'cubic-bezier(.2,.8,.2,1)',fill:'backwards'});
  });
 }
-function setMode(value){const raw=String(value),alias=raw==='slideshow'?'welcome':raw;const valid=['loading','welcome','checking','conflicts','downgrade','version-invalid','license','components','certificate','cleanup-review','uninstall-select','installing','uninstalling','unlock-modules','unlock-processes','launching','settings-removal-risk','confirm-cancel','cancelling','cancelled','complete','error'];const next=valid.includes(alias)?alias:'welcome';if(next!==mode){endComponentDrag(false);clearTimeout(componentHideTimer);clearTimeout(componentNoteTimer);document.getElementById('components-gesture-status').className='component-toast';clearComponentEdge();}if(next==='welcome'&&!assetsReady){pendingMode='welcome';mode='loading';stage.dataset.mode='loading';syncModeText();clearTimeout(timer);return}if(next!=='welcome')pendingMode='';if(mode===next&&stage.dataset.mode===next){syncModeText();return}mode=next;stage.dataset.mode=mode;if(componentWorkspaceActive())componentEntrancePending=true;syncModeText();animateComponentEntrance();if(isCarouselMode())schedule();else clearTimeout(timer);}
+function setMode(value){const raw=String(value),alias=raw==='slideshow'?'welcome':raw;const valid=['loading','welcome','checking','conflicts','downgrade','version-invalid','license','components','certificate','cleanup-review','uninstall-select','installing','uninstalling','unlock-modules','unlock-processes','launching','settings-removal-risk','confirm-cancel','cancelling','cancelled','complete','error'];const next=valid.includes(alias)?alias:'welcome';if(next!==mode){endComponentDrag(false);clearTimeout(componentHideTimer);clearTimeout(componentNoteTimer);componentNoticeWaitsForActivity=false;document.getElementById('components-gesture-status').className='component-toast';clearComponentEdge();}if(next==='welcome'&&!assetsReady){pendingMode='welcome';mode='loading';stage.dataset.mode='loading';syncModeText();clearTimeout(timer);return}if(next!=='welcome')pendingMode='';if(mode===next&&stage.dataset.mode===next){syncModeText();return}mode=next;stage.dataset.mode=mode;if(componentWorkspaceActive())componentEntrancePending=true;syncModeText();animateComponentEntrance();if(isCarouselMode())schedule();else clearTimeout(timer);}
 function setCompletionText(tag,title,body,note,ready){completionText={doneTag:String(tag||''),doneTitle:String(title||''),doneBody:String(body||''),doneNote:String(note||''),doneReady:String(ready||'')};syncModeText();}
 function setErrorText(tag,title,body,details,reason,note){errorText={errorTag:String(tag||''),errorTitle:String(title||''),errorBody:String(body||''),errorDetails:String(details||''),errorReason:String(reason||''),errorNote:String(note||'')};syncModeText();}
 function update(){[...root.children].forEach((el,i)=>{el.classList.toggle('active',i===index);el.setAttribute('aria-hidden',i!==index)});[...dots.children].forEach((b,i)=>b.setAttribute('aria-current',i===index));pauseButton.innerHTML=paused?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';pauseButton.setAttribute('aria-label',paused?uiResources[locale].resume:uiResources[locale].pause);pauseButton.setAttribute('aria-pressed',String(paused));}

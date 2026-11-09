@@ -39,6 +39,7 @@ namespace InstallLog {
 namespace GlassInstallUtil {
  enum class SecureUxThemeState {Unavailable,Inactive,Active,ActivationPending,DeactivationPending,External,Conflict};
  SecureUxThemeState state=SecureUxThemeState::Inactive;bool query=true;
+ bool settingsAbsent=false;bool GlassSettingsAbsentForSecureUxRemoval(){return settingsAbsent;}
  bool IsOs64Bit(){return true;}
  bool helperSuccess=true,lateExternal=false;int styleCalls=0;
  struct SecureUxThemeDeactivateRun {bool ran=false,themeNotRestored=false,skippedExternalInstall=false;};
@@ -87,7 +88,7 @@ namespace GlassProfileMaintenance {
 struct InstallEngine {
  GlassProductPlan::Plan executionPlan_{};bool executionPlanReady_=true;
  InstallEngine(){executionPlan_.rows[GlassProductPlan::Index(GlassProductPlan::Product::SecureUxTheme)].action=GlassProductPlan::Action::Remove;}
- struct {bool secureUxTheme=false,secureUxThemeRemove=true;unsigned removeMask=0;bool Removes(unsigned row)const{return (removeMask&(1u<<row))!=0;}}selection_;
+ struct {bool secureUxTheme=false,secureUxThemeRemove=true,secureUxRemovalWithoutSettings=false,nativeUpdate=false;bool Settings64(bool)const{return nativeUpdate;}bool Settings32(bool)const{return false;}unsigned removeMask=0;bool Removes(unsigned row)const{return (removeMask&(1u<<row))!=0;}}selection_;
  GlassSecureUxPackage::Removal secureUxRemoval_;
  GlassProfileMaintenance::Inventory secureUxRemovalProfiles_;bool secureUxLoadedRemoval_=false;
  GlassSecureUxPackage::Package secureUxPackage_;
@@ -102,13 +103,27 @@ struct InstallEngine {
  bool PrepareSecureUxRemoval() noexcept;bool RemoveOriginalSecureUxTheme() noexcept;bool InstallOriginalSecureUxTheme() noexcept;
 };
 // METHODS
-void Reset(){GlassProfileMaintenance::skipped.clear();GlassInstallUtil::lateExternal=false;GlassSecureUxPackage::failRecheckAt=0;GlassProfileMaintenance::styleRechecks=GlassProfileMaintenance::failStyleAt=0;GlassInstallUtil::helperSuccess=true;GlassInstallUtil::styleCalls=0;
+void Reset(){GlassInstallUtil::settingsAbsent=false;GlassProfileMaintenance::skipped.clear();GlassInstallUtil::lateExternal=false;GlassSecureUxPackage::failRecheckAt=0;GlassProfileMaintenance::styleRechecks=GlassProfileMaintenance::failStyleAt=0;GlassInstallUtil::helperSuccess=true;GlassInstallUtil::styleCalls=0;
  GlassProfileMaintenance::preflight=GlassProfileMaintenance::recheckStyles=GlassProfileMaintenance::commitStyles=true;GlassProfileMaintenance::preflights=GlassProfileMaintenance::commits=0;GlassInstallUtil::overrideAfter=false;GlassInstallUtil::pending=false;GlassInstallUtil::pendingKnown=true;GlassInstallMsi::arpRefreshOk=true;GlassSecureUxPackage::presenceSafe=GlassSecureUxPackage::legacyAbsent=true;GlassSecureUxPackage::installed.clear();
  GlassMaintenanceCache::valid=true;GlassMaintenanceCache::code=L"official";GlassMaintenanceCache::version=L"4.0.0";
  GlassInstallMsi::installs=0;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Inactive;GlassInstallUtil::query=true;
  GlassSecureUxPackage::prepare=GlassSecureUxPackage::recheck=true;
  GlassSecureUxPackage::prepares=GlassSecureUxPackage::rechecks=0;GlassInstallMsi::uninstalls=0;GlassInstallMsi::result=0;}
 int main(){
+ // Manual risk exception only when BOTH Settings products are actually absent.
+ {Reset();InstallEngine e;e.selection_.secureUxRemovalWithoutSettings=true;GlassInstallUtil::settingsAbsent=true;GlassInstallUtil::query=false;
+  assert(e.PrepareSecureUxRemoval()&&e.RemoveOriginalSecureUxTheme());assert(GlassInstallMsi::uninstalls==1&&GlassInstallUtil::styleCalls==0&&e.warnings==2);}
+ {Reset();InstallEngine e;e.selection_.secureUxRemovalWithoutSettings=true;assert(!e.PrepareSecureUxRemoval());assert(GlassInstallMsi::uninstalls==0);}
+ {Reset();InstallEngine e;e.selection_.secureUxRemovalWithoutSettings=true;GlassInstallUtil::settingsAbsent=true;assert(e.PrepareSecureUxRemoval());
+  GlassInstallUtil::settingsAbsent=false;assert(!e.RemoveOriginalSecureUxTheme()&&GlassInstallMsi::uninstalls==0);}
+ // New Settings first: no old-Native query gate; fresh query/profile/style
+ // checks are mandatory before vendor MSI, after the selected update succeeds.
+ {Reset();InstallEngine e;e.selection_.nativeUpdate=true;GlassInstallUtil::query=false;assert(e.PrepareSecureUxRemoval());
+  GlassInstallUtil::query=true;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;
+  assert(e.RemoveOriginalSecureUxTheme());assert(GlassInstallUtil::styleCalls==1&&GlassProfileMaintenance::preflights==1);}
+ {Reset();InstallEngine e;e.selection_.nativeUpdate=true;GlassInstallUtil::query=false;assert(e.PrepareSecureUxRemoval());
+  assert(!e.RemoveOriginalSecureUxTheme()&&GlassInstallMsi::uninstalls==0);}
+
  {Reset();InstallEngine e;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;
   GlassProfileMaintenance::skipped={{L"SID-1008",L"C:\\Users\\OldUser"},{L"SID-1011",L"C:\\Users\\WsiAccount"}};
   assert(e.PrepareSecureUxRemoval());assert(e.warnings==0);assert(e.RemoveOriginalSecureUxTheme());

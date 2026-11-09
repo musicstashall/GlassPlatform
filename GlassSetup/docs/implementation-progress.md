@@ -1671,3 +1671,51 @@ resources and HTML (native fallback uses the resources). Preparation failures
 no longer receive ERROR_INSTALL_PACKAGE_REJECTED and its false policy message.
 Targeted production-source mocks, resources/build graph and production DOM pass;
 Windows/MSVC/WiX and actual theme color/removal validation remain outstanding.
+
+
+### Action-specific Native prerequisite for SecureUxTheme removal
+
+Implemented the explicit planning dependency requested after Log16:
+- Native architecture follows the OS. A newer available Settings package
+  (verified local MSI / downloadable catalogue offer), damaged installed Settings,
+  or missing OS-native Settings while the other architecture is installed requires
+  an explicit Settings Apply intent. Selection never cascades automatically.
+- Click and real pointer drag share the same guard. Refused removal leaves the
+  card installed and posts a yellow top notice. The plan is numbered in execution
+  order (Settings helper phase first, vendor SUT removal last). Cancelling or
+  removing the prerequisite cancels the dependent intent, both optimistically in
+  HTML and authoritatively in native IPC/Apply guards.
+- With no Settings products installed, explicit removal accepts manual risk:
+  red top notice plus existing compact warning-count/Details summary (red severity)
+  while the removal remains planned. No extra confirmation dialog is introduced.
+  Both Settings MSI registrations must still be absent at execution; missing DLL,
+  untrusted Native, other-bitness Settings or broken/advertised registration never
+  authorize this exception. The normal original-MSI baseline/identity/cache checks
+  remain mandatory. Native runtime/style/profile preparation is explicitly not
+  promised in this manual mode. Finish warnings repeat manual preparation/restart.
+- Notices wait for the next window input (pointer/keyboard/wheel), minimum 1000ms;
+  no subsequent activity means no timer-only expiry. Triggering input is excluded.
+  Native fallback uses its own inline notice/timer, no system dialogs.
+- The existing early Settings MSI phase already precedes vendor commit. When a
+  native update is explicitly planned, old-Native query/profile preflight no longer
+  blocks that prerequisite: original MSI is verified before any mutation; fresh
+  runtime/profile/style checks run via the newly installed Native before vendor
+  MSI. Failed update/check prevents vendor removal and uses normal Glass rollback.
+  Retained Platform is not stopped/scanned just to update Settings.
+- Detection is conservatively at Settings package-version/health level, not a
+  per-DLL digest/version dependency solver. The documented rule is reusable for
+  future action-specific dependencies; only SUT removal is wired currently.
+
+Validation: 82 mock scripts, 72 PASS / 10 unchanged known failures
+(module_scan, platform_mutex, preserve_registry, registered_paths, scan_protocol,
+task_close_cleanup, task_scheduler_stop, unins_close_state, unins_task_stop,
+watch_lifecycle). All four production DOM suites PASS, including new RU/EN
+click/real-drag, wrong architecture, prerequisite order/undo, manual risk/Details,
+host echo and deterministic notice timing. Resource/build-graph/diff checks PASS.
+No MSVC/WiX build, actual Windows theme color validation or live MSI acceptance
+was possible here; mocks do not establish Windows runtime success.
+
+Contract updated alongside code in cache-profile-maintenance-contract.md and
+linked from the module README. Previous installed-Native requirement is now
+conditional: explicit newer-Settings prerequisite or explicit absent-Settings
+manual exception; no embedded executable payload or new Native export was added.

@@ -37,6 +37,9 @@ struct Selection {
     bool secureUxTheme = false;
     // Explicit original-MSI removal, not an unchecked install selection.
     bool secureUxThemeRemove = false;
+    // Explicit interactive risk acceptance; valid only while BOTH Settings MSI
+    // products are absent. Never infer absence from a missing Native DLL.
+    bool secureUxRemovalWithoutSettings = false;
     // Same row indices as GlassProductPlan::Product. SUT has its separate protocol.
     std::uint32_t removeMask = 0;
     unsigned confirmedSettingsRemovalRisk = 0;
