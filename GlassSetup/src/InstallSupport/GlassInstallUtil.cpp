@@ -1809,7 +1809,10 @@ bool PrepareSecureUxRemovalVisualStyle(const std::wstring& x64Dir,const std::wst
         const std::wstring rundll=os64?NativeRundll64():RundllPathForTaskArch(arch);
         if(rundll.empty())return fail(L"Native-architecture rundll32.exe was not found.");
         StockThemeMaintenanceTrace::Reader trace;
-        const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemePrepareRemovalV2W"+
+        // rundll32 appends W/A itself. Passing the exact W export falls back
+        // to its unsuffixed/ANSI lookup and sends LPSTR to our LPWSTR callback.
+        // Keep the PE check above on the real W export, but request its base name.
+        const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemePrepareRemovalV2"+
             (*trace.Name()?L" "+std::wstring(trace.Name()):L"");
         DWORD exitCode=MAXDWORD;bool started=false,completed=false;
         const bool ran=RunHiddenCommand(cmd,&exitCode,45000,&started,&completed);

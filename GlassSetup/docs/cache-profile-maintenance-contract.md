@@ -324,3 +324,39 @@ Active query exit2 в log20 не подтверждает гипотезу inact
 выполнение COM/force от старой DLL/no-op и дать данные для следующего исправления.
 Windows/MSVC/WiX-проверка недоступна; mock PASS не является visual acceptance.
 Исходные log20 и vendor MSI log удалены после сохранения анализа.
+
+
+### Log21: ANSI/Unicode dispatch в rundll32
+
+Log21 (20261109_161115): Native source comparison теперь действительно сработал
+(compared1/differs1 для обеих архитектур; installed MSI .101 → offered .103).
+Явно выбраны обе GS: rows0x24; их MSI установились exit0 в16:12:41.030 и
+16:12:47.985. Затем x64 style helper завершился **0x80070057 / E_INVALIDARG**
+в16:12:48.469 без опубликованного trace. Vendor SUT MSI не запускался. Rollback
+восстановил предыдущую установку (16:13:01.698). Missing HKU по-прежнему skipped.
+Это не ошибка установки GS или vendor uninstall; новый diagnostic argument
+выявил ошибку dispatch, которой предыдущие mock-тесты не моделировали.
+
+Setup передавал rundll32 точное имя `GlassSettings_SecureUxThemePrepareRemovalV2W`.
+Алгоритм rundll32 пробует requested+W как Unicode, requested+A и requested как
+ANSI. Exact fallback не становится Unicode только оттого, что имя оканчивается
+буквой W. Получался вызов LPWSTR callback с ANSI аргументом diagnostic mapping;
+валидатор имени отклоняет такой буфер с E_INVALIDARG до применения темы. Раньше
+пустой аргумент маскировал несовпадение сигнатуры. Совместимый алгоритм изучен в
+https://github.com/wine-mirror/wine/blob/master/programs/rundll32/rundll32.c
+(get_entry_point32); Windows machine-level trace здесь недоступен.
+
+Исправлена только command line: requested base `...PrepareRemovalV2` без W.
+Проверки PE/export/publisher/архитектуры остаются на реальном `...V2W`; LPWSTR
+callback и строгая проверка имени mapping сохранены. Никаких новых версий
+экспорта/искусственного обновления GS, bypass ошибки, fallback на x86 или
+удаления hook вручную. Достаточно пересобрать Setup с этой правкой; существующие
+пакеты с diagnostic Native должны быть установлены через явный prerequisite,
+учитывая выполненный rollback. Модель lookup теперь проверяет actual production
+команду и отдельно отвергает прежний exact-W ANSI dispatch.
+
+Исправлен объяснимый новый отказ до применения темы. Это не подтверждение
+устранения прежнего visible-style false success: после правильного вызова
+ожидается строка stock-style stages с результатами COM/force/read, но видимое
+переключение требует Windows acceptance. Исходные три журнала Log21 удалены
+после фиксации анализа.

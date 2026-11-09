@@ -20,7 +20,17 @@ std::wstring InstalledSecureUxThemeNativeDll(GlassShared::GlassPlatformTask::Pla
 bool PeMatches(const std::wstring&,WORD machine,const char* entry){assert(machine==(os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386));assert(std::string(entry)=="GlassSettings_SecureUxThemePrepareRemovalV2W");return pe;}
 std::wstring NativeRundll64(){assert(os64);return path?L"native64.exe":L"";}
 std::wstring RundllPathForTaskArch(GlassShared::GlassPlatformTask::PlatformArch arch){assert(!os64&&arch==GlassShared::GlassPlatformTask::PlatformArch::X86);return path?L"native32.exe":L"";}
-bool RunHiddenCommand(const std::wstring& cmd,DWORD* out,int timeout,bool* started,bool* completed){++calls;assert(timeout==45000&&cmd.find(L"trusted.dll\",GlassSettings_SecureUxThemePrepareRemovalV2W")!=std::wstring::npos);assert(cmd.find(L" Local\\GlassStockTheme-1-2")!=std::wstring::npos);*out=code;*started=start;*completed=complete;return launch;}
+bool UnicodeDispatch(const std::wstring& requested){
+ const std::wstring exported=L"GlassSettings_SecureUxThemePrepareRemovalV2W";
+ if(requested+L"W"==exported)return true;
+ // Exact fallback is an ANSI dispatch, even when the export name ends in W.
+ assert(requested==exported);return false;
+}
+bool RunHiddenCommand(const std::wstring& cmd,DWORD* out,int timeout,bool* started,bool* completed){++calls;assert(timeout==45000&&cmd.find(L"trusted.dll\",GlassSettings_SecureUxThemePrepareRemovalV2 ")!=std::wstring::npos);assert(cmd.find(L" Local\\GlassStockTheme-1-2")!=std::wstring::npos);
+// rundll32 resolves base+W as Unicode, then base+A/base as ANSI.
+auto comma=cmd.find(L",");auto end=cmd.find(L" ",comma);
+const auto requested=cmd.substr(comma+1,end-comma-1);
+assert(UnicodeDispatch(requested));*out=code;*started=start;*completed=complete;return launch;}
 namespace StockThemeMaintenanceTrace {
 struct Data {unsigned active=1;long hr=0,comHr=0,forceHr=0,fontHr=0,readHr=0;unsigned verified=1;};
 bool available=true;Data data;
@@ -34,7 +44,7 @@ void Line(const wchar_t*){++missingLogs;}
 struct SecureUxThemeDeactivateRun {bool ran=false;};
 template<size_t N,class... T>int swprintf_s(wchar_t (&buf)[N],const wchar_t* fmt,T... args){return swprintf(buf,N,fmt,args...);}
 // METHOD
-int main(){std::wstring detail;SecureUxThemeDeactivateRun run;
+int main(){assert(!UnicodeDispatch(L"GlassSettings_SecureUxThemePrepareRemovalV2W"));assert(UnicodeDispatch(L"GlassSettings_SecureUxThemePrepareRemovalV2"));std::wstring detail;SecureUxThemeDeactivateRun run;
 for(bool diag:{false,true}){StockThemeMaintenanceTrace::available=diag;
 for(bool arch:{false,true}){os64=arch;
  for(int failure=0;failure<8;++failure){missing=failure==0;pe=failure!=1;path=failure!=2;launch=failure!=3;start=failure!=4;complete=failure!=5;code=failure==6?12:failure==7?16:0;calls=0;run.ran=true;
