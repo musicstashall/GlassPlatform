@@ -1693,7 +1693,7 @@ Implemented the explicit planning dependency requested after Log16:
   authorize this exception. The normal original-MSI baseline/identity/cache checks
   remain mandatory. Native runtime/style/profile preparation is explicitly not
   promised in this manual mode. Finish warnings repeat manual preparation/restart.
-- Notices wait for the next window input (pointer/keyboard/wheel), minimum 1000ms;
+- Notices wait for the next pointer click anywhere in the window, minimum 1000ms;
   no subsequent activity means no timer-only expiry. Triggering input is excluded.
   Native fallback uses its own inline notice/timer, no system dialogs.
 - The existing early Settings MSI phase already precedes vendor commit. When a
@@ -1719,3 +1719,21 @@ Contract updated alongside code in cache-profile-maintenance-contract.md and
 linked from the module README. Previous installed-Native requirement is now
 conditional: explicit newer-Settings prerequisite or explicit absent-Settings
 manual exception; no embedded executable payload or new Native export was added.
+
+
+### Уточнение: только клики закрывают уведомления
+
+По уточнению пользователя движения мыши, прокрутка, клавиатура и команды
+контролов больше не считаются активностью для закрытия уведомлений. HTML
+учитывает только pointer click/auxclick (не keyboard/programmatic detail=0),
+с сохранением минимума 1000 мс. Завершающий click инициирующего drag исключён.
+Клики в нативном footer/title bar передаются в HTML отдельным уведомлением.
+Native fallback наблюдает завершённые нажатие/отпускание в окне и дочерних
+контролах до IsDialogMessage; перетаскивание за системный порог не считается
+кликом. Инициирующий клик не закрывает созданное им уведомление.
+
+PASS: production dependency DOM (RU/EN: pointermove/down, wheel, keyboard и
+programmatic click не закрывают; click/auxclick и footer закрывают; trailing
+drag click исключён; минимум 1000 мс); actual native click observer mock
+(client/child/nonclient/footer, foreign window/drag/keyboard/command exclusions).
+Resources/diff checks PASS. Windows runtime validation remains outstanding.

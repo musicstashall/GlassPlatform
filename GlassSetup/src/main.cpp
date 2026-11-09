@@ -1186,7 +1186,34 @@ public:
         if (startupThread_.joinable()) startupThread_.join();
         if (inspectThread_.joinable()) inspectThread_.join();
     }
+    // Observe queued pointer messages before child controls/IsDialogMessage
+    // consume them. Commands and keyboard activation are NOT pointer clicks.
+    void ObserveComponentNoticeClick(const MSG& message) noexcept {
+        if(message.hwnd!=window&&!IsChild(window,message.hwnd))return;
+        const UINT msg=message.message;
+        const bool down=msg==WM_LBUTTONDOWN||msg==WM_RBUTTONDOWN||msg==WM_MBUTTONDOWN||msg==WM_XBUTTONDOWN||
+            msg==WM_NCLBUTTONDOWN||msg==WM_NCRBUTTONDOWN||msg==WM_NCMBUTTONDOWN||msg==WM_NCXBUTTONDOWN;
+        const bool up=msg==WM_LBUTTONUP||msg==WM_RBUTTONUP||msg==WM_MBUTTONUP||msg==WM_XBUTTONUP||
+            msg==WM_NCLBUTTONUP||msg==WM_NCRBUTTONUP||msg==WM_NCMBUTTONUP||msg==WM_NCXBUTTONUP;
+        if(down){nativeNoticePress_=message.pt;nativeNoticeButton_=msg;return;}
+        if(nativeNoticeButton_&&(up||msg==WM_MOUSEMOVE||msg==WM_NCMOUSEMOVE)) {
+            const LONG dx=message.pt.x-nativeNoticePress_.x,dy=message.pt.y-nativeNoticePress_.y;
+            const int cx=GetSystemMetrics(SM_CXDRAG),cy=GetSystemMetrics(SM_CYDRAG);
+            if(dx>cx||dx<-cx||dy>cy||dy<-cy){nativeNoticeButton_=0;return;}
+            if(up){
+                if(msg==nativeNoticeButton_+1) {
+                    if(!nativeComponentNotice_.empty())nativeComponentNoticeActivity_=true;
+                    // Footer/title-bar clicks lie outside the WebView document.
+                    if(webReady_&&web_&&message.hwnd!=webHost_&&!IsChild(webHost_,message.hwnd))
+                        (void)web_->PostWebMessageAsJson(L"{\"type\":\"component-notice-click\"}");
+                }
+                nativeNoticeButton_=0;
+            }
+        }
+    }
 private:
+    POINT nativeNoticePress_{};
+    UINT nativeNoticeButton_=0;
     Page page_ = Page::Welcome;
     UINT dpi_ = 96;
     HWND back_ = nullptr, next_ = nullptr, cancel_ = nullptr;
@@ -3916,8 +3943,6 @@ private:
         if (progressTrack_) DeleteObject(progressTrack_);
     }
     LRESULT Handle(UINT msg, WPARAM w, LPARAM l) {
-        if(!nativeComponentNotice_.empty()&&(msg==WM_MOUSEMOVE||msg==WM_MOUSEWHEEL||msg==WM_LBUTTONDOWN||msg==WM_KEYDOWN||msg==WM_COMMAND))
-            nativeComponentNoticeActivity_=true;
         switch (msg) {
         case WM_CREATE: InitializeLoading(); return 0;
         case kBeginStartup: BeginStartup(); return 0;
@@ -4243,6 +4268,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         MSG message{};
         BOOL result = 0;
         while ((result=GetMessageW(&message,nullptr,0,0))>0) {
+            gInstaller.ObserveComponentNoticeClick(message);
             if (!IsDialogMessageW(gInstaller.window,&message)) {
                 TranslateMessage(&message); DispatchMessageW(&message);
             }

@@ -16,16 +16,20 @@ function send(rows,lang='ru'){receive({data:{type:'state',appMode:'setup',page:'
 function input(id){return d.querySelector('#product-'+id);}
 function card(id){return input(id).closest('.c-card');}
 function note(){return d.querySelector('#components-gesture-status');}
-function activity(type='pointermove'){d.dispatchEvent(new w.Event(type,{bubbles:true}));}
+function activity(type='click'){d.dispatchEvent(new w.MouseEvent(type,{bubbles:true,detail:1}));}
 function dragSut(){const target=d.querySelector('[data-component-drop="available"]');d.elementFromPoint=()=>target;
  const event=(type,x)=>{const e=new w.MouseEvent(type,{bubbles:true,clientX:x,clientY:50,button:0});Object.defineProperties(e,{pointerType:{value:'mouse'},pointerId:{value:1}});return e;};
  card('secureUxTheme').dispatchEvent(event('pointerdown',10));d.dispatchEvent(event('pointermove',40));d.dispatchEvent(event('pointerup',40));}
 for(const lang of ['ru','en']){
  send([settings,sut],lang);let before=messages.length;card('secureUxTheme').querySelector('.comp-remove').click();
  assert.equal(messages.length,before);assert.equal(input('secureUxTheme').checked,false);assert.ok(d.querySelector('#components-installed-grid').contains(card('secureUxTheme')));assert.ok(note().classList.contains('warn'));
- assert.match(note().textContent,/GlassSettings x64/);advance(5000);assert.ok(note().classList.contains('show'),'no activity: no timer expiry');activity('keydown');advance(0);assert.ok(!note().classList.contains('show'));
+ assert.match(note().textContent,/GlassSettings x64/);advance(5000);assert.ok(note().classList.contains('show'),'no activity: no timer expiry');for(const type of ['pointermove','pointerdown','keydown','wheel'])activity(type);advance(5000);assert.ok(note().classList.contains('show'),'movement, press, keyboard and wheel are not clicks');d.dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:0}));advance(0);assert.ok(note().classList.contains('show'),'keyboard/programmatic click is ignored');receive({data:{type:'component-notice-click'}});advance(0);assert.ok(!note().classList.contains('show'),'native footer click dismisses HTML notice');
+ // The browser's trailing click after pointerup is part of the same drag,
+ // not the NEXT user click; it must not arm an automatic one-second expiry.
+ dragSut();card('secureUxTheme').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));advance(5000);assert.ok(note().classList.contains('show'));
+ activity('auxclick');advance(0);assert.ok(!note().classList.contains('show'));
  // Real drag repeats the refusal and starts a fresh one-second minimum.
- dragSut();assert.equal(messages.length,before);assert.ok(note().classList.contains('warn'));activity('wheel');advance(999);assert.ok(note().classList.contains('show'));advance(1);assert.ok(!note().classList.contains('show'));
+ dragSut();assert.equal(messages.length,before);assert.ok(note().classList.contains('warn'));activity('auxclick');advance(999);assert.ok(note().classList.contains('show'));advance(1);assert.ok(!note().classList.contains('show'));
  // Wrong-architecture Settings does not satisfy the prerequisite.
  send([{...settings,id:'settings32',title:'GlassSettings x86',checked:true},settings,sut],lang);before=messages.length;card('secureUxTheme').querySelector('.comp-remove').click();assert.equal(messages.length,before);
  // No auto selection; explicitly update Settings, then remove SUT.
@@ -53,4 +57,4 @@ for(const lang of ['ru','en']){
  card('secureUxTheme').querySelector('.comp-remove').click();assert.equal(d.querySelector('#components-plan-notices').hidden,true);
 }
 assert.deepEqual(errors,[]);dom.window.close();
-console.log('PASS: production dependency UI: RU/EN click/drag refusal, OS architecture, explicit prerequisite/order/undo, no-Settings red risk + pinned Details, activity/minimum 1000ms');
+console.log('PASS: production dependency UI: RU/EN click/drag refusal, OS architecture, explicit prerequisite/order/undo, no-Settings red risk + pinned Details, pointer clicks only/minimum 1000ms');
