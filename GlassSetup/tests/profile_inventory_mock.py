@@ -24,13 +24,14 @@ prefix=r'''
 #include <utility>
 using DWORD=std::uint32_t;using BYTE=unsigned char;using LONG=int;using HKEY=void*;using PSID=void*;
 HKEY HKEY_LOCAL_MACHINE=reinterpret_cast<HKEY>(1),HKEY_USERS=reinterpret_cast<HKEY>(2);
-constexpr LONG ERROR_SUCCESS=0,ERROR_FILE_NOT_FOUND=2,ERROR_NO_MORE_ITEMS=259;
+constexpr LONG ERROR_SUCCESS=0,ERROR_BADDB=1009,ERROR_FILE_NOT_FOUND=2,ERROR_NO_MORE_ITEMS=259;
 constexpr DWORD KEY_READ=1,KEY_WRITE=2,KEY_WOW64_64KEY=4,KEY_ALL_ACCESS=7,REG_PROCESS_APPKEY=1,REG_SZ=1,REG_EXPAND_SZ=2,
  FILE_ATTRIBUTE_DIRECTORY=16,FILE_ATTRIBUTE_REPARSE_POINT=1024,INVALID_FILE_ATTRIBUTES=0xffffffff;
 struct Entry{std::wstring sid,path;bool loaded=false;};
 std::vector<Entry> entries;
 struct Handle{int kind,index;};std::map<HKEY,Handle> handles;std::uintptr_t serial=10;
 std::map<std::wstring,DWORD> attributes;
+bool loadBadDb=false,fallbackOk=false;int fallbackCalls=0,ownedUnloads=0;
 bool enumFail=false,openListFail=false,openEntryFail=false,openHiveFail=false,loadFail=false,invalidSid=false,badPathValue=false,otherSession=false;
 int malformed=0,changeOnCheck=0;
 int offlineLoads=0,cleanChecks=0,cleanWrites=0;int failCheckAt=0,failWriteAt=0;
@@ -59,7 +60,7 @@ DWORD ExpandEnvironmentStringsW(const wchar_t* text,wchar_t* out,DWORD size){DWO
 int ConvertStringSidToSidW(const wchar_t*,PSID* sid){if(invalidSid)return 0;*sid=std::malloc(1);return 1;}
 void LocalFree(void* p){std::free(p);}
 DWORD GetFileAttributesW(const wchar_t* raw){std::wstring path=raw;auto it=attributes.find(path);if(it!=attributes.end())return it->second;return path.find(L"NTUSER.DAT")!=std::wstring::npos?128:FILE_ATTRIBUTE_DIRECTORY;}
-LONG RegLoadAppKeyW(const wchar_t* path,HKEY* out,DWORD,DWORD,DWORD){++offlineLoads;if(loadFail)return 5;for(std::size_t i=0;i<entries.size();++i)if(entries[i].path+L"\\NTUSER.DAT"==path){*out=create(2,i);return 0;}return 2;}
+LONG RegLoadAppKeyW(const wchar_t* path,HKEY* out,DWORD,DWORD,DWORD){++offlineLoads;if(loadBadDb)return ERROR_BADDB;if(loadFail)return 5;for(std::size_t i=0;i<entries.size();++i)if(entries[i].path+L"\\NTUSER.DAT"==path){*out=create(2,i);return 0;}return 2;}
 bool OtherUserSessions(std::wstring& detail){if(otherSession)detail=L"Other session";return otherSession;}
 namespace Shared::RegistrySanity {
 bool CleanOwnedSettings(HKEY,bool,bool commit,std::wstring& detail){
@@ -74,6 +75,14 @@ namespace GlassSavedThemeCleanup {struct Batch {bool Prepare(const std::wstring&
 bool IsDesktopProfile(const std::wstring&){return false;}
 '''
 prefix+='\nbool deletedLocal=false;bool DeletedLocalProfile(const std::wstring& sid){return deletedLocal&&sid==L"S-1-5-21-222";}\n'
+prefix+=r'''
+namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
+namespace GlassOfflineUserHive {
+ bool Unmount(const std::wstring& name){assert(name==L"owned-test");++ownedUnloads;return true;}
+ bool LoadMounted(const std::wstring& path,HKEY& hive,std::wstring& mount,std::wstring&){++fallbackCalls;if(!fallbackOk)return false;
+  for(std::size_t n=0;n<entries.size();++n)if(entries[n].path+L"\\NTUSER.DAT"==path){hive=create(2,n);mount=L"owned-test";return true;}return false;}
+}
+'''
 profile=s[s.index('struct Profile {'):s.index('inline bool ReadString(')]
 methods='\n'.join(function(token) for token in ('bool OpenAll(', 'bool VerifyInventory(', 'bool PreflightCleanup(', 'bool Cleanup('))
 body=prefix+profile+function('inline bool ReadString(')+function('inline bool SafePath(')+'''\nclass Inventory {
@@ -82,9 +91,13 @@ body=prefix+profile+function('inline bool ReadString(')+function('inline bool Sa
  const std::vector<Profile>& Profiles() const {return profiles_;}
 '''+methods+'\n};\n'
 main=r'''
-void reset(){deletedLocal=false;assert(handles.empty());entries={{L"S-1-5-21-111",L"C:\\Users\\A"},{L"S-1-12-1-222",L"C:\\Users\\B"}};attributes.clear();enumFail=openListFail=openEntryFail=openHiveFail=loadFail=invalidSid=badPathValue=otherSession=false;offlineLoads=cleanChecks=cleanWrites=failCheckAt=failWriteAt=malformed=changeOnCheck=0;themeChecks=themeCommits=failThemeCheck=failThemeCommit=0;}
+void reset(){loadBadDb=fallbackOk=false;fallbackCalls=ownedUnloads=0;deletedLocal=false;assert(handles.empty());entries={{L"S-1-5-21-111",L"C:\\Users\\A"},{L"S-1-12-1-222",L"C:\\Users\\B"}};attributes.clear();enumFail=openListFail=openEntryFail=openHiveFail=loadFail=invalidSid=badPathValue=otherSession=false;offlineLoads=cleanChecks=cleanWrites=failCheckAt=failWriteAt=malformed=changeOnCheck=0;themeChecks=themeCommits=failThemeCheck=failThemeCommit=0;}
 int main(){
  std::wstring orphanDetail;
+ reset();{loadBadDb=fallbackOk=true;entries[0].loaded=true;Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.Profiles().size()==2);assert(fallbackCalls==1);assert(i.VerifyInventory(orphanDetail));}assert(ownedUnloads==1&&handles.empty());
+ reset();{loadBadDb=fallbackOk=true;Inventory i;assert(!i.OpenAll(orphanDetail));assert(fallbackCalls==0);} // Never broaden general cleanup loader.
+ reset();{loadBadDb=true;fallbackOk=false;Inventory i;assert(!i.OpenAll(orphanDetail,true));assert(fallbackCalls==1&&handles.empty());}
+
  reset();{entries[1].sid=L"S-1-5-21-222";deletedLocal=true;loadFail=true;entries[0].loaded=true;
   Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.Profiles().size()==1);assert(offlineLoads==0);assert(i.VerifyInventory(orphanDetail));
   deletedLocal=false;assert(!i.VerifyInventory(orphanDetail));}

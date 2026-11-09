@@ -10,6 +10,7 @@
 #include <RegistrySanity.h>
 #include <SystemVisualStyle.h>
 #include "GlassSavedThemeCleanup.h"
+#include "GlassOfflineUserHive.h"
 #pragma comment(lib,"Wtsapi32.lib")
 
 namespace GlassProfileMaintenance {
@@ -33,21 +34,23 @@ inline bool DeletedLocalProfile(const std::wstring& text) {
         for(BYTE i=0;local&&i<count;++i)local=*GetSidSubAuthority(sid,i)==*GetSidSubAuthority(info->DomainSid,i);
     }
     LsaFreeMemory(info);
-    if(!local)return false;
+    if(!local){GlassInstallLog::LineFormat(L"Profile account: %s is not confirmed machine-local SAM",text.c_str());return false;}
     DWORD nameSize=0,domainSize=0;SID_NAME_USE use{};
     SetLastError(ERROR_SUCCESS);
-    if(LookupAccountSidW(nullptr,sid,nullptr,&nameSize,nullptr,&domainSize,&use))return false;
-    return GetLastError()==ERROR_NONE_MAPPED;
+    const bool mapped=LookupAccountSidW(nullptr,sid,nullptr,&nameSize,nullptr,&domainSize,&use)!=FALSE;
+    const DWORD lookup=GetLastError();
+    GlassInstallLog::LineFormat(L"Profile account: %s machine-local=1 lookup=%lu deleted=%d",text.c_str(),lookup,!mapped&&lookup==ERROR_NONE_MAPPED?1:0);
+    return !mapped&&lookup==ERROR_NONE_MAPPED;
 }
 struct Profile {
-    std::wstring sid, path;
+    std::wstring sid, path, ownedMount;
     HKEY hive=nullptr;
     GlassSavedThemeCleanup::Batch savedThemes;
     Profile()=default;
     Profile(const Profile&)=delete;
     Profile& operator=(const Profile&)=delete;
-    Profile(Profile&& other) noexcept : sid(std::move(other.sid)),path(std::move(other.path)),hive(other.hive),savedThemes(std::move(other.savedThemes)) {other.hive=nullptr;}
-    ~Profile(){if(hive)RegCloseKey(hive);}
+    Profile(Profile&& other) noexcept : sid(std::move(other.sid)),path(std::move(other.path)),ownedMount(std::move(other.ownedMount)),hive(other.hive),savedThemes(std::move(other.savedThemes)) {other.hive=nullptr;other.ownedMount.clear();}
+    ~Profile(){if(hive)RegCloseKey(hive);if(!ownedMount.empty())GlassOfflineUserHive::Unmount(ownedMount);}
 };
 inline bool ReadString(HKEY key,const wchar_t* name,std::wstring& out) {
     out.clear();
@@ -120,8 +123,8 @@ class Inventory {
 public:
     bool SavedThemeRegistryFallback() const noexcept{return savedThemeRegistryFallback_;}
     const std::vector<Profile>& Profiles() const noexcept{return profiles_;}
-    // All hives stay open between preflight and commit. We never unload a system
-    // mount; RegLoadAppKey handles unload only our private offline mapping.
+    // Hives stay open between preflight and commit. Existing SID mounts are
+    // never unloaded; private app hives/owned fallback mounts have scoped cleanup.
     bool OpenAll(std::wstring& detail,bool skipDeletedLocal=false) {
         skipDeletedLocal_=skipDeletedLocal;
         cleanupPrepared_=false;
@@ -142,7 +145,7 @@ public:
             PSID binary=nullptr;
             if(!ConvertStringSidToSidW(name,&binary)){detail=L"Invalid profile SID";ok=false;break;}
             LocalFree(binary);
-            if(skipDeletedLocal_&&DeletedLocalProfile(sid)){detail+=sid+L": deleted local-account residue ignored; ";continue;}
+            if(skipDeletedLocal_&&DeletedLocalProfile(sid)){GlassInstallLog::LineFormat(L"SecureUxTheme profile: deleted local-account residue ignored: %s",sid.c_str());continue;}
             HKEY entry=nullptr;
             if(RegOpenKeyExW(list,name,0,KEY_READ,&entry)!=ERROR_SUCCESS){detail=sid+L": profile entry unavailable";ok=false;break;}
             std::wstring raw;const bool got=ReadString(entry,L"ProfileImagePath",raw);RegCloseKey(entry);
@@ -172,7 +175,15 @@ public:
                 if(attr==INVALID_FILE_ATTRIBUTES){detail=sid+L": NTUSER.DAT unavailable";ok=false;break;}
                 if(!SafePath(file)){detail=sid+L": unsafe or unavailable NTUSER.DAT";ok=false;break;}
                 st=RegLoadAppKeyW(file.c_str(),&profile.hive,KEY_ALL_ACCESS,REG_PROCESS_APPKEY,0);
-                if(st!=ERROR_SUCCESS){detail=sid+L": cannot open offline hive: "+std::to_wstring(st);ok=false;break;}
+                if(st!=ERROR_SUCCESS){
+                    GlassInstallLog::LineFormat(L"Offline user hive: SID=%s path=%s RegLoadAppKey=%ld",sid.c_str(),file.c_str(),st);
+                    std::wstring fallback;
+                    if(st!=ERROR_BADDB||!skipDeletedLocal_||!GlassOfflineUserHive::LoadMounted(file,profile.hive,profile.ownedMount,fallback)) {
+                        detail=sid+L": cannot open offline hive: RegLoadAppKey="+std::to_wstring(st);
+                        if(!fallback.empty())detail+=L"; "+fallback;
+                        ok=false;break;
+                    }
+                }
             }
             profiles_.push_back(std::move(profile));
         }

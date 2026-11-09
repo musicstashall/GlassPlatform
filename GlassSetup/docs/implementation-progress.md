@@ -1568,3 +1568,42 @@ Validation: production DOM covers all six products, RU/EN, installed and absent,
 exact two-source order/labels, distinct installed/local-offer/server versions and
 unknown-origin omission. Managed-removal DOM, resource invariants and diff check
 PASS. No Windows build or visual Windows acceptance performed.
+
+### Windows removal retry: offline NTUSER loader fallback (1009)
+
+GlassSetup-14.log (session 2026-11-09 12:14–12:20): Setup 2.0.0.0098 queries
+SecureUxTheme Active=2, original MSI registered state=5, local original 4.0.0 found.
+OpenGlass upstream/local versions both 3.0.2.3749. Removal stops before style/MSI
+operations on RegLoadAppKey error 1009, now for SID ending -1011 rather than the
+previous -1008. This does not prove that -1011 is deleted, that -1008 was skipped,
+or that a file lock caused 1009. No vendor uninstall has failed in this attempt.
+
+Added a standard RegLoadKey fallback specifically for ERROR_BADDB (1009) from
+RegLoadAppKey during SUT profile preparation. Ordinary user NTUSER hives rejected
+by the application-hive loader can now be offered to the normal registry loader,
+including its standard transaction-log handling. Backup/Restore privileges are
+enabled only around the operations and their previous states are restored. A
+fresh GUID-named HKU GlassSetup-Offline mount is owned only after successful load;
+Profile RAII closes its handle and unloads only that owned mount, including moved
+profiles, failure and partial-inventory exits. Existing HKU SID mounts are only
+opened/closed, never unloaded. No file deletion/copy/hand-written registry repair.
+The fallback is not enabled for general settings cleanup.
+
+If the normal loader also fails, Setup reports both loader codes rather than
+pretending the profile was prepared. Truly corrupt/unreadable hives are not
+silently ignored. Added immediate per-profile account classification/skip logging
+so a later failure cannot erase evidence about earlier deleted-account residues.
+Added path, owned mount, load and cleanup diagnostics. Normal owned mounts are
+scoped to Inventory lifetime, not process-private app hives: abrupt termination
+can leave an owned HKU mount, and unload failures are logged (no automatic global
+mount recovery/journal is implemented). A regular fallback load may perform
+Windows hive-log recovery; it is not a read-only file probe.
+
+Validation: 84 mock scripts, 74 PASS, same 10 documented known failures, zero new
+failures. Actual-source fallback/token-privilege ASan/UBSan harness checks load,
+open, missing privileges, prior privilege restoration, no unload after a failed
+load and cleanup retry. Inventory harness checks 1009 fallback, moved ownership,
+strict cleanup isolation, unavailable fallback and handle release. Resource/build
+graph/diff checks PASS. No Windows/MSVC build or real NTUSER load/removal was run.
+This implements the missing alternate loader, not proof that the user's specific
+hive will be recoverable. Uploaded GlassSetup-14.log deleted after analysis.

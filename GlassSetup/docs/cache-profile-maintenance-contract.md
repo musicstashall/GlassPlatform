@@ -138,3 +138,12 @@ lookup before ignoring that entry. Recheck classification with inventory before
 commit. A foreign-domain/cloud SID or any other lookup failure is not deletion
 evidence. Ignore residues before attempting NTUSER.DAT; do not unload system hives,
 repair/delete profile data or make general settings cleanup skip such entries.
+
+SUT removal's offline loader now falls back from RegLoadAppKey ERROR_BADDB=1009
+to RegLoadKey under a GUID-named HKU GlassSetup-Offline mount with scoped
+Backup/Restore privileges. Only successful loads confer mount ownership; existing
+SID mounts are never unloaded. Profile handle/move/destructor lifetime owns close
+and private-name unmount. Both loader failures stop preparation and report codes.
+This is the normal Windows loader, not custom hive repair. Mount cleanup failures
+are logged; crash recovery of owned mounts is not yet journaled. General settings
+cleanup remains on its original application-hive loader path.

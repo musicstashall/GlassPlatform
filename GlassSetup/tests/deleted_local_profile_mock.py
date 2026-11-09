@@ -8,6 +8,7 @@ h=r'''
 #include <string>
 #include <cstring>
 #include <iostream>
+constexpr int FALSE=0;namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
 using BYTE=unsigned char;using DWORD=unsigned;
 struct SID_IDENTIFIER_AUTHORITY {BYTE Value[6];};
 struct Sid {SID_IDENTIFIER_AUTHORITY auth{{0,0,0,0,0,5}};BYTE count=4;DWORD sub[5]{21,11,22,33,1001};};
