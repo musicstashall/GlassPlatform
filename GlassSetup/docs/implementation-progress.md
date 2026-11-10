@@ -1,3 +1,57 @@
+# Разбор двух запусков старого external Setup: источники карточек
+
+Разобраны четыре входящих журнала: `GlassSetup[1]-5.log`, `GlassSetup[2]-6.log`,
+`GlassSetup[3]-2.log`, `GlassSetup[4].log`. После фиксации выводов исходники удалены.
+
+- Две цепочки parent→installed controller. Parent startup confirmed:
+  12:07:58.852 и12:12:08.544. Оба child работают из controller digest
+  `9abbcaddc7527f15ed67d65fd3f4968b5453e27d18a3ff8d8cbdac466f3415bf`.
+  Источник именно этого EXE (новая download или reuse) по этим строкам не доказан.
+- Child наследует product catalog, без повторной Setup update check; inspection
+  завершён12:08:04.451 и12:12:13.710. ARP refresh всех пяти Glass entries ok.
+- Во всех4журналах нет `Product preparation`, `Acquired`, MSI execution.
+  Online product package transfer не принят. Само открытие выбора без выбранного
+  install/update/repair не обязано запускать загрузки.
+- Original source root сохранён как `Release/Legasy`, не installed controller
+  directory: оба adjacent и packages пути всех5Glass MSI отсутствуют (Win32 2/3).
+  Пакеты в родительском `Release` не являются приложенными к EXE из `Legasy`;
+  автоматически искать вверх по дереву или в CWD не следует.
+- OpenGlass upstream API и SecureUxTheme discovery вернули HTTP403 в обеих
+  сессиях. Это не доказательство отказа GlassPlatform release downloads; без
+  response headers нельзя утверждать, что причина именно API rate limit.
+- SUT обнаружен как absent; локальный offer4.0.0 взят из protected Current.
+  Это пригодный внутренний cache candidate, но не приложенный пользователем MSI.
+
+Подтверждён UI-дефект исходников: в `paintComponentCard` available local-version
+для installed продукта берётся из current installed version, для остальных — из
+общего resolved local offer (включая Current). Нельзя исправить это только сменой
+подписи: нужно отдельно передавать attached-media provenance.
+
+## Предложение по source policy (ещё не реализовано этим разбором)
+
+1. Две source rows остаются server→local. Local-version только для проверенного
+   пакета рядом с исходным external EXE либо в его packages, с сохранением root
+   при controller handoff. Installed/version и internal Current/session/Retained
+   не подставляются в эту строку. Отсутствие attached media — явное нет/прочерк.
+2. По умолчанию выбирать новейший допустимый verified target, без downgrade;
+   при равной версии предпочитать приложенный local, не скачивать повторно.
+   Для repair exact installed baseline из cache остаётся допустимым независимо
+   от отсутствия attached media. Same identity с разными bytes не приравнивать
+   к одному exact original и не ослаблять receipts/publisher policy.
+3. Не вводить обязательный modal source choice при каждом действии. Раскрываемые
+   сведения могут объяснять выбранный источник/путь, readiness и причину отказа.
+   Явный override — отдельное решение, требующее source selection в самом resolver,
+   а не декоративного переключателя HTML.
+4. Слегка выделять новейшую из двух сопоставимых доступных версий; при равенстве
+   не выделять победителя. Не сравнивать лексикографически, не сопоставлять MSI
+   ProductVersion с upstream tag или OpenGlass DLL version. Upstream metadata без
+   пригодного installer asset не выдаётся за гарантированное downloadable offer.
+
+Runtime/source resolver этим коммитом не меняется; это диагностика и предложение
+пользователю, а не выполненное изменение выбора источников. Пересборка не нужна.
+
+---
+
 # Параллельная подготовка пакетов на странице выбора продуктов
 
 Online product transfer остаётся **не принятым на Windows**, даже при прежних
