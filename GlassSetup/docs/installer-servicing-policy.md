@@ -332,3 +332,18 @@ inspection не запрашивает version.json повторно. Bootstrapp
 controller до дорогого product-source inspection, не переносит inventory report.
 После handoff child показывает анализ продуктов, а не повторный Setup update.
 Native loading сохраняется до WebView ready, native Checking — только fallback.
+
+
+## 13. Optional receipt probe и результаты Windows product update
+
+Отсутствие `<source>.sha256` (Win32 file/path-not-found) само по себе означает
+unbound candidate, а не ошибку публикации. Проверять отсутствие до диагностического
+TrustedPath: иначе opportunistic probe отравляет publication context даже при
+успешных rotate/register/GC. Иные ошибки, unsafe ACL/reparse или неверная binding
+не превращаются в доверие к legacy source.
+
+Пользовательский прогон четырёх MSI Settings/Platform x64/x86 завершился code0,
+но автоматическая выгрузка не принята: потребовалась помощь Settings. В Watch
+добавлены периодические cooperative queue wakes для реально найденных holders и
+PID/module logging. Это не скрытие держателей, не принудительная выгрузка и не
+доказательство устранения всех зависаний на Windows.

@@ -22,15 +22,18 @@ prefix=r'''
 #include <cwchar>
 #include <iostream>
 using BYTE=unsigned char;using DWORD=std::uint32_t;
-constexpr DWORD GENERIC_READ=1,GENERIC_WRITE=2,FILE_SHARE_READ=1,OPEN_EXISTING=3,CREATE_NEW=1,FILE_FLAG_OPEN_REPARSE_POINT=1,FILE_ATTRIBUTE_NORMAL=0,FILE_ATTRIBUTE_DIRECTORY=16,FILE_ATTRIBUTE_REPARSE_POINT=1024,ERROR_INVALID_DATA=13,ERROR_SUCCESS=0,ERROR_WRITE_FAULT=29;
+constexpr DWORD GENERIC_READ=1,GENERIC_WRITE=2,FILE_SHARE_READ=1,OPEN_EXISTING=3,CREATE_NEW=1,FILE_FLAG_OPEN_REPARSE_POINT=1,FILE_ATTRIBUTE_NORMAL=0,FILE_ATTRIBUTE_DIRECTORY=16,FILE_ATTRIBUTE_REPARSE_POINT=1024,INVALID_FILE_ATTRIBUTES=~0u,ERROR_FILE_NOT_FOUND=2,ERROR_PATH_NOT_FOUND=3,ERROR_INVALID_DATA=13,ERROR_SUCCESS=0,ERROR_WRITE_FAULT=29;
 struct Handle{std::wstring path;};using HANDLE=Handle*;const HANDLE INVALID_HANDLE_VALUE=nullptr;
 struct BY_HANDLE_FILE_INFORMATION{DWORD dwFileAttributes=0,nNumberOfLinks=1;};
 struct LARGE_INTEGER{long long QuadPart;};
 std::map<std::wstring,std::string> files;
 bool trusted=true,readable=true,hashable=true,flushed=true;DWORD attrs=0,links=1;int registration=1;
-DWORD GetLastError(){return 5;}
+DWORD probeError=ERROR_FILE_NOT_FOUND;
+DWORD GetLastError(){return probeError;}
+DWORD GetFileAttributesW(const wchar_t* path){return files.count(path)?attrs:INVALID_FILE_ATTRIBUTES;}
+int trustChecks=0;
 namespace Diag{bool Fail(const wchar_t*,const std::wstring&,DWORD){return false;}}
-bool TrustedPath(const std::wstring& p,bool){return trusted&&files.count(p);}
+bool TrustedPath(const std::wstring& p,bool){++trustChecks;return trusted&&files.count(p);}
 std::wstring CurrentFile(const wchar_t* name){auto p=L"Current\\"+std::wstring(name);return trusted&&files.count(p)?p:L"";}
 HANDLE CreateFileW(const wchar_t* path,DWORD,DWORD,void*,DWORD mode,DWORD,void*){
  if(mode==CREATE_NEW){if(files.count(path))return nullptr;files[path]="";}
@@ -58,7 +61,10 @@ main=r'''
 int main(){
  const std::wstring msi=L"Current\\product.msi",record=msi+L".sha256",copy=L"Work\\product.msi";
  files[L"WindowsInstaller\\cached.msi"]="stripped MSI cache";files[msi]="original distribution with cabinet";files[copy]=files[msi];
- assert(!MatchesInstalled(msi,L"code",L"1")); // Legacy ACL+identity is insufficient.
+ assert(!MatchesInstalled(msi,L"code",L"1")&&trustChecks==0); // Legacy ACL+identity is insufficient.
+ probeError=ERROR_PATH_NOT_FOUND;assert(!MatchesInstalled(msi,L"code",L"1")&&trustChecks==0);
+ probeError=5;assert(!MatchesInstalled(msi,L"code",L"1")&&trustChecks==1); // Non-absence errors still reach diagnostic trust validation.
+ probeError=ERROR_FILE_NOT_FOUND;
  assert(WritePublishedDigest(msi));assert(files[record].size()==128);
  assert(MatchesInstalled(msi,L"code",L"1")&&!MatchesInstalled(copy,L"code",L"1"));
  files[copy+L".sha256"]=files[record];assert(MatchesInstalled(copy,L"code",L"1"));

@@ -104,6 +104,14 @@ namespace Shared::GlassStop
         return CollectResiduals(arch, outPids, maxPids);
     }
 
+    unsigned WakeProcessQueues(DWORD pid) noexcept
+    {
+        if(!pid)return 0;
+        unsigned windows=0,threads=0;
+        NudgeProcess(pid,windows,threads);
+        return windows+threads;
+    }
+
     unsigned WakeResidualProcesses(
         PlatformArch arch, DWORD* outPids, unsigned maxPids) noexcept
     {

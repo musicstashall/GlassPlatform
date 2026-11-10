@@ -279,6 +279,12 @@ inline bool InstalledCacheDigest(const std::wstring& file,std::array<BYTE,32>& d
 // separately. Never hash the stripped cache and call it a distribution digest.
 inline bool PublishedDigestMatches(const std::wstring& file) {
     const auto record=file+L".sha256";
+    // A legacy/uninstalled vendor source may legitimately have no binding.
+    // Probe absence without poisoning the current publication diagnostics.
+    if(GetFileAttributesW(record.c_str())==INVALID_FILE_ATTRIBUTES) {
+        const DWORD error=GetLastError();
+        if(error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND)return false;
+    }
     if(!TrustedPath(record,false))return false; // Legacy ACL/identity alone is not provenance.
     HANDLE handle=CreateFileW(record.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
     if(handle==INVALID_HANDLE_VALUE)return false;

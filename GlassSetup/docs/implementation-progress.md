@@ -1,3 +1,42 @@
+# Product update: MSI success, ложный source warning, остаточные modules
+
+Разобраны `GlassSetup[1]-3.log`, `GlassSetup[2]-4.log` и четыре verbose MSI log
+`20261110_094924` (Settings x64/x86, Platform x64/x86). Скриншот image-22.png
+не удалён; исходные журналы после анализа удалены.
+
+- External startup/handoff штатный. Четыре выбранных MSI 2.0.0.105 и предшествующие
+  uninstall завершились с code 0. Product actions completed 09:53:10.770,
+  обе ранее работавшие Platform architecture запущены снова; ARP refresh ok.
+- Source publication прошла rotate/register/release/GC, но diagnostic context
+  был отравлен probe отсутствующего `Current/SecureUxTheme_x64.msi.sha256`:
+  GetFileAttributesW/error2 в prepare-staging. SUT inventory absent и не выбран;
+  отсутствие legacy binding — не failed publication. Исправлено: file/path-not-found
+  receipt возвращает unbound без вызова диагностического TrustedPath; реальные
+  ACL/reparse/I/O отказы по-прежнему проверяются. Trust к legacy MSI не добавляется.
+- x64 HostStop: timeout15s, validated task Stop hr0, post-task wake residual0.
+  x86 HostStop: hostGone 11.812s, residual2. Watch позже видит8 holders,
+  два timeout30s и третий Retry clear в 09:53:07.061 после помощи GlassSettings
+  по сообщению пользователя. Старые логи не содержат PID/module rows: нельзя
+  доказательно приписать восемь держателей конкретным DLL или tmp-процессам.
+- Добавлен bounded cooperative request + WM_NULL queue wake для holders выбранных
+  scan-архитектур сразу после обнаружения и раз в5s. Новый shared wrapper использует
+  существующий NudgeProcess, работает с PID обеих разрядностей и самим Setup.
+  Никаких новых stop/task-kill/remote-FreeLibrary; self остаётся в safety scan.
+  Каждые5s логируются до16 PID/exe/module rows и self marker.
+
+Проверка: 96 mock-тестов, 86 PASS/10 прежних baseline FAIL; новый actual-source test
+исполняет holder wake и общий WM_NULL helper с fake Win32 API. Receipt test
+проверяет quiet absence (2/3) и сохранение trust path для иных ошибок. Это не
+Windows unload acceptance. Не обещать, что дополнительные cooperative wakes
+устранят все OS-held hook references: это требует повторного runtime trace.
+
+План следующего Windows шага: полная сборка Release x64→x86; проверить Settings
+entry (теперь продукты обновлены), затем выбранную product operation с module gate.
+При сохранении holders новые логи покажут PID/modules; не скрывать Setup и не
+принимать unknown/nonempty за clear. Не добавлять legacy Settings compatibility.
+
+---
+
 # Offline / ARP и решение по старому GlassSettings
 
 Разобраны журналы `GlassSetup[1.2].log` (offline external),

@@ -83,6 +83,10 @@ namespace Shared::GlassStop
     /// «пинкать» больше некому: у «тихого» процесса иначе остаётся per-thread
     /// hook-ссылка до следующего обращения к user32.
     /// Ничего не загружает и не выгружает. Возвращает число процессов, которым помогли.
+    // Wake a PID already obtained from a verified holder scan. Architecture-
+    // neutral queue messages only; includes the caller when it holds modules.
+    [[nodiscard]] unsigned WakeProcessQueues(DWORD pid) noexcept;
+
     [[nodiscard]] unsigned WakeResidualProcesses(
         PlatformArch arch, DWORD* outPids, unsigned maxPids) noexcept;
 }

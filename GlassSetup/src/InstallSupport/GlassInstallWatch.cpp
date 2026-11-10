@@ -2,6 +2,7 @@
 #include "GlassInstallUtil.h"
 #include "GlassInstallLog.h"
 #include <GlassPlatformTask.h>
+#include <GlassStop.h>
 #include <InjectModuleScan.h>
 #include <InjectProcessMap.h>
 #include <shlwapi.h>
@@ -255,6 +256,18 @@ bool ConsumeNextPipeEvent(
 
 namespace GlassInstallWatch {
 
+// The holder set has already been filtered by monitored architecture. Queue
+// messages work across bitness and include Setup itself; never force FreeLibrary.
+void WakeHolderQueues(const std::vector<ModuleHolder>& holders) noexcept {
+    for(const auto& holder:holders) {
+        if(!holder.pid)continue;
+        const bool requested=Shared::InjectProcessMap::SignalUnloadRequest(holder.pid);
+        const auto queues=Shared::GlassStop::WakeProcessQueues(holder.pid);
+        GlassInstallLog::LineFormat(L"Watch: cooperative request pid=%lu signaled=%d queues=%u",
+            holder.pid,requested?1:0,queues);
+    }
+}
+
 #ifdef GLASS_SETUP_NATIVE_MONITOR
 bool BeginLocalNativeMonitor() noexcept {
     if (g_localNative) return g_localScan && g_localForceUnload;
@@ -493,6 +506,8 @@ bool WaitUntilClearOrTimeout(
     std::vector<ModuleHolder> x64Tick;
     bool x64Empty = !scanNativeX64 || !NeedNativeX64Helper();
     ULONGLONG lastBeat = waitStart;
+    ULONGLONG lastWake = waitStart;
+    bool firstWake=true;
     ULONGLONG lastFrame = 0;
     DWORD helperExitCode=STILL_ACTIVE;
 
@@ -654,10 +669,21 @@ bool WaitUntilClearOrTimeout(
         for (const auto& row : x64Tick)
             MergeHolder(lastHolders, row.pid, row.exe, row.modules);
 
+        if(!lastHolders.empty()&&(firstWake||GetTickCount64()-lastWake>=5000)) {
+            firstWake=false;lastWake=GetTickCount64();
+            WakeHolderQueues(lastHolders);
+        }
+
         if (GetTickCount64() - lastBeat >= 5000) {
             lastBeat = GetTickCount64();
             GlassInstallLog::LineFormat(L"Watch: still held %u pipe=%d",
                 static_cast<unsigned>(lastHolders.size()), pipeConnected ? 1 : 0);
+            unsigned logged=0;
+            for(const auto& holder:lastHolders) {
+                if(logged++==16)break;
+                GlassInstallLog::LineFormat(L"Watch: holder pid=%lu self=%d exe=%s modules=%s",
+                    holder.pid,holder.pid==GetCurrentProcessId()?1:0,holder.exe.c_str(),holder.modules.c_str());
+            }
         }
 
         // A new row or a partial marker supersedes the preceding empty frame.
