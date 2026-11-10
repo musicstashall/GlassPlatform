@@ -9,6 +9,7 @@ struct SetupCommandLine {
 
 [[nodiscard]] SetupCommandLine ParseSetupCommandLine() noexcept;
 [[nodiscard]] bool AuthorizeMaintenanceModifyLaunch() noexcept;
+[[nodiscard]] bool MaintenanceProductAbsent(const std::wstring& code) noexcept;
 [[nodiscard]] bool PathsEqualCanonical(const std::wstring& left, const std::wstring& right) noexcept;
 
 // Controller handoff has no authority to replay product actions or EULA consent.

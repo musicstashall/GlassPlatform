@@ -206,6 +206,9 @@ private:
     bool StopHostsForRollback() noexcept;
     bool RemoveCreatedHostsForRollback() noexcept;
     bool PrepareManagedRemoval() noexcept;
+    bool PrepareFullRemovalCleanup() noexcept;
+    void FinishFullRemovalCleanup() noexcept;
+    GlassProfileMaintenance::Inventory fullRemovalProfiles_;
     bool RemoveManagedProduct(GlassProductPlan::Product product) noexcept;
     bool RunOneMsi(const std::wstring& msiPath, const std::wstring& installDir,
         const std::wstring& label, int progressBase, int progressSpan) noexcept;

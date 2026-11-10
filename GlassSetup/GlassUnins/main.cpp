@@ -485,7 +485,7 @@ private:
         check_[2]=Button(L"GlassSettings x64",IDC_COMPONENT_SETTINGS,BS_AUTOCHECKBOX);
         check_[6]=Button(L"GlassSettings x86",kSettings32,BS_AUTOCHECKBOX);
         check_[3]=Button(L"OpenGlass",IDC_COMPONENT_OG,BS_AUTOCHECKBOX);
-        check_[4]=Button(T(L"Удалить настройки",L"Remove settings"),IDC_UNINS_SETTINGS_CLEANUP,BS_AUTOCHECKBOX);
+        check_[4]=Button(T(L"Удалить настройки и пользовательские данные",L"Remove settings and user data"),IDC_UNINS_SETTINGS_CLEANUP,BS_AUTOCHECKBOX);
         check_[5]=Button(L"SecureUxTheme",IDC_UNINS_SECUREUXTHEME,BS_AUTOCHECKBOX);
         webHost_=CreateWindowExW(WS_EX_CONTROLPARENT,L"STATIC",L"",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
             0,0,0,0,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_WEBHOST)),gInstance,nullptr);
@@ -628,9 +628,9 @@ private:
         }
         // Cleanup is offered only on the separate full-removal review page.
         if (page_==Page::Cleanup && RemovesAllInstalled(selected_)) {
-        json+=L",{\"id\":\"cleanup\",\"slim\":true,\"title\":"+Q(T(L"Удалить настройки",L"Remove settings"))+
-            L",\"description\":"+Q(T(L"Все локальные профили, параметры HKLM/DWM и сохранённые .theme с разделами Glass в пользовательском каталоге тем. Активные темы переключаются на стандартную; при неудаче меняется реестр. По умолчанию данные сохраняются.",
-                L"All local profiles, product-owned HKLM/DWM settings and saved .theme files with Glass sections in the user themes folder. Active themes switch to stock, with a registry fallback if needed. Data is kept by default."))+
+        json+=L",{\"id\":\"cleanup\",\"slim\":true,\"title\":"+Q(T(L"Удалить настройки и пользовательские данные",L"Remove settings and user data"))+
+            L",\"description\":"+Q(T(L"Пользовательские папки AppData\\Local\\GlassPlatform в доступных профилях, параметры HKLM/DWM и сохранённые .theme с разделами Glass в пользовательском каталоге тем. Активные темы переключаются на стандартную; при неудаче меняется реестр. По умолчанию данные сохраняются.",
+                L"AppData\\Local\\GlassPlatform user data in accessible profiles, product-owned HKLM/DWM settings and saved .theme files with Glass sections in the user themes folder. Active themes switch to stock, with a registry fallback if needed. Data is kept by default."))+
             L",\"checked\":"+(selected_.cleanupSettings?L"true":L"false")+L",\"locked\":false,\"hidden\":false}";
         }
         return json+L"]";

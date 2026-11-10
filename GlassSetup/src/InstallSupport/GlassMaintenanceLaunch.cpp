@@ -124,6 +124,17 @@ bool PathsEqualCanonical(const std::wstring& left, const std::wstring& right) no
     return CompareStringOrdinal(LongPath(left).c_str(), -1, LongPath(right).c_str(), -1, TRUE) == CSTR_EQUAL;
 }
 
+bool MaintenanceProductAbsent(const std::wstring& code) noexcept {
+    const wchar_t* known[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
+        GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass,
+        GlassInstallMsi::kLegacyPlatformX64,GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
+    bool recognized=false;for(const auto* item:known)if(!_wcsicmp(code.c_str(),item)){recognized=true;break;}
+    if(!recognized)return false;
+    wchar_t product[39]{};
+    const UINT result=MsiEnumProductsExW(code.c_str(),L"S-1-1-0",MSIINSTALLCONTEXT_ALL,0,product,nullptr,nullptr,nullptr);
+    return result==ERROR_NO_MORE_ITEMS||result==ERROR_UNKNOWN_PRODUCT;
+}
+
 bool AuthorizeMaintenanceModifyLaunch() noexcept
 {
     if (!IsTrustedCachedSetupImage()) {

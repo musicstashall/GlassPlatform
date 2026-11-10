@@ -61,5 +61,14 @@ receive({data:{type:'state',appMode:'setup',page:'components',components:rows,co
 assert.equal(d.querySelector('#components-remove-all').disabled,true);
 receive({data:{type:'state',appMode:'unins',page:'uninstall-select',components:rows,componentsLoading:false}});
 beforeBulk=messages.length;d.querySelector('#components-remove-all').click();assert.deepEqual(messages.slice(beforeBulk),['components:select-all']);
+for(const locale of ['ru','en']){
+ receive({data:{type:'state',appMode:'setup',page:'full-cleanup',locale,cleanupBody:'Explicit full-removal review',cleanupUserData:false}});
+ const option=d.querySelector('#full-cleanup-option'),choice=d.querySelector('#full-cleanup-choice');
+ assert.equal(option.hidden,false);assert.equal(choice.checked,false);
+ assert.match(d.querySelector('#confirm-body').textContent,/Explicit full-removal review/);
+ choice.click();assert.equal(messages.at(-1),'cleanup:1');
+ receive({data:{type:'state',cleanupUserData:true}});assert.equal(choice.checked,true);
+ receive({data:{type:'state',page:'components'}});assert.equal(option.hidden,true);
+}
 assert.deepEqual(errors.map(x=>x.message),[]);dom.window.close();
 process.stdout.write('PASS: five installed Glass cards: explicit removal IPC, host echo/plan, undo-to-Keep, capability refusal\n');

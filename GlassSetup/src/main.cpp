@@ -100,7 +100,7 @@ constexpr wchar_t kWebView2BootstrapperUrl[] = L"https://go.microsoft.com/fwlink
 constexpr UINT_PTR kDebugDemoTimer = 4;
 constexpr UINT kDebugDemoPageMs = 1800;
 #endif
-enum class Page { RuntimeRequired, RuntimeInstalling, RuntimeError, AlreadyRunning, Welcome, Checking, Conflicts, Downgrade, VersionInvalid, License, Components, Certificate, SettingsRemovalRisk, Installing, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
+enum class Page { RuntimeRequired, RuntimeInstalling, RuntimeError, AlreadyRunning, Welcome, Checking, Conflicts, Downgrade, VersionInvalid, License, Components, Certificate, FullCleanup, SettingsRemovalRisk, Installing, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
 HINSTANCE gInstance = nullptr;
 HBRUSH gWindowClassBrush = nullptr;
 bool gWindowClassRegistered = false;
@@ -1144,6 +1144,7 @@ struct Surface {
 class Installer {
 public:
     HWND window = nullptr;
+    bool retireControllerOnExit=false;
     bool Create(int show) {
         WNDCLASSEXW wc{sizeof(wc)};
         wc.style = 0; // Fixed-size window: do not invalidate the entire client on sizing.
@@ -1331,6 +1332,7 @@ private:
     GlassPackageCatalog::Catalog releaseCatalog_;
     GlassProductDownloads downloads_;
     bool downloadContinuePending_=false,setupDownloadActive_=false;
+    bool fullCleanupReviewed_=false;
     std::atomic<std::uint64_t> setupDownloadBytes_{0},setupDownloadTotal_{0};
     std::wstring checkingStatus_;
     bool versionCheckStarted_ = false, versionCheckHandled_ = false, controllerCheckHandled_ = false;
@@ -1665,6 +1667,13 @@ private:
         selection_.openGlass=os64 && !installedSelection_.openGlass;
         selection_.secureUxTheme=false;
         ClampSecureUxThemeSelection();
+        if(launchCmd_.modify&&!launchCmd_.productCode.empty()&&MaintenanceProductAbsent(launchCmd_.productCode)) {
+            InstallLog::Line(L"Obsolete ARP Modify command refused: product is no longer registered");
+            ShowInstallError(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                L"Этот продукт уже удалён. Список «Установленные приложения» ещё не обновился. Закройте и снова откройте окно системных настроек.":
+                L"This product has already been removed. The Installed apps list is out of date. Close and reopen Windows Settings.");
+            return;
+        }
         if (launchCmd_.modify) {
             maintenanceMode_ = AuthorizeMaintenanceModifyLaunch();
             maintenanceFocusProduct_ = launchCmd_.productCode;
@@ -1731,7 +1740,9 @@ private:
         const bool webVisible = SlidesVisible();
         const bool nativeLicense = !webVisible && page_==Page::License && !transitioning_;
         ShowWindow(eula_,nativeLicense?SW_SHOWNA:SW_HIDE);
-        ShowWindow(accept_,nativeLicense?SW_SHOWNA:SW_HIDE);
+        ShowWindow(accept_,(nativeLicense||(!webVisible&&page_==Page::FullCleanup))?SW_SHOWNA:SW_HIDE);
+        SetWindowTextW(accept_,page_==Page::FullCleanup?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Удалить настройки и пользовательские данные":L"Remove settings and user data"):Text(IDS_ACCEPT).c_str());
+        SendMessageW(accept_,BM_SETCHECK,(page_==Page::FullCleanup?selection_.cleanupUserData:accepted_)?BST_CHECKED:BST_UNCHECKED,0);
         EnableWindow(accept_,!DebugDemoLocksControls());
         const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching || page_==Page::RuntimeInstalling ||
             (page_==Page::Components&&downloadContinuePending_) || (page_==Page::Checking&&setupDownloadActive_));
@@ -1818,6 +1829,7 @@ private:
         case Page::License: return L"license";
         case Page::Components: return L"components";
         case Page::Certificate: return L"certificate";
+        case Page::FullCleanup: return L"full-cleanup";
         case Page::SettingsRemovalRisk: return L"settings-removal-risk";
         case Page::ConfirmCancel: return L"confirm-cancel";
         case Page::Cancelling: return L"cancelling";
@@ -2425,6 +2437,8 @@ private:
             L",\"monitorRiskBody\":"+JsStringLiteral(Text(IDS_NATIVE_RISK_BODY))+
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
             L",\"maintenance\":"+(maintenanceMode_?L"true":L"false")+
+            L",\"cleanupBody\":"+JsStringLiteral(FullCleanupText())+
+            L",\"cleanupUserData\":"+(selection_.cleanupUserData?L"true":L"false")+
             L",\"settingsRiskBody\":"+JsStringLiteral(SettingsRemovalRiskText())+
             L",\"componentsLoading\":"+(inspectReady_.load(std::memory_order_acquire)?L"false":L"true")+
             L",\"components\":"+ComponentsJson()+
@@ -2525,6 +2539,8 @@ private:
     }
     void SetPage(Page page) {
         const Page oldPage=page_;
+        if(page==Page::Complete&&installEngine_.Succeeded()&&(selection_.removeMask||selection_.secureUxThemeRemove))
+            retireControllerOnExit=true;
         if (transitioning_) EndTransition();
         page_=page;
         if(page_!=Page::Components)downloadContinuePending_=false;
@@ -2550,6 +2566,7 @@ private:
         const bool inProgress=page_==Page::Checking || page_==Page::Installing || page_==Page::Cancelling ||
             page_==Page::Launching || page_==Page::RuntimeInstalling;
         const UINT nextId = page_==Page::RuntimeRequired?IDS_RUNTIME_INSTALL:
+            page_==Page::FullCleanup?IDS_APPLY:
             page_==Page::SettingsRemovalRisk?IDS_CONTINUE_RISK:
             page_==Page::ConfirmCancel?IDS_CONFIRM_ABORT:
             page_==Page::Conflicts?IDS_RECHECK_CONFLICTS:
@@ -2562,7 +2579,7 @@ private:
         SetWindowTextW(back_,Text(page_==Page::ModulesBusy?IDS_CONTINUE_RISK:page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
         SetWindowTextW(cancel_,Text(blockedPage?IDS_CLOSE:IDS_CANCEL).c_str());
         const bool confirm=page_==Page::ConfirmCancel || page_==Page::SettingsRemovalRisk;
-        const bool backVisible=(page_==Page::License || page_==Page::Components || page_==Page::Certificate || page_==Page::ModulesBusy || confirm)
+        const bool backVisible=(page_==Page::License || page_==Page::Components || page_==Page::Certificate || page_==Page::FullCleanup || page_==Page::ModulesBusy || confirm)
             && !(maintenanceMode_ && page_==Page::Components);
         const bool nextVisible=!inProgress && !blockedPage;
         const bool cancelVisible=!terminal && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
@@ -2742,6 +2759,25 @@ private:
         pendingSettingsRemovalRisk_=risk;beforeSettingsRemovalRisk_=page_;
         SetPage(Page::SettingsRemovalRisk);return false;
     }
+    bool ConfirmFullRemovalCleanup() {
+        unsigned installed=0;bool vendor=false;
+        {std::lock_guard<std::mutex> lock(inspectMutex_);
+            const bool present[]={inspect_.x64.installed,inspect_.x86.installed,inspect_.settings64.installed,
+                inspect_.og.installed||inspect_.og.residual,false,inspect_.settings32.installed};
+            for(unsigned i=0;i<6;++i)if(present[i])installed|=1u<<i;
+            vendor=inspect_.secureUxTheme.installed;
+        }
+        if(!GlassProducts::FullRemovalSelected(selection_,installed,vendor)) {
+            selection_.cleanupUserData=false;fullCleanupReviewed_=false;return true;
+        }
+        if(fullCleanupReviewed_)return true;
+        selection_.cleanupUserData=false;SetPage(Page::FullCleanup);return false;
+    }
+    std::wstring FullCleanupText() const {
+        return PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+            L"Выбрано полное удаление продуктов. По умолчанию пользовательские данные сохраняются.\n\nМожно отдельно удалить папки AppData\\Local\\GlassPlatform в доступных профилях, принадлежащие Glass параметры HKCU/HKLM и OpenGlass DWM, а также сохранённые темы Glass.\n\nОчистка выполняется только после успешного удаления всех продуктов. Доступ к профилям проверяется до изменений. Папки профилей, чужие данные и сертификаты не удаляются.":
+            L"All installed products are selected for removal. User data is kept by default.\n\nYou may also remove AppData\\Local\\GlassPlatform in accessible profiles, Glass-owned HKCU/HKLM and OpenGlass DWM settings, and saved Glass themes.\n\nCleanup runs only after successful removal of all products. Profile access is checked before changes. User profiles, unrelated data and certificates are not deleted.";
+    }
     void StartInstallation() {
         // Debug retains its original simulation contract; Release uses external MSI.
         if (!accepted_ || transitioning_ || DebugDemoLocksControls() || !ComponentsReady() || !DownloadsReady()) return;
@@ -2757,6 +2793,7 @@ private:
             }
         }
         if (!RunPreflightChecks()) return;
+        if(!ConfirmFullRemovalCleanup())return;
         if(!ConfirmManagedSettingsRemoval())return;
         finishWarnings_.clear();
         percent_ = 0;
@@ -3441,11 +3478,15 @@ private:
 #endif
             return S_OK;
         }
+        if(page_==Page::FullCleanup&&(message==L"cleanup:1"||message==L"cleanup:0")) {
+            selection_.cleanupUserData=message.back()==L'1';SyncWebViewState();return S_OK;
+        }
         if (page_==Page::Components && !DebugDemoLocksControls()) {
             static constexpr const wchar_t* downloadIds[]={L"x64",L"x86",L"settings64",L"settings32",L"openglass",L"secureUxTheme"};
             for(std::size_t i=0;i<6;++i)if(message==L"download-retry:"+std::wstring(downloadIds[i])) {
                 downloads_.Retry(i);SyncWebViewState();return S_OK;
             }
+            if(message.rfind(L"component:",0)==0) {fullCleanupReviewed_=false;selection_.cleanupUserData=false;}
             const bool os64=GlassInstallUtil::IsOs64Bit();
             // Выбор карточки не тянет за собой основную платформу: принудительная
             // отметка уместна только при установке с нуля/обновлении, где карточка
@@ -3967,6 +4008,9 @@ private:
             const auto warnings=ComponentWarnings();
             if(!warnings.empty())DrawLabel(dc,warnings,Box(48,432,840,88),font_,white);
             }
+        } else if(page_==Page::FullCleanup) {
+            DrawLabel(dc,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Полное удаление: данные":L"Full removal: data",Box(48,70,900,48),title_,RGB(242,239,255));
+            DrawLabel(dc,FullCleanupText(),Box(48,140,900,285),font_,RGB(215,211,231));
         } else if(page_==Page::SettingsRemovalRisk) {
             DrawLabel(dc,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Риск для Platform":L"Platform risk",Box(48,70,900,48),title_,RGB(242,239,255));
             DrawLabel(dc,SettingsRemovalRiskText(),Box(48,140,900,285),font_,RGB(215,211,231));
@@ -4309,6 +4353,7 @@ private:
             }
             switch (LOWORD(w)) {
             case IDC_ACCEPT:
+                if(page_==Page::FullCleanup&&HIWORD(w)==BN_CLICKED){selection_.cleanupUserData=SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED;return 0;}
                 if (HIWORD(w)==BN_CLICKED && page_==Page::License && !DebugDemoLocksControls()) {
                     accepted_ = SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED;
                     EnableWindow(next_,accepted_);
@@ -4320,6 +4365,7 @@ private:
                 if (page_==Page::Components && HIWORD(w)==BN_CLICKED && !webReady_ && !DebugDemoLocksControls()) {
                     const bool os64=GlassInstallUtil::IsOs64Bit();
                     selection_.confirmedSettingsRemovalRisk=0;
+                    fullCleanupReviewed_=false;selection_.cleanupUserData=false;
                     if(LOWORD(w)==IDC_COMPONENT64)selection_.removeMask&=~1u;
                     if(LOWORD(w)==IDC_COMPONENT32)selection_.removeMask&=~2u;
                     if(LOWORD(w)==IDC_COMPONENT_SETTINGS)selection_.removeMask&=~4u;
@@ -4368,6 +4414,7 @@ private:
                 }
                 return 0;
             case IDC_BACK:
+                if(page_==Page::FullCleanup){fullCleanupReviewed_=false;selection_.cleanupUserData=false;SetPage(Page::Components);return 0;}
                 if(page_==Page::SettingsRemovalRisk){SetPage(beforeSettingsRemovalRisk_);return 0;}
                 if(page_==Page::ModulesBusy && !DebugDemoLocksControls()) {
                     installEngine_.SignalHold(InstallEngine::HoldAction::ContinueRisk);
@@ -4396,6 +4443,7 @@ private:
                 }
 #endif
                 if (transitioning_) return 0;
+                if(page_==Page::FullCleanup){fullCleanupReviewed_=true;SetPage(Page::Components);StartInstallation();return 0;}
                 if(page_==Page::SettingsRemovalRisk) {
                     selection_.confirmedSettingsRemovalRisk|=pendingSettingsRemovalRisk_;
                     SetPage(beforeSettingsRemovalRisk_);StartInstallation();return 0;
@@ -4567,6 +4615,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     WizardTheme::UninstallDetours();
     Gdiplus::GdiplusShutdown(gdiplusToken);
     CloseHandle(instanceMutex);
+    if(gInstaller.retireControllerOnExit) {
+        std::vector<std::wstring> vendor;
+        if(Shared::SecureUxThemeInventory::Query(vendor)==ERROR_SUCCESS&&vendor.empty()&&!GlassMaintenanceLifetime::HasProducts()) {
+            CloseHandle(maintenanceLease.handle);maintenanceLease.handle=INVALID_HANDLE_VALUE;
+            if(!GlassMaintenanceLifetime::RetireUnused())InstallLog::Line(L"Controller retirement deferred: active lease, reboot pin or locked files; CleanupPending retained");
+        }
+    }
     InstallLog::Shutdown();
     if (SUCCEEDED(com)) CoUninitialize();
     return exitCode;
