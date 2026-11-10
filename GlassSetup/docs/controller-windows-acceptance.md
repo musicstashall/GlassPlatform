@@ -2,8 +2,11 @@
 
 Статус: пользователь собрал и успешно проверил online startup без операций:
 protected controller handoff, inherited catalog, один product inspection и UI без
-нареканий подтверждены двумя журналами и наблюдением пользователя. Offline,
-entrypoints, полный Authenticode/ACL fault matrix и MSI acceptance не выполнены. Не использовать рабочую
+нареканий подтверждены журналами и наблюдением пользователя. Дополнительно приняты
+offline startup (с bounded failed network attempts) и ARP modify entry без MSI.
+Вход из обновлённого GlassSettings, полный Authenticode/ACL fault matrix и MSI
+acceptance не выполнены. Старый Settings 2.0.0.103 не находит старый Current путь;
+по решению пользователя compatibility entrypoint не добавляется — продукты будут обновлены. Не использовать рабочую
 машину для fault-injection или намеренного повреждения cache.
 
 ## 1. Сначала сборка, без установки

@@ -1,3 +1,35 @@
+# Offline / ARP и решение по старому GlassSettings
+
+Разобраны журналы `GlassSetup[1.2].log` (offline external),
+`GlassSetup[1.1].log` (offline child), `GlassSetup[3].log` (ARP modify).
+Дубли имён во вложении обозначают те же доступные файлы, не дополнительные запуски.
+
+- Offline: external catalog request завершился 12002 в 09:37:11.405;
+  handoff ACK 09:37:12.567. Child использовал unavailable catalog outcome без
+  повторного Setup request и закончил product inspection в 09:37:29.977.
+  Отдельные OpenGlass/SUT upstream queries завершились 12002/12007; обслуживание
+  не заблокировано. Это offline tolerance, не отсутствие всех сетевых попыток.
+- ARP: canonical installed controller, shell-parent modify authorized
+  09:40:35.186, focus Platform x64; один controller check, один product inspection,
+  local Setup 2.0.0.105 / remote 2.0.0.70, нормальное завершение без MSI execution.
+- Settings entry не состоялся; отсутствующего GlassSetup[2].log нет.
+  Установленные Settings MSI всё ещё 2.0.0.103; доступные в layout — 2.0.0.105.
+  Старый Settings resolver ищет Current/GlassSetup.exe, новый — Installer/Active.
+  Разница версий согласуется с сообщением старого клиента, но managed binary
+  version и фактическую причину отказа нового resolver эти Setup logs не измеряют.
+
+Пользователь явно отказался от совместимости со старой логикой: продукт ещё не
+публичный, продукты будут обновлены. Незакоммиченная попытка compatibility-copy и
+расширения modify authorization удалена целиком. Current/GlassSetup.exe не
+восстанавливается; доверие/проверки нового resolver не ослабляются.
+
+Следующий этап: обновить продукты выбранным пользователем планом, затем проверить
+Settings entry через новый resolver. Offline/ARP entry принят только для запуска
+и отмены; product update и вход из обновлённой Settings ещё не подтверждены.
+Исходные три файла логов удалены после сохранения выводов.
+
+---
+
 # Windows startup acceptance: короткий сценарий пройден
 
 Пользователь подтвердил корректную логику и отсутствие визуальных нареканий после
