@@ -83,14 +83,19 @@ std::vector<std::wstring> CandidatePaths(const Asset& asset) {
     if(!GlassSetupSourceLayout::directory.empty())directory=GlassSetupSourceLayout::directory+L"\\";
     const auto name=Wide(asset.name);
     return {directory+L"packages\\"+name,directory+name,
-        GlassMaintenanceCache::CurrentFile(name.c_str())};
+        GlassMaintenanceCache::CurrentFile(name.c_str()),GlassSetupSourceLayout::Prepared(5)};
 }
 bool FetchAsset(Architecture arch,const std::atomic<bool>& cancel,Asset& asset,std::wstring& error) {
+    if(cancel.load())return false;
     std::string json,parseError;
-    if(!Get(L"https://api.github.com/repos/namazso/SecureUxTheme/releases/latest",INVALID_HANDLE_VALUE,&json,
+    {std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::secureUxCatalogMutex);json=GlassSetupSourceLayout::secureUxCatalogText;}
+    if(json.empty()&&!Get(L"https://api.github.com/repos/namazso/SecureUxTheme/releases/latest",INVALID_HANDLE_VALUE,&json,
         4*1024*1024,cancel,error))return false;
     if(!Select(json,arch,asset,parseError)){error=L"SecureUxTheme release discovery: "+Wide(parseError);return false;}
-    return true;
+    // Pin validated vendor metadata for this session too: Apply must not require
+    // another online discovery after the selected package is already verified.
+    {std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::secureUxCatalogMutex);GlassSetupSourceLayout::secureUxCatalogText=json;}
+    return !cancel.load();
 }
 bool FindLocal(const Asset& asset,Architecture arch,const std::atomic<bool>& cancel,
     File& file,std::wstring& selected,Package& metadata,std::wstring& error) {

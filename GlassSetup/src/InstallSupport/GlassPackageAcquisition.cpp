@@ -200,8 +200,8 @@ static bool Discover(GlassPackageCatalog::Product product,const GlassPackageCata
         if(!length||length>=32768)return Fail(error,L"Cannot locate installer directory");
         std::wstring parent(exe,length);parent=parent.substr(0,parent.find_last_of(L"\\/"));
         if(!GlassSetupSourceLayout::directory.empty())parent=GlassSetupSourceLayout::directory;
-        const std::array<std::wstring,3> paths={GlassMaintenanceCache::CurrentFile(name.c_str()),
-            parent+L"\\packages\\"+name,parent+L"\\"+name};
+        const std::array<std::wstring,4> paths={GlassMaintenanceCache::CurrentFile(name.c_str()),
+            parent+L"\\packages\\"+name,parent+L"\\"+name,GlassSetupSourceLayout::Prepared(i)};
         const auto rejected=[&](const std::wstring& path,const std::wstring& reason) {
             InstallLog::LineFormat(L"Local MSI rejected: %s: %s",path.c_str(),reason.c_str());
             diagnostics+=L"\n"+path+L": "+reason;
@@ -224,7 +224,7 @@ static bool Discover(GlassPackageCatalog::Product product,const GlassPackageCata
                 rejected(paths[n],L"signature/publisher or release hash verification failed (see log); unsigned local MSI is not trusted");
                 continue;
             }
-            candidates.push_back({static_cast<Source>(n),v,true});sources.push_back(paths[n]);
+            candidates.push_back({(n==3?Source::LocalPackages:static_cast<Source>(n)),v,true});sources.push_back(paths[n]);
             if(labels)labels->push_back(display);
         }
         if(remote&&remote->downloadable){

@@ -75,7 +75,7 @@ bool CopySnapshot(File& file,const std::wstring& path,const std::atomic_bool&,st
 bool CheckLegacyRepackAbsent(std::wstring&){return true;}
 bool QueryInstallPresence(std::vector<std::wstring>& out,const std::atomic_bool&,std::wstring&){if(existing)out.push_back(L"installed");return true;}
 // ACTUAL
-void reset(const std::string& data){assert(handles.empty());files.clear();fetches=downloads=copies=creates=0;online=moduleOk=trusted=true;existing=false;json=data;machine=Architecture::X64;}
+void reset(const std::string& data){assert(handles.empty());GlassSetupSourceLayout::secureUxCatalogText.clear();for(unsigned i=0;i<6;++i)GlassSetupSourceLayout::SetPrepared(i,{});files.clear();fetches=downloads=copies=creates=0;online=moduleOk=trusted=true;existing=false;json=data;machine=Architecture::X64;}
 int main(int argc,char** argv){assert(argc==2);std::ifstream input(argv[1]);const std::string fixture((std::istreambuf_iterator<char>(input)),{});
  const auto known=OfflineV4(Architecture::X64);const std::wstring local=L"C:\\kit\\SecureUxTheme_x64.msi";
  std::atomic_bool cancel{false};Offer offer;std::wstring error;Package package;
@@ -99,6 +99,9 @@ int main(int argc,char** argv){assert(argc==2);std::ifstream input(argv[1]);cons
  {reset(newer.dump());files[local]={known};assert(Describe(cancel,offer,error));assert(offer.localVersion==L"4.0.0"&&offer.releaseVersion==L"4.1.0");
   assert(Prepare(L"private",cancel,package,error)&&package.version==L"4.0.0");}
  {reset(newer.dump());assert(Prepare(L"private",cancel,package,error));assert(downloads==1&&copies==1&&package.version==L"4.1.0");}
+ {reset(newer.dump());assert(Prepare(L"private",cancel,package,error));
+  GlassSetupSourceLayout::SetPrepared(5,package.path);online=false;
+  assert(Prepare(L"engine",cancel,package,error));assert(downloads==1&&copies==2&&package.version==L"4.1.0");}
  {reset(fixture);cancel=true;assert(!Describe(cancel,offer,error)&&offer.localVersion.empty()&&fetches==0);cancel=false;}
  {reset(fixture);moduleOk=false;assert(!Describe(cancel,offer,error)&&offer.localVersion.empty());}
  {reset(fixture);existing=true;assert(Prepare(L"private",cancel,package,error)&&package.alreadyInstalled&&copies==0&&fetches==0);}

@@ -113,6 +113,7 @@
   <ItemGroup>
     <ClInclude Include="src\InstallSupport\GlassRegisteredMsi.h" />
     <ClInclude Include="src\GlassMaintenanceExecutor.h" />
+    <ClInclude Include="src\GlassProductDownloads.h" />
     <ProjectReference Include="..\GlassShared\GlassShared.vcxproj">
       <Project>{2591bb0c-7c14-42fc-a888-d9a7f4d2a723}</Project>
       <LinkLibraryDependencies>true</LinkLibraryDependencies>

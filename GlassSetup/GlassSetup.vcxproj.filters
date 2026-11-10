@@ -81,4 +81,7 @@
     <None Include="tests\run_package_catalog_tests.py"><Filter>tests</Filter></None>
     <None Include="packages.config" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\GlassProductDownloads.h" />
+  </ItemGroup>
 </Project>

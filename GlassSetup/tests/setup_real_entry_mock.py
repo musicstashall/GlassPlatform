@@ -72,6 +72,7 @@ struct Wizard {
  bool SecureUxRemovalDependencySatisfiedLocked(){return true;}
  bool NoSettingsInstalledLocked(){return false;}
 
+ bool packagesReady=true;bool ComponentsReady(){return packagesReady;}
  Page page_=Page::Components;
  bool simulateInstall_=false,simulateRollback_=false;ULONGLONG started_=0,simulateRollbackStarted_=0;
  bool accepted_=true,transitioning_=false,debugDemoActive_=false,debugDemoPending_=false;
@@ -102,7 +103,7 @@ int main(){
 #else
  static_assert(!Wizard::SimulationBuild());
 #endif
- for(int n=0;n<14;++n){Wizard w;timers=0;timerAvailable=true;GlassInstallUtil::rootsOk=true;GlassInstallUtil::observation={};
+ for(int n=0;n<15;++n){Wizard w;timers=0;timerAvailable=true;GlassInstallUtil::rootsOk=true;GlassInstallUtil::observation={};
   if(n==1)w.accepted_=false;
   if(n==2)w.transitioning_=true;
   if(n==3)w.inspectReady_=false;
@@ -116,6 +117,7 @@ int main(){
   if(n==11)w.page_=Page::Certificate;
   if(n==12)timerAvailable=false;
   if(n==13)w.certificate=true;
+  if(n==14)w.packagesReady=false;
   w.selection_.trustSigner=true;w.StartInstallation();
 #ifdef _DEBUG
   assert(w.installEngine_.starts==0);

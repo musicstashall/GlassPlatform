@@ -89,7 +89,7 @@ main=r'''
 }
 using GlassPackageCatalog::Product;
 std::string Package(const char* version,const char* markers="|SIGNED|"){std::string text=std::string(version)+"|GOOD|"+markers;text.resize(1024,' ');return text;}
-void reset(){assert(s.handles==0);s=State{};cancelled=false;}
+void reset(){assert(s.handles==0);s=State{};cancelled=false;for(std::size_t i=0;i<6;++i)GlassSetupSourceLayout::SetPrepared(i,{});}
 int main(){
  GlassPackageCatalog::Catalog catalog;std::wstring error;
  auto run=[&]{return GlassPackageAcquisition::Prepare(Product::Platform64,catalog,L"C:\\cache\\Work",cancelled,error);};
@@ -114,6 +114,14 @@ int main(){
  reset();{std::wstring v;bool verified=true;assert(!GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified,nullptr));assert(v.empty()&&!verified&&s.files.empty());}
  auto& remote=catalog.products[0];remote=GlassPackageCatalog::Asset{};remote->version.parts={3,0,0,0};remote->downloadable=true;remote->size=1024;remote->sha256=std::string(64,'a');remote->url="https://github.com/release";
  reset();{std::wstring v;bool verified=true;assert(GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified,nullptr));assert(v==L"3.0.0.0"&&!verified&&s.downloads==0&&s.files.empty());}
+ // Engine consumes a verified session hint without a second HTTP transfer.
+ reset();GlassSetupSourceLayout::SetPrepared(0,L"C:\\cache\\Prepared\\Glass-x64.msi");
+ s.files[GlassSetupSourceLayout::Prepared(0)].bytes=Package("3.0.0","|HASH|");
+ assert(run());assert(s.downloads==0&&s.files.at(dest).bytes==Package("3.0.0","|HASH|"));
+ // A hint is not authority: invalid bytes do not bypass hash/publisher verification.
+ reset();GlassSetupSourceLayout::SetPrepared(0,L"C:\\cache\\Prepared\\Glass-x64.msi");
+ s.files[GlassSetupSourceLayout::Prepared(0)].bytes=Package("3.0.0","");s.downloadFails=true;
+ assert(!run());assert(s.downloads==1&&!s.files.count(dest));
  reset();s.download=Package("3.0.0","|HASH|");assert(run());assert(s.downloads==1&&s.files.at(dest).bytes==s.download&&!s.files.count(part));
  reset();s.download=Package("3.0.0","");assert(!run());assert(!s.files.count(dest)&&!s.files.count(part));
  reset();s.download=Package("2.0.0","|HASH|");assert(!run());assert(!s.files.count(dest)&&!s.files.count(part)); // digest isn't enough without target metadata.

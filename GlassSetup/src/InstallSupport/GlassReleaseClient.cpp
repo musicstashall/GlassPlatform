@@ -81,6 +81,7 @@ bool Get(const std::wstring& initial,HANDLE output,std::string* text,std::uint64
             url=location.data();continue;
         }
         if(status!=200)return Fail(error,L"GitHub HTTP error",status);
+        if(!text&&packageProgress)packageProgress(0,limit);
         std::array<char,32768> buffer{};std::uint64_t total=0;
         for(;;){
             if(Cancelled(cancel,error))return false;
@@ -88,7 +89,8 @@ bool Get(const std::wstring& initial,HANDLE output,std::string* text,std::uint64
             if(!read)return true;
             total+=read;if(total>limit)return Fail(error,L"GitHub response too large",ERROR_FILE_TOO_LARGE);
             if(text)text->append(buffer.data(),read);
-            else {DWORD written=0;if(!WriteFile(output,buffer.data(),read,&written,nullptr)||written!=read)return Fail(error,L"Writing package download");}
+            else {DWORD written=0;if(!WriteFile(output,buffer.data(),read,&written,nullptr)||written!=read)return Fail(error,L"Writing package download");
+                if(packageProgress)packageProgress(total,limit);}
         }
     }
     return Fail(error,L"Too many GitHub redirects",ERROR_WINHTTP_REDIRECT_FAILED);

@@ -29,6 +29,7 @@
 #include "WizardAssets.h"
 #include "WizardProgress.h"
 #include "GlassProductPlan.h"
+#include "GlassProductDownloads.h"
 #include "GlassProductUiPolicy.h"
 #include "InstallSupport/GlassInstallMsi.h"
 #include "InstallSupport/GlassInstallUtil.h"
@@ -72,7 +73,7 @@ namespace {
 constexpr int kWidth = 1000, kHtmlHeight = 540, kProgressHeight = 4;
 constexpr int kContentHeight = kHtmlHeight + kProgressHeight;
 constexpr int kFooterHeight = 56, kHeight = 600;
-constexpr UINT_PTR kInstallTimer = 1, kFadeTimer = 2, kHeroTimer = 3, kStartupPollTimer = 5, kComponentNoticeTimer = 6;
+constexpr UINT_PTR kInstallTimer = 1, kFadeTimer = 2, kHeroTimer = 3, kStartupPollTimer = 5, kComponentNoticeTimer = 6, kProductDownloadTimer = 7;
 constexpr UINT kInstallTimerMs = 16, kHeroTimerMs = 50;
 constexpr ULONGLONG kMarqueePeriodMs = 1400;
 constexpr double kProgressSmoothTauMs = 120.0;
@@ -1188,6 +1189,7 @@ public:
         // already gone when this is called from the main loop's shutdown path.
         if (startupThread_.joinable()) startupThread_.join();
         if (inspectThread_.joinable()) inspectThread_.join();
+        downloads_.Join();
     }
     // Observe queued pointer messages before child controls/IsDialogMessage
     // consume them. Commands and keyboard activation are NOT pointer clicks.
@@ -1305,6 +1307,7 @@ private:
     VersionCheckResult versionCheckResult_;
     std::atomic_bool versionCheckCancel_{false};
     GlassPackageCatalog::Catalog releaseCatalog_;
+    GlassProductDownloads downloads_;
     std::wstring checkingStatus_;
     bool versionCheckStarted_ = false, versionCheckHandled_ = false, controllerCheckHandled_ = false;
 
@@ -2197,7 +2200,58 @@ private:
         }
         return json+L"]";
     }
+    std::array<bool,6> DownloadSelection() const {
+        const bool os64=GlassInstallUtil::IsOs64Bit();
+        return {{os64&&selection_.platform64&&!selection_.Removes(0),selection_.platform32&&!selection_.Removes(1),
+            selection_.Settings64(os64)&&!selection_.Removes(2),selection_.Settings32(os64)&&!selection_.Removes(5),
+            os64&&selection_.openGlass&&!selection_.Removes(3),selection_.secureUxTheme&&!selection_.secureUxThemeRemove}};
+    }
+    bool DownloadsReady() const {return SimulationBuild()||downloads_.Ready(DownloadSelection());}
+    void ReconcileDownloads() {
+        if(SimulationBuild()||DebugDemoLocksControls()||!controlsReady_)return;
+        if(page_==Page::Components&&inspectReady_.load(std::memory_order_acquire)) {
+            downloads_.Reconcile(DownloadSelection(),releaseCatalog_);
+            SetTimer(window,kProductDownloadTimer,200,nullptr);
+        } else if(page_==Page::License) {
+            downloads_.Reconcile({},releaseCatalog_);
+            KillTimer(window,kProductDownloadTimer);
+        }
+    }
+    std::wstring NativeDownloadSummary() const {
+        if(SimulationBuild())return {};
+        unsigned count=0,ready=0,failed=0;std::uint64_t total=0,received=0;
+        for(const auto& job:downloads_.jobs)if(job&&!job->cancel.load()) {
+            ++count;const bool done=job->done.load(std::memory_order_acquire);
+            if(done){if(job->ok)++ready;else ++failed;}
+            const auto size=job->total.load();total+=size;
+            received+=(done&&job->ok)?size:(std::min)(size,job->bytes.load());
+        }
+        if(!count)return {};
+        const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
+        if(failed)return ru?L"Не удалось подготовить пакет. Снимите отметку и выберите продукт повторно либо отмените операцию.":L"Package preparation failed. Uncheck and reselect the product to retry, or cancel.";
+        if(count==ready)return ru?L"Выбранные пакеты проверены и готовы.":L"Selected packages are verified and ready.";
+        const auto percent=total?(std::min<std::uint64_t>)(99,received*100/total):0;
+        return (ru?L"Подготовка пакетов: ":L"Preparing packages: ")+std::to_wstring(percent)+L"% ("+std::to_wstring(ready)+L"/"+std::to_wstring(count)+L")";
+    }
+    std::wstring DownloadsJson() const {
+        static constexpr const wchar_t* ids[]={L"x64",L"x86",L"settings64",L"settings32",L"openglass",L"secureUxTheme"};
+        std::wstring result=L"[";
+        for(std::size_t i=0;i<downloads_.jobs.size();++i)if(const auto& job=downloads_.jobs[i]) {
+            if(job->cancel.load())continue;
+            if(result.size()>1)result+=L",";
+            const bool done=job->done.load(std::memory_order_acquire);
+            const auto total=job->total.load(),bytes=job->bytes.load();
+            const wchar_t* phase=done?(job->ok?L"ready":L"error"):(total&&bytes>=total?L"verifying":bytes?L"downloading":L"preparing");
+            result+=L"{\"id\":"+JsStringLiteral(ids[i])+L",\"phase\":"+JsStringLiteral(phase)+
+                L",\"bytes\":"+std::to_wstring(bytes)+L",\"total\":"+std::to_wstring(total)+
+                L",\"network\":"+(job->network.load()?L"true":L"false")+
+                L",\"elapsedMs\":"+std::to_wstring(GetTickCount64()-job->started)+
+                L",\"error\":"+JsStringLiteral(done?job->error:L"")+L"}";
+        }
+        return result+L"]";
+    }
     void SyncWebViewState() {
+        ReconcileDownloads();
         if (!web_ || !webReady_ || !webBridgeReady_) return;
         if (!webInitSent_) {
             const UINT doneBodyId=SimulationBuild()?IDS_DONE_BODY_DEMO:IDS_DONE_BODY;
@@ -2271,6 +2325,7 @@ private:
         }
         const auto unlock=installEngine_.ActiveUnlock();
         std::wstring json=L"{\"type\":\"state\",\"page\":"+JsStringLiteral(WebPageName(unlock))+
+            L",\"downloads\":"+DownloadsJson()+
             L",\"accepted\":"+(accepted_?L"true":L"false")+
             L",\"platformVersion\":"+JsStringLiteral(platformVersion_)+
             L",\"checkingProducts\":"+((controllerCheckHandled_||IsControllerChild())?L"true":L"false")+
@@ -2363,7 +2418,7 @@ private:
     }
     // «Установить» доступен, когда анализ завершён и есть выбранные продукты.
     [[nodiscard]] bool ComponentsReady() const noexcept {
-        return page_!=Page::Components || (inspectReady_.load(std::memory_order_acquire) && HasSelectedComponent() &&
+        return (page_!=Page::Components && page_!=Page::Certificate) || (DownloadsReady() && inspectReady_.load(std::memory_order_acquire) && HasSelectedComponent() &&
             !(selection_.removeMask && (selection_.secureUxTheme||selection_.secureUxThemeRemove)));
     }
     void OnInspectReady() {
@@ -2611,7 +2666,7 @@ private:
     }
     void StartInstallation() {
         // Debug retains its original simulation contract; Release uses external MSI.
-        if (!accepted_ || transitioning_ || DebugDemoLocksControls()) return;
+        if (!accepted_ || transitioning_ || DebugDemoLocksControls() || !ComponentsReady()) return;
         if ((page_!=Page::Components && page_!=Page::Certificate) ||
             !inspectReady_.load(std::memory_order_acquire) || !HasSelectedComponent()) return;
         {std::lock_guard<std::mutex> lock(inspectMutex_);
@@ -3301,6 +3356,10 @@ private:
             return S_OK;
         }
         if (page_==Page::Components && !DebugDemoLocksControls()) {
+            static constexpr const wchar_t* downloadIds[]={L"x64",L"x86",L"settings64",L"settings32",L"openglass",L"secureUxTheme"};
+            for(std::size_t i=0;i<6;++i)if(message==L"download-retry:"+std::wstring(downloadIds[i])) {
+                downloads_.Retry(i);SyncWebViewState();return S_OK;
+            }
             const bool os64=GlassInstallUtil::IsOs64Bit();
             // Выбор карточки не тянет за собой основную платформу: принудительная
             // отметка уместна только при установке с нуля/обновлении, где карточка
@@ -3818,6 +3877,7 @@ private:
                 sutChecked?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF;
             DrawLabel(dc,selection_.secureUxThemeRemove?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
                 L"Будет удалён MSI; постоянные файлы сохранятся":L"MSI will be removed; permanent files are retained"):Text(sutStateId),Box(510,377,380,38),small_,accent);
+            DrawLabel(dc,NativeDownloadSummary(),Box(48,520,900,20),small_,accent,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
             const auto warnings=ComponentWarnings();
             if(!warnings.empty())DrawLabel(dc,warnings,Box(48,432,840,88),font_,white);
             }
@@ -4024,6 +4084,8 @@ private:
             std::lock_guard<std::mutex> lock(startupMutex_);
             startupStop_.store(true,std::memory_order_release);
         }
+        downloads_.Stop();
+        KillTimer(window,kProductDownloadTimer);
         KillTimer(window,kStartupPollTimer);
         KillTimer(window,kInstallTimer); KillTimer(window,kFadeTimer); KillTimer(window,kHeroTimer);
 #ifdef _DEBUG
@@ -4291,7 +4353,7 @@ private:
                     (void)Shared::GlassInstallerLaunch::MarkEulaAccepted(SetupLicenseIdentity().c_str());
                     SetPage(Page::Components);
                 }
-                else if (page_==Page::Components) { if (CertificatePageApplies()) SetPage(Page::Certificate); else StartInstallation(); }
+                else if (page_==Page::Components) { if(!ComponentsReady())return 0; if (CertificatePageApplies()) SetPage(Page::Certificate); else StartInstallation(); }
                 else if (page_==Page::Certificate) StartInstallation();
                 else if (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error || page_==Page::RuntimeError || page_==Page::AlreadyRunning) RequestClose();
                 return 0;
@@ -4300,7 +4362,13 @@ private:
             }
             break;
         case WM_TIMER:
-            if(w==kComponentNoticeTimer) {
+            if(w==kProductDownloadTimer) {
+                if(page_!=Page::Components){KillTimer(window,kProductDownloadTimer);return 0;}
+                ReconcileDownloads();
+                EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());
+                SyncWebViewState();InvalidateContent();
+            }
+            else if(w==kComponentNoticeTimer) {
                 if(page_!=Page::Components||(nativeComponentNoticeActivity_&&GetTickCount64()-nativeComponentNoticeSince_>=1000)) {
                     nativeComponentNotice_.clear();KillTimer(window,kComponentNoticeTimer);InvalidateContent();
                 }

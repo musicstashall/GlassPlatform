@@ -1,3 +1,91 @@
+# Параллельная подготовка пакетов на странице выбора продуктов
+
+Online product transfer остаётся **не принятым на Windows**, даже при прежних
+успешных локальных MSI updates. По запросу пользователя подготовка перенесена
+на страницу плана, до product mutation. Матрица отказов отложена до этой проверки.
+
+- Release: до6 независимых workers (Platform64/32, Settings64/32, OpenGlass,
+  оригинальный SecureUxTheme) используют прежние acquisition providers. При
+  наличии проверенного local/cache package сохраняется прежний выбор источника;
+  ненужные повторные скачивания не добавлены. Removal-only rows не загружаются.
+- Worker-local byte observer в ReleaseClient учитывает только записанные package
+  bytes, не catalogue JSON/redirects. В UI отдельный downloads state, без пересоздания
+  карточек/plan buttons на каждом tick. Прогресс не срывает drag и keyboard focus.
+- Installed-lane cards: полоска; plan rows: процент загрузки/проверка/готовность,
+  на ошибке — явный Retry с diagnostic tooltip. Агрегат над footer: объёмный %,
+  bytes/total, средняя скорость по elapsed time и оценка оставшегося времени.
+  Ожидание/неизвестный total не выдумывает процент,100% только после verification.
+  При показе агрегата высота lanes/plan сокращается, overlap с footer не допускается.
+- Cancel action/возврат карточки/крестик plan row отменяют только этот job;
+  Back к License отменяет подготовку плана, закрытие мастера — все jobs.
+  Cancel не блокирует UI; synchronous WinHTTP проверяет его между chunks/redirects,
+  незавершённый read может ждать существующий сетевой timeout. HTTP resume нет.
+- Job generations раздельны: старый cancelled worker не публикует новый hint.
+  Файлы остаются в отдельных защищённых workspaces, cleanup после завершения
+  worker; thread join на выходе выполняется после закрытия окна.
+- Готовые path hints только в памяти процесса, не доверенные receipts. InstallEngine
+  повторно проверяет MSI/hash/publisher и копирует snapshot в свой workspace.
+  Они не добавляют третью категорию source rows и не меняют publisher policy.
+  Валидированный vendor catalogue SUT также удерживается на время процесса:
+  проверенный downloaded original можно применить после отключения сети без
+  обязательного повторного discovery; hash/identity перепроверяются.
+  Apply/Next не допускается до готовности и публикации hints всех выбранных jobs.
+- Debug сохраняет симуляцию; `--demo-native` не получает реальных downloads.
+  Для online acceptance требуется Release. Native fallback показывает общий статус
+  подготовки; per-card progress относится к HTML product workspace.
+
+Проверки:98 mocks →88PASS/10 прежних baseline FAIL; новый production coordinator
+mock (6параллельных jobs, cancel/reselect generation, retry, ready gate, cleanup)
+и acquisition hint reuse/reject tests PASS. SUT mock дополнительно проверяет
+повторный Prepare в другом workspace после отключения сети, без второго download.5 production DOM suites PASS, включая
+RU/EN download states, weighted %, speed, focus preservation, cancel/retry IPC.
+Chromium download geometry и unlock RU/EN tests PASS. verify_resources и
+verify_sut_build_graph PASS. Большой maintenance_ui_browser_test останавливается
+на попытке нажать inert Available pin (строка287); та же ошибка воспроизведена
+на неизменённом HEAD HTML, это не новый download regression. Windows/MSVC/WinHTTP
+runtime здесь недоступен; успешную GitHub-загрузку не заявлять.
+
+## Порядок сборки этого изменения (без полной пересборки продуктов)
+
+Из корня решения, **Release | x86**, в таком порядке:
+1. GlassShared (если актуален — останется up-to-date).
+2. GlassUnins (общий HTML встроен и в него).
+3. GlassSetup (встраивает подготовленный Release Unins).
+
+```bat
+msbuild GlassProject.sln /t:"GlassShared;GlassUnins;GlassSetup" /p:Configuration=Release /p:Platform=x86 /m:1
+```
+
+Без Clean, без пересборки продуктовых MSI/платформы. Требуется уже существующий
+x64 Release Native helper от предыдущего полного комплекта; если его нет, сначала
+нужна обычная сборка solution Release|x64. Платформу не останавливать ради сборки.
+
+## Короткая online проверка перед матрицей отказов
+
+На чистой/snapshot VM запустить подписанный новый Release EXE без MSI рядом
+и без `packages`. Не удалять системный Windows Installer cache или защищённый
+Current на рабочей системе ради принудительной сети. Нужен доступный release
+catalog с URL/size/SHA256 совместимых MSI; более старый remote не должен понижать
+установленные продукты.
+
+1. Дождаться catalogue/product inspection, выбрать2–3 продукта. На странице
+   должны параллельно появиться реальные download progress и общий объём/скорость.
+2. Во время передачи вернуть одну карточку, отменить другую через × плана.
+   Остальные jobs продолжаются. Выбрать отменённый продукт снова: старый worker
+   не должен вернуть stale готовность или возобновить отменённую строку.
+3. Отключить сеть на одном из прогона VM: error не становится ready/100%; Apply
+   заблокирован. Включить сеть и нажать Retry. Проверить unknown/preparing и
+   verification states, а не требовать видимого процента для очень маленького MSI.
+4. После verified-ready подтвердить выбранные операции. В engine не должно быть
+   второго package transfer для того же пригодного snapshot; повторные hash/MSI
+   проверки и безопасное копирование ожидаемы.
+5. Сохранить полный Setup log: `Product preparation: start index=…`,
+   `GitHub package transfer started index=… expectedBytes=…`,
+   `finish … ok/cancelled/network/bytes`, затем acquisition/MSI result.
+   Индексы0..5: Platform64,Platform32,Settings64,Settings32,OpenGlass,SecureUxTheme.
+
+---
+
 # Завершение UI разблокировки и нативная Debug-демонстрация
 
 По решению пользователя разбор Explorer dumps вынесен в отдельную тему и не
