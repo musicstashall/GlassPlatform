@@ -54,11 +54,9 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 
 /* Code-drawn Unlocker animation over a still banner — deliberately not the slideshow. */
 /* Preparation is driven by verified native jobs, never by a presentation timer. */
-.product-transfer{position:absolute;left:8px;right:8px;bottom:2px;height:3px;border-radius:3px;overflow:hidden;background:#c1b4ff24;pointer-events:none}
-.product-transfer>i{display:block;height:100%;background:linear-gradient(90deg,#a7dddf,#c1b4ff);transition:width .18s linear}
-.product-transfer.is-unknown>i{width:28%!important;animation:transfer-wait 1.4s ease-in-out infinite alternate}
-@keyframes transfer-wait{to{transform:translateX(240%)}}
-@media(prefers-reduced-motion:reduce){.product-transfer.is-unknown>i{animation:none}}
+.product-transfer{position:absolute;inset:0;border-radius:inherit;overflow:hidden;pointer-events:none;z-index:-1}
+.product-transfer>i{display:block;height:100%;background:linear-gradient(130deg,rgba(31,61,52,.62),rgba(17,32,35,.78));transition:width .22s linear}
+@media(prefers-reduced-motion:reduce){.product-transfer>i{transition:none}}
 #components-panel .download-retry{margin:0 4px 0 0;padding:2px 4px;border:1px solid #ffaaaa55;border-radius:4px;background:#ffaaaa0d;color:#ffbcbc;font:inherit;cursor:pointer}
 .unlock-backdrop{position:absolute;inset:0;width:1000px;height:540px;object-fit:cover;opacity:.43;filter:saturate(.78);pointer-events:none}
 .unlock-shade{position:absolute;inset:0;background:linear-gradient(90deg,#101225f0 0%,#101225df 38%,#10122582 72%,#1012259c 100%);pointer-events:none}
@@ -737,6 +735,12 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .c-card:not(.is-disabled){cursor:grab}
 #components-panel .components-summary{position:static;left:auto;right:auto;top:auto;width:auto}
 .source-newer{font-weight:650;color:#d3c6ff}.src-absent{opacity:.6}
+/* Selected remote media stays outlined until real bytes arrive. The same
+   green surface as an activated card grows behind its content, never over it. */
+#components-panel .c-card{isolation:isolate}
+#components-panel .c-card.download-planned,#components-panel .c-card.download-progress{border:1px dashed #83d9a685;background:linear-gradient(130deg,#22253c,#181b2d)}
+#components-panel .c-card.download-local{border:1px solid #83d9a685;background:linear-gradient(130deg,rgba(31,61,52,.62),rgba(17,32,35,.78))}
+#components-panel .c-card.download-failed{border-color:#e57a7a;border-style:dashed}
 </style></head>
 <body><main id="viewport"><div id="stage" data-mode="loading" role="region" aria-roledescription="carousel" aria-label="GlassPlatform">
 <div class="ambient slideshow-only"></div>
@@ -956,7 +960,7 @@ function showProductWarning(item,button){
   dialogParagraph(body,item.description,'dialog-description');
   const input=document.getElementById('product-'+item.id),f=input&&componentCardFacts(item,input);
   const state=f?.remove?(ru?'Будет удалено: MSI снимается с регистрации; удаляются файлы, службы и задачи продукта согласно правилам пакета.':'Will be removed: MSI registration, files, services and tasks are removed according to package rules.'):item.state;
-  const version=item.targetVersionKind==='release'?(ru?'релиз ':'release ')+(item.targetVersion||item.releaseTag||'—'):((item.id==='openglass'?item.targetPayloadVersion:item.targetVersion)||'—');
+  const version=item.targetVersionKind==='release'?(ru?'релиз ':'release ')+(item.targetVersion||item.releaseTag||'—'):((componentUsesPayload(item)?item.targetPayloadVersion:item.targetVersion)||'—');
   const pkg=[item.packageSize?componentSize(item.packageSize):'',version,ru?'Размер и SHA-256 сверяются перед установкой.':'Size and SHA-256 are checked before installation.'].filter(Boolean).join(' · ');
   for(const [label,text] of [[ru?'СОСТОЯНИЕ':'STATE',state],[ru?'ЗАВИСИМОСТИ':'DEPENDENCIES',item.warning||(ru?'Нет предупреждений о составе.':'No composition warnings.')],[ru?'ПАКЕТ':'PACKAGE',pkg],...(item.removeBlockedReason?[[ru?'УДАЛЕНИЕ':'REMOVAL',item.removeBlockedReason]]:[])]){
    const row=document.createElement('div');row.className='dialog-detail-row';const key=document.createElement('span');key.textContent='•  '+label;row.append(key);dialogParagraph(row,text);body.append(row);
@@ -1189,7 +1193,8 @@ function bindComponentWorkspace(){
 // A release catalogue card and an installed-composition card are different views
 // of one intent, not clones with the same action/status content (concept C).
 function componentSize(bytes){return new Intl.NumberFormat(locale==='ru'?'ru':'en',{minimumFractionDigits:1,maximumFractionDigits:1}).format(bytes/1048576)+(locale==='ru'?' МБ':' MB');}
-function componentMsiVersion(item){if(item.id==='openglass'&&typeof item.installedPayloadVersion==='string')return item.installedPayloadVersion||'—';return typeof item.installedPackageVersion==='string'?(item.installedPackageVersion||'—'):(item.installedVersion||'—');}
+function componentUsesPayload(item){return ['openglass','settings64','settings32'].includes(item.id);}
+function componentMsiVersion(item){if(componentUsesPayload(item))return item.installedPayloadVersion||'—';return typeof item.installedPackageVersion==='string'?(item.installedPackageVersion||'—'):(item.installedVersion||'—');}
 function openGlassPayloadUpdate(item){
  const parse=value=>{if(typeof value!=='string'||!/^\d{1,10}\.\d{1,10}\.\d{1,10}(?:\.\d{1,10})?$/.test(value))return null;const parts=value.split('.').map(Number);if(parts.some(x=>x>4294967295))return null;while(parts.length<4)parts.push(0);return parts;};
  const current=parse(item.installedPayloadVersion),target=parse(item.targetPayloadVersion);
@@ -1249,20 +1254,20 @@ function commitComponentChoice(input,checked){
  return true;
 }
 function componentCardAction(item,input,shelf){
- const ru=locale==='ru',f=componentCardFacts(item,input),current=componentMsiVersion(item),target=(item.id==='openglass'?item.targetPayloadVersion:item.targetVersion)||'';
+ const ru=locale==='ru',f=componentCardFacts(item,input),current=componentMsiVersion(item),target=(componentUsesPayload(item)?item.targetPayloadVersion:item.targetVersion)||'';
  if(f.remove&&hostState.appMode!=='unins'&&shelf==='available'&&item.applySupported!==false)return {act:'install',value:true,label:(ru?'Установить ':'Install ')+item.title};
  if(f.remove&&hostState.appMode!=='unins')return {act:'restore',value:false,label:ru?'Оставить установленным':'Keep installed'};
  if(shelf==='available')return {act:!item.installed?'install':f.newer?'update':'repair',value:true,
-  label:!item.installed?(ru?'Установить ':'Install ')+item.title:f.newer?(ru?'Обновить до ':'Update to ')+target:(ru?'Переустановить ':'Reinstall ')+current};
+  label:!item.installed?(ru?'Установить ':'Install ')+item.title:f.newer?(target?(ru?'Обновить до ':'Update to ')+target:(ru?'Обновить':'Update')):(ru?'Переустановить ':'Reinstall ')+current};
  if(hostState.appMode==='unins')return {act:f.selected?'restore':'remove',value:!f.selected,
   label:f.selected?(ru?'Оставить установленным':'Keep installed'):(ru?'Удалить':'Remove')};
  if(!item.installed)return {act:'remove',value:false,label:ru?'Удалить':'Remove'}; // Cancel a pending install, not MSI removal.
  if(f.selected)return {act:f.newer?'undo':'unrepair',value:false,label:f.newer?(ru?'Отменить обновление':'Undo update'):(ru?'Отменить переустановку':'Undo reinstall')};
- return {act:f.newer?'update':'repair',value:true,label:f.newer?(ru?'Обновить до ':'Update to ')+target:(ru?'Переустановить ':'Reinstall ')+current};
+ return {act:f.newer?'update':'repair',value:true,label:f.newer?(target?(ru?'Обновить до ':'Update to ')+target:(ru?'Обновить':'Update')):(ru?'Переустановить ':'Reinstall ')+current};
 }
 function paintComponentCard(card,item,input,shelf){
  const ru=locale==='ru',f=componentCardFacts(item,input),available=shelf==='available';
- const current=componentMsiVersion(item),target=(item.id==='openglass'?item.targetPayloadVersion:item.targetVersion)||'';
+ const current=componentMsiVersion(item),target=(componentUsesPayload(item)?item.targetPayloadVersion:item.targetVersion)||'';
  const meta=card.querySelector('.c-meta'),foot=card.querySelector('.c-foot'),action=card.querySelector('.comp-decision');
  const line=document.createElement('span');line.className='comp-version-line';
  const text=(value,bold=false)=>{const node=document.createElement(bold?'b':'span');node.className='comp-version-tag';node.textContent=value||'—';line.append(node);};
@@ -1283,7 +1288,7 @@ function paintComponentCard(card,item,input,shelf){
   card.classList.add('pending-install');text(target);if(suffix)line.append(suffix);chipClass='pending';chipText=ru?'Будет установлено':'Will be installed';icon='download';
  }else if(f.selected){
   card.classList.add('is-activated');text(current);
-  if(f.newer){line.append(' → ');text(target);chipText=(ru?'обновится до ':'will update to ')+target;icon='update';}
+  if(f.newer){line.append(' → ');text(target);chipText=(ru?'обновится до ':'will update to ')+(target||'—');icon='update';}
   else {if(suffix)line.append(suffix);line.append(ru?' заново':' again');chipClass='download';chipText=ru?'переустановится':'will reinstall';icon='repair';}
  }else if(f.broken){
   card.classList.add('is-broken');text(current);line.append(item.integrityMismatch?(ru?' · файлы не совпадают с SHA-256':' · files differ from SHA-256'):(ru?' · требуется восстановление':' · repair required'));chipClass='broken';chipText=item.integrityMismatch?(ru?'целостность нарушена':'integrity damaged'):(ru?'требуется восстановление':'repair required');icon='warn';
@@ -1303,9 +1308,9 @@ function paintComponentCard(card,item,input,shelf){
   const source=(kind,label,version)=>{if(marks.childNodes.length){const sep=document.createElement('span');sep.className='src-sep';sep.textContent='·';marks.append(sep);}const bit=document.createElement('span');bit.className='src-bit '+kind;bit.append(document.createElement('i'),document.createTextNode(label+' '+version));marks.append(bit);};
   // Exactly two source categories for every product, in server/local order.
   // Vendor release metadata stays separate internally from MSI identity.
-  const server=item.id==='openglass'?item.remotePayloadVersion:
+  const server=componentUsesPayload(item)?item.remotePayloadVersion:
    item.id==='secureUxTheme'?(item.remoteVersion||item.releaseTag):item.remoteVersion;
-  const local=item.id==='openglass'?item.attachedPayloadVersion:item.attachedPackageVersion;
+  const local=componentUsesPayload(item)?item.attachedPayloadVersion:item.attachedPackageVersion;
   // OpenGlass compares DLL FileVersion on both sides; SUT release tags
   // cannot be ordered against MSI ProductVersion.
   const comparable=item.id!=='secureUxTheme';
@@ -1462,11 +1467,19 @@ function syncDownloadVisuals(){
  const percent=d=>d.phase==='ready'?100:d.total>0?Math.min(99,Math.floor(100*Math.max(0,d.bytes||0)/d.total)):0;
  const label=d=>d.phase==='error'?(ru?'Ошибка загрузки':'Download failed'):d.phase==='ready'?(d.network?(ru?'Загружено и проверено':'Downloaded and verified'):(ru?'Локальный пакет':'Local package')):d.phase==='verifying'?(ru?'Проверка…':'Verifying…'):d.phase==='downloading'?(ru?'Загружается ':'Downloading ')+percent(d)+'%':(ru?'Подготовка…':'Preparing…');
  for(const card of document.querySelectorAll('#components-panel .c-card')){
-  const d=selected.find(d=>d.id===card.dataset.product),installed=!!card.closest('#components-installed-grid');
+  const item=(hostState.components||[]).find(item=>item.id===card.dataset.product),input=item&&document.getElementById('product-'+item.id);
+  const planned=!!(input?.checked&&input.dataset.intent!=='remove'&&hostState.appMode!=='unins'&&card.closest('#components-installed-grid'));
+  const d=selected.find(d=>d.id===card.dataset.product);
   let bar=card.querySelector('.product-transfer'),retry=card.querySelector('.download-retry');
-  if(!d||!installed){if(bar)bar.remove();if(retry)retry.remove();continue;}
+  const remote=item?.downloadRequired!==false||!!d?.network,active=planned&&remote&&!!d&&d.phase!=='ready';
+  card.classList.toggle('download-planned',planned&&remote&&!d);
+  card.classList.toggle('download-progress',active);
+  card.classList.toggle('download-local',planned&&((d&&d.phase==='ready')||(!remote&&d?.phase!=='error')));
+  card.classList.toggle('download-failed',planned&&d?.phase==='error');
+  if(!planned||!d){if(bar)bar.remove();if(retry)retry.remove();continue;}
   if(!bar){bar=document.createElement('div');bar.className='product-transfer';bar.append(document.createElement('i'));bar.setAttribute('role','progressbar');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax','100');card.append(bar);}
-  bar.classList.toggle('is-unknown',!d.total&&d.phase!=='ready'&&d.phase!=='error');bar.firstElementChild.style.width=percent(d)+'%';bar.setAttribute('aria-label',label(d));bar.setAttribute('aria-valuenow',String(percent(d)));
+  bar.style.opacity=d.phase==='ready'?'0':'1';bar.firstElementChild.style.width=(!remote?100:percent(d))+'%';bar.setAttribute('aria-label',label(d));
+  if(!d.total&&d.phase!=='ready')bar.removeAttribute('aria-valuenow');else bar.setAttribute('aria-valuenow',String(percent(d)));
   if(d.phase==='error'){
    if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';retry.onclick=e=>{e.stopPropagation();if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('download-retry:'+d.id);};card.querySelector('.c-foot').prepend(retry);}
    retry.textContent=ru?'Повторить':'Retry';retry.title=d.error||label(d);

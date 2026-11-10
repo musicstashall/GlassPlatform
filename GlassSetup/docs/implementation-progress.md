@@ -1,3 +1,48 @@
+# Online install принят пользователем; заливка карточек и FileVersion Settings
+
+Пользователь сообщил об успешном тесте онлайн-установки. Это пользовательское
+подтверждение online install; новые логи/матрица сбоев/restart в этом сообщении
+не предоставлены. Полный security/fault/reboot acceptance этим не объявляется.
+Пользователь также сообщил о локальных правках: в Arena checkout рабочее дерево
+было чистым, fetch текущей ветки не обнаружил новых remote commits. Эти локальные
+правки не были доступны для сверки и не объявляются включёнными в данный коммит.
+
+- Индивидуальная тонкая полоса заменена зелёной заливкой площади карточки слева
+  направо. Цвет соответствует activated surface. Текст и кнопки выше заливки,
+  pointer events не перехватываются, общий штатный footer strip не изменён.
+- Selected verified local: сразу сплошной зелёный. Selected remote до «Далее»:
+  зелёная пунктирная рамка, нейтральный фон без фиктивного прогресса. Во время
+  transfer — заливка по реальным bytes, verification максимум 99%; Ready — полная
+  зелёная карточка, сплошная рамка. При unknown total нет придуманной анимации
+  процентов; Error сохраняет достигнутую заливку и красный контур с Retry.
+- downloadRequired приходит из backend выбранного источника; inspected local
+  version/installed status не используются HTML как доказательство local source.
+  Неизвестные источники в DOM fixtures считаются ожидающими подготовки.
+- Исправлена оставшаяся ошибка Settings display: ранее приложение/MSI получили
+  независимый release identity, но карточки всё ещё показывали MSI version.
+  Теперь Installed берёт FileVersion EXE из собственного x64/x86 registered root;
+  target/attached — File.Version GlassSettings.exe из соответствующего verified
+  MSI. Не подставляются Platform/MSI/Native версии при отсутствии app FileVersion.
+- Release generator добавляет `payloadVersion` Settings из MSI File table,
+  parser проверяет числовой формат. Серверные строки используют это поле; при
+  старом каталоге без поля версия приложения неизвестна, не копируется из MSI.
+  Перегенерировать version.json из существующих соответствующих MSI. MSI ordering,
+  identity/trust/no-downgrade и запуск подготовки только по «Далее» сохранены.
+
+PASS: installed Settings payload projection (разные x64/x86), production FileVersion
+reader, catalog payload metadata validation, source/inspection/acquisition/Next
+mocks, 5 DOM suites; Chromium RU/EN проверяет заливку высотой всей карточки и шириной
+50% при 50% bytes, без дополнительного footer bar. Реальной Windows сборки этих
+новых изменений в Arena не было; PowerShell catalog generator здесь не выполнялся.
+
+Сборка **Release|x86: GlassShared → GlassUnins → GlassSetup** (общий HTML в обоих
+EXE). При наличии прежних x64 Native/helper prerequisites полный solution build
+не нужен. Для отображения FileVersion не требуется пересборка Settings/MSI, если
+существующие пакеты корректны: требуется пересоздать release catalog со свежими
+metadata Settings. Не смешивать этот новый UI acceptance с прежним online PASS.
+
+---
+
 # Независимая release-версия приложения и MSI GlassSettings
 
 - Отдельный источник `GlassSettings/Version.props`: `GlassSettingsVersion=2.0.1.0`.

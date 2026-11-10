@@ -53,6 +53,9 @@ int main() {
     auto partial=good;partial["products"][3]["version"]="2.0.0.5";
     partial["products"][3]["url"]="https://github.com/musicstashall/GlassPlatform/releases/download/settings-only/GlassSettings-x86.msi";
     assert(Parse(partial.dump(),out,error));assert(Compare(out.products[3]->version,V("2.0.0.5"))==0);
+    auto payload=good;payload["products"][2]["payloadVersion"]="2.0.1.401";payload["products"][3]["payloadVersion"]="2.0.1.399";
+    assert(Parse(payload.dump(),out,error));assert(out.products[2]->payloadVersion=="2.0.1.401"&&out.products[3]->payloadVersion=="2.0.1.399");
+    payload["products"][2]["payloadVersion"]="invalid";assert(!Parse(payload.dump(),out,error));
     auto missing=good;missing["products"][0].erase("sha256");
     assert(Parse(missing.dump(),out,error));assert(!out.products[0]->downloadable && out.products[1]->downloadable);
     assert(!Parse("{\"glass\":\"1.2.3\",\"url\":\"https://github.com/legacy\"}",out,error));

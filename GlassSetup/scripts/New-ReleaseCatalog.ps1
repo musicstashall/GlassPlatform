@@ -75,6 +75,23 @@ foreach ($id in $Products) {
     $expectedArch = if ($id -in @('platform32','settings32')) {'Intel'} else {'x64'}
     if ($template.Split(';')[0] -ne $expectedArch) { throw "Unexpected MSI architecture: $path ($template)" }
     $asset = New-Asset $files[$id] $properties.ProductVersion
+    if ($id -in @('settings64','settings32')) {
+        # MSI ordering uses ProductVersion; card display uses the actual EXE FileVersion.
+        $view = Invoke-Com $db 'OpenView' @('SELECT `FileName`, `Version` FROM `File`')
+        Invoke-Com $view 'Execute' @() | Out-Null
+        $payloadVersion = $null
+        while ($null -ne ($row = Invoke-Com $view 'Fetch' @())) {
+            $name = [string](Read-Com $row 'StringData' @(1))
+            if ($name.Split('|')[-1] -ieq 'GlassSettings.exe') {
+                if ($null -ne $payloadVersion) { throw "Duplicate Settings EXE in $path" }
+                $payloadVersion = [string](Read-Com $row 'StringData' @(2))
+                Test-Version $payloadVersion
+            }
+        }
+        Invoke-Com $view 'Close' @() | Out-Null
+        if (-not $payloadVersion) { throw "Missing Settings EXE FileVersion in $path" }
+        $asset['payloadVersion'] = $payloadVersion
+    }
     $asset['id'] = $id
     $asset['productCode'] = ([guid]$properties.ProductCode).ToString('B').ToUpperInvariant()
     $asset['upgradeCode'] = ([guid]$properties.UpgradeCode).ToString('B').ToUpperInvariant()

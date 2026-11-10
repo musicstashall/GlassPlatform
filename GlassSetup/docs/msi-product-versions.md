@@ -35,9 +35,14 @@ Native остаётся отдельным модулем, не источник
 обязательна: поддерживается single-file publish. Ни приложение, ни Native не
 запускаются. Проверка не заменяет runtime trust/receipt/identity validation.
 
-Установщик уже сравнивает независимые installed/candidate MSI Settings и
-показывает их версии в карточках. При согласованных EXE/MSI это собственная версия
-Settings, а не платформа. Каталог релиза по-прежнему считывает ProductVersion MSI.
+Установщик сравнивает независимые installed/candidate MSI Settings для выбора
+операции. **Карточки Settings показывают собственный FileVersion приложения**:
+Installed — из зарегистрированного EXE каждой архитектуры, target/attached — из
+File.Version GlassSettings.exe соответствующего проверенного MSI, server — из
+`payloadVersion` каталога. FileVersion x64/x86 может различаться даже при общей
+release/MSI версии. Unknown отображается прочерком, не MSI/платформой/Native.
+`New-ReleaseCatalog.ps1` извлекает payloadVersion из MSI File table; после этой
+правки каталог нужно пересоздать, но MSI ради отображения пересобирать не нужно. Каталог релиза по-прежнему считывает ProductVersion MSI.
 Для нового выпуска Settings нужно поднять `GlassSettingsVersion`; повторная
 компиляция с тем же release-номером не объявляется новым выпуском. Обновление
 только Setup/платформы не требует увеличения версии Settings.

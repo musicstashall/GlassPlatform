@@ -426,8 +426,8 @@ bool FileHasSameSignerAsSetup(const std::wstring& path) noexcept
     return !hex.empty() && _wcsicmp(hex.c_str(), self.c_str()) == 0;
 }
 
-// Read the installed DLL's fixed file version without loading/executing it.
-static std::wstring OpenGlassDllVersion(const std::wstring& path) {
+// Read an installed payload's fixed FileVersion without loading/executing it.
+static std::wstring PayloadFileVersion(const std::wstring& path) {
     DWORD ignored=0;const DWORD bytes=GetFileVersionInfoSizeW(path.c_str(),&ignored);
     if(!bytes||bytes>1024*1024)return {};
     std::vector<BYTE> data(bytes);
@@ -437,6 +437,11 @@ static std::wstring OpenGlassDllVersion(const std::wstring& path) {
        size<sizeof(*info)||!info||info->dwSignature!=0xfeef04bd)return {};
     return std::to_wstring(HIWORD(info->dwFileVersionMS))+L"."+std::to_wstring(LOWORD(info->dwFileVersionMS))+L"."+
         std::to_wstring(HIWORD(info->dwFileVersionLS))+L"."+std::to_wstring(LOWORD(info->dwFileVersionLS));
+}
+
+static void ReadSettingsPayloadVersion(ProductReport& report,const std::wstring& root) {
+    if(report.installed&&!root.empty())
+        report.installedPayloadVersion=PayloadFileVersion(root+L"\\GlassSettings\\GlassSettings.exe");
 }
 
 Report Run(const Inputs& in)
@@ -548,16 +553,18 @@ Report Run(const Inputs& in)
                 GlassPackageRules::Compare(installed,target)<0;
         }
         job.rep->selectedPackagePath=offerPath;
-        if(job.product==GlassPackageCatalog::Product::OpenGlass&&!job.rep->attachedPackagePath.empty()) {
+        const bool payload=job.product==GlassPackageCatalog::Product::OpenGlass||job.product==GlassPackageCatalog::Product::Settings64||job.product==GlassPackageCatalog::Product::Settings32;
+        const wchar_t* payloadFile=job.product==GlassPackageCatalog::Product::OpenGlass?L"OpenGlass.dll":L"GlassSettings.exe";
+        if(payload&&!job.rep->attachedPackagePath.empty()) {
             MSIHANDLE db=0;
             if(MsiOpenDatabaseW(job.rep->attachedPackagePath.c_str(),MSIDBOPEN_READONLY,&db)==ERROR_SUCCESS) {
-                job.rep->attachedPayloadVersion=QueryFileVersion(db,L"OpenGlass.dll");MsiCloseHandle(db);
+                job.rep->attachedPayloadVersion=QueryFileVersion(db,payloadFile);MsiCloseHandle(db);
             }
         }
-        if(job.product==GlassPackageCatalog::Product::OpenGlass&&!offerPath.empty()) {
+        if(payload&&!offerPath.empty()) {
             MSIHANDLE db=0;
             if(MsiOpenDatabaseW(offerPath.c_str(),MSIDBOPEN_READONLY,&db)==ERROR_SUCCESS) {
-                job.rep->targetPayloadVersion=QueryFileVersion(db,L"OpenGlass.dll");MsiCloseHandle(db);
+                job.rep->targetPayloadVersion=QueryFileVersion(db,payloadFile);MsiCloseHandle(db);
             }
         }
         if(job.rep->installed&&job.rep->sourceVerified&&!offerPath.empty()&&rootsOk&&
@@ -581,7 +588,12 @@ Report Run(const Inputs& in)
         if(!job.rep->integrityKnown)AddReason(*job.rep,Reason::InspectionUnavailable);
     }
     if(report.og.installed&&rootsOk&&!roots.openGlass.empty())
-        report.og.installedPayloadVersion=OpenGlassDllVersion(roots.openGlass+L"\\OpenGlass.dll");
+        report.og.installedPayloadVersion=PayloadFileVersion(roots.openGlass+L"\\OpenGlass.dll");
+    // The application FileVersion is a display fact, not MSI version authority.
+    if(rootsOk) {
+        ReadSettingsPayloadVersion(report.settings64,roots.x64);
+        ReadSettingsPayloadVersion(report.settings32,roots.x86);
+    }
     // Package releases may update installer plumbing without changing OpenGlass.
     // Keep MSI version authority for acquisition/execution, not the product badge.
     report.og.updateAvailable=report.og.installed&&report.og.sourceVerified&&GlassOpenGlassRelease::PayloadUpdateAvailable(
