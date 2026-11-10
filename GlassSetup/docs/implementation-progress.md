@@ -1,3 +1,71 @@
+# Повторный product update и вход из обновлённого Settings
+
+Разобраны `GlassSetup-25.log`, `GlassSetup[1]-4.log`, `GlassSetup[2]-5.log`
+и четыре UTF-16 MSI-журнала `20261110_100731`. После сохранения выводов эти
+семь входящих журналов удалены; изображения не удаляются.
+
+- External → installed controller: штатный handoff; child digest
+  `5f15c226dea789e802646e06845ebb172b898928bf3fcf45f76c000ceac62f24`.
+- Settings x64/x86 и Platform x64/x86: все восемь uninstall/install engine
+  executions завершились 0; `Return value 3` не обнаружен. Product actions
+  completed 10:08:35.840, commit 35.848, publication completed 38.948.
+  Прежний ложный warning отсутствующего optional SUT receipt не повторился.
+- Watch: старт 10:08:30.165, pipe 30.547, module gate clear 31.925, без Retry
+  или ручного ожидания в журнале. Это успешный отдельный прогон, не доказательство
+  устранения всех гонок выгрузки и не подтверждение восстановления оформления.
+- x64 HostStop: hostGone=0 через15031мс, phase=host; затем validated Scheduler
+  Stop hr0 и post-task cooperative wake residual0. x86: hostGone=1 через2625мс,
+  без TaskStop. Без host trace неизвестно, какая стадия задержала x64.
+- Вход из обновлённого Settings подтверждён: 10:15:03.548
+  `Maintenance modify authorized via GlassSettings ticket`; пользователь также
+  подтвердил успешный вход. Legacy Settings entrypoint не требуется.
+
+## Общая остановка: сравнение истории, не только Setup
+
+Для сравнения доступна история до исходного `eaeb5f3` (shallow checkout углублён;
+ветка не переключалась, master не вливался).
+
+| Коммит | Значение для проверки остановки |
+|---|---|
+| `b453cdf` | Общий GlassStop для Settings, ShellExt, host и installers |
+| `ab9e07e` | Повторный stop/busy с ожиданием |
+| `1fb6b5c` | Minimal watcher, wake до ожидания, изменение busy lifecycle |
+| `7f23d44` | Отдельная WM_CLOSE/TaskStop ветка: 4 broadcast ping перед FinishTaskStop, вместо обычного ForceUnloadResiduals |
+| `2ed352d` | Setup graceful budget увеличен с5с до15с; это всё ещё меньше Settings30с и ShellExt45с |
+| `0d8d27a` | Удалена инструментация, включая environment keep-module overrides; stale-callback guards сохранены |
+| `b99d134` | Исправлен известный Explorer CFG-crash: detach CtrlNotifySink раньше фильтра в WndCompat |
+| `ce16ab9` | UICompat background thread pins/join и guard residual reclaim; исправлял SEH, не доказательство причины нынешнего Explorer crash |
+| `fe25afd` | Новый общий WM_NULL wrapper и его вызов в Setup/Unins holder monitor; обычные Settings/ShellExt Request не менялись |
+
+Проверено `eaeb5f3..fe25afd`: GlassCompat (включая EntryRundll и
+CoreWindowHostInject), GlassCore, WndCompat, ExplorerCompat, TaskbarCompat и
+UICompat не изменены. Shared GlassStop::Request также не изменён; добавлен
+публичный wrapper существующего NudgeProcess. Settings RequestPlatformStop и
+C# StopPlatformAndWait/ShellExt stop path не менялись. Изменения OpenGlass stop
+в Native — другой продукт, не изменение общего GlassPlatform teardown.
+
+В текущем ExecuteShutdown сохранены BeginExplorerShellChromeRestore → UICompat →
+TaskbarCompat → ExplorerCompat → GlassCore → WndCompat. Нельзя из неизменности
+исходников заключать, что прежняя гонка отсутствует или что установленный binary
+действительно соответствует исследованному commit. Unload/module-gate clear не
+равен успешному redraw и не исключает позднего обращения по старому callback.
+
+**Не закрыто:** пользователь сообщает неполный redraw Explorer и периодические
+падения при общей остановке. Setup/MSI журналы не содержат crash stack. Для
+локализации нужны свежий platform log вокруг обычного Stop из Settings/меню,
+Explorer dump из `%LOCALAPPDATA%\GlassPlatform\Crashes` (или WER CrashDumps),
+версии загруженных DLL/Windows и последний заведомо исправный build, если известен.
+Скилл `.cursor/skills/crashdump/SKILL.md` в checkout отсутствует; анализ дампа
+не выполнялся. Не откатывать `b99d134`/`ce16ab9` и не вводить принудительный
+FreeLibrary/таймаут для обхода own-thread detach. Не выдавать увеличение Setup
+budget за исправление общего Stop: оно не объясняет падение при Settings Stop.
+
+Controller happy-path (online/offline/ARP/updated Settings/product update) теперь
+подтверждён. Security/fault/reboot recovery matrix и общая остановка с корректным
+redraw остаются открытыми; fault-injection на рабочей системе не выполнять.
+
+---
+
 # Product update: MSI success, ложный source warning, остаточные modules
 
 Разобраны `GlassSetup[1]-3.log`, `GlassSetup[2]-4.log` и четыре verbose MSI log

@@ -4,9 +4,13 @@
 protected controller handoff, inherited catalog, один product inspection и UI без
 нареканий подтверждены журналами и наблюдением пользователя. Дополнительно приняты
 offline startup (с bounded failed network attempts) и ARP modify entry без MSI.
-Вход из обновлённого GlassSettings, полный Authenticode/ACL fault matrix и MSI
-acceptance не выполнены. Старый Settings 2.0.0.103 не находит старый Current путь;
-по решению пользователя compatibility entrypoint не добавляется — продукты будут обновлены. Не использовать рабочую
+Вход из обновлённого GlassSettings подтверждён ticket authorization. Повторное
+обновление Settings x64/x86 и Platform x64/x86: uninstall/install code0, module
+gate clear без Retry, source publication completed. Happy-path MSI принят; полный
+Authenticode/ACL fault matrix, reboot/crash recovery не выполнены. Общая остановка
+с восстановлением Explorer не принята: есть сообщение о неполном redraw/падениях,
+но нет platform trace и дампа. Подробнее — начало implementation-progress.md.
+Совместимость со старым Settings entrypoint не добавляется. Не использовать рабочую
 машину для fault-injection или намеренного повреждения cache.
 
 ## 1. Сначала сборка, без установки
