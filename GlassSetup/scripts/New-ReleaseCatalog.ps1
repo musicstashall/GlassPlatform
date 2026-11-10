@@ -20,11 +20,24 @@ $files = @{
     settings32='GlassSettings-x86.msi'; openglass='OpenGlass-x64.msi'
 }
 $upgradeSuffix = @{platform64='5010';platform32='5020';settings64='5040';settings32='5050';openglass='5030'}
+function ConvertTo-ComArguments([object[]]$Arguments) {
+    # PowerShell boxes the array elements. Windows Installer then rejects a bare
+    # integer open mode with DISP_E_TYPEMISMATCH. Rebox strings and ints.
+    $copy = New-Object object[] $Arguments.Count
+    for ($i = 0; $i -lt $Arguments.Count; $i++) {
+        $value = $Arguments[$i]
+        if ($value -is [string]) { $copy[$i] = [string]$value }
+        else { $copy[$i] = [int]$value }
+    }
+    return ,$copy
+}
 function Invoke-Com($Object, [string]$Name, [object[]]$Arguments) {
-    return $Object.GetType().InvokeMember($Name, [Reflection.BindingFlags]::InvokeMethod, $null, $Object, $Arguments)
+    $copy = ConvertTo-ComArguments $Arguments
+    return $Object.GetType().InvokeMember($Name, [Reflection.BindingFlags]::InvokeMethod, $null, $Object, $copy)
 }
 function Read-Com($Object, [string]$Name, [object[]]$Arguments) {
-    return $Object.GetType().InvokeMember($Name, [Reflection.BindingFlags]::GetProperty, $null, $Object, $Arguments)
+    $copy = ConvertTo-ComArguments $Arguments
+    return $Object.GetType().InvokeMember($Name, [Reflection.BindingFlags]::GetProperty, $null, $Object, $copy)
 }
 function Test-Version([string]$Value) {
     if ($Value -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { throw "Invalid version: $Value" }
@@ -107,7 +120,8 @@ $fullOutput = [IO.Path]::GetFullPath($OutputPath)
 $part = $fullOutput + '.' + [guid]::NewGuid().ToString('N') + '.part'
 try {
     [IO.File]::WriteAllText($part, ($catalog | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false))
-    if ([IO.File]::Exists($fullOutput)) { [IO.File]::Replace($part, $fullOutput, $null) }
+    # PowerShell turns $null into an empty path. NullString keeps the no-backup replace.
+    if ([IO.File]::Exists($fullOutput)) { [IO.File]::Replace($part, $fullOutput, [NullString]::Value) }
     else { [IO.File]::Move($part, $fullOutput) }
 } finally {
     if ([IO.File]::Exists($part)) { [IO.File]::Delete($part) }
