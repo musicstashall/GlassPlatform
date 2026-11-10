@@ -35,6 +35,9 @@ struct ProductReport {
     // Same ProductVersion may contain a rebuilt Native helper.
     bool nativeSourceCompared = false;
     bool nativeSourceDiffers = false;
+    // Only verified media supplied next to the original EXE or in its packages.
+    // Never filled from Current, installed registration or session downloads.
+    std::wstring attachedPackageVersion,attachedPackagePath,selectedPackagePath,attachedPayloadVersion;
     std::wstring targetVersion;
     // MSI ProductVersion only. Never replace either field with a PE/bundle version.
     std::wstring installedVersion; // Compatibility alias for old UI consumers.

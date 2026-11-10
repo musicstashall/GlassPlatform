@@ -11,7 +11,7 @@ def fn(token):
  while depth:
   depth+=(s[c]=='{')-(s[c]=='}');c+=1
  return s[a:c]
-code='\n'.join(fn(t) for t in ['std::vector<std::wstring> CandidatePaths(', 'bool FetchAsset(', 'bool FindLocal(', 'bool Describe(', 'bool Prepare(const std::wstring& privateDirectory'])
+code='\n'.join(fn(t) for t in ['bool NewerMsiVersion(', 'std::vector<std::wstring> CandidatePaths(', 'bool PreferCandidate(', 'bool FetchAsset(', 'bool FindLocal(', 'bool Describe(', 'bool Prepare(const std::wstring& privateDirectory'])
 assert 'SecureUxTheme.msi' not in fn('std::vector<std::wstring> CandidatePaths(')
 assert 'CreatePrivateFile' not in fn('bool Describe(') and 'CopySnapshot' not in fn('bool Describe(')
 main=(root/'GlassSetup/src/main.cpp').read_text()
@@ -36,7 +36,7 @@ constexpr unsigned GENERIC_READ=1,FILE_SHARE_READ=2,OPEN_EXISTING=3,FILE_FLAG_OP
  ERROR_ACCESS_DENIED=5,ERROR_INVALID_DATA=13,ERROR_NOT_ENOUGH_MEMORY=8;
 struct LARGE_INTEGER {long long QuadPart=0;};
 struct Package {std::wstring path,productCode,version;bool alreadyInstalled=false;};
-struct Offer {std::wstring localVersion,localPath,releaseVersion,releaseTag;std::uint64_t localSize=0,releaseSize=0;bool localVerified=false;};
+struct Offer {std::wstring attachedVersion,attachedPath;std::wstring localVersion,localPath,releaseVersion,releaseTag;std::uint64_t localSize=0,releaseSize=0;bool localVerified=false;};
 struct Entry {Asset asset;std::wstring version=L"4.0.0";bool safe=true,identity=true;};
 std::map<std::wstring,Entry> files;std::map<int,std::wstring> handles;
 int nextHandle=1,fetches=0,downloads=0,copies=0,creates=0;bool online=true,moduleOk=true,existing=false,trusted=true;
@@ -82,6 +82,8 @@ int main(int argc,char** argv){assert(argc==2);std::ifstream input(argv[1]);cons
  {reset(fixture);files[local]={known};assert(Describe(cancel,offer,error));assert(offer.localVerified&&offer.localVersion==L"4.0.0"&&offer.localPath==local);
   assert(offer.releaseVersion==L"4.0.0"&&offer.releaseTag==L"v4.0.0");assert(copies==0&&creates==0&&downloads==0&&handles.empty());
   assert(Prepare(L"private",cancel,package,error));assert(package.version==offer.localVersion&&package.path==L"private\\SecureUxTheme_x64.msi");assert(copies==1&&downloads==0);}
+ {reset(fixture);files[L"cache\\SecureUxTheme_x64.msi"]={known};
+  assert(Describe(cancel,offer,error));assert(offer.attachedVersion.empty()&&offer.attachedPath.empty());}
  {reset(fixture);online=false;files[local]={known};assert(Describe(cancel,offer,error));assert(offer.localVersion==L"4.0.0"&&offer.releaseVersion.empty());}
  {reset(fixture);assert(Describe(cancel,offer,error));assert(!offer.localVerified&&offer.localVersion.empty()&&offer.releaseVersion==L"4.0.0");assert(copies==0&&creates==0&&downloads==0);}
  {reset(fixture);online=false;assert(!Describe(cancel,offer,error));assert(offer.localVersion.empty()&&offer.releaseVersion.empty());}
@@ -94,10 +96,14 @@ int main(int argc,char** argv){assert(argc==2);std::ifstream input(argv[1]);cons
  auto newer=nlohmann::json::parse(fixture);newer["tag_name"]="v4.1.0";
  for(auto& a:newer["assets"]){a["browser_download_url"]="https://github.com/namazso/SecureUxTheme/releases/download/v4.1.0/"+a["name"].get<std::string>();a["digest"]="sha256:"+std::string(64,'a');}
  Asset remote;std::string why;assert(Select(newer.dump(),Architecture::X64,remote,why));
+ {Package a,b;a.version=L"4.0.0";b.version=L"4.0.0.0";
+  assert(PreferCandidate(a,local,remote,b,L"cache\\SecureUxTheme_x64.msi",known));
+  assert(!PreferCandidate(b,L"cache\\SecureUxTheme_x64.msi",known,a,local,remote));}
+
  {reset(newer.dump());files[local]={remote,L"4.0.9"};assert(Describe(cancel,offer,error));
   assert(offer.localVersion==L"4.0.9"&&offer.releaseVersion==L"4.1.0");assert(Prepare(L"private",cancel,package,error));assert(package.version==L"4.0.9"&&downloads==0);}
  {reset(newer.dump());files[local]={known};assert(Describe(cancel,offer,error));assert(offer.localVersion==L"4.0.0"&&offer.releaseVersion==L"4.1.0");
-  assert(Prepare(L"private",cancel,package,error)&&package.version==L"4.0.0");}
+  assert(Prepare(L"private",cancel,package,error)&&package.version==L"4.1.0"&&downloads==1);}
  {reset(newer.dump());assert(Prepare(L"private",cancel,package,error));assert(downloads==1&&copies==1&&package.version==L"4.1.0");}
  {reset(newer.dump());assert(Prepare(L"private",cancel,package,error));
   GlassSetupSourceLayout::SetPrepared(5,package.path);online=false;
@@ -112,4 +118,4 @@ with tempfile.TemporaryDirectory(prefix='GlassSutOffer-') as directory:
  p=Path(directory)/'test.cpp';exe=Path(directory)/'test';p.write_text(h)
  subprocess.run([shutil.which('clang++') or shutil.which('g++'),'-std=c++17','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-pedantic','-I'+str(root),str(p),'-o',str(exe)],check=True)
  subprocess.run([str(exe),str(root/'GlassSetup/tests/fixtures/secure_ux_release_v4.json')],check=True)
-print('PASS: actual SUT discovery/acquisition: canonical local-first MSI, actual ProductVersion vs release tag, offline/online, rejected files, cancellation, no discovery writes/downloads, immutable prepare snapshot')
+print('PASS: actual SUT discovery/acquisition: newest verified MSI and separate attached provenance, actual ProductVersion vs release tag, offline/online, rejected files, cancellation, no discovery writes/downloads, immutable prepare snapshot')

@@ -2070,6 +2070,10 @@ private:
                 L",\"targetPayloadVersion\":"+JsStringLiteral(targetPayloadVersion)+
                 L",\"targetVersion\":"+JsStringLiteral(targetVersion)+
                 L",\"remoteVersion\":"+JsStringLiteral(remoteVersion)+
+                L",\"attachedPackageVersion\":"+JsStringLiteral(rep?rep->attachedPackageVersion:L"")+
+                L",\"attachedPayloadVersion\":"+JsStringLiteral(rep?rep->attachedPayloadVersion:L"")+
+                L",\"attachedPackagePath\":"+JsStringLiteral(rep?rep->attachedPackagePath:L"")+
+                L",\"selectedPackagePath\":"+JsStringLiteral(rep?rep->selectedPackagePath:L"")+
                 L",\"localPackageVersion\":"+JsStringLiteral(rep&&rep->sourceVerified?rep->targetVersion:L"")+
                 L",\"packageSize\":"+std::to_wstring(packageSize)+
                 L",\"operation\":"+JsStringLiteral(removing?L"remove":condition==GlassProducts::ProductCondition::NotInstalled?L"install":condition==GlassProducts::ProductCondition::UpdateAvailable?L"update":L"repair")+
@@ -2135,6 +2139,9 @@ private:
             L",\"installedPackageVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedPackageVersion)+
             L",\"targetVersion\":"+JsStringLiteral(sutTarget)+
             L",\"targetVersionKind\":"+JsStringLiteral(sutLocal?L"msi":L"release")+
+            L",\"attachedPackageVersion\":"+JsStringLiteral(sutOffer.attachedVersion)+
+            L",\"attachedPackagePath\":"+JsStringLiteral(sutOffer.attachedPath)+
+            L",\"selectedPackagePath\":"+JsStringLiteral(sutOffer.localPath)+
             L",\"localPackageVersion\":"+JsStringLiteral(sutLocal?sutOffer.localVersion:L"")+
             L",\"remoteVersion\":"+JsStringLiteral(sutOffer.releaseVersion)+
             L",\"releaseTag\":"+JsStringLiteral(sutOffer.releaseTag)+

@@ -536,7 +536,8 @@ Report Run(const Inputs& in)
         if(cancel.load())break;
         std::wstring offerPath;
         if(in.inspectSources && GlassPackageAcquisition::Describe(job.product,catalog,cancel,
-            job.rep->targetVersion,job.rep->sourceVerified,&offerPath)) {
+            job.rep->targetVersion,job.rep->sourceVerified,&offerPath,
+            &job.rep->attachedPackageVersion,&job.rep->attachedPackagePath)) {
             GlassPackageRules::Version installed,target;
             const auto numeric=[](const std::wstring& text,GlassPackageRules::Version& out) {
                 for(wchar_t c:text)if(static_cast<unsigned>(c)>127)return false;
@@ -545,6 +546,13 @@ Report Run(const Inputs& in)
             job.rep->updateAvailable=job.rep->installed &&
                 numeric(job.rep->installedPackageVersion,installed) && numeric(job.rep->targetVersion,target) &&
                 GlassPackageRules::Compare(installed,target)<0;
+        }
+        job.rep->selectedPackagePath=offerPath;
+        if(job.product==GlassPackageCatalog::Product::OpenGlass&&!job.rep->attachedPackagePath.empty()) {
+            MSIHANDLE db=0;
+            if(MsiOpenDatabaseW(job.rep->attachedPackagePath.c_str(),MSIDBOPEN_READONLY,&db)==ERROR_SUCCESS) {
+                job.rep->attachedPayloadVersion=QueryFileVersion(db,L"OpenGlass.dll");MsiCloseHandle(db);
+            }
         }
         if(job.product==GlassPackageCatalog::Product::OpenGlass&&!offerPath.empty()) {
             MSIHANDLE db=0;

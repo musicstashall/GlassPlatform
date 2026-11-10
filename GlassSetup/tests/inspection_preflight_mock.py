@@ -27,7 +27,7 @@ void CompareNativeWithOffer(const std::wstring&,const std::wstring&,bool& compar
 std::set<std::wstring> installed;
 std::vector<std::wstring> checked;
 struct ProductReport {bool installed=false,integrityKnown=false,sourceVerified=false,updateAvailable=false,nativeSourceCompared=false,nativeSourceDiffers=false;
- std::wstring targetVersion,installedVersion,installedPackageVersion,targetPayloadVersion;int unavailable=0;};
+ std::wstring attachedPackageVersion,attachedPackagePath,selectedPackagePath,attachedPayloadVersion;std::wstring targetVersion,installedVersion,installedPackageVersion,targetPayloadVersion;int unavailable=0;};
 struct Report {ProductReport x64,x86,settings64,settings32,og;};
 struct Inputs {bool inspectSources=true;const std::atomic_bool* cancelled=nullptr;};
 enum class Reason {InspectionUnavailable};
@@ -40,7 +40,7 @@ const char* kFiles[]={"Glass-x64.msi","Glass-x86.msi","GlassSettings-x64.msi","G
 std::wstring QueryFileVersion(MSIHANDLE,const wchar_t*){return L"1.5.0";}
 namespace GlassPackageAcquisition {
 bool FetchCatalog(const std::atomic_bool&,GlassPackageCatalog::Catalog&,std::wstring&){++fetches;return true;}
-bool Describe(GlassPackageCatalog::Product,const GlassPackageCatalog::Catalog&,const std::atomic_bool&,std::wstring& out,bool& local,std::wstring* path){if(path)*path=L"offer.msi";++prepares;out=L"2.0.0";local=true;return true;}
+bool Describe(GlassPackageCatalog::Product,const GlassPackageCatalog::Catalog&,const std::atomic_bool&,std::wstring& out,bool& local,std::wstring* path,std::wstring* attachedVersion,std::wstring* attachedPath){if(path)*path=L"offer.msi";if(attachedVersion)*attachedVersion=L"2.0.0";if(attachedPath)*attachedPath=L"offer.msi";++prepares;out=L"2.0.0";local=true;return true;}
 }
 namespace GlassInstallMsi {
 constexpr const wchar_t* kProductPlatformX64=L"p64",*kLegacyPlatformX64=L"old64",*kProductPlatformX86=L"p32",

@@ -41,7 +41,7 @@ int main() {
         for(unsigned i=0;i<4;++i) same.push_back({static_cast<Source>(i),V("1.0.0"),(mask&(1u<<i))!=0});
         const auto choice=Select({V("1.0.0"),V("1.0.0")},same);
         if(!mask) assert(!choice.index);
-        else { unsigned first=0;while(!(mask&(1u<<first)))++first;Equal(choice,first); }
+        else { for(unsigned i : {1u,2u,0u,3u})if(mask&(1u<<i)){Equal(choice,i);break;} }
     }
     using namespace GlassPackageCatalog;
     Catalog out; std::string error;

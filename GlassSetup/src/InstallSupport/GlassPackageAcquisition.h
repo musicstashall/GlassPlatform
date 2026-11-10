@@ -12,8 +12,12 @@ bool FetchCatalog(const std::atomic<bool>& cancel, GlassPackageCatalog::Catalog&
 // publication. A release offer is metadata, not yet verified downloaded bytes.
 // localPath optionally identifies the selected local MSI for payload metadata;
 // it is empty for a release-only offer and is not install authorization.
+// attachedVersion/attachedPath independently describe verified original-EXE
+// media only, even when a newer remote candidate is selected. Never Current
+// or a prepared session hint; these outputs do not authorize execution.
 bool Describe(GlassPackageCatalog::Product product,const GlassPackageCatalog::Catalog& catalog,
-    const std::atomic<bool>& cancel,std::wstring& version,bool& verifiedLocal,std::wstring* localPath=nullptr) noexcept;
+    const std::atomic<bool>& cancel,std::wstring& version,bool& verifiedLocal,std::wstring* localPath=nullptr,
+    std::wstring* attachedVersion=nullptr,std::wstring* attachedPath=nullptr) noexcept;
 bool Prepare(GlassPackageCatalog::Product product, const GlassPackageCatalog::Catalog& catalog,
     const std::wstring& workspace, const std::atomic<bool>& cancel, std::wstring& error) noexcept;
 // Prepare only; publication/restart must independently implement the handoff journal.

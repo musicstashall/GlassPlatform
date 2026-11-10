@@ -1,3 +1,39 @@
+# Реализация разделения attached media и внутреннего кэша
+
+- Backend независимо возвращает verified attached MSI version/path только из
+  `packages` исходного external EXE и рядом с ним. Current и Prepared остаются
+  внутренними источниками; установленная версия остаётся в Installed.
+- Prepared имеет отдельный Source. При равных целевых версиях resolver предпочитает
+  attached packages → adjacent → prepared → Current → release. Проверки доверия,
+  no-downgrade и exact-original receipts не ослаблены.
+- Available оставляет server → local без третьей категории; отсутствие attached
+  обозначается прочерком. Числовая подсветка только для сопоставимых версий;
+  OpenGlass использует DLL FileVersion отдельно из attached MSI. SUT tag не
+  сравнивается с MSI ProductVersion. Сведения по нажатию имени показывают путь
+  приложенного MSI, уже доступный выбранный локальный источник и правила выбора.
+- SUT Prepare больше не фиксирует v4 local при наличии нового remote MSI:
+  проверяет hash/identity загруженного кандидата и сравнивает его ProductVersion.
+  При одинаковом официальном digest повторной загрузки нет. Для разных bytes
+  сервер без MSI-version metadata требует проверенной загрузки даже тогда, когда
+  в итоге локальный MSI окажется равным/новее. Describe остаётся read-only;
+  показанный там SUT local offer предварительный, до проверки remote MSI.
+  **Существующий официальный установленный SUT по-прежнему сохраняется**:
+  автоматическое обновление его регистрации этой задачей не добавлено.
+- Original external root и receipts/security handoff не менялись. Равные версии
+  не объявляются равными байтами. Нет source override или обязательного диалога.
+
+Проверено в Linux: package catalog/selection, acquisition, inspection preflight,
+SUT discovery/acquisition mocks и пять production DOM suites. Это не MSVC/WiX
+сборка, не WinTrust/MSI acceptance и не реальное скачивание продуктов с GitHub.
+Online Windows product download и fault/restart matrix остаются открытыми.
+
+Сборка: из корня solution **Release|x86**, порядок **GlassShared → GlassUnins →
+GlassSetup** (общий HTML в обоих EXE). Полная пересборка продуктов не нужна, если
+имеются прежние Release x64 Native/helper prerequisites. Для реальной загрузки
+не использовать Debug, который обходит production download path.
+
+---
+
 # Разбор двух запусков старого external Setup: источники карточек
 
 Разобраны четыре входящих журнала: `GlassSetup[1]-5.log`, `GlassSetup[2]-6.log`,

@@ -108,16 +108,26 @@ int main(){
  reset();
  for(unsigned i=0;i<5;++i){const auto file=GlassReleaseClient::Wide(GlassPackageCatalog::kFiles[i]);
   s.files[L"C:\\kit\\packages\\"+file].bytes=Package((std::to_string(i+2)+".3.4").c_str());}
- for(unsigned i=0;i<5;++i){std::wstring v;bool verified=false;
-  assert(GlassPackageAcquisition::Describe(static_cast<Product>(i),catalog,cancelled,v,verified,nullptr));
+ for(unsigned i=0;i<5;++i){std::wstring v,attached,path;bool verified=false;
+  assert(GlassPackageAcquisition::Describe(static_cast<Product>(i),catalog,cancelled,v,verified,nullptr,&attached,&path));
+  assert(attached==v&&path.find(L"packages")!=std::wstring::npos);
   assert(v==std::to_wstring(i+2)+L".3.4"&&verified&&s.files.size()==5&&s.downloads==0&&s.handles==0);}
- reset();{std::wstring v;bool verified=true;assert(!GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified,nullptr));assert(v.empty()&&!verified&&s.files.empty());}
+ reset();{std::wstring v;bool verified=true;assert(!GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified,nullptr,nullptr,nullptr));assert(v.empty()&&!verified&&s.files.empty());}
  auto& remote=catalog.products[0];remote=GlassPackageCatalog::Asset{};remote->version.parts={3,0,0,0};remote->downloadable=true;remote->size=1024;remote->sha256=std::string(64,'a');remote->url="https://github.com/release";
- reset();{std::wstring v;bool verified=true;assert(GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified,nullptr));assert(v==L"3.0.0.0"&&!verified&&s.downloads==0&&s.files.empty());}
+ reset();{std::wstring v;bool verified=true;assert(GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified,nullptr,nullptr,nullptr));assert(v==L"3.0.0.0"&&!verified&&s.downloads==0&&s.files.empty());}
  // Engine consumes a verified session hint without a second HTTP transfer.
  reset();GlassSetupSourceLayout::SetPrepared(0,L"C:\\cache\\Prepared\\Glass-x64.msi");
  s.files[GlassSetupSourceLayout::Prepared(0)].bytes=Package("3.0.0","|HASH|");
  assert(run());assert(s.downloads==0&&s.files.at(dest).bytes==Package("3.0.0","|HASH|"));
+ {std::wstring v,attached,path;bool verified=false;
+  assert(GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified,nullptr,&attached,&path));
+  assert(verified&&attached.empty()&&path.empty());}
+ // Attached wins an equal-version tie over a verified prepared download.
+ s.files[L"C:\\kit\\packages\\Glass-x64.msi"].bytes=Package("3.0.0","|HASH|");
+ {std::wstring v,attached,path,selected;bool verified=false;
+  assert(GlassPackageAcquisition::Describe(Product::Platform64,catalog,cancelled,v,verified,&selected,&attached,&path));
+  assert(selected==path&&attached==L"3.0.0");}
+
  // A hint is not authority: invalid bytes do not bypass hash/publisher verification.
  reset();GlassSetupSourceLayout::SetPrepared(0,L"C:\\cache\\Prepared\\Glass-x64.msi");
  s.files[GlassSetupSourceLayout::Prepared(0)].bytes=Package("3.0.0","");s.downloadFails=true;

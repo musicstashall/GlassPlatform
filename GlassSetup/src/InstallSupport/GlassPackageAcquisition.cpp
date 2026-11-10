@@ -224,7 +224,7 @@ static bool Discover(GlassPackageCatalog::Product product,const GlassPackageCata
                 rejected(paths[n],L"signature/publisher or release hash verification failed (see log); unsigned local MSI is not trusted");
                 continue;
             }
-            candidates.push_back({(n==3?Source::LocalPackages:static_cast<Source>(n)),v,true});sources.push_back(paths[n]);
+            candidates.push_back({(n==3?Source::Prepared:static_cast<Source>(n)),v,true});sources.push_back(paths[n]);
             if(labels)labels->push_back(display);
         }
         if(remote&&remote->downloadable){
@@ -236,13 +236,25 @@ static bool Discover(GlassPackageCatalog::Product product,const GlassPackageCata
 }
 
 bool Describe(GlassPackageCatalog::Product product,const GlassPackageCatalog::Catalog& catalog,
-    const std::atomic<bool>& cancel,std::wstring& version,bool& verifiedLocal,std::wstring* localPath) noexcept {
+    const std::atomic<bool>& cancel,std::wstring& version,bool& verifiedLocal,std::wstring* localPath,std::wstring* attachedVersion,std::wstring* attachedPath) noexcept {
     if(localPath)localPath->clear();
+    if(attachedVersion)attachedVersion->clear();
+    if(attachedPath)attachedPath->clear();
     version.clear();verifiedLocal=false;
     try {
         std::vector<Candidate> candidates;std::vector<std::wstring> sources,labels;
         std::wstring diagnostics,error;
         if(!Discover(product,catalog,cancel,candidates,sources,diagnostics,error,&labels))return false;
+        std::optional<std::size_t> attached;
+        for(std::size_t i=0;i<candidates.size();++i) {
+            const auto& c=candidates[i];
+            if(c.source!=Source::LocalPackages&&c.source!=Source::LocalAdjacent)continue;
+            if(!attached||Compare(c.version,candidates[*attached].version)>0)attached=i;
+        }
+        if(attached) {
+            if(attachedVersion)*attachedVersion=labels[*attached];
+            if(attachedPath)*attachedPath=sources[*attached];
+        }
         Request request;const auto& spec=specs[static_cast<std::size_t>(product)];
         if(GlassInstallMsi::IsProductInstalled(spec.code)) {
             Version installed;

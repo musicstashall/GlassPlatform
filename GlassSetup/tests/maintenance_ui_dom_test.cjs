@@ -82,7 +82,7 @@ receive({data:{type:'state',page:'checking'}});assert.equal(d.querySelector('#ch
 receive({data:{type:'state',locale:'en',page:'checking'}});assert.equal(d.querySelector('#checking-copy').textContent,'Looking for a GlassSetup update.');
 // Vendor local ProductVersion has priority; release-tag metadata is labelled.
 for(const local of [true,false]){
- const sutOffer={id:'secureUxTheme',title:'SecureUxTheme',installed:false,checked:false,operation:'install',targetVersion:local?'4.0.0':'4.1.0',targetVersionKind:local?'msi':'release',localPackageVersion:local?'4.0.0':'',remoteVersion:'4.1.0',releaseTag:'v4.1.0'};
+ const sutOffer={id:'secureUxTheme',title:'SecureUxTheme',installed:false,checked:false,operation:'install',targetVersion:local?'4.0.0':'4.1.0',targetVersionKind:local?'msi':'release',attachedPackageVersion:local?'4.0.0':'',localPackageVersion:local?'4.0.0':'',remoteVersion:'4.1.0',releaseTag:'v4.1.0'};
  receive({data:{type:'state',appMode:'setup',locale:'ru',page:'components',components:[sutOffer]}});
  const card=d.querySelector('#product-secureUxTheme').closest('.c-card');
  assert.equal(card.querySelector('.comp-version-line').textContent,local?'4.0.0':'4.1.0');
@@ -155,7 +155,7 @@ receive({data:{type:'state',locale:'ru',appMode:'setup',page:'components',compon
 const installedCard=id=>d.querySelector('#product-'+id).closest('.c-card');
 const catalogueCard=id=>d.querySelector('#components-grid [data-product="'+id+'"]');
 assert.equal(catalogueCard('x64').querySelector('.c-chip'),null);
-assert.match(catalogueCard('x64').querySelector('.c-src').textContent,/локально 1.0.0.0/);
+assert.match(catalogueCard('x64').querySelector('.c-src').textContent,/локально —/);
 assert.equal(catalogueCard('x64').querySelector('.src-bit.remote'),null);
 assert.ok(catalogueCard('x64').classList.contains('idle'));
 assert.match(catalogueCard('settings64').querySelector('.c-meta').textContent,/1.0.0.0 → 1.1.0.0/);
@@ -235,7 +235,7 @@ assert.equal(d.querySelectorAll('#components-plan-items li:not(.plan-warning):no
 // shows its own candidate, not the installed version copied onto both panels.
 const versions=rows.map((r,i)=>({...r,checked:false,installed:i<5,operation:'repair',disabled:false,
  remotePayloadVersion:r.id==='openglass'?'3.0.2.3749':undefined,installedPayloadVersion:r.id==='openglass'?'1.5.0':undefined,targetPayloadVersion:r.id==='openglass'?'1.6.0':undefined,
- installedVersion:'99.0.0.999',installedPackageVersion:(i+1)+'.2.3',targetVersion:(i+2)+'.4.5',
+ attachedPayloadVersion:r.id==='openglass'?'2.0.0':undefined,attachedPackageVersion:'2.0.0',installedVersion:'99.0.0.999',installedPackageVersion:(i+1)+'.2.3',targetVersion:(i+2)+'.4.5',
  updateAvailable:i===0,broken:i===0,applySupported:true}));
 receive({data:{type:'state',page:'components',appMode:'setup',locale:'en',components:versions}});
 for(let i=0;i<5;i++){
@@ -245,7 +245,7 @@ for(let i=0;i<5;i++){
  const offer=d.querySelector('[data-catalog-alias="'+rows[i].id+'"]');
  assert.ok(offer);assert.ok(offer.querySelector('.c-meta').textContent.includes(rows[i].id==='openglass'?'1.6.0':(i+2)+'.4.5'));
 }
-assert.match(d.querySelector('[data-catalog-alias="openglass"] .c-src').textContent,/local 1\.5\.0/);
+assert.match(d.querySelector('[data-catalog-alias="openglass"] .c-src').textContent,/local 2\.0\.0/);
 assert.match(d.querySelector('[data-catalog-alias="openglass"] .c-src').textContent,/on server 3\.0\.2\.3749/);
 assert.ok(d.querySelector('#product-x64').closest('.c-card').classList.contains('is-broken'));
 assert.equal(d.querySelector('[data-catalog-alias="x64"] .comp-decision').title,'Update to 2.4.5');
@@ -285,18 +285,26 @@ for(const lang of ['ru','en'])for(const installed of [false,true]){
  const sourceRows=rows.map(r=>({...r,installed,checked:false,disabled:false,locked:false,applySupported:true,
   operation:installed?'repair':'install',installedPackageVersion:'1.0.0',installedPayloadVersion:r.id==='openglass'?'1.0.0':undefined,
   targetVersion:'2.0.0',targetPayloadVersion:r.id==='openglass'?'2.0.0':undefined,
-  localPackageVersion:'2.0.0',remoteVersion:'3.0.0',remotePayloadVersion:r.id==='openglass'?'3.0.0':undefined,releaseTag:'v3.0.0'}));
+  attachedPayloadVersion:r.id==='openglass'?'2.0.0':undefined,attachedPackageVersion:'2.0.0',localPackageVersion:'9.0.0',remoteVersion:'3.0.0',remotePayloadVersion:r.id==='openglass'?'3.0.0':undefined,releaseTag:'v3.0.0'}));
  receive({data:{type:'state',locale:lang,page:'components',appMode:'setup',components:sourceRows}});
  for(const row of sourceRows){
   const card=installed?d.querySelector('[data-catalog-alias="'+row.id+'"]'):d.querySelector('#product-'+row.id).closest('.c-card');
   const bits=[...card.querySelectorAll('.c-src .src-bit')];assert.equal(bits.length,2);
   assert.equal(bits[0].textContent,(lang==='ru'?'на сервере ':'on server ')+'3.0.0');
-  assert.equal(bits[1].textContent,(lang==='ru'?'локально ':'local ')+(installed?'1.0.0':'2.0.0'));
+  assert.equal(bits[1].textContent,(lang==='ru'?'локально ':'local ')+'2.0.0');
+  assert.equal(bits[0].classList.contains('source-newer'),row.id!=='secureUxTheme');
+  assert.equal(bits[1].classList.contains('source-newer'),false);
   assert.doesNotMatch(card.querySelector('.c-src').textContent,/пакет|релиз|package|release/i);
  }
 }
 receive({data:{type:'state',locale:'ru',page:'components',components:[{id:'x64',title:'Platform',installed:false,targetVersion:'2.0.0',operation:'install',applySupported:true}]}});
 assert.equal(d.querySelector('#product-x64').closest('.c-card').querySelectorAll('.c-src .src-bit').length,0,'unknown origins are not invented from target version');
+// Numeric ordering, ties and malformed versions have no lexicographic winners.
+for(const [remote,local,winner] of [['1.2.9','1.2.10','local'],['1.2.10','1.2.9','remote'],['1.2.3','1.2.3.0',''],['v2.0.0','1.0.0','']]){
+ receive({data:{type:'state',components:[{id:'x64',title:'Platform',installed:false,targetVersion:'2.0.0',remoteVersion:remote,attachedPackageVersion:local,operation:'install',applySupported:true}]}});
+ const wins=d.querySelector('#product-x64').closest('.c-card').querySelectorAll('.source-newer');
+ assert.equal(wins.length,winner?1:0);if(winner)assert.ok(wins[0].classList.contains(winner));
+}
 // OpenGlass product badges must not inherit the Glass MSI wrapper update.
 for(const lang of ['ru','en'])for(const [current,target,newer] of [
  ['3.0.2.3749','3.0.2.3749',false],['3.0.2','3.0.2.0',false],

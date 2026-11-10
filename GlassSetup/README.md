@@ -14,6 +14,24 @@
 
 Версии карточек и независимый MSI ProductVersion: [контракт MSI-версий](docs/msi-product-versions.md).
 
+## Источники Available
+
+«Локально» означает только проверенный MSI рядом с исходным external EXE либо
+в его `packages`; установленная версия, Current и session downloads туда не
+подставляются. Resolver предпочитает новейший допустимый target без downgrade,
+при равенстве — attached media. Exact-original servicing receipts не заменяются
+совпадением версии. Подробности и оговорка SUT release tag/MSI ProductVersion —
+в начале [implementation-progress.md](docs/implementation-progress.md).
+
+После этих изменений собрать **Release|x86: GlassShared → GlassUnins → GlassSetup**:
+
+```bat
+msbuild GlassProject.sln /t:"GlassShared;GlassUnins;GlassSetup" /p:Configuration=Release /p:Platform=x86 /m:1
+```
+
+Нужны существующие Release x64 Native/helper prerequisites; пересборка всех MSI
+не требуется. Реальные GitHub product downloads на Windows ещё не приняты.
+
 ## Содержание
 
 - [Исходники в Visual Studio](#работа-с-исходниками-в-visual-studio)

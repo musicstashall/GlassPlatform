@@ -74,6 +74,14 @@ bool Metadata(const std::wstring& path,Architecture arch,Package& package,std::w
     if(_wcsicmp(machine.c_str(),expected))return Fail(error,L"MSI architecture differs from native OS",ERROR_BAD_EXE_FORMAT);
     return true;
 }
+bool NewerMsiVersion(const std::wstring& lhs,const std::wstring& rhs) {
+    GlassPackageRules::Version a,b;
+    const auto parse=[](const std::wstring& text,GlassPackageRules::Version& version) {
+        for(wchar_t c:text)if(c>127)return false;
+        return GlassPackageRules::ParseVersion(std::string(text.begin(),text.end()),version);
+    };
+    return parse(lhs,a)&&parse(rhs,b)&&GlassPackageRules::Compare(a,b)>0;
+}
 std::vector<std::wstring> CandidatePaths(const Asset& asset) {
     wchar_t exe[32768]{};const DWORD count=GetModuleFileNameW(nullptr,exe,32768);
     if(!count||count>=32768)throw std::runtime_error("Cannot locate GlassSetup.exe");
@@ -84,6 +92,17 @@ std::vector<std::wstring> CandidatePaths(const Asset& asset) {
     const auto name=Wide(asset.name);
     return {directory+L"packages\\"+name,directory+name,
         GlassMaintenanceCache::CurrentFile(name.c_str()),GlassSetupSourceLayout::Prepared(5)};
+}
+// Paths are classified by the same original-root enumerator, not by a
+// UI pathname heuristic. Equal versions still require independent hash checks.
+bool PreferCandidate(const Package& candidate,const std::wstring& path,const Asset& candidateAsset,
+    const Package& current,const std::wstring& currentPath,const Asset& currentAsset) {
+    if(NewerMsiVersion(candidate.version,current.version))return true;
+    if(NewerMsiVersion(current.version,candidate.version))return false;
+    const auto a=CandidatePaths(candidateAsset),b=CandidatePaths(currentAsset);
+    const bool attached=path==a[0]||path==a[1];
+    const bool currentAttached=currentPath==b[0]||currentPath==b[1];
+    return attached&&!currentAttached;
 }
 bool FetchAsset(Architecture arch,const std::atomic<bool>& cancel,Asset& asset,std::wstring& error) {
     if(cancel.load())return false;
@@ -98,8 +117,11 @@ bool FetchAsset(Architecture arch,const std::atomic<bool>& cancel,Asset& asset,s
     return !cancel.load();
 }
 bool FindLocal(const Asset& asset,Architecture arch,const std::atomic<bool>& cancel,
-    File& file,std::wstring& selected,Package& metadata,std::wstring& error) {
-    for(const auto& path:CandidatePaths(asset)) {
+    File& file,std::wstring& selected,Package& metadata,std::wstring& error,bool attachedOnly=false) {
+    const auto paths=CandidatePaths(asset);
+    for(std::size_t index=0;index<paths.size();++index) {
+        if(attachedOnly&&index>=2)continue;
+        const auto& path=paths[index];
         if(cancel.load())return false;
         if(path.empty())continue;
         if(file.h!=INVALID_HANDLE_VALUE){CloseHandle(file.h);file.h=INVALID_HANDLE_VALUE;}
@@ -167,7 +189,19 @@ bool Describe(const std::atomic<bool>& cancel,Offer& offer,std::wstring& diagnos
         if(cancel.load()){offer={};return false;}
         if(online) {
             offer.releaseTag=Wide(remote.tag);offer.releaseVersion=Wide(ReleaseVersion(remote.tag));offer.releaseSize=remote.size;
-            if(!found)found=FindLocal(remote,arch,cancel,local,selected,metadata,error);
+            File other;std::wstring path;Package candidate;
+            if(FindLocal(remote,arch,cancel,other,path,candidate,error)&&(!found||PreferCandidate(candidate,path,remote,metadata,selected,known))) {
+                std::swap(local.h,other.h);selected=path;metadata=candidate;found=true;
+            }
+        }
+        // Attached media is a separate fact, never inferred from the selected cache.
+        File attached;std::wstring path;Package candidate;
+        if(FindLocal(known,arch,cancel,attached,path,candidate,error,true)) {
+            offer.attachedVersion=candidate.version;offer.attachedPath=path;
+        }
+        if(online&&FindLocal(remote,arch,cancel,attached,path,candidate,error,true)&&
+            (offer.attachedVersion.empty()||NewerMsiVersion(candidate.version,offer.attachedVersion))) {
+            offer.attachedVersion=candidate.version;offer.attachedPath=path;
         }
         if(cancel.load()){offer={};return false;}
         if(found) {
@@ -192,30 +226,36 @@ bool Prepare(const std::wstring& privateDirectory,const std::atomic<bool>& cance
         const auto arch=NativeArchitecture();Asset asset=OfflineV4(arch);
         if(!GlassMaintenanceCache::TrustedDirectory(privateDirectory))return Fail(error,L"Untrusted package workspace",ERROR_ACCESS_DENIED);
         File local;std::wstring selected;Package localMetadata;
-        const auto findLocal=[&]() { return FindLocal(asset,arch,cancel,local,selected,localMetadata,error); };
-        // Known official v4 assets remain usable offline. Unknown local files
-        // are never modified; a missing/invalid source can use a private download.
-        if(!findLocal()) {
-            if(Cancelled(cancel,error))return false;
-            error.clear();
-            if(!FetchAsset(arch,cancel,asset,error))return false;
-            if(!findLocal()) {
-                if(Cancelled(cancel,error))return false;
-                error.clear();partial=privateDirectory+L"\\"+Wide(asset.name)+L".part";
+        bool found=FindLocal(asset,arch,cancel,local,selected,localMetadata,error);
+        Asset remote;const bool online=FetchAsset(arch,cancel,remote,error);
+        if(Cancelled(cancel,error))return false;
+        if(online) {
+            File candidate;std::wstring candidatePath;Package candidateMetadata;
+            bool remoteLocal=FindLocal(remote,arch,cancel,candidate,candidatePath,candidateMetadata,error);
+            // A release tag is NOT MSI ProductVersion. For different bytes the
+            // remote MSI must be verified and inspected before ordering versions.
+            if(!remoteLocal&&(!found||remote.sha256!=asset.sha256)) {
+                partial=privateDirectory+L"\\"+Wide(remote.name)+L".part";
                 {
                     File download;download.h=GlassReleaseClient::CreatePrivateFile(partial);
-                    if(download.h==INVALID_HANDLE_VALUE||!Get(Wide(asset.url),download.h,nullptr,asset.size,cancel,error)||
+                    if(download.h==INVALID_HANDLE_VALUE||!Get(Wide(remote.url),download.h,nullptr,remote.size,cancel,error)||
                         !FlushFileBuffers(download.h))throw std::runtime_error("Cannot download original MSI into protected workspace");
                 }
-                local.h=CreateFileW(partial.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
-                if(local.h==INVALID_HANDLE_VALUE||!Hash(local,asset,cancel,error))throw std::runtime_error("Original MSI download verification failed");
-                selected=partial;
+                candidate.h=CreateFileW(partial.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+                if(candidate.h==INVALID_HANDLE_VALUE||!Hash(candidate,remote,cancel,error)||!Metadata(partial,arch,candidateMetadata,error))
+                    throw std::runtime_error("Original MSI download verification failed");
+                candidatePath=partial;remoteLocal=true;
+            }
+            if(remoteLocal&&(!found||PreferCandidate(candidateMetadata,candidatePath,remote,localMetadata,selected,asset))) {
+                std::swap(local.h,candidate.h);selected=candidatePath;localMetadata=candidateMetadata;asset=remote;found=true;
             }
         }
+        if(!found){if(!online)return false;throw std::runtime_error("No verified original MSI candidate");}
+        error.clear();
         staged=privateDirectory+L"\\"+Wide(asset.name);
         if(!CopySnapshot(local,staged,cancel,error)||!Metadata(staged,arch,package,error))
             throw std::runtime_error("Cannot prepare verified original MSI snapshot");
-        const wchar_t* source=partial.empty()?L"local":L"download";
+        const wchar_t* source=selected==partial?L"download":L"local";
         package.path=staged;error.clear();
         if(!partial.empty()){CloseHandle(local.h);local.h=INVALID_HANDLE_VALUE;DeleteFileW(partial.c_str());partial.clear();}
         InstallLog::LineFormat(L"SecureUxTheme original MSI: %s; release %s; ProductCode %s; version %s; source=%s",selected.c_str(),Wide(asset.tag).c_str(),package.productCode.c_str(),package.version.c_str(),source);

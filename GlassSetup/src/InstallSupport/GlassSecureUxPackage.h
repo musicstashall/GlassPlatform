@@ -13,6 +13,7 @@ struct Package {
 };
 struct Offer {
     std::wstring localVersion,localPath,releaseVersion,releaseTag;
+    std::wstring attachedVersion,attachedPath;
     std::uint64_t localSize=0,releaseSize=0;
     bool localVerified=false;
 };

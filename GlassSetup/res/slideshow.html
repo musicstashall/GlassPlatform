@@ -742,6 +742,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .components-summary{position:static;left:auto;right:auto;top:auto;width:auto}
 #components-panel.has-downloads .c-slot,#components-panel.has-downloads .c-lane,#components-panel.has-downloads .c-plan{height:340px}
 #components-panel.has-downloads .components-list{height:298px}
+.source-newer{font-weight:650;color:#d3c6ff}.src-absent{opacity:.6}
 </style></head>
 <body><main id="viewport"><div id="stage" data-mode="loading" role="region" aria-roledescription="carousel" aria-label="GlassPlatform">
 <div class="ambient slideshow-only"></div>
@@ -967,6 +968,13 @@ function showProductWarning(item,button){
   for(const [label,text] of [[ru?'СОСТОЯНИЕ':'STATE',state],[ru?'ЗАВИСИМОСТИ':'DEPENDENCIES',item.warning||(ru?'Нет предупреждений о составе.':'No composition warnings.')],[ru?'ПАКЕТ':'PACKAGE',pkg],...(item.removeBlockedReason?[[ru?'УДАЛЕНИЕ':'REMOVAL',item.removeBlockedReason]]:[])]){
    const row=document.createElement('div');row.className='dialog-detail-row';const key=document.createElement('span');key.textContent='•  '+label;row.append(key);dialogParagraph(row,text);body.append(row);
   }
+  const chosen=item.selectedPackagePath?(item.selectedPackagePath===item.attachedPackagePath?(ru?'приложенный MSI':'attached MSI'):(ru?'проверенный внутренний источник':'verified internal source')):(ru?'серверный кандидат / ещё не подготовлен':'server candidate / not yet prepared');
+  dialogParagraph(body,(ru?'Источник предложения: ':'Offer source: ')+chosen+(item.selectedPackagePath?' · '+item.selectedPackagePath:''),'dialog-diagnostic');
+  if(item.id==='secureUxTheme')dialogParagraph(body,ru?'Версия на сервере — tag релиза, а локальная — MSI ProductVersion. При разных байтах серверный MSI сначала загружается и проверяется, затем сравнивается его ProductVersion. Уже установленный официальный SUT сохраняется без автоматического обновления.':'The server version is a release tag; the local version is MSI ProductVersion. Different remote bytes must first be downloaded and verified before comparing ProductVersion. An already installed official SUT is retained without automatic update.','dialog-diagnostic');
+  if(item.id==='openglass')dialogParagraph(body,ru?'Версии источников относятся к OpenGlass.dll. Метаданные upstream без подходящего установочного пакета не гарантируют загрузку.':'Source versions refer to OpenGlass.dll. Upstream metadata without a suitable installer package does not guarantee a downloadable offer.','dialog-diagnostic');
+  const attached=item.attachedPackagePath||'';
+  dialogParagraph(body,(ru?'Приложенный MSI: ':'Attached MSI: ')+(attached||'—'),'dialog-diagnostic');
+  dialogParagraph(body,ru?'Автоматически выбирается новейший допустимый проверенный MSI без понижения версии; при равной версии предпочитается приложенный файл. Кэш используется для обслуживания, но не считается приложенным носителем. Версия не доказывает совпадение байтов.':'The newest eligible verified MSI is selected without downgrade; attached media wins equal-version ties. Internal cache is for servicing, not attached media. Equal versions do not prove equal bytes.','dialog-diagnostic');
   for(const reason of item.reasons||[])dialogParagraph(body,reason,'dialog-diagnostic');
  }else if(item.planWarnings){
   dialogParagraph(body,ru?'Проверьте сведения перед применением изменений.':'Review these notes before applying changes.','dialog-description');
@@ -1304,10 +1312,19 @@ function paintComponentCard(card,item,input,shelf){
   // Vendor release metadata stays separate internally from MSI identity.
   const server=item.id==='openglass'?item.remotePayloadVersion:
    item.id==='secureUxTheme'?(item.remoteVersion||item.releaseTag):item.remoteVersion;
-  const local=item.installed?(current==='—'?'':current):
-   item.id==='openglass'?item.targetPayloadVersion:item.localPackageVersion;
-  if(server){source('remote',ru?'на сервере':'on server',server);if(item.id==='openglass'&&item.upstreamUpdateAvailable)marks.lastElementChild.style.fontWeight='700';}
-  if(local)source('local',ru?'локально':'local',local);
+  const local=item.id==='openglass'?item.attachedPayloadVersion:item.attachedPackageVersion;
+  // OpenGlass compares DLL FileVersion on both sides; SUT release tags
+  // cannot be ordered against MSI ProductVersion.
+  const comparable=item.id!=='secureUxTheme';
+  const parse=v=>/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(v||'')?v.split('.').map(Number):null;
+  const sv=parse(server),lv=parse(local);
+  let order=0;
+  if(comparable&&sv&&lv&&[...sv,...lv].every(n=>Number.isSafeInteger(n)&&n<=4294967295)){
+   for(let i=0;i<4&&!order;i++)order=Math.sign((sv[i]||0)-(lv[i]||0));
+  }
+  if(server){source('remote',ru?'на сервере':'on server',server);marks.lastElementChild.classList.toggle('source-newer',order>0);}
+  if(local){source('local',ru?'локально':'local',local);marks.lastElementChild.classList.toggle('source-newer',order<0);}
+  else {const absent=document.createElement('span');absent.className='src-absent';absent.textContent=ru?'локально —':'local —';marks.append(absent);}
   action.disabled=input.disabled;action.classList.remove('repair','is-on','danger');
   action.replaceChildren();
   action.append(svg('arrowRight'));

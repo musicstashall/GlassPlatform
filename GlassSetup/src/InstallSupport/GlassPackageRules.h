@@ -41,7 +41,7 @@ inline bool ParseVersion(const std::string& text, Version& out) noexcept {
     }
     return false;
 }
-enum class Source { Current, LocalPackages, LocalAdjacent, Release };
+enum class Source { Current, LocalPackages, LocalAdjacent, Release, Prepared };
 struct Candidate {
     Source source;
     Version version;
@@ -74,13 +74,24 @@ inline Choice Select(const Request& request, const std::vector<Candidate>& candi
     if (!target) return {};
     if (request.installed && Compare(*target, *request.installed) < 0)
         return {{}, target, Failure::Downgrade};
+    // Equal-version attached media wins over internal cache and network.
+    const auto rank=[](Source source) {
+        switch(source) {
+        case Source::LocalPackages:return 0;
+        case Source::LocalAdjacent:return 1;
+        case Source::Prepared:return 2;
+        case Source::Current:return 3;
+        case Source::Release:return 4;
+        }
+        return 5;
+    };
     Choice result{{}, target, Failure::NoSource};
     for (std::size_t i = 0; i < candidates.size(); ++i) {
         const auto& c = candidates[i];
         if (!c.eligible || Compare(c.version, *target) != 0) continue;
         if (c.source == Source::Current &&
             (!request.installed || Compare(*target, *request.installed) != 0)) continue;
-        if (!result.index || static_cast<int>(c.source) < static_cast<int>(candidates[*result.index].source)) {
+        if (!result.index || rank(c.source) < rank(candidates[*result.index].source)) {
             result.index = i;
             result.failure = Failure::None;
         }
