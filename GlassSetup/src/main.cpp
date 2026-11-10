@@ -1306,7 +1306,7 @@ private:
     std::atomic_bool versionCheckCancel_{false};
     GlassPackageCatalog::Catalog releaseCatalog_;
     std::wstring checkingStatus_;
-    bool versionCheckStarted_ = false, versionCheckHandled_ = false;
+    bool versionCheckStarted_ = false, versionCheckHandled_ = false, controllerCheckHandled_ = false;
 
     bool failurePending_ = false;
     bool transitioning_ = false;
@@ -2251,6 +2251,7 @@ private:
         std::wstring json=L"{\"type\":\"state\",\"page\":"+JsStringLiteral(WebPageName(unlock))+
             L",\"accepted\":"+(accepted_?L"true":L"false")+
             L",\"platformVersion\":"+JsStringLiteral(platformVersion_)+
+            L",\"checkingProducts\":"+((controllerCheckHandled_||IsControllerChild())?L"true":L"false")+
             L",\"checkingStatus\":"+JsStringLiteral(checkingStatus_)+
             L",\"conflicts\":"+ConflictsJson()+
             L",\"installedGlassVersion\":"+JsStringLiteral(installedGlassVersion_)+
@@ -2376,7 +2377,7 @@ private:
         BOOL animationsEnabled=TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
         loadingAnimationsEnabled_=animationsEnabled!=FALSE;
-        const bool nativeLoading=(page_==Page::Welcome || (maintenanceMode_ && page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_);
+        const bool nativeLoading=(page_==Page::Welcome || (page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_);
         if (animationsEnabled && !webReady_ &&
             (nativeLoading || page_==Page::Error || page_==Page::RuntimeInstalling))
             SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
@@ -2419,7 +2420,7 @@ private:
         EnableWindow(cancel_,!demoLocked && !(page_==Page::RuntimeInstalling && runtimeCancel_.load()));
         const int defaultId=confirm?IDC_BACK:blockedPage?IDC_CANCEL:IDC_NEXT;
         SendMessageW(window,DM_SETDEFID,defaultId,0);
-        if (!webReady_ && ((oldPage==Page::Welcome && (page_==Page::Checking || page_==Page::License)) ||
+        if (!webReady_ && (page_!=Page::Checking||FAILED(webError_)) && ((oldPage==Page::Welcome && (page_==Page::Checking || page_==Page::License)) ||
             (oldPage==Page::Checking && page_==Page::License))) BeginTransition();
         ShowContentControls();
         if (!transitioning_) FocusPage();
@@ -2760,6 +2761,8 @@ private:
     }
     bool BeginProductInspection() {
         if(inspectThread_.joinable() || inspectReady_.load(std::memory_order_acquire))return true;
+        checkingStatus_=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Анализируем установленные продукты":L"Analyzing installed products";
+        SyncWebViewState();InvalidateContent();
         InstallLog::Line(L"Checking: analyzing installed MSI products before maintenance");
         const bool os64=GlassInstallUtil::IsOs64Bit();
         try {
@@ -2791,13 +2794,14 @@ private:
             return;
         }
         versionCheckStarted_ = true;
-        InstallLog::Line(L"Checking for newer setup on GitHub…");
+        InstallLog::Line(IsControllerChild()?L"Controller already checked; loading inherited product catalog":L"Checking for newer setup on GitHub…");
         SetPage(Page::Checking);
-        if(!BeginProductInspection())return;
+        if(IsControllerChild()&&!BeginProductInspection())return;
         const HWND target = window;
-        const bool allowSetupDownload=!HasCommandLineSwitch(L"--no-self-update");
+        const bool checkSetup=!IsControllerChild();
+        const bool allowSetupDownload=checkSetup&&!HasCommandLineSwitch(L"--no-self-update");
         try {
-            versionCheckThread_ = std::thread([this, target, allowSetupDownload]() {
+            versionCheckThread_ = std::thread([this, target, checkSetup, allowSetupDownload]() {
                 VersionCheckResult result;
                 try {
                     std::wstring diagnostic;
@@ -2807,7 +2811,7 @@ private:
                         result.latest=std::to_wstring(v[0])+L"."+std::to_wstring(v[1])+L"."+std::to_wstring(v[2])+L"."+std::to_wstring(v[3]);
                     }
                     if(!diagnostic.empty())InstallLog::Line(diagnostic.c_str());
-                    if (result.fetched) {
+                    if (result.fetched&&checkSetup) {
                         result.self = SelfProductVersion();
                         result.newer = !result.self.empty() && VersionOlder(result.self, result.latest);
                         if(allowSetupDownload&&result.newer&&result.catalog.setup&&result.catalog.setup->downloadable&&!versionCheckCancel_.load()){
@@ -2880,13 +2884,21 @@ private:
             if (!versionCheckResult_.completed) return;
             result = versionCheckResult_;
         }
-        // Network completion and inspection can arrive in either order. Do not
-        // expose maintenance until both the report and default choices are applied.
+        // Bootstrapper checks the controller first. Only the final controller
+        // inspects product payloads; do not repeat that expensive scan across handoff.
+        if(!controllerCheckHandled_) {
+            controllerCheckHandled_=true;
+            if(TransitionController(result.preparedSetup))return;
+            if(!BeginProductInspection())return;
+        }
         if(!inspectionApplied_)return;
         releaseCatalog_=result.catalog;
         versionCheckHandled_ = true;
-        if(TransitionController(result.preparedSetup))return;
         if(!RunPreflightChecks())return;
+        if(IsControllerChild()) {
+            InstallLog::Line(L"Installed controller product inspection completed; no repeated Setup update check");
+            ContinueAfterLicenseCheck();return;
+        }
         if (!result.fetched) {
             InstallLog::Line(L"Version check: fetch failed or skipped; continuing with this setup");
 
@@ -3715,9 +3727,9 @@ private:
         RECT content=Box(0,0,kWidth,kContentHeight);
         FillRect(dc,&content,darkBrush_);
         const COLORREF white=RGB(245,244,252), muted=RGB(163,168,191), accent=RGB(193,180,255);
-        // Do not paint a second, native Checking page while the maintenance
-        // WebView is still loading. Retain the native fallback on WebView error.
-        if (maintenanceMode_ && page_==Page::Checking && !webReady_ && SUCCEEDED(webError_)) {
+        // Do not flash native Checking before the real WebView Checking page,
+        // for either bootstrapper or maintenance startup. Retain the native fallback on WebView error.
+        if (page_==Page::Checking && !webReady_ && SUCCEEDED(webError_)) {
             DrawLoadingScreen(dc);
             return;
         }
@@ -3843,8 +3855,10 @@ private:
         } else if (page_ == Page::Checking) {
             DrawBanner(dc,true);
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
-            DrawLabel(dc,Text(IDS_CHECKING_TITLE),Box(48,137,520,72),heading_,white);
-            DrawLabel(dc,Text(IDS_CHECKING_BODY),Box(48,226,470,128),font_,muted);
+            const bool products=controllerCheckHandled_||IsControllerChild();
+            const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
+            DrawLabel(dc,products?(ru?L"Проверяем продукты":L"Checking products"):Text(IDS_CHECKING_TITLE),Box(48,137,520,72),heading_,white);
+            DrawLabel(dc,products?(ru?L"Анализируем установленное состояние и доступные пакеты.":L"Analyzing installed state and available packages."):Text(IDS_CHECKING_BODY),Box(48,226,470,128),font_,muted);
             Gdiplus::Graphics g(dc);
             g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
             Gdiplus::Pen track(Gdiplus::Color(140,92,87,121),static_cast<Gdiplus::REAL>(Scale(2)));
@@ -3905,7 +3919,7 @@ private:
             DrawLabel(dc,Text(IDS_INSTALLED_VERSION_LABEL)+L": "+(installedGlassVersion_.empty()?L"—":installedGlassVersion_),Box(48,382,520,30),font_,white);
             DrawLabel(dc,Text(IDS_SETUP_VERSION_LABEL)+L": "+(setupProductVersion_.empty()?L"—":setupProductVersion_),Box(48,420,520,30),font_,white);
             DrawLabel(dc,versionInvalidNote_,Box(48,489,520,34),small_,muted);
-        } else if ((page_==Page::Welcome || (maintenanceMode_ && page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_)) {
+        } else if ((page_==Page::Welcome || (page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_)) {
             DrawLoadingScreen(dc);
         } else if (!webReady_ && FAILED(webError_)) {
             wchar_t code[16]{};
@@ -4024,7 +4038,7 @@ private:
         case WM_THEMECHANGED:
             EndTransition(); InvalidateRect(window,nullptr,FALSE); return 0;
         case WM_SETTINGCHANGE:
-            if ((page_==Page::Welcome || (maintenanceMode_ && page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_)) {
+            if ((page_==Page::Welcome || (page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_)) {
                 BOOL enabled=TRUE;
                 SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&enabled,0);
                 loadingAnimationsEnabled_=enabled!=FALSE;
@@ -4256,7 +4270,7 @@ private:
                 if (GetTickCount64()-fadeStarted_>=kFadeDuration) EndTransition();
                 else InvalidateContent();
             } else if (w==kHeroTimer && !webReady_ &&
-                       (page_==Page::Welcome || (maintenanceMode_ && page_==Page::Checking) || page_==Page::Error || page_==Page::RuntimeInstalling)) {
+                       (page_==Page::Welcome || (page_==Page::Checking) || page_==Page::Error || page_==Page::RuntimeInstalling)) {
                 if (page_==Page::RuntimeInstalling) { progressMarquee_=true; marqueePhase_=static_cast<double>(GetTickCount64()%kMarqueePeriodMs)/kMarqueePeriodMs; InvalidateRect(progress_,nullptr,FALSE); }
                 InvalidateContent();
             }

@@ -209,7 +209,7 @@ bool ControllerSupportsStartupAck(const std::wstring& path) {
     const auto resource=FindResourceW(module,MAKEINTRESOURCEW(IDR_CONTROLLER_PROTOCOL),RT_RCDATA);
     const auto loaded=resource?LoadResource(module,resource):nullptr;
     const auto* bytes=loaded?static_cast<const BYTE*>(LockResource(loaded)):nullptr;
-    const bool supported=bytes&&SizeofResource(module,resource)==2&&bytes[0]==2&&bytes[1]==0;
+    const bool supported=bytes&&SizeofResource(module,resource)==2&&bytes[0]==3&&bytes[1]==0;
     FreeLibrary(module);return supported;
 }
 ULONGLONG ControllerVersion(const std::wstring& file){
@@ -281,6 +281,37 @@ bool RecoverControllerTransition() {
     // candidate and retry its startup, never invent an older trusted controller.
     return DeleteFileW((Root()+L"\\Installer\\Pending").c_str())!=FALSE;
 }
+struct ControllerCatalogSnapshot {
+    std::wstring path;
+    ~ControllerCatalogSnapshot(){if(!path.empty())DeleteFileW(path.c_str());}
+    bool Write() {
+        using namespace GlassMaintenanceCache;
+        const auto& text=GlassSetupSourceLayout::catalogText;
+        if(text.size()>1024*1024)return false;
+        path=Root()+L"\\Installer\\Catalog-"+ControllerToken();
+        ControllerHandle file;
+        file.value=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(file.value==INVALID_HANDLE_VALUE){path.clear();return false;}
+        DWORD written=0;
+        const bool ok=WriteFile(file.value,text.data(),static_cast<DWORD>(text.size()),&written,nullptr)&&
+            written==text.size()&&FlushFileBuffers(file.value);
+        CloseHandle(file.value);file.value=nullptr;
+        return ok&&HardenFile(path);
+    }
+};
+bool ReadControllerCatalog(const std::wstring& path) {
+    using namespace GlassMaintenanceCache;
+    const auto prefix=Root()+L"\\Installer\\Catalog-";
+    if(path.rfind(prefix,0)!=0||path.substr(prefix.size()).find_first_of(L"\\/:")!=std::wstring::npos||
+       !GlassInstallUtil::IsSafeInstallPath(path)||!TrustedPath(path,false))return false;
+    ControllerHandle file;
+    file.value=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    if(file.value==INVALID_HANDLE_VALUE)return false;
+    std::vector<char> bytes(1024*1024+1);DWORD read=0;
+    if(!ReadFile(file.value,bytes.data(),static_cast<DWORD>(bytes.size()),&read,nullptr)||read>1024*1024)return false;
+    GlassSetupSourceLayout::catalogText.assign(bytes.data(),read);
+    GlassSetupSourceLayout::catalogInherited=true;return true;
+}
 // Quote only explicitly supported intent parameters; never forward an arbitrary
 // original command line (which may contain old handoff switches/Apply commands).
 std::wstring ControllerQuote(const std::wstring& value){
@@ -309,7 +340,7 @@ bool BeginControllerChild(std::wstring& error) noexcept {
         if(!argv)return false;
         std::vector<std::wstring> args;for(int i=1;i<argc;++i)args.emplace_back(argv[i]);LocalFree(argv);
         bool requested=false;
-        std::wstring parent,ready,commit,record,layout;
+        std::wstring parent,ready,commit,record,layout,catalog;
         for(size_t i=0;i<args.size();++i){
             if(args[i]==L"--controller-child")requested=true;
             else if(args[i]==L"--controller-startup-ack")controllerChild.startupAckRequired=true;
@@ -318,6 +349,7 @@ bool BeginControllerChild(std::wstring& error) noexcept {
             else if(i+1<args.size()&&args[i]==L"--controller-commit")commit=args[++i];
             else if(i+1<args.size()&&args[i]==L"--controller-record")record=args[++i];
             else if(i+1<args.size()&&args[i]==L"--source-layout")layout=args[++i];
+            else if(i+1<args.size()&&args[i]==L"--controller-catalog")catalog=args[++i];
             else if(args[i]==L"--modify")controllerChild.modify=true;
         }
         if(!requested)return true;
@@ -337,6 +369,7 @@ bool BeginControllerChild(std::wstring& error) noexcept {
         SetHandleInformation(controllerChild.parent.value,HANDLE_FLAG_INHERIT,0);
         SetHandleInformation(controllerChild.ready.value,HANDLE_FLAG_INHERIT,0);
         SetHandleInformation(controllerChild.commit.value,HANDLE_FLAG_INHERIT,0);
+        if(!catalog.empty()&&!ReadControllerCatalog(catalog))return false;
         GlassSetupSourceLayout::directory=layout;
         controllerChild.validated=true;error.clear();return true;
     }catch(...){error=L"Cannot validate controller handoff";return false;}
@@ -425,6 +458,8 @@ ControllerTransition EnsureCurrentController(const std::wstring& downloaded,bool
         // previous active controller intact. A crash after replacement leaves a
         // fully verified, already-started candidate, not a half-written EXE.
         if(!WriteControllerRecord(L"Pending",record)){error=L"Cannot journal controller transition";return ControllerTransition::Failed;}
+        ControllerCatalogSnapshot catalogSnapshot;
+        if(!catalogSnapshot.Write()){error=L"Cannot snapshot the controller catalog";return ControllerTransition::Failed;}
         SECURITY_ATTRIBUTES sa{sizeof(sa),nullptr,TRUE};
         ControllerHandle ready,commit,parent;
         ready.value=CreateEventW(&sa,TRUE,FALSE,nullptr);commit.value=CreateEventW(&sa,TRUE,FALSE,nullptr);
@@ -443,7 +478,8 @@ ControllerTransition EnsureCurrentController(const std::wstring& downloaded,bool
         if(layout.empty())layout=self.substr(0,self.find_last_of(L"\\/"));
         std::wstring command=ControllerQuote(target)+L" --controller-child --controller-startup-ack --no-self-update --controller-parent "+number(parent.value)+
             L" --controller-ready "+number(ready.value)+L" --controller-commit "+number(commit.value)+
-            L" --controller-record "+std::wstring(record.begin(),record.end())+L" --source-layout "+ControllerQuote(layout);
+            L" --controller-record "+std::wstring(record.begin(),record.end())+L" --source-layout "+ControllerQuote(layout)+
+            L" --controller-catalog "+ControllerQuote(catalogSnapshot.path);
         if(modify){command+=L" --modify";if(!product.empty())command+=L" --product "+ControllerQuote(product);}
         PROCESS_INFORMATION process{};
         const auto folder=target.substr(0,target.find_last_of(L'\\'));
@@ -517,6 +553,11 @@ bool FinalizeControllerStartup(bool ready) noexcept {
                    !(data.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)&&ascii!=active.substr(0,64)) {
                     if(!RemoveFlat(store+L"\\"+name))
                         GlassInstallLog::LineFormat(L"Controller CleanupPending: %s",name.c_str());
+                } else if(!(data.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))&&
+                          (name.rfind(L"Catalog-",0)==0||name.rfind(L"Record-",0)==0)) {
+                    const auto stale=store+L"\\"+name;
+                    if(TrustedPath(stale,false)&&!DeleteFileW(stale.c_str()))
+                        GlassInstallLog::LineFormat(L"Controller snapshot CleanupPending: %s",name.c_str());
                 }
             }while(FindNextFileW(find,&data));
             FindClose(find);

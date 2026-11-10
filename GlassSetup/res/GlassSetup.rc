@@ -483,5 +483,5 @@ IDR_MAINTENANCE_UNINS RCDATA "..\\..\\Build\\GlassUnins\\Release\\GlassUnins.exe
 
 #include "ProductStrings.rcinc"
 
-// Controller handoff v2: startup-success ACK after initial READY/COMMIT.
-IDR_CONTROLLER_PROTOCOL RCDATA BEGIN 2 END
+// Controller handoff v3: startup ACK and protected per-chain catalog snapshot.
+IDR_CONTROLLER_PROTOCOL RCDATA BEGIN 3 END

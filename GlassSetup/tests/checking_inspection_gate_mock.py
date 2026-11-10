@@ -21,13 +21,15 @@ prefix=r'''
 #include <string>
 #include <iostream>
 namespace InstallLog{void Line(const wchar_t*){}template<class... T>void LineFormat(const wchar_t*,T...){} }
+bool IsControllerChild(){return false;}
 enum class Page{Checking,Components};
 struct VersionCheckResult{bool completed=false,fetched=false,newer=false;int catalog=7;
  std::wstring self=L"2.0.0.90",latest=L"2.0.0.70",preparedSetup;};
 struct App{Page page_=Page::Checking;std::mutex versionCheckMutex_;
- VersionCheckResult versionCheckResult_;bool versionCheckHandled_=false,inspectionApplied_=false;
- int releaseCatalog_=0,advances=0,transitions=0;bool transfer=false;
+ VersionCheckResult versionCheckResult_;bool versionCheckHandled_=false,inspectionApplied_=false,controllerCheckHandled_=false;
+ int scans=0;int releaseCatalog_=0,advances=0,transitions=0;bool transfer=false;
  bool TransitionController(const std::wstring&){++transitions;return transfer;}
+ bool BeginProductInspection(){++scans;return true;}
  bool RunPreflightChecks(){return true;}
  void ContinueAfterLicenseCheck(){++advances;page_=Page::Components;}
 '''
@@ -44,7 +46,7 @@ int main(){
   a.CompleteVersionCheck();assert(a.advances==1&&a.versionCheckHandled_);
  }
  {App a;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;a.transfer=true;
-  a.CompleteVersionCheck();assert(a.transitions==1&&a.advances==0);}
+  a.CompleteVersionCheck();assert(a.transitions==1&&a.advances==0&&a.scans==0);}
  std::cout<<"PASS: actual Checking completion gate: inspection/network in both orders, failed/offline catalog, one advance\n";
 }
 '''

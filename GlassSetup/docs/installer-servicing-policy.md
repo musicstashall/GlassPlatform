@@ -273,11 +273,11 @@ UAC, process races, reboot/crash recovery или MSI acceptance. Полную п
 
 ## 11. Завершение runtime lifecycle до Windows-проверки
 
-- Handoff v2 помечен отдельным data-only RCDATA resource. Новый parent проверяет
-  поддержку до запуска: v1 Active равной/меньшей версии мигрирует на подходящий
+- Handoff v3 помечен отдельным data-only RCDATA resource. Новый parent проверяет
+  поддержку до запуска: v1/v2 Active равной/меньшей версии мигрирует на подходящий
   новый controller, более новая неподдерживаемая версия не понижается.
   Новый child от проверенного v1 parent сохраняет старый initial COMMIT barrier
-  и сам подтверждает startup; второй ACK гарантируется только для пары v2/v2.
+  и сам подтверждает startup; второй ACK обязателен для нового parent; legacy-parent compatibility сохраняется.
 - `Confirmed` — durable startup-success record, `Pending` — intent, `Rejected` —
   digest отказавшего кандидата. Записи используют тот же защищённый atomic-write
   формат. При незавершённом переходе на неподтверждённый Active восстанавливается
@@ -314,3 +314,21 @@ journal, а не универсальная crash-транзакция Windows I
 repair ограничены фактически сохранёнными полными original payloads. Сбой записи
 reboot pin в реестре — отказ текущей очистки; надёжность persistence при отказе
 всех системных записей требует отдельной Windows fault-injection проверки.
+
+
+## 12. Один catalog check на цепочку запуска
+
+Protocol resource v3 добавляет per-launch `Catalog-<GUID>` snapshot в protected
+Installer store. Передаются raw catalog bytes (до 1 MiB), не готовое разрешение
+установки. Child читает snapshot только после проверки реального parent и
+canonical self; принимает только protected non-reparse Catalog path, повторно
+разбирает schema тем же parser. Пакеты по-прежнему независимо проверяются по
+signature/hash/identity. Пустой snapshot переносит offline outcome без retry.
+Файл удаляется parent после startup ACK; crash leftovers удаляются finalizer.
+Snapshot не используется как глобальный бессрочный cache между независимыми запусками.
+
+FetchCatalog сериализован и использует неизменяемый результат внутри процесса;
+inspection не запрашивает version.json повторно. Bootstrapper переходит в final
+controller до дорогого product-source inspection, не переносит inventory report.
+После handoff child показывает анализ продуктов, а не повторный Setup update.
+Native loading сохраняется до WebView ready, native Checking — только fallback.

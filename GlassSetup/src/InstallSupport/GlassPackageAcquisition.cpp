@@ -169,10 +169,20 @@ bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& wo
 bool FetchCatalog(const std::atomic<bool>& cancel,GlassPackageCatalog::Catalog& catalog,std::wstring& diagnostic) noexcept {
     catalog={};
     try {
+        std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::catalogMutex);
         std::string text,error;
-        if(!GlassReleaseClient::Get(L"https://github.com/musicstashall/GlassPlatform/releases/latest/download/version.json",
-            INVALID_HANDLE_VALUE,&text,1024*1024,cancel,diagnostic))return false;
+        const bool reuse=GlassSetupSourceLayout::catalogInherited||GlassSetupSourceLayout::catalogChecked;
+        if(reuse) {
+            text=GlassSetupSourceLayout::catalogText;
+            if(text.empty())return Fail(diagnostic,L"Parent catalog check was unavailable; continuing offline without a duplicate request");
+        } else {
+            GlassSetupSourceLayout::catalogChecked=true;
+            GlassSetupSourceLayout::catalogText.clear();
+            if(!GlassReleaseClient::Get(L"https://github.com/musicstashall/GlassPlatform/releases/latest/download/version.json",
+                INVALID_HANDLE_VALUE,&text,1024*1024,cancel,diagnostic))return false;
+        }
         if(!GlassPackageCatalog::Parse(text,catalog,error))return Fail(diagnostic,Wide(error));
+        if(!reuse)GlassSetupSourceLayout::catalogText=text;
         diagnostic.clear();return true;
     }catch(...){return Fail(diagnostic,L"Cannot read release package catalog");}
 }

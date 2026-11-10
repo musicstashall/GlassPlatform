@@ -320,5 +320,10 @@ for(const lang of ['ru','en']) {
  assert.doesNotMatch(d.querySelector('#error-body').textContent,/установк|installation/i);
  assert.equal(d.querySelector('#error-detail').textContent,'SecureUxTheme removal failed');
 }
+for(const locale of ['ru','en'])for(const checkingProducts of [false,true]) {
+ receive({data:{type:'state',locale,page:'checking',checkingProducts,checkingStatus:''}});
+ assert.equal(d.querySelector('#checking-title').textContent,checkingProducts?(locale==='ru'?'Проверяем продукты':'Checking products'):(locale==='ru'?'Проверяем новую версию':'Checking for a newer version'));
+ if(checkingProducts)assert.doesNotMatch(d.querySelector('#checking-source').textContent,/GitHub/);
+}
 dom.window.close();
 process.stdout.write('PASS: separate catalogue/composition content, planned catalogue idle/needed exclusion; actual production DOM: six rows, real per-architecture IPC, version metadata, live plan/counts, warnings/Escape, RU/EN, setup/uninstall titles and disabled-action gate\n');

@@ -87,6 +87,9 @@ void FindClose(HANDLE h){CloseHandle(h);}
 // HANDLE
 // WRITE
 // STAGE
+namespace GlassSetupSourceLayout {std::string catalogText;bool catalogInherited=false;}
+// SNAPSHOT
+// READCATALOG
 // FINALIZE
 // RECOVER
 void reset(){assert(handles==0&&loads==0);lockedFolder.clear();modulePath.clear();lockAvailable=true;arpRefreshes=0;dirs={L"root"};files.clear();digests.clear();trusted=signedOk=copyOk=extractOk=hardenOk=flushOk=moveOk=true;files[L"download.exe"]="setup";digests[L"download.exe"]=0xaa;}
@@ -127,12 +130,23 @@ int main(){using namespace GlassMaintenanceCache;std::string record;
  assert(WriteControllerRecord(L"Pending",oldRecord));assert(RecoverControllerTransition()&&ReadControllerRecord()==record); // Staged, not committed.
  files.erase(L"root\\Installer\\Confirmed");assert(WriteControllerRecord(L"Pending",record));
  assert(RecoverControllerTransition()&&ReadControllerRecord()==record); // First install: forward recovery without a fake rollback target.
+
+ GlassSetupSourceLayout::catalogText="catalog";
+ {ControllerCatalogSnapshot snapshot;assert(snapshot.Write());auto path=snapshot.path;
+  GlassSetupSourceLayout::catalogText.clear();assert(ReadControllerCatalog(path)&&GlassSetupSourceLayout::catalogInherited&&GlassSetupSourceLayout::catalogText=="catalog");
+  assert(!ReadControllerCatalog(L"untrusted\\Catalog-test")&&!ReadControllerCatalog(L"root\\Installer\\Catalog-..\\Active"));
+  trusted=false;assert(!ReadControllerCatalog(path));trusted=true;
+  files[path]=std::string(1024*1024+1,'x');assert(!ReadControllerCatalog(path));
+ }
+ assert(!files.count(L"root\\Installer\\Catalog-unique"));
+ GlassSetupSourceLayout::catalogText.clear();
+ {ControllerCatalogSnapshot snapshot;assert(snapshot.Write()&&ReadControllerCatalog(snapshot.path)&&GlassSetupSourceLayout::catalogText.empty());}
  assert(handles==0&&loads==0);
  std::cout<<"PASS: actual controller store: immutable Setup/Unins digests, resource-data-only staging, strict pointer parsing, ACL/hash refusal, atomic pointer writes, copy/extract/flush/move failure preservation and cleanup\n";
 }
 '''
 methods='\n'.join(fn(cache,t) for t in ['inline bool ControllerRecordValid(', 'inline std::string ReadControllerRecord(', 'inline std::string ControllerDigest(', 'inline std::wstring ControllerFileForRecord(', 'inline std::wstring ControllerFile('])
-h=h.replace('// CACHE',methods).replace('// HANDLE',fn(launch,'struct ControllerHandle ')+ ';').replace('// WRITE',fn(launch,'bool WriteControllerRecord(')).replace('// STAGE',fn(launch,'bool StageController(')).replace('// FINALIZE',fn(launch,'bool FinalizeControllerStartup(')).replace('// RECOVER',fn(launch,'bool RecoverControllerTransition('))
+h=h.replace('// CACHE',methods).replace('// HANDLE',fn(launch,'struct ControllerHandle ')+ ';').replace('// WRITE',fn(launch,'bool WriteControllerRecord(')).replace('// STAGE',fn(launch,'bool StageController(')).replace('// SNAPSHOT',fn(launch,'struct ControllerCatalogSnapshot ')+ ';').replace('// READCATALOG',fn(launch,'bool ReadControllerCatalog(')).replace('// FINALIZE',fn(launch,'bool FinalizeControllerStartup(')).replace('// RECOVER',fn(launch,'bool RecoverControllerTransition('))
 with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'test.cpp';p.write_text(h);exe=Path(d)/'test'
  subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-fsanitize=address,undefined','-fno-pie','-no-pie',str(p),'-o',str(exe)],check=True)

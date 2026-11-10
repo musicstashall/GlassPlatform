@@ -32,6 +32,7 @@ DWORD GetProcessId(HANDLE){return parentPid;}
 DWORD WaitForSingleObject(HANDLE,int){return parentAlive?WAIT_TIMEOUT:0;}
 bool QueryFullProcessImageNameW(HANDLE,int,wchar_t* out,DWORD*){std::wcscpy(out,L"parent.exe");return true;}
 bool ControllerTrusted(const std::wstring&){return signedParent;}
+bool ReadControllerCatalog(const std::wstring&){return true;}
 bool SetHandleInformation(HANDLE,int,int){++inheritClears;return true;}
 std::wstring ModulePath(){return correctImage?L"canonical.exe":L"temp.exe";}
 bool PathsEqualCanonical(const std::wstring& a,const std::wstring& b){return a==b;}

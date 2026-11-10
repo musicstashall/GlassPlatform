@@ -1,3 +1,33 @@
+# Проверка без изменения продуктов: лишний Checking исправлен
+
+Пользователь выполнил запуск без установки/обновления продуктов. Два журнала
+`GlassSetup[1].log` / `GlassSetup[2]-2.log` разобраны; исходные вложения удалены.
+Первый запрос начался в 09:14:58.410, handoff подтвердился в 09:15:10.454;
+child из защищённого Installer начал тот же check повторно в 09:15:11.120.
+Local Setup 2.0.0.0104, remote 2.0.0.70: новой remote-версии не было, перезапуск
+нужен был для перехода в persistent controller. OpenGlass/SUT HTTP 403 относится
+к отдельному upstream discovery, не является причиной relaunch.
+
+Исправлено:
+- Protocol v3 передаёт защищённый per-chain catalog snapshot, включая offline
+  результат; child и product inspection не повторяют запрос version.json.
+- Bootstrapper не сканирует все product MSI до handoff. Полный fresh inventory
+  выполняется конечным controller один раз, без передачи доверия старому report.
+- Child не сравнивает Setup versions повторно; Checking в RU/EN обозначает
+  анализ продуктов, а не новый запрос обновления Setup.
+- Native Checking не вспыхивает до WebView в обычном запуске; error fallback сохранён.
+- Snapshot имеет ограничение 1 MiB, protected path/ACL, data-only parsing и cleanup
+  после ACK; при crash stale snapshot удаляется следующей финализацией.
+
+Проверки: **95 mock-тестов: 85 PASS / 10 прежних baseline FAIL**, новых сбоев нет.
+Actual-source tests проверяют single-fetch/offline inheritance, snapshot IO/refusal,
+порядок transition-before-scan; production DOM проверяет обе Checking-фазы RU/EN.
+Исправленная ревизия требует повторной Windows-сборки и короткого запуска.
+Предыдущий пользовательский запуск подтверждает protected handoff, но не полную
+MSI/removal/reboot acceptance и не работу этих новых исправлений.
+
+---
+
 # Controller store/handoff — 2026-11-04
 
 До этапа Windows-проверки подключены:

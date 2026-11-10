@@ -61,6 +61,10 @@ inline bool RetireUnused() {
             if((data.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)&&!(data.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)&&
                (ControllerRecordValid(ascii+ascii)||name.rfind(L"Stage-",0)==0)) {
                 if(!RemoveFlat(store+L"\\"+name))ok=false;
+            } else if(!(data.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))&&
+                      (name.rfind(L"Catalog-",0)==0||name.rfind(L"Record-",0)==0)) {
+                const auto file=store+L"\\"+name;
+                if(!TrustedPath(file,false)||!DeleteFileW(file.c_str()))ok=false;
             } else ok=false; // Unknown objects are not ours to delete.
         }while(FindNextFileW(find,&data));
         if(GetLastError()!=ERROR_NO_MORE_FILES)ok=false;

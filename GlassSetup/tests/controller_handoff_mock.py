@@ -72,6 +72,7 @@ bool CreateProcessW(const wchar_t* path,wchar_t* cmd,void*,void*,int inherit,int
 DWORD WaitForMultipleObjects(int,HANDLE*,int,int){if(!readyOk||(++waitsCount==2&&!finalOk))return 258;ack=true;return WAIT_OBJECT_0;}
 bool SetEvent(HANDLE){assert(ack&&records[L"Active"]==selectedRecord);return eventOk;}
 bool DeleteFileW(const wchar_t*){return true;}
+struct ControllerCatalogSnapshot {std::wstring path=L"store\\Installer\\Catalog-test";bool Write(){return true;}};
 bool RecoverControllerTransition(){return true;}
 bool ResetEvent(HANDLE){return true;}
 // QUOTE
