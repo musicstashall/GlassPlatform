@@ -1,3 +1,31 @@
+# Windows startup acceptance: короткий сценарий пройден
+
+Пользователь подтвердил корректную логику и отсутствие визуальных нареканий после
+повторной сборки. Разобраны `GlassSetup[2]-3.log` (external) и `GlassSetup[1]-2.log`
+(installed child); исходные вложения после анализа удалены.
+
+- External: check 09:30:30.772, startup handoff ACK 09:30:34.411, выход 09:30:34.456.
+  Полного MSI-source inspection до handoff нет.
+- Child из protected Installer/57a02f…: 09:30:35.016 inherited product catalog,
+  09:30:35.020 один product inspection, 09:30:41.206 completed/no repeated Setup check.
+- ARP refresh пяти зарегистрированных Glass products — ok. Product MSI execution
+  в этих журналах отсутствует; scenario завершён пользователем без операций.
+- Native offers корректно различают installed MSI 2.0.0.103 и offered 2.0.0.105;
+  это metadata discovery, не автоматический update. OpenGlass upstream/local DLL
+  совпали: 3.0.2.3749. SUT inventory absent; local vendor offer 4.0.0.
+
+Принят только online startup из layout: controller persistence/handoff, отсутствие
+повторного Setup check, однократный fresh product inventory, UI по подтверждению
+пользователя и выход без product changes. Не распространять приёмку на offline,
+Settings launch, фактический ARP entry launch, старый bootstrapper/newer Active,
+MSI apply/remove, reboot pins, retirement и fault-injection recovery.
+
+Следующий безопасный этап: offline startup и Settings/ARP entrypoints, каждый
+раз только дойти до выбора продуктов и отменить. Product operations — затем
+отдельным согласованным тестовым сценарием; crash/reboot injection только VM.
+
+---
+
 # Проверка без изменения продуктов: лишний Checking исправлен
 
 Пользователь выполнил запуск без установки/обновления продуктов. Два журнала

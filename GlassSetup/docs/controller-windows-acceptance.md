@@ -1,7 +1,9 @@
 # Controller lifecycle: следующий шаг — проверка на Windows
 
-Статус: реализация и portable actual-source tests подготовлены. Windows build,
-Authenticode/ACL/process/MSI acceptance ещё не выполнены. Не использовать рабочую
+Статус: пользователь собрал и успешно проверил online startup без операций:
+protected controller handoff, inherited catalog, один product inspection и UI без
+нареканий подтверждены двумя журналами и наблюдением пользователя. Offline,
+entrypoints, полный Authenticode/ACL fault matrix и MSI acceptance не выполнены. Не использовать рабочую
 машину для fault-injection или намеренного повреждения cache.
 
 ## 1. Сначала сборка, без установки
@@ -88,5 +90,7 @@ Fault-injection — только на snapshot VM. Не завершать ра�
 занятый EXE; повтор из подписанного distribution Unins после закрытия старых
 launchers убирает остаток. Не требуется вручную удалять Active или системный cache.
 
-Никакой Windows acceptance пока не заявлен. Ошибки первой сборки и результаты
-короткого сценария из §2 — следующий вход для исправлений.
+Короткий online startup без продуктовых операций принят. Следующий шаг — offline
+startup и запуск через Settings/ARP без подтверждения установки или удаления.
+Полная Windows acceptance остаётся открытой; результат online startup не является
+подтверждением MSI/reboot/crash recovery.
