@@ -1,3 +1,30 @@
+# Исправление download UX: штатная полоса и запуск только по «Далее»
+
+- Удалён дополнительный HTML aggregate progress-bar `components-downloads`
+  и резервирование места под него. Общий прогресс использует существующий
+  native `IDC_PROGRESS` над footer; индивидуальные полосы карточек сохранены.
+- План и state/selection echoes не запускают preparation. Только «Далее»
+  устанавливает pending continuation и разрешает coordinator создавать workers.
+- При готовом плане продолжаем сразу; иначе остаёмся на Components, отображаем
+  скачивание/проверку и по ready всех выбранных пакетов автоматически продолжаем
+  обычный путь установки. Certificate сохраняется там, где он требуется.
+- Ошибка не считается ready и не запускает MSI: остаёмся для Retry/изменения плана.
+  Возврат назад сбрасывает continuation и отменяет jobs; закрытие отменяет workers.
+- Загрузка самого Setup публикует реальные bytes/total через worker-local observer,
+  UI обновляет тот же IDC_PROGRESS; проверка после bytes==total не выдаётся за
+  завершённую установку. Нет второго aggregate bar в WebView или native content.
+
+Проверки: extracted production Next/reconcile/continuation/progress mock;
+coordinator и Setup acquisition mocks; пять production DOM suites; Chromium RU/EN
+геометрия карточек без дополнительной полосы. Нет MSVC/Windows build/network/MSI
+acceptance: реальные product downloads на Windows ещё не приняты.
+
+Собрать из корня solution **Release|x86: GlassShared → GlassUnins → GlassSetup**.
+Общий HTML затрагивает и GlassUnins. Полная пересборка MSI не нужна при наличии
+прежних Release x64 Native/helper prerequisites. Debug не проверяет production downloads.
+
+---
+
 # Реализация разделения attached media и внутреннего кэша
 
 - Backend независимо возвращает verified attached MSI version/path только из

@@ -350,7 +350,9 @@ assert "if (controlsReady_) { CreateFonts(); Layout(); WizardTheme::ResetButtonC
 # it with the engine target, a right-anchored fill, or a moving segment.
 progress_draw = section(setup, "case WM_DRAWITEM:", "case WM_CTLCOLORBTN:")
 assert "WizardProgress::DeterminateSpan" in progress_draw and "visibleProgress_.RecordPaint(progressValue_)" in progress_draw
-assert "progressMarquee_ && page_==Page::RuntimeInstalling" in progress_draw
+assert "progressMarquee_ && (page_==Page::RuntimeInstalling" in progress_draw  # Shared strip also handles unknown download totals.
+assert "(page_==Page::Components&&downloadContinuePending_)" in setup
+assert "(page_==Page::Checking&&setupDownloadActive_)" in setup
 assert "MarqueePhase" not in progress_draw and "progressValue_,progressReverse_" not in progress_draw
 cancel_request = section(setup, "void RequestClose() {", "void WebFailure(")
 assert "visibleProgress_.PaintedOr(progressValue_)" in cancel_request
@@ -705,7 +707,7 @@ assert "comp-reason-line:before" in ui and "componentsLoading" in ui
 # 2026-11-03 follow-up 7: final pages hide the progress strip and align one
 # footer divider with the HTML content edge.
 assert "const int footerTop=terminalPage?kHtmlHeight:kContentHeight" in setup and "Box(0,kHtmlHeight,kWidth,1)" not in setup
-assert "page_==Page::RuntimeInstalling);" in setup and "page_==Page::RuntimeInstalling || page_==Page::Complete" not in setup
+assert "const bool showProgress = !transitioning_" in setup and "page_==Page::RuntimeInstalling || page_==Page::Complete" not in setup
 
 # 2026-11-03 follow-up 8: on a clean install the reason line states requiredness —
 # «требуется» on platform products, «рекомендуется» on OpenGlass (neutral «не требуется»

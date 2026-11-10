@@ -81,6 +81,7 @@ constexpr ULONGLONG kRollbackFinishMs = 900;
 constexpr UINT kInitWebView = WM_APP + 1;
 constexpr UINT kVersionCheckComplete = WM_APP + 2;
 constexpr UINT kSetupDownloadStarted = WM_APP + 8;
+constexpr UINT kSetupDownloadProgress = WM_APP + 9;
 constexpr UINT kRuntimeStatus = WM_APP + 3, kRuntimeComplete = WM_APP + 4;
 constexpr UINT kBeginStartup = WM_APP + 5, kStartupComplete = WM_APP + 6, kInspectReady = WM_APP + 7;
 constexpr ULONGLONG kFadeDuration = 280;
@@ -1308,6 +1309,8 @@ private:
     std::atomic_bool versionCheckCancel_{false};
     GlassPackageCatalog::Catalog releaseCatalog_;
     GlassProductDownloads downloads_;
+    bool downloadContinuePending_=false,setupDownloadActive_=false;
+    std::atomic<std::uint64_t> setupDownloadBytes_{0},setupDownloadTotal_{0};
     std::wstring checkingStatus_;
     bool versionCheckStarted_ = false, versionCheckHandled_ = false, controllerCheckHandled_ = false;
 
@@ -1709,7 +1712,8 @@ private:
         ShowWindow(eula_,nativeLicense?SW_SHOWNA:SW_HIDE);
         ShowWindow(accept_,nativeLicense?SW_SHOWNA:SW_HIDE);
         EnableWindow(accept_,!DebugDemoLocksControls());
-        const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching || page_==Page::RuntimeInstalling);
+        const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching || page_==Page::RuntimeInstalling ||
+            (page_==Page::Components&&downloadContinuePending_) || (page_==Page::Checking&&setupDownloadActive_));
         ShowWindow(progress_, showProgress ? SW_SHOWNA : SW_HIDE);
         if (controller_) controller_->put_IsVisible(webVisible ? TRUE : FALSE);
         ShowWindow(webHost_,webVisible?SW_SHOWNA:SW_HIDE);
@@ -2216,13 +2220,50 @@ private:
     bool DownloadsReady() const {return SimulationBuild()||downloads_.Ready(DownloadSelection());}
     void ReconcileDownloads() {
         if(SimulationBuild()||DebugDemoLocksControls()||!controlsReady_)return;
-        if(page_==Page::Components&&inspectReady_.load(std::memory_order_acquire)) {
+        if(page_==Page::Components&&downloadContinuePending_&&inspectReady_.load(std::memory_order_acquire)) {
             downloads_.Reconcile(DownloadSelection(),releaseCatalog_);
             SetTimer(window,kProductDownloadTimer,200,nullptr);
         } else if(page_==Page::License) {
             downloads_.Reconcile({},releaseCatalog_);
             KillTimer(window,kProductDownloadTimer);
         }
+    }
+    void UpdateDownloadProgress() {
+        std::uint64_t total=0,received=0;bool ready=true,unknown=false;
+        if(page_==Page::Checking) {
+            total=setupDownloadTotal_.load();received=setupDownloadBytes_.load();
+            ready=false;unknown=!total;
+        }else {
+            const auto selected=DownloadSelection();
+            for(std::size_t i=0;i<selected.size();++i)if(selected[i]) {
+                const auto& job=downloads_.jobs[i];
+                if(!job){unknown=true;ready=false;continue;}
+                const bool finished=job->done.load(std::memory_order_acquire);
+                const bool done=finished&&job->ok;
+                const auto size=job->total.load();total+=size;
+                received+=done?size:(std::min)(size,job->bytes.load());
+                unknown|=!size&&!finished;ready&=done;
+            }
+        }
+        progressMarquee_=unknown;
+        marqueePhase_=static_cast<double>(GetTickCount64()%kMarqueePeriodMs)/kMarqueePeriodMs;
+        progressValue_=displayProgress_=progressTarget_=ready?10000:total?
+            static_cast<int>((std::min<std::uint64_t>)(9900,received*10000/total)):0;
+        percent_=WizardProgress::Percent(progressValue_);
+        ShowContentControls();InvalidateRect(progress_,nullptr,FALSE);InvalidateFooter();
+    }
+    void RequestComponentContinue() {
+        if(!ComponentsReady())return;
+        downloadContinuePending_=true;
+        ReconcileDownloads();UpdateDownloadProgress();
+        ContinueAfterDownloads();SyncWebViewState();
+        EnableWindow(next_,ComponentsReady());
+    }
+    void ContinueAfterDownloads() {
+        if(!downloadContinuePending_||page_!=Page::Components||transitioning_||!DownloadsReady()||!ComponentsReady())return;
+        downloadContinuePending_=false;
+        KillTimer(window,kProductDownloadTimer);
+        if(CertificatePageApplies())SetPage(Page::Certificate);else StartInstallation();
     }
     std::wstring NativeDownloadSummary() const {
         if(SimulationBuild())return {};
@@ -2425,7 +2466,7 @@ private:
     }
     // «Установить» доступен, когда анализ завершён и есть выбранные продукты.
     [[nodiscard]] bool ComponentsReady() const noexcept {
-        return (page_!=Page::Components && page_!=Page::Certificate) || (DownloadsReady() && inspectReady_.load(std::memory_order_acquire) && HasSelectedComponent() &&
+        return (page_!=Page::Components && page_!=Page::Certificate) || ((!downloadContinuePending_||DownloadsReady()) && inspectReady_.load(std::memory_order_acquire) && HasSelectedComponent() &&
             !(selection_.removeMask && (selection_.secureUxTheme||selection_.secureUxThemeRemove)));
     }
     void OnInspectReady() {
@@ -2458,6 +2499,8 @@ private:
         const Page oldPage=page_;
         if (transitioning_) EndTransition();
         page_=page;
+        if(page_!=Page::Components)downloadContinuePending_=false;
+        if(page_!=Page::Checking)setupDownloadActive_=false;
         BOOL animationsEnabled=TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
         loadingAnimationsEnabled_=animationsEnabled!=FALSE;
@@ -2673,7 +2716,7 @@ private:
     }
     void StartInstallation() {
         // Debug retains its original simulation contract; Release uses external MSI.
-        if (!accepted_ || transitioning_ || DebugDemoLocksControls() || !ComponentsReady()) return;
+        if (!accepted_ || transitioning_ || DebugDemoLocksControls() || !ComponentsReady() || !DownloadsReady()) return;
         if ((page_!=Page::Components && page_!=Page::Certificate) ||
             !inspectReady_.load(std::memory_order_acquire) || !HasSelectedComponent()) return;
         {std::lock_guard<std::mutex> lock(inspectMutex_);
@@ -2899,7 +2942,14 @@ private:
                         result.self = SelfProductVersion();
                         result.newer = !result.self.empty() && VersionOlder(result.self, result.latest);
                         if(allowSetupDownload&&result.newer&&result.catalog.setup&&result.catalog.setup->downloadable&&!versionCheckCancel_.load()){
+                            setupDownloadBytes_=0;setupDownloadTotal_=result.catalog.setup->size;
                             PostMessageW(target,kSetupDownloadStarted,0,0);
+                            ULONGLONG lastProgress=0;
+                            GlassReleaseClient::packageProgress=[this,target,&lastProgress](std::uint64_t bytes,std::uint64_t total) {
+                                setupDownloadBytes_=bytes;setupDownloadTotal_=total;
+                                const auto now=GetTickCount64();
+                                if(now-lastProgress>=100||bytes==total){lastProgress=now;PostMessageW(target,kSetupDownloadProgress,0,0);}
+                            };
                             if(GlassPackageAcquisition::CreateWorkspace(result.workspace)&&
                                GlassPackageAcquisition::PrepareSetup(*result.catalog.setup,result.workspace,versionCheckCancel_,result.preparedSetup,diagnostic)){
                                 ULONGLONG key=0;
@@ -2910,6 +2960,7 @@ private:
                                     diagnostic=L"Downloaded Setup ProductVersion differs from release catalog";
                                 }
                             }
+                            GlassReleaseClient::packageProgress={};
                             if(!diagnostic.empty())InstallLog::Line(diagnostic.c_str());
                         }
                     }
@@ -2917,6 +2968,7 @@ private:
                     result.fetched = false;
                     result.newer = false;
                 }
+                GlassReleaseClient::packageProgress={};
                 result.completed = true;
                 {
                     std::lock_guard<std::mutex> lock(versionCheckMutex_);
@@ -3884,7 +3936,7 @@ private:
                 sutChecked?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF;
             DrawLabel(dc,selection_.secureUxThemeRemove?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
                 L"Будет удалён MSI; постоянные файлы сохранятся":L"MSI will be removed; permanent files are retained"):Text(sutStateId),Box(510,377,380,38),small_,accent);
-            DrawLabel(dc,NativeDownloadSummary(),Box(48,520,900,20),small_,accent,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
+
             const auto warnings=ComponentWarnings();
             if(!warnings.empty())DrawLabel(dc,warnings,Box(48,432,840,88),font_,white);
             }
@@ -4040,8 +4092,8 @@ private:
         }
     }
     void RenderFooterText(HDC dc) {
-        if (page_!=Page::Installing && page_!=Page::Cancelling && page_!=Page::Launching && page_!=Page::RuntimeInstalling) return;
-        const std::wstring line=page_==Page::RuntimeInstalling?runtimeStatus_:installStatusLine_.empty()?Text(IDS_STATUS_PREPARE):installStatusLine_;
+        if (page_!=Page::Installing && page_!=Page::Cancelling && page_!=Page::Launching && page_!=Page::RuntimeInstalling && !(page_==Page::Components&&downloadContinuePending_) && !(page_==Page::Checking&&setupDownloadActive_)) return;
+        const std::wstring line=page_==Page::Components?NativeDownloadSummary():page_==Page::Checking?checkingStatus_:page_==Page::RuntimeInstalling?runtimeStatus_:installStatusLine_.empty()?Text(IDS_STATUS_PREPARE):installStatusLine_;
         const std::wstring percentText=progressValue_>0 && percent_==0 ? L"<1%" : std::to_wstring(percent_)+L"%";
         const std::wstring shown=progressMarquee_?line:line+L"  "+percentText;
         RECT dot=Box(32,kContentHeight+22,8,8);
@@ -4130,9 +4182,13 @@ private:
         case kInitWebView: if (!closing_) InitializeWebView(); return 0;
         case kSetupDownloadStarted:
             if(!closing_&&page_==Page::Checking){
+                setupDownloadActive_=true;UpdateDownloadProgress();
                 checkingStatus_=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Скачиваем и проверяем новый Setup":L"Downloading and verifying new Setup";
                 SyncWebViewState();InvalidateRect(window,nullptr,FALSE);
             }
+            return 0;
+        case kSetupDownloadProgress:
+            if(!closing_&&page_==Page::Checking&&setupDownloadActive_)UpdateDownloadProgress();
             return 0;
         case kVersionCheckComplete: if (!closing_) CompleteVersionCheck(); return 0;
         case kRuntimeStatus: {
@@ -4178,7 +4234,8 @@ private:
             const auto item=reinterpret_cast<const DRAWITEMSTRUCT*>(l);
             if (item && item->CtlID==IDC_PROGRESS) {
                 FillRect(item->hDC,&item->rcItem,progressTrack_);
-                if (progressMarquee_ && page_==Page::RuntimeInstalling) {
+                if (progressMarquee_ && (page_==Page::RuntimeInstalling ||
+                    (page_==Page::Components&&downloadContinuePending_) || (page_==Page::Checking&&setupDownloadActive_))) {
                     const int width = item->rcItem.right - item->rcItem.left;
                     const int span = std::max(width / 3, 48);
                     const int travel = width + span;
@@ -4360,7 +4417,9 @@ private:
                     (void)Shared::GlassInstallerLaunch::MarkEulaAccepted(SetupLicenseIdentity().c_str());
                     SetPage(Page::Components);
                 }
-                else if (page_==Page::Components) { if(!ComponentsReady())return 0; if (CertificatePageApplies()) SetPage(Page::Certificate); else StartInstallation(); }
+                else if (page_==Page::Components) {
+                    RequestComponentContinue();
+                }
                 else if (page_==Page::Certificate) StartInstallation();
                 else if (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error || page_==Page::RuntimeError || page_==Page::AlreadyRunning) RequestClose();
                 return 0;
@@ -4371,7 +4430,7 @@ private:
         case WM_TIMER:
             if(w==kProductDownloadTimer) {
                 if(page_!=Page::Components){KillTimer(window,kProductDownloadTimer);return 0;}
-                ReconcileDownloads();
+                ReconcileDownloads();UpdateDownloadProgress();ContinueAfterDownloads();
                 EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());
                 SyncWebViewState();InvalidateContent();
             }
