@@ -1,3 +1,19 @@
+## Дополнение: проверяемая очистка реестра DWM после полного удаления
+
+Повторно сверено upstream OpenGlass `fb145fcd391b274cb91e642c93b3fc2b0e30e61c`
+`DeleteConfig`: все 49 допустимых OpenGlass значений уже были в локальном списке;
+пять остальных upstream имён — защищённые Windows цвета, исключённые по согласованной
+политике. Новых подтверждённых имён для удаления не обнаружено.
+
+Доработана общая реализация `RegistrySanity::CleanOwnedSettings`: проверка отсутствия
+всего allowlist после удаления, ошибка при recreated/query-failed значении, диагностика
+с именем. Этот код применяется к пользовательским hive и HKLM, обоим view, через
+общую Inventory в Setup/GlassUnins. Не меняет явное согласие и after-removal gates.
+Новый production-function registry mock и существующие profile/full-removal/resource
+проверки PASS. Windows/MSVC runtime/build не выполнялись.
+
+Сборка **Release|x86: GlassShared → GlassUnins → GlassSetup**; full solution не нужна.
+
 # Полное удаление: explicit data cleanup и устаревшая команда ARP Modify
 
 Пользователь наблюдал: после удаления всех продуктов SystemSettings продолжает
