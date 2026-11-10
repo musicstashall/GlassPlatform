@@ -218,7 +218,7 @@ ULONGLONG ControllerVersion(const std::wstring& file){
     std::vector<BYTE> bytes(size);VS_FIXEDFILEINFO* info=nullptr;UINT length=0;
     if(!GetFileVersionInfoW(file.c_str(),0,size,bytes.data())||
        !VerQueryValueW(bytes.data(),L"\\",reinterpret_cast<void**>(&info),&length)||length<sizeof(*info)||!info||info->dwSignature!=0xfeef04bd)return 0;
-    return (static_cast<ULONGLONG>(info->dwProductVersionMS)<<32)|info->dwProductVersionLS;
+    return (static_cast<ULONGLONG>(info->dwFileVersionMS)<<32)|info->dwFileVersionLS;
 }
 bool WriteControllerRecord(const wchar_t* name,const std::string& record){
     using namespace GlassMaintenanceCache;

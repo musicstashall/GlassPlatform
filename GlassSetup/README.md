@@ -14,6 +14,19 @@
 
 Версии карточек и независимый MSI ProductVersion: [контракт MSI-версий](docs/msi-product-versions.md).
 
+## Самообновление Setup
+
+Для self-update используется собственный числовой **FileVersion GlassSetup.exe**,
+а не ProductVersion комплекта. `setup` / `setupPackage.version` в `version.json`
+должны содержать FileVersion опубликованного EXE. После сборки пересоздайте каталог
+скриптом `GlassSetup/scripts/New-ReleaseCatalog.ps1` с `-IncludeSetup`; он вычисляет
+также SHA-256 и размер нового файла. MSI сохраняют независимые ProductVersion.
+Подробнее: [контракт версий](docs/msi-product-versions.md).
+
+Для этой правки собрать **GlassSetup — Release|x86**; ранее собранные GlassShared
+и Release GlassUnins достаточны. Старый уже выпущенный EXE продолжает использовать
+прежнее сравнение и может потребовать прямого скачивания нового Setup из релиза.
+
 ## Источники Available
 
 «Локально» означает только проверенный MSI рядом с исходным external EXE либо

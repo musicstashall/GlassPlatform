@@ -239,7 +239,7 @@ GlassSetup.exe (Win32, ~без MSI)
 Новые версии отдельных продуктов отражаются на странице обслуживания продуктов.
 
 1. Старт мастера → стадия «Проверка» (существующая `Page::Checking`), статус «Проверяем версию установщика».
-2. `GET version.json` → `setupPackage.version`; сравнение с `ProductVersion` собственного EXE (`SelfProductVersion()` + `TryParseVersion`/`CompareVersions`).
+2. `GET version.json` → `setupPackage.version`; сравнение с числовым `FileVersion` собственного EXE (`SelfFileVersion()` + `TryParseVersion`/`CompareVersions`). Скачанный EXE и выбор controller проверяются в том же домене FileVersion; ProductVersion комплекта здесь не используется.
 3. Если серверная **новее** — загрузка:
    - `.part` в защищённом staging ProgramData → проверка размера, SHA-256, подписи (WinVerifyTrust + ожидаемый издатель);
    - подготовка проверенного EXE и отдельная публикация пользовательского файла или cached EXE по правилам п.7–9;

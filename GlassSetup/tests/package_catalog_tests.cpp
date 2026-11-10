@@ -55,8 +55,13 @@ int main() {
     assert(Parse(partial.dump(),out,error));assert(Compare(out.products[3]->version,V("2.0.0.5"))==0);
     auto missing=good;missing["products"][0].erase("sha256");
     assert(Parse(missing.dump(),out,error));assert(!out.products[0]->downloadable && out.products[1]->downloadable);
-    assert(Parse("{\"glass\":\"1.2.3\",\"url\":\"https://github.com/legacy\"}",out,error));
-    assert(!out.setup && out.setupVersion); // Legacy metadata is not a verified EXE download.
+    assert(!Parse("{\"glass\":\"1.2.3\",\"url\":\"https://github.com/legacy\"}",out,error));
+    // Bundle/MSI versions must never become a controller FileVersion.
+    auto independent=good;independent["glass"]="9.0.0.108";
+    independent["setup"]="1.0.0.12";independent["setupPackage"]["version"]="1.0.0.12";
+    assert(Parse(independent.dump(),out,error));assert(Compare(*out.setupVersion,V("1.0.0.12"))==0);
+    independent.erase("setup");independent.erase("setupPackage");
+    assert(Parse(independent.dump(),out,error)&&!out.setupVersion&&!out.setup);
     auto rejected=[&](const json& value){assert(!Parse(value.dump(),out,error));assert(!error.empty() && !out.setup && !out.products[0]);};
     auto bad=good;bad["products"].push_back(bad["products"][0]);rejected(bad);
     for(const char* url : {"http://github.com/musicstashall/GlassPlatform/releases/download/v1/Glass-x64.msi",

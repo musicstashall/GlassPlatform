@@ -204,6 +204,27 @@ std::wstring SelfProductVersion() {
     return ReadProductVersionString(exe, key);
 }
 
+// Self-update is ordered by the Setup module's numeric FileVersion, not by
+// bundle ProductVersion or a localized display string. Match controller storage.
+std::wstring ReadSetupFileVersion(const std::wstring& path) {
+    DWORD ignored=0;const DWORD size=GetFileVersionInfoSizeW(path.c_str(),&ignored);
+    if(!size||size>1024*1024)return {};
+    std::vector<BYTE> bytes(size);VS_FIXEDFILEINFO* info=nullptr;UINT length=0;
+    if(!GetFileVersionInfoW(path.c_str(),0,size,bytes.data())||
+       !VerQueryValueW(bytes.data(),L"\\",reinterpret_cast<void**>(&info),&length)||
+       !info||length<sizeof(*info)||info->dwSignature!=0xfeef04bd||
+       (!info->dwFileVersionMS&&!info->dwFileVersionLS))return {};
+    return std::to_wstring(HIWORD(info->dwFileVersionMS))+L"."+
+        std::to_wstring(LOWORD(info->dwFileVersionMS))+L"."+
+        std::to_wstring(HIWORD(info->dwFileVersionLS))+L"."+
+        std::to_wstring(LOWORD(info->dwFileVersionLS));
+}
+std::wstring SelfFileVersion() {
+    wchar_t exe[32768]{};const DWORD count=GetModuleFileNameW(nullptr,exe,32768);
+    if(!count||count>=32768)return {};
+    return ReadSetupFileVersion(std::wstring(exe,count));
+}
+
 // Both translations and the GPL appendix contribute in a fixed order. Changing
 // UI language alone must not repeat consent; changed terms must repeat it even
 // if a publisher accidentally keeps ProductVersion unchanged. No handoff token
@@ -2939,7 +2960,7 @@ private:
                     }
                     if(!diagnostic.empty())InstallLog::Line(diagnostic.c_str());
                     if (result.fetched&&checkSetup) {
-                        result.self = SelfProductVersion();
+                        result.self = SelfFileVersion();
                         result.newer = !result.self.empty() && VersionOlder(result.self, result.latest);
                         if(allowSetupDownload&&result.newer&&result.catalog.setup&&result.catalog.setup->downloadable&&!versionCheckCancel_.load()){
                             setupDownloadBytes_=0;setupDownloadTotal_=result.catalog.setup->size;
@@ -2952,12 +2973,11 @@ private:
                             };
                             if(GlassPackageAcquisition::CreateWorkspace(result.workspace)&&
                                GlassPackageAcquisition::PrepareSetup(*result.catalog.setup,result.workspace,versionCheckCancel_,result.preparedSetup,diagnostic)){
-                                ULONGLONG key=0;
                                 ParsedVersion actualVersion{},expectedVersion{};
-                                if(!TryParseVersion(ReadProductVersionString(result.preparedSetup,key),actualVersion)||
+                                if(!TryParseVersion(ReadSetupFileVersion(result.preparedSetup),actualVersion)||
                                    !TryParseVersion(result.latest,expectedVersion)||actualVersion.fields!=expectedVersion.fields){
                                     DeleteFileW(result.preparedSetup.c_str());result.preparedSetup.clear();
-                                    diagnostic=L"Downloaded Setup ProductVersion differs from release catalog";
+                                    diagnostic=L"Downloaded Setup FileVersion differs from release catalog";
                                 }
                             }
                             GlassReleaseClient::packageProgress={};
@@ -3041,7 +3061,7 @@ private:
             ContinueAfterLicenseCheck();
             return;
         }
-        InstallLog::LineFormat(L"Version check: local=%s remote=%s",
+        InstallLog::LineFormat(L"Setup FileVersion check: local=%s remote=%s",
             result.self.c_str(), result.latest.c_str());
         if (result.self.empty() || !result.newer) {
             InstallLog::Line(L"Version check: no newer setup; continuing with this setup");

@@ -1,5 +1,25 @@
 # Версии продуктов: MSI отдельно от версии контроллера Setup
 
+## Собственная версия Setup
+
+Самообновление Setup использует числовой **FileVersion** EXE из `VS_FIXEDFILEINFO`.
+`setup` и `setupPackage.version` каталога относятся именно к нему, а не к
+ProductVersion комплекта или `products[].version`. После скачивания FileVersion
+EXE сверяется с каталогом; выбор immutable controller и запрет его downgrade
+используют тот же FileVersion. Подпись, ожидаемый издатель, hash и протокол
+startup ACK проверяются независимо от версии.
+
+`New-ReleaseCatalog.ps1 -IncludeSetup` читает FileMajorPart/FileMinorPart/
+FileBuildPart/FilePrivatePart из готового EXE. При публикации изменённого Setup
+его FileVersion должен увеличиться. Старый `version.json` с ProductVersion в
+setup-полях нужно пересоздать, не подменять версию без пересчёта SHA-256/размера.
+Fallback `glass` → setup удалён: версия платформы не версия controller.
+Старые выпущенные EXE продолжат выполнять свой прежний код сравнения; для
+перехода может потребоваться прямой запуск нового EXE из релиза.
+
+ProductVersion Setup остаётся для существующих bundle/preflight display и EULA
+identity; этим изменением их семантика не меняется. Версии MSI независимы.
+
 ## Источник истины
 
 - **Установлено:** `MsiGetProductInfoW(ProductCode, INSTALLPROPERTY_VERSIONSTRING)`

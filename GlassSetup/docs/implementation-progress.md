@@ -1,3 +1,30 @@
+# Независимая FileVersion для самообновления Setup
+
+- Self-update сравнивает numeric fixed FileVersion собственного EXE с `setup` /
+  `setupPackage.version`; проверка скачанного EXE использует ту же FileVersion.
+- Controller selection/publication/no-downgrade также переведены на FileVersion,
+  иначе одинаковый ProductVersion мог оставить старый active controller.
+- Release generator читает числовые File*Part EXE, MSI — по-прежнему из таблицы
+  Property.ProductVersion. Версия `glass` больше не fallback версии Setup.
+- Проверки SHA-256, издателя, startup protocol и receipts не ослаблены. EULA и
+  bundle ProductVersion display не переопределены. Пересоздать release catalog
+  с `-IncludeSetup` после сборки; старый ProductVersion manifest не переиспользовать.
+- Выпущенный старый EXE не меняет своего алгоритма: для первоначального перехода
+  может требоваться прямая загрузка и запуск нового Setup из релиза.
+
+PASS: extracted production Setup/controller FileVersion readers (ProductVersion
+не меняется, FileVersion растёт; invalid/missing resources); catalog parser,
+controller handoff/store/child/trust, installed-version/preflight, EULA,
+Setup acquisition и resource smoke. PowerShell generator проверен по исходникам,
+не выполнялся на Windows. Реального self-update/network/MSI acceptance нет.
+
+Сборка из корня solution: **GlassSetup, Release|x86**. GlassShared и Release
+GlassUnins используются из предыдущей успешной сборки; их исходники/общий HTML
+этим изменением не затронуты. При отсутствии prerequisites обычный порядок
+GlassShared → GlassUnins → GlassSetup. Все MSI пересобирать не требуется.
+
+---
+
 # Исправление download UX: штатная полоса и запуск только по «Далее»
 
 - Удалён дополнительный HTML aggregate progress-bar `components-downloads`

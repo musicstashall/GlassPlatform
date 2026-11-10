@@ -17,6 +17,7 @@ struct Asset {
     bool downloadable = false;
 };
 struct Catalog {
+    // Numeric Setup EXE FileVersion; independent from all MSI ProductVersions.
     std::optional<Version> setupVersion;
     std::optional<Asset> setup;
     std::array<std::optional<Asset>, kCount> products{};
@@ -85,7 +86,6 @@ inline bool Parse(const std::string& text, Catalog& out, std::string& error) {
         if (!json.is_object()) throw std::runtime_error("Expected catalog object");
         Catalog result;
         if (json.contains("setup")) result.setupVersion = ReadVersion(json.at("setup"));
-        else if (json.contains("glass")) result.setupVersion = ReadVersion(json.at("glass"));
         if (json.contains("setupPackage")) {
             auto asset = ReadAsset(json.at("setupPackage"), "GlassSetup.exe");
             if (result.setupVersion && GlassPackageRules::Compare(*result.setupVersion, asset.version) != 0)

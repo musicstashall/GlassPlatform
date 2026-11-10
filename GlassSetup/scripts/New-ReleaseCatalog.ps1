@@ -84,10 +84,13 @@ foreach ($id in $Products) {
 $catalog['products'] = @($entries.Keys | Sort-Object | ForEach-Object { $entries[$_] })
 if ($IncludeSetup) {
     $exe = Join-Path $directory 'GlassSetup.exe'
-    $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($exe).ProductVersion
+    # Numeric fixed FileVersion is the controller's own build identity.
+    # ProductVersion belongs to the bundle and can stay unchanged across Setup builds.
+    $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+    $version = '{0}.{1}.{2}.{3}' -f $info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart
+    if ($version -eq '0.0.0.0') { throw 'Setup numeric FileVersion is missing or zero' }
     $catalog['setupPackage'] = New-Asset 'GlassSetup.exe' $version
     $catalog['setup'] = $version
-    if (-not $catalog.Contains('glass')) { $catalog['glass'] = $version }
 }
 # Legacy scalar refers to Platform, never to a newer Settings-only/Setup-only build.
 $legacyPlatform = $null
