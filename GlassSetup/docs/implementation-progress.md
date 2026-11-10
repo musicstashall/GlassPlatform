@@ -1,3 +1,18 @@
+# GlassSettings снова берёт версию из комплекта
+
+- Удалены `GlassSettings/Version.props` и подмена Version/AssemblyVersion/
+  InformationalVersion. ProductVersion приложения — `GlassBundleVersionEffective`.
+  FileVersion сохраняет свой счётчик, префикс — `GlassProductVersion` (`2.0.0`).
+- Оба MSI Settings по умолчанию снова получают базовую тройку и номер комплекта.
+  Gate сверяет ProductVersion staged EXE с версией комплекта и с MSI.
+- Миграции со старой `2.0.1.0` нет: прежняя установка снимается, новая
+  проверяется с нуля.
+
+Сборка — полная пересборка продуктов пользователем. Каталог релиза после неё
+пересоздаётся из готовых MSI, версии вручную не правятся.
+
+---
+
 # Независимая release-версия приложения и MSI GlassSettings
 
 - Отдельный источник `GlassSettings/Version.props`: `GlassSettingsVersion=2.0.1.0`.

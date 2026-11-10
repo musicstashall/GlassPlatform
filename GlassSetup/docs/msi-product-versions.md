@@ -20,27 +20,26 @@ Fallback `glass` → setup удалён: версия платформы не в
 ProductVersion Setup остаётся для существующих bundle/preflight display и EULA
 identity; этим изменением их семантика не меняется. Версии MSI независимы.
 
-## Независимая версия GlassSettings
+## Версия GlassSettings
 
-`GlassSettings/Version.props` — источник `GlassSettingsVersion` приложения и MSI
-x64/x86. Она больше не берётся из GlassBundleVersion. Начало — `2.0.1.0`, выше
-прошлых `2.0.0.N` по первым трём полям MSI. Приложение получает эту версию в
-ProductVersion/AssemblyVersion; FileVersion имеет свой per-project build counter.
-Native остаётся отдельным модулем, не источником версии приложения.
+Приложение и оба MSI Settings используют общий источник комплекта:
+`GlassProductVersion` и номер сессии. Отдельного `GlassSettingsVersion` нет.
+ProductVersion EXE — `GlassBundleVersion`. FileVersion сохраняет per-project
+build counter с префиксом `GlassProductVersion`. Native не является источником
+версии приложения.
 
-`ProductVersions.props` по умолчанию задаёт обоим MSI Settings эту release-версию.
-Перед созданием metadata/harvest `Assert-SettingsVersion.ps1` сверяет MSI version
-и ProductVersion staged `GlassSettings.exe` с release-версией. Несовпадение,
-отсутствующий/устаревший EXE или недопустимая версия прерывают упаковку. DLL не
+`ProductVersions.props` оставляет версии Settings пустыми, поэтому MSI получает
+ту же формулу, что и платформа: базовая тройка плюс номер комплекта. Явная
+подмена `GlassSettings64MsiVersion` или `GlassSettings32MsiVersion` допустима
+только когда она численно совпадает с ProductVersion упаковываемого EXE.
+`Assert-SettingsVersion.ps1` сверяет этот EXE и ProductVersion MSI до harvest.
+Несовпадение, отсутствующий или устаревший EXE прерывают упаковку. DLL не
 обязательна: поддерживается single-file publish. Ни приложение, ни Native не
 запускаются. Проверка не заменяет runtime trust/receipt/identity validation.
 
-Установщик уже сравнивает независимые installed/candidate MSI Settings и
-показывает их версии в карточках. При согласованных EXE/MSI это собственная версия
-Settings, а не платформа. Каталог релиза по-прежнему считывает ProductVersion MSI.
-Для нового выпуска Settings нужно поднять `GlassSettingsVersion`; повторная
-компиляция с тем же release-номером не объявляется новым выпуском. Обновление
-только Setup/платформы не требует увеличения версии Settings.
+Каталог релиза читает ProductVersion каждого MSI. Повторная компиляция в той же
+сессии комплекта не меняет эту версию. Новый номер комплекта меняет её вместе
+с платформой.
 
 ## Источник истины
 

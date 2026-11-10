@@ -4,28 +4,25 @@
 
 Приложение параметров платформы. Detail-страницы используют serial-конвейер UI + реестр + notice — **обязательно** [docs/GlassSettings-page-pipeline.md](docs/GlassSettings-page-pipeline.md) перед правками страниц.
 
-## Собственная версия Settings
+## Версия Settings
 
-`Version.props` задаёт **GlassSettingsVersion** приложения и обоих MSI Settings,
-независимо от версии платформы, FileVersion Setup и версии Settings.Native.
-Начальная независимая версия — **2.0.1.0**: она выше прежней `2.0.0.N` по первым
-трём полям, сравниваемым Windows Installer. При новом выпуске Settings увеличивайте
-эту четырёхкомпонентную release-версию; не увеличивайте её ради правок только Setup
-или платформы. Если уже опубликована более высокая версия Settings, не понижайте её.
+Основная версия приложения и обоих MSI Settings берётся из общего источника
+комплекта: `GlassProductVersion` в корневом `Directory.Build.props` и номер
+комплекта текущей сессии. Отдельной версии Settings нет. FileVersion сохраняет
+собственный счётчик проекта, его первые три поля — те же `2.0.0`. Native helper
+нумеруется отдельно и не задаёт версию приложения.
 
-Приложение получает собственные Version/AssemblyVersion/InformationalVersion
-(ProductVersion ресурса EXE). Диагностический FileVersion сохраняет per-project
-build counter с префиксом версии Settings. Native helper нумеруется отдельно.
-MSI packaging проверяет ProductVersion фактически упаковываемого EXE (включая
-single-file publish) против release-версии и MSI; устаревший publish запрещён.
-Это read-only проверка без запуска EXE и без загрузки Native/managed assembly.
+ProductVersion EXE — версия комплекта. Перед упаковкой MSI read-only проверка
+сверяет её с ProductVersion пакета; устаревший EXE или чужая подмена версии
+прерывают сборку. EXE и Native при этом не запускаются. Single-file publish
+поддерживается: managed DLL для проверки не нужна.
 
-Сборка обоих payload: **Release|x64: GlassShared → GlassSettings (сборка Native
-выполняется его target) → GlassSettings-x64**; затем **Release|x86: GlassShared →
-GlassSettings → GlassSettings-x86**. Нужен ранее собранный Release x86 GlassUnins;
-при его отсутствии сначала собрать **Release|x86: GlassShared → GlassUnins**.
-Пересборка платформенных MSI и Setup для этой правки не требуется.
-После сборки обновить release catalog из новых MSI. См.
+Оба payload Settings собираются в сессии комплекта: **Release|x64: GlassShared →
+GlassSettings (сборка Native выполняется его target) → GlassSettings-x64**; затем
+**Release|x86: GlassShared → GlassSettings → GlassSettings-x86**. Нужен ранее
+собранный Release x86 GlassUnins; при его отсутствии сначала собрать
+**Release|x86: GlassShared → GlassUnins**. После пересборки продуктов каталог
+релиза создаётся заново из готовых MSI. См.
 [контракт версий](../GlassSetup/docs/msi-product-versions.md).
 
 ## Документация
