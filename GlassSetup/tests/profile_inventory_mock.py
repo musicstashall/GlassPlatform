@@ -76,6 +76,7 @@ int themeChecks=0,themeCommits=0,failThemeCheck=0,failThemeCommit=0;
 namespace GlassSavedThemeCleanup {struct Batch {bool Prepare(const std::wstring&,HKEY,bool (*)(const std::wstring&),std::wstring&){return ++themeChecks!=failThemeCheck;}bool Cleanup(HKEY,bool,bool&,std::wstring&){return ++themeCommits!=failThemeCommit;}};}
 bool IsDesktopProfile(const std::wstring&){return false;}
 '''
+prefix+=r'namespace GlassUserDataCleanup {bool Run(const std::wstring&,bool,std::wstring&){return true;}}'
 prefix+=r'namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}'
 profile=s[s.index('struct Profile {'):s.index('inline bool ReadString(')]
 methods='\n'.join(function(token) for token in ('bool OpenAll(', 'bool VerifyInventory(', 'bool PreflightCleanup(', 'bool Cleanup('))

@@ -1,6 +1,7 @@
 #include "InstallSupport/GlassMaintenanceCache.h"
 #include "InstallSupport/GlassPackageAcquisition.h"
 #include "InstallEngine.h"
+#include "InstallSupport/GlassMaintenanceLifetime.h"
 #include "GlassMaintenanceExecutor.h"
 #include "InstallSupport/GlassProductInspect.h"
 #include "InstallSupport/GlassPackageRules.h"
@@ -467,6 +468,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             }
 
             if (ok && !self->IsCancelRequested()) ok = self->PrepareSecureUxRemoval();
+            if (ok && !self->IsCancelRequested()) ok = self->PrepareFullRemovalCleanup();
             if (ok && !self->IsCancelRequested()) ok = self->BuildExecutionPlan();
             if(ok && !self->IsCancelRequested())ok=self->PrepareManagedRemoval();
 
@@ -555,6 +557,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                         const ULONGLONG remain = kMinLaunchMs - elapsed;
                         Sleep(remain > 150 ? 150 : static_cast<DWORD>(remain));
                     }
+                    self->FinishFullRemovalCleanup();
                     self->SetStatus(self->labels_.finalize, 10000);
                 }
             }
@@ -1691,6 +1694,39 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
         executionPlanReady_=true;
         return true;
     }catch(...){return refuse(L"Cannot allocate execution plan");}
+}
+
+bool InstallEngine::PrepareFullRemovalCleanup() noexcept {
+    if(!selection_.cleanupUserData)return true;
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    try {
+        unsigned installed=0;
+        const wchar_t* codes[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
+            GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductOpenGlass,nullptr,GlassInstallMsi::kProductSettingsX86};
+        for(unsigned i=0;i<6;++i)if(codes[i]&&GlassInstallMsi::IsProductInstalled(codes[i]))installed|=1u<<i;
+        if(GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX64))installed|=1;
+        if(GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX86))installed|=2;
+        if(GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass))installed|=8;
+        std::vector<std::wstring> vendor;std::wstring detail;
+        const bool vendorKnown=Shared::SecureUxThemeInventory::Query(vendor)==ERROR_SUCCESS;
+        if(!vendorKnown||!GlassProducts::FullRemovalSelected(selection_,installed,!vendor.empty())||
+           !fullRemovalProfiles_.PreflightCleanup(detail)) {
+            SetFailure(std::wstring(ru?L"Предварительная проверка очистки отклонена: ":L"Full-removal cleanup preflight refused: ")+detail,ERROR_INSTALL_PACKAGE_REJECTED);return false;
+        }
+        return true;
+    }catch(...){SetFailure(ru?L"Проверка доступности очистки не выполнена":L"Full-removal cleanup preflight unavailable",ERROR_NOT_ENOUGH_MEMORY);return false;}
+}
+void InstallEngine::FinishFullRemovalCleanup() noexcept {
+    if(!selection_.cleanupUserData)return;
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    try {
+        std::vector<std::wstring> vendor;std::wstring detail;
+        const bool absent=Shared::SecureUxThemeInventory::Query(vendor)==ERROR_SUCCESS&&vendor.empty()&&!GlassMaintenanceLifetime::HasProducts();
+        const bool ok=absent&&fullRemovalProfiles_.Cleanup(detail);
+        if(!ok)AddFinishWarning(ru?L"Пользовательские данные очищены не полностью":L"User data cleanup incomplete",
+            absent?detail:(ru?L"Продукты ещё зарегистрированы; очистка не выполнялась.":L"Products remain registered; cleanup was not performed."));
+        else InstallLog::Line(L"Full-removal cleanup: owned profile data, settings and saved themes removed");
+    }catch(...){AddFinishWarning(ru?L"Данные очищены не полностью":L"User data cleanup incomplete",ru?L"Ошибка очистки после удаления; продукты не восстанавливались.":L"Cleanup failed after product removal; products were not restored.");}
 }
 
 bool InstallEngine::PrepareManagedRemoval() noexcept {

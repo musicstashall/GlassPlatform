@@ -1,15 +1,67 @@
-# GlassSettings снова берёт версию из комплекта
+## Дополнение: проверяемая очистка реестра DWM после полного удаления
 
-- Удалены `GlassSettings/Version.props` и подмена Version/AssemblyVersion/
-  InformationalVersion. ProductVersion приложения — `GlassBundleVersionEffective`.
-  FileVersion сохраняет свой счётчик, префикс — `GlassProductVersion` (`2.0.0`).
-- Оба MSI Settings по умолчанию снова получают базовую тройку и номер комплекта.
-  Gate сверяет ProductVersion staged EXE с версией комплекта и с MSI.
-- Миграции со старой `2.0.1.0` нет: прежняя установка снимается, новая
-  проверяется с нуля.
+Повторно сверено upstream OpenGlass `fb145fcd391b274cb91e642c93b3fc2b0e30e61c`
+`DeleteConfig`: все 49 допустимых OpenGlass значений уже были в локальном списке;
+пять остальных upstream имён — защищённые Windows цвета, исключённые по согласованной
+политике. Новых подтверждённых имён для удаления не обнаружено.
 
-Сборка — полная пересборка продуктов пользователем. Каталог релиза после неё
-пересоздаётся из готовых MSI, версии вручную не правятся.
+Доработана общая реализация `RegistrySanity::CleanOwnedSettings`: проверка отсутствия
+всего allowlist после удаления, ошибка при recreated/query-failed значении, диагностика
+с именем. Этот код применяется к пользовательским hive и HKLM, обоим view, через
+общую Inventory в Setup/GlassUnins. Не меняет явное согласие и after-removal gates.
+Новый production-function registry mock и существующие profile/full-removal/resource
+проверки PASS. Windows/MSVC runtime/build не выполнялись.
+
+Сборка **Release|x86: GlassShared → GlassUnins → GlassSetup**; full solution не нужна.
+
+# Полное удаление: explicit data cleanup и устаревшая команда ARP Modify
+
+Пользователь наблюдал: после удаления всех продуктов SystemSettings продолжает
+показывать строки Glass и позволяет нажать Modify; после переоткрытия окна строк
+нет. Это согласуется с устаревшим UI snapshot Windows Settings, но без новых
+MSI/registry logs фактическое удаление регистрации по одному симптому не доказано.
+Нельзя считать повторное CreateProcess из закэшированной команды доказательством
+установленного продукта: controller живёт отдельно от продуктовых MSI и защищён
+lifetime lease, может оставаться на диске до закрытия текущей оболочки.
+
+Подтверждённая регрессия: managed removal через Setup не проходил отдельный
+cleanup review GlassUnins. Исправлено:
+- Перед последним full-removal планом Setup показывает свою страницу с явной
+  выключенной опцией очистки. Back и любое изменение плана сбрасывают согласие.
+  HTML RU/EN и native checkbox используют одну policy; системных modal нет.
+- Partial/mixed install+remove не дают глобальную очистку. SUT сохраняет свой
+  отдельный protocol/порядок удаления; смешанное удаление SUT/MSI не разблокировано.
+- Worker повторно сверяет full-removal plan и выполняет profile/data preflight
+  до остановки/мутаций. Cleanup выполняется только после commit и повторной проверки
+  отсутствия MSI во всех contexts и official SUT. Сбой cleanup — finish warning,
+  не ложный rollback уже удалённых продуктов.
+- Общая profile cleanup теперь охватывает AppData/Local/GlassPlatform вместе с
+  прежними owned HKCU/HKLM/DWM settings и saved Glass themes. Одинаково для Setup
+  и отдельного GlassUnins. Не удаляются профили/NTUSER.DAT, чужие ключи/файлы,
+  сертификаты, Windows Installer cache. Недоступные профили не объявляются удалёнными:
+  существующий строгий preflight отказывает, loaded-users SUT policy не расширена.
+- User-data walker держит handle каждого ancestor без FILE_SHARE_DELETE, запрещает
+  reparse и hardlinks, удаляет по проверенному handle; ограничены глубина/количество.
+  Preflight read-only; перед очисткой paths/objects проверяются заново. Locked/read-only
+  files могут дать явную неполную очистку, а не «успешно всё удалено».
+- Устаревший --modify --product для известного отсутствующего MSI больше не
+  переходит к fresh install/maintenance: проверка MsiEnumProductsEx всех contexts
+  выводит штатную error page с объяснением stale Settings list. Ошибка enumeration
+  не трактуется как отсутствие. Не принуждаем SystemSettings закрываться/обновляться.
+- После закрытия успешной removal оболочки Setup освобождает lifetime lease и
+  пытается RetireUnused только при отсутствии продуктов/official SUT; existing
+  exclusive lease/reboot-pin/hash/path gates остаются. Locked executable может
+  оставить CleanupPending, но Active entrypoints отзываются по существующей policy.
+
+PASS: production full-removal predicate/stale ARP guard mock, безопасный data walker
+mock, profile inventory/one-shot cleanup, existing cleanup-review и lifetime mocks,
+DOM RU/EN страницы согласия, resource smoke. Это не Windows/MSI/registry deletion
+acceptance и не реальное тестирование filesystem races на Windows. Новое удаление
+пользовательских данных требует Windows VM проверки с контрольной точкой.
+
+Сборка: **Release|x86: GlassShared → GlassUnins → GlassSetup**. Shared HTML и profile
+header используются обоими EXE; Setup встраивает свежий GlassUnins. Полная сборка
+всех продуктовых MSI не нужна, если прежние Release x64 Native prerequisites есть.
 
 ---
 

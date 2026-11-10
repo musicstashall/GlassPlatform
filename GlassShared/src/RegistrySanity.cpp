@@ -52,6 +52,12 @@ constexpr Rule kOpenGlassRootRules[] = {
 
 // Только значения OpenGlass в DWM — имена и типы из каталога SettingsCatalog v3. Базовые цвета
 // Windows (ColorizationColor/Afterglow/…/EnableTransparency) в схему не входят.
+// Audited against ALTaleX531/OpenGlass fb145fcd391b274cb91e642c93b3fc2b0e30e61c,
+// Scripts/OpenGlass.iss::DeleteConfig: 54 names minus five protected Windows
+// values (ColorizationColor, ColorizationAfterglow, ColorizationColorBalance,
+// ColorizationAfterglowBalance, ColorizationBlurBalance). The remaining 49
+// names are removed in every user hive and HKLM by CleanOwnedSettings.
+// Do NOT copy upstream's five Windows values into our uninstall allowlist.
 constexpr Rule kDwmOpenGlassRules[] = {
     { L"ColorizationColorOverride", ValueKind::Dword },
     { L"ColorizationAfterglowOverride", ValueKind::Dword },
@@ -278,9 +284,28 @@ bool CleanOwnedSettings(HKEY root, bool machine, bool apply, std::wstring& detai
         st=RegOpenKeyExW(root,L"Software\\Microsoft\\Windows\\DWM",0,KEY_QUERY_VALUE|KEY_SET_VALUE|view,&dwm);
         if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){detail=L"DWM access: "+std::to_wstring(st);return false;}
         if(dwm) {
-            if(apply)for(const auto& rule:kDwmOpenGlassRules) {
-                st=RegDeleteValueW(dwm,rule.valueName);
-                if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){RegCloseKey(dwm);detail=L"DWM cleanup: "+std::to_wstring(st);return false;}
+            if(apply) {
+                for(const auto& rule:kDwmOpenGlassRules) {
+                    st=RegDeleteValueW(dwm,rule.valueName);
+                    if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND) {
+                        RegCloseKey(dwm);
+                        detail=L"DWM cleanup: "+std::wstring(rule.valueName)+L" ("+std::to_wstring(st)+L")";
+                        return false;
+                    }
+                }
+                // A retained writer can recreate values even after a successful
+                // RegDeleteValue. Do not report a complete registry cleanup in
+                // that case. Query presence only: type/size never exempt an owned
+                // name from explicit uninstall cleanup. Unknown Windows values
+                // and the DWM key itself are deliberately preserved.
+                for(const auto& rule:kDwmOpenGlassRules) {
+                    st=RegQueryValueExW(dwm,rule.valueName,nullptr,nullptr,nullptr,nullptr);
+                    if(st!=ERROR_FILE_NOT_FOUND) {
+                        RegCloseKey(dwm);
+                        detail=L"DWM cleanup verification: "+std::wstring(rule.valueName)+L" ("+std::to_wstring(st)+L")";
+                        return false;
+                    }
+                }
             }
             RegCloseKey(dwm);
         }

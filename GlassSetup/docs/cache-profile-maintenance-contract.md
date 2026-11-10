@@ -46,6 +46,29 @@
 - https://github.com/ALTaleX531/OpenGlass/blob/fb145fcd391b274cb91e642c93b3fc2b0e30e61c/Common/DwmSettings.hpp
 - https://github.com/ALTaleX531/OpenGlass/blob/fb145fcd391b274cb91e642c93b3fc2b0e30e61c/Scripts/OpenGlass.iss
 
+### Реализация registry cleanup после полного удаления (2026-11-04)
+
+Повторно сверен `Scripts/OpenGlass.iss::DeleteConfig` на указанном выше commit:
+upstream содержит 54 имени, локальный `kDwmOpenGlassRules` — 49. Разница ровно
+пять штатных Windows значений: `ColorizationColor`, `ColorizationAfterglow`,
+`ColorizationColorBalance`, `ColorizationAfterglowBalance`, `ColorizationBlurBalance`.
+Это намеренное исключение по принятой политике, не недостающие настройки OpenGlass.
+Добавлять их в destructive cleanup нельзя. Остальные 49 имён полностью совпадают.
+
+`CleanOwnedSettings` вызывается общей Inventory из Setup и GlassUnins после
+успешного полного удаления с явным согласием: каждый пользовательский hive и HKLM,
+оба registry view. Удаление не зависит от типа значения. Добавлена отсутствовавшая
+проверка результата: после прохода удаления перечитывается наличие всех 49 имён.
+Если writer восстановил значение или query недоступен — cleanup возвращает ошибку,
+а не объявляет реестр очищенным. Диагностика delete/verify содержит имя значения и
+код ошибки. Это не атомарная блокировка реестра: будущую запись после проверки
+исключить нельзя. Штатные/неизвестные значения и DWM key/subkeys сохраняются.
+
+`GlassSetup/tests/registry_cleanup_mock.py` исполняет настоящую функцию на fake
+registry: два user hive + HKLM, оба view, preflight без мутаций, удаление всех 49
+имён, сохранение пяти Windows цветов и неизвестных имён, повторная очистка,
+отказы доступа/delete/query и повторная запись writer. Это не Windows acceptance.
+
 ## 3. Как удалять старые источники без накопления версий
 
 ### Учёт, а не удаление по возрасту каталога
