@@ -1,4 +1,6 @@
 using System.Text;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 namespace GlassSettings.Core.Platform;
 
@@ -9,6 +11,30 @@ public static class GlassMaintenanceSetupPaths
     {
         var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
         return Path.Combine(programData, "Packages", "GlassPlatform", "Current");
+    }
+
+    private static bool TrustedObject(string path, bool directory)
+    {
+        var attributes = File.GetAttributes(path);
+        if ((attributes & FileAttributes.ReparsePoint) != 0 ||
+            ((attributes & FileAttributes.Directory) != 0) != directory) return false;
+        FileSystemSecurity security = directory
+            ? new DirectoryInfo(path).GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access)
+            : new FileInfo(path).GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
+        var descriptor = new RawSecurityDescriptor(security.GetSecurityDescriptorBinaryForm(), 0);
+        static bool Authority(SecurityIdentifier? sid) => sid is not null &&
+            (sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid) || sid.IsWellKnown(WellKnownSidType.LocalSystemSid));
+        if (!Authority(descriptor.Owner) || descriptor.DiscretionaryAcl is null) return false;
+        const uint writes = 0x10000000 | 0x40000000 | 0x00010000 | 0x00040000 | 0x00080000 |
+                            0x00000002 | 0x00000004 | 0x00000040 | 0x00000010 | 0x00000100;
+        foreach (GenericAce ace in descriptor.DiscretionaryAcl)
+        {
+            if (ace is not CommonAce common || common.IsCallback) return false;
+            if (common.AceQualifier == AceQualifier.AccessDenied) continue;
+            if (common.AceQualifier != AceQualifier.AccessAllowed ||
+                (((uint)common.AccessMask & writes) != 0 && !Authority(common.SecurityIdentifier))) return false;
+        }
+        return true;
     }
 
     public static string SetupExecutablePath()
@@ -42,7 +68,7 @@ public static class GlassMaintenanceSetupPaths
                 // No paths are accepted from the record. Native launch performs
                 // publisher/ACL validation too; avoid following reparse entries here.
                 foreach (var path in new[] { root, store, active, folder, setup })
-                    if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) return string.Empty;
+                    if (!TrustedObject(path, path == root || path == store || path == folder)) return string.Empty;
                 for (var parent = Directory.GetParent(root); parent is not null; parent = parent.Parent)
                     if ((parent.Attributes & FileAttributes.ReparsePoint) != 0) return string.Empty;
                 using var file = File.OpenRead(setup);
@@ -55,7 +81,15 @@ public static class GlassMaintenanceSetupPaths
             }
         }
         var legacy = Path.Combine(CurrentDirectory(), "GlassSetup.exe");
-        return File.Exists(legacy) ? legacy : string.Empty;
+        try
+        {
+            return TrustedObject(root, true) && TrustedObject(CurrentDirectory(), true) && TrustedObject(legacy, false)
+                ? legacy : string.Empty;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return string.Empty;
+        }
     }
 
     public static string SecureUxThemeMsiPath()

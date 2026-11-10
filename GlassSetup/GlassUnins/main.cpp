@@ -28,6 +28,7 @@
 #include <WebView2.h>
 #include "GlassMaintenanceExecutor.h"
 #include "InstallSupport/GlassMaintenanceCache.h"
+#include "InstallSupport/GlassMaintenanceLifetime.h"
 #include "InstallSupport/GlassRegisteredMsi.h"
 #include <algorithm>
 #include <array>
@@ -88,6 +89,7 @@ bool IsKnownCode(const std::wstring& code) noexcept {
 
 struct Arguments {
     bool fromTemp=false;
+    bool removeController=false;
     bool silent=false;
     bool acceptSettingsRemovalRisk=false;
     bool acceptModuleMonitorRisk=false;
@@ -103,6 +105,7 @@ Arguments ParseArguments() {
     for (int i=1;i<count;++i) {
         if (_wcsicmp(args[i],L"/fromtemp")==0 && i+1<count) { a.fromTemp=true; a.originalDir=args[++i]; }
         else if (_wcsicmp(args[i],L"--product")==0 && i+1<count) a.product=args[++i];
+        else if (_wcsicmp(args[i],L"--remove-controller")==0) a.removeController=true;
         else if (_wcsicmp(args[i],L"--silent")==0) a.silent=true;
         else if (_wcsicmp(args[i],L"--accept-module-monitor-risk")==0) a.acceptModuleMonitorRisk=true;
         else if (_wcsicmp(args[i],L"--accept-settings-removal-risk")==0) a.acceptSettingsRemovalRisk=true;
@@ -245,6 +248,8 @@ int RelaunchFromPrivateTemp(const Arguments& a) noexcept {
         if (wait==WAIT_OBJECT_0) (void)GetExitCodeProcess(pi.hProcess,&exitCode);
         CloseHandle(pi.hProcess);
         DeleteFileW(dest.c_str()); RemoveDirectoryW(temp.c_str());
+        if(exitCode==ERROR_SUCCESS&&!GlassMaintenanceLifetime::HasProducts())
+            (void)GlassMaintenanceLifetime::RetireUnused();
         return static_cast<int>(exitCode);
     }
     CloseHandle(pi.hProcess);
@@ -1194,6 +1199,8 @@ private:
                 SetError(std::wstring(T(L"Не удалось удалить пакет: ",L"Could not remove package: "))+name);
                 return false;
             }
+            if(removalCode==ERROR_SUCCESS_REBOOT_REQUIRED||removalCode==ERROR_SUCCESS_REBOOT_INITIATED)
+                (void)GlassMaintenanceReboot::Pinned(true);
             msiRebootRequired=msiRebootRequired || removalCode==ERROR_SUCCESS_REBOOT_REQUIRED || removalCode==ERROR_SUCCESS_REBOOT_INITIATED;
             return true;
         };
@@ -1323,6 +1330,10 @@ private:
             SetError(T(L"Выбранные продукты удалены, но не удалось перезапустить оставшиеся компоненты.",
                 L"Selected products were removed, but remaining components could not be restarted."));
             return 17;
+        }
+        if(secureUxThemeReboot||msiRebootRequired)(void)GlassMaintenanceReboot::Pinned(true);
+        else if(!GlassMaintenanceReboot::Pinned()) {
+            if(!GlassMaintenanceCache::CollectAfterRemoval())LogLine(L"Product source CleanupPending; removal result preserved");
         }
         std::wstring complete=T(L"Удаление завершено.",L"Uninstall complete.");
         if (cleanupProfiles.SavedThemeRegistryFallback()) {
@@ -1723,11 +1734,14 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
         MAKELANGID(LANG_RUSSIAN,SUBLANG_DEFAULT):MAKELANGID(LANG_ENGLISH,SUBLANG_ENGLISH_US);
     SetThreadUILanguage(gLanguage);
     Arguments args=ParseArguments();
+    if(args.removeController)return GlassMaintenanceLifetime::RetireUnused()?0:ERROR_BUSY;
     if (!args.fromTemp) {
         const int launch=RelaunchFromPrivateTemp(args);
         if (!launch || args.silent) return launch;
         args.launchError=launch; // Show the failure inside the wizard, not in a system dialog.
     }
+    GlassMaintenanceLifetime::Lease maintenanceLease;
+    if(!maintenanceLease.Acquire())return ERROR_BUSY;
     const HRESULT com=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
     if (FAILED(com)) return 4;
     HANDLE mutex=CreateMutexW(nullptr,FALSE,L"Local\\GlassSetup.Instance.Mutex");

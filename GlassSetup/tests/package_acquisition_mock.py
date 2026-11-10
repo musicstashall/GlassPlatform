@@ -58,6 +58,7 @@ namespace GlassInstallMsi{
  std::wstring QueryDisplayVersion(const wchar_t*){return s.installedVersion;}
 }
 namespace GlassMaintenanceCache{
+ std::string ControllerDigest(const std::wstring& path){return s.files.at(path).bytes;}
  bool TrustedDirectory(const std::wstring&){return s.workspaceTrusted;}
  std::wstring CurrentFile(const wchar_t* file){return L"C:\\cache\\Current\\"+std::wstring(file);}
  bool MatchesInstalled(const std::wstring& path,const std::wstring&,const std::wstring&){return s.installed&&s.files.at(path).bytes.find("|INSTALLED|")!=std::string::npos;}

@@ -19,6 +19,7 @@ harness=r'''
 #include "GlassProductPlan.h"
 #include <atomic>
 #include <cassert>
+namespace GlassMaintenanceReboot {bool Pinned(bool){return true;}}
 #include <functional>
 #include <iostream>
 #include <string>

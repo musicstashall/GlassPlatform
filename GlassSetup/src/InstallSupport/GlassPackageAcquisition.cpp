@@ -297,7 +297,8 @@ bool Prepare(GlassPackageCatalog::Product product,const GlassPackageCatalog::Cat
             if(file.h==INVALID_HANDLE_VALUE||!CopyLocked(file.h,staged,cancel))throw std::runtime_error("Cannot snapshot local package");
             // Revalidate the immutable private copy, not only a previous path query.
             const bool current=candidates[index].source==Source::Current&&request.installed&&
-                GlassMaintenanceCache::MatchesInstalled(staged,spec.code,GlassInstallMsi::QueryDisplayVersion(spec.code));
+                GlassMaintenanceCache::MatchesInstalled(sources[index],spec.code,GlassInstallMsi::QueryDisplayVersion(spec.code))&&
+                GlassMaintenanceCache::ControllerDigest(staged)==GlassMaintenanceCache::ControllerDigest(sources[index]);
             const bool digest=remote&&remote->downloadable&&Compare(candidates[index].version,remote->version)==0&&
                 GlassReleaseClient::VerifyHash(file.h,remote->size,remote->sha256,cancel,error);
             if(!current&&!digest&&!SameMsiPublisher(staged))throw std::runtime_error("Local package changed or is not trusted");

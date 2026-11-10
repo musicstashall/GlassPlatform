@@ -1237,6 +1237,8 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
         exitCode = GlassInstallMsi::InstallProduct(msiPath, props, &sink);
     }
     MsiEnableLogW(0, nullptr, 0);
+    if(exitCode==ERROR_SUCCESS_REBOOT_REQUIRED||exitCode==ERROR_SUCCESS_REBOOT_INITIATED)
+        (void)GlassMaintenanceReboot::Pinned(true);
     InstallLog::LineFormat(L"MsiInstallProduct exit code %u (%s)", exitCode, label.c_str());
 
     if (GlassInstallMsi::MsiSuccess(exitCode) && !productCode.empty())
@@ -1432,6 +1434,7 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
         if(runtimeRestart || !restart || (GlassInstallUtil::QuerySecureUxPendingFileOperations(pending)&&!pending))restart=runtimeRestart;
     }
     InstallLog::LineFormat(L"SecureUxTheme after removal: state=%u; restart=%d; MSI=%u",static_cast<unsigned>(after),restart?1:0,result);
+    if(restart)(void)GlassMaintenanceReboot::Pinned(true);
     if(restart)
         AddFinishWarning(ru?L"SecureUxTheme: требуется перезагрузка":L"SecureUxTheme: restart required",
             ru?L"Для завершения изменения состояния SecureUxTheme требуется перезагрузка. Постоянные файлы автора сохраняются.":
@@ -1499,6 +1502,7 @@ bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
         if(runtimeRestart || !restart || (GlassInstallUtil::QuerySecureUxPendingFileOperations(pending)&&!pending))restart=runtimeRestart;
     }
     InstallLog::LineFormat(L"SecureUxTheme after install: state=%u; restart=%d; MSI=%u",static_cast<unsigned>(after),restart?1:0,result);
+    if(restart)(void)GlassMaintenanceReboot::Pinned(true);
     if (restart)
         AddFinishWarning(ru?L"SecureUxTheme: требуется перезагрузка Windows":
                             L"SecureUxTheme: Windows restart required",
@@ -1803,6 +1807,8 @@ bool InstallEngine::RemoveManagedProduct(GlassProductPlan::Product product) noex
            GlassInstallMsi::CheckProductContexts(code,contextDetail,&cancelRequested_)!=GlassInstallMsi::ProductPathCheck::Safe) {
             SetFailure(L"MSI removal did not safely remove the selected registration",ERROR_INSTALL_FAILURE);return false;
         }
+        if(result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED)
+            (void)GlassMaintenanceReboot::Pinned(true);
         if(result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED)
             AddFinishWarning(ru?L"Для завершения удаления нужна перезагрузка":L"Restart required to complete removal",title);
     }

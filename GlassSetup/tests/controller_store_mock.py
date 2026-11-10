@@ -67,7 +67,10 @@ HMODULE LoadLibraryExW(const wchar_t* p,void*,int flags){assert(flags==(LOAD_LIB
 void FreeLibrary(HMODULE h){delete h;--loads;}
 namespace GlassInstallUtil {bool ExtractResourceToFile(HMODULE,int,int,const std::wstring& path){if(!extractOk)return false;files[path]="unins";digests[path]=0xbb;return true;}}
 
-struct ControllerLock {bool acquired=lockAvailable;};
+struct ControllerLock {struct {HANDLE value=nullptr;} handle;bool acquired=lockAvailable;};
+constexpr int WAIT_OBJECT_0=0,WAIT_ABANDONED=128;
+int WaitForSingleObject(HANDLE,int){return WAIT_OBJECT_0;}
+bool ConfirmControllerStartup(bool ready){return ready;}
 std::wstring ModulePath(){return modulePath;}
 bool PathsEqualCanonical(const std::wstring& a,const std::wstring& b){return a==b;}
 namespace GlassInstallLog {void Line(const wchar_t*){}template<class... T>void LineFormat(const wchar_t*,T...) {}}
@@ -85,6 +88,7 @@ void FindClose(HANDLE h){CloseHandle(h);}
 // WRITE
 // STAGE
 // FINALIZE
+// RECOVER
 void reset(){assert(handles==0&&loads==0);lockedFolder.clear();modulePath.clear();lockAvailable=true;arpRefreshes=0;dirs={L"root"};files.clear();digests.clear();trusted=signedOk=copyOk=extractOk=hardenOk=flushOk=moveOk=true;files[L"download.exe"]="setup";digests[L"download.exe"]=0xaa;}
 int main(){using namespace GlassMaintenanceCache;std::string record;
  reset();assert(StageController(L"download.exe",record));assert(record==std::string(64,'a')+std::string(64,'b'));
@@ -111,12 +115,24 @@ int main(){using namespace GlassMaintenanceCache;std::string record;
  FinalizeControllerStartup(true);assert(ReadControllerRecord()==record&&dirs.count(oldFolder)&&arpRefreshes==1);
  lockedFolder.clear();FinalizeControllerStartup(true);assert(!dirs.count(oldFolder)&&files.count(L"root\\Current\\old.msi"));
  assert(!ControllerFile(L"GlassSetup.exe").empty());
+
+ // Replay crashes on each side of the durable confirmation boundary.
+ assert(WriteControllerRecord(L"Confirmed",oldRecord));assert(WriteControllerRecord(L"Pending",record));
+ // oldRecord was GC'd above: untrusted rollback target must fail closed.
+ assert(!RecoverControllerTransition());
+ files[L"old.exe"]="old";digests[L"old.exe"]=0xcc;assert(StageController(L"old.exe",oldRecord));
+ assert(RecoverControllerTransition()&&ReadControllerRecord()==oldRecord&&ReadControllerRecord(L"Rejected")==record);
+ assert(WriteControllerRecord(L"Active",record)&&WriteControllerRecord(L"Confirmed",record)&&WriteControllerRecord(L"Pending",record));
+ assert(RecoverControllerTransition()&&ReadControllerRecord()==record); // Crash after Confirmed, before journal deletion.
+ assert(WriteControllerRecord(L"Pending",oldRecord));assert(RecoverControllerTransition()&&ReadControllerRecord()==record); // Staged, not committed.
+ files.erase(L"root\\Installer\\Confirmed");assert(WriteControllerRecord(L"Pending",record));
+ assert(RecoverControllerTransition()&&ReadControllerRecord()==record); // First install: forward recovery without a fake rollback target.
  assert(handles==0&&loads==0);
  std::cout<<"PASS: actual controller store: immutable Setup/Unins digests, resource-data-only staging, strict pointer parsing, ACL/hash refusal, atomic pointer writes, copy/extract/flush/move failure preservation and cleanup\n";
 }
 '''
 methods='\n'.join(fn(cache,t) for t in ['inline bool ControllerRecordValid(', 'inline std::string ReadControllerRecord(', 'inline std::string ControllerDigest(', 'inline std::wstring ControllerFileForRecord(', 'inline std::wstring ControllerFile('])
-h=h.replace('// CACHE',methods).replace('// HANDLE',fn(launch,'struct ControllerHandle ')+ ';').replace('// WRITE',fn(launch,'bool WriteControllerRecord(')).replace('// STAGE',fn(launch,'bool StageController(')).replace('// FINALIZE',fn(launch,'void FinalizeControllerStartup('))
+h=h.replace('// CACHE',methods).replace('// HANDLE',fn(launch,'struct ControllerHandle ')+ ';').replace('// WRITE',fn(launch,'bool WriteControllerRecord(')).replace('// STAGE',fn(launch,'bool StageController(')).replace('// FINALIZE',fn(launch,'bool FinalizeControllerStartup(')).replace('// RECOVER',fn(launch,'bool RecoverControllerTransition('))
 with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'test.cpp';p.write_text(h);exe=Path(d)/'test'
  subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-fsanitize=address,undefined','-fno-pie','-no-pie',str(p),'-o',str(exe)],check=True)

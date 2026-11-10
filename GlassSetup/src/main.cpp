@@ -37,6 +37,7 @@
 #include "InstallSupport/GlassSetupSourceLayout.h"
 #include "InstallSupport/GlassPackageAcquisition.h"
 #include "InstallSupport/GlassMaintenanceCache.h"
+#include "InstallSupport/GlassMaintenanceLifetime.h"
 #include <GlassInstallerLaunch.h>
 #ifdef ShellExecute
 #undef ShellExecute // IShellDispatch2::ShellExecute is a COM method, not the Win32 macro.
@@ -1589,13 +1590,15 @@ private:
         KillTimer(window,kStartupPollTimer);
         startupPending_=false;
         if (!result.ok) {
-            FinalizeControllerStartup(false);
+            (void)FinalizeControllerStartup(false);
             errorReason_=Text(IDS_STARTUP_FAILED);
             SetPage(Page::Error);
             return;
         }
         if (gAlreadyRunning) { SetPage(Page::AlreadyRunning); return; }
-        FinalizeControllerStartup(true);
+        if(!FinalizeControllerStartup(true)) {
+            errorReason_=Text(IDS_STARTUP_FAILED);SetPage(Page::Error);return;
+        }
         platformVersion_=std::move(result.platformVersion);
         eulaText_=std::move(result.eulaText);
         SetWindowTextW(eula_,eulaText_.c_str());
@@ -4292,6 +4295,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         InstallLog::LineFormat(L"COM init failed: 0x%08X", static_cast<unsigned>(com));
         InstallLog::Shutdown();
         return 4;
+    }
+    GlassMaintenanceLifetime::Lease maintenanceLease;
+    if(!maintenanceLease.Acquire()) {
+        InstallLog::Line(L"Cannot acquire protected maintenance lifetime lease");
+        CoUninitialize();InstallLog::Shutdown();return 4;
     }
     std::wstring handoffError;
     if(!BeginControllerChild(handoffError)) {

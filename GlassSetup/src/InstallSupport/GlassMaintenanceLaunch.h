@@ -21,4 +21,4 @@ enum class ControllerTransition { Continue, Transferred, Failed };
     bool modify,const std::wstring& product,std::wstring& error) noexcept;
 
 // Readiness commits controller lifecycle only, never product transactions.
-void FinalizeControllerStartup(bool ready) noexcept;
+[[nodiscard]] bool FinalizeControllerStartup(bool ready) noexcept;

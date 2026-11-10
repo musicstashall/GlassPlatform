@@ -30,6 +30,7 @@ std::map<std::wstring,std::string> files;
 bool trusted=true,readable=true,hashable=true,flushed=true;DWORD attrs=0,links=1;int registration=1;
 DWORD GetLastError(){return 5;}
 namespace Diag{bool Fail(const wchar_t*,const std::wstring&,DWORD){return false;}}
+bool TrustedPath(const std::wstring& p,bool){return trusted&&files.count(p);}
 std::wstring CurrentFile(const wchar_t* name){auto p=L"Current\\"+std::wstring(name);return trusted&&files.count(p)?p:L"";}
 HANDLE CreateFileW(const wchar_t* path,DWORD,DWORD,void*,DWORD mode,DWORD,void*){
  if(mode==CREATE_NEW){if(files.count(path))return nullptr;files[path]="";}
@@ -59,7 +60,8 @@ int main(){
  files[L"WindowsInstaller\\cached.msi"]="stripped MSI cache";files[msi]="original distribution with cabinet";files[copy]=files[msi];
  assert(!MatchesInstalled(msi,L"code",L"1")); // Legacy ACL+identity is insufficient.
  assert(WritePublishedDigest(msi));assert(files[record].size()==128);
- assert(MatchesInstalled(msi,L"code",L"1")&&MatchesInstalled(copy,L"code",L"1"));
+ assert(MatchesInstalled(msi,L"code",L"1")&&!MatchesInstalled(copy,L"code",L"1"));
+ files[copy+L".sha256"]=files[record];assert(MatchesInstalled(copy,L"code",L"1"));
  const auto cached=files[L"WindowsInstaller\\cached.msi"];
  files[L"WindowsInstaller\\cached.msi"]="cache changed with identical package identity";assert(!MatchesInstalled(copy,L"code",L"1"));
  files[L"WindowsInstaller\\cached.msi"]=cached;unambiguous=false;assert(!MatchesInstalled(copy,L"code",L"1"));unambiguous=true;
@@ -76,7 +78,7 @@ int main(){
   if(scenario==3)attrs=FILE_ATTRIBUTE_REPARSE_POINT;if(scenario==4)attrs=FILE_ATTRIBUTE_DIRECTORY;
   if(scenario==5)links=2;if(scenario==6)files[record]+='\n';
   if(scenario==7)files[record][0]='z';if(scenario==8)files.erase(record);
-  assert(!MatchesInstalled(copy,L"code",L"1"));
+  assert(!MatchesInstalled(msi,L"code",L"1"));
  }
  trusted=readable=hashable=true;attrs=0;links=1;
  flushed=false;assert(!WritePublishedDigest(msi));assert(!files.count(record));
@@ -91,7 +93,7 @@ with tempfile.TemporaryDirectory(prefix='glass-cache-digest-') as d:
 assert 'blobs[i].verifiedSource || PublishedDigestMatches(source)' in s
 assert 'PublishedDigestMatches(staged' not in s
 acq=(root/'GlassSetup/src/InstallSupport/GlassPackageAcquisition.cpp').read_text()
-assert 'MatchesInstalled(staged' in acq and 'SameMsiPublisher(staged)' in acq
+assert 'MatchesInstalled(sources[index]' in acq and 'ControllerDigest(staged)==GlassMaintenanceCache::ControllerDigest(sources[index])' in acq and 'SameMsiPublisher(staged)' in acq
 
 repair=function('inline bool RegisterRepairSource(')
 assert repair.index('PublishedDigestMatches(file)') < repair.index('MsiSourceListAddSourceExW(')

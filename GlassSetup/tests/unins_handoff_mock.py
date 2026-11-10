@@ -12,6 +12,7 @@ b=s.index('            if (!pathsSafe) {',a)
 guard=s[a:b]
 harness=r'''
 #include <cassert>
+namespace GlassMaintenanceLifetime {bool HasProducts(){return true;}bool RetireUnused(){return true;}}
 #include <string>
 #include <iostream>
 using DWORD=unsigned long;

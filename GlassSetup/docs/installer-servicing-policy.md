@@ -1,9 +1,8 @@
 # Единая политика обновления и обслуживания GlassPlatform
 
-Статус: целевая архитектура по запросу пользователя; не отчёт о реализованном self-update.
-Реализация текущего handoff отсутствует. Не включать его одним ShellExecute.
-Первый runtime-инкремент: разделены repair-source coverage и ошибка публикации
-существующего комплекта; controller/source-store физически ещё не разделены.
+Статус: runtime controller/source lifecycle подключён; актуальные детали — §10–11.
+Это не отчёт об успешной Windows-приёмке. Перед использованием требуется сборка
+и проверка на Windows по [controller-windows-acceptance.md](controller-windows-acceptance.md).
 
 ## 1. Основание и границы
 
@@ -61,8 +60,9 @@ GlassPlatform, основанные на документированных пр
 ## 3. Размещение (решение GlassPlatform, не предписание Microsoft)
 
 - Controller: отдельный защищённый machine-wide code directory, логически
-  `%ProgramFiles%\GlassPlatform\Installer`, не внутри выбранного каталога продукта.
-  Использовать Known Folder API с учётом x86 Setup/x64 OS, не строковый WOW64 путь.
+  `%ProgramData%\Packages\GlassPlatform\Installer`, не внутри выбранного каталога продукта.
+  ProgramData получается через Known Folder API; directory/owner/DACL и reparse
+  проверяются. Это отдельное code subtree, не продуктовый MSI Current.
 - Активный controller выбирается стабильной защищённой точкой запуска/записью
   состояния; binaries публикуются в отдельное immutable version/hash directory.
 - До подтверждённого запуска новой версии сохраняется один recovery controller.
@@ -226,7 +226,7 @@ Publish передаёт coverage отдельно от publication error: legac
 
 Этот первый инкремент сам по себе не включал controller lifecycle. Следующий
 runtime-этап описан ниже; Windows acceptance раздела 8 остаётся обязательным.
-Старые registration/GC политики не объявлены полноценным reference-counted source-store.
+Последующая reference/GC реализация описана в §11.
 
 ## 10. Подключённый runtime controller (2026-11-04)
 
@@ -241,7 +241,9 @@ runtime-этап описан ниже; Windows acceptance раздела 8 ос
   inherited handles. Проверяются реальный родитель, его publisher, canonical self,
   handles и record. READY означает созданное окно; родитель ждёт до 30 секунд,
   публикует Active и разрешает COMMIT. До COMMIT message loop не запускается.
-  Финального ACK успешного startup после COMMIT протокол пока не содержит.
+  После COMMIT READY сбрасывается и используется для второго, startup-success ACK.
+  Родитель ждёт ещё до 30 секунд, сохраняет Confirmed и только после этого
+  повторным COMMIT разрешает child дальнейшую продуктовую работу.
 - В child передаются только служебный протокол, разрешённый modify/product intent,
   no-self-update и source-layout hint. Согласие EULA и продуктовые действия не
   пересылаются. Hint не отменяет независимую проверку каждого MSI.
@@ -250,18 +252,65 @@ runtime-этап описан ниже; Windows acceptance раздела 8 ос
   удаляются после успешного ARP refresh; MSI/CAB/receipts не удаляются этой очисткой.
 - Успешный canonical startup удаляет старые плоские code directories; занятые
   файлы получают CleanupPending и повторную попытку при следующем запуске.
-  При startup failure восстанавливается проверенный Previous, если он есть.
-  Pending не является авторитетным указателем и очищается при успешном startup.
-  Если lock ещё у родителя, finalizer откладывается до следующего запуска.
+  При startup failure восстанавливается проверенный Confirmed (или Previous при
+  миграции). Finalizer ожидает освобождения controller lock до 5 секунд, после
+  чего при занятости оставляет очистку следующему запуску.
 - Offline работает с доверенным локальным controller; доверие к сертификату должно
   быть уже установлено. Authenticode использует cache-only chain retrieval без
   сетевой revocation проверки. Автоматического добавления сертификатов нет.
-- Последний product removal не удаляет независимый controller: отдельная команда
-  его удаления пока не реализована. Первый startup failure без Previous не имеет
-  rollback-target. Полного crash-journal replay и reference-counted source GC нет.
+- Успешное удаление последнего продукта через cache-parent пытается освободить
+  controller; отдельный `GlassUnins.exe --remove-controller` повторяет эту очистку
+  без удаления продуктов/профилей. При registrations, ошибке discovery, активном
+  Setup/Unins или reboot pin — отказ от очистки. Занятый старый launcher остаётся
+  инертным CleanupPending без Active, без kill и reboot-delete scheduling.
 
 Проверено actual-source mock-тестами с поддельными Win32 API, включая staging,
 atomic pointers, handoff, child barrier, trust gate, rollback и locked-code GC.
 Это **не** Windows/MSVC/WiX/.NET сборка и **не** проверка реальных ACL/AuthentiCode,
 UAC, process races, reboot/crash recovery или MSI acceptance. Полную политику
 нельзя считать принятой до выполнения Windows-матрицы раздела 8.
+
+
+## 11. Завершение runtime lifecycle до Windows-проверки
+
+- Handoff v2 помечен отдельным data-only RCDATA resource. Новый parent проверяет
+  поддержку до запуска: v1 Active равной/меньшей версии мигрирует на подходящий
+  новый controller, более новая неподдерживаемая версия не понижается.
+  Новый child от проверенного v1 parent сохраняет старый initial COMMIT barrier
+  и сам подтверждает startup; второй ACK гарантируется только для пары v2/v2.
+- `Confirmed` — durable startup-success record, `Pending` — intent, `Rejected` —
+  digest отказавшего кандидата. Записи используют тот же защищённый atomic-write
+  формат. При незавершённом переходе на неподтверждённый Active восстанавливается
+  проверенный Confirmed; отказавший self/download не выбирается снова вместо
+  рабочего installed controller. Если rollback-target никогда не существовал,
+  возможна только повторная проверенная forward-попытка, а не выдуманный rollback.
+  Сбой после записи Confirmed, но до удаления Pending сохраняет подтверждённый Active.
+  Ошибка чтения/проверки journal не объявляется успешным rollback.
+- Все новые процессы Setup/Unins удерживают shared kernel file lease на время
+  работы, включая MSI и handoff. Retirement требует exclusive lease во всех
+  сессиях плюс cache mutex и отсутствие любых managed/legacy registrations.
+  Active отзывается до best-effort code GC, чтобы не оставлять ссылку на неполную
+  пару. Старые бинарники без lease не получают новых гарантий сериализации.
+- Перед ротацией Current обходятся **все** его MSI, а не только продукты нового
+  плана. Exact originals сохраняются как Retained/<distributionSHA256>.msi;
+  существующий digest-target повторно проверяется. Сохраняются только реальные
+  registrations либо reboot pins; неизвестная регистрация блокирует release.
+  Receipt следует за своим MSI, проверяется по distribution и LocalPackage digest.
+  Legacy-кандидат без binding никогда автоматически не получает доверие.
+- GC повторно перечисляет context/SID/package identities для каждого source;
+  нет регистрации — можно удалить MSI и sidecar, неизвестно — удерживать.
+  При removal source GC использует тот же cache mutex, что publication.
+  SourceList обновляется через MSI API, системный Windows Installer cache не трогается.
+- MSI 3010/1641 и SUT restart устанавливают защищённый volatile HKLM reboot pin
+  (единый 64-bit view). До reboot release source/controller запрещён. Volatile
+  key исчезает при reboot, не зависит от настенных часов и времени жизни процесса.
+- Settings до запуска проверяет owner/DACL/reparse/hash для Active-пути; legacy
+  fallback также требует защищённых объектов. Native controller дополнительно
+  проверяет publisher/Authenticode.
+
+Границы: cleanup может остаться Pending при locks/неизвестном state; продукты
+из-за этого не откатываются. Выполняется bounded replay собственного controller
+journal, а не универсальная crash-транзакция Windows Installer. Возможности
+repair ограничены фактически сохранёнными полными original payloads. Сбой записи
+reboot pin в реестре — отказ текущей очистки; надёжность persistence при отказе
+всех системных записей требует отдельной Windows fault-injection проверки.

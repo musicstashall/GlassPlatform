@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess, tempfile
 root=Path(__file__).resolve().parents[2]
 s=(root/'GlassSetup/src/InstallSupport/GlassMaintenanceCache.h').read_text()
-a=s.index('inline bool RegisterRepairSource(');b=s.index('inline bool GarbageCollect(',a)
+a=s.index('inline bool RegisterRepairSource(');b=s.index('struct CacheLock {',a)
 h=r'''
 #include <cassert>
 #include <string>

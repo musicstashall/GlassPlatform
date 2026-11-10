@@ -1,22 +1,26 @@
 # Controller store/handoff — 2026-11-04
 
-Подключена независимая публикация Setup/Unins до продуктовых действий, выбор
-версии без downgrade, проверка Authenticode, READY/COMMIT child handoff, startup
-rollback/GC, ARP migration и Settings Active resolver. Exact MSI sources остаются
-отдельно; локальный layout передаётся только как недоверенная discovery hint.
-Подробности и ограничения: [installer-servicing-policy.md §10](installer-servicing-policy.md#10-подключённый-runtime-controller-2026-11-04).
+До этапа Windows-проверки подключены:
+- independent immutable controller и READY/COMMIT/startup-success ACK;
+- durable Confirmed/Pending/Rejected replay, bounded rollback/forward recovery;
+- shared lifetime lease и exclusive controller retirement, включая отдельную команду;
+- content-addressed retention всех Current MSI по проверенным registration refs,
+  перенос binding receipts, serialized source GC и volatile reboot pins;
+- ARP/Settings migration; Settings owner/DACL/reparse/hash checks до запуска.
 
-Проверки: четыре новых actual-source controller mock, resource smoke, SUT build
-graph и четыре production DOM теста PASS. Финальная полная регрессия:
-**92 теста, 82 PASS, 10 известных baseline FAIL** (module_scan,
-platform_mutex, preserve_registry, registered_paths, scan_protocol,
-task_close_cleanup, task_scheduler_stop, unins_close_state, unins_task_stop,
-watch_lifecycle). Новых сбоев в этом прогоне нет.
+Актуальная политика: [installer-servicing-policy.md §10–11](installer-servicing-policy.md).
+Порядок следующего шага: [controller-windows-acceptance.md](controller-windows-acceptance.md).
 
-Windows/MSVC/WiX/.NET сборка недоступна в этом Linux sandbox. Реальные ACL,
-подписи, процессный handoff и Windows acceptance не подтверждены. Нет final
-postcommit ACK, полного crash-journal replay, отдельного удаления controller и
-reference-counted source GC. Не считать реализацию всей servicing policy принятой.
+Финальная полная регрессия: **94 mock-теста, 84 PASS / 10 baseline FAIL**.
+Resource smoke, SUT build graph и четыре production DOM-теста PASS.
+Новых сбоев нет. Известные baseline FAIL: module_scan, platform_mutex, preserve_registry, registered_paths,
+scan_protocol, task_close_cleanup, task_scheduler_stop, unins_close_state,
+unins_task_stop, watch_lifecycle. Эти старые mock-harness failures не объявлены
+успешными тестами и не заменяют Windows build.
+
+Windows/MSVC/WiX/.NET сборка недоступна в Linux sandbox. Реальные ACL, подписи,
+process races, volatile registry keys и installer crash/reboot acceptance остаются
+неподтверждёнными до проверки на Windows. Платформа в sandbox не запускалась.
 
 ---
 

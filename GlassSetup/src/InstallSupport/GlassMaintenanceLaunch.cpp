@@ -168,7 +168,7 @@ struct ControllerHandle {
 };
 struct ControllerChildState {
     ControllerHandle parent,ready,commit;
-    bool validated=false,modify=false;
+    bool validated=false,modify=false,startupAckRequired=false;
     std::string record;
 } controllerChild;
 struct ControllerLock {
@@ -202,6 +202,15 @@ bool ControllerTrusted(const std::wstring& path){
     trust.dwStateAction=WTD_STATEACTION_CLOSE;WinVerifyTrust(nullptr,&policy,&trust);
     if(status!=ERROR_SUCCESS)GlassInstallLog::LineFormat(L"Controller Authenticode refused: status=0x%08lX path=%s",static_cast<unsigned long>(status),path.c_str());
     return status==ERROR_SUCCESS;
+}
+bool ControllerSupportsStartupAck(const std::wstring& path) {
+    HMODULE module=LoadLibraryExW(path.c_str(),nullptr,LOAD_LIBRARY_AS_DATAFILE|LOAD_LIBRARY_AS_IMAGE_RESOURCE);
+    if(!module)return false;
+    const auto resource=FindResourceW(module,MAKEINTRESOURCEW(IDR_CONTROLLER_PROTOCOL),RT_RCDATA);
+    const auto loaded=resource?LoadResource(module,resource):nullptr;
+    const auto* bytes=loaded?static_cast<const BYTE*>(LockResource(loaded)):nullptr;
+    const bool supported=bytes&&SizeofResource(module,resource)==2&&bytes[0]==2&&bytes[1]==0;
+    FreeLibrary(module);return supported;
 }
 ULONGLONG ControllerVersion(const std::wstring& file){
     DWORD ignored=0;const DWORD size=GetFileVersionInfoSizeW(file.c_str(),&ignored);
@@ -253,6 +262,25 @@ bool StageController(const std::wstring& source,std::string& record){
     }
     return !ControllerFileForRecord(record,L"GlassSetup.exe").empty()&&!ControllerFileForRecord(record,L"GlassUnins.exe").empty();
 }
+// Called only under the controller mutex. Pending is intent, Confirmed is the
+// durable startup-success boundary. Never execute a record merely because it is
+// present in the journal.
+bool RecoverControllerTransition() {
+    using namespace GlassMaintenanceCache;
+    const auto pending=ReadControllerRecord(L"Pending");
+    if(pending.empty())return GetFileAttributesW((Root()+L"\\Installer\\Pending").c_str())==INVALID_FILE_ATTRIBUTES;
+    const auto active=ReadControllerRecord(),confirmed=ReadControllerRecord(L"Confirmed");
+    if(confirmed.empty()&&GetFileAttributesW((Root()+L"\\Installer\\Confirmed").c_str())!=INVALID_FILE_ATTRIBUTES)return false;
+    if(active==pending&&confirmed!=pending&&!confirmed.empty()) {
+        if(!ControllerTrusted(ControllerFileForRecord(confirmed,L"GlassSetup.exe"))||
+           !ControllerTrusted(ControllerFileForRecord(confirmed,L"GlassUnins.exe")))return false;
+        if(!WriteControllerRecord(L"Rejected",pending)||!WriteControllerRecord(L"Active",confirmed))return false;
+        GlassInstallLog::Line(L"Controller recovery: interrupted unconfirmed startup rolled back");
+    }
+    // First publication has no rollback target: retain the verified immutable
+    // candidate and retry its startup, never invent an older trusted controller.
+    return DeleteFileW((Root()+L"\\Installer\\Pending").c_str())!=FALSE;
+}
 // Quote only explicitly supported intent parameters; never forward an arbitrary
 // original command line (which may contain old handoff switches/Apply commands).
 std::wstring ControllerQuote(const std::wstring& value){
@@ -284,6 +312,7 @@ bool BeginControllerChild(std::wstring& error) noexcept {
         std::wstring parent,ready,commit,record,layout;
         for(size_t i=0;i<args.size();++i){
             if(args[i]==L"--controller-child")requested=true;
+            else if(args[i]==L"--controller-startup-ack")controllerChild.startupAckRequired=true;
             else if(i+1<args.size()&&args[i]==L"--controller-parent")parent=args[++i];
             else if(i+1<args.size()&&args[i]==L"--controller-ready")ready=args[++i];
             else if(i+1<args.size()&&args[i]==L"--controller-commit")commit=args[++i];
@@ -319,7 +348,17 @@ bool CompleteControllerChild(bool windowReady) noexcept {
     HANDLE waits[]={controllerChild.commit.value,controllerChild.parent.value};
     if(WaitForMultipleObjects(2,waits,FALSE,30000)!=WAIT_OBJECT_0)return false;
     // Recheck the atomic active pointer after the parent has committed it.
-    return GlassMaintenanceCache::ReadControllerRecord()==controllerChild.record;
+    return GlassMaintenanceCache::ReadControllerRecord()==controllerChild.record&&
+        (!controllerChild.startupAckRequired||ResetEvent(controllerChild.commit.value));
+}
+
+bool ConfirmControllerStartup(bool ready) noexcept {
+    if(!IsControllerChild()||!controllerChild.startupAckRequired)return ready; // Validated v1 parent compatibility.
+    if(!ready||!SetEvent(controllerChild.ready.value))return false;
+    HANDLE waits[]={controllerChild.commit.value,controllerChild.parent.value};
+    return WaitForMultipleObjects(2,waits,FALSE,30000)==WAIT_OBJECT_0&&
+        GlassMaintenanceCache::ReadControllerRecord(L"Confirmed")==controllerChild.record&&
+        GlassMaintenanceCache::ReadControllerRecord()==controllerChild.record;
 }
 
 ControllerTransition EnsureCurrentController(const std::wstring& downloaded,bool modify,const std::wstring& product,std::wstring& error) noexcept {
@@ -329,9 +368,12 @@ ControllerTransition EnsureCurrentController(const std::wstring& downloaded,bool
         if(IsControllerChild())return ControllerTransition::Continue; // One transition per launch chain.
         ControllerLock lock;
         if(!lock.acquired){error=L"Another controller update is in progress";return ControllerTransition::Failed;}
+        if(!RecoverControllerTransition()){error=L"Controller journal recovery failed";return ControllerTransition::Failed;}
         const auto self=ModulePath();const auto selfVersion=ControllerVersion(self);
         if(!selfVersion){error=L"Cannot identify running controller version";return ControllerTransition::Failed;}
-        auto source=self;auto version=selfVersion;
+        const auto rejected=ReadControllerRecord(L"Rejected");
+        const bool rejectedSelf=!rejected.empty()&&!ControllerFile(L"GlassSetup.exe").empty()&&ControllerDigest(self)==rejected.substr(0,64);
+        auto source=rejectedSelf?std::wstring{}:self;auto version=rejectedSelf?0:selfVersion;
         if(!downloaded.empty()&&(!ControllerVersion(downloaded)||!ControllerTrusted(downloaded))) {
             error=L"Downloaded controller verification failed before publication";return ControllerTransition::Failed;
         }
@@ -343,12 +385,14 @@ ControllerTransition EnsureCurrentController(const std::wstring& downloaded,bool
         if(!active.empty()&&(!ControllerVersion(active)||!ControllerTrusted(active))) {
             error=L"The installed controller publisher or Authenticode verification failed";return ControllerTransition::Failed;
         }
-        if(!active.empty()&&ControllerVersion(active)>=version&&ControllerTrusted(active)){
+        if(!active.empty()&&ControllerVersion(active)>=version&&ControllerTrusted(active)&&ControllerSupportsStartupAck(active)){
             source=active;version=ControllerVersion(active);
         }
-        if(!downloaded.empty()&&ControllerVersion(downloaded)>version&&ControllerTrusted(downloaded)){
+        if(!downloaded.empty()&&ControllerVersion(downloaded)>version&&ControllerTrusted(downloaded)&&
+           (active.empty()||rejected.empty()||ControllerDigest(downloaded)!=rejected.substr(0,64))){
             source=downloaded;version=ControllerVersion(downloaded);
         }
+        if(source.empty()){error=L"No controller with a successful or new startup candidate is available";return ControllerTransition::Failed;}
         std::string record;
         if(!active.empty()&&PathsEqualCanonical(source,active)) {
             record=ReadControllerRecord();
@@ -359,12 +403,22 @@ ControllerTransition EnsureCurrentController(const std::wstring& downloaded,bool
             error=L"Cannot stage the verified controller";return ControllerTransition::Failed;
         }
         const auto target=ControllerFileForRecord(record,L"GlassSetup.exe");
-        if(ControllerVersion(target)!=version) {
+        if((!active.empty()&&version<ControllerVersion(active))||ControllerVersion(target)!=version||!ControllerSupportsStartupAck(target)) {
             error=L"Staged controller version changed during publication";return ControllerTransition::Failed;
         }
         const auto previous=ReadControllerRecord();
         if(PathsEqualCanonical(self,target)){
-            if(previous!=record&&!WriteControllerRecord(L"Active",record)){error=L"Cannot activate controller";return ControllerTransition::Failed;}
+            // A manually launched immutable candidate has completed startup too,
+            // but still needs the same durable intent/confirmation boundary.
+            if(previous!=record&&(!WriteControllerRecord(L"Pending",record)||
+               (!previous.empty()&&!WriteControllerRecord(L"Previous",previous))||!WriteControllerRecord(L"Active",record))){
+                error=L"Cannot journal and activate controller";return ControllerTransition::Failed;
+            }
+            if(!WriteControllerRecord(L"Confirmed",record)){
+                error=L"Cannot confirm controller";return ControllerTransition::Failed;
+            }
+            if(GetFileAttributesW((Root()+L"\\Installer\\Pending").c_str())!=INVALID_FILE_ATTRIBUTES)
+                DeleteFileW((Root()+L"\\Installer\\Pending").c_str());
             return ControllerTransition::Continue;
         }
         // Durable pending record: a crash before Active replacement leaves the
@@ -387,7 +441,7 @@ ControllerTransition EnsureCurrentController(const std::wstring& downloaded,bool
         auto number=[](HANDLE h){return std::to_wstring(reinterpret_cast<uintptr_t>(h));};
         auto layout=GlassSetupSourceLayout::directory;
         if(layout.empty())layout=self.substr(0,self.find_last_of(L"\\/"));
-        std::wstring command=ControllerQuote(target)+L" --controller-child --no-self-update --controller-parent "+number(parent.value)+
+        std::wstring command=ControllerQuote(target)+L" --controller-child --controller-startup-ack --no-self-update --controller-parent "+number(parent.value)+
             L" --controller-ready "+number(ready.value)+L" --controller-commit "+number(commit.value)+
             L" --controller-record "+std::wstring(record.begin(),record.end())+L" --source-layout "+ControllerQuote(layout);
         if(modify){command+=L" --modify";if(!product.empty())command+=L" --product "+ControllerQuote(product);}
@@ -400,32 +454,53 @@ ControllerTransition EnsureCurrentController(const std::wstring& downloaded,bool
         if(WaitForMultipleObjects(2,waits,FALSE,30000)!=WAIT_OBJECT_0){error=L"New controller did not acknowledge readiness";return ControllerTransition::Failed;}
         if((!previous.empty()&&!WriteControllerRecord(L"Previous",previous))||!WriteControllerRecord(L"Active",record)){
             error=L"Cannot commit active controller";return ControllerTransition::Failed;}
-        if(!SetEvent(commit.value)){
+        if(!ResetEvent(ready.value)||!SetEvent(commit.value)){
             if(!previous.empty())(void)WriteControllerRecord(L"Active",previous);
             else DeleteFileW((Root()+L"\\Installer\\Active").c_str());
             error=L"Cannot acknowledge controller commit";return ControllerTransition::Failed;
         }
-        DeleteFileW((Root()+L"\\Installer\\Pending").c_str());
-        GlassInstallLog::Line(L"Controller handoff committed; product actions will be inspected by the new process");
+        // READY was reset before COMMIT; a second signal now means the child
+        // completed startup, not merely window creation. It still gates product UI.
+        if(WaitForMultipleObjects(2,waits,FALSE,30000)!=WAIT_OBJECT_0||
+           !WriteControllerRecord(L"Confirmed",record)) {
+            (void)WriteControllerRecord(L"Rejected",record);
+            if(!previous.empty())(void)WriteControllerRecord(L"Active",previous);
+            else DeleteFileW((Root()+L"\\Installer\\Active").c_str());
+            error=L"Controller startup confirmation failed; journal retained for recovery";
+            return ControllerTransition::Failed;
+        }
+        if(!DeleteFileW((Root()+L"\\Installer\\Pending").c_str())||!SetEvent(commit.value)) {
+            error=L"Controller startup acceptance failed";return ControllerTransition::Failed;
+        }
+        GlassInstallLog::Line(L"Controller handoff startup confirmed; product inspection is permitted");
         return ControllerTransition::Transferred;
     }catch(...){error=L"Controller transition failed";return ControllerTransition::Failed;}
 }
 
-void FinalizeControllerStartup(bool ready) noexcept {
+bool FinalizeControllerStartup(bool ready) noexcept {
+    if(ready&&!ConfirmControllerStartup(true))return false;
     try {
         using namespace GlassMaintenanceCache;
         const auto self=ModulePath();const auto active=ReadControllerRecord();
         if(active.empty()||!PathsEqualCanonical(self,ControllerFileForRecord(active,L"GlassSetup.exe"))||
-           !ControllerTrusted(self)||!ControllerTrusted(ControllerFileForRecord(active,L"GlassUnins.exe")))return;
-        ControllerLock lock;if(!lock.acquired)return; // Parent may still own commit; next startup retries GC.
+           !ControllerTrusted(self)||!ControllerTrusted(ControllerFileForRecord(active,L"GlassUnins.exe")))return true;
+        ControllerLock lock;
+        if(!lock.acquired&&lock.handle.value) {
+            const auto wait=WaitForSingleObject(lock.handle.value,5000);
+            lock.acquired=wait==WAIT_OBJECT_0||wait==WAIT_ABANDONED;
+        }
+        if(!lock.acquired)return true; // No unsafe cleanup if another transition owns the lock.
         if(!ready){
-            const auto previous=ReadControllerRecord(L"Previous");
+            (void)WriteControllerRecord(L"Rejected",active);
+            auto previous=ReadControllerRecord(L"Confirmed");
+            if(previous.empty())previous=ReadControllerRecord(L"Previous");
             if(ControllerTrusted(ControllerFileForRecord(previous,L"GlassSetup.exe"))&&
                ControllerTrusted(ControllerFileForRecord(previous,L"GlassUnins.exe")))
                 (void)WriteControllerRecord(L"Active",previous);
             GlassInstallLog::Line(L"Controller startup failed; previous verified pointer restored when available");
-            return;
+            return false;
         }
+        if(!WriteControllerRecord(L"Confirmed",active))return false;
         const auto store=Root()+L"\\Installer";
         DeleteFileW((store+L"\\Previous").c_str());
         DeleteFileW((store+L"\\Pending").c_str());
@@ -459,5 +534,6 @@ void FinalizeControllerStartup(bool ready) noexcept {
                     GlassInstallLog::LineFormat(L"Controller legacy entrypoint CleanupPending: %s",legacy.c_str());
             }
         }
-    }catch(...){GlassInstallLog::Line(L"Controller startup finalization pending");}
+        return true;
+    }catch(...){GlassInstallLog::Line(L"Controller startup finalization pending");return false;}
 }

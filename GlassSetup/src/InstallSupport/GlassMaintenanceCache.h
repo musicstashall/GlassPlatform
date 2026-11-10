@@ -12,6 +12,7 @@
 #include <cwctype>
 #include "GlassCacheDiagnostics.h"
 #include "GlassRegisteredMsi.h"
+#include "GlassMaintenanceReboot.h"
 
 // One current bundle, not a version archive. All executable cache paths are
 // fixed, administrator-owned and checked for writable/untrusted ACLs/reparse.
@@ -277,10 +278,8 @@ inline bool InstalledCacheDigest(const std::wstring& file,std::array<BYTE,32>& d
 // to our protected publication record, and compare MSI identity to LocalPackage
 // separately. Never hash the stripped cache and call it a distribution digest.
 inline bool PublishedDigestMatches(const std::wstring& file) {
-    const auto slash=file.find_last_of(L"\\/");
-    const auto name=file.substr(slash==std::wstring::npos?0:slash+1)+L".sha256";
-    const auto record=CurrentFile(name.c_str());
-    if(record.empty())return false; // Legacy ACL/identity alone is not provenance.
+    const auto record=file+L".sha256";
+    if(!TrustedPath(record,false))return false; // Legacy ACL/identity alone is not provenance.
     HANDLE handle=CreateFileW(record.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
     if(handle==INVALID_HANDLE_VALUE)return false;
     BY_HANDLE_FILE_INFORMATION info{};LARGE_INTEGER length{};
@@ -354,47 +353,7 @@ inline bool RegisterRepairSource(const std::wstring& file,std::vector<std::wstri
     }
     return true;
 }
-inline bool GarbageCollect() {
-    const auto root=Root(),retained=root+L"\\Retained";
-    if(!TrustedDirectory(root)||!TrustedDirectory(retained))return false;
-    WIN32_FIND_DATAW data{};HANDLE find=FindFirstFileW((retained+L"\\*.msi").c_str(),&data);
-    if(find==INVALID_HANDLE_VALUE) {
-        const DWORD error=GetLastError();return error==ERROR_FILE_NOT_FOUND?true:Diag::Fail(L"FindFirstFileW",retained,error);
-    }
-    bool ok=true;
-    for(;;) {
-        const auto file=retained+L"\\"+data.cFileName;
-        if(data.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))
-            ok=Diag::Fail(L"GarbageCollect",file,ERROR_ACCESS_DENIED,L"Directory/reparse source refused",L"Policy");
-        else {
-            std::wstring code,version;
-            if(!Identity(file,code,version))ok=false;
-            else {
-                const int state=RegistrationState(file,code,version);
-                if(state<0)ok=false;
-                else if(state==0&&!DeleteFileW(file.c_str()))ok=Diag::Fail(L"DeleteFileW",file,GetLastError());
-            }
-        }
-        if(!FindNextFileW(find,&data)) {
-            const DWORD error=GetLastError();if(error!=ERROR_NO_MORE_FILES)ok=Diag::Fail(L"FindNextFileW",retained,error);break;
-        }
-    }
-    FindClose(find);return ok;
-}
-struct Blob {
-    UINT id;const wchar_t* file;const wchar_t* source=nullptr;
-    // Only the acquisition adapter can assert this after signature/manifest
-    // validation of its private copy. A legacy Current file is never blessed.
-    bool verifiedSource=false;
-};
-// Invoked only after successful MSI commit. Failed publication leaves Previous
-// intact; recovery restores it on the next attempt. Never prunes system MSI cache.
-inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT uninstallerResource,
-    std::wstring* failureDetail=nullptr,std::vector<std::wstring>* needsOriginal=nullptr) {
-    if(needsOriginal)needsOriginal->clear();
-    Diag::Publication publication(failureDetail);
-    Diag::Step(L"acquire-lock",L"Global\\GlassPlatform.MaintenanceCache.V1");
-    struct CacheLock {
+struct CacheLock {
         HANDLE handle=nullptr;bool acquired=false;
         CacheLock(){
             constexpr auto name=L"Global\\GlassPlatform.MaintenanceCache.V1";
@@ -412,7 +371,88 @@ inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT 
             }
         }
         ~CacheLock(){if(acquired)ReleaseMutex(handle);if(handle)CloseHandle(handle);}
-    } lock;
+    };
+// References are re-enumerated for every exact source. Unknown context/SID or
+// LocalPackage identity pins the source; absence of a receipt never creates trust.
+inline bool RetainReferencedSources(const std::wstring& current,const std::wstring& retained) {
+    WIN32_FIND_DATAW data{};HANDLE find=FindFirstFileW((current+L"\\*.msi").c_str(),&data);
+    if(find==INVALID_HANDLE_VALUE)return GetLastError()==ERROR_FILE_NOT_FOUND;
+    bool ok=true;
+    do {
+        const auto file=current+L"\\"+data.cFileName;
+        std::wstring code,version;
+        if(data.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)||
+           !TrustedPath(file,false)||!Identity(file,code,version)){ok=false;break;}
+        const int refs=RegistrationState(file,code,version);
+        if(refs<0){ok=false;break;}if(!refs&&!GlassMaintenanceReboot::Pinned())continue;
+        const auto digest=ControllerDigest(file);
+        if(digest.size()!=64){ok=false;break;}
+        const auto dest=retained+L"\\"+std::wstring(digest.begin(),digest.end())+L".msi";
+        const bool copied=CopyFileW(file.c_str(),dest.c_str(),TRUE)!=FALSE;
+        if(!copied&&(GetLastError()!=ERROR_FILE_EXISTS||!TrustedPath(dest,false))){ok=false;break;}
+        if((copied&&!HardenFile(dest))||ControllerDigest(dest)!=digest){ok=false;break;}
+        // Only carry forward a verified binding; an unbound original stays an
+        // unbound candidate. Never mint a receipt from ACL/PackageCode alone.
+        if(PublishedDigestMatches(file)) {
+            const auto receipt=file+L".sha256",target=dest+L".sha256";
+            const bool receiptCopied=CopyFileW(receipt.c_str(),target.c_str(),TRUE)!=FALSE;
+            if(!receiptCopied&&(GetLastError()!=ERROR_FILE_EXISTS||!TrustedPath(target,false))){ok=false;break;}
+            if((receiptCopied&&!HardenFile(target))||!PublishedDigestMatches(dest)){ok=false;break;}
+        }
+    }while(FindNextFileW(find,&data));
+    if(ok&&GetLastError()!=ERROR_NO_MORE_FILES)ok=false;
+    FindClose(find);return ok;
+}
+inline bool CollectSourceFolder(const std::wstring& folder) {
+    if(!TrustedDirectory(folder))return false;
+    WIN32_FIND_DATAW data{};HANDLE find=FindFirstFileW((folder+L"\\*.msi").c_str(),&data);
+    if(find==INVALID_HANDLE_VALUE)return GetLastError()==ERROR_FILE_NOT_FOUND;
+    bool ok=true;
+    do {
+        const auto file=folder+L"\\"+data.cFileName;
+        std::wstring code,version;
+        if(data.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)||
+           !TrustedPath(file,false)||!Identity(file,code,version)){ok=false;continue;}
+        const int refs=RegistrationState(file,code,version);
+        if(refs<0){ok=false;continue;}
+        if(!refs) {
+            if(!DeleteFileW(file.c_str())){ok=false;continue;}
+            const auto receipt=file+L".sha256";
+            if(GetFileAttributesW(receipt.c_str())!=INVALID_FILE_ATTRIBUTES&&
+               (!TrustedPath(receipt,false)||!DeleteFileW(receipt.c_str())))ok=false;
+        }
+    }while(FindNextFileW(find,&data));
+    if(GetLastError()!=ERROR_NO_MORE_FILES)ok=false;
+    FindClose(find);return ok;
+}
+inline bool GarbageCollect() {
+    if(GlassMaintenanceReboot::Pinned())return true;
+    const auto root=Root();
+    if(!TrustedDirectory(root))return false;
+    return CollectSourceFolder(root+L"\\Retained");
+}
+inline bool CollectAfterRemoval() {
+    CacheLock lock;if(!lock.acquired)return false;
+    if(GlassMaintenanceReboot::Pinned())return true;
+    const bool retained=GarbageCollect();
+    const auto current=Root()+L"\\Current";
+    const bool collected=GetFileAttributesW(current.c_str())==INVALID_FILE_ATTRIBUTES||CollectSourceFolder(current);
+    return retained&&collected;
+}
+struct Blob {
+    UINT id;const wchar_t* file;const wchar_t* source=nullptr;
+    // Only the acquisition adapter can assert this after signature/manifest
+    // validation of its private copy. A legacy Current file is never blessed.
+    bool verifiedSource=false;
+};
+// Invoked only after successful MSI commit. Failed publication leaves Previous
+// intact; recovery restores it on the next attempt. Never prunes system MSI cache.
+inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT uninstallerResource,
+    std::wstring* failureDetail=nullptr,std::vector<std::wstring>* needsOriginal=nullptr) {
+    if(needsOriginal)needsOriginal->clear();
+    Diag::Publication publication(failureDetail);
+    Diag::Step(L"acquire-lock",L"Global\\GlassPlatform.MaintenanceCache.V1");
+    CacheLock lock;
     if(!lock.acquired||!EnsureRoot())return false;
     const auto root=Root(),current=root+L"\\Current",previous=root+L"\\Previous",stage=root+L"\\Staging",retained=root+L"\\Retained";
     Diag::Step(L"prepare-retained",retained);
@@ -433,6 +473,12 @@ inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT 
     }
     Diag::Step(L"prepare-staging",stage);
     if(!RemoveFlat(stage)||!SecureDirectory(stage))return false;
+    const auto extract=[&](UINT id,const wchar_t* file) {
+        const auto path=stage+L"\\"+file;
+        Diag::Step(L"extract-resource",path);
+        return GlassInstallUtil::ExtractResourceToFile(instance,id,RT_RCDATA,path)?true:
+            Diag::Fail(L"ExtractResourceToFile",path,GetLastError(),L"resourceId="+std::to_wstring(id));
+    };
     // The immutable controller is committed before MSI work. Keep executable
     // publication here only for compatibility with older callers/installations.
     if(ControllerFile(L"GlassSetup.exe").empty()) {
@@ -441,12 +487,6 @@ inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT 
         if(!length)return Diag::Fail(L"GetModuleFileNameW",L"current Setup",GetLastError());
         if(length>=32768)return Diag::Fail(L"GetModuleFileNameW",L"current Setup",ERROR_INSUFFICIENT_BUFFER);
         if(!CopyFileW(exe,(stage+L"\\GlassSetup.exe").c_str(),TRUE))return Diag::Fail(L"CopyFileW",stage+L"\\GlassSetup.exe",GetLastError(),L"source="+std::wstring(exe));
-        const auto extract=[&](UINT id,const wchar_t* file) {
-            const auto path=stage+L"\\"+file;
-            Diag::Step(L"extract-resource",path);
-            return GlassInstallUtil::ExtractResourceToFile(instance,id,RT_RCDATA,path)?true:
-                Diag::Fail(L"ExtractResourceToFile",path,GetLastError(),L"resourceId="+std::to_wstring(id));
-        };
         if(!extract(uninstallerResource,L"GlassUnins.exe"))return false;
     }
     for(std::size_t i=0;i<count;++i) {
@@ -480,24 +520,7 @@ inline bool Publish(HINSTANCE instance,const Blob* blobs,std::size_t count,UINT 
     // Retain only the source of an actually installed, different old package.
     if(hasCurrent) {
         if(!TrustedDirectory(current))return false;
-        for(std::size_t i=0;i<count;++i) {
-            const auto old=current+L"\\"+blobs[i].file,newer=stage+L"\\"+blobs[i].file;
-            bool found=false;if(!exists(old,found))return false;if(!found)continue;
-            std::wstring code,version,newCode,newVersion;
-            if(!TrustedPath(old,false)||!Identity(old,code,version)||!Identity(newer,newCode,newVersion))return false;
-            if(RegistrationState(old,code,version)<0||RegistrationState(newer,newCode,newVersion)<0)return false;
-            if(code==newCode&&RegistrationState(old,code,version)==1&&
-               (version!=newVersion||_wcsicmp(PackageCode(old).c_str(),PackageCode(newer).c_str())!=0)) {
-                const auto package=PackageCode(old);
-                if(package.size()!=38)return Diag::Fail(L"ValidatePackageCode",old,ERROR_INVALID_DATA,package,L"Policy");
-                for(wchar_t c:package)if(!iswxdigit(c)&&c!=L'{'&&c!=L'}'&&c!=L'-')return Diag::Fail(L"ValidatePackageCode",old,ERROR_INVALID_DATA,package,L"Policy");
-                const auto dest=retained+L"\\"+code+L"-"+version+L"-"+package+L".msi";
-                if(!CopyFileW(old.c_str(),dest.c_str(),TRUE)) {
-                    const DWORD error=GetLastError();if(error!=ERROR_FILE_EXISTS)return Diag::Fail(L"CopyFileW",dest,error,L"source="+old);
-                }
-                if(!TrustedPath(dest,false))return false;
-            }
-        }
+        if(!RetainReferencedSources(current,retained))return false;
         Diag::Step(L"rotate-current-to-previous",current);
         if(!RemoveFlat(previous))return false;
         if(!MoveFileExW(current.c_str(),previous.c_str(),MOVEFILE_WRITE_THROUGH))return Diag::Fail(L"MoveFileExW",current,GetLastError(),L"target="+previous);

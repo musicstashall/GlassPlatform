@@ -38,8 +38,10 @@ bool PathsEqualCanonical(const std::wstring& a,const std::wstring& b){return a==
 namespace GlassSetupSourceLayout {std::wstring directory;}
 namespace GlassMaintenanceCache {
 std::wstring ControllerFileForRecord(const std::string& record,const wchar_t*){return record==std::string(128,'a')?L"canonical.exe":L"";}
-std::string ReadControllerRecord(){return committed?std::string(128,'a'):std::string(128,'b');}
+std::string ReadControllerRecord(const wchar_t* =L"Active"){return committed?std::string(128,'a'):std::string(128,'b');}
 }
+bool ResetEvent(HANDLE){return true;}
+bool IsControllerChild();
 bool SetEvent(HANDLE h){assert(h==reinterpret_cast<HANDLE>(12));++readySignals;return readyOk;}
 DWORD WaitForMultipleObjects(int count,HANDLE* waits,int,int timeout){assert(count==2&&timeout==30000&&waits[0]==reinterpret_cast<HANDLE>(13));return committed?WAIT_OBJECT_0:258;}
 // HANDLE
@@ -47,12 +49,14 @@ DWORD WaitForMultipleObjects(int count,HANDLE* waits,int,int timeout){assert(cou
 // PARSE
 // BEGIN
 // COMPLETE
-void reset(){controllerChild.validated=controllerChild.modify=false;controllerChild.record.clear();controllerChild.parent.value=controllerChild.ready.value=controllerChild.commit.value=nullptr;
+bool IsControllerChild(){return controllerChild.validated;}
+// CONFIRM
+void reset(){controllerChild.validated=controllerChild.modify=controllerChild.startupAckRequired=false;controllerChild.record.clear();controllerChild.parent.value=controllerChild.ready.value=controllerChild.commit.value=nullptr;
  parentAlive=signedParent=correctImage=readyOk=committed=validHandles=true;parentPid=10;readySignals=inheritClears=0;GlassSetupSourceLayout::directory.clear();
- args={L"setup",L"--controller-child",L"--controller-parent",L"11",L"--controller-ready",L"12",L"--controller-commit",L"13",L"--controller-record",std::wstring(128,'a'),L"--source-layout",L"D:\\original",L"--modify"};}
+ args={L"setup",L"--controller-child",L"--controller-parent",L"11",L"--controller-ready",L"12",L"--controller-commit",L"13",L"--controller-record",std::wstring(128,'a'),L"--source-layout",L"D:\\original",L"--modify",L"--controller-startup-ack"};}
 int main(){std::wstring error;
  reset();assert(BeginControllerChild(error));assert(controllerChild.validated&&controllerChild.modify&&inheritClears==3&&GlassSetupSourceLayout::directory==L"D:\\original");
- assert(CompleteControllerChild(true)&&readySignals==1);
+ assert(CompleteControllerChild(true)&&readySignals==1);assert(ConfirmControllerStartup(true)&&readySignals==2);
  for(int failure=0;failure<8;++failure){reset();
   if(failure==0)parentAlive=false;
   if(failure==1)signedParent=false;
@@ -65,12 +69,13 @@ int main(){std::wstring error;
   assert(!BeginControllerChild(error)&&!controllerChild.validated&&readySignals==0);}
  reset();assert(BeginControllerChild(error));assert(!CompleteControllerChild(false)&&readySignals==0);
  reset();assert(BeginControllerChild(error));committed=false;assert(!CompleteControllerChild(true));
+ reset();args.pop_back();assert(BeginControllerChild(error)&&!controllerChild.startupAckRequired);assert(CompleteControllerChild(true)&&ConfirmControllerStartup(true)&&readySignals==1); // Validated legacy parent uses v1 barrier.
  reset();args={L"setup"};assert(BeginControllerChild(error)&&!controllerChild.validated&&CompleteControllerChild(true));
  std::cout<<"PASS: actual child handoff: inherited-handle/real-parent/publisher/canonical-image validation, strict record, source hint, READY/COMMIT barrier and timeout refusal\n";
 }
 '''
 state=s[s.index('struct ControllerChildState {'):s.index('struct ControllerLock {')]
-h=h.replace('// HANDLE',fn('struct ControllerHandle ')+ ';').replace('// STATE',state).replace('// PARSE',fn('bool ParseControllerHandle(')).replace('// BEGIN',fn('bool BeginControllerChild(')).replace('// COMPLETE',fn('bool CompleteControllerChild('))
+h=h.replace('// HANDLE',fn('struct ControllerHandle ')+ ';').replace('// STATE',state).replace('// PARSE',fn('bool ParseControllerHandle(')).replace('// BEGIN',fn('bool BeginControllerChild(')).replace('// COMPLETE',fn('bool CompleteControllerChild(')).replace('// CONFIRM',fn('bool ConfirmControllerStartup('))
 with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'test.cpp';p.write_text(h);exe=Path(d)/'test'
  subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie',str(p),'-o',str(exe)],check=True)

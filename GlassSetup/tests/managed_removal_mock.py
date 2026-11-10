@@ -11,6 +11,7 @@ prefix=r'''
 #include "GlassProducts.h"
 #include <atomic>
 #include <cassert>
+namespace GlassMaintenanceReboot {bool Pinned(bool){return true;}}
 #include <functional>
 #include <iostream>
 #include <map>
