@@ -12,7 +12,7 @@ inline constexpr const char* kIds[] = {"platform64", "platform32", "settings64",
 inline constexpr const char* kFiles[] = {"Glass-x64.msi", "Glass-x86.msi", "GlassSettings-x64.msi", "GlassSettings-x86.msi", "OpenGlass-x64.msi"};
 struct Asset {
     Version version;
-    std::string file, url, sha256;
+    std::string file, url, sha256,payloadVersion;
     std::uint64_t size = 0;
     bool downloadable = false;
 };
@@ -48,6 +48,10 @@ inline Version ReadVersion(const nlohmann::json& value) {
 inline Asset ReadAsset(const nlohmann::json& value, const char* expectedFile) {
     Asset asset;
     asset.version = ReadVersion(value.at("version"));
+    if(value.contains("payloadVersion")) {
+        (void)ReadVersion(value.at("payloadVersion"));
+        asset.payloadVersion=value.at("payloadVersion").get<std::string>();
+    }
     asset.file = value.at("file").get<std::string>();
     if (asset.file != expectedFile) throw std::runtime_error("Unexpected asset filename");
     // Missing digest/size makes this release source unavailable, not an excuse

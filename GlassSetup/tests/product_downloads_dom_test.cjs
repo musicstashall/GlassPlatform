@@ -10,6 +10,10 @@ const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../res/slideshow.html')
 const d=dom.window.document,send=data=>receive({data:{type:'state',...data}});
 for(const locale of ['ru','en']){
  const components=['x64','x86','settings64','settings32','openglass','secureUxTheme'].map(id=>({id,title:id,checked:true,installed:true,operation:'update',installedVersion:'1.0',targetVersion:'2.0',remoteVersion:'2.0',applySupported:true}));
+ send({locale,page:'components',components:components.map((c,i)=>({...c,downloadRequired:i!==0})),downloads:[]});
+ assert.equal(d.querySelectorAll('.product-transfer').length,0,'selection does not create progress before Next');
+ assert.ok(d.querySelector('#product-x64').closest('.c-card').classList.contains('download-local'));
+ assert.ok(d.querySelector('#product-settings64').closest('.c-card').classList.contains('download-planned'));
  send({locale,page:'components',components,downloads:components.map(c=>({id:c.id,phase:'preparing',total:0,bytes:0}))});
  assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer').length,6);
  assert.equal(d.querySelector('#components-downloads'),null,'aggregate progress uses the existing native footer strip');
@@ -30,6 +34,7 @@ for(const locale of ['ru','en']){
  assert.ok(!d.querySelector('#components-plan-items .plan-transfer-status').textContent.includes('100%'));
  send({downloads:jobs.map(j=>({...j,phase:'ready',bytes:j.total}))});
  assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer[aria-valuenow="100"]').length,5);
+ assert.equal(d.querySelectorAll('#components-installed-grid .download-local').length,5);
  send({downloads:[]});assert.equal(d.querySelector('#components-downloads'),null);
  assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer').length,0);
 }

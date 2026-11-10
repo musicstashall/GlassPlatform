@@ -41,6 +41,16 @@ build counter с префиксом `GlassProductVersion`. Native не явля�
 сессии комплекта не меняет эту версию. Новый номер комплекта меняет её вместе
 с платформой.
 
+Установщик сравнивает installed/candidate MSI Settings для выбора операции.
+Карточки Settings показывают собственный FileVersion приложения: Installed — из
+зарегистрированного EXE каждой архитектуры, target/attached — из File.Version
+`GlassSettings.exe` соответствующего проверенного MSI, server — из
+`payloadVersion` каталога. FileVersion x64 и x86 может различаться при общей
+версии MSI. Unknown отображается прочерком, не версией MSI, платформы или Native.
+`New-ReleaseCatalog.ps1` извлекает `payloadVersion` из таблицы File MSI. После
+этой правки каталог нужно пересоздать; ради одного отображения MSI заново не
+собирают. Отдельного `GlassSettingsVersion` больше нет.
+
 ## Источник истины
 
 - **Установлено:** `MsiGetProductInfoW(ProductCode, INSTALLPROPERTY_VERSIONSTRING)`

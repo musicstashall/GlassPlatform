@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 s=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
-a=s.index('static std::wstring OpenGlassDllVersion(');b=s.index('\nReport Run(',a)
+a=s.index('static std::wstring PayloadFileVersion(');b=s.index('\nstatic void ReadSettingsPayloadVersion(',a)
 h=r'''
 #include "GlassSetup/src/InstallSupport/GlassOpenGlassRelease.h"
 #include <cassert>
@@ -30,10 +30,10 @@ int main(){
  assert(GlassOpenGlassRelease::Parse(R"({"tag_name":"v3.0.2.3749","draft":false,"prerelease":false})",version));assert(version=="3.0.2.3749");
  for(auto text:{"{}","[]","oops",R"({"tag_name":"v3.x"})",R"({"tag_name":"v3.0","draft":true})",R"({"tag_name":"v3.0","prerelease":true})"}){assert(!GlassOpenGlassRelease::Parse(text,version));assert(version.empty());}
  assert(!GlassOpenGlassRelease::Parse(std::string(1024*1024+1,'x'),version));
- assert(OpenGlassDllVersion(L"OpenGlass.dll")==L"3.2.1.3749");
+ assert(PayloadFileVersion(L"OpenGlass.dll")==L"3.2.1.3749");
  for(int fail=0;fail<5;++fail){exists=read=query=true;shortInfo=false;info.dwSignature=0xfeef04bd;
   if(fail==0)exists=false;if(fail==1)read=false;if(fail==2)query=false;if(fail==3)shortInfo=true;if(fail==4)info.dwSignature=0;
-  assert(OpenGlassDllVersion(L"OpenGlass.dll").empty());
+  assert(PayloadFileVersion(L"OpenGlass.dll").empty());
  }
  std::cout<<"PASS: actual OpenGlass upstream release parser and installed DLL fixed version, malformed/offline metadata and read errors\n";
 }

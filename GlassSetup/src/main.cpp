@@ -2029,9 +2029,14 @@ private:
                 if(rep&&rep->installed&&!rep->damaged&&!rep->installedPackageVersion.empty()&&VersionOlder(rep->installedPackageVersion,targetVersion))condition=GlassProducts::ProductCondition::UpdateAvailable;
             }}
             const bool openGlass=wcscmp(id,L"openglass")==0;
+            const bool settings=wcscmp(id,L"settings64")==0||wcscmp(id,L"settings32")==0;
+            std::wstring remotePayloadVersion=rep?rep->remotePayloadVersion:L"";
+            if(settings&&catalogIndex>=0&&releaseCatalog_.products[catalogIndex])
+                remotePayloadVersion=GlassReleaseClient::Wide(releaseCatalog_.products[catalogIndex]->payloadVersion);
             // A local MSI's DLL version belongs only to that exact offer, not a
             // newer remote MSI whose payload has not been inspected yet.
-            const std::wstring targetPayloadVersion=rep&&rep->sourceVerified&&targetVersion==rep->targetVersion?rep->targetPayloadVersion:L"";
+            const bool selectedLocal=rep&&rep->sourceVerified&&targetVersion==rep->targetVersion;
+            const std::wstring targetPayloadVersion=selectedLocal?rep->targetPayloadVersion:settings?remotePayloadVersion:L"";
             const bool hasUpdate=rep&&rep->installed&&(openGlass?
                 GlassOpenGlassRelease::PayloadUpdateAvailable(rep->installedPayloadVersion,targetPayloadVersion):
                 (!rep->installedPackageVersion.empty()&&!targetVersion.empty()&&VersionOlder(rep->installedPackageVersion,targetVersion)));
@@ -2090,7 +2095,7 @@ private:
                 L",\"installedVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
                 L",\"installedPackageVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
                 L",\"installedPayloadVersion\":"+JsStringLiteral(rep?rep->installedPayloadVersion:L"")+
-                L",\"remotePayloadVersion\":"+JsStringLiteral(rep?rep->remotePayloadVersion:L"")+
+                L",\"remotePayloadVersion\":"+JsStringLiteral(remotePayloadVersion)+
                 L",\"upstreamUpdateAvailable\":"+((rep&&!rep->installedPayloadVersion.empty()&&!rep->remotePayloadVersion.empty()&&VersionOlder(rep->installedPayloadVersion,rep->remotePayloadVersion))?L"true":L"false")+
                 L",\"targetPayloadVersion\":"+JsStringLiteral(targetPayloadVersion)+
                 L",\"targetVersion\":"+JsStringLiteral(targetVersion)+
@@ -2099,6 +2104,7 @@ private:
                 L",\"attachedPayloadVersion\":"+JsStringLiteral(rep?rep->attachedPayloadVersion:L"")+
                 L",\"attachedPackagePath\":"+JsStringLiteral(rep?rep->attachedPackagePath:L"")+
                 L",\"selectedPackagePath\":"+JsStringLiteral(rep?rep->selectedPackagePath:L"")+
+                L",\"downloadRequired\":"+(!targetVersion.empty()&&!selectedLocal?L"true":L"false")+
                 L",\"localPackageVersion\":"+JsStringLiteral(rep&&rep->sourceVerified?rep->targetVersion:L"")+
                 L",\"packageSize\":"+std::to_wstring(packageSize)+
                 L",\"operation\":"+JsStringLiteral(removing?L"remove":condition==GlassProducts::ProductCondition::NotInstalled?L"install":condition==GlassProducts::ProductCondition::UpdateAvailable?L"update":L"repair")+
@@ -2167,6 +2173,7 @@ private:
             L",\"attachedPackageVersion\":"+JsStringLiteral(sutOffer.attachedVersion)+
             L",\"attachedPackagePath\":"+JsStringLiteral(sutOffer.attachedPath)+
             L",\"selectedPackagePath\":"+JsStringLiteral(sutOffer.localPath)+
+            L",\"downloadRequired\":"+(!sutLocal?L"true":L"false")+
             L",\"localPackageVersion\":"+JsStringLiteral(sutLocal?sutOffer.localVersion:L"")+
             L",\"remoteVersion\":"+JsStringLiteral(sutOffer.releaseVersion)+
             L",\"releaseTag\":"+JsStringLiteral(sutOffer.releaseTag)+
