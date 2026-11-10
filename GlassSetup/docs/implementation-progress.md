@@ -1,3 +1,14 @@
+## Исправление Invalid UTF-8 response на карточках GlassSettings
+
+`payloadVersion` в remote catalog необязателен. Карточки Settings передавали его
+пустое значение в `GlassReleaseClient::Wide`; MultiByteToWideChar возвращает 0 для
+пустого входа, что ошибочно превращалось в видимую «версию» Invalid UTF-8 response.
+Wide теперь возвращает пустую строку без вызова API для пустого входа. Проверка
+невалидных непустых UTF-8 данных сохранена. Отсутствующее поле не подменяется
+версией MSI/платформы. Тест production Wide (empty/version/Cyrillic/invalid) и resource
+smoke PASS; MSVC/Windows UI не проверены. Сборка Release|x86: GlassSetup; если общие
+зависимости уже актуальны, повторная сборка GlassShared/GlassUnins не нужна.
+
 ## Дополнение: проверяемая очистка реестра DWM после полного удаления
 
 Повторно сверено upstream OpenGlass `fb145fcd391b274cb91e642c93b3fc2b0e30e61c`
