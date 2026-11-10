@@ -1,16 +1,18 @@
 <Project>
   <!-- Independent MSI ProductVersion overrides, not the Setup/PE version.
-       Empty means the existing bundle base/build policy (backward compatible).
-       Set a full numeric version per product when publishing it independently.
+       Settings defaults to its own application release from Version.props.
+       Platform/OpenGlass retain their separate existing version policies.
+       A Settings override must match the packaged application release.
        MSI upgrade tables compare only the first three fields; our controller
        additionally compares field four for existing bundle-build packages.
        Never lower a released product version. Release catalog reads the MSI.
        Values can also be supplied as MSBuild global properties. -->
+  <Import Project="..\..\GlassSettings\Version.props" Condition="'$(GlassSettingsVersion)' == ''" />
   <PropertyGroup>
     <GlassPlatform64MsiVersion Condition="'$(GlassPlatform64MsiVersion)' == ''"></GlassPlatform64MsiVersion>
     <GlassPlatform32MsiVersion Condition="'$(GlassPlatform32MsiVersion)' == ''"></GlassPlatform32MsiVersion>
-    <GlassSettings64MsiVersion Condition="'$(GlassSettings64MsiVersion)' == ''"></GlassSettings64MsiVersion>
-    <GlassSettings32MsiVersion Condition="'$(GlassSettings32MsiVersion)' == ''"></GlassSettings32MsiVersion>
+    <GlassSettings64MsiVersion Condition="'$(GlassSettings64MsiVersion)' == ''">$(GlassSettingsVersion)</GlassSettings64MsiVersion>
+    <GlassSettings32MsiVersion Condition="'$(GlassSettings32MsiVersion)' == ''">$(GlassSettingsVersion)</GlassSettings32MsiVersion>
     <GlassOpenGlassMsiVersion Condition="'$(GlassOpenGlassMsiVersion)' == ''"></GlassOpenGlassMsiVersion>
   </PropertyGroup>
 </Project>

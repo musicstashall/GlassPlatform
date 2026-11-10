@@ -1,6 +1,7 @@
 <Project>
+  <Import Project="$(MSBuildThisFileDirectory)GlassSettings\Version.props" />
   <!--
-    Единый источник истины версии продукта Glass.
+    Источник версии продуктов платформы Glass (Settings: GlassSettings/Version.props).
     Меняется ТОЛЬКО здесь (Major.Minor.Patch). FileVersion (4-е поле) —
     автоинкремент per-project через BuildNumber.txt и Directory.Build.targets.
   -->
@@ -27,6 +28,10 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'GlassSettings'">
+    <!-- Settings release identity is not the platform bundle identity. -->
+    <Version>$(GlassSettingsVersion)</Version>
+    <AssemblyVersion>$(GlassSettingsVersion)</AssemblyVersion>
+    <InformationalVersion>$(GlassSettingsVersion)</InformationalVersion>
     <GlassSettingsUnpackagedDir>$(SolutionRoot)Build\$(Platform)\$(Configuration)\GlassSettingsUnpackaged\</GlassSettingsUnpackagedDir>
     <BaseOutputPath>$(SolutionRoot)Build\</BaseOutputPath>
     <OutputPath>$(GlassSettingsUnpackagedDir)</OutputPath>

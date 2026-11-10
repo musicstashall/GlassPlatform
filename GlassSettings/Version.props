@@ -1,0 +1,10 @@
+<Project>
+  <!-- Settings application/MSI release version, independent of platform, Setup
+       and Native helper build counters. Bump this for a Settings release.
+       2.0.1.0 supersedes the previous bundle-derived 2.0.0.N MSI family in the
+       first three fields that Windows Installer actually orders. -->
+  <PropertyGroup>
+    <GlassSettingsVersion Condition="'$(GlassSettingsVersion)' == ''">2.0.1.0</GlassSettingsVersion>
+    <GlassSettingsVersionBase3>$([System.Text.RegularExpressions.Regex]::Match('$(GlassSettingsVersion)', '^\d+\.\d+\.\d+').Value)</GlassSettingsVersionBase3>
+  </PropertyGroup>
+</Project>

@@ -1,3 +1,37 @@
+# Независимая release-версия приложения и MSI GlassSettings
+
+- Отдельный источник `GlassSettings/Version.props`: `GlassSettingsVersion=2.0.1.0`.
+  Начальная версия выше прежних `2.0.0.N` в первых трёх полях MSI. Это release
+  identity Settings, не автоматически растущий номер комплекта.
+- C# Version/AssemblyVersion/InformationalVersion Settings берут эту версию;
+  диагностический FileVersion сохраняет отдельный build counter с собственным
+  Settings-префиксом. Версии Native/платформы/Setup не подменены.
+- Оба MSI Settings по умолчанию используют ту же версию. Read-only packaging gate
+  сверяет staged EXE ProductVersion, release и MSI версии; stale publish/override
+  mismatch запрещены. Работает и для single-file publish, не требует managed DLL.
+- Runtime installer/Unins уже читают отдельный MSI Settings, release generator —
+  тоже. Переключать MSI ordering на FileVersion приложения не требуется.
+- При выпуске изменённого Settings увеличивать Version.props. Правки только Setup
+  или платформы больше не увеличивают его release-версию.
+
+PASS: XML/source wiring Settings release, both architectures, independent Native,
+stale payload gate; реальные MSI version API/Unins projection, catalog parser и
+inspection/preflight mocks. Это не MSBuild/.NET/WiX build: PowerShell gate и
+EXE resource propagation нуждаются в Windows проверке после сборки. Online
+product download acceptance по-прежнему не выполнен.
+
+Сборка без полного solution rebuild:
+1. Нужен существующий Release x86 GlassUnins; если его нет — **Release|x86:
+   GlassShared → GlassUnins**.
+2. **Release|x64: GlassShared → GlassSettings → GlassSettings-x64**.
+3. **Release|x86: GlassShared → GlassSettings → GlassSettings-x86**.
+GlassSettings target сам собирает соответствующий Native. Setup и платформенные
+MSI не изменены; пересобирать их ради этой правки не требуется. Перегенерировать
+release catalog из новых MSI (для partial publication использовать BaseManifest
+и Products settings64,settings32), не редактировать версии/хэши вручную.
+
+---
+
 # Независимая FileVersion для самообновления Setup
 
 - Self-update сравнивает numeric fixed FileVersion собственного EXE с `setup` /

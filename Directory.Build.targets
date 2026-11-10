@@ -87,7 +87,10 @@
       <_GlassBuildCurrent Condition="'@(_GlassBuildLine)' == ''">0</_GlassBuildCurrent>
       <GlassBuildNumberNext>$([MSBuild]::Add($(_GlassBuildCurrent), 1))</GlassBuildNumberNext>
       <GlassFileVersionDot>$(GlassProductVersionBase3).$(GlassBuildNumberNext)</GlassFileVersionDot>
-      <_GlassBuildVersionCsContent>// Автогенерация: Directory.Build.targets. Не редактировать.;[assembly: System.Reflection.AssemblyFileVersion("$(GlassFileVersionDot)")];[assembly: System.Reflection.AssemblyInformationalVersion("$(GlassBundleVersionEffective)")]</_GlassBuildVersionCsContent>
+      <GlassFileVersionDot Condition="'$(MSBuildProjectName)' == 'GlassSettings'">$(GlassSettingsVersionBase3).$(GlassBuildNumberNext)</GlassFileVersionDot>
+      <_GlassCSharpProductVersion>$(GlassBundleVersionEffective)</_GlassCSharpProductVersion>
+      <_GlassCSharpProductVersion Condition="'$(MSBuildProjectName)' == 'GlassSettings'">$(GlassSettingsVersion)</_GlassCSharpProductVersion>
+      <_GlassBuildVersionCsContent>// Автогенерация: Directory.Build.targets. Не редактировать.;[assembly: System.Reflection.AssemblyFileVersion("$(GlassFileVersionDot)")];[assembly: System.Reflection.AssemblyInformationalVersion("$(_GlassCSharpProductVersion)")]</_GlassBuildVersionCsContent>
     </PropertyGroup>
     <WriteLinesToFile File="$(GlassBuildNumberPath)" Lines="$(GlassBuildNumberNext)" Overwrite="true" />
     <WriteLinesToFile File="$(GlassBuildVersionCsPath)" Lines="$(_GlassBuildVersionCsContent)" Overwrite="true" />
@@ -98,7 +101,7 @@
     <PropertyGroup>
       <_GlassBuildNumberIncremented>true</_GlassBuildNumberIncremented>
     </PropertyGroup>
-    <Message Importance="low" Text="Glass $(MSBuildProjectName): FileVersion=$(GlassFileVersionDot), ProductVersion=$(GlassBundleVersionEffective)" />
+    <Message Importance="low" Text="Glass $(MSBuildProjectName): FileVersion=$(GlassFileVersionDot), ProductVersion=$(_GlassCSharpProductVersion)" />
   </Target>
 
   <!-- После WiX SDK: конечный MSI сразу рядом с Setup. BaseOutputPath и obj остаются

@@ -158,6 +158,10 @@
       Text="Glass MSI $(GlassPayloadArch): номер комплекта не задан. Сначала Release|x64 solution, затем x86 с активной сессией." />
     <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(_GlassMsiVersion)', '^\d+\.\d+\.\d+(\.\d+)?$'))"
            Text="Invalid MSI ProductVersion for $(MSBuildProjectName): $(_GlassMsiVersion). Use a numeric three- or four-part version." />
+    <!-- Refuse stale app output or an MSI override that advertises a different
+         Settings release. Native is intentionally NOT the app version source. -->
+    <Exec Condition="'$(MSBuildProjectName)' == 'GlassSettings-x64' or '$(MSBuildProjectName)' == 'GlassSettings-x86'"
+      Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\Assert-SettingsVersion.ps1&quot; -ApplicationPath &quot;$(GlassPayloadStage)\GlassSettings\GlassSettings.exe&quot; -ExpectedVersion &quot;$(GlassSettingsVersion)&quot; -MsiVersion &quot;$(_GlassMsiVersion)&quot;" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Overwrite="true" Lines="&lt;?define GlassMsiVersion = &quot;$(_GlassMsiVersion)&quot; ?&gt;" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassMsiBundleVersion = &quot;$(_GlassMsiBundleVersion)&quot; ?&gt;" Overwrite="false" />
     <WriteLinesToFile File="$(GlassProductMetadataWxi)" Lines="&lt;?define GlassUpgradeCode = &quot;$(GlassUpgradeCode)&quot; ?&gt;" Overwrite="false" />
