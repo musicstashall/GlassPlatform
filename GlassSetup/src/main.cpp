@@ -1331,6 +1331,7 @@ private:
     bool simulateRollback_ = false;
     ULONGLONG simulateRollbackStarted_ = 0;
     bool debugDemoPending_ = false, debugDemoStarted_ = false, debugDemoActive_ = false;
+    bool debugNativeDemo_ = false;
     size_t debugDemoStep_ = 0;
 #endif
     std::wstring installStatusLine_;
@@ -1435,7 +1436,8 @@ private:
         SendMessageW(eula_,EM_SETLIMITTEXT,1024*1024,0);
         SendMessageW(eula_,EM_SETMARGINS,EC_LEFTMARGIN | EC_RIGHTMARGIN,MAKELPARAM(14,14));
 #ifdef _DEBUG
-        debugDemoPending_=HasCommandLineSwitch(L"--demo-tour");
+        debugNativeDemo_=HasCommandLineSwitch(L"--demo-native");
+        debugDemoPending_=debugNativeDemo_ || HasCommandLineSwitch(L"--demo-tour");
 #endif
         Layout();
         AttachButtonSubclasses();
@@ -1550,6 +1552,19 @@ private:
     void BeginStartup() {
         if (!startupPending_ || startupStarted_ || closing_) return;
         startupStarted_=true;
+#ifdef _DEBUG
+        // Native preview never starts discovery/update/MSI/runtime workers or WebView.
+        if (HasCommandLineSwitch(L"--demo-native")) {
+            (void)WizardTheme::InstallDetours();
+            InitializeControls();
+            startupPending_=false;
+            inspectReady_.store(true,std::memory_order_release); // Synthetic empty inventory for preview only.
+            eulaText_=Utf8(Resource(IDR_EULA,gLanguage));
+            SendMessageW(eula_,WM_SETTEXT,0,reinterpret_cast<LPARAM>(eulaText_.c_str()));
+            MaybeStartDebugDemo();
+            return;
+        }
+#endif
         // Attach Detours on the UI thread before any worker can enter uxtheme.
         const bool themed=WizardTheme::InstallDetours();
         bool slowStartup=false;
@@ -1690,6 +1705,7 @@ private:
         const bool nativeLicense = !webVisible && page_==Page::License && !transitioning_;
         ShowWindow(eula_,nativeLicense?SW_SHOWNA:SW_HIDE);
         ShowWindow(accept_,nativeLicense?SW_SHOWNA:SW_HIDE);
+        EnableWindow(accept_,!DebugDemoLocksControls());
         const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching || page_==Page::RuntimeInstalling);
         ShowWindow(progress_, showProgress ? SW_SHOWNA : SW_HIDE);
         if (controller_) controller_->put_IsVisible(webVisible ? TRUE : FALSE);
@@ -1731,12 +1747,18 @@ private:
             EnableWindow(componentSettings_,TRUE); EnableWindow(componentSettings32_,TRUE);
             EnableWindow(component64_,os64); EnableWindow(component32_,TRUE);
         }
+        if (DebugDemoLocksControls()) {
+            for (HWND control:{accept_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_})
+                EnableWindow(control,FALSE);
+        }
         const bool nativeCertificate=!webVisible && page_==Page::Certificate && !transitioning_;
         ShowWindow(certInstall_,nativeCertificate?SW_SHOWNA:SW_HIDE);
         ShowWindow(certSkip_,nativeCertificate?SW_SHOWNA:SW_HIDE);
         if (nativeCertificate) {
             SendMessageW(certInstall_,BM_SETCHECK,selection_.trustSigner?BST_CHECKED:BST_UNCHECKED,0);
             SendMessageW(certSkip_,BM_SETCHECK,selection_.trustSigner?BST_UNCHECKED:BST_CHECKED,0);
+            EnableWindow(certInstall_,!DebugDemoLocksControls());
+            EnableWindow(certSkip_,!DebugDemoLocksControls());
         }
     }
     [[nodiscard]] bool SlidesVisible() const noexcept {
@@ -2327,8 +2349,8 @@ private:
         KillTimer(window,kFadeTimer);
         transitioning_=false;
         ShowContentControls();
-        EnableWindow(back_,TRUE);
-        EnableWindow(next_,!failurePending_ && (page_!=Page::License || accepted_) && ComponentsReady());
+        EnableWindow(back_,!DebugDemoLocksControls());
+        EnableWindow(next_,!DebugDemoLocksControls() && !failurePending_ && (page_!=Page::License || accepted_) && ComponentsReady());
         FocusPage();
         InvalidateContent();
     }
@@ -2918,7 +2940,7 @@ private:
     }
 #ifdef _DEBUG
     void MaybeStartDebugDemo() {
-        if (!debugDemoPending_ || debugDemoStarted_ || !webReady_ || !webBridgeReady_) return;
+        if (!debugDemoPending_ || debugDemoStarted_ || (!debugNativeDemo_ && (!webReady_ || !webBridgeReady_))) return;
         debugDemoStarted_=true;
         debugDemoPending_=false;
         debugDemoActive_=true;
@@ -2930,7 +2952,7 @@ private:
         webInitSent_=false;
         InstallLog::Line(L"Debug page tour started; no update or installation actions will run");
         SetPage(Page::Welcome);
-        SetTimer(window,kDebugDemoTimer,kDebugDemoPageMs,nullptr);
+        SetTimer(window,kDebugDemoTimer,debugNativeDemo_?4000:kDebugDemoPageMs,nullptr);
     }
     void SetDebugDemoPage(Page page) {
         switch (page) {
@@ -3057,7 +3079,11 @@ private:
             Page::Installing,Page::ModulesBusy,Page::ProcessesStuck,Page::ConfirmCancel,Page::Cancelling,Page::Cancelled,Page::Launching,Page::Complete,Page::Error};
         constexpr size_t count=sizeof(sequence)/sizeof(sequence[0]);
         if (!debugDemoActive_) { KillTimer(window,kDebugDemoTimer); return; }
-        if (debugDemoStep_+1>=count) { FinishDebugDemo(); return; }
+        if (debugDemoStep_+1>=count) {
+            // Keep the isolated native tour isolated: no normal wizard after preview.
+            if (debugNativeDemo_) { debugDemoStep_=0; SetDebugDemoPage(sequence[0]); return; }
+            FinishDebugDemo(); return;
+        }
         ++debugDemoStep_;
         SetDebugDemoPage(sequence[debugDemoStep_]);
     }
@@ -3360,6 +3386,7 @@ private:
         return S_OK;
     }
     void InitializeWebView() {
+        if (NativeDemo()) return;
         PWSTR local = nullptr;
         HRESULT folderResult = SHGetKnownFolderPath(FOLDERID_LocalAppData,0,nullptr,&local);
         if (FAILED(folderResult)) { WebFailure(folderResult); return; }
@@ -3723,13 +3750,20 @@ private:
         g.DrawImage(banner_.get(), dest, 0, 0, static_cast<INT>(banner_->GetWidth()),
                     static_cast<INT>(banner_->GetHeight()), Gdiplus::UnitPixel);
     }
+    [[nodiscard]] bool NativeDemo() const noexcept {
+#ifdef _DEBUG
+        return debugNativeDemo_;
+#else
+        return false;
+#endif
+    }
     void RenderContent(HDC dc) {
         RECT content=Box(0,0,kWidth,kContentHeight);
         FillRect(dc,&content,darkBrush_);
         const COLORREF white=RGB(245,244,252), muted=RGB(163,168,191), accent=RGB(193,180,255);
         // Do not flash native Checking before the real WebView Checking page,
         // for either bootstrapper or maintenance startup. Retain the native fallback on WebView error.
-        if (page_==Page::Checking && !webReady_ && SUCCEEDED(webError_)) {
+        if (page_==Page::Checking && !webReady_ && SUCCEEDED(webError_) && !NativeDemo()) {
             DrawLoadingScreen(dc);
             return;
         }
@@ -3845,6 +3879,11 @@ private:
             DrawLabel(dc,errorReason_,Box(48,362,520,92),font_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
             DrawLabel(dc,Text(IDS_ERROR_LOG_HINT),Box(48,476,450,50),small_,muted);
             DrawFailureIllustration(dc);
+        } else if (page_ == Page::Installing && !webReady_) {
+            DrawBanner(dc,true);
+            DrawLabel(dc,Text(IDS_BRAND),Box(48,34,500,44),heading_,white);
+            DrawLabel(dc,Text(IDS_MAINTENANCE_TITLE),Box(48,145,560,110),title_,white);
+            DrawLabel(dc,installStatusLine_,Box(48,285,520,100),font_,muted);
         } else if (page_ == Page::ModulesBusy || page_ == Page::ProcessesStuck) {
             DrawBanner(dc,true);
             const bool kill=page_==Page::ProcessesStuck;
@@ -3852,6 +3891,11 @@ private:
             DrawLabel(dc,Text(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?IDS_NATIVE_RISK_TITLE:kill?IDS_KILL_TITLE:IDS_HOLD_TITLE),Box(48,139,520,70),heading_,white);
             DrawLabel(dc,Text(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?IDS_NATIVE_RISK_BODY:kill?IDS_KILL_BODY:IDS_HOLD_BODY),Box(48,220,460,136),font_,muted);
             DrawLabel(dc,holdReport_,Box(48,365,520,165),font_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+        } else if (page_ == Page::Welcome && NativeDemo()) {
+            DrawBanner(dc,true);
+            DrawLabel(dc,Text(IDS_BRAND),Box(48,34,500,44),heading_,white);
+            DrawLabel(dc,Text(IDS_TITLE),Box(48,145,560,110),title_,white);
+            DrawLabel(dc,Text(IDS_SIMULATION_NOTE),Box(48,285,520,100),font_,muted);
         } else if (page_ == Page::Checking) {
             DrawBanner(dc,true);
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
@@ -4120,7 +4164,7 @@ private:
                 }
                 return 0;
             case IDC_COMPONENT64: case IDC_COMPONENT32: case IDC_COMPONENT_SETTINGS32: case IDC_COMPONENT_SETTINGS: case IDC_COMPONENT_OG: case IDC_COMPONENT_SUT:
-                if (page_==Page::Components && HIWORD(w)==BN_CLICKED && !webReady_) {
+                if (page_==Page::Components && HIWORD(w)==BN_CLICKED && !webReady_ && !DebugDemoLocksControls()) {
                     const bool os64=GlassInstallUtil::IsOs64Bit();
                     selection_.confirmedSettingsRemovalRisk=0;
                     if(LOWORD(w)==IDC_COMPONENT64)selection_.removeMask&=~1u;
@@ -4165,7 +4209,7 @@ private:
                 }
                 return 0;
             case IDC_CERT_INSTALL: case IDC_CERT_SKIP:
-                if (page_==Page::Certificate && HIWORD(w)==BN_CLICKED && !webReady_) {
+                if (page_==Page::Certificate && HIWORD(w)==BN_CLICKED && !webReady_ && !DebugDemoLocksControls()) {
                     selection_.trustSigner=SendMessageW(certInstall_,BM_GETCHECK,0,0)==BST_CHECKED;
                     InvalidateContent();
                 }

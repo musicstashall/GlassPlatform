@@ -7,9 +7,9 @@ offline startup (с bounded failed network attempts) и ARP modify entry без 
 Вход из обновлённого GlassSettings подтверждён ticket authorization. Повторное
 обновление Settings x64/x86 и Platform x64/x86: uninstall/install code0, module
 gate clear без Retry, source publication completed. Happy-path MSI принят; полный
-Authenticode/ACL fault matrix, reboot/crash recovery не выполнены. Общая остановка
-с восстановлением Explorer не принята: есть сообщение о неполном redraw/падениях,
-но нет platform trace и дампа. Подробнее — начало implementation-progress.md.
+Authenticode/ACL fault matrix, reboot/crash recovery не выполнены. Разбор общей остановки
+и падений Explorer по решению пользователя вынесен в отдельную тему; это не
+подтверждение исправления и не задача текущего прохода установщика. Подробнее — начало implementation-progress.md.
 Совместимость со старым Settings entrypoint не добавляется. Не использовать рабочую
 машину для fault-injection или намеренного повреждения cache.
 

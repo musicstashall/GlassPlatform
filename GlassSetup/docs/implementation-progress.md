@@ -1,3 +1,53 @@
+# Завершение UI разблокировки и нативная Debug-демонстрация
+
+По решению пользователя разбор Explorer dumps вынесен в отдельную тему и не
+продолжается в рамках завершения установщика. Изменений unload-контракта нет.
+
+- Таблица держателей заменена правой glass-панелью в стиле плана продуктов:
+  общий surface/бордюр/тень, заголовок, вертикальный прокручиваемый список.
+  Нет прежней узкой полосы у нижней границы; текст слева и панель не пересекаются.
+- При `unlockActive=true` панель и отдельный dim/blur слой скрыты, анимация
+  работает (с уважением prefers-reduced-motion). Старый holdReport не появляется
+  поверх повторной выгрузки. После ожидания с держателями панель возвращается,
+  фон затемняется, анимация останавливается. Empty report и уход со страницы
+  убирают и панель, и shade. Shared HTML используется Setup и GlassUnins.
+- Debug `--demo-native`: изолированный циклический показ нативных страниц каждые4с.
+  Ранний BeginStartup branch создаёт controls и синтетическое inventory без
+  startup worker, product discovery, controller update и WebView. Не зависит от
+  наличия WebView Runtime. Общие process lease/COM остаются, это не установка.
+  Release-путь не изменён, параметр не является Release dry-run.
+- Устранена недостающая native Installing отрисовка (ранее могла оставаться
+  пустая content area), добавлен Welcome для native preview; Checking в preview
+  больше не подменяется бесконечным loading spinner. License/product/certificate
+  controls заблокированы в demo, включая command handlers. Fade completion не
+  включает обратно demo-кнопки. В конце native tour не открывается обычный wizard.
+
+Проверки: 97 mocks → 87 PASS / 10 прежних baseline FAIL (тот же набор, что до
+изменений). Новый native_demo_mock исполняет production demo readiness/timer
+state machine с fake Win32 и проверяет раннюю изоляцию source assertions.
+verify_resources и verify_sut_build_graph PASS. Chromium production HTML: RU/EN,
+оба unlock modes,18holders, scroll/bounds, shade/idle/retry/остатки/empty/navigation,
+reduced-motion PASS. Четыре production DOM suites (maintenance entry/UI, managed
+removal, SUT dependency) также PASS. Это не Windows/MSVC/GDI runtime acceptance.
+
+## Что осталось до приёмки установщика
+
+1. Windows build и визуальная проверка `--demo-native`, затем новых holder states
+   в обычной операции. Сам факт наличия portable checks не закрывает GDI/DPI/theme.
+2. VM-only fault/reboot/controller recovery matrix из controller-windows-acceptance:
+   реализованный security/recovery код ещё не имеет полного runtime proof.
+3. Привести10 устаревших mock harness к текущим API, не менять production security
+   ради их прохождения. Общая проверка пока не green.
+4. Отдельный проход шлифовки/устаревшей документации: исторические пункты README
+   про отсутствие controller/cache не являются актуальным списком недостающего
+   кода. Текущее состояние controller — в начале этого файла и acceptance matrix.
+
+Не объявлять весь установщик завершённым: happy-path подтверждён, но проверки
+отказов/перезапуска остаются. Не подменять их искусственными обновлениями продуктов
+или fault-injection на рабочей машине. Explorer crash investigation — отдельная тема.
+
+---
+
 # Повторный product update и вход из обновлённого Settings
 
 Разобраны `GlassSetup-25.log`, `GlassSetup[1]-4.log`, `GlassSetup[2]-5.log`
