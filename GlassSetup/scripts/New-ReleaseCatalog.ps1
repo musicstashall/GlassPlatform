@@ -2,7 +2,7 @@
 param(
     [string]$PackageDirectory = (Join-Path $PSScriptRoot '..\..\Build\GlassSetup\Release'),
     [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9_.-]{1,128}$')][string]$ReleaseTag,
-    [ValidateSet('platform64','platform32','settings64','settings32','openglass')][string[]]$Products = @('platform64','platform32','settings64','settings32','openglass'),
+    [ValidateSet('platform64','platform32','settings64','settings32','openglass')][string[]]$Products = @('platform64','platform32','settings64','settings32'),
     [string]$BaseManifest,
     [switch]$IncludeSetup,
     [string]$OutputPath
@@ -10,8 +10,9 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($ReleaseTag.Contains('..')) { throw 'Release tag cannot contain ..' }
 if (@($Products | Select-Object -Unique).Count -ne $Products.Count) { throw 'Duplicate product selection' }
-if (-not $BaseManifest -and ($Products.Count -ne 5 -or -not $IncludeSetup)) {
-    throw 'First catalog requires all five MSI and -IncludeSetup; partial publication requires -BaseManifest.'
+$required = @('platform64','platform32','settings64','settings32')
+if (-not $BaseManifest -and (-not $IncludeSetup -or @($required | Where-Object { $_ -notin $Products }).Count -gt 0)) {
+    throw 'First catalog requires both platform and Settings architectures and -IncludeSetup; partial publication requires -BaseManifest. OpenGlass is not part of this catalog.'
 }
 $directory = [IO.Path]::GetFullPath($PackageDirectory)
 if (-not $OutputPath) { $OutputPath = Join-Path $directory 'version.json' }

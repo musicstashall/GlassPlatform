@@ -143,7 +143,7 @@ Runtime acquisition подключён; переход inspector/UI/cache/helper
 В Windows PowerShell из корня solution, после подписи финальных файлов:
 
 ```powershell
-# Первый каталог: все пять MSI и EXE; версии MSI и EXE читаются из самих файлов.
+# Первый каталог: платформа и GlassSettings обеих разрядностей и EXE. OpenGlass в каталог не входит.
 .\GlassSetup\scripts\New-ReleaseCatalog.ps1 -ReleaseTag v1.4.3 -IncludeSetup
 # Отдельный MSI в другом релизе: остальные версии/ссылки и EXE metadata сохраняются.
 .\GlassSetup\scripts\New-ReleaseCatalog.ps1 -ReleaseTag settings-hotfix -Products settings64 `
