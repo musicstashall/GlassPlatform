@@ -14,6 +14,8 @@
 
 Версии карточек и независимый MSI ProductVersion: [контракт MSI-версий](docs/msi-product-versions.md).
 
+Извлечение OpenGlass из upstream-установщика ещё не реализовано: [контракт разбора](docs/openglass-upstream-setup.md).
+
 ## Самообновление Setup
 
 Для self-update используется собственный числовой **FileVersion GlassSetup.exe**,

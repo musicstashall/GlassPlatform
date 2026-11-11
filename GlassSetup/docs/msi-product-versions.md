@@ -20,32 +20,36 @@ Fallback `glass` → setup удалён: версия платформы не в
 ProductVersion Setup остаётся для существующих bundle/preflight display и EULA
 identity; этим изменением их семантика не меняется. Версии MSI независимы.
 
-## Независимая версия GlassSettings
+## Версия GlassSettings
 
-`GlassSettings/Version.props` — источник `GlassSettingsVersion` приложения и MSI
-x64/x86. Она больше не берётся из GlassBundleVersion. Начало — `2.0.1.0`, выше
-прошлых `2.0.0.N` по первым трём полям MSI. Приложение получает эту версию в
-ProductVersion/AssemblyVersion; FileVersion имеет свой per-project build counter.
-Native остаётся отдельным модулем, не источником версии приложения.
+Приложение и оба MSI Settings используют общий источник комплекта:
+`GlassProductVersion` и номер сессии. Отдельного `GlassSettingsVersion` нет.
+ProductVersion EXE — `GlassBundleVersion`. FileVersion сохраняет per-project
+build counter с префиксом `GlassProductVersion`. Native не является источником
+версии приложения.
 
-`ProductVersions.props` по умолчанию задаёт обоим MSI Settings эту release-версию.
-Перед созданием metadata/harvest `Assert-SettingsVersion.ps1` сверяет MSI version
-и ProductVersion staged `GlassSettings.exe` с release-версией. Несовпадение,
-отсутствующий/устаревший EXE или недопустимая версия прерывают упаковку. DLL не
+`ProductVersions.props` оставляет версии Settings пустыми, поэтому MSI получает
+ту же формулу, что и платформа: базовая тройка плюс номер комплекта. Явная
+подмена `GlassSettings64MsiVersion` или `GlassSettings32MsiVersion` допустима
+только когда она численно совпадает с ProductVersion упаковываемого EXE.
+`Assert-SettingsVersion.ps1` сверяет этот EXE и ProductVersion MSI до harvest.
+Несовпадение, отсутствующий или устаревший EXE прерывают упаковку. DLL не
 обязательна: поддерживается single-file publish. Ни приложение, ни Native не
 запускаются. Проверка не заменяет runtime trust/receipt/identity validation.
 
-Установщик сравнивает независимые installed/candidate MSI Settings для выбора
-операции. **Карточки Settings показывают собственный FileVersion приложения**:
-Installed — из зарегистрированного EXE каждой архитектуры, target/attached — из
-File.Version GlassSettings.exe соответствующего проверенного MSI, server — из
-`payloadVersion` каталога. FileVersion x64/x86 может различаться даже при общей
-release/MSI версии. Unknown отображается прочерком, не MSI/платформой/Native.
-`New-ReleaseCatalog.ps1` извлекает payloadVersion из MSI File table; после этой
-правки каталог нужно пересоздать, но MSI ради отображения пересобирать не нужно. Каталог релиза по-прежнему считывает ProductVersion MSI.
-Для нового выпуска Settings нужно поднять `GlassSettingsVersion`; повторная
-компиляция с тем же release-номером не объявляется новым выпуском. Обновление
-только Setup/платформы не требует увеличения версии Settings.
+Каталог релиза читает ProductVersion каждого MSI. Повторная компиляция в той же
+сессии комплекта не меняет эту версию. Новый номер комплекта меняет её вместе
+с платформой.
+
+Установщик сравнивает installed/candidate MSI Settings для выбора операции.
+Карточки Settings показывают собственный FileVersion приложения: Installed — из
+зарегистрированного EXE каждой архитектуры, target/attached — из File.Version
+`GlassSettings.exe` соответствующего проверенного MSI, server — из
+`payloadVersion` каталога. FileVersion x64 и x86 может различаться при общей
+версии MSI. Unknown отображается прочерком, не версией MSI, платформы или Native.
+`New-ReleaseCatalog.ps1` извлекает `payloadVersion` из таблицы File MSI. После
+этой правки каталог нужно пересоздать; ради одного отображения MSI заново не
+собирают. Отдельного `GlassSettingsVersion` больше нет.
 
 ## Источник истины
 
