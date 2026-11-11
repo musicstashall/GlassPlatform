@@ -49,11 +49,15 @@ HANDLE FindFirstFileW(const wchar_t*,WIN32_FIND_DATAW* data){names.clear();index
  if(names.empty()){error_=2;return -1;}fill(data);return 43;}
 bool FindNextFileW(HANDLE,WIN32_FIND_DATAW* data){if(++index_>=names.size()){error_=18;return false;}fill(data);return true;}
 void FindClose(HANDLE){}
+bool fileProduct=false,rootsKnown=true;
+namespace GlassInstallUtil {struct InstallRoots {std::wstring openGlass;}; bool ResolveInstallRoots(InstallRoots&){return rootsKnown;}}
+namespace GlassOpenGlassFiles {bool HasReceipt(const std::wstring&){return fileProduct;}}
 // REBOOT
 // LIFE
 void reset(){assert(live==0);GlassMaintenanceReboot::pinRequested=false;trusted=registryReadable=registryWritable=true;busy=registryPresent=locked=false;registration=259;files.clear();dirs={L"root\\Installer",L"root\\Installer\\"+std::wstring(64,L'a'),L"root\\Current"};files[L"root\\Installer\\Active"]="record";}
 int main(){using namespace GlassMaintenanceLifetime;
  reset();{Lease shared;assert(shared.Acquire()&&share_==FILE_SHARE_READ&&access_==GENERIC_READ);}assert(live==0);
+ reset();fileProduct=true;assert(!RetireUnused());fileProduct=false;rootsKnown=false;assert(!RetireUnused());rootsKnown=true;
  reset();registration=0;assert(!RetireUnused()&&files.count(L"root\\Installer\\Active"));
  registration=5;assert(!RetireUnused()); // Incomplete registration discovery is not absence.
  reset();busy=true;assert(!RetireUnused()&&files.count(L"root\\Installer\\Active"));

@@ -2060,17 +2060,23 @@ private:
             std::wstring remotePayloadVersion=rep?rep->remotePayloadVersion:L"";
             if(settings&&catalogIndex>=0&&releaseCatalog_.products[catalogIndex])
                 remotePayloadVersion=GlassReleaseClient::Wide(releaseCatalog_.products[catalogIndex]->payloadVersion);
+            if(openGlass) {
+                // Upstream file product: a missing Glass MSI catalogue row is
+                // expected, not a reason to permanently disable the card.
+                targetVersion=remotePayloadVersion;
+            }
             // A local MSI's DLL version belongs only to that exact offer, not a
             // newer remote MSI whose payload has not been inspected yet.
-            const bool selectedLocal=rep&&rep->sourceVerified&&targetVersion==rep->targetVersion;
-            const std::wstring targetPayloadVersion=selectedLocal?rep->targetPayloadVersion:settings?remotePayloadVersion:L"";
+            const bool selectedLocal=!openGlass&&rep&&rep->sourceVerified&&targetVersion==rep->targetVersion;
+            const std::wstring targetPayloadVersion=selectedLocal?rep->targetPayloadVersion:(settings||openGlass)?remotePayloadVersion:L"";
             const bool hasUpdate=rep&&rep->installed&&(openGlass?
                 GlassOpenGlassRelease::PayloadUpdateAvailable(rep->installedPayloadVersion,targetPayloadVersion):
                 (!rep->installedPackageVersion.empty()&&!targetVersion.empty()&&VersionOlder(rep->installedPackageVersion,targetVersion)));
             if(openGlass&&rep&&rep->installed&&!rep->damaged)
                 condition=hasUpdate?GlassProducts::ProductCondition::UpdateAvailable:GlassProducts::ProductCondition::Healthy;
-            const bool applySupported=!targetVersion.empty() && (!rep||!rep->installed||
-                (!rep->installedPackageVersion.empty()&&!VersionOlder(targetVersion,rep->installedPackageVersion)));
+            const bool applySupported=!targetVersion.empty() && (openGlass?
+                (!rep||!rep->installed||rep->installedPayloadVersion.empty()||!VersionOlder(targetVersion,rep->installedPayloadVersion)):
+                (!rep||!rep->installed||(!rep->installedPackageVersion.empty()&&!VersionOlder(targetVersion,rep->installedPackageVersion))));
             const auto action=GlassProducts::ActionForCondition(checked,condition);
             const UINT badgeId=ComponentBadgeId(condition);
             // Причины не смешиваются: у обновления своя причина, у повреждений — свои.

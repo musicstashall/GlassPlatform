@@ -1,3 +1,4 @@
+#include "InstallSupport/GlassOpenGlassRelease.h"
 #include "InstallSupport/GlassMaintenanceCache.h"
 #include "InstallSupport/GlassPackageAcquisition.h"
 #include "InstallEngine.h"
@@ -548,6 +549,8 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                     // installation is final: no step below may fail the install
                     // or trigger a rollback; problems become finish-page notes.
                     InstallLog::Line(L"Launch: commit point reached, rollback is no longer possible");
+                    if(self->openGlassFiles_)self->openGlassFiles_->Commit();
+                    self->rollbackSession_.restoreOpenGlassFiles={};
                     if(!vendorOnly && !self->auxiliaryOnly_)self->LaunchSelectedProducts();
                     constexpr ULONGLONG kMinLaunchMs = 5000;
                     for (;self->HasHostLaunchWork();) {
@@ -690,6 +693,7 @@ bool InstallEngine::Start(
     selection_=GlassProducts::NormalizeInstall(selection_,GlassInstallUtil::IsOs64Bit());
     procedureMask_=GlassProcedurePlan::MutationMask(selection_,GlassInstallUtil::IsOs64Bit());
     auxiliaryOnly_=procedureMask_==8u && selection_.Removes(3) && !forceClean_ &&
+        !GlassOpenGlassFiles::HasReceipt(openGlassDir_) &&
         MsiQueryProductStateW(GlassInstallMsi::kProductOpenGlass)==INSTALLSTATE_UNKNOWN &&
         MsiQueryProductStateW(GlassInstallMsi::kLegacyOpenGlass)==INSTALLSTATE_UNKNOWN;
     InstallLog::LineFormat(L"Procedure map: rows=0x%X auxiliaryOnly=%d",procedureMask_,auxiliaryOnly_?1:0);
@@ -1569,6 +1573,28 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
             if(removing&&probe.selected)return refuse(L"Contradictory apply/remove intents");
             request.selected[i]=probe.selected;
             if(removing)request.actions[i]=P::Action::Remove;
+            if(probe.product==P::Product::OpenGlass && (probe.selected||(removing&&GlassOpenGlassFiles::HasReceipt(openGlassDir_)))) {
+                // No transition from our retired MSI family, and no overwrite of
+                // an independent upstream install. Ownership is a fixed-file receipt.
+                if(MsiQueryProductStateW(probe.code)!=INSTALLSTATE_UNKNOWN ||
+                   MsiQueryProductStateW(probe.legacy)!=INSTALLSTATE_UNKNOWN)
+                    return refuse(L"Retired OpenGlass MSI is still registered");
+                const auto installed=GlassOpenGlassFiles::Inspect(openGlassDir_);
+                if(removing) {
+                    if(!installed.present)return refuse(L"OpenGlass file receipt disappeared");
+                    fact.presence=P::Presence::Installed;fact.condition=P::Condition::Healthy;
+                    fact.ownership=P::Ownership::Managed;continue;
+                }
+                if(openGlassPackage_.dll.empty()||openGlassPackage_.host.empty()||openGlassPackage_.gui.empty())
+                    return refuse(L"Upstream OpenGlass payload was not prepared");
+                if(installed.present&&GlassOpenGlassRelease::PayloadUpdateAvailable(openGlassPackage_.version,installed.version))
+                    return refuse(L"OpenGlass payload downgrade refused");
+                fact.presence=installed.present?P::Presence::Installed:P::Presence::Absent;
+                fact.condition=installed.present&&!installed.integrity?P::Condition::Damaged:P::Condition::Healthy;
+                fact.version=installed.present&&GlassOpenGlassRelease::PayloadUpdateAvailable(installed.version,openGlassPackage_.version)?P::Version::Older:P::Version::Same;
+                fact.source=P::Source::Verified;fact.ownership=P::Ownership::Managed;
+                continue;
+            }
             bool present=false,presenceKnown=true;
             std::array<bool,2> wasInstalled{};std::size_t codeIndex=0;
             for(const auto* code:{probe.code,probe.legacy}) {
@@ -1715,6 +1741,9 @@ bool InstallEngine::PrepareFullRemovalCleanup() noexcept {
         if(GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX64))installed|=1;
         if(GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX86))installed|=2;
         if(GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass))installed|=8;
+        GlassInstallUtil::InstallRoots cleanupRoots{};
+        if(!GlassInstallUtil::ResolveInstallRoots(cleanupRoots))return false;
+        if(GlassOpenGlassFiles::HasReceipt(cleanupRoots.openGlass))installed|=8;
         std::vector<std::wstring> vendor;std::wstring detail;
         const bool vendorKnown=Shared::SecureUxThemeInventory::Query(vendor)==ERROR_SUCCESS;
         if(!vendorKnown||!GlassProducts::FullRemovalSelected(selection_,installed,!vendor.empty())||
@@ -1778,6 +1807,20 @@ bool InstallEngine::RemoveManagedProduct(GlassProductPlan::Product product) noex
     const unsigned row=static_cast<unsigned>(P::Index(product));
     if(!executionPlanReady_ || !selection_.Removes(row) ||
        executionPlan_.rows[row].action!=P::Action::Remove || IsCancelRequested())return false;
+    if(product==P::Product::OpenGlass&&GlassOpenGlassFiles::HasReceipt(openGlassDir_)) {
+        try {
+        if(MsiQueryProductStateW(GlassInstallMsi::kProductOpenGlass)!=INSTALLSTATE_UNKNOWN ||
+           MsiQueryProductStateW(GlassInstallMsi::kLegacyOpenGlass)!=INSTALLSTATE_UNKNOWN) {
+            SetFailure(L"OpenGlass MSI registration changed",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+        }
+        openGlassFiles_=std::make_shared<GlassOpenGlassFiles::Transaction>();
+        const auto transaction=openGlassFiles_;
+        rollbackSession_.restoreOpenGlassFiles=[transaction]{return transaction->Rollback();};
+        std::wstring error;
+        if(transaction->Begin(openGlassDir_,error)&&transaction->Remove(error))return true;
+        SetFailure(error,ERROR_INSTALL_FAILURE);return false;
+        }catch(...){SetFailure(L"OpenGlass removal allocation failed",ERROR_NOT_ENOUGH_MEMORY);return false;}
+    }
     const wchar_t* current=nullptr;const wchar_t* legacy=nullptr;const wchar_t* title=nullptr;
     switch(product) {
     case P::Product::Platform64:current=GlassInstallMsi::kProductPlatformX64;legacy=GlassInstallMsi::kLegacyPlatformX64;title=L"Platform x64";break;
@@ -1881,7 +1924,7 @@ bool InstallEngine::RunMsiSequence() noexcept {
         if(!P::IsMutation(plan.rows[P::Index(product)].action))continue;
         if(product==P::Product::Platform64)steps.push_back({P::Product::Platform64,L"Glass-x64.msi",x64Dir_,labels_.platform64});
         if(product==P::Product::Platform32)steps.push_back({P::Product::Platform32,L"Glass-x86.msi",x86Dir_,labels_.platform32});
-        if(product==P::Product::OpenGlass)steps.push_back({P::Product::OpenGlass,L"OpenGlass-x64.msi",openGlassDir_,labels_.openGlass});
+
     }
 
     constexpr int kProgressStart = 2200;
@@ -1930,6 +1973,24 @@ bool InstallEngine::RunMsiSequence() noexcept {
     };
     const auto scheduled=GlassMaintenanceExecutor::RunPhase(plan,GlassMaintenanceExecutor::Phase::Products,
         [&](P::Product product,P::Action action)->unsigned {
+            if(product==P::Product::OpenGlass && action!=P::Action::Remove) {
+                try {
+                if(MsiQueryProductStateW(GlassInstallMsi::kProductOpenGlass)!=INSTALLSTATE_UNKNOWN ||
+                   MsiQueryProductStateW(GlassInstallMsi::kLegacyOpenGlass)!=INSTALLSTATE_UNKNOWN) {
+                    SetFailure(L"OpenGlass MSI registration changed",ERROR_INSTALL_PACKAGE_REJECTED);return ERROR_INSTALL_FAILURE;
+                }
+                openGlassFiles_=std::make_shared<GlassOpenGlassFiles::Transaction>();
+                const auto transaction=openGlassFiles_;
+                rollbackSession_.restoreOpenGlassFiles=[transaction]{return transaction->Rollback();};
+                std::wstring error;
+                const bool applied=transaction->Begin(openGlassDir_,error)&&
+                    transaction->Apply(openGlassPackage_.version,openGlassPackage_.milComp,
+                        {openGlassPackage_.dll,openGlassPackage_.host,openGlassPackage_.gui},error)&&
+                    GlassInstallUtil::WriteOpenGlassInstallPath(x64Dir_,openGlassDir_);
+                if(!applied){SetFailure(error.empty()?L"Could not apply upstream OpenGlass files":error,ERROR_INSTALL_FAILURE);return ERROR_INSTALL_FAILURE;}
+                return ERROR_SUCCESS;
+                }catch(...){SetFailure(L"OpenGlass file transaction allocation failed",ERROR_NOT_ENOUGH_MEMORY);return ERROR_INSTALL_FAILURE;}
+            }
             if(action==P::Action::Remove)return RemoveManagedProduct(product)?ERROR_SUCCESS:
                 IsCancelRequested()?ERROR_INSTALL_USEREXIT:ERROR_INSTALL_FAILURE;
             for(const auto& step:steps)if(step.product==product)
@@ -2078,7 +2139,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         // Publish the actual acquired sources, not stale embedded packages. Keep
         // sources for unmodified installed products in Current across partial updates.
         const wchar_t* names[]={L"Glass-x64.msi",L"Glass-x86.msi",L"GlassSettings-x64.msi",
-            L"GlassSettings-x86.msi",L"OpenGlass-x64.msi",is64?L"SecureUxTheme_x64.msi":L"SecureUxTheme_x86.msi"};
+            L"GlassSettings-x86.msi",is64?L"SecureUxTheme_x64.msi":L"SecureUxTheme_x86.msi"};
         std::vector<std::wstring> sources;
         sources.reserve(std::size(names));
         for(const auto* name:names) {
@@ -2087,7 +2148,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
                 acquired:GlassMaintenanceCache::CurrentFile(name));
         }
         std::vector<GlassMaintenanceCache::Blob> cacheBlobs;
-        constexpr unsigned sourceRows[]={0,1,2,5,3,4};
+        constexpr unsigned sourceRows[]={0,1,2,5,4};
         for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty() && !selection_.Removes(sourceRows[i]))
             cacheBlobs.push_back({0,names[i],sources[i].c_str(),sources[i]==tempDir_+L"\\"+names[i]});
         std::wstring cacheFailure;

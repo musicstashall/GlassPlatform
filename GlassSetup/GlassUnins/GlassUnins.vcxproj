@@ -108,6 +108,7 @@
     <ResourceCompile Include="GlassUnins.rc" />
     <None Include="app.manifest" />
     <ClInclude Include="..\src\InstallSupport\GlassProfileMaintenance.h" />
+    <ClInclude Include="..\src\InstallSupport\GlassOpenGlassFiles.h" />
     <ClInclude Include="..\src\InstallSupport\GlassUserDataCleanup.h" />
     <ClInclude Include="..\src\InstallSupport\GlassSavedThemeCleanup.h" />
     <ClInclude Include="..\src\WizardAssets.h" />

@@ -1,5 +1,6 @@
 #pragma once
 #include "GlassMaintenanceCache.h"
+#include "GlassOpenGlassFiles.h"
 
 // A shared kernel file lease spans UI, MSI execution and handoff in every new
 // Setup/Unins process. Retirement needs an exclusive lease across all sessions.
@@ -33,6 +34,9 @@ inline bool HasProducts() {
         const UINT result=MsiEnumProductsExW(code,L"S-1-1-0",MSIINSTALLCONTEXT_ALL,0,product,nullptr,nullptr,nullptr);
         if(result!=ERROR_NO_MORE_ITEMS&&result!=ERROR_UNKNOWN_PRODUCT)return true;
     }
+    GlassInstallUtil::InstallRoots roots{};
+    if(!GlassInstallUtil::ResolveInstallRoots(roots))return true;
+    if(GlassOpenGlassFiles::HasReceipt(roots.openGlass))return true;
     return false; // Unknown enumeration is a reference, never absence.
 }
 // Explicit command, or successful last-product removal. No product/configuration

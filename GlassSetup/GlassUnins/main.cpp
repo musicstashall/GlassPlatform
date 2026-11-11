@@ -408,6 +408,12 @@ private:
             (!installed_.openGlass || chosen.openGlass) && (!installed_.secureUxTheme || chosen.secureUxTheme);
     }
     bool AnyRegisteredProduct(const Selection* excluding=nullptr) const noexcept {
+        // File-based OpenGlass is still a product even without an MSI. Do not
+        // permit global data cleanup while the standalone MSI-only route keeps it.
+        GlassInstallUtil::InstallRoots fileRoots{};
+        if(!GlassInstallUtil::ResolveInstallRoots(fileRoots))return true;
+        if(GlassOpenGlassFiles::HasReceipt(fileRoots.openGlass))return true;
+
         struct Candidate { const wchar_t* code; bool excluded; };
         const Candidate products[]={
             {Msi::kProductPlatformX64,excluding && excluding->x64},

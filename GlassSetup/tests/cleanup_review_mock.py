@@ -20,6 +20,9 @@ prefix=r'''
 #include <map>
 #include <string>
 using UINT=unsigned;using INSTALLSTATE=int;
+bool fileProduct=false,rootsKnown=true;
+namespace GlassInstallUtil {struct InstallRoots {std::wstring openGlass;};bool ResolveInstallRoots(InstallRoots&){return rootsKnown;}}
+namespace GlassOpenGlassFiles {bool HasReceipt(const std::wstring&){return fileProduct;}}
 constexpr UINT ERROR_NO_MORE_ITEMS=259,ERROR_UNKNOWN_PRODUCT=1605,ERROR_SUCCESS=0,MSIINSTALLCONTEXT_ALL=7;
 constexpr int INSTALLSTATE_UNKNOWN=-1,INSTALLSTATE_ABSENT=2;
 namespace Msi {
@@ -41,6 +44,8 @@ int main(){
   assert(t.RemovesAllInstalled(chosen)==(installed!=0&&selected!=0&&(selected&installed)==installed));
  }
  Test t;assert(!t.AnyRegisteredProduct());
+ fileProduct=true;assert(t.AnyRegisteredProduct());fileProduct=false;
+ rootsKnown=false;assert(t.AnyRegisteredProduct());rootsKnown=true;
  Selection exclude;exclude.settings64=true;
  enumerations[Msi::kProductSettingsX64]=ERROR_SUCCESS;assert(!t.AnyRegisteredProduct(&exclude));
  enumerations[Msi::kProductSettingsX86]=ERROR_SUCCESS;assert(t.AnyRegisteredProduct(&exclude));

@@ -551,6 +551,9 @@ bool UninstallSessionProductSafely(SessionState& state,const wchar_t* productCod
 }
 
 bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScope scope) noexcept {
+    if(scope==RestoreScope::AllProducts && state.restoreOpenGlassFiles && !state.restoreOpenGlassFiles()) {
+        state.copyError=ERROR_INVALID_DATA;return false;
+    }
     bool uninstallOk=true;
     for (auto it = state.installedThisSession.rbegin(); it != state.installedThisSession.rend(); ++it) {
         if (!UninstallSessionProductSafely(state,it->c_str())) { uninstallOk=false;break; }

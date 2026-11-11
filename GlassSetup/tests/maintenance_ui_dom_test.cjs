@@ -332,6 +332,21 @@ for(const lang of ['ru','en'])for(const [current,target,newer] of [
  assert.equal(card.querySelector('.c-meta').textContent.includes('→'),newer&&checked);
  if(!newer){assert.doesNotMatch(card.querySelector('.c-chip').textContent,/обновится|will update|Доступно|Available/);if(checked)assert.match(d.querySelector('#components-plan-items').textContent,/Переустановить|Reinstall/);}
 }
+// Upstream OpenGlass has no Glass MSI catalogue row. Repeated Available/Plan
+// roundtrips must retain the enabled explicit install action and server version.
+for(const locale of ['ru','en']) {
+ const upstream={id:'openglass',title:'OpenGlass',installed:false,checked:false,
+  targetVersion:'3.0.2.3749',targetPayloadVersion:'3.0.2.3749',remotePayloadVersion:'3.0.2.3749',
+  installedPackageVersion:'',attachedPackageVersion:'',applySupported:true,downloadRequired:true,operation:'install'};
+ for(let cycle=0;cycle<2;++cycle){
+  receive({data:{type:'state',appMode:'setup',locale,page:'components',components:[upstream]}});
+  const check=d.querySelector('#product-openglass');assert.equal(check.disabled,false);
+  assert.match(check.closest('.c-card').textContent,/3\.0\.2\.3749/);
+  const before=messages.length;check.click();assert.equal(messages[before],'component:openglass:1');
+  receive({data:{type:'state',components:[{...upstream,checked:true}]}});
+  assert.equal(d.querySelector('#product-openglass').checked,true);
+ }
+}
 // Equal payload does not suppress genuine damage/repair information.
 receive({data:{type:'state',appMode:'setup',locale:'ru',page:'components',components:[{id:'openglass',title:'OpenGlass',installed:true,broken:true,checked:false,operation:'update',updateAvailable:true,installedPayloadVersion:'3.0.2.3749',targetPayloadVersion:'3.0.2.3749',targetVersion:'2.0.0.99'}]}});
 assert.ok(d.querySelector('#product-openglass').closest('.c-card').classList.contains('is-broken'));

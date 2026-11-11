@@ -2898,3 +2898,20 @@ mock — отдельные RU/EN предупреждения, реальные
 
 Проверки первого runtime-инкремента: 88 mocks — 78 PASS / 10 прежних baseline
 failures; verify_resources и diff --check PASS. Это не Windows acceptance.
+
+### 2026-11-04 — OpenGlass file-product integration (intermediate)
+
+- Added a fixed-name, SHA-256 receipt for the three extracted upstream binaries,
+  ownership-aware inventory and file apply/remove journal with checked rollback.
+  Unowned binaries are not adopted; independent Inno installations remain untouched.
+- Setup plans the upstream file product independently of its removed MSI catalogue
+  row; Available uses upstream payload metadata, not a Glass MSI version. Local
+  MSI source probing explicitly skips OpenGlass. Download/extraction still starts
+  only on Next; the upstream executable is never launched.
+- Receipt presence keeps the maintenance controller alive and prevents broad
+  settings cleanup. File-only removal must not take the MSI auxiliary shortcut.
+- Portable production-header tests and RU/EN Available/Plan DOM roundtrips pass.
+  These are not Windows compile, filesystem ACL, sharing or runtime evidence.
+- **Not complete:** standalone GlassUnins file-product removal, maintenance/ARP
+  servicing and end-to-end Windows apply/remove/rollback verification remain.
+  Do not treat the newly enabled Setup path as release-ready until those close.

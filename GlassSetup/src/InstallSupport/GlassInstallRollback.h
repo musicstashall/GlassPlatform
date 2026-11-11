@@ -26,6 +26,7 @@ struct RegistryValueSnapshot {
 };
 
 struct SessionState {
+    std::function<bool()> restoreOpenGlassFiles;
     unsigned productMask = 0x7Fu; // Product rows eligible for this transaction only.
     std::wstring workspaceDir;
     std::wstring x64Dir;

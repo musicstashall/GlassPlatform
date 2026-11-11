@@ -1,3 +1,4 @@
+#include "GlassOpenGlassFiles.h"
 #include "GlassSetupSourceLayout.h"
 #include "GlassProductInspect.h"
 #include "GlassPackageAcquisition.h"
@@ -540,6 +541,7 @@ Report Run(const Inputs& in)
         {GlassPackageCatalog::Product::OpenGlass,&report.og,GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass}};
     for(const auto& job:jobs) {
         if(cancel.load())break;
+        if(job.product==GlassPackageCatalog::Product::OpenGlass)continue; // Upstream file product, never adjacent/cached Glass MSI.
         std::wstring offerPath;
         if(in.inspectSources && GlassPackageAcquisition::Describe(job.product,catalog,cancel,
             job.rep->targetVersion,job.rep->sourceVerified,&offerPath,
@@ -594,6 +596,23 @@ Report Run(const Inputs& in)
     if(rootsOk) {
         ReadSettingsPayloadVersion(report.settings64,roots.x64);
         ReadSettingsPayloadVersion(report.settings32,roots.x86);
+    }
+    if(rootsOk&&!roots.openGlass.empty()) {
+        try {
+            const auto files=GlassOpenGlassFiles::Inspect(roots.openGlass);
+            if(files.present) {
+                report.og.installed=true;report.og.residual=false;report.og.residualSafe=false;
+                report.og.integrityKnown=true;report.og.damaged=!files.integrity;
+                report.og.installedVersion.clear();report.og.installedPackageVersion.clear();
+                report.og.installedPayloadVersion=files.version;report.og.reasons.clear();
+                if(!files.integrity)AddReason(report.og,Reason::FileHashMismatch);
+            }
+        }catch(...) {
+            if(GlassOpenGlassFiles::HasReceipt(roots.openGlass)) {
+                report.og.installed=true;report.og.damaged=true;report.og.integrityKnown=false;
+                AddReason(report.og,Reason::InspectionUnavailable);
+            }
+        }
     }
     // Package releases may update installer plumbing without changing OpenGlass.
     // Keep MSI version authority for acquisition/execution, not the product badge.
