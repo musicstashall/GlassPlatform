@@ -35,7 +35,7 @@ for(const checked of [false,true]){
  assert.equal(card.classList.contains('pending-install'),false);
  if(!checked)assert.ok(card.classList.contains('is-broken'));
  const drop=dom.window.eval('componentDropValue')({id:'openglass',input,source:'installed'},'available');
- assert.equal(drop,'remove');
+ assert.equal(drop,checked?false:'remove');
  dom.window.eval('commitComponentRemoval')(input);
  assert.equal(messages.at(-1),'component:openglass:remove');
 }

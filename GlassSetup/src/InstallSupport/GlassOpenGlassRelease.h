@@ -12,6 +12,11 @@ inline bool PayloadUpdateAvailable(const std::wstring& installed,const std::wstr
         GlassPackageRules::ParseVersion(std::string(offered.begin(),offered.end()),target)&&
         GlassPackageRules::Compare(current,target)<0;
 }
+// Planning is not authorization to install. Discovery is best-effort; Next
+// retries metadata, verifies/extracts the payload and rechecks downgrade rules.
+inline bool CanPlanApply(const std::wstring& installed,const std::wstring& offered) {
+    return offered.empty() || !PayloadUpdateAvailable(offered,installed);
+}
 // Metadata only: release tags do not authorize installing a different MSI or EXE.
 inline bool Parse(const std::string& text,std::string& version) noexcept {
     version.clear();

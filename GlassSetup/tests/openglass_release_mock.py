@@ -26,6 +26,11 @@ int main(){
   assert(!GlassOpenGlassRelease::PayloadUpdateAvailable(pair.first,pair.second));
  assert(GlassOpenGlassRelease::PayloadUpdateAvailable(L"3.0.2.9",L"3.0.2.10"));
  assert(GlassOpenGlassRelease::PayloadUpdateAvailable(L"3.0.2.3749",L"3.0.3.0"));
+ assert(GlassOpenGlassRelease::CanPlanApply(L"",L"")); // no initial network metadata
+ assert(GlassOpenGlassRelease::CanPlanApply(L"3.0.2.3749",L"")); // retry on Next
+ assert(GlassOpenGlassRelease::CanPlanApply(L"",L"3.0.2.3749"));
+ assert(GlassOpenGlassRelease::CanPlanApply(L"3.0.2.3749",L"3.0.2.3749"));
+ assert(!GlassOpenGlassRelease::CanPlanApply(L"3.0.3.0",L"3.0.2.3749")); // known downgrade remains blocked
  std::string version;
  assert(GlassOpenGlassRelease::Parse(R"({"tag_name":"v3.0.2.3749","draft":false,"prerelease":false})",version));assert(version=="3.0.2.3749");
  for(auto text:{"{}","[]","oops",R"({"tag_name":"v3.x"})",R"({"tag_name":"v3.0","draft":true})",R"({"tag_name":"v3.0","prerelease":true})"}){assert(!GlassOpenGlassRelease::Parse(text,version));assert(version.empty());}
@@ -43,3 +48,8 @@ with tempfile.TemporaryDirectory(prefix='OgRelease-') as d:
  p=Path(d)/'test.cpp';exe=Path(d)/'test';p.write_text(h)
  subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-I',str(root),str(p),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)
+
+main=(root / "GlassSetup/src/main.cpp").read_text(encoding="utf-8-sig")
+assert "const bool applySupported=openGlass?" in main
+assert "GlassOpenGlassRelease::CanPlanApply" in main
+assert "(openGlass||!targetVersion.empty())&&!selectedLocal" in main

@@ -752,13 +752,12 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #full-cleanup-option:focus-within{outline:2px solid #a9cbbd;outline-offset:3px}
 
 /* Short composition feedback; overlays never intercept interaction. */
-.c-pop-ghost{position:absolute!important;z-index:30;pointer-events:none!important;box-sizing:border-box;overflow:visible!important;transform-origin:center;animation:c-bubble-pop .18s ease-out both;background:linear-gradient(120deg,#d9baff26,#9feaff18)!important;border:1px solid #e8ddff99!important;box-shadow:inset 0 0 20px #cdf5ff44,0 0 16px #e4c2ff55!important}
-.c-pop-ghost::after{content:'';position:absolute;inset:-2px;border:2px solid #d4eaffaa;border-radius:inherit;animation:c-bubble-ring .18s ease-out both}
+.c-removal-slot{position:relative;flex:0 0 auto;min-height:1px;pointer-events:none;overflow:hidden}
+.c-crt-screen{position:absolute;inset:0;border-radius:8px;background:#d8eaff;box-shadow:inset 0 0 16px #9ccaff,0 0 8px #c3dbff;animation:c-crt-off .2s linear both;transform-origin:center}
 .c-landing{animation:c-card-land .42s cubic-bezier(.2,.8,.25,1) both}
 @keyframes c-card-land{0%{opacity:0;transform:translateX(-42px) scale(.96)}75%{opacity:1;transform:translateX(3px) scale(1.01)}100%{opacity:1;transform:none}}
-@keyframes c-bubble-pop{0%{opacity:.5;transform:scale(.94)}100%{opacity:0;transform:scale(.12);filter:blur(2px)}}
-@keyframes c-bubble-ring{0%{opacity:.7;transform:scale(.94)}100%{opacity:0;transform:scale(.12)}}
-@media(prefers-reduced-motion:reduce){.c-landing{animation:none}.c-pop-ghost{display:none}}
+@keyframes c-crt-off{0%{opacity:.45;transform:scale(1,1)}55%{opacity:.9;transform:scale(1,.025)}80%{opacity:1;transform:scale(.018,.025)}100%{opacity:0;transform:scale(0,0)}}
+@media(prefers-reduced-motion:reduce){.c-landing{animation:none}.c-removal-slot{display:none}}
 </style></head>
 <body><main id="viewport"><div id="stage" data-mode="loading" role="region" aria-roledescription="carousel" aria-label="GlassPlatform">
 <div class="ambient slideshow-only"></div>
@@ -1122,10 +1121,10 @@ function componentDropValue(drag,lane){
  if(hostState.appMode==='unins')return lane==='available'?true:false;
  if(lane==='installed'){const item=(hostState.components||[]).find(item=>item.id===drag.id);return drag.input.dataset.intent==='remove'?(item?.applySupported===false?false:true):item?.applySupported===false?null:true;}
  const item=(hostState.components||[]).find(item=>item.id===drag.id);
- // An installed card moves to Available as explicit removal, even when its
- // repair/update was selected. Only a fresh pending installation becomes Keep.
- if(componentRemovalSupported(item))return drag.input.dataset.intent==='remove'?null:'remove';
+ // Mirror the preceding Apply: moving a selected update/reinstall back
+ // cancels it. Only an unchanged installed product can stage explicit removal.
  if(drag.input.checked)return drag.input.dataset.intent==='remove'?null:false;
+ if(componentRemovalSupported(item))return 'remove';
  return null;
 }
 function componentDropText(drag,lane){
@@ -1280,16 +1279,32 @@ function cancelSecureUxDependentRemoval(item){
 const componentLandings=new Map();
 let componentRevealId='',componentRevealFrame=0,componentCascade=0;
 const componentReducedMotion=()=>window.matchMedia?.('(prefers-reduced-motion: reduce)').matches===true;
+const componentRemovalSlots=new Map();
+function restoreComponentRemovalSlots(){
+ const grid=document.getElementById('components-installed-grid');
+ const order=(hostState.components||[]).map(item=>String(item.id));
+ for(const [id,slot] of componentRemovalSlots){
+  if(hostState.appMode!=='unins'&&document.getElementById('product-'+id)?.closest('#components-installed-grid')){
+   slot.node.remove();componentRemovalSlots.delete(id);continue; // Undo during shutdown.
+  }
+  const anchor=[...grid.querySelectorAll('.c-card')].find(card=>order.indexOf(card.dataset.product)>slot.rank);
+  grid.insertBefore(slot.node,anchor||null);
+ }
+}
 function popComponentCard(input){
- const card=input.closest('.c-card');if(!card||componentReducedMotion())return;
- const panel=componentPanel(),rect=card.getBoundingClientRect(),base=panel.getBoundingClientRect();
- const scale=base.width/panel.offsetWidth||1,ghost=card.cloneNode(true);
- ghost.className='c-card c-pop-ghost';ghost.setAttribute('aria-hidden','true');ghost.inert=true;
- for(const el of [ghost,...ghost.querySelectorAll('[id]')])el.removeAttribute('id');
- ghost.removeAttribute('data-product');for(const el of ghost.querySelectorAll('input'))el.remove();
- ghost.style.cssText=`left:${(rect.left-base.left)/scale}px;top:${(rect.top-base.top)/scale}px;width:${rect.width/scale}px;height:${rect.height/scale}px`;
- // Keep only a faint outline: the actual card leaves the shelf synchronously.
- ghost.replaceChildren();panel.append(ghost);setTimeout(()=>ghost.remove(),200);
+ const card=input.closest('.c-card');if(!card||componentReducedMotion()||!card.closest('#components-installed-grid'))return;
+ const id=input.dataset.component;
+ componentLandings.delete(id);card.classList.remove('c-landing');card.style.animationDelay='';
+ componentRemovalSlots.get(id)?.node.remove();
+ const slot=document.createElement('div'),screen=document.createElement('div');
+ slot.className='c-removal-slot';slot.setAttribute('aria-hidden','true');slot.inert=true;
+ slot.style.height=card.offsetHeight+'px';screen.className='c-crt-screen';slot.append(screen);
+ // Reserve this exact position until the CRT animation finishes. The live card
+ // can move to Available immediately without a neighbour replacing its pixels.
+ card.before(slot);
+ const record={node:slot,rank:(hostState.components||[]).findIndex(item=>item.id===id)};
+ componentRemovalSlots.set(id,record);
+ setTimeout(()=>{slot.remove();if(componentRemovalSlots.get(id)===record)componentRemovalSlots.delete(id);},220);
 }
 function revealComponentChoice(input,landing){
  const id=input.dataset.component;
@@ -1525,7 +1540,7 @@ function updateComponentsStatus(){
  document.getElementById('components-plan-note').textContent=hostState.appMode==='unins'?(ru?'Неотмеченные продукты и настройки сохраняются.':'Unchecked products and settings are retained.'):(ru?'Снятие отметки не удаляет установленный продукт.':'Unchecking an installed product does not remove it.');
  const notices=document.getElementById('components-plan-notices'),warnings=componentPlanWarnings();notices.replaceChildren();notices.hidden=!warnings.length;notices.classList.toggle('danger',!!items.find(x=>x.id==='secureUxTheme'&&secureUxRemovalIsManual(x))&&selected.some(x=>x.dataset.component==='secureUxTheme'&&x.dataset.intent==='remove'));
  if(warnings.length){const text=document.createElement('span');text.textContent=(ru?'●  Предупреждений: ':'●  Warnings: ')+warnings.length+(ru?' · Проверьте состав продуктов.':' · Review product composition.');const details=document.createElement('button');details.type='button';details.textContent=ru?'Подробнее':'Details';details.onclick=()=>showProductWarning({title:ru?'Зависимости затронуты':'Dependencies affected',planWarnings:componentPlanWarnings()},details);notices.append(text,details);}
- syncComponentShelves();syncComponentLandingEffects();syncDownloadVisuals();
+ syncComponentShelves();restoreComponentRemovalSlots();syncComponentLandingEffects();syncDownloadVisuals();
 }
 function planRemoveAllComponents(){
  if(hostState.componentsLoading)return;

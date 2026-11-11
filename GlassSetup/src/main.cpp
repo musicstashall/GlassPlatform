@@ -2074,23 +2074,32 @@ private:
                 (!rep->installedPackageVersion.empty()&&!targetVersion.empty()&&VersionOlder(rep->installedPackageVersion,targetVersion)));
             if(openGlass&&rep&&rep->installed&&!rep->damaged)
                 condition=hasUpdate?GlassProducts::ProductCondition::UpdateAvailable:GlassProducts::ProductCondition::Healthy;
-            const bool applySupported=!targetVersion.empty() && (openGlass?
-                (!rep||!rep->installed||rep->installedPayloadVersion.empty()||!VersionOlder(targetVersion,rep->installedPayloadVersion)):
-                (!rep||!rep->installed||(!rep->installedPackageVersion.empty()&&!VersionOlder(targetVersion,rep->installedPackageVersion))));
+            const bool applySupported=openGlass?
+                GlassOpenGlassRelease::CanPlanApply(rep&&rep->installed?rep->installedPayloadVersion:L"",targetVersion):
+                (!targetVersion.empty()&&(!rep||!rep->installed||(!rep->installedPackageVersion.empty()&&!VersionOlder(targetVersion,rep->installedPackageVersion))));
             const auto action=GlassProducts::ActionForCondition(checked,condition);
             const UINT badgeId=ComponentBadgeId(condition);
             // Причины не смешиваются: у обновления своя причина, у повреждений — свои.
             std::wstring reasons=L"[";
             bool firstReason=true;
+            if(openGlass&&remotePayloadVersion.empty()) {
+                reasons+=JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                    L"Версия upstream пока не получена. Продукт можно добавить в план; после «Далее» установщик повторит запрос и проверит пакет до любых изменений.":
+                    L"The upstream version is not available yet. You can plan this product; Next retries discovery and verifies the package before any changes.");
+                firstReason=false;
+            }
             if (condition==GlassProducts::ProductCondition::UpdateAvailable) {
+                if(!firstReason)reasons+=L",";
                 reasons+=JsStringLiteral(Text(IDS_INSPECT_VERSION));
                 firstReason=false;
             } else if (condition==GlassProducts::ProductCondition::NotInstalled) {
+                if(!firstReason)reasons+=L",";
                 // Initial selection is a recommendation, not a mandatory install lock.
                 // Returning a pending card to Available must remain an explicit choice.
                 reasons+=JsStringLiteral(Text(IDS_COMP_RECOMMENDED));
                 firstReason=false;
             } else if (rep && rep->residual) {
+                if(!firstReason)reasons+=L",";
                 reasons+=JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
                     L"MSI не зарегистрирован; осталась служба или задача OpenGlass. Можно переустановить продукт или удалить проверенные остатки.":
                     L"MSI is not registered; an OpenGlass service or task remains. Reinstall the product or remove verified remnants.");
@@ -2137,7 +2146,7 @@ private:
                 L",\"attachedPayloadVersion\":"+JsStringLiteral(rep?rep->attachedPayloadVersion:L"")+
                 L",\"attachedPackagePath\":"+JsStringLiteral(rep?rep->attachedPackagePath:L"")+
                 L",\"selectedPackagePath\":"+JsStringLiteral(rep?rep->selectedPackagePath:L"")+
-                L",\"downloadRequired\":"+(!targetVersion.empty()&&!selectedLocal?L"true":L"false")+
+                L",\"downloadRequired\":"+((openGlass||!targetVersion.empty())&&!selectedLocal?L"true":L"false")+
                 L",\"localPackageVersion\":"+JsStringLiteral(rep&&rep->sourceVerified?rep->targetVersion:L"")+
                 L",\"packageSize\":"+std::to_wstring(packageSize)+
                 L",\"operation\":"+JsStringLiteral(removing?L"remove":condition==GlassProducts::ProductCondition::NotInstalled?L"install":condition==GlassProducts::ProductCondition::UpdateAvailable?L"update":L"repair")+

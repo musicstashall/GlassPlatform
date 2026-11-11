@@ -878,3 +878,12 @@ continues to acquire and verify the upstream setup on Next, without running it.
 Portable file mocks, source servicing contracts and composition DOM tests pass.
 Outstanding acceptance: Windows install, repair, partial/full removal, cancellation
 and injected-failure rollback, including SCM/tasks, ACL/sharing and ARP behavior.
+
+#### Composition gesture correction — 2026-11-04
+
+Available → Installed selecting Apply, then Installed → Available, is a mirrored
+undo of Apply (including forced same-version reinstall), never implicit Remove.
+Explicit trash still stages removal. Removal's CRT placeholder holds the old
+position until the effect finishes, including across native state echoes.
+OpenGlass planning does not require a successful initial metadata request;
+unknown versions are resolved and verified on Next, not treated as local media.

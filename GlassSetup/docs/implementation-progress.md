@@ -2958,3 +2958,25 @@ failures; verify_resources и diff --check PASS. Это не Windows acceptance.
   not create action receipts. No action notice claims installation has executed.
 - All production DOM suites and resource/source smoke checks pass; no MSVC or
   Windows runtime verification was performed here.
+
+### 2026-11-04 — CRT removal slots, mirrored gestures, deferred OpenGlass discovery
+
+- Replaced the free-floating removal overlay with an inert in-flow placeholder
+  of the departing card's height. Content disappears immediately; the placeholder
+  collapses vertically to a CRT line, then horizontally to a point over 200 ms,
+  and is removed at 220 ms. Native state echoes preserve the slot; undo cancels
+  it. The following card occupies that position only after shutdown completes.
+- Corrected the drag-intent precedence: returning a selected Apply (update or
+  same-version reinstall) from Installed to Available sends Keep (`:0`), not
+  Remove. Explicit trash remains Remove. Regression tests cover both payload
+  and MSI products, equal/newer versions and native acknowledgement roundtrips.
+- Found a native availability gate that still required a nonempty discovery
+  version for OpenGlass. A failed initial metadata request therefore disabled
+  planning. `CanPlanApply` now allows deferred discovery with an unknown version;
+  a known downgrade remains blocked. Next retains metadata retry, publisher/hash
+  verification, extraction and execution-plan downgrade checks before mutation.
+  OpenGlass always remains a download-required source, never a fictitious local
+  verified package when discovery is empty. The information dialog explains this.
+- Tests: all production DOM suites, actual C++ OpenGlass release/planning helper,
+  source servicing contracts, resource smoke checks and whitespace checks pass.
+  No Windows/MSVC runtime result is implied.
