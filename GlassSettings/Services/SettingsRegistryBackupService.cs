@@ -4,18 +4,54 @@ using System.ComponentModel;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text.Json;
 
 namespace GlassSettings.Services;
 
-/// <summary>Explicit registry-only export; never changes settings or mounts/unloads user hives.</summary>
+/// <summary>Часть резервной копии параметров текущего профиля.</summary>
+public enum SettingsBackupSection
+{
+    Appearance,
+    Processes,
+    OpenGlass,
+    App
+}
+
+/// <summary>Какие части реально есть в выбранном файле.</summary>
+public sealed class SettingsBackupInspection
+{
+    public bool IsValid { get; init; }
+    public string? Error { get; init; }
+    public IReadOnlySet<SettingsBackupSection> Present { get; init; } =
+        new HashSet<SettingsBackupSection>();
+}
+
+/// <summary>Что удалось записать и какие сигналы после этого нужны.</summary>
+public sealed class SettingsBackupApplyResult
+{
+    public IReadOnlySet<SettingsBackupSection> Applied { get; init; } =
+        new HashSet<SettingsBackupSection>();
+    public bool ThemeNotify { get; init; }
+    public bool LanguageChanged { get; init; }
+}
+
+/// <summary>
+/// Копия параметров только HKCU текущего пользователя. Чужие профили и HKLM не читаются.
+/// </summary>
 public static class SettingsRegistryBackupService
 {
+    public const string FileExtension = ".glassbackup";
+    public const string FormatName = "GlassPlatform.RegistryBackup";
+
     private const string GlassPath = @"Software\StanislavKa\GlassPlatform";
     private const string DwmPath = @"Software\Microsoft\Windows\DWM";
-    private const int MaxValues = 100000, MaxBytes = 64 * 1024 * 1024;
-    // Kept identical to RegistrySanity's uninstall allowlist by the source test.
-    private static readonly string[] DwmNames = [
+    private const int MaxValues = 100000;
+    private const int MaxBytes = 64 * 1024 * 1024;
+
+    // Совпадает с RegistrySanity::kDwmOpenGlassRules: DeleteConfig минус пять штатных значений Windows.
+    private static readonly string[] DwmNames =
+    [
         "ColorizationColorOverride", "ColorizationAfterglowOverride", "ColorizationColorBalanceOverride",
         "ColorizationAfterglowBalanceOverride", "ColorizationBlurBalanceOverride", "ColorizationColorInactive",
         "GlassOpacity", "GlassOpacityInactive", "ColorizationColorCaption", "ColorizationColorCaptionInactive",
@@ -30,64 +66,110 @@ public static class SettingsRegistryBackupService
         "DisableGlassOnBattery", "DisabledHooks", "GlassSafetyZoneMode", "MINMAXBUTTONGLOWid", "CLOSEBUTTONGLOWid",
         "TOOLCLOSEBUTTONGLOWid", "EnableUxMitigation", "CustomThemeReflection", "CustomThemeMaterial", "CustomThemeAtlas"
     ];
-    private sealed record Value(string Hive, string View, string Key, string Name, uint? Type, byte[]? Data);
-    private sealed record Profile(string Sid, string Path);
+
+    private static readonly string[] ThemeNames =
+    [
+        "CustomThemeReflection", "CustomThemeMaterial", "CustomThemeAtlas"
+    ];
+
+    private static readonly HashSet<string> InstallMetadata = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "InstallPath", "InstallPathX64", "InstallPathX86", "OpenGlassInstallPath"
+    };
+
+    private static readonly HashSet<string> DwmNameSet = new(DwmNames, StringComparer.OrdinalIgnoreCase);
+
+    private sealed class StoredValue
+    {
+        public string? Section { get; set; }
+        public string Hive { get; set; } = "";
+        public string View { get; set; } = "";
+        public string Key { get; set; } = "";
+        public string Name { get; set; } = "";
+        public uint? Type { get; set; }
+        public byte[]? Data { get; set; }
+    }
+
     private sealed class Capture
     {
-        public List<Value> Values { get; } = [];
-        private long bytes;
-        public void Add(Value value)
+        public List<StoredValue> Values { get; } = [];
+        private long _bytes;
+
+        public void Add(StoredValue value)
         {
-            bytes += value.Data?.Length ?? 0;
-            if (Values.Count >= MaxValues || bytes > MaxBytes) throw new IOException("Registry export limit exceeded.");
+            _bytes += value.Data?.Length ?? 0;
+            if (Values.Count >= MaxValues || _bytes > MaxBytes)
+                throw new IOException("Registry export limit exceeded.");
             Values.Add(value);
         }
     }
 
-    public static Task<string> SaveAsync() => Task.Run(Save);
+    public static Task<string> SaveAsync(IReadOnlyCollection<SettingsBackupSection> sections) =>
+        Task.Run(() => Save(sections));
 
-    private static string Save()
+    public static Task<SettingsBackupInspection> InspectAsync(string path) =>
+        Task.Run(() => Inspect(path));
+
+    public static Task<SettingsBackupApplyResult> ApplyAsync(
+        string path,
+        IReadOnlyCollection<SettingsBackupSection> sections) =>
+        Task.Run(() => Apply(path, sections));
+
+    public static string SectionId(SettingsBackupSection section) => section switch
     {
+        SettingsBackupSection.Appearance => "appearance",
+        SettingsBackupSection.Processes => "processes",
+        SettingsBackupSection.OpenGlass => "openglass",
+        SettingsBackupSection.App => "app",
+        _ => "appearance"
+    };
+
+    private static string Save(IReadOnlyCollection<SettingsBackupSection> sections)
+    {
+        if (sections.Count == 0)
+            throw new IOException("No backup section selected.");
+
+        var selected = sections.ToHashSet();
         var capture = new Capture();
-        var profiles = Profiles();
-        foreach (var view in Environment.Is64BitOperatingSystem
-                     ? new[] { RegistryView.Registry64, RegistryView.Registry32 }
-                     : new[] { RegistryView.Registry32 })
+        foreach (var view in Views())
         {
-            using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
-            Export(machine, "HKLM", view, capture);
-            using var users = RegistryKey.OpenBaseKey(RegistryHive.Users, view);
-            foreach (var profile in profiles)
-            {
-                // Absence is not an empty profile. No offline mounting or fabricated success.
-                using var user = Open(users, profile.Sid)
-                    ?? throw new IOException($"Profile hive is not loaded: {profile.Sid}. No complete backup was created.");
-                Export(user, @"HKU\" + profile.Sid, view, capture);
-            }
+            using var user = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, view);
+            if (selected.Contains(SettingsBackupSection.Appearance))
+                ExportAppearance(user, view, capture);
+            if (selected.Contains(SettingsBackupSection.Processes))
+                ExportChild(user, view, "AttachList", SettingsBackupSection.Processes, capture);
+            if (selected.Contains(SettingsBackupSection.Processes))
+                ExportChild(user, view, "BlockList", SettingsBackupSection.Processes, capture);
+            if (selected.Contains(SettingsBackupSection.App))
+                ExportChild(user, view, "GlassSettings", SettingsBackupSection.App, capture);
+            if (selected.Contains(SettingsBackupSection.OpenGlass))
+                ExportOpenGlass(user, view, capture);
         }
-        if (!profiles.OrderBy(p => p.Sid).SequenceEqual(Profiles().OrderBy(p => p.Sid)))
-            throw new IOException("Profile inventory changed during export.");
+
         var payload = JsonSerializer.SerializeToUtf8Bytes(capture.Values);
         var digest = Convert.ToHexString(SHA256.HashData(payload));
         var manifest = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            format = "GlassPlatform.RegistryBackup", formatVersion = 1,
-            createdUtc = DateTimeOffset.UtcNow, profiles,
-            scope = "All enumerated initialized user profiles and HKLM, GlassPlatform config and 49 OpenGlass DWM values; registry only",
-            includesUserFiles = false, includesInstallMetadata = false,
-            restoreImplemented = false, registrySha256 = digest, valueCount = capture.Values.Count
+            format = FormatName,
+            formatVersion = 2,
+            createdUtc = DateTimeOffset.UtcNow,
+            scope = "Current user HKCU only",
+            sections = selected.Select(SectionId).OrderBy(static id => id).ToArray(),
+            includesUserFiles = false,
+            includesInstallMetadata = false,
+            restoreImplemented = true,
+            registrySha256 = digest,
+            valueCount = capture.Values.Count
         });
+
         var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        if (string.IsNullOrWhiteSpace(documents)) throw new IOException("Documents folder is unavailable.");
-        using var parents = PinDirectory(documents);
-        var path = Path.Combine(documents, $"GlassSettingsBackup-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.zip");
-        using var handle = CreateFileW(path, 0xC0010000, 0, IntPtr.Zero, 1, 0x00200000, IntPtr.Zero);
-        if (handle.IsInvalid)
-        {
-            var code = Marshal.GetLastWin32Error();
-            throw new Win32Exception(code, $"Create backup {path}: {new Win32Exception(code).Message}");
-        }
-        using var file = new FileStream(handle, FileAccess.ReadWrite);
+        if (string.IsNullOrWhiteSpace(documents))
+            throw new IOException("Documents folder is unavailable.");
+
+        var path = Path.Combine(
+            documents,
+            $"GlassSettingsBackup-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}{FileExtension}");
+        using var file = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
         try
         {
             using (var zip = new ZipArchive(file, ZipArchiveMode.Create, leaveOpen: true))
@@ -95,23 +177,385 @@ public static class SettingsRegistryBackupService
                 Write(zip, "manifest.json", manifest);
                 Write(zip, "registry.json", payload);
             }
+
             file.Flush(true);
             file.Position = 0;
             using (var zip = new ZipArchive(file, ZipArchiveMode.Read, leaveOpen: true))
             {
-                if (zip.Entries.Count != 2) throw new IOException("Archive entry verification failed.");
+                if (zip.Entries.Count != 2)
+                    throw new IOException("Archive entry verification failed.");
                 Verify(zip, "manifest.json", manifest);
                 Verify(zip, "registry.json", payload);
             }
+
             return path;
         }
         catch
         {
-            // Delete this exact open object, never a path potentially replaced by another process.
             var disposition = new Disposition { DeleteFile = true };
-            _ = SetFileInformationByHandle(handle, 4, ref disposition, (uint)Marshal.SizeOf<Disposition>());
+            _ = SetFileInformationByHandle(file.SafeFileHandle, 4, ref disposition, (uint)Marshal.SizeOf<Disposition>());
             throw;
         }
+    }
+
+    private static SettingsBackupInspection Inspect(string path)
+    {
+        try
+        {
+            var values = ReadValues(path, out _);
+            var present = new HashSet<SettingsBackupSection>();
+            foreach (var value in values)
+            {
+                // Type/Data = null — запись «значения не было», не само значение.
+                if (value.Type is null || !IsCurrentUserHive(value.Hive))
+                    continue;
+                if (Classify(value.Key, value.Name) is { } section)
+                    present.Add(section);
+            }
+
+            return new SettingsBackupInspection { IsValid = true, Present = present };
+        }
+        catch (Exception error)
+        {
+            return new SettingsBackupInspection { IsValid = false, Error = error.Message };
+        }
+    }
+
+    private static SettingsBackupApplyResult Apply(
+        string path,
+        IReadOnlyCollection<SettingsBackupSection> sections)
+    {
+        var selected = sections.ToHashSet();
+        if (selected.Count == 0)
+            throw new IOException("No restore section selected.");
+
+        var languageBefore = Core.Registry.GlassSettingsRegistry.ReadAppUiLanguage();
+        var values = ReadValues(path, out _);
+        var applied = new HashSet<SettingsBackupSection>();
+        var themeNotify = false;
+        foreach (var value in values)
+        {
+            if (!IsCurrentUserHive(value.Hive))
+                continue;
+            if (Classify(value.Key, value.Name) is not { } section || !selected.Contains(section))
+                continue;
+            if (!TryParseView(value.View, out var view))
+                throw new IOException("Unknown registry view: " + value.View);
+
+            WriteValue(view, value, section);
+            applied.Add(section);
+            if (section == SettingsBackupSection.OpenGlass
+                && ThemeNames.Contains(value.Name, StringComparer.OrdinalIgnoreCase))
+                themeNotify = true;
+        }
+
+        var languageAfter = Core.Registry.GlassSettingsRegistry.ReadAppUiLanguage();
+        return new SettingsBackupApplyResult
+        {
+            Applied = applied,
+            ThemeNotify = themeNotify,
+            LanguageChanged = applied.Contains(SettingsBackupSection.App)
+                && !string.Equals(languageBefore, languageAfter, StringComparison.Ordinal)
+        };
+    }
+
+    private static List<StoredValue> ReadValues(string path, out JsonElement manifest)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            throw new IOException("Backup file was not found.");
+
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var zip = new ZipArchive(file, ZipArchiveMode.Read, leaveOpen: false);
+        var manifestBytes = ReadEntry(zip, "manifest.json");
+        var registryBytes = ReadEntry(zip, "registry.json");
+        using var document = JsonDocument.Parse(manifestBytes);
+        manifest = document.RootElement.Clone();
+        if (!manifest.TryGetProperty("format", out var format)
+            || !string.Equals(format.GetString(), FormatName, StringComparison.Ordinal))
+            throw new IOException("Backup format is not recognized.");
+        if (!manifest.TryGetProperty("formatVersion", out var version)
+            || version.ValueKind != JsonValueKind.Number
+            || version.GetInt32() is < 1 or > 2)
+            throw new IOException("Backup format version is not supported.");
+        if (manifest.TryGetProperty("registrySha256", out var digest)
+            && digest.ValueKind == JsonValueKind.String
+            && !string.Equals(digest.GetString(), Convert.ToHexString(SHA256.HashData(registryBytes)), StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Archive checksum verification failed.");
+
+        return JsonSerializer.Deserialize<List<StoredValue>>(registryBytes)
+            ?? throw new IOException("Backup registry entry is empty.");
+    }
+
+    private static void ExportAppearance(RegistryKey user, RegistryView view, Capture capture)
+    {
+        using var glass = Open(user, GlassPath);
+        if (glass is null)
+            return;
+        Tree(glass, view, GlassPath, SettingsBackupSection.Appearance, capture, 0, skipExcludedChildren: true);
+    }
+
+    private static void ExportChild(
+        RegistryKey user,
+        RegistryView view,
+        string child,
+        SettingsBackupSection section,
+        Capture capture)
+    {
+        var path = GlassPath + "\\" + child;
+        using var key = Open(user, path);
+        if (key is null)
+            return;
+        Tree(key, view, path, section, capture, 0, skipExcludedChildren: false);
+    }
+
+    private static void ExportOpenGlass(RegistryKey user, RegistryView view, Capture capture)
+    {
+        using var dwm = Open(user, DwmPath);
+        foreach (var name in DwmNames)
+            capture.Add(Read(dwm, view, DwmPath, name, SettingsBackupSection.OpenGlass));
+    }
+
+    private static void Tree(
+        RegistryKey key,
+        RegistryView view,
+        string path,
+        SettingsBackupSection section,
+        Capture capture,
+        int depth,
+        bool skipExcludedChildren)
+    {
+        if (depth > 64)
+            throw new IOException("Registry depth limit exceeded.");
+
+        foreach (var name in key.GetValueNames())
+        {
+            if (skipExcludedChildren
+                && path.Equals(GlassPath, StringComparison.OrdinalIgnoreCase)
+                && InstallMetadata.Contains(name))
+                continue;
+            capture.Add(Read(key, view, path, name, section));
+        }
+
+        foreach (var child in key.GetSubKeyNames())
+        {
+            if (skipExcludedChildren && path.Equals(GlassPath, StringComparison.OrdinalIgnoreCase)
+                && IsExcludedGlassChild(child))
+                continue;
+            using var sub = Open(key, child) ?? throw new IOException("Registry key disappeared: " + path);
+            Tree(sub, view, path + "\\" + child, section, capture, depth + 1, skipExcludedChildren: false);
+        }
+    }
+
+    private static bool IsExcludedGlassChild(string child) =>
+        child.Equals("AttachList", StringComparison.OrdinalIgnoreCase)
+        || child.Equals("BlockList", StringComparison.OrdinalIgnoreCase)
+        || child.Equals("Crashes", StringComparison.OrdinalIgnoreCase)
+        || child.Equals("Installer", StringComparison.OrdinalIgnoreCase)
+        || child.Equals("GlassSettings", StringComparison.OrdinalIgnoreCase);
+
+    private static StoredValue Read(
+        RegistryKey? key,
+        RegistryView view,
+        string path,
+        string name,
+        SettingsBackupSection section)
+    {
+        uint type = 0;
+        uint size = 0;
+        var status = key is null
+            ? 2
+            : RegQueryValueExW(key.Handle, name, IntPtr.Zero, out type, null, ref size);
+        if (status == 2)
+            return new StoredValue
+            {
+                Section = SectionId(section),
+                Hive = "HKCU",
+                View = view.ToString(),
+                Key = path,
+                Name = name
+            };
+        if (status != 0 || size > MaxBytes)
+            throw new IOException($"Registry read failed: HKCU\\{path}\\{name} ({status}).");
+
+        var data = new byte[checked((int)size)];
+        status = RegQueryValueExW(key!.Handle, name, IntPtr.Zero, out type, data, ref size);
+        if (status != 0 || type == 6 || size != data.Length)
+            throw new IOException("Registry value changed or is a link: " + name);
+        return new StoredValue
+        {
+            Section = SectionId(section),
+            Hive = "HKCU",
+            View = view.ToString(),
+            Key = path,
+            Name = name,
+            Type = type,
+            Data = data
+        };
+    }
+
+    private static void WriteValue(RegistryView view, StoredValue value, SettingsBackupSection section)
+    {
+        if (value.Type == 6)
+            throw new IOException("Registry symbolic link refused.");
+        if (value.Key.Equals(GlassPath, StringComparison.OrdinalIgnoreCase) && InstallMetadata.Contains(value.Name))
+            return;
+
+        using var root = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, view);
+        using var key = Create(root, value.Key);
+        if (value.Type is null)
+        {
+            if (section != SettingsBackupSection.OpenGlass)
+                return;
+            var deleted = RegDeleteValueW(key.Handle, value.Name);
+            if (deleted != 0 && deleted != 2)
+                throw new Win32Exception(deleted, $"Delete registry value HKCU\\{value.Key}\\{value.Name}: {new Win32Exception(deleted).Message}");
+            return;
+        }
+
+        var data = value.Data ?? [];
+        var status = RegSetValueExW(key.Handle, value.Name, 0, value.Type.Value, data, (uint)data.Length);
+        if (status != 0)
+            throw new Win32Exception(status, $"Write registry value HKCU\\{value.Key}\\{value.Name}: {new Win32Exception(status).Message}");
+    }
+
+    private static SettingsBackupSection? Classify(string key, string name)
+    {
+        if (key.Equals(DwmPath, StringComparison.OrdinalIgnoreCase))
+            return DwmNameSet.Contains(name) ? SettingsBackupSection.OpenGlass : null;
+        if (!key.StartsWith(GlassPath, StringComparison.OrdinalIgnoreCase))
+            return null;
+        if (key.Length > GlassPath.Length && key[GlassPath.Length] != '\\')
+            return null;
+
+        var rest = key.Length == GlassPath.Length ? "" : key[(GlassPath.Length + 1)..];
+        if (rest.Length == 0)
+            return InstallMetadata.Contains(name) ? null : SettingsBackupSection.Appearance;
+
+        var first = rest.Split('\\', 2)[0];
+        if (first.Equals("AttachList", StringComparison.OrdinalIgnoreCase)
+            || first.Equals("BlockList", StringComparison.OrdinalIgnoreCase))
+            return SettingsBackupSection.Processes;
+        if (first.Equals("GlassSettings", StringComparison.OrdinalIgnoreCase))
+            return SettingsBackupSection.App;
+        if (first.Equals("Crashes", StringComparison.OrdinalIgnoreCase)
+            || first.Equals("Installer", StringComparison.OrdinalIgnoreCase))
+            return null;
+        return SettingsBackupSection.Appearance;
+    }
+
+    private static bool IsCurrentUserHive(string hive)
+    {
+        if (hive.Equals("HKCU", StringComparison.OrdinalIgnoreCase))
+            return true;
+        var sid = WindowsIdentity.GetCurrent().User?.Value;
+        return sid is not null && hive.Equals(@"HKU\" + sid, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryParseView(string view, out RegistryView parsed)
+    {
+        if (view.Contains("64", StringComparison.Ordinal))
+        {
+            parsed = RegistryView.Registry64;
+            return true;
+        }
+
+        if (view.Contains("32", StringComparison.Ordinal))
+        {
+            parsed = RegistryView.Registry32;
+            return true;
+        }
+
+        parsed = RegistryView.Default;
+        return false;
+    }
+
+    private static RegistryView[] Views() =>
+        Environment.Is64BitOperatingSystem
+            ? [RegistryView.Registry64, RegistryView.Registry32]
+            : [RegistryView.Registry32];
+
+    private static RegistryKey? Open(RegistryKey parent, string path)
+    {
+        RegistryKey? result = null;
+        try
+        {
+            foreach (var part in path.Split('\\', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var status = RegOpenKeyExW((result ?? parent).Handle, part, 8, 0x0009 | (int)parent.View, out var handle);
+                if (status == 2)
+                {
+                    handle?.Dispose();
+                    result?.Dispose();
+                    return null;
+                }
+
+                if (status != 0)
+                {
+                    handle?.Dispose();
+                    throw new Win32Exception(status, $"Read registry key {parent.Name}\\{path} ({parent.View}), component {part}: {new Win32Exception(status).Message}");
+                }
+
+                var next = RegistryKey.FromHandle(handle, parent.View);
+                result?.Dispose();
+                result = next;
+                RefuseLink(next);
+            }
+
+            return result;
+        }
+        catch
+        {
+            result?.Dispose();
+            throw;
+        }
+    }
+
+    private static RegistryKey Create(RegistryKey parent, string path)
+    {
+        RegistryKey? result = null;
+        try
+        {
+            foreach (var part in path.Split('\\', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var status = RegCreateKeyExW(
+                    (result ?? parent).Handle,
+                    part,
+                    0,
+                    null,
+                    0,
+                    0x000F | (int)parent.View,
+                    IntPtr.Zero,
+                    out var handle,
+                    out _);
+                if (status != 0)
+                {
+                    handle?.Dispose();
+                    throw new Win32Exception(status, $"Write registry key {parent.Name}\\{path} ({parent.View}), component {part}: {new Win32Exception(status).Message}");
+                }
+
+                var next = RegistryKey.FromHandle(handle, parent.View);
+                result?.Dispose();
+                result = next;
+                RefuseLink(next);
+            }
+
+            return result ?? throw new IOException("Empty registry path.");
+        }
+        catch
+        {
+            result?.Dispose();
+            throw;
+        }
+    }
+
+    private static void RefuseLink(RegistryKey key)
+    {
+        uint size = 0;
+        var status = RegQueryValueExW(key.Handle, "SymbolicLinkValue", IntPtr.Zero, out var type, null, ref size);
+        if (status != 0 && status != 2)
+            throw new Win32Exception(status);
+        if (status == 0 && type == 6)
+            throw new IOException("Registry symbolic link refused.");
     }
 
     private static void Write(ZipArchive zip, string name, byte[] data)
@@ -119,142 +563,58 @@ public static class SettingsRegistryBackupService
         using var output = zip.CreateEntry(name, CompressionLevel.Optimal).Open();
         output.Write(data);
     }
+
     private static void Verify(ZipArchive zip, string name, byte[] expected)
     {
-        var entry = zip.GetEntry(name) ?? throw new IOException("Missing archive entry.");
-        if (entry.Length != expected.Length) throw new IOException("Archive length verification failed.");
-        using var input = entry.Open();
-        if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(input), SHA256.HashData(expected)))
+        var actual = ReadEntry(zip, name);
+        if (actual.Length != expected.Length
+            || !CryptographicOperations.FixedTimeEquals(SHA256.HashData(actual), SHA256.HashData(expected)))
             throw new IOException("Archive checksum verification failed.");
     }
-    private static List<Profile> Profiles()
+
+    private static byte[] ReadEntry(ZipArchive zip, string name)
     {
-        using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine,
-            Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32);
-        using var list = machine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList")
-            ?? throw new IOException("Profile inventory unavailable.");
-        var profiles = new List<Profile>();
-        foreach (var sid in list.GetSubKeyNames())
-        {
-            if (!sid.StartsWith("S-1-5-21-", StringComparison.Ordinal) && !sid.StartsWith("S-1-12-1-", StringComparison.Ordinal)) continue;
-            using var key = Open(list, sid) ?? throw new IOException("Profile disappeared: " + sid);
-            var path = key.GetValue("ProfileImagePath") as string;
-            if (string.IsNullOrWhiteSpace(path)) throw new IOException("Unknown profile path: " + sid);
-            // A SID without an initialized hive has no settings to export.
-            var hivePath = Path.Combine(Environment.ExpandEnvironmentVariables(path), "NTUSER.DAT");
-            try { _ = File.GetAttributes(hivePath); }
-            catch (FileNotFoundException) { continue; }
-            catch (DirectoryNotFoundException) { continue; }
-            catch (UnauthorizedAccessException error)
-            {
-                throw new IOException($"Read profile inventory {sid}, {hivePath}: {error.Message}", error);
-            }
-            profiles.Add(new Profile(sid, path));
-        }
-        if (profiles.Count == 0) throw new IOException("No initialized user profiles found.");
-        return profiles;
-    }
-    private static void Export(RegistryKey root, string hive, RegistryView view, Capture capture)
-    {
-        using (var glass = Open(root, GlassPath))
-            if (glass != null) Tree(glass, hive, view, GlassPath, capture, 0);
-        using var dwm = Open(root, DwmPath);
-        foreach (var name in DwmNames) capture.Add(Read(dwm, hive, view, DwmPath, name));
-    }
-    private static void Tree(RegistryKey key, string hive, RegistryView view, string path, Capture capture, int depth)
-    {
-        if (depth > 64) throw new IOException("Registry depth limit exceeded.");
-        foreach (var name in key.GetValueNames())
-        {
-            if (path == GlassPath && new[] { "InstallPath", "InstallPathX64", "InstallPathX86", "OpenGlassInstallPath" }
-                    .Contains(name, StringComparer.OrdinalIgnoreCase)) continue;
-            capture.Add(Read(key, hive, view, path, name));
-        }
-        foreach (var child in key.GetSubKeyNames())
-        {
-            using var sub = Open(key, child) ?? throw new IOException("Registry key disappeared: " + path);
-            Tree(sub, hive, view, path + @"\" + child, capture, depth + 1);
-        }
-    }
-    private static Value Read(RegistryKey? key, string hive, RegistryView view, string path, string name)
-    {
-        uint type = 0, size = 0;
-        var status = key == null ? 2 : RegQueryValueExW(key.Handle, name, IntPtr.Zero, out type, null, ref size);
-        if (status == 2) return new(hive, view.ToString(), path, name, null, null);
-        if (status != 0 || size > MaxBytes) throw new IOException($"Registry read failed: {hive}\\{path}\\{name} ({status}).");
-        var data = new byte[checked((int)size)];
-        status = RegQueryValueExW(key!.Handle, name, IntPtr.Zero, out type, data, ref size);
-        if (status != 0 || type == 6 || size != data.Length) throw new IOException("Registry value changed or is a link: " + name);
-        return new(hive, view.ToString(), path, name, type, data);
-    }
-    private static RegistryKey? Open(RegistryKey parent, string path)
-    {
-        // Open each component with OPEN_LINK; never follow registry symbolic links.
-        RegistryKey? result = null;
-        try
-        {
-            foreach (var part in path.Split('\\', StringSplitOptions.RemoveEmptyEntries))
-            {
-                var status = RegOpenKeyExW((result ?? parent).Handle, part, 8, 0x0009 | (int)parent.View, out var handle);
-                if (status == 2) { handle?.Dispose(); result?.Dispose(); return null; }
-                if (status != 0) { handle?.Dispose(); throw new Win32Exception(status, $"Read registry key {parent.Name}\\{path} ({parent.View}), component {part}: {new Win32Exception(status).Message}"); }
-                var next = RegistryKey.FromHandle(handle, parent.View);
-                result?.Dispose(); result = next;
-                uint size = 0;
-                status = RegQueryValueExW(next.Handle, "SymbolicLinkValue", IntPtr.Zero, out var type, null, ref size);
-                if (status != 0 && status != 2) throw new Win32Exception(status);
-                if (status == 0 && type == 6) throw new IOException("Registry symbolic link refused.");
-            }
-            return result;
-        }
-        catch { result?.Dispose(); throw; }
+        var entry = zip.GetEntry(name) ?? throw new IOException("Missing archive entry.");
+        using var input = entry.Open();
+        using var buffer = new MemoryStream();
+        input.CopyTo(buffer);
+        if (buffer.Length > MaxBytes)
+            throw new IOException("Archive entry is too large.");
+        return buffer.ToArray();
     }
 
-    private sealed class Pins : IDisposable
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Disposition
     {
-        public List<SafeFileHandle> Handles { get; } = [];
-        public void Dispose() { foreach (var handle in Handles) handle.Dispose(); }
+        [MarshalAs(UnmanagedType.U1)]
+        public bool DeleteFile;
     }
-    private static Pins PinDirectory(string directory)
-    {
-        var pins = new Pins();
-        try
-        {
-            var full = Path.GetFullPath(directory);
-            var root = Path.GetPathRoot(full)!;
-            if (root.Length != 3 || root[1] != ':') throw new IOException("Only a local Documents folder is supported.");
-            var current = root;
-            foreach (var part in new[] { "" }.Concat(full[root.Length..].Split('\\', StringSplitOptions.RemoveEmptyEntries)))
-            {
-                current = part.Length == 0 ? current : Path.Combine(current, part);
-                var h = CreateFileW(current, 0x80, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
-                if (h.IsInvalid)
-                {
-                    var code = Marshal.GetLastWin32Error(); h.Dispose();
-                    throw new Win32Exception(code, $"Read Documents ancestor {current}: {new Win32Exception(code).Message}");
-                }
-                pins.Handles.Add(h);
-                if (!GetFileInformationByHandle(h, out var info) || (info.Attributes & 0x410) != 0x10)
-                    throw new IOException("Documents path contains a link or inaccessible directory.");
-            }
-            return pins;
-        }
-        catch { pins.Dispose(); throw; }
-    }
-    [StructLayout(LayoutKind.Sequential)] private struct Info
-    {
-        public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Creation, Access, Write;
-        public uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
-    }
-    [StructLayout(LayoutKind.Sequential)] private struct Disposition { [MarshalAs(UnmanagedType.U1)] public bool DeleteFile; }
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetFileInformationByHandle(SafeFileHandle file, out Info info);
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetFileInformationByHandle(SafeFileHandle file, int kind, ref Disposition data, uint size);
+
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
     private static extern int RegOpenKeyExW(SafeRegistryHandle key, string subKey, uint options, int access, out SafeRegistryHandle result);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+    private static extern int RegCreateKeyExW(
+        SafeRegistryHandle key,
+        string subKey,
+        int reserved,
+        string? className,
+        uint options,
+        int access,
+        IntPtr security,
+        out SafeRegistryHandle result,
+        out uint disposition);
+
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
     private static extern int RegQueryValueExW(SafeRegistryHandle key, string name, IntPtr reserved, out uint type, byte[]? data, ref uint size);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+    private static extern int RegSetValueExW(SafeRegistryHandle key, string name, int reserved, uint type, byte[] data, uint size);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+    private static extern int RegDeleteValueW(SafeRegistryHandle key, string name);
 }

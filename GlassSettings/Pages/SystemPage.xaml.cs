@@ -29,6 +29,7 @@ public sealed partial class SystemPage : Page
     {
         InitializeComponent();
         ApplyLocalizedStrings();
+        WireBackupLayout();
         BuildInfoBanner();
         ConfigureUpdateIntervalRow();
         ShellExtensionRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.ShellExtension);
@@ -166,24 +167,6 @@ public sealed partial class SystemPage : Page
         }
     }
 
-    private async void RegistryBackup_OnClick(object sender, RoutedEventArgs e)
-    {
-        RegistryBackupButton.IsEnabled = false;
-        RegistryBackupStatus.Visibility = Visibility.Collapsed;
-        try
-        {
-            var path = await SettingsRegistryBackupService.SaveAsync();
-            await ShowBackupNoticeAsync(SettingsNoticeSeverity.Success,
-                GlassSettingsResources.Get("System_BackupSaved") + "\n" + path);
-        }
-        catch (Exception error)
-        {
-            await ShowBackupNoticeAsync(SettingsNoticeSeverity.Error,
-                GlassSettingsResources.Get("System_BackupFailed") + "\n" + error.Message);
-        }
-        finally { RegistryBackupButton.IsEnabled = true; }
-    }
-
     private async Task ShowBackupNoticeAsync(SettingsNoticeSeverity severity, string message)
     {
         _backupNoticeActive = severity == SettingsNoticeSeverity.Error;
@@ -213,9 +196,7 @@ public sealed partial class SystemPage : Page
         MaintenanceModifyButton.Content = GlassSettingsResources.Get("System_MaintenanceModify");
         BackupExpander.Title = GlassSettingsResources.Get("System_BackupTitle");
         BackupExpander.IconGlyph = "\uE74E";
-        BackupHeading.Text = GlassSettingsResources.Get("System_BackupTitle");
-        BackupInstruction.Text = GlassSettingsResources.Get("System_BackupDescription");
-        RegistryBackupButton.Content = GlassSettingsResources.Get("System_BackupSave");
+        ApplyBackupStrings();
         ShellExtensionRow.Title = GlassSettingsResources.Get("System_RowShellExtension");
         ShellExtensionRow.Description = GlassSettingsResources.Get("System_RowShellExtensionDesc");
         ShellMenuNoticeBlock.Title = GlassSettingsResources.Get("System_ShellMenuNoticeTitle");

@@ -1101,8 +1101,26 @@
   <data name="System_MaintenanceDescription" xml:space="preserve"><value>Install, update or remove Glass products</value></data>
   <data name="System_MaintenanceModify" xml:space="preserve"><value>Modify</value></data>
   <data name="System_BackupTitle" xml:space="preserve"><value>Settings backups</value></data>
-  <data name="System_BackupDescription" xml:space="preserve"><value>A Glass and OpenGlass/DWM registry archive for initialized profiles and the machine is saved in Documents. User files and themes are not included. Close other settings editors; all profile hives must be loaded. The archive is not encrypted. Automatic restore is not available yet.</value></data>
-  <data name="System_BackupSave" xml:space="preserve"><value>Save settings copy</value></data>
+  <data name="System_BackupDescription" xml:space="preserve"><value>Save and restore Glass and OpenGlass settings for the current profile.</value></data>
+  <data name="System_BackupCreateTab" xml:space="preserve"><value>Create</value></data>
+  <data name="System_BackupRestoreTab" xml:space="preserve"><value>Restore</value></data>
+  <data name="System_BackupCreateHeading" xml:space="preserve"><value>New copy</value></data>
+  <data name="System_BackupCreateCall" xml:space="preserve"><value>Choose which settings to include. The file is saved in Documents.</value></data>
+  <data name="System_BackupRestoreHeading" xml:space="preserve"><value>Copy from a file</value></data>
+  <data name="System_BackupRestoreCall" xml:space="preserve"><value>Choose a backup file. Only the parts stored in it can be selected.</value></data>
+  <data name="System_BackupPartAppearance" xml:space="preserve"><value>Glass appearance</value></data>
+  <data name="System_BackupPartProcesses" xml:space="preserve"><value>Process lists</value></data>
+  <data name="System_BackupPartOpenGlass" xml:space="preserve"><value>OpenGlass</value></data>
+  <data name="System_BackupPartApp" xml:space="preserve"><value>App settings</value></data>
+  <data name="System_BackupSelect" xml:space="preserve"><value>Browse</value></data>
+  <data name="System_BackupApply" xml:space="preserve"><value>Apply</value></data>
+  <data name="System_BackupApplied" xml:space="preserve"><value>The selected settings were written to the current profile.</value></data>
+  <data name="System_BackupApplyFailed" xml:space="preserve"><value>The settings copy could not be applied.</value></data>
+  <data name="System_BackupInvalidFile" xml:space="preserve"><value>This file is not a Glass settings backup.</value></data>
+  <data name="System_BackupFilePickerTitle" xml:space="preserve"><value>Choose a settings backup</value></data>
+  <data name="System_BackupFileFilter" xml:space="preserve"><value>Glass settings backup (*.glassbackup)</value></data>
+  <data name="System_BackupFileType" xml:space="preserve"><value>Glass settings backup</value></data>
+  <data name="System_BackupSave" xml:space="preserve"><value>Create copy</value></data>
   <data name="System_BackupBusy" xml:space="preserve"><value>Creating and verifying the archive…</value></data>
   <data name="System_BackupSaved" xml:space="preserve"><value>Settings archive saved and verified:</value></data>
   <data name="System_BackupFailed" xml:space="preserve"><value>A complete settings copy could not be created. Do not clean up settings until a backup succeeds.</value></data>

@@ -1106,8 +1106,26 @@
   <data name="System_MaintenanceDescription" xml:space="preserve"><value>Установка, обновление и удаление продуктов Glass</value></data>
   <data name="System_MaintenanceModify" xml:space="preserve"><value>Изменить</value></data>
   <data name="System_BackupTitle" xml:space="preserve"><value>Резервные копии параметров</value></data>
-  <data name="System_BackupDescription" xml:space="preserve"><value>Архив настроек Glass и OpenGlass/DWM всех доступных профилей и компьютера сохраняется в «Документы». Пользовательские файлы и темы в архив не входят. Закройте другие редакторы настроек; все профили должны быть загружены. Архив не зашифрован. Автоматическое восстановление пока недоступно.</value></data>
-  <data name="System_BackupSave" xml:space="preserve"><value>Сохранить копию параметров</value></data>
+  <data name="System_BackupDescription" xml:space="preserve"><value>Сохранение и восстановление параметров Glass и OpenGlass текущего профиля.</value></data>
+  <data name="System_BackupCreateTab" xml:space="preserve"><value>Создать</value></data>
+  <data name="System_BackupRestoreTab" xml:space="preserve"><value>Восстановить</value></data>
+  <data name="System_BackupCreateHeading" xml:space="preserve"><value>Новая копия</value></data>
+  <data name="System_BackupCreateCall" xml:space="preserve"><value>Отметьте части параметров. Файл сохранится в папке «Документы».</value></data>
+  <data name="System_BackupRestoreHeading" xml:space="preserve"><value>Копия из файла</value></data>
+  <data name="System_BackupRestoreCall" xml:space="preserve"><value>Выберите файл копии. Отметить можно только части, которые в нём есть.</value></data>
+  <data name="System_BackupPartAppearance" xml:space="preserve"><value>Оформление Glass</value></data>
+  <data name="System_BackupPartProcesses" xml:space="preserve"><value>Списки процессов</value></data>
+  <data name="System_BackupPartOpenGlass" xml:space="preserve"><value>OpenGlass</value></data>
+  <data name="System_BackupPartApp" xml:space="preserve"><value>Параметры приложения</value></data>
+  <data name="System_BackupSelect" xml:space="preserve"><value>Выбрать</value></data>
+  <data name="System_BackupApply" xml:space="preserve"><value>Применить</value></data>
+  <data name="System_BackupApplied" xml:space="preserve"><value>Выбранные параметры записаны в реестр текущего профиля.</value></data>
+  <data name="System_BackupApplyFailed" xml:space="preserve"><value>Не удалось применить копию параметров.</value></data>
+  <data name="System_BackupInvalidFile" xml:space="preserve"><value>Файл не является копией параметров Glass.</value></data>
+  <data name="System_BackupFilePickerTitle" xml:space="preserve"><value>Выбор резервной копии</value></data>
+  <data name="System_BackupFileFilter" xml:space="preserve"><value>Резервная копия Glass (*.glassbackup)</value></data>
+  <data name="System_BackupFileType" xml:space="preserve"><value>Резервная копия параметров Glass</value></data>
+  <data name="System_BackupSave" xml:space="preserve"><value>Создать копию</value></data>
   <data name="System_BackupBusy" xml:space="preserve"><value>Создание и проверка архива…</value></data>
   <data name="System_BackupSaved" xml:space="preserve"><value>Архив параметров сохранён и проверен:</value></data>
   <data name="System_BackupFailed" xml:space="preserve"><value>Не удалось создать полную копию параметров. Не выполняйте очистку до успешного сохранения.</value></data>

@@ -78,28 +78,26 @@ GlassSettings (сборка Native выполняется его target) → Gla
 
 После штатного удаления авторского MSI могут остаться permanent ThemeUiProxy и COM-перенаправления. Неактивные файлы — не конфликт и не признак установленного продукта. Оставшуюся COM-регистрацию можно отключить без патчера; включение требует полного установленного набора native/WOW модулей. Чужие COM значения и активные несовместимые старые hooks не перезаписываются. Подробности и незавершённое обслуживание: [GlassSetup README](../GlassSetup/README.md).
 
-## Архив базы параметров (System → Обслуживание системы)
+## Архив базы параметров (System → Резервные копии параметров)
 
-«Изменить» запускает проверенный cached Setup через maintenance ticket.
-«Сохранить копию параметров» создаёт уникальный `GlassSettingsBackup-*.zip`
-в корне Documents. Он содержит `manifest.json` (formatVersion=1, scope, profiles,
-SHA256 registry entry, flags) и `registry.json`: массив Hive/View/Key/Name/Type/Data.
-Data — Base64 исходных байтов значения; Type — числовой Win32 REG_* тип, а не
-преобразованный .NET тип. Type/Data=null обозначает отсутствующее DWM value.
+«Изменить» в «Обслуживании систем» запускает проверенный cached Setup через maintenance ticket.
+«Создать копию» создаёт уникальный `GlassSettingsBackup-*.glassbackup`
+в корне Documents. Внутри это zip: `manifest.json` (formatVersion=2, список частей,
+SHA256) и `registry.json` — массив Section/Hive/View/Key/Name/Type/Data.
+Data — Base64 исходных байтов; Type — числовой Win32 REG_*. Type/Data=null у имени
+OpenGlass означает, что значения не было, и восстановление его удаляет.
 
-Scope: конфигурация `Software\StanislavKa\GlassPlatform` без четырёх install-path
-метаданных и 49 OpenGlass values `Software\Microsoft\Windows\DWM`, обе view
-(на 32-bit ОС только Registry32), HKLM и HKU перечисленных обычных профилей.
-Не сохраняются файлы/темы/папки, MSI/cache/controller, службы/задачи, сертификаты.
-Автоматический импорт пока **не реализован**. Нельзя считать registry-only ZIP
-резервной копией файлов перед удалением AppData/Glass themes.
+Копия только HKCU текущего пользователя, обе view на 64-bit. Чужие профили и HKLM
+не читаются. Пути установки, `Crashes` и `Installer` не входят. Части:
 
-Все инициализированные профили должны быть доступны в HKU. Экспорт не mount/unload
-NTUSER.DAT; offline/inaccessible hive или изменение inventory означает отказ.
-Архив не является atomic snapshot против конкурентных writers: закройте другие
-редакторы параметров. Файл не зашифрован и может содержать пользовательские пути.
-Храните его как приватные данные. Redirected/reparse/network Documents пока
-консервативно отклоняются; существующие файлы никогда не перезаписываются.
+- оформление Glass — корень `Software\StanislavKa\GlassPlatform` и подключи кроме списков, `GlassSettings`, `Crashes`, `Installer`;
+- списки процессов — только `AttachList` и `BlockList`;
+- OpenGlass — 49 имён из `kDwmOpenGlassRules`, не пять штатных цветов Windows и не весь раздел DWM;
+- параметры приложения — подключ `GlassSettings`.
+
+Восстановление пишет выбранные части обратно в HKCU и рассылает live-reload.
+Файл не зашифрован. Существующие файлы не перезаписываются. Двойной щелчок по
+`.glassbackup` открывает GlassSettings на странице «Система», вкладке «Восстановить».
 
 Реализация: `Services/SettingsRegistryBackupService.cs`, UI SystemPage.
 Source contract: `GlassSetup/tests/settings_backup_contract.py`. Это не замена

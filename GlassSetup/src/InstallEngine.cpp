@@ -1306,6 +1306,11 @@ bool InstallEngine::InstallGlassSettingsEarly() noexcept {
         InstallLog::LineFormat(L"Helper phase failed: error=%u attempted=0x%X completed=0x%X",result.error,result.attemptedMask,result.completedMask);
         return false;
     }
+    const bool os64 = GlassInstallUtil::IsOs64Bit();
+    const std::wstring& root = (os64 && selection_.settings64) ? x64Dir_ : x86Dir_;
+    const std::wstring exe = GlassInstallUtil::TrimTrailingSlashes(root) + L"\\GlassSettings\\GlassSettings.exe";
+    if (!GlassInstallUtil::RegisterSettingsBackupAssociation(exe))
+        InstallLog::Line(L"Settings backup file association was not registered");
     return true;
 }
 

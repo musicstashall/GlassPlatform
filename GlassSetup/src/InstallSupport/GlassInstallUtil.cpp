@@ -1949,4 +1949,75 @@ bool InvokeSecureUxThemeActivate(const std::wstring& x64Dir,const std::wstring& 
     return true;
 }
 
+bool RegisterSettingsBackupAssociation(const std::wstring& glassSettingsExe) noexcept {
+    try {
+        if (glassSettingsExe.empty()) return false;
+        const DWORD attrs = GetFileAttributesW(glassSettingsExe.c_str());
+        if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) return false;
+
+        const bool ru = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
+        const wchar_t* friendly = ru ? L"Резервная копия параметров Glass" : L"Glass settings backup";
+        const std::wstring command = L"\"" + glassSettingsExe + L"\" \"%1\"";
+        const std::wstring icon = glassSettingsExe + L",0";
+        HKEY extension = nullptr, prog = nullptr, iconKey = nullptr, commandKey = nullptr;
+        const auto close = [&]() noexcept {
+            if (commandKey) RegCloseKey(commandKey);
+            if (iconKey) RegCloseKey(iconKey);
+            if (prog) RegCloseKey(prog);
+            if (extension) RegCloseKey(extension);
+        };
+        auto write = [](HKEY key, const wchar_t* value) noexcept {
+            return RegSetValueExW(key, nullptr, 0, REG_SZ, reinterpret_cast<const BYTE*>(value),
+                static_cast<DWORD>((wcslen(value) + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+        };
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.glassbackup", 0, nullptr, 0,
+                KEY_SET_VALUE, nullptr, &extension, nullptr) != ERROR_SUCCESS || !write(extension, L"GlassPlatform.SettingsBackup")) {
+            close(); return false;
+        }
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\GlassPlatform.SettingsBackup", 0, nullptr, 0,
+                KEY_SET_VALUE, nullptr, &prog, nullptr) != ERROR_SUCCESS || !write(prog, friendly)) {
+            close(); return false;
+        }
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\GlassPlatform.SettingsBackup\\DefaultIcon", 0, nullptr, 0,
+                KEY_SET_VALUE, nullptr, &iconKey, nullptr) != ERROR_SUCCESS || !write(iconKey, icon.c_str())) {
+            close(); return false;
+        }
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\GlassPlatform.SettingsBackup\\shell\\open\\command", 0, nullptr, 0,
+                KEY_SET_VALUE, nullptr, &commandKey, nullptr) != ERROR_SUCCESS || !write(commandKey, command.c_str())) {
+            close(); return false;
+        }
+        close();
+        const std::wstring registered = L"Registered .glassbackup for " + glassSettingsExe;
+        GlassInstallLog::Line(registered.c_str());
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool RemoveSettingsBackupAssociationIfOwned() noexcept {
+    try {
+        HKEY command = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER,
+                L"Software\\Classes\\GlassPlatform.SettingsBackup\\shell\\open\\command",
+                0, KEY_QUERY_VALUE, &command) != ERROR_SUCCESS)
+            return true;
+        wchar_t buffer[2048]{};
+        DWORD bytes = sizeof(buffer);
+        DWORD type = 0;
+        const LONG status = RegQueryValueExW(command, nullptr, nullptr, &type, reinterpret_cast<BYTE*>(buffer), &bytes);
+        RegCloseKey(command);
+        if (status != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) return true;
+        std::wstring text = buffer;
+        for (auto& ch : text) ch = static_cast<wchar_t>(towlower(ch));
+        if (text.find(L"glasssettings.exe") == std::wstring::npos) return true;
+        RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\.glassbackup");
+        RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\GlassPlatform.SettingsBackup");
+        GlassInstallLog::Line(L"Removed .glassbackup association");
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 } // namespace GlassInstallUtil

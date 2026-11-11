@@ -116,6 +116,11 @@ bool StartMenuShortcutExists() noexcept;
 bool CreateStartMenuShortcut(const std::wstring& targetExe, const std::wstring& workingDir) noexcept;
 void DeleteStartMenuShortcut() noexcept;
 
+// .glassbackup → GlassSettings.exe. Пишет HKCU\Software\Classes текущего пользователя.
+bool RegisterSettingsBackupAssociation(const std::wstring& glassSettingsExe) noexcept;
+// Снимает ассоциацию, только если команда open указывает на GlassSettings.exe.
+bool RemoveSettingsBackupAssociationIfOwned() noexcept;
+
 // failureDetail (optional) receives a short technical, language-neutral
 // description of why the helper failed (exit code, decoded HRESULT); it is
 // meant for the log and the finish-page notes, not as a user-facing sentence.

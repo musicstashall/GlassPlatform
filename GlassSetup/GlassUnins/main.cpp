@@ -1287,7 +1287,11 @@ private:
             (void)restoreRemaining();return ERROR_INSTALL_FAILURE;
         }
         if (chosen.settings && !Msi::IsProductInstalled(Msi::kProductSettingsX64) &&
-            !Msi::IsProductInstalled(Msi::kProductSettingsX86)) GlassInstallUtil::DeleteStartMenuShortcut();
+            !Msi::IsProductInstalled(Msi::kProductSettingsX86)) {
+            GlassInstallUtil::DeleteStartMenuShortcut();
+            if (!GlassInstallUtil::RemoveSettingsBackupAssociationIfOwned())
+                LogLine(L"Settings backup association was not removed");
+        }
         // Pin retained product directories, including nested/aliased roots,
         // while pruning only empty directories of removed products.
         std::vector<std::wstring> keptRoots;

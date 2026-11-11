@@ -24,35 +24,6 @@
 
             <ctrl:SettingsInfoBlock x:Name="ShellMenuNoticeBlock" IconGlyph="&#xE7BA;" Visibility="Collapsed" />
 
-            <ctrl:SettingsSystemGateExpander
-                x:Name="MaintenanceExpander"
-                ShowGateSwitch="False"
-                DimHeaderActionsWithGate="False"
-                HorizontalAlignment="Stretch">
-                <ctrl:SettingsSystemGateExpander.HeaderActions>
-                    <Button x:Name="MaintenanceModifyButton"
-                            Click="MaintenanceModify_OnClick" />
-                </ctrl:SettingsSystemGateExpander.HeaderActions>
-            </ctrl:SettingsSystemGateExpander>
-
-            <ctrl:SettingsSystemGateExpander x:Name="BackupExpander"
-                    ShowGateSwitch="False" HorizontalAlignment="Stretch">
-                <Grid HorizontalAlignment="Stretch" MinWidth="0">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <StackPanel Spacing="12" HorizontalAlignment="Stretch">
-                        <TextBlock x:Name="BackupHeading" TextWrapping="Wrap" />
-                        <TextBlock x:Name="BackupInstruction" TextWrapping="Wrap" />
-                    </StackPanel>
-                    <Button Grid.Row="1" x:Name="RegistryBackupButton"
-                            Margin="0,16,0,0" HorizontalAlignment="Right"
-                            Click="RegistryBackup_OnClick" />
-                    <TextBlock x:Name="RegistryBackupStatus" Visibility="Collapsed" />
-                </Grid>
-            </ctrl:SettingsSystemGateExpander>
-
             <ctrl:SettingsOptionRow x:Name="UpdateIntervalRow">
 
                 <ComboBox
@@ -64,6 +35,136 @@
                     SelectionChanged="UpdateIntervalCombo_OnSelectionChanged" />
 
             </ctrl:SettingsOptionRow>
+
+            <ctrl:SettingsSystemGateExpander
+                x:Name="MaintenanceExpander"
+                AllowBodyExpand="False"
+                ShowGateSwitch="False"
+                DimHeaderActionsWithGate="False"
+                HorizontalAlignment="Stretch">
+                <ctrl:SettingsSystemGateExpander.HeaderActions>
+                    <Button x:Name="MaintenanceModifyButton"
+                            Click="MaintenanceModify_OnClick" />
+                </ctrl:SettingsSystemGateExpander.HeaderActions>
+            </ctrl:SettingsSystemGateExpander>
+
+            <ctrl:SettingsSystemGateExpander x:Name="BackupExpander"
+                    ShowGateSwitch="False" HorizontalAlignment="Stretch">
+                <StackPanel>
+                    <Pivot x:Name="BackupPivot" SelectionChanged="BackupPivot_OnSelectionChanged">
+                        <Pivot.Resources>
+                            <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                            <Style TargetType="PivotItem">
+                                <Setter Property="MinHeight" Value="0" />
+                                <Setter Property="Height" Value="0" />
+                            </Style>
+                        </Pivot.Resources>
+                        <PivotItem x:Name="BackupCreateTab" />
+                        <PivotItem x:Name="BackupRestoreTab" />
+                    </Pivot>
+                    <Grid>
+                        <ctrl:SettingsParameterPanel x:Name="BackupCreatePanel">
+                            <Grid x:Name="BackupCreateBody" MinWidth="0" Margin="0,0,0,24"
+                                  HorizontalAlignment="Stretch"
+                                  SizeChanged="BackupCreateBody_OnSizeChanged">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid x:Name="BackupCreateChecks" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock x:Name="BackupCreateHeading" Grid.ColumnSpan="2"
+                                               Margin="0,0,0,8" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                    <CheckBox x:Name="CreateAppearanceCheck" Grid.Row="1" MinWidth="0" IsChecked="True"
+                                              Checked="CreatePart_OnChanged" Unchecked="CreatePart_OnChanged" />
+                                    <CheckBox x:Name="CreateProcessesCheck" Grid.Row="1" Grid.Column="1" MinWidth="0"
+                                              Margin="16,0,0,0" IsChecked="True"
+                                              Checked="CreatePart_OnChanged" Unchecked="CreatePart_OnChanged" />
+                                    <CheckBox x:Name="CreateOpenGlassCheck" Grid.Row="2" MinWidth="0"
+                                              Margin="0,8,0,0" IsChecked="True"
+                                              Checked="CreatePart_OnChanged" Unchecked="CreatePart_OnChanged" />
+                                    <CheckBox x:Name="CreateAppCheck" Grid.Row="2" Grid.Column="1" MinWidth="0"
+                                              Margin="16,8,0,0" IsChecked="True"
+                                              Checked="CreatePart_OnChanged" Unchecked="CreatePart_OnChanged" />
+                                </Grid>
+                                <Border x:Name="BackupCreateDivider" Grid.Column="1" Width="1" Margin="16,0"
+                                        VerticalAlignment="Stretch"
+                                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                                <Button x:Name="CreateBackupButton" Grid.Column="2" MinWidth="0"
+                                        VerticalAlignment="Center" Click="CreateBackup_OnClick" />
+                            </Grid>
+                        </ctrl:SettingsParameterPanel>
+                        <ctrl:SettingsParameterPanel x:Name="BackupRestorePanel" Visibility="Collapsed">
+                            <Grid x:Name="BackupRestoreBody" MinWidth="0" Margin="0,0,0,24"
+                                  HorizontalAlignment="Stretch"
+                                  SizeChanged="BackupRestoreBody_OnSizeChanged">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid x:Name="BackupRestoreChecks" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock x:Name="BackupRestoreHeading" Grid.ColumnSpan="2"
+                                               Margin="0,0,0,8" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                    <CheckBox x:Name="RestoreAppearanceCheck" Grid.Row="1" MinWidth="0" IsEnabled="False"
+                                              Checked="RestorePart_OnChanged" Unchecked="RestorePart_OnChanged" />
+                                    <CheckBox x:Name="RestoreProcessesCheck" Grid.Row="1" Grid.Column="1" MinWidth="0"
+                                              Margin="16,0,0,0" IsEnabled="False"
+                                              Checked="RestorePart_OnChanged" Unchecked="RestorePart_OnChanged" />
+                                    <CheckBox x:Name="RestoreOpenGlassCheck" Grid.Row="2" MinWidth="0"
+                                              Margin="0,8,0,0" IsEnabled="False"
+                                              Checked="RestorePart_OnChanged" Unchecked="RestorePart_OnChanged" />
+                                    <CheckBox x:Name="RestoreAppCheck" Grid.Row="2" Grid.Column="1" MinWidth="0"
+                                              Margin="16,8,0,0" IsEnabled="False"
+                                              Checked="RestorePart_OnChanged" Unchecked="RestorePart_OnChanged" />
+                                </Grid>
+                                <Border x:Name="BackupRestoreDivider" Grid.Column="1" Width="1" Margin="16,0"
+                                        VerticalAlignment="Stretch"
+                                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                                <StackPanel x:Name="BackupRestoreActions" Grid.Column="2" Spacing="8"
+                                            VerticalAlignment="Center">
+                                    <Button x:Name="RestoreSelectButton" MinWidth="0" HorizontalAlignment="Stretch"
+                                            Click="RestoreSelect_OnClick" />
+                                    <Button x:Name="RestoreApplyButton" MinWidth="0" HorizontalAlignment="Stretch"
+                                            IsEnabled="False" Click="RestoreApply_OnClick" />
+                                </StackPanel>
+                            </Grid>
+                        </ctrl:SettingsParameterPanel>
+                    </Grid>
+                </StackPanel>
+            </ctrl:SettingsSystemGateExpander>
 
         </StackPanel>
 
