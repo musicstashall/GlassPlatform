@@ -601,6 +601,11 @@ ogs = (repo / "GlassSettings/Core/Platform/OpenGlassInstallService.cs").read_tex
 assert "OpenGlassHostPath is not null" not in ogs, "uninstall must not gate service removal on the exe path"
 row_src = (repo / "GlassSettings/Controls/PlatformSchedulerRow.cs").read_text(encoding="utf-8")
 assert "Task.Run(() => QueryDirectState().TaskExists)" in row_src
+locked_x86 = row_src.split("            if (IsX86ControlsLocked)\n", 1)[1].split("            if (!gateTaskExists)", 1)[0]
+assert 'GlassSettingsResources.Get("Status_Disabled")' in locked_x86
+assert 'Status_PlatformNotInstalled' not in locked_x86
+assert '_installGate.IsEnabled = false;' in locked_x86 and 'splitEnabled: false' in locked_x86
+
 inspect_cpp = (repo / "GlassSetup/src/InstallSupport/GlassProductInspect.cpp").read_text(encoding="utf-8")
 assert "MsiGetFileHashW" in inspect_cpp and "WinVerifyTrust" in inspect_cpp and "MsiGetComponentPathW" in inspect_cpp
 gp = read("src/GlassProducts.h")

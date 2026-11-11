@@ -173,7 +173,7 @@ public sealed class PlatformSchedulerRow
                 _installGate.IsOn = false;
                 _installGate.IsEnabled = false;
                 _stackable.SetStatusTone(
-                    GlassSettingsResources.Get("Status_PlatformNotInstalled"),
+                    GlassSettingsResources.Get("Status_Disabled"),
                     PlatformSchedulerStackableActions.StatusToneKind.Disabled);
                 return;
             }
