@@ -841,3 +841,16 @@ assert 'kContentHeight+34,450,16' in footer_text
 provider_src = (repo / "GlassSetup/src/InstallSupport/GlassOpenGlassPackage.cpp").read_text(encoding="utf-8")
 assert 'MAXULONG' not in provider_src
 assert '(std::numeric_limits<ULONG>::max)()' in provider_src
+
+# Fonts exist before first visible frame; pending WebView never exposes the
+# native wizard. Runtime bootstrap and confirmed failure keep native recovery.
+loading_init = setup_main.split('void InitializeLoading() {',1)[1].split('void InitializeControls()',1)[0]
+assert 'CreateFonts();' in loading_init
+assert 'footerFont_ = create(10,FW_NORMAL);' in setup_main
+assert 'kContentHeight+34,450,16),footerFont_' in setup_main
+pending_ui = setup_main.split('bool WaitingForWebUi() const noexcept {',1)[1].split('void ShowContentControls()',1)[0]
+assert '!NativeDemo() && !webReady_ && SUCCEEDED(webError_)' in pending_ui
+assert 'Page::RuntimeRequired' in pending_ui and 'Page::Error' in pending_ui
+render_content = setup_main.split('void RenderContent(HDC dc) {',1)[1].split('void RenderFooterText',1)[0]
+assert render_content.index('if (WaitingForWebUi())') < render_content.index('DrawBanner')
+assert 'SetPage(page_); // Restore controls only after a confirmed WebView failure.' in setup_main

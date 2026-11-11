@@ -1255,7 +1255,7 @@ private:
     HWND eula_ = nullptr, accept_ = nullptr, progress_ = nullptr, webHost_ = nullptr;
     HWND component64_ = nullptr, component32_ = nullptr, componentSettings_ = nullptr, componentSettings32_ = nullptr, componentOpenGlass_ = nullptr, componentSecureUxTheme_ = nullptr;
     HWND certInstall_ = nullptr, certSkip_ = nullptr; // GDI fallback of the certificate page
-    HFONT font_ = nullptr, heading_ = nullptr, small_ = nullptr, title_ = nullptr;
+    HFONT font_ = nullptr, heading_ = nullptr, small_ = nullptr, title_ = nullptr, footerFont_ = nullptr;
     HBRUSH darkBrush_ = nullptr, licenseBrush_ = nullptr, buttonBrush_ = nullptr;
     HBRUSH progressFill_ = nullptr, progressTrack_ = nullptr;
     ComPtr<IStream> bannerStream_;
@@ -1413,7 +1413,7 @@ private:
                      wanted.bottom-wanted.top,SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
     }
     void CreateFonts() {
-        for (HFONT* f : {&font_, &heading_, &small_, &title_}) {
+        for (HFONT* f : {&font_, &heading_, &small_, &title_, &footerFont_}) {
             if (*f) DeleteObject(*f);
             *f = nullptr;
         }
@@ -1423,6 +1423,7 @@ private:
                               DEFAULT_PITCH,L"Segoe UI");
         };
         font_ = create(14,FW_NORMAL); small_ = create(12,FW_NORMAL);
+        footerFont_ = create(10,FW_NORMAL);
         heading_ = create(28,FW_NORMAL); title_ = create(39,FW_LIGHT);
         for (HWND c : {back_,next_,cancel_,eula_,accept_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,certInstall_,certSkip_})
             if (c) SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
@@ -1430,6 +1431,8 @@ private:
     void InitializeLoading() {
         dpi_=GetDpiForWindow(window);
         darkBrush_=CreateSolidBrush(kDark);
+        // WM_CREATE precedes ShowWindow/first Paint; never use a stock bitmap font.
+        CreateFonts();
         WizardTheme::ApplyDarkWindowChrome(window);
         BOOL animationsEnabled=TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
@@ -1736,7 +1739,19 @@ private:
         RECT footer=Box(0,kContentHeight,kWidth,kFooterHeight);
         InvalidateRect(window,&footer,FALSE);
     }
+    bool WaitingForWebUi() const noexcept {
+        return !NativeDemo() && !webReady_ && SUCCEEDED(webError_) &&
+            page_!=Page::RuntimeRequired && page_!=Page::RuntimeInstalling &&
+            page_!=Page::RuntimeError && page_!=Page::AlreadyRunning && page_!=Page::Error;
+    }
     void ShowContentControls() {
+        if(WaitingForWebUi()) {
+            EnableWindow(next_,FALSE);EnableWindow(back_,FALSE);
+            for(HWND control:{back_,next_,cancel_,eula_,accept_,component64_,component32_,componentSettings_,
+                componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,certInstall_,certSkip_,progress_,webHost_})
+                if(control)ShowWindow(control,SW_HIDE);
+            return;
+        }
         const bool webVisible = SlidesVisible();
         const bool nativeLicense = !webVisible && page_==Page::License && !transitioning_;
         ShowWindow(eula_,nativeLicense?SW_SHOWNA:SW_HIDE);
@@ -3452,7 +3467,7 @@ private:
         if (controller_) controller_->put_IsVisible(FALSE);
         ShowWindow(webHost_,SW_HIDE);
         if (page_==Page::Welcome) KillTimer(window,kHeroTimer);
-        ShowContentControls(); // Reveal native EULA and the native fallback page.
+        SetPage(page_); // Restore controls only after a confirmed WebView failure.
         InvalidateContent();
     }
     HRESULT HandleWebMessage(ICoreWebView2WebMessageReceivedEventArgs* args) {
@@ -3686,7 +3701,7 @@ private:
                 transitioning_=false;
                 webReady_ = true; webError_ = S_OK;
                 KillTimer(window,kHeroTimer);
-                ShowContentControls();
+                SetPage(page_);
                 SyncWebViewState();
 #ifdef _DEBUG
                 MaybeStartDebugDemo();
@@ -3949,7 +3964,7 @@ private:
         const COLORREF white=RGB(245,244,252), muted=RGB(163,168,191), accent=RGB(193,180,255);
         // Do not flash native Checking before the real WebView Checking page,
         // for either bootstrapper or maintenance startup. Retain the native fallback on WebView error.
-        if (page_==Page::Checking && !webReady_ && SUCCEEDED(webError_) && !NativeDemo()) {
+        if (WaitingForWebUi()) {
             DrawLoadingScreen(dc);
             return;
         }
@@ -4166,8 +4181,9 @@ private:
         // This footer is native even when the page content is WebView2: one
         // caption for both renderers, outside the HTML/progress-strip bounds.
         if(!footerSetupVersion_.empty())
-            DrawLabel(dc,L"GlassSetup "+footerSetupVersion_,Box(32,kContentHeight+34,450,16),small_,RGB(156,153,175),
+            DrawLabel(dc,L"GlassSetup "+footerSetupVersion_,Box(32,kContentHeight+34,450,16),footerFont_,RGB(156,153,175),
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        if (WaitingForWebUi()) return;
         if (page_!=Page::Installing && page_!=Page::Cancelling && page_!=Page::Launching && page_!=Page::RuntimeInstalling && !(page_==Page::Components&&downloadContinuePending_) && !(page_==Page::Checking&&setupDownloadActive_)) return;
         const std::wstring line=page_==Page::Components?NativeDownloadSummary():page_==Page::Checking?checkingStatus_:page_==Page::RuntimeInstalling?runtimeStatus_:installStatusLine_.empty()?Text(IDS_STATUS_PREPARE):installStatusLine_;
         const std::wstring percentText=progressValue_>0 && percent_==0 ? L"<1%" : std::to_wstring(percent_)+L"%";
@@ -4239,7 +4255,7 @@ private:
         for (HWND button : {back_,next_,cancel_})
             if (button && IsWindow(button)) WizardTheme::DetachButtonScope(button);
         WizardTheme::ResetButtonCache();
-        for (HFONT f : {font_,heading_,small_,title_}) if (f) DeleteObject(f);
+        for (HFONT f : {font_,heading_,small_,title_,footerFont_}) if (f) DeleteObject(f);
         if (darkBrush_) DeleteObject(darkBrush_);
         if (licenseBrush_) DeleteObject(licenseBrush_);
         if (buttonBrush_) DeleteObject(buttonBrush_);

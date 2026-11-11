@@ -1,3 +1,18 @@
+## Startup WebView concealment и меньший footer font
+
+Footer version использует отдельный Segoe UI ClearType 10px (было 12), DPI-scaled.
+Fonts создаются уже в InitializeLoading/WM_CREATE, до ShowWindow/первого paint;
+ранее caption footer мог рисоваться stock bitmap font до InitializeControls.
+
+WaitingForWebUi ограничивает initial native rendering нейтральным spinner и
+version footer; native формы/кнопки скрыты, Back/Next отключены, пока WebView
+ожидается. Native recovery сохранён для runtime bootstrap, явной ошибки,
+AlreadyRunning и --demo-native. Navigation success и WebFailure вызывают SetPage
+для восстановления правильного состояния controls; не удаляем recovery UI.
+
+Source/resource checks PASS; Windows startup/slow-runtime/DPI ещё не проверены.
+Сборка только GlassSetup Release|x86 с актуальными зависимостями.
+
 ## MSVC MAXULONG и видимая версия Setup
 
 Исправлен C2065 в GlassOpenGlassPackage: проверка размера использует
