@@ -3,12 +3,86 @@
 - **Дата:** 2026-11-06
 - **Ветка выполнения:** `arena/e53d8dd2-glassplatform`
 - **Макет целевой страницы:** [`mockups/product-maintenance-concepts.html`](mockups/product-maintenance-concepts.html) (вариант C)
-- **Статус:** план уточнён по решениям пользователя 2026-11-06. В опубликованных изменениях `39aa595`/`5cae9ca` добавлены план и макет; runtime-код облегчённого установщика ещё не реализован, сборка не проверялась.
+- **Статус:** основной runtime лёгкого Setup реализован; пользователь подтвердил online install. Текущий единый остаток реализации и отдельная Windows-приёмка — в разделе 0 ниже. Старые исходные оценки в §2/§14/§15 являются историческими, не текущим статусом.
 
 Документ описывает рефакторинг установщика на «облегчённый» вариант: MSI больше не упаковываются в `GlassSetup.exe`,
 пакеты берутся из предыдущей установки, из каталога рядом с установщиком или из релизов; установщик сам проверяет
 и подтягивает свою новую версию; страница «Доступна новая версия» упраздняется. Отдельным обязательным этапом описан выбор **обеих разрядностей GlassSettings** двумя независимыми карточками.
 Назначение Native/helper и доступность конкретных cross-architecture операций проверяются отдельно от работоспособности Platform.
+
+---
+
+## 0. Единый актуальный план: Setup + Settings + upstream OpenGlass
+
+Эта таблица объединяет исходные R0–R10 и новый запрос обслуживания Settings.
+Она имеет приоритет над историческими «ещё не реализовано» в старых разделах.
+`settings-maintenance-upstream-plan.md` сохраняется как журнал анализа, а не
+второй независимый backlog. Подробный контракт извлечения —
+[openglass-upstream-setup.md](openglass-upstream-setup.md).
+
+### 0.1 Реализованная основа (не писать повторно)
+
+| Этап | Состояние реализации / подтверждение |
+|---|---|
+| R0, R1 | Catalog/ReleaseClient и New-ReleaseCatalog.ps1 есть; HTTPS/redirect/hash/size gates и portable checks. Генератор исправлен remote-изменением для PowerShell 5.1. |
+| R2–R4 | File-based acquisition, resolver rules, attached/cache/server inspection и trust есть. Отображение: категории server/local, download только по Next. |
+| R5 | Controller store/handoff/self-update код и mocks есть. Полная VM fault/reboot acceptance не закрыта. |
+| R6 | Page::Update больше не является рабочей страницей; штатный download progress. |
+| R7 | MSI не встроены в runtime Setup; старые неиспользуемые resource defines ещё встречаются и требуют housekeeping, не возврата payload. |
+| R8 | Production HTML/native maintenance plan, карточки, downloads, Remove/Keep, предупреждения реализованы. |
+| R9 | Раздельные Settings x64/x86 и helpers реализованы. Пришедший e3ab778 использует общую bundle version; не возвращать удалённый Settings Version.props. |
+| Cleanup | Explicit opt-in, preflight, after-success/registration-absence gates, profile folders/themes, Glass registry и 49 DWM values; post-delete verification. |
+| Settings UI | Home maintenance row убрана; System maintenance expander + ticketed cached Modify. Missing Platform x86 caption исправлена без изменения кнопок. |
+| Update launch | Обе кнопки update в ProductUpdateCoordinator уже запускают cached Setup; этот маршрут сохранять. |
+| Online install | Успешно подтверждён пользователем. Не переносить этот результат на новые backup/upstream/fault сценарии. |
+
+### 0.2 Новый код, добавленный на текущем этапе
+
+**N1 — экспорт базы параметров из Settings: реализован, требует Windows сборки/приёмки.**
+
+- Кнопка «Сохранить копию параметров» в System maintenance body. Файл ZIP с уникальным
+  именем в корне Documents, без перезаписи; UI показывает полный путь/ошибку.
+- Формат v1: manifest.json + registry.json. Сохраняются raw type/bytes (Base64 JSON)
+  Glass config и 49 DWM values в обоих view для HKLM и загруженных user hives
+  всех инициализированных обычных профилей. Отсутствующие DWM values отмечены явно.
+- InstallPath metadata исключены; сертификаты, MSI/controller, tasks/service не
+  экспортируются. Это **registry-only backup**, не копия удаляемых файлов/тем.
+- Профили перечисляются по ProfileList и повторно сверяются; offline/inaccessible
+  hive — явный отказ, не пустой backup. Ничего не mount/unload; два удерживаемых
+  NTUSER.DAT и удалённые аккаунты не выгружать ради успешного экспорта.
+- Защита записи: CREATE_NEW, no sharing, pinned local Documents ancestors,
+  reparse refusal, exact-handle cleanup ошибки. Проверка обеих ZIP entries по
+  длине/SHA256 до сообщения успеха. Архив не зашифрован.
+- Нет atomic snapshot против других registry writers; закрыть другие редакторы.
+  Автоматический restore не реализован и прямо отмечен в UI/manifest.
+
+### 0.3 Ещё НЕ реализовано — единый backlog
+
+| ID | Оставшаяся реализация | Условие завершения |
+|---|---|---|
+| N2 | Per-product Glass update provider вместо bundle `glass`; compare только установленные продукты/архитектуры, независимый catalog version | Несколько updates дают компактную общую строку на Glass expander, один — конкретную; dismissed identity не теряет изменения набора |
+| N3 | OpenGlass installed DWM architecture + актуальные unsuffixed releases, старые -legacy/-milcomp только своего канала | Не переводит Legacy в MILComp по более новому тегу; учитывает repair при смене Windows build |
+| N4 | Исправить регрессию switch-off OpenGlass orchestration | Service и legacy task удаляются так же, как dropdown Delete; выключение не подменяется disable autorun |
+| N5 | Inno 6.7 upstream extractor/provider | Bounded parser/LZMA/filter, publisher+PE/version/hash; только принятые контрактом Host/GUI/выбранная DLL; upstream EXE никогда не исполняется |
+| N6 | Убрать своё OpenGlass MSI семейство, source/catalog/engine/inventory/ARP gates заменить на защищённые file receipts | Без compatibility/migration ветки; независимый Inno install не перезаписывается; rollback сохраняется |
+| N7 | Resources graphics package как отдельный продукт с зависимостью от OpenGlass | Catalog/build/UI/planner/snapshot/remove/rollback: не спрятанный addon в OpenGlass payload |
+| N8 | Полная файловая резервная копия и импорт — **не реализованы**, не обещаны текущей кнопкой параметров | При расширении scope отдельный file-safety/restore contract; registry-only ZIP не является страховкой удаления файлов/тем |
+| R10 | Довести устаревшие mock harness до текущих API и документы/релизный checklist до нового состава продуктов | Общий run с явным отчётом, без ослабления production trust ради тестов |
+
+Порядок: N1 → N2/N3 → N4 → N5/N6 → N7 → R10. Не считать весь переход
+выполненным только потому, что добавлены UI строки или extractor-контракт.
+
+### 0.4 Отдельно: остающаяся приёмка, не отсутствие реализации
+
+- Windows build/WinUI/System backup: archive type/bytes, loaded/offline/access denied,
+  Documents readonly/reparse/disk full; проверить отсутствие ложного «сохранено».
+- Полное удаление keep/clean: Glass + HKU/HKLM DWM whitelist, folders/themes,
+  registration/controller retirement, stale Settings Modify.
+- Offline attached/cache/нет источников, repair, per-arch Native; visual DPI/native fallback.
+- Fault/cancel/reboot/recovery matrix: [controller-windows-acceptance.md](controller-windows-acceptance.md).
+  Только VM, без fault injection на рабочей системе.
+- Upstream + Resources требуют собственной новой acceptance после реализации.
+- Explorer crashes — отдельная отложенная задача, не часть завершения installer.
 
 ---
 

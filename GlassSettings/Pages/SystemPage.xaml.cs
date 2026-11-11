@@ -160,11 +160,31 @@ public sealed partial class SystemPage : Page
         }
     }
 
+    private async void RegistryBackup_OnClick(object sender, RoutedEventArgs e)
+    {
+        RegistryBackupButton.IsEnabled = false;
+        RegistryBackupStatus.Visibility = Visibility.Visible;
+        RegistryBackupStatus.Text = GlassSettingsResources.Get("System_BackupBusy");
+        try
+        {
+            var path = await SettingsRegistryBackupService.SaveAsync();
+            RegistryBackupStatus.Text = GlassSettingsResources.Get("System_BackupSaved") + "\n" + path;
+        }
+        catch (Exception error)
+        {
+            RegistryBackupStatus.Text = GlassSettingsResources.Get("System_BackupFailed") + "\n" + error.Message;
+        }
+        finally { RegistryBackupButton.IsEnabled = true; }
+    }
+
     private void ApplyLocalizedStrings()
     {
         MaintenanceExpander.Title = GlassSettingsResources.Get("System_MaintenanceTitle");
         MaintenanceExpander.Description = GlassSettingsResources.Get("System_MaintenanceDescription");
         MaintenanceModifyButton.Content = GlassSettingsResources.Get("System_MaintenanceModify");
+        RegistryBackupRow.Title = GlassSettingsResources.Get("System_BackupTitle");
+        RegistryBackupRow.Description = GlassSettingsResources.Get("System_BackupDescription");
+        RegistryBackupButton.Content = GlassSettingsResources.Get("System_BackupSave");
         ShellExtensionRow.Title = GlassSettingsResources.Get("System_RowShellExtension");
         ShellExtensionRow.Description = GlassSettingsResources.Get("System_RowShellExtensionDesc");
         ShellMenuNoticeBlock.Title = GlassSettingsResources.Get("System_ShellMenuNoticeTitle");

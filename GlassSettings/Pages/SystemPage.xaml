@@ -33,6 +33,13 @@
                     <Button x:Name="MaintenanceModifyButton"
                             Click="MaintenanceModify_OnClick" />
                 </ctrl:SettingsSystemGateExpander.HeaderActions>
+                <StackPanel Spacing="12">
+                    <ctrl:SettingsOptionRow x:Name="RegistryBackupRow">
+                        <Button x:Name="RegistryBackupButton" Click="RegistryBackup_OnClick" />
+                    </ctrl:SettingsOptionRow>
+                    <TextBlock x:Name="RegistryBackupStatus" TextWrapping="Wrap"
+                               IsTextSelectionEnabled="True" Visibility="Collapsed" />
+                </StackPanel>
             </ctrl:SettingsSystemGateExpander>
 
             <ctrl:SettingsOptionRow x:Name="UpdateIntervalRow">

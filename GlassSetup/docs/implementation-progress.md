@@ -1,3 +1,25 @@
+## Продолжение: архив базы параметров и единый основной план
+
+Добавлен SettingsRegistryBackupService и кнопка в System maintenance. Registry-only
+ZIP в Documents: manifest v1 + исходные type/bytes Glass/DWM HKU/HKLM обе view,
+49-name allowlist, install metadata excluded, offline hive refusal без mount/unload.
+CREATE_NEW + pinned local ancestors + no sharing/reparse, bounded export,
+ZIP readback length/SHA256 verification, exact-handle error cleanup. Статус UI
+не выдаёт недоступный профиль за полную копию. Нет файлового backup/автоимпорта.
+
+Основной installer-lightweight-plan §0 объединяет R0–R10 и новый Settings/upstream
+backlog. Исправлен устаревший статус, что lightweight runtime якобы ещё отсутствует.
+Новый settings-maintenance-upstream-plan оставлен как журнал, а не второй backlog.
+Отдельно отмечены implemented code vs Windows acceptance, успешный online install
+не переносится на backup/fault/upstream. N2–N7 ещё не реализованы.
+
+PASS: backup source/schema contract (не запуск C#), resource smoke, ранее production
+registry cleanup/profile/full-removal mocks. Нет dotnet/MSVC/Windows в sandbox;
+компиляция и runtime ZIP/registry export ещё не подтверждены.
+
+Сборка этой части: GlassSettings Release|x64 и Release|x86 с уже актуальными
+GlassShared/Native соответствующей архитектуры. Setup/Unins в этом этапе не менялись.
+
 ## Исправление Invalid UTF-8 response на карточках GlassSettings
 
 `payloadVersion` в remote catalog необязателен. Карточки Settings передавали его

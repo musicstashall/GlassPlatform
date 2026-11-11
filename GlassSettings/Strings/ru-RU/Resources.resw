@@ -1105,4 +1105,10 @@
   <data name="System_MaintenanceTitle" xml:space="preserve"><value>Обслуживание системы</value></data>
   <data name="System_MaintenanceDescription" xml:space="preserve"><value>Установка, обновление и удаление продуктов Glass</value></data>
   <data name="System_MaintenanceModify" xml:space="preserve"><value>Изменить</value></data>
+  <data name="System_BackupTitle" xml:space="preserve"><value>Параметры реестра</value></data>
+  <data name="System_BackupDescription" xml:space="preserve"><value>Архив настроек Glass и OpenGlass/DWM всех доступных профилей и компьютера сохраняется в «Документы». Пользовательские файлы и темы в архив не входят. Закройте другие редакторы настроек; все профили должны быть загружены. Архив не зашифрован. Автоматическое восстановление пока недоступно.</value></data>
+  <data name="System_BackupSave" xml:space="preserve"><value>Сохранить копию параметров</value></data>
+  <data name="System_BackupBusy" xml:space="preserve"><value>Создание и проверка архива…</value></data>
+  <data name="System_BackupSaved" xml:space="preserve"><value>Архив параметров сохранён и проверен:</value></data>
+  <data name="System_BackupFailed" xml:space="preserve"><value>Не удалось создать полную копию параметров. Не выполняйте очистку до успешного сохранения.</value></data>
 </root>
