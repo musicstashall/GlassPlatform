@@ -9,6 +9,8 @@ inline std::wstring directory;
 // Session-only hints, never authority. Acquisition rechecks hash, MSI identity and trust.
 inline std::mutex secureUxCatalogMutex;
 inline std::string secureUxCatalogText;
+inline std::mutex openGlassCatalogMutex;
+inline std::string openGlassCatalogText;
 inline std::mutex preparedMutex;
 inline std::array<std::wstring,6> prepared{};
 inline std::wstring Prepared(std::size_t i) {std::lock_guard<std::mutex> lock(preparedMutex);return prepared.at(i);}

@@ -1,3 +1,28 @@
+## OpenGlass: подключение Next preparation и повторной проверки без второго download
+
+ProductDownloads index4 теперь вызывает upstream provider, не MSI acquisition.
+Engine ExtractPayload также выделяет OpenGlass в свой preparation path и хранит
+Package (selected DLL/Host/GUI/setup). Windows build получен RtlGetVersion, native
+OS architecture проверена: неизвестная/unsupported ОС не выбирает Legacy молча.
+
+Metadata snapshot между inspector/Next общий, payload не качается на выборе.
+После полной проверки provider сохраняет metadata sidecar в защищённой workspace.
+Prepared hint указывает на setup; при повторной engine preparation sidecar и
+source проверяются по protected ACL/type/link, size/hash, setup signer. Setup
+копируется из pinned handle и распаковывается заново с per-file trust checks,
+без второго transfer. Ни sidecar, ни hints не являются авторизацией установки.
+
+Ещё не завершено: BuildExecutionPlan/RunMsiSequence по-прежнему содержат MSI OG;
+file receipt/inventory/transaction/removal/controller lifetime не подключены.
+Карточка пока не разблокирована: не разрешаем Apply на неработающий engine path.
+Не объявлять весь task выполненным и не просить пользователя тестировать install.
+
+PASS: parser/LZMA tests, Next gate mock, provider/queue routing source assertions,
+resource smoke. Windows provider/COM/Authenticode/MSVC не выполнялись.
+Сборка этой части: GlassSetup Release|x86; изменение ProductInspect/SourceLayout
+также затрагивает GlassUnins — Release|x86 GlassUnins → GlassSetup с актуальным
+GlassShared. Runtime OG по-прежнему требует следующего этапа.
+
 ## Upstream OpenGlass: parser/staging и явный выбор продуктов
 
 Получены local commits 9f25136/65abdb2. Пользователь подтвердил сохранение/restore/

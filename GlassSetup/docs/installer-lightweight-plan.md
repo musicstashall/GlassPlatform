@@ -58,7 +58,9 @@
   setup Valid Authenticode + upstream subject, RT_RCDATA/11111, decoded hashes,
   x64 PE32+/version/original filename/description и одинаковый signer каждого
   payload. Package возвращает selected DLL (build>=28000 MILComp), Host и GUI.
-- Это защищённый staging API, **ещё не подключённый** к Next/engine. Он не создаёт
+- Staging API подключён к Next ProductDownloads index4 и engine ExtractPayload.
+  Повторная preparation проверяет protected metadata/setup/hash/signatures и
+  распаковывает из session hint без второго download. Он не создаёт
   service/ARP/receipt и не заменяет прежний MSI execution path. Нельзя считать
   заблокированную OG карточку окончательно исправленной этим этапом.
 - Реальные portable parser/LZMA тесты на synthetic fixtures PASS. Скачивание и

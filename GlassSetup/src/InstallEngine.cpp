@@ -1067,7 +1067,10 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
         if(!p.selected)continue;
         if(IsCancelRequested())return false;
         std::wstring error;
-        if(!GlassPackageAcquisition::Prepare(p.product,catalog,tempDir_,cancelRequested_,error)) {
+        const bool prepared=p.product==Product::OpenGlass?
+            GlassOpenGlassPackage::PrepareForCurrentSystem(tempDir_,cancelRequested_,openGlassPackage_,error):
+            GlassPackageAcquisition::Prepare(p.product,catalog,tempDir_,cancelRequested_,error);
+        if(!prepared) {
             if(!IsCancelRequested())SetFailure(error,0);
             return false;
         }

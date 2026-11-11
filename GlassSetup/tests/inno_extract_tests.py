@@ -75,3 +75,15 @@ policy=(root/'GlassSetup/src/GlassProducts.h').read_text()
 a=policy.index('constexpr bool DefaultSelectedFor(');b=policy.index('constexpr Selection NormalizeInstall',a)
 assert 'return false;' in policy[a:b]
 print('PASS: provider source gates and explicit-choice default; Windows provider is not executed by this test')
+
+queue=(root/'GlassSetup/src/GlassProductDownloads.h').read_text()
+assert 'else if(i==4)' in queue and 'GlassOpenGlassPackage::PrepareForCurrentSystem' in queue
+assert 'else if(i<4)' in queue
+engine=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
+assert 'p.product==Product::OpenGlass?' in engine
+assert 'GlassOpenGlassPackage::PrepareForCurrentSystem(tempDir_' in engine
+assert 'ReadMetadata(prepared+L".metadata.json")' in provider
+assert 'TrustedPath(prepared,false)' in provider
+assert 'Prepared OpenGlass hash changed' in provider
+assert provider.index('Prepared OpenGlass hash changed') < provider.index('const auto publisher=VerifyPublisher')
+print('PASS: production source routing: OpenGlass Next/engine preparation bypasses MSI acquisition; prepared reuse rechecks protected metadata/hash/signature')

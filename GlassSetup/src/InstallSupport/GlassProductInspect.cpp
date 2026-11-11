@@ -1,3 +1,4 @@
+#include "GlassSetupSourceLayout.h"
 #include "GlassProductInspect.h"
 #include "GlassPackageAcquisition.h"
 #include "GlassPackageCatalog.h"
@@ -603,6 +604,10 @@ Report Run(const Inputs& in)
         if(GlassReleaseClient::Get(L"https://api.github.com/repos/ALTaleX531/OpenGlass/releases/latest",INVALID_HANDLE_VALUE,&text,1024*1024,cancel,error)&&
            GlassOpenGlassRelease::Parse(text,version)) {
             report.og.remotePayloadVersion=GlassReleaseClient::Wide(version);
+            // One metadata snapshot for inspection and subsequent Next; this
+            // caches no payload and never turns metadata into install authority.
+            {std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::openGlassCatalogMutex);
+             GlassSetupSourceLayout::openGlassCatalogText=text;}
             GlassInstallLog::LineFormat(L"OpenGlass upstream release: %s; local DLL: %s",report.og.remotePayloadVersion.c_str(),report.og.installedPayloadVersion.c_str());
         }else GlassInstallLog::LineFormat(L"OpenGlass upstream release unavailable: %s",error.c_str());
     }

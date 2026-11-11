@@ -1,6 +1,7 @@
 #pragma once
 #include "InstallSupport/GlassPackageAcquisition.h"
 #include "InstallSupport/GlassSecureUxPackage.h"
+#include "InstallSupport/GlassOpenGlassPackage.h"
 #include "InstallSupport/GlassReleaseClient.h"
 #include "InstallSupport/GlassSetupSourceLayout.h"
 #include "InstallSupport/GlassMaintenanceCache.h"
@@ -73,7 +74,12 @@ public:
                         };
                         if(FAILED(com))current->error=L"COM initialization failed";
                         else if(!GlassPackageAcquisition::CreateWorkspace(current->directory))current->error=L"Cannot create protected package workspace";
-                        else if(i<5) {
+                        else if(i==4) {
+                            GlassOpenGlassPackage::Package package;
+                            current->ok=GlassOpenGlassPackage::PrepareForCurrentSystem(current->directory,current->cancel,package,current->error);
+                            current->path=package.setup;
+                        }
+                        else if(i<4) {
                             current->ok=GlassPackageAcquisition::Prepare(static_cast<GlassPackageCatalog::Product>(i),catalog,current->directory,current->cancel,current->error);
                             if(current->ok)current->path=current->directory+L"\\"+GlassReleaseClient::Wide(GlassPackageCatalog::kFiles[i]);
                         } else {
