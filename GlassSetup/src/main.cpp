@@ -1417,13 +1417,13 @@ private:
             if (*f) DeleteObject(*f);
             *f = nullptr;
         }
-        auto create = [this](int pixels, int weight) {
-            return CreateFontW(-Scale(pixels),0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
+        auto create = [this](double pixels, int weight) {
+            return CreateFontW(-static_cast<int>(std::lround(pixels*dpi_/96.0)),0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
                               OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,
                               DEFAULT_PITCH,L"Segoe UI");
         };
         font_ = create(14,FW_NORMAL); small_ = create(12,FW_NORMAL);
-        footerFont_ = create(10,FW_NORMAL);
+        footerFont_ = create(8.5,FW_NORMAL);
         heading_ = create(28,FW_NORMAL); title_ = create(39,FW_LIGHT);
         for (HWND c : {back_,next_,cancel_,eula_,accept_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,certInstall_,certSkip_})
             if (c) SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
@@ -4181,7 +4181,7 @@ private:
         // This footer is native even when the page content is WebView2: one
         // caption for both renderers, outside the HTML/progress-strip bounds.
         if(!footerSetupVersion_.empty())
-            DrawLabel(dc,L"GlassSetup "+footerSetupVersion_,Box(32,kContentHeight+34,450,16),footerFont_,RGB(156,153,175),
+            DrawLabel(dc,Text(IDS_FOOTER_SETUP_VERSION)+L" "+footerSetupVersion_,Box(32,kContentHeight+34,450,16),footerFont_,RGB(156,153,175),
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
         if (WaitingForWebUi()) return;
         if (page_!=Page::Installing && page_!=Page::Cancelling && page_!=Page::Launching && page_!=Page::RuntimeInstalling && !(page_==Page::Components&&downloadContinuePending_) && !(page_==Page::Checking&&setupDownloadActive_)) return;

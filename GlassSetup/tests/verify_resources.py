@@ -835,7 +835,7 @@ assert "GlassMaintenanceSetupLaunchService.TryLaunch()" in system_page
 setup_main = (repo / "GlassSetup/src/main.cpp").read_text(encoding="utf-8")
 assert 'footerSetupVersion_=SelfFileVersion();' in setup_main
 footer_text = setup_main.split('void RenderFooterText(HDC dc) {', 1)[1].split('void Paint()', 1)[0]
-assert 'L"GlassSetup "+footerSetupVersion_' in footer_text
+assert 'Text(IDS_FOOTER_SETUP_VERSION)+L" "+footerSetupVersion_' in footer_text
 assert footer_text.index('footerSetupVersion_') < footer_text.index('if (page_!=Page::Installing')
 assert 'kContentHeight+34,450,16' in footer_text
 provider_src = (repo / "GlassSetup/src/InstallSupport/GlassOpenGlassPackage.cpp").read_text(encoding="utf-8")
@@ -846,7 +846,7 @@ assert '(std::numeric_limits<ULONG>::max)()' in provider_src
 # native wizard. Runtime bootstrap and confirmed failure keep native recovery.
 loading_init = setup_main.split('void InitializeLoading() {',1)[1].split('void InitializeControls()',1)[0]
 assert 'CreateFonts();' in loading_init
-assert 'footerFont_ = create(10,FW_NORMAL);' in setup_main
+assert 'footerFont_ = create(8.5,FW_NORMAL);' in setup_main
 assert 'kContentHeight+34,450,16),footerFont_' in setup_main
 pending_ui = setup_main.split('bool WaitingForWebUi() const noexcept {',1)[1].split('void ShowContentControls()',1)[0]
 assert '!NativeDemo() && !webReady_ && SUCCEEDED(webError_)' in pending_ui
