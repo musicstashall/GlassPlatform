@@ -2,6 +2,7 @@
 #include "GlassInstallLog.h"
 #include "GlassInstallUtil.h"
 #include "GlassMaintenanceCache.h"
+#include "GlassOpenGlassFiles.h"
 #include <SecureUxThemeInventory.h>
 #include <msi.h>
 #include <msiquery.h>
@@ -315,6 +316,48 @@ bool PatchArpUninstallString(const std::wstring& productCode, const std::wstring
     }catch(...){return false;}
 }
 
+// A separate, non-MSI registration. Never adopt/delete the upstream Inno key
+// or reuse the retired Glass MSI identity as an ARP registry key.
+static bool RefreshOpenGlassFileArp(const std::wstring& root) {
+    if(root.empty())return true; // No file-product root: do not publish or delete any key.
+    constexpr auto path=L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\GlassPlatform.OpenGlass";
+    constexpr auto owner=L"GlassPlatform.OpenGlass.Files.v1";
+    HKEY key=nullptr;
+    auto status=RegOpenKeyExW(HKEY_LOCAL_MACHINE,path,0,KEY_READ|KEY_WRITE|KEY_WOW64_64KEY,&key);
+    if(status!=ERROR_SUCCESS&&status!=ERROR_FILE_NOT_FOUND)return false;
+    if(key) {
+        wchar_t marker[80]{};DWORD type=0,bytes=sizeof(marker);
+        const bool ours=RegQueryValueExW(key,L"GlassOwner",nullptr,&type,reinterpret_cast<BYTE*>(marker),&bytes)==ERROR_SUCCESS&&
+            type==REG_SZ&&bytes==sizeof(L"GlassPlatform.OpenGlass.Files.v1")&&wcscmp(marker,owner)==0;
+        if(!ours){RegCloseKey(key);return false;}
+    }
+    const bool present=GlassOpenGlassFiles::HasReceipt(root);
+    if(!present) {
+        if(!key)return true;
+        RegCloseKey(key);
+        return RegDeleteKeyExW(HKEY_LOCAL_MACHINE,path,KEY_WOW64_64KEY,0)==ERROR_SUCCESS;
+    }
+    GlassOpenGlassFiles::Record record;
+    try{record=GlassOpenGlassFiles::Inspect(root);}catch(...){if(key)RegCloseKey(key);return false;}
+    const auto exe=GlassMaintenanceCache::CurrentFile(L"GlassUnins.exe"),setup=GlassMaintenanceCache::CurrentFile(L"GlassSetup.exe");
+    if(!record.present||exe.empty()||setup.empty()){if(key)RegCloseKey(key);return false;}
+    if(!key&&RegCreateKeyExW(HKEY_LOCAL_MACHINE,path,0,nullptr,0,KEY_READ|KEY_WRITE|KEY_WOW64_64KEY,nullptr,&key,nullptr)!=ERROR_SUCCESS)return false;
+    const auto put=[&](const wchar_t* name,const std::wstring& value){return RegSetValueExW(key,name,0,REG_SZ,
+        reinterpret_cast<const BYTE*>(value.c_str()),static_cast<DWORD>((value.size()+1)*sizeof(wchar_t)))==ERROR_SUCCESS;};
+    const std::wstring command=L"\""+exe+L"\" --product \""+kProductOpenGlass+L"\"";
+    bool ok=put(L"GlassOwner",owner);
+    ok=put(L"DisplayName",L"OpenGlass (GlassPlatform)")&&ok;
+    ok=put(L"DisplayVersion",record.version)&&ok;
+    ok=put(L"InstallLocation",root)&&ok;
+    ok=put(L"DisplayIcon",exe+L",0")&&ok;
+    ok=put(L"UninstallString",command+L" --interactive")&&ok;
+    ok=put(L"QuietUninstallString",command+L" --silent")&&ok;
+    ok=put(L"ModifyPath",L"\""+setup+L"\" --modify --product \""+kProductOpenGlass+L"\"")&&ok;
+    const DWORD one=1;
+    ok=(RegSetValueExW(key,L"NoRepair",0,REG_DWORD,reinterpret_cast<const BYTE*>(&one),sizeof(one))==ERROR_SUCCESS)&&ok;
+    RegCloseKey(key);return ok;
+}
+
 bool RefreshManagedArp(const std::wstring& x64Dir,const std::wstring& x86Dir,const std::wstring& openGlassDir) noexcept {
     try {
         bool ok=true;
@@ -333,6 +376,7 @@ bool RefreshManagedArp(const std::wstring& x64Dir,const std::wstring& x86Dir,con
                 GlassInstallLog::LineFormat(L"Remaining ARP refresh refused/failed: product=%s",code);ok=false;
             }
         }
+        ok=RefreshOpenGlassFileArp(openGlassDir)&&ok;
         GlassInstallLog::LineFormat(L"Remaining managed ARP refresh: %s",ok?L"ok":L"incomplete");
         return ok;
     }catch(...){return false;}

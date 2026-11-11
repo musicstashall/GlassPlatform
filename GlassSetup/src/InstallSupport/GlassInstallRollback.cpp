@@ -644,7 +644,10 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
         if (ok && !state.backupX86.empty() && !state.x86Dir.empty()) {
             if (!CopyTree(state.backupX86, state.x86Dir, {}, copied, total, onProgress, copyError)) ok = false;
         }
-        if (ok && !state.backupOpenGlass.empty() && !state.openGlassDir.empty()) {
+        // File-managed OpenGlass was restored by its checked journal above.
+        // Do not overwrite it (or unrelated user files) a second time from a
+        // whole-directory snapshot after the postimage safety check.
+        if (ok && !state.restoreOpenGlassFiles && !state.backupOpenGlass.empty() && !state.openGlassDir.empty()) {
             if (!CopyTree(state.backupOpenGlass, state.openGlassDir, {}, copied, total, onProgress, copyError)) ok = false;
         }
     }

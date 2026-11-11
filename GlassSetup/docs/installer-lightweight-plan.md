@@ -867,3 +867,14 @@ struct Selection {
 **Итог.** Работы разбиты на этапы R0–R10: контракты и манифест → сетевой клиент → резолвер источников → движок на файлах →
 инспектор → самопродление с `.bak` → удаление страницы новой версии → изъятие MSI из сборки → страница обслуживания по макету →
 обе разрядности GlassSettings (модель до финализации UI) → документация и VM-матрица. Сборка остаётся рабочей после каждого этапа.
+
+### OpenGlass file servicing — 2026-11-04
+
+Setup and GlassUnins now share receipt-based fixed-file transactions; the
+standalone removal planner no longer requires a Glass MSI for this product.
+ARP uses a separate owned `GlassPlatform.OpenGlass` key and cached controllers;
+independent upstream Inno registrations are outside this route. Repair/update
+continues to acquire and verify the upstream setup on Next, without running it.
+Portable file mocks, source servicing contracts and composition DOM tests pass.
+Outstanding acceptance: Windows install, repair, partial/full removal, cancellation
+and injected-failure rollback, including SCM/tasks, ACL/sharing and ARP behavior.

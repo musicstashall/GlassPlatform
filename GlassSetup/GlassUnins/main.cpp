@@ -388,7 +388,10 @@ private:
         installed_.settings64=Msi::IsProductInstalled(Msi::kProductSettingsX64);
         installed_.settings32=Msi::IsProductInstalled(Msi::kProductSettingsX86);
         installed_.settings=installed_.settings64 || installed_.settings32;
-        installed_.openGlass=Msi::IsProductInstalled(Msi::kProductOpenGlass);
+        GlassInstallUtil::InstallRoots fileRoots{};
+        const bool fileRootsKnown=GlassInstallUtil::ResolveInstallRoots(fileRoots);
+        installed_.openGlass=Msi::IsProductInstalled(Msi::kProductOpenGlass)||
+            (fileRootsKnown&&GlassOpenGlassFiles::HasReceipt(fileRoots.openGlass));
         installed_.secureUxTheme=Msi::IsProductInstalled(Msi::kProductSecureUxThemeX64) ||
             Msi::IsProductInstalled(Msi::kProductSecureUxThemeX86);
     }
@@ -563,6 +566,9 @@ private:
     }
     std::wstring InstalledMsiVersion(const wchar_t* id) const {
         using namespace GlassInstallMsi;
+        if(wcscmp(id,L"openglass")==0&&GlassOpenGlassFiles::HasReceipt(openGlassDir_)) {
+            try{return GlassOpenGlassFiles::Inspect(openGlassDir_).version;}catch(...){return {};}
+        }
         const struct {const wchar_t* id;const wchar_t* code;const wchar_t* legacy;} products[]={
             {L"x64",kProductPlatformX64,kLegacyPlatformX64},{L"x86",kProductPlatformX86,kLegacyPlatformX86},
             {L"settings64",kProductSettingsX64,nullptr},{L"settings32",kProductSettingsX86,nullptr},
@@ -855,7 +861,20 @@ private:
                 probes.push_back({Msi::kProductSecureUxThemeX64, GlassInstallUtil::SecureUxThemeInstalledFileRoot(true), {}});
             probes.push_back({Msi::kProductSecureUxThemeX86, GlassInstallUtil::SecureUxThemeInstalledFileRoot(os64 ? false : true), {}});
         }
-        if (chosen.openGlass) probes.push_back({Msi::kProductOpenGlass,openGlassDir_,{}});
+        const bool fileOpenGlass=chosen.openGlass&&GlassOpenGlassFiles::HasReceipt(openGlassDir_);
+        if(fileOpenGlass) {
+            try {
+                if(MsiQueryProductStateW(Msi::kProductOpenGlass)!=INSTALLSTATE_UNKNOWN||
+                   MsiQueryProductStateW(Msi::kLegacyOpenGlass)!=INSTALLSTATE_UNKNOWN)
+                    throw std::runtime_error("Conflicting OpenGlass MSI registration");
+                if(!GlassOpenGlassFiles::Inspect(openGlassDir_).present)
+                    throw std::runtime_error("OpenGlass receipt disappeared");
+            }catch(...) {
+                SetError(T(L"Не удалось подтвердить владение файлами OpenGlass. Удаление остановлено.",
+                    L"OpenGlass file ownership could not be verified. Removal stopped."));return 9;
+            }
+        }
+        if (chosen.openGlass&&!fileOpenGlass) probes.push_back({Msi::kProductOpenGlass,openGlassDir_,{}});
         SetStatus(T(L"Проверка путей установленных продуктов…",L"Checking installed product paths…"),100);
         if (!GlassInstallUtil::CreateSecureTempDirectory(L"GlassUninsCheck",workspace.directory)) {
             SetError(T(L"Не удалось подготовить проверку MSI. Пакеты не удалены.",L"Could not prepare the MSI check. No packages were removed."));
@@ -917,6 +936,9 @@ private:
         authorize(P::Product::Settings64,Msi::kProductSettingsX64,chosen.settings64);
         authorize(P::Product::Settings32,Msi::kProductSettingsX86,chosen.settings32);
         authorize(P::Product::OpenGlass,Msi::kProductOpenGlass,chosen.openGlass);
+        if(fileOpenGlass)facts[P::Index(P::Product::OpenGlass)]={true,P::Presence::Installed,
+            P::Ownership::Managed,P::Condition::Healthy,P::Version::Unknown,P::Source::Missing,
+            P::Transition::Idle,P::Activity::Unknown};
         auto& sut=facts[P::Index(P::Product::SecureUxTheme)];
         request.selected[P::Index(P::Product::SecureUxTheme)]=chosen.secureUxTheme;
         // Repeat silent Settings/SUT policy at the worker boundary. Neither a
@@ -1044,6 +1066,7 @@ private:
             return 10;
         }
         bool removed64=false,removed86=false,removedOg=false;
+        std::unique_ptr<GlassOpenGlassFiles::Transaction> fileRemoval;
         bool stopAttempted64=false,stopAttempted86=false;
         auto restoreArch=[&](GP::PlatformArch arch,const std::wstring& root,bool wasRunning,bool wasEnabled,bool removed,bool stopAttempted) -> bool {
             if (!wasRunning || removed) return true;
@@ -1068,6 +1091,10 @@ private:
         };
         auto restoreRemaining=[&]() -> bool {
             bool restored=true;
+            if(fileRemoval) {
+                if(!fileRemoval->Rollback())return false;
+                fileRemoval.reset();removedOg=false;
+            }
             if (!restoreArch(GP::PlatformArch::X64,x64Dir_,prior64,enabled64,removed64,stopAttempted64)) restored=false;
             if (!restoreArch(GP::PlatformArch::X86,x86Dir_,prior86,enabled86,removed86,stopAttempted86)) restored=false;
             if (priorOg && !removedOg) {
@@ -1227,8 +1254,21 @@ private:
             ++done;
         }
         if (product==P::Product::OpenGlass) {
-            if (!remove(Msi::kProductOpenGlass,L"OpenGlass")) { restoreRemaining(); return 13; }
-            removedOg=true;
+            if(fileOpenGlass) {
+                std::wstring fileError;
+                try {fileRemoval=std::make_unique<GlassOpenGlassFiles::Transaction>();}
+                catch(...) {SetError(T(L"Недостаточно памяти для удаления OpenGlass.",L"Not enough memory to remove OpenGlass."));restoreRemaining();return 13;}
+                if(MsiQueryProductStateW(Msi::kProductOpenGlass)!=INSTALLSTATE_UNKNOWN||
+                   MsiQueryProductStateW(Msi::kLegacyOpenGlass)!=INSTALLSTATE_UNKNOWN||
+                   !GlassOpenGlassFiles::HasReceipt(openGlassDir_)||
+                   !fileRemoval->Begin(openGlassDir_,fileError)||!fileRemoval->Remove(fileError)) {
+                    SetError(T(L"Не удалось удалить файлы OpenGlass: ",L"Could not remove OpenGlass files: ")+fileError);
+                    restoreRemaining();return 13;
+                }
+            }else {
+                if (!remove(Msi::kProductOpenGlass,L"OpenGlass")) { restoreRemaining(); return 13; }
+                removedOg=true;
+            }
             std::wstring backendError;bool serviceExists=false;DWORD serviceType=0;GlassInstallUtil::OpenGlassTaskState currentTasks;
             const bool serviceKnown=GlassInstallHost::QueryOpenGlassServiceStartType(serviceExists,serviceType);
             const DWORD serviceError=serviceKnown?ERROR_SUCCESS:GetLastError();
@@ -1244,11 +1284,13 @@ private:
                 L" tasks="+std::to_wstring(currentTasks.found)+L" prior="+std::to_wstring(ogTasks.found)+
                 L" queryError="+std::to_wstring(tasksError)+L" pathsSafe="+std::to_wstring(pathsSafe));
             if (!pathsSafe) {
-                SetError(T(L"OpenGlass MSI удалён, но служба или задача изменилась и не будет удалена.",
-                    L"OpenGlass MSI was removed, but the service or task changed and will not be deleted."));
+                SetError(T(L"Служба или задача OpenGlass изменилась и не будет удалена. Выполняется восстановление доступного состояния.",
+                    L"The OpenGlass service or task changed and will not be deleted. Attempting to restore the available state."));
                 LogLine(L"OpenGlass cleanup refused: "+backendError);(void)restoreRemaining();return 17;
             }
             if (!GlassInstallHost::RemoveOpenGlassServiceAndTasks()) { SetError(T(L"OpenGlass удалён, но служба или задача не удалена.",L"OpenGlass was removed, but its service or task could not be removed.")); (void)restoreRemaining(); return 17; }
+            if(fileRemoval){fileRemoval->Commit();fileRemoval.reset();}
+            removedOg=true;
             GlassInstallUtil::ClearOpenGlassInstallPath(); ++done;
         }
         if (product==P::Product::Platform32) {

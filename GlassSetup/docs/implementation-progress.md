@@ -2915,3 +2915,27 @@ failures; verify_resources и diff --check PASS. Это не Windows acceptance.
 - **Not complete:** standalone GlassUnins file-product removal, maintenance/ARP
   servicing and end-to-end Windows apply/remove/rollback verification remain.
   Do not treat the newly enabled Setup path as release-ready until those close.
+
+### 2026-11-04 — OpenGlass standalone removal and composition feedback
+
+- GlassUnins discovers the file receipt independently of MSI, validates ownership
+  and rejects simultaneous retired MSI registrations before stopping hosts. Its
+  removal plan authorizes the file product without a fictitious MSI source.
+  Removal uses the same exact-file journal; failure before backend completion
+  attempts file rollback before restarting remaining hosts. Successful removal
+  clears the install-path registration and refreshes maintenance entries.
+- Added a separate `GlassPlatform.OpenGlass` non-MSI ARP entry with a private
+  ownership marker, receipt payload version and verified cached controller paths.
+  Change uses cached GlassSetup; removal uses GlassUnins. Upstream Inno and
+  retired MSI registry keys are not adopted. Only the owned file-product entry
+  is deleted when the receipt is gone. Normal servicing refreshes this entry.
+- File rollback no longer replays the whole OpenGlass directory snapshot over
+  the exact-file journal's restoration.
+- Composition gestures reveal the last accepted card by scrolling only its
+  shelf. Accept-all landings cascade left-to-right at 70 ms intervals; selecting
+  removal creates an inert, ID/input-free bubble-pop overlay while the intent
+  immediately moves to Available/the plan. This feedback does not claim that
+  Windows removal has already run. Reduced motion suppresses decorative effects.
+- Added production DOM coverage for motion/scroll/cascade/host acknowledgement.
+  Windows filesystem/SCM/task/ARP integration and actual install/remove/rollback
+  remain runtime verification items; portable mocks do not establish them.

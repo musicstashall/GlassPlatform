@@ -750,6 +750,15 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #full-cleanup-option:not([hidden]){display:flex;align-items:center;gap:12px;margin-top:18px;padding:16px 18px;border:1px solid #ffffff24;border-radius:12px;background:#ffffff08;color:#eeeaf7;font-size:15px;cursor:pointer}
 #full-cleanup-option input{width:18px;height:18px;margin:0;flex:none;accent-color:#8cc6ac}
 #full-cleanup-option:focus-within{outline:2px solid #a9cbbd;outline-offset:3px}
+
+/* Short composition feedback; overlays never intercept interaction. */
+.c-pop-ghost{position:absolute!important;z-index:30;pointer-events:none!important;box-sizing:border-box;overflow:visible!important;transform-origin:center;animation:c-bubble-pop .48s ease-out both;background:linear-gradient(120deg,#d9baff26,#9feaff18)!important;border:1px solid #e8ddff99!important;box-shadow:inset 0 0 20px #cdf5ff44,0 0 16px #e4c2ff55!important}
+.c-pop-ghost::after{content:'';position:absolute;inset:-2px;border:2px solid #d4eaffaa;border-radius:inherit;animation:c-bubble-ring .48s ease-out both}
+.c-landing{animation:c-card-land .42s cubic-bezier(.2,.8,.25,1) both}
+@keyframes c-card-land{0%{opacity:0;transform:translateX(-42px) scale(.96)}75%{opacity:1;transform:translateX(3px) scale(1.01)}100%{opacity:1;transform:none}}
+@keyframes c-bubble-pop{0%{opacity:.85;transform:scale(1)}35%{opacity:.65;transform:scale(1.055)}100%{opacity:0;transform:scale(1.15);filter:blur(3px)}}
+@keyframes c-bubble-ring{0%{opacity:0;transform:scale(.98)}30%{opacity:.9}100%{opacity:0;transform:scale(1.2)}}
+@media(prefers-reduced-motion:reduce){.c-landing{animation:none}.c-pop-ghost{display:none}}
 </style></head>
 <body><main id="viewport"><div id="stage" data-mode="loading" role="region" aria-roledescription="carousel" aria-label="GlassPlatform">
 <div class="ambient slideshow-only"></div>
@@ -1099,7 +1108,7 @@ function componentDropText(drag,lane){
  const refusal=(hostState.components||[]).find(item=>item.id===drag.id)?.removeBlockedReason;
  if(value===null&&lane==='available'&&lane!==drag.source&&refusal)return refusal;
  if(value===null)return lane===drag.source?(ru?'Исходная панель — без изменений':'Original shelf — no changes'):(ru?'Удаление в этом режиме не поддерживается':'Removal is not supported in this mode');
- if(value==='remove')return ru?'Отпустите, чтобы запланировать удаление MSI; постоянные файлы сохранятся':'Release to plan MSI removal; permanent files are retained';
+ if(value==='remove')return ru?'Отпустите, чтобы запланировать удаление; пользовательские данные сохранятся':'Release to plan removal; user data is retained';
  if(hostState.appMode==='unins')return value?(ru?'Отпустите, чтобы запланировать удаление':'Release to plan removal'):(ru?'Отпустите, чтобы оставить продукт':'Release to keep the product');
  return value?(ru?'Отпустите, чтобы добавить действие в план':'Release to add the action to the plan'):(ru?'Отпустите, чтобы отменить выбранное действие':'Release to undo the selected action');
 }
@@ -1239,6 +1248,45 @@ function cancelSecureUxDependentRemoval(item){
   componentGestureNote(secureUxDependencyText(sut),true,true);
  }
 }
+// Gesture-only feedback: host inventory ticks never enqueue effects.
+const componentLandings=new Map();
+let componentRevealId='',componentRevealFrame=0,componentCascade=0;
+const componentReducedMotion=()=>window.matchMedia?.('(prefers-reduced-motion: reduce)').matches===true;
+function popComponentCard(input){
+ const card=input.closest('.c-card');if(!card||componentReducedMotion())return;
+ const panel=componentPanel(),rect=card.getBoundingClientRect(),base=panel.getBoundingClientRect();
+ const scale=base.width/panel.offsetWidth||1,ghost=card.cloneNode(true);
+ ghost.className='c-card c-pop-ghost';ghost.setAttribute('aria-hidden','true');ghost.inert=true;
+ for(const el of [ghost,...ghost.querySelectorAll('[id]')])el.removeAttribute('id');
+ ghost.removeAttribute('data-product');for(const el of ghost.querySelectorAll('input'))el.remove();
+ ghost.style.cssText=`left:${(rect.left-base.left)/scale}px;top:${(rect.top-base.top)/scale}px;width:${rect.width/scale}px;height:${rect.height/scale}px`;
+ panel.append(ghost);setTimeout(()=>ghost.remove(),520);
+}
+function revealComponentChoice(input,landing){
+ const id=input.dataset.component;
+ if(landing&&!componentReducedMotion()){componentLandings.set(id,performance.now()+componentCascade++*70);setTimeout(syncComponentLandingEffects,900);}
+ componentRevealId=id;
+ if(componentRevealFrame)return;
+ componentRevealFrame=(window.requestAnimationFrame||((fn)=>setTimeout(fn,16)))(()=>{
+  componentRevealFrame=0;componentCascade=0;syncComponentLandingEffects();
+  const input=document.getElementById('product-'+componentRevealId),card=input?.closest('.c-card');
+  const list=card?.closest('.c-lane-body');if(!list)return;
+  const r=card.getBoundingClientRect(),b=list.getBoundingClientRect();
+  // Scroll only this shelf, never the wizard or the adjacent catalogue.
+  const delta=r.bottom>b.bottom?r.bottom-b.bottom:r.top<b.top?r.top-b.top:0;
+  if(delta)list.scrollTop+=delta;
+ });
+}
+function syncComponentLandingEffects(){
+ const now=performance.now();
+ for(const [id,start] of componentLandings){
+  if(componentReducedMotion()||now-start>=420){const card=document.getElementById('product-'+id)?.closest('.c-card');card?.classList.remove('c-landing');if(card)card.style.animationDelay='';componentLandings.delete(id);continue;}
+  const card=document.getElementById('product-'+id)?.closest('.c-card');
+  if(card?.closest('#components-installed-grid')){
+   card.classList.add('c-landing');card.style.animationDelay=(start-now)+'ms';
+  }
+ }
+}
 function commitComponentRemoval(input){
  const item=(hostState.components||[]).find(item=>item.id===input.dataset.component);
  if(input.disabled||hostState.componentsLoading||!componentRemovalSupported(item)||input.checked&&input.dataset.intent==='remove')return false;
@@ -1246,6 +1294,7 @@ function commitComponentRemoval(input){
   componentGestureNote(secureUxDependencyText(item),true,true);return false;
  }
  cancelSecureUxDependentRemoval(item);
+ popComponentCard(input);
  input.dataset.intent='remove';input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));
  if(item.id==='secureUxTheme'&&secureUxRemovalIsManual(item))componentGestureNote(secureUxManualRiskText(),'danger',true);
  return true;
@@ -1254,7 +1303,9 @@ function commitComponentChoice(input,checked){
  const item=(hostState.components||[]).find(item=>item.id===input.dataset.component);
  if(input.disabled||hostState.componentsLoading||input.checked===checked&&input.dataset.intent!=='remove'||checked&&item?.applySupported===false)return false;
  if(!checked)cancelSecureUxDependentRemoval(item);
+ if(checked&&hostState.appMode==='unins'||!checked&&!item?.installed&&input.checked)popComponentCard(input);
  input.dataset.intent='apply';input.checked=checked;input.dispatchEvent(new Event('change',{bubbles:true}));
+ if(checked)revealComponentChoice(input,hostState.appMode!=='unins');
  const sut=(hostState.components||[]).find(x=>x.id==='secureUxTheme'),dependent=document.getElementById('product-secureUxTheme');
  if(dependent?.checked&&dependent.dataset.intent==='remove'&&!secureUxDependencyReady(sut)){
   dependent.checked=false;dependent.dataset.intent='apply';dependent.dispatchEvent(new Event('change',{bubbles:true}));
@@ -1375,7 +1426,7 @@ function syncComponentShelves(){
  if(hostState.appMode!=='unins')for(const card of [...installed.querySelectorAll('.c-card')]){
   const input=card.querySelector('input.comp-check'),item=(hostState.components||[]).find(x=>x.id===input.dataset.component);
   if(!item)continue;
-  const mirror=card.cloneNode(true);mirror.dataset.catalogAlias=item.id;mirror.querySelector('input').remove();
+  const mirror=card.cloneNode(true);mirror.classList.remove('c-landing');mirror.style.animationDelay='';mirror.dataset.catalogAlias=item.id;mirror.querySelector('input').remove();
   bindComponentName(mirror.querySelector('.comp-name'),item);
   const warn=mirror.querySelector('.comp-warning-button');if(warn)warn.onclick=()=>showProductWarning(item,warn);
   catalog.append(mirror);
@@ -1441,7 +1492,7 @@ function updateComponentsStatus(){
  document.getElementById('components-plan-note').textContent=hostState.appMode==='unins'?(ru?'Неотмеченные продукты и настройки сохраняются.':'Unchecked products and settings are retained.'):(ru?'Снятие отметки не удаляет установленный продукт.':'Unchecking an installed product does not remove it.');
  const notices=document.getElementById('components-plan-notices'),warnings=componentPlanWarnings();notices.replaceChildren();notices.hidden=!warnings.length;notices.classList.toggle('danger',!!items.find(x=>x.id==='secureUxTheme'&&secureUxRemovalIsManual(x))&&selected.some(x=>x.dataset.component==='secureUxTheme'&&x.dataset.intent==='remove'));
  if(warnings.length){const text=document.createElement('span');text.textContent=(ru?'●  Предупреждений: ':'●  Warnings: ')+warnings.length+(ru?' · Проверьте состав продуктов.':' · Review product composition.');const details=document.createElement('button');details.type='button';details.textContent=ru?'Подробнее':'Details';details.onclick=()=>showProductWarning({title:ru?'Зависимости затронуты':'Dependencies affected',planWarnings:componentPlanWarnings()},details);notices.append(text,details);}
- syncComponentShelves();syncDownloadVisuals();
+ syncComponentShelves();syncComponentLandingEffects();syncDownloadVisuals();
 }
 function planRemoveAllComponents(){
  if(hostState.componentsLoading)return;
