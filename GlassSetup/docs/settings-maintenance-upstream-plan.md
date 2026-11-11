@@ -30,7 +30,8 @@
 9. Собственный OpenGlass MSI отменить. Загружать upstream release, извлекать
    только нужный OpenGlass.dll по Windows/DWM architecture. Сначала определить
    servicing/receipt/source trust и переход с ранее установленного нашего MSI,
-   не оставлять двойное владение/ARP. Не запускать upstream EXE install.
+   Не сохранять старое MSI семейство или ветку миграции (контракт ниже).
+   Не запускать upstream EXE install.
 
 ## Результат первичной проверки
 
@@ -43,19 +44,25 @@
   service-first query/cache/event sequencing и runtime сценария.
 - `GlassReleaseUpdateService` ещё читает bundle `glass`, OpenGlass provider ищет
   только `-legacy`. Это не соответствует новому требованию.
-- В checkout отсутствует указанный пользователем документ
-  `GlassSetup/docs/openglass-upstream-setup.md`. Требуется получить его перед
-  реализацией upstream extraction/host ownership.
+- После первого анализа получены новые remote commits обычным fetch/merge,
+  включая `GlassSetup/docs/openglass-upstream-setup.md`. Это нормативный контракт:
+  собственный parser Inno 6.7, проверка publisher, CRC/SHA256, bounded LZMA и
+  CALL/JMP decode по 64KB; PE/version/signature проверка каждого файла.
+  Старое MSI семейство удаляется без migration/compatibility ветки.
+  В соответствии с инструкцией устанавливаются выбранная DLL + Host + GUI,
+  а не DLL без host. Не перечитывать EXE вместо предоставленного формата.
 - Upstream API Releases: v3.0.2.3749/v3.0.1.3747/v3.0.0.3733 публикуют
   OpenGlassSetup.Signed.exe и symbols; старые v3.0.0.3329-milcomp /
   v2.6.2.2891-legacy имеют раздельные теги. Нельзя предполагать ZIP payload.
 - Проверенный текущий upstream Scripts/OpenGlass.iss содержит оба DLL в EXE;
   selector Windows build >=28000 → MILComp, иначе Legacy. Современные unsuffixed
   релизы нельзя игнорировать при реализации проверки обновлений.
-- Отказ от OpenGlassHost.exe (при «только DLL») требует явной архитектуры
-  оркестрации: существующий service-first путь рассчитывает на этот executable.
-  Требование не разрешает молча продолжить поставлять его или запускать upstream
-  installer. Способ extraction и orchestration следует взять из недостающей инструкции.
+- Host/GUI сохраняются согласно полученной инструкции, служба управляется
+  существующим кодом Glass. Независимый upstream Inno install не перезаписывать.
+- Пришедший remote commit e3ab778 возвращает GlassSettings на общую bundle version;
+  не восстанавливать удалённый Version.props при per-product update реализации.
+- Кнопки update в ProductUpdateCoordinator уже вызывают cached Setup. Требуется
+  сохранить этот маршрут, а не создавать новый downloader внутри Settings.
 
 ## Порядок реализации
 
