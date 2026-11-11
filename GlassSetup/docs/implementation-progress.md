@@ -2980,3 +2980,21 @@ failures; verify_resources и diff --check PASS. Это не Windows acceptance.
 - Tests: all production DOM suites, actual C++ OpenGlass release/planning helper,
   source servicing contracts, resource smoke checks and whitespace checks pass.
   No Windows/MSVC runtime result is implied.
+
+### 2026-11-04 — Undo Remove, last pending install animation, OpenGlass version row
+
+- Available → Installed with an existing Remove intent now sends Keep (`:0`),
+  never Apply (`:1`). The matching action button says Undo removal. This does
+  not require an available repair source, adds no reinstall and leaves no green
+  activated card or plan action. Apply can still be selected separately later.
+- Cancelling the last pending installation keeps the CRT placeholder ahead of
+  the empty-list hint; the hint stays hidden until the 220 ms placeholder cleanup.
+  Slot height/order survives native acknowledgement and animation phase is
+  preserved when it must be reinserted. Button, plan undo and pointer-drop routes
+  are covered against the actual production HTML.
+- OpenGlass's offered-version line falls back from target payload metadata to
+  upstream payload metadata. If neither is available it explicitly says Version
+  pending (RU: «Версия уточняется»), rather than appearing to have no version row.
+  Installed DLL version and update-comparison authority remain separate.
+- All production DOM tests and resource smoke checks pass. No Windows runtime
+  or pixel-rendering verification is implied by these DOM tests.

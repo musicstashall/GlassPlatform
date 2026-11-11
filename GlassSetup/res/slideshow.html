@@ -752,6 +752,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #full-cleanup-option:focus-within{outline:2px solid #a9cbbd;outline-offset:3px}
 
 /* Short composition feedback; overlays never intercept interaction. */
+#components-installed-grid.has-removal-slot>.c-drop{display:none}
 .c-removal-slot{position:relative;flex:0 0 auto;min-height:1px;pointer-events:none;overflow:hidden}
 .c-crt-screen{position:absolute;inset:0;border-radius:8px;background:#d8eaff;box-shadow:inset 0 0 16px #9ccaff,0 0 8px #c3dbff;animation:c-crt-off .2s linear both;transform-origin:center}
 .c-landing{animation:c-card-land .42s cubic-bezier(.2,.8,.25,1) both}
@@ -1119,7 +1120,7 @@ function leaveComponentEdge(name){
 function componentDropValue(drag,lane){
  if(!['available','installed'].includes(lane)||lane===drag.source)return null;
  if(hostState.appMode==='unins')return lane==='available'?true:false;
- if(lane==='installed'){const item=(hostState.components||[]).find(item=>item.id===drag.id);return drag.input.dataset.intent==='remove'?(item?.applySupported===false?false:true):item?.applySupported===false?null:true;}
+ if(lane==='installed'){const item=(hostState.components||[]).find(item=>item.id===drag.id);return drag.input.dataset.intent==='remove'?false:item?.applySupported===false?null:true;}
  const item=(hostState.components||[]).find(item=>item.id===drag.id);
  // Mirror the preceding Apply: moving a selected update/reinstall back
  // cancels it. Only an unchanged installed product can stage explicit removal.
@@ -1239,6 +1240,7 @@ function bindComponentWorkspace(){
 // of one intent, not clones with the same action/status content (concept C).
 function componentSize(bytes){return new Intl.NumberFormat(locale==='ru'?'ru':'en',{minimumFractionDigits:1,maximumFractionDigits:1}).format(bytes/1048576)+(locale==='ru'?' МБ':' MB');}
 function componentUsesPayload(item){return ['openglass','settings64','settings32'].includes(item.id);}
+function componentTargetVersion(item){return componentUsesPayload(item)?(item.targetPayloadVersion||(item.id==='openglass'?item.remotePayloadVersion:'')||''):(item.targetVersion||'');}
 function componentMsiVersion(item){if(componentUsesPayload(item))return item.installedPayloadVersion||'—';return typeof item.installedPackageVersion==='string'?(item.installedPackageVersion||'—'):(item.installedVersion||'—');}
 function openGlassPayloadUpdate(item){
  const parse=value=>{if(typeof value!=='string'||!/^\d{1,10}\.\d{1,10}\.\d{1,10}(?:\.\d{1,10})?$/.test(value))return null;const parts=value.split('.').map(Number);if(parts.some(x=>x>4294967295))return null;while(parts.length<4)parts.push(0);return parts;};
@@ -1281,14 +1283,17 @@ let componentRevealId='',componentRevealFrame=0,componentCascade=0;
 const componentReducedMotion=()=>window.matchMedia?.('(prefers-reduced-motion: reduce)').matches===true;
 const componentRemovalSlots=new Map();
 function restoreComponentRemovalSlots(){
- const grid=document.getElementById('components-installed-grid');
+ const grid=document.getElementById('components-installed-grid');grid.classList.remove('has-removal-slot');
  const order=(hostState.components||[]).map(item=>String(item.id));
  for(const [id,slot] of componentRemovalSlots){
   if(hostState.appMode!=='unins'&&document.getElementById('product-'+id)?.closest('#components-installed-grid')){
    slot.node.remove();componentRemovalSlots.delete(id);continue; // Undo during shutdown.
   }
   const anchor=[...grid.querySelectorAll('.c-card')].find(card=>order.indexOf(card.dataset.product)>slot.rank);
-  grid.insertBefore(slot.node,anchor||null);
+  const before=anchor||grid.querySelector('.c-drop');
+  if(slot.node.parentElement!==grid||slot.node.nextElementSibling!==before)grid.insertBefore(slot.node,before);
+  slot.node.firstElementChild.style.animationDelay=-(performance.now()-slot.started)+'ms';
+  grid.classList.add('has-removal-slot');
  }
 }
 function popComponentCard(input){
@@ -1302,9 +1307,9 @@ function popComponentCard(input){
  // Reserve this exact position until the CRT animation finishes. The live card
  // can move to Available immediately without a neighbour replacing its pixels.
  card.before(slot);
- const record={node:slot,rank:(hostState.components||[]).findIndex(item=>item.id===id)};
+ const record={node:slot,started:performance.now(),rank:(hostState.components||[]).findIndex(item=>item.id===id)};
  componentRemovalSlots.set(id,record);
- setTimeout(()=>{slot.remove();if(componentRemovalSlots.get(id)===record)componentRemovalSlots.delete(id);},220);
+ setTimeout(()=>{slot.remove();if(componentRemovalSlots.get(id)===record)componentRemovalSlots.delete(id);restoreComponentRemovalSlots();},220);
 }
 function revealComponentChoice(input,landing){
  const id=input.dataset.component;
@@ -1362,9 +1367,8 @@ function commitComponentChoice(input,checked){
  return true;
 }
 function componentCardAction(item,input,shelf){
- const ru=locale==='ru',f=componentCardFacts(item,input),current=componentMsiVersion(item),target=(componentUsesPayload(item)?item.targetPayloadVersion:item.targetVersion)||'';
- if(f.remove&&hostState.appMode!=='unins'&&shelf==='available'&&item.applySupported!==false)return {act:'install',value:true,label:(ru?'Установить ':'Install ')+item.title};
- if(f.remove&&hostState.appMode!=='unins')return {act:'restore',value:false,label:ru?'Оставить установленным':'Keep installed'};
+ const ru=locale==='ru',f=componentCardFacts(item,input),current=componentMsiVersion(item),target=componentTargetVersion(item);
+ if(f.remove&&hostState.appMode!=='unins')return {act:'restore',value:false,label:ru?'Отменить удаление':'Undo removal'};
  if(shelf==='available')return {act:!item.installed?'install':f.newer?'update':'repair',value:true,
   label:!item.installed?(ru?'Установить ':'Install ')+item.title:f.newer?(target?(ru?'Обновить до ':'Update to ')+target:(ru?'Обновить':'Update')):(ru?'Переустановить ':'Reinstall ')+current};
  if(hostState.appMode==='unins')return {act:f.selected?'restore':'remove',value:!f.selected,
@@ -1375,10 +1379,10 @@ function componentCardAction(item,input,shelf){
 }
 function paintComponentCard(card,item,input,shelf){
  const ru=locale==='ru',f=componentCardFacts(item,input),available=shelf==='available';
- const current=componentMsiVersion(item),target=(componentUsesPayload(item)?item.targetPayloadVersion:item.targetVersion)||'';
+ const current=componentMsiVersion(item),target=componentTargetVersion(item);
  const meta=card.querySelector('.c-meta'),foot=card.querySelector('.c-foot'),action=card.querySelector('.comp-decision');
  const line=document.createElement('span');line.className='comp-version-line';
- const text=(value,bold=false)=>{const node=document.createElement(bold?'b':'span');node.className='comp-version-tag';node.textContent=value||'—';line.append(node);};
+ const text=(value,bold=false)=>{const node=document.createElement(bold?'b':'span');node.className='comp-version-tag';node.textContent=value||(item.id==='openglass'&&(available||!item.installed)?(ru?'Версия уточняется':'Version pending'):'—');line.append(node);};
  const size=Number(item.packageSize||0);const suffix=size>0?' · '+componentSize(size):'';
  for(const cls of ['active','idle','has-newer','has-offer','is-activated','is-broken','pending-install','pending-remove'])card.classList.remove(cls);
  let chipClass='',chipText='',icon='';

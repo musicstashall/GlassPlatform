@@ -887,3 +887,10 @@ Explicit trash still stages removal. Removal's CRT placeholder holds the old
 position until the effect finishes, including across native state echoes.
 OpenGlass planning does not require a successful initial metadata request;
 unknown versions are resolved and verified on Next, not treated as local media.
+
+#### Mirror Remove too — 2026-11-04
+
+Remove → return to Installed is Keep, not Apply/reinstall, regardless of repair
+source availability. The original installed product remains unchanged and the
+plan becomes empty for that row. Pending fresh-install cancellation uses the
+same CRT slot, including when this empties the composition panel.

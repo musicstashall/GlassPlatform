@@ -123,7 +123,7 @@ const nativeRemove=sutRows.map(r=>({...r,checked:r.id==='secureUxTheme',operatio
 receive({data:{type:'state',components:nativeRemove}});
 sut=d.querySelector('#product-secureUxTheme');sutCard=sut.closest('.c-card');
 assert.equal(sut.dataset.intent,'remove');assert.ok(d.querySelector('#components-grid').contains(sutCard));assert.ok(sutCard.classList.contains('active'));
-assert.equal(sutCard.querySelector('.comp-decision').title,'Оставить установленным');
+assert.equal(sutCard.querySelector('.comp-decision').title,'Отменить удаление');
 d.querySelector('#components-plan-items .plan-cancel').click();
 assert.equal(messages.at(-1),'component:secureUxTheme:0');assert.equal(sut.checked,false);
 assert.equal(sutCard.classList.contains('pending-remove'),false);

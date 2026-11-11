@@ -16,15 +16,16 @@ for(const row of rows){
  send(rows.map(x=>x.id===row.id?{...x,checked:true,operation:'remove'}:x));
  card=d.querySelector('#product-'+row.id).closest('.c-card');assert.equal(card.dataset.catalogState,'available');assert.ok(d.querySelector('#components-grid').contains(card));assert.ok(card.classList.contains('active'));
  assert.match(d.querySelector('#components-plan-items').textContent,/Удалить/);
- assert.equal(card.querySelector('.comp-decision').dataset.componentAction,'install');
- assert.equal(dom.window.eval('componentDropValue')({id:row.id,input:card.querySelector('input'),source:'available'},'installed'),true);
+ assert.equal(card.querySelector('.comp-decision').dataset.componentAction,'restore');
+ assert.equal(dom.window.eval('componentDropValue')({id:row.id,input:card.querySelector('input'),source:'available'},'installed'),false);
  // Undo Keep stays explicit in the plan; it restores the original installed state.
  d.querySelector('.plan-cancel').click();assert.equal(messages.at(-1),'component:'+row.id+':0');
  assert.ok(d.querySelector('#components-installed-grid').contains(card));
- // Selecting the available removed product replaces Remove with Apply.
+ // Returning the removed product cancels Remove without creating Apply.
+ send(rows); // native acknowledges the prior Keep before another removal
  send(rows.map(x=>x.id===row.id?{...x,checked:true,operation:'remove'}:x));
  d.querySelector('#product-'+row.id).closest('.c-card').querySelector('.comp-decision').click();
- assert.equal(messages.at(-1),'component:'+row.id+':1');
+ assert.equal(messages.at(-1),'component:'+row.id+':0');
  assert.ok(d.querySelector('#components-installed-grid #product-'+row.id));
 }
 // Residual entity: Installed + damaged, not a fresh dashed installation.

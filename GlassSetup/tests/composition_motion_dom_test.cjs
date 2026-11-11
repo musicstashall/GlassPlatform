@@ -80,7 +80,7 @@ for(const id of ['x64','x86','settings64','settings32','openglass'])for(const ne
  const move=(source,target)=>{
   d.elementFromPoint=()=>d.querySelector('[data-component-drop="'+target+'"]');
   const event=(type,x)=>{const e=new dom.window.MouseEvent(type,{bubbles:true,clientX:x,clientY:50,button:0});Object.defineProperties(e,{pointerType:{value:'mouse'},pointerId:{value:2}});return e;};
-  const surface=source==='available'?d.querySelector('[data-catalog-alias="'+id+'"]'):card(id);
+  const surface=source==='available'?d.querySelector('#components-grid .c-card[data-product="'+id+'"]'):card(id);
   surface.dispatchEvent(event('pointerdown',10));d.dispatchEvent(event('pointermove',40));d.dispatchEvent(event('pointerup',40));
  };
  move('available','installed');assert.equal(messages.at(-1),'component:'+id+':1');
@@ -89,14 +89,56 @@ for(const id of ['x64','x86','settings64','settings32','openglass'])for(const ne
  assert.equal(input(id).dataset.intent,'apply');assert.equal(input(id).checked,false);
  assert.equal(d.querySelectorAll('#components-plan-items li.remove').length,0);
  card(id).querySelector('.comp-remove').click();assert.equal(messages.at(-1),'component:'+id+':remove');
+ state([{...row,checked:true,operation:'remove'}]);
+ move('available','installed');assert.equal(messages.at(-1),'component:'+id+':0');
+ assert.equal(input(id).checked,false);assert.equal(input(id).dataset.intent,'apply');
+ assert.equal(d.querySelectorAll('#components-plan-items li:not(.components-plan-empty)').length,0);
+ assert.ok(!card(id).classList.contains('is-activated'));
+}
+// Remove -> return is Keep, independently of Apply source capability.
+for(const applySupported of [false,true]){
+ const row={id:'openglass',title:'OpenGlass',installed:true,checked:true,operation:'remove',applySupported,removeSupported:true,installedPayloadVersion:'3.0.2.3749'};
+ state([row]);const drag={id:'openglass',input:input('openglass'),source:'available'};
+ assert.equal(dom.window.componentDropValue(drag,'installed'),false);
+ card('openglass').querySelector('.comp-decision').click();
+ assert.equal(messages.at(-1),'component:openglass:0');assert.equal(input('openglass').checked,false);
+ assert.ok(card('openglass').closest('#components-installed-grid'));
+ assert.equal(d.querySelectorAll('#components-plan-items li:not(.components-plan-empty)').length,0);
+ assert.ok(!card('openglass').classList.contains('is-activated'));
 }
 // Missing discovery version is a deferred download, not a disabled/local offer.
 state([{id:'openglass',title:'OpenGlass',installed:false,checked:false,applySupported:true,downloadRequired:true,operation:'install',targetVersion:'',targetPayloadVersion:''}]);
 assert.ok(card('openglass').classList.contains('active'));
+assert.match(card('openglass').querySelector('.comp-version-line').textContent,/Версия уточняется|Version pending/);
 card('openglass').querySelector('.comp-decision').click();
 assert.equal(messages.at(-1),'component:openglass:1');
 assert.ok(card('openglass').classList.contains('download-planned'));
 assert.ok(!card('openglass').classList.contains('download-local'));
+// Cancel the last fresh product: retain the CRT slot before the empty hint,
+// and cover button, plan undo and actual pointer-drop paths.
+for(const route of ['button','plan','drag']){
+ while(shutdownTimers.length)shutdownTimers.shift()();
+ state([{id:'fresh',title:'Fresh',installed:false,checked:true,operation:'install',applySupported:true,targetVersion:'1.0.0'}]);
+ Object.defineProperty(card('fresh'),'offsetHeight',{value:72});
+ if(route==='button')card('fresh').querySelector('.comp-decision').click();
+ if(route==='plan')d.querySelector('.plan-cancel').click();
+ if(route==='drag'){
+  d.elementFromPoint=()=>d.querySelector('[data-component-drop="available"]');
+  const e=type=>{const event=new dom.window.MouseEvent(type,{bubbles:true,clientX:type==='pointerdown'?10:40,clientY:50,button:0});Object.defineProperties(event,{pointerType:{value:'mouse'},pointerId:{value:3}});return event;};
+  card('fresh').dispatchEvent(e('pointerdown'));d.dispatchEvent(e('pointermove'));d.dispatchEvent(e('pointerup'));
+ }
+ assert.equal(messages.at(-1),'component:fresh:0');
+ const grid=d.getElementById('components-installed-grid'),slot=grid.querySelector('.c-removal-slot');
+ assert.ok(slot);assert.equal(slot.style.height,'72px');assert.equal(grid.firstElementChild,slot);
+ assert.equal(dom.window.getComputedStyle(grid.querySelector('.c-drop')).display,'none');
+ state([{id:'fresh',title:'Fresh',installed:false,checked:false,operation:'install',applySupported:true,targetVersion:'1.0.0'}]);
+ assert.equal(grid.firstElementChild,slot);shutdownTimers.shift()();
+ assert.equal(grid.querySelector('.c-removal-slot'),null);assert.ok(!grid.classList.contains('has-removal-slot'));
+}
+for(const locale of ['ru','en']){
+ receive({data:{type:'state',locale,components:[{id:'openglass',title:'OpenGlass',installed:false,checked:false,applySupported:true,remotePayloadVersion:'3.0.2.3749',targetPayloadVersion:''}]}});
+ assert.match(card('openglass').querySelector('.comp-version-line').textContent,/3\.0\.2\.3749/);
+}
 assert.deepEqual(errors,[]);
 dom.window.close();
 console.log('PASS: composition motion, cascade, shelf-only reveal, host acknowledgement, pop ownership/IPC and reduced motion');
