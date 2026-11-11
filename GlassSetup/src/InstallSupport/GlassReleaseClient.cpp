@@ -22,6 +22,9 @@ struct Internet {
     Internet(const Internet&)=delete; Internet& operator=(const Internet&)=delete;
 };
 std::wstring Wide(const std::string& text){
+    // Optional catalogue metadata may be absent. Windows returns zero for an
+    // empty input too; that is not a UTF-8 decoding error.
+    if(text.empty())return {};
     const int n=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),static_cast<int>(text.size()),nullptr,0);
     if(!n)return L"Invalid UTF-8 response";
     std::wstring result(n,L'\0');MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),static_cast<int>(text.size()),&result[0],n);return result;
