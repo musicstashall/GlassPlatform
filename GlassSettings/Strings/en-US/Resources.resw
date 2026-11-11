@@ -1100,7 +1100,7 @@
   <data name="System_MaintenanceTitle" xml:space="preserve"><value>System maintenance</value></data>
   <data name="System_MaintenanceDescription" xml:space="preserve"><value>Install, update or remove Glass products</value></data>
   <data name="System_MaintenanceModify" xml:space="preserve"><value>Modify</value></data>
-  <data name="System_BackupTitle" xml:space="preserve"><value>Registry settings</value></data>
+  <data name="System_BackupTitle" xml:space="preserve"><value>Settings backups</value></data>
   <data name="System_BackupDescription" xml:space="preserve"><value>A Glass and OpenGlass/DWM registry archive for initialized profiles and the machine is saved in Documents. User files and themes are not included. Close other settings editors; all profile hives must be loaded. The archive is not encrypted. Automatic restore is not available yet.</value></data>
   <data name="System_BackupSave" xml:space="preserve"><value>Save settings copy</value></data>
   <data name="System_BackupBusy" xml:space="preserve"><value>Creating and verifying the archive…</value></data>

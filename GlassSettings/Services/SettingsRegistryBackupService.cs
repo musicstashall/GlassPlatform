@@ -82,7 +82,11 @@ public static class SettingsRegistryBackupService
         using var parents = PinDirectory(documents);
         var path = Path.Combine(documents, $"GlassSettingsBackup-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.zip");
         using var handle = CreateFileW(path, 0xC0010000, 0, IntPtr.Zero, 1, 0x00200000, IntPtr.Zero);
-        if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (handle.IsInvalid)
+        {
+            var code = Marshal.GetLastWin32Error();
+            throw new Win32Exception(code, $"Create backup {path}: {new Win32Exception(code).Message}");
+        }
         using var file = new FileStream(handle, FileAccess.ReadWrite);
         try
         {
@@ -141,6 +145,10 @@ public static class SettingsRegistryBackupService
             try { _ = File.GetAttributes(hivePath); }
             catch (FileNotFoundException) { continue; }
             catch (DirectoryNotFoundException) { continue; }
+            catch (UnauthorizedAccessException error)
+            {
+                throw new IOException($"Read profile inventory {sid}, {hivePath}: {error.Message}", error);
+            }
             profiles.Add(new Profile(sid, path));
         }
         if (profiles.Count == 0) throw new IOException("No initialized user profiles found.");
@@ -187,9 +195,9 @@ public static class SettingsRegistryBackupService
         {
             foreach (var part in path.Split('\\', StringSplitOptions.RemoveEmptyEntries))
             {
-                var status = RegOpenKeyExW((result ?? parent).Handle, part, 8, 0x20019 | (int)parent.View, out var handle);
+                var status = RegOpenKeyExW((result ?? parent).Handle, part, 8, 0x0009 | (int)parent.View, out var handle);
                 if (status == 2) { handle?.Dispose(); result?.Dispose(); return null; }
-                if (status != 0) { handle?.Dispose(); throw new Win32Exception(status); }
+                if (status != 0) { handle?.Dispose(); throw new Win32Exception(status, $"Read registry key {parent.Name}\\{path} ({parent.View}), component {part}: {new Win32Exception(status).Message}"); }
                 var next = RegistryKey.FromHandle(handle, parent.View);
                 result?.Dispose(); result = next;
                 uint size = 0;
@@ -220,7 +228,11 @@ public static class SettingsRegistryBackupService
             {
                 current = part.Length == 0 ? current : Path.Combine(current, part);
                 var h = CreateFileW(current, 0x80, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
-                if (h.IsInvalid) { h.Dispose(); throw new Win32Exception(Marshal.GetLastWin32Error()); }
+                if (h.IsInvalid)
+                {
+                    var code = Marshal.GetLastWin32Error(); h.Dispose();
+                    throw new Win32Exception(code, $"Read Documents ancestor {current}: {new Win32Exception(code).Message}");
+                }
                 pins.Handles.Add(h);
                 if (!GetFileInformationByHandle(h, out var info) || (info.Attributes & 0x410) != 0x10)
                     throw new IOException("Documents path contains a link or inaccessible directory.");

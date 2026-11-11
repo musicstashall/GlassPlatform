@@ -23,6 +23,7 @@ public sealed partial class SystemPage : Page
     private SystemDualGlassPlatformControls? _glassDualControls;
     private bool _shellSuppress;
     private bool _updateNoticeSubscribed;
+    private bool _backupNoticeActive;
 
     public SystemPage()
     {
@@ -72,9 +73,14 @@ public sealed partial class SystemPage : Page
         }
 
         PageShell.PageNoticeStack.ActionNotice.ActionRequested += async (_, _) =>
-            await ProductUpdateCoordinator.OpenVisibleUpdateDownloadAsync();
+        {
+            if (!_backupNoticeActive) await ProductUpdateCoordinator.OpenVisibleUpdateDownloadAsync();
+        };
         PageShell.PageNoticeStack.ActionNotice.DismissRequested += (_, _) =>
+        {
+            if (_backupNoticeActive) { _backupNoticeActive = false; return; }
             ProductUpdateCoordinator.DismissVisibleUpdateNotice();
+        };
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -163,27 +169,52 @@ public sealed partial class SystemPage : Page
     private async void RegistryBackup_OnClick(object sender, RoutedEventArgs e)
     {
         RegistryBackupButton.IsEnabled = false;
-        RegistryBackupStatus.Visibility = Visibility.Visible;
-        RegistryBackupStatus.Text = GlassSettingsResources.Get("System_BackupBusy");
+        RegistryBackupStatus.Visibility = Visibility.Collapsed;
         try
         {
             var path = await SettingsRegistryBackupService.SaveAsync();
-            RegistryBackupStatus.Text = GlassSettingsResources.Get("System_BackupSaved") + "\n" + path;
+            await ShowBackupNoticeAsync(SettingsNoticeSeverity.Success,
+                GlassSettingsResources.Get("System_BackupSaved") + "\n" + path);
         }
         catch (Exception error)
         {
-            RegistryBackupStatus.Text = GlassSettingsResources.Get("System_BackupFailed") + "\n" + error.Message;
+            await ShowBackupNoticeAsync(SettingsNoticeSeverity.Error,
+                GlassSettingsResources.Get("System_BackupFailed") + "\n" + error.Message);
         }
         finally { RegistryBackupButton.IsEnabled = true; }
     }
 
+    private async Task ShowBackupNoticeAsync(SettingsNoticeSeverity severity, string message)
+    {
+        _backupNoticeActive = severity == SettingsNoticeSeverity.Error;
+        var stack = PageShell.PageNoticeStack;
+        var strip = stack.ActionNotice;
+        strip.AllowDismiss = true;
+        strip.ShowSaveButton = false;
+        strip.ShowActionButton = false;
+        if (strip.IsVisuallyOpen)
+            NoticeViewportMirrorService.ClosePinnedSourcePreservingScroll(strip);
+        strip.Visibility = NoticePresentationPolicy.IsInformationalMirrorOnly(severity, false, false)
+            ? Visibility.Collapsed : Visibility.Visible;
+        await SettingsNoticeCoordinator.PresentAsync(
+            SettingsNoticeCoordinator.CreateShellHost(stack, PageShell.PageScrollViewer),
+            new SettingsNoticeCoordinator.NoticePresentRequest
+            {
+                Strip = strip, Severity = severity, Message = message,
+                ShowSave = false, ShowAction = false, Animate = true
+            });
+    }
+
     private void ApplyLocalizedStrings()
     {
+        MaintenanceExpander.IconGlyph = "\uE713";
         MaintenanceExpander.Title = GlassSettingsResources.Get("System_MaintenanceTitle");
         MaintenanceExpander.Description = GlassSettingsResources.Get("System_MaintenanceDescription");
         MaintenanceModifyButton.Content = GlassSettingsResources.Get("System_MaintenanceModify");
-        RegistryBackupRow.Title = GlassSettingsResources.Get("System_BackupTitle");
-        RegistryBackupRow.Description = GlassSettingsResources.Get("System_BackupDescription");
+        BackupExpander.Title = GlassSettingsResources.Get("System_BackupTitle");
+        BackupExpander.IconGlyph = "\uE74E";
+        BackupHeading.Text = GlassSettingsResources.Get("System_BackupTitle");
+        BackupInstruction.Text = GlassSettingsResources.Get("System_BackupDescription");
         RegistryBackupButton.Content = GlassSettingsResources.Get("System_BackupSave");
         ShellExtensionRow.Title = GlassSettingsResources.Get("System_RowShellExtension");
         ShellExtensionRow.Description = GlassSettingsResources.Get("System_RowShellExtensionDesc");
@@ -323,6 +354,7 @@ public sealed partial class SystemPage : Page
 
     private async void RefreshUpdateNotice()
     {
+        if (_backupNoticeActive) return;
         if (ProductUpdateCoordinator.ShouldShowOpenGlassNotice
             && ProductUpdateCoordinator.GetPendingOpenGlass() is { } pendingOg)
         {

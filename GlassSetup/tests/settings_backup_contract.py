@@ -29,3 +29,12 @@ for lang in ['ru-RU','en-US']:
     for name in ['System_BackupTitle','System_BackupDescription','System_BackupSave','System_BackupBusy','System_BackupSaved','System_BackupFailed']:
         assert names.count(name)==1
 print('PASS: backup source contract, exact 49-value DWM allowlist, bounded raw registry schema, guarded archive publication and RU/EN wiring; NOT a C#/Windows execution test')
+
+assert '0x0009 | (int)parent.View' in s
+for context in ['Read registry key {parent.Name}', 'Create backup {path}', 'Read Documents ancestor {current}', 'Read profile inventory {sid}']:
+    assert context in s, context
+assert 'RegistryBackupRow' not in ui
+assert 'x:Name="BackupExpander"' in ui
+assert 'SettingsNoticeCoordinator.PresentAsync' in host
+assert 'SettingsNoticeSeverity.Error' in host and 'SettingsNoticeSeverity.Success' in host
+assert '_backupNoticeActive' in host

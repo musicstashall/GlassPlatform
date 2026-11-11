@@ -56,6 +56,48 @@
 - Нет atomic snapshot против других registry writers; закрыть другие редакторы.
   Автоматический restore не реализован и прямо отмечен в UI/manifest.
 
+### Уточнение backup UI/restore после пользовательского теста
+
+Новый запрос имеет приоритет над первоначальной registry-only кнопкой:
+- Maintenance переименован «Обслуживание систем» + иконка, отдельный spoiler
+  «Резервные копии параметров». Nested option row убран: он помещал длинное
+  описание + Auto action в body и приводил к обрезанию; контент ограничен Grid.
+- Результаты backup идут через SettingsNoticeCoordinator (Success MirrorOnly,
+  Error pinned), а не TextBlock снизу. Dismiss backup error не dismiss update.
+- Native registry reads снижены с KEY_READ до QUERY_VALUE|ENUMERATE_SUB_KEYS;
+  READ_CONTROL/NOTIFY не нужны экспорту. Отказы теперь имеют operation/key/view/
+  SID/path context. По прежнему общему «access denied» невозможно установить,
+  отказал ли HKU, Documents или доступ к NTUSER.DAT; live-причина ещё не доказана.
+
+**Следующий обязательный этап N1b (ещё не реализован):**
+- Pivot «Создать/Восстановить» в отдельном backup spoiler, стандартный pivot style.
+- Расширяемый descriptor registry разделов: stable ID, локализованное название,
+  capture/validate/preflight/apply/live-reload handlers. Начальные IDs:
+  glass-platform, dwm, saved-themes. AppData/Local/GlassPlatform не архивировать.
+- Новое расширение `.glassbackup` для ZIP container v2, без auto-association в
+  registry при запуске Settings. OS file association — отдельно explicit install
+  registration; filter расширения не является проверкой доверия.
+- Создание: heading + призыв выбрать разделы, dynamic checkboxes, кнопка снизу
+  справа с переносом/ограничением по доступной ширине. Themes только сохранённые
+  Glass themes по существующему ownership contract, не все .theme.
+- Восстановление: heading + CTA, кнопка «Выбрать», существующий hosted WinUI
+  ExecutableFilePickerPanel как на Processes; только .glassbackup, Documents
+  как initialDirectory. Никакого shell Open/запуска архивов.
+- До выбора/валидации все checkboxes disabled. Manifest доступности разрешает
+  только подтверждённые разделы; неизвестные sections не активировать.
+- Reader: open/pin file once, bounded ZIP/JSON, reject duplicates, traversal,
+  unknown format, invalid checksums/types/paths/SIDs/install metadata. Нельзя
+  применять произвольные Hive/Key из архива v1 без повторного allowlist validation.
+- Restore: full preflight → snapshot rollback → serial operation pipeline →
+  selected registry/theme mutations → existing live reloads/session/watch sync
+  → единый Success/partial Error. Не объявлять live reload до его результата.
+  Не запускать arbitrary Native paths из архива. v1 import policy отдельная,
+  текущий v1 архив не следует объявлять безопасно импортируемым.
+- SUT/OG missing server version: backend уже передаёт releaseVersion/tag и
+  remotePayloadVersion соответственно. Требуется воспроизвести фактический
+  metadata discovery failure и добавить regression, не подставлять MSI/local
+  version под видом server. Исправление пока не заявляется завершённым.
+
 ### 0.3 Ещё НЕ реализовано — единый backlog
 
 | ID | Оставшаяся реализация | Условие завершения |

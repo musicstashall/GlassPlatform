@@ -1102,10 +1102,10 @@
   <data name="Dwm_DefaultReflectionTile" xml:space="preserve"><value>Системное отражение (по умолчанию)</value></data>
   <data name="Dwm_DefaultMaterialTile" xml:space="preserve"><value>Системный материал (по умолчанию)</value></data>
   <data name="Dialog_SignatureMissingPayloadBody" xml:space="preserve"><value>Полный комплект модулей SecureUxTheme не найден. Установите оригинальный MSI через GlassSetup. Наличие оставшегося ThemeUiProxy.dll само по себе не позволяет включить SecureUxTheme.</value></data>
-  <data name="System_MaintenanceTitle" xml:space="preserve"><value>Обслуживание системы</value></data>
+  <data name="System_MaintenanceTitle" xml:space="preserve"><value>Обслуживание систем</value></data>
   <data name="System_MaintenanceDescription" xml:space="preserve"><value>Установка, обновление и удаление продуктов Glass</value></data>
   <data name="System_MaintenanceModify" xml:space="preserve"><value>Изменить</value></data>
-  <data name="System_BackupTitle" xml:space="preserve"><value>Параметры реестра</value></data>
+  <data name="System_BackupTitle" xml:space="preserve"><value>Резервные копии параметров</value></data>
   <data name="System_BackupDescription" xml:space="preserve"><value>Архив настроек Glass и OpenGlass/DWM всех доступных профилей и компьютера сохраняется в «Документы». Пользовательские файлы и темы в архив не входят. Закройте другие редакторы настроек; все профили должны быть загружены. Архив не зашифрован. Автоматическое восстановление пока недоступно.</value></data>
   <data name="System_BackupSave" xml:space="preserve"><value>Сохранить копию параметров</value></data>
   <data name="System_BackupBusy" xml:space="preserve"><value>Создание и проверка архива…</value></data>
