@@ -567,40 +567,7 @@ public sealed partial class HomePage : Page
         manageRow.Title = GlassSettingsResources.Get("Home_RowSystemManagement");
         manageRow.NavigateRequested += (_, _) => RaiseNav(HomeNavTarget.Section("system"));
 
-        var maintenanceRow = _systemCard.AddRow();
-        maintenanceRow.Title = GlassSettingsResources.Get("Home_RowInstallationMaintenance");
-        maintenanceRow.ShowDivider = false;
-        maintenanceRow.NavigateRequested += (_, _) => LaunchInstallationMaintenanceSetup();
         _systemCard.UpdateLastDivider();
-    }
-
-    private static void LaunchInstallationMaintenanceSetup()
-    {
-        var setup = GlassMaintenanceSetupPaths.SetupExecutablePath();
-        if (string.IsNullOrEmpty(setup))
-        {
-            _ = HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
-            {
-                Title = GlassSettingsResources.Get("Home_RowInstallationMaintenance"),
-                Body = HostedConfirmationDialogService.CreateBody(
-                    GlassSettingsResources.Get("Home_InstallationMaintenanceMissing")),
-                Footer = HostedConfirmationDialogService.CreateFooter(
-                    GlassSettingsResources.Get("Dialog_Close"))
-            });
-            return;
-        }
-
-        if (!GlassMaintenanceSetupLaunchService.TryLaunch())
-        {
-            _ = HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
-            {
-                Title = GlassSettingsResources.Get("Home_RowInstallationMaintenance"),
-                Body = HostedConfirmationDialogService.CreateBody(
-                    GlassSettingsResources.Get("Home_InstallationMaintenanceLaunchFailed")),
-                Footer = HostedConfirmationDialogService.CreateFooter(
-                    GlassSettingsResources.Get("Dialog_Close"))
-            });
-        }
     }
 
     private void ApplyPlatformHomeVisibility()

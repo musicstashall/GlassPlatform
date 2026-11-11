@@ -131,8 +131,40 @@ public sealed partial class SystemPage : Page
     private void OnPendingUpdatesChanged(object? sender, EventArgs e) =>
         DispatcherQueue.TryEnqueue(RefreshAfterShellNavigation);
 
+    private void MaintenanceModify_OnClick(object sender, RoutedEventArgs e)
+    {
+        var setup = GlassMaintenanceSetupPaths.SetupExecutablePath();
+        if (string.IsNullOrEmpty(setup))
+        {
+            _ = HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("System_MaintenanceTitle"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Get("Home_InstallationMaintenanceMissing")),
+                Footer = HostedConfirmationDialogService.CreateFooter(
+                    GlassSettingsResources.Get("Dialog_Close"))
+            });
+            return;
+        }
+
+        if (!GlassMaintenanceSetupLaunchService.TryLaunch())
+        {
+            _ = HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("System_MaintenanceTitle"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Get("Home_InstallationMaintenanceLaunchFailed")),
+                Footer = HostedConfirmationDialogService.CreateFooter(
+                    GlassSettingsResources.Get("Dialog_Close"))
+            });
+        }
+    }
+
     private void ApplyLocalizedStrings()
     {
+        MaintenanceExpander.Title = GlassSettingsResources.Get("System_MaintenanceTitle");
+        MaintenanceExpander.Description = GlassSettingsResources.Get("System_MaintenanceDescription");
+        MaintenanceModifyButton.Content = GlassSettingsResources.Get("System_MaintenanceModify");
         ShellExtensionRow.Title = GlassSettingsResources.Get("System_RowShellExtension");
         ShellExtensionRow.Description = GlassSettingsResources.Get("System_RowShellExtensionDesc");
         ShellMenuNoticeBlock.Title = GlassSettingsResources.Get("System_ShellMenuNoticeTitle");

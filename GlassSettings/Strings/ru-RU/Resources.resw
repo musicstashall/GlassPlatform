@@ -1102,4 +1102,7 @@
   <data name="Dwm_DefaultReflectionTile" xml:space="preserve"><value>Системное отражение (по умолчанию)</value></data>
   <data name="Dwm_DefaultMaterialTile" xml:space="preserve"><value>Системный материал (по умолчанию)</value></data>
   <data name="Dialog_SignatureMissingPayloadBody" xml:space="preserve"><value>Полный комплект модулей SecureUxTheme не найден. Установите оригинальный MSI через GlassSetup. Наличие оставшегося ThemeUiProxy.dll само по себе не позволяет включить SecureUxTheme.</value></data>
+  <data name="System_MaintenanceTitle" xml:space="preserve"><value>Обслуживание системы</value></data>
+  <data name="System_MaintenanceDescription" xml:space="preserve"><value>Установка, обновление и удаление продуктов Glass</value></data>
+  <data name="System_MaintenanceModify" xml:space="preserve"><value>Изменить</value></data>
 </root>

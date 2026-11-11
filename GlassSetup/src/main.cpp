@@ -2775,8 +2775,8 @@ private:
     }
     std::wstring FullCleanupText() const {
         return PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-            L"Выбрано полное удаление продуктов. По умолчанию пользовательские данные сохраняются.\n\nМожно отдельно удалить папки AppData\\Local\\GlassPlatform в доступных профилях, принадлежащие Glass параметры HKCU/HKLM и OpenGlass DWM, а также сохранённые темы Glass.\n\nОчистка выполняется только после успешного удаления всех продуктов. Доступ к профилям проверяется до изменений. Папки профилей, чужие данные и сертификаты не удаляются.":
-            L"All installed products are selected for removal. User data is kept by default.\n\nYou may also remove AppData\\Local\\GlassPlatform in accessible profiles, Glass-owned HKCU/HKLM and OpenGlass DWM settings, and saved Glass themes.\n\nCleanup runs only after successful removal of all products. Profile access is checked before changes. User profiles, unrelated data and certificates are not deleted.";
+            L"Продукты будут удалены. Настройки и пользовательские данные можно сохранить для повторной установки.\n\nПри выборе очистки удаляются:\n• параметры Glass и OpenGlass/DWM в реестре пользователей и компьютера;\n• папки AppData\\Local\\GlassPlatform и сохранённые темы Glass.\n\nПрофили пользователей, чужие данные и сертификаты сохраняются.":
+            L"The products will be removed. Keep settings and user data if you plan to install them again.\n\nIf you choose cleanup, it removes:\n• Glass and OpenGlass/DWM settings from user and machine registry;\n• AppData\\Local\\GlassPlatform folders and saved Glass themes.\n\nUser profiles, unrelated data and certificates are kept.";
     }
     void StartInstallation() {
         // Debug retains its original simulation contract; Release uses external MSI.

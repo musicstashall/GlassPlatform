@@ -818,3 +818,14 @@ if node:
 
 print("PASS: RU/EN resources, offline assets, manifests, product policy, theme detours, UI/IPC, cancellation and rollback source invariants.")
 print("NOTE: This is a source smoke test, not an MSVC/WiX build or an actual Windows install/uninstall/rollback test.")
+
+# Maintenance moved from Home to the standard System expander; preserve the
+# existing ticketed cache launch instead of opening release URLs or a new EXE.
+home_page = (repo / "GlassSettings/Pages/HomePage.xaml.cs").read_text(encoding="utf-8")
+system_page = (repo / "GlassSettings/Pages/SystemPage.xaml.cs").read_text(encoding="utf-8")
+system_xaml = (repo / "GlassSettings/Pages/SystemPage.xaml").read_text(encoding="utf-8-sig")
+assert "LaunchInstallationMaintenanceSetup" not in home_page
+assert 'maintenanceRow = ' not in home_page
+assert 'x:Name="MaintenanceExpander"' in system_xaml
+assert 'Click="MaintenanceModify_OnClick"' in system_xaml
+assert "GlassMaintenanceSetupLaunchService.TryLaunch()" in system_page

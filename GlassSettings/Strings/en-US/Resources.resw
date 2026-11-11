@@ -1097,4 +1097,7 @@
   <data name="Dwm_DefaultReflectionTile" xml:space="preserve"><value>System reflection (default)</value></data>
   <data name="Dwm_DefaultMaterialTile" xml:space="preserve"><value>System material (default)</value></data>
   <data name="Dialog_SignatureMissingPayloadBody" xml:space="preserve"><value>The complete SecureUxTheme modules are not available. Install the original MSI using GlassSetup. A retained ThemeUiProxy.dll alone cannot enable SecureUxTheme.</value></data>
+  <data name="System_MaintenanceTitle" xml:space="preserve"><value>System maintenance</value></data>
+  <data name="System_MaintenanceDescription" xml:space="preserve"><value>Install, update or remove Glass products</value></data>
+  <data name="System_MaintenanceModify" xml:space="preserve"><value>Modify</value></data>
 </root>

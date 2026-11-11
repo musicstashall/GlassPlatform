@@ -24,6 +24,17 @@
 
             <ctrl:SettingsInfoBlock x:Name="ShellMenuNoticeBlock" IconGlyph="&#xE7BA;" Visibility="Collapsed" />
 
+            <ctrl:SettingsSystemGateExpander
+                x:Name="MaintenanceExpander"
+                ShowGateSwitch="False"
+                DimHeaderActionsWithGate="False"
+                HorizontalAlignment="Stretch">
+                <ctrl:SettingsSystemGateExpander.HeaderActions>
+                    <Button x:Name="MaintenanceModifyButton"
+                            Click="MaintenanceModify_OnClick" />
+                </ctrl:SettingsSystemGateExpander.HeaderActions>
+            </ctrl:SettingsSystemGateExpander>
+
             <ctrl:SettingsOptionRow x:Name="UpdateIntervalRow">
 
                 <ComboBox

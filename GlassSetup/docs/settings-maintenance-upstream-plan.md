@@ -77,3 +77,19 @@ E. Windows build/VM acceptance, включая backup перед destructive cle
 Текущий малый UI fix: GlassSettings Release|x86 и Release|x64, зависимости уже
 собранные GlassShared/Native соответствующей архитектуры. Другие этапы пока
 не реализованы; порядок сборки потребуется уточнить после изменения пакетов.
+
+## Выполненная часть UI
+
+- На Home удалена строка обслуживания установки; на System добавлен штатный
+  SettingsSystemGateExpander «Обслуживание системы» с HeaderActions «Изменить».
+  Перенесён существующий launch с ticket/cache проверкой и hosted failure UI.
+- Страница full-cleanup: ограниченная ширина текста, единый левый край,
+  компактные смысловые абзацы/список, отдельная строка opt-in и secondary callout.
+  Native RU/EN описание также сокращено; destructive policy не изменена.
+- Backup-кнопка/сервис ещё НЕ реализованы. Per-product notices, provider upstream,
+  Resources package и регрессия тумблера также остаются открытыми.
+- Resource/source и cleanup DOM checks PASS; WinUI/MSVC/Windows проверок нет.
+
+Сборка этой UI части: Release|x86 и Release|x64 GlassSettings после соответствующих
+GlassShared/Native dependencies; для cleanup page Release|x86 GlassUnins → GlassSetup
+(shared HTML в обоих). Полная продуктовая MSI сборка пока не требуется.
