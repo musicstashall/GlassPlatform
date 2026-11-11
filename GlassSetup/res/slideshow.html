@@ -752,12 +752,12 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #full-cleanup-option:focus-within{outline:2px solid #a9cbbd;outline-offset:3px}
 
 /* Short composition feedback; overlays never intercept interaction. */
-.c-pop-ghost{position:absolute!important;z-index:30;pointer-events:none!important;box-sizing:border-box;overflow:visible!important;transform-origin:center;animation:c-bubble-pop .48s ease-out both;background:linear-gradient(120deg,#d9baff26,#9feaff18)!important;border:1px solid #e8ddff99!important;box-shadow:inset 0 0 20px #cdf5ff44,0 0 16px #e4c2ff55!important}
-.c-pop-ghost::after{content:'';position:absolute;inset:-2px;border:2px solid #d4eaffaa;border-radius:inherit;animation:c-bubble-ring .48s ease-out both}
+.c-pop-ghost{position:absolute!important;z-index:30;pointer-events:none!important;box-sizing:border-box;overflow:visible!important;transform-origin:center;animation:c-bubble-pop .18s ease-out both;background:linear-gradient(120deg,#d9baff26,#9feaff18)!important;border:1px solid #e8ddff99!important;box-shadow:inset 0 0 20px #cdf5ff44,0 0 16px #e4c2ff55!important}
+.c-pop-ghost::after{content:'';position:absolute;inset:-2px;border:2px solid #d4eaffaa;border-radius:inherit;animation:c-bubble-ring .18s ease-out both}
 .c-landing{animation:c-card-land .42s cubic-bezier(.2,.8,.25,1) both}
 @keyframes c-card-land{0%{opacity:0;transform:translateX(-42px) scale(.96)}75%{opacity:1;transform:translateX(3px) scale(1.01)}100%{opacity:1;transform:none}}
-@keyframes c-bubble-pop{0%{opacity:.85;transform:scale(1)}35%{opacity:.65;transform:scale(1.055)}100%{opacity:0;transform:scale(1.15);filter:blur(3px)}}
-@keyframes c-bubble-ring{0%{opacity:0;transform:scale(.98)}30%{opacity:.9}100%{opacity:0;transform:scale(1.2)}}
+@keyframes c-bubble-pop{0%{opacity:.5;transform:scale(.94)}100%{opacity:0;transform:scale(.12);filter:blur(2px)}}
+@keyframes c-bubble-ring{0%{opacity:.7;transform:scale(.94)}100%{opacity:0;transform:scale(.12)}}
 @media(prefers-reduced-motion:reduce){.c-landing{animation:none}.c-pop-ghost{display:none}}
 </style></head>
 <body><main id="viewport"><div id="stage" data-mode="loading" role="region" aria-roledescription="carousel" aria-label="GlassPlatform">
@@ -1006,7 +1006,7 @@ function componentRecommendations(){
   const f=componentCardFacts(item,input);return !input.disabled&&item.applySupported!==false&&!f.remove&&(f.newer||f.broken||item.recommended===true);
  });
 }
-function acceptComponentRecommendations(){for(const input of componentRecommendations())if(!input.checked)commitComponentChoice(input,true);}
+function acceptComponentRecommendations(){batchComponentActions(()=>{for(const input of componentRecommendations())if(!input.checked)commitComponentChoice(input,true);});}
 
 const componentShelfViews={available:'all',installed:'all'};
 // Concept C panel lifecycle. Session-local layout state never changes product intents.
@@ -1018,12 +1018,37 @@ const componentSlot=name=>componentPanel().querySelector(name==='available'?'.c-
 const componentEdge=name=>componentPanel().querySelector('[data-component-edge="'+name+'"]');
 const componentOther=name=>name==='available'?'plan':'available';
 function componentWorkspaceActive(){return mode==='components'||mode==='uninstall-select';}
-let componentNoticeUntil=0,componentNoticeWaitsForActivity=false;
+let componentNoticeUntil=0,componentNoticeWaitsForActivity=false,componentNoticeSerial=0;
+let componentActionBatch=null;
 function componentGestureNote(text,warn=false,untilActivity=false){
+ componentNoticeSerial++;
  const note=document.getElementById('components-gesture-status');note.textContent=text;note.setAttribute('role',warn==='danger'?'alert':'status');note.setAttribute('aria-live',warn==='danger'?'assertive':'polite');
  note.className='component-toast show '+(warn==='danger'?'danger':warn?'warn':'neutral');clearTimeout(componentNoteTimer);
  componentNoticeWaitsForActivity=untilActivity;componentNoticeUntil=Date.now()+1000;
  if(!untilActivity)componentNoteTimer=setTimeout(()=>{note.className='component-toast';},3600);
+}
+function componentActionNote(text,serial){
+ // Dependency warnings/errors raised by this gesture outrank its neutral receipt.
+ if(componentNoticeSerial!==serial)return;
+ if(componentActionBatch){componentActionBatch.push(text);return;}
+ componentGestureNote(text,false,true);
+}
+function batchComponentActions(action){
+ const serial=componentNoticeSerial;componentActionBatch=[];
+ try{action();}finally{
+  const notes=componentActionBatch;componentActionBatch=null;
+  if(notes.length&&serial===componentNoticeSerial){
+   const names=[...new Set(notes.map(text=>text.split(' — ')[0]))].join(', ');
+   componentGestureNote((locale==='ru'?'План изменён: ':'Plan changed: ')+names,false,true);
+  }
+ }
+}
+function componentChoiceNote(item,checked,wasRemove){
+ const ru=locale==='ru',name=item?.title||item?.id||'';
+ if(hostState.appMode==='unins')return name+(checked?(ru?' — удаление добавлено в план':' — removal planned'):(ru?' — продукт будет сохранён':' — product will be kept'));
+ if(!checked)return name+(wasRemove?(ru?' — удаление отменено, продукт сохранён':' — removal cancelled, product kept'):(ru?' — действие отменено':' — action cancelled'));
+ const input=item&&document.getElementById('product-'+item.id),newer=input&&componentCardFacts(item,input).newer;
+ return name+(item?.installed?(newer?(ru?' — обновление добавлено в план':' — update planned'):(ru?' — переустановка добавлена в план':' — reinstall planned')):(ru?' — установка добавлена в план':' — installation planned'));
 }
 function dismissComponentNoticeOnActivity(event){
  // Wheel/trackpad scrolling counts even with detail=0; keyboard clicks do not.
@@ -1093,7 +1118,7 @@ function leaveComponentEdge(name){
 // A drop uses the same single checkbox/IPC as the buttons. In Setup, dropping
 // back to Available cancels an install intent or uses an explicit backend removal capability.
 function componentDropValue(drag,lane){
- if(!lane||lane===drag.source)return null;
+ if(!['available','installed'].includes(lane)||lane===drag.source)return null;
  if(hostState.appMode==='unins')return lane==='available'?true:false;
  if(lane==='installed'){const item=(hostState.components||[]).find(item=>item.id===drag.id);return drag.input.dataset.intent==='remove'?(item?.applySupported===false?false:true):item?.applySupported===false?null:true;}
  const item=(hostState.components||[]).find(item=>item.id===drag.id);
@@ -1105,9 +1130,12 @@ function componentDropValue(drag,lane){
 }
 function componentDropText(drag,lane){
  const ru=locale==='ru',value=componentDropValue(drag,lane);
- const refusal=(hostState.components||[]).find(item=>item.id===drag.id)?.removeBlockedReason;
- if(value===null&&lane==='available'&&lane!==drag.source&&refusal)return refusal;
- if(value===null)return lane===drag.source?(ru?'Исходная панель — без изменений':'Original shelf — no changes'):(ru?'Удаление в этом режиме не поддерживается':'Removal is not supported in this mode');
+ const item=(hostState.components||[]).find(item=>item.id===drag.id);
+ if(value===null){
+  if(lane===drag.source)return ru?'Исходная панель — без изменений':'Original shelf — no changes';
+  if(lane==='installed')return ru?'Установка или обновление сейчас недоступны. Дождитесь проверки источника.':'Install or update is currently unavailable. Wait for source verification.';
+  return item?.removeBlockedReason||(ru?'Удаление этого продукта сейчас недоступно':'Removal of this product is currently unavailable');
+ }
  if(value==='remove')return ru?'Отпустите, чтобы запланировать удаление; пользовательские данные сохранятся':'Release to plan removal; user data is retained';
  if(hostState.appMode==='unins')return value?(ru?'Отпустите, чтобы запланировать удаление':'Release to plan removal'):(ru?'Отпустите, чтобы оставить продукт':'Release to keep the product');
  return value?(ru?'Отпустите, чтобы добавить действие в план':'Release to add the action to the plan'):(ru?'Отпустите, чтобы отменить выбранное действие':'Release to undo the selected action');
@@ -1260,7 +1288,8 @@ function popComponentCard(input){
  for(const el of [ghost,...ghost.querySelectorAll('[id]')])el.removeAttribute('id');
  ghost.removeAttribute('data-product');for(const el of ghost.querySelectorAll('input'))el.remove();
  ghost.style.cssText=`left:${(rect.left-base.left)/scale}px;top:${(rect.top-base.top)/scale}px;width:${rect.width/scale}px;height:${rect.height/scale}px`;
- panel.append(ghost);setTimeout(()=>ghost.remove(),520);
+ // Keep only a faint outline: the actual card leaves the shelf synchronously.
+ ghost.replaceChildren();panel.append(ghost);setTimeout(()=>ghost.remove(),200);
 }
 function revealComponentChoice(input,landing){
  const id=input.dataset.component;
@@ -1293,15 +1322,18 @@ function commitComponentRemoval(input){
  if(item.id==='secureUxTheme'&&!secureUxDependencyReady(item)){
   componentGestureNote(secureUxDependencyText(item),true,true);return false;
  }
+ const serial=componentNoticeSerial;
  cancelSecureUxDependentRemoval(item);
  popComponentCard(input);
  input.dataset.intent='remove';input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));
  if(item.id==='secureUxTheme'&&secureUxRemovalIsManual(item))componentGestureNote(secureUxManualRiskText(),'danger',true);
+ componentActionNote(item.title+(locale==='ru'?' — удаление добавлено в план':' — removal planned'),serial);
  return true;
 }
 function commitComponentChoice(input,checked){
  const item=(hostState.components||[]).find(item=>item.id===input.dataset.component);
  if(input.disabled||hostState.componentsLoading||input.checked===checked&&input.dataset.intent!=='remove'||checked&&item?.applySupported===false)return false;
+ const serial=componentNoticeSerial,wasRemove=input.dataset.intent==='remove';
  if(!checked)cancelSecureUxDependentRemoval(item);
  if(checked&&hostState.appMode==='unins'||!checked&&!item?.installed&&input.checked)popComponentCard(input);
  input.dataset.intent='apply';input.checked=checked;input.dispatchEvent(new Event('change',{bubbles:true}));
@@ -1311,6 +1343,7 @@ function commitComponentChoice(input,checked){
   dependent.checked=false;dependent.dataset.intent='apply';dependent.dispatchEvent(new Event('change',{bubbles:true}));
   componentGestureNote(secureUxDependencyText(sut),true,true);
  }
+ componentActionNote(componentChoiceNote(item,checked,wasRemove),serial);
  return true;
 }
 function componentCardAction(item,input,shelf){
@@ -1496,12 +1529,14 @@ function updateComponentsStatus(){
 }
 function planRemoveAllComponents(){
  if(hostState.componentsLoading)return;
- if(hostState.appMode==='unins'){if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('components:select-all');return;}
+ if(hostState.appMode==='unins'){if(window.chrome&&window.chrome.webview){window.chrome.webview.postMessage('components:select-all');componentGestureNote(locale==='ru'?'Запрошено добавление всех доступных продуктов в план удаления':'Requested removal planning for all eligible products',false,true);}return;}
  // Reuse the per-row intent protocol: no MSI operation, cleanup or bypass of
  // native capability/conflict checks. Clear Apply intents, then stage Remove.
  const inputs=[...document.querySelectorAll('#components-panel .c-card input.comp-check')];
+ batchComponentActions(()=>{
  for(const input of inputs)if(input.checked&&input.dataset.intent!=='remove')commitComponentChoice(input,false);
  for(const input of inputs)commitComponentRemoval(input);
+ });
 }
 function renderComponentsPanel(){
  const grid=document.getElementById('components-grid'),installedGrid=document.getElementById('components-installed-grid'),extra=document.getElementById('components-extra'),button=document.getElementById('components-select-all');

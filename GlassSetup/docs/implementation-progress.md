@@ -2939,3 +2939,22 @@ failures; verify_resources и diff --check PASS. Это не Windows acceptance.
 - Added production DOM coverage for motion/scroll/cascade/host acknowledgement.
   Windows filesystem/SCM/task/ARP integration and actual install/remove/rollback
   remain runtime verification items; portable mocks do not establish them.
+
+### 2026-11-04 — Composition feedback corrections
+
+- Removal feedback is now a 180 ms inward collapse of an empty decorative
+  outline, not an expanding copy of the card. The actual composition updates
+  synchronously; the outline is removed after 200 ms.
+- Fixed misleading drag refusal copy: a blocked Available → Installed transfer
+  now describes install/update source availability, never unsupported removal.
+  A real pointer-event DOM regression verifies fresh OpenGlass with Apply
+  capability sends exactly the installation intent in RU/EN. The reported
+  refusal of an eligible product was not reproduced in this harness; native
+  metadata and hit-testing still need confirmation on the affected Windows run.
+- Added neutral upper notices for install/update/reinstall, removal, cancellation,
+  Keep and grouped plan changes. Existing dependency warnings and manual-removal
+  danger notices outrank neutral receipts within the same gesture. Notices use
+  the established activity dismissal and one-second minimum; host refreshes do
+  not create action receipts. No action notice claims installation has executed.
+- All production DOM suites and resource/source smoke checks pass; no MSVC or
+  Windows runtime verification was performed here.
