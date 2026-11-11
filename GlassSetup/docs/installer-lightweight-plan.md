@@ -36,25 +36,33 @@
 | Update launch | Обе кнопки update в ProductUpdateCoordinator уже запускают cached Setup; этот маршрут сохранять. |
 | Online install | Успешно подтверждён пользователем. Не переносить этот результат на новые backup/upstream/fault сценарии. |
 
-### 0.2 Новый код, добавленный на текущем этапе
+### 0.2 Актуальный backup и upstream этап
 
-**N1 — экспорт базы параметров из Settings: реализован, требует Windows сборки/приёмки.**
+Локальные коммиты пользователя 9f25136/65abdb2 получены обычным fast-forward.
+Сохранение/восстановление .glassbackup и открытие двойным кликом подтверждены
+пользователем. Backup теперь current-user HKCU, с разделами/темами и restore UI;
+прежняя all-profile реализация и её ограничения ниже — исторический журнал.
+Не откатывать локальный backup, file association или live reloads.
 
-- Кнопка «Сохранить копию параметров» в System maintenance body. Файл ZIP с уникальным
-  именем в корне Documents, без перезаписи; UI показывает полный путь/ошибку.
-- Формат v1: manifest.json + registry.json. Сохраняются raw type/bytes (Base64 JSON)
-  Glass config и 49 DWM values в обоих view для HKLM и загруженных user hives
-  всех инициализированных обычных профилей. Отсутствующие DWM values отмечены явно.
-- InstallPath metadata исключены; сертификаты, MSI/controller, tasks/service не
-  экспортируются. Это **registry-only backup**, не копия удаляемых файлов/тем.
-- Профили перечисляются по ProfileList и повторно сверяются; offline/inaccessible
-  hive — явный отказ, не пустой backup. Ничего не mount/unload; два удерживаемых
-  NTUSER.DAT и удалённые аккаунты не выгружать ради успешного экспорта.
-- Защита записи: CREATE_NEW, no sharing, pinned local Documents ancestors,
-  reparse refusal, exact-handle cleanup ошибки. Проверка обеих ZIP entries по
-  длине/SHA256 до сообщения успеха. Архив не зашифрован.
-- Нет atomic snapshot против других registry writers; закрыть другие редакторы.
-  Автоматический restore не реализован и прямо отмечен в UI/manifest.
+Каталог Glass теперь содержит только Platform/Settings. OpenGlass MSI отсутствует
+намеренно. Найденный конфликт: main.cpp связывает applySupported OG с MSI target,
+поэтому карточка после возврата блокируется. Для устранения нужен N6 end-to-end,
+не ложное включение applySupported без способного выполнить установку engine.
+
+На текущем этапе добавлены:
+- DefaultSelectedFor всегда false: inspection/recommendation/fresh install не
+  выбирают ни один продукт автоматически; временные startup intents также пустые.
+- GlassInnoExtract: bounded Inno 6.7 headers/offset table/CRC/LZMA/89-byte records,
+  CALL/JMP decode строго 64KB; ни записи файлов, ни исполнения.
+- GlassOpenGlassPackage::Prepare: GitHub latest asset download, size/SHA256,
+  setup Valid Authenticode + upstream subject, RT_RCDATA/11111, decoded hashes,
+  x64 PE32+/version/original filename/description и одинаковый signer каждого
+  payload. Package возвращает selected DLL (build>=28000 MILComp), Host и GUI.
+- Это защищённый staging API, **ещё не подключённый** к Next/engine. Он не создаёт
+  service/ARP/receipt и не заменяет прежний MSI execution path. Нельзя считать
+  заблокированную OG карточку окончательно исправленной этим этапом.
+- Реальные portable parser/LZMA тесты на synthetic fixtures PASS. Скачивание и
+  Authenticode Windows provider на настоящем upstream EXE не выполнялись.
 
 ### Уточнение backup UI/restore после пользовательского теста
 
@@ -105,10 +113,10 @@
 | N2 | Per-product Glass update provider вместо bundle `glass`; compare только установленные продукты/архитектуры, независимый catalog version | Несколько updates дают компактную общую строку на Glass expander, один — конкретную; dismissed identity не теряет изменения набора |
 | N3 | OpenGlass installed DWM architecture + актуальные unsuffixed releases, старые -legacy/-milcomp только своего канала | Не переводит Legacy в MILComp по более новому тегу; учитывает repair при смене Windows build |
 | N4 | Исправить регрессию switch-off OpenGlass orchestration | Service и legacy task удаляются так же, как dropdown Delete; выключение не подменяется disable autorun |
-| N5 | Inno 6.7 upstream extractor/provider | Bounded parser/LZMA/filter, publisher+PE/version/hash; только принятые контрактом Host/GUI/выбранная DLL; upstream EXE никогда не исполняется |
+| N5 | Parser и staging provider написаны; Windows/real-package validation остаётся | Bounded parser/LZMA/filter, publisher+PE/version/hash; только принятые контрактом Host/GUI/выбранная DLL; upstream EXE никогда не исполняется |
 | N6 | Убрать своё OpenGlass MSI семейство, source/catalog/engine/inventory/ARP gates заменить на защищённые file receipts | Без compatibility/migration ветки; независимый Inno install не перезаписывается; rollback сохраняется |
 | N7 | Resources graphics package как отдельный продукт с зависимостью от OpenGlass | Catalog/build/UI/planner/snapshot/remove/rollback: не спрятанный addon в OpenGlass payload |
-| N8 | Полная файловая резервная копия и импорт — **не реализованы**, не обещаны текущей кнопкой параметров | При расширении scope отдельный file-safety/restore contract; registry-only ZIP не является страховкой удаления файлов/тем |
+| N8 | Backup/restore/association приняты после локальных доработок пользователя | Не добавлять AppData/Local/GlassPlatform в архив; сохранять действующий current-user контракт |
 | R10 | Довести устаревшие mock harness до текущих API и документы/релизный checklist до нового состава продуктов | Общий run с явным отчётом, без ослабления production trust ради тестов |
 
 Порядок: N1 → N2/N3 → N4 → N5/N6 → N7 → R10. Не считать весь переход

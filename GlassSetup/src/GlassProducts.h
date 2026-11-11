@@ -134,9 +134,10 @@ constexpr InstallAction ActionForCondition(bool selected, ProductCondition condi
 }
 
 // Installed health is information, not consent to mutate. Repair/update must
-// be chosen explicitly; retain the existing recommendation for a fresh install.
+// be chosen explicitly, including a fresh install.
 constexpr bool DefaultSelectedFor(ProductCondition condition, bool maintenance = false) noexcept {
-    return !maintenance && condition == ProductCondition::NotInstalled;
+    (void)condition;(void)maintenance;
+    return false;
 }
 
 constexpr Selection NormalizeInstall(Selection choice, bool os64) noexcept {

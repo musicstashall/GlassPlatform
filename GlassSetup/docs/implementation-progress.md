@@ -1,3 +1,32 @@
+## Upstream OpenGlass: parser/staging и явный выбор продуктов
+
+Получены local commits 9f25136/65abdb2. Пользователь подтвердил сохранение/restore/
+double-click .glassbackup; эти изменения сохранены. Glass catalog не содержит
+OpenGlass MSI намеренно. UI до сих пор требует этот MSI для OG applySupported,
+а engine продолжает исполнять MSI. Именно поэтому возврат карточки блокируется.
+
+Добавлены portable bounded Inno 6.7 reader и pinned public-domain LZMA SDK decoder;
+Windows staging provider скачивает только upstream asset, проверяет size/hash,
+Valid signature/upstream subject, offset resource, CRC, decompressed per-file
+SHA256, PE64/version/OriginalFilename/description и один cert signer setup/payload.
+Выбирает DLL по Windows build, возвращает Host/GUI. Upstream EXE не запускается.
+Provider пока НЕ вызывается Next/engine; карточка ещё не разблокирована. Не
+подменять отсутствие end-to-end servicing UI-флагом: установка иначе упадёт MSI.
+Следующий шаг — N6: file receipt/inventory/acquisition/engine snapshot/rollback/
+removal/controller coverage вместо нашего MSI, без compatibility ветки.
+
+Реальное исправление выбора: DefaultSelectedFor=false для всех состояний и
+maintenance/fresh, startup intents также пустые. Никакие отсутствующие продукты
+не попадают в план автоматически. Explicit bulk choices сохранены.
+
+PASS: actual parser/LZMA synthetic tests (CRC/bounds/truncation/cancel/swapped
+offsets/64K filter), product plan tests, resource smoke, current backup contract.
+Это не MSVC build, не реальное upstream extraction и не Windows signature proof.
+
+Сборка parser/provider: GlassSetup Release|x86 (LzmaDec.c включён без PCH,
+bcrypt.lib добавлен). GlassShared/GlassUnins/Settings не изменялись этим этапом;
+полная пересборка продуктов не нужна. End-to-end OG пока не предлагать тестировать.
+
 ## Продолжение: архив базы параметров и единый основной план
 
 Добавлен SettingsRegistryBackupService и кнопка в System maintenance. Registry-only

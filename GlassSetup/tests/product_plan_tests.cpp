@@ -1,3 +1,4 @@
+#include "../src/GlassProducts.h"
 #include "../src/GlassProductPlan.h"
 #include <cassert>
 #include <iostream>
@@ -16,6 +17,12 @@ Facts KnownFacts() {
 }
 
 int main() {
+    // Neither discovery nor recommendations constitute install consent.
+    static_assert(!GlassProducts::DefaultSelectedFor(GlassProducts::ProductCondition::NotInstalled, false));
+    static_assert(!GlassProducts::DefaultSelectedFor(GlassProducts::ProductCondition::NotInstalled, true));
+    static_assert(!GlassProducts::DefaultSelectedFor(GlassProducts::ProductCondition::UpdateAvailable, false));
+    static_assert(!GlassProducts::DefaultSelectedFor(GlassProducts::ProductCondition::Damaged, false));
+
     constexpr auto fresh = P::FreshInstall(true);
     static_assert(fresh.selected[0] && fresh.selected[1] && fresh.selected[2] && fresh.selected[3]);
     static_assert(!fresh.selected[4]);

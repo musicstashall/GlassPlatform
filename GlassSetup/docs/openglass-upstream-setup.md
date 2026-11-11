@@ -1,6 +1,10 @@
 # Извлечение продуктов из OpenGlassSetup.Signed.exe
 
-Статус: контракт для реализации. Код установщика ещё не переведён на эту схему.
+Статус: portable parser и защищённый staging provider реализованы в
+`GlassInnoExtract.h` / `GlassOpenGlassPackage.cpp`. Next/engine/inventory ещё
+не переведены с MSI на file-based servicing: целиком схема пока не работает.
+Parser проверен synthetic fixtures, реальный EXE/Windows Authenticode здесь
+не проверены. Этот контракт остаётся источником формата, EXE заново не открывался.
 Облачная модель не открывает `OpenGlassSetup.Signed.exe` заново: формат ниже уже снят
 с релиза и является единственным источником.
 

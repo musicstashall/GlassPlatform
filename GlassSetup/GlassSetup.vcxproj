@@ -69,7 +69,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateManifest>false</GenerateManifest>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)res;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -96,7 +96,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateManifest>false</GenerateManifest>
       <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(ProjectDir)third_party\WebView2LoaderStatic.lib;comctl32.lib;uxtheme.lib;gdiplus.lib;shlwapi.lib;shell32.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;version.lib;advapi32.lib;msi.lib;user32.lib;gdi32.lib;msimg32.lib;dwmapi.lib;winhttp.lib;wintrust.lib;crypt32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)res;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -128,6 +128,10 @@
     <ClCompile Include="src\InstallSupport\GlassInstallMsi.cpp" />
     <ClCompile Include="src\InstallSupport\GlassSecureUxPackage.cpp" />
     <ClCompile Include="src\InstallSupport\GlassReleaseClient.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassOpenGlassPackage.cpp" />
+    <ClCompile Include="third_party\lzma\LzmaDec.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="src\InstallSupport\GlassPackageAcquisition.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallRollback.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallUtil.cpp" />
@@ -148,6 +152,8 @@
     <ClInclude Include="src\InstallSupport\GlassMaintenanceCache.h" />
     <ClInclude Include="src\InstallSupport\GlassPackageRules.h" />
     <ClInclude Include="src\InstallSupport\GlassReleaseClient.h" />
+    <ClInclude Include="src\InstallSupport\GlassInnoExtract.h" />
+    <ClInclude Include="src\InstallSupport\GlassOpenGlassPackage.h" />
     <ClInclude Include="src\InstallSupport\GlassPackageAcquisition.h" />
     <ClInclude Include="src\InstallSupport\GlassPackageCatalog.h" />
     <ClInclude Include="src\InstallSupport\GlassOpenGlassRelease.h" />

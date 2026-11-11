@@ -1656,15 +1656,13 @@ private:
         openGlassStartup_=result.openGlass;
         openGlassStartupDir_=std::move(result.openGlassDir);
         const bool os64=result.os64;
-        // Временные отметки до завершения обследования: установленные — сняты,
-        // отсутствующие — отмечены. Точные состояния (обновление/повреждение)
-        // выставляются в OnInspectReady; до завершения анализа остаёмся на Checking.
-        selection_.platform64=os64 && !installedSelection_.platform64;
-        selection_.platform32=!installedSelection_.platform32;
-        selection_.settings64=os64 && !installedSelection_.settings64;
-        selection_.settings32=!installedSelection_.settings32;
+        // Presence and recommendations never imply consent, even during startup.
+        selection_.platform64=false;
+        selection_.platform32=false;
+        selection_.settings64=false;
+        selection_.settings32=false;
         selection_.SyncSettings(os64);
-        selection_.openGlass=os64 && !installedSelection_.openGlass;
+        selection_.openGlass=false;
         selection_.secureUxTheme=false;
         ClampSecureUxThemeSelection();
         if(launchCmd_.modify&&!launchCmd_.productCode.empty()&&MaintenanceProductAbsent(launchCmd_.productCode)) {
