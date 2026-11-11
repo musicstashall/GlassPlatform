@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <cwchar>
 #include <utility>
+#include <limits>
 
 namespace GlassOpenGlassPackage {
 namespace {
@@ -31,7 +32,7 @@ void Pin(File& file,const std::wstring& path) {
         !(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)),"OpenGlass file pin/link check failed");
 }
 std::array<unsigned char,32> Hash(const unsigned char* data,std::size_t size) {
-    Require(size<=MAXULONG,"OpenGlass hash size limit");std::array<unsigned char,32> result{};
+    Require(size<=(std::numeric_limits<ULONG>::max)(),"OpenGlass hash size limit");std::array<unsigned char,32> result{};
     BCRYPT_ALG_HANDLE algorithm=nullptr;
     Require(BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0)>=0,"OpenGlass SHA256 provider");
     const auto status=BCryptHash(algorithm,nullptr,0,const_cast<PUCHAR>(data),static_cast<ULONG>(size),result.data(),static_cast<ULONG>(result.size()));

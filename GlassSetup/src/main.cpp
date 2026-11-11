@@ -1146,6 +1146,7 @@ public:
     HWND window = nullptr;
     bool retireControllerOnExit=false;
     bool Create(int show) {
+        footerSetupVersion_=SelfFileVersion();
         WNDCLASSEXW wc{sizeof(wc)};
         wc.style = 0; // Fixed-size window: do not invalidate the entire client on sizing.
         wc.lpfnWndProc = WindowProc;
@@ -1311,6 +1312,7 @@ private:
     std::atomic_bool inspectStop_{false};
     mutable std::mutex inspectMutex_;
     std::wstring setupProductVersion_;
+    std::wstring footerSetupVersion_; // Actual running EXE FileVersion; not catalog/bundle.
     std::wstring preflightX64Root_,preflightX86Root_,preflightOpenGlassRoot_;
     std::wstring blockReason_;
     std::wstring versionInvalidNote_;
@@ -4161,17 +4163,22 @@ private:
         }
     }
     void RenderFooterText(HDC dc) {
+        // This footer is native even when the page content is WebView2: one
+        // caption for both renderers, outside the HTML/progress-strip bounds.
+        if(!footerSetupVersion_.empty())
+            DrawLabel(dc,L"GlassSetup "+footerSetupVersion_,Box(32,kContentHeight+34,450,16),small_,RGB(156,153,175),
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
         if (page_!=Page::Installing && page_!=Page::Cancelling && page_!=Page::Launching && page_!=Page::RuntimeInstalling && !(page_==Page::Components&&downloadContinuePending_) && !(page_==Page::Checking&&setupDownloadActive_)) return;
         const std::wstring line=page_==Page::Components?NativeDownloadSummary():page_==Page::Checking?checkingStatus_:page_==Page::RuntimeInstalling?runtimeStatus_:installStatusLine_.empty()?Text(IDS_STATUS_PREPARE):installStatusLine_;
         const std::wstring percentText=progressValue_>0 && percent_==0 ? L"<1%" : std::to_wstring(percent_)+L"%";
         const std::wstring shown=progressMarquee_?line:line+L"  "+percentText;
-        RECT dot=Box(32,kContentHeight+22,8,8);
+        RECT dot=Box(32,kContentHeight+14,8,8);
         HBRUSH dotBrush=CreateSolidBrush(RGB(183,168,255));
         HGDIOBJ oldBrush=SelectObject(dc,dotBrush);
         HGDIOBJ oldPen=SelectObject(dc,GetStockObject(NULL_PEN));
         Ellipse(dc,dot.left,dot.top,dot.right,dot.bottom);
         SelectObject(dc,oldPen); SelectObject(dc,oldBrush); DeleteObject(dotBrush);
-        DrawLabel(dc,shown,Box(50,kContentHeight+10,560,34),font_,RGB(231,229,246),
+        DrawLabel(dc,shown,Box(50,kContentHeight+4,450,26),font_,RGB(231,229,246),
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
     }
     void Paint() {

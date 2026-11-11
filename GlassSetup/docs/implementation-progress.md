@@ -1,3 +1,20 @@
+## MSVC MAXULONG и видимая версия Setup
+
+Исправлен C2065 в GlassOpenGlassPackage: проверка размера использует
+`(std::numeric_limits<ULONG>::max)()` с `<limits>` вместо необязательного MAXULONG.
+Win32 max macro не мешает вызову. ULONG по-прежнему ограничивает размер BCryptHash.
+
+В общем native footer (он общий и для WebView2 content) добавлен неброский
+`GlassSetup <FileVersion>` слева. Версия читается один раз из реально запущенного
+EXE, не из bundle/catalog. Отображается и после self-update, на error/terminal
+и обычных страницах. Сброс состояния мастера её не очищает. Статус/проценты
+занимают верхнюю строку, подпись версии — нижнюю; ширина ограничена до кнопок,
+существующая progress strip не изменена. Font/rects масштабируются текущим DPI.
+
+PASS resource/source smoke и portable Inno tests. MSVC/Windows visual не проверены.
+Сборка только GlassSetup Release|x86 с уже актуальными зависимостями;
+полная сборка решения и повторная сборка Settings/Unins для этих правок не нужны.
+
 ## OpenGlass: подключение Next preparation и повторной проверки без второго download
 
 ProductDownloads index4 теперь вызывает upstream provider, не MSI acquisition.

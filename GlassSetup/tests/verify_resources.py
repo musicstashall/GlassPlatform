@@ -829,3 +829,15 @@ assert 'maintenanceRow = ' not in home_page
 assert 'x:Name="MaintenanceExpander"' in system_xaml
 assert 'Click="MaintenanceModify_OnClick"' in system_xaml
 assert "GlassMaintenanceSetupLaunchService.TryLaunch()" in system_page
+
+# Actual running Setup FileVersion stays visible in the shared native footer,
+# including WebView2 pages. No server/bundle value and no extra progress control.
+setup_main = (repo / "GlassSetup/src/main.cpp").read_text(encoding="utf-8")
+assert 'footerSetupVersion_=SelfFileVersion();' in setup_main
+footer_text = setup_main.split('void RenderFooterText(HDC dc) {', 1)[1].split('void Paint()', 1)[0]
+assert 'L"GlassSetup "+footerSetupVersion_' in footer_text
+assert footer_text.index('footerSetupVersion_') < footer_text.index('if (page_!=Page::Installing')
+assert 'kContentHeight+34,450,16' in footer_text
+provider_src = (repo / "GlassSetup/src/InstallSupport/GlassOpenGlassPackage.cpp").read_text(encoding="utf-8")
+assert 'MAXULONG' not in provider_src
+assert '(std::numeric_limits<ULONG>::max)()' in provider_src
