@@ -18,6 +18,24 @@ assert package.find("w:Property[@Id='OPENGLASSROOT']",ns) is None
 assert package.find(".//w:DirectorySearch",ns).get('Path')=='[UPSTREAMOPENGLASSROOT]'
 assert 'UPSTREAMOPENGLASSROOT AND OPENGLASSDLL AND NOT UPSTREAMOPENGLASSALTROOT' in package.find('w:Launch',ns).get('Condition')
 assert 'UPSTREAMOPENGLASSALTROOT AND OPENGLASSALTDLL AND NOT UPSTREAMOPENGLASSROOT' in package.find('w:Launch',ns).get('Condition')
+# Evaluate the actual MSI launch expression over every relevant property state.
+# Maintenance (Change/repair/update) must work without OG, while a fresh install
+# still requires an unambiguous upstream registration and its DLL.
+import itertools
+import re
+condition = package.find('w:Launch', ns).get('Condition')
+expression = condition.replace('GLASS_RESTORE_NO_CAB = 1', 'restore').replace('REMOVE = "ALL"', 'remove_all')
+for operator in ('AND', 'OR', 'NOT'):
+ expression = re.sub(r'\b' + operator + r'\b', operator.lower(), expression)
+properties = ('Installed', 'restore', 'remove_all', 'UPSTREAMOPENGLASSROOT',
+              'OPENGLASSDLL', 'UPSTREAMOPENGLASSALTROOT', 'OPENGLASSALTDLL')
+for values in itertools.product((False, True), repeat=len(properties)):
+ state = dict(zip(properties, values))
+ installed, restore, remove_all, root_ok, dll_ok, alt_ok, alt_dll_ok = values
+ expected = (installed or restore or remove_all or
+             (root_ok and dll_ok and not alt_ok) or
+             (alt_ok and alt_dll_ok and not root_ok))
+ assert bool(eval(expression, {'__builtins__': {}}, state)) == bool(expected), state
 assert '{D3D1BC7D-5E24-4B33-9383-7934271A3B05}}_is1' in (msi/'OpenGlassResourcesPackage.wxs').read_text()
 native=package.find("w:StandardDirectory[@Id='ProgramFiles64Folder']",ns)
 platform=native.find("w:Directory[@Name='GlassPlatform']",ns)

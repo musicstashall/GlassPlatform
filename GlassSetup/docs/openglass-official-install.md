@@ -616,3 +616,14 @@ catalog, snapshots/rollback, cancellation, OG Unins, downloads и resources.
 Сборка: GlassUnins Release|x86 → GlassSetup Release|x86; сам графический пакет —
 OpenGlassResources-x64 Release|x64. Подписанный MSI рядом с Setup/в packages либо
 запись openglassResources в release catalog обязательны. GlassShared не менялся.
+
+### Resources MSI maintenance after OG removal
+
+The upstream OG prerequisite applies only to a new Resources installation.
+The MSI launch condition accepts `Installed`, so ARP Change, repair, reinstall
+and removal of an existing Resources product remain available even if OG has
+already been removed. This does not reinstall OG or change ownership of its
+files/services. Fresh Resources installation still requires a single recognized
+upstream registration and its DLL; the rollback restore bypass is unchanged.
+Rebuild and publish `OpenGlassResources-x64` (`Release|x64`) to deliver this fix;
+already cached MSI packages retain their old launch condition.
