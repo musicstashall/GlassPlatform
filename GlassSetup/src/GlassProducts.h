@@ -35,6 +35,7 @@ struct Selection {
     bool openGlass = true;
     // Optional SecureUxTheme product selection (per-machine MSI).
     bool secureUxTheme = false;
+    bool openGlassResources = false; // Graphics-only x64 MSI, row 6.
     // Explicit original-MSI removal, not an unchecked install selection.
     bool secureUxThemeRemove = false;
     // Explicit interactive risk acceptance; valid only while BOTH Settings MSI
@@ -44,7 +45,7 @@ struct Selection {
     std::uint32_t removeMask = 0;
     unsigned confirmedSettingsRemovalRisk = 0;
     constexpr bool Removes(unsigned row) const noexcept { return (removeMask & (1u<<row))!=0; }
-    static constexpr std::uint32_t kManagedRemovalMask = 0x2Fu;
+    static constexpr std::uint32_t kManagedRemovalMask = 0x6Fu;
     // Windows 11 certificate page: the user chose to add the author certificate
     // (signer of GlassShellSparse.msix) to LocalMachine\TrustedPeople so the
     // compact menu can be registered. Off when the page was not shown.
@@ -64,13 +65,13 @@ struct Selection {
 
 // Temporary official-EXE lane: reject unsupported combinations before mutation.
 constexpr bool StandaloneOpenGlassApply(const Selection& s,bool forceClean,bool os64) noexcept {
-    return os64&&s.openGlass&&!s.platform64&&!s.platform32&&!s.glassSettings&&
+    return !s.openGlassResources&&os64&&s.openGlass&&!s.platform64&&!s.platform32&&!s.glassSettings&&
         !s.settings64&&!s.settings32&&!s.secureUxTheme&&!s.secureUxThemeRemove&&
         !s.removeMask&&!s.cleanupUserData&&!s.trustSigner&&!forceClean;
 }
 
 constexpr bool StandaloneOpenGlassRemoval(const Selection& s,bool forceClean,bool os64) noexcept {
-    return os64&&!s.openGlass&&s.removeMask==(1u<<3)&&!s.platform64&&!s.platform32&&
+    return !s.openGlassResources&&os64&&!s.openGlass&&s.removeMask==(1u<<3)&&!s.platform64&&!s.platform32&&
         !s.glassSettings&&!s.settings64&&!s.settings32&&!s.secureUxTheme&&!s.secureUxThemeRemove&&
         !s.cleanupUserData&&!s.trustSigner&&!forceClean;
 }
@@ -78,13 +79,13 @@ constexpr bool StandaloneOpenGlassRemoval(const Selection& s,bool forceClean,boo
 // Sequential commits: managed Glass apply first, official Inno apply last.
 // Two different external vendors and mixed removal need a separate protocol.
 constexpr bool MixedOpenGlassApply(const Selection& s,bool forceClean,bool os64) noexcept {
-    return os64&&s.openGlass&&(s.platform64||s.platform32||s.Settings64(os64)||s.Settings32(os64))&&
+    return !s.openGlassResources&&os64&&s.openGlass&&(s.platform64||s.platform32||s.Settings64(os64)||s.Settings32(os64))&&
         !s.secureUxTheme&&!s.secureUxThemeRemove&&!s.removeMask&&!s.cleanupUserData&&!forceClean;
 }
 
 // Managed apply can precede official OG removal just as it precedes OG apply.
 constexpr bool MixedOpenGlassRemoval(const Selection& s,bool forceClean,bool os64) noexcept {
-    return os64&&!s.openGlass&&s.removeMask==(1u<<3)&&
+    return !s.openGlassResources&&os64&&!s.openGlass&&s.removeMask==(1u<<3)&&
         (s.platform64||s.platform32||s.Settings64(os64)||s.Settings32(os64))&&
         !s.secureUxTheme&&!s.secureUxThemeRemove&&!s.cleanupUserData&&!forceClean;
 }
@@ -92,7 +93,7 @@ constexpr bool MixedOpenGlassRemoval(const Selection& s,bool forceClean,bool os6
 // Pure managed removal needs the installed MSI baseline, not new release media.
 constexpr bool OnlyManagedRemoval(const Selection& choice) noexcept {
     return choice.removeMask && !choice.secureUxTheme && !choice.secureUxThemeRemove &&
-        !choice.platform64 && !choice.platform32 && !choice.openGlass &&
+        !choice.platform64 && !choice.platform32 && !choice.openGlass && !choice.openGlassResources &&
         !choice.glassSettings && !choice.settings64 && !choice.settings32;
 }
 
@@ -100,7 +101,7 @@ constexpr bool OnlyManagedRemoval(const Selection& choice) noexcept {
 // is separately authorized and may reset the current user style).
 constexpr bool OnlySecureUxThemeRemoval(const Selection& choice) noexcept {
     return !choice.removeMask && choice.secureUxThemeRemove && !choice.secureUxTheme &&
-        !choice.platform64 && !choice.platform32 && !choice.openGlass &&
+        !choice.platform64 && !choice.platform32 && !choice.openGlass && !choice.openGlassResources &&
         !choice.glassSettings && !choice.settings64 && !choice.settings32;
 }
 
@@ -123,7 +124,7 @@ constexpr bool ShouldStartOpenGlass(const OpenGlassStartupState& startup) noexce
 
 // Removal has no new media/controller to publish. Keep the running cache intact.
 constexpr bool HasPackageApply(const Selection& s) noexcept {
-    return s.platform64||s.platform32||s.glassSettings||s.settings64||s.settings32||s.openGlass||s.secureUxTheme;
+    return s.platform64||s.platform32||s.glassSettings||s.settings64||s.settings32||s.openGlass||s.secureUxTheme||s.openGlassResources;
 }
 // Only an explicitly selected startup-capable product owns the launch page.
 // Restoring a previously running, temporarily stopped retained host is part of
@@ -174,6 +175,7 @@ constexpr Selection NormalizeInstall(Selection choice, bool os64) noexcept {
     if (!os64) {
         choice.platform64 = false;
         choice.openGlass = false;
+        choice.openGlassResources = false;
     }
     choice.SyncSettings(os64);
     return choice;
@@ -185,6 +187,7 @@ constexpr Selection NormalizeRemoval(Selection choice, Selection installed, bool
     choice.glassSettings = choice.glassSettings && installed.glassSettings;
     choice.openGlass = os64 && choice.openGlass && installed.openGlass;
     choice.secureUxTheme = choice.secureUxTheme && installed.secureUxTheme;
+    choice.openGlassResources = os64 && choice.openGlassResources && installed.openGlassResources;
     return choice;
 }
 } // namespace GlassProducts

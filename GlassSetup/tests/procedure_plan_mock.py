@@ -26,13 +26,13 @@ h=r'''
 #include <iostream>
 // UNINS
 int main(){CheckUninsMap();unsigned cases=0;
- for(bool os64:{false,true})for(unsigned combination=0;combination<243;++combination){
+ for(bool os64:{false,true})for(unsigned combination=0;combination<729;++combination){
   auto n=combination;GlassProducts::Selection s;
   s.platform64=s.platform32=s.glassSettings=s.openGlass=false;s.independentSettings=true;
-  bool* choices[]={&s.platform64,&s.platform32,&s.settings64,&s.openGlass,&s.settings32};
-  const unsigned bits[]={1,2,4,8,32};unsigned expected=0;
-  for(unsigned row=0;row<5;++row){const auto action=n%3;n/=3;
-   if(!os64&&(row==0||row==2||row==3))continue;
+  bool* choices[]={&s.platform64,&s.platform32,&s.settings64,&s.openGlass,&s.settings32,&s.openGlassResources};
+  const unsigned bits[]={1,2,4,8,32,64};unsigned expected=0;
+  for(unsigned row=0;row<6;++row){const auto action=n%3;n/=3;
+   if(!os64&&(row==0||row==2||row==3||row==5))continue;
    if(action){expected|=bits[row];if(action==1)*choices[row]=true;else s.removeMask|=bits[row];}}
   s.SyncSettings(os64);const auto mask=GlassProcedurePlan::MutationMask(s,os64);assert(mask==expected);
   assert(GlassProcedurePlan::Platform64(mask)==bool(expected&1));

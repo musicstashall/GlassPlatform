@@ -12,11 +12,11 @@ inline GlassProductPlan::Plan Preview(const GlassProducts::Selection& choice,
     const GlassProducts::Selection& installed, bool os64, bool removal, bool sutActive) {
     namespace P = GlassProductPlan;
     const std::array<bool, P::kProductCount> present{installed.platform64, installed.platform32,
-        installed.Settings64(os64), installed.openGlass, installed.secureUxTheme, installed.Settings32(os64)};
+        installed.Settings64(os64), installed.openGlass, installed.secureUxTheme, installed.Settings32(os64), installed.openGlassResources};
     P::Request request;
     request.os64=os64;
     request.mode=removal?P::Mode::RemoveInteractive:P::Mode::Install;
-    request.selected={choice.platform64,choice.platform32,choice.Settings64(os64),choice.openGlass,choice.secureUxTheme,choice.Settings32(os64)};
+    request.selected={choice.platform64,choice.platform32,choice.Settings64(os64),choice.openGlass,choice.secureUxTheme,choice.Settings32(os64), choice.openGlassResources};
     if(!removal)for(std::size_t i=0;i<P::kProductCount;++i)
         if(choice.Removes(static_cast<unsigned>(i)))request.actions[i]=P::Action::Remove;
     if(!removal && choice.secureUxThemeRemove)request.actions[P::Index(P::Product::SecureUxTheme)]=P::Action::Remove;
@@ -87,6 +87,7 @@ inline std::size_t Index(const wchar_t* id) {
     if (std::wstring(id)==L"x86") return 1;
     if (std::wstring(id)==L"settings" || std::wstring(id)==L"settings64") return 2;
     if (std::wstring(id)==L"settings32") return 5;
+    if (std::wstring(id)==L"openglassResources") return 6;
     if (std::wstring(id)==L"openglass") return 3;
     return 4;
 }

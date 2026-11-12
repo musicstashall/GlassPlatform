@@ -49,9 +49,10 @@ namespace GlassInstallRollback {
  enum class RestoreScope { AllProducts, SettingsX86, SettingsX64, SettingsBoth };
  struct ProductSnapshot{std::wstring productCode,installDir,cachedMsiPath,displayVersion;};
  struct SessionState {
+  std::function<bool()> restoreOpenGlassFiles;
   unsigned productMask=0x7Fu;
-  std::wstring workspaceDir=L"workspace",x64Dir=L"root64",x86Dir=L"root86",openGlassDir=L"rootOG";
-  std::wstring backupX64=L"backup64",backupX86=L"backup86",backupOpenGlass=L"backupOG";
+  std::wstring workspaceDir=L"workspace",x64Dir=L"root64",x86Dir=L"root86",openGlassDir=L"rootOG",resourcesDir=L"resources";
+  std::wstring backupX64=L"backup64",backupX86=L"backup86",backupOpenGlass=L"backupOG",backupResources;
   std::vector<ProductSnapshot> oldProducts;std::vector<std::wstring> installedThisSession,modifiedProducts;
   bool hadPriorInstall=true;unsigned copyError=0;
  };
@@ -67,7 +68,7 @@ namespace GlassInstallUtil {
 namespace GlassInstallLog { template<class... T>void LineFormat(const wchar_t*,T...){} void Line(const wchar_t*){} }
 namespace GlassInstallMsi {
  constexpr wchar_t kProductPlatformX64[]=L"p64",kProductPlatformX86[]=L"p86",kProductSettingsX64[]=L"gs64",
-  kProductSettingsX86[]=L"gs86",kProductSecureUxThemeX64[]=L"sut64",kProductSecureUxThemeX86[]=L"sut86",kProductOpenGlass[]=L"og",kLegacyPlatformX64[]=L"old64",
+  kProductSettingsX86[]=L"gs86",kProductSecureUxThemeX64[]=L"sut64",kProductSecureUxThemeX86[]=L"sut86",kProductOpenGlassResourcesX64[]=L"res",kProductOpenGlass[]=L"og",kLegacyPlatformX64[]=L"old64",
   kLegacyPlatformX86[]=L"old86",kLegacyOpenGlass[]=L"oldog";
  enum class ProductPathCheck {Safe,OutsideRoot,Unverifiable,Cancelled};
  ProductPathCheck CheckProductFileRoots(const wchar_t*,const std::wstring&,const std::wstring&,std::wstring&){return ProductPathCheck::Safe;}
@@ -118,6 +119,13 @@ int main(){
   assert(!ExecuteRollback(s,nullptr,RestoreScope::SettingsX64));assert(s.copyError==ERROR_GEN_FAILURE && fake.copies.empty());}
  {reset();SessionState s;fake.settingReparse=true;
   assert(!ExecuteRollback(s,nullptr,RestoreScope::SettingsX64));assert(s.copyError==ERROR_NOT_SUPPORTED && fake.copies.empty());}
+ {reset();SessionState s;s.productMask=64;s.backupX64=s.backupX86=s.backupOpenGlass=L"";
+  s.backupResources=L"graphics-backup";
+  assert(ExecuteRollback(s,nullptr,RestoreScope::AllProducts));
+  assert(fake.copies==std::vector<std::wstring>{L"graphics-backup -> resources"});}
+ {reset();SessionState s;s.backupResources=L"graphics-backup";s.productMask=4;
+  assert(ExecuteRollback(s,nullptr,RestoreScope::SettingsX64));
+  for(const auto& copy:fake.copies)assert(copy.find(L"graphics-backup")==std::wstring::npos);}
  {reset();SessionState s;assert(ExecuteRollback(s,nullptr,RestoreScope::AllProducts));
   assert(fake.copies.size()==3 && fake.registryCalls==1);}
  {reset();SessionState s;fake.otherFilesLocked=true;assert(!ExecuteRollback(s,nullptr,RestoreScope::AllProducts));

@@ -7,7 +7,7 @@
 namespace GlassProcedurePlan {
 constexpr unsigned MutationMask(const GlassProducts::Selection& s,bool os64) noexcept {
     return s.removeMask | (s.platform64?1u:0u) | (s.platform32?2u:0u) |
-        (s.Settings64(os64)?4u:0u) | (s.openGlass?8u:0u) | (s.Settings32(os64)?32u:0u);
+        (s.Settings64(os64)?4u:0u) | (s.openGlass?8u:0u) | (s.Settings32(os64)?32u:0u) | (s.openGlassResources?64u:0u);
 }
 constexpr bool Platform64(unsigned mask) noexcept {return (mask&1u)!=0;}
 constexpr bool Platform32(unsigned mask) noexcept {return (mask&2u)!=0;}

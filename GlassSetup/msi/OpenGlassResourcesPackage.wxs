@@ -31,7 +31,11 @@
         <FileSearch Id="OpenGlassAltDllFile" Name="OpenGlass.dll" />
       </DirectorySearch>
     </Property>
-    <Launch Condition="REMOVE = &quot;ALL&quot; OR ((UPSTREAMOPENGLASSROOT AND OPENGLASSDLL AND NOT UPSTREAMOPENGLASSALTROOT) OR (UPSTREAMOPENGLASSALTROOT AND OPENGLASSALTDLL AND NOT UPSTREAMOPENGLASSROOT))"
+    <Property Id="GLASS_RESTORE_NO_CAB" Value="0" Hidden="yes" />
+    <InstallExecuteSequence>
+      <InstallFiles Condition="GLASS_RESTORE_NO_CAB &lt;&gt; 1" />
+    </InstallExecuteSequence>
+    <Launch Condition="GLASS_RESTORE_NO_CAB = 1 OR REMOVE = &quot;ALL&quot; OR ((UPSTREAMOPENGLASSROOT AND OPENGLASSDLL AND NOT UPSTREAMOPENGLASSALTROOT) OR (UPSTREAMOPENGLASSALTROOT AND OPENGLASSALTDLL AND NOT UPSTREAMOPENGLASSROOT))"
             Message="Install OpenGlass before OpenGlass Resources. / Сначала установите OpenGlass." />
     <StandardDirectory Id="ProgramFiles64Folder">
       <!-- Upstream inventory is a prerequisite only, never our payload root. -->

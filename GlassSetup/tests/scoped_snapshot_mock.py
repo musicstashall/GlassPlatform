@@ -21,13 +21,13 @@ constexpr unsigned ERROR_CANCELLED=1223,ERROR_INVALID_DATA=13,ERROR_ACCESS_DENIE
  INVALID_FILE_ATTRIBUTES=0xffffffff;constexpr unsigned MAX_PATH=260;
 namespace GlassInstallRollback {
 struct SessionState {unsigned productMask=0x7f,copyError=0;bool hadPriorInstall=false,productPathUnverified=false;
- std::wstring workspaceDir,x64Dir,x86Dir,openGlassDir,backupX64,backupX86,backupOpenGlass,productPathCode,productPathDetail;
+ std::wstring workspaceDir,x64Dir,x86Dir,openGlassDir,backupX64,backupX86,backupOpenGlass,resourcesDir,backupResources,productPathCode,productPathDetail;
  std::vector<std::wstring> oldProducts,installedThisSession,modifiedProducts;};
 using CopyProgressFn=std::function<void(int)>;
 }
 namespace GlassInstallMsi {
 constexpr const wchar_t* kProductSettingsX64=L"s64",*kProductSettingsX86=L"s32",*kProductSecureUxThemeX64=L"sut64",*kProductSecureUxThemeX86=L"sut32",
- *kProductPlatformX64=L"p64",*kProductPlatformX86=L"p32",*kProductOpenGlass=L"og";
+ *kProductOpenGlassResourcesX64=L"res",*kProductPlatformX64=L"p64",*kProductPlatformX86=L"p32",*kProductOpenGlass=L"og";
 }
 struct State {std::vector<std::wstring> copies,measured;unsigned mask=0;bool safe=true;}f;
 DWORD GetLastError(){return 5;}
@@ -36,6 +36,7 @@ bool CreateDirectoryW(const wchar_t*,void*){return true;}
 wchar_t* PathCombineW(wchar_t* out,const wchar_t* a,const wchar_t* b){auto path=std::wstring(a)+L"\\"+b;std::wcscpy(out,path.c_str());return out;}
 namespace GlassInstallUtil {
 bool IsSafeInstallPath(const std::wstring&){return f.safe;}
+bool ResolveOpenGlassResourcesRoot(std::wstring& out){out=L"fixed64\\OpenGlass\\Resources";return f.safe;}
 bool CreateSecureTempDirectory(const wchar_t*,std::wstring& out){out=L"workspace";return true;}
 }
 namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...){} }
@@ -50,16 +51,18 @@ namespace GlassInstallRollback {
 // BODY
 }
 int main(){using namespace GlassInstallRollback;
- for(unsigned mask=0;mask<64;++mask){if(mask&16)continue;f={};SessionState s;std::atomic_bool cancel{false};
+ for(unsigned mask=0;mask<128;++mask){if(mask&16)continue;f={};SessionState s;std::atomic_bool cancel{false};
   assert(CreateSnapshot(s,L"root64",L"root32",L"root64\\OpenGlass",false,nullptr,&cancel,mask));
   std::vector<std::wstring> expected;
   if(mask&5)expected.push_back(mask&1?L"root64":L"root64\\GlassSettings");
   if(mask&34)expected.push_back(mask&2?L"root32":L"root32\\GlassSettings");
   if(mask&8)expected.push_back(L"root64\\OpenGlass");
+  if(mask&64)expected.push_back(L"fixed64\\OpenGlass\\Resources");
   assert(f.copies==expected&&f.measured==expected&&f.mask==mask);
+  assert(s.backupResources.empty()==!(mask&64));
   assert(s.backupX64.empty()==!(mask&5));assert(s.backupX86.empty()==!(mask&34));assert(s.backupOpenGlass.empty()==!(mask&8));
  }
- std::cout<<"PASS: actual CreateSnapshot: all 32 row unions; only touched roots/Settings leaves measured and copied, OG independent\n";
+ std::cout<<"PASS: actual CreateSnapshot: all 64 row unions including independent fixed Resources; only touched roots/Settings leaves measured and copied, OG independent\n";
 }
 '''.replace('// BODY',body)
 with tempfile.TemporaryDirectory(prefix='ScopedSnapshot-') as d:

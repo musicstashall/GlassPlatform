@@ -78,3 +78,20 @@ assert 'if(!in.os64 && job.product==GlassPackageCatalog::Product::OpenGlassResou
 assert 'InstalledBaselineMatches(reference,installedCode)' in inspection
 assert 'CheckProductFiles(reference,installedCode,signerSha1,*job.rep,job.product==GlassPackageCatalog::Product::OpenGlass)' in inspection
 print('PASS: separate x64 graphics inventory/offer/installed-baseline lane; exact two upstream prerequisite identities, no ambiguous roots')
+
+util=(root/'GlassSetup/src/InstallSupport/GlassInstallUtil.cpp').read_text()
+fixed=util[util.index('bool ResolveOpenGlassResourcesRoot('):util.index('bool ResolveFixedPlatformRoots(')]
+assert 'ResolveDefaultPlatformRoot(true,os64,platform)' in fixed
+assert 'ReadOpenGlassInstallPath' not in fixed and 'IsSafeInstallPath(target)' in fixed
+rollback=(root/'GlassSetup/src/InstallSupport/GlassInstallRollback.cpp').read_text()
+assert '{kProductOpenGlassResourcesX64,64}' in rollback
+assert 'TrySnapshotProduct(state, GlassInstallMsi::kProductOpenGlassResourcesX64, state.resourcesDir, cancelled)' in rollback
+assert 'CopyTree(state.backupResources,state.resourcesDir' in rollback
+assert package.find("w:Property[@Id='GLASS_RESTORE_NO_CAB']",ns) is not None
+assert package.find('w:InstallExecuteSequence/w:InstallFiles',ns).get('Condition')=='GLASS_RESTORE_NO_CAB <> 1'
+engine=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
+assert '{Product::OpenGlassResources,os64&&selection_.openGlassResources}' in engine
+assert 'steps.push_back({P::Product::OpenGlassResources,L"OpenGlassResources-x64.msi",root,L"OpenGlass Resources"})' in engine
+assert 'case P::Product::OpenGlassResources:current=GlassInstallMsi::kProductOpenGlassResourcesX64' in engine
+assert 'constexpr unsigned sourceRows[]={0,1,2,5,4,6}' in engine
+print('PASS: Resources engine acquire/apply/remove, independent fixed-root snapshot/restore and cache wiring; UI and fresh OG mixed protocol remain pending')

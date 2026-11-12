@@ -696,6 +696,21 @@ DWORD ResolveDefaultPlatformRoot(bool x64, bool os64, std::wstring& root) {
 
 } // namespace
 
+bool ResolveOpenGlassResourcesRoot(std::wstring& root) noexcept {
+    root.clear();
+    try {
+        bool os64=false;
+        if(!QueryNativeOs64Bit(os64))return false;
+        if(!os64){SetLastError(ERROR_NOT_SUPPORTED);return false;}
+        std::wstring platform;
+        const DWORD error=ResolveDefaultPlatformRoot(true,os64,platform);
+        if(error!=ERROR_SUCCESS){SetLastError(error);return false;}
+        const auto target=platform+L"\\OpenGlass\\Resources";
+        if(!IsSafeInstallPath(target)){SetLastError(ERROR_INVALID_DATA);return false;}
+        root=target;return true;
+    }catch(...){root.clear();SetLastError(ERROR_NOT_ENOUGH_MEMORY);return false;}
+}
+
 bool ResolveFixedPlatformRoots(std::wstring& x64, std::wstring& x86) noexcept {
     x64.clear(); x86.clear();
     auto fail=[&](DWORD error) { x64.clear(); x86.clear(); SetLastError(error); return false; };

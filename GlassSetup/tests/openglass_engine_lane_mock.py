@@ -41,12 +41,13 @@ int main(){
  assert(!StandaloneOpenGlassApply(s,false,false));
  for(bool Selection::* member:{&Selection::platform64,&Selection::platform32,&Selection::glassSettings,
  &Selection::settings64,&Selection::settings32,&Selection::secureUxTheme,&Selection::secureUxThemeRemove,
- &Selection::cleanupUserData,&Selection::trustSigner}){
+ &Selection::cleanupUserData,&Selection::trustSigner,&Selection::openGlassResources}){
  s.*member=true;assert(!StandaloneOpenGlassApply(s,false,true));s.*member=false;
  }
- for(unsigned i=0;i<6;++i){s.removeMask=1u<<i;assert(!StandaloneOpenGlassApply(s,false,true));}
+ for(unsigned i=0;i<7;++i){s.removeMask=1u<<i;assert(!StandaloneOpenGlassApply(s,false,true));}
  s.removeMask=0;
  s.platform64=true;assert(MixedOpenGlassApply(s,false,true));
+ s.openGlassResources=true;assert(!MixedOpenGlassApply(s,false,true));s.openGlassResources=false;
  assert(!MixedOpenGlassApply(s,true,true));assert(!MixedOpenGlassApply(s,false,false));
  s.secureUxTheme=true;assert(!MixedOpenGlassApply(s,false,true));s.secureUxTheme=false;
  s.removeMask=8;assert(!MixedOpenGlassApply(s,false,true));s.removeMask=0;
@@ -60,6 +61,7 @@ int main(){
  auto mixed=Selection{};mixed.platform64=mixed.platform32=mixed.openGlass=false;
  mixed.independentSettings=true;mixed.settings32=true;mixed.glassSettings=true;mixed.removeMask=8;
  assert(MixedOpenGlassRemoval(mixed,false,true)); // Exact user plan: rows=0x28.
+ mixed.openGlassResources=true;assert(!MixedOpenGlassRemoval(mixed,false,true));mixed.openGlassResources=false;
  assert(!MixedOpenGlassRemoval(mixed,true,true));assert(!MixedOpenGlassRemoval(mixed,false,false));
  mixed.secureUxTheme=true;assert(!MixedOpenGlassRemoval(mixed,false,true));mixed.secureUxTheme=false;
  mixed.cleanupUserData=true;assert(!MixedOpenGlassRemoval(mixed,false,true));mixed.cleanupUserData=false;

@@ -457,3 +457,52 @@ managed execution и official commit-last fresh OG + Resources. Карточка
 не появляется; текущая правка не выдаётся за завершение пользовательской задачи.
 Сборка: GlassUnins Release|x86 → GlassSetup Release|x86; изменённый пакет —
 OpenGlassResources-x64 Release|x64 с graphics source. GlassShared не менялся.
+
+### Resources integration: managed execution and rollback adapters
+
+Добавлен `Selection::openGlassResources`, apply/removal bit 64 и preview row 6.
+Флаг по умолчанию выключен; на x86 NormalizeInstall его снимает. Mutation mask
+не включает Platform/Settings/OG host bits из-за выбора одной графики.
+Собственный Resources MSI вошёл в Prepare, BuildExecutionPlan, RunMsiSequence,
+RemoveManagedProduct, related-family recheck и maintenance source publication.
+Apply пока требует **уже установленного** официального OG: повторный upstream
+inventory плюс безопасный существующий OpenGlass.dll. Он не переписывает путь
+upstream OG и не принимает его каталог как INSTALLDIR. Managed remove графики
+не требует ни нового media, ни установленного OG.
+
+Новый ResolveOpenGlassResourcesRoot разрешает native PF из системного источника,
+проверяет OS и путь/предков. Результат фиксирован:
+PF\GlassPlatform\OpenGlass\Resources, независимо от relocated Platform/OG.
+Snapshot получает отдельные resourcesDir/backupResources, product mask и family.
+Сохраняются как установленный MSI baseline (с проверкой контекста и component
+roots), так и существующие файлы, в том числе при отсутствии MSI-регистрации.
+Restore/uninstall используют только этот root; Settings-only early rollback
+не трогает графику. Старое значение snapshot mask по умолчанию сужено с 0x7F
+до 0x3F: новый бит 64 должен запрашиваться явно и не включаться на x86 от
+унаследованного default. Default старых шести реальных продуктов не изменён.
+
+Resources MSI получил GLASS_RESTORE_NO_CAB/InstallFiles condition по существующему
+протоколу: после возврата файлов из snapshot допускается восстановление
+регистрации по cached MSI без встроенного cabinet и без присутствующего OG.
+ARP дополнения остаётся штатным MSI: ему не подставляется несуществующий
+GlassUnins в каталоге Resources. Full-clean preflight учитывает и его регистрацию;
+Resources Apply/Remove вместе с forceClean отклоняется до worker mutations.
+
+**Незавершено:** карточка/нативный control, IPC/download job и forwarding новых
+installed facts из UI. Fresh OG + Resources и остальные combined official lanes
+с Resources Apply пока явно отклоняются: протокол OG commit → Resources commit
+ещё не реализован. Эти правки не означают готовый пользовательский сценарий.
+Существующие OG lanes не могут молча проигнорировать новый выбранный флаг.
+
+Проверки PASS: actual BuildExecutionPlan (исправлены границы extraction и
+недостающие старые stubs; прежний compile blocker устранён), Resources install,
+update/repair/downgrade, отсутствующий/неизвестный upstream, отсутствующий/linked
+DLL, неверный media, x86 refusal и removal без OG; 64 snapshot row unions;
+1458 procedure maps; actual rollback с отдельной graphics copy и запретом её
+Settings-only restore; fixed MSI path/context/rollback guards, fixed native roots,
+product policy/scheduler/catalog suites, OG engine/mixed worker/Unins mocks,
+empty-inventory preview, cancel-decision и verify_resources.
+Ни один mock не является Windows MSI/WiX/MSVC acceptance.
+
+Сборка: GlassUnins Release|x86 → GlassSetup Release|x86; Resources MSI пересобрать
+OpenGlassResources-x64 Release|x64. GlassShared не менялся.

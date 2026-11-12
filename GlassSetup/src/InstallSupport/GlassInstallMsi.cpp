@@ -178,6 +178,7 @@ std::wstring KnownProductCodeFromFileName(const std::wstring& msiPath) {
     if (!name) return L"";
     if (_wcsicmp(name, L"Glass-x64.msi") == 0) return kProductPlatformX64;
     if (_wcsicmp(name, L"Glass-x86.msi") == 0) return kProductPlatformX86;
+    if (_wcsicmp(name, L"OpenGlassResources-x64.msi") == 0) return kProductOpenGlassResourcesX64;
     if (_wcsicmp(name, L"OpenGlass-x64.msi") == 0) return kProductOpenGlass;
     if (_wcsicmp(name, L"GlassSettings-x64.msi") == 0) return kProductSettingsX64;
     if (_wcsicmp(name, L"GlassSettings-x86.msi") == 0) return kProductSettingsX86;
