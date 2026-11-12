@@ -1,4 +1,5 @@
 #pragma once
+#include "GlassOpenGlassInstall.h"
 #include "GlassMaintenanceCache.h"
 #include "GlassOpenGlassFiles.h"
 
@@ -36,7 +37,7 @@ inline bool HasProducts() {
     }
     GlassInstallUtil::InstallRoots roots{};
     if(!GlassInstallUtil::ResolveInstallRoots(roots))return true;
-    if(GlassOpenGlassFiles::HasReceipt(roots.openGlass))return true;
+    if(GlassOpenGlassFiles::HasReceipt(roots.openGlass)||GlassOpenGlassInstall::HasProduct())return true;
     return false; // Unknown enumeration is a reference, never absence.
 }
 // Explicit command, or successful last-product removal. No product/configuration

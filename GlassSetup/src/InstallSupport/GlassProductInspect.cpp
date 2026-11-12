@@ -1,4 +1,5 @@
 #include "GlassOpenGlassFiles.h"
+#include "GlassOpenGlassInstall.h"
 #include "GlassSetupSourceLayout.h"
 #include "GlassProductInspect.h"
 #include "GlassPackageAcquisition.h"
@@ -614,6 +615,26 @@ Report Run(const Inputs& in)
             }
         }
     }
+    // Official Inno registration is independent of bundled Glass roots. Read
+    // only: do not adopt its service/tasks into managed lifecycle ownership.
+    std::wstring officialOpenGlassRoot;
+    if(in.os64) {
+        GlassOpenGlassInstall::Record official;std::wstring inventoryError;
+        if(GlassOpenGlassInstall::Query(official,inventoryError)&&official.installed) {
+            officialOpenGlassRoot=official.directory;
+            report.og.installed=true;report.og.residual=false;report.og.residualSafe=false;
+            report.og.installedVersion.clear();report.og.installedPackageVersion.clear();
+            report.og.installedPayloadVersion=PayloadFileVersion(official.directory+L"\\OpenGlass.dll");
+            report.og.integrityKnown=false; // Registration/FileVersion is not a payload hash check.
+            report.og.damaged=report.og.installedPayloadVersion.empty();report.og.reasons.clear();
+            if(report.og.damaged)AddReason(report.og,Reason::FileMissing);
+        }else if(!inventoryError.empty()) {
+            report.og.installed=true;report.og.integrityKnown=false;report.og.damaged=true;
+            report.og.residual=false;report.og.residualSafe=false;
+            AddReason(report.og,Reason::InspectionUnavailable);
+            GlassInstallLog::Line(L"Official OpenGlass inventory: "+inventoryError);
+        }
+    }
     // Package releases may update installer plumbing without changing OpenGlass.
     // Keep MSI version authority for acquisition/execution, not the product badge.
     report.og.updateAvailable=report.og.installed&&report.og.sourceVerified&&GlassOpenGlassRelease::PayloadUpdateAvailable(
@@ -651,7 +672,8 @@ Report Run(const Inputs& in)
         AddReason(report.settings, Reason::RegistryInvalid);
     if (glassRepackedSut && (!rootsOk || rootInvalid(in.os64 ? roots.x64 : roots.x86)))
         AddReason(report.secureUxTheme, Reason::RegistryInvalid);
-    if (report.og.installed && (!rootsOk || rootInvalid(roots.openGlass)))
+    if (report.og.installed && (officialOpenGlassRoot.empty()?
+        (!rootsOk || rootInvalid(roots.openGlass)):rootInvalid(officialOpenGlassRoot)))
         AddReason(report.og, Reason::RegistryInvalid);
 
     // Служба/задачи автозапуска.

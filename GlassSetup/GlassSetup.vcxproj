@@ -135,6 +135,7 @@
     <ClCompile Include="src\InstallSupport\GlassPackageAcquisition.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallRollback.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallUtil.cpp" />
+    <ClCompile Include="src\InstallSupport\GlassOpenGlassUninstall.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallWatch.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallHost.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallRemoval.cpp" />

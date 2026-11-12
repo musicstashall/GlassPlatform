@@ -11,11 +11,18 @@ lane=s[s.index('bool InstallEngine::RunOfficialOpenGlassOnly()'):s.index('DWORD 
 for forbidden in ['StopRunningHosts(', 'CreateRollbackSnapshot(', 'RunMsiSequence(', 'RegisterSelectedProducts(', 'WriteOpenGlassInstallPath(', 'RefreshManagedArp(', 'PerformRollback(']:
     assert forbidden not in lane, forbidden
 assert lane.index('StandaloneOpenGlassApply(')<lane.index('EnsureTempWorkspace(')<lane.index('PrepareInstallerForCurrentSystem(')<lane.index('RunInstaller(')
-assert lane.index('Same(before,current)')<lane.index('RunInstaller(')
+assert lane.index('Same(officialOpenGlassBefore_,current)')<lane.index('RunInstaller(')
 assert lane.index('launchingPhase_.store(true')<lane.index('RunInstaller(')
 assert 'target=before.directory' in lane and 'target=native+L"\\\\OpenGlass"' in lane
 assert 'rollbackSucceeded_.store(false' in lane and 'ERROR_SUCCESS_REBOOT_REQUIRED' in lane
 assert 'after.version==openGlassPackage_.version' in lane
+assert 'RunUninstaller(current,code,error)' in lane and 'removing?!after.installed' in lane
+assert 'if(!removing) {' in lane
+inspect=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
+assert 'PayloadFileVersion(official.directory+' in inspect
+assert 'officialOpenGlassRoot.empty()?' in inspect
+assert 'report.og.integrityKnown=false; // Registration/FileVersion is not a payload hash check.' in inspect
+
 ui=(root/'GlassSetup/src/GlassProductDownloads.h').read_text()
 assert 'GlassOpenGlassPackage::PrepareInstallerForCurrentSystem(' in ui
 h=r'''
@@ -34,7 +41,20 @@ int main(){
  s.*member=true;assert(!StandaloneOpenGlassApply(s,false,true));s.*member=false;
  }
  for(unsigned i=0;i<6;++i){s.removeMask=1u<<i;assert(!StandaloneOpenGlassApply(s,false,true));}
- s.removeMask=0;s.openGlass=false;assert(!StandaloneOpenGlassApply(s,false,true));
+ s.removeMask=0;
+ s.platform64=true;assert(MixedOpenGlassApply(s,false,true));
+ assert(!MixedOpenGlassApply(s,true,true));assert(!MixedOpenGlassApply(s,false,false));
+ s.secureUxTheme=true;assert(!MixedOpenGlassApply(s,false,true));s.secureUxTheme=false;
+ s.removeMask=8;assert(!MixedOpenGlassApply(s,false,true));s.removeMask=0;
+ s.platform64=false;s.independentSettings=true;s.settings64=true;assert(MixedOpenGlassApply(s,false,true));s.settings64=false;
+ assert(!MixedOpenGlassApply(s,false,true));
+ s.openGlass=false;assert(!StandaloneOpenGlassApply(s,false,true));
+ s.removeMask=8;assert(StandaloneOpenGlassRemoval(s,false,true));
+ assert(!StandaloneOpenGlassRemoval(s,true,true));assert(!StandaloneOpenGlassRemoval(s,false,false));
+ s.openGlass=true;assert(!StandaloneOpenGlassRemoval(s,false,true));s.openGlass=false;
+ s.cleanupUserData=true;assert(!StandaloneOpenGlassRemoval(s,false,true));s.cleanupUserData=false;
+ s.removeMask=12;assert(!StandaloneOpenGlassRemoval(s,false,true));
+
 }
 '''
 with tempfile.TemporaryDirectory() as tmp:

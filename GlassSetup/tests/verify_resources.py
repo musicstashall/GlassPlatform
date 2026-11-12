@@ -841,7 +841,10 @@ assert footer_text.index('footerSetupVersion_') < footer_text.index('if (page_!=
 assert 'kContentHeight+34,450,16' in footer_text
 provider_src = (repo / "GlassSetup/src/InstallSupport/GlassOpenGlassPackage.cpp").read_text(encoding="utf-8")
 assert 'MAXULONG' not in provider_src
-assert '(std::numeric_limits<ULONG>::max)()' in provider_src
+trust_src = (repo / 'GlassSetup/src/InstallSupport/GlassOpenGlassTrust.h').read_text(encoding='utf-8')
+assert 'MAXULONG' not in trust_src
+assert '(std::numeric_limits<ULONG>::max)()' in trust_src
+assert '#include "GlassOpenGlassTrust.h"' in provider_src
 
 # Fonts exist before first visible frame; pending WebView never exposes the
 # native wizard. Runtime bootstrap and confirmed failure keep native recovery.

@@ -454,22 +454,33 @@ bool InstallEngine::RestorePriorHosts(bool keptOnly) noexcept {
 // stop/start, service/task registration, receipt or ARP rewriting is involved.
 bool InstallEngine::RunOfficialOpenGlassOnly() noexcept {
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-    bool attempted=false;
     try {
-        if(!GlassProducts::StandaloneOpenGlassApply(selection_,forceClean_,GlassInstallUtil::IsOs64Bit())) {
-            SetFailure(ru?L"Пока выполняйте установку/обновление OpenGlass отдельно. Смешанный план, очистка и удаление OpenGlass ещё не подключены к штатному установщику. Продукты не изменены.":
-                L"For now, install/update OpenGlass separately. Mixed plans, cleanup and OpenGlass removal are not yet connected to the official installer. Products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);
+        const bool removing=GlassProducts::StandaloneOpenGlassRemoval(selection_,forceClean_,GlassInstallUtil::IsOs64Bit());
+        if(!removing&&!GlassProducts::StandaloneOpenGlassApply(selection_,forceClean_,GlassInstallUtil::IsOs64Bit())) {
+            SetFailure(ru?L"Этот план OpenGlass пока не поддерживается: удаление должно быть отдельным; сочетание с SecureUxTheme, очисткой или чистой переустановкой недоступно. Продукты не изменены.":
+                L"This OpenGlass plan is not yet supported: removal must be standalone; combining with SecureUxTheme, cleanup or clean reinstall is unavailable. Products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);
             return false;
         }
+        return PrepareOfficialOpenGlass(removing)&&CommitOfficialOpenGlass(removing);
+    }catch(...) {SetFailure(L"OpenGlass operation failed",ERROR_INSTALL_FAILURE);return false;}
+}
+
+bool InstallEngine::PrepareOfficialOpenGlass(bool removing) noexcept {
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    try {
         if(MsiQueryProductStateW(GlassInstallMsi::kProductOpenGlass)!=INSTALLSTATE_UNKNOWN||
            MsiQueryProductStateW(GlassInstallMsi::kLegacyOpenGlass)!=INSTALLSTATE_UNKNOWN||
            GlassOpenGlassFiles::HasReceipt(openGlassDir_)) {
-            SetFailure(ru?L"Обнаружена прежняя управляемая установка OpenGlass. Автоматическая миграция пока не поддерживается; продукты не изменены.":
-                L"A retired managed OpenGlass installation was detected. Automatic migration is not yet supported; products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+            SetFailure(ru?L"Обнаружена старая тестовая установка OpenGlass. Удалите её прежним деинсталлятором перед проверкой нового маршрута; миграции не выполняются.":
+                L"A retired test OpenGlass installation was found. Remove it with its previous uninstaller before testing the new route; no migration is performed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
         }
-        GlassOpenGlassInstall::Record before;std::wstring error;
+        auto& before=officialOpenGlassBefore_;std::wstring error;
         if(!GlassOpenGlassInstall::Query(before,error)){SetFailure(error,ERROR_INSTALL_PACKAGE_REJECTED);return false;}
-        std::wstring target;
+        if(removing&&!before.installed) {
+            SetFailure(ru?L"Штатная регистрация OpenGlass не найдена. Удаление не выполнялось.":
+                L"Official OpenGlass registration is missing. No removal was performed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+        }
+        auto& target=officialOpenGlassTarget_;
         if(before.installed) {
             target=before.directory;
             if(!GlassMaintenanceCache::TrustedDirectory(target)||GlassOpenGlassFiles::HasReceipt(target)) {
@@ -488,16 +499,26 @@ bool InstallEngine::RunOfficialOpenGlassOnly() noexcept {
                     L"OpenGlass destination exists or is inaccessible without official registration. Products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
             }
         }
-        if(!EnsureTempWorkspace()){SetFailure(L"Cannot create protected OpenGlass workspace",GetLastError());return false;}
-        SetStatus(ru?L"OpenGlass: подготовка официального установщика":L"OpenGlass: preparing official installer",0);
-        if(!GlassOpenGlassPackage::PrepareInstallerForCurrentSystem(tempDir_,cancelRequested_,openGlassPackage_,error)) {
-            if(IsCancelRequested())userCancelled_.store(true,std::memory_order_release);
-            else SetFailure(error,ERROR_INSTALL_PACKAGE_REJECTED);
-            return false;
+        if(!removing) {
+            if(!EnsureTempWorkspace()){SetFailure(L"Cannot create protected OpenGlass workspace",GetLastError());return false;}
+            SetStatus(ru?L"OpenGlass: подготовка официального установщика":L"OpenGlass: preparing official installer",0);
+            if(!GlassOpenGlassPackage::PrepareInstallerForCurrentSystem(tempDir_,cancelRequested_,openGlassPackage_,error)) {
+                if(IsCancelRequested())userCancelled_.store(true,std::memory_order_release);
+                else SetFailure(error,ERROR_INSTALL_PACKAGE_REJECTED);
+                return false;
+            }
+            if(before.installed&&GlassOpenGlassRelease::PayloadUpdateAvailable(openGlassPackage_.version,before.version)) {
+                SetFailure(L"OpenGlass downgrade refused",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+            }
         }
-        if(before.installed&&GlassOpenGlassRelease::PayloadUpdateAvailable(openGlassPackage_.version,before.version)) {
-            SetFailure(L"OpenGlass downgrade refused",ERROR_INSTALL_PACKAGE_REJECTED);return false;
-        }
+        return true;
+    }catch(...) {SetFailure(L"OpenGlass preparation failed; no vendor execution",ERROR_INSTALL_FAILURE);return false;}
+}
+
+bool InstallEngine::CommitOfficialOpenGlass(bool removing) noexcept {
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    bool attempted=false;std::wstring error;
+    try {
         // Use the same lock/gate as RequestCancel: the vendor transaction is
         // non-cancellable once this boundary has been crossed.
         for(;;) {
@@ -512,24 +533,27 @@ bool InstallEngine::RunOfficialOpenGlassOnly() noexcept {
             if(ready)break;
         }
         GlassOpenGlassInstall::Record current;
-        if(!GlassOpenGlassInstall::Query(current,error)||!GlassOpenGlassInstall::Same(before,current)) {
+        if(!GlassOpenGlassInstall::Query(current,error)||!GlassOpenGlassInstall::Same(officialOpenGlassBefore_,current)) {
             SetFailure(error.empty()?L"OpenGlass registration changed before commit":error,ERROR_INSTALL_PACKAGE_REJECTED);return false;
         }
-        SetStatus(ru?L"OpenGlass: официальный установщик":L"OpenGlass: official installer",9000);
+        SetStatus(removing?(ru?L"OpenGlass: штатное удаление":L"OpenGlass: official uninstall"):
+            (ru?L"OpenGlass: официальный установщик":L"OpenGlass: official installer"),9000);
         DWORD code=ERROR_INSTALL_FAILURE;attempted=true;
-        const bool ran=GlassOpenGlassPackage::RunInstaller(openGlassPackage_,target,code,error);
+        const bool ran=removing?GlassOpenGlassPackage::RunUninstaller(current,code,error):
+            GlassOpenGlassPackage::RunInstaller(openGlassPackage_,officialOpenGlassTarget_,code,error);
         GlassOpenGlassInstall::Record after;std::wstring inventoryError;
-        const bool confirmed=GlassOpenGlassInstall::Query(after,inventoryError)&&after.installed&&
-            GlassInstallUtil::SameInstallPath(after.directory,target)&&after.version==openGlassPackage_.version;
+        const bool confirmed=GlassOpenGlassInstall::Query(after,inventoryError)&&
+            (removing?!after.installed:(after.installed&&
+            GlassInstallUtil::SameInstallPath(after.directory,officialOpenGlassTarget_)&&after.version==openGlassPackage_.version));
         if(!ran||(code!=ERROR_SUCCESS&&code!=ERROR_SUCCESS_REBOOT_REQUIRED)||!confirmed) {
             rollbackSucceeded_.store(false,std::memory_order_release);
             SetFailure((ru?L"Операция OpenGlass не подтверждена. Его состояние могло измениться; upstream-установка не откатывалась. ":
                 L"OpenGlass operation was not confirmed. Its state may have changed; the upstream installation was not rolled back. ")+error+L" "+inventoryError,
-                code==ERROR_SUCCESS?ERROR_INSTALL_FAILURE:code);return false;
+                (code==ERROR_SUCCESS||code==ERROR_SUCCESS_REBOOT_REQUIRED)?ERROR_INSTALL_FAILURE:code);return false;
         }
         if(code==ERROR_SUCCESS_REBOOT_REQUIRED)AddFinishWarning(ru?L"OpenGlass: требуется перезагрузка":L"OpenGlass: restart required",
             ru?L"Официальный установщик запросил перезагрузку Windows.":L"The official installer requested a Windows restart.");
-        InstallLog::Line(L"OpenGlass official standalone transaction confirmed; no Glass rollback claimed");
+        InstallLog::Line(L"OpenGlass official transaction confirmed; no Glass rollback claimed");
         SetStatus(labels_.finalize,10000);return true;
     }catch(...) {
         if(attempted)rollbackSucceeded_.store(false,std::memory_order_release);
@@ -539,18 +563,39 @@ bool InstallEngine::RunOfficialOpenGlassOnly() noexcept {
 }
 
 DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
-            auto* self = static_cast<InstallEngine*>(p);
-            // Never let a selected OG row fall through to the retired managed
-            // file/service/receipt pipeline, including unsupported mixed plans.
-            if(self->selection_.openGlass||self->selection_.Removes(3)) {
-                self->succeeded_=self->RunOfficialOpenGlassOnly();
-                if(!self->tempDir_.empty()) {
-                    (void)RemoveDirectoryTree(self->tempDir_);self->tempDir_.clear();
+    auto* self=static_cast<InstallEngine*>(p);
+    self->mixedOpenGlass_=GlassProducts::MixedOpenGlassApply(self->selection_,self->forceClean_,GlassInstallUtil::IsOs64Bit());
+    if(self->mixedOpenGlass_) {
+        // Preparation failure changes no products. Keep the staged EXE until
+        // after managed commit; the Glass worker must never own the OG row.
+        if(self->PrepareOfficialOpenGlass(false)) {
+            self->selection_.openGlass=false;
+            self->procedureMask_&=~8u;
+            RunGlassWorker(p);
+            self->selection_.openGlass=true;
+            if(self->succeeded_) {
+                self->succeeded_=self->CommitOfficialOpenGlass(false);
+                if(!self->succeeded_) {
+                    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+                    self->rollbackSucceeded_.store(false,std::memory_order_release);
+                    self->SetFailure((ru?L"План выполнен частично: изменения Glass сохранены, финальная операция OpenGlass не подтверждена. Общий откат не выполнялся. ":
+                        L"Plan partially completed: Glass changes were committed; the final OpenGlass operation was not confirmed. No overall rollback was performed. ")+self->ErrorText(),ERROR_INSTALL_FAILURE);
                 }
-                self->launchingPhase_.store(false,std::memory_order_release);
-                self->finished_.store(true,std::memory_order_release);
-                return 0;
             }
+        }
+    } else if(self->selection_.openGlass||self->selection_.Removes(3)) {
+        self->succeeded_=self->RunOfficialOpenGlassOnly();
+    } else RunGlassWorker(p);
+    if(!self->tempDir_.empty()) {
+        (void)RemoveDirectoryTree(self->tempDir_);self->tempDir_.clear();
+    }
+    self->finished_.store(true,std::memory_order_release);
+    self->launchingPhase_.store(false,std::memory_order_release);
+    return 0;
+}
+
+DWORD WINAPI InstallEngine::RunGlassWorker(LPVOID p) noexcept {
+            auto* self = static_cast<InstallEngine*>(p);
             const bool vendorOnly=GlassProducts::OnlySecureUxThemeRemoval(self->selection_);
             bool priorStateOk=vendorOnly || self->CapturePriorHostState();
             if(vendorOnly || self->auxiliaryOnly_)self->scanNativeX64_=GlassInstallUtil::IsOs64Bit();
@@ -661,7 +706,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                         Sleep(remain > 150 ? 150 : static_cast<DWORD>(remain));
                     }
                     self->FinishFullRemovalCleanup();
-                    self->SetStatus(self->labels_.finalize, 10000);
+                    if(!self->mixedOpenGlass_)self->SetStatus(self->labels_.finalize, 10000);
                 }
             }
 
@@ -748,16 +793,10 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                 ReleaseSRWLockExclusive(&self->statusLock_);
                 InstallLog::LineFormat(L"Rollback failed; retaining backup: %s",backup.c_str());
             }
-            if (!self->tempDir_.empty()) {
-                (void)RemoveDirectoryTree(self->tempDir_);
-                self->tempDir_.clear();
-            }
             // The local Native module has been released before rollback and no
             // helper process is needed beyond this point.
 
             self->succeeded_ = ok && !self->userCancelled_.load(std::memory_order_acquire);
-            self->finished_.store(true,std::memory_order_release);
-            self->launchingPhase_.store(false,std::memory_order_release);
             return 0;
 }
 

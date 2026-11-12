@@ -43,7 +43,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
       <GenerateManifest>false</GenerateManifest>
-      <AdditionalDependencies>$(MSBuildThisFileDirectory)..\third_party\WebView2LoaderStatic.lib;comctl32.lib;msi.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;advapi32.lib;user32.lib;version.lib;shlwapi.lib;shell32.lib;uxtheme.lib;gdiplus.lib;dwmapi.lib;gdi32.lib;msimg32.lib;wintrust.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(MSBuildThisFileDirectory)..\third_party\WebView2LoaderStatic.lib;comctl32.lib;msi.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;advapi32.lib;user32.lib;version.lib;shlwapi.lib;shell32.lib;uxtheme.lib;gdiplus.lib;dwmapi.lib;gdi32.lib;msimg32.lib;wintrust.lib;crypt32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -55,6 +55,7 @@
     <ClCompile Include="..\src\InstallSupport\GlassInstallMsi.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallRemoval.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallUtil.cpp" />
+    <ClCompile Include="..\src\InstallSupport\GlassOpenGlassUninstall.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallWatch.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallHost.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallUnlock.cpp" />

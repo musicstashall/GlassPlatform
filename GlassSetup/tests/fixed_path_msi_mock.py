@@ -44,7 +44,7 @@ assert 'GlassRegisteredMsi::Recheck' in unins
 assert r'workspaceDir+L"\\rollback-prior-' in rollback_src
 assert 'GlassRegisteredMsi::Recheck' in engine
 assert r'workspace+L"\\recheck-' in registered
-worker = function(engine, "DWORD WINAPI InstallEngine::WorkerThread(")
+worker = function(engine, "DWORD WINAPI InstallEngine::RunGlassWorker(")
 assert worker.index("CreateRollbackSnapshot()") < worker.index("StopRunningHosts()") < worker.index("InstallGlassSettingsEarly()")
 assert worker.index("CapturePriorHostState()") < worker.index("CreateRollbackSnapshot()")
 create = function(rollback_src, "bool CreateSnapshot(")

@@ -55,7 +55,7 @@ bool IsProductInstalled(const wchar_t* code){return versions.count(code);}
 namespace Shared::SecureUxThemeInventory{
 unsigned QueryInstalled(std::vector<std::wstring>& out){out=official;return inventoryStatus;}}
 namespace GlassOpenGlassFiles {bool HasReceipt(const std::wstring&){return false;}struct Record{std::wstring version;};Record Inspect(const std::wstring&){return {};}}
-struct App{std::wstring openGlassDir_;
+struct App{std::wstring openGlassDir_;struct {bool installed=false;std::wstring version;} officialOpenGlass_;
 // PROJECTION
 };
 // OLDER
@@ -78,6 +78,7 @@ int main(){App app;
  official.push_back(L"another");assert(app.InstalledMsiVersion(L"secureUxTheme").empty());official.clear();
  versions[L"sut64"]=L"2.9.0";assert(app.InstalledMsiVersion(L"secureUxTheme")==L"2.9.0");
  inventoryStatus=5;assert(app.InstalledMsiVersion(L"secureUxTheme").empty());
+ app.officialOpenGlass_.installed=true;app.officialOpenGlass_.version=L"3.0.2.3749";assert(app.InstalledMsiVersion(L"openglass")==L"3.0.2.3749");
  std::cout<<"PASS: actual MSI version API/Unins projection: five distinct versions, legacy, unknown, oversized, ambiguous SUT; independent MSI build-property wiring\n";
 }
 '''.replace('// READER',reader).replace('// PROJECTION',projection).replace('// OLDER',older)

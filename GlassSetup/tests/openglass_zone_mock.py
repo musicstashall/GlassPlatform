@@ -7,7 +7,7 @@ import tempfile
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallSupport/GlassOpenGlassPackage.cpp').read_text(encoding='utf-8')
 a=source.index('void RemoveInternetZone(')
-b=source.index('std::array<unsigned char,32> Hash(',a)
+b=source.index('std::wstring Property(',a)
 helper=source[a:b]
 harness=r'''
 #include <cassert>
