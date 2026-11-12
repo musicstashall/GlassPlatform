@@ -855,3 +855,37 @@ catalog after final signing and publish the matching artifacts.
 The six supplied build/install logs were deleted after analysis; image-34.png was
 retained. The confirmed earlier five-MSI release/catalog mismatch was a separate
 publication issue, not the cause of this cache-timing warning.
+
+### Installed-app follow-up: icon, official OG Change, retained Settings entries
+
+Resources maintenance ARP customization now explicitly writes DisplayIcon to the
+verified cached GlassSetup.exe,0. The MSI already has ARPPRODUCTICON, but Windows
+Settings also needs a usable icon path after our non-WindowsInstaller ARP redirect.
+
+Official OG Change integration is now implemented, superseding the earlier
+"if possible" backlog item. Only the unique validated exact upstream Inno key is
+opened, with a second inventory equality check before writes. A trusted cached
+Setup is required. Only ModifyPath (--modify --product retired logical OG GUID)
+and NoModify=0 are changed; no new OG ARP entry, uninstall override, service/ACL
+change or broad registry search is performed. Refresh runs after confirmed vendor
+install/uninstall as well as normal managed maintenance. A failed refresh is a
+finish warning, not a false vendor rollback. Source/mock tests cover absence,
+invalid inventory, changed inventory, missing cache, access/write failures and
+unchanged vendor UninstallString. No Windows UI acceptance performed.
+
+The reported two retained GlassSettings entries after full removal are NOT yet
+root-caused or claimed fixed: no removal log accompanies this report, and MSI
+registration versus orphan ARP key versus SystemSettings cached list cannot be
+inferred from an entry's display name. Bounded notifications were already present.
+Do not delete MSI registrations or ARP keys by display name, force-close Settings,
+or use Win32_Product (which may initiate repairs).
+
+Run the read-only scripts/Get-SettingsArpDiagnostics.ps1 after removal while the
+entries remain visible; it prints current-context MSI state and exact known
+Settings ProductCode keys in HKLM/HKCU 32/64-bit views. It does not enumerate other
+users' MSI contexts. Capture its output and the corresponding GlassSetup removal
+log before closing/reopening Settings; those distinguish actionable residual
+registration from an already-removed product retained only in the UI.
+
+Build GlassUnins Release|Win32 followed by GlassSetup Release|Win32. These ARP
+changes do not require rebuilding Resources MSI; its package icon is unchanged.

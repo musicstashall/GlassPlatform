@@ -37,6 +37,7 @@ int main(){reset();values[L"WindowsInstaller"]=L"1";assert(PatchResourcesMainten
  assert(values[L"ModifyPath"]==L"\"C:\\Protected\\GlassSetup.exe\" --modify --product \"{6D6046DB-6B28-4F2C-8A7D-EB6CF13CBBD9}\"");
  assert(values[L"UninstallString"].find(L"msiexec.exe\" /x")!=std::wstring::npos);
  assert(values[L"QuietUninstallString"].find(L"/qn /norestart")!=std::wstring::npos);
+ assert(values[L"DisplayIcon"]==L"C:\\Protected\\GlassSetup.exe,0");
  assert(values[L"NoModify"]==L"0"&&!values.count(L"WindowsInstaller"));
  for(bool* flag:{&installed,&safe,&available,&open,&writes}){reset();*flag=false;assert(!PatchResourcesMaintenance()&&handles==0);}
 }

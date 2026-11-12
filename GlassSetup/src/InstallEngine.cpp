@@ -578,6 +578,9 @@ bool InstallEngine::CommitOfficialOpenGlass(bool removing) noexcept {
         if(code==ERROR_SUCCESS_REBOOT_REQUIRED)AddFinishWarning(ru?L"OpenGlass: требуется перезагрузка":L"OpenGlass: restart required",
             ru?L"Для завершения операции OpenGlass требуется перезагрузка Windows.":L"Restart Windows to finish the OpenGlass operation.");
         InstallLog::Line(L"OpenGlass official transaction confirmed; no Glass rollback claimed");
+        if(!GlassInstallMsi::RefreshManagedArp(x64Dir_,x86Dir_,openGlassDir_))
+            AddFinishWarning(ru?L"Не все записи приложений обновлены":L"Some installed-app entries were not updated",
+                ru?L"Не удалось обновить ссылки обслуживания. Подробности в журнале.":L"Maintenance links could not all be updated. See the log.");
         SetStatus(labels_.finalize,selection_.openGlassResources?9600:10000);return true;
     }catch(...) {
         if(attempted)rollbackSucceeded_.store(false,std::memory_order_release);

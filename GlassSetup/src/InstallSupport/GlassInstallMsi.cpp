@@ -4,6 +4,7 @@
 #include "GlassInstallUtil.h"
 #include "GlassMaintenanceCache.h"
 #include "GlassOpenGlassFiles.h"
+#include "GlassOpenGlassInstall.h"
 #include <SecureUxThemeInventory.h>
 #include <msi.h>
 #include <msiquery.h>
@@ -243,7 +244,7 @@ static bool PatchResourcesMaintenance() {
     bool ok=IsProductInstalled(kProductOpenGlassResourcesX64)&&
         CheckProductContexts(kProductOpenGlassResourcesX64,detail)==ProductPathCheck::Safe;
     if(ok) {
-        ok=put(L"ModifyPath",modify)&&put(L"UninstallString",uninstall)&&put(L"QuietUninstallString",uninstall+L" /qn /norestart");
+        ok=put(L"DisplayIcon",setup+L",0")&&put(L"ModifyPath",modify)&&put(L"UninstallString",uninstall)&&put(L"QuietUninstallString",uninstall+L" /qn /norestart");
         const DWORD zero=0,one=1;
         ok=RegSetValueExW(key,L"NoModify",0,REG_DWORD,reinterpret_cast<const BYTE*>(&zero),sizeof(zero))==ERROR_SUCCESS&&ok;
         ok=RegSetValueExW(key,L"NoRepair",0,REG_DWORD,reinterpret_cast<const BYTE*>(&one),sizeof(one))==ERROR_SUCCESS&&ok;
@@ -399,6 +400,30 @@ static bool RefreshOpenGlassFileArp(const std::wstring& root) {
     RegCloseKey(key);return ok;
 }
 
+// Augment only the unambiguous, validated official Inno registration.
+// Its uninstall commands, identity and service ownership remain upstream-owned.
+static bool PatchOfficialOpenGlassMaintenance() {
+    GlassOpenGlassInstall::Record before;std::wstring error;
+    if(!GlassOpenGlassInstall::Query(before,error))return false;
+    if(!before.installed)return true;
+    const auto setup=GlassMaintenanceCache::CurrentFile(L"GlassSetup.exe");
+    if(setup.empty())return false;
+    HKEY key=nullptr;
+    if(RegOpenKeyExW(HKEY_LOCAL_MACHINE,before.keyPath.c_str(),0,KEY_SET_VALUE|KEY_WOW64_64KEY,&key)!=ERROR_SUCCESS)return false;
+    GlassOpenGlassInstall::Record after;
+    bool ok=GlassOpenGlassInstall::Query(after,error)&&GlassOpenGlassInstall::Same(before,after);
+    if(ok) {
+        const auto modify=L"\""+setup+L"\" --modify --product \""+kProductOpenGlass+L"\"";
+        const DWORD zero=0;
+        ok=RegSetValueExW(key,L"ModifyPath",0,REG_SZ,reinterpret_cast<const BYTE*>(modify.c_str()),
+            static_cast<DWORD>((modify.size()+1)*sizeof(wchar_t)))==ERROR_SUCCESS;
+        if(ok)ok=RegSetValueExW(key,L"NoModify",0,REG_DWORD,reinterpret_cast<const BYTE*>(&zero),sizeof(zero))==ERROR_SUCCESS;
+    }
+    RegCloseKey(key);
+    GlassInstallLog::LineFormat(L"Official OpenGlass Change redirect: %s",ok?L"ok":L"incomplete");
+    return ok;
+}
+
 bool RefreshManagedArp(const std::wstring& x64Dir,const std::wstring& x86Dir,const std::wstring& openGlassDir) noexcept {
     try {
         bool ok=true;
@@ -419,6 +444,7 @@ bool RefreshManagedArp(const std::wstring& x64Dir,const std::wstring& x86Dir,con
         }
         if(IsProductInstalled(kProductOpenGlassResourcesX64))ok=PatchResourcesMaintenance()&&ok;
         ok=RefreshOpenGlassFileArp(openGlassDir)&&ok;
+        ok=PatchOfficialOpenGlassMaintenance()&&ok;
         GlassAppsNotification::Changed();
         GlassInstallLog::LineFormat(L"Remaining managed ARP refresh: %s",ok?L"ok":L"incomplete");
         return ok;
