@@ -30,10 +30,29 @@
     <GenerateAssemblyInformationalVersionAttribute>false</GenerateAssemblyInformationalVersionAttribute>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <GlassBundleVersionStamp>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassBundleVersion.stamp'))</GlassBundleVersionStamp>
+  </PropertyGroup>
+
+  <!-- Номер комплекта — вход проверки актуальности. Метка пишется только при смене номера,
+       поэтому обычная повторная сборка того же комплекта проекты не пересобирает. -->
+  <ItemGroup Condition="'$(MSBuildProjectExtension)' == '.csproj' and '$(Configuration)' == 'Release' and Exists('$(GlassBundleVersionStamp)')">
+    <UpToDateCheckInput Include="$(GlassBundleVersionStamp)" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(IsGlassNativeBinary)' == 'true'">
     <ResourceCompile Include="$(MSBuildThisFileDirectory)Shared\GlassModuleVersion.rc">
       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(IsGlassNativeBinary)' == 'true' and '$(Configuration)' == 'Release' and Exists('$(GlassBundleVersionStamp)')">
+    <CustomBuild Include="$(GlassBundleVersionStamp)">
+      <Command>cmd /d /c if not exist "$(IntDir)." mkdir "$(IntDir)." &amp; copy /y "$(GlassBundleVersionStamp)" "$(IntDir)GlassBundleSession.stamp" &gt;nul</Command>
+      <Outputs>$(IntDir)GlassBundleSession.stamp</Outputs>
+      <Message>GlassBundle $(GlassBundleVersion)</Message>
+      <LinkObjects>false</LinkObjects>
+    </CustomBuild>
   </ItemGroup>
 
   <Target Name="GlassEnsureIntDir" BeforeTargets="GlassWriteVersionHeader" Condition="'$(IsGlassNativeBinary)' == 'true'">
