@@ -55,28 +55,46 @@ public static class PlatformPaths
         _openGlassGuiPath ??= ResolveOpenGlassGuiCore();
 
     /// <summary>
-    /// Упорядоченный список корней для поиска ресурсов (атласы, отражения, материалы).
-    /// Гарантирует поиск в каталоге OpenGlass.dll, корне установки, платформенном корне и AppBase.
+    /// Корень дополнений GlassPlatform, содержащий Resources. Не зависит от
+    /// каталога upstream OG, разрядности Settings или наличия GlassCompat.dll.
+    /// Совпадает с ProgramFiles64Folder\GlassPlatform\OpenGlass в Resources MSI.
     /// </summary>
-    public static IReadOnlyList<string> GetResourceSearchRoots()
+    public static string? OpenGlassResourcesRoot => ResolveOpenGlassResourcesRoot();
+
+    public static string? OpenGlassResourcesDirectory => OpenGlassResourcesRoot is { } root
+        ? Path.Combine(root, "Resources")
+        : null;
+
+    /// <summary>
+    /// Единственный корень каталога графических дополнений. ThemeImageCatalog
+    /// добавляет Resources/AtlasTheme, Resources/GlassReflection и т. п.
+    /// Внешняя установка OG используется для DLL/Host/GUI, но не для дополнений.
+    /// </summary>
+    public static IReadOnlyList<string> GetResourceSearchRoots() =>
+        OpenGlassResourcesRoot is { } root ? new[] { root } : Array.Empty<string>();
+
+    private static string? ResolveOpenGlassResourcesRoot()
     {
-        var roots = new List<string>(4);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        void AddRoot(string? path)
+        try
         {
-            if (string.IsNullOrWhiteSpace(path)) return;
-            var full = Path.GetFullPath(path);
-            if (seen.Add(full))
-                roots.Add(full);
+            // HKLM64 gives native Program Files even to x86 GlassSettings.
+            // Do not use the external OG InstallLocation or process AppBase.
+            using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine,
+                Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32);
+            using var key = machine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion");
+            if (key is null || key.GetValueKind("ProgramFilesDir") != RegistryValueKind.String ||
+                key.GetValue("ProgramFilesDir", null, RegistryValueOptions.DoNotExpandEnvironmentNames) is not string programFiles ||
+                string.IsNullOrWhiteSpace(programFiles) || !Path.IsPathFullyQualified(programFiles))
+                return null;
+
+            return Path.Combine(Path.GetFullPath(programFiles), "GlassPlatform", "OpenGlass");
         }
-
-        AddRoot(OpenGlassDir);
-        AddRoot(OpenGlassInstallRoot);
-        AddRoot(PlatformRoot);
-        AddRoot(AppBase);
-
-        return roots;
+        catch
+        {
+            // Unknown root means no built-in catalog, not a fallback into an
+            // unrelated upstream or x86 directory. Custom paths remain intact.
+            return null;
+        }
     }
 
     /// <summary>Резолв модуля платформы по имени файла и архитектуре.</summary>
