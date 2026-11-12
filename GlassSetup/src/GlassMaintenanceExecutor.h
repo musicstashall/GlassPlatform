@@ -14,11 +14,11 @@ constexpr Phase PhaseOf(P::Product product,P::Action action) noexcept {
     return Phase::Products;
 }
 constexpr std::array<P::Product,P::kProductCount> kRemovalOrder{
-    P::Product::SecureUxTheme,P::Product::OpenGlass,P::Product::Platform32,
+    P::Product::SecureUxTheme,P::Product::OpenGlassResources,P::Product::OpenGlass,P::Product::Platform32,
     P::Product::Platform64,P::Product::Settings64,P::Product::Settings32};
 constexpr std::array<P::Product,P::kProductCount> kInstallOrder{
     P::Product::Settings64,P::Product::Settings32,P::Product::Platform64,
-    P::Product::Platform32,P::Product::OpenGlass,P::Product::SecureUxTheme};
+    P::Product::Platform32,P::Product::OpenGlass,P::Product::OpenGlassResources,P::Product::SecureUxTheme};
 struct Result {
     bool ok=true;
     unsigned error=0;

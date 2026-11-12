@@ -16,7 +16,9 @@ upstream=package.find("w:Property[@Id='UPSTREAMOPENGLASSROOT']",ns)
 assert upstream is not None and upstream.find('w:RegistrySearch',ns) is not None
 assert package.find("w:Property[@Id='OPENGLASSROOT']",ns) is None
 assert package.find(".//w:DirectorySearch",ns).get('Path')=='[UPSTREAMOPENGLASSROOT]'
-assert 'UPSTREAMOPENGLASSROOT AND OPENGLASSDLL' in package.find('w:Launch',ns).get('Condition')
+assert 'UPSTREAMOPENGLASSROOT AND OPENGLASSDLL AND NOT UPSTREAMOPENGLASSALTROOT' in package.find('w:Launch',ns).get('Condition')
+assert 'UPSTREAMOPENGLASSALTROOT AND OPENGLASSALTDLL AND NOT UPSTREAMOPENGLASSROOT' in package.find('w:Launch',ns).get('Condition')
+assert '{D3D1BC7D-5E24-4B33-9383-7934271A3B05}}_is1' in (msi/'OpenGlassResourcesPackage.wxs').read_text()
 native=package.find("w:StandardDirectory[@Id='ProgramFiles64Folder']",ns)
 platform=native.find("w:Directory[@Name='GlassPlatform']",ns)
 og=platform.find("w:Directory[@Name='OpenGlass']",ns)
@@ -65,3 +67,14 @@ publish=(root/'GlassSetup/scripts/New-ReleaseCatalog.ps1').read_text()
 assert "openglassResources='OpenGlassResources-x64.msi'" in publish
 assert package.get('UpgradeCode') in publish and package.get('ProductCode') in publish
 print('PASS: Resources catalog/publisher/acquisition fixed identity, AMD64 guard, non-colliding prepared slot; UI/execution integration still pending')
+
+inspection=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
+assert '{ GlassInstallMsi::kProductOpenGlassResourcesX64, nullptr, &report.openGlassResources }' in inspection
+assert '{GlassPackageCatalog::Product::OpenGlassResources,&report.openGlassResources,GlassInstallMsi::kProductOpenGlassResourcesX64,nullptr}' in inspection
+assert 'if(!in.os64 && product.report==&report.openGlassResources)continue;' in inspection
+assert 'if(!in.os64 && job.product==GlassPackageCatalog::Product::OpenGlassResources)continue;' in inspection
+# Graphics uses the installed MSI baseline, never the external Resources directory,
+# and never PE payload version/service/task checks belonging to OG itself.
+assert 'InstalledBaselineMatches(reference,installedCode)' in inspection
+assert 'CheckProductFiles(reference,installedCode,signerSha1,*job.rep,job.product==GlassPackageCatalog::Product::OpenGlass)' in inspection
+print('PASS: separate x64 graphics inventory/offer/installed-baseline lane; exact two upstream prerequisite identities, no ambiguous roots')

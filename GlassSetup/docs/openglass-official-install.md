@@ -412,3 +412,48 @@ Resources build/source contract, catalog handoff и verify_resources PASS.
 Windows WiX/MSVC/реальная установка не проверялись.
 Сборка текущих C++ изменений: GlassUnins Release|x86 → GlassSetup Release|x86;
 пакет отдельно OpenGlassResources-x64 Release|x64 с непустым graphics source.
+
+### Resources integration: shared policy and read-only inventory
+
+Следующий реализованный слой (UI и Windows mutation adapters ещё не подключены):
+`GlassProductPlan::Product::OpenGlassResources` добавлен **в конец**, индекс 6.
+Индексы старых шести продуктов не изменены. Planner запрещает Resources Apply
+на x86, а на x64 требует OG Installed в after-state без Blocked OG operation.
+Самостоятельный выбор графики не выбирает OG автоматически. OG Remove не
+расширяет удаление на графику: её можно оставить, затем отдельно удалить без OG.
+Старые preview/worker adapters пока не передают седьмой выбор; никакой новой
+mutation только от расширения enum не возникает.
+
+Shared scheduler содержит все семь строк ровно по одному разу: установка OG
+раньше Resources; при явном удалении обоих — Resources раньше OG. Это policy
+порядок, **не утверждение о готовности official commit-last worker**. Для fresh
+upstream OG → Resources отдельный адаптер фаз/частичного результата ещё нужен.
+
+`GlassProductInspect::Report::openGlassResources` — независимая регистрация
+фиксированного ProductCode, ProductVersion, локальный/серверный offer, attached
+media и installed-baseline integrity. Наличие DLL, служб и upstream Resources
+не считается наличием этого MSI. На x86 соответствующие inventory/source jobs
+пропускаются. Графике не присваивается выдуманный PE payload version и не
+назначаются OG service/task checks.
+
+В MSI Launch prerequisite добавлен второй **точный** upstream Inno identity,
+уже поддерживаемый Setup; каждый root проверяется своим OpenGlass.dll search.
+Два найденных root одновременно не принимаются. Ни один из них не становится
+INSTALLDIR: назначение по-прежнему native PF\GlassPlatform\OpenGlass\Resources.
+Удаление собственного MSI допускается и без установленного upstream OG.
+
+Проверки: 16384 старых presence/selection cases + 128 dedicated Resources
+presence/intent/OS combinations; 16384 семипродуктовых scheduler plans, invalid
+plan refusal и остановка на каждой из семи ошибок удаления; compiled catalog,
+Resources source/XML contracts, empty-inventory Preview, procedure maps,
+official OG engine/mixed worker/Unins mocks и verify_resources PASS.
+`setup_execution_plan_mock.py` не скомпилировался: его извлечённый engine harness
+не содержит существующие GlassOpenGlassFiles/openGlassPackage_ и методы full
+cleanup. Этот тест не считается пройденным. Windows/WiX/MSVC acceptance нет.
+
+Оставшаяся работа: седьмая строка UI/native controls и selection/IPC/downloads,
+передача reports в adapters, rollback/cache/root contracts для Graphics MSI,
+managed execution и official commit-last fresh OG + Resources. Карточка пока
+не появляется; текущая правка не выдаётся за завершение пользовательской задачи.
+Сборка: GlassUnins Release|x86 → GlassSetup Release|x86; изменённый пакет —
+OpenGlassResources-x64 Release|x64 с graphics source. GlassShared не менялся.

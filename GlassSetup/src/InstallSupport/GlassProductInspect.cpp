@@ -466,10 +466,12 @@ Report Run(const Inputs& in)
         { GlassInstallMsi::kProductSecureUxThemeX64, nullptr, &report.secureUxTheme },
         { GlassInstallMsi::kProductSecureUxThemeX86, nullptr, &report.secureUxTheme },
         { GlassInstallMsi::kProductOpenGlass, GlassInstallMsi::kLegacyOpenGlass, &report.og },
+        { GlassInstallMsi::kProductOpenGlassResourcesX64, nullptr, &report.openGlassResources },
     };
 
     for (const auto& product : products)
     {
+        if(!in.os64 && product.report==&report.openGlassResources)continue;
         const bool modern = GlassInstallMsi::IsProductInstalled(product.modernCode);
         const bool legacy = product.legacyCode && GlassInstallMsi::IsProductInstalled(product.legacyCode);
         if (!modern && !legacy)
@@ -539,9 +541,11 @@ Report Run(const Inputs& in)
         {GlassPackageCatalog::Product::Platform32,&report.x86,GlassInstallMsi::kProductPlatformX86,GlassInstallMsi::kLegacyPlatformX86},
         {GlassPackageCatalog::Product::Settings64,&report.settings64,GlassInstallMsi::kProductSettingsX64,nullptr},
         {GlassPackageCatalog::Product::Settings32,&report.settings32,GlassInstallMsi::kProductSettingsX86,nullptr},
-        {GlassPackageCatalog::Product::OpenGlass,&report.og,GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass}};
+        {GlassPackageCatalog::Product::OpenGlass,&report.og,GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass},
+        {GlassPackageCatalog::Product::OpenGlassResources,&report.openGlassResources,GlassInstallMsi::kProductOpenGlassResourcesX64,nullptr}};
     for(const auto& job:jobs) {
         if(cancel.load())break;
+        if(!in.os64 && job.product==GlassPackageCatalog::Product::OpenGlassResources)continue;
         if(job.product==GlassPackageCatalog::Product::OpenGlass)continue; // Upstream file product, never adjacent/cached Glass MSI.
         std::wstring offerPath;
         if(in.inspectSources && GlassPackageAcquisition::Describe(job.product,catalog,cancel,

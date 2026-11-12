@@ -19,7 +19,19 @@
         <FileSearch Id="OpenGlassDllFile" Name="OpenGlass.dll" />
       </DirectorySearch>
     </Property>
-    <Launch Condition="REMOVE = &quot;ALL&quot; OR (UPSTREAMOPENGLASSROOT AND OPENGLASSDLL)"
+    <!-- Match the second exact Inno identity accepted by Setup's inventory.
+         Do not accept arbitrary names/locations or ambiguous dual registration. -->
+    <Property Id="UPSTREAMOPENGLASSALTROOT" Secure="yes">
+      <RegistrySearch Id="UpstreamOpenGlassAltRoot" Root="HKLM"
+          Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\{D3D1BC7D-5E24-4B33-9383-7934271A3B05}}_is1"
+          Name="InstallLocation" Type="directory" Bitness="always64" />
+    </Property>
+    <Property Id="OPENGLASSALTDLL">
+      <DirectorySearch Id="OpenGlassAltDllDirectory" Path="[UPSTREAMOPENGLASSALTROOT]" Depth="0">
+        <FileSearch Id="OpenGlassAltDllFile" Name="OpenGlass.dll" />
+      </DirectorySearch>
+    </Property>
+    <Launch Condition="REMOVE = &quot;ALL&quot; OR ((UPSTREAMOPENGLASSROOT AND OPENGLASSDLL AND NOT UPSTREAMOPENGLASSALTROOT) OR (UPSTREAMOPENGLASSALTROOT AND OPENGLASSALTDLL AND NOT UPSTREAMOPENGLASSROOT))"
             Message="Install OpenGlass before OpenGlass Resources. / Сначала установите OpenGlass." />
     <StandardDirectory Id="ProgramFiles64Folder">
       <!-- Upstream inventory is a prerequisite only, never our payload root. -->
