@@ -82,6 +82,13 @@ constexpr bool MixedOpenGlassApply(const Selection& s,bool forceClean,bool os64)
         !s.secureUxTheme&&!s.secureUxThemeRemove&&!s.removeMask&&!s.cleanupUserData&&!forceClean;
 }
 
+// Managed apply can precede official OG removal just as it precedes OG apply.
+constexpr bool MixedOpenGlassRemoval(const Selection& s,bool forceClean,bool os64) noexcept {
+    return os64&&!s.openGlass&&s.removeMask==(1u<<3)&&
+        (s.platform64||s.platform32||s.Settings64(os64)||s.Settings32(os64))&&
+        !s.secureUxTheme&&!s.secureUxThemeRemove&&!s.cleanupUserData&&!forceClean;
+}
+
 // Pure managed removal needs the installed MSI baseline, not new release media.
 constexpr bool OnlyManagedRemoval(const Selection& choice) noexcept {
     return choice.removeMask && !choice.secureUxTheme && !choice.secureUxThemeRemove &&

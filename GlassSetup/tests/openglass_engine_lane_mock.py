@@ -57,6 +57,13 @@ int main(){
  assert(!StandaloneOpenGlassRemoval(s,true,true));assert(!StandaloneOpenGlassRemoval(s,false,false));
  s.openGlass=true;assert(!StandaloneOpenGlassRemoval(s,false,true));s.openGlass=false;
  s.cleanupUserData=true;assert(!StandaloneOpenGlassRemoval(s,false,true));s.cleanupUserData=false;
+ auto mixed=Selection{};mixed.platform64=mixed.platform32=mixed.openGlass=false;
+ mixed.independentSettings=true;mixed.settings32=true;mixed.glassSettings=true;mixed.removeMask=8;
+ assert(MixedOpenGlassRemoval(mixed,false,true)); // Exact user plan: rows=0x28.
+ assert(!MixedOpenGlassRemoval(mixed,true,true));assert(!MixedOpenGlassRemoval(mixed,false,false));
+ mixed.secureUxTheme=true;assert(!MixedOpenGlassRemoval(mixed,false,true));mixed.secureUxTheme=false;
+ mixed.cleanupUserData=true;assert(!MixedOpenGlassRemoval(mixed,false,true));mixed.cleanupUserData=false;
+ mixed.removeMask=9;assert(!MixedOpenGlassRemoval(mixed,false,true));
  s.removeMask=12;assert(!StandaloneOpenGlassRemoval(s,false,true));
 
 }

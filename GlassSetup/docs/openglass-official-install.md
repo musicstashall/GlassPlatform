@@ -345,3 +345,32 @@ Windows/Inno acceptance пока не проводился в sandbox. Загр�
 Сборка: GlassUnins Release|x86 → GlassSetup Release|x86 (общий inventory header);
 GlassSettings Release|x64/Release|x86 для исправленного discovery. Native/Shared
 код и каталог ресурсов не менялись.
+
+### OG Remove + Platform/Settings Apply в Setup
+
+Разобран GlassSetup-28.log, session 20261112_093001, Setup FileVersion 2.0.0.247.
+Пользовательский план — rows=0x28: OG Remove плюс Settings x86 Apply. Локальный
+Settings x86 MSI подготовлен успешно; inventory обнаружил отличающийся Native
+x86 при той же MSI версии. Ни MSI mutation, ни Inno uninstall не начинались:
+dispatcher отправил этот mixed remove в прежний standalone-only gate.
+Это ограничение реализации, а не отказ Windows или самого uninstaller.
+
+Теперь MixedOpenGlassRemoval допускает ровно OG Remove вместе с Platform и/или
+Settings Apply, без других Remove, SUT, cleanup и force-clean. Используется
+существующий sequential-commit dispatcher: PrepareOfficialOpenGlass(removing)
+без downloads, исключение OG apply/remove intent и procedure bit из managed
+worker, восстановление исходных intent, затем официальный Commit(removing).
+При неуспехе/отмене managed части OG не удаляется. После Glass commit ошибка
+uninstaller означает явный частичный результат: изменения Glass сохранены,
+удаление OG не подтверждено; общий rollback не заявляется. Конфигурация OG
+сохраняется, publisher/path checks не изменены. Совместное удаление OG и других
+продуктов, а также mixed GlassUnins Remove пока не реализованы.
+
+Compiled mocks: exact user policy rows=0x28; настоящий dispatcher для mixed
+removal success, managed failure и vendor partial failure, исключение Remove
+bit из managed worker и восстановление исходного плана. Также PASS existing
+standalone/uninstaller/GlassUnins/cancellation/fixed-path/source checks.
+MSVC/реальное удаление Inno в sandbox не запускались. Исходное log-вложение
+после анализа удалено; image-27.png сохранено.
+Сборка: GlassUnins Release|x86 → GlassSetup Release|x86, поскольку общий
+GlassProducts.h входит в оба проекта. GlassShared не менялся.
