@@ -32,9 +32,10 @@ int RegCreateKeyExW(int,const wchar_t*,int,void*,int options,int access,SECURITY
 int RegOpenKeyExW(int,const wchar_t*,int,int access,HKEY* key){assert(access&KEY_WOW64_64KEY);*key=reinterpret_cast<void*>(2);return !registryReadable?5:registryPresent?0:2;}
 void RegCloseKey(HKEY){}
 namespace GlassInstallMsi {
-constexpr auto kProductPlatformX64=L"a",kProductPlatformX86=L"b",kProductSettingsX64=L"c",kProductSettingsX86=L"d",kProductOpenGlass=L"e",kProductSecureUxThemeX64=L"f",kProductSecureUxThemeX86=L"g",kLegacyPlatformX64=L"h",kLegacyPlatformX86=L"i",kLegacyOpenGlass=L"j";
+constexpr auto kProductPlatformX64=L"a",kProductPlatformX86=L"b",kProductSettingsX64=L"c",kProductSettingsX86=L"d",kProductOpenGlass=L"e",kProductSecureUxThemeX64=L"f",kProductSecureUxThemeX86=L"g",kLegacyPlatformX64=L"h",kLegacyPlatformX86=L"i",kLegacyOpenGlass=L"j",kProductOpenGlassResourcesX64=L"res";
 }
-UINT MsiEnumProductsExW(const wchar_t*,const wchar_t*,int,int,wchar_t*,void*,void*,void*){return registration;}
+bool resourcesOnly=false;
+UINT MsiEnumProductsExW(const wchar_t* code,const wchar_t*,int,int,wchar_t*,void*,void*,void*){return resourcesOnly&&std::wstring(code)==L"res"?0:registration;}
 namespace GlassInstallLog {void Line(const wchar_t*){}}
 namespace GlassMaintenanceCache {
 struct CacheLock {bool acquired=true;};
@@ -60,6 +61,7 @@ int main(){using namespace GlassMaintenanceLifetime;
  reset();{Lease shared;assert(shared.Acquire()&&share_==FILE_SHARE_READ&&access_==GENERIC_READ);}assert(live==0);
  reset();fileProduct=true;assert(!RetireUnused());fileProduct=false;rootsKnown=false;assert(!RetireUnused());rootsKnown=true;
  reset();officialProduct=true;assert(!RetireUnused());officialProduct=false;
+ reset();resourcesOnly=true;assert(!RetireUnused());resourcesOnly=false;
  reset();registration=0;assert(!RetireUnused()&&files.count(L"root\\Installer\\Active"));
  registration=5;assert(!RetireUnused()); // Incomplete registration discovery is not absence.
  reset();busy=true;assert(!RetireUnused()&&files.count(L"root\\Installer\\Active"));

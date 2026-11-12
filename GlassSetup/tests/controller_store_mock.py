@@ -116,12 +116,14 @@ int main(){using namespace GlassMaintenanceCache;std::string record;
  const auto oldFolder=L"root\\Installer\\"+std::wstring(64,L'c');lockedFolder=oldFolder;
  dirs.insert(L"root\\Current");files[L"root\\Current\\old.msi"]="source";
  FinalizeControllerStartup(true);assert(ReadControllerRecord()==record&&dirs.count(oldFolder)&&arpRefreshes==1);
- lockedFolder.clear();FinalizeControllerStartup(true);assert(!dirs.count(oldFolder)&&files.count(L"root\\Current\\old.msi"));
+ lockedFolder.clear();FinalizeControllerStartup(true);assert(dirs.count(oldFolder)&&files.count(L"root\\Current\\old.msi"));
+ assert(!ControllerFileForRecord(oldRecord,L"GlassSetup.exe").empty()); // Cached ModifyPath still launches after old process exits.
  assert(!ControllerFile(L"GlassSetup.exe").empty());
 
  // Replay crashes on each side of the durable confirmation boundary.
  assert(WriteControllerRecord(L"Confirmed",oldRecord));assert(WriteControllerRecord(L"Pending",record));
- // oldRecord was GC'd above: untrusted rollback target must fail closed.
+ // Simulate external loss/corruption: an unavailable rollback target fails closed.
+ assert(RemoveFlat(oldFolder));
  assert(!RecoverControllerTransition());
  files[L"old.exe"]="old";digests[L"old.exe"]=0xcc;assert(StageController(L"old.exe",oldRecord));
  assert(RecoverControllerTransition()&&ReadControllerRecord()==oldRecord&&ReadControllerRecord(L"Rejected")==record);

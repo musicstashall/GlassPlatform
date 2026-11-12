@@ -97,7 +97,16 @@ namespace {
         return false;
     if (!GlassMaintenanceCache::TrustedPath(self, false))
         return false;
-    return PathsEqualCanonical(self, canonical);
+    if(PathsEqualCanonical(self, canonical))return true;
+    // An already-open Installed Apps window can retain an older ModifyPath.
+    // Accept only our protected content-addressed entrypoint; signer and parent/
+    // ticket authorization below remain mandatory, then normal handoff picks Active.
+    const auto digest=GlassMaintenanceCache::ControllerDigest(self);
+    if(digest.size()!=64)return false;
+    const auto root=GlassMaintenanceCache::Root(),store=root+L"\\Installer";
+    const auto folder=store+L"\\"+std::wstring(digest.begin(),digest.end());
+    return GlassMaintenanceCache::TrustedDirectory(root)&&GlassMaintenanceCache::TrustedDirectory(store)&&
+        GlassMaintenanceCache::TrustedDirectory(folder)&&PathsEqualCanonical(self,folder+L"\\GlassSetup.exe");
 }
 
 } // namespace
@@ -564,16 +573,18 @@ bool FinalizeControllerStartup(bool ready) noexcept {
         const auto store=Root()+L"\\Installer";
         DeleteFileW((store+L"\\Previous").c_str());
         DeleteFileW((store+L"\\Pending").c_str());
-        // Only our flat code directories are eligible. Locked old EXEs survive
-        // as CleanupPending and are retried next startup; no forced process kill.
+        // Installed Apps caches command strings while its window remains open.
+        // A broadcast cannot guarantee it rereads ModifyPath/UninstallString.
+        // Keep published digest folders until explicit unused-controller retirement;
+        // even an unlocked old EXE may still be a live cached entrypoint.
+        // Only abandoned staging/snapshot objects are collected here.
         WIN32_FIND_DATAW data{};HANDLE find=FindFirstFileW((store+L"\\*").c_str(),&data);
         if(find!=INVALID_HANDLE_VALUE){
             do {
                 const std::wstring name=data.cFileName;
                 const std::string ascii(name.begin(),name.end());
-                const bool digestFolder=ControllerRecordValid(ascii+ascii);
                 const bool stageFolder=name.rfind(L"Stage-",0)==0;
-                if((digestFolder||stageFolder)&&(data.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)&&
+                if(stageFolder&&(data.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)&&
                    !(data.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)&&ascii!=active.substr(0,64)) {
                     if(!RemoveFlat(store+L"\\"+name))
                         GlassInstallLog::LineFormat(L"Controller CleanupPending: %s",name.c_str());
@@ -589,16 +600,9 @@ bool FinalizeControllerStartup(bool ready) noexcept {
         GlassInstallUtil::InstallRoots roots;
         if(!GlassInstallUtil::ResolveInstallRoots(roots)||!GlassInstallMsi::RefreshManagedArp(roots.x64,roots.x86,roots.openGlass)) {
             GlassInstallLog::Line(L"Controller ready; maintenance entry refresh pending; legacy entrypoints retained");
-        } else {
-            // Migrate code only after managed ARP entries point at the independent
-            // controller. Never remove MSI/CAB/receipts from legacy Current here.
-            for(const auto* name:{L"GlassSetup.exe",L"GlassUnins.exe"}) {
-                const auto legacy=Root()+L"\\Current\\"+name;
-                if(GetFileAttributesW(legacy.c_str())==INVALID_FILE_ATTRIBUTES)continue;
-                if(!GlassInstallUtil::IsSafeInstallPath(legacy)||!TrustedPath(legacy,false)||!DeleteFileW(legacy.c_str()))
-                    GlassInstallLog::LineFormat(L"Controller legacy entrypoint CleanupPending: %s",legacy.c_str());
-            }
         }
+        // Legacy entrypoints can also be cached by an open Settings window.
+        // Do not delete them merely because current registry writes succeeded.
         return true;
     }catch(...){GlassInstallLog::Line(L"Controller startup finalization pending");return false;}
 }

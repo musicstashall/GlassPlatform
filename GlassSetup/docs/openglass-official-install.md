@@ -982,3 +982,47 @@ excluding verified absent products from accepted recommendations (superseded by
 the earlier fresh-install recommendation change); expectation now matches that
 explicit user-approved policy, with no production policy change in this patch.
 Build GlassUnins Release|Win32 -> GlassSetup Release|Win32; no Resources MSI change.
+
+### Open Installed Apps window retains pre-update commands (image-37)
+
+User clarified that reopening Windows Settings fixes the links: current ARP data
+is correct, but the same open window retains an old Installer/<digest>/GlassSetup.exe
+command. Startup finalization collected non-active digest directories as soon as
+they were unlocked. This made an externally cached command fail with file-not-found.
+The existing bounded WM_SETTINGCHANGE broadcast is best-effort and does not prove
+that SystemSettings rereads its per-window command cache.
+
+Finalization now retains published content-addressed controller folders rather
+than treating them as abandoned staging. Legacy Current code is likewise no
+longer explicitly deleted in finalization just because ARP refresh succeeded.
+Abandoned Stage-/snapshot cleanup continues. Old published controllers are removed
+by explicit RetireUnused only after no products, no reboot pin and exclusive lease.
+This trades disk space for command compatibility: multiple installed updater
+versions can remain until retirement; no age/count-based deletion can guarantee
+that an open external window has released the old command.
+
+For newly built controllers, Modify authorization recognizes a retained protected
+content-addressed Setup path as well as Active. Its actual SHA256 must equal the
+folder name, the exact Setup filename/path and protected directory ACLs must match,
+Active must still be valid, and signer plus parent/ticket/handoff checks still run.
+Existing controller selection transfers to the newest compatible Active without
+downgrade. This does not change older EXE code retroactively: already-deleted
+old paths require refreshing the existing Settings window once; older retained
+controllers predating the authorization fix may enter the normal wizard instead
+of preserving Modify intent. New-to-new updates exercise the full compatibility
+path. No registry redirection to untrusted paths, Settings force-close, or UI
+refresh guarantee is claimed.
+
+While checking retirement, Resources was found missing from HasProducts' fixed MSI
+list. It is now included so keeping only Resources cannot retire its Setup link.
+The old/new digest-store mock proves old code paths remain resolvable after
+finalization (including once unlocked), while a separately simulated missing
+rollback target still fails closed. Actual retained-entry identity/ACL/hash tests,
+Resources-only lifetime tests, controller handoff, notifications and source smoke
+pass. Real open-SystemSettings Windows acceptance is pending.
+
+Build GlassUnins Release|Win32 -> GlassSetup Release|Win32; publish matching Setup
+metadata. Resources MSI need not be rebuilt. The separately reported disabled
+Apply button is still unconfirmed: no selected-plan screenshot or log accompanied
+this report, and retaining command paths does not fix a selection/readiness gate.
+Do not claim that issue resolved by this patch.
