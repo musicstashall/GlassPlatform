@@ -131,7 +131,7 @@ preparation также больше не извлекает payload. MOTW сни
 **не утверждает**, что Inno был откачен. Собственный rollback не запускается.
 
 GlassUnins, общий inventory/UI установленного продукта, mixed-product commit,
-полная Resources integration и миграция старых управляемых файлов ещё не готовы.
+полная Resources integration ещё не готовы. Миграция старых тестовых установок не планируется: их нужно предварительно удалить прежним деинсталлятором.
 Старый общий код пока сохранён, но выбранная строка OG до него не доходит.
 `openglass_engine_lane_mock.py` проверяет pure selection policy и source-order
 контракты; runner/ADS/inventory имеют отдельные compiled mocks. Windows VM
@@ -143,8 +143,7 @@ acceptance (Inno/SCM/reboot/cancel/partial failure) и MSVC сборка ещё 
 
 Ограничение выше уточнено: standalone Remove OpenGlass теперь поддерживается
 новым маршрутом Setup. Нужна ровно одна Remove-строка OpenGlass, без Apply других
-продуктов, force-clean или cleanupUserData. Смешанные планы и миграция по-прежнему
-отклоняются до изменений. GlassUnins пока не подключён к новому runner.
+продуктов, force-clean или cleanupUserData. Смешанные планы по-прежнему отклоняются до изменений. Миграция старых тестовых установок намеренно не реализуется. GlassUnins пока не подключён к новому runner.
 
 `RunUninstaller` повторно проверяет точную Inno-регистрацию, защищённость каталога,
 EXE и `unins000.dat`, обычные single-link файлы и подпись ожидаемого upstream
@@ -181,3 +180,40 @@ Windows uninstall acceptance. Для проверки на Windows нужна VM
 (общий inline lifetime header изменён; нового линковочного модуля нет).
 GlassShared пересобирать не требуется. При проверке удаления используйте Setup,
 а не ещё не подключённый к official runner GlassUnins.
+
+
+### GlassUnins подключён к official removal
+
+Standalone OpenGlass Remove теперь использует тот же `RunUninstaller` в Setup и
+GlassUnins. Runner вынесен в отдельный `GlassOpenGlassUninstall.cpp`, а прежние
+pin/Authenticode/exact publisher/hash helpers без ослабления политики вынесены
+в `GlassOpenGlassTrust.h`. GlassUnins не линкуется с acquisition/download/extract
+модулями; ему добавлены только uninstall translation unit и bcrypt.lib для
+существующего signer hash. Оба vcxproj компилируют общий runner ровно один раз.
+
+GlassUnins read-only inventory и версия карточки теперь учитывают точную Inno
+регистрацию независимо от bundled дерева. Выбранная строка OpenGlass
+перехватывается до старых root/MSI/file/service probes. Отдельный маршрут
+повторно сверяет регистрацию с показанной пользователю, атомарно закрывает
+отмену, вызывает runner с сохранением конфигурации и подтверждает отсутствие
+регистрации. Ошибка, неизвестное состояние и retained registration — не успех;
+автоматический откат upstream не заявляется. 3010 сохраняет reboot pin.
+
+Mixed-product Remove и cleanupUserData пока отклоняются до изменений.
+Официальный продукт также учитывается как ссылка, запрещающая глобальную
+очистку при его сохранении. Последующие этапы: согласованный mixed-product
+commit и полноценная интеграция Resources; **миграции старых установок не нужны
+и не планируются**, поскольку публичного выпуска ещё не было. Старую тестовую
+установку нужно удалить её прежним деинсталлятором перед проверкой нового пути.
+Старые строки документа о «миграции ещё не готова» не являются планом её разработки.
+
+`openglass_unins_lane_mock.py` компилирует настоящий метод GlassUnins с fake
+Win32/vendor API: отдельный выбор, ранний отказ mixed/cleanup/retired identity,
+конкурирующая отмена, изменившаяся регистрация, raw ошибки, post-check и reboot.
+Отдельный compiled runner mock продолжает проверять command/trust/pins/handles.
+Подпись реального upstream uninstaller и Windows runtime всё ещё требуют VM
+acceptance; unsigned uninstaller не запускается, доверие не ослаблено.
+
+Сборка: **GlassUnins Release|x86 → GlassSetup Release|x86**. Shared/Settings и
+полный solution rebuild не требуются. Native fallback и HTML используют один
+новый RunOperation dispatch, отдельного сценария удаления в UI не добавлено.

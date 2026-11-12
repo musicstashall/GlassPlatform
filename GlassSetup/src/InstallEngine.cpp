@@ -465,8 +465,8 @@ bool InstallEngine::RunOfficialOpenGlassOnly() noexcept {
         if(MsiQueryProductStateW(GlassInstallMsi::kProductOpenGlass)!=INSTALLSTATE_UNKNOWN||
            MsiQueryProductStateW(GlassInstallMsi::kLegacyOpenGlass)!=INSTALLSTATE_UNKNOWN||
            GlassOpenGlassFiles::HasReceipt(openGlassDir_)) {
-            SetFailure(ru?L"Обнаружена прежняя управляемая установка OpenGlass. Автоматическая миграция пока не поддерживается; продукты не изменены.":
-                L"A retired managed OpenGlass installation was detected. Automatic migration is not yet supported; products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+            SetFailure(ru?L"Обнаружена старая тестовая установка OpenGlass. Удалите её прежним деинсталлятором перед проверкой нового маршрута; миграции не выполняются.":
+                L"A retired test OpenGlass installation was found. Remove it with its previous uninstaller before testing the new route; no migration is performed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
         }
         GlassOpenGlassInstall::Record before;std::wstring error;
         if(!GlassOpenGlassInstall::Query(before,error)){SetFailure(error,ERROR_INSTALL_PACKAGE_REJECTED);return false;}

@@ -1,6 +1,8 @@
 // GlassPlatform selective uninstaller. The original executable relaunches from an
 // administrator-only temporary directory before any MSI is removed.
 #include "InstallSupport/GlassInstallHost.h"
+#include "InstallSupport/GlassOpenGlassPackage.h"
+#include "InstallSupport/GlassOpenGlassInstall.h"
 #include "InstallSupport/GlassInstallLog.h"
 #include "InstallSupport/GlassInstallMsi.h"
 #include "InstallSupport/GlassInstallRemoval.h"
@@ -354,6 +356,7 @@ private:
     std::wstring webState_;
     std::wstring x64Dir_,x86Dir_,openGlassDir_;
     bool rootsKnown_=false;
+    GlassOpenGlassInstall::Record officialOpenGlass_;
     std::mutex dataMutex_;
     std::wstring status_,error_,holdReport_;
     bool savedThemeFallbackWarning_=false;
@@ -390,8 +393,11 @@ private:
         installed_.settings=installed_.settings64 || installed_.settings32;
         GlassInstallUtil::InstallRoots fileRoots{};
         const bool fileRootsKnown=GlassInstallUtil::ResolveInstallRoots(fileRoots);
+        std::wstring officialError;
+        const bool officialKnown=GlassOpenGlassInstall::Query(officialOpenGlass_,officialError);
         installed_.openGlass=Msi::IsProductInstalled(Msi::kProductOpenGlass)||
-            (fileRootsKnown&&GlassOpenGlassFiles::HasReceipt(fileRoots.openGlass));
+            (fileRootsKnown&&GlassOpenGlassFiles::HasReceipt(fileRoots.openGlass))||
+            !officialKnown||officialOpenGlass_.installed;
         installed_.secureUxTheme=Msi::IsProductInstalled(Msi::kProductSecureUxThemeX64) ||
             Msi::IsProductInstalled(Msi::kProductSecureUxThemeX86);
     }
@@ -415,7 +421,7 @@ private:
         // permit global data cleanup while the standalone MSI-only route keeps it.
         GlassInstallUtil::InstallRoots fileRoots{};
         if(!GlassInstallUtil::ResolveInstallRoots(fileRoots))return true;
-        if(GlassOpenGlassFiles::HasReceipt(fileRoots.openGlass))return true;
+        if(GlassOpenGlassFiles::HasReceipt(fileRoots.openGlass)||GlassOpenGlassInstall::HasProduct())return true;
 
         struct Candidate { const wchar_t* code; bool excluded; };
         const Candidate products[]={
@@ -566,6 +572,7 @@ private:
     }
     std::wstring InstalledMsiVersion(const wchar_t* id) const {
         using namespace GlassInstallMsi;
+        if(wcscmp(id,L"openglass")==0&&officialOpenGlass_.installed)return officialOpenGlass_.version;
         if(wcscmp(id,L"openglass")==0&&GlassOpenGlassFiles::HasReceipt(openGlassDir_)) {
             try{return GlassOpenGlassFiles::Inspect(openGlassDir_).version;}catch(...){return {};}
         }
@@ -789,7 +796,52 @@ private:
         SetPage(Page::SettingsRisk);
         return false;
     }
+    int RunOfficialOpenGlassRemoval(const Selection& chosen) {
+        if(chosen.x64||chosen.x86||chosen.settings||chosen.settings64||chosen.settings32||
+           chosen.secureUxTheme||chosen.cleanupSettings) {
+            SetError(T(L"Пока удаляйте OpenGlass отдельно от других продуктов, без очистки пользовательских данных. Продукты не изменены.",
+                L"For now, remove OpenGlass separately from other products, without user-data cleanup. Products were not changed."));
+            return ERROR_INSTALL_PACKAGE_REJECTED;
+        }
+        if(MsiQueryProductStateW(Msi::kProductOpenGlass)!=INSTALLSTATE_UNKNOWN||
+           MsiQueryProductStateW(Msi::kLegacyOpenGlass)!=INSTALLSTATE_UNKNOWN||
+           GlassOpenGlassFiles::HasReceipt(openGlassDir_)) {
+            SetError(T(L"Обнаружена старая тестовая установка OpenGlass. Удалите её прежним деинсталлятором перед проверкой нового маршрута; миграции не выполняются.",
+                L"A retired test OpenGlass installation was found. Remove it with its previous uninstaller before testing the new route; no migration is performed."));
+            return ERROR_INSTALL_PACKAGE_REJECTED;
+        }
+        GlassOpenGlassInstall::Record current;std::wstring detail;
+        if(!GlassOpenGlassInstall::Query(current,detail)||!current.installed||
+           !GlassOpenGlassInstall::Same(officialOpenGlass_,current)||GlassOpenGlassFiles::HasReceipt(current.directory)) {
+            SetError(T(L"Штатная установка OpenGlass недоступна или изменилась. Удаление не начато. ",
+                L"The official OpenGlass installation is unavailable or changed. Removal was not started. ")+detail);
+            return ERROR_INSTALL_PACKAGE_REJECTED;
+        }
+        // Same atomic close/cancel boundary as the MSI route, but no host stop,
+        // MSI snapshot, managed service/task teardown or directory pruning.
+        OperationState expected=OperationState::BeforeRemoval;
+        if(!operationState_.compare_exchange_strong(expected,OperationState::Removing,std::memory_order_acq_rel))
+            return ERROR_INSTALL_USEREXIT;
+        removalStarted_.store(true,std::memory_order_release);
+        if(window)PostMessageW(window,kWorkerHold,static_cast<WPARAM>(Page::Removing),0);
+        SetStatus(T(L"OpenGlass: штатное удаление…",L"OpenGlass: official uninstall…"),1000);
+        DWORD code=ERROR_INSTALL_FAILURE;
+        const bool ran=GlassOpenGlassPackage::RunUninstaller(current,code,detail);
+        GlassOpenGlassInstall::Record after;std::wstring inventoryError;
+        const bool absent=GlassOpenGlassInstall::Query(after,inventoryError)&&!after.installed;
+        if(!ran||(code!=ERROR_SUCCESS&&code!=ERROR_SUCCESS_REBOOT_REQUIRED)||!absent) {
+            SetError(T(L"Штатное удаление OpenGlass не подтверждено. Его состояние могло измениться; автоматический откат не выполнялся. ",
+                L"Official OpenGlass removal was not confirmed. Its state may have changed; no automatic rollback was performed. ")+detail+L" "+inventoryError);
+            return code==ERROR_SUCCESS||code==ERROR_SUCCESS_REBOOT_REQUIRED?ERROR_INSTALL_FAILURE:static_cast<int>(code);
+        }
+        if(code==ERROR_SUCCESS_REBOOT_REQUIRED)(void)GlassMaintenanceReboot::Pinned(true);
+        SetStatus(code==ERROR_SUCCESS_REBOOT_REQUIRED?
+            T(L"OpenGlass удалён. Требуется перезагрузка Windows.",L"OpenGlass removed. Restart Windows to finish."):
+            T(L"OpenGlass удалён. Пользовательские настройки сохранены.",L"OpenGlass removed. User settings were preserved."),10000);
+        return static_cast<int>(code);
+    }
     int RunOperation(Selection chosen) {
+        if(chosen.openGlass)return RunOfficialOpenGlassRemoval(chosen);
         if (chosen.cleanupSettings && (args_.silent || !cleanupReviewed_ || !RemovesAllInstalled(chosen) || AnyRegisteredProduct(&chosen))) {
             SetError(T(L"Очистка не разрешена: требуется явный выбор на странице полного удаления.",
                 L"Cleanup refused: an explicit choice on the full-removal page is required."));

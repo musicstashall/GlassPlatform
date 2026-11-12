@@ -3,8 +3,8 @@
 from pathlib import Path
 import subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
-s=(root/'GlassSetup/src/InstallSupport/GlassOpenGlassPackage.cpp').read_text()
-runner=s[s.index('bool RunUninstaller('):s.index('bool RunInstaller(')]
+s=(root/'GlassSetup/src/InstallSupport/GlassOpenGlassUninstall.cpp').read_text()
+runner=s[s.index('bool RunUninstaller('):s.rfind('\n}')]
 h=r'''
 #include <cassert>
 #include <string>
