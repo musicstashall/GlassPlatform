@@ -9,21 +9,24 @@
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="GlassProductIcon" SourceFile="$(var.GlassSetupIcon)" />
     <Property Id="ARPPRODUCTICON" Value="GlassProductIcon" />
-    <Property Id="OPENGLASSROOT" Secure="yes">
+    <Property Id="UPSTREAMOPENGLASSROOT" Secure="yes">
       <RegistrySearch Id="UpstreamOpenGlassRoot" Root="HKLM"
           Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\{D3D1BC7D-5E24-4B33-9383-7934271A3B05}_is1"
           Name="InstallLocation" Type="directory" Bitness="always64" />
     </Property>
     <Property Id="OPENGLASSDLL">
-      <DirectorySearch Id="OpenGlassDllDirectory" Path="[OPENGLASSROOT]" Depth="0">
+      <DirectorySearch Id="OpenGlassDllDirectory" Path="[UPSTREAMOPENGLASSROOT]" Depth="0">
         <FileSearch Id="OpenGlassDllFile" Name="OpenGlass.dll" />
       </DirectorySearch>
     </Property>
-    <Launch Condition="REMOVE = &quot;ALL&quot; OR (OPENGLASSROOT AND OPENGLASSDLL)"
+    <Launch Condition="REMOVE = &quot;ALL&quot; OR (UPSTREAMOPENGLASSROOT AND OPENGLASSDLL)"
             Message="Install OpenGlass before OpenGlass Resources. / Сначала установите OpenGlass." />
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="OPENGLASSROOT" Name="OpenGlass">
-        <Directory Id="INSTALLDIR" Name="Resources" />
+      <!-- Upstream inventory is a prerequisite only, never our payload root. -->
+      <Directory Id="GlassPlatformResourcesRoot" Name="GlassPlatform">
+        <Directory Id="GlassOpenGlassResourcesRoot" Name="OpenGlass">
+          <Directory Id="INSTALLDIR" Name="Resources" />
+        </Directory>
       </Directory>
     </StandardDirectory>
     <Feature Id="Graphics" Title="OpenGlass Resources" Level="1">

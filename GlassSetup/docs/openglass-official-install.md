@@ -56,8 +56,9 @@
   `Build\x64\Release\OpenGlass\Resources`; можно задать `GlassOgResourcesSource`.
   Build отказывает при отсутствии/пустом источнике, reparse points и расширениях
   вне whitelist graphics/data. DLL/EXE/service/uninstaller не включаются.
-- Ставится только подкаталог `Resources` найденной Inno установки. MSI можно
-  направить через `OPENGLASSROOT` после проверки каталога в Setup (интеграция впереди).
+- Дополнения ставятся в `[ProgramFiles64Folder]GlassPlatform\OpenGlass\Resources`,
+  независимо от каталога upstream OG. Inno InstallLocation используется только
+  для проверки зависимости (наличия OpenGlass.dll), не как destination MSI.
 - Проект виден в solution, но не добавлен в автоматическую Build.0: исходные
   графические файлы не хранятся в этом репозитории, пустой пакет недопустим.
 
@@ -257,3 +258,30 @@ reboot, cache и сохранность upstream service/config.
 
 Сборка этого шага: **GlassSetup Release|x86**. GlassUnins, GlassShared и их
 линковочные зависимости в этом шаге не менялись; full solution rebuild не нужен.
+
+
+### Исправлен контракт каталога графических дополнений
+
+Resources принадлежат GlassPlatform, а не внешней установке OpenGlass. Default
+MSI destination: native Program Files\GlassPlatform\OpenGlass\Resources.
+Например, при OG в D:\Apps\OpenGlass дополнения остаются в
+C:\Program Files\GlassPlatform\OpenGlass\Resources (если native Program Files
+этой Windows — C:\Program Files). Внешние Resources не заполняются этим MSI.
+
+`UPSTREAMOPENGLASSROOT` — отдельное read-only discovery свойство зависимости,
+не directory payload. Каталог MSI строится независимо от него от
+`ProgramFiles64Folder`. `PlatformPaths.OpenGlassResourcesRoot` и
+`OpenGlassResourcesDirectory` используют тот же native Program Files из HKLM64,
+включая x86 Settings на x64 Windows. ThemeImageCatalog ищет встроенные дополнения
+только в этом корне; внешние DLL/Host/GUI продолжают разрешаться по официальному
+Inno InstallLocation. Указанные пользователем custom asset paths не меняются.
+При недоступном системном пути Settings не подставляет внешний OG/AppBase.
+
+Проверка `openglass_resources_contract.py`: XML дерево MSI/независимость
+upstream search от destination и source wiring Settings/ThemeImageCatalog.
+Это не WiX/MSVC/.NET runtime acceptance. Полное подключение Resources к
+catalog/UI/planner всё ещё впереди. Миграций прежних тестовых установок нет.
+
+Сборка: отдельно OpenGlassResources-x64.wixproj Release|x64 (нужен graphics
+source), затем GlassSettings Release|x64 и Release|x86 для нужных пакетов.
+Изменений native/shared/GlassUnins/GlassSetup C++ в этом исправлении нет.
