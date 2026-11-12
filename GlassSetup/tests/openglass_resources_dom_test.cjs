@@ -32,6 +32,14 @@ for(const locale of ['ru','en']){
  assert.match(d.querySelector('#components-plan-items li[data-product="openglassResources"]').textContent,/25%/);
  d.querySelector('#components-plan-items li[data-product="openglassResources"] .plan-cancel').click();
  assert.equal(messages.at(-1),'component:openglassResources:0');
+ // Fresh pair: prerequisite is explicit, not silently selected by Resources.
+ const empty=rows.map(row=>row.id==='openglass'||row.id==='openglassResources'?{...row,installed:false,operation:'install',applySupported:row.id==='openglass'}:row);
+ send(empty,locale);assert.ok(available().querySelector('.comp-decision').disabled);
+ d.querySelector('#components-grid [data-product="openglass"] .comp-decision').click();
+ assert.equal(messages.at(-1),'component:openglass:1');
+ send(empty.map(row=>row.id==='openglass'?{...row,checked:true}:row.id==='openglassResources'?{...row,applySupported:true}:row),locale);
+ available().querySelector('.comp-decision').click();assert.equal(messages.at(-1),'component:openglassResources:1');
+ assert.deepEqual([...d.querySelectorAll('#components-plan-items li[data-product]')].map(node=>node.dataset.product),['openglass','openglassResources']);
  // Installed/orphan resources remain removable without a usable OG Apply.
  const installed=rows.map(row=>row.id==='openglassResources'?{...row,applySupported:false}:row);
  send(installed,locale);input().closest('.c-card').querySelector('.comp-remove').click();
@@ -41,11 +49,11 @@ for(const locale of ['ru','en']){
  // x86 capability hides both authoritative card and catalogue alias.
  send(rows.map(row=>({...row,hidden:row.id==='openglassResources'})),locale);
  assert.equal(input(),null);assert.equal(available(),null);
- // Bulk recommendations prioritize OG; never add the unsupported pair.
+ // Once the host advertises the combined lane, recommendations include both.
  send(ready.map(row=>row.id==='openglass'?{...row,operation:'update',updateAvailable:true,targetVersion:'2.0.0',targetPayloadVersion:'2.0.0',installedPayloadVersion:'1.0.0'}:row),locale);
  const before=messages.length;d.getElementById('components-select-all').click();
  assert.ok(messages.slice(before).includes('component:openglass:1'));
- assert.ok(!messages.slice(before).includes('component:openglassResources:1'));
+ assert.ok(messages.slice(before).includes('component:openglassResources:1'));
 }
 assert.deepEqual(errors,[]);dom.window.close();
 console.log('PASS: production RU/EN Resources card, icon, prerequisite refusal, apply/remove/undo IPC, progress, x86 hiding and compatible recommendations');

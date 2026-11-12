@@ -31,7 +31,7 @@ int main(){
   UI ui;native64=os64;auto& s=ui.selection_;s.platform64=s.platform32=s.glassSettings=s.openGlass=false;
   s.independentSettings=true;ui.resourcesPrerequisiteReady_=installed;
   s.openGlassResources=mask&1;s.openGlass=mask&2;s.removeMask=(mask&4?8u:0u)|(mask&8?64u:0u);
-  assert(ResourcesApplyReady(s,os64,installed)==(os64&&installed&&!s.openGlass&&!s.Removes(3)));
+  assert(ResourcesApplyReady(s,os64,installed)==(os64&&(installed||s.openGlass)&&!s.Removes(3)&&(!s.openGlass||!s.removeMask)));
   const auto selected=ui.DownloadSelection();assert(selected.size()==7);
   assert(selected[6]==(os64&&s.openGlassResources&&!s.Removes(6)));
   assert(!selected[5]); // SUT is not the catalog's Resources index.

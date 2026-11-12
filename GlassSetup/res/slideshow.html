@@ -1013,11 +1013,7 @@ function componentRecommendations(){
   const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);if(!item||item.hidden)return false;
   const f=componentCardFacts(item,input);return !input.disabled&&item.applySupported!==false&&!f.remove&&(!item.installed||f.newer||f.broken||f.helperChanged||item.recommended===true);
  });
- // The current Resources lane uses existing OG only; bulk recommendations
- // must not create a plan the native commit-last dispatcher cannot execute.
- const og=document.getElementById('product-openglass');
- return candidates.filter(input=>input.dataset.component!=='openglassResources'||
-  !og?.checked&&!candidates.some(candidate=>candidate.dataset.component==='openglass'));
+ return candidates;
 }
 function acceptComponentRecommendations(){batchComponentActions(()=>{for(const input of componentRecommendations())if(!input.checked)commitComponentChoice(input,true);});}
 

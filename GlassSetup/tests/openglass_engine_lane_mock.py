@@ -47,7 +47,7 @@ int main(){
  for(unsigned i=0;i<7;++i){s.removeMask=1u<<i;assert(!StandaloneOpenGlassApply(s,false,true));}
  s.removeMask=0;
  s.platform64=true;assert(MixedOpenGlassApply(s,false,true));
- s.openGlassResources=true;assert(!MixedOpenGlassApply(s,false,true));s.openGlassResources=false;
+ s.openGlassResources=true;assert(MixedOpenGlassApply(s,false,true));s.openGlassResources=false;
  assert(!MixedOpenGlassApply(s,true,true));assert(!MixedOpenGlassApply(s,false,false));
  s.secureUxTheme=true;assert(!MixedOpenGlassApply(s,false,true));s.secureUxTheme=false;
  s.removeMask=8;assert(!MixedOpenGlassApply(s,false,true));s.removeMask=0;

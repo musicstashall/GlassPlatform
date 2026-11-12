@@ -41,7 +41,7 @@ int main(){
  Package package{L"C:\\Protected\\OpenGlassSetup.Signed.exe",L"3.0.2.3749"};std::wstring error;DWORD result=0;
  for(unsigned exit:{0u,3010u,2u}){reset();code=exit;assert(RunInstaller(package,L"D:\\Other Folder\\OG",result,error));assert(result==exit&&closes==2&&creates==1);
   assert(app==package.setup&&working==L"C:\\Protected");
-  assert(command==L"\"C:\\Protected\\OpenGlassSetup.Signed.exe\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /RESTARTEXITCODE=3010 /DIR=\"D:\\Other Folder\\OG\" /LOG=\"C:\\Protected\\OpenGlass-install.log\"");
+  assert(command==L"\"C:\\Protected\\OpenGlassSetup.Signed.exe\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOICONS /MERGETASKS=\"!desktopicon\" /SP- /RESTARTEXITCODE=3010 /DIR=\"D:\\Other Folder\\OG\" /LOG=\"C:\\Protected\\OpenGlass-install.log\"");
   assert(order==L"pin;verify;unblock;pin;verify;");
  }
  for(auto dir:{L"C:\\",L"relative",L"C:\\Bad\" /TASKS=x",L"C:\\Bad\nPath",L"C:\\OG\\"}){reset();assert(!RunInstaller(package,dir,result,error)&&creates==0);}

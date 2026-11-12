@@ -90,7 +90,7 @@ namespace GlassSecureUxPackage {
 }
 struct Old {std::wstring productCode,cachedMsiPath;};
 struct InstallEngine {
- GlassProductPlan::Plan executionPlan_{};bool executionPlanReady_=true,openGlassResidualRemoval_=false,scanNativeX64_=true,cancelled=false,forceClean_=false;
+ GlassProductPlan::Plan executionPlan_{};bool executionPlanReady_=true,openGlassResidualRemoval_=false,scanNativeX64_=true,cancelled=false,forceClean_=false,preparingOfficialResources_=false;
  std::atomic_bool cancelRequested_{false};GlassProducts::Selection selection_{};
  GlassSecureUxPackage::Package secureUxPackage_;
  GlassSecureUxPackage::Removal secureUxRemoval_;
@@ -224,6 +224,11 @@ int main(){
  {InstallEngine e;Reset(e);GlassProductInspect::observation.secureUxTheme.installed=true;
   assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Keep);}
 
+ // Planned OG satisfies only the private PREPARATION phase, never post-commit revalidation.
+ {InstallEngine e;Reset(e);e.selection_.openGlassResources=true;e.preparingOfficialResources_=true;upstreamKnown=false;
+  GlassMaintenanceCache::media[L"work\\OpenGlassResources-x64.msi"]={L"res",L"2.0.0"};
+  assert(e.BuildExecutionPlan());e.preparingOfficialResources_=false;assert(!e.BuildExecutionPlan());
+  e.preparingOfficialResources_=true;e.openGlassPackage_.version.clear();assert(!e.BuildExecutionPlan());}
  // Resources uses its own prepared MSI and the existing official prerequisite.
  for(unsigned failure=0;failure<9;++failure) {
   InstallEngine e;Reset(e);e.selection_.openGlassResources=true;

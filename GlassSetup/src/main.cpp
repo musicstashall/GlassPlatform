@@ -1810,7 +1810,7 @@ private:
             EnableWindow(componentSecureUxTheme_,(!SecureUxThemeSelectionBlocked()||sutCanRemove)&&(!sutInstalled||sutCanRemove||selection_.secureUxThemeRemove));
             const bool resourcesReady=GlassProducts::ResourcesApplyReady(selection_,os64,resourcesPrerequisiteReady_);
             SetWindowTextW(componentResources_,(Text(IDS_COMP_OGR_TITLE)+(resourcesReady?L"":
-                (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L" — сначала установите OpenGlass отдельно":L" — install OpenGlass separately first"))).c_str());
+                (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L" — выберите или установите OpenGlass":L" — select or install OpenGlass first"))).c_str());
             SendMessageW(componentResources_,BM_SETCHECK,selection_.openGlassResources?BST_CHECKED:BST_UNCHECKED,0);
             EnableWindow(componentResources_,resourcesReady||selection_.openGlassResources);
             EnableWindow(componentSettings_,TRUE); EnableWindow(componentSettings32_,TRUE);
@@ -2049,7 +2049,7 @@ private:
         }
         if(!GlassProducts::ResourcesPlanReady(selection_,GlassInstallUtil::IsOs64Bit(),resourcesPrerequisiteReady_)) {
             if(!text.empty())text+=L"\n";
-            text+=Text(resourcesPrerequisiteReady_?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG);
+            text+=Text((selection_.openGlass||selection_.Removes(3)||resourcesPrerequisiteReady_)?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG);
         }
         return text;
     }
@@ -2146,12 +2146,12 @@ private:
             }
             if(resources&&!resourcesReady) {
                 if(!firstReason)reasons+=L",";
-                reasons+=JsStringLiteral(Text(resourcesPrerequisiteReady_?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG));
+                reasons+=JsStringLiteral(Text((selection_.openGlass||selection_.Removes(3)||resourcesPrerequisiteReady_)?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG));
             }
             reasons+=L"]";
             std::wstring description=(desc==IDS_COMP_P64_DESC||desc==IDS_COMP_P32_DESC)?
                 GlassProductUiPolicy::PlatformDescription(Text(desc),desc==IDS_COMP_P64_DESC,os64,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN):Text(desc);
-            if(resources&&!resourcesReady)description+=L" "+Text(resourcesPrerequisiteReady_?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG);
+            if(resources&&!resourcesReady)description+=L" "+Text((selection_.openGlass||selection_.Removes(3)||resourcesPrerequisiteReady_)?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG);
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
                 L",\"description\":"+JsStringLiteral(description)+L",\"warning\":"+JsStringLiteral(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit()))+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
                 L",\"installed\":"+((rep&&(rep->installed||rep->residual))?L"true":L"false")+
@@ -2162,7 +2162,7 @@ private:
                 L",\"updateAvailable\":"+(hasUpdate?L"true":L"false")+
                 L",\"applySupported\":"+(applySupported?L"true":L"false")+
                 L",\"applyHint\":"+JsStringLiteral(resources&&!resourcesReady?
-                    (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Сначала примените действие OpenGlass отдельно":L"Apply OpenGlass separately first"):L"")+
+                    (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Выберите OpenGlass в этом плане или установите его заранее":L"Select OpenGlass in this plan or install it first"):L"")+
                 L",\"broken\":"+((rep&&rep->damaged)?L"true":L"false")+
                 L",\"installedVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
                 L",\"installedPackageVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+

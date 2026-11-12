@@ -79,7 +79,7 @@ constexpr bool StandaloneOpenGlassRemoval(const Selection& s,bool forceClean,boo
 // Sequential commits: managed Glass apply first, official Inno apply last.
 // Two different external vendors and mixed removal need a separate protocol.
 constexpr bool MixedOpenGlassApply(const Selection& s,bool forceClean,bool os64) noexcept {
-    return !s.openGlassResources&&os64&&s.openGlass&&(s.platform64||s.platform32||s.Settings64(os64)||s.Settings32(os64))&&
+    return os64&&s.openGlass&&(s.openGlassResources||s.platform64||s.platform32||s.Settings64(os64)||s.Settings32(os64))&&
         !s.secureUxTheme&&!s.secureUxThemeRemove&&!s.removeMask&&!s.cleanupUserData&&!forceClean;
 }
 
@@ -90,10 +90,10 @@ constexpr bool MixedOpenGlassRemoval(const Selection& s,bool forceClean,bool os6
         !s.secureUxTheme&&!s.secureUxThemeRemove&&!s.cleanupUserData&&!forceClean;
 }
 
-// First UI lane: graphics apply uses an existing official OG prerequisite.
-// Do not offer a plan whose vendor commit-last protocol cannot run it yet.
+// Graphics can follow an existing OG or its explicit official Apply in this plan.
 constexpr bool ResourcesApplyReady(const Selection& s,bool os64,bool upstreamReady) noexcept {
-    return os64&&upstreamReady&&!s.openGlass&&!s.Removes(3);
+    return os64&&(upstreamReady||s.openGlass)&&!s.Removes(3)&&
+        (!s.openGlass||(!s.secureUxTheme&&!s.secureUxThemeRemove&&!s.removeMask&&!s.cleanupUserData));
 }
 
 constexpr bool ResourcesPlanReady(const Selection& s,bool os64,bool upstreamReady) noexcept {

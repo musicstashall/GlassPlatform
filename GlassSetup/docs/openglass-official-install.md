@@ -558,3 +558,61 @@ OpenGlassResources-x64 Release|x64 нужен для получения само
 GlassShared не менялся. Единый fresh OG→Resources commit/partial-result протокол
 и Resources controls в GlassUnins остаются следующими незавершёнными частями;
 штатный ARP uninstaller самого Resources MSI сохранён.
+
+### Completed Setup install/update lane: OG + Resources in one pass; no icons
+
+Этот раздел заменяет прежние промежуточные ограничения «устанавливать отдельно»
+для **Apply OG + Apply Resources**. Теперь доступны fresh install и update обоих
+за один проход Setup, также с выбранными managed Platform/Settings Apply.
+Resources не выбирает OG автоматически: на свежей системе сначала выберите OG,
+затем Resources, ставший доступным в том же плане. При уже установленном OG
+Resources можно по-прежнему устанавливать отдельно. Recommendations больше не
+исключают совместимую пару. x86 exclusion сохраняется. Другие ограничения
+(совместные vendor SUT, смешанное удаление, forceClean) не расширены.
+
+Официальная команда OG теперь содержит пользовательские параметры:
+`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOICONS /MERGETASKS="!desktopicon"`.
+Дополнительно сохранены `/SP- /RESTARTEXITCODE=3010`, явный защищённый staging log
+и проверенный `/DIR`. Новая установка по умолчанию использует native
+Program Files\GlassPlatform\OpenGlass. Обновление сохраняет подтверждённый
+зарегистрированный путь существующего официального OG; миграций/перемещения
+внешней установки нет. Setup сам ярлыки upstream не создаёт/не удаляет.
+
+Dispatcher:
+1. PrepareOfficialOpenGlass с identity/publisher/path/version checks.
+2. Trusted acquire Resources MSI + отдельный snapshot bit64 до **любых**
+   изменений. BuildExecutionPlan проверяет media, версию, контекст, installed
+   baseline. Только в этом private preflight planned OG считается будущей
+   зависимостью; после commit требуется реальный upstream inventory/DLL.
+3. Managed Glass phase без OG и Resources rows. При плане только OG+Resources
+   пустая managed phase пропускается. Неуспех/отмена не запускают vendor.
+4. Официальный OG commit с повторным inventory и проверкой результата.
+5. Только после подтверждения OG — OfficialResourcesPhase(false): повторная
+   проверка плана/зависимости и MSI Resources в собственном fixed root.
+
+Resources snapshot хранится отдельно от managed rollbackSession, не очищается
+managed commit и не пересоздаётся после OG. Scoped swap меняет только временный
+graphics adapter context и возвращает selection/plan/mask/snapshot при любом
+выходе. При ошибке MSI учтена его возможная частичная регистрация; rollback
+удаляет только проверенный Resources MSI и возвращает собственный baseline.
+При неуспехе восстановления его workspace сохраняется для диагностики/recovery.
+OG и уже committed Glass не откатываются. Итог явно сообщает о частичном
+выполнении, даже если отдельный откат Resources удался. Ошибка/неподтверждённый
+commit OG не запускает Resources. Финальный 100% vendor status отложен до
+завершения Resources. После границы OG commit cancellation закрыт; вводить новый
+откат upstream или выполнять второй cancellable общий Glass worker нельзя.
+
+Проверки PASS: exact launcher command/trust/Zone/wait/exit; настоящий dispatcher
+(success, отказ каждого prepare, managed failure, OG failure, Resources failure,
+план только OG+Resources, восстановление selection и staged lifetime); настоящий
+Resources phase с ASan/UBSan (preflight-before-mutation, отдельный baseline,
+post-OG recheck, fresh/update MSI failure rollback, recovery retention и exception
+scope restoration); actual BuildExecutionPlan проверяет ограниченность planned
+prerequisite только preflight; UI/Next capability tests и production RU/EN DOM
+проверяют совместимые recommendations. Также регрессии planner/scheduler,
+catalog, snapshots/rollback, cancellation, OG Unins, downloads и resources.
+Это не Windows/MSVC/WiX/Inno acceptance: в Linux sandbox установка не запускалась.
+
+Сборка: GlassUnins Release|x86 → GlassSetup Release|x86; сам графический пакет —
+OpenGlassResources-x64 Release|x64. Подписанный MSI рядом с Setup/в packages либо
+запись openglassResources в release catalog обязательны. GlassShared не менялся.
