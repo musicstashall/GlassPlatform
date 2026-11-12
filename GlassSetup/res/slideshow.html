@@ -1003,7 +1003,7 @@ function componentRecommendations(){
  if(hostState.appMode==='unins'||hostState.componentsLoading)return [];
  return [...document.querySelectorAll('#components-panel .c-card input.comp-check')].filter(input=>{
   const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);if(!item||item.hidden)return false;
-  const f=componentCardFacts(item,input);return !input.disabled&&item.applySupported!==false&&!f.remove&&(f.newer||f.broken||item.recommended===true);
+  const f=componentCardFacts(item,input);return !input.disabled&&item.applySupported!==false&&!f.remove&&(!item.installed||f.newer||f.broken||f.helperChanged||item.recommended===true);
  });
 }
 function acceptComponentRecommendations(){batchComponentActions(()=>{for(const input of componentRecommendations())if(!input.checked)commitComponentChoice(input,true);});}

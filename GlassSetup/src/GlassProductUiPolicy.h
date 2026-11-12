@@ -31,7 +31,16 @@ inline GlassProductPlan::Plan Preview(const GlassProducts::Selection& choice,
         f.source=P::Source::Verified;
         f.activity=i==4&&sutActive?P::Activity::Active:P::Activity::Inactive;
     }
-    return P::Build(facts,request);
+    auto plan=P::Build(facts,request);
+    // An empty installed inventory has no retained-product dependencies to
+    // warn about. This is preview-only; execution still validates the plan.
+    bool hasInstalled=false;
+    for(bool value:present)hasInstalled=hasInstalled||value;
+    if(!hasInstalled&&!removal) {
+        plan.warnings=P::Warning::None;
+        for(auto& row:plan.rows)row.warnings=P::Warning::None;
+    }
+    return plan;
 }
 inline std::wstring ShellSuffix(bool ru) {
     HINSTANCE instance=GetModuleHandleW(nullptr);

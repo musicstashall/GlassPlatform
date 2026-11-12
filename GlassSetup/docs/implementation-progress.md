@@ -3067,3 +3067,25 @@ Do not describe the standalone WiX project as a selectable installed product yet
   behavior, plus acquisition-order source contracts. Retirement/build graph,
   package catalog, MSI identity, ADS and resource smoke checks pass. These do not
   establish Windows process/Authenticode/NTFS/Inno runtime acceptance.
+
+### Empty installed inventory / Accept recommendations
+
+UI preview (`GlassProductUiPolicy::Preview`) больше не показывает row/summary
+composition warnings, пока фактический installed inventory пуст. Pending Apply
+не выдаётся за уже установленный продукт. При наличии хотя бы одного installed
+продукта существующие предупреждения сохраняются. Это presentation policy:
+execution planner, trust, источники и зависимости исполнения не ослаблены.
+
+Исправлен фильтр HTML Accept all recommendations: доступные неустановленные
+продукты снова кандидаты, как и update/broken/changed Native. Исправные уже
+установленные продукты без рекомендации не переустанавливаются автоматически.
+Hidden/disabled/applyUnsupported/loading и Remove исключаются как прежде.
+Кнопка отключена, когда выбирать нечего или все рекомендации уже выбраны.
+
+Проверки: compiled actual Preview для 128 empty-inventory plans и сохранения
+реальных installed warnings; production HTML DOM recommendations (fresh six
+products, checked host acknowledgement/reset, unsupported/disabled/loading,
+changed helper без reinstall здоровой Platform). Также PASS существующие
+secure_ux_dependency, managed_removal, composition_motion DOM и verify_resources.
+Windows/MSVC/WebView2 acceptance здесь не выполнялся.
+Сборка общего HTML/inline policy: GlassUnins Release|x86 → GlassSetup Release|x86.
