@@ -125,6 +125,8 @@ namespace GlassInstallRollback {
 }
 bool ProductWasSnapshotted(const GlassInstallRollback::SessionState&,const wchar_t*){return fake.snapshotted;}
 namespace GlassInstallUtil {
+ std::wstring TrimTrailingSlashes(const std::wstring& value){return value;}
+ bool RegisterSettingsBackupAssociation(const std::wstring&){return true;}
  bool IsSafeInstallPath(const std::wstring&){return true;}
  struct OpenGlassTaskState{bool found=false,anyDisabled=false,anyRunning=false,multipleTasks=false,multipleRunningInstances=false;};
  bool IsOs64Bit(){return fake.is64;}

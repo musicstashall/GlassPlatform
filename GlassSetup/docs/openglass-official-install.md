@@ -217,3 +217,43 @@ acceptance; unsigned uninstaller не запускается, доверие н�
 Сборка: **GlassUnins Release|x86 → GlassSetup Release|x86**. Shared/Settings и
 полный solution rebuild не требуются. Native fallback и HTML используют один
 новый RunOperation dispatch, отдельного сценария удаления в UI не добавлено.
+
+### Mixed apply: Platform/Settings + OpenGlass
+
+Setup теперь допускает общий Apply-план OpenGlass с Platform и/или Settings.
+Это **последовательные commits**, не атомарная транзакция двух установщиков:
+
+1. До managed Glass изменений разрешаются Inno inventory/каталог, проверяется
+   старая тестовая identity, подготавливается проверенный official EXE, запрещается
+   downgrade. Ошибка подготовки не запускает managed worker.
+2. На время managed worker строка OpenGlass исключается из selection и procedure
+   mask. Следовательно, она не входит в Glass snapshot, stop/register/launch,
+   managed removal и file-transaction pipeline. Исходные snapshot/rollback
+   гарантии остальных выбранных Glass-продуктов сохраняются.
+3. Если managed worker неуспешен/отменён, Inno не запускается. Если он успешен,
+   Glass уже committed; отмена остаётся закрытой. Повторно сверяется официальный
+   OpenGlass inventory и запускается official EXE.
+4. Ошибка финального Inno шага даёт явный **частичный результат**: Glass сохранён,
+   OpenGlass не подтверждён, общий rollback не выполнялся. Это относится и к
+   изменившейся перед Inno регистрации. Заявлять восстановление всех продуктов
+   по Glass snapshot после отдельного vendor commit нельзя.
+
+Worker split: внешний `WorkerThread` — dispatcher и единственное место публикации
+finished/финальной очистки staging; внутренний `RunGlassWorker` выполняет прежний
+managed pipeline. Staged EXE живёт до завершения последнего Inno шага, managed
+worker не выставляет finished и не уничтожает его преждевременно. Prepare/Commit
+OpenGlass используют одни методы для standalone и mixed сценариев.
+
+Сочетание OpenGlass с SecureUxTheme, mixed Remove, force-clean и user-data cleanup
+пока отклоняется до изменений. Смешанное удаление в GlassUnins также пока не
+включено. Миграции старых тестовых установок намеренно не реализуются.
+
+`openglass_mixed_worker_mock.py` компилирует настоящий dispatcher: prepare failure,
+managed failure/cancel-equivalent, последовательность commits, OG row/mask
+exclusion, сохранение staging, partial failure и deferred finished. Остальные
+compiled mocks/source guards покрывают предыдущие операции. Это не Windows
+acceptance: на VM ещё нужны реальные MSI/Inno, cancellation, partial failures,
+reboot, cache и сохранность upstream service/config.
+
+Сборка этого шага: **GlassSetup Release|x86**. GlassUnins, GlassShared и их
+линковочные зависимости в этом шаге не менялись; full solution rebuild не нужен.

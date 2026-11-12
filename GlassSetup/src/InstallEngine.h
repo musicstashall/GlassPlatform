@@ -4,6 +4,7 @@
 #include "InstallSupport/GlassUserDefaults.h"
 #include "InstallSupport/GlassSecureUxPackage.h"
 #include "InstallSupport/GlassOpenGlassPackage.h"
+#include "InstallSupport/GlassOpenGlassInstall.h"
 #include "InstallSupport/GlassOpenGlassFiles.h"
 #include "GlassProducts.h"
 #include "InstallSupport/GlassProfileMaintenance.h"
@@ -189,6 +190,12 @@ private:
     bool ExtractPayload(HINSTANCE instance) noexcept;
     bool InstallGlassSettingsEarly() noexcept;
     bool RunOfficialOpenGlassOnly() noexcept;
+    bool PrepareOfficialOpenGlass(bool removing) noexcept;
+    bool CommitOfficialOpenGlass(bool removing) noexcept;
+    static DWORD WINAPI RunGlassWorker(LPVOID p) noexcept;
+    GlassOpenGlassInstall::Record officialOpenGlassBefore_;
+    std::wstring officialOpenGlassTarget_;
+    bool mixedOpenGlass_=false;
     bool BuildExecutionPlan() noexcept;
     GlassProductPlan::Plan executionPlan_{};
     unsigned procedureMask_=0x2Fu;
