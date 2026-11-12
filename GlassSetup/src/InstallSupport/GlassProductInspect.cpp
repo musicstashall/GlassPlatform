@@ -632,7 +632,7 @@ Report Run(const Inputs& in)
             report.og.installed=true;report.og.integrityKnown=false;report.og.damaged=true;
             report.og.residual=false;report.og.residualSafe=false;
             AddReason(report.og,Reason::InspectionUnavailable);
-            GlassInstallLog::Line(L"Official OpenGlass inventory: "+inventoryError);
+            GlassInstallLog::LineFormat(L"Official OpenGlass inventory: %s",inventoryError.c_str());
         }
     }
     // Package releases may update installer plumbing without changing OpenGlass.
