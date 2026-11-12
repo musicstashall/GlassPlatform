@@ -76,7 +76,7 @@ public:
                         else if(!GlassPackageAcquisition::CreateWorkspace(current->directory))current->error=L"Cannot create protected package workspace";
                         else if(i==4) {
                             GlassOpenGlassPackage::Package package;
-                            current->ok=GlassOpenGlassPackage::PrepareForCurrentSystem(current->directory,current->cancel,package,current->error);
+                            current->ok=GlassOpenGlassPackage::PrepareInstallerForCurrentSystem(current->directory,current->cancel,package,current->error);
                             current->path=package.setup;
                         }
                         else if(i<4) {

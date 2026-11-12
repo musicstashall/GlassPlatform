@@ -188,6 +188,7 @@ private:
     bool EnsureTempWorkspace() noexcept;
     bool ExtractPayload(HINSTANCE instance) noexcept;
     bool InstallGlassSettingsEarly() noexcept;
+    bool RunOfficialOpenGlassOnly() noexcept;
     bool BuildExecutionPlan() noexcept;
     GlassProductPlan::Plan executionPlan_{};
     unsigned procedureMask_=0x2Fu;
