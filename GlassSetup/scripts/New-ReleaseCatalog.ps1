@@ -89,6 +89,19 @@ foreach ($id in $Products) {
     $template = [string](Read-Com $summary 'Property' @(7))
     $expectedArch = if ($id -in @('platform32','settings32')) {'Intel'} else {'x64'}
     if ($template.Split(';')[0] -ne $expectedArch) { throw "Unexpected MSI architecture: $path ($template)" }
+    if ($id -eq 'openglassResources') {
+        # Same numeric versions may contain the old OG-first launch condition.
+        # Reject that artifact rather than publish it for a Resources-first Setup.
+        $view = Invoke-Com $db 'OpenView' @('SELECT `Condition` FROM `LaunchCondition`')
+        Invoke-Com $view 'Execute' @() | Out-Null
+        $supportsPreOg = $false
+        while ($null -ne ($row = Invoke-Com $view 'Fetch' @())) {
+            $condition = [string](Read-Com $row 'StringData' @(1))
+            if ($condition.StartsWith('GLASS_OG_INSTALL_PENDING = 1 OR ', [StringComparison]::Ordinal)) { $supportsPreOg = $true }
+        }
+        Invoke-Com $view 'Close' @() | Out-Null
+        if (-not $supportsPreOg) { throw "Outdated Resources MSI: rebuild Release|x64 with pre-OG launch protocol before signing/publishing: $path" }
+    }
     $asset = New-Asset $files[$id] $properties.ProductVersion
     if ($id -in @('settings64','settings32')) {
         # MSI ordering uses ProductVersion; card display uses the actual EXE FileVersion.

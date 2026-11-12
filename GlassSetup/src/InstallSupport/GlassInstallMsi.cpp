@@ -157,6 +157,28 @@ bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress, UINT* 
            exitCode == ERROR_UNKNOWN_PRODUCT;
 }
 
+bool SupportsResourcesBeforeOpenGlass(const std::wstring& msiPath) noexcept {
+    // Inspect the acquired MSI, never infer capability from ProductVersion or
+    // from a catalog entry: older packages have the same numeric version.
+    struct Handle {MSIHANDLE value=0;~Handle(){if(value)MsiCloseHandle(value);}} db,view;
+    if(MsiOpenDatabaseW(msiPath.c_str(),MSIDBOPEN_READONLY,&db.value)!=ERROR_SUCCESS ||
+       MsiDatabaseOpenViewW(db.value,L"SELECT `Condition` FROM `LaunchCondition`",&view.value)!=ERROR_SUCCESS ||
+       MsiViewExecute(view.value,0)!=ERROR_SUCCESS)return false;
+    bool supported=false;
+    for(;;) {
+        Handle row;
+        const auto fetched=MsiViewFetch(view.value,&row.value);
+        if(fetched==ERROR_NO_MORE_ITEMS)return supported;
+        if(fetched!=ERROR_SUCCESS)return false;
+        wchar_t condition[4096]{};DWORD count=static_cast<DWORD>(std::size(condition));
+        if(MsiRecordGetStringW(row.value,1,condition,&count)!=ERROR_SUCCESS)return false;
+        // Exact protocol prefix used by the signed Resources package source.
+        // Merely declaring a property without honoring it is not sufficient.
+        constexpr wchar_t prefix[]=L"GLASS_OG_INSTALL_PENDING = 1 OR ";
+        if(wcsncmp(condition,prefix,std::size(prefix)-1)==0)supported=true;
+    }
+}
+
 std::wstring ProductCodeFromMsiPath(const std::wstring& msiPath) {
     // Reading a property must not start an MSI installation session: opening
     // a package can briefly show the system "Preparing to install" window,

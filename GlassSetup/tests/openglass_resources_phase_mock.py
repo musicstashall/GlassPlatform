@@ -19,8 +19,9 @@ h=r'''
 #define _wcsicmp wcscasecmp
 constexpr int LANG_RUSSIAN=25,ERROR_INSTALL_FAILURE=1603,ERROR_INSTALL_PACKAGE_REJECTED=1625;
 int GetUserDefaultUILanguage(){return 0;}int GetLastError(){return 5;}
-bool rootOk=true,prepareOk=true,snapshotOk=true,planOk=true,installOk=true,rollbackOk=true,present=false,wasPresent=false,throwInstall=false;
+bool protocolOk=true,rootOk=true,prepareOk=true,snapshotOk=true,planOk=true,installOk=true,rollbackOk=true,present=false,wasPresent=false,throwInstall=false;
 unsigned prepares=0,snapshots=0,installs=0,rollbacks=0,publishes=0;bool upstream=false;
+namespace InstallLog {void Line(const wchar_t*){}}
 namespace GlassInstallUtil {bool ResolveOpenGlassResourcesRoot(std::wstring& r){r=L"fixed-resources";return rootOk;}}
 namespace GlassPackageCatalog {enum class Product{OpenGlassResources};struct Catalog{};}
 namespace GlassPackageAcquisition {
@@ -29,6 +30,7 @@ bool Prepare(GlassPackageCatalog::Product,const GlassPackageCatalog::Catalog&,co
 }
 namespace GlassInstallMsi {
 constexpr auto kProductOpenGlassResourcesX64=L"resources";
+bool SupportsResourcesBeforeOpenGlass(const std::wstring& path){assert(path==L"staged\\OpenGlassResources-x64.msi");return protocolOk;}
 bool IsProductInstalled(const wchar_t* code){assert(std::wstring(code)==L"resources");return present;}
 }
 namespace GlassInstallRollback {
@@ -61,8 +63,9 @@ struct InstallEngine {
  bool FinishOfficialResources(bool commit) noexcept;
 };
 // METHOD
-void reset(){rootOk=prepareOk=snapshotOk=planOk=installOk=rollbackOk=true;present=wasPresent=throwInstall=upstream=false;prepares=snapshots=installs=rollbacks=publishes=0;}
+void reset(){protocolOk=true;rootOk=prepareOk=snapshotOk=planOk=installOk=rollbackOk=true;present=wasPresent=throwInstall=upstream=false;prepares=snapshots=installs=rollbacks=publishes=0;}
 int main(){
+ reset();protocolOk=false;InstallEngine outdated;assert(!outdated.OfficialResourcesPhase(true));assert(snapshots==0&&installs==0&&rollbacks==0&&publishes==0);assert(outdated.error.find(L"outdated")!=std::wstring::npos);
  for(unsigned failure=0;failure<5;++failure){
   reset();rootOk=failure!=1;prepareOk=failure!=2;snapshotOk=failure!=3;planOk=failure!=4;
   InstallEngine e;e.selection_.openGlassResources=true;e.rollbackSession_.workspaceDir=L"managed";

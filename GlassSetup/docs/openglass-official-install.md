@@ -889,3 +889,42 @@ registration from an already-removed product retained only in the UI.
 
 Build GlassUnins Release|Win32 followed by GlassSetup Release|Win32. These ARP
 changes do not require rebuilding Resources MSI; its package icon is unchanged.
+
+### GlassSetup-32: incompatible Resources artifact rejected after managed commit
+
+The supplied log at 15:56:46.849 records the correct
+GLASS_OG_INSTALL_PENDING=1 command line. The Resources MSI server log confirms
+receipt of that property at 15:56:47.230, then rejects LaunchConditions with the
+OG-first message and exit1603. The previous Resources source's new expression
+starts with GLASS_OG_INSTALL_PENDING = 1 OR; that expression cannot reject with
+this property equal to1. Therefore the consumed MSI is incompatible with the new
+pre-OG protocol (consistent with an older release MSI), not a missing Setup
+command-line flag. It was acquired as version2.0.0.0115 source3 and then reused
+as source4 from prepared storage. Numeric version/trust/hash alone cannot prove
+this capability. Exact artifact provenance requires inspecting the MSI itself.
+
+The four other managed MSIs committed successfully before Resources failed;
+Resources baseline recovery succeeded and vendor OG never ran, hence the empty
+OG directory. Do not describe this as full rollback or upstream installation
+failure. Rebuilding only Setup is insufficient: rebuild/sign/publish the updated
+Resources MSI and generate matching release metadata including openglassResources.
+For a same-version replacement, use the new catalog snapshot in a NEW Setup run;
+clearing trusted caches manually is neither necessary nor recommended.
+
+Setup now reads the acquired MSI LaunchCondition table in its prepare-only
+Resources phase, BEFORE any managed changes or vendor execution. It requires the
+explicit new condition prefix and reports an outdated-package error otherwise.
+It does not patch MSI tables, bypass launch conditions, change ordering to OG-first,
+or weaken signature/digest/identity checks. MSI database inspection is read-only,
+not MsiOpenPackage or an install/repair session. The release catalog generator
+also refuses an old Resources artifact when openglassResources is selected.
+Partial catalog operations preserving existing entries still require the publisher
+to explicitly include Resources when replacing that asset.
+
+Regression: compiled actual MSI capability reader (old/new/malformed/empty tables,
+all API failure/handle cleanup), actual preparation refuses before snapshot/install,
+mixed dispatcher, Resources MSI expression matrix and resource source smoke pass.
+Windows/MSVC/WiX acceptance remains pending. Build Resources Release|x64,
+GlassUnins Release|Win32, GlassSetup Release|Win32; generate the catalog only after
+final artifact signing. This guard prevents a partial installation with stale
+packages; it cannot make the old published MSI support the new execution order.

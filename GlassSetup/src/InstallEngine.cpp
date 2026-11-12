@@ -606,6 +606,12 @@ bool InstallEngine::OfficialResourcesPhase(bool preparing) noexcept {
                 catalog,tempDir_,cancelRequested_,error)) {
                 SetFailure(error,ERROR_INSTALL_PACKAGE_REJECTED);return false;
             }
+            if(!GlassInstallMsi::SupportsResourcesBeforeOpenGlass(tempDir_+L"\\OpenGlassResources-x64.msi")) {
+                InstallLog::Line(L"Resources pre-OG protocol missing in acquired MSI; refusing before managed mutation");
+                SetFailure(ru?L"Пакет Resources устарел: он не поддерживает установку перед OpenGlass. Обновите Resources MSI и каталог релиза, затем перезапустите Setup. Продукты не изменены.":
+                    L"The Resources package is outdated: it cannot be installed before OpenGlass. Update the Resources MSI and release catalog, then restart Setup. Products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);
+                return false;
+            }
             if(!GlassInstallRollback::CreateSnapshot(officialResourcesRollback_,x64Dir_,x86Dir_,openGlassDir_,false,
                 {},&cancelRequested_,64u)) {
                 SetFailure(ru?L"Не удалось сохранить исходное состояние OpenGlass Resources. Продукты не изменены.":

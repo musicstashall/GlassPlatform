@@ -31,6 +31,8 @@ void RemoveOrphanUninstallEntry(const wchar_t* productCode) noexcept;
 bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress = nullptr,
     UINT* resultCode = nullptr) noexcept;
 
+// Read-only protocol check, not a replacement for package identity/trust verification.
+bool SupportsResourcesBeforeOpenGlass(const std::wstring& msiPath) noexcept;
 std::wstring ProductCodeFromMsiPath(const std::wstring& msiPath);
 std::wstring KnownProductCodeFromFileName(const std::wstring& msiPath);
 std::wstring ResolveProductCode(const std::wstring& msiPath);
