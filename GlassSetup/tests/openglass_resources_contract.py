@@ -32,6 +32,16 @@ stage=(msi/'scripts/Stage-OpenGlassResources.ps1').read_text()
 assert '$allowed -notcontains $file.Extension.ToLowerInvariant()' in stage
 assert 'ReparsePoint' in stage and 'Refusing to produce an empty' in stage
 assert "'.exe'" not in stage and "'.dll'" not in stage
+# Exercise the actual staging allowlist against atlas sidecars and forbidden
+# payloads (source contract only, not a PowerShell execution test).
+import re
+allowed = set(re.findall(r"'([^']+)'", re.search(r'\$allowed = @\(([^\n]+)\)', stage).group(1)))
+for name in ('AtlasTheme/Aero Glow Square 10.png.Layout', 'AtlasTheme/Aero.png.layout',
+             'AtlasTheme/Aero.PNG', 'GlassReflection/Reflection.png'):
+ assert Path(name).suffix.lower() in allowed, name
+for name in ('OpenGlass.dll', 'OpenGlass.exe', 'setup.ps1', 'run.cmd', 'run.bat',
+             'run.vbs', 'payload.msi', 'Aero.png.Layout.exe'):
+ assert Path(name).suffix.lower() not in allowed, name
 solution=(root/'GlassProject.sln').read_text()
 assert 'OpenGlassResources-x64.wixproj' in solution
 # Build the x64 graphics MSI in the x64 release phase, not again in x86.

@@ -41,7 +41,9 @@ function Get-RegularFiles([string]$Root) {
 }
 $files = @(Get-RegularFiles $sourceRoot)
 if (-not $files.Count) { throw 'Refusing to produce an empty OpenGlass Resources MSI.' }
-$allowed = @('.png','.bmp','.jpg','.jpeg','.gif','.webp','.svg','.ico','.dds','.json','.ini','.xml','.txt','.md','.material','.atlas')
+# AtlasTheme images use companion .png.Layout text files for atlas geometry.
+# Extension matching is case-insensitive; executable payloads remain forbidden.
+$allowed = @('.png','.bmp','.jpg','.jpeg','.gif','.webp','.svg','.ico','.dds','.json','.ini','.xml','.txt','.md','.material','.atlas','.layout')
 foreach ($file in $files) {
     if ($allowed -notcontains $file.Extension.ToLowerInvariant()) { throw "Not a supported graphics resource: $($file.FullName)" }
 }
