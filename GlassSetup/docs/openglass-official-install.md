@@ -374,3 +374,41 @@ MSVC/реальное удаление Inno в sandbox не запускалис
 после анализа удалено; image-27.png сохранено.
 Сборка: GlassUnins Release|x86 → GlassSetup Release|x86, поскольку общий
 GlassProducts.h входит в оба проекта. GlassShared не менялся.
+
+### Resources integration: catalog/acquisition foundation (not yet a UI product)
+
+Подтверждено: отсутствие карточки OpenGlass Resources вызвано тем, что planner,
+inspection и UI всё ещё содержат прежние шесть продуктов. Наличие wixproj само
+по себе карточку не создаёт. Полная интеграция пока **не завершена**, эта правка
+не обещает появления активной карточки и не запускает MSI автоматически.
+
+Подключён самостоятельный catalog ID `openglassResources`, файл строго
+`OpenGlassResources-x64.msi`. Acquisition проверяет отдельные ProductCode
+`{6D6046DB-6B28-4F2C-8A7D-EB6CF13CBBD9}`, UpgradeCode
+`{A5571574-00E7-43AD-81DF-B65D1AE07699}`, MSI machine x64, числовую версию,
+существующие publisher/hash checks без ослабления. Describe и Prepare отказывают
+на native x86; пакет предназначен для AMD64, не для x86 Windows.
+Prepared slot 6 выделен отдельно: slot 5 уже занят SecureUxTheme, хотя в MSI
+catalog его нет. Старые catalog индексы сохранены. Не использовать индекс нового
+MSI как индекс download job до подключения UI/worker.
+
+Публикация независимого дополнения после его сборки:
+`New-ReleaseCatalog.ps1 -ReleaseTag <tag> -BaseManifest <version.json> -Products openglassResources`
+(из каталога скриптов, либо полный путь к скрипту; PackageDirectory при нужде).
+Для первого каталога прежние четыре продукта и IncludeSetup остаются обязательны;
+Resources добавляется в Products явно, чтобы отсутствие ещё не собранного
+дополнения не ломало существующий выпуск. Генератор сверяет оба GUID и x64,
+не выдумывает payload FileVersion для графических файлов.
+
+Осталось: седьмая строка installed inventory и RU/EN/native UI, IPC/download
+job, selection/plan dependency, MSI apply/remove/rollback/cache и сценарий
+upstream OG commit → Resources commit с честным partial-result. До этого
+добавлять фиктивную активную карточку запрещено. На x86 её не предлагать.
+Прежний пункт о незавершённой полной Resources integration остаётся актуален.
+
+Проверено: compiled catalog/source-selection tests (включая Resources-only,
+старый catalog без дополнения, неверное имя, duplicate ID и prepared slot),
+Resources build/source contract, catalog handoff и verify_resources PASS.
+Windows WiX/MSVC/реальная установка не проверялись.
+Сборка текущих C++ изменений: GlassUnins Release|x86 → GlassSetup Release|x86;
+пакет отдельно OpenGlassResources-x64 Release|x64 с непустым graphics source.

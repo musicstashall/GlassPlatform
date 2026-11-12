@@ -50,3 +50,18 @@ policy=(root/'GlassSettings/Core/Platform/OpenGlassUiPolicy.cs').read_text()
 assert 'IsBundledWithApplication' not in policy and 'OrchestrationTargetsBundledPackage' not in policy
 assert 'PlatformPaths.OpenGlassDllPath' in policy
 print('PASS: graphics-only Resources MSI build/dependency contracts; fixed native GlassPlatform graphics destination independent of upstream OG; Settings catalog source wiring')
+
+# Independently publishable/acquirable identity, never the retired OG MSI.
+catalog=(root/'GlassSetup/src/InstallSupport/GlassPackageCatalog.h').read_text()
+assert '"openglassResources"' in catalog and '"OpenGlassResources-x64.msi"' in catalog
+acquisition=(root/'GlassSetup/src/InstallSupport/GlassPackageAcquisition.cpp').read_text()
+assert 'kProductOpenGlassResourcesX64,L"{A5571574-00E7-43AD-81DF-B65D1AE07699}",L"x64"' in acquisition
+assert acquisition.count('!NativeProductSupported(product)')==2
+assert 'PROCESSOR_ARCHITECTURE_AMD64' in acquisition
+assert 'Prepared(GlassPackageCatalog::PreparedIndex(product))' in acquisition
+codes=(root/'GlassSetup/src/InstallSupport/GlassInstallMsi.h').read_text()
+assert '{'+package.get('ProductCode')+'}' in codes
+publish=(root/'GlassSetup/scripts/New-ReleaseCatalog.ps1').read_text()
+assert "openglassResources='OpenGlassResources-x64.msi'" in publish
+assert package.get('UpgradeCode') in publish and package.get('ProductCode') in publish
+print('PASS: Resources catalog/publisher/acquisition fixed identity, AMD64 guard, non-colliding prepared slot; UI/execution integration still pending')

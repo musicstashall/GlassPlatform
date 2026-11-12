@@ -12,7 +12,7 @@ inline std::string secureUxCatalogText;
 inline std::mutex openGlassCatalogMutex;
 inline std::string openGlassCatalogText;
 inline std::mutex preparedMutex;
-inline std::array<std::wstring,6> prepared{};
+inline std::array<std::wstring,7> prepared{};
 inline std::wstring Prepared(std::size_t i) {std::lock_guard<std::mutex> lock(preparedMutex);return prepared.at(i);}
 inline void SetPrepared(std::size_t i,const std::wstring& path) {std::lock_guard<std::mutex> lock(preparedMutex);prepared.at(i)=path;}
 

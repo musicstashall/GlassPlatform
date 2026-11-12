@@ -29,8 +29,15 @@ const Spec specs[] = {
     {GlassInstallMsi::kProductPlatformX86,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5020}",L"Intel"},
     {GlassInstallMsi::kProductSettingsX64,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5040}",L"x64"},
     {GlassInstallMsi::kProductSettingsX86,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5050}",L"Intel"},
-    {GlassInstallMsi::kProductOpenGlass,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5030}",L"x64"}
+    {GlassInstallMsi::kProductOpenGlass,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5030}",L"x64"},
+    {GlassInstallMsi::kProductOpenGlassResourcesX64,L"{A5571574-00E7-43AD-81DF-B65D1AE07699}",L"x64"}
 };
+static_assert(sizeof(specs)/sizeof(specs[0])==GlassPackageCatalog::kCount);
+bool NativeProductSupported(GlassPackageCatalog::Product product) {
+    if(product!=GlassPackageCatalog::Product::OpenGlassResources)return true;
+    SYSTEM_INFO system{};GetNativeSystemInfo(&system);
+    return GlassPackageCatalog::ResourcesSupported(system.wProcessorArchitecture==PROCESSOR_ARCHITECTURE_AMD64);
+}
 bool Fail(std::wstring& error,const std::wstring& text) {error=text;return false;}
 std::string Narrow(const std::wstring& text) {
     std::string out;
@@ -193,7 +200,7 @@ static bool Discover(GlassPackageCatalog::Product product,const GlassPackageCata
     std::vector<std::wstring>& sources,std::wstring& diagnostics,std::wstring& error,
     std::vector<std::wstring>* labels=nullptr) {
         const auto i=static_cast<std::size_t>(product);
-        if(i>=GlassPackageCatalog::kCount||cancel.load())return false;
+        if(i>=GlassPackageCatalog::kCount||cancel.load()||!NativeProductSupported(product))return false;
         const auto& spec=specs[i];const auto& remote=catalog.products[i];
         const auto name=Wide(GlassPackageCatalog::kFiles[i]);
         wchar_t exe[32768]{};const DWORD length=GetModuleFileNameW(nullptr,exe,32768);
@@ -201,7 +208,7 @@ static bool Discover(GlassPackageCatalog::Product product,const GlassPackageCata
         std::wstring parent(exe,length);parent=parent.substr(0,parent.find_last_of(L"\\/"));
         if(!GlassSetupSourceLayout::directory.empty())parent=GlassSetupSourceLayout::directory;
         const std::array<std::wstring,4> paths={GlassMaintenanceCache::CurrentFile(name.c_str()),
-            parent+L"\\packages\\"+name,parent+L"\\"+name,GlassSetupSourceLayout::Prepared(i)};
+            parent+L"\\packages\\"+name,parent+L"\\"+name,GlassSetupSourceLayout::Prepared(GlassPackageCatalog::PreparedIndex(product))};
         const auto rejected=[&](const std::wstring& path,const std::wstring& reason) {
             InstallLog::LineFormat(L"Local MSI rejected: %s: %s",path.c_str(),reason.c_str());
             diagnostics+=L"\n"+path+L": "+reason;
@@ -278,7 +285,7 @@ bool Prepare(GlassPackageCatalog::Product product,const GlassPackageCatalog::Cat
     std::wstring staged,part;
     try {
         const auto i=static_cast<std::size_t>(product);
-        if(i>=GlassPackageCatalog::kCount||!GlassMaintenanceCache::TrustedDirectory(workspace))
+        if(i>=GlassPackageCatalog::kCount||!NativeProductSupported(product)||!GlassMaintenanceCache::TrustedDirectory(workspace))
             return Fail(error,L"Invalid package workspace/product");
         if(cancel.load())return Fail(error,L"Package acquisition cancelled");
         const auto& spec=specs[i];const auto& remote=catalog.products[i];

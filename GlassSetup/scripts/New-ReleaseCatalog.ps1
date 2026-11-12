@@ -2,7 +2,7 @@
 param(
     [string]$PackageDirectory = (Join-Path $PSScriptRoot '..\..\Build\GlassSetup\Release'),
     [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9_.-]{1,128}$')][string]$ReleaseTag,
-    [ValidateSet('platform64','platform32','settings64','settings32')][string[]]$Products = @('platform64','platform32','settings64','settings32'),
+    [ValidateSet('platform64','platform32','settings64','settings32','openglassResources')][string[]]$Products = @('platform64','platform32','settings64','settings32'),
     [string]$BaseManifest,
     [switch]$IncludeSetup,
     [string]$OutputPath
@@ -18,7 +18,7 @@ $directory = [IO.Path]::GetFullPath($PackageDirectory)
 if (-not $OutputPath) { $OutputPath = Join-Path $directory 'version.json' }
 $files = @{
     platform64='Glass-x64.msi'; platform32='Glass-x86.msi'; settings64='GlassSettings-x64.msi';
-    settings32='GlassSettings-x86.msi'
+    settings32='GlassSettings-x86.msi'; openglassResources='OpenGlassResources-x64.msi'
 }
 $upgradeSuffix = @{platform64='5010';platform32='5020';settings64='5040';settings32='5050'}
 function ConvertTo-ComArguments([object[]]$Arguments) {
@@ -82,7 +82,8 @@ foreach ($id in $Products) {
         $properties[$name] = Read-Com $row 'StringData' @(1)
         Invoke-Com $view 'Close' @() | Out-Null
     }
-    $expectedUpgrade = 'B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F' + $upgradeSuffix[$id]
+    $expectedUpgrade = if ($id -eq 'openglassResources') { 'A5571574-00E7-43AD-81DF-B65D1AE07699' } else { 'B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F' + $upgradeSuffix[$id] }
+    if ($id -eq 'openglassResources' -and [guid]$properties.ProductCode -ne [guid]'6D6046DB-6B28-4F2C-8A7D-EB6CF13CBBD9') { throw "Unexpected Resources ProductCode: $path" }
     if ([guid]$properties.UpgradeCode -ne [guid]$expectedUpgrade) { throw "Unexpected UpgradeCode: $path" }
     $summary = Read-Com $db 'SummaryInformation' @(0)
     $template = [string](Read-Com $summary 'Property' @(7))
