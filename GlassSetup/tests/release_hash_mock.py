@@ -42,7 +42,7 @@ int main(){
  reset();f.attributes=FILE_ATTRIBUTE_DIRECTORY;assert(!VerifyHash(1,3,expected,cancel,error));
  reset();f.attributes=FILE_ATTRIBUTE_REPARSE_POINT;assert(!VerifyHash(1,3,expected,cancel,error));
  reset();f.links=2;assert(!VerifyHash(1,3,expected,cancel,error));
- reset();assert(!VerifyHash(1,3,std::string(64,'f'),cancel,error));assert(error.find(L"23")!=std::wstring::npos);
+ reset();assert(!VerifyHash(1,3,std::string(64,'f'),cancel,error));assert(error.find(L"23")!=std::wstring::npos);assert(error.find(L"expected="+std::wstring(64,L'f'))!=std::wstring::npos);assert(error.find(L"actual="+std::wstring(expected.begin(),expected.end()))!=std::wstring::npos);
  reset();f.readFail=true;assert(!VerifyHash(1,3,expected,cancel,error));assert(error.find(L"111")!=std::wstring::npos);
  reset();f.hashFail=true;assert(!VerifyHash(1,3,expected,cancel,error));assert(error.find(L"333")!=std::wstring::npos);
  reset();f.queryFail=true;assert(!VerifyHash(1,3,expected,cancel,error));assert(error.find(L"444")!=std::wstring::npos);

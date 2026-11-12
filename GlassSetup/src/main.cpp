@@ -2382,7 +2382,7 @@ private:
         }
         if(!count)return {};
         const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
-        if(failed)return ru?L"Не удалось подготовить пакет. Снимите отметку и выберите продукт повторно либо отмените операцию.":L"Package preparation failed. Uncheck and reselect the product to retry, or cancel.";
+        if(failed)return ru?L"Ошибка подготовки. Повторите загрузку или отмените.":L"Preparation failed. Retry the download or cancel.";
         if(count==ready)return ru?L"Выбранные пакеты проверены и готовы.":L"Selected packages are verified and ready.";
         const auto percent=total?(std::min<std::uint64_t>)(99,received*100/total):0;
         return (ru?L"Подготовка пакетов: ":L"Preparing packages: ")+std::to_wstring(percent)+L"% ("+std::to_wstring(ready)+L"/"+std::to_wstring(count)+L")";

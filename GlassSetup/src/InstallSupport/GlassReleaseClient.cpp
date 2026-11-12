@@ -121,7 +121,11 @@ bool VerifyHash(HANDLE file,std::uint64_t expectedSize,const std::string& expect
     if(!ok)return cancel.load()?false:Fail(error,L"Computing MSI SHA-256",failure);
     std::string hex;const char digits[]="0123456789abcdef";
     for(BYTE b:digest){hex+=digits[b>>4];hex+=digits[b&15];}
-    if(hex!=expectedHash)return Fail(error,L"MSI SHA-256 differs from release metadata",ERROR_CRC);
+    if(hex!=expectedHash) {
+        const auto detail=L"Package SHA-256 differs from release metadata; expected="+
+            std::wstring(expectedHash.begin(),expectedHash.end())+L"; actual="+std::wstring(hex.begin(),hex.end());
+        return Fail(error,detail.c_str(),ERROR_CRC);
+    }
     return SetFilePointerEx(file,zero,nullptr,FILE_BEGIN)?true:Fail(error,L"Rewinding MSI");
 }
 }

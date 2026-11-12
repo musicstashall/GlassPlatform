@@ -769,3 +769,34 @@ Settings live-list acceptance was performed here.
 Build GlassUnins Release|Win32 (solution x86), then GlassSetup Release|Win32
 (solution x86). Publish updated embedded uninstallers in MSI distributions as
 needed; this does not require rebuilding GlassShared or the OG vendor installer.
+
+### Download preparation failure: GlassSetup-30
+
+Setup FileVersion 2.0.0.254 downloaded all five Glass MSI payloads to their expected
+sizes, but rejected each with SHA-256 mismatch (ERROR_CRC 23): Platform64 5222400,
+Platform32 5111808, Settings64 69779456, Settings32 63193088, Resources 3444736 bytes.
+Official OG job index4 succeeded (4049232 bytes). Separate metadata discovery for
+OG/SUT reported GitHub HTTP403; that is not the cause of the five post-transfer
+hash failures. Local cached MSI signatures were accepted, while absent adjacent
+files under the original launch directory were normal discovery misses.
+
+The failure proves bytes differed from the catalog snapshot, not a blanket network
+outage. Manifest/artifact publication mismatch (e.g. rebuilding/signing/replacing
+MSIs without regenerating all selected product entries) is a likely explanation,
+not independently proven here: GitHub release asset digests/sizes were readable,
+but downloading version.json for comparison was blocked by the sandbox's asset
+host access. Do not bypass verification or substitute hashes automatically.
+
+Regenerate the catalog from the FINAL signed MSI/Setup files with all five product
+IDs and IncludeSetup, publish those exact bytes and version.json last. A partial
+Setup-only catalog update preserves old MSI entries and cannot repair changed MSI
+hashes. Restart Setup after correcting publication because the current launch
+chain intentionally uses its inherited catalog snapshot; repeatedly clicking retry
+with the same mismatching release cannot fix that snapshot.
+
+Native footer failure copy is now concise RU/EN retry-or-cancel guidance, no
+uncheck/reselect instruction. Full verifier mismatch diagnostics now include both
+expected and actual SHA-256 (shared Setup/MSI verifier), preserving ERROR_CRC and
+all trust gates. Actual footer/verifier mocks pass; Windows font/DPI layout remains
+a visual acceptance check. Uploaded GlassSetup-30.log was deleted after analysis;
+its conclusions are retained here, image-33.png was not deleted.
