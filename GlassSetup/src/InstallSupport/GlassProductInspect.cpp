@@ -1,5 +1,6 @@
 #include "GlassOpenGlassFiles.h"
 #include "GlassOpenGlassInstall.h"
+#include "GlassOpenGlassService.h"
 #include "GlassSetupSourceLayout.h"
 #include "GlassProductInspect.h"
 #include "GlassPackageAcquisition.h"
@@ -509,24 +510,12 @@ Report Run(const Inputs& in)
         report.secureUxThemePresenceDetail+=L"; "+code+L" state="+std::to_wstring(static_cast<int>(MsiQueryProductStateW(code.c_str())));
     GlassInstallLog::LineFormat(L"SecureUxTheme presence: %s",report.secureUxThemePresenceDetail.c_str());
 
-    // Probe physical backends BEFORE the all-MSI-absent return. Keep registration
-    // and residual evidence separate: a residual has no installed MSI baseline.
-    if (in.os64 && !report.og.installed) {
-        bool serviceExists=false;DWORD startType=SERVICE_AUTO_START;
-        const bool serviceKnown=GlassInstallHost::QueryOpenGlassServiceStartType(serviceExists,startType);
-        const DWORD serviceError=serviceKnown?ERROR_SUCCESS:GetLastError();
-        GlassInstallUtil::OpenGlassTaskState tasks;
-        const bool tasksKnown=GlassInstallUtil::QueryOpenGlassTasks(tasks);
-        report.og.residual=serviceExists || tasks.found;
-        if (report.og.residual) {
-            report.og.damaged=true;
-            GlassInstallUtil::InstallRoots residualRoots{};std::wstring detail;
-            report.og.residualSafe=serviceKnown && tasksKnown &&
-                GlassInstallUtil::ResolveInstallRoots(residualRoots) &&
-                GlassInstallRemoval::ValidateOpenGlassPaths(residualRoots.openGlass,in.cancelled,false,detail);
-            GlassInstallLog::LineFormat(L"OpenGlass residual: service=%d tasks=%d serviceError=%lu safe=%d detail=%s",
-                serviceExists?1:0,tasks.found?1:0,serviceError,report.og.residualSafe?1:0,detail.c_str());
-        }
+    // Service/task leftovers are diagnostics, never installation or repair offers.
+    if(in.os64) {
+        bool exists=false,stopped=false;
+        const DWORD serviceError=GlassOpenGlassService::Probe(exists,stopped);
+        GlassInstallLog::LineFormat(L"OpenGlass service fact: exists=%d stopped=%d error=%lu (not product presence)",
+            exists?1:0,stopped?1:0,serviceError);
     }
 
     GlassInstallUtil::InstallRoots roots{};
@@ -602,23 +591,12 @@ Report Run(const Inputs& in)
         ReadSettingsPayloadVersion(report.settings64,roots.x64);
         ReadSettingsPayloadVersion(report.settings32,roots.x86);
     }
-    if(rootsOk&&!roots.openGlass.empty()) {
-        try {
-            const auto files=GlassOpenGlassFiles::Inspect(roots.openGlass);
-            if(files.present) {
-                report.og.installed=true;report.og.residual=false;report.og.residualSafe=false;
-                report.og.integrityKnown=true;report.og.damaged=!files.integrity;
-                report.og.installedVersion.clear();report.og.installedPackageVersion.clear();
-                report.og.installedPayloadVersion=files.version;report.og.reasons.clear();
-                if(!files.integrity)AddReason(report.og,Reason::FileHashMismatch);
-            }
-        }catch(...) {
-            if(GlassOpenGlassFiles::HasReceipt(roots.openGlass)) {
-                report.og.installed=true;report.og.damaged=true;report.og.integrityKnown=false;
-                AddReason(report.og,Reason::InspectionUnavailable);
-            }
-        }
-    }
+    // Retired MSI/receipt facts must not masquerade as official OG presence.
+    report.openGlassRetiredMsi=report.og.installed;
+    report.openGlassRetiredReceipt=rootsOk&&!roots.openGlass.empty()&&GlassOpenGlassFiles::HasReceipt(roots.openGlass);
+    GlassInstallLog::LineFormat(L"OpenGlass retired facts: MSI=%d receipt=%d",
+        report.openGlassRetiredMsi?1:0,report.openGlassRetiredReceipt?1:0);
+    report.og=ProductReport{};
     // Official Inno registration is independent of bundled Glass roots. Read
     // only: do not adopt its service/tasks into managed lifecycle ownership.
     std::wstring officialOpenGlassRoot;
@@ -635,7 +613,7 @@ Report Run(const Inputs& in)
                 !(attrs&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) &&
                 GlassInstallUtil::IsSafeInstallPath(dll);
             report.og.integrityKnown=false; // Registration/FileVersion is not a payload hash check.
-            report.og.damaged=report.og.installedPayloadVersion.empty();report.og.reasons.clear();
+            report.og.damaged=!report.openGlassResourcesPrerequisite||report.og.installedPayloadVersion.empty();report.og.reasons.clear();
             if(report.og.damaged)AddReason(report.og,Reason::FileMissing);
         }else if(!inventoryError.empty()) {
             report.og.installed=true;report.og.integrityKnown=false;report.og.damaged=true;
@@ -692,18 +670,8 @@ Report Run(const Inputs& in)
     if (report.x86.installed &&
         !GlassShared::GlassPlatformTask::GlassAutorunTaskExists(GlassShared::GlassPlatformTask::PlatformArch::X86))
         AddReason(report.x86, Reason::AutostartMissing);
-    if (report.og.installed)
-    {
-        GlassInstallUtil::OpenGlassTaskState tasks{};
-        bool serviceExists = false;
-        DWORD startType = 0;
-        const bool taskKnown = GlassInstallUtil::QueryOpenGlassTasks(tasks);
-        const bool serviceKnown = GlassInstallHost::QueryOpenGlassServiceStartType(serviceExists, startType);
-        if ((taskKnown && !tasks.found) && (serviceKnown && !serviceExists))
-            AddReason(report.og, Reason::AutostartMissing);
-        else if (!taskKnown && !serviceKnown)
-            AddReason(report.og, Reason::AutostartMissing);
-    }
+    // Upstream owns service/task policy. Their absence or pending deletion
+    // does not invalidate the registered DLL payload.
 
     // Известные параметры реестра платформы (GlassPlatform и DWM-значения OpenGlass):
     // некорректные значения — признак повреждения; чинит удаление при установке.
@@ -717,7 +685,7 @@ Report Run(const Inputs& in)
             settings->registryValueNames=sanity.glassValueNames;
         }
     }
-    if (sanity.openGlassIssues)
+    if (sanity.openGlassIssues && report.og.installed)
     {
         AddReason(report.og, Reason::RegistryInvalid);
         report.og.registryValueNames = sanity.openGlassValueNames;

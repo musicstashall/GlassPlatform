@@ -1,73 +1,47 @@
-"""Run actual residual inspection and UI classification against read-only API seams.
-Not a Windows SCM/Scheduler/MSI or signature/ownership integration test.
+"""Actual diagnostic probe and UI classification: leftovers do not imply OG presence.
+Fake APIs only; not Windows SCM/MSI acceptance.
 """
 from pathlib import Path
 import subprocess, tempfile
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
-start=source.index('    if (in.os64 && !report.og.installed)')
-end=source.index('    GlassInstallUtil::InstallRoots roots{};',start)
-probe=source[start:end]
+start=source.index('    // Service/task leftovers')
+probe=source[start:source.index('    GlassInstallUtil::InstallRoots roots{};',start)]
 main=(root/'GlassSetup/src/main.cpp').read_text()
 condition=main[main.index('    static GlassProducts::ProductCondition ConditionOf('):main.index('    static UINT InspectReasonId(')]
-harness=r'''
+h=r'''
 #include "GlassProducts.h"
-#include <atomic>
 #include <cassert>
-#include <string>
-#include <iostream>
-using DWORD=unsigned long;
-constexpr DWORD SERVICE_AUTO_START=2,ERROR_SUCCESS=0;
-DWORD GetLastError(){return 5;}
-struct State {bool service=false,tasks=false,serviceKnown=true,tasksKnown=true,rootsSafe=true,pathsSafe=true;
- int queries=0,validations=0;} s;
-namespace GlassProductInspect {
-struct ProductReport {bool installed=false,residual=false,residualSafe=false,damaged=false,updateAvailable=false;};
-struct Report {ProductReport og;};
-struct Inputs {bool os64=true;const std::atomic_bool* cancelled=nullptr;};
-}
-namespace GlassInstallHost {
-bool QueryOpenGlassServiceStartType(bool& exists,DWORD&){++s.queries;exists=s.service;return s.serviceKnown;}
-}
-namespace GlassInstallUtil {
-struct OpenGlassTaskState {bool found=false;};
-bool QueryOpenGlassTasks(OpenGlassTaskState& out){++s.queries;out.found=s.tasks;return s.tasksKnown;}
-struct InstallRoots {std::wstring openGlass=L"expected-root";};
-bool ResolveInstallRoots(InstallRoots&){return s.rootsSafe;}
-}
-namespace GlassInstallRemoval {
-bool ValidateOpenGlassPaths(const std::wstring& root,const std::atomic_bool* cancelled,bool,std::wstring&){
- ++s.validations;assert(root==L"expected-root");return s.pathsSafe&&!(cancelled&&cancelled->load());}
-}
+#include <initializer_list>
+using DWORD=unsigned;
+struct State{bool exists=false,stopped=false;DWORD error=0;int probes=0;} s;
+namespace GlassProductInspect {struct ProductReport {bool installed=false,residual=false,residualSafe=false,damaged=false,updateAvailable=false;};
+struct Report{ProductReport og;};struct Inputs{bool os64=true;};}
+namespace GlassOpenGlassService {DWORD Probe(bool& exists,bool& stopped){++s.probes;exists=s.exists;stopped=s.stopped;return s.error;}}
 namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...){} }
-GlassProductInspect::Report Inspect(bool registered=false,bool os64=true,const std::atomic_bool* cancel=nullptr){
- GlassProductInspect::Inputs in{os64,cancel};GlassProductInspect::Report report;report.og.installed=registered;
+GlassProductInspect::Report Inspect(bool os64=true){GlassProductInspect::Inputs in{os64};GlassProductInspect::Report report;
 // PROBE
- return report;
-}
+return report;}
 // CONDITION
-int main(){
- using C=GlassProducts::ProductCondition;
- static_assert(!GlassProducts::DefaultSelectedFor(C::Damaged));
- static_assert(!GlassProducts::DefaultSelectedFor(C::UpdateAvailable));
- static_assert(!GlassProducts::DefaultSelectedFor(C::Healthy));
- static_assert(GlassProducts::DefaultSelectedFor(C::NotInstalled));
- static_assert(!GlassProducts::DefaultSelectedFor(C::NotInstalled,true));
- {s={};auto r=Inspect();assert(!r.og.installed&&!r.og.residual&&!r.og.damaged);assert(s.validations==0);}
- for(bool taskOnly:{false,true}){s={};s.service=!taskOnly;s.tasks=taskOnly;auto r=Inspect();
-  assert(!r.og.installed&&r.og.residual&&r.og.damaged&&r.og.residualSafe);
-  assert(ConditionOf(&r.og,false)==C::Damaged);assert(s.validations==1);}
- {s={};s.service=true;s.pathsSafe=false;auto r=Inspect();assert(r.og.residual&&!r.og.residualSafe);}
- {s={};s.service=true;s.rootsSafe=false;auto r=Inspect();assert(r.og.residual&&!r.og.residualSafe);assert(s.validations==0);}
- {s={};s.service=true;s.serviceKnown=false;auto r=Inspect();assert(r.og.residual&&!r.og.residualSafe);assert(s.validations==0);}
- {s={};s.service=true;s.tasksKnown=false;auto r=Inspect();assert(r.og.residual&&!r.og.residualSafe);}
- {s={};s.service=true;auto r=Inspect(true);assert(r.og.installed&&!r.og.residual);assert(s.queries==0);}
- {s={};s.service=true;auto r=Inspect(false,false);assert(!r.og.residual);assert(s.queries==0);}
- {s={};s.service=true;std::atomic_bool cancel{true};auto r=Inspect(false,true,&cancel);assert(r.og.residual&&!r.og.residualSafe);}
- std::cout<<"PASS: actual OpenGlass residual probe/classification: service/tasks, MSI distinction, absent, foreign path/root, query failure, cancellation\n";
+int main(){using C=GlassProducts::ProductCondition;
+ for(bool exists:{false,true})for(bool stopped:{false,true})for(DWORD error:{0u,5u,1072u}){
+  s={exists,stopped,error,0};auto r=Inspect();assert(s.probes==1);
+  assert(!r.og.installed&&!r.og.residual&&!r.og.residualSafe&&!r.og.damaged);
+  assert(ConditionOf(&r.og,false)==C::NotInstalled);
+ }
+ s={};Inspect(false);assert(s.probes==0);
 }
 '''.replace('// PROBE',probe).replace('// CONDITION',condition)
-with tempfile.TemporaryDirectory(prefix='OpenGlassResidual-') as d:
- p=Path(d)/'test.cpp';exe=Path(d)/'test';p.write_text(harness)
+with tempfile.TemporaryDirectory() as d:
+ p=Path(d)/'test.cpp';exe=Path(d)/'test';p.write_text(h)
  subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-I'+str(root/'GlassSetup/src'),str(p),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)
+assert 'report.og.residual=serviceExists' not in source
+assert 'report.og=ProductReport{};' in source
+assert source.index('report.og=ProductReport{};') < source.index('GlassOpenGlassInstall::Query(official,inventoryError)')
+assert 'report.openGlassRetiredMsi=report.og.installed' in source
+assert 'report.openGlassRetiredReceipt=' in source
+assert '!report.openGlassResourcesPrerequisite||report.og.installedPayloadVersion.empty()' in source
+assert 'AddReason(report.og, Reason::AutostartMissing)' not in source
+assert 'sanity.openGlassIssues && report.og.installed' in source
+print('PASS: OG leftover service incl.1072 is diagnostic only; retired facts separate; official DLL presence guards and no service-based damage')

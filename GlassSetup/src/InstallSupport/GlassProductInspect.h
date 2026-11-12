@@ -24,8 +24,8 @@ enum class Reason {
 };
 
 struct ProductReport {
-    bool installed = false; // MSI registration only; never inferred from a service.
-    bool residual = false; // Physical OpenGlass service/tasks without a registered MSI.
+    bool installed = false; // MSI registration, or official Inno for OG; never inferred from a service.
+    bool residual = false; // Reserved legacy UI fact; OG service/task leftovers never set this.
     bool residualSafe = false; // Read-only root/action/account validation succeeded.
     bool updateAvailable = false;
     bool damaged = false;
@@ -59,6 +59,7 @@ struct Report {
     ProductReport settings64,settings32;
     ProductReport secureUxTheme;
     GlassSecureUxPackage::Offer secureUxOffer;
+    bool openGlassRetiredMsi = false, openGlassRetiredReceipt = false;
     ProductReport og;
     // Graphics MSI inventory is independent of upstream OG, its files/services.
     ProductReport openGlassResources;

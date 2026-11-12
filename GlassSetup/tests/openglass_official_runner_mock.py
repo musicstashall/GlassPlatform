@@ -35,8 +35,9 @@ bool CreateProcessW(const wchar_t* exe,wchar_t* cmd,void*,void*,bool inherit,uns
 unsigned WaitForSingleObject(HANDLE h,unsigned timeout){assert(h==10&&timeout==INFINITE);return waitOk?WAIT_OBJECT_0:~0u;}
 bool GetExitCodeProcess(HANDLE h,DWORD* out){assert(h==10);*out=code;return exitOk;}
 void CloseHandle(HANDLE h){assert(h==10||h==11);++closes;}
+namespace GlassOpenGlassService {bool ready=true;bool Check(bool,std::wstring& e,DWORD& c){if(!ready){e=L"pending deletion";c=1072;}return ready;}}
 // RUNNER
-void reset(){trusted=safe=createOk=waitOk=exitOk=true;creates=closes=code=0;order.clear();actualVersion=L"3.0.2.3749";}
+void reset(){GlassOpenGlassService::ready=true;trusted=safe=createOk=waitOk=exitOk=true;creates=closes=code=0;order.clear();actualVersion=L"3.0.2.3749";}
 int main(){
  Package package{L"C:\\Protected\\OpenGlassSetup.Signed.exe",L"3.0.2.3749"};std::wstring error;DWORD result=0;
  for(unsigned exit:{0u,3010u,2u}){reset();code=exit;assert(RunInstaller(package,L"D:\\Other Folder\\OG",result,error));assert(result==exit&&closes==2&&creates==1);
@@ -44,6 +45,7 @@ int main(){
   assert(command==L"\"C:\\Protected\\OpenGlassSetup.Signed.exe\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOICONS /MERGETASKS=\"!desktopicon\" /SP- /RESTARTEXITCODE=3010 /DIR=\"D:\\Other Folder\\OG\" /LOG=\"C:\\Protected\\OpenGlass-install.log\"");
   assert(order==L"pin;verify;unblock;pin;verify;");
  }
+ reset();GlassOpenGlassService::ready=false;assert(!RunInstaller(package,L"C:\\OG",result,error)&&creates==0&&result==1072);
  for(auto dir:{L"C:\\",L"relative",L"C:\\Bad\" /TASKS=x",L"C:\\Bad\nPath",L"C:\\OG\\"}){reset();assert(!RunInstaller(package,dir,result,error)&&creates==0);}
  reset();trusted=false;assert(!RunInstaller(package,L"C:\\OG",result,error)&&creates==0);
  reset();actualVersion=L"9.0.0.0";assert(!RunInstaller(package,L"C:\\OG",result,error)&&creates==0);

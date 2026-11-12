@@ -28,7 +28,8 @@
    `C:\Program Files\GlassPlatform\OpenGlass` (через known folder, не literal drive).
 5. Запускать проверенную staged-копию напрямую, без shell:
    `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="<resolved directory>"`.
-   Не создавать/останавливать/удалять службы, задачи или ACL вместо Inno.
+   Не создавать/удалять службы, задачи или ACL вместо Inno. Перед удалением
+   допускается только проверенная остановка OG по общему протоколу ниже.
 6. Не прерывать установившийся Inno процесс через TerminateProcess на Cancel.
    Дождаться результата; корректно обработать exit code и reboot requirement.
    После завершения перечитать upstream registration и реальное состояние.
@@ -627,3 +628,48 @@ files/services. Fresh Resources installation still requires a single recognized
 upstream registration and its DLL; the rollback restore bypass is unchanged.
 Rebuild and publish `OpenGlassResources-x64` (`Release|x64`) to deliver this fix;
 already cached MSI packages retain their old launch condition.
+
+
+### OG presence and pre-uninstall stop (service deletion pending)
+
+Official Inno registration is the OG card presence authority. A service, task,
+empty directory or Resources-only directory without that registration is not an
+installed/damaged OG and does not offer residual cleanup. Retired MSI and receipt
+presence are retained as separate inventory/log facts; no migration is performed.
+With registration, the DLL must be a safe regular file with readable version.
+Service/task absence does not add an OG integrity error.
+
+`GlassOpenGlassService` probes only SCM status, never starts/creates a service to
+try to detect 1072. A confirmed `ERROR_SERVICE_MARKED_FOR_DELETE` is logged as
+Windows deletion pending, not product damage. Setup preflight and the installer
+execution boundary refuse vendor installation in this state with RU/EN advice to
+close foreign service-management handles or restart Windows. A status query that
+reports STOPPED cannot prove that Windows has no hidden pending deletion; there
+is no guaranteed read-only probe for every such state.
+
+The common official uninstaller runner (Setup standalone/mixed and GlassUnins)
+verifies the official registration and trusted signed uninstaller/data first,
+then validates service configuration/running image and known task action paths
+against the registered OG directory. It requests a bounded stop through the
+existing OG service/task stop helper, independently confirms SERVICE_STOPPED (or
+service absence), and closes its SCM/service handles before launching Inno.
+Timeout, access failure, foreign paths or confirmed 1072 prevent vendor execution.
+No service/task deletion, startup-type/ACL change, process kill or automatic reboot
+is performed. Only explicit OG removal invokes this stop. Mixed managed actions
+still commit first; a later OG preparation/removal failure remains partial
+completion, never a global rollback claim. A post-uninstall confirmed 1072 yields
+restart-required completion, provided the official registration was removed.
+
+Build: GlassUnins Release|Win32 (solution x86), then GlassSetup Release|Win32
+(solution x86). Repackage MSI products that distribute the embedded unins000.exe
+when publishing those packages. GlassShared and Resources payload are unchanged.
+
+Tests: `openglass_official_service_mock.py` compiles the actual shared helper;
+`openglass_residual_mock.py` checks the actual diagnostic probe/UI classification;
+actual official launcher mocks cover stop refusal/no process execution and the
+pending-deletion restart result. Mixed worker, GlassUnins lane, Resources phase,
+execution-plan, product-plan and resource-source checks pass. These are mocked
+Win32/source tests, not MSVC/SCM/Scheduler/Inno acceptance on Windows.
+Older unrelated harnesses `task_scheduler_stop_mock.py`, `unins_task_stop_mock.py`
+and `setup_real_entry_mock.py` currently fail on missing mock APIs/stale extraction
+assumptions; they were not treated as passing acceptance or changed in this fix.

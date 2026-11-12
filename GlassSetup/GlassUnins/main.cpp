@@ -817,8 +817,9 @@ private:
                 L"The official OpenGlass installation is unavailable or changed. Removal was not started. ")+detail);
             return ERROR_INSTALL_PACKAGE_REJECTED;
         }
-        // Same atomic close/cancel boundary as the MSI route, but no host stop,
-        // MSI snapshot, managed service/task teardown or directory pruning.
+        // Same atomic close/cancel boundary as the MSI route. The shared
+        // vendor runner validates and stops OG before Inno; no MSI snapshot,
+        // managed service/task deletion or directory pruning.
         OperationState expected=OperationState::BeforeRemoval;
         if(!operationState_.compare_exchange_strong(expected,OperationState::Removing,std::memory_order_acq_rel))
             return ERROR_INSTALL_USEREXIT;

@@ -2,6 +2,7 @@
 #include "GlassOpenGlassInstall.h"
 #include "GlassOpenGlassTrust.h"
 #include "GlassMaintenanceCache.h"
+#include "GlassOpenGlassService.h"
 
 namespace GlassOpenGlassPackage {
 using namespace GlassOpenGlassTrust;
@@ -22,6 +23,7 @@ bool RunUninstaller(const GlassOpenGlassInstall::Record& record,DWORD& exitCode,
             // Release pins only after verification; the directory must remain
             // protected from unprivileged replacement. Never unblock originals.
         }
+        if(!GlassOpenGlassService::PrepareRemoval(record.directory,error,exitCode))return false;
         std::wstring command=L"\""+record.uninstaller+L"\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /NODELETECONFIG";
         STARTUPINFOW startup{};startup.cb=sizeof(startup);startup.dwFlags=STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;
         PROCESS_INFORMATION process{};
@@ -30,6 +32,11 @@ bool RunUninstaller(const GlassOpenGlassInstall::Record& record,DWORD& exitCode,
         struct ProcessHandles {PROCESS_INFORMATION& p;~ProcessHandles(){CloseHandle(p.hThread);CloseHandle(p.hProcess);}} handles{process};
         Require(WaitForSingleObject(process.hProcess,INFINITE)==WAIT_OBJECT_0,"Cannot wait for official OpenGlass uninstaller");
         Require(GetExitCodeProcess(process.hProcess,&exitCode)!=FALSE,"Cannot read official OpenGlass uninstaller result");
+        if(exitCode==ERROR_SUCCESS) {
+            bool exists=false,stopped=false;
+            if(GlassOpenGlassService::Probe(exists,stopped)==ERROR_SERVICE_MARKED_FOR_DELETE)
+                exitCode=ERROR_SUCCESS_REBOOT_REQUIRED;
+        }
         return true;
     }catch(const std::exception& e){error=L"OpenGlass: "+std::wstring(e.what(),e.what()+std::char_traits<char>::length(e.what()));}
      catch(...){error=L"OpenGlass uninstaller execution failed";}

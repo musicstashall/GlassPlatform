@@ -1,6 +1,7 @@
 #include "GlassOpenGlassPackage.h"
 #include "GlassOpenGlassTrust.h"
 #include "GlassOpenGlassInstall.h"
+#include "GlassOpenGlassService.h"
 #include "GlassInnoExtract.h"
 #include "GlassOpenGlassRelease.h"
 #include "GlassReleaseClient.h"
@@ -298,6 +299,7 @@ bool RunInstaller(const Package& package,const std::wstring& directory,DWORD& ex
         Require(GlassInstallUtil::IsSafeInstallPath(directory)&&directory.size()>3&&directory[1]==L':'&&directory[2]==L'\\'&&
             directory.find_first_of(L"\"\r\n")==std::wstring::npos&&directory.back()!=L'\\',"Unsafe OpenGlass install directory");
         {File verified;Pin(verified,package.setup);(void)VerifyPublisher(package.setup,verified.h);}
+        if(!GlassOpenGlassService::Check(false,error,exitCode))return false;
         RemoveInternetZone(package.setup);
         File pinned;Pin(pinned,package.setup);(void)VerifyPublisher(package.setup,pinned.h);
         Require(!package.version.empty()&&SetupFileVersion(package.setup)==package.version,"OpenGlass installer version changed");

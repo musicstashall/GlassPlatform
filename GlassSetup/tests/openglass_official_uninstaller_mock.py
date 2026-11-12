@@ -11,6 +11,7 @@ h=r'''
 #include <stdexcept>
 using DWORD=unsigned;using HANDLE=int;
 constexpr unsigned ERROR_INSTALL_FAILURE=1603,STARTF_USESHOWWINDOW=1,SW_HIDE=0,CREATE_NO_WINDOW=0x8000000,INFINITE=~0u,WAIT_OBJECT_0=0;
+constexpr unsigned ERROR_SUCCESS=0,ERROR_SUCCESS_REBOOT_REQUIRED=3010,ERROR_SERVICE_MARKED_FOR_DELETE=1072;
 constexpr bool FALSE=false;
 struct STARTUPINFOW{unsigned cb=0,dwFlags=0,wShowWindow=0;};
 struct PROCESS_INFORMATION{HANDLE hProcess=0,hThread=0;};
@@ -36,14 +37,21 @@ bool CreateProcessW(const wchar_t* exe,wchar_t* cmd,void*,void*,bool inherit,uns
 unsigned WaitForSingleObject(HANDLE h,unsigned t){assert(h==10&&t==INFINITE);return waitOk?WAIT_OBJECT_0:~0u;}
 bool GetExitCodeProcess(HANDLE h,DWORD* out){assert(h==10);*out=code;return exitOk;}
 void CloseHandle(HANDLE h){assert(h==10||h==11);++closes;}
+namespace GlassOpenGlassService {
+bool ready=true,pending=false;unsigned stops=0;
+bool PrepareRemoval(const std::wstring&,std::wstring& e,DWORD& c){assert(pins==2&&livePins==0);++stops;if(!ready){e=L"stop failed";c=1072;}return ready;}
+DWORD Probe(bool&,bool&){return pending?1072:0;}
+}
 // RUNNER
-void reset(){queryOk=same=trusted=signedOk=pinOk=createOk=waitOk=exitOk=true;code=creates=closes=pins=livePins=0;}
+void reset(){GlassOpenGlassService::ready=true;GlassOpenGlassService::pending=false;GlassOpenGlassService::stops=0;queryOk=same=trusted=signedOk=pinOk=createOk=waitOk=exitOk=true;code=creates=closes=pins=livePins=0;}
 int main(){
  GlassOpenGlassInstall::Record record;std::wstring error;DWORD result=0;
  for(unsigned exit:{0u,3010u,2u}){reset();code=exit;assert(RunUninstaller(record,result,error)&&result==exit&&closes==2&&livePins==0);
  assert(app==record.uninstaller&&cwd==record.directory);
  assert(command==L"\"D:\\Official OG\\unins000.exe\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /NODELETECONFIG");}
  for(bool* flag:{&queryOk,&same,&trusted,&signedOk,&pinOk}){reset();*flag=false;assert(!RunUninstaller(record,result,error)&&creates==0&&livePins==0&&!error.empty());}
+ reset();GlassOpenGlassService::ready=false;assert(!RunUninstaller(record,result,error)&&creates==0&&result==1072);
+ reset();GlassOpenGlassService::pending=true;assert(RunUninstaller(record,result,error)&&result==3010);
  reset();record.installed=false;assert(!RunUninstaller(record,result,error)&&creates==0);record.installed=true;
  reset();createOk=false;assert(!RunUninstaller(record,result,error)&&closes==0&&livePins==0);
  reset();waitOk=false;assert(!RunUninstaller(record,result,error)&&closes==2);

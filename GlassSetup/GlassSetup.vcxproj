@@ -156,6 +156,7 @@
     <ClInclude Include="src\InstallSupport\GlassInnoExtract.h" />
     <ClInclude Include="src\InstallSupport\GlassOpenGlassFiles.h" />
     <ClInclude Include="src\InstallSupport\GlassOpenGlassPackage.h" />
+    <ClInclude Include="src\InstallSupport\GlassOpenGlassService.h" />
     <ClInclude Include="src\InstallSupport\GlassPackageAcquisition.h" />
     <ClInclude Include="src\InstallSupport\GlassPackageCatalog.h" />
     <ClInclude Include="src\InstallSupport\GlassOpenGlassRelease.h" />

@@ -4,6 +4,7 @@
     <ClCompile Include="src\InstallSupport\GlassOpenGlassPackage.cpp"><Filter>src\InstallSupport</Filter></ClCompile>
     <ClCompile Include="third_party\lzma\LzmaDec.c" />
     <ClInclude Include="src\InstallSupport\GlassOpenGlassPackage.h"><Filter>src\InstallSupport</Filter></ClInclude>
+    <ClInclude Include="src\InstallSupport\GlassOpenGlassService.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClInclude Include="src\InstallSupport\GlassInnoExtract.h"><Filter>src\InstallSupport</Filter></ClInclude>
     <ClInclude Include="src\GlassMaintenanceExecutor.h" />
     <ClInclude Include="src\InstallSupport\GlassPackageRules.h" />

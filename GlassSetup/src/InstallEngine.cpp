@@ -1,5 +1,6 @@
 #include "InstallSupport/GlassOpenGlassRelease.h"
 #include "InstallSupport/GlassOpenGlassInstall.h"
+#include "InstallSupport/GlassOpenGlassService.h"
 #include "InstallSupport/GlassMaintenanceCache.h"
 #include "InstallSupport/GlassPackageAcquisition.h"
 #include "InstallEngine.h"
@@ -476,6 +477,10 @@ bool InstallEngine::PrepareOfficialOpenGlass(bool removing) noexcept {
             SetFailure(ru?L"Обнаружена старая тестовая установка OpenGlass. Удалите её прежним деинсталлятором перед проверкой нового маршрута; миграции не выполняются.":
                 L"A retired test OpenGlass installation was found. Remove it with its previous uninstaller before testing the new route; no migration is performed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
         }
+        std::wstring serviceError;DWORD serviceCode=ERROR_SUCCESS;
+        if(!GlassOpenGlassService::Check(false,serviceError,serviceCode)) {
+            SetFailure(serviceError,serviceCode);return false;
+        }
         auto& before=officialOpenGlassBefore_;std::wstring error;
         if(!GlassOpenGlassInstall::Query(before,error)){SetFailure(error,ERROR_INSTALL_PACKAGE_REJECTED);return false;}
         if(removing&&!before.installed) {
@@ -558,7 +563,7 @@ bool InstallEngine::CommitOfficialOpenGlass(bool removing) noexcept {
                 (code==ERROR_SUCCESS||code==ERROR_SUCCESS_REBOOT_REQUIRED)?ERROR_INSTALL_FAILURE:code);return false;
         }
         if(code==ERROR_SUCCESS_REBOOT_REQUIRED)AddFinishWarning(ru?L"OpenGlass: требуется перезагрузка":L"OpenGlass: restart required",
-            ru?L"Официальный установщик запросил перезагрузку Windows.":L"The official installer requested a Windows restart.");
+            ru?L"Для завершения операции OpenGlass требуется перезагрузка Windows.":L"Restart Windows to finish the OpenGlass operation.");
         InstallLog::Line(L"OpenGlass official transaction confirmed; no Glass rollback claimed");
         SetStatus(labels_.finalize,selection_.openGlassResources?9600:10000);return true;
     }catch(...) {

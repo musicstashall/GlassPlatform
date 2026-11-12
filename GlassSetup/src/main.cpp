@@ -1542,8 +1542,7 @@ private:
                     result.installed.glassSettings=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX64) ||
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86);
                 if (!startupStop_.load(std::memory_order_acquire))
-                    result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
-                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass) || GlassOpenGlassInstall::HasProduct();
+                    result.installed.openGlass=GlassOpenGlassInstall::HasProduct();
                 if (!startupStop_.load(std::memory_order_acquire))
                     result.installed.openGlassResources=result.os64&&GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlassResourcesX64);
                 // Discovery is read-only: orphan ARP cleanup must not run before
