@@ -727,3 +727,45 @@ and signature failure), resources_arp_maintenance_mock (actual registry adapter)
 empty_inventory_preview_mock (actual preview including SUT-only idle inventory),
 controller_handoff_mock, product-plan matrix, resource smoke. No Windows build or
 real ARP/Settings UI test was performed in the sandbox.
+
+### Completed follow-up: mixed SUT removal and installed-app notifications
+
+This supersedes the earlier follow-up's separate-only original-SUT removal
+restriction in Setup. Original SUT removal may now accompany managed product
+removal (Platform, Settings and Resources); SUT installation plus managed removal
+remains rejected, as do unsafe/conflicting inventory, profile or helper states.
+The official OG dispatcher restrictions are not expanded by this change.
+
+All original-MSI identity, Glass baseline/snapshot, style/profile and managed
+removal preflights run first. Hosts are stopped/modules released and any explicitly
+selected helper update runs before the private SUT transaction. In mixed removal,
+SUT is removed while the trusted installed Native helper is still present, before
+RunMsiSequence can remove Settings. The existing loaded-profile/stock-style and
+manual-risk rules are unchanged. Cancellation closes atomically at this earlier
+vendor boundary. SUT is never executed a second time in the final vendor stage.
+If subsequent managed work fails, Glass recovery runs separately and the result
+explicitly reports partial completion: SUT was removed and is not restored. No
+successful global rollback is claimed. Full user-data cleanup remains opt-in and
+only runs after complete success.
+
+The MSI wrapper sends a bounded WM_SETTINGCHANGE notification for the Uninstall
+registry section after successful removal; the final ARP refresh sends another
+notification at batch completion. This requests live refresh of consumers, without
+terminating/reopening SystemSettings or removing unrelated registrations. Windows
+Settings owns its list UI: delivery is best-effort and immediate visual removal
+must be verified on Windows, not claimed from a mock or guaranteed if Settings
+ignores the notification. Successful MSI removal/registration absence and a live
+UI refresh are separate acceptance checks.
+
+Tests added: mixed_sut_removal_mock (actual atomic early gate/order/partial-result
+contracts), apps_notification_mock (actual bounded notification); actual execution
+plan tests cover SUT + each managed removal row, and vendor worker tests now cover
+loaded SUT removal with native Settings scheduled for later removal. Full-removal
+and cleanup-review harness seams were brought up to current Resources/Inno facts.
+Profile/vendor refusal, MSI errors, restart results, plan matrix, scoped snapshots,
+resource smoke and recommendation DOM tests pass. No MSVC/Windows installation or
+Settings live-list acceptance was performed here.
+
+Build GlassUnins Release|Win32 (solution x86), then GlassSetup Release|Win32
+(solution x86). Publish updated embedded uninstallers in MSI distributions as
+needed; this does not require rebuilding GlassShared or the OG vendor installer.

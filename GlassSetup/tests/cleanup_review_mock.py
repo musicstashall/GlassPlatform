@@ -22,6 +22,7 @@ prefix=r'''
 using UINT=unsigned;using INSTALLSTATE=int;
 bool fileProduct=false,rootsKnown=true;
 namespace GlassInstallUtil {struct InstallRoots {std::wstring openGlass;};bool ResolveInstallRoots(InstallRoots&){return rootsKnown;}}
+namespace GlassOpenGlassInstall {bool HasProduct(){return false;}}
 namespace GlassOpenGlassFiles {bool HasReceipt(const std::wstring&){return fileProduct;}}
 constexpr UINT ERROR_NO_MORE_ITEMS=259,ERROR_UNKNOWN_PRODUCT=1605,ERROR_SUCCESS=0,MSIINSTALLCONTEXT_ALL=7;
 constexpr int INSTALLSTATE_UNKNOWN=-1,INSTALLSTATE_ABSENT=2;

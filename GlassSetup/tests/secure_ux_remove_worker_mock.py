@@ -4,6 +4,8 @@ import subprocess, shutil, tempfile
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
 methods=source[source.index('bool InstallEngine::PrepareSecureUxRemoval()'):source.index('bool InstallEngine::BuildExecutionPlan()')]
+early=source[source.index('bool InstallEngine::CommitEarlySecureUxRemoval()'):source.index('bool InstallEngine::InstallOriginalSecureUxTheme()')]
+methods=methods.replace(early,'')
 worker=source[source.index('DWORD WINAPI InstallEngine::WorkerThread('):source.index('bool InstallEngine::Start(')]
 assert worker.index('CreateRollbackSnapshot()')<worker.index('PrepareSecureUxRemoval()')<worker.index('StopRunningHosts()')
 assert worker.index('RegisterSelectedProducts()')<worker.index('InstallOriginalSecureUxTheme()')<worker.index('LaunchSelectedProducts()')
@@ -91,7 +93,7 @@ struct InstallEngine {
  InstallEngine(){executionPlan_.rows[GlassProductPlan::Index(GlassProductPlan::Product::SecureUxTheme)].action=GlassProductPlan::Action::Remove;}
  struct {bool secureUxTheme=false,secureUxThemeRemove=true,secureUxRemovalWithoutSettings=false,nativeUpdate=false;bool Settings64(bool)const{return nativeUpdate;}bool Settings32(bool)const{return false;}unsigned removeMask=0;bool Removes(unsigned row)const{return (removeMask&(1u<<row))!=0;}}selection_;
  GlassSecureUxPackage::Removal secureUxRemoval_;
- GlassProfileMaintenance::Inventory secureUxRemovalProfiles_;bool secureUxLoadedRemoval_=false;
+ GlassProfileMaintenance::Inventory secureUxRemovalProfiles_;bool secureUxLoadedRemoval_=false,secureUxRemovalCommitted_=false;
  GlassSecureUxPackage::Package secureUxPackage_;
  struct {std::wstring secureUxTheme;}labels_;
  std::wstring secureUxRemovalCode_=L"official",tempDir_=L"work",x64Dir_=L"x64",x86Dir_=L"x86",openGlassDir_=L"og";
@@ -160,7 +162,7 @@ int main(){
   assert(!e.RemoveOriginalSecureUxTheme());assert(GlassInstallMsi::uninstalls==0);
  }
  {Reset();InstallEngine e;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;e.selection_.removeMask=1u<<2;
-  assert(!e.PrepareSecureUxRemoval());assert(GlassInstallUtil::styleCalls==0&&GlassSecureUxPackage::prepares==0);}
+  assert(e.PrepareSecureUxRemoval());assert(e.RemoveOriginalSecureUxTheme());assert(GlassInstallUtil::styleCalls==1&&GlassSecureUxPackage::prepares==1);}
  {Reset();InstallEngine e;GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;
   assert(e.PrepareSecureUxRemoval());GlassInstallMsi::result=1603;assert(!e.RemoveOriginalSecureUxTheme());assert(GlassInstallUtil::styleCalls==1&&e.failures==1);}
 

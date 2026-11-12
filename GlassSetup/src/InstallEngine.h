@@ -207,6 +207,8 @@ private:
     bool openGlassResidualRemoval_=false;
     bool RunMsiSequence() noexcept;
     bool InstallOriginalSecureUxTheme() noexcept;
+    bool CommitEarlySecureUxRemoval() noexcept;
+    bool secureUxRemovalCommitted_ = false;
     GlassSecureUxPackage::Package secureUxPackage_;
     GlassOpenGlassPackage::Package openGlassPackage_;
     std::shared_ptr<GlassOpenGlassFiles::Transaction> openGlassFiles_;

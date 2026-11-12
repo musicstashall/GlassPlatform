@@ -12,7 +12,7 @@ h=r'''
 using UINT=unsigned;
 constexpr unsigned ERROR_NO_MORE_ITEMS=259,ERROR_UNKNOWN_PRODUCT=1605,MSIINSTALLCONTEXT_ALL=7;
 int _wcsicmp(const wchar_t* a,const wchar_t* b){return wcscasecmp(a,b);}
-namespace GlassInstallMsi {constexpr const wchar_t* kProductPlatformX64=L"p64",*kProductPlatformX86=L"p32",*kProductSettingsX64=L"s64",*kProductSettingsX86=L"s32",*kProductOpenGlass=L"og",*kLegacyPlatformX64=L"old64",*kLegacyPlatformX86=L"old32",*kLegacyOpenGlass=L"oldog";}
+namespace GlassInstallMsi {constexpr const wchar_t* kProductPlatformX64=L"p64",*kProductPlatformX86=L"p32",*kProductSettingsX64=L"s64",*kProductSettingsX86=L"s32",*kProductOpenGlass=L"og",*kProductOpenGlassResourcesX64=L"res",*kLegacyPlatformX64=L"old64",*kLegacyPlatformX86=L"old32",*kLegacyOpenGlass=L"oldog";}
 unsigned result=ERROR_NO_MORE_ITEMS,calls=0;
 unsigned MsiEnumProductsExW(const wchar_t*,const wchar_t*,unsigned mode,unsigned,wchar_t*,void*,void*,void*){assert(mode==MSIINSTALLCONTEXT_ALL);++calls;return result;}
 // GUARD
@@ -27,7 +27,7 @@ int main(){
  }
  GlassProducts::Selection vendor;vendor.platform64=vendor.platform32=vendor.glassSettings=vendor.openGlass=false;vendor.secureUxThemeRemove=true;
  assert(GlassProducts::FullRemovalSelected(vendor,0,true));assert(!GlassProducts::FullRemovalSelected(vendor,1,true));
- assert(MaintenanceProductAbsent(L"p64"));result=ERROR_UNKNOWN_PRODUCT;assert(MaintenanceProductAbsent(L"s32"));
+ assert(MaintenanceProductAbsent(L"res"));assert(MaintenanceProductAbsent(L"p64"));result=ERROR_UNKNOWN_PRODUCT;assert(MaintenanceProductAbsent(L"s32"));
  result=0;assert(!MaintenanceProductAbsent(L"p64"));result=5;assert(!MaintenanceProductAbsent(L"p64"));
  calls=0;assert(!MaintenanceProductAbsent(L"unknown")&&calls==0);
 }

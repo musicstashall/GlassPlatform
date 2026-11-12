@@ -2040,7 +2040,13 @@ private:
             if(selection_.secureUxRemovalWithoutSettings)
                 text+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"\nБез GlassSettings: верните штатную тему вручную. Ответственность за последствия удаления принимаете вы. Перезагрузите Windows.":L"\nWithout GlassSettings: restore a stock theme yourself. You accept responsibility for removal consequences. Restart Windows.";
         }
-        if(selection_.removeMask && (selection_.secureUxTheme||selection_.secureUxThemeRemove)) {
+        if(selection_.removeMask && selection_.secureUxThemeRemove) {
+            if(!text.empty())text+=L"\n";
+            text+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+                L"Сначала удаляется SecureUxTheme с проверкой штатного стиля, затем выбранные продукты Glass. При последующей ошибке SecureUxTheme автоматически не восстанавливается.":
+                L"SecureUxTheme is removed first with stock-style safety checks, then selected Glass products. A later failure does not automatically restore SecureUxTheme.";
+        }
+        if(selection_.removeMask && selection_.secureUxTheme) {
             if(!text.empty())text+=L"\n";
             text+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
                 L"Операцию с оригинальным SecureUxTheme выполните отдельно от удаления продуктов Glass.":
@@ -2570,7 +2576,7 @@ private:
     [[nodiscard]] bool ComponentsReady() const noexcept {
         return (page_!=Page::Components && page_!=Page::Certificate) || ((!downloadContinuePending_||DownloadsReady()) && inspectReady_.load(std::memory_order_acquire) && HasSelectedComponent() &&
             GlassProducts::ResourcesPlanReady(selection_,GlassInstallUtil::IsOs64Bit(),resourcesPrerequisiteReady_) &&
-            !(selection_.removeMask && (selection_.secureUxTheme||selection_.secureUxThemeRemove)));
+            !(selection_.removeMask && selection_.secureUxTheme));
     }
     void OnInspectReady() {
         {

@@ -255,6 +255,18 @@ int main(){
   assert(e.BuildExecutionPlan()==(version[0]!=L'3'));
   if(e.executionPlanReady_)assert(e.executionPlan_.rows[6].action==(version[0]==L'1'?Action::Update:Action::Repair));
  }
+ // Mixed original SUT + managed removal retains both independent authorities.
+ for(auto product:{Product::Platform64,Product::Settings64,Product::Settings32,Product::OpenGlassResources}){
+  InstallEngine e;Reset(e);const auto row=Index(product);e.selection_.removeMask=1u<<row;
+  e.selection_.secureUxThemeRemove=true;e.secureUxRemoval_.ready=true;e.secureUxLoadedRemoval_=true;
+  const wchar_t* code=row==0?L"p64":row==2?L"s64":row==5?L"s32":L"res";
+  Installed(e,code,L"1.0.0");auto& report=GlassProductInspect::observation;
+  (row==0?report.x64:row==2?report.settings64:row==5?report.settings32:report.openGlassResources).installed=true;
+  report.secureUxTheme.installed=true;report.officialSecureUxThemeCode=L"vendor";
+  GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Active;
+  assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[row].action==Action::Remove);
+  assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Remove);
+ }
  // Managed removal needs no adjacent/release media, but retains exact installed authority.
  for(auto p:{Product::Platform64,Product::Platform32,Product::Settings64,Product::Settings32,Product::OpenGlass}){
   InstallEngine e;Reset(e);const auto row=Index(p);e.selection_.removeMask=1u<<row;

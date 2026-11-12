@@ -1,3 +1,4 @@
+#include "GlassAppsNotification.h"
 #include "GlassInstallMsi.h"
 #include "GlassInstallLog.h"
 #include "GlassInstallUtil.h"
@@ -149,6 +150,8 @@ bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress, UINT* 
     if (progress) MsiSetExternalUIRecord(nullptr, 0, nullptr, nullptr);
     if (resultCode) *resultCode = exitCode;
     GlassInstallLog::LineFormat(L"Uninstall exit code %u", exitCode);
+    if(exitCode==ERROR_SUCCESS||exitCode==ERROR_SUCCESS_REBOOT_REQUIRED||exitCode==ERROR_UNKNOWN_PRODUCT)
+        GlassAppsNotification::Changed();
     return exitCode == ERROR_SUCCESS || exitCode == ERROR_SUCCESS_REBOOT_REQUIRED ||
            exitCode == ERROR_UNKNOWN_PRODUCT;
 }
@@ -416,6 +419,7 @@ bool RefreshManagedArp(const std::wstring& x64Dir,const std::wstring& x86Dir,con
         }
         if(IsProductInstalled(kProductOpenGlassResourcesX64))ok=PatchResourcesMaintenance()&&ok;
         ok=RefreshOpenGlassFileArp(openGlassDir)&&ok;
+        GlassAppsNotification::Changed();
         GlassInstallLog::LineFormat(L"Remaining managed ARP refresh: %s",ok?L"ok":L"incomplete");
         return ok;
     }catch(...){return false;}

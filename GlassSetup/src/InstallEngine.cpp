@@ -765,6 +765,11 @@ DWORD WINAPI InstallEngine::RunGlassWorker(LPVOID p) noexcept {
                 ok = self->PurgeRemnants();
                 if (ok) self->cleanInstall_ = true;
             }
+            // SUT must be removed while the installed Native helper still
+            // exists, before managed removal can delete Settings. All baseline,
+            // profile, module-release and managed removal preflights ran above.
+            if(ok && self->selection_.secureUxThemeRemove && self->selection_.removeMask)
+                ok=self->CommitEarlySecureUxRemoval();
             if (ok && !vendorOnly && !self->IsCancelRequested()) {
                 self->installAttempted_ = true;
                 self->nonSettingsChangesAttempted_ = true;
@@ -794,9 +799,9 @@ DWORD WINAPI InstallEngine::RunGlassWorker(LPVOID p) noexcept {
                 // Phase B still rolls back: tasks and the service are registered
                 // and validated while nothing has been started yet.
                 if(!vendorOnly)ok = self->RegisterSelectedProducts();
-                // The original vendor transaction is last: all rollbackable
-                // Glass registration is complete and UI cancellation is closed.
-                // Failure rolls back Glass; vendor success is the commit point.
+                // Apply/standalone vendor work is commit-last. Mixed removal
+                // already committed SUT before deleting its Native helper; the
+                // adapter's committed flag prevents a second vendor execution.
                 if(ok && self->selection_.removeMask) {
                     std::wstring detail;
                     ok=GlassInstallRemoval::Commit(self->removalSession_,PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN,detail);
@@ -906,6 +911,12 @@ DWORD WINAPI InstallEngine::RunGlassWorker(LPVOID p) noexcept {
                 if (!backup.empty()) self->rollbackNote_+=L"\r\nBackup: "+backup;
                 ReleaseSRWLockExclusive(&self->statusLock_);
                 InstallLog::LineFormat(L"Rollback failed; retaining backup: %s",backup.c_str());
+            }
+            if(!ok && self->secureUxRemovalCommitted_) {
+                const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+                self->SetFailure((ru?L"План выполнен частично: SecureUxTheme удалён и не восстанавливался. Восстановление изменений Glass выполнялось отдельно; общего отката нет. ":
+                    L"Plan partially completed: SecureUxTheme was removed and was not restored. Glass recovery was handled separately; no overall rollback occurred. ")+self->ErrorText(),ERROR_INSTALL_FAILURE);
+                self->rollbackSucceeded_.store(false,std::memory_order_release);
             }
             // The local Native module has been released before rollback and no
             // helper process is needed beyond this point.
@@ -1604,8 +1615,7 @@ bool InstallEngine::PrepareSecureUxRemoval() noexcept {
         secureUxLoadedRemoval_=!GlassProducts::SecureUxUnloadedRemoval(state);
         try {
             if(secureUxLoadedRemoval_) {
-                if(selection_.Removes(GlassInstallUtil::IsOs64Bit()?2u:5u))error=L"Remove SecureUxTheme first while retaining OS-native GlassSettings; its runtime-query helper must remain installed through the last vendor transaction.";
-                else if(secureUxRemovalProfiles_.PreflightLoadedRemoval(error)) {
+                if(secureUxRemovalProfiles_.PreflightLoadedRemoval(error)) {
                     if(!error.empty())InstallLog::LineFormat(L"SecureUxTheme profile preparation: %s",error.c_str());
                     if(GlassSecureUxPackage::PrepareRemoval(tempDir_,secureUxRemovalCode_,cancelRequested_,secureUxRemoval_,error))return true;
                 }
@@ -1620,9 +1630,9 @@ bool InstallEngine::PrepareSecureUxRemoval() noexcept {
 }
 
 bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
-    // The single vendor transaction is the last fallible step, with cancellation
-    // already closed. Failure takes the existing Glass rollback path; vendor MSI
-    // owns its transaction and all permanent files. Never add it to Glass rollback.
+    // Cancellation is already closed at either vendor boundary. In a mixed
+    // removal this runs BEFORE Settings deletion; otherwise it is commit-last.
+    // Vendor MSI owns its transaction/permanent files, never Glass rollback.
     namespace P=GlassProductPlan;
     if(!executionPlanReady_ || !executionPlan_.valid ||
        executionPlan_.rows[P::Index(P::Product::SecureUxTheme)].action!=P::Action::Remove) {
@@ -1641,7 +1651,7 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
         runtimeValid=GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&state,&error)&&GlassProducts::SecureUxKnownRemoval(state);
         if(runtimeValid&&nativeUpdate) {
             secureUxLoadedRemoval_=!GlassProducts::SecureUxUnloadedRemoval(state);
-            if(secureUxLoadedRemoval_)runtimeValid=!selection_.Removes(GlassInstallUtil::IsOs64Bit()?2u:5u)&&secureUxRemovalProfiles_.PreflightLoadedRemoval(error);
+            if(secureUxLoadedRemoval_)runtimeValid=secureUxRemovalProfiles_.PreflightLoadedRemoval(error);
         }
         runtimeValid=runtimeValid&&(GlassProducts::SecureUxUnloadedRemoval(state)||secureUxLoadedRemoval_);
     }
@@ -1718,7 +1728,26 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
     return true;
 }
 
+bool InstallEngine::CommitEarlySecureUxRemoval() noexcept {
+    // Same cancel/commit gate as the normal final vendor phase. No accepted
+    // cancellation may arrive after an irreversible vendor removal.
+    for(;;) {
+        if(decisionGate_)WaitForSingleObject(decisionGate_,INFINITE);
+        AcquireSRWLockExclusive(&statusLock_);
+        if(cancelRequested_.load(std::memory_order_acquire)) {
+            ReleaseSRWLockExclusive(&statusLock_);return false;
+        }
+        const bool ready=!decisionGate_||WaitForSingleObject(decisionGate_,0)==WAIT_OBJECT_0;
+        if(ready)launchingPhase_.store(true,std::memory_order_release);
+        ReleaseSRWLockExclusive(&statusLock_);
+        if(ready)break;
+    }
+    secureUxRemovalCommitted_=RemoveOriginalSecureUxTheme();
+    return secureUxRemovalCommitted_;
+}
+
 bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
+    if(secureUxRemovalCommitted_)return true;
     if(selection_.secureUxThemeRemove)return RemoveOriginalSecureUxTheme();
     if (!selection_.secureUxTheme) return true;
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
@@ -1806,7 +1835,7 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
         if(IsCancelRequested())return false;
         if(selection_.removeMask && forceClean_)return refuse(L"Clean purge cannot accompany managed removal");
         if(selection_.removeMask & ~GlassProducts::Selection::kManagedRemovalMask)return refuse(L"Invalid managed removal mask");
-        if(selection_.removeMask && (selection_.secureUxTheme||selection_.secureUxThemeRemove))
+        if(selection_.removeMask && selection_.secureUxTheme)
             return refuse(L"Vendor transaction and managed removal require separate operations");
         GlassProductInspect::Inputs input;
         input.os64=scanNativeX64_;input.cancelled=&cancelRequested_;input.inspectSources=false;
@@ -2193,8 +2222,8 @@ bool InstallEngine::RunMsiSequence() noexcept {
     std::vector<Step> steps;
     namespace P=GlassProductPlan;
     if(!executionPlanReady_ || !executionPlan_.valid)return false;
-    // Setup's original vendor removal is commit-last, unlike Unins' regular
-    // managed removal order. Exclude only that row from the Glass MSI phase.
+    // Original SUT uses the private vendor adapter, never the Glass MSI phase.
+    // Mixed removal already committed it before any Settings removal.
     auto plan=executionPlan_;
     plan.rows[P::Index(P::Product::SecureUxTheme)].action=P::Action::Keep;
     for(auto product:GlassMaintenanceExecutor::kInstallOrder) {
