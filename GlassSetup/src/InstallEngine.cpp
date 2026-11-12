@@ -499,11 +499,24 @@ bool InstallEngine::PrepareOfficialOpenGlass(bool removing) noexcept {
                 SetFailure(L"Cannot resolve native Program Files for OpenGlass",GetLastError());return false;
             }
             target=native+L"\\OpenGlass";
-            // Do not silently adopt unmanaged files without an Inno identity.
-            if(GetFileAttributesW(target.c_str())!=INVALID_FILE_ATTRIBUTES||
-               (GetLastError()!=ERROR_FILE_NOT_FOUND&&GetLastError()!=ERROR_PATH_NOT_FOUND)) {
-                SetFailure(ru?L"Каталог OpenGlass уже существует или недоступен без штатной регистрации. Продукты не изменены.":
-                    L"OpenGlass destination exists or is inaccessible without official registration. Products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+            // Resources/configuration may survive an official uninstall. An
+            // existing safe directory is not product registration or a reason
+            // to block Inno; never delete it or adopt its files as managed OG.
+            const DWORD attributes=GetFileAttributesW(target.c_str());
+            const DWORD pathError=attributes==INVALID_FILE_ATTRIBUTES?GetLastError():ERROR_SUCCESS;
+            if(attributes!=INVALID_FILE_ATTRIBUTES) {
+                if(!(attributes&FILE_ATTRIBUTE_DIRECTORY)||(attributes&FILE_ATTRIBUTE_REPARSE_POINT)||
+                   !GlassInstallUtil::IsSafeInstallPath(target)||!GlassMaintenanceCache::TrustedDirectory(target)) {
+                    SetFailure(ru?L"Существующий каталог OpenGlass небезопасен или недоступен. Продукты не изменены.":
+                        L"The existing OpenGlass directory is unsafe or inaccessible. Products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+                }
+                if(GlassOpenGlassFiles::HasReceipt(target)) {
+                    SetFailure(ru?L"В каталоге OpenGlass найдена старая тестовая квитанция. Удалите тестовую установку прежним деинсталлятором; миграции не выполняются.":
+                        L"A retired test receipt was found in the OpenGlass directory. Remove the test installation with its previous uninstaller; no migration is performed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+                }
+            } else if(pathError!=ERROR_FILE_NOT_FOUND&&pathError!=ERROR_PATH_NOT_FOUND) {
+                SetFailure(ru?L"Не удалось проверить каталог OpenGlass. Продукты не изменены.":
+                    L"Could not inspect the OpenGlass directory. Products were not changed.",pathError);return false;
             }
         }
         if(!removing) {

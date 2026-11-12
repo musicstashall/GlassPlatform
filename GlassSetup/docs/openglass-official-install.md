@@ -673,3 +673,15 @@ Win32/source tests, not MSVC/SCM/Scheduler/Inno acceptance on Windows.
 Older unrelated harnesses `task_scheduler_stop_mock.py`, `unins_task_stop_mock.py`
 and `setup_real_entry_mock.py` currently fail on missing mock APIs/stale extraction
 assumptions; they were not treated as passing acceptance or changed in this fix.
+
+### Existing OG destination on fresh official installation
+
+A missing Inno registration no longer requires the default OG directory to be
+absent. A pre-existing safe, administrator-controlled regular directory is allowed,
+including one containing Resources or retained configuration. No files are deleted
+by this gate; official Inno handles installation. Files alone do not become OG
+registration. Reparse points, unsafe paths, untrusted ACLs, a file in place of the
+directory, unreadable paths and retired managed test receipts still fail safely.
+`openglass_existing_directory_mock.py` compiles this actual RU/EN gate with fake
+Win32 APIs. Build GlassSetup Release|Win32 (solution x86); GlassUnins, GlassShared
+and the Resources MSI are unchanged by this particular fix.
