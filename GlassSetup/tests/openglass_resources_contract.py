@@ -34,6 +34,15 @@ assert 'ReparsePoint' in stage and 'Refusing to produce an empty' in stage
 assert "'.exe'" not in stage and "'.dll'" not in stage
 solution=(root/'GlassProject.sln').read_text()
 assert 'OpenGlassResources-x64.wixproj' in solution
+# A mapping alone does not build a project: both release solution lanes
+# must select the graphics MSI, always using its native x64 configuration.
+resources_guid = '{66B912C7-3BF1-4EC3-8EA2-406DB4E8BB19}'
+for solution_arch in ('x64', 'x86'):
+ for mapping in ('ActiveCfg', 'Build.0'):
+  line = f'{resources_guid}.Release|{solution_arch}.{mapping} = Release|x64'
+  assert solution.count(line) == 1, f'Missing/duplicate Resources solution mapping: {line}'
+assert not any(resources_guid in line and '.Debug|' in line and '.Build.0' in line
+               for line in solution.splitlines())
 paths=(root/'GlassSettings/Core/Platform/PlatformPaths.cs').read_text()
 assert paths.index('var upstream = ReadUpstreamOpenGlassInstallPath()') < paths.index('var installDir = ReadBlackWindowManagerInstallPath()')
 resource_policy=paths[paths.index('public static string? OpenGlassResourcesRoot'):paths.index('/// <summary>Резолв модуля платформы')]
