@@ -39,7 +39,7 @@ for(const locale of ['ru','en']){
  assert.equal(messages.at(-1),'component:openglass:1');
  send(empty.map(row=>row.id==='openglass'?{...row,checked:true}:row.id==='openglassResources'?{...row,applySupported:true}:row),locale);
  available().querySelector('.comp-decision').click();assert.equal(messages.at(-1),'component:openglassResources:1');
- assert.deepEqual([...d.querySelectorAll('#components-plan-items li[data-product]')].map(node=>node.dataset.product),['openglass','openglassResources']);
+ assert.deepEqual([...d.querySelectorAll('#components-plan-items li[data-product]')].map(node=>node.dataset.product),['openglassResources','openglass']);
  // Installed/orphan resources remain removable without a usable OG Apply.
  const installed=rows.map(row=>row.id==='openglassResources'?{...row,applySupported:false}:row);
  send(installed,locale);input().closest('.c-card').querySelector('.comp-remove').click();

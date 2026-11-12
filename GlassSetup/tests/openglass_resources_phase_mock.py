@@ -36,7 +36,7 @@ struct SessionState {std::wstring workspaceDir;unsigned copyError=5;std::vector<
 bool CreateSnapshot(SessionState& state,const std::wstring&,const std::wstring&,const std::wstring&,bool include,
  std::function<void(int)>,const std::atomic_bool*,unsigned mask){assert(!include&&mask==64);++snapshots;state.workspaceDir=L"resources-backup";if(wasPresent)state.oldProducts={L"resources"};return snapshotOk;}
 void NoteInstalled(SessionState& state,const wchar_t* code){state.installedThisSession.push_back(code);}
-bool ExecuteRollback(SessionState& state,std::function<void(int)>){++rollbacks;assert(state.workspaceDir==L"resources-backup");assert(upstream);return rollbackOk;}
+bool ExecuteRollback(SessionState& state,std::function<void(int)>){++rollbacks;assert(state.workspaceDir==L"resources-backup");return rollbackOk;}
 void CleanupSnapshot(SessionState& state){state.workspaceDir.clear();}
 }
 struct InstallEngine {
@@ -53,11 +53,12 @@ struct InstallEngine {
   assert(scanNativeX64_&&procedureMask_==64&&rollbackSession_.workspaceDir==L"resources-backup");
   executionPlanReady_=true;return planOk&&(preparingOfficialResources_||upstream);}
  bool RunOneMsi(const std::wstring& path,const std::wstring& root,const std::wstring&,int,int){
-  assert(path==L"staged\\OpenGlassResources-x64.msi"&&root==L"fixed-resources"&&!preparingOfficialResources_&&upstream);
+  assert(path==L"staged\\OpenGlassResources-x64.msi"&&root==L"fixed-resources"&&preparingOfficialResources_);
   ++installs;if(throwInstall)throw std::runtime_error("allocation seam");
   if(wasPresent){rollbackSession_.modifiedProducts={L"resources"};}present=true;error=L"MSI failed";return installOk;}
  void LaunchSelectedProducts(){++publishes;assert(selection_.openGlassResources&&!selection_.openGlass);}
  bool OfficialResourcesPhase(bool preparing) noexcept;
+ bool FinishOfficialResources(bool commit) noexcept;
 };
 // METHOD
 void reset(){rootOk=prepareOk=snapshotOk=planOk=installOk=rollbackOk=true;present=wasPresent=throwInstall=upstream=false;prepares=snapshots=installs=rollbacks=publishes=0;}
@@ -76,15 +77,23 @@ int main(){
   assert(e.OfficialResourcesPhase(false)==(failure==0));
   assert(e.rollbackSession_.workspaceDir==L"managed"&&e.selection_.openGlass&&e.selection_.platform64&&e.selection_.openGlassResources);
   assert(!e.preparingOfficialResources_&&!e.executionPlanReady_&&e.procedureMask_==7);
-  if(failure==0)assert(publishes==1&&rollbacks==0&&e.officialResourcesRollback_.workspaceDir.empty());
+  if(failure==0){assert(publishes==0&&rollbacks==0&&!e.officialResourcesRollback_.workspaceDir.empty());assert(e.FinishOfficialResources(true));assert(publishes==1&&e.officialResourcesRollback_.workspaceDir.empty());}
   if(failure==1||failure==2){assert(rollbacks==1&&publishes==0);assert(e.officialResourcesRollback_.installedThisSession==std::vector<std::wstring>{L"resources"});}
   assert(e.preserveOfficialResourcesSnapshot_==(failure==2||failure==3));
  }
- reset();InstallEngine changed;assert(changed.OfficialResourcesPhase(true));assert(!changed.OfficialResourcesPhase(false));assert(installs==0&&rollbacks==0); // OG post-commit prerequisite no longer available.
+ reset();InstallEngine changed;assert(changed.OfficialResourcesPhase(true));assert(changed.OfficialResourcesPhase(false));assert(installs==1);assert(changed.FinishOfficialResources(false));assert(rollbacks==1&&publishes==0); // Vendor failure restores the pre-OG graphics baseline.
 }
 '''.replace('// METHOD',method)
 with tempfile.TemporaryDirectory(prefix='ResourcesPhase-') as d:
  p=Path(d)/'test.cpp';exe=Path(d)/'test';p.write_text(h)
  subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-omit-frame-pointer','-no-pie','-I',str(root),str(p),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)
-print('PASS: actual Resources phase: prepare-before-mutation, independent baseline, post-OG revalidation, fresh/update MSI failure rollback, recovery retention and scoped state restoration')
+print('PASS: actual Resources phase: prepare-before-mutation, independent baseline, pre-OG graphics install, fresh/update MSI failure rollback, recovery retention and scoped state restoration')
+
+# Pending authorization is private to the staged graphics product, and early
+# managed cache publication excludes the still-pending Resources baseline.
+assert 'props+=L" GLASS_OG_INSTALL_PENDING=1"' in s
+assert '_wcsicmp(productCode.c_str(),GlassInstallMsi::kProductOpenGlassResourcesX64)==0' in s
+assert '!(mixedOpenGlass_&&!selection_.openGlassResources&&!officialResourcesRollback_.workspaceDir.empty()&&sourceRows[i]==6)' in s
+ui=(root/'GlassSetup/src/main.cpp').read_text()
+assert 'inspect_.og.installedPayloadVersion:L"",inspect_.og.remotePayloadVersion)' in ui

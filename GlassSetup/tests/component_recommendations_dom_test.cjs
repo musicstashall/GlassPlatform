@@ -28,4 +28,15 @@ assert.equal(button().disabled,false);before=messages.length;button().click();
 assert.equal(d.querySelector('#product-x64').checked,false);
 assert.equal(d.querySelector('#product-settings64').checked,true);
 assert.deepEqual(messages.slice(before),['component:settings64:1']);
+// OG recommendation carries Resources, including an already healthy graphics MSI.
+for(const locale of ['ru','en'])for(const installed of [false,true]){
+ const og={...rows[4],installed,installedPayloadVersion:'3.0.1.1',targetPayloadVersion:'3.0.2.3749'};
+ const graphics={id:'openglassResources',title:'Resources',installed,checked:false,operation:'repair',
+  targetVersion:'2.0.0.115',installedPackageVersion:'2.0.0.115',applySupported:false,pairedApplySupported:true};
+ send([og,graphics],{locale});before=messages.length;button().click();
+ assert.deepEqual(messages.slice(before),['component:openglass:1','component:openglassResources:1']);
+ assert.ok(d.querySelector('#product-openglassResources').checked);
+ send([og,{...graphics,hidden:true}],{locale});before=messages.length;button().click();
+ assert.deepEqual(messages.slice(before),['component:openglass:1']);
+}
 assert.deepEqual(errors,[]);dom.window.close();console.log('PASS: fresh install recommendations, repeat host echo, loading/capability gates and changed-helper recommendations');

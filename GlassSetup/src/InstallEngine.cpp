@@ -622,15 +622,14 @@ bool InstallEngine::OfficialResourcesPhase(bool preparing) noexcept {
         struct Restore {const decltype(restore)& fn;~Restore(){fn();}} scope{restore};
         selection_={};selection_.platform64=selection_.platform32=selection_.glassSettings=selection_.openGlass=false;
         selection_.independentSettings=true;selection_.openGlassResources=true;
-        scanNativeX64_=true;procedureMask_=64u;preparingOfficialResources_=preparing;
+        scanNativeX64_=true;procedureMask_=64u;preparingOfficialResources_=true;
         if(!BuildExecutionPlan())return false;
         if(preparing)return true;
         // Cancellation closed at official OG commit. Only the graphics MSI and
         // its own checked baseline participate in rollback from this point.
         const auto path=tempDir_+L"\\OpenGlassResources-x64.msi";
         if(RunOneMsi(path,root,L"OpenGlass Resources",9600,350)) {
-            GlassInstallRollback::CleanupSnapshot(rollbackSession_);
-            LaunchSelectedProducts(); // Persist the actual acquired MSI, no host launch.
+            // Keep the original baseline until the vendor confirms OG success.
             return true;
         }
         const auto error=ErrorText();
@@ -649,6 +648,22 @@ bool InstallEngine::OfficialResourcesPhase(bool preparing) noexcept {
         SetFailure(ru?L"Операция Resources прервана; сохраните журнал и копию для восстановления.":
             L"Resources operation interrupted; retain the log and recovery snapshot.",ERROR_INSTALL_FAILURE);return false;
     }
+}
+
+bool InstallEngine::FinishOfficialResources(bool commit) noexcept {
+    if(commit) {
+        GlassInstallRollback::CleanupSnapshot(officialResourcesRollback_);
+        const auto saved=selection_;
+        selection_={};selection_.platform64=selection_.platform32=selection_.glassSettings=selection_.openGlass=false;
+        selection_.independentSettings=true;selection_.openGlassResources=true;
+        LaunchSelectedProducts(); // Publish only installed, confirmed package baselines.
+        selection_=saved;
+        return true;
+    }
+    const bool restored=GlassInstallRollback::ExecuteRollback(officialResourcesRollback_,{});
+    preserveOfficialResourcesSnapshot_=!restored;
+    if(restored)GlassInstallRollback::CleanupSnapshot(officialResourcesRollback_);
+    return restored;
 }
 
 DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
@@ -676,23 +691,34 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
             self->selection_.openGlass=originalApply;
             self->selection_.openGlassResources=resources;
             self->selection_.removeMask=originalRemoveMask;
+            if(self->succeeded_&&resources) {
+                self->succeeded_=self->OfficialResourcesPhase(false);
+                if(!self->succeeded_) {
+                    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+                    self->rollbackSucceeded_.store(false,std::memory_order_release);
+                    self->SetFailure((ru?L"Resources не установлены; официальный установщик OpenGlass не запускался. Предыдущие изменения Glass сохранены. ":
+                        L"Resources installation failed; the official OpenGlass installer was not started. Previous Glass changes were retained. ")+self->ErrorText(),ERROR_INSTALL_FAILURE);
+                }
+            }
             if(self->succeeded_) {
                 self->succeeded_=self->CommitOfficialOpenGlass(mixedRemoval);
+                if(!self->succeeded_&&resources) {
+                    const bool restored=self->FinishOfficialResources(false);
+                    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+                    self->SetFailure(self->ErrorText()+(restored?
+                        (ru?L" Исходное состояние Resources восстановлено.":L" Resources baseline restored."):
+                        (ru?L" Восстановление Resources не завершено; сохраните журнал и резервную копию.":L" Resources recovery incomplete; retain the log and snapshot.")),ERROR_INSTALL_FAILURE);
+                }
                 if(!self->succeeded_) {
                     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
                     self->rollbackSucceeded_.store(false,std::memory_order_release);
                     self->SetFailure((managed?(ru?L"План выполнен частично: изменения Glass сохранены, финальная операция OpenGlass не подтверждена. Общий откат не выполнялся. ":
                         L"Plan partially completed: Glass changes were committed; the final OpenGlass operation was not confirmed. No overall rollback was performed. "):
-                        (ru?L"Resources не запускались. ":L"Resources was not started. "))+self->ErrorText(),ERROR_INSTALL_FAILURE);
+                        (ru?L"Операция OpenGlass не подтверждена. ":L"OpenGlass operation was not confirmed. "))+self->ErrorText(),ERROR_INSTALL_FAILURE);
                 }
                 if(self->succeeded_&&resources) {
-                    self->succeeded_=self->OfficialResourcesPhase(false);
-                    if(!self->succeeded_) {
-                        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-                        self->rollbackSucceeded_.store(false,std::memory_order_release);
-                        self->SetFailure((ru?L"План выполнен частично: OpenGlass установлен/обновлён, предыдущие изменения Glass сохранены. Установка Resources не подтверждена; общий откат не выполнялся. ":
-                            L"Plan partially completed: OpenGlass installed/updated and previous Glass changes retained. Resources installation was not confirmed; no overall rollback was performed. ")+self->ErrorText(),ERROR_INSTALL_FAILURE);
-                    }else self->SetStatus(self->labels_.finalize,10000);
+                    self->FinishOfficialResources(true);
+                    self->SetStatus(self->labels_.finalize,10000);
                 }
             }
         }
@@ -1483,6 +1509,9 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
 
     if (!RecheckRelatedProducts(productCode.c_str()) || !targetSafe()) { MsiEnableLogW(0,nullptr,0);return false; }
     std::wstring props = GlassInstallMsi::BuildInstallPropertyString(installDir, false);
+    if(preparingOfficialResources_&&selection_.openGlassResources&&!openGlassPackage_.version.empty()&&
+       _wcsicmp(productCode.c_str(),GlassInstallMsi::kProductOpenGlassResourcesX64)==0)
+        props+=L" GLASS_OG_INSTALL_PENDING=1";
     const wchar_t* msiName=PathFindFileNameW(msiPath.c_str());
     const bool secureUxThemeMsi=msiName &&
         (_wcsicmp(msiName,L"SecureUxTheme-x64.msi")==0 || _wcsicmp(msiName,L"SecureUxTheme-x86.msi")==0);
@@ -2460,7 +2489,8 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         }
         std::vector<GlassMaintenanceCache::Blob> cacheBlobs;
         constexpr unsigned sourceRows[]={0,1,2,5,4,6};
-        for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty() && !selection_.Removes(sourceRows[i]))
+        for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty() && !selection_.Removes(sourceRows[i]) &&
+            !(mixedOpenGlass_&&!selection_.openGlassResources&&!officialResourcesRollback_.workspaceDir.empty()&&sourceRows[i]==6))
             cacheBlobs.push_back({0,names[i],sources[i].c_str(),sources[i]==tempDir_+L"\\"+names[i]});
         std::wstring cacheFailure;
         std::vector<std::wstring> needsOriginal;

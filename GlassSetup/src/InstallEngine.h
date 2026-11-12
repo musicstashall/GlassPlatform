@@ -193,6 +193,7 @@ private:
     bool PrepareOfficialOpenGlass(bool removing) noexcept;
     bool CommitOfficialOpenGlass(bool removing) noexcept;
     bool OfficialResourcesPhase(bool preparing) noexcept;
+    bool FinishOfficialResources(bool commit) noexcept;
     GlassInstallRollback::SessionState officialResourcesRollback_;
     bool preparingOfficialResources_=false, preserveOfficialResourcesSnapshot_=false;
     static DWORD WINAPI RunGlassWorker(LPVOID p) noexcept;

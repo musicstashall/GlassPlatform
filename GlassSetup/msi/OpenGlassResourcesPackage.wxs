@@ -37,7 +37,9 @@
     </InstallExecuteSequence>
     <!-- Require OG only for a new Resources installation. Existing graphics
          remain independently serviceable after upstream OG has been removed. -->
-    <Launch Condition="Installed OR GLASS_RESTORE_NO_CAB = 1 OR REMOVE = &quot;ALL&quot; OR ((UPSTREAMOPENGLASSROOT AND OPENGLASSDLL AND NOT UPSTREAMOPENGLASSALTROOT) OR (UPSTREAMOPENGLASSALTROOT AND OPENGLASSALTDLL AND NOT UPSTREAMOPENGLASSROOT))"
+    <Property Id="GLASS_OG_INSTALL_PENDING" Secure="yes" Hidden="yes" />
+    <!-- Setup may explicitly install graphics before invoking verified official OG. -->
+    <Launch Condition="GLASS_OG_INSTALL_PENDING = 1 OR Installed OR GLASS_RESTORE_NO_CAB = 1 OR REMOVE = &quot;ALL&quot; OR ((UPSTREAMOPENGLASSROOT AND OPENGLASSDLL AND NOT UPSTREAMOPENGLASSALTROOT) OR (UPSTREAMOPENGLASSALTROOT AND OPENGLASSALTDLL AND NOT UPSTREAMOPENGLASSROOT))"
             Message="Install OpenGlass before OpenGlass Resources. / Сначала установите OpenGlass." />
     <StandardDirectory Id="ProgramFiles64Folder">
       <!-- Upstream inventory is a prerequisite only, never our payload root. -->

@@ -27,6 +27,7 @@ struct InstallEngine{
  GlassProducts::Selection selection_;bool mixedOpenGlass_=false,forceClean_=false,succeeded_=false;
  struct {std::wstring finalize;}labels_;
  void SetStatus(const std::wstring&,int){}
+ bool FinishOfficialResources(bool commit){order+=commit?"res-finalize;":"res-rollback;";return true;}
  bool OfficialResourcesPhase(bool preparing){order+=preparing?"res-prepare;":"res-commit;";return preparing?resourcesPrep:resourcesCommit;}
  std::wstring tempDir_=L"protected",error;unsigned procedureMask_=15;
  std::atomic_bool finished_{false},launchingPhase_{false},rollbackSucceeded_{true};
@@ -59,15 +60,15 @@ int main(){
   InstallEngine combined;combined.selection_.openGlassResources=true;
   InstallEngine::WorkerThread(&combined);
   assert(combined.succeeded_==(failure==0));
-  if(failure==0)assert(order=="prepare;res-prepare;glass;vendor;res-commit;cleanup;");
+  if(failure==0)assert(order=="prepare;res-prepare;glass;res-commit;vendor;res-finalize;cleanup;");
   if(failure==1)assert(glassRuns==0&&vendorRuns==0);
   if(failure==2)assert(vendorRuns==0&&order.find("res-commit;")==std::string::npos);
-  if(failure==3)assert(order.find("res-commit;")==std::string::npos&&!combined.rollbackSucceeded_);
-  if(failure==4)assert(vendorRuns==1&&!combined.rollbackSucceeded_&&!combined.error.empty());
+  if(failure==3)assert(order.find("res-commit;")!=std::string::npos&&order.find("res-rollback;")!=std::string::npos&&!combined.rollbackSucceeded_);
+  if(failure==4)assert(vendorRuns==0&&!combined.rollbackSucceeded_&&!combined.error.empty());
   assert(combined.selection_.openGlassResources&&combined.selection_.openGlass);
  }
  reset();InstallEngine pair;pair.selection_.platform64=pair.selection_.platform32=pair.selection_.glassSettings=false;pair.selection_.openGlassResources=true;
- InstallEngine::WorkerThread(&pair);assert(pair.succeeded_&&glassRuns==0&&order=="prepare;res-prepare;vendor;res-commit;cleanup;");
+ InstallEngine::WorkerThread(&pair);assert(pair.succeeded_&&glassRuns==0&&order=="prepare;res-prepare;res-commit;vendor;res-finalize;cleanup;");
  reset();InstallEngine ordinary;ordinary.selection_.openGlass=false;InstallEngine::WorkerThread(&ordinary);assert(ordinary.succeeded_&&preparations==0&&glassRuns==1&&vendorRuns==0);
  reset();InstallEngine only;only.selection_.platform64=only.selection_.platform32=only.selection_.glassSettings=false;InstallEngine::WorkerThread(&only);assert(only.succeeded_&&standalone==1&&glassRuns==0);
  reset();InstallEngine unsupported;unsupported.selection_.secureUxTheme=true;InstallEngine::WorkerThread(&unsupported);assert(standalone==1&&glassRuns==0&&preparations==0);

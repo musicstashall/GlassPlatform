@@ -24,15 +24,15 @@ assert 'UPSTREAMOPENGLASSALTROOT AND OPENGLASSALTDLL AND NOT UPSTREAMOPENGLASSRO
 import itertools
 import re
 condition = package.find('w:Launch', ns).get('Condition')
-expression = condition.replace('GLASS_RESTORE_NO_CAB = 1', 'restore').replace('REMOVE = "ALL"', 'remove_all')
+expression = condition.replace('GLASS_OG_INSTALL_PENDING = 1', 'pending').replace('GLASS_RESTORE_NO_CAB = 1', 'restore').replace('REMOVE = "ALL"', 'remove_all')
 for operator in ('AND', 'OR', 'NOT'):
  expression = re.sub(r'\b' + operator + r'\b', operator.lower(), expression)
-properties = ('Installed', 'restore', 'remove_all', 'UPSTREAMOPENGLASSROOT',
+properties = ('pending', 'Installed', 'restore', 'remove_all', 'UPSTREAMOPENGLASSROOT',
               'OPENGLASSDLL', 'UPSTREAMOPENGLASSALTROOT', 'OPENGLASSALTDLL')
 for values in itertools.product((False, True), repeat=len(properties)):
  state = dict(zip(properties, values))
- installed, restore, remove_all, root_ok, dll_ok, alt_ok, alt_dll_ok = values
- expected = (installed or restore or remove_all or
+ pending, installed, restore, remove_all, root_ok, dll_ok, alt_ok, alt_dll_ok = values
+ expected = (pending or installed or restore or remove_all or
              (root_ok and dll_ok and not alt_ok) or
              (alt_ok and alt_dll_ok and not root_ok))
  assert bool(eval(expression, {'__builtins__': {}}, state)) == bool(expected), state

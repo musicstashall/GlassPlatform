@@ -2100,6 +2100,10 @@ private:
                 condition=hasUpdate?GlassProducts::ProductCondition::UpdateAvailable:GlassProducts::ProductCondition::Healthy;
             const bool resources=wcscmp(id,L"openglassResources")==0;
             const bool resourcesReady=GlassProducts::ResourcesApplyReady(selection_,os64,resourcesPrerequisiteReady_);
+            auto pairedSelection=selection_;pairedSelection.openGlass=true;
+            const bool pairedApply=resources&&GlassProducts::ResourcesApplyReady(pairedSelection,os64,resourcesPrerequisiteReady_)&&
+                !targetVersion.empty()&&GlassOpenGlassRelease::CanPlanApply(inspect_.og.installed?inspect_.og.installedPayloadVersion:L"",inspect_.og.remotePayloadVersion);
+
             const bool applySupported=(!resources||resourcesReady)&&(openGlass?
                 GlassOpenGlassRelease::CanPlanApply(rep&&rep->installed?rep->installedPayloadVersion:L"",targetVersion):
                 (!targetVersion.empty()&&(!rep||!rep->installed||(!rep->installedPackageVersion.empty()&&!VersionOlder(targetVersion,rep->installedPackageVersion)))));
@@ -2165,6 +2169,7 @@ private:
                 L",\"nativeSourceCompared\":"+((rep&&rep->nativeSourceCompared)?L"true":L"false")+
                 L",\"nativeSourceDiffers\":"+((rep&&rep->nativeSourceDiffers)?L"true":L"false")+
                 L",\"updateAvailable\":"+(hasUpdate?L"true":L"false")+
+                L",\"pairedApplySupported\":"+(pairedApply?L"true":L"false")+
                 L",\"applySupported\":"+(applySupported?L"true":L"false")+
                 L",\"applyHint\":"+JsStringLiteral(resources&&!resourcesReady?
                     (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Выберите OpenGlass в этом плане или установите его заранее":L"Select OpenGlass in this plan or install it first"):L"")+

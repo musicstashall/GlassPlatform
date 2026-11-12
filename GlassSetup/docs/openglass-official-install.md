@@ -800,3 +800,58 @@ expected and actual SHA-256 (shared Setup/MSI verifier), preserving ERROR_CRC an
 all trust gates. Actual footer/verifier mocks pass; Windows font/DPI layout remains
 a visual acceptance check. Uploaded GlassSetup-30.log was deleted after analysis;
 its conclusions are retained here, image-33.png was not deleted.
+
+### Resources before official OG startup; GlassSetup-31 cache warning
+
+The five supplied MSI logs all ended with code 0. GlassSetup-31 shows an early
+managed-phase cache publication attempting HashPublishedPackage on Resources
+before its MSI was installed. InstalledCacheDigest correctly refused the missing
+installed baseline. A second publication after the Resources MSI succeeded, but
+the first finish warning remained. The managed phase now omits the pending
+Resources blob while its independent pre-OG snapshot is alive; it is published
+only after its actual MSI and official OG result are confirmed. This does not
+suppress real cache errors or weaken the installed-cache digest binding.
+
+This section supersedes the previous OG-then-Resources execution order. Upstream
+v3.0.2.3749 Scripts/OpenGlass.iss [Run] unconditionally invokes sc start OpenGlassHost;
+there is no supported silent no-start switch. Therefore a selected pair must
+install graphics BEFORE invoking the official OG EXE, not merely restart it after.
+The sequence is prepare/validate both and capture independent Resources baseline,
+managed Glass commit, Resources MSI, official OG installer/postcheck, Resources
+baseline release and maintenance-source publication. The visual plan also lists
+Resources before OG. No service startup-type/ACL manipulation or replacement of
+upstream service ownership is added.
+
+The signed graphics MSI accepts explicit GLASS_OG_INSTALL_PENDING=1 for this
+pre-OG install. Setup supplies it only in its private graphics phase, for the
+fixed Resources ProductCode and after preparing the verified official OG package.
+Normal standalone Resources install still requires installed OG; maintenance,
+removal and recovery remain available without OG. This property expresses an
+explicit planned dependency, not a service/registration or payload-trust check.
+The Resources MSI MUST be rebuilt/published with Setup for this order change;
+an older MSI's launch condition will reject a fresh pre-OG graphics installation.
+
+Resources MSI failure restores only its independent baseline and skips OG vendor
+execution. A subsequent OG refusal/failure/cancel attempts to restore Resources;
+OG itself remains outside Glass rollback, and committed managed changes are not
+claimed as rolled back. Recovery failures retain the independent snapshot. The
+baseline is not discarded immediately after a successful Resources MSI.
+
+When OG is among recommendations, the x64 compatible Resources row is added to
+that same explicit accept-recommendations batch, after the OG selection IPC. This
+also recommends reapplying a healthy installed Resources package alongside an OG
+update. The paired capability uses upstream remotePayloadVersion (not the retired
+OG MSI targetVersion). Hidden/x86/disabled/conflicting rows are not auto-selected;
+merely opening the page does not grant installation consent.
+
+Regression: actual mixed dispatcher failure branches, actual Resources phase with
+ASan/UBSan, explicit pending-property MSI truth table, source/cache-binding guards,
+execution-plan/product-plan matrices, cache digest/diagnostics, official launcher,
+and production RU/EN recommendations/Resources/download DOM tests pass. No actual
+Windows/MSVC/WiX/Inno execution was performed here. Build Resources MSI Release|x64,
+GlassUnins Release|Win32, then GlassSetup Release|Win32; regenerate the release
+catalog after final signing and publish the matching artifacts.
+
+The six supplied build/install logs were deleted after analysis; image-34.png was
+retained. The confirmed earlier five-MSI release/catalog mismatch was a separate
+publication issue, not the cause of this cache-timing warning.
