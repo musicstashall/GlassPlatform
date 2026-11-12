@@ -8,6 +8,8 @@
     <EnableDefaultItems>false</EnableDefaultItems>
     <GlassMsiProductCode>6D6046DB-6B28-4F2C-8A7D-EB6CF13CBBD9</GlassMsiProductCode>
     <GlassSignThisProject>true</GlassSignThisProject>
+    <!-- Inno AppId={{#MyAppId}} оставляет ключ {GUID}}_is1. ICE03 считает лишнюю «}» неверным RegPath; поиск в MSI при этом открывает ключ как есть. -->
+    <SuppressIces>ICE03</SuppressIces>
     <GlassOgResourcesSource Condition="'$(GlassOgResourcesSource)' == ''">$(SolutionRoot)Build\x64\Release\OpenGlass\Resources</GlassOgResourcesSource>
     <GlassResourcesStage>$(SolutionRoot)Build\SetupPayload\OpenGlassResources</GlassResourcesStage>
     <GlassResourcesHarvest>$(BaseIntermediateOutputPath)OpenGlassResources.Harvest.wxs</GlassResourcesHarvest>

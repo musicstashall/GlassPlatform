@@ -143,12 +143,22 @@ Runtime acquisition подключён; переход inspector/UI/cache/helper
 В Windows PowerShell из корня solution, после подписи финальных файлов:
 
 ```powershell
-# Первый каталог: платформа и GlassSettings обеих разрядностей и EXE. OpenGlass в каталог не входит.
-.\GlassSetup\scripts\New-ReleaseCatalog.ps1 -ReleaseTag v1.4.3 -IncludeSetup
-# Отдельный MSI в другом релизе: остальные версии/ссылки и EXE metadata сохраняются.
-.\GlassSetup\scripts\New-ReleaseCatalog.ps1 -ReleaseTag settings-hotfix -Products settings64 `
+# Первый каталог комплекта: обе разрядности платформы и GlassSettings, Resources и EXE.
+# Установщик OpenGlass в каталог не входит.
+.\GlassSetup\scripts\New-ReleaseCatalog.ps1 -ReleaseTag v2.0.0.0115 -IncludeSetup `
+    -Products platform64,platform32,settings64,settings32,openglassResources
+# Отдельный MSI в том же комплекте: остальные версии/ссылки и EXE metadata сохраняются.
+.\GlassSetup\scripts\New-ReleaseCatalog.ps1 -ReleaseTag v2.0.0.0115 -Products settings64 `
     -BaseManifest .\Build\GlassSetup\Release\version.json
 ```
+
+Страница релиза — это выход комплекта **GlassPlatform**, а не выпуск установщика.
+Заголовок и тег содержат версию комплекта (`GlassBundleVersion`), например
+`GlassPlatform 2.0.0.0115` и `v2.0.0.0115`. В набор входят все пакеты комплекта и
+`GlassSetup.exe`. В таблице версия GlassSettings — FileVersion `GlassSettings.exe`
+этой разрядности, не ProductVersion MSI. У платформы и OpenGlass Resources в таблице
+ProductVersion MSI. У установщика — его собственный FileVersion. Номер комплекта общий;
+отдельный продукт может обновиться внутри него, и тогда меняется только его строка.
 
 Скрипт создаёт `version.json` в том же output каталоге; проверяет MSI UpgradeCode/архитектуру, пишет ProductCode/PackageCode,
 размеры и SHA-256. Не выполняет MSI, не подписывает файлы и не загружает их в GitHub. После изменения каталога нужно
