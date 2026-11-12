@@ -63,7 +63,12 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 /* 1.6s travel over the full card, then 1.6s fully outside the card. */
 @keyframes product-transfer-shine{0%{transform:translateX(-100%)}50%,100%{transform:translateX(100%)}}
 @media(prefers-reduced-motion:reduce){.product-transfer,.product-transfer>i{transition:none}.product-transfer.is-transferring::after{animation:none;display:none}}
-#components-panel .download-retry{margin:0 4px 0 0;padding:2px 4px;border:1px solid #ffaaaa55;border-radius:4px;background:#ffaaaa0d;color:#ffbcbc;font:inherit;cursor:pointer}
+#components-panel .download-retry{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;display:grid;place-items:center;width:38px;height:38px;margin:0;padding:0;border:1px solid transparent;border-radius:50%;background:transparent;color:#e8dfff;cursor:pointer;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,color .18s ease}
+#components-panel .download-retry::before{content:"";display:block;width:12px;height:14px;margin-left:3px;background:currentColor;clip-path:polygon(0 0,100% 50%,0 100%);pointer-events:none}
+#components-panel .download-retry:hover,#components-panel .download-retry:focus-visible{background:#c1b4ff20;border-color:#d5caff70;box-shadow:0 0 16px #b6a1ff26;color:#fff}
+#components-panel .download-retry:focus-visible{outline:2px solid #d5caff;outline-offset:3px}
+#components-panel .download-retry:active{background:#c1b4ff38;box-shadow:0 0 9px #b6a1ff30}
+@media(prefers-reduced-motion:reduce){#components-panel .download-retry{transition:none}}
 .unlock-backdrop{position:absolute;inset:0;width:1000px;height:540px;object-fit:cover;opacity:.43;filter:saturate(.78);pointer-events:none}
 .unlock-shade{position:absolute;inset:0;background:linear-gradient(90deg,#101225f0 0%,#101225df 38%,#10122582 72%,#1012259c 100%);pointer-events:none}
 .unlock-copy{position:absolute;left:48px;top:120px;width:410px;z-index:3}
@@ -1610,8 +1615,8 @@ function syncDownloadVisuals(){
   bar.classList.toggle('is-transferring',remote&&d.phase==='downloading');bar.style.setProperty('--transfer-progress',(!remote?100:percent(d))+'%');bar.style.opacity=d.phase==='ready'?'0':'1';bar.firstElementChild.style.width=(!remote?100:percent(d))+'%';bar.setAttribute('aria-label',label(d));
   if(!d.total&&d.phase!=='ready')bar.removeAttribute('aria-valuenow');else bar.setAttribute('aria-valuenow',String(percent(d)));
   if(d.phase==='error'){
-   if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';retry.onclick=e=>{e.stopPropagation();if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('download-retry:'+d.id);};card.querySelector('.c-foot').prepend(retry);}
-   retry.textContent=ru?'Повторить':'Retry';retry.title=d.error||label(d);
+   if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';retry.onclick=e=>{e.stopPropagation();if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('download-retry:'+d.id);};card.append(retry);}
+   retry.setAttribute('aria-label',ru?'Повторить загрузку':'Retry download');retry.title=(ru?'Повторить загрузку':'Retry download')+(d.error?' — '+d.error:'');
   }else if(retry)retry.remove();
  }
  for(const row of document.querySelectorAll('#components-plan-items li[data-product]')){const d=selected.find(d=>d.id===row.dataset.product);if(d){const text=row.querySelector('.plan-transfer-status');text.textContent=label(d);text.title=d.error||label(d);}}
