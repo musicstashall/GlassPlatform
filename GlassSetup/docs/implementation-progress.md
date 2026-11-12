@@ -3123,3 +3123,22 @@ Installer cache, recovery snapshots и пользовательские данн
 
 Сборка общего HTML: GlassUnins Release|x86 → GlassSetup Release|x86.
 Native Shared/Settings не менялись.
+
+### Installed update: no unnecessary shelf scroll
+
+Причина регрессии: input onchange безусловно append-ил существующую installed
+карточку в конец той же полки; sync также повторно append-ил все карточки.
+Затем reveal показывал новую нижнюю позицию. Теперь оба пути меняют parent
+только при реальной смене полки, сохраняя порядок и scroll anchoring.
+Перед Apply фиксируется видимость существующей installed карточки: полностью
+видимая не получает reveal/landing. Для добавления из Available и внеэкранных
+карточек, включая batch last-card reveal, прежнее поведение сохранено.
+При native echo сохраняется scrollTop обеих полок, focus восстанавливается
+с preventScroll вместо неявного прокручивания.
+
+Production DOM regression: видимая update-карточка, неизменность порядка,
+отсутствие reappend, сохранение обеих scrollTop на echo; старые cascade/reveal,
+CRT removal, reduced motion также PASS. managed_removal, recommendations,
+product_downloads DOM и verify_resources PASS. Реальный WebView2 visual test
+в этой среде не выполнялся.
+Сборка общего HTML: GlassUnins Release|x86 → GlassSetup Release|x86.
