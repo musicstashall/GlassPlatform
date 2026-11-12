@@ -2998,3 +2998,27 @@ failures; verify_resources и diff --check PASS. Это не Windows acceptance.
   Installed DLL version and update-comparison authority remain separate.
 - All production DOM tests and resource smoke checks pass. No Windows runtime
   or pixel-rendering verification is implied by these DOM tests.
+
+### 2026-11-04 — Policy changed to official Inno install; first separate Resources build
+
+User explicitly authorized upstream silent EXE execution and management of any
+installed OG regardless of directory. The extraction-only/no-upstream-execution
+contract is superseded by `openglass-official-install.md`. Engine/provider and
+GlassUnins are **not yet switched**; the old file route is not the new policy.
+
+First implementation batch:
+- Settings resolves the official Inno InstallLocation before bundled fallbacks;
+  feature exposure and the root-backdrop hint no longer reject other directories.
+  The resolved OG install root is the DLL directory, not an assumed parent.
+- Added the separate OpenGlassResources-x64 WiX project and solution entry,
+  graphics-only staging, distinct identities and existing-OG file prerequisite.
+  No executable/service/uninstaller is bundled. Empty/unsupported/link payloads
+  fail the build. Input uses the previously expected Build/x64/Release/OpenGlass/
+  Resources directory or an explicit GlassOgResourcesSource override.
+- Source/build contracts, existing Settings SCM mock, resource checks and
+  build-graph checks pass. WiX/WinUI/MSVC builds were not run here.
+
+Still implementation work, not merely acceptance: official adjacent/downloaded
+setup acquisition and execution, native Inno discovery/uninstall/commit boundary,
+and Resources release catalog/UI/planner/cache/removal/rollback integration.
+Do not describe the standalone WiX project as a selectable installed product yet.

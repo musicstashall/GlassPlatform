@@ -11,7 +11,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Navigation;
-using System.Diagnostics;
 
 namespace GlassSettings.Pages.Glass;
 
@@ -258,10 +257,7 @@ public sealed partial class RootWindowsPage : Page, ISettingsCommitScopeProvider
         AddInlineText(text, GlassSettingsResources.Get("Notice_OgRootBackdropBody"));
         AddInlineText(text, " ");
 
-        if (OpenGlassUiPolicy.IsOrchestratedExternally())
-            AddRootBackdropExternalHint(text);
-        else
-            AddRootBackdropGlassHint(text);
+        AddRootBackdropGlassHint(text);
     }
 
     private static void AddInlineText(TextBlock target, string value) =>
@@ -286,35 +282,6 @@ public sealed partial class RootWindowsPage : Page, ISettingsCommitScopeProvider
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         });
         link.Click += (_, _) => navigate();
-        target.Inlines.Add(link);
-    }
-
-    private static void AddRootBackdropExternalHint(TextBlock target)
-    {
-        var exe = PlatformPaths.OpenGlassGuiPath;
-        if (string.IsNullOrWhiteSpace(exe))
-        {
-            AddInlineText(target, GlassSettingsResources.Get("Notice_OgRootBackdrop_ActionExternal"));
-            return;
-        }
-
-        var link = new Hyperlink();
-        link.Inlines.Add(new Run
-        {
-            Text = GlassSettingsResources.Get("Notice_OgRootBackdrop_ActionExternal"),
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-        });
-        link.Click += (_, _) =>
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
-            }
-            catch
-            {
-                // ignore
-            }
-        };
         target.Inlines.Add(link);
     }
 

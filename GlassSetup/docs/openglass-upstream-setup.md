@@ -1,5 +1,10 @@
 # Извлечение продуктов из OpenGlassSetup.Signed.exe
 
+> **Архивный контракт формата, не актуальная политика установки.**
+> Пользователь разрешил и потребовал штатный silent install upstream EXE.
+> Новый контракт и незавершённые этапы: [openglass-official-install.md](openglass-official-install.md).
+> Старые запреты запуска EXE ниже отменены новой политикой.
+
 Статус: portable parser и защищённый staging provider реализованы в
 `GlassInnoExtract.h` / `GlassOpenGlassPackage.cpp`. Next/engine/inventory ещё
 не переведены с MSI на file-based servicing: целиком схема пока не работает.

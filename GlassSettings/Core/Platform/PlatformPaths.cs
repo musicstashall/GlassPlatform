@@ -91,6 +91,14 @@ public static class PlatformPaths
 
     private static string? ResolveOpenGlassDllCore()
     {
+        // Upstream Inno installation may live anywhere, independently of Glass.
+        var upstream = ReadUpstreamOpenGlassInstallPath();
+        if (!string.IsNullOrWhiteSpace(upstream))
+        {
+            var candidate = Path.Combine(upstream, "OpenGlass.dll");
+            if (IsFileAccessible(candidate)) return Path.GetFullPath(candidate);
+        }
+
         var installDir = ReadBlackWindowManagerInstallPath();
         if (!string.IsNullOrEmpty(installDir))
         {
@@ -124,15 +132,6 @@ public static class PlatformPaths
             var oglassDir = Path.GetDirectoryName(dll);
             if (!string.IsNullOrWhiteSpace(oglassDir))
             {
-                var leaf = Path.GetFileName(oglassDir);
-                if (leaf.Equals("OpenGlass", StringComparison.OrdinalIgnoreCase)
-                    || leaf.Equals("openglass", StringComparison.OrdinalIgnoreCase))
-                {
-                    var parent = Path.GetDirectoryName(oglassDir);
-                    if (!string.IsNullOrWhiteSpace(parent))
-                        return NormalizeDir(parent);
-                }
-
                 return NormalizeDir(oglassDir);
             }
         }
@@ -213,6 +212,19 @@ public static class PlatformPaths
 
         if (TryAdd(AppBase) is { } fromExe)
             yield return fromExe;
+    }
+
+    private static string? ReadUpstreamOpenGlassInstallPath()
+    {
+        try
+        {
+            using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+            using var key = machine.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\{D3D1BC7D-5E24-4B33-9383-7934271A3B05}_is1", false);
+            var value = key?.GetValue("InstallLocation") as string;
+            return !string.IsNullOrWhiteSpace(value) && Path.IsPathFullyQualified(value)
+                ? Path.GetFullPath(value) : null;
+        }
+        catch { return null; }
     }
 
     private static string ReadBlackWindowManagerInstallPath()

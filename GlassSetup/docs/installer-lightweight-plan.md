@@ -115,9 +115,9 @@
 | N2 | Per-product Glass update provider вместо bundle `glass`; compare только установленные продукты/архитектуры, независимый catalog version | Несколько updates дают компактную общую строку на Glass expander, один — конкретную; dismissed identity не теряет изменения набора |
 | N3 | OpenGlass installed DWM architecture + актуальные unsuffixed releases, старые -legacy/-milcomp только своего канала | Не переводит Legacy в MILComp по более новому тегу; учитывает repair при смене Windows build |
 | N4 | Исправить регрессию switch-off OpenGlass orchestration | Service и legacy task удаляются так же, как dropdown Delete; выключение не подменяется disable autorun |
-| N5 | Parser и staging provider написаны; Windows/real-package validation остаётся | Bounded parser/LZMA/filter, publisher+PE/version/hash; только принятые контрактом Host/GUI/выбранная DLL; upstream EXE никогда не исполняется |
-| N6 | Убрать своё OpenGlass MSI семейство, source/catalog/engine/inventory/ARP gates заменить на защищённые file receipts | Без compatibility/migration ветки; независимый Inno install не перезаписывается; rollback сохраняется |
-| N7 | Resources graphics package как отдельный продукт с зависимостью от OpenGlass | Catalog/build/UI/planner/snapshot/remove/rollback: не спрятанный addon в OpenGlass payload |
+| N5 | Перевести acquisition/execution на официальный silent upstream EXE (новая политика) | Adjacent signed EXE → release download on Next; publisher/version/hash trust, exit/reboot handling; без собственного извлечения DLL |
+| N6 | Заменить receipt route на upstream Inno inventory/servicing в любом каталоге | Inno управляет файлами, правами, службами и ARP; Setup не создаёт/удаляет их за него; честная граница commit/rollback |
+| N7 | Resources: добавлен отдельный WiX-проект/graphics-only staging и MSI prerequisite; catalog/UI/planner ещё не подключены | Catalog/build/UI/planner/snapshot/remove/rollback: не спрятанный addon в OpenGlass payload |
 | N8 | Backup/restore/association приняты после локальных доработок пользователя | Не добавлять AppData/Local/GlassPlatform в архив; сохранять действующий current-user контракт |
 | R10 | Довести устаревшие mock harness до текущих API и документы/релизный checklist до нового состава продуктов | Общий run с явным отчётом, без ослабления production trust ради тестов |
 

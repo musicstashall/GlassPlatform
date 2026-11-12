@@ -1,0 +1,33 @@
+<Project Sdk="WixToolset.Sdk">
+  <PropertyGroup>
+    <ProjectGuid>{66B912C7-3BF1-4EC3-8EA2-406DB4E8BB19}</ProjectGuid>
+    <Configurations>Debug;Release</Configurations>
+    <OutputName>OpenGlassResources-x64</OutputName>
+    <OutputType>Package</OutputType>
+    <Cultures>neutral</Cultures>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <GlassMsiProductCode>6D6046DB-6B28-4F2C-8A7D-EB6CF13CBBD9</GlassMsiProductCode>
+    <GlassSignThisProject>true</GlassSignThisProject>
+    <GlassOgResourcesSource Condition="'$(GlassOgResourcesSource)' == ''">$(SolutionRoot)Build\x64\Release\OpenGlass\Resources</GlassOgResourcesSource>
+    <GlassResourcesStage>$(SolutionRoot)Build\SetupPayload\OpenGlassResources</GlassResourcesStage>
+    <GlassResourcesHarvest>$(BaseIntermediateOutputPath)OpenGlassResources.Harvest.wxs</GlassResourcesHarvest>
+    <DefineConstants>$(DefineConstants);GlassSetupIcon=$(SolutionRoot)GlassSetup\res\app.ico</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' != 'Release'">
+    <BuildProject>false</BuildProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="OpenGlassResourcesPackage.wxs" />
+    <None Include="scripts\Stage-OpenGlassResources.ps1" />
+  </ItemGroup>
+  <Target Name="StageOpenGlassResources" BeforeTargets="BeforeCompile" DependsOnTargets="GlassBundleImportSessionProps">
+    <PropertyGroup>
+      <GlassResourcesVersion Condition="'$(GlassResourcesVersion)' == ''">$(GlassBundleVersionEffective)</GlassResourcesVersion>
+      <DefineConstants>$(DefineConstants);GlassResourcesVersion=$(GlassResourcesVersion)</DefineConstants>
+    </PropertyGroup>
+    <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\Stage-OpenGlassResources.ps1&quot; -Source &quot;$(GlassOgResourcesSource)&quot; -Destination &quot;$(GlassResourcesStage)&quot;" />
+    <MakeDir Directories="$(BaseIntermediateOutputPath)" />
+    <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\Generate-HarvestWxs.ps1&quot; -StagingDir &quot;$(GlassResourcesStage)&quot; -OutFile &quot;$(GlassResourcesHarvest)&quot; -ComponentGroupId &quot;OpenGlassGraphics&quot; -RootDirectoryId &quot;INSTALLDIR&quot;" />
+    <ItemGroup><Compile Include="$(GlassResourcesHarvest)" /></ItemGroup>
+  </Target>
+</Project>
