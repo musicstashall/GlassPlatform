@@ -595,7 +595,8 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
         self->succeeded_=self->RunOfficialOpenGlassOnly();
     } else RunGlassWorker(p);
     if(!self->tempDir_.empty()) {
-        (void)RemoveDirectoryTree(self->tempDir_);self->tempDir_.clear();
+        if(RemoveDirectoryTree(self->tempDir_))self->tempDir_.clear();
+        else InstallLog::LineFormat(L"Staging cleanup incomplete; destructor will retry: %s",self->tempDir_.c_str());
     }
     self->finished_.store(true,std::memory_order_release);
     self->launchingPhase_.store(false,std::memory_order_release);

@@ -17,6 +17,14 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
      rows:[...document.querySelectorAll('#components-installed-grid .c-card')].map(card=>{const bar=card.querySelector('.product-transfer').getBoundingClientRect(),rect=card.getBoundingClientRect();const fill=card.querySelector('.product-transfer i').getBoundingClientRect();return bar.left>=rect.left&&bar.right<=rect.right&&bar.top>=rect.top&&bar.bottom<=rect.bottom&&bar.height>rect.height*.9&&bar.width>rect.width*.9&&Math.abs(fill.width/bar.width-.5)<.02;})};
    });
    assert.equal(geometry.extraStrip,false);assert.ok(geometry.laneBottom<=540,JSON.stringify(geometry));assert.equal(geometry.bars,6);assert.ok(geometry.rows.every(Boolean));
+   const surfaces=await page.evaluate(()=>{
+    const card=document.querySelector('#components-installed-grid .c-card'),bar=card.querySelector('.product-transfer');
+    const fill=getComputedStyle(bar).backgroundImage,clip=getComputedStyle(bar).clipPath;
+    const original=card.className;card.className='c-card is-activated';const updated=getComputedStyle(card).backgroundImage;card.className=original;
+    return {fill,updated,clip,reduced:getComputedStyle(bar,'::after').display};
+   });
+   assert.equal(surfaces.fill,surfaces.updated,'download and activated card use identical opaque green surface');
+   assert.match(surfaces.clip,/50%/);assert.equal(surfaces.reduced,'none');
    await page.evaluate(()=>window.receive({data:{type:'state',downloads:[]}}));
    assert.equal(await page.locator('#components-panel').evaluate(el=>el.classList.contains('has-downloads')),false);
   }

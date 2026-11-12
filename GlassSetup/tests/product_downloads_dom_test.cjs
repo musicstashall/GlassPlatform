@@ -23,13 +23,21 @@ for(const locale of ['ru','en']){
  assert.equal(d.activeElement,cancel,'progress must not replace focused plan controls');
  assert.match(d.querySelector('#components-plan-items .plan-transfer-status').textContent,/50%/);
  assert.equal(d.querySelector('#components-installed-grid .product-transfer i').style.width,'50%');
+ assert.equal(d.querySelector('.product-transfer').style.getPropertyValue('--transfer-progress'),'50%');
+ assert.ok(d.querySelector('.product-transfer').classList.contains('is-transferring'));
+ const css=d.querySelector('style').textContent;
+ assert.match(css,/clip-path:inset\(0 calc\(100% - var\(--transfer-progress,0%\)\)/);
+ assert.match(css,/@keyframes product-transfer-shine\{0%\{transform:translateX\(-100%\)\}50%,100%\{transform:translateX\(100%\)\}\}/);
+ assert.match(css,/animation:product-transfer-shine 3\.2s linear infinite/);
+ assert.match(css,/prefers-reduced-motion:reduce/);
  // Removing the plan row cancels the same native selection IPC and hides stale progress immediately.
  cancel.click();assert.equal(messages.at(-1),'component:settings64:0');
  assert.equal(d.querySelector('#product-settings64').checked,false);
  assert.equal(d.querySelector('#components-plan-items li[data-product="settings64"]'),null);
  const failed=jobs.map(j=>({...j,phase:'error',error:'HTTP 404'}));send({downloads:failed});
- const retry=d.querySelector('#components-installed-grid .download-retry');assert.ok(retry);retry.click();assert.match(messages.at(-1),/^download-retry:/);
+ const retry=d.querySelector('#components-installed-grid .download-retry');assert.ok(retry);assert.equal(d.querySelectorAll('.product-transfer.is-transferring').length,0);retry.click();assert.match(messages.at(-1),/^download-retry:/);
  send({downloads:jobs.map(j=>({...j,phase:'verifying',bytes:j.total}))});
+ assert.equal(d.querySelectorAll('.product-transfer.is-transferring').length,0);
  assert.match(d.querySelector('#components-plan-items .plan-transfer-status').textContent,locale==='ru'?/Проверка/:/Verifying/);
  assert.ok(!d.querySelector('#components-plan-items .plan-transfer-status').textContent.includes('100%'));
  send({downloads:jobs.map(j=>({...j,phase:'ready',bytes:j.total}))});
