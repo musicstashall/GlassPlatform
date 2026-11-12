@@ -39,6 +39,16 @@ inline GlassProductPlan::Plan Preview(const GlassProducts::Selection& choice,
     if(!hasInstalled&&!removal) {
         plan.warnings=P::Warning::None;
         for(auto& row:plan.rows)row.warnings=P::Warning::None;
+    } else {
+        // Absent unselected products are not dependencies of this plan.
+        // Preserve warnings on retained/selected products, never advertise a
+        // missing platform/helper on every unrelated Available card.
+        plan.warnings=P::Warning::None;
+        for(std::size_t i=0;i<plan.rows.size();++i) {
+            if(!present[i]&&!request.selected[i]&&request.actions[i]!=P::Action::Remove)
+                plan.rows[i].warnings=P::Warning::None;
+            plan.warnings=plan.warnings|plan.rows[i].warnings;
+        }
     }
     return plan;
 }

@@ -217,6 +217,43 @@ std::wstring UninsExePathForProduct(const std::wstring& productCode, const std::
     return {};
 }
 
+// Graphics MSI keeps Windows Installer ownership, but its ARP Change action
+// opens the trusted product-aware controller, not a UI-less msiexec /i run.
+static bool PatchResourcesMaintenance() {
+    std::wstring detail;
+    if(!IsProductInstalled(kProductOpenGlassResourcesX64)||
+       CheckProductContexts(kProductOpenGlassResourcesX64,detail)!=ProductPathCheck::Safe)return false;
+    const auto setup=GlassMaintenanceCache::CurrentFile(L"GlassSetup.exe");
+    if(setup.empty())return false; // Never redirect to an untrusted/absent controller.
+    wchar_t system[MAX_PATH]{};
+    const UINT length=GetSystemDirectoryW(system,MAX_PATH);
+    if(!length||length>=MAX_PATH)return false;
+    const auto uninstall=L"\""+std::wstring(system)+L"\\msiexec.exe\" /x \""+kProductOpenGlassResourcesX64+L"\"";
+    const auto modify=L"\""+setup+L"\" --modify --product \""+kProductOpenGlassResourcesX64+L"\"";
+    const auto path=L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"+std::wstring(kProductOpenGlassResourcesX64);
+    HKEY key=nullptr;
+    if(RegOpenKeyExW(HKEY_LOCAL_MACHINE,path.c_str(),0,KEY_SET_VALUE|KEY_WOW64_64KEY,&key)!=ERROR_SUCCESS)return false;
+    const auto put=[&](const wchar_t* name,const std::wstring& value) {
+        return RegSetValueExW(key,name,0,REG_SZ,reinterpret_cast<const BYTE*>(value.c_str()),
+            static_cast<DWORD>((value.size()+1)*sizeof(wchar_t)))==ERROR_SUCCESS;
+    };
+    bool ok=IsProductInstalled(kProductOpenGlassResourcesX64)&&
+        CheckProductContexts(kProductOpenGlassResourcesX64,detail)==ProductPathCheck::Safe;
+    if(ok) {
+        ok=put(L"ModifyPath",modify)&&put(L"UninstallString",uninstall)&&put(L"QuietUninstallString",uninstall+L" /qn /norestart");
+        const DWORD zero=0,one=1;
+        ok=RegSetValueExW(key,L"NoModify",0,REG_DWORD,reinterpret_cast<const BYTE*>(&zero),sizeof(zero))==ERROR_SUCCESS&&ok;
+        ok=RegSetValueExW(key,L"NoRepair",0,REG_DWORD,reinterpret_cast<const BYTE*>(&one),sizeof(one))==ERROR_SUCCESS&&ok;
+        if(ok) {
+            const auto removed=RegDeleteValueW(key,L"WindowsInstaller");
+            ok=removed==ERROR_SUCCESS||removed==ERROR_FILE_NOT_FOUND;
+        }
+    }
+    RegCloseKey(key);
+    GlassInstallLog::LineFormat(L"Resources ARP maintenance redirect: %s",ok?L"ok":L"incomplete");
+    return ok;
+}
+
 // PublishProduct пишет msiexec + WindowsInstaller=1. Переключаем ARP на unins000.exe --product "{GUID}"
 // и снимаем WindowsInstaller, чтобы Параметры Windows вызывали наш WebView2-деинсталлятор.
 bool PatchArpUninstallString(const std::wstring& productCode, const std::wstring& installDir) noexcept {
@@ -377,6 +414,7 @@ bool RefreshManagedArp(const std::wstring& x64Dir,const std::wstring& x86Dir,con
                 GlassInstallLog::LineFormat(L"Remaining ARP refresh refused/failed: product=%s",code);ok=false;
             }
         }
+        if(IsProductInstalled(kProductOpenGlassResourcesX64))ok=PatchResourcesMaintenance()&&ok;
         ok=RefreshOpenGlassFileArp(openGlassDir)&&ok;
         GlassInstallLog::LineFormat(L"Remaining managed ARP refresh: %s",ok?L"ok":L"incomplete");
         return ok;

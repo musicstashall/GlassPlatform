@@ -685,3 +685,45 @@ directory, unreadable paths and retired managed test receipts still fail safely.
 `openglass_existing_directory_mock.py` compiles this actual RU/EN gate with fake
 Win32 APIs. Build GlassSetup Release|Win32 (solution x86); GlassUnins, GlassShared
 and the Resources MSI are unchanged by this particular fix.
+
+### Follow-up: Resources ARP Change, idle dependency cards, cached controller
+
+The supplied GlassSetup-29 and five MSI removal logs show Resources, Platform
+x86/x64 and Settings x64/x86 removals all returning 0, with successful registration
+postchecks. Entries disappearing on reopening Windows Installed apps are consistent
+with a stale Settings list, not persistent product registration. Do not delete
+additional registry keys to force that list to refresh. Original supplied logs were
+removed after analysis; screenshots are retained.
+
+Resources previously had no ARP redirect: the UI-less MSI maintenance action could
+show a progress window and exit without opening GlassSetup. RefreshManagedArp now
+sets its Change command to the trusted cached GlassSetup --modify --product GUID,
+while retaining direct Windows Installer /x removal (not the unfinished Resources
+GlassUnins lane). The WindowsInstaller ARP flag is removed just as for other managed
+entries; Windows Installer product registration is untouched. New Setup startup
+refreshes existing registered Resources entries. No foreign Inno ARP key is edited.
+
+UI preview clears warnings on absent, unselected product rows even when an unrelated
+product such as SUT is installed. Actual retained/selected-product warnings and
+execution safety gates remain intact. Empty inventory behavior is unchanged.
+
+When a server catalog offers newer Setup than the running EXE, acquisition first
+tries the protected cached controller. Only matching server size/SHA256 bytes are
+copied from a pinned handle to this operation's workspace; the same Authenticode,
+expected-publisher and final FileVersion checks still run. Otherwise network
+acquisition remains the fallback. Cached code is never deleted on a version-check
+failure: the caller receives only its own staged copy.
+
+Not completed by this follow-up: combined original-SUT plus managed-product removal
+(the current explicit restriction can disable Apply for Remove all); official OG
+Change integration (upstream owns Inno registration); Resources MSI empty-parent
+cleanup for direct uninstall; forced live refresh of the Windows Settings app list.
+Do not advertise these as implemented or suggest recursive removal of retained OG
+settings. Rebuild GlassUnins Release|Win32 then GlassSetup Release|Win32 for shared
+support/UI policy changes; republish embedded uninstallers where applicable.
+
+Checks: setup_download_mock (actual preparation, including zero-network cache reuse
+and signature failure), resources_arp_maintenance_mock (actual registry adapter),
+empty_inventory_preview_mock (actual preview including SUT-only idle inventory),
+controller_handoff_mock, product-plan matrix, resource smoke. No Windows build or
+real ARP/Settings UI test was performed in the sandbox.

@@ -145,7 +145,18 @@ bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& wo
            asset.size<512||asset.size>1024ull*1024*1024||!GlassMaintenanceCache::TrustedDirectory(workspace)||cancel.load())
             return Fail(error,L"Setup download metadata/workspace unavailable");
         bool ok=false;
-        {
+        const auto cached=GlassMaintenanceCache::CurrentFile(L"GlassSetup.exe");
+        if(!cached.empty()) {
+            Handle source;source.h=CreateFileW(cached.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+            // Version equality alone is not trust: require the current catalog
+            // size/digest and copy from the pinned handle into our own workspace.
+            if(source.h!=INVALID_HANDLE_VALUE&&GlassReleaseClient::VerifyHash(source.h,asset.size,asset.sha256,cancel,error))
+                ok=CopyLocked(source.h,part,cancel);
+            if(ok)InstallLog::Line(L"Setup acquisition: exact catalog bytes reused from protected controller cache; no download");
+        }
+        if(!ok&&!cancel.load()) {
+            DeleteFileW(part.c_str()); // Only this operation's workspace copy.
+            error.clear();
             Handle out;out.h=GlassReleaseClient::CreatePrivateFile(part);
             if(out.h==INVALID_HANDLE_VALUE)return Fail(error,L"Cannot create private Setup staging file");
             ok=GlassReleaseClient::Get(Wide(asset.url),out.h,nullptr,asset.size,cancel,error)&&FlushFileBuffers(out.h);

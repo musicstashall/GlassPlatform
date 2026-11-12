@@ -21,6 +21,10 @@ int main(){
   assert(result.warnings==P::Warning::None);
   for(const auto& row:result.rows)assert(row.warnings==P::Warning::None);
  }
+ auto sutOnly=empty;sutOnly.secureUxTheme=true;
+ auto idle=Preview(empty,sutOnly,true,false,false);
+ assert(idle.warnings==P::Warning::None);
+ for(const auto& row:idle.rows)assert(row.warnings==P::Warning::None);
  auto present=empty;present.platform64=true;
  auto retained=Preview(empty,present,true,false,false);
  assert(retained.warnings!=P::Warning::None); // Real retained-product warnings survive.

@@ -127,6 +127,7 @@ bool PathsEqualCanonical(const std::wstring& left, const std::wstring& right) no
 bool MaintenanceProductAbsent(const std::wstring& code) noexcept {
     const wchar_t* known[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
         GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass,
+        GlassInstallMsi::kProductOpenGlassResourcesX64,
         GlassInstallMsi::kLegacyPlatformX64,GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
     bool recognized=false;for(const auto* item:known)if(!_wcsicmp(code.c_str(),item)){recognized=true;break;}
     if(!recognized)return false;

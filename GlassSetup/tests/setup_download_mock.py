@@ -33,6 +33,7 @@ struct GUID{};const GUID WINTRUST_ACTION_GENERIC_VERIFY_V2{};
 struct WINTRUST_FILE_INFO{unsigned cbStruct=0;const wchar_t* pcwszFilePath=nullptr;HANDLE hFile=0;};
 struct WINTRUST_DATA{unsigned cbStruct=0;int dwUIChoice=0,dwUnionChoice=0;WINTRUST_FILE_INFO* pFile=nullptr;int dwStateAction=0,dwProvFlags=0;};
 bool trusted=true,created=true,download=true,flush=true,opened=true,hash=true,signature=true,publisher=true,moved=true;
+std::wstring cached;bool copy=true;
 int handles=0,deletes=0,trustCalls=0,moves=0,gets=0;std::atomic<bool> cancel{false};
 void CloseHandle(HANDLE h){assert(h==1);--handles;}
 HANDLE CreateFileW(const wchar_t*,int,int,void*,int,int,void*){if(!opened)return -1;++handles;return 1;}
@@ -40,7 +41,9 @@ bool FlushFileBuffers(HANDLE){return flush;}
 bool DeleteFileW(const wchar_t*){++deletes;return true;}
 bool MoveFileExW(const wchar_t*,const wchar_t*,int){++moves;return moved;}
 LONG WinVerifyTrust(void*,GUID*,WINTRUST_DATA* data){++trustCalls;return data->dwStateAction==WTD_STATEACTION_CLOSE||signature?0:1;}
-namespace GlassMaintenanceCache{bool TrustedDirectory(const std::wstring&){return trusted;}}
+namespace GlassMaintenanceCache{std::wstring CurrentFile(const wchar_t*){return cached;}bool TrustedDirectory(const std::wstring&){return trusted;}}
+namespace InstallLog{void Line(const wchar_t*){}}
+bool CopyLocked(HANDLE,const std::wstring&,const std::atomic<bool>&){return copy;}
 namespace GlassProductInspect{bool FileHasSameSignerAsSetup(const std::wstring&){return publisher;}}
 namespace GlassReleaseClient{
  HANDLE CreatePrivateFile(const std::wstring&){if(!created)return -1;++handles;return 1;}
@@ -69,8 +72,12 @@ int main(){
   if(ok){assert(prepared==L"private-workspace\\GlassSetup.exe");assert(error.empty());assert(moves==1);}
   else {assert(prepared.empty());assert(!error.empty());}
   if(i==0||i==9||i==10)assert(gets==0&&moves==0);
-  if(i==5||i==6||i==7)assert(moves==0&&deletes==1);
+  if(i==5||i==6||i==7)assert(moves==0&&deletes==2);
  }
+ cached=L"protected-cache\\GlassSetup.exe";trusted=created=download=flush=opened=hash=signature=publisher=moved=true;cancel=false;
+ gets=0;assert(PrepareSetup(asset,L"private-workspace",cancel,prepared,error));assert(gets==0&&handles==0);
+ signature=false;gets=0;assert(!PrepareSetup(asset,L"private-workspace",cancel,prepared,error));assert(gets==0&&handles==0);
+ signature=true;copy=false;gets=0;assert(PrepareSetup(asset,L"private-workspace",cancel,prepared,error));assert(gets==1&&handles==0);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='GlassSetupDownload-') as temp:
