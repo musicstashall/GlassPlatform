@@ -34,13 +34,15 @@ assert 'ReparsePoint' in stage and 'Refusing to produce an empty' in stage
 assert "'.exe'" not in stage and "'.dll'" not in stage
 solution=(root/'GlassProject.sln').read_text()
 assert 'OpenGlassResources-x64.wixproj' in solution
-# A mapping alone does not build a project: both release solution lanes
-# must select the graphics MSI, always using its native x64 configuration.
+# Build the x64 graphics MSI in the x64 release phase, not again in x86.
+# ActiveCfg only maps the project for IDE use; Build.0 selects it for build.
 resources_guid = '{66B912C7-3BF1-4EC3-8EA2-406DB4E8BB19}'
-for solution_arch in ('x64', 'x86'):
- for mapping in ('ActiveCfg', 'Build.0'):
-  line = f'{resources_guid}.Release|{solution_arch}.{mapping} = Release|x64'
-  assert solution.count(line) == 1, f'Missing/duplicate Resources solution mapping: {line}'
+for mapping in ('ActiveCfg', 'Build.0'):
+ line = f'{resources_guid}.Release|x64.{mapping} = Release|x64'
+ assert solution.count(line) == 1, f'Missing/duplicate Resources solution mapping: {line}'
+assert f'{resources_guid}.Release|x86.ActiveCfg = Release|x64' in solution
+assert not any(resources_guid in line and '.Release|x86.Build.0' in line
+               for line in solution.splitlines())
 assert not any(resources_guid in line and '.Debug|' in line and '.Build.0' in line
                for line in solution.splitlines())
 paths=(root/'GlassSettings/Core/Platform/PlatformPaths.cs').read_text()
