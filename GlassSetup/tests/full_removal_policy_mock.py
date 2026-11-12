@@ -45,7 +45,10 @@ int main(){
 '''.replace('// GUARD',s[a:b])
 engine=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
 assert engine.index('ok = self->PrepareFullRemovalCleanup()')<engine.index('ok=self->PrepareManagedRemoval()')
-assert engine.index('Launch: commit point reached')<engine.index('self->FinishFullRemovalCleanup()')
+managed=engine[engine.index('DWORD WINAPI InstallEngine::RunGlassWorker('):engine.index('bool InstallEngine::Start(')]
+assert managed.index('Launch: commit point reached')<managed.index('self->FinishFullRemovalCleanup()')
+wrapper=engine[engine.index('DWORD WINAPI InstallEngine::WorkerThread('):engine.index('DWORD WINAPI InstallEngine::RunGlassWorker(')]
+assert wrapper.index('CommitOfficialOpenGlass(mixedRemoval)')<wrapper.index('FinishFullRemovalCleanup()')
 main=(root/'GlassSetup/src/main.cpp').read_text()
 assert 'fullCleanupReviewed_=false;selection_.cleanupUserData=false;' in main
 assert 'if(page_==Page::FullCleanup){fullCleanupReviewed_=true;' in main

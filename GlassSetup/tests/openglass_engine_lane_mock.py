@@ -8,7 +8,7 @@ s=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
 worker=s[s.index('DWORD WINAPI InstallEngine::WorkerThread('):s.index('bool InstallEngine::Start(')]
 assert worker.index('RunOfficialOpenGlassOnly()') < worker.index('CapturePriorHostState()')
 lane=s[s.index('bool InstallEngine::RunOfficialOpenGlassOnly()'):s.index('DWORD WINAPI InstallEngine::WorkerThread(')]
-for forbidden in ['StopRunningHosts(', 'CreateRollbackSnapshot(', 'RunMsiSequence(', 'RegisterSelectedProducts(', 'WriteOpenGlassInstallPath(', 'RefreshManagedArp(', 'PerformRollback(']:
+for forbidden in ['StopRunningHosts(', 'CreateRollbackSnapshot(', 'RunMsiSequence(', 'RegisterSelectedProducts(', 'WriteOpenGlassInstallPath(', 'PerformRollback(']:
     assert forbidden not in lane, forbidden
 assert lane.index('StandaloneOpenGlassApply(')<lane.index('EnsureTempWorkspace(')<lane.index('PrepareInstallerForCurrentSystem(')<lane.index('RunInstaller(')
 assert lane.index('Same(officialOpenGlassBefore_,current)')<lane.index('RunInstaller(')
@@ -64,8 +64,8 @@ int main(){
  mixed.openGlassResources=true;assert(!MixedOpenGlassRemoval(mixed,false,true));mixed.openGlassResources=false;
  assert(!MixedOpenGlassRemoval(mixed,true,true));assert(!MixedOpenGlassRemoval(mixed,false,false));
  mixed.secureUxTheme=true;assert(!MixedOpenGlassRemoval(mixed,false,true));mixed.secureUxTheme=false;
- mixed.cleanupUserData=true;assert(!MixedOpenGlassRemoval(mixed,false,true));mixed.cleanupUserData=false;
- mixed.removeMask=9;assert(!MixedOpenGlassRemoval(mixed,false,true));
+ mixed.cleanupUserData=true;assert(MixedOpenGlassRemoval(mixed,false,true));mixed.cleanupUserData=false;
+ mixed.removeMask=9;assert(MixedOpenGlassRemoval(mixed,false,true));
  s.removeMask=12;assert(!StandaloneOpenGlassRemoval(s,false,true));
 
 }

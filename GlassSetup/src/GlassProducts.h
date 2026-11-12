@@ -85,9 +85,11 @@ constexpr bool MixedOpenGlassApply(const Selection& s,bool forceClean,bool os64)
 
 // Managed apply can precede official OG removal just as it precedes OG apply.
 constexpr bool MixedOpenGlassRemoval(const Selection& s,bool forceClean,bool os64) noexcept {
-    return !s.openGlassResources&&os64&&!s.openGlass&&s.removeMask==(1u<<3)&&
-        (s.platform64||s.platform32||s.Settings64(os64)||s.Settings32(os64))&&
-        !s.secureUxTheme&&!s.secureUxThemeRemove&&!s.cleanupUserData&&!forceClean;
+    return !s.openGlassResources&&os64&&!s.openGlass&&s.Removes(3)&&
+        !(s.removeMask&~Selection::kManagedRemovalMask)&&
+        (s.platform64||s.platform32||s.Settings64(os64)||s.Settings32(os64)||
+         (s.removeMask&~8u)||s.secureUxThemeRemove)&&
+        !s.secureUxTheme&&!forceClean;
 }
 
 // Graphics can follow an existing OG or its explicit official Apply in this plan.
@@ -98,7 +100,7 @@ constexpr bool ResourcesApplyReady(const Selection& s,bool os64,bool upstreamRea
 
 constexpr bool ResourcesPlanReady(const Selection& s,bool os64,bool upstreamReady) noexcept {
     return (!s.openGlassResources||ResourcesApplyReady(s,os64,upstreamReady))&&
-        (!s.Removes(6)||(os64&&!s.openGlass&&!s.Removes(3)));
+        (!s.Removes(6)||(os64&&!s.openGlass));
 }
 
 // Pure managed removal needs the installed MSI baseline, not new release media.

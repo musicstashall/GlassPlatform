@@ -3637,6 +3637,10 @@ private:
                     selection_.secureUxThemeRemove=false;selection_.secureUxRemovalWithoutSettings=false;secureUxRemovalCode_.clear();
                 }
             }
+            InstallLog::LineFormat(L"Component plan: removeMask=0x%X applyOG=%d applyResources=%d applySUT=%d inspectReady=%d downloadPending=%d downloadsReady=%d resourcesReady=%d failurePending=%d canApply=%d",
+                selection_.removeMask,selection_.openGlass?1:0,selection_.openGlassResources?1:0,selection_.secureUxTheme?1:0,
+                inspectReady_.load()?1:0,downloadContinuePending_?1:0,DownloadsReady()?1:0,
+                GlassProducts::ResourcesPlanReady(selection_,os64,resourcesPrerequisiteReady_)?1:0,failurePending_?1:0,ComponentsReady()?1:0);
             EnableWindow(next_,!failurePending_ && ComponentsReady());
             SetWindowTextW(next_,Text(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()).c_str());
             SyncWebViewState();

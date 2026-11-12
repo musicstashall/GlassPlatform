@@ -26,6 +26,8 @@ bool RemoveDirectoryTree(const std::wstring&){++cleanups;order+="cleanup;";retur
 struct InstallEngine{
  GlassProducts::Selection selection_;bool mixedOpenGlass_=false,forceClean_=false,succeeded_=false;
  struct {std::wstring finalize;}labels_;
+ bool PrepareFullRemovalCleanup(){if(selection_.cleanupUserData)order+="cleanup-preflight;";return true;}
+ void FinishFullRemovalCleanup(){if(selection_.cleanupUserData){assert(vendorRuns==1);order+="data-cleanup;";}}
  void SetStatus(const std::wstring&,int){}
  bool FinishOfficialResources(bool commit){order+=commit?"res-finalize;":"res-rollback;";return true;}
  bool OfficialResourcesPhase(bool preparing){order+=preparing?"res-prepare;":"res-commit;";return preparing?resourcesPrep:resourcesCommit;}
@@ -33,7 +35,7 @@ struct InstallEngine{
  std::atomic_bool finished_{false},launchingPhase_{false},rollbackSucceeded_{true};
  bool PrepareOfficialOpenGlass(bool r){assert(r==expectedRemoval&&!finished_);++preparations;order+="prepare;";return prep;}
  static DWORD RunGlassWorker(LPVOID p){auto* self=static_cast<InstallEngine*>(p);++glassRuns;order+="glass;";
- assert(!self->finished_);if(self->mixedOpenGlass_){assert(!self->selection_.openGlass&&(self->procedureMask_&8)==0&&self->selection_.removeMask==0);}
+ assert(!self->finished_);if(self->selection_.Removes(6))assert(self->procedureMask_&64);if(self->mixedOpenGlass_){assert(!self->selection_.openGlass&&(self->procedureMask_&8)==0&&(self->selection_.removeMask&8)==0);}
  self->succeeded_=glass;if(glass)self->launchingPhase_=true;return 0;}
  bool CommitOfficialOpenGlass(bool r){assert(r==expectedRemoval&&!finished_&&succeeded_);assert(r?selection_.Removes(3):selection_.openGlass);++vendorRuns;order+="vendor;";return vendor;}
  bool RunOfficialOpenGlassOnly(){++standalone;return vendor;}
@@ -69,6 +71,25 @@ int main(){
  }
  reset();InstallEngine pair;pair.selection_.platform64=pair.selection_.platform32=pair.selection_.glassSettings=false;pair.selection_.openGlassResources=true;
  InstallEngine::WorkerThread(&pair);assert(pair.succeeded_&&glassRuns==0&&order=="prepare;res-prepare;res-commit;vendor;res-finalize;cleanup;");
+ // Removal subsets route through the managed worker, then official OG last.
+ for(unsigned mask=1;mask<128;++mask){
+  if(mask&~GlassProducts::Selection::kManagedRemovalMask)continue;
+  reset();expectedRemoval=bool(mask&8);InstallEngine e;
+  e.selection_.platform64=e.selection_.platform32=e.selection_.glassSettings=e.selection_.openGlass=false;
+  e.selection_.removeMask=mask;e.procedureMask_=mask;
+  InstallEngine::WorkerThread(&e);
+  assert(e.succeeded_&&e.selection_.removeMask==mask);
+  if((mask&8)&&(mask&~8u))assert(glassRuns==1&&vendorRuns==1&&order=="prepare;glass;vendor;cleanup;");
+  if(!(mask&8))assert(vendorRuns==0&&glassRuns==1); // Resources-only never invokes/removes OG.
+ }
+ reset();expectedRemoval=true;InstallEngine all;all.selection_.platform64=all.selection_.platform32=all.selection_.glassSettings=all.selection_.openGlass=false;
+ all.selection_.removeMask=0x6f;all.procedureMask_=0x6f;all.selection_.secureUxThemeRemove=true;
+ InstallEngine::WorkerThread(&all);assert(all.succeeded_&&glassRuns==1&&vendorRuns==1);
+ reset();expectedRemoval=true;InstallEngine cleaned;cleaned.selection_.platform64=cleaned.selection_.platform32=cleaned.selection_.glassSettings=cleaned.selection_.openGlass=false;
+ cleaned.selection_.removeMask=0x6f;cleaned.procedureMask_=0x6f;cleaned.selection_.cleanupUserData=true;
+ InstallEngine::WorkerThread(&cleaned);assert(cleaned.succeeded_&&order=="prepare;cleanup-preflight;glass;vendor;data-cleanup;cleanup;");
+ reset();expectedRemoval=true;glass=false;InstallEngine failRemove;failRemove.selection_.platform64=failRemove.selection_.platform32=failRemove.selection_.glassSettings=failRemove.selection_.openGlass=false;
+ failRemove.selection_.removeMask=0x48;failRemove.procedureMask_=0x48;InstallEngine::WorkerThread(&failRemove);assert(!failRemove.succeeded_&&vendorRuns==0);
  reset();InstallEngine ordinary;ordinary.selection_.openGlass=false;InstallEngine::WorkerThread(&ordinary);assert(ordinary.succeeded_&&preparations==0&&glassRuns==1&&vendorRuns==0);
  reset();InstallEngine only;only.selection_.platform64=only.selection_.platform32=only.selection_.glassSettings=false;InstallEngine::WorkerThread(&only);assert(only.succeeded_&&standalone==1&&glassRuns==0);
  reset();InstallEngine unsupported;unsupported.selection_.secureUxTheme=true;InstallEngine::WorkerThread(&unsupported);assert(standalone==1&&glassRuns==0&&preparations==0);

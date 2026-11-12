@@ -1060,3 +1060,49 @@ source smoke passes. No Windows/Inno execution performed here.
 
 Build GlassUnins Release|Win32 -> GlassSetup Release|Win32. No MSI rebuild required
 for these diagnostic/wording changes; publish matching Setup metadata.
+
+### Resources removal Apply gating and mixed removal dispatch (image-38)
+
+The screenshot's all-remove plan hits an obsolete ResourcesPlanReady condition:
+Resources removal was disallowed when OG was also marked for removal. Removing
+graphics requires no installed/retained OG dependency. The x64/no-OG-Apply gates
+remain, but the !Removes(3) veto is removed. This does not implicitly select OG
+removal when Resources alone is selected.
+
+Simply enabling the button would have exposed a second stale restriction:
+MixedOpenGlassRemoval accepted only OG removal plus managed Apply, not managed
+removals. The dispatcher now also accepts OG removal plus any explicitly selected
+managed removal subset and SUT removal (no vendor installation, force-clean or
+unknown bits). It preflights official OG before managed mutation, excludes OG's
+row from the managed transaction, runs actual selected MSI removals (including
+Resources row64, no longer stripped from the procedure mask), then runs official
+OG removal last. SUT retains its independently tested pre-Settings commit rule.
+If the managed phase fails, vendor OG is not invoked. If OG subsequently fails,
+committed managed changes remain a reported partial result, not a claimed overall
+rollback. The existing stop/check/official uninstaller contract is unchanged.
+
+Explicit optional profile cleanup is preflighted on the original plan and deferred
+until official OG success; it is suppressed during the managed subtransaction so
+it cannot delete retained OG settings early. Preflight now includes official Inno
+presence, not only the retired MSI/receipt. Partial removal never implicitly asks
+for profile cleanup. FullRemovalSelected's existing mixed-SUT cleanup eligibility
+is not broadened by this patch.
+
+The clarification says Resources-only removal also disabled Apply. A true pure
+Resources-only plan already passes the extracted readiness predicate, so its
+specific runtime blocker is not proven by the screenshot (which has seven planned
+removals). New actual-IPC regression verifies that selecting Resources removal
+clears its Apply flag, sets only bit64, requires no OG presence, and enables Apply;
+all63 nonempty subsets of the six managed removal rows are covered, including
+OG+Resources/all rows. The actual worker subset test also proves Resources-only
+never calls the vendor OG lane. Runtime component-plan logs now record removeMask,
+OG/Resources/SUT Apply flags, inspect/download readiness, failure gate and final
+canApply, to distinguish a remaining standalone blocker without guessing.
+
+Tests: actual IPC/readiness, mixed dispatcher/subset routing/failure/profile-cleanup
+ordering, Resources UI matrix, standalone policy, actual SUT early gate/removal
+worker, full-removal policy, both16384-case product-plan matrices and resource
+smoke pass. A stale standalone source guard forbidding all ARP refresh was updated
+to reflect the earlier official OG Change-link implementation. No Windows/MSVC/
+WiX installation/removal acceptance performed. Build GlassUnins Release|Win32 ->
+GlassSetup Release|Win32; no Resources MSI rebuild is needed for these changes.

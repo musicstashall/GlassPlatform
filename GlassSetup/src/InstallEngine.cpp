@@ -688,19 +688,25 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
         // Preparation failure changes no products. Keep the staged EXE until
         // after managed commit; the Glass worker must never own the OG row.
         const bool resources=self->selection_.openGlassResources;
-        if(self->PrepareOfficialOpenGlass(mixedRemoval)&&(!resources||self->OfficialResourcesPhase(true))) {
+        if(self->PrepareOfficialOpenGlass(mixedRemoval)&&(!resources||self->OfficialResourcesPhase(true))&&
+           (!self->selection_.cleanupUserData||self->PrepareFullRemovalCleanup())) {
             const bool originalApply=self->selection_.openGlass;
             const auto originalRemoveMask=self->selection_.removeMask;
+            const bool originalCleanup=self->selection_.cleanupUserData;
+            self->selection_.cleanupUserData=false; // Deferred until official OG removal is confirmed.
             self->selection_.openGlass=false;
             self->selection_.openGlassResources=false;
             self->selection_.removeMask&=~8u;
-            self->procedureMask_&=~(8u|64u);
-            const bool managed=GlassProducts::HasPackageApply(self->selection_);
+            self->procedureMask_&=~8u;
+            if(resources)self->procedureMask_&=~64u;
+            const bool managed=GlassProducts::HasPackageApply(self->selection_)||
+                self->selection_.removeMask||self->selection_.secureUxThemeRemove;
             if(managed)RunGlassWorker(p);
             else self->succeeded_=true;
             self->selection_.openGlass=originalApply;
             self->selection_.openGlassResources=resources;
             self->selection_.removeMask=originalRemoveMask;
+            self->selection_.cleanupUserData=originalCleanup;
             if(self->succeeded_&&resources) {
                 self->succeeded_=self->OfficialResourcesPhase(false);
                 if(!self->succeeded_) {
@@ -726,6 +732,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                         L"Plan partially completed: Glass changes were committed; the final OpenGlass operation was not confirmed. No overall rollback was performed. "):
                         (ru?L"Операция OpenGlass не подтверждена. ":L"OpenGlass operation was not confirmed. "))+self->ErrorText(),ERROR_INSTALL_FAILURE);
                 }
+                if(self->succeeded_&&mixedRemoval)self->FinishFullRemovalCleanup();
                 if(self->succeeded_&&resources) {
                     self->FinishOfficialResources(true);
                     self->SetStatus(self->labels_.finalize,10000);
@@ -2087,7 +2094,7 @@ bool InstallEngine::PrepareFullRemovalCleanup() noexcept {
         if(GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass))installed|=8;
         GlassInstallUtil::InstallRoots cleanupRoots{};
         if(!GlassInstallUtil::ResolveInstallRoots(cleanupRoots))return false;
-        if(GlassOpenGlassFiles::HasReceipt(cleanupRoots.openGlass))installed|=8;
+        if(GlassOpenGlassFiles::HasReceipt(cleanupRoots.openGlass)||GlassOpenGlassInstall::HasProduct())installed|=8;
         std::vector<std::wstring> vendor;std::wstring detail;
         const bool vendorKnown=Shared::SecureUxThemeInventory::Query(vendor)==ERROR_SUCCESS;
         if(!vendorKnown||!GlassProducts::FullRemovalSelected(selection_,installed,!vendor.empty())||
