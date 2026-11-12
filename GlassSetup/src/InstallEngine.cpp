@@ -456,9 +456,10 @@ bool InstallEngine::RunOfficialOpenGlassOnly() noexcept {
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
     bool attempted=false;
     try {
-        if(!GlassProducts::StandaloneOpenGlassApply(selection_,forceClean_,GlassInstallUtil::IsOs64Bit())) {
-            SetFailure(ru?L"Пока выполняйте установку/обновление OpenGlass отдельно. Смешанный план, очистка и удаление OpenGlass ещё не подключены к штатному установщику. Продукты не изменены.":
-                L"For now, install/update OpenGlass separately. Mixed plans, cleanup and OpenGlass removal are not yet connected to the official installer. Products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);
+        const bool removing=GlassProducts::StandaloneOpenGlassRemoval(selection_,forceClean_,GlassInstallUtil::IsOs64Bit());
+        if(!removing&&!GlassProducts::StandaloneOpenGlassApply(selection_,forceClean_,GlassInstallUtil::IsOs64Bit())) {
+            SetFailure(ru?L"Пока выполняйте установку, обновление или удаление OpenGlass отдельно. Смешанный план и очистка пользовательских данных ещё не подключены к штатному установщику. Продукты не изменены.":
+                L"For now, install, update or remove OpenGlass separately. Mixed plans and user-data cleanup are not yet connected to the official installer. Products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);
             return false;
         }
         if(MsiQueryProductStateW(GlassInstallMsi::kProductOpenGlass)!=INSTALLSTATE_UNKNOWN||
@@ -469,6 +470,10 @@ bool InstallEngine::RunOfficialOpenGlassOnly() noexcept {
         }
         GlassOpenGlassInstall::Record before;std::wstring error;
         if(!GlassOpenGlassInstall::Query(before,error)){SetFailure(error,ERROR_INSTALL_PACKAGE_REJECTED);return false;}
+        if(removing&&!before.installed) {
+            SetFailure(ru?L"Штатная регистрация OpenGlass не найдена. Удаление не выполнялось.":
+                L"Official OpenGlass registration is missing. No removal was performed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+        }
         std::wstring target;
         if(before.installed) {
             target=before.directory;
@@ -488,15 +493,17 @@ bool InstallEngine::RunOfficialOpenGlassOnly() noexcept {
                     L"OpenGlass destination exists or is inaccessible without official registration. Products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
             }
         }
-        if(!EnsureTempWorkspace()){SetFailure(L"Cannot create protected OpenGlass workspace",GetLastError());return false;}
-        SetStatus(ru?L"OpenGlass: подготовка официального установщика":L"OpenGlass: preparing official installer",0);
-        if(!GlassOpenGlassPackage::PrepareInstallerForCurrentSystem(tempDir_,cancelRequested_,openGlassPackage_,error)) {
-            if(IsCancelRequested())userCancelled_.store(true,std::memory_order_release);
-            else SetFailure(error,ERROR_INSTALL_PACKAGE_REJECTED);
-            return false;
-        }
-        if(before.installed&&GlassOpenGlassRelease::PayloadUpdateAvailable(openGlassPackage_.version,before.version)) {
-            SetFailure(L"OpenGlass downgrade refused",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+        if(!removing) {
+            if(!EnsureTempWorkspace()){SetFailure(L"Cannot create protected OpenGlass workspace",GetLastError());return false;}
+            SetStatus(ru?L"OpenGlass: подготовка официального установщика":L"OpenGlass: preparing official installer",0);
+            if(!GlassOpenGlassPackage::PrepareInstallerForCurrentSystem(tempDir_,cancelRequested_,openGlassPackage_,error)) {
+                if(IsCancelRequested())userCancelled_.store(true,std::memory_order_release);
+                else SetFailure(error,ERROR_INSTALL_PACKAGE_REJECTED);
+                return false;
+            }
+            if(before.installed&&GlassOpenGlassRelease::PayloadUpdateAvailable(openGlassPackage_.version,before.version)) {
+                SetFailure(L"OpenGlass downgrade refused",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+            }
         }
         // Use the same lock/gate as RequestCancel: the vendor transaction is
         // non-cancellable once this boundary has been crossed.
@@ -515,12 +522,15 @@ bool InstallEngine::RunOfficialOpenGlassOnly() noexcept {
         if(!GlassOpenGlassInstall::Query(current,error)||!GlassOpenGlassInstall::Same(before,current)) {
             SetFailure(error.empty()?L"OpenGlass registration changed before commit":error,ERROR_INSTALL_PACKAGE_REJECTED);return false;
         }
-        SetStatus(ru?L"OpenGlass: официальный установщик":L"OpenGlass: official installer",9000);
+        SetStatus(removing?(ru?L"OpenGlass: штатное удаление":L"OpenGlass: official uninstall"):
+            (ru?L"OpenGlass: официальный установщик":L"OpenGlass: official installer"),9000);
         DWORD code=ERROR_INSTALL_FAILURE;attempted=true;
-        const bool ran=GlassOpenGlassPackage::RunInstaller(openGlassPackage_,target,code,error);
+        const bool ran=removing?GlassOpenGlassPackage::RunUninstaller(current,code,error):
+            GlassOpenGlassPackage::RunInstaller(openGlassPackage_,target,code,error);
         GlassOpenGlassInstall::Record after;std::wstring inventoryError;
-        const bool confirmed=GlassOpenGlassInstall::Query(after,inventoryError)&&after.installed&&
-            GlassInstallUtil::SameInstallPath(after.directory,target)&&after.version==openGlassPackage_.version;
+        const bool confirmed=GlassOpenGlassInstall::Query(after,inventoryError)&&
+            (removing?!after.installed:(after.installed&&
+            GlassInstallUtil::SameInstallPath(after.directory,target)&&after.version==openGlassPackage_.version));
         if(!ran||(code!=ERROR_SUCCESS&&code!=ERROR_SUCCESS_REBOOT_REQUIRED)||!confirmed) {
             rollbackSucceeded_.store(false,std::memory_order_release);
             SetFailure((ru?L"Операция OpenGlass не подтверждена. Его состояние могло измениться; upstream-установка не откатывалась. ":

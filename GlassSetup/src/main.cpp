@@ -64,6 +64,7 @@
 #include "InstallEngine.h"
 #include <SecureUxThemeInventory.h>
 #include "InstallSupport/GlassOpenGlassRelease.h"
+#include "InstallSupport/GlassOpenGlassInstall.h"
 #include "InstallLog.h"
 
 using Microsoft::WRL::ComPtr;
@@ -1539,7 +1540,7 @@ private:
                         GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductSettingsX86);
                 if (!startupStop_.load(std::memory_order_acquire))
                     result.installed.openGlass=GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kProductOpenGlass) ||
-                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass);
+                        GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass) || GlassOpenGlassInstall::HasProduct();
                 // Discovery is read-only: orphan ARP cleanup must not run before
                 // user consent, including during the explicit debug page tour.
                 if (!startupStop_.load(std::memory_order_acquire))

@@ -16,6 +16,13 @@ assert lane.index('launchingPhase_.store(true')<lane.index('RunInstaller(')
 assert 'target=before.directory' in lane and 'target=native+L"\\\\OpenGlass"' in lane
 assert 'rollbackSucceeded_.store(false' in lane and 'ERROR_SUCCESS_REBOOT_REQUIRED' in lane
 assert 'after.version==openGlassPackage_.version' in lane
+assert 'RunUninstaller(current,code,error)' in lane and 'removing?!after.installed' in lane
+assert 'if(!removing) {' in lane
+inspect=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
+assert 'PayloadFileVersion(official.directory+' in inspect
+assert 'officialOpenGlassRoot.empty()?' in inspect
+assert 'report.og.integrityKnown=false; // Registration/FileVersion is not a payload hash check.' in inspect
+
 ui=(root/'GlassSetup/src/GlassProductDownloads.h').read_text()
 assert 'GlassOpenGlassPackage::PrepareInstallerForCurrentSystem(' in ui
 h=r'''
@@ -35,6 +42,12 @@ int main(){
  }
  for(unsigned i=0;i<6;++i){s.removeMask=1u<<i;assert(!StandaloneOpenGlassApply(s,false,true));}
  s.removeMask=0;s.openGlass=false;assert(!StandaloneOpenGlassApply(s,false,true));
+ s.removeMask=8;assert(StandaloneOpenGlassRemoval(s,false,true));
+ assert(!StandaloneOpenGlassRemoval(s,true,true));assert(!StandaloneOpenGlassRemoval(s,false,false));
+ s.openGlass=true;assert(!StandaloneOpenGlassRemoval(s,false,true));s.openGlass=false;
+ s.cleanupUserData=true;assert(!StandaloneOpenGlassRemoval(s,false,true));s.cleanupUserData=false;
+ s.removeMask=12;assert(!StandaloneOpenGlassRemoval(s,false,true));
+
 }
 '''
 with tempfile.TemporaryDirectory() as tmp:

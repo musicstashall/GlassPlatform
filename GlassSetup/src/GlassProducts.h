@@ -69,6 +69,12 @@ constexpr bool StandaloneOpenGlassApply(const Selection& s,bool forceClean,bool 
         !s.removeMask&&!s.cleanupUserData&&!s.trustSigner&&!forceClean;
 }
 
+constexpr bool StandaloneOpenGlassRemoval(const Selection& s,bool forceClean,bool os64) noexcept {
+    return os64&&!s.openGlass&&s.removeMask==(1u<<3)&&!s.platform64&&!s.platform32&&
+        !s.glassSettings&&!s.settings64&&!s.settings32&&!s.secureUxTheme&&!s.secureUxThemeRemove&&
+        !s.cleanupUserData&&!s.trustSigner&&!forceClean;
+}
+
 // Pure managed removal needs the installed MSI baseline, not new release media.
 constexpr bool OnlyManagedRemoval(const Selection& choice) noexcept {
     return choice.removeMask && !choice.secureUxTheme && !choice.secureUxThemeRemove &&

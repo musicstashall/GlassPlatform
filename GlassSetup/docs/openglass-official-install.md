@@ -138,3 +138,46 @@ GlassUnins, общий inventory/UI установленного продукт�
 acceptance (Inno/SCM/reboot/cancel/partial failure) и MSVC сборка ещё нужны.
 
 Сборка для проверки: **GlassSetup Release|x86**; GlassShared/GlassUnins не менялись.
+
+### Отдельное штатное удаление через Setup
+
+Ограничение выше уточнено: standalone Remove OpenGlass теперь поддерживается
+новым маршрутом Setup. Нужна ровно одна Remove-строка OpenGlass, без Apply других
+продуктов, force-clean или cleanupUserData. Смешанные планы и миграция по-прежнему
+отклоняются до изменений. GlassUnins пока не подключён к новому runner.
+
+`RunUninstaller` повторно проверяет точную Inno-регистрацию, защищённость каталога,
+EXE и `unins000.dat`, обычные single-link файлы и подпись ожидаемого upstream
+издателя. Никакого shell/TerminateProcess и изменения ADS оригинала. Pins
+освобождаются перед запуском: Inno должен иметь возможность удалить свои файлы.
+Команда: `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /NODELETECONFIG`.
+Именно `/NODELETECONFIG` сохраняет текущую пользовательскую и машинную
+конфигурацию: в текущем upstream .iss её удаление включено по умолчанию.
+`/DELETEPRESETS` не передаётся. Пользовательские данные не удаляются без opt-in.
+
+Удаление не готовит/скачивает installer. После raw 0/3010 Setup дополнительно
+проверяет отсутствие Inno-регистрации; ошибка/неизвестное состояние не считается
+успехом и не порождает заявления об upstream rollback. Службы, задачи и файлы
+удаляет только Inno. Перезагрузка обрабатывается как предупреждение.
+
+Read-only discovery Setup теперь учитывает официальный Inno inventory и читает
+DLL FileVersion из зарегистрированного произвольного каталога; отсутствие нашего
+bundled OpenGlass-каталога не объявляет официальную установку повреждённой.
+Это не hash-проверка payload и не право владения его службами. Lifetime controller
+также сохраняет ссылку на официальный продукт, включая неизвестный результат
+чтения регистрации, вместо преждевременного retirement maintenance-cache.
+
+**Ограничение доверия:** реальная подпись генерируемого upstream `unins000.exe`
+в этой среде не проверялась. Если он unsigned/не проходит существующую проверку
+ожидаемого publisher, runner откажет до запуска. Наличие подписанного setup само
+по себе не доказывает подпись uninstaller; trust policy не ослаблена.
+
+Проверки: compiled mock настоящего uninstall runner (trust/publisher/registry,
+EXE+data pins, command, сохранение config, raw exit codes, handles/errors), lane
+policy/source guards, inventory, installer/ADS и lifetime mocks. Это не MSVC и не
+Windows uninstall acceptance. Для проверки на Windows нужна VM со snapshot.
+
+Сборка после этого шага: **GlassUnins Release|x86 → GlassSetup Release|x86**
+(общий inline lifetime header изменён; нового линковочного модуля нет).
+GlassShared пересобирать не требуется. При проверке удаления используйте Setup,
+а не ещё не подключённый к official runner GlassUnins.
