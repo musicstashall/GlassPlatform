@@ -542,9 +542,13 @@ bool InstallEngine::CommitOfficialOpenGlass(bool removing) noexcept {
         const bool ran=removing?GlassOpenGlassPackage::RunUninstaller(current,code,error):
             GlassOpenGlassPackage::RunInstaller(openGlassPackage_,officialOpenGlassTarget_,code,error);
         GlassOpenGlassInstall::Record after;std::wstring inventoryError;
-        const bool confirmed=GlassOpenGlassInstall::Query(after,inventoryError)&&
-            (removing?!after.installed:(after.installed&&
-            GlassInstallUtil::SameInstallPath(after.directory,officialOpenGlassTarget_)&&after.version==openGlassPackage_.version));
+        const bool inventoryKnown=GlassOpenGlassInstall::Query(after,inventoryError);
+        const bool pathMatches=after.installed&&GlassInstallUtil::SameInstallPath(after.directory,officialOpenGlassTarget_);
+        const bool versionMatches=after.installed&&GlassOpenGlassInstall::SameVersion(after.version,openGlassPackage_.version);
+        const bool confirmed=inventoryKnown&&(removing?!after.installed:(pathMatches&&versionMatches));
+        InstallLog::LineFormat(L"OpenGlass post-check: ran=%d exit=%lu removing=%d inventoryKnown=%d installed=%d pathMatches=%d versionMatches=%d key=%s expectedDir=%s actualDir=%s expectedVersion=%s actualVersion=%s detail=%s",
+            ran?1:0,code,removing?1:0,inventoryKnown?1:0,after.installed?1:0,pathMatches?1:0,versionMatches?1:0,
+            after.keyPath.c_str(),officialOpenGlassTarget_.c_str(),after.directory.c_str(),openGlassPackage_.version.c_str(),after.version.c_str(),inventoryError.c_str());
         if(!ran||(code!=ERROR_SUCCESS&&code!=ERROR_SUCCESS_REBOOT_REQUIRED)||!confirmed) {
             rollbackSucceeded_.store(false,std::memory_order_release);
             SetFailure((ru?L"Операция OpenGlass не подтверждена. Его состояние могло измениться; upstream-установка не откатывалась. ":
@@ -591,7 +595,8 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
         self->succeeded_=self->RunOfficialOpenGlassOnly();
     } else RunGlassWorker(p);
     if(!self->tempDir_.empty()) {
-        (void)RemoveDirectoryTree(self->tempDir_);self->tempDir_.clear();
+        if(RemoveDirectoryTree(self->tempDir_))self->tempDir_.clear();
+        else InstallLog::LineFormat(L"Staging cleanup incomplete; destructor will retry: %s",self->tempDir_.c_str());
     }
     self->finished_.store(true,std::memory_order_release);
     self->launchingPhase_.store(false,std::memory_order_release);

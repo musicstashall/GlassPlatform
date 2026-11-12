@@ -301,7 +301,7 @@ bool RunInstaller(const Package& package,const std::wstring& directory,DWORD& ex
         RemoveInternetZone(package.setup);
         File pinned;Pin(pinned,package.setup);(void)VerifyPublisher(package.setup,pinned.h);
         Require(!package.version.empty()&&SetupFileVersion(package.setup)==package.version,"OpenGlass installer version changed");
-        std::wstring command=L"\""+package.setup+L"\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /RESTARTEXITCODE=3010 /DIR=\""+directory+L"\"";
+        std::wstring command=L"\""+package.setup+L"\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /RESTARTEXITCODE=3010 /DIR=\""+directory+L"\" /LOG=\""+package.setup.substr(0,slash)+L"\\OpenGlass-install.log\"";
         STARTUPINFOW startup{};startup.cb=sizeof(startup);startup.dwFlags=STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;
         PROCESS_INFORMATION process{};
         Require(CreateProcessW(package.setup.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,

@@ -3067,3 +3067,59 @@ Do not describe the standalone WiX project as a selectable installed product yet
   behavior, plus acquisition-order source contracts. Retirement/build graph,
   package catalog, MSI identity, ADS and resource smoke checks pass. These do not
   establish Windows process/Authenticode/NTFS/Inno runtime acceptance.
+
+### Empty installed inventory / Accept recommendations
+
+UI preview (`GlassProductUiPolicy::Preview`) больше не показывает row/summary
+composition warnings, пока фактический installed inventory пуст. Pending Apply
+не выдаётся за уже установленный продукт. При наличии хотя бы одного installed
+продукта существующие предупреждения сохраняются. Это presentation policy:
+execution planner, trust, источники и зависимости исполнения не ослаблены.
+
+Исправлен фильтр HTML Accept all recommendations: доступные неустановленные
+продукты снова кандидаты, как и update/broken/changed Native. Исправные уже
+установленные продукты без рекомендации не переустанавливаются автоматически.
+Hidden/disabled/applyUnsupported/loading и Remove исключаются как прежде.
+Кнопка отключена, когда выбирать нечего или все рекомендации уже выбраны.
+
+Проверки: compiled actual Preview для 128 empty-inventory plans и сохранения
+реальных installed warnings; production HTML DOM recommendations (fresh six
+products, checked host acknowledgement/reset, unsupported/disabled/loading,
+changed helper без reinstall здоровой Platform). Также PASS существующие
+secure_ux_dependency, managed_removal, composition_motion DOM и verify_resources.
+Windows/MSVC/WebView2 acceptance здесь не выполнялся.
+Сборка общего HTML/inline policy: GlassUnins Release|x86 → GlassSetup Release|x86.
+
+### Product download surface, moving highlight and temporary files
+
+Сравнение CSS: activated card и transfer использовали один RGBA gradient
+(31,61,52,.62 → 17,32,35,.78), но transfer композитился поверх собственного
+тёмного download background. Теперь activated/local/transfer используют общий
+opaque `--component-green-surface` (#203437 → #131f25). Transfer рисуется во всю
+карточку, clip-path показывает только фактический progress; ширина i сохранена
+для существующего DOM/геометрического контракта. Нет отдельного нижнего progress.
+
+Highlight: whole-card ::after, 1.6s travel + 1.6s pause, clipped вместе с fill;
+включён только в real downloading phase, не preparing/verifying/error/ready.
+Reduced motion отключает highlight и transition. DOM регрессия проверяет фазы,
+clip variable, keyframes и длительность. Chromium regression расширена проверкой
+computed green equality/clip/reduced-motion, но в текущем sandbox запуск
+невозможен: отсутствует libnspr4.so. Визуальная Windows/WebView2 acceptance нужна.
+
+TEMP audit: CreateSecureTempDirectory использует Windows Temp с private ACL,
+а download workspaces — защищённый ProgramData, не произвольный user TEMP.
+WebView bootstrapper вызывает RemoveWebView2TempFiles после try/catch, rollback
+snapshot очищается после успеха/успешного rollback; failed rollback сохраняет
+recovery намеренно. Installer WebView2 user data — постоянный LocalAppData cache,
+не TEMP-мусор. Диагностические session/MSI logs также сохраняются намеренно.
+
+У official OpenGlass SetupLogging=yes: теперь передаётся явный /LOG в protected
+staged workspace (`OpenGlass-install.log`), чтобы не оставлять default Setup Log
+в TEMP пользователя. Workspace удаляется после окончания vendor process при
+успехе/ошибке/отмене. Если удаление staging не удалось, путь больше не забывается:
+ошибка логируется, destructor повторяет очистку. Чужие TEMP-файлы, Windows
+Installer cache, recovery snapshots и пользовательские данные не удаляются.
+Гарантировать vendor-internal cleanup при crash/kill/reboot по source tests нельзя.
+
+Сборка общего HTML: GlassUnins Release|x86 → GlassSetup Release|x86.
+Native Shared/Settings не менялись.

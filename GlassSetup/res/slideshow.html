@@ -54,9 +54,15 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 
 /* Code-drawn Unlocker animation over a still banner — deliberately not the slideshow. */
 /* Preparation is driven by verified native jobs, never by a presentation timer. */
-.product-transfer{position:absolute;inset:0;border-radius:inherit;overflow:hidden;pointer-events:none;z-index:-1}
-.product-transfer>i{display:block;height:100%;background:linear-gradient(130deg,rgba(31,61,52,.62),rgba(17,32,35,.78));transition:width .22s linear}
-@media(prefers-reduced-motion:reduce){.product-transfer>i{transition:none}}
+:root{--component-green-surface:linear-gradient(130deg,#203437,#131f25)}
+/* Opaque common surface: no second alpha composite over the dark download card.
+   The overlay always spans the whole card; clipping reveals only actual bytes. */
+.product-transfer{position:absolute;inset:0;border-radius:inherit;overflow:hidden;pointer-events:none;z-index:-1;background:var(--component-green-surface);clip-path:inset(0 calc(100% - var(--transfer-progress,0%)) 0 0);transition:clip-path .22s linear}
+.product-transfer>i{display:block;height:100%;transition:width .22s linear}
+.product-transfer.is-transferring::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,#c8ffe936 48%,#eafff35c 50%,#c8ffe936 52%,transparent 70%);transform:translateX(-100%);animation:product-transfer-shine 3.2s linear infinite}
+/* 1.6s travel over the full card, then 1.6s fully outside the card. */
+@keyframes product-transfer-shine{0%{transform:translateX(-100%)}50%,100%{transform:translateX(100%)}}
+@media(prefers-reduced-motion:reduce){.product-transfer,.product-transfer>i{transition:none}.product-transfer.is-transferring::after{animation:none;display:none}}
 #components-panel .download-retry{margin:0 4px 0 0;padding:2px 4px;border:1px solid #ffaaaa55;border-radius:4px;background:#ffaaaa0d;color:#ffbcbc;font:inherit;cursor:pointer}
 .unlock-backdrop{position:absolute;inset:0;width:1000px;height:540px;object-fit:cover;opacity:.43;filter:saturate(.78);pointer-events:none}
 .unlock-shade{position:absolute;inset:0;background:linear-gradient(90deg,#101225f0 0%,#101225df 38%,#10122582 72%,#1012259c 100%);pointer-events:none}
@@ -536,7 +542,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .c-card.idle .c-meta{color:#7f849e}
 .c-card.idle .c-move{color:#8f93ad}
 .c-card.idle:hover{opacity:.92;border-color:rgba(193,180,255,.38);background:linear-gradient(130deg,#232640,#191c2e)}
-.c-card.is-activated{border-color:#83d9a685;background:linear-gradient(130deg,rgba(31,61,52,.62),rgba(17,32,35,.78));box-shadow:inset 0 1px #ffffff0f,0 0 0 1px #83d9a626,0 3px 10px #04050e3d}
+.c-card.is-activated{border-color:#83d9a685;background:var(--component-green-surface);box-shadow:inset 0 1px #ffffff0f,0 0 0 1px #83d9a626,0 3px 10px #04050e3d}
 .c-card.is-activated:hover{border-color:#83d9a6b8;background:linear-gradient(130deg,rgba(36,72,60,.7),rgba(19,38,41,.84))}
 .c-card.is-activated .c-meta{color:#a9e0c2}
 .c-card.is-activated .c-meta b{color:#d5f6e3}
@@ -660,7 +666,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 /* Semantic tones follow neutral states and outrank legacy hover; no automatic Apply. */
 #components-panel .c-card.has-offer,#components-panel .c-card.has-warning{border-color:#f4bd5e5c;background:linear-gradient(130deg,rgba(124,95,42,.32),rgba(33,30,42,.62))}
 #components-panel .c-card.has-offer:hover,#components-panel .c-card.has-warning:hover{border-color:#f4bd5e8c;background:linear-gradient(130deg,rgba(148,111,45,.42),rgba(46,38,39,.72))}
-#components-panel .c-card.is-activated{border-color:#83d9a685;background:linear-gradient(130deg,rgba(31,61,52,.62),rgba(17,32,35,.78))}
+#components-panel .c-card.is-activated{border-color:#83d9a685;background:var(--component-green-surface)}
 #components-panel .c-card.is-activated:hover{border-color:#83d9a6b8;background:linear-gradient(130deg,rgba(36,72,60,.7),rgba(19,38,41,.84))}
 #components-panel .c-card.is-broken{border-color:#e57a7a70;background:linear-gradient(130deg,rgba(126,72,86,.34),rgba(38,26,36,.56))}
 #components-panel .c-card.is-broken:hover{border-color:#e57a7a9e;background:linear-gradient(130deg,rgba(148,70,83,.46),rgba(51,29,40,.72))}
@@ -740,7 +746,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
    green surface as an activated card grows behind its content, never over it. */
 #components-panel .c-card{isolation:isolate}
 #components-panel .c-card.download-planned,#components-panel .c-card.download-progress{border:1px dashed #83d9a685;background:linear-gradient(130deg,#22253c,#181b2d)}
-#components-panel .c-card.download-local{border:1px solid #83d9a685;background:linear-gradient(130deg,rgba(31,61,52,.62),rgba(17,32,35,.78))}
+#components-panel .c-card.download-local{border:1px solid #83d9a685;background:var(--component-green-surface)}
 #components-panel .c-card.download-failed{border-color:#e57a7a;border-style:dashed}
 #stage[data-mode="full-cleanup"] .error-copy{top:62px;left:60px;width:800px;text-align:left}
 #stage[data-mode="full-cleanup"] .complete-visual{display:none}
@@ -1003,7 +1009,7 @@ function componentRecommendations(){
  if(hostState.appMode==='unins'||hostState.componentsLoading)return [];
  return [...document.querySelectorAll('#components-panel .c-card input.comp-check')].filter(input=>{
   const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);if(!item||item.hidden)return false;
-  const f=componentCardFacts(item,input);return !input.disabled&&item.applySupported!==false&&!f.remove&&(f.newer||f.broken||item.recommended===true);
+  const f=componentCardFacts(item,input);return !input.disabled&&item.applySupported!==false&&!f.remove&&(!item.installed||f.newer||f.broken||f.helperChanged||item.recommended===true);
  });
 }
 function acceptComponentRecommendations(){batchComponentActions(()=>{for(const input of componentRecommendations())if(!input.checked)commitComponentChoice(input,true);});}
@@ -1592,7 +1598,7 @@ function syncDownloadVisuals(){
   card.classList.toggle('download-failed',planned&&d?.phase==='error');
   if(!planned||!d){if(bar)bar.remove();if(retry)retry.remove();continue;}
   if(!bar){bar=document.createElement('div');bar.className='product-transfer';bar.append(document.createElement('i'));bar.setAttribute('role','progressbar');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax','100');card.append(bar);}
-  bar.style.opacity=d.phase==='ready'?'0':'1';bar.firstElementChild.style.width=(!remote?100:percent(d))+'%';bar.setAttribute('aria-label',label(d));
+  bar.classList.toggle('is-transferring',remote&&d.phase==='downloading');bar.style.setProperty('--transfer-progress',(!remote?100:percent(d))+'%');bar.style.opacity=d.phase==='ready'?'0':'1';bar.firstElementChild.style.width=(!remote?100:percent(d))+'%';bar.setAttribute('aria-label',label(d));
   if(!d.total&&d.phase!=='ready')bar.removeAttribute('aria-valuenow');else bar.setAttribute('aria-valuenow',String(percent(d)));
   if(d.phase==='error'){
    if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';retry.onclick=e=>{e.stopPropagation();if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('download-retry:'+d.id);};card.querySelector('.c-foot').prepend(retry);}
