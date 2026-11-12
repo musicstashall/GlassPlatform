@@ -3,6 +3,8 @@
 #include "GlassMaintenanceCache.h"
 #include "GlassProductInspect.h"
 #include "GlassInstallLog.h"
+#include "GlassOpenGlassInstall.h"
+#include "GlassOpenGlassFiles.h"
 
 #include <GlassInstallerLaunch.h>
 
@@ -131,6 +133,16 @@ bool MaintenanceProductAbsent(const std::wstring& code) noexcept {
         GlassInstallMsi::kLegacyPlatformX64,GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
     bool recognized=false;for(const auto* item:known)if(!_wcsicmp(code.c_str(),item)){recognized=true;break;}
     if(!recognized)return false;
+    if(!_wcsicmp(code.c_str(),GlassInstallMsi::kProductOpenGlass) ||
+       !_wcsicmp(code.c_str(),GlassInstallMsi::kLegacyOpenGlass)) {
+        GlassOpenGlassInstall::Record official;std::wstring error;
+        // Inventory failure is not evidence of absence. Discovery will report it.
+        if(!GlassOpenGlassInstall::Query(official,error)||official.installed)return false;
+        GlassInstallUtil::InstallRoots roots;
+        if(!GlassInstallUtil::ResolveInstallRoots(roots))return false;
+        if(GlassOpenGlassFiles::HasReceipt(roots.openGlass))return false;
+        // Retired managed MSI registrations are still separate presence facts.
+    }
     wchar_t product[39]{};
     const UINT result=MsiEnumProductsExW(code.c_str(),L"S-1-1-0",MSIINSTALLCONTEXT_ALL,0,product,nullptr,nullptr,nullptr);
     return result==ERROR_NO_MORE_ITEMS||result==ERROR_UNKNOWN_PRODUCT;

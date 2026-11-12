@@ -928,3 +928,57 @@ Windows/MSVC/WiX acceptance remains pending. Build Resources Release|x64,
 GlassUnins Release|Win32, GlassSetup Release|Win32; generate the catalog only after
 final artifact signing. This guard prevents a partial installation with stale
 packages; it cannot make the old published MSI support the new execution order.
+
+### Official OG Modify presence and complete WebView page-routing audit (image-36)
+
+The official OG ARP Change command correctly passes our logical OG product GUID,
+but MaintenanceProductAbsent incorrectly treated that GUID only as a retired MSI
+identity. A current official Inno registration has no such MSI, so the early guard
+claimed it was removed. That same early return bypassed WebView initialization
+at the end of CompleteStartupIfReady, permanently leaving the native Error UI.
+
+The OG presence guard now checks unambiguous official Inno inventory first, then
+retained file receipt, then legacy MSI presence. Inventory/root-query failures are
+not treated as proof of absence; discovery/trust checks remain responsible for
+execution authorization. Other managed products keep the exact MSI guard.
+This does not grant Modify authorization: trusted cached controller, signer and
+shell/ticket/handoff validation still run. The existing Change link need not be
+rewritten; rebuild/publish Setup and let its verified controller/cache update run.
+
+Setup now detects WebView runtime availability even for duplicate launches and
+queues UI-STA initialization before all startup terminal branches. Error and
+AlreadyRunning wait on WebView when initialization is expected (native loading
+placeholder, not permanent native error); an actual WebView failure still exposes
+usable native controls. AlreadyRunning and RuntimeError map to the web error
+state, with the appropriate localized labels/details rather than endless loading.
+GlassUnins also initializes WebView for its duplicate-launch Error page instead
+of deliberately skipping it, and detects failure to post the initialization.
+
+Page coverage audit:
+- Setup: all 23 Page enum values have explicit mappings. Welcome, Checking,
+  Conflicts, Downgrade, VersionInvalid, License, Components, Certificate,
+  FullCleanup, SettingsRemovalRisk, Installing, ModulesBusy, ProcessesStuck,
+  ConfirmCancel, Cancelling, Cancelled, Launching, Complete and Error have WebView
+  states. Installing preserves its dynamic unlock routing. AlreadyRunning and
+  RuntimeError use the web error state if a runtime is available.
+- RuntimeRequired/RuntimeInstalling necessarily use native bootstrap UI while
+  WebView2 is absent (and RuntimeError likewise needs native fallback if runtime
+  installation failed). Successful runtime installation initializes WebView.
+  Absence/environment/controller/navigation failure and debug --demo-native
+  remain intentional native fallback, not missing business-page coverage.
+- GlassUnins: all 10 Page values mapped: Select, Cleanup, SettingsRisk, Stopping,
+  UnlockModules, UnlockProcesses, Removing, Cancelled, Complete and Error.
+- All 23 supported HTML modes are recognized; production DOM smoke visits each
+  mode in RU/EN for Setup/GlassUnins without JS errors. Welcome asset loading is
+  intentionally asynchronous. Enum routing and early-branch ordering are checked
+  separately. These checks do NOT prove Windows rendering, focus, DPI/accessibility
+  or live WebView2 initialization; actual Windows acceptance is still required.
+
+Regression: actual stale-ARP guard covers official present/absent, inventory
+failure, receipt, root failure and retired MSI; official Change adapter test;
+full page routing and DOM smoke; maintenance entry/full maintenance DOM; source
+resource smoke pass. The larger maintenance DOM test had a stale expectation
+excluding verified absent products from accepted recommendations (superseded by
+the earlier fresh-install recommendation change); expectation now matches that
+explicit user-approved policy, with no production policy change in this patch.
+Build GlassUnins Release|Win32 -> GlassSetup Release|Win32; no Resources MSI change.

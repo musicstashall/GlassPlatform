@@ -1268,6 +1268,7 @@ private:
     ComPtr<ICoreWebView2Controller> controller_;
     ComPtr<ICoreWebView2> web_;
     bool accepted_ = false, closing_ = false, webReady_ = false, webBridgeReady_ = false;
+    bool webStartupExpected_ = false;
     bool webInitSent_ = false;
     std::wstring lastWebState_;
     InstallEngine::ComponentSelection selection_{};
@@ -1488,6 +1489,8 @@ private:
         bool rootsChecked=false;
         const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
         try {
+            // UI availability must be known even for duplicate-launch/early errors.
+            result.runtimeInstalled=IsWebView2RuntimeInstalled();
             // Capture running state as soon as the initial window is shown,
             // before version checks, user choices, or any host is stopped.
             if (SUCCEEDED(com) && !gAlreadyRunning && !startupStop_.load(std::memory_order_acquire)) {
@@ -1570,7 +1573,6 @@ private:
                     result.eulaText=Utf8(Resource(IDR_EULA,gLanguage));
                     result.eulaText+=L"\r\n\r\n────────────────────────────────\r\n"+
                         Text(IDS_GPL_APPENDIX)+L"\r\n\r\n"+Utf8(Resource(IDR_GPL));
-                    result.runtimeInstalled=IsWebView2RuntimeInstalled();
                 }
             }
             result.ok=SUCCEEDED(com) && !startupStop_.load(std::memory_order_acquire);
@@ -1643,6 +1645,11 @@ private:
         if (startupThread_.joinable()) startupThread_.join();
         KillTimer(window,kStartupPollTimer);
         startupPending_=false;
+        // Queue on the UI STA BEFORE any terminal startup branch can return.
+        // A stale ARP command/startup failure must not strand the native page.
+        webStartupExpected_=result.runtimeInstalled;
+        if (result.runtimeInstalled && !PostMessageW(window,kInitWebView,0,0))
+            WebFailure(HRESULT_FROM_WIN32(GetLastError()));
         if (!result.ok) {
             (void)FinalizeControllerStartup(false);
             errorReason_=Text(IDS_STARTUP_FAILED);
@@ -1703,9 +1710,6 @@ private:
         } else {
             SetPage(Page::RuntimeRequired);
         }
-        // WebView2 environment and controller creation must stay on the UI STA.
-        if (result.runtimeInstalled && !PostMessageW(window,kInitWebView,0,0))
-            WebFailure(HRESULT_FROM_WIN32(GetLastError()));
     }
     void Layout() {
         Move(back_,page_==Page::ModulesBusy?510:644,kContentHeight+12,page_==Page::ModulesBusy?230:96,32);
@@ -1750,7 +1754,8 @@ private:
     bool WaitingForWebUi() const noexcept {
         return !NativeDemo() && !webReady_ && SUCCEEDED(webError_) &&
             page_!=Page::RuntimeRequired && page_!=Page::RuntimeInstalling &&
-            page_!=Page::RuntimeError && page_!=Page::AlreadyRunning && page_!=Page::Error;
+            page_!=Page::RuntimeError &&
+            (webStartupExpected_ || (page_!=Page::AlreadyRunning && page_!=Page::Error));
     }
     void ShowContentControls() {
         if(WaitingForWebUi()) {
@@ -1869,7 +1874,9 @@ private:
         case Page::ProcessesStuck: return L"unlock-processes";
         case Page::Complete: return L"complete";
         case Page::Error: return L"error";
-        case Page::RuntimeRequired: case Page::RuntimeInstalling: case Page::RuntimeError: case Page::AlreadyRunning: return L"loading";
+        case Page::AlreadyRunning: case Page::RuntimeError: return L"error";
+        // Bootstrap pages necessarily work without a WebView2 runtime.
+        case Page::RuntimeRequired: case Page::RuntimeInstalling: return L"loading";
         }
         return L"welcome";
     }
@@ -2445,8 +2452,8 @@ private:
                 L",\"doneWarnBody\":"+JsStringLiteral(Text(SimulationBuild()?IDS_DONE_BODY_DEMO:IDS_DONE_WARN_BODY))+
                 L",\"doneWarnLabel\":"+JsStringLiteral(Text(IDS_DONE_WARN_LABEL))+
                 L",\"errorTag\":"+JsStringLiteral(Text(IDS_ERROR_TAG))+
-                L",\"errorTitle\":"+JsStringLiteral(Text(IDS_ERROR_TITLE))+
-                L",\"errorBody\":"+JsStringLiteral(Text(IDS_ERROR_BODY))+
+                L",\"errorTitle\":"+JsStringLiteral(Text(page_==Page::AlreadyRunning?IDS_ALREADY_RUNNING_TITLE:page_==Page::RuntimeError?IDS_RUNTIME_INSTALL_FAILED:IDS_ERROR_TITLE))+
+                L",\"errorBody\":"+JsStringLiteral(Text(page_==Page::AlreadyRunning?IDS_ALREADY_RUNNING_BODY:IDS_ERROR_BODY))+
                 L",\"errorDetails\":"+JsStringLiteral(Text(IDS_ERROR_DETAILS))+
                 L",\"errorNote\":"+JsStringLiteral(Text(IDS_ERROR_LOG_HINT))+
                 L",\"compTag\":"+JsStringLiteral(Text(IDS_COMP_TAG))+
@@ -2495,7 +2502,7 @@ private:
             L",\"versionInvalidNote\":"+JsStringLiteral(versionInvalidNote_)+
             L",\"blockReason\":"+JsStringLiteral(blockReason_)+
             L",\"downgradeBody\":"+JsStringLiteral(downgradeBody_)+
-            L",\"errorReason\":"+JsStringLiteral(errorReason_)+
+            L",\"errorReason\":"+JsStringLiteral(page_==Page::RuntimeError?runtimeError_:errorReason_)+
             L",\"finishWarnings\":"+FinishWarningsJson()+
             L",\"cancelledDetail\":"+JsStringLiteral(cancelledDetail_)+
             L",\"status\":"+JsStringLiteral(installStatusLine_)+

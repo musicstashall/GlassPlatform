@@ -322,7 +322,7 @@ public:
             T(L"GlassPlatform — Удаление",L"GlassPlatform — Uninstall"),style,x,y,width,height,nullptr,nullptr,gInstance,this);
         if (!window) return false;
         ShowWindow(window,show); UpdateWindow(window);
-        if (!alreadyRunning_) PostMessageW(window,kWebInit,0,0);
+        if(!PostMessageW(window,kWebInit,0,0))WebFailure();
         return true;
     }
 
