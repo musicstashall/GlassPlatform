@@ -3022,3 +3022,20 @@ Still implementation work, not merely acceptance: official adjacent/downloaded
 setup acquisition and execution, native Inno discovery/uninstall/commit boundary,
 and Resources release catalog/UI/planner/cache/removal/rollback integration.
 Do not describe the standalone WiX project as a selectable installed product yet.
+
+### 2026-11-04 — Unblock only the verified staged OpenGlass installer
+
+- Added `Zone.Identifier` deletion to OpenGlass setup preparation, after release
+  hash and expected-publisher Authenticode validation. Only the protected staged
+  installer is changed; original local/Downloads files, other streams, system
+  trust policy and certificates are untouched.
+- Absence is checked with an ADS handle probe, not GetFileAttributes (which is
+  unsuitable for named streams). Missing ADS is success; deletion/probe access
+  errors are explicit preparation failures. Re-pin/hash/publisher verification
+  follows the operation so reopened bytes remain authenticated.
+- Portable test compiles the production helper with Win32 stubs: present/absent,
+  delete failures, persistent stream and inaccessible absence probe pass.
+  Resource/source checks and diff check pass. This is not an NTFS/SmartScreen
+  runtime test, nor a guarantee against unrelated Windows security prompts.
+- Official upstream execution integration remains outstanding as documented;
+  this change is in preparation and does not claim that route is now complete.

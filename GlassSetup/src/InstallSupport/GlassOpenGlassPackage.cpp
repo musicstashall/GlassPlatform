@@ -31,6 +31,23 @@ void Pin(File& file,const std::wstring& path) {
     Require(file.h!=INVALID_HANDLE_VALUE&&GetFileInformationByHandle(file.h,&info)&&info.nNumberOfLinks==1&&
         !(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)),"OpenGlass file pin/link check failed");
 }
+// Only the staged, verified upstream installer is unblocked. Never change the
+// original adjacent/Downloads file, other streams, trust policy or certificates.
+void RemoveInternetZone(const std::wstring& setup) {
+    const auto zone=setup+L":Zone.Identifier";
+    if(!DeleteFileW(zone.c_str())) {
+        const auto error=GetLastError();
+        if(error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)
+            throw std::runtime_error("Cannot remove OpenGlass installer Zone.Identifier ("+std::to_string(error)+")");
+    }
+    // Absence must be observable; access denied is not evidence of absence.
+    File check;check.h=CreateFileW(zone.c_str(),FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    if(check.h!=INVALID_HANDLE_VALUE)throw std::runtime_error("OpenGlass installer Zone.Identifier is still present");
+    const auto error=GetLastError();
+    if(error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)
+        throw std::runtime_error("Cannot confirm OpenGlass installer Zone.Identifier removal ("+std::to_string(error)+")");
+}
 std::array<unsigned char,32> Hash(const unsigned char* data,std::size_t size) {
     Require(size<=(std::numeric_limits<ULONG>::max)(),"OpenGlass hash size limit");std::array<unsigned char,32> result{};
     BCRYPT_ALG_HANDLE algorithm=nullptr;
@@ -185,6 +202,16 @@ bool Prepare(const std::wstring& workspace,unsigned windowsBuild,const std::atom
              }
          }
          Require(FlushFileBuffers(output.h)!=FALSE,"OpenGlass download flush failed");}
+        // Release the verification handle before deleting the named stream:
+        // no sharing-mode dependency may turn unblocking into a hidden prompt.
+        {
+            File verified;Pin(verified,setup);
+            if(!GlassReleaseClient::VerifyHash(verified.h,size,digest.substr(7),cancel,error))throw std::runtime_error("OpenGlass setup hash failed");
+            (void)VerifyPublisher(setup,verified.h);
+        }
+        RemoveInternetZone(setup);
+        // Re-pin and revalidate bytes/identity after the stream operation. The
+        // caller never receives an executable validated only before a reopen.
         File pinned;Pin(pinned,setup);
         if(!GlassReleaseClient::VerifyHash(pinned.h,size,digest.substr(7),cancel,error))throw std::runtime_error("OpenGlass setup hash failed");
         const auto publisher=VerifyPublisher(setup,pinned.h);GlassInnoExtract::CheckCancel(cancelled);
