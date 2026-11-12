@@ -458,7 +458,7 @@ bool InstallEngine::RunOfficialOpenGlassOnly() noexcept {
         const bool removing=GlassProducts::StandaloneOpenGlassRemoval(selection_,forceClean_,GlassInstallUtil::IsOs64Bit());
         if(!removing&&!GlassProducts::StandaloneOpenGlassApply(selection_,forceClean_,GlassInstallUtil::IsOs64Bit())) {
             SetFailure(ru?L"Этот план OpenGlass пока не поддерживается: удаление должно быть отдельным; сочетание с SecureUxTheme, очисткой или чистой переустановкой недоступно. Продукты не изменены.":
-                L"This OpenGlass plan is not yet supported: removal must be standalone; combining with SecureUxTheme, cleanup or clean reinstall is unavailable. Products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);
+                L"This OpenGlass plan is not yet supported: removal must be standalone; combining with SecureUxTheme, cleanup or clean reinstall is unavailable. Products were not changed.",ERROR_NOT_SUPPORTED);
             return false;
         }
         return PrepareOfficialOpenGlass(removing)&&CommitOfficialOpenGlass(removing);
@@ -565,6 +565,10 @@ bool InstallEngine::CommitOfficialOpenGlass(bool removing) noexcept {
 DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
     auto* self=static_cast<InstallEngine*>(p);
     self->mixedOpenGlass_=GlassProducts::MixedOpenGlassApply(self->selection_,self->forceClean_,GlassInstallUtil::IsOs64Bit());
+    InstallLog::LineFormat(L"OpenGlass dispatcher revision=2: route=%s rows=0x%X ogApply=%d ogRemove=%d SecureUxTheme=%d forceClean=%d",
+        self->mixedOpenGlass_?L"mixed-apply":(self->selection_.openGlass||self->selection_.Removes(3)?L"standalone-or-unsupported":L"managed-glass"),
+        self->procedureMask_,self->selection_.openGlass?1:0,self->selection_.Removes(3)?1:0,
+        self->selection_.secureUxTheme?1:0,self->forceClean_?1:0);
     if(self->mixedOpenGlass_) {
         // Preparation failure changes no products. Keep the staged EXE until
         // after managed commit; the Glass worker must never own the OG row.
