@@ -306,3 +306,42 @@ ERROR_INSTALL_PACKAGE_REJECTED: наше ограничение плана не 
 как запрет установки политикой Windows. Trust/ownership отказы не ослаблены.
 Исходное загруженное log-вложение удалено после анализа; изображение сохранено.
 Сборка диагностического исправления: GlassSetup Release|x86.
+
+### Post-check после успешного запуска OG
+
+Пользователь сообщил, что OG установлен и запущен, но показана ошибка.
+В GlassSetup-27.log (session 20261112_090740) выбран mixed-apply dispatcher rev2;
+все четыре Platform/Settings MSI вернули 0 (подтверждено отдельными verbose logs),
+Glass committed и запущен. Ошибка пришла из финального OG post-check. Старый
+журнал не записывает raw Inno exit, найденный key/path/version и причину mismatch,
+поэтому точную ветку отказа ретроспективно установить нельзя. Факт запуска OG
+сам по себе не используется как разрешение игнорировать ошибку post-check.
+
+При сверке Scripts/OpenGlass.iss для v3.0.2.3749 обнаружена конструкция
+`#define MyAppId "{D3D1BC7D-5E24-4B33-9383-7934271A3B05}"` плюс
+`AppId={{#MyAppId}}`: после ISPP получается `{{GUID}}`, а Inno literal escaping
+оставляет `{GUID}}`. Наш inventory раньше проверял только canonical `{GUID}_is1`.
+Теперь read-only Query проверяет ровно две определённые source-derived identity:
+canonical и `{GUID}}_is1`; никаких перечислений по DisplayName, изменения
+реестра или миграций нет. Две регистрации одновременно/неизвестный доступ —
+ошибка, не выбор наугад. Record сохраняет keyPath, Same проверяет и его, чтобы
+смена identity между подготовкой и запуском не прошла незамеченной. Settings
+DLL discovery использует те же две identity с отказом при конфликте. Это
+исправляет конкретный дефект обнаружения; actual key пользователя старый лог
+не содержит, и причина именно его отказа без новых диагностических фактов
+остаётся предположением.
+
+Версии post-check сравниваются численно (3.0.2 эквивалентна 3.0.2.0, но не
+3.0.2.3749), не строковым равенством. Условия raw exit 0/3010, наличия регистрации,
+совпадения каталога и версии сохраняются. Добавлена строка `OpenGlass post-check`
+с ran/exit/removing/inventoryKnown/installed/pathMatches/versionMatches,
+keyPath, ожидаемыми/фактическими каталогом и версией, inventoryError.
+
+Inventory compiled mock расширен exact-key fallback/conflict и numeric versions;
+раньше его fake RegOpen проверял только GUID substring, теперь весь key literal.
+Windows/Inno acceptance пока не проводился в sandbox. Загруженные пять исходных
+логов после разбора удалены; изображение сохранено.
+
+Сборка: GlassUnins Release|x86 → GlassSetup Release|x86 (общий inventory header);
+GlassSettings Release|x64/Release|x86 для исправленного discovery. Native/Shared
+код и каталог ресурсов не менялись.

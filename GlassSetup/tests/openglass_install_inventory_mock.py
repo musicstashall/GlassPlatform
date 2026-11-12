@@ -20,11 +20,16 @@ harness = r'''
 using DWORD=unsigned long;using BYTE=unsigned char;using HKEY=void*;
 constexpr int HKEY_LOCAL_MACHINE=1,KEY_QUERY_VALUE=1,KEY_WOW64_64KEY=256;
 constexpr int ERROR_SUCCESS=0,ERROR_FILE_NOT_FOUND=2,ERROR_PATH_NOT_FOUND=3,REG_SZ=1;
-int opened=0,live=0;bool badType=false,badTerminator=false;std::map<std::wstring,std::wstring> values;
+int opened=0,live=0,identity=0;bool badType=false,badTerminator=false;std::map<std::wstring,std::wstring> values;
 int RegOpenKeyExW(int,const wchar_t* key,int,int access,HKEY* out){
  assert(access==(KEY_QUERY_VALUE|KEY_WOW64_64KEY));
- assert(std::wstring(key).find(L"{D3D1BC7D-5E24-4B33-9383-7934271A3B05}_is1")!=std::wstring::npos);
- if(opened)return opened;*out=reinterpret_cast<void*>(1);++live;return 0;
+ const auto path=std::wstring(key);
+ const bool canonical=path==L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{D3D1BC7D-5E24-4B33-9383-7934271A3B05}_is1";
+ const bool script=path==L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{D3D1BC7D-5E24-4B33-9383-7934271A3B05}}_is1";
+ assert(canonical||script);
+ if(opened)return opened;
+ if(identity!=2&&((identity==0&&!canonical)||(identity==1&&!script)))return 2;
+ *out=reinterpret_cast<void*>(1);++live;return 0;
 }
 int RegQueryValueExW(HKEY,const wchar_t* name,void*,DWORD* type,BYTE* data,DWORD* size){
  auto it=values.find(name);if(it==values.end())return 2;
@@ -57,6 +62,12 @@ int main(){
  values=good;values.erase(L"InstallLocation");assert(!Query(r,error)&&live==0);
  values=good;values[L"InstallLocation"]=std::wstring(L"D:\\Custom OG\0hidden",19);assert(!Query(r,error)&&live==0);
  values=good;assert(Query(r,error)&&r.installed&&live==0);
+ identity=1;assert(Query(r,error)&&r.installed&&r.keyPath==ScriptKey&&live==0);
+ identity=2;assert(!Query(r,error)&&!r.installed&&live==0&&HasProduct());
+ identity=0;assert(Query(r,error)&&r.keyPath==Key&&live==0);
+ assert(SameVersion(L"3.0.2",L"3.0.2.0"));assert(!SameVersion(L"3.0.2",L"3.0.2.3749"));
+ assert(!SameVersion(L"3.0.2x",L"3.0.2"));assert(!SameVersion(L"",L""));
+ assert(!SameVersion(L"３.0.2",L"3.0.2"));
 }
 '''
 with tempfile.TemporaryDirectory() as tmp:

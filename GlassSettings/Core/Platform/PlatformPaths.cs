@@ -237,10 +237,18 @@ public static class PlatformPaths
         try
         {
             using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-            using var key = machine.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\{D3D1BC7D-5E24-4B33-9383-7934271A3B05}_is1", false);
-            var value = key?.GetValue("InstallLocation") as string;
-            return !string.IsNullOrWhiteSpace(value) && Path.IsPathFullyQualified(value)
-                ? Path.GetFullPath(value) : null;
+            const string prefix = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\";
+            string? result = null;
+            foreach (var identity in new[] { "{D3D1BC7D-5E24-4B33-9383-7934271A3B05}_is1", "{D3D1BC7D-5E24-4B33-9383-7934271A3B05}}_is1" })
+            {
+                using var key = machine.OpenSubKey(prefix + identity, false);
+                if (key is null) continue;
+                if (result is not null) return null; // Conflicting exact upstream identities.
+                var value = key.GetValue("InstallLocation") as string;
+                if (string.IsNullOrWhiteSpace(value) || !Path.IsPathFullyQualified(value)) return null;
+                result = Path.GetFullPath(value);
+            }
+            return result;
         }
         catch { return null; }
     }
