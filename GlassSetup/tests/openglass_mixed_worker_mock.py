@@ -20,6 +20,7 @@ using LPVOID=void*;using DWORD=unsigned;
 constexpr int LANG_RUSSIAN=25,ERROR_INSTALL_FAILURE=1603;
 int GetUserDefaultUILanguage(){return 0;}
 namespace GlassInstallUtil{bool IsOs64Bit(){return true;}}
+namespace InstallLog{template<class... Args>void LineFormat(const wchar_t*,Args...) {}}
 bool prep=true,glass=true,vendor=true;unsigned preparations=0,glassRuns=0,vendorRuns=0,standalone=0,cleanups=0;std::string order;
 bool RemoveDirectoryTree(const std::wstring&){++cleanups;order+="cleanup;";return true;}
 struct InstallEngine{

@@ -285,3 +285,24 @@ catalog/UI/planner всё ещё впереди. Миграций прежних
 Сборка: отдельно OpenGlassResources-x64.wixproj Release|x64 (нужен graphics
 source), затем GlassSettings Release|x64 и Release|x86 для нужных пакетов.
 Изменений native/shared/GlassUnins/GlassSetup C++ в этом исправлении нет.
+
+### Диагностика старого запрета смешанного плана
+
+Разобран пользовательский GlassSetup-26.log (session 20261112_085450): четыре
+локальных Platform/Settings MSI успешно проверены Authenticode и подготовлены
+с source=2, network=0, ok=1. Отсутствие пробного подпути packages не мешало
+успешному adjacent fallback. Для OG использован release EXE (4049232 bytes,
+network=1); SecureUxTheme не выбран. До MSI execution worker отказал дословным
+ранним текстом «Пока выполняйте установку/обновление OpenGlass отдельно…».
+Это старый engine без mixed-apply dispatcher, а не ошибка доступности локальных
+MSI. Запущенная копия находилась в защищённом Installer/hash каталоге; журнал
+не содержит фактическую FileVersion, поэтому точный исходный build и причину
+выбора этой копии по этому журналу установить нельзя. Installer cache не менялся.
+
+Для последующих журналов добавлены Running Setup FileVersion и OpenGlass
+`dispatcher revision=2: route=...` с rows/apply/remove/SUT/forceClean. Текущий
+неподдерживаемый OG-план возвращает ERROR_NOT_SUPPORTED, а не MSI policy code
+ERROR_INSTALL_PACKAGE_REJECTED: наше ограничение плана не должно объясняться
+как запрет установки политикой Windows. Trust/ownership отказы не ослаблены.
+Исходное загруженное log-вложение удалено после анализа; изображение сохранено.
+Сборка диагностического исправления: GlassSetup Release|x86.

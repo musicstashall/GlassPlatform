@@ -18,6 +18,10 @@ assert 'rollbackSucceeded_.store(false' in lane and 'ERROR_SUCCESS_REBOOT_REQUIR
 assert 'after.version==openGlassPackage_.version' in lane
 assert 'RunUninstaller(current,code,error)' in lane and 'removing?!after.installed' in lane
 assert 'if(!removing) {' in lane
+unsupported=lane[lane.index('if(!removing&&!GlassProducts::StandaloneOpenGlassApply'):lane.index('return PrepareOfficialOpenGlass')]
+assert 'ERROR_NOT_SUPPORTED' in unsupported and 'ERROR_INSTALL_PACKAGE_REJECTED' not in unsupported
+assert 'OpenGlass dispatcher revision=2: route=%s' in worker
+assert 'Running Setup FileVersion: %s' in (root/'GlassSetup/src/main.cpp').read_text()
 inspect=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
 assert 'PayloadFileVersion(official.directory+' in inspect
 assert 'officialOpenGlassRoot.empty()?' in inspect

@@ -1148,6 +1148,7 @@ public:
     bool retireControllerOnExit=false;
     bool Create(int show) {
         footerSetupVersion_=SelfFileVersion();
+        InstallLog::LineFormat(L"Running Setup FileVersion: %s",footerSetupVersion_.empty()?L"unavailable":footerSetupVersion_.c_str());
         WNDCLASSEXW wc{sizeof(wc)};
         wc.style = 0; // Fixed-size window: do not invalidate the entire client on sizing.
         wc.lpfnWndProc = WindowProc;
