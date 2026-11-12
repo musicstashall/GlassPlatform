@@ -9,6 +9,5 @@
     <GlassPlatform32MsiVersion Condition="'$(GlassPlatform32MsiVersion)' == ''"></GlassPlatform32MsiVersion>
     <GlassSettings64MsiVersion Condition="'$(GlassSettings64MsiVersion)' == ''"></GlassSettings64MsiVersion>
     <GlassSettings32MsiVersion Condition="'$(GlassSettings32MsiVersion)' == ''"></GlassSettings32MsiVersion>
-    <GlassOpenGlassMsiVersion Condition="'$(GlassOpenGlassMsiVersion)' == ''"></GlassOpenGlassMsiVersion>
   </PropertyGroup>
 </Project>

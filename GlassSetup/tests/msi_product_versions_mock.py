@@ -22,10 +22,10 @@ projection=function(unins,'    std::wstring InstalledMsiVersion(')
 target=ET.parse(root/'GlassSetup/msi/GlassSetupPayload.targets').getroot()
 metadata=target.find("Target[@Name='GlassWriteProductMetadata']")
 for project,prop in [('Glass-x64','GlassPlatform64MsiVersion'),('Glass-x86','GlassPlatform32MsiVersion'),
- ('GlassSettings-x64','GlassSettings64MsiVersion'),('GlassSettings-x86','GlassSettings32MsiVersion'),('OpenGlass-x64','GlassOpenGlassMsiVersion')]:
+ ('GlassSettings-x64','GlassSettings64MsiVersion'),('GlassSettings-x86','GlassSettings32MsiVersion')]:
  nodes=[n for n in metadata.findall('./PropertyGroup/_GlassMsiVersion') if f"== '{project}'" in n.get('Condition','')]
  assert len(nodes)==1 and nodes[0].text==f'$({prop})'
-for name in ['PlatformPackage','GlassSettingsPackage','OpenGlassPackage']:
+for name in ['PlatformPackage','GlassSettingsPackage']:
  package=ET.parse(root/f'GlassSetup/msi/{name}.template.wxs').getroot()[0]
  assert package.get('Version')=='$(var.GlassMsiVersion)'
 ET.parse(root/'GlassSetup/msi/ProductVersions.props')
@@ -54,7 +54,8 @@ bool IsProductInstalled(const wchar_t* code){return versions.count(code);}
 }
 namespace Shared::SecureUxThemeInventory{
 unsigned QueryInstalled(std::vector<std::wstring>& out){out=official;return inventoryStatus;}}
-struct App{
+namespace GlassOpenGlassFiles {bool HasReceipt(const std::wstring&){return false;}struct Record{std::wstring version;};Record Inspect(const std::wstring&){return {};}}
+struct App{std::wstring openGlassDir_;
 // PROJECTION
 };
 // OLDER

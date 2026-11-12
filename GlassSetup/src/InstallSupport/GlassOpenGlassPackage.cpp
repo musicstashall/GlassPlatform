@@ -129,6 +129,40 @@ bool Metadata(const std::atomic<bool>& cancel,std::string& text,std::wstring& er
     {std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::openGlassCatalogMutex);GlassSetupSourceLayout::openGlassCatalogText=text;}
     return !cancel.load();
 }
+std::wstring SetupFileVersion(const std::wstring& path) {
+    DWORD ignored=0;const auto size=GetFileVersionInfoSizeW(path.c_str(),&ignored);
+    Require(size>0&&size<=1024*1024,"OpenGlass setup version is missing/too large");
+    std::vector<BYTE> bytes(size);Require(GetFileVersionInfoW(path.c_str(),0,size,bytes.data())!=FALSE,"Cannot read OpenGlass setup version");
+    VS_FIXEDFILEINFO* info=nullptr;UINT count=0;
+    Require(VerQueryValueW(bytes.data(),L"\\",reinterpret_cast<void**>(&info),&count)&&info&&count>=sizeof(*info)&&
+        info->dwSignature==0xfeef04bd,"Invalid OpenGlass setup fixed version");
+    return std::to_wstring(HIWORD(info->dwFileVersionMS))+L"."+std::to_wstring(LOWORD(info->dwFileVersionMS))+L"."+
+        std::to_wstring(HIWORD(info->dwFileVersionLS))+L"."+std::to_wstring(LOWORD(info->dwFileVersionLS));
+}
+void StageAttachedInstaller(const std::wstring& source,const std::wstring& setup,
+    const std::atomic<bool>& cancel,Package& package,std::vector<std::wstring>& created) {
+    File input;Pin(input,source);const auto signer=VerifyPublisher(source,input.h);
+    LARGE_INTEGER size{};Require(GetFileSizeEx(input.h,&size)&&size.QuadPart>=512&&
+        static_cast<std::uint64_t>(size.QuadPart)<=GlassInnoExtract::MaxInput,"Invalid adjacent OpenGlass setup size");
+    {
+        File output;output.h=GlassReleaseClient::CreatePrivateFile(setup);
+        Require(output.h!=INVALID_HANDLE_VALUE,"Cannot stage adjacent OpenGlass setup");
+        created.push_back(setup); // Cleanup owns only successfully created files.
+        std::array<BYTE,65536> buffer{};std::uint64_t copied=0;
+        for(;;) {
+            GlassInnoExtract::CheckCancel([&]{return cancel.load();});DWORD read=0,written=0;
+            Require(ReadFile(input.h,buffer.data(),static_cast<DWORD>(buffer.size()),&read,nullptr)!=FALSE,"Adjacent OpenGlass setup read failed");
+            if(!read)break;
+            Require(WriteFile(output.h,buffer.data(),read,&written,nullptr)&&written==read,"Adjacent OpenGlass setup write failed");
+            copied+=read;Require(copied<=static_cast<std::uint64_t>(size.QuadPart),"Adjacent OpenGlass setup grew");
+        }
+        Require(copied==static_cast<std::uint64_t>(size.QuadPart)&&FlushFileBuffers(output.h),"Adjacent OpenGlass setup flush/size failed");
+    }
+    {File verified;Pin(verified,setup);Require(VerifyPublisher(setup,verified.h)==signer,"Adjacent OpenGlass setup signer changed");}
+    RemoveInternetZone(setup);
+    File verified;Pin(verified,setup);Require(VerifyPublisher(setup,verified.h)==signer,"Adjacent OpenGlass setup signer changed after unblock");
+    package.setup=setup;package.version=SetupFileVersion(setup);
+}
 bool Ends(const std::wstring& text,const wchar_t* suffix) {
     const std::wstring ending(suffix);return text.size()>=ending.size()&&text.compare(text.size()-ending.size(),ending.size(),ending)==0;
 }
@@ -161,11 +195,23 @@ bool PrepareForCurrentSystem(const std::wstring& workspace,const std::atomic<boo
     }
     return Prepare(workspace,version.dwBuildNumber,cancel,package,error);
 }
-bool Prepare(const std::wstring& workspace,unsigned windowsBuild,const std::atomic<bool>& cancel,Package& package,std::wstring& error) noexcept {
+static bool PrepareImpl(const std::wstring& workspace,unsigned windowsBuild,const std::atomic<bool>& cancel,Package& package,std::wstring& error,bool extractPayload) noexcept {
     package={};error.clear();std::vector<std::wstring> created;
     const auto cancelled=[&]{return cancel.load();};
     try {
         Require(GlassMaintenanceCache::TrustedDirectory(workspace),"Untrusted OpenGlass workspace");
+        if(!extractPayload&&!GlassSetupSourceLayout::directory.empty()) {
+            const auto local=GlassSetupSourceLayout::directory+L"\\OpenGlassSetup.Signed.exe";
+            const auto attributes=GetFileAttributesW(local.c_str());
+            if(attributes!=INVALID_FILE_ATTRIBUTES) {
+                Require(!(attributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)),"Unsafe adjacent OpenGlass setup");
+                const auto setup=workspace+L"\\OpenGlassSetup.Signed.exe";
+                StageAttachedInstaller(local,setup,cancel,package,created);
+                GlassInnoExtract::CheckCancel(cancelled);return true;
+            }
+            const auto failure=GetLastError();
+            Require(failure==ERROR_FILE_NOT_FOUND||failure==ERROR_PATH_NOT_FOUND,"Adjacent OpenGlass setup is inaccessible");
+        }
         std::string metadata,version;
         auto prepared=GlassSetupSourceLayout::Prepared(4);
         if(!prepared.empty()) {
@@ -183,9 +229,10 @@ bool Prepare(const std::wstring& workspace,unsigned windowsBuild,const std::atom
         Require(matches==1&&url=="https://github.com/ALTaleX531/OpenGlass/releases/download/"+tag+"/OpenGlassSetup.Signed.exe"&&
             size>=512&&size<=GlassInnoExtract::MaxInput,"Invalid OpenGlass release asset");
         Require(digest.compare(0,7,"sha256:")==0&&digest.size()==71&&std::all_of(digest.begin()+7,digest.end(),[](char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f');}),"OpenGlass release digest missing/invalid");
-        const auto setup=workspace+L"\\OpenGlassSetup.Signed.exe";created.push_back(setup);
+        const auto setup=workspace+L"\\OpenGlassSetup.Signed.exe";
         {File output;output.h=GlassReleaseClient::CreatePrivateFile(setup);
          Require(output.h!=INVALID_HANDLE_VALUE,"Cannot create OpenGlass setup staging file");
+         created.push_back(setup);
          if(prepared.empty()) {
              if(!GlassReleaseClient::Get(GlassReleaseClient::Wide(url),output.h,nullptr,size,cancel,error))throw std::runtime_error("OpenGlass download failed");
          }else {
@@ -215,6 +262,16 @@ bool Prepare(const std::wstring& workspace,unsigned windowsBuild,const std::atom
         File pinned;Pin(pinned,setup);
         if(!GlassReleaseClient::VerifyHash(pinned.h,size,digest.substr(7),cancel,error))throw std::runtime_error("OpenGlass setup hash failed");
         const auto publisher=VerifyPublisher(setup,pinned.h);GlassInnoExtract::CheckCancel(cancelled);
+        if(!extractPayload) {
+            const auto actual=SetupFileVersion(setup);
+            GlassPackageRules::Version expected{},found{};
+            Require(GlassPackageRules::ParseVersion(version,expected)&&
+                GlassPackageRules::ParseVersion(std::string(actual.begin(),actual.end()),found)&&
+                GlassPackageRules::Compare(expected,found)==0,"OpenGlass setup/release version mismatch");
+            const auto receipt=setup+L".metadata.json";created.push_back(receipt);
+            Write(receipt,GlassInnoExtract::Bytes(metadata.begin(),metadata.end()));
+            package.setup=setup;package.version=actual;return true;
+        }
         GlassInnoExtract::Bytes input(static_cast<std::size_t>(size));LARGE_INTEGER zero{};
         Require(SetFilePointerEx(pinned.h,zero,nullptr,FILE_BEGIN)!=FALSE,"OpenGlass input seek failed");DWORD read=0;
         Require(ReadFile(pinned.h,input.data(),static_cast<DWORD>(input.size()),&read,nullptr)&&read==input.size(),"OpenGlass input read failed");
@@ -254,6 +311,48 @@ bool Prepare(const std::wstring& workspace,unsigned windowsBuild,const std::atom
      catch(...){if(error.empty())error=L"OpenGlass staging failed";}
     // Workspace is private and remains unpublished; never delete user paths.
     for(const auto& path:created)DeleteFileW(path.c_str());
+    package={};return false;
+}
+bool Prepare(const std::wstring& workspace,unsigned windowsBuild,const std::atomic<bool>& cancel,Package& package,std::wstring& error) noexcept {
+    return PrepareImpl(workspace,windowsBuild,cancel,package,error,true);
+}
+bool PrepareInstaller(const std::wstring& workspace,unsigned windowsBuild,const std::atomic<bool>& cancel,Package& package,std::wstring& error) noexcept {
+    return PrepareImpl(workspace,windowsBuild,cancel,package,error,false);
+}
+bool PrepareInstallerForCurrentSystem(const std::wstring& workspace,const std::atomic<bool>& cancel,Package& package,std::wstring& error) noexcept {
+    using Query=LONG (WINAPI*)(PRTL_OSVERSIONINFOW);
+    const auto module=GetModuleHandleW(L"ntdll.dll");const auto query=module?reinterpret_cast<Query>(GetProcAddress(module,"RtlGetVersion")):nullptr;
+    RTL_OSVERSIONINFOW version{};version.dwOSVersionInfoSize=sizeof(version);SYSTEM_INFO system{};GetNativeSystemInfo(&system);
+    if(!query||query(&version)!=0||version.dwMajorVersion!=10||version.dwBuildNumber<17763||system.wProcessorArchitecture!=PROCESSOR_ARCHITECTURE_AMD64) {
+        package={};error=L"OpenGlass: unsupported or unknown native Windows version/architecture";return false;
+    }
+    return PrepareInstaller(workspace,version.dwBuildNumber,cancel,package,error);
+}
+bool RunInstaller(const Package& package,const std::wstring& directory,DWORD& exitCode,std::wstring& error) noexcept {
+    exitCode=ERROR_INSTALL_FAILURE;error.clear();
+    try {
+        const auto slash=package.setup.find_last_of(L"\\/");
+        Require(slash!=std::wstring::npos&&package.setup.substr(slash+1)==L"OpenGlassSetup.Signed.exe"&&
+            GlassMaintenanceCache::TrustedDirectory(package.setup.substr(0,slash))&&
+            GlassMaintenanceCache::TrustedPath(package.setup,false),"Untrusted OpenGlass installer destination");
+        Require(GlassInstallUtil::IsSafeInstallPath(directory)&&directory.size()>3&&directory[1]==L':'&&directory[2]==L'\\'&&
+            directory.find_first_of(L"\"\r\n")==std::wstring::npos&&directory.back()!=L'\\',"Unsafe OpenGlass install directory");
+        {File verified;Pin(verified,package.setup);(void)VerifyPublisher(package.setup,verified.h);}
+        RemoveInternetZone(package.setup);
+        File pinned;Pin(pinned,package.setup);(void)VerifyPublisher(package.setup,pinned.h);
+        Require(!package.version.empty()&&SetupFileVersion(package.setup)==package.version,"OpenGlass installer version changed");
+        std::wstring command=L"\""+package.setup+L"\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /RESTARTEXITCODE=3010 /DIR=\""+directory+L"\"";
+        STARTUPINFOW startup{};startup.cb=sizeof(startup);startup.dwFlags=STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;
+        PROCESS_INFORMATION process{};
+        Require(CreateProcessW(package.setup.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,
+            package.setup.substr(0,slash).c_str(),&startup,&process)!=FALSE,"Cannot start official OpenGlass installer");
+        struct ProcessHandles {PROCESS_INFORMATION& p;~ProcessHandles(){CloseHandle(p.hThread);CloseHandle(p.hProcess);}} handles{process};
+        Require(WaitForSingleObject(process.hProcess,INFINITE)==WAIT_OBJECT_0,"Cannot wait for official OpenGlass installer");
+        Require(GetExitCodeProcess(process.hProcess,&exitCode)!=FALSE,"Cannot read official OpenGlass installer result");
+        return true;
+    }catch(const std::exception& e){error=L"OpenGlass: "+GlassReleaseClient::Wide(e.what());}
+     catch(...){error=L"OpenGlass installer execution failed";}
     return false;
 }
+
 }

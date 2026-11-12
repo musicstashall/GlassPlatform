@@ -19,9 +19,9 @@
     <GlassBundleFromSolution Condition="'$(GlassBundleFromSolution)' == '' and '$(SolutionPath)' != ''">true</GlassBundleFromSolution>
     <GlassBundleFromSolution Condition="'$(GlassBundleFromSolution)' == '' and '$(SolutionDir)' != ''">true</GlassBundleFromSolution>
     <GlassBundleFromSolution Condition="'$(GlassBundleFromSolution)' == ''">false</GlassBundleFromSolution>
-    <GlassBundlePackagingEnabled Condition="'$(GlassBundlePackagingEnabled)' == '' and '$(Configuration)' == 'Release' and '$(GlassBundleFromSolution)' == 'true' and '$(MSBuildProjectName)' != 'OpenGlass-x64'">true</GlassBundlePackagingEnabled>
+    <GlassBundlePackagingEnabled Condition="'$(GlassBundlePackagingEnabled)' == '' and '$(Configuration)' == 'Release' and '$(GlassBundleFromSolution)' == 'true'">true</GlassBundlePackagingEnabled>
     <GlassBundlePackagingEnabled Condition="'$(GlassBundlePackagingEnabled)' == ''">false</GlassBundlePackagingEnabled>
-    <GlassBundleRequiresProductVersion Condition="'$(Configuration)' == 'Release' and '$(GlassBundleFromSolution)' == 'true' and '$(MSBuildProjectName)' != 'OpenGlass-x64'">true</GlassBundleRequiresProductVersion>
+    <GlassBundleRequiresProductVersion Condition="'$(Configuration)' == 'Release' and '$(GlassBundleFromSolution)' == 'true'">true</GlassBundleRequiresProductVersion>
     <!-- Новый номер комплекта после финализации — только x64 native DLL (Release|x64). Остальное — повторная сборка того же комплекта. -->
     <GlassBundleAllowNewAfterCompleted Condition="'$(GlassBundleAllowNewAfterCompleted)' == '' and '$(IsGlassNativeBinary)' == 'true' and '$(GlassBundlePlatformNorm)' == 'x64'">true</GlassBundleAllowNewAfterCompleted>
     <GlassBundleVersionEffective Condition="'$(GlassBundleVersion)' != ''">$(GlassBundleVersion)</GlassBundleVersionEffective>
