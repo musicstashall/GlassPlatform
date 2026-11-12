@@ -1026,3 +1026,37 @@ metadata. Resources MSI need not be rebuilt. The separately reported disabled
 Apply button is still unconfirmed: no selected-plan screenshot or log accompanied
 this report, and retaining command paths does not fix a selection/readiness gate.
 Do not claim that issue resolved by this patch.
+
+### GlassSetup-33: official OG reports restart despite successful startup
+
+All five managed MSI install/reinstall logs (Settings64/32, Platform64/32,
+Resources) ended0, and their uninstall portions also ended0. At16:40:36.723 the
+official OG post-check records raw exit3010 with installed/path/version checks
+all true for3.0.2.3749. The only restart finish note immediately follows. Setup
+uses Inno /NORESTART /RESTARTEXITCODE=3010, so the source is the official vendor
+installer's restart request, not our inference from service state or a managed
+MSI request. Successful OG startup does not establish that deferred vendor file
+operations have completed. Do not hide/rewrite3010 to0 merely because OG runs.
+
+The exact reason/file cannot be recovered from the supplied Setup/MSI logs.
+The launcher previously wrote OpenGlass-install.log inside its Work-* staging
+folder, which normal cleanup deletes. It now requests GlassInstallLog's protected
+per-launch directory; Setup's bridge now exposes InstallLog::Directory() instead
+of returning empty. The vendor log therefore survives in Windows\\Temp\\GlassSetupLogs-*
+with Setup/MSI logs. The raw exit and exact vendor log path are explicitly logged.
+If persistent logging is unavailable, retain the former protected-workspace
+fallback, recording persistent=0 rather than blocking the vendor operation.
+
+RU/EN restart wording now explicitly attributes code3010 to the official OG
+installer and explains that already running does not cancel a restart request.
+It does not assert a particular locked/deferred filename without the vendor log.
+For this completed run, restarting Windows is the conservative vendor-directed
+action. If the request repeats, capture OpenGlass-install.log from the NEXT build
+together with GlassSetup.log to distinguish pending file replacement from another
+Inno restart reason. No service deletion/startup-policy changes, manual pending
+rename cleanup, forced reboot or termination added. Tests exercise raw0/3010/2
+preservation, persistent vendor log command and missing-log-directory fallback;
+source smoke passes. No Windows/Inno execution performed here.
+
+Build GlassUnins Release|Win32 -> GlassSetup Release|Win32. No MSI rebuild required
+for these diagnostic/wording changes; publish matching Setup metadata.

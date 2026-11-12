@@ -39,7 +39,7 @@ std::wstring SecureLogDirectory() noexcept {
         return directory;
     } catch (...) { return {}; }
 #else
-    return {}; // Setup uses its own protected InstallLog directory.
+    return InstallLog::Directory(); // Preserve vendor logs beside the Setup/MSI logs.
 #endif
 }
 

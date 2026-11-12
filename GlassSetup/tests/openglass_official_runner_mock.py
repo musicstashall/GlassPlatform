@@ -22,6 +22,8 @@ void Require(bool ok,const char* error){if(!ok)throw std::runtime_error(error);}
 namespace GlassMaintenanceCache{bool TrustedDirectory(const std::wstring&){return trusted;}bool TrustedPath(const std::wstring&,bool){return trusted;}}
 namespace GlassInstallUtil{bool IsSafeInstallPath(const std::wstring&){return safe;}}
 namespace GlassReleaseClient{std::wstring Wide(const std::string& s){return {s.begin(),s.end()};}}
+std::wstring logDir=L"C:\\SavedLogs";
+namespace GlassInstallLog {std::wstring SecureLogDirectory(){return logDir;}template<class... T>void LineFormat(const wchar_t*,T...) {}}
 struct File{HANDLE h=1;};
 void Pin(File&,const std::wstring&){order+=L"pin;";}
 unsigned VerifyPublisher(const std::wstring&,HANDLE){order+=L"verify;";return 1;}
@@ -42,9 +44,10 @@ int main(){
  Package package{L"C:\\Protected\\OpenGlassSetup.Signed.exe",L"3.0.2.3749"};std::wstring error;DWORD result=0;
  for(unsigned exit:{0u,3010u,2u}){reset();code=exit;assert(RunInstaller(package,L"D:\\Other Folder\\OG",result,error));assert(result==exit&&closes==2&&creates==1);
   assert(app==package.setup&&working==L"C:\\Protected");
-  assert(command==L"\"C:\\Protected\\OpenGlassSetup.Signed.exe\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOICONS /MERGETASKS=\"!desktopicon\" /SP- /RESTARTEXITCODE=3010 /DIR=\"D:\\Other Folder\\OG\" /LOG=\"C:\\Protected\\OpenGlass-install.log\"");
+  assert(command==L"\"C:\\Protected\\OpenGlassSetup.Signed.exe\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOICONS /MERGETASKS=\"!desktopicon\" /SP- /RESTARTEXITCODE=3010 /DIR=\"D:\\Other Folder\\OG\" /LOG=\"C:\\SavedLogs\\OpenGlass-install.log\"");
   assert(order==L"pin;verify;unblock;pin;verify;");
  }
+ reset();logDir.clear();assert(RunInstaller(package,L"C:\\OG",result,error));assert(command.find(L"/LOG=\"C:\\Protected\\OpenGlass-install.log\"")!=std::wstring::npos);logDir=L"C:\\SavedLogs";
  reset();GlassOpenGlassService::ready=false;assert(!RunInstaller(package,L"C:\\OG",result,error)&&creates==0&&result==1072);
  for(auto dir:{L"C:\\",L"relative",L"C:\\Bad\" /TASKS=x",L"C:\\Bad\nPath",L"C:\\OG\\"}){reset();assert(!RunInstaller(package,dir,result,error)&&creates==0);}
  reset();trusted=false;assert(!RunInstaller(package,L"C:\\OG",result,error)&&creates==0);
@@ -67,3 +70,8 @@ solution=(root/'GlassProject.sln').read_text()
 assert 'OpenGlass-x64.wixproj' not in solution and '{D1E2F3A4-B5C6-4789-0ABC-DEF123456789}' not in solution
 assert not (root/'GlassSetup/msi/OpenGlass-x64.wixproj').exists()
 print('PASS: actual official installer launcher command/trust/unblock/wait/raw exits/handles; official acquisition precedence and retired MSI graph source contracts')
+
+# Setup must actually expose its persistent directory, not fall back to Work-*.
+bridge=(root/'GlassSetup/src/InstallSupport/GlassInstallLog.cpp').read_text()
+assert 'return InstallLog::Directory();' in bridge
+assert 'Official OpenGlass installer raw exit=%lu; log=%s' in runner

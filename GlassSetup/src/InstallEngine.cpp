@@ -576,7 +576,8 @@ bool InstallEngine::CommitOfficialOpenGlass(bool removing) noexcept {
                 (code==ERROR_SUCCESS||code==ERROR_SUCCESS_REBOOT_REQUIRED)?ERROR_INSTALL_FAILURE:code);return false;
         }
         if(code==ERROR_SUCCESS_REBOOT_REQUIRED)AddFinishWarning(ru?L"OpenGlass: требуется перезагрузка":L"OpenGlass: restart required",
-            ru?L"Для завершения операции OpenGlass требуется перезагрузка Windows.":L"Restart Windows to finish the OpenGlass operation.");
+            ru?L"Официальный установщик OpenGlass сообщил о необходимости перезагрузки (код 3010). Даже если OpenGlass уже работает, для завершения отложенных изменений перезагрузите Windows.":
+                L"The official OpenGlass installer requested a restart (code 3010). Even if OpenGlass is running, restart Windows to complete pending changes.");
         InstallLog::Line(L"OpenGlass official transaction confirmed; no Glass rollback claimed");
         if(!GlassInstallMsi::RefreshManagedArp(x64Dir_,x86Dir_,openGlassDir_))
             AddFinishWarning(ru?L"Не все записи приложений обновлены":L"Some installed-app entries were not updated",

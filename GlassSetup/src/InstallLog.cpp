@@ -108,6 +108,11 @@ void LineFormat(const wchar_t* format, ...) noexcept {
     Line(buffer);
 }
 
+std::wstring Directory() noexcept {
+    if (gLogDir.empty()) Initialize();
+    return gLogDir;
+}
+
 std::wstring NextMsiVerboseLogPath(const wchar_t* msiLabel) noexcept {
     if (gLogDir.empty()) Initialize();
     if (gLogDir.empty()) return {};

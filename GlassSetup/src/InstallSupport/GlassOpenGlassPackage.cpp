@@ -1,4 +1,5 @@
 #include "GlassOpenGlassPackage.h"
+#include "GlassInstallLog.h"
 #include "GlassOpenGlassTrust.h"
 #include "GlassOpenGlassInstall.h"
 #include "GlassOpenGlassService.h"
@@ -303,7 +304,10 @@ bool RunInstaller(const Package& package,const std::wstring& directory,DWORD& ex
         RemoveInternetZone(package.setup);
         File pinned;Pin(pinned,package.setup);(void)VerifyPublisher(package.setup,pinned.h);
         Require(!package.version.empty()&&SetupFileVersion(package.setup)==package.version,"OpenGlass installer version changed");
-        std::wstring command=L"\""+package.setup+L"\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOICONS /MERGETASKS=\"!desktopicon\" /SP- /RESTARTEXITCODE=3010 /DIR=\""+directory+L"\" /LOG=\""+package.setup.substr(0,slash)+L"\\OpenGlass-install.log\"";
+        const auto persistentLogDirectory=GlassInstallLog::SecureLogDirectory();
+        const auto logPath=(persistentLogDirectory.empty()?package.setup.substr(0,slash):persistentLogDirectory)+L"\\OpenGlass-install.log";
+        GlassInstallLog::LineFormat(L"Official OpenGlass installer log: %s (persistent=%d)",logPath.c_str(),persistentLogDirectory.empty()?0:1);
+        std::wstring command=L"\""+package.setup+L"\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOICONS /MERGETASKS=\"!desktopicon\" /SP- /RESTARTEXITCODE=3010 /DIR=\""+directory+L"\" /LOG=\""+logPath+L"\"";
         STARTUPINFOW startup{};startup.cb=sizeof(startup);startup.dwFlags=STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;
         PROCESS_INFORMATION process{};
         Require(CreateProcessW(package.setup.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,
@@ -311,6 +315,7 @@ bool RunInstaller(const Package& package,const std::wstring& directory,DWORD& ex
         struct ProcessHandles {PROCESS_INFORMATION& p;~ProcessHandles(){CloseHandle(p.hThread);CloseHandle(p.hProcess);}} handles{process};
         Require(WaitForSingleObject(process.hProcess,INFINITE)==WAIT_OBJECT_0,"Cannot wait for official OpenGlass installer");
         Require(GetExitCodeProcess(process.hProcess,&exitCode)!=FALSE,"Cannot read official OpenGlass installer result");
+        GlassInstallLog::LineFormat(L"Official OpenGlass installer raw exit=%lu; log=%s",exitCode,logPath.c_str());
         return true;
     }catch(const std::exception& e){error=L"OpenGlass: "+GlassReleaseClient::Wide(e.what());}
      catch(...){error=L"OpenGlass installer execution failed";}
