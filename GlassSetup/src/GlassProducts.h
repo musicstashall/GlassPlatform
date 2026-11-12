@@ -90,6 +90,17 @@ constexpr bool MixedOpenGlassRemoval(const Selection& s,bool forceClean,bool os6
         !s.secureUxTheme&&!s.secureUxThemeRemove&&!s.cleanupUserData&&!forceClean;
 }
 
+// First UI lane: graphics apply uses an existing official OG prerequisite.
+// Do not offer a plan whose vendor commit-last protocol cannot run it yet.
+constexpr bool ResourcesApplyReady(const Selection& s,bool os64,bool upstreamReady) noexcept {
+    return os64&&upstreamReady&&!s.openGlass&&!s.Removes(3);
+}
+
+constexpr bool ResourcesPlanReady(const Selection& s,bool os64,bool upstreamReady) noexcept {
+    return (!s.openGlassResources||ResourcesApplyReady(s,os64,upstreamReady))&&
+        (!s.Removes(6)||(os64&&!s.openGlass&&!s.Removes(3)));
+}
+
 // Pure managed removal needs the installed MSI baseline, not new release media.
 constexpr bool OnlyManagedRemoval(const Selection& choice) noexcept {
     return choice.removeMask && !choice.secureUxTheme && !choice.secureUxThemeRemove &&

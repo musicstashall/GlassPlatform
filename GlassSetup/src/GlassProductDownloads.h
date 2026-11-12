@@ -27,7 +27,7 @@ public:
         ULONGLONG started=GetTickCount64();
         ~Job(){cancel=true;if(thread.joinable())thread.join();if(!directory.empty())GlassMaintenanceCache::RemoveFlat(directory);}
     };
-    std::array<std::shared_ptr<Job>,6> jobs{};
+    std::array<std::shared_ptr<Job>,7> jobs{};
     std::vector<std::shared_ptr<Job>> retired;
     bool stopped=false;
     ~GlassProductDownloads(){Stop();Join();}
@@ -42,11 +42,11 @@ public:
         }
     }
     void Join() {for(auto& job:jobs)job.reset();retired.clear();}
-    bool Ready(const std::array<bool,6>& selected) const {
+    bool Ready(const std::array<bool,7>& selected) const {
         for(std::size_t i=0;i<jobs.size();++i)if(selected[i]&&(!jobs[i]||!jobs[i]->done.load()||!jobs[i]->ok||!jobs[i]->published||jobs[i]->cancel.load()))return false;
         return true;
     }
-    void Reconcile(const std::array<bool,6>& selected,const GlassPackageCatalog::Catalog& catalog) {
+    void Reconcile(const std::array<bool,7>& selected,const GlassPackageCatalog::Catalog& catalog) {
         if(stopped)return;
         retired.erase(std::remove_if(retired.begin(),retired.end(),[](const auto& job){return job->done.load();}),retired.end());
         for(std::size_t i=0;i<jobs.size();++i) {
@@ -60,7 +60,8 @@ public:
                 continue;
             }
             job=std::make_shared<Job>();auto current=job.get();
-            if(i<5&&catalog.products[i])job->total=catalog.products[i]->size;
+            const auto catalogIndex=i==6?5:i; // UI slot 5 belongs to SUT.
+            if(i!=5&&catalog.products[catalogIndex])job->total=catalog.products[catalogIndex]->size;
             try {
                 job->thread=std::thread([current,catalog,i]() {
                     InstallLog::LineFormat(L"Product preparation: start index=%u",static_cast<unsigned>(i));
@@ -79,9 +80,10 @@ public:
                             current->ok=GlassOpenGlassPackage::PrepareInstallerForCurrentSystem(current->directory,current->cancel,package,current->error);
                             current->path=package.setup;
                         }
-                        else if(i<4) {
-                            current->ok=GlassPackageAcquisition::Prepare(static_cast<GlassPackageCatalog::Product>(i),catalog,current->directory,current->cancel,current->error);
-                            if(current->ok)current->path=current->directory+L"\\"+GlassReleaseClient::Wide(GlassPackageCatalog::kFiles[i]);
+                        else if(i<4||i==6) {
+                            const auto product=static_cast<GlassPackageCatalog::Product>(i==6?5:i);
+                            current->ok=GlassPackageAcquisition::Prepare(product,catalog,current->directory,current->cancel,current->error);
+                            if(current->ok)current->path=current->directory+L"\\"+GlassReleaseClient::Wide(GlassPackageCatalog::kFiles[static_cast<std::size_t>(product)]);
                         } else {
                             GlassSecureUxPackage::Package package;
                             current->ok=GlassSecureUxPackage::Prepare(current->directory,current->cancel,package,current->error);

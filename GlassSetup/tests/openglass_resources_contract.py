@@ -66,7 +66,7 @@ assert '{'+package.get('ProductCode')+'}' in codes
 publish=(root/'GlassSetup/scripts/New-ReleaseCatalog.ps1').read_text()
 assert "openglassResources='OpenGlassResources-x64.msi'" in publish
 assert package.get('UpgradeCode') in publish and package.get('ProductCode') in publish
-print('PASS: Resources catalog/publisher/acquisition fixed identity, AMD64 guard, non-colliding prepared slot; UI/execution integration still pending')
+print('PASS: Resources catalog/publisher/acquisition fixed identity, AMD64 guard, non-colliding prepared slot; UI/engine connected; combined fresh OG protocol still pending')
 
 inspection=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
 assert '{ GlassInstallMsi::kProductOpenGlassResourcesX64, nullptr, &report.openGlassResources }' in inspection
@@ -94,4 +94,4 @@ assert '{Product::OpenGlassResources,os64&&selection_.openGlassResources}' in en
 assert 'steps.push_back({P::Product::OpenGlassResources,L"OpenGlassResources-x64.msi",root,L"OpenGlass Resources"})' in engine
 assert 'case P::Product::OpenGlassResources:current=GlassInstallMsi::kProductOpenGlassResourcesX64' in engine
 assert 'constexpr unsigned sourceRows[]={0,1,2,5,4,6}' in engine
-print('PASS: Resources engine acquire/apply/remove, independent fixed-root snapshot/restore and cache wiring; UI and fresh OG mixed protocol remain pending')
+print('PASS: Resources engine acquire/apply/remove, independent fixed-root snapshot/restore and cache wiring; fresh OG mixed protocol remains pending')

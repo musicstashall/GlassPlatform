@@ -629,6 +629,11 @@ Report Run(const Inputs& in)
             report.og.installed=true;report.og.residual=false;report.og.residualSafe=false;
             report.og.installedVersion.clear();report.og.installedPackageVersion.clear();
             report.og.installedPayloadVersion=PayloadFileVersion(official.directory+L"\\OpenGlass.dll");
+            const auto dll=official.directory+L"\\OpenGlass.dll";
+            const auto attrs=GetFileAttributesW(dll.c_str());
+            report.openGlassResourcesPrerequisite=attrs!=INVALID_FILE_ATTRIBUTES &&
+                !(attrs&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) &&
+                GlassInstallUtil::IsSafeInstallPath(dll);
             report.og.integrityKnown=false; // Registration/FileVersion is not a payload hash check.
             report.og.damaged=report.og.installedPayloadVersion.empty();report.og.reasons.clear();
             if(report.og.damaged)AddReason(report.og,Reason::FileMissing);

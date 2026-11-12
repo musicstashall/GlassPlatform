@@ -25,10 +25,10 @@ HRESULT CoInitializeEx(void*,int){return 0;}void CoUninitialize(){}
 bool FAILED(HRESULT h){return h<0;}bool SUCCEEDED(HRESULT h){return h>=0;}
 namespace InstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
 namespace GlassReleaseClient {inline thread_local std::function<void(std::uint64_t,std::uint64_t)> packageProgress;std::wstring Wide(const char*){return L"package.msi";}}
-namespace GlassSetupSourceLayout {std::array<std::wstring,6> prepared;void SetPrepared(std::size_t i,const std::wstring& path){prepared[i]=path;}}
+namespace GlassSetupSourceLayout {std::array<std::wstring,7> prepared;void SetPrepared(std::size_t i,const std::wstring& path){prepared[i]=path;}}
 namespace GlassMaintenanceCache {std::atomic<int> removed{0};bool RemoveFlat(const std::wstring&){++removed;return true;}}
-namespace GlassPackageCatalog {enum class Product:std::size_t {A,B,C,D,E};struct Asset{unsigned size=100;};struct Catalog{std::array<std::shared_ptr<Asset>,5> products{};};constexpr const char* kFiles[]={"a","b","c","d","e"};}
-std::array<std::atomic<int>,6> calls{};std::array<std::atomic<bool>,6> release{},fail{};
+namespace GlassPackageCatalog {enum class Product:std::size_t {A,B,C,D,E,F};struct Asset{unsigned size=100;};struct Catalog{std::array<std::shared_ptr<Asset>,6> products{};};constexpr const char* kFiles[]={"a","b","c","d","e","resources"};}
+std::array<std::atomic<int>,7> calls{};std::array<std::atomic<bool>,7> release{},fail{};
 std::atomic<int> serial{0};
 bool provider(std::size_t i,const std::atomic<bool>& cancel,std::wstring& error){
  ++calls[i];if(GlassReleaseClient::packageProgress)GlassReleaseClient::packageProgress(50,100);
@@ -37,15 +37,19 @@ bool provider(std::size_t i,const std::atomic<bool>& cancel,std::wstring& error)
 }
 namespace GlassPackageAcquisition {
 bool CreateWorkspace(std::wstring& path){path=L"private-"+std::to_wstring(++serial);return true;}
-bool Prepare(GlassPackageCatalog::Product p,const GlassPackageCatalog::Catalog&,const std::wstring&,const std::atomic<bool>& cancel,std::wstring& error){return provider(static_cast<std::size_t>(p),cancel,error);}
+bool Prepare(GlassPackageCatalog::Product p,const GlassPackageCatalog::Catalog&,const std::wstring&,const std::atomic<bool>& cancel,std::wstring& error){return provider(p==GlassPackageCatalog::Product::F?6:static_cast<std::size_t>(p),cancel,error);}
 }
 namespace GlassSecureUxPackage {struct Package{std::wstring path;};bool Prepare(const std::wstring& dir,const std::atomic<bool>& cancel,Package& p,std::wstring& error){p.path=dir+L"/original.msi";return provider(5,cancel,error);}}
+'''
+prefix+=r'''
+namespace GlassOpenGlassPackage {struct Package{std::wstring setup;};bool PrepareInstallerForCurrentSystem(const std::wstring& dir,const std::atomic<bool>& cancel,Package& p,std::wstring& error){p.setup=dir+L"/signed.exe";return provider(4,cancel,error);}}
 '''
 main=r'''
 template<class P>void wait(P predicate){auto deadline=GetTickCount64()+3000;while(!predicate()){assert(GetTickCount64()<deadline);std::this_thread::sleep_for(std::chrono::milliseconds(1));}}
 int main(){
  GlassProductDownloads downloads;GlassPackageCatalog::Catalog catalog;
- std::array<bool,6> selected{{true,true,true,true,true,true}};
+ std::array<bool,7> selected{{true,true,true,true,true,true,true}};
+ downloads.Reconcile({},catalog);for(const auto& c:calls)assert(c==0);
  downloads.Reconcile(selected,catalog);wait([]{for(auto& c:calls)if(c.load()!=1)return false;return true;});
  assert(!downloads.Ready(selected));wait([&]{return downloads.jobs[0]->bytes==50;});
  auto stale=downloads.jobs[1];selected[1]=false;downloads.Reconcile(selected,catalog);assert(stale->cancel&&GlassSetupSourceLayout::prepared[1].empty());
@@ -56,10 +60,12 @@ int main(){
  assert(GlassSetupSourceLayout::prepared[1].find(downloads.jobs[1]->directory)==0);
  assert(GlassSetupSourceLayout::prepared[2].empty()&&!downloads.Ready(selected));
  fail[2]=false;downloads.Retry(2);downloads.Reconcile(selected,catalog);wait([&]{return downloads.jobs[2]->done.load();});downloads.Reconcile(selected,catalog);
- assert(downloads.Ready(selected));assert(calls[2]==2);assert(!GlassSetupSourceLayout::prepared[5].empty());
+ assert(downloads.Ready(selected));assert(calls[2]==2);assert(!GlassSetupSourceLayout::prepared[5].empty());assert(!GlassSetupSourceLayout::prepared[6].empty());
+ assert(GlassSetupSourceLayout::prepared[5].find(L"original.msi")!=std::wstring::npos);
+ assert(GlassSetupSourceLayout::prepared[6].find(downloads.jobs[6]->directory)==0);
  selected[0]=false;downloads.Reconcile(selected,catalog);assert(GlassSetupSourceLayout::prepared[0].empty());
  stale.reset();downloads.Stop();downloads.Join();for(auto& p:GlassSetupSourceLayout::prepared)assert(p.empty());assert(GlassMaintenanceCache::removed==serial);
- std::cout<<"PASS: six parallel production jobs, cancellation/reselection generations, failed retry, ready gate, verified hints, cleanup\n";
+ std::cout<<"PASS: seven parallel production jobs, cancellation/reselection generations, failed retry, ready gate, verified hints, cleanup\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='glass-product-downloads-') as d:

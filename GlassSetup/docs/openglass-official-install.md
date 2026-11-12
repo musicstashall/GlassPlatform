@@ -506,3 +506,55 @@ empty-inventory preview, cancel-decision и verify_resources.
 
 Сборка: GlassUnins Release|x86 → GlassSetup Release|x86; Resources MSI пересобрать
 OpenGlassResources-x64 Release|x64. GlassShared не менялся.
+
+### Resources integration: Setup card, native control, IPC and downloads
+
+Карточка **OpenGlass Resources** теперь подключена к ComponentsJson на x64,
+с каталогом `openglassResources` (MSI catalog index 5), отдельным installed
+report, MSI-версиями серверного/локального источников, capability и состоянием.
+На x86 hidden=true; нативный флажок также скрыт. Startup/maintenance inventory,
+preview, full-clean review и HasSelectedComponent учитывают дополнение.
+Apply/Cancel/Remove проходят стандартный component IPC; removal bit 64 не
+пересекается с SUT и Settings32. Нет неявного выбора OG или других продуктов.
+
+Поддерживаемый пользовательский сценарий этого этапа — Resources при **уже
+установленном официальном OG**, без OG Apply/Remove в том же плане. При отсутствии
+зависимости или выборе операции OG карточка сохраняется в каталоге, Apply
+недоступен; компактная нейтральная подпись и подробности RU/EN объясняют причину.
+Remove установленного/осиротевшего Resources остаётся доступен без OG. Если
+пользователь сначала выбрал Resources, затем OG, Next блокируется и показывает
+пояснение о раздельных операциях; пользовательский выбор не снимается молча.
+Bulk recommendations, если рекомендуют OG, не добавляют конфликтующий Resources
+в тот же batch. Fresh OG + Resources за один проход всё ещё не реализован;
+это явное ограничение, а не утверждение о полной готовности интеграции.
+
+Download coordinator расширен до семи UI jobs: 0..4 прежние Glass/OG, 5 SUT,
+6 Resources. Для job 6 MSI catalog index явно равен 5; prepared hint slot 6,
+не SUT slot 5. Resources использует существующий trusted acquisition, private
+workspace, progress/cancel/retry и cleanup lifetime. Prepare/download стартует
+только после Next, не при появлении/выборе карточки. Источник beside Setup либо
+packages/ — `OpenGlassResources-x64.msi`; remote требует опубликованной записи
+openglassResources в version.json. Наличие карточки не заменяет наличие пакета.
+Серверную запись создаёт ранее подключённый New-ReleaseCatalog.ps1.
+
+Native fallback: отдельный флажок в четвёртом ряду, язык/шрифты/DPI/видимость/
+loading/debug locks подключены. При недоступной зависимости в подписи есть
+пояснение; выбранный конфликтующий флажок остаётся доступен для отмены.
+Реальная проверка компоновки WebView2/GDI на Windows ещё нужна.
+
+PASS: новые compiled actual UI DownloadSelection/HasSelectedComponent/
+ComponentsReady adapters (архитектура/зависимость/конфликт/Next wait/orphan remove),
+production RU/EN DOM seventh card/icon/refusal/Apply/Remove/Cancel/progress/x86
+hiding/recommendations; coordinator с семью параллельными fake providers под
+ASan/UBSan, проверка независимых SUT/Resources hints и очистки; existing Next gate,
+семипродуктовый download DOM, recommendations и composition motion DOM; product
+planner/scheduler/catalog, actual execution plan, OG engine/mixed worker,
+empty-inventory Preview, Resources XML/source contract и verify_resources.
+Windows/MSVC/WiX/реальные install/remove/rollback здесь не запускались.
+
+Сборка: GlassUnins Release|x86 → GlassSetup Release|x86 (общий HTML/header).
+OpenGlassResources-x64 Release|x64 нужен для получения самого MSI; поместить
+проверенный подписанный MSI рядом с Setup или опубликовать его с каталогом.
+GlassShared не менялся. Единый fresh OG→Resources commit/partial-result протокол
+и Resources controls в GlassUnins остаются следующими незавершёнными частями;
+штатный ARP uninstaller самого Resources MSI сохранён.
