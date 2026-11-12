@@ -27,7 +27,7 @@ struct RegistryValueSnapshot {
 
 struct SessionState {
     std::function<bool()> restoreOpenGlassFiles;
-    unsigned productMask = 0x7Fu; // Product rows eligible for this transaction only.
+    unsigned productMask = 0x3Fu; // Product rows eligible for this transaction only.
     std::wstring workspaceDir;
     std::wstring x64Dir;
     std::wstring x86Dir;
@@ -35,6 +35,7 @@ struct SessionState {
     std::wstring backupX64;
     std::wstring backupX86;
     std::wstring backupOpenGlass;
+    std::wstring resourcesDir, backupResources;
     std::vector<ProductSnapshot> oldProducts;
     std::vector<RegistryValueSnapshot> registryValues;
     std::vector<std::wstring> installedThisSession;
@@ -57,7 +58,7 @@ bool CreateSnapshot(
     const std::wstring& openGlassDir,
     bool includeOpenGlass,
     CopyProgressFn onProgress,
-    const std::atomic_bool* cancelled = nullptr, unsigned productMask = 0x7Fu) noexcept;
+    const std::atomic_bool* cancelled = nullptr, unsigned productMask = 0x3Fu) noexcept;
 
 void NoteModified(SessionState& state, const wchar_t* productCode) noexcept;
 void NoteInstalled(SessionState& state, const wchar_t* productCode) noexcept;

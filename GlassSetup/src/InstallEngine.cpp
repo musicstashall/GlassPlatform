@@ -20,6 +20,7 @@
 #include "../res/resource.h"
 #include <GlassPlatformTask.h>
 #include <InjectModuleScan.h>
+#include <utility>
 #include <OpenGlassHostState.h>
 #include <msi.h>
 #include <msiquery.h>
@@ -207,6 +208,7 @@ InstallEngine::~InstallEngine() noexcept {
         errorPageShown_ = nullptr;
     }
     if (!preserveSnapshot_) GlassInstallRollback::CleanupSnapshot(rollbackSession_);
+    if(!preserveOfficialResourcesSnapshot_)GlassInstallRollback::CleanupSnapshot(officialResourcesRollback_);
     if (!tempDir_.empty()) {
         (void)RemoveDirectoryTree(tempDir_);
         tempDir_.clear();
@@ -558,11 +560,76 @@ bool InstallEngine::CommitOfficialOpenGlass(bool removing) noexcept {
         if(code==ERROR_SUCCESS_REBOOT_REQUIRED)AddFinishWarning(ru?L"OpenGlass: требуется перезагрузка":L"OpenGlass: restart required",
             ru?L"Официальный установщик запросил перезагрузку Windows.":L"The official installer requested a Windows restart.");
         InstallLog::Line(L"OpenGlass official transaction confirmed; no Glass rollback claimed");
-        SetStatus(labels_.finalize,10000);return true;
+        SetStatus(labels_.finalize,selection_.openGlassResources?9600:10000);return true;
     }catch(...) {
         if(attempted)rollbackSucceeded_.store(false,std::memory_order_release);
         SetFailure(ru?L"Операция OpenGlass завершилась ошибкой; автоматический откат upstream не выполнялся.":
             L"OpenGlass operation failed; no automatic upstream rollback was performed.",ERROR_INSTALL_FAILURE);return false;
+    }
+}
+
+// A separate reversible graphics transaction surrounds the irreversible OG commit.
+// Its baseline is captured before ANY managed/vendor mutation, never afterward.
+bool InstallEngine::OfficialResourcesPhase(bool preparing) noexcept {
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    try {
+        std::wstring root;
+        if(!GlassInstallUtil::ResolveOpenGlassResourcesRoot(root)) {
+            SetFailure(L"OpenGlass Resources root unavailable",GetLastError());return false;
+        }
+        if(preparing) {
+            GlassPackageCatalog::Catalog catalog;std::wstring diagnostic,error;
+            if(!EnsureTempWorkspace()){SetFailure(L"Cannot create protected Resources workspace",GetLastError());return false;}
+            (void)GlassPackageAcquisition::FetchCatalog(cancelRequested_,catalog,diagnostic);
+            if(!GlassPackageAcquisition::Prepare(GlassPackageCatalog::Product::OpenGlassResources,
+                catalog,tempDir_,cancelRequested_,error)) {
+                SetFailure(error,ERROR_INSTALL_PACKAGE_REJECTED);return false;
+            }
+            if(!GlassInstallRollback::CreateSnapshot(officialResourcesRollback_,x64Dir_,x86Dir_,openGlassDir_,false,
+                {},&cancelRequested_,64u)) {
+                SetFailure(ru?L"Не удалось сохранить исходное состояние OpenGlass Resources. Продукты не изменены.":
+                    L"Could not snapshot OpenGlass Resources. Products were not changed.",officialResourcesRollback_.copyError);return false;
+            }
+        }
+        const auto savedSelection=selection_;
+        const auto savedPlan=executionPlan_;
+        const bool savedReady=executionPlanReady_,savedScan=scanNativeX64_,savedPending=preparingOfficialResources_;
+        const auto savedMask=procedureMask_;
+        std::swap(rollbackSession_,officialResourcesRollback_);
+        const auto restore=[&]() noexcept {
+            std::swap(rollbackSession_,officialResourcesRollback_);
+            selection_=savedSelection;executionPlan_=savedPlan;executionPlanReady_=savedReady;
+            scanNativeX64_=savedScan;procedureMask_=savedMask;preparingOfficialResources_=savedPending;
+        };
+        struct Restore {const decltype(restore)& fn;~Restore(){fn();}} scope{restore};
+        selection_={};selection_.platform64=selection_.platform32=selection_.glassSettings=selection_.openGlass=false;
+        selection_.independentSettings=true;selection_.openGlassResources=true;
+        scanNativeX64_=true;procedureMask_=64u;preparingOfficialResources_=preparing;
+        if(!BuildExecutionPlan())return false;
+        if(preparing)return true;
+        // Cancellation closed at official OG commit. Only the graphics MSI and
+        // its own checked baseline participate in rollback from this point.
+        const auto path=tempDir_+L"\\OpenGlassResources-x64.msi";
+        if(RunOneMsi(path,root,L"OpenGlass Resources",9600,350)) {
+            GlassInstallRollback::CleanupSnapshot(rollbackSession_);
+            LaunchSelectedProducts(); // Persist the actual acquired MSI, no host launch.
+            return true;
+        }
+        const auto error=ErrorText();
+        const auto code=GlassInstallMsi::kProductOpenGlassResourcesX64;
+        bool modified=false;
+        for(const auto& item:rollbackSession_.modifiedProducts)modified=modified||_wcsicmp(item.c_str(),code)==0;
+        if(GlassInstallMsi::IsProductInstalled(code)&&(modified||rollbackSession_.oldProducts.empty()))
+            GlassInstallRollback::NoteInstalled(rollbackSession_,code); // Include failed MSI's possible registration.
+        const bool restored=GlassInstallRollback::ExecuteRollback(rollbackSession_,{});
+        preserveOfficialResourcesSnapshot_=!restored;
+        SetFailure(error+(restored?(ru?L" Исходное состояние Resources восстановлено.":L" Resources baseline restored."):
+            (ru?L" Откат Resources не завершён. Копия: ":L" Resources rollback incomplete. Backup: ")+rollbackSession_.workspaceDir),ERROR_INSTALL_FAILURE);
+        return false;
+    }catch(...) {
+        preserveOfficialResourcesSnapshot_=true;
+        SetFailure(ru?L"Операция Resources прервана; сохраните журнал и копию для восстановления.":
+            L"Resources operation interrupted; retain the log and recovery snapshot.",ERROR_INSTALL_FAILURE);return false;
     }
 }
 
@@ -577,22 +644,37 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
     if(self->mixedOpenGlass_) {
         // Preparation failure changes no products. Keep the staged EXE until
         // after managed commit; the Glass worker must never own the OG row.
-        if(self->PrepareOfficialOpenGlass(mixedRemoval)) {
+        const bool resources=self->selection_.openGlassResources;
+        if(self->PrepareOfficialOpenGlass(mixedRemoval)&&(!resources||self->OfficialResourcesPhase(true))) {
             const bool originalApply=self->selection_.openGlass;
             const auto originalRemoveMask=self->selection_.removeMask;
             self->selection_.openGlass=false;
+            self->selection_.openGlassResources=false;
             self->selection_.removeMask&=~8u;
-            self->procedureMask_&=~8u;
-            RunGlassWorker(p);
+            self->procedureMask_&=~(8u|64u);
+            const bool managed=GlassProducts::HasPackageApply(self->selection_);
+            if(managed)RunGlassWorker(p);
+            else self->succeeded_=true;
             self->selection_.openGlass=originalApply;
+            self->selection_.openGlassResources=resources;
             self->selection_.removeMask=originalRemoveMask;
             if(self->succeeded_) {
                 self->succeeded_=self->CommitOfficialOpenGlass(mixedRemoval);
                 if(!self->succeeded_) {
                     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
                     self->rollbackSucceeded_.store(false,std::memory_order_release);
-                    self->SetFailure((ru?L"План выполнен частично: изменения Glass сохранены, финальная операция OpenGlass не подтверждена. Общий откат не выполнялся. ":
-                        L"Plan partially completed: Glass changes were committed; the final OpenGlass operation was not confirmed. No overall rollback was performed. ")+self->ErrorText(),ERROR_INSTALL_FAILURE);
+                    self->SetFailure((managed?(ru?L"План выполнен частично: изменения Glass сохранены, финальная операция OpenGlass не подтверждена. Общий откат не выполнялся. ":
+                        L"Plan partially completed: Glass changes were committed; the final OpenGlass operation was not confirmed. No overall rollback was performed. "):
+                        (ru?L"Resources не запускались. ":L"Resources was not started. "))+self->ErrorText(),ERROR_INSTALL_FAILURE);
+                }
+                if(self->succeeded_&&resources) {
+                    self->succeeded_=self->OfficialResourcesPhase(false);
+                    if(!self->succeeded_) {
+                        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+                        self->rollbackSucceeded_.store(false,std::memory_order_release);
+                        self->SetFailure((ru?L"План выполнен частично: OpenGlass установлен/обновлён, предыдущие изменения Glass сохранены. Установка Resources не подтверждена; общий откат не выполнялся. ":
+                            L"Plan partially completed: OpenGlass installed/updated and previous Glass changes retained. Resources installation was not confirmed; no overall rollback was performed. ")+self->ErrorText(),ERROR_INSTALL_FAILURE);
+                    }else self->SetStatus(self->labels_.finalize,10000);
                 }
             }
         }
@@ -844,6 +926,12 @@ bool InstallEngine::Start(
     hostLaunchExpected_.store(false, std::memory_order_relaxed);
 
     selection_=GlassProducts::NormalizeInstall(selection_,GlassInstallUtil::IsOs64Bit());
+    if((selection_.openGlassResources||selection_.Removes(6))&&forceClean_) {
+        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+        SetFailure(ru?L"OpenGlass Resources нельзя совмещать с принудительной очисткой.":
+            L"OpenGlass Resources cannot be combined with forced cleanup.",ERROR_INSTALL_PACKAGE_REJECTED);
+        return false;
+    }
     procedureMask_=GlassProcedurePlan::MutationMask(selection_,GlassInstallUtil::IsOs64Bit());
     auxiliaryOnly_=procedureMask_==8u && selection_.Removes(3) && !forceClean_ &&
         !GlassOpenGlassFiles::HasReceipt(openGlassDir_) &&
@@ -1216,7 +1304,8 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
         {Product::Platform32,selection_.platform32},
         {Product::Settings64,selection_.Settings64(os64)},
         {Product::Settings32,selection_.Settings32(os64)},
-        {Product::OpenGlass,os64&&selection_.openGlass}
+        {Product::OpenGlass,os64&&selection_.openGlass},
+        {Product::OpenGlassResources,os64&&selection_.openGlassResources}
     };
     int total=0,done=0;
     for(const auto& p:packages)if(p.selected)++total;
@@ -1273,6 +1362,7 @@ bool InstallEngine::RecheckRelatedProducts(const wchar_t* productCode) noexcept 
         {GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5030}"},
         {GlassInstallMsi::kProductSettingsX64,nullptr,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5040}"},
         {GlassInstallMsi::kProductSettingsX86,nullptr,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5050}"},
+        {GlassInstallMsi::kProductOpenGlassResourcesX64,nullptr,L"{A5571574-00E7-43AD-81DF-B65D1AE07699}"},
         {GlassInstallMsi::kProductSecureUxThemeX64,nullptr,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5080}"},
         {GlassInstallMsi::kProductSecureUxThemeX86,nullptr,L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5090}"},
     };
@@ -1714,6 +1804,7 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
             {P::Product::Platform32,GlassInstallMsi::kProductPlatformX86,GlassInstallMsi::kLegacyPlatformX86,L"Glass-x86.msi",selection_.platform32,&report.x86},
             {P::Product::Settings64,GlassInstallMsi::kProductSettingsX64,nullptr,L"GlassSettings-x64.msi",selection_.Settings64(scanNativeX64_),&report.settings64},
             {P::Product::Settings32,GlassInstallMsi::kProductSettingsX86,nullptr,L"GlassSettings-x86.msi",selection_.Settings32(scanNativeX64_),&report.settings32},
+            {P::Product::OpenGlassResources,GlassInstallMsi::kProductOpenGlassResourcesX64,nullptr,L"OpenGlassResources-x64.msi",selection_.openGlassResources,&report.openGlassResources},
             {P::Product::OpenGlass,GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass,L"OpenGlass-x64.msi",selection_.openGlass,&report.og}
         };
         std::array<P::Facts,P::kProductCount> facts{};
@@ -1872,6 +1963,20 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
             request.actions[sutIndex]=P::Action::Install;
         }
         if(IsCancelRequested())return false;
+        if(selection_.openGlassResources&&!preparingOfficialResources_) {
+            GlassOpenGlassInstall::Record upstream;std::wstring detail;
+            if(!GlassOpenGlassInstall::Query(upstream,detail) || !upstream.installed ||
+               !GlassInstallUtil::IsSafeInstallPath(upstream.directory+L"\\OpenGlass.dll"))
+                return refuse(L"OpenGlass Resources needs a verified existing upstream OpenGlass install");
+            const auto attrs=GetFileAttributesW((upstream.directory+L"\\OpenGlass.dll").c_str());
+            if(attrs==INVALID_FILE_ATTRIBUTES || (attrs&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)))
+                return refuse(L"OpenGlass Resources prerequisite DLL unavailable");
+            facts[P::Index(P::Product::OpenGlass)].presence=P::Presence::Installed;
+        }
+        if(selection_.openGlassResources&&preparingOfficialResources_) {
+            if(openGlassPackage_.version.empty())return refuse(L"Official OG prerequisite was not prepared");
+            facts[P::Index(P::Product::OpenGlass)].presence=P::Presence::Installed;
+        }
         executionPlan_=P::Build(facts,request);
         if(!executionPlan_.valid) {
             for(std::size_t i=0;i<P::kProductCount;++i)if(executionPlan_.rows[i].error!=P::Error::None)
@@ -1889,8 +1994,8 @@ bool InstallEngine::PrepareFullRemovalCleanup() noexcept {
     try {
         unsigned installed=0;
         const wchar_t* codes[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
-            GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductOpenGlass,nullptr,GlassInstallMsi::kProductSettingsX86};
-        for(unsigned i=0;i<6;++i)if(codes[i]&&GlassInstallMsi::IsProductInstalled(codes[i]))installed|=1u<<i;
+            GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductOpenGlass,nullptr,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlassResourcesX64};
+        for(unsigned i=0;i<std::size(codes);++i)if(codes[i]&&GlassInstallMsi::IsProductInstalled(codes[i]))installed|=1u<<i;
         if(GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX64))installed|=1;
         if(GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyPlatformX86))installed|=2;
         if(GlassInstallMsi::IsProductInstalled(GlassInstallMsi::kLegacyOpenGlass))installed|=8;
@@ -1979,6 +2084,7 @@ bool InstallEngine::RemoveManagedProduct(GlassProductPlan::Product product) noex
     case P::Product::Platform64:current=GlassInstallMsi::kProductPlatformX64;legacy=GlassInstallMsi::kLegacyPlatformX64;title=L"Platform x64";break;
     case P::Product::Platform32:current=GlassInstallMsi::kProductPlatformX86;legacy=GlassInstallMsi::kLegacyPlatformX86;title=L"Platform x86";break;
     case P::Product::Settings64:current=GlassInstallMsi::kProductSettingsX64;title=L"GlassSettings x64";break;
+    case P::Product::OpenGlassResources:current=GlassInstallMsi::kProductOpenGlassResourcesX64;title=L"OpenGlass Resources";break;
     case P::Product::Settings32:current=GlassInstallMsi::kProductSettingsX86;title=L"GlassSettings x86";break;
     case P::Product::OpenGlass:current=GlassInstallMsi::kProductOpenGlass;legacy=GlassInstallMsi::kLegacyOpenGlass;title=L"OpenGlass";break;
     default:return false;
@@ -2077,6 +2183,11 @@ bool InstallEngine::RunMsiSequence() noexcept {
         if(!P::IsMutation(plan.rows[P::Index(product)].action))continue;
         if(product==P::Product::Platform64)steps.push_back({P::Product::Platform64,L"Glass-x64.msi",x64Dir_,labels_.platform64});
         if(product==P::Product::Platform32)steps.push_back({P::Product::Platform32,L"Glass-x86.msi",x86Dir_,labels_.platform32});
+        if(product==P::Product::OpenGlassResources) {
+            std::wstring root;
+            if(!GlassInstallUtil::ResolveOpenGlassResourcesRoot(root)){SetFailure(L"OpenGlass Resources root unavailable",GetLastError());return false;}
+            steps.push_back({P::Product::OpenGlassResources,L"OpenGlassResources-x64.msi",root,L"OpenGlass Resources"});
+        }
 
     }
 
@@ -2292,7 +2403,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         // Publish the actual acquired sources, not stale embedded packages. Keep
         // sources for unmodified installed products in Current across partial updates.
         const wchar_t* names[]={L"Glass-x64.msi",L"Glass-x86.msi",L"GlassSettings-x64.msi",
-            L"GlassSettings-x86.msi",is64?L"SecureUxTheme_x64.msi":L"SecureUxTheme_x86.msi"};
+            L"GlassSettings-x86.msi",is64?L"SecureUxTheme_x64.msi":L"SecureUxTheme_x86.msi",L"OpenGlassResources-x64.msi"};
         std::vector<std::wstring> sources;
         sources.reserve(std::size(names));
         for(const auto* name:names) {
@@ -2301,7 +2412,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
                 acquired:GlassMaintenanceCache::CurrentFile(name));
         }
         std::vector<GlassMaintenanceCache::Blob> cacheBlobs;
-        constexpr unsigned sourceRows[]={0,1,2,5,4};
+        constexpr unsigned sourceRows[]={0,1,2,5,4,6};
         for(std::size_t i=0;i<std::size(names);++i)if(!sources[i].empty() && !selection_.Removes(sourceRows[i]))
             cacheBlobs.push_back({0,names[i],sources[i].c_str(),sources[i]==tempDir_+L"\\"+names[i]});
         std::wstring cacheFailure;
@@ -2679,12 +2790,12 @@ bool InstallEngine::UndoCleanInstall() noexcept {
         // A failed MSI can leave an unexpected registration that was never
         // recorded as successfully installed. Do not call a partial cleanup a
         // successful clean rollback or guess which product owns it.
-        const wchar_t* known[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
+        const wchar_t* known[]={GlassInstallMsi::kProductOpenGlassResourcesX64,GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
             GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,
             GlassInstallMsi::kProductSecureUxThemeX64,GlassInstallMsi::kProductSecureUxThemeX86,
             GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyPlatformX64,
             GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
-        constexpr unsigned rows[]={1,2,4,32,16,16,8,1,2,8};
+        constexpr unsigned rows[]={64,1,2,4,32,16,16,8,1,2,8};
         for (unsigned index=0;index<std::size(known);++index) {
             const auto* code=known[index];
             if(!(procedureMask_&rows[index]))continue;

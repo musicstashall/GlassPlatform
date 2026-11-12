@@ -60,6 +60,9 @@ struct Report {
     ProductReport secureUxTheme;
     GlassSecureUxPackage::Offer secureUxOffer;
     ProductReport og;
+    // Graphics MSI inventory is independent of upstream OG, its files/services.
+    ProductReport openGlassResources;
+    bool openGlassResourcesPrerequisite = false;
 };
 
 struct Inputs {

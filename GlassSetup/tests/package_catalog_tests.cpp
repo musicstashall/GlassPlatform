@@ -49,6 +49,21 @@ int main() {
     for(std::size_t i=0;i<kCount;++i){auto a=MakeAsset(kFiles[i]);a["id"]=kIds[i];good["products"].push_back(a);}
     assert(Parse(good.dump(),out,error) && error.empty() && out.setup->downloadable);
     for(const auto& product:out.products) assert(product && product->downloadable);
+    const auto resources=static_cast<std::size_t>(Product::OpenGlassResources);
+    static_assert(resources==5); // Existing catalog IDs retain their indices.
+    static_assert(PreparedIndex(Product::OpenGlassResources)==6); // Slot 5 is SUT.
+    static_assert(PreparedIndex(Product::OpenGlass)==4);
+    static_assert(ResourcesSupported(true)&&!ResourcesSupported(false));
+    assert(out.products[resources]->file=="OpenGlassResources-x64.msi");
+    auto resourcesOnly=json{{"products",json::array({good["products"][resources]})}};
+    assert(Parse(resourcesOnly.dump(),out,error)&&out.products[resources]);
+    assert(!out.products[0]&&!out.products[4]);
+    auto wrongResources=resourcesOnly;wrongResources["products"][0]["file"]="OpenGlass-x64.msi";
+    assert(!Parse(wrongResources.dump(),out,error));
+    wrongResources=resourcesOnly;wrongResources["products"].push_back(wrongResources["products"][0]);
+    assert(!Parse(wrongResources.dump(),out,error));
+    auto oldCatalog=good;oldCatalog["products"].erase(resources);
+    assert(Parse(oldCatalog.dump(),out,error)&&!out.products[resources]&&out.products[3]);
     // A partial product release may link to a different release tag and version.
     auto partial=good;partial["products"][3]["version"]="2.0.0.5";
     partial["products"][3]["url"]="https://github.com/musicstashall/GlassPlatform/releases/download/settings-only/GlassSettings-x86.msi";

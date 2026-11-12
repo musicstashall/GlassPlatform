@@ -268,7 +268,7 @@ unsigned SnapshotProductMask(const wchar_t* code) noexcept {
     using namespace GlassInstallMsi;
     const struct {const wchar_t* code;unsigned mask;} rows[]={
         {kProductPlatformX64,1},{kLegacyPlatformX64,1},{kProductPlatformX86,2},{kLegacyPlatformX86,2},
-        {kProductSettingsX64,4},{kProductSettingsX86,32},{kProductOpenGlass,8},{kLegacyOpenGlass,8},
+        {kProductOpenGlassResourcesX64,64},{kProductSettingsX64,4},{kProductSettingsX86,32},{kProductOpenGlass,8},{kLegacyOpenGlass,8},
         {kProductSecureUxThemeX64,16},{kProductSecureUxThemeX86,16}};
     for(const auto& row:rows)if(code && _wcsicmp(code,row.code)==0)return row.mask;
     return 0x7Fu; // Generic callers still require the old strict checks.
@@ -285,6 +285,7 @@ bool VerifyProductRegistrations(GlassInstallRollback::SessionState& state,
         {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5030}",GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyOpenGlass},
         {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5040}",GlassInstallMsi::kProductSettingsX64,nullptr},
         {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5050}",GlassInstallMsi::kProductSettingsX86,nullptr},
+        {L"{A5571574-00E7-43AD-81DF-B65D1AE07699}",GlassInstallMsi::kProductOpenGlassResourcesX64,nullptr},
         {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5080}",GlassInstallMsi::kProductSecureUxThemeX64,nullptr},
         {L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5090}",GlassInstallMsi::kProductSecureUxThemeX86,nullptr},
     };
@@ -388,6 +389,10 @@ bool CreateSnapshot(
     state.backupX64.clear();
     state.backupX86.clear();
     state.backupOpenGlass.clear();
+    state.resourcesDir.clear();state.backupResources.clear();
+    if((productMask&64u) && !GlassInstallUtil::ResolveOpenGlassResourcesRoot(state.resourcesDir)) {
+        state.copyError=GetLastError();return false;
+    }
     state.copyError = 0;
     state.productPathUnverified = false;
     state.productPathCode.clear();
@@ -417,7 +422,8 @@ bool CreateSnapshot(
     }
     const std::wstring folder=state.workspaceDir;
 
-    if (!TrySnapshotProduct(state, GlassInstallMsi::kProductSettingsX64, x64Dir, cancelled) ||
+    if (!TrySnapshotProduct(state, GlassInstallMsi::kProductOpenGlassResourcesX64, state.resourcesDir, cancelled) ||
+        !TrySnapshotProduct(state, GlassInstallMsi::kProductSettingsX64, x64Dir, cancelled) ||
         !TrySnapshotProduct(state, GlassInstallMsi::kProductSettingsX86, x86Dir, cancelled) ||
         !TrySnapshotProduct(state, GlassInstallMsi::kProductSecureUxThemeX64, x64Dir, cancelled) ||
         !TrySnapshotProduct(state, GlassInstallMsi::kProductSecureUxThemeX86, x86Dir, cancelled) ||
@@ -452,7 +458,8 @@ bool CreateSnapshot(
     const auto source64=(state.productMask&1u)?x64Dir:(state.productMask&4u)?x64Dir+L"\\GlassSettings":std::wstring{};
     const auto source32=(state.productMask&2u)?x86Dir:(state.productMask&32u)?x86Dir+L"\\GlassSettings":std::wstring{};
     uint64_t total = DirBytes(source64, skipInX64, cancelled) + DirBytes(source32, {}, cancelled)
-        + (backupOg ? DirBytes(openGlassDir, {}, cancelled) : 0);
+        + (backupOg ? DirBytes(openGlassDir, {}, cancelled) : 0)
+        + DirBytes(state.resourcesDir, {}, cancelled);
     if (cancelled && cancelled->load(std::memory_order_acquire)) { state.copyError=ERROR_CANCELLED; return false; }
     uint64_t copied = 0;
     bool copiedOk = true;
@@ -503,6 +510,7 @@ bool CreateSnapshot(
     architectureBackup(false,source32,2u,state.backupX86);
     if (backupOg)
         bump(openGlassDir, L"OpenGlass", {}, state.backupOpenGlass);
+    if(state.productMask&64u)bump(state.resourcesDir,L"OpenGlassResources",{},state.backupResources);
 
     GlassInstallLog::LineFormat(L"Rollback snapshot at %s (hadPrior=%d, bytes=%llu)",
         folder.c_str(), state.hadPriorInstall ? 1 : 0, static_cast<unsigned long long>(total));
@@ -539,6 +547,7 @@ bool UninstallSessionProductSafely(SessionState& state,const wchar_t* productCod
              _wcsicmp(productCode,GlassInstallMsi::kProductSettingsX86)==0 ||
              _wcsicmp(productCode,GlassInstallMsi::kProductSecureUxThemeX86)==0) root=&state.x86Dir;
     else if (_wcsicmp(productCode,GlassInstallMsi::kProductOpenGlass)==0) root=&state.openGlassDir;
+    if (_wcsicmp(productCode,GlassInstallMsi::kProductOpenGlassResourcesX64)==0)root=&state.resourcesDir;
     if (!root || root->empty() || state.workspaceDir.empty()) return false;
     const std::wstring cached=state.workspaceDir+L"\\rollback-check-"+productCode+L".msi";
     if (!GlassInstallMsi::CopyLocalPackage(productCode,cached)) return false;
@@ -565,7 +574,7 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
     }
 
     if (!state.hadPriorInstall
-        && state.backupX64.empty() && state.backupX86.empty() && state.backupOpenGlass.empty()) {
+        && state.backupX64.empty() && state.backupX86.empty() && state.backupOpenGlass.empty() && state.backupResources.empty()) {
         if (onProgress) onProgress(10000);
         return uninstallOk;
     }
@@ -573,7 +582,7 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
     // Restoring an MSI can itself trigger MajorUpgrade. Refuse newly appeared
     // or relocated products instead of letting that operation remove them.
     if (!VerifyProductRegistrations(state,nullptr)) return false;
-    const wchar_t* known[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
+    const wchar_t* known[]={GlassInstallMsi::kProductOpenGlassResourcesX64,GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
         GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,
         GlassInstallMsi::kProductSecureUxThemeX64,GlassInstallMsi::kProductSecureUxThemeX86,
         GlassInstallMsi::kProductOpenGlass,GlassInstallMsi::kLegacyPlatformX64,
@@ -636,13 +645,16 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
         }
         }
     } else {
-        uint64_t total = DirBytes(state.backupX64) + DirBytes(state.backupX86) + DirBytes(state.backupOpenGlass);
+        uint64_t total = DirBytes(state.backupX64) + DirBytes(state.backupX86) + DirBytes(state.backupOpenGlass) + DirBytes(state.backupResources);
         if (total == 0) total = 1;
         if (!state.backupX64.empty() && !state.x64Dir.empty()) {
             if (!CopyTree(state.backupX64, state.x64Dir, {}, copied, total, onProgress, copyError)) ok = false;
         }
         if (ok && !state.backupX86.empty() && !state.x86Dir.empty()) {
             if (!CopyTree(state.backupX86, state.x86Dir, {}, copied, total, onProgress, copyError)) ok = false;
+        }
+        if(ok && !state.backupResources.empty() && !state.resourcesDir.empty()) {
+            if(!CopyTree(state.backupResources,state.resourcesDir,{},copied,total,onProgress,copyError))ok=false;
         }
         // File-managed OpenGlass was restored by its checked journal above.
         // Do not overwrite it (or unrelated user files) a second time from a
@@ -697,6 +709,7 @@ bool ExecuteRollback(SessionState& state, CopyProgressFn onProgress, RestoreScop
         GlassInstallMsi::kProductSecureUxThemeX64,
         GlassInstallMsi::kProductSecureUxThemeX86,
         GlassInstallMsi::kProductOpenGlass,
+        GlassInstallMsi::kProductOpenGlassResourcesX64,
         L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5061}",
         L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5062}",
         L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5063}",
@@ -764,6 +777,7 @@ void CleanupSnapshot(SessionState& state) noexcept {
     state.backupX64.clear();
     state.backupX86.clear();
     state.backupOpenGlass.clear();
+    state.backupResources.clear();
 }
 
 } // namespace GlassInstallRollback

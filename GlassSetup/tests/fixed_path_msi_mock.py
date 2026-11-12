@@ -156,7 +156,7 @@ namespace GlassInstallMsi {
  enum class ProductPathCheck {Safe,OutsideRoot,Unverifiable,Cancelled};
  std::wstring ProductCodeFromMsiPath(const std::wstring&){return fake.cachedCode;}
  constexpr wchar_t kProductPlatformX64[]=L"p64",kLegacyPlatformX64[]=L"old64",kProductPlatformX86[]=L"p86",
-  kLegacyPlatformX86[]=L"old86",kProductOpenGlass[]=L"og",kLegacyOpenGlass[]=L"oldog",
+  kLegacyPlatformX86[]=L"old86",kProductOpenGlassResourcesX64[]=L"res",kProductOpenGlass[]=L"og",kLegacyOpenGlass[]=L"oldog",
   kProductSettingsX64[]=L"gs64",kProductSettingsX86[]=L"gs86",
   kProductSecureUxThemeX64[]=L"sut64",kProductSecureUxThemeX86[]=L"sut86";
  ProductPathCheck CheckProductContexts(const wchar_t*,std::wstring&,const std::atomic_bool* = nullptr) noexcept;
@@ -172,7 +172,7 @@ namespace GlassInstallRollback {
  struct ProductSnapshot{std::wstring productCode,installDir,cachedMsiPath,displayVersion;};
  struct SessionState{
   unsigned productMask=0x7Fu;
-  std::wstring workspaceDir=L"secure",x64Dir=L"root",x86Dir=L"root",openGlassDir=L"root";std::vector<ProductSnapshot> oldProducts;
+  std::wstring workspaceDir=L"secure",x64Dir=L"root",x86Dir=L"root",openGlassDir=L"root",resourcesDir=L"resources";std::vector<ProductSnapshot> oldProducts;
   unsigned copyError=0;bool hadPriorInstall=false,productPathUnverified=false;std::wstring productPathCode,productPathDetail;
  };
 }

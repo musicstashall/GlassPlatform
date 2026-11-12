@@ -81,6 +81,8 @@ bool QueryOpenGlassFiles(const std::wstring& openGlassDir, const std::wstring& p
 bool IsOs64Bit() noexcept;
 // Default product roots for a first installation, derived from Windows rather
 // than an inherited environment variable. x64 is empty on 32-bit Windows.
+// Fixed native PF\GlassPlatform\OpenGlass\Resources, never an upstream root.
+bool ResolveOpenGlassResourcesRoot(std::wstring& root) noexcept;
 bool ResolveFixedPlatformRoots(std::wstring& x64, std::wstring& x86) noexcept;
 
 struct InstallRoots {

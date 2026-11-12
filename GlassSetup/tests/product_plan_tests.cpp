@@ -41,7 +41,47 @@ int main() {
     std::size_t cases = 0;
     for (bool os64 : {false, true}) for (auto mode : {P::Mode::Install, P::Mode::RemoveInteractive})
     for (unsigned present = 0; present < 64; ++present) for (unsigned selected = 0; selected < 64; ++selected) {
-        Facts facts = KnownFacts();
+        // Seventh row is append-only: existing IPC/removal bit positions stay fixed.
+    static_assert(P::Index(P::Product::OpenGlassResources)==6);
+    static_assert(P::Index(P::Product::Settings32)==5);
+    static_assert(!P::SupportedOnOs(P::Product::OpenGlassResources,false));
+    static_assert(P::SupportedOnOs(P::Product::OpenGlassResources,true));
+    // Complete core/add-on presence, explicit intent, and architecture matrix.
+    for(bool os64:{false,true})for(unsigned present=0;present<4;++present)
+    for(unsigned coreIntent=0;coreIntent<4;++coreIntent)for(unsigned graphicsIntent=0;graphicsIntent<4;++graphicsIntent) {
+        auto f=KnownFacts();P::Request r;r.os64=os64;
+        const auto og=P::Index(P::Product::OpenGlass),res=P::Index(P::Product::OpenGlassResources);
+        f[og].presence=(present&1)?P::Presence::Installed:P::Presence::Absent;
+        f[res].presence=(present&2)?P::Presence::Installed:P::Presence::Absent;
+        const auto intent=[](unsigned i){return i==0?P::Action::Keep:i==1?P::Action::Install:i==2?P::Action::Remove:P::Action::Repair;};
+        r.actions[og]=intent(coreIntent);r.actions[res]=intent(graphicsIntent);
+        const auto p=P::Build(f,r);
+        if(p.valid) {
+            const auto& graphics=p.rows[res];
+            if(P::IsMutation(graphics.action)&&graphics.action!=P::Action::Remove)
+                assert(os64&&p.rows[og].after==P::Presence::Installed);
+            if(p.rows[og].action==P::Action::Remove && graphicsIntent==0)assert(graphics.after==f[res].presence);
+        }
+        if(graphicsIntent==0)assert(!P::IsMutation(p.rows[res].action)); // no removal cascade
+        if(coreIntent==0)assert(!P::IsMutation(p.rows[og].action)); // no prerequisite auto-apply
+    }
+    {
+        auto f=KnownFacts();P::Request r;
+        r.selected[P::Index(P::Product::OpenGlassResources)]=true;
+        auto p=P::Build(f,r);assert(!p.valid&&p.rows[6].error==P::Error::OpenGlassRequired);
+        r.selected[3]=true;f[3].source=P::Source::Invalid;
+        p=P::Build(f,r);assert(!p.valid&&p.rows[6].error==P::Error::OpenGlassRequired);
+        f[3].source=P::Source::Verified;
+        p=P::Build(f,r);assert(p.valid&&p.rows[6].action==P::Action::Install);
+        f[3].presence=P::Presence::Installed;r.selected[3]=false;
+        p=P::Build(f,r);assert(p.valid&&p.rows[3].action==P::Action::Keep);
+        f[6].presence=P::Presence::Installed;r.selected[6]=false;r.actions[3]=P::Action::Remove;
+        p=P::Build(f,r);assert(p.valid&&p.rows[3].action==P::Action::Remove&&p.rows[6].action==P::Action::Keep);
+        r.actions[6]=P::Action::Remove;p=P::Build(f,r);assert(p.valid&&p.rows[6].action==P::Action::Remove);
+        f[3].presence=P::Presence::Absent;r.actions[3]=P::Action::None;
+        p=P::Build(f,r);assert(p.valid&&p.rows[6].action==P::Action::Remove); // orphan add-on removal
+    }
+    Facts facts = KnownFacts();
         P::Request request;
         request.os64 = os64;
         request.mode = mode;

@@ -9,13 +9,13 @@ const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../res/slideshow.html')
 });
 const d=dom.window.document,send=data=>receive({data:{type:'state',...data}});
 for(const locale of ['ru','en']){
- const components=['x64','x86','settings64','settings32','openglass','secureUxTheme'].map(id=>({id,title:id,checked:true,installed:true,operation:'update',installedVersion:'1.0',targetVersion:'2.0',remoteVersion:'2.0',applySupported:true}));
+ const components=['x64','x86','settings64','settings32','openglass','secureUxTheme','openglassResources'].map(id=>({id,title:id,checked:true,installed:true,operation:'update',installedVersion:'1.0',targetVersion:'2.0',remoteVersion:'2.0',applySupported:true}));
  send({locale,page:'components',components:components.map((c,i)=>({...c,downloadRequired:i!==0})),downloads:[]});
  assert.equal(d.querySelectorAll('.product-transfer').length,0,'selection does not create progress before Next');
  assert.ok(d.querySelector('#product-x64').closest('.c-card').classList.contains('download-local'));
  assert.ok(d.querySelector('#product-settings64').closest('.c-card').classList.contains('download-planned'));
  send({locale,page:'components',components,downloads:components.map(c=>({id:c.id,phase:'preparing',total:0,bytes:0}))});
- assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer').length,6);
+ assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer').length,7);
  assert.equal(d.querySelector('#components-downloads'),null,'aggregate progress uses the existing native footer strip');
  const jobs=components.map((c,i)=>({id:c.id,phase:'downloading',total:(i+1)*1024,bytes:(i+1)*512,elapsedMs:2000,network:true}));
  const cancel=d.querySelector('#components-plan-items .plan-cancel');cancel.focus();
@@ -41,10 +41,10 @@ for(const locale of ['ru','en']){
  assert.match(d.querySelector('#components-plan-items .plan-transfer-status').textContent,locale==='ru'?/Проверка/:/Verifying/);
  assert.ok(!d.querySelector('#components-plan-items .plan-transfer-status').textContent.includes('100%'));
  send({downloads:jobs.map(j=>({...j,phase:'ready',bytes:j.total}))});
- assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer[aria-valuenow="100"]').length,5);
- assert.equal(d.querySelectorAll('#components-installed-grid .download-local').length,5);
+ assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer[aria-valuenow="100"]').length,6);
+ assert.equal(d.querySelectorAll('#components-installed-grid .download-local').length,6);
  send({downloads:[]});assert.equal(d.querySelector('#components-downloads'),null);
  assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer').length,0);
 }
 assert.equal(errors.length,0,errors.map(String).join('\n'));dom.window.close();
-console.log('PASS: production RU/EN six product transfers, per-product progress, no extra aggregate strip, stable focus, cancel IPC, error retry, verification and ready states');
+console.log('PASS: production RU/EN seven product transfers, per-product progress, no extra aggregate strip, stable focus, cancel IPC, error retry, verification and ready states');

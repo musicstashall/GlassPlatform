@@ -6,7 +6,7 @@ namespace P=GlassProductPlan;
 namespace E=GlassMaintenanceExecutor;
 int main(){
     std::size_t cases=0;
-    for(unsigned encoded=0;encoded<4096;++encoded) {
+    for(unsigned encoded=0;encoded<16384;++encoded) {
         std::array<P::Facts,P::kProductCount> facts{};
         P::Request request;
         unsigned bits=encoded;
@@ -17,7 +17,14 @@ int main(){
             if(choice==3)facts[i].version=P::Version::Older;
         }
         const auto plan=P::Build(facts,request);
-        assert(plan.valid);
+        if(!plan.valid) {
+            unsigned calls=0;
+            for(auto phase:{E::Phase::Helpers,E::Phase::Products,E::Phase::Vendor}) {
+                const auto refused=E::RunPhase(plan,phase,[&](P::Product,P::Action)->unsigned {++calls;return 0;});
+                assert(!refused.ok);
+            }
+            assert(calls==0);++cases;continue;
+        }
         std::array<unsigned,P::kProductCount> seen{};
         for(auto phase:{E::Phase::Helpers,E::Phase::Products,E::Phase::Vendor}) {
             auto result=E::RunPhase(plan,phase,[&](P::Product p,P::Action a)->unsigned {
@@ -32,9 +39,9 @@ int main(){
     for(auto& row:plan.rows)row.action=P::Action::Remove;
     std::vector<P::Product> sequence;
     auto result=E::RunPhase(plan,E::Phase::Products,[&](P::Product p,P::Action)->unsigned {sequence.push_back(p);return 0;});
-    assert(result.ok && sequence.size()==6);
+    assert(result.ok && sequence.size()==P::kProductCount);
     assert(sequence==std::vector<P::Product>(E::kRemovalOrder.begin(),E::kRemovalOrder.end()));
-    for(unsigned fail=0;fail<6;++fail) {
+    for(unsigned fail=0;fail<P::kProductCount;++fail) {
         unsigned count=0;
         result=E::RunPhase(plan,E::Phase::Products,[&](P::Product,P::Action)->unsigned {return count++==fail?1603:0;});
         assert(!result.ok && result.completed==fail && result.error==1603 && count==fail+1);
@@ -46,5 +53,5 @@ int main(){
     plan.valid=false;unsigned calls=0;
     result=E::RunPhase(plan,E::Phase::Products,[&](P::Product,P::Action)->unsigned {++calls;return 0;});
     assert(!result.ok && !calls);
-    std::cout<<"PASS: "<<cases<<" explicit mixed plans; six independent products; shared phases/order; no added mutations; stop on each failure; invalid-plan refusal\n";
+    std::cout<<"PASS: "<<cases<<" explicit mixed plans; seven explicit products with OG/Resources dependency; shared phases/order; no added mutations; stop on each failure; invalid-plan refusal\n";
 }

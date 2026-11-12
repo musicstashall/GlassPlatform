@@ -7,6 +7,7 @@
 
 namespace GlassInstallMsi {
 
+inline constexpr wchar_t kProductOpenGlassResourcesX64[] = L"{6D6046DB-6B28-4F2C-8A7D-EB6CF13CBBD9}";
 inline constexpr wchar_t kProductPlatformX64[] = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5071}";
 inline constexpr wchar_t kProductPlatformX86[] = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5072}";
 inline constexpr wchar_t kProductOpenGlass[]   = L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5073}";

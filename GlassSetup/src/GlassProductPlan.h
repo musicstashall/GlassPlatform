@@ -7,7 +7,7 @@
 // Portable policy only: no registry/MSI/filesystem side effects. Discovery must
 // supply verified facts; UI and workers must consume the same resulting plan.
 namespace GlassProductPlan {
-enum class Product : std::size_t { Platform64, Platform32, Settings, OpenGlass, SecureUxTheme, Settings32, Count, Settings64=Settings };
+enum class Product : std::size_t { Platform64, Platform32, Settings, OpenGlass, SecureUxTheme, Settings32, OpenGlassResources, Count, Settings64=Settings };
 constexpr std::size_t kProductCount = static_cast<std::size_t>(Product::Count);
 constexpr std::size_t Index(Product p) noexcept { return static_cast<std::size_t>(p); }
 
@@ -23,7 +23,8 @@ enum class Action { None, Keep, Install, Update, Repair, Remove, Blocked };
 enum class Error {
     None, Unsupported, UnknownPresence, ExternalOwnership, UnknownOwnership,
     Busy, RebootPending, RecoveryRequired, Unverifiable, UnknownVersion,
-    Downgrade, MissingSource, InvalidSource, SettingsRemovalNeedsInteractivePlan
+    Downgrade, MissingSource, InvalidSource, SettingsRemovalNeedsInteractivePlan,
+    OpenGlassRequired
 };
 enum class Warning : std::uint32_t {
     None = 0, NoPlatform64 = 1u << 0, NoPlatform32 = 1u << 1,
@@ -98,7 +99,7 @@ constexpr Error MutationError(const Facts& f, bool install) noexcept {
     return Error::None;
 }
 constexpr bool SupportedOnOs(Product p, bool os64) noexcept {
-    return os64 || (p != Product::Platform64 && p != Product::OpenGlass && p != Product::Settings64);
+    return os64 || (p != Product::Platform64 && p != Product::OpenGlass && p != Product::Settings64 && p != Product::OpenGlassResources);
 }
 constexpr void AddWarning(Plan& plan, Product product, Warning warning) noexcept {
     plan.rows[Index(product)].warnings = plan.rows[Index(product)].warnings | warning;
@@ -149,6 +150,20 @@ constexpr Plan Build(const std::array<Facts, kProductCount>& facts, const Reques
             row.after = Presence::Installed;
         }
     }
+    // Resources is a dependent graphics MSI, never an implicit OG selection.
+    // Check the planned after-state; a failed/blocked OG apply cannot satisfy it.
+    const auto og = Index(Product::OpenGlass);
+    const auto resources = Index(Product::OpenGlassResources);
+    auto& graphics = result.rows[resources];
+    if (IsMutation(graphics.action) && graphics.action != Action::Remove &&
+        (result.rows[og].after != Presence::Installed || result.rows[og].action == Action::Blocked)) {
+        graphics.action = Action::Blocked;
+        graphics.error = Error::OpenGlassRequired;
+        graphics.after = facts[resources].presence;
+        result.valid = false;
+    }
+    // Removing OG does not implicitly remove retained graphics/user choices.
+    // An orphan graphics MSI can still be removed without its prerequisite.
     // Entry-point guard, NOT a SUT -> Settings dependency/cascade. Even a silent
     // request to remove both is refused: the user must see an explicit UI plan.
     const auto settings = Index(Product::Settings);

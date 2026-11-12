@@ -6,10 +6,16 @@
 
 namespace GlassPackageCatalog {
 using GlassPackageRules::Version;
-enum class Product : std::size_t { Platform64, Platform32, Settings64, Settings32, OpenGlass, Count };
+enum class Product : std::size_t { Platform64, Platform32, Settings64, Settings32, OpenGlass, OpenGlassResources, Count };
 constexpr std::size_t kCount = static_cast<std::size_t>(Product::Count);
-inline constexpr const char* kIds[] = {"platform64", "platform32", "settings64", "settings32", "openglass"};
-inline constexpr const char* kFiles[] = {"Glass-x64.msi", "Glass-x86.msi", "GlassSettings-x64.msi", "GlassSettings-x86.msi", "OpenGlass-x64.msi"};
+inline constexpr const char* kIds[] = {"platform64", "platform32", "settings64", "settings32", "openglass", "openglassResources"};
+inline constexpr const char* kFiles[] = {"Glass-x64.msi", "Glass-x86.msi", "GlassSettings-x64.msi", "GlassSettings-x86.msi", "OpenGlass-x64.msi", "OpenGlassResources-x64.msi"};
+// Resources is an x64-only add-on, never an x86 installation candidate.
+constexpr bool ResourcesSupported(bool os64) noexcept { return os64; }
+// Prepared slot 5 belongs to SecureUxTheme, not this MSI catalog.
+constexpr std::size_t PreparedIndex(Product product) noexcept {
+    return product==Product::OpenGlassResources?6:static_cast<std::size_t>(product);
+}
 struct Asset {
     Version version;
     std::string file, url, sha256,payloadVersion;

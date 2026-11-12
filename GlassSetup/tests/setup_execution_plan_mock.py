@@ -8,7 +8,7 @@ import tempfile
 
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
-adapter=source[source.index('bool InstallEngine::BuildExecutionPlan() noexcept {'):source.index('bool InstallEngine::PrepareManagedRemoval() noexcept {')]
+adapter=source[source.index('bool InstallEngine::BuildExecutionPlan() noexcept {'):source.index('bool InstallEngine::PrepareFullRemovalCleanup() noexcept {')]
 util=(root/'GlassSetup/src/InstallSupport/GlassInstallUtil.cpp').read_text()
 a=util.index('bool GlassSettingsAbsentForSecureUxRemoval()');b=util.index('bool PrepareSecureUxRemovalVisualStyle(',a)
 absence=util[a:b]
@@ -25,13 +25,26 @@ harness=r'''
 #include <vector>
 #define _wcsicmp wcscasecmp
 #define PRIMARYLANGID(x) (x)
-constexpr unsigned LANG_RUSSIAN=25,ERROR_INSTALL_PACKAGE_REJECTED=1625;
+constexpr unsigned LANG_RUSSIAN=25,ERROR_INSTALL_PACKAGE_REJECTED=1625,INVALID_FILE_ATTRIBUTES=0xffffffff,FILE_ATTRIBUTE_DIRECTORY=16,FILE_ATTRIBUTE_REPARSE_POINT=1024;
 constexpr int INSTALLSTATE_DEFAULT=5,INSTALLSTATE_UNKNOWN=-1,INSTALLSTATE_ADVERTISED=1;
 unsigned GetUserDefaultUILanguage(){return 0;}
+bool upstreamKnown=true,upstreamInstalled=true,pathSafe=true;unsigned dllAttributes=0;
+unsigned GetFileAttributesW(const wchar_t*){return dllAttributes;}
+namespace GlassOpenGlassInstall {
+struct Record {bool installed=false;std::wstring directory=L"upstream";};
+bool Query(Record& r,std::wstring&){r.installed=upstreamInstalled;return upstreamKnown;}
+}
+namespace GlassOpenGlassFiles {
+bool HasReceipt(const std::wstring&){return false;}
+struct State {bool present=false,integrity=false;std::wstring version;};
+State Inspect(const std::wstring&){return {};}
+}
+namespace GlassOpenGlassRelease {bool PayloadUpdateAvailable(const std::wstring& a,const std::wstring& b){return a<b;}}
+
 namespace InstallLog {template<class... Args>void LineFormat(const wchar_t*,Args...) {}}
 namespace GlassProductInspect {
 struct ProductReport {bool installed=false,integrityKnown=false,damaged=false,residual=false,residualSafe=false;};
-struct Report {bool ran=true;ProductReport x64,x86,settings64,settings32,og,secureUxTheme;std::wstring officialSecureUxThemeCode;};
+struct Report {bool ran=true;ProductReport x64,x86,settings64,settings32,og,secureUxTheme,openGlassResources;std::wstring officialSecureUxThemeCode;};
 struct Inputs {bool os64=false,inspectSources=true;const std::atomic_bool* cancelled=nullptr;};
 Report observation;
 Report Run(const Inputs& input){assert(!input.inspectSources);return observation;}
@@ -39,7 +52,7 @@ Report Run(const Inputs& input){assert(!input.inspectSources);return observation
 namespace GlassInstallMsi {
 constexpr const wchar_t* kProductPlatformX64=L"p64",*kLegacyPlatformX64=L"old64",
  *kProductPlatformX86=L"p32",*kLegacyPlatformX86=L"old32",*kProductSettingsX64=L"s64",
- *kProductSettingsX86=L"s32",*kProductOpenGlass=L"og",*kLegacyOpenGlass=L"oldog";
+ *kProductOpenGlassResourcesX64=L"res",*kProductSettingsX86=L"s32",*kProductOpenGlass=L"og",*kLegacyOpenGlass=L"oldog";
 enum class ProductPathCheck {Safe,Unsafe};
 std::map<std::wstring,int> states;
 std::wstring unsafe;
@@ -60,6 +73,7 @@ bool Identity(const std::wstring& path,std::wstring& code,std::wstring& version)
 }
 }
 namespace GlassInstallUtil {
+bool IsSafeInstallPath(const std::wstring&){return pathSafe;}
 // ACTUAL ABSENCE
 
  enum class SecureUxThemeState {Conflict,Inactive,Active,ActivationPending,DeactivationPending};
@@ -76,13 +90,14 @@ namespace GlassSecureUxPackage {
 }
 struct Old {std::wstring productCode,cachedMsiPath;};
 struct InstallEngine {
- GlassProductPlan::Plan executionPlan_{};bool executionPlanReady_=true,openGlassResidualRemoval_=false,scanNativeX64_=true,cancelled=false,forceClean_=false;
+ GlassProductPlan::Plan executionPlan_{};bool executionPlanReady_=true,openGlassResidualRemoval_=false,scanNativeX64_=true,cancelled=false,forceClean_=false,preparingOfficialResources_=false;
  std::atomic_bool cancelRequested_{false};GlassProducts::Selection selection_{};
  GlassSecureUxPackage::Package secureUxPackage_;
  GlassSecureUxPackage::Removal secureUxRemoval_;
  bool secureUxLoadedRemoval_=false;struct {bool RecheckLoadedRemoval(std::wstring&)const{return true;}}secureUxRemovalProfiles_;
  std::wstring secureUxRemovalCode_=L"vendor",x64Dir_=L"x64",x86Dir_=L"x86";
- std::wstring tempDir_=L"work",badBaseline,badFamily;
+ std::wstring tempDir_=L"work",badBaseline,badFamily,openGlassDir_;
+ struct {std::wstring dll=L"dll",host=L"host",gui=L"gui",version=L"3.0.0";}openGlassPackage_;
  struct {std::vector<Old> oldProducts;}rollbackSession_;
  int failures=0,baselineChecks=0,familyChecks=0;
  bool IsCancelRequested()const{return cancelled;}
@@ -105,7 +120,7 @@ void Reset(InstallEngine& e){
  GlassSecureUxPackage::presenceSafe=GlassSecureUxPackage::legacyAbsent=GlassSecureUxPackage::recheck=true;
  GlassSecureUxPackage::installed.clear();GlassInstallUtil::query=true;
  GlassInstallUtil::state=GlassInstallUtil::SecureUxThemeState::Inactive;
- stateReads=0;concurrent=false;
+ stateReads=0;concurrent=false;upstreamKnown=upstreamInstalled=pathSafe=true;dllAttributes=0;
 }
 void Installed(InstallEngine& e,const wchar_t* code,const wchar_t* version){
  GlassInstallMsi::states[code]=INSTALLSTATE_DEFAULT;
@@ -209,6 +224,37 @@ int main(){
  {InstallEngine e;Reset(e);GlassProductInspect::observation.secureUxTheme.installed=true;
   assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[Index(Product::SecureUxTheme)].action==Action::Keep);}
 
+ // Planned OG satisfies only the private PREPARATION phase, never post-commit revalidation.
+ {InstallEngine e;Reset(e);e.selection_.openGlassResources=true;e.preparingOfficialResources_=true;upstreamKnown=false;
+  GlassMaintenanceCache::media[L"work\\OpenGlassResources-x64.msi"]={L"res",L"2.0.0"};
+  assert(e.BuildExecutionPlan());e.preparingOfficialResources_=false;assert(!e.BuildExecutionPlan());
+  e.preparingOfficialResources_=true;e.openGlassPackage_.version.clear();assert(!e.BuildExecutionPlan());}
+ // Resources uses its own prepared MSI and the existing official prerequisite.
+ for(unsigned failure=0;failure<9;++failure) {
+  InstallEngine e;Reset(e);e.selection_.openGlassResources=true;
+  GlassMaintenanceCache::media[L"work\\OpenGlassResources-x64.msi"]={L"res",L"2.0.0"};
+  if(failure==1)upstreamKnown=false;
+  if(failure==2)upstreamInstalled=false;
+  if(failure==3)pathSafe=false;
+  if(failure==4)dllAttributes=INVALID_FILE_ATTRIBUTES;
+  if(failure==5)dllAttributes=FILE_ATTRIBUTE_REPARSE_POINT;
+  if(failure==6)e.scanNativeX64_=false;
+  if(failure==7)GlassMaintenanceCache::media.clear();
+  if(failure==8)GlassMaintenanceCache::media[L"work\\OpenGlassResources-x64.msi"].first=L"og";
+  assert(e.BuildExecutionPlan()==(failure==0));
+  if(failure==0)assert(e.executionPlan_.rows[6].action==Action::Install&&e.executionPlan_.rows[3].action==Action::Keep);
+ }
+ {InstallEngine e;Reset(e);e.selection_.removeMask=64;Installed(e,L"res",L"1.0.0");
+  GlassProductInspect::observation.openGlassResources.installed=true;upstreamKnown=false;
+  GlassMaintenanceCache::media.erase(L"work\\OpenGlassResources-x64.msi");
+  assert(e.BuildExecutionPlan()&&e.executionPlan_.rows[6].action==Action::Remove);}
+ for(const auto version:{L"1.0.0",L"2.0.0",L"3.0.0"}) {
+  InstallEngine e;Reset(e);e.selection_.openGlassResources=true;Installed(e,L"res",version);
+  auto& graphics=GlassProductInspect::observation.openGlassResources;graphics.installed=graphics.integrityKnown=true;
+  GlassMaintenanceCache::media[L"work\\OpenGlassResources-x64.msi"]={L"res",L"2.0.0"};
+  assert(e.BuildExecutionPlan()==(version[0]!=L'3'));
+  if(e.executionPlanReady_)assert(e.executionPlan_.rows[6].action==(version[0]==L'1'?Action::Update:Action::Repair));
+ }
  // Managed removal needs no adjacent/release media, but retains exact installed authority.
  for(auto p:{Product::Platform64,Product::Platform32,Product::Settings64,Product::Settings32,Product::OpenGlass}){
   InstallEngine e;Reset(e);const auto row=Index(p);e.selection_.removeMask=1u<<row;
