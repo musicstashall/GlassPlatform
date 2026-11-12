@@ -3039,3 +3039,31 @@ Do not describe the standalone WiX project as a selectable installed product yet
   runtime test, nor a guarantee against unrelated Windows security prompts.
 - Official upstream execution integration remains outstanding as documented;
   this change is in preparation and does not claim that route is now complete.
+
+### 2026-11-04 — Retire the old MSI project; official EXE preparation/runner primitives
+
+- Removed OpenGlass-x64 from the solution and deleted its wixproj, package
+  templates/generated metadata. Removed its payload staging, version override,
+  bundle exceptions and release-catalog publication option. Resources retains
+  its independent OpenGlassResources-x64 project. Runtime retired-MSI detection
+  is not a request to build or migrate that old package.
+- Added official-mode PrepareInstaller[ForCurrentSystem] APIs. Adjacent
+  OpenGlassSetup.Signed.exe takes precedence without requiring release metadata;
+  the protected staged copy is publisher-validated and unblocked. Missing local
+  source falls back to the existing release URL/size/hash/publisher validation.
+  Official mode returns before any extraction and checks setup FileVersion
+  against remote release metadata. Invalid/inaccessible local source is reported,
+  not silently substituted by another download. Cleanup owns only created files.
+- Added RunInstaller: protected staged EXE only, publisher and version recheck,
+  Zone.Identifier removal and recheck, direct CreateProcess (no shell), quoted
+  validated destination, /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- and
+  /RESTARTEXITCODE=3010. It waits for completion and returns raw exit status;
+  it never terminates Inno on cancellation.
+- **Still not connected to the worker transaction:** the engine continues to use
+  the prior extraction/file path until Inno inventory/uninstall, commit boundary
+  and exclusion of custom OG host operations are integrated. New APIs alone are
+  not evidence that a user selection now executes the official installer.
+- Portable actual-launcher mocks pass for command/trust/unblock/exit/handle
+  behavior, plus acquisition-order source contracts. Retirement/build graph,
+  package catalog, MSI identity, ADS and resource smoke checks pass. These do not
+  establish Windows process/Authenticode/NTFS/Inno runtime acceptance.

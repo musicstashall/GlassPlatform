@@ -9,7 +9,7 @@
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x86' or '$(MSBuildProjectName)' == 'GlassSettings-x86'">
     <GlassWixLockedPlatform>x86</GlassWixLockedPlatform>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x64' or '$(MSBuildProjectName)' == 'OpenGlass-x64' or '$(MSBuildProjectName)' == 'OpenGlassResources-x64' or '$(MSBuildProjectName)' == 'GlassSettings-x64'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x64' or '$(MSBuildProjectName)' == 'OpenGlassResources-x64' or '$(MSBuildProjectName)' == 'GlassSettings-x64'">
     <GlassWixLockedPlatform>x64</GlassWixLockedPlatform>
   </PropertyGroup>
 

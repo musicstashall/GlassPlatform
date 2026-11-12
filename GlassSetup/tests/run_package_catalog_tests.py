@@ -47,7 +47,7 @@ sign_after=signing.find("Target[@Name='GlassSignAfterBuild']")
 assert sign_after is not None and sign_after.get('AfterTargets')=='Build'
 assert '$(TargetPath)' in (root/'Shared/GlassSign.targets').read_text(encoding='utf-8')
 output_names=set()
-for name in ('Glass-x64', 'Glass-x86', 'GlassSettings-x64', 'GlassSettings-x86', 'OpenGlass-x64'):
+for name in ('Glass-x64', 'Glass-x86', 'GlassSettings-x64', 'GlassSettings-x86'):
     project = ET.parse(root / f'GlassSetup/msi/{name}.wixproj').getroot()
     assert any(item.get('Project') == 'GlassSetupPayload.targets' for item in project.findall('Import'))
     output_name=project.find('PropertyGroup/OutputName').text
@@ -60,4 +60,4 @@ assert 'GlassPackageAcquisition::Prepare(' in engine
 cache=(root / 'GlassSetup/src/InstallSupport/GlassMaintenanceCache.h').read_text(encoding='utf-8')
 assert 'PublishedDigestMatches(file)' in cache and 'InstalledCacheDigest(file,installed)' in cache
 assert 'blobs[i].verifiedSource || PublishedDigestMatches(source)' in cache
-print('PASS: five MSI outputs beside EXE; external runtime acquisition; protected distribution and installed-cache digest binding')
+print('PASS: four Glass MSI outputs beside EXE; external runtime acquisition; protected distribution and installed-cache digest binding')

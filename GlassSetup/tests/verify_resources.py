@@ -118,7 +118,7 @@ for manifest in (root / "res/app.manifest", root / "GlassUnins/app.manifest"):
     dpi = tree.find(".//ws:dpiAwareness", ns)
     assert dpi is not None and dpi.text == "PerMonitorV2", manifest
 for project in (root / "GlassSetup.vcxproj", root / "GlassUnins/GlassUnins.vcxproj",
-                root / "msi/PlatformPackage.template.wxs", root / "msi/OpenGlassPackage.template.wxs",
+                root / "msi/PlatformPackage.template.wxs", root / "msi/OpenGlassResourcesPackage.wxs",
                 root / "msi/GlassSettingsPackage.template.wxs",
                 root / "msi/GlassSetupPayload.targets"):
     ET.parse(project)
@@ -163,14 +163,14 @@ assert f"{setup_guid}.Release|x86.Build.0 = Release|Win32" in solution
 # MSI products, individual product-code routing, and no legacy forced settings removal.
 settings_wxs = read("msi/GlassSettingsPackage.template.wxs")
 platform_wxs = read("msi/PlatformPackage.template.wxs")
-og_wxs = read("msi/OpenGlassPackage.template.wxs")
+og_wxs = read("msi/OpenGlassResourcesPackage.wxs")
 payload = read("msi/GlassSetupPayload.targets")
 assert "ARPSYSTEMCOMPONENT" not in settings_wxs
 assert "GlassProductIcon" in settings_wxs and "ARPPRODUCTICON" in settings_wxs
 assert "GlassSettings\\unins000.exe" in payload and "GlassSettings\\unins000.dat" in payload
 assert "SETTINGS_PRODUCT_CODE=" not in payload
 assert "GlassInstallPathValueName" in platform_wxs and "InstallPathX64" in payload and "InstallPathX86" in payload
-assert 'Root="HKLM"' in og_wxs and 'Key="Software\\StanislavKa\\GlassPlatform"' in og_wxs
+assert 'Root="HKLM"' in og_wxs and 'OpenGlassGraphics' in og_wxs
 assert "--product" in msi and "--silent" in msi
 for suffix in ("5071", "5072", "5073", "5074", "5075"):
     assert suffix in read("src/InstallSupport/GlassInstallMsi.h"), suffix
@@ -539,7 +539,8 @@ assert "SecureUxThemeCa" not in payload and "SecureUxTheme-" not in payload
 assert "SecureUxTheme-x64.msi" not in rc and "SecureUxTheme-x86.msi" not in project
 solution=read("../GlassProject.sln")
 assert '"SecureUxTheme-x64"' not in solution and '"SecureUxThemeCa"' not in solution
-assert "<GlassSignThisProject>true</GlassSignThisProject>" in read("msi/OpenGlass-x64.wixproj")
+assert '"OpenGlass-x64"' not in solution
+assert "<GlassSignThisProject>true</GlassSignThisProject>" in read("msi/OpenGlassResources-x64.wixproj")
 # Actual discovered plan is built before any process shutdown or MSI mutation.
 assert worker.index("CreateRollbackSnapshot()") < worker.index("BuildExecutionPlan()") < worker.index("CloseSelectedSettingsProcesses(")
 execution_plan=section(engine,"bool InstallEngine::BuildExecutionPlan()", "bool InstallEngine::RunMsiSequence()")

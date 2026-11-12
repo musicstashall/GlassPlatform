@@ -63,7 +63,7 @@ assert "before==now" in registered
 
 # Keep UpgradeCodes used by the guard synchronized with the actual projects.
 family_section = function(rollback_src, "bool VerifyProductRegistrations(")
-for filename in ("Glass-x64.wixproj", "Glass-x86.wixproj", "OpenGlass-x64.wixproj",
+for filename in ("Glass-x64.wixproj", "Glass-x86.wixproj",
                  "GlassSettings-x64.wixproj", "GlassSettings-x86.wixproj"):
     root = ET.parse(repo / "GlassSetup/msi" / filename).getroot()
     upgrade = next(node.text for node in root.iter() if node.tag.endswith("GlassUpgradeCode"))

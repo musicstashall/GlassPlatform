@@ -2,7 +2,7 @@
 param(
     [string]$PackageDirectory = (Join-Path $PSScriptRoot '..\..\Build\GlassSetup\Release'),
     [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9_.-]{1,128}$')][string]$ReleaseTag,
-    [ValidateSet('platform64','platform32','settings64','settings32','openglass')][string[]]$Products = @('platform64','platform32','settings64','settings32'),
+    [ValidateSet('platform64','platform32','settings64','settings32')][string[]]$Products = @('platform64','platform32','settings64','settings32'),
     [string]$BaseManifest,
     [switch]$IncludeSetup,
     [string]$OutputPath
@@ -18,9 +18,9 @@ $directory = [IO.Path]::GetFullPath($PackageDirectory)
 if (-not $OutputPath) { $OutputPath = Join-Path $directory 'version.json' }
 $files = @{
     platform64='Glass-x64.msi'; platform32='Glass-x86.msi'; settings64='GlassSettings-x64.msi';
-    settings32='GlassSettings-x86.msi'; openglass='OpenGlass-x64.msi'
+    settings32='GlassSettings-x86.msi'
 }
-$upgradeSuffix = @{platform64='5010';platform32='5020';settings64='5040';settings32='5050';openglass='5030'}
+$upgradeSuffix = @{platform64='5010';platform32='5020';settings64='5040';settings32='5050'}
 function ConvertTo-ComArguments([object[]]$Arguments) {
     # PowerShell boxes the array elements. Windows Installer then rejects a bare
     # integer open mode with DISP_E_TYPEMISMATCH. Rebox strings and ints.

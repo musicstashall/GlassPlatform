@@ -54,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix='OpenGlassZone-') as temp:
     cpp.write_text(harness,encoding='utf-8')
     subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-Wno-misleading-indentation',str(cpp),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)
-prepare=source[source.index('bool Prepare(const std::wstring& workspace'):]
+prepare=source[source.index('static bool PrepareImpl('):]
 assert prepare.index('(void)VerifyPublisher(setup,verified.h)') < prepare.index('RemoveInternetZone(setup)')
 assert prepare.index('RemoveInternetZone(setup)') < prepare.index('const auto publisher=VerifyPublisher(setup,pinned.h)')
 assert prepare.index('RemoveInternetZone(setup)') < prepare.index('GlassInnoExtract::Extract(')
