@@ -53,6 +53,12 @@ main=(root/'GlassSetup/src/main.cpp').read_text()
 assert 'fullCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;' in main
 assert 'fullCleanupReviewed_=true;' in main
 assert 'maintenanceLease.handle=INVALID_HANDLE_VALUE' in main
+assert 'if(maintenanceMode_&&page_==Page::Components)return 0;' in main
+transition=main[main.index('    void SetPage(Page page)'):main.index('    void SetPage(Page page)')+600]
+assert 'maintenanceMode_&&(page==Page::License||page==Page::Welcome)' in transition
+assert transition.index('page=Page::Components')<transition.index('page_=page')
+assert 'return webReady_;' in main[main.index('bool SlidesVisible()'):main.index('bool SlidesVisible()')+350]
+
 assert 'fullRemovalProfiles_.CleanupRegistry(detail)' in engine
 assert 'if (restored && (!self->mixedOpenGlass_ || !ok))' in engine
 with tempfile.TemporaryDirectory(prefix='GlassFullRemoval-') as temp:

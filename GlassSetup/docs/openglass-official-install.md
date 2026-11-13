@@ -1228,3 +1228,23 @@ use singular copy for single-product plans.
 Chromium regression compares the actual cleanup title coordinates against the
 certificate title and asserts identical cleanup heading coordinates across
 RU/EN and all single/both-product states, in addition to click/IPC/bounds checks.
+
+### Maintenance navigation and operational heading grid
+
+Maintenance rejects Back at the Components boundary, and SetPage redirects any
+maintenance transition to License/Welcome back to Components. This guards
+keyboard/programmatic requests as well as the already hidden Back button.
+
+Operational WebView2 pages now share the heading anchor, including Components,
+License, Certificate, confirmations, checking/conflict/version gates, completion,
+error, cancellation, launch/uninstall and module unlock. Page-specific 65px/64px
+and margin/inline-layout overrides were removed or normalized. Slideshow artwork
+and loading splash are separate layouts. Chromium compares title x/y against
+the certificate reference across 16 states and both locales; module-holder layout
+regression still passes.
+
+The cleanup page remains in the persistent offline WebView2 document. It now
+adds a restrained CSS-only backdrop, decorative noninteractive outline shapes,
+and a contextual paragraph explaining cleanup timing/ownership for the eligible
+products. No remote background assets, extra navigation or consent changes.
+Windows native execution and installer acceptance still require Windows testing.

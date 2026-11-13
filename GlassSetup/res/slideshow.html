@@ -83,7 +83,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 /* Same glass surface as the product plan; foreground only while waiting for consent. */
 .unlock-holder-shade{position:absolute;inset:0;z-index:4;background:#080b1b65;backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);pointer-events:none}
 .unlock-holder-shade[hidden],.unlock-holders[hidden]{display:none!important}
-#unlock-panel .unlock-copy{top:64px;max-height:326px;overflow:auto;padding-right:8px}
+#unlock-panel .unlock-copy{top:var(--page-heading-top);max-height:326px;overflow:auto;padding-right:8px}
 #unlock-panel .unlock-status{margin-top:18px}
 #unlock-panel .unlock-holders{position:absolute;left:510px;right:48px;top:94px;bottom:48px;z-index:5;display:flex;flex-direction:column;min-height:0;padding:18px;border:1px solid #ffffff21;border-radius:14px;background:linear-gradient(150deg,#ffffff14,#ffffff00 40%),linear-gradient(165deg,#3437568f,#131526c7);backdrop-filter:blur(22px) saturate(165%);-webkit-backdrop-filter:blur(22px) saturate(165%);box-shadow:inset 0 1px #ffffff1f,inset 0 0 0 1px #ffffff05,0 16px 36px #04050e52;pointer-events:auto}
 .unlock-holders-title{flex:0 0 auto;margin:0 0 14px;padding-bottom:12px;border-bottom:1px solid #ffffff20;color:#c1b4ff;font-size:10px;font-weight:700;letter-spacing:1.3px;text-transform:uppercase}
@@ -294,7 +294,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .license-banner{position:absolute;inset:0 0 0 auto;width:680px;height:540px;object-fit:cover;opacity:.19;mask-image:linear-gradient(90deg,transparent 0%,#000 55%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 55%,#000 100%)}
 .license-overlay{position:absolute;inset:0;background:linear-gradient(90deg,#101225 0%,#101225eb 55%,#10122589 100%)}
 .license-brand{position:absolute;left:48px;top:34px;color:#f5f4fc;font-size:16px;font-weight:600;z-index:3}
-.license-heading{position:absolute;left:48px;top:96px;width:904px;z-index:2}
+.license-heading{position:absolute;left:var(--page-heading-left);top:99px;width:904px;z-index:2}
 .license-title{margin:0 0 7px;color:#f5f4fc;font-size:28px;line-height:1.2;font-weight:350;letter-spacing:-.45px}
 .license-intro{margin:0;color:#aeb2c9;font-size:12px;line-height:1.45}
 .license-paper{position:absolute;left:48px;top:159px;width:904px;height:268px;padding:16px 19px;border:1px solid #c7bdff24;border-radius:13px;background:linear-gradient(140deg,#181a2de8,#111326f2);box-shadow:inset 0 1px #ffffff0c,0 12px 32px #07081333;z-index:2}
@@ -617,9 +617,9 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .native-brand:before,#components-panel .native-brand:after{content:'';position:absolute;left:0;top:0;width:15px;height:19px;border-radius:4px;background:linear-gradient(140deg,#b1e8ff75,#8d6eff35);border:1px solid #d2e9ff99;transform:skewY(-13deg)}
 #components-panel .native-brand:after{left:7px;top:4px;background:linear-gradient(140deg,#e8c1ff70,#759cff30)}
 #components-panel .comp-icon svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-#components-panel .components-heading{top:65px}
-#components-panel .components-kicker{font-size:9px;gap:9px;margin-bottom:8px}
-#components-panel .components-title{font-size:27px;line-height:1.13;letter-spacing:-.65px;margin-bottom:5px}
+#components-panel .components-heading{top:var(--page-heading-top)}
+#components-panel .components-kicker{font-size:10px;gap:10px;margin-bottom:10px}
+#components-panel .components-title{font-size:29px;line-height:1.16;letter-spacing:-.55px;margin-bottom:6px}
 #components-panel .components-intro{font-size:11.8px;line-height:1.45}
 #components-panel .components-banner{width:820px;opacity:.34;mask-image:linear-gradient(94deg,#0000 0%,#00000047 34%,#000 78%);-webkit-mask-image:linear-gradient(94deg,#0000 0%,#00000047 34%,#000 78%)}
 #components-panel .components-stack{left:0;top:0;width:1000px;height:540px;display:block;pointer-events:none}
@@ -740,7 +740,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 
 #stage[data-mode="settings-removal-risk"] .error-copy{top:78px;width:880px}
 #stage[data-mode="settings-removal-risk"] .complete-visual{display:none}
-#stage[data-mode="settings-removal-risk"] #confirm-title{font-size:36px;margin:14px 0}
+#stage[data-mode="settings-removal-risk"] #confirm-title{font-size:29px;line-height:1.16;margin:10px 0 12px}
 #stage[data-mode="settings-removal-risk"] #confirm-body{width:850px;max-height:285px;overflow-y:auto;white-space:pre-line;font-size:15px;line-height:1.4}
 #stage[data-mode="settings-removal-risk"] #confirm-note{width:820px;margin-top:14px}
 #stage[data-mode="cleanup-review"] #components-select-all,
@@ -757,6 +757,18 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .c-card.download-failed{border-color:#e57a7a;border-style:dashed}
 #stage[data-mode="full-cleanup"] .error-copy{top:var(--page-heading-top);left:var(--page-heading-left);right:48px;bottom:30px;width:auto;overflow:auto;justify-content:flex-start;pointer-events:auto;opacity:1;transform:none;animation:none}
 #stage[data-mode="full-cleanup"] .complete-visual,#stage[data-mode="full-cleanup"] #confirm-banner,#stage[data-mode="full-cleanup"] .confirm-ambient{display:none}
+/* Offline WebView2 backdrop: no remote assets, no illustration beneath copy. */
+#stage[data-mode="full-cleanup"] #confirm-panel{background:radial-gradient(ellipse at 95% 15%,#7365a51c,transparent 58%),radial-gradient(ellipse at 80% 95%,#499b9b10,transparent 50%),#101225}
+#stage[data-mode="full-cleanup"] #confirm-panel:before{content:"";position:absolute;right:-95px;top:140px;width:390px;height:390px;border:1px solid #b4a4ea0d;border-radius:80px;transform:rotate(25deg);pointer-events:none}
+#stage[data-mode="full-cleanup"] #confirm-panel:after{content:"";position:absolute;right:-65px;top:175px;width:310px;height:310px;border:1px solid #b4a4ea0c;border-radius:65px;transform:rotate(25deg);pointer-events:none}
+/* Shared operational-page heading anchors; slideshow artwork is separate. */
+.mode-panel .complete-copy,.mode-panel .error-copy,.mode-panel .unlock-copy{top:var(--page-heading-top);left:var(--page-heading-left)}
+.mode-panel .complete-copy{display:flex;flex-direction:column}
+.mode-panel .complete-tag,.mode-panel .cancelled-tag{flex-shrink:0;line-height:normal}
+.mode-panel .complete-title,.mode-panel .error-title{margin-top:10px}
+.mode-panel .unlock-kicker{margin-bottom:10px}
+.mode-panel .check-kicker,.mode-panel .conflicts-kicker,.mode-panel .blocked-kicker{top:var(--page-heading-top)}
+.mode-panel .check-title,.mode-panel .conflicts-title,.mode-panel .blocked-title{top:99px}
 /* Confirmation headings share the certificate/decision-page grid. Never
    distribute or center their header according to the amount of body content. */
 #confirm-panel .error-copy{top:var(--page-heading-top);left:var(--page-heading-left);justify-content:flex-start}
@@ -764,6 +776,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #confirm-panel #confirm-title{flex-shrink:0;font-size:29px;line-height:1.16;letter-spacing:-.55px;margin:10px 0 12px}
 #stage[data-mode="full-cleanup"] #confirm-body{flex-shrink:0;width:auto;max-width:100%;white-space:pre-line;font-size:14px;line-height:1.5;color:#c4c1d4;margin:0 0 24px}
 #stage[data-mode="full-cleanup"] #confirm-note{order:5;flex-shrink:0;width:auto;max-width:none;margin:10px 0 0;padding:0;border:0;border-radius:0;background:none;box-shadow:none;color:#aaa6bc;font-size:12px;line-height:1.5}
+#cleanup-explanation:not([hidden]){order:4;flex-shrink:0;max-width:780px;margin:6px 0 4px;color:#b5b1c6;font-size:13px;line-height:1.55}
 .cleanup-option:not([hidden]){display:flex;flex-shrink:0;align-items:flex-start;gap:14px;margin:0 0 12px;padding:16px 18px;border:1px solid #ffffff24;border-radius:12px;background:#ffffff08;color:#eeeaf7;font-size:15px;cursor:pointer;pointer-events:auto;box-sizing:border-box}
 .cleanup-option input{width:18px;height:18px;margin:2px 0 0;flex:none;accent-color:#8cc6ac;cursor:pointer}
 .cleanup-option strong{display:block;font-weight:600;margin-bottom:5px}
@@ -905,7 +918,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <section id="confirm-panel" class="mode-panel confirm-scene" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
 <img id="confirm-banner" class="banner-portrait" alt="" aria-hidden="true"><div class="confirm-ambient" aria-hidden="true"></div><div class="native-brand">GlassPlatform</div>
 <div class="error-copy"><div id="confirm-tag" class="confirm-tag"></div><h1 id="confirm-title" class="complete-title"></h1><p id="confirm-body" class="complete-body"></p>
-<div id="confirm-note" class="confirm-callout"></div><label id="full-cleanup-option" class="cleanup-option" hidden><input id="full-cleanup-choice" type="checkbox"><span><strong>GlassPlatform</strong><small></small></span></label><label id="og-cleanup-option" class="cleanup-option" hidden><input id="og-cleanup-choice" type="checkbox"><span><strong>OpenGlass</strong><small></small></span></label></div>
+<p id="cleanup-explanation" hidden></p><div id="confirm-note" class="confirm-callout"></div><label id="full-cleanup-option" class="cleanup-option" hidden><input id="full-cleanup-choice" type="checkbox"><span><strong>GlassPlatform</strong><small></small></span></label><label id="og-cleanup-option" class="cleanup-option" hidden><input id="og-cleanup-choice" type="checkbox"><span><strong>OpenGlass</strong><small></small></span></label></div>
 <div class="complete-visual" aria-hidden="true"><svg class="complete-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
 <circle class="complete-halo" cx="200" cy="200" r="157"/><circle class="complete-orbit" cx="200" cy="200" r="158"/><circle class="complete-orbit inner" cx="200" cy="200" r="132"/>
 <circle cx="200" cy="200" r="86" fill="#1b1a2ede" stroke="#f4be72" stroke-width="2.3"/><circle cx="200" cy="200" r="71" fill="#f4be7212" stroke="#ffffff20" stroke-width="1.2"/>
@@ -1681,6 +1694,8 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  if(Array.isArray(hostState.launchCards)){const ids=[['launch-card-a-title','launch-card-a-sub'],['launch-card-b-title','launch-card-b-sub'],['launch-card-c-title','launch-card-c-sub']];ids.forEach(([a,b],idx)=>{const c=hostState.launchCards[idx];const group=document.getElementById(a).parentNode;group.style.display=c?'':'none';if(c){group.classList.toggle('launch-card-ready',!!c.ready);setModeText(a,c.title);setModeText(b,c.sub);}});}
  setModeText('unins-kicker',hostUi.uninsTag||(locale==='ru'?'УДАЛЕНИЕ КОМПОНЕНТОВ':'UNINSTALLING COMPONENTS'));setModeText('unins-title',hostUi.uninsTitle||(locale==='ru'?'Удаляем выбранные продукты':'Removing selected products'));setModeText('unins-description',hostUi.uninsBody||'');setModeText('unins-status',hostState.status||hostUi.uninsTitle||'');setModeText('unins-substatus',hostUi.uninsSubstatus||'');
  const fullCleanup=mode==='full-cleanup';
+ const cleanupExplanation=document.getElementById('cleanup-explanation');cleanupExplanation.hidden=!fullCleanup;
+ cleanupExplanation.textContent=hostState.cleanupPlatformEligible&&hostState.cleanupOgEligible?(locale==='ru'?'Параметры платформы очищаются после успешного удаления всех её разрядностей. Параметры OpenGlass удаляет его штатный удалятор. Эти решения независимы.':'Platform settings are cleared after all its architectures are successfully removed. OpenGlass settings are handled by its official uninstaller. These choices are independent.'):hostState.cleanupOgEligible?(locale==='ru'?'Очистку выполнит штатный удалятор OpenGlass во время удаления. Параметры в других профилях пользователей не затрагиваются.':'The official OpenGlass uninstaller performs cleanup during removal. Settings in other user profiles are unaffected.'):(locale==='ru'?'Очистка выполняется только после успешного удаления всех установленных разрядностей платформы. Сохранение параметров позволит использовать их при повторной установке.':'Cleanup runs only after all installed Platform architectures are successfully removed. Keeping settings lets you reuse them when reinstalling.');
  for(const [prefix,eligible,checked,key] of [['full',hostState.cleanupPlatformEligible,hostState.cleanupUserData,'platform'],['og',hostState.cleanupOgEligible,hostState.cleanupOpenGlassConfig,'og']]){
   const label=document.getElementById(prefix==='full'?'full-cleanup-option':'og-cleanup-option'),choice=label.querySelector('input');
   label.hidden=!fullCleanup||!eligible;choice.checked=!!checked;

@@ -2631,6 +2631,9 @@ private:
         if(page_==Page::Checking)CompleteVersionCheck();
     }
     void SetPage(Page page) {
+        // Maintenance has no backwards route into first-install onboarding.
+        // Guard the transition itself, including keyboard/programmatic requests.
+        if(maintenanceMode_&&(page==Page::License||page==Page::Welcome))page=Page::Components;
         const Page oldPage=page_;
         if(page==Page::Complete&&installEngine_.Succeeded()&&(selection_.removeMask||selection_.secureUxThemeRemove))
             retireControllerOnExit=true;
@@ -4537,6 +4540,7 @@ private:
                 }
                 return 0;
             case IDC_BACK:
+                if(maintenanceMode_&&page_==Page::Components)return 0;
                 if(page_==Page::FullCleanup){fullCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;SetPage(Page::Components);return 0;}
                 if(page_==Page::SettingsRemovalRisk){SetPage(beforeSettingsRemovalRisk_);return 0;}
                 if(page_==Page::ModulesBusy && !DebugDemoLocksControls()) {
