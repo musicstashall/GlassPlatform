@@ -1,3 +1,7 @@
+# Журнал хода работ
+
+Актуальный остаток реализации — [installer-lightweight-plan.md](installer-lightweight-plan.md). Записи ниже исторические: фраза «ещё не реализовано» внутри записи описывает момент этой записи, а не текущий backlog.
+
 ## Startup WebView concealment и меньший footer font
 
 Footer version использует отдельный Segoe UI ClearType 10px (было 12), DPI-scaled.
@@ -95,7 +99,7 @@ ZIP readback length/SHA256 verification, exact-handle error cleanup. Стату�
 
 Основной installer-lightweight-plan §0 объединяет R0–R10 и новый Settings/upstream
 backlog. Исправлен устаревший статус, что lightweight runtime якобы ещё отсутствует.
-Новый settings-maintenance-upstream-plan оставлен как журнал, а не второй backlog.
+Журнал settings-maintenance-upstream-plan удалён и вторым backlog не является.
 Отдельно отмечены implemented code vs Windows acceptance, успешный online install
 не переносится на backup/fault/upstream. N2–N7 ещё не реализованы.
 
