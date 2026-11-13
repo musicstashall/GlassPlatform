@@ -42,6 +42,17 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
 
    }
   }
+  for(const detail of ['', '   \n  ', 'Hosts restored']){
+   await page.evaluate(detail=>window.receive({data:{type:'state',page:'cancelled',cancellationIsRemoval:true,cancelledDetail:detail,ui:{cancelledDetail:'stale fallback'}}}),detail);
+   await page.waitForTimeout(400);
+   const note=page.locator('#cancelled-detail');
+   assert.equal(await note.isVisible(),!!detail.trim());
+   if(!detail.trim())assert.equal(await note.boundingBox(),null);
+   else {
+    const style=await note.evaluate(e=>({border:getComputedStyle(e).borderTopWidth,background:getComputedStyle(e).backgroundColor,padding:getComputedStyle(e).padding}));
+    assert.equal(style.border,'0px');assert.equal(style.padding,'0px');assert.equal(style.background,'rgba(0, 0, 0, 0)');
+   }
+  }
   console.log('PASS: real Chromium RU/EN cleanup labels clickable, independent IPC, all single/both-product states fit content bounds');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});

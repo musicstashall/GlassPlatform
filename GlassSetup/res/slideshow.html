@@ -420,7 +420,8 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .cancelled-tag:before{content:"";width:7px;height:7px;border-radius:50%;background:#b8bedb;box-shadow:0 0 12px #b8bedb90}
 .confirm-callout{margin-top:20px;width:435px;padding:12px 15px;border:1px solid #f4be7240;border-left:2px solid #f4be72;border-radius:12px;background:linear-gradient(115deg,#4734224a,#221e3345);color:#efe4d2;font-size:12px;line-height:1.52}
 .cancelled-callout[hidden]{display:none}
-.cancelled-callout{margin-top:20px;width:435px;padding:12px 15px;border:1px solid #c1b4ff35;border-left:2px solid #a7dddf;border-radius:12px;background:linear-gradient(115deg,#25284466,#181b3058);color:#dfe2f3;font-size:12px;line-height:1.52;white-space:pre-wrap}
+.cancelled-callout{margin:16px 0 0;max-width:435px;padding:0;border:0;border-radius:0;background:none;color:#b8b3c6;font-size:12px;line-height:1.52;white-space:pre-wrap;overflow-wrap:anywhere}
+.cancelled-callout:empty{display:none}
 .reverse-orbit{animation-direction:reverse!important;animation-duration:16s!important}
 
 
@@ -936,7 +937,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <section id="cancelled-panel" class="mode-panel cancelled-scene" role="status" aria-live="polite">
 <img id="cancelled-banner" class="banner-portrait" alt="" aria-hidden="true"><div class="cancelled-ambient" aria-hidden="true"></div><div class="native-brand">GlassPlatform</div>
 <div class="complete-copy"><div id="cancelled-tag" class="cancelled-tag"></div><h1 id="cancelled-title" class="complete-title"></h1><p id="cancelled-body" class="complete-body"></p>
-<div id="cancelled-detail" class="cancelled-callout"></div></div>
+<p id="cancelled-detail" class="cancelled-callout" hidden></p></div>
 <div class="complete-visual" aria-hidden="true"><svg class="complete-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
 <circle class="complete-halo" cx="200" cy="200" r="157"/><circle class="complete-orbit" cx="200" cy="200" r="158"/><circle class="complete-orbit inner" cx="200" cy="200" r="132"/>
 <circle cx="200" cy="200" r="86" fill="#181b30de" stroke="#c1b4ff" stroke-width="2.2"/><circle cx="200" cy="200" r="71" fill="#c1b4ff12" stroke="#ffffff20" stroke-width="1.2"/>
@@ -1717,7 +1718,7 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  setModeText('cancelled-tag',removalCancelled?(locale==='ru'?'УДАЛЕНИЕ ОТМЕНЕНО':'REMOVAL CANCELLED'):hostUi.cancelledTag||(locale==='ru'?'УСТАНОВКА ОТМЕНЕНА':'SETUP CANCELLED'));
  setModeText('cancelled-title',removalCancelled?(locale==='ru'?'Удаление отменено':'Removal was cancelled'):hostUi.cancelledTitle||(locale==='ru'?'Установка прервана':'Setup was cancelled'));
  setModeText('cancelled-body',removalCancelled?(locale==='ru'?'Выбранное удаление не завершено. Изменения, внесённые мастером, отменены.':'The selected removal was not completed. Changes made by the wizard were rolled back.'):hostUi.cancelledBody||'');
- const cancelledDetail=hostState.cancelledDetail||hostUi.cancelledDetail||'';
+ const cancelledDetail=(typeof hostState.cancelledDetail==='string'?hostState.cancelledDetail:hostUi.cancelledDetail||'').trim();
  setModeText('cancelled-detail',cancelledDetail);document.getElementById('cancelled-detail').hidden=!cancelledDetail.trim();
 }
 function isCarouselMode(value=mode){return value==='welcome'||value==='installing'}
