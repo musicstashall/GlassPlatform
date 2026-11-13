@@ -755,16 +755,18 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .c-card.download-planned,#components-panel .c-card.download-progress{border:1px dashed #83d9a685;background:linear-gradient(130deg,#22253c,#181b2d)}
 #components-panel .c-card.download-local{border:1px solid #83d9a685;background:var(--component-green-surface)}
 #components-panel .c-card.download-failed{border-color:#e57a7a;border-style:dashed}
-#stage[data-mode="full-cleanup"] .error-copy{top:62px;left:60px;right:60px;bottom:24px;width:auto;overflow:auto;pointer-events:auto;opacity:1;transform:none;animation:none}
+#stage[data-mode="full-cleanup"] .error-copy{top:76px;left:72px;right:72px;bottom:30px;width:auto;overflow:auto;justify-content:center;pointer-events:auto;opacity:1;transform:none;animation:none}
 #stage[data-mode="full-cleanup"] .complete-visual,#stage[data-mode="full-cleanup"] #confirm-banner,#stage[data-mode="full-cleanup"] .confirm-ambient{display:none}
-#stage[data-mode="full-cleanup"] #confirm-title{flex-shrink:0;font-size:30px;line-height:1.2;margin:12px 0 14px}
-#stage[data-mode="full-cleanup"] #confirm-body{flex-shrink:0;width:auto;max-width:100%;white-space:pre-line;font-size:14px;line-height:1.5;color:#c4c1d4;margin:0 0 16px}
-#stage[data-mode="full-cleanup"] #confirm-note{order:5;flex-shrink:0;max-width:none;margin:16px 0 0;padding:10px 14px;font-size:12px;line-height:1.5}
+#stage[data-mode="full-cleanup"] #confirm-title{flex-shrink:0;font-size:30px;line-height:1.2;margin:10px 0 12px}
+#stage[data-mode="full-cleanup"] #confirm-body{flex-shrink:0;width:auto;max-width:100%;white-space:pre-line;font-size:14px;line-height:1.5;color:#c4c1d4;margin:0 0 24px}
+#stage[data-mode="full-cleanup"] #confirm-note{order:5;flex-shrink:0;width:auto;max-width:none;margin:10px 0 0;padding:0;border:0;border-radius:0;background:none;box-shadow:none;color:#aaa6bc;font-size:12px;line-height:1.5}
 .cleanup-option:not([hidden]){display:flex;flex-shrink:0;align-items:flex-start;gap:14px;margin:0 0 12px;padding:16px 18px;border:1px solid #ffffff24;border-radius:12px;background:#ffffff08;color:#eeeaf7;font-size:15px;cursor:pointer;pointer-events:auto;box-sizing:border-box}
 .cleanup-option input{width:18px;height:18px;margin:2px 0 0;flex:none;accent-color:#8cc6ac;cursor:pointer}
 .cleanup-option strong{display:block;font-weight:600;margin-bottom:5px}
 .cleanup-option small{display:block;color:#bdb9cd;font-size:13px;line-height:1.45}
-.cleanup-option:focus-within{outline:2px solid #a9cbbd;outline-offset:3px}
+.cleanup-option:hover{border-color:#ffffff40;background:#ffffff0c}
+.cleanup-option:has(input:checked){border-color:#a99bc34d;background:linear-gradient(120deg,#b0a1d912,#ffffff06)}
+.cleanup-option input:focus-visible{outline:2px solid #c5b7ee;outline-offset:4px;border-radius:3px}
 
 /* Short composition feedback; overlays never intercept interaction. */
 #components-installed-grid.has-removal-slot>.c-drop{display:none}
@@ -1682,7 +1684,14 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
   label.querySelector('small').textContent=key==='platform'?(locale==='ru'?'Удалить параметры платформы у пользователей и компьютера. Темы и файлы сохраняются.':'Remove user and machine Platform settings. Themes and files are kept.'):(locale==='ru'?'Штатный удалятор удалит параметры текущего пользователя и компьютера. Другие профили сохраняются.':'The official uninstaller removes current-user and machine settings. Other profiles are kept.');
  }
  const settingsRisk=mode==='settings-removal-risk';setModeText('confirm-tag',settingsRisk?(locale==='ru'?'ПЕРЕД УДАЛЕНИЕМ SETTINGS':'BEFORE REMOVING SETTINGS'):hostUi.confirmTag||(locale==='ru'?'ПОДТВЕРЖДЕНИЕ ОТМЕНЫ':'CONFIRM CANCELLATION'));setModeText('confirm-title',settingsRisk?(locale==='ru'?'Риск для Platform':'Platform risk'):hostUi.confirmTitle||(locale==='ru'?'Прервать установку?':'Cancel installation?'));setModeText('confirm-body',settingsRisk?hostState.settingsRiskBody:hostUi.confirmBody||'');setModeText('confirm-note',settingsRisk?(locale==='ru'?'Отмена возвращает к выбору без изменений.':'Cancel returns to selection without making changes.'):hostUi.confirmNote||'');
- if(fullCleanup){setModeText('confirm-tag',locale==='ru'?'ПАРАМЕТРЫ РЕЕСТРА':'FULL REMOVAL');setModeText('confirm-title',locale==='ru'?'Очистить параметры реестра?':'Remove registry settings?');setModeText('confirm-body',hostState.cleanupBody||'');setModeText('confirm-note',locale==='ru'?'По умолчанию данные сохраняются. Выберите очистку отдельно для каждого продукта.':'Data is kept by default. Choose cleanup separately for each product.');}
+ if(fullCleanup){
+  const both=!!hostState.cleanupPlatformEligible&&!!hostState.cleanupOgEligible;
+  const product=hostState.cleanupOgEligible?'OpenGlass':'GlassPlatform';
+  setModeText('confirm-tag',locale==='ru'?'ПАРАМЕТРЫ РЕЕСТРА':'REGISTRY SETTINGS');
+  setModeText('confirm-title',locale==='ru'?'Очистить параметры реестра?':'Remove registry settings?');
+  setModeText('confirm-body',both?(locale==='ru'?'Выберите, параметры каких продуктов нужно удалить.':'Choose which product settings to remove.'):(locale==='ru'?`При удалении ${product} можно также очистить его параметры реестра.`:`When removing ${product}, you can also clear its registry settings.`));
+  setModeText('confirm-note',both?(locale==='ru'?'Неотмеченные параметры сохранятся для повторной установки.':'Unchecked settings are kept for reinstallation.'):(locale==='ru'?'Оставьте флажок снятым, чтобы сохранить параметры для повторной установки.':'Leave the checkbox unchecked to keep settings for reinstallation.'));
+ }
  setModeText('cancelling-kicker',hostUi.cancellingTag||(locale==='ru'?'ОТМЕНА И ОТКАТ':'CANCELLING & ROLLING BACK'));setModeText('cancelling-title',hostUi.cancellingTitle||(locale==='ru'?'Отменяем изменения':'Rolling back changes'));setModeText('cancelling-description',hostUi.cancellingBody||(locale==='ru'?'Восстанавливаем исходное состояние пакетов, файлов и автозапуска.':'Restoring previous packages, files, and startup configuration.'));setModeText('cancelling-status',hostState.status||(locale==='ru'?'Откат изменений…':'Rolling back changes…'));setModeText('cancelling-substatus',hostUi.cancellingSubstatus||(locale==='ru'?'Пожалуйста, не выключайте компьютер':'Please wait until rollback finishes'));
  setModeText('cancelled-tag',hostUi.cancelledTag||(locale==='ru'?'УСТАНОВКА ОТМЕНЕНА':'SETUP CANCELLED'));setModeText('cancelled-title',hostUi.cancelledTitle||(locale==='ru'?'Установка прервана':'Setup was cancelled'));setModeText('cancelled-body',hostUi.cancelledBody||'');setModeText('cancelled-detail',hostState.cancelledDetail||hostUi.cancelledDetail||'');
 }

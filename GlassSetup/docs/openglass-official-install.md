@@ -1217,3 +1217,12 @@ RU/EN, single-product/both-product states and independent IPC. DOM tests cover
 selection independence. Recommended OG now carries Resources in initial choices;
 paired recommendation capability no longer inherits unrelated current intents.
 The plan counter reads “Изменений в плане” / “Planned changes”.
+
+Cleanup review visual follow-up: the content group is vertically balanced in
+its available body area, for one or both products. Mouse clicks no longer outline
+an entire checkbox card; keyboard focus remains visible on the checkbox itself.
+The amber warning-style callout is replaced by a quiet contextual preservation
+hint. A one-product plan names that product and uses singular instructions;
+only a two-product plan asks the user to choose between product settings.
+Chromium coverage checks balanced bounds, mouse focus styling, single-product
+copy, clickability and independent product IPC in both locales.
