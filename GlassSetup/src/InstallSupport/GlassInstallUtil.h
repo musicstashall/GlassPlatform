@@ -145,6 +145,7 @@ std::wstring DescribeShellClassicFallback(DWORD reason);
 // Windows 11 (build 22000+): the only Windows where the compact menu (sparse
 // package) and therefore the author certificate are used.
 bool IsWindows11OrGreater() noexcept;
+[[nodiscard]] DWORD WindowsBuildNumber() noexcept;
 
 // Runs GlassSettings_ShellSignerTrustSetupV1W of the verified installed x64 helper: adds
 // the certificate that signs <root>\GlassShellSparse\GlassShellSparse.msix to

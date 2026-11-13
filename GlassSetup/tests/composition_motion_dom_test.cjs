@@ -81,7 +81,7 @@ for(const locale of ['ru','en']){
  // A blocked Apply is described as Apply, never as unsupported removal.
  receive({data:{type:'state',components:[{...og,applySupported:false}]}});
  const text=dom.window.componentDropText({id:'openglass',input:input('openglass'),source:'available'},'installed');
- assert.match(text,locale==='ru'?/Установка или обновление/:/Install or update/);
+ assert.match(text,locale==='ru'?/Нет подходящего источника/:/No eligible installation source/);
  assert.doesNotMatch(text,/удалени|[Rr]emoval/);
 }
 // Mirrored gestures: Apply (including same-version reinstall) -> undo Apply,

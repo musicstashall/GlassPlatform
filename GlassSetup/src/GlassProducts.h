@@ -93,6 +93,13 @@ constexpr bool MixedOpenGlassRemoval(const Selection& s,bool forceClean,bool os6
         !s.secureUxTheme&&!forceClean;
 }
 
+// The official OG apply route does not own a second vendor transaction.
+// Keep the UI gate aligned with Standalone/MixedOpenGlassApply, with or without
+// Resources; do not let a late graphics choice be the first visible failure.
+constexpr bool OpenGlassVendorConflict(const Selection& s) noexcept {
+    return s.openGlass&&(s.secureUxTheme||s.secureUxThemeRemove);
+}
+
 // Graphics can follow an existing OG or its explicit official Apply in this plan.
 constexpr bool ResourcesApplyReady(const Selection& s,bool os64,bool upstreamReady) noexcept {
     return os64&&(upstreamReady||s.openGlass)&&!s.Removes(3)&&

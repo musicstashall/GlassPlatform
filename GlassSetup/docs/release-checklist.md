@@ -68,6 +68,9 @@ Windows и продуктов, Setup/MSI/Inno logs. Не публиковать 
   равные server/local версии, online и offline запуск; нет цикла/двух окон/авто-MSI.
 - [ ] Обновление контроллера, Modify из Installed Apps и Settings, сохранение позиции
   перемещённого окна, x64/x86 maintenance, отказ чужому/повреждённому controller.
+- [ ] На 26300 выбранный OG 3.0.2.3749: красная карточка/значок/предупреждение;
+  другие builds/версии и removal не получают ложный compatibility risk.
+  Accept all не выбирает OG/Resources, ручной выбор остаётся.
 - [ ] Fresh OG+Resources: Resources **до** запуска официального EXE. Resources
   maintenance/removal работает и без OG. Одна папка OG не считается installation.
 - [ ] Removal keep/clean, обе архитектуры: shell-unregister barrier **до первого MSI**;

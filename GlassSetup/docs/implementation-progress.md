@@ -3167,3 +3167,39 @@ Windows/MSVC/WiX/Inno/WebView2 execution в этой среде не выпол�
 checklist: пять first-party MSI, Resources x64 only, upstream OG EXE и SUT отдельно,
 самоподписанный first-party controller/MSI с точным signer и только untrusted-root
 исключением. Отложенные N2/N3/N4 — отдельные Settings задачи, не потерянный Setup backlog.
+
+### Manual OG recommendations, release-specific 26300 risk, source diagnostics
+
+New user policy supersedes the previous Accept-all OG→Resources recommendation:
+OG and Resources are explicit/manual only in HTML recommendations and native
+select-all. Fresh paired servicing/prerequisites and Resources-before-Inno stay.
+
+GitHub API latest release = v3.0.2.3749, published 2026-10-05; its release body
+explicitly warns of severe issues on Windows 11 26H2 26300.9818. Main-branch README
+now says stable for 26300 but describes newer development, not the published binary.
+Exact numeric 3.0.2.3749 + Windows build family 26300 + selected apply yields red card,
+warning icon and localized DWM/black-screen/sign-in-loop warning with release URL.
+Removal, unselected cards, other build families and future versions do not inherit
+this compatibility warning; risk is not labelled payload corruption. Native fallback
+and aggregate warning use the same text. No automatic unsigned CI download.
+
+Removed only installed shelf lower-right “more” count; count/size and scrolling stay.
+UI target projection no longer discards discovered server MSI metadata merely because
+sourceVerified (verified-local) is false. selectedLocal/download/trust checks remain
+separate. Completed missing-source diagnostics no longer say “wait”; card details and
+drop note distinguish pending inspection, no eligible MSI and version incompatibility.
+Added per-product catalog/offer selection logs; native new-PC root cause still needs
+actual Windows evidence. See new-pc-source-diagnostics.md for a read-only Cursor task.
+Initial curl asset download failed. Follow-up: version.json was retrieved and inspected;
+GlassSetup-39.log identifies an OG+SUT+Resources composition gate, not a missing cache.
+All five published MSI size/hash entries match GitHub Release asset metadata; MSI
+contents/signatures were not downloaded or verified. The UI now rejects OG+SUT
+consistently, before Resources is added, and displays the concrete separate-operation
+reason in RU/EN. Cursor scope is local build artifacts only. Regression: 137/137
+Python mocks and all DOM suites pass; no Windows build/runtime acceptance here.
+
+Validation: 137/137 portable mocks, all 10 DOM suites, verify_resources and diff check
+PASS. Includes actual source-projection regression, exact known-risk predicate, RU/EN
+risk/card/dialog/removal/undo/source-state tests. Updated old DOM assertions to revised
+recommendation/copy policy and existing independent cleanup IPC. No Windows/MSVC/WiX
+build, native runtime acceptance or claim of full new-PC installation resolution.

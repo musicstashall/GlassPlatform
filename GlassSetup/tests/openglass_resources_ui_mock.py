@@ -41,6 +41,17 @@ int main(){
   ui.downloadContinuePending_=true;assert(!ui.ComponentsReady());
   ui.downloadsReady=true;assert(ui.ComponentsReady()==expected);
  }
+ // Both external-vendor variants must block before download, not just after Resources.
+ for(bool resources:{false,true})for(bool sutRemove:{false,true}){
+  UI blocked;native64=true;auto& b=blocked.selection_;
+  b.openGlass=true;b.openGlassResources=resources;
+  b.secureUxTheme=!sutRemove;b.secureUxThemeRemove=sutRemove;
+  assert(OpenGlassVendorConflict(b));assert(!blocked.ComponentsReady());
+  b.secureUxTheme=b.secureUxThemeRemove=false;
+  assert(!OpenGlassVendorConflict(b));assert(blocked.ComponentsReady());
+  b.openGlass=b.openGlassResources=false;b.secureUxTheme=true;
+  assert(blocked.ComponentsReady()); // managed Glass + SUT remains supported
+ }
  UI ui;native64=true;ui.resourcesPrerequisiteReady_=true;
  auto& s=ui.selection_;s.platform64=s.platform32=s.glassSettings=s.openGlass=false;s.independentSettings=true;s.openGlassResources=true;
  assert(ui.HasSelectedComponent()&&ui.ComponentsReady());
