@@ -16,7 +16,7 @@ assert lane.index('launchingPhase_.store(true')<lane.index('RunInstaller(')
 assert 'target=before.directory' in lane and 'target=native+L"\\\\OpenGlass"' in lane
 assert 'rollbackSucceeded_.store(false' in lane and 'ERROR_SUCCESS_REBOOT_REQUIRED' in lane
 assert 'GlassOpenGlassInstall::SameVersion(after.version,openGlassPackage_.version)' in lane
-assert 'RunUninstaller(current,code,error,selection_.cleanupUserData)' in lane and 'removing?!after.installed' in lane
+assert 'RunUninstaller(current,code,error,selection_.cleanupOpenGlassConfig)' in lane and 'removing?!after.installed' in lane
 assert 'if(!removing) {' in lane
 unsupported=lane[lane.index('if(!removing&&!GlassProducts::StandaloneOpenGlassApply'):lane.index('return PrepareOfficialOpenGlass')]
 assert 'ERROR_NOT_SUPPORTED' in unsupported and 'ERROR_INSTALL_PACKAGE_REJECTED' not in unsupported

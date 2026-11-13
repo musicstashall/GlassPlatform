@@ -12,7 +12,7 @@ def extract(begin, end):
     start = source.index(begin)
     return source[start:source.index(end, start)]
 
-merge_helpers = extract("std::wstring TrimToken(", "std::wstring ModuleNamesFromBits(")
+merge_helpers = extract("std::wstring TrimToken(", "std::wstring ModuleNamesFromBits(")+extract("std::wstring Utf8ToWideLossy(", "bool NeedNativeX64Helper(")
 consume = extract("bool ConsumeNextPipeEvent(", "} // namespace")
 parser = extract("void MergeModuleTokens(", "bool CollectInProcessHolders(")
 prefix = r'''
@@ -41,6 +41,7 @@ namespace GlassInstallWatch {
  struct ModuleHolder{DWORD pid;std::wstring exe,modules;};
  void MergeModuleTokens(std::wstring&,const std::wstring&);
  bool ParseNativePipeUtf8(const std::string&,std::vector<ModuleHolder>&);
+ bool ParseNativeFailLine(const std::string&,std::wstring&);
 }
 '''
 main = r'''
@@ -58,22 +59,25 @@ int main(){
    std::string("2\texe\t\xff\n",8),"#empty\n",std::string(1024*1024+1,'x')}){
    std::vector<ModuleHolder> ignored;assert(!ParseNativePipeUtf8(invalid,ignored));
  }
- bool empty=false,end=false,malformed=false;std::string buffer="#emp";rows.clear();
- assert(!ConsumeNextPipeEvent(buffer,rows,empty,end,malformed));buffer+="ty\n";
- assert(ConsumeNextPipeEvent(buffer,rows,empty,end,malformed));assert(empty && !end && !malformed);
+ std::wstring diag;bool gotFail=false;bool empty=false,end=false,malformed=false;std::string buffer="#emp";rows.clear();
+ assert(!ConsumeNextPipeEvent(buffer,rows,empty,end,gotFail,diag,malformed));buffer+="ty\n";
+ assert(ConsumeNextPipeEvent(buffer,rows,empty,end,gotFail,diag,malformed));assert(empty && !end && !malformed);
  buffer="42\texplorer.exe\tGlassCore.dll\n43\tapp.exe\tWndCompat.dll\n#end\n#empty\n";
- assert(ConsumeNextPipeEvent(buffer,rows,empty,end,malformed));assert(end && !empty && !malformed && rows.size()==2);
- rows.clear();assert(ConsumeNextPipeEvent(buffer,rows,empty,end,malformed));assert(empty && !end && !malformed);
+ assert(ConsumeNextPipeEvent(buffer,rows,empty,end,gotFail,diag,malformed));assert(end && !empty && !malformed && rows.size()==2);
+ rows.clear();assert(ConsumeNextPipeEvent(buffer,rows,empty,end,gotFail,diag,malformed));assert(empty && !end && !malformed);
  buffer="#end\n";rows.clear();
- assert(ConsumeNextPipeEvent(buffer,rows,empty,end,malformed));assert(malformed && !end);
+ assert(ConsumeNextPipeEvent(buffer,rows,empty,end,gotFail,diag,malformed));assert(malformed && !end);
  buffer="1234\tGlassSetup.exe\tGlassCore.dll\n#end\n";rows.clear();
- assert(ConsumeNextPipeEvent(buffer,rows,empty,end,malformed));assert(end && !malformed && rows.size()==1);
+ assert(ConsumeNextPipeEvent(buffer,rows,empty,end,gotFail,diag,malformed));assert(end && !malformed && rows.size()==1);
  buffer="42\texplorer.exe\tGlassCore.dll\n#empty\n";rows.clear();
- assert(ConsumeNextPipeEvent(buffer,rows,empty,end,malformed));assert(malformed && !empty);
+ assert(ConsumeNextPipeEvent(buffer,rows,empty,end,gotFail,diag,malformed));assert(malformed && !empty);
  buffer="42\texplorer.exe\tGlassCore.dll\npartial";rows.clear();
- assert(ConsumeNextPipeEvent(buffer,rows,empty,end,malformed));assert(!end && !empty && !malformed && rows.size()==1);
- assert(!ConsumeNextPipeEvent(buffer,rows,empty,end,malformed));buffer="\n#end\n";
- assert(ConsumeNextPipeEvent(buffer,rows,empty,end,malformed));assert(malformed);
+ assert(ConsumeNextPipeEvent(buffer,rows,empty,end,gotFail,diag,malformed));assert(!end && !empty && !malformed && rows.size()==1);
+ assert(!ConsumeNextPipeEvent(buffer,rows,empty,end,gotFail,diag,malformed));buffer="\n#end\n";
+ assert(ConsumeNextPipeEvent(buffer,rows,empty,end,gotFail,diag,malformed));assert(malformed);
+ buffer="#fail stage=OpenProcess pid=42 error=5\n";rows.clear();
+ assert(ConsumeNextPipeEvent(buffer,rows,empty,end,gotFail,diag,malformed));
+ assert(gotFail&&!malformed&&!empty&&!end&&diag.find(L"error=5")!=std::wstring::npos);
  std::cout<<"PASS: real helper parser: UTF-8, rows, identity, partial and malformed frames\n";
 }
 '''

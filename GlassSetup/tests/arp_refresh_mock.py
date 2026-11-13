@@ -54,6 +54,7 @@ bool IsProductInstalled(const wchar_t* code){return MsiQueryProductStateW(code)=
 enum class ProductPathCheck {Safe,Unsafe};
 ProductPathCheck CheckProductContexts(const wchar_t*,std::wstring&){return safe?ProductPathCheck::Safe:ProductPathCheck::Unsafe;}
 std::wstring UninsExePathForProduct(const std::wstring&,const std::wstring&){return L"local\\unins000.exe";}
+void RemoveOrphanUninstallEntry(const wchar_t*){}
 // SOURCE
 }
 namespace Msi=GlassInstallMsi;

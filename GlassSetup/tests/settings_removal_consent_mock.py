@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile,subprocess
 root=Path(__file__).resolve().parents[2]
 s=(root/'GlassSetup/src/main.cpp').read_text()
-code=s[s.index('    unsigned ManagedSettingsRemovalRisk()'):s.index('    void StartInstallation()')]
+code=s[s.index('    unsigned ManagedSettingsRemovalRisk()'):s.index('    bool ConfirmFullRemovalCleanup()')]
 prefix=r'''
 #include "GlassProducts.h"
 #include "GlassProductPlan.h"

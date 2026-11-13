@@ -75,6 +75,7 @@ namespace GlassReleaseClient{
 }
 namespace GlassPackageAcquisition{
 using namespace GlassPackageRules;using GlassReleaseClient::Wide;
+bool NativeProductSupported(GlassPackageCatalog::Product){return true;}
 struct Handle{HANDLE h=INVALID_HANDLE_VALUE;~Handle(){if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}};
 struct Spec{const wchar_t* code;};const Spec specs[]={{L"code"},{L"code"},{L"code"},{L"code"},{L"code"}};
 bool Fail(std::wstring& error,const std::wstring& message){error=message;return false;}

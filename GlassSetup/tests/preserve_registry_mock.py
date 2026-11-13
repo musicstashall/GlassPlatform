@@ -43,7 +43,7 @@ prefix = r'''
 #include <tuple>
 #include <vector>
 using DWORD=uint32_t; using BYTE=unsigned char; using REGSAM=DWORD; using LSTATUS=int32_t; using HKEY=void*;
-constexpr DWORD ERROR_SUCCESS=0,ERROR_ACCESS_DENIED=5,ERROR_INVALID_DATA=13,KEY_SET_VALUE=2;
+constexpr DWORD ERROR_SUCCESS=0,ERROR_ACCESS_DENIED=5,ERROR_INVALID_DATA=13,KEY_SET_VALUE=2,KEY_WOW64_64KEY=256,KEY_WOW64_32KEY=512;
 HKEY const HKEY_CURRENT_USER=reinterpret_cast<HKEY>(1);
 HKEY const HKEY_LOCAL_MACHINE=reinterpret_cast<HKEY>(2);
 DWORD lastError=0; bool denyWrite=false;
@@ -69,11 +69,11 @@ struct SessionState {std::vector<RegistryValueSnapshot> registryValues;};
 main = r'''
 int main(){
  const std::wstring path=L"Software\\GlassPlatform";
- RegistryValueSnapshot prior{HKEY_CURRENT_USER,0,path,L"InstallPathX86",2,{7,0,4,0,0,0},true};
- RegistryValueSnapshot other{HKEY_CURRENT_USER,0,path,L"InstallPathX64",1,{1,2},false};
+ RegistryValueSnapshot prior{HKEY_LOCAL_MACHINE,KEY_WOW64_32KEY,path,L"InstallPathX86",2,{7,0,4,0,0,0},true};
+ RegistryValueSnapshot other{HKEY_LOCAL_MACHINE,KEY_WOW64_64KEY,path,L"InstallPathX64",1,{1,2},false};
  SessionState state{{prior,other}};
- const Key x86={HKEY_CURRENT_USER,path,L"InstallPathX86"};
- const Key x64={HKEY_CURRENT_USER,path,L"InstallPathX64"};
+ const Key x86={HKEY_LOCAL_MACHINE,path,L"InstallPathX86"};
+ const Key x64={HKEY_LOCAL_MACHINE,path,L"InstallPathX64"};
  registry[x86]={1,{9,9}};registry[x64]={1,{8,8}}; // what MSI just wrote
  assert(PreservePlatformUserPath(state,false));
  assert(registry[x86].type==2 && registry[x86].data==prior.data);

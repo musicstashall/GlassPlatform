@@ -39,7 +39,7 @@ prefix=r'''
 #include <set>
 #include <string>
 #include <vector>
-using DWORD=std::uint32_t;using HRESULT=int;using HWINEVENTHOOK=void*;
+using ULONGLONG=std::uint64_t;using DWORD=std::uint32_t;using HRESULT=int;using HWINEVENTHOOK=void*;
 constexpr HRESULT S_OK=0,S_FALSE=1;constexpr int COINIT_MULTITHREADED=0;
 #define SUCCEEDED(hr) ((hr)>=0)
 struct ThreadHook{DWORD pid=0;HWINEVENTHOOK hook=nullptr,uncloakHook=nullptr,locationHook=nullptr;};
@@ -47,6 +47,7 @@ std::mutex g_mx;std::map<int,ThreadHook> g_hooks;std::set<DWORD> g_bootstrappedP
 std::set<std::wstring> g_sehPlmDebugPkgs;
 struct Fake{int unhooks=0,wakes=0,posts=0,sleeps=0,inits=0,uninits=0,releases=0,closeEvents=0;
  bool settings=true;HRESULT init=S_OK;std::vector<std::wstring> disabled;} f;
+ULONGLONG GetTickCount64(){return 0;}
 void UnhookWinEvent(HWINEVENTHOOK){++f.unhooks;}void WakeRemoteCwProcess(DWORD){++f.wakes;}
 void PostWmNullToTrackedHwnds(DWORD){++f.posts;}void Sleep(DWORD){++f.sleeps;}
 HRESULT CoInitializeEx(void*,int){++f.inits;return f.init;}void CoUninitialize(){++f.uninits;}

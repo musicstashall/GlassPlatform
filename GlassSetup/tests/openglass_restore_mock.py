@@ -60,7 +60,7 @@ namespace GlassInstallUtil {
 }
 namespace GlassInstallHost {
  bool RestoreOpenGlassServiceStartType(DWORD){++s.restoreTypes;return s.restoreTypeOk;}
- bool StartOpenGlassServicePreservingStartType(DWORD type){++s.serviceStarts;s.startType=type;return s.startOk;}
+ bool StartOpenGlassServicePreservingStartType(DWORD type){++s.serviceStarts;s.startType=type;if(s.startOk)s.running=true;return s.startOk;}
 }
 class InstallEngine {
 public:
@@ -71,6 +71,7 @@ public:
  bool hostsStopped_=true,x64StopAttempted_=false,x86StopAttempted_=false,ogStopSignalled_=false,
   ogServiceStartTypeMayNeedRestore_=false;
  std::wstring x64Dir_=L"x64",x86Dir_=L"x86",openGlassDir_=L"og";
+ bool EnsureOpenGlassBeforePlatform(){return s.queryOk&&s.running;}
  bool RestorePriorHosts(bool keptOnly=false) noexcept;
 };
 '''

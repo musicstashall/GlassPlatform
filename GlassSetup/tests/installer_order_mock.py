@@ -26,7 +26,7 @@ def function(token):
             if depth == 0: return source[start:pos + 1]
     raise ValueError(token)
 
-worker = section("DWORD WINAPI InstallEngine::WorkerThread(", "bool InstallEngine::Start(")
+worker = section("DWORD WINAPI InstallEngine::RunGlassWorker(", "bool InstallEngine::Start(")
 stages = ["CapturePriorHostState()", "ExtractPayload(", "CreateRollbackSnapshot()", "BuildExecutionPlan()",
           "CloseSelectedSettingsProcesses(", "StopRunningHosts()", "InstallGlassSettingsEarly()",
           "ReleaseLockedModules()", "PurgeRemnants()", "RunMsiSequence()", "RegisterSelectedProducts()",
@@ -61,7 +61,7 @@ determine_fn = function("bool InstallEngine::DetermineCleanInstall(")
 early_fn = function("bool InstallEngine::InstallGlassSettingsEarly(")
 purge_fn = function("bool InstallEngine::PurgeRemnants(")
 
-prefix = '#include "/home/user/GlassPlatform/GlassSetup/src/GlassProcedurePlan.h"\n' + '#include "'+str(root / "GlassSetup/src/GlassMaintenanceExecutor.h")+'"\n' + r'''
+prefix = '#include "'+str(root / "GlassSetup/src/GlassProcedurePlan.h")+'"\n' + '#include "'+str(root / "GlassSetup/src/GlassMaintenanceExecutor.h")+'"\n' + r'''
 #include <algorithm>
 #include <atomic>
 #include <cassert>

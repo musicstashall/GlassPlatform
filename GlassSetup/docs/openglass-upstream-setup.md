@@ -2,21 +2,14 @@
 
 > **Архивный контракт формата, не актуальная политика установки.**
 > Пользователь разрешил и потребовал штатный silent install upstream EXE.
-> Новый контракт и незавершённые этапы: [openglass-official-install.md](openglass-official-install.md).
+> Действующий реализованный маршрут и границы Windows-приёмки: [openglass-official-install.md](openglass-official-install.md).
 > Старые запреты запуска EXE ниже отменены новой политикой.
 
-Статус: portable parser и защищённый staging provider реализованы в
-`GlassInnoExtract.h` / `GlassOpenGlassPackage.cpp`. Next/engine/inventory ещё
-не переведены с MSI на file-based servicing: целиком схема пока не работает.
-Parser проверен synthetic fixtures, реальный EXE/Windows Authenticode здесь
-не проверены. Этот контракт остаётся источником формата, EXE заново не открывался.
-Облачная модель не открывает `OpenGlassSetup.Signed.exe` заново: формат ниже уже снят
-с релиза и является единственным источником.
-
-Вместо своего `OpenGlass-x64.msi` Setup скачивает `OpenGlassSetup.Signed.exe` из релизов
-ALTaleX531/OpenGlass и извлекает продукты своим разборщиком Inno Setup 6.7.
-Установщик Glass ещё в разработке. Перехода с `OpenGlass-x64.msi` нет: семейство MSI
-OpenGlass, его ProductCode и строка каталога удаляются, а не мигрируются.
+Исторический статус ниже не применять к текущему Setup. Официальный EXE
+acquisition/execution и Inno inventory/servicing уже подключены; собственное
+извлечение DLL для установки не используется. Описание parser/формата сохранено
+для справки, не как план следующей реализации. Текущие статусы —
+[основной план, §0](installer-lightweight-plan.md#0-единый-актуальный-план-setup--settings--upstream-openglass).
 
 Эталон, на котором процедура уже проверена: релиз `v3.0.2.3749`, asset
 `OpenGlassSetup.Signed.exe` (4 049 232 байта, опубликован 2026-10-05). Подпись самого

@@ -29,7 +29,7 @@ void AcquireSRWLockExclusive(int*){} void ReleaseSRWLockExclusive(int*){}
 int RemoveDirectoryW(const wchar_t*){++fake.dirs;return 1;}
 namespace InstallLog{void Line(const wchar_t*){} template<class... T>void LineFormat(const wchar_t*,T...) {}}
 namespace WizardProgress{constexpr int kMaxUnits=10000;}
-namespace GlassInstallMsi {
+namespace GlassInstallMsi {constexpr const wchar_t* kProductOpenGlassResourcesX64=L"res";
  constexpr wchar_t kProductPlatformX64[]=L"p64",kProductPlatformX86[]=L"p86",kProductSettingsX64[]=L"gs64",
   kProductSettingsX86[]=L"gs86",kProductSecureUxThemeX64[]=L"sut64",kProductSecureUxThemeX86[]=L"sut86",
   kProductOpenGlass[]=L"og",kLegacyPlatformX64[]=L"old64",

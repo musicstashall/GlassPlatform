@@ -30,7 +30,11 @@ constexpr DWORD ERROR_CANCELLED=1223,ERROR_ACCESS_DENIED=5,ERROR_GEN_FAILURE=31;
 struct Fake{bool valid=true,com=true,safe=true,connect=true,folder=true,task=true,definition=true,
  action=true,instances=true;LONG count=1;HRESULT result=S_OK;int stops=0;DWORD error=0;std::wstring expected;} f;
 void SetLastError(DWORD e){f.error=e;}
-namespace GP {enum class PlatformArch{X64,X86};const wchar_t* GlassAutorunTaskName(PlatformArch){return L"Glass task";}}
+constexpr bool FALSE=false;
+using HANDLE=void*;constexpr DWORD SYNCHRONIZE=1,ERROR_FILE_NOT_FOUND=2;
+HANDLE OpenMutexW(DWORD,bool,const wchar_t*){return reinterpret_cast<HANDLE>(1);}
+void CloseHandle(HANDLE){} DWORD GetLastError(){return f.error;}
+namespace GP {enum class PlatformArch{X64,X86};const wchar_t* InstanceMutexName(PlatformArch){return L"mutex";}const wchar_t* GlassAutorunTaskName(PlatformArch){return L"Glass task";}}
 struct ITaskService{};struct ITaskDefinition{};
 struct IRunningTaskCollection{HRESULT get_Count(LONG* n){*n=f.count;return S_OK;}};
 struct IRegisteredTask{

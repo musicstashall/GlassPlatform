@@ -41,8 +41,11 @@ constexpr int LANG_RUSSIAN=25;int gLanguage=0;
 #define PRIMARYLANGID(x) (x)
 using UINT=unsigned;constexpr UINT IDS_APPLY=1909,IDS_INSTALL=103;
 bool VersionOlder(const std::wstring& a,const std::wstring& b){return !a.empty()&&a<b;}
+namespace InstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
 namespace GlassInstallUtil {bool os64=true;bool IsOs64Bit(){return os64;}enum class SecureUxThemeState {Unavailable,Inactive,Active,ActivationPending,DeactivationPending,External,Conflict};}
 struct Wizard {
+ bool resourcesPrerequisiteReady_=true,downloadContinuePending_=false,failurePending_=false;
+ bool DownloadsReady(){return true;} bool ComponentsReady(){return true;} bool MaintenanceUi() const{return maintenanceMode_;}
  GlassProducts::Selection selection_{};
  GlassProducts::Selection installedSelection_{};
  struct Asset {bool downloadable=true;struct {std::array<int,4> parts{3,0,0,0};}version;};
