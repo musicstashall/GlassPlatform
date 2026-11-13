@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <windows.h>
 
 struct SetupCommandLine {
     bool modify = false;
@@ -17,6 +18,7 @@ struct SetupCommandLine {
 [[nodiscard]] bool BeginControllerChild(std::wstring& error) noexcept;
 [[nodiscard]] bool CompleteControllerChild(bool windowReady) noexcept;
 [[nodiscard]] bool IsControllerChild() noexcept;
+[[nodiscard]] bool GetControllerParentWindowRect(RECT& bounds) noexcept;
 enum class ControllerTransition { Continue, Transferred, Failed };
 [[nodiscard]] ControllerTransition EnsureCurrentController(const std::wstring& downloaded,
     bool modify,const std::wstring& product,std::wstring& error) noexcept;

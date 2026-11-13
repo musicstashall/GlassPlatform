@@ -367,6 +367,25 @@ bool ParseControllerHandle(const std::wstring& text,HANDLE& result){
 
 bool IsControllerChild() noexcept {return controllerChild.validated;}
 
+bool GetControllerParentWindowRect(RECT& bounds) noexcept {
+    if(!IsControllerChild())return false;
+    struct Search {DWORD pid;RECT bounds{};bool found=false;} search{GetProcessId(controllerChild.parent.value)};
+    if(!search.pid)return false;
+    EnumWindows([](HWND window,LPARAM data)->BOOL {
+        auto& result=*reinterpret_cast<Search*>(data);
+        DWORD pid=0;GetWindowThreadProcessId(window,&pid);
+        if(pid!=result.pid||IsIconic(window))return TRUE;
+        wchar_t name[64]{};
+        if(!GetClassNameW(window,name,64)||wcscmp(name,L"GlassSetupWindow")!=0)return TRUE;
+        RECT rect{};
+        if(!GetWindowRect(window,&rect)||rect.right<=rect.left||rect.bottom<=rect.top)return TRUE;
+        result.bounds=rect;result.found=true;return FALSE;
+    },reinterpret_cast<LPARAM>(&search));
+    if(search.found)bounds=search.bounds;
+    return search.found;
+}
+
+
 bool BeginControllerChild(std::wstring& error) noexcept {
     try {
         int argc=0;LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);

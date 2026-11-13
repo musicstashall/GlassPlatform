@@ -1367,3 +1367,16 @@ The controller protocol still receives only the original authorized Modify flag.
 Regression compiles the actual UI predicate for fresh/installed/Modify/consent
 combinations and checks all Back guards and registered-product inspection inputs.
 Native Windows keyboard/button behavior still requires Windows acceptance.
+
+### Controller replacement window position
+
+A validated controller child obtains the parent wizard's current outer-window
+screen rectangle by enumerating only GlassSetupWindow windows belonging to the
+verified inherited parent process. It uses the parent's left/top both when
+creating its hidden HWND and after monitor-DPI client-size normalization, before
+ShowWindow. The position is re-sampled before showing; negative multi-monitor
+coordinates are preserved and are not clamped or re-centered. No new untrusted
+command-line coordinates or handoff authorization are introduced. Fresh launch,
+missing parent window and minimized parent retain the normal centering fallback.
+Geometry tests execute the lookup with fake HWND/PID/class APIs; existing child
+validation and handoff mocks pass. Actual Win32/DPI transition needs Windows QA.

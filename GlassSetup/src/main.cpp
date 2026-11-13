@@ -1177,8 +1177,11 @@ public:
         POINT cursor{}; GetCursorPos(&cursor);
         MONITORINFO mi{sizeof(mi)};
         GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY), &mi);
-        const int x = static_cast<int>(mi.rcWork.left + std::max<LONG>(0, (mi.rcWork.right - mi.rcWork.left - width) / 2));
-        const int y = static_cast<int>(mi.rcWork.top + std::max<LONG>(0, (mi.rcWork.bottom - mi.rcWork.top - height) / 2));
+        int x = static_cast<int>(mi.rcWork.left + std::max<LONG>(0, (mi.rcWork.right - mi.rcWork.left - width) / 2));
+        int y = static_cast<int>(mi.rcWork.top + std::max<LONG>(0, (mi.rcWork.bottom - mi.rcWork.top - height) / 2));
+        RECT parentBounds{};
+        bool inheritPosition=GetControllerParentWindowRect(parentBounds);
+        if(inheritPosition){x=parentBounds.left;y=parentBounds.top;}
         auto title = Text(IDS_TITLE);
         window = CreateWindowExW(WS_EX_CONTROLPARENT, wc.lpszClassName, title.c_str(), style,
                                  x, y, width, height, nullptr, nullptr, gInstance, this);
@@ -1191,10 +1194,14 @@ public:
         AdjustWindowRectExForDpi(&actual,style,FALSE,WS_EX_CONTROLPARENT,dpi_);
         GetMonitorInfoW(MonitorFromWindow(window,MONITOR_DEFAULTTONEAREST),&mi);
         const int finalWidth = actual.right-actual.left, finalHeight = actual.bottom-actual.top;
-        const int finalX = static_cast<int>(mi.rcWork.left +
+        int finalX = static_cast<int>(mi.rcWork.left +
             std::max<LONG>(0,(mi.rcWork.right-mi.rcWork.left-finalWidth)/2));
-        const int finalY = static_cast<int>(mi.rcWork.top +
+        int finalY = static_cast<int>(mi.rcWork.top +
             std::max<LONG>(0,(mi.rcWork.bottom-mi.rcWork.top-finalHeight)/2));
+        // Re-sample just before showing: DPI normalization must not re-center
+        // the replacement window, including on a negative-coordinate monitor.
+        if(GetControllerParentWindowRect(parentBounds))inheritPosition=true;
+        if(inheritPosition){finalX=parentBounds.left;finalY=parentBounds.top;}
         SetWindowPos(window,nullptr,finalX,finalY,finalWidth,finalHeight,SWP_NOZORDER | SWP_NOACTIVATE);
         ShowWindow(window, show);
         // Paint the centered loading indicator before starting any expensive work.
