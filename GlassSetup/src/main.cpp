@@ -2058,6 +2058,12 @@ private:
             secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
         return GlassProductUiPolicy::Preview(selection_,installedSelection_,GlassInstallUtil::IsOs64Bit(),false,active);
     }
+    std::wstring ComponentPlanBlockReason() const {
+        if(GlassProducts::OpenGlassVendorConflict(selection_))return PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
+            L"OpenGlass и SecureUxTheme нельзя применить одним планом. Уберите один из них и выполните отдельной операцией. Продукты Glass можно оставить выбранными.":
+            L"OpenGlass and SecureUxTheme cannot be applied in one plan. Remove one from this plan and run it separately. Glass products may stay selected.";
+        return {};
+    }
     std::wstring ComponentWarnings() const {
         auto text=GlassProductUiPolicy::WarningText(SelectionPreview().warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit());
         if(selection_.openGlass&&!selection_.Removes(3)) {
@@ -2090,6 +2096,8 @@ private:
             if(!text.empty())text+=L"\n";
             text+=Text((selection_.openGlass||selection_.Removes(3)||resourcesPrerequisiteReady_)?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG);
         }
+        const auto block=ComponentPlanBlockReason();
+        if(!block.empty()){if(!text.empty())text+=L"\n";text+=block;}
         return text;
     }
     std::wstring ComponentsJson() const {
@@ -2563,6 +2571,7 @@ private:
             L",\"componentsLoading\":"+(inspectReady_.load(std::memory_order_acquire)?L"false":L"true")+
             L",\"components\":"+ComponentsJson()+
             L",\"componentsWarning\":"+JsStringLiteral(ComponentWarnings())+
+            L",\"componentsBlockReason\":"+JsStringLiteral(ComponentPlanBlockReason())+
             L",\"certificate\":"+CertificateJson()+
             L",\"launchCards\":"+LaunchCardsJson()+L"}";
         if (json==lastWebState_) return;
@@ -2629,6 +2638,7 @@ private:
     // «Установить» доступен, когда анализ завершён и есть выбранные продукты.
     [[nodiscard]] bool ComponentsReady() const noexcept {
         return (page_!=Page::Components && page_!=Page::Certificate) || ((!downloadContinuePending_||DownloadsReady()) && inspectReady_.load(std::memory_order_acquire) && HasSelectedComponent() &&
+            !GlassProducts::OpenGlassVendorConflict(selection_) &&
             GlassProducts::ResourcesPlanReady(selection_,GlassInstallUtil::IsOs64Bit(),resourcesPrerequisiteReady_) &&
             !(selection_.removeMask && selection_.secureUxTheme));
     }

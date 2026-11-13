@@ -1,57 +1,37 @@
-# Задание Cursor: почему Glass Apply недоступен на новом ПК
+# Задание Cursor: локальные артефакты на сборочном ПК
 
-Нужен **диагностический отчёт**, не автоматическое исправление системы.
-Не устанавливать/удалять продукты, не запускать MSI/OG, не импортировать сертификаты,
-не править registry/cache/ACL и не отключать trust checks. Особенно не запускать
-OpenGlass 3.0.2.3749 на Windows 11 26H2 26300 ради воспроизведения.
+Нужен read-only отчёт о **локальных результатах сборки**, не диагностика тестового ПК.
+Не устанавливать/удалять продукты, не запускать MSI/OG, не менять registry/cache/ACL,
+не импортировать сертификаты и не обходить проверки доверия. Не экспортировать ключи.
 
-## Собрать факты
+1. Указать commit исходников, конфигурации сборки, пути и время создания выходных файлов.
+2. Для локального GlassSetup.exe: FileVersion/ProductVersion, размер, SHA-256,
+   Authenticode Status/StatusMessage и thumbprint подписанта. Проверить, что файл,
+   предназначенный для публикации, совпадает с подписанным выходным файлом.
+3. Для имеющихся пяти MSI (Glass-x64/x86, GlassSettings-x64/x86,
+   OpenGlassResources-x64): путь, размер, SHA-256, подпись; прочитать без установки
+   ProductCode, UpgradeCode, PackageCode, ProductVersion, архитектуру из MSI.
+   Отсутствующие артефакты отметить, не скачивать и не пересобирать автоматически.
+4. Проверить локальную staging-копию version.json, если она существует: сопоставить
+   записи с этими файлами, перечислить несовпадения версий, размеров, хешей и GUID.
+   Resources должен происходить из Release|x64, не из solution Release|x86.
+5. Вернуть таблицу артефактов и конкретные несовпадения. Не исправлять production
+   manifest, подписи или пакеты без отдельного согласования.
 
-1. Commit исходников и путь/версию реально запущенного GlassSetup.exe, Windows
-   DisplayVersion/CurrentBuild/UBR, архитектуру OS. Если это новый build, указать
-   его commit; одного FileVersion недостаточно.
-2. SHA-256 и Authenticode запущенного Setup: Status/StatusMessage и signer thumbprint.
-   Не запрашивать/экспортировать private keys, токены и сертификатные хранилища.
-3. Запустить UI только до Components (или взять предыдущий отказ), **не нажимать
-   Apply/Install**. Снять свежий Setup log и screenshot карточек с версиями/источниками.
-   Если случился controller handoff, нужны оба журнала и пути обоих EXE.
-4. Скачать **только version.json** по URL
-   `https://github.com/musicstashall/GlassPlatform/releases/latest/download/version.json`.
-   Сохранить исходные байты и указать итоговый redirect URL, HTTP status/ошибку.
-   Это обязательная локальная проверка: агентская среда получает release metadata,
-   но скачивание release asset здесь обрывается на внешнем asset-host.
-5. Для platform64/platform32/settings64/settings32/openglassResources вывести
-   `id`, `file`, `version`, `url`, `size`, длину/значение SHA-256. Проверить:
-   - products — массив, без duplicate IDs;
-   - version — числовая MSI ProductVersion, не DLL version;
-   - filename совпадает с runtime kFiles;
-   - size — целое положительное >=512, SHA-256 — 64 lowercase hex;
-   - URL вида `https://github.com/musicstashall/GlassPlatform/releases/download/<tag>/<file>`;
-   - setup и setupPackage.version совпадают.
-   Не менять production manifest; просто перечислить нарушения schema.
-6. Для уже имеющихся рядом с Setup/в `packages` MSI перечислить path/size/hash,
-   подпись и read-only MSI metadata (ProductCode/ProductVersion/architecture).
-   Не скачивать/запускать MSI, если их нет. Наличие локального файла ещё не означает доверие.
-7. В свежем логе искать:
-   - catalog fetch/parse failure, `Parent catalog check was unavailable`;
-   - `Local MSI rejected`, signer/trust/hash/identity/version errors;
-   - новые `MSI offer selected/unavailable/discovery failed`, `UI catalog source`;
-   - различие `version` и `verifiedLocal=0` — для server offer нормально;
-   - наличие targetVersion при false applySupported в отправляемом state, если есть debug instrumentation.
-   При необходимости read-only debugger/trace поставить на ComponentsJson: выписать
-   rep.targetVersion, rep.sourceVerified, releaseCatalog entry/downloadable,
-   installedPackageVersion и applySupported для каждой заблокированной карточки.
-   Не менять значения в debugger, не обходить gate.
+Проверку публичного релиза и каталога выполняет агент; Cursor не требуется
+скачивать version.json, проверять сеть тестового ПК или воспроизводить установку.
 
-## Вернуть отчёт
+## Уже установлено агентом по GlassSetup-39.log
 
-- ОС, commit/FileVersion/пути parent+controller, screenshot.
-- Оба Setup logs и исходный version.json (без персональных секретов).
-- Таблица по продуктам: installed / discovered version / verifiedLocal /
-  catalog entry+downloadable / applySupported / конкретная причина отказа.
-- Разделить доказанные факты и гипотезы. Не писать «сеть», «версия совпадает» или
-  «сертификат» без соответствующего error/status из журнала.
+Запущен опубликованный Setup 2.0.0.276, его хеш совпадает с setupPackage каталога
+релиза v2.0.0.0117. Метаданные пяти MSI присутствуют; размеры и SHA-256 совпадают
+с digest/size файлов GitHub Release. Это не проверка подписей/содержимого самих MSI.
 
-Исправление в текущей ветке: UI больше не отбрасывает rep.targetVersion только
-из-за verifiedLocal=false; это **не** разрешение выполнять непроверенный MSI.
-Окончательный acquisition по-прежнему проверяет hash, подпись, identity и downgrade.
+В 18:47:47.657 выбраны OG+SUT: resourcesReady=1, canApply=1. После добавления
+Resources в 18:47:47.660: resourcesReady=0, canApply=0. Загрузки не начинались.
+Пустая Packages ожидаема. Причина — ограничение состава плана: движок запрещает
+совместный apply OG и SUT. UI теперь блокирует такую пару сразу, независимо от
+Resources, и показывает, какой продукт нужно вынести в отдельную операцию.
+OG+Resources и управляемые Glass-продукты поддерживаются; SUT+Glass — тоже.
+Не следует снимать запрет двух vendor-транзакций без отдельного протокола
+подготовки, фиксации и честного отчёта о частичном результате.

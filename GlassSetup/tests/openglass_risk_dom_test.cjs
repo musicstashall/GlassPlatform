@@ -13,7 +13,13 @@ for(const locale of ['ru','en']){
  const warning=locale==='ru'?'Опасность применения: сбои DWM, чёрный экран, возврат к экрану входа.':'Danger: DWM crashes, black screens, return to sign-in.';
  const og={id:'openglass',title:'OpenGlass',installed:false,checked:true,applySupported:true,operation:'install',
   targetVersion:'3.0.2.3749',targetPayloadVersion:'3.0.2.3749',compatibilityRisk:true,warning};
- send([og],locale);
+ const block=locale==='ru'?'OpenGlass и SecureUxTheme нельзя применить одним планом.':'OpenGlass and SecureUxTheme cannot be applied in one plan.';
+ send([og],locale,{componentsBlockReason:block});
+ assert.ok(d.getElementById('components-plan-notices').textContent.includes(block));
+ d.querySelector('#components-plan-notices button').click();
+ assert.ok(d.getElementById('components-warning-dialog').textContent.includes(block));
+ d.getElementById('components-warning-close').click();
+ send([og],locale,{componentsBlockReason:''});
  const card=d.querySelector('#components-installed-grid [data-product="openglass"]');
  assert.ok(card.classList.contains('compatibility-risk'));assert.ok(!card.classList.contains('is-broken'));
  const warn=card.querySelector('.comp-warning-button');assert.ok(warn);warn.click();

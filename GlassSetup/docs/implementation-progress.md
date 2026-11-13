@@ -3190,8 +3190,13 @@ separate. Completed missing-source diagnostics no longer say “wait”; card de
 drop note distinguish pending inspection, no eligible MSI and version incompatibility.
 Added per-product catalog/offer selection logs; native new-PC root cause still needs
 actual Windows evidence. See new-pc-source-diagnostics.md for a read-only Cursor task.
-Release metadata accessible here, but release-asset download redirected to an unavailable
-asset host, so the user's actual version.json/Windows logs were not inspected.
+Initial curl asset download failed. Follow-up: version.json was retrieved and inspected;
+GlassSetup-39.log identifies an OG+SUT+Resources composition gate, not a missing cache.
+All five published MSI size/hash entries match GitHub Release asset metadata; MSI
+contents/signatures were not downloaded or verified. The UI now rejects OG+SUT
+consistently, before Resources is added, and displays the concrete separate-operation
+reason in RU/EN. Cursor scope is local build artifacts only. Regression: 137/137
+Python mocks and all DOM suites pass; no Windows build/runtime acceptance here.
 
 Validation: 137/137 portable mocks, all 10 DOM suites, verify_resources and diff check
 PASS. Includes actual source-projection regression, exact known-risk predicate, RU/EN
