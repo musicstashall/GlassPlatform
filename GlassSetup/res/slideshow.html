@@ -6,7 +6,7 @@
 <!-- Offline installer: embedded font only. -->
 <style>
 @font-face{font-family:HandwrittenOffline;src:url('https://glassplatform.invalid/assets/handwritten.ttf') format('truetype');font-display:swap}
-:root{color-scheme:dark;--background:#101225;--foreground:#f5f4fc;--muted:#a2a6bf;--accent:#c1b4ff;--content-bottom-gap:36px}
+:root{color-scheme:dark;--background:#101225;--foreground:#f5f4fc;--muted:#a2a6bf;--accent:#c1b4ff;--content-bottom-gap:36px;--page-heading-left:48px;--page-heading-top:78px}
 *{-webkit-user-select:none;user-select:none;caret-color:transparent;cursor:default}
 *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{background:var(--background);font-family:'Segoe UI',Arial,sans-serif;color:var(--foreground)}
 #viewport{width:100%;height:100%;display:grid;place-items:center;background:var(--background)}
@@ -314,7 +314,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel{bottom:0}
 .components-banner{position:absolute;inset:0 0 0 auto;width:700px;height:540px;object-fit:cover;opacity:.36;mask-image:linear-gradient(90deg,transparent 0%,#000 52%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 52%,#000 100%)}
 .components-overlay{position:absolute;inset:0;background:linear-gradient(90deg,#10122500 0%,#10122510 54%,#10122528 100%)}
-.components-heading{position:absolute;left:48px;top:78px;width:904px;z-index:2}
+.components-heading{position:absolute;left:var(--page-heading-left);top:var(--page-heading-top);width:904px;z-index:2}
 .components-select-all{position:relative;flex:0 0 auto;align-self:center;min-height:30px;margin-left:8px;white-space:nowrap;pointer-events:auto;padding:0 12px;border:1px solid #a7dddf55;border-radius:8px;background:#a7dddf12;color:#cdeff0;font:600 10.5px 'Segoe UI',Arial,sans-serif;letter-spacing:.2px;cursor:pointer;transition:background .18s,border-color .18s}
 .components-select-all:hover:not(:disabled){border-color:#a7dddf99;background:#a7dddf24}
 .components-select-all:focus-visible{outline:2px solid #d8ffff;outline-offset:2px}
@@ -755,9 +755,13 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .c-card.download-planned,#components-panel .c-card.download-progress{border:1px dashed #83d9a685;background:linear-gradient(130deg,#22253c,#181b2d)}
 #components-panel .c-card.download-local{border:1px solid #83d9a685;background:var(--component-green-surface)}
 #components-panel .c-card.download-failed{border-color:#e57a7a;border-style:dashed}
-#stage[data-mode="full-cleanup"] .error-copy{top:76px;left:72px;right:72px;bottom:30px;width:auto;overflow:auto;justify-content:center;pointer-events:auto;opacity:1;transform:none;animation:none}
+#stage[data-mode="full-cleanup"] .error-copy{top:var(--page-heading-top);left:var(--page-heading-left);right:48px;bottom:30px;width:auto;overflow:auto;justify-content:flex-start;pointer-events:auto;opacity:1;transform:none;animation:none}
 #stage[data-mode="full-cleanup"] .complete-visual,#stage[data-mode="full-cleanup"] #confirm-banner,#stage[data-mode="full-cleanup"] .confirm-ambient{display:none}
-#stage[data-mode="full-cleanup"] #confirm-title{flex-shrink:0;font-size:30px;line-height:1.2;margin:10px 0 12px}
+/* Confirmation headings share the certificate/decision-page grid. Never
+   distribute or center their header according to the amount of body content. */
+#confirm-panel .error-copy{top:var(--page-heading-top);left:var(--page-heading-left);justify-content:flex-start}
+#confirm-panel #confirm-tag{flex-shrink:0;line-height:normal}
+#confirm-panel #confirm-title{flex-shrink:0;font-size:29px;line-height:1.16;letter-spacing:-.55px;margin:10px 0 12px}
 #stage[data-mode="full-cleanup"] #confirm-body{flex-shrink:0;width:auto;max-width:100%;white-space:pre-line;font-size:14px;line-height:1.5;color:#c4c1d4;margin:0 0 24px}
 #stage[data-mode="full-cleanup"] #confirm-note{order:5;flex-shrink:0;width:auto;max-width:none;margin:10px 0 0;padding:0;border:0;border-radius:0;background:none;box-shadow:none;color:#aaa6bc;font-size:12px;line-height:1.5}
 .cleanup-option:not([hidden]){display:flex;flex-shrink:0;align-items:flex-start;gap:14px;margin:0 0 12px;padding:16px 18px;border:1px solid #ffffff24;border-radius:12px;background:#ffffff08;color:#eeeaf7;font-size:15px;cursor:pointer;pointer-events:auto;box-sizing:border-box}

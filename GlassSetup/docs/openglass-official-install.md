@@ -1218,11 +1218,13 @@ selection independence. Recommended OG now carries Resources in initial choices;
 paired recommendation capability no longer inherits unrelated current intents.
 The plan counter reads “Изменений в плане” / “Planned changes”.
 
-Cleanup review visual follow-up: the content group is vertically balanced in
-its available body area, for one or both products. Mouse clicks no longer outline
-an entire checkbox card; keyboard focus remains visible on the checkbox itself.
-The amber warning-style callout is replaced by a quiet contextual preservation
-hint. A one-product plan names that product and uses singular instructions;
-only a two-product plan asks the user to choose between product settings.
-Chromium coverage checks balanced bounds, mouse focus styling, single-product
-copy, clickability and independent product IPC in both locales.
+Cleanup review heading follow-up: confirmation pages use the shared decision-page
+heading grid (left 48px, top 78px), matching the certificate page. The header
+must never be centered or distributed based on body height/product count.
+The previous vertically centered layout is superseded. Checkbox cards remain
+below the fixed header, with no mouse-click outline around the whole card;
+keyboard focus remains visible on the checkbox. Contextual preservation hints
+use singular copy for single-product plans.
+Chromium regression compares the actual cleanup title coordinates against the
+certificate title and asserts identical cleanup heading coordinates across
+RU/EN and all single/both-product states, in addition to click/IPC/bounds checks.
