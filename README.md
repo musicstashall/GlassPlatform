@@ -25,9 +25,9 @@ Glass Platform is experimental theming for Windows 10 and 11. It hooks GUI proce
 
 ## Прежде чем включать
 
-**Windows 11 26H2 (сборка 26300):** не включайте и не устанавливайте платформу. На этой сборке Проводник падает в цикле, диалоги остановки не нажимаются, и сессия может дойти до отказа системы. Пока этот цикл не закрыт, 26H2 не поддерживается.
+**Windows 11 26H2 (сборка 26300):** цикл падений Проводника начинается после установки и запуска OpenGlass. Остановка Glass Platform его не прерывает. Автор OpenGlass в [таблице совместимости](https://github.com/ALTaleX531/OpenGlass/wiki/Compatibility-and-DWM-architectures) помечает 26H2 как Stable, но в опубликованном релизе [v3.0.2.3749](https://github.com/ALTaleX531/OpenGlass/releases/tag/v3.0.2.3749) предупреждает о серьёзных проблемах на сборке 26300.9818 и просит использовать сборку GitHub Actions вместо этого установщика. Пока исправление не вошло в релиз, OpenGlass на 26H2 не устанавливайте и не запускайте.
 
-**Windows 11 26H2 (build 26300):** do not install or enable the platform. Explorer crash-loops, stop dialogs cannot be clicked, and the session can fail until the machine is unusable.
+**Windows 11 26H2 (build 26300):** the Explorer crash loop starts only after OpenGlass is installed and launched, and stopping Glass Platform does not stop it; OpenGlass v3.0.2.3749 warns of severe issues on build 26300.9818 and says to use the GitHub Actions CI build instead of that installer.
 
 Программа **экспериментальная**: инъекция в GUI-процессы, дополнительная нагрузка на CPU и GPU, без гарантии стабильности. После остановки возможны кратковременные артефакты в проводнике или других процессах, пока они не перерисуются. Не используйте на машине, где сбой или перезапуск оболочки недопустимы.
 
