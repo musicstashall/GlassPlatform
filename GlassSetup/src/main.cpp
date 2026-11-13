@@ -2512,6 +2512,7 @@ private:
             L",\"downgradeBody\":"+JsStringLiteral(downgradeBody_)+
             L",\"errorReason\":"+JsStringLiteral(page_==Page::RuntimeError?runtimeError_:errorReason_)+
             L",\"finishWarnings\":"+FinishWarningsJson()+
+            L",\"cancellationIsRemoval\":"+((selection_.removeMask||selection_.secureUxThemeRemove)?L"true":L"false")+
             L",\"cancelledDetail\":"+JsStringLiteral(cancelledDetail_)+
             L",\"status\":"+JsStringLiteral(installStatusLine_)+
             L",\"percent\":"+std::to_wstring(percent_)+

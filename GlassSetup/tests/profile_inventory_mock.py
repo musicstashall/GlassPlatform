@@ -79,7 +79,7 @@ bool IsDesktopProfile(const std::wstring&){return false;}
 prefix+=r'namespace GlassUserDataCleanup {bool Run(const std::wstring&,bool,std::wstring&){return true;}}'
 prefix+=r'namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}'
 profile=s[s.index('struct Profile {'):s.index('inline bool ReadString(')]
-methods='\n'.join(function(token) for token in ('bool OpenAll(', 'bool VerifyInventory(', 'bool PreflightCleanup(', 'bool Cleanup('))
+methods='\n'.join(function(token) for token in ('bool OpenAll(', 'bool VerifyInventory(', 'bool PreflightRegistryCleanup(', 'bool CleanupRegistry(', 'bool PreflightCleanup(', 'bool Cleanup('))
 body=prefix+profile+function('inline bool ReadString(')+function('inline bool SafePath(')+function('inline LONG LoadedSidPresence(')+'''\nclass Inventory {
  std::vector<Profile> profiles_;bool loadedUsersOnly_=false;std::vector<std::pair<std::wstring,std::wstring>> skippedProfiles_;bool removalStylePrepared_=false,removalStyleCommitted_=false;bool cleanupPrepared_=false;bool savedThemeRegistryFallback_=false;
  public:
@@ -107,6 +107,8 @@ int main(){
  reset();{entries[1].sid+=L".bak";Inventory i;assert(i.OpenAll(orphanDetail,true));assert(i.SkippedLoadedProfiles().size()==2&&offlineLoads==0);}
 
  std::wstring detail;
+ reset();{rootWriteDenied=true;entries[0].loaded=true;Inventory i;assert(i.PreflightRegistryCleanup(detail));assert(i.Profiles().size()==2&&offlineLoads==1);assert(cleanWrites==0);assert(i.CleanupRegistry(detail));assert(cleanWrites==3&&themeChecks==0&&themeCommits==0);}
+ reset();{rootWriteDenied=true;entries[0].loaded=true;failCheckAt=1;Inventory i;assert(!i.PreflightRegistryCleanup(detail));assert(cleanWrites==0);}
  reset();{Inventory i;assert(!i.Cleanup(detail));assert(cleanWrites==0);assert(i.PreflightCleanup(detail));assert(i.Profiles().size()==2&&offlineLoads==2);assert(cleanChecks==3);assert(i.Cleanup(detail));assert(cleanWrites==3);assert(!i.Cleanup(detail));assert(cleanWrites==3);}
  reset();{entries[0].loaded=true;Inventory i;assert(i.PreflightCleanup(detail));assert(offlineLoads==1);}
  for(int bad=1;bad<=4;++bad){reset();malformed=bad;Inventory i;assert(!i.PreflightCleanup(detail));assert(i.Profiles().empty());assert(handles.empty());assert(cleanWrites==0);}

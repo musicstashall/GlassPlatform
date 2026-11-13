@@ -179,7 +179,7 @@ public:
                 detail=sid+L": NTUSER.DAT unavailable or unsafe";ok=false;break;
             }
             profile.path=expanded;
-            st=profile.hive?ERROR_SUCCESS:RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ|KEY_WRITE,&profile.hive);
+            st=profile.hive?ERROR_SUCCESS:RegOpenKeyExW(HKEY_USERS,name,0,KEY_READ,&profile.hive);
             if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){detail=sid+L": loaded hive unavailable: "+std::to_wstring(st);ok=false;break;}
             if(!profile.hive) {
                 const std::wstring file=profile.path+L"\\NTUSER.DAT";

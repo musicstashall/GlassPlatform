@@ -59,4 +59,10 @@ for(const locale of ['ru','en']){
  send([],{page:'full-cleanup',locale,cleanupPlatformEligible:false,cleanupOgEligible:true,cleanupUserData:false,cleanupOpenGlassConfig:true});
  assert.equal(platform.parentElement.hidden,true);assert.equal(og.parentElement.hidden,false);assert.equal(og.checked,true);
 }
+send([],{page:'cancelled',cancellationIsRemoval:true,cancelledDetail:''});
+assert.match(d.getElementById('cancelled-title').textContent,/Удаление отменено|Removal was cancelled/);
+assert.equal(d.getElementById('cancelled-detail').hidden,true);
+send([],{page:'cancelled',cancellationIsRemoval:true,cancelledDetail:'Restored hosts'});
+assert.equal(d.getElementById('cancelled-detail').hidden,false);
+assert.equal(d.getElementById('cancelled-detail').textContent,'Restored hosts');
 assert.deepEqual(errors,[]);dom.window.close();console.log('PASS: fresh install recommendations, repeat host echo, loading/capability gates and changed-helper recommendations');

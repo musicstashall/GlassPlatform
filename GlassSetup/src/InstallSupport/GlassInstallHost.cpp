@@ -49,6 +49,10 @@ bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::wstring& installDir
         // Match Settings/context-menu cooperative stop: wake window/thread
         // queues so injected hooks can finish draining. No remote FreeLibrary.
         options.wakeResiduals = true;
+        if(isCancelled()){SetLastError(ERROR_CANCELLED);return false;}
+        // Cooperative stop is already a mutation. Rollback must wait for it
+        // even if cancellation prevents the later Task Scheduler stop.
+        if(stopAttempted)*stopAttempted=true;
         const Shared::GlassStop::Result r = Shared::GlassStop::Request(arch, options);
         hostGoneByStop = r.hostGone;
         GlassInstallLog::LineFormat(L"HostStop: %s signal hostGone=%d ms=%lu residuals=%u phase=%s wake=1",
@@ -68,7 +72,6 @@ bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::wstring& installDir
         if (hostGoneByStop || !stillRunning) {
             GlassInstallLog::LineFormat(L"HostStop: %s stopped by GlassStop; task stop not needed",
                 GP::GlassAutorunTaskName(arch));
-            if (stopAttempted) *stopAttempted = false;
             return true;
         }
     }
@@ -79,7 +82,7 @@ bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::wstring& installDir
     const bool accepted=GlassInstallRemoval::StopValidatedPlatformTask(
         arch,installDir,cancelled,attempted,ru,error);
     const DWORD requestError=accepted ? ERROR_SUCCESS : GetLastError();
-    if (stopAttempted) *stopAttempted=attempted;
+    // Keep the earlier cooperative-stop attempt recorded.
     if (!error.empty()) {
         GlassInstallLog::LineFormat(L"HostStop: %s",error.c_str());
         if (detail) *detail=error;

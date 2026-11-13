@@ -380,6 +380,7 @@ bool InstallEngine::RestorePriorHosts(bool keptOnly) noexcept {
     bool ok=true;
     auto restoreArch=[&](GP::PlatformArch arch,const std::wstring& root,bool existed,bool enabled,bool running,bool stopAttempted) -> bool {
         if (!running) return true;
+        InstallLog::LineFormat(L"Rollback host restore: arch=%s stopAttempted=%d",GP::GlassAutorunTaskName(arch),stopAttempted?1:0);
         // A timed-out stop may still complete later. Do not report rollback as
         // successful or restart another instance while that stop is in flight.
         if (stopAttempted && !GP::WaitForPlatformStopped(arch,30000)) return false;
@@ -1196,6 +1197,7 @@ void InstallEngine::SignalHold(HoldAction action) noexcept {
 
 bool InstallEngine::StopGlassPlatform(GP::PlatformArch arch, const std::wstring& statusLabel,
     const wchar_t* logTag, const std::function<bool(const wchar_t*)>& fail) noexcept {
+    if(IsCancelRequested())return false;
     SetStatus(statusLabel, -1);
     bool running = false;
     if (!QueryPlatformMutex(arch, running)) return fail(L"GlassPlatform mutex state");
@@ -1218,13 +1220,15 @@ bool InstallEngine::StopGlassPlatform(GP::PlatformArch arch, const std::wstring&
         SetFailure(taskError,0);
         return false;
     }
+    if(IsCancelRequested())return false; // Validation can race with cancellation; do not signal a new stop.
+    InstallLog::LineFormat(L"%s: beginning host stop",logTag);
     bool attempted=false;
     taskError.clear();
     const bool stopped=GlassInstallHost::StopGlassPlatform(
         arch,fixedRoot,&cancelRequested_,&attempted,&taskError);
     if (arch==GP::PlatformArch::X64) x64StopAttempted_=attempted;
     else x86StopAttempted_=attempted;
-    if (IsCancelRequested()) return false;
+    if (IsCancelRequested()) {InstallLog::LineFormat(L"%s: cancellation during host stop; attempted=%d stopped=%d; restoring prior state",logTag,attempted?1:0,stopped?1:0);return false;}
     if (!stopped) {
         InstallLog::LineFormat(L"%s: task stop failed or host did not settle",logTag);
         if (!taskError.empty()) { SetFailure(taskError,0); return false; }
@@ -1245,6 +1249,7 @@ bool InstallEngine::StopRunningHosts() noexcept {
         return false;
     };
 
+    if(IsCancelRequested())return false;
     hostsStopped_ = true;
     // Recheck only affected hosts, even on a seemingly clean install.
     // A newly appeared or unknown affected host fails closed.
@@ -2114,7 +2119,7 @@ bool InstallEngine::PrepareFullRemovalCleanup() noexcept {
         (void)vendor;
         if(!GlassProducts::PlatformCleanupSelected(selection_,installed)||
            !fullRemovalProfiles_.PreflightRegistryCleanup(detail)) {
-            SetFailure(std::wstring(ru?L"Предварительная проверка очистки отклонена: ":L"Full-removal cleanup preflight refused: ")+detail,ERROR_INSTALL_PACKAGE_REJECTED);return false;
+            SetFailure(std::wstring(ru?L"Предварительная проверка очистки отклонена: ":L"Registry cleanup preflight refused: ")+detail,ERROR_ACCESS_DENIED);return false;
         }
         return true;
     }catch(...){SetFailure(ru?L"Проверка доступности очистки не выполнена":L"Full-removal cleanup preflight unavailable",ERROR_NOT_ENOUGH_MEMORY);return false;}

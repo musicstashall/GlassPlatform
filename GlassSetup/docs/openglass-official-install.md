@@ -1248,3 +1248,28 @@ adds a restrained CSS-only backdrop, decorative noninteractive outline shapes,
 and a contextual paragraph explaining cleanup timing/ownership for the eligible
 products. No remote background assets, extra navigation or consent changes.
 Windows native execution and installer acceptance still require Windows testing.
+
+### Logs 1/2 (Setup 2.0.0.263): cleanup root rights and stop cancellation
+
+Cleanup preflight refused HKU SID ...-1008 with access denied before MSI changes.
+General profile inventory unnecessarily requested KEY_READ|KEY_WRITE on the
+loaded hive root. It now requests KEY_READ; cleanup still separately verifies
+write access on owned Platform keys and refuses actual subkey denial. No ACL
+changes or inaccessible-profile skipping. Mock coverage includes denied root
+write with successful registry-only cleanup, plus owned-key denial refusal.
+The cleanup error uses access-denied wording, not install-policy rejection.
+
+Log 2 ends after cooperative x64 stop and cancellation, without MSI execution.
+Cooperative stop now sets the stop-attempt flag before signaling, retains it
+through cancellation/task-stop handling and therefore takes the existing
+wait-for-stopped restoration path before restart. Entry/pre-signal cancellation
+checks avoid starting a stop after cancellation during validation. Additional
+stop/restore diagnostic lines aid reproduction. This is not proof that the
+reported Explorer crash is fixed; fault module/exception/event or dump is needed.
+
+Cancelled-removal WebView uses removal-specific copy and hides an empty detail
+callout. DOM tests cover both empty/nonempty details. Profile inventory mocks,
+source ordering, source smoke and Chromium layout tests pass. Two older stop
+mocks currently fail for unrelated stale harness expectations: unins_task_stop
+expects a removed EnsureModulesReleased token; task_scheduler_stop lacks
+OpenMutex/handle/error API stubs. No native Windows build/runtime validation.

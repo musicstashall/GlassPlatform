@@ -419,6 +419,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .cancelled-tag{display:inline-flex;align-items:center;gap:8px;margin:0;color:#c7cbe2;letter-spacing:2px;font-size:10px;text-transform:uppercase;font-weight:650}
 .cancelled-tag:before{content:"";width:7px;height:7px;border-radius:50%;background:#b8bedb;box-shadow:0 0 12px #b8bedb90}
 .confirm-callout{margin-top:20px;width:435px;padding:12px 15px;border:1px solid #f4be7240;border-left:2px solid #f4be72;border-radius:12px;background:linear-gradient(115deg,#4734224a,#221e3345);color:#efe4d2;font-size:12px;line-height:1.52}
+.cancelled-callout[hidden]{display:none}
 .cancelled-callout{margin-top:20px;width:435px;padding:12px 15px;border:1px solid #c1b4ff35;border-left:2px solid #a7dddf;border-radius:12px;background:linear-gradient(115deg,#25284466,#181b3058);color:#dfe2f3;font-size:12px;line-height:1.52;white-space:pre-wrap}
 .reverse-orbit{animation-direction:reverse!important;animation-duration:16s!important}
 
@@ -1712,7 +1713,12 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
   setModeText('confirm-note',both?(locale==='ru'?'Неотмеченные параметры сохранятся для повторной установки.':'Unchecked settings are kept for reinstallation.'):(locale==='ru'?'Оставьте флажок снятым, чтобы сохранить параметры для повторной установки.':'Leave the checkbox unchecked to keep settings for reinstallation.'));
  }
  setModeText('cancelling-kicker',hostUi.cancellingTag||(locale==='ru'?'ОТМЕНА И ОТКАТ':'CANCELLING & ROLLING BACK'));setModeText('cancelling-title',hostUi.cancellingTitle||(locale==='ru'?'Отменяем изменения':'Rolling back changes'));setModeText('cancelling-description',hostUi.cancellingBody||(locale==='ru'?'Восстанавливаем исходное состояние пакетов, файлов и автозапуска.':'Restoring previous packages, files, and startup configuration.'));setModeText('cancelling-status',hostState.status||(locale==='ru'?'Откат изменений…':'Rolling back changes…'));setModeText('cancelling-substatus',hostUi.cancellingSubstatus||(locale==='ru'?'Пожалуйста, не выключайте компьютер':'Please wait until rollback finishes'));
- setModeText('cancelled-tag',hostUi.cancelledTag||(locale==='ru'?'УСТАНОВКА ОТМЕНЕНА':'SETUP CANCELLED'));setModeText('cancelled-title',hostUi.cancelledTitle||(locale==='ru'?'Установка прервана':'Setup was cancelled'));setModeText('cancelled-body',hostUi.cancelledBody||'');setModeText('cancelled-detail',hostState.cancelledDetail||hostUi.cancelledDetail||'');
+ const removalCancelled=!!hostState.cancellationIsRemoval;
+ setModeText('cancelled-tag',removalCancelled?(locale==='ru'?'УДАЛЕНИЕ ОТМЕНЕНО':'REMOVAL CANCELLED'):hostUi.cancelledTag||(locale==='ru'?'УСТАНОВКА ОТМЕНЕНА':'SETUP CANCELLED'));
+ setModeText('cancelled-title',removalCancelled?(locale==='ru'?'Удаление отменено':'Removal was cancelled'):hostUi.cancelledTitle||(locale==='ru'?'Установка прервана':'Setup was cancelled'));
+ setModeText('cancelled-body',removalCancelled?(locale==='ru'?'Выбранное удаление не завершено. Изменения, внесённые мастером, отменены.':'The selected removal was not completed. Changes made by the wizard were rolled back.'):hostUi.cancelledBody||'');
+ const cancelledDetail=hostState.cancelledDetail||hostUi.cancelledDetail||'';
+ setModeText('cancelled-detail',cancelledDetail);document.getElementById('cancelled-detail').hidden=!cancelledDetail.trim();
 }
 function isCarouselMode(value=mode){return value==='welcome'||value==='installing'}
 // Only page entry (or the first completed report on that page) starts a cascade.
