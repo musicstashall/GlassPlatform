@@ -39,4 +39,13 @@ for(const locale of ['ru','en'])for(const installed of [false,true]){
  send([og,{...graphics,hidden:true}],{locale});before=messages.length;button().click();
  assert.deepEqual(messages.slice(before),['component:openglass:1']);
 }
+// An installed retained SUT is not a seventh planned action after Accept all.
+for(const locale of ['ru','en']){
+ const seven=[...rows,{id:'openglassResources',title:'Resources',installed:false,checked:false,operation:'install',applySupported:true,targetVersion:'2.0.0.115'}]
+  .map(r=>r.id==='secureUxTheme'?{...r,installed:true,applySupported:false,operation:'repair'}:{...r,checked:false});
+ send(seven,{locale});button().click();
+ const actual=d.querySelectorAll('#components-plan-items li[data-product]').length;
+ assert.equal(actual,6);assert.equal(d.querySelector('#components-count').textContent,locale==='ru'?'Действий в плане: 6':'Planned actions: 6');
+ assert.equal(d.querySelector('#product-secureUxTheme').checked,false);
+}
 assert.deepEqual(errors,[]);dom.window.close();console.log('PASS: fresh install recommendations, repeat host echo, loading/capability gates and changed-helper recommendations');

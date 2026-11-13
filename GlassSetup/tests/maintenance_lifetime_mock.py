@@ -34,8 +34,8 @@ void RegCloseKey(HKEY){}
 namespace GlassInstallMsi {
 constexpr auto kProductPlatformX64=L"a",kProductPlatformX86=L"b",kProductSettingsX64=L"c",kProductSettingsX86=L"d",kProductOpenGlass=L"e",kProductSecureUxThemeX64=L"f",kProductSecureUxThemeX86=L"g",kLegacyPlatformX64=L"h",kLegacyPlatformX86=L"i",kLegacyOpenGlass=L"j",kProductOpenGlassResourcesX64=L"res";
 }
-bool resourcesOnly=false;
-UINT MsiEnumProductsExW(const wchar_t* code,const wchar_t*,int,int,wchar_t*,void*,void*,void*){return resourcesOnly&&std::wstring(code)==L"res"?0:registration;}
+bool resourcesOnly=false,sutOnly=false;
+UINT MsiEnumProductsExW(const wchar_t* code,const wchar_t*,int,int,wchar_t*,void*,void*,void*){return (resourcesOnly&&std::wstring(code)==L"res")||(sutOnly&&(std::wstring(code)==L"f"||std::wstring(code)==L"g"))?0:registration;}
 namespace GlassInstallLog {void Line(const wchar_t*){}}
 namespace GlassMaintenanceCache {
 struct CacheLock {bool acquired=true;};
@@ -61,6 +61,7 @@ int main(){using namespace GlassMaintenanceLifetime;
  reset();{Lease shared;assert(shared.Acquire()&&share_==FILE_SHARE_READ&&access_==GENERIC_READ);}assert(live==0);
  reset();fileProduct=true;assert(!RetireUnused());fileProduct=false;rootsKnown=false;assert(!RetireUnused());rootsKnown=true;
  reset();officialProduct=true;assert(!RetireUnused());officialProduct=false;
+ reset();sutOnly=true;assert(HasProducts()&&!HasProducts(false));assert(!RetireUnused());sutOnly=false;
  reset();resourcesOnly=true;assert(!RetireUnused());resourcesOnly=false;
  reset();registration=0;assert(!RetireUnused()&&files.count(L"root\\Installer\\Active"));
  registration=5;assert(!RetireUnused()); // Incomplete registration discovery is not absence.

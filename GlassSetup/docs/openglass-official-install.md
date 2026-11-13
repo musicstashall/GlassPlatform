@@ -1161,3 +1161,25 @@ Resources adapters (covered by their own compiled harnesses), rather than failin
 on unrelated newly added adapter dependencies. No Windows integration performed.
 Build GlassUnins Release|Win32 -> GlassSetup Release|Win32 (normal shared library
 dependencies rebuild); these changes require no MSI package rebuild.
+
+### Mixed-removal preflight and diagnostics
+
+Official OpenGlass removal now verifies the current Inno registration, protected
+paths, pinned EXE/data and publisher during plan preflight, before managed MSI
+mutation. The runner repeats validation immediately before service preparation.
+Trust policy is unchanged; WinVerifyTrust failures include the numeric status.
+A mixed plan retains its managed rollback snapshot until the official operation
+succeeds; partial completion preserves and logs the snapshot path. This is not
+an automatic rollback of the official uninstaller.
+
+The plan counter reports selected actions, not selection out of catalogue rows.
+The optional full Glass-data cleanup review is available when every installed
+Glass component is being removed even if SecureUxTheme is retained. The final
+Glass-registration guard excludes retained SUT; no SUT data is cleaned.
+Successful MSI removals log all-context registration enumeration, MSI state and
+both HKLM ARP views without deleting registry entries.
+
+Regression coverage includes extracted C++ official-runner, mixed-worker,
+full-removal policy, maintenance lifetime and removal-registration diagnostics,
+plus production DOM action counts. These checks are not a Windows native build
+or proof of immediate refresh of an already-open Installed Apps window.

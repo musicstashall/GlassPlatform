@@ -6,8 +6,8 @@
 
 namespace GlassOpenGlassPackage {
 using namespace GlassOpenGlassTrust;
-bool RunUninstaller(const GlassOpenGlassInstall::Record& record,DWORD& exitCode,std::wstring& error,bool deleteConfig) noexcept {
-    exitCode=ERROR_INSTALL_FAILURE;error.clear();
+bool ValidateUninstaller(const GlassOpenGlassInstall::Record& record,std::wstring& error) noexcept {
+    error.clear();
     try {
         GlassOpenGlassInstall::Record current;
         Require(GlassOpenGlassInstall::Query(current,error)&&record.installed&&GlassOpenGlassInstall::Same(record,current),
@@ -23,6 +23,15 @@ bool RunUninstaller(const GlassOpenGlassInstall::Record& record,DWORD& exitCode,
             // Release pins only after verification; the directory must remain
             // protected from unprivileged replacement. Never unblock originals.
         }
+        return true;
+    }catch(const std::exception& e){error=L"OpenGlass: "+std::wstring(e.what(),e.what()+std::char_traits<char>::length(e.what()));}
+     catch(...){error=L"OpenGlass uninstaller validation failed";}
+    return false;
+}
+bool RunUninstaller(const GlassOpenGlassInstall::Record& record,DWORD& exitCode,std::wstring& error,bool deleteConfig) noexcept {
+    exitCode=ERROR_INSTALL_FAILURE;error.clear();
+    try {
+        if(!ValidateUninstaller(record,error))return false;
         if(!GlassOpenGlassService::PrepareRemoval(record.directory,error,exitCode))return false;
         std::wstring command=L"\""+record.uninstaller+L"\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /DELETEPRESETS";
         if(!deleteConfig)command+=L" /NODELETECONFIG";

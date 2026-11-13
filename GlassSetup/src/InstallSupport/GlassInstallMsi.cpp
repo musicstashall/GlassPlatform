@@ -132,6 +132,22 @@ void RemoveOrphanUninstallEntry(const wchar_t* productCode) noexcept {
     GlassInstallLog::LineFormat(L"Removed orphan ARP uninstall key %s (0x%08lX)", productCode, st);
 }
 
+// Read-only post-removal facts: distinguish an orphan ARP key from Windows'
+// already-open cached app list. Do not delete registrations on an ambiguous state.
+static void LogRemovalRegistration(const wchar_t* productCode) {
+    wchar_t product[39]{};
+    const auto result=MsiEnumProductsExW(productCode,L"S-1-1-0",MSIINSTALLCONTEXT_ALL,0,product,nullptr,nullptr,nullptr);
+    GlassInstallLog::LineFormat(L"Removal postcheck: product=%s all-context enumeration=%u MSI state=%d",
+        productCode,result,static_cast<int>(MsiQueryProductStateW(productCode)));
+    const auto path=L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"+std::wstring(productCode);
+    for(const auto view:{KEY_WOW64_64KEY,KEY_WOW64_32KEY}) {
+        HKEY key=nullptr;
+        const auto opened=RegOpenKeyExW(HKEY_LOCAL_MACHINE,path.c_str(),0,KEY_QUERY_VALUE|view,&key);
+        GlassInstallLog::LineFormat(L"Removal ARP postcheck: product=%s HKLM view=%u open=%ld",productCode,static_cast<unsigned>(view),opened);
+        if(key)RegCloseKey(key);
+    }
+}
+
 bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress, UINT* resultCode) noexcept {
     if (resultCode) *resultCode = ERROR_SUCCESS;
     if (!productCode || !productCode[0]) return true;
@@ -151,8 +167,10 @@ bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress, UINT* 
     if (progress) MsiSetExternalUIRecord(nullptr, 0, nullptr, nullptr);
     if (resultCode) *resultCode = exitCode;
     GlassInstallLog::LineFormat(L"Uninstall exit code %u", exitCode);
-    if(exitCode==ERROR_SUCCESS||exitCode==ERROR_SUCCESS_REBOOT_REQUIRED||exitCode==ERROR_UNKNOWN_PRODUCT)
+    if(exitCode==ERROR_SUCCESS||exitCode==ERROR_SUCCESS_REBOOT_REQUIRED||exitCode==ERROR_UNKNOWN_PRODUCT) {
+        LogRemovalRegistration(productCode);
         GlassAppsNotification::Changed();
+    }
     return exitCode == ERROR_SUCCESS || exitCode == ERROR_SUCCESS_REBOOT_REQUIRED ||
            exitCode == ERROR_UNKNOWN_PRODUCT;
 }

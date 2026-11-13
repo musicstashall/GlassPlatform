@@ -487,6 +487,11 @@ bool InstallEngine::PrepareOfficialOpenGlass(bool removing) noexcept {
             SetFailure(ru?L"Штатная регистрация OpenGlass не найдена. Удаление не выполнялось.":
                 L"Official OpenGlass registration is missing. No removal was performed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
         }
+        if(removing&&!GlassOpenGlassPackage::ValidateUninstaller(before,error)) {
+            SetFailure((ru?L"Штатный удалятор OpenGlass не прошёл проверку доверия. Продукты не изменены. ":
+                L"The official OpenGlass uninstaller failed trust verification. Products were not changed. ")+error,ERROR_INSTALL_PACKAGE_REJECTED);
+            return false;
+        }
         auto& target=officialOpenGlassTarget_;
         if(before.installed) {
             target=before.directory;
@@ -726,12 +731,16 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                         (ru?L" Восстановление Resources не завершено; сохраните журнал и резервную копию.":L" Resources recovery incomplete; retain the log and snapshot.")),ERROR_INSTALL_FAILURE);
                 }
                 if(!self->succeeded_) {
+                    self->preserveSnapshot_=!self->rollbackSession_.workspaceDir.empty();
+                    InstallLog::LineFormat(L"Mixed operation partial; retaining managed snapshot: %s",self->rollbackSession_.workspaceDir.c_str());
                     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
                     self->rollbackSucceeded_.store(false,std::memory_order_release);
                     self->SetFailure((managed?(ru?L"План выполнен частично: изменения Glass сохранены, финальная операция OpenGlass не подтверждена. Общий откат не выполнялся. ":
                         L"Plan partially completed: Glass changes were committed; the final OpenGlass operation was not confirmed. No overall rollback was performed. "):
-                        (ru?L"Операция OpenGlass не подтверждена. ":L"OpenGlass operation was not confirmed. "))+self->ErrorText(),ERROR_INSTALL_FAILURE);
+                        (ru?L"Операция OpenGlass не подтверждена. ":L"OpenGlass operation was not confirmed. "))+self->ErrorText()+
+                        (self->preserveSnapshot_?L"\nBackup: "+self->rollbackSession_.workspaceDir:L""),ERROR_INSTALL_FAILURE);
                 }
+                if(self->succeeded_)GlassInstallRollback::CleanupSnapshot(self->rollbackSession_);
                 if(self->succeeded_&&mixedRemoval)self->FinishFullRemovalCleanup();
                 if(self->succeeded_&&resources) {
                     self->FinishOfficialResources(true);
@@ -742,6 +751,10 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
     } else if(self->selection_.openGlass||self->selection_.Removes(3)) {
         self->succeeded_=self->RunOfficialOpenGlassOnly();
     } else RunGlassWorker(p);
+    if(self->mixedOpenGlass_&&!self->succeeded_&&!self->rollbackSession_.workspaceDir.empty()) {
+        self->preserveSnapshot_=true;
+        InstallLog::LineFormat(L"Incomplete mixed plan: recovery snapshot retained at %s",self->rollbackSession_.workspaceDir.c_str());
+    }
     if(!self->tempDir_.empty()) {
         if(RemoveDirectoryTree(self->tempDir_))self->tempDir_.clear();
         else InstallLog::LineFormat(L"Staging cleanup incomplete; destructor will retry: %s",self->tempDir_.c_str());
@@ -945,7 +958,8 @@ DWORD WINAPI InstallEngine::RunGlassWorker(LPVOID p) noexcept {
             }
 
             self->rollbackSucceeded_.store(restored,std::memory_order_release);
-            if (restored) GlassInstallRollback::CleanupSnapshot(self->rollbackSession_);
+            if (restored && (!self->mixedOpenGlass_ || !ok)) GlassInstallRollback::CleanupSnapshot(self->rollbackSession_);
+            else if(restored)InstallLog::Line(L"Mixed transaction: managed snapshot retained until official OG result");
             else {
                 self->preserveSnapshot_=true;
                 const std::wstring backup=self->rollbackSession_.workspaceDir;
@@ -2108,8 +2122,8 @@ void InstallEngine::FinishFullRemovalCleanup() noexcept {
     if(!selection_.cleanupUserData)return;
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
     try {
-        std::vector<std::wstring> vendor;std::wstring detail;
-        const bool absent=Shared::SecureUxThemeInventory::Query(vendor)==ERROR_SUCCESS&&vendor.empty()&&!GlassMaintenanceLifetime::HasProducts();
+        std::wstring detail;
+        const bool absent=!GlassMaintenanceLifetime::HasProducts(false); // Retained SUT does not own Glass data.
         const bool ok=absent&&fullRemovalProfiles_.Cleanup(detail);
         if(!ok)AddFinishWarning(ru?L"Пользовательские данные очищены не полностью":L"User data cleanup incomplete",
             absent?detail:(ru?L"Продукты ещё зарегистрированы; очистка не выполнялась.":L"Products remain registered; cleanup was not performed."));

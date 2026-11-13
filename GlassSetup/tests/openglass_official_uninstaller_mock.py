@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 s=(root/'GlassSetup/src/InstallSupport/GlassOpenGlassUninstall.cpp').read_text()
-runner=s[s.index('bool RunUninstaller('):s.rfind('\n}')]
+runner=s[s.index('bool ValidateUninstaller('):s.rfind('\n}')]
 h=r'''
 #include <cassert>
 #include <string>
@@ -46,6 +46,8 @@ DWORD Probe(bool&,bool&){return pending?1072:0;}
 void reset(){GlassOpenGlassService::ready=true;GlassOpenGlassService::pending=false;GlassOpenGlassService::stops=0;queryOk=same=trusted=signedOk=pinOk=createOk=waitOk=exitOk=true;code=creates=closes=pins=livePins=0;}
 int main(){
  GlassOpenGlassInstall::Record record;std::wstring error;DWORD result=0;
+ reset();assert(ValidateUninstaller(record,error)&&creates==0&&GlassOpenGlassService::stops==0&&livePins==0);
+ reset();signedOk=false;assert(!ValidateUninstaller(record,error)&&creates==0&&GlassOpenGlassService::stops==0&&livePins==0);
  for(unsigned exit:{0u,3010u,2u}){reset();code=exit;assert(RunUninstaller(record,result,error,false)&&result==exit&&closes==2&&livePins==0);
  assert(app==record.uninstaller&&cwd==record.directory);
  assert(command==L"\"D:\\Official OG\\unins000.exe\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /DELETEPRESETS /NODELETECONFIG");}
@@ -67,3 +69,10 @@ with tempfile.TemporaryDirectory() as tmp:
 for forbidden in ['RemoveInternetZone(', 'DeleteFileW(', 'TerminateProcess(', 'ShellExecute']:
     assert forbidden not in runner
 print('PASS: actual official uninstall runner: registration/trust/signature/pins/command/config preservation/raw exits/handles')
+
+engine=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
+prepare=engine[engine.index('bool InstallEngine::PrepareOfficialOpenGlass('):engine.index('bool InstallEngine::CommitOfficialOpenGlass(')]
+assert 'if(removing&&!GlassOpenGlassPackage::ValidateUninstaller(before,error))' in prepare
+assert 'RunUninstaller(' not in prepare and 'PrepareRemoval(' not in prepare
+# The same validator is called again immediately before execution.
+assert runner.index('ValidateUninstaller(record,error)')<runner.index('GlassOpenGlassService::PrepareRemoval')

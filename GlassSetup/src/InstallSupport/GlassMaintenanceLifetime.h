@@ -25,13 +25,15 @@ struct Lease {
         return (opened==ERROR_ALREADY_EXISTS||HardenFile(path))&&TrustedPath(path,false);
     }
 };
-inline bool HasProducts() {
+inline bool HasProducts(bool includeSecureUxTheme=true) {
     const wchar_t* codes[]={GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kProductPlatformX86,
         GlassInstallMsi::kProductSettingsX64,GlassInstallMsi::kProductSettingsX86,GlassInstallMsi::kProductOpenGlass,
         GlassInstallMsi::kProductOpenGlassResourcesX64,
         GlassInstallMsi::kProductSecureUxThemeX64,GlassInstallMsi::kProductSecureUxThemeX86,
         GlassInstallMsi::kLegacyPlatformX64,GlassInstallMsi::kLegacyPlatformX86,GlassInstallMsi::kLegacyOpenGlass};
     for(const auto* code:codes) {
+        if(!includeSecureUxTheme&&(wcscmp(code,GlassInstallMsi::kProductSecureUxThemeX64)==0||
+            wcscmp(code,GlassInstallMsi::kProductSecureUxThemeX86)==0))continue;
         wchar_t product[39]{};
         const UINT result=MsiEnumProductsExW(code,L"S-1-1-0",MSIINSTALLCONTEXT_ALL,0,product,nullptr,nullptr,nullptr);
         if(result!=ERROR_NO_MORE_ITEMS&&result!=ERROR_UNKNOWN_PRODUCT)return true;

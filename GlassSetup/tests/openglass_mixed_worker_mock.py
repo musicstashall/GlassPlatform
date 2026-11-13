@@ -20,10 +20,12 @@ using LPVOID=void*;using DWORD=unsigned;
 constexpr int LANG_RUSSIAN=25,ERROR_INSTALL_FAILURE=1603;
 int GetUserDefaultUILanguage(){return 0;}
 namespace GlassInstallUtil{bool IsOs64Bit(){return true;}}
+namespace GlassInstallRollback {struct SessionState{std::wstring workspaceDir=L"snapshot";};void CleanupSnapshot(SessionState& s){s.workspaceDir.clear();}}
 namespace InstallLog{template<class... Args>void LineFormat(const wchar_t*,Args...) {}}
 bool prep=true,glass=true,vendor=true,resourcesPrep=true,resourcesCommit=true;bool expectedRemoval=false;unsigned preparations=0,glassRuns=0,vendorRuns=0,standalone=0,cleanups=0;std::string order;
 bool RemoveDirectoryTree(const std::wstring&){++cleanups;order+="cleanup;";return true;}
 struct InstallEngine{
+ GlassInstallRollback::SessionState rollbackSession_;bool preserveSnapshot_=false;
  GlassProducts::Selection selection_;bool mixedOpenGlass_=false,forceClean_=false,succeeded_=false;
  struct {std::wstring finalize;}labels_;
  bool PrepareFullRemovalCleanup(){if(selection_.cleanupUserData)order+="cleanup-preflight;";return true;}
@@ -49,7 +51,7 @@ int main(){
  InstallEngine::WorkerThread(&ok);assert(ok.succeeded_&&ok.finished_&&!ok.launchingPhase_&&ok.selection_.openGlass&&order=="prepare;glass;vendor;cleanup;");
  reset();prep=false;InstallEngine failedPrep;InstallEngine::WorkerThread(&failedPrep);assert(!failedPrep.succeeded_&&glassRuns==0&&vendorRuns==0&&failedPrep.finished_);
  reset();glass=false;InstallEngine failedGlass;InstallEngine::WorkerThread(&failedGlass);assert(!failedGlass.succeeded_&&vendorRuns==0&&failedGlass.selection_.openGlass&&failedGlass.finished_);
- reset();vendor=false;InstallEngine partial;InstallEngine::WorkerThread(&partial);assert(!partial.succeeded_&&!partial.rollbackSucceeded_&&!partial.error.empty()&&glassRuns==1&&vendorRuns==1&&partial.finished_);
+ reset();vendor=false;InstallEngine partial;InstallEngine::WorkerThread(&partial);assert(partial.preserveSnapshot_&&!partial.rollbackSession_.workspaceDir.empty());assert(!partial.succeeded_&&!partial.rollbackSucceeded_&&!partial.error.empty()&&glassRuns==1&&vendorRuns==1&&partial.finished_);
  reset();expectedRemoval=true;InstallEngine remove;remove.selection_.openGlass=false;remove.selection_.removeMask=8;
  InstallEngine::WorkerThread(&remove);assert(remove.succeeded_&&remove.selection_.removeMask==8&&!remove.selection_.openGlass&&vendorRuns==1&&order=="prepare;glass;vendor;cleanup;");
  reset();expectedRemoval=true;glass=false;InstallEngine removeFail;removeFail.selection_.openGlass=false;removeFail.selection_.removeMask=8;

@@ -120,9 +120,13 @@ constexpr bool OnlySecureUxThemeRemoval(const Selection& choice) noexcept {
 
 // Full-removal review uses current installed facts, not unchecked Apply flags.
 constexpr bool FullRemovalSelected(const Selection& choice,unsigned installedMask,bool vendorInstalled) noexcept {
-    return (OnlyManagedRemoval(choice)||OnlySecureUxThemeRemoval(choice))&&
-        (installedMask||vendorInstalled)&&
-        (choice.removeMask&installedMask)==installedMask&&(!vendorInstalled||choice.secureUxThemeRemove);
+    const bool removalOnly=(choice.removeMask||choice.secureUxThemeRemove)&&
+        !choice.secureUxTheme&&!choice.platform64&&!choice.platform32&&!choice.openGlass&&
+        !choice.openGlassResources&&!choice.glassSettings&&!choice.settings64&&!choice.settings32;
+    // Glass data can be reviewed when all Glass products are removed even if
+    // original SUT is retained. Its own registration/configuration is not ours.
+    return removalOnly&&((installedMask&&(choice.removeMask&installedMask)==installedMask)||
+        (!installedMask&&vendorInstalled&&choice.secureUxThemeRemove));
 }
 
 // Recorded at wizard startup, independently of the later rollback snapshot.

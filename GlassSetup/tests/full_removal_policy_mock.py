@@ -20,11 +20,11 @@ unsigned result=ERROR_NO_MORE_ITEMS,calls=0;
 unsigned MsiEnumProductsExW(const wchar_t*,const wchar_t*,unsigned mode,unsigned,wchar_t*,void*,void*,void*){assert(mode==MSIINSTALLCONTEXT_ALL);++calls;return result;}
 // GUARD
 int main(){
- for(unsigned installed=0;installed<64;++installed)for(unsigned removes=0;removes<64;++removes)for(bool vendor:{false,true}){
+ for(unsigned installed=0;installed<128;++installed)for(unsigned removes=0;removes<128;++removes)for(bool vendor:{false,true}){
   if(installed&16||removes&16)continue;
   GlassProducts::Selection choice;choice.platform64=choice.platform32=choice.glassSettings=choice.openGlass=false;
   choice.independentSettings=true;choice.removeMask=removes;
-  const bool expected=installed&&removes&&(removes&installed)==installed&&!vendor;
+  const bool expected=installed&&removes&&(removes&installed)==installed;
   assert(GlassProducts::FullRemovalSelected(choice,installed,vendor)==expected);
   choice.platform32=true;assert(!GlassProducts::FullRemovalSelected(choice,installed,vendor));
  }
@@ -53,6 +53,8 @@ main=(root/'GlassSetup/src/main.cpp').read_text()
 assert 'fullCleanupReviewed_=false;selection_.cleanupUserData=false;' in main
 assert 'if(page_==Page::FullCleanup){fullCleanupReviewed_=true;' in main
 assert 'maintenanceLease.handle=INVALID_HANDLE_VALUE' in main
+assert 'GlassMaintenanceLifetime::HasProducts(false)' in engine
+assert 'if (restored && (!self->mixedOpenGlass_ || !ok))' in engine
 with tempfile.TemporaryDirectory(prefix='GlassFullRemoval-') as temp:
  p=Path(temp)/'test.cpp';p.write_text(h);exe=Path(temp)/'test'
  subprocess.run([shutil.which('g++'),'-std=c++17','-Wall','-Wextra','-Werror','-I'+str(root),str(p),'-o',str(exe)],check=True)
