@@ -7,7 +7,7 @@ root=Path(__file__).resolve().parents[2]
 base=runpy.run_path(str(root/'GlassSetup/tests/secure_ux_inventory_mock.py'))['harness']
 base=base[:base.index('int main(){')]
 source=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
-projection=source[source.index('    struct ProductInputs'):source.index('    // Probe physical backends BEFORE')]
+projection=source[source.index('    struct ProductInputs'):source.index('    // Service/task leftovers are diagnostics')]
 header=(root/'GlassSetup/src/InstallSupport/GlassInstallMsi.h').read_text()
 codes='\n'.join(re.findall(r'inline constexpr wchar_t k(?:Product|Legacy)\w+\[\]\s*=\s*L"[^"\n]+";',header))
 assert codes
@@ -29,11 +29,11 @@ std::wstring QueryDisplayVersion(const wchar_t* code){auto it=versions.find(code
 }
 namespace GlassProductInspect {
 struct ProductReport {bool installed=false;std::wstring installedVersion,installedPackageVersion;};
-struct Report {ProductReport x64,x86,settings64,settings32,settings,og,secureUxTheme;
+struct Report {ProductReport x64,x86,settings64,settings32,settings,og,secureUxTheme,openGlassResources;
  std::wstring officialSecureUxThemeCode,secureUxThemePresenceDetail;};
 }
 namespace GlassInstallLog {std::wstring last;void LineFormat(const wchar_t*,const wchar_t* details){last=details;}}
-GlassProductInspect::Report InspectPresence(){using namespace GlassProductInspect;Report report;
+GlassProductInspect::Report InspectPresence(){using namespace GlassProductInspect;Report report; struct {bool os64=true;} in;
 // PROJECTION
 return report;}
 int main(){

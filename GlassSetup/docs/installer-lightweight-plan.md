@@ -28,7 +28,7 @@
 | R2–R4 | File-based acquisition, resolver rules, attached/cache/server inspection и trust есть. Отображение: категории server/local, download только по Next. |
 | R5 | Controller store/handoff/self-update код и mocks есть. Полная VM fault/reboot acceptance не закрыта. |
 | R6 | Page::Update больше не является рабочей страницей; штатный download progress. |
-| R7 | MSI не встроены в runtime Setup; старые неиспользуемые resource defines ещё встречаются и требуют housekeeping, не возврата payload. |
+| R7 | MSI не встроены в runtime Setup; неиспользуемые resource defines удалены. |
 | R8 | Production HTML/native maintenance plan, карточки, downloads, Remove/Keep, предупреждения реализованы. |
 | R9 | Раздельные Settings x64/x86 и helpers реализованы. Пришедший e3ab778 использует общую bundle version; не возвращать удалённый Settings Version.props. |
 | Cleanup | Explicit opt-in, preflight, after-success/registration-absence gates, profile folders/themes, Glass registry и 49 DWM values; post-delete verification. |
@@ -36,105 +36,52 @@
 | Update launch | Обе кнопки update в ProductUpdateCoordinator уже запускают cached Setup; этот маршрут сохранять. |
 | Online install | Успешно подтверждён пользователем. Не переносить этот результат на новые backup/upstream/fault сценарии. |
 
-### 0.2 Актуальный backup и upstream этап
+### 0.2 Реализовано к завершению этапа установщика
 
-Локальные коммиты пользователя 9f25136/65abdb2 получены обычным fast-forward.
-Сохранение/восстановление .glassbackup и открытие двойным кликом подтверждены
-пользователем. Backup теперь current-user HKCU, с разделами/темами и restore UI;
-прежняя all-profile реализация и её ограничения ниже — исторический журнал.
-Не откатывать локальный backup, file association или live reloads.
+Этап слит в master через PR #8 (`68a72bb`). Последующая уборка документации и
+portable mocks не является новой реализацией этих функций.
 
-Каталог Glass теперь содержит только Platform/Settings. OpenGlass MSI отсутствует
-намеренно. Найденный конфликт: main.cpp связывает applySupported OG с MSI target,
-поэтому карточка после возврата блокируется. Для устранения нужен N6 end-to-end,
-не ложное включение applySupported без способного выполнить установку engine.
+| Область / прежний ID | Текущее состояние |
+|---|---|
+| N1/N1b/N8 — backup | Current-user `.glassbackup`, создание/восстановление, association и live reload приняты после доработок пользователя. Не возвращать all-profile scope; AppData/Local/GlassPlatform в архив не добавлять. |
+| N5 — официальный EXE | Acquisition и исполнение официального silent Inno EXE подключены. Проверенные adjacent/cache/release источники, staged lifetime, raw exit/reboot и повторное использование; собственного извлечения DLL для установки нет. |
+| N6 — inventory/servicing | Официальная Inno-регистрация, каталог установки, штатный деинсталлятор и mixed/standalone маршруты реализованы. Файлы, служба и её удаление принадлежат Inno; honest partial commit сохраняется. Service/task/directory сами по себе не означают установленный OG. |
+| N7 — Resources | Отдельный graphics-only `OpenGlassResources-x64.msi`: build/catalog/UI/planner, snapshot/remove/rollback подключены. Только Release|x64. При выбранной паре Resources ставится до официального OG EXE (он запускает службу). Обслуживание/удаление Resources допустимо после удаления OG. |
+| Controller/R5 | Publication/handoff/self-update, real-parent validation и сохранение позиции окна реализованы. Self-signed first-party policy согласована с MSI; импорт корневого сертификата не нужен. |
+| Maintenance UI | Две независимые cleanup-галочки Platform/OG, общий WebView2 review, граница Back, нейтральное завершение/отмена и offline background реализованы. |
+| Removal/ARP | Проверка службы до managed mutation, scoped unquoted-path rule, orphan-key cleanup после all-context отсутствия и уведомление Installed Apps реализованы. Shell unregister перенесён перед первым managed MSI; no-wait shell notifications. |
+| R7 housekeeping | Неиспользуемые `IDR_MSI_*` удалены из resource.h; MSI payload не возвращается. |
+| R10 housekeeping | Portable mocks адаптированы к текущим API; общий запуск — `python3 GlassSetup/tests/run_mocks.py`. Windows/release checklist актуализирован. Это не Windows acceptance. |
 
-На текущем этапе добавлены:
-- DefaultSelectedFor всегда false: inspection/recommendation/fresh install не
-  выбирают ни один продукт автоматически; временные startup intents также пустые.
-- GlassInnoExtract: bounded Inno 6.7 headers/offset table/CRC/LZMA/89-byte records,
-  CALL/JMP decode строго 64KB; ни записи файлов, ни исполнения.
-- GlassOpenGlassPackage::Prepare: GitHub latest asset download, size/SHA256,
-  setup Valid Authenticode + upstream subject, RT_RCDATA/11111, decoded hashes,
-  x64 PE32+/version/original filename/description и одинаковый signer каждого
-  payload. Package возвращает selected DLL (build>=28000 MILComp), Host и GUI.
-- Staging API подключён к Next ProductDownloads index4 и engine ExtractPayload.
-  Повторная preparation проверяет protected metadata/setup/hash/signatures и
-  распаковывает из session hint без второго download. Он не создаёт
-  service/ARP/receipt и не заменяет прежний MSI execution path. Нельзя считать
-  заблокированную OG карточку окончательно исправленной этим этапом.
-- Реальные portable parser/LZMA тесты на synthetic fixtures PASS. Скачивание и
-  Authenticode Windows provider на настоящем upstream EXE не выполнялись.
+Актуальная политика доверия и удаления OG, включая ограниченный допуск
+защищённого unsigned установленного Inno-деинсталлятора:
+[openglass-official-install.md](openglass-official-install.md).
+Старый extractor-документ ниже — только историческая справка о формате.
 
-### Уточнение backup UI/restore после пользовательского теста
+### 0.3 Отложенная функциональность Settings, не остаток реализации Setup
 
-Новый запрос имеет приоритет над первоначальной registry-only кнопкой:
-- Maintenance переименован «Обслуживание систем» + иконка, отдельный spoiler
-  «Резервные копии параметров». Nested option row убран: он помещал длинное
-  описание + Auto action в body и приводил к обрезанию; контент ограничен Grid.
-- Результаты backup идут через SettingsNoticeCoordinator (Success MirrorOnly,
-  Error pinned), а не TextBlock снизу. Dismiss backup error не dismiss update.
-- Native registry reads снижены с KEY_READ до QUERY_VALUE|ENUMERATE_SUB_KEYS;
-  READ_CONTROL/NOTIFY не нужны экспорту. Отказы теперь имеют operation/key/view/
-  SID/path context. По прежнему общему «access denied» невозможно установить,
-  отказал ли HKU, Documents или доступ к NTUSER.DAT; live-причина ещё не доказана.
+| ID | Что остаётся |
+|---|---|
+| N2 | Per-product update provider вместо bundle `glass`: версии/архитектуры, общая строка нескольких updates и dismissed identity. `GlassReleaseUpdateService` пока читает общую версию. |
+| N3 | Settings OpenGlass update provider: актуальные unsuffixed релизы, соответствие установленному DWM-варианту/каналу и repair после смены Windows build. Текущий provider ещё ориентирован на `-legacy`. |
+| N4 | Отдельно проверить/довести Settings switch-off orchestration OG до того же удаления service/legacy task, что dropdown Delete; завершение установщика не подтверждает этот Settings-сценарий. |
 
-**Следующий обязательный этап N1b (ещё не реализован):**
-- Pivot «Создать/Восстановить» в отдельном backup spoiler, стандартный pivot style.
-- Расширяемый descriptor registry разделов: stable ID, локализованное название,
-  capture/validate/preflight/apply/live-reload handlers. Начальные IDs:
-  glass-platform, dwm, saved-themes. AppData/Local/GlassPlatform не архивировать.
-- Новое расширение `.glassbackup` для ZIP container v2, без auto-association в
-  registry при запуске Settings. OS file association — отдельно explicit install
-  registration; filter расширения не является проверкой доверия.
-- Создание: heading + призыв выбрать разделы, dynamic checkboxes, кнопка снизу
-  справа с переносом/ограничением по доступной ширине. Themes только сохранённые
-  Glass themes по существующему ownership contract, не все .theme.
-- Восстановление: heading + CTA, кнопка «Выбрать», существующий hosted WinUI
-  ExecutableFilePickerPanel как на Processes; только .glassbackup, Documents
-  как initialDirectory. Никакого shell Open/запуска архивов.
-- До выбора/валидации все checkboxes disabled. Manifest доступности разрешает
-  только подтверждённые разделы; неизвестные sections не активировать.
-- Reader: open/pin file once, bounded ZIP/JSON, reject duplicates, traversal,
-  unknown format, invalid checksums/types/paths/SIDs/install metadata. Нельзя
-  применять произвольные Hive/Key из архива v1 без повторного allowlist validation.
-- Restore: full preflight → snapshot rollback → serial operation pipeline →
-  selected registry/theme mutations → existing live reloads/session/watch sync
-  → единый Success/partial Error. Не объявлять live reload до его результата.
-  Не запускать arbitrary Native paths из архива. v1 import policy отдельная,
-  текущий v1 архив не следует объявлять безопасно импортируемым.
-- SUT/OG missing server version: backend уже передаёт releaseVersion/tag и
-  remotePayloadVersion соответственно. Требуется воспроизвести фактический
-  metadata discovery failure и добавить regression, не подставлять MSI/local
-  version под видом server. Исправление пока не заявляется завершённым.
+### 0.4 Непройденная Windows-приёмка — не объявлять функции отсутствующими
 
-### 0.3 Ещё НЕ реализовано — единый backlog
-
-| ID | Оставшаяся реализация | Условие завершения |
-|---|---|---|
-| N2 | Per-product Glass update provider вместо bundle `glass`; compare только установленные продукты/архитектуры, независимый catalog version | Несколько updates дают компактную общую строку на Glass expander, один — конкретную; dismissed identity не теряет изменения набора |
-| N3 | OpenGlass installed DWM architecture + актуальные unsuffixed releases, старые -legacy/-milcomp только своего канала | Не переводит Legacy в MILComp по более новому тегу; учитывает repair при смене Windows build |
-| N4 | Исправить регрессию switch-off OpenGlass orchestration | Service и legacy task удаляются так же, как dropdown Delete; выключение не подменяется disable autorun |
-| N5 | Перевести acquisition/execution на официальный silent upstream EXE (новая политика) | Adjacent signed EXE → release download on Next; publisher/version/hash trust, exit/reboot handling; без собственного извлечения DLL |
-| N6 | Заменить receipt route на upstream Inno inventory/servicing в любом каталоге | Inno управляет файлами, правами, службами и ARP; Setup не создаёт/удаляет их за него; честная граница commit/rollback |
-| N7 | Resources: добавлен отдельный WiX-проект/graphics-only staging и MSI prerequisite; catalog/UI/planner ещё не подключены | Catalog/build/UI/planner/snapshot/remove/rollback: не спрятанный addon в OpenGlass payload |
-| N8 | Backup/restore/association приняты после локальных доработок пользователя | Не добавлять AppData/Local/GlassPlatform в архив; сохранять действующий current-user контракт |
-| R10 | Довести устаревшие mock harness до текущих API и документы/релизный checklist до нового состава продуктов | Общий run с явным отчётом, без ослабления production trust ради тестов |
-
-Порядок: N1 → N2/N3 → N4 → N5/N6 → N7 → R10. Не считать весь переход
-выполненным только потому, что добавлены UI строки или extractor-контракт.
-
-### 0.4 Отдельно: остающаяся приёмка, не отсутствие реализации
-
-- Windows build/WinUI/System backup: archive type/bytes, loaded/offline/access denied,
-  Documents readonly/reparse/disk full; проверить отсутствие ложного «сохранено».
-- Полное удаление keep/clean: Glass + HKU/HKLM DWM whitelist, folders/themes,
-  registration/controller retirement, stale Settings Modify.
-- Offline attached/cache/нет источников, repair, per-arch Native; visual DPI/native fallback.
-- Fault/cancel/reboot/recovery matrix: [controller-windows-acceptance.md](controller-windows-acceptance.md).
-  Только VM, без fault injection на рабочей системе.
-- Upstream + Resources требуют собственной новой acceptance после реализации.
-- Explorer crashes — отдельная отложенная задача, не часть завершения installer.
+- Полный повтор последнего удаления: shell unregister helper завис на 45 s;
+  Resources/x86 удалились, rollback получил sharing violation на GlassShellExt.dll.
+  Изменения порядка/no-wait реализованы, устранение hang ещё не подтверждено.
+- Чистый ПК: first publication self-signed controller без доверенного root;
+  подписи Setup/Unins, equality и отказ чужому/повреждённому файлу.
+- OG: реальное удаление после исправления service ImagePath, stopped/1072/error,
+  mixed partial outcome, сохранение config/presets согласно отдельным согласиям.
+- Installed Apps: отсутствие ключей уже подтверждено для Resources и Platform x86;
+  немедленное обновление уже открытого окна и отсутствие stale actions проверить отдельно.
+- Backup: loaded/offline/access denied, readonly/reparse/disk full, отказ повреждённому архиву.
+- Attached/cache/offline/нет источника, repair, per-arch helpers, DPI/native fallback.
+- Fault/cancel/reboot/recovery: [controller-windows-acceptance.md](controller-windows-acceptance.md).
+  Только VM; crash Explorer остаётся отдельной диагностической задачей.
+- Релиз: [release-checklist.md](release-checklist.md). Source/mocks не заменяют MSVC/WiX/Inno/WebView2.
 
 ---
 
@@ -798,33 +745,22 @@ struct Selection {
 
 ## 15. Документация и релизный чек-лист
 
-**Обновить после реализации**
-
-- `GlassSetup/README.md` — сборка без встраивания; источники пакетов; самопродление; «Установка без сети»; таблица «кто что качает».
-- `GlassSetup/docs/implementation-progress.md` — запись о переходе на лёгкий установщик и оставшихся пунктах.
-- `GlassSetup/docs/product-state-contract.md` — модель шести продуктов (§9), независимые действия, ограничения и предупреждения.
-- `GlassSetup/docs/cache-profile-maintenance-contract.md` — кэш как источник пакетов (единственный `Current`, временный staging/rollback и удаление старых пакетов после commit).
-- `AGENTS.md` — запрет «предлагать вернуть встраивание MSI».
-
-**Релизный чек-лист (ручной, пока нет workflow)**
-
-1. Собрать Release|x64 → Release|x86; проверить пять MSI рядом с EXE в `GlassProject\Build\GlassSetup\Release`.
-2. Подписать `GlassSetup.exe`, `GlassSettings.Native.dll`, все пять MSI.
-3. Посчитать SHA-256 и размеры; сгенерировать `version.json`.
-4. Проверить: манифест ссылается ровно на опубликованные имена файлов; все `url` проходят allowlist.
-5. Загрузить ассеты (5 MSI + `GlassSetup.exe` + `version.json`) в релиз.
-6. Проверить на чистой VM: чистая установка, обновление, офлайн-установка, самопродление.
+Актуальный ручной checklist вынесен в [release-checklist.md](release-checklist.md).
+Windows acceptance: [controller-windows-acceptance.md](controller-windows-acceptance.md).
+Текущие статусы и отложенный Settings backlog — только §0 этого документа.
+Разделы 1–14 и приложения сохраняют исходные проектные решения/историю;
+их старые «нужно реализовать» и номера строк не являются текущим backlog.
 
 ---
 
 ## 16. Приложения
 
-### Приложение A. Карта символов (текущий HEAD, номера строк сдвинутся)
+### Приложение A. Историческая карта символов до рефакторинга
 
 | Что | Где |
 |---|---|
 | `GLASS_EMBED_MSI`, `GlassMsiPayloadDir`, проверки наличия MSI | `GlassSetup.vcxproj` (~87, 109–125) |
-| `IDR_MSI_*` | `res/resource.h` (171–175) |
+| `IDR_MSI_*` | Удалены из runtime RC и resource.h; ниже — историческая карта остальных символов |
 | `IDR_HTML RCDATA "slideshow.html"` | `res/GlassSetup.rc` (7) |
 | `InstallEngine::ExtractPayload` | `src/InstallEngine.cpp` (~1101) |
 | `InstallEngine::VerifyEmbeddedNativePayload` | `src/InstallEngine.cpp` (~1161) |

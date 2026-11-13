@@ -13,6 +13,7 @@ prefix=r'''
 #include <cassert>
 namespace GlassMaintenanceReboot {bool Pinned(bool){return true;}}
 #include <functional>
+#include <memory>
 #include <iostream>
 #include <map>
 #include <string>
@@ -23,6 +24,9 @@ namespace GlassMaintenanceReboot {bool Pinned(bool){return true;}}
 constexpr unsigned LANG_RUSSIAN=25,ERROR_SUCCESS=0,ERROR_INSTALL_FAILURE=1603,ERROR_INSTALL_USEREXIT=1602,
  ERROR_INSTALL_PACKAGE_REJECTED=1625,ERROR_SUCCESS_REBOOT_REQUIRED=3010,ERROR_SUCCESS_REBOOT_INITIATED=1641,
  INSTALLLOGMODE_VERBOSE=1,INSTALLLOGMODE_ERROR=2,INSTALLLOGMODE_WARNING=4,INSTALLLOGATTRIBUTES_FLUSHEACHLINE=1;
+constexpr int INSTALLSTATE_UNKNOWN=-1;int MsiQueryProductStateW(const wchar_t*){return INSTALLSTATE_UNKNOWN;}
+constexpr unsigned ERROR_NOT_ENOUGH_MEMORY=8;
+namespace GlassOpenGlassFiles {bool HasReceipt(const std::wstring&){return false;} struct Transaction {bool Begin(const std::wstring&,std::wstring&){return true;}bool Remove(std::wstring&){return true;}bool Rollback(){return true;}};}
 using UINT=unsigned;
 namespace GP{enum class PlatformArch{X64,X86};}
 constexpr unsigned IMAGE_FILE_MACHINE_AMD64=0x8664,IMAGE_FILE_MACHINE_I386=0x14c;
@@ -32,7 +36,7 @@ struct State{std::map<std::wstring,bool> installed;std::vector<std::wstring> cal
  bool x86=false,x64=false,og=false,shortcut=false,helper=true,pathsSafe=true,retargetOk=true;std::wstring retarget;unsigned result=0;}s;
 namespace GlassInstallMsi{
  constexpr const wchar_t* kProductPlatformX64=L"p64",*kLegacyPlatformX64=L"old64",*kProductPlatformX86=L"p32",*kLegacyPlatformX86=L"old32",
- *kProductSettingsX64=L"s64",*kProductSettingsX86=L"s32",*kProductOpenGlass=L"og",*kLegacyOpenGlass=L"oldog";
+ *kProductSettingsX64=L"s64",*kProductSettingsX86=L"s32",*kProductOpenGlass=L"og",*kLegacyOpenGlass=L"oldog",*kProductOpenGlassResourcesX64=L"res";
  enum class ProductPathCheck{Safe,Unsafe};
  struct ProgressSink{std::wstring label;int base=0,span=0;std::atomic_bool* cancelRequested=nullptr;
  std::function<void(const std::wstring&)> onError;std::function<void(const std::wstring&,int)> onProgress;};
@@ -43,7 +47,7 @@ namespace GlassInstallMsi{
   if(s.msi&&!s.stillPresent)s.installed[code]=false;return s.msi;
  }
 }
-namespace GlassInstallRollback{struct Snapshot{std::wstring productCode;};struct SessionState{std::wstring workspaceDir=L"backup";std::vector<Snapshot> oldProducts;};
+namespace GlassInstallRollback{struct Snapshot{std::wstring productCode;};struct SessionState{std::function<bool()> restoreOpenGlassFiles;std::wstring workspaceDir=L"backup";std::vector<Snapshot> oldProducts;};
  void NoteModified(SessionState&,const wchar_t* code){s.modified.emplace_back(code);}}
 namespace GlassInstallRemoval{struct Session{};
  bool PrepareSettingsShortcutRetarget(Session&,const std::wstring& target,const std::wstring&,const std::wstring&,
@@ -64,7 +68,7 @@ namespace InstallLog{std::wstring NextMsiVerboseLogPath(const wchar_t*) noexcept
  template<class... T>void LineFormat(const wchar_t*,T...){} }
 void MsiEnableLogW(unsigned,const wchar_t*,unsigned){}
 struct InstallEngine{
- GlassProducts::Selection selection_;GlassProductPlan::Plan executionPlan_;bool executionPlanReady_=true,openGlassResidualRemoval_=false,scanNativeX64_=true,shellRemovedForMaintenance_=false,family=true;
+ std::shared_ptr<GlassOpenGlassFiles::Transaction> openGlassFiles_;GlassProducts::Selection selection_;GlassProductPlan::Plan executionPlan_;bool executionPlanReady_=true,openGlassResidualRemoval_=false,scanNativeX64_=true,shellRemovedForMaintenance_=false,family=true;
  std::atomic_bool cancelRequested_{false};GlassInstallRemoval::Session removalSession_;GlassInstallRollback::SessionState rollbackSession_;
  std::wstring x64Dir_=L"64",x86Dir_=L"32",openGlassDir_=L"OG";int failures=0,warnings=0;
  bool IsCancelRequested(){return cancelRequested_.load();}
@@ -87,7 +91,8 @@ int main(){
  }
  {InstallEngine e;reset(e,Product::Platform32);s.installed[L"old32"]=true;assert(Run(e,Product::Platform32));assert(s.calls==std::vector<std::wstring>{L"old32"});}
  {InstallEngine e;reset(e,Product::Platform32);s.installed[L"p32"]=s.installed[L"old32"]=true;assert(Run(e,Product::Platform32));assert(s.modified.size()==2);}
- {InstallEngine e;reset(e,Product::Platform64);s.installed[L"p64"]=true;s.shell=false;assert(!Run(e,Product::Platform64));assert(s.modified.empty());assert(e.failures==1);}
+ {InstallEngine e;reset(e,Product::Platform64);s.installed[L"p64"]=true;s.shell=false;assert(Run(e,Product::Platform64));assert(s.modified.size()==1); // shell barrier moved to RunMsiSequence, covered separately
+ }
  {InstallEngine e;reset(e,Product::Platform32);s.installed[L"p32"]=true;s.baselineBad=L"p32";assert(!Run(e,Product::Platform32));assert(s.modified.empty());}
  {InstallEngine e;reset(e,Product::Platform32);s.installed[L"p32"]=true;s.msi=false;s.result=1603;assert(!Run(e,Product::Platform32));assert(s.modified.size()==1&&e.failures==1);}
  {InstallEngine e;reset(e,Product::Platform32);s.installed[L"p32"]=true;s.cancel=true;assert(!Run(e,Product::Platform32));assert(s.modified.size()==1&&e.IsCancelRequested()&&e.failures==0);}

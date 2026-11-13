@@ -41,7 +41,7 @@ prefix = r'''
 #include <mutex>
 #include <string>
 #include <thread>
-constexpr int ERROR_INSTALL_USEREXIT=1602, FALSE=0;
+constexpr int ERROR_SUCCESS_REBOOT_REQUIRED=3010,ERROR_INSTALL_USEREXIT=1602, FALSE=0;
 int closed=0, signaled=0, disabled=0;
 void DestroyWindow(int){++closed;}
 void SetEvent(int){++signaled;}
@@ -51,6 +51,7 @@ void LogLine(const std::wstring&){}
 class_start = r'''
 struct App {
  int window=1,gate_=2,cancel_=3,resultCode_=0;
+ bool cleanupReviewed_=false; unsigned pendingSettingsRisk_=0; struct {bool cleanupSettings=false;} selected_;
  Page page_=Page::Select;
  std::thread worker_;
  std::mutex dataMutex_;

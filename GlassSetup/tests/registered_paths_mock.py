@@ -185,9 +185,9 @@ int main(){InstallRoots r;
  put(2,L"Software\\GlassPlatform",0,L"InstallPathX86",L"E:\\User\\Glass");
  assert(ResolveInstallRoots(r) && r.x86==L"D:\\Legacy\\Glass" && r.sourceX86==L"HKLM(32) InstallPath");
  reset();put(2,L"Software\\GlassPlatform",0,L"InstallPathX86",L"E:\\User\\Glass");
- assert(ResolveInstallRoots(r) && r.x86==L"E:\\User\\Glass" && r.sourceX86==L"HKCU InstallPathX86");
+ assert(ResolveInstallRoots(r) && r.x86==L"C:\\Program Files (x86)\\GlassPlatform" && r.sourceX86==L"Windows Program Files default");
  reset();put(2,L"Software\\Wow6432Node\\GlassPlatform",0,L"InstallPath",L"D:\\LegacyUser\\Glass");
- assert(ResolveInstallRoots(r) && r.x86==L"D:\\LegacyUser\\Glass");
+ assert(ResolveInstallRoots(r) && r.x86==L"C:\\Program Files (x86)\\GlassPlatform");
  // Native 32-bit Windows does not resolve x64/OpenGlass.
  reset();fake.wow=false;fake.pf86=L"C:\\Program Files";assert(ResolveInstallRoots(r));
  assert(r.x64.empty() && r.openGlass.empty() && r.x86==L"C:\\Program Files\\GlassPlatform");

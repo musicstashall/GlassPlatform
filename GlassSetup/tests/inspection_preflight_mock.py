@@ -28,12 +28,12 @@ std::set<std::wstring> installed;
 std::vector<std::wstring> checked;
 struct ProductReport {bool installed=false,integrityKnown=false,sourceVerified=false,updateAvailable=false,nativeSourceCompared=false,nativeSourceDiffers=false;
  std::wstring attachedPackageVersion,attachedPackagePath,selectedPackagePath,attachedPayloadVersion;std::wstring targetVersion,installedVersion,installedPackageVersion,targetPayloadVersion;int unavailable=0;};
-struct Report {ProductReport x64,x86,settings64,settings32,og;};
-struct Inputs {bool inspectSources=true;const std::atomic_bool* cancelled=nullptr;};
+struct Report {ProductReport x64,x86,settings64,settings32,og,openGlassResources;};
+struct Inputs {bool inspectSources=true,os64=true;const std::atomic_bool* cancelled=nullptr;};
 enum class Reason {InspectionUnavailable};
 void AddReason(ProductReport& r,Reason){++r.unavailable;}
 namespace GlassPackageCatalog {
-enum class Product {Platform64,Platform32,Settings64,Settings32,OpenGlass};
+enum class Product {Platform64,Platform32,Settings64,Settings32,OpenGlass,OpenGlassResources};
 struct Catalog {};
 const char* kFiles[]={"Glass-x64.msi","Glass-x86.msi","GlassSettings-x64.msi","GlassSettings-x86.msi","OpenGlass-x64.msi"};
 }
@@ -44,7 +44,7 @@ bool Describe(GlassPackageCatalog::Product,const GlassPackageCatalog::Catalog&,c
 }
 namespace GlassInstallMsi {
 constexpr const wchar_t* kProductPlatformX64=L"p64",*kLegacyPlatformX64=L"old64",*kProductPlatformX86=L"p32",
- *kLegacyPlatformX86=L"old32",*kProductSettingsX64=L"s64",*kProductSettingsX86=L"s32",*kProductOpenGlass=L"og",*kLegacyOpenGlass=L"oldog";
+ *kLegacyPlatformX86=L"old32",*kProductSettingsX64=L"s64",*kProductSettingsX86=L"s32",*kProductOpenGlass=L"og",*kLegacyOpenGlass=L"oldog",*kProductOpenGlassResourcesX64=L"res";
 bool IsProductInstalled(const wchar_t* code){return installed.count(code)!=0;}
 enum class ProductPathCheck {Safe,Unsafe};
 ProductPathCheck CheckProductContexts(const wchar_t*,std::wstring&){return context?ProductPathCheck::Safe:ProductPathCheck::Unsafe;}
@@ -70,8 +70,8 @@ int main(){
   assert(r.x64.integrityKnown&&checked==std::vector<std::wstring>{code});
   assert(fetches==0&&workspaces==0&&prepares==0&&cleanups==0);
  }
- for(const auto* code:{L"old32",L"oldog"}){
-  Reset();installed.insert(code);Report r;auto& product=std::wstring(code)==L"old32"?r.x86:r.og;
+ for(const auto* code:{L"old32",L"res"}){
+  Reset();installed.insert(code);Report r;auto& product=std::wstring(code)==L"old32"?r.x86:r.openGlassResources;
   product.installed=true;Inputs in;in.inspectSources=false;Inspect(in,r);
   assert(product.integrityKnown&&checked==std::vector<std::wstring>{code});
  }
@@ -79,7 +79,7 @@ int main(){
   assert(checked==std::vector<std::wstring>{L"p64"});}
  {Reset();installed={L"s32"};Report r;r.settings32.installed=true;Inputs in;Inspect(in,r);
   assert(fetches==1&&workspaces==0&&prepares==5&&cleanups==0&&r.settings32.integrityKnown&&r.settings32.nativeSourceCompared&&!r.settings32.nativeSourceDiffers);
-  assert(r.og.targetPayloadVersion==L"1.5.0"&&r.og.targetVersion==L"2.0.0");
+  assert(r.og.targetPayloadVersion.empty()&&r.og.targetVersion.empty()); // upstream OG is not an MSI source
   assert(r.x64.targetPayloadVersion.empty());}
  for(bool unsafe:{false,true}){
   Reset();installed={L"p64"};baseline=unsafe;context=!unsafe;Report r;r.x64.installed=true;Inputs in;in.inspectSources=false;Inspect(in,r);

@@ -3142,3 +3142,28 @@ CRT removal, reduced motion также PASS. managed_removal, recommendations,
 product_downloads DOM и verify_resources PASS. Реальный WebView2 visual test
 в этой среде не выполнялся.
 Сборка общего HTML: GlassUnins Release|x86 → GlassSetup Release|x86.
+
+
+### Завершение installer stage: housekeeping и актуализация portable mocks
+
+База — master PR #8, `68a72bb`; новая ветка `arena/48d07fae-glassplatform`.
+Удалены пять неиспользуемых IDR_MSI defines из resource.h и зеркального resource.h.txt;
+verify_resources запрещает их повторное появление. Payload/runtime/trust не менялись.
+
+Начальный полный прогон: 135 mocks, 108 PASS / 27 FAIL. Исправлены устаревшие
+harness API/fixtures: Resources, machine-only roots/registry views, GlassStop reason
+и cooperative attempt, scoped Settings close, scan diagnostics/options/frame failure,
+local watch selection, cleanup согласия, worker dispatch и shell pre-MSI barrier.
+Scanner mock использует действующие enum/struct definitions из production header;
+добавлена проверка #fail framing. Orphan deletion отдельно покрывает свой actual-source
+mock, ARP-refresh fixture лишь моделирует этот внешний вызов.
+Ни один mock не удалён и не помечен skip. Общий run_mocks.py сохраняет индивидуальные
+логи вне Git, возвращает nonzero на failure/timeout и явно исключает browser/native QA.
+
+Итоговый общий прогон: **135/135 PASS**. verify_resources и git diff --check PASS.
+Windows/MSVC/WiX/Inno/WebView2 execution в этой среде не выполнялся. Shell helper hang
+не объявлен исправленным результатом mocks. Обновлены основной план §0, архивные
+статусы upstream/Settings, controller Windows acceptance, signing и ручной release
+checklist: пять first-party MSI, Resources x64 only, upstream OG EXE и SUT отдельно,
+самоподписанный first-party controller/MSI с точным signer и только untrusted-root
+исключением. Отложенные N2/N3/N4 — отдельные Settings задачи, не потерянный Setup backlog.

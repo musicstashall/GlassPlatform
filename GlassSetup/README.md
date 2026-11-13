@@ -540,3 +540,17 @@ SecureUxTheme. Без prerequisite карточка остаётся устан�
 Движения мыши и клавиатура не закрывают уведомление.
 Подробный [контракт зависимостей и исключения](docs/cache-profile-maintenance-contract.md)
 также описывает проверку MSI, разрядность, отмену prerequisite и порядок выполнения.
+
+
+## Regression и публикация после installer stage
+
+- Все portable mocks: `python3 GlassSetup/tests/run_mocks.py` (Python 3 + C++17
+  compiler). `--jobs`, `--timeout`, `--log-dir` настраивают запуск; логи по умолчанию
+  вне checkout, в системном temp. Любой failure/timeout даёт ненулевой exit.
+- Source/resources: `python3 GlassSetup/tests/verify_resources.py`. Browser/DOM и
+  native Windows tests — отдельные прогоны, не скрытые пропуски в mock runner.
+- [Текущие статусы/остаток](docs/installer-lightweight-plan.md#0-единый-актуальный-план-setup--settings--upstream-openglass).
+- [Ручной release checklist](docs/release-checklist.md): пять first-party MSI,
+  Resources только Release|x64, upstream OG EXE/SUT отдельно, актуальный signed catalog.
+- [Windows acceptance](docs/controller-windows-acceptance.md): clean-PC self-signed
+  publication, shell-unregister timeout и реальное удаление пока требуют native проверки.

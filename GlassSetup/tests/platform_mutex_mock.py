@@ -45,6 +45,12 @@ DWORD GetLastError(){return fake.error;}void SetLastError(DWORD e){fake.error=e;
 ULONGLONG GetTickCount64(){return fake.now;}void Sleep(DWORD ms){fake.now+=ms;}int GetUserDefaultUILanguage(){return 0;}
 namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
 namespace GlassInstallHost {bool QueryGlassPlatformRunning(GP::PlatformArch,bool&) noexcept;}
+namespace Shared::GlassStop {
+ enum class Reason{Installer,HostDead};
+ struct Options {Reason reason;unsigned gracefulMs=0,hostGoneMs=0;bool allowTaskStop=false,wakeResiduals=false;};
+ struct Result {bool hostGone=false;unsigned elapsedMs=0,residualProcesses=0;const wchar_t* failedPhase=L"";};
+ Result Request(GP::PlatformArch,const Options&){return {};}
+}
 namespace GlassInstallRemoval {
  bool StopValidatedPlatformTask(GP::PlatformArch,const std::wstring& root,const std::atomic_bool* cancel,
   bool& attempted,bool,std::wstring& detail){fake.root=root;attempted=false;
@@ -63,7 +69,7 @@ int main(){auto reset=[](){fake=Fake{};};bool running=false,attempted=false;std:
  reset();assert(stop() && fake.requests==0 && fake.now==0 && !attempted);
  reset();fake.running=true;assert(stop() && fake.requests==1 && attempted && fake.root==L"D:\\Root" && fake.now==500);
  reset();fake.running=true;assert(!stop(nullptr,false) && !attempted && fake.requests==0 && fake.error==ERROR_INVALID_STATE);
- reset();fake.running=true;fake.validate=false;assert(!stop() && !attempted && fake.requests==0 && detail==L"task changed");
+ reset();fake.running=true;fake.validate=false;assert(!stop() && attempted && fake.requests==0 && detail==L"task changed");
  reset();fake.running=true;fake.denyAfterRequest=true;assert(!stop() && attempted && fake.requests==1);
  reset();fake.running=true;fake.stopAt=999999;assert(!stop() && attempted && fake.now>=45000 && fake.error==ERROR_TIMEOUT);
  reset();fake.running=true;fake.accepted=false;assert(!stop() && attempted && fake.now==500 && fake.error==ERROR_ACCESS_DENIED);

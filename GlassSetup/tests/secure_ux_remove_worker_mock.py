@@ -6,12 +6,12 @@ source=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
 methods=source[source.index('bool InstallEngine::PrepareSecureUxRemoval()'):source.index('bool InstallEngine::BuildExecutionPlan()')]
 early=source[source.index('bool InstallEngine::CommitEarlySecureUxRemoval()'):source.index('bool InstallEngine::InstallOriginalSecureUxTheme()')]
 methods=methods.replace(early,'')
-worker=source[source.index('DWORD WINAPI InstallEngine::WorkerThread('):source.index('bool InstallEngine::Start(')]
+worker=source[source.index('DWORD WINAPI InstallEngine::RunGlassWorker('):source.index('bool InstallEngine::Start(')]
 assert worker.index('CreateRollbackSnapshot()')<worker.index('PrepareSecureUxRemoval()')<worker.index('StopRunningHosts()')
 assert worker.index('RegisterSelectedProducts()')<worker.index('InstallOriginalSecureUxTheme()')<worker.index('LaunchSelectedProducts()')
 assert 'vendorOnly || self->CapturePriorHostState()' in worker
 assert 'if(!vendorOnly)ok = self->RegisterSelectedProducts()' in worker
-assert 'if(!vendorOnly && !self->auxiliaryOnly_)self->LaunchSelectedProducts()' in worker
+assert 'if(!vendorOnly && !self->auxiliaryOnly_ && !self->mixedOpenGlass_)self->LaunchSelectedProducts()' in worker
 assert 'if (ok && !vendorOnly)' in worker
 assert 'if (ok && !vendorOnly && !self->IsCancelRequested())' in worker
 assert 'PerformRollback()' in worker and 'UndoCleanInstall()' in worker

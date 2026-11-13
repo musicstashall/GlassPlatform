@@ -88,7 +88,7 @@ struct Wizard {
  InstallEngine installEngine_;std::vector<InstallEngine::FinishWarning> finishWarnings_;
  int errors=0;
  std::wstring Text(unsigned id){return std::to_wstring(id);}
- bool ConfirmManagedSettingsRemoval(){return true;}
+ bool ConfirmManagedSettingsRemoval(){return true;} bool ConfirmFullRemovalCleanup(){return true;} bool DownloadsReady(){return true;}
  bool RunPreflightChecks(){return preflight;}bool CertificatePageApplies(){return certificate;}
  void SetPage(Page p){page_=p;}void ShowInstallError(const std::wstring&){++errors;KillTimer(window,kInstallTimer);page_=Page::Error;}
  void ShowFailurePage(bool){++errors;KillTimer(window,kInstallTimer);page_=Page::Error;}

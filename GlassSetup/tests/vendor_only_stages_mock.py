@@ -37,6 +37,7 @@ struct InstallEngine {
  bool DetermineCleanInstall(){return Call("determine");}
  bool ExtractPayload(int){return Call("extract");}
  bool CreateRollbackSnapshot(){return Call("snapshot");}
+ bool CommitEarlySecureUxRemoval(){return Call("commit-vendor");}
  bool PrepareSecureUxRemoval(){return Call("prepare-vendor");}
  bool PrepareFullRemovalCleanup(){return true;}
  bool BuildExecutionPlan(){return Call("build");}

@@ -17,7 +17,8 @@ for forbidden in ('StartupWorker(', 'ContinueVersionCheck(', 'StartInstallation(
     assert forbidden not in preview, forbidden
 assert 'if (NativeDemo()) return;' in function('void InitializeWebView()')
 assert 'debugNativeDemo_=HasCommandLineSwitch(L"--demo-native");' in function('void InitializeControls()')
-assert '!NativeDemo()' in function('void RenderContent(')
+assert 'WaitingForWebUi()' in function('void RenderContent(')
+assert '!NativeDemo()' in function('bool WaitingForWebUi()')
 assert 'Page::Welcome && NativeDemo()' in function('void RenderContent(')
 assert 'Page::Installing && !webReady_' in function('void RenderContent(')
 assert 'return false;' in function('bool NativeDemo()') # Release cannot enable it.

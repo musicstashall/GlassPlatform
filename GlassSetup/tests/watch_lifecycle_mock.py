@@ -12,7 +12,7 @@ def extract(begin, end):
     start = source.index(begin)
     return source[start:source.index(end, start)]
 
-merge_helpers = extract("std::wstring TrimToken(", "std::wstring ModuleNamesFromBits(")
+merge_helpers = extract("std::wstring TrimToken(", "std::wstring ModuleNamesFromBits(")+extract("std::wstring Utf8ToWideLossy(", "bool NeedNativeX64Helper(")
 consume = extract("bool ConsumeNextPipeEvent(", "} // namespace")
 parser = extract("void MergeModuleTokens(", "bool CollectInProcessHolders(")
 watch = extract("bool WaitUntilClearOrTimeout(", "} // namespace GlassInstallWatch")
@@ -94,8 +94,10 @@ namespace GlassInstallLog {void Line(const wchar_t*){}template<class...A>void Li
 bool NeedNativeX64Helper(){return true;}
 namespace GlassInstallWatch {
  struct ModuleHolder{DWORD pid;std::wstring exe,modules;};
+ void WakeHolderQueues(const std::vector<ModuleHolder>&){}
  void MergeModuleTokens(std::wstring&,const std::wstring&);
  bool ParseNativePipeUtf8(const std::string&,std::vector<ModuleHolder>&);
+ bool ParseNativeFailLine(const std::string&,std::wstring&);
  bool CollectInProcessHolders(std::vector<ModuleHolder>& holders){
   if(scenario.localFails)return false;
   if(scenario.now<scenario.localUntil)holders.push_back({77,L"local.exe",L"GlassCore.dll"});
@@ -106,7 +108,7 @@ namespace GlassInstallWatch {
 main = r'''
 using namespace GlassInstallWatch;
 bool run(DWORD timeout,std::vector<ModuleHolder>& rows,bool& failed,const std::atomic_bool* cancel=nullptr){
- return WaitUntilClearOrTimeout(timeout,L"x64",L"x86",true,rows,failed,cancel);
+ return WaitUntilClearOrTimeout(timeout,L"x64",L"x86",true,rows,failed,cancel,true);
 }
 int main(){
  std::vector<ModuleHolder> rows;bool failed=false;

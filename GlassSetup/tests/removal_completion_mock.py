@@ -46,7 +46,7 @@ bool RefreshManagedArp(const std::wstring&,const std::wstring&,const std::wstrin
 }
 struct InstallEngine {
  GlassProducts::Selection selection_;
- bool scanNativeX64_=true;int instance_=0,warnings=0;
+ bool mixedOpenGlass_=false;struct {std::wstring workspaceDir;} officialResourcesRollback_;bool scanNativeX64_=true;int instance_=0,warnings=0;
  std::wstring tempDir_=L"temp",x64Dir_,x86Dir_,openGlassDir_;
  void AddFinishWarning(const std::wstring& title,const std::wstring&){++warnings;warningTitles.push_back(title);}
  void LaunchSelectedProducts() noexcept;

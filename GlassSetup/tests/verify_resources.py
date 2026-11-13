@@ -137,6 +137,7 @@ assert project.count("taskschd.lib") >= 2
 assert 'ResourceCompile Include="GlassUnins.rc"' in unins_project
 assert "GLASS_HAVE_UNLOCKER" not in project and "GLASS_EMBED_MSI" not in project
 assert "GLASS_SETUP_NATIVE_MONITOR" in project
+assert "IDR_MSI_" not in header
 assert "IDR_MSI_" not in rc and "IDR_UNLOCKER_" not in unins_rc
 assert "GlassSettings.Native.vcxproj" not in project
 assert "GLASS_EMBED_MAINTENANCE" in project and "IDR_MAINTENANCE_UNINS RCDATA" in rc

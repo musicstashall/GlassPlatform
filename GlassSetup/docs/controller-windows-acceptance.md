@@ -18,10 +18,12 @@ Authenticode/ACL fault matrix, reboot/crash recovery не выполнены. Р
 Из корня solution в VS 2022 Developer Command Prompt, с обычными зависимостями
 проекта (v143/Windows SDK/.NET 9/WiX/NuGet):
 
-```bat
-msbuild GlassProject.sln /p:Configuration=Release /p:Platform=x64
-msbuild GlassProject.sln /p:Configuration=Release /p:Platform=x86
-```
+Собирать Release prerequisites обеих архитектур по [README](../README.md).
+Resources MSI — **только Release|x64** (`msi/OpenGlassResources-x64.wixproj`),
+не выбирать его в solution Release|x86. Затем актуальные GlassUnins → GlassSetup
+(C++ Release|Win32 / solution target x86). Полный состав/публикация —
+[release-checklist.md](release-checklist.md). Безусловный build всего solution x86
+для Resources не применять.
 
 Порядок x64 → x86 сохраняется; итоговый Setup —
 `Build\GlassSetup\Release\GlassSetup.exe`. Следовать текущему README, не собирать
@@ -34,9 +36,11 @@ LNK1168 — не повод агенту завершать процессы/о�
 
 ## 2. Первая короткая проверка
 
-1. Использовать подписанный комплект с уже доверенным signer. Новый controller
-   требует совместимую PE-архитектуру, совпадение publisher и успешный WinVerifyTrust.
-   Сертификаты автоматически не устанавливаются. При trust error передать журнал;
+1. Использовать подписанный комплект с проверенным сертификатом автора, в том числе
+   на чистой VM **без** доверенного root. Controller требует совместимую PE-архитектуру,
+   точное совпадение signer с запущенным Setup и WinVerifyTrust success либо только
+   `CERT_E_UNTRUSTEDROOT` (0x800B0109). Все прочие ошибки блокируют запуск. Импорт root
+   для публикации контроллера не требуется. При ином trust error передать журнал;
    не отключать проверку, не обходить её переименованием или правкой Active.
 2. Запустить Setup из обычного distribution layout. После Checking новый процесс
    должен работать из `%ProgramData%\Packages\GlassPlatform\Installer\<SHA256>`.
@@ -97,7 +101,25 @@ Fault-injection — только на snapshot VM. Не завершать ра�
 занятый EXE; повтор из подписанного distribution Unins после закрытия старых
 launchers убирает остаток. Не требуется вручную удалять Active или системный cache.
 
-Короткий online startup без продуктовых операций принят. Следующий шаг — offline
-startup и запуск через Settings/ARP без подтверждения установки или удаления.
-Полная Windows acceptance остаётся открытой; результат online startup не является
-подтверждением MSI/reboot/crash recovery.
+Online/offline startup и Settings/ARP entry ранее приняты в happy path (см. начало).
+Повтор для новых trust/removal изменений и полная fault/reboot/crash acceptance
+остаются открытыми; прежний happy path не закрывает новые сценарии.
+
+
+## 4. Не закрытые последними mock-прогонами сценарии
+
+- Setup 273: shell unregister helper timeout 45 s, затем sharing violation на
+  GlassShellExt.dll при rollback. Повторить после pre-MSI barrier/no-wait изменений;
+  точная внутренняя причина hang пока не доказана. Не считать остановленные задачи/OG причиной.
+- Чистый ПК: первый self-signed controller, embedded Unins и parent verification.
+- OG removal: unquoted spaced ImagePath с trailing whitespace, running-image match,
+  ambiguous prefix EXE refusal, service 1072 vs timeout/access denial. Никаких probes,
+  принудительного удаления службы, смены ACL, kill или автоматического reboot.
+- Installed Apps: all-context отсутствие MSI, ключи обеих views отсутствуют,
+  уже открытое окно обновляется без активных stale Modify/Uninstall.
+- Состав: пять first-party MSI (Resources только x64), официальный OG EXE и
+  upstream SUT отдельно; Resources перед OG при fresh pair и servicing без OG.
+- Partial mixed result и сохранение recovery snapshot при неполном rollback;
+  .glassbackup restore/error/disk-full отдельно от installer snapshot.
+
+Portable mocks и source smoke tests не закрывают ни один из этих Windows gates.

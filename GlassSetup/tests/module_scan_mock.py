@@ -15,12 +15,15 @@ end = source.index("    namespace\n    {\n        constexpr DWORD kStickyMagic",
 scanner = source[start:end] + "\n}\n"
 prefix = r'''
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cwchar>
 #include <iostream>
 #include <string>
 #include <vector>
+template<class... T>int swprintf_s(wchar_t* out,std::size_t n,const wchar_t* fmt,T... args){return std::swprintf(out,n,fmt,args...);}
+template<std::size_t N>int wcscat_s(wchar_t (&out)[N],const wchar_t* text){assert(wcslen(out)+wcslen(text)<N);std::wcscat(out,text);return 0;}
 using DWORD=std::uint32_t; using ULONG=std::uint32_t; using BOOL=int;
 constexpr BOOL TRUE=1,FALSE=0; constexpr DWORD ERROR_NO_MORE_FILES=18,ERROR_INVALID_PARAMETER=87,
  ERROR_ACCESS_DENIED=5,ERROR_BAD_LENGTH=24,WAIT_TIMEOUT=258,WAIT_OBJECT_0=0;
@@ -31,6 +34,7 @@ constexpr DWORD TH32CS_SNAPPROCESS=1,TH32CS_SNAPMODULE=2,TH32CS_SNAPMODULE32=4,
 int wcsncpy_s(wchar_t* dest,std::size_t size,const wchar_t* src,std::size_t){
  if(!size)return 1;std::wcsncpy(dest,src,size-1);dest[size-1]=L'\0';return 0;
 }
+template<std::size_t N>int wcsncpy_s(wchar_t (&out)[N],const wchar_t* src,std::size_t count){return wcsncpy_s(out,N,src,count);}
 struct PROCESSENTRY32W { DWORD dwSize=0,th32ProcessID=0; wchar_t szExeFile[260]{}; };
 struct MODULEENTRY32W { DWORD dwSize=0; wchar_t szModule[260]{}; };
 struct Process {
@@ -87,16 +91,23 @@ BOOL IsWow64Process(HANDLE h,BOOL* out){*out=h?h->process->wow:selfWow;return TR
 DWORD WaitForSingleObject(HANDLE h,DWORD){return h->process->alive?WAIT_TIMEOUT:WAIT_OBJECT_0;}
 BOOL CloseHandle(HANDLE h){delete h;return TRUE;}
 namespace Shared::SystemHelper { ULONG g_buildNumber=19045; }
-namespace Shared::InjectModuleScan {
- enum ModuleBits : std::uint32_t {ModuleCompat=1u,ModuleCore=2u,ModuleWnd=4u,ModuleExplorer=8u,ModuleTaskbar=16u,ModuleUICompat=32u};
- constexpr DWORD kMaxResults=512,kExeNameChars=64;
- struct Result {DWORD pid;std::uint32_t moduleBits;wchar_t exeName[kExeNameChars];};
-}
+
 '''
+header=(root/'GlassShared/include/InjectModuleScan.h').read_text()
+contract=header[header.index('namespace Shared::InjectModuleScan'):header.index('    /// Скан только указанных PID')]+"}\n"
+prefix+=r'''
+constexpr DWORD TOKEN_ADJUST_PRIVILEGES=1,TOKEN_QUERY=2,SE_PRIVILEGE_ENABLED=2,ERROR_SUCCESS=0;
+constexpr const wchar_t* SE_DEBUG_NAME=L"SeDebugPrivilege";
+struct TOKEN_PRIVILEGES {DWORD PrivilegeCount=0;struct {int Luid=0;DWORD Attributes=0;} Privileges[1];};
+BOOL OpenProcessToken(HANDLE,DWORD,HANDLE*){lastError=ERROR_ACCESS_DENIED;return FALSE;}
+BOOL LookupPrivilegeValueW(const wchar_t*,const wchar_t*,int*){return FALSE;}
+BOOL AdjustTokenPrivileges(HANDLE,BOOL,TOKEN_PRIVILEGES*,DWORD,void*,void*){return FALSE;}
+'''
+prefix+=contract
 main = r'''
 using namespace Shared::InjectModuleScan;
 void reset(){processes.clear();lastError=0;processSnapshotFails=false;processNextFails=false;selfWow=true;}
-bool strict(Result* rows,DWORD cap,DWORD& count){return ScanForSetup(nullptr,0,rows,cap,&count);}
+bool strict(Result* rows,DWORD cap,DWORD& count){return ScanForSetup(nullptr,0,rows,cap,&count,ScanOptionNone);}
 int main(){
  Result rows[4]{};DWORD count=0;
  reset();processes.push_back({2,L"explorer.exe",{L"ExplorerCompat.dll",L"TaskbarCompat.dll"}});
@@ -114,7 +125,7 @@ int main(){
  assert(strict(rows,4,count));assert(count==0); // exited between process and module snapshots
  reset();processes.push_back({2,L"protected.exe",{L"GlassCore.dll"}});processes[0].accessible=false;processes[0].snapshotFails=true;
  assert(strict(rows,4,count));assert(count==0); // unrelated protected OS processes are not fatal
- { const DWORD tracked=2; assert(!ScanForSetup(&tracked,1,rows,4,&count)); } // a map-tracked PID is different
+ { const DWORD tracked=2; assert(!ScanForSetup(&tracked,1,rows,4,&count,ScanOptionNone)); } // a map-tracked PID is different
  reset();processes.push_back({2,L"a.exe",{L"GlassCore.dll"}});processes.push_back({3,L"b.exe",{L"WndCompat.dll"}});
  assert(!strict(rows,1,count));assert(Scan(nullptr,0,rows,1,&count));assert(count==1);
  reset();processes.push_back({2,L"a.exe",{L"GlassCore.dll"}});processNextFails=true;
