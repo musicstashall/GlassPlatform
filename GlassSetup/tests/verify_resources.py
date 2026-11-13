@@ -223,11 +223,12 @@ worker = section(engine, "DWORD WINAPI InstallEngine::WorkerThread(", "bool Inst
 assert worker.index("CreateRollbackSnapshot()") < worker.index("StopRunningHosts()")
 # Commit point: registration (rollback-able) precedes the first start; every
 # later step can only add finish-page notes.
-assert worker.index("RegisterSelectedProducts()") < worker.index("LaunchSelectedProducts()")
-assert "SetFailure(" not in worker[worker.index("LaunchSelectedProducts()"):worker.index("MsiEnableLogW(")]
+managed_worker=section(engine,"DWORD WINAPI InstallEngine::RunGlassWorker(","bool InstallEngine::Start(")
+assert managed_worker.index("RegisterSelectedProducts()") < managed_worker.index("LaunchSelectedProducts()")
+assert "SetFailure(" not in managed_worker[managed_worker.index("LaunchSelectedProducts()"):managed_worker.index("MsiEnableLogW(")]
 assert "FinishWarningsJson()" in setup and "hostState.finishWarnings" in ui and "IDS_DONE_WARN_TAG" in rc
 assert worker.index("PrepareManagedRemoval()") < worker.index("StopRunningHosts()")
-assert worker.index("RegisterSelectedProducts()") < worker.index("GlassInstallRemoval::Commit") < worker.index("LaunchSelectedProducts()")
+assert managed_worker.index("RegisterSelectedProducts()") < managed_worker.index("GlassInstallRemoval::Commit") < managed_worker.index("LaunchSelectedProducts()")
 assert worker.count("undoUserDefaults();") == 4 and "UndoSeededProcessLists" in worker
 success_restore = section(engine, "bool InstallEngine::RestorePriorHosts(", "DWORD WINAPI InstallEngine::WorkerThread(")
 # On success only kept (unselected, installed) products Setup stopped are restored; selected ones are launched.
@@ -527,7 +528,7 @@ release_client = read("src/InstallSupport/GlassReleaseClient.cpp")
 assert "WINHTTP_FLAG_SECURE" in release_client and "CryptHashData" in release_client
 assert "GlassReleaseClient::VerifyHash" in sut_package and "using GlassReleaseClient::Get" in sut_package
 assert "GlassSecureUxPackage::Prepare" in engine and "InstallOriginalSecureUxTheme" in worker
-assert worker.index("RegisterSelectedProducts()") < worker.index("InstallOriginalSecureUxTheme()") < worker.index("LaunchSelectedProducts()")
+assert managed_worker.index("RegisterSelectedProducts()") < managed_worker.index("InstallOriginalSecureUxTheme()") < managed_worker.index("LaunchSelectedProducts()")
 original_msi=section(engine, "bool InstallEngine::InstallOriginalSecureUxTheme()", "bool InstallEngine::RunMsiSequence()")
 assert 'L"REBOOT=ReallySuppress"' in original_msi
 assert "PatchArpUninstallString(" not in original_msi and "NoteInstalled(" not in original_msi
@@ -563,7 +564,7 @@ assert "PrepareRemoval" in sut_package and "RecheckRemoval" in sut_package
 assert "MSIINSTALLCONTEXT_MACHINE" in sut_package and "Vendor cached PackageCode differs from registration" in sut_package
 assert "before==removal.digest && now==removal.digest" in sut_package
 assert "if(!vendorOnly)ok = self->RegisterSelectedProducts()" in worker
-assert "if(!vendorOnly && !self->auxiliaryOnly_)self->LaunchSelectedProducts()" in worker
+assert "if(!vendorOnly && !self->auxiliaryOnly_ && !self->mixedOpenGlass_)self->LaunchSelectedProducts()" in worker
 assert "IDS_APPLY" in setup and 'IDS_APPLY "Применить"' in read("res/ProductStrings.rcinc")
 
 assert "if(in.inspectSources)GlassPackageAcquisition::FetchCatalog" in sut_inspect

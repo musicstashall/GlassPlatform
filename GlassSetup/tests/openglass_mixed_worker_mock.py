@@ -30,6 +30,7 @@ struct InstallEngine{
  struct {std::wstring finalize;}labels_;
  bool PrepareFullRemovalCleanup(){if(selection_.cleanupUserData)order+="cleanup-preflight;";return true;}
  void FinishFullRemovalCleanup(){if(selection_.cleanupUserData){assert(vendorRuns==1);order+="data-cleanup;";}}
+ void LaunchSelectedProducts(){assert(vendorRuns==1);assert(!selection_.openGlass);}
  void SetStatus(const std::wstring&,int){}
  bool FinishOfficialResources(bool commit){order+=commit?"res-finalize;":"res-rollback;";return true;}
  bool OfficialResourcesPhase(bool preparing){order+=preparing?"res-prepare;":"res-commit;";return preparing?resourcesPrep:resourcesCommit;}

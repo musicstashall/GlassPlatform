@@ -1300,3 +1300,31 @@ maintenance. Both user-specified guidance paragraphs are equal-size bullet
 points, including the GlassSettings System-page backup instruction. Chromium
 checks opacity, compact height, bottom anchoring, icon, equal typography and
 bullets in RU/EN, as well as existing bounds/click/heading regressions.
+
+### OpenGlass-before-Platform launch barrier
+
+Installer finalization now completes OpenGlass startup before launching Platform
+architectures. For a registered official OG product, repeat protected backend
+path validation, preserve the existing service start-type preference, request
+startup, and wait up to 15 seconds for SERVICE_RUNNING. START_PENDING is not
+readiness. Failure/unknown state blocks automatic Platform launch and produces a
+finish warning; absent official OG does not cause directory/service-only product
+inference. This is service-state confirmation, not proof that DWM rendering has
+visually settled. No fixed DWM delay, process kill or reboot was introduced.
+
+Mixed managed+official plans defer launch/publication until the official commit;
+Resources still installs before the official installer, which auto-starts OG.
+Prior-host restoration also restores OG before the platform hosts. Successful
+official OG startup is checked before selected/retained Platform launch. These
+changes concern installer finalization/restoration, not Windows logon task order.
+
+The actual barrier is compiled against fake SCM APIs covering absent/unknown
+registration, unsafe paths, missing service, start/query failure, pending/running,
+stopped state, timeout and handle cleanup. Mixed-worker, official-remover,
+full-removal and source checks pass. Windows build/runtime and reported dense
+glass symptom remain unverified. An older vendor_only_stages mock currently
+lacks its pre-existing CommitEarlySecureUxRemoval stub.
+
+Cleanup choices are acrylic again, matching the backup panel. Bottom hints are
+combined into one line, retaining checked-only cleanup/preservation guidance.
+Chromium checks backdrop blur and actual one-line text geometry in both locales.

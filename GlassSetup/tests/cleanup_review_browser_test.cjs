@@ -35,7 +35,7 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
    assert.match(await backup.innerText(),locale==='ru'?/страницу «Системы»/:/System page/);
    for(const card of await page.locator('.cleanup-option:not([hidden])').all()){
     const rect=await card.boundingBox();assert.ok(rect.width<=480&&rect.x+rect.width<backupBox.x&&rect.height<78);
-    assert.ok(!(await card.evaluate(e=>getComputedStyle(e).backgroundColor)).includes('rgba'));
+    assert.match(await card.evaluate(e=>getComputedStyle(e).backdropFilter),/blur/);
    }
    const choices=await page.locator('.cleanup-option:not([hidden]) small').allTextContents();
    assert.equal(choices.length,Number(platform)+Number(og));
@@ -51,6 +51,9 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
    headingPosition={x:title.x,y:title.y};
    assert.ok(bounds.y>=76&&bounds.y<=80&&end.y+end.height<510);
    assert.ok(end.y>440,'preservation hints sit at the bottom, not beneath the last choice');
+   assert.equal(await page.locator('#cleanup-explanation').isVisible(),false);
+   assert.ok(end.height<36,'one-line preservation hint including 16px top spacing');
+   assert.equal(await page.locator('#confirm-note').evaluate(e=>{const r=document.createRange();r.selectNodeContents(e);return r.getClientRects().length}),1);
    for(const [eligible,id,key] of [[platform,'full','platform'],[og,'og','og']]){
     const label=page.locator('#'+id+'-cleanup-option');assert.equal(await label.isVisible(),eligible);
     if(!eligible)continue;

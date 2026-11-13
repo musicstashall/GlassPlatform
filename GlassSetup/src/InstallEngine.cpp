@@ -410,11 +410,13 @@ bool InstallEngine::RestorePriorHosts(bool keptOnly) noexcept {
         } while (GetTickCount64()-start<30000);
         return false;
     };
+    const auto restorePlatforms=[&]() {
     if (!keptOnly || (!selection_.platform64 && !selection_.Removes(0)))
         if (!restoreArch(GP::PlatformArch::X64,x64Dir_,prior_.x64TaskExisted,prior_.x64TaskEnabled,prior_.x64WasRunning,x64StopAttempted_)) ok=false;
     if (!keptOnly || (!selection_.platform32 && !selection_.Removes(1)))
         if (!restoreArch(GP::PlatformArch::X86,x86Dir_,prior_.x86TaskExisted,prior_.x86TaskEnabled,prior_.x86WasRunning,x86StopAttempted_)) ok=false;
-    if (keptOnly && (selection_.openGlass||selection_.Removes(3))) return ok; // selected OpenGlass is handled by the launch phase
+    };
+    if (keptOnly && (selection_.openGlass||selection_.Removes(3))) {restorePlatforms();return ok;}
     bool ogPathsSafe=true;
     if (((prior_.ogWasRunning && ogStopSignalled_) || ogServiceStartTypeMayNeedRestore_) &&
         (prior_.ogServiceExisted || prior_.ogLegacyTaskExisted)) {
@@ -452,6 +454,8 @@ bool InstallEngine::RestorePriorHosts(bool keptOnly) noexcept {
             ogServiceStartTypeMayNeedRestore_=false;
         if (ogServiceStartTypeMayNeedRestore_) ok=false;
     }
+    if(ok&&prior_.ogWasRunning&&ogStopSignalled_)ok=EnsureOpenGlassBeforePlatform();
+    if(ok)restorePlatforms(); // OG restoration must settle first.
     return ok;
 }
 
@@ -742,6 +746,14 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                         (ru?L"Операция OpenGlass не подтверждена. ":L"OpenGlass operation was not confirmed. "))+self->ErrorText()+
                         (self->preserveSnapshot_?L"\nBackup: "+self->rollbackSession_.workspaceDir:L""),ERROR_INSTALL_FAILURE);
                 }
+                if(self->succeeded_&&managed) {
+                    // Official installer starts OG itself; never launch Platform
+                    // in the managed subtransaction before that vendor commit.
+                    const bool applyOg=self->selection_.openGlass;
+                    self->selection_.openGlass=false;
+                    self->LaunchSelectedProducts();
+                    self->selection_.openGlass=applyOg;
+                }
                 if(self->succeeded_)GlassInstallRollback::CleanupSnapshot(self->rollbackSession_);
                 if(self->succeeded_&&mixedRemoval)self->FinishFullRemovalCleanup();
                 if(self->succeeded_&&resources) {
@@ -873,7 +885,7 @@ DWORD WINAPI InstallEngine::RunGlassWorker(LPVOID p) noexcept {
                     InstallLog::Line(L"Launch: commit point reached, rollback is no longer possible");
                     if(self->openGlassFiles_)self->openGlassFiles_->Commit();
                     self->rollbackSession_.restoreOpenGlassFiles={};
-                    if(!vendorOnly && !self->auxiliaryOnly_)self->LaunchSelectedProducts();
+                    if(!vendorOnly && !self->auxiliaryOnly_ && !self->mixedOpenGlass_)self->LaunchSelectedProducts();
                     constexpr ULONGLONG kMinLaunchMs = 5000;
                     for (;self->HasHostLaunchWork();) {
                         const ULONGLONG elapsed = GetTickCount64() - launchStart;
@@ -2512,6 +2524,43 @@ bool InstallEngine::RegisterSelectedProducts() noexcept {
 // Phase C. The worker has already crossed the commit boundary (including
 // the final original vendor MSI, when selected). Nothing in this routine may
 // fail the install. Each problem is logged and shown as a finish note.
+bool InstallEngine::EnsureOpenGlassBeforePlatform() noexcept {
+    try {
+        GlassOpenGlassInstall::Record record;std::wstring error;
+        if(!GlassOpenGlassInstall::Query(record,error))return false;
+        if(!record.installed)return true; // No service/directory-only product inference.
+        if(!GlassInstallRemoval::ValidateOpenGlassPaths(record.directory,nullptr,
+            PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN,error)) {
+            InstallLog::LineFormat(L"Startup order: OpenGlass path validation refused: %s",error.c_str());return false;
+        }
+        bool exists=false;DWORD startType=SERVICE_DEMAND_START;
+        if(!GlassInstallHost::QueryOpenGlassServiceStartType(exists,startType)||!exists)return false;
+        if(startType==SERVICE_DISABLED) {
+            InstallLog::Line(L"Startup order: OpenGlass service is disabled; no configuration change or Platform launch");return false;
+        }
+        InstallLog::Line(L"Startup order: starting installed OpenGlass before Platform");
+        if(!GlassInstallHost::StartOpenGlassServicePreservingStartType(startType))return false;
+        const SC_HANDLE scm=OpenSCManagerW(nullptr,nullptr,SC_MANAGER_CONNECT);
+        if(!scm)return false;
+        const SC_HANDLE service=OpenServiceW(scm,L"OpenGlassHost",SERVICE_QUERY_STATUS);
+        CloseServiceHandle(scm);
+        if(!service)return false;
+        struct CloseService {SC_HANDLE value;~CloseService(){CloseServiceHandle(value);}} close{service};
+        const ULONGLONG start=GetTickCount64();
+        do {
+            SERVICE_STATUS_PROCESS status{};DWORD needed=0;
+            if(!QueryServiceStatusEx(service,SC_STATUS_PROCESS_INFO,reinterpret_cast<BYTE*>(&status),sizeof(status),&needed))return false;
+            if(status.dwCurrentState==SERVICE_RUNNING) {
+                InstallLog::Line(L"Startup order: OpenGlass SERVICE_RUNNING confirmed; Platform may start");return true;
+            }
+            if(status.dwCurrentState!=SERVICE_START_PENDING)return false;
+            Sleep(200);
+        }while(GetTickCount64()-start<15000);
+        InstallLog::Line(L"Startup order: OpenGlass startup timed out; Platform remains stopped");
+    }catch(...){}
+    return false;
+}
+
 void InstallEngine::LaunchSelectedProducts() noexcept {
     const bool is64 = scanNativeX64_;
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
@@ -2595,15 +2644,8 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         InstallLog::LineFormat(L"Autostart: platform running arch %d", static_cast<int>(arch));
     };
 
-    if (is64 && selection_.platform64)
-        startArch(GP::PlatformArch::X64, x64Dir_, prior_.x64TaskExisted, prior_.x64TaskEnabled, prior_.x64WasRunning,
-            labels_.start64, 9500, labels_.warnPlatform64Start, labels_.warnPlatform64Task);
-    if (selection_.platform32)
-        startArch(GP::PlatformArch::X86, x86Dir_, prior_.x86TaskExisted, prior_.x86TaskEnabled, prior_.x86WasRunning,
-            labels_.start86, 9750, labels_.warnPlatform32Start, labels_.warnPlatform32Task);
-
     if (is64 && selection_.openGlass) {
-        SetStatus(labels_.startOg, 9900);
+        SetStatus(labels_.startOg, 9400);
         const bool shouldStartOg = GlassProducts::ShouldStartOpenGlass(openGlassStartup_);
         InstallLog::LineFormat(L"Autostart: OpenGlass files-at-start=%d running-at-start=%d start=%d",
             openGlassStartup_.filesPresent ? 1 : 0, openGlassStartup_.wasRunning ? 1 : 0, shouldStartOg ? 1 : 0);
@@ -2648,7 +2690,24 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         }
     }
 
-    if (!RestorePriorHosts(true)) {
+    const bool platformLaunch=selection_.platform64||selection_.platform32||
+        (hostsStopped_&&((prior_.x64WasRunning&&!selection_.Removes(0))||(prior_.x86WasRunning&&!selection_.Removes(1))));
+    const bool ogReady=!platformLaunch||EnsureOpenGlassBeforePlatform();
+    if(ogReady) {
+    if (is64 && selection_.platform64)
+        startArch(GP::PlatformArch::X64, x64Dir_, prior_.x64TaskExisted, prior_.x64TaskEnabled, prior_.x64WasRunning,
+            labels_.start64, 9500, labels_.warnPlatform64Start, labels_.warnPlatform64Task);
+    if (selection_.platform32)
+        startArch(GP::PlatformArch::X86, x86Dir_, prior_.x86TaskExisted, prior_.x86TaskEnabled, prior_.x86WasRunning,
+            labels_.start86, 9750, labels_.warnPlatform32Start, labels_.warnPlatform32Task);
+
+    } else {
+        AddFinishWarning(ru?L"Платформа не запущена":L"Platform was not started",
+            ru?L"Не удалось подтвердить запуск OpenGlass. Запустите OpenGlass, затем платформу.":
+                L"OpenGlass startup was not confirmed. Start OpenGlass before the platform.");
+    }
+
+    if (ogReady && !RestorePriorHosts(true)) {
         AddFinishWarning(labels_.warnPriorHosts.empty()
             ? L"A previously running component could not be restarted." : labels_.warnPriorHosts, labels_.warnPriorHostsHint);
     }

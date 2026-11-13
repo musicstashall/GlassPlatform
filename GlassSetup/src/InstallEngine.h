@@ -236,6 +236,7 @@ private:
     // Phase C: after worker commit (including the final vendor transaction),
     // start selected products, restore prior hosts, register shell extension.
     // Every failure here becomes a FinishWarning, never a rollback.
+    bool EnsureOpenGlassBeforePlatform() noexcept;
     void LaunchSelectedProducts() noexcept;
     void SeedUserDefaults() noexcept;
     void AddFinishWarning(const std::wstring& title, const std::wstring& detail) noexcept;
