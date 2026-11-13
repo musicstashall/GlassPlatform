@@ -27,7 +27,7 @@ namespace
 
     void FlushShellCachesAfterExtensionRegistrationChange() noexcept
     {
-        ::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+        ::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, nullptr, nullptr);
     }
 
     enum class DesktopFactoryKind : int

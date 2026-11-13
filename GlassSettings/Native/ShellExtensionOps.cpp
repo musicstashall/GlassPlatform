@@ -695,11 +695,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI GlassSettings_CopyShellExtensionLa
 
 extern "C" __declspec(dllexport) void WINAPI GlassSettings_NotifyShellCachesAfterRegistrationChange() noexcept
 {
-    ::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+    ::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, nullptr, nullptr);
 
     wchar_t desktopDir[MAX_PATH]{};
     if (SUCCEEDED(::SHGetFolderPathW(nullptr, CSIDL_DESKTOPDIRECTORY, nullptr, SHGFP_TYPE_CURRENT, desktopDir)))
-        ::SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_IDLIST, desktopDir, nullptr);
+        ::SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_FLUSHNOWAIT, desktopDir, nullptr);
 }
 
 extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterW(

@@ -2250,14 +2250,6 @@ bool InstallEngine::RemoveManagedProduct(GlassProductPlan::Product product) noex
         }
         SetFailure(L"No installed removal baseline",ERROR_INSTALL_PACKAGE_REJECTED);return false;
     }
-    // The native helper is still installed here: all Settings removals are last.
-    // Do not unregister a foreign root or bypass an unavailable helper.
-    if(row==(scanNativeX64_?0u:1u)) {
-        bool conflict=false;std::wstring detail;
-        if(!GlassInstallUtil::InvokeShellExtRegistration(false,x64Dir_,x86Dir_,&shellRemovedForMaintenance_,&conflict,&detail)) {
-            SetFailure(detail,ERROR_INSTALL_FAILURE);return false;
-        }
-    }
     GlassInstallMsi::ProgressSink sink{};
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
     sink.label=std::wstring(ru?L"Удаление ":L"Removing ")+title;
@@ -2309,6 +2301,19 @@ bool InstallEngine::RunMsiSequence() noexcept {
     if(!executionPlanReady_ || !executionPlan_.valid)return false;
     // Original SUT uses the private vendor adapter, never the Glass MSI phase.
     // Mixed removal already committed it before any Settings removal.
+    // Shell removal can block in deployment/Explorer even with all platform
+    // hosts stopped. Resolve it before the first MSI removal, not halfway
+    // through Resources -> x86 -> x64, so a helper failure cannot strand those
+    // earlier products removed. The snapshot/rollback lifecycle already tracks
+    // any shell registration change, including a timed-out helper.
+    if(selection_.Removes(scanNativeX64_?0u:1u)) {
+        bool conflict=false;std::wstring detail;
+        InstallLog::Line(L"Shell unregister barrier: before any managed MSI mutation");
+        if(!GlassInstallUtil::InvokeShellExtRegistration(false,x64Dir_,x86Dir_,&shellRemovedForMaintenance_,&conflict,&detail)) {
+            SetFailure(detail,ERROR_INSTALL_FAILURE);return false;
+        }
+        InstallLog::Line(L"Shell unregister barrier completed");
+    }
     auto plan=executionPlan_;
     plan.rows[P::Index(P::Product::SecureUxTheme)].action=P::Action::Keep;
     for(auto product:GlassMaintenanceExecutor::kInstallOrder) {

@@ -1427,3 +1427,24 @@ Acceptance of the root exception is explicitly logged. Generic UI now says the
 controller could not be prepared, rather than implying a newer version exists.
 Trust, handoff, child-validation and source regression tests pass; clean Windows
 publication/signature acceptance still requires a native reproduction.
+
+### New-PC removal, Setup 273 / 13:26:51 session
+
+Resources and Platform x86 MSI removals return 0; their orphan native-view ARP
+keys are deleted successfully and both views subsequently return FILE_NOT_FOUND.
+Host tasks were already stopped and module scan passed. The blocker is the
+shell-extension unregister helper: timeout 0x102 after 45 seconds BEFORE x64 MSI
+execution. OG removal is not reached. Rollback then fails copying
+GlassShellSparse/GlassShellExt.dll with sharing violation 32; snapshot is retained.
+
+Move shell-unregister barrier from the middle of RemoveManagedProduct(native
+Platform row) to RunMsiSequence before any managed MSI mutation. Same exact-root,
+conflict, helper and rollback tracking gates; failure still stops the operation.
+Shell-cache notification in both Native and shell DLL uses SHCNF_FLUSHNOWAIT,
+not synchronous delivery to Explorer. Do not increase timeouts, ignore failures,
+force-kill Explorer/OG or change service ownership.
+
+The existing log cannot distinguish AppX deployment vs registry helper vs shell
+notification timeout. No claim of native hang resolution: Windows reproduction
+is still necessary. Existing root/sparse/reinstall/mixed tests plus actual notifier
+mock and pre-MSI barrier assertions pass; no Windows build/runtime here.
