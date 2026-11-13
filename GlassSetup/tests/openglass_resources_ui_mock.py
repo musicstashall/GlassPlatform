@@ -41,14 +41,15 @@ int main(){
   ui.downloadContinuePending_=true;assert(!ui.ComponentsReady());
   ui.downloadsReady=true;assert(ui.ComponentsReady()==expected);
  }
- // Both external-vendor variants must block before download, not just after Resources.
+ // SUT apply/removal may precede Resources and OG in the same plan.
  for(bool resources:{false,true})for(bool sutRemove:{false,true}){
   UI blocked;native64=true;auto& b=blocked.selection_;
   b.openGlass=true;b.openGlassResources=resources;
   b.secureUxTheme=!sutRemove;b.secureUxThemeRemove=sutRemove;
-  assert(OpenGlassVendorConflict(b));assert(!blocked.ComponentsReady());
+  assert(blocked.ComponentsReady());
+  assert(MixedOpenGlassApply(b,false,true));
   b.secureUxTheme=b.secureUxThemeRemove=false;
-  assert(!OpenGlassVendorConflict(b));assert(blocked.ComponentsReady());
+  assert(blocked.ComponentsReady());
   b.openGlass=b.openGlassResources=false;b.secureUxTheme=true;
   assert(blocked.ComponentsReady()); // managed Glass + SUT remains supported
  }

@@ -8,6 +8,8 @@ wrapper=s[s.index('DWORD WINAPI InstallEngine::WorkerThread('):s.index('DWORD WI
 body=s[s.index('DWORD WINAPI InstallEngine::RunGlassWorker('):s.index('bool InstallEngine::Start(')]
 assert 'finished_.store(' not in body and 'tempDir_.clear()' not in body
 assert 'if(!self->mixedOpenGlass_)self->SetStatus' in body
+assert body.index('self->InstallOriginalSecureUxTheme()') < body.index('Launch: commit point reached')
+assert 'if(!vendorOnly && !self->auxiliaryOnly_ && !self->mixedOpenGlass_)self->LaunchSelectedProducts()' in body
 assert wrapper.index('PrepareOfficialOpenGlass(mixedRemoval)')<wrapper.index('selection_.openGlass=false')<wrapper.index('RunGlassWorker(p)')<wrapper.index('CommitOfficialOpenGlass(mixedRemoval)')<wrapper.index('RemoveDirectoryTree(')<wrapper.index('finished_.store(')
 h=r'''
 #include "GlassSetup/src/GlassProducts.h"
@@ -39,6 +41,7 @@ struct InstallEngine{
  bool PrepareOfficialOpenGlass(bool r){assert(r==expectedRemoval&&!finished_);++preparations;order+="prepare;";return prep;}
  static DWORD RunGlassWorker(LPVOID p){auto* self=static_cast<InstallEngine*>(p);++glassRuns;order+="glass;";
  assert(!self->finished_);if(self->selection_.Removes(6))assert(self->procedureMask_&64);if(self->mixedOpenGlass_){assert(!self->selection_.openGlass&&(self->procedureMask_&8)==0&&(self->selection_.removeMask&8)==0);}
+ if(glass&&(self->selection_.secureUxTheme||self->selection_.secureUxThemeRemove))order+="sut;";
  self->succeeded_=glass;if(glass)self->launchingPhase_=true;return 0;}
  bool CommitOfficialOpenGlass(bool r){assert(r==expectedRemoval&&!finished_&&succeeded_);assert(r?selection_.Removes(3):selection_.openGlass);++vendorRuns;order+="vendor;";return vendor;}
  bool RunOfficialOpenGlassOnly(){++standalone;return vendor;}
@@ -95,7 +98,20 @@ int main(){
  failRemove.selection_.removeMask=0x48;failRemove.procedureMask_=0x48;InstallEngine::WorkerThread(&failRemove);assert(!failRemove.succeeded_&&vendorRuns==0);
  reset();InstallEngine ordinary;ordinary.selection_.openGlass=false;InstallEngine::WorkerThread(&ordinary);assert(ordinary.succeeded_&&preparations==0&&glassRuns==1&&vendorRuns==0);
  reset();InstallEngine only;only.selection_.platform64=only.selection_.platform32=only.selection_.glassSettings=false;InstallEngine::WorkerThread(&only);assert(only.succeeded_&&standalone==1&&glassRuns==0);
- reset();InstallEngine unsupported;unsupported.selection_.secureUxTheme=true;InstallEngine::WorkerThread(&unsupported);assert(standalone==1&&glassRuns==0&&preparations==0);
+ // SUT alone is sufficient to select the mixed route, with or without Resources.
+ for(bool resources:{false,true})for(bool removal:{false,true})for(unsigned failure=0;failure<5;++failure){
+  reset();prep=failure!=1;glass=failure!=2;resourcesCommit=failure!=3;vendor=failure!=4;
+  InstallEngine e;e.selection_.platform64=e.selection_.platform32=e.selection_.glassSettings=false;
+  e.selection_.secureUxTheme=!removal;e.selection_.secureUxThemeRemove=removal;e.selection_.openGlassResources=resources;
+  InstallEngine::WorkerThread(&e);
+  assert(standalone==0&&e.mixedOpenGlass_);
+  assert(e.succeeded_==(failure==0||(!resources&&failure==3)));
+  if(failure==1)assert(glassRuns==0&&vendorRuns==0);
+  if(failure==2)assert(glassRuns==1&&vendorRuns==0);
+  if(failure==4||(resources&&failure==3))assert(!e.rollbackSucceeded_&&e.error.find(L"SecureUxTheme")!=std::wstring::npos);
+  if(failure==0)assert(order==(resources?"prepare;res-prepare;glass;sut;res-commit;vendor;res-finalize;cleanup;":"prepare;glass;sut;vendor;cleanup;"));
+  assert(e.selection_.secureUxTheme==!removal&&e.selection_.secureUxThemeRemove==removal);
+ }
 }
 '''.replace('// WRAPPER',wrapper)
 with tempfile.TemporaryDirectory() as tmp:

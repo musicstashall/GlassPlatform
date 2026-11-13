@@ -695,7 +695,7 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
     auto* self=static_cast<InstallEngine*>(p);
     const bool mixedRemoval=GlassProducts::MixedOpenGlassRemoval(self->selection_,self->forceClean_,GlassInstallUtil::IsOs64Bit());
     self->mixedOpenGlass_=mixedRemoval||GlassProducts::MixedOpenGlassApply(self->selection_,self->forceClean_,GlassInstallUtil::IsOs64Bit());
-    InstallLog::LineFormat(L"OpenGlass dispatcher revision=2: route=%s rows=0x%X ogApply=%d ogRemove=%d SecureUxTheme=%d forceClean=%d",
+    InstallLog::LineFormat(L"OpenGlass dispatcher revision=3: route=%s rows=0x%X ogApply=%d ogRemove=%d SecureUxTheme=%d forceClean=%d",
         self->mixedOpenGlass_?(mixedRemoval?L"mixed-remove":L"mixed-apply"):(self->selection_.openGlass||self->selection_.Removes(3)?L"standalone-or-unsupported":L"managed-glass"),
         self->procedureMask_,self->selection_.openGlass?1:0,self->selection_.Removes(3)?1:0,
         self->selection_.secureUxTheme?1:0,self->forceClean_?1:0);
@@ -727,8 +727,8 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                 if(!self->succeeded_) {
                     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
                     self->rollbackSucceeded_.store(false,std::memory_order_release);
-                    self->SetFailure((ru?L"Resources не установлены; официальный установщик OpenGlass не запускался. Предыдущие изменения Glass сохранены. ":
-                        L"Resources installation failed; the official OpenGlass installer was not started. Previous Glass changes were retained. ")+self->ErrorText(),ERROR_INSTALL_FAILURE);
+                    self->SetFailure((ru?L"Resources не установлены; официальный установщик OpenGlass не запускался. Предыдущие изменения Glass и завершённая операция SecureUxTheme (если выбрана) сохранены. ":
+                        L"Resources installation failed; the official OpenGlass installer was not started. Previous Glass changes and the completed SecureUxTheme operation (if selected) were retained. ")+self->ErrorText(),ERROR_INSTALL_FAILURE);
                 }
             }
             if(self->succeeded_) {
@@ -745,8 +745,8 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
                     InstallLog::LineFormat(L"Mixed operation partial; retaining managed snapshot: %s",self->rollbackSession_.workspaceDir.c_str());
                     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
                     self->rollbackSucceeded_.store(false,std::memory_order_release);
-                    self->SetFailure((managed?(ru?L"План выполнен частично: изменения Glass сохранены, финальная операция OpenGlass не подтверждена. Общий откат не выполнялся. ":
-                        L"Plan partially completed: Glass changes were committed; the final OpenGlass operation was not confirmed. No overall rollback was performed. "):
+                    self->SetFailure((managed?(ru?L"План выполнен частично: изменения Glass и завершённая операция SecureUxTheme (если выбрана) сохранены, финальная операция OpenGlass не подтверждена. Общий откат не выполнялся. ":
+                        L"Plan partially completed: Glass changes and the completed SecureUxTheme operation (if selected) were committed; the final OpenGlass operation was not confirmed. No overall rollback was performed. "):
                         (ru?L"Операция OpenGlass не подтверждена. ":L"OpenGlass operation was not confirmed. "))+self->ErrorText()+
                         (self->preserveSnapshot_?L"\nBackup: "+self->rollbackSession_.workspaceDir:L""),ERROR_INSTALL_FAILURE);
                 }
@@ -1880,7 +1880,8 @@ bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
         return false;
     }
     // Do not put the vendor ProductCode into Glass rollback's fixed-root list.
-    // There are no failing/cancellable steps after this vendor transaction.
+    // In a mixed OG plan, Resources/OG still follow. Their failure must retain
+    // this vendor commit and report a partial result, never claim global rollback.
     bool restart=result==ERROR_SUCCESS_REBOOT_REQUIRED || result==ERROR_SUCCESS_REBOOT_INITIATED;
     auto after=GlassInstallUtil::SecureUxThemeState::Conflict;
     if(GlassInstallUtil::QuerySecureUxThemeState(x64Dir_,x86Dir_,&after,&error) && result!=ERROR_SUCCESS_REBOOT_INITIATED) {
