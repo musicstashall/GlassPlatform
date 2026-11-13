@@ -21,6 +21,13 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
   for(const locale of ['ru','en'])for(const [platform,og] of [[true,true],[true,false],[false,true]]){
    await page.evaluate(({locale,platform,og})=>{window.messages=[];window.receive({data:{type:'state',page:'full-cleanup',locale,cleanupBody:locale==='ru'?'Выберите, параметры каких продуктов нужно удалить.\nНеотмеченные параметры сохранятся для повторной установки.':'Choose which product settings to remove.\nUnchecked settings are kept for reinstallation.',cleanupPlatformEligible:platform,cleanupOgEligible:og,cleanupUserData:false,cleanupOpenGlassConfig:false}})}, {locale,platform,og});
    await page.waitForTimeout(400);
+   const background=page.locator('#confirm-banner');
+   assert.equal(await background.isVisible(),true,'cleanup must show the shared maintenance banner');
+   assert.equal(await background.getAttribute('src'),await page.locator('#components-banner').getAttribute('src'));
+   assert.equal(await background.evaluate(e=>getComputedStyle(e).opacity),'0.34');
+   const choices=await page.locator('.cleanup-option:not([hidden]) small').allTextContents();
+   assert.equal(choices.length,Number(platform)+Number(og));
+   for(const text of choices)assert.ok(!/uninstaller|profiles|штатн|профил|файл|темы/i.test(text));
    const body=await page.locator('#confirm-body').innerText(),note=await page.locator('#confirm-note').innerText();
    if(platform!==og){assert.ok(body.includes(og?'OpenGlass':'GlassPlatform'));assert.ok(!note.includes('каждого')&&!note.includes('each product'));}
    const bounds=await page.locator('#confirm-tag').boundingBox();
@@ -41,6 +48,10 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
     await page.locator('#'+id+'-cleanup-choice').focus();
 
    }
+  }
+  for(const locale of ['ru','en']){
+   await page.evaluate(locale=>window.receive({data:{type:'state',page:'complete',locale,ui:{},finishWarnings:[]}}),locale);
+   assert.equal(await page.locator('#complete-ready-text').innerText(),locale==='ru'?'ОПЕРАЦИИ ВЫПОЛНЕНЫ':'OPERATIONS COMPLETED');
   }
   for(const detail of ['', '   \n  ', 'Hosts restored']){
    await page.evaluate(detail=>window.receive({data:{type:'state',page:'cancelled',cancellationIsRemoval:true,cancelledDetail:detail,ui:{cancelledDetail:'stale fallback'}}}),detail);

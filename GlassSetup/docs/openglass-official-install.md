@@ -1273,3 +1273,12 @@ source ordering, source smoke and Chromium layout tests pass. Two older stop
 mocks currently fail for unrelated stale harness expectations: unins_task_stop
 expects a removed EnsureModulesReleased token; task_scheduler_stop lacks
 OpenMutex/handle/error API stubs. No native Windows build/runtime validation.
+
+Cleanup copy/background follow-up: use the actual shared offline maintenance
+banner with the same opacity/mask instead of substitute CSS decorative shapes.
+Checkbox descriptions simply offer deletion of saved product settings; the
+shared explanation identifies checked products without exposing implementation
+or registry-profile details. Completion status is universally “ОПЕРАЦИИ ВЫПОЛНЕНЫ” /
+“OPERATIONS COMPLETED” in native resources and WebView fallback strings, suitable
+for removal as well as installation. Chromium checks banner visibility/shared
+source, neutral option text and localized universal completion status.
