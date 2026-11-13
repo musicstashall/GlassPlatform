@@ -787,6 +787,15 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .cleanup-option:has(input:checked){border-color:#a99bc34d;background:linear-gradient(120deg,#b0a1d912,#ffffff06)}
 .cleanup-option input:focus-visible{outline:2px solid #c5b7ee;outline-offset:4px;border-radius:3px}
 
+/* Cleanup choices and guidance share the maintenance page's acrylic language. */
+#stage[data-mode="full-cleanup"] .cleanup-option{width:480px;max-width:100%}
+#stage[data-mode="full-cleanup"] #cleanup-explanation,#stage[data-mode="full-cleanup"] #confirm-note{width:480px;max-width:100%}
+.cleanup-backup[hidden]{display:none}
+.cleanup-backup{position:absolute;left:552px;right:48px;top:190px;z-index:5;padding:24px;border:1px solid #ffffff26;border-radius:14px;background:linear-gradient(150deg,#ffffff12,#ffffff00 40%),linear-gradient(165deg,#3437568f,#131526c7);backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%);box-shadow:inset 0 1px #ffffff1f,inset 0 0 0 1px #ffffff05,0 16px 36px #04050e44;color:#c4c1d4;pointer-events:auto}
+.cleanup-backup h2{margin:0 0 14px;font-size:18px;line-height:1.3;font-weight:600;color:#eeeaf7;letter-spacing:-.2px}
+.cleanup-backup p{margin:0 0 14px;font-size:13px;line-height:1.6}
+.cleanup-backup p:last-child{margin-bottom:0;color:#aba8c0;font-size:12px}
+
 /* Short composition feedback; overlays never intercept interaction. */
 #components-installed-grid.has-removal-slot>.c-drop{display:none}
 .c-removal-slot{position:relative;flex:0 0 auto;min-height:1px;pointer-events:none;overflow:hidden}
@@ -921,6 +930,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <img id="confirm-banner" class="banner-portrait" alt="" aria-hidden="true"><div class="confirm-ambient" aria-hidden="true"></div><div class="native-brand">GlassPlatform</div>
 <div class="error-copy"><div id="confirm-tag" class="confirm-tag"></div><h1 id="confirm-title" class="complete-title"></h1><p id="confirm-body" class="complete-body"></p>
 <p id="cleanup-explanation" hidden></p><div id="confirm-note" class="confirm-callout"></div><label id="full-cleanup-option" class="cleanup-option" hidden><input id="full-cleanup-choice" type="checkbox"><span><strong>GlassPlatform</strong><small></small></span></label><label id="og-cleanup-option" class="cleanup-option" hidden><input id="og-cleanup-choice" type="checkbox"><span><strong>OpenGlass</strong><small></small></span></label></div>
+<aside id="cleanup-backup" class="cleanup-backup" hidden aria-labelledby="cleanup-backup-title"><h2 id="cleanup-backup-title"></h2><p id="cleanup-backup-body"></p><p id="cleanup-backup-note"></p></aside>
 <div class="complete-visual" aria-hidden="true"><svg class="complete-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
 <circle class="complete-halo" cx="200" cy="200" r="157"/><circle class="complete-orbit" cx="200" cy="200" r="158"/><circle class="complete-orbit inner" cx="200" cy="200" r="132"/>
 <circle cx="200" cy="200" r="86" fill="#1b1a2ede" stroke="#f4be72" stroke-width="2.3"/><circle cx="200" cy="200" r="71" fill="#f4be7212" stroke="#ffffff20" stroke-width="1.2"/>
@@ -1696,6 +1706,10 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  if(Array.isArray(hostState.launchCards)){const ids=[['launch-card-a-title','launch-card-a-sub'],['launch-card-b-title','launch-card-b-sub'],['launch-card-c-title','launch-card-c-sub']];ids.forEach(([a,b],idx)=>{const c=hostState.launchCards[idx];const group=document.getElementById(a).parentNode;group.style.display=c?'':'none';if(c){group.classList.toggle('launch-card-ready',!!c.ready);setModeText(a,c.title);setModeText(b,c.sub);}});}
  setModeText('unins-kicker',hostUi.uninsTag||(locale==='ru'?'УДАЛЕНИЕ КОМПОНЕНТОВ':'UNINSTALLING COMPONENTS'));setModeText('unins-title',hostUi.uninsTitle||(locale==='ru'?'Удаляем выбранные продукты':'Removing selected products'));setModeText('unins-description',hostUi.uninsBody||'');setModeText('unins-status',hostState.status||hostUi.uninsTitle||'');setModeText('unins-substatus',hostUi.uninsSubstatus||'');
  const fullCleanup=mode==='full-cleanup';
+ document.getElementById('cleanup-backup').hidden=!fullCleanup;
+ setModeText('cleanup-backup-title',locale==='ru'?'Сохраните резервную копию':'Keep a backup');
+ setModeText('cleanup-backup-body',locale==='ru'?'Перед удалением настроек вы можете сохранить их резервную копию в GlassSettings. Она позволит восстановить сохранённые настройки после повторной установки.':'Before removing settings, you can save a backup in GlassSettings. You can use it to restore the saved settings after reinstalling.');
+ setModeText('cleanup-backup-note',locale==='ru'?'Если копия ещё не создана, вернитесь к выбору продуктов и откройте GlassSettings. Сохраните файл копии, затем продолжите удаление. Мастер не создаёт резервную копию настроек автоматически.':'If you have not created a backup yet, return to product selection and open GlassSettings. Save the backup file, then continue removal. The wizard does not automatically create a settings backup.');
  const cleanupExplanation=document.getElementById('cleanup-explanation');cleanupExplanation.hidden=!fullCleanup;
  cleanupExplanation.textContent=locale==='ru'?'Будут удалены только настройки отмеченных продуктов.':'Only settings for the checked products will be removed.';
  for(const [prefix,eligible,checked,key] of [['full',hostState.cleanupPlatformEligible,hostState.cleanupUserData,'platform'],['og',hostState.cleanupOgEligible,hostState.cleanupOpenGlassConfig,'og']]){

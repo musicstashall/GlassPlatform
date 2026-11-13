@@ -12,7 +12,7 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
   const reference=await page.locator('#certificate-title').boundingBox();
   for(const locale of ['ru','en'])for(const [mode,id] of [['components','components-title'],['license','license-title'],['certificate','certificate-title'],['settings-removal-risk','confirm-title'],['confirm-cancel','confirm-title'],['checking','checking-title'],['conflicts','conflicts-title'],['downgrade','downgrade-title'],['version-invalid','version-invalid-title'],['error','error-title'],['complete','complete-title'],['cancelled','cancelled-title'],['launching','launch-title'],['uninstalling','unins-title'],['cancelling','cancelling-title'],['unlock-modules','unlock-title']]){
    await page.evaluate(({mode,locale})=>window.receive({data:{type:'state',page:mode,locale,components:[],componentsLoading:false}}),{mode,locale});
-   await page.waitForTimeout(450);
+   await page.waitForTimeout(950);
    const heading=await page.locator('#'+id).boundingBox();
    assert.ok(Math.abs(heading.y-reference.y)<2,JSON.stringify({mode,locale,heading,reference}));
    assert.equal(heading.x,reference.x);
@@ -25,6 +25,13 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
    assert.equal(await background.isVisible(),true,'cleanup must show the shared maintenance banner');
    assert.equal(await background.getAttribute('src'),await page.locator('#components-banner').getAttribute('src'));
    assert.equal(await background.evaluate(e=>getComputedStyle(e).opacity),'0.34');
+   const backup=page.locator('#cleanup-backup'),backupBox=await backup.boundingBox();
+   assert.ok(backupBox&&backupBox.x>=550&&backupBox.x+backupBox.width<=953&&backupBox.y+backupBox.height<=500,JSON.stringify(backupBox));
+   assert.match(await backup.innerText(),/GlassSettings/);
+   assert.match(await backup.innerText(),locale==='ru'?/не создаёт.*автоматически/:/does not automatically/);
+   for(const card of await page.locator('.cleanup-option:not([hidden])').all()){
+    const rect=await card.boundingBox();assert.ok(rect.width<=480&&rect.x+rect.width<backupBox.x);
+   }
    const choices=await page.locator('.cleanup-option:not([hidden]) small').allTextContents();
    assert.equal(choices.length,Number(platform)+Number(og));
    for(const text of choices)assert.ok(!/uninstaller|profiles|штатн|профил|файл|темы/i.test(text));

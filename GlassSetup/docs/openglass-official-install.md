@@ -1282,3 +1282,12 @@ or registry-profile details. Completion status is universally “ОПЕРАЦИ�
 “OPERATIONS COMPLETED” in native resources and WebView fallback strings, suitable
 for removal as well as installation. Chromium checks banner visibility/shared
 source, neutral option text and localized universal completion status.
+
+Cleanup two-column composition: 480px-wide choice cards on the left and a
+separate 400px acrylic guidance panel on the right. The guidance explains saving
+a backup in GlassSettings before proceeding and explicitly states that the
+wizard does not create one automatically. This informational panel does not
+launch Settings or imply that a backup already exists. Heading anchors, offline
+maintenance background and independent consent handling are unchanged. Chromium
+checks both column bounds/non-overlap and guidance visibility/copy in RU/EN for
+single- and two-product plans; heading checks wait for entrance animation.
