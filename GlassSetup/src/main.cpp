@@ -1339,8 +1339,12 @@ private:
     GlassProductDownloads downloads_;
     bool downloadContinuePending_=false,setupDownloadActive_=false;
     bool fullCleanupReviewed_=false;
-    bool ogCleanupReviewed_=false,reviewingOgCleanup_=false;
-    bool& CleanupChoice() {return reviewingOgCleanup_?selection_.cleanupOpenGlassConfig:selection_.cleanupUserData;}
+    bool cleanupPlatformEligible_=false,cleanupOgEligible_=false;
+    bool CleanupChoice() const {return selection_.cleanupUserData||selection_.cleanupOpenGlassConfig;}
+    void SetCleanupChoice(bool consent) {
+        selection_.cleanupUserData=consent&&cleanupPlatformEligible_;
+        selection_.cleanupOpenGlassConfig=consent&&cleanupOgEligible_;
+    }
     std::atomic<std::uint64_t> setupDownloadBytes_{0},setupDownloadTotal_{0};
     std::wstring checkingStatus_;
     bool versionCheckStarted_ = false, versionCheckHandled_ = false, controllerCheckHandled_ = false;
@@ -2852,24 +2856,30 @@ private:
             vendor=inspect_.secureUxTheme.installed;
         }
         (void)vendor;
-        if(!selection_.Removes(3)){selection_.cleanupOpenGlassConfig=false;ogCleanupReviewed_=false;}
-        if(selection_.Removes(3)&&!ogCleanupReviewed_) {
-            reviewingOgCleanup_=true;SetPage(Page::FullCleanup);return false;
-        }
-        if(!GlassProducts::PlatformCleanupSelected(selection_,installed)) {
-            selection_.cleanupUserData=false;fullCleanupReviewed_=false;return true;
+        cleanupOgEligible_=selection_.Removes(3);
+        cleanupPlatformEligible_=GlassProducts::PlatformCleanupSelected(selection_,installed);
+        if(!cleanupOgEligible_)selection_.cleanupOpenGlassConfig=false;
+        if(!cleanupPlatformEligible_)selection_.cleanupUserData=false;
+        if(!cleanupOgEligible_&&!cleanupPlatformEligible_) {
+            fullCleanupReviewed_=false;return true;
         }
         if(fullCleanupReviewed_)return true;
-        reviewingOgCleanup_=false;SetPage(Page::FullCleanup);return false;
+        SetPage(Page::FullCleanup);return false;
     }
     std::wstring FullCleanupText() const {
         const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
-        if(reviewingOgCleanup_)return ru?
-            L"OpenGlass: удалить параметры в реестре?\n\nПри согласии штатный удалятор OpenGlass удалит параметры текущего пользователя и компьютера. Параметры других профилей не затрагиваются. Без согласия используется /NODELETECONFIG. Это решение не влияет на параметры платформы.":
-            L"OpenGlass: remove registry settings?\n\nWith your consent, the official OpenGlass uninstaller removes current-user and machine settings, not other profiles. Without consent, /NODELETECONFIG is used. This choice does not affect Platform settings.";
-        return ru?
-            L"GlassPlatform: удалить параметры в реестре?\n\nПосле успешного удаления всех установленных разрядностей платформы будут удалены только её параметры реестра пользователей и компьютера. Параметры OpenGlass, сохранённые темы и файлы пользователей не затрагиваются.":
-            L"GlassPlatform: remove registry settings?\n\nAfter successful removal of all installed Platform architectures, only Platform user and machine registry settings will be removed. OpenGlass settings, saved themes and user files are retained.";
+        std::wstring text=ru?
+            L"Можно удалить параметры реестра следующих продуктов из плана:\n":
+            L"You can remove registry settings for these products in the plan:\n";
+        if(cleanupPlatformEligible_)text+=ru?
+            L"\n• GlassPlatform — параметры пользователей и компьютера после успешного удаления всех установленных разрядностей платформы. Сохранённые темы и пользовательские файлы не удаляются.\n":
+            L"\n• GlassPlatform — user and machine settings after successful removal of all installed Platform architectures. Saved themes and user files are retained.\n";
+        if(cleanupOgEligible_)text+=ru?
+            L"\n• OpenGlass — параметры текущего пользователя и компьютера удаляет штатный удалятор. Другие профили не затрагиваются. При согласии /NODELETECONFIG не передаётся.\n":
+            L"\n• OpenGlass — the official uninstaller removes current-user and machine settings, not other profiles. With consent, /NODELETECONFIG is omitted.\n";
+        text+=ru?L"\nБез согласия параметры сохраняются. Параметры остальных продуктов не затрагиваются.":
+            L"\nWithout consent, settings are retained. Settings of other products are unaffected.";
+        return text;
     }
     void StartInstallation() {
         // Debug retains its original simulation contract; Release uses external MSI.
@@ -3572,14 +3582,14 @@ private:
             return S_OK;
         }
         if(page_==Page::FullCleanup&&(message==L"cleanup:1"||message==L"cleanup:0")) {
-            CleanupChoice()=message.back()==L'1';SyncWebViewState();return S_OK;
+            SetCleanupChoice(message.back()==L'1');SyncWebViewState();return S_OK;
         }
         if (page_==Page::Components && !DebugDemoLocksControls()) {
             static constexpr const wchar_t* downloadIds[]={L"x64",L"x86",L"settings64",L"settings32",L"openglass",L"secureUxTheme",L"openglassResources"};
             for(std::size_t i=0;i<std::size(downloadIds);++i)if(message==L"download-retry:"+std::wstring(downloadIds[i])) {
                 downloads_.Retry(i);SyncWebViewState();return S_OK;
             }
-            if(message.rfind(L"component:",0)==0) {fullCleanupReviewed_=ogCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;}
+            if(message.rfind(L"component:",0)==0) {fullCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;}
             const bool os64=GlassInstallUtil::IsOs64Bit();
             // Выбор карточки не тянет за собой основную платформу: принудительная
             // отметка уместна только при установке с нуля/обновлении, где карточка
@@ -4460,7 +4470,7 @@ private:
             }
             switch (LOWORD(w)) {
             case IDC_ACCEPT:
-                if(page_==Page::FullCleanup&&HIWORD(w)==BN_CLICKED){CleanupChoice()=SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED;return 0;}
+                if(page_==Page::FullCleanup&&HIWORD(w)==BN_CLICKED){SetCleanupChoice(SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED);return 0;}
                 if (HIWORD(w)==BN_CLICKED && page_==Page::License && !DebugDemoLocksControls()) {
                     accepted_ = SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED;
                     EnableWindow(next_,accepted_);
@@ -4472,7 +4482,7 @@ private:
                 if (page_==Page::Components && HIWORD(w)==BN_CLICKED && !webReady_ && !DebugDemoLocksControls()) {
                     const bool os64=GlassInstallUtil::IsOs64Bit();
                     selection_.confirmedSettingsRemovalRisk=0;
-                    fullCleanupReviewed_=ogCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;
+                    fullCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;
                     if(LOWORD(w)==IDC_COMPONENT64)selection_.removeMask&=~1u;
                     if(LOWORD(w)==IDC_COMPONENT32)selection_.removeMask&=~2u;
                     if(LOWORD(w)==IDC_COMPONENT_SETTINGS)selection_.removeMask&=~4u;
@@ -4525,7 +4535,7 @@ private:
                 }
                 return 0;
             case IDC_BACK:
-                if(page_==Page::FullCleanup){fullCleanupReviewed_=ogCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;SetPage(Page::Components);return 0;}
+                if(page_==Page::FullCleanup){fullCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;SetPage(Page::Components);return 0;}
                 if(page_==Page::SettingsRemovalRisk){SetPage(beforeSettingsRemovalRisk_);return 0;}
                 if(page_==Page::ModulesBusy && !DebugDemoLocksControls()) {
                     installEngine_.SignalHold(InstallEngine::HoldAction::ContinueRisk);
@@ -4554,7 +4564,7 @@ private:
                 }
 #endif
                 if (transitioning_) return 0;
-                if(page_==Page::FullCleanup){if(reviewingOgCleanup_)ogCleanupReviewed_=true;else fullCleanupReviewed_=true;SetPage(Page::Components);StartInstallation();return 0;}
+                if(page_==Page::FullCleanup){fullCleanupReviewed_=true;SetPage(Page::Components);StartInstallation();return 0;}
                 if(page_==Page::SettingsRemovalRisk) {
                     selection_.confirmedSettingsRemovalRisk|=pendingSettingsRemovalRisk_;
                     SetPage(beforeSettingsRemovalRisk_);StartInstallation();return 0;

@@ -5,8 +5,13 @@ root=Path(__file__).resolve().parents[2]
 main=(root/'GlassSetup/src/main.cpp').read_text()
 engine=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
 profile=(root/'GlassSetup/src/InstallSupport/GlassProfileMaintenance.h').read_text()
-assert main.index('if(selection_.Removes(3)&&!ogCleanupReviewed_)') < main.index('if(!GlassProducts::PlatformCleanupSelected')
-assert 'reviewingOgCleanup_?selection_.cleanupOpenGlassConfig:selection_.cleanupUserData' in main
+assert 'ogCleanupReviewed_' not in main and 'reviewingOgCleanup_' not in main
+assert 'if(!cleanupOgEligible_&&!cleanupPlatformEligible_)' in main
+assert 'selection_.cleanupUserData=consent&&cleanupPlatformEligible_' in main
+assert 'selection_.cleanupOpenGlassConfig=consent&&cleanupOgEligible_' in main
+review=main[main.index('    bool ConfirmFullRemovalCleanup()'):main.index('    void StartInstallation()')]
+assert review.count('SetPage(Page::FullCleanup)')==1
+assert 'if(cleanupPlatformEligible_)text+=' in review and 'if(cleanupOgEligible_)text+=' in review
 assert 'RunUninstaller(current,code,error,selection_.cleanupOpenGlassConfig)' in engine
 assert 'fullRemovalProfiles_.CleanupRegistry(detail)' in engine
 registry=profile[profile.index('    bool PreflightRegistryCleanup'):profile.index('    bool PreflightCleanup')]
@@ -29,4 +34,4 @@ with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'test.cpp';p.write_text(src);exe=Path(d)/'test'
  subprocess.run(['g++','-std=c++17','-I'+str(root),str(p),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)
-print('PASS: separate OG/Platform consent, 16384 Platform inventory/removal combinations, registry-only scope')
+print('PASS: unified page with product-scoped consent, 16384 Platform inventory/removal combinations, registry-only scope')

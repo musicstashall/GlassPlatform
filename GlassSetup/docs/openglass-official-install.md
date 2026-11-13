@@ -1184,16 +1184,18 @@ full-removal policy, maintenance lifetime and removal-registration diagnostics,
 plus production DOM action counts. These checks are not a Windows native build
 or proof of immediate refresh of an already-open Installed Apps window.
 
-### Independent registry consent in the consolidated setup plan
+### Universal registry-cleanup review in the consolidated setup plan
 
-The consolidated setup review now asks separately for OpenGlass registry cleanup
-whenever OG removal is selected, and Platform registry cleanup when every
-installed Platform architecture is selected for removal (without reinstall).
-If both apply, OG review precedes Platform review, before execution. Both default
-to preservation and are reset when product choices change. OG consent alone
-controls omission of `/NODELETECONFIG`; `/DELETEPRESETS` remains unchanged.
-Platform consent now invokes registry-only profile preflight/commit, not saved
-theme or AppData cleanup. Other retained Glass products no longer suppress that
-review; commit checks absence of current/legacy Platform registrations.
-This replaces the preceding full-Glass-removal gate in the consolidated setup.
+One common page appears before execution when OG removal or complete installed
+Platform-architecture removal is selected. It lists only eligible products:
+Platform, OpenGlass, or both. A single unchecked-by-default consent applies only
+to the listed products. Product changes reset consent and page review.
+
+Internally the product flags remain scoped: OG consent alone controls omission
+of `/NODELETECONFIG`; `/DELETEPRESETS` remains unchanged. Platform consent uses
+registry-only profile preflight/commit, never saved-theme or AppData cleanup.
+Retained Settings, Resources or SUT do not suppress the page. Platform commit
+checks absence of current/legacy Platform registrations. Native and WebView
+interfaces use the same review state, text and consent mapping.
+
 The separate legacy GlassUnins selection/cleanup UI is not changed by this patch.
