@@ -8,7 +8,7 @@ def fn(token):
  while depth:
   depth+=(s[i]=='{')-(s[i]=='}');i+=1
  return s[a:i]
-methods='\n'.join(fn(token) for token in ('std::array<bool,7> DownloadSelection()', 'bool HasSelectedComponent()', 'bool ComponentsReady()'))
+methods='\n'.join(fn(token) for token in ('std::array<bool,7> DownloadSelection()', 'bool HasSelectedComponent()', 'bool OpenGlassApplyPlanSupported()', 'bool ComponentsReady()'))
 code=r'''
 #include "GlassProducts.h"
 #include "GlassProcedurePlan.h"
@@ -31,11 +31,13 @@ int main(){
   UI ui;native64=os64;auto& s=ui.selection_;s.platform64=s.platform32=s.glassSettings=s.openGlass=false;
   s.independentSettings=true;ui.resourcesPrerequisiteReady_=installed;
   s.openGlassResources=mask&1;s.openGlass=mask&2;s.removeMask=(mask&4?8u:0u)|(mask&8?64u:0u);
-  assert(ResourcesApplyReady(s,os64,installed)==(os64&&(installed||s.openGlass)&&!s.Removes(3)&&(!s.openGlass||!s.removeMask)));
+  assert(ResourcesApplyReady(s,os64,installed)==(os64&&(installed||s.openGlass)&&!s.Removes(3)));
   const auto selected=ui.DownloadSelection();assert(selected.size()==7);
   assert(selected[6]==(os64&&s.openGlassResources&&!s.Removes(6)));
   assert(!selected[5]); // SUT is not the catalog's Resources index.
-  const bool expected=(mask!=0)&&ResourcesPlanReady(s,os64,installed);
+  const bool ogApply=s.openGlass&&!s.Removes(3);
+  const bool ogSupported=!ogApply||StandaloneOpenGlassApply(s,false,os64)||MixedOpenGlassApply(s,false,os64);
+  const bool expected=(mask!=0)&&ResourcesPlanReady(s,os64,installed)&&ogSupported;
   assert(ui.ComponentsReady()==expected);
   ui.inspectReady_=false;assert(!ui.ComponentsReady());ui.inspectReady_=true;
   ui.downloadContinuePending_=true;assert(!ui.ComponentsReady());

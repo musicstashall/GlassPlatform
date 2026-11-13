@@ -311,9 +311,7 @@ public sealed partial class SystemPage : Page
         var hasUpdate = pending is not null;
         _ogNav.SetUpdateLine(
             hasUpdate,
-            hasUpdate
-                ? string.Format(GlassSettingsResources.Get("System_OpenGlassUpdateSpoilerFormat"), pending!.Version)
-                : null,
+            hasUpdate ? ProductUpdateCoordinator.FormatOpenGlassSpoiler(pending!) : null,
             hasUpdate ? () => _ = ProductUpdateCoordinator.OpenPendingOpenGlassDownloadAsync() : null);
         _ogNav.RefreshHeaderLayout();
     }
@@ -322,9 +320,7 @@ public sealed partial class SystemPage : Page
     {
         var pending = ProductUpdateCoordinator.GetPendingGlass();
         var hasUpdate = pending is not null;
-        var line = hasUpdate
-            ? string.Format(GlassSettingsResources.Get("System_OpenGlassUpdateSpoilerFormat"), pending!.Version)
-            : null;
+        var line = hasUpdate ? ProductUpdateCoordinator.FormatGlassSpoiler(pending!) : null;
         Action? click = hasUpdate
             ? () => _ = ProductUpdateCoordinator.OpenPendingGlassDownloadAsync()
             : null;
@@ -344,10 +340,7 @@ public sealed partial class SystemPage : Page
 
             await PageShell.PageNoticeStack.ShowActionNoticeAsync(
                 SettingsNoticeSeverity.Warning,
-                string.Format(
-                    GlassSettingsResources.Get("System_OpenGlassUpdateTitle"),
-                    pendingOg.Version,
-                    installedOg),
+                ProductUpdateCoordinator.FormatOpenGlassSystemNotice(pendingOg, installedOg ?? "—"),
                 GlassSettingsResources.Get("System_OpenGlassUpdateAction"),
                 animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
             return;
@@ -362,10 +355,17 @@ public sealed partial class SystemPage : Page
 
             await PageShell.PageNoticeStack.ShowActionNoticeAsync(
                 SettingsNoticeSeverity.Warning,
-                string.Format(
-                    GlassSettingsResources.Get("System_GlassUpdateTitle"),
-                    pendingGlass.Version,
-                    installedGlass),
+                ProductUpdateCoordinator.FormatGlassSystemNotice(pendingGlass, installedGlass),
+                GlassSettingsResources.Get("System_OpenGlassUpdateAction"),
+                animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
+            return;
+        }
+
+        if (ProductUpdateCoordinator.ShouldShowOfflineNotice)
+        {
+            await PageShell.PageNoticeStack.ShowActionNoticeAsync(
+                SettingsNoticeSeverity.Warning,
+                ProductUpdateCoordinator.OfflineNoticeText,
                 GlassSettingsResources.Get("System_OpenGlassUpdateAction"),
                 animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
             return;

@@ -663,6 +663,11 @@
   <data name="System_OpenGlassUpdateSpoilerFormat" xml:space="preserve"><value>Доступна новая версия {0}</value></data>
   <data name="Home_OpenGlassUpdateNotice" xml:space="preserve"><value>Доступна новая версия OpenGlass {0}. Установлена: {1}.</value></data>
   <data name="Home_GlassUpdateNotice" xml:space="preserve"><value>Доступна новая версия Glass {0}. Установлена: {1}.</value></data>
+  <data name="Home_GlassUpdateSummary" xml:space="preserve"><value>Доступны обновления установленных продуктов Glass: {0}.</value></data>
+  <data name="Home_GlassUpdateLinkSummary" xml:space="preserve"><value>Обновления: {0}</value></data>
+  <data name="Home_OpenGlassRepairNotice" xml:space="preserve"><value>Сборка Windows изменилась. OpenGlass нужно переустановить для текущего DWM. Версия канала: {0}.</value></data>
+  <data name="Home_OpenGlassRepairLink" xml:space="preserve"><value>Переустановка {0}</value></data>
+  <data name="Home_UpdateCheckOffline" xml:space="preserve"><value>Не удалось проверить обновления. Это не значит, что обновлений нет.</value></data>
   <data name="Home_RowPopupWindows" xml:space="preserve"><value>Popup-окна</value></data>
   <data name="Home_RowProcessList" xml:space="preserve"><value>Список процессов</value></data>
   <data name="Home_RowRootWindows" xml:space="preserve"><value>Root-окна</value></data>
@@ -774,6 +779,10 @@
   <data name="System_NoticeReflectionLink" xml:space="preserve"><value>текстуры</value></data>
   <data name="System_OpenGlassUpdateTitle" xml:space="preserve"><value>Доступна новая версия OpenGlass {0}. Установлена: {1}.</value></data>
   <data name="System_GlassUpdateTitle" xml:space="preserve"><value>Доступна новая версия Glass {0}. Установлена: {1}.</value></data>
+  <data name="System_GlassUpdateSummary" xml:space="preserve"><value>Доступны обновления установленных продуктов Glass: {0}.</value></data>
+  <data name="System_GlassUpdateSpoilerSummary" xml:space="preserve"><value>Доступны обновления: {0}</value></data>
+  <data name="System_OpenGlassRepairTitle" xml:space="preserve"><value>Сборка Windows изменилась. OpenGlass нужно переустановить для текущего DWM. Версия канала: {0}.</value></data>
+  <data name="System_OpenGlassRepairSpoiler" xml:space="preserve"><value>Нужна переустановка OpenGlass ({0})</value></data>
   <data name="System_OpenGlassUpdateMessage" xml:space="preserve"><value>Рекомендуется обновить библиотеку OpenGlass до последнего legacy-релиза.</value></data>
   <data name="System_OpenGlassUpdateAction" xml:space="preserve"><value>Открыть обслуживание</value></data>
   <data name="Notice_OpenGlassBorderBody" xml:space="preserve"><value>Так как бордюры создаются Диспетчером окон (DWM), активный OpenGlass имеет инициативу над DWM и поглощает цвет бордюров. В связи с этим вы не сможете изменить цвет бордюров, пока система OpenGlass приведена в действие. Выполните остановку OpenGlass, если для вас важно иметь цветные бордюры.</value></data>

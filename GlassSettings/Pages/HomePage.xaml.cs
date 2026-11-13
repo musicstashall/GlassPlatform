@@ -1700,7 +1700,7 @@ public sealed partial class HomePage : Page
                 GlassSettingsResources.Get("Home_ComponentsProductVersion"),
                 product),
             hasUpdate,
-            hasUpdate ? GetOpenGlassUpdateLinkText(pendingGlass!.Version) : null,
+            hasUpdate ? ProductUpdateCoordinator.FormatGlassLink(pendingGlass!) : null,
             hasUpdate ? () => _ = ProductUpdateCoordinator.OpenPendingGlassDownloadAsync() : null);
     }
 
@@ -1723,12 +1723,9 @@ public sealed partial class HomePage : Page
         _openGlassComponentGroup.SetProductFooter(
             string.Format(GlassSettingsResources.Get("Home_ComponentsProductVersion"), openGlassVersion),
             hasUpdate,
-            hasUpdate ? GetOpenGlassUpdateLinkText(pending!.Version) : null,
+            hasUpdate ? ProductUpdateCoordinator.FormatOpenGlassLink(pending!) : null,
             hasUpdate ? () => _ = ProductUpdateCoordinator.OpenPendingOpenGlassDownloadAsync() : null);
     }
-
-    private static string? GetOpenGlassUpdateLinkText(string pendingVersion) =>
-        string.Format(GlassSettingsResources.Get("Home_OpenGlassUpdateLinkFormat"), pendingVersion);
 
     private async Task RefreshNoticesAsync(bool forceAnimateGreen = false, bool animateUpdate = false)
     {
@@ -1756,7 +1753,8 @@ public sealed partial class HomePage : Page
                     && ProductUpdateCoordinator.ShouldShowOpenGlassNotice
                     && ProductUpdateCoordinator.GetPendingOpenGlass() is not null)
                 || (ProductUpdateCoordinator.ShouldShowGlassNotice
-                    && ProductUpdateCoordinator.GetPendingGlass() is not null);
+                    && ProductUpdateCoordinator.GetPendingGlass() is not null)
+                || ProductUpdateCoordinator.ShouldShowOfflineNotice;
             if (!showUpdateWhilePending)
             {
                 SyncSummaryFooterFromSession();
@@ -1788,10 +1786,7 @@ public sealed partial class HomePage : Page
         {
             showUpdate = true;
             OpenGlassVersionService.TryGetInstalledVersion(out var installedOg, out _);
-            updateMessage = string.Format(
-                GlassSettingsResources.Get("Home_OpenGlassUpdateNotice"),
-                pendingOg.Version,
-                installedOg ?? "—");
+            updateMessage = ProductUpdateCoordinator.FormatOpenGlassNotice(pendingOg, installedOg ?? "—");
             updateActionText = GlassSettingsResources.Get("System_OpenGlassUpdateAction");
             if (!animateUpdate)
                 animateUpdate = !UpdateNoticeStrip.IsVisuallyOpen;
@@ -1803,10 +1798,15 @@ public sealed partial class HomePage : Page
             var installedGlass = PlatformModuleVersions.GetGlassPlatformReleaseVersion();
             if (PlatformModuleVersions.IsPlaceholderVersion(installedGlass))
                 installedGlass = "—";
-            updateMessage = string.Format(
-                GlassSettingsResources.Get("Home_GlassUpdateNotice"),
-                pendingGlassNotice.Version,
-                installedGlass);
+            updateMessage = ProductUpdateCoordinator.FormatGlassNotice(pendingGlassNotice, installedGlass);
+            updateActionText = GlassSettingsResources.Get("System_OpenGlassUpdateAction");
+            if (!animateUpdate)
+                animateUpdate = !UpdateNoticeStrip.IsVisuallyOpen;
+        }
+        else if (ProductUpdateCoordinator.ShouldShowOfflineNotice)
+        {
+            showUpdate = true;
+            updateMessage = ProductUpdateCoordinator.OfflineNoticeText;
             updateActionText = GlassSettingsResources.Get("System_OpenGlassUpdateAction");
             if (!animateUpdate)
                 animateUpdate = !UpdateNoticeStrip.IsVisuallyOpen;

@@ -100,10 +100,13 @@ constexpr bool OpenGlassVendorConflict(const Selection& s) noexcept {
     return s.openGlass&&(s.secureUxTheme||s.secureUxThemeRemove);
 }
 
-// Graphics can follow an existing OG or its explicit official Apply in this plan.
+// Графика ставится на x64, если официальный OpenGlass уже установлен
+// или выбран для установки в этом же плане. Удаление OpenGlass в том же
+// плане не заменяет ни то, ни другое. SecureUxTheme, чужие удаления и
+// очистка не снимают саму отметку Resources: такой план отвергает
+// ComponentsReady, потому что его не выполняет ни standalone, ни mixed.
 constexpr bool ResourcesApplyReady(const Selection& s,bool os64,bool upstreamReady) noexcept {
-    return os64&&(upstreamReady||s.openGlass)&&!s.Removes(3)&&
-        (!s.openGlass||(!s.secureUxTheme&&!s.secureUxThemeRemove&&!s.removeMask&&!s.cleanupUserData));
+    return os64&&(upstreamReady||s.openGlass)&&!s.Removes(3);
 }
 
 constexpr bool ResourcesPlanReady(const Selection& s,bool os64,bool upstreamReady) noexcept {
