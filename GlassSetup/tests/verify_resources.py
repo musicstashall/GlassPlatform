@@ -688,7 +688,7 @@ assert "comp-warning-button" in ui and "components-warning-shade" in ui
 assert "e.stopPropagation();closeProductWarning()" in ui
 assert "li.textContent='⚠ '+item.warning" not in ui
 assert "components-remove-all" in ui and "function planRemoveAllComponents()" in ui
-assert "Planned actions: ${selected.length}" in ui
+assert "Planned changes: ${selected.length}" in ui
 assert "More products below" in ui and "Products above" in ui
 assert "const bool sutNeedsSettings=false" in setup and "const bool sutRequiresSettings=false" in setup
 assert "(page==Page::UnlockModules || page==Page::Cleanup || (select&&!webReady_))?SW_SHOWNA:SW_HIDE" in unins and "ShowWindow(back_,SW_HIDE)" in unins

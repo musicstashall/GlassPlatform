@@ -45,7 +45,18 @@ for(const locale of ['ru','en']){
   .map(r=>r.id==='secureUxTheme'?{...r,installed:true,applySupported:false,operation:'repair'}:{...r,checked:false});
  send(seven,{locale});button().click();
  const actual=d.querySelectorAll('#components-plan-items li[data-product]').length;
- assert.equal(actual,6);assert.equal(d.querySelector('#components-count').textContent,locale==='ru'?'Действий в плане: 6':'Planned actions: 6');
+ assert.equal(actual,6);assert.equal(d.querySelector('#components-count').textContent,locale==='ru'?'Изменений в плане: 6':'Planned changes: 6');
  assert.equal(d.querySelector('#product-secureUxTheme').checked,false);
+}
+// One common cleanup page: independent native IPC and optional product rows.
+for(const locale of ['ru','en']){
+ send([],{page:'full-cleanup',locale,cleanupPlatformEligible:true,cleanupOgEligible:true,cleanupUserData:false,cleanupOpenGlassConfig:false});
+ const platform=d.getElementById('full-cleanup-choice'),og=d.getElementById('og-cleanup-choice');
+ assert.equal(platform.parentElement.hidden,false);assert.equal(og.parentElement.hidden,false);
+ before=messages.length;platform.click();assert.equal(platform.checked,true);assert.equal(og.checked,false);
+ og.click();assert.equal(og.checked,true);platform.click();assert.equal(platform.checked,false);
+ assert.deepEqual(messages.slice(before),['cleanup:platform:1','cleanup:og:1','cleanup:platform:0']);
+ send([],{page:'full-cleanup',locale,cleanupPlatformEligible:false,cleanupOgEligible:true,cleanupUserData:false,cleanupOpenGlassConfig:true});
+ assert.equal(platform.parentElement.hidden,true);assert.equal(og.parentElement.hidden,false);assert.equal(og.checked,true);
 }
 assert.deepEqual(errors,[]);dom.window.close();console.log('PASS: fresh install recommendations, repeat host echo, loading/capability gates and changed-helper recommendations');

@@ -7,11 +7,13 @@ engine=(root/'GlassSetup/src/InstallEngine.cpp').read_text()
 profile=(root/'GlassSetup/src/InstallSupport/GlassProfileMaintenance.h').read_text()
 assert 'ogCleanupReviewed_' not in main and 'reviewingOgCleanup_' not in main
 assert 'if(!cleanupOgEligible_&&!cleanupPlatformEligible_)' in main
-assert 'selection_.cleanupUserData=consent&&cleanupPlatformEligible_' in main
-assert 'selection_.cleanupOpenGlassConfig=consent&&cleanupOgEligible_' in main
+assert 'message==L"cleanup:platform:1"' in main
+assert 'message==L"cleanup:og:1"' in main
 review=main[main.index('    bool ConfirmFullRemovalCleanup()'):main.index('    void StartInstallation()')]
 assert review.count('SetPage(Page::FullCleanup)')==1
-assert 'if(cleanupPlatformEligible_)text+=' in review and 'if(cleanupOgEligible_)text+=' in review
+assert 'cleanupPlatformEligible' in main and 'cleanupOgEligible' in main
+assert 'GlassProducts::Selection pairedSelection{};pairedSelection.openGlass=true;' in main
+assert 'selection_.openGlassResources=selection_.openGlass;' in main
 assert 'RunUninstaller(current,code,error,selection_.cleanupOpenGlassConfig)' in engine
 assert 'fullRemovalProfiles_.CleanupRegistry(detail)' in engine
 registry=profile[profile.index('    bool PreflightRegistryCleanup'):profile.index('    bool PreflightCleanup')]

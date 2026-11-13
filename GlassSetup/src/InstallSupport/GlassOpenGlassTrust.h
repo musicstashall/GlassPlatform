@@ -44,6 +44,7 @@ inline std::array<unsigned char,32> VerifyPublisher(const std::wstring& path,HAN
     GUID action=WINTRUST_ACTION_GENERIC_VERIFY_V2;
     const auto status=WinVerifyTrust(nullptr,&action,&trust);
     struct Close {WINTRUST_DATA& t;GUID& g;~Close(){t.dwStateAction=WTD_STATEACTION_CLOSE;WinVerifyTrust(nullptr,&g,&t);}} close{trust,action};
+    if(static_cast<unsigned long>(status)==0x800B0100UL)throw std::runtime_error("OpenGlass executable has no verifiable Authenticode signature (TRUST_E_NOSIGNATURE, 0x800B0100).");
     if(status!=ERROR_SUCCESS)throw std::runtime_error("OpenGlass Authenticode is not Valid; WinVerifyTrust status="+
         std::to_string(static_cast<unsigned long>(status)));
     const auto provider=WTHelperProvDataFromStateData(trust.hWVTStateData);

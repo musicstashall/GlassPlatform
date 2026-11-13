@@ -25,7 +25,7 @@ assert.equal(messages.at(-1),'component:settings32:1');
 assert.equal(d.querySelector('#product-settings64').checked,true);
 assert.equal(d.querySelector('#product-settings32').checked,true);
 assert.equal(d.querySelectorAll('#components-panel .c-card:not([data-catalog-alias]).is-checked').length,2);
-assert.match(d.querySelector('#components-count').textContent,/Действий в плане: 2/);
+assert.match(d.querySelector('#components-count').textContent,/Изменений в плане: 2/);
 assert.equal(d.querySelectorAll('#components-plan-items li:not(.plan-warning):not(.components-plan-empty)').length,2);
 // Catalogue mirrors share a single authoritative intent and do not duplicate counts.
 assert.equal(d.querySelectorAll('#components-grid .c-card').length,6);

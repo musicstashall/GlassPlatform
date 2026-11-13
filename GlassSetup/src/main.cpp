@@ -1254,6 +1254,8 @@ private:
     Page page_ = Page::Welcome;
     UINT dpi_ = 96;
     HWND back_ = nullptr, next_ = nullptr, cancel_ = nullptr;
+    HWND cleanupOg_ = nullptr;
+    static constexpr int kCleanupOgId=4921;
     HWND eula_ = nullptr, accept_ = nullptr, progress_ = nullptr, webHost_ = nullptr;
     HWND component64_ = nullptr, component32_ = nullptr, componentSettings_ = nullptr, componentSettings32_ = nullptr, componentOpenGlass_ = nullptr, componentSecureUxTheme_ = nullptr, componentResources_ = nullptr;
     bool resourcesPrerequisiteReady_ = false;
@@ -1340,11 +1342,6 @@ private:
     bool downloadContinuePending_=false,setupDownloadActive_=false;
     bool fullCleanupReviewed_=false;
     bool cleanupPlatformEligible_=false,cleanupOgEligible_=false;
-    bool CleanupChoice() const {return selection_.cleanupUserData||selection_.cleanupOpenGlassConfig;}
-    void SetCleanupChoice(bool consent) {
-        selection_.cleanupUserData=consent&&cleanupPlatformEligible_;
-        selection_.cleanupOpenGlassConfig=consent&&cleanupOgEligible_;
-    }
     std::atomic<std::uint64_t> setupDownloadBytes_{0},setupDownloadTotal_{0};
     std::wstring checkingStatus_;
     bool versionCheckStarted_ = false, versionCheckHandled_ = false, controllerCheckHandled_ = false;
@@ -1435,7 +1432,7 @@ private:
         font_ = create(14,FW_NORMAL); small_ = create(12,FW_NORMAL);
         footerFont_ = create(8.5,FW_NORMAL);
         heading_ = create(28,FW_NORMAL); title_ = create(39,FW_LIGHT);
-        for (HWND c : {back_,next_,cancel_,eula_,accept_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,certInstall_,certSkip_})
+        for (HWND c : {back_,next_,cancel_,eula_,accept_,cleanupOg_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,certInstall_,certSkip_})
             if (c) SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
     void InitializeLoading() {
@@ -1460,6 +1457,7 @@ private:
         eula_ = Control(L"EDIT",L"",WS_BORDER | WS_TABSTOP | ES_MULTILINE | ES_READONLY |
                          ES_AUTOVSCROLL | ES_LEFT | WS_VSCROLL,IDC_EULA);
         accept_ = Control(L"BUTTON",Text(IDS_ACCEPT),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_ACCEPT);
+        cleanupOg_ = Control(L"BUTTON",L"OpenGlass",BS_AUTOCHECKBOX | WS_TABSTOP,kCleanupOgId);
         component64_ = Control(L"BUTTON",Text(IDS_COMP_P64_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT64);
         component32_ = Control(L"BUTTON",Text(IDS_COMP_P32_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT32);
         componentSettings32_ = Control(L"BUTTON",Text(IDS_COMP_GS_TITLE)+L" x86",BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_SETTINGS32);
@@ -1732,7 +1730,8 @@ private:
         Move(next_,nextX,kContentHeight+12,nextWidth,32);
         Move(cancel_,864,kContentHeight+12,104,32);
         Move(eula_,48,142,904,285);
-        Move(accept_,48,447,904,32);
+        Move(accept_,48,page_==Page::FullCleanup?360:447,904,32);
+        Move(cleanupOg_,48,405,904,32);
         Move(progress_,0,kHtmlHeight,kWidth,kProgressHeight);
         Move(webHost_,0,0,kWidth,kHtmlHeight);
         // Leave room outside each platform checkbox for the separate mandatory lock.
@@ -1766,7 +1765,7 @@ private:
     void ShowContentControls() {
         if(WaitingForWebUi()) {
             EnableWindow(next_,FALSE);EnableWindow(back_,FALSE);
-            for(HWND control:{back_,next_,cancel_,eula_,accept_,component64_,component32_,componentSettings_,
+            for(HWND control:{back_,next_,cancel_,eula_,accept_,cleanupOg_,component64_,component32_,componentSettings_,
                 componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,certInstall_,certSkip_,progress_,webHost_})
                 if(control)ShowWindow(control,SW_HIDE);
             return;
@@ -1774,10 +1773,13 @@ private:
         const bool webVisible = SlidesVisible();
         const bool nativeLicense = !webVisible && page_==Page::License && !transitioning_;
         ShowWindow(eula_,nativeLicense?SW_SHOWNA:SW_HIDE);
-        ShowWindow(accept_,(nativeLicense||(!webVisible&&page_==Page::FullCleanup))?SW_SHOWNA:SW_HIDE);
-        SetWindowTextW(accept_,page_==Page::FullCleanup?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Удалить параметры в реестре":L"Remove registry settings"):Text(IDS_ACCEPT).c_str());
-        SendMessageW(accept_,BM_SETCHECK,(page_==Page::FullCleanup?CleanupChoice():accepted_)?BST_CHECKED:BST_UNCHECKED,0);
+        ShowWindow(accept_,(nativeLicense||(!webVisible&&page_==Page::FullCleanup&&cleanupPlatformEligible_))?SW_SHOWNA:SW_HIDE);
+        SetWindowTextW(accept_,page_==Page::FullCleanup?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"GlassPlatform — удалить параметры реестра":L"GlassPlatform — remove registry settings"):Text(IDS_ACCEPT).c_str());
+        SendMessageW(accept_,BM_SETCHECK,(page_==Page::FullCleanup?selection_.cleanupUserData:accepted_)?BST_CHECKED:BST_UNCHECKED,0);
         EnableWindow(accept_,!DebugDemoLocksControls());
+        ShowWindow(cleanupOg_,!webVisible&&page_==Page::FullCleanup&&cleanupOgEligible_?SW_SHOWNA:SW_HIDE);
+        SetWindowTextW(cleanupOg_,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"OpenGlass — удалить параметры реестра":L"OpenGlass — remove registry settings");
+        SendMessageW(cleanupOg_,BM_SETCHECK,selection_.cleanupOpenGlassConfig?BST_CHECKED:BST_UNCHECKED,0);
         const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching || page_==Page::RuntimeInstalling ||
             (page_==Page::Components&&downloadContinuePending_) || (page_==Page::Checking&&setupDownloadActive_));
         ShowWindow(progress_, showProgress ? SW_SHOWNA : SW_HIDE);
@@ -2113,7 +2115,7 @@ private:
                 condition=hasUpdate?GlassProducts::ProductCondition::UpdateAvailable:GlassProducts::ProductCondition::Healthy;
             const bool resources=wcscmp(id,L"openglassResources")==0;
             const bool resourcesReady=GlassProducts::ResourcesApplyReady(selection_,os64,resourcesPrerequisiteReady_);
-            auto pairedSelection=selection_;pairedSelection.openGlass=true;
+            GlassProducts::Selection pairedSelection{};pairedSelection.openGlass=true;
             const bool pairedApply=resources&&GlassProducts::ResourcesApplyReady(pairedSelection,os64,resourcesPrerequisiteReady_)&&
                 !targetVersion.empty()&&GlassOpenGlassRelease::CanPlanApply(inspect_.og.installed?inspect_.og.installedPayloadVersion:L"",inspect_.og.remotePayloadVersion);
 
@@ -2522,7 +2524,10 @@ private:
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
             L",\"maintenance\":"+(maintenanceMode_?L"true":L"false")+
             L",\"cleanupBody\":"+JsStringLiteral(FullCleanupText())+
-            L",\"cleanupUserData\":"+(CleanupChoice()?L"true":L"false")+
+            L",\"cleanupUserData\":"+(selection_.cleanupUserData?L"true":L"false")+
+            L",\"cleanupOpenGlassConfig\":"+(selection_.cleanupOpenGlassConfig?L"true":L"false")+
+            L",\"cleanupPlatformEligible\":"+(cleanupPlatformEligible_?L"true":L"false")+
+            L",\"cleanupOgEligible\":"+(cleanupOgEligible_?L"true":L"false")+
             L",\"settingsRiskBody\":"+JsStringLiteral(SettingsRemovalRiskText())+
             L",\"componentsLoading\":"+(inspectReady_.load(std::memory_order_acquire)?L"false":L"true")+
             L",\"components\":"+ComponentsJson()+
@@ -2608,8 +2613,8 @@ private:
             installedSelection_.openGlass=inspect_.og.installed||inspect_.og.residual;
             installedSelection_.openGlassResources=os64&&inspect_.openGlassResources.installed;
             resourcesPrerequisiteReady_=os64&&inspect_.openGlassResourcesPrerequisite;
-            selection_.openGlassResources=false;
             selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.og,installedSelection_.openGlass),maintenanceMode_);
+            selection_.openGlassResources=selection_.openGlass; // Recommended OG always carries its graphics package.
             // Original vendor repair/upgrade is not implemented; never select a
             // no-op reinstall automatically. Fresh SUT remains explicit opt-in.
             selection_.secureUxTheme=false;
@@ -2869,16 +2874,8 @@ private:
     std::wstring FullCleanupText() const {
         const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
         std::wstring text=ru?
-            L"Можно удалить параметры реестра следующих продуктов из плана:\n":
-            L"You can remove registry settings for these products in the plan:\n";
-        if(cleanupPlatformEligible_)text+=ru?
-            L"\n• GlassPlatform — параметры пользователей и компьютера после успешного удаления всех установленных разрядностей платформы. Сохранённые темы и пользовательские файлы не удаляются.\n":
-            L"\n• GlassPlatform — user and machine settings after successful removal of all installed Platform architectures. Saved themes and user files are retained.\n";
-        if(cleanupOgEligible_)text+=ru?
-            L"\n• OpenGlass — параметры текущего пользователя и компьютера удаляет штатный удалятор. Другие профили не затрагиваются. При согласии /NODELETECONFIG не передаётся.\n":
-            L"\n• OpenGlass — the official uninstaller removes current-user and machine settings, not other profiles. With consent, /NODELETECONFIG is omitted.\n";
-        text+=ru?L"\nБез согласия параметры сохраняются. Параметры остальных продуктов не затрагиваются.":
-            L"\nWithout consent, settings are retained. Settings of other products are unaffected.";
+            L"Выберите, параметры каких продуктов нужно удалить.\nНеотмеченные параметры сохранятся для повторной установки.":
+            L"Choose which product settings to remove.\nUnchecked settings are kept for reinstallation.";
         return text;
     }
     void StartInstallation() {
@@ -3581,8 +3578,10 @@ private:
 #endif
             return S_OK;
         }
-        if(page_==Page::FullCleanup&&(message==L"cleanup:1"||message==L"cleanup:0")) {
-            SetCleanupChoice(message.back()==L'1');SyncWebViewState();return S_OK;
+        if(page_==Page::FullCleanup&&message.rfind(L"cleanup:",0)==0) {
+            if(cleanupPlatformEligible_&&(message==L"cleanup:platform:1"||message==L"cleanup:platform:0"))selection_.cleanupUserData=message.back()==L'1';
+            if(cleanupOgEligible_&&(message==L"cleanup:og:1"||message==L"cleanup:og:0"))selection_.cleanupOpenGlassConfig=message.back()==L'1';
+            SyncWebViewState();return S_OK;
         }
         if (page_==Page::Components && !DebugDemoLocksControls()) {
             static constexpr const wchar_t* downloadIds[]={L"x64",L"x86",L"settings64",L"settings32",L"openglass",L"secureUxTheme",L"openglassResources"};
@@ -3619,7 +3618,7 @@ private:
             }
             if(message==L"components:select-all") {
                 selection_.removeMask=0;selection_.confirmedSettingsRemovalRisk=0;
-                selection_.platform64=os64;selection_.platform32=true;selection_.settings64=os64;selection_.settings32=true;selection_.SyncSettings(os64);selection_.openGlass=os64;
+                selection_.platform64=os64;selection_.platform32=true;selection_.settings64=os64;selection_.settings32=true;selection_.SyncSettings(os64);selection_.openGlass=os64;selection_.openGlassResources=os64;
                 std::lock_guard<std::mutex> lock(inspectMutex_);
                 if(!selection_.secureUxThemeRemove)selection_.secureUxTheme=!inspect_.secureUxTheme.installed && !SecureUxThemeSelectionBlocked();
             }
@@ -3632,7 +3631,7 @@ private:
                 selection_.settings32=message.back()==L'1';selection_.SyncSettings(os64);
             }
             else if(message==L"component:openglassResources:1"||message==L"component:openglassResources:0") {
-                selection_.openGlassResources=message.back()==L'1'&&GlassProducts::ResourcesApplyReady(selection_,os64,resourcesPrerequisiteReady_);
+                selection_.openGlassResources=message.back()==L'1'&&os64&&!selection_.Removes(3)&&(resourcesPrerequisiteReady_||selection_.openGlass);
             }
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
             else if(message==L"component:secureUxTheme:remove") {
@@ -4469,8 +4468,11 @@ private:
                 return 0;
             }
             switch (LOWORD(w)) {
+            case kCleanupOgId:
+                if(page_==Page::FullCleanup&&HIWORD(w)==BN_CLICKED){selection_.cleanupOpenGlassConfig=cleanupOgEligible_&&SendMessageW(cleanupOg_,BM_GETCHECK,0,0)==BST_CHECKED;return 0;}
+                return 0;
             case IDC_ACCEPT:
-                if(page_==Page::FullCleanup&&HIWORD(w)==BN_CLICKED){SetCleanupChoice(SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED);return 0;}
+                if(page_==Page::FullCleanup&&HIWORD(w)==BN_CLICKED){selection_.cleanupUserData=cleanupPlatformEligible_&&SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED;return 0;}
                 if (HIWORD(w)==BN_CLICKED && page_==Page::License && !DebugDemoLocksControls()) {
                     accepted_ = SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED;
                     EnableWindow(next_,accepted_);

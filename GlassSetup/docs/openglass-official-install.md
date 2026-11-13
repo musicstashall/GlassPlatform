@@ -1188,14 +1188,32 @@ or proof of immediate refresh of an already-open Installed Apps window.
 
 One common page appears before execution when OG removal or complete installed
 Platform-architecture removal is selected. It lists only eligible products:
-Platform, OpenGlass, or both. A single unchecked-by-default consent applies only
-to the listed products. Product changes reset consent and page review.
+Platform, OpenGlass, or both. Two independent unchecked-by-default choices apply only
+to their respective eligible products on that same page. Product changes reset consent and page review.
 
 Internally the product flags remain scoped: OG consent alone controls omission
 of `/NODELETECONFIG`; `/DELETEPRESETS` remains unchanged. Platform consent uses
 registry-only profile preflight/commit, never saved-theme or AppData cleanup.
 Retained Settings, Resources or SUT do not suppress the page. Platform commit
 checks absence of current/legacy Platform registrations. Native and WebView
-interfaces use the same review state, text and consent mapping.
+interfaces use the same eligibility and independent consent mapping.
 
 The separate legacy GlassUnins selection/cleanup UI is not changed by this patch.
+
+
+### Log 35: missing uninstaller signature and cleanup UI regression
+
+WinVerifyTrust status 2148204800 is 0x800B0100, TRUST_E_NOSIGNATURE.
+This log shows refusal during preflight, before any MSI mutation, not a failed
+MSI batch or generic Windows policy prohibition. The error now identifies the
+missing verifiable signature and avoids ERROR_INSTALL_PACKAGE_REJECTED's
+misleading policy heading. Unsigned official uninstaller support is unresolved;
+this patch does not bypass publisher verification.
+
+The universal review now uses two compact product-specific checkbox cards,
+explicit pointer interaction, a bounded scrollable content area and no background
+illustration under the text. Chromium hit-testing/geometry regression covers
+RU/EN, single-product/both-product states and independent IPC. DOM tests cover
+selection independence. Recommended OG now carries Resources in initial choices;
+paired recommendation capability no longer inherits unrelated current intents.
+The plan counter reads “Изменений в плане” / “Planned changes”.

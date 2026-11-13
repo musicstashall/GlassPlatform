@@ -755,14 +755,16 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .c-card.download-planned,#components-panel .c-card.download-progress{border:1px dashed #83d9a685;background:linear-gradient(130deg,#22253c,#181b2d)}
 #components-panel .c-card.download-local{border:1px solid #83d9a685;background:var(--component-green-surface)}
 #components-panel .c-card.download-failed{border-color:#e57a7a;border-style:dashed}
-#stage[data-mode="full-cleanup"] .error-copy{top:62px;left:60px;width:800px;text-align:left}
-#stage[data-mode="full-cleanup"] .complete-visual{display:none}
-#stage[data-mode="full-cleanup"] #confirm-title{font-size:32px;line-height:1.18;margin:12px 0 18px}
-#stage[data-mode="full-cleanup"] #confirm-body{width:740px;max-width:100%;white-space:pre-line;font-size:15px;line-height:1.55;color:#c4c1d4}
-#stage[data-mode="full-cleanup"] #confirm-note{margin-top:20px;padding:12px 16px;font-size:13px;line-height:1.5}
-#full-cleanup-option:not([hidden]){display:flex;align-items:center;gap:12px;margin-top:18px;padding:16px 18px;border:1px solid #ffffff24;border-radius:12px;background:#ffffff08;color:#eeeaf7;font-size:15px;cursor:pointer}
-#full-cleanup-option input{width:18px;height:18px;margin:0;flex:none;accent-color:#8cc6ac}
-#full-cleanup-option:focus-within{outline:2px solid #a9cbbd;outline-offset:3px}
+#stage[data-mode="full-cleanup"] .error-copy{top:62px;left:60px;right:60px;bottom:24px;width:auto;overflow:auto;pointer-events:auto;opacity:1;transform:none;animation:none}
+#stage[data-mode="full-cleanup"] .complete-visual,#stage[data-mode="full-cleanup"] #confirm-banner,#stage[data-mode="full-cleanup"] .confirm-ambient{display:none}
+#stage[data-mode="full-cleanup"] #confirm-title{flex-shrink:0;font-size:30px;line-height:1.2;margin:12px 0 14px}
+#stage[data-mode="full-cleanup"] #confirm-body{flex-shrink:0;width:auto;max-width:100%;white-space:pre-line;font-size:14px;line-height:1.5;color:#c4c1d4;margin:0 0 16px}
+#stage[data-mode="full-cleanup"] #confirm-note{order:5;flex-shrink:0;max-width:none;margin:16px 0 0;padding:10px 14px;font-size:12px;line-height:1.5}
+.cleanup-option:not([hidden]){display:flex;flex-shrink:0;align-items:flex-start;gap:14px;margin:0 0 12px;padding:16px 18px;border:1px solid #ffffff24;border-radius:12px;background:#ffffff08;color:#eeeaf7;font-size:15px;cursor:pointer;pointer-events:auto;box-sizing:border-box}
+.cleanup-option input{width:18px;height:18px;margin:2px 0 0;flex:none;accent-color:#8cc6ac;cursor:pointer}
+.cleanup-option strong{display:block;font-weight:600;margin-bottom:5px}
+.cleanup-option small{display:block;color:#bdb9cd;font-size:13px;line-height:1.45}
+.cleanup-option:focus-within{outline:2px solid #a9cbbd;outline-offset:3px}
 
 /* Short composition feedback; overlays never intercept interaction. */
 #components-installed-grid.has-removal-slot>.c-drop{display:none}
@@ -897,7 +899,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <section id="confirm-panel" class="mode-panel confirm-scene" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
 <img id="confirm-banner" class="banner-portrait" alt="" aria-hidden="true"><div class="confirm-ambient" aria-hidden="true"></div><div class="native-brand">GlassPlatform</div>
 <div class="error-copy"><div id="confirm-tag" class="confirm-tag"></div><h1 id="confirm-title" class="complete-title"></h1><p id="confirm-body" class="complete-body"></p>
-<div id="confirm-note" class="confirm-callout"></div><label id="full-cleanup-option" hidden><input id="full-cleanup-choice" type="checkbox"><span></span></label></div>
+<div id="confirm-note" class="confirm-callout"></div><label id="full-cleanup-option" class="cleanup-option" hidden><input id="full-cleanup-choice" type="checkbox"><span><strong>GlassPlatform</strong><small></small></span></label><label id="og-cleanup-option" class="cleanup-option" hidden><input id="og-cleanup-choice" type="checkbox"><span><strong>OpenGlass</strong><small></small></span></label></div>
 <div class="complete-visual" aria-hidden="true"><svg class="complete-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
 <circle class="complete-halo" cx="200" cy="200" r="157"/><circle class="complete-orbit" cx="200" cy="200" r="158"/><circle class="complete-orbit inner" cx="200" cy="200" r="132"/>
 <circle cx="200" cy="200" r="86" fill="#1b1a2ede" stroke="#f4be72" stroke-width="2.3"/><circle cx="200" cy="200" r="71" fill="#f4be7212" stroke="#ffffff20" stroke-width="1.2"/>
@@ -1548,7 +1550,7 @@ function updateComponentsStatus(){
  const removable=inputs.filter(input=>{const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);return !input.disabled&&item?.installed&&(hostState.appMode==='unins'||item.removeSupported===true);});
  const removeAll=document.getElementById('components-remove-all');removeAll.replaceChildren();const trash=document.createElement('span');trash.setAttribute('aria-hidden','true');trash.innerHTML='<svg viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>';removeAll.append(trash,ru?'Удалить все продукты':'Remove all products');removeAll.title=ru?'Добавить в план удаление всех установленных продуктов, для которых удаление поддерживается.':'Plan removal of all installed products that support removal.';
  removeAll.hidden=hostState.componentsLoading===true||!removable.some(input=>!componentCardFacts((hostState.components||[]).find(x=>x.id===input.dataset.component),input).remove);removeAll.disabled=removeAll.hidden;
- const count=document.getElementById('components-count');count.hidden=false;count.textContent=ru?`Действий в плане: ${selected.length}`:`Planned actions: ${selected.length}`;
+ const count=document.getElementById('components-count');count.hidden=false;count.textContent=ru?`Изменений в плане: ${selected.length}`:`Planned changes: ${selected.length}`;
  const list=document.querySelector('#components-panel .components-list');document.getElementById('components-scroll-hint').textContent=list.scrollHeight>list.clientHeight+1?(list.scrollTop+list.clientHeight<list.scrollHeight-2?(ru?'Ещё продукты ниже ↓':'More products below ↓'):(ru?'Начало списка выше ↑':'Products above ↑')):'';
  const plan=document.getElementById('components-plan-items');plan.replaceChildren();const items=hostState.components||[];
  const totals=document.getElementById('components-plan-totals');totals.replaceChildren();
@@ -1672,12 +1674,15 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  setModeText('launch-kicker',hostUi.launchTag||(locale==='ru'?'ЗАПУСК ПЛАТФОРМЫ':'STARTING PLATFORM'));setModeText('launch-title',hostUi.launchTitle||(locale==='ru'?'Запускаем компоненты':'Starting components'));setModeText('launch-description',hostUi.launchBody||'');setModeText('launch-status',hostState.status||hostUi.launchTitle||'');setModeText('launch-substatus',hostUi.launchSubstatus||'');
  if(Array.isArray(hostState.launchCards)){const ids=[['launch-card-a-title','launch-card-a-sub'],['launch-card-b-title','launch-card-b-sub'],['launch-card-c-title','launch-card-c-sub']];ids.forEach(([a,b],idx)=>{const c=hostState.launchCards[idx];const group=document.getElementById(a).parentNode;group.style.display=c?'':'none';if(c){group.classList.toggle('launch-card-ready',!!c.ready);setModeText(a,c.title);setModeText(b,c.sub);}});}
  setModeText('unins-kicker',hostUi.uninsTag||(locale==='ru'?'УДАЛЕНИЕ КОМПОНЕНТОВ':'UNINSTALLING COMPONENTS'));setModeText('unins-title',hostUi.uninsTitle||(locale==='ru'?'Удаляем выбранные продукты':'Removing selected products'));setModeText('unins-description',hostUi.uninsBody||'');setModeText('unins-status',hostState.status||hostUi.uninsTitle||'');setModeText('unins-substatus',hostUi.uninsSubstatus||'');
- const fullCleanup=mode==='full-cleanup',cleanupChoice=document.getElementById('full-cleanup-choice');
- document.getElementById('full-cleanup-option').hidden=!fullCleanup;
- cleanupChoice.checked=!!hostState.cleanupUserData;cleanupChoice.onchange=()=>window.chrome?.webview?.postMessage('cleanup:'+(cleanupChoice.checked?'1':'0'));
- document.querySelector('#full-cleanup-option span').textContent=locale==='ru'?'Удалить параметры в реестре':'Remove registry settings';
+ const fullCleanup=mode==='full-cleanup';
+ for(const [prefix,eligible,checked,key] of [['full',hostState.cleanupPlatformEligible,hostState.cleanupUserData,'platform'],['og',hostState.cleanupOgEligible,hostState.cleanupOpenGlassConfig,'og']]){
+  const label=document.getElementById(prefix==='full'?'full-cleanup-option':'og-cleanup-option'),choice=label.querySelector('input');
+  label.hidden=!fullCleanup||!eligible;choice.checked=!!checked;
+  choice.onchange=()=>window.chrome?.webview?.postMessage('cleanup:'+key+':'+(choice.checked?'1':'0'));
+  label.querySelector('small').textContent=key==='platform'?(locale==='ru'?'Удалить параметры платформы у пользователей и компьютера. Темы и файлы сохраняются.':'Remove user and machine Platform settings. Themes and files are kept.'):(locale==='ru'?'Штатный удалятор удалит параметры текущего пользователя и компьютера. Другие профили сохраняются.':'The official uninstaller removes current-user and machine settings. Other profiles are kept.');
+ }
  const settingsRisk=mode==='settings-removal-risk';setModeText('confirm-tag',settingsRisk?(locale==='ru'?'ПЕРЕД УДАЛЕНИЕМ SETTINGS':'BEFORE REMOVING SETTINGS'):hostUi.confirmTag||(locale==='ru'?'ПОДТВЕРЖДЕНИЕ ОТМЕНЫ':'CONFIRM CANCELLATION'));setModeText('confirm-title',settingsRisk?(locale==='ru'?'Риск для Platform':'Platform risk'):hostUi.confirmTitle||(locale==='ru'?'Прервать установку?':'Cancel installation?'));setModeText('confirm-body',settingsRisk?hostState.settingsRiskBody:hostUi.confirmBody||'');setModeText('confirm-note',settingsRisk?(locale==='ru'?'Отмена возвращает к выбору без изменений.':'Cancel returns to selection without making changes.'):hostUi.confirmNote||'');
- if(fullCleanup){setModeText('confirm-tag',locale==='ru'?'ПАРАМЕТРЫ РЕЕСТРА':'FULL REMOVAL');setModeText('confirm-title',locale==='ru'?'Очистить параметры реестра?':'Remove registry settings?');setModeText('confirm-body',hostState.cleanupBody||'');setModeText('confirm-note',locale==='ru'?'По умолчанию данные сохраняются. Согласие применяется только к перечисленным выше продуктам.':'Data is kept by default. Consent applies only to the products listed above.');}
+ if(fullCleanup){setModeText('confirm-tag',locale==='ru'?'ПАРАМЕТРЫ РЕЕСТРА':'FULL REMOVAL');setModeText('confirm-title',locale==='ru'?'Очистить параметры реестра?':'Remove registry settings?');setModeText('confirm-body',hostState.cleanupBody||'');setModeText('confirm-note',locale==='ru'?'По умолчанию данные сохраняются. Выберите очистку отдельно для каждого продукта.':'Data is kept by default. Choose cleanup separately for each product.');}
  setModeText('cancelling-kicker',hostUi.cancellingTag||(locale==='ru'?'ОТМЕНА И ОТКАТ':'CANCELLING & ROLLING BACK'));setModeText('cancelling-title',hostUi.cancellingTitle||(locale==='ru'?'Отменяем изменения':'Rolling back changes'));setModeText('cancelling-description',hostUi.cancellingBody||(locale==='ru'?'Восстанавливаем исходное состояние пакетов, файлов и автозапуска.':'Restoring previous packages, files, and startup configuration.'));setModeText('cancelling-status',hostState.status||(locale==='ru'?'Откат изменений…':'Rolling back changes…'));setModeText('cancelling-substatus',hostUi.cancellingSubstatus||(locale==='ru'?'Пожалуйста, не выключайте компьютер':'Please wait until rollback finishes'));
  setModeText('cancelled-tag',hostUi.cancelledTag||(locale==='ru'?'УСТАНОВКА ОТМЕНЕНА':'SETUP CANCELLED'));setModeText('cancelled-title',hostUi.cancelledTitle||(locale==='ru'?'Установка прервана':'Setup was cancelled'));setModeText('cancelled-body',hostUi.cancelledBody||'');setModeText('cancelled-detail',hostState.cancelledDetail||hostUi.cancelledDetail||'');
 }
