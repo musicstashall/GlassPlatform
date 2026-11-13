@@ -247,6 +247,7 @@
     <ClCompile Include="src\PartRegistryQuery.cpp" />
     <ClCompile Include="src\RootRegistryMigration.cpp" />
     <ClCompile Include="src\GlassHostRegistry.cpp" />
+    <ClCompile Include="src\GlassInstallerLaunch.cpp" />
     <ClCompile Include="src\RootNcActiveCache.cpp" />
     <ClCompile Include="src\GlassShellRegistration.cpp" />
   </ItemGroup>

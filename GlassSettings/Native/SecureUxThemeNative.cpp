@@ -1,13 +1,18 @@
 #include "NativeHost.h"
+#include "StockVisualStyle.h"
+#include <StockThemeMaintenanceTrace.h>
 
-#include <TaskSchedulerCom.h>
 #include <DebugLog.h>
 #include <Helpers/ThemeHelper.h>
-#include <aclapi.h>
 #include <uxtheme.h>
+#include <SystemVisualStyle.h>
 #include <wil/resource.h>
+#include <msi.h>
+#include <SecureUxThemeInventory.h>
+#include <cstring>
 
 #pragma comment(lib, "uxtheme.lib")
+#pragma comment(lib, "msi.lib")
 
 #include <string>
 #include <vector>
@@ -22,21 +27,10 @@ namespace
     constexpr wchar_t kIfeoPath[] =
         L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\";
 
-    // Packed ProductCode x64 MSI v4: {D686CD0E-139E-4599-A4E2-1B9BC0B72F73}
-    constexpr wchar_t kOfficialV4ProductPacked[] = L"E0DC686DE93199544A2EB1B90C7BF237";
-    constexpr wchar_t kInstallerProductsPath[] =
-        L"SOFTWARE\\Classes\\Installer\\Products\\";
-
     constexpr wchar_t kThemeManager2[] = L"{9324DA94-50EC-4A14-A770-E90CA03E7C8F}";
     constexpr wchar_t kThemeManagerShared[] = L"{C04B329E-5823-4415-9C93-BA44688947B0}";
-    // Payload is a separate architecture-specific MSI installed beside GlassSettings:
-    // <root>\GlassSettings\SecureUxTheme\ with only native-architecture files.
-    constexpr wchar_t kPayloadFolderName[] = L"SecureUxTheme";
-    constexpr wchar_t kPatcherDll[] = L"SecureUxTheme4.dll";
-    constexpr wchar_t kProxyDll[] = L"ThemeUiProxy.dll";
     constexpr wchar_t kInProcProxy[] = L"%SystemRoot%\\system32\\ThemeUiProxy.dll";
     constexpr wchar_t kInProcThemeUi[] = L"%SystemRoot%\\system32\\themeui.dll";
-    constexpr wchar_t kCleanupScriptName[] = L"SecureUxThemeCleanup.cmd";
 
     constexpr const wchar_t* kInProcKeysNative[] = {
         L"SOFTWARE\\Classes\\CLSID\\{9324DA94-50EC-4A14-A770-E90CA03E7C8F}\\InProcServer32",
@@ -48,6 +42,7 @@ namespace
     };
 
     HMODULE g_loadedPatcher = nullptr;
+    [[nodiscard]] bool HasUnsupportedLegacySecureUxTheme(const GlassSettings_SecureUxThemeNativeQuery& q) noexcept;
 
     struct Wow64FsRedirectGuard
     {
@@ -70,7 +65,7 @@ namespace
     {
         BOOL wow = FALSE;
         if (!IsWow64Process(GetCurrentProcess(), &wow))
-            return false;
+            return true; // Unknown process architecture must never permit native registry writes.
         return wow != FALSE;
     }
 
@@ -147,20 +142,6 @@ namespace
         return path;
     }
 
-    [[nodiscard]] std::wstring DirectoryName(const std::wstring& path) noexcept
-    {
-        if (path.empty())
-            return {};
-        auto trimmed = path;
-        if (trimmed.back() == L'\\' || trimmed.back() == L'/')
-            trimmed.pop_back();
-        const auto slash = trimmed.find_last_of(L"\\/");
-        if (slash == std::wstring::npos)
-            return {};
-        trimmed.resize(slash);
-        return trimmed;
-    }
-
     [[nodiscard]] bool FileExistsNative(const std::wstring& path) noexcept
     {
         Wow64FsRedirectGuard guard;
@@ -219,16 +200,6 @@ namespace
                 return true;
         }
         return false;
-    }
-
-    [[nodiscard]] bool VerifierExact(const wchar_t* list, const wchar_t* name) noexcept
-    {
-        if (!list || !name)
-            return false;
-        std::wstring trimmed = list;
-        while (!trimmed.empty() && (trimmed.back() == L' ' || trimmed.back() == L'\t'))
-            trimmed.pop_back();
-        return _wcsicmp(trimmed.c_str(), name) == 0;
     }
 
     [[nodiscard]] std::wstring AddVerifierToken(const wchar_t* list, const wchar_t* name)
@@ -323,70 +294,10 @@ namespace
         }
     }
 
-    [[nodiscard]] HRESULT WriteIfeo(const wchar_t* executable, DWORD globalFlag, const wchar_t* verifierDlls) noexcept
-    {
-        const auto subkey = IfeoSubkey(executable);
-        wil::unique_hkey key;
-        DWORD disp = 0;
-        const LONG created = RegCreateKeyExW(
-            HKEY_LOCAL_MACHINE,
-            subkey.c_str(),
-            0,
-            nullptr,
-            0,
-            KEY_SET_VALUE | KEY_QUERY_VALUE | KEY_WOW64_64KEY,
-            nullptr,
-            &key,
-            &disp);
-        if (created != ERROR_SUCCESS)
-            return HRESULT_FROM_WIN32(created);
-
-        LONG status = ERROR_SUCCESS;
-        if (globalFlag == 0)
-        {
-            status = RegDeleteValueW(key.get(), L"GlobalFlag");
-            if (status == ERROR_FILE_NOT_FOUND)
-                status = ERROR_SUCCESS;
-        }
-        else
-        {
-            status = RegSetValueExW(
-                key.get(),
-                L"GlobalFlag",
-                0,
-                REG_DWORD,
-                reinterpret_cast<const BYTE*>(&globalFlag),
-                sizeof(globalFlag));
-        }
-        if (status != ERROR_SUCCESS)
-            return HRESULT_FROM_WIN32(status);
-
-        if (!verifierDlls || !*verifierDlls)
-        {
-            status = RegDeleteValueW(key.get(), L"VerifierDlls");
-            if (status == ERROR_FILE_NOT_FOUND)
-                status = ERROR_SUCCESS;
-        }
-        else
-        {
-            const DWORD bytes = static_cast<DWORD>((wcslen(verifierDlls) + 1) * sizeof(wchar_t));
-            status = RegSetValueExW(
-                key.get(),
-                L"VerifierDlls",
-                0,
-                REG_SZ,
-                reinterpret_cast<const BYTE*>(verifierDlls),
-                bytes);
-        }
-        return HRESULT_FROM_WIN32(status);
-    }
-
     [[nodiscard]] bool LoadedEventPresent() noexcept
     {
         const wil::unique_handle event(OpenEventW(SYNCHRONIZE, FALSE, kLoadedEventName));
-        if (event)
-            return true;
-        return GetLastError() == ERROR_ACCESS_DENIED;
+        return static_cast<bool>(event);
     }
 
     [[nodiscard]] bool InProcIsProxy(HKEY root, const wchar_t* clsid, REGSAM wow) noexcept
@@ -435,18 +346,9 @@ namespace
         return false;
     }
 
-    [[nodiscard]] bool OfficialV4ProductKeyPresent() noexcept
+    [[nodiscard]] bool OfficialMsiProductPresent() noexcept
     {
-        std::wstring path = kInstallerProductsPath;
-        path += kOfficialV4ProductPacked;
-        wil::unique_hkey key;
-        return RegOpenKeyExW(
-                   HKEY_LOCAL_MACHINE,
-                   path.c_str(),
-                   0,
-                   KEY_READ | KEY_WOW64_64KEY,
-                   &key)
-            == ERROR_SUCCESS;
+        return Shared::SecureUxThemeInventory::IsInstalled();
     }
 
     [[nodiscard]] bool IsNative64() noexcept
@@ -455,403 +357,173 @@ namespace
         return machine == IMAGE_FILE_MACHINE_AMD64 || machine == IMAGE_FILE_MACHINE_ARM64;
     }
 
-    [[nodiscard]] std::wstring ExeDirectory() noexcept
-    {
-        wchar_t modulePath[MAX_PATH]{};
-        if (GetModuleFileNameW(nullptr, modulePath, MAX_PATH) == 0)
-            return {};
-        std::wstring local = modulePath;
-        const auto slash = local.find_last_of(L"\\/");
-        if (slash == std::wstring::npos)
-            return {};
-        local.resize(slash);
-        return local;
-    }
-
-    // Directory of GlassSettings.Native.dll itself: the payload lives next to it
-    // (<root>\GlassSettings\SecureUxTheme\) and the process may be rundll32 (the
-    // uninstaller entry point below), so the exe directory is no anchor there.
-    [[nodiscard]] std::wstring ThisModuleDirectory() noexcept
-    {
-        HMODULE module = nullptr;
-        if (!GetModuleHandleExW(
-                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                reinterpret_cast<LPCWSTR>(&ThisModuleDirectory),
-                &module))
-            return {};
-        wchar_t modulePath[MAX_PATH]{};
-        if (GetModuleFileNameW(module, modulePath, MAX_PATH) == 0)
-            return {};
-        std::wstring local = modulePath;
-        const auto slash = local.find_last_of(L"\\/");
-        if (slash == std::wstring::npos)
-            return {};
-        local.resize(slash);
-        return local;
-    }
-
-    [[nodiscard]] std::wstring ResolvePayloadFolder(const wchar_t* payloadFolder) noexcept
-    {
-        if (payloadFolder && *payloadFolder)
-            return payloadFolder;
-
-        // GlassSettings MSI layout: <root>\GlassSettings\SecureUxTheme\ (both bitnesses).
-        auto dir = ThisModuleDirectory();
-        if (dir.empty())
-            dir = ExeDirectory();
-        if (dir.empty())
-            return {};
-        const auto current = JoinPath(dir, kPayloadFolderName);
-        if (FileExistsNative(JoinPath(current, kPatcherDll)))
-            return current;
-
-        // Старая раскладка платформенных MSI: <root>\SecureUxTheme\ (каталог выше GlassSettings).
-        const auto legacy = JoinPath(DirectoryName(dir), kPayloadFolderName);
-        if (FileExistsNative(JoinPath(legacy, kPatcherDll)))
-            return legacy;
-
-        return current;
-    }
-
-    [[nodiscard]] bool PayloadComplete(
-        const std::wstring& folder,
-        std::wstring& patcherSrc,
-        std::wstring& proxyNativeSrc) noexcept
-    {
-        patcherSrc.clear();
-        proxyNativeSrc.clear();
-        if (folder.empty())
-            return false;
-
-        patcherSrc = JoinPath(folder, kPatcherDll);
-        proxyNativeSrc = JoinPath(folder, kProxyDll);
-        return FileExistsNative(patcherSrc) && FileExistsNative(proxyNativeSrc);
-    }
-
-    void EnablePrivilege(const wchar_t* name) noexcept
-    {
-        HANDLE raw = nullptr;
-        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &raw))
-            return;
-        wil::unique_handle token(raw);
-
-        TOKEN_PRIVILEGES tp{};
-        tp.PrivilegeCount = 1;
-        tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-        if (!LookupPrivilegeValueW(nullptr, name, &tp.Privileges[0].Luid))
-            return;
-        AdjustTokenPrivileges(token.get(), FALSE, &tp, 0, nullptr, nullptr);
-    }
-
-    [[nodiscard]] bool MakeAdministratorsSid(PSID* sid) noexcept
-    {
-        SID_IDENTIFIER_AUTHORITY ntAuth = SECURITY_NT_AUTHORITY;
-        return AllocateAndInitializeSid(
-                   &ntAuth,
-                   2,
-                   SECURITY_BUILTIN_DOMAIN_RID,
-                   DOMAIN_ALIAS_RID_ADMINS,
-                   0,
-                   0,
-                   0,
-                   0,
-                   0,
-                   0,
-                   sid)
-            != FALSE;
-    }
-
-    [[nodiscard]] bool SetKeyOwnerAdministrators(HKEY key) noexcept
-    {
-        PSID adminSid = nullptr;
-        if (!MakeAdministratorsSid(&adminSid))
-            return false;
-        const auto freeSid = wil::scope_exit([&] { FreeSid(adminSid); });
-
-        SECURITY_DESCRIPTOR sd{};
-        if (!InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION))
-            return false;
-        if (!SetSecurityDescriptorOwner(&sd, adminSid, FALSE))
-            return false;
-        return RegSetKeySecurity(key, OWNER_SECURITY_INFORMATION, &sd) == ERROR_SUCCESS;
-    }
-
-    [[nodiscard]] bool AllowAdministratorsSetValue(HKEY key) noexcept
-    {
-        DWORD needed = 0;
-        RegGetKeySecurity(key, DACL_SECURITY_INFORMATION, nullptr, &needed);
-        if (needed == 0)
-            return false;
-
-        std::vector<BYTE> buffer(needed);
-        auto* sd = reinterpret_cast<PSECURITY_DESCRIPTOR>(buffer.data());
-        if (RegGetKeySecurity(key, DACL_SECURITY_INFORMATION, sd, &needed) != ERROR_SUCCESS)
-            return false;
-
-        BOOL present = FALSE;
-        BOOL defaulted = FALSE;
-        PACL oldDacl = nullptr;
-        if (!GetSecurityDescriptorDacl(sd, &present, &oldDacl, &defaulted))
-            return false;
-
-        SID_IDENTIFIER_AUTHORITY ntAuth = SECURITY_NT_AUTHORITY;
-        PSID adminSid = nullptr;
-        if (!AllocateAndInitializeSid(
-                &ntAuth,
-                2,
-                SECURITY_BUILTIN_DOMAIN_RID,
-                DOMAIN_ALIAS_RID_ADMINS,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                &adminSid))
-        {
-            return false;
+    // REG_OPTION_BACKUP_RESTORE grants the requested restore access using
+    // privileges, without taking ownership or leaving a relaxed WRP key DACL.
+    struct RegistrationPrivileges {
+        wil::unique_handle token;
+        BYTE previous[sizeof(TOKEN_PRIVILEGES)+2*sizeof(LUID_AND_ATTRIBUTES)]{};
+        bool adjusted=false, ready=false;
+        RegistrationPrivileges() noexcept {
+            HANDLE raw=nullptr;
+            if (!OpenProcessToken(GetCurrentProcess(),TOKEN_ADJUST_PRIVILEGES|TOKEN_QUERY,&raw)) return;
+            token.reset(raw);
+            struct { DWORD count; LUID_AND_ATTRIBUTES items[2]; } requested{};
+            requested.count=2;
+            if (!LookupPrivilegeValueW(nullptr,SE_BACKUP_NAME,&requested.items[0].Luid) ||
+                !LookupPrivilegeValueW(nullptr,SE_RESTORE_NAME,&requested.items[1].Luid)) return;
+            for (auto& item:requested.items) item.Attributes=SE_PRIVILEGE_ENABLED;
+            DWORD bytes=sizeof(previous); SetLastError(ERROR_SUCCESS);
+            adjusted=AdjustTokenPrivileges(token.get(),FALSE,reinterpret_cast<TOKEN_PRIVILEGES*>(&requested),
+                sizeof(previous),reinterpret_cast<TOKEN_PRIVILEGES*>(previous),&bytes)!=FALSE;
+            ready=adjusted && GetLastError()==ERROR_SUCCESS;
         }
-        const auto freeSid = wil::scope_exit([&] { FreeSid(adminSid); });
-
-        EXPLICIT_ACCESSW access{};
-        access.grfAccessPermissions = KEY_SET_VALUE;
-        access.grfAccessMode = GRANT_ACCESS;
-        access.grfInheritance = NO_INHERITANCE;
-        access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
-        access.Trustee.TrusteeType = TRUSTEE_IS_GROUP;
-        access.Trustee.ptstrName = static_cast<LPWSTR>(adminSid);
-
-        PACL newDacl = nullptr;
-        if (SetEntriesInAclW(1, &access, present ? oldDacl : nullptr, &newDacl) != ERROR_SUCCESS)
-            return false;
-        const auto freeAcl = wil::scope_exit([&] { if (newDacl) LocalFree(newDacl); });
-
-        SECURITY_DESCRIPTOR newSd{};
-        if (!InitializeSecurityDescriptor(&newSd, SECURITY_DESCRIPTOR_REVISION))
-            return false;
-        if (!SetSecurityDescriptorDacl(&newSd, TRUE, newDacl, FALSE))
-            return false;
-        return RegSetKeySecurity(key, DACL_SECURITY_INFORMATION, &newSd) == ERROR_SUCCESS;
-    }
-
-    [[nodiscard]] HRESULT SetInProcDefault(const wchar_t* relative, const wchar_t* expandValue) noexcept
-    {
-        if (!relative || !expandValue)
-            return E_INVALIDARG;
-
-        auto tryOpen = [&](REGSAM sam, wil::unique_hkey& key) -> LONG {
-            return RegOpenKeyExW(HKEY_LOCAL_MACHINE, relative, 0, sam | KEY_WOW64_64KEY, &key);
-        };
-
+        ~RegistrationPrivileges() {
+            if (adjusted) AdjustTokenPrivileges(token.get(),FALSE,reinterpret_cast<TOKEN_PRIVILEGES*>(previous),0,nullptr,nullptr);
+        }
+    };
+    struct RegistrationValue {
+        std::wstring key, name;
+        bool exists=false;
+        DWORD type=REG_NONE;
+        std::vector<BYTE> data;
+    };
+    [[nodiscard]] LONG ReadRegistrationValue(RegistrationValue& value) {
         wil::unique_hkey key;
-        LONG status = tryOpen(KEY_SET_VALUE, key);
-        if (status != ERROR_SUCCESS)
-        {
-            EnablePrivilege(SE_TAKE_OWNERSHIP_NAME);
-            EnablePrivilege(SE_RESTORE_NAME);
-
-            // WRP: KEY_SET_VALUE|WRITE_DAC вместе часто дают 5. Сначала ownership, потом DACL.
-            status = tryOpen(WRITE_OWNER, key);
-            if (status != ERROR_SUCCESS)
-                return HRESULT_FROM_WIN32(status);
-
-            if (!SetKeyOwnerAdministrators(key.get()))
-                return HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED);
-            key.reset();
-
-            status = tryOpen(KEY_READ | WRITE_DAC, key);
-            if (status != ERROR_SUCCESS)
-                return HRESULT_FROM_WIN32(status);
-
-            if (!AllowAdministratorsSetValue(key.get()))
-                return HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED);
-            key.reset();
-
-            status = tryOpen(KEY_SET_VALUE, key);
-            if (status != ERROR_SUCCESS)
-                return HRESULT_FROM_WIN32(status);
+        LONG rc=RegOpenKeyExW(HKEY_LOCAL_MACHINE,value.key.c_str(),0,KEY_QUERY_VALUE|KEY_WOW64_64KEY,&key);
+        if (rc==ERROR_ACCESS_DENIED) {
+            DWORD disposition=0;
+            rc=RegCreateKeyExW(HKEY_LOCAL_MACHINE,value.key.c_str(),0,nullptr,REG_OPTION_BACKUP_RESTORE,
+                0,nullptr,&key,&disposition);
         }
-
-        const DWORD bytes = static_cast<DWORD>((wcslen(expandValue) + 1) * sizeof(wchar_t));
-        status = RegSetValueExW(
-            key.get(),
-            nullptr,
-            0,
-            REG_EXPAND_SZ,
-            reinterpret_cast<const BYTE*>(expandValue),
-            bytes);
-        return HRESULT_FROM_WIN32(status);
+        value.exists=false; value.data.clear(); value.type=REG_NONE;
+        if (rc==ERROR_FILE_NOT_FOUND) return ERROR_SUCCESS;
+        if (rc!=ERROR_SUCCESS) return rc;
+        DWORD bytes=0;
+        rc=RegQueryValueExW(key.get(),value.name.c_str(),nullptr,&value.type,nullptr,&bytes);
+        if (rc==ERROR_FILE_NOT_FOUND) return ERROR_SUCCESS;
+        if (rc!=ERROR_SUCCESS || bytes>65536) return rc==ERROR_SUCCESS?ERROR_INVALID_DATA:rc;
+        value.data.resize(bytes);
+        rc=RegQueryValueExW(key.get(),value.name.c_str(),nullptr,&value.type,value.data.data(),&bytes);
+        if (rc==ERROR_SUCCESS) { value.exists=true; value.data.resize(bytes); }
+        return rc;
     }
-
-    [[nodiscard]] HRESULT SetAllInProcDefaults(const wchar_t* expandValue) noexcept
-    {
-        HRESULT firstFail = S_OK;
-        for (const wchar_t* key : kInProcKeysNative)
-        {
-            const HRESULT hr = SetInProcDefault(key, expandValue);
-            if (FAILED(hr) && firstFail == S_OK)
-                firstFail = hr;
-        }
-        if (IsNative64())
-        {
-            for (const wchar_t* key : kInProcKeysWow)
-            {
-                const HRESULT hr = SetInProcDefault(key, expandValue);
-                if (FAILED(hr) && firstFail == S_OK)
-                    firstFail = hr;
+    [[nodiscard]] bool SameRegistrationValue(const RegistrationValue& a,const RegistrationValue& b) {
+        return a.exists==b.exists && (!a.exists || (a.type==b.type && a.data==b.data));
+    }
+    [[nodiscard]] LONG WriteRegistrationValue(const RegistrationValue& value) {
+        wil::unique_hkey key; DWORD disposition=0;
+        const LONG rc=RegCreateKeyExW(HKEY_LOCAL_MACHINE,value.key.c_str(),0,nullptr,REG_OPTION_BACKUP_RESTORE,
+            0,nullptr,&key,&disposition);
+        if (rc!=ERROR_SUCCESS) return rc;
+        if (value.exists) return RegSetValueExW(key.get(),value.name.c_str(),0,value.type,
+            value.data.data(),static_cast<DWORD>(value.data.size()));
+        const LONG removed=RegDeleteValueW(key.get(),value.name.c_str());
+        return removed==ERROR_FILE_NOT_FOUND?ERROR_SUCCESS:removed;
+    }
+    [[nodiscard]] bool RegistrationString(const RegistrationValue& value,std::wstring& text) {
+        text.clear(); if (!value.exists) return true;
+        if ((value.type!=REG_SZ && value.type!=REG_EXPAND_SZ) || value.data.size()<sizeof(wchar_t) ||
+            value.data.size()%sizeof(wchar_t)) return false;
+        const auto* data=reinterpret_cast<const wchar_t*>(value.data.data());
+        const auto count=value.data.size()/sizeof(wchar_t);
+        if (data[count-1]) return false;
+        text.assign(data,count-1); return text.find(L'\0')==std::wstring::npos;
+    }
+    void SetRegistrationString(RegistrationValue& value,const std::wstring& text,DWORD type=REG_SZ) {
+        value.exists=!text.empty(); value.type=type;
+        const auto* begin=reinterpret_cast<const BYTE*>(text.c_str());
+        value.data.assign(begin,begin+(text.size()+1)*sizeof(wchar_t));
+    }
+    [[nodiscard]] bool KnownComPath(const std::wstring& value,const wchar_t* file) {
+        wchar_t expanded[32768]{};
+        const DWORD n=ExpandEnvironmentStringsW(value.c_str(),expanded,_countof(expanded));
+        return n && n<=_countof(expanded) && _wcsicmp(expanded,JoinPath(NativeSystem32(),file).c_str())==0;
+    }
+    [[nodiscard]] HRESULT ToggleRegistration(bool enable) {
+        RegistrationPrivileges privileges;
+        if (!privileges.ready) return HRESULT_FROM_WIN32(ERROR_PRIVILEGE_NOT_HELD);
+        wil::unique_handle mutex(CreateMutexW(nullptr,FALSE,L"Global\\GlassSettings.SecureUxThemeRegistration"));
+        if (!mutex) return HRESULT_FROM_WIN32(GetLastError());
+        const DWORD wait=WaitForSingleObject(mutex.get(),10000);
+        if (wait!=WAIT_OBJECT_0 && wait!=WAIT_ABANDONED) return HRESULT_FROM_WIN32(ERROR_BUSY);
+        auto unlock=wil::scope_exit([&]{ReleaseMutex(mutex.get());});
+        struct Change { RegistrationValue before, after; };
+        std::vector<Change> changes;
+        auto queue=[&](RegistrationValue before,RegistrationValue after) {
+            if (!SameRegistrationValue(before,after)) changes.push_back({std::move(before),std::move(after)});
+        };
+        // Snapshot and validate every target before the first write. Refuse a
+        // foreign COM server, an unknown value type or an unreadable target.
+        for (const auto* keys:{&kInProcKeysNative,&kInProcKeysWow}) {
+            if (keys==&kInProcKeysWow && !IsNative64()) continue;
+            for (const wchar_t* path:*keys) {
+                RegistrationValue before; before.key=path;
+                LONG rc=ReadRegistrationValue(before);
+                if (rc!=ERROR_SUCCESS) return HRESULT_FROM_WIN32(rc);
+                if (!before.exists && !enable) continue;
+                std::wstring text;
+                if (!before.exists || !RegistrationString(before,text) ||
+                    (!KnownComPath(text,L"themeui.dll") && !KnownComPath(text,kProxyDllName)))
+                    return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                auto after=before; SetRegistrationString(after,enable?kInProcProxy:kInProcThemeUi,REG_EXPAND_SZ);
+                queue(before,after);
             }
         }
-        return firstFail;
-    }
-
-    [[nodiscard]] HRESULT RunHiddenProcess(const std::wstring& application, std::wstring commandLine) noexcept
-    {
-        STARTUPINFOW si{};
-        si.cb = sizeof(si);
-        si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
-        PROCESS_INFORMATION pi{};
-        if (!CreateProcessW(
-                application.c_str(),
-                commandLine.data(),
-                nullptr,
-                nullptr,
-                FALSE,
-                CREATE_NO_WINDOW,
-                nullptr,
-                nullptr,
-                &si,
-                &pi))
-        {
-            return HRESULT_FROM_WIN32(GetLastError());
-        }
-
-        wil::unique_handle process(pi.hProcess);
-        wil::unique_handle thread(pi.hThread);
-        WaitForSingleObject(process.get(), 30000);
-        DWORD code = 0;
-        if (!GetExitCodeProcess(process.get(), &code))
-            return HRESULT_FROM_WIN32(GetLastError());
-        return code == 0 ? S_OK : HRESULT_FROM_WIN32(code);
-    }
-
-    [[nodiscard]] std::wstring SchtasksPath() noexcept
-    {
-        return JoinPath(NativeSystem32(), L"schtasks.exe");
-    }
-
-    [[nodiscard]] HRESULT RunSchtasks(const wchar_t* arguments) noexcept
-    {
-        if (!arguments)
-            return E_INVALIDARG;
-        const auto exe = SchtasksPath();
-        std::wstring cmd = L"\"";
-        cmd += exe;
-        cmd += L"\" ";
-        cmd += arguments;
-        Wow64FsRedirectGuard guard;
-        return RunHiddenProcess(exe, std::move(cmd));
-    }
-
-    [[nodiscard]] std::wstring CleanupScriptPath() noexcept
-    {
-        wchar_t temp[MAX_PATH]{};
-        const DWORD n = GetTempPathW(MAX_PATH, temp);
-        if (n == 0 || n >= MAX_PATH)
-            return {};
-        std::wstring path = temp;
-        if (!path.empty() && path.back() != L'\\' && path.back() != L'/')
-            path += L'\\';
-        path += kCleanupScriptName;
-        return path;
-    }
-
-    void CancelFileCleanup() noexcept
-    {
-        const auto script = CleanupScriptPath();
-        if (!script.empty())
-            DeleteFileW(script.c_str());
-        (void)RunSchtasks(L"/Delete /TN \"GlassSettings\\SecureUxThemeCleanup\" /F");
-
-        GlassShared::TaskSchedulerCom ts;
-        if (ts.Connect())
-            (void)ts.DeleteRootSubfolder(L"GlassSettings");
-    }
-
-    [[nodiscard]] bool IsCleanupTaskPending() noexcept
-    {
-        GlassShared::TaskSchedulerCom ts;
-        if (!ts.Connect())
-            return false;
-        return ts.TaskExists(L"GlassSettings", L"SecureUxThemeCleanup");
-    }
-
-    [[nodiscard]] HRESULT ScheduleFileCleanup() noexcept
-    {
-        const auto script = CleanupScriptPath();
-        if (script.empty())
-            return HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
-
-        static constexpr char kScript[] =
-            "@echo off\r\n"
-            "del /f /q \"%SystemRoot%\\System32\\SecureUxTheme4.dll\" >nul 2>&1\r\n"
-            "del /f /q \"%SystemRoot%\\System32\\ThemeUiProxy.dll\" >nul 2>&1\r\n"
-            "if exist \"%SystemRoot%\\SysWOW64\\ThemeUiProxy.dll\" "
-            "del /f /q \"%SystemRoot%\\SysWOW64\\ThemeUiProxy.dll\" >nul 2>&1\r\n"
-            "schtasks /Delete /TN \"GlassSettings\\SecureUxThemeCleanup\" /F >nul 2>&1\r\n"
-            "powershell -NoProfile -Command \"try { $s=New-Object -ComObject Schedule.Service; $s.Connect(); $s.GetFolder('\\').DeleteFolder('GlassSettings', $null) } catch {}\" >nul 2>&1\r\n"
-            "del \"%~f0\"\r\n";
-
-        {
-            Wow64FsRedirectGuard guard;
-            const wil::unique_hfile file(CreateFileW(
-                script.c_str(),
-                GENERIC_WRITE,
-                0,
-                nullptr,
-                CREATE_ALWAYS,
-                FILE_ATTRIBUTE_NORMAL,
-                nullptr));
-            if (!file)
-                return HRESULT_FROM_WIN32(GetLastError());
-            DWORD written = 0;
-            const DWORD bytes = static_cast<DWORD>(sizeof(kScript) - 1);
-            if (!WriteFile(file.get(), kScript, bytes, &written, nullptr) || written != bytes)
-                return HRESULT_FROM_WIN32(GetLastError());
-        }
-
-        std::wstring args = L"/Create /TN \"GlassSettings\\SecureUxThemeCleanup\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F /TR \"";
-        args += script;
-        args += L"\"";
-        const HRESULT hr = RunSchtasks(args.c_str());
-        if (FAILED(hr))
-            DeleteFileW(script.c_str());
-        return hr;
-    }
-
-    [[nodiscard]] HRESULT CopyRenamed(
-        const std::wstring& src,
-        const std::wstring& dest,
-        bool& existed) noexcept
-    {
-        existed = FileExistsNative(dest);
-        Wow64FsRedirectGuard guard;
-        if (!CopyFileW(src.c_str(), dest.c_str(), FALSE))
-        {
-            const DWORD err = GetLastError();
-            // Уже в System32: winlogon держит файл (официальный leftover / наш патчер) или WRP ACL.
-            // Перезапись не нужна — те же имена SecureUxTheme4.dll / ThemeUiProxy.dll.
-            if (existed
-                && (err == ERROR_SHARING_VIOLATION
-                    || err == ERROR_LOCK_VIOLATION
-                    || err == ERROR_ACCESS_DENIED))
-            {
-                return S_OK;
+        for (const wchar_t* exe:{L"winlogon.exe",L"explorer.exe",L"SystemSettings.exe",L"LogonUI.exe",L"dwm.exe"}) {
+            if (enable && _wcsicmp(exe,L"winlogon.exe")) continue;
+            RegistrationValue dlls; dlls.key=IfeoSubkey(exe); dlls.name=L"VerifierDlls";
+            LONG rc=ReadRegistrationValue(dlls); if (rc!=ERROR_SUCCESS) return HRESULT_FROM_WIN32(rc);
+            std::wstring text; if (!RegistrationString(dlls,text)) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+            if (!enable && !VerifierHasToken(text.c_str(),kOurDllName)) continue;
+            RegistrationValue flags; flags.key=dlls.key; flags.name=L"GlobalFlag";
+            rc=ReadRegistrationValue(flags); if (rc!=ERROR_SUCCESS) return HRESULT_FROM_WIN32(rc);
+            DWORD bits=0;
+            if (flags.exists) {
+                if (flags.type!=REG_DWORD || flags.data.size()!=sizeof(bits)) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                memcpy(&bits,flags.data.data(),sizeof(bits));
             }
-            return HRESULT_FROM_WIN32(err);
+            auto nextDlls=dlls, nextFlags=flags;
+            text=enable?AddVerifierToken(text.c_str(),kOurDllName):RemoveVerifierToken(text.c_str(),kOurDllName);
+            SetRegistrationString(nextDlls,text,dlls.exists?dlls.type:REG_SZ);
+            if (enable) bits|=kFlgApplicationVerifier;
+            else if (text.empty()) bits&=~kFlgApplicationVerifier;
+            nextFlags.exists=bits!=0; nextFlags.type=REG_DWORD;
+            nextFlags.data.resize(sizeof(bits)); memcpy(nextFlags.data.data(),&bits,sizeof(bits));
+            queue(dlls,nextDlls); queue(flags,nextFlags);
+        }
+        size_t applied=0; LONG error=ERROR_SUCCESS;
+        try { for (;applied<changes.size();++applied) {
+            auto current=changes[applied].before;
+            error=ReadRegistrationValue(current);
+            if (error==ERROR_SUCCESS && !SameRegistrationValue(current,changes[applied].before)) error=ERROR_RETRY;
+            if (error==ERROR_SUCCESS) error=WriteRegistrationValue(changes[applied].after);
+            if (error!=ERROR_SUCCESS) break;
+        }
+        if (error==ERROR_SUCCESS) {
+            for (const auto& change:changes) {
+                auto current=change.after;
+                error=ReadRegistrationValue(current);
+                if (error==ERROR_SUCCESS && !SameRegistrationValue(current,change.after)) error=ERROR_RETRY;
+                if (error!=ERROR_SUCCESS) break;
+            }
+        }
+        } catch (...) { error=ERROR_NOT_ENOUGH_MEMORY; }
+        if (error!=ERROR_SUCCESS) {
+            bool restored=true;
+            while (applied) {
+                auto& change=changes[--applied];
+                try {
+                    auto current=change.after;
+                    if (ReadRegistrationValue(current)!=ERROR_SUCCESS || !SameRegistrationValue(current,change.after) ||
+                        WriteRegistrationValue(change.before)!=ERROR_SUCCESS) restored=false;
+                } catch (...) { restored=false; }
+            }
+            if (!restored) DebugLog(DBG_ERROR,L"[SecureUxTheme] registration rollback incomplete; inspect IFEO/COM before reboot");
+            return HRESULT_FROM_WIN32(restored?error:ERROR_TRANSACTIONAL_CONFLICT);
         }
         return S_OK;
     }
+
 }
 
 extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeQuery(
@@ -876,18 +548,13 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeQuery(
     out->SystemDll4Present = FileExistsNative(systemDll4) ? TRUE : FALSE;
     out->SystemLegacyDllPresent = FileExistsNative(systemLegacy) ? TRUE : FALSE;
     out->ThemeUiProxyPresent = FileExistsNative(proxy) ? TRUE : FALSE;
-    out->LoadedEventPresent = LoadedEventPresent() ? TRUE : FALSE;
+    out->LoadedEventPresent = (LoadedEventPresent() || g_loadedPatcher) ? TRUE : FALSE;
 
-    const auto folder = ResolvePayloadFolder(nullptr);
-    CopyW(out->LocalDllPath, _countof(out->LocalDllPath), folder.c_str());
-
-    std::wstring patcherSrc;
-    std::wstring proxyNativeSrc;
-    const bool complete = PayloadComplete(folder, patcherSrc, proxyNativeSrc);
-    out->LocalDllPresent = complete ? TRUE : FALSE;
-    if (complete)
+    CopyW(out->LocalDllPath, _countof(out->LocalDllPath), systemDll4.c_str());
+    out->LocalDllPresent = out->SystemDll4Present;
+    if (out->SystemDll4Present)
     {
-        out->LocalDllMachine = ReadPeMachine(patcherSrc);
+        out->LocalDllMachine = ReadPeMachine(systemDll4);
         out->LocalDllArchMatchesOs =
             (out->LocalDllMachine != 0 && out->LocalDllMachine == nativeMachine) ? TRUE : FALSE;
     }
@@ -896,26 +563,26 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeQuery(
     ReadIfeo(L"winlogon.exe", out->WinlogonGlobalFlag, winlogonDlls, _countof(winlogonDlls));
     CopyW(out->WinlogonVerifierDlls, _countof(out->WinlogonVerifierDlls), winlogonDlls);
     out->WinlogonHasOurToken = VerifierHasToken(winlogonDlls, kOurDllName) ? TRUE : FALSE;
-    out->WinlogonHasLegacyExact = VerifierExact(winlogonDlls, kLegacyDllName) ? TRUE : FALSE;
+    out->WinlogonHasLegacyExact = VerifierHasToken(winlogonDlls, kLegacyDllName) ? TRUE : FALSE;
 
     wchar_t explorerDlls[512]{};
     ReadIfeo(L"explorer.exe", out->ExplorerGlobalFlag, explorerDlls, _countof(explorerDlls));
-    out->ExplorerHasLegacyExact = VerifierExact(explorerDlls, kLegacyDllName) ? TRUE : FALSE;
+    out->ExplorerHasLegacyExact = VerifierHasToken(explorerDlls, kLegacyDllName) ? TRUE : FALSE;
 
     wchar_t settingsDlls[512]{};
     ReadIfeo(L"SystemSettings.exe", out->SettingsGlobalFlag, settingsDlls, _countof(settingsDlls));
-    out->SettingsHasLegacyExact = VerifierExact(settingsDlls, kLegacyDllName) ? TRUE : FALSE;
+    out->SettingsHasLegacyExact = VerifierHasToken(settingsDlls, kLegacyDllName) ? TRUE : FALSE;
 
     wchar_t logonUiDlls[512]{};
     ReadIfeo(L"LogonUI.exe", out->LogonUiGlobalFlag, logonUiDlls, _countof(logonUiDlls));
-    out->LogonUiHasLegacyExact = VerifierExact(logonUiDlls, kLegacyDllName) ? TRUE : FALSE;
+    out->LogonUiHasLegacyExact = VerifierHasToken(logonUiDlls, kLegacyDllName) ? TRUE : FALSE;
 
     wchar_t dwmDlls[512]{};
     ReadIfeo(L"dwm.exe", out->DwmGlobalFlag, dwmDlls, _countof(dwmDlls));
-    out->DwmHasLegacyExact = VerifierExact(dwmDlls, kLegacyDllName) ? TRUE : FALSE;
+    out->DwmHasLegacyExact = VerifierHasToken(dwmDlls, kLegacyDllName) ? TRUE : FALSE;
 
     out->ComProxyHijacked = ComProxyHijacked() ? TRUE : FALSE;
-    out->OfficialMsiPresent = OfficialV4ProductKeyPresent() ? TRUE : FALSE;
+    out->OfficialMsiPresent = OfficialMsiProductPresent() ? TRUE : FALSE;
     return S_OK;
 }
 
@@ -923,139 +590,59 @@ extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeActivate(
     const wchar_t* payloadFolder, BOOL reactivate) noexcept
 {
     if (IsWow64ProcessNow())
-        return HRESULT_FROM_WIN32(ERROR_INSTALL_WRONG_PROCESSOR_ARCHITECTURE);
+        return HRESULT_FROM_WIN32(ERROR_INSTALL_PLATFORM_UNSUPPORTED);
 
     const USHORT nativeMachine = QueryNativeMachine();
     if (nativeMachine != IMAGE_FILE_MACHINE_AMD64 && nativeMachine != IMAGE_FILE_MACHINE_I386)
-        return HRESULT_FROM_WIN32(ERROR_INSTALL_WRONG_PROCESSOR_ARCHITECTURE);
+        return HRESULT_FROM_WIN32(ERROR_INSTALL_PLATFORM_UNSUPPORTED);
 
-    if (reactivate)
-    {
-        CancelFileCleanup();
-
-        DWORD globalFlag = 0;
-        wchar_t verifier[512]{};
-        ReadIfeo(L"winlogon.exe", globalFlag, verifier, _countof(verifier));
-        const auto nextList = AddVerifierToken(verifier, kOurDllName);
-        globalFlag |= kFlgApplicationVerifier;
-        const HRESULT hr = WriteIfeo(L"winlogon.exe", globalFlag, nextList.c_str());
-        if (FAILED(hr))
-            return hr;
-
-        (void)SetAllInProcDefaults(kInProcProxy);
-        return S_OK;
-    }
-
-    const auto folder = ResolvePayloadFolder(payloadFolder);
-    std::wstring patcherSrc;
-    std::wstring proxyNativeSrc;
-    if (!PayloadComplete(folder, patcherSrc, proxyNativeSrc))
-        return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
-
-    if (ReadPeMachine(patcherSrc) != static_cast<int>(nativeMachine))
-        return HRESULT_FROM_WIN32(ERROR_INSTALL_WRONG_PROCESSOR_ARCHITECTURE);
-
-    CancelFileCleanup();
-
-    const auto system32 = NativeSystem32();
-    const auto destPatcher = JoinPath(system32, kOurDllName);
-    const auto destProxy = JoinPath(system32, kProxyDllName);
-    bool patcherExisted = false;
-    bool proxyExisted = false;
-
-    HRESULT hr = CopyRenamed(patcherSrc, destPatcher, patcherExisted);
-    if (FAILED(hr))
-        return hr;
-    hr = CopyRenamed(proxyNativeSrc, destProxy, proxyExisted);
-    if (FAILED(hr))
-    {
-        if (!patcherExisted)
-        {
-            Wow64FsRedirectGuard guard;
-            DeleteFileW(destPatcher.c_str());
-        }
-        return hr;
-    }
-
-    DWORD globalFlag = 0;
-    wchar_t verifier[512]{};
-    ReadIfeo(L"winlogon.exe", globalFlag, verifier, _countof(verifier));
-    const auto nextList = AddVerifierToken(verifier, kOurDllName);
-    globalFlag |= kFlgApplicationVerifier;
-    hr = WriteIfeo(L"winlogon.exe", globalFlag, nextList.c_str());
-    if (FAILED(hr))
-    {
-        Wow64FsRedirectGuard guard;
-        if (!patcherExisted)
-            DeleteFileW(destPatcher.c_str());
-        if (!proxyExisted)
-            DeleteFileW(destProxy.c_str());
-        return hr;
-    }
-
-    (void)SetAllInProcDefaults(kInProcProxy);
-    return S_OK;
-}
-
-[[nodiscard]] bool TryDeleteSystemFiles() noexcept
-{
-    const auto system32 = NativeSystem32();
-    if (system32.empty())
-        return false;
-
-    const auto patcherPath = JoinPath(system32, kOurDllName);
-    const auto proxyPath = JoinPath(system32, kProxyDllName);
-
-    bool allDeleted = true;
-    {
-        Wow64FsRedirectGuard guard;
-
-        if (FileExistsNative(patcherPath) && !DeleteFileW(patcherPath.c_str()))
-            allDeleted = false;
-
-        if (FileExistsNative(proxyPath) && !DeleteFileW(proxyPath.c_str()))
-            allDeleted = false;
-
-        const auto syswow64 = NativeSysWow64();
-        if (!syswow64.empty())
-        {
-            const auto proxyWowPath = JoinPath(syswow64, kProxyDllName);
-            if (FileExistsNative(proxyWowPath) && !DeleteFileW(proxyWowPath.c_str()))
-                allDeleted = false;
+    (void)payloadFolder; (void)reactivate;
+    GlassSettings_SecureUxThemeNativeQuery before{};
+    const HRESULT queried=GlassSettings_SecureUxThemeQuery(&before);
+    if (FAILED(queried)) return queried;
+    if (HasUnsupportedLegacySecureUxTheme(before)) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+    const auto system=NativeSystem32();
+    std::vector<wil::unique_hfile> modules;
+    auto lockModule=[&](const std::wstring& path)->HRESULT {
+        wil::unique_hfile handle(CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT,nullptr));
+        if (!handle) return HRESULT_FROM_WIN32(GetLastError());
+        BY_HANDLE_FILE_INFORMATION info{};
+        if (!GetFileInformationByHandle(handle.get(),&info)) return HRESULT_FROM_WIN32(GetLastError());
+        if (info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+        modules.push_back(std::move(handle)); return S_OK;
+    };
+    try {
+    for (const wchar_t* file:{kOurDllName,kProxyDllName}) {
+        const auto path=JoinPath(system,file);
+        const HRESULT locked=lockModule(path); if (FAILED(locked)) return locked;
+        if (ReadPeMachine(path)!=nativeMachine) return HRESULT_FROM_WIN32(ERROR_BAD_EXE_FORMAT);
+        if (IsNative64()) {
+            const auto wow=JoinPath(NativeSysWow64(),file);
+            const HRESULT lockedWow=lockModule(wow); if (FAILED(lockedWow)) return lockedWow;
+            if (ReadPeMachine(wow)!=IMAGE_FILE_MACHINE_I386)
+                return HRESULT_FROM_WIN32(ERROR_BAD_EXE_FORMAT);
         }
     }
-    return allDeleted;
+    return ToggleRegistration(true);
+    } catch (...) { return E_OUTOFMEMORY; }
 }
 
+// Registration only. Files, MSI registration and source cache remain untouched.
 extern "C" HRESULT WINAPI GlassSettings_SecureUxThemeDeactivate() noexcept
 {
-    if (IsWow64ProcessNow())
-        return HRESULT_FROM_WIN32(ERROR_INSTALL_WRONG_PROCESSOR_ARCHITECTURE);
-
-    if (g_loadedPatcher)
-    {
-        FreeLibrary(g_loadedPatcher);
-        g_loadedPatcher = nullptr;
+    if (IsWow64ProcessNow()) return HRESULT_FROM_WIN32(ERROR_INSTALL_PLATFORM_UNSUPPORTED);
+    GlassSettings_SecureUxThemeNativeQuery query{};
+    const HRESULT queried=GlassSettings_SecureUxThemeQuery(&query);
+    if (FAILED(queried)) return queried;
+    if (HasUnsupportedLegacySecureUxTheme(query)) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+    if (query.WinlogonHasOurToken || query.LoadedEventPresent ||
+        (query.ComProxyHijacked && query.SystemDll4Present)) {
+        if (Shared::SystemVisualStyle::CurrentForMaintenance()!=Shared::SystemVisualStyle::State::Stock)
+            return HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
     }
-
-    DWORD globalFlag = 0;
-    wchar_t verifier[512]{};
-    ReadIfeo(L"winlogon.exe", globalFlag, verifier, _countof(verifier));
-    const auto nextList = RemoveVerifierToken(verifier, kOurDllName);
-    if (nextList.empty())
-        globalFlag &= ~kFlgApplicationVerifier;
-
-    const HRESULT ifeoHr = WriteIfeo(L"winlogon.exe", globalFlag, nextList.c_str());
-    if (FAILED(ifeoHr))
-        return ifeoHr;
-    const HRESULT comHr = SetAllInProcDefaults(kInProcThemeUi);
-    if (FAILED(comHr))
-        return comHr;
-
-    if (TryDeleteSystemFiles())
-        return S_OK;
-
-    return ScheduleFileCleanup();
+    try { return ToggleRegistration(false); }
+    catch (...) { return E_OUTOFMEMORY; }
 }
 
 extern "C" BOOL WINAPI GlassSettings_SecureUxThemeEnsureLoaded() noexcept
@@ -1063,6 +650,9 @@ extern "C" BOOL WINAPI GlassSettings_SecureUxThemeEnsureLoaded() noexcept
     if (g_loadedPatcher)
         return TRUE;
 
+    GlassSettings_SecureUxThemeNativeQuery query{};
+    if (FAILED(GlassSettings_SecureUxThemeQuery(&query)) || !query.WinlogonHasOurToken ||
+        !(query.WinlogonGlobalFlag&kFlgApplicationVerifier) || !query.ComProxyHijacked) return FALSE;
     const auto path = NativeSystem32() + L"\\" + kOurDllName;
     Wow64FsRedirectGuard guard;
     g_loadedPatcher = LoadLibraryW(path.c_str());
@@ -1071,12 +661,12 @@ extern "C" BOOL WINAPI GlassSettings_SecureUxThemeEnsureLoaded() noexcept
 
 extern "C" BOOL WINAPI GlassSettings_SecureUxThemeCheckCleanupPending() noexcept
 {
-    return IsCleanupTaskPending() ? TRUE : FALSE;
+    return FALSE;
 }
 
 extern "C" BOOL WINAPI GlassSettings_SecureUxThemeTryDeleteSystemFiles() noexcept
 {
-    return TryDeleteSystemFiles() ? TRUE : FALSE;
+    return FALSE; // MSI owns these files; never delete them outside its transaction.
 }
 
 namespace
@@ -1095,13 +685,11 @@ namespace
     constexpr DWORD kSecureUxStateExternal = 5u;
     constexpr DWORD kSecureUxStateConflict = 6u;
 
-    // Официальные установки SecureUxTheme (MSI v4 или старые хуки) своими файлами и
-    // ключами управляет сам продукт — деактивация GlassSettings их не трогает.
-    [[nodiscard]] bool IsExternalSecureUxTheme(
+    // Only incompatible pre-v4 installations remain excluded. An official v4
+    // MSI installed outside GlassSetup is managed exactly like any other v4.
+    [[nodiscard]] bool HasUnsupportedLegacySecureUxTheme(
         const GlassSettings_SecureUxThemeNativeQuery& q) noexcept
     {
-        if (q.OfficialMsiPresent || q.SystemLegacyDllPresent)
-            return true;
         const auto legacyHook = [](DWORD globalFlag, BOOL exact) noexcept {
             return exact != FALSE && (globalFlag & kFlgApplicationVerifier) != 0;
         };
@@ -1112,65 +700,22 @@ namespace
             || legacyHook(q.DwmGlobalFlag, q.DwmHasLegacyExact);
     }
 
-    [[nodiscard]] bool IsStockStyleName(const wchar_t* path) noexcept
-    {
-        std::wstring name = path ? path : L"";
-        const auto slash = name.find_last_of(L"\\/");
-        if (slash != std::wstring::npos)
-            name = name.substr(slash + 1);
-        return _wcsicmp(name.c_str(), L"aero.msstyles") == 0
-            || _wcsicmp(name.c_str(), L"aerolite.msstyles") == 0;
-    }
-
-    // Активен ли пользовательский визуальный стиль (не aero/aerolite), как
-    // VisualStyleCatalog.IsCustomVisualStylePath в GlassSettings.
-    [[nodiscard]] bool CustomVisualStyleActive() noexcept
-    {
-        wchar_t value[MAX_PATH]{};
-        DWORD size = sizeof(value);
-        if (::RegGetValueW(
-                HKEY_CURRENT_USER,
-                L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager",
-                L"DllName",
-                RRF_RT_REG_SZ,
-                nullptr,
-                value,
-                &size) != ERROR_SUCCESS)
-            return false;
-        return value[0] && !IsStockStyleName(value) && FileExistsNative(value);
-    }
-
     // Возврат к стандартному стилю до снятия обхода подписи — иначе после перезагрузки
     // пользовательский .msstyles не пройдёт проверку подписи (parity с toggle-off GS).
     [[nodiscard]] bool ApplyStockVisualStyle() noexcept
     {
-        wchar_t windows[MAX_PATH]{};
-        if (GetWindowsDirectoryW(windows, MAX_PATH) == 0)
-            return false;
-        const std::wstring stock = JoinPath(windows, L"Resources\\Themes\\Aero\\aero.msstyles");
-        if (!FileExistsNative(stock))
-            return false;
-        DWORD fonts = 0;
-        DWORD size = sizeof(fonts);
-        (void)::RegGetValueW(
-            HKEY_CURRENT_USER,
-            L"Software\\StanislavKa\\GlassPlatform\\GlassSettings",
-            L"EnableSystemFont",
-            RRF_RT_REG_DWORD,
-            nullptr,
-            &fonts,
-            &size);
-        return SUCCEEDED(Shared::ThemeHelper::SetSystemVisualStyle(
-            stock.c_str(), L"NormalColor", L"NormalSize", fonts ? 65 : 0));
+        NativeStockVisualStyle::Result result{};
+        const HRESULT hr=NativeStockVisualStyle::Apply(result);
+        DebugLog(DBG_NORMAL,L"[GlassSettings][SecureUxTheme] stock theme: hr=0x%08lX COM=0x%08lX force=0x%08lX font=0x%08lX read=0x%08lX verified=%d",
+            static_cast<unsigned long>(hr),static_cast<unsigned long>(result.comHr),static_cast<unsigned long>(result.forceHr),static_cast<unsigned long>(result.fontHr),static_cast<unsigned long>(result.readHr),result.verified?1:0);
+        return SUCCEEDED(hr)&&result.verified;
     }
 }
 
-// Точка входа GlassUnins (rundll32, разрядность ОС): деактивирует SecureUxTheme так же,
-// как это делает GlassSettings — сначала возвращает стандартный визуальный стиль, если
-// активен пользовательский, затем выполняет единую деактивацию
-// GlassSettings_SecureUxThemeDeactivate.
+// Legacy GlassUnins entry: stock-style preparation only. The explicit Settings
+// toggle uses GlassSettings_SecureUxThemeDeactivate separately. MSI owns removal.
 // Биты кода выхода: 1 — неверные аргументы; 2 — нужна перезагрузка (отложена очистка
-// файлов); 4 — стандартный стиль не восстановлен (деактивация выполнена); 8 —
+// файлов); 4 — стандартный стиль не подтверждён (hook сохранён); 8 —
 // деактивация не удалась; 16 — установлен внешний SecureUxTheme, ничего не изменено.
 extern "C" void CALLBACK GlassSettings_SecureUxThemeSetupV1W(
     HWND, HINSTANCE, LPWSTR cmdLine, int) noexcept
@@ -1186,32 +731,64 @@ extern "C" void CALLBACK GlassSettings_SecureUxThemeSetupV1W(
     GlassSettings_SecureUxThemeNativeQuery query{};
     if (FAILED(GlassSettings_SecureUxThemeQuery(&query)))
         ::ExitProcess(kSecureUxExitDeactivateFailed);
-    if (IsExternalSecureUxTheme(query))
+    if (HasUnsupportedLegacySecureUxTheme(query))
         ::ExitProcess(kSecureUxExitExternalInstall);
 
     DWORD code = 0;
     const bool oursActive = query.WinlogonHasOurToken
-        || query.ComProxyHijacked
         || query.LoadedEventPresent
-        || query.SystemDll4Present
-        || query.ThemeUiProxyPresent;
-    if (oursActive && CustomVisualStyleActive() && !ApplyStockVisualStyle())
+        || (query.ComProxyHijacked && query.SystemDll4Present);
+    const auto style=Shared::SystemVisualStyle::CurrentForMaintenance();
+    if(oursActive&&style==Shared::SystemVisualStyle::State::Unknown) {
+        DebugLog(DBG_ERROR,L"[GlassSettings][SecureUxTheme] active visual style could not be verified; hook retained");
+        ::ExitProcess(kSecureUxExitDeactivateFailed|kSecureUxExitThemeNotRestored);
+    }
+    if (oursActive && style==Shared::SystemVisualStyle::State::ResetRequired &&
+        (!ApplyStockVisualStyle()||Shared::SystemVisualStyle::CurrentForMaintenance()!=Shared::SystemVisualStyle::State::Stock))
     {
         DebugLog(DBG_WARNING,
             L"[GlassSettings][SecureUxTheme] setup: stock visual style could not be applied");
-        code |= kSecureUxExitThemeNotRestored;
+        ::ExitProcess(kSecureUxExitDeactivateFailed | kSecureUxExitThemeNotRestored);
     }
-
-    const HRESULT hr = GlassSettings_SecureUxThemeDeactivate();
-    if (FAILED(hr))
-    {
-        DebugLog(DBG_ERROR,
-            L"[GlassSettings][SecureUxTheme] setup: deactivate failed hr=0x%08lX", hr);
-        ::ExitProcess(kSecureUxExitDeactivateFailed);
-    }
-    if (GlassSettings_SecureUxThemeCheckCleanupPending())
-        code |= kSecureUxExitRebootRequired;
+    // Uninstaller helper prepares style only. MSI may intentionally retain proxy/COM.
+    // Settings toggle-off is a separate explicit registration operation.
     ::ExitProcess(code);
+}
+
+// Versioned contract: prepares only the current visual style, never removes
+// IFEO/COM registrations or system files. Old installed DLLs lack this export.
+extern "C" void CALLBACK GlassSettings_SecureUxThemePrepareRemovalV2W(
+    HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept
+{
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_SecureUxThemePrepareRemovalV2W=_GlassSettings_SecureUxThemePrepareRemovalV2W@16")
+#endif
+    (void)hwnd;(void)instance;(void)show;
+    if(cmdLine&&*cmdLine&&!StockThemeMaintenanceTrace::ValidName(cmdLine))::ExitProcess(static_cast<UINT>(E_INVALIDARG));
+    StockThemeMaintenanceTrace::Writer trace(cmdLine);
+    if(cmdLine&&*cmdLine&&!trace.Ready())::ExitProcess(static_cast<UINT>(HRESULT_FROM_WIN32(ERROR_INVALID_HANDLE)));
+    if(IsWow64ProcessNow())::ExitProcess(static_cast<UINT>(HRESULT_FROM_WIN32(ERROR_INSTALL_PLATFORM_UNSUPPORTED)));
+    GlassSettings_SecureUxThemeNativeQuery query{};
+    const HRESULT queried=GlassSettings_SecureUxThemeQuery(&query);
+    if(FAILED(queried))::ExitProcess(static_cast<UINT>(queried));
+    if(HasUnsupportedLegacySecureUxTheme(query))::ExitProcess(static_cast<UINT>(HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED)));
+    const bool active=query.WinlogonHasOurToken||query.LoadedEventPresent||
+        (query.ComProxyHijacked&&query.SystemDll4Present);
+    if(!active) {
+        StockThemeMaintenanceTrace::Data data{};data.hr=S_OK;trace.Complete(data);
+        ::ExitProcess(0);
+    }
+    NativeStockVisualStyle::Result result{};
+    const HRESULT hr=NativeStockVisualStyle::Apply(result);
+    DebugLog(DBG_NORMAL,L"[GlassSettings][SecureUxTheme] removal theme: hr=0x%08lX COM=0x%08lX force=0x%08lX font=0x%08lX read=0x%08lX verified=%d",
+        static_cast<unsigned long>(hr),static_cast<unsigned long>(result.comHr),static_cast<unsigned long>(result.forceHr),static_cast<unsigned long>(result.fontHr),static_cast<unsigned long>(result.readHr),result.verified?1:0);
+    StockThemeMaintenanceTrace::Data data{};
+    data.active=1;data.hr=hr;data.comHr=result.comHr;data.forceHr=result.forceHr;
+    data.fontHr=result.fontHr;data.readHr=result.readHr;data.verified=result.verified?1:0;
+    trace.Complete(data);
+    // V2's caller accepts only zero; keep V1's legacy bitmask unchanged, but
+    // return the actual HRESULT here instead of collapsing every failure to 0xC.
+    ::ExitProcess(static_cast<UINT>(FAILED(hr)?hr:result.verified?S_OK:HRESULT_FROM_WIN32(ERROR_INVALID_STATE)));
 }
 
 // Небольшие протоколы для карточки SecureUxTheme в GlassSetup/GlassUnins.
@@ -1227,14 +804,14 @@ extern "C" void CALLBACK GlassSettings_SecureUxThemeQueryStateV1W(
     if (IsWow64ProcessNow()) ::ExitProcess(kSecureUxStateConflict);
     GlassSettings_SecureUxThemeNativeQuery q{};
     if (FAILED(GlassSettings_SecureUxThemeQuery(&q))) ::ExitProcess(kSecureUxStateConflict);
-    if (IsExternalSecureUxTheme(q)) ::ExitProcess(kSecureUxStateExternal);
+    if (HasUnsupportedLegacySecureUxTheme(q)) ::ExitProcess(kSecureUxStateExternal);
     const bool ourIfeo=q.WinlogonHasOurToken && (q.WinlogonGlobalFlag&kFlgApplicationVerifier)!=0;
     if (ourIfeo && q.LoadedEventPresent) ::ExitProcess(kSecureUxStateActive);
     if (ourIfeo) ::ExitProcess(kSecureUxStateActivationPending);
     if (q.LoadedEventPresent) ::ExitProcess(kSecureUxStateDeactivationPending);
-    if (q.ComProxyHijacked || q.SystemDll4Present || q.ThemeUiProxyPresent)
-        ::ExitProcess(kSecureUxStateConflict);
-    if (q.LocalDllPresent) ::ExitProcess(kSecureUxStateInactive);
+    // Inert DLLs and the author's permanent proxy after MSI removal are not corruption.
+    if (q.ComProxyHijacked || q.SystemDll4Present || q.ThemeUiProxyPresent || q.OfficialMsiPresent)
+        ::ExitProcess(kSecureUxStateInactive);
     ::ExitProcess(kSecureUxStateUnavailable);
 }
 
@@ -1248,12 +825,8 @@ extern "C" void CALLBACK GlassSettings_SecureUxThemeActivateSetupV1W(
     if (IsWow64ProcessNow()) ::ExitProcess(kSecureUxExitDeactivateFailed);
     GlassSettings_SecureUxThemeNativeQuery before{};
     if (FAILED(GlassSettings_SecureUxThemeQuery(&before))) ::ExitProcess(kSecureUxExitDeactivateFailed);
-    if (IsExternalSecureUxTheme(before)) ::ExitProcess(kSecureUxExitExternalInstall);
-    const HRESULT hr=GlassSettings_SecureUxThemeActivate(nullptr,FALSE);
-    if (FAILED(hr)) {
-        DebugLog(DBG_ERROR,L"[GlassSettings][SecureUxTheme] setup: activate failed hr=0x%08lX",hr);
-        ::ExitProcess(kSecureUxExitDeactivateFailed);
-    }
+    if (HasUnsupportedLegacySecureUxTheme(before)) ::ExitProcess(kSecureUxExitExternalInstall);
+    if (FAILED(GlassSettings_SecureUxThemeActivate(nullptr,FALSE))) ::ExitProcess(kSecureUxExitDeactivateFailed);
     GlassSettings_SecureUxThemeNativeQuery after{};
     if (FAILED(GlassSettings_SecureUxThemeQuery(&after))) ::ExitProcess(kSecureUxExitDeactivateFailed);
     const bool active=after.WinlogonHasOurToken && (after.WinlogonGlobalFlag&kFlgApplicationVerifier)!=0;

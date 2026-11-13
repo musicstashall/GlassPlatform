@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Макеты GlassSetup</title>
+<link rel="icon" href="data:,">
+<style>
+:root{color-scheme:dark;font:14px 'Segoe UI',sans-serif;background:#101222;color:#e8e5f6}
+body{max-width:1160px;margin:28px auto;padding:0 20px}h1{font-size:26px;font-weight:500;margin:0 0 8px}p{color:#b1b4c9;line-height:1.5}
+nav,.controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:18px 0}button,select,a{font:inherit;color:#e2dcff}button,select{border:1px solid #c1b4ff45;background:#22243b;border-radius:8px;padding:8px 12px;cursor:pointer}button:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid #c1b4ff;outline-offset:3px}button[aria-pressed=true]{background:#3b355d}a{padding:8px 0}.frame-wrap{overflow:auto;border:1px solid #c1b4ff35;border-radius:12px;background:#111328}iframe{display:block;width:1000px;height:540px;border:0;margin:auto}#reference{padding:28px}#reference img{max-width:100%;image-rendering:auto}pre{white-space:pre-wrap;color:#a7dddf;font-size:12px;max-height:140px;overflow:auto}small{color:#9ca2ba}[hidden]{display:none!important}
+</style>
+<h1>Макеты GlassSetup</h1>
+<p>Рабочий HTML установщика с демонстрационным host. Кнопки меняют только план: MSI, реестр, службы и платформа не запускаются.</p>
+<nav aria-label="Макеты">
+ <button id="runtime-tab" type="button" aria-pressed="true">Текущий интерфейс · план и карточки</button>
+ <a href="product-maintenance-concepts.html" target="_blank" rel="noopener">Концепции A / B / C ↗</a>
+ <button id="reference-tab" type="button" aria-pressed="false">Предоставленный образец карточки</button>
+</nav>
+<div id="runtime-view">
+ <div class="controls">
+  <label>Режим <select id="app-mode"><option value="setup">Setup</option><option value="unins">Unins</option></select></label>
+  <label>Язык <select id="locale"><option value="ru">Русский</option><option value="en">English</option></select></label>
+  <label>Сценарий <select id="scenario"><option value="updates">Установлены · доступны обновления</option><option value="damaged">Повреждение и обновление</option><option value="fresh">Первая установка</option><option value="removed">Завершено полное удаление</option><option value="empty">Пустые панели</option><option value="checking">Проверка версии Setup</option><option value="sut-local">SecureUxTheme · локальный MSI (демо)</option><option value="sut-release">SecureUxTheme · релиз (демо)</option><option value="sut-active">SUT: активен, удаление заблокировано</option><option value="sut-pending">SUT: ещё не загружен, удаление доступно</option><option value="sut-unloading">SUT: загружен, регистрация отключена</option></select></label>
+  <button id="reset" type="button">Сбросить план</button>
+  <button id="available" type="button">Закрепить / скрыть «Доступно»</button>
+  <button id="plan" type="button">Закрепить / скрыть план</button>
+ </div>
+ <div class="frame-wrap"><iframe id="preview" title="Настоящий HTML GlassSetup с демонстрационным host"></iframe></div>
+ <p><small>Проверка: «Удалить всё» → Installed опустеет, в плане только удаления; × отменяет действие. Жёлтый треугольник открывает предупреждение, Escape закрывает его. Доступные обновления зелёные, повреждения красные; Apply не выбирается автоматически.</small></p>
+ <details><summary>Последние сообщения mock host</summary><pre id="messages"></pre></details>
+ <p id="error" role="alert" hidden></p>
+</div>
+<section id="reference" hidden aria-label="Предоставленный образец"><h2>Образец карточки с предупреждением</h2><img src="warning-card-reference.png" width="263" height="81" alt="Зелёная карточка обновления GlassSettings и жёлтый треугольник в правом верхнем углу"><p>Исходный образец из запроса. В текущем интерфейсе предупреждение открывается отдельным popup по треугольнику и не дублируется в панели плана.</p></section>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);let source='',generation=0;
+const params=new URLSearchParams(location.search);
+for(const id of ['app-mode','locale','scenario'])if([...$(id).options].some(x=>x.value===params.get(id)))$(id).value=params.get(id);
+function mockHostBridge(initial){
+ let receive;const state=initial;
+ const send=()=>{if(receive)receive({data:JSON.parse(JSON.stringify(state))});};
+ const messageLog=message=>{const log=parent.document.getElementById('messages');log.textContent=(log.textContent+'\n'+message).split('\n').slice(-30).join('\n');};
+ window.chrome={webview:{addEventListener(type,callback){if(type==='message')receive=callback;},postMessage(message){
+  if(message==='ready'){queueMicrotask(send);return;}
+  messageLog(message);
+  if(message==='components:select-all')for(const item of state.components){if(item.disabled||item.locked)continue;if(state.appMode==='unins'||item.applySupported!==false){item.checked=true;item.operation=state.appMode==='unins'?'remove':item.baseOperation;}}
+  const match=/^component:([^:]+):(0|1|remove)$/.exec(message);
+  if(match){const item=state.components.find(x=>x.id===match[1]);if(item&&!item.disabled&&!item.locked){
+   const removes=match[2]==='remove';if(!removes||item.removeSupported){item.checked=match[2]!=='0';item.operation=(state.appMode==='unins'&&item.checked||removes)?'remove':item.baseOperation;}
+  }}
+  // WebView messages are asynchronous; preserve this for bulk per-row intents.
+  queueMicrotask(send);
+ }}};
+}
+function fixtureState(){
+ const ru=$('locale').value==='ru',mode=$('app-mode').value,scenario=$('scenario').value;
+ const names=[['x64','GlassPlatform x64'],['x86','GlassPlatform x86'],['settings64','GlassSettings x64'],['settings32','GlassSettings x86'],['openglass','OpenGlass']];
+ const components=names.map(([id,title],i)=>{const installed=scenario!=='fresh';return {id,title,installed,checked:false,installedPackageVersion:installed?'1.4.0':'',installedVersion:installed?'1.4.0':'',targetVersion:'1.5.0',localPackageVersion:'1.4.0',releasePackageVersion:'1.5.0',baseOperation:installed?'update':'install',operation:installed?'update':'install',packageSize:(i<2?12:6)*1048576,removeSupported:installed,applySupported:true,broken:scenario==='damaged'&&id==='settings64',description:ru?'Демонстрационный продукт; системных изменений нет.':'Demonstration product; no system changes.',warning:id==='settings64'?(ru?'Демонстрационное предупреждение: проверяйте совместимость Settings и платформы. Выбор действий остаётся за вами.':'Demonstration warning: check Settings/platform compatibility. Actions remain your choice.'):'',reasons:[]};});
+ if(scenario==='sut-local'||scenario==='sut-release'){
+  const local=scenario==='sut-local';components.splice(0,components.length,{id:'secureUxTheme',title:'SecureUxTheme',installed:false,checked:false,operation:'install',baseOperation:'install',applySupported:true,installedPackageVersion:'',targetVersion:local?'4.0.0':'4.1.0',targetVersionKind:local?'msi':'release',localPackageVersion:local?'4.0.0':'',remoteVersion:'4.1.0',releaseTag:'v4.1.0',packageSize:499712,description:ru?'Демонстрационные версии, не данные текущего релиза.':'Demonstration versions, not current release data.'});
+ }
+ if(['sut-active','sut-pending','sut-unloading'].includes(scenario)){
+  const pending=scenario==='sut-pending';components.splice(0,components.length,{id:'secureUxTheme',title:'SecureUxTheme',installed:true,checked:false,installedPackageVersion:'4.0.0',installedVersion:'4.0.0',operation:'repair',baseOperation:'repair',applySupported:false,removeSupported:pending,description:ru?'Демонстрационное состояние SecureUxTheme; системных изменений нет.':'Demonstration SecureUxTheme state; no system changes.',state:pending?(ru?'Состояние изменится после перезапуска':'State change pending restart'):(ru?'Активен':'Active'),removeBlockedReason:pending?'':scenario==='sut-unloading'?(ru?'Изменение состояния SecureUxTheme ожидает перезагрузки. После перезагрузки требуется повторная проверка.':'A SecureUxTheme state change is pending restart. Inspection must run again after restarting.'):(ru?'SecureUxTheme активен. Безопасное удаление активного компонента в Setup пока не реализовано; изменений не выполнено.':'SecureUxTheme is active. Safe removal of the active component is not yet implemented in Setup; no changes were made.')});
+ }
+ return {type:'state',locale:ru?'ru':'en',appMode:mode,page:scenario==='removed'?'complete':scenario==='checking'?'checking':mode==='unins'?'uninstall-select':'components',maintenance:scenario!=='fresh',components:['removed','empty','checking'].includes(scenario)?[]:components,componentsLoading:false,finishWarnings:[],ui:scenario==='removed'?{doneTitle:ru?'Удаление завершено':'Removal complete',doneBody:ru?'Все выбранные продукты удалены.':'All selected products were removed.',doneReady:ru?'Операция завершена':'Operation complete',doneNote:ru?'Пользовательские данные сохранены.':'User data was retained.'}:{}};
+}
+async function render(){
+ const version=++generation;$('messages').textContent='';$('error').hidden=true;
+ try{
+  if(!source){const response=await fetch('runtime/slideshow.html');if(!response.ok)throw new Error('HTML: '+response.status);source=await response.text();}
+  if(version!==generation)return;
+  const runtime=new URL('runtime/',location.href).href;
+  // Only this preview copy is adapted. Production CSP and virtual URLs stay unchanged.
+  let html=source.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/i,'').replaceAll('https://glassplatform.invalid/',runtime);
+  const bridge='<script>('+mockHostBridge.toString()+')('+JSON.stringify(fixtureState())+');</'+'script>';
+  html=html.replace('<head>','<head>'+bridge);$('preview').srcdoc=html;
+ }catch(error){$('error').textContent='Не удалось открыть макет: '+error.message+'. Запустите python GlassSetup/tools/preview_mockups.py из корня solution.';$('error').hidden=false;}
+}
+for(const id of ['app-mode','locale','scenario'])$(id).onchange=render;
+$('reset').onclick=render;
+for(const id of ['available','plan'])$(id).onclick=()=>{const button=$('preview').contentDocument?.querySelector('[data-component-pin="'+id+'"]');if(button)button.click();};
+function showReference(reference){$('reference').hidden=!reference;$('runtime-view').hidden=reference;$('reference-tab').setAttribute('aria-pressed',String(reference));$('runtime-tab').setAttribute('aria-pressed',String(!reference));}
+$('reference-tab').onclick=()=>showReference(true);$('runtime-tab').onclick=()=>showReference(false);
+render();
+</script>
+</html>

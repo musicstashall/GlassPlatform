@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- Graphics only. Upstream Inno owns all OpenGlass executables and services. -->
+  <Package Name="OpenGlass Resources" Manufacturer="Glass"
+           Version="$(var.GlassResourcesVersion)" Scope="perMachine" Compressed="yes"
+           UpgradeCode="A5571574-00E7-43AD-81DF-B65D1AE07699"
+           ProductCode="6D6046DB-6B28-4F2C-8A7D-EB6CF13CBBD9">
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer OpenGlass Resources package is installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="GlassProductIcon" SourceFile="$(var.GlassSetupIcon)" />
+    <Property Id="ARPPRODUCTICON" Value="GlassProductIcon" />
+    <Property Id="UPSTREAMOPENGLASSROOT" Secure="yes">
+      <RegistrySearch Id="UpstreamOpenGlassRoot" Root="HKLM"
+          Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\{D3D1BC7D-5E24-4B33-9383-7934271A3B05}_is1"
+          Name="InstallLocation" Type="directory" Bitness="always64" />
+    </Property>
+    <Property Id="OPENGLASSDLL">
+      <DirectorySearch Id="OpenGlassDllDirectory" Path="[UPSTREAMOPENGLASSROOT]" Depth="0">
+        <FileSearch Id="OpenGlassDllFile" Name="OpenGlass.dll" />
+      </DirectorySearch>
+    </Property>
+    <!-- Match the second exact Inno identity accepted by Setup's inventory.
+         Do not accept arbitrary names/locations or ambiguous dual registration. -->
+    <Property Id="UPSTREAMOPENGLASSALTROOT" Secure="yes">
+      <RegistrySearch Id="UpstreamOpenGlassAltRoot" Root="HKLM"
+          Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\{D3D1BC7D-5E24-4B33-9383-7934271A3B05}}_is1"
+          Name="InstallLocation" Type="directory" Bitness="always64" />
+    </Property>
+    <Property Id="OPENGLASSALTDLL">
+      <DirectorySearch Id="OpenGlassAltDllDirectory" Path="[UPSTREAMOPENGLASSALTROOT]" Depth="0">
+        <FileSearch Id="OpenGlassAltDllFile" Name="OpenGlass.dll" />
+      </DirectorySearch>
+    </Property>
+    <Property Id="GLASS_RESTORE_NO_CAB" Value="0" Hidden="yes" />
+    <InstallExecuteSequence>
+      <InstallFiles Condition="GLASS_RESTORE_NO_CAB &lt;&gt; 1" />
+    </InstallExecuteSequence>
+    <!-- Require OG only for a new Resources installation. Existing graphics
+         remain independently serviceable after upstream OG has been removed. -->
+    <Property Id="GLASS_OG_INSTALL_PENDING" Secure="yes" Hidden="yes" />
+    <!-- Setup may explicitly install graphics before invoking verified official OG. -->
+    <Launch Condition="GLASS_OG_INSTALL_PENDING = 1 OR Installed OR GLASS_RESTORE_NO_CAB = 1 OR REMOVE = &quot;ALL&quot; OR ((UPSTREAMOPENGLASSROOT AND OPENGLASSDLL AND NOT UPSTREAMOPENGLASSALTROOT) OR (UPSTREAMOPENGLASSALTROOT AND OPENGLASSALTDLL AND NOT UPSTREAMOPENGLASSROOT))"
+            Message="Install OpenGlass before OpenGlass Resources. / Сначала установите OpenGlass." />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <!-- Upstream inventory is a prerequisite only, never our payload root. -->
+      <Directory Id="GlassPlatformResourcesRoot" Name="GlassPlatform">
+        <Directory Id="GlassOpenGlassResourcesRoot" Name="OpenGlass">
+          <Directory Id="INSTALLDIR" Name="Resources" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="Graphics" Title="OpenGlass Resources" Level="1">
+      <ComponentGroupRef Id="OpenGlassGraphics" />
+    </Feature>
+  </Package>
+</Wix>

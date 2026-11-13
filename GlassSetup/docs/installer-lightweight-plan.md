@@ -1,0 +1,896 @@
+# План: лёгкий GlassSetup без встроенных MSI, самопродление и выбор разрядности GlassSettings
+
+- **Дата:** 2026-11-06
+- **Ветка выполнения:** `arena/e53d8dd2-glassplatform`
+- **Макет целевой страницы:** [`mockups/product-maintenance-concepts.html`](mockups/product-maintenance-concepts.html) (вариант C)
+- **Статус:** основной runtime лёгкого Setup реализован; пользователь подтвердил online install. Текущий единый остаток реализации и отдельная Windows-приёмка — в разделе 0 ниже. Старые исходные оценки в §2/§14/§15 являются историческими, не текущим статусом.
+
+Документ описывает рефакторинг установщика на «облегчённый» вариант: MSI больше не упаковываются в `GlassSetup.exe`,
+пакеты берутся из предыдущей установки, из каталога рядом с установщиком или из релизов; установщик сам проверяет
+и подтягивает свою новую версию; страница «Доступна новая версия» упраздняется. Отдельным обязательным этапом описан выбор **обеих разрядностей GlassSettings** двумя независимыми карточками.
+Назначение Native/helper и доступность конкретных cross-architecture операций проверяются отдельно от работоспособности Platform.
+
+---
+
+## 0. Единый актуальный план: Setup + Settings + upstream OpenGlass
+
+Эта таблица объединяет исходные R0–R10 и новый запрос обслуживания Settings.
+Она имеет приоритет над историческими «ещё не реализовано» в старых разделах.
+`settings-maintenance-upstream-plan.md` сохраняется как журнал анализа, а не
+второй независимый backlog. Подробный контракт извлечения —
+[openglass-upstream-setup.md](openglass-upstream-setup.md).
+
+### 0.1 Реализованная основа (не писать повторно)
+
+| Этап | Состояние реализации / подтверждение |
+|---|---|
+| R0, R1 | Catalog/ReleaseClient и New-ReleaseCatalog.ps1 есть; HTTPS/redirect/hash/size gates и portable checks. Генератор исправлен remote-изменением для PowerShell 5.1. |
+| R2–R4 | File-based acquisition, resolver rules, attached/cache/server inspection и trust есть. Отображение: категории server/local, download только по Next. |
+| R5 | Controller store/handoff/self-update код и mocks есть. Полная VM fault/reboot acceptance не закрыта. |
+| R6 | Page::Update больше не является рабочей страницей; штатный download progress. |
+| R7 | MSI не встроены в runtime Setup; старые неиспользуемые resource defines ещё встречаются и требуют housekeeping, не возврата payload. |
+| R8 | Production HTML/native maintenance plan, карточки, downloads, Remove/Keep, предупреждения реализованы. |
+| R9 | Раздельные Settings x64/x86 и helpers реализованы. Пришедший e3ab778 использует общую bundle version; не возвращать удалённый Settings Version.props. |
+| Cleanup | Explicit opt-in, preflight, after-success/registration-absence gates, profile folders/themes, Glass registry и 49 DWM values; post-delete verification. |
+| Settings UI | Home maintenance row убрана; System maintenance expander + ticketed cached Modify. Missing Platform x86 caption исправлена без изменения кнопок. |
+| Update launch | Обе кнопки update в ProductUpdateCoordinator уже запускают cached Setup; этот маршрут сохранять. |
+| Online install | Успешно подтверждён пользователем. Не переносить этот результат на новые backup/upstream/fault сценарии. |
+
+### 0.2 Актуальный backup и upstream этап
+
+Локальные коммиты пользователя 9f25136/65abdb2 получены обычным fast-forward.
+Сохранение/восстановление .glassbackup и открытие двойным кликом подтверждены
+пользователем. Backup теперь current-user HKCU, с разделами/темами и restore UI;
+прежняя all-profile реализация и её ограничения ниже — исторический журнал.
+Не откатывать локальный backup, file association или live reloads.
+
+Каталог Glass теперь содержит только Platform/Settings. OpenGlass MSI отсутствует
+намеренно. Найденный конфликт: main.cpp связывает applySupported OG с MSI target,
+поэтому карточка после возврата блокируется. Для устранения нужен N6 end-to-end,
+не ложное включение applySupported без способного выполнить установку engine.
+
+На текущем этапе добавлены:
+- DefaultSelectedFor всегда false: inspection/recommendation/fresh install не
+  выбирают ни один продукт автоматически; временные startup intents также пустые.
+- GlassInnoExtract: bounded Inno 6.7 headers/offset table/CRC/LZMA/89-byte records,
+  CALL/JMP decode строго 64KB; ни записи файлов, ни исполнения.
+- GlassOpenGlassPackage::Prepare: GitHub latest asset download, size/SHA256,
+  setup Valid Authenticode + upstream subject, RT_RCDATA/11111, decoded hashes,
+  x64 PE32+/version/original filename/description и одинаковый signer каждого
+  payload. Package возвращает selected DLL (build>=28000 MILComp), Host и GUI.
+- Staging API подключён к Next ProductDownloads index4 и engine ExtractPayload.
+  Повторная preparation проверяет protected metadata/setup/hash/signatures и
+  распаковывает из session hint без второго download. Он не создаёт
+  service/ARP/receipt и не заменяет прежний MSI execution path. Нельзя считать
+  заблокированную OG карточку окончательно исправленной этим этапом.
+- Реальные portable parser/LZMA тесты на synthetic fixtures PASS. Скачивание и
+  Authenticode Windows provider на настоящем upstream EXE не выполнялись.
+
+### Уточнение backup UI/restore после пользовательского теста
+
+Новый запрос имеет приоритет над первоначальной registry-only кнопкой:
+- Maintenance переименован «Обслуживание систем» + иконка, отдельный spoiler
+  «Резервные копии параметров». Nested option row убран: он помещал длинное
+  описание + Auto action в body и приводил к обрезанию; контент ограничен Grid.
+- Результаты backup идут через SettingsNoticeCoordinator (Success MirrorOnly,
+  Error pinned), а не TextBlock снизу. Dismiss backup error не dismiss update.
+- Native registry reads снижены с KEY_READ до QUERY_VALUE|ENUMERATE_SUB_KEYS;
+  READ_CONTROL/NOTIFY не нужны экспорту. Отказы теперь имеют operation/key/view/
+  SID/path context. По прежнему общему «access denied» невозможно установить,
+  отказал ли HKU, Documents или доступ к NTUSER.DAT; live-причина ещё не доказана.
+
+**Следующий обязательный этап N1b (ещё не реализован):**
+- Pivot «Создать/Восстановить» в отдельном backup spoiler, стандартный pivot style.
+- Расширяемый descriptor registry разделов: stable ID, локализованное название,
+  capture/validate/preflight/apply/live-reload handlers. Начальные IDs:
+  glass-platform, dwm, saved-themes. AppData/Local/GlassPlatform не архивировать.
+- Новое расширение `.glassbackup` для ZIP container v2, без auto-association в
+  registry при запуске Settings. OS file association — отдельно explicit install
+  registration; filter расширения не является проверкой доверия.
+- Создание: heading + призыв выбрать разделы, dynamic checkboxes, кнопка снизу
+  справа с переносом/ограничением по доступной ширине. Themes только сохранённые
+  Glass themes по существующему ownership contract, не все .theme.
+- Восстановление: heading + CTA, кнопка «Выбрать», существующий hosted WinUI
+  ExecutableFilePickerPanel как на Processes; только .glassbackup, Documents
+  как initialDirectory. Никакого shell Open/запуска архивов.
+- До выбора/валидации все checkboxes disabled. Manifest доступности разрешает
+  только подтверждённые разделы; неизвестные sections не активировать.
+- Reader: open/pin file once, bounded ZIP/JSON, reject duplicates, traversal,
+  unknown format, invalid checksums/types/paths/SIDs/install metadata. Нельзя
+  применять произвольные Hive/Key из архива v1 без повторного allowlist validation.
+- Restore: full preflight → snapshot rollback → serial operation pipeline →
+  selected registry/theme mutations → existing live reloads/session/watch sync
+  → единый Success/partial Error. Не объявлять live reload до его результата.
+  Не запускать arbitrary Native paths из архива. v1 import policy отдельная,
+  текущий v1 архив не следует объявлять безопасно импортируемым.
+- SUT/OG missing server version: backend уже передаёт releaseVersion/tag и
+  remotePayloadVersion соответственно. Требуется воспроизвести фактический
+  metadata discovery failure и добавить regression, не подставлять MSI/local
+  version под видом server. Исправление пока не заявляется завершённым.
+
+### 0.3 Ещё НЕ реализовано — единый backlog
+
+| ID | Оставшаяся реализация | Условие завершения |
+|---|---|---|
+| N2 | Per-product Glass update provider вместо bundle `glass`; compare только установленные продукты/архитектуры, независимый catalog version | Несколько updates дают компактную общую строку на Glass expander, один — конкретную; dismissed identity не теряет изменения набора |
+| N3 | OpenGlass installed DWM architecture + актуальные unsuffixed releases, старые -legacy/-milcomp только своего канала | Не переводит Legacy в MILComp по более новому тегу; учитывает repair при смене Windows build |
+| N4 | Исправить регрессию switch-off OpenGlass orchestration | Service и legacy task удаляются так же, как dropdown Delete; выключение не подменяется disable autorun |
+| N5 | Перевести acquisition/execution на официальный silent upstream EXE (новая политика) | Adjacent signed EXE → release download on Next; publisher/version/hash trust, exit/reboot handling; без собственного извлечения DLL |
+| N6 | Заменить receipt route на upstream Inno inventory/servicing в любом каталоге | Inno управляет файлами, правами, службами и ARP; Setup не создаёт/удаляет их за него; честная граница commit/rollback |
+| N7 | Resources: добавлен отдельный WiX-проект/graphics-only staging и MSI prerequisite; catalog/UI/planner ещё не подключены | Catalog/build/UI/planner/snapshot/remove/rollback: не спрятанный addon в OpenGlass payload |
+| N8 | Backup/restore/association приняты после локальных доработок пользователя | Не добавлять AppData/Local/GlassPlatform в архив; сохранять действующий current-user контракт |
+| R10 | Довести устаревшие mock harness до текущих API и документы/релизный checklist до нового состава продуктов | Общий run с явным отчётом, без ослабления production trust ради тестов |
+
+Порядок: N1 → N2/N3 → N4 → N5/N6 → N7 → R10. Не считать весь переход
+выполненным только потому, что добавлены UI строки или extractor-контракт.
+
+### 0.4 Отдельно: остающаяся приёмка, не отсутствие реализации
+
+- Windows build/WinUI/System backup: archive type/bytes, loaded/offline/access denied,
+  Documents readonly/reparse/disk full; проверить отсутствие ложного «сохранено».
+- Полное удаление keep/clean: Glass + HKU/HKLM DWM whitelist, folders/themes,
+  registration/controller retirement, stale Settings Modify.
+- Offline attached/cache/нет источников, repair, per-arch Native; visual DPI/native fallback.
+- Fault/cancel/reboot/recovery matrix: [controller-windows-acceptance.md](controller-windows-acceptance.md).
+  Только VM, без fault injection на рабочей системе.
+- Upstream + Resources требуют собственной новой acceptance после реализации.
+- Explorer crashes — отдельная отложенная задача, не часть завершения installer.
+
+---
+
+## Содержание
+
+1. [Цель и результат](#1-цель-и-результат)
+2. [Что есть сейчас (факты из кода)](#2-что-есть-сейчас-факты-из-кода)
+3. [Целевая архитектура](#3-целевая-архитектура)
+4. [Источники MSI и правила выбора версии](#4-источники-msi-и-правила-выбора-версии)
+5. [Манифест релиза](#5-манифест-релиза)
+6. [Самопродление установщика](#6-самопродление-установщика)
+7. [Упразднение страницы новой версии](#7-упразднение-страницы-новой-версии)
+8. [Этапы работ](#8-этапы-работ)
+9. [GlassSettings обеих разрядностей](#9-glasssettings-обеих-разрядностей)
+10. [Безопасность загрузки и доверие](#10-безопасность-загрузки-и-доверие)
+11. [Инварианты: что нельзя ломать](#11-инварианты-что-нельзя-ломать)
+12. [Проверки и тесты](#12-проверки-и-тесты)
+13. [Риски](#13-риски)
+14. [Подтверждённые решения пользователя](#14-подтверждённые-решения-пользователя-2026-11-06)
+15. [Документация и релизный чек-лист](#15-документация-и-релизный-чек-лист)
+16. [Приложения](#16-приложения)
+
+---
+
+## 1. Цель и результат
+
+**Цель.** Разделить установщик и полезную нагрузку.
+
+| Сейчас | После |
+|---|---|
+| `GlassSetup.exe` ≈ 5 встроенных MSI (`IDR_MSI_*`) + обе `GlassSettings.Native.dll` | `GlassSetup.exe` без MSI и без встроенных Native DLL; helpers берутся только из установленного Settings |
+| Новый продукт нельзя поставить без новой сборки установщика | Пакеты берутся из релиза; установщик обновляет сам себя |
+| Обновление установщика — отдельная страница и переход в браузер | Загрузка и перезапуск на новой версии внутри мастера, без отдельной страницы |
+| Повреждённый/отсутствующий локальный MSI = ошибка установки | Явный выбор источника: кэш предыдущей установки → рядом с установщиком → релиз |
+
+**Результат этапа.**
+
+1. Установщик проверяет в релизах версию **себя**, скачивает новую сборку, переименовывает текущую в `.bak` и перезапускается.
+2. Страница «Доступна новая версия» удалена из нативного UI, HTML и строковых ресурсов.
+3. MSI разрешаются по единому алгоритму с явными правилами сравнения версий.
+4. Сборка больше не требует наличия пяти MSI в `Build\GlassSetup\msi\Release\`; MSI публикуются в релизе.
+5. Доступна установка `GlassSettings` x64 и x86 одновременно, две отдельные карточки; обязательной зависимости Platform от Settings нет.
+6. Единый мастер обслуживания выполняет явно выбранные установку, обновление, восстановление и удаление, показывая общий план и предупреждения.
+7. Для тестирования пять MSI собираются в `GlassProject\Build\GlassSetup\Release` рядом с EXE; подкаталог `packages\` также поддерживается для ручного комплекта.
+
+**Вне границ.** Изменения самих продуктов (GlassCore/WndCompat/GlassSettings), политика SecureUxTheme (остаётся отдельным внешним MSI),
+полное переписывание GlassUnins (но адаптация общего removal engine/контрактов нужна), публикация релизов автоматикой (workflow в репозитории сейчас нет — публикация остаётся ручной, но с чек-листом).
+
+---
+
+## 2. Что есть сейчас (факты из кода)
+
+### 2.1 Упаковка
+
+- `GlassSetup.vcxproj`: `GLASS_EMBED_MSI` в `PreprocessorDefinitions`; property `GlassMsiPayloadDir` = `Build\GlassSetup\msi\Release\`;
+  таргеты `BeforeBuild` жёстко проверяют наличие `Glass-x64.msi`, `Glass-x86.msi`, `GlassSettings-x64.msi`,
+  `GlassSettings-x86.msi`, `OpenGlass-x64.msi` и **падают**, если файла нет. Там же — `GlassSignCommand -Mode Verify`
+  по шести файлам (MSI + две `GlassSettings.Native.dll`) до встраивания.
+- `res/resource.h`: `IDR_MSI_X64 301`, `IDR_MSI_X86 302`, `IDR_MSI_OPENGLASS 303`, `IDR_MSI_GS_X64 306`, `IDR_MSI_GS_X86 307`.
+  Отдельно живут `IDR_UNLOCKER_X64 216` / `IDR_UNLOCKER_X86 217` — сейчас это встроенные helpers; в целевой реализации они также удаляются, мониторинг использует установленный Settings.
+- `res/GlassSetup.rc`: `IDR_HTML RCDATA "slideshow.html"` — единственный HTML мастера (и деинсталлятора), включая панель `#update-panel`.
+
+### 2.2 Движок
+
+- `InstallEngine::ExtractPayload(HINSTANCE)` (`src/InstallEngine.cpp`, ~1101) распаковывает выбранные MSI из `RT_RCDATA` в `tempDir_`
+  именами `Glass-x64.msi`, `GlassSettings-x64.msi`, `OpenGlass-x64.msi`, …
+- `InstallEngine::VerifyEmbeddedNativePayload()` (~1161) проверяет PE/экспорты встроенных Native DLL по ресурсам.
+- Порядок шагов установки (`~1485`): `Glass-x64.msi` → `GlassSettings-*` → `OpenGlass-x64.msi`, с legacy ProductCode для распознавания.
+- `GlassInstallMsi` уже умеет всё, что нужно для работы с файловым пакетом: ProductCode из базы, контексты, `CopyLocalPackage`,
+  проверка file roots, `QueryDisplayVersion`, запуск `msiexec`.
+
+### 2.3 Кэш предыдущей установки
+
+- `src/InstallSupport/GlassMaintenanceCache.h`: `%ProgramData%\Packages\GlassPlatform\{Current,Previous,Staging,Retained}`,
+  `Publish(HINSTANCE instance, const Blob* blobs, ...)` — публикация **из ресурсов**; `Registrations/RegistrationState/MatchesInstalled`
+  сверяют PackageCode с `LocalPackage` (Windows Installer); `RegisterRepairSource` добавляет каталог как источник восстановления.
+- `GlassProductInspect` (~311) уже читает `INSTALLPROPERTY_LOCALPACKAGE` — кэш MSI установленного продукта.
+
+### 2.4 Проверка версии установщика и страница обновления
+
+- `main.cpp`: `Page::Update` в перечислении страниц; `FetchLatestSetupVersion()` читает
+  `https://github.com/musicstashall/GlassPlatform/releases/latest/download/version.json` полями `glass`/`setup` + `url`;
+  `IsAllowedReleaseUrl()` разрешает только `https://github.com/musicstashall/GlassPlatform/releases/…` без `%`, `\`, `..`.
+- При более новой версии: `SetPage(Page::Update)` (~2601), кнопки `updateDownload_` (открывает релиз в браузере через
+  `OpenReleaseInUserBrowser`) и `updateSkip_`; `updateAvailable_`, `updateSkipped_`, `updateUrl_`, `updateBody_`.
+- HTML: `<section id="update-panel">` + блок `.update-*` CSS (~40 правил) + строки `checkingTitle/checkingCopy` и т. п.
+- Строки: `IDS_CHECKING_BODY`, `IDS_UPDATE_*` в `res/GlassSetup.rc`, `res/ProductStrings.rcinc`.
+- Отладочный тур `TickDebugDemo()` включает `Page::Update` в `sequence[]`.
+
+### 2.5 Готовый образец нужного поведения
+
+- `src/InstallSupport/GlassSecureUxPackage.cpp`: поиск MSI **рядом с EXE** (не CWD), сверка с asset релиза через GitHub API,
+  загрузка в `.part`, проверка размера/дайджеста, публикация без перезаписи существующего файла.
+  Это уже фактически «резолвер источника» — его логику и надо обобщить на все пять пакетов.
+
+---
+
+## 3. Целевая архитектура
+
+### 3.1 Компоненты
+
+```
+GlassSetup.exe (Win32, ~без MSI)
+ ├─ Wizard (main.cpp)           — страницы, HTML, нативные фолбэки
+ ├─ SetupUpdater                — проверка/загрузка/перезапуск новой версии установщика
+ ├─ ReleaseClient               — HTTPS-клиент (WinHTTP), allowlist, JSON, отмена, ретраи
+ ├─ PackageCatalog              — манифест: какие пакеты, версии, хэши, URL
+ ├─ PackageResolver             — выбор источника пакета по правилам §4
+ ├─ PackageCache                — %ProgramData%\Packages\GlassPlatform\Current (единственный постоянный кэш)
+ ├─ Inspect/Plan/UI policy      — без изменений по смыслу, но на файловых пакетах
+ └─ InstallEngine               — msiexec, rollback, unlock, watch (без ExtractPayload)
+```
+
+### 3.2 Ключевое изменение конвейера
+
+```
+было:  ресурс RCDATA ──extract──> temp\X.msi ──msiexec──>
+стало: PackageResolver → (Current | packages рядом с EXE | рядом с EXE | релиз)
+       → проверка/защищённый staging в ProgramData → msiexec → commit Current
+```
+
+Требования к шагу:
+
+- Источник определяется **до** любых изменений системы (как сейчас `GlassSecureUxPackage::Prepare`) — иначе придётся откатывать.
+- Скачанный/локальный пакет приводится к проверенной неизменяемой копии в защищённом staging под `%ProgramData%\Packages\GlassPlatform`; `%TEMP%` не служит источником MSI. `CopyLocalPackage` адаптируется без ослабления защиты.
+- Проверка идентичности: ProductCode из фактической базы MSI, UpgradeCode, native-разрядность, ProductVersion —
+  существующие проверки `GlassInstallMsi::CheckProductContexts` / `CheckProductFileRoots` не ослабляются.
+- Ошибка источника для одного продукта не валит весь мастер: карточка продукта получает блокирующую причину
+  (как `GlassProductPlan::Error::MissingSource`); независимые действия остаются доступны для выбора. Нельзя молча вычёркивать заблокированное действие из уже подтверждённого плана: до выполнения нужна повторная валидация и явный пересмотр плана.
+
+### 3.3 Рабочие каталоги
+
+| Назначение | Путь | Примечание |
+|---|---|---|
+| Единственный постоянный кэш пакетов и maintenance EXE | `%ProgramData%\Packages\GlassPlatform\Current` | проверенный владелец/ACL, без reparse |
+| Временный staging/rollback | защищённые временные каталоги под `%ProgramData%\Packages\GlassPlatform` | не альтернативные источники; удалить после завершения/восстановления транзакции |
+| Ручной комплект MSI | `<каталог GlassSetup.exe>\packages\` | не CWD; основной аккуратный каталог локального комплекта |
+| Локальные MSI рядом с EXE | `<каталог GlassSetup.exe>\` | поддержка тестовой сборки и существующих комплектов |
+| Тестовый output сборки | `GlassProject\Build\GlassSetup\Release\` | EXE и все пять собранных MSI рядом |
+
+`Previous`/`Retained` не сохраняются как постоянные версии кэша. Старые пакеты удерживаются лишь пока нужны
+для rollback незавершённой операции; замена `Current` производится после успешного commit, не при обнаружении нового релиза.
+Пакеты сохраняемых продуктов не удаляются при обновлении другого продукта. Системный Windows Installer `LocalPackage`
+не является вторым кэшем GlassPlatform и самостоятельно не очищается. Read-only каталог пользовательского EXE допускает
+проверенную загрузку/перезапуск из `Current`, но не создание отдельного постоянного кэша `Setup`.
+
+---
+
+## 4. Источники MSI и правила выбора версии
+
+### 4.1 Порядок поиска (по требованию)
+
+1. **Кэш предыдущей установки** — `%ProgramData%\Packages\GlassPlatform\Current\<продукт>.msi`, сверенный с
+   `MsiGetProductInfo(LocalPackage)` + PackageCode и ProductVersion.
+2. **Локальные** — `<каталог GlassSetup.exe>\packages\Glass-x64.msi` и рядом с EXE (`Glass-x64.msi` и т. д.). Имена фиксированные. Среди валидных локальных кандидатов выбирается более новая версия; при равенстве предпочтителен `packages\`.
+   Читается версия из базы MSI (`ProductVersion`), проверяется ProductCode/UpgradeCode/разрядность.
+3. **Релиз** — пакет из манифеста `version.json` (`products[]`), с проверкой размера и SHA-256.
+
+### 4.2 Правила (ровно как в задании)
+
+| Ситуация | Источник |
+|---|---|
+| Продукт установлен, нужен репэйр/переустановка **той же версии**, пакет в кэше есть и валиден | кэш предыдущей установки |
+| Локальный рядом с установщиком **равен** серверному | локальный |
+| Локальный **выше** серверного | локальный (в UI — пометка «локальный пакет новее опубликованного») |
+| Локального на сервере **нет** (или продукт не публикуется) | локальный |
+| Серверный **выше** локального (или локального нет) | загрузка из релиза |
+| Нет ни одного источника | карточка продукта блокируется с причиной; мастер продолжает работу |
+
+Сначала определяется целевая версия/действие. Для обновления выбирается **максимальная версия** среди валидных локальных и релизных кандидатов; при равенстве приоритет у локального (без скачивания, но startup-проверка релиза выполняется при наличии сети). Кэш старой установленной версии не может переопределить эту цель.
+Понижение версии не выполняется никогда: если все доступные пакеты ниже установленной версии, действие `Update` не предлагается.
+
+> **Решение D1 (подтверждено).** Источник №1 применяется только когда целевая версия совпадает с установленной
+> (репэйр, восстановление повреждённого продукта, «переустановить»). Если план требует обновления, старый пакет из кэша
+> целью не является, и поиск сразу идёт по источникам 2–3. Иначе установщик будет ставить старую сборку «из кэша» поверх
+> требования обновления.
+
+### 4.3 Сеть и офлайн
+
+- Проверка манифеста — один `GET` с таймаутами `4/4/4/8 c` и отменой, как у `FetchLatestSetupVersion`.
+- Нет сети: работаем на кэше и локальных пакетах; в статусе — «Версия не проверена, сеть недоступна» (не ошибка).
+- Полностью офлайн-установка возможна, если доступны все MSI, нужные для выбранных действий, в `packages\` или рядом с EXE. Это осознанное следствие
+  требования «пакеты скачиваются из релизов»: снимаем встраивание — получаем зависимость от наличия файлов.
+  В README добавляется раздел «Установка без сети».
+
+---
+
+## 5. Манифест релиза
+
+`version.json` расширяется обратносовместимо (поле `glass`/`setup` остаётся строкой для старых клиентов):
+
+```json
+{
+  "glass": "1.4.2.120",
+  "setup": "1.4.2.120",
+  "setupPackage": {
+    "version": "1.4.2.120",
+    "url": "https://github.com/musicstashall/GlassPlatform/releases/download/v1.4.2/GlassSetup.exe",
+    "sha256": "…",
+    "size": 18765432
+  },
+  "products": [
+    {"id": "platform64",    "version": "1.4.2.120", "file": "Glass-x64.msi",
+     "url": "…/Glass-x64.msi", "sha256": "…", "size": 0},
+    {"id": "platform32",    "version": "1.4.2.120", "file": "Glass-x86.msi", "…": "…"},
+    {"id": "settings64",    "version": "1.4.2.120", "file": "GlassSettings-x64.msi", "…": "…"},
+    {"id": "settings32",    "version": "1.4.2.120", "file": "GlassSettings-x86.msi", "…": "…"},
+    {"id": "openglass",     "version": "1.4.2.120", "file": "OpenGlass-x64.msi", "…": "…"}
+  ]
+}
+```
+
+Правила манифеста:
+
+- Все `url` проходят тот же allowlist (`github.com/musicstashall/GlassPlatform/releases/…`), что и сейчас.
+- Отсутствие `sha256`/`size` у продукта = пакет из релиза недоступен (только локальный/кэш).
+- Манифест недоверенный: значения используются только как ожидания для проверки скачанного файла.
+- ID продуктов в манифесте совпадают с `GlassProductPlan::Product` (с учётом этапа 9 — `settings64`/`settings32`).
+
+---
+
+## 6. Самопродление установщика
+
+### 6.1 Сценарий
+
+Уточнение пользователя 2026-11-07: проверка и скачивание нового Setup выполняются на одной
+странице Checking; отдельное отображение новой версии/Download/Skip больше не требуется.
+Новые версии отдельных продуктов отражаются на странице обслуживания продуктов.
+
+1. Старт мастера → стадия «Проверка» (существующая `Page::Checking`), статус «Проверяем версию установщика».
+2. `GET version.json` → `setupPackage.version`; сравнение с числовым `FileVersion` собственного EXE (`SelfFileVersion()` + `TryParseVersion`/`CompareVersions`). Скачанный EXE и выбор controller проверяются в том же домене FileVersion; ProductVersion комплекта здесь не используется.
+3. Если серверная **новее** — загрузка:
+   - `.part` в защищённом staging ProgramData → проверка размера, SHA-256, подписи (WinVerifyTrust + ожидаемый издатель);
+   - подготовка проверенного EXE и отдельная публикация пользовательского файла или cached EXE по правилам п.7–9;
+   - защищённая копия удерживается до завершения handoff, пользовательский writable путь не служит доверенным источником elevated исполнения.
+4. Переименование: текущий `GlassSetup.exe` → `GlassSetup.exe.bak` (только пользовательский EXE; если имя занято — нумерованный `.bak` по п.7), новый → `GlassSetup.exe`. В доверенном кэше используется ветка п.8 без пользовательского backup.
+5. Запуск новой сборки с исходными аргументами + `--self-updated=<PID>`; старый процесс освобождает мьютекс одиночного запуска и выходит.
+6. Новый процесс ждёт завершения `<PID>` (ограниченный таймаут), затем начинает мастер заново со страницы «Проверка»/«Приветствие».
+7. Для пользовательского EXE резервные копии **не удаляются и не ротируются**: `GlassSetup.exe.bak`, затем
+   `GlassSetup.exe[2].bak`, `GlassSetup.exe[3].bak`, …; существующий backup никогда не перезаписывается, свободное имя
+   резервируется без гонки. Хранение и очистка — ответственность пользователя.
+8. При запуске из доверенного кэша GlassPlatform пользовательские `.bak` не создаются: проверенный новый EXE
+   заменяет кэшированный после освобождения старого процесса. После успешной публикации обновляются соответствующие
+   машинные maintenance/ARP ссылки и metadata в HKLM. Запись по пути произвольного CLI-аргумента запрещена.
+9. При неудаче замены/перезапуска восстанавливается работоспособный предыдущий EXE. Временная rollback-копия в кэше
+   допустима только на время операции и не является пользовательским `.bak`. Нужен crash-recovery протокол.
+
+### 6.2 Особые случаи
+
+| Случай | Поведение |
+|---|---|
+| Каталог EXE только для чтения (Program Files, CD, сеть) | скачиваем в `%ProgramData%\Packages\GlassPlatform\Current\GlassSetup.exe`, перезапускаемся на нём; `.bak` не создаётся |
+| Хэш/подпись не совпали, загрузка прервана | файл удаляется, установщик продолжает работу на текущей версии, в журнал — строка с причиной |
+| Файл занят (антивирус, другой процесс) | 3 попытки `MoveFileEx` с паузой 500 мс, затем «продолжаем на текущей версии» |
+| Уже обновлялись в этом запуске | второй переход запрещён (защита от петли), флаг `--no-self-update` для диагностики |
+| Запуск без прав повышения | `ShellExecuteEx("runas")` для новой копии; если отказ UAC — продолжаем на текущей |
+| Пользователь закрыл мастер во время загрузки | отмена через существующий `cancelRequested_`, `.part` удаляется, система не изменена |
+| Серверная версия **старее** текущей (dev-сборка) | обновление не выполняется, в журнал — «локальная сборка новее опубликованной» |
+
+### 6.3 Почему до любых изменений системы
+
+Самопродление выполняется **раньше** продуктовых транзакций, snapshot и остановки хостов: если обновление состоялось, старый
+процесс завершается, не изменив установленные продукты. Сама публикация в машинный кэш и обновление его HKLM metadata — отдельные контролируемые изменения. Это исключает «половину установки старой сборкой и половину новой».
+
+### 6.4 Идентичность и совместимость
+
+- Новая версия установщика обязана поддерживать старый `version.json` и старые `.msi` (совместимость вниз на один мажор).
+- Самопродление выполняется до выбора продуктов; entry mode (обычный запуск / обслуживание) и валидный контекст
+  обслуживания сохраняются, выбранного плана ещё нет. Новая версия повторно показывает лицензию один раз перед входом
+  на соответствующую страницу (§14.2); внутренний handoff-флаг не заменяет принятие лицензии.
+- Аргументы CLI сохраняются полностью (`/S`, `/log=…`, `/packages=…` — см. Приложение B).
+
+---
+
+## 7. Упразднение страницы новой версии
+
+Удаляется полностью: отдельной страницы «Доступна новая версия» больше нет, вся коммуникация — строка статуса на «Проверке»
+и запись в журнале.
+
+**Нативный код (`src/main.cpp`)**
+
+- `Page::Update` из `enum class Page`; ветки в `Layout()`, `WebPageName()`, `FocusPage()`, `ShowNativeFallback()`,
+  `UpdateButtonStates()`, `defaultId`, `BeginTransition()`-условиях, `WM_COMMAND` (`IDC_UPDATE_DOWNLOAD`/`IDC_UPDATE_SKIP`),
+  `sequence[]` отладочного тура и `SetDebugDemoPage`.
+- Поля `updateAvailable_`, `updateSkipped_`, `updateCurrent_`, `updateLatest_`, `updateUrl_`, `updateBody_`, `updateDownload_`, `updateSkip_`.
+- `CompleteVersionCheck()` переписывается: результат проверки → либо самопродление (§6), либо продолжение мастера
+  с обновлённой строкой статуса. `Page::Checking` остаётся, но становится короче и без ветки «показать страницу».
+
+**HTML (`res/slideshow.html`)**
+
+- Удалить `<section id="update-panel">`, правила `.update-*` (≈40), `#stage[data-mode="update"]`, `update-*` ключи в
+  `uiResources`, `syncModeText()`-ветку и обработчики кнопок.
+- `checkingCopy/checkingStatus` переписать под новую семантику: проверка версии установщика + подготовка пакетов.
+
+**Ресурсы**
+
+- Удалить `IDS_UPDATE_*`, `IDC_UPDATE_*` из `res/resource.h` и `res/GlassSetup.rc`; подчистить `res/ProductStrings.rcinc`.
+- Проверить `tests/verify_resources.py` и `res/asset-hashes.json` — пересчитать хэши.
+
+**Что остаётся**
+
+- Кнопка «Назад» на «Проверке» и возможность отмены.
+- Строка версии установщика на «Проверке» сохраняется; при maintenance entry startup discovery выполняется до входа на страницу обслуживания.
+- Диагностический флаг `--check-update` (только проверка и вывод версии в журнал, без изменений).
+
+---
+
+## 8. Этапы работ
+
+Каждый этап — отдельный коммит-PR в ветку `arena/e53d8dd2-glassplatform`, сборка остаётся зелёной на каждом шаге.
+
+### R0. Контракты, манифест, релизный чек-лист
+
+**Задачи.** Схема `version.json` (§5) + пример в репозитории; скрипт подготовки релиза (список файлов, SHA-256, генерация манифеста);
+раздел README «Установка без сети»; решение D1.
+
+**Приёмка.** Манифест валидируется скриптом; в документации описан порядок публикации; ничего не сломано в текущей сборке.
+
+### R1. ReleaseClient
+
+**Задачи.** Вынести HTTP/JSON-часть из `FetchLatestSetupVersion` и `GlassSecureUxPackage` в один модуль
+(`src/InstallSupport/GlassReleaseClient.h/.cpp`): WinHTTP-сессия, allowlist, редиректы HTTPS→HTTPS, лимит размера,
+таймауты, отмена, повторные попытки, потоковое скачивание в файл с `CancelIoEx`.
+
+**Приёмка.** Существующее поведение SecureUxTheme не изменилось (тесты `run_secure_ux_release_tests.py` проходят);
+Windows-GNU компиляция модуля; таблица ошибок в журнале.
+
+### R2. PackageResolver
+
+**Задачи.** `src/InstallSupport/GlassPackageResolver.h/.cpp` + portable-ядро `GlassPackageRules.h` (без Win32 — тестируется как
+`GlassProductPlan`): список кандидатов (кэш/локальный/сервер), версия из MSI-базы, правила §4.2, причина отказа.
+Скачивание — через R1 в `.part` → проверка → публикация. Локальный поиск — каталог EXE, а не CWD (как у SUT).
+
+**Приёмка.** Табличные тесты правил (равенство/новее/отсутствует/ниже установленной); мок файловой системы и HTTP;
+невозможность понижения версии.
+
+### R3. Движок на файловых пакетах
+
+**Задачи.** `InstallEngine::ExtractPayload` → `InstallEngine::AcquirePackages`: вместо `ResourceBlob[]` — план пакетов из резолвера;
+`VerifyEmbeddedNativePayload` удаляется вместе со встроенными Native ресурсами. Вместо обязательного preflight — обнаружение установленных helpers по архитектуре, доверенному пути и совместимости протокола. Отсутствие helper не блокирует чистую установку: это явно подтверждаемый ограниченный режим, а не ошибка bundle. До удаления ресурсов текущая ресурсная проверка не заменяется обязательной installed-only проверкой;
+`GlassMaintenanceCache::Publish` принимает пути к файлам вместо `UINT`-ресурсов.
+
+**Приёмка.** Шаги установки и rollback не изменились; порядок `Glass-x64 → GlassSettings → OpenGlass` сохранён;
+`installer_order_mock.py`, `cleanup_win32_mock.py`, `rollback_*_mock.py` проходят.
+
+### R4. Инспектор и кэш на файлах
+
+**Задачи.** `GlassProductInspect::Inputs` — пути к MSI вместо `msiRes*`; откуда брать таблицы File/MsiFileHash, если пакета нет
+(тот же резолвер, но в режиме «только чтение», без скачивания); при отсутствии пакета — `Condition::Unverifiable`, а не «повреждён».
+
+**Приёмка.** Карточки продуктов не показывают ложных «повреждений» при отсутствии сети и отсутствии локальных пакетов;
+`fixed_path_msi_mock.py`, `installed_version_mock.py`, `module_scan_mock.py` проходят.
+
+### R5. Самопродление
+
+**Задачи.** `src/InstallSupport/GlassSetupUpdater.h/.cpp` по §6; мьютекс/передача PID; `.bak`; каталог для read-only случая;
+CLI-флаги; журнал.
+
+**Приёмка.** Сценарии из §6.2 покрыты мок-тестами; при неудаче обновления установщик продолжает работу;
+после перезапуска новая версия стартует и мастер начинает заново; пользовательские `.bak` сохраняются без контроля количества; cached EXE заменяется без них, HKLM metadata актуальны. Проверяются сбой между переименованиями, неудачный запуск и занятый файл.
+
+### R6. Удаление страницы новой версии
+
+**Задачи.** §7.
+
+**Приёмка.** `Page::Update` и все её следы отсутствуют (`grep -rn "Page::Update\|IDC_UPDATE\|update-panel" GlassSetup/src GlassSetup/res`;
+в production коде — пусто, исторические документы и negative-test assertions допустимы); отладочный тур проходит без неё; `verify_resources.py` PASS.
+
+### R7. Изъятие встроенных MSI из сборки
+
+**Задачи.** Убрать `IDR_MSI_*` из `res/GlassSetup.rc` и `res/resource.h`; убрать `GLASS_EMBED_MSI` (и `#else`-ветки
+«Release build required (embedded MSI missing)»); в `GlassSetup.vcxproj` убрать `GlassMsiPayloadDir` и проверки наличия MSI,
+также убрать встраивание `IDR_UNLOCKER_X64/X86` и обязательную проверку наличия bundle Native; проверять только реально используемые установленные helpers; обновить `msi/GlassSetupPayload.targets` и `msi/Directory.Build.props` (staging для создания MSI сохранить; убрать зависимость сборки Setup от встраивания, публиковать пять MSI в `Build\GlassSetup\Release`),
+`tests/verify_sut_build_graph.py`, `res/asset-hashes.json`.
+
+**Приёмка.** Release-сборка Setup собирается без MSI в `Build`; размер EXE падает на величину пакетов; установка выполняется
+по локальным/релизным пакетам; graph-проверка зелёная.
+
+### R8. Страница обслуживания продуктов по макету
+
+**Задачи.** Перенести в мастер поведение варианта C из `docs/mockups/product-maintenance-concepts.html`:
+три области (Доступно / Установлено / План), перетаскивание, ↻, «все»/«нужно», «Принять все рекомендации»,
+активированные карточки (зелёные), мгновенное притухание карточек в «Доступно», свёртывание панелей с пинами и краевым шевроном,
+диалоги предупреждений. Нативное дерево фолбэка приводится в соответствие (те же действия, без анимаций).
+
+**Приёмка.** Поведение совпадает с макетом по всем сценариям, перечисленным в макете; клавиатурная навигация и фолбэк без WebView2 работают.
+
+### R9. GlassSettings обеих разрядностей (подтверждено)
+
+**Задачи.** §9. Модель шести продуктов нужна до финализации R8, чтобы не реализовывать UI/plan дважды. Отдельные карточки подтверждены, это не опциональный вариант.
+
+### R10. Документация, проверки, релиз
+
+**Задачи.** Обновить `GlassSetup/README.md` (сборка без встраивания, новые страницы, самопродление), `docs/implementation-progress.md`,
+`docs/product-state-contract.md`, `docs/cache-profile-maintenance-contract.md`; прогнать все portable-тесты; Windows-VM матрица;
+чек-лист публикации релиза.
+
+**Приёмка.** Матрица §12 пройдена; в актуальном production-коде и пользовательских инструкциях «встроенный MSI» не описывается как рабочая модель; исторические разделы не стираются.
+
+---
+
+## 9. GlassSettings обеих разрядностей
+
+### 9.1 Мотивация и границы зависимости
+
+Подтверждены две независимые карточки Settings x64/x86. В `InjectProcessMapNative.cpp` действительно есть выбор
+соответствующей Native DLL и запуск helper через подходящий `rundll32` для cross-architecture операций. Это не доказывает,
+что Platform x86 без Settings x86 не оформляет приложения: Native helper не следует отождествлять с инжектируемыми
+модулями Platform. До конкретных утверждений в карточках нужен аудит доступности каждой управляющей операции.
+
+Обязательного правила `Platform x86 ⇒ GlassSettings x86` нет. Ни установка, ни удаление Settings не должны
+молча каскадировать выбор Platform; допустима рекомендация с проверенным объяснением ограничения.
+
+### 9.2 Модель данных
+
+```cpp
+// src/GlassProducts.h
+struct Selection {
+    bool platform64 = true;
+    bool platform32 = true;
+    bool glassSettings64 = true;   // было: glassSettings
+    bool glassSettings32 = false;  // новое: WOW-разрядность
+    bool openGlass = true;
+    bool secureUxTheme = false;
+    bool trustSigner = false;
+};
+```
+
+- `NormalizeInstall`: независимые флаги Settings64/Settings32; на x86-ОС исключается Settings64.
+  Отсутствие Settings32 не форсирует изменение выбранной Platform32. Defaults и рекомендации проверяются отдельно от OS support.
+- `NormalizeRemoval`: `glassSettings32 = glassSettings32 && installed.glassSettings32`.
+- `GlassProductPlan::Product`: `{ Platform64, Platform32, Settings64, Settings32, OpenGlass, SecureUxTheme }`,
+  `kProductCount = 6`; `SupportedOnOs`: `Settings32` поддерживается на обеих ОС, `Settings64` — только на x64.
+- Предупреждение об отсутствии соответствующего helper допускается только для подтверждённого ограничения управляющих операций; не объявляет Platform неработоспособной.
+- Все адаптеры с захардкоженными массивами на 5 элементов (`GlassProductUiPolicy::Preview`, `std::array<bool,5>`,
+  `facts.size()`, `RemovalOrder`, `selection_tests.cpp`, `product_plan_tests.cpp`, `removal_order_tests.cpp`, моки)
+  переводятся на `kProductCount`.
+
+### 9.3 UI (карточки)
+
+- В «Установлено»/«Доступно» карточка `GlassSettings` показывается **двумя** карточками: «GlassSettings (64-бит)» и
+  «GlassSettings (32-бит, WOW64)» с пояснением в meta-строке: «управляет 32-битными приложениями».
+- На 32-битной ОС карточка x64 скрыта (как сегодня Platform x64).
+- Карточки независимы, без замков и без «Обязательный». Рекомендации не переписывают явный выбор и не создают
+  скрытых каскадных установок/удалений; все действия видны в плане.
+- Статусы/цвета — по макету: жёлтый = внимание, красный = критическая ошибка, зелёный = «действие в плане», фиолетовый = рекомендация.
+- В «нужно» обе карточки показываются независимо: основание рекомендации для GS x86 определяется проверенным набором управляющих операций, не жёсткой зависимостью от Platform x86.
+
+### 9.4 Установка и учёт
+
+- `GlassInstallMsi::kProductSettingsX64` / `kProductSettingsX86` уже существуют; `ExtractPayload`/`AcquirePackages` перестают
+  выбирать пакет по разрядности ОС и берут пакет по флагу.
+- Обе MSI ставятся в `ProgramFiles6432Folder\GlassPlatform` (x64 → `…\Program Files\GlassPlatform`,
+  x86 → `…\Program Files (x86)\GlassPlatform`), конфликта файлов нет.
+- Ярлык и автозапуск `GlassSettings.exe` — только для нативной разрядности (одна запись), вторая установка не создаёт второй ярлык
+  (проверить `GlassSettingsPackage.template.wxs` и `CreateStartMenuShortcut` в `InstallEngine::InstallGlassSettingsEarly`).
+- Инспектор: `Report` получает `settings32`; проверка файлов и `Native.dll` — по своей разрядности.
+- Unins: удаление обеих MSI, каждая своим ProductCode; «нужно» на карточке — по своей разрядности.
+- Монитор модулей (`GLASS_SETUP_NATIVE_MONITOR`) уже использует x86-инстанс `Native.dll`; после установки GS x86
+  его безопасный протокол сохраняется. Использовать только совместимый установленный helper своей архитектуры; без него — подтверждаемый ограниченный режим. Ни встроенного ресурса Native, ни fallback-извлечения в Temp/Unlocker в целевой модели нет.
+
+### 9.5 Совместимость и миграция
+
+- Старые установки: `installed.glassSettings32` определяется по `IsProductInstalled(kProductSettingsX86)`; на x64-ОС по умолчанию
+  **выключено** (не навязываем новую установку), но карточка видна как доступная рекомендация.
+- `Selection.trustSigner`/SecureUxTheme не затрагиваются.
+- `version.json` содержит `settings64` и `settings32` — отсутствие `settings32` в старом манифесте не ломает установщик.
+
+### 9.6 Приёмка этапа
+
+1. На x64-ОС можно поставить `Platform x86` + `GlassSettings x86` без `Platform x64`.
+2. Обе GS MSI видны в «Установленные приложения», удаляются независимо.
+3. `Native.dll` x86 действительно загружается в 32-битный процесс и управляет модулями (проверка в VM, журнал монитора).
+4. Platform x86 без GS x86 разрешена; предупреждения содержат только подтверждённые ограничения и не меняют выбор скрыто.
+5. Никаких «Обязательный»-бейджей и замков не появилось.
+
+---
+
+## 10. Безопасность загрузки и доверие
+
+- Только HTTPS, allowlist `github.com/musicstashall/GlassPlatform/releases/...`, без кодированных разделителей/`..`.
+- Скачанное: лимит размера, SHA-256 из манифеста, `WinVerifyTrust` + сверка издателя с текущим `GlassSetup.exe`.
+  Собираемый нами MSI-контейнер OpenGlass подписывается существующим Glass сертификатом для offline source trust; upstream DLL не переподписываются. Оригинальный MSI SecureUxTheme не изменяется и не подписывается Glass: проверяются его официальные identity/architecture/hash.
+- Запись только в `.part` в защищённом staging и проверенная атомарная публикация. Пользовательские MSI/backup не перезаписываются. Замена управляемого `Current`/cached EXE — отдельная разрешённая commit-операция с rollback, а не запрет на обновление кэша.
+- Каталоги кэша — существующие проверки `TrustedPath`: владелец Administrators/SYSTEM, без writable-ACE для прочих,
+  без reparse-точек.
+- Локальные MSI пользователя не становятся «доверенными» из-за расположения: проверяются те же идентичность/версия/ProductCode.
+- Отсутствие подписи у новой версии установщика = отказ от самопродления (продолжаем на текущей, пишем в журнал).
+- Все решения и причины — в `InstallLog` (уже есть инфраструктура `InstallLog::LineFormat`).
+
+---
+
+## 11. Инварианты: что нельзя ломать
+
+1. Setup — единый мастер обслуживания: явные Install/Update/Repair/Remove в общем плане. Удаление выполняется только по явно выбранному действию, не из-за снятой install-галочки. Removal engine/CLI и проверки зависимостей общие с GlassUnins; ARP Uninstall не открывает мастер; специальный диалог риска при прямом удалении Settings обязателен по §14.1. Modify открывает страницу обслуживания по §14.2.
+2. Обязательных продуктов нет; обе архитектуры Platform и Settings независимы. Рекомендации не становятся скрытыми зависимостями.
+3. Порядок шагов: `Glass-x64.msi` → `GlassSettings*` → `OpenGlass-x64.msi`; SecureUxTheme — отдельной последней транзакцией.
+4. Rollback и snapshot не меняются; временная рабочая копия пакета — в защищённом каталоге.
+5. Остановка/закрытие хостов, unlock, watch — без изменений.
+6. Встроенных MSI и Native DLL нет. Наличие Settings даёт возможности обслуживания, а не является обязательным условием установки Platform. Неизвестное состояние выгрузки нельзя выдавать за успешно проверенное.
+7. SecureUxTheme: discover → adjacent/download → последняя транзакция; политика «не перезаписывать существующий MSI» сохраняется.
+8. Политика автозапуска OpenGlass `!filesPresent || wasRunning` не меняется.
+9. Единственная папка платформы в профиле — `%LOCALAPPDATA%\GlassPlatform`.
+10. Клиентская совместимость `version.json` (поле `glass`/`setup`) сохраняется хотя бы на один релиз.
+
+---
+
+## 12. Проверки и тесты
+
+### 12.1 Portable (в песочнице, без Windows)
+
+| Тест | Что покрывает |
+|---|---|
+| `tests/package_rules_tests.cpp` (новый) | правила §4.2: равенство/новее/отсутствует/ниже установленной; tie → локальный |
+| `tests/package_resolver_mock.py` (новый) | кэш/локальный/сервер, `.part`, ошибки HTTP, отмена, отсутствие сети |
+| `tests/self_update_mock.py` (новый) | нумерованные пользовательские `.bak` без удаления, cached EXE без `.bak`, HKLM metadata, read-only каталог, занятый файл, битый хэш, петля, handoff/rollback и перезапуск с аргументами |
+| `tests/product_plan_tests.cpp` | миграция с 5 на 6 продуктов и mixed install/remove/repair |
+| `tests/selection_tests.cpp`, `tests/removal_order_tests.cpp` | независимость Platform/Settings обеих архитектур, отсутствие скрытых каскадов и явные предупреждения |
+| `tests/run_secure_ux_release_tests.py` | не изменилось после переноса в ReleaseClient |
+| `tests/verify_resources.py`, `tests/verify_sut_build_graph.py`, `res/asset-hashes.json` | ресурсная и графовая проверка после изъятия MSI |
+| `tests/fixed_path_msi_mock.py`, `installed_version_mock.py`, `module_scan_mock.py` | инспектор на файловых пакетах |
+
+### 12.2 Windows VM (обязательная матрица)
+
+| Сценарий | Ожидание |
+|---|---|
+| Чистая VM, сеть есть | пакеты скачиваются из релиза, установка проходит |
+| Чистая VM, сети нет, MSI рядом с EXE | установка с локальных пакетов |
+| Чистая VM, сети нет, MSI нет | карточки блокируются с причиной, система не изменена |
+| Пользовательский EXE, новый релиз | самопродление: первый/нумерованный `.bak` сохранён, перезапуск, новая версия |
+| EXE запущен из доверенного `Current`, новый релиз | замена без пользовательского `.bak`, актуальные HKLM maintenance/ARP сведения |
+| Установленная версия, релиз новее по пакетам | обновление продуктов на серверные пакеты |
+| Локальный MSI новее релизного | локальный выигрывает, в UI пометка |
+| Повреждённый продукт, пакет в кэше | репэйр из кэша без сети |
+| `GlassSetup.exe` в Program Files (read-only каталог) | самопродление через `ProgramData\...\Current` |
+| Прерывание загрузки/отмена | `.part` удалён, система не изменена |
+| (этап 9) x64-ОС + Platform x86 + GS x86 | x86 `Native.dll` управляет модулями 32-битных процессов |
+
+---
+
+## 13. Риски
+
+| Риск | Влияние | Смягчение |
+|---|---|---|
+| Пакет в кэше предыдущей установки повреждён или подменён | установка мусора | сверка PackageCode/ProductVersion/ProductCode + падение на следующий источник |
+| Каталог установщика read-only | самопродление не работает | путь в `ProgramData` (§6.2) |
+| Антивирус блокирует подмену EXE | обновление не применяется | ретраи, затем «продолжаем на текущей версии» с записью в журнал |
+| Потеря офлайн-установки | часть пользователей без сети | документированный «каталог пакетов» рядом с EXE + чек-лист релиза |
+| Релиз без одного из MSI | установка этого продукта невозможна | скрипт публикации проверяет полноту манифеста до создания релиза |
+| Двойной запуск во время перезапуска | два мастера | существующий мьютекс + передача PID и ожидание |
+| Расхождение версии установщика и версии пакетов | странные состояния | манифест связывает `setupPackage.version` и `products[].version`; при расхождении — предупреждение в журнале |
+| Этап 9 меняет размерность массива продуктов | падение существующих моков | отдельный коммит, все массивы переводятся на `kProductCount` |
+
+---
+
+## 14. Подтверждённые решения пользователя (2026-11-06)
+
+1. **D1.** Кэш предыдущей установки применяется **только при совпадении целевой и установленной версии**. Проверка версии не заменяет PackageCode/hash/identity validation.
+2. **D2.** `%ProgramData%\Packages\GlassPlatform\Current` — единственный постоянный кэш. MSI в `%TEMP%` не источник. При обновлении пакеты заменяются новыми после commit; старые сохраняются лишь для незавершённого rollback.
+3. **D3.** Поддерживается аккуратный каталог `<EXE-dir>\packages\`. Для тестирования сборки все пять MSI располагаются также непосредственно в `GlassProject\Build\GlassSetup\Release` рядом с EXE. Разрешение обоих расположений выполняется не относительно CWD.
+4. **D4.** Кнопки «Проверить обновление установщика» нет. При старте автоматически получаются актуальные версии EXE и продуктов; при недоступной сети локальная установка остаётся возможной. Startup discovery не означает предварительное скачивание всех MSI: payload приобретается только для подтверждённых действий.
+5. **D5.** Две отдельные карточки `GlassSettings` x64/x86; независимые MSI, состояния, действия и диагностика.
+6. **D6.** Пользовательские `GlassSetup.exe.bak`, `GlassSetup.exe[2].bak`, `GlassSetup.exe[3].bak`, … сохраняются без лимита и автоочистки, на ответственность пользователя. При запуске из доверенного машинного кэша эта схема не применяется: проверенная замена EXE, обновление HKLM metadata/ссылок после успешной публикации, без пользовательского backup.
+
+### 14.1 Дополнительные согласованные решения: helpers и удаление Settings
+
+- Обе Native DLL исключаются из bundle. Установленный Settings не обязателен для Platform: он предоставляет
+  helper нужной архитектуры. Проверяются фактический PE, архитектура, безопасный путь и совместимость протокола;
+  MSI registration сама по себе не подтверждает пригодность helper. DLL не загружается в процесс другой архитектуры.
+- Если helper отсутствует/несовместим, GUI показывает предупреждение в общем плане и требует явного принятия риска.
+  Ответственность за выгрузку модулей принимает пользователь. Обычный `/S` не принимает этот риск: для CLI требуется
+  отдельный явный параметр; без него при необходимой, но недоступной проверке — отказ до продуктовых изменений.
+- Если проверка доступна и после штатной остановки обнаружены загруженные модули, показать процессы и действия
+  «Повторить проверку / Продолжить на свой риск / Отмена». Для CLI также требуется явное принятие риска.
+  Скрытое завершение чужих процессов запрещено. Неизвестно/проверено/обнаружены holders — разные состояния.
+- Подтверждение риска не отменяет MSI ошибки занятых файлов, требования перезагрузки, проверки пакетов/путей/прав
+  и остальные проверки безопасности. Возможные падения процессов объясняются до выполнения, не скрываются как успех.
+- Общий планировщик/исполнитель Setup и Unins использует существующие модули, без нового EXE/DLL. Правила и проверки
+  removal не дублируются в двух независимых реализациях.
+- Автоматическое обновление EXE допускается только при подтверждённом доверии. Неподписанная dev-сборка/неподтверждённый
+  новый сертификат не включают обход проверки: остаётся текущий EXE с диагностикой. Локальное тестирование MSI — отдельный сценарий.
+- При прямом пользовательском запуске Unins продукта GlassSettings и установленной Platform соответствующей архитектуры
+  показывается специальный диалог **до остановки/удаления**. Соответствующие пары: Settings x86 ↔ Platform x86,
+  Settings x64 ↔ Platform x64. Наличие другой архитектуры вместо соответствующей само по себе не вызывает этот диалог.
+  Проверяется регистрация/наличие Platform, а не только то, запущена ли она сейчас; отсутствие другой Settings архитектуры
+  не используется как доказательство отсутствия зависимости helper.
+- Смысл диалога: после удаления Settings дальнейшая выгрузка Platform останется без соответствующего helper/контроля
+  и может привести к падению процессов. Если намерены удалить весь комплект, сначала удалить Platform, затем Settings;
+  либо использовать интерфейс обслуживания через «Изменить», где порядок задаётся общим планом.
+  Явный выбор продолжить не запускает каскадное удаление Platform; отмена оставляет продукты без изменений.
+- В общем maintenance-плане предупреждение оценивается по итоговому набору оставляемых продуктов; при совместном удалении
+  сначала обслуживается/удаляется соответствующая Platform и завершается использование helper, только затем Settings.
+  Прямой запуск Unins не открывает полный мастер автоматически. Silent entry не пытается показать интерактивный диалог:
+  действует согласованное правило явного CLI принятия риска, без него операция не начинается.
+
+### 14.2 Вход в обслуживание и лицензия
+
+- Вход «Изменить»/maintenance entry запускает **страницу обслуживания**, без welcome/license tour, если лицензия
+  этой версии установщика уже принята пользователем. Проверка релиза, валидности entry context и обнаружение продуктов
+  при этом не пропускаются. Сам факт наличия установленного продукта не является принятием новой лицензии.
+- После обновления установщика лицензионное соглашение показывается один раз при первом использовании новой версии,
+  в том числе при входе через «Изменить». После принятия — сразу страница обслуживания, без повторного welcome tour.
+  При следующем обслуживании той же версии лицензия повторно не показывается.
+- Принятие фиксируется только после явного согласия, с идентичностью версии установщика и редакции лицензии;
+  пользовательское состояние хранится в HKCU, metadata машинного кэша — в HKLM. Отмена/закрытие не фиксируют принятие
+  и не запускают продуктовую транзакцию. CLI не должен получать скрытое принятие из handoff-флага или `/S`.
+- Handoff после self-update сохраняет режим обслуживания, но не превращает согласие старой версии в согласие новой.
+  Не делать отдельную кнопку обновления и не возвращать упразднённую страницу Update.
+
+### 14.3 Проверки новых контрактов
+
+- Каждая архитектура: прямое удаление Settings с соответствующей Platform (работающей и остановленной), только с другой
+  Platform, без Platform; продолжение/отмена; отсутствие непрошеного каскадного удаления; CLI с/без принятия риска.
+- Mixed remove: Platform перед Settings, helper не теряется посреди операций; удаление одной архитектуры не лишает
+  другую её собственных зарегистрированных путей. Отдельно проверить обновление самого используемого Settings/helper.
+- Maintenance entry той же версии без лицензии-повтора; новая версия показывает лицензию ровно до первого принятия;
+  cancel, повторный запуск, self-update handoff, запуск из Current и переход после лицензии прямо на maintenance page.
+- Установленная Native валидна/повреждена/несовместима/отсутствует: независимые возможности архитектур, честный статус
+  неизвестного мониторинга, подтверждение риска в GUI/CLI. Проверки пакетов не обходятся этим подтверждением.
+- GlassSettings x86 на x64 разрешён. Пользователь подтвердил фактическое применение стилей; запрещать его по WOW64 нельзя.
+  Красное уведомление после успешной смены стиля — отдельный открытый дефект, причина ещё не установлена. Ограничения
+  SecureUxTheme registration и прочих операций должны проверяться в UI и backend отдельно по capabilities.
+
+### 14.4 Очистка, тексты страницы и уведомления Settings — финальные уточнения
+
+- Очистка — отдельная страница перед выполнением полного удаления, checkbox по умолчанию выключен. Выбор виден
+  в общем плане, доступ всех профилей проверяется до изменений; cleanup выполняется после успешного удаления продуктов.
+  При частичном удалении/ошибке глобальная очистка не начинается; поздняя ошибка cleanup — честный partial result.
+- На странице выбора продуктов нет checkbox, ссылки или действия «очистить хвосты». Если продуктов уже нет,
+  оставшиеся данные только перечисляются с конкретными путями/разделами реестра; отдельный cleanup workflow не создаётся.
+- Состав cleanup: продуктовые папки всех локальных профилей (настройки/логи/дампы), свои HKCU/HKU/HKLM записи,
+  whitelist значений OpenGlass/DWM и `.theme` сохранённой темы, куда Glass дописывает параметры. Нельзя считать любой
+  `.theme` с нашими параметрами собственностью Glass вне согласованного каталога.
+  Уточнение пользователя: удаляются `.theme` с секциями `Glass`/`Glass.*` в пользовательском каталоге сохранённых тем
+  (`LocalAppData\Microsoft\Windows\Themes`), у всех локальных пользователей; `Windows\Resources\Themes` не очищается.
+  Отдельный ledger происхождения для этих файлов не требуется. Активная тема сначала переключается на стандартную;
+  если переключение не удалось, разрешена прямая правка `CurrentTheme`/`ThemeManager` в соответствующем hive.
+  Registry fallback не выдаётся за подтверждённую смену оформления текущего сеанса и не завершает сеансы.
+  Не удалять произвольные темы/весь раздел DWM, Windows Installer cache, permanent файлы автора SUT или пользовательские `.bak`.
+- Нет установленных продуктов: «Установка GlassPlatform» / «Выберите продукты для установки. Проверьте выбранные действия в плане.»
+  Есть установленные: «Обслуживание GlassPlatform» / «Установите, обновите, восстановите или удалите продукты. Все изменения отображаются в плане.»
+  Наличие только хвостов не меняет заголовок на обслуживание и не добавляет предложение очистки в подзаголовок.
+- Settings показывает собственную версию запущенного EXE и архитектуру. Новый центр обновлений/таблица пакетов не создаются.
+  Один координатор проверяет независимые версии установленных продуктов из общего каталога. Найденные обновления —
+  сводное уведомление и отметки на спойлерах; закрытие запоминается в HKCU для продукта/архитектуры/версии. Новая версия
+  уведомляет снова; отсутствие сети не выдаётся за отсутствие обновлений.
+- «Обновить» в уведомлении/на спойлере только запускает обслуживание. Settings не скачивает MSI, не выполняет установку
+  и не формирует доверенный executable plan. Setup заново проверяет каталог/факты и предлагает действия.
+
+### Замечания аудита, обязательные для реализации
+
+- Новый HTML пока макет, а не подключённый production UI. В diff новых коммитов нет реализации файлового resolver/self-update или удаления embedded MSI из проекта.
+- §5: определить отдельно bundle/display version и фактический MSI ProductVersion; сравнивать численно. Равная версия не доказывает эквивалентность пересобранных пакетов — нужны PackageCode и hash, как в текущем контракте.
+- Startup self-update должен быть отдельной восстанавливаемой операцией. Определение «запущен из кэша» — по каноническому доверенному пути/владельцу, не по совпадению имени каталога. Не исполнять/не заменять файл в пользовательском writable каталоге из elevated процесса без проверенной защищённой копии и защиты от подмены между проверкой и запуском.
+- Глобальный install mutex сам по себе не подменяет handoff-протокол: новый процесс не должен повторно применять чужой PID/аргументы; нужно тестировать старый/новый процессы, UAC, CLI/maintenance ticket и сбой между rename/launch. Новые внешние EXE/DLL/helper-модули без отдельного согласования не добавлять.
+- Сетевая политика должна учитывать реальные HTTPS redirects release assets без произвольных host redirects; статус «нет сети» не должен означать «новая версия отсутствует».
+- R8, R9 и §14.1–14.3 требуют адаптации удаления обеих Settings MSI, install-path readers и ключей HKLM по разрядности; одна native карточка/один путь в старом коде недостаточны.
+- Изъятие ресурсов MSI нельзя считать завершённым без локальной offline установки, обновления, rollback, combined install/remove и запуска из `Current`. Нужны Windows/MSVC/WiX проверки, не только portable/source guards.
+
+---
+
+## 15. Документация и релизный чек-лист
+
+**Обновить после реализации**
+
+- `GlassSetup/README.md` — сборка без встраивания; источники пакетов; самопродление; «Установка без сети»; таблица «кто что качает».
+- `GlassSetup/docs/implementation-progress.md` — запись о переходе на лёгкий установщик и оставшихся пунктах.
+- `GlassSetup/docs/product-state-contract.md` — модель шести продуктов (§9), независимые действия, ограничения и предупреждения.
+- `GlassSetup/docs/cache-profile-maintenance-contract.md` — кэш как источник пакетов (единственный `Current`, временный staging/rollback и удаление старых пакетов после commit).
+- `AGENTS.md` — запрет «предлагать вернуть встраивание MSI».
+
+**Релизный чек-лист (ручной, пока нет workflow)**
+
+1. Собрать Release|x64 → Release|x86; проверить пять MSI рядом с EXE в `GlassProject\Build\GlassSetup\Release`.
+2. Подписать `GlassSetup.exe`, `GlassSettings.Native.dll`, все пять MSI.
+3. Посчитать SHA-256 и размеры; сгенерировать `version.json`.
+4. Проверить: манифест ссылается ровно на опубликованные имена файлов; все `url` проходят allowlist.
+5. Загрузить ассеты (5 MSI + `GlassSetup.exe` + `version.json`) в релиз.
+6. Проверить на чистой VM: чистая установка, обновление, офлайн-установка, самопродление.
+
+---
+
+## 16. Приложения
+
+### Приложение A. Карта символов (текущий HEAD, номера строк сдвинутся)
+
+| Что | Где |
+|---|---|
+| `GLASS_EMBED_MSI`, `GlassMsiPayloadDir`, проверки наличия MSI | `GlassSetup.vcxproj` (~87, 109–125) |
+| `IDR_MSI_*` | `res/resource.h` (171–175) |
+| `IDR_HTML RCDATA "slideshow.html"` | `res/GlassSetup.rc` (7) |
+| `InstallEngine::ExtractPayload` | `src/InstallEngine.cpp` (~1101) |
+| `InstallEngine::VerifyEmbeddedNativePayload` | `src/InstallEngine.cpp` (~1161) |
+| Шаги установки MSI | `src/InstallEngine.cpp` (~1485–1529) |
+| `GlassInstallSettingsEarly` | `src/InstallEngine.cpp` (~1392) |
+| `GlassProductInspect::Inputs{msiRes*}` | `src/InstallSupport/GlassProductInspect.h` (36–45) |
+| Кэш предыдущей установки | `src/InstallSupport/GlassMaintenanceCache.h` (Publish ~278) |
+| `FetchLatestSetupVersion`, `IsAllowedReleaseUrl` | `src/main.cpp` (~272, ~315) |
+| `Page::Update` и его ветки | `src/main.cpp` (~92, 1676, 1727, 2573–2602, 2744, 3538, 3811–3890) |
+| `update-panel`, `.update-*` | `res/slideshow.html` (206, 243–265, 503–509) |
+| `IDS_UPDATE_*`, `IDS_CHECKING_BODY` | `res/GlassSetup.rc` (~312, ~348) |
+| Образец резолвера | `src/InstallSupport/GlassSecureUxPackage.cpp` (~50, ~216) |
+| Модель продуктов | `src/GlassProducts.h`, `src/GlassProductPlan.h`, `src/GlassProductUiPolicy.h` |
+| ProductCode MSI | `src/InstallSupport/GlassInstallMsi.h` (5–17) |
+
+### Приложение B. CLI (предложение)
+
+| Флаг | Смысл |
+|---|---|
+| `--no-self-update` | не проверять и не скачивать новую версию установщика |
+| `--check-update` | только проверить версии (установщика и пакетов), вывести в журнал и выйти |
+| `--packages=<dir>` | дополнительный каталог локальных MSI (приоритет как у каталога EXE) |
+| `--offline` | не обращаться к сети вообще; отсутствующие пакеты = блокирующая причина |
+| `--self-updated=<pid>` | внутренний: новый экземпляр ждёт завершения указанного процесса |
+| `/log=<file>` | существующий журнал установки |
+
+### Приложение C. Тексты (RU/EN, предложение)
+
+| Ключ | RU | EN |
+|---|---|---|
+| `IDS_CHECKING_BODY` | Проверяем версию установщика и доступность пакетов. Если обновления нет или сервер недоступен, установка продолжится с этой версией. | Checking the setup version and package availability. If there is no update or the server is unreachable, setup continues with this version. |
+| `IDS_SELFUPDATE_STATUS` | Загружаем установщик 1.4.3 и перезапускаемся | Downloading setup 1.4.3 and restarting |
+| `IDS_SELFUPDATE_FAILED` | Не удалось обновить установщик. Продолжаем с версией 1.4.2. | Could not update setup. Continuing with version 1.4.2. |
+| `IDS_PKG_LOCAL_NEWER` | Используется локальный пакет новее опубликованного | Using a local package newer than the published one |
+| `IDS_PKG_NO_SOURCE` | Нет пакета ни локально, ни в релизах | No package locally or in the release |
+| `IDS_PKG_FROM_CACHE` | Пакет из предыдущей установки | Package from the previous installation |
+
+---
+
+**Итог.** Работы разбиты на этапы R0–R10: контракты и манифест → сетевой клиент → резолвер источников → движок на файлах →
+инспектор → самопродление с `.bak` → удаление страницы новой версии → изъятие MSI из сборки → страница обслуживания по макету →
+обе разрядности GlassSettings (модель до финализации UI) → документация и VM-матрица. Сборка остаётся рабочей после каждого этапа.
+
+### OpenGlass file servicing — 2026-11-04
+
+Setup and GlassUnins now share receipt-based fixed-file transactions; the
+standalone removal planner no longer requires a Glass MSI for this product.
+ARP uses a separate owned `GlassPlatform.OpenGlass` key and cached controllers;
+independent upstream Inno registrations are outside this route. Repair/update
+continues to acquire and verify the upstream setup on Next, without running it.
+Portable file mocks, source servicing contracts and composition DOM tests pass.
+Outstanding acceptance: Windows install, repair, partial/full removal, cancellation
+and injected-failure rollback, including SCM/tasks, ACL/sharing and ARP behavior.
+
+#### Composition gesture correction — 2026-11-04
+
+Available → Installed selecting Apply, then Installed → Available, is a mirrored
+undo of Apply (including forced same-version reinstall), never implicit Remove.
+Explicit trash still stages removal. Removal's CRT placeholder holds the old
+position until the effect finishes, including across native state echoes.
+OpenGlass planning does not require a successful initial metadata request;
+unknown versions are resolved and verified on Next, not treated as local media.
+
+#### Mirror Remove too — 2026-11-04
+
+Remove → return to Installed is Keep, not Apply/reinstall, regardless of repair
+source availability. The original installed product remains unchanged and the
+plan becomes empty for that row. Pending fresh-install cancellation uses the
+same CRT slot, including when this empties the composition panel.

@@ -39,27 +39,31 @@ assert "args_.originalDir" not in unins_roots
 assert 'ogDir=roots.openGlass' in start_install
 # Workspace paths use one Windows separator at the junction, not a doubled
 # literal that depends on Win32 path normalization.
-assert r'workspace.directory+L"\\current-' in unins
+registered=(repo/'GlassSetup/src/InstallSupport/GlassRegisteredMsi.h').read_text(encoding='utf-8')
+assert 'GlassRegisteredMsi::Recheck' in unins
 assert r'workspaceDir+L"\\rollback-prior-' in rollback_src
-assert r'workspaceDir+L"\\recheck-' in engine
-worker = function(engine, "DWORD WINAPI InstallEngine::WorkerThread(")
+assert 'GlassRegisteredMsi::Recheck' in engine
+assert r'workspace+L"\\recheck-' in registered
+worker = function(engine, "DWORD WINAPI InstallEngine::RunGlassWorker(")
 assert worker.index("CreateRollbackSnapshot()") < worker.index("StopRunningHosts()") < worker.index("InstallGlassSettingsEarly()")
 assert worker.index("CapturePriorHostState()") < worker.index("CreateRollbackSnapshot()")
 create = function(rollback_src, "bool CreateSnapshot(")
 assert create.index("VerifyProductRegistrations(") < create.index("TrySnapshotProduct(")
 operation = function(unins, "int RunOperation(")
-assert operation.index("CheckProductFileRoots(") < operation.index("StopAllForUninstall(") < operation.index("UninstallProduct(")
+assert operation.index("CheckProductFileRoots(") < operation.index("P::Build(facts,request)") < operation.index("StopAllForUninstall(") < operation.index("UninstallProduct(")
 assert "ValidatePlatformTask(" in operation and "ValidateOpenGlassPaths(" in operation
 for stage in ("bool InstallEngine::RunOneMsi(", "bool InstallEngine::RunMsiSequence(", "bool InstallEngine::PurgeRemnants("):
     assert "RecheckSnapshottedProduct(" in function(engine, stage), stage
 retry = function(engine, "bool InstallEngine::RunOneMsi(").split("exitCode == ERROR_PRODUCT_VERSION", 1)[1]
 assert retry.index("RecheckRelatedProducts(") < retry.index("GlassInstallMsi::InstallProduct(")
 recheck = function(engine, "bool InstallEngine::RecheckSnapshottedProduct(")
-assert recheck.index("CopyLocalPackage(") < recheck.index("CheckProductFileRoots(")
+assert "GlassRegisteredMsi::Recheck" in recheck
+assert registered.index("CopyLocalPackage(") < registered.index("CheckProductFileRoots(")
+assert "before==now" in registered
 
 # Keep UpgradeCodes used by the guard synchronized with the actual projects.
 family_section = function(rollback_src, "bool VerifyProductRegistrations(")
-for filename in ("Glass-x64.wixproj", "Glass-x86.wixproj", "OpenGlass-x64.wixproj",
+for filename in ("Glass-x64.wixproj", "Glass-x86.wixproj",
                  "GlassSettings-x64.wixproj", "GlassSettings-x86.wixproj"):
     root = ET.parse(repo / "GlassSetup/msi" / filename).getroot()
     upgrade = next(node.text for node in root.iter() if node.tag.endswith("GlassUpgradeCode"))
@@ -152,7 +156,7 @@ namespace GlassInstallMsi {
  enum class ProductPathCheck {Safe,OutsideRoot,Unverifiable,Cancelled};
  std::wstring ProductCodeFromMsiPath(const std::wstring&){return fake.cachedCode;}
  constexpr wchar_t kProductPlatformX64[]=L"p64",kLegacyPlatformX64[]=L"old64",kProductPlatformX86[]=L"p86",
-  kLegacyPlatformX86[]=L"old86",kProductOpenGlass[]=L"og",kLegacyOpenGlass[]=L"oldog",
+  kLegacyPlatformX86[]=L"old86",kProductOpenGlassResourcesX64[]=L"res",kProductOpenGlass[]=L"og",kLegacyOpenGlass[]=L"oldog",
   kProductSettingsX64[]=L"gs64",kProductSettingsX86[]=L"gs86",
   kProductSecureUxThemeX64[]=L"sut64",kProductSecureUxThemeX86[]=L"sut86";
  ProductPathCheck CheckProductContexts(const wchar_t*,std::wstring&,const std::atomic_bool* = nullptr) noexcept;
@@ -167,7 +171,8 @@ middle = r'''
 namespace GlassInstallRollback {
  struct ProductSnapshot{std::wstring productCode,installDir,cachedMsiPath,displayVersion;};
  struct SessionState{
-  std::wstring workspaceDir=L"secure",x64Dir=L"root",x86Dir=L"root",openGlassDir=L"root";std::vector<ProductSnapshot> oldProducts;
+  unsigned productMask=0x7Fu;
+  std::wstring workspaceDir=L"secure",x64Dir=L"root",x86Dir=L"root",openGlassDir=L"root",resourcesDir=L"resources";std::vector<ProductSnapshot> oldProducts;
   unsigned copyError=0;bool hadPriorInstall=false,productPathUnverified=false;std::wstring productPathCode,productPathDetail;
  };
 }
@@ -179,6 +184,15 @@ int main(){
  reset();assert(CheckProductContexts(L"p",detail,&cancelled)==ProductPathCheck::Safe);
  reset();fake.all=fake.current=1;fake.productState=INSTALLSTATE_DEFAULT;
  assert(CheckProductContexts(L"p",detail,&cancelled)==ProductPathCheck::Safe);
+ // A foreign family outside the transaction is not snapshotted/mutated.
+ {GlassInstallRollback::SessionState onlyOg;onlyOg.productMask=8;
+  assert(VerifyProductRegistrations(onlyOg,&cancelled));}
+ reset();fake.all=fake.current=1;fake.productState=INSTALLSTATE_DEFAULT;
+ fake.related[L"{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5030}"]={L"foreign-og"};
+ {GlassInstallRollback::SessionState onlyOg;onlyOg.productMask=8;
+  assert(!VerifyProductRegistrations(onlyOg,&cancelled));}
+ {GlassInstallRollback::SessionState onlyOg;onlyOg.productMask=8;
+  assert(TrySnapshotProduct(onlyOg,L"p64",L"root",&cancelled));assert(fake.copyCalls==0);}
  reset();fake.all=1;fake.current=0;fake.productState=INSTALLSTATE_UNKNOWN;
  assert(CheckProductContexts(L"p",detail,&cancelled)==ProductPathCheck::Unverifiable);
  reset();fake.all=fake.current=2;fake.productState=INSTALLSTATE_DEFAULT;
@@ -223,7 +237,12 @@ int main(){
  reset();fake.rows={{L"",L"C:\\fixed\\a.dll"}};
  assert(CheckProductFileRoots(L"p",L"cached",L"C:\\fixed",detail,&cancelled)==ProductPathCheck::Unverifiable);
  reset();fake.rows={{L"{one}",L"C:\\fixed\\a.dll",INSTALLSTATE_ABSENT}};
+ assert(CheckProductFileRoots(L"p",L"cached",L"C:\\fixed",detail,&cancelled)==ProductPathCheck::Safe);
+ // A confirmed absent optional component has no resource to remove; Unknown is not absence.
+ reset();fake.rows={{L"{one}",L"C:\\fixed\\a.dll",INSTALLSTATE_UNKNOWN}};
  assert(CheckProductFileRoots(L"p",L"cached",L"C:\\fixed",detail,&cancelled)==ProductPathCheck::Unverifiable);
+ reset();fake.rows={{L"{one}",L"",INSTALLSTATE_ABSENT},{L"{two}",L"D:\\outside\\a.dll"}};
+ assert(CheckProductFileRoots(L"p",L"cached",L"C:\\fixed",detail,&cancelled)==ProductPathCheck::OutsideRoot);
  reset();fake.rows={{L"{one}",L"C:\\fixed\\a.dll",INSTALLSTATE_SOURCE}};
  assert(CheckProductFileRoots(L"p",L"cached",L"C:\\fixed",detail,&cancelled)==ProductPathCheck::Unverifiable);
  reset();fake.rows={{L"{one}",L"",INSTALLSTATE_LOCAL}};
@@ -281,7 +300,7 @@ int main(){
 with tempfile.TemporaryDirectory(prefix="glass-fixed-msi-") as directory:
     cpp = Path(directory) / "fixed.cpp"
     exe = Path(directory) / "fixed"
-    cpp.write_text(prefix + contexts + "\n" + file_roots + middle + verify_registrations + "\n" + snapshot +
+    cpp.write_text(prefix + contexts + "\n" + file_roots + middle + function(rollback_src, "unsigned SnapshotProductMask(") + verify_registrations + "\n" + snapshot +
                    "\nnamespace GlassInstallRollback {\n" + safe_uninstall + "\n}\n" + main, encoding="utf-8")
     compiler = os.environ.get("CXX", "g++")
     subprocess.run([compiler, "-std=c++17", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-no-pie",

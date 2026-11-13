@@ -67,6 +67,8 @@ public sealed partial class MainWindow : Window
     private IntPtr _closeSubclassFn;
     private static readonly UIntPtr CloseSubclassId = new(0x4753_434C); // GSCL
     private const uint WmClose = 0x0010;
+    private const uint WmCopyData = 0x004A;
+    private const int BackupCopyMagic = 0x4753424B;
     /// <summary>GlassSettingsMsg::WM_GLASS_SETTINGS_ACTIVATE (WM_APP + 0xA03) — ShellExt / second instance.</summary>
     private const uint WmGlassSettingsActivate = 0x8000 + 0xA03;
     private const uint MsgfltAllow = 1;
@@ -1073,6 +1075,8 @@ public sealed partial class MainWindow : Window
         RunDeferredStartupTasks();
         // WarmAttach до снятия overlay — иначе Processes «догоняет» после dismiss.
         WarmAttachListPageIfReady();
+        if (SettingsBackupOpenRequest.TryPeek(out var backupPath))
+            OpenSettingsBackup(backupPath);
 
         // Контент под fade: host Opacity=0, затем 0→1 за 500 ms после снятия splash.
         // Hit-test остаётся off до MarkReady — иначе клики со splash доезжают как Home GlassDrill.
@@ -1905,7 +1909,23 @@ public sealed partial class MainWindow : Window
         if (uMsg == WmGlassSettingsActivate)
         {
             if (!_closeInProgress)
-                _ = DispatcherQueue.TryEnqueue(BringMainWindowToForeground);
+            {
+                _ = DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (SettingsBackupOpenRequest.TryReadPublished() is { } published)
+                        SettingsBackupOpenRequest.Set(published);
+                    BringMainWindowToForeground();
+                    if (SettingsBackupOpenRequest.TryPeek(out var backupPath))
+                        OpenSettingsBackup(backupPath);
+                });
+            }
+            return IntPtr.Zero;
+        }
+
+        if (uMsg == WmCopyData)
+        {
+            if (TryReadBackupCopyData(lParam, out var path))
+                _ = DispatcherQueue.TryEnqueue(() => OpenSettingsBackup(path));
             return IntPtr.Zero;
         }
 
@@ -2295,10 +2315,15 @@ public sealed partial class MainWindow : Window
         AddNav("attach", GlassSettingsResources.Get("NavAttach"), "\uE77B");
         NavView.ItemInvoked += NavView_OnItemInvoked;
         ApplyOpenGlassNavVisibility();
+        ApplyPlatformNavVisibility();
     }
 
     private void OnOpenGlassUiPolicyChanged(object? sender, EventArgs e) =>
-        DispatcherQueue.TryEnqueue(ApplyOpenGlassNavVisibility);
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            ApplyOpenGlassNavVisibility();
+            ApplyPlatformNavVisibility();
+        });
 
     private void ApplyOpenGlassNavVisibility()
     {
@@ -2316,6 +2341,25 @@ public sealed partial class MainWindow : Window
         {
             NavigateTo("home", force: true);
             SelectNavItem("home");
+        }
+    }
+
+    private void ApplyPlatformNavVisibility()
+    {
+        var expose = GlassPlatformUiPolicy.ShouldExposePlatformSections();
+        foreach (var tag in new[] { "glass", "text", "attach" })
+        {
+            if (!_navItems.TryGetValue(tag, out var item))
+                continue;
+            item.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+            if (expose)
+                continue;
+            if (string.Equals(_currentTag, tag, StringComparison.Ordinal)
+                || string.Equals(_nav.CurrentSidebarTag, tag, StringComparison.Ordinal))
+            {
+                NavigateTo("home", force: true);
+                SelectNavItem("home");
+            }
         }
     }
 
@@ -2766,6 +2810,57 @@ public sealed partial class MainWindow : Window
             null,
             GlassSettingsResources.Get("Breadcrumb_ThemesDesktopBackground"));
         UpdateBackButton();
+    }
+
+    /// <summary>Открыть страницу «Система» на вкладке восстановления выбранной копии.</summary>
+    internal void OpenSettingsBackup(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        if (!_contentReady)
+        {
+            SettingsBackupOpenRequest.Set(path);
+            return;
+        }
+
+        if (string.Equals(_currentTag, "system", StringComparison.Ordinal)
+            && !_nav.IsDrillActive
+            && NavFrame.Content is SystemPage page)
+        {
+            SettingsBackupOpenRequest.Clear();
+            SelectNavItem("system");
+            page.OpenRestore(path);
+            UpdateBackButton();
+            return;
+        }
+
+        SettingsBackupOpenRequest.Set(path);
+        NavigateTo("system", force: true);
+        SelectNavItem("system");
+    }
+
+    private static bool TryReadBackupCopyData(IntPtr lParam, out string path)
+    {
+        path = "";
+        if (lParam == IntPtr.Zero)
+            return false;
+        var data = Marshal.PtrToStructure<BackupCopyData>(lParam);
+        if (data.Data.ToInt64() != BackupCopyMagic || data.Size < 2 || data.Pointer == IntPtr.Zero)
+            return false;
+        var text = Marshal.PtrToStringUni(data.Pointer, data.Size / 2);
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        path = text.Trim().TrimEnd('\0');
+        return path.EndsWith(SettingsRegistryBackupService.FileExtension, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BackupCopyData
+    {
+        public IntPtr Data;
+        public int Size;
+        public IntPtr Pointer;
     }
 
     internal void NavigateHomeDwmReflectionPicker()

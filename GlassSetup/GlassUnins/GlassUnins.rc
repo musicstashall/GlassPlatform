@@ -12,4 +12,5 @@ IDR_SLIDE_TASKBAR RCDATA "..\\res\\assets\\slide_taskbar.jpg"
 IDR_SLIDE_NOTIFICATION RCDATA "..\\res\\assets\\slide_notification.png"
 IDR_SLIDE_CONTEXT_MENU RCDATA "..\\res\\assets\\slide_context_menu.jpg"
 IDR_SLIDE_EXPLORER RCDATA "..\\res\\assets\\slide_explorer.jpg"
-IDR_UNLOCKER_X64 RCDATA "..\\..\\Build\\x64\\Release\\GlassSettings.Native.dll"
+
+#include "../res/ProductStrings.rcinc"

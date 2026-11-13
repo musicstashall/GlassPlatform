@@ -11,6 +11,7 @@ using GlassSettings.Pages.Dwm;
 using GlassSettings.Pages.Glass;
 using GlassSettings.Services;
 using GlassSettings.Strings;
+using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -349,6 +350,7 @@ public sealed partial class HomePage : Page
         Refresh();
         HookEnvironmentWatcher();
         ApplyOpenGlassUiVisibility();
+        ApplyPlatformHomeVisibility();
         OpenGlassUiPolicy.Changed += OnOpenGlassUiPolicyChanged;
         OpenGlassBorderPolicyCoordinator.Changed += OnOpenGlassBorderPolicyChanged;
         // Presence subscription on every load — ensures toggle updates when navigating back.
@@ -563,9 +565,28 @@ public sealed partial class HomePage : Page
 
         var manageRow = _systemCard.AddRow();
         manageRow.Title = GlassSettingsResources.Get("Home_RowSystemManagement");
-        manageRow.ShowDivider = false;
         manageRow.NavigateRequested += (_, _) => RaiseNav(HomeNavTarget.Section("system"));
+
         _systemCard.UpdateLastDivider();
+    }
+
+    private void ApplyPlatformHomeVisibility()
+    {
+        var expose = GlassPlatformUiPolicy.ShouldExposePlatformSections();
+        if (_glassCard is not null)
+            _glassCard.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_processesCard is not null)
+            _processesCard.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_placeholdersCard is not null)
+            _placeholdersCard.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_componentsCard is not null)
+            _componentsCard.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_glassPlatformDualRow is not null)
+            _glassPlatformDualRow.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_glassPlatformRow is not null)
+            _glassPlatformRow.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
+        if (_shellRow is not null)
+            _shellRow.Visibility = expose ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void BuildProcessesCard()
@@ -1209,15 +1230,14 @@ public sealed partial class HomePage : Page
     private bool _glassPlatformSuppress;
     private bool _openGlassBusy;
     private bool _glassPlatformBusy;
-    private DateTime _lastRefreshSystemCardUtc = DateTime.MinValue;
 
     private void RefreshSystemCard()
     {
         if (_systemCard is null) return;
+        ApplyPlatformHomeVisibility();
 
-        if ((DateTime.UtcNow - _lastRefreshSystemCardUtc).TotalMilliseconds < 2000)
-            return;
-        _lastRefreshSystemCardUtc = DateTime.UtcNow;
+        // Presence events may be delivered only once per state change. Do not
+        // drop them behind a timer throttle; the fingerprint already deduplicates UI.
 
         var ogLine = HomeStatusSummary.OpenGlassLine();
         var ogColor = HomeStatusSummary.OpenGlassStatusColor();
@@ -1226,13 +1246,14 @@ public sealed partial class HomePage : Page
         bool ogRunning;
         if (presence.Revision > 0)
         {
-            ogTaskExists = presence.OgLegacyTaskExists != 0 || presence.OgCurrentTaskExists != 0;
+            ogTaskExists = presence.OgLegacyTaskExists != 0 || presence.OgCurrentTaskExists != 0
+                || presence.OpenGlassOrchestration != (int)NativeHostInterop.NativeOpenGlassHostUiState.NoTask;
             ogRunning = presence.OpenGlassOrchestration
                 == (int)NativeHostInterop.NativeOpenGlassHostUiState.Running;
         }
         else
         {
-            ogTaskExists = OpenGlassHostService.LegacyHostTaskExists();
+            ogTaskExists = OpenGlassHostService.OrchestrationInstalled();
             ogRunning = OpenGlassHostService.QueryOpenGlassHostUiState() == OpenGlassHostUiState.Running;
         }
 
@@ -1437,7 +1458,7 @@ public sealed partial class HomePage : Page
         var want = _openGlassSwitch.IsOn;
         var st = OpenGlassHostService.QueryOpenGlassHostUiState();
 
-        if (!OpenGlassHostService.LegacyHostTaskExists())
+        if (!OpenGlassHostService.OrchestrationInstalled())
         {
             _openGlassSuppress = true;
             _openGlassSwitch.IsOn = st == OpenGlassHostUiState.Running;
@@ -1449,7 +1470,7 @@ public sealed partial class HomePage : Page
         {
             if (st == OpenGlassHostUiState.Running)
                 return;
-            if (st != OpenGlassHostUiState.Ready)
+            if (st is not OpenGlassHostUiState.Ready and not OpenGlassHostUiState.Disabled)
             {
                 _openGlassSuppress = true;
                 _openGlassSwitch.IsOn = false;
@@ -1657,6 +1678,9 @@ public sealed partial class HomePage : Page
     private void RefreshPlatformComponentGroup()
     {
         if (_platformComponentGroup is null)
+            return;
+
+        if (!GlassPlatformUiPolicy.ShouldExposePlatformSections())
             return;
 
         var detailed = PlatformModuleVersions.GetAllDetailed();

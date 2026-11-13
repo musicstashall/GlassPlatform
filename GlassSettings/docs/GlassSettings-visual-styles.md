@@ -29,7 +29,7 @@
 | Реестр BWM | `GlassSettingsRegistry.cs` → `EnableSystemFont` |
 | Применение темы | `VisualStyleThemeManager.cs`, `ThemeManager2.cs`, `ThemeApplyFallback.cs` |
 | Native #65 + DWM | `GlassSettings_ApplyVisualStyleAndDwmPolicy` → `ThemeHelper::SetSystemVisualStyle` + `OpenGlassDwmPolicy` |
-| SecureUxTheme | `SecureUxThemeService.cs`, `SecureUxThemeNative.cpp` — папка `GlassSettings\SecureUxTheme\` (в составе GlassSettings.MSI), IFEO `winlogon.exe`, COM ThemeUiProxy |
+| SecureUxTheme | `SecureUxThemeMsiService.cs`, `SecureUxThemeService.cs` — per-machine MSI из `%ProgramData%\Packages\GlassPlatform\Current`; IFEO/COM через CA пакета; Native только Query и подготовка штатного стиля перед удалением |
 
 Навигация: пункт **«Визуальные стили»** (`NavThemes`, tag `themes`). Заголовок — только в breadcrumb. Drill: **Цвета** (`Breadcrumb_ThemesColors`), **Фон рабочего стола** (`Breadcrumb_ThemesDesktopBackground`).
 
@@ -161,7 +161,7 @@ ThemesColorsPage — live apply (без page-pipeline Save):
 1. **Hero** + быстрые действия: системные шрифты, **Цвет**, сглаживание текста, toggle «Шрифты темы»; **Сохранить** *или* «Использовать персонализированную тему» (`Custom.theme`).
 2. **Текущая тема** (Expander) + сетка (именованные user → системные). ПКМ → «Удалить»: disabled только у стоковых aero/aerolite (`IsDefaultVisualStylePath` + файл в `Resources\Themes`). Кастомные `.theme` в том же каталоге и `Custom.theme` — пункт enabled. Если `.msstyles` больше не ссылается другими `.theme` и это не aero/Program Files — удаляется `.theme` и папка библиотеки (ресурсы); иначе только `.theme`. FullLibrary активной темы / того же `.msstyles` — hosted OK «сначала переключите тему», без удаления. `ThemeDeleteService.TryCreatePlan` / `Execute`.
 3. Подвал: «Обзор тем» → MenuFlyout (`7themes.su`, `vsthemes.org`).
-4. **Цифровая подпись** — тумблер IFEO/Application Verifier. Payload: папка `GlassSettings\SecureUxTheme\` внутри GlassSettings.MSI (`SecureUxTheme4.dll`, `ThemeUiProxy.dll`; для x64 дополнительно `x86\ThemeUiProxy.dll` для SysWOW64) — без GlassSettings SecureUxTheme не ставится. GS x64: патчер и proxy в System32, `x86\ThemeUiProxy.dll` в SysWOW64; x86-патчер на x64 не копируется. При ON: COM `InProcServer32` → `ThemeUiProxy.dll`, IFEO `winlogon.exe`. При OFF: COM → `themeui.dll`, IFEO снимается; DLL удаляет одноразовая задача ONSTART (SYSTEM) скриптом из `%TEMP%`. Официальный MSI — блокер, пока ключ продукта в реестре; после удаления MSI leftover `SecureUxTheme4.dll` / `ThemeUiProxy.dll` в System32 **не** блокер: копирование перезаписывает их, а если файл занят winlogon или WRP (`ERROR_SHARING_VIOLATION` / `ERROR_ACCESS_DENIED`) — существующий dest оставляем и продолжаем IFEO+COM (перезагрузка не обязательна). Старый ThemeTool (`SecureUxTheme.dll`) — по-прежнему блокер. Внизу страницы (под спойлером тем) — ссылка «SecureUxTheme в интернете» (`https://github.com/namazso/SecureUxTheme`).
+4. **Цифровая подпись** — тумблер ставит/снимает per-machine MSI из `%ProgramData%\Packages\GlassPlatform\Current` (файлы System32/SysWOW64, IFEO/COM — custom action пакета). Перед OFF при кастомной теме — штатный стиль, затем `msiexec /x`. Официальный MSI v4 и ThemeTool (`SecureUxTheme.dll`) — блокеры. Ссылка «SecureUxTheme в интернете» (`https://github.com/namazso/SecureUxTheme`).
 
 ---
 

@@ -151,12 +151,6 @@ namespace Shared::OpenGlassHostState
                     HeapFree(GetProcessHeap(), 0, cfg);
             }
 
-            if (startType == SERVICE_DISABLED)
-            {
-                CloseServiceHandle(svc);
-                return HostUiState::Disabled;
-            }
-
             SERVICE_STATUS_PROCESS status{};
             status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
             DWORD bytesNeeded = 0;
@@ -174,9 +168,11 @@ namespace Shared::OpenGlassHostState
             switch (status.dwCurrentState)
             {
             case SERVICE_RUNNING:
-            case SERVICE_START_PENDING:
                 return HostUiState::Running;
+            case SERVICE_START_PENDING:
+                return HostUiState::Ready;
             case SERVICE_STOPPED:
+                return startType == SERVICE_DISABLED ? HostUiState::Disabled : HostUiState::Ready;
             case SERVICE_STOP_PENDING:
                 return HostUiState::Ready;
             default:
@@ -370,8 +366,9 @@ namespace Shared::OpenGlassHostState
         // Setup/Unins создают сервис OpenGlassHost, а строки Home/Systems показывали
         // «Нет задачи» до первого фонового опроса.
         const HostUiState svc = QueryServiceUiState();
-        // Running не зависит от задачи: не сканировать дерево.
-        if (svc == HostUiState::Running)
+        // Service-first, just like start/stop: a leftover legacy task must not
+        // override SCM state or produce a different result on UI/worker threads.
+        if (svc != HostUiState::NoTask)
         {
             g_orchestrationCache.store({ svc, now }, std::memory_order_release);
             return svc;
@@ -380,36 +377,10 @@ namespace Shared::OpenGlassHostState
         // Холодный обход дерева планировщика (COM) с UI держит прокрутку — только фон.
         if (GlassShared::IsSchedulerUiThread())
         {
-            if (svc != HostUiState::NoTask)
-            {
-                g_orchestrationCache.store({ svc, now }, std::memory_order_release);
-                return svc;
-            }
             return cached.state;
         }
 
-        const HostUiState task = QueryTaskUiState();
-
-        HostUiState result;
-        if (svc == HostUiState::NoTask && task == HostUiState::NoTask)
-            result = HostUiState::NoTask;
-        else if (svc == HostUiState::Running || task == HostUiState::Running)
-            result = HostUiState::Running;
-        else if (svc == HostUiState::Disabled || task == HostUiState::Disabled)
-        {
-            if (svc == HostUiState::Disabled && task == HostUiState::Disabled)
-                result = HostUiState::Disabled;
-            else if (svc == HostUiState::Disabled && task == HostUiState::NoTask)
-                result = HostUiState::Disabled;
-            else if (task == HostUiState::Disabled && svc == HostUiState::NoTask)
-                result = HostUiState::Disabled;
-            else
-                result = svc != HostUiState::NoTask ? svc : task;
-        }
-        else if (svc == HostUiState::Ready || task == HostUiState::Ready)
-            result = HostUiState::Ready;
-        else
-            result = svc != HostUiState::NoTask ? svc : task;
+        const HostUiState result = QueryTaskUiState();
 
         g_orchestrationCache.store({ result, now }, std::memory_order_release);
         return result;

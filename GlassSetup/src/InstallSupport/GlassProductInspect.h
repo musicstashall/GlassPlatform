@@ -1,12 +1,13 @@
 #pragma once
 
 #include <Windows.h>
+#include "GlassSecureUxPackage.h"
 #include <atomic>
 #include <string>
 #include <vector>
 
 // Обследование текущей установки для карточек продуктов (Task F, стадии 1-2):
-// целостность файлов по таблицам File/MsiFileHash встроенного MSI (повреждение,
+// целостность файлов по таблицам File/MsiFileHash установленного MSI (повреждение,
 // подмена), подпись файлов относительно издателя самого установщика, параметры
 // реестра установки, службы/задачи автозапуска и сравнение версий.
 namespace GlassProductInspect {
@@ -17,41 +18,66 @@ enum class Reason {
     FileHashMismatch,  // контрольная сумма не совпадает (повреждение/подмена)
     SignatureMismatch, // подпись файла не принадлежит издателю установщика
     RegistryInvalid,   // параметры установки в реестре нечитаемы/неверны
+    InspectionUnavailable, // no verified installed-package baseline; never equate unknown with healthy
     AutostartMissing,  // служба или задача автозапуска отсутствует
     VersionOutdated,   // установлена более старая версия
 };
 
 struct ProductReport {
-    bool installed = false;
+    bool installed = false; // MSI registration, or official Inno for OG; never inferred from a service.
+    bool residual = false; // Reserved legacy UI fact; OG service/task leftovers never set this.
+    bool residualSafe = false; // Read-only root/action/account validation succeeded.
     bool updateAvailable = false;
     bool damaged = false;
-    std::wstring installedVersion;
+    bool sourceVerified = false;
+    bool integrityKnown = false;
+    // Dependency freshness, NOT integrity against the installed baseline.
+    // Same ProductVersion may contain a rebuilt Native helper.
+    bool nativeSourceCompared = false;
+    bool nativeSourceDiffers = false;
+    // Only verified media supplied next to the original EXE or in its packages.
+    // Never filled from Current, installed registration or session downloads.
+    std::wstring attachedPackageVersion,attachedPackagePath,selectedPackagePath,attachedPayloadVersion;
+    std::wstring targetVersion;
+    // MSI ProductVersion only. Never replace either field with a PE/bundle version.
+    std::wstring installedVersion; // Compatibility alias for old UI consumers.
+    std::wstring installedPackageVersion;
+    // Application FileVersion (OpenGlass DLL / Settings EXE) for display only; MSI ordering stays independent.
+    std::wstring installedPayloadVersion,targetPayloadVersion,remotePayloadVersion;
     std::vector<Reason> reasons;
     std::wstring registryValueNames; // имена некорректных значений реестра (диагностика)
 };
 
 struct Report {
     bool ran = false;
+    // UI capability hint only; execution re-enumerates and verifies the cache.
+    std::wstring officialSecureUxThemeCode;
+    std::wstring secureUxThemePresenceDetail;
     ProductReport x64;
     ProductReport x86;
-    ProductReport settings;
+    ProductReport settings; // compatibility view for the current UI
+    ProductReport settings64,settings32;
     ProductReport secureUxTheme;
+    GlassSecureUxPackage::Offer secureUxOffer;
+    bool openGlassRetiredMsi = false, openGlassRetiredReceipt = false;
     ProductReport og;
+    // Graphics MSI inventory is independent of upstream OG, its files/services.
+    ProductReport openGlassResources;
+    bool openGlassResourcesPrerequisite = false;
 };
 
 struct Inputs {
-    HINSTANCE instance = nullptr; // модуль Setup: встроенные MSI (RT_RCDATA)
-    std::wstring signerSha1;      // SHA-1 издателя самого установщика; пусто — без проверки подписи
+    std::wstring signerSha1;
     bool os64 = false;
-    // Идентификаторы встроенных MSI-ресурсов.
-    UINT msiResX64 = 0;
-    UINT msiResX86 = 0;
-    UINT msiResSettings = 0;
-    UINT msiResSecureUxTheme = 0;
-    UINT msiResOg = 0;
+    // Execution preflight already acquired its media: inspect installed facts
+    // without fetching the catalogue or preparing/downloading packages again.
+    bool inspectSources = true;
     const std::atomic_bool* cancelled = nullptr; // остановка между проверками продуктов
 };
 
 Report Run(const Inputs& in);
+
+[[nodiscard]] std::wstring QuerySelfSignerSha1() noexcept;
+[[nodiscard]] bool FileHasSameSignerAsSetup(const std::wstring& path) noexcept;
 
 } // namespace GlassProductInspect

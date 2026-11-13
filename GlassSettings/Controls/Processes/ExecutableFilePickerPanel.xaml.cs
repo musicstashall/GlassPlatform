@@ -26,6 +26,7 @@ public sealed partial class ExecutableFilePickerPanel : UserControl, IHostedDial
     private readonly ExecutableFilePickerSearchOptions _searchOptions = new();
 
     private HostedDialogHostContext? _dialogContext;
+    private bool _persistExecutableLastPath = true;
     private string _currentPath;
     private readonly bool _foldersOnly;
     private readonly IReadOnlyList<ExecutableFilePickerExtensionFilterItem> _extensionFilters;
@@ -74,6 +75,14 @@ public sealed partial class ExecutableFilePickerPanel : UserControl, IHostedDial
         DispatcherQueue dispatcherQueue,
         IReadOnlyList<ExecutableFilePickerExtensionFilterItem> extensionFilters)
         : this(dispatcherQueue, extensionFilters, foldersOnly: false, initialDirectory: null)
+    {
+    }
+
+    public ExecutableFilePickerPanel(
+        DispatcherQueue dispatcherQueue,
+        IReadOnlyList<ExecutableFilePickerExtensionFilterItem> extensionFilters,
+        string? initialDirectory)
+        : this(dispatcherQueue, extensionFilters, foldersOnly: false, initialDirectory)
     {
     }
 
@@ -594,10 +603,18 @@ public sealed partial class ExecutableFilePickerPanel : UserControl, IHostedDial
     /// <summary>Сохраняет текущую папку в реестр (вызывается при закрытии диалога).</summary>
     public void PersistLastDirectory() => PersistCurrentDirectory();
 
+    /// <summary>Диалог резервной копии не должен затирать последний каталог выбора exe.</summary>
+    public void UsePrivateDirectoryMemory() => _persistExecutableLastPath = false;
+
+    public string? CurrentDirectory =>
+        ExecutableFilePickerCatalog.IsValidDirectory(_currentPath)
+            ? ExecutableFilePickerCatalog.NormalizeBrowsablePath(_currentPath)
+            : null;
+
     private void PersistCurrentDirectory()
     {
         // Folder-Picker не пишет ExecutableFilePickerLastPath — стартовый путь задаёт call site.
-        if (_foldersOnly || string.IsNullOrWhiteSpace(_currentPath))
+        if (!_persistExecutableLastPath || _foldersOnly || string.IsNullOrWhiteSpace(_currentPath))
             return;
 
         ExecutableFilePickerCatalog.RememberLastDirectory(_currentPath);

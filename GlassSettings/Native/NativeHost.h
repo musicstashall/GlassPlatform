@@ -229,16 +229,23 @@ extern "C"
     /// Проверка известных параметров реестра платформы (Shared::RegistrySanity).
     /// Возвращает число некорректных значений; applyFixes — удалить их (умолчания не пишутся).
     __declspec(dllexport) DWORD WINAPI GlassSettings_ValidateRegistryState(BOOL applyFixes) noexcept;
-    /// GlassUnins (rundll32, разрядность ОС): деактивация SecureUxTheme «как в GlassSettings» —
-    /// стандартный стиль при пользовательском, затем GlassSettings_SecureUxThemeDeactivate.
+    /// Legacy GlassUnins style-only preparation in OS-native rundll32.
+    /// Does not remove IFEO/COM registrations or system files.
     /// Код выхода: биты 1 неверные аргументы, 2 перезагрузка, 4 стиль не восстановлен,
     /// 8 деактивация не удалась, 16 внешний SecureUxTheme (ничего не изменено).
     __declspec(dllexport) void CALLBACK GlassSettings_SecureUxThemeSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
-    /// GlassSetup/GlassUnins helpers: query or activate our bundled SecureUxTheme via rundll32.
+    /// OS-native stock .theme preparation via ThemeManager2 + optional font apply.
+    /// V2 exit: 0 success, nonzero failure (new builds return the actual HRESULT).
+    /// Never unregisters SecureUxTheme; the original MSI owns removal.
+    __declspec(dllexport) void CALLBACK GlassSettings_SecureUxThemePrepareRemovalV2W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
     /// Query exit values: 0 unavailable, 1 inactive, 2 active, 3 activation pending, 4 deactivation pending, 5 external, 6 conflict.
     __declspec(dllexport) void CALLBACK GlassSettings_SecureUxThemeQueryStateV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
     /// Activation exit values: 0 active, 2 restart pending, 8 activation failed, 16 external installation (untouched).
     __declspec(dllexport) void CALLBACK GlassSettings_SecureUxThemeActivateSetupV1W(HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
+
+    /// Одноразовый билет HKLM для запуска GlassSetup.exe --modify из GlassSettings (UAC).
+    __declspec(dllexport) void CALLBACK GlassSettings_IssueMaintenanceSetupTicketV1W(
+        HWND hwnd, HINSTANCE instance, LPWSTR cmdLine, int show) noexcept;
 
     /// Built-in BlockList: единственный список в ProcessBlockList.h.
     __declspec(dllexport) DWORD WINAPI GlassSettings_GetBuiltInBlockListCount() noexcept;

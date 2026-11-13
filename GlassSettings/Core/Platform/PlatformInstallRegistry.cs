@@ -1,9 +1,9 @@
 namespace GlassSettings.Core.Platform;
 
 /// <summary>
-/// HKCU/HKLM InstallPath от установщика.
+/// HKLM InstallPath от установщика.
 /// Новая схема без WOW64-коллизий: InstallPathX64 и InstallPathX86 в Software\GlassPlatform;
-/// для обратной совместимости сохраняется fallback на legacy InstallPath / Wow6432Node.
+/// Читаются только машинные представления реестра соответствующей архитектуры.
 /// </summary>
 public static class PlatformInstallRegistry
 {
@@ -27,24 +27,6 @@ public static class PlatformInstallRegistry
             return lmExplicit;
         if (TryReadValue(Microsoft.Win32.RegistryHive.LocalMachine, lmView, SubKey, InstallPathValue) is { } lmLegacy)
             return lmLegacy;
-
-        if (TryReadValue(Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Default, SubKey, explicitValue) is { } cuExplicit)
-            return cuExplicit;
-
-        if (arch == GlassPlatformArch.X86 && Environment.Is64BitOperatingSystem)
-        {
-            if (TryReadValue(Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Default, Wow6432SubKey, InstallPathValue) is { } cuWow)
-                return cuWow;
-            return null;
-        }
-
-        if (TryReadValue(Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Default, SubKey, InstallPathValue) is { } cuLegacy)
-        {
-            if (arch == GlassPlatformArch.X64 && Environment.Is64BitOperatingSystem
-                && !MatchesX64Module(cuLegacy))
-                return null;
-            return cuLegacy;
-        }
 
         return null;
     }

@@ -6,16 +6,16 @@
   <Import Project="$([System.IO.Path]::Combine('$(SolutionRoot)', 'Directory.Build.props'))" Condition="'$(GlassProductVersion)' == ''" />
 
   <!-- Одна MSI-архитектура на .wixproj; без явных ProjectConfiguration VS/HeatWave показывает x64 и x86. -->
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x86' or '$(MSBuildProjectName)' == 'GlassSettings-x86' or '$(MSBuildProjectName)' == 'SecureUxTheme-x86'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x86' or '$(MSBuildProjectName)' == 'GlassSettings-x86'">
     <GlassWixLockedPlatform>x86</GlassWixLockedPlatform>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x64' or '$(MSBuildProjectName)' == 'OpenGlass-x64' or '$(MSBuildProjectName)' == 'GlassSettings-x64' or '$(MSBuildProjectName)' == 'SecureUxTheme-x64'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Glass-x64' or '$(MSBuildProjectName)' == 'OpenGlassResources-x64' or '$(MSBuildProjectName)' == 'GlassSettings-x64'">
     <GlassWixLockedPlatform>x64</GlassWixLockedPlatform>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(GlassWixLockedPlatform)' != ''">
-    <BaseOutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassSetup', 'msi', '$(Configuration)', '$(MSBuildProjectName)'))\</BaseOutputPath>
-    <OutputPath>$(BaseOutputPath)</OutputPath>
+    <BaseOutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Cache', '$(MSBuildProjectName)', 'Output'))\</BaseOutputPath>
+    <OutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Build', 'GlassSetup', '$(Configuration)'))\</OutputPath>
     <AppendPlatformToOutputPath>false</AppendPlatformToOutputPath>
     <BaseIntermediateOutputPath>$([System.IO.Path]::Combine('$(SolutionRoot)', 'Cache', '$(MSBuildProjectName)'))\</BaseIntermediateOutputPath>
     <IntermediateOutputPath>$(BaseIntermediateOutputPath)$(Platform)\$(Configuration)\</IntermediateOutputPath>

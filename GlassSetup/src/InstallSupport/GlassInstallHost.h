@@ -27,7 +27,7 @@ bool StopAllForUninstall(
     bool* stopAttemptedX64 = nullptr,
     bool* stopAttemptedX86 = nullptr,
     const bool* wasRunningX64 = nullptr,
-    const bool* wasRunningX86 = nullptr) noexcept;
+    const bool* wasRunningX86 = nullptr, unsigned settingsMask = 36u) noexcept;
 
 bool EnsureGlassAutorunTask(
     GlassShared::GlassPlatformTask::PlatformArch arch,

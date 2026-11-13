@@ -23,11 +23,13 @@ public sealed partial class SystemPage : Page
     private SystemDualGlassPlatformControls? _glassDualControls;
     private bool _shellSuppress;
     private bool _updateNoticeSubscribed;
+    private bool _backupNoticeActive;
 
     public SystemPage()
     {
         InitializeComponent();
         ApplyLocalizedStrings();
+        WireBackupLayout();
         BuildInfoBanner();
         ConfigureUpdateIntervalRow();
         ShellExtensionRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.ShellExtension);
@@ -72,9 +74,14 @@ public sealed partial class SystemPage : Page
         }
 
         PageShell.PageNoticeStack.ActionNotice.ActionRequested += async (_, _) =>
-            await ProductUpdateCoordinator.OpenVisibleUpdateDownloadAsync();
+        {
+            if (!_backupNoticeActive) await ProductUpdateCoordinator.OpenVisibleUpdateDownloadAsync();
+        };
         PageShell.PageNoticeStack.ActionNotice.DismissRequested += (_, _) =>
+        {
+            if (_backupNoticeActive) { _backupNoticeActive = false; return; }
             ProductUpdateCoordinator.DismissVisibleUpdateNotice();
+        };
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -131,8 +138,65 @@ public sealed partial class SystemPage : Page
     private void OnPendingUpdatesChanged(object? sender, EventArgs e) =>
         DispatcherQueue.TryEnqueue(RefreshAfterShellNavigation);
 
+    private void MaintenanceModify_OnClick(object sender, RoutedEventArgs e)
+    {
+        var setup = GlassMaintenanceSetupPaths.SetupExecutablePath();
+        if (string.IsNullOrEmpty(setup))
+        {
+            _ = HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("System_MaintenanceTitle"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Get("Home_InstallationMaintenanceMissing")),
+                Footer = HostedConfirmationDialogService.CreateFooter(
+                    GlassSettingsResources.Get("Dialog_Close"))
+            });
+            return;
+        }
+
+        if (!GlassMaintenanceSetupLaunchService.TryLaunch())
+        {
+            _ = HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("System_MaintenanceTitle"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Get("Home_InstallationMaintenanceLaunchFailed")),
+                Footer = HostedConfirmationDialogService.CreateFooter(
+                    GlassSettingsResources.Get("Dialog_Close"))
+            });
+        }
+    }
+
+    private async Task ShowBackupNoticeAsync(SettingsNoticeSeverity severity, string message)
+    {
+        _backupNoticeActive = severity == SettingsNoticeSeverity.Error;
+        var stack = PageShell.PageNoticeStack;
+        var strip = stack.ActionNotice;
+        strip.AllowDismiss = true;
+        strip.ShowSaveButton = false;
+        strip.ShowActionButton = false;
+        if (strip.IsVisuallyOpen)
+            NoticeViewportMirrorService.ClosePinnedSourcePreservingScroll(strip);
+        strip.Visibility = NoticePresentationPolicy.IsInformationalMirrorOnly(severity, false, false)
+            ? Visibility.Collapsed : Visibility.Visible;
+        await SettingsNoticeCoordinator.PresentAsync(
+            SettingsNoticeCoordinator.CreateShellHost(stack, PageShell.PageScrollViewer),
+            new SettingsNoticeCoordinator.NoticePresentRequest
+            {
+                Strip = strip, Severity = severity, Message = message,
+                ShowSave = false, ShowAction = false, Animate = true
+            });
+    }
+
     private void ApplyLocalizedStrings()
     {
+        MaintenanceExpander.IconGlyph = "\uE713";
+        MaintenanceExpander.Title = GlassSettingsResources.Get("System_MaintenanceTitle");
+        MaintenanceExpander.Description = GlassSettingsResources.Get("System_MaintenanceDescription");
+        MaintenanceModifyButton.Content = GlassSettingsResources.Get("System_MaintenanceModify");
+        BackupExpander.Title = GlassSettingsResources.Get("System_BackupTitle");
+        BackupExpander.IconGlyph = "\uE74E";
+        ApplyBackupStrings();
         ShellExtensionRow.Title = GlassSettingsResources.Get("System_RowShellExtension");
         ShellExtensionRow.Description = GlassSettingsResources.Get("System_RowShellExtensionDesc");
         ShellMenuNoticeBlock.Title = GlassSettingsResources.Get("System_ShellMenuNoticeTitle");
@@ -182,6 +246,10 @@ public sealed partial class SystemPage : Page
         var exposed = OpenGlassUiPolicy.IsFeatureExposedInUi();
         if (_ogNav is not null)
             _ogNav.Visibility = exposed ? Visibility.Visible : Visibility.Collapsed;
+        var platform = GlassPlatformUiPolicy.ShouldExposePlatformSections();
+        if (_glassNav is not null)
+            _glassNav.Visibility = platform ? Visibility.Visible : Visibility.Collapsed;
+        ShellExtensionRow.Visibility = platform ? Visibility.Visible : Visibility.Collapsed;
         BuildInfoBanner();
     }
 
@@ -267,6 +335,7 @@ public sealed partial class SystemPage : Page
 
     private async void RefreshUpdateNotice()
     {
+        if (_backupNoticeActive) return;
         if (ProductUpdateCoordinator.ShouldShowOpenGlassNotice
             && ProductUpdateCoordinator.GetPendingOpenGlass() is { } pendingOg)
         {

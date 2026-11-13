@@ -2,6 +2,7 @@
 #include "GlassInstallUtil.h"
 #include "GlassInstallLog.h"
 #include <GlassPlatformTask.h>
+#include <GlassStop.h>
 #include <InjectModuleScan.h>
 #include <InjectProcessMap.h>
 #include <shlwapi.h>
@@ -96,7 +97,7 @@ void AppendScanResults(std::vector<GlassInstallWatch::ModuleHolder>& holders,
 }
 
 // Why the last strict local scan on this thread stopped, or which explorer.exe
-// it left to the x64 scan. Setup asks the embedded DLL that performed the scan;
+// it left to the x64 scan. Setup asks the trusted installed DLL that performed the scan;
 // the uninstaller links the scanner itself.
 bool ReadLocalScanDiag(Shared::InjectModuleScan::ScanDiag& diag) noexcept {
     diag = {};
@@ -255,12 +256,24 @@ bool ConsumeNextPipeEvent(
 
 namespace GlassInstallWatch {
 
+// The holder set has already been filtered by monitored architecture. Queue
+// messages work across bitness and include Setup itself; never force FreeLibrary.
+void WakeHolderQueues(const std::vector<ModuleHolder>& holders) noexcept {
+    for(const auto& holder:holders) {
+        if(!holder.pid)continue;
+        const bool requested=Shared::InjectProcessMap::SignalUnloadRequest(holder.pid);
+        const auto queues=Shared::GlassStop::WakeProcessQueues(holder.pid);
+        GlassInstallLog::LineFormat(L"Watch: cooperative request pid=%lu signaled=%d queues=%u",
+            holder.pid,requested?1:0,queues);
+    }
+}
+
 #ifdef GLASS_SETUP_NATIVE_MONITOR
 bool BeginLocalNativeMonitor() noexcept {
     if (g_localNative) return g_localScan && g_localForceUnload;
-    const std::wstring path = GlassInstallUtil::EmbeddedNativeDllX86();
+    const std::wstring path = GlassInstallUtil::InstalledNativeDllX86();
     if (path.empty()) {
-        GlassInstallLog::Line(L"Watch: embedded x86 GlassSettings.Native.dll is unavailable");
+        GlassInstallLog::Line(L"Watch: trusted installed x86 GlassSettings.Native.dll is unavailable");
         return false;
     }
     // Do not search the current working directory or a user-selected install
@@ -282,7 +295,7 @@ bool BeginLocalNativeMonitor() noexcept {
     }
     GlassInstallLog::LineFormat(L"Watch: x86 Native requested=%s loaded=%s", path.c_str(), loadedPath);
     if (_wcsicmp(path.c_str(), loadedPath) != 0) {
-        GlassInstallLog::Line(L"Watch: loaded x86 Native path differs from the embedded file");
+        GlassInstallLog::Line(L"Watch: loaded x86 Native path differs from the verified installed file");
         FreeLibrary(dll);
         return false;
     }
@@ -318,7 +331,7 @@ bool BeginLocalNativeMonitor() noexcept {
     g_localScan = scan;
     g_localForceUnload = unload;
     g_localDiag = reinterpret_cast<NativeScanDiag>(diagExport);
-    GlassInstallLog::Line(L"Watch: loaded embedded x86 GlassSettings.Native.dll into Setup");
+    GlassInstallLog::Line(L"Watch: loaded trusted installed x86 GlassSettings.Native.dll into Setup");
     return true;
 }
 
@@ -333,7 +346,7 @@ void EndLocalNativeMonitor() noexcept {
 }
 
 bool ForceUnloadInLocalNative(DWORD pid) noexcept {
-    return pid && g_localForceUnload && g_localForceUnload(pid) != FALSE;
+    return pid && (g_localForceUnload || BeginLocalNativeMonitor()) && g_localForceUnload && g_localForceUnload(pid) != FALSE;
 }
 #endif
 
@@ -478,7 +491,7 @@ bool WaitUntilClearOrTimeout(
     bool scanNativeX64,
     std::vector<ModuleHolder>& lastHolders,
     bool& nativeScanFailed,
-    const std::atomic<bool>* cancelRequested) noexcept {
+    const std::atomic<bool>* cancelRequested, bool scanLocal) noexcept {
     nativeScanFailed = false;
     lastHolders.clear();
 
@@ -493,6 +506,8 @@ bool WaitUntilClearOrTimeout(
     std::vector<ModuleHolder> x64Tick;
     bool x64Empty = !scanNativeX64 || !NeedNativeX64Helper();
     ULONGLONG lastBeat = waitStart;
+    ULONGLONG lastWake = waitStart;
+    bool firstWake=true;
     ULONGLONG lastFrame = 0;
     DWORD helperExitCode=STILL_ACTIVE;
 
@@ -647,17 +662,28 @@ bool WaitUntilClearOrTimeout(
             break;
         }
         lastHolders.clear();
-        if (!CollectInProcessHolders(lastHolders)) {
+        if (scanLocal && !CollectInProcessHolders(lastHolders)) {
             nativeScanFailed=true;
             break;
         }
         for (const auto& row : x64Tick)
             MergeHolder(lastHolders, row.pid, row.exe, row.modules);
 
+        if(!lastHolders.empty()&&(firstWake||GetTickCount64()-lastWake>=5000)) {
+            firstWake=false;lastWake=GetTickCount64();
+            WakeHolderQueues(lastHolders);
+        }
+
         if (GetTickCount64() - lastBeat >= 5000) {
             lastBeat = GetTickCount64();
             GlassInstallLog::LineFormat(L"Watch: still held %u pipe=%d",
                 static_cast<unsigned>(lastHolders.size()), pipeConnected ? 1 : 0);
+            unsigned logged=0;
+            for(const auto& holder:lastHolders) {
+                if(logged++==16)break;
+                GlassInstallLog::LineFormat(L"Watch: holder pid=%lu self=%d exe=%s modules=%s",
+                    holder.pid,holder.pid==GetCurrentProcessId()?1:0,holder.exe.c_str(),holder.modules.c_str());
+            }
         }
 
         // A new row or a partial marker supersedes the preceding empty frame.

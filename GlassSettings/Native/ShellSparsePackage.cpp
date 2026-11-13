@@ -276,17 +276,13 @@ namespace GlassSettings::ShellSparsePackage
                 return v;
             if (auto v = readVal(HKEY_LOCAL_MACHINE, L"InstallPath", KEY_WOW64_64KEY); !v.empty())
                 return v;
-            if (auto v = readVal(HKEY_CURRENT_USER, L"InstallPathX64", 0); !v.empty())
-                return v;
 #else
             if (auto v = readVal(HKEY_LOCAL_MACHINE, L"InstallPathX86", KEY_WOW64_32KEY); !v.empty())
                 return v;
             if (auto v = readVal(HKEY_LOCAL_MACHINE, L"InstallPath", KEY_WOW64_32KEY); !v.empty())
                 return v;
-            if (auto v = readVal(HKEY_CURRENT_USER, L"InstallPathX86", 0); !v.empty())
-                return v;
 #endif
-            return readVal(HKEY_CURRENT_USER, L"InstallPath", 0);
+            return {};
         }
 
         /// Корень платформы (каталог с GlassCompat.dll и подкаталогом GlassShellSparse\). ExternalLocation

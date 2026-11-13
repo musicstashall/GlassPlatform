@@ -1,8 +1,9 @@
 <Project>
   <!--
-    Единый источник истины версии продукта Glass.
+    Источник версии продуктов платформы Glass, включая GlassSettings.
     Меняется ТОЛЬКО здесь (Major.Minor.Patch). FileVersion (4-е поле) —
     автоинкремент per-project через BuildNumber.txt и Directory.Build.targets.
+    Номер комплекта задаёт ProductVersion MSI и InformationalVersion приложения.
   -->
   <PropertyGroup>
     <GlassProductVersion>2.0.0.0</GlassProductVersion>

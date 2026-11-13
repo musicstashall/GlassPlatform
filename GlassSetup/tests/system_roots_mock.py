@@ -34,6 +34,7 @@ validate = function(util, "DWORD ValidateSystemProgramFiles(")
 architecture = function(util, "bool QueryNativeOs64Bit(")
 default_root = function(util, "DWORD ResolveDefaultPlatformRoot(")
 resolve = function(util, "bool ResolveFixedPlatformRoots(")
+resources = function(util, "bool ResolveOpenGlassResourcesRoot(")
 assert 'KEY_QUERY_VALUE|KEY_WOW64_64KEY' in read_value
 assert 'HKEY_LOCAL_MACHINE' in read_value and 'ProgramFilesDir' in default_root and 'ProgramW6432Dir' in default_root
 assert 'GetEnvironmentVariable' not in read_value + default_root and 'ExpandEnvironmentStrings' not in read_value + default_root
@@ -63,7 +64,7 @@ prefix = r'''
 using DWORD=uint32_t; using LSTATUS=int32_t; using HRESULT=int32_t; using BOOL=int;
 using HKEY=void*; using LPBYTE=unsigned char*; using PWSTR=wchar_t*;
 constexpr BOOL FALSE=0; constexpr DWORD ERROR_SUCCESS=0,ERROR_FILE_NOT_FOUND=2,ERROR_PATH_NOT_FOUND=3,
- ERROR_ACCESS_DENIED=5,ERROR_INVALID_DATA=13,ERROR_NOT_ENOUGH_MEMORY=8,ERROR_INVALID_NAME=123,
+ ERROR_ACCESS_DENIED=5,ERROR_INVALID_DATA=13,ERROR_NOT_SUPPORTED=50,ERROR_NOT_ENOUGH_MEMORY=8,ERROR_INVALID_NAME=123,
  ERROR_MORE_DATA=234,ERROR_INVALID_PARAMETER=87,FILE_ATTRIBUTE_DIRECTORY=16,FILE_ATTRIBUTE_REPARSE_POINT=0x400,
  INVALID_FILE_ATTRIBUTES=0xffffffffu,REG_SZ=1,REG_EXPAND_SZ=2,KEY_QUERY_VALUE=1,KEY_WOW64_64KEY=0x100,
  KF_FLAG_DEFAULT=0; constexpr int FOLDERID_ProgramFilesX86=1,FOLDERID_ProgramFiles=2;
@@ -162,13 +163,18 @@ int main(){std::wstring x64=L"old",x86=L"old";
  reset();fake.unsafe.insert(L"C:\\Program Files\\GlassPlatform");assert(!ResolveFixedPlatformRoots(x64,x86));
  reset();fake.files.insert(L"C:\\Program Files\\GlassPlatform");assert(!ResolveFixedPlatformRoots(x64,x86));
  reset();fake.existing.erase(L"C:\\Program Files");assert(!ResolveFixedPlatformRoots(x64,x86));
+ std::wstring graphics;
+ reset();assert(ResolveOpenGlassResourcesRoot(graphics));assert(graphics==L"C:\\Program Files\\GlassPlatform\\OpenGlass\\Resources");
+ reset();fake.wow=false;assert(!ResolveOpenGlassResourcesRoot(graphics)&&graphics.empty());
+ reset();fake.reg[L"ProgramW6432Dir"].text=L"D:\\Wrong";assert(!ResolveOpenGlassResourcesRoot(graphics)&&graphics.empty());
+ reset();fake.unsafe.insert(L"C:\\Program Files\\GlassPlatform\\OpenGlass\\Resources");assert(!ResolveOpenGlassResourcesRoot(graphics)&&graphics.empty());
  std::cout<<"PASS: real fixed roots: x86-on-x64, x86 Windows, malformed/missing registry, paths and aliases\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix="glass-roots-") as directory:
     cpp = Path(directory) / "test.cpp"
     exe = Path(directory) / "test"
-    cpp.write_text(prefix + read_value + "\n" + validate + "\n" + architecture + "\n" + default_root + "\n" + resolve + "\n" + main, encoding="utf-8")
+    cpp.write_text(prefix + read_value + "\n" + validate + "\n" + architecture + "\n" + default_root + "\n" + resolve + "\n" + resources + "\n" + main, encoding="utf-8")
     subprocess.run([os.environ.get("CXX", "g++"), "-std=c++17", "-g", "-fsanitize=address,undefined",
                     "-fno-omit-frame-pointer", "-no-pie", str(cpp), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

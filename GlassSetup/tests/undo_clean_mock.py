@@ -14,12 +14,16 @@ for end in range(brace,len(source)):
         depth-=1
         if depth==0:break
 undo=source[start:end+1]
-prefix=r'''
+prefix='#include "'+str(repo/'GlassSetup/src/GlassProcedurePlan.h')+'"\n'+r'''
 #include <atomic>
 #include <cassert>
 #include <iostream>
 #include <string>
 #include <vector>
+#define PRIMARYLANGID(x) (x)
+constexpr unsigned LANG_RUSSIAN=25;
+unsigned GetUserDefaultUILanguage(){return 0;}
+namespace GlassInstallRemoval {struct Session{};bool Restore(Session&,bool,std::wstring&){return true;}}
 struct Fake {bool stop=true,uninstall=true,ambiguous=false,unexpected=false,createdSafe=true;int uninstalls=0,dirs=0,registry=0,services=0,tasks=0,shortcuts=0;} fake;
 void AcquireSRWLockExclusive(int*){} void ReleaseSRWLockExclusive(int*){}
 int RemoveDirectoryW(const wchar_t*){++fake.dirs;return 1;}
@@ -49,6 +53,8 @@ namespace GlassInstallHost {
 }
 class InstallEngine {
 public:
+ unsigned procedureMask_=0x2Fu;bool auxiliaryOnly_=false;
+ GlassProducts::Selection selection_;GlassInstallRemoval::Session removalSession_;
  struct Labels {std::wstring rollback=L"rollback",rollbackRemoved=L"removed",rollbackFailed=L"failed";} labels_;
  struct Prior {bool shortcutExisted=false;} prior_;
  GlassInstallRollback::SessionState rollbackSession_;

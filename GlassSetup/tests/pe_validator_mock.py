@@ -23,7 +23,7 @@ def function(token):
             if depth == 0: return source[start:pos + 1]
     raise ValueError(token)
 
-inspector = function("bool PeMatches(")
+inspector = function("bool PeBufferMatches(") + "\n" + function("bool PeMatches(") + "\n" + function("bool ResourcePeMatches(")
 prefix = r'''
 #include <cassert>
 #include <cstddef>
@@ -35,7 +35,7 @@ prefix = r'''
 #include <string>
 #include <vector>
 using BYTE=std::uint8_t; using WORD=std::uint16_t; using DWORD=std::uint32_t; using BOOL=int;
-using HANDLE=void*;
+using HANDLE=void*;using HINSTANCE=void*;using HRSRC=void*;using HGLOBAL=void*;using UINT=unsigned;
 #define INVALID_HANDLE_VALUE reinterpret_cast<HANDLE>(-1)
 constexpr DWORD GENERIC_READ=1, FILE_SHARE_READ=2, FILE_SHARE_WRITE=4, FILE_SHARE_DELETE=8,
  OPEN_EXISTING=3, FILE_ATTRIBUTE_NORMAL=0, PAGE_READONLY=1, FILE_MAP_READ=1;
@@ -56,7 +56,21 @@ struct IMAGE_EXPORT_DIRECTORY{DWORD Characteristics,TimeDateStamp;WORD MajorVers
 static_assert(sizeof(IMAGE_DOS_HEADER)==64 && sizeof(IMAGE_FILE_HEADER)==20 && sizeof(IMAGE_SECTION_HEADER)==40);
 static_assert(offsetof(IMAGE_OPTIONAL_HEADER32,DataDirectory)==96 && offsetof(IMAGE_OPTIONAL_HEADER64,DataDirectory)==112);
 static std::vector<BYTE> bytes;
-HANDLE CreateFileW(const wchar_t*,DWORD,DWORD,void*,DWORD,DWORD,void*){return reinterpret_cast<HANDLE>(1);}
+static bool resourcePresent=true,loadOk=true,lockOk=true;
+static int fileOpens=0;static DWORD lastError=0;
+constexpr DWORD ERROR_INVALID_PARAMETER=87,ERROR_INVALID_DATA=13,ERROR_RESOURCE_DATA_NOT_FOUND=1812,ERROR_BAD_EXE_FORMAT=193;
+const wchar_t* RT_RCDATA=L"RCDATA";
+#define MAKEINTRESOURCEW(id) reinterpret_cast<const wchar_t*>(static_cast<std::uintptr_t>(id))
+void SetLastError(DWORD code){lastError=code;}
+HRSRC FindResourceW(HINSTANCE instance,const wchar_t* id,const wchar_t*){
+ assert(instance==reinterpret_cast<HINSTANCE>(3));assert(id==MAKEINTRESOURCEW(216));
+ if(!resourcePresent){SetLastError(1814);return nullptr;}return reinterpret_cast<HRSRC>(4);
+}
+DWORD SizeofResource(HINSTANCE,HRSRC){return static_cast<DWORD>(bytes.size());}
+HGLOBAL LoadResource(HINSTANCE,HRSRC){if(!loadOk){SetLastError(1812);return nullptr;}return reinterpret_cast<HGLOBAL>(5);}
+const void* LockResource(HGLOBAL){return lockOk?bytes.data():nullptr;}
+
+HANDLE CreateFileW(const wchar_t*,DWORD,DWORD,void*,DWORD,DWORD,void*){++fileOpens;return reinterpret_cast<HANDLE>(1);}
 BOOL GetFileSizeEx(HANDLE,LARGE_INTEGER* size){size->QuadPart=static_cast<std::int64_t>(bytes.size());return 1;}
 HANDLE CreateFileMappingW(HANDLE,void*,DWORD,DWORD,DWORD,void*){return reinterpret_cast<HANDLE>(2);}
 BOOL CloseHandle(HANDLE){return 1;}
@@ -69,7 +83,20 @@ int main(int argc,char** argv){
  bytes.assign(std::istreambuf_iterator<char>(file),std::istreambuf_iterator<char>());
  const WORD machine=static_cast<WORD>(std::stoul(argv[2],nullptr,16));
  const bool expected=std::string(argv[3])=="1";
- assert(PeMatches(L"fixture",machine,"GlassSettings_InstallerScanProtocolV1")==expected);
+ const char* marker="GlassSettings_InstallerScanProtocolV2";
+ assert(PeMatches(L"fixture",machine,marker)==expected);assert(fileOpens==1);
+ assert(PeBufferMatches(bytes.data(),bytes.size(),machine,marker)==expected);
+ assert(ResourcePeMatches(reinterpret_cast<HINSTANCE>(3),216,machine,marker)==expected);
+ assert(fileOpens==1); // No installed path or extracted DLL is consulted.
+ assert(!PeBufferMatches(nullptr,bytes.size(),machine,marker));
+ assert(!ResourcePeMatches(nullptr,216,machine,marker)&&lastError==ERROR_INVALID_PARAMETER);
+ resourcePresent=false;assert(!ResourcePeMatches(reinterpret_cast<HINSTANCE>(3),216,machine,marker)&&lastError==1814);
+ resourcePresent=true;
+ if(bytes.size()>=512){
+  loadOk=false;assert(!ResourcePeMatches(reinterpret_cast<HINSTANCE>(3),216,machine,marker)&&lastError==1812);loadOk=true;
+  lockOk=false;assert(!ResourcePeMatches(reinterpret_cast<HINSTANCE>(3),216,machine,marker)&&lastError==ERROR_RESOURCE_DATA_NOT_FOUND);lockOk=true;
+ }
+ assert(fileOpens==1);
  std::cout<<"PASS: PE fixture "<<argv[1]<<"\n";
 }
 '''
@@ -92,7 +119,7 @@ def fixture(machine, marker=True, malformed=False):
     struct.pack_into("<I", data, 0x200 + 32, 0x1040)
     struct.pack_into("<II", data, 0x240, 0x1080, 0x10C0)
     data[0x280:0x280+len(b"GlassSettings_UnlockerW\0")] = b"GlassSettings_UnlockerW\0"
-    name = b"GlassSettings_InstallerScanProtocolV1\0" if marker else b"GlassSettings_ScanGlassModules\0"
+    name = b"GlassSettings_InstallerScanProtocolV2\0" if marker else b"GlassSettings_ScanGlassModules\0"
     data[0x2C0:0x2C0+len(name)] = name
     return data
 
@@ -109,8 +136,11 @@ with tempfile.TemporaryDirectory(prefix="glass-pe-validator-") as directory:
         ("old-x86", fixture(0x14C, marker=False), "14c", False),
         ("malformed", fixture(0x14C, malformed=True), "14c", False),
         ("truncated", fixture(0x14C)[:200], "14c", False),
+        ("resource-export-only-raw-string", fixture(0x8664), "8664", False),
     ]
     for name, data, machine, expected in cases:
+        if name=="resource-export-only-raw-string":
+            struct.pack_into("<I",data,0x200+24,1) # String exists but is not an exported name.
         path = directory / (name + ".bin")
         path.write_bytes(data)
         subprocess.run([str(exe), str(path), machine, "1" if expected else "0"], check=True)

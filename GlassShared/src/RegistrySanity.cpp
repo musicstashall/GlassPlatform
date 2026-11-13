@@ -52,6 +52,12 @@ constexpr Rule kOpenGlassRootRules[] = {
 
 // Только значения OpenGlass в DWM — имена и типы из каталога SettingsCatalog v3. Базовые цвета
 // Windows (ColorizationColor/Afterglow/…/EnableTransparency) в схему не входят.
+// Audited against ALTaleX531/OpenGlass fb145fcd391b274cb91e642c93b3fc2b0e30e61c,
+// Scripts/OpenGlass.iss::DeleteConfig: 54 names minus five protected Windows
+// values (ColorizationColor, ColorizationAfterglow, ColorizationColorBalance,
+// ColorizationAfterglowBalance, ColorizationBlurBalance). The remaining 49
+// names are removed in every user hive and HKLM by CleanOwnedSettings.
+// Do NOT copy upstream's five Windows values into our uninstall allowlist.
 constexpr Rule kDwmOpenGlassRules[] = {
     { L"ColorizationColorOverride", ValueKind::Dword },
     { L"ColorizationAfterglowOverride", ValueKind::Dword },
@@ -226,6 +232,94 @@ void RemoveUserSettings() noexcept
             RegCloseKey(dwm);
         }
     }
+}
+
+
+namespace {
+bool VerifyTreeAccess(HKEY key, unsigned depth) {
+    if(depth>64)return false;
+    for(DWORD index=0;;++index) {
+        wchar_t name[256]{};DWORD size=256;
+        const LONG st=RegEnumKeyExW(key,index,name,&size,nullptr,nullptr,nullptr,nullptr);
+        if(st==ERROR_NO_MORE_ITEMS)return true;
+        if(st!=ERROR_SUCCESS)return false;
+        HKEY child=nullptr;
+        if(RegOpenKeyExW(key,name,0,KEY_ALL_ACCESS,&child)!=ERROR_SUCCESS)return false;
+        const bool ok=VerifyTreeAccess(child,depth+1);RegCloseKey(child);if(!ok)return false;
+    }
+}
+bool InstallMetadata(const wchar_t* name) {
+    for(const auto& rule:kGlassPlatformRootRules)if(_wcsicmp(name,rule.valueName)==0)return true;
+    return false;
+}
+}
+static bool CleanSettingsImpl(HKEY root, bool machine, bool apply, std::wstring& detail, bool includeOpenGlass) {
+    for(REGSAM view:kViews) {
+        HKEY glass=nullptr;
+        LONG st=RegOpenKeyExW(root,L"Software\\StanislavKa\\GlassPlatform",0,KEY_ALL_ACCESS|view,&glass);
+        if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){detail=L"GlassPlatform access: "+std::to_wstring(st);return false;}
+        if(glass) {
+            if(!VerifyTreeAccess(glass,0)){RegCloseKey(glass);detail=L"GlassPlatform child access";return false;}
+            if(apply) {
+                for(;;) {
+                    wchar_t child[256]{};DWORD size=256;
+                    st=RegEnumKeyExW(glass,0,child,&size,nullptr,nullptr,nullptr,nullptr);
+                    if(st==ERROR_NO_MORE_ITEMS)break;
+                    if(st==ERROR_SUCCESS)st=RegDeleteTreeW(glass,child);
+                    if(st!=ERROR_SUCCESS){RegCloseKey(glass);detail=L"GlassPlatform child cleanup: "+std::to_wstring(st);return false;}
+                }
+                for(DWORD index=0;;) {
+                    wchar_t name[16384]{};DWORD size=16384;
+                    st=RegEnumValueW(glass,index,name,&size,nullptr,nullptr,nullptr,nullptr);
+                    if(st==ERROR_NO_MORE_ITEMS)break;
+                    if(st!=ERROR_SUCCESS){RegCloseKey(glass);detail=L"GlassPlatform value enumeration";return false;}
+                    if(InstallMetadata(name)){++index;continue;}
+                    st=RegDeleteValueW(glass,name);
+                    if(st!=ERROR_SUCCESS){RegCloseKey(glass);detail=L"GlassPlatform value cleanup: "+std::to_wstring(st);return false;}
+                }
+            }
+            RegCloseKey(glass);
+        }
+        if(!includeOpenGlass)continue; // OG config is owned by its official uninstaller.
+        HKEY dwm=nullptr;
+        st=RegOpenKeyExW(root,L"Software\\Microsoft\\Windows\\DWM",0,KEY_QUERY_VALUE|KEY_SET_VALUE|view,&dwm);
+        if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){detail=L"DWM access: "+std::to_wstring(st);return false;}
+        if(dwm) {
+            if(apply) {
+                for(const auto& rule:kDwmOpenGlassRules) {
+                    st=RegDeleteValueW(dwm,rule.valueName);
+                    if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND) {
+                        RegCloseKey(dwm);
+                        detail=L"DWM cleanup: "+std::wstring(rule.valueName)+L" ("+std::to_wstring(st)+L")";
+                        return false;
+                    }
+                }
+                // A retained writer can recreate values even after a successful
+                // RegDeleteValue. Do not report a complete registry cleanup in
+                // that case. Query presence only: type/size never exempt an owned
+                // name from explicit uninstall cleanup. Unknown Windows values
+                // and the DWM key itself are deliberately preserved.
+                for(const auto& rule:kDwmOpenGlassRules) {
+                    st=RegQueryValueExW(dwm,rule.valueName,nullptr,nullptr,nullptr,nullptr);
+                    if(st!=ERROR_FILE_NOT_FOUND) {
+                        RegCloseKey(dwm);
+                        detail=L"DWM cleanup verification: "+std::wstring(rule.valueName)+L" ("+std::to_wstring(st)+L")";
+                        return false;
+                    }
+                }
+            }
+            RegCloseKey(dwm);
+        }
+    }
+    (void)machine; // Same whitelist; the caller supplies HKLM only once.
+    return true;
+}
+
+bool CleanOwnedSettings(HKEY root, bool machine, bool apply, std::wstring& detail) {
+    return CleanSettingsImpl(root,machine,apply,detail,true);
+}
+bool CleanPlatformSettings(HKEY root, bool machine, bool apply, std::wstring& detail) {
+    return CleanSettingsImpl(root,machine,apply,detail,false);
 }
 
 } // namespace Shared::RegistrySanity

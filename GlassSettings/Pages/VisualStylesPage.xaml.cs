@@ -66,6 +66,9 @@ public sealed partial class VisualStylesPage : Page
         base.OnNavigatedTo(e);
         ThemesExpander.IsExpanded = true;
         HookEnvironmentWatcher();
+        TextFontsCard.Visibility = GlassPlatformUiPolicy.ShouldExposePlatformSections()
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         LoadThemes();
         if (ThemesExpander.IsLoaded)
             ThemesExpander_OnLoaded(ThemesExpander, new RoutedEventArgs());
@@ -779,10 +782,7 @@ public sealed partial class VisualStylesPage : Page
             SignatureToggle.IsOn = snapshot.SwitchOn;
             SignatureToggle.SyncInnerEnabled();
 
-            var cardBlocked = !snapshot.LocalDllPresent
-                && snapshot.State is not SecureUxThemeState.Active
-                    and not SecureUxThemeState.ActivationPendingRestart
-                    and not SecureUxThemeState.DeactivationPendingRestart;
+            var cardBlocked = !snapshot.SwitchEnabled;
             SignatureCard.IsEnabled = !cardBlocked && !_signatureBusy;
 
             GlassSettingsToolTipService.SetToolTip(SignatureCard, null);

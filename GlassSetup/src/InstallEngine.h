@@ -2,7 +2,14 @@
 #include "InstallSupport/GlassInstallRollback.h"
 #include "InstallSupport/GlassInstallRemoval.h"
 #include "InstallSupport/GlassUserDefaults.h"
+#include "InstallSupport/GlassSecureUxPackage.h"
+#include "InstallSupport/GlassOpenGlassPackage.h"
+#include "InstallSupport/GlassOpenGlassInstall.h"
+#include "InstallSupport/GlassOpenGlassFiles.h"
 #include "GlassProducts.h"
+#include "InstallSupport/GlassProfileMaintenance.h"
+#include "GlassProductPlan.h"
+#include "GlassProcedurePlan.h"
 #include "WizardUnlockState.h"
 #include <windows.h>
 #include <winsvc.h>
@@ -12,7 +19,8 @@
 #include <vector>
 #include <GlassPlatformTask.h>
 
-// Распаковка встроенных MSI и установка через MsiInstallProduct с кооперативной отменой и откатом.
+// Protected MSI acquisition/install with cooperative cancellation and Glass rollback.
+// Original vendor MSI install/removal is a separate, last transaction.
 class InstallEngine {
 public:
     using StatusFn = std::function<void(const std::wstring& line, int percent)>;
@@ -103,7 +111,8 @@ public:
         GlassProducts::OpenGlassStartupState openGlassStartup,
         bool forceClean,
         PhaseLabels labels,
-        StatusFn onStatus) noexcept;
+        StatusFn onStatus,
+        const std::wstring& secureUxRemovalCode = {}) noexcept;
 
     bool Poll() noexcept;
     bool Succeeded() const noexcept { return succeeded_; }
@@ -112,6 +121,8 @@ public:
     bool RollbackSucceeded() const noexcept { return rollbackSucceeded_.load(std::memory_order_acquire); }
     bool IsCancelRequested() const noexcept { return cancelRequested_.load(std::memory_order_acquire); }
     bool IsRollingBack() const noexcept { return rollingBack_.load(std::memory_order_acquire); }
+    // Explicitly selected startup products only; retained-host restoration is finalization.
+    bool HasHostLaunchWork() const noexcept { return hostLaunchExpected_.load(std::memory_order_acquire); }
     bool IsLaunchingPhase() const noexcept { return launchingPhase_.load(std::memory_order_acquire); }
     bool CanRequestCancel() const noexcept {
         return started_ && !finished_
@@ -140,8 +151,8 @@ public:
     bool IsMarquee() const noexcept;
     void SetStatus(const std::wstring& line, int percent) noexcept;
 
-    enum class HoldKind { None, Modules, Processes };
-    enum class HoldAction { None, Retry, Unlock, Cancel };
+    enum class HoldKind { None, Modules, Processes, MissingHelper };
+    enum class HoldAction { None, Retry, Unlock, ContinueRisk, Cancel };
 
     HoldKind CurrentHold() const noexcept;
     WizardUnlock::Phase ActiveUnlock() const noexcept { return unlockActivity_.Current(); }
@@ -177,21 +188,55 @@ private:
     bool ReleaseLockedModules() noexcept;
     bool EnsureTempWorkspace() noexcept;
     bool ExtractPayload(HINSTANCE instance) noexcept;
-    bool VerifyEmbeddedNativePayload() noexcept;
     bool InstallGlassSettingsEarly() noexcept;
+    bool RunOfficialOpenGlassOnly() noexcept;
+    bool PrepareOfficialOpenGlass(bool removing) noexcept;
+    bool CommitOfficialOpenGlass(bool removing) noexcept;
+    bool OfficialResourcesPhase(bool preparing) noexcept;
+    bool FinishOfficialResources(bool commit) noexcept;
+    GlassInstallRollback::SessionState officialResourcesRollback_;
+    bool preparingOfficialResources_=false, preserveOfficialResourcesSnapshot_=false;
+    static DWORD WINAPI RunGlassWorker(LPVOID p) noexcept;
+    GlassOpenGlassInstall::Record officialOpenGlassBefore_;
+    std::wstring officialOpenGlassTarget_;
+    bool mixedOpenGlass_=false;
+    bool BuildExecutionPlan() noexcept;
+    GlassProductPlan::Plan executionPlan_{};
+    unsigned procedureMask_=0x2Fu;
+    bool auxiliaryOnly_=false;
+    bool executionPlanReady_=false;
+    bool openGlassResidualRemoval_=false;
     bool RunMsiSequence() noexcept;
+    bool InstallOriginalSecureUxTheme() noexcept;
+    bool CommitEarlySecureUxRemoval() noexcept;
+    bool secureUxRemovalCommitted_ = false;
+    GlassSecureUxPackage::Package secureUxPackage_;
+    GlassOpenGlassPackage::Package openGlassPackage_;
+    std::shared_ptr<GlassOpenGlassFiles::Transaction> openGlassFiles_;
+    GlassSecureUxPackage::Removal secureUxRemoval_;
+    GlassProfileMaintenance::Inventory secureUxRemovalProfiles_;
+    bool secureUxLoadedRemoval_=false;
+    std::wstring secureUxRemovalCode_;
+    bool PrepareSecureUxRemoval() noexcept;
+    bool RemoveOriginalSecureUxTheme() noexcept;
     bool RecheckSnapshottedProduct(const wchar_t* productCode) noexcept;
     bool RecheckRelatedProducts(const wchar_t* productCode) noexcept;
     bool StopHostsForRollback() noexcept;
     bool RemoveCreatedHostsForRollback() noexcept;
+    bool PrepareManagedRemoval() noexcept;
+    bool PrepareFullRemovalCleanup() noexcept;
+    void FinishFullRemovalCleanup() noexcept;
+    GlassProfileMaintenance::Inventory fullRemovalProfiles_;
+    bool RemoveManagedProduct(GlassProductPlan::Product product) noexcept;
     bool RunOneMsi(const std::wstring& msiPath, const std::wstring& installDir,
         const std::wstring& label, int progressBase, int progressSpan) noexcept;
     // Phase B: autostart tasks / OpenGlass service and their validation.
     // Runs before anything is started, so a failure still rolls back.
     bool RegisterSelectedProducts() noexcept;
-    // Phase C: start the selected products, restore prior hosts, register the
-    // shell extension. The first start is the commit point: every failure in
-    // here becomes a FinishWarning, never a failure or rollback.
+    // Phase C: after worker commit (including the final vendor transaction),
+    // start selected products, restore prior hosts, register shell extension.
+    // Every failure here becomes a FinishWarning, never a rollback.
+    bool EnsureOpenGlassBeforePlatform() noexcept;
     void LaunchSelectedProducts() noexcept;
     void SeedUserDefaults() noexcept;
     void AddFinishWarning(const std::wstring& title, const std::wstring& detail) noexcept;
@@ -204,6 +249,8 @@ private:
 
     StatusFn status_;
     GlassInstallRollback::SessionState rollbackSession_;
+    GlassInstallRemoval::Session removalSession_;
+    bool shellRemovedForMaintenance_=false;
     ComponentSelection selection_{};
     GlassProducts::OpenGlassStartupState openGlassStartup_{};
     GlassUserDefaults::SeedReport userDefaults_;
@@ -230,6 +277,7 @@ private:
     std::atomic<bool> userCancelled_{false};
     std::atomic<bool> rollingBack_{false};
     std::atomic<bool> failureFinalizing_{false};
+    std::atomic<bool> hostLaunchExpected_{false}; // UI only; launchingPhase_ still closes cancellation.
     std::atomic<bool> launchingPhase_{false};
     std::atomic_bool rollbackSucceeded_{true};
     bool preserveSnapshot_ = false;
@@ -244,6 +292,7 @@ private:
     bool hostsStopped_ = false;
     bool x64StopAttempted_ = false, x86StopAttempted_ = false, ogStopSignalled_ = false;
     bool installAttempted_ = false;
+    unsigned earlySettingsAttemptMask_ = 0;
     // Before this boundary only the early GlassSettings MSI can have changed.
     bool nonSettingsChangesAttempted_ = false;
     bool scanNativeX64_ = false;

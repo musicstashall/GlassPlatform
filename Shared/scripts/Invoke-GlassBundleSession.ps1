@@ -154,6 +154,20 @@ function Test-SessionSameProduct([object] $Session, [string] $Base3, [string] $C
     return $true
 }
 
+function Write-BundleStamp([string] $BuildDir, [string] $Version) {
+    # Метка меняется только вместе с номером. Иначе каждый PrepareSession
+    # обновляет время файла и Visual Studio заново собирает весь комплект.
+    $stamp = Join-Path $BuildDir 'GlassBundleVersion.stamp'
+    if (Test-Path -LiteralPath $stamp) {
+        $current = ([System.IO.File]::ReadAllText($stamp)).Trim()
+        if ($current -eq $Version) { return }
+    }
+    $tmp = "$stamp.tmp"
+    [System.IO.File]::WriteAllText($tmp, $Version, [System.Text.UTF8Encoding]::new($false))
+    if (Test-Path -LiteralPath $stamp) { Remove-Item -LiteralPath $stamp -Force }
+    Move-Item -LiteralPath $tmp -Destination $stamp -Force
+}
+
 function Write-SessionArtifacts([string] $BuildDir, [object] $Session) {
     $sessionJson = Join-Path $BuildDir 'GlassBundleSession.json'
     $sessionProps = Join-Path $BuildDir 'GlassBundleSession.props'
@@ -170,6 +184,7 @@ function Write-SessionArtifacts([string] $BuildDir, [object] $Session) {
         GlassBundlePhase          = $record.Phase
         GlassBundleSessionActive  = $sessionActive
     }
+    Write-BundleStamp $BuildDir ([string]$record.GlassBundleVersion)
 }
 
 function Read-Counter([string] $CounterPath) {
@@ -238,6 +253,7 @@ function Complete-Session([object] $Session) {
         GlassBundlePhase          = 'completed'
         GlassBundleSessionActive  = 'false'
     }
+    Write-BundleStamp $buildDir ([string]$record.GlassBundleVersion)
     Write-Host "GlassBundle: комплект $($record.GlassBundleVersion) финализирован → $manifestPath"
 }
 

@@ -36,7 +36,8 @@ def structure(text, token):
 
 preflight = function(setup, "bool RunPreflightChecks()")
 page = function(setup, "void SetPage(Page page)")
-assert 'if (!installed.rootsResolved || (installed.detected && !installed.valid))' in preflight
+assert 'ResolveInstallRoots(roots)' in preflight
+assert 'FindInstalledGlassVersion' not in preflight and 'CompareVersions' not in preflight
 assert 'SetPage(Page::VersionInvalid)' in preflight and 'return false;' in preflight
 assert 'page_==Page::Downgrade || page_==Page::VersionInvalid' in page
 assert 'page_==Page::VersionInvalid) return 0;' in setup
@@ -110,35 +111,24 @@ struct Wizard {Page page_=Page::Welcome;std::vector<std::wstring> conflicts_;
 };
 void addCore(const std::wstring& root,const std::wstring& version){auto p=root+L"\\GlassCore.dll";fake.files[p]=0;fake.versions[p]=version;}
 int main(){
- // Reproduce a healthy x64 installation: it is an update, not a clean reinstall.
- reset();addCore(fake.x64,L"2.0.0.50");Wizard normal;assert(normal.RunPreflightChecks());
- assert(normal.installedGlassVersion_==L"2.0.0.50" && normal.page_==Page::Welcome);
- // Resolve and compare both architectures, retaining the highest valid version.
- reset();fake.reg86=true;addCore(fake.x64,L"2.0.0.50");addCore(fake.x86,L"2.0.0.51");
- Wizard both;assert(both.RunPreflightChecks() && both.installedGlassVersion_==L"2.0.0.51");
- // A registered, non-default root must be used for version detection.
- reset();fake.reg86=true;fake.x86=L"D:\\Programs\\GlassPlatform";addCore(fake.x64,L"2.0.0.50");
- addCore(fake.x86,L"2.0.0.51");Wizard custom;assert(custom.RunPreflightChecks());
- assert(custom.preflightX86Root_==fake.x86 && custom.installedGlassVersion_==L"2.0.0.51");
- // A genuinely clean system is distinct from an unreadable registered install.
- reset();fake.reg64=false;Wizard empty;assert(empty.RunPreflightChecks() && empty.installedGlassVersion_.empty());
- reset();Wizard missing;assert(!missing.RunPreflightChecks() && missing.page_==Page::VersionInvalid);
- assert(missing.blockReason_==Text(IDS_VERSION_INVALID_BODY) && missing.versionInvalidNote_==Text(IDS_VERSION_INVALID_NOTE));
- // If system root lookup fails, block even if MSI detection is also empty.
- reset();fake.roots=false;fake.reg64=false;Wizard noroot;assert(!noroot.RunPreflightChecks());
- assert(noroot.page_==Page::VersionInvalid && noroot.blockReason_==Text(IDS_ERR_INSTALL_PATH));
- // Missing or invalid metadata, inaccessible markers and unsafe links do not
- // authorize a destructive clean installation.
- reset();addCore(fake.x64,L"bad");Wizard badVersion;assert(!badVersion.RunPreflightChecks() && badVersion.page_==Page::VersionInvalid);
- reset();fake.errors[fake.x64+L"\\GlassCore.dll"]=ERROR_ACCESS_DENIED;Wizard denied;assert(!denied.RunPreflightChecks());
- reset();addCore(fake.x64,L"2.0.0.50");fake.unsafe.insert(fake.x64+L"\\GlassCore.dll");Wizard unsafe;assert(!unsafe.RunPreflightChecks());
- reset();addCore(fake.x64,L"2.0.0.50");fake.files[fake.x86+L"\\GlassCompat.dll"]=0;Wizard incomplete;assert(!incomplete.RunPreflightChecks());
- // Downgrades and unreadable Setup versions are still blocked.
- reset();addCore(fake.x64,L"2.0.0.60");Wizard newer;assert(!newer.RunPreflightChecks() && newer.page_==Page::Downgrade);
- reset();addCore(fake.x64,L"2.0.0.50");fake.self=L"";Wizard noSelf;assert(!noSelf.RunPreflightChecks());
- assert(noSelf.page_==Page::VersionInvalid && noSelf.versionInvalidNote_==Text(IDS_SETUP_VERSION_INVALID_NOTE));
- std::cout<<"PASS: real preflight: healthy x64/x86 update, clean system, inaccessible paths, versions and downgrade\n";
+ reset();addCore(fake.x64,L"99.0.0.50");Wizard normal;assert(normal.RunPreflightChecks());
+ assert(normal.installedGlassVersion_.empty()&&normal.preflightX64Root_==fake.x64);
+ reset();fake.reg86=true;fake.x86=L"D:\\Programs\\GlassPlatform";addCore(fake.x86,L"99.0.0.51");
+ Wizard custom;assert(custom.RunPreflightChecks()&&custom.preflightX86Root_==fake.x86);
+ reset();fake.roots=false;Wizard noRoots;assert(!noRoots.RunPreflightChecks());
+ assert(noRoots.page_==Page::VersionInvalid&&noRoots.blockReason_==Text(IDS_ERR_INSTALL_PATH));
+ // Missing/damaged/unreadable PE files and a different Setup version cannot
+ // hide cards or authorize a downgrade of any product's MSI.
+ for(int n=0;n<5;++n){reset();
+  if(n==0)addCore(fake.x64,L"bad");
+  if(n==1)fake.errors[fake.x64+L"\\GlassCore.dll"]=ERROR_ACCESS_DENIED;
+  if(n==2){addCore(fake.x64,L"99.0.0");fake.self=L"1.0.0";}
+  if(n==3)fake.self=L"";
+  Wizard w;assert(w.RunPreflightChecks()&&w.page_==Page::Welcome);
+ }
+ std::cout<<"PASS: real preflight: MSI products independent of Setup/PE versions; unresolved roots refused\n";
 }
+
 '''
 with tempfile.TemporaryDirectory(prefix="glass-version-") as directory:
     cpp = Path(directory) / "test.cpp"

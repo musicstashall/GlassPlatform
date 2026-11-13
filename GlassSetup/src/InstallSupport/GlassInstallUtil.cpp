@@ -1,7 +1,18 @@
 #include "GlassInstallUtil.h"
+#include <StockThemeMaintenanceTrace.h>
+#include "GlassInstallMsi.h"
+#include <msi.h>
 #include "GlassInstallLog.h"
+#include "GlassMaintenanceCache.h"
 #include "GlassEmptyDirectories.h"
 #include <shlobj.h>
+#include <wintrust.h>
+#include <softpub.h>
+#include <wincrypt.h>
+#include <InjectModuleScan.h>
+#include <Helpers/ThemeHelper.h>
+#include <algorithm>
+#include <array>
 #include <GlassShellMenuConstants.h>
 #include <objbase.h>
 #include <oleauto.h>
@@ -20,15 +31,6 @@
 namespace GlassInstallUtil {
 
 namespace {
-
-std::mutex g_unlockerMutex;
-HINSTANCE g_unlockerInstance = nullptr;
-UINT g_unlockerX64ResId = 0;
-UINT g_unlockerX86ResId = 0;
-std::wstring g_extractedUnlockerDir;
-std::wstring g_extractedUnlockerX64Path;
-std::wstring g_extractedUnlockerX86Dir;
-std::wstring g_extractedUnlockerX86Path;
 
 // Fail closed: do not overwrite an orphaned legacy shell registration on a clean install.
 bool HasExistingShellRegistrationKeys() noexcept {
@@ -179,97 +181,112 @@ void RemoveEmptyInstallPathKeys() noexcept {
 }
 } // namespace
 
-std::wstring EnsureExtractedUnlockerX64() noexcept {
-    std::lock_guard<std::mutex> lock(g_unlockerMutex);
-    if (!g_extractedUnlockerX64Path.empty()
-        && PeMatches(g_extractedUnlockerX64Path, IMAGE_FILE_MACHINE_AMD64, "GlassSettings_UnlockerW")) {
-        return g_extractedUnlockerX64Path;
-    }
-    if (!g_unlockerInstance || g_unlockerX64ResId == 0)
-        return {};
-    std::wstring dir;
-    if (!CreateSecureTempDirectory(L"GlassUnlocker",dir)) return {};
-    const std::wstring dllPath = dir + L"\\GlassSettings.Native.dll";
-    if (!ExtractResourceToFile(g_unlockerInstance, g_unlockerX64ResId, RT_RCDATA, dllPath)) {
-        RemoveDirectoryW(dir.c_str());
-        return {};
-    }
-    if (!PeMatches(dllPath, IMAGE_FILE_MACHINE_AMD64, "GlassSettings_UnlockerW")) {
-        DeleteFileW(dllPath.c_str());
-        RemoveDirectoryW(dir.c_str());
-        return {};
-    }
-    g_extractedUnlockerDir = dir;
-    g_extractedUnlockerX64Path = dllPath;
-    return g_extractedUnlockerX64Path;
-}
-
 } // namespace
 
-void ConfigureEmbeddedUnlocker(HINSTANCE instance, UINT x64ResourceId, UINT x86ResourceId) noexcept {
-    std::lock_guard<std::mutex> lock(g_unlockerMutex);
-    g_unlockerInstance = instance;
-    g_unlockerX64ResId = x64ResourceId;
-    g_unlockerX86ResId = x86ResourceId;
+namespace {
+bool SignedPublisher(const std::wstring& path,std::array<BYTE,32>& digest) noexcept {
+    WINTRUST_FILE_INFO file{sizeof(file)};file.pcwszFilePath=path.c_str();
+    WINTRUST_DATA data{sizeof(data)};data.dwUIChoice=WTD_UI_NONE;data.fdwRevocationChecks=WTD_REVOKE_NONE;
+    data.dwUnionChoice=WTD_CHOICE_FILE;data.pFile=&file;data.dwStateAction=WTD_STATEACTION_VERIFY;
+    data.dwProvFlags=WTD_CACHE_ONLY_URL_RETRIEVAL;
+    GUID policy=WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    const LONG status=WinVerifyTrust(nullptr,&policy,&data);
+    // A pinned self-signed Glass certificate is supported offline, but invalid
+    // file digests/signatures, expiry, revocation and wrong usage are not.
+    bool ok=status==ERROR_SUCCESS || status==CERT_E_UNTRUSTEDROOT || status==CERT_E_CHAINING;
+    auto* provider=WTHelperProvDataFromStateData(data.hWVTStateData);
+    auto* signer=provider?WTHelperGetProvSignerFromChain(provider,0,FALSE,0):nullptr;
+    if(!signer || !signer->csCertChain || !signer->pasCertChain || !signer->pasCertChain[0].pCert)ok=false;
+    if(ok) {
+        const auto* cert=signer->pasCertChain[0].pCert;
+        DWORD size=static_cast<DWORD>(digest.size());
+        ok=CryptHashCertificate2(BCRYPT_SHA256_ALGORITHM,0,nullptr,cert->pbCertEncoded,cert->cbCertEncoded,digest.data(),&size) && size==digest.size();
+    }
+    data.dwStateAction=WTD_STATEACTION_CLOSE;WinVerifyTrust(nullptr,&policy,&data);
+    return ok;
+}
+// Protect against renaming an admin-owned leaf through a user-writable ancestor.
+// Ancestors may be owned/written by Windows servicing (TrustedInstaller), but
+// installed MSI leaves/files permit the same privileged Windows servicing SID.
+bool NativeAncestorsProtected(std::wstring path, bool directory=true) noexcept {
+    if(path.size()<3 || path[1]!=L':' || path[2]!=L'\\')return false;
+    BYTE admins[SECURITY_MAX_SID_SIZE]{},system[SECURITY_MAX_SID_SIZE]{};
+    DWORD na=sizeof(admins),ns=sizeof(system);PSID servicing=nullptr;
+    if(!CreateWellKnownSid(WinBuiltinAdministratorsSid,nullptr,admins,&na) ||
+       !CreateWellKnownSid(WinLocalSystemSid,nullptr,system,&ns) ||
+       !ConvertStringSidToSidW(L"S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",&servicing))return false;
+    const auto privileged=[&](PSID sid){return sid && (EqualSid(sid,admins)||EqualSid(sid,system)||EqualSid(sid,servicing));};
+    bool ok=true;
+    while(ok) {
+        const DWORD attr=GetFileAttributesW(path.c_str());
+        if(attr==INVALID_FILE_ATTRIBUTES || ((attr&FILE_ATTRIBUTE_DIRECTORY)!=0)!=directory || (attr&FILE_ATTRIBUTE_REPARSE_POINT)){
+            GlassInstallLog::LineFormat(L"Native trust: invalid type, missing or reparse path: %s",path.c_str());
+            ok=false;break;
+        }
+        PSID owner=nullptr;PACL acl=nullptr;PSECURITY_DESCRIPTOR sd=nullptr;
+        const DWORD security=GetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()),SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,&owner,nullptr,&acl,nullptr,&sd);
+        if(security!=ERROR_SUCCESS){
+            GlassInstallLog::LineFormat(L"Native trust: GetNamedSecurityInfoW failed (%lu): %s",security,path.c_str());
+            if(sd)LocalFree(sd);
+            ok=false;break;
+        }
+        ok=privileged(owner) && acl;
+        for(DWORD i=0;ok && i<acl->AceCount;++i) {
+            void* raw=nullptr;if(!GetAce(acl,i,&raw)){ok=false;break;}
+            const auto* header=static_cast<ACE_HEADER*>(raw);
+            if(header->AceFlags&INHERIT_ONLY_ACE)continue;
+            if(header->AceType==ACCESS_DENIED_ACE_TYPE)continue;
+            if(header->AceType!=ACCESS_ALLOWED_ACE_TYPE){ok=false;break;}
+            auto* ace=static_cast<ACCESS_ALLOWED_ACE*>(raw);
+            // For directories, creating a new subdirectory alone cannot replace
+            // this already-existing pinned DLL. In particular C:\ may grant
+            // FILE_ADD_SUBDIRECTORY to users. Mutating/deleting an existing
+            // child, or changing its ACL/owner, must remain privileged.
+            const DWORD replace=GENERIC_ALL|GENERIC_WRITE|DELETE|WRITE_DAC|WRITE_OWNER|FILE_DELETE_CHILD|FILE_WRITE_DATA|
+                (directory?0u:(FILE_APPEND_DATA|FILE_WRITE_EA|FILE_WRITE_ATTRIBUTES));
+            if((ace->Mask&replace) && !privileged(&ace->SidStart)) {
+                GlassInstallLog::LineFormat(L"Native trust: non-privileged write ACE mask=0x%08lX: %s",ace->Mask,path.c_str());
+                ok=false;
+            }
+        }
+        if(!ok)GlassInstallLog::LineFormat(L"Native trust: owner/DACL validation failed: %s",path.c_str());
+        LocalFree(sd);
+        if(path.size()==3)break;
+        const auto slash=path.find_last_of(L'\\');if(slash==std::wstring::npos){ok=false;break;}
+        path.resize(slash==2?3:slash);
+        directory=true;
+    }
+    LocalFree(servicing);return ok;
 }
 
-std::wstring EmbeddedNativeDllX86() noexcept {
-    std::lock_guard<std::mutex> lock(g_unlockerMutex);
-    if (!g_extractedUnlockerX86Path.empty() &&
-        PeMatches(g_extractedUnlockerX86Path, IMAGE_FILE_MACHINE_I386, "GlassSettings_UnlockerW"))
-        return g_extractedUnlockerX86Path;
-    if (!g_unlockerInstance || !g_unlockerX86ResId) return {};
-    std::wstring dir;
-    if (!CreateSecureTempDirectory(L"GlassUnlocker86", dir)) return {};
-    // Use a distinct temporary basename so a previously loaded Settings DLL
-    // cannot be mistaken for this installer's bundled x86 Native module.
-    const std::wstring path = dir + L"\\GlassSetup.Native.x86.dll";
-    if (!ExtractResourceToFile(g_unlockerInstance, g_unlockerX86ResId, RT_RCDATA, path) ||
-        !PeMatches(path, IMAGE_FILE_MACHINE_I386, "GlassSettings_UnlockerW")) {
-        DeleteFileW(path.c_str());
-        RemoveDirectoryW(dir.c_str());
-        return {};
+bool TrustedInstalledNative(const std::wstring& path,const std::wstring& root) noexcept {
+    const auto parent=TrimTrailingSlashes(root)+L"\\GlassSettings";
+    if(path!=parent+L"\\GlassSettings.Native.dll")return false;
+    // Installed MSI directories retain normal Windows ACLs: TrustedInstaller
+    // and inherit-only CREATOR OWNER ACEs are legitimate here. Do not apply the
+    // private ProgramData cache's Administrators/SYSTEM-only policy, and never
+    // rewrite MSI-owned ACLs just to make the executable pass validation.
+    if(!NativeAncestorsProtected(path,false))return false;
+    // Pin the file while validating. Installed roots/files are admin-only; no
+    // executable is copied/extracted to Temp or loaded from a writable source.
+    HANDLE pin=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(pin==INVALID_HANDLE_VALUE) {
+        GlassInstallLog::LineFormat(L"Native trust: cannot pin DLL for reading (%lu): %s",GetLastError(),path.c_str());
+        return false;
     }
-    g_extractedUnlockerX86Dir = dir;
-    g_extractedUnlockerX86Path = path;
-    return path;
+    wchar_t self[32768]{};const DWORD n=GetModuleFileNameW(nullptr,self,_countof(self));
+    std::array<BYTE,32> expected{},actual{};
+    const bool ok=n && n<_countof(self) && SignedPublisher(self,expected) && SignedPublisher(path,actual) && expected==actual;
+    CloseHandle(pin);
+    if(!ok)GlassInstallLog::LineFormat(L"Native trust: Setup/DLL Authenticode publisher verification failed: %s",path.c_str());
+    return ok;
 }
+} // namespace
 
-void CleanupEmbeddedUnlocker() noexcept {
-    std::lock_guard<std::mutex> lock(g_unlockerMutex);
-    // The in-process x86 module must have been FreeLibrary'd first.
-    if (!g_extractedUnlockerX86Path.empty()) {
-        if (!DeleteFileW(g_extractedUnlockerX86Path.c_str())) {
-            const DWORD error = GetLastError();
-            const bool deferred = MoveFileExW(g_extractedUnlockerX86Path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
-            GlassInstallLog::LineFormat(L"x86 Native cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
-        }
-        g_extractedUnlockerX86Path.clear();
-    }
-    if (!g_extractedUnlockerX86Dir.empty()) {
-        if (!RemoveDirectoryW(g_extractedUnlockerX86Dir.c_str())) {
-            const DWORD error = GetLastError();
-            const bool deferred = MoveFileExW(g_extractedUnlockerX86Dir.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
-            GlassInstallLog::LineFormat(L"x86 Native temp directory cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
-        }
-        g_extractedUnlockerX86Dir.clear();
-    }
-    if (!g_extractedUnlockerX64Path.empty()) {
-        if (!DeleteFileW(g_extractedUnlockerX64Path.c_str())) {
-            const DWORD error = GetLastError();
-            const bool deferred = MoveFileExW(g_extractedUnlockerX64Path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
-            GlassInstallLog::LineFormat(L"x64 Native cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
-        }
-        g_extractedUnlockerX64Path.clear();
-    }
-    if (!g_extractedUnlockerDir.empty()) {
-        if (!RemoveDirectoryW(g_extractedUnlockerDir.c_str())) {
-            const DWORD error = GetLastError();
-            const bool deferred = MoveFileExW(g_extractedUnlockerDir.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
-            GlassInstallLog::LineFormat(L"x64 Native temp directory cleanup failed (%lu), deferred=%d", error, deferred ? 1 : 0);
-        }
-        g_extractedUnlockerDir.clear();
-    }
+std::wstring InstalledNativeDllX86() noexcept {
+    InstallRoots roots;if(!ResolveInstallRoots(roots))return {};
+    return NativeDllForArch(GlassShared::GlassPlatformTask::PlatformArch::X86,roots.x64,roots.x86);
 }
 
 bool CreateSecureTempDirectory(const wchar_t* prefix, std::wstring& out) noexcept {
@@ -298,36 +315,39 @@ bool ExtractResourceToFile(
     const wchar_t* resourceType,
     const std::wstring& destPath,
     const std::atomic_bool* cancelled) noexcept {
-    if (!instance || resourceId == 0 || destPath.empty())
-        return false;
+    if (!instance || resourceId == 0 || destPath.empty()) {
+        SetLastError(ERROR_INVALID_PARAMETER);return false;
+    }
     HRSRC res = FindResourceW(instance, MAKEINTRESOURCEW(resourceId), resourceType);
     if (!res)
         return false;
     const DWORD size = SizeofResource(instance, res);
-    if (size == 0)
-        return false;
+    if (size == 0) {SetLastError(ERROR_RESOURCE_DATA_NOT_FOUND);return false;}
     HGLOBAL loaded = LoadResource(instance, res);
     if (!loaded)
         return false;
     const void* bytes = LockResource(loaded);
-    if (!bytes)
-        return false;
+    if (!bytes) {SetLastError(ERROR_RESOURCE_DATA_NOT_FOUND);return false;}
     HANDLE file = CreateFileW(destPath.c_str(), GENERIC_WRITE, 0, nullptr,
         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
         return false;
     DWORD offset=0;
-    bool ok=true;
+    DWORD failure=ERROR_SUCCESS;
     const auto* data=static_cast<const BYTE*>(bytes);
     while (offset<size) {
-        if (cancelled && cancelled->load(std::memory_order_acquire)) { ok=false; break; }
+        if (cancelled && cancelled->load(std::memory_order_acquire)) { failure=ERROR_CANCELLED; break; }
         const DWORD chunk=(size-offset)>1024*1024 ? 1024*1024 : size-offset;
         DWORD written=0;
-        if (!WriteFile(file,data+offset,chunk,&written,nullptr) || written==0) { ok=false; break; }
+        if (!WriteFile(file,data+offset,chunk,&written,nullptr)) { failure=GetLastError();break; }
+        if(written==0){failure=ERROR_WRITE_FAULT;break;}
         offset+=written;
     }
-    CloseHandle(file);
-    if (!ok || offset!=size) { DeleteFileW(destPath.c_str()); return false; }
+    if(!CloseHandle(file)&&failure==ERROR_SUCCESS)failure=GetLastError();
+    if(failure!=ERROR_SUCCESS||offset!=size) {
+        if(failure==ERROR_SUCCESS)failure=ERROR_WRITE_FAULT;
+        DeleteFileW(destPath.c_str());SetLastError(failure);return false;
+    }
     return true;
 }
 
@@ -675,6 +695,21 @@ DWORD ResolveDefaultPlatformRoot(bool x64, bool os64, std::wstring& root) {
 }
 
 } // namespace
+
+bool ResolveOpenGlassResourcesRoot(std::wstring& root) noexcept {
+    root.clear();
+    try {
+        bool os64=false;
+        if(!QueryNativeOs64Bit(os64))return false;
+        if(!os64){SetLastError(ERROR_NOT_SUPPORTED);return false;}
+        std::wstring platform;
+        const DWORD error=ResolveDefaultPlatformRoot(true,os64,platform);
+        if(error!=ERROR_SUCCESS){SetLastError(error);return false;}
+        const auto target=platform+L"\\OpenGlass\\Resources";
+        if(!IsSafeInstallPath(target)){SetLastError(ERROR_INVALID_DATA);return false;}
+        root=target;return true;
+    }catch(...){root.clear();SetLastError(ERROR_NOT_ENOUGH_MEMORY);return false;}
+}
 
 bool ResolveFixedPlatformRoots(std::wstring& x64, std::wstring& x86) noexcept {
     x64.clear(); x86.clear();
@@ -1049,32 +1084,69 @@ BOOL CALLBACK CloseWindowsForPid(HWND hwnd, LPARAM param) {
     return TRUE;
 }
 
-void CloseGlassSettingsProcesses(const std::atomic_bool* cancelled) noexcept {
-    const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return;
-    PROCESSENTRY32W entry{};
-    entry.dwSize = sizeof(entry);
-    if (Process32FirstW(snap, &entry)) {
+// Unknown image identity fails closed. Never send WM_CLOSE by basename alone.
+namespace {
+bool VisitSelectedSettings(const std::wstring& root64,const std::wstring& root32,
+    unsigned mask,bool close,bool& running,const std::atomic_bool* cancelled) {
+    running=false;
+    if(!(mask&36u))return true;
+    if(((mask&4u)&&root64.empty()) || ((mask&32u)&&root32.empty())) {SetLastError(ERROR_INVALID_PARAMETER);return false;}
+    const auto exe64=TrimTrailingSlashes(root64)+L"\\GlassSettings\\GlassSettings.exe";
+    const auto exe32=TrimTrailingSlashes(root32)+L"\\GlassSettings\\GlassSettings.exe";
+    const HANDLE snap=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
+    if(snap==INVALID_HANDLE_VALUE)return false;
+    PROCESSENTRY32W entry{};entry.dwSize=sizeof(entry);bool ok=true;DWORD error=ERROR_SUCCESS;
+    if(Process32FirstW(snap,&entry)) {
         do {
-            if (cancelled && cancelled->load(std::memory_order_acquire)) break;
-            if (_wcsicmp(entry.szExeFile, L"GlassSettings.exe") != 0) continue;
-            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, entry.th32ProcessID);
-            if (!process) continue;
-            wchar_t path[32768]{};
-            DWORD length = static_cast<DWORD>(std::size(path));
-            const bool alive = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
-            if (alive && QueryFullProcessImageNameW(process, 0, path, &length)) {
-                const wchar_t* name = wcsrchr(path, L'\\');
-                if (_wcsicmp(name ? name + 1 : path, L"GlassSettings.exe") == 0)
-                    EnumWindows(CloseWindowsForPid, static_cast<LPARAM>(entry.th32ProcessID));
+            if(cancelled&&cancelled->load(std::memory_order_acquire)){ok=false;error=ERROR_CANCELLED;break;}
+            if(_wcsicmp(entry.szExeFile,L"GlassSettings.exe")!=0)continue;
+            const HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,entry.th32ProcessID);
+            if(!process) {
+                error=GetLastError();
+                if(error==ERROR_INVALID_PARAMETER)continue; // Process exited after snapshot.
+                ok=false;break;
+            }
+            const DWORD wait=WaitForSingleObject(process,0);
+            if(wait==WAIT_OBJECT_0){CloseHandle(process);continue;}
+            wchar_t path[32768]{};DWORD length=static_cast<DWORD>(std::size(path));
+            if(wait!=WAIT_TIMEOUT || !QueryFullProcessImageNameW(process,0,path,&length)) {
+                error=GetLastError();CloseHandle(process);ok=false;break;
+            }
+            const bool selected=((mask&4u)&&SameInstallPath(path,exe64)) || ((mask&32u)&&SameInstallPath(path,exe32));
+            if(selected) {
+                running=true;
+                if(close)EnumWindows(CloseWindowsForPid,static_cast<LPARAM>(entry.th32ProcessID));
             }
             CloseHandle(process);
-        } while (Process32NextW(snap, &entry));
-    }
+        } while(Process32NextW(snap,&entry));
+        if(ok&&GetLastError()!=ERROR_NO_MORE_FILES){ok=false;error=GetLastError();}
+    } else if(GetLastError()!=ERROR_NO_MORE_FILES){ok=false;error=GetLastError();}
     CloseHandle(snap);
-    const ULONGLONG start = GetTickCount64();
-    while ((!cancelled || !cancelled->load(std::memory_order_acquire)) &&
-        ImageRunning(L"GlassSettings.exe") && GetTickCount64() - start < 8000) Sleep(200);
+    if(!ok)SetLastError(error?error:ERROR_GEN_FAILURE);
+    return ok;
+}
+}
+
+bool QuerySelectedSettingsRunning(const std::wstring& root64,const std::wstring& root32,
+    unsigned mask,bool& running) noexcept {
+    try{return VisitSelectedSettings(root64,root32,mask,false,running,nullptr);}
+    catch(...){running=false;SetLastError(ERROR_NOT_ENOUGH_MEMORY);return false;}
+}
+
+bool CloseSelectedSettingsProcesses(const std::wstring& root64,const std::wstring& root32,
+    unsigned mask,const std::atomic_bool* cancelled) noexcept {
+    try {
+        bool running=false;
+        if(!VisitSelectedSettings(root64,root32,mask,true,running,cancelled))return false;
+        const ULONGLONG start=GetTickCount64();
+        while(running) {
+            if(cancelled&&cancelled->load(std::memory_order_acquire)){SetLastError(ERROR_CANCELLED);return false;}
+            if(GetTickCount64()-start>=8000){SetLastError(ERROR_TIMEOUT);return false;}
+            Sleep(200);
+            if(!VisitSelectedSettings(root64,root32,mask,false,running,cancelled))return false;
+        }
+        return true;
+    }catch(...){SetLastError(ERROR_NOT_ENOUGH_MEMORY);return false;}
 }
 
 std::wstring NativeRundll64() {
@@ -1122,17 +1194,9 @@ std::wstring RundllPathForTaskArch(GlassShared::GlassPlatformTask::PlatformArch 
     return std::wstring(winDir) + L"\\System32\\rundll32.exe";
 }
 
-bool PeMatches(const std::wstring& path, WORD machine, const char* exportName) noexcept {
-    HANDLE file=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
-        nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
-    if (file==INVALID_HANDLE_VALUE) return false;
-    LARGE_INTEGER size{};
-    if (!GetFileSizeEx(file,&size) || size.QuadPart<512 || size.QuadPart>64ll*1024*1024) { CloseHandle(file); return false; }
-    const size_t length=static_cast<size_t>(size.QuadPart);
-    HANDLE map=CreateFileMappingW(file,nullptr,PAGE_READONLY,0,0,nullptr); CloseHandle(file);
-    if (!map) return false;
-    const auto* base=static_cast<const BYTE*>(MapViewOfFile(map,FILE_MAP_READ,0,0,0)); CloseHandle(map);
-    if (!base) return false;
+bool PeBufferMatches(const void* data, size_t length, WORD machine, const char* exportName) noexcept {
+    if (!data || length<512 || length>64u*1024*1024) return false;
+    const auto* base=static_cast<const BYTE*>(data);
     auto bounds=[&](size_t offset,size_t bytes) { return offset<=length && bytes<=length-offset; };
     bool ok=false;
     if (bounds(0,sizeof(IMAGE_DOS_HEADER))) {
@@ -1191,8 +1255,39 @@ bool PeMatches(const std::wstring& path, WORD machine, const char* exportName) n
             }
         }
     }
+    return ok;
+}
+
+bool PeMatches(const std::wstring& path, WORD machine, const char* exportName) noexcept {
+    HANDLE file=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+        nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if (file==INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(file,&size) || size.QuadPart<512 || size.QuadPart>64ll*1024*1024) { CloseHandle(file); return false; }
+    const size_t length=static_cast<size_t>(size.QuadPart);
+    HANDLE map=CreateFileMappingW(file,nullptr,PAGE_READONLY,0,0,nullptr); CloseHandle(file);
+    if (!map) return false;
+    const auto* base=static_cast<const BYTE*>(MapViewOfFile(map,FILE_MAP_READ,0,0,0)); CloseHandle(map);
+    if (!base) return false;
+    const bool ok=PeBufferMatches(base,length,machine,exportName);
     UnmapViewOfFile(base);
     return ok;
+}
+
+bool ResourcePeMatches(HINSTANCE instance, UINT resourceId, WORD machine, const char* exportName) noexcept {
+    // RCDATA contains the raw on-disk PE layout (not an executable image).
+    // Do not extract it, load a DLL, or consult any installed Settings path.
+    if (!instance || !resourceId) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
+    HRSRC resource=FindResourceW(instance,MAKEINTRESOURCEW(resourceId),RT_RCDATA);
+    if (!resource) return false;
+    const DWORD length=SizeofResource(instance,resource);
+    if (length<512 || length>64u*1024*1024) { SetLastError(ERROR_INVALID_DATA); return false; }
+    HGLOBAL loaded=LoadResource(instance,resource);
+    if (!loaded) return false;
+    const void* data=LockResource(loaded);
+    if (!data) { SetLastError(ERROR_RESOURCE_DATA_NOT_FOUND); return false; }
+    if (!PeBufferMatches(data,length,machine,exportName)) { SetLastError(ERROR_BAD_EXE_FORMAT); return false; }
+    return true;
 }
 
 namespace {
@@ -1204,7 +1299,11 @@ std::wstring InstalledSecureUxThemeNativeDll(
     const std::wstring& root=x64?x64Dir:x86Dir;
     if(root.empty())return {};
     const std::wstring dll=TrimTrailingSlashes(root)+L"\\GlassSettings\\GlassSettings.Native.dll";
-    return PeMatches(dll,machine,exportName)?dll:std::wstring();
+    if(!PeMatches(dll,machine,exportName)) {
+        GlassInstallLog::LineFormat(L"Native helper: file, architecture or required export %S failed: %s",exportName,dll.c_str());
+        return {};
+    }
+    return TrustedInstalledNative(dll,root)?dll:std::wstring();
 }
 }
 
@@ -1212,28 +1311,13 @@ std::wstring NativeDllForArch(
     GlassShared::GlassPlatformTask::PlatformArch arch,
     const std::wstring& x64Dir,
     const std::wstring& x86Dir) noexcept {
-    const bool x64 = arch == GlassShared::GlassPlatformTask::PlatformArch::X64;
-    const WORD machine = x64 ? IMAGE_FILE_MACHINE_AMD64 : IMAGE_FILE_MACHINE_I386;
-    if (x64) {
-        // The x64 helper is embedded in Setup/Unins and extracted to a
-        // restricted temporary directory. A missing resource fails closed.
-        if (!g_unlockerInstance || !g_unlockerX64ResId ||
-            !FindResourceW(g_unlockerInstance,MAKEINTRESOURCEW(g_unlockerX64ResId),RT_RCDATA)) return {};
-        return EnsureExtractedUnlockerX64();
+    const auto dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,"GlassSettings_UnlockerW");
+    const WORD machine=arch==GlassShared::GlassPlatformTask::PlatformArch::X64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386;
+    if(!dll.empty() && !PeMatches(dll,machine,Shared::InjectModuleScan::kNativeInstallerProtocolExport)) {
+        GlassInstallLog::LineFormat(L"Native helper: required installer scan protocol export missing: %s",dll.c_str());
+        return {};
     }
-    // Setup also embeds x86; prefer that resource over an installed helper.
-    // The resource is trusted only to the extent the Setup executable is trusted.
-    if (g_unlockerX86ResId) return EmbeddedNativeDllX86();
-    const std::wstring root = x86Dir;
-    if (!root.empty()) {
-        const std::wstring dll = TrimTrailingSlashes(root) + L"\\GlassSettings\\GlassSettings.Native.dll";
-        if (PeMatches(dll, machine, "GlassSettings_UnlockerW"))
-            return dll;
-    }
-    // Unins without an embedded x86 resource can use the resolved product
-    // root, which may be registry-derived. PeMatches checks format and export,
-    // not the origin or signature of that DLL.
-    return {};
+    return dll;
 }
 
 namespace {
@@ -1250,22 +1334,14 @@ RegistryPathRead ReadPlatformInstallPath(bool x64, bool os64,
         if (result==RegistryPathRead::Found) source=label;
         return result;
     };
-    // Preserve the established machine-before-user precedence. The view and
-    // value actually used are reported, rather than comparing or repairing
-    // other registry copies.
+    // Installation facts are machine-wide, independent of the interactive account.
     auto status=read(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",explicitValue,machineView,
         x64?L"HKLM(64) InstallPathX64":L"HKLM(32) InstallPathX86");
     if (status!=RegistryPathRead::Missing) return status;
     status=read(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",L"InstallPath",machineView,
         x64?L"HKLM(64) InstallPath":L"HKLM(32) InstallPath");
     if (status!=RegistryPathRead::Missing) return status;
-    status=read(HKEY_CURRENT_USER,L"Software\\GlassPlatform",explicitValue,0,
-        x64?L"HKCU InstallPathX64":L"HKCU InstallPathX86");
-    if (status!=RegistryPathRead::Missing) return status;
-    if (!x64 && os64)
-        return read(HKEY_CURRENT_USER,L"Software\\Wow6432Node\\GlassPlatform",L"InstallPath",0,
-            L"HKCU Wow6432Node InstallPath");
-    return read(HKEY_CURRENT_USER,L"Software\\GlassPlatform",L"InstallPath",0,L"HKCU InstallPath");
+    return RegistryPathRead::Missing;
 }
 
 RegistryPathRead ReadOpenGlassInstallPath(std::wstring& path, std::wstring& source) {
@@ -1279,11 +1355,7 @@ RegistryPathRead ReadOpenGlassInstallPath(std::wstring& path, std::wstring& sour
     auto status=read(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",
         L"OpenGlassInstallPath",KEY_WOW64_64KEY,L"HKLM(64) OpenGlassInstallPath");
     if (status!=RegistryPathRead::Missing) return status;
-    status=read(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform",
-        L"OpenGlassInstallPath",0,L"HKCU OpenGlassInstallPath");
-    if (status!=RegistryPathRead::Missing) return status;
-    return read(HKEY_CURRENT_USER,L"Software\\StanislavKa\\OpenGlass",
-        L"InstallPath",0,L"HKCU legacy OpenGlass InstallPath");
+    return RegistryPathRead::Missing;
 }
 
 DWORD ValidateRegisteredInstallRoot(std::wstring& path) {
@@ -1364,15 +1436,8 @@ bool WritePlatformInstallPath(bool x64, const std::wstring& installDir) noexcept
         if (!QueryNativeOs64Bit(os64)) return false;
         const wchar_t* explicitVal=x64?L"InstallPathX64":L"InstallPathX86";
         const REGSAM lmSam=x64?KEY_WOW64_64KEY:KEY_WOW64_32KEY;
-        if (!WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\GlassPlatform",explicitVal,0,dir) ||
-            !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",explicitVal,lmSam,dir) ||
+        if (!WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",explicitVal,lmSam,dir) ||
             !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\GlassPlatform",L"InstallPath",lmSam,dir)) return false;
-        if (x64==os64 &&
-            !WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\GlassPlatform",L"InstallPath",0,dir)) return false;
-        if (!x64 && os64 &&
-            !WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\Wow6432Node\\GlassPlatform",L"InstallPath",0,dir)) return false;
-        // Only the authoritative value is rechecked. Conflicting copies are
-        // neither compared with each other nor rewritten to match it.
         std::wstring effective,source;
         const auto status=ReadPlatformInstallPath(x64,os64,effective,source);
         if (status==RegistryPathRead::Error) return false;
@@ -1413,9 +1478,7 @@ bool WriteOpenGlassInstallPath(const std::wstring& x64RootDir, const std::wstrin
         const std::wstring root=TrimTrailingSlashes(x64RootDir);
         const std::wstring og=TrimTrailingSlashes(openGlassDir);
         if (root.empty() || og.empty()) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
-        if (!WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform",L"InstallPath",0,root) ||
-            !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",L"InstallPath",KEY_WOW64_64KEY,root) ||
-            !WriteRegSzIfMissing(HKEY_CURRENT_USER,L"Software\\StanislavKa\\GlassPlatform",L"OpenGlassInstallPath",0,og) ||
+        if (!WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",L"InstallPath",KEY_WOW64_64KEY,root) ||
             !WriteRegSzIfMissing(HKEY_LOCAL_MACHINE,L"Software\\StanislavKa\\GlassPlatform",L"OpenGlassInstallPath",KEY_WOW64_64KEY,og)) return false;
         std::wstring effective,source;
         const auto status=ReadOpenGlassInstallPath(effective,source);
@@ -1579,7 +1642,7 @@ bool InvokeShellExtRegistration(
     if (dll.empty() || !PeMatches(dll,machine,kInstallerShellExport)) {
         // Windows 11 requires the sparse package; do not silently substitute legacy regsvr32.
         // On 32-bit Windows 10, legacy registration is the supported fallback.
-        if (os64) return fail(L"GlassSettings.Native.dll with the setup export was not found");
+        if (os64) return fail(L"Installed GlassSettings.Native.dll is missing or failed architecture, export, ACL or publisher verification; see Native helper/trust log entries");
         const std::wstring shellExt = root + L"\\" + GlassShared::GlassShellMenu::kShellExtRelativePath;
         if (!IsSafeInstallPath(shellExt) || !PathFileExistsW(shellExt.c_str())) return fail(L"GlassShellSparse\\GlassShellExt.dll was not found");
         if (HasExistingShellRegistrationKeys()) {
@@ -1611,7 +1674,10 @@ bool InvokeShellExtRegistration(
     }
     const std::wstring rundll = os64 ? NativeRundll64() : RundllPathForTaskArch(arch);
     if (rundll.empty()) return fail(L"rundll32.exe was not found");
-    std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\",GlassSettings_ShellExtRegisterSetupV1W ";
+    constexpr char reportExport[]="GlassSettings_ShellExtUnregisterReportSetupV1W";
+    const bool reportsNoop=!registerExtension && PeMatches(dll,machine,reportExport);
+    std::wstring cmd = L"\"" + rundll + L"\" \"" + dll + L"\","+
+        (reportsNoop?L"GlassSettings_ShellExtUnregisterReportSetupV1W ":L"GlassSettings_ShellExtRegisterSetupV1W ");
     cmd += registerExtension ? L"/register" : L"/unregister";
     cmd += L" /installroot \"" + root + L"\"";
     DWORD exitCode = 1;
@@ -1620,7 +1686,9 @@ bool InvokeShellExtRegistration(
     constexpr DWORD kShellAlreadyRegistered=0x47505245; // Verified existing registration.
     constexpr DWORD kShellRegistrationConflict=0x47504346; // Preserved, no change made.
     constexpr DWORD kShellClassicFallbackBase=0x47504C00; // Registered the classic menu; low byte = reason.
-    const bool alreadyRegistered=registerExtension && completed && exitCode==kShellAlreadyRegistered;
+    constexpr DWORD kShellNothingToUnregister=0x47504E4Fu;
+    const bool alreadyRegistered=completed && ((registerExtension && exitCode==kShellAlreadyRegistered)||
+        (!registerExtension && reportsNoop && exitCode==kShellNothingToUnregister));
     const bool conflict=completed && exitCode==kShellRegistrationConflict;
     const bool classic=registerExtension && completed && (exitCode & 0xFFFFFF00u)==kShellClassicFallbackBase;
     if (registrationMayHaveChanged) *registrationMayHaveChanged=started && !alreadyRegistered && !conflict;
@@ -1705,7 +1773,7 @@ bool InvokeSecureUxThemeDeactivate(
     const auto arch = os64
         ? GlassShared::GlassPlatformTask::PlatformArch::X64
         : GlassShared::GlassPlatformTask::PlatformArch::X86;
-    const std::wstring dll = NativeDllForArch(arch, x64Dir, x86Dir);
+    const std::wstring dll = InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,kInstallerSecureUxThemeExport);
     const WORD machine=os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386;
     if (dll.empty() || !PeMatches(dll,machine,kInstallerSecureUxThemeExport))
         return fail(L"GlassSettings.Native.dll with the SecureUxTheme export was not found");
@@ -1735,14 +1803,113 @@ bool InvokeSecureUxThemeDeactivate(
     return true;
 }
 
+bool GlassSettingsAbsentForSecureUxRemoval() noexcept {
+    return MsiQueryProductStateW(GlassInstallMsi::kProductSettingsX64)==INSTALLSTATE_UNKNOWN &&
+        MsiQueryProductStateW(GlassInstallMsi::kProductSettingsX86)==INSTALLSTATE_UNKNOWN;
+}
+
+bool PrepareSecureUxRemovalVisualStyle(const std::wstring& x64Dir,const std::wstring& x86Dir,
+    SecureUxThemeDeactivateRun* run,std::wstring* detail) noexcept {
+    if(run)*run={};
+    auto fail=[detail](const wchar_t* text) noexcept {if(detail)try{*detail=text;}catch(...){}return false;};
+    try {
+        // Never apply a system style in the x86 Setup process on x64 Windows.
+        // Validate the installed OS-native DLL, its publisher/ACLs and style export.
+        const bool os64=IsOs64Bit();
+        const auto arch=os64?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
+        constexpr auto entry="GlassSettings_SecureUxThemePrepareRemovalV2W";
+        const std::wstring dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,entry);
+        if(dll.empty()||!PeMatches(dll,os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386,entry))
+            return fail(L"Installed native-architecture visual-style helper is unavailable.");
+        const std::wstring rundll=os64?NativeRundll64():RundllPathForTaskArch(arch);
+        if(rundll.empty())return fail(L"Native-architecture rundll32.exe was not found.");
+        StockThemeMaintenanceTrace::Reader trace;
+        // rundll32 appends W/A itself. Passing the exact W export falls back
+        // to its unsuffixed/ANSI lookup and sends LPSTR to our LPWSTR callback.
+        // Keep the PE check above on the real W export, but request its base name.
+        const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemePrepareRemovalV2"+
+            (*trace.Name()?L" "+std::wstring(trace.Name()):L"");
+        DWORD exitCode=MAXDWORD;bool started=false,completed=false;
+        const bool ran=RunHiddenCommand(cmd,&exitCode,45000,&started,&completed);
+        GlassInstallLog::LineFormat(L"SecureUxTheme stock-style native helper: os64=%d ran=%d started=%d completed=%d exit=0x%08lX DLL=%s",os64?1:0,ran?1:0,started?1:0,completed?1:0,exitCode,dll.c_str());
+        if(completed) {
+            if(const auto* data=trace.Result()) {
+                GlassInstallLog::LineFormat(L"SecureUxTheme stock-style stages: active=%lu hr=0x%08lX COM=0x%08lX force=0x%08lX font=0x%08lX read=0x%08lX pathVerified=%lu",
+                    data->active,static_cast<unsigned long>(data->hr),static_cast<unsigned long>(data->comHr),static_cast<unsigned long>(data->forceHr),static_cast<unsigned long>(data->fontHr),static_cast<unsigned long>(data->readHr),data->verified);
+            } else GlassInstallLog::Line(L"SecureUxTheme stock-style stages: unavailable (helper did not publish diagnostics)");
+        }
+        if(!ran||!started)return fail(L"Visual-style helper could not be started.");
+        if(!completed)return fail(L"Visual-style helper did not finish within 45 s; the style may already have changed.");
+        if(exitCode!=0) {
+            wchar_t text[160]{};swprintf_s(text,L"Native stock .theme preparation or verification failed (HRESULT/legacy exit=0x%08lX); SecureUxTheme MSI was not removed.",exitCode);
+            return fail(text);
+        }
+        if(run)run->ran=true;
+        return true;
+    }catch(...){return fail(L"Native visual-style preparation failed; the style may already have changed.");}
+}
+
+bool QuerySecureUxPendingFileOperations(bool& pending) noexcept {
+    pending=true; // Unreadable/invalid data must not suppress an MSI reboot request.
+    const auto fail=[](const wchar_t* reason) {
+        GlassInstallLog::LineFormat(L"SecureUxTheme pending file operations: unverified (%s)",reason);return false;
+    };
+    try {
+        constexpr auto key=L"SYSTEM\\CurrentControlSet\\Control\\Session Manager";
+        constexpr auto value=L"PendingFileRenameOperations";
+        DWORD bytes=0;
+        LONG rc=RegGetValueW(HKEY_LOCAL_MACHINE,key,value,RRF_RT_REG_MULTI_SZ,nullptr,nullptr,&bytes);
+        if(rc==ERROR_FILE_NOT_FOUND){pending=false;GlassInstallLog::Line(L"SecureUxTheme pending file operations: none (value absent)");return true;}
+        if(rc!=ERROR_SUCCESS || bytes<2*sizeof(wchar_t) || bytes>1024*1024 || bytes%sizeof(wchar_t))return fail(L"registry size/type/access");
+        std::vector<wchar_t> data(bytes/sizeof(wchar_t));
+        rc=RegGetValueW(HKEY_LOCAL_MACHINE,key,value,RRF_RT_REG_MULTI_SZ,nullptr,data.data(),&bytes);
+        if(rc!=ERROR_SUCCESS || bytes<2*sizeof(wchar_t) || bytes%sizeof(wchar_t) || bytes/sizeof(wchar_t)>data.size())return fail(L"registry read/size changed");
+        const auto count=bytes/sizeof(wchar_t);
+        if(data[count-1]!=0 || data[count-2]!=0)return fail(L"unterminated queue");
+        wchar_t windows[32768]{};const UINT length=GetSystemWindowsDirectoryW(windows,32768);
+        if(!length || length>=32768)return fail(L"Windows directory unavailable");
+        std::wstring root(windows,length);while(!root.empty()&&root.back()==L'\\')root.pop_back();
+        const auto relevant=[&](std::wstring path) {
+            // Session Manager uses NT DOS paths and an optional overwrite marker.
+            if(!path.empty()&&path.front()==L'!')path.erase(0,1);
+            if(path.rfind(L"\\??\\",0)==0 || path.rfind(L"\\?\\",0)==0)path.erase(0,4);
+            if(_wcsnicmp(path.c_str(),L"\\SystemRoot\\",12)==0)path=root+L"\\"+path.substr(12);
+            for(const wchar_t* folder:{L"\\System32\\",L"\\SysWOW64\\"})
+                for(const wchar_t* file:{L"SecureUxTheme4.dll",L"ThemeUiProxy.dll"})
+                    if(_wcsicmp(path.c_str(),(root+folder+file).c_str())==0)return true;
+            // A non-DOS namespace/short path cannot safely prove unrelatedness
+            // for a named SUT file. Keep its reboot request conservatively.
+            const auto slash=path.find_last_of(L"\\/");const auto name=path.substr(slash==std::wstring::npos?0:slash+1);
+            const bool sutName=_wcsicmp(name.c_str(),L"SecureUxTheme4.dll")==0 || _wcsicmp(name.c_str(),L"ThemeUiProxy.dll")==0;
+            return path.find(L'~')!=std::wstring::npos || (sutName && (path.size()<3 || path[1]!=L':' ||
+                path.find(L"\\..\\")!=std::wstring::npos || path.find(L"\\.\\")!=std::wstring::npos));
+        };
+        std::size_t at=0,pairs=0;bool found=false;
+        while(at<count && data[at]!=0) {
+            const std::wstring source(data.data()+at);at+=source.size()+1;
+            if(at>=count)return fail(L"missing destination");
+            const std::wstring destination(data.data()+at);at+=destination.size()+1;++pairs;
+            if(relevant(source)||relevant(destination)) {
+                found=true;
+                GlassInstallLog::LineFormat(L"SecureUxTheme pending file operation: %s -> %s",source.c_str(),destination.c_str());
+            }
+        }
+        if(at>=count || std::any_of(data.begin()+at,data.begin()+count,[](wchar_t c){return c!=0;}))return fail(L"invalid queue tail");
+        pending=found;
+        GlassInstallLog::LineFormat(L"SecureUxTheme pending file operations: read=ok pairs=%u relevant=%d",static_cast<unsigned>(pairs),found?1:0);
+        return true;
+    }catch(...){return fail(L"exception");}
+}
+
 bool QuerySecureUxThemeState(const std::wstring& x64Dir,const std::wstring& x86Dir,
     SecureUxThemeState* state,std::wstring* failureDetail) noexcept {
     auto fail=[failureDetail](const wchar_t* detail) noexcept { if(failureDetail)try{*failureDetail=detail;}catch(...){} return false; };
     if(state)*state=SecureUxThemeState::Conflict;
     const bool os64=IsOs64Bit();
     const auto arch=os64?GlassShared::GlassPlatformTask::PlatformArch::X64:GlassShared::GlassPlatformTask::PlatformArch::X86;
-    const std::wstring dll=InstalledSecureUxThemeNativeDll(arch,x64Dir,x86Dir,kInstallerSecureUxThemeQueryExport);
-    if(dll.empty())return fail(L"installed GlassSettings.Native.dll query helper was not found");
+    const std::wstring dll=NativeDllForArch(arch,x64Dir,x86Dir);
+    if(dll.empty()||!PeMatches(dll,os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386,kInstallerSecureUxThemeQueryExport))
+        return fail(L"embedded GlassSettings.Native.dll query helper was not found");
     const std::wstring rundll=os64?NativeRundll64():RundllPathForTaskArch(arch);
     if(rundll.empty())return fail(L"native rundll32.exe was not found");
     const std::wstring cmd=L"\""+rundll+L"\" \""+dll+L"\",GlassSettings_SecureUxThemeQueryStateV1W";
@@ -1754,6 +1921,23 @@ bool QuerySecureUxThemeState(const std::wstring& x64Dir,const std::wstring& x86D
     if(exitCode>static_cast<DWORD>(SecureUxThemeState::Conflict))return fail(L"query helper returned an unknown state");
     if(state)*state=static_cast<SecureUxThemeState>(exitCode);
     return true;
+}
+
+std::wstring SecureUxThemeInstalledFileRoot(bool x64Product) noexcept {
+    wchar_t buffer[MAX_PATH + 1]{};
+    if (x64Product) {
+        if (GetSystemDirectoryW(buffer, MAX_PATH) == 0)
+            return {};
+        return buffer;
+    }
+    if (IsOs64Bit()) {
+        if (GetSystemWow64DirectoryW(buffer, MAX_PATH) == 0)
+            return {};
+        return buffer;
+    }
+    if (GetSystemDirectoryW(buffer, MAX_PATH) == 0)
+        return {};
+    return buffer;
 }
 
 bool InvokeSecureUxThemeActivate(const std::wstring& x64Dir,const std::wstring& x86Dir,
@@ -1778,6 +1962,77 @@ bool InvokeSecureUxThemeActivate(const std::wstring& x64Dir,const std::wstring& 
     }
     if(run){run->ran=true;run->rebootRequired=exitCode==kSecureUxThemeExitRebootRequired;}
     return true;
+}
+
+bool RegisterSettingsBackupAssociation(const std::wstring& glassSettingsExe) noexcept {
+    try {
+        if (glassSettingsExe.empty()) return false;
+        const DWORD attrs = GetFileAttributesW(glassSettingsExe.c_str());
+        if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) return false;
+
+        const bool ru = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
+        const wchar_t* friendly = ru ? L"Резервная копия параметров Glass" : L"Glass settings backup";
+        const std::wstring command = L"\"" + glassSettingsExe + L"\" \"%1\"";
+        const std::wstring icon = glassSettingsExe + L",0";
+        HKEY extension = nullptr, prog = nullptr, iconKey = nullptr, commandKey = nullptr;
+        const auto close = [&]() noexcept {
+            if (commandKey) RegCloseKey(commandKey);
+            if (iconKey) RegCloseKey(iconKey);
+            if (prog) RegCloseKey(prog);
+            if (extension) RegCloseKey(extension);
+        };
+        auto write = [](HKEY key, const wchar_t* value) noexcept {
+            return RegSetValueExW(key, nullptr, 0, REG_SZ, reinterpret_cast<const BYTE*>(value),
+                static_cast<DWORD>((wcslen(value) + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+        };
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.glassbackup", 0, nullptr, 0,
+                KEY_SET_VALUE, nullptr, &extension, nullptr) != ERROR_SUCCESS || !write(extension, L"GlassPlatform.SettingsBackup")) {
+            close(); return false;
+        }
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\GlassPlatform.SettingsBackup", 0, nullptr, 0,
+                KEY_SET_VALUE, nullptr, &prog, nullptr) != ERROR_SUCCESS || !write(prog, friendly)) {
+            close(); return false;
+        }
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\GlassPlatform.SettingsBackup\\DefaultIcon", 0, nullptr, 0,
+                KEY_SET_VALUE, nullptr, &iconKey, nullptr) != ERROR_SUCCESS || !write(iconKey, icon.c_str())) {
+            close(); return false;
+        }
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\GlassPlatform.SettingsBackup\\shell\\open\\command", 0, nullptr, 0,
+                KEY_SET_VALUE, nullptr, &commandKey, nullptr) != ERROR_SUCCESS || !write(commandKey, command.c_str())) {
+            close(); return false;
+        }
+        close();
+        const std::wstring registered = L"Registered .glassbackup for " + glassSettingsExe;
+        GlassInstallLog::Line(registered.c_str());
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool RemoveSettingsBackupAssociationIfOwned() noexcept {
+    try {
+        HKEY command = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER,
+                L"Software\\Classes\\GlassPlatform.SettingsBackup\\shell\\open\\command",
+                0, KEY_QUERY_VALUE, &command) != ERROR_SUCCESS)
+            return true;
+        wchar_t buffer[2048]{};
+        DWORD bytes = sizeof(buffer);
+        DWORD type = 0;
+        const LONG status = RegQueryValueExW(command, nullptr, nullptr, &type, reinterpret_cast<BYTE*>(buffer), &bytes);
+        RegCloseKey(command);
+        if (status != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) return true;
+        std::wstring text = buffer;
+        for (auto& ch : text) ch = static_cast<wchar_t>(towlower(ch));
+        if (text.find(L"glasssettings.exe") == std::wstring::npos) return true;
+        RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\.glassbackup");
+        RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\GlassPlatform.SettingsBackup");
+        GlassInstallLog::Line(L"Removed .glassbackup association");
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 } // namespace GlassInstallUtil

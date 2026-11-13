@@ -59,6 +59,8 @@ public static partial class GlassSettingsRegistry
 
     public const string ExecutableFilePickerLastPathValue = "ExecutableFilePickerLastPath";
 
+    public const string BackupFilePickerLastPathValue = "BackupFilePickerLastPath";
+
     public const string LastAppliedThemeFilePathValue = "LastAppliedThemeFilePath";
 
     /// <summary>Accent baseline исходной темы (0xAARRGGBB) для Default на Colors.</summary>
@@ -180,6 +182,17 @@ public static partial class GlassSettingsRegistry
             return;
 
         GlassRegistry.WriteString(SubKey, ExecutableFilePickerLastPathValue, path);
+    }
+
+    public static string? ReadBackupFilePickerLastPath() =>
+        ReadString(BackupFilePickerLastPathValue);
+
+    public static void WriteBackupFilePickerLastPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        GlassRegistry.WriteString(SubKey, BackupFilePickerLastPathValue, path);
     }
 
     /// <summary>Последний успешно применённый .theme (исходник для Default акцента на Colors).</summary>

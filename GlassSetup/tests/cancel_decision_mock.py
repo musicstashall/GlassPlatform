@@ -89,6 +89,10 @@ int main(){
  {
   InstallEngine e;e.finished_=true;assert(!e.PauseForCancelDecision());
  }
+ {
+  InstallEngine e;e.launchingPhase_=true; // Commit is closed even without a launch page.
+  assert(!e.PauseForCancelDecision());e.RequestCancel();assert(!e.cancelRequested_);
+ }
  std::cout<<"PASS: real failure/cancel gate: confirmation, accepted cancel, continue, failure-first races\n";
 }
 '''

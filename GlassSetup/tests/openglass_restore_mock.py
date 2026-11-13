@@ -67,7 +67,7 @@ public:
  struct Prior{bool x64WasRunning=false,x86WasRunning=false,x64TaskExisted=false,x86TaskExisted=false,
   x64TaskEnabled=true,x86TaskEnabled=true,ogServiceExisted=false,ogLegacyTaskExisted=false,
   ogWasRunning=false,ogLegacyTaskEnabled=true;DWORD ogServiceStartType=SERVICE_DEMAND_START;} prior_;
- struct Selection{bool platform64=true,platform32=true,openGlass=true;} selection_;
+ struct Selection{bool platform64=true,platform32=true,openGlass=true;unsigned removeMask=0;bool Removes(unsigned i)const{return (removeMask&(1u<<i))!=0;}} selection_;
  bool hostsStopped_=true,x64StopAttempted_=false,x86StopAttempted_=false,ogStopSignalled_=false,
   ogServiceStartTypeMayNeedRestore_=false;
  std::wstring x64Dir_=L"x64",x86Dir_=L"x86",openGlassDir_=L"og";
@@ -106,6 +106,10 @@ int main(){
   assert(e.RestorePriorHosts(true));assert(s.platformStarts==0);} // selected x86 is started by the launch phase
  {reset();InstallEngine e;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;e.ogStopSignalled_=true;s.pathsOk=false;
   assert(!e.RestorePriorHosts());assert(s.serviceStarts==0 && s.taskStarts==0);} // changed backend cannot be started
+ {reset();InstallEngine e;e.selection_.openGlass=false;e.selection_.removeMask=8;e.prior_.ogServiceExisted=true;e.prior_.ogWasRunning=true;e.ogStopSignalled_=true;
+  assert(e.RestorePriorHosts(true));assert(s.serviceStarts==0);} // removed OG is never restarted on success
+ {reset();InstallEngine e;e.selection_.platform32=false;e.selection_.removeMask=2;e.prior_.x86WasRunning=true;e.prior_.x86TaskExisted=true;e.x86StopAttempted_=true;
+  assert(e.RestorePriorHosts(true));assert(s.platformStarts==0);assert(e.RestorePriorHosts(false));assert(s.platformStarts==1);} // rollback still restores a removed row
  std::cout<<"PASS: real host rollback: stopped OpenGlass stays stopped, running service/task restored; changed path blocked\n";
 }
 '''

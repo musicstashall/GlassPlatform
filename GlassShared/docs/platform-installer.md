@@ -108,7 +108,7 @@ SETTINGS_PRODUCT_CODE={…5074}
 platform, затем для `SETTINGS_PRODUCT_CODE`. После завершения работы копия и её каталог
 удаляются; хвосты прошлых запусков убираются при следующем старте (`Stale private copies`).
 
-Сборка WiX: `Build\GlassSetup\msi\$(Configuration)\$(ProjectName)\`, промежуточное — `Cache\$(ProjectName)\`.
+Конечный выход WiX: `Build\GlassSetup\$(Configuration)\$(ProjectName).msi` рядом с Setup, без отдельной post-build публикационной копии. Промежуточные obj/tracking и project-private BaseOutputPath — в `Cache\$(ProjectName)\`; Clean не должен владеть общей выходной папкой.
 
 ## GlassSettings
 

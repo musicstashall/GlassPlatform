@@ -138,8 +138,6 @@ namespace
             };
             tryValue(HKEY_LOCAL_MACHINE, machineView, valName);
             if (path.empty()) tryValue(HKEY_LOCAL_MACHINE, machineView, L"InstallPath");
-            if (path.empty()) tryValue(HKEY_CURRENT_USER, 0, valName);
-            if (path.empty()) tryValue(HKEY_CURRENT_USER, 0, L"InstallPath");
         }
         if (path.empty())
             return false;
@@ -697,11 +695,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI GlassSettings_CopyShellExtensionLa
 
 extern "C" __declspec(dllexport) void WINAPI GlassSettings_NotifyShellCachesAfterRegistrationChange() noexcept
 {
-    ::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+    ::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, nullptr, nullptr);
 
     wchar_t desktopDir[MAX_PATH]{};
     if (SUCCEEDED(::SHGetFolderPathW(nullptr, CSIDL_DESKTOPDIRECTORY, nullptr, SHGFP_TYPE_CURRENT, desktopDir)))
-        ::SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_IDLIST, desktopDir, nullptr);
+        ::SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_FLUSHNOWAIT, desktopDir, nullptr);
 }
 
 extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterW(
@@ -752,6 +750,8 @@ namespace
 
 // Versioned entry point: unlike the legacy GlassSettings UI API, the installer
 // must use its resolved InstallPath without searching other candidate folders.
+namespace { bool g_reportSetupRemovalNoop=false; }
+
 extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSetupV1W(
     HWND, HINSTANCE, LPWSTR cmdLine, int) noexcept
 {
@@ -797,11 +797,13 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSet
         {
             using GlassSettings::ShellSparsePackage::InstallerSparseState;
             const auto sparse=GlassSettings::ShellSparsePackage::QueryInstallerSparseState(root.c_str());
+            if(!keys && sparse==InstallerSparseState::Absent)::ExitProcess(g_reportSetupRemovalNoop?0x47504E4Fu:0u); // Preserve old export ABI.
             const bool classicOurs=keys && HasMatchingLegacyShellRegistration(root.c_str());
             if ((sparse!=InstallerSparseState::Absent && sparse!=InstallerSparseState::Matching) ||
                 (keys && !classicOurs))
                 ::ExitProcess(kConflict);
         }
+        else if(!keys)::ExitProcess(g_reportSetupRemovalNoop?0x47504E4Fu:0u);
         else if (keys && !HasMatchingLegacyShellRegistration(root.c_str()))
         {
             ::ExitProcess(kConflict);
@@ -831,6 +833,17 @@ extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtRegisterSet
     }
     GlassSettings_NotifyShellCachesAfterRegistrationChange();
     ::ExitProcess(exitCode);
+}
+
+// Opt-in reporting ABI. Old Setup/Unins callers keep the old success code 0.
+extern "C" __declspec(dllexport) void CALLBACK GlassSettings_ShellExtUnregisterReportSetupV1W(
+    HWND hwnd,HINSTANCE instance,LPWSTR cmdLine,int show) noexcept
+{
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_ShellExtUnregisterReportSetupV1W=_GlassSettings_ShellExtUnregisterReportSetupV1W@16")
+#endif
+    g_reportSetupRemovalNoop=true;
+    GlassSettings_ShellExtRegisterSetupV1W(hwnd,instance,cmdLine,show);
 }
 
 // Trusts the author certificate that signs GlassShellSparse.msix (LocalMachine\TrustedPeople) on the

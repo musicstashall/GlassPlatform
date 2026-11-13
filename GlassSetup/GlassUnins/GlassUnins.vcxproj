@@ -43,16 +43,19 @@
       <OptimizeReferences>true</OptimizeReferences>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
       <GenerateManifest>false</GenerateManifest>
-      <AdditionalDependencies>$(MSBuildThisFileDirectory)..\third_party\WebView2LoaderStatic.lib;comctl32.lib;msi.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;advapi32.lib;user32.lib;version.lib;shlwapi.lib;shell32.lib;uxtheme.lib;gdiplus.lib;dwmapi.lib;gdi32.lib;msimg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(MSBuildThisFileDirectory)..\third_party\WebView2LoaderStatic.lib;comctl32.lib;msi.lib;taskschd.lib;ole32.lib;oleaut32.lib;uuid.lib;advapi32.lib;user32.lib;version.lib;shlwapi.lib;shell32.lib;uxtheme.lib;gdiplus.lib;dwmapi.lib;gdi32.lib;msimg32.lib;wintrust.lib;crypt32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\src\InstallSupport\GlassRegisteredMsi.h" />
+    <ClInclude Include="..\src\GlassMaintenanceExecutor.h" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="..\src\WizardTheme.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallLog.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallMsi.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallRemoval.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallUtil.cpp" />
+    <ClCompile Include="..\src\InstallSupport\GlassOpenGlassUninstall.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallWatch.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallHost.cpp" />
     <ClCompile Include="..\src\InstallSupport\GlassInstallUnlock.cpp" />
@@ -105,13 +108,19 @@
   <ItemGroup>
     <ResourceCompile Include="GlassUnins.rc" />
     <None Include="app.manifest" />
+    <ClInclude Include="..\src\InstallSupport\GlassProfileMaintenance.h" />
+    <ClInclude Include="..\src\InstallSupport\GlassOpenGlassFiles.h" />
+    <ClInclude Include="..\src\InstallSupport\GlassUserDataCleanup.h" />
+    <ClInclude Include="..\src\InstallSupport\GlassSavedThemeCleanup.h" />
     <ClInclude Include="..\src\WizardAssets.h" />
     <ClInclude Include="..\src\WizardTheme.h" />
     <ClInclude Include="..\src\GdiPlusCompat.h" />
     <ClInclude Include="..\src\GlassProducts.h" />
+    <ClInclude Include="..\src\GlassProductPlan.h" />
+    <ClInclude Include="..\src\GlassProductUiPolicy.h" />
   </ItemGroup>
   <Target Name="GlassUninsVerifyNativeHelper" BeforeTargets="BeforeResourceCompile">
-    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\..\Build\x64\Release\GlassSettings.Native.dll')" Text="GlassUnins: сначала соберите GlassSettings.Native Release|x64 (IDR_UNLOCKER_X64)." />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\..\Build\x64\Release\GlassSettings.Native.dll')" Text="GlassUnins: отсутствует x64 helper зависимости GlassSettings.Native (IDR_UNLOCKER_X64). Соберите решение Release|x64." />
     <Touch Files="$(MSBuildThisFileDirectory)GlassUnins.rc" />
   </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

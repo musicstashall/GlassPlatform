@@ -34,4 +34,15 @@ Stats Validate(bool applyFixes) noexcept;
 // DWM (HKCU+HKLM). Базовые значения Windows DWM и чужие параметры не трогаются.
 void RemoveUserSettings() noexcept;
 
+// New maintenance contract. userRoot may be HKU\SID or a private offline app
+// hive; machine=true handles only global keys. apply=false verifies access.
+// Installation-path metadata and unknown DWM values are preserved. Returns the
+// first failure; apply=true may already have cleared earlier values/profiles.
+// DWM cleanup removes all 49 allowlisted OpenGlass values regardless of type,
+// then checks their absence; a recreated value or query error is incomplete
+// cleanup. This is not atomic against writers after the verification.
+bool CleanOwnedSettings(HKEY userRoot, bool machine, bool apply, std::wstring& detail);
+// Installer cleanup: GlassPlatform only. Does not inspect/delete OG DWM values.
+bool CleanPlatformSettings(HKEY userRoot, bool machine, bool apply, std::wstring& detail);
+
 } // namespace Shared::RegistrySanity

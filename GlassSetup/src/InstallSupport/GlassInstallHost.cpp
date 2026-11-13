@@ -46,12 +46,18 @@ bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::wstring& installDir
         options.gracefulMs = 15000;
         options.hostGoneMs = 0;
         options.allowTaskStop = false;
-        options.wakeResiduals = false;
+        // Match Settings/context-menu cooperative stop: wake window/thread
+        // queues so injected hooks can finish draining. No remote FreeLibrary.
+        options.wakeResiduals = true;
+        if(isCancelled()){SetLastError(ERROR_CANCELLED);return false;}
+        // Cooperative stop is already a mutation. Rollback must wait for it
+        // even if cancellation prevents the later Task Scheduler stop.
+        if(stopAttempted)*stopAttempted=true;
         const Shared::GlassStop::Result r = Shared::GlassStop::Request(arch, options);
         hostGoneByStop = r.hostGone;
-        GlassInstallLog::LineFormat(L"HostStop: %s signal hostGone=%d ms=%lu residuals=%u",
+        GlassInstallLog::LineFormat(L"HostStop: %s signal hostGone=%d ms=%lu residuals=%u phase=%s wake=1",
             GP::GlassAutorunTaskName(arch), r.hostGone ? 1 : 0,
-            static_cast<unsigned long>(r.elapsedMs), r.residualProcesses);
+            static_cast<unsigned long>(r.elapsedMs), r.residualProcesses,r.failedPhase);
         if (isCancelled()) { SetLastError(ERROR_CANCELLED); return false; }
     }
 
@@ -66,7 +72,6 @@ bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::wstring& installDir
         if (hostGoneByStop || !stillRunning) {
             GlassInstallLog::LineFormat(L"HostStop: %s stopped by GlassStop; task stop not needed",
                 GP::GlassAutorunTaskName(arch));
-            if (stopAttempted) *stopAttempted = false;
             return true;
         }
     }
@@ -77,7 +82,7 @@ bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::wstring& installDir
     const bool accepted=GlassInstallRemoval::StopValidatedPlatformTask(
         arch,installDir,cancelled,attempted,ru,error);
     const DWORD requestError=accepted ? ERROR_SUCCESS : GetLastError();
-    if (stopAttempted) *stopAttempted=attempted;
+    // Keep the earlier cooperative-stop attempt recorded.
     if (!error.empty()) {
         GlassInstallLog::LineFormat(L"HostStop: %s",error.c_str());
         if (detail) *detail=error;
@@ -98,7 +103,14 @@ bool StopGlassPlatformImpl(GP::PlatformArch arch, const std::wstring& installDir
     }
     if (isCancelled()) { SetLastError(ERROR_CANCELLED); return false; }
     if (!accepted) { SetLastError(requestError); return false; }
-    // The separate watch phase, never this task-stop stage, handles residuals.
+    // Scheduler fallback can leave dormant message queues after HostAlive is
+    // abandoned. Repeat the same cooperative wake used by Settings after stop.
+    Shared::GlassStop::Options residualOptions{};
+    residualOptions.reason=Shared::GlassStop::Reason::HostDead;
+    residualOptions.wakeResiduals=true;
+    const auto residual=Shared::GlassStop::Request(arch,residualOptions);
+    GlassInstallLog::LineFormat(L"HostStop: post-task cooperative wake residuals=%u",residual.residualProcesses);
+    // The separate watch phase still verifies actual module disappearance.
     return true;
 }
 
@@ -218,10 +230,10 @@ bool StopAllForUninstall(
     bool* stopAttemptedX64,
     bool* stopAttemptedX86,
     const bool* wasRunningX64,
-    const bool* wasRunningX86) noexcept {
+    const bool* wasRunningX86, unsigned settingsMask) noexcept {
     if (stopAttemptedX64) *stopAttemptedX64=false;
     if (stopAttemptedX86) *stopAttemptedX86=false;
-    GlassInstallUtil::CloseGlassSettingsProcesses(cancelled);
+    if(!GlassInstallUtil::CloseSelectedSettingsProcesses(x64InstallDir,x86InstallDir,settingsMask,cancelled))return false;
     if (cancelled && cancelled->load(std::memory_order_acquire)) return false;
     // R11: удаляльщик идёт тем же путём, отличается только Reason в логе.
     if (stopX64 && !StopGlassPlatformImpl(GP::PlatformArch::X64,x64InstallDir,cancelled,
@@ -425,7 +437,10 @@ bool RemoveOpenGlassServiceAndTasks(bool removeTasks) noexcept {
     const SC_HANDLE svc=OpenServiceW(scm,L"OpenGlassHost",SERVICE_STOP|SERVICE_QUERY_STATUS|DELETE);
     const DWORD openError=svc?ERROR_SUCCESS:GetLastError();
     CloseServiceHandle(scm);
-    if (!svc) return ok && (openError==ERROR_SERVICE_DOES_NOT_EXIST || openError==ERROR_SERVICE_MARKED_FOR_DELETE);
+    if (!svc) {
+        GlassInstallLog::LineFormat(L"OpenGlass cleanup: OpenService error=%lu",openError);
+        return ok && (openError==ERROR_SERVICE_DOES_NOT_EXIST || openError==ERROR_SERVICE_MARKED_FOR_DELETE);
+    }
     SERVICE_STATUS status{};
     ControlService(svc,SERVICE_CONTROL_STOP,&status);
     const ULONGLONG start=GetTickCount64();
@@ -440,6 +455,7 @@ bool RemoveOpenGlassServiceAndTasks(bool removeTasks) noexcept {
         const DWORD error=GetLastError();
         if (error!=ERROR_SERVICE_MARKED_FOR_DELETE) { GlassInstallLog::LineFormat(L"HostStop: DeleteService failed %lu",error); ok=false; }
     }
+    else GlassInstallLog::Line(L"OpenGlass cleanup: DeleteService accepted; final deletion waits for other open service handles");
     CloseServiceHandle(svc);
     return ok;
 }

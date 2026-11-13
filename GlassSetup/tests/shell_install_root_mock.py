@@ -41,10 +41,11 @@ reason_text = function(util, 'const wchar_t* ShellHelperReasonText(')
 describe = function(util, 'std::wstring DescribeShellHelperExit(')
 describe_classic = function(util, 'std::wstring DescribeShellClassicFallback(')
 operation = function(unins, 'int RunOperation(')
-preflight = function(engine, 'bool InstallEngine::VerifyEmbeddedNativePayload(')
 assert operation.index('kInstallerShellExport') < operation.index('StopAllForUninstall(')
 assert operation.index('kInstallerShellExport') < operation.index('UninstallProduct(')
-assert 'kInstallerShellExport' in preflight
+# External MSI builds no longer have an embedded-Native preflight. Check the
+# actual installed-helper invocation gate below, not the removed method.
+assert 'kInstallerShellExport' in invoke and 'PeMatches(dll,machine' in invoke
 assert 'GlassSettings_ShellExtRegisterSetupV1W' in script
 assert 'GlassSettings_ShellExtRegisterSetupV1W' in ops
 assert '/EXPORT:GlassSettings_ShellExtRegisterSetupV1W=_GlassSettings_ShellExtRegisterSetupV1W@16' in ops
@@ -80,7 +81,7 @@ struct Fake {
  std::set<std::wstring> files,sparseRoots,unsafe;
  std::wstring nextExe,nextDll,registry,exeDir=L"C:\\Windows\\System32",command;
  int nextCalls=0, registryCalls=0, commandCalls=0, argvLive=0;
- bool os64=true,nativePresent=true,nativeProtocol=true,started=true,completed=true,ran=true,existingShell=false,matchingShell=false;
+ bool os64=true,nativePresent=true,nativeProtocol=true,reportProtocol=false,started=true,completed=true,ran=true,existingShell=false,matchingShell=false;
  DWORD exitCode=0;
 } fake;
 std::vector<std::wstring> tokenStorage;
@@ -145,6 +146,7 @@ namespace GlassInstallUtil {
  bool IsSafeInstallPath(const std::wstring& p){return !fake.unsafe.count(p);}
  std::wstring NativeDllForArch(PlatformArch,const std::wstring&,const std::wstring&){return fake.nativePresent?L"protected-temp\\Native.dll":L"";}
  bool PeMatches(const std::wstring&,WORD machine,const char* name){
+  if(std::string(name)=="GlassSettings_ShellExtUnregisterReportSetupV1W")return fake.reportProtocol;
   assert(std::string(name)==kInstallerShellExport);
   assert(machine==(fake.os64?IMAGE_FILE_MACHINE_AMD64:IMAGE_FILE_MACHINE_I386));return fake.nativeProtocol;
  }
@@ -238,6 +240,9 @@ int main(){
  assert(!GlassInstallUtil::InvokeShellExtRegistration(false,L"D:\\64",L"E:\\32",&changed,&conflict,&detail,&classicReason) && classicReason==0);
  reset();fake.exitCode=0x47500008;detail.clear();assert(!GlassInstallUtil::InvokeShellExtRegistration(true,L"D:\\64",L"E:\\32",&changed,&conflict,&detail));
  assert(detail.find(L"signer certificate is not trusted")!=std::wstring::npos && detail.find(L"0x47500008")!=std::wstring::npos);
+ reset();fake.reportProtocol=true;fake.exitCode=0x47504E4Fu;bool noChange=true;
+ assert(GlassInstallUtil::InvokeShellExtRegistration(false,L"E:\\64",L"E:\\32",&noChange));
+ assert(!noChange); // Native verified that there was no shell registration to remove.
  std::cout<<"PASS: exact selected root, preserved conflicts, verified legacy registration, compatible x86 fallback, classic fallback and failure details\n";
 }
 '''

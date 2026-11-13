@@ -172,7 +172,7 @@ bool WriteTextBackup(const std::wstring& path, const std::wstring& text) noexcep
 }
 
 bool CaptureTask(IRegisteredTask* task, bool platform, const std::wstring& expected,
-    Session& session, const std::wstring& workspace, bool ru, std::wstring& error) noexcept {
+    Session& session, const std::wstring& workspace, bool ru, std::wstring& error, GP::PlatformArch arch=GP::PlatformArch::X86) noexcept {
     Bstr path, xml, security;
     VARIANT_BOOL enabled = VARIANT_FALSE;
     ComPtr<ITaskDefinition> definition;
@@ -193,7 +193,7 @@ bool CaptureTask(IRegisteredTask* task, bool platform, const std::wstring& expec
             L"This task's account cannot be reliably restored without credentials. Setup stopped before making changes.", path.value);
         return false;
     }
-    if (!ExpectedAction(definition.Get(), platform, expected)) {
+    if (!ExpectedAction(definition.Get(), platform, expected,arch)) {
         error = Problem(ru,
             L"Задача с именем продукта запускает другую программу или содержит дополнительные действия. Она не будет изменена.",
             L"A task with the product's name starts another program or has additional actions. It will not be changed.", path.value);
@@ -227,7 +227,7 @@ bool CaptureTask(IRegisteredTask* task, bool platform, const std::wstring& expec
 bool ScanTasks(ITaskFolder* folder, bool x86, bool og, const std::wstring& x86Exe,
     const std::wstring& ogExe, Session& session, const std::wstring& workspace,
     const std::atomic_bool* cancel, bool ru, std::wstring& error, unsigned depth = 0,
-    bool validateOnly = false) noexcept {
+    bool validateOnly = false, const std::wstring& x64Exe={}) noexcept {
     if (Cancelled(cancel)) return false;
     if (depth > 64) {
         error = Problem(ru, L"Слишком большая вложенность папок планировщика.", L"Task Scheduler folder nesting is too deep.");
@@ -252,17 +252,18 @@ bool ScanTasks(ITaskFolder* folder, bool x86, bool og, const std::wstring& x86Ex
             error = Problem(ru, L"Не удалось прочитать задачу планировщика.", L"Could not read a scheduled task.");
             return false;
         }
-        const bool isX86 = x86 && _wcsicmp(name.value, GP::GlassAutorunTaskName(GP::PlatformArch::X86)) == 0;
+        const bool isX64 = depth==0 && !x64Exe.empty() && _wcsicmp(name.value, GP::GlassAutorunTaskName(GP::PlatformArch::X64))==0;
+        const bool isX86 = depth==0 && x86 && _wcsicmp(name.value, GP::GlassAutorunTaskName(GP::PlatformArch::X86)) == 0;
         const bool isOg = og && (_wcsicmp(name.value, L"OpenGlass Host") == 0 ||
                                 _wcsicmp(name.value, L"OpenGlass Legacy Host") == 0);
-        if (isX86 || isOg) {
+        if (isX64 || isX86 || isOg) {
             if (!validateOnly) {
-                if (!CaptureTask(task.Get(),isX86,isX86?x86Exe:ogExe,session,workspace,ru,error)) return false;
+                if (!CaptureTask(task.Get(),isX64||isX86,isX64?x64Exe:isX86?x86Exe:ogExe,session,workspace,ru,error,isX64?GP::PlatformArch::X64:GP::PlatformArch::X86)) return false;
             } else {
                 ComPtr<ITaskDefinition> definition; Bstr taskPath;
                 if (FAILED(task->get_Path(taskPath.out())) || !taskPath.value ||
                     FAILED(task->get_Definition(definition.GetAddressOf())) || !definition ||
-                    !ExpectedAction(definition.Get(),isX86,isX86?x86Exe:ogExe)) {
+                    !ExpectedAction(definition.Get(),isX64||isX86,isX64?x64Exe:isX86?x86Exe:ogExe,isX64?GP::PlatformArch::X64:GP::PlatformArch::X86)) {
                     error=Problem(ru,L"Задача запускает программу вне каталога установки или содержит неизвестные действия. Она не будет запущена.",
                         L"A task runs a program outside the installation directory or has unsupported actions. It will not be started.",
                         taskPath.value?taskPath.value:L"");
@@ -296,7 +297,7 @@ bool ScanTasks(ITaskFolder* folder, bool x86, bool og, const std::wstring& x86Ex
     return true;
 }
 
-bool ReadServiceConfiguration(SC_HANDLE service, const std::wstring& expected, std::wstring& signature) noexcept {
+bool ReadServiceConfiguration(SC_HANDLE service, const std::wstring& expected, std::wstring& signature, bool allowExactUnquoted=false) noexcept {
     DWORD bytes = 0;
     (void)QueryServiceConfigW(service, nullptr, 0, &bytes);
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || !bytes || bytes > 1024 * 1024) return false;
@@ -309,13 +310,24 @@ bool ReadServiceConfiguration(SC_HANDLE service, const std::wstring& expected, s
     const wchar_t* account = config->lpServiceStartName;
     if (!account || (_wcsicmp(account, L"LocalSystem") != 0 &&
                      _wcsicmp(account, L"NT AUTHORITY\\SYSTEM") != 0)) return false;
-    const std::wstring command = config->lpBinaryPathName;
+    std::wstring command = config->lpBinaryPathName;
+    while(!command.empty()&&(command.back()==L' '||command.back()==L'\t'))command.pop_back();
     // An unquoted service path containing spaces is ambiguous; never guess.
     std::wstring executable;
     if (!command.empty() && command.front() == L'"') {
         const auto end = command.find(L'"', 1);
         if (end == std::wstring::npos) return false;
         executable = command.substr(1, end - 1);
+    } else if(allowExactUnquoted&&SamePath(command,expected)) {
+        // Upstream Inno registers the whole EXE path without quotes. Accept
+        // only an exact no-argument path, and refuse any ambiguous prefix EXE.
+        for(size_t space=command.find_first_of(L" \t");space!=std::wstring::npos;space=command.find_first_of(L" \t",space+1)) {
+            const auto candidate=command.substr(0,space)+L".exe";
+            if(GetFileAttributesW(candidate.c_str())!=INVALID_FILE_ATTRIBUTES)return false;
+            const DWORD error=GetLastError();
+            if(error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)return false;
+        }
+        executable=command;
     } else {
         const auto end = command.find_first_of(L" \t");
         executable = command.substr(0, end);
@@ -414,7 +426,10 @@ bool DeleteServiceLast(const Session& session, bool ru, std::wstring& error) noe
     const DWORD openError = svc ? ERROR_SUCCESS : GetLastError();
     CloseServiceHandle(scm);
     if (!svc) {
-        if (!session.serviceExisted && openError == ERROR_SERVICE_DOES_NOT_EXIST) return true;
+        // The explicit Remove postcondition is already satisfied. There is no
+        // object to mutate; never roll back MSI/tasks just because a prior
+        // deferred service deletion completed between inspection and commit.
+        if (openError == ERROR_SERVICE_DOES_NOT_EXIST) return true;
         error = Problem(ru, L"Служба OpenGlassHost изменилась во время установки.", L"OpenGlassHost changed during setup.", {}, openError);
         return false;
     }
@@ -699,6 +714,59 @@ bool RemoveShortcut(Session& session, bool ru, std::wstring& error) noexcept {
     session.shortcutRemoved = true;
     return true;
 }
+// Only the default stream is changed: object identity, ACL/owner, ADS and other
+// custom link metadata remain on the original locked file. No path replacement.
+bool RewriteShortcutStream(HANDLE target,const std::wstring& source) noexcept {
+    const HANDLE input=CreateFileW(source.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,
+        OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    if(input==INVALID_HANDLE_VALUE)return false;
+    BY_HANDLE_FILE_INFORMATION info{};LARGE_INTEGER size{},zero{};
+    bool ok=GetFileInformationByHandle(input,&info) && info.nNumberOfLinks==1 &&
+        !(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) &&
+        GetFileSizeEx(input,&size) && size.QuadPart>0 && size.QuadPart<=1024*1024 &&
+        SetFilePointerEx(target,zero,nullptr,FILE_BEGIN);
+    BYTE bytes[4096];DWORD count=0;
+    while(ok) {
+        if(!ReadFile(input,bytes,sizeof(bytes),&count,nullptr)){ok=false;break;}
+        if(!count)break;
+        DWORD written=0;
+        if(!WriteFile(target,bytes,count,&written,nullptr)||written!=count){ok=false;break;}
+    }
+    if(ok)ok=SetEndOfFile(target)&&FlushFileBuffers(target);
+    CloseHandle(input);return ok;
+}
+
+bool LockedShortcutMatches(Session& session,const std::wstring& backup,bool compareBytes) {
+    if(session.shortcutLock.file==INVALID_HANDLE_VALUE)return false;
+    std::vector<BYTE> security;
+    if(!ReadFileSecurity(session.shortcutLock.file,security)||security!=session.shortcutSecurity)return false;
+    if(!compareBytes)return true; // Our exclusive write/delete lock protects edited bytes.
+    const HANDLE input=CreateFileW(backup.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,
+        OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    if(input==INVALID_HANDLE_VALUE)return false;
+    LARGE_INTEGER zero{};
+    const bool same=SetFilePointerEx(session.shortcutLock.file,zero,nullptr,FILE_BEGIN)&&
+        SameOpenFiles(session.shortcutLock.file,input);
+    CloseHandle(input);return same;
+}
+
+bool CommitShortcut(Session& session,bool ru,std::wstring& error) {
+    if(!session.shortcutPreserved)return RemoveShortcut(session,ru,error);
+    if(session.shortcutRetargetBackup.empty())return true;
+    ScopedPrivilege security(SE_SECURITY_NAME);
+    const DWORD attr=GetFileAttributesW(session.shortcutRetargetExe.c_str());
+    if(!security.enabled || attr==INVALID_FILE_ATTRIBUTES || (attr&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) ||
+       !GlassInstallUtil::IsSafeInstallPath(session.shortcutRetargetExe) ||
+       !LockedShortcutMatches(session,session.shortcutBackup,true)) {
+        error=Problem(ru,L"Ярлык или оставшийся Settings изменился; переназначение отменено.",
+            L"The shortcut or retained Settings changed; retargeting was refused.");return false;
+    }
+    session.shortcutRetargetAttempted=true; // Includes partial writes: rollback uses the held object.
+    if(RewriteShortcutStream(session.shortcutLock.file,session.shortcutRetargetBackup))return true;
+    error=Problem(ru,L"Не удалось переназначить ярлык Settings; требуется откат.",
+        L"Could not retarget the Settings shortcut; rollback is required.");return false;
+}
+
 } // namespace
 
 namespace GlassInstallRemoval {
@@ -846,7 +914,7 @@ bool ValidateOpenGlassPaths(const std::wstring& fixedRoot, const std::atomic_boo
     }
     if (service) {
         std::wstring signature;
-        bool matches=ReadServiceConfiguration(service,expected,signature);
+        bool matches=ReadServiceConfiguration(service,expected,signature,true);
         SERVICE_STATUS_PROCESS status{};DWORD needed=0;
         matches=matches && QueryServiceStatusEx(service,SC_STATUS_PROCESS_INFO,
             reinterpret_cast<BYTE*>(&status),sizeof(status),&needed)!=FALSE;
@@ -877,7 +945,7 @@ bool ValidateOpenGlassPaths(const std::wstring& fixedRoot, const std::atomic_boo
 bool Prepare(Session& session, bool removeX86, bool removeOpenGlass, bool removeSettings,
     const std::wstring& x64Dir, const std::wstring& x86Dir, const std::wstring& openGlassDir,
     const std::wstring& secureWorkspace, const std::atomic_bool* cancelled,
-    bool russian, std::wstring& error) noexcept {
+    bool russian, std::wstring& error, bool removeX64) noexcept {
     session = {}; error.clear();
     if (Cancelled(cancelled)) return false;
     if (removeSettings && !PrepareShortcut(session, secureWorkspace, x64Dir, x86Dir, russian, error)) return false;
@@ -886,7 +954,7 @@ bool Prepare(Session& session, bool removeX86, bool removeOpenGlass, bool remove
         if (!InspectService(session, true, russian, error)) return false;
         if (session.serviceExisted && !BackupServiceRegistry(secureWorkspace, russian, error)) return false;
     }
-    if (removeX86 || removeOpenGlass) {
+    if (removeX64 || removeX86 || removeOpenGlass) {
         ComGuard com; ScopedPrivilege privilege(SE_SECURITY_NAME);
         ComPtr<ITaskService> service; ComPtr<ITaskFolder> root;
         if (!com.ok() || !privilege.enabled || !Connect(service) || !GetFolder(service.Get(), L"\\", root)) {
@@ -897,16 +965,66 @@ bool Prepare(Session& session, bool removeX86, bool removeOpenGlass, bool remove
         const std::wstring x86Exe = GlassInstallUtil::TrimTrailingSlashes(x86Dir) + L"\\GlassCompat.dll";
         const std::wstring ogExe = GlassInstallUtil::TrimTrailingSlashes(openGlassDir) + L"\\OpenGlassHost.exe";
         if (!ScanTasks(root.Get(), removeX86, removeOpenGlass, x86Exe, ogExe, session,
-                secureWorkspace, cancelled, russian, error)) return false;
+                secureWorkspace, cancelled, russian, error,0,false,removeX64?GlassInstallUtil::TrimTrailingSlashes(x64Dir)+L"\\GlassCompat.dll":L"")) return false;
     }
     return !Cancelled(cancelled);
+}
+
+bool PrepareSettingsShortcutRetarget(Session& session,const std::wstring& survivingRoot,
+    const std::wstring& x64Dir,const std::wstring& x86Dir,const std::wstring& workspace,
+    bool ru,std::wstring& error) noexcept {
+    try {
+        session.shortcutPreserved=true;
+        if(!x64Dir.empty()&&!x86Dir.empty()&&SamePath(x64Dir,x86Dir)) {
+            error=Problem(ru,L"Пути Settings x64 и x86 совпадают; раздельное удаление небезопасно.",
+                L"Settings x64 and x86 share a root; separate removal is unsafe.");return false;
+        }
+        if(survivingRoot.empty() || (!SamePath(survivingRoot,x64Dir)&&!SamePath(survivingRoot,x86Dir)))return false;
+        if(!PrepareShortcut(session,workspace,x64Dir,x86Dir,ru,error))return false;
+        if(!session.shortcutExisted)return true; // Respect a deliberately absent shortcut.
+        ComGuard com;ComPtr<IShellLinkW> link;ComPtr<IPersistFile> persist;
+        wchar_t oldTarget[32768]{},working[32768]{},icon[32768]{};int iconIndex=0;
+        if(!com.ok() || FAILED(CoCreateInstance(CLSID_ShellLink,nullptr,CLSCTX_INPROC_SERVER,
+            IID_IShellLinkW,reinterpret_cast<void**>(link.GetAddressOf()))) || !link ||
+            FAILED(link->QueryInterface(IID_IPersistFile,reinterpret_cast<void**>(persist.GetAddressOf()))) || !persist ||
+            FAILED(persist->Load(session.shortcutBackup.c_str(),STGM_READ)) ||
+            FAILED(link->GetPath(oldTarget,static_cast<int>(std::size(oldTarget)),nullptr,SLGP_RAWPATH)))return false;
+        const auto target=GlassInstallUtil::TrimTrailingSlashes(survivingRoot)+L"\\GlassSettings\\GlassSettings.exe";
+        if(SamePath(oldTarget,target))return true; // Already points at the kept architecture.
+        if(FAILED(link->GetWorkingDirectory(working,static_cast<int>(std::size(working)))) ||
+           FAILED(link->GetIconLocation(icon,static_cast<int>(std::size(icon)),&iconIndex)))return false;
+        const std::wstring oldExe=oldTarget;
+        const auto oldParent=oldExe.substr(0,oldExe.find_last_of(L"\\/"));
+        const auto newParent=target.substr(0,target.find_last_of(L"\\/"));
+        if(FAILED(link->SetPath(target.c_str())) ||
+           (SamePath(working,oldParent)&&FAILED(link->SetWorkingDirectory(newParent.c_str()))) ||
+           (SamePath(icon,oldExe)&&FAILED(link->SetIconLocation(target.c_str(),iconIndex))))return false;
+        // Arguments, description, custom icon/working directory, hotkey/show mode
+        // and extra data are preserved by loading/modifying the original link.
+        session.shortcutRetargetBackup=workspace+L"\\GlassSettings-retarget.lnk";
+        if(FAILED(persist->Save(session.shortcutRetargetBackup.c_str(),TRUE)))return false;
+        ScopedPrivilege security(SE_SECURITY_NAME);
+        if(!security.enabled)return false;
+        session.shortcutLock.file=CreateFileW(session.shortcutPath.c_str(),GENERIC_READ|GENERIC_WRITE|READ_CONTROL|ACCESS_SYSTEM_SECURITY,
+            FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+        BY_HANDLE_FILE_INFORMATION info{};LARGE_INTEGER size{};
+        if(session.shortcutLock.file==INVALID_HANDLE_VALUE ||
+           !GetFileInformationByHandle(session.shortcutLock.file,&info) || info.nNumberOfLinks!=1 ||
+           (info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) ||
+           !GetFileSizeEx(session.shortcutLock.file,&size) || size.QuadPart<=0 || size.QuadPart>1024*1024 ||
+           !GetFileInformationByHandleEx(session.shortcutLock.file,FileBasicInfo,&session.shortcutBasic,sizeof(session.shortcutBasic)) ||
+           !LockedShortcutMatches(session,session.shortcutBackup,true))return false;
+        session.shortcutRetargetExe=target;
+        return true;
+    }catch(...){error=Problem(ru,L"Не удалось подготовить переназначение ярлыка Settings.",
+        L"Could not prepare Settings shortcut retargeting.");return false;}
 }
 
 bool Commit(Session& session, bool russian, std::wstring& error) noexcept {
     error.clear();
     const auto orderedCommit = [&](ITaskService* service) {
         return GlassRemovalOrder::Commit(session.tasks.size(),
-            [&] { return RemoveShortcut(session, russian, error); },
+            [&] { return CommitShortcut(session, russian, error); },
             [&](size_t i) { return service && RemoveTask(service, session.tasks[i], russian, error); },
             [&] {
                 // The service is never recreated: credentials and arbitrary
@@ -942,6 +1060,15 @@ bool Restore(Session& session, bool russian, std::wstring& error) noexcept {
                 if (!RestoreTask(service.Get(), *it, russian, detail)) { ok = false; if (error.empty()) error = detail; }
             }
         }
+    }
+    if(session.shortcutRetargetAttempted) {
+        ScopedPrivilege security(SE_SECURITY_NAME);
+        const bool restored=security.enabled && LockedShortcutMatches(session,session.shortcutBackup,false) &&
+            RewriteShortcutStream(session.shortcutLock.file,session.shortcutBackup) &&
+            SetFileInformationByHandle(session.shortcutLock.file,FileBasicInfo,&session.shortcutBasic,sizeof(session.shortcutBasic));
+        if(restored)session.shortcutRetargetAttempted=false;
+        else {ok=false;if(error.empty())error=Problem(russian,L"Не удалось восстановить исходный ярлык Settings.",
+            L"Could not restore the original Settings shortcut.");}
     }
     if (session.shortcutRemoved) {
         if (!CopyFileW(session.shortcutBackup.c_str(), session.shortcutPath.c_str(), TRUE)) {

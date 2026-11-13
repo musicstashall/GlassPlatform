@@ -30,6 +30,10 @@ public partial class App : Application
             return;
         }
 
+        SettingsBackupAssociation.EnsureIfMissing();
+        if (SettingsBackupOpenRequest.FromCommandLine() is { } backupPath)
+            SettingsBackupOpenRequest.Set(backupPath);
+
         // UI-поток: с него нельзя обходить дерево задач планировщика.
         NativeHostInterop.NoteUiThread();
 
