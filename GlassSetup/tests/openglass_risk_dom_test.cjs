@@ -13,13 +13,7 @@ for(const locale of ['ru','en']){
  const warning=locale==='ru'?'Опасность применения: сбои DWM, чёрный экран, возврат к экрану входа.':'Danger: DWM crashes, black screens, return to sign-in.';
  const og={id:'openglass',title:'OpenGlass',installed:false,checked:true,applySupported:true,operation:'install',
   targetVersion:'3.0.2.3749',targetPayloadVersion:'3.0.2.3749',compatibilityRisk:true,warning};
- const block=locale==='ru'?'OpenGlass и SecureUxTheme нельзя применить одним планом.':'OpenGlass and SecureUxTheme cannot be applied in one plan.';
- send([og],locale,{componentsBlockReason:block});
- assert.ok(d.getElementById('components-plan-notices').textContent.includes(block));
- d.querySelector('#components-plan-notices button').click();
- assert.ok(d.getElementById('components-warning-dialog').textContent.includes(block));
- d.getElementById('components-warning-close').click();
- send([og],locale,{componentsBlockReason:''});
+ send([og],locale);
  const card=d.querySelector('#components-installed-grid [data-product="openglass"]');
  assert.ok(card.classList.contains('compatibility-risk'));assert.ok(!card.classList.contains('is-broken'));
  const warn=card.querySelector('.comp-warning-button');assert.ok(warn);warn.click();
@@ -38,6 +32,11 @@ for(const locale of ['ru','en']){
  const note=dom.window.componentDropText(drag,'installed');assert.equal(note,source.applyHint);
  assert.ok(!/Дождитесь|Wait for/.test(note));
  assert.equal(d.querySelector('#components-grid .comp-decision').disabled,true,'do not bypass the source gate');
+ const ids=['openglass','openglassResources','secureUxTheme','x64','settings64'];
+ send(ids.map(id=>({id,title:id,checked:true,installed:false,applySupported:true,operation:'install'})),locale);
+ assert.deepEqual([...d.querySelectorAll('#components-plan-items li[data-product]')].map(x=>x.dataset.product),
+  ['settings64','x64','secureUxTheme','openglassResources','openglass']);
+ assert.ok(!/cannot be applied|нельзя применить/.test(d.getElementById('components-plan-notices').textContent));
  send([source],locale,{componentsLoading:true});assert.match(dom.window.componentDropText(drag,'installed'),/Проверяются|Checking/);
 }
 assert.deepEqual(errors,[]);dom.window.close();console.log('PASS: risk red-state/icon/dialog, removal/undo, no installed overflow hint, unavailable vs pending source diagnostics and gate retained');

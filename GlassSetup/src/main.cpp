@@ -2059,7 +2059,7 @@ private:
         return GlassProductUiPolicy::Preview(selection_,installedSelection_,GlassInstallUtil::IsOs64Bit(),false,active);
     }
     // Apply OpenGlass только двумя исполнимыми маршрутами: один продукт
-    // либо Glass/Resources без удаления, SecureUxTheme и очистки.
+    // либо Glass/Resources/SecureUxTheme без удаления других продуктов и очистки.
     [[nodiscard]] bool OpenGlassApplyPlanSupported() const noexcept {
         const bool os64=GlassInstallUtil::IsOs64Bit();
         if(!selection_.openGlass||selection_.Removes(3))return true;
@@ -2068,9 +2068,6 @@ private:
     }
     std::wstring ComponentPlanBlockReason() const {
         const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
-        if(GlassProducts::OpenGlassVendorConflict(selection_))return ru?
-            L"OpenGlass и SecureUxTheme нельзя применить одним планом. Уберите один из них и выполните отдельной операцией. Продукты Glass можно оставить выбранными.":
-            L"OpenGlass and SecureUxTheme cannot be applied in one plan. Remove one from this plan and run it separately. Glass products may stay selected.";
         if(!OpenGlassApplyPlanSupported())return ru?
             L"Этот план OpenGlass не поддерживается: его нельзя совмещать с удалением других продуктов или очисткой. Resources можно выбрать вместе с установкой OpenGlass.":
             L"This OpenGlass plan is not supported: it cannot be combined with removal of other products or cleanup. Resources can be selected together with an OpenGlass installation.";
@@ -2585,7 +2582,6 @@ private:
             L",\"componentsLoading\":"+(inspectReady_.load(std::memory_order_acquire)?L"false":L"true")+
             L",\"components\":"+ComponentsJson()+
             L",\"componentsWarning\":"+JsStringLiteral(ComponentWarnings())+
-            L",\"componentsBlockReason\":"+JsStringLiteral(ComponentPlanBlockReason())+
             L",\"certificate\":"+CertificateJson()+
             L",\"launchCards\":"+LaunchCardsJson()+L"}";
         if (json==lastWebState_) return;
@@ -2652,7 +2648,6 @@ private:
     // «Установить» доступен, когда анализ завершён и есть выбранные продукты.
     [[nodiscard]] bool ComponentsReady() const noexcept {
         return (page_!=Page::Components && page_!=Page::Certificate) || ((!downloadContinuePending_||DownloadsReady()) && inspectReady_.load(std::memory_order_acquire) && HasSelectedComponent() &&
-            !GlassProducts::OpenGlassVendorConflict(selection_) &&
             OpenGlassApplyPlanSupported() &&
             GlassProducts::ResourcesPlanReady(selection_,GlassInstallUtil::IsOs64Bit(),resourcesPrerequisiteReady_) &&
             !(selection_.removeMask && selection_.secureUxTheme));

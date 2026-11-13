@@ -78,10 +78,11 @@ constexpr bool StandaloneOpenGlassRemoval(const Selection& s,bool forceClean,boo
 }
 
 // Sequential commits: managed Glass apply first, official Inno apply last.
-// Two different external vendors and mixed removal need a separate protocol.
+// SecureUxTheme commits inside the managed worker; Resources and OG follow.
+// Later vendor failure retains committed managed/SUT changes (no global rollback).
 constexpr bool MixedOpenGlassApply(const Selection& s,bool forceClean,bool os64) noexcept {
-    return os64&&s.openGlass&&(s.openGlassResources||s.platform64||s.platform32||s.Settings64(os64)||s.Settings32(os64))&&
-        !s.secureUxTheme&&!s.secureUxThemeRemove&&!s.removeMask&&!s.cleanupUserData&&!forceClean;
+    return os64&&s.openGlass&&(s.openGlassResources||s.platform64||s.platform32||s.Settings64(os64)||s.Settings32(os64)||s.secureUxTheme||s.secureUxThemeRemove)&&
+        !s.removeMask&&!s.cleanupUserData&&!forceClean;
 }
 
 // Managed apply can precede official OG removal just as it precedes OG apply.
@@ -93,18 +94,7 @@ constexpr bool MixedOpenGlassRemoval(const Selection& s,bool forceClean,bool os6
         !s.secureUxTheme&&!forceClean;
 }
 
-// The official OG apply route does not own a second vendor transaction.
-// Keep the UI gate aligned with Standalone/MixedOpenGlassApply, with or without
-// Resources; do not let a late graphics choice be the first visible failure.
-constexpr bool OpenGlassVendorConflict(const Selection& s) noexcept {
-    return s.openGlass&&(s.secureUxTheme||s.secureUxThemeRemove);
-}
-
-// Графика ставится на x64, если официальный OpenGlass уже установлен
-// или выбран для установки в этом же плане. Удаление OpenGlass в том же
-// плане не заменяет ни то, ни другое. SecureUxTheme, чужие удаления и
-// очистка не снимают саму отметку Resources: такой план отвергает
-// ComponentsReady, потому что его не выполняет ни standalone, ни mixed.
+// Graphics can follow installed OG or an explicit OG apply, including SUT plans.
 constexpr bool ResourcesApplyReady(const Selection& s,bool os64,bool upstreamReady) noexcept {
     return os64&&(upstreamReady||s.openGlass)&&!s.Removes(3);
 }

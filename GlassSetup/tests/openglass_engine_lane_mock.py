@@ -20,7 +20,7 @@ assert 'RunUninstaller(current,code,error,selection_.cleanupOpenGlassConfig)' in
 assert 'if(!removing) {' in lane
 unsupported=lane[lane.index('if(!removing&&!GlassProducts::StandaloneOpenGlassApply'):lane.index('return PrepareOfficialOpenGlass')]
 assert 'ERROR_NOT_SUPPORTED' in unsupported and 'ERROR_INSTALL_PACKAGE_REJECTED' not in unsupported
-assert 'OpenGlass dispatcher revision=2: route=%s' in worker
+assert 'OpenGlass dispatcher revision=3: route=%s' in worker
 assert 'Running Setup FileVersion: %s' in (root/'GlassSetup/src/main.cpp').read_text()
 inspect=(root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
 assert 'PayloadFileVersion(official.directory+' in inspect
@@ -49,7 +49,7 @@ int main(){
  s.platform64=true;assert(MixedOpenGlassApply(s,false,true));
  s.openGlassResources=true;assert(MixedOpenGlassApply(s,false,true));s.openGlassResources=false;
  assert(!MixedOpenGlassApply(s,true,true));assert(!MixedOpenGlassApply(s,false,false));
- s.secureUxTheme=true;assert(!MixedOpenGlassApply(s,false,true));s.secureUxTheme=false;
+ s.secureUxTheme=true;assert(MixedOpenGlassApply(s,false,true));s.secureUxTheme=false;
  s.removeMask=8;assert(!MixedOpenGlassApply(s,false,true));s.removeMask=0;
  s.platform64=false;s.independentSettings=true;s.settings64=true;assert(MixedOpenGlassApply(s,false,true));s.settings64=false;
  assert(!MixedOpenGlassApply(s,false,true));

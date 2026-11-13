@@ -3207,3 +3207,19 @@ PASS. Includes actual source-projection regression, exact known-risk predicate, 
 risk/card/dialog/removal/undo/source-state tests. Updated old DOM assertions to revised
 recommendation/copy policy and existing independent cleanup IPC. No Windows/MSVC/WiX
 build, native runtime acceptance or claim of full new-PC installation resolution.
+
+
+## Mixed OG + SecureUxTheme: correction of the artificial composition guard
+
+The earlier OG/SUT exclusion was an implementation restriction, not a product
+compatibility requirement. Removed the UI conflict gate and allowed SUT apply or
+removal to select the mixed OG route, even without another managed Glass product.
+The managed worker keeps its existing trusted SUT preparation and commit logic;
+Resources commit follows, then official OG. Managed products are not launched
+before OG. A later Resources/OG failure retains the completed SUT transaction and
+reports partial completion, never overall rollback. Resources recovery remains
+scoped to Resources. Standalone OG remains the OG-only optimization.
+
+Validation: actual UI gates and dispatcher mock cover SUT-only+OG, full plans,
+Resources optional, SUT removal, preflight/managed/Resources/OG failures. Native
+Windows build/runtime verification is still required.
