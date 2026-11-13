@@ -1,3 +1,4 @@
+#include "InstallSupport/GlassMaintenanceLaunch.h"
 #include "InstallSupport/GlassOpenGlassRelease.h"
 #include "InstallSupport/GlassOpenGlassInstall.h"
 #include "InstallSupport/GlassOpenGlassService.h"
@@ -564,7 +565,7 @@ bool InstallEngine::CommitOfficialOpenGlass(bool removing) noexcept {
         SetStatus(removing?(ru?L"OpenGlass: штатное удаление":L"OpenGlass: official uninstall"):
             (ru?L"OpenGlass: официальный установщик":L"OpenGlass: official installer"),9000);
         DWORD code=ERROR_INSTALL_FAILURE;attempted=true;
-        const bool ran=removing?GlassOpenGlassPackage::RunUninstaller(current,code,error,selection_.cleanupUserData):
+        const bool ran=removing?GlassOpenGlassPackage::RunUninstaller(current,code,error,selection_.cleanupOpenGlassConfig):
             GlassOpenGlassPackage::RunInstaller(openGlassPackage_,officialOpenGlassTarget_,code,error);
         GlassOpenGlassInstall::Record after;std::wstring inventoryError;
         const bool inventoryKnown=GlassOpenGlassInstall::Query(after,inventoryError);
@@ -2110,9 +2111,9 @@ bool InstallEngine::PrepareFullRemovalCleanup() noexcept {
         if(!GlassInstallUtil::ResolveInstallRoots(cleanupRoots))return false;
         if(GlassOpenGlassFiles::HasReceipt(cleanupRoots.openGlass)||GlassOpenGlassInstall::HasProduct())installed|=8;
         std::vector<std::wstring> vendor;std::wstring detail;
-        const bool vendorKnown=Shared::SecureUxThemeInventory::Query(vendor)==ERROR_SUCCESS;
-        if(!vendorKnown||!GlassProducts::FullRemovalSelected(selection_,installed,!vendor.empty())||
-           !fullRemovalProfiles_.PreflightCleanup(detail)) {
+        (void)vendor;
+        if(!GlassProducts::PlatformCleanupSelected(selection_,installed)||
+           !fullRemovalProfiles_.PreflightRegistryCleanup(detail)) {
             SetFailure(std::wstring(ru?L"Предварительная проверка очистки отклонена: ":L"Full-removal cleanup preflight refused: ")+detail,ERROR_INSTALL_PACKAGE_REJECTED);return false;
         }
         return true;
@@ -2123,11 +2124,14 @@ void InstallEngine::FinishFullRemovalCleanup() noexcept {
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
     try {
         std::wstring detail;
-        const bool absent=!GlassMaintenanceLifetime::HasProducts(false); // Retained SUT does not own Glass data.
-        const bool ok=absent&&fullRemovalProfiles_.Cleanup(detail);
+        const bool absent=MaintenanceProductAbsent(GlassInstallMsi::kProductPlatformX64)&&
+            MaintenanceProductAbsent(GlassInstallMsi::kProductPlatformX86)&&
+            MaintenanceProductAbsent(GlassInstallMsi::kLegacyPlatformX64)&&
+            MaintenanceProductAbsent(GlassInstallMsi::kLegacyPlatformX86);
+        const bool ok=absent&&fullRemovalProfiles_.CleanupRegistry(detail);
         if(!ok)AddFinishWarning(ru?L"Пользовательские данные очищены не полностью":L"User data cleanup incomplete",
             absent?detail:(ru?L"Продукты ещё зарегистрированы; очистка не выполнялась.":L"Products remain registered; cleanup was not performed."));
-        else InstallLog::Line(L"Full-removal cleanup: owned profile data, settings and saved themes removed");
+        else InstallLog::Line(L"Platform registry cleanup completed");
     }catch(...){AddFinishWarning(ru?L"Данные очищены не полностью":L"User data cleanup incomplete",ru?L"Ошибка очистки после удаления; продукты не восстанавливались.":L"Cleanup failed after product removal; products were not restored.");}
 }
 

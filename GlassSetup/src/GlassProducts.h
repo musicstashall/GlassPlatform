@@ -54,7 +54,8 @@ struct Selection {
     bool independentSettings = false;
     bool settings64 = false;
     bool settings32 = false;
-    bool cleanupUserData = false; // Explicit full-removal consent, never inferred.
+    bool cleanupUserData = false; // Explicit Platform registry-only consent.
+    bool cleanupOpenGlassConfig = false; // Independent official OG registry-cleanup consent.
     constexpr bool Settings64(bool os64) const noexcept { return os64 && (independentSettings?settings64:glassSettings); }
     constexpr bool Settings32(bool os64) const noexcept { return independentSettings?settings32:(!os64&&glassSettings); }
     constexpr void SyncSettings(bool os64) noexcept {
@@ -116,6 +117,14 @@ constexpr bool OnlySecureUxThemeRemoval(const Selection& choice) noexcept {
     return !choice.removeMask && choice.secureUxThemeRemove && !choice.secureUxTheme &&
         !choice.platform64 && !choice.platform32 && !choice.openGlass && !choice.openGlassResources &&
         !choice.glassSettings && !choice.settings64 && !choice.settings32;
+}
+
+// Platform settings are shared across architectures. Review only when no
+// installed architecture is retained and no Platform install is selected.
+constexpr bool PlatformCleanupSelected(const Selection& choice,unsigned installedMask) noexcept {
+    const unsigned platforms=installedMask&3u;
+    return platforms&&!choice.platform64&&!choice.platform32&&
+        (choice.removeMask&platforms)==platforms;
 }
 
 // Full-removal review uses current installed facts, not unchecked Apply flags.

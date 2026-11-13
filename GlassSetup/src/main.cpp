@@ -1339,6 +1339,8 @@ private:
     GlassProductDownloads downloads_;
     bool downloadContinuePending_=false,setupDownloadActive_=false;
     bool fullCleanupReviewed_=false;
+    bool ogCleanupReviewed_=false,reviewingOgCleanup_=false;
+    bool& CleanupChoice() {return reviewingOgCleanup_?selection_.cleanupOpenGlassConfig:selection_.cleanupUserData;}
     std::atomic<std::uint64_t> setupDownloadBytes_{0},setupDownloadTotal_{0};
     std::wstring checkingStatus_;
     bool versionCheckStarted_ = false, versionCheckHandled_ = false, controllerCheckHandled_ = false;
@@ -1769,8 +1771,8 @@ private:
         const bool nativeLicense = !webVisible && page_==Page::License && !transitioning_;
         ShowWindow(eula_,nativeLicense?SW_SHOWNA:SW_HIDE);
         ShowWindow(accept_,(nativeLicense||(!webVisible&&page_==Page::FullCleanup))?SW_SHOWNA:SW_HIDE);
-        SetWindowTextW(accept_,page_==Page::FullCleanup?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Удалить настройки и пользовательские данные":L"Remove settings and user data"):Text(IDS_ACCEPT).c_str());
-        SendMessageW(accept_,BM_SETCHECK,(page_==Page::FullCleanup?selection_.cleanupUserData:accepted_)?BST_CHECKED:BST_UNCHECKED,0);
+        SetWindowTextW(accept_,page_==Page::FullCleanup?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Удалить параметры в реестре":L"Remove registry settings"):Text(IDS_ACCEPT).c_str());
+        SendMessageW(accept_,BM_SETCHECK,(page_==Page::FullCleanup?CleanupChoice():accepted_)?BST_CHECKED:BST_UNCHECKED,0);
         EnableWindow(accept_,!DebugDemoLocksControls());
         const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching || page_==Page::RuntimeInstalling ||
             (page_==Page::Components&&downloadContinuePending_) || (page_==Page::Checking&&setupDownloadActive_));
@@ -2516,7 +2518,7 @@ private:
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
             L",\"maintenance\":"+(maintenanceMode_?L"true":L"false")+
             L",\"cleanupBody\":"+JsStringLiteral(FullCleanupText())+
-            L",\"cleanupUserData\":"+(selection_.cleanupUserData?L"true":L"false")+
+            L",\"cleanupUserData\":"+(CleanupChoice()?L"true":L"false")+
             L",\"settingsRiskBody\":"+JsStringLiteral(SettingsRemovalRiskText())+
             L",\"componentsLoading\":"+(inspectReady_.load(std::memory_order_acquire)?L"false":L"true")+
             L",\"components\":"+ComponentsJson()+
@@ -2849,16 +2851,25 @@ private:
             for(unsigned i=0;i<std::size(present);++i)if(present[i])installed|=1u<<i;
             vendor=inspect_.secureUxTheme.installed;
         }
-        if(!GlassProducts::FullRemovalSelected(selection_,installed,vendor)) {
+        (void)vendor;
+        if(!selection_.Removes(3)){selection_.cleanupOpenGlassConfig=false;ogCleanupReviewed_=false;}
+        if(selection_.Removes(3)&&!ogCleanupReviewed_) {
+            reviewingOgCleanup_=true;SetPage(Page::FullCleanup);return false;
+        }
+        if(!GlassProducts::PlatformCleanupSelected(selection_,installed)) {
             selection_.cleanupUserData=false;fullCleanupReviewed_=false;return true;
         }
         if(fullCleanupReviewed_)return true;
-        selection_.cleanupUserData=false;SetPage(Page::FullCleanup);return false;
+        reviewingOgCleanup_=false;SetPage(Page::FullCleanup);return false;
     }
     std::wstring FullCleanupText() const {
-        return PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-            L"Выбранные продукты Glass будут удалены. Невыбранные продукты, включая SecureUxTheme, сохраняются. Настройки и пользовательские данные можно сохранить для повторной установки.\n\nПри выборе очистки удаляются:\n• параметры Glass в реестре пользователей и компьютера;\n• при удалении OpenGlass — его параметры текущего пользователя и компьютера штатным удалятором (не других профилей);\n• папки AppData\\Local\\GlassPlatform и сохранённые темы Glass.\n\nПрофили пользователей, чужие данные и сертификаты сохраняются.":
-            L"Selected Glass products will be removed. Unselected products, including SecureUxTheme, are retained. Keep settings and user data if you plan to install them again.\n\nIf you choose cleanup, it removes:\n• Glass settings from user and machine registry;\n• when removing OpenGlass, its current-user and machine settings via the official uninstaller (not other profiles);\n• AppData\\Local\\GlassPlatform folders and saved Glass themes.\n\nUser profiles, unrelated data and certificates are kept.";
+        const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
+        if(reviewingOgCleanup_)return ru?
+            L"OpenGlass: удалить параметры в реестре?\n\nПри согласии штатный удалятор OpenGlass удалит параметры текущего пользователя и компьютера. Параметры других профилей не затрагиваются. Без согласия используется /NODELETECONFIG. Это решение не влияет на параметры платформы.":
+            L"OpenGlass: remove registry settings?\n\nWith your consent, the official OpenGlass uninstaller removes current-user and machine settings, not other profiles. Without consent, /NODELETECONFIG is used. This choice does not affect Platform settings.";
+        return ru?
+            L"GlassPlatform: удалить параметры в реестре?\n\nПосле успешного удаления всех установленных разрядностей платформы будут удалены только её параметры реестра пользователей и компьютера. Параметры OpenGlass, сохранённые темы и файлы пользователей не затрагиваются.":
+            L"GlassPlatform: remove registry settings?\n\nAfter successful removal of all installed Platform architectures, only Platform user and machine registry settings will be removed. OpenGlass settings, saved themes and user files are retained.";
     }
     void StartInstallation() {
         // Debug retains its original simulation contract; Release uses external MSI.
@@ -3561,14 +3572,14 @@ private:
             return S_OK;
         }
         if(page_==Page::FullCleanup&&(message==L"cleanup:1"||message==L"cleanup:0")) {
-            selection_.cleanupUserData=message.back()==L'1';SyncWebViewState();return S_OK;
+            CleanupChoice()=message.back()==L'1';SyncWebViewState();return S_OK;
         }
         if (page_==Page::Components && !DebugDemoLocksControls()) {
             static constexpr const wchar_t* downloadIds[]={L"x64",L"x86",L"settings64",L"settings32",L"openglass",L"secureUxTheme",L"openglassResources"};
             for(std::size_t i=0;i<std::size(downloadIds);++i)if(message==L"download-retry:"+std::wstring(downloadIds[i])) {
                 downloads_.Retry(i);SyncWebViewState();return S_OK;
             }
-            if(message.rfind(L"component:",0)==0) {fullCleanupReviewed_=false;selection_.cleanupUserData=false;}
+            if(message.rfind(L"component:",0)==0) {fullCleanupReviewed_=ogCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;}
             const bool os64=GlassInstallUtil::IsOs64Bit();
             // Выбор карточки не тянет за собой основную платформу: принудительная
             // отметка уместна только при установке с нуля/обновлении, где карточка
@@ -4449,7 +4460,7 @@ private:
             }
             switch (LOWORD(w)) {
             case IDC_ACCEPT:
-                if(page_==Page::FullCleanup&&HIWORD(w)==BN_CLICKED){selection_.cleanupUserData=SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED;return 0;}
+                if(page_==Page::FullCleanup&&HIWORD(w)==BN_CLICKED){CleanupChoice()=SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED;return 0;}
                 if (HIWORD(w)==BN_CLICKED && page_==Page::License && !DebugDemoLocksControls()) {
                     accepted_ = SendMessageW(accept_,BM_GETCHECK,0,0)==BST_CHECKED;
                     EnableWindow(next_,accepted_);
@@ -4461,7 +4472,7 @@ private:
                 if (page_==Page::Components && HIWORD(w)==BN_CLICKED && !webReady_ && !DebugDemoLocksControls()) {
                     const bool os64=GlassInstallUtil::IsOs64Bit();
                     selection_.confirmedSettingsRemovalRisk=0;
-                    fullCleanupReviewed_=false;selection_.cleanupUserData=false;
+                    fullCleanupReviewed_=ogCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;
                     if(LOWORD(w)==IDC_COMPONENT64)selection_.removeMask&=~1u;
                     if(LOWORD(w)==IDC_COMPONENT32)selection_.removeMask&=~2u;
                     if(LOWORD(w)==IDC_COMPONENT_SETTINGS)selection_.removeMask&=~4u;
@@ -4514,7 +4525,7 @@ private:
                 }
                 return 0;
             case IDC_BACK:
-                if(page_==Page::FullCleanup){fullCleanupReviewed_=false;selection_.cleanupUserData=false;SetPage(Page::Components);return 0;}
+                if(page_==Page::FullCleanup){fullCleanupReviewed_=ogCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;SetPage(Page::Components);return 0;}
                 if(page_==Page::SettingsRemovalRisk){SetPage(beforeSettingsRemovalRisk_);return 0;}
                 if(page_==Page::ModulesBusy && !DebugDemoLocksControls()) {
                     installEngine_.SignalHold(InstallEngine::HoldAction::ContinueRisk);
@@ -4543,7 +4554,7 @@ private:
                 }
 #endif
                 if (transitioning_) return 0;
-                if(page_==Page::FullCleanup){fullCleanupReviewed_=true;SetPage(Page::Components);StartInstallation();return 0;}
+                if(page_==Page::FullCleanup){if(reviewingOgCleanup_)ogCleanupReviewed_=true;else fullCleanupReviewed_=true;SetPage(Page::Components);StartInstallation();return 0;}
                 if(page_==Page::SettingsRemovalRisk) {
                     selection_.confirmedSettingsRemovalRisk|=pendingSettingsRemovalRisk_;
                     SetPage(beforeSettingsRemovalRisk_);StartInstallation();return 0;

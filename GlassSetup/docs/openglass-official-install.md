@@ -1183,3 +1183,17 @@ Regression coverage includes extracted C++ official-runner, mixed-worker,
 full-removal policy, maintenance lifetime and removal-registration diagnostics,
 plus production DOM action counts. These checks are not a Windows native build
 or proof of immediate refresh of an already-open Installed Apps window.
+
+### Independent registry consent in the consolidated setup plan
+
+The consolidated setup review now asks separately for OpenGlass registry cleanup
+whenever OG removal is selected, and Platform registry cleanup when every
+installed Platform architecture is selected for removal (without reinstall).
+If both apply, OG review precedes Platform review, before execution. Both default
+to preservation and are reset when product choices change. OG consent alone
+controls omission of `/NODELETECONFIG`; `/DELETEPRESETS` remains unchanged.
+Platform consent now invokes registry-only profile preflight/commit, not saved
+theme or AppData cleanup. Other retained Glass products no longer suppress that
+review; commit checks absence of current/legacy Platform registrations.
+This replaces the preceding full-Glass-removal gate in the consolidated setup.
+The separate legacy GlassUnins selection/cleanup UI is not changed by this patch.

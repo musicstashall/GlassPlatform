@@ -382,6 +382,22 @@ public:
         }
         return true;
     }
+    bool PreflightRegistryCleanup(std::wstring& detail) {
+        cleanupPrepared_=false;
+        if(OtherUserSessions(detail)||!OpenAll(detail))return false;
+        for(const auto& profile:profiles_)
+            if(!Shared::RegistrySanity::CleanPlatformSettings(profile.hive,false,false,detail))return false;
+        cleanupPrepared_=Shared::RegistrySanity::CleanPlatformSettings(HKEY_LOCAL_MACHINE,true,false,detail)&&VerifyInventory(detail);
+        return cleanupPrepared_;
+    }
+    bool CleanupRegistry(std::wstring& detail) {
+        if(!cleanupPrepared_){detail=L"Registry cleanup preflight required";return false;}
+        cleanupPrepared_=false;
+        if(OtherUserSessions(detail)||!VerifyInventory(detail))return false;
+        for(const auto& profile:profiles_)
+            if(!Shared::RegistrySanity::CleanPlatformSettings(profile.hive,false,true,detail))return false;
+        return Shared::RegistrySanity::CleanPlatformSettings(HKEY_LOCAL_MACHINE,true,true,detail);
+    }
     bool PreflightCleanup(std::wstring& detail) {
         cleanupPrepared_=false;
         if(OtherUserSessions(detail)||!OpenAll(detail))return false;

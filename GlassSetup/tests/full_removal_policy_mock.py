@@ -50,10 +50,10 @@ assert managed.index('Launch: commit point reached')<managed.index('self->Finish
 wrapper=engine[engine.index('DWORD WINAPI InstallEngine::WorkerThread('):engine.index('DWORD WINAPI InstallEngine::RunGlassWorker(')]
 assert wrapper.index('CommitOfficialOpenGlass(mixedRemoval)')<wrapper.index('FinishFullRemovalCleanup()')
 main=(root/'GlassSetup/src/main.cpp').read_text()
-assert 'fullCleanupReviewed_=false;selection_.cleanupUserData=false;' in main
-assert 'if(page_==Page::FullCleanup){fullCleanupReviewed_=true;' in main
+assert 'fullCleanupReviewed_=ogCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;' in main
+assert 'if(reviewingOgCleanup_)ogCleanupReviewed_=true;else fullCleanupReviewed_=true;' in main
 assert 'maintenanceLease.handle=INVALID_HANDLE_VALUE' in main
-assert 'GlassMaintenanceLifetime::HasProducts(false)' in engine
+assert 'fullRemovalProfiles_.CleanupRegistry(detail)' in engine
 assert 'if (restored && (!self->mixedOpenGlass_ || !ok))' in engine
 with tempfile.TemporaryDirectory(prefix='GlassFullRemoval-') as temp:
  p=Path(temp)/'test.cpp';p.write_text(h);exe=Path(temp)/'test'
