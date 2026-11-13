@@ -1328,3 +1328,16 @@ lacks its pre-existing CommitEarlySecureUxRemoval stub.
 Cleanup choices are acrylic again, matching the backup panel. Bottom hints are
 combined into one line, retaining checked-only cleanup/preservation guidance.
 Chromium checks backdrop blur and actual one-line text geometry in both locales.
+
+Maintenance boundary follow-up: --modify authorization alone was insufficient
+for ordinary EXE launches that discover existing products. The UI now keeps
+installed-product presence separate from launch authority. Once current EULA
+consent is accepted, discovered installation enters the same maintenance
+navigation boundary as authorized Modify: Components Back is hidden, disabled,
+and ignored by the handler; transitions to License/Welcome are redirected.
+Cleanup/Certificate Back still returns to Components. No directory-only OG
+presence is inferred and no EULA/Modify authority is granted by product presence.
+The controller protocol still receives only the original authorized Modify flag.
+Regression compiles the actual UI predicate for fresh/installed/Modify/consent
+combinations and checks all Back guards and registered-product inspection inputs.
+Native Windows keyboard/button behavior still requires Windows acceptance.

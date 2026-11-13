@@ -1281,7 +1281,12 @@ private:
     GlassProducts::OpenGlassStartupState openGlassStartup_{};
     std::wstring openGlassStartupDir_;
     const SetupCommandLine launchCmd_{ParseSetupCommandLine()};
-    bool maintenanceMode_ = false;
+    bool maintenanceMode_ = false; // Authorized --modify entry, not product presence.
+    bool existingInstallationDetected_ = false;
+    bool MaintenanceUi() const noexcept {
+        // Presence does not grant --modify authority or imply EULA acceptance.
+        return maintenanceMode_ || (existingInstallationDetected_ && accepted_);
+    }
     std::wstring maintenanceFocusProduct_;
     ULONGLONG lastWebPush_=0;
     Page beforeCancel_ = Page::Installing;
@@ -2523,7 +2528,7 @@ private:
             L",\"monitorRiskTitle\":"+JsStringLiteral(Text(IDS_NATIVE_RISK_TITLE))+
             L",\"monitorRiskBody\":"+JsStringLiteral(Text(IDS_NATIVE_RISK_BODY))+
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
-            L",\"maintenance\":"+(maintenanceMode_?L"true":L"false")+
+            L",\"maintenance\":"+(MaintenanceUi()?L"true":L"false")+
             L",\"cleanupBody\":"+JsStringLiteral(FullCleanupText())+
             L",\"cleanupUserData\":"+(selection_.cleanupUserData?L"true":L"false")+
             L",\"cleanupOpenGlassConfig\":"+(selection_.cleanupOpenGlassConfig?L"true":L"false")+
@@ -2591,7 +2596,7 @@ private:
     }
     // «Установить» доступен только с выбранными продуктами: без них делать нечего.
     [[nodiscard]] UINT ProductApplyTextId() const noexcept {
-        return selection_.removeMask || selection_.secureUxThemeRemove || maintenanceMode_?IDS_APPLY:IDS_INSTALL;
+        return selection_.removeMask || selection_.secureUxThemeRemove || MaintenanceUi()?IDS_APPLY:IDS_INSTALL;
     }
     [[nodiscard]] bool HasSelectedComponent() const noexcept {
         return selection_.removeMask || selection_.platform64 || selection_.platform32 || selection_.glassSettings || selection_.openGlass || selection_.secureUxTheme || selection_.secureUxThemeRemove || selection_.openGlassResources;
@@ -2606,15 +2611,18 @@ private:
         {
             std::lock_guard<std::mutex> lock(inspectMutex_);
             const bool os64=GlassInstallUtil::IsOs64Bit();
-            selection_.platform64=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.x64,installedSelection_.platform64),maintenanceMode_);
-            selection_.platform32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.x86,installedSelection_.platform32),maintenanceMode_);
-            selection_.settings64=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings64,installedSelection_.settings64),maintenanceMode_);
-            selection_.settings32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings32,installedSelection_.settings32),maintenanceMode_);
+            existingInstallationDetected_=existingInstallationDetected_||inspect_.x64.installed||inspect_.x86.installed||
+                inspect_.settings64.installed||inspect_.settings32.installed||inspect_.og.installed||
+                inspect_.openGlassResources.installed||inspect_.secureUxTheme.installed;
+            selection_.platform64=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.x64,installedSelection_.platform64),MaintenanceUi());
+            selection_.platform32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.x86,installedSelection_.platform32),MaintenanceUi());
+            selection_.settings64=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings64,installedSelection_.settings64),MaintenanceUi());
+            selection_.settings32=GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.settings32,installedSelection_.settings32),MaintenanceUi());
             selection_.SyncSettings(os64);
             installedSelection_.openGlass=inspect_.og.installed||inspect_.og.residual;
             installedSelection_.openGlassResources=os64&&inspect_.openGlassResources.installed;
             resourcesPrerequisiteReady_=os64&&inspect_.openGlassResourcesPrerequisite;
-            selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.og,installedSelection_.openGlass),maintenanceMode_);
+            selection_.openGlass=os64 && GlassProducts::DefaultSelectedFor(ConditionOf(&inspect_.og,installedSelection_.openGlass),MaintenanceUi());
             selection_.openGlassResources=selection_.openGlass; // Recommended OG always carries its graphics package.
             // Original vendor repair/upgrade is not implemented; never select a
             // no-op reinstall automatically. Fresh SUT remains explicit opt-in.
@@ -2634,7 +2642,7 @@ private:
     void SetPage(Page page) {
         // Maintenance has no backwards route into first-install onboarding.
         // Guard the transition itself, including keyboard/programmatic requests.
-        if(maintenanceMode_&&(page==Page::License||page==Page::Welcome))page=Page::Components;
+        if(MaintenanceUi()&&(page==Page::License||page==Page::Welcome))page=Page::Components;
         const Page oldPage=page_;
         if(page==Page::Complete&&installEngine_.Succeeded()&&(selection_.removeMask||selection_.secureUxThemeRemove))
             retireControllerOnExit=true;
@@ -2677,7 +2685,7 @@ private:
         SetWindowTextW(cancel_,Text(blockedPage?IDS_CLOSE:IDS_CANCEL).c_str());
         const bool confirm=page_==Page::ConfirmCancel || page_==Page::SettingsRemovalRisk;
         const bool backVisible=(page_==Page::License || page_==Page::Components || page_==Page::Certificate || page_==Page::FullCleanup || page_==Page::ModulesBusy || confirm)
-            && !(maintenanceMode_ && page_==Page::Components);
+            && !(MaintenanceUi() && page_==Page::Components);
         const bool nextVisible=!inProgress && !blockedPage;
         const bool cancelVisible=!terminal && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
         const bool demoLocked=demoControlsLocked && !terminal;
@@ -2685,7 +2693,7 @@ private:
         ShowWindow(next_,nextVisible?SW_SHOWNA:SW_HIDE);
         ShowWindow(cancel_,cancelVisible && !demoLocked?SW_SHOWNA:SW_HIDE);
         EnableWindow(next_,!failurePending_ && !demoLocked && (page_!=Page::License || accepted_) && ComponentsReady());
-        EnableWindow(back_,!demoLocked);
+        EnableWindow(back_,!demoLocked && !(MaintenanceUi() && page_==Page::Components));
         EnableWindow(cancel_,!demoLocked && !(page_==Page::RuntimeInstalling && runtimeCancel_.load()));
         const int defaultId=confirm?IDC_BACK:blockedPage?IDC_CANCEL:IDC_NEXT;
         SendMessageW(window,DM_SETDEFID,defaultId,0);
@@ -4093,7 +4101,7 @@ private:
         } else if (page_==Page::Components && !webReady_) {
             DrawBanner(dc,true);
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
-            DrawLabel(dc,Text(maintenanceMode_?IDS_MAINTENANCE_TITLE:IDS_INSTALL_TITLE),Box(48,90,700,50),heading_,white);
+            DrawLabel(dc,Text(MaintenanceUi()?IDS_MAINTENANCE_TITLE:IDS_INSTALL_TITLE),Box(48,90,700,50),heading_,white);
             if (!inspectReady_.load(std::memory_order_acquire)) {
                 DrawLabel(dc,Text(IDS_COMP_ANALYZING),Box(60,238,800,40),font_,muted);
             } else {
@@ -4541,7 +4549,7 @@ private:
                 }
                 return 0;
             case IDC_BACK:
-                if(maintenanceMode_&&page_==Page::Components)return 0;
+                if(MaintenanceUi()&&page_==Page::Components)return 0;
                 if(page_==Page::FullCleanup){fullCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;SetPage(Page::Components);return 0;}
                 if(page_==Page::SettingsRemovalRisk){SetPage(beforeSettingsRemovalRisk_);return 0;}
                 if(page_==Page::ModulesBusy && !DebugDemoLocksControls()) {
