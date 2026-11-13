@@ -297,7 +297,7 @@ bool ScanTasks(ITaskFolder* folder, bool x86, bool og, const std::wstring& x86Ex
     return true;
 }
 
-bool ReadServiceConfiguration(SC_HANDLE service, const std::wstring& expected, std::wstring& signature) noexcept {
+bool ReadServiceConfiguration(SC_HANDLE service, const std::wstring& expected, std::wstring& signature, bool allowExactUnquoted=false) noexcept {
     DWORD bytes = 0;
     (void)QueryServiceConfigW(service, nullptr, 0, &bytes);
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || !bytes || bytes > 1024 * 1024) return false;
@@ -310,13 +310,24 @@ bool ReadServiceConfiguration(SC_HANDLE service, const std::wstring& expected, s
     const wchar_t* account = config->lpServiceStartName;
     if (!account || (_wcsicmp(account, L"LocalSystem") != 0 &&
                      _wcsicmp(account, L"NT AUTHORITY\\SYSTEM") != 0)) return false;
-    const std::wstring command = config->lpBinaryPathName;
+    std::wstring command = config->lpBinaryPathName;
+    while(!command.empty()&&(command.back()==L' '||command.back()==L'\t'))command.pop_back();
     // An unquoted service path containing spaces is ambiguous; never guess.
     std::wstring executable;
     if (!command.empty() && command.front() == L'"') {
         const auto end = command.find(L'"', 1);
         if (end == std::wstring::npos) return false;
         executable = command.substr(1, end - 1);
+    } else if(allowExactUnquoted&&SamePath(command,expected)) {
+        // Upstream Inno registers the whole EXE path without quotes. Accept
+        // only an exact no-argument path, and refuse any ambiguous prefix EXE.
+        for(size_t space=command.find_first_of(L" \t");space!=std::wstring::npos;space=command.find_first_of(L" \t",space+1)) {
+            const auto candidate=command.substr(0,space)+L".exe";
+            if(GetFileAttributesW(candidate.c_str())!=INVALID_FILE_ATTRIBUTES)return false;
+            const DWORD error=GetLastError();
+            if(error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)return false;
+        }
+        executable=command;
     } else {
         const auto end = command.find_first_of(L" \t");
         executable = command.substr(0, end);
@@ -903,7 +914,7 @@ bool ValidateOpenGlassPaths(const std::wstring& fixedRoot, const std::atomic_boo
     }
     if (service) {
         std::wstring signature;
-        bool matches=ReadServiceConfiguration(service,expected,signature);
+        bool matches=ReadServiceConfiguration(service,expected,signature,true);
         SERVICE_STATUS_PROCESS status{};DWORD needed=0;
         matches=matches && QueryServiceStatusEx(service,SC_STATUS_PROCESS_INFO,
             reinterpret_cast<BYTE*>(&status),sizeof(status),&needed)!=FALSE;

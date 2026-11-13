@@ -120,16 +120,28 @@ bool IsProductInstalled(const wchar_t* productCode) noexcept {
 }
 
 void RemoveOrphanUninstallEntry(const wchar_t* productCode) noexcept {
-    if (!productCode || !productCode[0]) return;
-    if (IsProductInstalled(productCode)) return;
-    const std::wstring sub =
-        L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + std::wstring(productCode);
-    HKEY probe = nullptr;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, sub.c_str(), 0, KEY_READ | KEY_WOW64_64KEY, &probe) != ERROR_SUCCESS)
-        return;
-    RegCloseKey(probe);
-    const LONG st = RegDeleteTreeW(HKEY_LOCAL_MACHINE, sub.c_str());
-    GlassInstallLog::LineFormat(L"Removed orphan ARP uninstall key %s (0x%08lX)", productCode, st);
+    if(!productCode||!productCode[0])return;
+    bool owned=false;
+    for(const auto* code:{kProductPlatformX64,kProductPlatformX86,kProductSettingsX64,kProductSettingsX86,
+        kProductOpenGlassResourcesX64,kProductOpenGlass,kLegacyPlatformX64,kLegacyPlatformX86,kLegacyOpenGlass})
+        owned=owned||_wcsicmp(code,productCode)==0;
+    if(!owned)return; // Never remove upstream OG/Inno, SUT or arbitrary ARP entries.
+    const auto absent=[productCode]() {
+        wchar_t found[39]{};
+        return MsiEnumProductsExW(productCode,L"S-1-1-0",MSIINSTALLCONTEXT_ALL,0,found,nullptr,nullptr,nullptr)==ERROR_NO_MORE_ITEMS;
+    };
+    if(!absent())return; // Unknown/access failure is not proof of absence.
+    for(const auto root:{HKEY_LOCAL_MACHINE,HKEY_CURRENT_USER})for(const auto view:{KEY_WOW64_64KEY,KEY_WOW64_32KEY}) {
+        HKEY parent{};
+        const auto opened=RegOpenKeyExW(root,L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",0,KEY_READ|KEY_WRITE|DELETE|view,&parent);
+        if(opened!=ERROR_SUCCESS)continue;
+        // Hold the explicitly selected registry view and repeat the all-user
+        // absence check immediately before deleting this exact owned GUID key.
+        const auto removed=absent()?RegDeleteTreeW(parent,productCode):ERROR_INSTALL_ALREADY_RUNNING;
+        RegCloseKey(parent);
+        GlassInstallLog::LineFormat(L"Orphan ARP cleanup: product=%s hive=%s view=%u result=%ld",productCode,
+            root==HKEY_LOCAL_MACHINE?L"HKLM":L"HKCU",static_cast<unsigned>(view),removed);
+    }
 }
 
 // Read-only post-removal facts: distinguish an orphan ARP key from Windows'
@@ -152,7 +164,9 @@ bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress, UINT* 
     if (resultCode) *resultCode = ERROR_SUCCESS;
     if (!productCode || !productCode[0]) return true;
     const INSTALLSTATE state = MsiQueryProductStateW(productCode);
-    if (state == INSTALLSTATE_ABSENT || state == INSTALLSTATE_UNKNOWN) return true;
+    if (state == INSTALLSTATE_ABSENT || state == INSTALLSTATE_UNKNOWN) {
+        RemoveOrphanUninstallEntry(productCode);GlassAppsNotification::Changed();return true;
+    }
     GlassInstallLog::LineFormat(L"MsiConfigureProductEx uninstall %s", productCode);
     MsiSetInternalUI(INSTALLUILEVEL_NONE, nullptr);
     if (progress) {
@@ -168,6 +182,7 @@ bool UninstallProduct(const wchar_t* productCode, ProgressSink* progress, UINT* 
     if (resultCode) *resultCode = exitCode;
     GlassInstallLog::LineFormat(L"Uninstall exit code %u", exitCode);
     if(exitCode==ERROR_SUCCESS||exitCode==ERROR_SUCCESS_REBOOT_REQUIRED||exitCode==ERROR_UNKNOWN_PRODUCT) {
+        RemoveOrphanUninstallEntry(productCode);
         LogRemovalRegistration(productCode);
         GlassAppsNotification::Changed();
     }
@@ -469,8 +484,9 @@ bool RefreshManagedArp(const std::wstring& x64Dir,const std::wstring& x86Dir,con
         for(const auto* code:{kProductPlatformX64,kProductPlatformX86,kProductSettingsX64,kProductSettingsX86,
             kProductOpenGlass,kLegacyPlatformX64,kLegacyPlatformX86,kLegacyOpenGlass,kProductSecureUxThemeX64,kProductSecureUxThemeX86}) {
             const auto state=MsiQueryProductStateW(code);
-            if(state==INSTALLSTATE_UNKNOWN)continue;
+            if(state==INSTALLSTATE_UNKNOWN){RemoveOrphanUninstallEntry(code);continue;}
             if(state!=INSTALLSTATE_DEFAULT){
+                RemoveOrphanUninstallEntry(code);
                 GlassInstallLog::LineFormat(L"Remaining ARP skipped: product=%s MSI state=%d",code,static_cast<int>(state));
                 ok=false;continue;
             }
@@ -482,6 +498,7 @@ bool RefreshManagedArp(const std::wstring& x64Dir,const std::wstring& x86Dir,con
             }
         }
         if(IsProductInstalled(kProductOpenGlassResourcesX64))ok=PatchResourcesMaintenance()&&ok;
+        else RemoveOrphanUninstallEntry(kProductOpenGlassResourcesX64);
         ok=RefreshOpenGlassFileArp(openGlassDir)&&ok;
         ok=PatchOfficialOpenGlassMaintenance()&&ok;
         GlassAppsNotification::Changed();

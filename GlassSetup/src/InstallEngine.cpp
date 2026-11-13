@@ -498,6 +498,10 @@ bool InstallEngine::PrepareOfficialOpenGlass(bool removing) noexcept {
                 L"The official OpenGlass uninstaller failed trust verification. Products were not changed. ")+error,ERROR_INSTALL_FAILURE);
             return false;
         }
+        if(removing&&!GlassInstallRemoval::ValidateOpenGlassPaths(before.directory,nullptr,ru,error)) {
+            SetFailure((ru?L"Проверка службы OpenGlass отклонена до изменений продуктов. ":
+                L"OpenGlass service validation failed before product changes. ")+error,ERROR_INSTALL_FAILURE);return false;
+        }
         auto& target=officialOpenGlassTarget_;
         if(before.installed) {
             target=before.directory;

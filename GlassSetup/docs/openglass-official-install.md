@@ -1380,3 +1380,31 @@ command-line coordinates or handoff authorization are introduced. Fresh launch,
 missing parent window and minimized parent retain the normal centering fallback.
 Geometry tests execute the lookup with fake HWND/PID/class APIs; existing child
 validation and handoff mocks pass. Actual Win32/DPI transition needs Windows QA.
+
+### Log 37: service-path preflight and real orphan ARP keys
+
+Five MSI logs return 0. Setup postchecks show all-context enumeration 259 and
+MSI state -1, while each native-view HKLM ARP key still opens successfully.
+This establishes actual residual registry entries, not merely an already-open
+Settings cache. The previous orphan cleanup routine was unused and also failed
+to select both registry views safely. It is now invoked after successful/unknown
+MSI removal and when refreshing absent known products (including Resources).
+Only fixed owned MSI GUIDs qualify, never upstream Inno/SUT/arbitrary keys.
+All-context all-user absence must be ERROR_NO_MORE_ITEMS, repeated just before
+each exact-key removal using explicitly opened HKLM/HKCU view handles. Inventory
+failure, re-registration or key-access refusal cannot authorize deletion.
+Existing bounded change notifications run after cleanup. No Settings process
+control/UI automation; immediate live-window refresh still needs Windows QA.
+
+OG's new failure is before Inno invocation: backend path/config validation,
+not Authenticode. Upstream's unquoted full EXE path with trailing spaces conflicts
+with the legacy first-token parser. ValidateOpenGlassPaths now opts into exact
+unquoted/no-argument matching after trailing whitespace normalization, refusing
+any existing or inaccessible prefix EXE that could make SCM path resolution
+ambiguous. Strict backup/delete configuration comparisons keep their old parser;
+active service PID/image verification, account/type and safe-path checks remain.
+The same read-only service path check now runs in official-removal preflight
+before managed mutation and repeats immediately before stopping the service.
+
+Actual parser/orphan cleanup mocks and existing notifications/remover/mixed/service
+and source tests pass. No native Windows build or actual Inno/Settings acceptance.

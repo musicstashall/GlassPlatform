@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory() as d:
  subprocess.run([str(exe)],check=True)
 msi=(root/'GlassSetup/src/InstallSupport/GlassInstallMsi.cpp').read_text()
 fn=msi[msi.index('bool UninstallProduct('):msi.index('std::wstring ProductCodeFromMsiPath(')]
-assert fn.index('MsiConfigureProductExW(')<fn.index('GlassAppsNotification::Changed()')
+assert fn.index('MsiConfigureProductExW(')<fn.rindex('GlassAppsNotification::Changed()')
 assert 'exitCode==ERROR_SUCCESS||exitCode==ERROR_SUCCESS_REBOOT_REQUIRED||exitCode==ERROR_UNKNOWN_PRODUCT' in fn
 refresh=msi[msi.index('bool RefreshManagedArp('):msi.index('DWORD CALLBACK SnapshotCopyProgress')]
 assert 'GlassAppsNotification::Changed()' in refresh
