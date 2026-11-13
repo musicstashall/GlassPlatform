@@ -26,19 +26,32 @@
 
   <!--
     Publish для MSI делает проект GlassSettings (GlassSettingsPublishForMsi).
-    Повторный MSBuild отсюда во время сборки solution идёт параллельно с Clean GlassSettings.Native
-    и сносит Cache\...\vc143.pdb (C1090, код 3). Отдельная сборка одного .wixproj Publish вызывает сама.
+    Повторный MSBuild во время сборки solution, пока GlassSettings.Native ещё чистит Cache,
+    сносит vc143.pdb (C1090). Поэтому свежий exe повторно не публикуем.
+    Проверка актуальности Visual Studio проходит до записи нового номера комплекта,
+    и GlassSettings остаётся на прошлом ProductVersion. Тогда публикуем один раз здесь:
+    к этому моменту Native уже собран (зависимость MSI).
   -->
   <Target Name="GlassEnsureGlassSettingsPublish"
           BeforeTargets="GlassStagePayload"
+          DependsOnTargets="GlassBundlePrepareSession;GlassBundleImportSessionProps"
           Condition="'$(GlassPayloadArch)' == 'x64' or '$(GlassPayloadArch)' == 'x86' or '$(GlassPayloadArch)' == 'GlassSettings-x64' or '$(GlassPayloadArch)' == 'GlassSettings-x86'">
     <PropertyGroup>
       <_GsPublishExe>$(GlassBuildRelease)\GlassSettings\GlassSettings.exe</_GsPublishExe>
       <_GsPublishFromSolution Condition="'$(BuildingSolutionFile)' == 'true' or '$(BuildingInsideVisualStudio)' == 'true' or '$(SolutionDir)' != ''">true</_GsPublishFromSolution>
+      <_GsNeedsPublish Condition="'$(_GsPublishFromSolution)' != 'true'">true</_GsNeedsPublish>
     </PropertyGroup>
-    <Message Importance="high" Condition="'$(_GsPublishFromSolution)' == 'true'" Text="GlassSettings для MSI: $(_GsPublishExe)" />
-    <Message Importance="high" Condition="'$(_GsPublishFromSolution)' != 'true'" Text="GlassSettings Publish $(GlassPayloadArch) before MSI" />
-    <MSBuild Condition="'$(_GsPublishFromSolution)' != 'true'"
+    <Exec Condition="'$(_GsPublishFromSolution)' == 'true'"
+          IgnoreExitCode="true"
+          Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -Command &quot;$ErrorActionPreference='Stop'; $expected='$(GlassBundleVersionEffective)'; $path='$(GlassBuildRelease)\GlassSettings\GlassSettings.exe'; $fresh=$false; try { if (Test-Path -LiteralPath $path) { $actual=[Diagnostics.FileVersionInfo]::GetVersionInfo($path).ProductVersion; if ($actual -and ([version]$actual -eq [version]$expected)) { $fresh=$true } } } catch { $fresh=$false }; if (-not $fresh) { exit 2 }&quot;">
+      <Output TaskParameter="ExitCode" PropertyName="_GsVersionCheck" />
+    </Exec>
+    <PropertyGroup>
+      <_GsNeedsPublish Condition="'$(_GsVersionCheck)' == '2'">true</_GsNeedsPublish>
+    </PropertyGroup>
+    <Message Importance="high" Condition="'$(_GsNeedsPublish)' != 'true'" Text="GlassSettings для MSI: $(_GsPublishExe) ($(GlassBundleVersionEffective))" />
+    <Message Importance="high" Condition="'$(_GsNeedsPublish)' == 'true'" Text="GlassSettings $(GlassNativeArch) не $(GlassBundleVersionEffective). Публикация перед MSI." />
+    <MSBuild Condition="'$(_GsNeedsPublish)' == 'true'"
              Projects="$(SolutionRoot)GlassSettings\GlassSettings.csproj"
              Targets="Publish"
              Properties="Configuration=Release;Platform=$(GlassNativeArch);GlassSettingsSkipPublishForMsi=true" />

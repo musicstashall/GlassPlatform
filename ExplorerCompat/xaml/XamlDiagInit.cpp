@@ -10,9 +10,12 @@
 #include <GlassMessages.h>
 
 #include <objbase.h>
+#include <winver.h>
 
 #include <atomic>
 #include <mutex>
+
+#pragma comment(lib, "version.lib")
 
 extern "C" void WINAPI ExplorerCompat_NotifyDesktopBridgeWindow(HWND hwnd) noexcept;
 
@@ -40,7 +43,8 @@ namespace
         CLSID tapClsid,
         LPCWSTR wszInitializationData);
 
-    // Как FileBrowsWindowPatch TAPSite::InstallUdk: полный путь к диагностической DLL + короткое имя TAP.
+    // MUX 2.9: полный путь в wszDllXamlDiagnostics и короткое имя в wszTAPDllName.
+    // WinUI 3.2 / CBS.2 короткое имя не принимает — см. IxdeModuleRequiresAbsoluteTapName.
     #if 0
     constexpr const wchar_t* kTapDllFileName = L"TaskbarCompat.dll";
     #else
@@ -862,12 +866,81 @@ namespace
         DebugLog(DBG_IMPORTANT, L"[ExplorerCompat][XamlDiag] IXDE reclaim HWND_MESSAGE destroyed");
     }
 
+    // Версия файла без загрузки образа: соседний Microsoft.UI.Xaml.dll пакета, чей FrameworkUdk отдал IXDE.
+    [[nodiscard]] bool TryReadFileVersionMajorMinor(
+        const wchar_t* path,
+        WORD& major,
+        WORD& minor) noexcept
+    {
+        major = 0;
+        minor = 0;
+        if (!path || path[0] == L'\0')
+            return false;
+
+        DWORD unused = 0;
+        const DWORD bytes = GetFileVersionInfoSizeW(path, &unused);
+        if (bytes == 0)
+            return false;
+
+        std::vector<BYTE> block(bytes);
+        if (!GetFileVersionInfoW(path, 0, bytes, block.data()))
+            return false;
+
+        VS_FIXEDFILEINFO* info = nullptr;
+        UINT infoLen = 0;
+        if (!VerQueryValueW(block.data(), L"\\", reinterpret_cast<void**>(&info), &infoLen) ||
+            info == nullptr ||
+            infoLen < sizeof(VS_FIXEDFILEINFO))
+        {
+            return false;
+        }
+
+        major = HIWORD(info->dwFileVersionMS);
+        minor = LOWORD(info->dwFileVersionMS);
+        return true;
+    }
+
+    // WinUI 3.2 (WindowsAppRuntime.CBS.2) в DebugTool::callback делает FailFast 0x8000FFFF,
+    // если wszTAPDllName относительный. Гейт — путь/версия MUX того модуля, который отдал IXDE,
+    // а не GetModuleHandle(Microsoft.UI.Xaml.dll): в explorer две копии.
+    [[nodiscard]] bool IxdeModuleRequiresAbsoluteTapName(HMODULE ixdeModule) noexcept
+    {
+        wchar_t modulePath[MAX_PATH]{};
+        if (!ixdeModule || GetModuleFileNameW(ixdeModule, modulePath, MAX_PATH) == 0)
+            return false;
+
+        if (wcsstr(modulePath, L"Microsoft.WindowsAppRuntime.CBS.2_") != nullptr)
+            return true;
+
+        wchar_t muxPath[MAX_PATH]{};
+        if (wcscpy_s(muxPath, modulePath) != 0)
+            return false;
+
+        wchar_t* slash = wcsrchr(muxPath, L'\\');
+        if (!slash)
+            return false;
+
+        if (_wcsicmp(slash + 1, L"Microsoft.UI.Xaml.dll") != 0)
+        {
+            const size_t remain = static_cast<size_t>(std::size(muxPath) - static_cast<size_t>(slash + 1 - muxPath));
+            if (wcscpy_s(slash + 1, remain, L"Microsoft.UI.Xaml.dll") != 0)
+                return false;
+        }
+
+        WORD major = 0;
+        WORD minor = 0;
+        if (!TryReadFileVersionMajorMinor(muxPath, major, minor))
+            return false;
+        return major > 3 || (major == 3 && minor >= 2);
+    }
+
     [[nodiscard]] HRESULT CallFrameworkUdkInit(
         InitializeXamlDiagnosticsExFn pIxde,
         DWORD pid,
         HWND hwndForLog,
         wchar_t* connBuf,
-        size_t connCch) noexcept
+        size_t connCch,
+        HMODULE ixdeModule) noexcept
     {
         if (hwndForLog)
         {
@@ -890,11 +963,19 @@ namespace
         if (!g_tapPathReady.load(std::memory_order_acquire))
             return E_FAIL;
 
+        const bool absoluteTapName = IxdeModuleRequiresAbsoluteTapName(ixdeModule);
+        const wchar_t* tapDllName = absoluteTapName ? g_tapDllFullPath : kTapDllFileName;
+        DebugLog(
+            DBG_IMPORTANT,
+            L"[ExplorerCompat][XamlDiag] IXDE wszTAPDllName absolute=%d name=%s",
+            absoluteTapName ? 1 : 0,
+            tapDllName);
+
         return pIxde(
             connBuf,
             pid,
             g_tapDllFullPath,
-            kTapDllFileName,
+            tapDllName,
             CLSID_GlassXamlTapSite,
             nullptr);
     }
@@ -916,7 +997,7 @@ namespace
         else
         {
             wchar_t conn[128]{};
-            hr = CallFrameworkUdkInit(pIxde, pid, nullptr, conn, _countof(conn));
+            hr = CallFrameworkUdkInit(pIxde, pid, nullptr, conn, _countof(conn), udk.module);
             if (SUCCEEDED(hr))
             {
                 g_udkIxdeSucceeded.store(true, std::memory_order_release);

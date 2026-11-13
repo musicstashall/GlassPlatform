@@ -39,7 +39,7 @@
 | TaskbarCompat | [TaskbarCompat/README.md](TaskbarCompat/README.md) | [TaskbarBorders](TaskbarCompat/docs/TaskbarBorders.md) |
 | UICompat | [UICompat/README.md](UICompat/README.md) | [UICompat-CoreWindow](UICompat/docs/UICompat-CoreWindow.md) |
 | GlassSettings | [GlassSettings/README.md](GlassSettings/README.md) | [WinUI](GlassSettings/docs/GlassSettings-WinUI.md), [page-pipeline](GlassSettings/docs/GlassSettings-page-pipeline.md) |
-| GlassSetup | [GlassSetup/README.md](GlassSetup/README.md) | [GlassSetup/docs/](GlassSetup/docs/) |
+| GlassSetup | [GlassSetup/README.md](GlassSetup/README.md) | [публикация](GlassSetup/docs/release-publish.md), [docs](GlassSetup/docs/) |
 | GlassShared | [GlassShared/README.md](GlassShared/README.md) | [gdi-alpha](GlassShared/docs/gdi-alpha.md) |
 | LogViewer | [LogViewer/README.md](LogViewer/README.md) | — |
 | GlassShellExt | [GlassShellExt/README.md](GlassShellExt/README.md) | — |
@@ -47,6 +47,8 @@
 ## Сборка
 
 Используй скилл **build** (`.cursor/skills/build/SKILL.md`). Сборка только из корня solution. **Не** запускать/останавливать платформу; при LNK1168 — вопрос пользователю и ждать ответа ([contributing/build.md](contributing/build.md)).
+
+Публикация комплекта и отдельных MSI — скилл **glass-release** и [GlassSetup/docs/release-publish.md](GlassSetup/docs/release-publish.md). Новую сборку ради публикации не начинать; `version.json` заливать последним.
 
 ## Кодировка
 
@@ -70,6 +72,6 @@
 
 ## Скиллы проекта
 
-`glass-workflow`, `glass-hooks`, `glass-bwm-port`, `glass-wndcompat`, `glass-explorer-xaml`, `crashdump` — см. `.cursor/skills/`.
+`glass-workflow`, `glass-hooks`, `glass-bwm-port`, `glass-wndcompat`, `glass-explorer-xaml`, `glass-release`, `crashdump` — см. `.cursor/skills/`.
 
 При любом падении/дампе (`.dmp`, WER, `CrashDumps`, FailFast, CFG) — сначала скилл `crashdump`.

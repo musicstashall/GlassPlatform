@@ -43,6 +43,9 @@ Windows и продуктов, Setup/MSI/Inno logs. Не публиковать 
 
 ## 3. Catalog и публикация
 
+Порядок загрузки, частичное обновление и заметки релиза —
+[release-publish.md](release-publish.md). `version.json` заливается последним.
+
 - [ ] Сгенерировать catalog **из финальных подписанных файлов одного build**:
 
 ```powershell
@@ -53,8 +56,9 @@ Windows и продуктов, Setup/MSI/Inno logs. Не публиковать 
 - [ ] Проверить пять product entries, Setup version, точные filenames, SHA-256,
   размеры и allowlisted URLs. Resources нужно указать явно: default Products — четыре.
   Не брать version.json от нового build, а MSI от предыдущего.
-- [ ] Загрузить пять first-party MSI, Setup и version.json в один release.
+- [ ] Загрузить пять first-party MSI и Setup, затем version.json последним.
   Для частичной публикации применять `-BaseManifest`, не терять остальные entries.
+  MSI, чей SHA-256 уже совпадает с релизом, повторно не заливать.
 - [ ] Скачать опубликованные файлы и заново сверить bytes/hash/version с catalog.
   Проверить adjacent/cache/release resolution без подмены local version под remote.
 

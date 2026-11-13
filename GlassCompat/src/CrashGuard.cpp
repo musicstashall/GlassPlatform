@@ -1,5 +1,4 @@
 #include "CompatPch.h"
-#include <GlassStop.h>
 #include "CrashGuard.h"
 #include "HostPidHelper.h"
 
@@ -8,7 +7,6 @@
 #include <InjectProcessMap.h>
 #include <cstring>
 #include <cstdio>
-#include <process.h>
 
 #pragma comment(lib, "Dbghelp.lib")
 
@@ -24,8 +22,8 @@ namespace
     // Fallback чтения: прошлая сборка писала в корень BWM; ещё старее — Glass\CrashGuard.
     constexpr wchar_t kLegacyRegPath[] = L"Software\\Glass\\CrashGuard";
     constexpr DWORD kMaxCrashes = 3;
-    //10 минут — окно серии падений (FILETIME 100-ns)
-    constexpr ULONGLONG kCrashWindowTicks = 10ull * 60 * 10'000'000ull;
+    // 3 минуты — окно серии падений (FILETIME, 100 нс).
+    constexpr ULONGLONG kCrashWindowTicks = 3ull * 60 * 10'000'000ull;
     constexpr size_t kMaxDumpRoots = 5;
     constexpr DWORD kStowedExceptionCode = 0xC000027BUL;
 
@@ -522,21 +520,16 @@ namespace
         return count >= kMaxCrashes;
     }
 
-    struct CrashPromptThreadData
+    // Один инкремент на процесс: VEH fast-fail и UEF не должны считать один краш дважды.
+    // Диалог здесь не показываем — хост читает счётчик и решает сам.
+    static void RecordExplorerCrashOnce() noexcept
     {
-        int result;
-    };
-
-    static unsigned __stdcall CrashPromptThread(void* p) noexcept
-    {
-        auto* d = static_cast<CrashPromptThreadData*>(p);
-        d->result = MessageBoxW(
-            nullptr,
-            L"Проводник (explorer.exe) несколько раз завершился с ошибкой за короткий период.\n"
-            L"Остановить GlassPlatform, чтобы предотвратить дальнейшие падения?",
-            L"GlassPlatform",
-            MB_ICONERROR | MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST | MB_SYSTEMMODAL);
-        return 0;
+        if (!IsCurrentProcessExplorer())
+            return;
+        static LONG recorded = 0;
+        if (InterlockedCompareExchange(&recorded, 1, 0) != 0)
+            return;
+        (void)RecordExplorerCrashAndIsOverThreshold();
     }
 
     [[nodiscard]] bool IsVectoredFastFailGuardEnabled() noexcept
@@ -559,38 +552,6 @@ namespace
         DWORD v = 0;
         (void)ReadRegDwordCrashSettingsThenLegacy(L"DisableExplorerVehFatalDumps", v, 0);
         return v != 0;
-    }
-
-    // R11: единый координатор вместо двух ручных SetEvent по архам.
-    // gracefulMs=0 — при краше не ждём: наш процесс сейчас умрёт.
-    static void SignalPlatformStopBothArch() noexcept
-    {
-        for (const auto arch : { Shared::GlassStop::PlatformArch::X64,
-                                 Shared::GlassStop::PlatformArch::X86 })
-        {
-            Shared::GlassStop::Options options{};
-            options.reason = Shared::GlassStop::Reason::Crash;
-            options.gracefulMs = 0;
-            options.hostGoneMs = 0;
-            (void)Shared::GlassStop::Request(arch, options);
-        }
-    }
-
-    static void MaybePromptStopAfterExplorerSeries() noexcept
-    {
-        if (!IsCurrentProcessExplorer() || !RecordExplorerCrashAndIsOverThreshold())
-            return;
-
-        CrashPromptThreadData data{ IDNO };
-        uintptr_t th = _beginthreadex(nullptr, 0, CrashPromptThread, &data, 0, nullptr);
-        if (th)
-        {
-            WaitForSingleObject(reinterpret_cast<HANDLE>(th), INFINITE);
-            CloseHandle(reinterpret_cast<HANDLE>(th));
-        }
-
-        if (data.result == IDYES)
-            SignalPlatformStopBothArch();
     }
 
     /// Служебные исключения ntdll, которые не являются падениями процесса.
@@ -631,6 +592,10 @@ namespace
         }
 
         LogFaultingModuleProbe(info, "VEH");
+
+        // abort / stowed fail-fast не доходят до UEF. Считаем их здесь, один раз на процесс.
+        if (explorer && (code == 0xC0000409UL || code == kStowedExceptionCode))
+            RecordExplorerCrashOnce();
 
         bool wantDump = false;
         if (explorer && IsMiniDumpEnabled() && !IsExplorerVehFatalDumpsDisabled())
@@ -675,9 +640,8 @@ namespace
         if (IsMiniDumpEnabled())
             TryWriteProcessMiniDump(info);
 
-        // Цепочка prev (WER) часто не возвращается и убивает процесс вместе с диалогом,
-        // так что SetEvent на Stop не успевает. Спрашиваем и сигналим стоп до неё.
-        MaybePromptStopAfterExplorerSeries();
+        // Счётчик для хоста. Диалог в умирающем Explorer не показываем: кнопки не нажимаются.
+        RecordExplorerCrashOnce();
 
         if (g_prevExplorerFilter)
             return g_prevExplorerFilter(info);
@@ -855,4 +819,61 @@ void GlassCompat::UninstallProcessCrashGuard() noexcept
         GetCurrentProcessId(),
         Shared::InjectProcessMap::DiagCrashGuard,
         false);
+}
+
+DWORD GlassCompat::ReadExplorerCrashSeriesCount() noexcept
+{
+    FILETIME nowFt{};
+    GetSystemTimeAsFileTime(&nowFt);
+    ULONGLONG now = 0;
+    memcpy(&now, &nowFt, sizeof(now));
+
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kCrashRegPath, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+        return 0;
+
+    DWORD count = 0;
+    DWORD cb = sizeof(count);
+    (void)RegGetValueW(hKey, nullptr, L"GlassCrashSeriesCount", RRF_RT_REG_DWORD, nullptr, &count, &cb);
+
+    FILETIME lastFt{};
+    cb = sizeof(lastFt);
+    const LSTATUS lrLast = RegGetValueW(
+        hKey, nullptr, L"GlassCrashSeriesLastTime", RRF_RT_REG_BINARY, nullptr, &lastFt, &cb);
+    RegCloseKey(hKey);
+
+    ULONGLONG last = 0;
+    if (lrLast == ERROR_SUCCESS && cb == sizeof(lastFt))
+        memcpy(&last, &lastFt, sizeof(last));
+    if (last == 0 || (now > last && (now - last) > kCrashWindowTicks))
+        return 0;
+    return count;
+}
+
+void GlassCompat::ResetExplorerCrashSeriesCount() noexcept
+{
+    HKEY hKey = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kCrashRegPath, 0, nullptr, 0,
+            KEY_SET_VALUE, nullptr, &hKey, nullptr) != ERROR_SUCCESS)
+        return;
+
+    const DWORD zero = 0;
+    (void)RegSetValueExW(
+        hKey,
+        L"GlassCrashSeriesCount",
+        0,
+        REG_DWORD,
+        reinterpret_cast<const BYTE*>(&zero),
+        sizeof(zero));
+
+    FILETIME nowFt{};
+    GetSystemTimeAsFileTime(&nowFt);
+    (void)RegSetValueExW(
+        hKey,
+        L"GlassCrashSeriesLastTime",
+        0,
+        REG_BINARY,
+        reinterpret_cast<const BYTE*>(&nowFt),
+        sizeof(nowFt));
+    RegCloseKey(hKey);
 }

@@ -552,5 +552,7 @@ SecureUxTheme. Без prerequisite карточка остаётся устан�
 - [Текущие статусы/остаток](docs/installer-lightweight-plan.md#0-единый-актуальный-план-setup--settings--upstream-openglass).
 - [Ручной release checklist](docs/release-checklist.md): пять first-party MSI,
   Resources только Release|x64, upstream OG EXE/SUT отдельно, актуальный signed catalog.
+- [Публикация релиза](docs/release-publish.md): комплект и отдельные файлы,
+  каталог из подписанных байтов, `version.json` последним.
 - [Windows acceptance](docs/controller-windows-acceptance.md): clean-PC self-signed
   publication, shell-unregister timeout и реальное удаление пока требуют native проверки.
