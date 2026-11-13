@@ -5,7 +5,11 @@ from pathlib import Path
 import re, shutil, subprocess, tempfile
 root=Path(__file__).resolve().parents[2]
 s=(root/'GlassSetup/src/InstallSupport/GlassInstallMsi.cpp').read_text()
-code=s[s.index('bool PatchArpUninstallString('):s.index('DWORD CALLBACK SnapshotCopyProgress')]
+# Test the real managed writer/refresh; vendor/file/Resources adapters have their
+# own compiled harnesses, so isolate those independent dependencies here.
+code=s[s.index('bool PatchArpUninstallString('):s.index('// A separate, non-MSI registration.')]
+code+='\nbool RefreshOpenGlassFileArp(const std::wstring&){return true;}\nbool PatchOfficialOpenGlassMaintenance(){return true;}\nbool PatchResourcesMaintenance(){return true;}\nnamespace GlassAppsNotification{void Changed(){}}\n'
+code+=s[s.index('bool RefreshManagedArp('):s.index('DWORD CALLBACK SnapshotCopyProgress')]
 h=(root/'GlassSetup/src/InstallSupport/GlassInstallMsi.h').read_text()
 constants='\n'.join(re.findall(r'inline constexpr wchar_t k(?:Product|Legacy)\w+\[\]\s*=\s*L"[^"\n]+";',h))
 # New package metadata and repair of old ARP entries must agree.
@@ -69,7 +73,7 @@ int main(){using namespace GlassInstallMsi;
   if(n==4)states[kProductSecureUxThemeX86]=2;
   assert(PatchArpUninstallString(kProductSettingsX64,L"x64"));
   assert(registry[164][L"DisplayName"]==L"GlassSettings (64-bit)");
-  assert(registry[164][L"NoRemove"]==(n?L"1":L"0"));
+  assert(registry[164][L"NoRemove"]==L"0");
   assert(registry[164][L"ModifyPath"].find(L"--modify --product")!=std::wstring::npos);
  }
  {Reset();states[kProductSettingsX86]=5;assert(PatchArpUninstallString(kProductSettingsX86,L"x86"));
@@ -96,7 +100,7 @@ int main(){using namespace GlassInstallMsi;
   assert(PatchArpUninstallString(kProductSettingsX86,L"x86"));assert(registry[132].count(L"NoRemove"));}
  {Reset();registry[132]={};registry[164][L"WindowsInstaller"]=L"1";states[kProductSettingsX64]=5;failValue=L"NoRemove";
   assert(!PatchArpUninstallString(kProductSettingsX64,L"x64"));assert(registry[164].count(L"WindowsInstaller"));assert(registry[132].empty());}
- {Reset();states[kProductSettingsX64]=5;original=true;assert(RefreshManagedArp(L"x64",L"x86",L"og"));assert(registry[164][L"NoRemove"]==L"1");
+ {Reset();states[kProductSettingsX64]=5;original=true;assert(RefreshManagedArp(L"x64",L"x86",L"og"));assert(registry[164][L"NoRemove"]==L"0");
   original=false;assert(RefreshManagedArp(L"x64",L"x86",L"og"));assert(registry[164][L"NoRemove"]==L"0");}
  {Reset();states[kProductSettingsX64]=5;GlassMaintenanceCache::setupAvailable=false;
   assert(PatchArpUninstallString(kProductSettingsX64,L"x64"));assert(registry[164][L"ModifyPath"].find(L"--interactive --product")!=std::wstring::npos);}

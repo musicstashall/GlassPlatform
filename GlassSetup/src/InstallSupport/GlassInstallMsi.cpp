@@ -309,10 +309,9 @@ bool PatchArpUninstallString(const std::wstring& productCode, const std::wstring
         const std::wstring keyPath =
             L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + productCode;
         const bool settings=_wcsicmp(productCode.c_str(),kProductSettingsX64)==0||_wcsicmp(productCode.c_str(),kProductSettingsX86)==0;
-        std::vector<std::wstring> sutCandidates;
-        const bool sutGuard=Shared::SecureUxThemeInventory::Query(sutCandidates)!=ERROR_SUCCESS || !sutCandidates.empty() ||
-            MsiQueryProductStateW(kProductSecureUxThemeX64)!=INSTALLSTATE_UNKNOWN ||
-            MsiQueryProductStateW(kProductSecureUxThemeX86)!=INSTALLSTATE_UNKNOWN;
+        // ARP availability is not removal authorization. GlassUnins performs
+        // live Platform/SUT/loaded-style checks and explicit risk confirmation.
+        // A broad NoRemove flag leaves orphaned UI policy after Platform removal.
         bool opened=false;
         auto writeRoot = [&](HKEY root, REGSAM sam) {
             HKEY key = nullptr;
@@ -350,7 +349,7 @@ bool PatchArpUninstallString(const std::wstring& productCode, const std::wstring
             const DWORD one = 1,zero=0;
             valuesOk=RegSetValueExW(key,L"ModifyPath",0,REG_SZ,reinterpret_cast<const BYTE*>(modify.c_str()),static_cast<DWORD>((modify.size()+1)*sizeof(wchar_t)))==ERROR_SUCCESS && valuesOk;
             valuesOk=RegSetValueExW(key,L"NoModify",0,REG_DWORD,reinterpret_cast<const BYTE*>(&zero),sizeof(zero))==ERROR_SUCCESS && valuesOk;
-            const DWORD noRemove=settings&&sutGuard?1:0;
+            const DWORD noRemove=0;
             valuesOk=RegSetValueExW(key,L"NoRemove",0,REG_DWORD,reinterpret_cast<const BYTE*>(&noRemove),sizeof(noRemove))==ERROR_SUCCESS && valuesOk;
             valuesOk=RegSetValueExW(key, L"NoRepair", 0, REG_DWORD,
                 reinterpret_cast<const BYTE*>(&one), sizeof(one))==ERROR_SUCCESS && valuesOk;

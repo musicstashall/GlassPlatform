@@ -65,7 +65,7 @@ DWORD GetFileAttributesW(const wchar_t* raw){std::wstring path=raw;auto it=attri
 LONG RegLoadAppKeyW(const wchar_t* path,HKEY* out,DWORD,DWORD,DWORD){++offlineLoads;if(loadBadDb)return ERROR_BADDB;if(loadFail)return 5;for(std::size_t i=0;i<entries.size();++i)if(entries[i].path+L"\\NTUSER.DAT"==path){*out=create(2,i);return 0;}return 2;}
 bool OtherUserSessions(std::wstring& detail){if(otherSession)detail=L"Other session";return otherSession;}
 namespace Shared::RegistrySanity {
-bool CleanOwnedSettings(HKEY,bool,bool commit,std::wstring& detail){
+bool CleanPlatformSettings(HKEY,bool,bool commit,std::wstring& detail){
  int n=commit?++cleanWrites:++cleanChecks;
  if(!commit&&changeOnCheck==n)entries.push_back({L"S-1-5-21-333",L"C:\\Users\\C"});
  if(n==(commit?failWriteAt:failCheckAt)){detail=L"failure";return false;}return true;

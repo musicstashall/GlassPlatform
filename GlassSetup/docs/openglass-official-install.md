@@ -1106,3 +1106,58 @@ smoke pass. A stale standalone source guard forbidding all ARP refresh was updat
 to reflect the earlier official OG Change-link implementation. No Windows/MSVC/
 WiX installation/removal acceptance performed. Build GlassUnins Release|Win32 ->
 GlassSetup Release|Win32; no Resources MSI rebuild is needed for these changes.
+
+### OG uninstall option correction; Settings ARP Remove availability
+
+Latest user correction supersedes the earlier contradictory option wording:
+our default official OG invocation uses /DELETEPRESETS /NODELETECONFIG;
+with explicit registry-cleanup consent it uses /DELETEPRESETS, omitting
+/NODELETECONFIG. Common /VERYSILENT /SUPPRESSMSGBOXES /NORESTART and the raw3010
+restart mapping remain unchanged. Upstream v3.0.2.3749 InitializeUninstall confirms
+that absence of /NODELETECONFIG enables config deletion and /DELETEPRESETS deletes
+commonappdata/OpenGlass/Presets (user-created/downloaded packages, not merely an
+opaque cache). This destructive preset removal is the user's explicit default
+policy request; it is not inferred from an unrelated cleanup checkbox.
+
+RunUninstaller takes a default-false deleteConfig option. Setup supplies its
+explicit cleanupUserData consent after restoring the original mixed plan, before
+vendor execution. Standalone GlassUnins uses the preserve-config default; its
+existing prohibition on combining standalone OG with general all-profile cleanup
+is not silently bypassed. Direct Installed Apps removal still invokes official
+Inno and its own option UI; its UninstallString has NOT been rewritten/adopted.
+
+All-profile installer cleanup now calls CleanPlatformSettings, not the legacy
+CleanOwnedSettings API. The new scope leaves all OG/DWM values untouched, even
+on preflight. OG cleanup belongs to the official uninstaller and covers HKCU of
+the account running it plus HKLM, not every other user's hive. General maintenance
+cleanup UI/log text no longer claims all-profile OG/DWM cleanup; Setup explicitly
+states the official OG current-user/machine scope if OG is selected for removal.
+The existing general RegistrySanity API and its non-installer callers retain
+previous behavior. Glass-only themes/data/profile access safeguards are unchanged.
+
+Settings ARP NoRemove is now always0 after a validated managed-entry refresh.
+A broad vendor-presence flag previously disabled the Windows Remove button even
+after Platform removal; ARP visibility is not removal authorization. GlassUnins
+still performs its live helper/Platform/SUT/loaded-style checks, risk consent and
+snapshot validation. The existing RemainingArpRefresh finalizer after Platform
+uninstall rewrites both still-installed Settings architectures in their checked
+contexts/views (and does not recreate absent Settings). Thus old NoRemove values
+are cleared on the next refresh; no cross-architecture key copying is introduced.
+Windows Settings may still cache button policy until it processes a refresh;
+this is not a promise to force its already-open UI to redraw.
+
+The separate observation that Resources remains in Installed Apps after direct
+MSI removal, then disappears on a subsequent platform operation, is NOT claimed
+fixed here. It is consistent with missing external UI refresh, but no registration
+or removal log was supplied to establish whether an ARP key survived. Do not delete
+MSI registrations/keys by display name or relabel it as successful live UI refresh.
+
+Regression: exact default/cleanup vendor command assertions, raw exit/stop/trust
+failure tests, standalone uninstaller test, actual scoped registry cleanup proves
+no OG/DWM access, actual all-profile inventory, managed ARP writer/refresh proves
+NoRemove0 across vendor-present/unknown and legacy contexts plus refresh failures,
+and source smoke pass. The ARP mock now isolates the three independent vendor/file/
+Resources adapters (covered by their own compiled harnesses), rather than failing
+on unrelated newly added adapter dependencies. No Windows integration performed.
+Build GlassUnins Release|Win32 -> GlassSetup Release|Win32 (normal shared library
+dependencies rebuild); these changes require no MSI package rebuild.

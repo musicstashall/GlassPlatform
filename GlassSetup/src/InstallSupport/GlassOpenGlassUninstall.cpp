@@ -6,7 +6,7 @@
 
 namespace GlassOpenGlassPackage {
 using namespace GlassOpenGlassTrust;
-bool RunUninstaller(const GlassOpenGlassInstall::Record& record,DWORD& exitCode,std::wstring& error) noexcept {
+bool RunUninstaller(const GlassOpenGlassInstall::Record& record,DWORD& exitCode,std::wstring& error,bool deleteConfig) noexcept {
     exitCode=ERROR_INSTALL_FAILURE;error.clear();
     try {
         GlassOpenGlassInstall::Record current;
@@ -24,7 +24,8 @@ bool RunUninstaller(const GlassOpenGlassInstall::Record& record,DWORD& exitCode,
             // protected from unprivileged replacement. Never unblock originals.
         }
         if(!GlassOpenGlassService::PrepareRemoval(record.directory,error,exitCode))return false;
-        std::wstring command=L"\""+record.uninstaller+L"\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /NODELETECONFIG";
+        std::wstring command=L"\""+record.uninstaller+L"\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /DELETEPRESETS";
+        if(!deleteConfig)command+=L" /NODELETECONFIG";
         STARTUPINFOW startup{};startup.cb=sizeof(startup);startup.dwFlags=STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;
         PROCESS_INFORMATION process{};
         Require(CreateProcessW(record.uninstaller.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,

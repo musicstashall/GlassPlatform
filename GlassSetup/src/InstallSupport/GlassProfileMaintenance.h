@@ -387,10 +387,10 @@ public:
         if(OtherUserSessions(detail)||!OpenAll(detail))return false;
         for(auto& profile:profiles_) {
             if(!profile.savedThemes.Prepare(profile.path,profile.hive,SafePath,detail) ||
-               !Shared::RegistrySanity::CleanOwnedSettings(profile.hive,false,false,detail)){detail=profile.sid+L": "+detail;return false;}
+               !Shared::RegistrySanity::CleanPlatformSettings(profile.hive,false,false,detail)){detail=profile.sid+L": "+detail;return false;}
         }
         for(const auto& profile:profiles_)if(!GlassUserDataCleanup::Run(profile.path,false,detail))return false;
-        cleanupPrepared_=Shared::RegistrySanity::CleanOwnedSettings(HKEY_LOCAL_MACHINE,true,false,detail) && VerifyInventory(detail);
+        cleanupPrepared_=Shared::RegistrySanity::CleanPlatformSettings(HKEY_LOCAL_MACHINE,true,false,detail) && VerifyInventory(detail);
         return cleanupPrepared_;
     }
     bool Cleanup(std::wstring& detail) {
@@ -402,9 +402,9 @@ public:
             if(!profile.savedThemes.Cleanup(profile.hive,IsDesktopProfile(profile.sid),savedThemeRegistryFallback_,detail)) {
                 detail=profile.sid+L": partial saved-theme cleanup: "+detail;return false;
             }
-            if(!Shared::RegistrySanity::CleanOwnedSettings(profile.hive,false,true,detail)){detail=profile.sid+L": partial cleanup: "+detail;return false;}
+            if(!Shared::RegistrySanity::CleanPlatformSettings(profile.hive,false,true,detail)){detail=profile.sid+L": partial cleanup: "+detail;return false;}
         }
-        if(!Shared::RegistrySanity::CleanOwnedSettings(HKEY_LOCAL_MACHINE,true,true,detail))return false;
+        if(!Shared::RegistrySanity::CleanPlatformSettings(HKEY_LOCAL_MACHINE,true,true,detail))return false;
         for(const auto& profile:profiles_)if(!GlassUserDataCleanup::Run(profile.path,true,detail))return false;
         return true;
     }

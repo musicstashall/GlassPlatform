@@ -23,7 +23,8 @@ bool PrepareInstaller(const std::wstring& workspace,unsigned windowsBuild,
 // and must interpret raw exitCode (0 success, 3010 reboot with the supplied flag).
 // Official registered Inno uninstaller only; protected EXE/data and publisher
 // verification are mandatory. No mutation of the original EXE/ADS/config.
-bool RunUninstaller(const GlassOpenGlassInstall::Record& record,DWORD& exitCode,std::wstring& error) noexcept;
+// Presets are explicitly removed; config stays unless the caller has cleanup consent.
+bool RunUninstaller(const GlassOpenGlassInstall::Record& record,DWORD& exitCode,std::wstring& error, bool deleteConfig=false) noexcept;
 bool RunInstaller(const Package& package,const std::wstring& directory,DWORD& exitCode,std::wstring& error) noexcept;
 // Protected staging ONLY: no installation, service registration or upstream EXE
 // execution. Caller must implement product snapshot/commit/rollback separately.

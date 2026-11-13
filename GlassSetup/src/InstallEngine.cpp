@@ -559,7 +559,7 @@ bool InstallEngine::CommitOfficialOpenGlass(bool removing) noexcept {
         SetStatus(removing?(ru?L"OpenGlass: штатное удаление":L"OpenGlass: official uninstall"):
             (ru?L"OpenGlass: официальный установщик":L"OpenGlass: official installer"),9000);
         DWORD code=ERROR_INSTALL_FAILURE;attempted=true;
-        const bool ran=removing?GlassOpenGlassPackage::RunUninstaller(current,code,error):
+        const bool ran=removing?GlassOpenGlassPackage::RunUninstaller(current,code,error,selection_.cleanupUserData):
             GlassOpenGlassPackage::RunInstaller(openGlassPackage_,officialOpenGlassTarget_,code,error);
         GlassOpenGlassInstall::Record after;std::wstring inventoryError;
         const bool inventoryKnown=GlassOpenGlassInstall::Query(after,inventoryError);

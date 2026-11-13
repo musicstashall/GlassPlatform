@@ -253,7 +253,7 @@ bool InstallMetadata(const wchar_t* name) {
     return false;
 }
 }
-bool CleanOwnedSettings(HKEY root, bool machine, bool apply, std::wstring& detail) {
+static bool CleanSettingsImpl(HKEY root, bool machine, bool apply, std::wstring& detail, bool includeOpenGlass) {
     for(REGSAM view:kViews) {
         HKEY glass=nullptr;
         LONG st=RegOpenKeyExW(root,L"Software\\StanislavKa\\GlassPlatform",0,KEY_ALL_ACCESS|view,&glass);
@@ -280,6 +280,7 @@ bool CleanOwnedSettings(HKEY root, bool machine, bool apply, std::wstring& detai
             }
             RegCloseKey(glass);
         }
+        if(!includeOpenGlass)continue; // OG config is owned by its official uninstaller.
         HKEY dwm=nullptr;
         st=RegOpenKeyExW(root,L"Software\\Microsoft\\Windows\\DWM",0,KEY_QUERY_VALUE|KEY_SET_VALUE|view,&dwm);
         if(st!=ERROR_SUCCESS&&st!=ERROR_FILE_NOT_FOUND){detail=L"DWM access: "+std::to_wstring(st);return false;}
@@ -312,6 +313,13 @@ bool CleanOwnedSettings(HKEY root, bool machine, bool apply, std::wstring& detai
     }
     (void)machine; // Same whitelist; the caller supplies HKLM only once.
     return true;
+}
+
+bool CleanOwnedSettings(HKEY root, bool machine, bool apply, std::wstring& detail) {
+    return CleanSettingsImpl(root,machine,apply,detail,true);
+}
+bool CleanPlatformSettings(HKEY root, bool machine, bool apply, std::wstring& detail) {
+    return CleanSettingsImpl(root,machine,apply,detail,false);
 }
 
 } // namespace Shared::RegistrySanity

@@ -42,5 +42,7 @@ void RemoveUserSettings() noexcept;
 // then checks their absence; a recreated value or query error is incomplete
 // cleanup. This is not atomic against writers after the verification.
 bool CleanOwnedSettings(HKEY userRoot, bool machine, bool apply, std::wstring& detail);
+// Installer cleanup: GlassPlatform only. Does not inspect/delete OG DWM values.
+bool CleanPlatformSettings(HKEY userRoot, bool machine, bool apply, std::wstring& detail);
 
 } // namespace Shared::RegistrySanity

@@ -46,16 +46,18 @@ DWORD Probe(bool&,bool&){return pending?1072:0;}
 void reset(){GlassOpenGlassService::ready=true;GlassOpenGlassService::pending=false;GlassOpenGlassService::stops=0;queryOk=same=trusted=signedOk=pinOk=createOk=waitOk=exitOk=true;code=creates=closes=pins=livePins=0;}
 int main(){
  GlassOpenGlassInstall::Record record;std::wstring error;DWORD result=0;
- for(unsigned exit:{0u,3010u,2u}){reset();code=exit;assert(RunUninstaller(record,result,error)&&result==exit&&closes==2&&livePins==0);
+ for(unsigned exit:{0u,3010u,2u}){reset();code=exit;assert(RunUninstaller(record,result,error,false)&&result==exit&&closes==2&&livePins==0);
  assert(app==record.uninstaller&&cwd==record.directory);
- assert(command==L"\"D:\\Official OG\\unins000.exe\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /NODELETECONFIG");}
- for(bool* flag:{&queryOk,&same,&trusted,&signedOk,&pinOk}){reset();*flag=false;assert(!RunUninstaller(record,result,error)&&creates==0&&livePins==0&&!error.empty());}
- reset();GlassOpenGlassService::ready=false;assert(!RunUninstaller(record,result,error)&&creates==0&&result==1072);
- reset();GlassOpenGlassService::pending=true;assert(RunUninstaller(record,result,error)&&result==3010);
- reset();record.installed=false;assert(!RunUninstaller(record,result,error)&&creates==0);record.installed=true;
- reset();createOk=false;assert(!RunUninstaller(record,result,error)&&closes==0&&livePins==0);
- reset();waitOk=false;assert(!RunUninstaller(record,result,error)&&closes==2);
- reset();exitOk=false;assert(!RunUninstaller(record,result,error)&&closes==2);
+ assert(command==L"\"D:\\Official OG\\unins000.exe\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /DELETEPRESETS /NODELETECONFIG");}
+ reset();assert(RunUninstaller(record,result,error,true));
+ assert(command==L"\"D:\\Official OG\\unins000.exe\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /DELETEPRESETS");
+ for(bool* flag:{&queryOk,&same,&trusted,&signedOk,&pinOk}){reset();*flag=false;assert(!RunUninstaller(record,result,error,false)&&creates==0&&livePins==0&&!error.empty());}
+ reset();GlassOpenGlassService::ready=false;assert(!RunUninstaller(record,result,error,false)&&creates==0&&result==1072);
+ reset();GlassOpenGlassService::pending=true;assert(RunUninstaller(record,result,error,false)&&result==3010);
+ reset();record.installed=false;assert(!RunUninstaller(record,result,error,false)&&creates==0);record.installed=true;
+ reset();createOk=false;assert(!RunUninstaller(record,result,error,false)&&closes==0&&livePins==0);
+ reset();waitOk=false;assert(!RunUninstaller(record,result,error,false)&&closes==2);
+ reset();exitOk=false;assert(!RunUninstaller(record,result,error,false)&&closes==2);
 }
 '''.replace('// RUNNER',runner)
 with tempfile.TemporaryDirectory() as tmp:

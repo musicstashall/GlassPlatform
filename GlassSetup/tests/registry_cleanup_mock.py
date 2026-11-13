@@ -61,6 +61,9 @@ void reset(){assert(handles.empty());registry.clear();opened.clear();deletions=0
  for(auto name:{L"ColorizationColor",L"ColorizationAfterglow",L"ColorizationColorBalance",L"ColorizationAfterglowBalance",L"ColorizationBlurBalance",L"EnableTransparency",L"DwmInitSessionActivityId_test",L"GradientWhitePixelGPUBlacklist",L"OneCoreNoBootDWM",L"FutureUnknown"})values.insert(name);
  }}
 int main(){std::wstring detail;reset();auto before=registry;
+ for(int hive:{1,2,3}){assert(CleanPlatformSettings(hive,hive==3,false,detail));assert(CleanPlatformSettings(hive,hive==3,true,detail));}
+ assert(registry==before&&deletions==0&&opened.empty()); // Installer delegates OG; no DWM probe/write.
+
  for(int hive:{1,2,3})assert(CleanOwnedSettings(hive,hive==3,false,detail));
  assert(registry==before&&deletions==0&&opened.size()==6);
  for(int hive:{1,2,3})assert(CleanOwnedSettings(hive,hive==3,true,detail));

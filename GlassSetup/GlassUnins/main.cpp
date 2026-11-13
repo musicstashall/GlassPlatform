@@ -648,8 +648,8 @@ private:
         // Cleanup is offered only on the separate full-removal review page.
         if (page_==Page::Cleanup && RemovesAllInstalled(selected_)) {
         json+=L",{\"id\":\"cleanup\",\"slim\":true,\"title\":"+Q(T(L"Удалить настройки и пользовательские данные",L"Remove settings and user data"))+
-            L",\"description\":"+Q(T(L"Пользовательские папки AppData\\Local\\GlassPlatform в доступных профилях, параметры HKLM/DWM и сохранённые .theme с разделами Glass в пользовательском каталоге тем. Активные темы переключаются на стандартную; при неудаче меняется реестр. По умолчанию данные сохраняются.",
-                L"AppData\\Local\\GlassPlatform user data in accessible profiles, product-owned HKLM/DWM settings and saved .theme files with Glass sections in the user themes folder. Active themes switch to stock, with a registry fallback if needed. Data is kept by default."))+
+            L",\"description\":"+Q(T(L"Пользовательские папки AppData\\Local\\GlassPlatform в доступных профилях, параметры Glass в реестре и сохранённые .theme с разделами Glass в пользовательском каталоге тем. Активные темы переключаются на стандартную; при неудаче меняется реестр. По умолчанию данные сохраняются.",
+                L"AppData\\Local\\GlassPlatform user data in accessible profiles, Glass registry settings and saved .theme files with Glass sections in the user themes folder. Active themes switch to stock, with a registry fallback if needed. Data is kept by default."))+
             L",\"checked\":"+(selected_.cleanupSettings?L"true":L"false")+L",\"locked\":false,\"hidden\":false}";
         }
         return json+L"]";
@@ -838,7 +838,7 @@ private:
         if(code==ERROR_SUCCESS_REBOOT_REQUIRED)(void)GlassMaintenanceReboot::Pinned(true);
         SetStatus(code==ERROR_SUCCESS_REBOOT_REQUIRED?
             T(L"OpenGlass удалён. Требуется перезагрузка Windows.",L"OpenGlass removed. Restart Windows to finish."):
-            T(L"OpenGlass удалён. Пользовательские настройки сохранены.",L"OpenGlass removed. User settings were preserved."),10000);
+            T(L"OpenGlass удалён. Параметры реестра сохранены; пакеты пресетов удалены.",L"OpenGlass removed. Registry settings were preserved; preset packages were removed."),10000);
         return static_cast<int>(code);
     }
     int RunOperation(Selection chosen) {
@@ -1429,7 +1429,7 @@ private:
                 SetError(T(L"Продукты обработаны, но очистка настроек завершена не полностью: ",L"Products were processed, but settings cleanup is incomplete: ")+detail);
                 (void)restoreRemaining();return ERROR_INSTALL_FAILURE;
             }
-            LogLine(L"Settings cleanup: all enumerated user profiles and owned HKLM/DWM values; installation metadata preserved");
+            LogLine(L"Settings cleanup: all enumerated user profiles and owned Glass registry values; installation metadata preserved");
         }
         if (!restoreRemaining()) {
             SetError(T(L"Выбранные продукты удалены, но не удалось перезапустить оставшиеся компоненты.",

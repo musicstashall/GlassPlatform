@@ -733,7 +733,7 @@ style=(repo / "GlassShared/include/SystemVisualStyle.h").read_text(encoding="utf
 assert "RegLoadAppKeyW" in profiles and "KEY_ALL_ACCESS,REG_PROCESS_APPKEY" in profiles
 assert "ProfileList" in profiles and "NTUSER.DAT unavailable" in profiles
 assert unins.index("cleanupProfiles.PreflightCleanup") < unins.index("StopAllForUninstall(x64Dir_")
-assert "CleanOwnedSettings(profile.hive,false,false" in profiles and "CleanOwnedSettings(profile.hive,false,true" in profiles
+assert "CleanPlatformSettings(profile.hive,false,false" in profiles and "CleanPlatformSettings(profile.hive,false,true" in profiles
 assert "InstallMetadata(name)" in reg_sanity and "VerifyTreeAccess" in reg_sanity
 assert "kDwmOpenGlassRules" in reg_sanity and "partial cleanup" in profiles
 assert "GetCurrentThemeName" in style and "WinVerifyTrust" in style and "Microsoft Corporation" in style
