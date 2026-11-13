@@ -17,17 +17,24 @@ assert ready.index('inspectionApplied_=true')<ready.index('CompleteVersionCheck(
 assert 'if(!inspectionApplied_)return;' in function
 prefix=r'''
 #include <cassert>
+#include <array>
+#include <optional>
 #include <mutex>
 #include <string>
 #include <iostream>
+namespace GlassPackageCatalog {
+constexpr std::size_t kCount=1;const char* kIds[]={"platform64"};struct Asset{bool downloadable=true;};
+struct Catalog {int marker;std::array<std::optional<Asset>,kCount> products{};Catalog(int v=0):marker(v){}bool operator==(int v)const{return marker==v;}};
+}
+namespace GlassReleaseClient {std::wstring Wide(const char* text){return std::wstring(text,text+std::char_traits<char>::length(text));}}
 namespace InstallLog{void Line(const wchar_t*){}template<class... T>void LineFormat(const wchar_t*,T...){} }
 bool IsControllerChild(){return false;}
 enum class Page{Checking,Components};
-struct VersionCheckResult{bool completed=false,fetched=false,newer=false;int catalog=7;
+struct VersionCheckResult{bool completed=false,fetched=false,newer=false;GlassPackageCatalog::Catalog catalog=7;
  std::wstring self=L"2.0.0.90",latest=L"2.0.0.70",preparedSetup;};
 struct App{Page page_=Page::Checking;std::mutex versionCheckMutex_;
  VersionCheckResult versionCheckResult_;bool versionCheckHandled_=false,inspectionApplied_=false,controllerCheckHandled_=false;
- int scans=0;int releaseCatalog_=0,advances=0,transitions=0;bool transfer=false;
+ GlassPackageCatalog::Catalog releaseCatalog_;int scans=0,advances=0,transitions=0;bool transfer=false;
  bool TransitionController(const std::wstring&){++transitions;return transfer;}
  bool BeginProductInspection(){++scans;return true;}
  bool RunPreflightChecks(){return true;}

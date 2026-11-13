@@ -1448,3 +1448,28 @@ The existing log cannot distinguish AppX deployment vs registry helper vs shell
 notification timeout. No claim of native hang resolution: Windows reproduction
 is still necessary. Existing root/sparse/reinstall/mixed tests plus actual notifier
 mock and pre-MSI barrier assertions pass; no Windows build/runtime here.
+
+### Manual-only recommendations and 26300 warning
+
+User revised the prior recommendation rule: **neither OG nor Resources is included
+in Accept all recommendations**, including fresh installs, updates or helper flags.
+Manual selection and the Resources prerequisite/Resources-before-Inno ordering stay.
+The legacy native select-all route also leaves these explicit choices untouched.
+
+Upstream latest release metadata checked through GitHub API: v3.0.2.3749 (published
+2026-10-05), release body says “THIS BUILD HAS SEVERE ISSUES IN WINDOWS 11 26H2 BUILD
+26300.9818”. Source: https://github.com/ALTaleX531/OpenGlass/releases/tag/v3.0.2.3749 .
+User reports of DWM crashes/sign-in loops: issues #380 and #393; these are reports,
+not proof every revision is affected. README main calls 26300 stable but describes
+newer development state; do not use it to dismiss the published release's warning.
+
+Selected apply of that exact numeric version on build family 26300 gets red card,
+warning icon and RU/EN risk details (DWM, flicker/black screen, repeated sign-in).
+No warning is inferred for future versions/other OS builds or removal. OS detection
+uses RtlGetVersion; no extra trust, install blocking or automatic CI download.
+Native fallback and aggregate plan warning also show the risk.
+
+Installed shelf's redundant lower-right “more” count is removed, not its product
+count or normal scrolling. Remote offer metadata is preserved independently of the
+verified-local flag; absent-source UI no longer says to wait after inspection ends.
+The new-PC failure still needs native evidence: new-pc-source-diagnostics.md.

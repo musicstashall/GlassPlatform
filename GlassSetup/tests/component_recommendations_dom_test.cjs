@@ -15,7 +15,7 @@ assert.equal(d.querySelectorAll('#components-installed-grid .c-card').length,0);
 assert.equal(d.querySelectorAll('.c-card.has-warning').length,0);
 assert.equal(button().disabled,false,'fresh install must offer recommendations');
 let before=messages.length;button().click();
-for(const row of rows){assert.ok(d.querySelector('#product-'+row.id).checked,row.id);assert.ok(messages.slice(before).includes('component:'+row.id+':1'));}
+for(const row of rows.filter(x=>x.id!=='openglass')){assert.ok(d.querySelector('#product-'+row.id).checked,row.id);assert.ok(messages.slice(before).includes('component:'+row.id+':1'));}
 assert.equal(button().disabled,true);assert.match(button().textContent,/Всё выбрано/);
 send(rows.map(x=>({...x,checked:true})));send(rows);assert.equal(button().disabled,false,'native echo with no selection must not leave button stuck');
 send(rows.map(x=>({...x,applySupported:false})));assert.equal(button().disabled,true);
@@ -28,16 +28,19 @@ assert.equal(button().disabled,false);before=messages.length;button().click();
 assert.equal(d.querySelector('#product-x64').checked,false);
 assert.equal(d.querySelector('#product-settings64').checked,true);
 assert.deepEqual(messages.slice(before),['component:settings64:1']);
-// OG recommendation carries Resources, including an already healthy graphics MSI.
+// OG and Resources are never recommendations, even when fresh, outdated or explicitly marked recommended.
 for(const locale of ['ru','en'])for(const installed of [false,true]){
  const og={...rows[4],installed,installedPayloadVersion:'3.0.1.1',targetPayloadVersion:'3.0.2.3749'};
  const graphics={id:'openglassResources',title:'Resources',installed,checked:false,operation:'repair',
   targetVersion:'2.0.0.115',installedPackageVersion:'2.0.0.115',applySupported:false,pairedApplySupported:true};
- send([og,graphics],{locale});before=messages.length;button().click();
- assert.deepEqual(messages.slice(before),['component:openglass:1','component:openglassResources:1']);
- assert.ok(d.querySelector('#product-openglassResources').checked);
- send([og,{...graphics,hidden:true}],{locale});before=messages.length;button().click();
- assert.deepEqual(messages.slice(before),['component:openglass:1']);
+ send([{...og,recommended:true},{...graphics,recommended:true}],{locale});before=messages.length;button().click();
+ assert.deepEqual(messages.slice(before),[]);
+ assert.equal(d.querySelector('#product-openglass').checked,false);
+ assert.equal(d.querySelector('#product-openglassResources').checked,false);
+ // Manual OG selection remains available; recommendation exclusion is not a ban.
+ d.querySelector('#components-grid [data-product="openglass"] .comp-decision').click();
+ assert.equal(messages.at(-1),'component:openglass:1');
+
 }
 // An installed retained SUT is not a seventh planned action after Accept all.
 for(const locale of ['ru','en']){
@@ -45,7 +48,7 @@ for(const locale of ['ru','en']){
   .map(r=>r.id==='secureUxTheme'?{...r,installed:true,applySupported:false,operation:'repair'}:{...r,checked:false});
  send(seven,{locale});button().click();
  const actual=d.querySelectorAll('#components-plan-items li[data-product]').length;
- assert.equal(actual,6);assert.equal(d.querySelector('#components-count').textContent,locale==='ru'?'Изменений в плане: 6':'Planned changes: 6');
+ assert.equal(actual,4);assert.equal(d.querySelector('#components-count').textContent,locale==='ru'?'Изменений в плане: 4':'Planned changes: 4');
  assert.equal(d.querySelector('#product-secureUxTheme').checked,false);
 }
 // One common cleanup page: independent native IPC and optional product rows.

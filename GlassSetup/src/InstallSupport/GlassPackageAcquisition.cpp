@@ -262,7 +262,9 @@ bool Describe(GlassPackageCatalog::Product product,const GlassPackageCatalog::Ca
     try {
         std::vector<Candidate> candidates;std::vector<std::wstring> sources,labels;
         std::wstring diagnostics,error;
-        if(!Discover(product,catalog,cancel,candidates,sources,diagnostics,error,&labels))return false;
+        if(!Discover(product,catalog,cancel,candidates,sources,diagnostics,error,&labels)) {
+            InstallLog::LineFormat(L"MSI offer discovery failed: product=%u error=%s details=%s",static_cast<unsigned>(product),error.c_str(),diagnostics.c_str());return false;
+        }
         std::optional<std::size_t> attached;
         for(std::size_t i=0;i<candidates.size();++i) {
             const auto& c=candidates[i];
@@ -283,10 +285,17 @@ bool Describe(GlassPackageCatalog::Product product,const GlassPackageCatalog::Ca
             if(!newer)request.target=installed;
         }
         const auto choice=Select(request,candidates);
-        if(!choice.index||!choice.target)return false;
+        if(!choice.index||!choice.target) {
+            InstallLog::LineFormat(L"MSI offer unavailable: product=%u candidates=%u selectionFailure=%u releaseEntry=%d downloadable=%d details=%s",
+                static_cast<unsigned>(product),static_cast<unsigned>(candidates.size()),static_cast<unsigned>(choice.failure),
+                catalog.products[static_cast<std::size_t>(product)]?1:0,
+                catalog.products[static_cast<std::size_t>(product)]&&catalog.products[static_cast<std::size_t>(product)]->downloadable?1:0,diagnostics.c_str());
+            return false;
+        }
         version=labels[*choice.index];
         verifiedLocal=candidates[*choice.index].source!=Source::Release;
         if(localPath&&verifiedLocal)*localPath=sources[*choice.index];
+        InstallLog::LineFormat(L"MSI offer selected: product=%u version=%s verifiedLocal=%d source=%u",static_cast<unsigned>(product),version.c_str(),verifiedLocal?1:0,static_cast<unsigned>(candidates[*choice.index].source));
         return true;
     }catch(...){version.clear();verifiedLocal=false;return false;}
 }

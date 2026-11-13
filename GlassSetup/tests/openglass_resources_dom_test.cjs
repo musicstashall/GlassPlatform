@@ -49,11 +49,11 @@ for(const locale of ['ru','en']){
  // x86 capability hides both authoritative card and catalogue alias.
  send(rows.map(row=>({...row,hidden:row.id==='openglassResources'})),locale);
  assert.equal(input(),null);assert.equal(available(),null);
- // Once the host advertises the combined lane, recommendations include both.
+ // Even with a combined lane, OG and Resources are explicit choices, not recommendations.
  send(ready.map(row=>row.id==='openglass'?{...row,operation:'update',updateAvailable:true,targetVersion:'2.0.0',targetPayloadVersion:'2.0.0',installedPayloadVersion:'1.0.0'}:row),locale);
  const before=messages.length;d.getElementById('components-select-all').click();
- assert.ok(messages.slice(before).includes('component:openglass:1'));
- assert.ok(messages.slice(before).includes('component:openglassResources:1'));
+ assert.ok(!messages.slice(before).includes('component:openglass:1'));
+ assert.ok(!messages.slice(before).includes('component:openglassResources:1'));
 }
 assert.deepEqual(errors,[]);dom.window.close();
-console.log('PASS: production RU/EN Resources card, icon, prerequisite refusal, apply/remove/undo IPC, progress, x86 hiding and compatible recommendations');
+console.log('PASS: production RU/EN Resources card, icon, prerequisite refusal, apply/remove/undo IPC, progress, x86 hiding and manual-only recommendation policy');

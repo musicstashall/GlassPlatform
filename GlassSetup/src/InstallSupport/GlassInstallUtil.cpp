@@ -360,6 +360,14 @@ bool IsOs64Bit() noexcept {
 #endif
 }
 
+DWORD WindowsBuildNumber() noexcept {
+    using Query=LONG (WINAPI*)(PRTL_OSVERSIONINFOW);
+    const auto module=GetModuleHandleW(L"ntdll.dll");
+    const auto query=module?reinterpret_cast<Query>(GetProcAddress(module,"RtlGetVersion")):nullptr;
+    RTL_OSVERSIONINFOW version{};version.dwOSVersionInfoSize=sizeof(version);
+    return query&&query(&version)==0&&version.dwMajorVersion==10?version.dwBuildNumber:0;
+}
+
 bool IsWindows11OrGreater() noexcept {
     // RtlGetVersion is not subject to the manifest-based GetVersionEx lie.
     using RtlGetVersionFn = LONG (WINAPI*)(PRTL_OSVERSIONINFOW);
