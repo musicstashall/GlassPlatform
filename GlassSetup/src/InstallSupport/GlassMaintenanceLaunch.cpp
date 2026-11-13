@@ -233,8 +233,14 @@ bool ControllerTrusted(const std::wstring& path){
     GUID policy=WINTRUST_ACTION_GENERIC_VERIFY_V2;
     const LONG status=WinVerifyTrust(nullptr,&policy,&trust);
     trust.dwStateAction=WTD_STATEACTION_CLOSE;WinVerifyTrust(nullptr,&policy,&trust);
-    if(status!=ERROR_SUCCESS)GlassInstallLog::LineFormat(L"Controller Authenticode refused: status=0x%08lX path=%s",static_cast<unsigned long>(status),path.c_str());
-    return status==ERROR_SUCCESS;
+    // Match the first-party MSI policy: the release signer is currently
+    // self-signed. Exact signer equality with the running Setup was required
+    // above; only an untrusted ROOT is tolerated, never bad digest/no signature
+    // or other chain errors. Do not modify any Windows certificate store.
+    const bool pinnedUntrustedRoot=status==static_cast<LONG>(CERT_E_UNTRUSTEDROOT);
+    if(pinnedUntrustedRoot)GlassInstallLog::LineFormat(L"Controller Authenticode: matching Setup signer accepted with untrusted root (0x800B0109): %s",path.c_str());
+    else if(status!=ERROR_SUCCESS)GlassInstallLog::LineFormat(L"Controller Authenticode refused: status=0x%08lX path=%s",static_cast<unsigned long>(status),path.c_str());
+    return status==ERROR_SUCCESS||pinnedUntrustedRoot;
 }
 bool ControllerSupportsStartupAck(const std::wstring& path) {
     HMODULE module=LoadLibraryExW(path.c_str(),nullptr,LOAD_LIBRARY_AS_DATAFILE|LOAD_LIBRARY_AS_IMAGE_RESOURCE);

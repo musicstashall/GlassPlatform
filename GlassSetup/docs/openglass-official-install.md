@@ -1408,3 +1408,22 @@ before managed mutation and repeats immediately before stopping the service.
 
 Actual parser/orphan cleanup mocks and existing notifications/remover/mixed/service
 and source tests pass. No native Windows build or actual Inno/Settings acceptance.
+
+### Fresh-machine controller publication (log 38)
+
+Setup 2.0.0.272 fails before product changes on the current EXE in Downloads:
+WinVerifyTrust 0x800B0109 (CERT_E_UNTRUSTEDROOT). This is not a server/local
+version mismatch. First-time publication still verifies and stages the immutable
+maintenance controller even when no newer Setup is needed.
+
+ControllerTrusted now follows the existing first-party MSI self-signed policy:
+compatible binary and exact signer equality with the running Setup are required;
+accept Authenticode success or ONLY CERT_E_UNTRUSTEDROOT. All other status values,
+including bad digest, no signature, chaining, expiry and revocation, fail closed.
+No certificate-store modification, generic chain bypass or CN-only comparison.
+This supersedes older statements that the controller requires status 0 in every
+case. The running signed Setup is the signer trust anchor, not public CA trust.
+Acceptance of the root exception is explicitly logged. Generic UI now says the
+controller could not be prepared, rather than implying a newer version exists.
+Trust, handoff, child-validation and source regression tests pass; clean Windows
+publication/signature acceptance still requires a native reproduction.

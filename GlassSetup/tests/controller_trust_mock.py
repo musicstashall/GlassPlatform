@@ -9,6 +9,7 @@ h=r'''
 #include <string>
 #include <iostream>
 using DWORD=unsigned;using LONG=long;
+constexpr unsigned CERT_E_UNTRUSTEDROOT=0x800B0109u;
 constexpr int SCS_32BIT_BINARY=0,SCS_64BIT_BINARY=6,ERROR_SUCCESS=0,WTD_UI_NONE=1,WTD_CHOICE_FILE=2,WTD_STATEACTION_VERIFY=3,WTD_STATEACTION_CLOSE=4,WTD_CACHE_ONLY_URL_RETRIEVAL=8,WTD_REVOCATION_CHECK_NONE=16;
 struct GUID{};GUID WINTRUST_ACTION_GENERIC_VERIFY_V2;
 struct WINTRUST_FILE_INFO {size_t cbStruct=0;const wchar_t* pcwszFilePath=nullptr;};
@@ -37,11 +38,16 @@ int main(){
  protocolSize=3;assert(!ControllerSupportsStartupAck(L"bad.exe"));protocolSize=2;loadable=false;assert(!ControllerSupportsStartupAck(L"bad.exe"));
  assert(ControllerTrusted(L"candidate.exe")&&verified==1&&closed==1);
  status=-1;assert(!ControllerTrusted(L"candidate.exe")&&verified==2&&closed==2);
- status=0;matching=false;assert(!ControllerTrusted(L"candidate.exe")&&verified==2);matching=true;
+ status=static_cast<LONG>(CERT_E_UNTRUSTEDROOT);assert(ControllerTrusted(L"candidate.exe")&&verified==3&&closed==3);
+ matching=false;assert(!ControllerTrusted(L"candidate.exe")&&verified==3);matching=true;
+ for(const auto denied:{0x80096010u,0x800B0100u,0x800B010Au,0x800B0101u,0x800B010Cu}){
+  status=static_cast<LONG>(denied);assert(!ControllerTrusted(L"candidate.exe"));
+ }
+ status=0;matching=false;assert(!ControllerTrusted(L"candidate.exe"));matching=true;
  binaryOk=false;assert(!ControllerTrusted(L"candidate.exe"));binaryOk=true;
  kind=99;assert(!ControllerTrusted(L"candidate.exe"));kind=SCS_64BIT_BINARY;os64=false;assert(!ControllerTrusted(L"candidate.exe"));
  os64=true;assert(ControllerTrusted(L"candidate.exe"));assert(!ControllerTrusted(L""));
- std::cout<<"PASS: actual controller execution gate: compatible binary, expected publisher AND successful Authenticode, bounded offline chain verification and provider cleanup\n";
+ std::cout<<"PASS: actual controller execution gate: compatible binary, same Setup signer AND Authenticode success or only untrusted-root exception, bounded offline chain verification and provider cleanup\n";
 }
 '''.replace('// SOURCE',s[a:b])
 with tempfile.TemporaryDirectory() as d:

@@ -3186,11 +3186,11 @@ private:
             DestroyWindow(window);return true;
         }
         if(result==ControllerTransition::Failed) {
-            InstallLog::LineFormat(L"Controller update failed; current compatible Setup retained: %s",error.c_str());
+            InstallLog::LineFormat(L"Controller publication/transition failed; no product changes: %s",error.c_str());
             const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
             ShowInstallError(std::wstring(ru?
-                L"Не удалось обновить оболочку обслуживания. Продукты не изменены.\n":
-                L"The maintenance controller could not be updated. Products have not been changed.\n")+error);
+                L"Не удалось подготовить оболочку обслуживания. Продукты не изменены.\n":
+                L"The maintenance controller could not be prepared. Products have not been changed.\n")+error);
             return true;
         }
         return false;
