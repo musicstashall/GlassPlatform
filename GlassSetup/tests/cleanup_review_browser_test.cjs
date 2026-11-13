@@ -28,9 +28,14 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
    const backup=page.locator('#cleanup-backup'),backupBox=await backup.boundingBox();
    assert.ok(backupBox&&backupBox.x>=550&&backupBox.x+backupBox.width<=953&&backupBox.y+backupBox.height<=500,JSON.stringify(backupBox));
    assert.match(await backup.innerText(),/GlassSettings/);
-   assert.match(await backup.innerText(),locale==='ru'?/не создаёт.*автоматически/:/does not automatically/);
+   assert.equal(await backup.locator('h2 svg').count(),1);
+   const paragraphs=await backup.locator('p').evaluateAll(nodes=>nodes.map(e=>({font:getComputedStyle(e).fontSize,line:getComputedStyle(e).lineHeight,bullet:getComputedStyle(e,':before').content})));
+   assert.equal(paragraphs[0].font,paragraphs[1].font);assert.equal(paragraphs[0].line,paragraphs[1].line);
+   assert.ok(paragraphs.every(p=>p.bullet.includes('•')));
+   assert.match(await backup.innerText(),locale==='ru'?/страницу «Системы»/:/System page/);
    for(const card of await page.locator('.cleanup-option:not([hidden])').all()){
-    const rect=await card.boundingBox();assert.ok(rect.width<=480&&rect.x+rect.width<backupBox.x);
+    const rect=await card.boundingBox();assert.ok(rect.width<=480&&rect.x+rect.width<backupBox.x&&rect.height<78);
+    assert.ok(!(await card.evaluate(e=>getComputedStyle(e).backgroundColor)).includes('rgba'));
    }
    const choices=await page.locator('.cleanup-option:not([hidden]) small').allTextContents();
    assert.equal(choices.length,Number(platform)+Number(og));
@@ -45,6 +50,7 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
    if(headingPosition)assert.deepEqual({x:title.x,y:title.y},headingPosition,'heading must not move with product count or locale');
    headingPosition={x:title.x,y:title.y};
    assert.ok(bounds.y>=76&&bounds.y<=80&&end.y+end.height<510);
+   assert.ok(end.y>440,'preservation hints sit at the bottom, not beneath the last choice');
    for(const [eligible,id,key] of [[platform,'full','platform'],[og,'og','og']]){
     const label=page.locator('#'+id+'-cleanup-option');assert.equal(await label.isVisible(),eligible);
     if(!eligible)continue;

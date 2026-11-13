@@ -1291,3 +1291,12 @@ launch Settings or imply that a backup already exists. Heading anchors, offline
 maintenance background and independent consent handling are unchanged. Chromium
 checks both column bounds/non-overlap and guidance visibility/copy in RU/EN for
 single- and two-product plans; heading checks wait for entrance animation.
+
+Cleanup visual refinement: left choice cards use compact padding and fully
+opaque surfaces in idle/hover/checked states. Preservation hints use 11px text
+and sit at the bottom of the left content column regardless of choice count.
+The acrylic guidance heading includes the same warning-triangle motif used in
+maintenance. Both user-specified guidance paragraphs are equal-size bullet
+points, including the GlassSettings System-page backup instruction. Chromium
+checks opacity, compact height, bottom anchoring, icon, equal typography and
+bullets in RU/EN, as well as existing bounds/click/heading regressions.
