@@ -859,3 +859,11 @@ assert 'Page::RuntimeRequired' in pending_ui and 'Page::Error' in pending_ui
 render_content = setup_main.split('void RenderContent(HDC dc) {',1)[1].split('void RenderFooterText',1)[0]
 assert render_content.index('if (WaitingForWebUi())') < render_content.index('DrawBanner')
 assert 'SetPage(page_); // Restore controls only after a confirmed WebView failure.' in setup_main
+
+# Russian terminology: cover embedded resources and source-defined UI strings.
+for folder in (repo / "GlassSetup" / "res", repo / "GlassSetup" / "src", repo / "GlassSetup" / "GlassUnins"):
+    for text_file in folder.rglob("*"):
+        if text_file.suffix.lower() not in (".rc", ".txt", ".html", ".cpp", ".h"):
+            continue
+        text = text_file.read_text(encoding="utf-8-sig")
+        assert ("удаля" + "тор") not in text.lower(), str(text_file)

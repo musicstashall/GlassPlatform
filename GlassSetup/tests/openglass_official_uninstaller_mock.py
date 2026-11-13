@@ -28,7 +28,7 @@ namespace GlassMaintenanceCache{bool TrustedDirectory(const std::wstring&){retur
 namespace GlassReleaseClient{std::wstring Wide(const std::string& s){return {s.begin(),s.end()};}}
 struct File{HANDLE h=0;~File(){if(h)--livePins;}};
 void Pin(File& f,const std::wstring& p){Require(pinOk,"pin failed");++pins;++livePins;f.h=1;assert(p==L"D:\\Official OG\\unins000.exe"||p==L"D:\\Official OG\\unins000.dat");}
-unsigned VerifyPublisher(const std::wstring&,HANDLE){Require(signedOk,"signature failed");return 1;}
+unsigned VerifyPublisher(const std::wstring&,HANDLE,bool allowUnsigned){assert(allowUnsigned);Require(signedOk,"signature failed");return 1;}
 bool CreateProcessW(const wchar_t* exe,wchar_t* cmd,void*,void*,bool inherit,unsigned flags,void*,const wchar_t* work,STARTUPINFOW* startup,PROCESS_INFORMATION* process){
  ++creates;assert(livePins==0&&pins==2);app=exe;command=cmd;cwd=work;
  assert(!inherit&&flags==CREATE_NO_WINDOW&&startup->dwFlags==STARTF_USESHOWWINDOW&&startup->wShowWindow==SW_HIDE);

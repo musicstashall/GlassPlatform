@@ -494,7 +494,7 @@ bool InstallEngine::PrepareOfficialOpenGlass(bool removing) noexcept {
                 L"Official OpenGlass registration is missing. No removal was performed.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
         }
         if(removing&&!GlassOpenGlassPackage::ValidateUninstaller(before,error)) {
-            SetFailure((ru?L"Штатный удалятор OpenGlass не прошёл проверку доверия. Продукты не изменены. ":
+            SetFailure((ru?L"Штатный деинсталлятор OpenGlass не прошёл проверку доверия. Продукты не изменены. ":
                 L"The official OpenGlass uninstaller failed trust verification. Products were not changed. ")+error,ERROR_INSTALL_FAILURE);
             return false;
         }

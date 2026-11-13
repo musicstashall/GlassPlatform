@@ -36,7 +36,39 @@ inline std::wstring Attribute(PCCERT_CONTEXT cert,const char* oid) {
     std::wstring result(n,L'\0');CertGetNameStringW(cert,CERT_NAME_ATTR_TYPE,0,const_cast<char*>(oid),result.data(),n);
     result.resize(n-1);return result;
 }
-inline std::array<unsigned char,32> VerifyPublisher(const std::wstring& path,HANDLE handle) {
+// Generated Inno uninstallers need not inherit the signed setup's signature.
+// An unsigned fallback must never accept a damaged embedded certificate table.
+inline bool HasNoEmbeddedSignature(HANDLE file) noexcept {
+    const auto read=[file](LONGLONG offset,void* out,DWORD bytes) {
+        LARGE_INTEGER position{};position.QuadPart=offset;DWORD got=0;
+        return SetFilePointerEx(file,position,nullptr,FILE_BEGIN)&&
+            ReadFile(file,out,bytes,&got,nullptr)&&got==bytes;
+    };
+    IMAGE_DOS_HEADER dos{};
+    if(!read(0,&dos,sizeof(dos))||dos.e_magic!=IMAGE_DOS_SIGNATURE||
+       dos.e_lfanew<static_cast<LONG>(sizeof(dos))||dos.e_lfanew>1024*1024)return false;
+    DWORD signature=0;IMAGE_FILE_HEADER header{};
+    const LONGLONG nt=dos.e_lfanew;
+    if(!read(nt,&signature,sizeof(signature))||signature!=IMAGE_NT_SIGNATURE||
+       !read(nt+sizeof(signature),&header,sizeof(header)))return false;
+    const LONGLONG optional=nt+sizeof(signature)+sizeof(header);
+    WORD magic=0;if(!read(optional,&magic,sizeof(magic)))return false;
+    IMAGE_DATA_DIRECTORY certificate{};
+    if(magic==IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        IMAGE_OPTIONAL_HEADER32 value{};
+        if(header.SizeOfOptionalHeader<sizeof(value)||!read(optional,&value,sizeof(value))||
+            value.NumberOfRvaAndSizes<=IMAGE_DIRECTORY_ENTRY_SECURITY)return false;
+        certificate=value.DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY];
+    }else if(magic==IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        IMAGE_OPTIONAL_HEADER64 value{};
+        if(header.SizeOfOptionalHeader<sizeof(value)||!read(optional,&value,sizeof(value))||
+            value.NumberOfRvaAndSizes<=IMAGE_DIRECTORY_ENTRY_SECURITY)return false;
+        certificate=value.DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY];
+    }else return false;
+    return certificate.VirtualAddress==0&&certificate.Size==0;
+}
+
+inline std::array<unsigned char,32> VerifyPublisher(const std::wstring& path,HANDLE handle,bool allowProtectedUnsignedUninstaller=false) {
     WINTRUST_FILE_INFO file{};file.cbStruct=sizeof(file);file.pcwszFilePath=path.c_str();file.hFile=handle;
     WINTRUST_DATA trust{};trust.cbStruct=sizeof(trust);trust.dwUIChoice=WTD_UI_NONE;
     trust.fdwRevocationChecks=WTD_REVOKE_NONE;trust.dwUnionChoice=WTD_CHOICE_FILE;trust.pFile=&file;
@@ -44,6 +76,8 @@ inline std::array<unsigned char,32> VerifyPublisher(const std::wstring& path,HAN
     GUID action=WINTRUST_ACTION_GENERIC_VERIFY_V2;
     const auto status=WinVerifyTrust(nullptr,&action,&trust);
     struct Close {WINTRUST_DATA& t;GUID& g;~Close(){t.dwStateAction=WTD_STATEACTION_CLOSE;WinVerifyTrust(nullptr,&g,&t);}} close{trust,action};
+    if(static_cast<unsigned long>(status)==0x800B0100UL&&allowProtectedUnsignedUninstaller&&HasNoEmbeddedSignature(handle))
+        return {}; // No publisher digest; only the protected installed-uninstaller lane may opt in.
     if(static_cast<unsigned long>(status)==0x800B0100UL)throw std::runtime_error("OpenGlass executable has no verifiable Authenticode signature (TRUST_E_NOSIGNATURE, 0x800B0100).");
     if(status!=ERROR_SUCCESS)throw std::runtime_error("OpenGlass Authenticode is not Valid; WinVerifyTrust status="+
         std::to_string(static_cast<unsigned long>(status)));

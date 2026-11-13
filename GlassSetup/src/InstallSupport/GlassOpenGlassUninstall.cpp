@@ -18,7 +18,10 @@ bool ValidateUninstaller(const GlassOpenGlassInstall::Record& record,std::wstrin
             "Untrusted official OpenGlass uninstaller/data");
         {
             File executable,data;Pin(executable,record.uninstaller);Pin(data,record.directory+L"\\unins000.dat");
-            (void)VerifyPublisher(record.uninstaller,executable.h);
+            // Query/Same, trusted directory/path ACLs and pinned regular EXE/DAT
+            // above are the trust boundary for a generated unsigned uninstaller.
+            // Signed files still require the exact OG publisher and valid trust.
+            (void)VerifyPublisher(record.uninstaller,executable.h,true);
             // Inno copies the uninstaller and deletes its original EXE/data.
             // Release pins only after verification; the directory must remain
             // protected from unprivileged replacement. Never unblock originals.

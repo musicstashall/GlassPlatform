@@ -234,7 +234,7 @@ __declspec(dllexport) int WINAPI GlassSettings_RequestPlatformStop(int arch, int
 | Координатор | `Shared::GlassStop::Request`: сигнал → (при необходимости) остановка задачи → снимок остатков; единый `Result` вместо трёх разных ожиданий | `GlassShared/include/GlassStop.h`, `GlassShared/src/GlassStop.cpp` |
 | Сброс залипшего `StopEvent` | при старте хоста сигнальное событие сбрасывается | `GlassCompat/src/EntryRundll.cpp` |
 | Мягкие инициаторы | GlassSettings (кнопка), GlassShellExt (меню), CrashGuard, HostShellWatchdog, `/stop` вызывают координатор со своим `Reason` | `GlassPlatformService.cs`, `DesktopShellActions.cpp`, `CrashGuard.cpp`, `HostShellWatchdog.cpp`, `EntryRundll.cpp` |
-| Установщик и удалятор | `StopGlassPlatformImpl` → `GlassStop::Request(Installer/Uninstaller, gracefulMs=15000, allowTaskStop)`; жёсткая остановка задачи осталась резервом | `GlassInstallHost.cpp`, `GlassInstallRemoval.cpp` |
+| Установщик и деинсталлятор | `StopGlassPlatformImpl` → `GlassStop::Request(Installer/Uninstaller, gracefulMs=15000, allowTaskStop)`; жёсткая остановка задачи осталась резервом | `GlassInstallHost.cpp`, `GlassInstallRemoval.cpp` |
 | Принудительная выгрузка | `/forceUnload` из установщика по умолчанию не вызывается; вместо него страница остатков и штатное закрытие приложения | `GlassInstallUnlock.cpp` |
 | Паритет «хост завершён» | `Reason::HostDead`, страховочный `StartMinimalUnloadWatcher(1)` при неудаче GUI-потока | `GlassCompat.cpp`, `EntryRundll.cpp` |
 | «Пинок» остаткам (W2) | `GlassSettings_UnlockerW /wakeResiduals [86]`: `WM_NULL` окнам и потокам, без `FreeLibrary` | `GlassSetup/src/InstallSupport/GlassInstallUnlock.cpp` |
@@ -253,7 +253,7 @@ __declspec(dllexport) int WINAPI GlassSettings_RequestPlatformStop(int arch, int
 |---|---|---|
 | U1 | Все инициаторы вызывают `GlassStop::Request`; одно место с `SetEvent(StopEvent)` | выполнено (R11); исключение — LogViewer, только сигнал |
 | U2 | Один формат результата остановки: `Result` из координатора | выполнено (R11) |
-| U3 | Установщик и удалятор не делают `FreeLibrary` в чужих процессах без `ack=1` | выполнено (R11) |
+| U3 | Установщик и деинсталлятор не делают `FreeLibrary` в чужих процессах без `ack=1` | выполнено (R11) |
 | U4 | Меню, GS, установщик и удаление дают одинаковый итог | выполнено: прогоны 12–19 |
 | U5 | `StopEvent` не «протекает» между циклами старт/стоп | выполнено (R11) |
 | U6 | Второй одновременный стоп не запускается | выполнено (R11) |
@@ -315,7 +315,7 @@ liveness-ожидание.
 | R12h-3 | `GlassInstallHost.cpp` | `gracefulMs` 5000 → 15000: у хоста есть время на штатную выгрузку, жёсткий `IRegisteredTask::Stop` остаётся резервом |
 | R12h-4 | `GlassSetup/src/InstallEngine.cpp` | установка с нуля пропускает этап сканирования модулей в процессах: на машине нет ни платформы, ни задач, которые могли бы держать `Glass*.dll` |
 
-R12h-2 действует и на удалятор: `StopAllForUninstall` идёт тем же `StopGlassPlatformImpl`.
+R12h-2 действует и на деинсталлятор: `StopAllForUninstall` идёт тем же `StopGlassPlatformImpl`.
 
 ### 7.5. Повторный отказ гейта (R12i)
 

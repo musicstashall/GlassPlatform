@@ -54,7 +54,7 @@ inline bool PrepareRemoval(const std::wstring& directory,std::wstring& error,DWO
         code=GetLastError();
         if(code==ERROR_SUCCESS)code=ERROR_INSTALL_FAILURE;
         // Keep the precise stop error, including timeout/access denied/1072.
-        error=(ru?L"OpenGlass: остановка службы/задач не подтверждена; удалятор не запущен. Код: ":
+        error=(ru?L"OpenGlass: остановка службы/задач не подтверждена; деинсталлятор не запущен. Код: ":
             L"OpenGlass: service/task stop was not confirmed; uninstaller was not started. Code: ")+std::to_wstring(code);
         if(code==ERROR_SERVICE_MARKED_FOR_DELETE) {
             GlassInstallLog::Line(L"OpenGlass: stop failed with 1072; Windows service deletion pending");
