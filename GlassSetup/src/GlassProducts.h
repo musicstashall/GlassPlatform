@@ -94,10 +94,9 @@ constexpr bool MixedOpenGlassRemoval(const Selection& s,bool forceClean,bool os6
         !s.secureUxTheme&&!forceClean;
 }
 
-// Graphics can follow an existing OG or its explicit official Apply in this plan.
+// Graphics can follow installed OG or an explicit OG apply, including SUT plans.
 constexpr bool ResourcesApplyReady(const Selection& s,bool os64,bool upstreamReady) noexcept {
-    return os64&&(upstreamReady||s.openGlass)&&!s.Removes(3)&&
-        (!s.openGlass||(!s.removeMask&&!s.cleanupUserData));
+    return os64&&(upstreamReady||s.openGlass)&&!s.Removes(3);
 }
 
 constexpr bool ResourcesPlanReady(const Selection& s,bool os64,bool upstreamReady) noexcept {

@@ -171,6 +171,18 @@ public static class PlatformModuleVersions
 
     public static bool IsPlaceholderVersion(string value) => IsPlaceholder(value);
 
+    internal static bool TryReadProductVersion(string path, out string version)
+    {
+        version = ReadProductVersion(path);
+        return !IsPlaceholder(version);
+    }
+
+    internal static bool TryReadFileVersion(string path, out string version)
+    {
+        version = ReadFileVersion(path);
+        return !IsPlaceholder(version);
+    }
+
     private static string ReadFileVersion(string path)
     {
         if (!File.Exists(path))

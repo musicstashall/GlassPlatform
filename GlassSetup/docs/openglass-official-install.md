@@ -29,7 +29,9 @@ C++ mock выполняет реальную логику PE/Authenticode: unsig
 Актуальная политика от 2026-11-04. Отменяет запрет исполнения upstream EXE,
 извлечение payload и ограничение управления только bundled-каталогом Glass.
 
-## Требуемый маршрут Setup (ещё НЕ подключён)
+## Маршрут официального EXE
+
+Маршрут подключён последующими разделами этого файла. Формулировки «ещё не подключён» и «ещё не сделано» в ранних записях журнала не являются backlog. Актуальный остаток — [installer-lightweight-plan.md](installer-lightweight-plan.md).
 
 1. На Next искать `OpenGlassSetup.Signed.exe` рядом с исходным GlassSetup.exe.
    Локальный источник приоритетен, не требует доступности release API. Не запускать
@@ -66,9 +68,7 @@ C++ mock выполняет реальную логику PE/Authenticode: unsig
    последующей ошибке. Не обещать восстановление прежней версии без проверенного
    прежнего upstream setup и реально реализованного recovery.
 
-**Сейчас engine/provider всё ещё используют прежний extraction/file route.**
-Этот документ не означает, что запуск EXE уже подключён. До завершения перехода
-не считать текущую ветку готовой к проверке установки OG по новой политике.
+Извлечение DLL из upstream EXE не используется. Установка идёт штатным silent-запуском официального EXE.
 
 ## Реализованная первая часть
 
@@ -89,13 +89,7 @@ C++ mock выполняет реальную логику PE/Authenticode: unsig
 - Проект виден в solution, но не добавлен в автоматическую Build.0: исходные
   графические файлы не хранятся в этом репозитории, пустой пакет недопустим.
 
-## Ещё не сделано
-
-- Официальные acquisition/install/uninstall/commit boundary в Setup и GlassUnins.
-- Общая native inventory Inno и пути во всех потребителях; policy очистки/retirement.
-- Resources как отдельный selectable продукт в release catalog, UI, planner,
-  maintenance cache, uninstall ordering и rollback. Один WiX-проект не закрывает N7.
-- WiX/MSVC/WinUI сборка и Windows/VM acceptance; Linux source contracts не заменяют её.
+Пункты прежнего списка «ещё не сделано» закрыты последующими разделами и из backlog удалены. Windows-приёмка остаётся в [controller-windows-acceptance.md](controller-windows-acceptance.md).
 
 ## Сборка первой части
 
@@ -107,15 +101,14 @@ C++ mock выполняет реальную логику PE/Authenticode: unsig
 - Setup/GlassUnins в этой части не менялись. Для новой upstream установки их
   пересборка сама по себе новый маршрут не включит.
 
-### Подготовлены API, ещё не подключённые к worker
+### API подготовки EXE
 
 `GlassOpenGlassPackage::PrepareInstaller[ForCurrentSystem]` реализует приоритет
 проверенного adjacent EXE и fallback к release, без извлечения payload.
 `RunInstaller` реализует прямой silent запуск/ожидание и возвращает raw exit code;
 с `/RESTARTEXITCODE=3010` вызывающая сторона обязана отдельно учитывать reboot.
 Обе функции проверяют защищённую staged-копию, а не запускают пользовательский
-файл прямо из «Загрузок». Вызовы этих API из engine ещё не включены: требуется
-одновременно исключить его собственные lifecycle/file операции над OG.
+файл прямо из «Загрузок». На момент этой записи вызовы из engine ещё не были включены. Последующие разделы описывают подключённый маршрут.
 Старый OpenGlass-x64 MSI-проект и его сборочные/публикационные ветки удалены.
 
 ### Read-only Inno inventory (подготовительный шаг)

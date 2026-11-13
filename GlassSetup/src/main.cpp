@@ -2058,6 +2058,21 @@ private:
             secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
         return GlassProductUiPolicy::Preview(selection_,installedSelection_,GlassInstallUtil::IsOs64Bit(),false,active);
     }
+    // Apply OpenGlass только двумя исполнимыми маршрутами: один продукт
+    // либо Glass/Resources/SecureUxTheme без удаления других продуктов и очистки.
+    [[nodiscard]] bool OpenGlassApplyPlanSupported() const noexcept {
+        const bool os64=GlassInstallUtil::IsOs64Bit();
+        if(!selection_.openGlass||selection_.Removes(3))return true;
+        return GlassProducts::StandaloneOpenGlassApply(selection_,false,os64)||
+            GlassProducts::MixedOpenGlassApply(selection_,false,os64);
+    }
+    std::wstring ComponentPlanBlockReason() const {
+        const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
+        if(!OpenGlassApplyPlanSupported())return ru?
+            L"Этот план OpenGlass не поддерживается: его нельзя совмещать с удалением других продуктов или очисткой. Resources можно выбрать вместе с установкой OpenGlass.":
+            L"This OpenGlass plan is not supported: it cannot be combined with removal of other products or cleanup. Resources can be selected together with an OpenGlass installation.";
+        return {};
+    }
     std::wstring ComponentWarnings() const {
         auto text=GlassProductUiPolicy::WarningText(SelectionPreview().warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit());
         if(selection_.openGlass&&!selection_.Removes(3)) {
@@ -2090,6 +2105,8 @@ private:
             if(!text.empty())text+=L"\n";
             text+=Text((selection_.openGlass||selection_.Removes(3)||resourcesPrerequisiteReady_)?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG);
         }
+        const auto block=ComponentPlanBlockReason();
+        if(!block.empty()){if(!text.empty())text+=L"\n";text+=block;}
         return text;
     }
     std::wstring ComponentsJson() const {
@@ -2136,12 +2153,14 @@ private:
             const bool resources=wcscmp(id,L"openglassResources")==0;
             const bool resourcesReady=GlassProducts::ResourcesApplyReady(selection_,os64,resourcesPrerequisiteReady_);
             GlassProducts::Selection pairedSelection{};pairedSelection.openGlass=true;
+            // Пара с OpenGlass не ждёт уже известную версию MSI: «Далее» всё равно
+            // проверяет пакет. Неизвестная версия установленного MSI — не понижение.
             const bool pairedApply=resources&&GlassProducts::ResourcesApplyReady(pairedSelection,os64,resourcesPrerequisiteReady_)&&
-                !targetVersion.empty()&&GlassOpenGlassRelease::CanPlanApply(inspect_.og.installed?inspect_.og.installedPayloadVersion:L"",inspect_.og.remotePayloadVersion);
-
+                GlassOpenGlassRelease::CanPlanApply(inspect_.og.installed?inspect_.og.installedPayloadVersion:L"",inspect_.og.remotePayloadVersion);
+            const bool packageApplyable=!targetVersion.empty()&&(!rep||!rep->installed||rep->installedPackageVersion.empty()||!VersionOlder(targetVersion,rep->installedPackageVersion));
             const bool applySupported=(!resources||resourcesReady)&&(openGlass?
                 GlassOpenGlassRelease::CanPlanApply(rep&&rep->installed?rep->installedPayloadVersion:L"",targetVersion):
-                (!targetVersion.empty()&&(!rep||!rep->installed||(!rep->installedPackageVersion.empty()&&!VersionOlder(targetVersion,rep->installedPackageVersion)))));
+                ((resources&&resourcesReady&&targetVersion.empty())||packageApplyable));
             const bool compatibilityRisk=openGlass&&checked&&!removing&&GlassOpenGlassRelease::Known26300Risk(windowsBuild,targetVersion);
             std::wstring warning=GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,os64);
             if(compatibilityRisk) {
@@ -2214,7 +2233,7 @@ private:
                 L",\"updateAvailable\":"+(hasUpdate?L"true":L"false")+
                 L",\"pairedApplySupported\":"+(pairedApply?L"true":L"false")+
                 L",\"applySupported\":"+(applySupported?L"true":L"false")+
-                L",\"applyHint\":"+JsStringLiteral(!applySupported&&!resources&&!openGlass?
+                L",\"applyHint\":"+JsStringLiteral(!applySupported&&!openGlass&&(!resources||resourcesReady)?
                     (targetVersion.empty()?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Нет подходящего источника MSI. Проверка завершена: проверьте version.json и журналы отклонения локальных пакетов; повторный запуск с доступным источником выполнит новую проверку.":L"No eligible MSI source. Inspection has finished: check version.json and local-package rejection logs; restart with an available source to check again."):
                     (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Источник не подходит для установленной версии: понижение версии или неизвестная версия установленного MSI.":L"The source is not eligible for the installed version: downgrade or unknown installed MSI version.")):resources&&!resourcesReady?
                     (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Выберите OpenGlass в этом плане или установите его заранее":L"Select OpenGlass in this plan or install it first"):L"")+
@@ -2629,6 +2648,7 @@ private:
     // «Установить» доступен, когда анализ завершён и есть выбранные продукты.
     [[nodiscard]] bool ComponentsReady() const noexcept {
         return (page_!=Page::Components && page_!=Page::Certificate) || ((!downloadContinuePending_||DownloadsReady()) && inspectReady_.load(std::memory_order_acquire) && HasSelectedComponent() &&
+            OpenGlassApplyPlanSupported() &&
             GlassProducts::ResourcesPlanReady(selection_,GlassInstallUtil::IsOs64Bit(),resourcesPrerequisiteReady_) &&
             !(selection_.removeMask && selection_.secureUxTheme));
     }
@@ -3672,7 +3692,7 @@ private:
                 selection_.settings32=message.back()==L'1';selection_.SyncSettings(os64);
             }
             else if(message==L"component:openglassResources:1"||message==L"component:openglassResources:0") {
-                selection_.openGlassResources=message.back()==L'1'&&os64&&!selection_.Removes(3)&&(resourcesPrerequisiteReady_||selection_.openGlass);
+                selection_.openGlassResources=message.back()==L'1'&&GlassProducts::ResourcesApplyReady(selection_,os64,resourcesPrerequisiteReady_);
             }
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
             else if(message==L"component:secureUxTheme:remove") {

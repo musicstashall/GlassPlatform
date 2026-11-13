@@ -1176,7 +1176,7 @@ function leaveComponentEdge(name){
 function componentDropValue(drag,lane){
  if(!['available','installed'].includes(lane)||lane===drag.source)return null;
  if(hostState.appMode==='unins')return lane==='available'?true:false;
- if(lane==='installed'){const item=(hostState.components||[]).find(item=>item.id===drag.id);return drag.input.dataset.intent==='remove'?false:item?.applySupported===false?null:true;}
+ if(lane==='installed'){const item=(hostState.components||[]).find(item=>item.id===drag.id);return drag.input.dataset.intent==='remove'?false:(item?.applySupported===false&&!resourcesPairedChoice(item))?null:true;}
  const item=(hostState.components||[]).find(item=>item.id===drag.id);
  // Mirror the preceding Apply: moving a selected update/reinstall back
  // cancels it. Only an unchanged installed product can stage explicit removal.
@@ -1312,7 +1312,7 @@ function componentCardFacts(item,input){
  const broken=!!(item.installed&&item.broken===true);
  const helperChanged=!!(item.installed&&item.nativeSourceDiffers===true);
  const interactive=!input.disabled&&!hostState.componentsLoading;
- const canApply=interactive&&item.applySupported!==false;
+ const canApply=interactive&&(item.applySupported!==false||resourcesPairedChoice(item));
  return {selected,remove,newer,broken,helperChanged,
   availableNeeded:interactive&&(hostState.appMode==='unins'?selected:remove||canApply&&!selected&&(!item.installed||newer||broken||helperChanged)),
   installedNeeded:hostState.appMode==='unins'?selected:selected||canApply&&(newer||broken||helperChanged)};
@@ -1505,7 +1505,7 @@ function paintComponentCard(card,item,input,shelf){
   action.classList.toggle('danger',!item.installed||hostState.appMode==='unins'&&!f.selected);
  }
  const definition=componentCardAction(item,input,shelf),label=document.createElement('span');label.className='comp-action-label';label.textContent=definition.label;action.prepend(label);
- if(definition.value===true&&item.applySupported===false)action.disabled=true;
+ if(definition.value===true&&item.applySupported===false&&!resourcesPairedChoice(item))action.disabled=true;
  action.title=definition.label;action.setAttribute('aria-label',definition.label);action.dataset.componentAction=definition.act;
  if(definition.act==='repair'||definition.act==='update'||definition.act==='undo'||definition.act==='unrepair')action.setAttribute('aria-pressed',String(f.selected));else action.removeAttribute('aria-pressed');
  action.onclick=()=>commitComponentChoice(input,definition.value);

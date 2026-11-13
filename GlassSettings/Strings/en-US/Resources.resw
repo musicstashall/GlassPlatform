@@ -657,6 +657,11 @@
   <data name="System_OpenGlassUpdateSpoilerFormat" xml:space="preserve"><value>New version {0} available</value></data>
   <data name="Home_OpenGlassUpdateNotice" xml:space="preserve"><value>A new OpenGlass version {0} is available. Installed: {1}.</value></data>
   <data name="Home_GlassUpdateNotice" xml:space="preserve"><value>A new Glass version {0} is available. Installed: {1}.</value></data>
+  <data name="Home_GlassUpdateSummary" xml:space="preserve"><value>Updates are available for the installed Glass products: {0}.</value></data>
+  <data name="Home_GlassUpdateLinkSummary" xml:space="preserve"><value>Updates: {0}</value></data>
+  <data name="Home_OpenGlassRepairNotice" xml:space="preserve"><value>The Windows build changed. OpenGlass needs to be reinstalled for the current DWM. Channel version: {0}.</value></data>
+  <data name="Home_OpenGlassRepairLink" xml:space="preserve"><value>Reinstall {0}</value></data>
+  <data name="Home_UpdateCheckOffline" xml:space="preserve"><value>Could not check for updates. That does not mean there are no updates.</value></data>
   <data name="Home_RowPopupWindows" xml:space="preserve"><value>Popup windows</value></data>
   <data name="Home_RowProcessList" xml:space="preserve"><value>Process list</value></data>
   <data name="Home_RowRootWindows" xml:space="preserve"><value>Root windows</value></data>
@@ -769,6 +774,10 @@
   <data name="System_NoticeReflectionLink" xml:space="preserve"><value>textures</value></data>
   <data name="System_OpenGlassUpdateTitle" xml:space="preserve"><value>A new OpenGlass version {0} is available. Installed: {1}.</value></data>
   <data name="System_GlassUpdateTitle" xml:space="preserve"><value>A new Glass version {0} is available. Installed: {1}.</value></data>
+  <data name="System_GlassUpdateSummary" xml:space="preserve"><value>Updates are available for the installed Glass products: {0}.</value></data>
+  <data name="System_GlassUpdateSpoilerSummary" xml:space="preserve"><value>Updates available: {0}</value></data>
+  <data name="System_OpenGlassRepairTitle" xml:space="preserve"><value>The Windows build changed. OpenGlass needs to be reinstalled for the current DWM. Channel version: {0}.</value></data>
+  <data name="System_OpenGlassRepairSpoiler" xml:space="preserve"><value>OpenGlass needs to be reinstalled ({0})</value></data>
   <data name="System_OpenGlassUpdateMessage" xml:space="preserve"><value>Consider updating OpenGlass to the latest legacy release.</value></data>
   <data name="System_OpenGlassUpdateAction" xml:space="preserve"><value>Open maintenance</value></data>
   <data name="Notice_OpenGlassBorderBody" xml:space="preserve"><value>Window borders are drawn by the Desktop Window Manager (DWM). When OpenGlass is active, it takes precedence over DWM and overrides border color. You cannot change border colors while OpenGlass is running. Stop OpenGlass if colored borders are important to you.</value></data>
