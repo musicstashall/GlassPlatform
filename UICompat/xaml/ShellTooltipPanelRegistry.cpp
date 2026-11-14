@@ -1012,7 +1012,7 @@ namespace UICompat
             const bool wantTintBorder =
                 settings.patchBorder && settings.borderArgb != 0;
 
-            const double trayH = Shared::TrayXamlPaint::QueryTaskbarHeightDip();
+            const double trayThickness = Shared::TrayXamlPaint::QueryTaskbarThicknessDip();
             const double popupH = QueryVisibleHeightDip(slot.tip);
             double appliedR = 0.0;
 
@@ -1026,7 +1026,7 @@ namespace UICompat
                 }
 
                 appliedR = Shared::TrayXamlPaint::XamlPopupCornerRadiusDip(
-                    settings.cornerType, trayH, popupH);
+                    settings.cornerType, trayThickness, popupH);
                 const wux::CornerRadius cr{ appliedR, appliedR, appliedR, appliedR };
 
                 if (Shared::RootBackdropPolicy::IsStartMenuHostProcess())
@@ -1100,12 +1100,12 @@ namespace UICompat
                 DebugLog(
                     DBG_IMPORTANT,
                     L"[UICompat][ShellTooltip] applied delayMs=%u paintXaml=%u effect=%u "
-                    L"corner=%u trayH=%.1f popupH=%.1f r=%.1f",
+                    L"corner=%u trayThickness=%.1f popupH=%.1f r=%.1f",
                     delayMs,
                     settings.paintPathXaml ? 1u : 0u,
                     settings.xamlEffectType,
                     settings.cornerType,
-                    trayH,
+                    trayThickness,
                     popupH,
                     appliedR);
             }
@@ -1294,12 +1294,12 @@ namespace UICompat
                                             s->appliedOk = false;
                                             return;
                                         }
-                                        const double trayH =
-                                            Shared::TrayXamlPaint::QueryTaskbarHeightDip();
+                                        const double trayThickness =
+                                            Shared::TrayXamlPaint::QueryTaskbarThicknessDip();
                                         const double popupH = QueryVisibleHeightDip(s->tip);
                                         const double r =
                                             Shared::TrayXamlPaint::XamlPopupCornerRadiusDip(
-                                                settingsCopy.cornerType, trayH, popupH);
+                                                settingsCopy.cornerType, trayThickness, popupH);
                                         const wux::CornerRadius cr{ r, r, r, r };
                                         const bool smeh =
                                             Shared::RootBackdropPolicy::IsStartMenuHostProcess();

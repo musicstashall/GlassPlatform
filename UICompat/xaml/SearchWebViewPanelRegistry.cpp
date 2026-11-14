@@ -132,10 +132,10 @@ namespace UICompat
             if (!wantCorners && !wantBorder && !settings.noBorder)
                 return {};
 
-            const double trayH = Shared::TrayXamlPaint::QueryTaskbarHeightDip();
+            const double trayThickness = Shared::TrayXamlPaint::QueryTaskbarThicknessDip();
             const double radius = wantCorners
                 ? Shared::TrayXamlPaint::XamlPopupCornerRadiusDip(
-                      settings.cornerType, trayH, 0.0)
+                      settings.cornerType, trayThickness, 0.0)
                 : 0.0;
             const std::wstring borderCol =
                 wantBorder ? CssColorFromArgb(settings.borderArgb) : L"";

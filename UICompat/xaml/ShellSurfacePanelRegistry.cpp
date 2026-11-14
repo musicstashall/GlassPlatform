@@ -34,24 +34,10 @@ namespace UICompat
             };
         }
 
-        [[nodiscard]] double QueryTaskbarHeightDip() noexcept
-        {
-            HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
-            if (!tray)
-                tray = FindWindowW(L"Shell_SecondaryTrayWnd", nullptr);
-            if (!tray)
-                return 48.0;
-            RECT rc{};
-            if (!GetClientRect(tray, &rc))
-                return 48.0;
-            const int h = rc.bottom - rc.top;
-            return h > 1 ? static_cast<double>(h) : 48.0;
-        }
-
         [[nodiscard]] double ShellSurfaceCornerRadiusDip(DWORD cornerType) noexcept
         {
             return Shared::TrayXamlPaint::XamlCornerRadiusDip(
-                cornerType, QueryTaskbarHeightDip());
+                cornerType, Shared::TrayXamlPaint::QueryTaskbarThicknessDip());
         }
 
         [[nodiscard]] bool ThicknessAnyPositive(const wux::Thickness& t) noexcept

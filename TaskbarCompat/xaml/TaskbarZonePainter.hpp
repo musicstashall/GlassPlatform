@@ -136,7 +136,7 @@ namespace TaskbarCompat::Zones
         winrt::Windows::UI::Xaml::Shapes::Rectangle const& backgroundStroke,
         FrameZoneState& state) noexcept;
 
-    // panelHeightDip — ActualHeight панели/RootGrid; MaxRound (5) → height/2;
-    // Increased (4) → системный CoreWindow NC (NcSystemCornerRadius).
-    [[nodiscard]] double CornerRadiusDip(DWORD cornerType, double panelHeightDip) noexcept;
+    // panelThicknessDip — поперечный размер панели/RootGrid; MaxRound (5)
+    // использует thickness/2. Increased (4) → системный CoreWindow NC.
+    [[nodiscard]] double CornerRadiusDip(DWORD cornerType, double panelThicknessDip) noexcept;
 }

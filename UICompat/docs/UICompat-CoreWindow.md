@@ -163,7 +163,7 @@ UICompat
 | Цели | ToolTip: Background / Border* / CornerRadius / Shadow=null; innerBorder (первый Border в шаблоне) → Transparent (анти-двойной blur). |
 | VTS3 | SMEH: CornerRadius через `IVisualTreeService3` (WinRT get → fail-fast); SearchHost — WinRT напрямую. |
 | Настройки | `Tray\BorderDrawMode` + `Tray\Xaml\Tooltip\*` (fallback на `Tray\Xaml\*`). AppContainer: snapshot `Local\GlassPlatform.TrayXamlPolicy.v4` (v3→v4: +20 байт tooltip slot, 88→108). |
-| Углы | `XamlPopupCornerRadiusDip` + высота трея; CornerRadius после `TipLayoutReady`. |
+| Углы | `XamlPopupCornerRadiusDip` + толщина панели; CornerRadius после `TipLayoutReady`. |
 | Tid | Add на том же UI-потоке, что Start/Search ShellSurface. |
 
 **Требует перезапуска GlassPlatform после сборки:** v4 mapping создаётся только при старте хоста; старый v3 mapping без tooltip slot отклоняется клиентом по несовпадению версии.
@@ -178,7 +178,7 @@ UICompat
 | Цели | Background / Border* / CornerRadius / Shadow=null; companion `Border#JumpListAcrylic` → Transparent. |
 | Tid | Add на чужом STA (относительно NC tid) — **без** adopt NC tid. |
 | Настройки | Общие `Tray\BorderDrawMode` + `Tray\Xaml\*` (без новых ключей). |
-| Углы | `XamlPopupCornerRadiusDip` + высота трея; CornerRadius после `SizeChanged`. |
+| Углы | `XamlPopupCornerRadiusDip` + толщина панели; CornerRadius после `SizeChanged`. |
 | IXDE | Process-wide VTC после подъёма с NC-sized CoreWindow (`ShouldDeferSehToastSizedIxde` не меняем). |
 
 ### Toast (всплывающее уведомление приложения, SEH)

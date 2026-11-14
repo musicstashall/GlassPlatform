@@ -1486,12 +1486,18 @@ namespace TaskbarCompat
                 info.rootPaddingCaptured = true;
             }
 
-            const double panelH = info.rootGrid.ActualHeight() > 1.0
-                ? info.rootGrid.ActualHeight()
-                : (info.background && info.background.ActualHeight() > 1.0
-                       ? info.background.ActualHeight()
-                       : 48.0);
-            const double r = Zones::CornerRadiusDip(m_settings.cornerType, panelH);
+            const double rootW = info.rootGrid.ActualWidth();
+            const double rootH = info.rootGrid.ActualHeight();
+            const bool vertical = rootW > 1.0 && rootH > rootW;
+            const double panelThickness = vertical
+                ? rootW
+                : (rootH > 1.0
+                       ? rootH
+                       : (info.background && info.background.ActualHeight() > 1.0
+                              ? info.background.ActualHeight()
+                              : 48.0));
+            const double r = Zones::CornerRadiusDip(
+                m_settings.cornerType, panelThickness);
             const auto brush = MakeActiveBackdropBrush(info);
             if (brush)
                 info.rootGrid.Background(brush);

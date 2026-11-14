@@ -1219,9 +1219,9 @@ namespace TaskbarCompat::Zones
         }
     }
 
-    double CornerRadiusDip(DWORD cornerType, double panelHeightDip) noexcept
+    double CornerRadiusDip(DWORD cornerType, double panelThicknessDip) noexcept
     {
-        return Shared::TrayXamlPaint::XamlCornerRadiusDip(cornerType, panelHeightDip);
+        return Shared::TrayXamlPaint::XamlCornerRadiusDip(cornerType, panelThicknessDip);
     }
 
     void Apply(
@@ -1557,12 +1557,22 @@ namespace TaskbarCompat::Zones
                 && (state.left.active || state.center.active || state.tray.active))
             {
                 // Геометрия та же — кисть/скругление всё равно обновляем (смена Effect/tint).
-                const double panelHSkip = rootFe.ActualHeight() > 1.0
-                    ? rootFe.ActualHeight()
-                    : (backgroundFill.ActualHeight() > 1.0 ? backgroundFill.ActualHeight() : 48.0);
-                const double radiusRefSkip = RectValid(centerBounds)
-                    ? (std::min)(panelHSkip, static_cast<double>(centerBounds.Height))
-                    : panelHSkip;
+                // MaxRound опирается на поперечную ось: Height у горизонтальной
+                // панели и Width у нативной вертикальной панели.
+                const double rootWSkip = rootFe.ActualWidth();
+                const double rootHSkip = rootFe.ActualHeight();
+                const bool verticalSkip = rootWSkip > 1.0 && rootHSkip > rootWSkip;
+                const double panelThicknessSkip = verticalSkip
+                    ? rootWSkip
+                    : (rootHSkip > 1.0
+                           ? rootHSkip
+                           : (backgroundFill.ActualHeight() > 1.0
+                                  ? backgroundFill.ActualHeight()
+                                  : 48.0));
+                const double segmentThicknessSkip = RectValid(centerBounds)
+                    ? static_cast<double>(verticalSkip ? centerBounds.Width : centerBounds.Height)
+                    : panelThicknessSkip;
+                const double radiusRefSkip = (std::min)(panelThicknessSkip, segmentThicknessSkip);
                 const double radiusSkip = CornerRadiusDip(settings.cornerType, radiusRefSkip);
                 const bool patchBorderSkip = settings.patchBorderStroke && settings.cornerType != 0;
                 const DWORD borderArgbSkip = settings.borderColorArgb;
@@ -1594,14 +1604,23 @@ namespace TaskbarCompat::Zones
 
             EnsureLegacyTrayRestored(trayGrid, state);
 
-            const double panelH = rootFe.ActualHeight() > 1.0
-                ? rootFe.ActualHeight()
-                : (backgroundFill.ActualHeight() > 1.0 ? backgroundFill.ActualHeight() : 48.0);
-            // MaxRound: R от высоты сегмента (не panelH), иначе при cH!=panelH центр радиуса «плывёт».
-            const double radiusRefH = RectValid(centerBounds)
-                ? (std::min)(panelH, static_cast<double>(centerBounds.Height))
-                : panelH;
-            const double radius = CornerRadiusDip(settings.cornerType, radiusRefH);
+            const double actualRootW = rootFe.ActualWidth();
+            const double actualRootH = rootFe.ActualHeight();
+            const bool vertical = actualRootW > 1.0 && actualRootH > actualRootW;
+            const double panelThickness = vertical
+                ? actualRootW
+                : (actualRootH > 1.0
+                       ? actualRootH
+                       : (backgroundFill.ActualHeight() > 1.0
+                              ? backgroundFill.ActualHeight()
+                              : 48.0));
+            // MaxRound: R от толщины конкретного сегмента. Для вертикальной
+            // панели это Width, для горизонтальной — Height.
+            const double segmentThickness = RectValid(centerBounds)
+                ? static_cast<double>(vertical ? centerBounds.Width : centerBounds.Height)
+                : panelThickness;
+            const double radiusRefThickness = (std::min)(panelThickness, segmentThickness);
+            const double radius = CornerRadiusDip(settings.cornerType, radiusRefThickness);
             const bool patchBorder = settings.patchBorderStroke && settings.cornerType != 0;
             const DWORD borderArgb = settings.borderColorArgb;
 
