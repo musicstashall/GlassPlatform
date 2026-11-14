@@ -2658,9 +2658,13 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         InstallLog::LineFormat(L"Autostart: platform running arch %d", static_cast<int>(arch));
     };
 
+    // First install starts OpenGlass. An update or reinstall starts it only when
+    // it was running at wizard open, because that is the instance Setup stopped.
+    // A product outside this plan is neither stopped nor started.
+    bool shouldStartOg=false;
     if (is64 && selection_.openGlass) {
         SetStatus(labels_.startOg, 9400);
-        const bool shouldStartOg = GlassProducts::ShouldStartOpenGlass(openGlassStartup_);
+        shouldStartOg = GlassProducts::ShouldStartOpenGlass(openGlassStartup_);
         InstallLog::LineFormat(L"Autostart: OpenGlass files-at-start=%d running-at-start=%d start=%d",
             openGlassStartup_.filesPresent ? 1 : 0, openGlassStartup_.wasRunning ? 1 : 0, shouldStartOg ? 1 : 0);
         const std::wstring warnOg = labels_.warnOpenGlassStart.empty() ? L"OpenGlass did not start." : labels_.warnOpenGlassStart;
@@ -2706,7 +2710,11 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
 
     const bool platformLaunch=selection_.platform64||selection_.platform32||
         (hostsStopped_&&((prior_.x64WasRunning&&!selection_.Removes(0))||(prior_.x86WasRunning&&!selection_.Removes(1))));
-    const bool ogReady=!platformLaunch||EnsureOpenGlassBeforePlatform();
+    // Wait for OpenGlass only when this plan is launching it. Otherwise a
+    // retained host must not be started as a side effect of the platform.
+    if(platformLaunch && !shouldStartOg)
+        InstallLog::Line(L"Autostart: OpenGlass left untouched; platform launch does not start it");
+    const bool ogReady=!platformLaunch||!shouldStartOg||EnsureOpenGlassBeforePlatform();
     if(ogReady) {
     if (is64 && selection_.platform64)
         startArch(GP::PlatformArch::X64, x64Dir_, prior_.x64TaskExisted, prior_.x64TaskEnabled, prior_.x64WasRunning,

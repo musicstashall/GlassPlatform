@@ -65,7 +65,7 @@ std::wstring HoldReport(){return {};}
 int ProgressUnits(){return 5000;}bool IsProgressReverse(){return cancelled;}bool IsMarquee(){return false;}
 std::wstring StatusLine(){return L"actual worker";}std::vector<FinishWarning> FinishWarnings(){return {};}
 };
-enum class Page {Welcome,Components,Certificate,Installing,Error,ConfirmCancel,Cancelling,Cancelled,Launching,Complete,ModulesBusy,ProcessesStuck};
+enum class Page {Welcome,License,Components,Certificate,Installing,Error,ConfirmCancel,Cancelling,Cancelled,Launching,Complete,ModulesBusy,ProcessesStuck};
 struct Wizard {
  std::mutex inspectMutex_;
  bool SecureUxThemeRemovalSupportedLocked(){return true;}

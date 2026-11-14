@@ -1219,9 +1219,9 @@ namespace TaskbarCompat::Zones
         }
     }
 
-    double CornerRadiusDip(DWORD cornerType, double panelHeightDip) noexcept
+    double CornerRadiusDip(DWORD cornerType, double panelThicknessDip) noexcept
     {
-        return Shared::TrayXamlPaint::XamlCornerRadiusDip(cornerType, panelHeightDip);
+        return Shared::TrayXamlPaint::XamlCornerRadiusDip(cornerType, panelThicknessDip);
     }
 
     void Apply(
@@ -1242,6 +1242,33 @@ namespace TaskbarCompat::Zones
             {
                 return;
             }
+
+            const double actualRootWidth = rootFe.ActualWidth();
+            const double actualRootHeight = rootFe.ActualHeight();
+            const bool vertical = actualRootWidth > 1.0
+                && actualRootHeight > actualRootWidth;
+            if (state.orientationKnown && state.vertical != vertical)
+            {
+                // Нельзя анимировать новые логические Y-границы от старых
+                // физических X-границ.
+                Restore(backgroundFill, backgroundStroke, state);
+            }
+            state.orientationKnown = true;
+            state.vertical = vertical;
+
+            const auto toLogicalRect = [vertical](wf::Rect r) noexcept -> wf::Rect {
+                return vertical
+                    ? wf::Rect{ r.Y, r.X, r.Height, r.Width }
+                    : r;
+            };
+            const auto toPhysicalRect = [vertical](wf::Rect r) noexcept -> wf::Rect {
+                return vertical
+                    ? wf::Rect{ r.Y, r.X, r.Height, r.Width }
+                    : r;
+            };
+            const auto boundsInLogicalRoot = [&](wux::FrameworkElement const& element) noexcept {
+                return toLogicalRect(BoundsInRoot(element, rootFe));
+            };
 
             const auto searchRoot = [&]() -> wux::FrameworkElement {
                 try
@@ -1331,13 +1358,18 @@ namespace TaskbarCompat::Zones
             wf::Rect searchBounds{};
             wf::Rect taskViewBounds{};
 
-            const float rootWEarly = static_cast<float>(rootFe.ActualWidth());
+            // Вся существующая zone-логика работает по primary=X/cross=Y.
+            // Для вертикальной панели транспонируем координаты: logical X —
+            // экранная Y, logical Height — физическая ширина панели.
+            const float rootWEarly = static_cast<float>(
+                vertical ? actualRootHeight : actualRootWidth);
             const float rootHEarly = static_cast<float>(
-                rootFe.ActualHeight() > 1.0 ? rootFe.ActualHeight() : 48.0);
+                vertical ? actualRootWidth
+                         : (actualRootHeight > 1.0 ? actualRootHeight : 48.0));
 
             if (trayDeep)
             {
-                trayBounds = BoundsInRoot(trayDeep, rootFe);
+                trayBounds = boundsInLogicalRoot(trayDeep);
                 if (RectValid(trayBounds) && !RectOnPanel(trayBounds, rootWEarly, rootHEarly))
                 {
                     // Tray почти на всю ширину — не режем по 0.92; только Y/X-slop.
@@ -1352,7 +1384,7 @@ namespace TaskbarCompat::Zones
             const DWORD taskbarDa = ReadExplorerAdvancedDword(L"TaskbarDa", 1);
             if (taskbarDa != 0 && widgetsBtn)
             {
-                leftBounds = BoundsInRoot(widgetsBtn, rootFe);
+                leftBounds = boundsInLogicalRoot(widgetsBtn);
                 if (RectValid(leftBounds) && !RectOnPanel(leftBounds, rootWEarly, rootHEarly))
                     leftBounds = {};
             }
@@ -1360,7 +1392,7 @@ namespace TaskbarCompat::Zones
             // Пуск/ТV — узкие; Поиск может быть шире 120dip (иначе правый край «съезжает» влево).
             auto chromeBounds =
                 [&](wux::FrameworkElement const& fe, float maxW) noexcept -> wf::Rect {
-                wf::Rect r = BoundsInRoot(fe, rootFe);
+                wf::Rect r = boundsInLogicalRoot(fe);
                 if (!RectValid(r))
                     return {};
                 if (!RectOnPanel(r, rootWEarly, rootHEarly))
@@ -1398,7 +1430,7 @@ namespace TaskbarCompat::Zones
                 if (widgetsBtn && IsDescendantOf(btn, widgetsBtn))
                     continue;
 
-                const wf::Rect br = BoundsInRoot(btn, rootFe);
+                const wf::Rect br = boundsInLogicalRoot(btn);
                 if (!RectValid(br))
                     continue;
                 if (!RectOnPanel(br, rootWEarly, rootHEarly))
@@ -1417,7 +1449,7 @@ namespace TaskbarCompat::Zones
             // Кластер иконок у центра: только TaskListButton, не Пуск/Поиск.
             if (taskRects.size() >= 2u)
             {
-                const float rootMid = static_cast<float>(rootFe.ActualWidth()) * 0.5f;
+                const float rootMid = rootWEarly * 0.5f;
                 size_t seed = 0;
                 float bestDist = 1.0e9f;
                 for (size_t i = 0; i < taskRects.size(); ++i)
@@ -1490,7 +1522,7 @@ namespace TaskbarCompat::Zones
             ClipCenterAgainstNeighbor(centerBounds, leftBounds, true, gapKeep);
             ClipCenterAgainstNeighbor(centerBounds, trayBounds, false, gapKeep);
 
-            const float rootW = static_cast<float>(rootFe.ActualWidth());
+            const float rootW = rootWEarly;
             const float padX =
                 settings.cornerType == Shared::TrayXamlPaint::kCornerTypeMaxRoundXaml
                     ? kZonePadXMaxRound
@@ -1517,7 +1549,7 @@ namespace TaskbarCompat::Zones
                 && RectValid(centerBounds)
                 && RectValid(state.center.visual))
             {
-                const wf::Rect& prev = state.center.visual;
+                const wf::Rect prev = toLogicalRect(state.center.visual);
                 constexpr float kHoldEps = 2.0f;
                 const float prevR = prev.X + prev.Width;
                 const float newR = centerBounds.X + centerBounds.Width;
@@ -1540,6 +1572,19 @@ namespace TaskbarCompat::Zones
 
             if (zoneCount < 2u)
             {
+                if (vertical)
+                {
+                    DebugLog(
+                        DBG_WARNING,
+                        L"[TaskbarCompat][Zones] vertical layout: insufficient zones=%u root=%.1fx%.1f left=%u center=%u tray=%u skippedWide=%u",
+                        zoneCount,
+                        actualRootWidth,
+                        actualRootHeight,
+                        RectValid(leftBounds) ? 1u : 0u,
+                        RectValid(centerBounds) ? 1u : 0u,
+                        RectValid(trayBounds) ? 1u : 0u,
+                        skippedWideHosts);
+                }
                 Restore(backgroundFill, backgroundStroke, state);
                 return;
             }
@@ -1557,12 +1602,12 @@ namespace TaskbarCompat::Zones
                 && (state.left.active || state.center.active || state.tray.active))
             {
                 // Геометрия та же — кисть/скругление всё равно обновляем (смена Effect/tint).
-                const double panelHSkip = rootFe.ActualHeight() > 1.0
-                    ? rootFe.ActualHeight()
-                    : (backgroundFill.ActualHeight() > 1.0 ? backgroundFill.ActualHeight() : 48.0);
-                const double radiusRefSkip = RectValid(centerBounds)
-                    ? (std::min)(panelHSkip, static_cast<double>(centerBounds.Height))
-                    : panelHSkip;
+                // В логических координатах cross-axis всегда представлен Height.
+                const double panelThicknessSkip = rootHEarly;
+                const double segmentThicknessSkip = RectValid(centerBounds)
+                    ? static_cast<double>(centerBounds.Height)
+                    : panelThicknessSkip;
+                const double radiusRefSkip = (std::min)(panelThicknessSkip, segmentThicknessSkip);
                 const double radiusSkip = CornerRadiusDip(settings.cornerType, radiusRefSkip);
                 const bool patchBorderSkip = settings.patchBorderStroke && settings.cornerType != 0;
                 const DWORD borderArgbSkip = settings.borderColorArgb;
@@ -1579,6 +1624,11 @@ namespace TaskbarCompat::Zones
             }
             state.lastBoundsSig = boundsSig;
 
+            // Overlay-хосты живут в физических координатах RootGrid.
+            leftBounds = toPhysicalRect(leftBounds);
+            centerBounds = toPhysicalRect(centerBounds);
+            trayBounds = toPhysicalRect(trayBounds);
+
             CaptureAndClearRootGrid(state, rootGrid);
             SuppressFullBarLayer(backgroundFill, state);
 
@@ -1594,14 +1644,14 @@ namespace TaskbarCompat::Zones
 
             EnsureLegacyTrayRestored(trayGrid, state);
 
-            const double panelH = rootFe.ActualHeight() > 1.0
-                ? rootFe.ActualHeight()
-                : (backgroundFill.ActualHeight() > 1.0 ? backgroundFill.ActualHeight() : 48.0);
-            // MaxRound: R от высоты сегмента (не panelH), иначе при cH!=panelH центр радиуса «плывёт».
-            const double radiusRefH = RectValid(centerBounds)
-                ? (std::min)(panelH, static_cast<double>(centerBounds.Height))
-                : panelH;
-            const double radius = CornerRadiusDip(settings.cornerType, radiusRefH);
+            const double panelThickness = rootHEarly;
+            // Bounds уже возвращены в физические координаты: cross-axis — Width
+            // у вертикальной панели и Height у горизонтальной.
+            const double segmentThickness = RectValid(centerBounds)
+                ? static_cast<double>(vertical ? centerBounds.Width : centerBounds.Height)
+                : panelThickness;
+            const double radiusRefThickness = (std::min)(panelThickness, segmentThickness);
+            const double radius = CornerRadiusDip(settings.cornerType, radiusRefThickness);
             const bool patchBorder = settings.patchBorderStroke && settings.cornerType != 0;
             const DWORD borderArgb = settings.borderColorArgb;
 
@@ -1616,7 +1666,9 @@ namespace TaskbarCompat::Zones
             if (RectValid(leftBounds))
             {
                 // Slide-up только после Remove left в сессии (лог: slide=1 на старте — не нужно).
-                const bool slideUp = !state.left.active && state.leftAllowAppearAnim;
+                const bool slideUp = !vertical
+                    && !state.left.active
+                    && state.leftAllowAppearAnim;
                 ApplyOverlay(
                     state.left,
                     state,
@@ -1678,5 +1730,6 @@ namespace TaskbarCompat::Zones
         }
         state.strokeCollapsed = false;
         state.lastBoundsSig = 0;
+        state.orientationKnown = false;
     }
 }

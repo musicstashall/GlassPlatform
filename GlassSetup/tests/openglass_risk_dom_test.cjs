@@ -40,11 +40,17 @@ for(const locale of ['ru','en']){
  assert.equal(retryStyle.left,'50%');assert.equal(retryStyle.top,'50%');
  assert.equal(retryStyle.transform,'translate(-50%,-50%)');assert.equal(retryStyle.width,'38px');
  assert.ok(forbiddenCard.textContent.includes('403'));
- assert.equal(forbiddenCard.querySelector('.comp-decision').disabled,true);
+ assert.equal(forbiddenCard.querySelector('.comp-decision').disabled,false);
  const prior=messages.length;metadataRetry.click();assert.equal(messages.at(-1),'metadata-retry:openglass');assert.equal(messages.length,prior+1);
  dom.window.commitComponentChoice(d.getElementById('product-openglass'),true);
  assert.equal(d.getElementById('product-openglass').checked,false);
- assert.ok(d.getElementById('components-gesture-status').textContent.includes('403'));
+ assert.equal(d.querySelector('#components-installed-grid [data-product="openglass"]'),null);
+ const refused=d.getElementById('components-gesture-status');
+ assert.ok(refused.textContent.includes('403'));
+ assert.ok(refused.classList.contains('warn'));
+ send([{...forbidden,installed:true}],locale);
+ assert.equal(d.querySelector('#components-installed-grid .metadata-error-label'),null);
+ assert.ok(d.querySelector('#components-grid .metadata-error-label').textContent.includes('E403'));
  send([{...forbidden,metadataRetrying:true}],locale);
  assert.equal(d.querySelector('#components-grid .download-retry').disabled,true);
  send([{...forbidden,metadataBlocked:false,metadataRetrying:false,applySupported:true,targetPayloadVersion:'3.0.2.3749'}],locale);
@@ -70,6 +76,10 @@ for(const locale of ['ru','en']){
   assert.equal(d.querySelectorAll('[title]').length,0);
   dom.window.commitComponentChoice(d.getElementById('product-'+id),true);
   assert.equal(d.getElementById('product-'+id).checked,true);
+  const planned=d.querySelector('#components-installed-grid [data-product="'+id+'"]');
+  assert.equal(planned.querySelector('.metadata-error-label'),null);
+  assert.ok(!planned.classList.contains('download-failed'));
+  assert.ok(d.querySelector('#components-grid [data-catalog-alias="'+id+'"] .metadata-error-label').textContent.includes('E403'));
  }
  send([og],locale);
  const card=d.querySelector('#components-installed-grid [data-product="openglass"]');

@@ -14,14 +14,16 @@ for(const reduced of [false,true]){
  send('checking',{componentsLoading:true});assert.equal(animations.length,0);
  send('components',{componentsLoading:true});assert.equal(animations.length,0);
  send('components',{componentsLoading:false});
- assert.equal(d.querySelector('.c-slot-left').classList.contains('is-hidden'),true);
- assert.equal(d.querySelector('.c-slot-left').getAttribute('aria-hidden'),'true');
- assert.equal(d.querySelector('[data-component-edge="available"]').getAttribute('aria-hidden'),'false');
- assert.equal(animations.length,reduced?0:3);
- if(!reduced){assert.deepEqual(animations.map(a=>a.options.delay),[0,65,130]);assert.ok(animations.every(a=>a.options.duration>0&&a.frames[0].opacity===0&&a.frames[1].opacity===1));}
+ assert.equal(d.querySelector('.c-slot-left').classList.contains('is-hidden'),false);
+ assert.equal(d.querySelector('.c-slot-left').getAttribute('aria-hidden'),'false');
+ assert.equal(d.querySelector('.c-slot-right').classList.contains('is-hidden'),true);
+ assert.equal(d.querySelector('.c-lane.installed').hidden,false);
+ assert.equal(d.querySelector('[data-component-edge="plan"]').getAttribute('aria-hidden'),'false');
+ assert.equal(animations.length,reduced?0:7);
+ if(!reduced){assert.deepEqual(animations.map(a=>a.options.delay),[0,65,130,195,260,325,390]);assert.ok(animations.every(a=>a.options.duration>0&&a.frames[0].opacity===0&&a.frames[1].opacity===1));}
  const count=animations.length;send('components');assert.equal(animations.length,count); // no replay on ordinary host refresh
  send('components',{components:rows.map(x=>({...x,checked:x.id==='x64'}))});assert.equal(animations.length,count); // no replay on choice
- send('checking');send('components');assert.equal(animations.length,reduced?0:count+3); // explicit re-entry
+ send('checking');send('components');assert.equal(animations.length,reduced?0:count+7); // explicit re-entry
  assert.deepEqual(errors.map(e=>e.message),[]);dom.window.close();
 }
-process.stdout.write('PASS: hidden Available on entry; real production cascade scheduling, delayed inspection result, state refresh/re-entry, reduced motion\n');
+process.stdout.write('PASS: Available and Installed on entry, plan closed; real production cascade scheduling, delayed inspection result, state refresh/re-entry, reduced motion\n');

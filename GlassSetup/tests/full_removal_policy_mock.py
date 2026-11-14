@@ -54,8 +54,9 @@ assert 'fullCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanup
 assert 'fullCleanupReviewed_=true;' in main
 assert 'maintenanceLease.handle=INVALID_HANDLE_VALUE' in main
 assert 'if(MaintenanceUi()&&page_==Page::Components)return 0;' in main
-transition=main[main.index('    void SetPage(Page page)'):main.index('    void SetPage(Page page)')+600]
-assert 'MaintenanceUi()&&(page==Page::License||page==Page::Welcome)' in transition
+set_page=main.index('    void SetPage(Page page)')
+transition=main[set_page:main.index('page_=page',set_page)+len('page_=page')]
+assert 'MaintenanceUi()&&(page==Page::Welcome||(page==Page::License&&accepted_))' in transition
 assert transition.index('page=Page::Components')<transition.index('page_=page')
 assert 'return webReady_;' in main[main.index('bool SlidesVisible()'):main.index('bool SlidesVisible()')+350]
 

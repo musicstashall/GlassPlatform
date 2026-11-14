@@ -647,13 +647,16 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .comp-warning-button{position:static;flex:0 0 16px;margin-left:auto;width:16px;height:16px;padding:1px;border:0;background:transparent;color:#f4bd5e;border-radius:4px;display:grid;place-items:center}
 #components-panel .comp-warning-button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 #components-panel .comp-warning-button:focus-visible{outline:2px solid #ffdf9d;outline-offset:2px}
-#components-panel .c-card-top .comp-name{min-width:0;flex:1 1 auto}
+/* The card is only a drag surface. A control's tooltip and click stay on its own box, not the row around it. */
+#components-panel .c-card-top,#components-panel .c-meta,#components-panel .c-foot{pointer-events:none}
+#components-panel .c-card .comp-name,#components-panel .c-card button{pointer-events:auto}
+#components-panel .c-card-top .comp-name{flex:0 1 auto;width:max-content;max-width:100%;min-width:0}
 #components-panel .comp-name{padding:0;border:0;background:none;text-align:left;font-family:inherit;cursor:pointer;display:block}
 #components-panel .comp-name:hover{color:#ded7ff;text-decoration:underline;text-underline-offset:2px}
 #components-panel .comp-state{margin:0;max-width:225px;color:inherit;font-size:7.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #components-panel .c-meta{padding-left:0}
 #components-panel .has-warning .c-meta{padding-left:0}
-#components-panel .comp-version-line{margin:0;font:inherit;display:block}
+#components-panel .comp-version-line{margin:0;font:inherit;display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:top}
 #components-panel .comp-version-tag{padding:0;border:0;background:none}
 #components-panel .comp-version-target{color:#a3a7bf}
 #components-panel .comp-decision{position:static;min-width:19px;min-height:19px;max-width:none;line-height:1;font-size:0;cursor:pointer}
@@ -755,6 +758,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
    green surface as an activated card grows behind its content, never over it. */
 #components-panel .c-card{isolation:isolate}
 #components-panel .c-card.download-planned,#components-panel .c-card.download-progress{border:1px dashed #83d9a685;background:linear-gradient(130deg,#22253c,#181b2d)}
+#components-panel .c-card.download-planned:hover,#components-panel .c-card.download-progress:hover{border-color:#83d9a685;background:linear-gradient(130deg,#262942,#1b1e31)}
 #components-panel .c-card.download-local{border:1px solid #83d9a685;background:var(--component-green-surface)}
 #components-panel .c-card.download-failed{border-color:#e57a7a;border-style:dashed}
 #stage[data-mode="full-cleanup"] .error-copy{top:var(--page-heading-top);left:var(--page-heading-left);right:48px;bottom:30px;width:auto;overflow:auto;justify-content:flex-start;pointer-events:auto;opacity:1;transform:none;animation:none}
@@ -1070,7 +1074,9 @@ function acceptComponentRecommendations(){batchComponentActions(()=>{for(const i
 
 const componentShelfViews={available:'all',installed:'all'};
 // Concept C panel lifecycle. Session-local layout state never changes product intents.
-const componentSides={visible:{available:false,plan:true},pinned:{available:false,plan:false}};
+// Entry shows Available beside Installed. The plan stays closed until the user opens it.
+const componentSides={visible:{available:true,plan:false},pinned:{available:false,plan:false}};
+let downloadPanelShifted=false;
 let componentHideTimer=0,componentEdgeTimer=0,componentNoteTimer=0,componentLastUnpinned=null;
 let componentPress=null,componentDrag=null,componentSuppressClickUntil=0,componentSuppressPointerClick=false;
 const componentPanel=()=>document.getElementById('components-panel');
@@ -1120,6 +1126,18 @@ function dismissComponentNoticeOnActivity(event){
 }
 // Capture sees the triggering event BEFORE its handler creates a new notice.
 for(const type of ['click','auxclick','wheel'])document.addEventListener(type,dismissComponentNoticeOnActivity,{capture:true,passive:true});
+function revealPlanForDownloads(){
+ const jobs=Array.isArray(hostState.downloads)?hostState.downloads:[];
+ const transferring=hostState.appMode!=='unins'&&jobs.some(d=>d&&(d.phase==='preparing'||d.phase==='downloading'||d.phase==='verifying'));
+ if(!transferring){downloadPanelShifted=false;return;}
+ // One shift per preparation. A plan the user already opened stays as they left it.
+ if(downloadPanelShifted||componentSides.visible.plan)return;
+ downloadPanelShifted=true;
+ componentSides.pinned.available=false;
+ componentSides.visible.available=false;
+ componentSides.visible.plan=true;
+ applyComponentPanels();
+}
 function applyComponentPanels(){
  const panel=componentPanel(),a=componentSides.visible.available,p=componentSides.visible.plan;
  const lane=panel.querySelector('.c-lane.installed');
@@ -1534,8 +1552,11 @@ function paintComponentCard(card,item,input,shelf){
   action.classList.toggle('danger',!item.installed||hostState.appMode==='unins'&&!f.selected);
  }
  const definition=componentCardAction(item,input,shelf),label=document.createElement('span');label.className='comp-action-label';label.textContent=definition.label;action.prepend(label);
- if(definition.value===true&&item.applySupported===false&&!resourcesPairedChoice(item))action.disabled=true;
- action.dataset.tooltip=item.metadataBlocked?metadataBlockText(item):definition.label;action.setAttribute('aria-label',definition.label);action.dataset.componentAction=definition.act;
+ // A 403 without a local package stays in Available. The control remains
+ // pressable so the refusal can raise the yellow notice instead of dying silently.
+ const refuseRemote=!!(item.metadataBlocked&&!item.metadataLocalAvailable&&hostState.appMode!=='unins');
+ if(definition.value===true&&item.applySupported===false&&!resourcesPairedChoice(item)&&!refuseRemote)action.disabled=true;
+ action.dataset.tooltip=(available&&refuseRemote)?metadataBlockText(item):definition.label;action.setAttribute('aria-label',definition.label);action.dataset.componentAction=definition.act;
  if(definition.act==='repair'||definition.act==='update'||definition.act==='undo'||definition.act==='unrepair')action.setAttribute('aria-pressed',String(f.selected));else action.removeAttribute('aria-pressed');
  action.onclick=()=>commitComponentChoice(input,definition.value);
  const spacer=document.createElement('span');spacer.className='spacer';foot.replaceChildren(marks,spacer,action);
@@ -1682,9 +1703,13 @@ function syncDownloadVisuals(){
   const d=selected.find(d=>d.id===card.dataset.product);
   let bar=card.querySelector('.product-transfer'),retry=card.querySelector('.download-retry');
   let errorLabel=card.querySelector('.metadata-error-label');
-  if(!item?.metadataBlocked&&errorLabel)errorLabel.remove();
-  if(item?.metadataBlocked&&hostState.appMode!=='unins'&&input?.dataset.intent!=='remove'){
+  // Server-unavailable belongs only to the Available catalogue, including the
+  // mirror of a product already placed in the plan. The plan card stays a normal install.
+  const catalogCard=!!card.closest('#components-grid');
+  if((!item?.metadataBlocked||!catalogCard)&&errorLabel){errorLabel.remove();errorLabel=null;}
+  if(catalogCard&&item?.metadataBlocked&&hostState.appMode!=='unins'&&input?.dataset.intent!=='remove'){
    if(bar)bar.remove();
+   card.classList.remove('download-planned','download-progress','download-local');
    card.classList.add('download-failed');
    if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
    retry.disabled=!!item.metadataRetrying;
@@ -1709,7 +1734,7 @@ function syncDownloadVisuals(){
   }else if(retry)retry.remove();
  }
  for(const row of document.querySelectorAll('#components-plan-items li[data-product]')){const d=selected.find(d=>d.id===row.dataset.product);if(d){const text=row.querySelector('.plan-transfer-status');text.textContent=label(d);text.dataset.tooltip=d.error||label(d);}}
-
+ revealPlanForDownloads();
 }
 let certificateSignature='';
 function renderCertificatePanel(){

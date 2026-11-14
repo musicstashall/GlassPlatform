@@ -1318,7 +1318,7 @@ namespace UICompat
 
             const bool wantCorners =
                 settings.cornersPresent && settings.cornerType != 0;
-            const double trayH = Shared::TrayXamlPaint::QueryTaskbarHeightDip();
+            const double trayThickness = Shared::TrayXamlPaint::QueryTaskbarThicknessDip();
             const double popupH = QueryVisibleHeightDip(slot.chromeBorder);
             double appliedR = 0.0;
             const bool layoutReady = BorderLayoutReady(slot.chromeBorder);
@@ -1329,7 +1329,7 @@ namespace UICompat
             if (wantCorners)
             {
                 appliedR = Shared::TrayXamlPaint::XamlPopupCornerRadiusDip(
-                    settings.cornerType, trayH, popupH);
+                    settings.cornerType, trayThickness, popupH);
                 const wux::CornerRadius cr{ appliedR, appliedR, appliedR, appliedR };
 
                 if (avoidWinrtCr)
@@ -1427,12 +1427,12 @@ namespace UICompat
                 DebugLog(
                     DBG_IMPORTANT,
                     L"[UICompat][MenuFlyout] applied delayMs=%u paintXaml=%u effect=%u "
-                    L"corner=%u trayH=%.1f popupH=%.1f r=%.1f layout=%u start=%u",
+                    L"corner=%u trayThickness=%.1f popupH=%.1f r=%.1f layout=%u start=%u",
                     delayMs,
                     settings.paintPathXaml ? 1u : 0u,
                     settings.xamlEffectType,
                     settings.cornerType,
-                    trayH,
+                    trayThickness,
                     popupH,
                     appliedR,
                     layoutReady ? 1u : 0u,

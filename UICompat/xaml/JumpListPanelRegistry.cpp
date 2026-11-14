@@ -534,11 +534,12 @@ namespace UICompat
 
             const bool wantCorners =
                 settings.cornersPresent && settings.cornerType != 0;
-            const double trayH = Shared::TrayXamlPaint::QueryTaskbarHeightDip();
-            // Без ActualHeight (WinRT) — MaxRound по высоте трея.
+            const double trayThickness = Shared::TrayXamlPaint::QueryTaskbarThicknessDip();
+            // Без ActualHeight (WinRT) — MaxRound по толщине панели; передача
+            // той же величины как popupHeight сохраняет штатный радиус панели.
             const double r = wantCorners
                 ? Shared::TrayXamlPaint::XamlPopupCornerRadiusDip(
-                    settings.cornerType, trayH, trayH)
+                    settings.cornerType, trayThickness, trayThickness)
                 : 0.0;
 
             if (wantCorners && slot->originals[3].index != UINT_MAX)

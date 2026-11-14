@@ -623,7 +623,7 @@ namespace TaskbarCompat
             const bool wantTintBorder =
                 settings.patchBorderStroke && settings.borderColorArgb != 0;
 
-            const double trayH = Shared::TrayXamlPaint::QueryTaskbarHeightDip();
+            const double trayThickness = Shared::TrayXamlPaint::QueryTaskbarThicknessDip();
             const double popupH = QueryVisibleHeightDip(slot.tip);
             double appliedR = 0.0;
 
@@ -637,7 +637,7 @@ namespace TaskbarCompat
                 }
 
                 appliedR = Shared::TrayXamlPaint::XamlPopupCornerRadiusDip(
-                    settings.cornerType, trayH, popupH);
+                    settings.cornerType, trayThickness, popupH);
                 slot.tip.CornerRadius(wux::CornerRadius{ appliedR, appliedR, appliedR, appliedR });
                 slot.chromePatched = true;
             }
@@ -688,12 +688,12 @@ namespace TaskbarCompat
                 DebugLog(
                     DBG_IMPORTANT,
                     L"[TaskbarCompat][Tooltip] applied delayMs=%u paintXaml=%u effect=%u "
-                    L"corner=%u trayH=%.1f popupH=%.1f r=%.1f",
+                    L"corner=%u trayThickness=%.1f popupH=%.1f r=%.1f",
                     delayMs,
                     settings.paintPathXaml ? 1u : 0u,
                     settings.xamlEffectType,
                     settings.cornerType,
-                    trayH,
+                    trayThickness,
                     popupH,
                     appliedR);
             }
@@ -863,12 +863,12 @@ namespace TaskbarCompat
                                             s->appliedOk = false;
                                             return;
                                         }
-                                        const double trayH =
-                                            Shared::TrayXamlPaint::QueryTaskbarHeightDip();
+                                        const double trayThickness =
+                                            Shared::TrayXamlPaint::QueryTaskbarThicknessDip();
                                         const double popupH = QueryVisibleHeightDip(s->tip);
                                         const double r =
                                             Shared::TrayXamlPaint::XamlPopupCornerRadiusDip(
-                                                settingsCopy.cornerType, trayH, popupH);
+                                                settingsCopy.cornerType, trayThickness, popupH);
                                         s->tip.CornerRadius(wux::CornerRadius{ r, r, r, r });
                                         if (settingsCopy.patchBorderStroke
                                             && settingsCopy.borderColorArgb != 0)

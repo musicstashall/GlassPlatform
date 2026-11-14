@@ -652,7 +652,7 @@ namespace TaskbarCompat
             // Tint бордюра не зависит от углов (паритет bar Default stroke).
             const bool wantTintBorder =
                 settings.patchBorderStroke && settings.borderColorArgb != 0;
-            const double trayH = Shared::TrayXamlPaint::QueryTaskbarHeightDip();
+            const double trayThickness = Shared::TrayXamlPaint::QueryTaskbarThicknessDip();
             const double popupH = QueryVisibleHeightDip(slot.chromeBorder);
             double appliedR = 0.0;
             const bool layoutReady = BorderLayoutReady(slot.chromeBorder);
@@ -662,7 +662,7 @@ namespace TaskbarCompat
                 // Не ждать layout: иначе 0×0 → сотни VTC-retry и углы через 0.7–1.2 с.
                 // SizeChanged (EnsureSizeHook) пересчитает R, когда появится ActualHeight.
                 appliedR = Shared::TrayXamlPaint::XamlPopupCornerRadiusDip(
-                    settings.cornerType, trayH, popupH);
+                    settings.cornerType, trayThickness, popupH);
                 slot.chromeBorder.CornerRadius(
                     wux::CornerRadius{ appliedR, appliedR, appliedR, appliedR });
 
@@ -734,12 +734,12 @@ namespace TaskbarCompat
                 DebugLog(
                     DBG_IMPORTANT,
                     L"[TaskbarCompat][MenuFlyout] applied delayMs=%u paintXaml=%u effect=%u "
-                    L"corner=%u trayH=%.1f popupH=%.1f r=%.1f layout=%u",
+                    L"corner=%u trayThickness=%.1f popupH=%.1f r=%.1f layout=%u",
                     delayMs,
                     settings.paintPathXaml ? 1u : 0u,
                     settings.xamlEffectType,
                     settings.cornerType,
-                    trayH,
+                    trayThickness,
                     popupH,
                     appliedR,
                     layoutReady ? 1u : 0u);

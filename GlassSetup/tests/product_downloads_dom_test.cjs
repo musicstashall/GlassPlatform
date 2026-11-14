@@ -15,6 +15,8 @@ for(const locale of ['ru','en']){
  assert.ok(d.querySelector('#product-x64').closest('.c-card').classList.contains('download-local'));
  assert.ok(d.querySelector('#product-settings64').closest('.c-card').classList.contains('download-planned'));
  send({locale,page:'components',components,downloads:components.map(c=>({id:c.id,phase:'preparing',total:0,bytes:0}))});
+ assert.equal(d.querySelector('.c-slot-right').classList.contains('is-hidden'),false,'a hidden plan opens when preparation starts');
+ assert.equal(d.querySelector('.c-slot-left').classList.contains('is-hidden'),true,'Available closes to make room for the plan');
  assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer').length,7);
  assert.equal(d.querySelector('#components-downloads'),null,'aggregate progress uses the existing native footer strip');
  const jobs=components.map((c,i)=>({id:c.id,phase:'downloading',total:(i+1)*1024,bytes:(i+1)*512,elapsedMs:2000,network:true}));
@@ -30,6 +32,9 @@ for(const locale of ['ru','en']){
  assert.match(css,/@keyframes product-transfer-shine\{0%\{transform:translateX\(-100%\)\}50%,100%\{transform:translateX\(100%\)\}\}/);
  assert.match(css,/animation:product-transfer-shine 3\.2s linear infinite/);
  assert.match(css,/prefers-reduced-motion:reduce/);
+ assert.match(css,/#components-panel \.c-card\.download-progress:hover\{border-color:#83d9a685;background:linear-gradient\(130deg,#262942,#1b1e31\)\}/);
+ assert.match(css,/#components-panel \.c-card-top,#components-panel \.c-meta,#components-panel \.c-foot\{pointer-events:none\}/);
+ assert.match(css,/#components-panel \.c-card-top \.comp-name\{flex:0 1 auto;width:max-content;max-width:100%;min-width:0\}/);
  // Removing the plan row cancels the same native selection IPC and hides stale progress immediately.
  cancel.click();assert.equal(messages.at(-1),'component:settings64:0');
  assert.equal(d.querySelector('#product-settings64').checked,false);
@@ -47,5 +52,12 @@ for(const locale of ['ru','en']){
  send({downloads:[]});assert.equal(d.querySelector('#components-downloads'),null);
  assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer').length,0);
 }
+d.querySelector('[data-component-pin="available"]').click();
+d.querySelector('[data-component-pin="plan"]').click();
+assert.equal(d.querySelector('.c-slot-left').classList.contains('is-hidden'),false);
+assert.equal(d.querySelector('.c-slot-right').classList.contains('is-hidden'),false);
+send({page:'components',downloads:[{id:'x64',phase:'downloading',total:100,bytes:40}]});
+assert.equal(d.querySelector('.c-slot-left').classList.contains('is-hidden'),false,'an already open plan is left alone');
+assert.equal(d.querySelector('.c-slot-right').classList.contains('is-hidden'),false);
 assert.equal(errors.length,0,errors.map(String).join('\n'));dom.window.close();
 console.log('PASS: production RU/EN seven product transfers, per-product progress, no extra aggregate strip, stable focus, cancel IPC, error retry, verification and ready states');

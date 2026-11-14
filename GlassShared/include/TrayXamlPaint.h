@@ -271,9 +271,11 @@ namespace Shared::TrayXamlPaint
     }
 
     // Единый радиус XAML CornerType для Taskbar / UICompat.
+    // Для MaxRound опорный размер — толщина панели (поперечная ось), а не
+    // физическая высота окна: у вертикальной панели это её логическая ширина.
     [[nodiscard]] inline double XamlCornerRadiusDip(
         DWORD cornerType,
-        double panelHeightDip) noexcept
+        double panelThicknessDip) noexcept
     {
         switch (cornerType)
         {
@@ -286,15 +288,17 @@ namespace Shared::TrayXamlPaint
         case kCornerTypeIncreasedXaml:
             return kIncreasedCornerRadiusDip; // 16
         case kCornerTypeMaxRoundXaml:
-            return panelHeightDip > 1.0 ? panelHeightDip * 0.5 : 8.0;
+            return panelThicknessDip > 1.0 ? panelThicknessDip * 0.5 : 8.0;
         case 0:
         default:
             return 8.0;
         }
     }
 
-    // Высота Shell_*TrayWnd в DIP (клиент) — база для MaxRound popup/трея.
-    [[nodiscard]] inline double QueryTaskbarHeightDip() noexcept
+    // Толщина Shell_*TrayWnd по клиентской геометрии. Для горизонтальной панели
+    // это высота, для вертикальной — ширина. Геометрия является runtime-истиной
+    // и не зависит от build/CFR/TaskbarLocation.
+    [[nodiscard]] inline double QueryTaskbarThicknessDip() noexcept
     {
         HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
         if (!tray)
@@ -304,25 +308,30 @@ namespace Shared::TrayXamlPaint
         RECT rc{};
         if (!GetClientRect(tray, &rc))
             return 48.0;
-        const int h = rc.bottom - rc.top;
-        return h > 1 ? static_cast<double>(h) : 48.0;
+        const int width = rc.right - rc.left;
+        const int height = rc.bottom - rc.top;
+        if (width <= 1 || height <= 1)
+            return 48.0;
+        const int thickness = width < height ? width : height;
+        return static_cast<double>(thickness);
     }
 
-    // Popup (ToolTip / MenuFlyout): радиус всегда от высоты трея.
-    // MaxRound: R = trayH/2; если высота popup < 2R — Increased, иначе штатный R трея.
+    // Popup (ToolTip / MenuFlyout): MaxRound наследует толщину панели; если
+    // высота popup меньше диаметра — используется безопасный Increased.
     [[nodiscard]] inline double XamlPopupCornerRadiusDip(
         DWORD cornerType,
-        double trayHeightDip,
+        double taskbarThicknessDip,
         double popupHeightDip) noexcept
     {
         if (cornerType == kCornerTypeMaxRoundXaml)
         {
-            const double rTray = XamlCornerRadiusDip(kCornerTypeMaxRoundXaml, trayHeightDip);
+            const double rTray = XamlCornerRadiusDip(
+                kCornerTypeMaxRoundXaml, taskbarThicknessDip);
             if (popupHeightDip + 0.5 < rTray * 2.0)
                 return kIncreasedCornerRadiusDip;
             return rTray;
         }
-        return XamlCornerRadiusDip(cornerType, trayHeightDip);
+        return XamlCornerRadiusDip(cornerType, taskbarThicknessDip);
     }
 
     [[nodiscard]] inline bool TryReadGradientArgb(bool darkMode, DWORD& outArgb) noexcept

@@ -128,7 +128,7 @@ Neutral на `OverflowRootGrid` → backdrop на весь XAML-остров (в
 | VTC | Тип `Windows.UI.Xaml.Controls.ToolTip` (или `*.ToolTip`) → `TrayTooltipPanelRegistry`. |
 | Цели | `ToolTip`: Background / Border* / CornerRadius / Shadow; первый вложенный `Border` → Transparent (без двойного Blur). |
 | Настройки | `Tray\BorderDrawMode` + `Tray\Xaml\Tooltip\*` (fallback `Tray\Xaml\*`). |
-| Углы | `XamlPopupCornerRadiusDip`: R всегда от высоты трея; MaxRound при `popupH < 2×R_tray` → Increased, иначе R_tray. Только XAML CornerRadius — **без** DWM на host HWND. |
+| Углы | `XamlPopupCornerRadiusDip`: R всегда от толщины панели (высота горизонтальной / ширина вертикальной); MaxRound при `popupH < 2×R_tray` → Increased, иначе R_tray. Только XAML CornerRadius — **без** DWM на host HWND. |
 | Restore | Stop → `RestoreAllFills`; DWM-режим (`paintPathXaml=false`) → restore без перезапуска explorer. |
 
 **Theme → Stop / Unregister (Background):**
@@ -187,8 +187,8 @@ Neutral на `OverflowRootGrid` → backdrop на весь XAML-остров (в
 | Ключ | Смысл |
 |------|--------|
 | `EffectType` | 0 Disable, 1 Transparent, 2 Solid, 3 Blur, 4 Acrylic, 5 System (оригинальный бэкдроп) |
-| `CornerType` | 0–5: Default / Rect / Round / SmallRound / **Increased** (R = NC system) / **MaxRound** (R = h/2) |
-| `SeparateZones` | 0/1 — раздельные плитки (left/widgets, center=Пуск+apps, tray) |
+| `CornerType` | 0–5: Default / Rect / Round / SmallRound / **Increased** (R = NC system) / **MaxRound** (R = thickness/2) |
+| `SeparateZones` | 0/1 — раздельные плитки (start/widgets, center=Пуск+apps, end/tray); расчёт ведётся по primary/cross axis и поддерживает горизонтальную и вертикальную панель |
 | `LightMode_GradientColor` / `DarkMode_GradientColor` | Тинт XAML; **отсутствие ключа** = системный бэкдроп |
 | `LightMode_BorderColor` / `DarkMode_BorderColor`, `NoBorderColor` | Бордюр XAML; **отсутствие** = системный stroke (после capture). Tint применяется **независимо** от `CornerType`. Pre-capture / GS fallback: ChartView (`Tray` / `Tray\Xaml` / `Tray\Xaml\*`). |
 | `CachedSystemStrokeArgb` | Sample stroke до патча (пишет TaskbarCompat `NoteSystemStrokeArgb`). GS «По умолчанию» для `Tray\Xaml*` пишет этот ARGB (иначе ChartView). При смене visual style / `InvalidateSystemBrushSamples` ключ **удаляется** из HKCU (иначе stale theme → wrong default / Stop restore). |
@@ -264,7 +264,7 @@ Runtime:
 | 2 | Round | `ROUND` | 8 |
 | 3 | SmallRound | `ROUNDSMALL` | 4 |
 | 4 | Increased | — (только XAML) | **R = 16** (между Large и MaxRound) |
-| 5 | MaxRound | — (только XAML) | **R = высота панели / 2** (полукруг по бокам) |
+| 5 | MaxRound | — (только XAML) | **R = толщина панели / 2** (высота горизонтальной / ширина вертикальной; полукруг по краям) |
 
 **Миграция:** schema `Tray\Xaml\CornerTypeSchema`. Layout 0/1 (без Increased): `CornerType=4` → 5. Schema ≥2: `4` = Increased.
 

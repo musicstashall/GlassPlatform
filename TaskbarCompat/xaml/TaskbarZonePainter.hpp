@@ -98,6 +98,10 @@ namespace TaskbarCompat::Zones
 
         // Пропуск ApplyOverlay при неизменной геометрии (LayoutUpdated debounce).
         std::uint64_t lastBoundsSig{};
+        // Геометрия painter хранится в физических координатах; при повороте
+        // предыдущие visual bounds нельзя использовать для shrink/анимации.
+        bool orientationKnown{};
+        bool vertical{};
 
         // Close-window: не сужать center по mid-anim measure — hold до settle-commit.
         bool centerShrinkCommit{};
@@ -136,7 +140,7 @@ namespace TaskbarCompat::Zones
         winrt::Windows::UI::Xaml::Shapes::Rectangle const& backgroundStroke,
         FrameZoneState& state) noexcept;
 
-    // panelHeightDip — ActualHeight панели/RootGrid; MaxRound (5) → height/2;
-    // Increased (4) → системный CoreWindow NC (NcSystemCornerRadius).
-    [[nodiscard]] double CornerRadiusDip(DWORD cornerType, double panelHeightDip) noexcept;
+    // panelThicknessDip — поперечный размер панели/RootGrid; MaxRound (5)
+    // использует thickness/2. Increased (4) → системный CoreWindow NC.
+    [[nodiscard]] double CornerRadiusDip(DWORD cornerType, double panelThicknessDip) noexcept;
 }

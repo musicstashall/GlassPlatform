@@ -19,9 +19,10 @@ int main(){
 }
 '''
 assert 'if(MaintenanceUi()&&page_==Page::Components)return 0;' in s
-assert 'EnableWindow(back_,!demoLocked && !(MaintenanceUi() && page_==Page::Components));' in s
-assert '&& !(MaintenanceUi() && page_==Page::Components);' in s
-assert 'if(MaintenanceUi()&&(page==Page::License||page==Page::Welcome))page=Page::Components;' in s
+assert 'EnableWindow(back_,!demoLocked && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_))));' in s
+assert '&& !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_)));' in s
+assert 'if(MaintenanceUi()&&(page==Page::Welcome||(page==Page::License&&accepted_)))page=Page::Components;' in s
+assert 'if(MaintenanceUi()&&page_==Page::License&&!accepted_)return 0;' in s
 assert 'EnsureCurrentController(prepared,maintenanceMode_,maintenanceFocusProduct_,error)' in s
 inspection=s[s.index('    void OnInspectReady()'):s.index('    void SetPage(Page page)')]
 for field in ['x64','x86','settings64','settings32','og','openGlassResources','secureUxTheme']:

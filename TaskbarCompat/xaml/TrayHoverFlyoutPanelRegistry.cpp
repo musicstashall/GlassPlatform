@@ -119,7 +119,7 @@ namespace TaskbarCompat
         [[nodiscard]] double HoverCornerRadiusDip(DWORD cornerType) noexcept
         {
             return Shared::TrayXamlPaint::XamlCornerRadiusDip(
-                cornerType, Shared::TrayXamlPaint::QueryTaskbarHeightDip());
+                cornerType, Shared::TrayXamlPaint::QueryTaskbarThicknessDip());
         }
 
         [[nodiscard]] bool ThicknessAnyPositive(const wux::Thickness& t) noexcept

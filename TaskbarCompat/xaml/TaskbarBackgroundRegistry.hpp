@@ -84,6 +84,18 @@ namespace TaskbarCompat
             bool rootCornersPatched{};
             bool rootPaddingCaptured{};
 
+            // Нативный DockingStates меняет ориентацию существующего RootGrid без
+            // повторного Add BackgroundFill. LayoutUpdated переутверждает патчи,
+            // когда меняется продольный/поперечный размер панели.
+            winrt::Windows::UI::Xaml::FrameworkElement::LayoutUpdated_revoker rootLayoutRevoker{};
+            winrt::Windows::UI::Xaml::Controls::Grid rootLayoutHookedGrid{ nullptr };
+            double lastRootWidth{ -1.0 };
+            double lastRootHeight{ -1.0 };
+            bool rootLayoutApplyNesting{};
+            bool rootChromeWatchersRegistered{};
+            int64_t rootBackgroundWatcherToken{};
+            int64_t rootCornerRadiusWatcherToken{};
+
             // Живая геометрия зон: LayoutUpdated → Apply; shrink-hold → debounce settle.
             // Revoker, а не сырой event_token: токен снимался через текущий
             // info.zones.rootGrid, и если Grid успевал смениться или обнулиться,
@@ -124,8 +136,12 @@ namespace TaskbarCompat
         [[nodiscard]] winrt::Windows::UI::Xaml::Media::Brush MakeActiveBackdropBrush(
             TaskbarInfo& info) noexcept;
 
-        void ApplySingleTileCorners(TaskbarInfo& info) noexcept;
+        void ApplySingleTileCorners(InstanceHandle frameHandle, TaskbarInfo& info) noexcept;
         void RestoreSingleTileCorners(TaskbarInfo& info) noexcept;
+        void EnsureRootLayoutHook(InstanceHandle frameHandle, TaskbarInfo& info) noexcept;
+        void DetachRootLayoutHook(TaskbarInfo& info) noexcept;
+        void OnRootLayoutUpdated(InstanceHandle frameHandle) noexcept;
+        void OnTrackedRootChromeChanged(InstanceHandle frameHandle) noexcept;
 
         void EnsureZoneLayoutHook(InstanceHandle frameHandle, TaskbarInfo& info) noexcept;
         void DetachZoneLayoutHook(TaskbarInfo& info) noexcept;
