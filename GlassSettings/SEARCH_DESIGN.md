@@ -107,16 +107,15 @@ case, Unicode Form D, удаление диакритики, `ё→е`, заме
   ресурсных ключей по целевым страницам.
 - `GlassSettings/Search/SettingsSearchSuggestion.cs` — текст подсказки и
   идентификатор назначения.
-- `MainWindow.xaml`: `TextChanged`, `QuerySubmitted`, `Loaded`,
+- `MainWindow.xaml`: `TextChanged`, `QuerySubmitted`,
   `TextMemberPath="DisplayText"` и явный `ItemTemplate` для читаемого заголовка
-  подсказки. Остаётся стандартный `AutoSuggestBox`, который не требует
-  наследования от запечатанного WinUI-типа.
+  подсказки. Используется стандартный `AutoSuggestBox` и его системное поведение
+  курсора ввода, без ручного управления курсором.
 - `MainWindow.xaml.cs`: `DispatcherQueueTimer` с интервалом 1000 мс, повторный
   запуск при вводе; обработчик таймера читает `SearchBox.Text`, применяет
-  availability-фильтр и обновляет `ItemsSource`; курсор I-beam принудительно
-  задаётся на внутреннем `TextBox` через pointer-события; при выборе подсказки
-  ввод и список очищаются, затем повторно проверяется доступность и выполняется
-  переход.
+  availability-фильтр и обновляет `ItemsSource`; после возврата из события
+  выбора подсказки поле и список очищаются, затем повторно проверяется
+  доступность и выполняется переход.
 - `SearchSettings` фильтрует DWM destinations через
   `OpenGlassUiPolicy.IsFeatureExposedInUi()`, а Glass destinations — по наличию
   установленного модуля через `GlassModulePath.IsPlatformInstalled` с учётом

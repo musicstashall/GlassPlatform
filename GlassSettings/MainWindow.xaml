@@ -49,7 +49,6 @@
                         VerticalAlignment="Center"
                         PlaceholderText=""
                         QueryIcon="Find"
-                        Loaded="SearchBox_OnLoaded"
                         TextMemberPath="DisplayText"
                         TextChanged="SearchBox_OnTextChanged"
                         QuerySubmitted="SearchBox_OnQuerySubmitted">
