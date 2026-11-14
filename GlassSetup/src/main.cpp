@@ -2441,17 +2441,34 @@ private:
         ShowContentControls();InvalidateRect(progress_,nullptr,FALSE);InvalidateFooter();
     }
     void RequestComponentContinue() {
+        // Downloads can finish while consent is still missing. Do not leave Apply
+        // as a click that returns before the license page.
+        if(!accepted_) {
+            InstallLog::Line(L"Apply refused: license has not been accepted");
+            SetPage(Page::License);
+            return;
+        }
         if(!ComponentsReady())return;
-        downloadContinuePending_=true;
-        ReconcileDownloads();UpdateDownloadProgress();
-        ContinueAfterDownloads();SyncWebViewState();
-        EnableWindow(next_,ComponentsReady());
-    }
-    void ContinueAfterDownloads() {
-        if(!downloadContinuePending_||page_!=Page::Components||transitioning_||!DownloadsReady()||!ComponentsReady())return;
+        // Preparation never installs by itself. Apply starts it, and only a later
+        // Apply — once every selected package is ready — starts installation.
+        if(!DownloadsReady()) {
+            downloadContinuePending_=true;
+            ReconcileDownloads();UpdateDownloadProgress();
+            SyncWebViewState();
+            EnableWindow(next_,ComponentsReady());
+            return;
+        }
         downloadContinuePending_=false;
         KillTimer(window,kProductDownloadTimer);
         if(CertificatePageApplies())SetPage(Page::Certificate);else StartInstallation();
+    }
+    void NoteDownloadsPrepared() {
+        if(!downloadContinuePending_||page_!=Page::Components||!DownloadsReady())return;
+        downloadContinuePending_=false;
+        KillTimer(window,kProductDownloadTimer);
+        InstallLog::Line(L"Product preparation finished; installation waits for Apply");
+        EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());
+        UpdateDownloadProgress();
     }
     std::wstring NativeDownloadSummary() const {
         if(SimulationBuild())return {};
@@ -2706,9 +2723,10 @@ private:
         if(page_==Page::Checking)CompleteVersionCheck();
     }
     void SetPage(Page page) {
-        // Maintenance has no backwards route into first-install onboarding.
-        // Guard the transition itself, including keyboard/programmatic requests.
-        if(MaintenanceUi()&&(page==Page::License||page==Page::Welcome))page=Page::Components;
+        // Maintenance has no backwards route into the welcome slideshow.
+        // The license page stays until these terms are accepted: Apply cannot
+        // start without that consent, so hiding the page leaves the button dead.
+        if(MaintenanceUi()&&(page==Page::Welcome||(page==Page::License&&accepted_)))page=Page::Components;
         const Page oldPage=page_;
         if(page==Page::Complete&&installEngine_.Succeeded()&&(selection_.removeMask||selection_.secureUxThemeRemove))
             retireControllerOnExit=true;
@@ -2751,7 +2769,7 @@ private:
         SetWindowTextW(cancel_,Text(blockedPage?IDS_CLOSE:IDS_CANCEL).c_str());
         const bool confirm=page_==Page::ConfirmCancel || page_==Page::SettingsRemovalRisk;
         const bool backVisible=(page_==Page::License || page_==Page::Components || page_==Page::Certificate || page_==Page::FullCleanup || page_==Page::ModulesBusy || confirm)
-            && !(MaintenanceUi() && page_==Page::Components);
+            && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_)));
         const bool nextVisible=!inProgress && !blockedPage;
         const bool cancelVisible=!terminal && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
         const bool demoLocked=demoControlsLocked && !terminal;
@@ -2759,7 +2777,7 @@ private:
         ShowWindow(next_,nextVisible?SW_SHOWNA:SW_HIDE);
         ShowWindow(cancel_,cancelVisible && !demoLocked?SW_SHOWNA:SW_HIDE);
         EnableWindow(next_,!failurePending_ && !demoLocked && (page_!=Page::License || accepted_) && ComponentsReady());
-        EnableWindow(back_,!demoLocked && !(MaintenanceUi() && page_==Page::Components));
+        EnableWindow(back_,!demoLocked && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_))));
         EnableWindow(cancel_,!demoLocked && !(page_==Page::RuntimeInstalling && runtimeCancel_.load()));
         const int defaultId=confirm?IDC_BACK:blockedPage?IDC_CANCEL:IDC_NEXT;
         SendMessageW(window,DM_SETDEFID,defaultId,0);
@@ -2958,7 +2976,12 @@ private:
     }
     void StartInstallation() {
         // Debug retains its original simulation contract; Release uses external MSI.
-        if (!accepted_ || transitioning_ || DebugDemoLocksControls() || !ComponentsReady() || !DownloadsReady()) return;
+        if (!accepted_) {
+            InstallLog::Line(L"Apply refused: license has not been accepted");
+            if (page_!=Page::License) SetPage(Page::License);
+            return;
+        }
+        if (transitioning_ || DebugDemoLocksControls() || !ComponentsReady() || !DownloadsReady()) return;
         if ((page_!=Page::Components && page_!=Page::Certificate) ||
             !inspectReady_.load(std::memory_order_acquire) || !HasSelectedComponent()) return;
         {std::lock_guard<std::mutex> lock(inspectMutex_);
@@ -3708,6 +3731,7 @@ private:
             }
             if((ogMetadataBlocked_&&!ogMetadataLocal_&&message==L"component:openglass:1")||
                (sutMetadataBlocked_&&!sutMetadataLocal_&&message==L"component:secureUxTheme:1")){SyncWebViewState();return S_OK;}
+            const bool planEdited=message.rfind(L"component:",0)==0||message==L"components:select-all";
             static constexpr const wchar_t* downloadIds[]={L"x64",L"x86",L"settings64",L"settings32",L"openglass",L"secureUxTheme",L"openglassResources"};
             for(std::size_t i=0;i<std::size(downloadIds);++i)if(message==L"download-retry:"+std::wstring(downloadIds[i])) {
                 downloads_.Retry(i);SyncWebViewState();return S_OK;
@@ -3788,6 +3812,15 @@ private:
             EnableWindow(next_,!failurePending_ && ComponentsReady());
             SetWindowTextW(next_,Text(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()).c_str());
             SyncWebViewState();
+            // Правка плана во время подготовки — это не «Применить». Снятые
+            // продукты уже отменены сверкой выше; остальные не уходят в установку,
+            // пока пользователь снова не нажмёт «Применить».
+            if(planEdited&&downloadContinuePending_){
+                downloadContinuePending_=false;
+                InstallLog::Line(L"Apply continuation cleared: product plan changed during preparation");
+                EnableWindow(next_,!failurePending_ && ComponentsReady());
+                UpdateDownloadProgress();
+            }
             return S_OK;
         }
         if (page_==Page::Certificate && !DebugDemoLocksControls() &&
@@ -4671,6 +4704,7 @@ private:
                 return 0;
             case IDC_BACK:
                 if(MaintenanceUi()&&page_==Page::Components)return 0;
+                if(MaintenanceUi()&&page_==Page::License&&!accepted_)return 0;
                 if(page_==Page::FullCleanup){fullCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;SetPage(Page::Components);return 0;}
                 if(page_==Page::SettingsRemovalRisk){SetPage(beforeSettingsRemovalRisk_);return 0;}
                 if(page_==Page::ModulesBusy && !DebugDemoLocksControls()) {
@@ -4762,7 +4796,7 @@ private:
         case WM_TIMER:
             if(w==kProductDownloadTimer) {
                 if(page_!=Page::Components){KillTimer(window,kProductDownloadTimer);return 0;}
-                ReconcileDownloads();UpdateDownloadProgress();ContinueAfterDownloads();
+                ReconcileDownloads();UpdateDownloadProgress();NoteDownloadsPrepared();
                 EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());
                 SyncWebViewState();InvalidateContent();
             }

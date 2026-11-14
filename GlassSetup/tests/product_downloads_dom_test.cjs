@@ -30,6 +30,9 @@ for(const locale of ['ru','en']){
  assert.match(css,/@keyframes product-transfer-shine\{0%\{transform:translateX\(-100%\)\}50%,100%\{transform:translateX\(100%\)\}\}/);
  assert.match(css,/animation:product-transfer-shine 3\.2s linear infinite/);
  assert.match(css,/prefers-reduced-motion:reduce/);
+ assert.match(css,/#components-panel \.c-card\.download-progress:hover\{border-color:#83d9a685;background:linear-gradient\(130deg,#262942,#1b1e31\)\}/);
+ assert.match(css,/#components-panel \.c-card-top,#components-panel \.c-meta,#components-panel \.c-foot\{pointer-events:none\}/);
+ assert.match(css,/#components-panel \.c-card-top \.comp-name\{flex:0 1 auto;width:max-content;max-width:100%;min-width:0\}/);
  // Removing the plan row cancels the same native selection IPC and hides stale progress immediately.
  cancel.click();assert.equal(messages.at(-1),'component:settings64:0');
  assert.equal(d.querySelector('#product-settings64').checked,false);

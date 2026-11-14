@@ -47,6 +47,7 @@ int main(){InstallEngine e;
 '''
 launch=s[b:s.index('bool InstallEngine::StopHostsForRollback()',b)]
 assert launch.index('EnsureOpenGlassBeforePlatform()')<launch.index('startArch(GP::PlatformArch::X64')
+assert '!platformLaunch||!shouldStartOg||EnsureOpenGlassBeforePlatform()' in launch
 assert 'if(ogReady)' in launch and 'if (ogReady && !RestorePriorHosts(true))' in launch
 worker=s[s.index('DWORD WINAPI InstallEngine::WorkerThread('):s.index('DWORD WINAPI InstallEngine::RunGlassWorker(')]
 assert worker.index('CommitOfficialOpenGlass(mixedRemoval)')<worker.index('self->LaunchSelectedProducts()')
