@@ -12,6 +12,7 @@ using GlassSettings.Pages.Dwm;
 using GlassSettings.Pages.Glass;
 using GlassSettings.Pages.Text;
 using GlassSettings.Services;
+using GlassSettings.Search;
 using GlassSettings.Strings;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -63,6 +64,7 @@ public sealed partial class MainWindow : Window
     private bool _closeInProgress;
     private bool _allowWindowClose;
     private bool _closeSubclassInstalled;
+    private DispatcherQueueTimer? _searchDebounceTimer;
     private Win32WindowSubclass.Proc? _closeSubclassProc;
     private IntPtr _closeSubclassFn;
     private static readonly UIntPtr CloseSubclassId = new(0x4753_434C); // GSCL
@@ -512,6 +514,10 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _searchDebounceTimer = DispatcherQueue.CreateTimer();
+        _searchDebounceTimer.Interval = TimeSpan.FromMilliseconds(1000);
+        _searchDebounceTimer.IsRepeating = false;
+        _searchDebounceTimer.Tick += SearchDebounceTimer_OnTick;
         ApplyEarlyWindowPlacement();
         ApplyStartupVisuals();
         Title = SingleInstance.WindowTitle;
@@ -615,6 +621,8 @@ public sealed partial class MainWindow : Window
     {
         StartGlassSettingsPreferencesWatcher();
         PlatformPresenceService.Instance.Attach(DispatcherQueue);
+        PlatformPresenceService.Instance.PresenceChanged -= OnSearchAvailabilityChanged;
+        PlatformPresenceService.Instance.PresenceChanged += OnSearchAvailabilityChanged;
         OpenGlassBorderPolicyCoordinator.AttachPresenceListener();
         SwcaDwmBackdropNoticeCoordinator.AttachPresenceListener();
         OpenGlassRootBackdropNoticeCoordinator.AttachPresenceListener();
@@ -2296,7 +2304,24 @@ public sealed partial class MainWindow : Window
     }
 
     private void OnOpenGlassUiPolicyChanged(object? sender, EventArgs e) =>
-        DispatcherQueue.TryEnqueue(ApplyOpenGlassNavVisibility);
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            ApplyOpenGlassNavVisibility();
+            RefreshSearchSuggestionsIfOpen();
+        });
+
+    private void OnSearchAvailabilityChanged(object? sender, EventArgs e) =>
+        DispatcherQueue.TryEnqueue(RefreshSearchSuggestionsIfOpen);
+
+    private void RefreshSearchSuggestionsIfOpen()
+    {
+        if (!SearchBox.IsSuggestionListOpen)
+            return;
+
+        var matches = SearchSettings(SearchBox.Text);
+        SearchBox.ItemsSource = matches;
+        SearchBox.IsSuggestionListOpen = matches.Count > 0;
+    }
 
     private void ApplyOpenGlassNavVisibility()
     {
@@ -2878,42 +2903,195 @@ public sealed partial class MainWindow : Window
         _ => typeof(PlaceholderPage)
     };
 
+    private void SearchBox_OnTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput || _searchDebounceTimer is null)
+            return;
+
+        _searchDebounceTimer.Stop();
+        sender.IsSuggestionListOpen = false;
+        if (!string.IsNullOrWhiteSpace(sender.Text))
+            _searchDebounceTimer.Start();
+        else
+        {
+            sender.ItemsSource = Array.Empty<SettingsSearchSuggestion>();
+            sender.IsSuggestionListOpen = false;
+        }
+    }
+
+    private void SearchDebounceTimer_OnTick(DispatcherQueueTimer sender, object args)
+    {
+        _searchDebounceTimer?.Stop();
+        var query = SearchBox.Text;
+        var matches = SearchSettings(query);
+        SearchBox.ItemsSource = matches;
+        SearchBox.IsSuggestionListOpen = matches.Count > 0;
+    }
+
+    private IReadOnlyList<SettingsSearchSuggestion> SearchSettings(string? query)
+    {
+        var matches = SettingsSearchCatalog.Search(query);
+        var containsDwm = matches.Any(item => item.Destination.StartsWith("dwm", StringComparison.Ordinal));
+        var containsGlass = matches.Any(item => IsGlassSearchDestination(item.Destination));
+        var dwmAvailable = !containsDwm || IsDwmNavAvailable();
+        var glassAvailable = !containsGlass || IsGlassPlatformInstalledForUi();
+
+        return matches
+            .Where(item => item.Destination.StartsWith("dwm", StringComparison.Ordinal)
+                ? dwmAvailable
+                : !IsGlassSearchDestination(item.Destination) || glassAvailable)
+            .ToArray();
+    }
+
+    private static bool IsSearchDestinationAvailable(string destination)
+    {
+        if (destination.StartsWith("dwm", StringComparison.Ordinal))
+            return IsDwmNavAvailable();
+
+        return !IsGlassSearchDestination(destination) || IsGlassPlatformInstalledForUi();
+    }
+
+    private static bool IsGlassSearchDestination(string destination) =>
+        destination is "glass" or "root-windows" or "popup" or "taskbar" or "adjacent";
+
+    private static bool IsGlassPlatformInstalledForUi()
+    {
+        try
+        {
+            if (GlassPlatformNames.ShowDualGlassPlatformUi)
+            {
+                return GlassModulePath.IsPlatformInstalled(GlassPlatformArch.X64)
+                       || GlassModulePath.IsPlatformInstalled(GlassPlatformArch.X86);
+            }
+
+            return GlassModulePath.IsPlatformInstalled(GlassPlatformNames.NativeArch);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private void SearchBox_OnQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
     {
-        if (string.IsNullOrWhiteSpace(args.QueryText)) return;
-        var q = args.QueryText.Trim();
-        if (q.Contains("dwm", StringComparison.OrdinalIgnoreCase) ||
-            q.Contains("colorization", StringComparison.OrdinalIgnoreCase) ||
-            q.Contains("open glass", StringComparison.OrdinalIgnoreCase) ||
-            q.Contains("openglass", StringComparison.OrdinalIgnoreCase))
+        _searchDebounceTimer?.Stop();
+        var suggestion = args.ChosenSuggestion as SettingsSearchSuggestion
+                         ?? SearchSettings(args.QueryText).FirstOrDefault();
+        if (suggestion is null)
+            return;
+
+        sender.IsSuggestionListOpen = false;
+        if (!IsSearchDestinationAvailable(suggestion.Destination))
         {
-            if (IsDwmNavAvailable())
-            {
-                NavigateTo("dwm", force: true);
-                SelectNavItem("dwm");
-            }
+            var refreshedMatches = SearchSettings(sender.Text);
+            sender.ItemsSource = refreshedMatches;
+            sender.IsSuggestionListOpen = refreshedMatches.Count > 0;
+            return;
         }
-        else if (q.Contains("glass", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("popup", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("taskbar", StringComparison.OrdinalIgnoreCase))
+
+        NavigateToSearchDestination(suggestion.Destination);
+    }
+
+    private void NavigateToSearchDestination(string destination)
+    {
+        if (!IsSearchDestinationAvailable(destination))
+            return;
+
+        switch (destination)
         {
-            NavigateTo("glass", force: true);
-            SelectNavItem("glass");
+            case "system":
+            case "dwm":
+            case "glass":
+            case "attach":
+            case "themes":
+                NavigateTo(destination, force: true);
+                SelectNavItem(destination);
+                return;
+            case "text":
+                NavigateToTextPage();
+                return;
+            case "root-windows":
+                NavigateSearchDrill(
+                    "glass", typeof(GlassSettingsHubPage), "Breadcrumb_GlassSettings", null,
+                    typeof(RootWindowsPage), null, "Breadcrumb_RootSwca");
+                return;
+            case "popup":
+                NavigateSearchDrill(
+                    "glass", typeof(GlassSettingsHubPage), "Breadcrumb_GlassSettings", null,
+                    typeof(PopupHubPage), null, "Breadcrumb_PopupWindows");
+                return;
+            case "taskbar":
+                NavigateSearchDrill(
+                    "glass", typeof(GlassSettingsHubPage), "Breadcrumb_GlassSettings", null,
+                    typeof(TaskbarFlyoutPage), null, "Breadcrumb_Taskbar");
+                return;
+            case "adjacent":
+                NavigateSearchDrill(
+                    "glass", typeof(GlassSettingsHubPage), "Breadcrumb_GlassSettings", null,
+                    typeof(TaskbarAdjacentWindowsPage), null, "Breadcrumb_AdjacentWindows");
+                return;
+            case "dwm-colorization":
+                NavigateDwmSearchDrill(typeof(DwmColorizationDetailPage), DwmRouteIds.Colorization, "Breadcrumb_Colorization");
+                return;
+            case "dwm-glass":
+                NavigateDwmSearchDrill(typeof(DwmGlassDetailPage), DwmRouteIds.Glass, "Breadcrumb_DwmGlass");
+                return;
+            case "dwm-theme":
+                NavigateDwmSearchDrill(typeof(DwmThemeDetailPage), DwmRouteIds.Theme, "Breadcrumb_DwmTheme");
+                return;
+            case "themes-colors":
+                NavigateSearchDrill(
+                    "themes", typeof(VisualStylesPage), "NavThemes", null,
+                    typeof(ThemesColorsPage), null, "Breadcrumb_ThemesColors");
+                return;
+            case "themes-background":
+                NavigateSearchDrill(
+                    "themes", typeof(VisualStylesPage), "NavThemes", null,
+                    typeof(ThemesDesktopBackgroundPage), null, "Breadcrumb_ThemesDesktopBackground");
+                return;
         }
-        else if (q.Contains("стил", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("theme", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("visual style", StringComparison.OrdinalIgnoreCase))
-        {
-            NavigateTo("themes", force: true);
-            SelectNavItem("themes");
-        }
-        else if (q.Contains("process", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("attach", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("процесс", StringComparison.OrdinalIgnoreCase))
-        {
-            NavigateTo("attach", force: true);
-            SelectNavItem("attach");
-        }
+    }
+
+    private void NavigateDwmSearchDrill(Type detailPageType, string routeId, string breadcrumbKey)
+    {
+        if (!IsDwmNavAvailable())
+            return;
+
+        var hive = DwmRegistryHive.Hkcu;
+        NavigateSearchDrill(
+            "dwm",
+            typeof(DwmSettingsHubPage),
+            "Breadcrumb_DwmSettings",
+            DwmNavigationContext.ForHub(hive),
+            detailPageType,
+            DwmNavigationContext.ForDetail(hive, routeId),
+            breadcrumbKey);
+    }
+
+    private void NavigateSearchDrill(
+        string sidebarTag,
+        Type hubPageType,
+        string hubTitleKey,
+        object? hubParameter,
+        Type detailPageType,
+        object? detailParameter,
+        string detailTitleKey)
+    {
+        if (!_navItems.ContainsKey(sidebarTag))
+            return;
+
+        _nav.RememberForBack(_currentTag);
+        _currentTag = sidebarTag;
+        _nav.CurrentSidebarTag = sidebarTag;
+        SelectNavItem(sidebarTag);
+        _nav.NavigateHomeDrill(
+            hubPageType,
+            GlassSettingsResources.Get(hubTitleKey),
+            hubParameter,
+            detailPageType,
+            detailParameter,
+            GlassSettingsResources.Get(detailTitleKey));
+        UpdateBackButton();
     }
 
     private void HookTitleBarTheme()

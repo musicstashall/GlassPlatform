@@ -49,6 +49,8 @@
                         VerticalAlignment="Center"
                         PlaceholderText=""
                         QueryIcon="Find"
+                        TextMemberPath="DisplayText"
+                        TextChanged="SearchBox_OnTextChanged"
                         QuerySubmitted="SearchBox_OnQuerySubmitted" />
                 </TitleBar.Content>
             </TitleBar>
