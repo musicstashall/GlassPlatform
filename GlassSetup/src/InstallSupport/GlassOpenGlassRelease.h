@@ -17,6 +17,11 @@ inline bool PayloadUpdateAvailable(const std::wstring& installed,const std::wstr
 inline bool CanPlanApply(const std::wstring& installed,const std::wstring& offered) {
     return offered.empty() || !PayloadUpdateAvailable(offered,installed);
 }
+// Reviewed published release, DISPLAY ONLY when live discovery is unavailable.
+// Never use this value to authorize or select installation media.
+inline std::wstring DisplayVersion(const std::wstring& discovered) {
+    return discovered.empty()?L"3.0.2.3749":discovered;
+}
 // Upstream v3.0.2.3749 warns about 26H2; 25H2 has DWM crash reports
 // (#362/#387) and local Explorer crash evidence. Scope to this release, not
 // future fixed releases or all Windows 11. This is a warning, not a trust gate.
@@ -26,6 +31,10 @@ inline bool KnownPublishedReleaseRisk(unsigned windowsBuild,const std::wstring& 
     for(wchar_t c:offered)if(static_cast<unsigned>(c)>127)return false;
     return GlassPackageRules::ParseVersion(std::string(offered.begin(),offered.end()),version)&&
         GlassPackageRules::ParseVersion("3.0.2.3749",affected)&&GlassPackageRules::Compare(version,affected)==0;
+}
+// Unknown upstream metadata must not silence the known-build safety warning.
+inline bool ApplyRisk(unsigned build,const std::wstring& offered) {
+    return KnownPublishedReleaseRisk(build,DisplayVersion(offered));
 }
 inline std::wstring KnownPublishedReleaseRiskText(bool russian,unsigned windowsBuild=26300) {
     if(windowsBuild==26200)return russian?

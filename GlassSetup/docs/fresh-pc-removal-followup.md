@@ -71,3 +71,30 @@ cards, and both empty overflow captions. No native Windows build was performed.
 On Windows: fresh launch after a parent catalog failure, current binary build and
 signatures, SUT stock-style preparation in an offline leoka profile, partial/full
 removal package inventories, and actual WebView layout remain acceptance checks.
+
+## GlassSetup (4).log: vendor metadata HTTP 403
+
+The first-party catalog succeeds (platform/settings 2.0.0.119, Resources
+2.0.0.118). OG and SUT's independent upstream API calls both return HTTP 403.
+The log does not establish the specific reason for the 403 response. This is
+not the earlier missing first-party catalog problem.
+
+UI now distinguishes `displayVersion` / `versionFallback` from actual
+`targetVersion`, `targetPayloadVersion` and `remoteVersion`. With no vendor offer,
+OG displays reviewed published 3.0.2.3749 and SUT displays the existing pinned
+OfflineV4 release tag 4.0.0, labeled “известная версия / last known release”. The
+source strip does not describe these as current server offers. Details explain
+that upstream metadata is unavailable. Live/verified-local discovery overrides
+fallback display values. Acquisition, trust, hash, identity, downgrade decisions
+and version comparison never consume `displayVersion`.
+
+Known-build risk remains visible with empty upstream version (HTTP failure), but
+an actually discovered future version is not blanket-flagged. OG risk styling
+also applies to the available card before selection, with full-opacity red
+surface and red warning icon. Removal and retained installed products are not
+styled as dangerous apply. Portable regression replays both empty vendor offers,
+checks OG/SUT versions in available/planned cards and red icon computed color.
+
+This fixes UI information loss; it does not make a forbidden upstream HTTP
+request succeed. In particular, OG acquisition still requires verified official
+metadata/media. No fake server offer or unverified CI binary was introduced.

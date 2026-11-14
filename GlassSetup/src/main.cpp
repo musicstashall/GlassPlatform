@@ -64,6 +64,7 @@
 #include "InstallEngine.h"
 #include <SecureUxThemeInventory.h>
 #include "InstallSupport/GlassOpenGlassRelease.h"
+#include "InstallSupport/GlassSecureUxRelease.h"
 #include "InstallSupport/GlassOpenGlassInstall.h"
 #include "InstallLog.h"
 
@@ -2077,7 +2078,7 @@ private:
         auto text=GlassProductUiPolicy::WarningText(SelectionPreview().warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit());
         if(selection_.openGlass&&!selection_.Removes(3)) {
             std::lock_guard<std::mutex> lock(inspectMutex_);
-            if(GlassOpenGlassRelease::KnownPublishedReleaseRisk(GlassInstallUtil::WindowsBuildNumber(),inspect_.og.remotePayloadVersion)) {
+            if(GlassOpenGlassRelease::ApplyRisk(GlassInstallUtil::WindowsBuildNumber(),inspect_.og.remotePayloadVersion)) {
                 if(!text.empty())text+=L"\n";
                 text+=GlassOpenGlassRelease::KnownPublishedReleaseRiskText(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::WindowsBuildNumber());
             }
@@ -2161,7 +2162,7 @@ private:
             const bool applySupported=(!resources||resourcesReady)&&(openGlass?
                 GlassOpenGlassRelease::CanPlanApply(rep&&rep->installed?rep->installedPayloadVersion:L"",targetVersion):
                 ((resources&&resourcesReady&&targetVersion.empty())||packageApplyable));
-            const bool compatibilityRisk=openGlass&&checked&&!removing&&GlassOpenGlassRelease::KnownPublishedReleaseRisk(windowsBuild,targetVersion);
+            const bool compatibilityRisk=openGlass&&(checked||!rep||!rep->installed)&&!removing&&GlassOpenGlassRelease::ApplyRisk(windowsBuild,targetVersion);
             std::wstring warning=GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,os64);
             if(compatibilityRisk) {
                 if(!warning.empty())warning+=L"\n\n";
@@ -2241,6 +2242,8 @@ private:
                 L",\"installedVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
                 L",\"installedPackageVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
                 L",\"installedPayloadVersion\":"+JsStringLiteral(rep?rep->installedPayloadVersion:L"")+
+                L",\"displayVersion\":"+JsStringLiteral(openGlass?GlassOpenGlassRelease::DisplayVersion(remotePayloadVersion):L"")+
+                L",\"versionFallback\":"+(openGlass&&remotePayloadVersion.empty()?L"true":L"false")+
                 L",\"remotePayloadVersion\":"+JsStringLiteral(remotePayloadVersion)+
                 L",\"upstreamUpdateAvailable\":"+((rep&&!rep->installedPayloadVersion.empty()&&!rep->remotePayloadVersion.empty()&&VersionOlder(rep->installedPayloadVersion,rep->remotePayloadVersion))?L"true":L"false")+
                 L",\"targetPayloadVersion\":"+JsStringLiteral(targetPayloadVersion)+
@@ -2315,6 +2318,8 @@ private:
             L",\"presenceDetail\":"+JsStringLiteral(inspect_.secureUxThemePresenceDetail)+
             L",\"installedVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedPackageVersion)+
             L",\"installedPackageVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedPackageVersion)+
+            L",\"displayVersion\":"+JsStringLiteral(!sutTarget.empty()?sutTarget:GlassReleaseClient::Wide(GlassSecureUxRelease::ReleaseVersion(GlassSecureUxRelease::OfflineV4(os64?GlassSecureUxRelease::Architecture::X64:GlassSecureUxRelease::Architecture::X86).tag)))+
+            L",\"versionFallback\":"+(sutTarget.empty()?L"true":L"false")+
             L",\"targetVersion\":"+JsStringLiteral(sutTarget)+
             L",\"targetVersionKind\":"+JsStringLiteral(sutLocal?L"msi":L"release")+
             L",\"attachedPackageVersion\":"+JsStringLiteral(sutOffer.attachedVersion)+

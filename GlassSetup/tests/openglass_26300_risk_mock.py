@@ -7,6 +7,10 @@ h=r'''
 #include <cassert>
 int main(){using GlassOpenGlassRelease::KnownPublishedReleaseRisk;
  assert(KnownPublishedReleaseRisk(26300,L"3.0.2.3749"));
+ assert(GlassOpenGlassRelease::ApplyRisk(26200,L""));
+ assert(GlassOpenGlassRelease::ApplyRisk(26300,L""));
+ assert(!GlassOpenGlassRelease::ApplyRisk(26100,L""));
+ assert(!GlassOpenGlassRelease::ApplyRisk(26200,L"3.1.0.4266"));
  assert(KnownPublishedReleaseRisk(26200,L"3.0.2.3749"));
  assert(GlassOpenGlassRelease::KnownPublishedReleaseRiskText(true,26200).find(L"25H2")!=std::wstring::npos);
  for(unsigned build:{0u,19045u,22000u,26100u,28000u})assert(!KnownPublishedReleaseRisk(build,L"3.0.2.3749"));
@@ -14,7 +18,7 @@ int main(){using GlassOpenGlassRelease::KnownPublishedReleaseRisk;
 }
 '''
 s=(root/'GlassSetup/src/main.cpp').read_text()
-assert 'openGlass&&checked&&!removing&&GlassOpenGlassRelease::KnownPublishedReleaseRisk(windowsBuild,targetVersion)' in s
+assert 'openGlass&&(checked||!rep||!rep->installed)&&!removing&&GlassOpenGlassRelease::ApplyRisk(windowsBuild,targetVersion)' in s
 assert 'warning+=GlassOpenGlassRelease::KnownPublishedReleaseRiskText' in s
 header=(root/'GlassSetup/src/InstallSupport/GlassOpenGlassRelease.h').read_text()
 assert '26300.9818' in header and 'https://github.com/ALTaleX531/OpenGlass/releases/tag/v3.0.2.3749' in header

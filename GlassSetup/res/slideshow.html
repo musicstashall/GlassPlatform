@@ -809,8 +809,8 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 @keyframes c-crt-off{0%{opacity:.45;transform:scale(1,1)}55%{opacity:.9;transform:scale(1,.025)}80%{opacity:1;transform:scale(.018,.025)}100%{opacity:0;transform:scale(0,0)}}
 @media(prefers-reduced-motion:reduce){.c-landing{animation:none}.c-removal-slot{display:none}}
 /* Known upstream compatibility risk, distinct from installed-payload corruption. */
-#components-panel .c-card.compatibility-risk,#components-panel .c-card.compatibility-risk:hover{border-color:#f18383;background:linear-gradient(130deg,#5b272f,#321d2a);box-shadow:inset 0 1px #ffffff0a}
-#components-panel .c-card.compatibility-risk .comp-warning-button{color:#ffb1a7}
+#components-panel .c-card.compatibility-risk,#components-panel .c-card.compatibility-risk:hover{opacity:1;border-color:#f18383;background:linear-gradient(130deg,#5b272f,#321d2a);box-shadow:inset 0 1px #ffffff0a}
+#components-panel .c-card.compatibility-risk .comp-warning-button{color:#ff6b6b}
 </style></head>
 <body><main id="viewport"><div id="stage" data-mode="loading" role="region" aria-roledescription="carousel" aria-label="GlassPlatform">
 <div class="ambient slideshow-only"></div>
@@ -1031,11 +1031,12 @@ function showProductWarning(item,button){
   dialogParagraph(body,item.description,'dialog-description');
   const input=document.getElementById('product-'+item.id),f=input&&componentCardFacts(item,input);
   const state=f?.remove?(ru?'Будет удалено: MSI снимается с регистрации; удаляются файлы, службы и задачи продукта согласно правилам пакета.':'Will be removed: MSI registration, files, services and tasks are removed according to package rules.'):item.state;
-  const version=item.targetVersionKind==='release'?(ru?'релиз ':'release ')+(item.targetVersion||item.releaseTag||'—'):((componentUsesPayload(item)?item.targetPayloadVersion:item.targetVersion)||'—');
+  const version=item.targetVersionKind==='release'?(ru?'релиз ':'release ')+(item.targetVersion||item.releaseTag||item.displayVersion||'—'):((componentUsesPayload(item)?item.targetPayloadVersion:item.targetVersion)||item.displayVersion||'—');
   const pkg=[item.packageSize?componentSize(item.packageSize):'',version,ru?'Размер и SHA-256 сверяются перед установкой.':'Size and SHA-256 are checked before installation.'].filter(Boolean).join(' · ');
   for(const [label,text] of [[ru?'СОСТОЯНИЕ':'STATE',state],[ru?'ЗАВИСИМОСТИ':'DEPENDENCIES',item.warning||(ru?'Нет предупреждений о составе.':'No composition warnings.')],[ru?'ПАКЕТ':'PACKAGE',pkg],...(item.removeBlockedReason?[[ru?'УДАЛЕНИЕ':'REMOVAL',item.removeBlockedReason]]:[])]){
    const row=document.createElement('div');row.className='dialog-detail-row';const key=document.createElement('span');key.textContent='•  '+label;row.append(key);dialogParagraph(row,text);body.append(row);
   }
+  if(item.versionFallback)dialogParagraph(body,ru?'Upstream не вернул актуальную версию. Показана последняя известная опубликованная версия, а не подтверждённое предложение сервера. Пакет и его версия будут проверены перед установкой.':'Upstream did not return the current version. This is the last known published release, not a confirmed server offer. The package and its version will be verified before installation.','dialog-diagnostic');
   if(item.applySupported===false&&item.applyHint)dialogParagraph(body,item.applyHint,'dialog-warning-entry');
   const chosen=item.selectedPackagePath?(item.selectedPackagePath===item.attachedPackagePath?(ru?'приложенный MSI':'attached MSI'):(ru?'проверенный внутренний источник':'verified internal source')):(item.targetVersion||item.remoteVersion?(ru?'серверный кандидат / ещё не подготовлен':'server candidate / not yet prepared'):(ru?'подходящий источник не найден':'no eligible source found'));
   dialogParagraph(body,(ru?'Источник предложения: ':'Offer source: ')+chosen+(item.selectedPackagePath?' · '+item.selectedPackagePath:''),'dialog-diagnostic');
@@ -1438,10 +1439,10 @@ function componentCardAction(item,input,shelf){
 }
 function paintComponentCard(card,item,input,shelf){
  const ru=locale==='ru',f=componentCardFacts(item,input),available=shelf==='available';
- card.classList.toggle('compatibility-risk',item.compatibilityRisk===true&&f.selected&&!f.remove);
+ card.classList.toggle('compatibility-risk',item.compatibilityRisk===true&&(available||f.selected)&&!f.remove);
  const iconOnlyWarning=!available&&item.installed&&!f.selected&&!f.remove&&!!item.warning;
  card.classList.toggle('has-warning',!!item.warning&&!iconOnlyWarning);
- const current=componentMsiVersion(item),target=componentTargetVersion(item);
+ const current=componentMsiVersion(item),target=componentTargetVersion(item)||item.displayVersion||'';
  const meta=card.querySelector('.c-meta'),foot=card.querySelector('.c-foot'),action=card.querySelector('.comp-decision');
  const line=document.createElement('span');line.className='comp-version-line';
  const text=(value,bold=false)=>{const node=document.createElement(bold?'b':'span');node.className='comp-version-tag';node.textContent=value||(item.id==='openglass'&&(available||!item.installed)?(ru?'Версия уточняется':'Version pending'):'—');line.append(node);};
@@ -1473,6 +1474,7 @@ function paintComponentCard(card,item,input,shelf){
  }else{
   text(current);if(suffix)line.append(suffix);chipClass='current';chipText=current;icon='check';
  }
+ if(item.versionFallback&&(available||!item.installed))line.append(locale==='ru'?' · известная версия':' · last known release');
  meta.replaceChildren(line);
  const marks=document.createElement('span');
  const icons={"check": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12l4 4L19 6\"/></svg>", "update": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 19V5M6 11l6-6 6 6\"/></svg>", "download": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3v12M7 10l5 5 5-5\"/><path d=\"M4 20h16\"/></svg>", "trash": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13\"/></svg>", "repair": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12a8 8 0 0 1 13.7-5.7\"/><path d=\"M20 12a8 8 0 0 1-13.7 5.7\"/><path d=\"M18 3v4h-4\"/><path d=\"M6 21v-4h4\"/></svg>", "warn": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3.5l9 17H3z\"/><path d=\"M12 9v4.6\"/><circle cx=\"12\" cy=\"17\" r=\".9\"/></svg>", "arrowRight": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h15M13 6l6 6-6 6\"/></svg>", "arrowLeft": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M20 12H5M11 6l-6 6 6 6\"/></svg>"};
@@ -1494,6 +1496,7 @@ function paintComponentCard(card,item,input,shelf){
   if(comparable&&sv&&lv&&[...sv,...lv].every(n=>Number.isSafeInteger(n)&&n<=4294967295)){
    for(let i=0;i<4&&!order;i++)order=Math.sign((sv[i]||0)-(lv[i]||0));
   }
+  if(!server&&item.versionFallback&&item.displayVersion)source('known',ru?'известная':'last known',item.displayVersion);
   if(server){source('remote',ru?'на сервере':'on server',server);marks.lastElementChild.classList.toggle('source-newer',order>0);}
   if(local){source('local',ru?'локально':'local',local);marks.lastElementChild.classList.toggle('source-newer',order<0);}
   else {const absent=document.createElement('span');absent.className='src-absent';absent.textContent=ru?'локально —':'local —';marks.append(absent);}

@@ -13,6 +13,18 @@ for(const locale of ['ru','en']){
  const warning=locale==='ru'?'Опасность применения: сбои DWM, чёрный экран, возврат к экрану входа.':'Danger: DWM crashes, black screens, return to sign-in.';
  const og={id:'openglass',title:'OpenGlass',installed:false,checked:true,applySupported:true,operation:'install',
   targetVersion:'3.0.2.3749',targetPayloadVersion:'3.0.2.3749',compatibilityRisk:true,warning};
+ // Reproduce log4: both vendor API calls failed, no live versions.
+ const offlineOg={...og,checked:false,targetVersion:'',targetPayloadVersion:'',remotePayloadVersion:'',displayVersion:'3.0.2.3749',versionFallback:true};
+ const offlineSut={id:'secureUxTheme',title:'SecureUxTheme',installed:false,checked:false,applySupported:true,targetVersion:'',displayVersion:'4.0.0',versionFallback:true};
+ send([offlineOg,offlineSut],locale);
+ const offline=d.querySelector('#components-grid [data-product="openglass"]');
+ assert.ok(offline.classList.contains('compatibility-risk'),'available OG warns before selection despite API failure');
+ assert.ok(offline.textContent.includes('3.0.2.3749'));
+ assert.equal(dom.window.getComputedStyle(offline.querySelector('.comp-warning-button')).color,'rgb(255, 107, 107)');
+ assert.ok(!offline.textContent.includes('на сервере 3.0.2.3749')&&!offline.textContent.includes('on server 3.0.2.3749'));
+ assert.ok(d.querySelector('#components-grid [data-product="secureUxTheme"]').textContent.includes('4.0.0'));
+ send([{...offlineSut,checked:true}],locale);
+ assert.ok(d.querySelector('#components-installed-grid [data-product="secureUxTheme"]').textContent.includes('4.0.0'));
  send([og],locale);
  const card=d.querySelector('#components-installed-grid [data-product="openglass"]');
  assert.ok(card.classList.contains('compatibility-risk'));assert.ok(!card.classList.contains('is-broken'));
