@@ -13,6 +13,24 @@ for(const locale of ['ru','en']){
  const warning=locale==='ru'?'Опасность применения: сбои DWM, чёрный экран, возврат к экрану входа.':'Danger: DWM crashes, black screens, return to sign-in.';
  const og={id:'openglass',title:'OpenGlass',installed:false,checked:true,applySupported:true,operation:'install',
   targetVersion:'3.0.2.3749',targetPayloadVersion:'3.0.2.3749',compatibilityRisk:true,warning};
+ send([og],locale);
+ const ogAlias=d.querySelector('#components-grid [data-product="openglass"]');
+ assert.ok(ogAlias.classList.contains('idle'));
+ assert.ok(!ogAlias.classList.contains('compatibility-risk'));
+ assert.ok(!ogAlias.classList.contains('has-warning'));
+ assert.ok(d.querySelector('#components-installed-grid [data-product="openglass"]').classList.contains('compatibility-risk'));
+ const resources={id:'openglassResources',title:'Resources',installed:false,checked:false,applySupported:true,dependencyMissing:true,operation:'install'};
+ send([resources],locale);
+ let resourceCard=d.querySelector('#components-grid [data-product="openglassResources"]');
+ assert.ok(resourceCard.classList.contains('active'));assert.equal(resourceCard.querySelector('.comp-decision').disabled,false);
+ assert.equal(resourceCard.querySelector('.comp-dependency-warning'),null);
+ dom.window.commitComponentChoice(d.getElementById('product-openglassResources'),true);
+ resourceCard=d.querySelector('#components-installed-grid [data-product="openglassResources"]');
+ assert.ok(resourceCard.querySelector('.comp-dependency-warning'));
+ assert.ok(!resourceCard.classList.contains('has-warning'));
+ assert.equal(d.querySelector('#components-grid .comp-dependency-warning'),null);
+ send([{...resources,checked:true,dependencyMissing:false}],locale);
+ assert.equal(d.querySelector('.comp-dependency-warning'),null);
  // A forbidden metadata request exposes the same retry control, no install intent.
  const forbidden={id:'openglass',title:'OpenGlass',installed:false,checked:false,applySupported:false,metadataBlocked:true,metadataError:'GitHub HTTP error (403)'};
  send([forbidden],locale);

@@ -1458,9 +1458,16 @@ function componentCardAction(item,input,shelf){
 }
 function paintComponentCard(card,item,input,shelf){
  const ru=locale==='ru',f=componentCardFacts(item,input),available=shelf==='available';
- card.classList.toggle('compatibility-risk',item.compatibilityRisk===true&&(available||f.selected)&&!f.remove);
- const iconOnlyWarning=!available&&item.installed&&!f.selected&&!f.remove&&!!item.warning;
+ card.classList.toggle('compatibility-risk',item.compatibilityRisk===true&&(available?!f.selected:f.selected)&&!f.remove);
+ const iconOnlyWarning=available&&f.selected||item.id==='openglassResources'&&item.dependencyMissing||!available&&item.installed&&!f.selected&&!f.remove&&!!item.warning;
  card.classList.toggle('has-warning',!!item.warning&&!iconOnlyWarning);
+ // Dependency guidance belongs to the selected Resources card, never its catalogue mirror.
+ let dependency=card.querySelector('.comp-dependency-warning');
+ if(item.id==='openglassResources'&&!available&&f.selected&&!f.remove&&item.dependencyMissing){
+  if(!dependency){dependency=document.createElement('button');dependency.type='button';dependency.className='comp-warning-button comp-dependency-warning';dependency.textContent='⚠';card.querySelector('.c-card-top').append(dependency);}
+  const message=ru?'Нарушена зависимость: выберите OpenGlass в этом плане или установите его заранее':'Missing dependency: select OpenGlass in this plan or install it first';
+  dependency.dataset.tooltip=message;dependency.setAttribute('aria-label',message);dependency.onclick=()=>showProductWarning({title:item.title,warning:message},dependency);
+ }else if(dependency)dependency.remove();
  const current=componentMsiVersion(item),target=componentTargetVersion(item);
  const meta=card.querySelector('.c-meta'),foot=card.querySelector('.c-foot'),action=card.querySelector('.comp-decision');
  const line=document.createElement('span');line.className='comp-version-line';
@@ -1658,7 +1665,7 @@ function renderComponentsPanel(){
  const top=document.createElement('div');top.className='c-card-top';top.append(icons,name);const warning=icons.querySelector('.comp-warning-button');if(warning)top.append(warning);
  const meta=document.createElement('div');meta.className='c-meta';const foot=document.createElement('div');foot.className='c-foot';decision.classList.add('c-move');foot.append(decision);
  row.append(input,top,meta,foot);
- if(item.id==='openglassResources'&&item.applyHint){const hint=document.createElement('p');hint.className='comp-resource-dependency';hint.textContent=item.applyHint;row.insertBefore(hint,foot);row.classList.add('has-resource-dependency');}
+
  (hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid).append(row);}
 
  if(focusId){const restored=document.getElementById('product-'+focusId);if(restored&&!restored.disabled)restored.focus({preventScroll:true});}}

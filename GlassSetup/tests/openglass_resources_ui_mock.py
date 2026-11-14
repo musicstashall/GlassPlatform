@@ -76,6 +76,8 @@ assert '{L"openglassResources",6}' in s
 assert 'if(managedRow==6)selection_.openGlassResources=false' in s
 assert 'ShowWindow(componentResources_,nativeComponents && os64?SW_SHOWNA:SW_HIDE)' in s
 assert 'resourcesPrerequisiteReady_=os64&&inspect_.openGlassResourcesPrerequisite' in s
+assert "selection_.openGlassResources=message.back()==L'1'&&os64;" in s
+assert 'EnableWindow(componentResources_,os64);' in s
 assert 'for(std::size_t i=0;i<std::size(downloadIds);++i)' in s
 with tempfile.TemporaryDirectory(prefix='ResourcesUi-') as d:
  p=Path(d)/'test.cpp';exe=Path(d)/'test';p.write_text(code)

@@ -1840,7 +1840,7 @@ private:
             SetWindowTextW(componentResources_,(Text(IDS_COMP_OGR_TITLE)+(resourcesReady?L"":
                 (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L" — выберите или установите OpenGlass":L" — select or install OpenGlass first"))).c_str());
             SendMessageW(componentResources_,BM_SETCHECK,selection_.openGlassResources?BST_CHECKED:BST_UNCHECKED,0);
-            EnableWindow(componentResources_,resourcesReady||selection_.openGlassResources);
+            EnableWindow(componentResources_,os64);
             EnableWindow(componentSettings_,TRUE); EnableWindow(componentSettings32_,TRUE);
             EnableWindow(component64_,os64); EnableWindow(component32_,TRUE);
         }
@@ -2162,9 +2162,9 @@ private:
             const bool pairedApply=resources&&(!ogMetadataBlocked_||ogMetadataLocal_)&&GlassProducts::ResourcesApplyReady(pairedSelection,os64,resourcesPrerequisiteReady_)&&
                 GlassOpenGlassRelease::CanPlanApply(inspect_.og.installed?inspect_.og.installedPayloadVersion:L"",inspect_.og.remotePayloadVersion);
             const bool packageApplyable=!targetVersion.empty()&&(!rep||!rep->installed||rep->installedPackageVersion.empty()||!VersionOlder(targetVersion,rep->installedPackageVersion));
-            const bool applySupported=(!openGlass||!ogMetadataBlocked_||ogMetadataLocal_)&&(!resources||resourcesReady)&&(openGlass?
+            const bool applySupported=(!openGlass||!ogMetadataBlocked_||ogMetadataLocal_)&&(openGlass?
                 GlassOpenGlassRelease::CanPlanApply(rep&&rep->installed?rep->installedPayloadVersion:L"",targetVersion):
-                ((resources&&resourcesReady&&targetVersion.empty())||packageApplyable));
+                ((resources&&os64&&targetVersion.empty())||packageApplyable));
             const bool compatibilityRisk=openGlass&&(checked||!rep||!rep->installed)&&!removing&&GlassOpenGlassRelease::ApplyRisk(windowsBuild,targetVersion);
             std::wstring warning=GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,os64);
             if(compatibilityRisk) {
@@ -2239,6 +2239,7 @@ private:
                 L",\"nativeSourceCompared\":"+((rep&&rep->nativeSourceCompared)?L"true":L"false")+
                 L",\"nativeSourceDiffers\":"+((rep&&rep->nativeSourceDiffers)?L"true":L"false")+
                 L",\"updateAvailable\":"+(hasUpdate?L"true":L"false")+
+                L",\"dependencyMissing\":"+(resources&&!resourcesReady?L"true":L"false")+
                 L",\"pairedApplySupported\":"+(pairedApply?L"true":L"false")+
                 L",\"applySupported\":"+(applySupported?L"true":L"false")+
                 L",\"applyHint\":"+JsStringLiteral(!applySupported&&!openGlass&&(!resources||resourcesReady)?
@@ -3754,7 +3755,7 @@ private:
                 selection_.settings32=message.back()==L'1';selection_.SyncSettings(os64);
             }
             else if(message==L"component:openglassResources:1"||message==L"component:openglassResources:0") {
-                selection_.openGlassResources=message.back()==L'1'&&GlassProducts::ResourcesApplyReady(selection_,os64,resourcesPrerequisiteReady_);
+                selection_.openGlassResources=message.back()==L'1'&&os64;
             }
             else if (message==L"component:openglass:1" || message==L"component:openglass:0") selection_.openGlass=os64 && message.back()==L'1';
             else if(message==L"component:secureUxTheme:remove") {
@@ -4629,7 +4630,7 @@ private:
                         selection_.SyncSettings(GlassInstallUtil::IsOs64Bit());
                     } else if(LOWORD(w)==IDC_COMPONENT_OGR){
                         selection_.openGlassResources=SendMessageW(componentResources_,BM_GETCHECK,0,0)==BST_CHECKED &&
-                            GlassProducts::ResourcesApplyReady(selection_,os64,resourcesPrerequisiteReady_);
+                            os64;
                     } else if(LOWORD(w)==IDC_COMPONENT_SUT){
                         const bool checked=SendMessageW(componentSecureUxTheme_,BM_GETCHECK,0,0)==BST_CHECKED;
                         std::lock_guard<std::mutex> lock(inspectMutex_);
