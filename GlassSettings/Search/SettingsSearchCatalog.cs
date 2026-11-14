@@ -76,10 +76,12 @@ public static class SettingsSearchCatalog
 
         var queryWords = normalizedQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var index = Index.Value;
-        var exactMatches = FindMatches(index, queryWords, allowPrefix: false);
-        var matches = exactMatches.Count > 0
-            ? exactMatches
-            : FindMatches(index, queryWords, allowPrefix: true);
+        var matches = FindMatches(index, queryWords, allowPrefix: false)
+            .Concat(FindMatches(index, queryWords, allowPrefix: true))
+            .GroupBy(item => item.Entry.Id, StringComparer.Ordinal)
+            .Select(group => group.OrderByDescending(item => item.Score).First())
+            .OrderByDescending(item => item.Score)
+            .ThenBy(item => item.Entry.Id, StringComparer.Ordinal);
         var activeLanguage = GetActiveLanguage();
         return matches
             .Select(item => new SettingsSearchSuggestion(

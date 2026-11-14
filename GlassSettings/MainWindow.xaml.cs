@@ -65,6 +65,7 @@ public sealed partial class MainWindow : Window
     private bool _allowWindowClose;
     private bool _closeSubclassInstalled;
     private DispatcherQueueTimer? _searchDebounceTimer;
+    private TextBox? _searchInputTextBox;
     private Win32WindowSubclass.Proc? _closeSubclassProc;
     private IntPtr _closeSubclassFn;
     private static readonly UIntPtr CloseSubclassId = new(0x4753_434C); // GSCL
@@ -2903,6 +2904,64 @@ public sealed partial class MainWindow : Window
         _ => typeof(PlaceholderPage)
     };
 
+    private const int IBeamCursorId = 32513;
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern IntPtr LoadCursor(IntPtr hInstance, int cursorName);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetCursor(IntPtr cursor);
+
+    private void SearchBox_OnLoaded(object sender, RoutedEventArgs e)
+    {
+        var textBox = FindVisualChild<TextBox>(SearchBox);
+        if (ReferenceEquals(_searchInputTextBox, textBox))
+            return;
+
+        if (_searchInputTextBox is not null)
+        {
+            _searchInputTextBox.PointerEntered -= SearchInputTextBox_OnPointerEntered;
+            _searchInputTextBox.PointerMoved -= SearchInputTextBox_OnPointerMoved;
+        }
+
+        _searchInputTextBox = textBox;
+        if (_searchInputTextBox is not null)
+        {
+            _searchInputTextBox.PointerEntered += SearchInputTextBox_OnPointerEntered;
+            _searchInputTextBox.PointerMoved += SearchInputTextBox_OnPointerMoved;
+        }
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        var childCount = VisualTreeHelper.GetChildrenCount(parent);
+        for (var i = 0; i < childCount; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match)
+                return match;
+
+            var descendant = FindVisualChild<T>(child);
+            if (descendant is not null)
+                return descendant;
+        }
+
+        return null;
+    }
+
+    private static void SearchInputTextBox_OnPointerEntered(object sender, PointerRoutedEventArgs e) =>
+        SetSearchInputCursor();
+
+    private static void SearchInputTextBox_OnPointerMoved(object sender, PointerRoutedEventArgs e) =>
+        SetSearchInputCursor();
+
+    private static void SetSearchInputCursor()
+    {
+        var cursor = LoadCursor(IntPtr.Zero, IBeamCursorId);
+        if (cursor != IntPtr.Zero)
+            SetCursor(cursor);
+    }
+
     private void SearchBox_OnTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
         if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput || _searchDebounceTimer is null)
@@ -2989,6 +3048,9 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        sender.Text = string.Empty;
+        sender.ItemsSource = Array.Empty<SettingsSearchSuggestion>();
+        sender.IsSuggestionListOpen = false;
         NavigateToSearchDestination(suggestion.Destination);
     }
 
