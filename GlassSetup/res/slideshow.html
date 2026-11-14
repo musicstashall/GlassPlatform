@@ -1190,6 +1190,7 @@ function componentDropText(drag,lane){
  const item=(hostState.components||[]).find(item=>item.id===drag.id);
  if(value===null){
   if(lane===drag.source)return ru?'Исходная панель — без изменений':'Original shelf — no changes';
+  if(lane==='installed'&&item?.metadataBlocked)return metadataBlockText(item);
   if(lane==='installed')return hostState.componentsLoading?(ru?'Проверяются источники установки…':'Checking installation sources…'):(item?.applyHint||(ru?'Нет подходящего источника установки. Откройте сведения о продукте и проверьте журнал Setup.':'No eligible installation source. Open product details and check the Setup log.'));
   return item?.removeBlockedReason||(ru?'Удаление этого продукта сейчас недоступно':'Removal of this product is currently unavailable');
  }
@@ -1295,6 +1296,7 @@ function bindComponentWorkspace(){
 }
 // A release catalogue card and an installed-composition card are different views
 // of one intent, not clones with the same action/status content (concept C).
+function metadataBlockText(item){return (item?.metadataError||'HTTP 403')+' — '+(locale==='ru'?'Установка недоступна: не удалось получить версию продукта. Нажмите ▶ для повторной проверки.':'Installation unavailable: could not retrieve the product version. Press ▶ to retry.');}
 function componentSize(bytes){return new Intl.NumberFormat(locale==='ru'?'ru':'en',{minimumFractionDigits:1,maximumFractionDigits:1}).format(bytes/1048576)+(locale==='ru'?' МБ':' MB');}
 function componentUsesPayload(item){return ['openglass','settings64','settings32'].includes(item.id);}
 function componentTargetVersion(item){return componentUsesPayload(item)?(item.targetPayloadVersion||(item.id==='openglass'?item.remotePayloadVersion:'')||''):(item.targetVersion||'');}
@@ -1409,6 +1411,7 @@ function commitComponentRemoval(input){
 }
 function commitComponentChoice(input,checked){
  const item=(hostState.components||[]).find(item=>item.id===input.dataset.component);
+ if(checked&&item?.metadataBlocked){componentGestureNote(metadataBlockText(item),true,true);return false;}
  if(input.disabled||hostState.componentsLoading||input.checked===checked&&input.dataset.intent!=='remove'||checked&&item?.applySupported===false&&!resourcesPairedChoice(item))return false;
  const serial=componentNoticeSerial,wasRemove=input.dataset.intent==='remove';
  const currentCard=input.closest('#components-installed-grid .c-card'),currentList=currentCard?.closest('.c-lane-body');
@@ -1475,6 +1478,7 @@ function paintComponentCard(card,item,input,shelf){
   text(current);if(suffix)line.append(suffix);chipClass='current';chipText=current;icon='check';
  }
  if(item.versionFallback&&(available||!item.installed))line.append(locale==='ru'?' · известная версия':' · last known release');
+ if(item.metadataBlocked&&(available||!item.installed))line.append(' · '+(item.metadataRetrying?(ru?'Повторная проверка версии…':'Retrying version discovery…'):metadataBlockText(item)));
  meta.replaceChildren(line);
  const marks=document.createElement('span');
  const icons={"check": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12l4 4L19 6\"/></svg>", "update": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 19V5M6 11l6-6 6 6\"/></svg>", "download": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3v12M7 10l5 5 5-5\"/><path d=\"M4 20h16\"/></svg>", "trash": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13\"/></svg>", "repair": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12a8 8 0 0 1 13.7-5.7\"/><path d=\"M20 12a8 8 0 0 1-13.7 5.7\"/><path d=\"M18 3v4h-4\"/><path d=\"M6 21v-4h4\"/></svg>", "warn": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3.5l9 17H3z\"/><path d=\"M12 9v4.6\"/><circle cx=\"12\" cy=\"17\" r=\".9\"/></svg>", "arrowRight": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h15M13 6l6 6-6 6\"/></svg>", "arrowLeft": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M20 12H5M11 6l-6 6 6 6\"/></svg>"};
@@ -1511,7 +1515,7 @@ function paintComponentCard(card,item,input,shelf){
  }
  const definition=componentCardAction(item,input,shelf),label=document.createElement('span');label.className='comp-action-label';label.textContent=definition.label;action.prepend(label);
  if(definition.value===true&&item.applySupported===false&&!resourcesPairedChoice(item))action.disabled=true;
- action.title=definition.label;action.setAttribute('aria-label',definition.label);action.dataset.componentAction=definition.act;
+ action.title=item.metadataBlocked?metadataBlockText(item):definition.label;action.setAttribute('aria-label',definition.label);action.dataset.componentAction=definition.act;
  if(definition.act==='repair'||definition.act==='update'||definition.act==='undo'||definition.act==='unrepair')action.setAttribute('aria-pressed',String(f.selected));else action.removeAttribute('aria-pressed');
  action.onclick=()=>commitComponentChoice(input,definition.value);
  const spacer=document.createElement('span');spacer.className='spacer';foot.replaceChildren(marks,spacer,action);
@@ -1652,6 +1656,15 @@ function syncDownloadVisuals(){
   const planned=!!(input?.checked&&input.dataset.intent!=='remove'&&hostState.appMode!=='unins'&&card.closest('#components-installed-grid'));
   const d=selected.find(d=>d.id===card.dataset.product);
   let bar=card.querySelector('.product-transfer'),retry=card.querySelector('.download-retry');
+  if(item?.metadataBlocked&&hostState.appMode!=='unins'&&input?.dataset.intent!=='remove'){
+   if(bar)bar.remove();
+   card.classList.add('download-failed');
+   if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
+   retry.disabled=!!item.metadataRetrying;
+   retry.title=metadataBlockText(item);retry.setAttribute('aria-label',ru?'Повторить получение версии':'Retry version discovery');
+   retry.onclick=e=>{e.stopPropagation();if(!item.metadataRetrying)window.chrome?.webview?.postMessage('metadata-retry:'+item.id);};
+   continue;
+  }
   const remote=item?.downloadRequired!==false||!!d?.network,active=planned&&remote&&!!d&&d.phase!=='ready';
   card.classList.toggle('download-planned',planned&&remote&&!d);
   card.classList.toggle('download-progress',active);

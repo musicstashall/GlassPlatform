@@ -65,6 +65,7 @@
 #include <SecureUxThemeInventory.h>
 #include "InstallSupport/GlassOpenGlassRelease.h"
 #include "InstallSupport/GlassSecureUxRelease.h"
+#include "InstallSupport/GlassOpenGlassPackage.h"
 #include "InstallSupport/GlassOpenGlassInstall.h"
 #include "InstallLog.h"
 
@@ -80,6 +81,7 @@ constexpr UINT kInstallTimerMs = 16, kHeroTimerMs = 50;
 constexpr ULONGLONG kMarqueePeriodMs = 1400;
 constexpr double kProgressSmoothTauMs = 120.0;
 constexpr ULONGLONG kRollbackFinishMs = 900;
+constexpr UINT kVendorMetadataReady = WM_APP + 10;
 constexpr UINT kInitWebView = WM_APP + 1;
 constexpr UINT kVersionCheckComplete = WM_APP + 2;
 constexpr UINT kSetupDownloadStarted = WM_APP + 8;
@@ -1223,6 +1225,7 @@ public:
         // already gone when this is called from the main loop's shutdown path.
         if (startupThread_.joinable()) startupThread_.join();
         if (inspectThread_.joinable()) inspectThread_.join();
+        if(vendorMetadataThread_.joinable())vendorMetadataThread_.join();
         downloads_.Join();
     }
     // Observe queued pointer messages before child controls/IsDialogMessage
@@ -1323,7 +1326,9 @@ private:
     std::vector<std::wstring> conflicts_;
     std::wstring installedGlassVersion_;
     GlassProductInspect::Report inspect_;
-    std::thread inspectThread_;
+    std::thread inspectThread_,vendorMetadataThread_;
+    bool ogMetadataBlocked_=false,sutMetadataBlocked_=false;
+    std::wstring vendorMetadataRetry_;
     std::atomic_bool inspectReady_{false};
     bool inspectionApplied_=false;
     unsigned pendingSettingsRemovalRisk_=0;
@@ -2156,10 +2161,10 @@ private:
             GlassProducts::Selection pairedSelection{};pairedSelection.openGlass=true;
             // Пара с OpenGlass не ждёт уже известную версию MSI: «Далее» всё равно
             // проверяет пакет. Неизвестная версия установленного MSI — не понижение.
-            const bool pairedApply=resources&&GlassProducts::ResourcesApplyReady(pairedSelection,os64,resourcesPrerequisiteReady_)&&
+            const bool pairedApply=resources&&!ogMetadataBlocked_&&GlassProducts::ResourcesApplyReady(pairedSelection,os64,resourcesPrerequisiteReady_)&&
                 GlassOpenGlassRelease::CanPlanApply(inspect_.og.installed?inspect_.og.installedPayloadVersion:L"",inspect_.og.remotePayloadVersion);
             const bool packageApplyable=!targetVersion.empty()&&(!rep||!rep->installed||rep->installedPackageVersion.empty()||!VersionOlder(targetVersion,rep->installedPackageVersion));
-            const bool applySupported=(!resources||resourcesReady)&&(openGlass?
+            const bool applySupported=(!openGlass||!ogMetadataBlocked_)&&(!resources||resourcesReady)&&(openGlass?
                 GlassOpenGlassRelease::CanPlanApply(rep&&rep->installed?rep->installedPayloadVersion:L"",targetVersion):
                 ((resources&&resourcesReady&&targetVersion.empty())||packageApplyable));
             const bool compatibilityRisk=openGlass&&(checked||!rep||!rep->installed)&&!removing&&GlassOpenGlassRelease::ApplyRisk(windowsBuild,targetVersion);
@@ -2226,6 +2231,9 @@ private:
                 L",\"description\":"+JsStringLiteral(description)+L",\"warning\":"+JsStringLiteral(warning)+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
                 L",\"installed\":"+((rep&&(rep->installed||rep->residual))?L"true":L"false")+
                 L",\"removeSupported\":"+((rep&&(rep->installed||(rep->residual&&rep->residualSafe))&&!disabled&&!hidden)?L"true":L"false")+
+                L",\"metadataBlocked\":"+(openGlass&&ogMetadataBlocked_?L"true":L"false")+
+                L",\"metadataRetrying\":"+(openGlass&&vendorMetadataRetry_==L"openglass"?L"true":L"false")+
+                L",\"metadataError\":"+JsStringLiteral(openGlass?inspect_.openGlassDiscoveryError:L"")+
                 L",\"compatibilityRisk\":"+(compatibilityRisk?L"true":L"false")+
                 L",\"recommendationEligible\":"+((openGlass||resources)?L"false":L"true")+
                 L",\"recommended\":"+((rep&&rep->nativeSourceDiffers&&!openGlass&&!resources)?L"true":L"false")+
@@ -2331,7 +2339,10 @@ private:
             L",\"releaseTag\":"+JsStringLiteral(sutOffer.releaseTag)+
             L",\"packageSize\":"+std::to_wstring(sutLocal?sutOffer.localSize:sutOffer.releaseSize)+
             L",\"broken\":"+(inspect_.secureUxTheme.damaged?L"true":L"false")+
-            L",\"applySupported\":"+(inspect_.secureUxTheme.installed?L"false":L"true")+
+            L",\"metadataBlocked\":"+(sutMetadataBlocked_?L"true":L"false")+
+            L",\"metadataRetrying\":"+(vendorMetadataRetry_==L"secureUxTheme"?L"true":L"false")+
+            L",\"metadataError\":"+JsStringLiteral(inspect_.secureUxDiscoveryError)+
+            L",\"applySupported\":"+(inspect_.secureUxTheme.installed||sutMetadataBlocked_?L"false":L"true")+
             L",\"removalDependencyId\":"+JsStringLiteral(os64?L"settings64":L"settings32")+
             L",\"removalDependencyRequired\":"+(SecureUxRemovalNeedsSettingsUpdateLocked()?L"true":L"false")+
             L",\"removalWithoutSettings\":"+(NoSettingsInstalledLocked()?L"true":L"false")+
@@ -2653,11 +2664,17 @@ private:
     // «Установить» доступен, когда анализ завершён и есть выбранные продукты.
     [[nodiscard]] bool ComponentsReady() const noexcept {
         return (page_!=Page::Components && page_!=Page::Certificate) || ((!downloadContinuePending_||DownloadsReady()) && inspectReady_.load(std::memory_order_acquire) && HasSelectedComponent() &&
+            !(selection_.openGlass&&ogMetadataBlocked_) && !(selection_.secureUxTheme&&sutMetadataBlocked_) &&
             OpenGlassApplyPlanSupported() &&
             GlassProducts::ResourcesPlanReady(selection_,GlassInstallUtil::IsOs64Bit(),resourcesPrerequisiteReady_) &&
             !(selection_.removeMask && selection_.secureUxTheme));
     }
     void OnInspectReady() {
+        {
+            std::lock_guard<std::mutex> lock(inspectMutex_);
+            ogMetadataBlocked_=inspect_.openGlassDiscoveryError.find(L"403")!=std::wstring::npos;
+            sutMetadataBlocked_=inspect_.secureUxDiscoveryError.find(L"403")!=std::wstring::npos;
+        }
         {
             std::lock_guard<std::mutex> lock(inspectMutex_);
             const bool os64=GlassInstallUtil::IsOs64Bit();
@@ -3112,6 +3129,38 @@ private:
         accepted_=Shared::GlassInstallerLaunch::IsEulaAccepted(SetupLicenseIdentity().c_str());
         SendMessageW(accept_,BM_SETCHECK,accepted_?BST_CHECKED:BST_UNCHECKED,0);
         SetPage(accepted_?Page::Components:Page::License);
+    }
+    void RetryVendorMetadata(const std::wstring& id) {
+        if(!vendorMetadataRetry_.empty()||!inspectReady_.load()||closing_)return;
+        if(id!=L"openglass"&&id!=L"secureUxTheme")return;
+        if(id==L"openglass"?!ogMetadataBlocked_:!sutMetadataBlocked_)return;
+        if(vendorMetadataThread_.joinable())vendorMetadataThread_.join();
+        vendorMetadataRetry_=id;
+        try {
+            vendorMetadataThread_=std::thread([this,id]() {
+                std::wstring error,version;std::uint64_t size=0;
+                GlassSecureUxPackage::Offer offer;
+                bool ok=false;
+                try {
+                    if(id==L"openglass")ok=GlassOpenGlassPackage::Describe(inspectStop_,version,size,error);
+                    else ok=GlassSecureUxPackage::Describe(inspectStop_,offer,error)&&!offer.releaseVersion.empty();
+                }catch(...){error=L"Metadata retry failed";}
+                if(!ok&&error.empty())error=L"Upstream version unavailable";
+                {
+                    std::lock_guard<std::mutex> lock(inspectMutex_);
+                    if(id==L"openglass") {
+                        inspect_.openGlassDiscoveryError=error;
+                        if(ok)inspect_.og.remotePayloadVersion=version;
+                    }else {
+                        inspect_.secureUxDiscoveryError=error;
+                        if(ok)inspect_.secureUxOffer=std::move(offer);
+                    }
+                }
+                InstallLog::LineFormat(L"Vendor version retry: product=%s success=%d error=%s",id.c_str(),ok?1:0,error.c_str());
+                if(window)PostMessageW(window,kVendorMetadataReady,ok?1:0,id==L"openglass"?0:1);
+            });
+        }catch(...){vendorMetadataRetry_.clear();}
+        SyncWebViewState();
     }
     bool BeginProductInspection() {
         if(inspectThread_.joinable() || inspectReady_.load(std::memory_order_acquire))return true;
@@ -3650,6 +3699,11 @@ private:
             SyncWebViewState();return S_OK;
         }
         if (page_==Page::Components && !DebugDemoLocksControls()) {
+            if(message==L"metadata-retry:openglass"||message==L"metadata-retry:secureUxTheme") {
+                RetryVendorMetadata(message.substr(15));return S_OK;
+            }
+            if((ogMetadataBlocked_&&message==L"component:openglass:1")||
+               (sutMetadataBlocked_&&message==L"component:secureUxTheme:1")){SyncWebViewState();return S_OK;}
             static constexpr const wchar_t* downloadIds[]={L"x64",L"x86",L"settings64",L"settings32",L"openglass",L"secureUxTheme",L"openglassResources"};
             for(std::size_t i=0;i<std::size(downloadIds);++i)if(message==L"download-retry:"+std::wstring(downloadIds[i])) {
                 downloads_.Retry(i);SyncWebViewState();return S_OK;
@@ -3686,7 +3740,7 @@ private:
                 selection_.removeMask=0;selection_.confirmedSettingsRemovalRisk=0;
                 selection_.platform64=os64;selection_.platform32=true;selection_.settings64=os64;selection_.settings32=true;selection_.SyncSettings(os64); // OG/Resources are manual choices, never recommendations.
                 std::lock_guard<std::mutex> lock(inspectMutex_);
-                if(!selection_.secureUxThemeRemove)selection_.secureUxTheme=!inspect_.secureUxTheme.installed && !SecureUxThemeSelectionBlocked();
+                if(!selection_.secureUxThemeRemove)selection_.secureUxTheme=!sutMetadataBlocked_ && !inspect_.secureUxTheme.installed && !SecureUxThemeSelectionBlocked();
             }
             else if (message==L"component:x64:1" || message==L"component:x64:0") selection_.platform64=os64 && message.back()==L'1';
             else if (message==L"component:x86:1" || message==L"component:x86:0") selection_.platform32=message.back()==L'1';
@@ -3713,7 +3767,7 @@ private:
                 const bool checked=message.back()==L'1';
                 std::lock_guard<std::mutex> lock(inspectMutex_);
                 if (!SecureUxThemeSelectionBlocked())
-                    selection_.secureUxTheme=checked && !inspect_.secureUxTheme.installed;
+                    selection_.secureUxTheme=checked && !sutMetadataBlocked_ && !inspect_.secureUxTheme.installed;
                 else
                     ClampSecureUxThemeSelection();
             }
@@ -4428,6 +4482,12 @@ private:
         case WM_CREATE: InitializeLoading(); return 0;
         case kBeginStartup: BeginStartup(); return 0;
         case kStartupComplete: CompleteStartupIfReady(); return 0;
+        case kVendorMetadataReady:
+            if(vendorMetadataThread_.joinable())vendorMetadataThread_.join();
+            vendorMetadataRetry_.clear();
+            if(l==0)ogMetadataBlocked_=w==0;else sutMetadataBlocked_=w==0;
+            if(!closing_){EnableWindow(next_,!failurePending_&&ComponentsReady());SyncWebViewState();}
+            return 0;
         case kInspectReady: OnInspectReady(); return 0;
         case WM_ERASEBKGND:
             // Paint() composes both content and footer into the back buffer.
@@ -4568,7 +4628,7 @@ private:
                         const bool checked=SendMessageW(componentSecureUxTheme_,BM_GETCHECK,0,0)==BST_CHECKED;
                         std::lock_guard<std::mutex> lock(inspectMutex_);
                         selection_.secureUxThemeRemove=false;secureUxRemovalCode_.clear();
-                        selection_.secureUxTheme=checked && !inspect_.secureUxTheme.installed && !SecureUxThemeSelectionBlocked();
+                        selection_.secureUxTheme=checked && !sutMetadataBlocked_ && !inspect_.secureUxTheme.installed && !SecureUxThemeSelectionBlocked();
                         if(checked && SecureUxThemeRemovalSupportedLocked()&&SecureUxRemovalDependencySatisfiedLocked()){
                             selection_.secureUxRemovalWithoutSettings=NoSettingsInstalledLocked()&&!(os64?selection_.Settings64(true):selection_.Settings32(false));
                             selection_.secureUxThemeRemove=true;secureUxRemovalCode_=inspect_.officialSecureUxThemeCode;
@@ -4584,7 +4644,7 @@ private:
                     } else {
                         selection_.platform64=os64 && SendMessageW(component64_,BM_GETCHECK,0,0)==BST_CHECKED;
                         selection_.platform32=SendMessageW(component32_,BM_GETCHECK,0,0)==BST_CHECKED;
-                        selection_.openGlass=os64 && SendMessageW(componentOpenGlass_,BM_GETCHECK,0,0)==BST_CHECKED;
+                        selection_.openGlass=!ogMetadataBlocked_ && os64 && SendMessageW(componentOpenGlass_,BM_GETCHECK,0,0)==BST_CHECKED;
                     }
                     {std::lock_guard<std::mutex> lock(inspectMutex_);
                         if(selection_.secureUxThemeRemove&&(!SecureUxRemovalDependencySatisfiedLocked()||

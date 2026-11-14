@@ -44,6 +44,7 @@ bool VersionOlder(const std::wstring& a,const std::wstring& b){return !a.empty()
 namespace InstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
 namespace GlassInstallUtil {bool os64=true;bool IsOs64Bit(){return os64;}enum class SecureUxThemeState {Unavailable,Inactive,Active,ActivationPending,DeactivationPending,External,Conflict};}
 struct Wizard {
+ bool sutMetadataBlocked_=false;
  bool resourcesPrerequisiteReady_=true,downloadContinuePending_=false,failurePending_=false;
  bool DownloadsReady(){return true;} bool ComponentsReady(){return true;} bool MaintenanceUi() const{return maintenanceMode_;}
  GlassProducts::Selection selection_{};

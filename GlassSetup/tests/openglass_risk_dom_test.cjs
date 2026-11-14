@@ -13,6 +13,22 @@ for(const locale of ['ru','en']){
  const warning=locale==='ru'?'Опасность применения: сбои DWM, чёрный экран, возврат к экрану входа.':'Danger: DWM crashes, black screens, return to sign-in.';
  const og={id:'openglass',title:'OpenGlass',installed:false,checked:true,applySupported:true,operation:'install',
   targetVersion:'3.0.2.3749',targetPayloadVersion:'3.0.2.3749',compatibilityRisk:true,warning};
+ // A forbidden metadata request exposes the same retry control, no install intent.
+ const forbidden={id:'openglass',title:'OpenGlass',installed:false,checked:false,applySupported:false,metadataBlocked:true,metadataError:'GitHub HTTP error (403)'};
+ send([forbidden],locale);
+ let forbiddenCard=d.querySelector('#components-grid [data-product="openglass"]');
+ const metadataRetry=forbiddenCard.querySelector('.download-retry');assert.ok(metadataRetry);
+ assert.ok(forbiddenCard.textContent.includes('403'));
+ assert.equal(forbiddenCard.querySelector('.comp-decision').disabled,true);
+ const prior=messages.length;metadataRetry.click();assert.equal(messages.at(-1),'metadata-retry:openglass');assert.equal(messages.length,prior+1);
+ dom.window.commitComponentChoice(d.getElementById('product-openglass'),true);
+ assert.equal(d.getElementById('product-openglass').checked,false);
+ assert.ok(d.getElementById('components-gesture-status').textContent.includes('403'));
+ send([{...forbidden,metadataRetrying:true}],locale);
+ assert.equal(d.querySelector('#components-grid .download-retry').disabled,true);
+ send([{...forbidden,metadataBlocked:false,metadataRetrying:false,applySupported:true,targetPayloadVersion:'3.0.2.3749'}],locale);
+ assert.equal(d.querySelector('#components-grid .download-retry'),null);
+ assert.equal(d.querySelector('#components-grid .comp-decision').disabled,false);
  // Reproduce log4: both vendor API calls failed, no live versions.
  const offlineOg={...og,checked:false,targetVersion:'',targetPayloadVersion:'',remotePayloadVersion:'',displayVersion:'3.0.2.3749',versionFallback:true};
  const offlineSut={id:'secureUxTheme',title:'SecureUxTheme',installed:false,checked:false,applySupported:true,targetVersion:'',displayVersion:'4.0.0',versionFallback:true};

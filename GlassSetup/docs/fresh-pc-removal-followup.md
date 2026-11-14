@@ -98,3 +98,27 @@ checks OG/SUT versions in available/planned cards and red icon computed color.
 This fixes UI information loss; it does not make a forbidden upstream HTTP
 request succeed. In particular, OG acquisition still requires verified official
 metadata/media. No fake server offer or unverified CI binary was introduced.
+
+## Explicit version retry after HTTP 403
+
+A vendor metadata HTTP 403 now sets a distinct blocked capability on that card.
+It is not a package-transfer failure and does not create an install intent.
+The card shows the existing centered `.download-retry` Play control and the
+upstream error/retry explanation. Click sends `metadata-retry:<vendor>`.
+A dedicated cancellable worker calls only that vendor's read-only Describe;
+there is no full product rescan, selection reset, package download, install,
+controller handoff or change to verification rules. Repeated clicks while busy
+are suppressed. Completion updates the corresponding offer under inspectMutex
+and publishes UI state on the UI thread. Only a successful metadata response
+unblocks apply; another failure (including a different HTTP error) stays blocked
+and can be retried. Shutdown cancels and joins the worker.
+
+The WebView choice/drag/recommendation capability and native ComponentsReady
+all enforce this block. Resources cannot indirectly select a forbidden fresh OG
+through the paired-selection path. Product removal is not blocked by inability
+to discover a release. Known-version labels and the OG risk warning are display
+information only and cannot bypass the metadata gate.
+
+Tests: actual threaded retry/completion with failed/successful responses and
+double-click suppression; actual ComponentsReady apply/removal behavior; DOM
+reason, Play button, scoped IPC, pending disabled state and successful unblock.
