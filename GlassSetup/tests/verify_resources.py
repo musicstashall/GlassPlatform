@@ -682,7 +682,7 @@ assert "HasSelectedComponent" in setup
 assert "for(const reason of item.reasons||[])" in ui and "showProductWarning" in ui  # details live in the popup, not in C cards
 # Approved 2026-11-04 layout supersedes the lower warning stripe and mandatory locks.
 assert "comp-slim" in ui and "components-extra" in ui and "components-stack" in ui
-assert "left:48px;width:302px" in ui and "right:48px;width:268px" in ui and "height:330px" in ui
+assert "left:48px;width:302px" in ui and "right:48px;width:268px" in ui and "height:316px" in ui
 assert "mask-image:linear-gradient(180deg,transparent,#000 18px" in ui
 assert "has-warning" in ui and ".c-card.has-warning" in ui
 assert "components:select-all" in ui and "components:select-all" in setup and "components:select-all" in unins

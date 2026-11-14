@@ -1437,9 +1437,7 @@ private:
             return 17;
         }
         if(secureUxThemeReboot||msiRebootRequired)(void)GlassMaintenanceReboot::Pinned(true);
-        else if(!GlassMaintenanceReboot::Pinned()) {
-            if(!GlassMaintenanceCache::CollectAfterRemoval())LogLine(L"Product source CleanupPending; removal result preserved");
-        }
+        if(!GlassMaintenanceCache::CollectAfterRemoval())LogLine(L"Product source CleanupPending; removal result preserved");
         std::wstring complete=T(L"Удаление завершено.",L"Uninstall complete.");
         if (cleanupProfiles.SavedThemeRegistryFallback()) {
             {std::lock_guard<std::mutex> lock(dataMutex_);savedThemeFallbackWarning_=true;}

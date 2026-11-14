@@ -42,10 +42,10 @@ UINT GetWindowsDirectoryW(wchar_t* out,UINT){if(!windowsOk)return 0;std::wcscpy(
 int GetCurrentThemeName(wchar_t* out,int,wchar_t*,int,wchar_t*,int){if(!actualOk)return -1;std::wcscpy(out,actual.c_str());return 0;}
 namespace GlassInstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
 class Inventory {
- struct Profile {std::wstring sid;HKEY hive;};
+ struct Profile {std::wstring sid;HKEY hive;std::wstring path=L"profile";};
  std::vector<Profile> profiles_;
  bool removalStylePrepared_=false,removalStyleCommitted_=false;
- bool OpenAll(std::wstring&,bool skipDeleted=false){assert(skipDeleted);profiles_.clear();for(int i=1;i<=profileCount;++i)profiles_.push_back({L"SID-"+std::to_wstring(i),reinterpret_cast<HKEY>(static_cast<size_t>(i))});return openAllOk;}
+ bool OpenAll(std::wstring&,bool skipDeleted=false){assert(!skipDeleted);profiles_.clear();for(int i=1;i<=profileCount;++i)profiles_.push_back({L"SID-"+std::to_wstring(i),reinterpret_cast<HKEY>(static_cast<size_t>(i))});return openAllOk;}
  bool VerifyInventory(std::wstring&)const{return inventoryOk&&++inventoryCalls!=failInventoryAt;}
 public:
 // METHODS

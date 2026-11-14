@@ -15,7 +15,11 @@ receive({data:{type:'state',locale:'ru',page:'components',maintenance:true,compo
 assert.match(d.querySelector('#components-title').textContent,/Продукты/);
 assert.equal(d.querySelectorAll('#components-panel .c-card input.comp-check').length,6);
 assert.equal(dom.window.getComputedStyle(d.querySelector('#components-grid')).display,'flex');
-assert.equal(dom.window.getComputedStyle(d.querySelector('#components-panel .components-list')).height,'330px');
+assert.equal(dom.window.getComputedStyle(d.querySelector('#components-panel .components-list')).height,'316px');
+for(const selector of ['.c-slot-left','.c-slot-right','.c-lane.installed']){
+ assert.equal(dom.window.getComputedStyle(d.querySelector(selector)).top,'170px');
+ assert.equal(dom.window.getComputedStyle(d.querySelector(selector)).height,'358px');
+}
 assert.equal(d.querySelectorAll('.c-card:not([data-catalog-alias]) .comp-version-line').length,6);
 assert.equal(d.querySelectorAll('#components-panel .c-card:not([data-catalog-alias]).is-checked').length,1);
 assert.equal(d.querySelector('#product-settings64').checked,true);

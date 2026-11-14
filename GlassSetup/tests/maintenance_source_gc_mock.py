@@ -12,7 +12,7 @@ h=r'''
 #include <cwchar>
 #include <iostream>
 using DWORD=unsigned;using HANDLE=int;
-constexpr int INVALID_HANDLE_VALUE=-1,TRUE=1,FALSE=0,ERROR_FILE_NOT_FOUND=2,ERROR_FILE_EXISTS=80,ERROR_NO_MORE_FILES=18;
+constexpr int INVALID_HANDLE_VALUE=-1,TRUE=1,FALSE=0,ERROR_FILE_NOT_FOUND=2,ERROR_PATH_NOT_FOUND=3,ERROR_FILE_EXISTS=80,ERROR_NO_MORE_FILES=18;
 constexpr unsigned FILE_ATTRIBUTE_DIRECTORY=16,FILE_ATTRIBUTE_REPARSE_POINT=1024,INVALID_FILE_ATTRIBUTES=~0u;
 struct WIN32_FIND_DATAW {wchar_t cFileName[256];DWORD dwFileAttributes=0;};
 std::map<std::wstring,std::string> files;std::map<std::wstring,int> refs;std::map<std::wstring,bool> bound;
@@ -34,7 +34,11 @@ bool PublishedDigestMatches(const std::wstring& file){return bound[file]&&files[
 bool CopyFileW(const wchar_t* from,const wchar_t* to,int){if(!copyOk){error_=5;return false;}if(files.count(to)){error_=80;return false;}
  files[to]=files[from];refs[to]=refs[from];bound[to]=bound[from];return true;}
 bool DeleteFileW(const wchar_t* file){return files.erase(file)>0;}
-DWORD GetFileAttributesW(const wchar_t* file){return files.count(file)?0:INVALID_FILE_ATTRIBUTES;}
+DWORD GetFileAttributesW(const wchar_t* file){
+ if(files.count(file))return 0;
+ for(const auto& item:files)if(item.first.rfind(std::wstring(file)+L"\\",0)==0)return FILE_ATTRIBUTE_DIRECTORY;
+ error_=ERROR_FILE_NOT_FOUND;return INVALID_FILE_ATTRIBUTES;
+}
 struct CacheLock {bool acquired=true;};
 // SOURCE
 void reset(){files.clear();refs.clear();bound.clear();trust=copyOk=enumerationOk=true;pinned=false;}
@@ -54,6 +58,21 @@ int main(){
  reset();files[file]="a";refs[file]=-1;assert(!RetainReferencedSources(current,retained)&&files.count(file));
  refs[file]=1;copyOk=false;assert(!RetainReferencedSources(current,retained));
  copyOk=true;enumerationOk=false;assert(!RetainReferencedSources(current,retained)&&!GarbageCollect());
+ // Removal collection does not pin unreferenced source MSI files just because
+ // SUT requested reboot; installed and unknown references stay in every store.
+ reset();pinned=true;
+ for(const auto* name:{L"Current",L"Retained",L"Previous",L"Staging"}){
+  const auto folder=Root()+L"\\"+name;
+  for(const auto* product:{L"removed",L"installed",L"unknown"}){
+   const auto path=folder+L"\\"+product+L".msi";files[path]="a";
+   refs[path]=std::wstring(product)==L"removed"?0:std::wstring(product)==L"installed"?1:-1;
+  }
+ }
+ assert(!CollectAfterRemoval()); // Unknown state is reported, never deleted.
+ for(const auto* name:{L"Current",L"Retained",L"Previous",L"Staging"}){
+  const auto folder=Root()+L"\\"+name;
+  assert(!files.count(folder+L"\\removed.msi"));assert(files.count(folder+L"\\installed.msi"));assert(files.count(folder+L"\\unknown.msi"));
+ }
  std::cout<<"PASS: actual source reference GC: all Current MSIs including omitted products, content addressing, exact collision check, bound/unbound receipts, unknown registrations and reboot pins, safe release and I/O refusal\n";
 }
 '''.replace('// SOURCE',s[a:b])

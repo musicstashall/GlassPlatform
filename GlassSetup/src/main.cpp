@@ -2077,9 +2077,9 @@ private:
         auto text=GlassProductUiPolicy::WarningText(SelectionPreview().warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit());
         if(selection_.openGlass&&!selection_.Removes(3)) {
             std::lock_guard<std::mutex> lock(inspectMutex_);
-            if(GlassOpenGlassRelease::Known26300Risk(GlassInstallUtil::WindowsBuildNumber(),inspect_.og.remotePayloadVersion)) {
+            if(GlassOpenGlassRelease::KnownPublishedReleaseRisk(GlassInstallUtil::WindowsBuildNumber(),inspect_.og.remotePayloadVersion)) {
                 if(!text.empty())text+=L"\n";
-                text+=GlassOpenGlassRelease::Known26300RiskText(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN);
+                text+=GlassOpenGlassRelease::KnownPublishedReleaseRiskText(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::WindowsBuildNumber());
             }
         }
         if(selection_.secureUxThemeRemove) {
@@ -2161,11 +2161,11 @@ private:
             const bool applySupported=(!resources||resourcesReady)&&(openGlass?
                 GlassOpenGlassRelease::CanPlanApply(rep&&rep->installed?rep->installedPayloadVersion:L"",targetVersion):
                 ((resources&&resourcesReady&&targetVersion.empty())||packageApplyable));
-            const bool compatibilityRisk=openGlass&&checked&&!removing&&GlassOpenGlassRelease::Known26300Risk(windowsBuild,targetVersion);
+            const bool compatibilityRisk=openGlass&&checked&&!removing&&GlassOpenGlassRelease::KnownPublishedReleaseRisk(windowsBuild,targetVersion);
             std::wstring warning=GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,os64);
             if(compatibilityRisk) {
                 if(!warning.empty())warning+=L"\n\n";
-                warning+=GlassOpenGlassRelease::Known26300RiskText(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN);
+                warning+=GlassOpenGlassRelease::KnownPublishedReleaseRiskText(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,windowsBuild);
             }
             const auto action=GlassProducts::ActionForCondition(checked,condition);
             const UINT badgeId=ComponentBadgeId(condition);

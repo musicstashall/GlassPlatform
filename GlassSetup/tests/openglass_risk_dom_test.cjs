@@ -26,6 +26,15 @@ for(const locale of ['ru','en']){
  const many=Array.from({length:7},(_,i)=>({id:'p'+i,title:'Product '+i,installed:true,checked:false,applySupported:true,targetVersion:'1.0.0'}));
  send(many,locale);assert.equal(d.querySelectorAll('#installed-foot .c-more').length,0);
  assert.ok(!/ещё|more/.test(d.getElementById('installed-foot').textContent));
+ send(many.map(item=>({...item,installed:false})),locale);
+ assert.equal(d.getElementById('components-scroll-hint').textContent,'','no redundant available overflow hint');
+ const dependent={id:'settings64',title:'GlassSettings',installed:true,checked:false,applySupported:true,warning:'Dependent product retained without its dependency'};
+ send([dependent],locale);
+ const retained=d.querySelector('#components-installed-grid [data-product="settings64"]');
+ assert.ok(retained.querySelector('.comp-warning-button'));
+ assert.ok(!retained.classList.contains('has-warning')&&!retained.classList.contains('has-offer'),'kept installed dependencies keep neutral surface');
+ send([{...dependent,installed:false}],locale);
+ assert.ok(d.querySelector('#components-grid [data-product="settings64"]').classList.contains('has-warning'),'available warning styling unchanged');
  const source={id:'x64',title:'Glass',installed:false,checked:false,applySupported:false,applyHint:locale==='ru'?'Нет подходящего источника MSI':'No eligible MSI source'};
  send([source],locale);
  const input=d.getElementById('product-x64'),drag={id:'x64',input,source:'available'};

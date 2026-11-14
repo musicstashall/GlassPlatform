@@ -773,6 +773,10 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
         self->preserveSnapshot_=true;
         InstallLog::LineFormat(L"Incomplete mixed plan: recovery snapshot retained at %s",self->rollbackSession_.workspaceDir.c_str());
     }
+    if(self->succeeded_&&(self->selection_.removeMask||self->selection_.secureUxThemeRemove)) {
+        if(!GlassMaintenanceCache::CollectAfterRemoval())
+            InstallLog::Line(L"Product source cleanup incomplete; registered/unknown sources retained; removal result preserved");
+    }
     if(!self->tempDir_.empty()) {
         if(RemoveDirectoryTree(self->tempDir_))self->tempDir_.clear();
         else InstallLog::LineFormat(L"Staging cleanup incomplete; destructor will retry: %s",self->tempDir_.c_str());
@@ -2605,7 +2609,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
             AddFinishWarning(ru?L"Не для всех продуктов доступен источник восстановления":L"Repair sources are unavailable for some products",detail);
         }
     } else {
-        InstallLog::Line(L"Removal-only: maintenance cache left unchanged; no controller rotation or publication");
+        InstallLog::Line(L"Removal-only: no controller rotation/publication; unreferenced product sources collected after successful plan");
     }
     if(!GlassInstallMsi::RefreshManagedArp(x64Dir_,x86Dir_,openGlassDir_))
         AddFinishWarning(ru?L"Записи обслуживания обновлены не полностью":L"Maintenance entries were not fully refreshed",
