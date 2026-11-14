@@ -1074,7 +1074,9 @@ function acceptComponentRecommendations(){batchComponentActions(()=>{for(const i
 
 const componentShelfViews={available:'all',installed:'all'};
 // Concept C panel lifecycle. Session-local layout state never changes product intents.
-const componentSides={visible:{available:false,plan:true},pinned:{available:false,plan:false}};
+// Entry shows Available beside Installed. The plan stays closed until the user opens it.
+const componentSides={visible:{available:true,plan:false},pinned:{available:false,plan:false}};
+let downloadPanelShifted=false;
 let componentHideTimer=0,componentEdgeTimer=0,componentNoteTimer=0,componentLastUnpinned=null;
 let componentPress=null,componentDrag=null,componentSuppressClickUntil=0,componentSuppressPointerClick=false;
 const componentPanel=()=>document.getElementById('components-panel');
@@ -1124,6 +1126,18 @@ function dismissComponentNoticeOnActivity(event){
 }
 // Capture sees the triggering event BEFORE its handler creates a new notice.
 for(const type of ['click','auxclick','wheel'])document.addEventListener(type,dismissComponentNoticeOnActivity,{capture:true,passive:true});
+function revealPlanForDownloads(){
+ const jobs=Array.isArray(hostState.downloads)?hostState.downloads:[];
+ const transferring=hostState.appMode!=='unins'&&jobs.some(d=>d&&(d.phase==='preparing'||d.phase==='downloading'||d.phase==='verifying'));
+ if(!transferring){downloadPanelShifted=false;return;}
+ // One shift per preparation. A plan the user already opened stays as they left it.
+ if(downloadPanelShifted||componentSides.visible.plan)return;
+ downloadPanelShifted=true;
+ componentSides.pinned.available=false;
+ componentSides.visible.available=false;
+ componentSides.visible.plan=true;
+ applyComponentPanels();
+}
 function applyComponentPanels(){
  const panel=componentPanel(),a=componentSides.visible.available,p=componentSides.visible.plan;
  const lane=panel.querySelector('.c-lane.installed');
@@ -1720,7 +1734,7 @@ function syncDownloadVisuals(){
   }else if(retry)retry.remove();
  }
  for(const row of document.querySelectorAll('#components-plan-items li[data-product]')){const d=selected.find(d=>d.id===row.dataset.product);if(d){const text=row.querySelector('.plan-transfer-status');text.textContent=label(d);text.dataset.tooltip=d.error||label(d);}}
-
+ revealPlanForDownloads();
 }
 let certificateSignature='';
 function renderCertificatePanel(){

@@ -15,6 +15,8 @@ for(const locale of ['ru','en']){
  assert.ok(d.querySelector('#product-x64').closest('.c-card').classList.contains('download-local'));
  assert.ok(d.querySelector('#product-settings64').closest('.c-card').classList.contains('download-planned'));
  send({locale,page:'components',components,downloads:components.map(c=>({id:c.id,phase:'preparing',total:0,bytes:0}))});
+ assert.equal(d.querySelector('.c-slot-right').classList.contains('is-hidden'),false,'a hidden plan opens when preparation starts');
+ assert.equal(d.querySelector('.c-slot-left').classList.contains('is-hidden'),true,'Available closes to make room for the plan');
  assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer').length,7);
  assert.equal(d.querySelector('#components-downloads'),null,'aggregate progress uses the existing native footer strip');
  const jobs=components.map((c,i)=>({id:c.id,phase:'downloading',total:(i+1)*1024,bytes:(i+1)*512,elapsedMs:2000,network:true}));
@@ -50,5 +52,12 @@ for(const locale of ['ru','en']){
  send({downloads:[]});assert.equal(d.querySelector('#components-downloads'),null);
  assert.equal(d.querySelectorAll('#components-installed-grid .product-transfer').length,0);
 }
+d.querySelector('[data-component-pin="available"]').click();
+d.querySelector('[data-component-pin="plan"]').click();
+assert.equal(d.querySelector('.c-slot-left').classList.contains('is-hidden'),false);
+assert.equal(d.querySelector('.c-slot-right').classList.contains('is-hidden'),false);
+send({page:'components',downloads:[{id:'x64',phase:'downloading',total:100,bytes:40}]});
+assert.equal(d.querySelector('.c-slot-left').classList.contains('is-hidden'),false,'an already open plan is left alone');
+assert.equal(d.querySelector('.c-slot-right').classList.contains('is-hidden'),false);
 assert.equal(errors.length,0,errors.map(String).join('\n'));dom.window.close();
 console.log('PASS: production RU/EN seven product transfers, per-product progress, no extra aggregate strip, stable focus, cancel IPC, error retry, verification and ready states');
