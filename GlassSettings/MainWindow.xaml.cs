@@ -15,7 +15,6 @@ using GlassSettings.Services;
 using GlassSettings.Search;
 using GlassSettings.Strings;
 using Microsoft.UI.Dispatching;
-using Microsoft.UI.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Media;
@@ -515,7 +514,6 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        SearchBox.ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
         _searchDebounceTimer = DispatcherQueue.CreateTimer();
         _searchDebounceTimer.Interval = TimeSpan.FromMilliseconds(1000);
         _searchDebounceTimer.IsRepeating = false;
