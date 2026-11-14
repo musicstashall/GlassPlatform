@@ -109,13 +109,14 @@ case, Unicode Form D, удаление диакритики, `ё→е`, заме
   идентификатор назначения.
 - `MainWindow.xaml`: `TextChanged`, `QuerySubmitted`,
   `TextMemberPath="DisplayText"` и явный `ItemTemplate` для читаемого заголовка
-  подсказки. Используется стандартный `AutoSuggestBox` и его системное поведение
-  курсора ввода, без ручного управления курсором.
+  подсказки. Для поиска в пользовательской области заголовка задано
+  `TitleBar.IsDragRegion="False"`: WinUI не трактует поле как область перетаскивания,
+  а стандартный `AutoSuggestBox` сам задаёт системный курсор ввода.
 - `MainWindow.xaml.cs`: `DispatcherQueueTimer` с интервалом 1000 мс, повторный
   запуск при вводе; обработчик таймера читает `SearchBox.Text`, применяет
-  availability-фильтр и обновляет `ItemsSource`; после возврата из события
-  выбора подсказки поле и список очищаются, затем повторно проверяется
-  доступность и выполняется переход.
+  availability-фильтр и обновляет `ItemsSource`; выбор подсказки обрабатывается
+  в отдельных низкоприоритетных шагах диспетчера: закрытие списка, очистка поля,
+  повторная проверка доступности и переход.
 - `SearchSettings` фильтрует DWM destinations через
   `OpenGlassUiPolicy.IsFeatureExposedInUi()`, а Glass destinations — по наличию
   установленного модуля через `GlassModulePath.IsPlatformInstalled` с учётом

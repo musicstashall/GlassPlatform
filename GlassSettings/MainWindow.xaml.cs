@@ -2981,20 +2981,28 @@ public sealed partial class MainWindow : Window
             return;
 
         var destination = suggestion.Destination;
-        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
-        {
-            if (!IsSearchDestinationAvailable(destination))
-            {
-                var refreshedMatches = SearchSettings(sender.Text);
-                sender.ItemsSource = refreshedMatches;
-                sender.IsSuggestionListOpen = refreshedMatches.Count > 0;
-                return;
-            }
+        var query = args.QueryText;
 
+        // AutoSuggestBox is still processing selection when QuerySubmitted fires.
+        // Let its popup close, then clear it, and only navigate on a later queue turn.
+        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
             sender.IsSuggestionListOpen = false;
-            sender.Text = string.Empty;
-            sender.ItemsSource = Array.Empty<SettingsSearchSuggestion>();
-            NavigateToSearchDestination(destination);
+            _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+            {
+                if (!IsSearchDestinationAvailable(destination))
+                {
+                    var refreshedMatches = SearchSettings(query);
+                    sender.ItemsSource = refreshedMatches;
+                    sender.IsSuggestionListOpen = refreshedMatches.Count > 0;
+                    return;
+                }
+
+                sender.Text = string.Empty;
+                sender.ItemsSource = Array.Empty<SettingsSearchSuggestion>();
+                _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low,
+                    () => NavigateToSearchDestination(destination));
+            });
         });
     }
 
