@@ -1231,11 +1231,23 @@ namespace TaskbarCompat
     {
         try
         {
+            if (info.rootLayoutHookedGrid && info.rootChromeWatchersRegistered)
+            {
+                info.rootLayoutHookedGrid.UnregisterPropertyChangedCallback(
+                    wux::Controls::Panel::BackgroundProperty(),
+                    info.rootBackgroundWatcherToken);
+                info.rootLayoutHookedGrid.UnregisterPropertyChangedCallback(
+                    wux::Controls::Grid::CornerRadiusProperty(),
+                    info.rootCornerRadiusWatcherToken);
+            }
             info.rootLayoutRevoker.revoke();
         }
         catch (...)
         {
         }
+        info.rootChromeWatchersRegistered = false;
+        info.rootBackgroundWatcherToken = 0;
+        info.rootCornerRadiusWatcherToken = 0;
         info.rootLayoutRevoker = {};
         info.rootLayoutHookedGrid = nullptr;
         info.lastRootWidth = -1.0;
@@ -1271,6 +1283,21 @@ namespace TaskbarCompat
                     OnRootLayoutUpdated(frameHandle);
                 });
             info.rootLayoutHookedGrid = info.rootGrid;
+            info.rootBackgroundWatcherToken = info.rootGrid.RegisterPropertyChangedCallback(
+                wux::Controls::Panel::BackgroundProperty(),
+                [this, frameHandle](
+                    wux::DependencyObject const&,
+                    wux::DependencyProperty const&) {
+                    OnTrackedRootChromeChanged(frameHandle);
+                });
+            info.rootCornerRadiusWatcherToken = info.rootGrid.RegisterPropertyChangedCallback(
+                wux::Controls::Grid::CornerRadiusProperty(),
+                [this, frameHandle](
+                    wux::DependencyObject const&,
+                    wux::DependencyProperty const&) {
+                    OnTrackedRootChromeChanged(frameHandle);
+                });
+            info.rootChromeWatchersRegistered = true;
         }
         catch (...)
         {
@@ -1327,6 +1354,37 @@ namespace TaskbarCompat
                 height,
                 isVertical ? 1u : 0u,
                 wasVertical ? 1u : 0u);
+            RedrawShellTraysAfterTaskbarXamlPatch();
+        }
+        catch (...)
+        {
+            info.rootLayoutApplyNesting = false;
+        }
+    }
+
+    void TaskbarBackgroundRegistry::OnTrackedRootChromeChanged(
+        InstanceHandle frameHandle) noexcept
+    {
+        const auto it = m_taskbars.find(frameHandle);
+        if (it == m_taskbars.end())
+            return;
+        TaskbarInfo& info = it->second;
+        if (info.programmaticFillNesting != 0 || info.rootLayoutApplyNesting)
+            return;
+
+        try
+        {
+            info.rootLayoutApplyNesting = true;
+            {
+                ProgrammaticFillScope prog(info);
+                ApplyFillPolicyToFrame(frameHandle, info);
+                ApplyStrokePolicyToFrame(frameHandle, info);
+            }
+            info.rootLayoutApplyNesting = false;
+            DebugLog(
+                DBG_IMPORTANT,
+                L"[TaskbarCompat][BgRegistry] Root chrome changed by DockingStates: frame=%llu — patches reapplied",
+                static_cast<unsigned long long>(frameHandle));
             RedrawShellTraysAfterTaskbarXamlPatch();
         }
         catch (...)
@@ -1652,11 +1710,17 @@ namespace TaskbarCompat
             if (m_settings.cornerType == Shared::TrayXamlPaint::kCornerTypeMaxRoundXaml)
             {
                 const double side = (std::max)(8.0, r * 0.28);
-                info.rootGrid.Padding(wux::Thickness{
-                    side,
-                    info.originalRootPadding.Top,
-                    side,
-                    info.originalRootPadding.Bottom });
+                info.rootGrid.Padding(vertical
+                    ? wux::Thickness{
+                          info.originalRootPadding.Left,
+                          side,
+                          info.originalRootPadding.Right,
+                          side }
+                    : wux::Thickness{
+                          side,
+                          info.originalRootPadding.Top,
+                          side,
+                          info.originalRootPadding.Bottom });
             }
             else if (info.rootPaddingCaptured)
             {

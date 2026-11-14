@@ -188,7 +188,7 @@ Neutral на `OverflowRootGrid` → backdrop на весь XAML-остров (в
 |------|--------|
 | `EffectType` | 0 Disable, 1 Transparent, 2 Solid, 3 Blur, 4 Acrylic, 5 System (оригинальный бэкдроп) |
 | `CornerType` | 0–5: Default / Rect / Round / SmallRound / **Increased** (R = NC system) / **MaxRound** (R = thickness/2) |
-| `SeparateZones` | 0/1 — раздельные плитки (left/widgets, center=Пуск+apps, tray) |
+| `SeparateZones` | 0/1 — раздельные плитки (start/widgets, center=Пуск+apps, end/tray); расчёт ведётся по primary/cross axis и поддерживает горизонтальную и вертикальную панель |
 | `LightMode_GradientColor` / `DarkMode_GradientColor` | Тинт XAML; **отсутствие ключа** = системный бэкдроп |
 | `LightMode_BorderColor` / `DarkMode_BorderColor`, `NoBorderColor` | Бордюр XAML; **отсутствие** = системный stroke (после capture). Tint применяется **независимо** от `CornerType`. Pre-capture / GS fallback: ChartView (`Tray` / `Tray\Xaml` / `Tray\Xaml\*`). |
 | `CachedSystemStrokeArgb` | Sample stroke до патча (пишет TaskbarCompat `NoteSystemStrokeArgb`). GS «По умолчанию» для `Tray\Xaml*` пишет этот ARGB (иначе ChartView). При смене visual style / `InvalidateSystemBrushSamples` ключ **удаляется** из HKCU (иначе stale theme → wrong default / Stop restore). |

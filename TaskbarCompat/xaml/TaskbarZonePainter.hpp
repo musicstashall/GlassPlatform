@@ -98,6 +98,10 @@ namespace TaskbarCompat::Zones
 
         // Пропуск ApplyOverlay при неизменной геометрии (LayoutUpdated debounce).
         std::uint64_t lastBoundsSig{};
+        // Геометрия painter хранится в физических координатах; при повороте
+        // предыдущие visual bounds нельзя использовать для shrink/анимации.
+        bool orientationKnown{};
+        bool vertical{};
 
         // Close-window: не сужать center по mid-anim measure — hold до settle-commit.
         bool centerShrinkCommit{};

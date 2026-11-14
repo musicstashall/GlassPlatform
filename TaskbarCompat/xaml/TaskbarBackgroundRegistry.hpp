@@ -92,6 +92,9 @@ namespace TaskbarCompat
             double lastRootWidth{ -1.0 };
             double lastRootHeight{ -1.0 };
             bool rootLayoutApplyNesting{};
+            bool rootChromeWatchersRegistered{};
+            int64_t rootBackgroundWatcherToken{};
+            int64_t rootCornerRadiusWatcherToken{};
 
             // Живая геометрия зон: LayoutUpdated → Apply; shrink-hold → debounce settle.
             // Revoker, а не сырой event_token: токен снимался через текущий
@@ -138,6 +141,7 @@ namespace TaskbarCompat
         void EnsureRootLayoutHook(InstanceHandle frameHandle, TaskbarInfo& info) noexcept;
         void DetachRootLayoutHook(TaskbarInfo& info) noexcept;
         void OnRootLayoutUpdated(InstanceHandle frameHandle) noexcept;
+        void OnTrackedRootChromeChanged(InstanceHandle frameHandle) noexcept;
 
         void EnsureZoneLayoutHook(InstanceHandle frameHandle, TaskbarInfo& info) noexcept;
         void DetachZoneLayoutHook(TaskbarInfo& info) noexcept;
