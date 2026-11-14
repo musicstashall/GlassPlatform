@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.InteropServices;
 using GlassSettings.Controls;
 using GlassSettings.Core.Dwm;
@@ -15,12 +16,14 @@ using GlassSettings.Services;
 using GlassSettings.Search;
 using GlassSettings.Strings;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI;
@@ -39,8 +42,6 @@ public sealed partial class MainWindow : Window
     private HomePage? _home;
     private string _currentTag = "home";
     private bool _suppressNav;
-    /// <summary>Только splash WarmAttach Processes↔Home: не ConsumeGreen до показа стартового green.</summary>
-    private bool _suppressHomeNavigatedFrom;
     private bool _initialNavDone;
     private bool _contentReady;
     /// <summary>После fade/MarkReady: shell принимает клики (до этого клики со splash не должны доезжать).</summary>
@@ -72,6 +73,11 @@ public sealed partial class MainWindow : Window
     /// <summary>GlassSettingsMsg::WM_GLASS_SETTINGS_ACTIVATE (WM_APP + 0xA03) — ShellExt / second instance.</summary>
     private const uint WmGlassSettingsActivate = 0x8000 + 0xA03;
     private const uint MsgfltAllow = 1;
+    private const int IdcArrow = 32512;
+    private const int IdcIBeam = 32513;
+    private static readonly PropertyInfo? ProtectedCursorProperty = typeof(UIElement).GetProperty(
+        "ProtectedCursor",
+        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
     private int _windowBusyDepth;
     private TaskCompletionSource<HostedDialogResult>? _hostedDialogTcs;
     private HostedDialogSnapshot? _hostedDialogParentSnapshot;
@@ -514,6 +520,9 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SearchBox.Loaded += (_, _) => ApplyTitleBarSearchCaret();
+        SearchBox.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
+        SearchBox.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
         _searchDebounceTimer = DispatcherQueue.CreateTimer();
         _searchDebounceTimer.Interval = TimeSpan.FromMilliseconds(1000);
         _searchDebounceTimer.IsRepeating = false;
@@ -1079,8 +1088,6 @@ public sealed partial class MainWindow : Window
         SyncNavigationUserCardLayout();
         // Prep строго под splash: loading chrome / hit-test off (SyncLoadingChrome ещё true).
         RunDeferredStartupTasks();
-        // WarmAttach до снятия overlay — иначе Processes «догоняет» после dismiss.
-        WarmAttachListPageIfReady();
 
         // Контент под fade: host Opacity=0, затем 0→1 за 500 ms после снятия splash.
         // Hit-test остаётся off до MarkReady — иначе клики со splash доезжают как Home GlassDrill.
@@ -1889,6 +1896,12 @@ public sealed partial class MainWindow : Window
         _ = ChangeWindowMessageFilterEx(hwnd, WmGlassSettingsActivate, MsgfltAllow, IntPtr.Zero);
     }
 
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern IntPtr LoadCursor(IntPtr hInstance, int lpCursorName);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetCursor(IntPtr hCursor);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool ChangeWindowMessageFilterEx(
         IntPtr hwnd,
@@ -2244,6 +2257,83 @@ public sealed partial class MainWindow : Window
             NavigationPaneSearchHost);
         if (changed)
             RefreshTitleBarDragRegions();
+        ApplyTitleBarSearchCaret();
+    }
+
+    /// <summary>
+    /// Заголовок через SetTitleBar оставляет стрелку: над текстом поиска ставим каретку.
+    /// В панели навигации курсор не трогаем — его задаёт сам TextBox.
+    /// </summary>
+    private void ApplyTitleBarSearchCaret()
+    {
+        if (!IsSearchInTitleBar())
+            return;
+
+        SearchBox.ApplyTemplate();
+        var textBox = FindVisualChild<TextBox>(SearchBox);
+        if (textBox is null)
+            return;
+
+        SetProtectedCursor(textBox, InputSystemCursor.Create(InputSystemCursorShape.IBeam));
+    }
+
+    private void SearchBox_OnPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!IsSearchInTitleBar())
+            return;
+
+        SetWin32Cursor(IsInsideButton(e.OriginalSource as DependencyObject) ? IdcArrow : IdcIBeam);
+    }
+
+    private bool IsSearchInTitleBar() => ReferenceEquals(AppTitleBar.Content, SearchBox);
+
+    private static bool IsInsideButton(DependencyObject? source)
+    {
+        for (var node = source; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is AutoSuggestBox)
+                return false;
+            if (node is Button)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static void SetWin32Cursor(int cursorId)
+    {
+        var cursor = LoadCursor(IntPtr.Zero, cursorId);
+        if (cursor != IntPtr.Zero)
+            SetCursor(cursor);
+    }
+
+    private static void SetProtectedCursor(UIElement element, InputCursor? cursor)
+    {
+        try
+        {
+            ProtectedCursorProperty?.SetValue(element, cursor);
+        }
+        catch
+        {
+            // Каретку всё равно ставит SetCursor на PointerMoved.
+        }
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject root) where T : DependencyObject
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match)
+                return match;
+
+            var nested = FindVisualChild<T>(child);
+            if (nested is not null)
+                return nested;
+        }
+
+        return null;
     }
 
     private void RefreshTitleBarDragRegions()
@@ -2406,7 +2496,7 @@ public sealed partial class MainWindow : Window
     {
         var tag = e.Parameter as string ?? _currentTag;
         NoticeMirrorTrace.Write($"NavFrame_OnNavigated: tag={tag}, page={e.Content?.GetType().Name}");
-        if (!_suppressHomeNavigatedFrom && e.Content is not HomePage && _home is not null)
+        if (e.Content is not HomePage && _home is not null)
             _home.OnNavigatedFrom();
         NoticeViewportMirrorService.OnPageNavigated();
         WindowBusyOverlayService.ForceResetIfActive();
@@ -2494,38 +2584,12 @@ public sealed partial class MainWindow : Window
                     return;
                 if (NavFrame.Content is HomePage home)
                     home.RefreshWallpaperPreviewUnderSplash();
-                // До TryDismiss: прогреть Processes, пока виден acrylic splash.
-                WarmAttachListPageIfReady();
                 TryDismissLoadingOverlay();
             });
         }
         catch
         {
             /* dismiss best-effort */
-        }
-    }
-
-    /// <summary>Создаёт и наполняет ProcessesPage под заставкой — переход потом мгновенный.</summary>
-    private void WarmAttachListPageIfReady()
-    {
-        if (!ProcessIconResolver.IsPreloadComplete)
-        {
-            return;
-        }
-
-        _suppressHomeNavigatedFrom = true;
-        try
-        {
-            NavFrame.Navigate(typeof(ProcessesPage), "attach", new SuppressNavigationTransitionInfo());
-            if (string.Equals(_currentTag, "home", StringComparison.Ordinal))
-            {
-                NavFrame.Navigate(typeof(HomePage), "home", new SuppressNavigationTransitionInfo());
-            }
-        }
-        catch { /* ignore */ }
-        finally
-        {
-            _suppressHomeNavigatedFrom = false;
         }
     }
 
@@ -2683,11 +2747,12 @@ public sealed partial class MainWindow : Window
     }
 
     private string? _textScrollSectionOverride;
+    private string? _attachSearchAnchor;
 
     /// <param name="scrollSection">
     /// Опционально — id секции на <see cref="TextAndFontsPage"/> (см. <see cref="TextPageNavIds"/>).
     /// </param>
-    internal void NavigateToTextPage(string? scrollSection = null)
+    internal void NavigateToTextPage(string? scrollSection = null, NavigationTransitionInfo? transition = null)
     {
         // Уже на корне «Текст и шрифты» — не пересоздаём страницу, только скролл.
         try
@@ -2711,7 +2776,7 @@ public sealed partial class MainWindow : Window
         }
 
         _textScrollSectionOverride = scrollSection;
-        NavigateTo("text", force: true);
+        NavigateTo("text", force: true, transition);
         _textScrollSectionOverride = null;
         SelectNavItem("text");
     }
@@ -2811,7 +2876,7 @@ public sealed partial class MainWindow : Window
         UpdateBackButton();
     }
 
-    private void NavigateTo(string tag, bool force = false)
+    private void NavigateTo(string tag, bool force = false, NavigationTransitionInfo? transition = null)
     {
 
         if (string.Equals(tag, "dwm", StringComparison.Ordinal) && !IsDwmNavAvailable())
@@ -2842,6 +2907,8 @@ public sealed partial class MainWindow : Window
             _nav.CurrentSidebarTag = tag;
             if (frameContent is HomePage hp)
                 hp.OnNavigatedTo();
+            if (frameContent is ProcessesPage processes && ProcessesSearchAnchors.IsKnown(_attachSearchAnchor))
+                processes.RevealSearchAnchor(_attachSearchAnchor!);
             UpdateBackButton();
             return;
         }
@@ -2856,7 +2923,7 @@ public sealed partial class MainWindow : Window
 
         var rootParam = RootParameterForTag(tag);
         var rootTitle = NavTitleForTag(tag);
-        _nav.NavigateToRoot(rootPageType, rootParam, rootTitle);
+        _nav.NavigateToRoot(rootPageType, rootParam, rootTitle, transition);
         UpdateBackButton();
     }
 
@@ -2869,6 +2936,12 @@ public sealed partial class MainWindow : Window
             && !string.IsNullOrEmpty(_textScrollSectionOverride))
         {
             return _textScrollSectionOverride;
+        }
+
+        if (string.Equals(tag, "attach", StringComparison.Ordinal)
+            && ProcessesSearchAnchors.IsKnown(_attachSearchAnchor))
+        {
+            return _attachSearchAnchor;
         }
 
         return tag;
@@ -2981,32 +3054,68 @@ public sealed partial class MainWindow : Window
             return;
 
         var destination = suggestion.Destination;
+        var anchor = suggestion.Anchor;
         var query = args.QueryText;
 
-        // AutoSuggestBox is still processing selection when QuerySubmitted fires.
-        // Let its popup close, then clear it, and only navigate on a later queue turn.
-        _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        // Подписка до закрытия: IsSuggestionListOpen=false сразу гасит IsOpen,
+        // и Closed уже не поймать, если подписаться после.
+        var popup = FindVisualChild<Popup>(sender);
+        var completed = false;
+        void Complete()
         {
-            sender.IsSuggestionListOpen = false;
-            _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
-            {
-                if (!IsSearchDestinationAvailable(destination))
-                {
-                    var refreshedMatches = SearchSettings(query);
-                    sender.ItemsSource = refreshedMatches;
-                    sender.IsSuggestionListOpen = refreshedMatches.Count > 0;
-                    return;
-                }
+            if (completed)
+                return;
 
-                sender.Text = string.Empty;
-                sender.ItemsSource = Array.Empty<SettingsSearchSuggestion>();
-                _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low,
-                    () => NavigateToSearchDestination(destination));
-            });
-        });
+            completed = true;
+            _ = DispatcherQueue.TryEnqueue(() => FinishSearchNavigation(sender, destination, query, anchor));
+        }
+
+        void OnClosed(object? _, object __)
+        {
+            if (popup is not null)
+                popup.Closed -= OnClosed;
+            Complete();
+        }
+
+        if (popup is not null)
+            popup.Closed += OnClosed;
+
+        sender.IsSuggestionListOpen = false;
+
+        if (popup is null || !popup.IsOpen)
+        {
+            if (popup is not null)
+                popup.Closed -= OnClosed;
+            Complete();
+        }
     }
 
-    private void NavigateToSearchDestination(string destination)
+    private void FinishSearchNavigation(AutoSuggestBox sender, string destination, string? query, string? anchor)
+    {
+        try
+        {
+            if (!IsSearchDestinationAvailable(destination))
+            {
+                var refreshedMatches = SearchSettings(query);
+                sender.ItemsSource = refreshedMatches;
+                sender.IsSuggestionListOpen = refreshedMatches.Count > 0;
+                return;
+            }
+
+            NavigateToSearchDestination(destination, anchor);
+            _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+            {
+                sender.Text = string.Empty;
+                sender.ItemsSource = Array.Empty<SettingsSearchSuggestion>();
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"GlassSettings search navigate: {ex}");
+        }
+    }
+
+    private void NavigateToSearchDestination(string destination, string? anchor = null)
     {
         if (!IsSearchDestinationAvailable(destination))
             return;
@@ -3016,10 +3125,21 @@ public sealed partial class MainWindow : Window
             case "system":
             case "dwm":
             case "glass":
-            case "attach":
             case "themes":
                 NavigateTo(destination, force: true);
                 SelectNavItem(destination);
+                return;
+            case "attach":
+                _attachSearchAnchor = anchor;
+                try
+                {
+                    NavigateTo(destination, force: true);
+                    SelectNavItem(destination);
+                }
+                finally
+                {
+                    _attachSearchAnchor = null;
+                }
                 return;
             case "text":
                 NavigateToTextPage();

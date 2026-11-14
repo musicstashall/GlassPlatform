@@ -158,7 +158,8 @@
                             HorizontalAlignment="Center"
                             VerticalAlignment="Top"
                             IsTabStop="False"
-                            SelectionMode="None">
+                            SelectionMode="None"
+                            Visibility="Collapsed">
                             <ItemsView.Layout>
                                 <StackLayout Orientation="Vertical" Spacing="8" />
                             </ItemsView.Layout>
@@ -186,7 +187,8 @@
                             HorizontalAlignment="Center"
                             VerticalAlignment="Top"
                             IsTabStop="False"
-                            SelectionMode="None">
+                            SelectionMode="None"
+                            Visibility="Collapsed">
                             <ItemsView.Layout>
                                 <StackLayout Orientation="Vertical" Spacing="8" />
                             </ItemsView.Layout>

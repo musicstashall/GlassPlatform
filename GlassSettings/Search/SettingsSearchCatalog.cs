@@ -5,7 +5,7 @@ using GlassSettings.Strings;
 
 namespace GlassSettings.Search;
 
-/// <summary>Небольшой двуязычный индекс: тексты ресурсов → обычный маршрут страницы.</summary>
+/// <summary>Небольшой двуязычный индекс: тексты ресурсов → страница и, для «Процессов», якорь секции.</summary>
 public static class SettingsSearchCatalog
 {
     private const string Russian = "ru-RU";
@@ -89,7 +89,8 @@ public static class SettingsSearchCatalog
                 GetDisplayString(item.Entry.TitleKey, activeLanguage),
                 GetDisplayString(item.Entry.LocationKey, activeLanguage),
                 item.Entry.Destination,
-                item.Entry.SearchText))
+                item.Entry.SearchText,
+                item.Entry.Anchor))
             .ToArray();
     }
 
@@ -111,6 +112,10 @@ public static class SettingsSearchCatalog
                          .Append(entry.LocationKey)
                          .Distinct(StringComparer.Ordinal))
             {
+                // Якорные ключи — отдельные подсказки, иначе запрос секции открывает только страницу.
+                if (ProcessesSearchAnchors.TryGet(entry.Destination, key, out _))
+                    continue;
+
                 if (key != entry.TitleKey && key != entry.LocationKey && !IsSearchableResourceKey(key))
                     continue;
 
@@ -124,8 +129,31 @@ public static class SettingsSearchCatalog
                 entry.TitleKey,
                 entry.LocationKey,
                 entry.Destination,
+                null,
                 Normalize(string.Join(" ", localizedTitles)),
                 Normalize(string.Join(" ", texts))));
+
+            if (!string.Equals(entry.Destination, "attach", StringComparison.Ordinal))
+                continue;
+
+            foreach (var (key, anchor) in ProcessesSearchAnchors.AttachKeys)
+            {
+                var phrase = Normalize(string.Join(
+                    " ",
+                    GlassSettingsResources.GetForLanguage(key, Russian),
+                    GlassSettingsResources.GetForLanguage(key, English)));
+                if (phrase.Length == 0)
+                    continue;
+
+                result.Add(new IndexedEntry(
+                    $"{entry.Id}:{key}",
+                    key,
+                    entry.LocationKey,
+                    entry.Destination,
+                    anchor,
+                    phrase,
+                    phrase));
+            }
         }
 
         return result;
@@ -143,7 +171,9 @@ public static class SettingsSearchCatalog
                 continue;
 
             var titleMatch = WordsMatch(entry.TitleSearchText, queryWords, allowPrefix);
-            matches.Add((entry, (allowPrefix ? 4 : 12) + queryWords.Length + (titleMatch ? 20 : 0)));
+            var phrase = string.Join(' ', queryWords);
+            var phraseHit = entry.SearchText.Contains(phrase, StringComparison.Ordinal);
+            matches.Add((entry, (allowPrefix ? 4 : 12) + queryWords.Length + (titleMatch ? 20 : 0) + (phraseHit ? 24 : 0)));
         }
 
         return matches
@@ -220,6 +250,47 @@ public static class SettingsSearchCatalog
         string TitleKey,
         string LocationKey,
         string Destination,
+        string? Anchor,
         string TitleSearchText,
         string SearchText);
+}
+
+/// <summary>Якоря секций страницы «Процессы». Ключ ресурса → id спойлера.</summary>
+internal static class ProcessesSearchAnchors
+{
+    public const string ProcessList = "process-list";
+    public const string BlockList = "block-list";
+    public const string Runtime = "runtime";
+    public const string Crashes = "crashes";
+
+    internal static readonly (string Key, string Anchor)[] AttachKeys =
+    [
+        ("Home_RowProcessList", ProcessList),
+        ("Home_RowViewAllProcesses", ProcessList),
+        ("Attach_ListSection", ProcessList),
+        ("BlockList_Section", BlockList),
+        ("Runtime_Section", Runtime),
+        ("Crashes_Section", Crashes),
+    ];
+
+    internal static bool TryGet(string destination, string key, out string anchor)
+    {
+        anchor = string.Empty;
+        if (!string.Equals(destination, "attach", StringComparison.Ordinal))
+            return false;
+
+        foreach (var pair in AttachKeys)
+        {
+            if (!string.Equals(pair.Key, key, StringComparison.Ordinal))
+                continue;
+
+            anchor = pair.Anchor;
+            return true;
+        }
+
+        return false;
+    }
+
+    internal static bool IsKnown(string? anchor) =>
+        anchor is ProcessList or BlockList or Runtime or Crashes;
 }

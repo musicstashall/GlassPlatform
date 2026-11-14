@@ -5,7 +5,8 @@ public sealed record SettingsSearchSuggestion(
     string Title,
     string Location,
     string Destination,
-    string SearchText)
+    string SearchText,
+    string? Anchor = null)
 {
     public string DisplayText => string.IsNullOrWhiteSpace(Location)
         ? Title

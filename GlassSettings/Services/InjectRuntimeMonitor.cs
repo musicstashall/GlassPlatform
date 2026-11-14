@@ -752,9 +752,13 @@ public sealed class InjectRuntimeMonitor
 
         if (platformRunning)
         {
+            var seenSlotPids = new HashSet<uint>();
             foreach (var slot in slots)
             {
                 if (slot.Pid == 0)
+                    continue;
+                // Два слота на один PID: таблица делает Remove+Insert и падает с E_BOUNDS.
+                if (!seenSlotPids.Add(slot.Pid))
                     continue;
                 if (IsGlassSettingsProcess(slot.Pid, slot.ExeName, selfPid))
                 {
