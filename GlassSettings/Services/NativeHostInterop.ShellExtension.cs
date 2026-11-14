@@ -16,6 +16,34 @@ public static partial class NativeHostInterop
     public static void NotifyShellCachesAfterRegistrationChange() =>
         Native_NotifyShellCachesAfterRegistrationChange();
 
+    /// <summary>0 — пункта меню нет, 1 — классическая регистрация (Win11: «Показать дополнительные
+    /// параметры»), 2 — компактное меню Windows 11 (sparse-пакет).</summary>
+    public static int GetShellMenuMode() =>
+        (int)Native_GetShellMenuModeV1();
+
+    /// <summary>Доверие подписанту GlassShellSparse.msix для текущего пользователя (только чтение):
+    /// 0 неизвестно/Win10, 1 доверен, 2 не доверен, 3 msix отсутствует, 4 msix без подписи.</summary>
+    public static int GetShellSignerTrust(out string signerSubject)
+    {
+        var buffer = new char[512];
+        var trust = (int)Native_GetShellSignerTrustV1(buffer, (uint)buffer.Length);
+        signerSubject = new string(buffer).TrimEnd('\0');
+        return trust;
+    }
+
+    /// <summary>Добавляет подписанта GlassShellSparse.msix в LocalMachine\TrustedPeople (GlassSettings
+    /// работает с правами администратора). Возвращает SparseSignerTrustResult: 0 добавлен, 1 уже доверен,
+    /// 2 msix отсутствует, 3 без подписи, 4 Subject ≠ издателю пакета, 5 ошибка хранилища (lastError),
+    /// 6 неизвестно, 7 Windows 10.</summary>
+    public static int TrustShellSigner(out string signerSubject, out int lastError)
+    {
+        var buffer = new char[512];
+        var result = (int)Native_TrustShellSignerV1(buffer, (uint)buffer.Length, out var error);
+        signerSubject = new string(buffer).TrimEnd('\0');
+        lastError = (int)error;
+        return result;
+    }
+
     [DllImport(Dll, EntryPoint = "GlassSettings_BeginShellExtensionChange")]
     private static extern bool Native_BeginShellExtensionChange(
         bool registerNotUnregister);
@@ -28,4 +56,18 @@ public static partial class NativeHostInterop
 
     [DllImport(Dll, EntryPoint = "GlassSettings_NotifyShellCachesAfterRegistrationChange")]
     private static extern void Native_NotifyShellCachesAfterRegistrationChange();
+
+    [DllImport(Dll, EntryPoint = "GlassSettings_GetShellMenuModeV1")]
+    private static extern uint Native_GetShellMenuModeV1();
+
+    [DllImport(Dll, EntryPoint = "GlassSettings_GetShellSignerTrustV1", CharSet = CharSet.Unicode)]
+    private static extern uint Native_GetShellSignerTrustV1(
+        [Out] char[] subjectBuffer,
+        uint cchSubject);
+
+    [DllImport(Dll, EntryPoint = "GlassSettings_TrustShellSignerV1", CharSet = CharSet.Unicode)]
+    private static extern uint Native_TrustShellSignerV1(
+        [Out] char[] subjectBuffer,
+        uint cchSubject,
+        out uint lastError);
 }

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
+using GlassSettings.Services;
 using GlassSettings.Strings;
 
 namespace GlassSettings;
@@ -16,6 +18,8 @@ public static class SingleInstance
     private const int ActivatePollTimeoutMs = 5000;
     private const int GwOwner = 4;
     private const int SwRestore = 9;
+    private const uint WmCopyData = 0x004A;
+    private const int BackupCopyMagic = 0x4753424B;
     /// <summary>GlassSettingsMsg::WM_GLASS_SETTINGS_ACTIVATE (WM_APP + 0xA03).</summary>
     private const uint WmGlassSettingsActivate = 0x8000 + 0xA03;
     private const uint SmtoAbortIfHung = 0x0002;
@@ -37,17 +41,21 @@ public static class SingleInstance
     public static bool TryAcquire()
     {
         _mutex = new Mutex(true, MutexName, out var created);
-        if (created) return true;
-        _ = TryActivateExistingWithWait();
+        if (created)
+            return true;
+        var backupPath = SettingsBackupOpenRequest.FromCommandLine();
+        if (backupPath is not null)
+            SettingsBackupOpenRequest.Publish(backupPath);
+        _ = TryActivateExistingWithWait(backupPath);
         return false;
     }
 
     public static void ActivateExisting()
     {
-        _ = TryActivateExistingWithWait();
+        _ = TryActivateExistingWithWait(null);
     }
 
-    private static bool TryActivateExistingWithWait()
+    private static bool TryActivateExistingWithWait(string? backupPath)
     {
         var deadline = Environment.TickCount64 + ActivatePollTimeoutMs;
         while (Environment.TickCount64 < deadline)
@@ -55,7 +63,7 @@ public static class SingleInstance
             var hwnd = FindGlassSettingsWindow();
             if (hwnd != IntPtr.Zero)
             {
-                ActivateHwnd(hwnd);
+                ActivateHwnd(hwnd, backupPath);
                 return true;
             }
 
@@ -65,11 +73,14 @@ public static class SingleInstance
         return false;
     }
 
-    private static void ActivateHwnd(IntPtr hwnd)
+    private static void ActivateHwnd(IntPtr hwnd, string? backupPath)
     {
         GetWindowThreadProcessId(hwnd, out var pid);
         if (pid != 0)
             _ = AllowSetForegroundWindow(unchecked((int)pid));
+
+        if (!string.IsNullOrWhiteSpace(backupPath))
+            SendBackupPath(hwnd, backupPath);
 
         // In-process AppWindow restore (subclass MainWindow); Win32 — fallback до/без subclass.
         _ = SendMessageTimeoutW(
@@ -84,6 +95,38 @@ public static class SingleInstance
         _ = ShowWindow(hwnd, SwRestore);
         _ = BringWindowToTop(hwnd);
         _ = SetForegroundWindow(hwnd);
+    }
+
+    private static void SendBackupPath(IntPtr hwnd, string path)
+    {
+        var bytes = Encoding.Unicode.GetBytes(path + "\0");
+        var payload = Marshal.AllocHGlobal(bytes.Length);
+        var packet = Marshal.AllocHGlobal(Marshal.SizeOf<BackupCopyData>());
+        try
+        {
+            Marshal.Copy(bytes, 0, payload, bytes.Length);
+            var data = new BackupCopyData
+            {
+                Data = new IntPtr(BackupCopyMagic),
+                Size = bytes.Length,
+                Pointer = payload
+            };
+            Marshal.StructureToPtr(data, packet, false);
+            _ = SendMessageW(hwnd, WmCopyData, IntPtr.Zero, packet);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(packet);
+            Marshal.FreeHGlobal(payload);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BackupCopyData
+    {
+        public IntPtr Data;
+        public int Size;
+        public IntPtr Pointer;
     }
 
     private static IntPtr FindGlassSettingsWindow()
@@ -169,6 +212,9 @@ public static class SingleInstance
 
     [DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int dwProcessId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr SendMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr SendMessageTimeoutW(

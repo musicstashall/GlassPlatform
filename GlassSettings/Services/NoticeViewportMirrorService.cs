@@ -1,4 +1,4 @@
-using GlassSettings.Controls;
+﻿using GlassSettings.Controls;
 using GlassSettings.Core.Layout;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -11,7 +11,7 @@ namespace GlassSettings.Services;
 
 /// <summary>
 /// Зеркало notice у верхней кромки контента: дублирует открытые полосы страницы,
-/// когда якорь под ними вне viewport ScrollViewer. См. docs/guides/GlassSettings-notices.md.
+/// когда якорь под ними вне viewport ScrollViewer. См. GlassSettings/docs/GlassSettings-notices.md.
 /// </summary>
 internal static class NoticeViewportMirrorService
 {

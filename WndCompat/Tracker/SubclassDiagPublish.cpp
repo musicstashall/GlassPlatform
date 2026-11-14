@@ -41,6 +41,14 @@ namespace WndCompat::SubclassDiag
         FlushToMap();
     }
 
+    std::uint32_t Total() noexcept
+    {
+        std::uint32_t total = 0;
+        for (std::size_t i = 1; i < kMaxKind; ++i)
+            total += g_counts[i].load(std::memory_order_relaxed);
+        return total;
+    }
+
     void ClearAll() noexcept
     {
         for (auto& c : g_counts)

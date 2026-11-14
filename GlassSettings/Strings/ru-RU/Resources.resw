@@ -229,6 +229,8 @@
   <data name="AppSettings_BusyOverlayDescription" xml:space="preserve"><value>Вид окна, когда оно недоступно, например под диалогом</value></data>
   <data name="AppSettings_BusyOverlayModeAcrylic" xml:space="preserve"><value>Acrylic</value></data>
   <data name="AppSettings_BusyOverlayModeDim" xml:space="preserve"><value>Затенение</value></data>
+  <data name="AppSettings_ValidateRegistryHeader" xml:space="preserve"><value>Проверять настройки при старте</value></data>
+  <data name="AppSettings_ValidateRegistryDescription" xml:space="preserve"><value>При запуске GlassSettings проверять известные параметры реестра платформы и удалять повреждённые значения.</value></data>
   <data name="AppSettings_LanguageLabel" xml:space="preserve"><value>Язык интерфейса</value></data>
   <data name="AppSettings_LanguageDescription" xml:space="preserve"><value>Выберите предпочитаемый язык для GlassSettings</value></data>
   <data name="AppSettings_LanguageSystem" xml:space="preserve"><value>Системный</value></data>
@@ -482,11 +484,15 @@
   <data name="Error_ShellExtensionInconsistentState" xml:space="preserve"><value>Состояние расширения меню несогласовано. Отключите его и включите снова.</value></data>
   <data name="Error_ShellExtensionNeedsExplorerRestart" xml:space="preserve"><value>Перезапустите проводник Windows, чтобы обновить меню рабочего стола.</value></data>
   <data name="Error_ShellExtensionSparseArtifactsMissing" xml:space="preserve"><value>Не найдены файлы расширения контекстного меню. Переустановите Glass Settings.</value></data>
-  <data name="Error_ShellExtensionSparseCertFailed" xml:space="preserve"><value>Не удалось подготовить сертификат для установки пункта меню.</value></data>
+  <data name="Error_ShellExtensionSparseSignerNotTrusted" xml:space="preserve"><value>Windows 11 регистрирует компактное меню только от издателя с доверенным сертификатом, а классическая регистрация тоже не удалась. Сертификат разработчика можно установить на этой странице; описание — DeveloperCodeSigning.txt в папке установки.</value></data>
   <data name="Error_ShellExtensionSparseDeployFailed" xml:space="preserve"><value>Не удалось зарегистрировать расширение в контекстном меню рабочего стола.</value></data>
   <data name="Error_ShellExtensionSparseExternalLocationConflict" xml:space="preserve"><value>Осталась прежняя регистрация расширения контекстного меню рабочего стола. Отключите расширение в настройках Glass Settings и включите снова.</value></data>
   <data name="Error_ShellExtensionTimedOut" xml:space="preserve"><value>Операция не завершилась вовремя. Состояние могло не обновиться до конца.</value></data>
   <data name="Error_ShellExtensionTitle" xml:space="preserve"><value>Расширение контекстного меню</value></data>
+  <data name="Error_ShellCertTitle" xml:space="preserve"><value>Сертификат разработчика</value></data>
+  <data name="Error_ShellCertFailed" xml:space="preserve"><value>Не удалось установить сертификат разработчика в «Доверенные лица» компьютера.</value></data>
+  <data name="Error_ShellCertStoreFormat" xml:space="preserve"><value>Ошибка хранилища сертификатов: код {0}.</value></data>
+  <data name="Error_ShellCertResultFormat" xml:space="preserve"><value>Код результата {0}. Подробности — в журнале GlassSettings.</value></data>
   <data name="Flyout_Animation" xml:space="preserve"><value>Анимация</value></data>
   <data name="Flyout_AnimationDesc" xml:space="preserve"><value>Тайминги в миллисекундах, стиль появления и немедленное прерывание предыдущей анимации при открытии нового flyout.</value></data>
   <data name="Flyout_AnimationSubtitle" xml:space="preserve"><value>Тайминги затухания, стиль появления и прерывание анимации.</value></data>
@@ -657,12 +663,20 @@
   <data name="System_OpenGlassUpdateSpoilerFormat" xml:space="preserve"><value>Доступна новая версия {0}</value></data>
   <data name="Home_OpenGlassUpdateNotice" xml:space="preserve"><value>Доступна новая версия OpenGlass {0}. Установлена: {1}.</value></data>
   <data name="Home_GlassUpdateNotice" xml:space="preserve"><value>Доступна новая версия Glass {0}. Установлена: {1}.</value></data>
+  <data name="Home_GlassUpdateSummary" xml:space="preserve"><value>Доступны обновления установленных продуктов Glass: {0}.</value></data>
+  <data name="Home_GlassUpdateLinkSummary" xml:space="preserve"><value>Обновления: {0}</value></data>
+  <data name="Home_OpenGlassRepairNotice" xml:space="preserve"><value>Сборка Windows изменилась. OpenGlass нужно переустановить для текущего DWM. Версия канала: {0}.</value></data>
+  <data name="Home_OpenGlassRepairLink" xml:space="preserve"><value>Переустановка {0}</value></data>
+  <data name="Home_UpdateCheckOffline" xml:space="preserve"><value>Не удалось проверить обновления. Это не значит, что обновлений нет.</value></data>
   <data name="Home_RowPopupWindows" xml:space="preserve"><value>Popup-окна</value></data>
   <data name="Home_RowProcessList" xml:space="preserve"><value>Список процессов</value></data>
   <data name="Home_RowRootWindows" xml:space="preserve"><value>Root-окна</value></data>
   <data name="Home_RowShellExtension" xml:space="preserve"><value>Расширение контекстного меню</value></data>
   <data name="Home_RowShellExtensionSub" xml:space="preserve"><value>Управление в меню рабочего стола</value></data>
   <data name="Home_RowSystemManagement" xml:space="preserve"><value>Управление системой</value></data>
+  <data name="Home_RowInstallationMaintenance" xml:space="preserve"><value>Обслуживание установки</value></data>
+  <data name="Home_InstallationMaintenanceMissing" xml:space="preserve"><value>GlassSetup.exe не найден в кэше обслуживания ProgramData. Запустите установщик Glass хотя бы один раз, чтобы заполнить кэш.</value></data>
+  <data name="Home_InstallationMaintenanceLaunchFailed" xml:space="preserve"><value>Не удалось открыть обслуживание установки. Подтвердите запрос UAC или запустите «Изменить» для продукта Glass в параметрах Windows.</value></data>
   <data name="Home_RowTaskbar" xml:space="preserve"><value>Панель задач</value></data>
   <data name="Home_RowTextFonts" xml:space="preserve"><value>Текст и шрифты</value></data>
   <data name="Home_RowViewAllProcesses" xml:space="preserve"><value>Просмотреть все процессы</value></data>
@@ -765,8 +779,12 @@
   <data name="System_NoticeReflectionLink" xml:space="preserve"><value>текстуры</value></data>
   <data name="System_OpenGlassUpdateTitle" xml:space="preserve"><value>Доступна новая версия OpenGlass {0}. Установлена: {1}.</value></data>
   <data name="System_GlassUpdateTitle" xml:space="preserve"><value>Доступна новая версия Glass {0}. Установлена: {1}.</value></data>
+  <data name="System_GlassUpdateSummary" xml:space="preserve"><value>Доступны обновления установленных продуктов Glass: {0}.</value></data>
+  <data name="System_GlassUpdateSpoilerSummary" xml:space="preserve"><value>Доступны обновления: {0}</value></data>
+  <data name="System_OpenGlassRepairTitle" xml:space="preserve"><value>Сборка Windows изменилась. OpenGlass нужно переустановить для текущего DWM. Версия канала: {0}.</value></data>
+  <data name="System_OpenGlassRepairSpoiler" xml:space="preserve"><value>Нужна переустановка OpenGlass ({0})</value></data>
   <data name="System_OpenGlassUpdateMessage" xml:space="preserve"><value>Рекомендуется обновить библиотеку OpenGlass до последнего legacy-релиза.</value></data>
-  <data name="System_OpenGlassUpdateAction" xml:space="preserve"><value>Скачать</value></data>
+  <data name="System_OpenGlassUpdateAction" xml:space="preserve"><value>Открыть обслуживание</value></data>
   <data name="Notice_OpenGlassBorderBody" xml:space="preserve"><value>Так как бордюры создаются Диспетчером окон (DWM), активный OpenGlass имеет инициативу над DWM и поглощает цвет бордюров. В связи с этим вы не сможете изменить цвет бордюров, пока система OpenGlass приведена в действие. Выполните остановку OpenGlass, если для вас важно иметь цветные бордюры.</value></data>
   <data name="Notice_OpenGlassBorderTitle" xml:space="preserve"><value>Ограничено изменение цвета бордюров</value></data>
   <data name="Notice_OpenGlassBorderTraySuffix" xml:space="preserve"><value>Для панели задач остается возможным кастомизировать цвета в режиме XAML-пути отрисовки.</value></data>
@@ -801,6 +819,14 @@
   <data name="System_UpdateNever" xml:space="preserve"><value>Никогда</value></data>
   <data name="System_RowShellExtension" xml:space="preserve"><value>Расширение контекстного меню</value></data>
   <data name="System_RowShellExtensionDesc" xml:space="preserve"><value>Пункт Glass в меню рабочего стола</value></data>
+  <data name="System_RowShellExtensionDescClassic" xml:space="preserve"><value>Пункт Glass в меню рабочего стола (после «Показать дополнительные параметры»)</value></data>
+  <data name="System_ShellMenuNoticeTitle" xml:space="preserve"><value>Компактное меню Windows 11 недоступно</value></data>
+  <data name="System_ShellCertNoticeMessage" xml:space="preserve"><value>Windows 11 показывает компактное контекстное меню только для пакетов, подписанных доверенным сертификатом. Сертификат разработчика {0} пока не входит в «Доверенные лица» этого компьютера, поэтому пункт Glass зарегистрирован классическим способом и показывается после «Показать дополнительные параметры» (Shift+F10). Платформа работает полностью; сертификат нужен только для компактного меню, его установка необязательна и выполняется только по вашему нажатию. Что это за сертификат и как его удалить — {1} в папке установки.</value></data>
+  <data name="System_ShellCertNoticeOpenFolder" xml:space="preserve"><value>Открыть папку с сертификатом</value></data>
+  <data name="System_ShellCertNoticeInstall" xml:space="preserve"><value>Установить сертификат разработчика и включить компактное меню</value></data>
+  <data name="System_ShellClassicNoticeSwitch" xml:space="preserve"><value>Перейти на компактное меню</value></data>
+  <data name="System_ShellClassicNoticeMessage" xml:space="preserve"><value>Пункт Glass сейчас зарегистрирован классическим способом и показывается после «Показать дополнительные параметры» (Shift+F10). Сертификат разработчика уже доверен, поэтому можно перейти на компактное меню Windows 11.</value></data>
+  <data name="System_ShellSparseNoticeMessage" xml:space="preserve"><value>Пакет компактного меню (GlassShellSparse\GlassShellSparse.msix) отсутствует или не подписан, поэтому пункт Glass показывается после «Показать дополнительные параметры» (Shift+F10). Переустановите GlassPlatform, чтобы вернуть компактное меню.</value></data>
   <data name="Taskbar_PageSubtitle" xml:space="preserve"><value>Эффекты и цвета панели задач</value></data>
   <data name="Themes_ActiveBadge" xml:space="preserve"><value>Текущая</value></data>
   <data name="Themes_AllSection" xml:space="preserve"><value>Все темы</value></data>
@@ -816,7 +842,7 @@
   <data name="Themes_SignatureCardTitle" xml:space="preserve"><value>Цифровая подпись</value></data>
   <data name="Themes_SignatureCardDesc" xml:space="preserve"><value>Обход проверки цифровой подписи</value></data>
   <data name="Themes_SignatureActivated" xml:space="preserve"><value>Обход подписи успешно активирован.</value></data>
-  <data name="Themes_SignatureDeactivated" xml:space="preserve"><value>Обход подписи успешно деактивирован.</value></data>
+  <data name="Themes_SignatureDeactivated" xml:space="preserve"><value>Регистрация SecureUxTheme отключена. Файлы и MSI-продукт не удалены.</value></data>
   <data name="Themes_RestartRequired" xml:space="preserve"><value>Требуется перезагрузка.</value></data>
   <data name="Themes_RestartNotRequired" xml:space="preserve"><value>Перезагрузка не требуется.</value></data>
   <data name="Themes_SignatureActivateFailedFormat" xml:space="preserve"><value>Не удалось включить обход подписи (0x{0:X8})</value></data>
@@ -830,7 +856,7 @@
   <data name="Dialog_SignatureWrongArchBody" xml:space="preserve"><value>Архитектура модуля не совпадает с системой. Откройте GlassSettings той же разрядности, что и Windows.</value></data>
   <data name="Dialog_SignatureWow64Body" xml:space="preserve"><value>x86-сборка GlassSettings не может активировать патчер на 64-разрядной Windows. Откройте x64 GlassSettings.</value></data>
   <data name="Dialog_SignatureActivateConfirm" xml:space="preserve"><value>Включение изменит параметры загрузки winlogon.exe и потребует перезагрузки компьютера. Продолжить?</value></data>
-  <data name="Dialog_SignatureDeactivateConfirm" xml:space="preserve"><value>Отключение потребует перезагрузки. При активной сторонней теме будет применена штатная тема Windows. Продолжить?</value></data>
+  <data name="Dialog_SignatureDeactivateConfirm" xml:space="preserve"><value>Отключение снимет загрузку SecureUxTheme и COM-перенаправления на ThemeUiProxy. Файлы и MSI-продукт останутся; удалить продукт можно через «Установленные приложения» Windows. При активной сторонней теме будет применена штатная тема Windows. Для полного отключения в уже запущенных процессах нужна перезагрузка. Продолжить?</value></data>
   <data name="Dialog_SignatureConfirm" xml:space="preserve"><value>Продолжить</value></data>
   <data name="Themes_SignatureRebootButton" xml:space="preserve"><value>Перезагрузить</value></data>
   <data name="Home_FooterRebootRequired" xml:space="preserve"><value>Требуется перезагрузка</value></data>
@@ -1084,4 +1110,32 @@
   <data name="Dwm_ParallelConflictSuffixLocalValue" xml:space="preserve"><value>; конфликт с L-значением</value></data>
   <data name="Dwm_DefaultReflectionTile" xml:space="preserve"><value>Системное отражение (по умолчанию)</value></data>
   <data name="Dwm_DefaultMaterialTile" xml:space="preserve"><value>Системный материал (по умолчанию)</value></data>
+  <data name="Dialog_SignatureMissingPayloadBody" xml:space="preserve"><value>Полный комплект модулей SecureUxTheme не найден. Установите оригинальный MSI через GlassSetup. Наличие оставшегося ThemeUiProxy.dll само по себе не позволяет включить SecureUxTheme.</value></data>
+  <data name="System_MaintenanceTitle" xml:space="preserve"><value>Обслуживание систем</value></data>
+  <data name="System_MaintenanceDescription" xml:space="preserve"><value>Установка, обновление и удаление продуктов Glass</value></data>
+  <data name="System_MaintenanceModify" xml:space="preserve"><value>Изменить</value></data>
+  <data name="System_BackupTitle" xml:space="preserve"><value>Резервные копии параметров</value></data>
+  <data name="System_BackupDescription" xml:space="preserve"><value>Сохранение и восстановление параметров Glass и OpenGlass текущего профиля.</value></data>
+  <data name="System_BackupCreateTab" xml:space="preserve"><value>Создать</value></data>
+  <data name="System_BackupRestoreTab" xml:space="preserve"><value>Восстановить</value></data>
+  <data name="System_BackupCreateHeading" xml:space="preserve"><value>Новая копия</value></data>
+  <data name="System_BackupCreateCall" xml:space="preserve"><value>Отметьте части параметров. Файл сохранится в папке «Документы».</value></data>
+  <data name="System_BackupRestoreHeading" xml:space="preserve"><value>Копия из файла</value></data>
+  <data name="System_BackupRestoreCall" xml:space="preserve"><value>Выберите файл копии. Отметить можно только части, которые в нём есть.</value></data>
+  <data name="System_BackupPartAppearance" xml:space="preserve"><value>Оформление Glass</value></data>
+  <data name="System_BackupPartProcesses" xml:space="preserve"><value>Списки процессов</value></data>
+  <data name="System_BackupPartOpenGlass" xml:space="preserve"><value>OpenGlass</value></data>
+  <data name="System_BackupPartApp" xml:space="preserve"><value>Параметры приложения</value></data>
+  <data name="System_BackupSelect" xml:space="preserve"><value>Выбрать</value></data>
+  <data name="System_BackupApply" xml:space="preserve"><value>Применить</value></data>
+  <data name="System_BackupApplied" xml:space="preserve"><value>Выбранные параметры записаны в реестр текущего профиля.</value></data>
+  <data name="System_BackupApplyFailed" xml:space="preserve"><value>Не удалось применить копию параметров.</value></data>
+  <data name="System_BackupInvalidFile" xml:space="preserve"><value>Файл не является копией параметров Glass.</value></data>
+  <data name="System_BackupFilePickerTitle" xml:space="preserve"><value>Выбор резервной копии</value></data>
+  <data name="System_BackupFileFilter" xml:space="preserve"><value>Резервная копия Glass (*.glassbackup)</value></data>
+  <data name="System_BackupFileType" xml:space="preserve"><value>Резервная копия параметров Glass</value></data>
+  <data name="System_BackupSave" xml:space="preserve"><value>Создать копию</value></data>
+  <data name="System_BackupBusy" xml:space="preserve"><value>Создание и проверка архива…</value></data>
+  <data name="System_BackupSaved" xml:space="preserve"><value>Архив параметров сохранён и проверен:</value></data>
+  <data name="System_BackupFailed" xml:space="preserve"><value>Не удалось создать полную копию параметров. Не выполняйте очистку до успешного сохранения.</value></data>
 </root>

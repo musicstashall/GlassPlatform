@@ -7,7 +7,7 @@ namespace Shared::OpenGlassHostState
     inline constexpr wchar_t kOpenGlassHostServiceName[] = L"OpenGlassHost";
     inline constexpr wchar_t kOpenGlassHostExeName[] = L"OpenGlassHost.exe";
 
-    /// Состояние задачи планировщика OpenGlass Host (как GlassSettings / страница «Система»).
+    /// Состояние службы OpenGlassHost, а при её отсутствии — legacy задачи.
     enum class HostUiState : std::int32_t
     {
         NoTask = 0,
@@ -32,7 +32,7 @@ namespace Shared::OpenGlassHostState
     /// Задача или служба OpenGlass зарегистрированы.
     [[nodiscard]] bool OrchestrationInstalled() noexcept;
 
-    /// Агрегат task + service: NoInstall / Disabled / Ready / Running.
+    /// Service-first: состояние SCM; legacy task используется только без службы.
     [[nodiscard]] HostUiState QueryOrchestrationUiState() noexcept;
 
     /// Служба OpenGlassHost зарегистрирована.

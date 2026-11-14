@@ -37,6 +37,7 @@ public sealed partial class AppSettingsPanel : UserControl
         BackdropCombo.Header = GlassSettingsResources.Get("AppSettings_BackdropTypeLabel");
 
         ApplySettingsCardHeader(BusyOverlayCard, "AppSettings_BusyOverlayHeader", "AppSettings_BusyOverlayDescription");
+        ApplySettingsCardHeader(ValidateRegistryCard, "AppSettings_ValidateRegistryHeader", "AppSettings_ValidateRegistryDescription");
         BusyOverlaySwitch.OnContent = GlassSettingsResources.Get("AppSettings_BusyOverlayModeAcrylic");
         BusyOverlaySwitch.OffContent = GlassSettingsResources.Get("AppSettings_BusyOverlayModeDim");
 
@@ -95,6 +96,7 @@ public sealed partial class AppSettingsPanel : UserControl
             SelectLanguage(GlassSettingsRegistry.ReadAppUiLanguage());
             BusyOverlaySwitch.IsOn =
                 GlassSettingsRegistry.ReadWindowBusyOverlayMode() == WindowBusyOverlayMode.AcrylicChrome;
+            ValidateRegistrySwitch.IsOn = GlassSettingsRegistry.ReadValidateSettingsOnStartup();
         }
         finally
         {
@@ -130,6 +132,12 @@ public sealed partial class AppSettingsPanel : UserControl
             return;
 
         UiLanguageService.WriteAndApply(languageTag);
+    }
+
+    private void ValidateRegistrySwitch_OnToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        GlassSettingsRegistry.WriteValidateSettingsOnStartup(ValidateRegistrySwitch.IsOn);
     }
 
     private void BusyOverlaySwitch_OnToggled(object sender, RoutedEventArgs e)

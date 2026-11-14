@@ -1,6 +1,7 @@
 #pragma once
 #include <Windows.h>
 
+#include <cstddef>
 #include <unordered_map>
 #include <vector>
 
@@ -48,8 +49,11 @@ namespace WndCompat::ExplorerRoot
 
     void Detach(HWND hRoot);
 
-    // Принудительное снятие subclass с окна (EnumWindows fallback перед FreeLibrary)
-    void ExplorerRoot_ForceDetachSubclass(HWND hWnd) noexcept;
+    // Принудительное снятие subclass с окна (EnumWindows fallback перед FreeLibrary).
+    // true = RemoveWindowSubclass реально снял наш прок.
+    bool ExplorerRoot_ForceDetachSubclass(HWND hWnd) noexcept;
+
+    std::size_t ExplorerRoot_SubclassProcRva() noexcept;
 
     /// Снимок shutdown из Root_DetachAll: только File Explorer shell root из windows.
     void DetachAll(

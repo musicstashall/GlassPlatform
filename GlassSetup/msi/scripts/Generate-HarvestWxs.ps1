@@ -122,6 +122,29 @@ foreach ($line in $dirXml) { $lines.Add($line) }
 $lines.Add('    </DirectoryRef>')
 $lines.Add('  </Fragment>')
 $lines.Add('  <Fragment>')
+# Versioned PE files normally have no MsiFileHash row. Carry the exact staged
+# Native hash explicitly, inside the signed MSI, not in a loose sidecar.
+$nativeFiles = @($files | Where-Object { $_.Name -eq 'GlassSettings.Native.dll' })
+if ($nativeFiles.Count -gt 1) { throw 'Ambiguous Native payload' }
+if ((Split-Path $stagingFull -Leaf) -like 'GlassSettings-*' -and $nativeFiles.Count -ne 1) { throw 'Missing Native payload in Settings MSI' }
+if ($nativeFiles.Count -eq 1) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class GlassNativePayloadHash {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Hash { public uint Size, A, B, C, D; }
+    [DllImport("msi.dll", CharSet=CharSet.Unicode, ExactSpelling=true)]
+    public static extern uint MsiGetFileHashW(string path, uint options, ref Hash hash);
+}
+'@
+    $hash = New-Object GlassNativePayloadHash+Hash
+    $hash.Size = 20
+    $rc = [GlassNativePayloadHash]::MsiGetFileHashW($nativeFiles[0].FullName, 0, [ref]$hash)
+    if ($rc -ne 0) { throw "Cannot hash staged Native: $rc" }
+    $hex = '{0:X8}{1:X8}{2:X8}{3:X8}' -f $hash.A, $hash.B, $hash.C, $hash.D
+    $lines.Add("    <Property Id=`"GLASSNATIVEMSIHASH`" Value=`"$hex`" Hidden=`"yes`" />")
+}
 $lines.Add("    <ComponentGroup Id=`"$ComponentGroupId`">")
 foreach ($line in $compLines) { $lines.Add($line) }
 $lines.Add('    </ComponentGroup>')

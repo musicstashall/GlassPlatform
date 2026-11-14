@@ -1,0 +1,88 @@
+Сертификат разработчика / developer code-signing certificate
+=============================================================
+
+[RU]
+
+DeveloperCodeSigning.cer — публичный сертификат разработчика «Stanislav K.». Это подпись
+разработчика для любого его продукта (сертификат не привязан к конкретной программе): ею
+подписаны все исполняемые файлы GlassPlatform и sparse-пакет контекстного меню
+(GlassShellSparse\GlassShellSparse.msix).
+
+    Subject:    CN=Stanislav K.
+    SHA-1:      A801E5F5F430D6D19164C856F79B8EFD23F83EB8
+    Действует:  2026-11-01 — 2031-11-01
+
+Назначение. С помощью сертификата разработчик обеспечивает гарантию того, что приобретенный
+Вами продукт выпущен указанным разработчиком без вмешательства третьих лиц. Установка
+сертификата позволяет полноценно пользоваться продуктами разработчика на Вашем компьютере без
+ограничений, устанавливаемых политикой Microsoft; единственное ограничение — это Ваше доверие
+разработчику.
+
+Сертификат самоподписанный, Windows по умолчанию ему не доверяет — для работы платформы доверие
+НЕ требуется. Установка сертификата — Ваше право, а не обязанность: установщик спрашивает об
+этом на отдельной странице, и Вы можете отказаться.
+
+На что влияет отсутствие доверия: в Windows 11 пункт «Glass» в контекстном меню рабочего стола
+регистрируется классическим способом и показывается после «Показать дополнительные параметры»
+(Shift+F10). Компактное меню Windows 11 требует регистрации sparse-пакета, а Windows регистрирует
+его только от издателя, сертификат которого есть в хранилище «Доверенные лица»
+(LocalMachine\TrustedPeople).
+
+Как установить (если Вы приняли такое решение):
+
+  1. Сверьте отпечаток файла с указанным выше (PowerShell):
+       (Get-PfxCertificate "<папка установки>\DeveloperCodeSigning.cer").Thumbprint
+  2. Установщик на странице «Сертификат разработчика» (либо GlassSettings → Система →
+     Контекстное меню → «Установить сертификат разработчика») добавит сертификат в
+     «Доверенные лица» компьютера. Вручную то же самое:
+       Import-Certificate -FilePath "<папка установки>\DeveloperCodeSigning.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+     (или certlm.msc → Доверенные лица → Сертификаты → Все задачи → Импорт).
+  3. В GlassSettings → Система выключите и снова включите «Расширение контекстного меню»
+     (либо переустановите GlassPlatform). Проверка: Get-AppxPackage GlassProject.GlassShellMenu
+
+Отозвать доверие:
+       Remove-Item Cert:\LocalMachine\TrustedPeople\A801E5F5F430D6D19164C856F79B8EFD23F83EB8
+После этого снова выключите/включите пункт меню в GlassSettings — он вернётся к классической
+регистрации. Программа удаления GlassPlatform сертификат не удаляет.
+
+[EN]
+
+DeveloperCodeSigning.cer is the developer's public certificate ("Stanislav K."). It is the
+developer's signature for any of his products (the certificate is not tied to a particular
+program): it signs every GlassPlatform executable and the context-menu sparse package
+(GlassShellSparse\GlassShellSparse.msix).
+
+    Subject:    CN=Stanislav K.
+    SHA-1:      A801E5F5F430D6D19164C856F79B8EFD23F83EB8
+    Valid:      2026-11-01 — 2031-11-01
+
+Purpose. With the certificate the developer gives the user a guarantee that the product you
+purchased was released by the stated developer without third-party interference; installing the
+certificate lets you fully use the developer's products on your computer without the
+restrictions imposed by Microsoft policy — the only limitation is your trust in the developer.
+
+The certificate is self-signed and NOT trusted by Windows by default; the platform does not need
+that trust to work. Installing it is your right, not an obligation: Setup asks on a separate page
+and you may decline.
+
+What the missing trust affects: on Windows 11 the "Glass" desktop context-menu entry is registered
+the classic way and appears under "Show more options" (Shift+F10). The compact Windows 11 menu
+requires a sparse package, which Windows registers only when the publisher's certificate is in the
+LocalMachine\TrustedPeople store.
+
+How to install (if you choose to):
+
+  1. Compare the file's thumbprint with the value above (PowerShell):
+       (Get-PfxCertificate "<install folder>\DeveloperCodeSigning.cer").Thumbprint
+  2. Setup on the "Developer certificate" page (or GlassSettings → System → Context menu →
+     "Install the developer certificate") adds the certificate to the computer's Trusted People
+     store. Manually the same:
+       Import-Certificate -FilePath "<install folder>\DeveloperCodeSigning.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+     (or certlm.msc → Trusted People → Certificates → All Tasks → Import).
+  3. In GlassSettings → System turn "Context menu extension" off and on again (or reinstall
+     GlassPlatform). Check: Get-AppxPackage GlassProject.GlassShellMenu
+
+To revoke the trust:
+       Remove-Item Cert:\LocalMachine\TrustedPeople\A801E5F5F430D6D19164C856F79B8EFD23F83EB8
+Then toggle the menu entry in GlassSettings again — it falls back to the classic registration.
+The GlassPlatform uninstaller never removes the certificate.

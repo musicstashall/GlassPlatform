@@ -38,11 +38,9 @@ public static class OpenGlassRootBackdropNoticeCoordinator
         RootBackdropModePolicy.IsFullGlassEnabled && IsOpenGlassOrchestrationRunning();
 
     public static string FormatActionHint() =>
-        OpenGlassUiPolicy.IsOrchestratedExternally()
-            ? GlassSettingsResources.Get("Notice_OgRootBackdrop_ActionExternal")
-            : GlassSettingsResources.Get("Notice_OgRootBackdrop_ActionGlassBefore")
-              + GlassSettingsResources.Get("Notice_OgRootBackdrop_ActionGlassLink")
-              + GlassSettingsResources.Get("Notice_OgRootBackdrop_ActionGlassAfter");
+        GlassSettingsResources.Get("Notice_OgRootBackdrop_ActionGlassBefore")
+        + GlassSettingsResources.Get("Notice_OgRootBackdrop_ActionGlassLink")
+        + GlassSettingsResources.Get("Notice_OgRootBackdrop_ActionGlassAfter");
 
     private static void OnPresenceChanged(object? sender, EventArgs e)
     {

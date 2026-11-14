@@ -67,6 +67,14 @@ void AttachList::LogAll()
     }
 }
 
+void AttachList::GetEntries(std::vector<std::pair<std::wstring, DWORD>>& out)
+{
+    out.clear();
+    out.reserve(m_allowList.size());
+    for (const auto& [name, raw] : m_allowList)
+        out.emplace_back(name, raw);
+}
+
 Shared::InjectionMode AttachList::GetProcessMode(const std::wstring& exeName)
 {
     std::wstring key = Normalize(exeName);

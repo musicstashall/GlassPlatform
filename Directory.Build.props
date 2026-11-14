@@ -1,8 +1,9 @@
 <Project>
   <!--
-    Единый источник истины версии продукта Glass.
+    Источник версии продуктов платформы Glass, включая GlassSettings.
     Меняется ТОЛЬКО здесь (Major.Minor.Patch). FileVersion (4-е поле) —
     автоинкремент per-project через BuildNumber.txt и Directory.Build.targets.
+    Номер комплекта задаёт ProductVersion MSI и InformationalVersion приложения.
   -->
   <PropertyGroup>
     <GlassProductVersion>2.0.0.0</GlassProductVersion>
@@ -15,8 +16,7 @@
     <GlassProductVersionBase>$([System.Text.RegularExpressions.Regex]::Match('$(GlassProductVersion)', '^\d+\.\d+\.\d+').Value)</GlassProductVersionBase>
   </PropertyGroup>
 
-  <!-- Активная сессия комплекта между ручными вызовами VS (x64 затем x86). -->
-  <Import Project="$(SolutionRoot)Build\GlassBundleSession.props" Condition="Exists('$(SolutionRoot)Build\GlassBundleSession.props')" />
+  <!-- Версия комплекта подхватывается в GlassBundleImportSessionProps (JSON), не через Import .props — иначе GlassBundleBuildNumber ломает Override сессии. -->
 
   <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.csproj'">
     <Version>$(GlassProductVersion)</Version>

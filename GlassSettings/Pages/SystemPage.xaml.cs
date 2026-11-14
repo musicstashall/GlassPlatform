@@ -8,6 +8,7 @@ using GlassSettings.Strings;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
+using System.Diagnostics;
 
 namespace GlassSettings.Pages;
 
@@ -22,11 +23,13 @@ public sealed partial class SystemPage : Page
     private SystemDualGlassPlatformControls? _glassDualControls;
     private bool _shellSuppress;
     private bool _updateNoticeSubscribed;
+    private bool _backupNoticeActive;
 
     public SystemPage()
     {
         InitializeComponent();
         ApplyLocalizedStrings();
+        WireBackupLayout();
         BuildInfoBanner();
         ConfigureUpdateIntervalRow();
         ShellExtensionRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.ShellExtension);
@@ -71,9 +74,14 @@ public sealed partial class SystemPage : Page
         }
 
         PageShell.PageNoticeStack.ActionNotice.ActionRequested += async (_, _) =>
-            await ProductUpdateCoordinator.OpenVisibleUpdateDownloadAsync();
+        {
+            if (!_backupNoticeActive) await ProductUpdateCoordinator.OpenVisibleUpdateDownloadAsync();
+        };
         PageShell.PageNoticeStack.ActionNotice.DismissRequested += (_, _) =>
+        {
+            if (_backupNoticeActive) { _backupNoticeActive = false; return; }
             ProductUpdateCoordinator.DismissVisibleUpdateNotice();
+        };
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -130,10 +138,68 @@ public sealed partial class SystemPage : Page
     private void OnPendingUpdatesChanged(object? sender, EventArgs e) =>
         DispatcherQueue.TryEnqueue(RefreshAfterShellNavigation);
 
+    private void MaintenanceModify_OnClick(object sender, RoutedEventArgs e)
+    {
+        var setup = GlassMaintenanceSetupPaths.SetupExecutablePath();
+        if (string.IsNullOrEmpty(setup))
+        {
+            _ = HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("System_MaintenanceTitle"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Get("Home_InstallationMaintenanceMissing")),
+                Footer = HostedConfirmationDialogService.CreateFooter(
+                    GlassSettingsResources.Get("Dialog_Close"))
+            });
+            return;
+        }
+
+        if (!GlassMaintenanceSetupLaunchService.TryLaunch())
+        {
+            _ = HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("System_MaintenanceTitle"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Get("Home_InstallationMaintenanceLaunchFailed")),
+                Footer = HostedConfirmationDialogService.CreateFooter(
+                    GlassSettingsResources.Get("Dialog_Close"))
+            });
+        }
+    }
+
+    private async Task ShowBackupNoticeAsync(SettingsNoticeSeverity severity, string message)
+    {
+        _backupNoticeActive = severity == SettingsNoticeSeverity.Error;
+        var stack = PageShell.PageNoticeStack;
+        var strip = stack.ActionNotice;
+        strip.AllowDismiss = true;
+        strip.ShowSaveButton = false;
+        strip.ShowActionButton = false;
+        if (strip.IsVisuallyOpen)
+            NoticeViewportMirrorService.ClosePinnedSourcePreservingScroll(strip);
+        strip.Visibility = NoticePresentationPolicy.IsInformationalMirrorOnly(severity, false, false)
+            ? Visibility.Collapsed : Visibility.Visible;
+        await SettingsNoticeCoordinator.PresentAsync(
+            SettingsNoticeCoordinator.CreateShellHost(stack, PageShell.PageScrollViewer),
+            new SettingsNoticeCoordinator.NoticePresentRequest
+            {
+                Strip = strip, Severity = severity, Message = message,
+                ShowSave = false, ShowAction = false, Animate = true
+            });
+    }
+
     private void ApplyLocalizedStrings()
     {
+        MaintenanceExpander.IconGlyph = "\uE713";
+        MaintenanceExpander.Title = GlassSettingsResources.Get("System_MaintenanceTitle");
+        MaintenanceExpander.Description = GlassSettingsResources.Get("System_MaintenanceDescription");
+        MaintenanceModifyButton.Content = GlassSettingsResources.Get("System_MaintenanceModify");
+        BackupExpander.Title = GlassSettingsResources.Get("System_BackupTitle");
+        BackupExpander.IconGlyph = "\uE74E";
+        ApplyBackupStrings();
         ShellExtensionRow.Title = GlassSettingsResources.Get("System_RowShellExtension");
         ShellExtensionRow.Description = GlassSettingsResources.Get("System_RowShellExtensionDesc");
+        ShellMenuNoticeBlock.Title = GlassSettingsResources.Get("System_ShellMenuNoticeTitle");
         UpdateIntervalRow.Title = GlassSettingsResources.Get("System_UpdateIntervalTitle");
         UpdateIntervalRow.Description = GlassSettingsResources.Get("System_UpdateIntervalDesc");
     }
@@ -180,6 +246,10 @@ public sealed partial class SystemPage : Page
         var exposed = OpenGlassUiPolicy.IsFeatureExposedInUi();
         if (_ogNav is not null)
             _ogNav.Visibility = exposed ? Visibility.Visible : Visibility.Collapsed;
+        var platform = GlassPlatformUiPolicy.ShouldExposePlatformSections();
+        if (_glassNav is not null)
+            _glassNav.Visibility = platform ? Visibility.Visible : Visibility.Collapsed;
+        ShellExtensionRow.Visibility = platform ? Visibility.Visible : Visibility.Collapsed;
         BuildInfoBanner();
     }
 
@@ -241,9 +311,7 @@ public sealed partial class SystemPage : Page
         var hasUpdate = pending is not null;
         _ogNav.SetUpdateLine(
             hasUpdate,
-            hasUpdate
-                ? string.Format(GlassSettingsResources.Get("System_OpenGlassUpdateSpoilerFormat"), pending!.Version)
-                : null,
+            hasUpdate ? ProductUpdateCoordinator.FormatOpenGlassSpoiler(pending!) : null,
             hasUpdate ? () => _ = ProductUpdateCoordinator.OpenPendingOpenGlassDownloadAsync() : null);
         _ogNav.RefreshHeaderLayout();
     }
@@ -252,9 +320,7 @@ public sealed partial class SystemPage : Page
     {
         var pending = ProductUpdateCoordinator.GetPendingGlass();
         var hasUpdate = pending is not null;
-        var line = hasUpdate
-            ? string.Format(GlassSettingsResources.Get("System_OpenGlassUpdateSpoilerFormat"), pending!.Version)
-            : null;
+        var line = hasUpdate ? ProductUpdateCoordinator.FormatGlassSpoiler(pending!) : null;
         Action? click = hasUpdate
             ? () => _ = ProductUpdateCoordinator.OpenPendingGlassDownloadAsync()
             : null;
@@ -265,6 +331,7 @@ public sealed partial class SystemPage : Page
 
     private async void RefreshUpdateNotice()
     {
+        if (_backupNoticeActive) return;
         if (ProductUpdateCoordinator.ShouldShowOpenGlassNotice
             && ProductUpdateCoordinator.GetPendingOpenGlass() is { } pendingOg)
         {
@@ -273,10 +340,7 @@ public sealed partial class SystemPage : Page
 
             await PageShell.PageNoticeStack.ShowActionNoticeAsync(
                 SettingsNoticeSeverity.Warning,
-                string.Format(
-                    GlassSettingsResources.Get("System_OpenGlassUpdateTitle"),
-                    pendingOg.Version,
-                    installedOg),
+                ProductUpdateCoordinator.FormatOpenGlassSystemNotice(pendingOg, installedOg ?? "—"),
                 GlassSettingsResources.Get("System_OpenGlassUpdateAction"),
                 animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
             return;
@@ -291,10 +355,17 @@ public sealed partial class SystemPage : Page
 
             await PageShell.PageNoticeStack.ShowActionNoticeAsync(
                 SettingsNoticeSeverity.Warning,
-                string.Format(
-                    GlassSettingsResources.Get("System_GlassUpdateTitle"),
-                    pendingGlass.Version,
-                    installedGlass),
+                ProductUpdateCoordinator.FormatGlassSystemNotice(pendingGlass, installedGlass),
+                GlassSettingsResources.Get("System_OpenGlassUpdateAction"),
+                animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
+            return;
+        }
+
+        if (ProductUpdateCoordinator.ShouldShowOfflineNotice)
+        {
+            await PageShell.PageNoticeStack.ShowActionNoticeAsync(
+                SettingsNoticeSeverity.Warning,
+                ProductUpdateCoordinator.OfflineNoticeText,
                 GlassSettingsResources.Get("System_OpenGlassUpdateAction"),
                 animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
             return;
@@ -326,6 +397,8 @@ public sealed partial class SystemPage : Page
             _shellSuppress = false;
         }
 
+        RefreshShellMenuNotice(registered);
+
         _ogNav!.CanNavigate = _ogRow!.TaskExists;
         if (_glassDualControls is not null && _glassNav is not null)
         {
@@ -337,6 +410,107 @@ public sealed partial class SystemPage : Page
         else if (_glassNav is not null)
         {
             _glassNav.CanNavigate = _glassRow!.TaskExists;
+        }
+    }
+
+    /// <summary>
+    /// Windows 11: компактное меню требует sparse-пакет, который Windows регистрирует только от
+    /// издателя с доверенным сертификатом. Без доверия переключатель управляет классическим пунктом
+    /// («Показать дополнительные параметры»); уведомление объясняет это и даёт ссылку-действие:
+    /// установить сертификат разработчика одним нажатием (тот же код, что и на странице сертификата
+    /// установщика) и перейти на компактное меню. Сертификат никогда не ставится без этого нажатия.
+    /// </summary>
+    private void RefreshShellMenuNotice(bool registered)
+    {
+        var mode = registered ? ShellExtensionService.GetMenuMode() : ShellMenuMode.None;
+        var trust = ShellExtensionService.GetSignerTrust(out var signerSubject);
+        var classicDescription = mode == ShellMenuMode.Classic
+            || (trust != ShellSignerTrust.Unknown && trust != ShellSignerTrust.Trusted);
+        ShellExtensionRow.Description = GlassSettingsResources.Get(
+            classicDescription ? "System_RowShellExtensionDescClassic" : "System_RowShellExtensionDesc");
+
+        // Windows 10 / ошибка запроса → Unknown; компактное меню уже стоит → без уведомления.
+        if (trust == ShellSignerTrust.Unknown || mode == ShellMenuMode.Compact
+            || (!ShellExtensionSwitch.IsEnabled && mode == ShellMenuMode.None))
+        {
+            ShellMenuNoticeBlock.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var text = ShellMenuNoticeBlock.MessageTextBlock;
+        text.Inlines.Clear();
+        switch (trust)
+        {
+            case ShellSignerTrust.Trusted:
+                // Сертификат уже доверен, но пункт зарегистрирован классически (до импорта сертификата).
+                if (mode != ShellMenuMode.Classic)
+                {
+                    ShellMenuNoticeBlock.Visibility = Visibility.Collapsed;
+                    return;
+                }
+                AddInlineText(text, GlassSettingsResources.Get("System_ShellClassicNoticeMessage"));
+                AddInlineText(text, " ");
+                AddHyperlink(text, GlassSettingsResources.Get("System_ShellClassicNoticeSwitch"),
+                    () => _ = ApplyAuthorCertificateAsync(trustFirst: false));
+                break;
+            case ShellSignerTrust.Untrusted:
+                if (string.IsNullOrWhiteSpace(signerSubject))
+                    signerSubject = ShellExtensionService.SparsePublisher;
+                AddInlineText(text, string.Format(
+                    GlassSettingsResources.Get("System_ShellCertNoticeMessage"),
+                    signerSubject,
+                    ShellExtensionService.AuthorCertificateReadme));
+                AddInlineText(text, " ");
+                AddHyperlink(text, GlassSettingsResources.Get("System_ShellCertNoticeInstall"),
+                    () => _ = ApplyAuthorCertificateAsync(trustFirst: true));
+                var certificatePath = ShellExtensionService.GetAuthorCertificatePath();
+                if (!string.IsNullOrEmpty(certificatePath))
+                {
+                    AddInlineText(text, " · ");
+                    AddHyperlink(text, GlassSettingsResources.Get("System_ShellCertNoticeOpenFolder"),
+                        () => RevealInExplorer(certificatePath));
+                }
+                break;
+            default:
+                AddInlineText(text, GlassSettingsResources.Get("System_ShellSparseNoticeMessage"));
+                break;
+        }
+        ShellMenuNoticeBlock.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Ссылка-действие из уведомления: при trustFirst сертификат разработчика добавляется в
+    /// «Доверенные лица» компьютера, затем (если пункт меню включён) регистрация повторяется и
+    /// Windows 11 переходит на компактное меню. Переключатель на время операции блокируется.</summary>
+    private async Task ApplyAuthorCertificateAsync(bool trustFirst)
+    {
+        if (ShellExtensionService.IsShellExtensionOperationInProgress())
+            return;
+
+        _shellSuppress = true;
+        ShellExtensionSwitch.IsEnabled = false;
+        _shellSuppress = false;
+        try
+        {
+            if (trustFirst)
+                await ShellExtensionService.TrustAuthorCertificateAsync(reregister: true).ConfigureAwait(true);
+            else if (ShellExtensionService.IsBundledDllRegistered())
+                await ShellExtensionService.SetShellExtensionRegisteredAsync(true).ConfigureAwait(true);
+        }
+        finally
+        {
+            RefreshShellRow();
+        }
+    }
+
+    private static void RevealInExplorer(string filePath)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + filePath + "\"") { UseShellExecute = true });
+        }
+        catch
+        {
+            // Только удобство: без Проводника путь остаётся в тексте уведомления.
         }
     }
 

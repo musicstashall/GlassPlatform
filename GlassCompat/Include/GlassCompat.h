@@ -54,5 +54,11 @@ extern "C" {
 namespace GlassCompat
 {
     bool Initialize(HMODULE hSelf);
+
+    /// R12: страховка для процессов, куда DLL попала через глобальный WinEvent-хук и
+    /// где WinEventProc ещё не вызывался (DllHost прогона 12: attach_gate + pin_acq,
+    /// дальше тишина). Без этого у процесса нет ни GUI-потока, ни minimal watcher'а —
+    /// после стопа он держит наши модули вечно. Вызывается из DllMain (attach).
+    void EnsureAttachWatcher() noexcept;
     bool RequestShutdown();
 }

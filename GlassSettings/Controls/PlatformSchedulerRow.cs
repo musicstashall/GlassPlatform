@@ -173,7 +173,7 @@ public sealed class PlatformSchedulerRow
                 _installGate.IsOn = false;
                 _installGate.IsEnabled = false;
                 _stackable.SetStatusTone(
-                    GlassSettingsResources.Get("Status_PlatformNotInstalled"),
+                    GlassSettingsResources.Get("Status_Disabled"),
                     PlatformSchedulerStackableActions.StatusToneKind.Disabled);
                 return;
             }
@@ -358,7 +358,7 @@ public sealed class PlatformSchedulerRow
                 return;
             }
 
-            if (st == OpenGlassHostUiState.Ready)
+            if (st is OpenGlassHostUiState.Ready or OpenGlassHostUiState.Disabled)
             {
                 _ = RunOpenGlassStartAsync();
                 return;
@@ -522,15 +522,18 @@ public sealed class PlatformSchedulerRow
             }
             else
             {
-                await Task.Run(DeleteTask).ConfigureAwait(true);
-                if (Kind == PlatformSchedulerKind.OpenGlass)
+                operationOk = await Task.Run(DeleteTask).ConfigureAwait(true);
+                if (Kind == PlatformSchedulerKind.OpenGlass && operationOk)
                     await ApplyOpenGlassStopPolicyAfterDeleteAsync().ConfigureAwait(true);
-                operationOk = !QueryDirectState().TaskExists;
+                // Проверка вне UI-потока: прямой запрос задачи/службы на UI-потоке читает
+                // кэш планировщика и может вернуть уже удалённое состояние.
+                operationOk = operationOk && !await Task.Run(() => QueryDirectState().TaskExists).ConfigureAwait(true);
             }
 
             PlatformPresenceService.Instance.RefreshSnapshotSynchronouslyFromDirectQueries();
             PlatformPresenceService.Instance.NotifyLifecycleChanged();
-            if (!operationOk || QueryDirectState().TaskExists != install)
+            var finalExists = await Task.Run(() => QueryDirectState().TaskExists).ConfigureAwait(true);
+            if (!operationOk || finalExists != install)
                 RestoreInstallGateFromDirectState();
         }
         finally
@@ -554,15 +557,11 @@ public sealed class PlatformSchedulerRow
         }
     }
 
-    private void DeleteTask()
+    private bool DeleteTask()
     {
         if (Kind == PlatformSchedulerKind.Glass)
-        {
-            GlassPlatformService.TryRemoveGlassAutorunTaskWithStop(EffectiveGlassArch);
-            return;
-        }
-
-        OpenGlassInstallService.Uninstall();
+            return GlassPlatformService.TryRemoveGlassAutorunTaskWithStop(EffectiveGlassArch);
+        return OpenGlassInstallService.Uninstall();
     }
 
     private void OnMenuToggleClick()
@@ -585,10 +584,10 @@ public sealed class PlatformSchedulerRow
             return;
         }
 
-        OpenGlassInstallService.Uninstall();
-        _ = ApplyOpenGlassStopPolicyAfterDeleteAsync();
-        Refresh();
+        if (_busy) return;
+        BeginInstallGateOperation(false);
         StateChanged?.Invoke(this, EventArgs.Empty);
+        _ = ApplyInstallToggleAsync(false);
     }
 
     private async Task RemoveGlassTaskAsync()

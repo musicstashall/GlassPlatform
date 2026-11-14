@@ -3,11 +3,279 @@
 #include "GlassCompat.h"
 #include <CrashGuard.h>
 #include <Windows.h>
+#include <wchar.h>
+#include <string.h>
+#include <ProcessBlockList.h>
+#include <InjectProcessMap.h>
+#include <cstddef>
 
 #if defined(_DEBUG)
 #include <crtdbg.h>
 #include <cstdlib>
 #endif
+
+// ── R7 (H97): гейт загрузки ─────────────────────────────────────────────────
+//
+// user32 грузит INCONTEXT-hook DLL (глобальный SetWinEventHook из хоста) в КАЖДЫЙ процесс
+// с окнами и держит в нём указатель на GlassCompat_WinEventProc. Ссылку на модуль в таком
+// процессе снимает ОС, и только тогда, когда процесс сам обработает снятие хука. Снять её
+// снаружи (CreateRemoteThread+FreeLibrary) нельзя без use-after-unmap: дамп
+// `Яндекс Музыка.exe.35444` — AV 0xC0000005 записью по 0x8 внутри уже выгруженного
+// GlassCompat (стек вызова — user32). Поэтому единственный безопасный способ не иметь
+// проблем в «чужих» процессах — не загружаться в них вовсе.
+//
+// Хост (EntryRundll.cpp) на старте пишет `%LOCALAPPDATA%\GlassPlatform\attach-gate.txt`:
+//
+//     v1
+//     mode=deny            // deny: перечисленные процессы НЕ получают DLL
+//     name=яндекс музыка.exe
+//     ...
+//
+// (`mode=allow` — наоборот, грузимся только в перечисленные; `mode=off` или отсутствие
+// файла — гейт выключен). Хост берёт имена из ProcessBlockList (встроенный + реестр),
+// AttachList=Forbidden и GLASS_ATTACH_GATE_EXTRA.
+//
+// Файл, а не реестр: в DllMain нельзя дёргать advapi32 (загрузка под loader lock).
+// Читаем только kernel32 (CreateFileW/ReadFile) + статический буфер, без аллокаций CRT.
+namespace
+{
+    constexpr wchar_t kGateRelPath[] = L"GlassPlatform\\attach-gate.txt";
+    constexpr DWORD   kGateMaxChars = 16384;
+
+    enum class GateMode : int
+    {
+        Off = 0,   // файла нет / mode=off — ведём себя как раньше
+        Allow = 1, // грузимся только в перечисленные процессы
+        Deny = 2,  // не грузимся в перечисленные процессы
+    };
+
+    wchar_t GateLower(wchar_t c) noexcept
+    {
+        return (c >= L'A' && c <= L'Z') ? static_cast<wchar_t>(c + (L'a' - L'A')) : c;
+    }
+
+    bool GateNameEquals(const wchar_t* a, const wchar_t* b) noexcept
+    {
+        while (*a && *b)
+        {
+            if (GateLower(*a) != GateLower(*b))
+                return false;
+            ++a;
+            ++b;
+        }
+        return *a == 0 && *b == 0;
+    }
+
+    // R9: путь гейта. В прогоне 9 приложение Яндекс Музыки (`Y.Music.exe`, pid 904)
+    // получило `gate="missing"` при уже записанном файле — почти наверняка потому, что
+    // процесс живёт с другой средой (AppContainer/пакетное приложение переписывает
+    // LOCALAPPDATA на свой LocalCache). Поэтому: LOCALAPPDATA → USERPROFILE\AppData\Local,
+    // а если и это недоступно — гейт работает fail-closed (см. GateAllowsAttach).
+    bool GateBuildPath(wchar_t* out, DWORD cch) noexcept
+    {
+        wchar_t base[MAX_PATH]{};
+        const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, _countof(base));
+        if (n > 0 && n < _countof(base))
+            return swprintf_s(out, cch, L"%s\\%s", base, kGateRelPath) > 0;
+
+        const DWORD m = GetEnvironmentVariableW(L"USERPROFILE", base, _countof(base));
+        if (m > 0 && m < _countof(base))
+            return swprintf_s(out, cch, L"%s\\AppData\\Local\\%s", base, kGateRelPath) > 0;
+
+        return false;
+    }
+
+    // Процессы, которые обязаны получать DLL даже при нечитаемом/отсутствующем гейте:
+    // иначе платформа не запустится (rundll32-хост), не покажет процессы (GlassSettings),
+    // не отрисует shell-хосты UICompat и не починит панель задач (explorer).
+    bool GateIsAlwaysTrusted(const wchar_t* exeName) noexcept
+    {
+        static const wchar_t* const kTrusted[] = {
+            L"rundll32.exe",
+            L"GlassPlatform.exe",
+            L"GlassSettings.exe",
+            L"LogViewer.exe",
+            L"explorer.exe",
+            L"shellexperiencehost.exe",
+            L"shellhost.exe",
+            L"startmenuexperiencehost.exe",
+            L"searchhost.exe",
+            L"searchapp.exe",
+        };
+        for (const wchar_t* t : kTrusted)
+        {
+            if (GateNameEquals(exeName, t))
+                return true;
+        }
+        return false;
+    }
+
+    // Встроенный deny: имена из ProcessBlockList (header-only список, без реестра и без
+    // I/O — в DllMain это обязательное условие) плюс приложения, которые падали в чужом
+    // стеке после выгрузки GlassCompat.
+    bool GateIsBuiltInDeny(const wchar_t* exeName) noexcept
+    {
+        static const wchar_t* const kExtra[] = {
+            L"Y.Music.exe",
+            L"Яндекс Музыка.exe",
+            L"YMusic.exe",
+            L"RuntimeBroker.exe",
+            L"ApplicationFrameHost.exe",
+        };
+        for (const wchar_t* n : kExtra)
+        {
+            if (GateNameEquals(exeName, n))
+                return true;
+        }
+        for (std::size_t i = 0; i < ProcessBlockList::BuiltInCount(); ++i)
+        {
+            if (GateNameEquals(exeName, ProcessBlockList::kBuiltInNames[i]))
+                return true;
+        }
+        return false;
+    }
+
+    /// true — процессу разрешено грузить DLL. `reasonOut` — короткая причина для лога.
+    bool GateAllowsAttach(const wchar_t* exeName, GateMode& modeOut, char* modeText,
+        size_t modeTextCch, char* reasonOut, size_t reasonCch, unsigned long& gleOut) noexcept
+    {
+        modeOut = GateMode::Off;
+        gleOut = 0;
+        strncpy_s(modeText, modeTextCch, "missing", _TRUNCATE);
+        strncpy_s(reasonOut, reasonCch, "file", _TRUNCATE);
+
+        // (1) Встроенный список: не зависит ни от файла, ни от реестра, ни от среды.
+        // Именно здесь ловится прогон 9: `Y.Music.exe` получил allow=1 лишь потому, что
+        // гейт-файл в его среде не читался ("missing").
+        if (GateIsBuiltInDeny(exeName))
+        {
+            strncpy_s(modeText, modeTextCch, "builtin", _TRUNCATE);
+            strncpy_s(reasonOut, reasonCch, "builtin", _TRUNCATE);
+            return false;
+        }
+        if (GateIsAlwaysTrusted(exeName))
+        {
+            strncpy_s(reasonOut, reasonCch, "trusted", _TRUNCATE);
+            return true;
+        }
+
+        // (2) Файл гейта. FAIL-CLOSED: если его не прочитать (нет среды, ACL AppContainer,
+        // платформа не стартовала) — не грузимся. Для остальных процессов это безопасно:
+        // DLL приходит только от наших хуков, и без работающей платформы ей там нечего делать.
+        wchar_t path[MAX_PATH * 2]{};
+        if (!GateBuildPath(path, _countof(path)))
+        {
+            strncpy_s(modeText, modeTextCch, "noenv", _TRUNCATE);
+            strncpy_s(reasonOut, reasonCch, "noenv", _TRUNCATE);
+            return false;
+        }
+
+        HANDLE hFile = CreateFileW(
+            path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hFile == INVALID_HANDLE_VALUE)
+        {
+            gleOut = static_cast<unsigned long>(GetLastError());
+            return false;
+        }
+
+        static wchar_t s_buf[kGateMaxChars];
+        DWORD read = 0;
+        const BOOL readOk = ReadFile(
+            hFile, s_buf, static_cast<DWORD>(sizeof(s_buf) - sizeof(wchar_t)), &read, nullptr);
+        CloseHandle(hFile);
+        if (!readOk || read == 0)
+        {
+            gleOut = static_cast<unsigned long>(GetLastError());
+            return false;
+        }
+
+        const DWORD chars = read / sizeof(wchar_t);
+        s_buf[chars] = 0;
+
+        bool allow = true;
+        const wchar_t* line = s_buf;
+        while (line && *line)
+        {
+            const wchar_t* end = line;
+            while (*end && *end != L'\n')
+                ++end;
+
+            if (end > line && end[-1] == L'\r')
+                --end;
+
+            const wchar_t* name = nullptr;
+            if (end - line > 5 && wcsncmp(line, L"mode=", 5) == 0)
+            {
+                const wchar_t* v = line + 5;
+                const bool isAllow = (end - v == 5 && wcsncmp(v, L"allow", 5) == 0);
+                const bool isDeny = (end - v == 4 && wcsncmp(v, L"deny", 4) == 0);
+                const bool isOff = (end - v == 3 && wcsncmp(v, L"off", 3) == 0);
+                if (isAllow)
+                {
+                    modeOut = GateMode::Allow;
+                    allow = false; // пока имя не встретится
+                    strncpy_s(modeText, modeTextCch, "allow", _TRUNCATE);
+                }
+                else if (isDeny)
+                {
+                    modeOut = GateMode::Deny;
+                    allow = true;
+                    strncpy_s(modeText, modeTextCch, "deny", _TRUNCATE);
+                }
+                else if (isOff)
+                {
+                    modeOut = GateMode::Off;
+                    allow = true;
+                    strncpy_s(modeText, modeTextCch, "off", _TRUNCATE);
+                }
+            }
+            else if (end - line > 5 && wcsncmp(line, L"name=", 5) == 0)
+            {
+                name = line + 5;
+            }
+
+            if (name && exeName)
+            {
+                wchar_t candidate[128]{};
+                const size_t nameLen = static_cast<size_t>(end - name);
+                if (nameLen > 0 && nameLen < _countof(candidate))
+                {
+                    for (size_t i = 0; i < nameLen; ++i)
+                        candidate[i] = GateLower(name[i]);
+                    if (GateNameEquals(candidate, exeName))
+                        allow = (modeOut == GateMode::Allow);
+                }
+            }
+
+            line = (*end == L'\n') ? end + 1 : end;
+        }
+
+        return allow;
+    }
+}
+
+// Отказ гейта (path=2) обязан быть виден в GlassSettings. Гейт возвращает FALSE раньше
+// Initialize, поэтому слот `RejectedBlockList` пишет сам DllMain — иначе исключённые
+// процессы вообще не попадают в список. Бит ModuleCompat показывает, что произошло:
+// GlassCompat был отображён в процесс загрузчиком и отказался работать.
+//
+// Публикуется на КАЖДОМ отказе, а не «один раз на процесс». Карту создаёт хост при старте
+// (CreateHostResources обнуляет её) и закрывает при остановке, поэтому «один раз» означало
+// бы: после перезапуска платформы долгоживущие исключённые процессы (msedge, Telegram,
+// devenv) в новой карте не появятся никогда — «отвергнутые» пропадают из списка, хотя
+// user32 продолжает подсовывать им GlassCompat. Цена — один OpenFileMapping+MapViewOfFile
+// на попытку загрузки; решение гейта при этом не пересчитывается (кэш в мьютексе pid).
+static void WriteRejectedSlot(const wchar_t* exeName) noexcept
+{
+    (void)Shared::InjectProcessMap::TryUpsert(
+        GetCurrentProcessId(),
+        Shared::InjectProcessMap::Kind::RejectedBlockList,
+        /*path=*/2,
+        Shared::InjectProcessMap::State::Alive,
+        Shared::InjectProcessMap::ModuleCompat,
+        exeName);
+}
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
 {
@@ -29,6 +297,72 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
         (void)_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
         (void)_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
 #endif
+        // C2360: объявления внутри `case` без собственного блока запрещены (метка `case`
+        // пересекает инициализацию). Всё тело attach-гейта — в своём блоке.
+        {
+            // Решение об отказе проверяется первым: повторные LoadLibrary от user32 в
+            // исключённом процессе (msedge — сотни попыток за сессию) не должны считать
+            // гейт заново (файл, реестр, среда). Решение кэшируется мьютексом с именем pid,
+            // а слот отказа публикуется при каждом отказе — карта живёт одну сессию.
+            wchar_t exePath[MAX_PATH]{};
+            const DWORD exeLen = GetModuleFileNameW(nullptr, exePath, _countof(exePath));
+            const wchar_t* exeStem = exePath;
+            if (exeLen > 0)
+            {
+                for (DWORD i = exeLen; i > 0; --i)
+                {
+                    if (exePath[i - 1] == L'\\' || exePath[i - 1] == L'/')
+                    {
+                        exeStem = exePath + i;
+                        break;
+                    }
+                }
+            }
+            // Отказ кэшируем на процесс. Статик модуля НЕ годится: при возврате FALSE модуль
+            // не загружается, и его состояние исчезает — решение пришлось бы принимать заново
+            // на каждой попытке. Держим kernel-объект с именем pid: он живёт в таблице
+            // хэндлов процесса, а не в модуле, и переживает возврат FALSE.
+            wchar_t denyName[64]{};
+            swprintf_s(denyName, L"Local\\GlassCompatGateDeny_%lu",
+                static_cast<unsigned long>(GetCurrentProcessId()));
+            {
+                HANDLE hDenied = OpenMutexW(SYNCHRONIZE, FALSE, denyName);
+                if (hDenied)
+                {
+                    CloseHandle(hDenied);
+                    // Гейт уже отказывал этому процессу (в т.ч. в прошлой сессии платформы).
+                    // Решение не пересчитываем, но слот публикуем: карта в момент первого
+                    // отказа могла принадлежать прошлой сессии платформы, а нынешняя —
+                    // пустая (см. выше про «один раз на процесс»).
+                    WriteRejectedSlot(exeStem);
+                    return FALSE;
+                }
+            }
+
+            // R7: гейт загрузки. Отказ — DllMain возвращает FALSE, модуль остаётся
+            // незагруженным: user32 не получит колбэк в этом процессе, а значит не будет
+            // ни «висящей» OS-ссылки, ни остатка DLL после Stop, ни AV в чужом стеке.
+            {
+                GateMode gateMode = GateMode::Off;
+                char modeText[16]{};
+                char reason[16]{};
+                unsigned long gle = 0;
+                const bool allow = GateAllowsAttach(
+                    exeStem, gateMode, modeText, _countof(modeText),
+                    reason, _countof(reason), gle);
+                if (!allow)
+                {
+                    // Отказ — тоже факт: пишем слот, пока модуль ещё отображён в процессе.
+                    WriteRejectedSlot(exeStem);
+                    // Маркер «уже отказали» — повторные LoadLibrary от user32 молчат.
+                    (void)CreateMutexW(nullptr, FALSE, denyName);
+                    return FALSE;
+                }
+            }
+        }
+        // R12: страховка от «DLL есть, watcher'а нет». Процесс из глобального хука может
+        // никогда не получить WinEventProc → Initialize не вызовется → модули не выгрузятся.
+        GlassCompat::EnsureAttachWatcher();
         break;
     case DLL_PROCESS_DETACH:
         // Не Stop() лог-клиента здесь: join воркера под loader lock запрещён.

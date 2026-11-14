@@ -149,6 +149,7 @@
     <ClInclude Include="include\GlassLogClient.h" />
     <ClInclude Include="include\GlassLogProtocol.h" />
     <ClInclude Include="include\GlassMessages.h" />
+    <ClInclude Include="include\GlassModuleRefCount.h" />
     <ClInclude Include="include\GlassShellMenuConstants.h" />
     <ClInclude Include="include\GlassInkAlphaCapsule.h" />
     <ClInclude Include="include\InjectionMode.h" />
@@ -216,6 +217,7 @@
     <ClCompile Include="src\MenuUtils.cpp" />
     <ClCompile Include="src\WndCompatHostApi.cpp" />
     <ClCompile Include="src\ProcessBlockList.cpp" />
+    <ClCompile Include="src\RegistrySanity.cpp" />
     <ClCompile Include="src\WinApiUtils.cpp" />
     <ClCompile Include="src\OpenGlassDwmPolicy.cpp" />
     <ClCompile Include="src\OpenGlassHostState.cpp" />
@@ -223,6 +225,7 @@
     <ClCompile Include="src\OpenGlassHostLaunch.cpp" />
     <ClCompile Include="src\PlatformPresenceQuery.cpp" />
     <ClCompile Include="src\GlassPlatformTask.cpp" />
+    <ClCompile Include="src\GlassStop.cpp" />
     <ClCompile Include="src\GlassModulePath.cpp" />
     <ClCompile Include="src\DwmGlassOpacity.cpp" />
     <ClCompile Include="src\SwcaBackdrop.cpp" />
@@ -244,6 +247,7 @@
     <ClCompile Include="src\PartRegistryQuery.cpp" />
     <ClCompile Include="src\RootRegistryMigration.cpp" />
     <ClCompile Include="src\GlassHostRegistry.cpp" />
+    <ClCompile Include="src\GlassInstallerLaunch.cpp" />
     <ClCompile Include="src\RootNcActiveCache.cpp" />
     <ClCompile Include="src\GlassShellRegistration.cpp" />
   </ItemGroup>

@@ -3,6 +3,7 @@
 #include "xaml/UiVisualTreeWatcher.hpp"
 #include "xaml/XamlComLifetime.hpp"
 #include "xaml/XamlDiagInit.hpp"
+#include "xaml/ModuleThread.hpp"
 #include "config/UiRegistry.h"
 
 #include <GlassMessages.h>
@@ -445,10 +446,10 @@ namespace UICompat
             }
             watcher->AddRef();
             vts3->AddRef();
-            HANDLE th = CreateThread(
-                nullptr,
-                0,
-                [](LPVOID p) -> DWORD
+            // Фоновые потоки UICompat — только ModuleThread::Start (пин модуля,
+            // ожидание в Stop): голый CreateThread переживал FreeLibrary.
+            const bool adviseStarted = UICompat::ModuleThread::Start(
+                [](void* p) noexcept
                 {
                     auto* j = static_cast<AdviseJob*>(p);
                     const HRESULT hrCo = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -471,10 +472,8 @@ namespace UICompat
                             (void)PostMessageW(
                                 hwnd, UICompatMsg::WM_GLASS_UI_CATCHUP_NC, 0, 0);
                             j->watcher->AddRef();
-                            HANDLE delayed = CreateThread(
-                                nullptr,
-                                0,
-                                [](LPVOID wp) -> DWORD
+                            const bool delayedStarted = UICompat::ModuleThread::Start(
+                                [](void* wp) noexcept
                                 {
                                     auto* w = static_cast<UiVisualTreeWatcher*>(wp);
                                     Sleep(500);
@@ -485,14 +484,10 @@ namespace UICompat
                                         PostMessageW(h, UICompatMsg::WM_GLASS_UI_CATCHUP_NC, 0, 0);
                                     }
                                     w->Release();
-                                    return 0;
                                 },
                                 j->watcher,
-                                0,
-                                nullptr);
-                            if (delayed)
-                                CloseHandle(delayed);
-                            else
+                                L"TapSite-delayed-prepare");
+                            if (!delayedStarted)
                                 j->watcher->Release();
                         }
                     }
@@ -519,12 +514,10 @@ namespace UICompat
                     if (coInit)
                         CoUninitialize();
                     delete j;
-                    return 0;
                 },
                 job,
-                0,
-                nullptr);
-            if (!th)
+                L"TapSite-advise");
+            if (!adviseStarted)
             {
                 watcher->Release();
                 vts3->Release();
@@ -532,9 +525,8 @@ namespace UICompat
                 UICompat_ResetIxdeSchedulingAfterFailure();
                 vts3->Release();
                 watcher->Release();
-                return HRESULT_FROM_WIN32(GetLastError());
+                return E_FAIL;
             }
-            CloseHandle(th);
             return S_OK;
         }
 
@@ -584,10 +576,8 @@ namespace UICompat
             && s_marshalHwnd && IsWindow(s_marshalHwnd))
         {
             watcher->AddRef();
-            HANDLE delayed = CreateThread(
-                nullptr,
-                0,
-                [](LPVOID wp) -> DWORD
+            const bool delayedStarted = UICompat::ModuleThread::Start(
+                [](void* wp) noexcept
                 {
                     auto* w = static_cast<UiVisualTreeWatcher*>(wp);
                     Sleep(50);
@@ -600,14 +590,10 @@ namespace UICompat
                             h, UICompatMsg::WM_GLASS_UI_REAPPLY_SETTINGS, 0, 0);
                     }
                     w->Release();
-                    return 0;
                 },
                 watcher,
-                0,
-                nullptr);
-            if (delayed)
-                CloseHandle(delayed);
-            else
+                L"TapSite-delayed-catchup");
+            if (!delayedStarted)
                 watcher->Release();
         }
         return S_OK;

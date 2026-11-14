@@ -30,12 +30,20 @@ public partial class App : Application
             return;
         }
 
+        SettingsBackupAssociation.EnsureIfMissing();
+        if (SettingsBackupOpenRequest.FromCommandLine() is { } backupPath)
+            SettingsBackupOpenRequest.Set(backupPath);
+
         // UI-поток: с него нельзя обходить дерево задач планировщика.
         NativeHostInterop.NoteUiThread();
 
         AppThemeService.ApplyApplicationThemeAtStartup();
         UiLanguageService.ApplyAtStartup();
         SystemFontsSpiCache.LoadAtStartup();
+
+        // «Проверять настройки при старте» — на фоновом потоке, запуск не задерживает.
+        if (GlassSettings.Core.Registry.GlassSettingsRegistry.ReadValidateSettingsOnStartup())
+            _ = System.Threading.Tasks.Task.Run(() => NativeHostInterop.ValidateRegistryState(applyFixes: true));
 
         // Single-window: Main сразу как splash (SystemBackdrop + transparent + иконка).
         var window = new MainWindow();

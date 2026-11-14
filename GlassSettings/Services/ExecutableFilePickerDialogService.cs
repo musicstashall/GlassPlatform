@@ -154,6 +154,72 @@ public static class ExecutableFilePickerDialogService
         }
     }
 
+    /// <summary>Резервная копия: только .glassbackup, старт в «Документы» или в прошлом каталоге этого диалога.</summary>
+    public static async Task<string?> PickBackupAsync(DispatcherQueue dispatcherQueue)
+    {
+        WindowBusyOverlayService.Push(showProgress: true);
+        try
+        {
+            var initial = GlassSettingsRegistry.ReadBackupFilePickerLastPath();
+            if (string.IsNullOrWhiteSpace(initial) || !ExecutableFilePickerCatalog.IsValidDirectory(initial))
+                initial = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+
+            var panel = new ExecutableFilePickerPanel(
+                dispatcherQueue,
+                [
+                    new ExecutableFilePickerExtensionFilterItem
+                    {
+                        Extension = SettingsRegistryBackupService.FileExtension,
+                        DisplayName = GlassSettingsResources.Get("System_BackupFileFilter")
+                    }
+                ],
+                initial);
+            panel.UsePrivateDirectoryMemory();
+
+            try
+            {
+                var result = await HostedDialogService.ShowAsync(
+                    new HostedDialogSpec
+                    {
+                        Title = GlassSettingsResources.Get("System_BackupFilePickerTitle"),
+                        Body = panel,
+                        MinWidth = ExecutableFilePickerLayoutMetrics.CompactDialogMinWidth,
+                        MaxWidth = 900,
+                        MaxHeight = 560,
+                        ManageOverlay = false,
+                        BodyHandlesScroll = true,
+                        DeferPrimaryCloseToHost = true,
+                        Footer = new HostedDialogFooterSpec
+                        {
+                            PrimaryButtonText = GlassSettingsResources.Get("Attach_FilePickerSelect"),
+                            PrimaryButtonWidth = 108,
+                            IsPrimaryEnabled = false
+                        }
+                    },
+                    panel.AttachDialogContext).ConfigureAwait(true);
+
+                if (result != HostedDialogResult.Primary)
+                    return null;
+
+                var path = panel.GetSelectedFilePath();
+                if (string.IsNullOrWhiteSpace(path)
+                    || !path.EndsWith(SettingsRegistryBackupService.FileExtension, StringComparison.OrdinalIgnoreCase))
+                    return null;
+                return path;
+            }
+            finally
+            {
+                var directory = panel.CurrentDirectory;
+                if (!string.IsNullOrWhiteSpace(directory))
+                    GlassSettingsRegistry.WriteBackupFilePickerLastPath(directory);
+            }
+        }
+        finally
+        {
+            WindowBusyOverlayService.Pop();
+        }
+    }
+
     private static async Task<string?> PickExecutableAsync(DispatcherQueue dispatcherQueue)
     {
         while (true)

@@ -1,11 +1,11 @@
-#pragma once
+﻿#pragma once
 
 #include <Windows.h>
 #include <Helpers/RealUserReg.h>
 
 // Tray\BorderDrawMode — полный путь отрисовки панели задач (не только бордюр):
 // 0 = DWM/SWCA (фон SWCA на Shell_*TrayWnd), 1 = XAML (фон через TaskbarCompat).
-// См. docs/guides/TaskbarBorders.md
+// См. TaskbarCompat/docs/TaskbarBorders.md
 
 namespace Shared::TrayBorderDrawMode
 {

@@ -7,7 +7,9 @@
 #include <GlassMessages.h>
 #include <GlassModulePath.h>
 #include <GlassPlatformTask.h>
+#include <GlassStop.h>
 #include <strsafe.h>
+#include <shlobj.h>
 
 #include <cstdarg>
 #include <cstdio>
@@ -59,8 +61,15 @@ namespace
         if (FAILED(::SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localAppData)))
             return;
 
+        // The platform owns exactly one per-user folder: %LOCALAPPDATA%\GlassPlatform
+        // (attach-gate.txt, Crashes\, ...). Shell launch diagnostics go to Logs\ inside it.
+        wchar_t root[MAX_PATH]{};
+        if (FAILED(::StringCchPrintfW(root, _countof(root), L"%s\\GlassPlatform", localAppData)))
+            return;
+        (void)::CreateDirectoryW(root, nullptr);
+
         wchar_t dir[MAX_PATH]{};
-        if (FAILED(::StringCchPrintfW(dir, _countof(dir), L"%s\\GlassProject", localAppData)))
+        if (FAILED(::StringCchPrintfW(dir, _countof(dir), L"%s\\Logs", root)))
             return;
         (void)::CreateDirectoryW(dir, nullptr);
 
@@ -105,7 +114,7 @@ namespace
     {
         const DWORD codeValue = static_cast<DWORD>(code);
         AppendShellLaunchLog(
-            L"[GlassShellExt] FAIL code=%u %s (см. %%LOCALAPPDATA%%\\GlassProject\\GlassShellExt-launch.log)",
+            L"[GlassShellExt] FAIL code=%u %s (см. %%LOCALAPPDATA%%\\GlassPlatform\\Logs\\GlassShellExt-launch.log)",
             codeValue,
             detail ? detail : L"");
     }
@@ -267,7 +276,8 @@ namespace
         if (!GlassShellExt::g_module)
             return false;
 
-        // Получить каталог GlassShellExt.dll
+        // Каталог GlassShellExt.dll: <root>\GlassShellSparse\ (ExternalLocation sparse-пакета);
+        // корень платформы — его родитель, GlassSettings.exe — в <root>\GlassSettings\.
         wchar_t dllDir[MAX_PATH]{};
         if (::GetModuleFileNameW(GlassShellExt::g_module, dllDir, MAX_PATH) == 0)
             return false;
@@ -276,20 +286,81 @@ namespace
             return false;
         *(slash + 1) = L'\0';
 
-        // Сначала искать в подпапке GlassSettings\ (новая структура)
-        wchar_t candidate[MAX_PATH]{};
-        if (SUCCEEDED(::StringCchPrintfW(candidate, _countof(candidate), L"%sGlassSettings\\%s", dllDir, kGlassSettingsExe)))
+        auto tryRoot = [&](const wchar_t* rootDir) noexcept -> bool {
+            if (!rootDir || !*rootDir)
+                return false;
+            std::wstring root(rootDir);
+            while (!root.empty() && (root.back() == L'\\' || root.back() == L'/'))
+                root.pop_back();
+            if (root.empty())
+                return false;
+            wchar_t sub[MAX_PATH]{};
+            if (SUCCEEDED(::StringCchPrintfW(sub, _countof(sub), L"%s\\GlassSettings\\%s", root.c_str(), kGlassSettingsExe))
+                && ::GetFileAttributesW(sub) != INVALID_FILE_ATTRIBUTES)
+            {
+                return ::StringCchCopyW(out, cch, sub) == S_OK;
+            }
+            if (SUCCEEDED(::StringCchPrintfW(sub, _countof(sub), L"%s\\%s", root.c_str(), kGlassSettingsExe))
+                && ::GetFileAttributesW(sub) != INVALID_FILE_ATTRIBUTES)
+            {
+                return ::StringCchCopyW(out, cch, sub) == S_OK;
+            }
+            return false;
+        };
+
+        // 1) Корень платформы = родитель каталога DLL (установка и Build\<arch>\<cfg>\).
         {
-            if (::GetFileAttributesW(candidate) != INVALID_FILE_ATTRIBUTES)
-                return ::StringCchCopyW(out, cch, candidate) == S_OK;
+            wchar_t parentDir[MAX_PATH]{};
+            if (::StringCchCopyW(parentDir, _countof(parentDir), dllDir) == S_OK)
+            {
+                size_t len = wcslen(parentDir);
+                while (len > 0 && parentDir[len - 1] == L'\\')
+                    parentDir[--len] = L'\0';
+                if (wchar_t* parentSlash = wcsrchr(parentDir, L'\\'))
+                {
+                    *parentSlash = L'\0';
+                    if (tryRoot(parentDir))
+                        return true;
+                }
+            }
         }
 
-        // Fallback: рядом с GlassShellExt.dll (установленная платформа)
-        const std::wstring path = GlassShared::GlassModulePath::ResolveGlassModulePathNextToModule(
-            GlassShellExt::g_module, kGlassSettingsExe);
-        if (path.empty())
-            return false;
-        return ::StringCchCopyW(out, cch, path.c_str()) == S_OK;
+        // 2) Сам каталог DLL (плоская раскладка прежних сборок).
+        if (tryRoot(dllDir))
+            return true;
+
+        // 3) Fallback для 32-bit GlassShellExt на 64-bit ОС (GlassSettings ставится в 64-bit корень).
+        auto tryReg = [&](HKEY hive, const wchar_t* valName, REGSAM sam) noexcept -> bool {
+            HKEY key = nullptr;
+            if (::RegOpenKeyExW(hive, L"Software\\GlassPlatform", 0, KEY_READ | sam, &key) != ERROR_SUCCESS)
+                return false;
+            wchar_t regBuf[MAX_PATH]{};
+            DWORD cb = sizeof(regBuf);
+            DWORD type = 0;
+            const LSTATUS st = ::RegQueryValueExW(key, valName, nullptr, &type, reinterpret_cast<LPBYTE>(regBuf), &cb);
+            ::RegCloseKey(key);
+            if (st != ERROR_SUCCESS || type != REG_SZ || !regBuf[0])
+                return false;
+            return tryRoot(regBuf);
+        };
+
+        if (tryReg(HKEY_LOCAL_MACHINE, L"InstallPathX64", KEY_WOW64_64KEY))
+            return true;
+        if (tryReg(HKEY_LOCAL_MACHINE, L"InstallPath", KEY_WOW64_64KEY))
+            return true;
+        if (tryReg(HKEY_CURRENT_USER, L"InstallPathX64", 0))
+            return true;
+
+        PWSTR pf64 = nullptr;
+        if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_ProgramFilesX64, KF_FLAG_DEFAULT, nullptr, &pf64)) && pf64)
+        {
+            const std::wstring defaultRoot = std::wstring(pf64) + L"\\GlassPlatform";
+            ::CoTaskMemFree(pf64);
+            if (tryRoot(defaultRoot.c_str()))
+                return true;
+        }
+
+        return false;
     }
 
     [[nodiscard]] bool ResolveGlassSettingsExePathWithDiag(wchar_t* out, size_t cch) noexcept
@@ -452,35 +523,29 @@ namespace GlassDesktopActions
         }
         else if (ui == GS::AutorunUiState::Running)
         {
-            // Сначала Stop: иначе Presence после TryBegin → IsLifecycleBusy(busy+Running
-            // без Stop) auto-clear'ит busy, и GS не блокирует кнопки на время unload.
-            (void)GS::SignalPlatformStop(arch);
-            if (!GS::TryBeginLifecycleBusy(arch))
-                return;
+            // R11: единый координатор. Signal+Busy идут в Request подряд (без Sleep),
+            // поэтому окно, в котором Presence auto-clear'ит busy, отсутствует.
+            // Из UI ждём долго: unload ShellHost идёт десятками секунд.
             const auto a = arch;
             std::thread([a]() noexcept {
-                const DWORD deadline = ::GetTickCount() + 45000u;
-                // Пока держим busy, Query==Stopping — ждём !Running и пустой sticky.
-                // Несколько пустых подряд: Module32 miss на idle ShellHost.
-                int emptyResidualStreak = 0;
-                while (::GetTickCount() < deadline)
+                Shared::GlassStop::Options options{};
+                options.reason = Shared::GlassStop::Reason::User;
+                options.gracefulMs = 45000u;
+                options.hostGoneMs = 15000u;
+                options.allowTaskStop = true;   // прежний StopOrphanAutorunTaskInstance
+                options.wakeResiduals = true;   // прежний WakeWinEventCallbackThreads
+                const Shared::GlassStop::Result r = Shared::GlassStop::Request(a, options);
+                GS::RefreshInjectResidualSticky(a);
+                if (!r.hostGone || r.residualProcesses != 0)
                 {
-                    if (!GS::IsGlassPlatformRunning(a))
-                    {
-                        (void)GS::StopOrphanAutorunTaskInstance(a);
-                        if (!GS::RefreshInjectResidualSticky(a))
-                        {
-                            if (++emptyResidualStreak >= 6)
-                                break;
-                        }
-                        else
-                        {
-                            emptyResidualStreak = 0;
-                        }
-                    }
-                    ::Sleep(250);
+                    // Хост не ушёл или остались процессы с нашими модулями: из UI важно
+                    // видеть, что поток дожима завершился, а не завис на ожидании.
+                    AppendShellLaunchLog(
+                        L"[GlassShellExt] stop finished: hostGone=%d residuals=%u ms=%lu",
+                        r.hostGone ? 1 : 0,
+                        r.residualProcesses,
+                        static_cast<unsigned long>(r.elapsedMs));
                 }
-                GS::EndLifecycleBusy(a);
             }).detach();
         }
     }

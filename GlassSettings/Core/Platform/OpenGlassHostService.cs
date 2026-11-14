@@ -12,6 +12,8 @@ public static class OpenGlassHostService
     private const string TaskNameCurrent = "OpenGlass Host";
     private const string TaskNameLegacy = "OpenGlass Legacy Host";
 
+    public static bool OrchestrationInstalled() => NativeHostInterop.OpenGlassOrchestrationInstalled();
+
     public static bool LegacyHostTaskExists() =>
         NativeHostInterop.LegacyHostTaskExists();
 

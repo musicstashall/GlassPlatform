@@ -464,9 +464,21 @@ namespace WndCompat
 
 namespace WndCompat::ExplorerRoot
 {
-    void ExplorerRoot_ForceDetachSubclass(HWND hWnd) noexcept
+    bool ExplorerRoot_ForceDetachSubclass(HWND hWnd) noexcept
     {
-        RemoveWindowSubclass(hWnd, ExplorerRootSubclassProc, ExplorerRootSubclassId);
+        return RemoveWindowSubclass(hWnd, ExplorerRootSubclassProc, ExplorerRootSubclassId) != FALSE;
+    }
+
+    std::size_t ExplorerRoot_SubclassProcRva() noexcept
+    {
+        HMODULE self = nullptr;
+        if (!GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&ExplorerRoot_ForceDetachSubclass), &self) || !self)
+            return 0;
+        const auto base = reinterpret_cast<std::uintptr_t>(self);
+        const auto proc = reinterpret_cast<std::uintptr_t>(&ExplorerRootSubclassProc);
+        return proc >= base ? static_cast<std::size_t>(proc - base) : 0;
     }
 
     void Attach(HWND hRoot)

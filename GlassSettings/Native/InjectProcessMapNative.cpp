@@ -2,6 +2,7 @@
 
 #include <ForceUnloadAgent.h>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <ForceUnloadGlassModules.h>
@@ -10,6 +11,7 @@
 #include <InjectModuleScan.h>
 #include <InjectProcessMap.h>
 #include <GlassPlatformTask.h>
+#include <GlassStop.h>
 
 namespace
 {
@@ -222,43 +224,198 @@ namespace
         return text;
     }
 
-    [[nodiscard]] bool WriteScanTsv(const wchar_t* outPath) noexcept
+    [[nodiscard]] bool AppendUtf8Field(std::string& row, const wchar_t* wide) noexcept
+    {
+        if (!wide || !wide[0]) return false;
+        const int need = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+        if (need <= 1) return false;
+        std::string chunk(static_cast<size_t>(need), '\0');
+        if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, chunk.data(), need, nullptr, nullptr) != need)
+            return false;
+        chunk.pop_back();
+        row += chunk;
+        return true;
+    }
+
+    [[nodiscard]] bool WriteScanRowUtf8(
+        HANDLE dest,
+        const Shared::InjectModuleScan::Result& row) noexcept
+    {
+        const std::wstring modules = ModuleNamesFromBits(row.moduleBits);
+        if (modules.empty())
+            return false;
+        char line[640]{};
+        const int n = std::snprintf(line, sizeof(line), "%lu\t",
+            static_cast<unsigned long>(row.pid));
+        if (n <= 0)
+            return false;
+        std::string bytes(line);
+        if (!AppendUtf8Field(bytes, row.exeName)) return false;
+        bytes += '\t';
+        if (!AppendUtf8Field(bytes, modules.c_str())) return false;
+        bytes += '\n';
+        DWORD written = 0;
+        return WriteFile(dest, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) != FALSE &&
+            written == bytes.size();
+    }
+
+    [[nodiscard]] DWORD CountScanHolders() noexcept
     {
         Shared::InjectModuleScan::Result results[Shared::InjectModuleScan::kMaxResults]{};
         DWORD count = 0;
         if (!Shared::InjectModuleScan::Scan(
                 nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count))
-            return false;
-        FILE* file = nullptr;
-        if (_wfopen_s(&file, outPath, L"wb") != 0 || !file)
-            return false;
+            return 0;
+        DWORD holders = 0;
         for (DWORD i = 0; i < count; ++i)
         {
-            const std::wstring modules = ModuleNamesFromBits(results[i].moduleBits);
-            if (modules.empty())
+            if (ModuleNamesFromBits(results[i].moduleBits).empty())
                 continue;
-            char line[640]{};
-            const int n = std::snprintf(line, sizeof(line), "%lu\t",
-                static_cast<unsigned long>(results[i].pid));
-            if (n <= 0)
-                continue;
-            std::string row(line);
-            auto append = [&](const wchar_t* wide) {
-                if (!wide || !wide[0]) return;
-                const int need = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
-                if (need <= 1) return;
-                std::string chunk(static_cast<size_t>(need - 1), '\0');
-                WideCharToMultiByte(CP_UTF8, 0, wide, -1, chunk.data(), need, nullptr, nullptr);
-                row += chunk;
-            };
-            append(results[i].exeName);
-            row += '\t';
-            append(modules.c_str());
-            row += '\n';
-            fwrite(row.data(), 1, row.size(), file);
+            ++holders;
         }
-        fclose(file);
+        return holders;
+    }
+
+    [[nodiscard]] bool ValidateTrackedProcesses(const wchar_t* mapName) noexcept
+    {
+        Shared::InjectProcessMap::Slot slots[Shared::InjectProcessMap::kSlotCount]{};
+        DWORD slotCount = 0;
+        if (!Shared::InjectProcessMap::TryReadSlotsFromMapping(
+                mapName, slots, Shared::InjectProcessMap::kSlotCount, &slotCount))
+            return true; // absent host/map is normal
+        std::vector<DWORD> pids;
+        for (DWORD i = 0; i < slotCount; ++i)
+            if (slots[i].pid && slots[i].moduleBits) pids.push_back(slots[i].pid);
+        if (pids.empty()) return true;
+        Shared::InjectModuleScan::Result tracked[Shared::InjectModuleScan::kMaxResults]{};
+        DWORD count = 0;
+        return Shared::InjectModuleScan::ScanForSetup(pids.data(), static_cast<DWORD>(pids.size()),
+            tracked, Shared::InjectModuleScan::kMaxResults, &count);
+    }
+
+    [[nodiscard]] bool WriteScanResultsUtf8(
+        HANDLE dest,
+        bool* anyOut,
+        bool forSetup) noexcept
+    {
+        if (anyOut) *anyOut = false;
+        Shared::InjectModuleScan::Result results[Shared::InjectModuleScan::kMaxResults]{};
+        DWORD count = 0;
+        const bool scanned = forSetup
+            ? Shared::InjectModuleScan::ScanForSetup(nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count)
+            : Shared::InjectModuleScan::Scan(nullptr, 0, results, Shared::InjectModuleScan::kMaxResults, &count);
+        if (!scanned) return false;
+        if (forSetup &&
+            (!ValidateTrackedProcesses(Shared::InjectProcessMap::kMappingNameX64) ||
+             !ValidateTrackedProcesses(Shared::InjectProcessMap::kMappingNameX86) ||
+             !ValidateTrackedProcesses(Shared::InjectProcessMap::kMappingNameLegacy))) return false;
+        bool any = false;
+        for (DWORD i = 0; i < count; ++i)
+        {
+            if (ModuleNamesFromBits(results[i].moduleBits).empty()) continue;
+            if (!WriteScanRowUtf8(dest, results[i])) return false;
+            any = true;
+        }
+        if (anyOut) *anyOut = any;
         return true;
+    }
+
+    [[nodiscard]] bool WritePipeMarker(HANDLE pipe, const char* marker) noexcept
+    {
+        if (!marker)
+            return false;
+        const size_t len = std::strlen(marker);
+        DWORD written = 0;
+        if (!WriteFile(pipe, marker, static_cast<DWORD>(len), &written, nullptr) || written != len)
+            return false;
+        FlushFileBuffers(pipe);
+        return true;
+    }
+
+    // "#fail stage=... pid=... exe=... gle=... flags=...\n": why the strict scan of
+    // this (native x64) side stopped. Setup logs the line; older Setups treat
+    // any unknown line as an invalid frame, which is still a failure.
+    void WriteScanFailureUtf8(HANDLE dest, bool forSetup) noexcept
+    {
+        if (!forSetup || dest == INVALID_HANDLE_VALUE)
+            return;
+        Shared::InjectModuleScan::ScanDiag diag{};
+        Shared::InjectModuleScan::GetLastScanDiag(diag);
+        wchar_t text[256]{};
+        if (Shared::InjectModuleScan::FormatScanDiag(diag, text, static_cast<DWORD>(_countof(text))) == 0)
+            return;
+        std::string line = "#fail ";
+        if (!AppendUtf8Field(line, text))
+            return;
+        line += '\n';
+        (void)WritePipeMarker(dest, line.c_str());
+    }
+
+    [[nodiscard]] bool WriteScanTsv(const wchar_t* outPath, bool forSetup) noexcept
+    {
+        HANDLE file = CreateFileW(outPath, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return false;
+        bool any = false;
+        const bool ok = WriteScanResultsUtf8(file, &any, forSetup);
+        (void)any;
+        if (!ok)
+            WriteScanFailureUtf8(file, forSetup);
+        CloseHandle(file);
+        return ok;
+    }
+
+    [[nodiscard]] bool WatchGlassModulesPipe(const wchar_t* pipeName, DWORD timeoutMs, bool forSetup) noexcept
+    {
+        if (!pipeName || !pipeName[0])
+            ExitProcess(1);
+        HANDLE pipe = INVALID_HANDLE_VALUE;
+        const DWORD connectStart = GetTickCount();
+        while (GetTickCount() - connectStart < 5000)
+        {
+            pipe = CreateFileW(pipeName, GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+            if (pipe != INVALID_HANDLE_VALUE)
+                break;
+            Sleep(50);
+        }
+        if (pipe == INVALID_HANDLE_VALUE)
+            ExitProcess(1);
+        const DWORD watchStart = GetTickCount();
+        for (;;)
+        {
+            if (GetTickCount() - watchStart >= timeoutMs)
+            {
+                CloseHandle(pipe);
+                ExitProcess(2);
+            }
+            bool any = false;
+            if (!WriteScanResultsUtf8(pipe, &any, forSetup))
+            {
+                WriteScanFailureUtf8(pipe, forSetup);
+                CloseHandle(pipe);
+                ExitProcess(2);
+            }
+            if (!WritePipeMarker(pipe, any ? "#end\n" : "#empty\n"))
+            {
+                CloseHandle(pipe);
+                ExitProcess(0);
+            }
+            // Setup keeps watching both architectures while even one holder
+            // remains; otherwise an early empty frame could become stale.
+            if (!any && !forSetup)
+            {
+                CloseHandle(pipe);
+                ExitProcess(0);
+            }
+            const DWORD wait = 500;
+            if (timeoutMs - (GetTickCount() - watchStart) <= wait)
+            {
+                CloseHandle(pipe);
+                ExitProcess(2);
+            }
+            Sleep(wait);
+        }
     }
 
     [[nodiscard]] std::uint32_t BitsFromNames(const std::wstring& modules) noexcept
@@ -499,6 +656,9 @@ extern "C"
 
     __declspec(dllexport) BOOL WINAPI GlassSettings_ForceUnloadProcess(DWORD pid) noexcept
     {
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_ForceUnloadProcess=_GlassSettings_ForceUnloadProcess@4")
+#endif
         return UnloadPid(pid);
     }
 
@@ -568,8 +728,33 @@ extern "C"
         DWORD maxResults,
         DWORD* outCount) noexcept
     {
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_ScanGlassModules=_GlassSettings_ScanGlassModules@20")
+#pragma comment(linker, "/EXPORT:GlassSettings_InstallerScanProtocolV2=_GlassSettings_ScanGlassModules@20")
+#elif defined(_M_X64)
+#pragma comment(linker, "/EXPORT:GlassSettings_InstallerScanProtocolV2=GlassSettings_ScanGlassModules")
+#endif
+        // The versioned alias above points to this same existing scan export;
+        // it lets Setup reject an older embedded DLL before altering products.
+        // V2 ('GSI2'): kNativeDeferForeignExplorer option + GlassSettings_GetLastScanDiag.
+        // Preserve the original public export for GlassSettings. Setup also uses
+        // this export, but monitors x64 in its own resident rundll32 process.
+        // Its explicit option requests a strict scan of only this architecture.
+        const bool installerLocal = (maxResults & Shared::InjectModuleScan::kNativeLocalInstallerScan) != 0;
+        const bool deferForeignExplorer =
+            installerLocal && (maxResults & Shared::InjectModuleScan::kNativeDeferForeignExplorer) != 0;
+        maxResults &= ~Shared::InjectModuleScan::kNativeOptionMask;
+        if (installerLocal && !pids && pidsCount == 0 && !outResults && maxResults == 0 && outCount) {
+            *outCount = Shared::InjectModuleScan::kNativeInstallerScanProtocol;
+            return TRUE;
+        }
         if (!outResults || maxResults == 0 || !outCount)
             return FALSE;
+        if (installerLocal)
+            return Shared::InjectModuleScan::ScanForSetup(pids, pidsCount,
+                static_cast<Shared::InjectModuleScan::Result*>(outResults), maxResults, outCount,
+                deferForeignExplorer ? Shared::InjectModuleScan::ScanOptionDeferForeignExplorer
+                                     : Shared::InjectModuleScan::ScanOptionNone) ? TRUE : FALSE;
         const BOOL ok = Shared::InjectModuleScan::Scan(
             pids,
             pidsCount,
@@ -586,6 +771,22 @@ extern "C"
         }
 #endif
         return ok;
+    }
+
+    /// Diagnostics of the last strict scan on the calling thread (Setup's local
+    /// x86 monitor). Copies min(cb, sizeof(ScanDiag)) bytes; FALSE on bad args.
+    __declspec(dllexport) BOOL WINAPI GlassSettings_GetLastScanDiag(void* outDiag, DWORD cb) noexcept
+    {
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_GetLastScanDiag=_GlassSettings_GetLastScanDiag@8")
+#endif
+        if (!outDiag || cb == 0)
+            return FALSE;
+        Shared::InjectModuleScan::ScanDiag diag{};
+        Shared::InjectModuleScan::GetLastScanDiag(diag);
+        const DWORD n = cb < sizeof(diag) ? cb : static_cast<DWORD>(sizeof(diag));
+        std::memcpy(outDiag, &diag, n);
+        return TRUE;
     }
 }
 
@@ -641,19 +842,45 @@ std::wstring UnlockerCommandText(LPWSTR cmdLine) noexcept
 
 extern "C" __declspec(dllexport) void CALLBACK GlassSettings_UnlockerW(HWND, HINSTANCE, LPWSTR cmdLine, int)
 {
+#ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:GlassSettings_UnlockerW=_GlassSettings_UnlockerW@16")
+#endif
     std::wstring text = UnlockerCommandText(cmdLine);
     wchar_t* cursor = text.empty() ? const_cast<wchar_t*>(L"") : text.data();
     const std::wstring verb = UnlockerToken(cursor);
-    if (_wcsicmp(verb.c_str(), L"/scanGlassModules") == 0)
+    const bool setupScan = _wcsicmp(verb.c_str(), L"/scanGlassModulesSetup") == 0;
+    if (setupScan || _wcsicmp(verb.c_str(), L"/scanGlassModules") == 0)
     {
         const std::wstring path = UnlockerToken(cursor);
-        ExitProcess(path.empty() || !WriteScanTsv(path.c_str()) ? 2 : 0);
+        ExitProcess(path.empty() || !WriteScanTsv(path.c_str(), setupScan) ? 2 : 0);
     }
     if (_wcsicmp(verb.c_str(), L"/forceUnload") == 0)
     {
         const std::wstring pidText = UnlockerToken(cursor);
         const DWORD pid = static_cast<DWORD>(wcstoul(pidText.c_str(), nullptr, 10));
         ExitProcess(pid != 0 && UnloadPid(pid) ? 0 : 3);
+    }
+    // R11/5.5 (W2): «пинок» остаткам после смерти хоста. Ничего не грузит и не выгружает —
+    // только WM_NULL окнам и потокам процессов с нашими модулями. Нужен установщику,
+    // деинсталлятору и GS, когда хоста уже нет и будить процессы больше некому.
+    if (_wcsicmp(verb.c_str(), L"/wakeResiduals") == 0)
+    {
+        const std::wstring archText = UnlockerToken(cursor);
+        const auto arch = archText == L"86"
+            ? GlassShared::GlassPlatformTask::PlatformArch::X86
+            : GlassShared::GlassPlatformTask::PlatformArch::X64;
+        const unsigned nudged = Shared::GlassStop::WakeResidualProcesses(arch, nullptr, 0);
+        ExitProcess(nudged > 250u ? 250u : static_cast<UINT>(nudged));
+    }
+    const bool setupWatch = _wcsicmp(verb.c_str(), L"/watchGlassModulesSetup") == 0;
+    if (setupWatch || _wcsicmp(verb.c_str(), L"/watchGlassModules") == 0)
+    {
+        const std::wstring pipeName = UnlockerToken(cursor);
+        const std::wstring timeoutText = UnlockerToken(cursor);
+        const DWORD timeoutMs = timeoutText.empty()
+            ? 30000u
+            : static_cast<DWORD>(wcstoul(timeoutText.c_str(), nullptr, 10));
+        (void)WatchGlassModulesPipe(pipeName.c_str(), timeoutMs == 0 ? 30000u : timeoutMs, setupWatch);
     }
     ExitProcess(1);
 }

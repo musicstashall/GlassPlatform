@@ -82,11 +82,19 @@ public static partial class GlassPlatformService
 
     public static void StopPlatformAndWait(GlassPlatformArch arch, int timeoutMs = DefaultPlatformShutdownWaitMs)
     {
-        NativeHostInterop.SignalPlatformStop(arch);
-        NativeHostInterop.WaitForPlatformStopped(arch, (uint)timeoutMs);
-        // После ForceUnload/краша: mutex уже нет, StopEvent недоступен, задача всё ещё Running.
-        if (!IsGlassPlatformRunning(arch))
-            NativeHostInterop.StopOrphanAutorunTaskInstance(arch);
+        // R11/этап 1: сигнал, ожидание, остановка осиротевшей задачи и снимок остатков —
+        // в одном нативном вызове (Shared::GlassStop::Request). Раньше порядок был размазан
+        // по C#, и установщик/настройки/расширение оболочки расходились в поведении.
+        var (hostGone, killedByTask, residuals) = NativeHostInterop.RequestPlatformStop(
+            arch,
+            NativeHostInterop.StopReason.User,
+            gracefulMs: timeoutMs > 0 ? (uint)timeoutMs : 0,
+            hostGoneMs: 15000,
+            allowTaskStop: true,
+            wakeResiduals: true);
+        _ = hostGone;
+        _ = killedByTask;
+        _ = residuals;
     }
 
     public static bool SetGlassAutorunTaskSchedulerEnabled(bool enable) =>

@@ -36,6 +36,9 @@ public static partial class GlassSettingsRegistry
 
     public const string EnableSystemFontValue = "EnableSystemFont";
 
+    /// <summary>Опциональная проверка настроек при старте GlassSettings (карточка в настройках приложения).</summary>
+    public const string ValidateSettingsOnStartupValue = "ValidateSettingsOnStartup";
+
     public const string AppThemeValue = "AppTheme";
 
     public const string WindowBackdropValue = "WindowBackdrop";
@@ -55,6 +58,8 @@ public static partial class GlassSettingsRegistry
     public const string AppUiLanguageValue = "AppUiLanguage";
 
     public const string ExecutableFilePickerLastPathValue = "ExecutableFilePickerLastPath";
+
+    public const string BackupFilePickerLastPathValue = "BackupFilePickerLastPath";
 
     public const string LastAppliedThemeFilePathValue = "LastAppliedThemeFilePath";
 
@@ -91,6 +96,15 @@ public static partial class GlassSettingsRegistry
     public static void WriteEnableSystemFont(bool enabled) =>
 
         GlassRegistry.WriteDword(SubKey, EnableSystemFontValue, enabled ? 1u : 0u);
+
+    public static bool ReadValidateSettingsOnStartup(bool defaultValue = false)
+    {
+        var value = GlassRegistry.ReadDword(SubKey, ValidateSettingsOnStartupValue);
+        return value.HasValue ? value.Value != 0 : defaultValue;
+    }
+
+    public static void WriteValidateSettingsOnStartup(bool enabled) =>
+        GlassRegistry.WriteDword(SubKey, ValidateSettingsOnStartupValue, enabled ? 1u : 0u);
 
 
 
@@ -168,6 +182,17 @@ public static partial class GlassSettingsRegistry
             return;
 
         GlassRegistry.WriteString(SubKey, ExecutableFilePickerLastPathValue, path);
+    }
+
+    public static string? ReadBackupFilePickerLastPath() =>
+        ReadString(BackupFilePickerLastPathValue);
+
+    public static void WriteBackupFilePickerLastPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        GlassRegistry.WriteString(SubKey, BackupFilePickerLastPathValue, path);
     }
 
     /// <summary>Последний успешно применённый .theme (исходник для Default акцента на Colors).</summary>
@@ -340,13 +365,33 @@ public static partial class GlassSettingsRegistry
 
     {
 
-        var pending = ReadOpenGlassUpdatePendingVersion();
-
         var dismissed = ReadOpenGlassUpdateNoticeDismissedVersion();
 
-        return !string.IsNullOrWhiteSpace(pending)
+        if (string.IsNullOrWhiteSpace(dismissed))
 
-               && !string.IsNullOrWhiteSpace(dismissed)
+            return false;
+
+
+
+        var identity = ReadOpenGlassPendingIdentity();
+
+        if (!string.IsNullOrWhiteSpace(identity)
+
+            && string.Equals(identity, dismissed, StringComparison.OrdinalIgnoreCase))
+
+            return true;
+
+
+
+        if (IsOpenGlassUpdateRepair())
+
+            return false;
+
+
+
+        var pending = ReadOpenGlassUpdatePendingVersion();
+
+        return !string.IsNullOrWhiteSpace(pending)
 
                && string.Equals(pending, dismissed, StringComparison.OrdinalIgnoreCase);
 
@@ -367,6 +412,8 @@ public static partial class GlassSettingsRegistry
         GlassRegistry.DeleteValue(SubKey, LegacyCachedUrlValue);
 
         GlassRegistry.DeleteValue(SubKey, LegacyDismissedTagValue);
+
+        ClearOpenGlassUpdateChannel();
 
         ClearOpenGlassUpdateNoticeDismissedVersion();
 

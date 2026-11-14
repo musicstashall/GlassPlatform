@@ -36,6 +36,9 @@
     <ClCompile Include="xaml\XamlDiagInit.cpp">
       <Filter>xaml</Filter>
     </ClCompile>
+    <ClCompile Include="xaml\ModuleThread.cpp">
+      <Filter>xaml</Filter>
+    </ClCompile>
     <ClCompile Include="xaml\UiTapSite.cpp">
       <Filter>xaml</Filter>
     </ClCompile>
@@ -86,6 +89,9 @@
       <Filter>xaml</Filter>
     </ClInclude>
     <ClInclude Include="xaml\XamlDiagInit.hpp">
+      <Filter>xaml</Filter>
+    </ClInclude>
+    <ClInclude Include="xaml\ModuleThread.hpp">
       <Filter>xaml</Filter>
     </ClInclude>
     <ClInclude Include="xaml\XamlGlassIds.hpp">

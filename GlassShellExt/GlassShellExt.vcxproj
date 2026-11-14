@@ -54,19 +54,19 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <OutDir>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <OutDir>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\GlassShellSparse\</OutDir>
     <IntDir>$(MSBuildThisFileDirectory)..\Cache\$(ProjectName)\$(PlatformShortName)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <OutDir>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <OutDir>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\GlassShellSparse\</OutDir>
     <IntDir>$(MSBuildThisFileDirectory)..\Cache\$(ProjectName)\$(PlatformShortName)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <OutDir>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\GlassShellSparse\</OutDir>
     <IntDir>$(MSBuildThisFileDirectory)..\Cache\$(ProjectName)\$(PlatformShortName)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\</OutDir>
+    <OutDir>$(MSBuildThisFileDirectory)..\Build\$(PlatformShortName)\$(Configuration)\GlassShellSparse\</OutDir>
     <IntDir>$(MSBuildThisFileDirectory)..\Cache\$(ProjectName)\$(PlatformShortName)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -90,7 +90,7 @@
       <ModuleDefinitionFile>GlassShellExt.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)Package\BuildSparsePackage.ps1" -ProjectDir "$(ProjectDir)." -OutDir "$(OutDir)."</Command>
+      <Command>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)Package\BuildSparsePackage.ps1" -ProjectDir "$(ProjectDir)." -OutDir "$(OutDir)." -IntDir "$(IntDir)."</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -118,7 +118,7 @@
       <ModuleDefinitionFile>GlassShellExt.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)Package\BuildSparsePackage.ps1" -ProjectDir "$(ProjectDir)." -OutDir "$(OutDir)."</Command>
+      <Command>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)Package\BuildSparsePackage.ps1" -ProjectDir "$(ProjectDir)." -OutDir "$(OutDir)." -IntDir "$(IntDir)."</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -142,7 +142,7 @@
       <ModuleDefinitionFile>GlassShellExt.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)Package\BuildSparsePackage.ps1" -ProjectDir "$(ProjectDir)." -OutDir "$(OutDir)."</Command>
+      <Command>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)Package\BuildSparsePackage.ps1" -ProjectDir "$(ProjectDir)." -OutDir "$(OutDir)." -IntDir "$(IntDir)."</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -170,7 +170,7 @@
       <ModuleDefinitionFile>GlassShellExt.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)Package\BuildSparsePackage.ps1" -ProjectDir "$(ProjectDir)." -OutDir "$(OutDir)."</Command>
+      <Command>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)Package\BuildSparsePackage.ps1" -ProjectDir "$(ProjectDir)." -OutDir "$(OutDir)." -IntDir "$(IntDir)."</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -221,4 +221,12 @@
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <!-- Authenticode (Shared\GlassSign.targets): вместе с DLL подписывается sparse-msix из PostBuild
+       (BuildSparsePackage.ps1) — тем же сертификатом автора, Subject которого равен Publisher манифеста.
+       Без makeappx msix отсутствует и просто пропускается (Sign без -RequireFiles). -->
+  <Target Name="GlassShellExtSignPaths" BeforeTargets="GlassSignPrepare">
+    <PropertyGroup>
+      <GlassSignPaths>$(TargetPath);$(OutDir)GlassShellSparse.msix</GlassSignPaths>
+    </PropertyGroup>
+  </Target>
 </Project>

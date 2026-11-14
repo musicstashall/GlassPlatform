@@ -15,4 +15,4 @@ Vendored from the official NuGet package:
 
 GlassSetup — **только x86 (Win32)**. Loader статически линкуется; `WebView2Loader.dll` рядом с exe не нужна.
 
-The Microsoft Edge WebView2 **Runtime** is not vendored here yet. For development, install Evergreen Runtime on the dev machine. The shipping installer must bundle and install Runtime offline — see [docs/guides/GlassSetup.md](../../docs/guides/GlassSetup.md).
+The Microsoft Edge WebView2 **Runtime** is not vendored here. The current setup offers an online download when it is missing; it does **not** yet meet the original offline-Runtime goal. For current behaviour, build requirements and known gaps, see [GlassSetup/README.md](../README.md).

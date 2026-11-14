@@ -15,16 +15,16 @@ public static class OpenGlassInstallService
         return OpenGlassHostService.TryInstallLegacyHost();
     }
 
-    public static void Uninstall()
+    public static bool Uninstall()
     {
-        if (NativeHostInterop.OpenGlassOrchestrationInstalled()
-            && PlatformPaths.OpenGlassHostPath is not null)
-        {
-            NativeHostInterop.StopOpenGlassService();
-            _ = NativeHostInterop.RemoveOpenGlassService();
-        }
-
+        using var busy = OpenGlassLifecycleBusy.TryBegin();
+        if (busy is null) return false;
+        // The Native call waits for SERVICE_STOPPED before DeleteService and
+        // closes its handle before waiting for actual removal from SCM.
+        var serviceRemoved = NativeHostInterop.RemoveOpenGlassService();
         OpenGlassHostService.StopAndRemoveLegacyHostTask();
+        NativeHostInterop.InvalidateOGCache();
+        return serviceRemoved && !OpenGlassHostService.OrchestrationInstalled();
     }
 
     private static bool TryInstallService(string exePath)

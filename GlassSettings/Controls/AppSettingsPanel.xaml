@@ -32,6 +32,14 @@
                     OffContent=""
                     Toggled="BusyOverlaySwitch_OnToggled" />
             </toolkit:SettingsCard>
+            <toolkit:SettingsCard x:Name="ValidateRegistryCard" Header="" Description="">
+                <ToggleSwitch
+                    x:Name="ValidateRegistrySwitch"
+                    Style="{StaticResource GlassSettingsCompactToggleSwitchStyle}"
+                    OnContent=""
+                    OffContent=""
+                    Toggled="ValidateRegistrySwitch_OnToggled" />
+            </toolkit:SettingsCard>
         </StackPanel>
         <Border
             Grid.Column="1"

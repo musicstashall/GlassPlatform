@@ -1,4 +1,4 @@
-#include "WndPch.h"
+﻿#include "WndPch.h"
 #include "WinEventHandler.h"
 #include "Tracker/BackdropPolicyRescan.h"
 #include "Tracker/SubclassDiagPublish.h"
@@ -1512,14 +1512,47 @@ namespace WndCompat
             return ctx;
         }
 
-        // CFG-fix fallback: EnumWindows-based full scan to remove any remaining subclass procs
-        // before FreeLibrary. Catches windows that were subclassed by WinEvent callbacks
-        // but never entered g_rootWindows (race between WinEvent and shutdown snapshot).
+        // CFG-fix fallback: full scan to remove any remaining subclass procs before
+        // FreeLibrary. Catches windows that were subclassed by WinEvent callbacks but never
+        // entered g_rootWindows (race between WinEvent and shutdown snapshot).
+        //
+        // H91 (дамп explorer 29784): крэш = вызов WndCompat+0x194240 из comctl32-thunk при
+        // WM_PAINT окна CtrlNotifySink, которое НЕ было посещено — старый обход шёл только
+        // через EnumWindows (top-level). Окна DirectUI-шелла (CtrlNotifySink и прочие
+        // дочерние) переживали detach → оставались в цепочке comctl32 → unmap → fail-fast.
+        // Поэтому: рекурсивный обход дочерних + EnumThreadWindows (message-only окна).
         struct ForceDetachCtx final
         {
             DWORD pid{};
-            unsigned removed{};
+            unsigned visited{};      // окон посещено (top + child + thread)
+            unsigned topLevel{};
+            unsigned child{};
+            unsigned removedRoot{};      // RemoveWindowSubclass(RootSubclassProc) == TRUE
+            unsigned removedExplorer{};  // RemoveWindowSubclass(ExplorerRootSubclassProc) == TRUE
         };
+
+        void ForceDetachOne(HWND hwnd, ForceDetachCtx& ctx) noexcept
+        {
+            if (WndCompat::Root_ForceDetachSubclass(hwnd))
+                ++ctx.removedRoot;
+            if (WndCompat::ExplorerRoot::ExplorerRoot_ForceDetachSubclass(hwnd))
+                ++ctx.removedExplorer;
+            ++ctx.visited;
+        }
+
+        BOOL CALLBACK EnumForceDetachChild(HWND hwnd, LPARAM lParam) noexcept
+        {
+            auto* ctx = reinterpret_cast<ForceDetachCtx*>(lParam);
+            DWORD pid = 0;
+            (void)GetWindowThreadProcessId(hwnd, &pid);
+            if (pid != ctx->pid)
+                return TRUE;
+            ++ctx->child;
+            ForceDetachOne(hwnd, *ctx);
+            // EnumChildWindows уже рекурсивен, но повторный проход безвреден и страхует
+            // от окон, пересозданных во время обхода.
+            return TRUE;
+        }
 
         BOOL CALLBACK EnumForceDetachSubclasses(HWND hwnd, LPARAM lParam) noexcept
         {
@@ -1529,18 +1562,42 @@ namespace WndCompat
             if (pid != ctx->pid)
                 return TRUE;
 
-            WndCompat::Root_ForceDetachSubclass(hwnd);
-            WndCompat::ExplorerRoot::ExplorerRoot_ForceDetachSubclass(hwnd);
-            ++ctx->removed;
+            ++ctx->topLevel;
+            ForceDetachOne(hwnd, *ctx);
+            if (IsWindow(hwnd))
+                (void)EnumChildWindows(hwnd, EnumForceDetachChild, lParam);
             return TRUE;
         }
 
-        void ForceDetachAllSubclasses() noexcept
+        unsigned ForceDetachAllSubclasses(ForceDetachCtx& ctx) noexcept
         {
-            ForceDetachCtx ctx{};
+            ctx = ForceDetachCtx{};
             ctx.pid = GetCurrentProcessId();
             (void)EnumWindows(EnumForceDetachSubclasses, reinterpret_cast<LPARAM>(&ctx));
-            DebugLog(L"[WndCompat][WinEvent] ForceDetachAllSubclasses: scanned %u windows", ctx.removed);
+
+            // Message-only (HWND_MESSAGE) и окна не-GUI потоков: EnumWindows их не отдаёт.
+            HANDLE threads = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            if (threads != INVALID_HANDLE_VALUE)
+            {
+                THREADENTRY32 te{};
+                te.dwSize = sizeof(te);
+                if (Thread32First(threads, &te))
+                {
+                    do
+                    {
+                        if (te.th32OwnerProcessID != ctx.pid)
+                            continue;
+                        (void)EnumThreadWindows(te.th32ThreadID, EnumForceDetachSubclasses,
+                            reinterpret_cast<LPARAM>(&ctx));
+                    } while (Thread32Next(threads, &te));
+                }
+                CloseHandle(threads);
+            }
+
+            DebugLog(L"[WndCompat][WinEvent] ForceDetachAllSubclasses: visited %u "
+                     L"(top %u, child %u), removed root %u explorer %u",
+                ctx.visited, ctx.topLevel, ctx.child, ctx.removedRoot, ctx.removedExplorer);
+            return ctx.visited;
         }
     }
 
@@ -1643,7 +1700,11 @@ namespace WndCompat
         // procs that were subclassed by WinEvent callbacks but never entered g_rootWindows
         // (race between WinEvent INCONTEXT and shutdown snapshot). This is the last line
         // of defense before FreeLibrary — removes stale subclass procs from all windows.
-        ForceDetachAllSubclasses();
+        ForceDetachCtx forceCtx{};
+        const unsigned forceScanned = ForceDetachAllSubclasses(forceCtx);
+        // removed_root/removed_explorer — сколько RemoveWindowSubclass реально сняли наш прок
+        // (доказательство, что detach дошёл до окна). RVA проков нужны, чтобы сверить адрес
+        // из crash-дампа (WndCompat+0xXXXXXX) с конкретным проком.
 
         // CFG-fix: снимаем g_hookInstalled ПОСЛЕ DetachAll, чтобы никакой WinEvent callback
         // не мог установить новый субкласс пока DetachAll работает.
@@ -1653,11 +1714,17 @@ namespace WndCompat
 
         // Event-based shutdown: wait for all cross-thread detachments to complete
         const int pending = g_pendingDetaches.load(std::memory_order_acquire);
-        if (pending > 0)
+        // R5b: ожидание ограничено по времени. Раньше был INFINITE на событии, которое
+        // при «потерянном» Register не придёт никогда (а теперь ещё и не может появиться
+        // отрицательный счётчик). Зависание Stop хуже, чем незавершённый detach: после
+        // таймаута остаток виден в wnd_shutdown_end и попадает под защиту stale_scan.
+        constexpr DWORD kPendingWaitMs = 3000;
+        DWORD pendingWait = WAIT_TIMEOUT;
+        if (pending > 0 && g_hDetachAllDone)
         {
             DebugLog(L"[WndCompat][WinEvent] Waiting for %d cross-thread detachments", pending);
-            WaitForSingleObject(g_hDetachAllDone, INFINITE);
-            DebugLog(L"[WndCompat][WinEvent] All cross-thread detachments complete");
+            pendingWait = WaitForSingleObject(g_hDetachAllDone, kPendingWaitMs);
+            DebugLog(L"[WndCompat][WinEvent] Cross-thread detachments wait=%lu", pendingWait);
         }
 
         // ОчищаемHANDLE и сбрасываем счётчик для следующего цикла.
@@ -1695,12 +1762,28 @@ namespace WndCompat
     }
 
     // Event-based shutdown: signal completion when a subclass is removed
+    //
+    // R5b (прогон 6, explorer 20124): здесь счётчик уходил в минус — в логе
+    // wnd_shutdown_begin pending_before=-3. Причина: Shutdown ставит store(0) после
+    // ожидания, а «хвостовые» SignalDetachComplete из уже отправленных кросс-поточных
+    // detach приходят позже и декрементируют ноль. Дальше в следующем цикле
+    // Register(+11) и -3 дают pending=8, т.е. ждём меньше, чем реально в полёте, и
+    // FreeLibrary может случиться раньше, чем завершится чужой detach.
+    // Теперь счётчик не может стать отрицательным, а недобор фиксируется в логе.
     void WinEventHook_SignalDetachComplete()
     {
-        if (g_pendingDetaches.fetch_sub(1) == 1)
+        int cur = g_pendingDetaches.load(std::memory_order_acquire);
+        while (cur > 0)
         {
-            SetEvent(g_hDetachAllDone);
+            if (g_pendingDetaches.compare_exchange_weak(
+                    cur, cur - 1, std::memory_order_acq_rel, std::memory_order_acquire))
+            {
+                if (cur == 1)
+                    SetEvent(g_hDetachAllDone);
+                return;
+            }
         }
+        // Лишняя нотификация (detach завершился после store(0) или без Register).
     }
 
     Shared::InjectionMode WinEventHook_GetMode()

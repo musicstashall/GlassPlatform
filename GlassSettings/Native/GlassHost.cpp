@@ -204,13 +204,6 @@ namespace GlassSettingsNative
             ShutdownTrace(L"StopHostLogClient");
         }
 
-        void UnloadGlassCoreModule() noexcept
-        {
-            if (!g_hGlassCore)
-                return;
-            (void)::FreeLibrary(g_hGlassCore);
-            g_hGlassCore = nullptr;
-        }
     }
 
     bool LoadGlassCoreDll() noexcept
@@ -252,9 +245,10 @@ namespace GlassSettingsNative
     void ShutdownGlassRuntime() noexcept
     {
         RunShutdownBeforeFreeLibrary();
-        ShutdownTrace(L"before FreeLibrary");
-        UnloadGlassCoreModule();
-        ShutdownTrace(L"RunShutdownBeforeFreeLibrary END");
+        // Не FreeLibrary в живом WinUI-процессе: сразу после unmap любой paint caption → AV.
+        // Environment.Exit снимет образ; handle обнуляем только логически.
+        g_hGlassCore = nullptr;
+        ShutdownTrace(L"host shutdown complete (no FreeLibrary)");
     }
 
     void ReapplyOpenRootBackdropsIfEngineLoaded() noexcept

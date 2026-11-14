@@ -1,8 +1,8 @@
-namespace GlassSettings.Core.Snapshot;
+﻿namespace GlassSettings.Core.Snapshot;
 
 /// <summary>
 /// Ключи HKCU\DWM, исключённые из snapshot (Windows / персонализация).
-/// Синхронизировать с docs/guides/GlassSettings-customization-tracking.md.
+/// Синхронизировать с GlassSettings/docs/GlassSettings-customization-tracking.md.
 /// </summary>
 public static class DwmSnapshotExclusions
 {

@@ -19,4 +19,10 @@ public static class GlassPlatformUiPolicy
 
     public static bool CanCreateX86AutorunTask() =>
         !IsX86DualUiControlsLocked();
+
+    public static bool IsAnyPlatformInstalled() =>
+        GlassModulePath.IsPlatformInstalled(GlassPlatformArch.X64)
+        || GlassModulePath.IsPlatformInstalled(GlassPlatformArch.X86);
+
+    public static bool ShouldExposePlatformSections() => IsAnyPlatformInstalled();
 }

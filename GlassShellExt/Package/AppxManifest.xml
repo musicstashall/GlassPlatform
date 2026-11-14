@@ -11,13 +11,13 @@
 
   <Identity
     Name="GlassProject.GlassShellMenu"
-    Publisher="CN=GlassProject Dev"
+    Publisher="CN=Stanislav K."
     Version="1.0.0.0"
     ProcessorArchitecture="neutral" />
 
   <Properties>
     <DisplayName>Glass Platform Shell Menu</DisplayName>
-    <PublisherDisplayName>GlassProject</PublisherDisplayName>
+    <PublisherDisplayName>Stanislav K.</PublisherDisplayName>
     <Logo>Assets\Square44x44Logo.png</Logo>
     <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
   </Properties>

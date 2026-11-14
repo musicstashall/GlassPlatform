@@ -83,7 +83,7 @@ public static class SystemPlatformRunActions
     public static async Task<bool> InstallOpenGlassOrchestrationAsync()
     {
         var ok = await Task.Run(OpenGlassInstallService.Install).ConfigureAwait(true);
-        return ok && OpenGlassHostService.LegacyHostTaskExists();
+        return ok && OpenGlassHostService.OrchestrationInstalled();
     }
 
     public static async Task<bool> StartOpenGlassAsync()
@@ -114,15 +114,16 @@ public static class SystemPlatformRunActions
         finally
         {
             busy.Dispose();
+            PlatformPresenceService.Instance.NotifyLifecycleChanged();
         }
 
         CompleteOpenGlassStartSuccess();
         return true;
     }
 
-    /// <summary>OG реально работает: pipeline в dwm или orchestration Running + окно Dwm.</summary>
+    /// <summary>Home/System run controls reflect the service/task, not symbol/DWM pipeline readiness.</summary>
     private static bool IsOpenGlassLaunchComplete() =>
-        NativeHostInterop.IsOpenGlassBackdropPipelineActive();
+        OpenGlassHostService.QueryOpenGlassHostUiState() == OpenGlassHostUiState.Running;
 
     private static void CompleteOpenGlassStartSuccess()
     {
@@ -143,6 +144,7 @@ public static class SystemPlatformRunActions
         finally
         {
             busy.Dispose();
+            PlatformPresenceService.Instance.NotifyLifecycleChanged();
         }
         OpenGlassBorderPolicyCoordinator.NotifyOpenGlassStateChanged();
         NotifyRootBackdropAfterOpenGlassStop();

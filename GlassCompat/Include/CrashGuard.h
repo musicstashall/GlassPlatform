@@ -5,7 +5,7 @@ namespace GlassCompat
 {
     // UEF → опциональный минидамп: long-lived хост (/start) и Normal-инъекция.
     // BlockList/Forbidden (path=2/3) CrashGuard не ставят — только MinimalUnloadWatcher.
-    // Диалог «остановить платформу» — только при серии падений explorer.exe (см. CrashGuard.cpp).
+    // Серия падений explorer.exe пишется в реестр (один раз на процесс). Диалог и остановка — на хосте.
     //
     // HKCU\Software\StanislavKa\GlassPlatform\Crashes — основной ключ; при первой загрузке создаётся ключ и
     // при отсутствии — EnableMiniDump=1, плюс каталог %LOCALAPPDATA%\GlassPlatform\Crashes.
@@ -20,7 +20,8 @@ namespace GlassCompat
     //   DisableExplorerVehFatalDumps = 1 — отключить встроенный VEH (AV/fast-fail/heap/stowed) в explorer.exe;
     //   Не-explorer VEH: first-chance AV → дамп только если ExceptionAddress в Glass*/WndCompat
     //   (иначе AutoIt/JIT PAGE_NOACCESS заливал MiniDump и подвешивал UI).
-    //   GlassCrashSeriesCount / GlassCrashSeriesLastTime — серия падений explorer (диалог остановки платформы).
+    //   GlassCrashSeriesCount / GlassCrashSeriesLastTime — серия падений explorer за 3 минуты.
+    //   Хост останавливает платформу, если за это окно набралось 3 падения и за 20 с нет ответа.
     [[nodiscard]] bool IsProcessCrashGuardInstalled() noexcept;
 
     void InstallProcessCrashGuard() noexcept;
@@ -28,4 +29,9 @@ namespace GlassCompat
     // иначе чужой рантайм мог перезаписать UEF, заданный при Initialize / /start.
     void ReassertProcessCrashGuard() noexcept;
     void UninstallProcessCrashGuard() noexcept;
+
+    // Сколько падений Explorer в текущем 3-минутном окне. 0, если окно истекло или ключа нет.
+    [[nodiscard]] DWORD ReadExplorerCrashSeriesCount() noexcept;
+    // «Нет» в диалоге хоста: серия начинается заново.
+    void ResetExplorerCrashSeriesCount() noexcept;
 }

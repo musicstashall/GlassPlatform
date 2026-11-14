@@ -2,7 +2,7 @@ using GlassSettings.Services;
 
 namespace GlassSettings.Core.Platform;
 
-/// <summary>Видимость настроек OpenGlass в GlassSettings (bundled + владелец оркестрации).</summary>
+/// <summary>Видимость настроек любой обнаруженной установки OpenGlass.</summary>
 public static class OpenGlassUiPolicy
 {
     private static bool _presenceHooked;
@@ -20,40 +20,11 @@ public static class OpenGlassUiPolicy
         PlatformPresenceService.Instance.PresenceChanged += OnPresenceChanged;
     }
 
-    public static bool IsBundledWithApplication() => OpenGlassPathPolicy.IsBundledWithApplication();
-
-    public static bool IsOrchestratedExternally()
-    {
-        if (!NativeHostInterop.OpenGlassOrchestrationInstalled())
-            return false;
-
-        return !OrchestrationTargetsBundledPackage();
-    }
-
+    // Location is discovery information, not a reason to hide an installed OG.
+    // Upstream Inno owns package installation; Settings controls the discovered
+    // instance through its existing service/task APIs, regardless of directory.
     public static bool IsFeatureExposedInUi() =>
-        IsBundledWithApplication() && !IsOrchestratedExternally();
-
-    public static bool OrchestrationTargetsBundledPackage()
-    {
-        if (!IsBundledWithApplication())
-            return false;
-
-        var dll = PlatformPaths.OpenGlassDllPath;
-        if (OpenGlassPathPolicy.IsPathBundled(dll))
-            return true;
-
-        var host = PlatformPaths.OpenGlassHostPath;
-        if (OpenGlassPathPolicy.IsPathBundled(host))
-            return true;
-
-        if (NativeHostInterop.TryGetOpenGlassServiceBinPath(out var serviceBin)
-            && OpenGlassPathPolicy.IsPathBundled(serviceBin))
-        {
-            return true;
-        }
-
-        return false;
-    }
+        PlatformPaths.OpenGlassDllPath is { Length: > 0 } dll && File.Exists(dll);
 
     private static void OnPresenceChanged(object? sender, EventArgs e)
     {
@@ -67,15 +38,5 @@ public static class OpenGlassUiPolicy
         Changed?.Invoke(null, EventArgs.Empty);
     }
 
-    private static bool IsFeatureExposedWithoutScheduler()
-    {
-        if (!IsBundledWithApplication())
-            return false;
-
-        var snap = PlatformPresenceService.Instance.CurrentSnapshot;
-        if (snap.Revision == 0 || (snap.OgLegacyTaskExists == 0 && snap.OgCurrentTaskExists == 0))
-            return _lastFeatureExposed;
-
-        return OrchestrationTargetsBundledPackage();
-    }
+    private static bool IsFeatureExposedWithoutScheduler() => IsFeatureExposedInUi();
 }
