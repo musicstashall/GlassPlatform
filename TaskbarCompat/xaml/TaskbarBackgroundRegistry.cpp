@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 
 namespace wux = winrt::Windows::UI::Xaml;
 
@@ -699,6 +700,35 @@ namespace TaskbarCompat
             if (!shape)
                 return;
 
+            // Нативный DockingStates поворачивает уже существующее дерево и не
+            // обязан повторно добавить BackgroundFill. Отслеживаем RootGrid для
+            // всех paint-path, а не только когда включены скругления.
+            try
+            {
+                namespace wuxc = winrt::Windows::UI::Xaml::Controls;
+                namespace wuxm = winrt::Windows::UI::Xaml::Media;
+                wux::FrameworkElement cur = shape;
+                while (cur)
+                {
+                    if (cur.Name() == L"RootGrid")
+                    {
+                        const auto root = cur.try_as<wuxc::Grid>();
+                        if (root && root != info.rootGrid)
+                        {
+                            DetachRootLayoutHook(info);
+                            info.rootGrid = root;
+                        }
+                        break;
+                    }
+                    cur = wuxm::VisualTreeHelper::GetParent(cur)
+                        .try_as<wux::FrameworkElement>();
+                }
+                EnsureRootLayoutHook(frameHandle, info);
+            }
+            catch (...)
+            {
+            }
+
             // Не затирать оригинальный system brush прозрачной заглушкой zones soft-path.
             const auto capturedFill = shape.Fill();
             bool captureAsOriginal = true;
@@ -1197,6 +1227,114 @@ namespace TaskbarCompat
         }
     }
 
+    void TaskbarBackgroundRegistry::DetachRootLayoutHook(TaskbarInfo& info) noexcept
+    {
+        try
+        {
+            info.rootLayoutRevoker.revoke();
+        }
+        catch (...)
+        {
+        }
+        info.rootLayoutRevoker = {};
+        info.rootLayoutHookedGrid = nullptr;
+        info.lastRootWidth = -1.0;
+        info.lastRootHeight = -1.0;
+        info.rootLayoutApplyNesting = false;
+    }
+
+    void TaskbarBackgroundRegistry::EnsureRootLayoutHook(
+        InstanceHandle frameHandle,
+        TaskbarInfo& info) noexcept
+    {
+        if (!info.rootGrid)
+        {
+            DetachRootLayoutHook(info);
+            return;
+        }
+        if (info.rootLayoutRevoker)
+        {
+            if (info.rootLayoutHookedGrid == info.rootGrid)
+                return;
+            DetachRootLayoutHook(info);
+        }
+
+        try
+        {
+            info.lastRootWidth = info.rootGrid.ActualWidth();
+            info.lastRootHeight = info.rootGrid.ActualHeight();
+            info.rootLayoutRevoker = info.rootGrid.LayoutUpdated(
+                winrt::auto_revoke,
+                [this, frameHandle](
+                    winrt::Windows::Foundation::IInspectable const&,
+                    winrt::Windows::Foundation::IInspectable const&) {
+                    OnRootLayoutUpdated(frameHandle);
+                });
+            info.rootLayoutHookedGrid = info.rootGrid;
+        }
+        catch (...)
+        {
+            info.rootLayoutRevoker = {};
+            info.rootLayoutHookedGrid = nullptr;
+            info.lastRootWidth = -1.0;
+            info.lastRootHeight = -1.0;
+        }
+    }
+
+    void TaskbarBackgroundRegistry::OnRootLayoutUpdated(InstanceHandle frameHandle) noexcept
+    {
+        const auto it = m_taskbars.find(frameHandle);
+        if (it == m_taskbars.end())
+            return;
+        TaskbarInfo& info = it->second;
+        if (!info.rootGrid || info.rootLayoutApplyNesting)
+            return;
+
+        try
+        {
+            const double width = info.rootGrid.ActualWidth();
+            const double height = info.rootGrid.ActualHeight();
+            if (width <= 1.0 || height <= 1.0)
+                return;
+
+            constexpr double kLayoutEpsilon = 0.5;
+            const bool widthChanged = info.lastRootWidth < 0.0
+                || std::abs(width - info.lastRootWidth) > kLayoutEpsilon;
+            const bool heightChanged = info.lastRootHeight < 0.0
+                || std::abs(height - info.lastRootHeight) > kLayoutEpsilon;
+            if (!widthChanged && !heightChanged)
+                return;
+
+            const bool wasVertical = info.lastRootWidth > 1.0
+                && info.lastRootHeight > info.lastRootWidth;
+            const bool isVertical = height > width;
+            info.lastRootWidth = width;
+            info.lastRootHeight = height;
+
+            info.rootLayoutApplyNesting = true;
+            {
+                ProgrammaticFillScope prog(info);
+                ApplyFillPolicyToFrame(frameHandle, info);
+                ApplyStrokePolicyToFrame(frameHandle, info);
+            }
+            info.rootLayoutApplyNesting = false;
+
+            DebugLog(
+                DBG_IMPORTANT,
+                L"[TaskbarCompat][BgRegistry] Root layout changed: frame=%llu %.1fx%.1f vertical=%u (was=%u) — patches reapplied",
+                static_cast<unsigned long long>(frameHandle),
+                width,
+                height,
+                isVertical ? 1u : 0u,
+                wasVertical ? 1u : 0u);
+            RedrawShellTraysAfterTaskbarXamlPatch();
+        }
+        catch (...)
+        {
+            info.rootLayoutApplyNesting = false;
+        }
+    }
+
     void TaskbarBackgroundRegistry::CancelZoneShrinkFollowUp(TaskbarInfo& info) noexcept
     {
         try
@@ -1382,6 +1520,7 @@ namespace TaskbarCompat
     void TaskbarBackgroundRegistry::RestoreFrameVisuals(TaskbarInfo& info) noexcept
     {
         CancelThemeSampleTimer(info);
+        DetachRootLayoutHook(info);
         DetachZoneLayoutHook(info);
         Zones::Restore(info.background, info.border, info.zones);
         RestoreSingleTileCorners(info);
@@ -1426,7 +1565,9 @@ namespace TaskbarCompat
         return brush;
     }
 
-    void TaskbarBackgroundRegistry::ApplySingleTileCorners(TaskbarInfo& info) noexcept
+    void TaskbarBackgroundRegistry::ApplySingleTileCorners(
+        InstanceHandle frameHandle,
+        TaskbarInfo& info) noexcept
     {
         // BackgroundFill.RadiusX/Y на Taskbar.dll → AV (put_RadiusY). Скругление — через RootGrid.
         if (!info.background || !m_settings.paintPathXaml || !m_settings.cornersPresent
@@ -1456,6 +1597,10 @@ namespace TaskbarCompat
             {
                 return;
             }
+
+            // DockingStates меняет геометрию существующего XAML-дерева, поэтому
+            // одного VTC Add недостаточно: следим за поворотом RootGrid.
+            EnsureRootLayoutHook(frameHandle, info);
 
             if (!info.rootCornersCaptured)
             {
@@ -1627,7 +1772,7 @@ namespace TaskbarCompat
                     DetachZoneLayoutHook(info);
                     Zones::Restore(info.background, info.border, info.zones);
                     info.background.Fill(brush);
-                    ApplySingleTileCorners(info);
+                    ApplySingleTileCorners(frameHandle, info);
                 }
                 else
                 {
@@ -1692,7 +1837,7 @@ namespace TaskbarCompat
                 {
                     DetachZoneLayoutHook(info);
                     info.background.Fill(brush);
-                    ApplySingleTileCorners(info);
+                    ApplySingleTileCorners(frameHandle, info);
                 }
                 else
                 {
@@ -1712,7 +1857,7 @@ namespace TaskbarCompat
                 wux::Media::SolidColorBrush transparent;
                 transparent.Color(winrt::Windows::UI::Colors::Transparent());
                 info.background.Fill(transparent);
-                ApplySingleTileCorners(info);
+                ApplySingleTileCorners(frameHandle, info);
             }
             else
             {
