@@ -9,6 +9,11 @@ public static class GlassSettingsResources
     private static ResourceManager? _manager;
     private static ResourceContext? _explicitContext;
     private static string? _explicitLanguageTag;
+    private static readonly Dictionary<(string Key, string Language), string> LanguageStringCache = new();
+    private static readonly Dictionary<string, ResourceContext> LanguageContexts = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Явно выбранный язык интерфейса или null, если используется язык системы.</summary>
+    public static string? ActiveLanguageTag => _explicitLanguageTag;
 
     private static ResourceLoader Loader => _loader ??= new ResourceLoader();
 
@@ -25,6 +30,32 @@ public static class GlassSettingsResources
         _loader = null;
         _manager = null;
         _explicitContext = null;
+        LanguageStringCache.Clear();
+        LanguageContexts.Clear();
+    }
+
+    /// <summary>Строка из заданной локали независимо от текущего языка интерфейса.</summary>
+    public static string GetForLanguage(string key, string languageTag)
+    {
+        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(languageTag))
+            return string.Empty;
+
+        var cacheKey = (key, languageTag);
+        if (LanguageStringCache.TryGetValue(cacheKey, out var cached))
+            return cached;
+
+        _manager ??= new ResourceManager();
+        if (!LanguageContexts.TryGetValue(languageTag, out var context))
+        {
+            context = _manager.CreateResourceContext();
+            context.QualifierValues["Language"] = languageTag;
+            LanguageContexts[languageTag] = context;
+        }
+
+        var map = _manager.MainResourceMap.GetSubtree("Resources");
+        var value = map.TryGetValue(key, context)?.ValueAsString ?? string.Empty;
+        LanguageStringCache[cacheKey] = value;
+        return value;
     }
 
     public static string Get(string key)

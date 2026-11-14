@@ -90,7 +90,6 @@ internal static class HomeSessionNoticeState
     /// <summary>
     /// Уход с «Обзора»: снять green и всегда открыть левый footer (кастомизация).
     /// Независимо от того, успело ли стартовое green показаться (pending/armed/awaiting).
-    /// WarmAttach под splash не вызывает этот путь (<c>_suppressHomeNavigatedFrom</c>).
     /// </summary>
     public static void ConsumeGreenForNavigation()
     {

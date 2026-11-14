@@ -1,3 +1,4 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -86,18 +87,31 @@ public sealed class SettingsNavigationService
         // x86: TrailChanged→BreadcrumbBar.ItemsSource внутри ResetTrail (до Navigate) → AV.
         // Сначала trail без UI, Navigate, потом TrailChanged.
         ResetTrail(title, pageType, parameter, raiseTrailChanged: false);
-        if (_frameHasNavigated)
-        {
-            ClearBackStack();
-        }
-        else
-        {
-        }
-
-        // Первый cold-start — Suppress (x86 AV на slide); дальше — обычный ForwardSlide.
         var info = transition ?? (_frameHasNavigated
             ? ForwardSlide()
             : new SuppressNavigationTransitionInfo());
+
+        // RemoveAt журнала и Navigate в одном вызове: E_BOUNDS / 0x8000FFFF.
+        if (_frameHasNavigated)
+        {
+            ClearBackStack();
+            var frame = _frame;
+            _ = frame.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+            {
+                try
+                {
+                    frame.Navigate(pageType, parameter, info);
+                    _frameHasNavigated = true;
+                    TrailChanged?.Invoke(this, EventArgs.Empty);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"GlassSettings NavigateToRoot: {ex}");
+                }
+            });
+            return;
+        }
+
         _frame.Navigate(pageType, parameter, info);
         _frameHasNavigated = true;
         TrailChanged?.Invoke(this, EventArgs.Empty);
@@ -128,7 +142,8 @@ public sealed class SettingsNavigationService
         object? hubParameter,
         Type? detailPageType,
         object? detailParameter,
-        string? detailTitle)
+        string? detailTitle,
+        NavigationTransitionInfo? transition = null)
     {
         if (_frame is null)
             return;
@@ -145,10 +160,11 @@ public sealed class SettingsNavigationService
         TrailChanged?.Invoke(this, EventArgs.Empty);
         ClearBackStack();
 
+        var info = transition ?? ForwardSlide();
         if (detailPageType is not null)
-            _frame.Navigate(detailPageType, detailParameter, ForwardSlide());
+            _frame.Navigate(detailPageType, detailParameter, info);
         else
-            _frame.Navigate(hubPageType, hubParameter, ForwardSlide());
+            _frame.Navigate(hubPageType, hubParameter, info);
         _frameHasNavigated = true;
     }
 

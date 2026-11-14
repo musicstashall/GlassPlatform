@@ -250,6 +250,8 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
             return;
         }
 
+        DeduplicateEntries();
+
         var scroll = FindAncestorScrollViewer(this);
         // При открытом диалоге — принудительно pin scroll, чтобы add/remove строк не приводили к прыжку.
         if (_detailDialogOpen && _heldScrollOffset is null && scroll is not null)
@@ -313,12 +315,13 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
                 if (cur >= 0 && cur != i)
                 {
                     RowsHost.Children.RemoveAt(cur);
-                    RowsHost.Children.Insert(i, existing.Root);
+                    // cur < i: после RemoveAt хвост сдвигается, прежний i уже вне Count.
+                    InsertRow(existing.Root, cur < i ? i - 1 : i);
                     mutated = true;
                 }
                 else if (cur < 0)
                 {
-                    RowsHost.Children.Insert(i, existing.Root);
+                    InsertRow(existing.Root, i);
                     mutated = true;
                 }
 
@@ -328,7 +331,7 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
             {
                 var row = CreateRow(entry, zebra);
                 _rowsByPid[entry.Pid] = row;
-                RowsHost.Children.Insert(i, row.Root);
+                InsertRow(row.Root, i);
                 mutated = true;
             }
         }
@@ -336,6 +339,37 @@ public sealed partial class InjectRuntimeModuleTable : UserControl
         // Якорь только если дерево реально менялось — иначе не трогаем offset пользователя.
         if (mutated)
             RestoreScrollAfterSync(scroll, scrollOffset, anchorEl, anchorContentY);
+    }
+
+    /// <summary>Повтор PID в снимке: второй Insert уводит индекс за Count.</summary>
+    private void DeduplicateEntries()
+    {
+        if (_entries.Count < 2)
+            return;
+
+        var seen = new HashSet<uint>();
+        var unique = new List<InjectRuntimeEntry>(_entries.Count);
+        foreach (var entry in _entries)
+        {
+            if (seen.Add(entry.Pid))
+                unique.Add(entry);
+        }
+
+        if (unique.Count != _entries.Count)
+            _entries = unique;
+    }
+
+    private void InsertRow(FrameworkElement element, int index)
+    {
+        if (element.Parent is not null)
+            return;
+
+        if (index < 0)
+            index = 0;
+        if (index > RowsHost.Children.Count)
+            index = RowsHost.Children.Count;
+
+        RowsHost.Children.Insert(index, element);
     }
 
     /// <summary>Без структурных мутаций Children — только данные существующих строк.</summary>

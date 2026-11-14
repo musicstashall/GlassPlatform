@@ -968,11 +968,15 @@ public sealed class InjectRuntimeMonitor
 
         if (platformRunning)
         {
+            var seenSlotPids = new HashSet<uint>();
             foreach (var slot in slots)
             {
                 if (slot.Pid == 0)
                     continue;
-                // Свои инструменты (GlassSettings, LogViewer) в список не попадают.
+                // Два слота на один PID приводят к дублирующемуся элементу в таблице.
+                if (!seenSlotPids.Add(slot.Pid))
+                    continue;
+                // Не показывать собственные процессы (GlassSettings и LogViewer).
                 if (IsOwnToolProcess(slot.Pid, slot.ExeName, selfPid))
                     continue;
                 var slotIsTool = IsGlassPlatformHostPid(slot.Pid);

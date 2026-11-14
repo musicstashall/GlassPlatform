@@ -4,6 +4,7 @@ using GlassSettings.Controls;
 using GlassSettings.Controls.Processes;
 using GlassSettings.Core.Platform;
 using GlassSettings.Core.Registry;
+using GlassSettings.Search;
 using GlassSettings.Services;
 using GlassSettings.Strings;
 using Microsoft.UI.Xaml;
@@ -51,6 +52,8 @@ public sealed partial class ProcessesPage : Page
     private Button? _unloadAllButton;
     private bool _unloadAllBusy;
     private ProcessViewMode _viewMode = ProcessViewMode.List;
+    private ProcessViewMode? _processVisualMode;
+    private ProcessViewMode? _blockVisualMode;
     private ProcessFilter _filter = ProcessFilter.All;
     private ProcessSort _sort = ProcessSort.NameAsc;
     private string _searchQuery = string.Empty;
@@ -70,13 +73,15 @@ public sealed partial class ProcessesPage : Page
     private Button? _blockListAddButton;
     private MenuFlyout? _blockListAddMenu;
     private bool _layoutRetryScheduled;
+    private int _itemsBindGeneration;
+    private bool _runtimeExpandHooked;
+    private bool _crashesExpandHooked;
     private double _lastProcessItemsHostWidth;
     private double _lastBlockListItemsHostWidth;
     private const int ExpanderAnimationMs = 260;
 
     public ProcessesPage()
     {
-        NavigationCacheMode = NavigationCacheMode.Enabled;
         InitializeComponent();
 
         // Глушим BringIntoView на списке процессов — клик/двойной клик
@@ -128,7 +133,6 @@ public sealed partial class ProcessesPage : Page
                 }),
             handledEventsToo: true);
 
-        ApplyViewMode(ProcessViewMode.List);
         _headerLayout = new ProcessesPageHeaderLayout(
             HeaderGrid,
             SearchRowGrid,
@@ -146,13 +150,10 @@ public sealed partial class ProcessesPage : Page
         {
             HookProcessListExpanderLayout();
             HookSearchTargetExpanders();
+            HookRuntimeTableOnExpand();
+            HookCrashTablesOnExpand();
             ProcessItemsHost.SizeChanged += ProcessItemsHost_OnSizeChanged;
             BlockListItemsHost.SizeChanged += BlockListItemsHost_OnSizeChanged;
-            UpdateHeaderLayout();
-            UpdateSearchPlaceholder();
-            ScheduleProcessItemsLayout();
-            ScheduleItemsRemeasure();
-            RefreshCrashDumps();
         };
     }
 
@@ -160,15 +161,119 @@ public sealed partial class ProcessesPage : Page
     {
         base.OnNavigatedTo(e);
         CollapseAllExpanders();
-        EnsureListLoaded();
-        ApplyFilteredView();
-        ApplyBlockListFilteredView();
-        UpdateHeaderLayout();
-        ScheduleProcessItemsLayout();
-        ScheduleItemsRemeasure();
-        StartRuntimeMonitor();
-        StartCrashDumpWatcher();
-        RefreshCrashDumps();
+
+        // Реестр, ItemsView, дампы и runtime — не внутри Frame.Navigate:
+        // оттуда WinUI возвращает E_BOUNDS и 0x8000FFFF, переход зависает.
+        var generation = ++_itemsBindGeneration;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (generation != _itemsBindGeneration)
+                return;
+
+            try
+            {
+                // ItemsView (Layout / ItemsSource) здесь не трогаем: страница уже на экране,
+                // свёрнутый список от этого зависает и падает без managed-исключения.
+                EnsureListLoaded();
+                ApplyFilteredView();
+                UpdateHeaderLayout();
+                UpdateSearchPlaceholder();
+                StartRuntimeMonitor();
+                StartCrashDumpWatcher();
+                RefreshCrashDumps();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"GlassSettings ProcessesPage init: {ex}");
+            }
+        });
+
+        if (e.Parameter is string searchAnchor && ProcessesSearchAnchors.IsKnown(searchAnchor))
+            RevealSearchAnchor(searchAnchor);
+    }
+
+    private string? _pendingSearchAnchor;
+    private int _searchAnchorAttempts;
+
+    internal void RevealSearchAnchor(string anchor)
+    {
+        if (!ProcessesSearchAnchors.IsKnown(anchor))
+            return;
+
+        _pendingSearchAnchor = anchor;
+        _searchAnchorAttempts = 0;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, TryRevealSearchAnchor);
+    }
+
+    private void TryRevealSearchAnchor()
+    {
+        if (_pendingSearchAnchor is null)
+            return;
+
+        if (!IsLoaded)
+        {
+            if (_searchAnchorAttempts++ < 8)
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, TryRevealSearchAnchor);
+            return;
+        }
+
+        var target = ExpandSearchAnchor(_pendingSearchAnchor);
+        if (target is null)
+        {
+            _pendingSearchAnchor = null;
+            return;
+        }
+
+        var scroll = PageShell.PageScrollViewer;
+        scroll.UpdateLayout();
+        ScrollElementIntoPageView(scroll, target, animate: false, alignTop: true);
+        if (_searchAnchorAttempts == 0)
+        {
+            _searchAnchorAttempts = 1;
+            _ = RevealSearchAnchorAfterLayoutAsync();
+            return;
+        }
+
+        _pendingSearchAnchor = null;
+    }
+
+    private async Task RevealSearchAnchorAfterLayoutAsync()
+    {
+        await Task.Delay(ExpanderAnimationMs).ConfigureAwait(true);
+        if (_pendingSearchAnchor is null || !IsLoaded)
+            return;
+
+        var target = ExpandSearchAnchor(_pendingSearchAnchor);
+        _pendingSearchAnchor = null;
+        if (target is null)
+            return;
+
+        var scroll = PageShell.PageScrollViewer;
+        scroll.UpdateLayout();
+        ScrollElementIntoPageView(scroll, target, animate: false, alignTop: true);
+    }
+
+    private FrameworkElement? ExpandSearchAnchor(string anchor)
+    {
+        switch (anchor)
+        {
+            case ProcessesSearchAnchors.ProcessList:
+                ProcessListExpander.IsExpanded = true;
+                return ProcessListExpander;
+            case ProcessesSearchAnchors.BlockList:
+                BlockListExpander.IsExpanded = true;
+                return BlockListExpander;
+            case ProcessesSearchAnchors.Runtime:
+                AdvancedExpander.IsExpanded = true;
+                RuntimeExpander.IsExpanded = true;
+                return RuntimeExpander;
+            case ProcessesSearchAnchors.Crashes:
+                AdvancedExpander.IsExpanded = true;
+                CrashesExpander.IsExpanded = true;
+                return CrashesExpander;
+            default:
+                return null;
+        }
     }
 
     private void CollapseAllExpanders()
@@ -182,6 +287,8 @@ public sealed partial class ProcessesPage : Page
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        _pendingSearchAnchor = null;
+        _itemsBindGeneration++;
         StopCrashDumpWatcher();
         StopRuntimeMonitor();
         base.OnNavigatedFrom(e);
@@ -293,15 +400,29 @@ public sealed partial class ProcessesPage : Page
     private void RefreshPlatformCrashDumps()
     {
         _platformCrashDumps = CrashDumpCatalog.Enumerate(CrashDumpCatalog.ResolvePlatformFolder());
-        ApplyCrashDumpTable(
-            PlatformCrashesTable,
-            PlatformCrashesEmptyText,
-            _platformCrashDumps);
+        if (CrashesExpander.IsExpanded)
+            ApplyCrashDumpTable(
+                PlatformCrashesTable,
+                PlatformCrashesEmptyText,
+                _platformCrashDumps);
     }
 
     private void RefreshSystemCrashDumps()
     {
         _systemCrashDumps = CrashDumpCatalog.Enumerate(CrashDumpCatalog.ResolveSystemFolder());
+        if (CrashesExpander.IsExpanded)
+            ApplyCrashDumpTable(
+                SystemCrashesTable,
+                SystemCrashesEmptyText,
+                _systemCrashDumps);
+    }
+
+    private void BindCrashTables()
+    {
+        ApplyCrashDumpTable(
+            PlatformCrashesTable,
+            PlatformCrashesEmptyText,
+            _platformCrashDumps);
         ApplyCrashDumpTable(
             SystemCrashesTable,
             SystemCrashesEmptyText,
@@ -514,6 +635,19 @@ public sealed partial class ProcessesPage : Page
 
     private void ApplyRuntimeSnapshot(InjectRuntimeSnapshot snapshot)
     {
+        ApplyRuntimeDescription(snapshot);
+        UpdateUnloadAllButton(snapshot);
+
+        // Строки — только у раскрытого спойлера. Insert в свёрнутый RowsHost
+        // даёт ArgumentOutOfRangeException (index) и роняет процесс.
+        if (!RuntimeExpander.IsExpanded)
+            return;
+
+        ApplyRuntimeRows(snapshot);
+    }
+
+    private void ApplyRuntimeRows(InjectRuntimeSnapshot snapshot)
+    {
         var hasRows = snapshot.Entries.Count > 0;
         var tableVisibility = hasRows ? Visibility.Visible : Visibility.Collapsed;
         var emptyVisibility = hasRows ? Visibility.Collapsed : Visibility.Visible;
@@ -522,11 +656,43 @@ public sealed partial class ProcessesPage : Page
         if (RuntimeEmptyText.Visibility != emptyVisibility)
             RuntimeEmptyText.Visibility = emptyVisibility;
 
-        // Точечный sync + якорь скролла — внутри InjectRuntimeModuleTable.
         RuntimeTable.SetEntries(hasRows ? snapshot.Entries : Array.Empty<InjectRuntimeEntry>());
+    }
 
-        ApplyRuntimeDescription(snapshot);
-        UpdateUnloadAllButton(snapshot);
+    private void HookRuntimeTableOnExpand()
+    {
+        if (_runtimeExpandHooked)
+            return;
+
+        var expander = FindDescendant<Expander>(RuntimeExpander);
+        if (expander is null)
+            return;
+
+        _runtimeExpandHooked = true;
+        expander.Expanding += (_, _) =>
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (IsLoaded)
+                    ApplyRuntimeRows(InjectRuntimeMonitor.Instance.Latest);
+            });
+    }
+
+    private void HookCrashTablesOnExpand()
+    {
+        if (_crashesExpandHooked)
+            return;
+
+        var expander = FindDescendant<Expander>(CrashesExpander);
+        if (expander is null)
+            return;
+
+        _crashesExpandHooked = true;
+        expander.Expanding += (_, _) =>
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (IsLoaded)
+                    BindCrashTables();
+            });
     }
 
     private void ApplyRuntimeDescription(InjectRuntimeSnapshot snapshot)
@@ -573,6 +739,12 @@ public sealed partial class ProcessesPage : Page
 
     private void ProcessItemsHost_OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (ProcessListExpander.IsExpanded && e.NewSize.Width > 0 && ProcessItems.ItemsSource is null && _allEntries.Count > 0)
+        {
+            ApplyFilteredView();
+            return;
+        }
+
         UpdateProcessItemsLayout();
 
         if (e.PreviousSize.Width <= 0 && e.NewSize.Width > 0 && ProcessItems.ItemsSource is not null)
@@ -581,6 +753,12 @@ public sealed partial class ProcessesPage : Page
 
     private void BlockListItemsHost_OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (BlockListExpander.IsExpanded && e.NewSize.Width > 0 && BlockListItems.ItemsSource is null && _blockListEntries.Count > 0)
+        {
+            ApplyBlockListFilteredView();
+            return;
+        }
+
         UpdateBlockListItemsLayout();
 
         if (e.PreviousSize.Width <= 0 && e.NewSize.Width > 0 && BlockListItems.ItemsSource is not null)
@@ -989,12 +1167,19 @@ public sealed partial class ProcessesPage : Page
 
         var list = query.ToList();
         _visibleItemCount = list.Count;
-        ProcessItems.ItemsSource = list;
         FoundCountText.Text = GlassSettingsResources.Format("Attach_FoundCount", list.Count);
-        EmptyText.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        ProcessItems.Visibility = list.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        UpdateProcessItemsLayout();
-        ScheduleItemsRemeasure();
+
+        // Свёрнутый или ещё не измеренный ItemsView: ItemsSource роняет процесс без исключения.
+        if (ProcessListExpander.IsExpanded && ProcessItemsHost.ActualWidth > 0)
+        {
+            EnsureProcessItemsVisuals();
+            ProcessItems.ItemsSource = list;
+            EmptyText.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            ProcessItems.Visibility = list.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            UpdateProcessItemsLayout();
+            ScheduleItemsRemeasure();
+        }
+
         ApplyBlockListFilteredView();
     }
 
@@ -1020,15 +1205,20 @@ public sealed partial class ProcessesPage : Page
 
         var list = query.ToList();
         _visibleBlockListCount = list.Count;
-        BlockListItems.ItemsSource = list;
-        BlockListEmptyText.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        BlockListItems.Visibility = list.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        UpdateBlockListItemsLayout();
+
+        if (BlockListExpander.IsExpanded && BlockListItemsHost.ActualWidth > 0)
+        {
+            EnsureBlockListItemsVisuals();
+            BlockListItems.ItemsSource = list;
+            BlockListEmptyText.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            BlockListItems.Visibility = list.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            UpdateBlockListItemsLayout();
+        }
     }
 
     private void UpdateProcessItemsLayout()
     {
-        if (_visibleItemCount <= 0)
+        if (!ProcessListExpander.IsExpanded || _visibleItemCount <= 0)
             return;
 
         var hostWidth = ProcessItemsHost.ActualWidth;
@@ -1070,7 +1260,7 @@ public sealed partial class ProcessesPage : Page
 
     private void UpdateBlockListItemsLayout()
     {
-        if (_visibleBlockListCount <= 0)
+        if (!BlockListExpander.IsExpanded || _visibleBlockListCount <= 0)
             return;
 
         var hostWidth = BlockListItemsHost.ActualWidth;
@@ -1126,7 +1316,7 @@ public sealed partial class ProcessesPage : Page
 
     private void RefreshProcessItemsLayout()
     {
-        if (ProcessItems.Visibility != Visibility.Visible)
+        if (!CanForceProcessItemsLayout())
             return;
 
         ProcessItems.InvalidateMeasure();
@@ -1149,7 +1339,10 @@ public sealed partial class ProcessesPage : Page
     {
         await Task.Delay(ExpanderAnimationMs).ConfigureAwait(true);
 
-        if (ProcessItems.Visibility != Visibility.Visible)
+        if (ProcessItems.ItemsSource is null)
+            ApplyFilteredView();
+
+        if (!CanForceProcessItemsLayout())
             return;
 
         UpdateProcessItemsLayout();
@@ -1158,12 +1351,28 @@ public sealed partial class ProcessesPage : Page
         ProcessItems.UpdateLayout();
 
         await Task.Delay(1).ConfigureAwait(true);
+        if (!CanForceProcessItemsLayout())
+            return;
+
         UpdateProcessItemsLayout();
         ProcessItems.UpdateLayout();
     }
 
+    private bool CanForceProcessItemsLayout() =>
+        ProcessListExpander.IsExpanded
+        && ProcessItemsHost.ActualWidth > 0
+        && ProcessItems.Visibility == Visibility.Visible;
+
+    private bool CanForceBlockListItemsLayout() =>
+        BlockListExpander.IsExpanded
+        && BlockListItemsHost.ActualWidth > 0
+        && BlockListItems.Visibility == Visibility.Visible;
+
     private void ResetItemsViewBinding()
     {
+        if (!CanForceProcessItemsLayout())
+            return;
+
         var source = ProcessItems.ItemsSource;
         if (source is null)
             return;
@@ -1174,6 +1383,9 @@ public sealed partial class ProcessesPage : Page
 
     private void ResetBlockListItemsViewBinding()
     {
+        if (!CanForceBlockListItemsLayout())
+            return;
+
         var source = BlockListItems.ItemsSource;
         if (source is null)
             return;
@@ -1191,20 +1403,15 @@ public sealed partial class ProcessesPage : Page
     {
         await Task.Delay(1).ConfigureAwait(true);
 
-        if (ProcessItems.Visibility != Visibility.Visible)
+        if (!ProcessListExpander.IsExpanded || ProcessItems.Visibility != Visibility.Visible)
             return;
 
-        UpdateProcessItemsLayout();
-        ResetItemsViewBinding();
-        ProcessItems.UpdateLayout();
-
-        if (ProcessItemsHost.ActualWidth > 0)
-            return;
-
-        await Task.Delay(ExpanderAnimationMs).ConfigureAwait(true);
-
-        if (ProcessItems.Visibility != Visibility.Visible)
-            return;
+        if (ProcessItemsHost.ActualWidth <= 0)
+        {
+            await Task.Delay(ExpanderAnimationMs).ConfigureAwait(true);
+            if (!CanForceProcessItemsLayout())
+                return;
+        }
 
         UpdateProcessItemsLayout();
         ResetItemsViewBinding();
@@ -1215,61 +1422,15 @@ public sealed partial class ProcessesPage : Page
     {
         var modeChanged = _viewMode != mode;
         _viewMode = mode;
-        ProcessItems.ItemTemplate = mode switch
-        {
-            ProcessViewMode.Tiles => (DataTemplate)Resources["ProcessGridTemplate"],
-            ProcessViewMode.Compact => (DataTemplate)Resources["ProcessCompactTemplate"],
-            _ => (DataTemplate)Resources["ProcessListTemplate"]
-        };
 
-        ProcessItems.Layout = mode switch
-        {
-            ProcessViewMode.Tiles => new UniformGridLayout
-            {
-                MaximumRowsOrColumns = MaxTileColumns,
-                MinColumnSpacing = TileGap,
-                MinRowSpacing = TileGap,
-                MinItemWidth = (float)GridTileWidth,
-                MinItemHeight = (float)GridTileWidth
-            },
-            ProcessViewMode.Compact => new UniformGridLayout
-            {
-                MaximumRowsOrColumns = MaxTileColumns,
-                MinColumnSpacing = TileGap,
-                MinRowSpacing = TileGap,
-                MinItemWidth = (float)CompactTileWidth,
-                MinItemHeight = 70
-            },
-            _ => new StackLayout { Orientation = Orientation.Vertical, Spacing = TileGap }
-        };
+        // Пока оба спойлера свёрнуты, Layout живого ItemsView не подменяем.
+        if (!ProcessListExpander.IsExpanded && !BlockListExpander.IsExpanded)
+            return;
 
-        BlockListItems.ItemTemplate = mode switch
-        {
-            ProcessViewMode.Tiles => (DataTemplate)Resources["BlockListGridTemplate"],
-            ProcessViewMode.Compact => (DataTemplate)Resources["BlockListCompactTemplate"],
-            _ => (DataTemplate)Resources["BlockListListTemplate"]
-        };
-
-        BlockListItems.Layout = mode switch
-        {
-            ProcessViewMode.Tiles => new UniformGridLayout
-            {
-                MaximumRowsOrColumns = MaxTileColumns,
-                MinColumnSpacing = TileGap,
-                MinRowSpacing = TileGap,
-                MinItemWidth = (float)GridTileWidth,
-                MinItemHeight = (float)GridTileWidth
-            },
-            ProcessViewMode.Compact => new UniformGridLayout
-            {
-                MaximumRowsOrColumns = MaxTileColumns,
-                MinColumnSpacing = TileGap,
-                MinRowSpacing = TileGap,
-                MinItemWidth = (float)CompactTileWidth,
-                MinItemHeight = 70
-            },
-            _ => new StackLayout { Orientation = Orientation.Vertical, Spacing = TileGap }
-        };
+        if (ProcessListExpander.IsExpanded)
+            EnsureProcessItemsVisuals();
+        if (BlockListExpander.IsExpanded)
+            EnsureBlockListItemsVisuals();
 
         UpdateProcessItemsLayout();
         UpdateBlockListItemsLayout();
@@ -1280,6 +1441,64 @@ public sealed partial class ProcessesPage : Page
         if (modeChanged && BlockListItems.ItemsSource is not null)
             ResetBlockListItemsViewBinding();
     }
+
+    private void EnsureProcessItemsVisuals()
+    {
+        if (_processVisualMode == _viewMode && ProcessItems.ItemTemplate is not null)
+            return;
+
+        ProcessItems.ItemTemplate = _viewMode switch
+        {
+            ProcessViewMode.Tiles => (DataTemplate)Resources["ProcessGridTemplate"],
+            ProcessViewMode.Compact => (DataTemplate)Resources["ProcessCompactTemplate"],
+            _ => (DataTemplate)Resources["ProcessListTemplate"]
+        };
+
+        // List уже задан в XAML. Подмена Layout у живого ItemsView — нативный краш.
+        if (_viewMode != ProcessViewMode.List || ProcessItems.Layout is not StackLayout)
+            ProcessItems.Layout = CreateItemsLayout(_viewMode);
+
+        _processVisualMode = _viewMode;
+    }
+
+    private void EnsureBlockListItemsVisuals()
+    {
+        if (_blockVisualMode == _viewMode && BlockListItems.ItemTemplate is not null)
+            return;
+
+        BlockListItems.ItemTemplate = _viewMode switch
+        {
+            ProcessViewMode.Tiles => (DataTemplate)Resources["BlockListGridTemplate"],
+            ProcessViewMode.Compact => (DataTemplate)Resources["BlockListCompactTemplate"],
+            _ => (DataTemplate)Resources["BlockListListTemplate"]
+        };
+
+        if (_viewMode != ProcessViewMode.List || BlockListItems.Layout is not StackLayout)
+            BlockListItems.Layout = CreateItemsLayout(_viewMode);
+
+        _blockVisualMode = _viewMode;
+    }
+
+    private static Layout CreateItemsLayout(ProcessViewMode mode) => mode switch
+    {
+        ProcessViewMode.Tiles => new UniformGridLayout
+        {
+            MaximumRowsOrColumns = MaxTileColumns,
+            MinColumnSpacing = TileGap,
+            MinRowSpacing = TileGap,
+            MinItemWidth = (float)GridTileWidth,
+            MinItemHeight = (float)GridTileWidth
+        },
+        ProcessViewMode.Compact => new UniformGridLayout
+        {
+            MaximumRowsOrColumns = MaxTileColumns,
+            MinColumnSpacing = TileGap,
+            MinRowSpacing = TileGap,
+            MinItemWidth = (float)CompactTileWidth,
+            MinItemHeight = 70
+        },
+        _ => new StackLayout { Orientation = Orientation.Vertical, Spacing = TileGap }
+    };
 
     private void SearchBox_OnTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
@@ -1790,8 +2009,12 @@ public sealed partial class ProcessesPage : Page
         {
             await Task.Delay(16).ConfigureAwait(true);
             ProcessListExpander.UpdateLayout();
-            ProcessItems.UpdateLayout();
-            ProcessItemsHost.UpdateLayout();
+            if (CanForceProcessItemsLayout())
+            {
+                ProcessItems.UpdateLayout();
+                ProcessItemsHost.UpdateLayout();
+            }
+
             scroll.UpdateLayout();
 
             if (repeater.TryGetElement(index) is FrameworkElement element)
@@ -1846,7 +2069,7 @@ public sealed partial class ProcessesPage : Page
         }
     }
 
-    private static void ScrollElementIntoPageView(ScrollViewer scroll, FrameworkElement element, bool animate)
+    private static void ScrollElementIntoPageView(ScrollViewer scroll, FrameworkElement element, bool animate, bool alignTop = false)
     {
         if (scroll.Content is not FrameworkElement contentRoot)
             return;
@@ -1855,7 +2078,9 @@ public sealed partial class ProcessesPage : Page
         {
             var topLeft = element.TransformToVisual(contentRoot).TransformPoint(new Point(0, 0));
             var elementHeight = Math.Max(element.ActualHeight, 1);
-            var targetOffset = topLeft.Y - (scroll.ViewportHeight - elementHeight) / 2;
+            var targetOffset = alignTop
+                ? topLeft.Y - 12
+                : topLeft.Y - (scroll.ViewportHeight - elementHeight) / 2;
             targetOffset = Math.Clamp(targetOffset, 0, Math.Max(0, scroll.ScrollableHeight));
             scroll.ChangeView(null, targetOffset, null, disableAnimation: !animate);
         }
@@ -1870,7 +2095,8 @@ public sealed partial class ProcessesPage : Page
         for (var i = 0; i < 4; i++)
         {
             await Task.Delay(16).ConfigureAwait(true);
-            ProcessItems.UpdateLayout();
+            if (CanForceProcessItemsLayout())
+                ProcessItems.UpdateLayout();
             PageShell.PageScrollViewer.UpdateLayout();
         }
     }
@@ -1891,7 +2117,8 @@ public sealed partial class ProcessesPage : Page
         entry.SetListHighlighted(true);
 
         await Task.Delay(1).ConfigureAwait(true);
-        BlockListItems.UpdateLayout();
+        if (CanForceBlockListItemsLayout())
+            BlockListItems.UpdateLayout();
 
         if (BlockListItems.ItemsSource is not IEnumerable<ProcessEntryModel> source)
             return;

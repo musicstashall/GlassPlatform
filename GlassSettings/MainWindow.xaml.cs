@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.InteropServices;
 using GlassSettings.Controls;
 using GlassSettings.Core.Dwm;
@@ -12,14 +13,17 @@ using GlassSettings.Pages.Dwm;
 using GlassSettings.Pages.Glass;
 using GlassSettings.Pages.Text;
 using GlassSettings.Services;
+using GlassSettings.Search;
 using GlassSettings.Strings;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI;
@@ -38,8 +42,6 @@ public sealed partial class MainWindow : Window
     private HomePage? _home;
     private string _currentTag = "home";
     private bool _suppressNav;
-    /// <summary>Только splash WarmAttach Processes↔Home: не ConsumeGreen до показа стартового green.</summary>
-    private bool _suppressHomeNavigatedFrom;
     private bool _initialNavDone;
     private bool _contentReady;
     /// <summary>После fade/MarkReady: shell принимает клики (до этого клики со splash не должны доезжать).</summary>
@@ -63,6 +65,7 @@ public sealed partial class MainWindow : Window
     private bool _closeInProgress;
     private bool _allowWindowClose;
     private bool _closeSubclassInstalled;
+    private DispatcherQueueTimer? _searchDebounceTimer;
     private Win32WindowSubclass.Proc? _closeSubclassProc;
     private IntPtr _closeSubclassFn;
     private static readonly UIntPtr CloseSubclassId = new(0x4753_434C); // GSCL
@@ -72,6 +75,11 @@ public sealed partial class MainWindow : Window
     /// <summary>GlassSettingsMsg::WM_GLASS_SETTINGS_ACTIVATE (WM_APP + 0xA03) — ShellExt / second instance.</summary>
     private const uint WmGlassSettingsActivate = 0x8000 + 0xA03;
     private const uint MsgfltAllow = 1;
+    private const int IdcArrow = 32512;
+    private const int IdcIBeam = 32513;
+    private static readonly PropertyInfo? ProtectedCursorProperty = typeof(UIElement).GetProperty(
+        "ProtectedCursor",
+        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
     private int _windowBusyDepth;
     private TaskCompletionSource<HostedDialogResult>? _hostedDialogTcs;
     private HostedDialogSnapshot? _hostedDialogParentSnapshot;
@@ -514,6 +522,13 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SearchBox.Loaded += (_, _) => ApplyTitleBarSearchCaret();
+        SearchBox.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
+        SearchBox.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
+        _searchDebounceTimer = DispatcherQueue.CreateTimer();
+        _searchDebounceTimer.Interval = TimeSpan.FromMilliseconds(1000);
+        _searchDebounceTimer.IsRepeating = false;
+        _searchDebounceTimer.Tick += SearchDebounceTimer_OnTick;
         ApplyEarlyWindowPlacement();
         ApplyStartupVisuals();
         Title = SingleInstance.WindowTitle;
@@ -617,6 +632,8 @@ public sealed partial class MainWindow : Window
     {
         StartGlassSettingsPreferencesWatcher();
         PlatformPresenceService.Instance.Attach(DispatcherQueue);
+        PlatformPresenceService.Instance.PresenceChanged -= OnSearchAvailabilityChanged;
+        PlatformPresenceService.Instance.PresenceChanged += OnSearchAvailabilityChanged;
         OpenGlassBorderPolicyCoordinator.AttachPresenceListener();
         SwcaDwmBackdropNoticeCoordinator.AttachPresenceListener();
         OpenGlassRootBackdropNoticeCoordinator.AttachPresenceListener();
@@ -1073,8 +1090,8 @@ public sealed partial class MainWindow : Window
         SyncNavigationUserCardLayout();
         // Prep строго под splash: loading chrome / hit-test off (SyncLoadingChrome ещё true).
         RunDeferredStartupTasks();
-        // WarmAttach до снятия overlay — иначе Processes «догоняет» после dismiss.
-        WarmAttachListPageIfReady();
+        // Keep master’s startup backup-open handoff. ProcessesPage is no longer
+        // pre-warmed here; its staged loading belongs to the search navigation flow.
         if (SettingsBackupOpenRequest.TryPeek(out var backupPath))
             OpenSettingsBackup(backupPath);
 
@@ -1885,6 +1902,12 @@ public sealed partial class MainWindow : Window
         _ = ChangeWindowMessageFilterEx(hwnd, WmGlassSettingsActivate, MsgfltAllow, IntPtr.Zero);
     }
 
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern IntPtr LoadCursor(IntPtr hInstance, int lpCursorName);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetCursor(IntPtr hCursor);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool ChangeWindowMessageFilterEx(
         IntPtr hwnd,
@@ -2258,6 +2281,83 @@ public sealed partial class MainWindow : Window
             NavigationPaneSearchHost);
         if (changed)
             RefreshTitleBarDragRegions();
+        ApplyTitleBarSearchCaret();
+    }
+
+    /// <summary>
+    /// Заголовок через SetTitleBar оставляет стрелку: над текстом поиска ставим каретку.
+    /// В панели навигации курсор не трогаем — его задаёт сам TextBox.
+    /// </summary>
+    private void ApplyTitleBarSearchCaret()
+    {
+        if (!IsSearchInTitleBar())
+            return;
+
+        SearchBox.ApplyTemplate();
+        var textBox = FindVisualChild<TextBox>(SearchBox);
+        if (textBox is null)
+            return;
+
+        SetProtectedCursor(textBox, InputSystemCursor.Create(InputSystemCursorShape.IBeam));
+    }
+
+    private void SearchBox_OnPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!IsSearchInTitleBar())
+            return;
+
+        SetWin32Cursor(IsInsideButton(e.OriginalSource as DependencyObject) ? IdcArrow : IdcIBeam);
+    }
+
+    private bool IsSearchInTitleBar() => ReferenceEquals(AppTitleBar.Content, SearchBox);
+
+    private static bool IsInsideButton(DependencyObject? source)
+    {
+        for (var node = source; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is AutoSuggestBox)
+                return false;
+            if (node is Button)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static void SetWin32Cursor(int cursorId)
+    {
+        var cursor = LoadCursor(IntPtr.Zero, cursorId);
+        if (cursor != IntPtr.Zero)
+            SetCursor(cursor);
+    }
+
+    private static void SetProtectedCursor(UIElement element, InputCursor? cursor)
+    {
+        try
+        {
+            ProtectedCursorProperty?.SetValue(element, cursor);
+        }
+        catch
+        {
+            // Каретку всё равно ставит SetCursor на PointerMoved.
+        }
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject root) where T : DependencyObject
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match)
+                return match;
+
+            var nested = FindVisualChild<T>(child);
+            if (nested is not null)
+                return nested;
+        }
+
+        return null;
     }
 
     private void RefreshTitleBarDragRegions()
@@ -2323,7 +2423,21 @@ public sealed partial class MainWindow : Window
         {
             ApplyOpenGlassNavVisibility();
             ApplyPlatformNavVisibility();
+            RefreshSearchSuggestionsIfOpen();
         });
+
+    private void OnSearchAvailabilityChanged(object? sender, EventArgs e) =>
+        DispatcherQueue.TryEnqueue(RefreshSearchSuggestionsIfOpen);
+
+    private void RefreshSearchSuggestionsIfOpen()
+    {
+        if (!SearchBox.IsSuggestionListOpen)
+            return;
+
+        var matches = SearchSettings(SearchBox.Text);
+        SearchBox.ItemsSource = matches;
+        SearchBox.IsSuggestionListOpen = matches.Count > 0;
+    }
 
     private void ApplyOpenGlassNavVisibility()
     {
@@ -2427,7 +2541,7 @@ public sealed partial class MainWindow : Window
     {
         var tag = e.Parameter as string ?? _currentTag;
         NoticeMirrorTrace.Write($"NavFrame_OnNavigated: tag={tag}, page={e.Content?.GetType().Name}");
-        if (!_suppressHomeNavigatedFrom && e.Content is not HomePage && _home is not null)
+        if (e.Content is not HomePage && _home is not null)
             _home.OnNavigatedFrom();
         NoticeViewportMirrorService.OnPageNavigated();
         WindowBusyOverlayService.ForceResetIfActive();
@@ -2515,38 +2629,12 @@ public sealed partial class MainWindow : Window
                     return;
                 if (NavFrame.Content is HomePage home)
                     home.RefreshWallpaperPreviewUnderSplash();
-                // До TryDismiss: прогреть Processes, пока виден acrylic splash.
-                WarmAttachListPageIfReady();
                 TryDismissLoadingOverlay();
             });
         }
         catch
         {
             /* dismiss best-effort */
-        }
-    }
-
-    /// <summary>Создаёт и наполняет ProcessesPage под заставкой — переход потом мгновенный.</summary>
-    private void WarmAttachListPageIfReady()
-    {
-        if (!ProcessIconResolver.IsPreloadComplete)
-        {
-            return;
-        }
-
-        _suppressHomeNavigatedFrom = true;
-        try
-        {
-            NavFrame.Navigate(typeof(ProcessesPage), "attach", new SuppressNavigationTransitionInfo());
-            if (string.Equals(_currentTag, "home", StringComparison.Ordinal))
-            {
-                NavFrame.Navigate(typeof(HomePage), "home", new SuppressNavigationTransitionInfo());
-            }
-        }
-        catch { /* ignore */ }
-        finally
-        {
-            _suppressHomeNavigatedFrom = false;
         }
     }
 
@@ -2704,11 +2792,12 @@ public sealed partial class MainWindow : Window
     }
 
     private string? _textScrollSectionOverride;
+    private string? _attachSearchAnchor;
 
     /// <param name="scrollSection">
     /// Опционально — id секции на <see cref="TextAndFontsPage"/> (см. <see cref="TextPageNavIds"/>).
     /// </param>
-    internal void NavigateToTextPage(string? scrollSection = null)
+    internal void NavigateToTextPage(string? scrollSection = null, NavigationTransitionInfo? transition = null)
     {
         // Уже на корне «Текст и шрифты» — не пересоздаём страницу, только скролл.
         try
@@ -2732,7 +2821,7 @@ public sealed partial class MainWindow : Window
         }
 
         _textScrollSectionOverride = scrollSection;
-        NavigateTo("text", force: true);
+        NavigateTo("text", force: true, transition);
         _textScrollSectionOverride = null;
         SelectNavItem("text");
     }
@@ -2883,7 +2972,7 @@ public sealed partial class MainWindow : Window
         UpdateBackButton();
     }
 
-    private void NavigateTo(string tag, bool force = false)
+    private void NavigateTo(string tag, bool force = false, NavigationTransitionInfo? transition = null)
     {
 
         if (string.Equals(tag, "dwm", StringComparison.Ordinal) && !IsDwmNavAvailable())
@@ -2914,6 +3003,8 @@ public sealed partial class MainWindow : Window
             _nav.CurrentSidebarTag = tag;
             if (frameContent is HomePage hp)
                 hp.OnNavigatedTo();
+            if (frameContent is ProcessesPage processes && ProcessesSearchAnchors.IsKnown(_attachSearchAnchor))
+                processes.RevealSearchAnchor(_attachSearchAnchor!);
             UpdateBackButton();
             return;
         }
@@ -2928,7 +3019,7 @@ public sealed partial class MainWindow : Window
 
         var rootParam = RootParameterForTag(tag);
         var rootTitle = NavTitleForTag(tag);
-        _nav.NavigateToRoot(rootPageType, rootParam, rootTitle);
+        _nav.NavigateToRoot(rootPageType, rootParam, rootTitle, transition);
         UpdateBackButton();
     }
 
@@ -2941,6 +3032,12 @@ public sealed partial class MainWindow : Window
             && !string.IsNullOrEmpty(_textScrollSectionOverride))
         {
             return _textScrollSectionOverride;
+        }
+
+        if (string.Equals(tag, "attach", StringComparison.Ordinal)
+            && ProcessesSearchAnchors.IsKnown(_attachSearchAnchor))
+        {
+            return _attachSearchAnchor;
         }
 
         return tag;
@@ -2975,42 +3072,256 @@ public sealed partial class MainWindow : Window
         _ => typeof(PlaceholderPage)
     };
 
+    private void SearchBox_OnTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput || _searchDebounceTimer is null)
+            return;
+
+        _searchDebounceTimer.Stop();
+        sender.IsSuggestionListOpen = false;
+        if (!string.IsNullOrWhiteSpace(sender.Text))
+            _searchDebounceTimer.Start();
+        else
+        {
+            sender.ItemsSource = Array.Empty<SettingsSearchSuggestion>();
+            sender.IsSuggestionListOpen = false;
+        }
+    }
+
+    private void SearchDebounceTimer_OnTick(DispatcherQueueTimer sender, object args)
+    {
+        _searchDebounceTimer?.Stop();
+        var query = SearchBox.Text;
+        var matches = SearchSettings(query);
+        SearchBox.ItemsSource = matches;
+        SearchBox.IsSuggestionListOpen = matches.Count > 0;
+    }
+
+    private IReadOnlyList<SettingsSearchSuggestion> SearchSettings(string? query)
+    {
+        var matches = SettingsSearchCatalog.Search(query);
+        var containsDwm = matches.Any(item => item.Destination.StartsWith("dwm", StringComparison.Ordinal));
+        var containsGlass = matches.Any(item => IsGlassSearchDestination(item.Destination));
+        var dwmAvailable = !containsDwm || IsDwmNavAvailable();
+        var glassAvailable = !containsGlass || IsGlassPlatformInstalledForUi();
+
+        return matches
+            .Where(item => item.Destination.StartsWith("dwm", StringComparison.Ordinal)
+                ? dwmAvailable
+                : !IsGlassSearchDestination(item.Destination) || glassAvailable)
+            .ToArray();
+    }
+
+    private static bool IsSearchDestinationAvailable(string destination)
+    {
+        if (destination.StartsWith("dwm", StringComparison.Ordinal))
+            return IsDwmNavAvailable();
+
+        return !IsGlassSearchDestination(destination) || IsGlassPlatformInstalledForUi();
+    }
+
+    private static bool IsGlassSearchDestination(string destination) =>
+        destination is "glass" or "root-windows" or "popup" or "taskbar" or "adjacent";
+
+    private static bool IsGlassPlatformInstalledForUi()
+    {
+        try
+        {
+            if (GlassPlatformNames.ShowDualGlassPlatformUi)
+            {
+                return GlassModulePath.IsPlatformInstalled(GlassPlatformArch.X64)
+                       || GlassModulePath.IsPlatformInstalled(GlassPlatformArch.X86);
+            }
+
+            return GlassModulePath.IsPlatformInstalled(GlassPlatformNames.NativeArch);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private void SearchBox_OnQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
     {
-        if (string.IsNullOrWhiteSpace(args.QueryText)) return;
-        var q = args.QueryText.Trim();
-        if (q.Contains("dwm", StringComparison.OrdinalIgnoreCase) ||
-            q.Contains("colorization", StringComparison.OrdinalIgnoreCase) ||
-            q.Contains("open glass", StringComparison.OrdinalIgnoreCase) ||
-            q.Contains("openglass", StringComparison.OrdinalIgnoreCase))
+        _searchDebounceTimer?.Stop();
+        var suggestion = args.ChosenSuggestion as SettingsSearchSuggestion
+                         ?? SearchSettings(args.QueryText).FirstOrDefault();
+        if (suggestion is null)
+            return;
+
+        var destination = suggestion.Destination;
+        var anchor = suggestion.Anchor;
+        var query = args.QueryText;
+
+        // Подписка до закрытия: IsSuggestionListOpen=false сразу гасит IsOpen,
+        // и Closed уже не поймать, если подписаться после.
+        var popup = FindVisualChild<Popup>(sender);
+        var completed = false;
+        void Complete()
         {
-            if (IsDwmNavAvailable())
+            if (completed)
+                return;
+
+            completed = true;
+            _ = DispatcherQueue.TryEnqueue(() => FinishSearchNavigation(sender, destination, query, anchor));
+        }
+
+        void OnClosed(object? _, object __)
+        {
+            if (popup is not null)
+                popup.Closed -= OnClosed;
+            Complete();
+        }
+
+        if (popup is not null)
+            popup.Closed += OnClosed;
+
+        sender.IsSuggestionListOpen = false;
+
+        if (popup is null || !popup.IsOpen)
+        {
+            if (popup is not null)
+                popup.Closed -= OnClosed;
+            Complete();
+        }
+    }
+
+    private void FinishSearchNavigation(AutoSuggestBox sender, string destination, string? query, string? anchor)
+    {
+        try
+        {
+            if (!IsSearchDestinationAvailable(destination))
             {
-                NavigateTo("dwm", force: true);
-                SelectNavItem("dwm");
+                var refreshedMatches = SearchSettings(query);
+                sender.ItemsSource = refreshedMatches;
+                sender.IsSuggestionListOpen = refreshedMatches.Count > 0;
+                return;
             }
+
+            NavigateToSearchDestination(destination, anchor);
+            _ = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+            {
+                sender.Text = string.Empty;
+                sender.ItemsSource = Array.Empty<SettingsSearchSuggestion>();
+            });
         }
-        else if (q.Contains("glass", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("popup", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("taskbar", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex)
         {
-            NavigateTo("glass", force: true);
-            SelectNavItem("glass");
+            System.Diagnostics.Debug.WriteLine($"GlassSettings search navigate: {ex}");
         }
-        else if (q.Contains("стил", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("theme", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("visual style", StringComparison.OrdinalIgnoreCase))
+    }
+
+    private void NavigateToSearchDestination(string destination, string? anchor = null)
+    {
+        if (!IsSearchDestinationAvailable(destination))
+            return;
+
+        switch (destination)
         {
-            NavigateTo("themes", force: true);
-            SelectNavItem("themes");
+            case "system":
+            case "dwm":
+            case "glass":
+            case "themes":
+                NavigateTo(destination, force: true);
+                SelectNavItem(destination);
+                return;
+            case "attach":
+                _attachSearchAnchor = anchor;
+                try
+                {
+                    NavigateTo(destination, force: true);
+                    SelectNavItem(destination);
+                }
+                finally
+                {
+                    _attachSearchAnchor = null;
+                }
+                return;
+            case "text":
+                NavigateToTextPage();
+                return;
+            case "root-windows":
+                NavigateSearchDrill(
+                    "glass", typeof(GlassSettingsHubPage), "Breadcrumb_GlassSettings", null,
+                    typeof(RootWindowsPage), null, "Breadcrumb_RootSwca");
+                return;
+            case "popup":
+                NavigateSearchDrill(
+                    "glass", typeof(GlassSettingsHubPage), "Breadcrumb_GlassSettings", null,
+                    typeof(PopupHubPage), null, "Breadcrumb_PopupWindows");
+                return;
+            case "taskbar":
+                NavigateSearchDrill(
+                    "glass", typeof(GlassSettingsHubPage), "Breadcrumb_GlassSettings", null,
+                    typeof(TaskbarFlyoutPage), null, "Breadcrumb_Taskbar");
+                return;
+            case "adjacent":
+                NavigateSearchDrill(
+                    "glass", typeof(GlassSettingsHubPage), "Breadcrumb_GlassSettings", null,
+                    typeof(TaskbarAdjacentWindowsPage), null, "Breadcrumb_AdjacentWindows");
+                return;
+            case "dwm-colorization":
+                NavigateDwmSearchDrill(typeof(DwmColorizationDetailPage), DwmRouteIds.Colorization, "Breadcrumb_Colorization");
+                return;
+            case "dwm-glass":
+                NavigateDwmSearchDrill(typeof(DwmGlassDetailPage), DwmRouteIds.Glass, "Breadcrumb_DwmGlass");
+                return;
+            case "dwm-theme":
+                NavigateDwmSearchDrill(typeof(DwmThemeDetailPage), DwmRouteIds.Theme, "Breadcrumb_DwmTheme");
+                return;
+            case "themes-colors":
+                NavigateSearchDrill(
+                    "themes", typeof(VisualStylesPage), "NavThemes", null,
+                    typeof(ThemesColorsPage), null, "Breadcrumb_ThemesColors");
+                return;
+            case "themes-background":
+                NavigateSearchDrill(
+                    "themes", typeof(VisualStylesPage), "NavThemes", null,
+                    typeof(ThemesDesktopBackgroundPage), null, "Breadcrumb_ThemesDesktopBackground");
+                return;
         }
-        else if (q.Contains("process", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("attach", StringComparison.OrdinalIgnoreCase) ||
-                 q.Contains("процесс", StringComparison.OrdinalIgnoreCase))
-        {
-            NavigateTo("attach", force: true);
-            SelectNavItem("attach");
-        }
+    }
+
+    private void NavigateDwmSearchDrill(Type detailPageType, string routeId, string breadcrumbKey)
+    {
+        if (!IsDwmNavAvailable())
+            return;
+
+        var hive = DwmRegistryHive.Hkcu;
+        NavigateSearchDrill(
+            "dwm",
+            typeof(DwmSettingsHubPage),
+            "Breadcrumb_DwmSettings",
+            DwmNavigationContext.ForHub(hive),
+            detailPageType,
+            DwmNavigationContext.ForDetail(hive, routeId),
+            breadcrumbKey);
+    }
+
+    private void NavigateSearchDrill(
+        string sidebarTag,
+        Type hubPageType,
+        string hubTitleKey,
+        object? hubParameter,
+        Type detailPageType,
+        object? detailParameter,
+        string detailTitleKey)
+    {
+        if (!_navItems.ContainsKey(sidebarTag))
+            return;
+
+        _nav.RememberForBack(_currentTag);
+        _currentTag = sidebarTag;
+        _nav.CurrentSidebarTag = sidebarTag;
+        SelectNavItem(sidebarTag);
+        _nav.NavigateHomeDrill(
+            hubPageType,
+            GlassSettingsResources.Get(hubTitleKey),
+            hubParameter,
+            detailPageType,
+            detailParameter,
+            GlassSettingsResources.Get(detailTitleKey));
+        UpdateBackButton();
     }
 
     private void HookTitleBarTheme()

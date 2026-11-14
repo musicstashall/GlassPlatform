@@ -49,7 +49,19 @@
                         VerticalAlignment="Center"
                         PlaceholderText=""
                         QueryIcon="Find"
-                        QuerySubmitted="SearchBox_OnQuerySubmitted" />
+                        TitleBar.IsDragRegion="False"
+                        UpdateTextOnSelect="False"
+                        TextMemberPath="DisplayText"
+                        TextChanged="SearchBox_OnTextChanged"
+                        QuerySubmitted="SearchBox_OnQuerySubmitted">
+                        <AutoSuggestBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock
+                                    Text="{Binding DisplayText}"
+                                    TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </AutoSuggestBox.ItemTemplate>
+                    </AutoSuggestBox>
                 </TitleBar.Content>
             </TitleBar>
             <NavigationView
