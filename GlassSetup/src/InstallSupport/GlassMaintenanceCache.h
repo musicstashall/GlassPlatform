@@ -439,12 +439,23 @@ inline bool GarbageCollect() {
 }
 inline bool CollectAfterRemoval() {
     CacheLock lock;if(!lock.acquired)return false;
-    if(GlassMaintenanceReboot::Pinned())return true;
-    const bool retained=GarbageCollect();
-    const auto current=Root()+L"\\Current";
-    const bool collected=GetFileAttributesW(current.c_str())==INVALID_FILE_ATTRIBUTES||CollectSourceFolder(current);
-    return retained&&collected;
+    const auto root=Root();
+    if(!TrustedDirectory(root))return false;
+    bool ok=true;
+    // Pending reboot pins recovery snapshots/controllers, not source MSI files
+    // whose registrations are confirmed absent in every context/SID.
+    for(const auto* name:{L"Current",L"Retained",L"Previous",L"Staging"}) {
+        const auto folder=root+L"\\"+name;
+        if(GetFileAttributesW(folder.c_str())==INVALID_FILE_ATTRIBUTES) {
+            const auto error=GetLastError();
+            if(error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)ok=false;
+            continue;
+        }
+        if(!CollectSourceFolder(folder))ok=false;
+    }
+    return ok;
 }
+
 struct Blob {
     UINT id;const wchar_t* file;const wchar_t* source=nullptr;
     // Only the acquisition adapter can assert this after signature/manifest

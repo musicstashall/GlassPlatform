@@ -22,8 +22,9 @@ using LPVOID=void*;using DWORD=unsigned;
 constexpr int LANG_RUSSIAN=25,ERROR_INSTALL_FAILURE=1603;
 int GetUserDefaultUILanguage(){return 0;}
 namespace GlassInstallUtil{bool IsOs64Bit(){return true;}}
+namespace GlassMaintenanceCache{unsigned collections=0;bool CollectAfterRemoval(){++collections;return true;}}
 namespace GlassInstallRollback {struct SessionState{std::wstring workspaceDir=L"snapshot";};void CleanupSnapshot(SessionState& s){s.workspaceDir.clear();}}
-namespace InstallLog{template<class... Args>void LineFormat(const wchar_t*,Args...) {}}
+namespace InstallLog{void Line(const wchar_t*){} template<class... Args>void LineFormat(const wchar_t*,Args...) {}}
 bool prep=true,glass=true,vendor=true,resourcesPrep=true,resourcesCommit=true;bool expectedRemoval=false;unsigned preparations=0,glassRuns=0,vendorRuns=0,standalone=0,cleanups=0;std::string order;
 bool RemoveDirectoryTree(const std::wstring&){++cleanups;order+="cleanup;";return true;}
 struct InstallEngine{
@@ -49,7 +50,7 @@ struct InstallEngine{
  static DWORD WINAPI WorkerThread(LPVOID p) noexcept;
 };
 // WRAPPER
-void reset(){expectedRemoval=false;prep=glass=vendor=resourcesPrep=resourcesCommit=true;preparations=glassRuns=vendorRuns=standalone=cleanups=0;order.clear();}
+void reset(){GlassMaintenanceCache::collections=0;expectedRemoval=false;prep=glass=vendor=resourcesPrep=resourcesCommit=true;preparations=glassRuns=vendorRuns=standalone=cleanups=0;order.clear();}
 int main(){
  reset();InstallEngine ok;ok.selection_.platform32=false;ok.selection_.glassSettings=false;
  InstallEngine::WorkerThread(&ok);assert(ok.succeeded_&&ok.finished_&&!ok.launchingPhase_&&ok.selection_.openGlass&&order=="prepare;glass;vendor;cleanup;");
@@ -84,7 +85,7 @@ int main(){
   e.selection_.platform64=e.selection_.platform32=e.selection_.glassSettings=e.selection_.openGlass=false;
   e.selection_.removeMask=mask;e.procedureMask_=mask;
   InstallEngine::WorkerThread(&e);
-  assert(e.succeeded_&&e.selection_.removeMask==mask);
+  assert(e.succeeded_&&e.selection_.removeMask==mask);assert(GlassMaintenanceCache::collections==1);
   if((mask&8)&&(mask&~8u))assert(glassRuns==1&&vendorRuns==1&&order=="prepare;glass;vendor;cleanup;");
   if(!(mask&8))assert(vendorRuns==0&&glassRuns==1); // Resources-only never invokes/removes OG.
  }

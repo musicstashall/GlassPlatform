@@ -35,7 +35,7 @@ for(const locale of ['ru','en']){
  assert.equal(d.querySelector('#product-settings64').checked,false);
  assert.equal(d.querySelector('#components-plan-items li[data-product="settings64"]'),null);
  const failed=jobs.map(j=>({...j,phase:'error',error:'HTTP 404'}));send({downloads:failed});
- const retry=d.querySelector('#components-installed-grid .download-retry');assert.ok(retry);assert.equal(retry.textContent,'');assert.equal(retry.getAttribute('aria-label'),locale==='ru'?'Повторить загрузку':'Retry download');assert.ok(retry.parentElement.classList.contains('c-card'));assert.match(retry.title,/HTTP 404/);assert.match(css,/download-retry\{position:absolute;left:50%;top:50%/);assert.match(css,/download-retry::before/);assert.match(css,/download-retry:hover/);assert.equal(d.querySelectorAll('.product-transfer.is-transferring').length,0);retry.click();assert.match(messages.at(-1),/^download-retry:/);
+ const retry=d.querySelector('#components-installed-grid .download-retry');assert.ok(retry);assert.equal(retry.textContent,'');assert.equal(retry.getAttribute('aria-label'),locale==='ru'?'Повторить загрузку':'Retry download');assert.ok(retry.parentElement.classList.contains('c-card'));assert.match(retry.dataset.tooltip,/HTTP 404/);assert.match(css,/download-retry\{position:absolute;left:50%;top:50%/);assert.match(css,/download-retry::before/);assert.match(css,/download-retry:hover/);assert.equal(d.querySelectorAll('.product-transfer.is-transferring').length,0);retry.click();assert.match(messages.at(-1),/^download-retry:/);
  send({downloads:jobs.map(j=>({...j,phase:'verifying',bytes:j.total}))});
  assert.equal(d.querySelectorAll('.download-retry').length,0);
  assert.equal(d.querySelectorAll('.product-transfer.is-transferring').length,0);

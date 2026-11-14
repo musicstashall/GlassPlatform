@@ -129,6 +129,15 @@ bool Ends(const std::wstring& text,const wchar_t* suffix) {
     const std::wstring ending(suffix);return text.size()>=ending.size()&&text.compare(text.size()-ending.size(),ending.size(),ending)==0;
 }
 }
+bool DescribeLocal(std::wstring& version,std::wstring& path) noexcept {
+    version.clear();path.clear();
+    try {
+        if(GlassSetupSourceLayout::directory.empty())return false;
+        const auto candidate=GlassSetupSourceLayout::directory+L"\\OpenGlassSetup.Signed.exe";
+        File file;Pin(file,candidate);(void)VerifyPublisher(candidate,file.h);
+        version=SetupFileVersion(candidate);path=candidate;return !version.empty();
+    }catch(...){version.clear();path.clear();return false;}
+}
 bool Describe(const std::atomic<bool>& cancel,std::wstring& version,std::uint64_t& size,std::wstring& error) noexcept {
     version.clear();size=0;error.clear();
     try {

@@ -15,7 +15,11 @@ receive({data:{type:'state',locale:'ru',page:'components',maintenance:true,compo
 assert.match(d.querySelector('#components-title').textContent,/Продукты/);
 assert.equal(d.querySelectorAll('#components-panel .c-card input.comp-check').length,6);
 assert.equal(dom.window.getComputedStyle(d.querySelector('#components-grid')).display,'flex');
-assert.equal(dom.window.getComputedStyle(d.querySelector('#components-panel .components-list')).height,'330px');
+assert.equal(dom.window.getComputedStyle(d.querySelector('#components-panel .components-list')).height,'316px');
+for(const selector of ['.c-slot-left','.c-slot-right','.c-lane.installed']){
+ assert.equal(dom.window.getComputedStyle(d.querySelector(selector)).top,'170px');
+ assert.equal(dom.window.getComputedStyle(d.querySelector(selector)).height,'358px');
+}
 assert.equal(d.querySelectorAll('.c-card:not([data-catalog-alias]) .comp-version-line').length,6);
 assert.equal(d.querySelectorAll('#components-panel .c-card:not([data-catalog-alias]).is-checked').length,1);
 assert.equal(d.querySelector('#product-settings64').checked,true);
@@ -93,10 +97,10 @@ for(const local of [true,false]){
 // English state must regenerate decision labels even when product metadata is unchanged.
 receive({data:{type:'state',locale:'en',page:'components',maintenance:false,components:rows}});
 assert.equal(d.querySelector('#components-title').textContent,'GlassPlatform products');
-assert.equal(d.querySelector('#product-settings64').closest('.comp-card').querySelector('.comp-decision').title,'Undo update');
+assert.equal(d.querySelector('#product-settings64').closest('.comp-card').querySelector('.comp-decision').dataset.tooltip,'Undo update');
 receive({data:{type:'state',appMode:'unins',page:'uninstall-select',components:rows}});
 assert.equal(d.querySelector('#components-title').textContent,'Remove products');
-assert.equal(d.querySelector('#product-settings64').closest('.comp-card').querySelector('.comp-decision').title,'Keep installed');
+assert.equal(d.querySelector('#product-settings64').closest('.comp-card').querySelector('.comp-decision').dataset.tooltip,'Keep installed');
 // Cancelling a planned row must use the same real checkbox IPC and move a fresh product back.
 receive({data:{type:'state',appMode:'setup',page:'components',components:rows.map(r=>({...r,checked:r.id==='settings32'}))}});
 const fresh=d.querySelector('#components-installed-grid #product-settings32');assert.ok(fresh);
@@ -123,7 +127,7 @@ const nativeRemove=sutRows.map(r=>({...r,checked:r.id==='secureUxTheme',operatio
 receive({data:{type:'state',components:nativeRemove}});
 sut=d.querySelector('#product-secureUxTheme');sutCard=sut.closest('.c-card');
 assert.equal(sut.dataset.intent,'remove');assert.ok(d.querySelector('#components-grid').contains(sutCard));assert.ok(sutCard.classList.contains('active'));
-assert.equal(sutCard.querySelector('.comp-decision').title,'Отменить удаление');
+assert.equal(sutCard.querySelector('.comp-decision').dataset.tooltip,'Отменить удаление');
 d.querySelector('#components-plan-items .plan-cancel').click();
 assert.equal(messages.at(-1),'component:secureUxTheme:0');assert.equal(sut.checked,false);
 assert.equal(sutCard.classList.contains('pending-remove'),false);
@@ -156,7 +160,7 @@ const installedCard=id=>d.querySelector('#product-'+id).closest('.c-card');
 const catalogueCard=id=>d.querySelector('#components-grid [data-product="'+id+'"]');
 assert.equal(catalogueCard('x64').querySelector('.c-chip'),null);
 assert.match(catalogueCard('x64').querySelector('.c-src').textContent,/локально —/);
-assert.equal(catalogueCard('x64').querySelector('.src-bit.remote'),null);
+assert.equal(catalogueCard('x64').querySelector('.src-bit.remote').textContent,'на сервере —');
 assert.ok(catalogueCard('x64').classList.contains('idle'));
 assert.match(catalogueCard('settings64').querySelector('.c-meta').textContent,/1.0.0.0 → 1.1.0.0/);
 assert.match(catalogueCard('settings64').querySelector('.src-bit.remote').textContent,/на сервере 1.1.0.0/);
@@ -177,11 +181,11 @@ assert.equal(catalogueCard('x64').hidden,true,'warning alone is not a product ac
 assert.equal(catalogueCard('settings32').hidden,true,'already in plan must leave Available/needed');
 assert.equal(installedCard('settings32').hidden,false,'pending install stays in Installed/needed');
 // Labels are action-specific C labels, not a generic Keep/Skip/Undo toggle.
-assert.equal(installedCard('settings64').querySelector('.comp-decision').title,'Обновить до 1.1.0.0');
-assert.equal(installedCard('secureUxTheme').querySelector('.comp-decision').title,'Отменить переустановку');
-assert.equal(installedCard('settings32').querySelector('.comp-decision').title,'Удалить');
+assert.equal(installedCard('settings64').querySelector('.comp-decision').dataset.tooltip,'Обновить до 1.1.0.0');
+assert.equal(installedCard('secureUxTheme').querySelector('.comp-decision').dataset.tooltip,'Отменить переустановку');
+assert.equal(installedCard('settings32').querySelector('.comp-decision').dataset.tooltip,'Удалить');
 assert.ok(installedCard('settings32').querySelector('.comp-decision').classList.contains('danger'));
-assert.equal(catalogueCard('settings32').querySelector('.comp-decision').title,'Установить GlassSettings x86');
+assert.equal(catalogueCard('settings32').querySelector('.comp-decision').dataset.tooltip,'Установить GlassSettings x86');
 assert.equal(catalogueCard('settings32').querySelector('.comp-decision').classList.contains('danger'),false);
 assert.equal(d.querySelector('#installed-title').textContent,'Установлено');
 const cardName=catalogueCard('settings32').querySelector('.comp-name');
@@ -248,7 +252,7 @@ for(let i=0;i<5;i++){
 assert.match(d.querySelector('[data-catalog-alias="openglass"] .c-src').textContent,/local 2\.0\.0/);
 assert.match(d.querySelector('[data-catalog-alias="openglass"] .c-src').textContent,/on server 3\.0\.2\.3749/);
 assert.ok(d.querySelector('#product-x64').closest('.c-card').classList.contains('is-broken'));
-assert.equal(d.querySelector('[data-catalog-alias="x64"] .comp-decision').title,'Update to 2.4.5');
+assert.equal(d.querySelector('[data-catalog-alias="x64"] .comp-decision').dataset.tooltip,'Update to 2.4.5');
 receive({data:{type:'state',components:[{...versions[2],installedPayloadVersion:'',targetPayloadVersion:'',installed:true,installedVersion:'99.0.0',installedPackageVersion:'',targetVersion:'',applySupported:false}]}});
 assert.equal(d.querySelector('#product-settings64').closest('.c-card').querySelector('.c-meta').textContent,'—');
 receive({data:{type:'state',components:[{...versions[5],installed:false,installedVersion:'',installedPackageVersion:'',targetVersion:''}]}});
@@ -298,7 +302,7 @@ for(const lang of ['ru','en'])for(const installed of [false,true]){
  }
 }
 receive({data:{type:'state',locale:'ru',page:'components',components:[{id:'x64',title:'Platform',installed:false,targetVersion:'2.0.0',operation:'install',applySupported:true}]}});
-assert.equal(d.querySelector('#product-x64').closest('.c-card').querySelectorAll('.c-src .src-bit').length,0,'unknown origins are not invented from target version');
+assert.equal(d.querySelector('#product-x64').closest('.c-card').querySelectorAll('.c-src .src-bit').length,1,'unknown server origin is shown as an em dash');
 // Numeric ordering, ties and malformed versions have no lexicographic winners.
 for(const [remote,local,winner] of [['1.2.9','1.2.10','local'],['1.2.10','1.2.9','remote'],['1.2.3','1.2.3.0',''],['v2.0.0','1.0.0','']]){
  receive({data:{type:'state',components:[{id:'x64',title:'Platform',installed:false,targetVersion:'2.0.0',remoteVersion:remote,attachedPackageVersion:local,operation:'install',applySupported:true}]}});

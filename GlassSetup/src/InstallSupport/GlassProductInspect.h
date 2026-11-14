@@ -59,6 +59,7 @@ struct Report {
     ProductReport settings64,settings32;
     ProductReport secureUxTheme;
     GlassSecureUxPackage::Offer secureUxOffer;
+    std::wstring openGlassDiscoveryError,secureUxDiscoveryError;
     bool openGlassRetiredMsi = false, openGlassRetiredReceipt = false;
     ProductReport og;
     // Graphics MSI inventory is independent of upstream OG, its files/services.

@@ -6,6 +6,7 @@
 #include "GlassPackageAcquisition.h"
 #include "GlassPackageCatalog.h"
 #include "GlassOpenGlassRelease.h"
+#include "GlassOpenGlassPackage.h"
 #include "GlassReleaseClient.h"
 #include "GlassMaintenanceCache.h"
 #include <SecureUxThemeInventory.h>
@@ -636,7 +637,11 @@ Report Run(const Inputs& in)
             {std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::openGlassCatalogMutex);
              GlassSetupSourceLayout::openGlassCatalogText=text;}
             GlassInstallLog::LineFormat(L"OpenGlass upstream release: %s; local DLL: %s",report.og.remotePayloadVersion.c_str(),report.og.installedPayloadVersion.c_str());
-        }else GlassInstallLog::LineFormat(L"OpenGlass upstream release unavailable: %s",error.c_str());
+        }else {report.openGlassDiscoveryError=error;
+            if(GlassOpenGlassPackage::DescribeLocal(report.og.targetPayloadVersion,report.og.selectedPackagePath)) {
+                report.og.sourceVerified=true;report.og.attachedPayloadVersion=report.og.targetPayloadVersion;
+            }
+            GlassInstallLog::LineFormat(L"OpenGlass upstream release unavailable: %s",error.c_str());}
     }
     report.settings=report.settings64.installed?report.settings64:report.settings32;
     report.settings.damaged=report.settings64.damaged||report.settings32.damaged;
@@ -694,6 +699,7 @@ Report Run(const Inputs& in)
     if(in.inspectSources&&!cancel.load()) {
         std::wstring sutDiagnostic;
         GlassSecureUxPackage::Describe(cancel,report.secureUxOffer,sutDiagnostic);
+        report.secureUxDiscoveryError=sutDiagnostic;
         if(!sutDiagnostic.empty())GlassInstallLog::LineFormat(L"SecureUxTheme offer discovery: %s",sutDiagnostic.c_str());
     }
     report.ran = true;

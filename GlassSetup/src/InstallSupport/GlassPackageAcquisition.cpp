@@ -189,18 +189,23 @@ bool FetchCatalog(const std::atomic<bool>& cancel,GlassPackageCatalog::Catalog& 
     try {
         std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::catalogMutex);
         std::string text,error;
-        const bool reuse=GlassSetupSourceLayout::catalogInherited||GlassSetupSourceLayout::catalogChecked;
+        const bool reuse=!GlassSetupSourceLayout::catalogText.empty();
         if(reuse) {
             text=GlassSetupSourceLayout::catalogText;
-            if(text.empty())return Fail(diagnostic,L"Parent catalog check was unavailable; continuing offline without a duplicate request");
-        } else {
-            GlassSetupSourceLayout::catalogChecked=true;
+            if(GlassPackageCatalog::Parse(text,catalog,error)){diagnostic.clear();return true;}
             GlassSetupSourceLayout::catalogText.clear();
-            if(!GlassReleaseClient::Get(L"https://github.com/musicstashall/GlassPlatform/releases/latest/download/version.json",
-                INVALID_HANDLE_VALUE,&text,1024*1024,cancel,diagnostic))return false;
         }
+        // A failed parent check is not a usable source snapshot. The final
+        // controller gets one bounded recovery request; concurrent inspection
+        // shares its outcome under this mutex, with no repeat Setup handoff.
+        if(GlassSetupSourceLayout::catalogChecked)
+            return Fail(diagnostic,L"Release catalog unavailable after this process's check; local sources remain available");
+        GlassSetupSourceLayout::catalogChecked=true;
+        text.clear();
+        if(!GlassReleaseClient::Get(L"https://github.com/musicstashall/GlassPlatform/releases/latest/download/version.json",
+            INVALID_HANDLE_VALUE,&text,1024*1024,cancel,diagnostic))return false;
         if(!GlassPackageCatalog::Parse(text,catalog,error))return Fail(diagnostic,Wide(error));
-        if(!reuse)GlassSetupSourceLayout::catalogText=text;
+        GlassSetupSourceLayout::catalogText=text;
         diagnostic.clear();return true;
     }catch(...){return Fail(diagnostic,L"Cannot read release package catalog");}
 }

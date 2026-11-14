@@ -17,7 +17,7 @@ inline std::wstring Prepared(std::size_t i) {std::lock_guard<std::mutex> lock(pr
 inline void SetPrepared(std::size_t i,const std::wstring& path) {std::lock_guard<std::mutex> lock(preparedMutex);prepared.at(i)=path;}
 
 // Per-launch catalog snapshot, transported only by a validated controller parent.
-// Empty + inherited means the parent was offline; do not retry the same request.
+// Empty inherited snapshots allow one recovery request in the child process.
 inline std::string catalogText;
 inline bool catalogInherited=false;
 inline bool catalogChecked=false;

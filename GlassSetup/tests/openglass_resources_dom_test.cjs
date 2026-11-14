@@ -15,16 +15,16 @@ const send=(components,locale='ru',downloads=[])=>receive({data:{type:'state',ap
 const input=()=>d.getElementById('product-openglassResources');
 const available=()=>d.querySelector('#components-grid [data-product="openglassResources"]');
 for(const locale of ['ru','en']){
- const fresh=rows.map(row=>row.id==='openglassResources'?{...row,installed:false,operation:'install',applySupported:false,
+ const fresh=rows.map(row=>row.id==='openglassResources'?{...row,installed:false,operation:'install',applySupported:true,dependencyMissing:true,
   applyHint:locale==='ru'?'Сначала установите OpenGlass':'Install OpenGlass first'}:row);
  send(fresh,locale);
  assert.ok(available(),'catalogue must include the seventh card');
  assert.ok(available().querySelector('.comp-icon svg'),'graphics icon');
- assert.ok(available().textContent.includes(locale==='ru'?'Сначала':'Install OpenGlass'));
- assert.ok(available().querySelector('.comp-decision').disabled);
+ assert.equal(available().querySelector('.comp-resource-dependency'),null);
+ assert.equal(available().querySelector('.comp-decision').disabled,false);
  assert.equal(d.querySelectorAll('.product-transfer').length,0,'no downloads at selection/discovery');
  // Existing official OG + verified source permits the ordinary apply IPC.
- const ready=fresh.map(row=>row.id==='openglassResources'?{...row,applySupported:true}:row);
+ const ready=fresh.map(row=>row.id==='openglassResources'?{...row,applySupported:true,dependencyMissing:false}:row);
  send(ready,locale);available().querySelector('.comp-decision').click();
  assert.equal(messages.at(-1),'component:openglassResources:1');assert.ok(input().checked);
  assert.ok(input().closest('#components-installed-grid'));
@@ -33,8 +33,8 @@ for(const locale of ['ru','en']){
  d.querySelector('#components-plan-items li[data-product="openglassResources"] .plan-cancel').click();
  assert.equal(messages.at(-1),'component:openglassResources:0');
  // Fresh pair: prerequisite is explicit, not silently selected by Resources.
- const empty=rows.map(row=>row.id==='openglass'||row.id==='openglassResources'?{...row,installed:false,operation:'install',applySupported:row.id==='openglass'}:row);
- send(empty,locale);assert.ok(available().querySelector('.comp-decision').disabled);
+ const empty=rows.map(row=>row.id==='openglass'||row.id==='openglassResources'?{...row,installed:false,operation:'install',applySupported:true}:row);
+ send(empty,locale);assert.equal(available().querySelector('.comp-decision').disabled,false);
  d.querySelector('#components-grid [data-product="openglass"] .comp-decision').click();
  assert.equal(messages.at(-1),'component:openglass:1');
  send(empty.map(row=>row.id==='openglass'?{...row,checked:true}:row.id==='openglassResources'?{...row,applySupported:true}:row),locale);

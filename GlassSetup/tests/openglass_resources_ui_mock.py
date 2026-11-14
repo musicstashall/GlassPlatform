@@ -20,7 +20,7 @@ namespace GlassInstallUtil {bool IsOs64Bit(){return native64;}}
 enum class Page {Components,Certificate,Installing};
 struct UI {
  GlassProducts::Selection selection_;Page page_=Page::Components;
- bool resourcesPrerequisiteReady_=false,downloadContinuePending_=false,downloadsReady=false;
+ bool ogMetadataBlocked_=false,sutMetadataBlocked_=false,ogMetadataLocal_=false,sutMetadataLocal_=false;bool resourcesPrerequisiteReady_=false,downloadContinuePending_=false,downloadsReady=false;
  std::atomic<bool> inspectReady_{true};
  bool DownloadsReady() const {return downloadsReady;}
  // METHODS
@@ -43,6 +43,12 @@ int main(){
   ui.downloadContinuePending_=true;assert(!ui.ComponentsReady());
   ui.downloadsReady=true;assert(ui.ComponentsReady()==expected);
  }
+ // HTTP 403 metadata block never authorizes apply, but removal remains usable.
+ {UI gated;native64=true;gated.ogMetadataBlocked_=true;gated.selection_.openGlass=true;assert(!gated.ComponentsReady());
+  gated.ogMetadataLocal_=true;assert(gated.ComponentsReady());
+  gated.selection_.openGlass=false;gated.selection_.secureUxTheme=true;gated.sutMetadataBlocked_=true;assert(!gated.ComponentsReady());
+  gated.sutMetadataLocal_=true;assert(gated.ComponentsReady());
+  gated.selection_.secureUxTheme=false;gated.selection_.secureUxThemeRemove=true;assert(gated.ComponentsReady());}
  // SUT apply/removal may precede Resources and OG in the same plan.
  for(bool resources:{false,true})for(bool sutRemove:{false,true}){
   UI blocked;native64=true;auto& b=blocked.selection_;
@@ -70,6 +76,8 @@ assert '{L"openglassResources",6}' in s
 assert 'if(managedRow==6)selection_.openGlassResources=false' in s
 assert 'ShowWindow(componentResources_,nativeComponents && os64?SW_SHOWNA:SW_HIDE)' in s
 assert 'resourcesPrerequisiteReady_=os64&&inspect_.openGlassResourcesPrerequisite' in s
+assert "selection_.openGlassResources=message.back()==L'1'&&os64;" in s
+assert 'EnableWindow(componentResources_,os64);' in s
 assert 'for(std::size_t i=0;i<std::size(downloadIds);++i)' in s
 with tempfile.TemporaryDirectory(prefix='ResourcesUi-') as d:
  p=Path(d)/'test.cpp';exe=Path(d)/'test';p.write_text(code)

@@ -153,6 +153,26 @@ for(const locale of ['ru','en']){
  receive({data:{type:'state',locale,components:[{id:'openglass',title:'OpenGlass',installed:false,checked:false,applySupported:true,remotePayloadVersion:'3.0.2.3749',targetPayloadVersion:''}]}});
  assert.match(card('openglass').querySelector('.comp-version-line').textContent,/3\.0\.2\.3749/);
 }
+// Model browser scroll clamping during empty/short intermediate DOMs. jsdom
+// itself has no layout, so its default scrollTop would miss this regression.
+const catalogue=d.getElementById('components-grid');
+let availableTop=0;
+const maxAvailable=()=>Math.max(0,[...catalogue.querySelectorAll('.c-card')].filter(c=>!c.hidden).length*72-150);
+Object.defineProperty(availableList,'scrollTop',{configurable:true,
+ get(){availableTop=Math.min(availableTop,maxAvailable());return availableTop;},
+ set(value){availableTop=Math.max(0,Math.min(value,maxAvailable()));}});
+const catalogueRows=Array.from({length:9},(_,i)=>({id:'p'+i,title:'Product '+i,installed:false,checked:false,applySupported:true,operation:'install',targetVersion:'1.0.0'}));
+state(catalogueRows);availableList.scrollTop=280;
+// Immediate choice after drag, then native acknowledgement/rebuild.
+dom.window.commitComponentChoice(input('p7'),true);flush();
+assert.equal(availableList.scrollTop,280,'source catalogue stays at its pre-drop offset');
+state(catalogueRows.map(x=>({...x,checked:x.id==='p7'})));flush();
+assert.equal(availableList.scrollTop,280,'host acknowledgement must restore after aliases are recreated');
+// When catalogue consists of aliases, every sync temporarily removes all rows.
+state(catalogueRows.map(x=>({...x,checked:true})));availableList.scrollTop=280;
+dom.window.syncComponentShelves();assert.equal(availableList.scrollTop,280,'ordinary sync preserves offset across alias removal');
+state(catalogueRows.map(x=>({...x,checked:true,packageSize:1000})));assert.equal(availableList.scrollTop,280,'metadata refresh preserves offset');
+state(catalogueRows.slice(0,3));assert.equal(availableList.scrollTop,66,'shorter final list clamps to its new bottom');
 assert.deepEqual(errors,[]);
 dom.window.close();
 console.log('PASS: composition motion, cascade, shelf-only reveal, host acknowledgement, pop ownership/IPC and reduced motion');

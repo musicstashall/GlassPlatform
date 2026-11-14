@@ -429,7 +429,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .components-summary{position:absolute;left:60px;right:350px;top:174px;display:flex;justify-content:space-between;color:#aeb1ca;font-size:10px;line-height:14px;z-index:4}
 #components-panel .components-count,#components-count{color:#aeb1ca;font-size:10px;letter-spacing:0;font-weight:400}
 #components-panel .components-list{position:relative;inset:auto;height:330px;overflow-y:scroll;overflow-x:hidden;padding:18px 12px;background:transparent;mask-image:linear-gradient(180deg,transparent,#000 18px,#000 calc(100% - 18px),transparent);-webkit-mask-image:linear-gradient(180deg,transparent,#000 18px,#000 calc(100% - 18px),transparent);overscroll-behavior:contain}
-.c-slot{position:absolute;top:156px;height:372px;overflow:hidden;transition:width .34s cubic-bezier(.4,0,.2,1)}
+.c-slot{position:absolute;top:170px;height:358px;overflow:hidden;transition:width .34s cubic-bezier(.4,0,.2,1)}
 .c-slot-left{left:48px;width:302px}
 .c-slot-right{right:48px;width:268px}
 .c-slot-left.is-hidden,.c-slot-right.is-hidden{width:0}
@@ -437,7 +437,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .c-lip-left{left:48px;border-radius:0 10px 10px 0;transform:translateX(-5px);box-shadow:inset -1px 0 #ded5ff,inset -10px 0 22px -12px #c1b4ffb3,0 0 22px #c1b4ff33}
 .c-lip-right{right:48px;border-radius:10px 0 0 10px;transform:translateX(5px);box-shadow:inset 1px 0 #ded5ff,inset 10px 0 22px -12px #c1b4ffb3,0 0 22px #c1b4ff33}
 .c-edge.is-hot .c-lip{opacity:1;transform:none}
-.c-edge{position:absolute;top:156px;height:372px;width:56px;z-index:5}
+.c-edge{position:absolute;top:170px;height:358px;width:56px;z-index:5}
 .c-edge-left{left:0}
 .c-edge-right{right:0}
 .c-edge.is-off{pointer-events:none}
@@ -486,7 +486,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel.is-dragging .c-lane.is-source .c-veil{opacity:0;visibility:hidden}
 #components-panel.is-dragging,#components-panel.is-dragging *{cursor:grabbing!important}
 /* Approved concept C: shelf geometry and skins copied from the reference. */
-.c-lane{position:absolute;top:156px;width:302px;height:372px;border:1px solid #ffffff1f;border-radius:13px;background:linear-gradient(150deg,rgba(255,255,255,.07),rgba(255,255,255,0) 38%),linear-gradient(165deg,rgba(46,49,78,.52),rgba(20,22,40,.74));backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);box-shadow:inset 0 1px #ffffff1a,inset 0 0 0 1px #ffffff05,0 14px 34px #04050e4d;display:flex;flex-direction:column;overflow:hidden;transition:border-color .16s,background .16s}
+.c-lane{position:absolute;top:170px;width:302px;height:358px;border:1px solid #ffffff1f;border-radius:13px;background:linear-gradient(150deg,rgba(255,255,255,.07),rgba(255,255,255,0) 38%),linear-gradient(165deg,rgba(46,49,78,.52),rgba(20,22,40,.74));backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);box-shadow:inset 0 1px #ffffff1a,inset 0 0 0 1px #ffffff05,0 14px 34px #04050e4d;display:flex;flex-direction:column;overflow:hidden;transition:border-color .16s,background .16s}
 .c-lane{transition:border-color .16s,background .16s}
 .c-lane.available{top:0;right:0;left:auto;width:302px}
 .c-veil{position:absolute;top:26px;bottom:22px;left:0;right:0;z-index:7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:0 18px;border-radius:0;text-align:center;background:#0a0d1a3d;backdrop-filter:blur(5px) saturate(108%);-webkit-backdrop-filter:blur(5px) saturate(108%);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s,visibility .15s,background .15s,box-shadow .15s}
@@ -593,7 +593,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .is-dragging .c-drop{border-color:#c1b4ff99;background:#c1b4ff0d;color:#c1b4ff}
 .is-dragging .c-drop{border-color:#c1b4ff99;background:#c1b4ff0d;color:#c1b4ff}
 
-.c-plan{position:absolute;left:0;top:0;right:auto;width:268px;height:372px;padding:12px 13px;border:1px solid #ffffff21;border-radius:14px;background:linear-gradient(150deg,rgba(255,255,255,.08),rgba(255,255,255,0) 40%),linear-gradient(165deg,rgba(52,55,86,.56),rgba(19,21,38,.78));backdrop-filter:blur(22px) saturate(165%);-webkit-backdrop-filter:blur(22px) saturate(165%);box-shadow:inset 0 1px #ffffff1f,inset 0 0 0 1px #ffffff05,0 16px 36px #04050e52;display:flex;flex-direction:column;overflow:hidden;transition:border-color .2s,background .2s}
+.c-plan{position:absolute;left:0;top:0;right:auto;width:268px;height:358px;padding:12px 13px;border:1px solid #ffffff21;border-radius:14px;background:linear-gradient(150deg,rgba(255,255,255,.08),rgba(255,255,255,0) 40%),linear-gradient(165deg,rgba(52,55,86,.56),rgba(19,21,38,.78));backdrop-filter:blur(22px) saturate(165%);-webkit-backdrop-filter:blur(22px) saturate(165%);box-shadow:inset 0 1px #ffffff1f,inset 0 0 0 1px #ffffff05,0 16px 36px #04050e52;display:flex;flex-direction:column;overflow:hidden;transition:border-color .2s,background .2s}
 .c-plan.accent{border-color:#c1b4ff45}
 .c-plan.warn{border-color:#f4c46d66}
 .c-plan.warn .side-big b{color:#ffdf9d}
@@ -626,10 +626,10 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .components-banner{width:820px;opacity:.34;mask-image:linear-gradient(94deg,#0000 0%,#00000047 34%,#000 78%);-webkit-mask-image:linear-gradient(94deg,#0000 0%,#00000047 34%,#000 78%)}
 #components-panel .components-stack{left:0;top:0;width:1000px;height:540px;display:block;pointer-events:none}
 #components-panel .c-lane,#components-panel .c-slot{pointer-events:auto}
-#components-panel .c-slot{position:absolute;top:156px;height:372px;overflow:hidden}
+#components-panel .c-slot{position:absolute;top:170px;height:358px;overflow:hidden}
 #components-panel .c-slot-left{left:48px;width:302px}
 #components-panel .c-slot-right{right:48px;width:268px}
-#components-panel .components-list{position:relative;inset:auto;height:330px;padding:6px 10px;overflow-y:auto;mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),#0000);-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),#0000)}
+#components-panel .components-list{position:relative;inset:auto;height:316px;padding:6px 10px;overflow-y:auto;mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),#0000);-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),#0000)}
 #components-panel .components-grid{display:flex;flex-direction:column;gap:7px;grid-template-columns:none}
 /* Fill the usable list plane, retaining the lane's 6px/10px insets. */
 #components-panel .components-grid.is-empty{flex:1 1 auto;min-height:0}
@@ -662,7 +662,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .comp-decision:disabled{opacity:.4;cursor:default}
 #components-panel .comp-desc,#components-panel .comp-reason-line{display:none}
 #components-panel .components-summary{left:auto;right:62px;top:499px;width:240px;font-size:8px}
-#components-panel .components-plan{position:absolute;left:0;top:0;width:268px;height:372px;padding:12px 13px}
+#components-panel .components-plan{position:absolute;left:0;top:0;width:268px;height:358px;padding:12px 13px}
 #components-panel .components-plan h2{font-size:8px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#c1b4ff;margin:0 0 2px}
 #components-panel .components-plan-totals{display:flex;gap:12px;margin:0 0 7px;padding:0 0 7px;border-bottom:1px solid #ffffff0d}
 #components-panel .components-plan-total{font-size:8.8px;color:#a2a6bf;display:flex;gap:2px;min-width:0;flex-direction:column}
@@ -809,8 +809,12 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 @keyframes c-crt-off{0%{opacity:.45;transform:scale(1,1)}55%{opacity:.9;transform:scale(1,.025)}80%{opacity:1;transform:scale(.018,.025)}100%{opacity:0;transform:scale(0,0)}}
 @media(prefers-reduced-motion:reduce){.c-landing{animation:none}.c-removal-slot{display:none}}
 /* Known upstream compatibility risk, distinct from installed-payload corruption. */
-#components-panel .c-card.compatibility-risk,#components-panel .c-card.compatibility-risk:hover{border-color:#f18383;background:linear-gradient(130deg,#5b272f,#321d2a);box-shadow:inset 0 1px #ffffff0a}
-#components-panel .c-card.compatibility-risk .comp-warning-button{color:#ffb1a7}
+#components-panel .c-card.compatibility-risk,#components-panel .c-card.compatibility-risk:hover{opacity:1;border-color:#f18383;background:linear-gradient(130deg,#5b272f,#321d2a);box-shadow:inset 0 1px #ffffff0a}
+#components-panel .c-card.compatibility-risk .comp-warning-button{color:#ff6b6b}
+.metadata-error-label{position:absolute;left:8px;right:8px;top:50%;transform:translateY(-50%);text-align:center;font-size:10px;color:#f5ccd0;pointer-events:none;white-space:nowrap}
+#components-panel .c-card:has(.metadata-error-label) .c-meta{visibility:hidden}
+.acrylic-tooltip{position:fixed;z-index:10000;max-width:260px;padding:7px 10px;border:1px solid #d3c8ff45;border-radius:8px;background:#24273bd9;backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);box-shadow:0 8px 24px #0005,inset 0 1px #ffffff14;color:#f0edf9;font-size:11px;line-height:1.4;pointer-events:none;white-space:normal}
+.acrylic-tooltip[hidden]{display:none}
 </style></head>
 <body><main id="viewport"><div id="stage" data-mode="loading" role="region" aria-roledescription="carousel" aria-label="GlassPlatform">
 <div class="ambient slideshow-only"></div>
@@ -994,7 +998,7 @@ function parseHoldReport(value){return String(value||'').split(/\r\n?|\n/).map(l
 function renderHolderReport(processMode){const panel=document.getElementById('unlock-holders'),heading=document.getElementById('unlock-holders-title'),list=document.getElementById('unlock-holder-list');if(!panel||!heading||!list)return;const isUnlockMode=mode==='unlock-modules'||mode==='unlock-processes',records=parseHoldReport(hostState.holdReport);panel.hidden=!isUnlockMode||hostState.unlockActive===true||records.length===0;document.getElementById('unlock-holder-shade').hidden=panel.hidden;list.replaceChildren();if(panel.hidden)return;heading.textContent=processMode?uiResources[locale].unlockHoldersTitle:uiResources[locale].forceHoldersTitle;for(const record of records){const item=document.createElement('li');if(record.more){item.className='unlock-holder-more';item.textContent=locale==='ru'?'И другие процессы…':'Additional holders…';}else if(record.raw){item.className='unlock-holder-raw';item.textContent=record.raw;}else{item.className='unlock-holder';const meta=document.createElement('div');meta.className='unlock-holder-meta';const process=document.createElement('span');process.className='unlock-holder-process';process.textContent=record.process;const pid=document.createElement('span');pid.className='unlock-holder-pid';pid.textContent=record.pid?`PID ${record.pid}`:'';const modules=document.createElement('span');modules.className='unlock-holder-modules';modules.textContent=record.modules||'—';meta.append(process,pid);item.append(meta,modules);}list.append(item);}}
 function componentLock(title){
  const lock=document.createElement('span');
- lock.className='comp-lock';lock.title=String(title);lock.setAttribute('role','img');lock.setAttribute('aria-label',String(title));
+ lock.className='comp-lock';lock.dataset.tooltip=String(title);lock.setAttribute('role','img');lock.setAttribute('aria-label',String(title));
  // Fixed inline vector: keep the lock visible and multicoloured even when emoji fonts are absent.
  lock.innerHTML='<svg viewBox="0 0 24 26" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3" fill="none" stroke="#a7dfff" stroke-width="2.8" stroke-linecap="round"/><rect x="4" y="10" width="16" height="13" rx="3" fill="#efb94f" stroke="#ffe2a3" stroke-width="1.2"/><path d="M7 12h10" fill="none" stroke="#fff1bd" stroke-width="1" stroke-linecap="round" opacity=".8"/><circle cx="12" cy="16" r="1.5" fill="#573c38"/><path d="M12 17.2v2.2" stroke="#573c38" stroke-width="1.5" stroke-linecap="round"/></svg>';
  return lock;
@@ -1127,11 +1131,11 @@ function applyComponentPanels(){
   const peek=edge.querySelector('button');peek.classList.toggle('is-off',visible);
   const title=name==='available'?(locale==='ru'?'Доступно':'Available'):(locale==='ru'?'План':'Plan');
   peek.setAttribute('aria-label',(locale==='ru'?'Показать панель: ':'Show panel: ')+title);
-  peek.title=locale==='ru'?'Нажмите или задержите указатель у края на 2 секунды':'Click or hover at the edge for 2 seconds';
+  peek.dataset.tooltip=locale==='ru'?'Нажмите или задержите указатель у края на 2 секунды':'Click or hover at the edge for 2 seconds';
   const pin=panel.querySelector('[data-component-pin="'+name+'"]'),on=componentSides.pinned[name];
   pin.classList.toggle('is-on',on);pin.setAttribute('aria-pressed',String(on));
   pin.setAttribute('aria-label',(on?(locale==='ru'?'Открепить: ':'Unpin: '):(locale==='ru'?'Закрепить: ':'Pin: '))+title);
-  pin.title=on?(locale==='ru'?'Открепить панель':'Unpin panel'):(locale==='ru'?'Закрепить панель':'Pin panel');
+  pin.dataset.tooltip=on?(locale==='ru'?'Открепить панель':'Unpin panel'):(locale==='ru'?'Закрепить панель':'Pin panel');
  }
  lane.classList.toggle('is-wide-left',!a);lane.classList.toggle('is-wide-right',a&&!p);
  lane.classList.toggle('is-a-edge',!a&&componentEdge('available').classList.contains('is-hot'));
@@ -1189,6 +1193,7 @@ function componentDropText(drag,lane){
  const item=(hostState.components||[]).find(item=>item.id===drag.id);
  if(value===null){
   if(lane===drag.source)return ru?'Исходная панель — без изменений':'Original shelf — no changes';
+  if(lane==='installed'&&item?.metadataBlocked&&!item.metadataLocalAvailable)return metadataBlockText(item);
   if(lane==='installed')return hostState.componentsLoading?(ru?'Проверяются источники установки…':'Checking installation sources…'):(item?.applyHint||(ru?'Нет подходящего источника установки. Откройте сведения о продукте и проверьте журнал Setup.':'No eligible installation source. Open product details and check the Setup log.'));
   return item?.removeBlockedReason||(ru?'Удаление этого продукта сейчас недоступно':'Removal of this product is currently unavailable');
  }
@@ -1294,6 +1299,20 @@ function bindComponentWorkspace(){
 }
 // A release catalogue card and an installed-composition card are different views
 // of one intent, not clones with the same action/status content (concept C).
+const acrylicTip=document.createElement('div');acrylicTip.className='acrylic-tooltip';acrylicTip.id='acrylic-tooltip';acrylicTip.hidden=true;acrylicTip.setAttribute('role','tooltip');document.body.append(acrylicTip);
+let tooltipOwner=null;
+function hideAcrylicTooltip(){if(tooltipOwner)tooltipOwner.removeAttribute('aria-describedby');tooltipOwner=null;acrylicTip.hidden=true;}
+function showAcrylicTooltip(target){
+ const owner=target?.closest?.('[data-tooltip]');if(!owner||!owner.dataset.tooltip){hideAcrylicTooltip();return;}
+ tooltipOwner=owner;acrylicTip.textContent=owner.dataset.tooltip;acrylicTip.hidden=false;owner.setAttribute('aria-describedby',acrylicTip.id);
+ const rect=owner.getBoundingClientRect(),box=acrylicTip.getBoundingClientRect();
+ acrylicTip.style.left=Math.max(8,Math.min(innerWidth-box.width-8,rect.left+(rect.width-box.width)/2))+'px';
+ acrylicTip.style.top=(rect.bottom+box.height+12<innerHeight?rect.bottom+6:Math.max(8,rect.top-box.height-6))+'px';
+}
+document.addEventListener('pointerover',e=>showAcrylicTooltip(e.target));document.addEventListener('focusin',e=>showAcrylicTooltip(e.target));
+for(const type of ['pointerout','focusout','pointerdown','keydown','wheel'])document.addEventListener(type,hideAcrylicTooltip,{capture:true,passive:true});
+window.addEventListener('resize',hideAcrylicTooltip);document.addEventListener('scroll',hideAcrylicTooltip,true);
+function metadataBlockText(item){return (item?.metadataError||'HTTP 403')+' — '+(locale==='ru'?'Установка недоступна: не удалось получить версию продукта. Нажмите ▶ для повторной проверки.':'Installation unavailable: could not retrieve the product version. Press ▶ to retry.');}
 function componentSize(bytes){return new Intl.NumberFormat(locale==='ru'?'ru':'en',{minimumFractionDigits:1,maximumFractionDigits:1}).format(bytes/1048576)+(locale==='ru'?' МБ':' MB');}
 function componentUsesPayload(item){return ['openglass','settings64','settings32'].includes(item.id);}
 function componentTargetVersion(item){return componentUsesPayload(item)?(item.targetPayloadVersion||(item.id==='openglass'?item.remotePayloadVersion:'')||''):(item.targetVersion||'');}
@@ -1321,7 +1340,7 @@ function bindComponentName(name,item){
  // The title is a drag surface in C. Keep click/keyboard information access,
  // without making the whole header a native button excluded from pointer drag.
  name.tabIndex=0;name.setAttribute('role','button');
- name.title=locale==='ru'?'Сведения о продукте':'Product information';
+ name.dataset.tooltip=locale==='ru'?'Сведения о продукте':'Product information';
  name.onclick=()=>showProductWarning({...item,information:true},name);
  name.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();name.click();}};
 }
@@ -1408,6 +1427,7 @@ function commitComponentRemoval(input){
 }
 function commitComponentChoice(input,checked){
  const item=(hostState.components||[]).find(item=>item.id===input.dataset.component);
+ if(checked&&item?.metadataBlocked&&!item.metadataLocalAvailable){componentGestureNote(metadataBlockText(item),true,true);return false;}
  if(input.disabled||hostState.componentsLoading||input.checked===checked&&input.dataset.intent!=='remove'||checked&&item?.applySupported===false&&!resourcesPairedChoice(item))return false;
  const serial=componentNoticeSerial,wasRemove=input.dataset.intent==='remove';
  const currentCard=input.closest('#components-installed-grid .c-card'),currentList=currentCard?.closest('.c-lane-body');
@@ -1438,7 +1458,16 @@ function componentCardAction(item,input,shelf){
 }
 function paintComponentCard(card,item,input,shelf){
  const ru=locale==='ru',f=componentCardFacts(item,input),available=shelf==='available';
- card.classList.toggle('compatibility-risk',item.compatibilityRisk===true&&f.selected&&!f.remove);
+ card.classList.toggle('compatibility-risk',item.compatibilityRisk===true&&(available?!f.selected:f.selected)&&!f.remove);
+ const iconOnlyWarning=available&&f.selected||item.id==='openglassResources'&&item.dependencyMissing||!available&&item.installed&&!f.selected&&!f.remove&&!!item.warning;
+ card.classList.toggle('has-warning',!!item.warning&&!iconOnlyWarning);
+ // Dependency guidance belongs to the selected Resources card, never its catalogue mirror.
+ let dependency=card.querySelector('.comp-dependency-warning');
+ if(item.id==='openglassResources'&&!available&&f.selected&&!f.remove&&item.dependencyMissing){
+  if(!dependency){dependency=document.createElement('button');dependency.type='button';dependency.className='comp-warning-button comp-dependency-warning';dependency.textContent='⚠';card.querySelector('.c-card-top').append(dependency);}
+  const message=ru?'Нарушена зависимость: выберите OpenGlass в этом плане или установите его заранее':'Missing dependency: select OpenGlass in this plan or install it first';
+  dependency.dataset.tooltip=message;dependency.setAttribute('aria-label',message);dependency.onclick=()=>showProductWarning({title:item.title,warning:message},dependency);
+ }else if(dependency)dependency.remove();
  const current=componentMsiVersion(item),target=componentTargetVersion(item);
  const meta=card.querySelector('.c-meta'),foot=card.querySelector('.c-foot'),action=card.querySelector('.comp-decision');
  const line=document.createElement('span');line.className='comp-version-line';
@@ -1482,7 +1511,7 @@ function paintComponentCard(card,item,input,shelf){
   // Vendor release metadata stays separate internally from MSI identity.
   const server=componentUsesPayload(item)?item.remotePayloadVersion:
    item.id==='secureUxTheme'?(item.remoteVersion||item.releaseTag):item.remoteVersion;
-  const local=componentUsesPayload(item)?item.attachedPayloadVersion:item.attachedPackageVersion;
+  const local=componentUsesPayload(item)?(item.attachedPayloadVersion||(item.metadataLocalAvailable?item.localPackageVersion:'')):(item.attachedPackageVersion||(item.metadataLocalAvailable?item.localPackageVersion:''));
   // OpenGlass compares DLL FileVersion on both sides; SUT release tags
   // cannot be ordered against MSI ProductVersion.
   const comparable=item.id!=='secureUxTheme';
@@ -1492,7 +1521,7 @@ function paintComponentCard(card,item,input,shelf){
   if(comparable&&sv&&lv&&[...sv,...lv].every(n=>Number.isSafeInteger(n)&&n<=4294967295)){
    for(let i=0;i<4&&!order;i++)order=Math.sign((sv[i]||0)-(lv[i]||0));
   }
-  if(server){source('remote',ru?'на сервере':'on server',server);marks.lastElementChild.classList.toggle('source-newer',order>0);}
+  source('remote',ru?'на сервере':'on server',server||'—');marks.lastElementChild.classList.toggle('source-newer',order>0);
   if(local){source('local',ru?'локально':'local',local);marks.lastElementChild.classList.toggle('source-newer',order<0);}
   else {const absent=document.createElement('span');absent.className='src-absent';absent.textContent=ru?'локально —':'local —';marks.append(absent);}
   action.disabled=input.disabled;action.classList.remove('repair','is-on','danger');
@@ -1506,22 +1535,25 @@ function paintComponentCard(card,item,input,shelf){
  }
  const definition=componentCardAction(item,input,shelf),label=document.createElement('span');label.className='comp-action-label';label.textContent=definition.label;action.prepend(label);
  if(definition.value===true&&item.applySupported===false&&!resourcesPairedChoice(item))action.disabled=true;
- action.title=definition.label;action.setAttribute('aria-label',definition.label);action.dataset.componentAction=definition.act;
+ action.dataset.tooltip=item.metadataBlocked?metadataBlockText(item):definition.label;action.setAttribute('aria-label',definition.label);action.dataset.componentAction=definition.act;
  if(definition.act==='repair'||definition.act==='update'||definition.act==='undo'||definition.act==='unrepair')action.setAttribute('aria-pressed',String(f.selected));else action.removeAttribute('aria-pressed');
  action.onclick=()=>commitComponentChoice(input,definition.value);
  const spacer=document.createElement('span');spacer.className='spacer';foot.replaceChildren(marks,spacer,action);
  const removalInfo=hostState.appMode!=='unins'&&item.installed&&!!item.removeBlockedReason;
  if(!available&&(componentRemovalSupported(item)||removalInfo)){
   const remove=document.createElement('button');remove.type='button';remove.className='c-move comp-remove danger';
-  remove.title=ru?'Удалить':'Remove';remove.setAttribute('aria-label',remove.title);remove.disabled=input.disabled;
+  remove.dataset.tooltip=ru?'Удалить':'Remove';remove.setAttribute('aria-label',remove.dataset.tooltip);remove.disabled=input.disabled;
   remove.append(svg('trash'));
-  if(removalInfo){remove.disabled=false;remove.classList.add('removal-info');remove.dataset.componentAction='removal-info';remove.title=(ru?'Удаление недоступно: ':'Removal unavailable: ')+item.removeBlockedReason;remove.setAttribute('aria-label',remove.title);remove.onclick=()=>showProductWarning({title:ru?'Удаление SecureUxTheme':'Remove SecureUxTheme',warning:item.removeBlockedReason},remove);}
+  if(removalInfo){remove.disabled=false;remove.classList.add('removal-info');remove.dataset.componentAction='removal-info';remove.dataset.tooltip=(ru?'Удаление недоступно: ':'Removal unavailable: ')+item.removeBlockedReason;remove.setAttribute('aria-label',remove.dataset.tooltip);remove.onclick=()=>showProductWarning({title:ru?'Удаление SecureUxTheme':'Remove SecureUxTheme',warning:item.removeBlockedReason},remove);}
   else remove.onclick=()=>commitComponentRemoval(input);foot.append(remove);
  }
 
 }
+function captureComponentShelfScroll(){return [...document.querySelectorAll('#components-panel .c-lane-body')].map(list=>[list,list.scrollTop]);}
+function restoreComponentShelfScroll(snapshot){for(const [list,top] of snapshot)list.scrollTop=top;}
 function syncComponentShelves(){
  if(componentDrag)return; // Stable host ticks must not replace the card being carried.
+ const shelfScroll=captureComponentShelfScroll();
  const ru=locale==='ru',catalog=document.getElementById('components-grid'),installed=document.getElementById('components-installed-grid');
  for(const old of document.querySelectorAll('#components-panel [data-catalog-alias],#components-panel .c-drop'))old.remove();
  // Place the authoritative card by planned composition, not physical MSI
@@ -1565,7 +1597,7 @@ function syncComponentShelves(){
   const countLabel=count?(ru?count+' '+(count%100>10&&count%100<20?'продуктов':count%10===1?'продукт':count%10>=2&&count%10<=4?'продукта':'продуктов'):count+' product'+(count===1?'':'s'))+total:(componentShelfViews[id]==='needed'?(ru?'требований нет':'no requirements'):(ru?'продуктов пока нет':'no products yet'));
   if(id==='available'){
    document.getElementById('available-foot').textContent=countLabel;
-   document.getElementById('components-scroll-hint').textContent=count>4?(ru?'↓ ещё ':'↓ more ')+(count-4):'';
+   document.getElementById('components-scroll-hint').textContent='';
   }else{
    const foot=document.getElementById('installed-foot'),label=document.createElement('span');label.textContent=countLabel;foot.replaceChildren(label);
   }
@@ -1577,6 +1609,7 @@ function syncComponentShelves(){
    const text=document.createElement('span');text.append(ok?(id==='available'?(ru?'Нужных действий нет —':'No actions needed —'):(ru?'Внимания не требует':'No attention needed')):(ru?'Перетащите продукт сюда,':'Drag a product here,'),document.createElement('br'),ok?(id==='available'?(ru?'всё уже в плане или установлено':'everything is planned or installed'):(ru?'ни один продукт':'for any product')):(hostState.appMode==='unins'?(ru?'чтобы запланировать удаление':'to plan removal'):(ru?'чтобы установить':'to install')));empty.append(icon,text);grid.append(empty);
   }
  }
+ restoreComponentShelfScroll(shelfScroll);
 }
 function productActionLabel(item){if(item.id==='openglass'&&item.installed&&hostState.appMode!=='unins')return openGlassPayloadUpdate(item)?(locale==='ru'?'Обновить':'Update'):(locale==='ru'?'Переустановить':'Reinstall');return hostState.appMode==='unins'?(locale==='ru'?'Удалить':'Remove'):item.operation==='update'?(locale==='ru'?'Обновить':'Update'):item.operation==='repair'?(locale==='ru'?'Переустановить':'Reinstall'):(locale==='ru'?'Установить':'Install');}
 function updateComponentsStatus(){
@@ -1584,7 +1617,7 @@ function updateComponentsStatus(){
  for(const [id,title] of [['available',ru?'Доступно':'Available'],['installed',ru?'Установлено':'Installed']])document.getElementById(id+'-title').textContent=title;
  const button=document.getElementById('components-select-all'),recommendations=componentRecommendations();button.disabled=!recommendations.some(input=>!input.checked);const recommendationsSelected=recommendations.length>0&&recommendations.every(input=>input.checked);button.textContent=recommendationsSelected?(ru?'Всё выбрано':'All selected'):(ru?'↻  Принять все рекомендации':'↻  Accept all recommendations');
  const removable=inputs.filter(input=>{const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);return !input.disabled&&item?.installed&&(hostState.appMode==='unins'||item.removeSupported===true);});
- const removeAll=document.getElementById('components-remove-all');removeAll.replaceChildren();const trash=document.createElement('span');trash.setAttribute('aria-hidden','true');trash.innerHTML='<svg viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>';removeAll.append(trash,ru?'Удалить все продукты':'Remove all products');removeAll.title=ru?'Добавить в план удаление всех установленных продуктов, для которых удаление поддерживается.':'Plan removal of all installed products that support removal.';
+ const removeAll=document.getElementById('components-remove-all');removeAll.replaceChildren();const trash=document.createElement('span');trash.setAttribute('aria-hidden','true');trash.innerHTML='<svg viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>';removeAll.append(trash,ru?'Удалить все продукты':'Remove all products');removeAll.dataset.tooltip=ru?'Добавить в план удаление всех установленных продуктов, для которых удаление поддерживается.':'Plan removal of all installed products that support removal.';
  removeAll.hidden=hostState.componentsLoading===true||!removable.some(input=>!componentCardFacts((hostState.components||[]).find(x=>x.id===input.dataset.component),input).remove);removeAll.disabled=removeAll.hidden;
  const count=document.getElementById('components-count');count.hidden=false;count.textContent=ru?`Изменений в плане: ${selected.length}`:`Planned changes: ${selected.length}`;
  const list=document.querySelector('#components-panel .components-list');document.getElementById('components-scroll-hint').textContent=list.scrollHeight>list.clientHeight+1?(list.scrollTop+list.clientHeight<list.scrollHeight-2?(ru?'Ещё продукты ниже ↓':'More products below ↓'):(ru?'Начало списка выше ↑':'Products above ↑')):'';
@@ -1619,12 +1652,12 @@ function planRemoveAllComponents(){
 }
 function renderComponentsPanel(){
  const grid=document.getElementById('components-grid'),installedGrid=document.getElementById('components-installed-grid'),extra=document.getElementById('components-extra'),button=document.getElementById('components-select-all');
- if(!button.dataset.bound){button.dataset.bound='1';document.getElementById('components-remove-all').onclick=planRemoveAllComponents;button.onclick=acceptComponentRecommendations;const shade=document.getElementById('components-warning-dialog');shade.onclick=e=>{if(e.target===shade)closeProductWarning();};document.getElementById('components-warning-close').onclick=closeProductWarning;document.getElementById('components-warning-ok').onclick=closeProductWarning;shade.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeProductWarning();}if(e.key==='Tab'){const first=document.getElementById('components-warning-close'),last=document.getElementById('components-warning-ok');if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}};document.querySelector('#components-panel .components-list').onscroll=updateComponentsStatus;}
+ if(!button.dataset.bound){button.dataset.bound='1';document.getElementById('components-remove-all').onclick=planRemoveAllComponents;button.onclick=acceptComponentRecommendations;const shade=document.getElementById('components-warning-dialog');shade.onclick=e=>{if(e.target===shade)closeProductWarning();};document.getElementById('components-warning-close').onclick=closeProductWarning;document.getElementById('components-warning-ok').onclick=closeProductWarning;shade.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeProductWarning();}if(e.key==='Tab'){const first=document.getElementById('components-warning-close'),last=document.getElementById('components-warning-ok');if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}};document.querySelector('#components-panel .components-list').onscroll=hideAcrylicTooltip;}
  const items=Array.isArray(hostState.components)?hostState.components:[],loading=hostState.componentsLoading===true,signature=JSON.stringify([locale,hostState.appMode,loading,items]);
- const changed=signature!==componentSignature;
- if(changed){endComponentDrag(false);const focusId=document.activeElement&&document.activeElement.dataset.component,shelfScroll=[...document.querySelectorAll('#components-panel .c-lane-body')].map(list=>[list,list.scrollTop]);componentSignature=signature;grid.replaceChildren();installedGrid.replaceChildren();extra.replaceChildren();
+ const changed=signature!==componentSignature,shelfScroll=changed?captureComponentShelfScroll():null;
+ if(changed){endComponentDrag(false);const focusId=document.activeElement&&document.activeElement.dataset.component;componentSignature=signature;grid.replaceChildren();installedGrid.replaceChildren();extra.replaceChildren();
  if(loading){const label=document.createElement('div');label.className='comp-loading';label.textContent=locale==='ru'?'Анализ установки…':'Analyzing installation…';grid.append(label);}
- else for(const item of items){if(!item||item.hidden)continue;const input=document.createElement('input');input.type='checkbox';input.className='comp-check';input.dataset.component=String(item.id);input.id='product-'+String(item.id);input.checked=!!item.checked;input.dataset.intent=item.operation==='remove'?'remove':'apply';input.disabled=!!(item.disabled||item.locked);input.onchange=()=>{if(!input.checked)input.dataset.intent='apply';if(input.checked&&input.dataset.intent!=='remove'&&item.applySupported===false&&!resourcesPairedChoice(item)){input.checked=false;return;}const card=input.closest('.comp-card');if(card){card.classList.toggle('is-checked',input.checked);card.classList.toggle('active',input.checked&&hostState.appMode!=='unins');card.classList.toggle('pending-remove',input.checked&&hostState.appMode==='unins');card.classList.toggle('pending-install',!item.installed&&input.checked&&hostState.appMode!=='unins');const destination=hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid;if(card.parentElement!==destination)destination.append(card);}if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('component:'+String(item.id)+':'+(input.checked&&input.dataset.intent==='remove'?'remove':input.checked?'1':'0'));updateComponentsStatus();};
+ else for(const item of items){if(!item||item.hidden)continue;const input=document.createElement('input');input.type='checkbox';input.className='comp-check';input.dataset.component=String(item.id);input.id='product-'+String(item.id);input.checked=!!item.checked;input.dataset.intent=item.operation==='remove'?'remove':'apply';input.disabled=!!(item.disabled||item.locked);input.onchange=()=>{const shelfScroll=captureComponentShelfScroll();if(!input.checked)input.dataset.intent='apply';if(input.checked&&input.dataset.intent!=='remove'&&item.applySupported===false&&!resourcesPairedChoice(item)){input.checked=false;return;}const card=input.closest('.comp-card');if(card){card.classList.toggle('is-checked',input.checked);card.classList.toggle('active',input.checked&&hostState.appMode!=='unins');card.classList.toggle('pending-remove',input.checked&&hostState.appMode==='unins');card.classList.toggle('pending-install',!item.installed&&input.checked&&hostState.appMode!=='unins');const destination=hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid;if(card.parentElement!==destination)destination.append(card);}if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('component:'+String(item.id)+':'+(input.checked&&input.dataset.intent==='remove'?'remove':input.checked?'1':'0'));updateComponentsStatus();restoreComponentShelfScroll(shelfScroll);};
  if(item.slim){const row=document.createElement('label');row.className='comp-slim';const body=document.createElement('span'),title=document.createElement('span'),desc=document.createElement('span');title.className='comp-slim-title';title.textContent=item.title;desc.className='comp-slim-desc';desc.textContent=item.description;body.append(title,desc);row.append(input,body);extra.append(row);continue;}
  const row=document.createElement('article');row.dataset.product=String(item.id);row.className='comp-card c-card'+(input.checked?(hostState.appMode==='unins'?' pending-remove':' active'):'')+(input.checked?' is-checked':'')+(item.warning?' has-warning has-offer':item.installed&&item.operation==='update'?' has-offer':'')+(!item.installed&&input.checked&&hostState.appMode!=='unins'?' pending-install':'')+(input.disabled?' is-disabled':'');const icons=document.createElement('div');icons.className='comp-icons';const icon=document.createElement('span');icon.className='comp-icon '+(item.id==='x86'||item.id==='openglass'?'tone-cyan':item.id==='secureUxTheme'?'tone-amber':'tone-purple');icon.setAttribute('aria-hidden','true');icon.innerHTML=({"x64": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3.5\" y=\"5\" width=\"11\" height=\"14\" rx=\"2.2\"/><rect x=\"9.5\" y=\"8\" width=\"11\" height=\"14\" rx=\"2.2\"/></svg>", "x86": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"4\" y=\"6\" width=\"10\" height=\"12\" rx=\"2\"/><rect x=\"10\" y=\"9\" width=\"10\" height=\"12\" rx=\"2\"/></svg>", "settings64": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/><circle cx=\"9\" cy=\"7\" r=\"1.9\"/><circle cx=\"15\" cy=\"12\" r=\"1.9\"/><circle cx=\"8\" cy=\"17\" r=\"1.9\"/></svg>", "settings32": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/><circle cx=\"9\" cy=\"7\" r=\"1.9\"/><circle cx=\"15\" cy=\"12\" r=\"1.9\"/><circle cx=\"8\" cy=\"17\" r=\"1.9\"/></svg>", "openglass": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"3\"/><path d=\"M3 9.5h18\"/><circle cx=\"6.2\" cy=\"7.3\" r=\".8\"/><circle cx=\"9\" cy=\"7.3\" r=\".8\"/></svg>", "secureUxTheme": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z\"/><path d=\"M9 12l2 2 4-4\"/></svg>"})[item.id]||'';if(item.id==='openglassResources')icon.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="2"/><path d="m3 17 6-6 4 4 3-3 5 5"/></svg>';icons.append(icon);if(item.warning){const warn=document.createElement('button');warn.type='button';warn.className='comp-warning-button';warn.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.5a2 2 0 0 1 3.4 0l7.5 13a2 2 0 0 1-1.7 3H4.5a2 2 0 0 1-1.7-3z"/><path d="M12 9v4m0 3v.2"/></svg>';warn.setAttribute('aria-label',(locale==='ru'?'Предупреждение: ':'Warning: ')+item.title);warn.onclick=()=>showProductWarning(item,warn);icons.append(warn);}
  const name=document.createElement('span');name.className='comp-name c-name';name.textContent=item.title;bindComponentName(name,item);
@@ -1632,11 +1665,12 @@ function renderComponentsPanel(){
  const top=document.createElement('div');top.className='c-card-top';top.append(icons,name);const warning=icons.querySelector('.comp-warning-button');if(warning)top.append(warning);
  const meta=document.createElement('div');meta.className='c-meta';const foot=document.createElement('div');foot.className='c-foot';decision.classList.add('c-move');foot.append(decision);
  row.append(input,top,meta,foot);
- if(item.id==='openglassResources'&&item.applyHint){const hint=document.createElement('p');hint.className='comp-resource-dependency';hint.textContent=item.applyHint;row.insertBefore(hint,foot);row.classList.add('has-resource-dependency');}
+
  (hostState.appMode==='unins'||item.installed||input.checked?installedGrid:grid).append(row);}
 
- for(const [list,scroll] of shelfScroll)list.scrollTop=scroll;if(focusId){const restored=document.getElementById('product-'+focusId);if(restored&&!restored.disabled)restored.focus({preventScroll:true});}}
+ if(focusId){const restored=document.getElementById('product-'+focusId);if(restored&&!restored.disabled)restored.focus({preventScroll:true});}}
  if(changed)updateComponentsStatus();syncDownloadVisuals();applyComponentPanels();
+ if(shelfScroll)restoreComponentShelfScroll(shelfScroll);
 }
 function syncDownloadVisuals(){
  const ru=locale==='ru',all=Array.isArray(hostState.downloads)?hostState.downloads:[],selected=all.filter(d=>{const input=document.getElementById('product-'+d.id);return input&&input.checked&&input.dataset.intent!=='remove';});
@@ -1647,6 +1681,19 @@ function syncDownloadVisuals(){
   const planned=!!(input?.checked&&input.dataset.intent!=='remove'&&hostState.appMode!=='unins'&&card.closest('#components-installed-grid'));
   const d=selected.find(d=>d.id===card.dataset.product);
   let bar=card.querySelector('.product-transfer'),retry=card.querySelector('.download-retry');
+  let errorLabel=card.querySelector('.metadata-error-label');
+  if(!item?.metadataBlocked&&errorLabel)errorLabel.remove();
+  if(item?.metadataBlocked&&hostState.appMode!=='unins'&&input?.dataset.intent!=='remove'){
+   if(bar)bar.remove();
+   card.classList.add('download-failed');
+   if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
+   retry.disabled=!!item.metadataRetrying;
+   if(!errorLabel){errorLabel=document.createElement('span');errorLabel.className='metadata-error-label';card.append(errorLabel);}
+   errorLabel.textContent=ru?'Сервер недоступен (E403)':'Server unavailable (E403)';
+   retry.dataset.tooltip=ru?'Повторить загрузку метаданных':'Retry metadata download';retry.setAttribute('aria-label',ru?'Повторить получение версии':'Retry version discovery');
+   retry.onclick=e=>{e.stopPropagation();if(!item.metadataRetrying)window.chrome?.webview?.postMessage('metadata-retry:'+item.id);};
+   continue;
+  }
   const remote=item?.downloadRequired!==false||!!d?.network,active=planned&&remote&&!!d&&d.phase!=='ready';
   card.classList.toggle('download-planned',planned&&remote&&!d);
   card.classList.toggle('download-progress',active);
@@ -1658,10 +1705,10 @@ function syncDownloadVisuals(){
   if(!d.total&&d.phase!=='ready')bar.removeAttribute('aria-valuenow');else bar.setAttribute('aria-valuenow',String(percent(d)));
   if(d.phase==='error'){
    if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';retry.onclick=e=>{e.stopPropagation();if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('download-retry:'+d.id);};card.append(retry);}
-   retry.setAttribute('aria-label',ru?'Повторить загрузку':'Retry download');retry.title=(ru?'Повторить загрузку':'Retry download')+(d.error?' — '+d.error:'');
+   retry.setAttribute('aria-label',ru?'Повторить загрузку':'Retry download');retry.dataset.tooltip=(ru?'Повторить загрузку':'Retry download')+(d.error?' — '+d.error:'');
   }else if(retry)retry.remove();
  }
- for(const row of document.querySelectorAll('#components-plan-items li[data-product]')){const d=selected.find(d=>d.id===row.dataset.product);if(d){const text=row.querySelector('.plan-transfer-status');text.textContent=label(d);text.title=d.error||label(d);}}
+ for(const row of document.querySelectorAll('#components-plan-items li[data-product]')){const d=selected.find(d=>d.id===row.dataset.product);if(d){const text=row.querySelector('.plan-transfer-status');text.textContent=label(d);text.dataset.tooltip=d.error||label(d);}}
 
 }
 let certificateSignature='';

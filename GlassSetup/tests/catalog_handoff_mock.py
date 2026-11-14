@@ -1,4 +1,4 @@
-"""Actual FetchCatalog: one network request per chain, including offline failure."""
+"""Actual FetchCatalog: reuse valid snapshots; bounded recovery of empty/invalid inherited catalogs."""
 from pathlib import Path
 import subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
@@ -26,7 +26,13 @@ int main(){std::atomic<bool> cancel=false;GlassPackageCatalog::Catalog catalog;s
  GlassSetupSourceLayout::catalogInherited=true;GlassSetupSourceLayout::catalogChecked=false;network=false;
  assert(FetchCatalog(cancel,catalog,error)&&catalog.parsed&&requests==1); // Child, no network even when now offline.
  reset();network=false;assert(!FetchCatalog(cancel,catalog,error)&&requests==1);assert(!FetchCatalog(cancel,catalog,error)&&requests==1);
- GlassSetupSourceLayout::catalogInherited=true;network=true;assert(!FetchCatalog(cancel,catalog,error)&&requests==1); // Parent's failed check is inherited too.
+ GlassSetupSourceLayout::catalogInherited=true;GlassSetupSourceLayout::catalogChecked=false;network=true;
+ assert(FetchCatalog(cancel,catalog,error)&&requests==2); // Child recovers a parent failure once.
+ assert(FetchCatalog(cancel,catalog,error)&&requests==2);
+ reset();GlassSetupSourceLayout::catalogInherited=true;network=false;
+ assert(!FetchCatalog(cancel,catalog,error)&&requests==1);assert(!FetchCatalog(cancel,catalog,error)&&requests==1);
+ reset();GlassSetupSourceLayout::catalogInherited=true;GlassSetupSourceLayout::catalogText="malformed";valid=false;
+ assert(!FetchCatalog(cancel,catalog,error)&&requests==1);assert(!FetchCatalog(cancel,catalog,error)&&requests==1);
  reset();valid=false;assert(!FetchCatalog(cancel,catalog,error)&&requests==1);assert(!FetchCatalog(cancel,catalog,error)&&requests==1);
  std::cout<<"PASS: actual catalog fetch: one request, immutable product-inspection reuse, child snapshot reuse, offline/malformed result not retried\n";
 }

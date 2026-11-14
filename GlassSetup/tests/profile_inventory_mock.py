@@ -89,6 +89,11 @@ body=prefix+profile+function('inline bool ReadString(')+function('inline bool Sa
 main=r'''
 void reset(){hkuEnumFail=rootWriteDenied=unloadOnOpen=false;loadBadDb=false;assert(handles.empty());entries={{L"S-1-5-21-111",L"C:\\Users\\A"},{L"S-1-12-1-222",L"C:\\Users\\B"}};attributes.clear();enumFail=openListFail=openEntryFail=openHiveFail=loadFail=invalidSid=badPathValue=otherSession=false;offlineLoads=cleanChecks=cleanWrites=failCheckAt=failWriteAt=malformed=changeOnCheck=0;themeChecks=themeCommits=failThemeCheck=failThemeCommit=0;}
 int main(){
+ {reset();entries[1].path=L"C:\\Users\\leoka";entries[0].loaded=true;
+  std::wstring detail;Inventory i;assert(i.OpenAll(detail));
+  assert(i.Profiles().size()==2&&i.SkippedLoadedProfiles().empty()&&offlineLoads==1);
+  assert(i.Profiles()[1].path==L"C:\\Users\\leoka"&&i.VerifyInventory(detail));}
+
  std::wstring orphanDetail;
  reset();{loadBadDb=true;entries[0].loaded=true;Inventory i;assert(i.OpenAll(orphanDetail,true));
   assert(i.Profiles().size()==1&&i.SkippedLoadedProfiles().size()==1&&offlineLoads==0);

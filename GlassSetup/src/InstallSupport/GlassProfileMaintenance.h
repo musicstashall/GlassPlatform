@@ -251,13 +251,14 @@ public:
         for(bool present:seen)if(!present){detail=L"A profile disappeared; a fresh preflight is required";return false;}
         return true;
     }
-    // SUT removal touches only already-loaded HKU profiles. Missing keys are
-    // skipped with finish warnings; never mount offline NTUSER files here.
+    // SUT removal includes offline local profiles. OpenAll validates ProfileList
+    // paths and pins private RegLoadAppKey handles until style commit/recheck.
     bool PreflightLoadedRemoval(std::wstring& detail) {
         removalStylePrepared_=false;removalStyleCommitted_=false;
-        if(!OpenAll(detail,true))return false;
+        if(!OpenAll(detail))return false;
 
         for(const auto& profile:profiles_) {
+            GlassInstallLog::LineFormat(L"SecureUxTheme profile included: SID=%s profile=%s; registry hive pinned for stock-style preparation",profile.sid.c_str(),profile.path.c_str());
             for(const auto* path:{L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes",L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager"}) {
                 HKEY key=nullptr;
                 const LONG status=RegOpenKeyExW(profile.hive,path,0,KEY_QUERY_VALUE|KEY_SET_VALUE,&key);
