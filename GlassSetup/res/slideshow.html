@@ -811,6 +811,11 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 /* Known upstream compatibility risk, distinct from installed-payload corruption. */
 #components-panel .c-card.compatibility-risk,#components-panel .c-card.compatibility-risk:hover{opacity:1;border-color:#f18383;background:linear-gradient(130deg,#5b272f,#321d2a);box-shadow:inset 0 1px #ffffff0a}
 #components-panel .c-card.compatibility-risk .comp-warning-button{color:#ff6b6b}
+.metadata-error-label{position:absolute;left:8px;right:8px;top:50%;transform:translateY(-50%);text-align:center;font-size:10px;color:#f5ccd0;pointer-events:none;white-space:nowrap}
+#components-panel .c-card:has(.metadata-error-label) .download-retry{left:auto;right:8px;top:50%;transform:translateY(-50%);width:30px;height:30px}
+#components-panel .c-card:has(.metadata-error-label) .c-meta{visibility:hidden}
+.acrylic-tooltip{position:fixed;z-index:10000;max-width:260px;padding:7px 10px;border:1px solid #d3c8ff45;border-radius:8px;background:#24273bd9;backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);box-shadow:0 8px 24px #0005,inset 0 1px #ffffff14;color:#f0edf9;font-size:11px;line-height:1.4;pointer-events:none;white-space:normal}
+.acrylic-tooltip[hidden]{display:none}
 </style></head>
 <body><main id="viewport"><div id="stage" data-mode="loading" role="region" aria-roledescription="carousel" aria-label="GlassPlatform">
 <div class="ambient slideshow-only"></div>
@@ -994,7 +999,7 @@ function parseHoldReport(value){return String(value||'').split(/\r\n?|\n/).map(l
 function renderHolderReport(processMode){const panel=document.getElementById('unlock-holders'),heading=document.getElementById('unlock-holders-title'),list=document.getElementById('unlock-holder-list');if(!panel||!heading||!list)return;const isUnlockMode=mode==='unlock-modules'||mode==='unlock-processes',records=parseHoldReport(hostState.holdReport);panel.hidden=!isUnlockMode||hostState.unlockActive===true||records.length===0;document.getElementById('unlock-holder-shade').hidden=panel.hidden;list.replaceChildren();if(panel.hidden)return;heading.textContent=processMode?uiResources[locale].unlockHoldersTitle:uiResources[locale].forceHoldersTitle;for(const record of records){const item=document.createElement('li');if(record.more){item.className='unlock-holder-more';item.textContent=locale==='ru'?'И другие процессы…':'Additional holders…';}else if(record.raw){item.className='unlock-holder-raw';item.textContent=record.raw;}else{item.className='unlock-holder';const meta=document.createElement('div');meta.className='unlock-holder-meta';const process=document.createElement('span');process.className='unlock-holder-process';process.textContent=record.process;const pid=document.createElement('span');pid.className='unlock-holder-pid';pid.textContent=record.pid?`PID ${record.pid}`:'';const modules=document.createElement('span');modules.className='unlock-holder-modules';modules.textContent=record.modules||'—';meta.append(process,pid);item.append(meta,modules);}list.append(item);}}
 function componentLock(title){
  const lock=document.createElement('span');
- lock.className='comp-lock';lock.title=String(title);lock.setAttribute('role','img');lock.setAttribute('aria-label',String(title));
+ lock.className='comp-lock';lock.dataset.tooltip=String(title);lock.setAttribute('role','img');lock.setAttribute('aria-label',String(title));
  // Fixed inline vector: keep the lock visible and multicoloured even when emoji fonts are absent.
  lock.innerHTML='<svg viewBox="0 0 24 26" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3" fill="none" stroke="#a7dfff" stroke-width="2.8" stroke-linecap="round"/><rect x="4" y="10" width="16" height="13" rx="3" fill="#efb94f" stroke="#ffe2a3" stroke-width="1.2"/><path d="M7 12h10" fill="none" stroke="#fff1bd" stroke-width="1" stroke-linecap="round" opacity=".8"/><circle cx="12" cy="16" r="1.5" fill="#573c38"/><path d="M12 17.2v2.2" stroke="#573c38" stroke-width="1.5" stroke-linecap="round"/></svg>';
  return lock;
@@ -1031,12 +1036,11 @@ function showProductWarning(item,button){
   dialogParagraph(body,item.description,'dialog-description');
   const input=document.getElementById('product-'+item.id),f=input&&componentCardFacts(item,input);
   const state=f?.remove?(ru?'Будет удалено: MSI снимается с регистрации; удаляются файлы, службы и задачи продукта согласно правилам пакета.':'Will be removed: MSI registration, files, services and tasks are removed according to package rules.'):item.state;
-  const version=item.targetVersionKind==='release'?(ru?'релиз ':'release ')+(item.targetVersion||item.releaseTag||item.displayVersion||'—'):((componentUsesPayload(item)?item.targetPayloadVersion:item.targetVersion)||item.displayVersion||'—');
+  const version=item.targetVersionKind==='release'?(ru?'релиз ':'release ')+(item.targetVersion||item.releaseTag||'—'):((componentUsesPayload(item)?item.targetPayloadVersion:item.targetVersion)||'—');
   const pkg=[item.packageSize?componentSize(item.packageSize):'',version,ru?'Размер и SHA-256 сверяются перед установкой.':'Size and SHA-256 are checked before installation.'].filter(Boolean).join(' · ');
   for(const [label,text] of [[ru?'СОСТОЯНИЕ':'STATE',state],[ru?'ЗАВИСИМОСТИ':'DEPENDENCIES',item.warning||(ru?'Нет предупреждений о составе.':'No composition warnings.')],[ru?'ПАКЕТ':'PACKAGE',pkg],...(item.removeBlockedReason?[[ru?'УДАЛЕНИЕ':'REMOVAL',item.removeBlockedReason]]:[])]){
    const row=document.createElement('div');row.className='dialog-detail-row';const key=document.createElement('span');key.textContent='•  '+label;row.append(key);dialogParagraph(row,text);body.append(row);
   }
-  if(item.versionFallback)dialogParagraph(body,ru?'Upstream не вернул актуальную версию. Показана последняя известная опубликованная версия, а не подтверждённое предложение сервера. Пакет и его версия будут проверены перед установкой.':'Upstream did not return the current version. This is the last known published release, not a confirmed server offer. The package and its version will be verified before installation.','dialog-diagnostic');
   if(item.applySupported===false&&item.applyHint)dialogParagraph(body,item.applyHint,'dialog-warning-entry');
   const chosen=item.selectedPackagePath?(item.selectedPackagePath===item.attachedPackagePath?(ru?'приложенный MSI':'attached MSI'):(ru?'проверенный внутренний источник':'verified internal source')):(item.targetVersion||item.remoteVersion?(ru?'серверный кандидат / ещё не подготовлен':'server candidate / not yet prepared'):(ru?'подходящий источник не найден':'no eligible source found'));
   dialogParagraph(body,(ru?'Источник предложения: ':'Offer source: ')+chosen+(item.selectedPackagePath?' · '+item.selectedPackagePath:''),'dialog-diagnostic');
@@ -1128,11 +1132,11 @@ function applyComponentPanels(){
   const peek=edge.querySelector('button');peek.classList.toggle('is-off',visible);
   const title=name==='available'?(locale==='ru'?'Доступно':'Available'):(locale==='ru'?'План':'Plan');
   peek.setAttribute('aria-label',(locale==='ru'?'Показать панель: ':'Show panel: ')+title);
-  peek.title=locale==='ru'?'Нажмите или задержите указатель у края на 2 секунды':'Click or hover at the edge for 2 seconds';
+  peek.dataset.tooltip=locale==='ru'?'Нажмите или задержите указатель у края на 2 секунды':'Click or hover at the edge for 2 seconds';
   const pin=panel.querySelector('[data-component-pin="'+name+'"]'),on=componentSides.pinned[name];
   pin.classList.toggle('is-on',on);pin.setAttribute('aria-pressed',String(on));
   pin.setAttribute('aria-label',(on?(locale==='ru'?'Открепить: ':'Unpin: '):(locale==='ru'?'Закрепить: ':'Pin: '))+title);
-  pin.title=on?(locale==='ru'?'Открепить панель':'Unpin panel'):(locale==='ru'?'Закрепить панель':'Pin panel');
+  pin.dataset.tooltip=on?(locale==='ru'?'Открепить панель':'Unpin panel'):(locale==='ru'?'Закрепить панель':'Pin panel');
  }
  lane.classList.toggle('is-wide-left',!a);lane.classList.toggle('is-wide-right',a&&!p);
  lane.classList.toggle('is-a-edge',!a&&componentEdge('available').classList.contains('is-hot'));
@@ -1190,7 +1194,7 @@ function componentDropText(drag,lane){
  const item=(hostState.components||[]).find(item=>item.id===drag.id);
  if(value===null){
   if(lane===drag.source)return ru?'Исходная панель — без изменений':'Original shelf — no changes';
-  if(lane==='installed'&&item?.metadataBlocked)return metadataBlockText(item);
+  if(lane==='installed'&&item?.metadataBlocked&&!item.metadataLocalAvailable)return metadataBlockText(item);
   if(lane==='installed')return hostState.componentsLoading?(ru?'Проверяются источники установки…':'Checking installation sources…'):(item?.applyHint||(ru?'Нет подходящего источника установки. Откройте сведения о продукте и проверьте журнал Setup.':'No eligible installation source. Open product details and check the Setup log.'));
   return item?.removeBlockedReason||(ru?'Удаление этого продукта сейчас недоступно':'Removal of this product is currently unavailable');
  }
@@ -1296,6 +1300,19 @@ function bindComponentWorkspace(){
 }
 // A release catalogue card and an installed-composition card are different views
 // of one intent, not clones with the same action/status content (concept C).
+const acrylicTip=document.createElement('div');acrylicTip.className='acrylic-tooltip';acrylicTip.id='acrylic-tooltip';acrylicTip.hidden=true;acrylicTip.setAttribute('role','tooltip');document.body.append(acrylicTip);
+let tooltipOwner=null;
+function hideAcrylicTooltip(){if(tooltipOwner)tooltipOwner.removeAttribute('aria-describedby');tooltipOwner=null;acrylicTip.hidden=true;}
+function showAcrylicTooltip(target){
+ const owner=target?.closest?.('[data-tooltip]');if(!owner||!owner.dataset.tooltip){hideAcrylicTooltip();return;}
+ tooltipOwner=owner;acrylicTip.textContent=owner.dataset.tooltip;acrylicTip.hidden=false;owner.setAttribute('aria-describedby',acrylicTip.id);
+ const rect=owner.getBoundingClientRect(),box=acrylicTip.getBoundingClientRect();
+ acrylicTip.style.left=Math.max(8,Math.min(innerWidth-box.width-8,rect.left+(rect.width-box.width)/2))+'px';
+ acrylicTip.style.top=(rect.bottom+box.height+12<innerHeight?rect.bottom+6:Math.max(8,rect.top-box.height-6))+'px';
+}
+document.addEventListener('pointerover',e=>showAcrylicTooltip(e.target));document.addEventListener('focusin',e=>showAcrylicTooltip(e.target));
+for(const type of ['pointerout','focusout','pointerdown','keydown','wheel'])document.addEventListener(type,hideAcrylicTooltip,{capture:true,passive:true});
+window.addEventListener('resize',hideAcrylicTooltip);document.addEventListener('scroll',hideAcrylicTooltip,true);
 function metadataBlockText(item){return (item?.metadataError||'HTTP 403')+' — '+(locale==='ru'?'Установка недоступна: не удалось получить версию продукта. Нажмите ▶ для повторной проверки.':'Installation unavailable: could not retrieve the product version. Press ▶ to retry.');}
 function componentSize(bytes){return new Intl.NumberFormat(locale==='ru'?'ru':'en',{minimumFractionDigits:1,maximumFractionDigits:1}).format(bytes/1048576)+(locale==='ru'?' МБ':' MB');}
 function componentUsesPayload(item){return ['openglass','settings64','settings32'].includes(item.id);}
@@ -1324,7 +1341,7 @@ function bindComponentName(name,item){
  // The title is a drag surface in C. Keep click/keyboard information access,
  // without making the whole header a native button excluded from pointer drag.
  name.tabIndex=0;name.setAttribute('role','button');
- name.title=locale==='ru'?'Сведения о продукте':'Product information';
+ name.dataset.tooltip=locale==='ru'?'Сведения о продукте':'Product information';
  name.onclick=()=>showProductWarning({...item,information:true},name);
  name.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();name.click();}};
 }
@@ -1411,7 +1428,7 @@ function commitComponentRemoval(input){
 }
 function commitComponentChoice(input,checked){
  const item=(hostState.components||[]).find(item=>item.id===input.dataset.component);
- if(checked&&item?.metadataBlocked){componentGestureNote(metadataBlockText(item),true,true);return false;}
+ if(checked&&item?.metadataBlocked&&!item.metadataLocalAvailable){componentGestureNote(metadataBlockText(item),true,true);return false;}
  if(input.disabled||hostState.componentsLoading||input.checked===checked&&input.dataset.intent!=='remove'||checked&&item?.applySupported===false&&!resourcesPairedChoice(item))return false;
  const serial=componentNoticeSerial,wasRemove=input.dataset.intent==='remove';
  const currentCard=input.closest('#components-installed-grid .c-card'),currentList=currentCard?.closest('.c-lane-body');
@@ -1445,7 +1462,7 @@ function paintComponentCard(card,item,input,shelf){
  card.classList.toggle('compatibility-risk',item.compatibilityRisk===true&&(available||f.selected)&&!f.remove);
  const iconOnlyWarning=!available&&item.installed&&!f.selected&&!f.remove&&!!item.warning;
  card.classList.toggle('has-warning',!!item.warning&&!iconOnlyWarning);
- const current=componentMsiVersion(item),target=componentTargetVersion(item)||item.displayVersion||'';
+ const current=componentMsiVersion(item),target=componentTargetVersion(item);
  const meta=card.querySelector('.c-meta'),foot=card.querySelector('.c-foot'),action=card.querySelector('.comp-decision');
  const line=document.createElement('span');line.className='comp-version-line';
  const text=(value,bold=false)=>{const node=document.createElement(bold?'b':'span');node.className='comp-version-tag';node.textContent=value||(item.id==='openglass'&&(available||!item.installed)?(ru?'Версия уточняется':'Version pending'):'—');line.append(node);};
@@ -1477,8 +1494,6 @@ function paintComponentCard(card,item,input,shelf){
  }else{
   text(current);if(suffix)line.append(suffix);chipClass='current';chipText=current;icon='check';
  }
- if(item.versionFallback&&(available||!item.installed))line.append(locale==='ru'?' · известная версия':' · last known release');
- if(item.metadataBlocked&&(available||!item.installed))line.append(' · '+(item.metadataRetrying?(ru?'Повторная проверка версии…':'Retrying version discovery…'):metadataBlockText(item)));
  meta.replaceChildren(line);
  const marks=document.createElement('span');
  const icons={"check": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12l4 4L19 6\"/></svg>", "update": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 19V5M6 11l6-6 6 6\"/></svg>", "download": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3v12M7 10l5 5 5-5\"/><path d=\"M4 20h16\"/></svg>", "trash": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13\"/></svg>", "repair": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12a8 8 0 0 1 13.7-5.7\"/><path d=\"M20 12a8 8 0 0 1-13.7 5.7\"/><path d=\"M18 3v4h-4\"/><path d=\"M6 21v-4h4\"/></svg>", "warn": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3.5l9 17H3z\"/><path d=\"M12 9v4.6\"/><circle cx=\"12\" cy=\"17\" r=\".9\"/></svg>", "arrowRight": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h15M13 6l6 6-6 6\"/></svg>", "arrowLeft": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M20 12H5M11 6l-6 6 6 6\"/></svg>"};
@@ -1490,7 +1505,7 @@ function paintComponentCard(card,item,input,shelf){
   // Vendor release metadata stays separate internally from MSI identity.
   const server=componentUsesPayload(item)?item.remotePayloadVersion:
    item.id==='secureUxTheme'?(item.remoteVersion||item.releaseTag):item.remoteVersion;
-  const local=componentUsesPayload(item)?item.attachedPayloadVersion:item.attachedPackageVersion;
+  const local=componentUsesPayload(item)?(item.attachedPayloadVersion||(item.metadataLocalAvailable?item.localPackageVersion:'')):(item.attachedPackageVersion||(item.metadataLocalAvailable?item.localPackageVersion:''));
   // OpenGlass compares DLL FileVersion on both sides; SUT release tags
   // cannot be ordered against MSI ProductVersion.
   const comparable=item.id!=='secureUxTheme';
@@ -1500,8 +1515,7 @@ function paintComponentCard(card,item,input,shelf){
   if(comparable&&sv&&lv&&[...sv,...lv].every(n=>Number.isSafeInteger(n)&&n<=4294967295)){
    for(let i=0;i<4&&!order;i++)order=Math.sign((sv[i]||0)-(lv[i]||0));
   }
-  if(!server&&item.versionFallback&&item.displayVersion)source('known',ru?'известная':'last known',item.displayVersion);
-  if(server){source('remote',ru?'на сервере':'on server',server);marks.lastElementChild.classList.toggle('source-newer',order>0);}
+  source('remote',ru?'на сервере':'on server',server||'—');marks.lastElementChild.classList.toggle('source-newer',order>0);
   if(local){source('local',ru?'локально':'local',local);marks.lastElementChild.classList.toggle('source-newer',order<0);}
   else {const absent=document.createElement('span');absent.className='src-absent';absent.textContent=ru?'локально —':'local —';marks.append(absent);}
   action.disabled=input.disabled;action.classList.remove('repair','is-on','danger');
@@ -1515,16 +1529,16 @@ function paintComponentCard(card,item,input,shelf){
  }
  const definition=componentCardAction(item,input,shelf),label=document.createElement('span');label.className='comp-action-label';label.textContent=definition.label;action.prepend(label);
  if(definition.value===true&&item.applySupported===false&&!resourcesPairedChoice(item))action.disabled=true;
- action.title=item.metadataBlocked?metadataBlockText(item):definition.label;action.setAttribute('aria-label',definition.label);action.dataset.componentAction=definition.act;
+ action.dataset.tooltip=item.metadataBlocked?metadataBlockText(item):definition.label;action.setAttribute('aria-label',definition.label);action.dataset.componentAction=definition.act;
  if(definition.act==='repair'||definition.act==='update'||definition.act==='undo'||definition.act==='unrepair')action.setAttribute('aria-pressed',String(f.selected));else action.removeAttribute('aria-pressed');
  action.onclick=()=>commitComponentChoice(input,definition.value);
  const spacer=document.createElement('span');spacer.className='spacer';foot.replaceChildren(marks,spacer,action);
  const removalInfo=hostState.appMode!=='unins'&&item.installed&&!!item.removeBlockedReason;
  if(!available&&(componentRemovalSupported(item)||removalInfo)){
   const remove=document.createElement('button');remove.type='button';remove.className='c-move comp-remove danger';
-  remove.title=ru?'Удалить':'Remove';remove.setAttribute('aria-label',remove.title);remove.disabled=input.disabled;
+  remove.dataset.tooltip=ru?'Удалить':'Remove';remove.setAttribute('aria-label',remove.dataset.tooltip);remove.disabled=input.disabled;
   remove.append(svg('trash'));
-  if(removalInfo){remove.disabled=false;remove.classList.add('removal-info');remove.dataset.componentAction='removal-info';remove.title=(ru?'Удаление недоступно: ':'Removal unavailable: ')+item.removeBlockedReason;remove.setAttribute('aria-label',remove.title);remove.onclick=()=>showProductWarning({title:ru?'Удаление SecureUxTheme':'Remove SecureUxTheme',warning:item.removeBlockedReason},remove);}
+  if(removalInfo){remove.disabled=false;remove.classList.add('removal-info');remove.dataset.componentAction='removal-info';remove.dataset.tooltip=(ru?'Удаление недоступно: ':'Removal unavailable: ')+item.removeBlockedReason;remove.setAttribute('aria-label',remove.dataset.tooltip);remove.onclick=()=>showProductWarning({title:ru?'Удаление SecureUxTheme':'Remove SecureUxTheme',warning:item.removeBlockedReason},remove);}
   else remove.onclick=()=>commitComponentRemoval(input);foot.append(remove);
  }
 
@@ -1593,7 +1607,7 @@ function updateComponentsStatus(){
  for(const [id,title] of [['available',ru?'Доступно':'Available'],['installed',ru?'Установлено':'Installed']])document.getElementById(id+'-title').textContent=title;
  const button=document.getElementById('components-select-all'),recommendations=componentRecommendations();button.disabled=!recommendations.some(input=>!input.checked);const recommendationsSelected=recommendations.length>0&&recommendations.every(input=>input.checked);button.textContent=recommendationsSelected?(ru?'Всё выбрано':'All selected'):(ru?'↻  Принять все рекомендации':'↻  Accept all recommendations');
  const removable=inputs.filter(input=>{const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);return !input.disabled&&item?.installed&&(hostState.appMode==='unins'||item.removeSupported===true);});
- const removeAll=document.getElementById('components-remove-all');removeAll.replaceChildren();const trash=document.createElement('span');trash.setAttribute('aria-hidden','true');trash.innerHTML='<svg viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>';removeAll.append(trash,ru?'Удалить все продукты':'Remove all products');removeAll.title=ru?'Добавить в план удаление всех установленных продуктов, для которых удаление поддерживается.':'Plan removal of all installed products that support removal.';
+ const removeAll=document.getElementById('components-remove-all');removeAll.replaceChildren();const trash=document.createElement('span');trash.setAttribute('aria-hidden','true');trash.innerHTML='<svg viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>';removeAll.append(trash,ru?'Удалить все продукты':'Remove all products');removeAll.dataset.tooltip=ru?'Добавить в план удаление всех установленных продуктов, для которых удаление поддерживается.':'Plan removal of all installed products that support removal.';
  removeAll.hidden=hostState.componentsLoading===true||!removable.some(input=>!componentCardFacts((hostState.components||[]).find(x=>x.id===input.dataset.component),input).remove);removeAll.disabled=removeAll.hidden;
  const count=document.getElementById('components-count');count.hidden=false;count.textContent=ru?`Изменений в плане: ${selected.length}`:`Planned changes: ${selected.length}`;
  const list=document.querySelector('#components-panel .components-list');document.getElementById('components-scroll-hint').textContent=list.scrollHeight>list.clientHeight+1?(list.scrollTop+list.clientHeight<list.scrollHeight-2?(ru?'Ещё продукты ниже ↓':'More products below ↓'):(ru?'Начало списка выше ↑':'Products above ↑')):'';
@@ -1656,12 +1670,16 @@ function syncDownloadVisuals(){
   const planned=!!(input?.checked&&input.dataset.intent!=='remove'&&hostState.appMode!=='unins'&&card.closest('#components-installed-grid'));
   const d=selected.find(d=>d.id===card.dataset.product);
   let bar=card.querySelector('.product-transfer'),retry=card.querySelector('.download-retry');
+  let errorLabel=card.querySelector('.metadata-error-label');
+  if(!item?.metadataBlocked&&errorLabel)errorLabel.remove();
   if(item?.metadataBlocked&&hostState.appMode!=='unins'&&input?.dataset.intent!=='remove'){
    if(bar)bar.remove();
    card.classList.add('download-failed');
    if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
    retry.disabled=!!item.metadataRetrying;
-   retry.title=metadataBlockText(item);retry.setAttribute('aria-label',ru?'Повторить получение версии':'Retry version discovery');
+   if(!errorLabel){errorLabel=document.createElement('span');errorLabel.className='metadata-error-label';card.append(errorLabel);}
+   errorLabel.textContent=ru?'Сервер недоступен (E403)':'Server unavailable (E403)';
+   retry.dataset.tooltip=ru?'Повторить загрузку метаданных':'Retry metadata download';retry.setAttribute('aria-label',ru?'Повторить получение версии':'Retry version discovery');
    retry.onclick=e=>{e.stopPropagation();if(!item.metadataRetrying)window.chrome?.webview?.postMessage('metadata-retry:'+item.id);};
    continue;
   }
@@ -1676,10 +1694,10 @@ function syncDownloadVisuals(){
   if(!d.total&&d.phase!=='ready')bar.removeAttribute('aria-valuenow');else bar.setAttribute('aria-valuenow',String(percent(d)));
   if(d.phase==='error'){
    if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';retry.onclick=e=>{e.stopPropagation();if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('download-retry:'+d.id);};card.append(retry);}
-   retry.setAttribute('aria-label',ru?'Повторить загрузку':'Retry download');retry.title=(ru?'Повторить загрузку':'Retry download')+(d.error?' — '+d.error:'');
+   retry.setAttribute('aria-label',ru?'Повторить загрузку':'Retry download');retry.dataset.tooltip=(ru?'Повторить загрузку':'Retry download')+(d.error?' — '+d.error:'');
   }else if(retry)retry.remove();
  }
- for(const row of document.querySelectorAll('#components-plan-items li[data-product]')){const d=selected.find(d=>d.id===row.dataset.product);if(d){const text=row.querySelector('.plan-transfer-status');text.textContent=label(d);text.title=d.error||label(d);}}
+ for(const row of document.querySelectorAll('#components-plan-items li[data-product]')){const d=selected.find(d=>d.id===row.dataset.product);if(d){const text=row.querySelector('.plan-transfer-status');text.textContent=label(d);text.dataset.tooltip=d.error||label(d);}}
 
 }
 let certificateSignature='';

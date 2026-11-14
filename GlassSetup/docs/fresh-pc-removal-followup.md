@@ -122,3 +122,40 @@ information only and cannot bypass the metadata gate.
 Tests: actual threaded retry/completion with failed/successful responses and
 double-click suppression; actual ComponentsReady apply/removal behavior; DOM
 reason, Play button, scoped IPC, pending disabled state and successful unblock.
+
+## E403 presentation and verified-local exception (supersedes fallback labels)
+
+Removed last-known/display-version labels from cards and dialogs. Source captions
+remain exactly “на сервере / локально” (“on server / local”), with an em dash
+for unavailable metadata. E403 is a centered separate overlay, not a long inline
+version string. The retry button's short tooltip is “Повторить загрузку
+метаданных”. Metadata-error visuals remain even when verified local media permits
+apply. `metadataBlocked` now denotes metadata-error presentation; apply refusal
+additionally requires `!metadataLocalAvailable`. The native readiness, IPC,
+recommendations and paired Resources/OG path use the same local exception.
+
+SUT uses its existing hash/identity-verified local offer. OG additionally inspects
+an adjacent OpenGlassSetup.Signed.exe read-only, pins it against modification,
+checks the upstream publisher and reads its version; it never copies, unblocks
+or executes it during inspection. Normal acquisition rechecks/stages that installer
+before any mutation. Missing, invalid or wrong-signer files do not permit apply.
+The offline safety warning still uses the reviewed risk version internally, never
+as a fake server offer or displayed discovered version.
+
+All native browser `title` tooltips in the production shared WebView page have
+been replaced by an in-document, keyboard-accessible acrylic tooltip overlay.
+It is clamped to viewport bounds, uses textContent and aria-describedby, and
+closes on pointer exit, focus exit, input, scrolling and resizing. This shared
+page also covers the uninstaller's WebView UI.
+
+Removed the AlreadyRunning page, branches, strings and resource IDs. A duplicate
+non-handoff launch activates/restores GlassSetupWindow and exits before creating
+another wizard, with a bounded wait for the first process's CreateWindow race.
+Validated controller-child handoff remains exempt; no window recentering or
+arbitrary command forwarding is introduced.
+
+Validation: 140 portable mocks, all 10 DOM suites, resource mirror checks and
+`git diff --check`. New tests exercise the actual duplicate-instance code,
+read-only signed local OG discovery, local-allowed/E403-visual DOM, acrylic tooltip
+content, and readiness with/without verified local media. Native focus behavior,
+WebView acrylic rendering and signed-EXE staging remain Windows acceptance checks.

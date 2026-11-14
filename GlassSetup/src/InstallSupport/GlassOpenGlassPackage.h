@@ -11,6 +11,7 @@ struct Package {
     std::wstring version,setup,dll,host,gui;
     bool milComp=false;
 };
+bool DescribeLocal(std::wstring& version,std::wstring& path) noexcept;
 // Metadata only: no workspace, payload download or execution.
 bool Describe(const std::atomic<bool>& cancel,std::wstring& version,std::uint64_t& size,std::wstring& error) noexcept;
 // Official-installer staging: adjacent signed EXE first, otherwise release.

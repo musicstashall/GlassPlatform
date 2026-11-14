@@ -19,18 +19,20 @@ void PostMessageW(int,UINT,unsigned w,int l){++posted;result=w;product=l;}
 void EnableWindow(int,bool){}
 namespace InstallLog{template<class... T>void LineFormat(const wchar_t*,T...) {}}
 namespace GlassSecureUxPackage{
-struct Offer{std::wstring releaseVersion;};
+struct Offer{std::wstring releaseVersion;bool localVerified=false;};
 bool Describe(const std::atomic_bool&,Offer& o,std::wstring& error){++calls;if(requestOk)o.releaseVersion=L"4.0.0";else error=L"GitHub HTTP error (403)";return requestOk;}
 }
 namespace GlassOpenGlassPackage{
+bool DescribeLocal(std::wstring&,std::wstring&){return false;}
 bool Describe(const std::atomic_bool&,std::wstring& version,std::uint64_t& size,std::wstring& error){++calls;size=1000;if(requestOk)version=L"3.0.2.3749";else error=L"GitHub HTTP error (403)";return requestOk;}
 }
 struct Wizard{
  std::thread vendorMetadataThread_;std::mutex inspectMutex_;
  std::atomic_bool inspectReady_{true},inspectStop_{false};
+ bool ogMetadataLocal_=false,sutMetadataLocal_=false;
  bool closing_=false,ogMetadataBlocked_=true,sutMetadataBlocked_=true,failurePending_=false;
  std::wstring vendorMetadataRetry_;int next_=1,syncs=0;
- struct{std::wstring openGlassDiscoveryError,secureUxDiscoveryError;struct{std::wstring remotePayloadVersion;}og;GlassSecureUxPackage::Offer secureUxOffer;}inspect_;
+ struct{std::wstring openGlassDiscoveryError,secureUxDiscoveryError;struct{std::wstring remotePayloadVersion,targetPayloadVersion,attachedPayloadVersion,selectedPackagePath;bool sourceVerified=false;}og;GlassSecureUxPackage::Offer secureUxOffer;}inspect_;
  bool ComponentsReady(){return true;}void SyncWebViewState(){++syncs;}
  // WORKER
  int Complete(){auto w=result;auto l=product;

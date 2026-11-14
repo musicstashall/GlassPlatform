@@ -20,7 +20,7 @@ namespace GlassInstallUtil {bool IsOs64Bit(){return native64;}}
 enum class Page {Components,Certificate,Installing};
 struct UI {
  GlassProducts::Selection selection_;Page page_=Page::Components;
- bool ogMetadataBlocked_=false,sutMetadataBlocked_=false;bool resourcesPrerequisiteReady_=false,downloadContinuePending_=false,downloadsReady=false;
+ bool ogMetadataBlocked_=false,sutMetadataBlocked_=false,ogMetadataLocal_=false,sutMetadataLocal_=false;bool resourcesPrerequisiteReady_=false,downloadContinuePending_=false,downloadsReady=false;
  std::atomic<bool> inspectReady_{true};
  bool DownloadsReady() const {return downloadsReady;}
  // METHODS
@@ -45,7 +45,9 @@ int main(){
  }
  // HTTP 403 metadata block never authorizes apply, but removal remains usable.
  {UI gated;native64=true;gated.ogMetadataBlocked_=true;gated.selection_.openGlass=true;assert(!gated.ComponentsReady());
+  gated.ogMetadataLocal_=true;assert(gated.ComponentsReady());
   gated.selection_.openGlass=false;gated.selection_.secureUxTheme=true;gated.sutMetadataBlocked_=true;assert(!gated.ComponentsReady());
+  gated.sutMetadataLocal_=true;assert(gated.ComponentsReady());
   gated.selection_.secureUxTheme=false;gated.selection_.secureUxThemeRemove=true;assert(gated.ComponentsReady());}
  // SUT apply/removal may precede Resources and OG in the same plan.
  for(bool resources:{false,true})for(bool sutRemove:{false,true}){

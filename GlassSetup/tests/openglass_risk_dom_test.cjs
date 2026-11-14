@@ -29,18 +29,27 @@ for(const locale of ['ru','en']){
  send([{...forbidden,metadataBlocked:false,metadataRetrying:false,applySupported:true,targetPayloadVersion:'3.0.2.3749'}],locale);
  assert.equal(d.querySelector('#components-grid .download-retry'),null);
  assert.equal(d.querySelector('#components-grid .comp-decision').disabled,false);
- // Reproduce log4: both vendor API calls failed, no live versions.
- const offlineOg={...og,checked:false,targetVersion:'',targetPayloadVersion:'',remotePayloadVersion:'',displayVersion:'3.0.2.3749',versionFallback:true};
- const offlineSut={id:'secureUxTheme',title:'SecureUxTheme',installed:false,checked:false,applySupported:true,targetVersion:'',displayVersion:'4.0.0',versionFallback:true};
- send([offlineOg,offlineSut],locale);
- const offline=d.querySelector('#components-grid [data-product="openglass"]');
- assert.ok(offline.classList.contains('compatibility-risk'),'available OG warns before selection despite API failure');
- assert.ok(offline.textContent.includes('3.0.2.3749'));
- assert.equal(dom.window.getComputedStyle(offline.querySelector('.comp-warning-button')).color,'rgb(255, 107, 107)');
- assert.ok(!offline.textContent.includes('на сервере 3.0.2.3749')&&!offline.textContent.includes('on server 3.0.2.3749'));
- assert.ok(d.querySelector('#components-grid [data-product="secureUxTheme"]').textContent.includes('4.0.0'));
- send([{...offlineSut,checked:true}],locale);
- assert.ok(d.querySelector('#components-installed-grid [data-product="secureUxTheme"]').textContent.includes('4.0.0'));
+ // Local verified media remains usable while the E403 visuals and retry remain.
+ for(const id of ['openglass','secureUxTheme']){
+  const local={...forbidden,id,title:id,metadataLocalAvailable:true,applySupported:true,
+   targetVersion:'4.0.0',targetPayloadVersion:id==='openglass'?'3.0.2.3749':'',localPackageVersion:'4.0.0',attachedPayloadVersion:id==='openglass'?'3.0.2.3749':'',attachedPackageVersion:'4.0.0'};
+  send([local],locale);
+  const card=d.querySelector('#components-grid [data-product="'+id+'"]');
+  assert.ok(card.querySelector('.metadata-error-label').textContent.includes('E403'));
+  assert.ok(card.textContent.includes(locale==='ru'?'на сервере —':'on server —'));
+  assert.ok(card.textContent.includes(locale==='ru'?'локально ':'local '));
+  assert.ok(!/известная|last known/.test(card.textContent));
+  assert.equal(card.querySelector('.comp-decision').disabled,false);
+  assert.ok(card.querySelector('.download-retry'));
+  const retry=card.querySelector('.download-retry');
+  assert.equal(retry.hasAttribute('title'),false);
+  retry.dispatchEvent(new dom.window.Event('pointerover',{bubbles:true}));
+  const tip=d.getElementById('acrylic-tooltip');assert.equal(tip.hidden,false);
+  assert.equal(tip.textContent,locale==='ru'?'Повторить загрузку метаданных':'Retry metadata download');
+  assert.equal(d.querySelectorAll('[title]').length,0);
+  dom.window.commitComponentChoice(d.getElementById('product-'+id),true);
+  assert.equal(d.getElementById('product-'+id).checked,true);
+ }
  send([og],locale);
  const card=d.querySelector('#components-installed-grid [data-product="openglass"]');
  assert.ok(card.classList.contains('compatibility-risk'));assert.ok(!card.classList.contains('is-broken'));

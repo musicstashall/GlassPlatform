@@ -336,7 +336,7 @@ assert begin_startup.index("WizardTheme::InstallDetours()") < begin_startup.inde
 assert "--debug-slow-startup" in begin_startup and "IDS_STARTUP_FAILED" in begin_startup
 complete_startup = section(setup, "    void CompleteStartupIfReady()", "    void Layout()")
 assert "startupThread_.join()" in complete_startup and "Page::RuntimeRequired" in complete_startup
-assert "Page::AlreadyRunning" in complete_startup and "PostMessageW(window,kInitWebView" in complete_startup
+assert "Page::AlreadyRunning" not in setup and "PostMessageW(window,kInitWebView" in complete_startup
 assert "case kInitWebView: if (!closing_) InitializeWebView()" in setup
 assert "COINIT_APARTMENTTHREADED" in setup
 cleanup = section(setup, "    void Cleanup()", "    LRESULT Handle(")

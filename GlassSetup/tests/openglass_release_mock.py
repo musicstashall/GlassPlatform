@@ -50,6 +50,6 @@ with tempfile.TemporaryDirectory(prefix='OgRelease-') as d:
  subprocess.run([str(exe)],check=True)
 
 main=(root / "GlassSetup/src/main.cpp").read_text(encoding="utf-8-sig")
-assert "const bool applySupported=(!openGlass||!ogMetadataBlocked_)&&(!resources||resourcesReady)&&(openGlass?" in main
+assert "const bool applySupported=(!openGlass||!ogMetadataBlocked_||ogMetadataLocal_)&&(!resources||resourcesReady)&&(openGlass?" in main
 assert "GlassOpenGlassRelease::CanPlanApply" in main
 assert "(openGlass||!targetVersion.empty())&&!selectedLocal" in main
