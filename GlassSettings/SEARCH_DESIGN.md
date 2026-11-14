@@ -108,7 +108,8 @@ case, Unicode Form D, удаление диакритики, `ё→е`, заме
   идентификатор назначения.
 - `MainWindow.xaml`: `TextChanged`, `QuerySubmitted`,
   `TextMemberPath="DisplayText"` и явный `ItemTemplate` для читаемого заголовка
-  подсказки; `ProtectedCursor=IBeam` задаёт каретку над полем ввода.
+  подсказки. Остаётся стандартный `AutoSuggestBox`, который не требует
+  наследования от запечатанного WinUI-типа.
 - `MainWindow.xaml.cs`: `DispatcherQueueTimer` с интервалом 1000 мс, повторный
   запуск при вводе; обработчик таймера читает `SearchBox.Text`, применяет
   availability-фильтр и обновляет `ItemsSource`; выбор элемента повторно

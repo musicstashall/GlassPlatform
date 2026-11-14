@@ -42,7 +42,7 @@
                     </HyperlinkButton>
                 </TitleBar.LeftHeader>
                 <TitleBar.Content>
-                    <ctrl:SettingsSearchBox
+                    <AutoSuggestBox
                         x:Name="SearchBox"
                         Width="360"
                         HorizontalAlignment="Right"
@@ -52,14 +52,14 @@
                         TextMemberPath="DisplayText"
                         TextChanged="SearchBox_OnTextChanged"
                         QuerySubmitted="SearchBox_OnQuerySubmitted">
-                        <ctrl:SettingsSearchBox.ItemTemplate>
+                        <AutoSuggestBox.ItemTemplate>
                             <DataTemplate>
                                 <TextBlock
                                     Text="{Binding DisplayText}"
                                     TextTrimming="CharacterEllipsis" />
                             </DataTemplate>
-                        </ctrl:SettingsSearchBox.ItemTemplate>
-                    </ctrl:SettingsSearchBox>
+                        </AutoSuggestBox.ItemTemplate>
+                    </AutoSuggestBox>
                 </TitleBar.Content>
             </TitleBar>
             <NavigationView
