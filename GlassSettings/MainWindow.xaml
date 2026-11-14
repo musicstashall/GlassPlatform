@@ -51,7 +51,15 @@
                         QueryIcon="Find"
                         TextMemberPath="DisplayText"
                         TextChanged="SearchBox_OnTextChanged"
-                        QuerySubmitted="SearchBox_OnQuerySubmitted" />
+                        QuerySubmitted="SearchBox_OnQuerySubmitted">
+                        <AutoSuggestBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock
+                                    Text="{Binding DisplayText}"
+                                    TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </AutoSuggestBox.ItemTemplate>
+                    </AutoSuggestBox>
                 </TitleBar.Content>
             </TitleBar>
             <NavigationView

@@ -10,6 +10,13 @@ public static class SettingsSearchCatalog
 {
     private const string Russian = "ru-RU";
     private const string English = "en-US";
+    private static readonly string[] ExcludedKeyMarkers =
+    [
+        "Desc", "Description", "Subtitle", "Action", "Tip", "Limit", "Info", "Message", "Body",
+        "Format", "Placeholder", "Empty", "Error", "Notice", "Status", "Progress", "Failed",
+        "Saved", "Path", "Tooltip", "Preview", "Warn", "Dialog", "Picker", "Version", "Installed",
+        "Wizard", "SignatureActivated", "SignatureDeactivated"
+    ];
     private static readonly Lazy<IReadOnlyList<IndexedEntry>> Index = new(BuildIndex);
 
     private static readonly SearchEntry[] Entries =
@@ -64,16 +71,17 @@ public static class SettingsSearchCatalog
     public static IReadOnlyList<SettingsSearchSuggestion> Search(string? query)
     {
         var normalizedQuery = Normalize(query ?? string.Empty);
-        if (normalizedQuery.Length == 0)
+        if (normalizedQuery.Length < 2)
             return [];
 
         var queryWords = normalizedQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var index = Index.Value;
+        var exactMatches = FindMatches(index, queryWords, allowPrefix: false);
+        var matches = exactMatches.Count > 0
+            ? exactMatches
+            : FindMatches(index, queryWords, allowPrefix: true);
         var activeLanguage = GetActiveLanguage();
-        return Index.Value
-            .Select(entry => (Entry: entry, Score: Score(entry, normalizedQuery, queryWords)))
-            .Where(item => item.Score > 0)
-            .OrderByDescending(item => item.Score)
-            .ThenBy(item => item.Entry.Id, StringComparer.Ordinal)
+        return matches
             .Select(item => new SettingsSearchSuggestion(
                 item.Entry.Id,
                 GetDisplayString(item.Entry.TitleKey, activeLanguage),
@@ -88,6 +96,12 @@ public static class SettingsSearchCatalog
         var result = new List<IndexedEntry>(Entries.Length);
         foreach (var entry in Entries)
         {
+            var localizedTitles = new[]
+            {
+                GlassSettingsResources.GetForLanguage(entry.TitleKey, Russian),
+                GlassSettingsResources.GetForLanguage(entry.TitleKey, English),
+                entry.Id
+            };
             var texts = new List<string>(entry.ResourceKeys.Length * 2 + entry.Aliases.Length + 2);
             foreach (var key in entry.ResourceKeys
                          .Concat(SettingsSearchResourceKeys.ForDestination(entry.Destination))
@@ -95,6 +109,9 @@ public static class SettingsSearchCatalog
                          .Append(entry.LocationKey)
                          .Distinct(StringComparer.Ordinal))
             {
+                if (key != entry.TitleKey && key != entry.LocationKey && !IsSearchableResourceKey(key))
+                    continue;
+
                 AddIfNotEmpty(texts, GlassSettingsResources.GetForLanguage(key, Russian));
                 AddIfNotEmpty(texts, GlassSettingsResources.GetForLanguage(key, English));
             }
@@ -105,31 +122,41 @@ public static class SettingsSearchCatalog
                 entry.TitleKey,
                 entry.LocationKey,
                 entry.Destination,
+                Normalize(string.Join(" ", localizedTitles)),
                 Normalize(string.Join(" ", texts))));
         }
 
         return result;
     }
 
-    private static int Score(IndexedEntry entry, string query, string[] queryWords)
+    private static List<(IndexedEntry Entry, int Score)> FindMatches(
+        IReadOnlyList<IndexedEntry> index,
+        string[] queryWords,
+        bool allowPrefix)
     {
-        var score = 0;
-        if (entry.SearchText.Contains(query, StringComparison.Ordinal))
-            score += 10;
-
-        var matchedWords = 0;
-        foreach (var word in queryWords)
+        var matches = new List<(IndexedEntry Entry, int Score)>();
+        foreach (var entry in index)
         {
-            if (entry.SearchText.Contains(word, StringComparison.Ordinal))
-                matchedWords++;
+            if (!WordsMatch(entry.SearchText, queryWords, allowPrefix))
+                continue;
+
+            var titleMatch = WordsMatch(entry.TitleSearchText, queryWords, allowPrefix);
+            matches.Add((entry, (allowPrefix ? 4 : 12) + queryWords.Length + (titleMatch ? 20 : 0)));
         }
 
-        if (matchedWords == queryWords.Length)
-            score += 4 + matchedWords;
-        else if (queryWords.Length > 1 && matchedWords > 0)
-            score += matchedWords;
+        return matches
+            .OrderByDescending(item => item.Score)
+            .ThenBy(item => item.Entry.Id, StringComparer.Ordinal)
+            .ToList();
+    }
 
-        return score;
+    private static bool WordsMatch(string text, string[] queryWords, bool allowPrefix)
+    {
+        var indexedWords = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return queryWords.All(queryWord => indexedWords.Any(indexedWord =>
+            allowPrefix
+                ? indexedWord.StartsWith(queryWord, StringComparison.Ordinal)
+                : string.Equals(indexedWord, queryWord, StringComparison.Ordinal)));
     }
 
     private static string GetDisplayString(string key, string language)
@@ -152,6 +179,9 @@ public static class SettingsSearchCatalog
             ? Russian
             : English;
     }
+
+    private static bool IsSearchableResourceKey(string key) =>
+        !ExcludedKeyMarkers.Any(marker => key.Contains(marker, StringComparison.OrdinalIgnoreCase));
 
     private static void AddIfNotEmpty(List<string> values, string value)
     {
@@ -188,5 +218,6 @@ public static class SettingsSearchCatalog
         string TitleKey,
         string LocationKey,
         string Destination,
+        string TitleSearchText,
         string SearchText);
 }
