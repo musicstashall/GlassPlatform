@@ -18,6 +18,9 @@ for(const locale of ['ru','en']){
  send([forbidden],locale);
  let forbiddenCard=d.querySelector('#components-grid [data-product="openglass"]');
  const metadataRetry=forbiddenCard.querySelector('.download-retry');assert.ok(metadataRetry);
+ const retryStyle=dom.window.getComputedStyle(metadataRetry);
+ assert.equal(retryStyle.left,'50%');assert.equal(retryStyle.top,'50%');
+ assert.equal(retryStyle.transform,'translate(-50%,-50%)');assert.equal(retryStyle.width,'38px');
  assert.ok(forbiddenCard.textContent.includes('403'));
  assert.equal(forbiddenCard.querySelector('.comp-decision').disabled,true);
  const prior=messages.length;metadataRetry.click();assert.equal(messages.at(-1),'metadata-retry:openglass');assert.equal(messages.length,prior+1);
