@@ -186,3 +186,18 @@ for channel in range(3):
     assert set(stitch_dark[channel::4]) == {0}
     assert set(stitch_lite[channel::4]) == {160}
 print('PASS: approved dense CrossStitch geometry and Dark/Lite pair')
+
+twill_dark = decode_rgba(assets / 'TwillWeave_Dark.png', (8, 8))
+twill_lite = decode_rgba(assets / 'TwillWeave_Lite.png', (8, 8))
+expected_twill = bytearray()
+for y in range(8):
+    for x in range(8):
+        over = (x - y) % 4 != 0
+        alpha = (((145, 100)[x % 2] if y % 2 == 0 else (125, 80)[x % 2])
+                 if over else (55 if y % 2 == 0 else 110))
+        expected_twill.append(alpha)
+assert twill_dark[3::4] == twill_lite[3::4] == expected_twill
+for channel in range(3):
+    assert set(twill_dark[channel::4]) == {0}
+    assert set(twill_lite[channel::4]) == {160}
+print('PASS: approved TwillWeave geometry and Dark/Lite pair')
