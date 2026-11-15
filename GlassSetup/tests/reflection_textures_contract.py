@@ -54,16 +54,16 @@ def decode_rgba(path, expected_size):
 
 assets = ROOT / 'OpenGlass/Resources/GlassReflection/Textured'
 for name in ('GlassReflection_01', 'GlassReflection_02'):
-    size = (8, 8) if name == 'GlassReflection_02' else (256, 256)
+    size = (8, 8) if name == 'GlassReflection_02' else (18, 16)
     dark = decode_rgba(assets / (name + '_Dark.png'), size)
     lite = decode_rgba(assets / (name + '_Lite.png'), size)
     assert dark[3::4] == lite[3::4]
     assert len(set(dark[3::4])) > 1
     if name == 'GlassReflection_02':
-        # Golden canvas hashes: approved geometry; Lite recolored to #D0D0D0.
+        # Golden canvas hashes: approved geometry; Lite recolored to #B8B8B8.
         for pixels, expected_hash in (
             (dark, '6ca50312be4ef2ab027cc04f7cd8e9c0d081a62c7262a971e8bf32f5a041fc35'),
-            (lite, '52381c19d0be1acd960d81593551d21ad8efee076b5c4746e50754feacaa68d7'),
+            (lite, '30a57629a033d712f0b00ed82293855c84f585d42f4bab631f5cae13c124585d'),
         ):
             canvas = b''.join(bytes(pixels[(y % 8) * 32:(y % 8 + 1) * 32]) * 240
                               for y in range(1080))
@@ -77,7 +77,7 @@ for name in ('GlassReflection_01', 'GlassReflection_02'):
                            for y in range(8) for x in range(8))
     for channel in range(3):
         assert set(dark[channel::4]) == {0}
-        assert set(lite[channel::4]) == {208}
+        assert set(lite[channel::4]) == {184}
 print('PASS: RGBA pairs, 02 minimal 8x8 cell; full canvases match approved 256px tiles')
 
 paths = (ROOT / 'GlassSettings/Core/Platform/PlatformPaths.cs').read_text()
@@ -106,7 +106,12 @@ assert 'RepeatPixels(pixels.DetachPixelData()' in service
 assert 'Task.Run(() => RepeatPixels(tile' in service
 print('PASS: texture previews and applied canvas share unscaled pixel repetition; stale previews guarded')
 
-assert 'TransparencyCheckerboard.CreateImage(148, 92)' in control
+assert 'TransparencyCheckerboard.CreateImage(148, 92, colored: true)' in control
 xaml = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml').read_text()
 assert xaml.index('x:Name="CheckerboardImage"') < xaml.index('x:Name="PreviewImage"')
 print('PASS: shared atlas checkerboard placed behind reflection preview')
+
+checker = (ROOT / 'GlassSettings/Services/TransparencyCheckerboard.cs').read_text()
+assert 'bool colored = false' in checker
+assert '157, 174, 177' in checker and '177, 163, 157' in checker
+print('PASS: muted colored reflection substrate, original default retained for atlases')

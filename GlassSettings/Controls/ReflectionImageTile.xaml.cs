@@ -40,7 +40,7 @@ public sealed partial class ReflectionImageTile : UserControl
     public ReflectionImageTile()
     {
         InitializeComponent();
-        CheckerboardImage.Source = TransparencyCheckerboard.CreateImage(148, 92);
+        CheckerboardImage.Source = TransparencyCheckerboard.CreateImage(148, 92, colored: true);
         Loaded += (_, _) => UpdateSelectionVisualState();
         RootBorder.ContextRequested += OnRootContextRequested;
     }
