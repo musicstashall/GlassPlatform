@@ -1058,6 +1058,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private async void ReflectionItems_OnItemInvoked(ItemsView sender, ItemsViewItemInvokedEventArgs e)
     {
         if (e.InvokedItem is not ReflectionImageTileModel model) return;
+        Exception? preparationError = null;
         await PageShell.Operations.RunSequenceAsync(async seq =>
         {
             await seq.RegistryMutationAsync(async () =>
@@ -1068,12 +1069,23 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
                 catch (Exception error)
                 {
                     System.Diagnostics.Trace.TraceError("Reflection generation failed: {0}", error);
+                    preparationError = error;
                     return;
                 }
                 TrySelectCustomImage(ReflectionRegistryKey, path, refreshNotice: false);
             });
             await seq.NoticeSyncAsync(() => PageShell.RefreshSessionNoticeProgrammatic());
         });
+        if (preparationError is not null)
+            await HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("Dialog_ReflectionPrepareFailedTitle"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Format("Dialog_ReflectionPrepareFailedBody",
+                        GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory, preparationError.Message)),
+                Footer = HostedConfirmationDialogService.CreateFooter(
+                    GlassSettingsResources.Get("Dialog_Understood"))
+            });
     }
 
     private void MaterialItems_OnItemInvoked(ItemsView sender, ItemsViewItemInvokedEventArgs e)

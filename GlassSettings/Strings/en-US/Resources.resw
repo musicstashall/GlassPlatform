@@ -1133,4 +1133,8 @@
   <data name="System_BackupBusy" xml:space="preserve"><value>Creating and verifying the archive…</value></data>
   <data name="System_BackupSaved" xml:space="preserve"><value>Settings archive saved and verified:</value></data>
   <data name="System_BackupFailed" xml:space="preserve"><value>A complete settings copy could not be created. Do not clean up settings until a backup succeeds.</value></data>
+  <data name="Dialog_ReflectionPrepareFailedTitle" xml:space="preserve"><value>Could not apply texture</value></data>
+  <data name="Dialog_ReflectionPrepareFailedBody" xml:space="preserve"><value>Could not prepare or copy the reflection to {0}. Check write access to this folder.
+
+{1}</value></data>
 </root>

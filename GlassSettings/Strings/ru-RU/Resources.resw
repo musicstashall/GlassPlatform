@@ -1138,4 +1138,8 @@
   <data name="System_BackupBusy" xml:space="preserve"><value>Создание и проверка архива…</value></data>
   <data name="System_BackupSaved" xml:space="preserve"><value>Архив параметров сохранён и проверен:</value></data>
   <data name="System_BackupFailed" xml:space="preserve"><value>Не удалось создать полную копию параметров. Не выполняйте очистку до успешного сохранения.</value></data>
+  <data name="Dialog_ReflectionPrepareFailedTitle" xml:space="preserve"><value>Не удалось применить текстуру</value></data>
+  <data name="Dialog_ReflectionPrepareFailedBody" xml:space="preserve"><value>Не удалось подготовить или скопировать отражение в {0}. Проверьте доступ на запись к этой папке.
+
+{1}</value></data>
 </root>
