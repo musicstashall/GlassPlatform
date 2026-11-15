@@ -667,7 +667,6 @@
   <data name="Home_GlassUpdateLinkSummary" xml:space="preserve"><value>Обновления: {0}</value></data>
   <data name="Home_OpenGlassRepairNotice" xml:space="preserve"><value>Сборка Windows изменилась. OpenGlass нужно переустановить для текущего DWM. Версия канала: {0}.</value></data>
   <data name="Home_OpenGlassRepairLink" xml:space="preserve"><value>Переустановка {0}</value></data>
-  <data name="Home_UpdateCheckOffline" xml:space="preserve"><value>Не удалось проверить обновления. Это не значит, что обновлений нет.</value></data>
   <data name="Home_RowPopupWindows" xml:space="preserve"><value>Popup-окна</value></data>
   <data name="Home_RowProcessList" xml:space="preserve"><value>Список процессов</value></data>
   <data name="Home_RowRootWindows" xml:space="preserve"><value>Root-окна</value></data>
@@ -1148,7 +1147,7 @@
   <data name="Reflection_Configure" xml:space="preserve"><value>Настроить</value></data>
   <data name="Reflection_SettingScale" xml:space="preserve"><value>Масштаб, %</value></data>
   <data name="Reflection_SettingOpacity" xml:space="preserve"><value>Непрозрачность, %</value></data>
-  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Мягкость краёв, px (0–10)</value></data>
+  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Мягкость краёв, px (0–20)</value></data>
   <data name="Reflection_Reset" xml:space="preserve"><value>По умолчанию</value></data>
   <data name="Reflection_SettingNoise" xml:space="preserve"><value>Шум, %</value></data>
   <data name="Reflection_SettingNoiseType" xml:space="preserve"><value>Тип зерна</value></data>

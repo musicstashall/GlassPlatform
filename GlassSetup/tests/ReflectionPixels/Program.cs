@@ -150,7 +150,7 @@ Check(noNoiseBackground.All(v => v == 0), "None leaves transparent background no
 for (int type = 0; type < 5; type++)
     Check(new ReflectionRenderSettings(NoiseType: type).Normalize().NoiseType == type,
         "existing stored noise IDs preserved: " + type);
-Check(new ReflectionRenderSettings(Softness: 99).Normalize().Softness == 10, "softness upper bound is 10px");
+Check(new ReflectionRenderSettings(Softness: 99).Normalize().Softness == 20, "softness upper bound is 20px");
 byte[] tinyBlur = [160, 160, 160, 100];
-ReflectionPixelEffects.ApplyAlpha(tinyBlur, 1, 1, new(Softness: 10), wrap: true);
-Check(tinyBlur.SequenceEqual(new byte[] { 160, 160, 160, 100 }), "10px blur safely wraps a one-pixel texture");
+ReflectionPixelEffects.ApplyAlpha(tinyBlur, 1, 1, new(Softness: 20), wrap: true);
+Check(tinyBlur.SequenceEqual(new byte[] { 160, 160, 160, 100 }), "20px blur safely wraps a one-pixel texture");

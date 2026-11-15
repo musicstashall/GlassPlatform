@@ -90,13 +90,6 @@ public static class ProductUpdateCoordinator
     public static GlassReleaseInfo? GetPendingGlass() =>
         GlassReleaseUpdateService.TryReadPendingRelease();
 
-    public static bool ShouldShowOfflineNotice =>
-        !ShouldShowOpenGlassNotice
-        && !ShouldShowGlassNotice
-        && (GlassSettingsRegistry.IsGlassUpdateLastCheckFailed()
-            || (OpenGlassUiPolicy.IsFeatureExposedInUi() && GlassSettingsRegistry.IsOpenGlassUpdateLastCheckFailed()))
-        && !GlassSettingsRegistry.IsUpdateCheckOfflineNoticeDismissed();
-
     public static void DismissGlassNotice()
     {
         GlassSettingsRegistry.DismissGlassPendingOffers();
@@ -109,13 +102,6 @@ public static class ProductUpdateCoordinator
             DismissOpenGlassNotice();
         else if (ShouldShowGlassNotice)
             DismissGlassNotice();
-        else if (GlassSettingsRegistry.IsGlassUpdateLastCheckFailed()
-                 || (OpenGlassUiPolicy.IsFeatureExposedInUi()
-                     && GlassSettingsRegistry.IsOpenGlassUpdateLastCheckFailed()))
-        {
-            GlassSettingsRegistry.WriteUpdateCheckOfflineNoticeDismissed();
-            NotifyChanged();
-        }
     }
 
     public static Task OpenPendingGlassDownloadAsync()
@@ -131,8 +117,6 @@ public static class ProductUpdateCoordinator
             return OpenPendingOpenGlassDownloadAsync();
         if (ShouldShowGlassNotice)
             return OpenPendingGlassDownloadAsync();
-        if (ShouldShowOfflineNotice)
-            GlassMaintenanceSetupLaunchService.TryLaunch();
         return Task.CompletedTask;
     }
 
@@ -201,8 +185,6 @@ public static class ProductUpdateCoordinator
             return string.Format(GlassSettingsResources.Get("System_GlassUpdateSpoilerSummary"), info.Updates.Count);
         return string.Format(GlassSettingsResources.Get("System_OpenGlassUpdateSpoilerFormat"), info.Version);
     }
-
-    public static string OfflineNoticeText => GlassSettingsResources.Get("Home_UpdateCheckOffline");
 
     private static void MigrateLegacyDismissedTag()
     {
@@ -312,7 +294,6 @@ public static class ProductUpdateCoordinator
                 GlassReleaseUpdateService.JoinOffers(merged));
         }
 
-        NoteSuccessfulCheck();
     }
 
     private static async Task CheckNetworkForOpenGlassAsync()
@@ -371,7 +352,6 @@ public static class ProductUpdateCoordinator
                 build);
         }
 
-        NoteSuccessfulCheck();
     }
 
     private static bool NeedsOpenGlassRepairCheck()
@@ -420,13 +400,6 @@ public static class ProductUpdateCoordinator
 
     private static string InstalledOfferVersion(GlassProductUpdate update, string fallback) =>
         GlassInstalledProducts.TryReadVersion(update.Id, out var installed) ? installed : fallback;
-
-    private static void NoteSuccessfulCheck()
-    {
-        if (!GlassSettingsRegistry.IsGlassUpdateLastCheckFailed()
-            && !GlassSettingsRegistry.IsOpenGlassUpdateLastCheckFailed())
-            GlassSettingsRegistry.ClearUpdateCheckOfflineNoticeDismissed();
-    }
 
     private static void NotifyChanged() => PendingUpdatesChanged?.Invoke(null, EventArgs.Empty);
 }

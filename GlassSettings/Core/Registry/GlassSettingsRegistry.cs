@@ -251,43 +251,11 @@ public static partial class GlassSettingsRegistry
 
 
 
-    public static DateTime? ReadOpenGlassUpdateLastCheckUtc()
-
-    {
-
-        var raw = GlassRegistry.ReadDword(SubKey, OpenGlassUpdateLastCheckUtcValue);
-
-        if (!raw.HasValue || raw.Value == 0)
-
-            return null;
-
-
-
-        try
-
-        {
-
-            return DateTime.FromFileTimeUtc((long)raw.Value);
-
-        }
-
-        catch
-
-        {
-
-            return null;
-
-        }
-
-    }
-
-
+    public static DateTime? ReadOpenGlassUpdateLastCheckUtc() =>
+        ReadUpdateCheckUtc(OpenGlassUpdateLastCheckUtcValue);
 
     public static void WriteOpenGlassUpdateLastCheckUtc(DateTime utc) =>
-
-        GlassRegistry.WriteDword(SubKey, OpenGlassUpdateLastCheckUtcValue, unchecked((uint)utc.ToFileTimeUtc()));
-
-
+        WriteUpdateCheckUtc(OpenGlassUpdateLastCheckUtcValue, utc);
 
     public static string? ReadOpenGlassUpdatePendingVersion() =>
 

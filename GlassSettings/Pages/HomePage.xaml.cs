@@ -1753,8 +1753,7 @@ public sealed partial class HomePage : Page
                     && ProductUpdateCoordinator.ShouldShowOpenGlassNotice
                     && ProductUpdateCoordinator.GetPendingOpenGlass() is not null)
                 || (ProductUpdateCoordinator.ShouldShowGlassNotice
-                    && ProductUpdateCoordinator.GetPendingGlass() is not null)
-                || ProductUpdateCoordinator.ShouldShowOfflineNotice;
+                    && ProductUpdateCoordinator.GetPendingGlass() is not null);
             if (!showUpdateWhilePending)
             {
                 SyncSummaryFooterFromSession();
@@ -1799,14 +1798,6 @@ public sealed partial class HomePage : Page
             if (PlatformModuleVersions.IsPlaceholderVersion(installedGlass))
                 installedGlass = "—";
             updateMessage = ProductUpdateCoordinator.FormatGlassNotice(pendingGlassNotice, installedGlass);
-            updateActionText = GlassSettingsResources.Get("System_OpenGlassUpdateAction");
-            if (!animateUpdate)
-                animateUpdate = !UpdateNoticeStrip.IsVisuallyOpen;
-        }
-        else if (ProductUpdateCoordinator.ShouldShowOfflineNotice)
-        {
-            showUpdate = true;
-            updateMessage = ProductUpdateCoordinator.OfflineNoticeText;
             updateActionText = GlassSettingsResources.Get("System_OpenGlassUpdateAction");
             if (!animateUpdate)
                 animateUpdate = !UpdateNoticeStrip.IsVisuallyOpen;

@@ -661,7 +661,6 @@
   <data name="Home_GlassUpdateLinkSummary" xml:space="preserve"><value>Updates: {0}</value></data>
   <data name="Home_OpenGlassRepairNotice" xml:space="preserve"><value>The Windows build changed. OpenGlass needs to be reinstalled for the current DWM. Channel version: {0}.</value></data>
   <data name="Home_OpenGlassRepairLink" xml:space="preserve"><value>Reinstall {0}</value></data>
-  <data name="Home_UpdateCheckOffline" xml:space="preserve"><value>Could not check for updates. That does not mean there are no updates.</value></data>
   <data name="Home_RowPopupWindows" xml:space="preserve"><value>Popup windows</value></data>
   <data name="Home_RowProcessList" xml:space="preserve"><value>Process list</value></data>
   <data name="Home_RowRootWindows" xml:space="preserve"><value>Root windows</value></data>
@@ -1143,7 +1142,7 @@
   <data name="Reflection_Configure" xml:space="preserve"><value>Configure</value></data>
   <data name="Reflection_SettingScale" xml:space="preserve"><value>Scale, %</value></data>
   <data name="Reflection_SettingOpacity" xml:space="preserve"><value>Opacity, %</value></data>
-  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Edge softness, px (0–10)</value></data>
+  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Edge softness, px (0–20)</value></data>
   <data name="Reflection_Reset" xml:space="preserve"><value>Defaults</value></data>
   <data name="Reflection_SettingNoise" xml:space="preserve"><value>Noise, %</value></data>
   <data name="Reflection_SettingNoiseType" xml:space="preserve"><value>Grain type</value></data>

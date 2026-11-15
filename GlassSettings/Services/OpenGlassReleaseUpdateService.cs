@@ -73,12 +73,18 @@ public static class OpenGlassReleaseUpdateService
         {
             using var response = await Http.GetAsync(ReleasesApiUrl).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
+            {
+                Trace.TraceWarning("[UpdateCheck] OpenGlass releases HTTP {0}", (int)response.StatusCode);
                 return MarkUnreachable();
+            }
 
             await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
             using var doc = await JsonDocument.ParseAsync(stream).ConfigureAwait(false);
             if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                Trace.TraceWarning("[UpdateCheck] OpenGlass releases schema: expected array");
                 return MarkUnreachable();
+            }
 
             OpenGlassReleaseInfo? current = null;
             OpenGlassReleaseInfo? legacy = null;
@@ -119,8 +125,9 @@ public static class OpenGlassReleaseUpdateService
             MarkReached();
             return new OpenGlassChannelCheck { Reached = true, Current = current, Legacy = legacy };
         }
-        catch
+        catch (Exception error)
         {
+            Trace.TraceWarning("[UpdateCheck] OpenGlass releases {0}: {1}", error.GetType().Name, error.Message);
             return MarkUnreachable();
         }
     }
