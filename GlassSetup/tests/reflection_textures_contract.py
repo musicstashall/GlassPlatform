@@ -60,10 +60,10 @@ for name in ('GlassReflection_01', 'GlassReflection_02'):
     assert dark[3::4] == lite[3::4]
     assert len(set(dark[3::4])) > 1
     if name == 'GlassReflection_02':
-        # Golden hashes of 1920x1080 RGBA canvases built from the approved 256px tiles.
+        # Golden canvas hashes: approved geometry; Lite recolored to #D0D0D0.
         for pixels, expected_hash in (
             (dark, '6ca50312be4ef2ab027cc04f7cd8e9c0d081a62c7262a971e8bf32f5a041fc35'),
-            (lite, 'c18f341b5d2ec192f390e7832ef2c7fa7026929c92551811586b27b01e01b478'),
+            (lite, '52381c19d0be1acd960d81593551d21ad8efee076b5c4746e50754feacaa68d7'),
         ):
             canvas = b''.join(bytes(pixels[(y % 8) * 32:(y % 8 + 1) * 32]) * 240
                               for y in range(1080))
@@ -77,7 +77,7 @@ for name in ('GlassReflection_01', 'GlassReflection_02'):
                            for y in range(8) for x in range(8))
     for channel in range(3):
         assert set(dark[channel::4]) == {0}
-        assert set(lite[channel::4]) == {255}
+        assert set(lite[channel::4]) == {208}
 print('PASS: RGBA pairs, 02 minimal 8x8 cell; full canvases match approved 256px tiles')
 
 paths = (ROOT / 'GlassSettings/Core/Platform/PlatformPaths.cs').read_text()
@@ -105,3 +105,8 @@ assert 'revision != _imageRevision' in control
 assert 'RepeatPixels(pixels.DetachPixelData()' in service
 assert 'Task.Run(() => RepeatPixels(tile' in service
 print('PASS: texture previews and applied canvas share unscaled pixel repetition; stale previews guarded')
+
+assert 'TransparencyCheckerboard.CreateImage(148, 92)' in control
+xaml = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml').read_text()
+assert xaml.index('x:Name="CheckerboardImage"') < xaml.index('x:Name="PreviewImage"')
+print('PASS: shared atlas checkerboard placed behind reflection preview')
