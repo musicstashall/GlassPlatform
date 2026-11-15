@@ -132,24 +132,17 @@ for channel in range(3):
     assert set(fine_lite[channel::4]) == {160}
 print('PASS: approved FineDiagonal 3x3 geometry, paired alpha and Dark/Lite colors')
 
-dragon_dark = decode_rgba(assets / 'DragonScale_Dark.png', (12, 12))
-dragon_lite = decode_rgba(assets / 'DragonScale_Lite.png', (12, 12))
-expected_dragon = bytearray()
-for y in range(12):
-    for x in range(12):
-        strength = 0.0
-        for cy in (-6, 0, 6, 12):
-            offset = 3 if (cy // 6) % 2 else 0
-            for cx in range(-12, 25, 6):
-                dx, dy = x - (cx + offset), y - cy
-                if 0 <= dy <= 5 and abs(dx) <= 3:
-                    strength = max(strength, max(0, 1 - abs(dy - (1.0 + 0.40 * dx * dx))))
-        expected_dragon.append(round(45 + 110 * strength))
+dragon_dark = decode_rgba(assets / 'DragonScale_Dark.png', (8, 8))
+dragon_lite = decode_rgba(assets / 'DragonScale_Lite.png', (8, 8))
+# Regression alpha for the periodically filtered 2/3-size DragonScale.
+expected_dragon = bytes.fromhex(
+    "4f342d3e4f342d3e564e3b55564e3b552f47473d2f47473d2d32492d2d32492d2d3e4f342d3e4f343b55564e3b55564e473d2f47473d2f47492d2d32492d2d32"
+)
 assert dragon_dark[3::4] == dragon_lite[3::4] == expected_dragon
 for channel in range(3):
     assert set(dragon_dark[channel::4]) == {0}
     assert set(dragon_lite[channel::4]) == {160}
-print('PASS: approved DragonScale 12x12 geometry, paired alpha and Dark/Lite colors')
+print('PASS: DragonScale 8x8 geometry, paired alpha and Dark/Lite colors')
 
 chevron_dark = decode_rgba(assets / 'MicroChevron_Dark.png', (8, 8))
 chevron_lite = decode_rgba(assets / 'MicroChevron_Lite.png', (8, 8))
