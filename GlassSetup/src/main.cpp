@@ -1829,8 +1829,11 @@ private:
                 sutCanRemove=SecureUxThemeRemovalSupportedLocked();sutInstalled=inspect_.secureUxTheme.installed;
                 const auto& offer=inspect_.secureUxOffer;
                 if(sutInstalled)sutVersion=inspect_.secureUxTheme.installedPackageVersion;
-                else if(offer.localVerified)sutVersion=L"MSI "+offer.localVersion;
+                // MSI рядом с установщиком. Копия в Current — уже установленный пакет, не локальное предложение.
+                else if(!offer.attachedVersion.empty()&&(offer.releaseVersion.empty()||!VersionOlder(offer.attachedVersion,offer.releaseVersion)))
+                    sutVersion=L"MSI "+offer.attachedVersion;
                 else if(!offer.releaseTag.empty())sutVersion=(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"релиз ":L"release ")+offer.releaseTag;
+                else if(offer.localVerified)sutVersion=L"MSI "+offer.localVersion;
             }
             if(sutVersion.empty())sutVersion=L"—";
             const auto sutLabel=Text(IDS_COMP_SUT_TITLE)+L" — "+sutVersion+(sutCanRemove?
@@ -2291,8 +2294,12 @@ private:
         item(L"openglass",IDS_COMP_OG_TITLE,IDS_COMP_OG_DESC,selection_.openGlass,false,!os64,&inspect_.og);
         item(L"openglassResources",IDS_COMP_OGR_TITLE,IDS_COMP_OGR_DESC,selection_.openGlassResources,false,!os64,&inspect_.openGlassResources);
         const auto& sutOffer=inspect_.secureUxOffer;
-        const bool sutLocal=sutOffer.localVerified&&!sutOffer.localVersion.empty();
-        const auto& sutTarget=sutLocal?sutOffer.localVersion:sutOffer.releaseVersion;
+        const bool sutFile=sutOffer.localVerified&&!sutOffer.localVersion.empty();
+        // Current хранит MSI уже установленного SUT. Это не пакет рядом с установщиком.
+        // Более новый релиз перекрывает более старый файл, как у остальных продуктов.
+        const bool sutReleaseNewer=sutFile&&!sutOffer.releaseVersion.empty()&&VersionOlder(sutOffer.localVersion,sutOffer.releaseVersion);
+        const bool sutUseLocal=sutFile&&!sutReleaseNewer;
+        const auto& sutTarget=sutUseLocal?sutOffer.localVersion:sutOffer.releaseVersion;
         const auto sutState=secureUxThemeState_;
         const auto sutCondition=ConditionOf(&inspect_.secureUxTheme,installedSelection_.secureUxTheme);
         const bool sutExternal=sutState==GlassInstallUtil::SecureUxThemeState::External;
@@ -2337,15 +2344,15 @@ private:
             L",\"installedVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedPackageVersion)+
             L",\"installedPackageVersion\":"+JsStringLiteral(inspect_.secureUxTheme.installedPackageVersion)+
             L",\"targetVersion\":"+JsStringLiteral(sutTarget)+
-            L",\"targetVersionKind\":"+JsStringLiteral(sutLocal?L"msi":L"release")+
+            L",\"targetVersionKind\":"+JsStringLiteral(sutUseLocal?L"msi":L"release")+
             L",\"attachedPackageVersion\":"+JsStringLiteral(sutOffer.attachedVersion)+
             L",\"attachedPackagePath\":"+JsStringLiteral(sutOffer.attachedPath)+
-            L",\"selectedPackagePath\":"+JsStringLiteral(sutOffer.localPath)+
-            L",\"downloadRequired\":"+(!sutLocal?L"true":L"false")+
-            L",\"localPackageVersion\":"+JsStringLiteral(sutLocal?sutOffer.localVersion:L"")+
+            L",\"selectedPackagePath\":"+JsStringLiteral(sutUseLocal?sutOffer.localPath:L"")+
+            L",\"downloadRequired\":"+(!sutUseLocal?L"true":L"false")+
+            L",\"localPackageVersion\":"+JsStringLiteral(sutOffer.attachedVersion)+
             L",\"remoteVersion\":"+JsStringLiteral(sutOffer.releaseVersion)+
             L",\"releaseTag\":"+JsStringLiteral(sutOffer.releaseTag)+
-            L",\"packageSize\":"+std::to_wstring(sutLocal?sutOffer.localSize:sutOffer.releaseSize)+
+            L",\"packageSize\":"+std::to_wstring(sutUseLocal?sutOffer.localSize:sutOffer.releaseSize)+
             L",\"broken\":"+(inspect_.secureUxTheme.damaged?L"true":L"false")+
             L",\"metadataLocalAvailable\":"+(sutMetadataLocal_?L"true":L"false")+
             L",\"metadataBlocked\":"+(sutMetadataBlocked_?L"true":L"false")+

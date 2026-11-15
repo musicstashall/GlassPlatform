@@ -94,6 +94,14 @@ for(const local of [true,false]){
  if(local)assert.match(card.querySelector('.c-src').textContent,/локально 4.0.0/);
  else assert.doesNotMatch(card.querySelector('.c-src').textContent,/пакет/);
 }
+// The maintenance copy of an installed SUT is not an Available local package.
+const cachedSut={id:'secureUxTheme',title:'SecureUxTheme',installed:true,installedVersion:'4.0.0',checked:false,operation:'repair',targetVersion:'4.1.0',targetVersionKind:'release',attachedPackageVersion:'',localPackageVersion:'4.0.0',metadataLocalAvailable:true,remoteVersion:'4.1.0',releaseTag:'v4.1.0',applySupported:false};
+receive({data:{type:'state',appMode:'setup',locale:'ru',page:'components',components:[cachedSut]}});
+const cachedCard=d.querySelector('[data-catalog-alias="secureUxTheme"]');
+assert.ok(cachedCard);
+assert.match(cachedCard.querySelector('.c-src').textContent,/на сервере 4.1.0/);
+assert.match(cachedCard.querySelector('.c-src').textContent,/локально —/);
+assert.doesNotMatch(cachedCard.querySelector('.c-src').textContent,/локально 4\.0\.0/);
 // English state must regenerate decision labels even when product metadata is unchanged.
 receive({data:{type:'state',locale:'en',page:'components',maintenance:false,components:rows}});
 assert.equal(d.querySelector('#components-title').textContent,'GlassPlatform products');

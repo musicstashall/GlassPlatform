@@ -1572,10 +1572,11 @@ function paintComponentCard(card,item,input,shelf){
   marks.className='c-src';
   const source=(kind,label,version)=>{if(marks.childNodes.length){const sep=document.createElement('span');sep.className='src-sep';sep.textContent='·';marks.append(sep);}const bit=document.createElement('span');bit.className='src-bit '+kind;bit.append(document.createElement('i'),document.createTextNode(label+' '+version));marks.append(bit);};
   // Exactly two source categories for every product, in server/local order.
-  // Vendor release metadata stays separate internally from MSI identity.
+  // «Local» is only a package next to the installer. The maintenance cache of
+  // an installed product is not that package, including SecureUxTheme.
   const server=componentUsesPayload(item)?item.remotePayloadVersion:
    item.id==='secureUxTheme'?(item.remoteVersion||item.releaseTag):item.remoteVersion;
-  const local=componentUsesPayload(item)?(item.attachedPayloadVersion||(item.metadataLocalAvailable?item.localPackageVersion:'')):(item.attachedPackageVersion||(item.metadataLocalAvailable?item.localPackageVersion:''));
+  const local=componentUsesPayload(item)?(item.attachedPayloadVersion||''):(item.attachedPackageVersion||'');
   // OpenGlass compares DLL FileVersion on both sides; SUT release tags
   // cannot be ordered against MSI ProductVersion.
   const comparable=item.id!=='secureUxTheme';

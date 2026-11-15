@@ -15,7 +15,9 @@ code='\n'.join(fn(t) for t in ['bool NewerMsiVersion(', 'std::vector<std::wstrin
 assert 'SecureUxTheme.msi' not in fn('std::vector<std::wstring> CandidatePaths(')
 assert 'CreatePrivateFile' not in fn('bool Describe(') and 'CopySnapshot' not in fn('bool Describe(')
 main=(root/'GlassSetup/src/main.cpp').read_text()
-assert 'const auto& sutTarget=sutLocal?sutOffer.localVersion:sutOffer.releaseVersion' in main
+assert 'const bool sutReleaseNewer=sutFile&&!sutOffer.releaseVersion.empty()&&VersionOlder(sutOffer.localVersion,sutOffer.releaseVersion)' in main
+assert 'const auto& sutTarget=sutUseLocal?sutOffer.localVersion:sutOffer.releaseVersion' in main
+assert 'JsStringLiteral(sutOffer.attachedVersion)' in main and 'JsStringLiteral(sutLocal?sutOffer.localVersion' not in main
 assert 'JsStringLiteral(sutOffer.releaseTag)' in main
 assert 'GlassSecureUxPackage::Describe(cancel,report.secureUxOffer' in (root/'GlassSetup/src/InstallSupport/GlassProductInspect.cpp').read_text()
 h=r'''
