@@ -29,16 +29,18 @@ struct Catalog {int marker;std::array<std::optional<Asset>,kCount> products{};Ca
 namespace GlassReleaseClient {std::wstring Wide(const char* text){return std::wstring(text,text+std::char_traits<char>::length(text));}}
 namespace InstallLog{void Line(const wchar_t*){}template<class... T>void LineFormat(const wchar_t*,T...){} }
 bool IsControllerChild(){return false;}
+constexpr int LANG_RUSSIAN=1;int gLanguage=0;int PRIMARYLANGID(int value){return value;}
 enum class Page{Checking,Components};
-struct VersionCheckResult{bool completed=false,fetched=false,newer=false;GlassPackageCatalog::Catalog catalog=7;
+struct VersionCheckResult{bool completed=false,fetched=false,newer=false,setupDownloadFailed=false;GlassPackageCatalog::Catalog catalog=7;
  std::wstring self=L"2.0.0.90",latest=L"2.0.0.70",preparedSetup;};
 struct App{Page page_=Page::Checking;std::mutex versionCheckMutex_;
  VersionCheckResult versionCheckResult_;bool versionCheckHandled_=false,inspectionApplied_=false,controllerCheckHandled_=false;
- GlassPackageCatalog::Catalog releaseCatalog_;int scans=0,advances=0,transitions=0;bool transfer=false;
+ GlassPackageCatalog::Catalog releaseCatalog_;int scans=0,advances=0,transitions=0,errors=0;bool transfer=false;
  bool TransitionController(const std::wstring&){++transitions;return transfer;}
  bool BeginProductInspection(){++scans;return true;}
  bool RunPreflightChecks(){return true;}
  void ContinueAfterLicenseCheck(){++advances;page_=Page::Components;}
+ void ShowInstallError(const std::wstring&){++errors;}
 '''
 main=r'''
 };
@@ -54,6 +56,9 @@ int main(){
  }
  {App a;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;a.transfer=true;
   a.CompleteVersionCheck();assert(a.transitions==1&&a.advances==0&&a.scans==0);}
+ {App a;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;a.versionCheckResult_.fetched=true;
+  a.versionCheckResult_.newer=true;a.versionCheckResult_.setupDownloadFailed=true;
+  a.CompleteVersionCheck();assert(a.advances==0&&a.errors==1&&a.versionCheckHandled_);}
  std::cout<<"PASS: actual Checking completion gate: inspection/network in both orders, failed/offline catalog, one advance\n";
 }
 '''

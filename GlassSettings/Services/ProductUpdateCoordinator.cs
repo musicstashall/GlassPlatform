@@ -261,8 +261,18 @@ public static class ProductUpdateCoordinator
         var offers = GlassReleaseUpdateService.ParseOffers(GlassSettingsRegistry.ReadGlassUpdatePendingOffers());
         if (offers.Count == 0)
         {
-            var installed = PlatformModuleVersions.GetGlassPlatformReleaseVersion();
-            if (string.IsNullOrWhiteSpace(installed) || PlatformModuleVersions.IsPlaceholderVersion(installed))
+            // Старый pending без списка продуктов сравнивается с DisplayVersion MSI,
+            // как и каталог. ProductVersion DLL сюда не подставляется.
+            string? installed = null;
+            foreach (var id in new[] { "platform64", "platform32" })
+            {
+                if (!GlassInstalledProducts.TryReadVersion(id, out var version))
+                    continue;
+                if (installed is null || GlassReleaseUpdateService.IsInstalledOlderThan(version, installed))
+                    installed = version;
+            }
+
+            if (string.IsNullOrWhiteSpace(installed))
                 return;
 
             var pendingVersion = GlassSettingsRegistry.ReadGlassUpdatePendingVersion();

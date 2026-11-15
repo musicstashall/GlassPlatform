@@ -123,6 +123,11 @@ bool CopyLocked(HANDLE source,const std::wstring& destination,const std::atomic<
     }
     return false;
 }
+// Pause before another Range request so a dropped transfer can keep its partial file.
+void PauseSetupDownloadRetry(int attempt) noexcept {
+    const unsigned shift=attempt>0&&attempt<4?static_cast<unsigned>(attempt-1):3u;
+    Sleep(500u<<shift);
+}
 }
 bool CreateWorkspace(std::wstring& directory) noexcept {
     directory.clear();
@@ -159,7 +164,17 @@ bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& wo
             error.clear();
             Handle out;out.h=GlassReleaseClient::CreatePrivateFile(part);
             if(out.h==INVALID_HANDLE_VALUE)return Fail(error,L"Cannot create private Setup staging file");
-            ok=GlassReleaseClient::Get(Wide(asset.url),out.h,nullptr,asset.size,cancel,error)&&FlushFileBuffers(out.h);
+            // Keep the same partial file across a dropped connection. Get sends
+            // Range from its current size; a failed attempt does not delete it.
+            for(int attempt=0;attempt<8&&!ok&&!cancel.load();++attempt) {
+                if(attempt) {
+                    InstallLog::Line(L"Setup download interrupted; resuming the partial file");
+                    PauseSetupDownloadRetry(attempt);
+                    if(cancel.load())break;
+                    error.clear();
+                }
+                ok=GlassReleaseClient::Get(Wide(asset.url),out.h,nullptr,asset.size,cancel,error)&&FlushFileBuffers(out.h);
+            }
         }
         if(ok){
             Handle locked;locked.h=CreateFileW(part.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);

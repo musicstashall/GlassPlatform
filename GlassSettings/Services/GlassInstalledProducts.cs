@@ -5,11 +5,15 @@ namespace GlassSettings.Services;
 
 /// <summary>
 /// Установленные продукты Glass, которые умеет обновлять каталог version.json.
-/// Платформа — ProductVersion GlassCore.dll, Settings — FileVersion GlassSettings.exe,
-/// Resources — DisplayVersion фиксированного ProductCode x64 MSI.
+/// Платформа и Resources — DisplayVersion MSI (тот же VERSIONSTRING, что пишет установщик
+/// и публикует каталог в products[].version). Не ProductVersion GlassCore.dll:
+/// строка в DLL может отставать от версии пакета. Settings — FileVersion GlassSettings.exe
+/// против payloadVersion. Коды платформы совпадают с GlassInstallMsi::kProductPlatformX64/X86.
 /// </summary>
 internal static class GlassInstalledProducts
 {
+    private const string Platform64ProductCode = "{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5071}";
+    private const string Platform32ProductCode = "{B5E8F3A1-4C2D-4E5F-9A0B-1C2D3E4F5072}";
     private const string ResourcesProductCode = "{6D6046DB-6B28-4F2C-8A7D-EB6CF13CBBD9}";
 
     public static bool TryReadVersion(string id, out string version)
@@ -36,8 +40,9 @@ internal static class GlassInstalledProducts
         if (arch == GlassPlatformArch.X64 && !Environment.Is64BitOperatingSystem)
             return false;
 
-        var path = GlassModulePath.Resolve("GlassCore.dll", arch);
-        return path is not null && PlatformModuleVersions.TryReadProductVersion(path, out version);
+        var code = arch == GlassPlatformArch.X64 ? Platform64ProductCode : Platform32ProductCode;
+        var view = arch == GlassPlatformArch.X64 ? RegistryView.Registry64 : RegistryView.Registry32;
+        return TryReadUninstallDisplay(code, view, out version);
     }
 
     private static bool TryReadSettings(GlassPlatformArch arch, out string version)
@@ -62,11 +67,17 @@ internal static class GlassInstalledProducts
         if (!Environment.Is64BitOperatingSystem)
             return false;
 
+        return TryReadUninstallDisplay(ResourcesProductCode, RegistryView.Registry64, out version);
+    }
+
+    private static bool TryReadUninstallDisplay(string productCode, RegistryView view, out string version)
+    {
+        version = string.Empty;
         try
         {
-            using var hive = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+            using var hive = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
             using var key = hive.OpenSubKey(
-                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\" + ResourcesProductCode);
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\" + productCode);
             var display = key?.GetValue("DisplayVersion") as string;
             if (string.IsNullOrWhiteSpace(display))
                 return false;

@@ -34,7 +34,8 @@ struct WINTRUST_FILE_INFO{unsigned cbStruct=0;const wchar_t* pcwszFilePath=nullp
 struct WINTRUST_DATA{unsigned cbStruct=0;int dwUIChoice=0,dwUnionChoice=0;WINTRUST_FILE_INFO* pFile=nullptr;int dwStateAction=0,dwProvFlags=0;};
 bool trusted=true,created=true,download=true,flush=true,opened=true,hash=true,signature=true,publisher=true,moved=true;
 std::wstring cached;bool copy=true;
-int handles=0,deletes=0,trustCalls=0,moves=0,gets=0;std::atomic<bool> cancel{false};
+int handles=0,deletes=0,trustCalls=0,moves=0,gets=0,failGets=0;std::atomic<bool> cancel{false};
+void PauseSetupDownloadRetry(int){}
 void CloseHandle(HANDLE h){assert(h==1);--handles;}
 HANDLE CreateFileW(const wchar_t*,int,int,void*,int,int,void*){if(!opened)return -1;++handles;return 1;}
 bool FlushFileBuffers(HANDLE){return flush;}
@@ -47,7 +48,8 @@ bool CopyLocked(HANDLE,const std::wstring&,const std::atomic<bool>&){return copy
 namespace GlassProductInspect{bool FileHasSameSignerAsSetup(const std::wstring&){return publisher;}}
 namespace GlassReleaseClient{
  HANDLE CreatePrivateFile(const std::wstring&){if(!created)return -1;++handles;return 1;}
- bool Get(const std::wstring&,HANDLE,std::string*,std::uint64_t limit,const std::atomic<bool>&,std::wstring&){++gets;assert(limit==1024);return download;}
+ bool Get(const std::wstring&,HANDLE,std::string*,std::uint64_t limit,const std::atomic<bool>&,std::wstring&){
+  ++gets;assert(limit==1024);if(failGets>0){--failGets;return false;}return download;}
  bool VerifyHash(HANDLE,std::uint64_t,const std::string&,const std::atomic<bool>&,std::wstring&){return hash;}
  std::wstring Wide(const std::string& text){return {text.begin(),text.end()};}
 }
@@ -61,7 +63,7 @@ int main(){
  asset.url="https://github.com/musicstashall/GlassPlatform/releases/download/v1/GlassSetup.exe";asset.sha256=std::string(64,'a');
  std::wstring prepared,error;
  for(int i=0;i<12;++i){
-  trusted=created=download=flush=opened=hash=signature=publisher=moved=true;cancel=false;handles=deletes=trustCalls=moves=gets=0;
+  trusted=created=download=flush=opened=hash=signature=publisher=moved=true;cancel=false;handles=deletes=trustCalls=moves=gets=failGets=0;
   auto candidate=asset;
   if(i==0)trusted=false;if(i==1)created=false;if(i==2)download=false;if(i==3)flush=false;
   if(i==4)opened=false;if(i==5)hash=false;if(i==6)signature=false;if(i==7)publisher=false;
@@ -72,8 +74,12 @@ int main(){
   if(ok){assert(prepared==L"private-workspace\\GlassSetup.exe");assert(error.empty());assert(moves==1);}
   else {assert(prepared.empty());assert(!error.empty());}
   if(i==0||i==9||i==10)assert(gets==0&&moves==0);
+  if(i==2)assert(gets==8&&deletes==2);
   if(i==5||i==6||i==7)assert(moves==0&&deletes==2);
  }
+ failGets=1;gets=deletes=handles=0;prepared.clear();error.clear();
+ assert(PrepareSetup(asset,L"private-workspace",cancel,prepared,error));
+ assert(gets==2&&deletes==1&&handles==0&&prepared==L"private-workspace\\GlassSetup.exe"&&error.empty());
  cached=L"protected-cache\\GlassSetup.exe";trusted=created=download=flush=opened=hash=signature=publisher=moved=true;cancel=false;
  gets=0;assert(PrepareSetup(asset,L"private-workspace",cancel,prepared,error));assert(gets==0&&handles==0);
  signature=false;gets=0;assert(!PrepareSetup(asset,L"private-workspace",cancel,prepared,error));assert(gets==0&&handles==0);

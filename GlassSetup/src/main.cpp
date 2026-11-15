@@ -1349,6 +1349,7 @@ private:
         std::wstring self;
         GlassPackageCatalog::Catalog catalog;
         std::wstring workspace, preparedSetup;
+        bool setupDownloadFailed = false;
     };
     std::mutex versionCheckMutex_;
     std::thread versionCheckThread_;
@@ -3220,7 +3221,7 @@ private:
     void ContinueVersionCheck() {
         if (versionCheckStarted_) {
             if (!versionCheckHandled_) SetPage(Page::Checking);
-            else ContinueAfterLicenseCheck();
+            else if (page_ != Page::Error) ContinueAfterLicenseCheck();
             return;
         }
         versionCheckStarted_ = true;
@@ -3253,15 +3254,18 @@ private:
                                 const auto now=GetTickCount64();
                                 if(now-lastProgress>=100||bytes==total){lastProgress=now;PostMessageW(target,kSetupDownloadProgress,0,0);}
                             };
-                            if(GlassPackageAcquisition::CreateWorkspace(result.workspace)&&
-                               GlassPackageAcquisition::PrepareSetup(*result.catalog.setup,result.workspace,versionCheckCancel_,result.preparedSetup,diagnostic)){
+                            const bool workspaceReady=GlassPackageAcquisition::CreateWorkspace(result.workspace);
+                            const bool downloaded=workspaceReady&&
+                               GlassPackageAcquisition::PrepareSetup(*result.catalog.setup,result.workspace,versionCheckCancel_,result.preparedSetup,diagnostic);
+                            if(downloaded){
                                 ParsedVersion actualVersion{},expectedVersion{};
                                 if(!TryParseVersion(ReadSetupFileVersion(result.preparedSetup),actualVersion)||
                                    !TryParseVersion(result.latest,expectedVersion)||actualVersion.fields!=expectedVersion.fields){
                                     DeleteFileW(result.preparedSetup.c_str());result.preparedSetup.clear();
                                     diagnostic=L"Downloaded Setup FileVersion differs from release catalog";
                                 }
-                            }
+                            }else if(!versionCheckCancel_.load(std::memory_order_acquire))
+                                result.setupDownloadFailed=true;
                             GlassReleaseClient::packageProgress={};
                             if(!diagnostic.empty())InstallLog::Line(diagnostic.c_str());
                         }
@@ -3321,6 +3325,15 @@ private:
             std::lock_guard<std::mutex> lock(versionCheckMutex_);
             if (!versionCheckResult_.completed) return;
             result = versionCheckResult_;
+        }
+        if (result.setupDownloadFailed) {
+            versionCheckHandled_ = true;
+            InstallLog::Line(L"Setup download interrupted; not continuing with this Setup");
+            const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
+            ShowInstallError(ru
+                ? L"Не удалось докачать новую версию установщика. Этот Setup не переходит дальше со старой копией. Запустите его снова, когда связь появится."
+                : L"The installer update could not be resumed. This Setup will not continue with the old copy. Start it again when the connection is back.");
+            return;
         }
         // Bootstrapper checks the controller first. Only the final controller
         // inspects product payloads; do not repeat that expensive scan across handoff.

@@ -43,13 +43,30 @@ bool AllowedHost(const std::wstring& host){
 }
 // Redirects are followed manually so neither TLS nor GitHub host restrictions
 // can be bypassed. No auth tokens, shell, PowerShell or external downloader.
+bool RewindFile(HANDLE file,std::uint64_t offset,bool truncate,std::wstring& error){
+    LARGE_INTEGER at{};at.QuadPart=static_cast<LONGLONG>(offset);
+    if(!SetFilePointerEx(file,at,nullptr,FILE_BEGIN))return Fail(error,L"Seeking partial download");
+    if(truncate&&!SetEndOfFile(file))return Fail(error,L"Resetting partial download");
+    return true;
+}
+// A package file that already has bytes is continued with Range. A catalog
+// response (no output file) is always a fresh GET. 200 after a Range request
+// means the server ignored the range, so the partial file is replaced.
 bool Get(const std::wstring& initial,HANDLE output,std::string* text,std::uint64_t limit,
     const std::atomic<bool>& cancel,std::wstring& error){
     Internet session(WinHttpOpen(L"GlassSetup/ReleaseClient",WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
     if(!session.h)return Fail(error,L"WinHttpOpen");
     if(!WinHttpSetTimeouts(session.h,4000,4000,4000,8000))return Fail(error,L"WinHttpSetTimeouts");
-    std::wstring url=initial;
+    std::uint64_t resumeFrom=0;
+    if(!text&&output!=INVALID_HANDLE_VALUE){
+        LARGE_INTEGER size{};
+        if(!GetFileSizeEx(output,&size)||size.QuadPart<0)return Fail(error,L"Reading partial download");
+        resumeFrom=static_cast<std::uint64_t>(size.QuadPart);
+        if(resumeFrom>limit)return Fail(error,L"GitHub response too large",ERROR_FILE_TOO_LARGE);
+        if(resumeFrom==limit&&resumeFrom>0)return true;
+    }
+    std::wstring url=initial;bool rangeRestarted=false;
     for(int redirect=0;redirect<6;++redirect){
         if(Cancelled(cancel,error))return false;
         URL_COMPONENTS parts{};parts.dwStructSize=sizeof(parts);parts.dwHostNameLength=static_cast<DWORD>(-1);
@@ -68,9 +85,10 @@ bool Get(const std::wstring& initial,HANDLE output,std::string* text,std::uint64
         if(!request.h)return Fail(error,L"WinHttpOpenRequest");
         DWORD policy=WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
         if(!WinHttpSetOption(request.h,WINHTTP_OPTION_REDIRECT_POLICY,&policy,sizeof(policy)))return Fail(error,L"WinHttpSetOption");
-        const wchar_t* headers=text?L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28\r\n":
-                                    L"Accept: application/octet-stream\r\n";
-        if(!WinHttpSendRequest(request.h,headers,static_cast<DWORD>(-1),WINHTTP_NO_REQUEST_DATA,0,0,0)||
+        std::wstring headers=text?L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28\r\n":
+                                  L"Accept: application/octet-stream\r\n";
+        if(!text&&resumeFrom)headers+=L"Range: bytes="+std::to_wstring(resumeFrom)+L"-\r\n";
+        if(!WinHttpSendRequest(request.h,headers.c_str(),static_cast<DWORD>(-1),WINHTTP_NO_REQUEST_DATA,0,0,0)||
             !WinHttpReceiveResponse(request.h,nullptr))return Fail(error,L"GitHub request failed");
         DWORD status=0,bytes=sizeof(status);
         if(!WinHttpQueryHeaders(request.h,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,
@@ -83,9 +101,20 @@ bool Get(const std::wstring& initial,HANDLE output,std::string* text,std::uint64
                 location.data(),&bytes,WINHTTP_NO_HEADER_INDEX))return Fail(error,L"GitHub redirect");
             url=location.data();continue;
         }
-        if(status!=200)return Fail(error,L"GitHub HTTP error",status);
-        if(!text&&packageProgress)packageProgress(0,limit);
-        std::array<char,32768> buffer{};std::uint64_t total=0;
+        if(!text&&status==416&&resumeFrom&&!rangeRestarted){
+            rangeRestarted=true;
+            if(!RewindFile(output,0,true,error))return false;
+            resumeFrom=0;continue;
+        }
+        if(text?status!=200:!(status==200||(status==206&&resumeFrom)))return Fail(error,L"GitHub HTTP error",status);
+        if(!text&&status==200&&resumeFrom){
+            if(!RewindFile(output,0,true,error))return false;
+            resumeFrom=0;
+        }else if(!text&&status==206){
+            if(!RewindFile(output,resumeFrom,false,error))return false;
+        }
+        if(!text&&packageProgress)packageProgress(resumeFrom,limit);
+        std::array<char,32768> buffer{};std::uint64_t total=resumeFrom;
         for(;;){
             if(Cancelled(cancel,error))return false;
             DWORD read=0;if(!WinHttpReadData(request.h,buffer.data(),static_cast<DWORD>(buffer.size()),&read))return Fail(error,L"GitHub download");
