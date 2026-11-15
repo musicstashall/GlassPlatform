@@ -14,7 +14,8 @@ assert service.index('ReflectionRenderState.Invalidate();') < service.index('var
 assert service.index('var output = Publish(target);') < service.index('ReflectionRenderState.Save(')
 assert 'var directory = Path.GetFullPath(PlatformPaths.ReflectionAppliedDirectory);' in service
 assert 'if (!IsTexture(source) && !isSvg) return source;' in service
-assert 'ReflectionPixelEffects.ApplyAlpha(tile, tw, th, settings, wrap: true)' in service
+assert 'settings with { NoisePercent = 0, OpacityPercent = 100 }, wrap: true)' in service
+assert 'ReflectionPixelEffects.ApplyAlpha(repeated, width, height,' in service
 assert 'ReflectionPixelEffects.ApplyAlpha(pixels, width, height, settings, wrap: false)' in service
 assert 'if (category != 1) return items;' in page
 assert '.Where(item => ReflectionCategory(item.FilePath) == category)' in page

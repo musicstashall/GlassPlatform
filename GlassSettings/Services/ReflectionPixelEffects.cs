@@ -70,7 +70,21 @@ public static class ReflectionPixelEffects
             Pass(pixels, intermediate, horizontal: true);
             Pass(intermediate, pixels, horizontal: false);
         }
-        // Multiplicative alpha grain preserves RGB and transparent areas.
+        // A separate source-over noise layer must also cover transparent pixels.
+        // Infer its straight RGB from visible source pixels, never hidden RGB at alpha=0.
+        long weight = 0, blue = 0, green = 0, red = 0;
+        if (settings.NoisePercent > 0)
+        {
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                int a = pixels[i + 3];
+                weight += a; blue += pixels[i] * a;
+                green += pixels[i + 1] * a; red += pixels[i + 2] * a;
+            }
+        }
+        double nb = weight == 0 ? 0 : blue / (double)weight;
+        double ng = weight == 0 ? 0 : green / (double)weight;
+        double nr = weight == 0 ? 0 : red / (double)weight;
         int grainSize = Math.Clamp(settings.NoiseSize, 1, 32);
         for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
@@ -78,9 +92,18 @@ public static class ReflectionPixelEffects
             int i = (y * width + x) * 4 + 3;
             double grain = settings.NoisePercent == 0 ? 0
                 : Grain(x, y, width, height, grainSize, settings.NoiseType, wrap);
-            double alpha = pixels[i] * (1 - grain * settings.NoisePercent / 100.0)
-                * settings.OpacityPercent / 100.0;
-            pixels[i] = (byte)Math.Clamp((int)Math.Round(alpha), 0, 255);
+            double noiseAlpha = grain * settings.NoisePercent / 100.0;
+            double sourceAlpha = pixels[i] / 255.0;
+            double combined = noiseAlpha + sourceAlpha * (1 - noiseAlpha);
+            if (noiseAlpha > 0 && combined > 0)
+            {
+                double Mix(byte source, double noise) =>
+                    (noise * noiseAlpha + source * sourceAlpha * (1 - noiseAlpha)) / combined;
+                pixels[i - 3] = (byte)Math.Clamp((int)Math.Round(Mix(pixels[i - 3], nb)), 0, 255);
+                pixels[i - 2] = (byte)Math.Clamp((int)Math.Round(Mix(pixels[i - 2], ng)), 0, 255);
+                pixels[i - 1] = (byte)Math.Clamp((int)Math.Round(Mix(pixels[i - 1], nr)), 0, 255);
+            }
+            pixels[i] = (byte)Math.Clamp((int)Math.Round(combined * 255 * settings.OpacityPercent / 100.0), 0, 255);
         }
     }
 

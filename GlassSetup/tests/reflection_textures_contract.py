@@ -103,7 +103,8 @@ control = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml.cs').read_tex
 assert 'ReflectionTextureService.CreatePreviewAsync(FilePath)' in control
 assert 'revision != _imageRevision' in control
 assert 'RepeatPixels(pixels.DetachPixelData()' in service
-assert 'return RepeatPixels(tile, tw, th, width, height);' in service
+assert 'var repeated = RepeatPixels(tile, tw, th, width, height);' in service
+assert 'return repeated;' in service
 print('PASS: texture previews and applied canvas share unscaled pixel repetition; stale previews guarded')
 
 xaml = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml').read_text()

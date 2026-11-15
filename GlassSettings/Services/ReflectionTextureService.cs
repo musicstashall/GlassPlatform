@@ -125,8 +125,13 @@ public static class ReflectionTextureService
             int tw = Math.Max(1, (int)Math.Round(sw * settings.ScalePercent / 100.0));
             int th = Math.Max(1, (int)Math.Round(sh * settings.ScalePercent / 100.0));
             var tile = ReflectionPixelEffects.Resize(pixels, sw, sh, tw, th);
-            ReflectionPixelEffects.ApplyAlpha(tile, tw, th, settings, wrap: true);
-            return RepeatPixels(tile, tw, th, width, height);
+            // Blur the periodic source cell first, but add noise to the full canvas.
+            ReflectionPixelEffects.ApplyAlpha(tile, tw, th,
+                settings with { NoisePercent = 0, OpacityPercent = 100 }, wrap: true);
+            var repeated = RepeatPixels(tile, tw, th, width, height);
+            ReflectionPixelEffects.ApplyAlpha(repeated, width, height,
+                settings with { Softness = 0 }, wrap: false);
+            return repeated;
         });
         using var encoded = new Windows.Storage.Streams.InMemoryRandomAccessStream();
         var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, encoded);

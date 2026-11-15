@@ -58,3 +58,20 @@ Check(!variants[0].SequenceEqual(variants[1]) && !variants[1].SequenceEqual(vari
     && !variants[2].SequenceEqual(variants[3]), "grain types produce distinct results");
 Check(Enumerable.Range(0, 8).Select(x => variants[0][x * 4 + 3]).Distinct().Count() > 2,
     "soft grain varies within a former square block");
+for (int type = 0; type < 4; type++)
+{
+    var transparent = new byte[32 * 32 * 4];
+    ReflectionPixelEffects.ApplyAlpha(transparent, 32, 32, new(100, 100, 0, 75, 4, type), wrap: false);
+    Check(transparent.Where((_, i) => i % 4 == 3).Any(a => a > 0),
+        "noise fills fully transparent canvas: " + type);
+    var lite = new byte[32 * 32 * 4];
+    lite[0] = lite[1] = lite[2] = 160; lite[3] = 255;
+    ReflectionPixelEffects.ApplyAlpha(lite, 32, 32, new(100, 100, 0, 75, 4, type), wrap: false);
+    Check(Enumerable.Range(1, 1023).Any(i => lite[i * 4 + 3] > 0 && lite[i * 4] == 160),
+        "noise fills transparent background with Lite color: " + type);
+    var disabled = new byte[32 * 32 * 4];
+    ReflectionPixelEffects.ApplyAlpha(disabled, 32, 32, new(100, 100, 0, 0, 4, type), wrap: false);
+    Check(disabled.All(b => b == 0), "zero noise preserves transparency: " + type);
+    ReflectionPixelEffects.ApplyAlpha(transparent, 32, 32, new(100, 0, 0, 75, 4, type), wrap: false);
+    Check(transparent.Where((_, i) => i % 4 == 3).All(a => a == 0), "opacity zero hides noise too: " + type);
+}
