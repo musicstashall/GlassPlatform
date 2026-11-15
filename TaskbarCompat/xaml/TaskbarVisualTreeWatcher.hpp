@@ -89,6 +89,10 @@ namespace TaskbarCompat
             InstanceHandle elementHandle,
             bool isBackgroundFill) noexcept;
 
+        // Поздний sample системных кистей bar меняет defaults всех surfaces.
+        // Перечитываем и фактически применяем их, не трогая явно заданные цвета.
+        void RefreshDependentSurfaceSettings() noexcept;
+
         ~TaskbarVisualTreeWatcher();
 
         // Тело коллбэка (SEH — во внешней обёртке OnVisualTreeChange).
