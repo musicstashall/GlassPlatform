@@ -57,6 +57,11 @@ for name in ('GlassReflection_01', 'GlassReflection_02'):
     lite = decode_rgba(assets / (name + '_Lite.png'))
     assert dark[3::4] == lite[3::4]
     assert len(set(dark[3::4])) > 1
+    if name == 'GlassReflection_02':
+        alpha = dark[3::4]
+        # Exactly 32 repeats: wrapping a 256px tile continues the same 8px pattern.
+        assert all(alpha[y * 256 + x] == alpha[(y % 8) * 256 + x % 8]
+                   for y in range(256) for x in range(256))
     for channel in range(3):
         assert set(dark[channel::4]) == {0}
         assert set(lite[channel::4]) == {255}
