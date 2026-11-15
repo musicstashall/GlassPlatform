@@ -122,3 +122,12 @@ for channel in range(3):
     assert set(basket_dark[channel::4]) == {0}
     assert set(basket_lite[channel::4]) == {160}
 print('PASS: approved MicroBasket 8x8 geometry, paired alpha and Dark/Lite colors')
+
+fine_dark = decode_rgba(assets / 'FineDiagonal_Dark.png', (3, 3))
+fine_lite = decode_rgba(assets / 'FineDiagonal_Lite.png', (3, 3))
+expected_fine_alpha = bytes((60, 95, 125)[(x + y) % 3] for y in range(3) for x in range(3))
+assert fine_dark[3::4] == fine_lite[3::4] == expected_fine_alpha
+for channel in range(3):
+    assert set(fine_dark[channel::4]) == {0}
+    assert set(fine_lite[channel::4]) == {160}
+print('PASS: approved FineDiagonal 3x3 geometry, paired alpha and Dark/Lite colors')
