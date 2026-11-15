@@ -160,3 +160,17 @@ for channel in range(3):
     assert set(chevron_dark[channel::4]) == {0}
     assert set(chevron_lite[channel::4]) == {160}
 print('PASS: approved MicroChevron geometry and Dark/Lite pair')
+
+maze_dark = decode_rgba(assets / 'CircuitMaze_Dark.png', (12, 12))
+maze_lite = decode_rgba(assets / 'CircuitMaze_Lite.png', (12, 12))
+maze_pattern = (
+    '111111000000', '000001000000', '011101011110', '010001010010',
+    '010111010010', '010000010010', '011111110010', '000000000010',
+    '011111111110', '010000000000', '010111111110', '010000000010',
+)
+expected_maze = bytes(145 if c == '1' else 45 for row in maze_pattern for c in row)
+assert maze_dark[3::4] == maze_lite[3::4] == expected_maze
+for channel in range(3):
+    assert set(maze_dark[channel::4]) == {0}
+    assert set(maze_lite[channel::4]) == {160}
+print('PASS: approved CircuitMaze geometry and Dark/Lite pair')
