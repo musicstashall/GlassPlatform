@@ -1082,7 +1082,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
                 Title = GlassSettingsResources.Get("Dialog_ReflectionPrepareFailedTitle"),
                 Body = HostedConfirmationDialogService.CreateBody(
                     GlassSettingsResources.Format("Dialog_ReflectionPrepareFailedBody",
-                        GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory, preparationError.Message)),
+                        SvgReflectionRenderer.IsPattern(model.FilePath)
+                            ? GlassSettings.Core.Platform.PlatformPaths.ReflectionPatternAppliedDirectory
+                            : GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory,
+                        preparationError.Message)),
                 Footer = HostedConfirmationDialogService.CreateFooter(
                     GlassSettingsResources.Get("Dialog_Understood"))
             });

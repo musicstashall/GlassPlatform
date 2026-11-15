@@ -122,14 +122,17 @@ public sealed partial class ReflectionImageTile : UserControl
     private async void ApplyImage(ImageSource? source)
     {
         var revision = ++_imageRevision;
-        if (source is not null && ReflectionTextureService.IsTexture(FilePath))
+        if (SvgReflectionRenderer.IsPattern(FilePath) ||
+            (source is not null && ReflectionTextureService.IsTexture(FilePath)))
         {
             PreviewImage.Source = null;
             PreviewImage.Visibility = Visibility.Collapsed;
             PreviewFallback.Visibility = Visibility.Visible;
             try
             {
-                source = await ReflectionTextureService.CreatePreviewAsync(FilePath);
+                source = SvgReflectionRenderer.IsPattern(FilePath)
+                    ? await SvgReflectionRenderer.CreatePreviewAsync(FilePath)
+                    : await ReflectionTextureService.CreatePreviewAsync(FilePath);
             }
             catch (Exception error)
             {

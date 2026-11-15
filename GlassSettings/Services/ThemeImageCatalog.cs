@@ -571,7 +571,8 @@ public static class ThemeImageCatalog
         foreach (var file in Directory.EnumerateFiles(dir, "*.*", SearchOption.TopDirectoryOnly))
         {
             var ext = Path.GetExtension(file).ToLowerInvariant();
-            if (ext is not ".png" and not ".jpg" and not ".jpeg" and not ".bmp" and not ".webp")
+            if (ext is not ".png" and not ".jpg" and not ".jpeg" and not ".bmp" and not ".webp"
+                && !SvgReflectionRenderer.IsPattern(file))
                 continue;
 
             list.Add(new ThemeImageItem
@@ -587,6 +588,8 @@ public static class ThemeImageCatalog
 
     internal static Microsoft.UI.Xaml.Media.ImageSource? CreateImageSource(string filePath)
     {
+        if (SvgReflectionRenderer.IsPattern(filePath))
+            return null; // ReflectionImageTile asynchronously rasterizes SVG with the production renderer.
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
             return null;
 

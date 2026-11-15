@@ -19,6 +19,10 @@ public static class PlatformPaths
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "OpenGlass", "Presets", "Textured");
 
+    public static string ReflectionPatternAppliedDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "OpenGlass", "Presets", "Pattern");
+
     private static string? _platformRoot;
     private static string? _openGlassDllPath;
     private static string? _openGlassDir;

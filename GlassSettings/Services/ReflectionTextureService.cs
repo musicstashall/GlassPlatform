@@ -19,17 +19,21 @@ public static class ReflectionTextureService
     {
         if (!Path.IsPathFullyQualified(path)) return path;
         var full = Path.GetFullPath(path);
-        var roots = new[] { PlatformPaths.ReflectionCacheDirectory, PlatformPaths.ReflectionAppliedDirectory };
+        var roots = new[] { PlatformPaths.ReflectionCacheDirectory, PlatformPaths.ReflectionAppliedDirectory,
+            PlatformPaths.ReflectionPatternAppliedDirectory };
         if (!roots.Any(root => full.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar,
             StringComparison.OrdinalIgnoreCase))) return path;
         return ThemeImageCatalog.LoadReflectionImages().FirstOrDefault(item =>
-            IsTexture(item.FilePath) && string.Equals(Path.GetFileName(item.FilePath),
+            (IsTexture(item.FilePath) || SvgReflectionRenderer.IsPattern(item.FilePath)) &&
+                string.Equals(Path.GetFileName(SvgReflectionRenderer.IsPattern(item.FilePath)
+                    ? Path.ChangeExtension(item.FilePath, ".png") : item.FilePath),
                 Path.GetFileName(path), StringComparison.OrdinalIgnoreCase))?.FilePath ?? path;
     }
 
     public static async Task<string> PrepareAsync(string source)
     {
-        if (!IsTexture(source)) return source;
+        var isSvg = SvgReflectionRenderer.IsPattern(source);
+        if (!IsTexture(source) && !isSvg) return source;
         await Gate.WaitAsync();
         try
         {
@@ -38,14 +42,32 @@ public static class ReflectionTextureService
             if (width <= 0 || height <= 0 || width > 16384 || height > 16384 ||
                 (long)width * height > 33554432)
                 throw new InvalidOperationException("Unsupported reflection canvas size.");
-            var directory = Path.Combine(PlatformPaths.ReflectionCacheDirectory, $"{width}x{height}");
+            var directory = Path.Combine(PlatformPaths.ReflectionCacheDirectory,
+                isSvg ? "Pattern" : "Textured", $"{width}x{height}");
             Directory.CreateDirectory(directory);
-            var target = Path.Combine(directory, Path.GetFileName(source));
+            var target = Path.Combine(directory, Path.GetFileName(isSvg ? Path.ChangeExtension(source, ".png") : source));
+            if (isSvg && new FileInfo(source).Length > 262144)
+                throw new InvalidDataException("SVG source exceeds 256 KiB.");
             var sourceBytes = await File.ReadAllBytesAsync(source);
-            var fingerprint = "tile-v1:" + Convert.ToHexString(SHA256.HashData(sourceBytes));
+            var fingerprint = (isSvg ? SvgReflectionRenderer.CacheVersion : "tile-v1:")
+                + Convert.ToHexString(SHA256.HashData(sourceBytes));
             var stamp = target + ".sha256";
             if (File.Exists(target) && File.Exists(stamp) && await File.ReadAllTextAsync(stamp) == fingerprint)
-                return Publish(target);
+                return Publish(target, isSvg);
+
+            if (isSvg)
+            {
+                var png = await Task.Run(() => SvgReflectionRenderer.RenderPng(sourceBytes, width, height));
+                var staged = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                try
+                {
+                    await File.WriteAllBytesAsync(staged, png);
+                    File.Move(staged, target, overwrite: true);
+                    await File.WriteAllTextAsync(stamp, fingerprint);
+                }
+                finally { if (File.Exists(staged)) File.Delete(staged); }
+                return Publish(target, isSvg);
+            }
 
             using var input = new Windows.Storage.Streams.InMemoryRandomAccessStream();
             using (var writer = new Windows.Storage.Streams.DataWriter(input.GetOutputStreamAt(0)))
@@ -81,7 +103,7 @@ public static class ReflectionTextureService
             {
                 if (File.Exists(temporary)) File.Delete(temporary);
             }
-            return Publish(target);
+            return Publish(target, isSvg);
         }
         finally { Gate.Release(); }
     }
@@ -118,12 +140,13 @@ public static class ReflectionTextureService
         return result;
     }
 
-    private static string Publish(string cachedImage)
+    private static string Publish(string cachedImage, bool isSvg)
     {
         // Check the encoded size before removing the previous applied canvas.
         if (new FileInfo(cachedImage).Length is <= 0 or > 67108864)
             throw new InvalidOperationException("Reflection PNG exceeds the OpenGlass file size limit.");
-        var directory = Path.GetFullPath(PlatformPaths.ReflectionAppliedDirectory);
+        var directory = Path.GetFullPath(isSvg
+            ? PlatformPaths.ReflectionPatternAppliedDirectory : PlatformPaths.ReflectionAppliedDirectory);
         var target = Path.Combine(directory, Path.GetFileName(cachedImage));
         if (target.Length >= 260)
             throw new IOException("Reflection output path exceeds the OpenGlass MAX_PATH limit.");
@@ -150,7 +173,7 @@ public static class ReflectionTextureService
             }
         }
         Inventory(directory);
-        // Only Presets/Textured is owned by this feature; never clean Presets itself.
+        // Only the selected generated category is cleaned; never Presets itself.
         foreach (var file in files) File.Delete(file);
         foreach (var child in directories) Directory.Delete(child);
         var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";

@@ -85,7 +85,7 @@ service = (ROOT / 'GlassSettings/Services/ReflectionTextureService.cs').read_tex
 page = (ROOT / 'GlassSettings/Pages/Dwm/DwmThemeDetailPage.xaml.cs').read_text()
 assert 'SpecialFolder.CommonApplicationData' in paths
 assert '"OpenGlass", "Presets", "Textured"' in paths
-assert service.count('return Publish(target);') == 2  # cache hits must publish/clean too
+assert service.count('return Publish(target, isSvg);') == 3  # cache hits must publish/clean too
 assert 'PlatformPaths.ReflectionAppliedDirectory' in service
 assert service.index('Inventory(directory);') < service.index('File.Delete(file)')
 assert service.index('File.Delete(file)') < service.index('File.Copy(cachedImage, temporary')
