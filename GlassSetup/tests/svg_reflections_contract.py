@@ -41,7 +41,7 @@ print('NOTE: no Windows compilation, SVG.NET render, WIC or DWM runtime exercise
 # Accepted SVG test collection: true vectors, transparent canvas, matching pairs.
 ns = '{http://www.w3.org/2000/svg}'
 assets = root / 'OpenGlass/Resources/GlassReflection/Pattern'
-for name in ('SilkWave', 'FoldedVeil', 'CornerGlow', 'PrismGlints'):
+for name in ('SilkWave', 'FoldedVeil', 'CornerGlow', 'PrismGlints', 'LiquidCaustics'):
     documents = []
     for theme, color in (('Dark', '#000000'), ('Lite', '#A0A0A0')):
         path = assets / f'{name}_{theme}.svg'
