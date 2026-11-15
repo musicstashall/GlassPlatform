@@ -1151,10 +1151,10 @@
   <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Мягкость краёв, px (0–3)</value></data>
   <data name="Reflection_Reset" xml:space="preserve"><value>Сбросить</value></data>
   <data name="Reflection_SettingNoise" xml:space="preserve"><value>Шум, %</value></data>
-  <data name="Reflection_SettingNoiseSize" xml:space="preserve"><value>Размер зерна, px</value></data>
   <data name="Reflection_SettingNoiseType" xml:space="preserve"><value>Тип зерна</value></data>
   <data name="Reflection_NoiseSoft" xml:space="preserve"><value>Мягкое</value></data>
   <data name="Reflection_NoiseFilm" xml:space="preserve"><value>Плёночное</value></data>
   <data name="Reflection_NoiseDots" xml:space="preserve"><value>Точечное</value></data>
   <data name="Reflection_NoiseBlocks" xml:space="preserve"><value>Блочное</value></data>
+  <data name="Reflection_SettingNoiseDensity" xml:space="preserve"><value>Плотность зерна, %</value></data>
 </root>

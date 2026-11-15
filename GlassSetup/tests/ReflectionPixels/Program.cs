@@ -35,14 +35,8 @@ Check(Enumerable.Range(0, 256).All(i => grainA[i * 4] == grainA[i * 4 + 1]
     && grainA[i * 4 + 1] == grainA[i * 4 + 2]), "grain stays achromatic");
 Check(grainA.Where((_, i) => i % 4 == 3).Distinct().Count() > 1, "noise modulates alpha");
 Check(new ReflectionRenderSettings(100, 100, 0, 999).Normalize().NoisePercent == 100, "noise clamped");
-var coarse = Enumerable.Repeat((byte)200, 16 * 16 * 4).ToArray();
-ReflectionPixelEffects.ApplyAlpha(coarse, 16, 16, new(100, 100, 0, 100, 4, 3), wrap: true);
-for (int y = 0; y < 16; y++)
-for (int x = 0; x < 16; x++)
-    Check(coarse[(y * 16 + x) * 4 + 3] == coarse[((y / 4 * 4) * 16 + x / 4 * 4) * 4 + 3],
-        "grain attenuation is constant within 4px fractions");
-Check(new ReflectionRenderSettings(100, 100, 0, 50, 999).Normalize().NoiseSize == 32, "grain size clamped");
-Check(new ReflectionRenderSettings().NoiseSize == 1, "old settings default to one-pixel grain");
+Check(new ReflectionRenderSettings(NoiseDensity: 999).Normalize().NoiseDensity == 100, "density clamped");
+Check(new ReflectionRenderSettings(NoiseSize: 32).Normalize().NoiseSize == 1, "legacy grain size ignored");
 
 var variants = new List<byte[]>();
 for (int type = 0; type < 4; type++)
@@ -93,4 +87,21 @@ for (int type = 0; type < 4; type++)
     ReflectionPixelEffects.ApplyAlpha(dark, 128, 128, new(100, 100, 0, 100, 4, type), wrap: false);
     ReflectionPixelEffects.ApplyAlpha(light, 128, 128, new(100, 100, 0, 100, 4, type), wrap: false);
     Check(dark.Skip(4).SequenceEqual(light.Skip(4)), "background grain independent of source color: " + type);
+}
+
+for (int type = 0; type < 4; type++)
+{
+    byte[] RenderDensity(int density, int legacySize = 1)
+    {
+        var result = new byte[128 * 128 * 4];
+        ReflectionPixelEffects.ApplyAlpha(result, 128, 128,
+            new(NoisePercent: 100, NoiseSize: legacySize, NoiseType: type, NoiseDensity: density), wrap: false);
+        return result;
+    }
+    var empty = RenderDensity(0); var sparse = RenderDensity(10); var dense = RenderDensity(90);
+    int Coverage(byte[] pixels) => Enumerable.Range(0, 128 * 128).Count(i => pixels[i * 4 + 3] > 4);
+    Check(empty.All(v => v == 0), "zero density adds no grain: " + type);
+    Check(Coverage(dense) > Coverage(sparse), "density increases visible coverage: " + type);
+    Check(dense.SequenceEqual(RenderDensity(90, 32)), "legacy size cannot enlarge grains: " + type);
+    if (type == 2) Check(Coverage(dense) > 128 * 128 / 10, "dots have measurable coverage");
 }

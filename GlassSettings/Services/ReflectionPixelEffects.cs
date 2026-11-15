@@ -73,13 +73,13 @@ public static class ReflectionPixelEffects
         // Bipolar luminance grain, independent of source RGB. Both light and dark
         // grains cover transparent areas; near-neutral samples fade out instead of
         // adding a uniform grey veil. Composite straight BGRA using source-over.
-        int grainSize = Math.Clamp(settings.NoiseSize, 1, 32);
+        double density = Math.Clamp(settings.NoiseDensity, 0, 100) / 100.0;
         for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
         {
             int i = (y * width + x) * 4 + 3;
-            double grain = settings.NoisePercent == 0 ? 0
-                : Grain(x, y, width, height, grainSize, settings.NoiseType, wrap);
+            double grain = settings.NoisePercent == 0 || density == 0 ? 0
+                : Grain(x, y, width, height, settings.NoiseType, density, wrap);
             double noiseAlpha = Math.Abs(grain) * settings.NoisePercent / 100.0;
             double luminance = 127.5 * (1 + grain);
             double sourceAlpha = pixels[i] / 255.0;
@@ -109,9 +109,12 @@ public static class ReflectionPixelEffects
         }
     }
 
-    private static double Grain(int x, int y, int width, int height, int size, int type, bool wrap)
+    private static double Grain(int x, int y, int width, int height, int type, double density, bool wrap)
     {
-        if (type == 3) return 2 * Hash(x / size, y / size) - 1; // Explicit block effect only.
+        // Fixed spatial scales: density selects grains; it never enlarges them.
+        const int size = 2;
+        if (type == 3) return Hash(x / 2, y / 2, 991) < density
+            ? 2 * Hash(x / 2, y / 2) - 1 : 0;
         // Integer lattice periods keep the smooth fields periodic on repeated tiles.
         double Sample(double spacing, int salt, bool dots = false)
         {
@@ -126,6 +129,7 @@ public static class ReflectionPixelEffects
                 wrap ? (cy % ny + ny) % ny : cy, salt + channel);
             double L(int cx, int cy)
             {
+                if (H(cx, cy, 991) >= density) return 0;
                 if (type != 1) return 2 * H(cx, cy) - 1;
                 // Box–Muller Gaussian: moderate grains dominate, high contrast is
                 // rare. Separate hash channels for radius and phase.
@@ -140,12 +144,24 @@ public static class ReflectionPixelEffects
                 for (int dy = -1; dy <= 1; dy++)
                 for (int dx = -1; dx <= 1; dx++)
                 {
-                    double cx = dx + .2 + .6 * H(ix + dx, iy + dy);
-                    double cy = dy + .2 + .6 * H(ix + dx, iy + dy, 1);
-                    double radius = .22 + .22 * H(ix + dx, iy + dy, 2);
-                    double distance = Math.Sqrt((fx - cx) * (fx - cx) + (fy - cy) * (fy - cy));
-                    double t = Math.Clamp(1 - distance / radius, 0, 1);
-                    double mark = (2 * H(ix + dx, iy + dy, 3) - 1) * t * t * (3 - 2 * t);
+                    if (H(ix + dx, iy + dy, 991) >= density) continue;
+                    double cx = dx + .25 + .5 * H(ix + dx, iy + dy);
+                    double cy = dy + .25 + .5 * H(ix + dx, iy + dy, 1);
+                    double radius = .38 + .12 * H(ix + dx, iy + dy, 2);
+                    double coverage = 0;
+                    // Four subpixel samples give small dots stable coverage instead
+                    // of letting most of them fall between pixel sample positions.
+                    for (int sy = 0; sy < 2; sy++)
+                    for (int sx = 0; sx < 2; sx++)
+                    {
+                        double ox = fx + (sx == 0 ? -.25 : .25) / spacing - cx;
+                        double oy = fy + (sy == 0 ? -.25 : .25) / spacing - cy;
+                        double t = Math.Clamp((radius - Math.Sqrt(ox * ox + oy * oy)) * spacing + .5, 0, 1);
+                        coverage += t * t * (3 - 2 * t) / 4;
+                    }
+                    double sign = H(ix + dx, iy + dy, 3) < .5 ? -1 : 1;
+                    double contrast = .5 + .5 * H(ix + dx, iy + dy, 4);
+                    double mark = sign * contrast * coverage;
                     if (Math.Abs(mark) > Math.Abs(value)) value = mark;
                 }
                 return value;
@@ -160,7 +176,7 @@ public static class ReflectionPixelEffects
         {
             1 => .55 * Sample(size, 11) + .30 * Sample(Math.Max(1, size / 2.0), 29)
                 + .15 * Sample(Math.Max(1, size / 4.0), 47),
-            2 => Sample(size, 71, dots: true),
+            2 => Sample(3, 71, dots: true),
             _ => Sample(size, 0)
         };
     }

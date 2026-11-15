@@ -52,12 +52,12 @@ assert 'CreateCancelConfirmFooter(GlassSettingsResources.Get("CmdApply"))' in di
 for language in ('ru-RU', 'en-US'):
     assert 'Reflection_SettingNoise' in (root / f'GlassSettings/Strings/{language}/Resources.resw').read_text()
 print('PASS: noise control persisted with settings; bounded scrollable dialog retains Apply footer')
-assert 'int NoiseSize = 1' in state and 'Math.Clamp(NoiseSize, 1, 32)' in state
-assert 'initial.NoiseSize' in dialog and 'noiseSize.ValueChanged' in dialog
-assert 'noiseSize.Value = 1' in dialog
+assert 'int NoiseDensity = 50' in state and 'Math.Clamp(NoiseDensity, 0, 100)' in state
+assert 'initial.NoiseDensity' in dialog and 'noiseDensity.ValueChanged' in dialog
+assert 'noiseDensity.Value = 50' in dialog and 'noiseSize' not in dialog
 for language in ('ru-RU', 'en-US'):
-    assert 'Reflection_SettingNoiseSize' in (root / f'GlassSettings/Strings/{language}/Resources.resw').read_text()
-print('PASS: grain size control, defaults, bounds, preview and reset wiring')
+    assert 'Reflection_SettingNoiseDensity' in (root / f'GlassSettings/Strings/{language}/Resources.resw').read_text()
+print('PASS: grain density control, defaults, bounds, preview and reset wiring')
 assert 'int NoiseType = 0' in state and 'Math.Clamp(NoiseType, 0, 3)' in state
 assert 'noiseType.SelectionChanged' in dialog and 'initial.NoiseType' in dialog
 assert 'noiseType.SelectedIndex = 0' in dialog

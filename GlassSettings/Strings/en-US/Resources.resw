@@ -1146,10 +1146,10 @@
   <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Edge softness, px (0–3)</value></data>
   <data name="Reflection_Reset" xml:space="preserve"><value>Reset</value></data>
   <data name="Reflection_SettingNoise" xml:space="preserve"><value>Noise, %</value></data>
-  <data name="Reflection_SettingNoiseSize" xml:space="preserve"><value>Grain size, px</value></data>
   <data name="Reflection_SettingNoiseType" xml:space="preserve"><value>Grain type</value></data>
   <data name="Reflection_NoiseSoft" xml:space="preserve"><value>Soft</value></data>
   <data name="Reflection_NoiseFilm" xml:space="preserve"><value>Film</value></data>
   <data name="Reflection_NoiseDots" xml:space="preserve"><value>Dots</value></data>
   <data name="Reflection_NoiseBlocks" xml:space="preserve"><value>Blocks</value></data>
+  <data name="Reflection_SettingNoiseDensity" xml:space="preserve"><value>Grain density, %</value></data>
 </root>

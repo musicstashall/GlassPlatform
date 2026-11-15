@@ -15,7 +15,7 @@ public static class ReflectionSettingsDialog
         var opacity = Number("Reflection_SettingOpacity", 0, 100, initial.OpacityPercent);
         var softness = Number("Reflection_SettingSoftness", 0, 3, initial.Softness);
         var noise = Number("Reflection_SettingNoise", 0, 100, initial.NoisePercent);
-        var noiseSize = Number("Reflection_SettingNoiseSize", 1, 32, initial.NoiseSize);
+        var noiseDensity = Number("Reflection_SettingNoiseDensity", 0, 100, initial.NoiseDensity);
         var noiseType = new ComboBox { Width = 160, SelectedIndex = -1 };
         foreach (var key in new[] { "Soft", "Film", "Dots", "Blocks" })
             noiseType.Items.Add(GlassSettingsResources.Get("Reflection_Noise" + key));
@@ -38,7 +38,7 @@ public static class ReflectionSettingsDialog
         body.Children.Add(Row("Reflection_SettingSoftness", softness));
         body.Children.Add(Row("Reflection_SettingNoiseType", noiseType));
         body.Children.Add(Row("Reflection_SettingNoise", noise));
-        body.Children.Add(Row("Reflection_SettingNoiseSize", noiseSize));
+        body.Children.Add(Row("Reflection_SettingNoiseDensity", noiseDensity));
         body.Children.Add(reset); body.Children.Add(error);
         int revision = 0;
         bool closed = false;
@@ -47,8 +47,8 @@ public static class ReflectionSettingsDialog
             double.IsFinite(opacity.Value) ? (int)opacity.Value : 100,
             double.IsFinite(softness.Value) ? (int)softness.Value : 0,
             double.IsFinite(noise.Value) ? (int)noise.Value : 0,
-            double.IsFinite(noiseSize.Value) ? (int)noiseSize.Value : 1,
-            Math.Max(0, noiseType.SelectedIndex));
+            1, Math.Max(0, noiseType.SelectedIndex),
+            double.IsFinite(noiseDensity.Value) ? (int)noiseDensity.Value : 50);
         async Task RefreshAsync()
         {
             int current = ++revision;
@@ -78,9 +78,9 @@ public static class ReflectionSettingsDialog
         opacity.ValueChanged += (_, _) => _ = RefreshAsync();
         softness.ValueChanged += (_, _) => _ = RefreshAsync();
         noise.ValueChanged += (_, _) => _ = RefreshAsync();
-        noiseSize.ValueChanged += (_, _) => _ = RefreshAsync();
+        noiseDensity.ValueChanged += (_, _) => _ = RefreshAsync();
         noiseType.SelectionChanged += (_, _) => _ = RefreshAsync();
-        reset.Click += (_, _) => { scale.Value = 100; opacity.Value = 100; softness.Value = 0; noise.Value = 0; noiseSize.Value = 1; noiseType.SelectedIndex = 0; };
+        reset.Click += (_, _) => { scale.Value = 100; opacity.Value = 100; softness.Value = 0; noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0; };
         _ = RefreshAsync();
         try
         {
