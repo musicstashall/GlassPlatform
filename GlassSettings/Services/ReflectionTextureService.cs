@@ -23,6 +23,14 @@ public static class ReflectionTextureService
             PlatformPaths.ReflectionPatternAppliedDirectory };
         if (!roots.Any(root => full.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar,
             StringComparison.OrdinalIgnoreCase))) return path;
+        var items = ThemeImageCatalog.LoadReflectionImages();
+        var state = ReflectionRenderState.Read();
+        if (state is not null && string.Equals(Path.GetFullPath(state.Output), full, StringComparison.OrdinalIgnoreCase))
+        {
+            var exact = items.FirstOrDefault(item => string.Equals(Path.GetFullPath(item.FilePath),
+                state.Source, StringComparison.OrdinalIgnoreCase));
+            if (exact is not null) return exact.FilePath;
+        }
         // Preserve selection for canvases generated before the source textures were named.
         var appliedName = Path.GetFileName(path);
         foreach (var theme in new[] { "Dark", "Lite" })
@@ -32,89 +40,105 @@ public static class ReflectionTextureService
             if (string.Equals(appliedName, $"GlassReflection_02_{theme}.png", StringComparison.OrdinalIgnoreCase))
                 appliedName = $"DiagonalWeave_{theme}.png";
         }
-        return ThemeImageCatalog.LoadReflectionImages().FirstOrDefault(item =>
+        return items.FirstOrDefault(item =>
             (IsTexture(item.FilePath) || SvgReflectionRenderer.IsPattern(item.FilePath)) &&
                 string.Equals(Path.GetFileName(SvgReflectionRenderer.IsPattern(item.FilePath)
                     ? Path.ChangeExtension(item.FilePath, ".png") : item.FilePath),
                 appliedName, StringComparison.OrdinalIgnoreCase))?.FilePath ?? path;
     }
 
-    public static async Task<string> PrepareAsync(string source)
+    public static async Task<string> PrepareAsync(string source, ReflectionRenderSettings? settings = null)
     {
         var isSvg = SvgReflectionRenderer.IsPattern(source);
         if (!IsTexture(source) && !isSvg) return source;
+        settings = (settings ?? ReflectionRenderState.Settings).Normalize();
         await Gate.WaitAsync();
+        string? stagingFile = null;
         try
         {
-            // GetSystemMetrics returns the entire virtual desktop, not just the primary monitor.
             int width = GetSystemMetrics(78), height = GetSystemMetrics(79);
             if (width <= 0 || height <= 0 || width > 16384 || height > 16384 ||
                 (long)width * height > 33554432)
                 throw new InvalidOperationException("Unsupported reflection canvas size.");
-            var directory = Path.Combine(PlatformPaths.ReflectionCacheDirectory,
-                isSvg ? "Pattern" : "Textured", $"{width}x{height}");
+            var sourceHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(source)));
+            var png = await RenderConfiguredAsync(source, width, height, settings);
+            if (sourceHash != Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(source))))
+                throw new IOException("Reflection source changed during generation.");
+            var directory = Path.Combine(PlatformPaths.ReflectionCacheDirectory, "Staging");
             Directory.CreateDirectory(directory);
-            var target = Path.Combine(directory, Path.GetFileName(isSvg ? Path.ChangeExtension(source, ".png") : source));
-            if (isSvg && new FileInfo(source).Length > 262144)
-                throw new InvalidDataException("SVG source exceeds 256 KiB.");
-            var sourceBytes = await File.ReadAllBytesAsync(source);
-            var fingerprint = (isSvg ? SvgReflectionRenderer.CacheVersion : "tile-v1:")
-                + Convert.ToHexString(SHA256.HashData(sourceBytes));
-            var stamp = target + ".sha256";
-            if (File.Exists(target) && File.Exists(stamp) && await File.ReadAllTextAsync(stamp) == fingerprint)
-                return Publish(target, isSvg);
-
-            if (isSvg)
-            {
-                var png = await Task.Run(() => SvgReflectionRenderer.RenderPng(sourceBytes, width, height));
-                var staged = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                try
-                {
-                    await File.WriteAllBytesAsync(staged, png);
-                    File.Move(staged, target, overwrite: true);
-                    await File.WriteAllTextAsync(stamp, fingerprint);
-                }
-                finally { if (File.Exists(staged)) File.Delete(staged); }
-                return Publish(target, isSvg);
-            }
-
-            using var input = new Windows.Storage.Streams.InMemoryRandomAccessStream();
-            using (var writer = new Windows.Storage.Streams.DataWriter(input.GetOutputStreamAt(0)))
-            {
-                writer.WriteBytes(sourceBytes);
-                await writer.StoreAsync();
-                writer.DetachStream();
-            }
-            var decoder = await BitmapDecoder.CreateAsync(input);
-            if (decoder.PixelWidth == 0 || decoder.PixelHeight == 0 ||
-                decoder.PixelWidth > 1024 || decoder.PixelHeight > 1024)
-                throw new InvalidOperationException("Reflection tiles must be at most 1024 x 1024 pixels.");
-            var pixels = await decoder.GetPixelDataAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Straight,
-                new BitmapTransform(), ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
-            var tile = pixels.DetachPixelData();
-            int tw = checked((int)decoder.PixelWidth), th = checked((int)decoder.PixelHeight);
-            var canvas = await Task.Run(() => RepeatPixels(tile, tw, th, width, height));
+            var target = Path.Combine(directory, Path.GetFileName(Path.ChangeExtension(source, ".png")));
+            stagingFile = target;
             var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.ReadWrite))
-                using (var random = stream.AsRandomAccessStream())
-                {
-                    var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, random);
-                    encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Straight,
-                        (uint)width, (uint)height, 96, 96, canvas);
-                    await encoder.FlushAsync();
-                }
+                await File.WriteAllBytesAsync(temporary, png);
                 File.Move(temporary, target, overwrite: true);
-                await File.WriteAllTextAsync(stamp, fingerprint);
             }
-            finally
-            {
-                if (File.Exists(temporary)) File.Delete(temporary);
-            }
-            return Publish(target, isSvg);
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            // Invalidate and save happen under the same generation gate as publication.
+            ReflectionRenderState.Invalidate();
+            var output = Publish(target);
+            ReflectionRenderState.Save(source, output, width, height, sourceHash,
+                Convert.ToHexString(SHA256.HashData(png)), settings);
+            return output;
         }
-        finally { Gate.Release(); }
+        finally
+        {
+            try { if (stagingFile is not null && File.Exists(stagingFile)) File.Delete(stagingFile); }
+            catch (IOException error) { System.Diagnostics.Trace.TraceWarning("Reflection staging cleanup: {0}", error); }
+            catch (UnauthorizedAccessException error) { System.Diagnostics.Trace.TraceWarning("Reflection staging cleanup: {0}", error); }
+            finally { Gate.Release(); }
+        }
+    }
+
+    public static async Task<byte[]> RenderConfiguredAsync(string source, int width, int height,
+        ReflectionRenderSettings settings)
+    {
+        settings = settings.Normalize();
+        bool isSvg = SvgReflectionRenderer.IsPattern(source);
+        if (!IsTexture(source) && !isSvg) throw new InvalidOperationException("Not a generated reflection.");
+        if (width <= 0 || height <= 0 || width > 16384 || height > 16384 || (long)width * height > 33554432)
+            throw new InvalidOperationException("Unsupported reflection canvas size.");
+        if (isSvg && new FileInfo(source).Length > 262144)
+            throw new InvalidDataException("SVG source exceeds 256 KiB.");
+        var bytes = await File.ReadAllBytesAsync(source);
+        if (isSvg) bytes = await Task.Run(() => SvgReflectionRenderer.RenderPng(bytes, width, height));
+        using var memory = new MemoryStream(bytes);
+        using var input = memory.AsRandomAccessStream();
+        var decoder = await BitmapDecoder.CreateAsync(input);
+        if (!isSvg && (decoder.PixelWidth > 1024 || decoder.PixelHeight > 1024))
+            throw new InvalidDataException("Reflection tile exceeds 1024 pixels.");
+        int sw = checked((int)decoder.PixelWidth), sh = checked((int)decoder.PixelHeight);
+        if (sw <= 0 || sh <= 0) throw new InvalidDataException("Empty reflection image.");
+        var pixels = (await decoder.GetPixelDataAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Straight,
+            new BitmapTransform(), ExifOrientationMode.IgnoreExifOrientation,
+            ColorManagementMode.DoNotColorManage)).DetachPixelData();
+        var canvas = await Task.Run(() =>
+        {
+            if (isSvg)
+            {
+                if (settings.ScalePercent != 100)
+                    pixels = ReflectionPixelEffects.Resize(pixels, sw, sh, width, height, settings.ScalePercent / 100.0);
+                ReflectionPixelEffects.ApplyAlpha(pixels, width, height, settings, wrap: false);
+                return pixels;
+            }
+            int tw = Math.Max(1, (int)Math.Round(sw * settings.ScalePercent / 100.0));
+            int th = Math.Max(1, (int)Math.Round(sh * settings.ScalePercent / 100.0));
+            var tile = ReflectionPixelEffects.Resize(pixels, sw, sh, tw, th);
+            ReflectionPixelEffects.ApplyAlpha(tile, tw, th, settings, wrap: true);
+            return RepeatPixels(tile, tw, th, width, height);
+        });
+        using var encoded = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, encoded);
+        encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Straight,
+            (uint)width, (uint)height, 96, 96, canvas);
+        await encoder.FlushAsync();
+        encoded.Seek(0);
+        using var reader = new Windows.Storage.Streams.DataReader(encoded.GetInputStreamAt(0));
+        await reader.LoadAsync(checked((uint)encoded.Size));
+        var result = new byte[checked((int)encoded.Size)];
+        reader.ReadBytes(result);
+        return result;
     }
 
     /// <summary>Preview uses the same native-pixel repetition as the applied canvas.</summary>
@@ -149,13 +173,12 @@ public static class ReflectionTextureService
         return result;
     }
 
-    private static string Publish(string cachedImage, bool isSvg)
+    private static string Publish(string cachedImage)
     {
         // Check the encoded size before removing the previous applied canvas.
         if (new FileInfo(cachedImage).Length is <= 0 or > 67108864)
             throw new InvalidOperationException("Reflection PNG exceeds the OpenGlass file size limit.");
-        var directory = Path.GetFullPath(isSvg
-            ? PlatformPaths.ReflectionPatternAppliedDirectory : PlatformPaths.ReflectionAppliedDirectory);
+        var directory = Path.GetFullPath(PlatformPaths.ReflectionAppliedDirectory);
         var target = Path.Combine(directory, Path.GetFileName(cachedImage));
         if (target.Length >= 260)
             throw new IOException("Reflection output path exceeds the OpenGlass MAX_PATH limit.");

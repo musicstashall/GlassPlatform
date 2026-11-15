@@ -85,7 +85,7 @@ service = (ROOT / 'GlassSettings/Services/ReflectionTextureService.cs').read_tex
 page = (ROOT / 'GlassSettings/Pages/Dwm/DwmThemeDetailPage.xaml.cs').read_text()
 assert 'SpecialFolder.CommonApplicationData' in paths
 assert '"OpenGlass", "Presets", "Textured"' in paths
-assert service.count('return Publish(target, isSvg);') == 3  # cache hits must publish/clean too
+assert 'var output = Publish(target);' in service
 assert 'PlatformPaths.ReflectionAppliedDirectory' in service
 assert service.index('Inventory(directory);') < service.index('File.Delete(file)')
 assert service.index('File.Delete(file)') < service.index('File.Copy(cachedImage, temporary')
@@ -97,13 +97,13 @@ for language in ('ru-RU', 'en-US'):
     tree = ET.parse(ROOT / f'GlassSettings/Strings/{language}/Resources.resw')
     for key in ('Dialog_ReflectionPrepareFailedTitle', 'Dialog_ReflectionPrepareFailedBody'):
         assert tree.find(f"data[@name='{key}']/value").text
-print('PASS: ProgramData destination, cleanup before copying including cache hits, localized failure UI')
+print('PASS: ProgramData destination, cleanup before copying, localized failure UI')
 
 control = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml.cs').read_text()
 assert 'ReflectionTextureService.CreatePreviewAsync(FilePath)' in control
 assert 'revision != _imageRevision' in control
 assert 'RepeatPixels(pixels.DetachPixelData()' in service
-assert 'Task.Run(() => RepeatPixels(tile' in service
+assert 'return RepeatPixels(tile, tw, th, width, height);' in service
 print('PASS: texture previews and applied canvas share unscaled pixel repetition; stale previews guarded')
 
 xaml = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml').read_text()

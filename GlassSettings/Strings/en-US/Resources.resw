@@ -1137,4 +1137,12 @@
   <data name="Dialog_ReflectionPrepareFailedBody" xml:space="preserve"><value>Could not prepare or copy the reflection to {0}. Check write access to this folder.
 
 {1}</value></data>
+  <data name="Reflection_TabTextures" xml:space="preserve"><value>Textures</value></data>
+  <data name="Reflection_TabPattern" xml:space="preserve"><value>Pattern</value></data>
+  <data name="Reflection_TabOther" xml:space="preserve"><value>Other</value></data>
+  <data name="Reflection_Configure" xml:space="preserve"><value>Configure</value></data>
+  <data name="Reflection_SettingScale" xml:space="preserve"><value>Scale, %</value></data>
+  <data name="Reflection_SettingOpacity" xml:space="preserve"><value>Opacity, %</value></data>
+  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Edge softness, px (0–3)</value></data>
+  <data name="Reflection_Reset" xml:space="preserve"><value>Reset</value></data>
 </root>

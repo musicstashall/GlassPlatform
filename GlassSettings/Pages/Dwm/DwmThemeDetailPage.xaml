@@ -203,11 +203,25 @@
                 x:Name="ReflectionCollectionExpander"
                 GateToggled="ReflectionCollectionExpander_OnGateToggled"
                 HorizontalAlignment="Stretch">
+                <ctrl:SettingsSystemGateExpander.HeaderActions>
+                    <Button x:Name="ReflectionConfigureButton" Click="ReflectionConfigure_OnClick" />
+                </ctrl:SettingsSystemGateExpander.HeaderActions>
                 <Grid
                     x:Name="ReflectionItemsHost"
                     MinHeight="120"
                     SizeChanged="ReflectionItemsHost_OnSizeChanged">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Pivot x:Name="ReflectionCategoryPivot"
+                           SelectionChanged="ReflectionCategory_OnSelectionChanged">
+                        <PivotItem x:Name="ReflectionTexturesTab" />
+                        <PivotItem x:Name="ReflectionPatternTab" />
+                        <PivotItem x:Name="ReflectionOtherTab" />
+                    </Pivot>
                     <Border
+                        Grid.Row="1"
                         x:Name="EmptyStateHost"
                         MinHeight="120"
                         Background="{ThemeResource LayerFillColorDefaultBrush}"
@@ -231,6 +245,7 @@
                         </StackPanel>
                     </Border>
                     <ItemsView
+                        Grid.Row="1"
                         x:Name="ReflectionItems"
                         HorizontalAlignment="Center"
                         IsItemInvokedEnabled="True"

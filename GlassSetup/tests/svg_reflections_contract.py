@@ -15,16 +15,16 @@ assert 'SvgReflectionRenderer.IsPattern(file)' in catalog
 assert 'SvgReflectionRenderer.IsPattern(filePath)' in catalog
 assert 'SvgReflectionRenderer.CreatePreviewAsync(FilePath)' in control
 assert 'revision != _imageRevision' in control
-assert 'Task.Run(() => SvgReflectionRenderer.RenderPng(sourceBytes, width, height))' in service
+assert 'Task.Run(() => SvgReflectionRenderer.RenderPng(bytes, width, height))' in service
 assert 'RenderPng(source, 148, 92)' in renderer
 assert 'new Svg.SvgUnit(width)' in renderer and 'document.Draw(width, height)' in renderer
 assert 'bitmap.Save(output, ImageFormat.Png)' in renderer
-assert 'SvgReflectionRenderer.CacheVersion' in service
+assert 'ReflectionRenderState.Save(source, output' in service
 assert 'Path.ChangeExtension(source, ".png")' in service
 assert 'Path.ChangeExtension(item.FilePath, ".png")' in service
 assert 'PlatformPaths.ReflectionPatternAppliedDirectory' in service
 assert '"OpenGlass", "Presets", "Pattern"' in paths
-assert 'isSvg ? "Pattern" : "Textured"' in service
+assert 'var directory = Path.GetFullPath(PlatformPaths.ReflectionAppliedDirectory);' in service
 assert 'DtdProcessing.Prohibit' in renderer and 'XmlResolver = null' in renderer
 assert 'OfType<XProcessingInstruction>()' in renderer
 assert 'nodes.Length > 512' in renderer and 'MaximumSourceBytes = 262144' in renderer
@@ -35,7 +35,7 @@ attributes = set(re.findall(r'"([a-zA-Z0-9-]+)"', renderer.split('Attributes =')
 assert {'path', 'linearGradient', 'radialGradient', 'stop'} <= elements
 assert not {'script', 'image', 'use', 'text', 'style', 'foreignObject', 'filter'} & elements
 assert not {'href', 'style', 'onload', 'onclick'} & attributes
-print('PASS: SVG catalog/preview/PNG pipeline, dedicated Pattern output, cache/source matching and restricted SVG policy wiring')
+print('PASS: SVG catalog/preview/PNG pipeline, unified generated output, registry/source matching and restricted SVG policy wiring')
 print('NOTE: no Windows compilation, SVG.NET render, WIC or DWM runtime exercised by this test')
 
 # Accepted SVG test collection: true vectors, transparent canvas, matching pairs.

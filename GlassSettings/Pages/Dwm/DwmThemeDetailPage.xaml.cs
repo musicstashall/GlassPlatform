@@ -71,6 +71,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private EventHandler<DesktopEnvironmentChangedEventArgs>? _environmentChangedHandler;
     private DispatcherQueueTimer? _wallpaperRefreshTimer;
     private DispatcherQueueTimer? _themeReloadTimer;
+    private bool _reflectionUiReady;
     private int _themeReloadGeneration;
     private string? _lastThemeFilePath;
     private DwmRegistryHive _hive = DwmRegistryHive.Hkcu;
@@ -106,6 +107,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         ApplyUnsavedScopes();
 
         ReflectionItems.ItemsSource = _reflectionItems;
+        _reflectionUiReady = true;
         MaterialItems.ItemsSource = _materialItems;
         AtlasItems.ItemsSource = _atlasItems;
 
@@ -253,6 +255,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
 
     private void ConfigureCollectionExpanders()
     {
+        ReflectionTexturesTab.Header = GlassSettingsResources.Get("Reflection_TabTextures");
+        ReflectionPatternTab.Header = GlassSettingsResources.Get("Reflection_TabPattern");
+        ReflectionOtherTab.Header = GlassSettingsResources.Get("Reflection_TabOther");
+        ReflectionConfigureButton.Content = GlassSettingsResources.Get("Reflection_Configure");
         ReflectionCollectionExpander.IconGlyph = SettingsSectionGlyphs.Image;
         ReflectionCollectionExpander.Title = GlassSettingsResources.Get("Dwm_ReflectionCollection");
         ReflectionCollectionExpander.Description = GlassSettingsResources.Get("Dwm_ReflectionImageDesc");
@@ -547,7 +553,8 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         return row;
     }
 
-    private void LoadReflectionImages() =>
+    private void LoadReflectionImages()
+    {
         PopulateCollection(
             _reflectionItems,
             BuildReflectionItemsWithDefault(),
@@ -555,6 +562,8 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             ReflectionItems,
             UpdateReflectionTilesLayout,
             model => _ = TryDeleteReflectionImageAsync(model));
+        UpdateReflectionTileSelection();
+    }
 
     private async void LoadMaterialImages() =>
         PopulateCollection(
@@ -676,13 +685,13 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         updateLayout();
     }
 
-    private static IReadOnlyList<ThemeImageItem> BuildReflectionItemsWithDefault()
+    private IReadOnlyList<ThemeImageItem> BuildReflectionItemsWithDefault()
     {
-        var items = ThemeImageCatalog.LoadReflectionImages().ToList();
+        var category = Math.Max(0, ReflectionCategoryPivot.SelectedIndex);
+        var items = ThemeImageCatalog.LoadReflectionImages()
+            .Where(item => ReflectionCategory(item.FilePath) == category).ToList();
+        if (category != 1) return items;
         var defaultImage = ThemeImageCatalog.TryGetDefaultReflectionImage();
-        if (defaultImage is null)
-            return items;
-
         items.Insert(0, new ThemeImageItem
         {
             Title = GlassSettingsResources.Get("Dwm_DefaultReflectionTile"),
@@ -735,6 +744,14 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         ApplyPolicyGateVisual(PolicyGateSwitch.IsOn);
 
         UpdateValueLabels();
+        var reflectionSource = string.IsNullOrEmpty(_currentReflectionPath) ? DefaultReflectionTilePath
+            : ReflectionTextureService.ResolveSource(_currentReflectionPath);
+        var activeCategory = ReflectionCategory(reflectionSource);
+        if (ReflectionCategoryPivot.SelectedIndex != activeCategory)
+        {
+            ReflectionCategoryPivot.SelectedIndex = activeCategory;
+            LoadReflectionImages();
+        }
         UpdateReflectionTileSelection();
         UpdateMaterialTileSelection();
         UpdateAtlasTileSelection();
@@ -775,10 +792,38 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         SettingsSliderCommit.SyncCommittedValue(_materialOpacitySlider, _materialOpacitySlider.Value);
     }
 
-    private void UpdateReflectionTileSelection() =>
-        UpdateDefaultAwareTileSelection(_reflectionItems,
-            _currentReflectionPath is { } path ? ReflectionTextureService.ResolveSource(path) : null,
-            DefaultReflectionTilePath);
+    private void UpdateReflectionTileSelection()
+    {
+        var source = _currentReflectionPath is { } path ? ReflectionTextureService.ResolveSource(path) : null;
+        UpdateDefaultAwareTileSelection(_reflectionItems, source, DefaultReflectionTilePath);
+        ReflectionConfigureButton.IsEnabled = source is not null &&
+            _reflectionItems.Any(item => SamePath(item.FilePath, source)) &&
+            ReflectionCategory(source) == ReflectionCategoryPivot.SelectedIndex &&
+            (ReflectionTextureService.IsTexture(source) || SvgReflectionRenderer.IsPattern(source));
+    }
+
+    private static int ReflectionCategory(string path)
+    {
+        if (path == DefaultReflectionTilePath) return 1;
+        var parent = Path.GetFileName(Path.GetDirectoryName(path));
+        if (string.Equals(parent, "Textured", StringComparison.OrdinalIgnoreCase)) return 0;
+        return string.Equals(parent, "Pattern", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+    }
+
+    private void ReflectionCategory_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_reflectionUiReady || _loading) return;
+        LoadReflectionImages();
+    }
+
+    private async void ReflectionConfigure_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_currentReflectionPath is null) return;
+        var source = ReflectionTextureService.ResolveSource(_currentReflectionPath);
+        if (!ReflectionTextureService.IsTexture(source) && !SvgReflectionRenderer.IsPattern(source)) return;
+        var settings = await ReflectionSettingsDialog.ShowAsync(source);
+        if (settings is not null) await ApplyReflectionSourceAsync(source, settings);
+    }
 
     private void UpdateMaterialTileSelection() =>
         UpdateDefaultAwareTileSelection(_materialItems, _currentMaterialPath, DefaultMaterialTilePath);
@@ -1058,6 +1103,11 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private async void ReflectionItems_OnItemInvoked(ItemsView sender, ItemsViewItemInvokedEventArgs e)
     {
         if (e.InvokedItem is not ReflectionImageTileModel model) return;
+        await ApplyReflectionSourceAsync(model.FilePath);
+    }
+
+    private async Task ApplyReflectionSourceAsync(string source, ReflectionRenderSettings? settings = null)
+    {
         Exception? preparationError = null;
         await PageShell.Operations.RunSequenceAsync(async seq =>
         {
@@ -1065,7 +1115,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             {
                 // Generate successfully before changing the applied registry path.
                 string path;
-                try { path = await ReflectionTextureService.PrepareAsync(model.FilePath); }
+                try { path = await ReflectionTextureService.PrepareAsync(source, settings); }
                 catch (Exception error)
                 {
                     System.Diagnostics.Trace.TraceError("Reflection generation failed: {0}", error);
@@ -1082,9 +1132,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
                 Title = GlassSettingsResources.Get("Dialog_ReflectionPrepareFailedTitle"),
                 Body = HostedConfirmationDialogService.CreateBody(
                     GlassSettingsResources.Format("Dialog_ReflectionPrepareFailedBody",
-                        SvgReflectionRenderer.IsPattern(model.FilePath)
-                            ? GlassSettings.Core.Platform.PlatformPaths.ReflectionPatternAppliedDirectory
-                            : GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory,
+                        GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory,
                         preparationError.Message)),
                 Footer = HostedConfirmationDialogService.CreateFooter(
                     GlassSettingsResources.Get("Dialog_Understood"))

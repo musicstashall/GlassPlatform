@@ -19,6 +19,7 @@ public static class PlatformPaths
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "OpenGlass", "Presets", "Textured");
 
+    // Legacy generated Pattern directory: recognized for old active registry paths only.
     public static string ReflectionPatternAppliedDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "OpenGlass", "Presets", "Pattern");
