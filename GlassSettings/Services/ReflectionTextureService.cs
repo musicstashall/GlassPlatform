@@ -95,6 +95,8 @@ public static class ReflectionTextureService
         ReflectionRenderSettings settings)
     {
         settings = settings.Normalize();
+        // Keep the disabled recipe in HKCU, but generate a neutral native canvas.
+        if (!settings.Enabled) settings = new ReflectionRenderSettings();
         bool isSvg = SvgReflectionRenderer.IsPattern(source);
         if (!IsTexture(source) && !isSvg) throw new InvalidOperationException("Not a generated reflection.");
         if (width <= 0 || height <= 0 || width > 16384 || height > 16384 || (long)width * height > 33554432)

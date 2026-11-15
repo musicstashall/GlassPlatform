@@ -3,6 +3,7 @@ namespace GlassSettings.Services;
 using GlassSettings.Strings;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 
@@ -22,23 +23,39 @@ public static class ReflectionSettingsDialog
         noiseType.SelectedIndex = initial.NoiseType;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(noiseType,
             GlassSettingsResources.Get("Reflection_SettingNoiseType"));
-        var preview = new Image { Height = 180, Stretch = Stretch.Uniform };
+        var enabled = new ToggleSwitch
+        {
+            Header = GlassSettingsResources.Get("Reflection_EnableProcessing"), IsOn = initial.Enabled
+        };
+        var preview = new Image { Height = 144, Stretch = Stretch.Uniform };
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         var reset = new Button { Content = GlassSettingsResources.Get("Reflection_Reset") };
-        var body = new StackPanel { Spacing = 12 };
+        var body = new StackPanel { Spacing = 8 };
         body.Children.Add(new TextBlock
         {
             Text = Path.GetFileNameWithoutExtension(source),
             TextTrimming = TextTrimming.CharacterEllipsis,
             Opacity = 0.7
         });
-        body.Children.Add(new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 144, 144, 144)), Child = preview });
-        body.Children.Add(Row("Reflection_SettingScale", scale));
-        body.Children.Add(Row("Reflection_SettingOpacity", opacity));
-        body.Children.Add(Row("Reflection_SettingSoftness", softness));
-        body.Children.Add(Row("Reflection_SettingNoiseType", noiseType));
-        body.Children.Add(Row("Reflection_SettingNoise", noise));
-        body.Children.Add(Row("Reflection_SettingNoiseDensity", noiseDensity));
+        body.Children.Add(PreviewCard(preview));
+        body.Children.Add(enabled);
+        var imageGroup = new StackPanel { Spacing = 12 };
+        imageGroup.Children.Add(Row("Reflection_SettingScale", scale));
+        imageGroup.Children.Add(Row("Reflection_SettingOpacity", opacity));
+        imageGroup.Children.Add(Row("Reflection_SettingSoftness", softness));
+        var noiseGroup = new StackPanel { Spacing = 12 };
+        noiseGroup.Children.Add(Row("Reflection_SettingNoiseType", noiseType));
+        noiseGroup.Children.Add(Row("Reflection_SettingNoise", noise));
+        noiseGroup.Children.Add(Row("Reflection_SettingNoiseDensity", noiseDensity));
+        var groups = new Pivot { Height = 176 };
+        groups.Resources.Add(typeof(PivotHeaderItem), new Style(typeof(PivotHeaderItem))
+        {
+            BasedOn = (Style)Application.Current.Resources["GlassSettingsPivotHeaderItemStyle"]
+        });
+        groups.Items.Add(new PivotItem { Header = GlassSettingsResources.Get("Reflection_GroupImage"), Content = imageGroup });
+        groups.Items.Add(new PivotItem { Header = GlassSettingsResources.Get("Reflection_GroupNoise"), Content = noiseGroup });
+        groups.IsEnabled = enabled.IsOn;
+        body.Children.Add(groups);
         body.Children.Add(reset); body.Children.Add(error);
         int revision = 0;
         bool closed = false;
@@ -48,7 +65,7 @@ public static class ReflectionSettingsDialog
             double.IsFinite(softness.Value) ? (int)softness.Value : 0,
             double.IsFinite(noise.Value) ? (int)noise.Value : 0,
             1, Math.Max(0, noiseType.SelectedIndex),
-            double.IsFinite(noiseDensity.Value) ? (int)noiseDensity.Value : 50);
+            double.IsFinite(noiseDensity.Value) ? (int)noiseDensity.Value : 50, enabled.IsOn);
         async Task RefreshAsync()
         {
             int current = ++revision;
@@ -80,7 +97,8 @@ public static class ReflectionSettingsDialog
         noise.ValueChanged += (_, _) => _ = RefreshAsync();
         noiseDensity.ValueChanged += (_, _) => _ = RefreshAsync();
         noiseType.SelectionChanged += (_, _) => _ = RefreshAsync();
-        reset.Click += (_, _) => { scale.Value = 100; opacity.Value = 100; softness.Value = 0; noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0; };
+        enabled.Toggled += (_, _) => { groups.IsEnabled = enabled.IsOn; _ = RefreshAsync(); };
+        reset.Click += (_, _) => { enabled.IsOn = true; scale.Value = 100; opacity.Value = 100; softness.Value = 0; noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0; };
         _ = RefreshAsync();
         try
         {
@@ -93,6 +111,41 @@ public static class ReflectionSettingsDialog
             return result == HostedDialogResult.Primary ? Values().Normalize() : null;
         }
         finally { closed = true; revision++; }
+    }
+
+    private static Border PreviewCard(Image preview)
+    {
+        // Checkerboard is UI-only: never included in the encoded reflection PNG.
+        var content = new Grid { Height = 144 };
+        var white = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 255, 255));
+        var blueGrey = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 153, 170, 187));
+        for (int x = 0; x < 32; x++) content.ColumnDefinitions.Add(new ColumnDefinition());
+        for (int y = 0; y < 12; y++) content.RowDefinitions.Add(new RowDefinition());
+        for (int y = 0; y < 12; y++)
+        for (int x = 0; x < 32; x++)
+        {
+            var square = new Border { Background = (x + y) % 2 == 0 ? white : blueGrey };
+            Grid.SetColumn(square, x); Grid.SetRow(square, y);
+            content.Children.Add(square);
+        }
+        preview.Stretch = Stretch.UniformToFill;
+        Grid.SetColumnSpan(preview, 32); Grid.SetRowSpan(preview, 12);
+        content.Children.Add(preview);
+        content.SizeChanged += (_, _) =>
+        {
+            var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(content);
+            var geometry = visual.Compositor.CreateRoundedRectangleGeometry();
+            geometry.Size = new System.Numerics.Vector2((float)content.ActualWidth, (float)content.ActualHeight);
+            geometry.CornerRadius = new System.Numerics.Vector2(8);
+            visual.Clip = visual.Compositor.CreateGeometricClip(geometry);
+        };
+        return new Border
+        {
+            CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1),
+            BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+            Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
+            Child = content
+        };
     }
 
     private static NumberBox Number(string label, double minimum, double maximum, double value)

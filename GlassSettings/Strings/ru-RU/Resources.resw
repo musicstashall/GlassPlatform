@@ -1157,4 +1157,7 @@
   <data name="Reflection_NoiseDots" xml:space="preserve"><value>Точечное</value></data>
   <data name="Reflection_NoiseBlocks" xml:space="preserve"><value>Блочное</value></data>
   <data name="Reflection_SettingNoiseDensity" xml:space="preserve"><value>Плотность зерна, %</value></data>
+  <data name="Reflection_EnableProcessing" xml:space="preserve"><value>Применять обработку</value></data>
+  <data name="Reflection_GroupImage" xml:space="preserve"><value>Изображение</value></data>
+  <data name="Reflection_GroupNoise" xml:space="preserve"><value>Шум</value></data>
 </root>

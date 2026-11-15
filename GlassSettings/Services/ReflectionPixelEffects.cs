@@ -3,6 +3,29 @@ namespace GlassSettings.Services;
 /// <summary>Straight BGRA processing. Blur wraps on tiles and clamps on complete SVG canvases.</summary>
 public static class ReflectionPixelEffects
 {
+    private static readonly Lazy<double[]> NoiseGains = new(CalibrateNoise);
+
+    // Match RMS visible contrast on a neutral substrate at full density. With
+    // source-over, contrast is proportional to alpha * grain, hence grain^4.
+    // Attenuate stronger types only, never amplify or clip weaker distributions.
+    private static double[] CalibrateNoise()
+    {
+        var contrast = new double[4];
+        for (int type = 0; type < 4; type++)
+        {
+            double sum = 0;
+            for (int y = 0; y < 96; y++)
+            for (int x = 0; x < 96; x++)
+            {
+                double g = Grain(x, y, 96, 96, type, 1, false);
+                sum += g * g * g * g;
+            }
+            contrast[type] = Math.Sqrt(sum / (96 * 96));
+        }
+        double target = contrast.Min();
+        return contrast.Select(value => value > 0 ? target / value : 1).ToArray();
+    }
+
     public static byte[] Resize(byte[] source, int sw, int sh, int width, int height, double zoom = 0)
     {
         if (zoom == 0 && sw == width && sh == height) return source;
@@ -40,6 +63,7 @@ public static class ReflectionPixelEffects
 
     public static void ApplyAlpha(byte[] pixels, int width, int height, ReflectionRenderSettings settings, bool wrap)
     {
+        if (!settings.Enabled) return;
         int radius = settings.Softness;
         if (radius > 0)
         {
@@ -80,7 +104,8 @@ public static class ReflectionPixelEffects
             int i = (y * width + x) * 4 + 3;
             double grain = settings.NoisePercent == 0 || density == 0 ? 0
                 : Grain(x, y, width, height, settings.NoiseType, density, wrap);
-            double noiseAlpha = Math.Abs(grain) * settings.NoisePercent / 100.0;
+            double noiseAlpha = Math.Abs(grain) * settings.NoisePercent / 100.0
+                * .35 * (grain == 0 ? 1 : NoiseGains.Value[Math.Clamp(settings.NoiseType, 0, 3)]);
             double luminance = 127.5 * (1 + grain);
             double sourceAlpha = pixels[i] / 255.0;
             double combined = noiseAlpha + sourceAlpha * (1 - noiseAlpha);

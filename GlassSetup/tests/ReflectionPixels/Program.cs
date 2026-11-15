@@ -105,3 +105,27 @@ for (int type = 0; type < 4; type++)
     Check(dense.SequenceEqual(RenderDensity(90, 32)), "legacy size cannot enlarge grains: " + type);
     if (type == 2) Check(Coverage(dense) > 128 * 128 / 10, "dots have measurable coverage");
 }
+var bypass = (byte[])original.Clone();
+ReflectionPixelEffects.ApplyAlpha(bypass, 2, 1,
+    new(OpacityPercent: 0, Softness: 3, NoisePercent: 100, Enabled: false), wrap: true);
+Check(bypass.SequenceEqual(original), "disabled processing preserves original pixels");
+var contrastLevels = new List<double>();
+for (int type = 0; type < 4; type++)
+{
+    var sample = new byte[96 * 96 * 4];
+    ReflectionPixelEffects.ApplyAlpha(sample, 96, 96,
+        new(NoisePercent: 50, NoiseType: type, NoiseDensity: 100), wrap: false);
+    double sum = 0;
+    for (int i = 0; i < sample.Length; i += 4)
+    {
+        double delta = (sample[i] - 127.5) * sample[i + 3] / 255.0;
+        sum += delta * delta;
+    }
+    contrastLevels.Add(Math.Sqrt(sum / (96 * 96)));
+    var faint = new byte[96 * 96 * 4];
+    ReflectionPixelEffects.ApplyAlpha(faint, 96, 96,
+        new(NoisePercent: 3, NoiseType: type, NoiseDensity: 100), wrap: false);
+    Check(faint.Where((_, i) => i % 4 == 3).Max() <= 3, "low intensity remains faint: " + type);
+}
+Check(contrastLevels.Max() / contrastLevels.Min() < 1.15,
+    "noise types have comparable neutral-background RMS contrast at full density");

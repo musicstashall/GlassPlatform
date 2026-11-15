@@ -73,3 +73,12 @@ assert 'Math.Abs(grain) * settings.NoisePercent' in effects
 assert 'Math.Sqrt(-2 * Math.Log(u))' in effects
 assert 'blue / (double)weight' not in effects and 'weight += a' not in effects
 print('PASS: bipolar luminance grain independent of source RGB, Gaussian film samples')
+assert 'bool Enabled = true' in state
+assert 'if (!settings.Enabled) settings = new ReflectionRenderSettings();' in service
+assert 'enabled.IsOn' in dialog and 'groups.IsEnabled = enabled.IsOn' in dialog
+assert 'new Pivot' in dialog and 'Reflection_GroupImage' in dialog and 'Reflection_GroupNoise' in dialog
+assert 'GlassSettingsPivotHeaderItemStyle' in dialog
+assert 'CreateRoundedRectangleGeometry' in dialog and 'CardStrokeColorDefaultBrush' in dialog
+assert '255, 153, 170, 187' in dialog and '255, 255, 255, 255' in dialog
+assert 'CalibrateNoise' in effects and 'target / value' in effects
+print('PASS: calibrated intensity, persistent bypass, grouped Pivot and rounded checkerboard preview wiring')
