@@ -104,3 +104,8 @@ print('PASS: None bypasses only noise, locks noise controls, preserves previous 
 assert 'Math.Clamp(Softness, 0, 20)' in state
 assert 'Number("Reflection_SettingSoftness", 0, 20, initial.Softness)' in dialog
 print('PASS: reflection softness supports 0–20 px in both UI and persisted settings')
+number_factory = dialog[dialog.index('private static NumberBox Number'):dialog.index('private static Grid Row')]
+assert 'GlassSettingsNumberBoxStyle' in number_factory
+assert 'NumberBoxSpinButtonPlacementMode.Inline' in number_factory
+assert 'Width = 128' not in number_factory and 'NumberBoxSpinButtonPlacementMode.Compact' not in number_factory
+print('PASS: reflection numeric inputs reuse popup Animation NumberBox style and inline steppers')

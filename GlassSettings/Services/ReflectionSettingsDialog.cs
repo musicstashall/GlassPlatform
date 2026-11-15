@@ -193,8 +193,9 @@ public static class ReflectionSettingsDialog
     {
         var number = new NumberBox
         {
-            Minimum = minimum, Maximum = maximum, Value = value, Width = 128,
-            SmallChange = 1, LargeChange = 10, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact
+            Style = (Style)Application.Current.Resources["GlassSettingsNumberBoxStyle"],
+            Minimum = minimum, Maximum = maximum, Value = value,
+            SmallChange = 1, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(number, GlassSettingsResources.Get(label));
         return number;
