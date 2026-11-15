@@ -8,7 +8,6 @@ using Microsoft.UI.Xaml.Media.Imaging;
 /// <summary>Restricted self-contained SVG, rasterized by SVG.NET for both preview and OG.</summary>
 public static class SvgReflectionRenderer
 {
-    public const string CacheVersion = "svg-net-3.4.7-v1:";
     private const int MaximumSourceBytes = 262144;
     private static readonly HashSet<string> Elements = new(StringComparer.Ordinal)
     {

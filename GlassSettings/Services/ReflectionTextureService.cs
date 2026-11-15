@@ -7,7 +7,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using GlassSettings.Core.Platform;
 using Windows.Graphics.Imaging;
 
-/// <summary>Builds a native-pixel reflection canvas; never scales the source tile.</summary>
+/// <summary>Renders PNG tiles/SVG to one published canvas; native tile pixels unless explicitly scaled.</summary>
 public static class ReflectionTextureService
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
