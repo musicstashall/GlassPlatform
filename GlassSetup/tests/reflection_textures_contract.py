@@ -53,13 +53,13 @@ def decode_rgba(path, expected_size):
 
 
 assets = ROOT / 'OpenGlass/Resources/GlassReflection/Textured'
-for name in ('GlassReflection_01', 'GlassReflection_02'):
-    size = (8, 8) if name == 'GlassReflection_02' else (21, 18)
+for name in ('FrostWeave', 'DiagonalWeave'):
+    size = (8, 8) if name == 'DiagonalWeave' else (21, 18)
     dark = decode_rgba(assets / (name + '_Dark.png'), size)
     lite = decode_rgba(assets / (name + '_Lite.png'), size)
     assert dark[3::4] == lite[3::4]
     assert len(set(dark[3::4])) > 1
-    if name == 'GlassReflection_02':
+    if name == 'DiagonalWeave':
         # Golden canvas hashes: 160% geometry; Lite recolored to #A0A0A0.
         for pixels, expected_hash in (
             (dark, '6ca50312be4ef2ab027cc04f7cd8e9c0d081a62c7262a971e8bf32f5a041fc35'),
@@ -161,7 +161,14 @@ maze_pattern = (
     '010111010010', '010000010010', '011111110010', '000000000010',
     '011111111110', '010000000000', '010111111110', '010000000010',
 )
-expected_maze = bytes(145 if c == '1' else 45 for row in maze_pattern for c in row)
+original_maze = bytes(145 if c == '1' else 45 for row in maze_pattern for c in row)
+# Gentle Gaussian-like edge softening, toroidal to preserve the existing repeat.
+kernel = (1, 6, 1)
+expected_maze = bytes((sum(kernel[dx + 1] * kernel[dy + 1] *
+                          original_maze[((y + dy) % 12) * 12 + (x + dx) % 12]
+                          for dy in (-1, 0, 1) for dx in (-1, 0, 1)) + 32) // 64
+                      for y in range(12) for x in range(12))
+assert expected_maze != original_maze
 assert maze_dark[3::4] == maze_lite[3::4] == expected_maze
 for channel in range(3):
     assert set(maze_dark[channel::4]) == {0}
@@ -201,3 +208,7 @@ for channel in range(3):
     assert set(twill_dark[channel::4]) == {0}
     assert set(twill_lite[channel::4]) == {160}
 print('PASS: approved TwillWeave geometry and Dark/Lite pair')
+
+assert 'appliedName = $"FrostWeave_{theme}.png"' in service
+assert 'appliedName = $"DiagonalWeave_{theme}.png"' in service
+print('PASS: named textures retain selection aliases for earlier generated filenames')

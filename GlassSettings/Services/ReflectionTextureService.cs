@@ -23,11 +23,20 @@ public static class ReflectionTextureService
             PlatformPaths.ReflectionPatternAppliedDirectory };
         if (!roots.Any(root => full.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar,
             StringComparison.OrdinalIgnoreCase))) return path;
+        // Preserve selection for canvases generated before the source textures were named.
+        var appliedName = Path.GetFileName(path);
+        foreach (var theme in new[] { "Dark", "Lite" })
+        {
+            if (string.Equals(appliedName, $"GlassReflection_01_{theme}.png", StringComparison.OrdinalIgnoreCase))
+                appliedName = $"FrostWeave_{theme}.png";
+            if (string.Equals(appliedName, $"GlassReflection_02_{theme}.png", StringComparison.OrdinalIgnoreCase))
+                appliedName = $"DiagonalWeave_{theme}.png";
+        }
         return ThemeImageCatalog.LoadReflectionImages().FirstOrDefault(item =>
             (IsTexture(item.FilePath) || SvgReflectionRenderer.IsPattern(item.FilePath)) &&
                 string.Equals(Path.GetFileName(SvgReflectionRenderer.IsPattern(item.FilePath)
                     ? Path.ChangeExtension(item.FilePath, ".png") : item.FilePath),
-                Path.GetFileName(path), StringComparison.OrdinalIgnoreCase))?.FilePath ?? path;
+                appliedName, StringComparison.OrdinalIgnoreCase))?.FilePath ?? path;
     }
 
     public static async Task<string> PrepareAsync(string source)
