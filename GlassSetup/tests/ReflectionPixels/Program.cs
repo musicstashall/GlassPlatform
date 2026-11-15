@@ -34,3 +34,11 @@ Check(grainA.SequenceEqual(grainB), "noise is deterministic");
 Check(grainA.Where((_, i) => i % 4 != 3).All(v => v == 160), "noise preserves paired RGB colors");
 Check(grainA.Where((_, i) => i % 4 == 3).Distinct().Count() > 1, "noise modulates alpha");
 Check(new ReflectionRenderSettings(100, 100, 0, 999).Normalize().NoisePercent == 100, "noise clamped");
+var coarse = Enumerable.Repeat((byte)200, 16 * 16 * 4).ToArray();
+ReflectionPixelEffects.ApplyAlpha(coarse, 16, 16, new(100, 100, 0, 100, 4), wrap: true);
+for (int y = 0; y < 16; y++)
+for (int x = 0; x < 16; x++)
+    Check(coarse[(y * 16 + x) * 4 + 3] == coarse[((y / 4 * 4) * 16 + x / 4 * 4) * 4 + 3],
+        "grain attenuation is constant within 4px fractions");
+Check(new ReflectionRenderSettings(100, 100, 0, 50, 999).Normalize().NoiseSize == 32, "grain size clamped");
+Check(new ReflectionRenderSettings().NoiseSize == 1, "old settings default to one-pixel grain");

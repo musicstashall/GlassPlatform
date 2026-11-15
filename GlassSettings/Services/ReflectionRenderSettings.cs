@@ -4,11 +4,11 @@ using Microsoft.Win32;
 using System.Text.Json;
 using System.Security.Cryptography;
 
-public sealed record ReflectionRenderSettings(int ScalePercent = 100, int OpacityPercent = 100, int Softness = 0, int NoisePercent = 0)
+public sealed record ReflectionRenderSettings(int ScalePercent = 100, int OpacityPercent = 100, int Softness = 0, int NoisePercent = 0, int NoiseSize = 1)
 {
     public ReflectionRenderSettings Normalize() => new(
         Math.Clamp(ScalePercent, 25, 200), Math.Clamp(OpacityPercent, 0, 100), Math.Clamp(Softness, 0, 3),
-        Math.Clamp(NoisePercent, 0, 100));
+        Math.Clamp(NoisePercent, 0, 100), Math.Clamp(NoiseSize, 1, 32));
 }
 
 /// <summary>One record for the single generated canvas; not per-source profiles or PNG metadata.</summary>

@@ -72,10 +72,22 @@ public static class ReflectionPixelEffects
         }
         // Fixed-seed multiplicative alpha grain: preserves paired colors, transparent
         // areas and tile repetition. Zero noise is byte-for-byte unchanged.
-        uint seed = 0x9E3779B9u;
-        for (int i = 3; i < pixels.Length; i += 4)
+        int grainSize = Math.Clamp(settings.NoiseSize, 1, 32);
+        for (int y = 0; y < height; y++)
+        for (int x = 0; x < width; x++)
         {
-            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+            // Hash grain coordinates, not individual pixels: each square fraction
+            // has one attenuation. A texture's resulting cell is repeated as-is.
+            uint seed;
+            unchecked
+            {
+                seed = (uint)(x / grainSize) * 0x85EBCA6Bu
+                    ^ (uint)(y / grainSize) * 0xC2B2AE35u ^ 0x9E3779B9u;
+                seed ^= seed >> 16; seed *= 0x7FEB352Du;
+                seed ^= seed >> 15; seed *= 0x846CA68Bu;
+                seed ^= seed >> 16;
+            }
+            int i = (y * width + x) * 4 + 3;
             int attenuation = 100 - (int)(seed % 101) * settings.NoisePercent / 100;
             pixels[i] = (byte)((pixels[i] * attenuation * settings.OpacityPercent + 5000) / 10000);
         }

@@ -15,6 +15,7 @@ public static class ReflectionSettingsDialog
         var opacity = Number("Reflection_SettingOpacity", 0, 100, initial.OpacityPercent);
         var softness = Number("Reflection_SettingSoftness", 0, 3, initial.Softness);
         var noise = Number("Reflection_SettingNoise", 0, 100, initial.NoisePercent);
+        var noiseSize = Number("Reflection_SettingNoiseSize", 1, 32, initial.NoiseSize);
         var preview = new Image { Height = 180, Stretch = Stretch.Uniform };
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         var reset = new Button { Content = GlassSettingsResources.Get("Reflection_Reset") };
@@ -30,6 +31,7 @@ public static class ReflectionSettingsDialog
         body.Children.Add(Row("Reflection_SettingOpacity", opacity));
         body.Children.Add(Row("Reflection_SettingSoftness", softness));
         body.Children.Add(Row("Reflection_SettingNoise", noise));
+        body.Children.Add(Row("Reflection_SettingNoiseSize", noiseSize));
         body.Children.Add(reset); body.Children.Add(error);
         int revision = 0;
         bool closed = false;
@@ -37,7 +39,8 @@ public static class ReflectionSettingsDialog
             double.IsFinite(scale.Value) ? (int)scale.Value : 100,
             double.IsFinite(opacity.Value) ? (int)opacity.Value : 100,
             double.IsFinite(softness.Value) ? (int)softness.Value : 0,
-            double.IsFinite(noise.Value) ? (int)noise.Value : 0);
+            double.IsFinite(noise.Value) ? (int)noise.Value : 0,
+            double.IsFinite(noiseSize.Value) ? (int)noiseSize.Value : 1);
         async Task RefreshAsync()
         {
             int current = ++revision;
@@ -67,7 +70,8 @@ public static class ReflectionSettingsDialog
         opacity.ValueChanged += (_, _) => _ = RefreshAsync();
         softness.ValueChanged += (_, _) => _ = RefreshAsync();
         noise.ValueChanged += (_, _) => _ = RefreshAsync();
-        reset.Click += (_, _) => { scale.Value = 100; opacity.Value = 100; softness.Value = 0; noise.Value = 0; };
+        noiseSize.ValueChanged += (_, _) => _ = RefreshAsync();
+        reset.Click += (_, _) => { scale.Value = 100; opacity.Value = 100; softness.Value = 0; noise.Value = 0; noiseSize.Value = 1; };
         _ = RefreshAsync();
         try
         {

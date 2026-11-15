@@ -1146,4 +1146,5 @@
   <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Edge softness, px (0–3)</value></data>
   <data name="Reflection_Reset" xml:space="preserve"><value>Reset</value></data>
   <data name="Reflection_SettingNoise" xml:space="preserve"><value>Noise, %</value></data>
+  <data name="Reflection_SettingNoiseSize" xml:space="preserve"><value>Grain size, px</value></data>
 </root>
