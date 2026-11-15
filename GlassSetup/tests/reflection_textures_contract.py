@@ -150,3 +150,13 @@ for channel in range(3):
     assert set(dragon_dark[channel::4]) == {0}
     assert set(dragon_lite[channel::4]) == {160}
 print('PASS: approved DragonScale 12x12 geometry, paired alpha and Dark/Lite colors')
+
+chevron_dark = decode_rgba(assets / 'MicroChevron_Dark.png', (8, 8))
+chevron_lite = decode_rgba(assets / 'MicroChevron_Lite.png', (8, 8))
+expected_chevron = bytes((145, 95, 45, 65)[(y - (x if x < 4 else 7 - x)) % 4]
+                         for y in range(8) for x in range(8))
+assert chevron_dark[3::4] == chevron_lite[3::4] == expected_chevron
+for channel in range(3):
+    assert set(chevron_dark[channel::4]) == {0}
+    assert set(chevron_lite[channel::4]) == {160}
+print('PASS: approved MicroChevron geometry and Dark/Lite pair')
