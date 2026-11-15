@@ -67,3 +67,9 @@ for language in ('ru-RU', 'en-US'):
                 'Reflection_NoiseDots', 'Reflection_NoiseBlocks'):
         assert key in strings
 print('PASS: four grain types, default smooth noise, persistence and preview wiring')
+effects = (root / 'GlassSettings/Services/ReflectionPixelEffects.cs').read_text()
+assert 'double luminance = 127.5 * (1 + grain)' in effects
+assert 'Math.Abs(grain) * settings.NoisePercent' in effects
+assert 'Math.Sqrt(-2 * Math.Log(u))' in effects
+assert 'blue / (double)weight' not in effects and 'weight += a' not in effects
+print('PASS: bipolar luminance grain independent of source RGB, Gaussian film samples')

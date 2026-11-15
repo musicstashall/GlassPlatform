@@ -70,21 +70,9 @@ public static class ReflectionPixelEffects
             Pass(pixels, intermediate, horizontal: true);
             Pass(intermediate, pixels, horizontal: false);
         }
-        // A separate source-over noise layer must also cover transparent pixels.
-        // Infer its straight RGB from visible source pixels, never hidden RGB at alpha=0.
-        long weight = 0, blue = 0, green = 0, red = 0;
-        if (settings.NoisePercent > 0)
-        {
-            for (int i = 0; i < pixels.Length; i += 4)
-            {
-                int a = pixels[i + 3];
-                weight += a; blue += pixels[i] * a;
-                green += pixels[i + 1] * a; red += pixels[i + 2] * a;
-            }
-        }
-        double nb = weight == 0 ? 0 : blue / (double)weight;
-        double ng = weight == 0 ? 0 : green / (double)weight;
-        double nr = weight == 0 ? 0 : red / (double)weight;
+        // Bipolar luminance grain, independent of source RGB. Both light and dark
+        // grains cover transparent areas; near-neutral samples fade out instead of
+        // adding a uniform grey veil. Composite straight BGRA using source-over.
         int grainSize = Math.Clamp(settings.NoiseSize, 1, 32);
         for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
@@ -92,16 +80,17 @@ public static class ReflectionPixelEffects
             int i = (y * width + x) * 4 + 3;
             double grain = settings.NoisePercent == 0 ? 0
                 : Grain(x, y, width, height, grainSize, settings.NoiseType, wrap);
-            double noiseAlpha = grain * settings.NoisePercent / 100.0;
+            double noiseAlpha = Math.Abs(grain) * settings.NoisePercent / 100.0;
+            double luminance = 127.5 * (1 + grain);
             double sourceAlpha = pixels[i] / 255.0;
             double combined = noiseAlpha + sourceAlpha * (1 - noiseAlpha);
             if (noiseAlpha > 0 && combined > 0)
             {
                 double Mix(byte source, double noise) =>
                     (noise * noiseAlpha + source * sourceAlpha * (1 - noiseAlpha)) / combined;
-                pixels[i - 3] = (byte)Math.Clamp((int)Math.Round(Mix(pixels[i - 3], nb)), 0, 255);
-                pixels[i - 2] = (byte)Math.Clamp((int)Math.Round(Mix(pixels[i - 2], ng)), 0, 255);
-                pixels[i - 1] = (byte)Math.Clamp((int)Math.Round(Mix(pixels[i - 1], nr)), 0, 255);
+                pixels[i - 3] = (byte)Math.Clamp((int)Math.Round(Mix(pixels[i - 3], luminance)), 0, 255);
+                pixels[i - 2] = (byte)Math.Clamp((int)Math.Round(Mix(pixels[i - 2], luminance)), 0, 255);
+                pixels[i - 1] = (byte)Math.Clamp((int)Math.Round(Mix(pixels[i - 1], luminance)), 0, 255);
             }
             pixels[i] = (byte)Math.Clamp((int)Math.Round(combined * 255 * settings.OpacityPercent / 100.0), 0, 255);
         }
@@ -122,7 +111,7 @@ public static class ReflectionPixelEffects
 
     private static double Grain(int x, int y, int width, int height, int size, int type, bool wrap)
     {
-        if (type == 3) return Hash(x / size, y / size); // Explicit block effect only.
+        if (type == 3) return 2 * Hash(x / size, y / size) - 1; // Explicit block effect only.
         // Integer lattice periods keep the smooth fields periodic on repeated tiles.
         double Sample(double spacing, int salt, bool dots = false)
         {
@@ -135,6 +124,15 @@ public static class ReflectionPixelEffects
             double H(int cx, int cy, int channel = 0) => Hash(
                 wrap ? (cx % nx + nx) % nx : cx,
                 wrap ? (cy % ny + ny) % ny : cy, salt + channel);
+            double L(int cx, int cy)
+            {
+                if (type != 1) return 2 * H(cx, cy) - 1;
+                // Box–Muller Gaussian: moderate grains dominate, high contrast is
+                // rare. Separate hash channels for radius and phase.
+                double u = Math.Max(1e-9, H(cx, cy, 101));
+                double z = Math.Sqrt(-2 * Math.Log(u)) * Math.Cos(2 * Math.PI * H(cx, cy, 211));
+                return Math.Clamp(z / 2.5, -1, 1);
+            }
             if (dots)
             {
                 double value = 0;
@@ -147,14 +145,15 @@ public static class ReflectionPixelEffects
                     double radius = .22 + .22 * H(ix + dx, iy + dy, 2);
                     double distance = Math.Sqrt((fx - cx) * (fx - cx) + (fy - cy) * (fy - cy));
                     double t = Math.Clamp(1 - distance / radius, 0, 1);
-                    value = Math.Max(value, t * t * (3 - 2 * t));
+                    double mark = (2 * H(ix + dx, iy + dy, 3) - 1) * t * t * (3 - 2 * t);
+                    if (Math.Abs(mark) > Math.Abs(value)) value = mark;
                 }
                 return value;
             }
             // Smoothstep interpolation, rather than constant square fractions.
             fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
-            double top = H(ix, iy) * (1 - fx) + H(ix + 1, iy) * fx;
-            double bottom = H(ix, iy + 1) * (1 - fx) + H(ix + 1, iy + 1) * fx;
+            double top = L(ix, iy) * (1 - fx) + L(ix + 1, iy) * fx;
+            double bottom = L(ix, iy + 1) * (1 - fx) + L(ix + 1, iy + 1) * fx;
             return top * (1 - fy) + bottom * fy;
         }
         return type switch
