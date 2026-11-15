@@ -1,13 +1,14 @@
 """Portable asset/source contracts. Does not execute WinRT, ACLs or OG rendering."""
 from pathlib import Path
 import struct
+import hashlib
 import zlib
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def decode_rgba(path):
+def decode_rgba(path, expected_size):
     data = path.read_bytes()
     assert data[:8] == b'\x89PNG\r\n\x1a\n'
     offset, compressed, count = 8, bytearray(), 0
@@ -19,7 +20,7 @@ def decode_rgba(path):
         assert zlib.crc32(kind + payload) & 0xffffffff == crc
         if kind == b'IHDR':
             w, h, depth, color, comp, filt, interlace = struct.unpack('>IIBBBBB', payload)
-            assert (w, h, depth, color, comp, filt, interlace) == (256, 256, 8, 6, 0, 0, 0)
+            assert (w, h, depth, color, comp, filt, interlace) == (*expected_size, 8, 6, 0, 0, 0)
         if kind == b'IDAT':
             compressed.extend(payload)
         count += 1
@@ -53,19 +54,31 @@ def decode_rgba(path):
 
 assets = ROOT / 'OpenGlass/Resources/GlassReflection/Textured'
 for name in ('GlassReflection_01', 'GlassReflection_02'):
-    dark = decode_rgba(assets / (name + '_Dark.png'))
-    lite = decode_rgba(assets / (name + '_Lite.png'))
+    size = (8, 8) if name == 'GlassReflection_02' else (256, 256)
+    dark = decode_rgba(assets / (name + '_Dark.png'), size)
+    lite = decode_rgba(assets / (name + '_Lite.png'), size)
     assert dark[3::4] == lite[3::4]
     assert len(set(dark[3::4])) > 1
     if name == 'GlassReflection_02':
-        alpha = dark[3::4]
-        # Exactly 32 repeats: wrapping a 256px tile continues the same 8px pattern.
-        assert all(alpha[y * 256 + x] == alpha[(y % 8) * 256 + x % 8]
-                   for y in range(256) for x in range(256))
+        # Golden hashes of 1920x1080 RGBA canvases built from the approved 256px tiles.
+        for pixels, expected_hash in (
+            (dark, '6ca50312be4ef2ab027cc04f7cd8e9c0d081a62c7262a971e8bf32f5a041fc35'),
+            (lite, 'c18f341b5d2ec192f390e7832ef2c7fa7026929c92551811586b27b01e01b478'),
+        ):
+            canvas = b''.join(bytes(pixels[(y % 8) * 32:(y % 8 + 1) * 32]) * 240
+                              for y in range(1080))
+            assert hashlib.sha256(canvas).hexdigest() == expected_hash
+        # No smaller axial period can reproduce the cell.
+        for axis in (0, 1):
+            for period in range(1, 8):
+                assert any(dark[(y * 8 + x) * 4 + 3] !=
+                           dark[((y if axis == 0 else y % period) * 8 +
+                                 (x % period if axis == 0 else x)) * 4 + 3]
+                           for y in range(8) for x in range(8))
     for channel in range(3):
         assert set(dark[channel::4]) == {0}
         assert set(lite[channel::4]) == {255}
-print('PASS: 256x256 RGBA pairs, PNG CRC/decode, identical alpha and correct RGB')
+print('PASS: RGBA pairs, 02 minimal 8x8 cell; full canvases match approved 256px tiles')
 
 paths = (ROOT / 'GlassSettings/Core/Platform/PlatformPaths.cs').read_text()
 service = (ROOT / 'GlassSettings/Services/ReflectionTextureService.cs').read_text()
@@ -85,3 +98,10 @@ for language in ('ru-RU', 'en-US'):
     for key in ('Dialog_ReflectionPrepareFailedTitle', 'Dialog_ReflectionPrepareFailedBody'):
         assert tree.find(f"data[@name='{key}']/value").text
 print('PASS: ProgramData destination, cleanup before copying including cache hits, localized failure UI')
+
+control = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml.cs').read_text()
+assert 'ReflectionTextureService.CreatePreviewAsync(FilePath)' in control
+assert 'revision != _imageRevision' in control
+assert 'RepeatPixels(pixels.DetachPixelData()' in service
+assert 'Task.Run(() => RepeatPixels(tile' in service
+print('PASS: texture previews and applied canvas share unscaled pixel repetition; stale previews guarded')

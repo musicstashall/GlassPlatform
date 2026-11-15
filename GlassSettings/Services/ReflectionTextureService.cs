@@ -1,7 +1,9 @@
 namespace GlassSettings.Services;
 
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Security.Cryptography;
+using Microsoft.UI.Xaml.Media.Imaging;
 using GlassSettings.Core.Platform;
 using Windows.Graphics.Imaging;
 
@@ -60,15 +62,7 @@ public static class ReflectionTextureService
                 new BitmapTransform(), ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
             var tile = pixels.DetachPixelData();
             int tw = checked((int)decoder.PixelWidth), th = checked((int)decoder.PixelHeight);
-            var canvas = await Task.Run(() =>
-            {
-                var result = new byte[checked(width * height * 4)];
-                for (int y = 0; y < height; y++)
-                    for (int x = 0; x < width; x += tw)
-                        Buffer.BlockCopy(tile, (y % th) * tw * 4, result, (y * width + x) * 4,
-                            Math.Min(tw, width - x) * 4);
-                return result;
-            });
+            var canvas = await Task.Run(() => RepeatPixels(tile, tw, th, width, height));
             var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
@@ -90,6 +84,38 @@ public static class ReflectionTextureService
             return Publish(target);
         }
         finally { Gate.Release(); }
+    }
+
+    /// <summary>Preview uses the same native-pixel repetition as the applied canvas.</summary>
+    public static async Task<WriteableBitmap> CreatePreviewAsync(string source)
+    {
+        var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(Path.GetFullPath(source));
+        using var input = await file.OpenReadAsync();
+        var decoder = await BitmapDecoder.CreateAsync(input);
+        if (decoder.PixelWidth == 0 || decoder.PixelHeight == 0 ||
+            decoder.PixelWidth > 1024 || decoder.PixelHeight > 1024)
+            throw new InvalidOperationException("Unsupported reflection preview tile size.");
+        // XAML WriteableBitmap expects premultiplied BGRA; PNG generation uses straight alpha.
+        var pixels = await decoder.GetPixelDataAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied,
+            new BitmapTransform(), ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
+        const int width = 148, height = 92;
+        var repeated = RepeatPixels(pixels.DetachPixelData(), (int)decoder.PixelWidth,
+            (int)decoder.PixelHeight, width, height);
+        var bitmap = new WriteableBitmap(width, height);
+        using (var stream = bitmap.PixelBuffer.AsStream())
+            await stream.WriteAsync(repeated, 0, repeated.Length);
+        bitmap.Invalidate();
+        return bitmap;
+    }
+
+    private static byte[] RepeatPixels(byte[] tile, int tw, int th, int width, int height)
+    {
+        var result = new byte[checked(width * height * 4)];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x += tw)
+                Buffer.BlockCopy(tile, (y % th) * tw * 4, result, (y * width + x) * 4,
+                    Math.Min(tw, width - x) * 4);
+        return result;
     }
 
     private static string Publish(string cachedImage)

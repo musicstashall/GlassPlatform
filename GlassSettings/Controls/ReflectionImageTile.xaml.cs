@@ -14,7 +14,7 @@ public sealed partial class ReflectionImageTile : UserControl
             nameof(FilePath),
             typeof(string),
             typeof(ReflectionImageTile),
-            new PropertyMetadata(string.Empty));
+            new PropertyMetadata(string.Empty, OnFilePathChanged));
 
     public static readonly DependencyProperty ImageProperty =
         DependencyProperty.Register(
@@ -68,6 +68,14 @@ public sealed partial class ReflectionImageTile : UserControl
         set => SetValue(IsSelectedProperty, value);
     }
 
+    private int _imageRevision;
+
+    private static void OnFilePathChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is ReflectionImageTile tile)
+            tile.ApplyImage(tile.Image);
+    }
+
     private static void OnImageChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is ReflectionImageTile tile)
@@ -111,8 +119,26 @@ public sealed partial class ReflectionImageTile : UserControl
         args.Handled = true;
     }
 
-    private void ApplyImage(ImageSource? source)
+    private async void ApplyImage(ImageSource? source)
     {
+        var revision = ++_imageRevision;
+        if (source is not null && ReflectionTextureService.IsTexture(FilePath))
+        {
+            PreviewImage.Source = null;
+            PreviewImage.Visibility = Visibility.Collapsed;
+            PreviewFallback.Visibility = Visibility.Visible;
+            try
+            {
+                source = await ReflectionTextureService.CreatePreviewAsync(FilePath);
+            }
+            catch (Exception error)
+            {
+                System.Diagnostics.Trace.TraceError("Reflection preview failed: {0}", error);
+                source = null;
+            }
+            // A recycled tile may now refer to another image or path.
+            if (revision != _imageRevision) return;
+        }
         if (source is not null)
         {
             PreviewImage.Source = source;
