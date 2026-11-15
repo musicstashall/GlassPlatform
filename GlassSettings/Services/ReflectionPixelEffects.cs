@@ -70,7 +70,14 @@ public static class ReflectionPixelEffects
             Pass(pixels, intermediate, horizontal: true);
             Pass(intermediate, pixels, horizontal: false);
         }
+        // Fixed-seed multiplicative alpha grain: preserves paired colors, transparent
+        // areas and tile repetition. Zero noise is byte-for-byte unchanged.
+        uint seed = 0x9E3779B9u;
         for (int i = 3; i < pixels.Length; i += 4)
-            pixels[i] = (byte)((pixels[i] * settings.OpacityPercent + 50) / 100);
+        {
+            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+            int attenuation = 100 - (int)(seed % 101) * settings.NoisePercent / 100;
+            pixels[i] = (byte)((pixels[i] * attenuation * settings.OpacityPercent + 5000) / 10000);
+        }
     }
 }

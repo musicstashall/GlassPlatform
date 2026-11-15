@@ -1150,4 +1150,5 @@
   <data name="Reflection_SettingOpacity" xml:space="preserve"><value>Непрозрачность, %</value></data>
   <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Мягкость краёв, px (0–3)</value></data>
   <data name="Reflection_Reset" xml:space="preserve"><value>Сбросить</value></data>
+  <data name="Reflection_SettingNoise" xml:space="preserve"><value>Шум, %</value></data>
 </root>

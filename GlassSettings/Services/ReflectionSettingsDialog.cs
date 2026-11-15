@@ -14,20 +14,30 @@ public static class ReflectionSettingsDialog
         var scale = Number("Reflection_SettingScale", 25, 200, initial.ScalePercent);
         var opacity = Number("Reflection_SettingOpacity", 0, 100, initial.OpacityPercent);
         var softness = Number("Reflection_SettingSoftness", 0, 3, initial.Softness);
-        var preview = new Image { Width = 384, Height = 216, Stretch = Stretch.Uniform };
-        var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var noise = Number("Reflection_SettingNoise", 0, 100, initial.NoisePercent);
+        var preview = new Image { Height = 180, Stretch = Stretch.Uniform };
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         var reset = new Button { Content = GlassSettingsResources.Get("Reflection_Reset") };
         var body = new StackPanel { Spacing = 12 };
-        body.Children.Add(new TextBlock { Text = Path.GetFileNameWithoutExtension(source) });
+        body.Children.Add(new TextBlock
+        {
+            Text = Path.GetFileNameWithoutExtension(source),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Opacity = 0.7
+        });
         body.Children.Add(new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 144, 144, 144)), Child = preview });
-        body.Children.Add(scale); body.Children.Add(opacity); body.Children.Add(softness);
+        body.Children.Add(Row("Reflection_SettingScale", scale));
+        body.Children.Add(Row("Reflection_SettingOpacity", opacity));
+        body.Children.Add(Row("Reflection_SettingSoftness", softness));
+        body.Children.Add(Row("Reflection_SettingNoise", noise));
         body.Children.Add(reset); body.Children.Add(error);
         int revision = 0;
         bool closed = false;
         ReflectionRenderSettings Values() => new(
             double.IsFinite(scale.Value) ? (int)scale.Value : 100,
             double.IsFinite(opacity.Value) ? (int)opacity.Value : 100,
-            double.IsFinite(softness.Value) ? (int)softness.Value : 0);
+            double.IsFinite(softness.Value) ? (int)softness.Value : 0,
+            double.IsFinite(noise.Value) ? (int)noise.Value : 0);
         async Task RefreshAsync()
         {
             int current = ++revision;
@@ -42,34 +52,59 @@ public static class ReflectionSettingsDialog
                 var bitmap = new BitmapImage();
                 await bitmap.SetSourceAsync(random);
                 if (closed || current != revision) return;
-                preview.Source = bitmap; error.Text = "";
+                preview.Source = bitmap; error.Text = ""; error.Visibility = Visibility.Collapsed;
             }
             catch (Exception exception)
             {
-                if (!closed && current == revision) error.Text = exception.Message;
+                if (!closed && current == revision)
+                {
+                    error.Text = exception.Message;
+                    error.Visibility = Visibility.Visible;
+                }
             }
         }
         scale.ValueChanged += (_, _) => _ = RefreshAsync();
         opacity.ValueChanged += (_, _) => _ = RefreshAsync();
         softness.ValueChanged += (_, _) => _ = RefreshAsync();
-        reset.Click += (_, _) => { scale.Value = 100; opacity.Value = 100; softness.Value = 0; };
+        noise.ValueChanged += (_, _) => _ = RefreshAsync();
+        reset.Click += (_, _) => { scale.Value = 100; opacity.Value = 100; softness.Value = 0; noise.Value = 0; };
         _ = RefreshAsync();
         try
         {
-            var accepted = await HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            var result = await HostedDialogService.ShowAsync(new HostedDialogSpec
             {
-                Title = GlassSettingsResources.Get("Reflection_Configure"), Body = body,
-                MinWidth = 460, MaxWidth = 520,
+                Title = GlassSettingsResources.Get("Reflection_Configure"), Body = HostedDialogLayout.WrapBodyWithContentPadding(body),
+                MinWidth = 420, MaxWidth = 480, MaxHeight = 620,
                 Footer = HostedConfirmationDialogService.CreateCancelConfirmFooter(GlassSettingsResources.Get("CmdApply"))
             });
-            return accepted ? Values().Normalize() : null;
+            return result == HostedDialogResult.Primary ? Values().Normalize() : null;
         }
         finally { closed = true; revision++; }
     }
 
-    private static NumberBox Number(string label, double minimum, double maximum, double value) => new()
+    private static NumberBox Number(string label, double minimum, double maximum, double value)
     {
-        Header = GlassSettingsResources.Get(label), Minimum = minimum, Maximum = maximum, Value = value,
-        SmallChange = 1, LargeChange = 10, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact
-    };
+        var number = new NumberBox
+        {
+            Minimum = minimum, Maximum = maximum, Value = value, Width = 128,
+            SmallChange = 1, LargeChange = 10, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(number, GlassSettingsResources.Get(label));
+        return number;
+    }
+
+    private static Grid Row(string label, NumberBox number)
+    {
+        var row = new Grid { ColumnSpacing = 16 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(new TextBlock
+        {
+            Text = GlassSettingsResources.Get(label), VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap
+        });
+        Grid.SetColumn(number, 1);
+        row.Children.Add(number);
+        return row;
+    }
 }

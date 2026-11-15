@@ -26,3 +26,11 @@ Check(scaled.Length == 100 && scaled.Where((_, i) => i % 4 == 3).All(a => a == 2
 var bounded = new ReflectionRenderSettings(0, 300, -4).Normalize();
 Check(bounded == new ReflectionRenderSettings(25, 100, 0), "registry/UI values normalized");
 Console.WriteLine("Registry and WinUI are not exercised by these pixel tests.");
+var grainA = Enumerable.Repeat((byte)160, 256 * 4).ToArray();
+var grainB = (byte[])grainA.Clone();
+ReflectionPixelEffects.ApplyAlpha(grainA, 256, 1, new(100, 100, 0, 75), wrap: true);
+ReflectionPixelEffects.ApplyAlpha(grainB, 256, 1, new(100, 100, 0, 75), wrap: true);
+Check(grainA.SequenceEqual(grainB), "noise is deterministic");
+Check(grainA.Where((_, i) => i % 4 != 3).All(v => v == 160), "noise preserves paired RGB colors");
+Check(grainA.Where((_, i) => i % 4 == 3).Distinct().Count() > 1, "noise modulates alpha");
+Check(new ReflectionRenderSettings(100, 100, 0, 999).Normalize().NoisePercent == 100, "noise clamped");

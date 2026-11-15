@@ -44,3 +44,10 @@ header_style = pivot.find('ui:Pivot.Resources/ui:Style', ns)
 assert header_style is not None
 assert header_style.get('BasedOn') == '{StaticResource GlassSettingsPivotHeaderItemStyle}'
 print('PASS: configure precedes intensity in one header table; Pivot reuses Adjacent Windows typography')
+assert 'int NoisePercent = 0' in state and 'Math.Clamp(NoisePercent, 0, 100)' in state
+assert 'noise.ValueChanged' in dialog and 'initial.NoisePercent' in dialog
+assert 'MaxHeight = 620' in dialog and 'HostedDialogSpec' in dialog
+assert 'CreateCancelConfirmFooter(GlassSettingsResources.Get("CmdApply"))' in dialog
+for language in ('ru-RU', 'en-US'):
+    assert 'Reflection_SettingNoise' in (root / f'GlassSettings/Strings/{language}/Resources.resw').read_text()
+print('PASS: noise control persisted with settings; bounded scrollable dialog retains Apply footer')

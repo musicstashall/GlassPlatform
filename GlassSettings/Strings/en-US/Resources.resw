@@ -1145,4 +1145,5 @@
   <data name="Reflection_SettingOpacity" xml:space="preserve"><value>Opacity, %</value></data>
   <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Edge softness, px (0–3)</value></data>
   <data name="Reflection_Reset" xml:space="preserve"><value>Reset</value></data>
+  <data name="Reflection_SettingNoise" xml:space="preserve"><value>Noise, %</value></data>
 </root>
