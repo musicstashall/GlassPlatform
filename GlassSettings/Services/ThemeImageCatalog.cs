@@ -571,7 +571,14 @@ public static class ThemeImageCatalog
         foreach (var file in Directory.EnumerateFiles(dir, "*.*", SearchOption.TopDirectoryOnly))
         {
             var ext = Path.GetExtension(file).ToLowerInvariant();
-            if (ext is not ".png" and not ".jpg" and not ".jpeg" and not ".bmp" and not ".webp"
+            var patternFolder = string.Equals(Path.GetFileName(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+                "Pattern", StringComparison.OrdinalIgnoreCase);
+            if (patternFolder)
+            {
+                if (!SvgReflectionRenderer.IsPattern(file))
+                    continue;
+            }
+            else if (ext is not ".png" and not ".jpg" and not ".jpeg" and not ".bmp" and not ".webp"
                 && !SvgReflectionRenderer.IsPattern(file))
                 continue;
 

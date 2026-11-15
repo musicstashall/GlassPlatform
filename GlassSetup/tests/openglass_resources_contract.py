@@ -47,7 +47,15 @@ for forbidden in ('CustomAction','ServiceInstall','ServiceControl','RemoveFile',
  assert not package.findall('.//w:'+forbidden,ns)
 assert not package.findall('.//w:File',ns) # all graphics enter through the validated harvest
 stage=(msi/'scripts/Stage-OpenGlassResources.ps1').read_text()
+project_text=(msi/'OpenGlassResources-x64.wixproj').read_text()
+assert '$(SolutionRoot)OpenGlass\\Resources' in project_text
+assert 'Build\\x64\\Release\\OpenGlass\\Resources' not in project_text
 assert '$allowed -notcontains $file.Extension.ToLowerInvariant()' in stage
+assert "$item.Name -eq 'Tests'" in stage
+assert 'Pattern accepts only SVG' in stage
+pattern = root / 'OpenGlass/Resources/GlassReflection/Pattern'
+pattern_files = [path for path in pattern.iterdir() if path.is_file()]
+assert pattern_files and all(path.suffix.lower() == '.svg' for path in pattern_files)
 assert 'ReparsePoint' in stage and 'Refusing to produce an empty' in stage
 assert "'.exe'" not in stage and "'.dll'" not in stage
 # Exercise the actual staging allowlist against atlas sidecars and forbidden

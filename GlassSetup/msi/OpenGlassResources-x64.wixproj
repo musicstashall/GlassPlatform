@@ -10,7 +10,8 @@
     <GlassSignThisProject>true</GlassSignThisProject>
     <!-- Inno AppId={{#MyAppId}} оставляет ключ {GUID}}_is1. ICE03 считает лишнюю «}» неверным RegPath; поиск в MSI при этом открывает ключ как есть. -->
     <SuppressIces>ICE03</SuppressIces>
-    <GlassOgResourcesSource Condition="'$(GlassOgResourcesSource)' == ''">$(SolutionRoot)Build\x64\Release\OpenGlass\Resources</GlassOgResourcesSource>
+    <!-- Каталог GlassSettings: OpenGlass\Resources\GlassReflection и AtlasTheme. Не выход сборки OpenGlass. -->
+    <GlassOgResourcesSource Condition="'$(GlassOgResourcesSource)' == ''">$(SolutionRoot)OpenGlass\Resources</GlassOgResourcesSource>
     <GlassResourcesStage>$(SolutionRoot)Build\SetupPayload\OpenGlassResources</GlassResourcesStage>
     <GlassResourcesHarvest>$(BaseIntermediateOutputPath)OpenGlassResources.Harvest.wxs</GlassResourcesHarvest>
     <DefineConstants>$(DefineConstants);GlassSetupIcon=$(SolutionRoot)GlassSetup\res\app.ico</DefineConstants>

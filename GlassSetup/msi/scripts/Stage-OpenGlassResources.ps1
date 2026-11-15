@@ -35,7 +35,11 @@ function Get-RegularFiles([string]$Root) {
     while ($pending.Count) {
         foreach ($item in Get-ChildItem -LiteralPath $pending.Pop() -Force) {
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Reparse point refused: $($item.FullName)" }
-            if ($item.PSIsContainer) { $pending.Push($item.FullName) } else { $item }
+            # GlassSettings не показывает каталог Tests. В пакет он не входит.
+            if ($item.PSIsContainer) {
+                if ($item.Name -eq 'Tests') { continue }
+                $pending.Push($item.FullName)
+            } else { $item }
         }
     }
 }
@@ -46,6 +50,11 @@ if (-not $files.Count) { throw 'Refusing to produce an empty OpenGlass Resources
 $allowed = @('.png','.bmp','.jpg','.jpeg','.gif','.webp','.svg','.ico','.dds','.json','.ini','.xml','.txt','.md','.material','.atlas','.layout')
 foreach ($file in $files) {
     if ($allowed -notcontains $file.Extension.ToLowerInvariant()) { throw "Not a supported graphics resource: $($file.FullName)" }
+    $relative = $file.FullName.Substring($sourceRoot.Length).TrimStart('\')
+    # GlassReflection\Pattern — только SVG. Растровые файлы туда не входят.
+    if ($relative -match '(?i)(^|\\)Pattern\\' -and $file.Extension.ToLowerInvariant() -ne '.svg') {
+        throw "GlassReflection\Pattern accepts only SVG: $($file.FullName)"
+    }
 }
 if (Test-Path -LiteralPath $destinationRoot) {
     $null = @(Get-RegularFiles $destinationRoot)
