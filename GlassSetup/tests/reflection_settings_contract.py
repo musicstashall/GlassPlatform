@@ -57,3 +57,12 @@ assert 'noiseSize.Value = 1' in dialog
 for language in ('ru-RU', 'en-US'):
     assert 'Reflection_SettingNoiseSize' in (root / f'GlassSettings/Strings/{language}/Resources.resw').read_text()
 print('PASS: grain size control, defaults, bounds, preview and reset wiring')
+assert 'int NoiseType = 0' in state and 'Math.Clamp(NoiseType, 0, 3)' in state
+assert 'noiseType.SelectionChanged' in dialog and 'initial.NoiseType' in dialog
+assert 'noiseType.SelectedIndex = 0' in dialog
+for language in ('ru-RU', 'en-US'):
+    strings = (root / f'GlassSettings/Strings/{language}/Resources.resw').read_text()
+    for key in ('Reflection_SettingNoiseType', 'Reflection_NoiseSoft', 'Reflection_NoiseFilm',
+                'Reflection_NoiseDots', 'Reflection_NoiseBlocks'):
+        assert key in strings
+print('PASS: four grain types, default smooth noise, persistence and preview wiring')

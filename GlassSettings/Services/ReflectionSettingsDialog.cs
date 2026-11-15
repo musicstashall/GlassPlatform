@@ -16,6 +16,12 @@ public static class ReflectionSettingsDialog
         var softness = Number("Reflection_SettingSoftness", 0, 3, initial.Softness);
         var noise = Number("Reflection_SettingNoise", 0, 100, initial.NoisePercent);
         var noiseSize = Number("Reflection_SettingNoiseSize", 1, 32, initial.NoiseSize);
+        var noiseType = new ComboBox { Width = 160, SelectedIndex = -1 };
+        foreach (var key in new[] { "Soft", "Film", "Dots", "Blocks" })
+            noiseType.Items.Add(GlassSettingsResources.Get("Reflection_Noise" + key));
+        noiseType.SelectedIndex = initial.NoiseType;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(noiseType,
+            GlassSettingsResources.Get("Reflection_SettingNoiseType"));
         var preview = new Image { Height = 180, Stretch = Stretch.Uniform };
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         var reset = new Button { Content = GlassSettingsResources.Get("Reflection_Reset") };
@@ -30,6 +36,7 @@ public static class ReflectionSettingsDialog
         body.Children.Add(Row("Reflection_SettingScale", scale));
         body.Children.Add(Row("Reflection_SettingOpacity", opacity));
         body.Children.Add(Row("Reflection_SettingSoftness", softness));
+        body.Children.Add(Row("Reflection_SettingNoiseType", noiseType));
         body.Children.Add(Row("Reflection_SettingNoise", noise));
         body.Children.Add(Row("Reflection_SettingNoiseSize", noiseSize));
         body.Children.Add(reset); body.Children.Add(error);
@@ -40,7 +47,8 @@ public static class ReflectionSettingsDialog
             double.IsFinite(opacity.Value) ? (int)opacity.Value : 100,
             double.IsFinite(softness.Value) ? (int)softness.Value : 0,
             double.IsFinite(noise.Value) ? (int)noise.Value : 0,
-            double.IsFinite(noiseSize.Value) ? (int)noiseSize.Value : 1);
+            double.IsFinite(noiseSize.Value) ? (int)noiseSize.Value : 1,
+            Math.Max(0, noiseType.SelectedIndex));
         async Task RefreshAsync()
         {
             int current = ++revision;
@@ -71,7 +79,8 @@ public static class ReflectionSettingsDialog
         softness.ValueChanged += (_, _) => _ = RefreshAsync();
         noise.ValueChanged += (_, _) => _ = RefreshAsync();
         noiseSize.ValueChanged += (_, _) => _ = RefreshAsync();
-        reset.Click += (_, _) => { scale.Value = 100; opacity.Value = 100; softness.Value = 0; noise.Value = 0; noiseSize.Value = 1; };
+        noiseType.SelectionChanged += (_, _) => _ = RefreshAsync();
+        reset.Click += (_, _) => { scale.Value = 100; opacity.Value = 100; softness.Value = 0; noise.Value = 0; noiseSize.Value = 1; noiseType.SelectedIndex = 0; };
         _ = RefreshAsync();
         try
         {
@@ -97,7 +106,7 @@ public static class ReflectionSettingsDialog
         return number;
     }
 
-    private static Grid Row(string label, NumberBox number)
+    private static Grid Row(string label, FrameworkElement number)
     {
         var row = new Grid { ColumnSpacing = 16 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });

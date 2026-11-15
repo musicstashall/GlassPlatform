@@ -70,26 +70,76 @@ public static class ReflectionPixelEffects
             Pass(pixels, intermediate, horizontal: true);
             Pass(intermediate, pixels, horizontal: false);
         }
-        // Fixed-seed multiplicative alpha grain: preserves paired colors, transparent
-        // areas and tile repetition. Zero noise is byte-for-byte unchanged.
+        // Multiplicative alpha grain preserves RGB and transparent areas.
         int grainSize = Math.Clamp(settings.NoiseSize, 1, 32);
         for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
         {
-            // Hash grain coordinates, not individual pixels: each square fraction
-            // has one attenuation. A texture's resulting cell is repeated as-is.
-            uint seed;
-            unchecked
-            {
-                seed = (uint)(x / grainSize) * 0x85EBCA6Bu
-                    ^ (uint)(y / grainSize) * 0xC2B2AE35u ^ 0x9E3779B9u;
-                seed ^= seed >> 16; seed *= 0x7FEB352Du;
-                seed ^= seed >> 15; seed *= 0x846CA68Bu;
-                seed ^= seed >> 16;
-            }
             int i = (y * width + x) * 4 + 3;
-            int attenuation = 100 - (int)(seed % 101) * settings.NoisePercent / 100;
-            pixels[i] = (byte)((pixels[i] * attenuation * settings.OpacityPercent + 5000) / 10000);
+            double grain = settings.NoisePercent == 0 ? 0
+                : Grain(x, y, width, height, grainSize, settings.NoiseType, wrap);
+            double alpha = pixels[i] * (1 - grain * settings.NoisePercent / 100.0)
+                * settings.OpacityPercent / 100.0;
+            pixels[i] = (byte)Math.Clamp((int)Math.Round(alpha), 0, 255);
         }
+    }
+
+    private static double Hash(int x, int y, int salt = 0)
+    {
+        unchecked
+        {
+            uint seed = (uint)x * 0x85EBCA6Bu ^ (uint)y * 0xC2B2AE35u
+                ^ (uint)salt * 0x27D4EB2Du ^ 0x9E3779B9u;
+            seed ^= seed >> 16; seed *= 0x7FEB352Du;
+            seed ^= seed >> 15; seed *= 0x846CA68Bu;
+            seed ^= seed >> 16;
+            return seed / (double)uint.MaxValue;
+        }
+    }
+
+    private static double Grain(int x, int y, int width, int height, int size, int type, bool wrap)
+    {
+        if (type == 3) return Hash(x / size, y / size); // Explicit block effect only.
+        // Integer lattice periods keep the smooth fields periodic on repeated tiles.
+        double Sample(double spacing, int salt, bool dots = false)
+        {
+            int nx = Math.Max(1, (int)Math.Ceiling(width / spacing));
+            int ny = Math.Max(1, (int)Math.Ceiling(height / spacing));
+            double px = wrap ? x * (double)nx / width : x / spacing;
+            double py = wrap ? y * (double)ny / height : y / spacing;
+            int ix = (int)Math.Floor(px), iy = (int)Math.Floor(py);
+            double fx = px - ix, fy = py - iy;
+            double H(int cx, int cy, int channel = 0) => Hash(
+                wrap ? (cx % nx + nx) % nx : cx,
+                wrap ? (cy % ny + ny) % ny : cy, salt + channel);
+            if (dots)
+            {
+                double value = 0;
+                // Jittered round grains, including neighbours across tile boundaries.
+                for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    double cx = dx + .2 + .6 * H(ix + dx, iy + dy);
+                    double cy = dy + .2 + .6 * H(ix + dx, iy + dy, 1);
+                    double radius = .22 + .22 * H(ix + dx, iy + dy, 2);
+                    double distance = Math.Sqrt((fx - cx) * (fx - cx) + (fy - cy) * (fy - cy));
+                    double t = Math.Clamp(1 - distance / radius, 0, 1);
+                    value = Math.Max(value, t * t * (3 - 2 * t));
+                }
+                return value;
+            }
+            // Smoothstep interpolation, rather than constant square fractions.
+            fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+            double top = H(ix, iy) * (1 - fx) + H(ix + 1, iy) * fx;
+            double bottom = H(ix, iy + 1) * (1 - fx) + H(ix + 1, iy + 1) * fx;
+            return top * (1 - fy) + bottom * fy;
+        }
+        return type switch
+        {
+            1 => .55 * Sample(size, 11) + .30 * Sample(Math.Max(1, size / 2.0), 29)
+                + .15 * Sample(Math.Max(1, size / 4.0), 47),
+            2 => Sample(size, 71, dots: true),
+            _ => Sample(size, 0)
+        };
     }
 }
