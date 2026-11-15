@@ -44,6 +44,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private readonly ObservableCollection<AtlasImageTileModel> _atlasItems = [];
     private readonly DwmOpacityGroupRow _reflectionRow;
     private readonly DwmOpacityGroupRow _reflectionMaxRow;
+    private Button _reflectionConfigureButton = null!;
     private Slider _intensitySlider = null!;
     private TextBlock _intensityValueText = null!;
     private Slider _parallaxSlider = null!;
@@ -146,8 +147,13 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             _materialOpacitySlider,
             _materialOpacityValueText);
 
+        // Use one header-controls table. HeaderActions would activate the legacy bridge
+        // and replace the directly populated intensity cell on Loaded.
+        _reflectionConfigureButton = new Button();
+        _reflectionConfigureButton.Click += ReflectionConfigure_OnClick;
+        ReflectionCollectionExpander.HeaderControlsTable.SetCell(0, null, _reflectionConfigureButton);
         ReflectionCollectionExpander.HeaderControlsTable.SetCell(
-            0,
+            1,
             GlassSettingsResources.Get("Dwm_Intensity"),
             _reflectionHeaderSlider);
         MaterialCollectionExpander.HeaderControlsTable.SetCell(
@@ -228,7 +234,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         ReflectionInfoBlock.Message = GlassSettingsResources.Get("Dwm_ReflectionInfoMessage");
         AdvancedExpander.Title = GlassSettingsResources.Get("Dwm_AdvancedColorizationTitle");
 
-        ReflectionCollectionExpander.HeaderControlsTable.GetCell(0)!.Label =
+        ReflectionCollectionExpander.HeaderControlsTable.GetCell(1)!.Label =
             GlassSettingsResources.Get("Dwm_Intensity");
         MaterialCollectionExpander.HeaderControlsTable.GetCell(0)!.Label =
             GlassSettingsResources.Get("Dwm_Intensity");
@@ -258,7 +264,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         ReflectionTexturesTab.Header = GlassSettingsResources.Get("Reflection_TabTextures");
         ReflectionPatternTab.Header = GlassSettingsResources.Get("Reflection_TabPattern");
         ReflectionOtherTab.Header = GlassSettingsResources.Get("Reflection_TabOther");
-        ReflectionConfigureButton.Content = GlassSettingsResources.Get("Reflection_Configure");
+        _reflectionConfigureButton.Content = GlassSettingsResources.Get("Reflection_Configure");
         ReflectionCollectionExpander.IconGlyph = SettingsSectionGlyphs.Image;
         ReflectionCollectionExpander.Title = GlassSettingsResources.Get("Dwm_ReflectionCollection");
         ReflectionCollectionExpander.Description = GlassSettingsResources.Get("Dwm_ReflectionImageDesc");
@@ -796,7 +802,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     {
         var source = _currentReflectionPath is { } path ? ReflectionTextureService.ResolveSource(path) : null;
         UpdateDefaultAwareTileSelection(_reflectionItems, source, DefaultReflectionTilePath);
-        ReflectionConfigureButton.IsEnabled = source is not null &&
+        _reflectionConfigureButton.IsEnabled = source is not null &&
             _reflectionItems.Any(item => SamePath(item.FilePath, source)) &&
             ReflectionCategory(source) == ReflectionCategoryPivot.SelectedIndex &&
             (ReflectionTextureService.IsTexture(source) || SvgReflectionRenderer.IsPattern(source));

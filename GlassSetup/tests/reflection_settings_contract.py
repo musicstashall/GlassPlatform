@@ -33,3 +33,14 @@ for language in ('ru-RU', 'en-US'):
                 'Reflection_SettingSoftness', 'Reflection_Reset'):
         assert resources.find(f"data[@name='{key}']/value").text
 print('PASS: reflection Pivot, default placement, passthrough, settings dialog, single output and HKCU publication order')
+
+# Header actions and directly populated header-table cells must not be mixed:
+# the expander's legacy bridge would discard the slider on Loaded.
+assert 'ReflectionCollectionExpander.HeaderActions' not in page
+assert 'HeaderControlsTable.SetCell(0, null, _reflectionConfigureButton)' in page
+assert 'ReflectionCollectionExpander.HeaderControlsTable.SetCell(\n            1,' in page
+assert 'ReflectionCollectionExpander.HeaderControlsTable.GetCell(1)!.Label' in page
+header_style = pivot.find('ui:Pivot.Resources/ui:Style', ns)
+assert header_style is not None
+assert header_style.get('BasedOn') == '{StaticResource GlassSettingsPivotHeaderItemStyle}'
+print('PASS: configure precedes intensity in one header table; Pivot reuses Adjacent Windows typography')

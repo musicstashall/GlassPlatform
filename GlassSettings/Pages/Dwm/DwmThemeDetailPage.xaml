@@ -203,9 +203,6 @@
                 x:Name="ReflectionCollectionExpander"
                 GateToggled="ReflectionCollectionExpander_OnGateToggled"
                 HorizontalAlignment="Stretch">
-                <ctrl:SettingsSystemGateExpander.HeaderActions>
-                    <Button x:Name="ReflectionConfigureButton" Click="ReflectionConfigure_OnClick" />
-                </ctrl:SettingsSystemGateExpander.HeaderActions>
                 <Grid
                     x:Name="ReflectionItemsHost"
                     MinHeight="120"
@@ -216,6 +213,9 @@
                     </Grid.RowDefinitions>
                     <Pivot x:Name="ReflectionCategoryPivot"
                            SelectionChanged="ReflectionCategory_OnSelectionChanged">
+                        <Pivot.Resources>
+                            <Style TargetType="PivotHeaderItem" BasedOn="{StaticResource GlassSettingsPivotHeaderItemStyle}" />
+                        </Pivot.Resources>
                         <PivotItem x:Name="ReflectionTexturesTab" />
                         <PivotItem x:Name="ReflectionPatternTab" />
                         <PivotItem x:Name="ReflectionOtherTab" />
