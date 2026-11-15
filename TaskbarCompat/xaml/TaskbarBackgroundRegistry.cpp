@@ -22,6 +22,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <utility>
 
 namespace wux = winrt::Windows::UI::Xaml;
 
@@ -308,6 +309,32 @@ namespace TaskbarCompat
             return winrt::Windows::UI::Color{ a, r, g, b };
         }
 
+        [[nodiscard]] bool TryGetBrushColorArgb(
+            wux::Media::Brush const& brush,
+            DWORD& argb) noexcept
+        {
+            try
+            {
+                winrt::Windows::UI::Color color{};
+                if (const auto solid = brush.try_as<wux::Media::SolidColorBrush>())
+                    color = solid.Color();
+                else if (const auto acrylic = brush.try_as<wux::Media::AcrylicBrush>())
+                    color = acrylic.TintColor();
+                else
+                    return false;
+
+                argb = (static_cast<DWORD>(color.A) << 24)
+                    | (static_cast<DWORD>(color.R) << 16)
+                    | (static_cast<DWORD>(color.G) << 8)
+                    | static_cast<DWORD>(color.B);
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
         void LogBackgroundStrokeSystemFill(
             InstanceHandle              frameHandle,
             wux::Media::Brush const&    fill,
@@ -379,8 +406,11 @@ namespace TaskbarCompat
         }
     } // namespace
 
-    TaskbarBackgroundRegistry::TaskbarBackgroundRegistry(Registry::Settings settings) noexcept
+    TaskbarBackgroundRegistry::TaskbarBackgroundRegistry(
+        Registry::Settings settings,
+        std::function<void()> onSystemBrushSamplesChanged) noexcept
         : m_settings(settings)
+        , m_onSystemBrushSamplesChanged(std::move(onSystemBrushSamplesChanged))
     {
         DebugLog(
             DBG_IMPORTANT,
@@ -759,32 +789,13 @@ namespace TaskbarCompat
             {
                 const auto brushForNote =
                     info.originalBackgroundFill ? info.originalBackgroundFill : capturedFill;
-                if (const auto solid = brushForNote.try_as<wux::Media::SolidColorBrush>())
-                {
-                    const winrt::Windows::UI::Color c = solid.Color();
-                    const DWORD argb =
-                        (static_cast<DWORD>(c.A) << 24)
-                        | (static_cast<DWORD>(c.R) << 16)
-                        | (static_cast<DWORD>(c.G) << 8)
-                        | static_cast<DWORD>(c.B);
+                DWORD argb = 0;
+                if (TryGetBrushColorArgb(brushForNote, argb))
                     Registry::NoteSystemFillArgb(argb);
-                }
-                else if (const auto acrylic = brushForNote.try_as<wux::Media::AcrylicBrush>())
-                {
-                    const winrt::Windows::UI::Color c = acrylic.TintColor();
-                    const DWORD argb =
-                        (static_cast<DWORD>(c.A) << 24)
-                        | (static_cast<DWORD>(c.R) << 16)
-                        | (static_cast<DWORD>(c.G) << 8)
-                        | static_cast<DWORD>(c.B);
-                    Registry::NoteSystemFillArgb(argb);
-                }
                 else
-                {
                     DebugLog(
                         DBG_IMPORTANT,
-                        L"[TaskbarCompat][BgRegistry] BackgroundFill system brush is non-solid");
-                }
+                        L"[TaskbarCompat][BgRegistry] BackgroundFill system brush color unavailable");
             }
             catch (...)
             {
@@ -1067,16 +1078,14 @@ namespace TaskbarCompat
                 if (usableFill(fill))
                 {
                     info.originalBackgroundFill = fill;
-                    if (const auto solid = fill.try_as<wux::Media::SolidColorBrush>())
-                    {
-                        const auto c = solid.Color();
-                        const DWORD argb =
-                            (static_cast<DWORD>(c.A) << 24)
-                            | (static_cast<DWORD>(c.R) << 16)
-                            | (static_cast<DWORD>(c.G) << 8)
-                            | static_cast<DWORD>(c.B);
+                    DWORD argb = 0;
+                    if (TryGetBrushColorArgb(fill, argb))
                         Registry::NoteSystemFillArgb(argb);
-                    }
+                    else
+                        DebugLog(
+                            DBG_NORMAL,
+                            L"[TaskbarCompat][BgRegistry] theme BackgroundFill sampled, "
+                            L"but brush color is unavailable");
                     bgOk = true;
                 }
             }
@@ -1124,13 +1133,21 @@ namespace TaskbarCompat
                         CancelThemeSampleTimer(live);
                         if (sampled)
                         {
+                            // До этого места панель уже была окрашена fallback/старым
+                            // default. Новый sample бесполезен без повторного Read+Apply.
                             m_settings = Registry::ReadFromRegistry();
+                            ApplyFillPolicyToAllFrames();
+                            ApplyStrokePolicyToAllFrames();
+                            if (m_onSystemBrushSamplesChanged)
+                                m_onSystemBrushSamplesChanged();
                             DebugLog(
                                 DBG_IMPORTANT,
-                                L"[TaskbarCompat][BgRegistry] theme sample OK "
-                                L"frame=%llu retries=%u",
+                                L"[TaskbarCompat][BgRegistry] theme sample OK and applied "
+                                L"frame=%llu retries=%u tint=0x%08X border=0x%08X",
                                 static_cast<unsigned long long>(frameHandle),
-                                retries);
+                                retries,
+                                m_settings.tintArgb,
+                                m_settings.borderColorArgb);
                         }
                         else
                         {

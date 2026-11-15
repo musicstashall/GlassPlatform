@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include <cstdint>
+#include <functional>
 
 #include <xamlOM.h>
 #include <map>
@@ -26,7 +27,9 @@ namespace TaskbarCompat
     class TaskbarBackgroundRegistry
     {
     public:
-        explicit TaskbarBackgroundRegistry(Registry::Settings settings) noexcept;
+        explicit TaskbarBackgroundRegistry(
+            Registry::Settings settings,
+            std::function<void()> onSystemBrushSamplesChanged = {}) noexcept;
         ~TaskbarBackgroundRegistry() = default;
 
         TaskbarBackgroundRegistry(const TaskbarBackgroundRegistry&) = delete;
@@ -178,6 +181,7 @@ namespace TaskbarCompat
             winrt::Windows::UI::Xaml::Media::Brush& originalFill) noexcept;
 
         Registry::Settings m_settings;
+        std::function<void()> m_onSystemBrushSamplesChanged;
         std::map<InstanceHandle, TaskbarInfo> m_taskbars;
     };
 }

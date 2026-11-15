@@ -84,7 +84,9 @@ namespace TaskbarCompat
     TaskbarVisualTreeWatcher::TaskbarVisualTreeWatcher(
         IXamlDiagnostics* diagnostics,
         Registry::Settings settings) noexcept
-        : m_registry(std::make_unique<TaskbarBackgroundRegistry>(settings))
+        : m_registry(std::make_unique<TaskbarBackgroundRegistry>(
+            settings,
+            [this]() noexcept { RefreshDependentSurfaceSettings(); }))
         , m_inputSwitchRegistry(std::make_unique<InputSwitchPanelRegistry>(
             Registry::ReadSurface(Registry::SurfaceKind::Popup)))
         , m_overflowRegistry(std::make_unique<TrayOverflowPanelRegistry>(
@@ -676,11 +678,11 @@ namespace TaskbarCompat
         RetryPendingRectanglePatches();
     }
 
-    void TaskbarVisualTreeWatcher::UpdateSettings(Registry::Settings settings) noexcept
+    void TaskbarVisualTreeWatcher::RefreshDependentSurfaceSettings() noexcept
     {
-        // settings = Bar (Tray\Xaml). Смежные — per-surface.
-        if (m_registry)
-            m_registry->UpdateSettings(settings);
+        DebugLog(
+            DBG_IMPORTANT,
+            L"[TaskbarCompat][VTC] applying delayed system brush samples to surfaces");
         if (m_inputSwitchRegistry)
             m_inputSwitchRegistry->UpdateSettings(
                 Registry::ReadSurface(Registry::SurfaceKind::Popup));
@@ -696,5 +698,13 @@ namespace TaskbarCompat
         if (m_menuFlyoutRegistry)
             m_menuFlyoutRegistry->UpdateSettings(
                 Registry::ReadSurface(Registry::SurfaceKind::Menu));
+    }
+
+    void TaskbarVisualTreeWatcher::UpdateSettings(Registry::Settings settings) noexcept
+    {
+        // settings = Bar (Tray\Xaml). Смежные — per-surface.
+        if (m_registry)
+            m_registry->UpdateSettings(settings);
+        RefreshDependentSurfaceSettings();
     }
 }
