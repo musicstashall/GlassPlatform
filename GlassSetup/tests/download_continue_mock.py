@@ -24,7 +24,7 @@ unsigned long long GetTickCount64(){return ++ticks;}
 namespace WizardProgress {int Percent(int v){return v/100;}}
 namespace InstallLog {void Line(const wchar_t*){}}
 enum class Page {Components,Checking,Certificate,Installing,License};
-struct Job {std::atomic<bool> done{false};bool ok=false;std::atomic<std::uint64_t> total{0},bytes{0};};
+struct Job {std::atomic<bool> done{false},network{false};bool ok=false;std::atomic<std::uint64_t> total{0},bytes{0};};
 struct Downloads {int calls=0;bool ready=false;std::array<std::shared_ptr<Job>,6> jobs;
  void Reconcile(const std::array<bool,6>&,int){++calls;}};
 struct UI {
@@ -48,10 +48,16 @@ int main(){
  ui.SyncWebViewState();assert(ui.downloads_.calls==0);
  ui.RequestComponentContinue();assert(ui.page_==Page::Components&&ui.installs==0&&ui.downloadContinuePending_);
  const int calls=ui.downloads_.calls;ui.RequestComponentContinue();assert(ui.downloads_.calls==calls);
- // Finished preparation only releases Apply. It never opens installation.
+ // Unfinished preparation does not install. A finished transfer only releases Apply.
  ui.NoteDownloadsPrepared();assert(ui.installs==0&&ui.downloadContinuePending_);
- ui.downloads_.ready=true;ui.transitioning_=true;ui.NoteDownloadsPrepared();assert(ui.installs==0&&!ui.downloadContinuePending_&&ui.page_==Page::Components);
+ ui.downloads_.ready=true;ui.downloads_.jobs[0]=std::make_shared<Job>();ui.downloads_.jobs[0]->network=true;
+ ui.NoteDownloadsPrepared();assert(ui.installs==0&&!ui.downloadContinuePending_&&ui.page_==Page::Components);
  ui.NoteDownloadsPrepared();assert(ui.installs==0);
+ // Local packages need no second Apply: this preparation continues into installation.
+ UI local;local.RequestComponentContinue();assert(local.installs==0&&local.downloadContinuePending_);
+ local.downloads_.ready=true;local.NoteDownloadsPrepared();assert(local.installs==1&&!local.downloadContinuePending_&&local.page_==Page::Installing);
+ UI localCert;localCert.certificate=true;localCert.RequestComponentContinue();localCert.downloads_.ready=true;
+ localCert.NoteDownloadsPrepared();assert(localCert.page_==Page::Certificate&&localCert.installs==0);
  UI ready;ready.downloads_.ready=true;ready.RequestComponentContinue();assert(ready.installs==1&&ready.page_==Page::Installing);
  UI cert;cert.certificate=true;cert.downloads_.ready=true;cert.RequestComponentContinue();assert(cert.page_==Page::Certificate&&cert.installs==0);
  UI back;back.page_=Page::License;back.ReconcileDownloads();assert(back.downloads_.calls==1);
@@ -77,4 +83,4 @@ with tempfile.TemporaryDirectory(prefix='GlassDownloadContinue-') as temp:
  p=Path(temp)/'test.cpp';p.write_text(code);exe=Path(temp)/'test'
  subprocess.run([shutil.which('g++'),'-std=c++17','-Wall','-Wextra','-Werror',str(p),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)
-print('PASS: real Next gate: selection idle, preparation does not install, ready Apply installs, certificate, existing footer Setup/product progress')
+print('PASS: real Next gate: selection idle, a transfer waits for Apply, local packages continue, ready Apply installs, certificate, existing footer Setup/product progress')

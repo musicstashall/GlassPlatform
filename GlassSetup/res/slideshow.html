@@ -57,7 +57,8 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 :root{--component-green-surface:linear-gradient(130deg,#203437,#131f25)}
 /* Opaque common surface: no second alpha composite over the dark download card.
    The overlay always spans the whole card; clipping reveals only actual bytes. */
-.product-transfer{position:absolute;inset:0;border-radius:inherit;overflow:hidden;pointer-events:none;z-index:-1;background:var(--component-green-surface);clip-path:inset(0 calc(100% - var(--transfer-progress,0%)) 0 0);transition:clip-path .22s linear}
+.product-transfer{position:absolute;left:0;top:0;bottom:0;width:var(--transfer-progress,0%);border-radius:inherit 0 0 inherit;overflow:hidden;pointer-events:none;z-index:-1;background:var(--component-green-surface);transition:width .22s linear}
+.c-card.dragging .product-transfer,.c-card.drag-ghost .product-transfer{transition:none}
 .product-transfer>i{display:block;height:100%;transition:width .22s linear}
 .product-transfer.is-transferring::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,#c8ffe936 48%,#eafff35c 50%,#c8ffe936 52%,transparent 70%);transform:translateX(-100%);animation:product-transfer-shine 3.2s linear infinite}
 /* 1.6s travel over the full card, then 1.6s fully outside the card. */
@@ -759,6 +760,9 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .c-card{isolation:isolate}
 #components-panel .c-card.download-planned,#components-panel .c-card.download-progress{border:1px dashed #83d9a685;background:linear-gradient(130deg,#22253c,#181b2d)}
 #components-panel .c-card.download-planned:hover,#components-panel .c-card.download-progress:hover{border-color:#83d9a685;background:linear-gradient(130deg,#262942,#1b1e31)}
+/* A grab must not replace the progress stripe with the full activated fill. */
+#components-panel .c-card.dragging.download-progress,#components-panel .c-card.drag-ghost.download-progress,
+#components-panel .c-card.dragging.download-progress:hover,#components-panel .c-card.drag-ghost.download-progress:hover{background:linear-gradient(130deg,#22253c,#181b2d)}
 #components-panel .c-card.download-local{border:1px solid #83d9a685;background:var(--component-green-surface)}
 #components-panel .c-card.download-failed{border-color:#e57a7a;border-style:dashed}
 #stage[data-mode="full-cleanup"] .error-copy{top:var(--page-heading-top);left:var(--page-heading-left);right:48px;bottom:30px;width:auto;overflow:auto;justify-content:flex-start;pointer-events:auto;opacity:1;transform:none;animation:none}
@@ -1016,7 +1020,13 @@ function secureUxRemovalIsManual(item){
  return !!item?.removalWithoutSettings&&!(native?.checked&&native.dataset.intent!=='remove');
 }
 function componentPlanWarnings(){
- const warnings=(hostState.components||[]).filter(x=>!x.hidden).map(x=>x.warning).filter(Boolean);
+ const warnings=[];
+ for(const x of hostState.components||[]){
+  if(!x||x.hidden)continue;
+  if(x.warning)warnings.push(x.warning);
+  const input=document.getElementById('product-'+x.id);
+  if(x.offerWarning&&input?.checked&&input.dataset.intent!=='remove')warnings.push(x.offerWarning);
+ }
  const item=(hostState.components||[]).find(x=>x.id==='secureUxTheme'),input=document.getElementById('product-secureUxTheme');
  if(secureUxRemovalIsManual(item)&&input?.checked&&input.dataset.intent==='remove')warnings.push(secureUxManualRiskText());
  return [...new Set(warnings)];
@@ -1041,7 +1051,9 @@ function showProductWarning(item,button){
   const state=f?.remove?(ru?'Будет удалено: MSI снимается с регистрации; удаляются файлы, службы и задачи продукта согласно правилам пакета.':'Will be removed: MSI registration, files, services and tasks are removed according to package rules.'):item.state;
   const version=item.targetVersionKind==='release'?(ru?'релиз ':'release ')+(item.targetVersion||item.releaseTag||'—'):((componentUsesPayload(item)?item.targetPayloadVersion:item.targetVersion)||'—');
   const pkg=[item.packageSize?componentSize(item.packageSize):'',version,ru?'Размер и SHA-256 сверяются перед установкой.':'Size and SHA-256 are checked before installation.'].filter(Boolean).join(' · ');
-  for(const [label,text] of [[ru?'СОСТОЯНИЕ':'STATE',state],[ru?'ЗАВИСИМОСТИ':'DEPENDENCIES',item.warning||(ru?'Нет предупреждений о составе.':'No composition warnings.')],[ru?'ПАКЕТ':'PACKAGE',pkg],...(item.removeBlockedReason?[[ru?'УДАЛЕНИЕ':'REMOVAL',item.removeBlockedReason]]:[])]){
+  const fromAvailable=!!button?.closest?.('#components-grid');
+  const dependency=fromAvailable?'':(item.warning||'');
+  for(const [label,text] of [[ru?'СОСТОЯНИЕ':'STATE',state],[ru?'ЗАВИСИМОСТИ':'DEPENDENCIES',dependency||(ru?'Нет предупреждений о составе.':'No composition warnings.')],[ru?'ПАКЕТ':'PACKAGE',pkg],...(item.removeBlockedReason?[[ru?'УДАЛЕНИЕ':'REMOVAL',item.removeBlockedReason]]:[])]){
    const row=document.createElement('div');row.className='dialog-detail-row';const key=document.createElement('span');key.textContent='•  '+label;row.append(key);dialogParagraph(row,text);body.append(row);
   }
   if(item.applySupported===false&&item.applyHint)dialogParagraph(body,item.applyHint,'dialog-warning-entry');
@@ -1064,8 +1076,15 @@ function showProductWarning(item,button){
 function componentRecommendations(){
  if(hostState.appMode==='unins'||hostState.componentsLoading)return [];
  const candidates=[...document.querySelectorAll('#components-panel .c-card input.comp-check')].filter(input=>{
-  const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);if(!item||item.hidden||item.id==='openglass'||item.id==='openglassResources'||item.recommendationEligible===false)return false;
-  const f=componentCardFacts(item,input);return !input.disabled&&item.applySupported!==false&&!f.remove&&(!item.installed||f.newer||f.broken||f.helperChanged||item.recommended===true);
+  const item=(hostState.components||[]).find(x=>x.id===input.dataset.component);if(!item||item.hidden)return false;
+  const f=componentCardFacts(item,input);
+  // A fresh OpenGlass or Resources choice stays manual. An installed copy is
+  // recommended when a newer version is available, and damaged Resources is a repair.
+  const resourcesRepair=item.id==='openglassResources'&&item.installed&&f.broken;
+  const manualProduct=item.id==='openglass'||item.id==='openglassResources';
+  if(manualProduct&&!resourcesRepair&&!f.newer)return false;
+  if(!resourcesRepair&&!f.newer&&item.recommendationEligible===false)return false;
+  return !input.disabled&&item.applySupported!==false&&!f.remove&&(!item.installed||f.newer||f.broken||f.helperChanged||item.recommended===true);
  });
  return candidates;
 }
@@ -1454,6 +1473,8 @@ function commitComponentChoice(input,checked){
  if(!checked)cancelSecureUxDependentRemoval(item);
  if(checked&&hostState.appMode==='unins'||!checked&&!item?.installed&&input.checked)popComponentCard(input);
  input.dataset.intent='apply';input.checked=checked;input.dispatchEvent(new Event('change',{bubbles:true}));
+ if(checked&&item?.id==='openglass'&&item.legacyWindows&&componentOfferWarning(item))
+  showProductWarning({title:item.title,warning:componentOfferWarning(item)},input.closest('.c-card')||input);
  if(checked&&!alreadyVisible)revealComponentChoice(input,hostState.appMode!=='unins');
  const sut=(hostState.components||[]).find(x=>x.id==='secureUxTheme'),dependent=document.getElementById('product-secureUxTheme');
  if(dependent?.checked&&dependent.dataset.intent==='remove'&&!secureUxDependencyReady(sut)){
@@ -1474,11 +1495,34 @@ function componentCardAction(item,input,shelf){
  if(f.selected)return {act:f.newer?'undo':'unrepair',value:false,label:f.newer?(ru?'Отменить обновление':'Undo update'):(ru?'Отменить переустановку':'Undo reinstall')};
  return {act:f.newer?'update':'repair',value:true,label:f.newer?(target?(ru?'Обновить до ':'Update to ')+target:(ru?'Обновить':'Update')):(ru?'Переустановить ':'Reinstall ')+current};
 }
+function componentOfferWarning(item){return typeof item?.offerWarning==='string'?item.offerWarning:'';}
+function componentDependencyWarning(item){return typeof item?.warning==='string'?item.warning:'';}
+function componentWarningText(item,available,facts){
+ const offer=componentOfferWarning(item)||(item?.compatibilityRisk===true?componentDependencyWarning(item):'');
+ const offerVisible=!!offer&&(available?!facts.selected:facts.selected)&&!facts.remove;
+ const dependency=available?'':componentDependencyWarning(item);
+ if(available)return offerVisible?offer:'';
+ return [dependency,offerVisible&&offer!==dependency?offer:''].filter(Boolean).join('\n\n');
+}
+function syncComponentWarningButton(card,item,text){
+ let button=card.querySelector('.comp-warning-button:not(.comp-dependency-warning)');
+ if(!text){if(button)button.remove();return;}
+ if(!button){
+  button=document.createElement('button');button.type='button';button.className='comp-warning-button';
+  button.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.5a2 2 0 0 1 3.4 0l7.5 13a2 2 0 0 1-1.7 3H4.5a2 2 0 0 1-1.7-3z"/><path d="M12 9v4m0 3v.2"/></svg>';
+  (card.querySelector('.c-card-top')||card).append(button);
+ }
+ button.setAttribute('aria-label',(locale==='ru'?'Предупреждение: ':'Warning: ')+item.title);
+ button.onclick=()=>showProductWarning({...item,warning:text},button);
+}
 function paintComponentCard(card,item,input,shelf){
  const ru=locale==='ru',f=componentCardFacts(item,input),available=shelf==='available';
- card.classList.toggle('compatibility-risk',item.compatibilityRisk===true&&(available?!f.selected:f.selected)&&!f.remove);
- const iconOnlyWarning=available&&f.selected||item.id==='openglassResources'&&item.dependencyMissing||!available&&item.installed&&!f.selected&&!f.remove&&!!item.warning;
- card.classList.toggle('has-warning',!!item.warning&&!iconOnlyWarning);
+ const productRisk=(item.compatibilityRisk===true||item.legacyWindows===true)&&(available?!f.selected:f.selected)&&!f.remove;
+ card.classList.toggle('compatibility-risk',productRisk);
+ const dependencyWarning=componentDependencyWarning(item);
+ const iconOnlyWarning=item.id==='openglassResources'&&item.dependencyMissing||!available&&item.installed&&!f.selected&&!f.remove&&!!dependencyWarning;
+ card.classList.toggle('has-warning',!available&&!!dependencyWarning&&!iconOnlyWarning);
+ syncComponentWarningButton(card,item,componentWarningText(item,available,f));
  // Dependency guidance belongs to the selected Resources card, never its catalogue mirror.
  let dependency=card.querySelector('.comp-dependency-warning');
  if(item.id==='openglassResources'&&!available&&f.selected&&!f.remove&&item.dependencyMissing){
@@ -1498,7 +1542,9 @@ function paintComponentCard(card,item,input,shelf){
   const statusText=status==='removal-planned'?(ru?'запланировано удаление':'removal planned'):status==='planned'?(ru?'действие добавлено в план':'action planned'):status==='installed'?(ru?'уже установлен, без изменений':'already installed, kept'):(ru?'доступен, не выбран':'available, not selected');
   card.setAttribute('aria-label',item.title+': '+statusText);
  if(available){
-  card.classList.add(f.availableNeeded?'active':'idle');if(f.broken)card.classList.add('is-broken');else if(f.newer&&!f.selected)card.classList.add('has-newer');
+  card.classList.add(f.availableNeeded?'active':'idle');
+  // Available offers the newest package. Installed Resources damage stays on the installed shelf.
+  if(f.broken&&item.id!=='openglassResources')card.classList.add('is-broken');else if(f.newer&&!f.selected)card.classList.add('has-newer');
   if(f.newer){text(current);line.append(' → ');text(target,true);}else {text(target,f.selected&&!f.remove);}
   if(suffix)line.append(suffix);
  }else if(f.remove){
@@ -1632,7 +1678,15 @@ function syncComponentShelves(){
  }
  restoreComponentShelfScroll(shelfScroll);
 }
-function productActionLabel(item){if(item.id==='openglass'&&item.installed&&hostState.appMode!=='unins')return openGlassPayloadUpdate(item)?(locale==='ru'?'Обновить':'Update'):(locale==='ru'?'Переустановить':'Reinstall');return hostState.appMode==='unins'?(locale==='ru'?'Удалить':'Remove'):item.operation==='update'?(locale==='ru'?'Обновить':'Update'):item.operation==='repair'?(locale==='ru'?'Переустановить':'Reinstall'):(locale==='ru'?'Установить':'Install');}
+function productActionLabel(item){
+ const ru=locale==='ru';
+ if(hostState.appMode==='unins')return ru?'Удалить':'Remove';
+ if(!item?.installed)return ru?'Установить':'Install';
+ // A newer offer outranks a same-version repair, including when the installed copy is damaged.
+ const input=document.getElementById('product-'+item.id);
+ const newer=input?componentCardFacts(item,input).newer:(item.id==='openglass'?openGlassPayloadUpdate(item):(item.operation==='update'||item.updateAvailable===true)&&!!item.targetVersion);
+ return newer?(ru?'Обновить':'Update'):(ru?'Переустановить':'Reinstall');
+}
 function updateComponentsStatus(){
  const inputs=[...document.querySelectorAll('#components-panel .c-card input.comp-check')],selected=inputs.filter(x=>x.checked),available=inputs.filter(x=>!x.disabled&&(x.checked||(hostState.components||[]).find(item=>item.id===x.dataset.component)?.applySupported!==false)),all=available.length>0&&available.every(x=>x.checked),ru=locale==='ru';
  for(const [id,title] of [['available',ru?'Доступно':'Available'],['installed',ru?'Установлено':'Installed']])document.getElementById(id+'-title').textContent=title;
@@ -1652,7 +1706,7 @@ function updateComponentsStatus(){
   (input.dataset.component.startsWith('settings')&&input.dataset.intent!=='remove'?0:
    input.dataset.intent==='remove'?10+['openglassResources','openglass','x86','x64','settings64','settings32'].indexOf(input.dataset.component):30+['x64','x86','openglassResources','openglass'].indexOf(input.dataset.component));
  const ordered=selected.slice().sort((a,b)=>executionRank(a)-executionRank(b));
- for(const [step,input] of ordered.entries()){const item=items.find(x=>x.id===input.dataset.component);if(!item)continue;const li=document.createElement('li'),name=document.createElement('span'),action=document.createElement('span');name.textContent=(step+1)+'. '+item.title;const removes=componentCardFacts(item,input).remove;action.textContent=removes?(ru?'Удалить':'Remove'):productActionLabel(item);li.className=removes?'remove':item.operation||'install';li.dataset.product=item.id;action.className='plan-transfer-status';const cancel=document.createElement('button');cancel.type='button';cancel.className='plan-cancel';cancel.textContent='×';cancel.setAttribute('aria-label',(ru?'Отменить: ':'Undo: ')+item.title);cancel.onclick=()=>{commitComponentChoice(input,false);input.closest('.c-card').querySelector('.comp-decision:not(:disabled),.comp-remove:not(:disabled),.comp-name').focus();};li.append(name,action,cancel);plan.append(li);}
+ for(const [step,input] of ordered.entries()){const item=items.find(x=>x.id===input.dataset.component);if(!item)continue;const li=document.createElement('li'),name=document.createElement('span'),action=document.createElement('span');name.textContent=(step+1)+'. '+item.title;const facts=componentCardFacts(item,input),removes=facts.remove;action.textContent=removes?(ru?'Удалить':'Remove'):productActionLabel(item);li.className=removes?'remove':!item.installed?'install':facts.newer?'update':'repair';li.dataset.product=item.id;action.className='plan-transfer-status';const cancel=document.createElement('button');cancel.type='button';cancel.className='plan-cancel';cancel.textContent='×';cancel.setAttribute('aria-label',(ru?'Отменить: ':'Undo: ')+item.title);cancel.onclick=()=>{commitComponentChoice(input,false);input.closest('.c-card').querySelector('.comp-decision:not(:disabled),.comp-remove:not(:disabled),.comp-name').focus();};li.append(name,action,cancel);plan.append(li);}
  const cleanup=document.querySelector('#components-extra input');if(cleanup&&cleanup.checked){const li=document.createElement('li');li.textContent=ru?'Очистить настройки всех пользователей, HKLM и сохранённые темы Glass':'Clean all user profiles, HKLM and saved Glass themes';plan.append(li);}
  document.getElementById('components-plan-title').textContent=hostState.appMode==='unins'?(ru?'План удаления':'Removal plan'):(ru?'План и рекомендации':'Plan and recommendations');
  document.getElementById('components-plan-note').textContent=hostState.appMode==='unins'?(ru?'Неотмеченные продукты и настройки сохраняются.':'Unchecked products and settings are retained.'):(ru?'Снятие отметки не удаляет установленный продукт.':'Unchecking an installed product does not remove it.');

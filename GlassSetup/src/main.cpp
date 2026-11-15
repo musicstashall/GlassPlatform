@@ -1527,6 +1527,7 @@ private:
                         result.openGlassDir,startupRoots.x64,result.openGlass.filesPresent);
                     result.openGlass.valid=runningKnown && filesKnown;
                 }
+                result.openGlass.autostartAllowed=GlassProducts::OpenGlassAutostartAllowed(GlassInstallUtil::WindowsBuildNumber());
             }
             // This is the first logger user on the successful startup path.
             // UI interactions are locked until this worker has been joined.
@@ -1540,9 +1541,9 @@ private:
                 if (result.os64) InstallLog::LineFormat(L"Startup OpenGlass root: %s (%s)",
                     startupRoots.openGlass.c_str(),startupRoots.sourceOpenGlass.c_str());
             }
-            if (result.os64) InstallLog::LineFormat(L"OpenGlass at wizard startup: valid=%d files=%d running=%d dir=%s",
+            if (result.os64) InstallLog::LineFormat(L"OpenGlass at wizard startup: valid=%d files=%d running=%d autostart=%d dir=%s",
                 result.openGlass.valid ? 1 : 0, result.openGlass.filesPresent ? 1 : 0,
-                result.openGlass.wasRunning ? 1 : 0, result.openGlassDir.c_str());
+                result.openGlass.wasRunning ? 1 : 0, result.openGlass.autostartAllowed ? 1 : 0, result.openGlassDir.c_str());
 #ifdef _DEBUG
             if (slowStartup) {
                 for (int i=0;i<80 && !startupStop_.load(std::memory_order_acquire);++i) Sleep(50);
@@ -2082,10 +2083,14 @@ private:
         auto text=GlassProductUiPolicy::WarningText(SelectionPreview().warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit());
         if(selection_.openGlass&&!selection_.Removes(3)) {
             std::lock_guard<std::mutex> lock(inspectMutex_);
-            if(GlassOpenGlassRelease::ApplyRisk(GlassInstallUtil::WindowsBuildNumber(),inspect_.og.remotePayloadVersion)) {
-                if(!text.empty())text+=L"\n";
-                text+=GlassOpenGlassRelease::KnownPublishedReleaseRiskText(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::WindowsBuildNumber());
-            }
+            const unsigned build=GlassInstallUtil::WindowsBuildNumber();
+            const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
+            std::wstring offer;
+            if(GlassOpenGlassRelease::ApplyRisk(build,inspect_.og.remotePayloadVersion))
+                offer=GlassOpenGlassRelease::KnownPublishedReleaseRiskText(ru,build);
+            else if(GlassOpenGlassRelease::OlderThan23H2(build))
+                offer=GlassOpenGlassRelease::OlderThan23H2RiskText(ru);
+            if(!offer.empty()){if(!text.empty())text+=L"\n";text+=offer;}
         }
         if(selection_.secureUxThemeRemove) {
             const bool os64=GlassInstallUtil::IsOs64Bit();
@@ -2166,12 +2171,16 @@ private:
             const bool applySupported=(!openGlass||!ogMetadataBlocked_||ogMetadataLocal_)&&(openGlass?
                 GlassOpenGlassRelease::CanPlanApply(rep&&rep->installed?rep->installedPayloadVersion:L"",targetVersion):
                 ((resources&&os64&&targetVersion.empty())||packageApplyable));
+            const bool russianUi=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
             const bool compatibilityRisk=openGlass&&(checked||!rep||!rep->installed)&&!removing&&GlassOpenGlassRelease::ApplyRisk(windowsBuild,targetVersion);
-            std::wstring warning=GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,os64);
-            if(compatibilityRisk) {
-                if(!warning.empty())warning+=L"\n\n";
-                warning+=GlassOpenGlassRelease::KnownPublishedReleaseRiskText(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,windowsBuild);
-            }
+            const bool legacyWindows=openGlass&&GlassOpenGlassRelease::OlderThan23H2(windowsBuild);
+            // Предупреждение продукта не смешивается с зависимостями плана: карточка
+            // «Доступные» показывает только текст предложения, зависимости — «Установленные».
+            std::wstring offerWarning;
+            if(compatibilityRisk) offerWarning=GlassOpenGlassRelease::KnownPublishedReleaseRiskText(russianUi,windowsBuild);
+            else if(legacyWindows&&(checked||!rep||!rep->installed)&&!removing)
+                offerWarning=GlassOpenGlassRelease::OlderThan23H2RiskText(russianUi);
+            std::wstring warning=GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,russianUi,os64);
             const auto action=GlassProducts::ActionForCondition(checked,condition);
             const UINT badgeId=ComponentBadgeId(condition);
             // Причины не смешиваются: у обновления своя причина, у повреждений — свои.
@@ -2235,7 +2244,9 @@ private:
                 L",\"metadataRetrying\":"+(openGlass&&vendorMetadataRetry_==L"openglass"?L"true":L"false")+
                 L",\"metadataError\":"+JsStringLiteral(openGlass?inspect_.openGlassDiscoveryError:L"")+
                 L",\"compatibilityRisk\":"+(compatibilityRisk?L"true":L"false")+
-                L",\"recommendationEligible\":"+((openGlass||resources)?L"false":L"true")+
+                L",\"legacyWindows\":"+(legacyWindows?L"true":L"false")+
+                L",\"offerWarning\":"+JsStringLiteral(offerWarning)+
+                L",\"recommendationEligible\":"+(((openGlass||resources)&&!hasUpdate&&!(resources&&rep&&rep->installed&&rep->damaged))?L"false":L"true")+
                 L",\"recommended\":"+((rep&&rep->nativeSourceDiffers&&!openGlass&&!resources)?L"true":L"false")+
                 L",\"nativeSourceCompared\":"+((rep&&rep->nativeSourceCompared)?L"true":L"false")+
                 L",\"nativeSourceDiffers\":"+((rep&&rep->nativeSourceDiffers)?L"true":L"false")+
@@ -2450,8 +2461,8 @@ private:
             return;
         }
         if(!ComponentsReady())return;
-        // Preparation never installs by itself. Apply starts it, and only a later
-        // Apply — once every selected package is ready — starts installation.
+        // Apply starts preparation. A transfer waits for another Apply after the
+        // files are ready. Packages already on disk continue on this Apply.
         if(!DownloadsReady()) {
             downloadContinuePending_=true;
             ReconcileDownloads();UpdateDownloadProgress();
@@ -2467,9 +2478,18 @@ private:
         if(!downloadContinuePending_||page_!=Page::Components||!DownloadsReady())return;
         downloadContinuePending_=false;
         KillTimer(window,kProductDownloadTimer);
-        InstallLog::Line(L"Product preparation finished; installation waits for Apply");
-        EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());
-        UpdateDownloadProgress();
+        const auto selected=DownloadSelection();
+        bool transferred=false;
+        for(std::size_t i=0;i<selected.size();++i)
+            transferred|=selected[i]&&downloads_.jobs[i]&&downloads_.jobs[i]->network.load(std::memory_order_acquire);
+        if(transferred) {
+            InstallLog::Line(L"Product preparation finished; installation waits for Apply");
+            EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());
+            UpdateDownloadProgress();
+            return;
+        }
+        InstallLog::Line(L"Selected packages are already local; installation continues");
+        if(CertificatePageApplies())SetPage(Page::Certificate);else StartInstallation();
     }
     std::wstring NativeDownloadSummary() const {
         if(SimulationBuild())return {};
@@ -3779,7 +3799,7 @@ private:
             }
             if(message==L"components:select-all") {
                 selection_.removeMask=0;selection_.confirmedSettingsRemovalRisk=0;
-                selection_.platform64=os64;selection_.platform32=true;selection_.settings64=os64;selection_.settings32=true;selection_.SyncSettings(os64); // OG/Resources are manual choices, never recommendations.
+                selection_.platform64=os64;selection_.platform32=true;selection_.settings64=os64;selection_.settings32=true;selection_.SyncSettings(os64); // Fresh OG/Resources stay manual; installed updates are page recommendations.
                 std::lock_guard<std::mutex> lock(inspectMutex_);
                 if(!selection_.secureUxThemeRemove)selection_.secureUxTheme=(!sutMetadataBlocked_||sutMetadataLocal_) && !inspect_.secureUxTheme.installed && !SecureUxThemeSelectionBlocked();
             }

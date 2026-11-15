@@ -36,6 +36,16 @@ inline bool KnownPublishedReleaseRisk(unsigned windowsBuild,const std::wstring& 
 inline bool ApplyRisk(unsigned build,const std::wstring& offered) {
     return KnownPublishedReleaseRisk(build,DisplayVersion(offered));
 }
+// Windows 11 23H2 is build 22631. Older systems can still receive OpenGlass,
+// but the published builds are not treated as safe to start there.
+inline bool OlderThan23H2(unsigned windowsBuild) {
+    return windowsBuild!=0&&windowsBuild<22631;
+}
+inline std::wstring OlderThan23H2RiskText(bool russian) {
+    return russian?
+        L"Windows старше 11 23H2. На такой системе OpenGlass может вызывать сбои DWM, Проводника и сеанса. Установщик добавит продукт в план, но после установки не запустит его.":
+        L"Windows is older than 11 23H2. On this system OpenGlass can cause DWM, Explorer and session failures. Setup will add the product to the plan, but will not start it after installation.";
+}
 inline std::wstring KnownPublishedReleaseRiskText(bool russian,unsigned windowsBuild=26300) {
     if(windowsBuild==26200)return russian?
         L"Опасность применения: при установке OpenGlass 3.0.2.3749 учитывайте сообщения о сбоях DWM на Windows 11 25H2 (26200); возможны чёрный экран, нестабильная работа Проводника и сеанса. Применение этой версии не рекомендуется. Совместимость зависит от точной ревизии Windows и доступности символов; отметка 25H2 в таблице разработчика не гарантирует работу опубликованного бинарника. Обсуждение: https://github.com/ALTaleX531/OpenGlass/issues/362 ; https://github.com/ALTaleX531/OpenGlass/issues/387":

@@ -28,19 +28,52 @@ assert.equal(button().disabled,false);before=messages.length;button().click();
 assert.equal(d.querySelector('#product-x64').checked,false);
 assert.equal(d.querySelector('#product-settings64').checked,true);
 assert.deepEqual(messages.slice(before),['component:settings64:1']);
-// OG and Resources are never recommendations, even when fresh, outdated or explicitly marked recommended.
-for(const locale of ['ru','en'])for(const installed of [false,true]){
- const og={...rows[4],installed,installedPayloadVersion:'3.0.1.1',targetPayloadVersion:'3.0.2.3749'};
- const graphics={id:'openglassResources',title:'Resources',installed,checked:false,operation:'repair',
-  targetVersion:'2.0.0.115',installedPackageVersion:'2.0.0.115',applySupported:false,pairedApplySupported:true};
- send([{...og,recommended:true},{...graphics,recommended:true}],{locale});before=messages.length;button().click();
+// A damaged installed Resources package is a repair recommendation. Its Available
+// mirror stays the newest offer and does not inherit the installed damage tone.
+{
+ const broken={id:'openglassResources',title:'Resources',installed:true,checked:false,broken:true,operation:'repair',
+  applySupported:true,recommendationEligible:false,targetVersion:'2.0.0.122',installedPackageVersion:'2.0.0.121'};
+ send([broken]);
+ assert.equal(button().disabled,false);
+ assert.ok(d.querySelector('#components-installed-grid [data-product="openglassResources"]').classList.contains('is-broken'));
+ assert.equal(d.querySelector('[data-catalog-alias="openglassResources"]').classList.contains('is-broken'),false);
+ before=messages.length;button().click();
+ assert.deepEqual(messages.slice(before),['component:openglassResources:1']);
+ assert.equal(d.querySelector('#product-openglassResources').checked,true);
+ send([{...broken,broken:false,recommendationEligible:false}]);
+ assert.equal(button().disabled,true);
+ assert.equal(d.querySelector('#product-openglassResources').checked,false);
+}
+// A newer offer outranks a same-version repair in the plan, even when the installed copy is damaged.
+{
+ const row=()=>d.querySelector('#components-plan-items li[data-product="openglassResources"]');
+ const damaged={id:'openglassResources',title:'Resources',installed:true,checked:true,broken:true,operation:'repair',applySupported:true,installedPackageVersion:'2.0.0.121'};
+ send([{...damaged,updateAvailable:true,targetVersion:'2.0.0.122'}]);
+ assert.match(row().textContent,/Обновить/);assert.equal(row().className,'update');
+ send([{...damaged,updateAvailable:false,targetVersion:'2.0.0.121'}]);
+ assert.match(row().textContent,/Переустановить/);assert.equal(row().className,'repair');
+}
+// A fresh OpenGlass or Resources install stays manual. The same installed products
+// are recommended as soon as a newer version is available.
+for(const locale of ['ru','en']){
+ const freshOg={...rows[4],installed:false,recommended:true,installedPayloadVersion:'',targetPayloadVersion:'3.0.2.3749'};
+ const freshGraphics={id:'openglassResources',title:'Resources',installed:false,checked:false,recommended:true,operation:'install',applySupported:true,targetVersion:'2.0.0.115'};
+ send([freshOg,freshGraphics],{locale});before=messages.length;button().click();
  assert.deepEqual(messages.slice(before),[]);
  assert.equal(d.querySelector('#product-openglass').checked,false);
  assert.equal(d.querySelector('#product-openglassResources').checked,false);
- // Manual OG selection remains available; recommendation exclusion is not a ban.
  d.querySelector('#components-grid [data-product="openglass"] .comp-decision').click();
  assert.equal(messages.at(-1),'component:openglass:1');
-
+ const currentOg={...rows[4],installed:true,operation:'repair',installedPayloadVersion:'3.0.2.3749',targetPayloadVersion:'3.0.2.3749',recommendationEligible:false};
+ const currentGraphics={id:'openglassResources',title:'Resources',installed:true,checked:false,operation:'repair',applySupported:true,recommendationEligible:false,targetVersion:'2.0.0.115',installedPackageVersion:'2.0.0.115'};
+ send([currentOg,currentGraphics],{locale});before=messages.length;button().click();
+ assert.deepEqual(messages.slice(before),[]);
+ const newerOg={...currentOg,operation:'update',installedPayloadVersion:'3.0.1.1',updateAvailable:true};
+ const newerGraphics={...currentGraphics,operation:'update',updateAvailable:true,targetVersion:'2.0.0.122',installedPackageVersion:'2.0.0.115'};
+ send([newerOg,newerGraphics],{locale});assert.equal(button().disabled,false);before=messages.length;button().click();
+ assert.deepEqual(messages.slice(before),['component:openglass:1','component:openglassResources:1']);
+ assert.equal(d.querySelector('#product-openglass').checked,true);
+ assert.equal(d.querySelector('#product-openglassResources').checked,true);
 }
 // An installed retained SUT is not a seventh planned action after Accept all.
 for(const locale of ['ru','en']){

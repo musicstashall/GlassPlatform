@@ -2516,7 +2516,8 @@ bool InstallEngine::RegisterSelectedProducts() noexcept {
         if (!prior_.ogServiceExisted && !prior_.ogLegacyTaskExisted) {
             // Files without orchestration may have been run manually. Do not
             // introduce automatic startup for that existing installation.
-            const DWORD startType=openGlassStartup_.filesPresent ? SERVICE_DEMAND_START : SERVICE_AUTO_START;
+            // Older than Windows 11 23H2: register a manual service and do not start it.
+            const DWORD startType=openGlassStartup_.autostartAllowed&&!openGlassStartup_.filesPresent ? SERVICE_AUTO_START : SERVICE_DEMAND_START;
             if (!GlassInstallHost::EnsureOpenGlassService(openGlassDir_, startType)) {
                 SetFailure(labels_.ogServiceFailed.empty()
                     ? L"Could not register the OpenGlassHost service." : labels_.ogServiceFailed,0);

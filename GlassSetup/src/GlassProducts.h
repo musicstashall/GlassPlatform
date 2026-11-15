@@ -138,14 +138,23 @@ constexpr bool FullRemovalSelected(const Selection& choice,unsigned installedMas
         (!installedMask&&vendorInstalled&&choice.secureUxThemeRemove));
 }
 
+// Windows 11 23H2. Более старые системы OpenGlass после установки не запускают.
+constexpr unsigned kOpenGlassAutostartMinBuild = 22631;
+constexpr bool OpenGlassAutostartAllowed(unsigned windowsBuild) noexcept {
+    return windowsBuild == 0 || windowsBuild >= kOpenGlassAutostartMinBuild;
+}
+
 // Recorded at wizard startup, independently of the later rollback snapshot.
+// autostartAllowed is false on Windows older than 11 23H2: Setup must not
+// start OpenGlass after installation on those systems.
 struct OpenGlassStartupState {
     bool valid = false;
     bool filesPresent = false;
     bool wasRunning = false;
+    bool autostartAllowed = true;
 };
 constexpr bool ShouldStartOpenGlass(const OpenGlassStartupState& startup) noexcept {
-    return startup.valid && (!startup.filesPresent || startup.wasRunning);
+    return startup.autostartAllowed && startup.valid && (!startup.filesPresent || startup.wasRunning);
 }
 
 // Removal has no new media/controller to publish. Keep the running cache intact.

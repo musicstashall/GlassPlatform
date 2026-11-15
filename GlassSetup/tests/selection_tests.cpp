@@ -18,6 +18,12 @@ int main() {
     static_assert(GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,false,true}));
     static_assert(!GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,true,false})); // upgrade, stopped at wizard start
     static_assert(GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,true,true}));  // upgrade, running at wizard start
+    static_assert(GlassProducts::OpenGlassAutostartAllowed(22631));
+    static_assert(GlassProducts::OpenGlassAutostartAllowed(26100));
+    static_assert(GlassProducts::OpenGlassAutostartAllowed(0));
+    static_assert(!GlassProducts::OpenGlassAutostartAllowed(22621));
+    static_assert(!GlassProducts::OpenGlassAutostartAllowed(19045));
+    static_assert(!GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,false,false,false})); // older than 23H2, never start
     for (int bits=0;bits<16;++bits) for (bool os64:{false,true}) {
         const Selection raw{bool(bits&1),bool(bits&2),bool(bits&4),bool(bits&8)};
         const auto installed=GlassProducts::NormalizeInstall(raw,os64);
