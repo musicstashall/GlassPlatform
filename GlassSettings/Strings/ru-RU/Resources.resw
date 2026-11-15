@@ -1149,7 +1149,7 @@
   <data name="Reflection_SettingScale" xml:space="preserve"><value>Масштаб, %</value></data>
   <data name="Reflection_SettingOpacity" xml:space="preserve"><value>Непрозрачность, %</value></data>
   <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Мягкость краёв, px (0–3)</value></data>
-  <data name="Reflection_Reset" xml:space="preserve"><value>Сбросить</value></data>
+  <data name="Reflection_Reset" xml:space="preserve"><value>По умолчанию</value></data>
   <data name="Reflection_SettingNoise" xml:space="preserve"><value>Шум, %</value></data>
   <data name="Reflection_SettingNoiseType" xml:space="preserve"><value>Тип зерна</value></data>
   <data name="Reflection_NoiseSoft" xml:space="preserve"><value>Мягкое</value></data>
@@ -1160,4 +1160,5 @@
   <data name="Reflection_EnableProcessing" xml:space="preserve"><value>Применять обработку</value></data>
   <data name="Reflection_GroupImage" xml:space="preserve"><value>Изображение</value></data>
   <data name="Reflection_GroupNoise" xml:space="preserve"><value>Шум</value></data>
+  <data name="Reflection_NoiseSand" xml:space="preserve"><value>Наждачный</value></data>
 </root>

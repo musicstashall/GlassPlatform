@@ -58,7 +58,7 @@ assert 'noiseDensity.Value = 50' in dialog and 'noiseSize' not in dialog
 for language in ('ru-RU', 'en-US'):
     assert 'Reflection_SettingNoiseDensity' in (root / f'GlassSettings/Strings/{language}/Resources.resw').read_text()
 print('PASS: grain density control, defaults, bounds, preview and reset wiring')
-assert 'int NoiseType = 0' in state and 'Math.Clamp(NoiseType, 0, 3)' in state
+assert 'int NoiseType = 0' in state and 'Math.Clamp(NoiseType, 0, 4)' in state
 assert 'noiseType.SelectionChanged' in dialog and 'initial.NoiseType' in dialog
 assert 'noiseType.SelectedIndex = 0' in dialog
 for language in ('ru-RU', 'en-US'):
@@ -78,14 +78,20 @@ assert 'if (!settings.Enabled) settings = new ReflectionRenderSettings();' in se
 assert 'enabled.IsOn' in dialog and 'groups.IsEnabled = enabled.IsOn' in dialog
 assert 'new Pivot' in dialog and 'Reflection_GroupImage' in dialog and 'Reflection_GroupNoise' in dialog
 assert 'GlassSettingsPivotHeaderItemStyle' in dialog
-assert 'CreateRoundedRectangleGeometry' in dialog and 'CardStrokeColorDefaultBrush' in dialog
+assert 'CreateRoundedRectangleGeometry' in dialog and 'ControlStrongStrokeColorDefaultBrush' in dialog
 assert '255, 153, 170, 187' in dialog and '255, 255, 255, 255' in dialog
 assert 'CalibrateNoise' in effects and 'target / value' in effects
 print('PASS: calibrated intensity, persistent bypass, grouped Pivot and rounded checkerboard preview wiring')
 assert 'private static int _selectedGroupIndex' in dialog
-assert 'groups.SelectedIndex = Math.Clamp(_selectedGroupIndex' in dialog
-assert '_selectedGroupIndex = groups.SelectedIndex' in dialog
-assert 'ReferenceEquals(args.OriginalSource, groups)' in dialog
+assert 'Math.Clamp(_selectedGroupIndex' in dialog and 'groups.Loaded +=' in dialog
+assert '_selectedGroupIndex = restoredGroupIndex = groups.SelectedIndex' in dialog
+assert 'trackingGroup && groups.IsLoaded' in dialog
 assert 'Margin = new Thickness(0, 12, 0, 0)' in dialog
 assert 'Opacity = 0.07' in dialog and 'preview.Opacity' not in dialog
 print('PASS: process-only Pivot selection, faint checkerboard without image dimming, top content inset')
+assert 'groups.Loaded +=' in dialog and 'groups.Unloaded +=' in dialog
+assert 'Grid.SetColumn(reset, 1)' in dialog and 'body.Children.Add(reset)' not in dialog
+assert 'Shadow = new ThemeShadow()' in dialog
+assert 'Reflection_NoiseSand' in (root / 'GlassSettings/Strings/ru-RU/Resources.resw').read_text()
+assert 'if (type == 4)' in effects and 'u < 1311' in effects and 'u < 64004' in effects
+print('PASS: Pivot load restoration, top-right Defaults, preview shadow and independent-pixel sand grain')

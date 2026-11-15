@@ -9,7 +9,7 @@ public sealed record ReflectionRenderSettings(int ScalePercent = 100, int Opacit
 {
     public ReflectionRenderSettings Normalize() => new(
         Math.Clamp(ScalePercent, 25, 200), Math.Clamp(OpacityPercent, 0, 100), Math.Clamp(Softness, 0, 3),
-        Math.Clamp(NoisePercent, 0, 100), 1, Math.Clamp(NoiseType, 0, 3), Math.Clamp(NoiseDensity, 0, 100), Enabled);
+        Math.Clamp(NoisePercent, 0, 100), 1, Math.Clamp(NoiseType, 0, 4), Math.Clamp(NoiseDensity, 0, 100), Enabled);
 }
 
 /// <summary>One record for the single generated canvas; not per-source profiles or PNG metadata.</summary>

@@ -10,8 +10,8 @@ public static class ReflectionPixelEffects
     // Attenuate stronger types only, never amplify or clip weaker distributions.
     private static double[] CalibrateNoise()
     {
-        var contrast = new double[4];
-        for (int type = 0; type < 4; type++)
+        var contrast = new double[5];
+        for (int type = 0; type < 5; type++)
         {
             double sum = 0;
             for (int y = 0; y < 96; y++)
@@ -105,7 +105,7 @@ public static class ReflectionPixelEffects
             double grain = settings.NoisePercent == 0 || density == 0 ? 0
                 : Grain(x, y, width, height, settings.NoiseType, density, wrap);
             double noiseAlpha = Math.Abs(grain) * settings.NoisePercent / 100.0
-                * .35 * (grain == 0 ? 1 : NoiseGains.Value[Math.Clamp(settings.NoiseType, 0, 3)]);
+                * .35 * (grain == 0 ? 1 : NoiseGains.Value[Math.Clamp(settings.NoiseType, 0, 4)]);
             double luminance = 127.5 * (1 + grain);
             double sourceAlpha = pixels[i] / 255.0;
             double combined = noiseAlpha + sourceAlpha * (1 - noiseAlpha);
@@ -136,6 +136,20 @@ public static class ReflectionPixelEffects
 
     private static double Grain(int x, int y, int width, int height, int type, double density, bool wrap)
     {
+        if (type == 4)
+        {
+            // Sand: independent native-pixel samples, no interpolation. Six grey
+            // levels and their histogram follow the supplied 256x256 reference;
+            // synthesize a new field rather than repeating the uploaded image.
+            if (Hash(x, y, 1709) >= density) return 0;
+            double u = Hash(x, y, 2017) * 65536;
+            if (u < 1311) return -1;
+            if (u < 10405) return -.6;
+            if (u < 32439) return -.2;
+            if (u < 54653) return .2;
+            if (u < 64004) return .6;
+            return 1;
+        }
         // Fixed spatial scales: density selects grains; it never enlarges them.
         const int size = 2;
         if (type == 3) return Hash(x / 2, y / 2, 991) < density

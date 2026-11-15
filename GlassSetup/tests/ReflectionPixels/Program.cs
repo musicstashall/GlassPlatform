@@ -39,7 +39,7 @@ Check(new ReflectionRenderSettings(NoiseDensity: 999).Normalize().NoiseDensity =
 Check(new ReflectionRenderSettings(NoiseSize: 32).Normalize().NoiseSize == 1, "legacy grain size ignored");
 
 var variants = new List<byte[]>();
-for (int type = 0; type < 4; type++)
+for (int type = 0; type < 5; type++)
 {
     var pixels = Enumerable.Repeat((byte)200, 32 * 32 * 4).ToArray();
     ReflectionPixelEffects.ApplyAlpha(pixels, 32, 32, new(100, 100, 0, 100, 8, type), wrap: true);
@@ -53,7 +53,7 @@ Check(!variants[0].SequenceEqual(variants[1]) && !variants[1].SequenceEqual(vari
     && !variants[2].SequenceEqual(variants[3]), "grain types produce distinct results");
 Check(Enumerable.Range(0, 8).Select(x => variants[0][x * 4 + 3]).Distinct().Count() > 2,
     "soft grain varies within a former square block");
-for (int type = 0; type < 4; type++)
+for (int type = 0; type < 5; type++)
 {
     var transparent = new byte[32 * 32 * 4];
     ReflectionPixelEffects.ApplyAlpha(transparent, 32, 32, new(100, 100, 0, 75, 4, type), wrap: false);
@@ -71,14 +71,15 @@ for (int type = 0; type < 4; type++)
     Check(transparent.Where((_, i) => i % 4 == 3).All(a => a == 0), "opacity zero hides noise too: " + type);
 }
 
-for (int type = 0; type < 4; type++)
+for (int type = 0; type < 5; type++)
 {
     var field = new byte[128 * 128 * 4];
     ReflectionPixelEffects.ApplyAlpha(field, 128, 128, new(100, 100, 0, 100, 4, type), wrap: false);
     var visible = Enumerable.Range(0, 128 * 128).Where(i => field[i * 4 + 3] > 4).ToArray();
     Check(visible.Any(i => field[i * 4] < 110) && visible.Any(i => field[i * 4] > 145),
         "both dark and light grains: " + type);
-    Check(visible.Select(i => field[i * 4]).Distinct().Count() > 16, "varied luminance, not a solid color: " + type);
+    Check(visible.Select(i => field[i * 4]).Distinct().Count() >= (type == 4 ? 6 : 17),
+        "varied luminance, not a solid color: " + type);
     Check(visible.All(i => field[i * 4] == field[i * 4 + 1] && field[i * 4] == field[i * 4 + 2]),
         "neutral RGB grain on transparent canvas: " + type);
     var dark = new byte[field.Length]; var light = new byte[field.Length];
@@ -89,7 +90,7 @@ for (int type = 0; type < 4; type++)
     Check(dark.Skip(4).SequenceEqual(light.Skip(4)), "background grain independent of source color: " + type);
 }
 
-for (int type = 0; type < 4; type++)
+for (int type = 0; type < 5; type++)
 {
     byte[] RenderDensity(int density, int legacySize = 1)
     {
@@ -110,7 +111,7 @@ ReflectionPixelEffects.ApplyAlpha(bypass, 2, 1,
     new(OpacityPercent: 0, Softness: 3, NoisePercent: 100, Enabled: false), wrap: true);
 Check(bypass.SequenceEqual(original), "disabled processing preserves original pixels");
 var contrastLevels = new List<double>();
-for (int type = 0; type < 4; type++)
+for (int type = 0; type < 5; type++)
 {
     var sample = new byte[96 * 96 * 4];
     ReflectionPixelEffects.ApplyAlpha(sample, 96, 96,
@@ -129,3 +130,11 @@ for (int type = 0; type < 4; type++)
 }
 Check(contrastLevels.Max() / contrastLevels.Min() < 1.15,
     "noise types have comparable neutral-background RMS contrast at full density");
+
+var sand = new byte[256 * 256 * 4];
+ReflectionPixelEffects.ApplyAlpha(sand, 256, 256,
+    new(NoisePercent: 100, NoiseType: 4, NoiseDensity: 100), wrap: false);
+var sandLevels = Enumerable.Range(0, 65536).Select(i => sand[i * 4]).Distinct().Order().ToArray();
+Check(sandLevels.SequenceEqual(new byte[] { 0, 51, 102, 153, 204, 255 }), "sand reproduces six reference luminance levels");
+int sharpNeighbours = Enumerable.Range(0, 65535).Count(i => Math.Abs(sand[i * 4] - sand[(i + 1) * 4]) >= 102);
+Check(sharpNeighbours > 65536 / 10, "sand retains sharp unfiltered pixel contrast");

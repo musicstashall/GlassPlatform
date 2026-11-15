@@ -21,7 +21,7 @@ public static class ReflectionSettingsDialog
         var noise = Number("Reflection_SettingNoise", 0, 100, initial.NoisePercent);
         var noiseDensity = Number("Reflection_SettingNoiseDensity", 0, 100, initial.NoiseDensity);
         var noiseType = new ComboBox { Width = 160, SelectedIndex = -1 };
-        foreach (var key in new[] { "Soft", "Film", "Dots", "Blocks" })
+        foreach (var key in new[] { "Soft", "Film", "Dots", "Blocks", "Sand" })
             noiseType.Items.Add(GlassSettingsResources.Get("Reflection_Noise" + key));
         noiseType.SelectedIndex = initial.NoiseType;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(noiseType,
@@ -41,7 +41,15 @@ public static class ReflectionSettingsDialog
             Opacity = 0.7
         });
         body.Children.Add(PreviewCard(preview));
-        body.Children.Add(enabled);
+        var processingRow = new Grid { ColumnSpacing = 16 };
+        processingRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        processingRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        enabled.VerticalAlignment = VerticalAlignment.Center;
+        reset.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(reset, 1);
+        processingRow.Children.Add(enabled);
+        processingRow.Children.Add(reset);
+        body.Children.Add(processingRow);
         var imageGroup = new StackPanel { Spacing = 12 };
         imageGroup.Children.Add(Row("Reflection_SettingScale", scale));
         imageGroup.Children.Add(Row("Reflection_SettingOpacity", opacity));
@@ -57,15 +65,25 @@ public static class ReflectionSettingsDialog
         });
         groups.Items.Add(new PivotItem { Header = GlassSettingsResources.Get("Reflection_GroupImage"), Content = imageGroup });
         groups.Items.Add(new PivotItem { Header = GlassSettingsResources.Get("Reflection_GroupNoise"), Content = noiseGroup });
-        groups.SelectedIndex = Math.Clamp(_selectedGroupIndex, 0, groups.Items.Count - 1);
-        groups.SelectionChanged += (_, args) =>
+        int restoredGroupIndex = Math.Clamp(_selectedGroupIndex, 0, groups.Items.Count - 1);
+        groups.SelectedIndex = restoredGroupIndex;
+        bool trackingGroup = false;
+        // Pivot may choose its default item when its template is first loaded.
+        // Restore after that, and do not filter its routed event by OriginalSource.
+        groups.Loaded += (_, _) =>
         {
-            if (ReferenceEquals(args.OriginalSource, groups) && groups.SelectedIndex >= 0)
-                _selectedGroupIndex = groups.SelectedIndex;
+            groups.SelectedIndex = restoredGroupIndex;
+            trackingGroup = true;
+        };
+        groups.Unloaded += (_, _) => trackingGroup = false;
+        groups.SelectionChanged += (_, _) =>
+        {
+            if (trackingGroup && groups.IsLoaded && groups.SelectedIndex >= 0)
+                _selectedGroupIndex = restoredGroupIndex = groups.SelectedIndex;
         };
         groups.IsEnabled = enabled.IsOn;
         body.Children.Add(groups);
-        body.Children.Add(reset); body.Children.Add(error);
+        body.Children.Add(error);
         int revision = 0;
         bool closed = false;
         ReflectionRenderSettings Values() => new(
@@ -155,7 +173,9 @@ public static class ReflectionSettingsDialog
         return new Border
         {
             CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1),
-            BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+            Margin = new Thickness(8, 4, 8, 12),
+            Shadow = new ThemeShadow(), Translation = new System.Numerics.Vector3(0, 0, 16),
+            BorderBrush = (Brush)Application.Current.Resources["ControlStrongStrokeColorDefaultBrush"],
             Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
             Child = content
         };
