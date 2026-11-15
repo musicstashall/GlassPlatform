@@ -167,3 +167,22 @@ for channel in range(3):
     assert set(maze_dark[channel::4]) == {0}
     assert set(maze_lite[channel::4]) == {160}
 print('PASS: approved CircuitMaze geometry and Dark/Lite pair')
+
+stitch_dark = decode_rgba(assets / 'CrossStitch_Dark.png', (8, 8))
+stitch_lite = decode_rgba(assets / 'CrossStitch_Lite.png', (8, 8))
+expected_stitch = bytearray()
+for y in range(8):
+    for x in range(8):
+        u, v = (x % 4, y % 4) if (x // 4 + y // 4) % 2 == 0 else (y % 4, x % 4)
+        alpha = 45
+        if v <= 2:
+            if u == 1:
+                alpha = 155 if v == 1 else 130
+            elif u == 2:
+                alpha = 85
+        expected_stitch.append(alpha)
+assert stitch_dark[3::4] == stitch_lite[3::4] == expected_stitch
+for channel in range(3):
+    assert set(stitch_dark[channel::4]) == {0}
+    assert set(stitch_lite[channel::4]) == {160}
+print('PASS: approved dense CrossStitch geometry and Dark/Lite pair')
