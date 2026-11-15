@@ -110,3 +110,15 @@ xaml = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml').read_text()
 assert 'CheckerboardImage' not in xaml and 'TransparencyCheckerboard' not in control
 assert 'Background="#FF909090"' in xaml
 print('PASS: flat neutral reflection substrate, no checkerboard')
+
+# Approved MicroBasket geometry and alpha must match the original approval swatch.
+basket_dark = decode_rgba(assets / 'MicroBasket_Dark.png', (8, 8))
+basket_lite = decode_rgba(assets / 'MicroBasket_Lite.png', (8, 8))
+expected_alpha = bytes(150 if ((x // 2 + y // 2) % 2 == 0 and x % 2 == 0)
+                       or ((x // 2 + y // 2) % 2 == 1 and y % 2 == 0) else 65
+                       for y in range(8) for x in range(8))
+assert basket_dark[3::4] == basket_lite[3::4] == expected_alpha
+for channel in range(3):
+    assert set(basket_dark[channel::4]) == {0}
+    assert set(basket_lite[channel::4]) == {160}
+print('PASS: approved MicroBasket 8x8 geometry, paired alpha and Dark/Lite colors')
