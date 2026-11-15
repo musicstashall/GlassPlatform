@@ -7,7 +7,7 @@
         x:Name="RootBorder"
         Width="150"
         Height="94"
-        Background="White"
+        Background="#FF909090"
         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
         BorderThickness="1"
         CornerRadius="8"
@@ -17,9 +17,6 @@
             <Grid.Clip>
                 <RectangleGeometry Rect="0,0,148,92" />
             </Grid.Clip>
-            <Image
-                x:Name="CheckerboardImage"
-                Stretch="Fill" />
             <Image
                 x:Name="PreviewImage"
                 HorizontalAlignment="Left"

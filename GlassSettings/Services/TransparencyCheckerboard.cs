@@ -10,7 +10,7 @@ public static class TransparencyCheckerboard
 {
     private const int TileSize = 8;
 
-    public static BitmapSource CreateImage(int width, int height, bool colored = false)
+    public static BitmapSource CreateImage(int width, int height)
     {
         var bitmap = new WriteableBitmap(width, height);
         using var stream = bitmap.PixelBuffer.AsStream();
@@ -20,9 +20,7 @@ public static class TransparencyCheckerboard
             for (var col = 0; col < width; col++)
             {
                 var isLight = ((col / TileSize) + (row / TileSize)) % 2 == 0;
-                var color = colored
-                    ? (isLight ? Color.FromArgb(255, 157, 174, 177) : Color.FromArgb(255, 177, 163, 157))
-                    : (isLight ? Colors.White : Color.FromArgb(255, 224, 224, 224));
+                var color = isLight ? Colors.White : Color.FromArgb(255, 224, 224, 224);
                 stream.WriteByte(color.B);
                 stream.WriteByte(color.G);
                 stream.WriteByte(color.R);
