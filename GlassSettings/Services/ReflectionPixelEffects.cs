@@ -102,7 +102,7 @@ public static class ReflectionPixelEffects
         for (int x = 0; x < width; x++)
         {
             int i = (y * width + x) * 4 + 3;
-            double grain = settings.NoisePercent == 0 || density == 0 ? 0
+            double grain = settings.NoiseType < 0 || settings.NoisePercent == 0 || density == 0 ? 0
                 : Grain(x, y, width, height, settings.NoiseType, density, wrap);
             double noiseAlpha = Math.Abs(grain) * settings.NoisePercent / 100.0
                 * .35 * (grain == 0 ? 1 : NoiseGains.Value[Math.Clamp(settings.NoiseType, 0, 4)]);

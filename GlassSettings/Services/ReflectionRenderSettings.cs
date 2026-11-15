@@ -5,11 +5,11 @@ using System.Text.Json;
 using System.Security.Cryptography;
 
 // NoiseSize is retained only to read older registry recipes; rendering ignores it.
-public sealed record ReflectionRenderSettings(int ScalePercent = 100, int OpacityPercent = 100, int Softness = 0, int NoisePercent = 0, int NoiseSize = 1, int NoiseType = 0, int NoiseDensity = 50, bool Enabled = true)
+public sealed record ReflectionRenderSettings(int ScalePercent = 100, int OpacityPercent = 100, int Softness = 0, int NoisePercent = 0, int NoiseSize = 1, int NoiseType = -1, int NoiseDensity = 50, bool Enabled = true)
 {
     public ReflectionRenderSettings Normalize() => new(
         Math.Clamp(ScalePercent, 25, 200), Math.Clamp(OpacityPercent, 0, 100), Math.Clamp(Softness, 0, 3),
-        Math.Clamp(NoisePercent, 0, 100), 1, Math.Clamp(NoiseType, 0, 4), Math.Clamp(NoiseDensity, 0, 100), Enabled);
+        Math.Clamp(NoisePercent, 0, 100), 1, Math.Clamp(NoiseType, -1, 4), Math.Clamp(NoiseDensity, 0, 100), Enabled);
 }
 
 /// <summary>One record for the single generated canvas; not per-source profiles or PNG metadata.</summary>

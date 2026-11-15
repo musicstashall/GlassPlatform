@@ -21,9 +21,10 @@ public static class ReflectionSettingsDialog
         var noise = Number("Reflection_SettingNoise", 0, 100, initial.NoisePercent);
         var noiseDensity = Number("Reflection_SettingNoiseDensity", 0, 100, initial.NoiseDensity);
         var noiseType = new ComboBox { Width = 160, SelectedIndex = -1 };
-        foreach (var key in new[] { "Soft", "Film", "Dots", "Blocks", "Sand" })
+        foreach (var key in new[] { "None", "Soft", "Film", "Dots", "Blocks", "Sand" })
             noiseType.Items.Add(GlassSettingsResources.Get("Reflection_Noise" + key));
-        noiseType.SelectedIndex = initial.NoiseType;
+        // UI inserts None first; persisted IDs 0..4 retain their original meaning.
+        noiseType.SelectedIndex = initial.NoiseType + 1;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(noiseType,
             GlassSettingsResources.Get("Reflection_SettingNoiseType"));
         var enabled = new ToggleSwitch
@@ -91,7 +92,7 @@ public static class ReflectionSettingsDialog
             double.IsFinite(opacity.Value) ? (int)opacity.Value : 100,
             double.IsFinite(softness.Value) ? (int)softness.Value : 0,
             double.IsFinite(noise.Value) ? (int)noise.Value : 0,
-            1, Math.Max(0, noiseType.SelectedIndex),
+            1, Math.Clamp(noiseType.SelectedIndex - 1, -1, 4),
             double.IsFinite(noiseDensity.Value) ? (int)noiseDensity.Value : 50, enabled.IsOn);
         async Task RefreshAsync()
         {
@@ -123,8 +124,15 @@ public static class ReflectionSettingsDialog
         softness.ValueChanged += (_, _) => _ = RefreshAsync();
         noise.ValueChanged += (_, _) => _ = RefreshAsync();
         noiseDensity.ValueChanged += (_, _) => _ = RefreshAsync();
-        noiseType.SelectionChanged += (_, _) => _ = RefreshAsync();
-        enabled.Toggled += (_, _) => { groups.IsEnabled = enabled.IsOn; _ = RefreshAsync(); };
+        void SyncNoiseControls()
+        {
+            bool hasNoise = enabled.IsOn && noiseType.SelectedIndex > 0;
+            noise.IsEnabled = hasNoise;
+            noiseDensity.IsEnabled = hasNoise;
+        }
+        noiseType.SelectionChanged += (_, _) => { SyncNoiseControls(); _ = RefreshAsync(); };
+        enabled.Toggled += (_, _) => { groups.IsEnabled = enabled.IsOn; SyncNoiseControls(); _ = RefreshAsync(); };
+        SyncNoiseControls();
         reset.Click += (_, _) => { enabled.IsOn = true; scale.Value = 100; opacity.Value = 100; softness.Value = 0; noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0; };
         _ = RefreshAsync();
         try

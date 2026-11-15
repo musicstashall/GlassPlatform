@@ -1155,5 +1155,6 @@
   <data name="Reflection_EnableProcessing" xml:space="preserve"><value>Apply processing</value></data>
   <data name="Reflection_GroupImage" xml:space="preserve"><value>Image</value></data>
   <data name="Reflection_GroupNoise" xml:space="preserve"><value>Noise</value></data>
-  <data name="Reflection_NoiseSand" xml:space="preserve"><value>Sand (experimental)</value></data>
+  <data name="Reflection_NoiseSand" xml:space="preserve"><value>Fine grain</value></data>
+  <data name="Reflection_NoiseNone" xml:space="preserve"><value>No noise</value></data>
 </root>

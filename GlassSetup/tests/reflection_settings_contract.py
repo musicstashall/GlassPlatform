@@ -58,7 +58,7 @@ assert 'noiseDensity.Value = 50' in dialog and 'noiseSize' not in dialog
 for language in ('ru-RU', 'en-US'):
     assert 'Reflection_SettingNoiseDensity' in (root / f'GlassSettings/Strings/{language}/Resources.resw').read_text()
 print('PASS: grain density control, defaults, bounds, preview and reset wiring')
-assert 'int NoiseType = 0' in state and 'Math.Clamp(NoiseType, 0, 4)' in state
+assert 'int NoiseType = -1' in state and 'Math.Clamp(NoiseType, -1, 4)' in state
 assert 'noiseType.SelectionChanged' in dialog and 'initial.NoiseType' in dialog
 assert 'noiseType.SelectedIndex = 0' in dialog
 for language in ('ru-RU', 'en-US'):
@@ -95,3 +95,9 @@ assert 'Shadow = new ThemeShadow()' in dialog
 assert 'Reflection_NoiseSand' in (root / 'GlassSettings/Strings/ru-RU/Resources.resw').read_text()
 assert 'if (type == 4)' in effects and 'u < 1311' in effects and 'u < 64004' in effects
 print('PASS: Pivot load restoration, top-right Defaults, preview shadow and independent-pixel sand grain')
+assert '"None", "Soft", "Film", "Dots", "Blocks", "Sand"' in dialog
+assert 'noiseType.SelectedIndex = initial.NoiseType + 1' in dialog
+assert 'Math.Clamp(noiseType.SelectedIndex - 1, -1, 4)' in dialog
+assert 'noise.IsEnabled = hasNoise' in dialog and 'noiseDensity.IsEnabled = hasNoise' in dialog
+assert 'settings.NoiseType < 0 ||' in effects
+print('PASS: None bypasses only noise, locks noise controls, preserves previous type IDs')

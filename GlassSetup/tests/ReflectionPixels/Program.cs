@@ -28,8 +28,8 @@ Check(bounded == new ReflectionRenderSettings(25, 100, 0), "registry/UI values n
 Console.WriteLine("Registry and WinUI are not exercised by these pixel tests.");
 var grainA = Enumerable.Repeat((byte)160, 256 * 4).ToArray();
 var grainB = (byte[])grainA.Clone();
-ReflectionPixelEffects.ApplyAlpha(grainA, 256, 1, new(100, 100, 0, 75), wrap: true);
-ReflectionPixelEffects.ApplyAlpha(grainB, 256, 1, new(100, 100, 0, 75), wrap: true);
+ReflectionPixelEffects.ApplyAlpha(grainA, 256, 1, new(100, 100, 0, 75, NoiseType: 0), wrap: true);
+ReflectionPixelEffects.ApplyAlpha(grainB, 256, 1, new(100, 100, 0, 75, NoiseType: 0), wrap: true);
 Check(grainA.SequenceEqual(grainB), "noise is deterministic");
 Check(Enumerable.Range(0, 256).All(i => grainA[i * 4] == grainA[i * 4 + 1]
     && grainA[i * 4 + 1] == grainA[i * 4 + 2]), "grain stays achromatic");
@@ -138,3 +138,15 @@ var sandLevels = Enumerable.Range(0, 65536).Select(i => sand[i * 4]).Distinct().
 Check(sandLevels.SequenceEqual(new byte[] { 0, 51, 102, 153, 204, 255 }), "sand reproduces six reference luminance levels");
 int sharpNeighbours = Enumerable.Range(0, 65535).Count(i => Math.Abs(sand[i * 4] - sand[(i + 1) * 4]) >= 102);
 Check(sharpNeighbours > 65536 / 10, "sand retains sharp unfiltered pixel contrast");
+
+var noNoise = (byte[])original.Clone();
+ReflectionPixelEffects.ApplyAlpha(noNoise, 2, 1,
+    new(OpacityPercent: 50, NoisePercent: 100, NoiseType: -1, NoiseDensity: 100), wrap: false);
+Check(noNoise.SequenceEqual(faded), "None ignores noise parameters while applying image opacity");
+var noNoiseBackground = new byte[32 * 32 * 4];
+ReflectionPixelEffects.ApplyAlpha(noNoiseBackground, 32, 32,
+    new(NoisePercent: 100, NoiseType: -1, NoiseDensity: 100), wrap: false);
+Check(noNoiseBackground.All(v => v == 0), "None leaves transparent background noise-free");
+for (int type = 0; type < 5; type++)
+    Check(new ReflectionRenderSettings(NoiseType: type).Normalize().NoiseType == type,
+        "existing stored noise IDs preserved: " + type);

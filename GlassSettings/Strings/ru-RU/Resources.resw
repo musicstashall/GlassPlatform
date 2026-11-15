@@ -1160,5 +1160,6 @@
   <data name="Reflection_EnableProcessing" xml:space="preserve"><value>Применять обработку</value></data>
   <data name="Reflection_GroupImage" xml:space="preserve"><value>Изображение</value></data>
   <data name="Reflection_GroupNoise" xml:space="preserve"><value>Шум</value></data>
-  <data name="Reflection_NoiseSand" xml:space="preserve"><value>Наждачный</value></data>
+  <data name="Reflection_NoiseSand" xml:space="preserve"><value>Мелкозернистое</value></data>
+  <data name="Reflection_NoiseNone" xml:space="preserve"><value>Без шума</value></data>
 </root>
