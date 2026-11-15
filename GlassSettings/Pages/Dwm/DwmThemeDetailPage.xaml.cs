@@ -151,6 +151,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         // and replace the directly populated intensity cell on Loaded.
         _reflectionConfigureButton = new Button();
         _reflectionConfigureButton.Click += ReflectionConfigure_OnClick;
+        ReflectionCollectionExpander.HeaderControlsTable.StackFixedActionBelowSlider = true;
         ReflectionCollectionExpander.HeaderControlsTable.SetCell(0, null, _reflectionConfigureButton);
         ReflectionCollectionExpander.HeaderControlsTable.SetCell(
             1,

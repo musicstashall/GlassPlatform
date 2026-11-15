@@ -1148,7 +1148,7 @@
   <data name="Reflection_Configure" xml:space="preserve"><value>Настроить</value></data>
   <data name="Reflection_SettingScale" xml:space="preserve"><value>Масштаб, %</value></data>
   <data name="Reflection_SettingOpacity" xml:space="preserve"><value>Непрозрачность, %</value></data>
-  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Мягкость краёв, px (0–3)</value></data>
+  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Мягкость краёв, px (0–10)</value></data>
   <data name="Reflection_Reset" xml:space="preserve"><value>По умолчанию</value></data>
   <data name="Reflection_SettingNoise" xml:space="preserve"><value>Шум, %</value></data>
   <data name="Reflection_SettingNoiseType" xml:space="preserve"><value>Тип зерна</value></data>

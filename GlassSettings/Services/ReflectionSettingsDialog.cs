@@ -17,7 +17,7 @@ public static class ReflectionSettingsDialog
         var initial = ReflectionRenderState.Settings;
         var scale = Number("Reflection_SettingScale", 25, 200, initial.ScalePercent);
         var opacity = Number("Reflection_SettingOpacity", 0, 100, initial.OpacityPercent);
-        var softness = Number("Reflection_SettingSoftness", 0, 3, initial.Softness);
+        var softness = Number("Reflection_SettingSoftness", 0, 10, initial.Softness);
         var noise = Number("Reflection_SettingNoise", 0, 100, initial.NoisePercent);
         var noiseDensity = Number("Reflection_SettingNoiseDensity", 0, 100, initial.NoiseDensity);
         var noiseType = new ComboBox { Width = 160, SelectedIndex = -1 };

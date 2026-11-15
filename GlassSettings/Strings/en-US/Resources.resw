@@ -1143,7 +1143,7 @@
   <data name="Reflection_Configure" xml:space="preserve"><value>Configure</value></data>
   <data name="Reflection_SettingScale" xml:space="preserve"><value>Scale, %</value></data>
   <data name="Reflection_SettingOpacity" xml:space="preserve"><value>Opacity, %</value></data>
-  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Edge softness, px (0–3)</value></data>
+  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Edge softness, px (0–10)</value></data>
   <data name="Reflection_Reset" xml:space="preserve"><value>Defaults</value></data>
   <data name="Reflection_SettingNoise" xml:space="preserve"><value>Noise, %</value></data>
   <data name="Reflection_SettingNoiseType" xml:space="preserve"><value>Grain type</value></data>

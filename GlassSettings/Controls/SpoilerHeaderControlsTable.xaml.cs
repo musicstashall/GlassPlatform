@@ -29,6 +29,10 @@ public sealed partial class SpoilerHeaderControlsTable : UserControl
 
     public bool IsEmpty => CellCount == 0;
 
+    /// <summary>Mixed action+slider: below the inline minimum, put the action below the slider.</summary>
+    public bool StackFixedActionBelowSlider { get; set; }
+    private bool _cellsStacked;
+
     public SpoilerHeaderControlCell? GetCell(int index) =>
         index is >= 0 and < 2 ? _cells[index] : null;
 
@@ -145,6 +149,7 @@ public sealed partial class SpoilerHeaderControlsTable : UserControl
     /// <summary>Распределение budget между ячейками: fixed first, adaptive slider — остаток.</summary>
     public void ApplyInlineWidths(double available)
     {
+        ResetCellRows();
         SyncVisibleLabelWidths();
         if (available <= 0 || IsEmpty)
             return;
@@ -185,9 +190,55 @@ public sealed partial class SpoilerHeaderControlsTable : UserControl
 
     public void ApplyStackedChrome(double availableWidth)
     {
+        SyncVisibleLabelWidths();
+        var indices = GetVisibleIndices();
+        var adaptive = indices.Where(i => _cells[i]!.IsAdaptiveControl).ToList();
+        var fixedCells = indices.Where(i => !_cells[i]!.IsAdaptiveControl).ToList();
+        double minimum = MeasureMinWidth();
+        // Match the engine's 1px return hysteresis, based on measured minimums.
+        bool split = StackFixedActionBelowSlider && adaptive.Count == 1 && fixedCells.Count == 1
+            && availableWidth < minimum + (_cellsStacked ? 1 : 0);
+        if (!split)
+        {
+            // One shared budget, not the full available width for EACH cell.
+            ApplyInlineWidths(availableWidth);
+        }
+        else
+        {
+            ResetCellRows();
+            CellsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            CellsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            CellsGrid.RowSpacing = SpoilerHeaderLayoutMetrics.ColumnGap;
+            var sliderHost = GetHost(adaptive[0]);
+            var actionHost = GetHost(fixedCells[0]);
+            Grid.SetColumn(sliderHost, 0); Grid.SetColumnSpan(sliderHost, 2);
+            Grid.SetRow(sliderHost, 0);
+            Grid.SetColumn(actionHost, 0); Grid.SetColumnSpan(actionHost, 2);
+            Grid.SetRow(actionHost, 1);
+            _cells[adaptive[0]]!.ApplyStackedChrome(availableWidth);
+            _cells[fixedCells[0]]!.ApplyStackedChrome(availableWidth);
+            _cellsStacked = true;
+        }
         HorizontalAlignment = HorizontalAlignment.Right;
-        foreach (var cell in _cells)
-            cell?.ApplyStackedChrome(availableWidth);
+        foreach (var i in indices)
+        {
+            GetHost(i).HorizontalAlignment = HorizontalAlignment.Right;
+            _cells[i]!.HorizontalAlignment = HorizontalAlignment.Right;
+        }
+    }
+
+    private void ResetCellRows()
+    {
+        _cellsStacked = false;
+        CellsGrid.RowDefinitions.Clear();
+        CellsGrid.RowSpacing = 0;
+        for (int i = 0; i < 2; i++)
+        {
+            var host = GetHost(i);
+            Grid.SetRow(host, 0); Grid.SetColumn(host, i); Grid.SetColumnSpan(host, 1);
+            host.HorizontalAlignment = HorizontalAlignment.Left;
+            if (_cells[i] is { } cell) cell.HorizontalAlignment = HorizontalAlignment.Left;
+        }
     }
 
     /// <summary>Выравнивание подписей между ячейками одной таблицы.</summary>

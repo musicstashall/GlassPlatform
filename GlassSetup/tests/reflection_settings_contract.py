@@ -101,3 +101,6 @@ assert 'Math.Clamp(noiseType.SelectedIndex - 1, -1, 4)' in dialog
 assert 'noise.IsEnabled = hasNoise' in dialog and 'noiseDensity.IsEnabled = hasNoise' in dialog
 assert 'settings.NoiseType < 0 ||' in effects
 print('PASS: None bypasses only noise, locks noise controls, preserves previous type IDs')
+assert 'Math.Clamp(Softness, 0, 10)' in state
+assert 'Number("Reflection_SettingSoftness", 0, 10, initial.Softness)' in dialog
+print('PASS: reflection softness supports 0–10 px in both UI and persisted settings')
