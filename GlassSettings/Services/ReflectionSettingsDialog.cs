@@ -9,6 +9,9 @@ using Microsoft.UI.Xaml.Media.Imaging;
 
 public static class ReflectionSettingsDialog
 {
+    // Navigation state belongs to this process, not the generated PNG recipe.
+    private static int _selectedGroupIndex;
+
     public static async Task<ReflectionRenderSettings?> ShowAsync(string source)
     {
         var initial = ReflectionRenderState.Settings;
@@ -30,7 +33,7 @@ public static class ReflectionSettingsDialog
         var preview = new Image { Height = 144, Stretch = Stretch.Uniform };
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         var reset = new Button { Content = GlassSettingsResources.Get("Reflection_Reset") };
-        var body = new StackPanel { Spacing = 8 };
+        var body = new StackPanel { Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
         body.Children.Add(new TextBlock
         {
             Text = Path.GetFileNameWithoutExtension(source),
@@ -54,6 +57,12 @@ public static class ReflectionSettingsDialog
         });
         groups.Items.Add(new PivotItem { Header = GlassSettingsResources.Get("Reflection_GroupImage"), Content = imageGroup });
         groups.Items.Add(new PivotItem { Header = GlassSettingsResources.Get("Reflection_GroupNoise"), Content = noiseGroup });
+        groups.SelectedIndex = Math.Clamp(_selectedGroupIndex, 0, groups.Items.Count - 1);
+        groups.SelectionChanged += (_, args) =>
+        {
+            if (ReferenceEquals(args.OriginalSource, groups) && groups.SelectedIndex >= 0)
+                _selectedGroupIndex = groups.SelectedIndex;
+        };
         groups.IsEnabled = enabled.IsOn;
         body.Children.Add(groups);
         body.Children.Add(reset); body.Children.Add(error);
@@ -124,7 +133,11 @@ public static class ReflectionSettingsDialog
         for (int y = 0; y < 12; y++)
         for (int x = 0; x < 32; x++)
         {
-            var square = new Border { Background = (x + y) % 2 == 0 ? white : blueGrey };
+            var square = new Border
+            {
+                Background = (x + y) % 2 == 0 ? white : blueGrey,
+                Opacity = 0.07 // Only the substrate is faint; leave the image untouched.
+            };
             Grid.SetColumn(square, x); Grid.SetRow(square, y);
             content.Children.Add(square);
         }

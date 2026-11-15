@@ -82,3 +82,10 @@ assert 'CreateRoundedRectangleGeometry' in dialog and 'CardStrokeColorDefaultBru
 assert '255, 153, 170, 187' in dialog and '255, 255, 255, 255' in dialog
 assert 'CalibrateNoise' in effects and 'target / value' in effects
 print('PASS: calibrated intensity, persistent bypass, grouped Pivot and rounded checkerboard preview wiring')
+assert 'private static int _selectedGroupIndex' in dialog
+assert 'groups.SelectedIndex = Math.Clamp(_selectedGroupIndex' in dialog
+assert '_selectedGroupIndex = groups.SelectedIndex' in dialog
+assert 'ReferenceEquals(args.OriginalSource, groups)' in dialog
+assert 'Margin = new Thickness(0, 12, 0, 0)' in dialog
+assert 'Opacity = 0.07' in dialog and 'preview.Opacity' not in dialog
+print('PASS: process-only Pivot selection, faint checkerboard without image dimming, top content inset')
