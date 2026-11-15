@@ -101,18 +101,30 @@ public static class GlassReleaseUpdateService
         {
             using var response = await Http.GetAsync(VersionUrl).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
+            {
+                System.Diagnostics.Trace.TraceWarning("[UpdateCheck] Glass catalog HTTP {0}", (int)response.StatusCode);
                 return MarkUnreachable();
+            }
 
             await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
             using var doc = await JsonDocument.ParseAsync(stream).ConfigureAwait(false);
             if (!TryReadCatalog(doc.RootElement, out var check))
-                return MarkUnreachable();
+            {
+                System.Diagnostics.Trace.TraceWarning("[UpdateCheck] Glass catalog schema is unsupported or empty");
+                return MarkUnreachable(GlassCatalogCheckKind.Unreadable);
+            }
 
             MarkReached();
             return check;
         }
-        catch
+        catch (JsonException error)
         {
+            System.Diagnostics.Trace.TraceWarning("[UpdateCheck] Glass catalog JSON: {0}", error.Message);
+            return MarkUnreachable(GlassCatalogCheckKind.Unreadable);
+        }
+        catch (Exception error)
+        {
+            System.Diagnostics.Trace.TraceWarning("[UpdateCheck] Glass catalog {0}: {1}", error.GetType().Name, error.Message);
             return MarkUnreachable();
         }
     }
@@ -308,10 +320,10 @@ public static class GlassReleaseUpdateService
             .ThenBy(item => item.Architecture, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-    private static GlassCatalogCheck MarkUnreachable()
+    private static GlassCatalogCheck MarkUnreachable(GlassCatalogCheckKind kind = GlassCatalogCheckKind.Offline)
     {
         GlassSettingsRegistry.WriteGlassUpdateLastCheckOk(false);
-        return new GlassCatalogCheck { Kind = GlassCatalogCheckKind.Offline };
+        return new GlassCatalogCheck { Kind = kind };
     }
 
     private static void MarkReached()

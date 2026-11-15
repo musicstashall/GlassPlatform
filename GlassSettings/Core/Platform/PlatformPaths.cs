@@ -11,6 +11,19 @@ public static class PlatformPaths
     private const string BwmRegKey = @"Software\StanislavKa\GlassPlatform";
     private const string InstallPathValue = "InstallPath";
 
+    public static string ReflectionCacheDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "GlassPlatform", "GlassReflection");
+
+    public static string ReflectionAppliedDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "OpenGlass", "Presets", "Textured");
+
+    // Legacy generated Pattern directory: recognized for old active registry paths only.
+    public static string ReflectionPatternAppliedDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "OpenGlass", "Presets", "Pattern");
+
     private static string? _platformRoot;
     private static string? _openGlassDllPath;
     private static string? _openGlassDir;

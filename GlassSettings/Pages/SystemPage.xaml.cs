@@ -361,16 +361,6 @@ public sealed partial class SystemPage : Page
             return;
         }
 
-        if (ProductUpdateCoordinator.ShouldShowOfflineNotice)
-        {
-            await PageShell.PageNoticeStack.ShowActionNoticeAsync(
-                SettingsNoticeSeverity.Warning,
-                ProductUpdateCoordinator.OfflineNoticeText,
-                GlassSettingsResources.Get("System_OpenGlassUpdateAction"),
-                animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
-            return;
-        }
-
         await PageShell.PageNoticeStack.CloseActionNoticeAsync();
     }
 

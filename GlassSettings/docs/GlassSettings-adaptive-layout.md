@@ -702,3 +702,23 @@ var sideBySide = width >= _switchWidth + 1;  // возврат по запомн
 | 2026-06-26 | Ассистент | Picker-body: `SettingsPickerBodyLayout`, порог по body-таблице text\|control, controls left |
 | 2026-06-26 | Ассистент | `GlassSettingsSliderMetrics` (120–200): единые min/max трека для шапки и body; stack после сжатия col1 |
 | 2026-06-13 | Ассистент | Создание документа на основе рефакторинга DwmThemeDetailPage, SettingsSystemGateExpander, SettingsFlatGateRow |
+
+### Дополнение: две ячейки на строке под заголовком
+
+В stacked-режиме ширина **всей** `SpoilerHeaderControlsTable` ограничена фактическим
+viewport `ActionsBelowHost`. Нельзя выдавать каждой ячейке полный available:
+фиксированные ячейки и зазоры сначала вычитаются из единого бюджета, остаток
+распределяется через `ApplyInlineWidths`; трек сохраняет политику 120–200 px.
+`SpoilerHeaderLayoutHost` отслеживает также изменение ширины below-host (без
+таймера), поскольку outer expander шире внутреннего header viewport.
+
+Для пары action+slider есть opt-in `StackFixedActionBelowSlider` (включён на
+шапке коллекции отражений). При ширине меньше суммы **измеренных** minimum обеих
+ячеек и `GlassSettingsRowControlSpacing` таблица становится двухрядной:
+slider — верхний ряд таблицы (вторая строка шапки), action — нижний (третья).
+Оба выровнены вправо; вертикальный зазор 8 px из общих метрик. Возврат в один ряд
+при `available >= measuredMin + 1 px`; обратный переход всей таблицы в inline
+остаётся ответственностью общего layout engine. Разбиение и возврат сбрасывают
+row/column/span и alignment, поэтому повторные циклы resize не накапливают
+третью строку или старые ограничения. На страницах нет собственных SizeChanged,
+таймеров, estimates и повторной реализации порогов.

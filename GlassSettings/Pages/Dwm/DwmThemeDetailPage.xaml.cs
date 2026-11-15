@@ -44,6 +44,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private readonly ObservableCollection<AtlasImageTileModel> _atlasItems = [];
     private readonly DwmOpacityGroupRow _reflectionRow;
     private readonly DwmOpacityGroupRow _reflectionMaxRow;
+    private Button _reflectionConfigureButton = null!;
     private Slider _intensitySlider = null!;
     private TextBlock _intensityValueText = null!;
     private Slider _parallaxSlider = null!;
@@ -71,6 +72,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private EventHandler<DesktopEnvironmentChangedEventArgs>? _environmentChangedHandler;
     private DispatcherQueueTimer? _wallpaperRefreshTimer;
     private DispatcherQueueTimer? _themeReloadTimer;
+    private bool _reflectionUiReady;
     private int _themeReloadGeneration;
     private string? _lastThemeFilePath;
     private DwmRegistryHive _hive = DwmRegistryHive.Hkcu;
@@ -106,6 +108,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         ApplyUnsavedScopes();
 
         ReflectionItems.ItemsSource = _reflectionItems;
+        _reflectionUiReady = true;
         MaterialItems.ItemsSource = _materialItems;
         AtlasItems.ItemsSource = _atlasItems;
 
@@ -144,8 +147,14 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             _materialOpacitySlider,
             _materialOpacityValueText);
 
+        // Use one header-controls table. HeaderActions would activate the legacy bridge
+        // and replace the directly populated intensity cell on Loaded.
+        _reflectionConfigureButton = new Button();
+        _reflectionConfigureButton.Click += ReflectionConfigure_OnClick;
+        ReflectionCollectionExpander.HeaderControlsTable.StackFixedActionBelowSlider = true;
+        ReflectionCollectionExpander.HeaderControlsTable.SetCell(0, null, _reflectionConfigureButton);
         ReflectionCollectionExpander.HeaderControlsTable.SetCell(
-            0,
+            1,
             GlassSettingsResources.Get("Dwm_Intensity"),
             _reflectionHeaderSlider);
         MaterialCollectionExpander.HeaderControlsTable.SetCell(
@@ -226,7 +235,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         ReflectionInfoBlock.Message = GlassSettingsResources.Get("Dwm_ReflectionInfoMessage");
         AdvancedExpander.Title = GlassSettingsResources.Get("Dwm_AdvancedColorizationTitle");
 
-        ReflectionCollectionExpander.HeaderControlsTable.GetCell(0)!.Label =
+        ReflectionCollectionExpander.HeaderControlsTable.GetCell(1)!.Label =
             GlassSettingsResources.Get("Dwm_Intensity");
         MaterialCollectionExpander.HeaderControlsTable.GetCell(0)!.Label =
             GlassSettingsResources.Get("Dwm_Intensity");
@@ -253,6 +262,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
 
     private void ConfigureCollectionExpanders()
     {
+        ReflectionTexturesTab.Header = GlassSettingsResources.Get("Reflection_TabTextures");
+        ReflectionPatternTab.Header = GlassSettingsResources.Get("Reflection_TabPattern");
+        ReflectionOtherTab.Header = GlassSettingsResources.Get("Reflection_TabOther");
+        _reflectionConfigureButton.Content = GlassSettingsResources.Get("Reflection_Configure");
         ReflectionCollectionExpander.IconGlyph = SettingsSectionGlyphs.Image;
         ReflectionCollectionExpander.Title = GlassSettingsResources.Get("Dwm_ReflectionCollection");
         ReflectionCollectionExpander.Description = GlassSettingsResources.Get("Dwm_ReflectionImageDesc");
@@ -547,7 +560,8 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         return row;
     }
 
-    private void LoadReflectionImages() =>
+    private void LoadReflectionImages()
+    {
         PopulateCollection(
             _reflectionItems,
             BuildReflectionItemsWithDefault(),
@@ -555,6 +569,8 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             ReflectionItems,
             UpdateReflectionTilesLayout,
             model => _ = TryDeleteReflectionImageAsync(model));
+        UpdateReflectionTileSelection();
+    }
 
     private async void LoadMaterialImages() =>
         PopulateCollection(
@@ -676,13 +692,13 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         updateLayout();
     }
 
-    private static IReadOnlyList<ThemeImageItem> BuildReflectionItemsWithDefault()
+    private IReadOnlyList<ThemeImageItem> BuildReflectionItemsWithDefault()
     {
-        var items = ThemeImageCatalog.LoadReflectionImages().ToList();
+        var category = Math.Max(0, ReflectionCategoryPivot.SelectedIndex);
+        var items = ThemeImageCatalog.LoadReflectionImages()
+            .Where(item => ReflectionCategory(item.FilePath) == category).ToList();
+        if (category != 1) return items;
         var defaultImage = ThemeImageCatalog.TryGetDefaultReflectionImage();
-        if (defaultImage is null)
-            return items;
-
         items.Insert(0, new ThemeImageItem
         {
             Title = GlassSettingsResources.Get("Dwm_DefaultReflectionTile"),
@@ -735,6 +751,14 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         ApplyPolicyGateVisual(PolicyGateSwitch.IsOn);
 
         UpdateValueLabels();
+        var reflectionSource = string.IsNullOrEmpty(_currentReflectionPath) ? DefaultReflectionTilePath
+            : ReflectionTextureService.ResolveSource(_currentReflectionPath);
+        var activeCategory = ReflectionCategory(reflectionSource);
+        if (ReflectionCategoryPivot.SelectedIndex != activeCategory)
+        {
+            ReflectionCategoryPivot.SelectedIndex = activeCategory;
+            LoadReflectionImages();
+        }
         UpdateReflectionTileSelection();
         UpdateMaterialTileSelection();
         UpdateAtlasTileSelection();
@@ -775,8 +799,38 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         SettingsSliderCommit.SyncCommittedValue(_materialOpacitySlider, _materialOpacitySlider.Value);
     }
 
-    private void UpdateReflectionTileSelection() =>
-        UpdateDefaultAwareTileSelection(_reflectionItems, _currentReflectionPath, DefaultReflectionTilePath);
+    private void UpdateReflectionTileSelection()
+    {
+        var source = _currentReflectionPath is { } path ? ReflectionTextureService.ResolveSource(path) : null;
+        UpdateDefaultAwareTileSelection(_reflectionItems, source, DefaultReflectionTilePath);
+        _reflectionConfigureButton.IsEnabled = source is not null &&
+            _reflectionItems.Any(item => SamePath(item.FilePath, source)) &&
+            ReflectionCategory(source) == ReflectionCategoryPivot.SelectedIndex &&
+            (ReflectionTextureService.IsTexture(source) || SvgReflectionRenderer.IsPattern(source));
+    }
+
+    private static int ReflectionCategory(string path)
+    {
+        if (path == DefaultReflectionTilePath) return 1;
+        var parent = Path.GetFileName(Path.GetDirectoryName(path));
+        if (string.Equals(parent, "Textured", StringComparison.OrdinalIgnoreCase)) return 0;
+        return string.Equals(parent, "Pattern", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+    }
+
+    private void ReflectionCategory_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_reflectionUiReady || _loading) return;
+        LoadReflectionImages();
+    }
+
+    private async void ReflectionConfigure_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_currentReflectionPath is null) return;
+        var source = ReflectionTextureService.ResolveSource(_currentReflectionPath);
+        if (!ReflectionTextureService.IsTexture(source) && !SvgReflectionRenderer.IsPattern(source)) return;
+        var settings = await ReflectionSettingsDialog.ShowAsync(source);
+        if (settings is not null) await ApplyReflectionSourceAsync(source, settings);
+    }
 
     private void UpdateMaterialTileSelection() =>
         UpdateDefaultAwareTileSelection(_materialItems, _currentMaterialPath, DefaultMaterialTilePath);
@@ -1053,10 +1107,43 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         TrySelectCustomImage(AtlasRegistryKey, model.FilePath);
     }
 
-    private void ReflectionItems_OnItemInvoked(ItemsView sender, ItemsViewItemInvokedEventArgs e)
+    private async void ReflectionItems_OnItemInvoked(ItemsView sender, ItemsViewItemInvokedEventArgs e)
     {
         if (e.InvokedItem is not ReflectionImageTileModel model) return;
-        TrySelectCustomImage(ReflectionRegistryKey, model.FilePath);
+        await ApplyReflectionSourceAsync(model.FilePath);
+    }
+
+    private async Task ApplyReflectionSourceAsync(string source, ReflectionRenderSettings? settings = null)
+    {
+        Exception? preparationError = null;
+        await PageShell.Operations.RunSequenceAsync(async seq =>
+        {
+            await seq.RegistryMutationAsync(async () =>
+            {
+                // Generate successfully before changing the applied registry path.
+                string path;
+                try { path = await ReflectionTextureService.PrepareAsync(source, settings); }
+                catch (Exception error)
+                {
+                    System.Diagnostics.Trace.TraceError("Reflection generation failed: {0}", error);
+                    preparationError = error;
+                    return;
+                }
+                TrySelectCustomImage(ReflectionRegistryKey, path, refreshNotice: false);
+            });
+            await seq.NoticeSyncAsync(() => PageShell.RefreshSessionNoticeProgrammatic());
+        });
+        if (preparationError is not null)
+            await HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("Dialog_ReflectionPrepareFailedTitle"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Format("Dialog_ReflectionPrepareFailedBody",
+                        GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory,
+                        preparationError.Message)),
+                Footer = HostedConfirmationDialogService.CreateFooter(
+                    GlassSettingsResources.Get("Dialog_Understood"))
+            });
     }
 
     private void MaterialItems_OnItemInvoked(ItemsView sender, ItemsViewItemInvokedEventArgs e)
@@ -1069,7 +1156,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         await TryDeleteThemeImageAsync(
             model.Title,
             model.FilePath,
-            _currentReflectionPath,
+            _currentReflectionPath is { } path ? ReflectionTextureService.ResolveSource(path) : null,
             ThemeImageCatalog.TryDeleteReflectionImage,
             LoadReflectionImages,
             skipDelete: string.Equals(model.FilePath, DefaultReflectionTilePath, StringComparison.Ordinal)).ConfigureAwait(true);
@@ -1117,7 +1204,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         reloadCollection();
     }
 
-    private void TrySelectCustomImage(string registryKey, string filePath)
+    private void TrySelectCustomImage(string registryKey, string filePath, bool refreshNotice = true)
     {
         if (IsDefaultSelection(registryKey, filePath))
         {
@@ -1125,7 +1212,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             PageSessionNoticeState.InvalidateDismissOnMutation();
             HomeSessionNoticeState.InvalidateDismissOnMutation();
             Reload();
-            PageShell.RefreshSessionNoticeProgrammatic();
+            if (refreshNotice) PageShell.RefreshSessionNoticeProgrammatic();
             return;
         }
 
@@ -1142,7 +1229,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         PageSessionNoticeState.InvalidateDismissOnMutation();
         HomeSessionNoticeState.InvalidateDismissOnMutation();
         Reload();
-        PageShell.RefreshSessionNoticeProgrammatic();
+        if (refreshNotice) PageShell.RefreshSessionNoticeProgrammatic();
     }
 
     private static bool IsDefaultSelection(string registryKey, string filePath)

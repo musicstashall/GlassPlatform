@@ -45,6 +45,7 @@ GlassSettings (сборка Native выполняется его target) → Gla
 | Detail-карточки | [docs/GlassSettings-detail-cards.md](docs/GlassSettings-detail-cards.md) |
 | Customization / baseline | [docs/GlassSettings-customization-tracking.md](docs/GlassSettings-customization-tracking.md) |
 | Тултипы (acrylic) | [docs/GlassSettings-tooltips.md](docs/GlassSettings-tooltips.md) |
+| Отражения: PNG-замощение, SVG, параметры, ProgramData и права | [docs/ReflectionTextures.md](docs/ReflectionTextures.md) |
 | Миниатюры атласов | [docs/GlassSettings-atlas-preview.md](docs/GlassSettings-atlas-preview.md) |
 | Crossfade обоев в превью | [docs/GlassSettings-wallpaper-preview-crossfade.md](docs/GlassSettings-wallpaper-preview-crossfade.md) |
 | Превью «Стилизация» | [docs/GlassSettings-stylization-layered-preview.md](docs/GlassSettings-stylization-layered-preview.md) |
@@ -52,6 +53,21 @@ GlassSettings (сборка Native выполняется его target) → Gla
 | Visual styles | [docs/GlassSettings-visual-styles.md](docs/GlassSettings-visual-styles.md) |
 | Startup white flash | [docs/GlassSettings-startup-white-flash.md](docs/GlassSettings-startup-white-flash.md) |
 | Мастер ink (TextVisualTuning) | [docs/TextVisualTuningWizard.md](docs/TextVisualTuningWizard.md) |
+
+## Отражения OpenGlass
+
+Коллекция разделена на PNG-плитки замощения, векторные SVG-рисунки и прежние
+изображения без обработки. Для плиток/SVG диалог позволяет настроить масштаб,
+непрозрачность, мягкость 0–20 px и шум; можно выключить только шум либо всю
+обработку. После применения создаётся один итоговый PNG под виртуальный рабочий
+стол в `%PROGRAMDATA%\OpenGlass\Presets\Textured`, с предварительной очисткой
+**только этой выделенной папки**. Последний рецепт хранится в HKCU, не в JSON-файлах.
+
+Для записи и очистки требуется **Modify («Изменение») на папку результата**,
+а для OpenGlass — чтение PNG. Приложение не повышает права и не меняет ACL;
+наличие нужных разрешений нельзя выводить только из расположения в ProgramData.
+Подробности, ограничения общего файла для пользователей и список проверок:
+[Отражения](docs/ReflectionTextures.md).
 
 ## Список процессов и остановка платформы
 

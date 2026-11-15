@@ -7,7 +7,7 @@
         x:Name="RootBorder"
         Width="150"
         Height="94"
-        Background="White"
+        Background="#FF909090"
         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
         BorderThickness="1"
         CornerRadius="8"
