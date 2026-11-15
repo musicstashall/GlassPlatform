@@ -94,8 +94,15 @@ public static class ThemeImageCatalog
         }
     }
 
-    public static IReadOnlyList<ThemeImageItem> LoadReflectionImages() =>
-        LoadFromResourceFolders(ReflectionRelativeFolders);
+    public static IReadOnlyList<ThemeImageItem> LoadReflectionImages()
+    {
+        // Keep legacy flat catalogs working; test previews are intentionally not enumerated.
+        var items = new List<ThemeImageItem>(LoadFromResourceFolders(ReflectionRelativeFolders));
+        foreach (var category in new[] { "Textured", "Pattern" })
+            items.AddRange(LoadFromResourceFolders(ReflectionRelativeFolders
+                .Select(folder => Path.Combine(folder, category)).ToArray()));
+        return items;
+    }
 
     public static IReadOnlyList<ThemeImageItem> LoadMaterialImages() =>
         LoadFromResourceFolders(MaterialRelativeFolders);

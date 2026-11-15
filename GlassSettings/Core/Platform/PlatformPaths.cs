@@ -11,6 +11,10 @@ public static class PlatformPaths
     private const string BwmRegKey = @"Software\StanislavKa\GlassPlatform";
     private const string InstallPathValue = "InstallPath";
 
+    public static string ReflectionCacheDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "GlassPlatform", "GlassReflection");
+
     private static string? _platformRoot;
     private static string? _openGlassDllPath;
     private static string? _openGlassDir;

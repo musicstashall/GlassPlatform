@@ -776,7 +776,9 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     }
 
     private void UpdateReflectionTileSelection() =>
-        UpdateDefaultAwareTileSelection(_reflectionItems, _currentReflectionPath, DefaultReflectionTilePath);
+        UpdateDefaultAwareTileSelection(_reflectionItems,
+            _currentReflectionPath is { } path ? ReflectionTextureService.ResolveSource(path) : null,
+            DefaultReflectionTilePath);
 
     private void UpdateMaterialTileSelection() =>
         UpdateDefaultAwareTileSelection(_materialItems, _currentMaterialPath, DefaultMaterialTilePath);
@@ -1053,10 +1055,25 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         TrySelectCustomImage(AtlasRegistryKey, model.FilePath);
     }
 
-    private void ReflectionItems_OnItemInvoked(ItemsView sender, ItemsViewItemInvokedEventArgs e)
+    private async void ReflectionItems_OnItemInvoked(ItemsView sender, ItemsViewItemInvokedEventArgs e)
     {
         if (e.InvokedItem is not ReflectionImageTileModel model) return;
-        TrySelectCustomImage(ReflectionRegistryKey, model.FilePath);
+        await PageShell.Operations.RunSequenceAsync(async seq =>
+        {
+            await seq.RegistryMutationAsync(async () =>
+            {
+                // Generate successfully before changing the applied registry path.
+                string path;
+                try { path = await ReflectionTextureService.PrepareAsync(model.FilePath); }
+                catch (Exception error)
+                {
+                    System.Diagnostics.Trace.TraceError("Reflection generation failed: {0}", error);
+                    return;
+                }
+                TrySelectCustomImage(ReflectionRegistryKey, path, refreshNotice: false);
+            });
+            await seq.NoticeSyncAsync(() => PageShell.RefreshSessionNoticeProgrammatic());
+        });
     }
 
     private void MaterialItems_OnItemInvoked(ItemsView sender, ItemsViewItemInvokedEventArgs e)
@@ -1069,7 +1086,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         await TryDeleteThemeImageAsync(
             model.Title,
             model.FilePath,
-            _currentReflectionPath,
+            _currentReflectionPath is { } path ? ReflectionTextureService.ResolveSource(path) : null,
             ThemeImageCatalog.TryDeleteReflectionImage,
             LoadReflectionImages,
             skipDelete: string.Equals(model.FilePath, DefaultReflectionTilePath, StringComparison.Ordinal)).ConfigureAwait(true);
@@ -1117,7 +1134,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         reloadCollection();
     }
 
-    private void TrySelectCustomImage(string registryKey, string filePath)
+    private void TrySelectCustomImage(string registryKey, string filePath, bool refreshNotice = true)
     {
         if (IsDefaultSelection(registryKey, filePath))
         {
@@ -1125,7 +1142,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             PageSessionNoticeState.InvalidateDismissOnMutation();
             HomeSessionNoticeState.InvalidateDismissOnMutation();
             Reload();
-            PageShell.RefreshSessionNoticeProgrammatic();
+            if (refreshNotice) PageShell.RefreshSessionNoticeProgrammatic();
             return;
         }
 
@@ -1142,7 +1159,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         PageSessionNoticeState.InvalidateDismissOnMutation();
         HomeSessionNoticeState.InvalidateDismissOnMutation();
         Reload();
-        PageShell.RefreshSessionNoticeProgrammatic();
+        if (refreshNotice) PageShell.RefreshSessionNoticeProgrammatic();
     }
 
     private static bool IsDefaultSelection(string registryKey, string filePath)
