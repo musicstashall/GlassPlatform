@@ -11,24 +11,25 @@ public static partial class GlassSettingsRegistry
     public const string GlassUpdateLastCheckOkValue = "GlassUpdateLastCheckOk";
     public const string UpdateCheckOfflineNoticeDismissedValue = "UpdateCheckOfflineNoticeDismissed";
 
-    public static DateTime? ReadGlassUpdateLastCheckUtc()
-    {
-        var raw = GlassRegistry.ReadDword(SubKey, GlassUpdateLastCheckUtcValue);
-        if (!raw.HasValue || raw.Value == 0)
-            return null;
-
-        try
-        {
-            return DateTime.FromFileTimeUtc((long)raw.Value);
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    public static DateTime? ReadGlassUpdateLastCheckUtc() =>
+        ReadUpdateCheckUtc(GlassUpdateLastCheckUtcValue);
 
     public static void WriteGlassUpdateLastCheckUtc(DateTime utc) =>
-        GlassRegistry.WriteDword(SubKey, GlassUpdateLastCheckUtcValue, unchecked((uint)utc.ToFileTimeUtc()));
+        WriteUpdateCheckUtc(GlassUpdateLastCheckUtcValue, utc);
+
+    private static DateTime? ReadUpdateCheckUtc(string valueName)
+    {
+        // Legacy DWORD held only the low 32 bits of FILETIME and cannot be recovered.
+        // Ignore it; the next successful check replaces it with a complete UTC value.
+        var text = ReadString(valueName);
+        return DateTime.TryParseExact(text, "O", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind, out var value)
+            && value.Kind == DateTimeKind.Utc ? value : null;
+    }
+
+    private static void WriteUpdateCheckUtc(string valueName, DateTime utc) =>
+        GlassRegistry.WriteString(SubKey, valueName,
+            utc.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture));
 
     public static void WriteGlassUpdateLastCheckOk(bool ok) =>
         GlassRegistry.WriteDword(SubKey, GlassUpdateLastCheckOkValue, ok ? 1u : 0u);

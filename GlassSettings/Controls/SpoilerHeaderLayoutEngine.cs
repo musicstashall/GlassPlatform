@@ -131,7 +131,12 @@ public static class SpoilerHeaderLayoutEngine
 
         ClearInlineTableWidth(table);
         SpoilerHeaderLayoutMetrics.DetachFromVisualParent(table);
-        table.ApplyStackedChrome(availableWidth);
+        // Expander header padding makes the actual below-host narrower than its
+        // outer width source. Use the measured content viewport, never an estimate.
+        double belowWidth = context.BelowHost.Visibility == Visibility.Visible
+            && context.BelowHost.ActualWidth > 0
+                ? Math.Min(availableWidth, context.BelowHost.ActualWidth) : availableWidth;
+        table.ApplyStackedChrome(belowWidth);
         table.HorizontalAlignment = HorizontalAlignment.Right;
 
         context.BelowHost.Content = table;

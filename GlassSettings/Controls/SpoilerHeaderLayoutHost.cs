@@ -37,6 +37,7 @@ public sealed class SpoilerHeaderLayoutHost
         _layoutInitialized = false;
         _layoutRetryCount = 0;
         widthSource.SizeChanged += WidthSource_OnSizeChanged;
+        if (_belowHost is not null) _belowHost.SizeChanged += BelowHost_OnSizeChanged;
         UpdateLayout();
     }
 
@@ -44,6 +45,7 @@ public sealed class SpoilerHeaderLayoutHost
     {
         if (_widthSource is not null)
             _widthSource.SizeChanged -= WidthSource_OnSizeChanged;
+        if (_belowHost is not null) _belowHost.SizeChanged -= BelowHost_OnSizeChanged;
         _widthSource = null;
         _chrome = null;
         _belowHost = null;
@@ -106,6 +108,12 @@ public sealed class SpoilerHeaderLayoutHost
     }
 
     private void WidthSource_OnSizeChanged(object sender, SizeChangedEventArgs e) => UpdateLayout();
+
+    private void BelowHost_OnSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_stacked && Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > .1)
+            UpdateLayout();
+    }
 
     private void ScheduleOneShotLayoutRetry()
     {

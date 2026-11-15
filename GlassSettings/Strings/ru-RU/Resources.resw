@@ -667,7 +667,6 @@
   <data name="Home_GlassUpdateLinkSummary" xml:space="preserve"><value>Обновления: {0}</value></data>
   <data name="Home_OpenGlassRepairNotice" xml:space="preserve"><value>Сборка Windows изменилась. OpenGlass нужно переустановить для текущего DWM. Версия канала: {0}.</value></data>
   <data name="Home_OpenGlassRepairLink" xml:space="preserve"><value>Переустановка {0}</value></data>
-  <data name="Home_UpdateCheckOffline" xml:space="preserve"><value>Не удалось проверить обновления. Это не значит, что обновлений нет.</value></data>
   <data name="Home_RowPopupWindows" xml:space="preserve"><value>Popup-окна</value></data>
   <data name="Home_RowProcessList" xml:space="preserve"><value>Список процессов</value></data>
   <data name="Home_RowRootWindows" xml:space="preserve"><value>Root-окна</value></data>
@@ -1138,4 +1137,28 @@
   <data name="System_BackupBusy" xml:space="preserve"><value>Создание и проверка архива…</value></data>
   <data name="System_BackupSaved" xml:space="preserve"><value>Архив параметров сохранён и проверен:</value></data>
   <data name="System_BackupFailed" xml:space="preserve"><value>Не удалось создать полную копию параметров. Не выполняйте очистку до успешного сохранения.</value></data>
+  <data name="Dialog_ReflectionPrepareFailedTitle" xml:space="preserve"><value>Не удалось применить отражение</value></data>
+  <data name="Dialog_ReflectionPrepareFailedBody" xml:space="preserve"><value>Не удалось подготовить или скопировать отражение в {0}. Проверьте доступ на запись к этой папке.
+
+{1}</value></data>
+  <data name="Reflection_TabTextures" xml:space="preserve"><value>Текстуры</value></data>
+  <data name="Reflection_TabPattern" xml:space="preserve"><value>Рисунок</value></data>
+  <data name="Reflection_TabOther" xml:space="preserve"><value>Другие</value></data>
+  <data name="Reflection_Configure" xml:space="preserve"><value>Настроить</value></data>
+  <data name="Reflection_SettingScale" xml:space="preserve"><value>Масштаб, %</value></data>
+  <data name="Reflection_SettingOpacity" xml:space="preserve"><value>Непрозрачность, %</value></data>
+  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Мягкость краёв, px (0–20)</value></data>
+  <data name="Reflection_Reset" xml:space="preserve"><value>По умолчанию</value></data>
+  <data name="Reflection_SettingNoise" xml:space="preserve"><value>Шум, %</value></data>
+  <data name="Reflection_SettingNoiseType" xml:space="preserve"><value>Тип зерна</value></data>
+  <data name="Reflection_NoiseSoft" xml:space="preserve"><value>Мягкое</value></data>
+  <data name="Reflection_NoiseFilm" xml:space="preserve"><value>Плёночное</value></data>
+  <data name="Reflection_NoiseDots" xml:space="preserve"><value>Точечное</value></data>
+  <data name="Reflection_NoiseBlocks" xml:space="preserve"><value>Блочное</value></data>
+  <data name="Reflection_SettingNoiseDensity" xml:space="preserve"><value>Плотность зерна, %</value></data>
+  <data name="Reflection_EnableProcessing" xml:space="preserve"><value>Применять обработку</value></data>
+  <data name="Reflection_GroupImage" xml:space="preserve"><value>Изображение</value></data>
+  <data name="Reflection_GroupNoise" xml:space="preserve"><value>Шум</value></data>
+  <data name="Reflection_NoiseSand" xml:space="preserve"><value>Мелкозернистое</value></data>
+  <data name="Reflection_NoiseNone" xml:space="preserve"><value>Без шума</value></data>
 </root>
