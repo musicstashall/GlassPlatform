@@ -62,6 +62,8 @@ public static class SettingsContentColumnLayout
         {
             if (_pageContentScroll?.XamlRoot != null)
                 ApplyToColumn(column, GetViewportWidth(_pageContentScroll));
+            else
+                ClearColumnConstraints(column);
         }
 
         void OnWideChanged(object? s, EventArgs e) => Refresh();
@@ -92,10 +94,7 @@ public static class SettingsContentColumnLayout
             ApplyToColumn(reg.Column, GetViewportWidth(reg.Scroll));
         }
 
-        if (_pageContentScroll?.XamlRoot == null)
-            return;
-
-        var hostViewport = GetViewportWidth(_pageContentScroll);
+        var pageScroll = _pageContentScroll;
         for (var i = HostColumns.Count - 1; i >= 0; i--)
         {
             var column = HostColumns[i];
@@ -105,7 +104,11 @@ public static class SettingsContentColumnLayout
                 continue;
             }
 
-            ApplyToColumn(column, hostViewport);
+            // Без живого scroll страницы Center от прошлой ширины не снимается — заголовок едет при ресайзе.
+            if (pageScroll is { XamlRoot: not null } liveScroll)
+                ApplyToColumn(column, GetViewportWidth(liveScroll));
+            else
+                ClearColumnConstraints(column);
         }
     }
 
@@ -113,10 +116,7 @@ public static class SettingsContentColumnLayout
     {
         if (!IsWideCentered)
         {
-            column.ClearValue(FrameworkElement.WidthProperty);
-            column.ClearValue(FrameworkElement.MinWidthProperty);
-            column.ClearValue(FrameworkElement.HorizontalAlignmentProperty);
-            column.ClearValue(FrameworkElement.MaxWidthProperty);
+            ClearColumnConstraints(column);
             return;
         }
 
@@ -134,6 +134,15 @@ public static class SettingsContentColumnLayout
         column.ClearValue(FrameworkElement.WidthProperty);
         column.ClearValue(FrameworkElement.MinWidthProperty);
         column.HorizontalAlignment = HorizontalAlignment.Stretch;
+    }
+
+    /// <summary>Снять локальные Width/Alignment, чтобы залипший Center не двигал заголовок.</summary>
+    private static void ClearColumnConstraints(FrameworkElement column)
+    {
+        column.ClearValue(FrameworkElement.WidthProperty);
+        column.ClearValue(FrameworkElement.MinWidthProperty);
+        column.ClearValue(FrameworkElement.HorizontalAlignmentProperty);
+        column.ClearValue(FrameworkElement.MaxWidthProperty);
     }
 
     public static void AttachColumn(FrameworkElement column, ScrollViewer scrollViewer)

@@ -59,11 +59,18 @@ public sealed partial class SettingsPageShell : UserControl
 
     public static void NotifyPageNavigatedTo(Page page)
     {
-        if (page is HomePage)
+        if (page.Content is not SettingsPageShell shell)
             return;
 
-        if (page.Content is SettingsPageShell shell)
-            shell.OnPageNavigatedTo();
+        // «Обзор» ведёт полосы сам. Scroll всё равно перепривязать: иначе TrailColumn
+        // остаётся с Center после выгрузки предыдущей страницы.
+        if (page is HomePage)
+        {
+            shell.EnsurePageScrollRegistration();
+            return;
+        }
+
+        shell.OnPageNavigatedTo();
     }
 
     public SettingsPageNoticeStack PageNoticeStack => NoticeStack;
@@ -149,7 +156,9 @@ public sealed partial class SettingsPageShell : UserControl
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
-        SettingsContentColumnLayout.SetPageContentScroll(null);
+        // Unloaded старой страницы часто приходит после Loaded новой и не должен затирать её scroll.
+        if (ReferenceEquals(SettingsContentColumnLayout.GetPageContentScroll(), ContentScroll))
+            SettingsContentColumnLayout.SetPageContentScroll(null);
         SettingsSession.Current.DirtyChanged -= Session_OnDirtyChanged;
     }
 

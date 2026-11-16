@@ -8,6 +8,7 @@ public sealed partial class HomeSettingsCard : UserControl
     private const double ResponsiveBreakpointDefault = 600;
     private TextBlock? _rebootPromptText;
     private Button? _rebootPromptButton;
+    private bool _rebootPromptVisible;
     private bool _isStackedLayout;
     private double _responsiveBreakpoint = ResponsiveBreakpointDefault;
 
@@ -100,21 +101,11 @@ public sealed partial class HomeSettingsCard : UserControl
     /// <summary>Показать/скрыть блок перезагрузки.</summary>
     public void SetRebootPromptVisible(bool visible)
     {
+        _rebootPromptVisible = visible;
         if (_rebootPromptButton is null)
             return;
 
-        if (!visible)
-        {
-            RebootInline.Visibility = Visibility.Collapsed;
-            RebootStacked.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        // Всегда обновлять visibility, даже если _isStackedLayout не изменился.
-        var shouldStack = ActualWidth > 0 && ActualWidth < _responsiveBreakpoint;
-        _isStackedLayout = shouldStack;
-        RebootInline.Visibility = shouldStack ? Visibility.Collapsed : Visibility.Visible;
-        RebootStacked.Visibility = shouldStack ? Visibility.Visible : Visibility.Collapsed;
+        ApplyRebootLayout(force: true);
     }
 
     /// <summary>Кнопка «Перезагрузить» (для прямого доступа к Visibility).</summary>
@@ -226,13 +217,30 @@ public sealed partial class HomeSettingsCard : UserControl
         ApplyResponsiveLayout();
     }
 
-    private void ApplyResponsiveLayout()
+    private void ApplyResponsiveLayout() => ApplyRebootLayout(force: false);
+
+    /// <summary>
+    /// Inline/stacked только когда строка должна быть видна.
+    /// Иначе SizeChanged при сужении показывает её и не прячет при расширении.
+    /// </summary>
+    private void ApplyRebootLayout(bool force)
     {
         if (_rebootPromptButton is null)
             return;
 
+        if (!_rebootPromptVisible)
+        {
+            if (RebootInline.Visibility == Visibility.Collapsed &&
+                RebootStacked.Visibility == Visibility.Collapsed)
+                return;
+
+            RebootInline.Visibility = Visibility.Collapsed;
+            RebootStacked.Visibility = Visibility.Collapsed;
+            return;
+        }
+
         var shouldStack = ActualWidth > 0 && ActualWidth < _responsiveBreakpoint;
-        if (shouldStack == _isStackedLayout)
+        if (!force && shouldStack == _isStackedLayout)
             return;
 
         _isStackedLayout = shouldStack;
