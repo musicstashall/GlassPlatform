@@ -120,14 +120,19 @@
   <PropertyGroup>
     <CoreCompileDependsOn>GenerateUiLanguageCatalog;$(CoreCompileDependsOn)</CoreCompileDependsOn>
   </PropertyGroup>
-  <!-- GlassSettings.Native.dll — рядом с exe; без этого остаётся устаревшая DLL после правок PartRegistryNative. -->
+  <!--
+    GlassSettings.Native.dll — рядом с exe; без этого остаётся устаревшая DLL после правок PartRegistryNative.
+    Сборка Native — первая зависимость GlassWriteCSharpFileVersion: BeforeTargets=Build
+    выполняется после CoreCompile, и C# успевает запечь старый номер комплекта.
+  -->
   <PropertyGroup>
     <GlassSettingsNativeProject>$(MSBuildProjectDirectory)\Native\GlassSettings.Native.vcxproj</GlassSettingsNativeProject>
     <!-- C# Platform=x86 → VC Platform=Win32 (как у остальных native-проектов solution). -->
     <GlassSettingsNativePlatform Condition="'$(Platform)' == 'x86'">Win32</GlassSettingsNativePlatform>
     <GlassSettingsNativePlatform Condition="'$(GlassSettingsNativePlatform)' == ''">$(Platform)</GlassSettingsNativePlatform>
+    <GlassBeforeCSharpVersionTargets>BuildGlassSettingsNative</GlassBeforeCSharpVersionTargets>
   </PropertyGroup>
-  <Target Name="BuildGlassSettingsNative" BeforeTargets="Build">
+  <Target Name="BuildGlassSettingsNative" Condition="'$(GlassSettingsSkipNativeBuild)' != 'true'">
     <MSBuild Projects="$(GlassSettingsNativeProject)"
              Targets="Build"
              Properties="Configuration=$(Configuration);Platform=$(GlassSettingsNativePlatform);SolutionDir=$(SolutionRoot)" />
@@ -235,13 +240,14 @@
   <!-- Release: publish в Build\$(Platform)\Release\GlassSettings для MSI (после обычного Build).
        Явный /t:Publish обязан передать GlassSettingsSkipPublishForMsi=true.
        Иначе Build внутри Publish публикует каталог, а второй проход считает
-       single-file свежим и incremental clean удаляет нативные DLL WASDK. -->
+       single-file свежим и incremental clean удаляет нативные DLL WASDK.
+       Внутренний проход не собирает Native повторно и не сдвигает FileVersion. -->
   <Target Name="GlassSettingsPublishForMsi"
           AfterTargets="Build"
           Condition="'$(Configuration)' == 'Release' and '$(DesignTimeBuild)' != 'true' and '$(GlassSettingsSkipPublishForMsi)' != 'true' and Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">
     <MSBuild Projects="$(MSBuildProjectFile)"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);Platform=$(Platform);GlassSettingsSkipPublishForMsi=true" />
+             Properties="Configuration=$(Configuration);Platform=$(Platform);GlassSettingsSkipPublishForMsi=true;GlassSettingsSkipNativeBuild=true;GlassSkipBuildNumberWrite=true" />
   </Target>
 
   <Target Name="GenerateUiLanguageCatalog"

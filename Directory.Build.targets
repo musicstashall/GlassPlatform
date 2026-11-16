@@ -97,20 +97,28 @@
     <MakeDir Directories="$(IntermediateOutputPath)" Condition="!Exists('$(IntermediateOutputPath)')" />
   </Target>
 
-  <Target Name="GlassWriteCSharpFileVersion" BeforeTargets="BeforeBuild" DependsOnTargets="GlassBundlePrepareSession;GlassBundleImportSessionProps" Condition="'$(MSBuildProjectExtension)' == '.csproj' and '$(_GlassBuildNumberIncremented)' != 'true'">
+  <!--
+    GlassBeforeCSharpVersionTargets — цель проекта до чтения сессии комплекта.
+    Пустое имя в списке MSBuild пропускает. GlassSettings ставит сюда сборку Native,
+    чтобы номер был открыт до записи GlassBuildVersion.g.cs.
+    BeforeTargets здесь не подходит: DependsOnTargets цели выполняются раньше хука.
+    GlassSkipBuildNumberWrite — повторный вход Publish не сдвигает FileVersion и не переписывает .g.cs.
+  -->
+  <Target Name="GlassWriteCSharpFileVersion" BeforeTargets="BeforeBuild" DependsOnTargets="$(GlassBeforeCSharpVersionTargets);GlassBundlePrepareSession;GlassBundleImportSessionProps" Condition="'$(MSBuildProjectExtension)' == '.csproj' and '$(_GlassBuildNumberIncremented)' != 'true'">
     <ReadLinesFromFile File="$(GlassBuildNumberPath)" Condition="Exists('$(GlassBuildNumberPath)')">
       <Output TaskParameter="Lines" ItemName="_GlassBuildLine" />
     </ReadLinesFromFile>
     <PropertyGroup>
       <_GlassBuildCurrent Condition="'@(_GlassBuildLine)' != ''">@(_GlassBuildLine)</_GlassBuildCurrent>
       <_GlassBuildCurrent Condition="'@(_GlassBuildLine)' == ''">0</_GlassBuildCurrent>
-      <GlassBuildNumberNext>$([MSBuild]::Add($(_GlassBuildCurrent), 1))</GlassBuildNumberNext>
+      <GlassBuildNumberNext Condition="'$(GlassSkipBuildNumberWrite)' == 'true'">$(_GlassBuildCurrent)</GlassBuildNumberNext>
+      <GlassBuildNumberNext Condition="'$(GlassSkipBuildNumberWrite)' != 'true'">$([MSBuild]::Add($(_GlassBuildCurrent), 1))</GlassBuildNumberNext>
       <GlassFileVersionDot>$(GlassProductVersionBase3).$(GlassBuildNumberNext)</GlassFileVersionDot>
       <_GlassCSharpProductVersion>$(GlassBundleVersionEffective)</_GlassCSharpProductVersion>
       <_GlassBuildVersionCsContent>// Автогенерация: Directory.Build.targets. Не редактировать.;[assembly: System.Reflection.AssemblyFileVersion("$(GlassFileVersionDot)")];[assembly: System.Reflection.AssemblyInformationalVersion("$(_GlassCSharpProductVersion)")]</_GlassBuildVersionCsContent>
     </PropertyGroup>
-    <WriteLinesToFile File="$(GlassBuildNumberPath)" Lines="$(GlassBuildNumberNext)" Overwrite="true" />
-    <WriteLinesToFile File="$(GlassBuildVersionCsPath)" Lines="$(_GlassBuildVersionCsContent)" Overwrite="true" />
+    <WriteLinesToFile File="$(GlassBuildNumberPath)" Lines="$(GlassBuildNumberNext)" Overwrite="true" Condition="'$(GlassSkipBuildNumberWrite)' != 'true'" />
+    <WriteLinesToFile File="$(GlassBuildVersionCsPath)" Lines="$(_GlassBuildVersionCsContent)" Overwrite="true" Condition="'$(GlassSkipBuildNumberWrite)' != 'true'" />
     <ItemGroup>
       <Compile Include="$(GlassBuildVersionCsPath)" />
       <FileWrites Include="$(GlassBuildVersionCsPath)" />
