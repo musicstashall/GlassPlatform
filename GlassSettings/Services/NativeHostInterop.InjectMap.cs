@@ -76,11 +76,17 @@ public static partial class NativeHostInterop
 
     public enum InjectShutdownPhase : uint
     {
+        // Значения — как в Shared::InjectProcessMap::ShutdownPhase (C++).
         None = 0,
         CoreDetaching = 1,
         CoreDone = 2,
-        WndDetaching = 3,
-        WndDone = 4,
+        UiDetaching = 3,
+        UiDone = 4,
+        WndDetaching = 5,
+        WndDone = 6,
+        // ExecuteShutdown завершился целиком; только после него слепой
+        // ForceUnload в целевой процесс снова разрешён.
+        CompatDone = 7,
     }
 
     public struct InjectMapSlot

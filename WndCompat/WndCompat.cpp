@@ -708,8 +708,15 @@ namespace WndCompat
         DebugLog(L"[WndCompat][Core] Shutdown: END");
 
 #ifdef GLASS_ENABLE_LOGGING
-        // Завершаем логгер один раз, локально
-        Shared::Log::GlassLogClient::Instance().Stop();
+        // Завершаем логгер один раз, локально. Stop() с бюджетом: если воркер
+        // не вышел — модуль останется загруженным (гейт WndCompat_IsLogWorkerAlive
+        // в ExecuteShutdown), и это логируем явно для следующих дампов.
+        if (!Shared::Log::GlassLogClient::Instance().Stop())
+        {
+            DebugLog(
+                DBG_WARNING,
+                L"[WndCompat][Core] Shutdown: log worker still alive after stop budget — module will be kept loaded");
+        }
 #endif
     }
 
@@ -814,6 +821,19 @@ extern "C"
     __declspec(dllexport) BOOL WINAPI WndCompat_IsShutdownComplete()
     {
         return WndCompat::IsShutdownComplete() ? TRUE : FALSE;
+    }
+
+    __declspec(dllexport) BOOL WINAPI WndCompat_IsLogWorkerAlive()
+    {
+#if defined(_DEBUG) && defined(GLASS_ENABLE_LOGGING)
+        // Живой воркер лога исполняет код WndCompat: GlassCompat не выгружает
+        // DLL, пока он не завершится. Дамп ShellExperienceHost.exe 17.11.2026:
+        // Stop() в Shutdown() ждал воркер, а FreeLibrary(WndCompat) снаружи
+        // снимал образ под выполняющимся join → c0000005.
+        return Shared::Log::GlassLogClient::Instance().IsWorkerAlive() ? TRUE : FALSE;
+#else
+        return FALSE; // воркера лога в этой сборке нет
+#endif
     }
 
     __declspec(dllexport) BOOL WINAPI WndCompat_IsInitialized()

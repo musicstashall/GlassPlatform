@@ -147,6 +147,17 @@ extern "C" __declspec(dllexport) BOOL WINAPI UICompat_IsShutdownComplete()
     return g_shutdownComplete.load(std::memory_order_acquire) ? TRUE : FALSE;
 }
 
+extern "C" __declspec(dllexport) BOOL WINAPI UICompat_IsLogWorkerAlive()
+{
+#if defined(_DEBUG) && defined(GLASS_ENABLE_LOGGING)
+    // Живой воркер лога = код UICompat ещё исполняется: GlassCompat не
+    // выгружает DLL (гейт перед FreeLibrary(savedUICompat)).
+    return Shared::Log::GlassLogClient::Instance().IsWorkerAlive() ? TRUE : FALSE;
+#else
+    return FALSE;
+#endif
+}
+
 // Биты: 0..15 objectCount, 16..31 serverLocks, 32 shutdownDone,
 // 33 — живы потоки модуля (ModuleThread): GlassCompat не снимает остаточную
 // ссылку (TryDropIxdeResidualModule), пока бит установлен — иначе FreeLibrary

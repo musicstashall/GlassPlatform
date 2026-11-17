@@ -15,6 +15,7 @@ EXPORTS
     ExplorerCompat_OnRootBackdropPolicyChanged
     ExplorerCompat_PostLiveDisableChromeRedraw
     ExplorerCompat_DebugComState
+    ExplorerCompat_IsLogWorkerAlive
     ExplorerCompat_RunIxdeComReclaim
 
     DllGetClassObject PRIVATE

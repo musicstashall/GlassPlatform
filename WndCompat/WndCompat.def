@@ -18,6 +18,7 @@ EXPORTS
     WndCompat_SetInjectionMode
     WndCompat_ApplyInjectionModeVisuals
     WndCompat_IsInitialized
+    WndCompat_IsLogWorkerAlive
     WndCompat_ReapplyTaskbarBackdrops
     WndCompat_ApplyBackdropPolicyToTrackedRoots
     WndCompat_MarshalApplyRootBackdropReapplyForHwnd

@@ -88,10 +88,18 @@ enum ShutdownPhase : uint32_t {
     ShutdownPhaseUiDone           = 4,  // UICompat безопасен для FreeLibrary
     ShutdownPhaseWndDetaching     = 5,  // WndCompat снимает подклассы
     ShutdownPhaseWndDone          = 6,  // WndCompat безопасен для FreeLibrary
+    ShutdownPhaseCompatDone       = 7,  // ExecuteShutdown ЦЕЛИКОМ завершён
 };
 ```
 
-Запись в shared memory через `TrySetShutdownPhase()` — для диагностики GlassSettings.
+Запись в shared memory через `TrySetShutdownPhase()` — для диагностики GlassSettings
+и для гейта слепого `ForceUnloadGlassModules` (CreateRemoteThread(FreeLibrary) из
+unlock/uninstall): при фазе 1..6 выгрузка извне откладывается — иначе FreeLibrary
+снимает образ под выполняющимся потоком (дамп `ShellExperienceHost.exe.55548.dmp`,
+17.11.2026: c0000005 в `WndCompat!std::thread::join+0x81`). Фаза `CompatDone`
+**не публикуется**, если ExecuteShutdown оставил хоть один модуль (stale-колбэки
+или живой воркер лога `Xxx_IsLogWorkerAlive`) — оставленный код выгружать извне
+нельзя.
 
 #### Связанные сообщения
 

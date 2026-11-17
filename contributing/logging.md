@@ -38,6 +38,30 @@ OutputDebugStringW(L"[WndCompat] диагностика после shutdown\n");
 
 Формат тега: `[Модуль][Подсистема]` — например `[GlassCore][ComboLBox]`, `[WndCompat][Root]`.
 
+### Остановка (`GlassLogClient::Stop`)
+
+`Stop()` ждёт воркер **с бюджетом** (~500 мс, `CancelSynchronousIo` по хендлу
+воркера между опросами), а не безграничным `join()`: воркер может сидеть в
+`WriteFile`/`CreateFile` на канал и флаг `m_running` не читает. Возвращает:
+
+- `true` — воркер завершился (обычно после `join()`), модуль можно выгружать;
+- `false` — воркер ещё жив: `Stop()` сделал `detach()`, выгрузку нужно отложить.
+
+Пока воркер жив, его `WorkerThreadProc` исполняется в образе модуля —
+`FreeLibrary` снимет картину под ним (дамп `ShellExperienceHost.exe.55548.dmp`,
+17.11.2026: c0000005 в `WndCompat!std::thread::join`). Поэтому:
+
+- модули экспортируют `Xxx_IsLogWorkerAlive` (обёртка над `IsWorkerAlive()`);
+- `GlassCompat::ExecuteShutdown` не делает `FreeLibrary`, пока экспорт
+  отвечает `TRUE` (тот же приём, что для stale-колбэков H91);
+- `FreeSelfAndExitThread` GlassCompat аналогично не выгружает себя;
+- слепой `ForceUnloadGlassModules` (unlock/uninstall) откладывается, пока
+  фаза shutdown в `InjectProcessMap` не `None` и не `CompatDone`.
+
+Деструктор логгера и CRT-teardown по-прежнему делают только `detach()`
+(join в `DllMain`/CRT — deadlock/abort). В Release `StopImpl` пустой:
+воркера лога там нет.
+
 ### Цвета уровней в LogViewer
 
 Константы уровней совпадают с `DBG_NORMAL` … `DBG_CRITICAL` в таблице выше. Цвет текста строки в списке логов и заливка квадратиков фильтра **N / I / W / E / C** на среднем тулбаре задаются одними и теми же `RGB` — единый источник: `LogViewer\LogViewerLevelColors.h` (отрисовка списка: `UiMainWindow.cpp`).

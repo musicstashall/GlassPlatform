@@ -375,6 +375,30 @@ namespace Shared::InjectProcessMap
         return true;
     }
 
+    bool TryGetShutdownPhase(DWORD pid, std::uint32_t& outPhase) noexcept
+    {
+        outPhase = ShutdownPhaseNone;
+        if (pid == 0)
+            return false;
+
+        Header* header = MapHeaderView(FILE_MAP_READ);
+        if (!header)
+            return false;
+
+        Slot* slot = FindSlotByPid(header, pid);
+        if (!slot || slot->pid != pid)
+        {
+            UnmapViewOfFile(header);
+            return false;
+        }
+
+        // Как TryGetModuleBits: читаем без seqlock — фаза монотонна внутри
+        // одного shutdown, рассинхрон чтения не критичен.
+        outPhase = slot->shutdownPhase;
+        UnmapViewOfFile(header);
+        return true;
+    }
+
     bool TryPublishSubclassStats(
         DWORD pid,
         std::uint32_t windowTotal,

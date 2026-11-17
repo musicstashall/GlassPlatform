@@ -167,6 +167,17 @@ extern "C" __declspec(dllexport) BOOL WINAPI TaskbarCompat_IsShutdownComplete()
     return g_shutdownComplete.load(std::memory_order_acquire) ? TRUE : FALSE;
 }
 
+extern "C" __declspec(dllexport) BOOL WINAPI TaskbarCompat_IsLogWorkerAlive()
+{
+#if defined(_DEBUG) && defined(GLASS_ENABLE_LOGGING)
+    // Живой воркер лога = код TaskbarCompat ещё исполняется: GlassCompat не
+    // выгружает DLL (гейт перед FreeLibrary(savedTaskbar)).
+    return Shared::Log::GlassLogClient::Instance().IsWorkerAlive() ? TRUE : FALSE;
+#else
+    return FALSE;
+#endif
+}
+
 // COM-счётчики для residual FreeLibrary в GlassCompat (IXDE LoadLibrary-pin вне free-list).
 // bits 0-15: objectCount, bits 16-31: serverLocks, bit 32: shutdownDone.
 extern "C" __declspec(dllexport) unsigned long long WINAPI TaskbarCompat_DebugComState() noexcept

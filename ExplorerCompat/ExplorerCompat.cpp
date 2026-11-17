@@ -92,6 +92,17 @@ BOOL WINAPI ExplorerCompat_Shutdown()
     return TRUE;
 }
 
+extern "C" __declspec(dllexport) BOOL WINAPI ExplorerCompat_IsLogWorkerAlive()
+{
+#if defined(_DEBUG) && defined(GLASS_ENABLE_LOGGING)
+    // Живой воркер лога = код ExplorerCompat ещё исполняется: GlassCompat не
+    // выгружает DLL (гейт перед FreeLibrary(savedExplorer)).
+    return Shared::Log::GlassLogClient::Instance().IsWorkerAlive() ? TRUE : FALSE;
+#else
+    return FALSE;
+#endif
+}
+
 // COM-счётчики для residual FreeLibrary в GlassCompat (IXDE LoadLibrary-pin вне free-list).
 // bits 0-15: objectCount, bits 16-31: serverLocks, bit 32: shutdownDone.
 extern "C" __declspec(dllexport) unsigned long long WINAPI ExplorerCompat_DebugComState() noexcept
