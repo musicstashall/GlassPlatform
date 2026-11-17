@@ -1,4 +1,11 @@
 #include "TaskbarPch.h"
+#ifdef GetCurrentTime
+#undef GetCurrentTime
+#endif
+#include <windows.ui.xaml.h>
+#ifdef GetCurrentTime
+#undef GetCurrentTime
+#endif
 #include "xaml/TaskbarBackgroundRegistry.hpp"
 #include "xaml/brushes/XamlBackdropFactory.hpp"
 #include "xaml/TaskbarZonePainter.hpp"
@@ -1168,6 +1175,94 @@ namespace TaskbarCompat
         }
     }
 
+    namespace
+    {
+        // ClearValue на Rectangle/Grid панели: Windows.UI.Xaml читает слот значения
+        // как указатель. При live-reload там два float 1.0 (0x3f8000003f800000) и
+        // AV c0000005. catch (...) это не ловит — только SEH, без C++-объектов в кадре.
+        [[nodiscard]] bool SehClearDependencyValue(
+            IUnknown* target,
+            ABI::Windows::UI::Xaml::IDependencyProperty* property) noexcept
+        {
+            if (!target || !property)
+                return true;
+
+            ABI::Windows::UI::Xaml::IDependencyObject* dep = nullptr;
+            bool seh = false;
+            __try
+            {
+                const HRESULT qi = target->QueryInterface(
+                    __uuidof(ABI::Windows::UI::Xaml::IDependencyObject),
+                    reinterpret_cast<void**>(&dep));
+                if (SUCCEEDED(qi) && dep)
+                    (void)dep->ClearValue(property);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                seh = true;
+            }
+            if (dep)
+            {
+                __try
+                {
+                    dep->Release();
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    seh = true;
+                }
+            }
+            return !seh;
+        }
+
+        void ClearDependencyPropertySeh(
+            IUnknown* target,
+            const wux::DependencyProperty& property,
+            InstanceHandle frameHandle,
+            const wchar_t* propName) noexcept
+        {
+            if (!target || !property)
+                return;
+            auto* const dp = static_cast<ABI::Windows::UI::Xaml::IDependencyProperty*>(
+                winrt::get_abi(property));
+            if (SehClearDependencyValue(target, dp))
+                return;
+            DebugLog(
+                DBG_WARNING,
+                L"[TaskbarCompat][BgRegistry] Recapture ClearValue SEH frame=%llu prop=%s",
+                static_cast<unsigned long long>(frameHandle),
+                propName ? propName : L"?");
+        }
+
+        void ClearRectangleFillSeh(
+            const wux::Shapes::Rectangle& shape,
+            InstanceHandle frameHandle) noexcept
+        {
+            if (!shape)
+                return;
+            ClearDependencyPropertySeh(
+                static_cast<IUnknown*>(winrt::get_abi(shape)),
+                wux::Shapes::Shape::FillProperty(),
+                frameHandle,
+                L"Fill");
+        }
+
+        void ClearGridPropertySeh(
+            const wux::Controls::Grid& grid,
+            const wux::DependencyProperty& property,
+            InstanceHandle frameHandle,
+            const wchar_t* propName) noexcept
+        {
+            if (!grid)
+                return;
+            ClearDependencyPropertySeh(
+                static_cast<IUnknown*>(winrt::get_abi(grid)),
+                property,
+                frameHandle,
+                propName);
+        }
+    }
+
     void TaskbarBackgroundRegistry::RecaptureAfterThemeChange(Registry::Settings settings) noexcept
     {
         try
@@ -1184,22 +1279,30 @@ namespace TaskbarCompat
                 const auto prevBg = info.originalBackgroundFill;
                 const auto prevBorder = info.originalBorderFill;
                 RestoreFrameVisuals(info);
-                try
+                ClearRectangleFillSeh(info.background, frameHandle);
+                ClearRectangleFillSeh(info.border, frameHandle);
+                if (info.rootGrid)
                 {
-                    if (info.background)
-                        info.background.ClearValue(wux::Shapes::Shape::FillProperty());
-                    if (info.border)
-                        info.border.ClearValue(wux::Shapes::Shape::FillProperty());
-                    if (info.rootGrid)
-                    {
-                        info.rootGrid.ClearValue(wux::Controls::Panel::BackgroundProperty());
-                        info.rootGrid.ClearValue(wux::Controls::Control::BorderBrushProperty());
-                        info.rootGrid.ClearValue(wux::Controls::Control::BorderThicknessProperty());
-                        info.rootGrid.ClearValue(wux::Controls::Control::CornerRadiusProperty());
-                    }
-                }
-                catch (...)
-                {
+                    ClearGridPropertySeh(
+                        info.rootGrid,
+                        wux::Controls::Panel::BackgroundProperty(),
+                        frameHandle,
+                        L"Background");
+                    ClearGridPropertySeh(
+                        info.rootGrid,
+                        wux::Controls::Control::BorderBrushProperty(),
+                        frameHandle,
+                        L"BorderBrush");
+                    ClearGridPropertySeh(
+                        info.rootGrid,
+                        wux::Controls::Control::BorderThicknessProperty(),
+                        frameHandle,
+                        L"BorderThickness");
+                    ClearGridPropertySeh(
+                        info.rootGrid,
+                        wux::Controls::Control::CornerRadiusProperty(),
+                        frameHandle,
+                        L"CornerRadius");
                 }
 
                 info.originalBackgroundFill = nullptr;
