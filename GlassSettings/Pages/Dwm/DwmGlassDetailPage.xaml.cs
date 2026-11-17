@@ -184,7 +184,7 @@ public sealed partial class DwmGlassDetailPage : Page, ISettingsCommitScopeProvi
 
     private void ConfigureGeneralRow()
     {
-        GeneralRow.IconGlyph = SettingsSectionGlyphs.General;
+        GeneralRow.IconGlyph = "\uEA80";
         GeneralRow.Title = GlassSettingsResources.Get("Dwm_AppearanceGeneral");
 
         DwmAppearanceComboNames.PopulateBlurOptimization(_blurOptimizationCombo);
@@ -205,7 +205,7 @@ public sealed partial class DwmGlassDetailPage : Page, ISettingsCommitScopeProvi
 
     private void ConfigureWindowExpander()
     {
-        WindowExpander.IconGlyph = SettingsSectionGlyphs.Glass;
+        WindowExpander.IconGlyph = "\uEA5F";
         WindowExpander.Title = GlassSettingsResources.Get("Dwm_AppearanceWindow");
         WindowExpander.WireExpandedLayoutRefresh(() =>
         {
@@ -267,7 +267,7 @@ public sealed partial class DwmGlassDetailPage : Page, ISettingsCommitScopeProvi
 
     private void ConfigureCaptionExpander()
     {
-        CaptionExpander.IconGlyph = SettingsSectionGlyphs.Caption;
+        CaptionExpander.IconGlyph = "\uEB41";
         CaptionExpander.Title = GlassSettingsResources.Get("Dwm_AppearanceCaption");
         CaptionExpander.WireExpandedLayoutRefresh(() =>
         {
@@ -350,7 +350,7 @@ public sealed partial class DwmGlassDetailPage : Page, ISettingsCommitScopeProvi
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Title = GlassSettingsResources.Get(isActive ? "Dwm_CaptionColorActiveTitle" : "Dwm_CaptionColorInactiveTitle"),
             Description = GlassSettingsResources.Get(isActive ? "Dwm_CaptionColorActiveSubtitle" : "Dwm_CaptionColorInactiveSubtitle"),
-            IconGlyph = SettingsSectionGlyphs.CaptionColor,
+            IconGlyph = isActive ? "\uE790" : "\uF354",
             HeaderActions = new HubInlineLabel
             {
                 Label = GlassSettingsResources.Get("Dwm_LabelMode"),

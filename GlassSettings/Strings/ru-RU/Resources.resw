@@ -697,6 +697,8 @@
   <data name="Home_WindowsBuildCaption" xml:space="preserve"><value>Windows, сборка {0}</value></data>
   <data name="Main_BackToolTip" xml:space="preserve"><value>Назад</value></data>
   <data name="Main_AppSettingsToolTip" xml:space="preserve"><value>Настройки приложения</value></data>
+  <data name="Main_Help" xml:space="preserve"><value>Справка</value></data>
+  <data name="Main_HelpToolTip" xml:space="preserve"><value>Открыть инструкцию к этой странице</value></data>
   <data name="Main_SearchPlaceholder" xml:space="preserve"><value>Поиск…</value></data>
   <data name="Modules_NotFound" xml:space="preserve"><value>не найден</value></data>
   <data name="Modules_Unavailable" xml:space="preserve"><value>—</value></data>

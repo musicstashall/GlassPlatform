@@ -56,10 +56,10 @@ public sealed partial class TaskbarFlyoutPage : Page
         BuildNoBorderFooter();
         ApplyLocalizedStrings();
         GradientExpander.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Gradient);
-        BorderExpander.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Border);
-        EffectRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.EffectType);
-        CornerRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Corners);
-        ZonesRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Corners);
+        BorderExpander.IconGlyph = "\uF6C7";
+        EffectRow.IconGlyph = "\uEB78";
+        CornerRow.IconGlyph = "\uEE49";
+        ZonesRow.IconGlyph = "\uE736";
 
         if (!_cornersSupported)
         {
@@ -278,7 +278,7 @@ public sealed partial class TaskbarFlyoutPage : Page
 
         AdjacentWindowsRow.Title = GlassSettingsResources.Get("Glass_AdjacentWindows");
         AdjacentWindowsRow.Description = GlassSettingsResources.Get("Glass_AdjacentWindowsDesc");
-        AdjacentWindowsRow.IconGlyph = SettingsSectionGlyphs.TryForNavigateId("popup");
+        AdjacentWindowsRow.IconGlyph = "\uE97C";
 
         OpenGlassTrayBorderNotice.Title = GlassSettingsResources.Get("Notice_OpenGlassBorderTitle");
         OpenGlassTrayBorderNotice.Message =

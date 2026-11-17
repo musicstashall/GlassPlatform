@@ -71,9 +71,9 @@ public sealed partial class TaskbarAdjacentWindowsPage : Page
         BuildNoBorderFooter();
         ApplyLocalizedStrings();
         GradientExpander.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Gradient);
-        BorderExpander.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Border);
-        EffectRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.EffectType);
-        CornerRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Corners);
+        BorderExpander.IconGlyph = "\uF6C7";
+        EffectRow.IconGlyph = "\uEB78";
+        CornerRow.IconGlyph = "\uEE49";
 
         if (!_cornersSupported)
             CornerRow.Visibility = Visibility.Collapsed;

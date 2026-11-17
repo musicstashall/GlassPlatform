@@ -126,7 +126,7 @@ public sealed partial class ThemesDesktopBackgroundPage : Page
     {
         PersonalizeExpander.Title = GlassSettingsResources.Get("Themes_Bg_PersonalizeTitle");
         PersonalizeExpander.Description = GlassSettingsResources.Get("Themes_Bg_PersonalizeDesc");
-        PersonalizeExpander.IconGlyph = SettingsSectionGlyphs.Theme;
+        PersonalizeExpander.IconGlyph = SettingsSectionGlyphs.Image;
 
         RecentImagesLabel.Text = GlassSettingsResources.Get("Themes_Bg_RecentImages");
         ChoosePhotoLabel.Text = GlassSettingsResources.Get("Themes_Bg_ChoosePhoto");

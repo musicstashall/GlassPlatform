@@ -374,20 +374,17 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
 
     private void ConfigureStaticControls()
     {
-        var colorGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.GlassColor);
-        var opacityGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Opacity);
-
-        ActiveColorExpander.IconGlyph = colorGlyph;
+        ActiveColorExpander.IconGlyph = "\uE790";
         ActiveColorPicker.UseLivePreview = true;
         ActiveColorPicker.ColorLivePreview += ActiveColorPicker_OnColorLivePreview;
         ActiveColorPicker.ColorChanged += ActiveColorPicker_OnColorChanged;
 
-        SecondaryColorExpander.IconGlyph = colorGlyph;
+        SecondaryColorExpander.IconGlyph = "\uF354";
         SecondaryColorPicker.UseLivePreview = true;
         SecondaryColorPicker.ColorLivePreview += SecondaryColorPicker_OnColorLivePreview;
         SecondaryColorPicker.ColorChanged += SecondaryColorPicker_OnColorChanged;
 
-        BaseColorExpander.IconGlyph = colorGlyph;
+        BaseColorExpander.IconGlyph = "\uF196";
         BaseColorExpander.Title = GlassSettingsResources.Get("Dwm_BaseColorSpoilerTitle");
         BaseColorPicker.UseLivePreview = true;
         BaseColorPicker.ColorLivePreview += BaseColorPicker_OnColorLivePreview;
@@ -507,13 +504,13 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
     private void BuildCompositionTopControls()
     {
         OverrideAccentToggle.Toggled += (_, _) => OnOverrideAccentToggleChanged(OverrideAccentToggle.IsOn);
-        OverrideAccentCard.IconGlyphChar = SettingsSectionGlyphs.GlassColor;
+        OverrideAccentCard.IconGlyphChar = "\uE7BC";
         OverrideAccentCard.Title = GlassSettingsResources.Get("Dwm_OverrideAccentTitle");
         OverrideAccentCard.Description = GlassSettingsResources.Get("Dwm_OverrideAccentDesc");
         OverrideAccentCard.Click += (_, _) => OverrideAccentToggle.IsOn = !OverrideAccentToggle.IsOn;
 
         OpaqueBlendToggle.Toggled += (_, _) => OnOpaqueBlendToggleChanged(OpaqueBlendToggle.IsOn);
-        OpaqueBlendCard.IconGlyphChar = SettingsSectionGlyphs.Opacity;
+        OpaqueBlendCard.IconGlyphChar = "\uE8A8";
         OpaqueBlendCard.Title = GlassSettingsResources.Get("Dwm_OpaqueBlendTitle");
         OpaqueBlendCard.Description = GlassSettingsResources.Get("Dwm_OpaqueBlendDesc");
         OpaqueBlendCard.Click += (_, _) => OpaqueBlendToggle.IsOn = !OpaqueBlendToggle.IsOn;
@@ -652,7 +649,7 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
 
     private void BuildPriorityRow()
     {
-        PriorityRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.GlassColor);
+        PriorityRow.IconGlyph = "\uEB42";
         PriorityRow.Title = GlassSettingsResources.Get("Dwm_LabelOpaqueBlendPriority");
         PriorityRow.Description = GlassSettingsResources.Get("Dwm_OpaqueBlendPriorityDesc");
         PriorityRow.UnsavedScope = DwmColorizationScopeCatalog.PriorityScope(_hive);
@@ -1553,12 +1550,14 @@ public sealed partial class DwmColorizationDetailPage : Page, ISettingsCommitSco
     {
         if (IsWin7Tab(tabIndex))
         {
+            SecondaryColorExpander.IconGlyph = "\uE793";
             SecondaryColorExpander.Title = GlassSettingsResources.Get("Dwm_AfterglowColor");
             SecondaryColorExpander.Description = GlassSettingsResources.Get("Dwm_AfterglowSubtitle");
             SecondaryColorPanel.Description = GlassSettingsResources.Get("Dwm_AfterglowColorBodyDesc");
         }
         else
         {
+            SecondaryColorExpander.IconGlyph = "\uF354";
             SecondaryColorExpander.Title = GlassSettingsResources.Get("Dwm_CustomInactiveColor");
             SecondaryColorExpander.Description = GlassSettingsResources.Get("Dwm_CustomInactiveColorSubtitle");
             SecondaryColorPanel.Description = GlassSettingsResources.Get("Dwm_CustomInactiveColorBodyDesc");

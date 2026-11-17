@@ -63,6 +63,24 @@
                         </AutoSuggestBox.ItemTemplate>
                     </AutoSuggestBox>
                 </TitleBar.Content>
+                <TitleBar.RightHeader>
+                    <Button
+                        x:Name="HelpButton"
+                        MinWidth="44"
+                        MinHeight="32"
+                        Margin="0,0,8,0"
+                        Padding="10,0"
+                        VerticalAlignment="Center"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        TitleBar.IsDragRegion="False"
+                        Click="HelpButton_OnClick">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE897;" FontSize="14" />
+                            <TextBlock x:Name="HelpButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </TitleBar.RightHeader>
             </TitleBar>
             <NavigationView
                 x:Name="NavView"

@@ -524,7 +524,7 @@ public sealed partial class HomePage : Page
     {
         _systemCard = new HomeSettingsCard { CardTitle = GlassSettingsResources.Get("Home_CardSystem") };
 
-        _openGlassRow = AddNavRow(_systemCard, GlassSettingsResources.Get("Home_RowOpenGlass"), "\uEB9F",
+        _openGlassRow = AddNavRow(_systemCard, GlassSettingsResources.Get("Home_RowOpenGlass"), SettingsSectionGlyphs.OpenGlass,
             () => HomeStatusSummary.OpenGlassLine(),
             HomeNavTarget.Section("dwm"));
         _openGlassSwitch = new GlassSettingsLabeledToggleSwitch();
@@ -546,7 +546,7 @@ public sealed partial class HomePage : Page
         }
         else
         {
-            _glassPlatformRow = AddNavRow(_systemCard, GlassSettingsResources.Get("Home_RowGlassPlatform"), "\uE943",
+            _glassPlatformRow = AddNavRow(_systemCard, GlassSettingsResources.Get("Home_RowGlassPlatform"), SettingsSectionGlyphs.GlassPlatform,
                 () => HomeStatusSummary.GlassPlatformLine(),
                 HomeNavTarget.Section("glass"));
             _glassPlatformSwitch = new GlassSettingsLabeledToggleSwitch();
@@ -559,7 +559,7 @@ public sealed partial class HomePage : Page
         _shellRow = _systemCard.AddRow();
         _shellRow.Title = GlassSettingsResources.Get("Home_RowShellExtension");
         _shellRow.Subtitle = GlassSettingsResources.Get("Home_RowShellExtensionSub");
-        _shellRow.IconGlyphChar = "\uE8A7";
+        _shellRow.IconGlyphChar = SettingsSectionGlyphs.ShellExtension;
         _shellRow.ShowChevron = false;
         _shellRow.TrailingContent = _shellSwitch;
 
@@ -666,17 +666,17 @@ public sealed partial class HomePage : Page
     {
         _glassCard = new HomeSettingsCard { CardTitle = GlassSettingsResources.Get("Home_CardGlassPlatform") };
 
-        AddCustomizationRow(_glassCard, GlassSettingsResources.Get("Home_RowRootWindows"), "\uE7F4",
+        AddCustomizationRow(_glassCard, GlassSettingsResources.Get("Home_RowRootWindows"), SettingsSectionGlyphs.Root,
             HomeCustomizationSummary.Root,
             SettingsCommitScope.ForArea(CustomizationAreaId.Root),
             HomeNavTarget.RootWindows());
 
-        AddCustomizationRow(_glassCard, GlassSettingsResources.Get("Home_RowPopupWindows"), "\uE8A7",
+        AddCustomizationRow(_glassCard, GlassSettingsResources.Get("Home_RowPopupWindows"), SettingsSectionGlyphs.Popup,
             HomeCustomizationSummary.Popup,
             SettingsCommitScope.ForArea(CustomizationAreaId.Popup),
             HomeNavTarget.GlassPage(typeof(PopupHubPage), null, GlassSettingsResources.Get("Breadcrumb_PopupWindows")));
 
-        AddCustomizationRow(_glassCard, GlassSettingsResources.Get("Home_RowTaskbar"), "\uE7C3",
+        AddCustomizationRow(_glassCard, GlassSettingsResources.Get("Home_RowTaskbar"), SettingsSectionGlyphs.Taskbar,
             HomeCustomizationSummary.Taskbar,
             SettingsCommitScope.ForArea(CustomizationAreaId.Taskbar),
             HomeNavTarget.GlassPage(typeof(TaskbarFlyoutPage), null, GlassSettingsResources.Get("Breadcrumb_Taskbar")));
@@ -695,7 +695,7 @@ public sealed partial class HomePage : Page
 
     private void BuildDwmCardRows(HomeSettingsCard card, DwmRegistryHive hive)
     {
-        AddCustomizationRow(card, GlassSettingsResources.Get("Home_RowColorization"), "\uE790",
+        AddCustomizationRow(card, GlassSettingsResources.Get("Home_RowColorization"), SettingsSectionGlyphs.Composition,
             () => HomeCustomizationSummary.Colorization(hive),
             SettingsCommitScope.ForDwmHiveArea(CustomizationAreaId.DwmColorization, hive),
             HomeNavTarget.DwmPage(
@@ -704,7 +704,7 @@ public sealed partial class HomePage : Page
                 DwmRouteIds.Colorization,
                 GlassSettingsResources.Get("Breadcrumb_Colorization")));
 
-        AddCustomizationRow(card, GlassSettingsResources.Get("Home_RowDwmGlass"), "\uE8B9",
+        AddCustomizationRow(card, GlassSettingsResources.Get("Home_RowDwmGlass"), SettingsSectionGlyphs.Appearance,
             () => HomeCustomizationSummary.DwmGlass(hive),
             SettingsCommitScope.ForDwmHiveArea(CustomizationAreaId.DwmGlass, hive),
             HomeNavTarget.DwmPage(
@@ -713,7 +713,7 @@ public sealed partial class HomePage : Page
                 DwmRouteIds.Glass,
                 GlassSettingsResources.Get("Breadcrumb_DwmGlass")));
 
-        AddCustomizationRow(card, GlassSettingsResources.Get("Home_RowDwmTheme"), "\uE8B3",
+        AddCustomizationRow(card, GlassSettingsResources.Get("Home_RowDwmTheme"), SettingsSectionGlyphs.Stylization,
             () => HomeCustomizationSummary.DwmTheme(hive),
             SettingsCommitScope.ForDwmHiveArea(CustomizationAreaId.DwmTheme, hive),
             HomeNavTarget.DwmPage(

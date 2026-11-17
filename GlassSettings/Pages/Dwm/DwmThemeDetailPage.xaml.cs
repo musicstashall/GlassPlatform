@@ -133,7 +133,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
 
     private void ConfigureSliderUi()
     {
-        ParallaxRow.IconGlyph = SettingsSectionGlyphs.Animation;
+        ParallaxRow.IconGlyph = "\uE799";
 
         _intensitySlider = SettingsSliderFactory.Create();
         _intensityValueText = CreateSliderValueText();

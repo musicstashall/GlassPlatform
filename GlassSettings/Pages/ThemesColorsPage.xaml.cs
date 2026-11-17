@@ -319,17 +319,20 @@ public sealed partial class ThemesColorsPage : Page
     {
         ModeExpander.Title = GlassSettingsResources.Get("Themes_Colors_ModeTitle");
         ModeExpander.Description = GlassSettingsResources.Get("Themes_Colors_ModeDesc");
-        ModeExpander.IconGlyph = SettingsSectionGlyphs.Theme;
+        // Кисть, как в «Персонализация → Цвета» (Personalize).
+        ModeExpander.IconGlyph = "\uE771";
         // Body без призыва — паритет окна Персонализации (только две строки режимов).
         ModeParameterPanel.Description = string.Empty;
 
         TransparencyRow.Title = GlassSettingsResources.Get("Themes_Colors_TransparencyTitle");
         TransparencyRow.Description = GlassSettingsResources.Get("Themes_Colors_TransparencyDesc");
-        TransparencyRow.IconGlyph = SettingsSectionGlyphs.Colorization;
+        // Искра в пунктирном квадрате (SquareSparkle).
+        TransparencyRow.IconGlyph = "\uF1BA";
 
         AccentExpander.Title = GlassSettingsResources.Get("Themes_Colors_AccentTitle");
         AccentExpander.Description = GlassSettingsResources.Get("Themes_Colors_AccentDesc");
-        AccentExpander.IconGlyph = SettingsSectionGlyphs.Colorization;
+        // Палитра (ColorSolid).
+        AccentExpander.IconGlyph = "\uF354";
         AccentColorPanel.Description = GlassSettingsResources.Get("Themes_Colors_AccentBodyDesc");
 
         if (_windowsModeLabel is not null)

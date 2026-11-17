@@ -301,7 +301,7 @@ public sealed partial class PopupHubPage : Page
 
     private void ConfigureEffectRow()
     {
-        EffectRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.EffectType);
+        EffectRow.IconGlyph = "\uEB78";
         FlyoutEffectNames.PopulateCombo(_effectCombo);
         SettingsInteractionDeferral.WhenComboCommit(
             _effectCombo,
@@ -313,9 +313,9 @@ public sealed partial class PopupHubPage : Page
     private void ConfigureDetailControls()
     {
         GradientExpander.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Gradient);
-        BorderExpander.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Border);
-        CornerRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Corners);
-        AnimationExpander.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Animation);
+        BorderExpander.IconGlyph = "\uF6C7";
+        CornerRow.IconGlyph = "\uE7FA";
+        AnimationExpander.IconGlyph = "\uF1B9";
 
         _shadowSwitch.Style =
             Application.Current.Resources["GlassSettingsCompactToggleSwitchStyle"] as Style;
@@ -396,7 +396,7 @@ public sealed partial class PopupHubPage : Page
     {
         MenuAdvancedExpander.HasUnsavedOverride = HasAnyMenuAdvancedSectionUnsaved;
 
-        MenuGeneralSettingsExpander.IconGlyph = SettingsSectionGlyphs.Menu;
+        MenuGeneralSettingsExpander.IconGlyph = "\uE74C";
         MenuGeneralSettingsExpander.WireExpandedLayoutRefresh(() => MenuGeneralPanel.RefreshLayout());
 
         var toggleStyle = Application.Current.Resources["GlassSettingsCompactToggleSwitchStyle"] as Style;

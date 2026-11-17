@@ -102,7 +102,7 @@
                                             Grid.Column="1"
                                             FontSize="{StaticResource GlassSettingsSectionIconSize}"
                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Glyph="&#xE713;" />
+                                            Glyph="&#xEEA1;" />
                                         <TextBlock
                                             x:Name="PolicyTitleText"
                                             Grid.Column="2"

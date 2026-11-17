@@ -31,6 +31,7 @@ public sealed partial class RootFullGlassRow : UserControl, ISettingsUnsavedScop
         _fullGlassToggle.Unchecked += (_, _) => OnToggleCommitted(false);
 
         HeaderChrome.HeaderActions = _fullGlassToggle;
+        ApplyBackdropIcon();
         UnsavedScope = SettingsCommitScope.ForArea(CustomizationAreaId.Root);
 
         RootBorder.PointerEntered += RootBorder_OnPointerEntered;
@@ -69,9 +70,14 @@ public sealed partial class RootFullGlassRow : UserControl, ISettingsUnsavedScop
         finally
         {
             _loading = false;
+            ApplyBackdropIcon();
             FullGlassChanged?.Invoke(this, EventArgs.Empty);
         }
     }
+
+    /// <summary>Разрешённый backdrop — E794, запрет (NoBackdrop=1) — F439.</summary>
+    private void ApplyBackdropIcon() =>
+        HeaderChrome.IconGlyph = IsFullGlassEnabled ? "\uE794" : "\uF439";
 
     public void ApplyLocalizedStrings(string title, string? description = null)
     {
@@ -104,6 +110,7 @@ public sealed partial class RootFullGlassRow : UserControl, ISettingsUnsavedScop
             SettingsSession.Current.WriteGlassDword("Root", "NoBackdrop", 1);
 
         RootBackdropLiveReload.NotifyNoBackdropChange(fullGlassOn ? 0u : 1u);
+        ApplyBackdropIcon();
         FullGlassChanged?.Invoke(this, EventArgs.Empty);
     }
 

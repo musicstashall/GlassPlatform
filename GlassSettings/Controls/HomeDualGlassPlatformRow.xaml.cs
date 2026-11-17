@@ -21,6 +21,7 @@ public sealed partial class HomeDualGlassPlatformRow : UserControl
     public HomeDualGlassPlatformRow()
     {
         InitializeComponent();
+        IconGlyph.Glyph = SettingsSectionGlyphs.GlassPlatform;
         TitleX86.Text = GlassSettingsResources.Get("Home_RowGlassPlatformX86");
         TitleX64.Text = GlassSettingsResources.Get("Home_RowGlassPlatformX64");
         WireGates();

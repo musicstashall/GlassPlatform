@@ -97,11 +97,11 @@ public sealed partial class RootWindowsPage : Page, ISettingsCommitScopeProvider
         BuildNoBorderFooter();
         ConfigureControlIconSection();
         ApplyLocalizedStrings();
-        EffectRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.EffectType);
+        EffectRow.IconGlyph = "\uEB78";
         GradientExpander.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Gradient);
-        BorderExpander.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Border);
-        CornerRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.Corners);
-        DrawThemeRow.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.DrawTheme);
+        BorderExpander.IconGlyph = "\uF6C7";
+        CornerRow.IconGlyph = "\uEE49";
+        DrawThemeRow.IconGlyph = "\uF1BA";
 
         if (!_cornersSupported)
             CornerRow.Visibility = Visibility.Collapsed;

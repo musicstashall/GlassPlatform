@@ -26,12 +26,6 @@
                     Spacing="6"
                     VerticalAlignment="Center">
                     <Ellipse
-                        x:Name="StatusIndicatorDot"
-                        Width="6"
-                        Height="6"
-                        VerticalAlignment="Center"
-                        Visibility="Collapsed" />
-                    <Ellipse
                         x:Name="UnsavedDot"
                         Width="6"
                         Height="6"
@@ -51,24 +45,32 @@
                         x:Name="TitleText"
                         Style="{StaticResource BodyStrongTextBlockStyle}"
                         TextTrimming="CharacterEllipsis" />
-                    <StackPanel Orientation="Horizontal" Spacing="4">
-                        <TextBlock
-                            x:Name="SubtitlePrefix"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            TextTrimming="CharacterEllipsis"
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Ellipse
+                            x:Name="StatusIndicatorDot"
+                            Width="6"
+                            Height="6"
+                            VerticalAlignment="Center"
                             Visibility="Collapsed" />
-                        <TextBlock
-                            x:Name="SubtitleAccent"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            FontWeight="SemiBold"
-                            TextTrimming="CharacterEllipsis"
-                            Visibility="Collapsed" />
-                        <TextBlock
-                            x:Name="SubtitlePlain"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            TextTrimming="CharacterEllipsis" />
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock
+                                x:Name="SubtitlePrefix"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextTrimming="CharacterEllipsis"
+                                Visibility="Collapsed" />
+                            <TextBlock
+                                x:Name="SubtitleAccent"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                FontWeight="SemiBold"
+                                TextTrimming="CharacterEllipsis"
+                                Visibility="Collapsed" />
+                            <TextBlock
+                                x:Name="SubtitlePlain"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
                     </StackPanel>
                 </StackPanel>
                 <StackPanel

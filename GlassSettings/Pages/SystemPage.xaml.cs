@@ -54,6 +54,7 @@ public sealed partial class SystemPage : Page
                 "glass",
                 GlassSettingsResources.Get("System_RowGlassPlatform"),
                 GlassSettingsResources.Get("System_RowGlassPlatformDesc"),
+                SettingsSectionGlyphs.GlassPlatform,
                 canNavigate: () => _glassRowX86.TaskExists || _glassRowX64.TaskExists,
                 onNavigate: PushGlassSettingsHub);
             _glassNav.HeaderActions = _glassDualControls;
@@ -67,6 +68,7 @@ public sealed partial class SystemPage : Page
                 "glass",
                 GlassSettingsResources.Get("System_RowGlassPlatform"),
                 GlassSettingsResources.Get("System_RowGlassPlatformDesc"),
+                SettingsSectionGlyphs.GlassPlatform,
                 canNavigate: () => _glassRow.TaskExists,
                 onNavigate: PushGlassSettingsHub);
             _glassRow.AttachToNavigateRow(_glassNav);

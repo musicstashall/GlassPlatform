@@ -8,6 +8,7 @@ public static class SettingsSectionGlyphs
     public const string General = "\uE713";
     public const string Dwm = "\uE771";
     public const string Glass = "\uE943";
+    public const string GlassPlatform = "\uE950";
     public const string Gradient = "\uE790";
     public const string Border = "\uE7B9";
     public const string Corners = "\uE8FC";
@@ -16,25 +17,29 @@ public static class SettingsSectionGlyphs
     public const string Opacity = "\uE7B3";
     public const string Caption = "\uE8D2";
     public const string Image = "\uE91B";
-    public const string Taskbar = "\uE7C4";
+    public const string Taskbar = "\uECA5";
     public const string Menu = "\uE8A7";
     public const string DropDown = "\uE70D";
     public const string Tooltip = "\uE946";
-    public const string ShellExtension = "\uE8A7";
-    public const string Processes = "\uE9F5";
-    public const string Root = "\uE8A7";
-    public const string Popup = "\uE8A7";
+    public const string ShellExtension = "\uED0E";
+    public const string Processes = "\uE9D9";
+    public const string Root = "\uE7FB";
+    public const string Popup = "\uE7C4";
     public const string Text = "\uE8D2";
     public const string SystemFonts = "\uE8D2";
     public const string TextSmoothing = "\uE8D2";
     public const string Theme = "\uE790";
     public const string Colorization = "\uE771";
+    public const string Composition = "\uE81E";
+    public const string Appearance = "\uEABC";
+    public const string Stylization = "\uEA86";
     public const string GlassColor = "\uE771";
     public const string CaptionColor = "\uE8D2";
     public const string DrawTheme = "\uE7B3";
     public const string Symbols = "\uE896";
     public const string Signature = "\uEA18";
     public const string WebSearch = "\uF6FA";
+    public const string OpenGlass = "\uF158";
 
     public enum SectionKind
     {
@@ -84,10 +89,11 @@ public static class SettingsSectionGlyphs
         "menu" => Menu,
         "dropdown" => DropDown,
         "tooltip" => Tooltip,
-        "colorization" or "colorizationl" => Colorization,
-        "glass" or "glassl" or "glass-x86" or "glass-x64" => Glass,
-        "theme" or "themel" => Theme,
-        "openglass" => Dwm,
+        "colorization" or "colorizationl" => Composition,
+        "glass" or "glassl" => Appearance,
+        "glass-x86" or "glass-x64" => Glass,
+        "theme" or "themel" => Stylization,
+        "openglass" => OpenGlass,
         _ => string.Empty
     };
 }

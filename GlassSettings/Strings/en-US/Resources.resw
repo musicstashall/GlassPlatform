@@ -691,6 +691,8 @@
   <data name="Home_WindowsBuildCaption" xml:space="preserve"><value>Windows, build {0}</value></data>
   <data name="Main_BackToolTip" xml:space="preserve"><value>Back</value></data>
   <data name="Main_AppSettingsToolTip" xml:space="preserve"><value>App settings</value></data>
+  <data name="Main_Help" xml:space="preserve"><value>Help</value></data>
+  <data name="Main_HelpToolTip" xml:space="preserve"><value>Open the instructions for this page</value></data>
   <data name="Main_SearchPlaceholder" xml:space="preserve"><value>Search…</value></data>
   <data name="Modules_NotFound" xml:space="preserve"><value>not found</value></data>
   <data name="Modules_Unavailable" xml:space="preserve"><value>—</value></data>

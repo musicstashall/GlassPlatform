@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using GlassSettings.Controls;
@@ -2407,12 +2408,12 @@ public sealed partial class MainWindow : Window
     {
         NavView.MenuItems.Clear();
         AddNav("home", GlassSettingsResources.Get("NavHome"), "\uE80F");
-        AddNav("system", GlassSettingsResources.Get("NavSystem"), "\uE713");
-        AddNav("dwm", GlassSettingsResources.Get("NavDwm"), "\uE771");
-        AddNav("glass", GlassSettingsResources.Get("NavGlass"), "\uE943");
+        AddNav("system", GlassSettingsResources.Get("NavSystem"), "\uEC26");
+        AddNav("dwm", GlassSettingsResources.Get("NavDwm"), SettingsSectionGlyphs.OpenGlass);
+        AddNav("glass", GlassSettingsResources.Get("NavGlass"), SettingsSectionGlyphs.GlassPlatform);
         AddNav("themes", GlassSettingsResources.Get("NavThemes"), "\uE790");
         AddNav("text", GlassSettingsResources.Get("NavText"), "\uE8D2");
-        AddNav("attach", GlassSettingsResources.Get("NavAttach"), "\uE77B");
+        AddNav("attach", GlassSettingsResources.Get("NavAttach"), SettingsSectionGlyphs.Processes);
         NavView.ItemInvoked += NavView_OnItemInvoked;
         ApplyOpenGlassNavVisibility();
         ApplyPlatformNavVisibility();
@@ -3072,6 +3073,33 @@ public sealed partial class MainWindow : Window
         _ => typeof(PlaceholderPage)
     };
 
+    private void HelpButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var topic = HelpTopicFor(NavFrame.Content);
+        Process.Start(new ProcessStartInfo("https://glass-platform.ru/help.html#" + topic) { UseShellExecute = true });
+    }
+
+    private static string HelpTopicFor(object? page) => page switch
+    {
+        HomePage => "overview",
+        SystemPage => "system",
+        DwmSettingsHubPage => "dwm",
+        DwmColorizationDetailPage => "dwm-color",
+        DwmGlassDetailPage => "dwm-look",
+        DwmThemeDetailPage => "dwm-style",
+        GlassSettingsHubPage => "glass",
+        RootWindowsPage => "root",
+        PopupHubPage => "popup",
+        TaskbarFlyoutPage => "taskbar",
+        TaskbarAdjacentWindowsPage => "adjacent",
+        VisualStylesPage => "themes",
+        ThemesColorsPage => "colors",
+        ThemesDesktopBackgroundPage => "wallpaper",
+        TextAndFontsPage => "text",
+        ProcessesPage => "processes",
+        _ => "overview"
+    };
+
     private void SearchBox_OnTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
         if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput || _searchDebounceTimer is null)
@@ -3463,6 +3491,8 @@ public sealed partial class MainWindow : Window
         GlassSettingsToolTipService.SetToolTip(TitleBarBackButton, GlassSettingsResources.Get("Main_BackToolTip"));
         AppSettingsPaneLabel.Text = GlassSettingsResources.Get("Main_AppSettingsToolTip");
         GlassSettingsToolTipService.SetToolTip(AppSettingsPaneButton, GlassSettingsResources.Get("Main_AppSettingsToolTip"));
+        HelpButtonLabel.Text = GlassSettingsResources.Get("Main_Help");
+        GlassSettingsToolTipService.SetToolTip(HelpButton, GlassSettingsResources.Get("Main_HelpToolTip"));
         SearchBox.PlaceholderText = GlassSettingsResources.Get("Main_SearchPlaceholder");
     }
 

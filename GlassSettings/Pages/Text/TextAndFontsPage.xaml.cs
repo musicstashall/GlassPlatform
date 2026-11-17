@@ -68,6 +68,7 @@ public sealed partial class TextAndFontsPage : Page, IExternalRegistrySyncReload
 
     private const double TextHeroColumnGap = 24;
     private const double TextCardRightGapMin = 20;
+    private const string TextRenderGlyph = "\uE9E9";
 
     private GlobalTextGlowModel _model = GlobalTextGlowModel.Factory;
     private GlassInkCapsuleModel _inkModel = GlassInkCapsuleModel.Factory;
@@ -97,12 +98,12 @@ public sealed partial class TextAndFontsPage : Page, IExternalRegistrySyncReload
 
         PageShell.CommitScope = SettingsCommitScope.ForArea(CustomizationAreaId.Text);
         EffectsExpander.UnsavedScope = TextScopeCatalog.GlowScope;
-        EffectsExpander.IconGlyph = SettingsSectionGlyphs.ForKind(SettingsSectionGlyphs.SectionKind.EffectType);
+        EffectsExpander.IconGlyph = "\uEC34";
 
         GammaExpander.UnsavedScope = TextScopeCatalog.InkCapsuleScope;
-        GammaExpander.IconGlyph = SettingsSectionGlyphs.TextSmoothing;
+        GammaExpander.IconGlyph = "\uE7A1";
         PseudoExpander.UnsavedScope = null;
-        PseudoExpander.IconGlyph = SettingsSectionGlyphs.TextSmoothing;
+        PseudoExpander.IconGlyph = "\uE8BE";
 
         _glowEnableToggle = new ToggleButton
         {
@@ -185,7 +186,7 @@ public sealed partial class TextAndFontsPage : Page, IExternalRegistrySyncReload
     {
         var cardIcon = new FontIcon
         {
-            Glyph = SettingsSectionGlyphs.TextSmoothing,
+            Glyph = TextRenderGlyph,
             VerticalAlignment = VerticalAlignment.Center
         };
         if (Application.Current.Resources["GlassSettingsSectionIconSize"] is double iconSize)
@@ -226,7 +227,7 @@ public sealed partial class TextAndFontsPage : Page, IExternalRegistrySyncReload
 
     private void InitializeTextRenderFlatRow()
     {
-        TextRenderFlatRow.IconGlyph = SettingsSectionGlyphs.TextSmoothing;
+        TextRenderFlatRow.IconGlyph = TextRenderGlyph;
         TextRenderFlatRow.UnsavedScope = TextScopeCatalog.InkCapsuleScope;
         GlassSettingsToolTipService.SetToolTip(
             TextRenderFlatRow.GateSwitchControl,
