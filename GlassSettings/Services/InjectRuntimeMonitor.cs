@@ -42,6 +42,16 @@ public sealed class InjectRuntimeEntry
     /// </summary>
     public bool IsFading { get; init; }
 
+    /// <summary>
+    /// Отвергнутый слот, у которого здоровый скан не подтвердил DLL (и State не
+    /// Unloading/Unloaded): ModuleCompat здесь — отказ гейта (DllMain FALSE, лоадер
+    /// снял образ), а не присутствие модуля. Жёлтую точку в таблице оставляем — это
+    /// маркер строки «отвергнутые»; флаг лишь запрещает выгрузку: force без модуля
+    /// вернёт Failed и слот не почистит. State на стопе меняется → флаг снимается
+    /// и кнопка выгрузки возвращается (план rejected_status_after_stop, дыра 5).
+    /// </summary>
+    public bool ModuleLoadUnconfirmed { get; init; }
+
     public string ArchLabel => Arch == NativeHostInterop.InjectArch.X86 ? "x86" : "x64";
 
     /// <summary>
@@ -61,9 +71,9 @@ public sealed class InjectRuntimeEntry
             ? $"PID {Pid}"
             : $"PID {Pid} · (x86)";
 
-    /// <summary>Soft unload (событие) или Force FreeLibrary — при любом ненулевом ModuleBits.</summary>
+    /// <summary>Soft unload (событие) или Force FreeLibrary — при подтверждённом ModuleBits.</summary>
     public bool CanRequestUnload =>
-        ModuleBits != 0 && !NeedsX86ForceAgentWithoutPackage;
+        ModuleBits != 0 && !ModuleLoadUnconfirmed && !NeedsX86ForceAgentWithoutPackage;
 
     /// <summary>
     /// GS x64 + residual/off: Force через SysWOW64 rundll32 требует x86 InstallPath.
@@ -678,6 +688,7 @@ public sealed class InjectRuntimeMonitor
             DiagLifecycle = src.DiagLifecycle,
             SubclassWindowTotal = src.SubclassWindowTotal,
             SubclassKindMask = src.SubclassKindMask,
+            ModuleLoadUnconfirmed = src.ModuleLoadUnconfirmed,
             State = src.State,
             IsToolProcess = src.IsToolProcess,
             IsFading = fading,
@@ -1012,6 +1023,7 @@ public sealed class InjectRuntimeMonitor
                     ? slot.ExeName
                     : (scanned.ExeName ?? string.Empty);
 
+                var loadUnconfirmed = false;
                 InjectRuntimeBeacon beacon;
                 if (slot.Kind is NativeHostInterop.InjectKind.RejectedBlockList
                     or NativeHostInterop.InjectKind.RejectedForbidden)
@@ -1030,14 +1042,16 @@ public sealed class InjectRuntimeMonitor
                     else
                         beacon = InjectRuntimeBeacon.Rejected;
 
-                    // Дыра 5: бит ModuleCompat фиксирует отказ гейта, а не наличие
-                    // DLL (DllMain FALSE → лоадер снимает образ). Здоровый скан без
-                    // попадания → строка не должна выглядеть загруженной: иначе
-                    // CanRequestUnload ведёт в force, который без модуля вернёт
-                    // Failed и слот не почистит. При State Unloading не гасим —
-                    // там watcher есть, DLL была при старте (H42-неполнота скана).
+                    // Дыра 5 (уточнение после регрессии): бит ModuleCompat — это
+                    // отказ гейта (DllMain FALSE → лоадер снимает образ), а не
+                    // наличие DLL. Сам бит НЕ гасим: жёлтая точка в колонке —
+                    // маркер строки «отвергнутые», потерять её нельзя. «Не держать
+                    // как загруженный» переносим на готовность к выгрузке: без
+                    // подтверждения DLL выгрузку не предлагаем (force без модуля
+                    // Failed и слот не почистит). При State Unloading флаг не
+                    // ставим — там watcher есть, кнопка нужна для ручного force.
                     if (!stateResidual && !scanHit && scanValid)
-                        bits = 0;
+                        loadUnconfirmed = true;
                 }
                 else if (slot.State is NativeHostInterop.InjectState.Unloading
                     or NativeHostInterop.InjectState.Unloaded)
@@ -1065,6 +1079,7 @@ public sealed class InjectRuntimeMonitor
                     State = slot.State,
                     ModulesText = FormatModules(bits),
                     IsToolProcess = slotIsTool,
+                    ModuleLoadUnconfirmed = loadUnconfirmed,
                 });
             }
 
