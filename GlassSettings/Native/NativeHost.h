@@ -229,6 +229,9 @@ extern "C"
     /// Проверка известных параметров реестра платформы (Shared::RegistrySanity).
     /// Возвращает число некорректных значений; applyFixes — удалить их (умолчания не пишутся).
     __declspec(dllexport) DWORD WINAPI GlassSettings_ValidateRegistryState(BOOL applyFixes) noexcept;
+    /// Базовые AttachList и BlockList текущего пользователя, если ключ пуст.
+    /// Код: 0 ничего не писалось, 1 Attach, 2 Block, 3 оба, -1 сбой записи.
+    __declspec(dllexport) int WINAPI GlassSettings_SeedDefaultProcessLists() noexcept;
     /// Legacy GlassUnins style-only preparation in OS-native rundll32.
     /// Does not remove IFEO/COM registrations or system files.
     /// Код выхода: биты 1 неверные аргументы, 2 перезагрузка, 4 стиль не восстановлен,

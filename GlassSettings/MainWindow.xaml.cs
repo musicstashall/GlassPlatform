@@ -245,6 +245,11 @@ public sealed partial class MainWindow : Window
         try
         {
             Core.Platform.OpenGlassBorderPolicyCoordinator.ApplyStartupPolicy();
+            // Пустые списки другого пользователя заполняются до снимка, иначе запись
+            // станет ложным dirty. Уже заполненные списки не переписываются.
+            var seededLists = NativeHostInterop.SeedDefaultProcessLists();
+            if (seededLists > 0)
+                AttachListLiveReload.NotifyAttachListChanged();
             SettingsSession.Current.Capture();
             StartRegistrySnapshotWatch();
             _ = ProductUpdateCoordinator.RunStartupAsync();

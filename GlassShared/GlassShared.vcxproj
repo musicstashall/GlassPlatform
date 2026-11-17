@@ -155,6 +155,7 @@
     <ClInclude Include="include\InjectionMode.h" />
     <ClInclude Include="include\TaskSchedulerCom.h" />
     <ClInclude Include="include\ProcessBlockList.h" />
+    <ClInclude Include="include\DefaultProcessListsSeed.h" />
     <ClInclude Include="include\UnloadResult.h" />
     <ClInclude Include="include\wil.h" />
     <ClInclude Include="include\Providers\DirectUIEventProvider.h" />
@@ -217,6 +218,7 @@
     <ClCompile Include="src\MenuUtils.cpp" />
     <ClCompile Include="src\WndCompatHostApi.cpp" />
     <ClCompile Include="src\ProcessBlockList.cpp" />
+    <ClCompile Include="src\DefaultProcessListsSeed.cpp" />
     <ClCompile Include="src\RegistrySanity.cpp" />
     <ClCompile Include="src\WinApiUtils.cpp" />
     <ClCompile Include="src\OpenGlassDwmPolicy.cpp" />

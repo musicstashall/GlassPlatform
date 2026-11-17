@@ -130,6 +130,7 @@
     <ClCompile Include="OpenGlassHostTask.cpp" />
     <ClCompile Include="PlatformPresenceNative.cpp" />
     <ClCompile Include="RegistrySanityNative.cpp" />
+    <ClCompile Include="DefaultProcessListsNative.cpp" />
     <ClCompile Include="InjectProcessMapNative.cpp" />
     <ClCompile Include="ShellExtensionQuery.cpp" />
     <ClCompile Include="ShellExtensionOps.cpp" />

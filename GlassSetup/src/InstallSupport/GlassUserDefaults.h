@@ -2,9 +2,10 @@
 #include <windows.h>
 #include <string>
 
-// Per-user defaults written by Setup into the installing user's hive
-// (HKCU\Software\StanislavKa\GlassPlatform). The data lives in
-// GlassShared/include/DefaultProcessLists.h and is shared with the platform.
+// Per-user defaults written into the current user's hive
+// (HKCU\Software\StanislavKa\GlassPlatform). The lists and the write itself
+// live in GlassShared (DefaultProcessLists.h / DefaultProcessListsSeed.h).
+// Setup keeps this wrapper so a rollback can delete only the lists it created.
 namespace GlassUserDefaults {
 
 struct SeedReport {

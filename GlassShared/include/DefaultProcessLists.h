@@ -2,9 +2,9 @@
 
 // Default per-user process lists of Glass Platform.
 //
-// Setup seeds them into the current user's hive on a fresh installation and
-// Repair rewrites them (together with the rest of the user key) to the
-// fresh-install state. Both keys live under
+// Setup and GlassSettings write them into the current user's hive when the
+// key is missing or has no named values. A list that already has entries is
+// left unchanged. Both keys live under
 //   HKCU\Software\StanislavKa\GlassPlatform
 // and are read by the platform itself:
 //   AttachList  — GlassCompat/src/AttachList.cpp: one REG_DWORD per executable,

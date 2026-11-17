@@ -195,10 +195,17 @@ assert "GlassInstallRemoval::Commit" in engine and "GlassInstallRemoval::Restore
 assert "RemoveManagedProduct(product)" in sequence
 # Per-user defaults: seeded before the first platform start, never over existing lists, undone by rollback.
 defaults = read("src/InstallSupport/GlassUserDefaults.cpp")
+seed_cpp = (repo / "GlassShared/src/DefaultProcessListsSeed.cpp").read_text(encoding="utf-8")
+shared_project = (repo / "GlassShared/GlassShared.vcxproj").read_text(encoding="utf-8")
 default_lists = (repo / "GlassShared/include/DefaultProcessLists.h").read_text(encoding="utf-8")
 assert "GlassUserDefaults.cpp" in project and "GlassUserDefaults.h" in project
 assert "GlassUserDefaults.cpp" in read("GlassSetup.vcxproj.filters")
-assert "hasEntries" in defaults and "RegDeleteTreeW" in defaults and "kBlockListDescription" in defaults
+assert "SeedMissing" in defaults and "UndoSeed" in defaults
+assert "hasEntries" in seed_cpp and "RegDeleteTreeW" in seed_cpp and "kBlockListDescription" in seed_cpp
+assert "DefaultProcessListsSeed.cpp" in shared_project
+settings_startup = (repo / "GlassSettings/MainWindow.xaml.cs").read_text(encoding="utf-8")
+assert settings_startup.index("SeedDefaultProcessLists()") < settings_startup.index("SettingsSession.Current.Capture()")
+assert "GlassSettings_SeedDefaultProcessLists" in (repo / "GlassSettings/Native/NativeHost.h").read_text(encoding="utf-8")
 assert "#include <windows.h>" not in default_lists and "Software\\\\StanislavKa\\\\GlassPlatform\\\\AttachList" in default_lists
 assert default_lists.count("kModeForbidden }") == 2 and default_lists.count("kModePopupOnly }") == 28 and default_lists.count("kModeFull }") == 34
 assert '{ L"explorer.exe", kModeFull }' in default_lists and '{ L"cmd.exe", kModeForbidden }' in default_lists
