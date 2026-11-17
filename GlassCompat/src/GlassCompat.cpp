@@ -1232,6 +1232,9 @@ namespace
         // воркер лога). Тогда фазу CompatDone не публикуем: слепой ForceUnload
         // снаружи снял бы образ под оставленным кодом (дамп 17.11).
         bool anyModuleKept = false;
+        // Пин образа WndCompat на время BeginShutdown (см. шаг 3 ниже) —
+        // снимается в блоке решения о выгрузке WndCompat.
+        HMODULE wndShutdownPin = nullptr;
 
         // STOP S0: passthrough explorerframe ExtendFrame/DWM до XAML CHROME_REDRAW (glass ON, policy ещё true).
         if (isExplorer && g_hCore)
@@ -1382,6 +1385,25 @@ namespace
             if (pWndShutdown)
             {
                 result |= UnloadResult::BeginWnd_Called;
+
+                // Пин образа WndCompat на всё время BeginShutdown и до решения
+                // о выгрузке. Дамп ShellExperienceHost.exe 17.11.2026: единственный
+                // кадр AV — join+0x81 на GUI-потоке (стек на строке 1368, до
+                // FreeLibrary(savedWnd) не дошёл), выгрузивший поток в дампе не
+                // виден, в исходниках других FreeLibrary(WndCompat) нет.
+                // WndCompat снимает свои WinEvent/GetMessage-хуки внутри
+                // BeginShutdown до Stop — OS-ссылка на модуль уходит
+                // deferred-фрилом ещё в окне join, и остаётся ровно наша
+                // LoadLibrary-ссылка: ОДНОГО чужого FreeLibrary (remote
+                // CreateRemoteThread и т.п.) хватает для unmap под выполняющимся
+                // потоком. Пин = вторая ссылка (тот же приём, что пин=2
+                // GlassCompat-самому на время ExecuteShutdown): один чужой
+                // FreeLibrary снимает пин, образ остаётся живым.
+                (void)::GetModuleHandleExW(
+                    GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                    reinterpret_cast<LPCWSTR>(pWndShutdown),
+                    &wndShutdownPin);
+
                 (void)Shared::InjectProcessMap::TrySetShutdownPhase(
                     GetCurrentProcessId(),
                     Shared::InjectProcessMap::ShutdownPhaseWndDetaching);
@@ -1392,6 +1414,8 @@ namespace
                     Shared::InjectProcessMap::ShutdownPhaseWndDone);
                 result |= UnloadResult::BeginWnd_Returned;
                 DebugLog(L"[GlassCompat][Core] [Shutdown] WndCompat_BeginShutdown returned");
+                // wndShutdownPin снимается ниже — в блоке решения о выгрузке
+                // WndCompat (где учитывается и живой воркер лога).
             }
             else
             {
@@ -1772,14 +1796,24 @@ namespace
                 {
                     (void)FreeLibrary(savedWnd);
                     result |= UnloadResult::FreeWnd_Returned;
+
+                    // Снять пин BeginShutdown (шаг 3). Если чужой FreeLibrary
+                    // уже отнял нашу базовую ссылку, этот же FreeLibrary(savedWnd)
+                    // снял остаток и модуль ушёл — пин снимать нечего
+                    // (GetModuleHandle == null); если модуль жив — снимаем пин.
+                    if (wndShutdownPin && GetModuleHandleW(L"WndCompat.dll"))
+                        (void)::FreeLibrary(wndShutdownPin);
                 }
                 else
                 {
+                    // Пин остаётся и держит модуль вместе с гейтом воркера —
+                    // как FreeSelf-gate выше (остаток лучше AV).
                     anyModuleKept = true;
                     DebugLog(
                         DBG_IMPORTANT,
-                        L"[GlassCompat][Core] [Shutdown] WndCompat kept: stale=%u logWorkerAlive=%d",
-                        staleWndProcs, wndLogAlive ? 1 : 0);
+                        L"[GlassCompat][Core] [Shutdown] WndCompat kept: stale=%u logWorkerAlive=%d pin=%d",
+                        staleWndProcs, wndLogAlive ? 1 : 0,
+                        wndShutdownPin ? 1 : 0);
                 }
             }
         }
