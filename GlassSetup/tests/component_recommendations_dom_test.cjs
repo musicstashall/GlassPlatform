@@ -37,6 +37,13 @@ assert.deepEqual(messages.slice(before),['component:settings64:1']);
  assert.equal(button().disabled,false);
  assert.ok(d.querySelector('#components-installed-grid [data-product="openglassResources"]').classList.contains('is-broken'));
  assert.equal(d.querySelector('[data-catalog-alias="openglassResources"]').classList.contains('is-broken'),false);
+ const damagedSettings={id:'settings64',title:'GlassSettings',installed:true,checked:false,broken:true,operation:'repair',
+  applySupported:true,targetVersion:'2.0.0.123',installedPackageVersion:'2.0.0.123'};
+ send([damagedSettings]);
+ assert.ok(d.querySelector('#components-installed-grid [data-product="settings64"]').classList.contains('is-broken'));
+ assert.equal(d.querySelector('[data-catalog-alias="settings64"]').classList.contains('is-broken'),false);
+ assert.equal(d.querySelector('[data-catalog-alias="settings64"]').classList.contains('active'),false);
+ send([broken]);
  before=messages.length;button().click();
  assert.deepEqual(messages.slice(before),['component:openglassResources:1']);
  assert.equal(d.querySelector('#product-openglassResources').checked,true);

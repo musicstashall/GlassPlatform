@@ -53,6 +53,20 @@ for(const locale of ['ru','en']){
  assert.ok(d.querySelector('#components-grid .metadata-error-label').textContent.includes('E403'));
  send([{...forbidden,metadataRetrying:true}],locale);
  assert.equal(d.querySelector('#components-grid .download-retry').disabled,true);
+ // One retry must not recreate the other 403 cards or restart their border.
+ {
+  const blocked=id=>({id,title:id,installed:true,checked:false,applySupported:false,metadataBlocked:true,metadataError:'GitHub HTTP error (403)'});
+  send([blocked('openglass'),blocked('secureUxTheme')],locale);
+  const ogCard=d.querySelector('#components-grid [data-catalog-alias="openglass"]');
+  const sutCard=d.querySelector('#components-grid [data-catalog-alias="secureUxTheme"]');
+  assert.ok(ogCard&&sutCard);
+  send([{...blocked('openglass'),metadataRetrying:true},blocked('secureUxTheme')],locale);
+  assert.equal(d.querySelector('#components-grid [data-catalog-alias="openglass"]'),ogCard);
+  assert.equal(d.querySelector('#components-grid [data-catalog-alias="secureUxTheme"]'),sutCard);
+  assert.equal(ogCard.querySelector('.download-retry').disabled,true);
+  assert.equal(sutCard.querySelector('.download-retry').disabled,false);
+  assert.ok(ogCard.classList.contains('download-failed')&&sutCard.classList.contains('download-failed'));
+ }
  send([{...forbidden,metadataBlocked:false,metadataRetrying:false,applySupported:true,targetPayloadVersion:'3.0.2.3749'}],locale);
  assert.equal(d.querySelector('#components-grid .download-retry'),null);
  assert.equal(d.querySelector('#components-grid .comp-decision').disabled,false);
@@ -110,6 +124,13 @@ for(const locale of ['ru','en']){
  send([legacy],locale);
  const legacyCard=d.querySelector('#components-grid [data-product="openglass"]');
  assert.ok(legacyCard.classList.contains('compatibility-risk'));assert.ok(!legacyCard.classList.contains('has-warning'));
+ const damagedLegacy={...legacy,installed:true,broken:true,operation:'repair',installedPayloadVersion:'1.0.0',targetPayloadVersion:'1.0.0'};
+ send([damagedLegacy],locale);
+ const damagedOffer=d.querySelector('#components-grid [data-catalog-alias="openglass"]');
+ assert.ok(damagedOffer.classList.contains('compatibility-risk'));
+ assert.equal(damagedOffer.classList.contains('is-broken'),false);
+ assert.ok(d.querySelector('#components-installed-grid [data-product="openglass"]').classList.contains('is-broken'));
+ send([legacy],locale);
  assert.equal(d.getElementById('components-warning-dialog').hidden,true);
  dom.window.commitComponentChoice(d.getElementById('product-openglass'),true);
  assert.equal(d.getElementById('product-openglass').checked,true);

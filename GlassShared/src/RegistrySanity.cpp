@@ -24,7 +24,7 @@ constexpr Rule kGlassSettingsRules[] = {
     { L"ValidateSettingsOnStartup", ValueKind::DwordBool },
     { L"WindowBackdrop", ValueKind::Dword },
     { L"WindowBusyOverlayMode", ValueKind::Dword },
-    { L"OpenGlassUpdateLastCheckUtc", ValueKind::Dword },
+    // OpenGlassUpdateLastCheckUtc — метка последней проверки, на продукты не влияет.
     { L"UpdateCheckInterval", ValueKind::Dword },
     { L"LastAppliedThemeAccentColor", ValueKind::Dword },
     { L"LastAppliedThemeDwmFingerprint", ValueKind::Text },

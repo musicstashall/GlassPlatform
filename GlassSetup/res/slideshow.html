@@ -1370,7 +1370,7 @@ function componentCardFacts(item,input){
  const interactive=!input.disabled&&!hostState.componentsLoading;
  const canApply=interactive&&(item.applySupported!==false||resourcesPairedChoice(item));
  return {selected,remove,newer,broken,helperChanged,
-  availableNeeded:interactive&&(hostState.appMode==='unins'?selected:remove||canApply&&!selected&&(!item.installed||newer||broken||helperChanged)),
+  availableNeeded:interactive&&(hostState.appMode==='unins'?selected:remove||canApply&&!selected&&(!item.installed||newer)),
   installedNeeded:hostState.appMode==='unins'?selected:selected||canApply&&(newer||broken||helperChanged)};
 }
 function bindComponentName(name,item){
@@ -1543,8 +1543,9 @@ function paintComponentCard(card,item,input,shelf){
   card.setAttribute('aria-label',item.title+': '+statusText);
  if(available){
   card.classList.add(f.availableNeeded?'active':'idle');
-  // Available offers the newest package. Installed Resources damage stays on the installed shelf.
-  if(f.broken&&item.id!=='openglassResources')card.classList.add('is-broken');else if(f.newer&&!f.selected)card.classList.add('has-newer');
+  // Installed damage stays on the installed shelf. Available color follows the
+  // offer itself: a newer package, or a product risk such as an unstable OpenGlass build.
+  if(f.newer&&!f.selected)card.classList.add('has-newer');
   if(f.newer){text(current);line.append(' → ');text(target,true);}else {text(target,f.selected&&!f.remove);}
   if(suffix)line.append(suffix);
  }else if(f.remove){
@@ -1729,7 +1730,11 @@ function planRemoveAllComponents(){
 function renderComponentsPanel(){
  const grid=document.getElementById('components-grid'),installedGrid=document.getElementById('components-installed-grid'),extra=document.getElementById('components-extra'),button=document.getElementById('components-select-all');
  if(!button.dataset.bound){button.dataset.bound='1';document.getElementById('components-remove-all').onclick=planRemoveAllComponents;button.onclick=acceptComponentRecommendations;const shade=document.getElementById('components-warning-dialog');shade.onclick=e=>{if(e.target===shade)closeProductWarning();};document.getElementById('components-warning-close').onclick=closeProductWarning;document.getElementById('components-warning-ok').onclick=closeProductWarning;shade.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeProductWarning();}if(e.key==='Tab'){const first=document.getElementById('components-warning-close'),last=document.getElementById('components-warning-ok');if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}};document.querySelector('#components-panel .components-list').onscroll=hideAcrylicTooltip;}
- const items=Array.isArray(hostState.components)?hostState.components:[],loading=hostState.componentsLoading===true,signature=JSON.stringify([locale,hostState.appMode,loading,items]);
+ const items=Array.isArray(hostState.components)?hostState.components:[],loading=hostState.componentsLoading===true;
+ // metadataRetrying only disables the pressed play control. Including it would
+ // rebuild every card and replay the red border transition on all 403 offers.
+ const panelItems=items.map(item=>{if(!item||typeof item!=='object')return item;const copy={...item};delete copy.metadataRetrying;return copy;});
+ const signature=JSON.stringify([locale,hostState.appMode,loading,panelItems]);
  const changed=signature!==componentSignature,shelfScroll=changed?captureComponentShelfScroll():null;
  if(changed){endComponentDrag(false);const focusId=document.activeElement&&document.activeElement.dataset.component;componentSignature=signature;grid.replaceChildren();installedGrid.replaceChildren();extra.replaceChildren();
  if(loading){const label=document.createElement('div');label.className='comp-loading';label.textContent=locale==='ru'?'Анализ установки…':'Analyzing installation…';grid.append(label);}

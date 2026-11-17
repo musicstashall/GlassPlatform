@@ -67,13 +67,15 @@ for(const card of d.querySelectorAll('[data-product="x86"]')){
  triangle.click();assert.equal(d.querySelector('#components-warning-text').textContent,'Architecture-specific warning');
  d.querySelector('#components-warning-close').click();assert.equal(d.activeElement,triangle);
 }
-// The cascade must not grey out idle newer Available cards; damage stays red.
+// The cascade must not grey out idle newer Available cards. Installed damage
+// stays red on the installed shelf; the Available offer keeps its own tone.
 const newerCard=d.querySelector('[data-catalog-alias="x86"]');assert.ok(newerCard.classList.contains('has-newer'));
 assert.equal(dom.window.getComputedStyle(newerCard).borderTopColor,'rgba(131, 217, 166, 0.35)');
 assert.match(dom.window.getComputedStyle(newerCard).background,/#1f3a34|31, 58, 52/);
 receive({data:{type:'state',page:'components',components:rows.map(r=>({...r,checked:false,broken:r.id==='x86'}))}});
-assert.ok(d.querySelector('[data-catalog-alias="x86"]').classList.contains('is-broken'));
-assert.equal(d.querySelector('[data-catalog-alias="x86"]').classList.contains('has-newer'),false);
+assert.equal(d.querySelector('[data-catalog-alias="x86"]').classList.contains('is-broken'),false);
+assert.ok(d.querySelector('[data-catalog-alias="x86"]').classList.contains('has-newer'));
+assert.ok(d.querySelector('#product-x86').closest('.c-card').classList.contains('is-broken'));
 assert.equal(d.querySelector('#product-x86').checked,false);
 // Empty states occupy their list plane; checking copy contains no implementation tutorial.
 receive({data:{type:'state',appMode:'setup',locale:'ru',page:'components',components:[]}});
@@ -181,9 +183,11 @@ assert.match(installedCard('settings32').querySelector('.c-chip.pending').textCo
 assert.match(installedCard('secureUxTheme').querySelector('.c-chip.download').textContent,/переустановится/);
 assert.ok(installedCard('secureUxTheme').classList.contains('is-activated'));
 assert.ok(installedCard('x86').classList.contains('is-broken'));
+assert.equal(catalogueCard('x86').classList.contains('is-broken'),false);
 assert.doesNotMatch(installedCard('x86').querySelector('.c-meta').textContent,/SHA-256/,'do not invent a hash failure from a registry/unknown inspection failure');
 for(const name of ['available','installed'])d.querySelector('[data-shelf="'+name+'"] [data-view="needed"]').click();
-assert.equal(d.querySelectorAll('#components-grid .c-card:not([hidden])').length,3);
+assert.equal(d.querySelectorAll('#components-grid .c-card:not([hidden])').length,2);
+assert.equal(catalogueCard('x86').hidden,true,'installed damage is not an Available requirement');
 assert.equal(d.querySelectorAll('#components-installed-grid .c-card:not([hidden])').length,4);
 assert.equal(catalogueCard('x64').hidden,true,'warning alone is not a product action');
 assert.equal(catalogueCard('settings32').hidden,true,'already in plan must leave Available/needed');
@@ -220,7 +224,9 @@ filterRows[3]={...filterRows[3],installed:false,applySupported:true,checked:true
 filterRows[4]={...filterRows[4],applySupported:true,broken:true};
 filterRows[5]={...filterRows[5],broken:true}; // Maintenance unsupported, not an executable offer.
 receive({data:{type:'state',components:filterRows}});
-assert.deepEqual([...d.querySelectorAll('#components-grid .c-card:not([hidden])')].map(c=>c.dataset.product),['settings64','openglass']);
+assert.deepEqual([...d.querySelectorAll('#components-grid .c-card:not([hidden])')].map(c=>c.dataset.product),['settings64']);
+assert.equal(d.querySelector('[data-catalog-alias="openglass"]').classList.contains('is-broken'),false);
+assert.ok(d.querySelector('#product-openglass').closest('.c-card').classList.contains('is-broken'));
 assert.deepEqual([...d.querySelectorAll('#components-installed-grid .c-card:not([hidden])')].map(c=>c.dataset.product),['settings64','settings32','openglass']);
 for(const shelf of ['available','installed'])d.querySelector('[data-shelf="'+shelf+'"] [data-view="all"]').click();
 // No MSI or chosen action: inert SUT payloads must not produce Installed/removal.
@@ -260,6 +266,8 @@ for(let i=0;i<5;i++){
 assert.match(d.querySelector('[data-catalog-alias="openglass"] .c-src').textContent,/local 2\.0\.0/);
 assert.match(d.querySelector('[data-catalog-alias="openglass"] .c-src').textContent,/on server 3\.0\.2\.3749/);
 assert.ok(d.querySelector('#product-x64').closest('.c-card').classList.contains('is-broken'));
+assert.equal(d.querySelector('[data-catalog-alias="x64"]').classList.contains('is-broken'),false);
+assert.ok(d.querySelector('[data-catalog-alias="x64"]').classList.contains('has-newer'));
 assert.equal(d.querySelector('[data-catalog-alias="x64"] .comp-decision').dataset.tooltip,'Update to 2.4.5');
 receive({data:{type:'state',components:[{...versions[2],installedPayloadVersion:'',targetPayloadVersion:'',installed:true,installedVersion:'99.0.0',installedPackageVersion:'',targetVersion:'',applySupported:false}]}});
 assert.equal(d.querySelector('#product-settings64').closest('.c-card').querySelector('.c-meta').textContent,'—');
@@ -362,6 +370,7 @@ for(const locale of ['ru','en']) {
 // Equal payload does not suppress genuine damage/repair information.
 receive({data:{type:'state',appMode:'setup',locale:'ru',page:'components',components:[{id:'openglass',title:'OpenGlass',installed:true,broken:true,checked:false,operation:'update',updateAvailable:true,installedPayloadVersion:'3.0.2.3749',targetPayloadVersion:'3.0.2.3749',targetVersion:'2.0.0.99'}]}});
 assert.ok(d.querySelector('#product-openglass').closest('.c-card').classList.contains('is-broken'));
+assert.equal(d.querySelector('[data-catalog-alias="openglass"]').classList.contains('is-broken'),false);
 for(const lang of ['ru','en']) {
  receive({data:{type:'state',locale:lang,page:'error',ui:{},errorReason:'SecureUxTheme removal failed'}});
  assert.equal(d.querySelector('#error-title').textContent,lang==='ru'?'Не удалось выполнить операции':'Operations could not be completed');
