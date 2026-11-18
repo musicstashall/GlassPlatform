@@ -550,6 +550,25 @@ __declspec(dllexport) void WINAPI TaskbarCompat_ResetIxdeSchedulingAfterFailure(
 {
     g_ixdeKickRequested.store(false, std::memory_order_release);
     g_ixdeSurfaceInterestOrKick.store(0, std::memory_order_release);
+
+    // AdviseVisualTreeChange не удался (E_UNEXPECTED — раса с XAML-хостом при старте).
+    // Без этого таймера повтор установки возможен только при новом уведомлении о
+    // мосте трея — иначе таскбар остаётся без патчей до следующего цикла платформы.
+    // Таймер перезапускает бёрст IXDE с бэкоффом до успеха или остановки платформы.
+    TaskbarCompat::TaskbarTapSite::StartIxdeRetryTimer();
+}
+
+__declspec(dllexport) void WINAPI TaskbarCompat_ScheduleIxdeRetry() noexcept
+{
+    if (g_xamlStopRequested.load(std::memory_order_acquire))
+        return;
+    if (g_ixdeSucceeded.load(std::memory_order_acquire))
+        return;
+    if (!g_tapPathReady.load(std::memory_order_acquire))
+        return;
+
+    g_ixdeSurfaceInterestOrKick.store(1, std::memory_order_release);
+    ScheduleIxdeThreadIfPossible();
 }
 
 void TaskbarCompat_StopXamlDiagnostics() noexcept
@@ -559,12 +578,21 @@ void TaskbarCompat_StopXamlDiagnostics() noexcept
     // DllCanUnloadNow=S_OK до CoFree на STA IXDE/marshal — GlassCompat ещё держит LoadLibrary.
     TaskbarCompatCom::g_shutdownDone.store(true, std::memory_order_release);
 
+    // Снимаем сессию TAP всегда — даже если Advise не удался: marshal-окно
+    // создаётся в SetSite до Advise и может пережить FreeLibrary(TaskbarCompat).
+    TaskbarCompat::TaskbarTapSite::ShutdownActiveWatcher();
+
     const bool diagWasRunning = g_diagRunning.load(std::memory_order_acquire);
     if (diagWasRunning)
     {
         DebugLog(DBG_IMPORTANT, L"[TaskbarCompat][XamlDiag] Stop: BEGIN");
-        TaskbarCompat::TaskbarTapSite::ShutdownActiveWatcher();
         g_diagRunning.store(false, std::memory_order_release);
+    }
+    else
+    {
+        DebugLog(
+            DBG_IMPORTANT,
+            L"[TaskbarCompat][XamlDiag] TAP не был в diagRunning — без ActiveWatcher или IXDE не поднят");
     }
 
     // После Shutdown TAP — отпускаем STA IXDE-потока (иначе CoUninitialize ломает Advise/Unadvise).

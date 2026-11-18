@@ -15,6 +15,8 @@ namespace
 {
     std::atomic<bool> g_initialized{ false };
     std::atomic<bool> g_shutdownComplete{ false };
+    // Пин образа WndCompat на время жизни сессии TaskbarCompat (Initialize → Shutdown).
+    HMODULE g_wndCompatPin{ nullptr };
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI TaskbarCompat_Initialize(HMODULE)
@@ -90,6 +92,26 @@ extern "C" __declspec(dllexport) BOOL WINAPI TaskbarCompat_Initialize(HMODULE)
         }
     }
 
+    // Пин образа WndCompat на всё время жизни сессии TaskbarCompat (Initialize → Shutdown).
+    // WndCompat держит субклассы/пропы на окнах трея и DesktopWindowContentBridge (установленные
+    // WinUiContentBridgeHost из уведомлений TaskbarCompat), а таймеры TaskbarCompat вызывают
+    // WndCompat_RescanTaskbarDesktopWindowContentBridges. Выгрузка WndCompat до конца
+    // TaskbarCompat_Shutdown оставляет в дереве explorer указатели на код в выгруженном
+    // образе — следующая мутация XAML-дерева падает с AV (дамп explorer.exe.55880,
+    // c0000005 чтение [rax+18h] внутри образа WndCompat после FreeLibrary).
+    if (const HMODULE hWndCompatPinSrc = GetModuleHandleW(L"WndCompat.dll"))
+    {
+        using PinFn = void(WINAPI*)();
+        if (const auto pfn = reinterpret_cast<PinFn>(
+                GetProcAddress(hWndCompatPinSrc, "WndCompat_FlushPendingDesktopBridges")))
+        {
+            (void)::GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                reinterpret_cast<LPCWSTR>(pfn),
+                &g_wndCompatPin);
+        }
+    }
+
     DebugLog(DBG_IMPORTANT, L"[TaskbarCompat][Core] Initialize: END");
     (void)Shared::InjectProcessMap::TrySetDiagLifecycle(
         GetCurrentProcessId(),
@@ -149,6 +171,15 @@ extern "C" __declspec(dllexport) BOOL WINAPI TaskbarCompat_Shutdown()
         L"[TaskbarCompat][Core] CoFreeUnusedLibraries: after objectCount=%ld serverLocks=%ld",
         static_cast<long>(TaskbarCompatCom::g_objectCount.load(std::memory_order_acquire)),
         static_cast<long>(TaskbarCompatCom::g_serverLocks.load(std::memory_order_acquire)));
+
+    // Выпускаем пин WndCompat последними: таймеры отменены (ShutdownActiveWatcher),
+    // marshal-окно уничтожено, CoFreeUnusedLibraries отработало — модуль больше не требуется.
+    if (g_wndCompatPin)
+    {
+        (void)::FreeLibrary(g_wndCompatPin);
+        g_wndCompatPin = nullptr;
+        DebugLog(DBG_NORMAL, L"[TaskbarCompat][Core] WndCompat pin released");
+    }
 
     g_shutdownComplete.store(true, std::memory_order_release);
     g_initialized.store(false, std::memory_order_release);
