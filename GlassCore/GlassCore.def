@@ -17,6 +17,7 @@ EXPORTS
     GlassCore_InvalidateThemedChromeOnTrackedRoots
     GlassCore_IsEngineReady
     GlassCore_IsExplorerAuxiliaryRootHwnd
+    GlassCore_IsLogWorkerAlive
     GlassCore_LogViewerEnsureEngine
     GlassCore_NotifyExistingXamlHostDlls
     GlassCore_OnUserThemePaintSettingsChanged

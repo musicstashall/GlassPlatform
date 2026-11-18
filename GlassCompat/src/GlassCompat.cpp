@@ -1102,6 +1102,23 @@ namespace
         return TRUE;
     }
 
+    using IsLogWorkerAliveFn = BOOL(WINAPI*)(void);
+
+    // Гейт выгрузки: экспорт Xxx_IsLogWorkerAlive сообщает, что воркер лога
+    // модуля ещё исполняет код его образа (Stop() в Shutdown() отсоединил его
+    // с бюджетом). Дамп ShellExperienceHost.exe 17.11.2026: FreeLibrary при
+    // живом воркере снимал образ под выполняющимся join → c0000005.
+    // Экспорт отсутствует (смешанные версии/Release-сборка) — считаем, что
+    // воркера нет: поведение как до правки.
+    [[nodiscard]] bool IsPeerLogWorkerAlive(HMODULE hMod, const char* exportName) noexcept
+    {
+        if (!hMod || !exportName)
+            return false;
+        auto pfn = reinterpret_cast<IsLogWorkerAliveFn>(
+            ::GetProcAddress(hMod, exportName));
+        return pfn != nullptr && pfn() != FALSE;
+    }
+
     // R5b (прогон 6, explorer 20124): AV 0xC0000005 в Windows.UI.Xaml.dll+0x8E122,
     // чтение по адресу 0x7FF91E2BFBB0 — вне списка модулей (уже размотанный образ).
     // Точный модуль не определить без его размера, поэтому размер пишем в module_free:
@@ -1211,6 +1228,13 @@ namespace
         UnloadResult result = UnloadResult::Success;
         const bool isExplorer = (processName == L"explorer.exe");
         ULONGLONG forcedUnloadMask = 0;
+        // true — хоть один модуль оставлен намеренно (stale-колбэки или живой
+        // воркер лога). Тогда фазу CompatDone не публикуем: слепой ForceUnload
+        // снаружи снял бы образ под оставленным кодом (дамп 17.11).
+        bool anyModuleKept = false;
+        // Пин образа WndCompat на время BeginShutdown (см. шаг 3 ниже) —
+        // снимается в блоке решения о выгрузке WndCompat.
+        HMODULE wndShutdownPin = nullptr;
 
         // STOP S0: passthrough explorerframe ExtendFrame/DWM до XAML CHROME_REDRAW (glass ON, policy ещё true).
         if (isExplorer && g_hCore)
@@ -1361,6 +1385,25 @@ namespace
             if (pWndShutdown)
             {
                 result |= UnloadResult::BeginWnd_Called;
+
+                // Пин образа WndCompat на всё время BeginShutdown и до решения
+                // о выгрузке. Дамп ShellExperienceHost.exe 17.11.2026: единственный
+                // кадр AV — join+0x81 на GUI-потоке (стек на строке 1368, до
+                // FreeLibrary(savedWnd) не дошёл), выгрузивший поток в дампе не
+                // виден, в исходниках других FreeLibrary(WndCompat) нет.
+                // WndCompat снимает свои WinEvent/GetMessage-хуки внутри
+                // BeginShutdown до Stop — OS-ссылка на модуль уходит
+                // deferred-фрилом ещё в окне join, и остаётся ровно наша
+                // LoadLibrary-ссылка: ОДНОГО чужого FreeLibrary (remote
+                // CreateRemoteThread и т.п.) хватает для unmap под выполняющимся
+                // потоком. Пин = вторая ссылка (тот же приём, что пин=2
+                // GlassCompat-самому на время ExecuteShutdown): один чужой
+                // FreeLibrary снимает пин, образ остаётся живым.
+                (void)::GetModuleHandleExW(
+                    GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                    reinterpret_cast<LPCWSTR>(pWndShutdown),
+                    &wndShutdownPin);
+
                 (void)Shared::InjectProcessMap::TrySetShutdownPhase(
                     GetCurrentProcessId(),
                     Shared::InjectProcessMap::ShutdownPhaseWndDetaching);
@@ -1371,6 +1414,8 @@ namespace
                     Shared::InjectProcessMap::ShutdownPhaseWndDone);
                 result |= UnloadResult::BeginWnd_Returned;
                 DebugLog(L"[GlassCompat][Core] [Shutdown] WndCompat_BeginShutdown returned");
+                // wndShutdownPin снимается ниже — в блоке решения о выгрузке
+                // WndCompat (где учитывается и живой воркер лога).
             }
             else
             {
@@ -1403,6 +1448,17 @@ namespace
                     DBG_IMPORTANT,
                     L"[GlassCompat][Core] [Shutdown] skip FreeLibrary GlassCore (init failed / not ready)");
                 hCoreFree = nullptr;
+            }
+
+            // Дамп 17.11: воркер лога GlassCore ещё исполняет код образа
+            // (Stop() отсоединил его с бюджетом) — не выгружаем.
+            if (hCoreFree && IsPeerLogWorkerAlive(hCoreFree, "GlassCore_IsLogWorkerAlive"))
+            {
+                DebugLog(
+                    DBG_IMPORTANT,
+                    L"[GlassCompat][Core] [Shutdown] skip FreeLibrary GlassCore (log worker alive)");
+                hCoreFree = nullptr;
+                anyModuleKept = true;
             }
 
             if (hCoreFree)
@@ -1503,14 +1559,18 @@ namespace
                 AuditGlassMessageWindowsBeforeFree(L"ExplorerCompat", savedExplorer,
                     kExplorerStopClasses, _countof(kExplorerStopClasses));
                 const unsigned staleExplorer = ScanStaleCallbacksBeforeFree("ExplorerCompat", savedExplorer);
-                if (staleExplorer > 0)
+                const bool exLogAlive =
+                    IsPeerLogWorkerAlive(savedExplorer, "ExplorerCompat_IsLogWorkerAlive");
+                if (staleExplorer > 0 || exLogAlive)
                 {
                     // H91: указатели на код модуля ещё лежат в чужих окнах — выгрузка
                     // превратила бы их в висячие. Оставляем модуль жить до снятия ссылок.
+                    // Дамп 17.11: то же для живого воркера лога внутри образа.
+                    anyModuleKept = true;
                     DebugLog(
                         DBG_IMPORTANT,
-                        L"[GlassCompat][Core] [Shutdown] ExplorerCompat kept: stale callbacks in %u windows",
-                        staleExplorer);
+                        L"[GlassCompat][Core] [Shutdown] ExplorerCompat kept: stale=%u logWorkerAlive=%d",
+                        staleExplorer, exLogAlive ? 1 : 0);
                 }
                 else
                 {
@@ -1560,13 +1620,17 @@ namespace
                 // остался в чужом коде».
                 const unsigned staleTaskbar =
                     ScanStaleCallbacksBeforeFree("TaskbarCompat", savedTaskbar);
-                if (staleTaskbar > 0)
+                const bool tbLogAlive =
+                    IsPeerLogWorkerAlive(savedTaskbar, "TaskbarCompat_IsLogWorkerAlive");
+                if (staleTaskbar > 0 || tbLogAlive)
                 {
                     // H91: то же, что для ExplorerCompat — без снятия ссылок модуль не выгружаем.
+                    // Дамп 17.11: + живой воркер лога в образе модуля.
+                    anyModuleKept = true;
                     DebugLog(
                         DBG_IMPORTANT,
-                        L"[GlassCompat][Core] [Shutdown] TaskbarCompat kept: stale callbacks in %u windows",
-                        staleTaskbar);
+                        L"[GlassCompat][Core] [Shutdown] TaskbarCompat kept: stale=%u logWorkerAlive=%d",
+                        staleTaskbar, tbLogAlive ? 1 : 0);
                 }
                 else
                 {
@@ -1627,13 +1691,17 @@ namespace
                 AuditGlassMessageWindowsBeforeFree(L"UICompat", savedUICompat,
                     kUiStopClasses, _countof(kUiStopClasses));
                 const unsigned staleUi = ScanStaleCallbacksBeforeFree("UICompat", savedUICompat);
-                if (staleUi > 0)
+                const bool uiLogAlive =
+                    IsPeerLogWorkerAlive(savedUICompat, "UICompat_IsLogWorkerAlive");
+                if (staleUi > 0 || uiLogAlive)
                 {
                     // H91: то же, что для ExplorerCompat — без снятия ссылок модуль не выгружаем.
+                    // Дамп 17.11: + живой воркер лога в образе модуля.
+                    anyModuleKept = true;
                     DebugLog(
                         DBG_IMPORTANT,
-                        L"[GlassCompat][Core] [Shutdown] UICompat kept: stale callbacks in %u windows",
-                        staleUi);
+                        L"[GlassCompat][Core] [Shutdown] UICompat kept: stale=%u logWorkerAlive=%d",
+                        staleUi, uiLogAlive ? 1 : 0);
                 }
                 else
                 {
@@ -1718,15 +1786,56 @@ namespace
                     kWndStopClasses, _countof(kWndStopClasses));
                 // H91: не unmap WndCompat, пока скан видит наш код в GWLP/comctl32-цепочке.
                 const unsigned staleWndProcs = ScanStaleCallbacksBeforeFree("WndCompat", savedWnd);
-                if (staleWndProcs == 0)
+                // Дамп ShellExperienceHost.exe 17.11.2026: Stop() в конце
+                // WndCompat::Shutdown() отсоединил ещё живой воркер лога —
+                // WorkerThreadProc в этом же образе. Не выгружаем, пока воркер
+                // не завершится (иначе тот же SEH уже на самом воркере).
+                const bool wndLogAlive =
+                    IsPeerLogWorkerAlive(savedWnd, "WndCompat_IsLogWorkerAlive");
+                if (staleWndProcs == 0 && !wndLogAlive)
                 {
                     (void)FreeLibrary(savedWnd);
                     result |= UnloadResult::FreeWnd_Returned;
+
+                    // Снять пин BeginShutdown (шаг 3). Если чужой FreeLibrary
+                    // уже отнял нашу базовую ссылку, этот же FreeLibrary(savedWnd)
+                    // снял остаток и модуль ушёл — пин снимать нечего
+                    // (GetModuleHandle == null); если модуль жив — снимаем пин.
+                    if (wndShutdownPin && GetModuleHandleW(L"WndCompat.dll"))
+                        (void)::FreeLibrary(wndShutdownPin);
+                }
+                else
+                {
+                    // Пин остаётся и держит модуль вместе с гейтом воркера —
+                    // как FreeSelf-gate выше (остаток лучше AV).
+                    anyModuleKept = true;
+                    DebugLog(
+                        DBG_IMPORTANT,
+                        L"[GlassCompat][Core] [Shutdown] WndCompat kept: stale=%u logWorkerAlive=%d pin=%d",
+                        staleWndProcs, wndLogAlive ? 1 : 0,
+                        wndShutdownPin ? 1 : 0);
                 }
             }
         }
 
-        // 5. Сообщаем результат в GlassPlatform.
+        // 5. Фаза CompatDone = «ExecuteShutdown завершился целиком, все решения
+        // «оставить модуль» приняты» — единственный сигнал, после которого
+        // слепой ForceUnload снаружи снова разрешён (гейт в
+        // ForceUnloadGlassModules). Если что-то оставили — фазу не публикуем:
+        // оставленный код нельзя выгружать извне (дамп 17.11).
+        if (anyModuleKept)
+        {
+            DebugLog(
+                DBG_IMPORTANT,
+                L"[GlassCompat][Core] [Shutdown] CompatDone NOT published: modules kept (force-unload stays blocked)");
+        }
+        else
+        {
+            (void)Shared::InjectProcessMap::TrySetShutdownPhase(
+                pid, Shared::InjectProcessMap::ShutdownPhaseCompatDone);
+        }
+
+        // 6. Сообщаем результат в GlassPlatform.
         // Физическую верификацию выгрузки делает GlassPlatform снаружи через Toolhelp —
         // GetModuleHandleW здесь ненадёжен из-за async системного cleanup.
         DebugLog(L"[GlassCompat][Core] ExecuteShutdown: COMPLETE, reporting result=0x%08X",
@@ -2452,11 +2561,28 @@ namespace
     // H26 EnumWindows+SendMessageTimeout ОТКАТАН: для Taskmgr synced=0 (не помогает);
     // в explorer давал sync WM_NULL на 80+ top-level после S0/S1 — риск для UI restore,
     // но корневой баг шапки при ShellExt-stop — VTC-gate (g_hostBarRestoreOnIslandUiQueue).
-    [[noreturn]] void FreeSelfAndExitThread(
+    // Раньше [[noreturn]]: теперь возможен ранний return — воркер лога жив,
+    // выгружаться нельзя (см. дамп 17.11: тот же сценарий у WndCompat).
+    void FreeSelfAndExitThread(
         HMODULE hSelfRef,
         ULONGLONG path) noexcept
     {
         (void)path;
+
+#if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
+        // Дамп ShellExperienceHost.exe 17.11.2026: Stop() может отсоединить
+        // ещё живой воркер лога GlassCompat — его WorkerThreadProc в этом же
+        // образе. Не выгружаемся: pin hSelfRef намеренно остаётся и держит
+        // DLL (остаток лучше AV), поток просто завершается.
+        if (Shared::Log::GlassLogClient::Instance().IsWorkerAlive())
+        {
+            DebugLog(
+                DBG_IMPORTANT,
+                L"[GlassCompat][Core] FreeSelf skipped: log worker alive — module kept");
+            return;
+        }
+#endif
+
         (void)Shared::InjectProcessMap::TryClearPid(GetCurrentProcessId());
 
         // H69: без DispatchMessage (explorer). H72: wake callback-потоков в GUI до вызова;
@@ -3726,6 +3852,9 @@ namespace
                         watcherPath,
                         GetCurrentProcessId());
                     FreeSelfAndExitThread(hMod, watcherPath);
+                    // FreeSelf мог вернуться (живой воркер лога — модуль
+                    // остаётся): поток выходит, pin hMod держит DLL.
+                    return 0;
                 },
                 pack,
                 0,

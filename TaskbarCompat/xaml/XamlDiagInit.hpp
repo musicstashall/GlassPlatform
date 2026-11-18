@@ -18,6 +18,9 @@ __declspec(dllexport) void WINAPI TaskbarCompat_ReleaseTrayIxdeSurfaceInterest()
 // WndCompat: после финального FAILED бёрста сбросить счётчик перед повторными Attach-бампами.
 __declspec(dllexport) void WINAPI TaskbarCompat_ResetIxdeSchedulingAfterFailure() noexcept;
 
+// Повтор IXDE/TAP после неудачного AdviseVisualTreeChange (таймер marshal-окна TaskbarTapSite).
+__declspec(dllexport) void WINAPI TaskbarCompat_ScheduleIxdeRetry() noexcept;
+
 void TaskbarCompat_StopXamlDiagnostics() noexcept;
 
 }

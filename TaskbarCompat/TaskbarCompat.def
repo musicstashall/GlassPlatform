@@ -4,6 +4,7 @@ EXPORTS
     TaskbarCompat_Initialize
     TaskbarCompat_Shutdown
     TaskbarCompat_IsShutdownComplete
+    TaskbarCompat_IsLogWorkerAlive
     TaskbarCompat_HandleWinEvent
     TaskbarCompat_NotifyContentBridgeWindow
     TaskbarCompat_NotifyTrayTrackBarHwnd

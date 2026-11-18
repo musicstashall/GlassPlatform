@@ -42,6 +42,16 @@ public sealed class InjectRuntimeEntry
     /// </summary>
     public bool IsFading { get; init; }
 
+    /// <summary>
+    /// Отвергнутый слот, у которого здоровый скан не подтвердил DLL (и State не
+    /// Unloading/Unloaded): ModuleCompat здесь — отказ гейта (DllMain FALSE, лоадер
+    /// снял образ), а не присутствие модуля. Жёлтую точку в таблице оставляем — это
+    /// маркер строки «отвергнутые»; флаг лишь запрещает выгрузку: force без модуля
+    /// вернёт Failed и слот не почистит. State на стопе меняется → флаг снимается
+    /// и кнопка выгрузки возвращается (план rejected_status_after_stop, дыра 5).
+    /// </summary>
+    public bool ModuleLoadUnconfirmed { get; init; }
+
     public string ArchLabel => Arch == NativeHostInterop.InjectArch.X86 ? "x86" : "x64";
 
     /// <summary>
@@ -61,9 +71,9 @@ public sealed class InjectRuntimeEntry
             ? $"PID {Pid}"
             : $"PID {Pid} · (x86)";
 
-    /// <summary>Soft unload (событие) или Force FreeLibrary — при любом ненулевом ModuleBits.</summary>
+    /// <summary>Soft unload (событие) или Force FreeLibrary — при подтверждённом ModuleBits.</summary>
     public bool CanRequestUnload =>
-        ModuleBits != 0 && !NeedsX86ForceAgentWithoutPackage;
+        ModuleBits != 0 && !ModuleLoadUnconfirmed && !NeedsX86ForceAgentWithoutPackage;
 
     /// <summary>
     /// GS x64 + residual/off: Force через SysWOW64 rundll32 требует x86 InstallPath.
@@ -246,12 +256,18 @@ public sealed class InjectRuntimeMonitor
         // Residual / платформа off — только Force (нет слушателя UnloadRequest).
         // Active — soft; при отсутствии события native сам перейдёт к Force.
         // Любой хост (x86|x64): soft UnloadRequest слушает InjectMap той же разрядности.
+        // Отвергнутый со State Unloading/Unloaded — тоже Force (план
+        // rejected_status_after_stop, дыра 3): watcher мог пройти первый Wait и
+        // закрыть UnloadRequest — сигнал потерялся бы, а «успех» soft был бы ложным.
         var anyHost = ReloadRenderService.IsAnyGlassPlatformRunning();
         bool force;
         if (entry is null)
             force = !anyHost;
         else
-            force = entry.Beacon == InjectRuntimeBeacon.Residual || !anyHost;
+            force = entry.Beacon == InjectRuntimeBeacon.Residual
+                || !anyHost
+                || entry.State is NativeHostInterop.InjectState.Unloading
+                    or NativeHostInterop.InjectState.Unloaded;
 
         var ok = force
             ? NativeHostInterop.ForceUnloadProcess(pid)
@@ -446,6 +462,9 @@ public sealed class InjectRuntimeMonitor
         }
 
         NativeHostInterop.InjectScanResult[] scan;
+        // false — скан недоступен/сбойный: негатив («DLL нет») в Merge игнорируем,
+        // позитив (найденная DLL) доверяем всегда (план rejected_status_after_stop).
+        bool scanValid = false;
         if (platformRunning)
         {
             // slots ∪ sticky ∪ bridge — не терять PID, выпавший из карты до Module32.
@@ -479,6 +498,8 @@ public sealed class InjectRuntimeMonitor
                 targetedScanOk = false;
             }
 
+            scanValid = targetedScanOk;
+
             // CW hosts (ShellHost/SEH/…) часто вне карты — добрать Module32 по exe.
             scan = MergeScanResults(scan, ScanCwHostProcesses(selfPid));
             // Не чистить sticky при сбое Scan — иначе ложный drop и «воскрешение» на sweep.
@@ -490,6 +511,7 @@ public sealed class InjectRuntimeMonitor
             var fullScanOk = NativeHostInterop.ScanGlassModules(null, out scan);
             if (!fullScanOk)
                 scan = Array.Empty<NativeHostInterop.InjectScanResult>();
+            scanValid = fullScanOk;
             // Полный scan + bridge/sticky seed (если full miss на AC).
             var seedSet = new HashSet<uint>();
             foreach (var pid in bridgePids)
@@ -516,7 +538,7 @@ public sealed class InjectRuntimeMonitor
         _ = NativeHostInterop.RefreshInjectResidualSticky(GlassPlatformArch.X64);
         _ = NativeHostInterop.RefreshInjectResidualSticky(GlassPlatformArch.X86);
 
-        var merged = Merge(platformRunning, residualSweep, slots, scan, selfPid);
+        var merged = Merge(platformRunning, residualSweep, slots, scan, scanValid, selfPid);
         // Выгорание точек включаем только когда платформа уже останавливается: при живой
         // платформе строка исчезает потому, что процесс закрылся сам, — там гасить нечего.
         return WithFade(merged, fadeActive: !platformRunning || residualSweep);
@@ -666,6 +688,7 @@ public sealed class InjectRuntimeMonitor
             DiagLifecycle = src.DiagLifecycle,
             SubclassWindowTotal = src.SubclassWindowTotal,
             SubclassKindMask = src.SubclassKindMask,
+            ModuleLoadUnconfirmed = src.ModuleLoadUnconfirmed,
             State = src.State,
             IsToolProcess = src.IsToolProcess,
             IsFading = fading,
@@ -961,6 +984,7 @@ public sealed class InjectRuntimeMonitor
         bool residualSweep,
         NativeHostInterop.InjectMapSlot[] slots,
         NativeHostInterop.InjectScanResult[] scan,
+        bool scanValid,
         uint selfPid)
     {
         var scanByPid = scan.ToDictionary(s => s.Pid, s => s);
@@ -985,7 +1009,8 @@ public sealed class InjectRuntimeMonitor
                 // H42: AppContainer Toolhelp часто неполный (только Compat) — не даём scan
                 // сузить Alive-слот (иначе UICompat «пропадает» из таблицы при живой платформе).
                 uint bits = slot.ModuleBits;
-                if (scanned.Pid != 0 && scanned.ModuleBits != 0)
+                var scanHit = scanned.Pid != 0 && scanned.ModuleBits != 0;
+                if (scanHit)
                 {
                     var scanSubsetOfSlot = (scanned.ModuleBits & slot.ModuleBits) == scanned.ModuleBits
                         && scanned.ModuleBits != slot.ModuleBits;
@@ -998,11 +1023,35 @@ public sealed class InjectRuntimeMonitor
                     ? slot.ExeName
                     : (scanned.ExeName ?? string.Empty);
 
+                var loadUnconfirmed = false;
                 InjectRuntimeBeacon beacon;
                 if (slot.Kind is NativeHostInterop.InjectKind.RejectedBlockList
                     or NativeHostInterop.InjectKind.RejectedForbidden)
                 {
-                    beacon = InjectRuntimeBeacon.Rejected;
+                    // План rejected_status_after_stop (дыра 1): раньше Kind перебивал
+                    // State — отвергнутый догорал жёлтым после стопа и не считался
+                    // остатком (ResidualCount/HasResiduals). Красный «невыгружен» —
+                    // только когда есть основания: State Unloading/Unloaded пишет
+                    // лишь watcher с реально загруженной DLL (популяция DllMain-гейта
+                    // — pop1 — не покидает Alive), либо скан подтверждает DLL, пока
+                    // идёт residual-sweep (слот опаздывает с очисткой).
+                    bool stateResidual = slot.State is NativeHostInterop.InjectState.Unloading
+                        or NativeHostInterop.InjectState.Unloaded;
+                    if (stateResidual || (scanHit && residualSweep))
+                        beacon = InjectRuntimeBeacon.Residual;
+                    else
+                        beacon = InjectRuntimeBeacon.Rejected;
+
+                    // Дыра 5 (уточнение после регрессии): бит ModuleCompat — это
+                    // отказ гейта (DllMain FALSE → лоадер снимает образ), а не
+                    // наличие DLL. Сам бит НЕ гасим: жёлтая точка в колонке —
+                    // маркер строки «отвергнутые», потерять её нельзя. «Не держать
+                    // как загруженный» переносим на готовность к выгрузке: без
+                    // подтверждения DLL выгрузку не предлагаем (force без модуля
+                    // Failed и слот не почистит). При State Unloading флаг не
+                    // ставим — там watcher есть, кнопка нужна для ручного force.
+                    if (!stateResidual && !scanHit && scanValid)
+                        loadUnconfirmed = true;
                 }
                 else if (slot.State is NativeHostInterop.InjectState.Unloading
                     or NativeHostInterop.InjectState.Unloaded)
@@ -1030,6 +1079,7 @@ public sealed class InjectRuntimeMonitor
                     State = slot.State,
                     ModulesText = FormatModules(bits),
                     IsToolProcess = slotIsTool,
+                    ModuleLoadUnconfirmed = loadUnconfirmed,
                 });
             }
 

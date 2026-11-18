@@ -72,6 +72,11 @@ namespace Shared::InjectProcessMap
         ShutdownPhaseUiDone           = 4,  // UICompat готов к FreeLibrary
         ShutdownPhaseWndDetaching     = 5,  // WndCompat снимает subclass'ы
         ShutdownPhaseWndDone          = 6,  // WndCompat готов к FreeLibrary
+        // ExecuteShutdown завершился ЦЕЛИКОМ, включая решения «оставить модуль»
+        // (stale-колбэки / живой воркер лога). Только после этой фазы слепой
+        // ForceUnload снаружи снова разрешён (дамп SEH 17.11.2026).
+        // Не публикуется, если хоть один модуль оставлен.
+        ShutdownPhaseCompatDone       = 7,
     };
 
     /// Промежуточные состояния подсистем (пишут модули при старте/остановке).
@@ -146,6 +151,8 @@ namespace Shared::InjectProcessMap
     [[nodiscard]] bool TrySetDiagLifecycle(DWORD pid, std::uint32_t lifecycleBit, bool active) noexcept;
     /// Записать фазу выгрузки (ShutdownPhase) в слот.
     [[nodiscard]] bool TrySetShutdownPhase(DWORD pid, std::uint32_t phase) noexcept;
+    /// Прочитать фазу выгрузки (false — слота нет; outPhase=ShutdownPhaseNone).
+    [[nodiscard]] bool TryGetShutdownPhase(DWORD pid, std::uint32_t& outPhase) noexcept;
     [[nodiscard]] bool TryPublishSubclassStats(
         DWORD pid,
         std::uint32_t windowTotal,

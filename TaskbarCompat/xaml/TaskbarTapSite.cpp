@@ -37,6 +37,8 @@ namespace TaskbarCompat
         HWND s_marshalHwnd{};
         constexpr unsigned kPatchReassertRoundCount       = 12;
         unsigned           s_patchReassertRoundsRemaining = 0;
+        constexpr UINT_PTR kTrayIxdeRetryTimerId          = 0x5487;
+        constexpr unsigned kTrayIxdeRetryIntervalMs       = 20000; // мс между бёрстами при неудаче Advise
 
         [[nodiscard]] bool IsTapShutdownRequested() noexcept
         {
@@ -64,6 +66,7 @@ namespace TaskbarCompat
             KillTimer(hwnd, kTrayBridgeRescanTimerDeferredId);
             KillTimer(hwnd, kTrayBridgeRescanTimerDelayedSecondId);
             KillTimer(hwnd, kTrayPatchReassertTimerId);
+            KillTimer(hwnd, kTrayIxdeRetryTimerId);
             s_patchReassertRoundsRemaining = 0;
         }
 
@@ -81,6 +84,29 @@ namespace TaskbarCompat
             }
 
             (void)SendMessageW(hwnd, TaskbarCompatMsg::WM_GLASS_TASKBAR_CANCEL_TIMERS, 0, 0);
+        }
+
+        // Таймер повторной установки IXDE/TAP: запускается из TaskbarCompat_ResetIxdeSchedulingAfterFailure,
+        // когда AdviseVisualTreeChange не удался (E_UNEXPECTED — раса с XAML-хостом при старте). Без новых
+        // уведомлений о мостах трея повтор не произойдёт никогда, и таскбар останется без патчей до следующего
+        // цикла платформы. Таймер перезапускает бёрст IXDE с бэкоффом до успеха или остановки платформы.
+        void StartIxdeRetryTimerImpl() noexcept
+        {
+            if (IsTapShutdownRequested() || !s_marshalHwnd || !IsWindow(s_marshalHwnd))
+                return;
+
+            KillTimer(s_marshalHwnd, kTrayIxdeRetryTimerId);
+            if (SetTimer(
+                    s_marshalHwnd,
+                    kTrayIxdeRetryTimerId,
+                    kTrayIxdeRetryIntervalMs,
+                    nullptr) == 0)
+            {
+                DebugLog(
+                    DBG_WARNING,
+                    L"[TaskbarCompat][TapSite] SetTimer(IXDE retry) failed GLE=%u",
+                    static_cast<unsigned>(GetLastError()));
+            }
         }
 
         void ReloadSettingsAndReapplyOnMarshalThread() noexcept
@@ -382,6 +408,17 @@ namespace TaskbarCompat
                 w->Release();
                 return 0;
             }
+            if (msg == TaskbarCompatMsg::WM_GLASS_TASKBAR_IXDE_RETRY)
+            {
+                KillTimer(hwnd, kTrayIxdeRetryTimerId);
+                // Back-off повтор установки TAP: AdviseVisualTreeChange мог не
+                // удаться из-за расы с XAML-хостом (E_UNEXPECTED) — пробуем ещё раз.
+                // fStop/успех проверяются внутри TaskbarCompat_ScheduleIxdeRetry;
+                // таймер не перезапускается здесь — следующий цикл стартует из
+                // TaskbarCompat_ResetIxdeSchedulingAfterFailure при новой неудаче.
+                TaskbarCompat_ScheduleIxdeRetry();
+                return 0;
+            }
             if (msg == WM_TIMER && wParam == kTrayRedrawDeferredTimerId)
             {
                 if (IsTapShutdownRequested())
@@ -557,6 +594,11 @@ namespace TaskbarCompat
         g_pendingSettingsValid.store(true, std::memory_order_release);
     }
 
+    void TaskbarTapSite::StartIxdeRetryTimer() noexcept
+    {
+        StartIxdeRetryTimerImpl();
+    }
+
     TaskbarTapSite::TaskbarTapSite() noexcept
     {
         TaskbarCompatCom::g_objectCount.fetch_add(1, std::memory_order_relaxed);
@@ -638,6 +680,15 @@ namespace TaskbarCompat
                 m_site = nullptr;
             }
             return S_OK;
+        }
+
+        if (IsTapShutdownRequested())
+        {
+            // Новая сессия TAP после остановки платформы — создать нельзя: IXDE-поток
+            // мог засидеться в бёрсте и дойти до SetSite уже после TaskbarCompat_Shutdown.
+            SafeOutputDebugStringW(
+                L"[TaskbarCompat][TapSite] SetSite после остановки платформы — отказ\n");
+            return E_UNEXPECTED;
         }
 
         bool expectedBusy = false;
@@ -826,6 +877,38 @@ namespace TaskbarCompat
 
         if (!watcher && !vts)
         {
+            // Нет активной IXDE-сессии (Advise не удался или сессия не успела создать watcher),
+            // но marshal-окно могло остаться: EnsureTaskbarMarshalWindow вызывается в SetSite
+            // до Advise. После FreeLibrary(TaskbarCompat) его lpfnWndProc указывает в
+            // выгруженный модуль — любое сообщение в это окно = краш explorer
+            // (дамп explorer.exe.55880). Унижаем таймеры и уничтожаем окно.
+            if (const HWND hMsg = (s_marshalHwnd && IsWindow(s_marshalHwnd)) ? s_marshalHwnd : nullptr)
+            {
+                const DWORD wndTid = GetWindowThreadProcessId(hMsg, nullptr);
+                if (wndTid != 0 && GetCurrentThreadId() == wndTid)
+                {
+                    DestroyMarshalWindowOnOwnerThread(hMsg);
+                }
+                else
+                {
+                    DWORD_PTR result = 0;
+                    constexpr UINT kTimeoutMs = 15'000;
+                    if (SendMessageTimeoutW(
+                            hMsg,
+                            TaskbarCompatMsg::WM_GLASS_TASKBAR_XAML_SHUTDOWN,
+                            0,
+                            0,
+                            SMTO_ABORTIFHUNG,
+                            kTimeoutMs,
+                            &result) == 0)
+                    {
+                        DebugLog(
+                            DBG_WARNING,
+                            L"[TaskbarCompat][TapSite] Shutdown: не удалось отправить WM_GLASS_TASKBAR_XAML_SHUTDOWN маршал-окну GLE=%u",
+                            static_cast<unsigned>(GetLastError()));
+                    }
+                }
+            }
             DebugLog(DBG_NORMAL, L"[TaskbarCompat][TapSite] Shutdown: nothing to stop");
             return;
         }

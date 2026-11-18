@@ -138,6 +138,22 @@ namespace Shared::ForceUnloadGlassModules
         if (TargetNeedsX86Agent(pid))
             return ForceUnloadResult::NeedsX86Agent;
 
+        // Гейт против слепой выгрузки во время shutdown: FreeLibrary по
+        // чужому PID снимает образ, пока потоки ещё исполняют его код —
+        // дамп ShellExperienceHost.exe 17.11.2026 (c0000005 в
+        // WndCompat!std::thread::join под уже выгруженным WndCompat).
+        //   None (0)      — shutdown не начинался: штатный unlock, разрешён;
+        //   CompatDone(7) — ExecuteShutdown завершился целиком (включая
+        //                   решения «оставить модуль»): остаток, разрешён;
+        //   1..6          — shutdown в процессе: выгрузка откладывается.
+        std::uint32_t phase = Shared::InjectProcessMap::ShutdownPhaseNone;
+        (void)Shared::InjectProcessMap::TryGetShutdownPhase(pid, phase);
+        if (phase != Shared::InjectProcessMap::ShutdownPhaseNone &&
+            phase != Shared::InjectProcessMap::ShutdownPhaseCompatDone)
+        {
+            return ForceUnloadResult::ShutdownInProgress;
+        }
+
         HANDLE hProcess = OpenProcess(
             PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION |
                 PROCESS_VM_WRITE | PROCESS_VM_READ | PROCESS_DUP_HANDLE,

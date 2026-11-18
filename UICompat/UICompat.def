@@ -4,6 +4,7 @@ EXPORTS
     UICompat_Initialize
     UICompat_Shutdown
     UICompat_IsShutdownComplete
+    UICompat_IsLogWorkerAlive
     UICompat_HandleWinEvent
     UICompat_NotifyCoreWindow
     UICompat_NotifyShellSurfaceWindow

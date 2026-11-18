@@ -276,6 +276,9 @@ namespace TaskbarCompatMsg
     // SendMessage → marshal — снять отложенные таймеры до RunShutdownSession (Stop платформы).
     inline constexpr UINT WM_GLASS_TASKBAR_CANCEL_TIMERS = WM_APP + 0x906;
 
+    // PostMessage → marshal — повтор IXDE/TAP после неудачного AdviseVisualTreeChange (back-off).
+    inline constexpr UINT WM_GLASS_TASKBAR_IXDE_RETRY = WM_APP + 0x907;
+
     // Класс HWND_MESSAGE; WndCompat::Root_Attach не должен субклассить (как ExplorerCompat XAML shutdown).
     inline constexpr wchar_t kTaskbarXamlShutdownWndClass[] = L"GlassTaskbarCompatXamlShutdown";
 }

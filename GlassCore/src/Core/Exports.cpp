@@ -41,6 +41,18 @@ void WINAPI GlassCore_Shutdown()
 }
 
 extern "C" __declspec(dllexport)
+BOOL WINAPI GlassCore_IsLogWorkerAlive()
+{
+#if defined(_DEBUG) && defined(GLASS_ENABLE_LOGGING)
+    // Живой воркер лога = код GlassCore ещё исполняется: GlassCompat не
+    // выгружает DLL (гейт перед циклом FreeLibrary(GlassCore)).
+    return Shared::Log::GlassLogClient::Instance().IsWorkerAlive() ? TRUE : FALSE;
+#else
+    return FALSE;
+#endif
+}
+
+extern "C" __declspec(dllexport)
 void WINAPI GlassCore_HostExitShutdown() noexcept
 {
     GlassCore::Engine::HostExitShutdown();

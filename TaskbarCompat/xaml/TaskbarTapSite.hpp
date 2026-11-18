@@ -49,6 +49,10 @@ namespace TaskbarCompat
         // Reassert 12×4s при OG (Task Scheduler или OpenGlass.dll в dwm.exe).
         static void StartOgPatchReassertIfNeeded() noexcept;
 
+        // Запуск таймера повторной установки IXDE/TAP после неудачного
+        // AdviseVisualTreeChange (back-off, не зависящий от новых уведомлений о мостах трея).
+        static void StartIxdeRetryTimer() noexcept;
+
         // Передаёт настройки реестра в watcher до InitializeXamlDiagnosticsEx.
         // Подхватывается в SetSite на потоке IXDE.
         static void SetPendingSettings(Registry::Settings settings) noexcept;
