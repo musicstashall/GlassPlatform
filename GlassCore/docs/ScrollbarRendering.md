@@ -231,3 +231,35 @@ IAT на comctl32 ставится лениво и **живёт весь про�
 - `WM_GLASS_DETACH_TRACKBAR` (0x20A) уже вводился в §13; добавлено сообщение `WM_GLASS_FLYOUT_CLIENT_REFRESH = WM_APP + 0x225`.
 
 Открыто/требуется: для п.2 и п.3 нужен визуальный материал (скриншот/запись) и точная привязка окна (класс/путь): «ComboBox внутри ComboBoxEx» (inner combo адресной полосы?) и «тулбар с кнопками навигации» (TravelBand/Rebar в диалоге #32770?). В PopupOnly приаттаченные не-whitelist окна стекло получить не могут по коду (PaintDispatcher + RootGdiHooks гейтят по GDI-хукам), поэтому ожидаем лог `[Root][GDI] … black: caller=…` для идентификации источника чёрной кисти; если в логе их нет — причина не в GDI-хуках.
+## 15. Ретест round 5→6: исключение «пирога» шапки диалога, регрессия списков, трекбар в PopupOnly
+
+Ретест #5 (build 594682a): «списоки комбобоксов не получают патчи» + «трекбар по-прежнему белый»; у пользователя есть скриншот/лог на Flyout 0x771230 (ViewControlClass, 173x263) — commit-релиз Patch-refresh (WM_GLASS_FLYOUT_CLIENT_REFRESH) не дал визуала.
+
+Правки:
+
+### 15.1. «Пирог» шапки общего диалога — аттачи в PopupOnly запрещены полностью
+- Новый гейт `WindowClassifier::IsCommonDialogHeaderPieWindow(hWnd)`: true, если цепочка GA_ROOT — это `#32770`/`CabinetWClass`/`ExploreWClass` (диалог/проводник), либо любое окно под `Breadcrumb Parent` (крошки). Flyout-попапы (GA_ROOT == сам попап, например «Настройки вида» 0x771230) НЕ попадают под гейт.
+- `WinEventHandler`: ветка ToolBar/Atl_ToolBar/Wtl_SearchBand — skip + лог `skip (PopupOnly dialog-header π)` до any attach (ранее — attach внутри ViewControlClass в диалоге); ветка ReBar — идентичный skip (раньше была и так Full-only, теперь явно); `TryResolveGlassMarkKind` для catch-up marking — тот же skip.
+- `ToolBar_Attach` (ToolbarSubclass.cpp): та же проверка первой строкой — страховка от обхода через `BackdropPolicyRescan` / synthetic CREATE.
+- `ToolBar_Detach`/TextGlow не менялись: Pie-окна просто никогда не получают маркер `Toolbar`/`TextGlow Register` в PopupOnly, т.е. нет ни сессий провайдеров, ни регистрации glow-клиентов.
+- `Rebar_Attach` — был и остаётся Full-only; в PopupOnly rebar «пирога» этот код не исполнял и раньше.
+- Full-режим не затронут нигде (гейты только в ветках `!isFull` + полная проверка в `ToolBar_Attach` по `WinEventHook_GetMode()`).
+
+### 15.2. Регрессия «списки комбобоксов не получают патчи» — диагностика + fallback
+Цепочка: CBN_DROPDOWN → DropDownNotify sink → `ComboLBox_Attach` → (WM_SHOWWINDOW) `OnComboLBoxShow` → `ApplyComboLBoxFlyoutAtShow` → `ApplyPopupSwcaEffect` → если schedulePopupIn (системная combo-анимация ИЛИ `Animation.enable` в DropDown-контексте) → `CreateDropDownPopupIn` → `OnFlyoutAnimationFinished` → `RefreshFlyoutClientAfterUncloak(mode=ComboLBox)` → WM_PRINTCLIENT + `PostMessage(WM_GLASS_FLYOUT_CLIENT_REFRESH)`.
+Отсутствие WM_PAINT в ретесте #5 означает, что либо событие animation-finished не доходит (none of the deferred path — например, анимация не планировалась и repaint не вызывался вовсе), либо сообщение не обрабатывается. Правки:
+- `OnComboLBoxShow` (ComboLBoxHooks): если после `ApplyComboLBoxFlyoutAtShow` defer НЕ установлен (`!FlyoutFrame::IsHostBorderDeferred(hWnd)`), немедленно вызывается `GlassCore::DropDown::RefreshFlyoutClientAfterUncloak(hWnd)` — раньше в этом случае перерисовка не вызывалась вообще (это объясняет «no patches» и при живой WM_SHOWWINDOW-отрисовке внутри pre-uncloak cloak). В deferred-ветке без изменений.
+- `WM_GLASS_FLYOUT_CLIENT_REFRESH` (ComboLBoxSubclass): RDW_ERASE|RDW_INTERNALPAINT добавлены; лог `ok=%d updateRect=%d vis=%d` — видно, дошёл ли RedrawWindow и живо ли окно к моменту вычитки очереди.
+- Новый лимитированный (32) лог `WM_ERASEBKGND black hwnd=…` — подтверждение, что чёрная заливка attached-списка исполняется.
+- Добавлен `<Hooks/DropDown.h>` include; BOM у `WinEventHandler.cpp` сохранён.
+
+### 15.3. Трекбар «белый» в PopupOnly — провайдер/GDI-сессия для kind=TrackBar
+В Full все BeginPaint-сессии (в т.ч. трекбара) идут через PaintDispatcher → PushDC → `Root_MyGetSysColorBrush` подменяет COLOR_WINDOW/BTNFACE/MENU на BLACK в рамках активной сессии → у msctls_trackbar32 непрозрачная плашка заменяется стеклом («Full-mode уже имел нужные патчи»). В PopupOnly Fast-pass возвращал оригинал BeginPaint без сессии (`IsPopupOnlyPaintDispatcherKind` знал только ComboLBox/Toolbar/MonthCal) — отсюда белая плашка, которую не лечил ни TBS_TRANSPARENTBKGND, ни подавление WM_ERASEBKGND (ac67125). Изменения:
+- `PaintDispatcher`: `GlassControlKind::TrackBar` добавлен в `IsPopupOnlyPaintDispatcherKind` — теперь доаттаченный трекбар (маркер при TrackBar_Attach под ViewControlClass) получает сессию и GDI-подмены на время своего WM_PAINT, ровно как в Full.
+- `GlassIsBackdropAllowedForHwnd`: kind==TrackBar → true (аналог ComboLBox), независимо от RootBackdropMode prop на GA_ROOT.
+- WM_ERASEBKGND-подавление (ac67125, `return TRUE`) и Full-путь отрисовки трекбара в Full-путь трекбара изменения не вносились; `TrackBarSubclassProc` (id=3) и ViewControlEngineCustomDraw-гейт также не менялись.
+
+### Открыто
+- Issue 2 (inner ComboBox внутри ComboBoxEx32 чернеет): причина не установлена; ожидаем строки ретеста: `[Root][GDI] GetSysColorBrush black:` / `SelectObject USER32 black:` вокруг момента чернения + классы окон. Без лога фиксировать кодом не будем.
+- Issue 4 («Тип файлов» интерьер): тот же механизм, что 15.2 — ждём `OnComboLBoxShow … repaint inline`, `RefreshFlyoutClientAfterUncloak mode=ComboLBox`, `WM_GLASS_FLYOUT_CLIENT_REFRESH ok= vis=`, `WM_ERASEBKGND black` в логе.
+- Nav-toolbar «пирог»: ждём подтверждения со стороны пользователя, что тулбар навигации/крошки больше не под стеклом; если останется — нужен лог `[WndCompat][WinEvent] ToolBar_Attach: skip (PopupOnly dialog-header π)` либо отсутствие строк `ToolBar_Attach: hwnd=…` для окна панели навигации.

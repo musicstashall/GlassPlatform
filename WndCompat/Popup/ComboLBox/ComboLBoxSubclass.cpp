@@ -14,6 +14,7 @@
 
 #include <vector>
 #include <algorithm>
+#include <atomic>
 #include <windowsx.h>
 
 namespace
@@ -192,10 +193,15 @@ namespace
         // может не дать WM_PAINT. Здесь — обычный асинхронный поток: принудительно красим.
         if (uMsg == WndCompat::WM_GLASS_FLYOUT_CLIENT_REFRESH)
         {
+            // Диагностика регрессии (Round-5): RedrawWindow должен дойти до WM_PAINT / WM_ERASEBKGND.
+            const BOOL ok = ::RedrawWindow(hWnd, nullptr, nullptr,
+                RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_INTERNALPAINT);
+            RECT ur{};
+            const BOOL gotUpdate = ::GetUpdateRect(hWnd, &ur, FALSE);
+            const BOOL visible = ::IsWindowVisible(hWnd);
             DebugLog(DBG_IMPORTANT,
-                L"[WndCompat][ComboLBox] WM_GLASS_FLYOUT_CLIENT_REFRESH: repaint hwnd=0x%p", hWnd);
-            ::RedrawWindow(hWnd, nullptr, nullptr,
-                RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+                L"[WndCompat][ComboLBox] WM_GLASS_FLYOUT_CLIENT_REFRESH: repaint hwnd=0x%p ok=%d updateRect=%d vis=%d",
+                hWnd, ok ? 1 : 0, gotUpdate ? 1 : 0, visible ? 1 : 0);
             return 0;
         }
 
@@ -255,6 +261,11 @@ namespace
 
         case WM_ERASEBKGND:
         {
+            // Диагностика (Round-5): видно, срабатывает ли «чёрная заливка» клиента attached-списка.
+            static std::atomic<unsigned> s_eraseDiag{32};
+            if (s_eraseDiag.fetch_sub(1, std::memory_order_relaxed) < 32)
+                DebugLog(DBG_IMPORTANT, L"[WndCompat][ComboLBox] WM_ERASEBKGND black hwnd=0x%p", hWnd);
+
             HDC hdc = reinterpret_cast<HDC>(wParam);
             RECT clientRect{};
             GetClientRect(hWnd, &clientRect);

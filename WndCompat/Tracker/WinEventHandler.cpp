@@ -931,9 +931,16 @@ namespace
                 {
                     // 1) Проводник / диалоги: родитель WorkerW или SizeableRebar.
                     // 2) Full + хост UI (GlassSettings и т.п.): ReBar прямой дочерний элемент top-level (GA_ROOT).
+                    // PopupOnly: «пирог» шапки общего диалога (навигация + крошки + rebar)
+                    // не аттачим вовсе.
                     HWND parent = GetParent(hWnd);
                     if (!allowGlassForHwnd || !parent)
                         break;
+                    if (!isFull && WindowClassifier::IsCommonDialogHeaderPieWindow(hWnd))
+                    {
+                        DebugLog(L"[WndCompat][WinEvent] Rebar_Attach: skip (PopupOnly dialog-header π) hwnd=0x%p", hWnd);
+                        break;
+                    }
                     const bool shellRebar =
                         WndCompat::IsWindowClass(parent, L"WorkerW")
                         || WndCompat::IsWindowClass(parent, L"SizeableRebar");
@@ -953,7 +960,15 @@ namespace
                 case ControlKind::ToolBar:
                 case ControlKind::Atl_ToolBar:
                 case ControlKind::Wtl_SearchBand:
-                    // Full: все ToolBar; PopupOnly: только внутри ViewControlClass (ATL/WTL — те же условия)
+                    // Full: все ToolBar; PopupOnly: внутри ViewControlClass (ATL/WTL — те же условия),
+                    // НО «пирог» шапки общего диалога (навигационные кнопки / крошки / rebar)
+                    // не аттачим вовсе — см. IsCommonDialogHeaderPieWindow.
+                    if (!isFull && WindowClassifier::IsCommonDialogHeaderPieWindow(hWnd))
+                    {
+                        DebugLog(L"[WndCompat][WinEvent] ToolBar_Attach: skip (PopupOnly dialog-header π) hwnd=0x%p kind=%d", hWnd,
+                            static_cast<int>(kind));
+                        break;
+                    }
                     if (allowGlassForHwnd &&
                         (isFull || WndCompat::IsWindowClass(GetParent(hWnd), L"ViewControlClass") /*&& !(WndCompat::IsWindowClass(GetParent(hWnd), L"ViewControlClass"))*/))
                     {
@@ -2024,6 +2039,8 @@ namespace
         case ControlKind::ToolBar:
         case ControlKind::Atl_ToolBar:
         case ControlKind::Wtl_SearchBand:
+            if (!isFull && WindowClassifier::IsCommonDialogHeaderPieWindow(hWnd))
+                break;
             if (isFull || WndCompat::IsWindowClass(GetParent(hWnd), L"ViewControlClass"))
                 return GK::Toolbar;
             break;

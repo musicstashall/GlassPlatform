@@ -220,6 +220,47 @@ bool WindowClassifier::IsNetUiRibbonToolWindow(HWND hwnd) noexcept
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  IsCommonDialogHeaderPieWindow
+//
+//  «Пирог» шапки общего диалога: навигационные кнопки (ToolbarWindow32), крошки
+//  (Breadcrumb Parent), rebar с полосой адреса. В PopupOnly такие окна не получают
+//  стекло (был бы «патч» поверх чужого диалога), поэтому аттачить их нельзя.
+//  Применение: WinEventHandler (ToolBar/ReBar, PopupOnly) + ToolBar_Attach.
+//  Flyout-попапы (GA_ROOT == сам попап, например стопка «Настройки вида») сюда
+//  НЕ попадают — их аттачить можно.
+// ─────────────────────────────────────────────────────────────────────────────
+bool WindowClassifier::IsCommonDialogHeaderPieWindow(HWND hwnd) noexcept
+{
+    if (!hwnd || !IsWindow(hwnd))
+        return false;
+
+    // Для flyout GA_ROOT == сам flyout; диалоговый toolbar/rebar — GA_ROOT == #32770.
+    const HWND root = GetAncestor(hwnd, GA_ROOT);
+    if (root && root != hwnd)
+    {
+        if (WndCompat::IsWindowClass(root, L"#32770")
+            || WndCompat::IsWindowClass(root, L"CabinetWClass")
+            || WndCompat::IsWindowClass(root, L"ExploreWClass"))
+            return true;
+    }
+
+    // Хлебные крошки: дочерний контрол под «Breadcrumb Parent» — тот же «пирог».
+    HWND cur = hwnd;
+    for (int depth = 0; cur && depth < 16; ++depth)
+    {
+        if (!IsWindow(cur))
+            break;
+        if (WndCompat::IsWindowClass(cur, L"Breadcrumb Parent"))
+            return true;
+        HWND parent = GetParent(cur);
+        if (!parent || parent == cur)
+            break;
+        cur = parent;
+    }
+    return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  GetControlKind
 //
 //  Принимает нормализованное имя (NormalizeWindowClass):

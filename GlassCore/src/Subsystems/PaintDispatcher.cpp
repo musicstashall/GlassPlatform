@@ -59,6 +59,12 @@ namespace GlassCore::PaintDispatcher
         case GlassControlKind::ComboLBox:
         case GlassControlKind::Toolbar:
         case GlassControlKind::MonthCal:
+        case GlassControlKind::TrackBar:
+            // TrackBar: в Full все сессии идут через провайдеров/GDI-подмены
+            // (SetBkBrush COLOR_WINDOW/BTNFACE/MENU → BLACK в Root GDI-хуках);
+            // в PopupOnly то же самое нужно доаттаченным слайдерам попапа
+            // «Настройки вида», иначе GetSysColorBrush no-op → белая плашка
+            // (Round-5: «трекбар по-прежнему белый»).
             return true;
         default:
             return false;

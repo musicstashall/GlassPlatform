@@ -28,6 +28,7 @@
 #include "CorePch.h"
 
 #include <Hooks/ComboLBox.h>
+#include <Hooks/DropDown.h>
 #include <Hooks/ScrollBarDrawTheme.h>
 #include <Hooks/ScrollBarTheme.h>
 #include <Subsystems/PaintDispatcher.h>
@@ -1615,6 +1616,20 @@ namespace GlassCore::ComboLBox
             hWnd, static_cast<int>(isComboBoxAnimation));
 
         ApplyComboLBoxFlyoutAtShow(hWnd, isComboBoxAnimation);
+
+        // Round-5 диагностика регрессии: если отложенная анимация НЕ запланирована
+        // (border defer не выставлен), события OnFlyoutAnimationFinished / uncloak
+        // не будет вообще, и клиент attached-ComboLBox так и останется без перерисовки
+        // после ApplyPopupSwcaEffect (Round-5: списки «не получают патчи»).
+        // В этом случае форсируем клиентную перерисовку прямо здесь (WM_PRINTCLIENT
+        // + PostMessage WM_GLASS_FLYOUT_CLIENT_REFRESH). В deferred-ветке ничего не
+        // меняется — там RefreshFlyoutClientAfterUncloak вызывает OnFlyoutAnimationFinished.
+        if (!GlassCore::FlyoutFrame::IsHostBorderDeferred(hWnd))
+        {
+            DebugLog(DBG_IMPORTANT,
+                L"[GlassCore][ComboLBox] OnComboLBoxShow: no defer — repaint inline hwnd=0x%p", hWnd);
+            GlassCore::DropDown::RefreshFlyoutClientAfterUncloak(hWnd);
+        }
     }
 
     void OnComboLBoxDetach(HWND hWnd)
