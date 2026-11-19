@@ -32,6 +32,7 @@
 #include <Hooks/ScrollBarDrawTheme.h>
 #include <Hooks/ScrollBarTheme.h>
 #include <Subsystems/PaintDispatcher.h>
+#include <Subsystems/RootSwcaGradient.h>
 #include <Subsystems/GdiHookUtils.h>
 #include <Subsystems/RenderText.h>
 #include <Helpers/ThemeHelper.h>
@@ -109,7 +110,35 @@ namespace GlassCore::ComboLBox
 
     static inline bool IsActive() noexcept
     {
-        return g_paintRef > 0 || g_hotRef > 0 || g_scrollRef > 0;
+        if (g_paintRef <= 0 && g_hotRef <= 0 && g_scrollRef <= 0)
+            return false;
+        // PopupOnly: чужой BeginPaint/GetDC поверх списка — сессионные подмены не применяем.
+        if (GlassCore::PaintDispatcher::IsForeignPaintBarrierActive())
+            return false;
+        return true;
+    }
+
+    // PopupOnly: подмена только DC самого ComboLBox (или его memory-DC).
+    // В Full без проверки — прежнее поведение сессии.
+    [[nodiscard]] static bool IsComboLBoxTargetDc(HDC hdc) noexcept
+    {
+        if (GlassCore::Root::IsFullInjectionMode())
+            return true;
+        if (!hdc)
+            return false;
+        if (HWND windowDc = WindowFromDC(hdc))
+        {
+            return GlassShared::GlassGetWindowKind(windowDc)
+                == GlassShared::GlassControlKind::ComboLBox;
+        }
+        if (HWND owner = GlassCore::PaintDispatcher::GetStackOwnerForDc(hdc))
+        {
+            if (GlassShared::GlassGetWindowKind(owner) == GlassShared::GlassControlKind::ComboLBox)
+                return true;
+        }
+        const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+        return host
+            && GlassShared::GlassGetWindowKind(host) == GlassShared::GlassControlKind::ComboLBox;
     }
 
     // =========================================================================
@@ -492,6 +521,9 @@ namespace GlassCore::ComboLBox
         if (!IsActive() || !lprc || !hbr)
             return orig(hdc, lprc, hbr);
 
+        if (!IsComboLBoxTargetDc(hdc))
+            return orig(hdc, lprc, hbr);
+
         if (IsGlassClearBrush(hbr))
         {
             PatBlt(hdc,
@@ -528,6 +560,9 @@ namespace GlassCore::ComboLBox
         if (!IsActive() || rop != PATCOPY)
             return orig(hdc, x, y, cx, cy, rop);
 
+        if (!IsComboLBoxTargetDc(hdc))
+            return orig(hdc, x, y, cx, cy, rop);
+
         HGDIOBJ const hbrObj = GetCurrentObject(hdc, OBJ_BRUSH);
         if (hbrObj && IsGlassClearBrush(static_cast<HBRUSH>(hbrObj)))
             return PatBlt(hdc, x, y, cx, cy, BLACKNESS);
@@ -544,6 +579,10 @@ namespace GlassCore::ComboLBox
         //DebugLog(L"[GlassCore][Overall_MyDrawTextW]");
 
         if (!IsActive())
+            return orig ? orig(hdc, lpchText, cchText, lprc, format)
+            : DrawTextW(hdc, lpchText, cchText, lprc, format);
+
+        if (!IsComboLBoxTargetDc(hdc))
             return orig ? orig(hdc, lpchText, cchText, lprc, format)
             : DrawTextW(hdc, lpchText, cchText, lprc, format);
 
@@ -588,6 +627,9 @@ namespace GlassCore::ComboLBox
         if (!IsActive())
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
 
+        if (!IsComboLBoxTargetDc(hdc))
+            return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
+
         if (format & DT_CALCRECT)
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
 
@@ -613,6 +655,10 @@ namespace GlassCore::ComboLBox
         auto orig = GetOverallOrigSafe<OHK_EXTTEXTOUT, decltype(&ExtTextOutW)>(callerMod);
 
         if (!IsActive())
+            return orig ? orig(hdc, x, y, options, lprect, lpString, c, lpDx)
+            : ExtTextOutW(hdc, x, y, options, lprect, lpString, c, lpDx);
+
+        if (!IsComboLBoxTargetDc(hdc))
             return orig ? orig(hdc, x, y, options, lprect, lpString, c, lpDx)
             : ExtTextOutW(hdc, x, y, options, lprect, lpString, c, lpDx);
 
@@ -721,6 +767,10 @@ namespace GlassCore::ComboLBox
             return orig ? orig(hdc, x, y, lpString, c)
             : TextOutW(hdc, x, y, lpString, c);
 
+        if (!IsComboLBoxTargetDc(hdc))
+            return orig ? orig(hdc, x, y, lpString, c)
+            : TextOutW(hdc, x, y, lpString, c);
+
         int result = 0;
         RECT rc{};
         GetClipBox(hdc, &rc);
@@ -743,7 +793,7 @@ namespace GlassCore::ComboLBox
         if (!orig)
             return SetBkColor(hdc, color);
 
-        if (IsActive())
+        if (IsActive() && IsComboLBoxTargetDc(hdc))
         {
             if (color == GetSysColor(COLOR_WINDOW) || color == GetSysColor(COLOR_BTNFACE))
                 color = 0;
@@ -882,7 +932,7 @@ namespace GlassCore::ComboLBox
         auto orig = GetOverallOrigSafe<OHK_SELECTOBJECT, decltype(&SelectObject)>(callerMod);
         //DebugLog(L"[GlassCore][Overall_MySelectObject]");
 
-        if (IsActive())
+        if (IsActive() && IsComboLBoxTargetDc(hdc))
         {
             LOGPEN pn{};
             if (GetObject(h, sizeof(pn), &pn))
@@ -904,7 +954,7 @@ namespace GlassCore::ComboLBox
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<OHK_BITBLT, decltype(&BitBlt)>(callerMod);
 
-        if (IsActive())
+        if (IsActive() && IsComboLBoxTargetDc(hdc))
         {
             if (rop == SRCCOPY || rop == WHITENESS)
             {
@@ -951,6 +1001,9 @@ namespace GlassCore::ComboLBox
             }
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
         }
+
+        if (!IsComboLBoxTargetDc(hdc))
+            return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
         WCHAR themeClass[MAX_PATH + 1]{};
         const bool haveClass = SUCCEEDED(
@@ -1056,6 +1109,11 @@ namespace GlassCore::ComboLBox
         auto orig = GetOverallOrigSafe<OHK_DRAWTHEMETEXTEX, decltype(&DrawThemeTextEx)>(callerMod);
 
         if (!IsActive())
+            return orig ? orig(hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, pRect, pOptions)
+                : DrawThemeTextEx(
+                    hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, pRect, pOptions);
+
+        if (!IsComboLBoxTargetDc(hdc))
             return orig ? orig(hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, pRect, pOptions)
                 : DrawThemeTextEx(
                     hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, pRect, pOptions);

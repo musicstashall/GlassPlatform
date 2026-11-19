@@ -30,11 +30,20 @@ namespace GlassCore::PaintDispatcher
 
     // Стек (HWND, HDC) для BeginPaint и GetDC.
     // Поддерживает вложенные сессии (например, SendMessage(child, WM_PAINT) из wndproc).
-    // g_activePaintHWnd = вершина стека = HWND для следующего CreateCompatibleDC.
-    struct DCEntry { HWND hWnd; HDC hDC; };
+    // g_activePaintHWnd — ближайшая не-Foreign запись сверху (хост стеклянной сессии).
+    // Foreign: PopupOnly-барьер чужого BeginPaint/GetDC поверх стеклянной сессии.
+    // Такая запись не будит провайдеров и прячет хост, пока чужое окно рисуется.
+    enum class DcEntryType : unsigned char { Paint, GetDC, Compat, Foreign };
+    // rootVisibleAtPush: GA_ROOT был видим при push. Скрытый к моменту prune корень
+    // протухает только если был видим — снимок AnimateWindow/WM_PRINT скрытого
+    // списка (push до показа) не срезается посреди анимации.
+    struct DCEntry { HWND hWnd; HDC hDC; DcEntryType type; bool rootVisibleAtPush = false; };
     thread_local std::vector<DCEntry> g_dcStack;
     thread_local HWND                 g_activePaintHWnd = nullptr;
     thread_local HDC                  g_tlCurrentGetDcForProviders = nullptr;
+    thread_local bool                 g_pruningCompat = false;
+    thread_local unsigned             g_pruneLogBudget = 32;
+    thread_local unsigned             g_foreignLogBudget = 32;
 
     // Оригинальные указатели на функции (заменяются Detours)
     static decltype(&BeginPaint)         g_origBeginPaint         = nullptr;
@@ -84,15 +93,159 @@ namespace GlassCore::PaintDispatcher
         return GlassShared::GlassIsBackdropAllowedForHwnd(hWnd);
     }
 
+    static void RefreshActivePaintHwnd() noexcept
+    {
+        g_activePaintHWnd = nullptr;
+        for (auto it = g_dcStack.rbegin(); it != g_dcStack.rend(); ++it)
+        {
+            if (it->type == DcEntryType::Foreign)
+                continue;
+            g_activePaintHWnd = it->hWnd;
+            return;
+        }
+    }
+
+    static void EndCompatProviders(HWND hWnd) noexcept
+    {
+        for (auto& p : g_compatDCProviders)
+        {
+            if (p.onEnd)
+                p.onEnd(hWnd, nullptr);
+        }
+    }
+
+    // PopupOnly: compat-запись протухла, если окно уничтожено, маркер kind снят
+    // или GA_ROOT скрыт после того, как был видим (uxtheme кэширует memory-DC после закрытия попапа).
+    // Foreign протухает только с уничтоженным окном (EndPaint/ReleaseDC уже не придут).
+    [[nodiscard]] static bool IsStaleEntry(const DCEntry& entry) noexcept
+    {
+        if (entry.type == DcEntryType::Foreign)
+            return !entry.hWnd || !IsWindow(entry.hWnd);
+        if (entry.type != DcEntryType::Compat)
+            return false;
+        if (!entry.hWnd || !IsWindow(entry.hWnd))
+            return true;
+        if (GlassShared::GlassGetWindowKind(entry.hWnd) == GlassShared::GlassControlKind::None)
+            return true;
+        if (!entry.rootVisibleAtPush)
+            return false;
+        const HWND root = GetAncestor(entry.hWnd, GA_ROOT);
+        return !root || !IsWindowVisible(root);
+    }
+
+    [[nodiscard]] static bool IsRootVisible(HWND hWnd) noexcept
+    {
+        const HWND root = hWnd ? GetAncestor(hWnd, GA_ROOT) : nullptr;
+        return root && IsWindowVisible(root);
+    }
+
+    static void LogPrunedCompat(HWND hWnd) noexcept
+    {
+        if (g_pruneLogBudget == 0)
+            return;
+        --g_pruneLogBudget;
+        wchar_t cls[128]{};
+        if (hWnd && IsWindow(hWnd))
+            GetClassNameW(hWnd, cls, static_cast<int>(std::size(cls)));
+        DebugLog(DBG_IMPORTANT,
+            L"[GlassCore][PaintDispatcher] prune stale entry hwnd=0x%p class=\"%s\"",
+            hWnd, cls);
+    }
+
+    static void PruneStaleCompatEntries() noexcept
+    {
+        if (g_pruningCompat || GlassCore::Root::IsFullInjectionMode())
+            return;
+        g_pruningCompat = true;
+        bool removed = false;
+        for (size_t i = 0; i < g_dcStack.size();)
+        {
+            if (!IsStaleEntry(g_dcStack[i]))
+            {
+                ++i;
+                continue;
+            }
+            const HWND stale = g_dcStack[i].hWnd;
+            const bool compat = (g_dcStack[i].type == DcEntryType::Compat);
+            g_dcStack.erase(g_dcStack.begin() + static_cast<std::ptrdiff_t>(i));
+            removed = true;
+            LogPrunedCompat(stale);
+            if (compat)
+                EndCompatProviders(stale);
+        }
+        if (removed)
+            RefreshActivePaintHwnd();
+        g_pruningCompat = false;
+    }
+
+    // PopupOnly: compat-DC, созданные внутри Paint/GetDC-сессии, закрываются вместе с ней.
+    // DeleteDC кэшированного memory-DC позже запись уже не найдёт и onEnd не повторит.
+    static void UnwindCompatAbove(size_t keepIndex) noexcept
+    {
+        if (GlassCore::Root::IsFullInjectionMode() || g_pruningCompat)
+            return;
+        if (keepIndex >= g_dcStack.size())
+            return;
+        g_pruningCompat = true;
+        for (size_t i = g_dcStack.size(); i-- > keepIndex + 1;)
+        {
+            const DcEntryType type = g_dcStack[i].type;
+            if (type != DcEntryType::Compat && type != DcEntryType::Foreign)
+                continue;
+            const HWND stale = g_dcStack[i].hWnd;
+            g_dcStack.erase(g_dcStack.begin() + static_cast<std::ptrdiff_t>(i));
+            LogPrunedCompat(stale);
+            if (type == DcEntryType::Compat)
+                EndCompatProviders(stale);
+        }
+        g_pruningCompat = false;
+    }
+
+    static void PushForeignBarrier(HWND hWnd, HDC hDC) noexcept
+    {
+        if (!hWnd || !hDC)
+            return;
+        const HWND covered = g_activePaintHWnd;
+        if (g_foreignLogBudget > 0)
+        {
+            --g_foreignLogBudget;
+            wchar_t cls[128]{};
+            GetClassNameW(hWnd, cls, static_cast<int>(std::size(cls)));
+            DebugLog(DBG_IMPORTANT,
+                L"[GlassCore][PaintDispatcher] foreign barrier hwnd=0x%p class=\"%s\" over host=0x%p",
+                hWnd, cls, covered);
+        }
+        g_dcStack.push_back({ hWnd, hDC, DcEntryType::Foreign });
+        g_activePaintHWnd = nullptr;
+    }
+
+    static void PopForeignBarrier(HWND hWnd, HDC hDC) noexcept
+    {
+        if (!hDC)
+            return;
+        for (auto it = g_dcStack.rbegin(); it != g_dcStack.rend(); ++it)
+        {
+            if (it->type != DcEntryType::Foreign || it->hDC != hDC)
+                continue;
+            if (hWnd && it->hWnd != hWnd)
+                continue;
+            g_dcStack.erase((it + 1).base());
+            RefreshActivePaintHwnd();
+            return;
+        }
+    }
+
     // Кладёт DC на стек и уведомляет указанный список провайдеров.
     static void PushDC(HWND hWnd, HDC hDC,
                        std::vector<PaintProvider>& providers,
-                       HMODULE callerMod) noexcept
+                       HMODULE callerMod,
+                       DcEntryType type) noexcept
     {
         if (g_shutdown.load(std::memory_order_acquire) || !hWnd) return;
+        PruneStaleCompatEntries();
         if (!ShouldInvokeProvidersForHwnd(hWnd)) return;
         GlassCore::TextGlow::EnsureTextGlowClientRegistered(hWnd);
-        g_dcStack.push_back({ hWnd, hDC });
+        g_dcStack.push_back({ hWnd, hDC, type });
         g_activePaintHWnd = hWnd;
         for (auto& p : providers) p.onBegin(hWnd, callerMod);
     }
@@ -108,31 +261,54 @@ namespace GlassCore::PaintDispatcher
                       HWND hWndHint = nullptr) noexcept
     {
         if (g_shutdown.load(std::memory_order_acquire)) return;
+        PruneStaleCompatEntries();
         for (auto it = g_dcStack.rbegin(); it != g_dcStack.rend(); ++it)
         {
             if (it->hDC != hDC) continue;
             if (hWndHint && it->hWnd != hWndHint) continue;
 
-            HWND hWnd = it->hWnd;
-            g_dcStack.erase((it + 1).base());
-            g_activePaintHWnd = g_dcStack.empty() ? nullptr : g_dcStack.back().hWnd;
+            const auto fwd = (it + 1).base();
+            const size_t index = static_cast<size_t>(std::distance(g_dcStack.begin(), fwd));
+            const DcEntryType type = g_dcStack[index].type;
+            HWND hWnd = g_dcStack[index].hWnd;
+            if (type == DcEntryType::Paint || type == DcEntryType::GetDC)
+                UnwindCompatAbove(index);
+            if (index >= g_dcStack.size())
+                return;
+            g_dcStack.erase(g_dcStack.begin() + static_cast<std::ptrdiff_t>(index));
+            RefreshActivePaintHwnd();
 
-            for (auto& p : providers) p.onEnd(hWnd, callerMod);
+            if (type != DcEntryType::Foreign)
+            {
+                for (auto& p : providers) p.onEnd(hWnd, callerMod);
+            }
             return;
         }
+    }
+
+    [[nodiscard]] static bool IsPopupOnlyForeignWindow(HWND hWnd) noexcept
+    {
+        return !g_shutdown.load(std::memory_order_acquire)
+            && !GlassCore::Root::IsFullInjectionMode()
+            && hWnd
+            && !IsPopupOnlyPaintDispatcherKind(GlassShared::GlassGetWindowKind(hWnd));
     }
 
     // ── Detours хуки ─────────────────────────────────────────────────────────
 
     static HDC WINAPI HookBeginPaint(HWND hWnd, LPPAINTSTRUCT lpPaint)
     {
-        // PopupOnly fast-path: без DetourGetContainingModule / провайдеров на чужих HWND.
-        if (!g_shutdown.load(std::memory_order_acquire)
-            && !GlassCore::Root::IsFullInjectionMode()
-            && hWnd
-            && !IsPopupOnlyPaintDispatcherKind(GlassShared::GlassGetWindowKind(hWnd)))
+        PruneStaleCompatEntries();
+        // PopupOnly: чужое окно поверх стеклянной сессии прячет хост (Foreign),
+        // провайдеров не будит. Пустой стек — прежний fast-path без записи.
+        if (IsPopupOnlyForeignWindow(hWnd))
         {
-            return g_origBeginPaint(hWnd, lpPaint);
+            if (g_dcStack.empty())
+                return g_origBeginPaint(hWnd, lpPaint);
+            HDC hdc = g_origBeginPaint(hWnd, lpPaint);
+            if (hdc)
+                PushForeignBarrier(hWnd, hdc);
+            return hdc;
         }
 
         HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
@@ -167,7 +343,7 @@ namespace GlassCore::PaintDispatcher
             // («закрытие без открытия», расхождение стеков Root).
             if (notifyProviders)
             {
-                g_dcStack.push_back({ hWnd, hdc });
+                g_dcStack.push_back({ hWnd, hdc, DcEntryType::Paint });
                 g_activePaintHWnd = hWnd;
             }
         }
@@ -182,11 +358,10 @@ namespace GlassCore::PaintDispatcher
 
     static BOOL WINAPI HookEndPaint(HWND hWnd, const PAINTSTRUCT* lpPaint)
     {
-        if (!g_shutdown.load(std::memory_order_acquire)
-            && !GlassCore::Root::IsFullInjectionMode()
-            && hWnd
-            && !IsPopupOnlyPaintDispatcherKind(GlassShared::GlassGetWindowKind(hWnd)))
+        if (IsPopupOnlyForeignWindow(hWnd))
         {
+            if (lpPaint)
+                PopForeignBarrier(hWnd, lpPaint->hdc);
             return g_origEndPaint(hWnd, lpPaint);
         }
         HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
@@ -196,12 +371,13 @@ namespace GlassCore::PaintDispatcher
 
     static HDC WINAPI HookGetDC(HWND hWnd)
     {
-        if (!g_shutdown.load(std::memory_order_acquire)
-            && !GlassCore::Root::IsFullInjectionMode()
-            && hWnd
-            && !IsPopupOnlyPaintDispatcherKind(GlassShared::GlassGetWindowKind(hWnd)))
+        if (IsPopupOnlyForeignWindow(hWnd))
         {
-            return g_origGetDC(hWnd);
+            PruneStaleCompatEntries();
+            HDC hdc = g_origGetDC(hWnd);
+            if (hdc && !g_dcStack.empty())
+                PushForeignBarrier(hWnd, hdc);
+            return hdc;
         }
 
         HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
@@ -210,7 +386,7 @@ namespace GlassCore::PaintDispatcher
         if (hdc)
         {
             g_tlCurrentGetDcForProviders = hdc;
-            PushDC(hWnd, hdc, g_getDCProviders, callerMod);
+            PushDC(hWnd, hdc, g_getDCProviders, callerMod, DcEntryType::GetDC);
             g_tlCurrentGetDcForProviders = nullptr;
         }
         return hdc;
@@ -218,12 +394,13 @@ namespace GlassCore::PaintDispatcher
 
     static HDC WINAPI HookGetDCEx(HWND hWnd, HRGN hrgnClip, DWORD flags)
     {
-        if (!g_shutdown.load(std::memory_order_acquire)
-            && !GlassCore::Root::IsFullInjectionMode()
-            && hWnd
-            && !IsPopupOnlyPaintDispatcherKind(GlassShared::GlassGetWindowKind(hWnd)))
+        if (IsPopupOnlyForeignWindow(hWnd))
         {
-            return g_origGetDCEx ? g_origGetDCEx(hWnd, hrgnClip, flags) : nullptr;
+            PruneStaleCompatEntries();
+            HDC hdc = g_origGetDCEx ? g_origGetDCEx(hWnd, hrgnClip, flags) : nullptr;
+            if (hdc && !g_dcStack.empty())
+                PushForeignBarrier(hWnd, hdc);
+            return hdc;
         }
 
         HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
@@ -235,7 +412,7 @@ namespace GlassCore::PaintDispatcher
             if (ShouldInvokeProvidersForHwnd(hWnd))
                 GlassCore::ScrollBarTheme::EnsureComctlScrollBarIatIfComctlCaller(hWnd, callerMod);
             g_tlCurrentGetDcForProviders = hdc;
-            PushDC(hWnd, hdc, g_getDCProviders, callerMod);
+            PushDC(hWnd, hdc, g_getDCProviders, callerMod, DcEntryType::GetDC);
             g_tlCurrentGetDcForProviders = nullptr;
         }
         return hdc;
@@ -243,11 +420,9 @@ namespace GlassCore::PaintDispatcher
 
     static int WINAPI HookReleaseDC(HWND hWnd, HDC hDC)
     {
-        if (!g_shutdown.load(std::memory_order_acquire)
-            && !GlassCore::Root::IsFullInjectionMode()
-            && hWnd
-            && !IsPopupOnlyPaintDispatcherKind(GlassShared::GlassGetWindowKind(hWnd)))
+        if (IsPopupOnlyForeignWindow(hWnd))
         {
+            PopForeignBarrier(hWnd, hDC);
             return g_origReleaseDC(hWnd, hDC);
         }
         HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
@@ -269,12 +444,31 @@ namespace GlassCore::PaintDispatcher
         // из buffered paint отражался в IsPaintStackDcForHwnd для Edit session buffer.
         if (hdc)
         {
+            PruneStaleCompatEntries();
             HWND hResolved = hdcSrc ? WindowFromDC(hdcSrc) : nullptr;
-            if ((!hResolved || !ShouldInvokeProvidersForHwnd(hResolved)) && g_activePaintHWnd)
+            if (!GlassCore::Root::IsFullInjectionMode())
+            {
+                // Чужой оконный DC не приписываем стеклянному хосту.
+                // Fallback — только memory-DC источник и не под Foreign-барьером.
+                const bool foreignTop = !g_dcStack.empty()
+                    && g_dcStack.back().type == DcEntryType::Foreign;
+                if (!hResolved)
+                {
+                    if (!foreignTop && g_activePaintHWnd)
+                        hResolved = g_activePaintHWnd;
+                }
+                else if (!ShouldInvokeProvidersForHwnd(hResolved))
+                {
+                    hResolved = nullptr;
+                }
+            }
+            else if ((!hResolved || !ShouldInvokeProvidersForHwnd(hResolved)) && g_activePaintHWnd)
+            {
                 hResolved = g_activePaintHWnd;
+            }
             if (hResolved && ShouldInvokeProvidersForHwnd(hResolved))
             {
-                g_dcStack.push_back({ hResolved, hdc });
+                g_dcStack.push_back({ hResolved, hdc, DcEntryType::Compat, IsRootVisible(hResolved) });
                 g_activePaintHWnd = hResolved;
                 for (auto& p : g_compatDCProviders)
                     p.onBegin(hResolved, callerMod);
@@ -349,6 +543,13 @@ namespace GlassCore::PaintDispatcher
     HWND GetPaintSessionHostHwnd() noexcept
     {
         return g_activePaintHWnd;
+    }
+
+    bool IsForeignPaintBarrierActive() noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || g_dcStack.empty())
+            return false;
+        return g_dcStack.back().type == DcEntryType::Foreign;
     }
 
     HDC GetCurrentGetDcSessionHdc() noexcept

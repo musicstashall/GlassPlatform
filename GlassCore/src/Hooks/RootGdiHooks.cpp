@@ -28,6 +28,7 @@
 #include <Module/ModuleHandler.h>
 #include <Subsystems/RenderText.h>
 #include <Subsystems/PaintDispatcher.h>
+#include <GlassControlKind.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <Subsystems/GdiHookUtils.h>
 #include <WinApiUtils.h>
@@ -874,7 +875,24 @@ namespace GlassCore::Root
                 || plain == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF)
                 || Shared::ThemeHelper::IsThemeColor(color, L"ExplorerNavPane")
                 || Shared::ThemeHelper::IsThemeColor(color, L"ProperTree"))
+            {
+                if (!IsFullInjectionMode())
+                {
+                    static std::atomic<unsigned> s_popupBrushLog{ 32 };
+                    const unsigned n = s_popupBrushLog.fetch_sub(1, std::memory_order_relaxed);
+                    if (n < 32)
+                    {
+                        const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+                        wchar_t hostCls[128]{};
+                        if (host)
+                            GetClassNameW(host, hostCls, _countof(hostCls));
+                        DebugLog(DBG_IMPORTANT,
+                            L"[GlassCore][Root] CreateSolidBrush black (PopupOnly) color=0x%06X caller=%s host=0x%p hostClass=\"%s\"",
+                            plain, base.c_str(), host, hostCls);
+                    }
+                }
                 return o(RGB(0, 0, 0));
+            }
 
             // Остальное — alpha-кисть для корректного композитинга.
             HBRUSH b = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255);
@@ -896,6 +914,24 @@ namespace GlassCore::Root
             if (!IsFullInjectionMode()
                 && GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() == nullptr)
                 return o(hdc, h);
+
+            // PopupOnly: оконный DC чужого контрола (поле комбо, TreeView, шапка) не черним,
+            // даже если на потоке ещё жива стеклянная сессия попапа.
+            if (!IsFullInjectionMode())
+            {
+                if (HWND foreign = HwndFromDc(hdc))
+                {
+                    using GlassShared::GlassControlKind;
+                    const auto kind = GlassShared::GlassGetWindowKind(foreign);
+                    const bool glassTarget =
+                        kind == GlassControlKind::ComboLBox
+                        || kind == GlassControlKind::Toolbar
+                        || kind == GlassControlKind::MonthCal
+                        || kind == GlassControlKind::TrackBar;
+                    if (!glassTarget)
+                        return o(hdc, h);
+                }
+            }
 
             HWND w = HwndFromDc(hdc);
             wchar_t cls[256]{};

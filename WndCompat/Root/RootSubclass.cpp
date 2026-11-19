@@ -740,7 +740,7 @@ namespace
 
     LRESULT CALLBACK RootSubclassProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 
-    // ── CBN_DROPDOWN общий обработчик: RootSubclassProcShared + DropDownNotifySubclassProc ──
+    // ── CBN_DROPDOWN общий обработчик: RootSubclassProcShared + PopupOnly-ветка / sink ──
     // Тело 1-в-1 с прежней веткой WM_COMMAND (ComboBoxEx32 → GetComboBoxInfo(hCtrl)
     // → ComboLBox_Attach + DropDown-провайдер с AnimateWindow-detour).
     static void RootHandleComboBoxDropDown(WPARAM wParam, LPARAM lParam) noexcept
@@ -800,30 +800,22 @@ namespace
             g_dropDownNotifyWindows.erase(it);
     }
 
-    LRESULT CALLBACK DropDownNotifySubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
-        UINT_PTR uIdSubclass, DWORD_PTR dwRefData) noexcept
+    // PopupOnly: чёрная кисть только приаттаченному ComboLBox.
+    // DefSubclassProc оставляет цвет текста темы, фон под стекло — BLACK_BRUSH.
+    [[nodiscard]] static bool PopupOnlyTryCtlColorListBox(
+        HWND hWnd, WPARAM wParam, LPARAM lParam, LRESULT& outResult) noexcept
     {
-        // Порядок как в CtrlNotifySink-фильтре: shutdown-detach обрабатываем первым.
-        if (uMsg == WndCompat::WM_GLASS_DETACH_ROOT)
-        {
-            RemoveWindowSubclass(hWnd, DropDownNotifySubclassProc, uIdSubclass);
-            DropDownNotifyUnregister(hWnd);
-            WndCompat::WinEventHook_SignalDetachComplete();
-            return 0;
-        }
-        if (uMsg == WM_NCDESTROY)
-        {
-            // RemoveWindowSubclass здесь не вызываем: comctl32 снимает SetWindowSubclass-цепочку
-            // при уничтожении окна; чужой код не трогаем.
-            DropDownNotifyUnregister(hWnd);
-            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
-        }
-        if (uMsg == WM_COMMAND)
-        {
-            RootHandleComboBoxDropDown(wParam, lParam);
-            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
-        }
-        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        const HWND hChild = reinterpret_cast<HWND>(lParam);
+        const bool comboLBoxChild =
+            GlassShared::GlassGetWindowKind(hChild) == GlassShared::GlassControlKind::ComboLBox
+            || WndCompat::IsWindowClass(hChild, L"ComboLBox");
+        if (!comboLBoxChild)
+            return false;
+
+        DefSubclassProc(hWnd, WM_CTLCOLORLISTBOX, wParam, lParam);
+        SetBkColor(reinterpret_cast<HDC>(wParam), 0);
+        outResult = reinterpret_cast<LRESULT>(GetStockObject(BLACK_BRUSH));
+        return true;
     }
 
     LRESULT CALLBACK RootSubclassProcShared(
@@ -1321,10 +1313,98 @@ namespace
         return DefSubclassProc(hWnd, uMsg, wParam, lParam);
     }
 
+    // Узкий sink на чужом #32770 (id = kDropDownNotifySubclassId) — в любом режиме.
+    // Если окно позже получило полноценный Root_Attach (Full), CBN_DROPDOWN и кисть
+    // обрабатывает он — sink пропускает, чтобы не было двойного ComboLBox_Attach.
+    static LRESULT RootHandleDropDownNotifySink(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+        UINT_PTR uIdSubclass) noexcept
+    {
+        if (uMsg == WndCompat::WM_GLASS_DETACH_ROOT)
+        {
+            RemoveWindowSubclass(hWnd, RootSubclassProc, uIdSubclass);
+            DropDownNotifyUnregister(hWnd);
+            WndCompat::WinEventHook_SignalDetachComplete();
+            return 0;
+        }
+        if (uMsg == WM_NCDESTROY)
+        {
+            // RemoveWindowSubclass здесь не вызываем: comctl32 снимает SetWindowSubclass-цепочку
+            // при уничтожении окна; чужой код не трогаем.
+            DropDownNotifyUnregister(hWnd);
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        }
+        if ((uMsg == WM_COMMAND || uMsg == WM_CTLCOLORLISTBOX) && WndCompat::Root_IsAttached(hWnd))
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        if (uMsg == WM_COMMAND)
+        {
+            RootHandleComboBoxDropDown(wParam, lParam);
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        }
+        if (uMsg == WM_CTLCOLORLISTBOX)
+        {
+            LRESULT ctlResult{};
+            if (PopupOnlyTryCtlColorListBox(hWnd, wParam, lParam, ctlResult))
+                return ctlResult;
+        }
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    // PopupOnly-ветка единого RootSubclassProc (режим проверяется на каждом сообщении —
+    // live-смена режима не требует переустановки сабкласса).
+    // Whitelist: служебные WM_GLASS_*, меню-владелец, NC/активация, показ, тема, уничтожение —
+    // в общий обработчик как есть (там они не зависят от режима). CBN_DROPDOWN и кисть
+    // ComboLBox — здесь. Остальное (erase/CTLCOLOR*/PRINTCLIENT/NOTIFY Full-корня) — мимо.
+    static LRESULT PopupOnlyRootSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+        UINT_PTR uIdSubclass, DWORD_PTR dwRefData, SUBCLASSPROC selfProc) noexcept
+    {
+        if (uMsg >= WM_APP && uMsg <= 0xBFFF)
+            return RootSubclassProcShared(hWnd, uMsg, wParam, lParam, uIdSubclass, dwRefData, selfProc);
+
+        switch (uMsg)
+        {
+        case WM_COMMAND:
+            RootHandleComboBoxDropDown(wParam, lParam);
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+
+        case WM_CTLCOLORLISTBOX:
+        {
+            LRESULT ctlResult{};
+            if (PopupOnlyTryCtlColorListBox(hWnd, wParam, lParam, ctlResult))
+                return ctlResult;
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        }
+
+        case WM_NCDESTROY:
+        case WM_THEMECHANGED:
+        case WM_SHOWWINDOW:
+        case WM_NCACTIVATE:
+        case WM_NCPAINT:
+        case WM_NCHITTEST:
+        case WM_ENTERIDLE:
+        case WM_NCMOUSELEAVE:
+        case WM_DRAWITEM:
+        case WM_MEASUREITEM:
+        case WM_UAHNCPAINTMENUPOPUP:
+        case WM_UAHDRAWMENUITEM:
+        case WM_UAHINITMENU:
+        case WM_UAHDRAWMENU:
+        case WM_UAHMEASUREMENUITEM:
+            return RootSubclassProcShared(hWnd, uMsg, wParam, lParam, uIdSubclass, dwRefData, selfProc);
+
+        default:
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        }
+    }
+
     LRESULT CALLBACK RootSubclassProc(
         HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
     {
+        if (uIdSubclass == kDropDownNotifySubclassId)
+            return RootHandleDropDownNotifySink(hWnd, uMsg, wParam, lParam, uIdSubclass);
+        if (WndCompat::WinEventHook_GetMode() != Shared::InjectionMode::Full)
+            return PopupOnlyRootSubclassProc(
+                hWnd, uMsg, wParam, lParam, uIdSubclass, dwRefData, RootSubclassProc);
         return RootSubclassProcShared(
             hWnd, uMsg, wParam, lParam, uIdSubclass, dwRefData, RootSubclassProc);
     }
@@ -1502,7 +1582,7 @@ namespace WndCompat
                 return;
             g_dropDownNotifyWindows.push_back(hWnd);
         }
-        if (!SetWindowSubclass(hWnd, DropDownNotifySubclassProc, kDropDownNotifySubclassId, 0))
+        if (!SetWindowSubclass(hWnd, RootSubclassProc, kDropDownNotifySubclassId, 0))
         {
             DropDownNotifyUnregister(hWnd);
             DebugLog(std::format(
@@ -1764,7 +1844,7 @@ namespace WndCompat
                     WinEventHook_SignalDetachComplete();
                 continue;
             }
-            RemoveWindowSubclass(notifyWnd, DropDownNotifySubclassProc, kDropDownNotifySubclassId);
+            RemoveWindowSubclass(notifyWnd, RootSubclassProc, kDropDownNotifySubclassId);
         }
 
         unsigned sameOk = 0;

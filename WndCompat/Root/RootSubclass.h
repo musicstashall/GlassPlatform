@@ -20,8 +20,9 @@ namespace WndCompat
     // (кроме GLASS_DIAG_EXPLORER_USE_ROOT_SUBCLASS == 1).
     void Root_Attach(HWND hRoot);
 
-    // PopupOnly: узкий WM_COMMAND sink (CBN_DROPDOWN → ComboLBox_Attach) на родителя нативного
-    // ComboBox'а чужого диалога — без остальной обвязки Root_Attach (без class brush / SWCA / dark mode).
+    // Узкий sink (id 2) на родителя нативного ComboBox'а чужого диалога: CBN_DROPDOWN +
+    // WM_CTLCOLORLISTBOX приаттаченного ComboLBox — без class brush / SWCA / dark mode.
+    // Прок тот же RootSubclassProc (ветвление по id внутри), снимается так же.
     // Идемпотентен; вызывать на потоке-владельце (или маршалить через WM_GLASS_ATTACH_DROPDOWN_NOTIFY).
     void Root_AttachDropDownNotify(HWND hWnd) noexcept;
     bool Root_DropDownNotifyAttached(HWND hWnd) noexcept;
