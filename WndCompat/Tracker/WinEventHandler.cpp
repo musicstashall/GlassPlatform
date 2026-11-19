@@ -251,6 +251,11 @@ namespace
                     OBJID_WINDOW, CHILDID_SELF, 0, 0);
                 msg->message = WM_NULL; // поглощаем — до WndProc не доходит
             }
+            else if (msg && msg->message == WndCompat::WM_GLASS_ATTACH_DROPDOWN_NOTIFY && IsWindow(msg->hwnd))
+            {
+                WndCompat::Root_AttachDropDownNotify(msg->hwnd);
+                msg->message = WM_NULL; // поглощаем — до WndProc не доходит
+            }
             else if (msg && msg->message == WndCompat::WM_GLASS_SYNTHETIC_CREATE && IsWindow(msg->hwnd))
             {
                 WndHandler(nullptr, EVENT_OBJECT_CREATE, msg->hwnd,
@@ -362,6 +367,31 @@ namespace WndCompat
         WndCompat::Root_Attach(hRoot);
     }
 
+    // Нативный ComboBox (PopupOnly): CBN_DROPDOWN уходит родителю (чужому диалогу) —
+    // узкий WM_COMMAND sink вместо полного Root_Attach (см. RootSubclass.cpp).
+    void DispatchDropDownNotifyAttachToOwnerThread(HWND hWnd) noexcept
+    {
+        if (!IsWindow(hWnd))
+            return;
+        if (WndCompat::IsShuttingDown())
+            return;
+        DWORD wndTid = GetWindowThreadProcessId(hWnd, nullptr);
+        const DWORD curTid = GetCurrentThreadId();
+        if (wndTid != 0 && wndTid != curTid)
+        {
+            InstallGetMsgHookForThread(wndTid);
+            if (!PostMessageW(hWnd, WndCompat::WM_GLASS_ATTACH_DROPDOWN_NOTIFY, 0, 0))
+            {
+                DebugLog(DBG_WARNING,
+                    L"[WndCompat][WinEvent] DispatchDropDownNotifyAttachToOwnerThread: PostMessage failed hwnd=0x%p GLE=%u",
+                    hWnd,
+                    GetLastError());
+            }
+            return;
+        }
+        WndCompat::Root_AttachDropDownNotify(hWnd);
+    }
+
     // File Explorer shell root (CabinetWClass / ExploreWClass): отдельный subclass proc — см. ExplorerRootSubclass.cpp.
     void DispatchExplorerRootAttachToOwnerThread(HWND hRoot) noexcept
     {
@@ -444,6 +474,7 @@ namespace WndCompat
 
 namespace
 {
+    using WndCompat::DispatchDropDownNotifyAttachToOwnerThread;
     using WndCompat::DispatchExplorerRootAttachToOwnerThread;
     using WndCompat::DispatchRootAttachToOwnerThread;
 
@@ -816,6 +847,25 @@ namespace
                         DebugLog(L"[WndCompat][WinEvent] ComboBox_Attach: hwnd=0x%p", hWnd);
                         WndCompat::ComboBox_Attach(hWnd);
                     }
+                    else if (allowGlassForHwnd && !isFull)
+                    {
+                        // Нативный ComboBox («Тип файлов») в чужом, неприаттаченном диалоге:
+                        // CBN_DROPDOWN уходит родителю, который мы не хотим субклассировать
+                        // целиком. Узкий WM_COMMAND sink на родителя: только CBN_DROPDOWN →
+                        // ComboLBox_Attach (как у ComboBoxEx32-пути), без class brush / SWCA / dark mode.
+                        if (HWND hParent = GetParent(hWnd))
+                        {
+                            // Внутренний ComboBox ComboBoxEx32: CBN_DROPDOWN и так ловит Root_Attach
+                            // на самом Ex32 — sink на Ex32 был бы лишним (двойная обработка).
+                            if (WndCompat::IsWindowClass(hParent, L"ComboBoxEx32"))
+                            {
+                                DebugLog(L"[WndCompat][WinEvent] DropDownNotify: skip, parent is ComboBoxEx32 combo=0x%p", hWnd);
+                                break;
+                            }
+                            DebugLog(L"[WndCompat][WinEvent] DropDownNotify: parent=0x%p combo=0x%p", hParent, hWnd);
+                            DispatchDropDownNotifyAttachToOwnerThread(hParent);
+                        }
+                    }
                     break;
 
                 case ControlKind::WinForms_ComboBox:
@@ -881,9 +931,16 @@ namespace
                 {
                     // 1) Проводник / диалоги: родитель WorkerW или SizeableRebar.
                     // 2) Full + хост UI (GlassSettings и т.п.): ReBar прямой дочерний элемент top-level (GA_ROOT).
+                    // PopupOnly: «пирог» шапки общего диалога (навигация + крошки + rebar)
+                    // не аттачим вовсе.
                     HWND parent = GetParent(hWnd);
                     if (!allowGlassForHwnd || !parent)
                         break;
+                    if (!isFull && WindowClassifier::IsCommonDialogHeaderPieWindow(hWnd))
+                    {
+                        DebugLog(L"[WndCompat][WinEvent] Rebar_Attach: skip (PopupOnly dialog-header π) hwnd=0x%p", hWnd);
+                        break;
+                    }
                     const bool shellRebar =
                         WndCompat::IsWindowClass(parent, L"WorkerW")
                         || WndCompat::IsWindowClass(parent, L"SizeableRebar");
@@ -903,7 +960,15 @@ namespace
                 case ControlKind::ToolBar:
                 case ControlKind::Atl_ToolBar:
                 case ControlKind::Wtl_SearchBand:
-                    // Full: все ToolBar; PopupOnly: только внутри ViewControlClass (ATL/WTL — те же условия)
+                    // Full: все ToolBar; PopupOnly: внутри ViewControlClass (ATL/WTL — те же условия),
+                    // НО «пирог» шапки общего диалога (навигационные кнопки / крошки / rebar)
+                    // не аттачим вовсе — см. IsCommonDialogHeaderPieWindow.
+                    if (!isFull && WindowClassifier::IsCommonDialogHeaderPieWindow(hWnd))
+                    {
+                        DebugLog(L"[WndCompat][WinEvent] ToolBar_Attach: skip (PopupOnly dialog-header π) hwnd=0x%p kind=%d", hWnd,
+                            static_cast<int>(kind));
+                        break;
+                    }
                     if (allowGlassForHwnd &&
                         (isFull || WndCompat::IsWindowClass(GetParent(hWnd), L"ViewControlClass") /*&& !(WndCompat::IsWindowClass(GetParent(hWnd), L"ViewControlClass"))*/))
                     {
@@ -914,12 +979,13 @@ namespace
 
                 case ControlKind::TrackBar:
                     // Full: везде; PopupOnly: только внутри ViewControlClass
-                    if (allowGlassForHwnd && isFull)
+                    if (allowGlassForHwnd
+                        && (isFull || WndCompat::IsWindowClass(GetParent(hWnd), L"ViewControlClass")))
                     {
                         DebugLog(L"[WndCompat][WinEvent] TrackBar_Attach: hwnd=0x%p", hWnd);
-                        
+
                         WndCompat::TrackBar_Attach(hWnd);
-                            
+
                     }
                     break;
 
@@ -940,7 +1006,9 @@ namespace
                     break;
 
                 case ControlKind::ComboBoxEx32:
-                    // Root_Attach для обработки WM_CTLCOLOR* — в обоих режимах (BWM pattern)
+                    // В обоих режимах Root_Attach: субкласс нужен для WM_COMMAND (CBN_DROPDOWN →
+                    // ComboLBox_Attach) и для WM_CTLCOLOR* (ветки CTLCOLOR* Full-only внутри).
+                    // Process-wide эффекты Root_Attach для не-GA_ROOT (класс-кисть) сняты — см. Root_Attach.
                     if (allowGlassForHwnd)
                     {
                         LogWinEventRootAttach(L"ComboBoxEx32", hWnd);
@@ -1044,7 +1112,12 @@ namespace
 
                 case ControlKind::ListView:
                 case ControlKind::WinForms_ListView:
-                    if (isFull && allowGlassForHwnd)
+                    // Full: везде; PopupOnly: только под приаттаченным flyout'ом (DropDown / ListviewPopup) —
+                    // получающий патчи список (например, SysListView32 вида). Иначе неприаттаченные
+                    // диалоги (файловые и пр.) не трогаем.
+                    if (allowGlassForHwnd
+                        && (isFull
+                            || WindowClassifier::IsUnderDropDownAncestor(hWnd)))
                     {
                         DebugLog(L"[WndCompat][WinEvent] ListView_Attach: hwnd=0x%p", hWnd);
                         WndCompat::ListView_Attach(hWnd);
@@ -1971,12 +2044,14 @@ namespace
         case ControlKind::ToolBar:
         case ControlKind::Atl_ToolBar:
         case ControlKind::Wtl_SearchBand:
+            if (!isFull && WindowClassifier::IsCommonDialogHeaderPieWindow(hWnd))
+                break;
             if (isFull || WndCompat::IsWindowClass(GetParent(hWnd), L"ViewControlClass"))
                 return GK::Toolbar;
             break;
 
         case ControlKind::TrackBar:
-            if (isFull)
+            if (isFull || WndCompat::IsWindowClass(GetParent(hWnd), L"ViewControlClass"))
                 return GK::TrackBar;
             break;
 

@@ -130,6 +130,18 @@ public:
     // «Net UI Tool Window» / «Layered» — оболочка popup ленты (не DropDownSubclass / не #32768 меню).
     [[nodiscard]] static bool IsNetUiRibbonToolWindow(HWND hwnd) noexcept;
 
+    // PopupOnly: окно входит в «пирог» шапки общего диалога (#32770 / CabinetWClass /
+    // ExploreWClass как GA_ROOT, либо цепочка предков под «Breadcrumb Parent»).
+    // Такие ToolbarWindow32/ATL-тулбары/ReBar (навигационные кнопки, крошки, полоса адреса)
+    // в PopupOnly стекло не получают вовсе — аттачить их запрещено.
+    [[nodiscard]] static bool IsCommonDialogHeaderPieWindow(HWND hwnd) noexcept;
+
+    // PopupOnly: окно находится внутри приаттаченного flyout-попапа Explorer («DropDown»)
+    // или его списочной формы («ListviewPopup»). Такие контролы (например, SysListView32
+    // внутри выпадающего списка вида) получают glass-аттач и сессию paint-dispatcher'а,
+    // как в Full-режиме (в отличие от чужих #32770-диалогов).
+    [[nodiscard]] static bool IsUnderDropDownAncestor(HWND hwnd) noexcept;
+
     // Отображение нормализованного имени класса → ControlKind.
     // Принимает вывод NormalizeWindowClass (может быть ".Button" или "Button").
     // Точка сохраняется как признак WinForms — сравнения строгие (без strip).

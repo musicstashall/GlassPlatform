@@ -12,6 +12,7 @@
 #include <GlassBackdropMark.h>
 #include <GlassComctlScrollHost.h>
 #include <GlassControlKind.h>
+#include <Subsystems/PaintDispatcher.h>
 
 #include <wil/resource.h>
 #include <detours.h>
@@ -24,6 +25,32 @@ using namespace std::literals;
 namespace GlassCore::ScrollBarTheme
 {
     static thread_local int s_tlScrollBarDrawThemeOrigDepth{};
+
+    // Строгая проверка «окно под стеклом» для comctl32-скроллбаров.
+    // GlassIsBackdropAllowedForHwnd по умолчанию true для немаркированных окон
+    // (глобальный backdrop-флаг) — неприаттаченные (PopupOnly) окна получали
+    // чёрные track/SIZEBOX безо всякого glass-фрейма. Здесь требуется явный
+    // маркер: GlassControlKind (приаттаченный контрол) или GlassIsComctlScrollHost
+    // на HWND/GA_ROOT (приаттаченный в Full root). NoBackdrop/exempt — как раньше.
+    [[nodiscard]] static bool IsScrollBarPaintTargetAttached(HWND hWnd) noexcept
+    {
+        if (!hWnd || !IsWindow(hWnd))
+            return false;
+        // NoBackdrop=1 / exempt от backdrop — passthrough, как и раньше.
+        if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
+            return false;
+        // Приаттаченный контрол (TreeView/ListView/ScrollBar/ComboLBox/…).
+        if (GlassShared::GlassGetWindowKind(hWnd) != GlassShared::GlassControlKind::None)
+            return true;
+        // Сам приаттаченный Full root помечен ComctlScrollHost.
+        if (GlassShared::GlassIsComctlScrollHost(hWnd))
+            return true;
+        // Дочернее окно приаттаченного Full root'а.
+        const HWND hRoot = GetAncestor(hWnd, GA_ROOT);
+        if (hRoot && hRoot != hWnd && GlassShared::GlassIsComctlScrollHost(hRoot))
+            return true;
+        return false;
+    }
 
     bool IsInsideScrollBarDrawThemeOrig() noexcept
     {
@@ -102,8 +129,18 @@ namespace GlassCore::ScrollBarTheme
             || _wcsicmp(themeClass, L"ScrollBar") != 0)
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
-        const HWND hWnd = WindowFromDC(hdc);
-        if (hWnd && !GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
+        // Неприаттаченные окна (PopupOnly / диалоги чужих приложений) получают
+        // orig — скроллбар-патчи только для приаттаченных. memory-DC (buffered
+        // paint) резолвим через стек сессий PaintDispatcher текущего потока;
+        // если DC вне нашего хука, но на этом потоке идёт paint приаттаченного
+        // окна (например GDI+/другой буфер внутри WM_PAINT) — фолбэк на хоста
+        // сессии, как в HwndFromDcOrMmcSession. Владелец не определён — orig.
+        HWND hWnd = WindowFromDC(hdc);
+        if (!hWnd)
+            hWnd = GlassCore::PaintDispatcher::GetStackOwnerForDc(hdc);
+        if (!hWnd)
+            hWnd = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+        if (!IsScrollBarPaintTargetAttached(hWnd))
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
         GlassCore::ScrollBarDrawTheme::LogScrollBarDrawThemeCall(

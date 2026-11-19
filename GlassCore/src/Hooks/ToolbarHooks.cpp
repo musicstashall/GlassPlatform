@@ -88,6 +88,8 @@ namespace GlassCore::ToolbarControl
     {
         HWND hWnd = WindowFromDC(hdc);
         if (!hWnd)
+            hWnd = GlassCore::PaintDispatcher::GetStackOwnerForDc(hdc);
+        if (!hWnd)
             hWnd = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
         return IsToolbarGlassSessionAllowed(hWnd);
     }

@@ -28,9 +28,11 @@
 #include "CorePch.h"
 
 #include <Hooks/ComboLBox.h>
+#include <Hooks/DropDown.h>
 #include <Hooks/ScrollBarDrawTheme.h>
 #include <Hooks/ScrollBarTheme.h>
 #include <Subsystems/PaintDispatcher.h>
+#include <Subsystems/RootSwcaGradient.h>
 #include <Subsystems/GdiHookUtils.h>
 #include <Subsystems/RenderText.h>
 #include <Helpers/ThemeHelper.h>
@@ -108,7 +110,35 @@ namespace GlassCore::ComboLBox
 
     static inline bool IsActive() noexcept
     {
-        return g_paintRef > 0 || g_hotRef > 0 || g_scrollRef > 0;
+        if (g_paintRef <= 0 && g_hotRef <= 0 && g_scrollRef <= 0)
+            return false;
+        // PopupOnly: чужой BeginPaint/GetDC поверх списка — сессионные подмены не применяем.
+        if (GlassCore::PaintDispatcher::IsForeignPaintBarrierActive())
+            return false;
+        return true;
+    }
+
+    // PopupOnly: подмена только DC самого ComboLBox (или его memory-DC).
+    // В Full без проверки — прежнее поведение сессии.
+    [[nodiscard]] static bool IsComboLBoxTargetDc(HDC hdc) noexcept
+    {
+        if (GlassCore::Root::IsFullInjectionMode())
+            return true;
+        if (!hdc)
+            return false;
+        if (HWND windowDc = WindowFromDC(hdc))
+        {
+            return GlassShared::GlassGetWindowKind(windowDc)
+                == GlassShared::GlassControlKind::ComboLBox;
+        }
+        if (HWND owner = GlassCore::PaintDispatcher::GetStackOwnerForDc(hdc))
+        {
+            if (GlassShared::GlassGetWindowKind(owner) == GlassShared::GlassControlKind::ComboLBox)
+                return true;
+        }
+        const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+        return host
+            && GlassShared::GlassGetWindowKind(host) == GlassShared::GlassControlKind::ComboLBox;
     }
 
     // =========================================================================
@@ -491,6 +521,9 @@ namespace GlassCore::ComboLBox
         if (!IsActive() || !lprc || !hbr)
             return orig(hdc, lprc, hbr);
 
+        if (!IsComboLBoxTargetDc(hdc))
+            return orig(hdc, lprc, hbr);
+
         if (IsGlassClearBrush(hbr))
         {
             PatBlt(hdc,
@@ -527,6 +560,9 @@ namespace GlassCore::ComboLBox
         if (!IsActive() || rop != PATCOPY)
             return orig(hdc, x, y, cx, cy, rop);
 
+        if (!IsComboLBoxTargetDc(hdc))
+            return orig(hdc, x, y, cx, cy, rop);
+
         HGDIOBJ const hbrObj = GetCurrentObject(hdc, OBJ_BRUSH);
         if (hbrObj && IsGlassClearBrush(static_cast<HBRUSH>(hbrObj)))
             return PatBlt(hdc, x, y, cx, cy, BLACKNESS);
@@ -543,6 +579,10 @@ namespace GlassCore::ComboLBox
         //DebugLog(L"[GlassCore][Overall_MyDrawTextW]");
 
         if (!IsActive())
+            return orig ? orig(hdc, lpchText, cchText, lprc, format)
+            : DrawTextW(hdc, lpchText, cchText, lprc, format);
+
+        if (!IsComboLBoxTargetDc(hdc))
             return orig ? orig(hdc, lpchText, cchText, lprc, format)
             : DrawTextW(hdc, lpchText, cchText, lprc, format);
 
@@ -587,6 +627,9 @@ namespace GlassCore::ComboLBox
         if (!IsActive())
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
 
+        if (!IsComboLBoxTargetDc(hdc))
+            return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
+
         if (format & DT_CALCRECT)
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
 
@@ -612,6 +655,10 @@ namespace GlassCore::ComboLBox
         auto orig = GetOverallOrigSafe<OHK_EXTTEXTOUT, decltype(&ExtTextOutW)>(callerMod);
 
         if (!IsActive())
+            return orig ? orig(hdc, x, y, options, lprect, lpString, c, lpDx)
+            : ExtTextOutW(hdc, x, y, options, lprect, lpString, c, lpDx);
+
+        if (!IsComboLBoxTargetDc(hdc))
             return orig ? orig(hdc, x, y, options, lprect, lpString, c, lpDx)
             : ExtTextOutW(hdc, x, y, options, lprect, lpString, c, lpDx);
 
@@ -720,6 +767,10 @@ namespace GlassCore::ComboLBox
             return orig ? orig(hdc, x, y, lpString, c)
             : TextOutW(hdc, x, y, lpString, c);
 
+        if (!IsComboLBoxTargetDc(hdc))
+            return orig ? orig(hdc, x, y, lpString, c)
+            : TextOutW(hdc, x, y, lpString, c);
+
         int result = 0;
         RECT rc{};
         GetClipBox(hdc, &rc);
@@ -742,7 +793,7 @@ namespace GlassCore::ComboLBox
         if (!orig)
             return SetBkColor(hdc, color);
 
-        if (IsActive())
+        if (IsActive() && IsComboLBoxTargetDc(hdc))
         {
             if (color == GetSysColor(COLOR_WINDOW) || color == GetSysColor(COLOR_BTNFACE))
                 color = 0;
@@ -881,7 +932,7 @@ namespace GlassCore::ComboLBox
         auto orig = GetOverallOrigSafe<OHK_SELECTOBJECT, decltype(&SelectObject)>(callerMod);
         //DebugLog(L"[GlassCore][Overall_MySelectObject]");
 
-        if (IsActive())
+        if (IsActive() && IsComboLBoxTargetDc(hdc))
         {
             LOGPEN pn{};
             if (GetObject(h, sizeof(pn), &pn))
@@ -903,7 +954,7 @@ namespace GlassCore::ComboLBox
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<OHK_BITBLT, decltype(&BitBlt)>(callerMod);
 
-        if (IsActive())
+        if (IsActive() && IsComboLBoxTargetDc(hdc))
         {
             if (rop == SRCCOPY || rop == WHITENESS)
             {
@@ -931,6 +982,27 @@ namespace GlassCore::ComboLBox
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
         if (!IsActive())
+        {
+            // Диагностика (Round-7, Issue 2): видно ли вызов DTB класса Combobox/ListBox
+            // вне активной ComboLBox-сессии (например, поле адресного ComboBox внутри
+            // ComboBoxEx32 при открытии списка). Ограничено 32 срабатываниями.
+            static std::atomic<unsigned> s_dtbDiag{32};
+            unsigned const n = s_dtbDiag.fetch_sub(1, std::memory_order_relaxed);
+            if (n < 32)
+            {
+                WCHAR dcClass[MAX_PATH + 1]{};
+                if (SUCCEEDED(Shared::ThemeHelper::GetThemeClass(hTheme, dcClass, MAX_PATH))
+                    && (StrEq(dcClass, L"Combobox") || StrEq(dcClass, L"ListBox")))
+                {
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][ComboLBox] DTB(вне сессии): class=\"%s\" part=%d state=%d caller=%p",
+                        dcClass, iPartId, iStateId, callerMod);
+                }
+            }
+            return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
+        }
+
+        if (!IsComboLBoxTargetDc(hdc))
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
         WCHAR themeClass[MAX_PATH + 1]{};
@@ -974,8 +1046,41 @@ namespace GlassCore::ComboLBox
             return dtbOrig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
         }
 
+        // Тема "ListBox": фон клиента (part=0 state=0) — PatBlt(BLACKNESS) под стекло.
+        // Незамещение давало белую плашку интерьера выпадающего списка в PopupOnly
+        // (файловый диалог «Тип файлов»): comctl32 рисует тело списка
+        // DrawThemeBackground(ListBox, 0, 0). Паритет с ListBoxHooks.cpp.
+        if (haveClass && StrEq(themeClass, L"ListBox"))
+        {
+            if (pRect && !IsRectEmpty(pRect) && iPartId == 0 && iStateId == 0)
+            {
+                DebugLog(L"[GlassCore][ComboLBox] DrawThemeBackground: ListBox background part=0 state=0 — BLACKNESS");
+                const RECT* clipRect = pClipRect ? pClipRect : pRect;
+                PatBlt(hdc,
+                    clipRect->left,
+                    clipRect->top,
+                    clipRect->right - clipRect->left,
+                    clipRect->bottom - clipRect->top,
+                    BLACKNESS);
+                return S_OK;
+            }
+            return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
+        }
+
         if (haveClass && StrEq(themeClass, L"Combobox"))
         {
+            // Диагностика (Round-7, Issue 2): фиксируем вызов DTB класса Combobox под сессией
+            // (например, поле адресного ComboBox внутри ComboBoxEx32). Ограничено 32 срабатываниями.
+            {
+                static std::atomic<unsigned> s_dtbDiagCombo{32};
+                unsigned const n = s_dtbDiagCombo.fetch_sub(1, std::memory_order_relaxed);
+                if (n < 32)
+                {
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][ComboLBox] DTB(сессия): class=\"Combobox\" part=%d state=%d caller=%p host=0x%p",
+                        iPartId, iStateId, callerMod, h_combolbox);
+                }
+            }
             if (!pRect || IsRectEmpty(pRect))
                 return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
@@ -1004,6 +1109,11 @@ namespace GlassCore::ComboLBox
         auto orig = GetOverallOrigSafe<OHK_DRAWTHEMETEXTEX, decltype(&DrawThemeTextEx)>(callerMod);
 
         if (!IsActive())
+            return orig ? orig(hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, pRect, pOptions)
+                : DrawThemeTextEx(
+                    hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, pRect, pOptions);
+
+        if (!IsComboLBoxTargetDc(hdc))
             return orig ? orig(hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, pRect, pOptions)
                 : DrawThemeTextEx(
                     hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, pRect, pOptions);
@@ -1615,6 +1725,20 @@ namespace GlassCore::ComboLBox
             hWnd, static_cast<int>(isComboBoxAnimation));
 
         ApplyComboLBoxFlyoutAtShow(hWnd, isComboBoxAnimation);
+
+        // Round-5 диагностика регрессии: если отложенная анимация НЕ запланирована
+        // (border defer не выставлен), события OnFlyoutAnimationFinished / uncloak
+        // не будет вообще, и клиент attached-ComboLBox так и останется без перерисовки
+        // после ApplyPopupSwcaEffect (Round-5: списки «не получают патчи»).
+        // В этом случае форсируем клиентную перерисовку прямо здесь (WM_PRINTCLIENT
+        // + PostMessage WM_GLASS_FLYOUT_CLIENT_REFRESH). В deferred-ветке ничего не
+        // меняется — там RefreshFlyoutClientAfterUncloak вызывает OnFlyoutAnimationFinished.
+        if (!GlassCore::FlyoutFrame::IsHostBorderDeferred(hWnd))
+        {
+            DebugLog(DBG_IMPORTANT,
+                L"[GlassCore][ComboLBox] OnComboLBoxShow: no defer — repaint inline hwnd=0x%p", hWnd);
+            GlassCore::DropDown::RefreshFlyoutClientAfterUncloak(hWnd);
+        }
     }
 
     void OnComboLBoxDetach(HWND hWnd)

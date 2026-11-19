@@ -65,7 +65,12 @@ namespace GlassCore::PaintDispatcher
 
     // Вершина стека BeginPaint / GetDC / CreateCompatibleDC в текущем потоке (последний «хозяин» DC).
     // У memory-DC WindowFromDC часто NULL — для классификации MMC-графика в RootGdiHooks.
+    // PopupOnly: Foreign-барьер (чужой BeginPaint/GetDC поверх стеклянной сессии) прячет хост — здесь nullptr.
     [[nodiscard]] HWND GetPaintSessionHostHwnd() noexcept;
+
+    // PopupOnly: вершина стека — чужое окно (BeginPaint/GetDC неразрешённого kind).
+    // Пока барьер активен, сессионные хуки отдают orig. В Full всегда false.
+    [[nodiscard]] bool IsForeignPaintBarrierActive() noexcept;
 
     // Только внутри onBegin у провайдеров GetDC/GetDCEx: HDC уже получен диспетчером (g_origGetDC).
     // Не вызывать повторно GetDC(hWnd) для того же окна — иначе рекурсия через HookGetDC.

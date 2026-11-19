@@ -28,6 +28,8 @@
 #include <Module/ModuleHandler.h>
 #include <Subsystems/RenderText.h>
 #include <Subsystems/PaintDispatcher.h>
+#include <GlassControlKind.h>
+#include <Subsystems/RootSwcaGradient.h>
 #include <Subsystems/GdiHookUtils.h>
 #include <WinApiUtils.h>
 #include <BitmapUtils.h>
@@ -802,8 +804,32 @@ namespace GlassCore::Root
                 return GetSysColorBrush(nIndex);
             if (!g_shutdown.load(std::memory_order_acquire))
             {
-                if (nIndex == COLOR_WINDOW || nIndex == COLOR_BTNFACE || nIndex == COLOR_MENU)
-                    return CreateSolidBrush(0);
+                // PopupOnly: вне активной paint-сессии (стеклянного popup'а) comctl32/user32/
+                // comdlg32 не трогаем — иначе неприаттаченные окна (файловые диалоги и т.п.)
+                // получают чёрные кисти вместо системных. В Full — прежнее поведение.
+                if (IsFullInjectionMode() || GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() != nullptr)
+                {
+                    if (nIndex == COLOR_WINDOW || nIndex == COLOR_BTNFACE || nIndex == COLOR_MENU)
+                    {
+                        // Диагностика ограничена по числу срабатываний: видно, от каких модулей
+                        // и для каких индексов чёрная кисть запрашивалась под сессией (например,
+                        // comctl32 для WM_CTLCOLOREDIT-подобных путей неприаттаченных контролов).
+                        static std::atomic<unsigned> s_sysColorBrushDiag{64};
+                        unsigned n = s_sysColorBrushDiag.fetch_sub(1);
+                        if (n < 64)
+                        {
+                            const std::wstring callerBase = CallerBaseName(GetCallerModule(_ReturnAddress()));
+                            const HWND sessionHost = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+                            wchar_t hostCls[128]{};
+                            if (sessionHost)
+                                GetClassNameW(sessionHost, hostCls, _countof(hostCls));
+                            DebugLog(DBG_IMPORTANT,
+                                L"[GlassCore][Root][GDI] GetSysColorBrush black: nIndex=%d caller=%s host=0x%p hostClass=\"%s\"",
+                                nIndex, callerBase.c_str(), sessionHost, hostCls);
+                        }
+                        return CreateSolidBrush(0);
+                    }
+                }
             }
             return o(nIndex);
         }
@@ -816,6 +842,12 @@ namespace GlassCore::Root
                 return CreateSolidBrush(color);
 
             if (g_shutdown.load(std::memory_order_acquire))
+                return o(color);
+
+            // PopupOnly: без активной paint-сессии (стеклянного popup'а) comctl32
+            // не трогаем — иначе неприаттаченные окна (файловые диалоги и т.п.)
+            // получают чёрные/alpha-кисти вместо системных. В Full — прежнее поведение.
+            if (!IsFullInjectionMode() && GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() == nullptr)
                 return o(color);
 
             // BWM-паритет (WinHooks::MyCreateSolidBrush): глобальный перехват
@@ -843,7 +875,24 @@ namespace GlassCore::Root
                 || plain == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF)
                 || Shared::ThemeHelper::IsThemeColor(color, L"ExplorerNavPane")
                 || Shared::ThemeHelper::IsThemeColor(color, L"ProperTree"))
+            {
+                if (!IsFullInjectionMode())
+                {
+                    static std::atomic<unsigned> s_popupBrushLog{ 32 };
+                    const unsigned n = s_popupBrushLog.fetch_sub(1, std::memory_order_relaxed);
+                    if (n < 32)
+                    {
+                        const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+                        wchar_t hostCls[128]{};
+                        if (host)
+                            GetClassNameW(host, hostCls, _countof(hostCls));
+                        DebugLog(DBG_IMPORTANT,
+                            L"[GlassCore][Root] CreateSolidBrush black (PopupOnly) color=0x%06X caller=%s host=0x%p hostClass=\"%s\"",
+                            plain, base.c_str(), host, hostCls);
+                    }
+                }
                 return o(RGB(0, 0, 0));
+            }
 
             // Остальное — alpha-кисть для корректного композитинга.
             HBRUSH b = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255);
@@ -858,6 +907,31 @@ namespace GlassCore::Root
                 return SelectObject(hdc, h);
             if (g_shutdown.load(std::memory_order_acquire))
                 return o(hdc, h);
+
+            // PopupOnly: вне активной paint-сессии замены кистей (USER32 → BLACK_BRUSH,
+            // COMDLG32 → alpha) не делаем — неприаттаченные окна получают системные кисти.
+            // В Full — прежнее поведение.
+            if (!IsFullInjectionMode()
+                && GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() == nullptr)
+                return o(hdc, h);
+
+            // PopupOnly: оконный DC чужого контрола (поле комбо, TreeView, шапка) не черним,
+            // даже если на потоке ещё жива стеклянная сессия попапа.
+            if (!IsFullInjectionMode())
+            {
+                if (HWND foreign = HwndFromDc(hdc))
+                {
+                    using GlassShared::GlassControlKind;
+                    const auto kind = GlassShared::GlassGetWindowKind(foreign);
+                    const bool glassTarget =
+                        kind == GlassControlKind::ComboLBox
+                        || kind == GlassControlKind::Toolbar
+                        || kind == GlassControlKind::MonthCal
+                        || kind == GlassControlKind::TrackBar;
+                    if (!glassTarget)
+                        return o(hdc, h);
+                }
+            }
 
             HWND w = HwndFromDc(hdc);
             wchar_t cls[256]{};
@@ -878,7 +952,21 @@ namespace GlassCore::Root
                 if (GetObjectType(h) == OBJ_BRUSH && GetObject(h, sizeof(lb), &lb))
                 {
                     if (lb.lbColor == GetSysColor(COLOR_WINDOW) || lb.lbColor == GetSysColor(COLOR_BTNFACE))
+                    {
+                        static std::atomic<unsigned> s_selectBlackDiag{64};
+                        unsigned n = s_selectBlackDiag.fetch_sub(1);
+                        if (n < 64)
+                        {
+                            HWND w2 = HwndFromDc(hdc);
+                            wchar_t wCls[128]{};
+                            if (w2)
+                                GetClassNameW(w2, wCls, _countof(wCls));
+                            DebugLog(DBG_IMPORTANT,
+                                L"[GlassCore][Root][GDI] SelectObject USER32 black: dc=0x%p wnd=0x%p class=\"%s\" lb=0x%06X",
+                                hdc, w2, wCls, lb.lbColor & 0xFFFFFF);
+                        }
                         h = GetStockObject(BLACK_BRUSH);
+                    }
                 }
             }
 

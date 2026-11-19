@@ -35,3 +35,17 @@
   Дополнительно: внутри `HookBeginPaint` после успешного оригинального `BeginPaint` вызывается `g_postPaintProviders` (`RegisterPostPaintProvider`); коллбэк возвращает `bool` (фон очищен) — тогда диспетчер сбрасывает `PAINTSTRUCT::fErase`. Парного Release в диспетчере нет.
 
   Button и Static регистрируются **только** через `RegisterPaintProvider`. `HookDeleteDC` и `HookReleaseDC` обращаются исключительно к своим спискам и никогда не достигают `g_paintProviders` — это намеренно и не должно меняться.
+
+### PopupOnly: привязка сессии к окну
+
+В Full `g_activePaintHWnd` — вершина стека, и сессионные GDI-хуки действуют на весь поток. В PopupOnly этого мало: чужой `BeginPaint`/`GetDC` (TreeView, поле комбо, тулбар шапки диалога) шёл мимо стека и оставлял хостом уже закрытый попап, а memory-DC uxtheme кэширует без `DeleteDC`.
+
+Запись стека несёт тип: `Paint`, `GetDC`, `Compat`, `Foreign`.
+
+- **Foreign-барьер.** Неразрешённый kind при непустом стеке кладётся как `Foreign` без провайдеров, `GetPaintSessionHostHwnd()` на это время — `nullptr`. `IsForeignPaintBarrierActive()` — для сессионных хуков (ComboLBox `IsActive`). Пустой стек по-прежнему fast-path без записи.
+- **CreateCompatibleDC.** Fallback на хост сессии только если `WindowFromDC(hdcSrc) == nullptr` и вершина не `Foreign`. Оконный DC чужого HWND к стеклянной сессии не приписывается.
+- **Протухшие записи.** Перед Push/Pop в PopupOnly снимаются Compat-записи, у которых окно уничтожено, маркер kind снят или `GA_ROOT` скрыт после того, как был видим в момент push (снимок `AnimateWindow`/`WM_PRINT` ещё скрытого списка не срезается); на каждую — `onEnd` compat-провайдеров. `Foreign` с уничтоженным окном снимается без провайдеров. Закрытие `Paint`/`GetDC` так же снимает Compat/Foreign, созданные внутри этой сессии (повторный `DeleteDC` кэша запись уже не найдёт).
+- Диагностика, не больше 32 раз на поток: `prune stale entry` и `foreign barrier`.
+- **Attach-политика для popup'ов (PopupOnly).** Сессия открывается только на маркированные kind-окна. Матчинг attach-ветки в WinEventHandler по цепочке предков управляет, кто получает сессию: `Toolbar`/`TrackBar` (под `ViewControlClass`), теперь и `ListView`/`WinForms_ListView` (под `DropDown`/`ListviewPopup` — `WindowClassifier::IsUnderDropDownAncestor`, 8 уровней). Unmarked (`None`) — `Foreign`/fast-path без сессий, как раньше.
+
+Сабкласс корня — один `RootSubclassProc` в любом режиме; режим проверяется на каждом сообщении, поэтому live-смена режима (`WinEventHook_SetMode`) не требует переустановки сабкласса. В PopupOnly он передаёт управление `PopupOnlyRootSubclassProc` (`WndCompat`): служебные `WM_GLASS_*`, меню-владелец, NC/активация и уничтожение уходят в общий обработчик как есть; `WM_COMMAND` (`CBN_DROPDOWN`) и `WM_CTLCOLORLISTBOX` приаттаченного ComboLBox (`BLACK_BRUSH`) обрабатываются там; остальное — `DefSubclassProc`. Узкий sink на чужом `#32770` — тот же прок с id 2. Class brush, SWCA и dark mode на чужой диалог не ставятся.
