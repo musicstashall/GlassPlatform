@@ -803,8 +803,14 @@ namespace GlassCore::Root
                 return GetSysColorBrush(nIndex);
             if (!g_shutdown.load(std::memory_order_acquire))
             {
-                if (nIndex == COLOR_WINDOW || nIndex == COLOR_BTNFACE || nIndex == COLOR_MENU)
-                    return CreateSolidBrush(0);
+                // PopupOnly: вне активной paint-сессии (стеклянного popup'а) comctl32/user32/
+                // comdlg32 не трогаем — иначе неприаттаченные окна (файловые диалоги и т.п.)
+                // получают чёрные кисти вместо системных. В Full — прежнее поведение.
+                if (IsFullInjectionMode() || GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() != nullptr)
+                {
+                    if (nIndex == COLOR_WINDOW || nIndex == COLOR_BTNFACE || nIndex == COLOR_MENU)
+                        return CreateSolidBrush(0);
+                }
             }
             return o(nIndex);
         }
@@ -864,6 +870,13 @@ namespace GlassCore::Root
             if (!o)
                 return SelectObject(hdc, h);
             if (g_shutdown.load(std::memory_order_acquire))
+                return o(hdc, h);
+
+            // PopupOnly: вне активной paint-сессии замены кистей (USER32 → BLACK_BRUSH,
+            // COMDLG32 → alpha) не делаем — неприаттаченные окна получают системные кисти.
+            // В Full — прежнее поведение.
+            if (!IsFullInjectionMode()
+                && GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() == nullptr)
                 return o(hdc, h);
 
             HWND w = HwndFromDc(hdc);

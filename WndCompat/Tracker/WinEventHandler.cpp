@@ -914,12 +914,13 @@ namespace
 
                 case ControlKind::TrackBar:
                     // Full: везде; PopupOnly: только внутри ViewControlClass
-                    if (allowGlassForHwnd && isFull)
+                    if (allowGlassForHwnd
+                        && (isFull || WndCompat::IsWindowClass(GetParent(hWnd), L"ViewControlClass")))
                     {
                         DebugLog(L"[WndCompat][WinEvent] TrackBar_Attach: hwnd=0x%p", hWnd);
-                        
+
                         WndCompat::TrackBar_Attach(hWnd);
-                            
+
                     }
                     break;
 
@@ -1978,7 +1979,7 @@ namespace
             break;
 
         case ControlKind::TrackBar:
-            if (isFull)
+            if (isFull || WndCompat::IsWindowClass(GetParent(hWnd), L"ViewControlClass"))
                 return GK::TrackBar;
             break;
 
