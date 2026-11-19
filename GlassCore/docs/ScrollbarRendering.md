@@ -167,3 +167,18 @@ flowchart LR
 ---
 
 **Примечание:** `kBgColorTolerance` в diff-маске — тестовый параметр и может быть изменён/откачен после проверки.
+
+---
+
+## 10. Гейт целевого окна в root comctl32-пути (`ComctlScrollBarMyDrawThemeBackground`)
+
+IAT на comctl32 ставится лениво и **живёт весь процесс** (снимается только при выгрузке comctl32 / shutdown ядра). Поэтому тело хука дополнительно гейтится по целевому HWND:
+
+1. `WindowFromDC(hdc)`; если `NULL` (memory-DC / buffered paint) — владелец берётся из стека сессий PaintDispatcher текущего потока (`GetStackOwnerForDc`); если и там пусто (DC вне хука `CreateCompatibleDC`, но идёт paint приаттаченного окна) — фолбэк на хоста активной paint-сессии (`GetPaintSessionHostHwnd`). Владелец не определён → `orig`.
+2. Целевое окно обязано быть «под стеклом» — `IsScrollBarPaintTargetAttached()`:
+   - `GlassIsBackdropAllowedForHwnd(hWnd) == true` (уважается `NoBackdrop` / exempt — как раньше);
+   - и при этом либо маркер `GlassControlKind != None` (приаттаченный контрол: TreeView/ListView/ScrollBar/ComboLBox/…), либо `GlassIsComctlScrollHost(hWnd)`, либо `GlassIsComctlScrollHost(GA_ROOT)` (дочернее окно приаттаченного в Full root'а).
+
+Для неприаттаченных окон (типичный случай — PopupOnly: стороннее приложение не в AttachList, например файловый диалог) хук всегда отдаёт `orig`. Раньше проверялся только глобальный backdrop-флаг (по умолчанию true) с обходом гарда на memory-DC, из-за чего неприаттаченные окна получали чёрные track (parts 4–7) и чёрный SIZEBOX-угол (part 10) без glass-фрейма.
+
+Попутно `Root_Attach` (`WndCompat/Root/RootSubclass.cpp`) применяет `ApplyRootClassBlackBrush` (процесс-широкая `SetClassLongPtr(..., BLACK_BRUSH)`) только к настоящему `GA_ROOT`; дочерний `ComboBoxEx32` (например, поле имени файла в классическом файловом диалоге) больше не чернит все `ComboBoxEx32` процесса. Always-on `Root_MyCreateSolidBrush` (`RootGdiHooks.cpp`) в `PopupOnly` вне активной paint-сессии отдаёт `orig` без изменений.

@@ -28,6 +28,7 @@
 #include <Module/ModuleHandler.h>
 #include <Subsystems/RenderText.h>
 #include <Subsystems/PaintDispatcher.h>
+#include <Subsystems/RootSwcaGradient.h>
 #include <Subsystems/GdiHookUtils.h>
 #include <WinApiUtils.h>
 #include <BitmapUtils.h>
@@ -816,6 +817,12 @@ namespace GlassCore::Root
                 return CreateSolidBrush(color);
 
             if (g_shutdown.load(std::memory_order_acquire))
+                return o(color);
+
+            // PopupOnly: без активной paint-сессии (стеклянного popup'а) comctl32
+            // не трогаем — иначе неприаттаченные окна (файловые диалоги и т.п.)
+            // получают чёрные/alpha-кисти вместо системных. В Full — прежнее поведение.
+            if (!IsFullInjectionMode() && GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() == nullptr)
                 return o(color);
 
             // BWM-паритет (WinHooks::MyCreateSolidBrush): глобальный перехват

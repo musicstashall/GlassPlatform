@@ -1506,7 +1506,12 @@ namespace WndCompat
             GlassShared::GlassMarkComctlScrollHost(hRoot);
         }
 
-        if (Shared::RootPolicyQuery::IsRootGlassRenderingEnabled())
+        // ApplyRootClassBlackBrush — процесс-широкая SetClassLongPtr(BLACK_BRUSH)
+        // по атому класса: применима только настоящему GA_ROOT под стекло.
+        // Дочерний ComboBoxEx32 в неприаттаченном диалоге иначе чернит все
+        // ComboBoxEx32 процесса (в т.ч. будущие и чужие).
+        if (Shared::RootPolicyQuery::IsRootGlassRenderingEnabled()
+            && GetAncestor(hRoot, GA_ROOT) == hRoot)
             WndCompat::Root::ExplorerBridge::ApplyRootClassBlackBrush(hRoot);
 
         // IAT-хуки по типу root-окна (ветка «window» BWM PaintHandler)

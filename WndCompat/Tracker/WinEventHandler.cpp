@@ -940,7 +940,9 @@ namespace
                     break;
 
                 case ControlKind::ComboBoxEx32:
-                    // Root_Attach для обработки WM_CTLCOLOR* — в обоих режимах (BWM pattern)
+                    // В обоих режимах Root_Attach: субкласс нужен для WM_COMMAND (CBN_DROPDOWN →
+                    // ComboLBox_Attach) и для WM_CTLCOLOR* (ветки CTLCOLOR* Full-only внутри).
+                    // Process-wide эффекты Root_Attach для не-GA_ROOT (класс-кисть) сняты — см. Root_Attach.
                     if (allowGlassForHwnd)
                     {
                         LogWinEventRootAttach(L"ComboBoxEx32", hWnd);
