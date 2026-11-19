@@ -7,6 +7,8 @@
 #include <GlassControlKind.h>
 #include <Tracker/WinEventHandler.h>
 #include <WinApiUtils.h>
+#include "../Tracker/WindowClassUtils.h"
+#include <Helpers/ThemeHelper.h>
 #include <CommCtrl.h>
 
 #include <algorithm>
@@ -16,6 +18,24 @@
 namespace
 {
     std::vector<HWND> g_trackBarWindows;
+
+    // Трекбар может находиться не непосредственно в ViewControlClass, а глубже
+    // (внутри панели/сатичного контейнера попапа «Настройки вида»).
+    // Поднимаемся по цепочке родителей — ограниченная глубина, окно может быть живым
+    // на момент CREATE и стать "сиротой" на границе shutdown.
+    bool IsUnderViewControlPopup(HWND hWnd) noexcept
+    {
+        HWND cur = GetParent(hWnd);
+        for (int depth = 0; cur && depth < 8; ++depth)
+        {
+            if (!IsWindow(cur))
+                return false;
+            if (WndCompat::IsWindowClass(cur, L"ViewControlClass"))
+                return true;
+            cur = GetParent(cur);
+        }
+        return false;
+    }
 
     void SetTrackBarTransparentBkgnd(HWND hWnd, bool enable) noexcept
     {
@@ -59,9 +79,25 @@ namespace WndCompat
         g_trackBarWindows.push_back(hWnd);
         GlassShared::GlassMarkWindow(hWnd, GlassShared::GlassControlKind::TrackBar);
 
-        const bool allowGlass = WndCompat::IsGlassVisualsAllowed();
+        // Full: как раньше (IsGlassVisualsAllowed = GlassRendering + Full).
+        // PopupOnly: слайдер внутри ViewControlClass-попапа («Настройки вида») — тоже,
+        // иначе opaque-фон трейера остаётся плашкой, и «слайдер не получает патч».
+        const bool isViewControlChild = IsUnderViewControlPopup(hWnd);
+        const bool allowGlass = WndCompat::IsGlassVisualsAllowed()
+            || (WndCompat::WinEventHook_GetMode() == Shared::InjectionMode::PopupOnly
+                && isViewControlChild);
         if (allowGlass)
+        {
             SetTrackBarTransparentBkgnd(hWnd, true);
+            // Без Root_Attach на попапе (PopupOnly) dark-mode для конкретного контрола
+            // никто не включит — иначе трек/ползунок рисуются светлой темой на тёмном стекле.
+            Shared::ThemeHelper::EnableWindowDarkModeUxTheme(
+                hWnd, Shared::ThemeHelper::ResolveEffectiveDarkMode());
+        }
+
+        DebugLog(DBG_IMPORTANT,
+            L"[WndCompat][TrackBarHost] TrackBar_Attach: hwnd=0x%p glassAllowed=%d viewControlChild=%d",
+            hWnd, allowGlass ? 1 : 0, isViewControlChild ? 1 : 0);
 
         if (WndCompat::WinUi_IsUnderShellTrayRoot(hWnd))
             WndCompat::WinUi_TrayTrackBar_ReportIxdeIntent(hWnd);
@@ -117,20 +153,24 @@ namespace WndCompat
 
     void TrackBar_ApplyBackdropPolicyToTracked() noexcept
     {
-        const bool allowed = WndCompat::IsGlassVisualsAllowed();
+        const bool glassPolicy = WndCompat::IsGlassVisualsAllowed();
         const auto windows = g_trackBarWindows;
 
         for (HWND hWnd : windows)
         {
             if (!hWnd || !IsWindow(hWnd))
                 continue;
+            const bool isViewControlChild = IsUnderViewControlPopup(hWnd);
+            const bool allowed = glassPolicy
+                || (WndCompat::WinEventHook_GetMode() == Shared::InjectionMode::PopupOnly
+                    && isViewControlChild);
             SetTrackBarTransparentBkgnd(hWnd, allowed);
             RedrawTrackBarChrome(hWnd);
         }
 
         DebugLog(DBG_IMPORTANT,
-            L"[WndCompat][TrackBarHost] TrackBar_ApplyBackdropPolicy: allowed=%d count=%zu",
-            allowed ? 1 : 0,
+            L"[WndCompat][TrackBarHost] TrackBar_ApplyBackdropPolicy: glassPolicy=%d count=%zu",
+            glassPolicy ? 1 : 0,
             windows.size());
     }
 }

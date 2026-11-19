@@ -855,6 +855,13 @@ namespace
                         // ComboLBox_Attach (как у ComboBoxEx32-пути), без class brush / SWCA / dark mode.
                         if (HWND hParent = GetParent(hWnd))
                         {
+                            // Внутренний ComboBox ComboBoxEx32: CBN_DROPDOWN и так ловит Root_Attach
+                            // на самом Ex32 — sink на Ex32 был бы лишним (двойная обработка).
+                            if (WndCompat::IsWindowClass(hParent, L"ComboBoxEx32"))
+                            {
+                                DebugLog(L"[WndCompat][WinEvent] DropDownNotify: skip, parent is ComboBoxEx32 combo=0x%p", hWnd);
+                                break;
+                            }
                             DebugLog(L"[WndCompat][WinEvent] DropDownNotify: parent=0x%p combo=0x%p", hParent, hWnd);
                             DispatchDropDownNotifyAttachToOwnerThread(hParent);
                         }

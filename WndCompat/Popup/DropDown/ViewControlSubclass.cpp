@@ -302,13 +302,13 @@ namespace WndCompat
         if (SetWindowSubclass(hWnd, ViewControlSubclassProc, 1, 0))
         {
             WndCompat::RegisterTextGlowPopupClientWithGlassCore(hWnd, 0);
-            DebugLog(L"[WndCompat][ViewControl] ViewControl_Attach: subclassed 0x{:x}",
-                reinterpret_cast<std::uintptr_t>(hWnd));
+            DebugLog(L"[WndCompat][ViewControl] ViewControl_Attach: subclassed 0x%p",
+                hWnd);
         }
         else
         {
-            DebugLog(L"[WndCompat][ViewControl] ViewControl_Attach: FAILED 0x{:x}",
-                reinterpret_cast<std::uintptr_t>(hWnd));
+            DebugLog(L"[WndCompat][ViewControl] ViewControl_Attach: FAILED 0x%p",
+                hWnd);
         }
     }
 
@@ -330,7 +330,7 @@ namespace WndCompat
         if (IsWindow(hWnd))
             RemoveWindowSubclass(hWnd, ViewControlSubclassProc, 1);
 
-        DebugLog(L"[WndCompat][ViewControl] ViewControl_Detach: 0x{:x}",
-            reinterpret_cast<std::uintptr_t>(hWnd));
+        DebugLog(L"[WndCompat][ViewControl] ViewControl_Detach: 0x%p",
+            hWnd);
     }
 }

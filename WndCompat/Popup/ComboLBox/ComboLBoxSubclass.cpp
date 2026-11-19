@@ -10,6 +10,7 @@
 #include <GlassControlKind.h>
 #include <MenuUtils.h>
 #include <Tracker/WinEventHandler.h>
+#include <Helpers/ThemeHelper.h>
 
 #include <vector>
 #include <algorithm>
@@ -397,6 +398,11 @@ namespace WndCompat
 
         if (SetWindowSubclass(hWnd, ComboLBoxSubclassProc, 1, 0))
         {
+            // DWM/UXTheme: dark-mode самого списка — иначе у нативного ComboBox в диалоге
+            // («Тип файлов» в #32770) список рисуется светлой темой, и интерьер
+            // остаётся белым/нерисованным (на диалоге-владельце нет Root_Attach).
+            Shared::ThemeHelper::EnableWindowDarkModeUxTheme(
+                hWnd, Shared::ThemeHelper::ResolveEffectiveDarkMode());
             g_comboLBoxWindows.push_back(hWnd);
             GlassShared::GlassMarkWindow(hWnd, GlassShared::GlassControlKind::ComboLBox);
             WndCompat::RegisterTextGlowPopupClientWithGlassCore(hWnd, 0);

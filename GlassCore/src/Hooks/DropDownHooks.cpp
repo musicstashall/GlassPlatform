@@ -370,6 +370,16 @@ namespace GlassCore::DropDown
                 ::ReleaseDC(root, hdc);
             }
 
+            // Реальный WM_PAINT принудительно: у attached ComboLBox WM_ERASEBKGND
+            // заполняет клиент BLACKNESS (ComboLBoxSubclassProc), что покрывает случай,
+            // когда комдиалог/COM-рисование идёт мимо наших IAT-хуков (WM_PRINTCLIENT
+            // без WM_ERASEBKGND) и список остаётся в «доаттачном» белом виде.
+            (void)::RedrawWindow(
+                root,
+                nullptr,
+                nullptr,
+                RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+
             GlassCore::ComboLBox::OnComboLBoxPrintClientEnd(root);
         }
 

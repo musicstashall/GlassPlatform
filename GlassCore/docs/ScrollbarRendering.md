@@ -199,3 +199,16 @@ IAT на comctl32 ставится лениво и **живёт весь про�
 - Sink обрабатывает только: `WM_COMMAND` → `RootHandleComboBoxDropDown` (общее тело с RootSubclassProcShared: `GetComboBoxInfo(hCtrl)` → `ComboLBox_Attach` + DropDown `OnComboBoxDropDown` / AnimateWindow detour), `WM_GLASS_DETACH_ROOT` (снятие при shutdown, с `SignalDetachComplete`) и `WM_NCDESTROY` (unregister; `RemoveWindowSubclass` не зовём — comctl32 снимает цепочку сам). Класс, бэкдроп, dark‑mode и фрейм диалога не затрагиваются.
 - `Root_DetachAll` тоже снимает notify‑sinks (same‑thread → `RemoveWindowSubclass`; cross‑thread → `WM_GLASS_DETACH_ROOT` + pending‑счётчик) — субклассы не переживают FreeLibrary.
 - Эффект: список «Тип файлов» получает тот же пайплайн, что `ComboBoxEx32`‑списки (включая стеклянные скроллбары после гейта из §10). Ограничения: только нативный ComboBox (не WinForms), pie (`msctls_progress32→ComboBoxEx32`) не затрагивается, чужой диалог по‑прежнему не «застекляется» целиком.
+
+## 12. Ретест round 2→3: трекбар и «Тип файлов», диагностика по логу
+
+Ретест #2 показал: WM_COMMAND‑sink механика работает (DropDownNotify → ComboLBox_Attach → CreateDropDownPopupIn → corner SWCA/backdrop/`RefreshFlyoutClientAfterUncloak mode=ComboLBox`), но список остаётся без перерисовки, а трекбар в ViewControlClass‑попапе не «подхватывает» стекло.
+
+Правки (без расширения Root_Attach на чужие диалоги):
+- `ComboLBox_Attach`: `AllowDarkModeForWindow` (Win32DarkModeKick) на сам ComboLBox, иначе комдиалог‑рисование списка идёт светлой темой и интерьер не обновляется (белый/нерисованный).
+- `SyncComboLBoxClientPaint` (DropDownHooks.cpp): после WM_PRINTCLIENT дополнительно форсируем реальный `WM_PAINT` (`RedrawWindow … RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN`): attached ComboLBox сам заполняет клиент BLACKNESS в WM_ERASEBKGND (`ComboLBoxSubclassProc`) — гарантируем, что «доаттачный» белый фон затирается даже если рендер шёл мимо IAT.
+- `TrackBar_Attach` / `TrackBar_ApplyBackdropPolicyToTracked`: в PopupOnly `TBS_TRANSPARENTBKGND` + `AllowDarkModeForWindow` применяются и под ViewControlClass‑попапом (полный `Root_Attach` на попапе нет → иначе слайдер остаётся непрозрачной плашкой/светлой темой). Поиск ViewControlClass — по цепочке родителей (до 8 уровней), а не только прямой parent; добавлены диагностические строки `TrackBar_Attach: hwnd=0x%p glassAllowed=%d viewControlChild=%d` и `glassAllowed` в policy‑логе для следующего ретеста.
+- WinEventHandler (popup‑only ComboBox case): notify‑sink не ставится, если родитель — `ComboBoxEx32` (там `Root_Attach` ловит CBN_DROPDOWN сам) — убираем дублированный CBN_DROPDOWN/тоста‑шум.
+- ViewControl‑логи: `0x{:x}` → `0x%p` (был литерал).
+
+Открыто до ретеста: трекбар визуально может требовать дополнительного provider‑маркера/гейта PaintDispatcher (в PopupOnly `IsPopupOnlyPaintDispatcherKind` не знает про `msctls_trackbar32`); если после этих правок слайдер по‑прежнему не патчится — смотреть лог-строки `TrackBar_Attach` (`glassAllowed=? viewControlChild=?`) и PaintDispatcher‑ветку для trackbar (по аналогии с ComboLBox/Toolbar).
