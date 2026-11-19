@@ -251,6 +251,11 @@ namespace
                     OBJID_WINDOW, CHILDID_SELF, 0, 0);
                 msg->message = WM_NULL; // поглощаем — до WndProc не доходит
             }
+            else if (msg && msg->message == WndCompat::WM_GLASS_ATTACH_DROPDOWN_NOTIFY && IsWindow(msg->hwnd))
+            {
+                WndCompat::Root_AttachDropDownNotify(msg->hwnd);
+                msg->message = WM_NULL; // поглощаем — до WndProc не доходит
+            }
             else if (msg && msg->message == WndCompat::WM_GLASS_SYNTHETIC_CREATE && IsWindow(msg->hwnd))
             {
                 WndHandler(nullptr, EVENT_OBJECT_CREATE, msg->hwnd,
@@ -360,6 +365,31 @@ namespace WndCompat
             return;
         }
         WndCompat::Root_Attach(hRoot);
+    }
+
+    // Нативный ComboBox (PopupOnly): CBN_DROPDOWN уходит родителю (чужому диалогу) —
+    // узкий WM_COMMAND sink вместо полного Root_Attach (см. RootSubclass.cpp).
+    void DispatchDropDownNotifyAttachToOwnerThread(HWND hWnd) noexcept
+    {
+        if (!IsWindow(hWnd))
+            return;
+        if (WndCompat::IsShuttingDown())
+            return;
+        DWORD wndTid = GetWindowThreadProcessId(hWnd, nullptr);
+        const DWORD curTid = GetCurrentThreadId();
+        if (wndTid != 0 && wndTid != curTid)
+        {
+            InstallGetMsgHookForThread(wndTid);
+            if (!PostMessageW(hWnd, WndCompat::WM_GLASS_ATTACH_DROPDOWN_NOTIFY, 0, 0))
+            {
+                DebugLog(DBG_WARNING,
+                    L"[WndCompat][WinEvent] DispatchDropDownNotifyAttachToOwnerThread: PostMessage failed hwnd=0x%p GLE=%u",
+                    hWnd,
+                    GetLastError());
+            }
+            return;
+        }
+        WndCompat::Root_AttachDropDownNotify(hWnd);
     }
 
     // File Explorer shell root (CabinetWClass / ExploreWClass): отдельный subclass proc — см. ExplorerRootSubclass.cpp.
@@ -815,6 +845,18 @@ namespace
                     {
                         DebugLog(L"[WndCompat][WinEvent] ComboBox_Attach: hwnd=0x%p", hWnd);
                         WndCompat::ComboBox_Attach(hWnd);
+                    }
+                    else if (allowGlassForHwnd && !isFull)
+                    {
+                        // Нативный ComboBox («Тип файлов») в чужом, неприаттаченном диалоге:
+                        // CBN_DROPDOWN уходит родителю, который мы не хотим субклассировать
+                        // целиком. Узкий WM_COMMAND sink на родителя: только CBN_DROPDOWN →
+                        // ComboLBox_Attach (как у ComboBoxEx32-пути), без class brush / SWCA / dark mode.
+                        if (HWND hParent = GetParent(hWnd))
+                        {
+                            DebugLog(L"[WndCompat][WinEvent] DropDownNotify: parent=0x%p combo=0x%p", hParent, hWnd);
+                            DispatchDropDownNotifyAttachToOwnerThread(hParent);
+                        }
                     }
                     break;
 

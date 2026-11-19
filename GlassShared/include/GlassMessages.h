@@ -96,6 +96,10 @@ namespace WndCompat
     // Не использовать для top-level Root — только WM_GLASS_ATTACH_ROOT.
     inline constexpr UINT WM_GLASS_SYNTHETIC_CREATE = WM_APP + 0x221;
 
+    // PostMessage → GetMsgHookProc (поток-владелец) → Root_AttachDropDownNotify (узкий WM_COMMAND sink
+    // для чужого диалога, только PopupOnly: CBN_DROPDOWN → ComboLBox_Attach). Не Root_Attach.
+    inline constexpr UINT WM_GLASS_ATTACH_DROPDOWN_NOTIFY = WM_APP + 0x224;
+
     // PostMessage → ControlWndProc: один process-wide OnRootDwmColorizationChanged (coalesce wave).
     inline constexpr UINT WM_GLASS_DWMCOLORIZATION_DISPATCH = WM_APP + 0x218;
 

@@ -182,3 +182,20 @@ IAT на comctl32 ставится лениво и **живёт весь про�
 Для неприаттаченных окон (типичный случай — PopupOnly: стороннее приложение не в AttachList, например файловый диалог) хук всегда отдаёт `orig`. Раньше проверялся только глобальный backdrop-флаг (по умолчанию true) с обходом гарда на memory-DC, из-за чего неприаттаченные окна получали чёрные track (parts 4–7) и чёрный SIZEBOX-угол (part 10) без glass-фрейма.
 
 Попутно `Root_Attach` (`WndCompat/Root/RootSubclass.cpp`) применяет `ApplyRootClassBlackBrush` (процесс-широкая `SetClassLongPtr(..., BLACK_BRUSH)`) только к настоящему `GA_ROOT`; дочерний `ComboBoxEx32` (например, поле имени файла в классическом файловом диалоге) больше не чернит все `ComboBoxEx32` процесса. Always-on `Root_MyCreateSolidBrush` / `Root_MyGetSysColorBrush` / `Root_MySelectObject` (`RootGdiHooks.cpp`) в `PopupOnly` вне активной paint-сессии отдают `orig` без изменений. `Root_MyGetSysColorBrush` ранее всегда отдавал `CreateSolidBrush(0)` для `COLOR_WINDOW`/`COLOR_BTNFACE`/`COLOR_MENU`, а `Root_MySelectObject` безусловно подменял кисть `USER32`-вызова с `lbColor == COLOR_WINDOW`/`COLOR_BTNFACE` на `BLACK_BRUSH` — из‑за этого неприаттаченное поле комбобокса в адресной строке неподконтрольного диалога рисовалось чёрным при перерисовании.
+
+---
+
+## 11. PopupOnly: нативный ComboBox («Тип файлов») — WM_COMMAND‑sink вместо Root_Attach
+
+Проблема (ретест по логу): список «Имя файла» (`ComboBoxEx32`) патчится, список «Тип файлов» — нет.
+
+Механика:
+- `ComboBoxEx32` создаёт внутренний ComboBox с собой как владельцем, поэтому `CBN_DROPDOWN` приходит на сам `ComboBoxEx32` — в обоих режимах он получает `Root_Attach` (см. WinEventHandler → `DispatchRootAttachToOwnerThread`), и `RootSubclassProcShared` по `WM_COMMAND` аттачит ComboLBox.
+- Нативный `ComboBox` (`class="ComboBox"`, `kind=ComboBox`) шлёт `CBN_DROPDOWN` **родителю** — неприаттаченному диалогу (`#32770`). В PopupOnly диалоги намеренно не сабклассируются целиком (`GenericContainer` — Full‑only): полный `Root_Attach` на чужом диалоге включает `ApplyRootClassBlackBrush` (процесс‑широкая class‑кисть `#32770`), SWCA/DWM‑бэкдроп и dark‑mode хелпер — недопустимо. Поэтому `ComboLBox_Attach` не вызывался нигде, и список оставался стоковым.
+
+Решение: узкий нотификационный sink `DropDownNotifySubclassProc` (subclass‑id `2`):
+- Ставится на родителя нативного ComboBox'а из WinEventHandler (ComboBox case, PopupOnly, не pie‑subtree, не `FloatNotifySink`; родитель уже с полным `Root_Attach` — дублирования нет через `Root_IsAttached`).
+- `Root_AttachDropDownNotify` идемпотентен (реестр `g_dropDownNotifyWindows`, push под тем же локом, что и проверка), установка только на потоке‑владельце; cross‑thread — через `WM_GLASS_ATTACH_DROPDOWN_NOTIFY` (`WM_APP + 0x224`) + `GetMsgHookProc` (сообщение поглощается, до WndProc диалога не доходит).
+- Sink обрабатывает только: `WM_COMMAND` → `RootHandleComboBoxDropDown` (общее тело с RootSubclassProcShared: `GetComboBoxInfo(hCtrl)` → `ComboLBox_Attach` + DropDown `OnComboBoxDropDown` / AnimateWindow detour), `WM_GLASS_DETACH_ROOT` (снятие при shutdown, с `SignalDetachComplete`) и `WM_NCDESTROY` (unregister; `RemoveWindowSubclass` не зовём — comctl32 снимает цепочку сам). Класс, бэкдроп, dark‑mode и фрейм диалога не затрагиваются.
+- `Root_DetachAll` тоже снимает notify‑sinks (same‑thread → `RemoveWindowSubclass`; cross‑thread → `WM_GLASS_DETACH_ROOT` + pending‑счётчик) — субклассы не переживают FreeLibrary.
+- Эффект: список «Тип файлов» получает тот же пайплайн, что `ComboBoxEx32`‑списки (включая стеклянные скроллбары после гейта из §10). Ограничения: только нативный ComboBox (не WinForms), pie (`msctls_progress32→ComboBoxEx32`) не затрагивается, чужой диалог по‑прежнему не «застекляется» целиком.
