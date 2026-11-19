@@ -1,10 +1,12 @@
-// Трекбар: без субкласса — маркер GlassControlKind::TrackBar; TBCD_TICS — parent NM_CUSTOMDRAW.
+// Трекбар: субкласс доаттаченного слайдера только для WM_ERASEBKGND (прозрачный фон),
+// GlassMarkWindow; TBCD_TICS — parent NM_CUSTOMDRAW (ViewControlSubclassProc).
 #include "WndPch.h"
 #include "TrackBarHost.h"
 
 #include "WinUiBridge/WinUiContentBridgeHost.h"
 #include <WndCompat.h>
 #include <GlassControlKind.h>
+#include <GlassMessages.h>
 #include <Tracker/WinEventHandler.h>
 #include <WinApiUtils.h>
 #include "../Tracker/WindowClassUtils.h"
@@ -18,6 +20,9 @@
 namespace
 {
     std::vector<HWND> g_trackBarWindows;
+
+    // Идентификатор субкласса трекбара (не пересекается с ComboLBox(1)/DropDownNotify(2)).
+    constexpr UINT_PTR kTrackBarSubclassId = 3;
 
     // Трекбар может находиться не непосредственно в ViewControlClass, а глубже
     // (внутри панели/сатичного контейнера попапа «Настройки вида»).
@@ -65,6 +70,62 @@ namespace
             return;
         InvalidateRect(hWnd, nullptr, TRUE);
     }
+
+    LRESULT CALLBACK TrackBarSubclassProc(
+        HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+        UINT_PTR /*uIdSubclass*/, DWORD_PTR /*dwRefData*/)
+    {
+        // Отложенное снятие по запросу из чужого потока (TrackBar_DetachAll).
+        if (uMsg == WndCompat::WM_GLASS_DETACH_TRACKBAR)
+        {
+            RemoveWindowSubclass(hWnd, TrackBarSubclassProc, kTrackBarSubclassId);
+            DebugLog(L"[WndCompat][TrackBarHost] WM_GLASS_DETACH_TRACKBAR: субкласс снят hwnd=0x%p", hWnd);
+            WndCompat::WinEventHook_SignalDetachComplete();
+            return 0;
+        }
+
+        if (WndCompat::IsShuttingDown())
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+
+        switch (uMsg)
+        {
+        case WM_ERASEBKGND:
+            // Дефолтный класс msctls_trackbar32 стирает клиент кистью (COLOR_WINDOW) —
+            // непрозрачная плашка поверх стеклянного попапа. TBS_TRANSPARENTBKGND
+            // отвечает только за WM_PAINT; стирание подавляем здесь целиком.
+            return TRUE;
+
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(hWnd, TrackBarSubclassProc, kTrackBarSubclassId);
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        }
+
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    // Снятие субкласса: тот же поток — прямым RemoveWindowSubclass, чужой — через
+    // WM_GLASS_DETACH_TRACKBAR на поток-владелец (callback: TrackBarSubclassProc).
+    void RemoveTrackBarSubclass(HWND hWnd) noexcept
+    {
+        if (!hWnd || !IsWindow(hWnd))
+            return;
+
+        const DWORD curTid = GetCurrentThreadId();
+        const DWORD wndTid = GetWindowThreadProcessId(hWnd, nullptr);
+
+        if (wndTid == curTid)
+        {
+            RemoveWindowSubclass(hWnd, TrackBarSubclassProc, kTrackBarSubclassId);
+            return;
+        }
+
+        WndCompat::WinEventHook_RegisterPendingDetach();
+        if (!PostMessageW(hWnd, WndCompat::WM_GLASS_DETACH_TRACKBAR, 0, 0))
+        {
+            WndCompat::WinEventHook_SignalDetachComplete();
+            DebugLog(L"[WndCompat][TrackBarHost] WM_GLASS_DETACH_TRACKBAR: PostMessageW FAILED hwnd=0x%p", hWnd);
+        }
+    }
 }
 
 namespace WndCompat
@@ -81,7 +142,7 @@ namespace WndCompat
 
         // Full: как раньше (IsGlassVisualsAllowed = GlassRendering + Full).
         // PopupOnly: слайдер внутри ViewControlClass-попапа («Настройки вида») — тоже,
-        // иначе opaque-фон трейера остаётся плашкой, и «слайдер не получает патч».
+        // иначе opaque-фон трекбара остаётся плашкой, и «слайдер не получает патч».
         const bool isViewControlChild = IsUnderViewControlPopup(hWnd);
         const bool allowGlass = WndCompat::IsGlassVisualsAllowed()
             || (WndCompat::WinEventHook_GetMode() == Shared::InjectionMode::PopupOnly
@@ -93,6 +154,11 @@ namespace WndCompat
             // никто не включит — иначе трек/ползунок рисуются светлой темой на тёмном стекле.
             Shared::ThemeHelper::EnableWindowDarkModeUxTheme(
                 hWnd, Shared::ThemeHelper::ResolveEffectiveDarkMode());
+            if (!SetWindowSubclass(hWnd, TrackBarSubclassProc, kTrackBarSubclassId, 0))
+            {
+                DebugLog(DBG_IMPORTANT,
+                    L"[WndCompat][TrackBarHost] TrackBar_Attach: FAILED to subclass 0x%p", hWnd);
+            }
         }
 
         DebugLog(DBG_IMPORTANT,
@@ -123,6 +189,7 @@ namespace WndCompat
         if (IsWindow(hWnd))
         {
             SetTrackBarTransparentBkgnd(hWnd, false);
+            RemoveTrackBarSubclass(hWnd);
             GlassShared::GlassUnmarkWindow(hWnd);
             InvalidateTrackBarChrome(hWnd);
         }
@@ -144,6 +211,7 @@ namespace WndCompat
                 WndCompat::WinUi_TrayTrackBar_ReleaseIxdeIntent(hWnd);
 
             SetTrackBarTransparentBkgnd(hWnd, false);
+            RemoveTrackBarSubclass(hWnd);
             GlassShared::GlassUnmarkWindow(hWnd);
             InvalidateTrackBarChrome(hWnd);
 
@@ -165,6 +233,17 @@ namespace WndCompat
                 || (WndCompat::WinEventHook_GetMode() == Shared::InjectionMode::PopupOnly
                     && isViewControlChild);
             SetTrackBarTransparentBkgnd(hWnd, allowed);
+            if (allowed)
+            {
+                if (!::GetWindowSubclass(hWnd, TrackBarSubclassProc, kTrackBarSubclassId, nullptr))
+                    (void)SetWindowSubclass(hWnd, TrackBarSubclassProc, kTrackBarSubclassId, 0);
+                Shared::ThemeHelper::EnableWindowDarkModeUxTheme(
+                    hWnd, Shared::ThemeHelper::ResolveEffectiveDarkMode());
+            }
+            else
+            {
+                RemoveTrackBarSubclass(hWnd);
+            }
             RedrawTrackBarChrome(hWnd);
         }
 

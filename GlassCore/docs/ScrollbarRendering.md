@@ -212,3 +212,9 @@ IAT на comctl32 ставится лениво и **живёт весь про�
 - ViewControl‑логи: `0x{:x}` → `0x%p` (был литерал).
 
 Открыто до ретеста: трекбар визуально может требовать дополнительного provider‑маркера/гейта PaintDispatcher (в PopupOnly `IsPopupOnlyPaintDispatcherKind` не знает про `msctls_trackbar32`); если после этих правок слайдер по‑прежнему не патчится — смотреть лог-строки `TrackBar_Attach` (`glassAllowed=? viewControlChild=?`) и PaintDispatcher‑ветку для trackbar (по аналогии с ComboLBox/Toolbar).
+
+## 13. Ретест round 3→4: трекбар «не чистит дефолтный фон», Nav‑toolbar
+
+- `msctls_trackbar32` стирает свой клиент кистью класса в `WM_ERASEBKGND` (дефолт DefWindowProc) — непрозрачная плашка поверх шторки. `TBS_TRANSPARENTBKGND` покрывает только `WM_PAINT`. Введён `TrackBarSubclassProc` (id=3, WM_GLASS_DETACH_TRACKBAR (WM_APP+0x20A) для shutdown‑detach; cross‑thread — PostMessage по аналогии с ComboLBox): `WM_ERASEBKGND` → TRUE без отрисовки. Subclass ставится только при glass‑allowed (Full, либо PopupOnly под ViewControlClass по цепочке родителей ≤8 уровней), снимается в Detach/DetachAll/NCDESTROY.
+- `ViewControlSubclassProc` NM_CUSTOMDRAW: гейт `IsGlassVisualsAllowed()` → маркер `GlassGetWindowKind(hwndFrom) == TrackBar` (ранее в PopupOnly ветка CDDS_ITEMPREPAINT/TBCD_TICS вообще не исполнялась).
+- `ComboLBoxSubclassProc`: добавлен диагностический лог `WM_PAINT hwnd=…` — для проверки, доходит ли реальный WM_PAINT до списка «Тип файлов» после forced `RedrawWindow` (см. §12).

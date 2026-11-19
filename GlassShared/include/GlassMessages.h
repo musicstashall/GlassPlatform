@@ -43,7 +43,7 @@ namespace WndCompat
     // SendMessageTimeout → TabControlSubclassProc → RemoveWindowSubclass
     inline constexpr UINT WM_GLASS_DETACH_TABCONTROL = WM_APP + 0x209;
 
-    // Зарезервировано (ранее субкласс трекбара; сейчас TrackBarHost без WM_APP-detach).
+    // SendMessageTimeout/PostMessage → TrackBarSubclassProc → RemoveWindowSubclass
     inline constexpr UINT WM_GLASS_DETACH_TRACKBAR   = WM_APP + 0x20A;
 
     // SendMessageTimeout → DateTimePickerSubclassProc → RemoveWindowSubclass

@@ -2,6 +2,7 @@
 #include <WndCompat.h>
 #include "ViewControlSubclass.h"
 #include <commctrl.h>
+#include <GlassControlKind.h>
 #include <dwmapi.h>
 #include <ColorUtils.h>
 #include <wil.h>
@@ -250,7 +251,7 @@ namespace
                 HWND hwndFrom = nmhdr->hwndFrom;
 
                 if (WndCompat::IsWindowClass(hwndFrom, L"msctls_trackbar32")
-                    && WndCompat::IsGlassVisualsAllowed())
+                    && GlassShared::GlassGetWindowKind(hwndFrom) == GlassShared::GlassControlKind::TrackBar)
                 {
                     switch (nmcd->dwDrawStage)
                     {

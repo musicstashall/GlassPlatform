@@ -231,8 +231,13 @@ namespace
             return result;
         }
 
-        /*case WM_PAINT:
-            return DefSubclassProc(hWnd, uMsg, wParam, lParam);*/
+        case WM_PAINT:
+        {
+            // Диагностика: доходит ли реальный WM_PAINT до списка (для «Тип файлов»).
+            DebugLog(DBG_IMPORTANT,
+                L"[WndCompat][ComboLBox] WM_PAINT hwnd=0x%p", hWnd);
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        }
 
         case WM_ERASEBKGND:
         {
