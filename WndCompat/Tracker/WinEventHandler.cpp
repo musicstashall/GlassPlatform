@@ -474,6 +474,7 @@ namespace WndCompat
 
 namespace
 {
+    using WndCompat::DispatchDropDownNotifyAttachToOwnerThread;
     using WndCompat::DispatchExplorerRootAttachToOwnerThread;
     using WndCompat::DispatchRootAttachToOwnerThread;
 
