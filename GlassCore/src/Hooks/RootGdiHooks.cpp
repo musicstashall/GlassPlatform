@@ -809,7 +809,25 @@ namespace GlassCore::Root
                 if (IsFullInjectionMode() || GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() != nullptr)
                 {
                     if (nIndex == COLOR_WINDOW || nIndex == COLOR_BTNFACE || nIndex == COLOR_MENU)
+                    {
+                        // Диагностика ограничена по числу срабатываний: видно, от каких модулей
+                        // и для каких индексов чёрная кисть запрашивалась под сессией (например,
+                        // comctl32 для WM_CTLCOLOREDIT-подобных путей неприаттаченных контролов).
+                        static std::atomic<unsigned> s_sysColorBrushDiag{64};
+                        unsigned n = s_sysColorBrushDiag.fetch_sub(1);
+                        if (n < 64)
+                        {
+                            const std::wstring callerBase = CallerBaseName(GetCallerModule(_ReturnAddress()));
+                            const HWND sessionHost = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+                            wchar_t hostCls[128]{};
+                            if (sessionHost)
+                                GetClassNameW(sessionHost, hostCls, _countof(hostCls));
+                            DebugLog(DBG_IMPORTANT,
+                                L"[GlassCore][Root][GDI] GetSysColorBrush black: nIndex=%d caller=%s host=0x%p hostClass=\"%s\"",
+                                nIndex, callerBase.c_str(), sessionHost, hostCls);
+                        }
                         return CreateSolidBrush(0);
+                    }
                 }
             }
             return o(nIndex);
@@ -898,7 +916,21 @@ namespace GlassCore::Root
                 if (GetObjectType(h) == OBJ_BRUSH && GetObject(h, sizeof(lb), &lb))
                 {
                     if (lb.lbColor == GetSysColor(COLOR_WINDOW) || lb.lbColor == GetSysColor(COLOR_BTNFACE))
+                    {
+                        static std::atomic<unsigned> s_selectBlackDiag{64};
+                        unsigned n = s_selectBlackDiag.fetch_sub(1);
+                        if (n < 64)
+                        {
+                            HWND w2 = HwndFromDc(hdc);
+                            wchar_t wCls[128]{};
+                            if (w2)
+                                GetClassNameW(w2, wCls, _countof(wCls));
+                            DebugLog(DBG_IMPORTANT,
+                                L"[GlassCore][Root][GDI] SelectObject USER32 black: dc=0x%p wnd=0x%p class=\"%s\" lb=0x%06X",
+                                hdc, w2, wCls, lb.lbColor & 0xFFFFFF);
+                        }
                         h = GetStockObject(BLACK_BRUSH);
+                    }
                 }
             }
 

@@ -218,3 +218,16 @@ IAT на comctl32 ставится лениво и **живёт весь про�
 - `msctls_trackbar32` стирает свой клиент кистью класса в `WM_ERASEBKGND` (дефолт DefWindowProc) — непрозрачная плашка поверх шторки. `TBS_TRANSPARENTBKGND` покрывает только `WM_PAINT`. Введён `TrackBarSubclassProc` (id=3, WM_GLASS_DETACH_TRACKBAR (WM_APP+0x20A) для shutdown‑detach; cross‑thread — PostMessage по аналогии с ComboLBox): `WM_ERASEBKGND` → TRUE без отрисовки. Subclass ставится только при glass‑allowed (Full, либо PopupOnly под ViewControlClass по цепочке родителей ≤8 уровней), снимается в Detach/DetachAll/NCDESTROY.
 - `ViewControlSubclassProc` NM_CUSTOMDRAW: гейт `IsGlassVisualsAllowed()` → маркер `GlassGetWindowKind(hwndFrom) == TrackBar` (ранее в PopupOnly ветка CDDS_ITEMPREPAINT/TBCD_TICS вообще не исполнялась).
 - `ComboLBoxSubclassProc`: добавлен диагностический лог `WM_PAINT hwnd=…` — для проверки, доходит ли реальный WM_PAINT до списка «Тип файлов» после forced `RedrawWindow` (см. §12).
+
+## 14. Ретест round 4→5: «Тип файлов» интерьер, диагностика чёрных кистей
+
+По ответам пользователя: (1) трекбар не очищал дефолтный фон — исправлено в §13 (ac67125); (2) поле/ComboBox внутри ComboBoxEx чернеет при открытии списка — механика не видна в логе, добавлена ограниченная по числу срабатываний диагностика (см. ниже); (3) тулбар с кнопками навигации подсовывается glass — направление: убрать (как со скроллбарами); (4) «Тип файлов»: фон белый, остальные элементы получают патчи — DWM не отдаёт WM_PAINT до uncloak, поэтому forced RedrawWindow перенесён.
+
+Изменения (async-refresh + диагностика):
+- `DropDownHooks` (SyncComboLBoxClientPaint): синхронный `RedrawWindow` внутри paint-сессии убран; вместо него `PostMessage(root, WM_GLASS_FLYOUT_CLIENT_REFRESH (WM_APP+0x225))` после `OnComboLBoxPrintClientEnd`.
+- `ComboLBoxSubclassProc`: обработка `WM_GLASS_FLYOUT_CLIENT_REFRESH` — лог + `RedrawWindow(RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN)`. Сообщение обрабатывается обычной очередью после завершения всей цепочки uncloak (SWCA/Uncloak + PaintHostBorder + DwmFlush), что гарантирует реальный `WM_PAINT` (под которым attached ComboLBox сам заполняет клиент BLACKNESS через наш `WM_ERASEBKGND`).
+- `RootGdiHooks` (Root_MyGetSysColorBrush): под активной paint-сессией чёрная кисть только для COLOR_WINDOW/BTNFACE/MENU — добавлен ограниченный по счётчику (64) лог `[Root][GDI] GetSysColorBrush black: nIndex=, caller=, host=, hostClass=` — покажет, кто запрашивает чёрную под сессией (гипотеза: неприаттаченные контролы адресной полосы).
+- `RootGdiHooks` (Root_MySelectObject, ветка USER32): аналогичный лог `SelectObject USER32 black: dc=, wnd=, class=, lb=0x...` (64).
+- `WM_GLASS_DETACH_TRACKBAR` (0x20A) уже вводился в §13; добавлено сообщение `WM_GLASS_FLYOUT_CLIENT_REFRESH = WM_APP + 0x225`.
+
+Открыто/требуется: для п.2 и п.3 нужен визуальный материал (скриншот/запись) и точная привязка окна (класс/путь): «ComboBox внутри ComboBoxEx» (inner combo адресной полосы?) и «тулбар с кнопками навигации» (TravelBand/Rebar в диалоге #32770?). В PopupOnly приаттаченные не-whitelist окна стекло получить не могут по коду (PaintDispatcher + RootGdiHooks гейтят по GDI-хукам), поэтому ожидаем лог `[Root][GDI] … black: caller=…` для идентификации источника чёрной кисти; если в логе их нет — причина не в GDI-хуках.

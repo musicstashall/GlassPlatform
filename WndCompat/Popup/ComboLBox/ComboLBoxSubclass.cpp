@@ -185,6 +185,20 @@ namespace
         HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         UINT_PTR /*uIdSubclass*/, DWORD_PTR /*dwRefData*/)
     {
+        // Отложенная перерисовка клиента после uncloak (см. ScrollbarRendering.md §14):
+        // сообщение ставится из DropDownHooks (SyncComboLBoxClientPaint) после того, как
+        // шторка ушла с экрана — DWM обычно успевает отдать её compositor’у только к моменту
+        // вычитки очереди сообщений, поэтому синхронный RedrawWindow внутри paint-сессии
+        // может не дать WM_PAINT. Здесь — обычный асинхронный поток: принудительно красим.
+        if (uMsg == WndCompat::WM_GLASS_FLYOUT_CLIENT_REFRESH)
+        {
+            DebugLog(DBG_IMPORTANT,
+                L"[WndCompat][ComboLBox] WM_GLASS_FLYOUT_CLIENT_REFRESH: repaint hwnd=0x%p", hWnd);
+            ::RedrawWindow(hWnd, nullptr, nullptr,
+                RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+            return 0;
+        }
+
         // Снятие субкласса по запросу из чужого потока (ComboLBox_DetachAll → SendMessageTimeout).
         // Обрабатываем до шлюза IsShuttingDown — это и есть цель shutdown-пути.
         // RemoveWindowSubclass здесь безопасен: мы в потоке-владельце ComboLBox-окна.

@@ -18,6 +18,10 @@ namespace WndCompat
 
     // 0x200 зарезервирован
 
+    // PostMessage → ComboLBoxSubclassProc → RedrawWindow(RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN)
+    // (отложенная после uncloak перерисовка клиента списка — см. ScrollbarRendering.md §14).
+    inline constexpr UINT WM_GLASS_FLYOUT_CLIENT_REFRESH = WM_APP + 0x225;
+
     // PostMessage → GetMsgHookProc (поток-владелец) → Root_Attach
     inline constexpr UINT WM_GLASS_ATTACH_ROOT      = WM_APP + 0x201;
 
