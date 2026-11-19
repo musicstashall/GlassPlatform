@@ -263,3 +263,24 @@ IAT на comctl32 ставится лениво и **живёт весь про�
 - Issue 2 (inner ComboBox внутри ComboBoxEx32 чернеет): причина не установлена; ожидаем строки ретеста: `[Root][GDI] GetSysColorBrush black:` / `SelectObject USER32 black:` вокруг момента чернения + классы окон. Без лога фиксировать кодом не будем.
 - Issue 4 («Тип файлов» интерьер): тот же механизм, что 15.2 — ждём `OnComboLBoxShow … repaint inline`, `RefreshFlyoutClientAfterUncloak mode=ComboLBox`, `WM_GLASS_FLYOUT_CLIENT_REFRESH ok= vis=`, `WM_ERASEBKGND black` в логе.
 - Nav-toolbar «пирог»: ждём подтверждения со стороны пользователя, что тулбар навигации/крошки больше не под стеклом; если останется — нужен лог `[WndCompat][WinEvent] ToolBar_Attach: skip (PopupOnly dialog-header π)` либо отсутствие строк `ToolBar_Attach: hwnd=…` для окна панели навигации.
+
+## 16. Ретест round 6→7: «Тип файлов» — белая заливка темы «ListBox», диагностика Issue 2
+
+Ретест #6 (build 38d114c): трекбар и исключение «пирога» шапки подтверждены; «Тип файлов» по‑прежнему белый, inner ComboBox внутри ComboBoxEx32 по‑прежнему чернеет при открытии списка. Лог содержит `WM_GLASS_FLYOUT_CLIENT_REFRESH … ok=1 vis=1` и `WM_ERASEBKGND black`, но ни одной строки `[GlassCore][ComboBoxControl]`/`[Root][GDI]` — то есть стирание и перерисовка идут, а белым интерьер красит **ориг**-путь `DrawThemeBackground` класса темы `ListBox` (part=0 state=0 — фон тела списка), который в PopupOnly под ComboLBox-сессией не перехватывался: `ComboLBoxHooks::Overall_MyDrawThemeBg` обслуживал только `ScrollBar`/«Combobox» (orig).
+
+Правки (round 7):
+
+1. **«Тип файлов» — `DrawThemeBackground` темы «ListBox», часть 0 / состояние 0 → BLACKNESS** (`ComboLBoxHooks.cpp`). Блок повторяет `ListBoxHooks.cpp`: пустой `pRect`/`IsRectEmpty` не трогается, `pClipRect ?: pRect` — клип, `PatBlt(..., BLACKNESS)`, `S_OK`. Все прочие части `ListBox` и класс `Combobox` — прежние (orig). Действует под активной ComboLBox-сессией в обоих режимах (в Full то же замещение юниформно и безопасно: соседний WM_CTLCOLORLISTBOX и так чернит фон списка). Ожидаемый результат: интерьер списка «Тип файлов» тёмный (alpha=0 → стекло), текст — тема/CD-подсветка со списком (comctl32 в тёмной теме, у `ComboLBox_Attach` уже стоит `AllowDarkModeForWindow` на сам список — §12).
+2. **Диагностика Issue 2** (ограничена 32 срабатываниями на каждую ветку, уровень DBG_NORMAL):
+   - `ComboLBoxHooks::Overall_MyDrawThemeBg`, **вне сессии**: лог `DTB(вне сессии): class="…" part=… state=… caller=…` для классов `Combobox`/`ListBox` — фиксирует вызовы до/после активации сессии (например, при открытии списка адресной строки).
+   - `ComboLBoxHooks::Overall_MyDrawThemeBg`, **в активной сессии**, класс `Combobox`: лог `DTB(сессия): class="Combobox" part=… state=… caller=… host=0x…`.
+   - `ComboBoxControlHooks::InvokeComboDrawThemeBackground`, **вне сессии**: лог `DTB(вне сессии): class="…" part=… state=… caller=…` — покажет, доходит ли вообще вызов DTB адресного ComboBox до IAT-хука (в PopupOnly ComboBox‑виды не входят в `IsPopupOnlyPaintDispatcherKind`, сессия для них не включается — и в ретесте строк `[ComboBoxControl]` не было вовсе, что этот сценарий подтверждает).
+
+Issue 2 (механика): в PopupOnly PaintDispatcher не открывает ComboBox‑сессию (whitelist: ComboLBox/Toolbar/MonthCal/TrackBar), поэтому `InvokeComboDrawThemeBackground` работает в режиме `orig` — чёрной/alpha-подмены от ComboBoxControl‑хуков адресное поле не получает. Если по ретесту-логам окажется, что DTB для классов `Combobox`/`ListBox` под/вне сессии не вызывается вовсе, источник чёрной плашки не в DrawThemeBackground (следующий шаг — `uxtheme` интерактивный бюджет / DWM SWCA или сторонний dark‑mode-хук самого диалога). Без новых детерминированных строк кода на «чернение» не делаем.
+
+Full-режим не затронут нигде (гейты `IsActive()` и PopupOnly whitelist сохранены; добавлена только PatBlt-подмена фона ListBox, симметричная Full‑поведению `WM_CTLCOLORLISTBOX`).
+
+⚠️ По-прежнему требуется ретест сборки на Windows (Debug/Release × x64/x86):
+1. «Тип файлов»: появление строки `[GlassCore][ComboLBox] DrawThemeBackground: ListBox background part=0 state=0 — BLACKNESS` при открытии списка + тёмный интерьер.
+2. Открыть список адресной строки в классическом диалоге: присутствие/отсутствие строк `DTB(вне сессии)` / `DTB(сессия)` / `[GlassCore][ComboBoxControl] DTB(вне сессии)` — это снимет неопределённость по Issue 2.
+3. Регресс целей 38d114c (трекбар, «пирог» шапки) — не должны задеваться (коммит touches только ComboLBox/ComboBoxControl DTB + диагностику).

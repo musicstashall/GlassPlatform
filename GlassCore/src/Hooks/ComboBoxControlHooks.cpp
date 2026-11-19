@@ -325,7 +325,23 @@ namespace GlassCore::ComboBoxControl
                 return DrawThemeBackground(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
             if (!CbxSessionActive())
+            {
+                // Диагностика (Round-7, Issue 2): вызов DTB Combobox вне ComboBox-сессии
+                // (поле адресного ComboBox внутри ComboBoxEx32 при открытии списка и т.п.).
+                static std::atomic<unsigned> s_dtbDiag{32};
+                unsigned const n = s_dtbDiag.fetch_sub(1, std::memory_order_relaxed);
+                if (n < 32)
+                {
+                    WCHAR dcClass[MAX_PATH + 1]{};
+                    if (hTheme && SUCCEEDED(Shared::ThemeHelper::GetThemeClass(hTheme, dcClass, MAX_PATH)))
+                    {
+                        DebugLog(DBG_NORMAL,
+                            L"[GlassCore][ComboBoxControl] DTB(вне сессии): class=\"%s\" part=%d state=%d caller=%p",
+                            dcClass, iPartId, iStateId, callerMod);
+                    }
+                }
                 return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
+            }
 
             if (!pRect || IsRectEmpty(pRect))
                 return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);

@@ -932,7 +932,25 @@ namespace GlassCore::ComboLBox
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
         if (!IsActive())
+        {
+            // Диагностика (Round-7, Issue 2): видно ли вызов DTB класса Combobox/ListBox
+            // вне активной ComboLBox-сессии (например, поле адресного ComboBox внутри
+            // ComboBoxEx32 при открытии списка). Ограничено 32 срабатываниями.
+            static std::atomic<unsigned> s_dtbDiag{32};
+            unsigned const n = s_dtbDiag.fetch_sub(1, std::memory_order_relaxed);
+            if (n < 32)
+            {
+                WCHAR dcClass[MAX_PATH + 1]{};
+                if (SUCCEEDED(Shared::ThemeHelper::GetThemeClass(hTheme, dcClass, MAX_PATH))
+                    && (StrEq(dcClass, L"Combobox") || StrEq(dcClass, L"ListBox")))
+                {
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][ComboLBox] DTB(вне сессии): class=\"%s\" part=%d state=%d caller=%p",
+                        dcClass, iPartId, iStateId, callerMod);
+                }
+            }
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
+        }
 
         WCHAR themeClass[MAX_PATH + 1]{};
         const bool haveClass = SUCCEEDED(
@@ -975,8 +993,41 @@ namespace GlassCore::ComboLBox
             return dtbOrig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
         }
 
+        // Тема "ListBox": фон клиента (part=0 state=0) — PatBlt(BLACKNESS) под стекло.
+        // Незамещение давало белую плашку интерьера выпадающего списка в PopupOnly
+        // (файловый диалог «Тип файлов»): comctl32 рисует тело списка
+        // DrawThemeBackground(ListBox, 0, 0). Паритет с ListBoxHooks.cpp.
+        if (haveClass && StrEq(themeClass, L"ListBox"))
+        {
+            if (pRect && !IsRectEmpty(pRect) && iPartId == 0 && iStateId == 0)
+            {
+                DebugLog(L"[GlassCore][ComboLBox] DrawThemeBackground: ListBox background part=0 state=0 — BLACKNESS");
+                const RECT* clipRect = pClipRect ? pClipRect : pRect;
+                PatBlt(hdc,
+                    clipRect->left,
+                    clipRect->top,
+                    clipRect->right - clipRect->left,
+                    clipRect->bottom - clipRect->top,
+                    BLACKNESS);
+                return S_OK;
+            }
+            return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
+        }
+
         if (haveClass && StrEq(themeClass, L"Combobox"))
         {
+            // Диагностика (Round-7, Issue 2): фиксируем вызов DTB класса Combobox под сессией
+            // (например, поле адресного ComboBox внутри ComboBoxEx32). Ограничено 32 срабатываниями.
+            {
+                static std::atomic<unsigned> s_dtbDiagCombo{32};
+                unsigned const n = s_dtbDiagCombo.fetch_sub(1, std::memory_order_relaxed);
+                if (n < 32)
+                {
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][ComboLBox] DTB(сессия): class=\"Combobox\" part=%d state=%d caller=%p host=0x%p",
+                        iPartId, iStateId, callerMod, h_combolbox);
+                }
+            }
             if (!pRect || IsRectEmpty(pRect))
                 return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
