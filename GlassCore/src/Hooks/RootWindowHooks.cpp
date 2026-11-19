@@ -884,7 +884,7 @@ namespace GlassCore::Root
     void Startup() noexcept
     {
         /*using namespace Hooks::DebugDetourHooks;
-        (void)SetEnabled(DDH_SetBkColor | DDH_FillRect, true);*/
+        (void)SetEnabled(DDH_All, true);*/
         // Предпрогрев IAT точки входа для динамического SETBKCOLOR
         // (BWM window / caller == EntryPoint): холодный скан PE уходит из первого кадра.
         if (void* ep = GlassCore::ModuleHandler::g_entryPointModule)
@@ -899,7 +899,7 @@ namespace GlassCore::Root
     void Shutdown() noexcept
     {
         /*using namespace Hooks::DebugDetourHooks;
-        (void)SetEnabled(DDH_SetBkColor | DDH_FillRect, false);*/
+        (void)SetEnabled(DDH_All, false);*/
         g_shutdown.store(true, std::memory_order_release);
         SetRootGdiShutdown(true);
 
