@@ -284,3 +284,13 @@ Full-режим не затронут нигде (гейты `IsActive()` и Pop
 1. «Тип файлов»: появление строки `[GlassCore][ComboLBox] DrawThemeBackground: ListBox background part=0 state=0 — BLACKNESS` при открытии списка + тёмный интерьер.
 2. Открыть список адресной строки в классическом диалоге: присутствие/отсутствие строк `DTB(вне сессии)` / `DTB(сессия)` / `[GlassCore][ComboBoxControl] DTB(вне сессии)` — это снимет неопределённость по Issue 2.
 3. Регресс целей 38d114c (трекбар, «пирог» шапки) — не должны задеваться (коммит touches только ComboLBox/ComboBoxControl DTB + диагностику).
+
+## 17. Ретест round 7: Issue 2 — AllowDarkModeForWindow на дочернем Root_Attach
+
+Ответ пользователя на диагностику: чернеет **inner ComboBox без кнопки** (кнопку рисует сам ComboBoxEx32), желаемое поведение в PopupOnly — stock/белый вид неприаттаченного диалога.
+
+Механика: в PopupOnly `Root_Attach` для дочернего `ComboBoxEx32` вызывается намеренно (единственный канал перехвата CBN_DROPDOWN → attach выпадающего списка). Всё остальное из Root_Attach для него в PopupOnly — Full-only (WM_ERASEBKGND, WM_CTLCOLOR*, SWCA, class-black-brush) — ничего не чернит. Единственное окно-широкое «затемнение», выполняемое на дочернем окне, — `EnableWindowDarkModeUxTheme(hRoot)` (ordinal 133, AllowDarkModeForWindow): происходит ровно в момент первого открытия списка (совпадает с временной корреляцией «поле белым → чернеет при открытии»), GDI/DTB-хуки при этом молчат (у пользователя ни одной `[GlassCore][ComboBoxControl]`/`[Root][GDI]` строки в логе).
+
+Правка (`WndCompat/Root/RootSubclass.cpp`, `Root_Attach`): `EnableWindowDarkModeUxTheme` вызывается только в Full-режиме либо на настоящем GA_ROOT (popup-корень вроде «Настройки вида»). В PopupOnly на дочернем (не-GA_ROOT) окне dark-kick пропускается — self/дерево должны остаться stock. Выпадающий список (ComboLBox) получает `AllowDarkModeForWindow` собственным путём в `ComboLBox_Attach` — не затронут. Full-режим не затронут.
+
+⚠️ Требуется ретест сборки на Windows: открыть список адресной строки в классическом файловом диалоге — inner ComboBox должен оставаться stock (белым/системным). Если чернение сохранится — источник вне AllowDark (следующий suspect: процессный `SetPreferredAppMode(AllowDark)` из `TryEnableProcessDarkMode`, или тёмная тема самого диалога) — снимок/лог ждём.

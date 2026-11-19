@@ -1584,8 +1584,23 @@ namespace WndCompat
             return;
         }
 
-        Shared::ThemeHelper::EnableWindowDarkModeUxTheme(
-            hRoot, Shared::ThemeHelper::ResolveEffectiveDarkMode());
+        // Dark-mode kick для самого приаттаченного окна. В PopupOnly Root_Attach
+        // на дочернем окне (напр., ComboBoxEx32 адресной строки в неприаттаченном
+        // классическом #32770) нужен только для перехвата CBN_DROPDOWN — само окно
+        // штатно отрисовывается и должно остаться stock (белым), а не темнеть
+        // вместе с неf attached-поддеревом. Поэтому AllowDark ставим только в Full
+        // либо на настоящем GA_ROOT (popup-корень вроде «Настройки вида»).
+        if (WndCompat::WinEventHook_GetMode() == Shared::InjectionMode::Full
+            || GetAncestor(hRoot, GA_ROOT) == hRoot)
+        {
+            Shared::ThemeHelper::EnableWindowDarkModeUxTheme(
+                hRoot, Shared::ThemeHelper::ResolveEffectiveDarkMode());
+        }
+        else
+        {
+            DebugLog(L"[WndCompat][Root] Root_Attach: AllowDarkModeForWindow пропущен (PopupOnly non-GA_ROOT, stock rendering) hwnd=0x%p class=\"%s\"",
+                hRoot, rootClassName);
+        }
 
         if (WndCompat::WinEventHook_GetMode() == Shared::InjectionMode::Full
             && WndCompat::Root::ExplorerBridge::ShouldSetComctlScrollHostForRootClassName(rootClassName))
