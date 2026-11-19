@@ -30,6 +30,7 @@
 #include <Subsystems/PaintDispatcher.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <Subsystems/GdiHookUtils.h>
+#include <Hooks/PopupOnlyPaintScope.h>
 #include <WinApiUtils.h>
 #include <BitmapUtils.h>
 #include <DebugLog.h>
@@ -803,10 +804,11 @@ namespace GlassCore::Root
                 return GetSysColorBrush(nIndex);
             if (!g_shutdown.load(std::memory_order_acquire))
             {
-                // PopupOnly: вне активной paint-сессии (стеклянного popup'а) comctl32/user32/
-                // comdlg32 не трогаем — иначе неприаттаченные окна (файловые диалоги и т.п.)
-                // получают чёрные кисти вместо системных. В Full — прежнее поведение.
-                if (IsFullInjectionMode() || GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() != nullptr)
+                // PopupOnly: замены только в активной paint-сессии И только для owner-draw
+                // модулей (COMDLG32 и т.п.) — иначе неприаттаченные окна (файловые диалоги
+                // и т.п.), перерисованные ВЛОЖЕННО во время сессии popup'а (внутренний
+                // ComboBox), получают чёрные кисти вместо системных. В Full — прежнее поведение.
+                if (GlassCore::PopupOnlyPaintScope::CallerGlobalSubAllowed(GetCallerModule(_ReturnAddress())))
                 {
                     if (nIndex == COLOR_WINDOW || nIndex == COLOR_BTNFACE || nIndex == COLOR_MENU)
                     {
@@ -843,10 +845,11 @@ namespace GlassCore::Root
             if (g_shutdown.load(std::memory_order_acquire))
                 return o(color);
 
-            // PopupOnly: без активной paint-сессии (стеклянного popup'а) comctl32
-            // не трогаем — иначе неприаттаченные окна (файловые диалоги и т.п.)
-            // получают чёрные/alpha-кисти вместо системных. В Full — прежнее поведение.
-            if (!IsFullInjectionMode() && GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() == nullptr)
+            // PopupOnly: замены только в активной paint-сессии И только для owner-draw
+            // модулей (как Root_MyGetSysColorBrush) — иначе неприаттаченные окна,
+            // перерисованные вложенно во время сессии popup'а, получают чёрные кисти
+            // вместо системных. В Full — прежнее поведение.
+            if (!GlassCore::PopupOnlyPaintScope::CallerGlobalSubAllowed(caller))
                 return o(color);
 
             // BWM-паритет (WinHooks::MyCreateSolidBrush): глобальный перехват
@@ -890,11 +893,10 @@ namespace GlassCore::Root
             if (g_shutdown.load(std::memory_order_acquire))
                 return o(hdc, h);
 
-            // PopupOnly: вне активной paint-сессии замены кистей (USER32 → BLACK_BRUSH,
-            // COMDLG32 → alpha) не делаем — неприаттаченные окна получают системные кисти.
-            // В Full — прежнее поведение.
-            if (!IsFullInjectionMode()
-                && GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() == nullptr)
+            // PopupOnly: замены только в активной paint-сессии И только на свой оконный/
+            // стековый memory-DC сессии (чужие окна, перерисованные вложенно во время
+            // сессии popup'а, получают системные кисти). В Full — прежнее поведение.
+            if (!GlassCore::PopupOnlyPaintScope::HdcSubAllowed(caller, hdc))
                 return o(hdc, h);
 
             HWND w = HwndFromDc(hdc);

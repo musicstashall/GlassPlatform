@@ -50,6 +50,7 @@
 #include <Core/Intercept/HookHelper.h>
 #include <Core/Intercept/IATRegistry.h>
 #include <Hooks/RootGdiHooks.h>
+#include <Hooks/PopupOnlyPaintScope.h>
 #if defined(_DEBUG)
 #include <Core/Intercept/DebugDetourHooks.h>
 #endif
@@ -196,6 +197,7 @@ namespace GlassCore::ComboLBox
     HGDIOBJ  WINAPI Overall_MySelectObject(HDC, HGDIOBJ);
     BOOL     WINAPI Overall_MyBitBlt(HDC, int, int, int, int, HDC, int, int, DWORD);
     HRESULT  WINAPI Overall_MyDrawThemeBg(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
+    HRESULT  WINAPI Overall_MyDrawThemeBgEx(HTHEME, HDC, int, int, const RECT*, const DTBGOPTS*);
     HRESULT  WINAPI Overall_MyDrawThemeTextEx(
         HTHEME, HDC, int, int, LPCWSTR, int, DWORD, LPRECT, const DTTOPTS*);
     BOOL WINAPI Overall_MyAnimateWindow(HWND, DWORD, DWORD);
@@ -224,6 +226,7 @@ namespace GlassCore::ComboLBox
         OHK_PATBLT,
         OHK_GETSYSCOLORBRUSH,
         OHK_LINETO,
+        OHK_DRAWTHEMEBGEX,
         OHK_COUNT
     };
 
@@ -280,6 +283,10 @@ namespace GlassCore::ComboLBox
                                                         // OHK_LINETO — sysmon.ocx в ComboLBox (линии/пунктир настроек графиков)
                                                         std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
                                                             "LineTo", reinterpret_cast<PVOID>(Overall_MyLineTo) },
+                                                        // OHK_DRAWTHEMEBGEX — uxtheme!DrawThemeBackgroundEx (DTBGOPTS):
+                                                        // comctl32 рисует фон списка через DTBEx, DrawThemeBackground IAT-слот пропуск.
+                                                        std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv },
+                                                            "DrawThemeBackgroundEx", reinterpret_cast<PVOID>(Overall_MyDrawThemeBgEx) },
                                              } };
 
     using OverallDispatcher = HookDispatcher<OHK_COUNT, 3>;
@@ -431,7 +438,7 @@ namespace GlassCore::ComboLBox
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<OHK_CREATEHATCHBRUSH, decltype(&CreateHatchBrush)>(callerMod);
 
-        if (IsActive())
+        if (IsActive() && GlassCore::PopupOnlyPaintScope::CallerGlobalSubAllowed(callerMod))
             return CreateAlphaHatchBrush(fnStyle, color);
 
         return orig ? orig(fnStyle, color) : CreateHatchBrush(fnStyle, color);
@@ -443,7 +450,7 @@ namespace GlassCore::ComboLBox
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<OHK_GETSYSCOLORBRUSH, decltype(&GetSysColorBrush)>(callerMod);
 
-        if (IsActive() && nIndex == COLOR_WINDOW)
+        if (IsActive() && GlassCore::PopupOnlyPaintScope::CallerGlobalSubAllowed(callerMod) && nIndex == COLOR_WINDOW)
             return GetStockBrush(BLACK_BRUSH);
 
         return orig ? orig(nIndex) : GetSysColorBrush(nIndex);
@@ -489,7 +496,7 @@ namespace GlassCore::ComboLBox
         if (!orig)
             return FillRect(hdc, lprc, hbr);
 
-        if (!IsActive() || !lprc || !hbr)
+        if (!IsActive() || !lprc || !hbr || !GlassCore::PopupOnlyPaintScope::HdcSubAllowed(callerMod, hdc))
             return orig(hdc, lprc, hbr);
 
         if (IsGlassClearBrush(hbr))
@@ -525,7 +532,14 @@ namespace GlassCore::ComboLBox
         if (!orig)
             return PatBlt(hdc, x, y, cx, cy, rop);
 
-        if (!IsActive() || rop != PATCOPY)
+        if (!IsActive() || !GlassCore::PopupOnlyPaintScope::HdcSubAllowed(callerMod, hdc))
+            return orig(hdc, x, y, cx, cy, rop);
+        if (rop == WHITENESS)
+        {
+            PatBlt(hdc, x, y, cx, cy, BLACKNESS);
+            return TRUE;
+        }
+        if (rop != PATCOPY)
             return orig(hdc, x, y, cx, cy, rop);
 
         HGDIOBJ const hbrObj = GetCurrentObject(hdc, OBJ_BRUSH);
@@ -543,7 +557,7 @@ namespace GlassCore::ComboLBox
         auto orig = GetOverallOrigSafe<OHK_DRAWTEXT, decltype(&DrawTextW)>(callerMod);
         //DebugLog(L"[GlassCore][Overall_MyDrawTextW]");
 
-        if (!IsActive())
+        if (!IsActive() || !GlassCore::PopupOnlyPaintScope::HdcSubAllowed(callerMod, hdc))
             return orig ? orig(hdc, lpchText, cchText, lprc, format)
             : DrawTextW(hdc, lpchText, cchText, lprc, format);
 
@@ -585,7 +599,7 @@ namespace GlassCore::ComboLBox
         auto orig = GetOverallOrigSafe<OHK_DRAWTEXTEX, decltype(&DrawTextExW)>(callerMod);
         //DebugLog(L"[GlassCore][ComboLBox] Overall_MyDrawTextExW");
 
-        if (!IsActive())
+        if (!IsActive() || !GlassCore::PopupOnlyPaintScope::HdcSubAllowed(callerMod, hdc))
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
 
         if (format & DT_CALCRECT)
@@ -612,7 +626,7 @@ namespace GlassCore::ComboLBox
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<OHK_EXTTEXTOUT, decltype(&ExtTextOutW)>(callerMod);
 
-        if (!IsActive())
+        if (!IsActive() || !GlassCore::PopupOnlyPaintScope::HdcSubAllowed(callerMod, hdc))
             return orig ? orig(hdc, x, y, options, lprect, lpString, c, lpDx)
             : ExtTextOutW(hdc, x, y, options, lprect, lpString, c, lpDx);
 
@@ -743,7 +757,7 @@ namespace GlassCore::ComboLBox
         if (!orig)
             return SetBkColor(hdc, color);
 
-        if (IsActive())
+        if (IsActive() && GlassCore::PopupOnlyPaintScope::HdcSubAllowed(callerMod, hdc))
         {
             if (color == GetSysColor(COLOR_WINDOW) || color == GetSysColor(COLOR_BTNFACE))
                 color = 0;
@@ -761,7 +775,7 @@ namespace GlassCore::ComboLBox
         auto orig = GetOverallOrigSafe<OHK_CREATESOLIDBRUSH, decltype(&CreateSolidBrush)>(callerMod);
         //DebugLog(L"[GlassCore][Overall_MyCreateSolidBrush]");
 
-        if (IsActive())
+        if (IsActive() && GlassCore::PopupOnlyPaintScope::CallerGlobalSubAllowed(callerMod))
         {
             // Кисть выделения должна быть непрозрачной — иначе hover-highlight прозрачный
             if (color == GetSysColor(COLOR_HIGHLIGHT))
@@ -792,7 +806,7 @@ namespace GlassCore::ComboLBox
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<OHK_GETSTOCKOBJECT, decltype(&GetStockObject)>(callerMod);
 
-        if (IsActive())
+        if (IsActive() && GlassCore::PopupOnlyPaintScope::CallerGlobalSubAllowed(callerMod))
         {
             if (i == WHITE_BRUSH || i == DC_BRUSH)
                 i = BLACK_BRUSH;
@@ -882,7 +896,7 @@ namespace GlassCore::ComboLBox
         auto orig = GetOverallOrigSafe<OHK_SELECTOBJECT, decltype(&SelectObject)>(callerMod);
         //DebugLog(L"[GlassCore][Overall_MySelectObject]");
 
-        if (IsActive())
+        if (IsActive() && GlassCore::PopupOnlyPaintScope::HdcSubAllowed(callerMod, hdc))
         {
             LOGPEN pn{};
             if (GetObject(h, sizeof(pn), &pn))
@@ -904,7 +918,7 @@ namespace GlassCore::ComboLBox
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<OHK_BITBLT, decltype(&BitBlt)>(callerMod);
 
-        if (IsActive())
+        if (IsActive() && GlassCore::PopupOnlyPaintScope::HdcSubAllowed(callerMod, hdc))
         {
             if (rop == SRCCOPY || rop == WHITENESS)
             {
@@ -931,7 +945,7 @@ namespace GlassCore::ComboLBox
         if (g_shutdown.load(std::memory_order_acquire))
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
-        if (!IsActive())
+        if (!IsActive() || !GlassCore::PopupOnlyPaintScope::HdcSubAllowed(callerMod, hdc))
         {
             // Диагностика (Round-7, Issue 2): видно ли вызов DTB класса Combobox/ListBox
             // вне активной ComboLBox-сессии (например, поле адресного ComboBox внутри
@@ -1040,6 +1054,69 @@ namespace GlassCore::ComboLBox
         return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
     }
 
+    // ── Overall: MyDrawThemeBgEx — IAT uxtheme!DrawThemeBackgroundEx (DTBGOPTS)
+    // Паритет с Overall_MyDrawThemeBg (ListBox bites of round-7/8): фон ListBox (part=0)
+    // под активной paint-сессией → PatBlt(BLACKNESS); остальное — passthrough (со скоупингом).
+    // Плюс диагностика по ЛЮБОМУ классу (первые 32 вызова под сессией) — следующий ретест
+    // покажет, каким именно DTBEx вызовом рисуется белый фон «Тип файлов».
+    HRESULT WINAPI Overall_MyDrawThemeBgEx(
+        HTHEME hTheme,
+        HDC hdc,
+        int iPartId,
+        int iStateId,
+        const RECT* pRect,
+        const DTBGOPTS* pOptions)
+    {
+        HMODULE callerMod = GetCallerModule(_ReturnAddress());
+        auto orig = GetOverallOrigSafe<OHK_DRAWTHEMEBGEX, decltype(&DrawThemeBackgroundEx)>(callerMod);
+
+        const HRESULT fallback =
+            orig ? orig(hTheme, hdc, iPartId, iStateId, pRect, pOptions)
+                 : DrawThemeBackgroundEx(hTheme, hdc, iPartId, iStateId, pRect, pOptions);
+
+        if (g_shutdown.load(std::memory_order_acquire)
+            || !IsActive()
+            || !GlassCore::PopupOnlyPaintScope::HdcSubAllowed(callerMod, hdc))
+            return fallback;
+
+        WCHAR themeClass[MAX_PATH + 1]{};
+        const bool haveClass = SUCCEEDED(
+            Shared::ThemeHelper::GetThemeClass(hTheme, themeClass, MAX_PATH));
+
+        // Диагностика (round-9): фиксируем класс/часть любого DTBEx под сессией.
+        {
+            static std::atomic<unsigned> s_dtbExDiag{32};
+            unsigned const n = s_dtbExDiag.fetch_sub(1, std::memory_order_relaxed);
+            if (n < 32)
+            {
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][ComboLBox] DTBEx(сессия): class=\"%s\" part=%d state=%d caller=%p host=0x%p rect=(%ld,%ld-%ld,%ld)",
+                    haveClass ? themeClass : L"?",
+                    iPartId, iStateId, callerMod, h_combolbox,
+                    pRect ? pRect->left : -1, pRect ? pRect->top : -1,
+                    pRect ? pRect->right : -1, pRect ? pRect->bottom : -1);
+            }
+        }
+
+        // Тема "ListBox": фон клиента (part=0 state=0) — PatBlt(BLACKNESS) под стекло.
+        if (haveClass && StrEq(themeClass, L"ListBox"))
+        {
+            if (pRect && !IsRectEmpty(pRect) && iPartId == 0 && iStateId == 0)
+            {
+                DebugLog(L"[GlassCore][ComboLBox] DrawThemeBackgroundEx: ListBox background part=0 state=0 — BLACKNESS");
+                PatBlt(hdc,
+                    pRect->left,
+                    pRect->top,
+                    pRect->right - pRect->left,
+                    pRect->bottom - pRect->top,
+                    BLACKNESS);
+                return S_OK;
+            }
+        }
+
+        return fallback;
+    }
+
     // ── Overall: MyDrawThemeTextEx — IAT uxtheme!DrawThemeTextEx (список ListBox / поле Combobox)
     HRESULT WINAPI Overall_MyDrawThemeTextEx(
         HTHEME hTheme,
@@ -1055,7 +1132,7 @@ namespace GlassCore::ComboLBox
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<OHK_DRAWTHEMETEXTEX, decltype(&DrawThemeTextEx)>(callerMod);
 
-        if (!IsActive())
+        if (!IsActive() || !GlassCore::PopupOnlyPaintScope::HdcSubAllowed(callerMod, hdc))
             return orig ? orig(hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, pRect, pOptions)
                 : DrawThemeTextEx(
                     hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, pRect, pOptions);
@@ -1233,6 +1310,10 @@ namespace GlassCore::ComboLBox
         // список — ExtTextOutW (хуки стоят на обоих экземплярах — callerMod покрыт в любом случае).
         //EnableHooksOnModule(mod, OHK_DRAWTHEMETEXT, enable);
         EnableHooksOnModule(mod, OHK_DRAWTHEMEBG, enable);
+        // DrawThemeBackgroundEx (DTBGOPTS) — фон тела списка (ListBox) comctl32 рисует
+        // именно этим вызовом на Win11 (DrawThemeBackground IAT при этом молчит).
+        // Если слота нет — HookDispatcher отрицательно кэширует и молча не ставит.
+        EnableHooksOnModule(mod, OHK_DRAWTHEMEBGEX, enable);
         // Общие: фоновые операции и перья
         EnableHooksOnModule(mod, OHK_SELECTOBJECT, enable);
         EnableHooksOnModule(mod, OHK_SETBKCOLOR, enable);
