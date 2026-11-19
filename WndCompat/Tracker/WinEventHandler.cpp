@@ -1112,7 +1112,12 @@ namespace
 
                 case ControlKind::ListView:
                 case ControlKind::WinForms_ListView:
-                    if (isFull && allowGlassForHwnd)
+                    // Full: везде; PopupOnly: только под приаттаченным flyout'ом (DropDown / ListviewPopup) —
+                    // получающий патчи список (например, SysListView32 вида). Иначе неприаттаченные
+                    // диалоги (файловые и пр.) не трогаем.
+                    if (allowGlassForHwnd
+                        && (isFull
+                            || WindowClassifier::IsUnderDropDownAncestor(hWnd)))
                     {
                         DebugLog(L"[WndCompat][WinEvent] ListView_Attach: hwnd=0x%p", hWnd);
                         WndCompat::ListView_Attach(hWnd);

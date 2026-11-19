@@ -261,6 +261,37 @@ bool WindowClassifier::IsCommonDialogHeaderPieWindow(HWND hwnd) noexcept
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  IsUnderDropDownAncestor
+//
+//  PopupOnly: окно лежит внутри flyout-попапа Explorer («DropDown») или внутри его
+//  списочного корпуса («ListviewPopup») — оба класса приаттачиваются всегда
+//  (см. WinEventHandler: DropDown_AttachIfNeeded / ListviewPopup_Attach).
+//  Дочерние контролы таких попапов (например, SysListView32 выпадающего списка окна
+//  вида) в PopupOnly аттачить и рендерить glass, как в Full.
+//  Каскад Limited depth, без рекурсии: окно может быть «сиротой» к моменту CREATE.
+// ─────────────────────────────────────────────────────────────────────────────
+bool WindowClassifier::IsUnderDropDownAncestor(HWND hwnd) noexcept
+{
+    if (!hwnd || !IsWindow(hwnd))
+        return false;
+
+    HWND cur = GetParent(hwnd);
+    for (int depth = 0; cur && depth < 8; ++depth)
+    {
+        if (!IsWindow(cur))
+            return false;
+        if (WndCompat::IsWindowClass(cur, L"DropDown")
+            || WndCompat::IsWindowClass(cur, L"ListviewPopup"))
+            return true;
+        HWND parent = GetParent(cur);
+        if (!parent || parent == cur)
+            break;
+        cur = parent;
+    }
+    return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  GetControlKind
 //
 //  Принимает нормализованное имя (NormalizeWindowClass):

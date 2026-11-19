@@ -294,3 +294,25 @@ Full-режим не затронут нигде (гейты `IsActive()` и Pop
 Правка (`WndCompat/Root/RootSubclass.cpp`, `Root_Attach`): `EnableWindowDarkModeUxTheme` вызывается только в Full-режиме либо на настоящем GA_ROOT (popup-корень вроде «Настройки вида»). В PopupOnly на дочернем (не-GA_ROOT) окне dark-kick пропускается — self/дерево должны остаться stock. Выпадающий список (ComboLBox) получает `AllowDarkModeForWindow` собственным путём в `ComboLBox_Attach` — не затронут. Full-режим не затронут.
 
 ⚠️ Требуется ретест сборки на Windows: открыть список адресной строки в классическом файловом диалоге — inner ComboBox должен оставаться stock (белым/системным). Если чернение сохранится — источник вне AllowDark (следующий suspect: процессный `SetPreferredAppMode(AllowDark)` из `TryEnableProcessDarkMode`, или тёмная тема самого диалога) — снимок/лог ждём.
+
+## 19. PopupOnly: DropDown flyout — возврат glass скроллбара доаттаченного ListView (коммит user 505a88f + фикс)
+
+Ретест round 9 (build `505a88f`, PopupOnly): диалог рисуется как задумано; регрессия — **DropDown (приаттаченный flyout) потерял патчи скроллбара**. Причина: реуорк PaintDispatcher пускает сессию только для kind из whitelist (ComboLBox/Toolbar/MonthCal/TrackBar); child-`SysListView32` выпадающего списка в PopupOnly не аттачился (select case ListView — Full-only), поэтому `GlassGetWindowKind(...) == None` → окно под flat-fastpath/foreign-barrier → нет paint-сессии → comctl ScrollBar DTB никогда не вооружается → скроллбар рисуется stock.
+
+Правка (полный Full-поведенческий стиль для доаттаченного списка, Round-6-паттерн TrackBar):
+
+1. `WindowClassifier::IsUnderDropDownAncestor(hwnd)` — true, если среди ближайших ≤8 предков есть `DropDown` или `ListviewPopup` (Flyout-окна Explorer, приаттачиваемые всегда). Чужие top-level окна (#32770-диалоги, сторонние приложения) не матчатся.
+2. `WinEventHandler` (case ListView/WinForms_ListView): attach разрешён в Full (как раньше) **или** PopupOnly при `IsUnderDropDownAncestor` (и не только если parent — direct child; список может лежать глубже внутри панелей попапа).
+3. `PaintDispatcher::IsPopupOnlyPaintDispatcherKind`: добавлены `ListView`/`WinForms_ListView` — доаттаченный (под DropDown-chain) список получает paint-сессию в PopupOnly; unmarked (`None`) по-прежнему не диспетчеризуется.
+
+Механика отрисовки скроллбара (без изменений): `ListViewHooks::OnBeginPaintGlobal` (kind==ListView) — ArmSession: `EnsureComctlScrollBarIatIfComctlCaller` вооружает IAT-хуки на comctl32 `DrawThemeBackground`(ScrollBar-тема) до отрисовки содержимого SysListView32 → тёмный/стеклянный скроллбар. Memory-DC буфера buffered paint покрываются fallback'ом на хоста сессии (`GetPaintSessionHostHwnd`/`GetStackOwnerForDc` в `ComctlScrollBarMyDrawThemeBackground`).
+
+Что ListView_Attach даёт дополнительно (в том же Full-стиле): `ListView_SetBkColor(0)`/`SetTextBkColor(0)` (прозрачный фон), `WM_ERASEBKGND`-сабкласс, `TextGlow`-регистрация, BLACKNESS на первом paint списка. В Full ровно так же.
+
+Full-режим: изменений нет (ListView_Attach и раньше звался в обоих режимах в Full; новый PopupOnly-кейс добавляется только при цепочке DropDown-предков).
+
+⚠️ Требуется сборка и ретест на Windows:
+1. DropDown-попап (например, выбор вида): скроллбар списка — glass (тёмная тема/стекло), не stock;
+2. «Настройки вида»: трекбар и слайдер — стёклянные (нет регрессий 6-го раунда);
+3. Файловый диалог «Тип файлов»/адресная строка: без регрессий round 9 (там списки приаттачиваются свои — ComboLBox);
+4. Сторонние неприаттаченные приложения (чужой #32770): скроллбары и контролы — stock (нехватка аттача).
