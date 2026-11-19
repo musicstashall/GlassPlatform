@@ -44,3 +44,27 @@ GetProcAddress/пакеты BPL, memory-DC, `WM_PRINTCLIENT`, отрисовка
 аварии при закрытии нужен отдельный разбор дампа. Portable source-contract
 проверка: `python3 WndCompat/tests/delphi_pipeline_contract.py` — она не заменяет
 сборку и визуальные/жизненные тесты.
+
+## Журнал повторной проверки (Full, x64, light)
+
+`TPageControl` маркируется как TabControl, но его BeginPaint в наблюдаемом
+запуске вызван из EXE; при этом для `TTabControl` зафиксирован вызов табового
+DrawThemeBackground из comctl32, когда BeginPaint тоже шёл из comctl32.
+Первоначальная табовая сессия включала IAT только модуля BeginPaint. Теперь для
+двух VCL-классов `TPageControl`/`TTabControl` дополнительно включаются известные
+экземпляры comctl32, без повторной установки на caller, с симметричным снятием
+из сохранённой сессии. Это исправление предполагаемого пропуска, не подтверждение
+фактического пути отрисовки TPageControl: новый журнал без зонда не показывает
+его вызовы DrawThemeBackground. Проверить отрисовку и `TabHooks` в Windows;
+если сессия есть, но перехвата нет, проверить динамические вызовы и конфликты IAT.
+
+Для `TMemo`, `TListBox`, `TTreeView`, `TResTreeView`, `TListView`,
+`TSystemListView` и `TRichEdit` в журнале видна классификация/attach; для
+ListView и TreeView видны отдельные сессии/текстовые хуки. Это не доказывает,
+какой вызов перекрывает фон. `TRadioGroup`, `TRelativePanel`, `TButtonGroup`,
+`TCategoryButtons`, `TNumberBox`, `THotKey`, `TControlBar` и `TShownValueList`
+идут через Unknown → Root_Attach, что само по себе не обеспечивает их VCL paint.
+Для поиска источников фона, текста и memory-DC нужны адресные API-трассы.
+
+В конце этого запуска снова зарегистрирован `0xC0000005` в EXE (тот же RVA,
+что в первом журнале), создан минидамп. Стек и причинная связь с Glass неизвестны.

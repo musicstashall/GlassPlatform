@@ -40,6 +40,16 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn('L"' + cls + '"', root)
             self.assertIn('L"' + cls + '"', gdi)
 
+    def test_vcl_tab_paint_hooks_drawing_modules_symmetrically(self):
+        source = read("GlassCore/src/Hooks/TabHooks.cpp")
+        self.assertIn('L"TPageControl"', source)
+        self.assertIn('L"TTabControl"', source)
+        self.assertIn("vclComctlNew == callerMod", source)
+        self.assertIn("vclComctlLegacy == callerMod || vclComctlLegacy == vclComctlNew", source)
+        for module in ("vclComctlNew", "vclComctlLegacy"):
+            self.assertIn(f"EnableTabHooks(session.{module}, true, session)", source)
+            self.assertIn(f"EnableTabHooks(top.{module}, false, top)", source)
+
     def test_tab_brush_is_not_restored_to_another_class(self):
         source = read("WndCompat/Controls/TabControlSubclass.cpp")
         self.assertIn('_wcsicmp(className, L"TPageControl") != 0', source)

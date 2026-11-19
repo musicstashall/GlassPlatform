@@ -191,6 +191,8 @@ namespace GlassCore::TabControl
         bool hookDrawThemeBg;
         bool hookDrawThemeText;
         bool hookGetSysColorBrush;
+        HMODULE vclComctlNew;
+        HMODULE vclComctlLegacy;
     };
     thread_local std::vector<TabPaintSession> g_tabStack;
     thread_local int  g_tabDrawThemeTextSessionDepth = 0;
@@ -760,6 +762,18 @@ namespace GlassCore::TabControl
         const bool useTheme = TabUseThemeFromProp(hWnd);
         const UINT style = static_cast<UINT>(GetWindowLongW(hWnd, GWL_STYLE));
         const bool vertical = (style & TCS_VERTICAL) != 0;
+        // VCL can call BeginPaint from the EXE and delegate the tab drawing to
+        // comctl32. Hook the actual drawing modules as well, but only for these
+        // VCL tab classes; remember the exact set for a symmetric EndPaint.
+        WCHAR cls[256]{};
+        GetClassNameW(hWnd, cls, _countof(cls));
+        const bool isVclTab = _wcsicmp(cls, L"TPageControl") == 0
+            || _wcsicmp(cls, L"TTabControl") == 0;
+        HMODULE vclComctlNew = isVclTab ? GlassCore::ModuleHandler::g_comctl32New : nullptr;
+        HMODULE vclComctlLegacy = isVclTab ? GlassCore::ModuleHandler::g_comctl32Legacy : nullptr;
+        if (vclComctlNew == callerMod) vclComctlNew = nullptr;
+        if (vclComctlLegacy == callerMod || vclComctlLegacy == vclComctlNew)
+            vclComctlLegacy = nullptr;
         // BWM PaintHandler: ExtTextOut при vertical || !theme; DrawThemeText при theme && !vertical.
         // Плюс header-only: ETO-хук нужен чтобы comctl32 не заливал фон светлым поверх blacken.
         const TabPaintSession session{
@@ -770,11 +784,15 @@ namespace GlassCore::TabControl
             useTheme,
             useTheme && !vertical,
             useTheme,
+            vclComctlNew,
+            vclComctlLegacy,
         };
         g_tabStack.push_back(session);
         if (session.hookDrawThemeText)
             ++g_tabDrawThemeTextSessionDepth;
         EnableTabHooks(callerMod, true, session);
+        EnableTabHooks(session.vclComctlNew, true, session);
+        EnableTabHooks(session.vclComctlLegacy, true, session);
         // Паритет BWM (PaintHandler: фон таба идёт через DUI70): кисть BTNFACE/WINDOW
         // под язычками — чёрная, иначе под стеклом проступает серая заливка.
         // Только COMCTL32 paint-сессия (вложенные сессии других контролов не трогаем).
@@ -787,7 +805,7 @@ namespace GlassCore::TabControl
         }
         DebugLog(DBG_NORMAL,
             L"[GlassCore][Tab] BeginPaint: callerMod=0x%p caller=%s hWnd=0x%p themed=%d vert=%d "
-            L"hookETO=%d hookDTB=%d hookDTT=%d hookGSCB=%d depth=%zu",
+            L"hookETO=%d hookDTB=%d hookDTT=%d hookGSCB=%d vclComctlNew=0x%p vclComctlLegacy=0x%p depth=%zu",
             callerMod,
             Shared::WinApiUtils::GetModuleFileBaseName(callerMod).c_str(),
             hWnd, useTheme ? 1 : 0, vertical ? 1 : 0,
@@ -795,6 +813,7 @@ namespace GlassCore::TabControl
             session.hookDrawThemeBg ? 1 : 0,
             session.hookDrawThemeText ? 1 : 0,
             session.hookGetSysColorBrush ? 1 : 0,
+            session.vclComctlNew, session.vclComctlLegacy,
             g_tabStack.size());
     }
 
@@ -810,6 +829,8 @@ namespace GlassCore::TabControl
         if (top.hookDrawThemeText)
             --g_tabDrawThemeTextSessionDepth;
         g_tabStack.pop_back();
+        EnableTabHooks(top.vclComctlLegacy, false, top);
+        EnableTabHooks(top.vclComctlNew, false, top);
         EnableTabHooks(top.mod, false, top);
         if (top.hookGetSysColorBrush)
         {
