@@ -22,6 +22,7 @@ namespace
     // сохранять нужно один раз, восстанавливать тоже один раз в DetachAll.
     static LONG_PTR g_origTabBrush = 0;
     static bool     g_brushSaved   = false;
+    static wchar_t  g_brushClass[256]{};
 }
 
 namespace WndCompat
@@ -44,7 +45,11 @@ namespace WndCompat
         const bool useTheme = Shared::WinApiUtils::IsThemed(hWnd, L"TAB");
         SetPropW(hWnd, kGlassTabUseThemeProp, reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(useTheme ? 1u : 0u)));
 
-        if (!useTheme)
+        wchar_t className[256]{};
+        GetClassNameW(hWnd, className, _countof(className));
+        // VCL registers its own classes. Never change their class brush through the
+        // single SysTabControl32 backup: that would restore the wrong class on shutdown.
+        if (!useTheme && className[0] && _wcsicmp(className, L"TPageControl") != 0)
         {
             // SetClassLongPtr меняет brush для всего класса SysTabControl32.
             // Сохраняем оригинал только при первом вызове.
@@ -52,9 +57,10 @@ namespace WndCompat
             if (!g_brushSaved)
             {
                 g_origTabBrush = SetClassLongPtr(hWnd, GCLP_HBRBACKGROUND, blackBrush);
+                wcscpy_s(g_brushClass, className);
                 g_brushSaved = true;
             }
-            else
+            else if (_wcsicmp(g_brushClass, className) == 0)
             {
                 SetClassLongPtr(hWnd, GCLP_HBRBACKGROUND, blackBrush);
             }
@@ -87,7 +93,9 @@ namespace WndCompat
             g_brushSaved = false;
             for (HWND hWnd : windows)
             {
-                if (IsWindow(hWnd))
+                wchar_t className[256]{};
+                if (IsWindow(hWnd) && GetClassNameW(hWnd, className, _countof(className)) > 0
+                    && _wcsicmp(g_brushClass, className) == 0)
                 {
                     SetClassLongPtr(hWnd, GCLP_HBRBACKGROUND, g_origTabBrush);
                     DebugLog(L"[WndCompat][TabControl] TabControl_DetachAll: оригинальный brush восстановлен hwnd=0x%p", hWnd);
@@ -95,6 +103,7 @@ namespace WndCompat
                 }
             }
             g_origTabBrush = 0;
+            g_brushClass[0] = L'\0';
         }
 
         // Восстановить визуальный стиль и снять маркировку

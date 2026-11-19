@@ -364,6 +364,7 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
     // ── Static / SysLink ─────────────────────────────────────────────────────
     if (Equals(cls, L"Static") ||
         Equals(cls, L"TStatic") ||
+        Equals(cls, L"TStaticText") ||
         Equals(cls, L"SysLink") ||
         Equals(cls, L"Link Window"))
         return ControlKind::Static;
@@ -420,6 +421,7 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
     // ── TabControl ───────────────────────────────────────────────────────────
     if (Equals(cls, L"SysTabControl32") ||
         Equals(cls, L"TTabControl") ||
+        Equals(cls, L"TPageControl") ||
         Equals(cls, L"_wx_SysTabCtl32"))
         return ControlKind::TabControl;
 
@@ -434,7 +436,7 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::StatusBar;
 
     // ── TrackBar ─────────────────────────────────────────────────────────────
-    if (Equals(cls, L"msctls_trackbar32"))
+    if (Equals(cls, L"msctls_trackbar32") || Equals(cls, L"TTrackBar"))
         return ControlKind::TrackBar;
 
     // ── UpDown ───────────────────────────────────────────────────────────────
@@ -451,11 +453,11 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::Animate;
 
     // ── ScrollBar ────────────────────────────────────────────────────────────
-    if (Equals(cls, L"ScrollBar"))
+    if (Equals(cls, L"ScrollBar") || Equals(cls, L"TScrollBar"))
         return ControlKind::ScrollBar;
 
     // ── DateTimePicker ───────────────────────────────────────────────────────
-    if (Equals(cls, L"SysDateTimePick32"))
+    if (Equals(cls, L"SysDateTimePick32") || Equals(cls, L"TDateTimePicker"))
         return ControlKind::DateTimePicker;
 
     // ── MonthCal ─────────────────────────────────────────────────────────────
@@ -467,7 +469,7 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::ReBar;
 
     // ── ToolBar ──────────────────────────────────────────────────────────────
-    if (Equals(cls, L"ToolbarWindow32"))
+    if (Equals(cls, L"ToolbarWindow32") || Equals(cls, L"TToolBar"))
         return ControlKind::ToolBar;
 
     // ── Delphi-контейнеры ────────────────────────────────────────────────────

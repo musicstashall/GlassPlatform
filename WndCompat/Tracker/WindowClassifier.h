@@ -32,7 +32,7 @@ enum class ControlKind
 
     // ── Win32 / Delphi / MFC / wxWidgets ─────────────────────────────────────
     Button,             // Button, TButton, TCheckBox, TRadioButton
-    Static,             // Static, TStatic, SysLink, Link Window
+    Static,             // Static, TStatic, TStaticText, SysLink, Link Window
     Edit,               // Edit, TEdit, TMemo
     RichEdit20W,        // RichEdit20W, TRichEdit
     RichEdit50W,        // RICHEDIT50W
@@ -41,25 +41,25 @@ enum class ControlKind
     ComboBoxEx32,       // ComboBoxEx32 (extended combobox; root-subclass для WM_CTLCOLOR*)
     ListView,           // SysListView32, TListView, TSystemListView
     TreeView,           // SysTreeView32, TTreeView, TResTreeView
-    TabControl,         // SysTabControl32, TTabControl, _wx_SysTabCtl32
+    TabControl,         // SysTabControl32, TTabControl, TPageControl, _wx_SysTabCtl32
     ProgressBar,        // msctls_progress32, TProgressBar
     StatusBar,          // msctls_statusbar32, TStatusBar
-    TrackBar,           // msctls_trackbar32
+    TrackBar,           // msctls_trackbar32, TTrackBar
     UpDown,             // msctls_updown32, TUpDown
     Header,             // SysHeader32
     Animate,            // SysAnimate32
-    ScrollBar,          // ScrollBar
-    DateTimePicker,     // SysDateTimePick32
+    ScrollBar,          // ScrollBar, TScrollBar
+    DateTimePicker,     // SysDateTimePick32, TDateTimePicker
     MonthCal,           // SysMonthCal32
     ReBar,              // ReBarWindow32, SizeableRebar
-    ToolBar,            // ToolbarWindow32
+    ToolBar,            // ToolbarWindow32, TToolBar
     DirectUI,           // DirectUIHWND (DUser.dll/wdc.dll, Windows 10+)
     NetUI,              // NetUIHWND, UIRibbonCommandBar (Office ribbon / UIRibbon.dll)
     NetUiToolWindow,    // «Net UI Tool Window», «Net UI Tool Window Layered» — WinEvent: Control (как DirectUI)
     AMCCustomTab,       // AMCCustomTab — кастомный C#/WinForms таб-контрол mmc.exe (MFC42u.dll)
 
     // Delphi-контейнеры (WS_CHILD, но не leaf-контролы)
-    DelphiContainer,    // TGroupBox, TTabSheet, TInplaceEditList
+    DelphiContainer,    // TGroupBox, TTabSheet
 
     // Прочие WS_CHILD контейнеры
     GenericContainer,   // AutoIt v3 GUI, AfxWnd42u

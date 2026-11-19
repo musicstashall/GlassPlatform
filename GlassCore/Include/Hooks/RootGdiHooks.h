@@ -28,6 +28,7 @@ namespace GlassCore::Root
         OHK_GRADIENTFILL,
         OHK_TEXTOUT,
         OHK_FILLRECT,
+        OHK_DELPHI_DRAWTHEMETEXTEX,
         OHK_COUNT
     };
 

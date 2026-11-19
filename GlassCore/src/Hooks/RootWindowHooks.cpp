@@ -574,6 +574,17 @@ namespace GlassCore::Root
             if (StrEqI(wndBase.c_str(), L"System.Windows.Forms.ni.dll") && IsWinFormsDotWindow(hWnd))
                 cache.winFormsDrawTextEx = true;
 
+            // VCL paints windowless labels and group captions directly from the EXE.
+            // Limit the additional IAT slot to the observed container classes; the
+            // hook also verifies the current thread's paint owner and actual window DC.
+            if (instMod == GlassCore::ModuleHandler::g_entryPointModule
+                && (StrEqI(cls, L"TGroupBox") || StrEqI(cls, L"TTabSheet")
+                    || StrEqI(cls, L"TPanel") || StrEqI(cls, L"TScrollBox")))
+            {
+                PushPaint(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache);
+                PushDc(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache);
+            }
+
             // Точка входа процесса — типичные диалоги / сценарии владельца — BWM Paint (+ HEX: Paint+Dc)
             if (instMod == GlassCore::ModuleHandler::g_entryPointModule)
             {

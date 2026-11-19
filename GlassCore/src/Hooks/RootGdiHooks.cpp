@@ -502,6 +502,7 @@ namespace GlassCore::Root
         BOOL WINAPI Root_MyGradientFill(HDC, PTRIVERTEX, ULONG, PVOID, ULONG, ULONG);
         BOOL WINAPI Root_MyTextOutW(HDC, int, int, LPCWSTR, int);
         int WINAPI Root_MyFillRect(HDC, const RECT*, HBRUSH);
+        HRESULT WINAPI Root_MyDelphiDrawThemeTextEx(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, LPRECT, const DTTOPTS*);
 
         inline const HookDispatcherDependency<OHK_COUNT, 3> g_rootHookDep
         { {
@@ -539,6 +540,8 @@ namespace GlassCore::Root
                 "TextOutW", reinterpret_cast<PVOID>(Root_MyTextOutW) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
                 "FillRect", reinterpret_cast<PVOID>(Root_MyFillRect) },
+            std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv },
+                "DrawThemeTextEx", reinterpret_cast<PVOID>(Root_MyDelphiDrawThemeTextEx) },
         } };
 
         using RootDispatcher = HookDispatcher<OHK_COUNT, 3>;
@@ -652,6 +655,45 @@ namespace GlassCore::Root
             if (!FAILED(GlassCore::Text::DrawTextWithAlpha(hdc, t, c, rc, fmt, r)))
                 return r;
             return o(hdc, t, c, rc, fmt, dtp);
+        }
+
+        HRESULT WINAPI Root_MyDelphiDrawThemeTextEx(
+            HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count,
+            DWORD flags, LPRECT rect, const DTTOPTS* options)
+        {
+            const HMODULE caller = GetCallerModule(_ReturnAddress());
+            auto orig = GetRootOrg<OHK_DELPHI_DRAWTHEMETEXTEX, decltype(&DrawThemeTextEx)>(caller);
+            if (!orig)
+                return DrawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
+
+            const HWND hwnd = dc ? WindowFromDC(dc) : nullptr;
+            const HWND owner = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+            wchar_t cls[256]{};
+            if (hwnd) GetClassNameW(hwnd, cls, _countof(cls));
+            const bool isVclContainer = StrEqI(cls, L"TGroupBox") || StrEqI(cls, L"TTabSheet")
+                || StrEqI(cls, L"TPanel") || StrEqI(cls, L"TScrollBox");
+            // Do not reinterpret measurements, callbacks, untracked memory DCs or
+            // drawing in another window while this process-wide IAT slot is held.
+            if (g_shutdown.load(std::memory_order_acquire) || !hwnd || hwnd != owner
+                || !isVclContainer || !rect || IsRectEmpty(rect) || !text || count == 0
+                || (flags & DT_CALCRECT)
+                || (options && (options->dwSize != sizeof(DTTOPTS)
+                    || (options->dwFlags & (DTT_CALCRECT | DTT_CALLBACK)))))
+                return orig(theme, dc, part, state, text, count, flags, rect, options);
+
+            DTTOPTS work{ sizeof(DTTOPTS) };
+            if (options) work = *options;
+            work.dwFlags |= DTT_COMPOSITED;
+            HRESULT drawResult = E_FAIL;
+            const HRESULT bufferResult = GlassCore::Text::DrawThemeContent(
+                dc, *rect, nullptr, nullptr, 0,
+                [&](HDC memoryDC, HPAINTBUFFER, RGBQUAD*, int)
+                {
+                    drawResult = orig(theme, memoryDC, part, state, text, count, flags, rect, &work);
+                }, 0xFF, false, true, false);
+            if (FAILED(bufferResult) || FAILED(drawResult))
+                return orig(theme, dc, part, state, text, count, flags, rect, options);
+            return drawResult;
         }
 
         BOOL WINAPI Root_MyExtTextOutW(

@@ -1023,6 +1023,7 @@ namespace
                     }
                     break;
 
+                case ControlKind::DelphiContainer:
                 case ControlKind::GenericContainer:
                     // Full: Root_Attach для WM_CTLCOLOR*. PopupOnly: не аттачить —
                     // AutoIt/#32770 и т.п. иначе получают subclass + hooks cache на load.
