@@ -75,13 +75,6 @@ namespace GlassCore::PaintDispatcher
             // «Настройки вида», иначе GetSysColorBrush no-op → белая плашка
             // (Round-5: «трекбар по-прежнему белый»).
             return true;
-        case GlassControlKind::ListView:
-        case GlassControlKind::WinForms_ListView:
-            // PopupOnly: доаттаченные списки под приаттаченным flyout'ом (DropDown/ListviewPopup,
-            // см. WinEventHandler: attach только в цепочке предков DropDown). Сессия даёт
-            // glass в Full-стиле этому ListView: чёрный фон LVM + glass-скроллбар
-            // (comctl ScrollBar DTB). Неприаттаченный (kind=None) — не диспетчеризуется.
-            return true;
         default:
             return false;
         }
