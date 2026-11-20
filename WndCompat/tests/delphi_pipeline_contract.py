@@ -810,7 +810,8 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('orig=%d caller=%s', root)
         # Обработка не должна зависеть от наличия трамплина: без orig детур
         # раньше молча уходил в FillRect.
-        fill = root.split('Root_MyDelphiGridFill(', 1)[1].split('Root_MyDelphiGridTheme(', 1)[0]
+        fill = root.split('int WINAPI Root_MyDelphiGridFill(HDC dc', 1)[1].split(
+            'HRESULT WINAPI Root_MyDelphiGridTheme(', 1)[0]
         self.assertLess(fill.index('const auto passthrough'), fill.index('IsDelphiGridFillDC(dc))'))
         self.assertIn('orig ? orig(dc, rect, brush) : ::FillRect(dc, rect, brush)', fill)
         self.assertIn('ApplyDelphiGridCellBackground(dc, rect, fillColor)', fill)
