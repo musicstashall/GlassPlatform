@@ -808,7 +808,7 @@ class DelphiPipelineContract(unittest.TestCase):
         root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         body = root.split('Root_OnDelphiGridAfterBeginPaint(', 1)[1].split('static void EnableSpecs', 1)[0]
         for marker in ('IsRectEmpty(&ps->rcPaint)', 'L"TStringGrid"', 'L"TDrawGrid"',
-                       'L"TShownValueList"', 'BLACKNESS', 'return ok != FALSE;'):
+                       'L"TShownValueList"', 'PatBlt(hdc, rc.left, rc.top', 'return ok != FALSE;'):
             self.assertIn(marker, body)
         self.assertIn('RegisterPostPaintProvider({ Root_OnDelphiGridAfterBeginPaint })', root)
 

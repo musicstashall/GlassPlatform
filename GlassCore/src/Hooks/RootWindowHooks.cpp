@@ -661,8 +661,11 @@ namespace GlassCore::Root
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
                 return false;
             const RECT rc = ps->rcPaint;
+            // ВРЕМЕННАЯ диагностика: инверсия repaint-области вместо чёрной
+            // очистки. Если пиксели на экране меняются — наш DC это видимая
+            // поверхность; если нет — рисуем не туда.
             const BOOL ok = PatBlt(hdc, rc.left, rc.top, rc.right - rc.left,
-                rc.bottom - rc.top, BLACKNESS);
+                rc.bottom - rc.top, DSTINVERT);
 #if defined(_DEBUG)
             // Диагностика поверхности: dcWnd/bmp показывают, куда реально легла
             // заливка (оконный DC, memory DC, DIB), px — что вернулось обратно.
