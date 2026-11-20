@@ -3,6 +3,7 @@
 #include <Hooks/delphi/TListBoxDraw.h>
 #include <Hooks/delphi/TBackgroundHooks.h>
 #include <Hooks/UxThemeHooks.h>
+#include <Subsystems/ThemePaintRegistry.h>
 #include <Helpers/ThemeHelper.h>
 #include <vssym32.h>
 #include <Core/Intercept/HookDispatcher.h>
@@ -48,6 +49,11 @@ namespace GlassCore::DelphiListBox
             RECT item;
             bool colorList;
             bool checkList;
+            // ODT_COMBOBOX field/item session (TColorBox, TDriveComboBox,
+            // TFilterComboBox). The bounds cover only the supplied DC area.
+            bool combo{};
+            bool field{};
+            RECT bounds{};
             bool themeDetourAcquired{};
             unsigned long long serial{};
             RECT checkboxThemeRect{};
@@ -70,6 +76,30 @@ namespace GlassCore::DelphiListBox
         thread_local unsigned long long g_diagSequence = 0;
         thread_local ULONGLONG g_diagEpoch = 0;
         thread_local unsigned g_diagBudget = 0;
+        bool CheckProbeBudget() noexcept;
+        void LogComboFill(const Session& s, HDC dc, const RECT& r, const LOGBRUSH& brush,
+            const wchar_t* branch) noexcept
+        {
+            if (!s.combo || !CheckProbeBudget()) return;
+            const DWORD lastError = GetLastError();
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiComboDraw] fill hwnd=0x%p dc=0x%p dcType=%u field=%d rect=[%ld,%ld,%ld,%ld] bounds=[%ld,%ld,%ld,%ld] brush=0x%08X branch=%s",
+                s.hwnd, dc, static_cast<unsigned>(GetObjectType(dc)), s.field ? 1 : 0,
+                r.left, r.top, r.right, r.bottom, s.bounds.left, s.bounds.top,
+                s.bounds.right, s.bounds.bottom, static_cast<unsigned>(brush.lbColor), branch);
+            SetLastError(lastError);
+        }
+        void LogComboText(const Session& s, HDC dc, UINT options, UINT count,
+            const RECT& r, COLORREF bk, const wchar_t* branch) noexcept
+        {
+            if (!s.combo || !CheckProbeBudget()) return;
+            const DWORD lastError = GetLastError();
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiComboDraw] text hwnd=0x%p dc=0x%p dcType=%u options=0x%X count=%u bk=0x%08X rect=[%ld,%ld,%ld,%ld] branch=%s",
+                s.hwnd, dc, static_cast<unsigned>(GetObjectType(dc)), options, count,
+                static_cast<unsigned>(bk), r.left, r.top, r.right, r.bottom, branch);
+            SetLastError(lastError);
+        }
         bool CheckProbeBudget() noexcept
         {
             const ULONGLONG now = GetTickCount64();
@@ -177,6 +207,10 @@ namespace GlassCore::DelphiListBox
                 && r.right - r.left <= w / 3 && r.top > s.item.top
                 && r.bottom < s.item.bottom && r.bottom > r.top;
         }
+        bool ComboFillBounds(const Session& s, const RECT& r) noexcept
+        {
+            return EqualRect(&r, &s.bounds) || EqualRect(&r, &s.item);
+        }
         BOOL WINAPI MyRectangle(HDC dc, int left, int top, int right, int bottom)
         {
             auto orig = Original<RectangleSlot, decltype(&::Rectangle)>();
@@ -228,12 +262,34 @@ namespace GlassCore::DelphiListBox
             if (!current || !r || !brush) return orig(dc, r, brush);
             const Session s = *current;
             RECT clipped{};
-            if (!IntersectRect(&clipped, r, &s.item)) return orig(dc, r, brush);
+            if (!IntersectRect(&clipped, r, &s.bounds)) return orig(dc, r, brush);
             // Do not change a call crossing the item boundary.
             if (!EqualRect(&clipped, r)) return orig(dc, r, brush);
             LOGBRUSH lb{};
             if (GetObjectW(brush, sizeof(lb), &lb) != sizeof(lb) || lb.lbStyle != BS_SOLID)
                 return orig(dc, r, brush);
+            if (s.combo)
+            {
+                // Owner-draw combo field: only the control's own system-colour
+                // background is removed. Coloured swatches, selection and any
+                // smaller fill are passed through untouched; log them so the
+                // actual source of a white field can be identified.
+                if (!SystemBackground(lb.lbColor) || !ComboFillBounds(s, *r))
+                {
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+                    LogComboFill(s, dc, *r, lb, L"pass-through");
+#endif
+                    return orig(dc, r, brush);
+                }
+                g_inHook = true;
+                auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
+                const BOOL cleared = PatBlt(dc, r->left, r->top, r->right - r->left,
+                    r->bottom - r->top, BLACKNESS);
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+                LogComboFill(s, dc, *r, lb, cleared ? L"system-background" : L"failed");
+#endif
+                return cleared ? 1 : orig(dc, r, brush);
+            }
             const bool sample = IsColorSample(s, *r);
             // VCL's own DC clip governs each fill, including checkbox backgrounds.
             // Do not infer or alter checkbox geometry or clipping here.
@@ -266,7 +322,7 @@ namespace GlassCore::DelphiListBox
             const int saved = SaveDC(dc);
             if (!saved) return orig(dc, x, y, options, rect, text, count, dx);
             auto restore = wil::scope_exit([&]() noexcept { RestoreDC(dc, saved); });
-            if (IntersectClipRect(dc, s.item.left, s.item.top, s.item.right, s.item.bottom) == ERROR)
+            if (IntersectClipRect(dc, s.bounds.left, s.bounds.top, s.bounds.right, s.bounds.bottom) == ERROR)
                 return orig(dc, x, y, options, rect, text, count, dx);
             g_inHook = true;
             auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
@@ -274,6 +330,9 @@ namespace GlassCore::DelphiListBox
             if ((options & ETO_OPAQUE) && rect)
             {
                 const COLORREF bk = GetBkColor(dc);
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+                LogComboText(s, dc, options, count, *rect, bk, L"opaque");
+#endif
                 // Root may already map COLOR_WINDOW to black in the text DC.
                 if ((bk & 0xFFFFFFu) == 0 || SystemBackground(bk))
                 {
@@ -305,7 +364,7 @@ namespace GlassCore::DelphiListBox
             const int saved = SaveDC(dc);
             if (!saved) return orig(dc, text, count, rect, format);
             auto restore = wil::scope_exit([&]() noexcept { RestoreDC(dc, saved); });
-            if (IntersectClipRect(dc, s.item.left, s.item.top, s.item.right, s.item.bottom) == ERROR)
+            if (IntersectClipRect(dc, s.bounds.left, s.bounds.top, s.bounds.right, s.bounds.bottom) == ERROR)
                 return orig(dc, text, count, rect, format);
             g_inHook = true;
             auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
@@ -338,19 +397,48 @@ namespace GlassCore::DelphiListBox
     bool BeginDraw(HWND parent, const DRAWITEMSTRUCT* dis) noexcept
     {
         if (g_shutdown.load(std::memory_order_acquire) || !GlassCore::Root::IsFullInjectionMode()
-            || !dis || dis->CtlType != ODT_LISTBOX || !dis->hDC || !dis->hwndItem
+            || !dis || (dis->CtlType != ODT_LISTBOX && dis->CtlType != ODT_COMBOBOX)
+            || !dis->hDC || !dis->hwndItem
             || GetParent(dis->hwndItem) != parent || IsRectEmpty(&dis->rcItem)
-            || GlassShared::GlassGetWindowKind(dis->hwndItem) != GlassShared::GlassControlKind::ListBox
             || !GlassShared::GlassIsBackdropAllowedForHwnd(dis->hwndItem)) return false;
         WCHAR cls[64]{};
         if (!GetClassNameW(dis->hwndItem, cls, _countof(cls))) return false;
-        const bool color = _wcsicmp(cls, L"TColorListBox") == 0;
-        if (!color && _wcsicmp(cls, L"TListBox") != 0 && _wcsicmp(cls, L"TCheckListBox") != 0) return false;
-        GlassCore::DelphiBackground::ClearObservedListTail(dis->hwndItem, dis);
+        const bool list = dis->CtlType == ODT_LISTBOX;
+        const bool combo = dis->CtlType == ODT_COMBOBOX;
+        const bool color = list && _wcsicmp(cls, L"TColorListBox") == 0;
+        const bool check = list && _wcsicmp(cls, L"TCheckListBox") == 0;
+        if (list)
+        {
+            if (!color && !check && _wcsicmp(cls, L"TListBox") != 0) return false;
+            if (GlassShared::GlassGetWindowKind(dis->hwndItem) != GlassShared::GlassControlKind::ListBox)
+                return false;
+        }
+        else
+        {
+            // TComboBox is deliberately excluded: its field text is already
+            // painted correctly through the child Edit and themed field path.
+            if (_wcsicmp(cls, L"TColorBox") != 0 && _wcsicmp(cls, L"TDriveComboBox") != 0
+                && _wcsicmp(cls, L"TFilterComboBox") != 0) return false;
+            if (GlassShared::GlassGetWindowKind(dis->hwndItem) != GlassShared::GlassControlKind::ComboBox)
+                return false;
+        }
+        if (list)
+            GlassCore::DelphiBackground::ClearObservedListTail(dis->hwndItem, dis);
         HMODULE mod = GlassCore::ModuleHandler::g_entryPointModule;
         if (!mod) return false;
-        Session s{dis->hwndItem, dis->hDC, dis->rcItem, color,
-            _wcsicmp(cls, L"TCheckListBox") == 0};
+        Session s{dis->hwndItem, dis->hDC, dis->rcItem, color, check};
+        s.combo = combo;
+        s.field = combo && (dis->itemID == static_cast<UINT>(-1)
+            || (dis->itemState & ODS_COMBOBOXEDIT) != 0);
+        // A field owner-draw paints its background over the whole client area,
+        // not only over rcItem. Both rectangles stay inside this one DC.
+        s.bounds = s.item;
+        if (s.field)
+        {
+            RECT client{};
+            if (GetClientRect(dis->hwndItem, &client) && !IsRectEmpty(&client))
+                s.bounds = client;
+        }
         s.serial = ++g_sessionSerial;
         {
             auto lock = g_lock.lock_exclusive();
@@ -384,8 +472,10 @@ namespace GlassCore::DelphiListBox
             --budget;
             RECT client{};
             GetClientRect(s.hwnd, &client);
-            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p class=%s dc=0x%p fill=%d ext=%d draw=%d rectangle=%d theme=%d state=0x%X item=%u rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld,%ld,%ld]",
-                s.hwnd, cls, s.dc, s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot], s.hooks[RectangleSlot], s.themeDetourAcquired,
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p class=%s dc=0x%p combo=%d field=%d bounds=[%ld,%ld,%ld,%ld] fill=%d ext=%d draw=%d rectangle=%d theme=%d state=0x%X item=%u rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld,%ld,%ld]",
+                s.hwnd, cls, s.dc, s.combo ? 1 : 0, s.field ? 1 : 0,
+                s.bounds.left, s.bounds.top, s.bounds.right, s.bounds.bottom,
+                s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot], s.hooks[RectangleSlot], s.themeDetourAcquired,
                 dis->itemState, dis->itemID, s.item.left, s.item.top, s.item.right, s.item.bottom,
                 client.left, client.top, client.right, client.bottom);
         }

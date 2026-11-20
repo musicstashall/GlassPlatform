@@ -1365,11 +1365,19 @@ namespace
             }
             // VCL рисует строку в HDC из DRAWITEMSTRUCT. Production сессия
             // обрабатывает только этот DC; необязательная probe ничего не меняет.
-            if (dis->CtlType == ODT_LISTBOX && dis->hwndItem
+            const bool listOwnerDraw = dis->CtlType == ODT_LISTBOX && dis->hwndItem
                 && GetParent(dis->hwndItem) == hWnd
                 && (WndCompat::IsWindowClass(dis->hwndItem, L"TListBox")
                     || WndCompat::IsWindowClass(dis->hwndItem, L"TCheckListBox")
-                    || WndCompat::IsWindowClass(dis->hwndItem, L"TColorListBox")))
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TColorListBox"));
+            // VCL combo fields that draw their item themselves. TComboBox is not
+            // here: its field text already goes through the child Edit path.
+            const bool comboOwnerDraw = dis->CtlType == ODT_COMBOBOX && dis->hwndItem
+                && GetParent(dis->hwndItem) == hWnd
+                && (WndCompat::IsWindowClass(dis->hwndItem, L"TColorBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TDriveComboBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TFilterComboBox"));
+            if (listOwnerDraw || comboOwnerDraw)
             {
                 using BeginFn = BOOL (WINAPI*)(HWND, const DRAWITEMSTRUCT*) noexcept;
                 using EndFn = void (WINAPI*)() noexcept;
@@ -1381,11 +1389,11 @@ namespace
                 if (drawBegin && drawEnd && drawBegin(hWnd, dis))
                 {
                     auto finishDraw = wil::scope_exit([&]() noexcept { drawEnd(); });
-                    const bool probing = begin && end && begin(hWnd, dis);
+                    const bool probing = listOwnerDraw && begin && end && begin(hWnd, dis);
                     auto finishProbe = wil::scope_exit([&]() noexcept { if (probing) end(); });
                     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
                 }
-                if (begin && end && begin(hWnd, dis))
+                if (listOwnerDraw && begin && end && begin(hWnd, dis))
                 {
                     auto finish = wil::scope_exit([&]() noexcept { end(); });
                     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
