@@ -130,25 +130,22 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn('TInputHooks.cpp', read(path))
             self.assertIn('TInputHooks.h', read(path))
 
-    def test_checklist_default_buffer_clears_before_the_first_draw(self):
-        code = read('GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp')
-        prep = code.split('void PrepareObservedListBackground(', 1)[1]
-        for guard in ('it->hwnd != hwnd', '!it->armed', '!it->list', '!it->defaultBrush',
-                      'it->observedDc != dis->hDC', 'it->observedBitmap != GetCurrentObject(dis->hDC, OBJ_BITMAP)',
-                      'IsFullClient(hwnd, dis->hDC, &it->observedRect)',
-                      'dis->itemAction & ODA_DRAWENTIRE', 'if (it->checkList) it->defaultBrush = false',
-                      'it->defaultBrush = false', 'dis->rcItem.top != client.top',
-                      'LB_GETTOPINDEX', 'LB_GETCOUNT',
-                      'dis->itemID != static_cast<UINT>(top)', 'if (checkList)',
-                      'PatBlt(dis->hDC, client.left, client.top', 'BLACKNESS'):
-            self.assertIn(guard, prep)
-        self.assertLess(prep.index('it->defaultBrush = false;'), prep.index('if (checkList)'))
-        self.assertLess(prep.index('if (checkList)'), prep.index('LB_GETITEMRECT'))
-        for forbidden in ('SelectClipRgn', 'ExcludeClipRect', 'GetClipRgn', 'RectInRegion'):
-            self.assertNotIn(forbidden, prep)
-        draw = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
-        self.assertIn('PrepareObservedListBackground(dis->hwndItem, dis)', draw)
-        self.assertIn('const HRESULT draw = orig(theme, bufferDc, part, state, rect, clip)', draw)
+    def test_checklist_white_background_probe_is_opt_in_and_stage_correlated(self):
+        code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
+        probe = code.split('#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)', 2)[2].split('        template', 1)[0]
+        for marker in ('CheckProbeBudget()', 'g_diagBudget = 96', 'GetPixel(s.dc',
+                       'PtInRect(&s.item, points[i])', 'GetBufferedPaintBits', 'GdiFlush()',
+                       'alpha0=%u alpha255=%u alphaPartial=%u whiteNonzeroAlpha=%u',
+                       'rgbOutsideLeft', 'rgbOutsideRight', 'CLR_INVALID', 'SetLastError(lastError)'):
+            self.assertIn(marker, probe)
+        self.assertNotIn('SelectClipRgn', probe)
+        self.assertNotIn('ExcludeClipRect', probe)
+        for marker in ('L"theme.before"', 'L"theme.after"', 'L"item.end"',
+                       'LogCheckBuffer(session, buffer, *rect, state)', 'L"system-background"',
+                       'L"alpha-brush"'):
+            self.assertIn(marker, code)
+        bg = read('GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp')
+        self.assertNotIn('checklist initial background', bg)
 
     def test_checkbox_uses_scoped_theme_drawing_without_geometry_heuristics(self):
         code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
@@ -612,7 +609,7 @@ class DelphiPipelineContract(unittest.TestCase):
                        'g_dispatcher.DisableAllHooks()', 'BLACKNESS'):
             self.assertIn(marker, code)
         self.assertNotIn('TSpinEdit', code)
-        self.assertIn('PrepareObservedListBackground(dis->hwndItem, dis)', read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp'))
+        self.assertIn('ClearObservedListTail(dis->hwndItem, dis)', read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp'))
         engine = read('GlassCore/src/Core/Engine.cpp')
         self.assertIn('DelphiBackground::Startup()', engine)
         self.assertIn('DelphiBackground::Shutdown()', engine)
