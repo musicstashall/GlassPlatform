@@ -1637,6 +1637,14 @@ namespace GlassCore::Root
                 const RECT gridRect{ x, y, x + cx, y + cy };
                 const COLORREF brushColor = (lbrush.lbStyle == BS_SOLID && lbrush.lbColor)
                     ? lbrush.lbColor : GetBkColor(hdc);
+#if defined(_DEBUG)
+                if (AllowDelphiGridLog(1))
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][DelphiGrid] PatBlt hwnd=0x%p rop=0x%08X rect=[%ld,%ld,%ld,%ld] color=0x%08X",
+                        WindowFromDC(hdc), static_cast<unsigned>(rop),
+                        gridRect.left, gridRect.top, gridRect.right, gridRect.bottom,
+                        static_cast<unsigned>(brushColor));
+#endif
                 if (ApplyDelphiGridCellBackground(hdc, &gridRect, brushColor))
                     return TRUE;
             }
