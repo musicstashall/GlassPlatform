@@ -173,9 +173,35 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('DelphiListBox::TryCheckListThemeBackground', ux)
         self.assertIn('Button::TryDelphiBitBtnThemeBgDetour', ux)
 
+    def test_checklist_recolors_only_vcl_background_outline_after_theme(self):
+        code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
+        draw = code.split('BOOL WINAPI MyRectangle(HDC dc,', 1)[1].split('int WINAPI MyFill(HDC dc', 1)[0]
+        for guard in ('Original<RectangleSlot, decltype(&::Rectangle)>()',
+                      '!current->checkList', '!current->pendingCheckboxBackgroundOutline',
+                      'g_stack.back().pendingCheckboxBackgroundOutline = false',
+                      'EqualRect(&r, &session.checkboxThemeRect)',
+                      'brush.lbStyle != BS_NULL', 'pen.lopnStyle != PS_SOLID',
+                      'pen.lopnWidth.x != 1', 'GetSysColor(COLOR_WINDOW)',
+                      'GetStockObject(BLACK_PEN)', 'SelectObject(dc, backgroundPen)',
+                      'const BOOL result = orig(dc, left, top, right, bottom)',
+                      'SelectObject(dc, oldPen)', 'SetLastError(error)',
+                      'return orig(dc, left, top, right, bottom)'):
+            self.assertIn(guard, draw)
+        for forbidden in ('ExcludeClipRect', 'IntersectClipRect', 'PatBlt', 'RectInRegion'):
+            self.assertNotIn(forbidden, draw)
+        theme = code.split('bool TryCheckListThemeBackground(', 1)[1].split('void EndDraw()', 1)[0]
+        self.assertLess(theme.index('pendingCheckboxBackgroundOutline = false'),
+                        theme.index('const HRESULT draw = orig('))
+        self.assertLess(theme.index('if (FAILED(draw) || FAILED(end)) return false;'),
+                        theme.index('pendingCheckboxBackgroundOutline = true'))
+        self.assertIn('g_stack.back().serial == session.serial', theme)
+        self.assertIn('g_stack.back().checkboxThemeRect = *rect', theme)
+        self.assertIn('if (i == RectangleSlot && !s.checkList) continue', code)
+        self.assertIn('if (s.hooks[i]) g_dispatcher.EnableHook(i, false)', code)
+
     def test_vcl_draw_hook_slots_do_not_shadow_winapi_macros(self):
         code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
-        self.assertIn('enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, Count }', code)
+        self.assertIn('enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, RectangleSlot, Count }', code)
         self.assertIn('Original<DrawTextSlot, decltype(&::DrawTextW)>()', code)
         self.assertIn('Original<FillSlot, decltype(&::FillRect)>()', code)
         self.assertIn('Original<ExtTextSlot, decltype(&::ExtTextOutW)>()', code)

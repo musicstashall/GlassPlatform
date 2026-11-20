@@ -23,10 +23,11 @@ namespace GlassCore::DelphiListBox
     {
         using namespace GlassCore::Hooks;
         using namespace std::literals;
-        enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, Count };
+        enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, RectangleSlot, Count };
         int WINAPI MyFill(HDC, const RECT*, HBRUSH);
         BOOL WINAPI MyExtText(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
         int WINAPI MyDrawText(HDC, LPCWSTR, int, LPRECT, UINT);
+        BOOL WINAPI MyRectangle(HDC, int, int, int, int);
         const HookDispatcherDependency<Count, 3> g_dep{{
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
                 "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "FillRect", reinterpret_cast<void*>(MyFill) },
@@ -34,6 +35,8 @@ namespace GlassCore::DelphiListBox
                 "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "ExtTextOutW", reinterpret_cast<void*>(MyExtText) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
                 "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "DrawTextW", reinterpret_cast<void*>(MyDrawText) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv,
+                "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "Rectangle", reinterpret_cast<void*>(MyRectangle) },
         }};
         HookDispatcher<Count, 3> g_dispatcher{ g_dep, nullptr };
         wil::srwlock g_lock;
@@ -46,6 +49,9 @@ namespace GlassCore::DelphiListBox
             bool colorList;
             bool checkList;
             bool themeDetourAcquired{};
+            unsigned long long serial{};
+            RECT checkboxThemeRect{};
+            bool pendingCheckboxBackgroundOutline{};
             std::array<bool, Count> hooks{};
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
             unsigned long long diagId{};
@@ -58,6 +64,7 @@ namespace GlassCore::DelphiListBox
         thread_local std::vector<Session> g_stack;
         thread_local bool g_inHook = false;
         thread_local bool g_inCheckTheme = false;
+        thread_local unsigned long long g_sessionSerial = 0;
 
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
         thread_local unsigned long long g_diagSequence = 0;
@@ -169,6 +176,49 @@ namespace GlassCore::DelphiListBox
                 && r.left - s.item.left <= h && r.right > r.left
                 && r.right - r.left <= w / 3 && r.top > s.item.top
                 && r.bottom < s.item.bottom && r.bottom > r.top;
+        }
+        BOOL WINAPI MyRectangle(HDC dc, int left, int top, int right, int bottom)
+        {
+            auto orig = Original<RectangleSlot, decltype(&::Rectangle)>();
+            if (!orig) return Rectangle(dc, left, top, right, bottom);
+            const auto* current = Current(dc);
+            if (!current || !current->checkList || !current->pendingCheckboxBackgroundOutline)
+                return orig(dc, left, top, right, bottom);
+            const Session session = *current;
+            // Consume on the first Rectangle after the themed checkbox. A later
+            // user-drawn rectangle must not inherit this operation's context.
+            g_stack.back().pendingCheckboxBackgroundOutline = false;
+            const RECT r{left, top, right, bottom};
+            LOGBRUSH brush{};
+            LOGPEN pen{};
+            if (!EqualRect(&r, &session.checkboxThemeRect)
+                || GetObjectW(GetCurrentObject(dc, OBJ_BRUSH), sizeof(brush), &brush) != sizeof(brush)
+                || brush.lbStyle != BS_NULL
+                || GetObjectW(GetCurrentObject(dc, OBJ_PEN), sizeof(pen), &pen) != sizeof(pen)
+                || pen.lopnStyle != PS_SOLID || pen.lopnWidth.x != 1
+                || (pen.lopnColor & 0xFFFFFFu) != (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu))
+                return orig(dc, left, top, right, bottom);
+
+            // VCL paints its background-coloured outline over the theme. Give
+            // that background the same transparent black used for list fills;
+            // keep the original Rectangle, brush, clip, and themed inner border.
+            HGDIOBJ backgroundPen = GetStockObject(BLACK_PEN);
+            if (!backgroundPen) return orig(dc, left, top, right, bottom);
+            HGDIOBJ oldPen = SelectObject(dc, backgroundPen);
+            if (!oldPen || oldPen == HGDI_ERROR) return orig(dc, left, top, right, bottom);
+            const BOOL result = orig(dc, left, top, right, bottom);
+            const DWORD error = GetLastError();
+            SelectObject(dc, oldPen);
+#if defined(_DEBUG)
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 12; }
+            if (budget) { --budget; DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiListDraw] checkbox background pen hwnd=0x%p dc=0x%p result=%d", session.hwnd, dc, result); }
+#endif
+            SetLastError(error);
+            return result;
         }
         int WINAPI MyFill(HDC dc, const RECT* r, HBRUSH brush)
         {
@@ -301,12 +351,14 @@ namespace GlassCore::DelphiListBox
         if (!mod) return false;
         Session s{dis->hwndItem, dis->hDC, dis->rcItem, color,
             _wcsicmp(cls, L"TCheckListBox") == 0};
+        s.serial = ++g_sessionSerial;
         {
             auto lock = g_lock.lock_exclusive();
             if (g_shutdown.load(std::memory_order_acquire)) return false;
             g_dispatcher.moduleAddress = mod;
             for (size_t i = 0; i < Count; ++i)
             {
+                if (i == RectangleSlot && !s.checkList) continue;
                 const int before = g_dispatcher.GetRef(i);
                 g_dispatcher.EnableHook(i, true);
                 s.hooks[i] = g_dispatcher.GetRef(i) > before;
@@ -332,8 +384,8 @@ namespace GlassCore::DelphiListBox
             --budget;
             RECT client{};
             GetClientRect(s.hwnd, &client);
-            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p class=%s dc=0x%p fill=%d ext=%d draw=%d theme=%d state=0x%X item=%u rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld,%ld,%ld]",
-                s.hwnd, cls, s.dc, s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot], s.themeDetourAcquired,
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p class=%s dc=0x%p fill=%d ext=%d draw=%d rectangle=%d theme=%d state=0x%X item=%u rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld,%ld,%ld]",
+                s.hwnd, cls, s.dc, s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot], s.hooks[RectangleSlot], s.themeDetourAcquired,
                 dis->itemState, dis->itemID, s.item.left, s.item.top, s.item.right, s.item.bottom,
                 client.left, client.top, client.right, client.bottom);
         }
@@ -352,6 +404,9 @@ namespace GlassCore::DelphiListBox
         WCHAR themeClass[MAX_PATH + 1]{};
         if (FAILED(Shared::ThemeHelper::GetThemeClass(theme, themeClass, MAX_PATH))
             || _wcsicmp(themeClass, L"Button") != 0) return false;
+        // A later themed draw replaces (and on failure invalidates) any previous candidate.
+        if (g_stack.empty() || g_stack.back().serial != session.serial) return false;
+        g_stack.back().pendingCheckboxBackgroundOutline = false;
 
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
         g_stack.back().diagThemeRect = *rect;
@@ -399,6 +454,11 @@ namespace GlassCore::DelphiListBox
         }
 #endif
         if (FAILED(draw) || FAILED(end)) return false;
+        if (!g_stack.empty() && g_stack.back().serial == session.serial)
+        {
+            g_stack.back().checkboxThemeRect = *rect;
+            g_stack.back().pendingCheckboxBackgroundOutline = true;
+        }
         result = draw;
         return true;
     }
