@@ -1854,3 +1854,33 @@ EXE, включаются root-хуки `FillRect`, `Rectangle`, `PatBlt` и **�
 списком. Ожидаемо: в журнале `[NativeCombo]`-строки с `cleared-system` для
 белой подложки; если белая кнопка останется, её `api`/`rect`/`rop` из тех же
 строк покажут, чем именно она рисуется. Сборка на Windows не проверена.
+
+## Тест 45: поле `ComboBox` рисует COMCTL32, а не EXE
+
+API Monitor для окна `ComboBox` (`BeginPaint` из `DelphiControlsSample_Win64.exe`,
+`16:52:19`) показывает точный порядок:
+
+1. EXE: `BeginPaint` → `FillRect(hdc, [0,0,200,24], white)` — эту заливку уже
+   перехватывает тест 44.
+2. EXE: `DrawThemeTextEx(partId=4, stateId=1, "Списки и комбобоксы")` + тексты.
+3. **COMCTL32.dll**: `SetBkColor(white)` / `SetBkMode(OPAQUE)` →
+   `PatBlt(hdc, 2, 2, 179, 20, PATCOPY)` (белое поле) → `IntersectClipRect(3,3,180,21)`
+   → `GetTextExtentPointW("Alpha")` → текст поля; затем
+   `BeginPaint`/`CreateCompatibleDC`/`FillRect`/`BitBlt` для буфера текста.
+4. `DrawThemeBackground` в захвате **нет вообще**.
+
+Отсюда причина «нет DTB»: на время `BeginPaint` сессия и root-хуки включались
+только на модуле точки входа, а `PatBlt`/`DrawThemeBackground`/`ExtTextOutW`
+поля идут из `COMCTL32.dll`. Теперь для окна класса ровно `ComboBox`, рисуемого
+EXE, те же combo-хуки и root `FillRect`/`Rectangle`/`PatBlt` включаются ещё и на
+модуле `COMCTL32` (new, иначе legacy) и снимаются на `EndPaint`
+(`g_nativePeerMod`). Root `PatBlt` для этого окна на оконном DC с системной
+кистью и `PATCOPY`/`WHITENESS` заменяется на `BLACKNESS`
+(`branch=cleared-system`), а заливки в memory-DC COMCTL32 не трогаются
+(`WindowFromDC(dc) == hwnd`), иначе пострадал бы буфер текста.
+
+Ожидаемо в журнале: `BeginPaint session open … source=app-iat`, строка
+`[NativeCombo] api=PatBlt … rop=0x00F00021 branch=cleared-system`, и — если
+кнопка темизирована — `InvokeComboDrawThemeBg`/`DTB result` с `part=6`
+(CP_DROPDOWNBUTTONRIGHT) для этого HWND. Только после этого ховер кнопки пойдёт
+через общий alpha-путь. Сборка и визуальный результат на Windows не проверены.

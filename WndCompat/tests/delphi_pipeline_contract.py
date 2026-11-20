@@ -739,6 +739,18 @@ class DelphiPipelineContract(unittest.TestCase):
                        'IsNativeAppPaintSession(WindowFromDC(hdc))',
                        'L"cleared-system"', 'BLACKNESS'):
             self.assertIn(marker, root)
+        # COMCTL32 paints the field of a native ComboBox inside the EXE's
+        # BeginPaint: session + GDI hooks must also go to that module.
+        for marker in ('g_nativePeerMod', 'EnableComboBoxHooksOnComctlModule(peer, true)',
+                       'EnableRootHook(peer, GlassCore::Root::OHK_PATBLT, true)',
+                       'EnableComboBoxHooksOnComctlModule(g_nativePeerMod, false)',
+                       'EnableRootHook(g_nativePeerMod, GlassCore::Root::OHK_PATBLT, false)'):
+            self.assertIn(marker, hooks)
+        # Only the real window DC is converted; COMCTL32's text buffer is left alone.
+        self.assertIn('WindowFromDC(hDC) == hWnd', root)
+        for marker in ('WindowFromDC(hdc) == comboWnd', 'rop == PATCOPY || rop == WHITENESS',
+                       'return o(hdc, x, y, cx, cy, BLACKNESS)'):
+            self.assertIn(marker, root)
 
 if __name__ == "__main__":
     unittest.main()
