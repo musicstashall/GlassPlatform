@@ -89,17 +89,6 @@ namespace GlassCore::DelphiListBox
                 s.bounds.right, s.bounds.bottom, static_cast<unsigned>(brush.lbColor), branch);
             SetLastError(lastError);
         }
-        void LogComboText(const Session& s, HDC dc, UINT options, UINT count,
-            const RECT& r, COLORREF bk, const wchar_t* branch) noexcept
-        {
-            if (!s.combo || !CheckProbeBudget()) return;
-            const DWORD lastError = GetLastError();
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiComboDraw] text hwnd=0x%p dc=0x%p dcType=%u options=0x%X count=%u bk=0x%08X rect=[%ld,%ld,%ld,%ld] branch=%s",
-                s.hwnd, dc, static_cast<unsigned>(GetObjectType(dc)), options, count,
-                static_cast<unsigned>(bk), r.left, r.top, r.right, r.bottom, branch);
-            SetLastError(lastError);
-        }
         bool CheckProbeBudget() noexcept
         {
             const ULONGLONG now = GetTickCount64();
@@ -270,25 +259,37 @@ namespace GlassCore::DelphiListBox
                 return orig(dc, r, brush);
             if (s.combo)
             {
-                // Owner-draw combo field: only the control's own system-colour
-                // background is removed. Coloured swatches, selection and any
-                // smaller fill are passed through untouched; log them so the
-                // actual source of a white field can be identified.
-                if (!SystemBackground(lb.lbColor) || !ComboFillBounds(s, *r))
-                {
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-                    LogComboFill(s, dc, *r, lb, L"pass-through");
-#endif
-                    return orig(dc, r, brush);
-                }
+                // Owner-draw combo field. A system-coloured fill covering the
+                // field is what VCL paints when the value is empty: make it the
+                // transparent black used for glass. Every other solid fill
+                // (swatch, selection bar, inset background) keeps its colour and
+                // is drawn with a fully opaque brush, because these fills
+                // otherwise rely on the removed white background.
+                const RECT& b = s.bounds;
+                const long long fieldArea =
+                    static_cast<long long>(b.right - b.left) * (b.bottom - b.top);
+                const long long fillArea =
+                    static_cast<long long>(r->right - r->left) * (r->bottom - r->top);
+                const bool fieldBackground = ComboFillBounds(s, *r)
+                    && fieldArea > 0 && fillArea * 2 >= fieldArea;
                 g_inHook = true;
                 auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
-                const BOOL cleared = PatBlt(dc, r->left, r->top, r->right - r->left,
-                    r->bottom - r->top, BLACKNESS);
+                if (SystemBackground(lb.lbColor) && fieldBackground)
+                {
+                    const BOOL cleared = PatBlt(dc, r->left, r->top,
+                        r->right - r->left, r->bottom - r->top, BLACKNESS);
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-                LogComboFill(s, dc, *r, lb, cleared ? L"system-background" : L"failed");
+                    LogComboFill(s, dc, *r, lb, cleared ? L"system-background" : L"failed");
 #endif
-                return cleared ? 1 : orig(dc, r, brush);
+                    return cleared ? 1 : orig(dc, r, brush);
+                }
+                wil::unique_hbrush opaque{
+                    Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(lb.lbColor, 255) };
+                const int result = opaque ? orig(dc, r, opaque.get()) : orig(dc, r, brush);
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+                LogComboFill(s, dc, *r, lb, opaque ? L"opaque-brush" : L"original");
+#endif
+                return result;
             }
             const bool sample = IsColorSample(s, *r);
             // VCL's own DC clip governs each fill, including checkbox backgrounds.
@@ -316,8 +317,11 @@ namespace GlassCore::DelphiListBox
             auto orig = Original<ExtTextSlot, decltype(&::ExtTextOutW)>();
             if (!orig) return ExtTextOutW(dc, x, y, options, rect, text, count, dx);
             const auto* current = Current(dc);
-            if (!current || (GetTextAlign(dc) & TA_UPDATECP) || (options & ETO_PDY)
-                || ((options & ETO_OPAQUE) && !rect)) return orig(dc, x, y, options, rect, text, count, dx);
+            // Combo fields keep VCL's own text drawing; only their fills are
+            // changed, so no alpha text pass is applied to the owner DC.
+            if (!current || current->combo || (GetTextAlign(dc) & TA_UPDATECP)
+                || (options & ETO_PDY) || ((options & ETO_OPAQUE) && !rect))
+                return orig(dc, x, y, options, rect, text, count, dx);
             const Session s = *current;
             const int saved = SaveDC(dc);
             if (!saved) return orig(dc, x, y, options, rect, text, count, dx);
@@ -330,9 +334,6 @@ namespace GlassCore::DelphiListBox
             if ((options & ETO_OPAQUE) && rect)
             {
                 const COLORREF bk = GetBkColor(dc);
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-                LogComboText(s, dc, options, count, *rect, bk, L"opaque");
-#endif
                 // Root may already map COLOR_WINDOW to black in the text DC.
                 if ((bk & 0xFFFFFFu) == 0 || SystemBackground(bk))
                 {
@@ -349,12 +350,6 @@ namespace GlassCore::DelphiListBox
             }
             if (!count) return TRUE;
             if (!text) return orig(dc, x, y, drawOptions, rect, text, count, dx);
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-            {
-                const RECT logged = rect ? *rect : s.bounds;
-                LogComboText(s, dc, drawOptions, count, logged, GetBkColor(dc), L"text");
-            }
-#endif
             if (SUCCEEDED(GlassCore::Text::ExtTextOutWithAlpha(dc, x, y, drawOptions, rect, text, count, dx, orig)))
                 return TRUE;
             return orig(dc, x, y, drawOptions, rect, text, count, dx);
@@ -364,7 +359,8 @@ namespace GlassCore::DelphiListBox
             auto orig = Original<DrawTextSlot, decltype(&::DrawTextW)>();
             if (!orig) return DrawTextW(dc, text, count, rect, format);
             const auto* current = Current(dc);
-            if (!current || !rect || !text || (format & (DT_CALCRECT | DT_MODIFYSTRING)))
+            if (!current || current->combo || !rect || !text
+                || (format & (DT_CALCRECT | DT_MODIFYSTRING)))
                 return orig(dc, text, count, rect, format);
             const Session s = *current;
             const int saved = SaveDC(dc);
@@ -374,9 +370,6 @@ namespace GlassCore::DelphiListBox
                 return orig(dc, text, count, rect, format);
             g_inHook = true;
             auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-            LogComboText(s, dc, format, static_cast<UINT>(count), *rect, GetBkColor(dc), L"drawtext");
-#endif
             int result = 0;
             if (SUCCEEDED(GlassCore::Text::DrawTextWithAlpha(dc, text, count, rect, format, result))) return result;
             return orig(dc, text, count, rect, format);
@@ -416,6 +409,10 @@ namespace GlassCore::DelphiListBox
         const bool combo = dis->CtlType == ODT_COMBOBOX;
         const bool color = list && _wcsicmp(cls, L"TColorListBox") == 0;
         const bool check = list && _wcsicmp(cls, L"TCheckListBox") == 0;
+        // Only the field owner-draw is intercepted. Dropdown rows keep the
+        // existing ComboLBox path and VCL's own text/selection drawing.
+        const bool comboField = combo && (dis->itemID == static_cast<UINT>(-1)
+            || (dis->itemState & ODS_COMBOBOXEDIT) != 0);
         if (list)
         {
             if (!color && !check && _wcsicmp(cls, L"TListBox") != 0) return false;
@@ -426,6 +423,7 @@ namespace GlassCore::DelphiListBox
         {
             // TComboBox is deliberately excluded: its field text is already
             // painted correctly through the child Edit and themed field path.
+            if (!comboField) return false;
             if (_wcsicmp(cls, L"TColorBox") != 0 && _wcsicmp(cls, L"TDriveComboBox") != 0
                 && _wcsicmp(cls, L"TFilterComboBox") != 0) return false;
             if (GlassShared::GlassGetWindowKind(dis->hwndItem) != GlassShared::GlassControlKind::ComboBox)
@@ -437,8 +435,7 @@ namespace GlassCore::DelphiListBox
         if (!mod) return false;
         Session s{dis->hwndItem, dis->hDC, dis->rcItem, color, check};
         s.combo = combo;
-        s.field = combo && (dis->itemID == static_cast<UINT>(-1)
-            || (dis->itemState & ODS_COMBOBOXEDIT) != 0);
+        s.field = comboField;
         // A field owner-draw paints its background over the whole client area,
         // not only over rcItem. Both rectangles stay inside this one DC.
         s.bounds = s.item;
@@ -455,6 +452,9 @@ namespace GlassCore::DelphiListBox
             g_dispatcher.moduleAddress = mod;
             for (size_t i = 0; i < Count; ++i)
             {
+                // Combo field: fill only. Text, DrawText and Rectangle stay
+                // with VCL; a combo session never enables them.
+                if (s.combo && i != FillSlot) continue;
                 if (i == RectangleSlot && !s.checkList) continue;
                 const int before = g_dispatcher.GetRef(i);
                 g_dispatcher.EnableHook(i, true);
