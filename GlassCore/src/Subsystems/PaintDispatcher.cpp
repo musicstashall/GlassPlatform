@@ -312,6 +312,10 @@ namespace GlassCore::PaintDispatcher
         wchar_t cls[64]{};
         if (!GetClassNameW(hwnd, cls, _countof(cls))) return;
         const bool memo = _wcsicmp(cls, L"TMemo") == 0;
+        const bool vclEdit = _wcsicmp(cls, L"TLabeledEdit") == 0
+            || _wcsicmp(cls, L"TButtonedEdit") == 0
+            || _wcsicmp(cls, L"TMaskEdit") == 0
+            || _wcsicmp(cls, L"TSearchBox") == 0;
         bool comboEdit = false;
         HWND parent = GetParent(hwnd);
         if (!memo && _wcsicmp(cls, L"Edit") == 0 && parent)
@@ -320,7 +324,7 @@ namespace GlassCore::PaintDispatcher
             comboEdit = GetClassNameW(parent, parentClass, _countof(parentClass))
                 && _wcsicmp(parentClass, L"TComboBox") == 0;
         }
-        if (!memo && !comboEdit) return;
+        if (!memo && !vclEdit && !comboEdit) return;
         const unsigned channel = (api[0] == L'C' || api[0] == L'D') ? 2u
             : ((api[0] == L'B' || api[0] == L'E') ? 0u : 1u);
         static thread_local ULONGLONG epoch[3]{};
@@ -333,8 +337,9 @@ namespace GlassCore::PaintDispatcher
         const int clipKind = dc ? GetClipBox(dc, &clip) : ERROR;
         const RECT r = ps ? ps->rcPaint : RECT{};
         DebugLog(DBG_NORMAL,
-            L"[GlassCore][VclEditProbe] api=%s hwnd=0x%p class=%s parent=0x%p focused=%d dc=0x%p dcWnd=0x%p src=0x%p caller=0x%p flags=0x%08X result=%d clipKind=%d clip=[%ld,%ld,%ld,%ld] paint=[%ld,%ld,%ld,%ld] erase=%d stack=%zu",
-            api, hwnd, cls, parent, GetFocus() == hwnd ? 1 : 0, dc,
+            L"[GlassCore][VclEditProbe] api=%s hwnd=0x%p class=%s parent=0x%p style=0x%08X focused=%d dc=0x%p dcWnd=0x%p src=0x%p caller=0x%p flags=0x%08X result=%d clipKind=%d clip=[%ld,%ld,%ld,%ld] paint=[%ld,%ld,%ld,%ld] erase=%d stack=%zu",
+            api, hwnd, cls, parent, static_cast<unsigned>(GetWindowLongW(hwnd, GWL_STYLE)),
+            GetFocus() == hwnd ? 1 : 0, dc,
             dc ? WindowFromDC(dc) : nullptr, src, caller, static_cast<unsigned>(flags), result,
             clipKind, clip.left, clip.top, clip.right, clip.bottom,
             r.left, r.top, r.right, r.bottom, ps ? ps->fErase : -1, g_dcStack.size());

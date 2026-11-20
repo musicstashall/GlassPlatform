@@ -1200,6 +1200,23 @@ namespace GlassCore::Button
             GlassCore::Settings::QueryIconBackgroundColorRemovalContext(
                 { L"Root", L"Control", L"Button" }, g_buttonIconRemoval);
 
+#if defined(_DEBUG)
+        WCHAR cls[64]{};
+        if (GetClassNameW(hWnd, cls, _countof(cls)) && _wcsicmp(cls, L"TBitBtn") == 0)
+        {
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 16; }
+            if (budget)
+            {
+                --budget;
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] BeginPaint hwnd=0x%p style=0x%08X caller=0x%p depth=%zu",
+                    hWnd, static_cast<unsigned>(GetWindowLongW(hWnd, GWL_STYLE)), callerMod,
+                    g_buttonSessionStack.size() + 1);
+            }
+        }
+#endif
         g_buttonSessionStack.push_back({ callerMod, kind, hWnd });
         if (g_buttonSessionStack.size() == 1)
             g_splitButtonDtbDedupKey.reset();

@@ -357,6 +357,7 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
     // ── Button ───────────────────────────────────────────────────────────────
     if (Equals(cls, L"Button") ||
         Equals(cls, L"TButton") ||
+        Equals(cls, L"TBitBtn") ||
         Equals(cls, L"TCheckBox") ||
         Equals(cls, L"TRadioButton"))
         return ControlKind::Button;
@@ -372,6 +373,10 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
     // ── Edit ─────────────────────────────────────────────────────────────────
     if (Equals(cls, L"Edit") ||
         Equals(cls, L"TEdit") ||
+        Equals(cls, L"TLabeledEdit") ||
+        Equals(cls, L"TButtonedEdit") ||
+        Equals(cls, L"TMaskEdit") ||
+        Equals(cls, L"TSearchBox") ||
         Equals(cls, L"TMemo") ||
         Equals(cls, L"TInplaceEditList"))
         return ControlKind::Edit;

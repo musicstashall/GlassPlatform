@@ -22,6 +22,32 @@ class DelphiPipelineContract(unittest.TestCase):
                 self.assertRegex(source, r'(?s)if\s*\([^;{}]*L"' + name +
                                  r'"[^;{}]*\)\s*return ControlKind::' + kind + r'\s*;')
 
+    def test_new_vcl_input_and_bitbtn_use_existing_providers(self):
+        classifier = read("WndCompat/Tracker/WindowClassifier.cpp")
+        for cls, kind in (("TBitBtn", "Button"), ("TLabeledEdit", "Edit"),
+                          ("TButtonedEdit", "Edit"), ("TMaskEdit", "Edit"),
+                          ("TSearchBox", "Edit")):
+            with self.subTest(cls=cls):
+                self.assertRegex(classifier, r'(?s)if\s*\([^;{}]*L"' + cls +
+                                 r'"[^;{}]*\)\s*return ControlKind::' + kind + r'\s*;')
+        event = read("WndCompat/Tracker/WinEventHandler.cpp")
+        button = event.split('case ControlKind::Button:', 1)[1].split('case ControlKind::WinForms_Button:', 1)[0]
+        self.assertIn('isFull && allowGlassForHwnd', button)
+        self.assertIn('BS_BITMAP | BS_ICON', button)
+        self.assertIn('Button_Attach(hWnd, GlassShared::GlassControlKind::Button)', button)
+        edit_case = event.split('case ControlKind::Edit:', 1)[1].split('case ControlKind::RichEdit20W:', 1)[0]
+        self.assertIn('isFull && allowGlassForHwnd', edit_case)
+        self.assertIn('WndCompat::Edit_Attach(hWnd)', edit_case)
+        # Только диагностика существующих сессий, без нового IAT/общего зонда.
+        dispatcher = read('GlassCore/src/Subsystems/PaintDispatcher.cpp')
+        for cls in ("TLabeledEdit", "TButtonedEdit", "TMaskEdit", "TSearchBox"):
+            self.assertIn('L"' + cls + '"', dispatcher)
+        edit = read('GlassCore/src/Hooks/EditHooks.cpp')
+        self.assertIn('[GlassCore][DelphiInput] ExtTextOut', edit)
+        self.assertIn('[GlassCore][DelphiInput] TextResult', edit)
+        self.assertIn('static thread_local unsigned budget[2]', edit)
+        self.assertIn('[GlassCore][DelphiBitBtn] BeginPaint', read('GlassCore/src/Hooks/ButtonHooks.cpp'))
+
     def test_containers_use_guarded_root_attach(self):
         source = read("WndCompat/Tracker/WinEventHandler.cpp")
         self.assertRegex(source, r'(?s)case ControlKind::DelphiContainer:\s*case ControlKind::GenericContainer:.*?if \(isFull && allowGlassForHwnd\).*?DispatchRootAttachToOwnerThread\(hWnd\);')
