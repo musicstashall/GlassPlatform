@@ -12,6 +12,9 @@ namespace GlassCore::Button
     bool BeginDelphiBitBtnOwnerDraw(HWND parent, const DRAWITEMSTRUCT* dis) noexcept;
     void EndDelphiBitBtnOwnerDraw() noexcept;
     void ClearDelphiBitBtnDraw() noexcept;
+    bool TryDelphiBitBtnThemeBgDetour(decltype(&DrawThemeBackground) orig,
+        HTHEME theme, HDC dc, int part, int state, LPCRECT rect, LPCRECT clip,
+        HRESULT& result) noexcept;
     HRESULT WINAPI DelphiBitBtnThemeBg(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
     HRESULT WINAPI DelphiBitBtnThemeText(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, LPRECT, const DTTOPTS*);
     HRESULT WINAPI DelphiBitBtnParentBg(HWND, HDC, const RECT*);

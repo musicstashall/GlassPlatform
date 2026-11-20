@@ -115,10 +115,17 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('GetDelphiBitBtnThemeOriginal', theme)
         self.assertIn('GetOverallOrigSafe<OHK_DELPHI_BITBTN_THEME', button)
         self.assertIn('GlassCore::ModuleHandler::g_entryPointModule', theme)
-        self.assertIn('IntersectRect(&overlap, rect, &session.rect)', theme)
-        self.assertIn('IntersectRect(&drawClip, &session.rect, clip)', theme)
-        self.assertIn('IntersectClipRect(dc, drawClip.left', theme)
-        self.assertIn('RestoreDC(dc, saved)', theme)
+        shared = code.split('static bool TryDelphiBitBtnThemeBg(', 1)[1].split('HRESULT WINAPI DelphiBitBtnThemeBg(HTHEME theme', 1)[0]
+        self.assertIn('IntersectRect(&overlap, rect, &session.rect)', shared)
+        self.assertIn('IntersectRect(&drawClip, &session.rect, clip)', shared)
+        self.assertIn('IntersectClipRect(dc, drawClip.left', shared)
+        self.assertIn('RestoreDC(dc, saved)', shared)
+        self.assertIn('g_delphiBitBtnInTheme', shared)
+        self.assertIn('TryDelphiBitBtnThemeBg(orig,', theme)
+        self.assertIn('themeDetourAcquired', shared)
+        self.assertIn('TryDelphiBitBtnThemeBgDetour(', read('GlassCore/src/Hooks/UxThemeHooks.cpp'))
+        self.assertIn('EnableThemeHooks(true)', begin)
+        self.assertIn('EnableThemeHooks(false)', code.split('void EndDelphiBitBtnOwnerDraw()', 1)[1].split('[[nodiscard]]', 1)[0])
         self.assertIn('[GlassCore][DelphiBitBtn] DTB entry', theme)
         self.assertIn('part == BP_PUSHBUTTON', code)
         self.assertIn('DTT_CALCRECT | DTT_CALLBACK', code)
@@ -221,6 +228,30 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('it->hWnd == hWnd && it->type == DcEntryType::Paint', lookup)
         self.assertIn('[GlassCore][DelphiMemo] BufferTarget', source)
         self.assertIn('[GlassCore][DelphiMemo] ComposeFallback', source)
+
+    def test_toggle_preserves_only_real_beginpaint_dc_bkcolor(self):
+        trace = read('GlassCore/src/Hooks/delphi/TToggleSwitchHooks.cpp')
+        root = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
+        guard = trace.split('bool PreservePaintDcBkColor(', 1)[1].split('#if defined(_DEBUG)', 1)[0]
+        for item in ('g_entryPointModule', 'IsFullInjectionMode()',
+                     'GlassIsBackdropAllowedForHwnd(hwnd)', 'WindowFromDC(dc) != hwnd',
+                     'IsCurrentPaintDcForHwnd(hwnd, dc)', 'L"TToggleSwitch"'):
+            self.assertIn(item, guard)
+        setbk = root.split('COLORREF WINAPI Root_MySetBkColor(HDC hdc, COLORREF color)', 1)[1].split('HBRUSH WINAPI Root_MyGetSysColorBrush', 1)[0]
+        self.assertIn('!GlassCore::DelphiToggle::PreservePaintDcBkColor(hFromDc, hdc, caller)', setbk)
+        self.assertIn('return o(hdc, color)', setbk)
+
+    def test_theme_detour_transaction_failure_rolls_back_ref(self):
+        ux = read('GlassCore/src/Hooks/UxThemeHooks.cpp')
+        body = ux.split('bool EnableThemeHooks(bool enable)', 1)[1].split('void BeginMenuBarUxThemeDraw', 1)[0]
+        self.assertIn('const HRESULT detourHr', body)
+        self.assertIn('if (FAILED(detourHr))', body)
+        self.assertIn('g_themeRef += enable ? static_cast<size_t>(-1) : 1', body)
+        self.assertLess(body.index('if (FAILED(detourHr))'), body.index('g_uxThemeDispatcher.EnableHook'))
+        bit = read('GlassCore/src/Hooks/delphi/TBitBtnHooks.cpp')
+        self.assertIn('if (!orig || g_delphiBitBtnInTheme) return false', bit)
+        self.assertIn('if (session.themeDetourAcquired)', bit)
+        self.assertIn('EnableThemeHooks(false)', bit)
 
     def test_toggle_delete_trace_is_debug_bounded_and_observational(self):
         source = read('GlassCore/src/Subsystems/PaintDispatcher.cpp')

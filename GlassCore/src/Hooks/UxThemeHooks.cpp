@@ -1,6 +1,7 @@
 #include "CorePch.h"
 
 #include <Hooks/UxThemeHooks.h>
+#include <Hooks/delphi/TBitBtnHooks.h>
 #include <Core/Intercept/HookDispatcher.h>
 #include <Core/Intercept/HookHelper.h>
 
@@ -283,7 +284,7 @@ namespace GlassCore::Hooks::UxThemeHooks
         DebugLog(L"[GlassCore][UxThemeHooks] EnableHooks: %d (ref=%zu)", enable, g_commonRef);
     }
 
-    void EnableThemeHooks(bool enable)
+    bool EnableThemeHooks(bool enable)
     {
         auto lock = g_lock.lock_exclusive();
 
@@ -298,7 +299,7 @@ namespace GlassCore::Hooks::UxThemeHooks
                 L"пропуск без инкремента ref",
                 reinterpret_cast<void*>(g_actualDrawThemeBackground),
                 reinterpret_cast<void*>(g_actualDrawThemeTextEx));
-            return;
+            return false;
         }
 
         // Защита от underflow: если g_themeRef уже 0, пропускаем decrement
@@ -307,7 +308,7 @@ namespace GlassCore::Hooks::UxThemeHooks
             DebugLog(DBG_WARNING,
                 L"[GlassCore][UxThemeHooks] EnableThemeHooks(false): g_themeRef уже 0 — "
                 L"пропуск декремента (несимметричный Detach или повторный вызов)");
-            return;
+            return false;
         }
 
         bool changed =
@@ -324,10 +325,10 @@ namespace GlassCore::Hooks::UxThemeHooks
                     L"(детуры уже на месте)",
                     g_themeRef);
             }
-            return;
+            return true;
         }
 
-        Hooks::Detours::Write([&]
+        const HRESULT detourHr = Hooks::Detours::Write([&]
             {
                 if (enable)
                 {
@@ -355,6 +356,14 @@ namespace GlassCore::Hooks::UxThemeHooks
                     
                 }
             });
+        if (FAILED(detourHr))
+        {
+            // Транзакция отменена: восстановить ref, не трогая IAT.
+            g_themeRef += enable ? static_cast<size_t>(-1) : 1;
+            DebugLog(DBG_ERROR, L"[GlassCore][UxThemeHooks] EnableThemeHooks(%d) detour hr=0x%08X",
+                enable, static_cast<unsigned>(detourHr));
+            return false;
+        }
 
         if (EnsureTargetModule())
         {
@@ -363,6 +372,7 @@ namespace GlassCore::Hooks::UxThemeHooks
         
 
         DebugLog(L"[GlassCore][UxThemeHooks] EnableThemeHooks: %d (ref=%zu)", enable, g_themeRef);
+        return true;
     }
 
     void BeginMenuBarUxThemeDraw(HWND menuOwnerHwnd) noexcept
@@ -441,6 +451,11 @@ namespace GlassCore::Hooks::UxThemeHooks
         LPCRECT pRect,
         LPCRECT pClipRect)
     {
+        HRESULT delphiResult = S_OK;
+        if (GlassCore::Button::TryDelphiBitBtnThemeBgDetour(
+                g_actualDrawThemeBackground, hTheme, hdc, iPartId, iStateId,
+                pRect, pClipRect, delphiResult))
+            return delphiResult;
         bool uxhooks = GlassCore::Menu::MenuHandler::IsUxHooksEnabled();
         DebugLog(L"[GlassCore][UxTheme] MyDrawThemeBackground called: partId=%d stateId=%d rect=[%d,%d,%d,%d",
             iPartId, iStateId,

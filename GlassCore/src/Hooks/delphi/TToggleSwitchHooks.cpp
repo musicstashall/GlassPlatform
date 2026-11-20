@@ -1,10 +1,26 @@
-// Debug-only lifecycle tracing; no new detours and no GDI substitution.
+// VCL toggle paint safety and debug-only DC lifecycle tracing.
 #include "CorePch.h"
 #include <Hooks/delphi/TToggleSwitchHooks.h>
 #include <DebugLog.h>
+#include <Module/ModuleHandler.h>
+#include <Subsystems/PaintDispatcher.h>
+#include <Subsystems/RootSwcaGradient.h>
+#include <GlassBackdropMark.h>
 
 namespace GlassCore::DelphiToggle
 {
+    bool PreservePaintDcBkColor(HWND hwnd, HDC dc, HMODULE caller) noexcept
+    {
+        if (!hwnd || !dc || caller != GlassCore::ModuleHandler::g_entryPointModule
+            || !GlassCore::Root::IsFullInjectionMode()
+            || !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)
+            || WindowFromDC(dc) != hwnd
+            || !GlassCore::PaintDispatcher::IsCurrentPaintDcForHwnd(hwnd, dc))
+            return false;
+        wchar_t cls[64]{};
+        return GetClassNameW(hwnd, cls, _countof(cls))
+            && _wcsicmp(cls, L"TToggleSwitch") == 0;
+    }
 #if defined(_DEBUG)
     // Контекст TToggleSwitch — только реально открытая BeginPaint-сессия,
     // а не HWND, унаследованный memory DC из ближайшей записи стека. Сам

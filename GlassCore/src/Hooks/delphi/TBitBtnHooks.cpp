@@ -2,6 +2,7 @@
 #include "CorePch.h"
 #include <Hooks/delphi/TBitBtnHooks.h>
 #include <Hooks/delphi/TBitBtnBridge.h>
+#include <Hooks/UxThemeHooks.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <Core/Intercept/HookHelper.h>
 #include <Module/ModuleHandler.h>
@@ -56,11 +57,13 @@ namespace GlassCore::Button
         RECT rect;
         HMODULE module;
         std::array<bool, 3> acquired{};
+        bool themeDetourAcquired{};
 #if defined(_DEBUG)
         std::array<bool, 3> slotFound{};
 #endif
     };
     static thread_local std::vector<DelphiBitBtnDrawSession> g_delphiBitBtnDrawStack;
+    static thread_local bool g_delphiBitBtnInTheme = false;
 
 #if defined(_DEBUG)
     // Только чтение PE импортов. Слот означает наличие записи, не факт вызова.
@@ -99,6 +102,11 @@ namespace GlassCore::Button
 #endif
         }
         g_delphiBitBtnDrawStack.push_back(session);
+        // VCL может закешировать адрес DTB, минуя именованный IAT. Используем
+        // общий detour UxTheme (ref-count с меню), а IAT оставляем для обычных импортов.
+        g_delphiBitBtnDrawStack.back().themeDetourAcquired =
+            GlassCore::Hooks::UxThemeHooks::EnableThemeHooks(true);
+        session.themeDetourAcquired = g_delphiBitBtnDrawStack.back().themeDetourAcquired;
 #if defined(_DEBUG)
         // Импорты EXE неизменны за жизнь процесса. Сканируем один раз, но
         // выводим кеш вместе с каждой сессией: пользователь может включить
@@ -109,10 +117,10 @@ namespace GlassCore::Button
             HasDelphiThemeImport(module, "DrawThemeParentBackground"),
             HasDelphiThemeImport(module, "DrawThemeParentBackgroundEx")
         };
-        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawItem begin hwnd=0x%p dc=0x%p action=0x%X theme=%d text=%d parent=%d slotTheme=%d slotText=%d slotParent=%d importDtb=%d importDtbEx=%d importParent=%d importParentEx=%d",
+        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawItem begin hwnd=0x%p dc=0x%p action=0x%X theme=%d text=%d parent=%d slotTheme=%d slotText=%d slotParent=%d importDtb=%d importDtbEx=%d importParent=%d importParentEx=%d detourTheme=%d",
             session.hwnd, session.dc, dis->itemAction, session.acquired[0], session.acquired[1], session.acquired[2],
             session.slotFound[0], session.slotFound[1], session.slotFound[2],
-            namedImports[0], namedImports[1], namedImports[2], namedImports[3]);
+            namedImports[0], namedImports[1], namedImports[2], namedImports[3], session.themeDetourAcquired);
 #endif
         return true;
     }
@@ -122,6 +130,8 @@ namespace GlassCore::Button
         if (g_delphiBitBtnDrawStack.empty()) return;
         const auto session = g_delphiBitBtnDrawStack.back();
         g_delphiBitBtnDrawStack.pop_back();
+        if (session.themeDetourAcquired)
+            GlassCore::Hooks::UxThemeHooks::EnableThemeHooks(false);
         for (size_t i = 0; i < session.acquired.size(); ++i)
             if (session.acquired[i]) ReleaseDelphiBitBtnHook(session.module, i);
     }
@@ -139,6 +149,47 @@ namespace GlassCore::Button
         return theme && part == BP_PUSHBUTTON
             && SUCCEEDED(Shared::ThemeHelper::GetThemeClass(theme, name, MAX_PATH))
             && _wcsicmp(name, L"Button") == 0;
+    }
+
+    // Shared by the EXE IAT hook and the UxTheme export detour. No caller
+    // inference from memory DC: exact DRAWITEM hDC and the TLS scope are required.
+    static bool TryDelphiBitBtnThemeBg(decltype(&DrawThemeBackground) orig,
+        HTHEME theme, HDC dc, int part, int state, LPCRECT rect, LPCRECT clip,
+        HRESULT& result) noexcept
+    {
+        if (!orig || g_delphiBitBtnInTheme) return false;
+        const auto* current = GetDelphiBitBtnDraw(dc);
+        if (!current) return false;
+        const auto session = *current;
+        RECT overlap{};
+        if (!rect || !IntersectRect(&overlap, rect, &session.rect) || !IsDelphiBitBtnTheme(theme, part))
+            return false;
+        RECT drawClip = session.rect;
+        if (clip && !IntersectRect(&drawClip, &session.rect, clip)) { result = S_OK; return true; }
+        const int saved = SaveDC(dc);
+        if (!saved) return false;
+        if (IntersectClipRect(dc, drawClip.left, drawClip.top, drawClip.right, drawClip.bottom) == ERROR)
+        {
+            RestoreDC(dc, saved);
+            return false;
+        }
+        auto restore = wil::scope_exit([&]() noexcept { RestoreDC(dc, saved); });
+        g_delphiBitBtnInTheme = true;
+        auto recursion = wil::scope_exit([]() noexcept { g_delphiBitBtnInTheme = false; });
+#if defined(_DEBUG)
+        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawThemeBackground hwnd=0x%p dc=0x%p part=%d state=%d", session.hwnd, dc, part, state);
+#endif
+        result = InvokeDelphiBitBtnThemeBackground(orig, session.module, session.hwnd, theme, dc, part, state, rect, clip);
+        return true;
+    }
+
+    bool TryDelphiBitBtnThemeBgDetour(decltype(&DrawThemeBackground) orig,
+        HTHEME theme, HDC dc, int part, int state, LPCRECT rect, LPCRECT clip,
+        HRESULT& result) noexcept
+    {
+        if (g_delphiBitBtnDrawStack.empty() || !g_delphiBitBtnDrawStack.back().themeDetourAcquired)
+            return false;
+        return TryDelphiBitBtnThemeBg(orig, theme, dc, part, state, rect, clip, result);
     }
 
     HRESULT WINAPI DelphiBitBtnThemeBg(HTHEME theme, HDC dc, int part, int state, LPCRECT rect, LPCRECT clip)
@@ -167,28 +218,9 @@ namespace GlassCore::Button
             }
         }
 #endif
-        const auto* current = GetDelphiBitBtnDraw(dc);
-        if (!current) return orig(theme, dc, part, state, rect, clip);
-        const auto session = *current; // вложенный WM_DRAWITEM может перевыделить стек
-        RECT overlap{};
-        if (!rect || !IntersectRect(&overlap, rect, &session.rect) || !IsDelphiBitBtnTheme(theme, part))
-            return orig(theme, dc, part, state, rect, clip);
-        RECT drawClip = session.rect;
-        if (clip && !IntersectRect(&drawClip, &session.rect, clip)) return S_OK;
-        const int saved = SaveDC(dc);
-        if (!saved) return orig(theme, dc, part, state, rect, clip);
-        // Учитываем и clip вызывающего, и rcItem: alpha renderer копирует
-        // исходный rect целиком, поэтому ограничить только его source недостаточно.
-        if (IntersectClipRect(dc, drawClip.left, drawClip.top, drawClip.right, drawClip.bottom) == ERROR)
-        {
-            RestoreDC(dc, saved);
-            return orig(theme, dc, part, state, rect, clip);
-        }
-        auto restore = wil::scope_exit([&]() noexcept { RestoreDC(dc, saved); });
-#if defined(_DEBUG)
-        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawThemeBackground hwnd=0x%p dc=0x%p part=%d state=%d", session.hwnd, dc, part, state);
-#endif
-        return InvokeDelphiBitBtnThemeBackground(orig, session.module, session.hwnd, theme, dc, part, state, rect, clip);
+        HRESULT result = S_OK;
+        return TryDelphiBitBtnThemeBg(orig, theme, dc, part, state, rect, clip, result)
+            ? result : orig(theme, dc, part, state, rect, clip);
     }
 
     HRESULT WINAPI DelphiBitBtnThemeText(HTHEME theme, HDC dc, int part, int state, LPCWSTR text,
@@ -241,5 +273,13 @@ namespace GlassCore::Button
         return ok ? S_OK : orig(hwnd, dc, rect);
     }
 
-    void ClearDelphiBitBtnDraw() noexcept { g_delphiBitBtnDrawStack.clear(); }
+    void ClearDelphiBitBtnDraw() noexcept
+    {
+        while (!g_delphiBitBtnDrawStack.empty())
+        {
+            const bool acquired = g_delphiBitBtnDrawStack.back().themeDetourAcquired;
+            g_delphiBitBtnDrawStack.pop_back();
+            if (acquired) GlassCore::Hooks::UxThemeHooks::EnableThemeHooks(false);
+        }
+    }
 }
