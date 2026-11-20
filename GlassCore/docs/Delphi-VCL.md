@@ -2098,3 +2098,32 @@ VCL: в журнале 12 `WhiteFill`/`Fill` ячейки идёт **до** `Tex
   `PatBlt`, а не только `PATCOPY`/`WHITENESS`.
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 60: кто рисует фон клиента таблицы (по API Monitor)
+
+В логе API Monitor (`API-Monitor-4.log`) для `TStringGrid hwnd=0x3107d0`
+видна вся последовательность `WM_PAINT`:
+
+1. `BeginPaint` → DC `0x37010ede`;
+2. comctl32 рисует скроллбар в bitmap 17x96 и делает `BitBlt` в (261,2);
+3. EXE: `GetWindowDC` + `ExcludeClipRect(2,2,278,98)` — рамка (`DrawBorder`);
+4. EXE: `GetSysColor(COLOR_WINDOW)` → `CreateBrushIndirect` →
+   **`FillRect(BeginPaint DC, rect, brush)` — фон всего клиента**
+   (`TCustomGrid.Paint`: `Canvas.Brush.Color := Color; Canvas.FillRect(ClientRect)`);
+5. EXE: `PolyPolyline` ×6 — линии сетки;
+6. у фиксированных ячеек заливки **нет вообще**, только `ExtTextOut`;
+7. обычные ячейки: `FillRect` своей кистью + `ExtTextOut(ETO_OPAQUE)`.
+
+То есть серый фон фиксированных ячеек — это заливка **всего клиента** на шаге 4,
+а не отдельная заливка ячейки. Наш grid-детур `FillRect` для неё, судя по
+логам, не вызывается (нет `WhiteFill` с rect во весь клиент), при этом заливки
+обычных ячеек вызываются.
+
+Добавлена диагностика (поведение не меняется):
+- `[DelphiGrid] FillEnter dc=… dcWnd=… dcCls="…" rect=[…] style=… color=… gate=…`
+  — вход в grid-детур до всех гейтов;
+- `[DelphiGrid] GenFill hwnd=… rect=[…] style=… color=…` — общий
+  `OHK_FILLRECT`, если DC принадлежит окну таблицы (проверяем гипотезу, что
+  общий слот забирает вызов на себя).
+
+Сборка и визуальный результат на Windows не проверены.

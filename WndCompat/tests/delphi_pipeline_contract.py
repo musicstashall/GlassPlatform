@@ -804,6 +804,14 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('PushPaint(instMod, OHK_BITBLT, cache);', grid)
         self.assertIn('bmp=0x%p px=0x%08X', win)
 
+    def test_delphi_grid_logs_fill_entry_and_general_fillrect(self):
+        root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        self.assertIn('[GlassCore][DelphiGrid] FillEnter dc=0x%p dcWnd=0x%p', root)
+        self.assertIn('[GlassCore][DelphiGrid] GenFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld]', root)
+        # Общий FillRect не должен разыменовывать rect/brush до проверки.
+        gen = root.split('[GlassCore][DelphiGrid] GenFill', 1)[0]
+        self.assertIn('if (lprc && hbr && (StrEqI(cls, L"TStringGrid")', gen)
+
     def test_delphi_grid_logs_theme_and_any_patblt(self):
         root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
         self.assertIn('[GlassCore][DelphiGrid] Theme hwnd=0x%p part=%d state=%d', root)
