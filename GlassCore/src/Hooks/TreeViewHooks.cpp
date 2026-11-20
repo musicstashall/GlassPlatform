@@ -65,6 +65,27 @@ namespace GlassCore::TreeViewControl
     //  Helpers
     // =========================================================================
 
+#if defined(_DEBUG)
+    [[nodiscard]] static bool AllowDelphiTreeLog(HWND hwnd, unsigned channel) noexcept
+    {
+        WCHAR cls[128]{};
+        if (!hwnd || GetClassNameW(hwnd, cls, _countof(cls)) <= 0
+            || (_wcsicmp(cls, L"TTreeView") != 0 && _wcsicmp(cls, L"TResTreeView") != 0))
+            return false;
+        static thread_local ULONGLONG epoch[2]{};
+        static thread_local unsigned budget[2]{};
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch[channel] || now - epoch[channel] >= 1000)
+        {
+            epoch[channel] = now;
+            budget[channel] = 16;
+        }
+        if (!budget[channel]) return false;
+        --budget[channel];
+        return true;
+    }
+#endif
+
     static bool StrEq(LPCWSTR a, LPCWSTR b)
     {
         return _wcsicmp(a, b) == 0;
@@ -444,6 +465,13 @@ namespace GlassCore::TreeViewControl
         LOGBRUSH lb{};
         if (GetObject(hbr, sizeof(lb), &lb) && lb.lbStyle == BS_SOLID)
         {
+#if defined(_DEBUG)
+            if (AllowDelphiTreeLog(g_treeSessionStack.back().hWnd, 1))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiTreeView] FillRect hwnd=0x%p dc=0x%p dcWnd=0x%p caller=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X",
+                    g_treeSessionStack.back().hWnd, hdc, WindowFromDC(hdc), callerMod,
+                    lprc->left, lprc->top, lprc->right, lprc->bottom, static_cast<unsigned>(lb.lbColor));
+#endif
             const int rcW = lprc->right - lprc->left;
             const int rcH = lprc->bottom - lprc->top;
             const int band = GetScrollBandSizeForDpiCached(hdc);
@@ -630,6 +658,20 @@ namespace GlassCore::TreeViewControl
     {
         using namespace GlassShared;
         if (GlassGetWindowKind(hWnd) != GlassControlKind::TreeView) return;
+
+#if defined(_DEBUG)
+        if (AllowDelphiTreeLog(hWnd, 0))
+        {
+            WCHAR cls[128]{};
+            RECT client{};
+            GetClassNameW(hWnd, cls, _countof(cls));
+            GetClientRect(hWnd, &client);
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiTreeView] Begin hwnd=0x%p class=%s client=[%ld,%ld,%ld,%ld] caller=0x%p bkBefore=0x%08X",
+                hWnd, cls, client.left, client.top, client.right, client.bottom, callerMod,
+                static_cast<unsigned>(TreeView_GetBkColor(hWnd)));
+        }
+#endif
 
         // Гарантируем чёрный (прозрачный) фон перед BeginPaint/WM_ERASEBKGND.
         // TreeView_SetBkColor в TreeView_Attach может быть перезаписан shell-инициализацией.

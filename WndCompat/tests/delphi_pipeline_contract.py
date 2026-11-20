@@ -73,18 +73,32 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('[GlassCore][DelphiMemo] ExtTextOut', source)
         self.assertIn('[GlassCore][DelphiMemo] Flush', source)
         self.assertIn('_wcsicmp(cls, L"TMemo")', source)
+        self.assertIn('const bool isDib = composeBits != nullptr', source)
+        self.assertIn('buf->height, &composeBits)', source)
 
-    def test_memo_dib_and_vcl_list_background_are_scoped(self):
+    def test_memo_dib_is_scoped_and_listview_black_brush_is_preserved(self):
         edit = read("GlassCore/src/Hooks/EditHooks.cpp")
         self.assertIn('buf->delphiMemo = IsDelphiMemo(hWnd)', edit)
         self.assertIn('bmi.bmiHeader.biBitCount = 32', edit)
         self.assertIn('? CreateMemoComposeBitmap(bltSrc, rc.right, rc.bottom) : nullptr', edit)
         self.assertRegex(edit, r'(?s)if \(buf->delphiMemo\)\s*composeBmp = CreateMemoComposeBitmap.*?if \(!composeBmp\)\s*composeBmp = CreateCompatibleBitmap')
         lv = read("GlassCore/src/Hooks/ListViewHooks.cpp")
-        self.assertIn('g_lvSessionStack.back().vclListView && WindowFromDC(hdc) == hwnd', lv)
-        self.assertIn('const bool vclListView = IsDelphiListView(hWnd)', lv)
-        self.assertIn('lprc->right >= client.right && lprc->bottom >= client.bottom', lv)
-        self.assertRegex(lv, r'(?s)if \(!lb.lbColor\).*?return PatBlt\(hdc,.*?BLACKNESS\);.*?return orig\(hdc, lprc, hbr\);')
+        self.assertRegex(lv, r'(?s)if \(!lb.lbColor\)\s*return orig\(hdc, lprc, hbr\);')
+
+    def test_vcl_application_window_not_subclassed(self):
+        classifier = read("WndCompat/Tracker/WindowClassifier.cpp")
+        root = read("WndCompat/Root/RootSubclass.cpp")
+        self.assertRegex(classifier, r'(?s)if \(Equals\(cls, L"TApplication"\)\)\s*return \{\};')
+        attach = root.split("void Root_Attach(HWND hRoot)", 1)[1].split("void Root_Detach(HWND hRoot)", 1)[0]
+        self.assertRegex(attach, r'(?s)if \(_wcsicmp\(rootClassName, L"TApplication"\) == 0\).*?return;.*?SetWindowSubclass')
+
+    def test_treeview_diagnostics_do_not_add_hooks(self):
+        tree = read("GlassCore/src/Hooks/TreeViewHooks.cpp")
+        self.assertIn('[GlassCore][DelphiTreeView] Begin', tree)
+        self.assertIn('[GlassCore][DelphiTreeView] FillRect', tree)
+        self.assertIn('AllowDelphiTreeLog(hWnd, 0)', tree)
+        self.assertIn('AllowDelphiTreeLog(g_treeSessionStack.back().hWnd, 1)', tree)
+        self.assertIn('now - epoch[channel] >= 1000', tree)
 
     def test_tab_brush_is_not_restored_to_another_class(self):
         source = read("WndCompat/Controls/TabControlSubclass.cpp")

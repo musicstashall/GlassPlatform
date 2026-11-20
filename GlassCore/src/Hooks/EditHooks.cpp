@@ -86,7 +86,7 @@ namespace GlassCore::EditControl
 
     // Compatible bitmap оконного DC не гарантирует сохранение alpha при
     // промежуточной композиции. Для VCL Memo используем явный 32bpp DIB.
-    [[nodiscard]] static HBITMAP CreateMemoComposeBitmap(HDC dc, int width, int height) noexcept
+    [[nodiscard]] static HBITMAP CreateMemoComposeBitmap(HDC dc, int width, int height, void** outBits = nullptr) noexcept
     {
         BITMAPINFO bmi{};
         bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -96,7 +96,9 @@ namespace GlassCore::EditControl
         bmi.bmiHeader.biBitCount = 32;
         bmi.bmiHeader.biCompression = BI_RGB;
         void* bits = nullptr;
-        return CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        HBITMAP bitmap = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (outBits) *outBits = bitmap ? bits : nullptr;
+        return bitmap;
     }
 
     // =========================================================================
@@ -363,13 +365,14 @@ namespace GlassCore::EditControl
         // ── Compose-буфер ────────────────────────────────────────────────────
         HDC     composeDC = CreateCompatibleDC(buf->screenDC);
         HBITMAP composeBmp = nullptr;
+        void* composeBits = nullptr;
         HGDIOBJ oldComposeBmp = nullptr;
         bool composed = false;
 
         if (composeDC)
         {
             if (buf->delphiMemo)
-                composeBmp = CreateMemoComposeBitmap(buf->screenDC, buf->width, buf->height);
+                composeBmp = CreateMemoComposeBitmap(buf->screenDC, buf->width, buf->height, &composeBits);
             if (!composeBmp)
                 composeBmp = CreateCompatibleBitmap(buf->screenDC, buf->width, buf->height);
             if (composeBmp)
@@ -421,14 +424,13 @@ namespace GlassCore::EditControl
                 if (logMemoFlush)
                 {
                     GdiFlush();
-                    DIBSECTION section{};
-                    const bool isDib = GetObjectW(composeBmp, sizeof(section), &section) == sizeof(section)
-                        && section.dsBm.bmBits != nullptr && section.dsBm.bmBitsPixel == 32
-                        && section.dsBmih.biHeight < 0;
+                    // Проверяем фактический результат CreateDIBSection, а не
+                    // знак высоты в GetObject(DIBSECTION): он может нормализоваться.
+                    const bool isDib = composeBits != nullptr;
                     size_t nonzero = 0;
                     unsigned maxAlpha = 0;
                     if (isDib)
-                        MemoAlphaStats(static_cast<const RGBQUAD*>(section.dsBm.bmBits),
+                        MemoAlphaStats(static_cast<const RGBQUAD*>(composeBits),
                             buf->width, buf->height, nonzero, maxAlpha);
                     DebugLog(DBG_NORMAL,
                         L"[GlassCore][DelphiMemo] Compose hwnd=0x%p dib=%d blend=%d tblend=%u alphaCount=%zu alphaMax=%u",

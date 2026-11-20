@@ -518,6 +518,11 @@ ClassifyResult WindowClassifier::Classify(HWND hwnd)
 
     std::wstring cls = WndCompat::NormalizeWindowClass(hwnd);
 
+    // Delphi использует TApplication как служебное окно маршрутизации VCL,
+    // а не как форму для glass-rendering. Не меняем его WndProc/subclass.
+    if (Equals(cls, L"TApplication"))
+        return {};
+
     // 0. Win11 CoreWindow: SEH/ShellHost/SMEH/SearchHost — Special; иначе Ignored (никогда Root).
     //    Класс остаётся в kHardList (SWCA-exempt).
     if (Equals(cls, L"Windows.UI.Core.CoreWindow"))

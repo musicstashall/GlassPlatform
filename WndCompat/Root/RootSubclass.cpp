@@ -1695,6 +1695,14 @@ namespace WndCompat
         if (GetClassNameW(hRoot, rootClassName, static_cast<int>(_countof(rootClassName))) <= 0)
             rootClassName[0] = L'\0';
 
+        // Защита для прямых attach-вызовов в обход классификатора: TApplication
+        // — служебный VCL HWND. Его жизненный цикл принадлежит Delphi.
+        if (_wcsicmp(rootClassName, L"TApplication") == 0)
+        {
+            DebugLog(L"[WndCompat][Root] Root_Attach: skip VCL TApplication hwnd=0x%p", hRoot);
+            return;
+        }
+
         // Панель задач — только TaskbarHost_Attach (без RootSubclassProc).
         if (_wcsicmp(rootClassName, L"Shell_TrayWnd") == 0
             || _wcsicmp(rootClassName, L"Shell_SecondaryTrayWnd") == 0)
