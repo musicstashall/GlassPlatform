@@ -77,6 +77,28 @@ namespace GlassCore::EditControl
 
     static std::atomic<bool> g_shutdown{ false };
 
+    [[nodiscard]] static bool IsDelphiMemo(HWND hwnd) noexcept
+    {
+        WCHAR cls[64]{};
+        return hwnd && GetClassNameW(hwnd, cls, _countof(cls)) > 0
+            && _wcsicmp(cls, L"TMemo") == 0;
+    }
+
+    // Compatible bitmap оконного DC не гарантирует сохранение alpha при
+    // промежуточной композиции. Для VCL Memo используем явный 32bpp DIB.
+    [[nodiscard]] static HBITMAP CreateMemoComposeBitmap(HDC dc, int width, int height) noexcept
+    {
+        BITMAPINFO bmi{};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = width;
+        bmi.bmiHeader.biHeight = -height;
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        void* bits = nullptr;
+        return CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    }
+
     // =========================================================================
     //  EditBufferedSession — сессионный DIB для многострочного Edit
     // =========================================================================
@@ -107,6 +129,7 @@ namespace GlassCore::EditControl
 
         // fromGetDC: сессия создана для GetDC-канала (не BeginPaint)
         bool fromGetDC = false;
+        bool delphiMemo = false;
     };
 
     thread_local EditBufferedSession* g_activeEditBuffer = nullptr;
@@ -117,8 +140,7 @@ namespace GlassCore::EditControl
     // Никакого текста пользователя; лимит отдельно для вызовов и flush.
     [[nodiscard]] static bool AllowDelphiMemoLog(HWND hwnd, unsigned channel) noexcept
     {
-        WCHAR cls[64]{};
-        if (!hwnd || !GetClassNameW(hwnd, cls, _countof(cls)) || _wcsicmp(cls, L"TMemo") != 0)
+        if (!IsDelphiMemo(hwnd))
             return false;
         static thread_local ULONGLONG epoch[2]{};
         static thread_local unsigned budget[2]{};
@@ -131,6 +153,23 @@ namespace GlassCore::EditControl
         if (!budget[channel]) return false;
         --budget[channel];
         return true;
+    }
+
+    // Только суммарная alpha-статистика, не содержимое DIB. Ограничиваем работу.
+    static void MemoAlphaStats(const RGBQUAD* bits, int width, int height,
+        size_t& nonzero, unsigned& maximum) noexcept
+    {
+        nonzero = 0;
+        maximum = 0;
+        if (!bits || width <= 0 || height <= 0) return;
+        const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height);
+        if (count > 4000000) return;
+        for (size_t i = 0; i < count; ++i)
+        {
+            const unsigned alpha = bits[i].rgbReserved;
+            if (alpha) ++nonzero;
+            if (alpha > maximum) maximum = alpha;
+        }
     }
 #endif
 
@@ -239,6 +278,7 @@ namespace GlassCore::EditControl
         buf->width = rc.right;
         buf->height = rc.bottom;
         buf->fromGetDC = fromGetDC;
+        buf->delphiMemo = IsDelphiMemo(hWnd);
 
         const DWORD style = static_cast<DWORD>(GetWindowLongW(hWnd, GWL_STYLE));
         buf->hasHScroll = (style & WS_HSCROLL) != 0;
@@ -255,7 +295,10 @@ namespace GlassCore::EditControl
             if (HDC base = GlassCore::PaintDispatcher::GetPaintSessionBaseWindowDc(hWnd))
                 bltSrc = base;
         }
-        HBITMAP snapBmp = CreateCompatibleBitmap(bltSrc, rc.right, rc.bottom);
+        HBITMAP snapBmp = buf->delphiMemo
+            ? CreateMemoComposeBitmap(bltSrc, rc.right, rc.bottom) : nullptr;
+        if (!snapBmp)
+            snapBmp = CreateCompatibleBitmap(bltSrc, rc.right, rc.bottom);
         if (snapBmp)
         {
             HDC snapDC = CreateCompatibleDC(bltSrc);
@@ -299,15 +342,20 @@ namespace GlassCore::EditControl
             return;
         }
         g_activeEditBuffer = nullptr;
-#if defined(_DEBUG)
-        if (AllowDelphiMemoLog(buf->hWnd, 1))
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiMemo] Flush hwnd=0x%p focused=%d blackRects=%zu paintDepth=%zu dcDepth=%zu",
-                buf->hWnd, GetFocus() == buf->hWnd ? 1 : 0, g_sessionBlacknessRects.size(),
-                g_editSessionStack.size(), g_editDcStack.size());
-#endif
-
         GdiFlush();
+#if defined(_DEBUG)
+        const bool logMemoFlush = AllowDelphiMemoLog(buf->hWnd, 1);
+        if (logMemoFlush)
+        {
+            size_t nonzero = 0;
+            unsigned maxAlpha = 0;
+            MemoAlphaStats(buf->bits, buf->width, buf->height, nonzero, maxAlpha);
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiMemo] Flush hwnd=0x%p focused=%d blackRects=%zu paintDepth=%zu dcDepth=%zu inkAlphaCount=%zu inkAlphaMax=%u",
+                buf->hWnd, GetFocus() == buf->hWnd ? 1 : 0, g_sessionBlacknessRects.size(),
+                g_editSessionStack.size(), g_editDcStack.size(), nonzero, maxAlpha);
+        }
+#endif
 
         const DWORD editStyle =
             buf->hWnd ? static_cast<DWORD>(GetWindowLongW(buf->hWnd, GWL_STYLE)) : 0u;
@@ -320,7 +368,10 @@ namespace GlassCore::EditControl
 
         if (composeDC)
         {
-            composeBmp = CreateCompatibleBitmap(buf->screenDC, buf->width, buf->height);
+            if (buf->delphiMemo)
+                composeBmp = CreateMemoComposeBitmap(buf->screenDC, buf->width, buf->height);
+            if (!composeBmp)
+                composeBmp = CreateCompatibleBitmap(buf->screenDC, buf->width, buf->height);
             if (composeBmp)
             {
                 oldComposeBmp = SelectObject(composeDC, composeBmp);
@@ -364,12 +415,40 @@ namespace GlassCore::EditControl
                 const BYTE sessionTblend =
                     GlassCore::Text::ResolveEffectiveTargetBlendAlpha(buf->useDualPass);
                 BLENDFUNCTION bf{ AC_SRC_OVER, 0, sessionTblend, AC_SRC_ALPHA };
-                GdiAlphaBlend(composeDC, 0, 0, buf->width, buf->height,
+                const BOOL blendOk = GdiAlphaBlend(composeDC, 0, 0, buf->width, buf->height,
                     buf->memDC, 0, 0, buf->width, buf->height, bf);
+#if defined(_DEBUG)
+                if (logMemoFlush)
+                {
+                    GdiFlush();
+                    DIBSECTION section{};
+                    const bool isDib = GetObjectW(composeBmp, sizeof(section), &section) == sizeof(section)
+                        && section.dsBm.bmBits != nullptr && section.dsBm.bmBitsPixel == 32
+                        && section.dsBmih.biHeight < 0;
+                    size_t nonzero = 0;
+                    unsigned maxAlpha = 0;
+                    if (isDib)
+                        MemoAlphaStats(static_cast<const RGBQUAD*>(section.dsBm.bmBits),
+                            buf->width, buf->height, nonzero, maxAlpha);
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][DelphiMemo] Compose hwnd=0x%p dib=%d blend=%d tblend=%u alphaCount=%zu alphaMax=%u",
+                        buf->hWnd, isDib ? 1 : 0, blendOk ? 1 : 0,
+                        static_cast<unsigned>(sessionTblend), nonzero, maxAlpha);
+                }
+#else
+                (void)blendOk;
+#endif
 
                 // ── 4. Один BitBlt на экран ─────────────────────────────────
-                BitBlt(buf->screenDC, 0, 0, buf->width, buf->height,
+                const BOOL copyOk = BitBlt(buf->screenDC, 0, 0, buf->width, buf->height,
                     composeDC, 0, 0, SRCCOPY);
+#if defined(_DEBUG)
+                if (logMemoFlush)
+                    DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] Copy hwnd=0x%p ok=%d",
+                        buf->hWnd, copyOk ? 1 : 0);
+#else
+                (void)copyOk;
+#endif
 
                 SelectObject(composeDC, oldComposeBmp);
                 DeleteObject(composeBmp);

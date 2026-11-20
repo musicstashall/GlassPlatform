@@ -74,6 +74,7 @@ namespace GlassCore::ListViewControl
         GlassShared::GlassControlKind kind{};
         HWND                          hWnd{};
         bool                          needBlackout{};
+        bool                          vclListView{};
     };
     thread_local std::vector<ListViewPaintSession> g_lvSessionStack;
     // Окна, чей фон уже чернили post-BLACKNESS (первый paint либо BkFlip).
@@ -603,7 +604,6 @@ namespace GlassCore::ListViewControl
     //   другой цвет  → заменяем кисть на alpha-aware версию
     // Гистограмма заливок снята (финиш 2026-10-13).
 
-#if defined(_DEBUG)
     [[nodiscard]] static bool IsDelphiListView(HWND hwnd) noexcept
     {
         WCHAR cls[128]{};
@@ -611,6 +611,7 @@ namespace GlassCore::ListViewControl
             && (_wcsicmp(cls, L"TListView") == 0 || _wcsicmp(cls, L"TSystemListView") == 0);
     }
 
+#if defined(_DEBUG)
     // Отдельные лимиты для Begin и Fill; возобновляются после очистки лога.
     [[nodiscard]] static bool AllowDelphiListViewLog(unsigned channel) noexcept
     {
@@ -646,7 +647,7 @@ namespace GlassCore::ListViewControl
         if (GetObject(hbr, sizeof(lb), &lb) && lb.lbStyle == BS_SOLID)
         {
 #if defined(_DEBUG)
-            if (IsDelphiListView(g_lvSessionStack.back().hWnd) && AllowDelphiListViewLog(1))
+            if (g_lvSessionStack.back().vclListView && AllowDelphiListViewLog(1))
             {
                 DebugLog(DBG_NORMAL,
                     L"[GlassCore][DelphiListView] FillRect hwnd=0x%p dc=0x%p dcWnd=0x%p caller=0x%p "
@@ -685,9 +686,23 @@ namespace GlassCore::ListViewControl
                 return TRUE;
             }
 
-            // Чёрный (0) — уже прозрачный, не трогаем
+            // У VCL наблюдался solid black FillRect на весь оконный клиент.
+            // У обычной кисти не гарантирована alpha; для этого узкого случая
+            // используем тот же BLACKNESS, что для системного фона. Малые
+            // заливки элементов, memory DC и остальные классы не меняем.
             if (!lb.lbColor)
+            {
+                const HWND hwnd = g_lvSessionStack.back().hWnd;
+                RECT client{};
+                if (g_lvSessionStack.back().vclListView && WindowFromDC(hdc) == hwnd
+                    && GetClientRect(hwnd, &client) && !IsRectEmpty(&client)
+                    && lprc->left <= 1 && lprc->top <= 1
+                    && lprc->right >= client.right && lprc->bottom >= client.bottom)
+                {
+                    return PatBlt(hdc, lprc->left, lprc->top, rcW, rcH, BLACKNESS);
+                }
                 return orig(hdc, lprc, hbr);
+            }
 
             // Любой другой цвет — заменяем на alpha-aware кисть
             HBRUSH alphaBrush = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(lb.lbColor, 255);
@@ -1390,8 +1405,9 @@ namespace GlassCore::ListViewControl
         if (g_lvBgPrimed.size() > 512)
             g_lvBgPrimed.clear(); // защита от роста на recycled HWND
         const bool firstPaint = g_lvBgPrimed.insert(hWnd).second;
+        const bool vclListView = IsDelphiListView(hWnd);
 #if defined(_DEBUG)
-        if (IsDelphiListView(hWnd) && AllowDelphiListViewLog(0))
+        if (vclListView && AllowDelphiListViewLog(0))
         {
             WCHAR cls[128]{};
             RECT client{};
@@ -1405,7 +1421,7 @@ namespace GlassCore::ListViewControl
         }
 #endif
 
-        g_lvSessionStack.push_back({ callerMod, kind, hWnd, diagFlipped || firstPaint });
+        g_lvSessionStack.push_back({ callerMod, kind, hWnd, diagFlipped || firstPaint, vclListView });
         DebugLog(DBG_NORMAL, L"[GlassCore][ListView] BeginPaint: callerMod=0x%p hWnd=0x%p kind=%d depth=%zu",
             callerMod, hWnd, static_cast<int>(kind), g_lvSessionStack.size());
         EnableListViewHooksForModule(hWnd, callerMod, kind, true);
@@ -1443,7 +1459,7 @@ namespace GlassCore::ListViewControl
             return false;
 
 #if defined(_DEBUG)
-        if (!g_lvSessionStack.empty() && IsDelphiListView(hWnd) && AllowDelphiListViewLog(2))
+        if (!g_lvSessionStack.empty() && g_lvSessionStack.back().vclListView && AllowDelphiListViewLog(2))
             DebugLog(DBG_NORMAL,
                 L"[GlassCore][DelphiListView] PostBegin hwnd=0x%p rect=[%ld,%ld,%ld,%ld] erase=%d blackout=%d",
                 hWnd, ps->rcPaint.left, ps->rcPaint.top, ps->rcPaint.right, ps->rcPaint.bottom,
