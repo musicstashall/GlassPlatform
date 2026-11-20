@@ -130,17 +130,32 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn('TInputHooks.cpp', read(path))
             self.assertIn('TInputHooks.h', read(path))
 
-    def test_checkbox_background_avoids_complex_checkbox_clip(self):
+    def test_checkbox_complex_background_requires_observed_excluded_outline(self):
         code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
         area = code.split('if (s.checkList && r->left == s.item.left', 1)[1].split('g_inHook = true;', 1)[0]
         for guard in ('r->top == s.item.top', 'r->bottom == s.item.bottom',
-                      'GetClipBox(dc, &clip) == SIMPLEREGION', 'SystemBackground(lb.lbColor)',
+                      'clipKind == SIMPLEREGION || excludedCheck', 'clipKind == COMPLEXREGION',
+                      's.hasCheckOutline', 'EqualRect(&boxWithinFill, &s.checkOutline)',
+                      'ClipExcludesCheckOutline(dc, s.checkOutline)', 'SystemBackground(lb.lbColor)',
                       'BLACKNESS', 'return orig(dc, r, brush)'):
             self.assertIn(guard, area)
+        rectangle = code.split('BOOL WINAPI MyRectangle(HDC dc, int left', 1)[1].split('bool ClipExcludesCheckOutline', 1)[0]
+        for guard in ('current->checkList', 'brush.lbStyle == BS_NULL',
+                      'pen.lopnStyle == PS_SOLID', 'pen.lopnWidth.x == 1',
+                      'SystemBackground(pen.lopnColor)', 'EqualRect(&clipped, &box)',
+                      'const BOOL result = orig(dc, left, top, right, bottom)',
+                      'g_stack.back().serial == s.serial'):
+            self.assertIn(guard, rectangle)
+        clip = code.split('bool ClipExcludesCheckOutline', 1)[1].split('int WINAPI MyFill(HDC dc', 1)[0]
+        for guard in ('LPtoDP(dc, p, 4)', 'GetClipRgn(dc, region.get()) == 1',
+                      '!RectInRegion(region.get(), &deviceBox)'):
+            self.assertIn(guard, clip)
+        self.assertNotIn('SelectClipRgn(', clip)
+        self.assertNotIn('ExcludeClipRect(', clip)
 
     def test_vcl_draw_hook_slots_do_not_shadow_winapi_macros(self):
         code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
-        self.assertIn('enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, Count }', code)
+        self.assertIn('enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, RectangleSlot, Count }', code)
         self.assertIn('Original<DrawTextSlot, decltype(&::DrawTextW)>()', code)
         self.assertIn('Original<FillSlot, decltype(&::FillRect)>()', code)
         self.assertIn('Original<ExtTextSlot, decltype(&::ExtTextOutW)>()', code)
