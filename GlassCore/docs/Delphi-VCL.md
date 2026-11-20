@@ -1876,3 +1876,29 @@ HWND; тогда класс в журнале будет родительски�
 `Header`-тема → прозрачный фон; строки данных и чужие окна не затрагиваются.
 Проверить: `TStringGrid` (заголовок, строки, числа, скролл) и `TDrawGrid`
 (рисуемые значения). Сборка и визуальный результат на Windows не проверены.
+
+## Тест 49: фон VCL-таблиц без alpha-кистей; TInplaceEdit — Edit
+
+Журнал 12 подтвердил, что `TStringGrid` (`0x7C0450`) и `TDrawGrid`
+(`0x630E3C`) идут через `[GlassCore][DelphiGrid]`: `SetBkColor: entryPoint
+COLOR_WINDOW→0`, `WhiteFill` ячеек, `Text` с `hr=0x0`. Правки по фактам:
+
+1. **Фон таблиц — только `COLOR_WINDOW → 0`.** В `Root_MyCreateSolidBrush`, если
+   активная paint-сессия принадлежит VCL-таблице (`IsDelphiGridClass`:
+   `TStringGrid`/`TDrawGrid`/`TShownValueList`), alpha-кисти не создаются вообще:
+   `COLOR_WINDOW` (и `0`) → сплошная чёрная кисть, любой другой цвет — обычная
+   кисть `orig(color)`. Раньше все прочие цвета уходили в
+   `CreateSolidColorBrushWithAlpha(color, 255)`.
+2. **Вводимый текст.** In-place редактор ячейки — окно класса `TInplaceEdit`
+   (`hwnd=0xDA0F26`): в журнале для него только
+   `SetBkColor … COLOR_WINDOW→0`, ни одной сессии `[Edit] BeginPaint`, потому что
+   класса не было в классификаторе. `TInplaceEdit` добавлен в ветку `Edit`
+   (`Edit_Attach` + `EditHooks`), как `TEdit`/`TMemo`.
+3. **Заголовок `TStringGrid`.** Строк `DelphiGrid Fill` для `rect.top == 0` в
+   журнале нет, поэтому фон заголовка не гасится. Чтобы не гадать, `DelphiGrid
+   Fill` теперь логирует **каждую** заливку на DC таблицы:
+   `Fill hwnd=… rect=[…] color=0x… style=… brush=…`, а `Text` — свой `rect`.
+   По следующему журналу будет видно, чем именно закрашивается строка заголовка
+   (цвет/`style`), и правка будет точечной.
+
+Сборка и визуальный результат на Windows не проверены.

@@ -741,5 +741,22 @@ class DelphiPipelineContract(unittest.TestCase):
         kind_for("SysHeader32", "Header")
         kind_for("SysLink", "Static")
 
+    def test_delphi_grid_background_has_no_alpha_brushes(self):
+        wc = read("WndCompat/Tracker/WindowClassifier.cpp")
+        edit_block = wc.split('Equals(cls, L"TInplaceEditList")', 1)[0][-200:]
+        self.assertIn('Equals(cls, L"TInplaceEdit")', edit_block)
+        root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        brush = root.split('H BRUSH WINAPI Root_MyCreateSolidBrush'.replace('H B', 'HB'), 1)[1]
+        brush = brush.split('// BWM: COMDLG32', 1)[0]
+        for marker in ('IsDelphiGridClass(hostCls)',
+                       'plainGrid == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)',
+                       'return o(RGB(0, 0, 0))', 'return o(color)'):
+            self.assertIn(marker, brush)
+        self.assertNotIn('CreateSolidColorBrushWithAlpha', brush)
+        fill = root.split('int WINAPI Root_MyDelphiGridFill(HDC dc', 1)[1].split('HRESULT WINAPI Root_MyDelphiGridTheme', 1)[0]
+        for marker in ('[GlassCore][DelphiGrid] Fill', 'color=0x%08X', 'brush=%d'):
+            self.assertIn(marker, fill)
+        self.assertIn('count=%u rect=[', root)
+
 if __name__ == "__main__":
     unittest.main()

@@ -958,8 +958,11 @@ namespace GlassCore::Root
                 rect, text, count, dx, orig);
 #if defined(_DEBUG)
             if (AllowDelphiGridLog(0))
-                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] Text hwnd=0x%p options=0x%X count=%u hr=0x%08lX",
-                    WindowFromDC(dc), options, count, static_cast<unsigned long>(hr));
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] Text hwnd=0x%p options=0x%X count=%u rect=[%ld,%ld,%ld,%ld] hr=0x%08lX",
+                    WindowFromDC(dc), options, count,
+                    rect ? rect->left : 0, rect ? rect->top : 0,
+                    rect ? rect->right : 0, rect ? rect->bottom : 0,
+                    static_cast<unsigned long>(hr));
 #endif
             if (SUCCEEDED(hr)) return TRUE;
             return orig(dc, x, y, drawOptions, rect, text, count, dx);
@@ -969,10 +972,12 @@ namespace GlassCore::Root
         {
             auto orig = GetRootOrg<OHK_DELPHI_GRID_FILL, decltype(&FillRect)>(GetCallerModule(_ReturnAddress()));
             if (!orig) return FillRect(dc, rect, brush);
+            if (g_shutdown.load(std::memory_order_acquire) || !IsDelphiGridPaintDC(dc))
+                return orig(dc, rect, brush);
             LOGBRUSH lb{};
-            if (!g_shutdown.load(std::memory_order_acquire) && IsDelphiGridPaintDC(dc)
-                && rect && !IsRectEmpty(rect) && brush
-                && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb)
+            const bool haveBrush = brush
+                && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
+            if (rect && !IsRectEmpty(rect) && haveBrush
                 && lb.lbStyle == BS_SOLID && lb.lbColor == RGB(255, 255, 255)
                 && PatBlt(dc, rect->left, rect->top, rect->right - rect->left,
                     rect->bottom - rect->top, BLACKNESS))
@@ -984,6 +989,17 @@ namespace GlassCore::Root
 #endif
                 return 1;
             }
+#if defined(_DEBUG)
+            // Диагностика: чем именно закрашивается фон (например, заголовок
+            // TStringGrid), чтобы не гадать по скриншоту.
+            if (AllowDelphiGridLog(1))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] Fill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X style=%u brush=%d",
+                    WindowFromDC(dc), rect ? rect->left : 0, rect ? rect->top : 0,
+                    rect ? rect->right : 0, rect ? rect->bottom : 0,
+                    haveBrush ? static_cast<unsigned>(lb.lbColor) : 0u,
+                    haveBrush ? static_cast<unsigned>(lb.lbStyle) : 0u, haveBrush ? 1 : 0);
+#endif
             return orig(dc, rect, brush);
         }
 
@@ -1304,6 +1320,21 @@ namespace GlassCore::Root
             wchar_t baseBuf[MAX_PATH]{};
             GetModuleFileNameW(caller, baseBuf, MAX_PATH);
             const std::wstring base = BasenamePtr(baseBuf);
+
+            // VCL-таблицы (TStringGrid/TDrawGrid/TShownValueList): фон ячеек и
+            // заголовка — только COLOR_WINDOW→0. Никаких alpha-кистей: всё
+            // остальное отдаём как есть.
+            if (const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())
+            {
+                wchar_t hostCls[64]{};
+                if (GetClassNameW(host, hostCls, _countof(hostCls)) && IsDelphiGridClass(hostCls))
+                {
+                    const COLORREF plainGrid = color & 0xFFFFFF;
+                    if (!plainGrid || plainGrid == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF))
+                        return o(RGB(0, 0, 0));
+                    return o(color);
+                }
+            }
 
             // BWM: COMDLG32 — только alpha-обёртка.
             if (StrEqI(base.c_str(), L"COMDLG32.dll"))
