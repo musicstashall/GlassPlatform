@@ -14,6 +14,7 @@
 #include <Subsystems/RenderText.h>
 #include <Helpers/ThemeHelper.h>
 #include <Subsystems/ThemePaintRegistry.h>
+#include <Hooks/delphi/TListBoxDraw.h>
 #include <Core/Intercept/HookDispatcher.h>
 
 #include <Module/ModuleHandler.h>
@@ -451,6 +452,11 @@ namespace GlassCore::ComboBoxControl
             if (!CbxSessionActive())
                 return orig(hdc, lpchText, cchText, lprc, format);
 
+            // VCL owner-draw combo field already renders its text through the
+            // scoped Delphi session; do not composite the same glyphs twice.
+            if (GlassCore::DelphiListBox::IsInsideDraw())
+                return orig(hdc, lpchText, cchText, lprc, format);
+
             if (format & DT_CALCRECT)
                 return orig(hdc, lpchText, cchText, lprc, format);
 
@@ -472,6 +478,9 @@ namespace GlassCore::ComboBoxControl
                 return DrawTextExW(hdc, lpchText, cchText, lprc, format, lpdtp);
 
             if (!CbxSessionActive())
+                return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
+
+            if (GlassCore::DelphiListBox::IsInsideDraw())
                 return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
 
             if (format & DT_CALCRECT)
@@ -503,6 +512,11 @@ namespace GlassCore::ComboBoxControl
             };
 
             if (!CbxSessionActive())
+                return callOrig(options);
+
+            // The scoped Delphi combo-field session owns fill and glyph drawing
+            // for this WM_DRAWITEM DC; avoid a second PatBlt/alpha text pass.
+            if (GlassCore::DelphiListBox::IsInsideDraw())
                 return callOrig(options);
 
             RECT client{};

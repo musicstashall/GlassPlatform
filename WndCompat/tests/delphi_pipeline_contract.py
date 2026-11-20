@@ -631,14 +631,20 @@ class DelphiPipelineContract(unittest.TestCase):
                        'appPaintedNative', 'source=app-iat',
                        'OnHotBeginGlobal'):
             self.assertIn(marker, combo)
+        self.assertEqual(combo.count('GlassCore::DelphiListBox::IsInsideDraw()'), 3)
+        self.assertIn('#include <Hooks/delphi/TListBoxDraw.h>', combo)
         native = combo.split('BeginPaint session skip', 1)[1].split('static void OnEndPaintGlobal', 1)[0]
         self.assertIn('callerMod == entryPoint', native)
         self.assertNotIn('IsNativeComboBoxClass(hWnd) ||', native)
         self.assertIn('current->combo', draw)
-        self.assertNotIn('LogComboText', draw)
+        self.assertIn('opaque-stripped', draw)
+        self.assertIn('options & ~static_cast<UINT>(ETO_OPAQUE)', draw)
+        combo_text = draw.split('if (current->combo)', 1)[1].split('if ((GetTextAlign(dc)', 1)[0]
+        self.assertIn('ExtTextOutWithAlpha(', combo_text)
+        self.assertIn('if (!count) return TRUE;', combo_text)
         begin_draw = draw.split('bool BeginDraw(HWND parent', 1)[1].split('bool TryCheckListThemeBackground', 1)[0]
         for guard in ('const bool comboField', 'if (!comboField) return false;',
-                      'if (s.combo && i != FillSlot) continue;', 's.field = comboField'):
+                      'if (s.combo && i != FillSlot && i != ExtTextSlot) continue;', 's.field = comboField'):
             self.assertIn(guard, begin_draw)
         self.assertIn('opaque-brush', draw)
         self.assertIn('CreateSolidColorBrushWithAlpha(lb.lbColor, 255)', draw)

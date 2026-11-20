@@ -89,6 +89,18 @@ namespace GlassCore::DelphiListBox
                 s.bounds.right, s.bounds.bottom, static_cast<unsigned>(brush.lbColor), branch);
             SetLastError(lastError);
         }
+        void LogComboText(const Session& s, HDC dc, UINT options, UINT count,
+            const RECT* r, COLORREF bk, const wchar_t* branch) noexcept
+        {
+            if (!s.combo || !CheckProbeBudget()) return;
+            const DWORD lastError = GetLastError();
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiComboDraw] text hwnd=0x%p dc=0x%p dcType=%u options=0x%X count=%u bk=0x%08X rect=[%ld,%ld,%ld,%ld] branch=%s",
+                s.hwnd, dc, static_cast<unsigned>(GetObjectType(dc)), options, count,
+                static_cast<unsigned>(bk), r ? r->left : 0, r ? r->top : 0,
+                r ? r->right : 0, r ? r->bottom : 0, branch);
+            SetLastError(lastError);
+        }
         bool CheckProbeBudget() noexcept
         {
             const ULONGLONG now = GetTickCount64();
@@ -317,10 +329,28 @@ namespace GlassCore::DelphiListBox
             auto orig = Original<ExtTextSlot, decltype(&::ExtTextOutW)>();
             if (!orig) return ExtTextOutW(dc, x, y, options, rect, text, count, dx);
             const auto* current = Current(dc);
-            // Combo fields keep VCL's own text drawing; only their fills are
-            // changed, so no alpha text pass is applied to the owner DC.
-            if (!current || current->combo || (GetTextAlign(dc) & TA_UPDATECP)
-                || (options & ETO_PDY) || ((options & ETO_OPAQUE) && !rect))
+            if (!current) return orig(dc, x, y, options, rect, text, count, dx);
+            if (current->combo)
+            {
+                // VCL paints the field text with ETO_OPAQUE and a window-colour
+                // background, which Root maps to black; that fill would erase
+                // the themed selection under the text. Drop only the opaque
+                // fill and render the glyphs once through the alpha pipeline.
+                const Session s = *current;
+                const UINT comboOptions = options & ~static_cast<UINT>(ETO_OPAQUE);
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+                LogComboText(s, dc, options, count, rect, GetBkColor(dc),
+                    (options & ETO_OPAQUE) ? L"opaque-stripped" : L"text");
+#endif
+                if (!count) return TRUE;
+                if (!text) return orig(dc, x, y, comboOptions, rect, text, count, dx);
+                if (SUCCEEDED(GlassCore::Text::ExtTextOutWithAlpha(dc, x, y, comboOptions,
+                        rect, text, count, dx, orig)))
+                    return TRUE;
+                return orig(dc, x, y, comboOptions, rect, text, count, dx);
+            }
+            if ((GetTextAlign(dc) & TA_UPDATECP) || (options & ETO_PDY)
+                || ((options & ETO_OPAQUE) && !rect))
                 return orig(dc, x, y, options, rect, text, count, dx);
             const Session s = *current;
             const int saved = SaveDC(dc);
@@ -452,9 +482,9 @@ namespace GlassCore::DelphiListBox
             g_dispatcher.moduleAddress = mod;
             for (size_t i = 0; i < Count; ++i)
             {
-                // Combo field: fill only. Text, DrawText and Rectangle stay
-                // with VCL; a combo session never enables them.
-                if (s.combo && i != FillSlot) continue;
+                // Combo field: FillRect plus ExtTextOutW only to strip the
+                // opaque background. DrawText and Rectangle stay with VCL.
+                if (s.combo && i != FillSlot && i != ExtTextSlot) continue;
                 if (i == RectangleSlot && !s.checkList) continue;
                 const int before = g_dispatcher.GetRef(i);
                 g_dispatcher.EnableHook(i, true);
