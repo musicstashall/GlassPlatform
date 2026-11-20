@@ -96,6 +96,13 @@ class DelphiPipelineContract(unittest.TestCase):
                       'dis->hDC', 'g_entryPointModule', 'AcquireDelphiBitBtnHook'):
             self.assertIn(guard, begin)
         self.assertIn('if (session.acquired[i]) EnableHooksOnModule', code)
+        self.assertIn('slotTheme=%d slotText=%d slotParent=%d', code)
+        self.assertIn('hookInfoCache[index].first.IsValid()', code)
+        self.assertIn('EXE imports named dtb=%d dtbEx=%d parent=%d parentEx=%d', code)
+        probe = code.split('static bool HasDelphiThemeImport', 1)[1].split('#endif', 1)[0]
+        self.assertIn('Hooks::GetIAT', probe)
+        self.assertIn('Hooks::GetDelayloadIAT', probe)
+        self.assertNotIn('EnableHook', probe)
         self.assertIn('return dc && s.dc == dc ? &s : nullptr', code)
         self.assertIn('"DrawThemeBackground", reinterpret_cast<PVOID>(DelphiBitBtnThemeBg)', code)
         theme = code.split('HRESULT WINAPI DelphiBitBtnThemeBg(HTHEME theme', 1)[1].split('HRESULT WINAPI DelphiBitBtnThemeText(HTHEME theme', 1)[0]

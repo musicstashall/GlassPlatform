@@ -1222,10 +1222,13 @@ namespace GlassCore::Button
         RECT rect;
         HMODULE module;
         std::array<bool, 3> acquired{};
+#if defined(_DEBUG)
+        std::array<bool, 3> slotFound{};
+#endif
     };
     static thread_local std::vector<DelphiBitBtnDrawSession> g_delphiBitBtnDrawStack;
 
-    static bool AcquireDelphiBitBtnHook(HMODULE mod, size_t index) noexcept
+    static bool AcquireDelphiBitBtnHook(HMODULE mod, size_t index, bool* slotFound) noexcept
     {
         auto lock = g_overallLock.lock_exclusive();
         auto it = g_overallMap.find(mod);
@@ -1239,8 +1242,23 @@ namespace GlassCore::Button
         }
         const int before = it->second.GetRef(index);
         it->second.EnableHook(index, true);
+        if (slotFound) *slotFound = it->second.hookInfoCache[index].first.IsValid();
         return it->second.GetRef(index) > before;
     }
+
+#if defined(_DEBUG)
+    // Только чтение PE импортов. Слот означает наличие записи, не факт вызова.
+    [[nodiscard]] static bool HasDelphiThemeImport(HMODULE mod, LPCSTR name) noexcept
+    {
+        for (const auto dll : { "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv,
+                                "api-ms-win-uxtheme-l1-1-0.dll"sv })
+        {
+            if (Hooks::GetIAT(mod, dll, name) || Hooks::GetDelayloadIAT(mod, dll, name).second)
+                return true;
+        }
+        return false;
+    }
+#endif
 
     bool BeginDelphiBitBtnOwnerDraw(HWND parent, const DRAWITEMSTRUCT* dis) noexcept
     {
@@ -1257,11 +1275,29 @@ namespace GlassCore::Button
         if (!module) return false;
         DelphiBitBtnDrawSession session{ dis->hwndItem, dis->hDC, dis->rcItem, module };
         for (size_t i = 0; i < session.acquired.size(); ++i)
-            session.acquired[i] = AcquireDelphiBitBtnHook(module, OHK_DELPHI_BITBTN_THEME + i);
+        {
+#if defined(_DEBUG)
+            session.acquired[i] = AcquireDelphiBitBtnHook(module, OHK_DELPHI_BITBTN_THEME + i, &session.slotFound[i]);
+#else
+            session.acquired[i] = AcquireDelphiBitBtnHook(module, OHK_DELPHI_BITBTN_THEME + i, nullptr);
+#endif
+        }
         g_delphiBitBtnDrawStack.push_back(session);
 #if defined(_DEBUG)
-        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawItem begin hwnd=0x%p dc=0x%p action=0x%X theme=%d text=%d parent=%d",
-            session.hwnd, session.dc, dis->itemAction, session.acquired[0], session.acquired[1], session.acquired[2]);
+        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawItem begin hwnd=0x%p dc=0x%p action=0x%X theme=%d text=%d parent=%d slotTheme=%d slotText=%d slotParent=%d",
+            session.hwnd, session.dc, dis->itemAction, session.acquired[0], session.acquired[1], session.acquired[2],
+            session.slotFound[0], session.slotFound[1], session.slotFound[2]);
+        static std::atomic<bool> loggedImports{ false };
+        if (!loggedImports.exchange(true, std::memory_order_relaxed))
+        {
+            const bool dtb = HasDelphiThemeImport(module, "DrawThemeBackground");
+            const bool dtbEx = HasDelphiThemeImport(module, "DrawThemeBackgroundEx");
+            const bool parent = HasDelphiThemeImport(module, "DrawThemeParentBackground");
+            const bool parentEx = HasDelphiThemeImport(module, "DrawThemeParentBackgroundEx");
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiBitBtn] EXE imports named dtb=%d dtbEx=%d parent=%d parentEx=%d (regular or delay, selected DLL names)",
+                dtb, dtbEx, parent, parentEx);
+        }
 #endif
         return true;
     }
