@@ -589,6 +589,8 @@ class DelphiPipelineContract(unittest.TestCase):
         for name in ('OHK_DELPHI_GRID_TEXT', 'OHK_DELPHI_GRID_FILL', 'OHK_DELPHI_GRID_THEME'):
             self.assertIn('PushPaint(instMod, ' + name, block)
             self.assertNotIn('PushDc(instMod, ' + name, block)
+        # Стирание фона VCL-таблицы идёт PatBlt-ом.
+        self.assertIn('PushPaint(instMod, OHK_PATBLT, cache)', block)
         gdi = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
         grid = gdi.split('static bool IsDelphiGridClass', 1)[1].split('int WINAPI Root_MyDrawTextW(', 1)[0]
         for guard in ('WindowFromDC(dc)', 'GetPaintSessionHostHwnd()', 'IsForeignPaintBarrierActive()',
@@ -774,6 +776,9 @@ class DelphiPipelineContract(unittest.TestCase):
                        'AlphaFill hwnd=0x%p'):
             self.assertIn(marker, root)
         fill = root.split('int WINAPI Root_MyDelphiGridFill(HDC dc', 1)[1].split('HRESULT WINAPI Root_MyDelphiGridTheme', 1)[0]
+        for marker in ('static bool IsDelphiGridFillDC(', 'IsDelphiGridFillDC(dc)',
+                       '(rop == PATCOPY || rop == WHITENESS) && IsDelphiGridFillDC(hdc)'):
+            self.assertIn(marker, root)
         for marker in ('[GlassCore][DelphiGrid] Fill', 'color=0x%08X', 'brush=%d'):
             self.assertIn(marker, fill)
         self.assertIn('count=%u rect=[', root)

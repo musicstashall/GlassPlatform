@@ -983,6 +983,23 @@ namespace GlassCore::Root
             return GetClassNameW(host, cls, _countof(cls)) && IsDelphiGridClass(cls);
         }
 
+        // Заливка окна таблицы вне paint-сессии: BeginPaint сам посылает
+        // WM_ERASEBKGND до того, как PaintDispatcher положит окно в стек,
+        // поэтому GetPaintSessionHostHwnd() ещё не указывает на таблицу.
+        // Фон стирания (FixedColor) иначе остаётся непрозрачным.
+        static bool IsDelphiGridFillDC(HDC dc) noexcept
+        {
+            if (!dc || GlassCore::PaintDispatcher::IsForeignPaintBarrierActive())
+                return false;
+            if (IsDelphiGridPaintDC(dc))
+                return true;
+            const HWND w = WindowFromDC(dc);
+            if (!w)
+                return false;
+            wchar_t cls[128]{};
+            return GetClassNameW(w, cls, _countof(cls)) && IsDelphiGridClass(cls);
+        }
+
 #if defined(_DEBUG)
         static bool AllowDelphiGridLog(unsigned channel) noexcept
         {
@@ -1053,7 +1070,7 @@ namespace GlassCore::Root
         {
             auto orig = GetRootOrg<OHK_DELPHI_GRID_FILL, decltype(&FillRect)>(GetCallerModule(_ReturnAddress()));
             if (!orig) return FillRect(dc, rect, brush);
-            if (g_shutdown.load(std::memory_order_acquire) || !IsDelphiGridPaintDC(dc))
+            if (g_shutdown.load(std::memory_order_acquire) || !IsDelphiGridFillDC(dc))
                 return orig(dc, rect, brush);
             LOGBRUSH lb{};
             const bool haveBrush = brush
@@ -1612,6 +1629,25 @@ namespace GlassCore::Root
             LOGBRUSH lbrush{};
             HGDIOBJ hbr = GetCurrentObject(hdc, OBJ_BRUSH);
             GetObject(hbr, sizeof(lbrush), &lbrush);
+
+            // Фон VCL-таблицы стирается PatBlt-ом (в т.ч. WM_ERASEBKGND до
+            // начала paint-сессии): PATCOPY/WHITENESS → прозрачность + тинт.
+            if ((rop == PATCOPY || rop == WHITENESS) && IsDelphiGridFillDC(hdc))
+            {
+                const RECT gridRect{ x, y, x + cx, y + cy };
+                const COLORREF brushColor = (lbrush.lbStyle == BS_SOLID && lbrush.lbColor)
+                    ? lbrush.lbColor : GetBkColor(hdc);
+#if defined(_DEBUG)
+                if (AllowDelphiGridLog(1))
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][DelphiGrid] PatBlt hwnd=0x%p rop=0x%08X rect=[%ld,%ld,%ld,%ld] color=0x%08X",
+                        WindowFromDC(hdc), static_cast<unsigned>(rop),
+                        gridRect.left, gridRect.top, gridRect.right, gridRect.bottom,
+                        static_cast<unsigned>(brushColor));
+#endif
+                if (ApplyDelphiGridCellBackground(hdc, &gridRect, brushColor))
+                    return TRUE;
+            }
 
             const bool sysmon = CallerBaseIs(caller, L"sysmon.ocx") && StrEqI(cls, L"SysmonCtrl");
             const bool gdiplusCaller = CallerBaseIs(caller, L"gdiplus.dll");
