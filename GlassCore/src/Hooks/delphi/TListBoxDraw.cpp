@@ -18,7 +18,7 @@ namespace GlassCore::DelphiListBox
     {
         using namespace GlassCore::Hooks;
         using namespace std::literals;
-        enum : size_t { Fill, ExtText, DrawText, Count };
+        enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, Count };
         int WINAPI MyFill(HDC, const RECT*, HBRUSH);
         BOOL WINAPI MyExtText(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
         int WINAPI MyDrawText(HDC, LPCWSTR, int, LPRECT, UINT);
@@ -74,7 +74,7 @@ namespace GlassCore::DelphiListBox
         }
         int WINAPI MyFill(HDC dc, const RECT* r, HBRUSH brush)
         {
-            auto orig = Original<Fill, decltype(&FillRect)>();
+            auto orig = Original<FillSlot, decltype(&::FillRect)>();
             if (!orig) return FillRect(dc, r, brush);
             const auto* current = Current(dc);
             if (!current || !r || !brush) return orig(dc, r, brush);
@@ -103,7 +103,7 @@ namespace GlassCore::DelphiListBox
         BOOL WINAPI MyExtText(HDC dc, int x, int y, UINT options, const RECT* rect,
             LPCWSTR text, UINT count, const INT* dx)
         {
-            auto orig = Original<ExtText, decltype(&ExtTextOutW)>();
+            auto orig = Original<ExtTextSlot, decltype(&::ExtTextOutW)>();
             if (!orig) return ExtTextOutW(dc, x, y, options, rect, text, count, dx);
             const auto* current = Current(dc);
             if (!current || (GetTextAlign(dc) & TA_UPDATECP) || (options & ETO_PDY)
@@ -142,7 +142,7 @@ namespace GlassCore::DelphiListBox
         }
         int WINAPI MyDrawText(HDC dc, LPCWSTR text, int count, LPRECT rect, UINT format)
         {
-            auto orig = Original<DrawText, decltype(&DrawTextW)>();
+            auto orig = Original<DrawTextSlot, decltype(&::DrawTextW)>();
             if (!orig) return DrawTextW(dc, text, count, rect, format);
             const auto* current = Current(dc);
             if (!current || !rect || !text || (format & (DT_CALCRECT | DT_MODIFYSTRING)))
@@ -200,7 +200,7 @@ namespace GlassCore::DelphiListBox
         static thread_local unsigned budget = 0;
         const ULONGLONG now = GetTickCount64();
         if (!epoch || now - epoch >= 1000) { epoch = now; budget = 24; }
-        if (budget) { --budget; DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p dc=0x%p fill=%d ext=%d draw=%d state=0x%X", s.hwnd, s.dc, s.hooks[Fill], s.hooks[ExtText], s.hooks[DrawText], dis->itemState); }
+        if (budget) { --budget; DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p dc=0x%p fill=%d ext=%d draw=%d state=0x%X", s.hwnd, s.dc, s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot], dis->itemState); }
 #endif
         return true;
     }

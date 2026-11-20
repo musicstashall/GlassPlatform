@@ -109,6 +109,14 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn('TListBoxDraw.cpp', read(file))
             self.assertIn('TListBoxDraw.h', read(file))
 
+    def test_vcl_draw_hook_slots_do_not_shadow_winapi_macros(self):
+        code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
+        self.assertIn('enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, Count }', code)
+        self.assertIn('Original<DrawTextSlot, decltype(&::DrawTextW)>()', code)
+        self.assertIn('Original<FillSlot, decltype(&::FillRect)>()', code)
+        self.assertIn('Original<ExtTextSlot, decltype(&::ExtTextOutW)>()', code)
+        self.assertNotRegex(code, r'\bOriginal<DrawText\s*,')
+
     def test_spin_edit_uses_edit_and_input_color_probe_is_bounded(self):
         classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
         self.assertRegex(classifier, r'(?s)if\s*\([^;{}]*L"TSpinEdit"[^;{}]*\)\s*return ControlKind::Edit\s*;')
