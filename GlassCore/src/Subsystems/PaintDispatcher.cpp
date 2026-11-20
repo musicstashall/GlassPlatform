@@ -316,6 +316,8 @@ namespace GlassCore::PaintDispatcher
             || _wcsicmp(cls, L"TButtonedEdit") == 0
             || _wcsicmp(cls, L"TMaskEdit") == 0
             || _wcsicmp(cls, L"TSearchBox") == 0;
+        const bool vclDraw = _wcsicmp(cls, L"TBitBtn") == 0
+            || _wcsicmp(cls, L"TToggleSwitch") == 0;
         bool comboEdit = false;
         HWND parent = GetParent(hwnd);
         if (!memo && _wcsicmp(cls, L"Edit") == 0 && parent)
@@ -324,7 +326,7 @@ namespace GlassCore::PaintDispatcher
             comboEdit = GetClassNameW(parent, parentClass, _countof(parentClass))
                 && _wcsicmp(parentClass, L"TComboBox") == 0;
         }
-        if (!memo && !vclEdit && !comboEdit) return;
+        if (!memo && !vclEdit && !comboEdit && !vclDraw) return;
         const unsigned channel = (api[0] == L'C' || api[0] == L'D') ? 2u
             : ((api[0] == L'B' || api[0] == L'E') ? 0u : 1u);
         static thread_local ULONGLONG epoch[3]{};

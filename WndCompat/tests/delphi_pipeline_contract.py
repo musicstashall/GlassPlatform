@@ -48,6 +48,23 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('static thread_local unsigned budget[2]', edit)
         self.assertIn('[GlassCore][DelphiBitBtn] BeginPaint', read('GlassCore/src/Hooks/ButtonHooks.cpp'))
 
+    def test_vcl_draw_probes_are_opt_in_and_balanced(self):
+        header = read("GlassCore/Include/Hooks/RootGdiHooks.h")
+        gdi = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
+        guard = '#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)'
+        self.assertIn(guard + '\n        OHK_VCLPROBE_FILL', header)
+        self.assertIn(guard + '\n        struct VclProbeSession', gdi)
+        self.assertIn(guard + '\n    static void VclProbePaintBegin', root)
+        self.assertIn('session.acquired[i] = AcquireVclProbeHook(ep, i)', gdi)
+        self.assertIn('if (session.acquired[i]) EnableRootHook(session.module, i, false)', gdi)
+        self.assertIn('it->second.GetRef(index) > before', gdi)
+        for cls in ('TBitBtn', 'TToggleSwitch'):
+            self.assertIn('L"' + cls + '"', gdi)
+            self.assertIn('L"' + cls + '"', read('GlassCore/src/Subsystems/PaintDispatcher.cpp'))
+        self.assertIn('[WndCompat][DelphiBitBtn] WM_DRAWITEM', read('WndCompat/Root/RootSubclass.cpp'))
+        self.assertNotIn('DDH_All', root.split('static void VclProbePaintBegin', 1)[1].split('#endif', 1)[0])
+
     def test_containers_use_guarded_root_attach(self):
         source = read("WndCompat/Tracker/WinEventHandler.cpp")
         self.assertRegex(source, r'(?s)case ControlKind::DelphiContainer:\s*case ControlKind::GenericContainer:.*?if \(isFull && allowGlassForHwnd\).*?DispatchRootAttachToOwnerThread\(hWnd\);')

@@ -32,8 +32,23 @@ namespace GlassCore::Root
         OHK_DELPHI_GRID_TEXT,
         OHK_DELPHI_GRID_FILL,
         OHK_DELPHI_GRID_THEME,
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+        OHK_VCLPROBE_FILL, OHK_VCLPROBE_PATBLT, OHK_VCLPROBE_RECT,
+        OHK_VCLPROBE_ROUNDRECT, OHK_VCLPROBE_BITBLT, OHK_VCLPROBE_TEXT,
+        OHK_VCLPROBE_DRAWTEXT, OHK_VCLPROBE_THEME,
+        OHK_VCLPROBE_CREATEBRUSH, OHK_VCLPROBE_SELECT,
+        OHK_VCLPROBE_ELLIPSE, OHK_VCLPROBE_DRAWTEXTEX,
+        OHK_VCLPROBE_CREATEBRUSHINDIRECT, OHK_VCLPROBE_THEMETEXTEX,
+#endif
         OHK_COUNT
     };
+
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+    // Сессионные passthrough-пробы EXE; только точные TBitBtn / TToggleSwitch.
+    void BeginVclDrawProbe(HWND hWnd, bool paint) noexcept;
+    void EndVclDrawProbe(HWND hWnd, bool paint) noexcept;
+    void ClearVclDrawProbe() noexcept;
+#endif
 
     // Включить/выключить один IAT-хук на модуле (ref-counted).
     bool EnableRootHook(void* baseAddress, size_t index, bool enable) noexcept;

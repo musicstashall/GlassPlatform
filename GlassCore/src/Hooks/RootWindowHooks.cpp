@@ -902,6 +902,21 @@ namespace GlassCore::Root
     }
 
     // Engine::Startup: регистрируем три канала в PaintDispatcher.
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+    static void VclProbePaintBegin(HWND hWnd, HMODULE) noexcept
+    {
+        if (!g_shutdown.load(std::memory_order_acquire) && IsFullInjectionMode())
+            BeginVclDrawProbe(hWnd, true);
+    }
+    static void VclProbePaintEnd(HWND hWnd, HMODULE) noexcept { EndVclDrawProbe(hWnd, true); }
+    static void VclProbeDcBegin(HWND hWnd, HMODULE) noexcept
+    {
+        if (!g_shutdown.load(std::memory_order_acquire) && IsFullInjectionMode())
+            BeginVclDrawProbe(hWnd, false);
+    }
+    static void VclProbeDcEnd(HWND hWnd, HMODULE) noexcept { EndVclDrawProbe(hWnd, false); }
+#endif
+
     void Startup() noexcept
     {
         /*using namespace Hooks::DebugDetourHooks;
@@ -913,6 +928,10 @@ namespace GlassCore::Root
         GlassCore::PaintDispatcher::RegisterPaintProvider({ Root_OnBeginPaint, Root_OnEndPaint });
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ Root_OnGetDC, Root_OnReleaseDC });
         GlassCore::PaintDispatcher::RegisterCompatDCProvider({ Root_OnCreateCompatDC, Root_OnDeleteDC });
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+        GlassCore::PaintDispatcher::RegisterPaintProvider({ VclProbePaintBegin, VclProbePaintEnd });
+        GlassCore::PaintDispatcher::RegisterGetDCProvider({ VclProbeDcBegin, VclProbeDcEnd });
+#endif
         DebugLog(DBG_IMPORTANT, L"[GlassCore][Root] Startup: провайдеры PaintDispatcher зарегистрированы");
     }
 
@@ -933,6 +952,9 @@ namespace GlassCore::Root
         g_rootPaintStack.clear();
         g_rootDcStack.clear();
         g_rootCompatDcStack.clear();
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+        ClearVclDrawProbe();
+#endif
 
         DisableAllRootHooks();
         SetRootGdiShutdown(false);

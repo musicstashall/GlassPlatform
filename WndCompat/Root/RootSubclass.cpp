@@ -1254,6 +1254,28 @@ namespace
             if (!dis)
                 break;
 
+#if defined(_DEBUG)
+            // Пассивный зонд именно owner-draw TBitBtn; не меняет передачу
+            // WM_DRAWITEM, содержимое DRAWITEMSTRUCT или результаты VCL.
+            if (dis->CtlType == ODT_BUTTON && dis->hwndItem
+                && GetParent(dis->hwndItem) == hWnd
+                && WndCompat::IsWindowClass(dis->hwndItem, L"TBitBtn"))
+            {
+                static thread_local ULONGLONG epoch = 0;
+                static thread_local unsigned budget = 0;
+                const ULONGLONG now = GetTickCount64();
+                if (!epoch || now - epoch >= 1000) { epoch = now; budget = 24; }
+                if (budget)
+                {
+                    --budget;
+                    const RECT& r = dis->rcItem;
+                    DebugLog(DBG_NORMAL,
+                        L"[WndCompat][DelphiBitBtn] WM_DRAWITEM parent=0x%p hwnd=0x%p dc=0x%p dcWnd=0x%p action=0x%X state=0x%X rect=[%ld,%ld,%ld,%ld]",
+                        hWnd, dis->hwndItem, dis->hDC, WindowFromDC(dis->hDC),
+                        dis->itemAction, dis->itemState, r.left, r.top, r.right, r.bottom);
+                }
+            }
+#endif
             // Нас интересуют только пункты меню
             if (dis->CtlType == ODT_MENU)
             {
