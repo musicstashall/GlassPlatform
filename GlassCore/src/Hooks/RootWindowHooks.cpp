@@ -596,6 +596,9 @@ namespace GlassCore::Root
                 PushPaint(instMod, OHK_DELPHI_GRID_TEXT, cache);
                 PushPaint(instMod, OHK_DELPHI_GRID_FILL, cache);
                 PushPaint(instMod, OHK_DELPHI_GRID_THEME, cache);
+                // Стирание фона (WM_ERASEBKGND) VCL делает PatBlt-ом с кистью
+                // FixedColor — без этого фиксированные ячейки остаются плотными.
+                PushPaint(instMod, OHK_PATBLT, cache);
             }
 
             // Точка входа процесса — типичные диалоги / сценарии владельца — BWM Paint (+ HEX: Paint+Dc)
