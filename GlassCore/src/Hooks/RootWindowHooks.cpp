@@ -601,6 +601,8 @@ namespace GlassCore::Root
                 PushPaint(instMod, OHK_PATBLT, cache);
                 // Диагностика (только лог): Blt из промежуточного буфера в DC таблицы.
                 PushPaint(instMod, OHK_BITBLT, cache);
+                // Цвет фона клиента: GetSysColor(COLOR_WINDOW) внутри paint-сессии.
+                PushPaint(instMod, OHK_GETSYSCOLOR, cache);
             }
 
             // Точка входа процесса — типичные диалоги / сценарии владельца — BWM Paint (+ HEX: Paint+Dc)

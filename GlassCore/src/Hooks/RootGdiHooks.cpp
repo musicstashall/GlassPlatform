@@ -508,6 +508,7 @@ namespace GlassCore::Root
         BOOL WINAPI Root_MyDelphiGridText(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
         int WINAPI Root_MyDelphiGridFill(HDC, const RECT*, HBRUSH);
         HRESULT WINAPI Root_MyDelphiGridTheme(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
+        DWORD WINAPI Root_MyGetSysColor(int);
 
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
         int WINAPI VclProbeFill(HDC, const RECT*, HBRUSH);
@@ -572,6 +573,8 @@ namespace GlassCore::Root
                 "FillRect", reinterpret_cast<PVOID>(Root_MyDelphiGridFill) },
             std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv },
                 "DrawThemeBackground", reinterpret_cast<PVOID>(Root_MyDelphiGridTheme) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv },
+                "GetSysColor", reinterpret_cast<PVOID>(Root_MyGetSysColor) },
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "FillRect", reinterpret_cast<PVOID>(VclProbeFill) },
             std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "PatBlt", reinterpret_cast<PVOID>(VclProbePatBlt) },
@@ -1000,6 +1003,16 @@ namespace GlassCore::Root
             return GetClassNameW(w, cls, _countof(cls)) && IsDelphiGridClass(cls);
         }
 
+        // Окно текущей paint-сессии — таблица? (без DC: для GetSysColor его нет)
+        static bool IsDelphiGridPaintHost() noexcept
+        {
+            const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+            if (!host)
+                return false;
+            wchar_t cls[128]{};
+            return GetClassNameW(host, cls, _countof(cls)) && IsDelphiGridClass(cls);
+        }
+
 #if defined(_DEBUG)
         static bool AllowDelphiGridLog(unsigned channel) noexcept
         {
@@ -1193,6 +1206,28 @@ namespace GlassCore::Root
                 }
             }
             return orig(theme, dc, part, state, rect, clip);
+        }
+
+        // Фон клиента VCL-таблицы: TCustomGrid.Paint берёт цвет как
+        // GetSysColor(COLOR_WINDOW) → CreateBrushIndirect → FillRect(ClientRect).
+        // Этот FillRect приходит мимо нашего детура, поэтому гасим цвет в самой
+        // точке его получения: белый (COLOR_WINDOW) → чёрный = прозрачность.
+        DWORD WINAPI Root_MyGetSysColor(int nIndex)
+        {
+            auto o = GetRootOrg<OHK_GETSYSCOLOR, decltype(&GetSysColor)>(GetCallerModule(_ReturnAddress()));
+            if (!o)
+                return GetSysColor(nIndex);
+            if (!g_shutdown.load(std::memory_order_acquire) && nIndex == COLOR_WINDOW
+                && IsDelphiGridPaintHost())
+            {
+#if defined(_DEBUG)
+                if (AllowDelphiGridLog(2))
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][DelphiGrid] GetSysColor COLOR_WINDOW→0 (client fill)");
+#endif
+                return 0;
+            }
+            return o(nIndex);
         }
 
         int WINAPI Root_MyDrawTextW(
