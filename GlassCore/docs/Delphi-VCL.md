@@ -2147,3 +2147,23 @@ VCL: в журнале 12 `WhiteFill`/`Fill` ячейки идёт **до** `Tex
 добавлены `orig=` и `caller=` (basename модуля caller'а).
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 62: цвет фона клиента гасится в GetSysColor
+
+Журнал 17: `FillEnter` по-прежнему только для ячеек
+(`rect=[65,25,129,49]`, `orig=1 caller=DelphiControlsSample_Win64.exe`), заливки
+всего клиента детур `FillRect` **не получает вообще** — ни с `orig=0`, ни с
+`gate=0`. То есть этот вызов идёт мимо нашего IAT-слота, и ловить его в
+`FillRect` бессмысленно.
+
+По логу API Monitor цвет этой заливки берётся так:
+`GetSysColor(COLOR_WINDOW)` → `CreateBrushIndirect` → `FillRect(ClientRect)`.
+Гасим цвет в самой точке получения: новый root-слот `OHK_GETSYSCOLOR`
+(`user32!GetSysColor`, включается для `TStringGrid`/`TDrawGrid`/`TShownValueList`
+вместе с grid-слотами) возвращает `0` для `COLOR_WINDOW`, если окно текущей
+paint-сессии — таблица (`IsDelphiGridPaintHost`). Белая кисть клиента
+становится чёрной = прозрачность, независимо от того, кто делает `FillRect`.
+
+Диагностика: `[DelphiGrid] GetSysColor COLOR_WINDOW→0 (client fill)`.
+
+Сборка и визуальный результат на Windows не проверены.

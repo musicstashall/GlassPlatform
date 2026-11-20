@@ -804,6 +804,20 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('PushPaint(instMod, OHK_BITBLT, cache);', grid)
         self.assertIn('bmp=0x%p px=0x%08X', win)
 
+    def test_delphi_grid_kills_window_color_for_client_fill(self):
+        root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        body = root.split('DWORD WINAPI Root_MyGetSysColor(int nIndex)', 1)[1].split(
+            'int WINAPI Root_MyDrawTextW(', 1)[0]
+        for marker in ('nIndex == COLOR_WINDOW', 'IsDelphiGridPaintHost()', 'return 0;'):
+            self.assertIn(marker, body)
+        self.assertIn('bool IsDelphiGridPaintHost()', root)
+        header = read("GlassCore/Include/Hooks/RootGdiHooks.h")
+        self.assertIn('OHK_GETSYSCOLOR,', header)
+        self.assertIn('"GetSysColor", reinterpret_cast<PVOID>(Root_MyGetSysColor) }', root)
+        win = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
+        grid = win.split('L"TShownValueList"', 1)[1].split('// Точка входа процесса', 1)[0]
+        self.assertIn('PushPaint(instMod, OHK_GETSYSCOLOR, cache);', grid)
+
     def test_delphi_grid_logs_fill_entry_and_general_fillrect(self):
         root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
         self.assertIn('[GlassCore][DelphiGrid] FillEnter dc=0x%p dcWnd=0x%p', root)
