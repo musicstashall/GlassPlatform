@@ -755,7 +755,7 @@ class DelphiPipelineContract(unittest.TestCase):
                        'kDelphiGridCellAlpha', 'return o(color)'):
             self.assertIn(marker, brush)
         # COLOR_WINDOW → 0, остальные цвета → низкая альфа (не 255).
-        self.assertIn('constexpr BYTE kDelphiGridCellAlpha = 35;', root)
+        self.assertIn('constexpr BYTE kDelphiGridCellAlpha = 12;', root)
         self.assertIn('CreateSolidColorBrushWithAlpha(', brush)
         self.assertNotIn(', 255)', brush)
         syscolor = root.split('HBRUSH WINAPI Root_MyGetSysColorBrush(int nIndex)', 1)[1].split('HBRUSH WINAPI Root_MyCreateSolidBrush', 1)[0]

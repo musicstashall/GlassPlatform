@@ -1933,12 +1933,13 @@ COLOR_WINDOW→0`, `WhiteFill` ячеек, `Text` с `hr=0x0`. Правки по
 - `COLOR_WINDOW` (обычные ячейки, фон) → сплошная чёрная кисть, то есть
   прозрачный фон (как раньше);
 - любой другой цвет (фиксированные строка/колонка `TStringGrid` = `clBtnFace`,
-  цветные ячейки `TDrawGrid`) → `CreateSolidColorBrushWithAlpha(color, 35)`,
-  тот же порядок альфы, что у темы/комбо (`effAlpha=35`);
+  цветные ячейки `TDrawGrid`) → `CreateSolidColorBrushWithAlpha(color, 12)`:
+  заметно ниже темы/комбо (`effAlpha=35`), по просьбе «сильно уменьшить альфу»;
 - то же правило в `Root_MyGetSysColorBrush` для `COLOR_WINDOW`/`COLOR_BTNFACE`,
   чтобы стоковые кисти не выпадали из политики;
 - `[DelphiGrid] Fill` гасит в `BLACKNESS` только `COLOR_WINDOW`; alpha-кисть
   проходит в `orig()` и даёт полупрозрачную заливку.
 
-Сборка и визуальный результат на Windows не проверены. Если 35 окажется мало
-или много — это одна константа `kDelphiGridCellAlpha` в `RootGdiHooks.cpp`.
+Сборка и визуальный результат на Windows не проверены. Если 12 окажется мало
+или много — это одна константа `kDelphiGridCellAlpha` в `RootGdiHooks.cpp`
+(было 35, стало 12).
