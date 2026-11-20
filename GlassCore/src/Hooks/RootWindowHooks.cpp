@@ -639,6 +639,36 @@ namespace GlassCore::Root
         // HookBeginPaint обходит g_paintProviders вместе с Button/Static/… — порядок регистрации
         // до PaintDispatcher::Startup см. CLAUDE.md. Здесь нет if по классу окна — только s_rootCache.
 
+        // VCL-таблицы: после BeginPaint (и любого стирания фона до него) чистим
+        // repaint-область чёрным. Приложение фон фиксированных ячеек не заливает
+        // ни FillRect, ни PatBlt (в журнале для них нет ни Fill, ни PatBlt),
+        // поэтому единственный способ убрать непрозрачный фон — чёрная база.
+        static bool Root_OnDelphiGridAfterBeginPaint(
+            HWND hWnd, HDC hdc, LPPAINTSTRUCT ps, HMODULE /*callerMod*/) noexcept
+        {
+            if (g_shutdown.load(std::memory_order_acquire) || !hWnd || !hdc || !ps)
+                return false;
+            if (IsRectEmpty(&ps->rcPaint))
+                return false;
+            wchar_t cls[256]{};
+            if (!GetClassNameW(hWnd, cls, _countof(cls)))
+                return false;
+            if (!(StrEqI(cls, L"TStringGrid") || StrEqI(cls, L"TDrawGrid")
+                || StrEqI(cls, L"TShownValueList")))
+                return false;
+            if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
+                return false;
+            const RECT rc = ps->rcPaint;
+            const BOOL ok = PatBlt(hdc, rc.left, rc.top, rc.right - rc.left,
+                rc.bottom - rc.top, BLACKNESS);
+#if defined(_DEBUG)
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiGrid] Erase hwnd=0x%p rect=[%ld,%ld,%ld,%ld] ok=%d",
+                hWnd, rc.left, rc.top, rc.right, rc.bottom, ok ? 1 : 0);
+#endif
+            return ok != FALSE;
+        }
+
         // EnableRootHook держит ref-count на паре (module, OHK) в HookDispatcher.
         static void EnableSpecs(const std::vector<HookSpec>& specs, bool enable) noexcept
         {
@@ -939,6 +969,7 @@ namespace GlassCore::Root
         if (void* ep = GlassCore::ModuleHandler::g_entryPointModule)
             PrewarmRootHook(ep);
         GlassCore::PaintDispatcher::RegisterPaintProvider({ Root_OnBeginPaint, Root_OnEndPaint });
+        GlassCore::PaintDispatcher::RegisterPostPaintProvider({ Root_OnDelphiGridAfterBeginPaint });
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ Root_OnGetDC, Root_OnReleaseDC });
         GlassCore::PaintDispatcher::RegisterCompatDCProvider({ Root_OnCreateCompatDC, Root_OnDeleteDC });
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
