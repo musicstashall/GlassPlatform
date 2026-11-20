@@ -1133,6 +1133,22 @@ namespace GlassCore::Root
             auto orig = GetRootOrg<OHK_DELPHI_GRID_THEME, decltype(&DrawThemeBackground)>(GetCallerModule(_ReturnAddress()));
             if (!orig) return DrawThemeBackground(theme, dc, part, state, rect, clip);
             wchar_t cls[MAX_PATH + 1]{};
+#if defined(_DEBUG)
+            // Диагностика: какие элементы темы рисуются в DC таблицы. Фон
+            // фиксированных ячеек не приходит ни через FillRect/PatBlt/BitBlt,
+            // поэтому проверяем DrawThemeBackground (StyleServices.DrawElement).
+            if (!g_shutdown.load(std::memory_order_acquire) && IsDelphiGridPaintDC(dc)
+                && AllowDelphiGridLog(0))
+            {
+                wchar_t themeCls[MAX_PATH + 1]{};
+                (void)Shared::ThemeHelper::GetThemeClass(theme, themeCls, MAX_PATH);
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] Theme hwnd=0x%p part=%d state=%d rect=[%ld,%ld,%ld,%ld] theme=\"%s\"",
+                    WindowFromDC(dc), part, state,
+                    rect ? rect->left : 0, rect ? rect->top : 0,
+                    rect ? rect->right : 0, rect ? rect->bottom : 0, themeCls);
+            }
+#endif
             if (!g_shutdown.load(std::memory_order_acquire) && IsDelphiGridPaintDC(dc)
                 && rect && !IsRectEmpty(rect) && (part == 0 || part == 1)
                 && (state == 1 || state == 4)
@@ -1630,6 +1646,13 @@ namespace GlassCore::Root
             HGDIOBJ hbr = GetCurrentObject(hdc, OBJ_BRUSH);
             GetObject(hbr, sizeof(lbrush), &lbrush);
 
+#if defined(_DEBUG)
+            if (IsDelphiGridFillDC(hdc) && AllowDelphiGridLog(1))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] PatBltAny hwnd=0x%p rop=0x%08X rect=[%ld,%ld,%ld,%ld] style=%u color=0x%08X",
+                    WindowFromDC(hdc), static_cast<unsigned>(rop), x, y, x + cx, y + cy,
+                    static_cast<unsigned>(lbrush.lbStyle), static_cast<unsigned>(lbrush.lbColor));
+#endif
             // Фон VCL-таблицы стирается PatBlt-ом (в т.ч. WM_ERASEBKGND до
             // начала paint-сессии): PATCOPY/WHITENESS → прозрачность + тинт.
             if ((rop == PATCOPY || rop == WHITENESS) && IsDelphiGridFillDC(hdc))
