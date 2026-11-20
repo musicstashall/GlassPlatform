@@ -3,7 +3,8 @@
 
 namespace GlassCore::DelphiToggle
 {
-    bool PreservePaintDcBkColor(HWND hwnd, HDC dc, HMODULE caller) noexcept;
+    void Startup() noexcept;
+    void Shutdown() noexcept;
 #if defined(_DEBUG)
     struct DelphiToggleDeleteTrace
     {

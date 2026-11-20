@@ -693,6 +693,18 @@ namespace GlassCore::PaintDispatcher
         return false;
     }
 
+    bool IsTopWindowDrawingSession(HWND hWnd) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || !hWnd) return false;
+        for (auto it = g_dcStack.rbegin(); it != g_dcStack.rend(); ++it)
+        {
+            if (it->type == DcEntryType::Foreign) return false;
+            if (it->type == DcEntryType::Paint || it->type == DcEntryType::GetDC)
+                return it->hWnd == hWnd && it->hDC && WindowFromDC(it->hDC) == hWnd;
+        }
+        return false;
+    }
+
     bool IsCurrentPaintDcForHwnd(HWND hWnd, HDC hdc) noexcept
     {
         if (g_shutdown.load(std::memory_order_acquire) || !hWnd || !hdc)

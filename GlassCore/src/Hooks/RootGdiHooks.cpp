@@ -23,7 +23,6 @@
 #include "CorePch.h"
 #include <Hooks/RootGdiHooks.h>
 #include <Hooks/RootWindowHooks.h>
-#include <Hooks/delphi/TToggleSwitchHooks.h>
 #include <Core/Intercept/HookDispatcher.h>
 #include <Core/Intercept/IATRegistry.h>
 #include <Module/ModuleHandler.h>
@@ -1208,9 +1207,6 @@ namespace GlassCore::Root
             // mmc.exe исключён как в BWM.
             if (!g_shutdown.load(std::memory_order_acquire) && caller
                 && caller == GlassCore::ModuleHandler::g_entryPointModule
-                // Для точного оконного BeginPaint DC переключателя не менять
-                // состояние цвета VCL. Memory DC по контексту не идентифицируем.
-                && !GlassCore::DelphiToggle::PreservePaintDcBkColor(hFromDc, hdc, caller)
                 && (color & 0xFFFFFF) == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
                 && hFromDc && GlassCore::Root::HasRootHookCache(hFromDc))
             {

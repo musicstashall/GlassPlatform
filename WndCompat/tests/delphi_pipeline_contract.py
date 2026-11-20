@@ -229,18 +229,6 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('[GlassCore][DelphiMemo] BufferTarget', source)
         self.assertIn('[GlassCore][DelphiMemo] ComposeFallback', source)
 
-    def test_toggle_preserves_only_real_beginpaint_dc_bkcolor(self):
-        trace = read('GlassCore/src/Hooks/delphi/TToggleSwitchHooks.cpp')
-        root = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
-        guard = trace.split('bool PreservePaintDcBkColor(', 1)[1].split('#if defined(_DEBUG)', 1)[0]
-        for item in ('g_entryPointModule', 'IsFullInjectionMode()',
-                     'GlassIsBackdropAllowedForHwnd(hwnd)', 'WindowFromDC(dc) != hwnd',
-                     'IsCurrentPaintDcForHwnd(hwnd, dc)', 'L"TToggleSwitch"'):
-            self.assertIn(item, guard)
-        setbk = root.split('COLORREF WINAPI Root_MySetBkColor(HDC hdc, COLORREF color)', 1)[1].split('HBRUSH WINAPI Root_MyGetSysColorBrush', 1)[0]
-        self.assertIn('!GlassCore::DelphiToggle::PreservePaintDcBkColor(hFromDc, hdc, caller)', setbk)
-        self.assertIn('return o(hdc, color)', setbk)
-
     def test_theme_detour_transaction_failure_rolls_back_ref(self):
         ux = read('GlassCore/src/Hooks/UxThemeHooks.cpp')
         body = ux.split('bool EnableThemeHooks(bool enable)', 1)[1].split('void BeginMenuBarUxThemeDraw', 1)[0]
@@ -252,6 +240,32 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('if (!orig || g_delphiBitBtnInTheme) return false', bit)
         self.assertIn('if (session.themeDetourAcquired)', bit)
         self.assertIn('EnableThemeHooks(false)', bit)
+
+    def test_toggle_alpha_hooks_are_session_and_buffer_scoped(self):
+        code = read('GlassCore/src/Hooks/delphi/TToggleSwitchHooks.cpp')
+        engine = read('GlassCore/src/Core/Engine.cpp')
+        self.assertIn('GlassCore::DelphiToggle::Startup()', engine)
+        self.assertIn('GlassCore::DelphiToggle::Shutdown()', engine)
+        for guard in ('IsFullInjectionMode()', 'GlassIsBackdropAllowedForHwnd(hwnd)',
+                      'caller == GlassCore::ModuleHandler::g_entryPointModule',
+                      'IsTopWindowDrawingSession(s.hwnd)', 'GetStackOwnerForDc(dc) != s.hwnd',
+                      'GetObjectType(dc) != OBJ_MEMDC', 'GetMapMode(dc) != MM_TEXT',
+                      'info.bmWidth == client.right', 'info.bmHeight == client.bottom',
+                      'bitmap != s.trackBitmap'):
+            self.assertIn(guard, code)
+        self.assertIn('"Rectangle", reinterpret_cast<void*>(ToggleRectangle)', code)
+        self.assertIn('"FillRect", reinterpret_cast<void*>(ToggleFillRect)', code)
+        self.assertIn('LayeredStrokePen::TryCreateSolid(lp, 255)', code)
+        self.assertIn('CreateSolidColorBrushWithAlpha(lb.lbColor, 255)', code)
+        self.assertIn('SelectObject(dc, prevPen)', code)
+        self.assertIn('SelectObject(dc, prevBrush)', code)
+        self.assertIn('return orig(dc, rect, alpha.get())', code)
+        self.assertIn('session.eligible', code)
+        self.assertIn('g_sessions.back().serial == sessionSerial', code)
+        self.assertIn('RegisterGetDCProvider({BeginDcSession, EndDcSession})', code)
+        root = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
+        self.assertNotIn('PreservePaintDcBkColor', root)
+        self.assertIn('SetBkColor: entryPoint COLOR_WINDOW→0', root)
 
     def test_toggle_delete_trace_is_debug_bounded_and_observational(self):
         source = read('GlassCore/src/Subsystems/PaintDispatcher.cpp')
