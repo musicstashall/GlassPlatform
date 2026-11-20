@@ -87,6 +87,9 @@ namespace GlassCore::PaintDispatcher
     // Ближайшая оконная paint/GetDC-сессия без учёта вложенных memory DC.
     [[nodiscard]] bool IsTopWindowDrawingSession(HWND hWnd) noexcept;
 
+    // Истинная BeginPaint-сессия этого HWND ещё открыта (в т.ч. под GetDC).
+    [[nodiscard]] bool HasOpenPaintSessionForHwnd(HWND hWnd) noexcept;
+
     // Ближайшая запись именно этого HDC — BeginPaint данного окна, не вложенный GetDC.
     [[nodiscard]] bool IsCurrentPaintDcForHwnd(HWND hWnd, HDC hdc) noexcept;
 

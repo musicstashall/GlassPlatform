@@ -18,14 +18,14 @@ namespace GlassCore::DelphiToggle
     {
         using namespace GlassCore::Hooks;
         using namespace std::literals;
-        enum : size_t { TrackRectangle, ThumbFillRect,
+        enum : size_t { TrackRectangle, ThumbFillRect, CopyStretchBlt,
 #if defined(_DEBUG)
-            CopyBitBlt, CopyStretchBlt,
+            CopyBitBlt,
 #endif
             HookCount };
+        BOOL WINAPI ToggleStretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
 #if defined(_DEBUG)
         BOOL WINAPI TraceBitBlt(HDC, int, int, int, int, HDC, int, int, DWORD);
-        BOOL WINAPI TraceStretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
 #endif
         BOOL WINAPI ToggleRectangle(HDC dc, int left, int top, int right, int bottom);
         int WINAPI ToggleFillRect(HDC dc, const RECT* rect, HBRUSH brush);
@@ -34,11 +34,11 @@ namespace GlassCore::DelphiToggle
                 "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "Rectangle", reinterpret_cast<void*>(ToggleRectangle) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
                 "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "FillRect", reinterpret_cast<void*>(ToggleFillRect) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv,
+                "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "StretchBlt", reinterpret_cast<void*>(ToggleStretchBlt) },
 #if defined(_DEBUG)
             std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv,
                 "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "BitBlt", reinterpret_cast<void*>(TraceBitBlt) },
-            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv,
-                "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "StretchBlt", reinterpret_cast<void*>(TraceStretchBlt) },
 #endif
         }};
         HookDispatcher<HookCount, 3> g_dispatcher{ g_dependency, nullptr };
@@ -50,9 +50,8 @@ namespace GlassCore::DelphiToggle
             unsigned long long serial{};
             bool isPaint{};
             bool eligible{};
-#if defined(_DEBUG)
             HDC windowDC{};
-#endif
+            bool copyInvalidated{};
             std::array<bool, HookCount> hooks{};
             HDC trackDC{};
             HBITMAP trackBitmap{};
@@ -79,9 +78,7 @@ namespace GlassCore::DelphiToggle
             session.hwnd = hwnd;
             session.serial = ++g_nextSerial;
             session.isPaint = paint;
-#if defined(_DEBUG)
             if (!paint) session.windowDC = GlassCore::PaintDispatcher::GetCurrentGetDcSessionHdc();
-#endif
             session.eligible = IsTarget(hwnd) && caller
                 && caller == GlassCore::ModuleHandler::g_entryPointModule;
             if (!session.eligible)
@@ -96,9 +93,10 @@ namespace GlassCore::DelphiToggle
                 if (g_shutdown.load(std::memory_order_acquire)) return;
                 for (size_t i = 0; i < HookCount; ++i)
                 {
+                    // Копирование контролируется только в сессии GetDC.
+                    if (paint && i == CopyStretchBlt) continue;
 #if defined(_DEBUG)
-                    // Copy probes are observational and restricted to GetDC.
-                    if (paint && (i == CopyBitBlt || i == CopyStretchBlt)) continue;
+                    if (paint && i == CopyBitBlt) continue;
 #endif
                     const int before = g_dispatcher.GetRef(i);
                     g_dispatcher.EnableHook(i, true);
@@ -309,27 +307,69 @@ namespace GlassCore::DelphiToggle
             return result;
         }
 
-        BOOL WINAPI TraceStretchBlt(HDC dest, int x, int y, int width, int height,
+#endif
+
+        // VCL может подготовить DDB кадра до GetDC и затем скопировать его
+        // целиком в окно: на таком пути Rectangle/FillRect не вызываются. Не
+        // подменяем содержимое или ROP. После успешной точной копии просим VCL
+        // перерисовать само окно обычным WM_PAINT (без фонового erase).
+        BOOL WINAPI ToggleStretchBlt(HDC dest, int x, int y, int width, int height,
             HDC source, int sx, int sy, int sw, int sh, DWORD rop)
         {
             const DWORD entryError = GetLastError();
             auto orig = g_dispatcher.GetOrg<CopyStretchBlt, decltype(&StretchBlt)>();
             if (!orig) { SetLastError(entryError); return StretchBlt(dest, x, y, width, height, source, sx, sy, sw, sh, rop); }
-            const bool tracked = !g_sessions.empty() && g_sessions.back().eligible
+            const bool tracked = !g_shutdown.load(std::memory_order_acquire)
+                && !g_sessions.empty() && g_sessions.back().eligible
                 && !g_sessions.back().isPaint && g_sessions.back().windowDC == dest
-                && WindowFromDC(dest) == g_sessions.back().hwnd
+                && dest && WindowFromDC(dest) == g_sessions.back().hwnd
                 && GlassCore::PaintDispatcher::IsTopWindowDrawingSession(g_sessions.back().hwnd);
             Session session{};
             if (tracked) session = g_sessions.back();
+            bool refresh = false;
+            if (tracked && !session.copyInvalidated && rop == SRCCOPY && source
+                // Не создавать цикл invalidate -> paint -> вложенный GetDC -> invalidate.
+                && !GlassCore::PaintDispatcher::HasOpenPaintSessionForHwnd(session.hwnd)
+                && GetObjectType(source) == OBJ_MEMDC && !WindowFromDC(source)
+                && IsTarget(session.hwnd) && IsWindowVisible(session.hwnd))
+            {
+                RECT client{};
+                BITMAP bitmap{};
+                const HGDIOBJ bmp = GetCurrentObject(source, OBJ_BITMAP);
+                refresh = GetClientRect(session.hwnd, &client) && !IsRectEmpty(&client)
+                    && x == 0 && y == 0 && sx == 0 && sy == 0
+                    && width == client.right && height == client.bottom
+                    && sw == width && sh == height
+                    && bmp && GetObject(bmp, sizeof(bitmap), &bitmap) == sizeof(bitmap)
+                    && bitmap.bmWidth == width && bitmap.bmHeight == height
+                    && bitmap.bmBitsPixel == 32;
+            }
             SetLastError(entryError);
             const BOOL result = orig(dest, x, y, width, height, source, sx, sy, sw, sh, rop);
             const DWORD error = GetLastError();
+            if (result && refresh && !g_shutdown.load(std::memory_order_acquire)
+                && !g_sessions.empty() && g_sessions.back().serial == session.serial
+                && g_sessions.back().hwnd == session.hwnd
+                && !g_sessions.back().copyInvalidated && IsTarget(session.hwnd)
+                && !GlassCore::PaintDispatcher::HasOpenPaintSessionForHwnd(session.hwnd))
+            {
+                // Один запрос на GetDC-сессию; Windows объединяет invalidation.
+                g_sessions.back().copyInvalidated = true;
+                const BOOL invalidated = InvalidateRect(session.hwnd, nullptr, FALSE);
+#if defined(_DEBUG)
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiToggle] copy refresh hwnd=0x%p dc=0x%p invalidated=%d",
+                    session.hwnd, dest, invalidated);
+#else
+                (void)invalidated;
+#endif
+            }
+#if defined(_DEBUG)
             if (tracked) LogCopy(L"StretchBlt", session, dest, x, y, width, height,
                 source, sx, sy, sw, sh, rop, result);
+#endif
             SetLastError(error);
             return result;
         }
-#endif
 
         int WINAPI ToggleFillRect(HDC dc, const RECT* rect, HBRUSH brush)
         {

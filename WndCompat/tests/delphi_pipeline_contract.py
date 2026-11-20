@@ -267,21 +267,44 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertNotIn('PreservePaintDcBkColor', root)
         self.assertIn('SetBkColor: entryPoint COLOR_WINDOW→0', root)
 
-    def test_toggle_getdc_copy_probes_are_debug_only_and_observational(self):
+    def test_toggle_getdc_full_copy_requests_one_async_paint(self):
         code = read('GlassCore/src/Hooks/delphi/TToggleSwitchHooks.cpp')
         enum = code.split('enum : size_t { TrackRectangle', 1)[1].split('HookCount };', 1)[0]
-        self.assertIn('#if defined(_DEBUG)', enum)
-        self.assertIn('CopyBitBlt, CopyStretchBlt', enum)
-        self.assertIn('if (paint && (i == CopyBitBlt || i == CopyStretchBlt)) continue;', code)
-        for name in ('TraceBitBlt', 'TraceStretchBlt'):
-            body = code.rsplit(f'BOOL WINAPI {name}(', 1)[1].split('\n        }', 1)[0]
-            self.assertIn('g_sessions.back().windowDC == dest', body)
-            self.assertIn('WindowFromDC(dest) == g_sessions.back().hwnd', body)
-            self.assertIn('IsTopWindowDrawingSession', body)
-            self.assertEqual(body.count('const BOOL result = orig('), 1)
-            self.assertIn('SetLastError(entryError)', body)
-            self.assertIn('SetLastError(error)', body)
-            self.assertIn('return result;', body)
+        self.assertIn('CopyStretchBlt,', enum.split('#if defined(_DEBUG)', 1)[0])
+        self.assertIn('CopyBitBlt,', enum.split('#if defined(_DEBUG)', 1)[1])
+        self.assertIn('if (paint && i == CopyStretchBlt) continue;', code)
+        body = code.rsplit('BOOL WINAPI ToggleStretchBlt(', 1)[1].split('\n        }', 1)[0]
+        for guard in ('g_sessions.back().windowDC == dest', 'WindowFromDC(dest) == g_sessions.back().hwnd',
+                      'IsTopWindowDrawingSession', 'HasOpenPaintSessionForHwnd(session.hwnd)',
+                      'rop == SRCCOPY', 'GetObjectType(source) == OBJ_MEMDC',
+                      'x == 0 && y == 0 && sx == 0 && sy == 0',
+                      'width == client.right && height == client.bottom',
+                      'bitmap.bmWidth == width && bitmap.bmHeight == height',
+                      'g_sessions.back().serial == session.serial',
+                      'g_sessions.back().copyInvalidated = true',
+                      'InvalidateRect(session.hwnd, nullptr, FALSE)'):
+            self.assertIn(guard, body)
+        self.assertEqual(body.count('const BOOL result = orig('), 1)
+        self.assertLess(body.index('const BOOL result = orig('), body.index('InvalidateRect('))
+        self.assertIn('if (result && refresh', body)
+        self.assertIn('SetLastError(entryError)', body)
+        self.assertIn('SetLastError(error)', body)
+        self.assertIn('return result;', body)
+        self.assertNotIn('UpdateWindow(', body)
+        self.assertNotIn('GdiAlphaBlend(', body)
+        dispatcher = read('GlassCore/src/Subsystems/PaintDispatcher.cpp')
+        lookup = dispatcher.split('bool HasOpenPaintSessionForHwnd(', 1)[1].split('bool IsCurrentPaintDcForHwnd(', 1)[0]
+        self.assertIn('it->type == DcEntryType::Paint && it->hWnd == hWnd', lookup)
+
+    def test_toggle_bitblt_probe_remains_debug_only_and_observational(self):
+        code = read('GlassCore/src/Hooks/delphi/TToggleSwitchHooks.cpp')
+        body = code.rsplit('BOOL WINAPI TraceBitBlt(', 1)[1].split('\n        }', 1)[0]
+        self.assertIn('g_sessions.back().windowDC == dest', body)
+        self.assertIn('WindowFromDC(dest) == g_sessions.back().hwnd', body)
+        self.assertEqual(body.count('const BOOL result = orig('), 1)
+        self.assertIn('SetLastError(entryError)', body)
+        self.assertIn('SetLastError(error)', body)
+        self.assertIn('return result;', body)
         self.assertIn('budget = 32', code)
         self.assertIn('LogCopy(L"StretchBlt"', code)
 

@@ -705,6 +705,15 @@ namespace GlassCore::PaintDispatcher
         return false;
     }
 
+    bool HasOpenPaintSessionForHwnd(HWND hWnd) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || !hWnd) return false;
+        for (auto it = g_dcStack.rbegin(); it != g_dcStack.rend(); ++it)
+            if (it->type == DcEntryType::Paint && it->hWnd == hWnd && it->hDC)
+                return true;
+        return false;
+    }
+
     bool IsCurrentPaintDcForHwnd(HWND hWnd, HDC hdc) noexcept
     {
         if (g_shutdown.load(std::memory_order_acquire) || !hWnd || !hdc)
