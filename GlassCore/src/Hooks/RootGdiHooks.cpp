@@ -1469,28 +1469,12 @@ namespace GlassCore::Root
             HGDIOBJ hbr = GetCurrentObject(hdc, OBJ_BRUSH);
             GetObject(hbr, sizeof(lbrush), &lbrush);
 
+            if (GlassCore::ComboBoxControl::IsNativeAppPaintSession(HwndFromDcOrMmcSession(hdc, caller)))
             {
-                HWND comboWnd = HwndFromDcOrMmcSession(hdc, caller);
-                if (GlassCore::ComboBoxControl::IsNativeAppPaintSession(comboWnd))
-                {
-                    const RECT r{ x, y, x + cx, y + cy };
-                    const bool systemBrush = lbrush.lbStyle == BS_SOLID && lbrush.lbColor != 0
-                        && (lbrush.lbColor == GetSysColor(COLOR_WINDOW)
-                            || lbrush.lbColor == GetSysColor(COLOR_BTNFACE));
-                    const bool whiteRop = rop == PATCOPY || rop == WHITENESS;
-                    // API Monitor: COMCTL32 fills the field with
-                    // PatBlt(hdc, 2, 2, 179, 20, PATCOPY) after the EXE cleared
-                    // the whole client. Same conversion, but only on the window
-                    // DC of this exact combo.
-                    if (WindowFromDC(hdc) == comboWnd && systemBrush && whiteRop)
-                    {
-                        LogNativeComboGdi(L"PatBlt", hdc, &r, lbrush.lbColor, L"cleared-system");
-                        return o(hdc, x, y, cx, cy, BLACKNESS);
-                    }
-                    wchar_t branch[32]{};
-                    swprintf_s(branch, L"rop=0x%08X", static_cast<unsigned>(rop));
-                    LogNativeComboGdi(L"PatBlt", hdc, &r, lbrush.lbColor, branch);
-                }
+                const RECT r{ x, y, x + cx, y + cy };
+                wchar_t branch[32]{};
+                swprintf_s(branch, L"rop=0x%08X", static_cast<unsigned>(rop));
+                LogNativeComboGdi(L"PatBlt", hdc, &r, lbrush.lbColor, branch);
             }
 
             const bool sysmon = CallerBaseIs(caller, L"sysmon.ocx") && StrEqI(cls, L"SysmonCtrl");
@@ -1865,13 +1849,10 @@ namespace GlassCore::Root
 
             if (GlassCore::ComboBoxControl::IsNativeAppPaintSession(hWnd))
             {
-                // Native class-"ComboBox" painted by the EXE/COMCTL32: its field
+                // Native class-"ComboBox" painted by the EXE: its field/button
                 // background is opaque system colour. Convert that fill to the
                 // transparent black used elsewhere; other colours pass through.
-                // Only the real window DC is converted: COMCTL32 also fills its
-                // own memory buffer for the field text, which must stay intact.
-                if (WindowFromDC(hDC) == hWnd
-                    && lb.lbStyle == BS_SOLID && lb.lbColor != 0
+                if (lb.lbStyle == BS_SOLID && lb.lbColor != 0
                     && (lb.lbColor == GetSysColor(COLOR_WINDOW)
                         || lb.lbColor == GetSysColor(COLOR_BTNFACE)))
                 {

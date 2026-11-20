@@ -47,10 +47,6 @@ namespace GlassCore::ComboBoxControl
         // Native class-"ComboBox" painted by the EXE: temporary Root GDI hooks
         // (fill/rectangle/PatBlt) scoped to that window and session.
         thread_local bool   g_nativeAppGdiHooksOn = false;
-        // COMCTL32 module that paints the field of a native class-"ComboBox"
-        // inside the EXE's BeginPaint (API Monitor: PatBlt/DrawThemeTextEx and
-        // the field text come from COMCTL32, not from the entry point).
-        thread_local HMODULE g_nativePeerMod = nullptr;
         static std::atomic<bool> g_shutdown{ false };
 
         // Дедуп: два идентичных DTB подряд (тот же part/state/rect) → skip, иначе второй проход ломает стекло.
@@ -991,19 +987,6 @@ namespace GlassCore::ComboBoxControl
                 GlassCore::Root::EnableRootHook(comctlMod, GlassCore::Root::OHK_RECTANGLE, true);
                 GlassCore::Root::EnableRootHook(comctlMod, GlassCore::Root::OHK_PATBLT, true);
                 g_nativeAppGdiHooksOn = true;
-                // The EXE begins the paint, but the field itself (white PatBlt,
-                // clip, text) is produced by COMCTL32 on the same HDC. Attach the
-                // same combo session + GDI hooks there, otherwise neither the
-                // field fill nor DrawThemeBackground (hover button) are seen.
-                HMODULE peer = g_new ? g_new : g_legacy;
-                if (peer && peer != comctlMod)
-                {
-                    EnableComboBoxHooksOnComctlModule(peer, true);
-                    GlassCore::Root::EnableRootHook(peer, GlassCore::Root::OHK_FILLRECT, true);
-                    GlassCore::Root::EnableRootHook(peer, GlassCore::Root::OHK_RECTANGLE, true);
-                    GlassCore::Root::EnableRootHook(peer, GlassCore::Root::OHK_PATBLT, true);
-                    g_nativePeerMod = peer;
-                }
             }
 #if defined(_DEBUG)
             {
@@ -1046,14 +1029,6 @@ namespace GlassCore::ComboBoxControl
             if (!g_activePaintMod)
                 return;
 
-            if (g_nativePeerMod)
-            {
-                EnableComboBoxHooksOnComctlModule(g_nativePeerMod, false);
-                GlassCore::Root::EnableRootHook(g_nativePeerMod, GlassCore::Root::OHK_FILLRECT, false);
-                GlassCore::Root::EnableRootHook(g_nativePeerMod, GlassCore::Root::OHK_RECTANGLE, false);
-                GlassCore::Root::EnableRootHook(g_nativePeerMod, GlassCore::Root::OHK_PATBLT, false);
-                g_nativePeerMod = nullptr;
-            }
             if (g_nativeAppGdiHooksOn)
             {
                 GlassCore::Root::EnableRootHook(g_activePaintMod, GlassCore::Root::OHK_FILLRECT, false);
