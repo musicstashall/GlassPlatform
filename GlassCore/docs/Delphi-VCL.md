@@ -1933,16 +1933,15 @@ COLOR_WINDOW→0`, `WhiteFill` ячеек, `Text` с `hr=0x0`. Правки по
 - `COLOR_WINDOW` (обычные ячейки, фон) → сплошная чёрная кисть, то есть
   прозрачный фон (как раньше);
 - любой другой цвет (фиксированные строка/колонка `TStringGrid` = `clBtnFace`,
-  цветные ячейки `TDrawGrid`) → `CreateSolidColorBrushWithAlpha(color, 12)`:
-  заметно ниже темы/комбо (`effAlpha=35`), по просьбе «сильно уменьшить альфу»;
+  цветные ячейки `TDrawGrid`) → альфа `kDelphiGridCellAlpha` (тот же порядок,
+  что у темы/комбо);
 - то же правило в `Root_MyGetSysColorBrush` для `COLOR_WINDOW`/`COLOR_BTNFACE`,
   чтобы стоковые кисти не выпадали из политики;
 - `[DelphiGrid] Fill` гасит в `BLACKNESS` только `COLOR_WINDOW`; alpha-кисть
   проходит в `orig()` и даёт полупрозрачную заливку.
 
-Сборка и визуальный результат на Windows не проверены. Если 12 окажется мало
-или много — это одна константа `kDelphiGridCellAlpha` в `RootGdiHooks.cpp`
-(было 35, стало 12).
+Сборка и визуальный результат на Windows не проверены. Альфа настраивается
+одной константой `kDelphiGridCellAlpha` в `RootGdiHooks.cpp`.
 
 ## Тест 52: чёрная очистка + AlphaBlend для цветных ячеек
 
@@ -1957,12 +1956,12 @@ COLOR_WINDOW→0`, `WhiteFill` ячеек, `Text` с `hr=0x0`. Правки по
 1. прямоугольник очищается `PatBlt(BLACKNESS)` — прозрачный фон;
 2. если цвет отличается от `COLOR_WINDOW` — поверх кладётся цветная подложка
    через `FillRectWithAlphaBlend` (1×1 premultiplied DIB + `GdiAlphaBlend` с
-   `AC_SRC_ALPHA`), альфа `kDelphiGridCellAlpha = 12`.
+   `AC_SRC_ALPHA`), альфа `kDelphiGridCellAlpha` (сейчас 35).
 
 Так цвет ячейки одновременно отличается от общего фона и просвечивает, а не
 смешивается со старым содержимым (что и давало «плотный» цвет). Стоковые кисти
 `GetSysColorBrush(COLOR_WINDOW/COLOR_BTNFACE)` распознаются по хэндлу, потому что
 `GetObject` для них не работает. В журнале: `WhiteFill` (только очистка) или
-`AlphaFill … color=0x… alpha=12`.
+`AlphaFill … color=0x… alpha=35`.
 
 Сборка и визуальный результат на Windows не проверены.
