@@ -616,6 +616,30 @@ namespace
     }
 #endif
 
+#if defined(_DEBUG)
+    static void LogDelphiInputCtlColor(HWND parent, UINT msg, HWND child, HDC dc, LRESULT brush) noexcept
+    {
+        if (!child || !dc || !(WndCompat::IsWindowClass(child, L"TNumberBox")
+            || WndCompat::IsWindowClass(child, L"THotKey")
+            || WndCompat::IsWindowClass(child, L"TSpinEdit"))) return;
+        static thread_local ULONGLONG epoch = 0;
+        static thread_local unsigned budget = 0;
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch || now - epoch >= 1000) { epoch = now; budget = 24; }
+        if (!budget) return;
+        --budget;
+        WCHAR cls[64]{};
+        GetClassNameW(child, cls, _countof(cls));
+        LOGBRUSH lb{};
+        const bool valid = GetObjectW(reinterpret_cast<HGDIOBJ>(brush), sizeof(lb), &lb) == sizeof(lb);
+        DebugLog(DBG_NORMAL, L"[WndCompat][DelphiInputColor] parent=0x%p hwnd=0x%p class=%s msg=0x%X dc=0x%p dcWnd=0x%p focus=%d style=0x%08X brush=0x%p brushValid=%d brushStyle=%u brushColor=0x%08X bk=0x%08X mode=%d",
+            parent, child, cls, msg, dc, WindowFromDC(dc), GetFocus() == child ? 1 : 0,
+            static_cast<unsigned>(GetWindowLongW(child, GWL_STYLE)), reinterpret_cast<void*>(brush),
+            valid ? 1 : 0, static_cast<unsigned>(lb.lbStyle), static_cast<unsigned>(lb.lbColor),
+            static_cast<unsigned>(GetBkColor(dc)), GetBkMode(dc));
+    }
+#endif
+
     // BWM WinHandler WM_CTLCOLORSTATIC/LISTBOX — probe кисти через DefSubclassProc + SetBkColor hook.
     [[nodiscard]] bool TryResolveCtlColorStaticBrush(
         HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, LRESULT& outResult) noexcept
@@ -640,6 +664,7 @@ namespace
         const LRESULT defResult = DefSubclassProc(hWnd, uMsg, wParam, lParam);
         SetCtlColorBkColorProbeAttach(false);
 #if defined(_DEBUG)
+        LogDelphiInputCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc, defResult);
         const HWND memoChild = reinterpret_cast<HWND>(lParam);
         const bool isMemo = memoChild && WndCompat::IsWindowClass(memoChild, L"TMemo");
         const COLORREF memoOriginalBk = isMemo ? GetBkColor(hdc) : CLR_INVALID;
@@ -1076,6 +1101,8 @@ namespace
             // Переопределяем только фон для стекла
             HDC hdc = reinterpret_cast<HDC>(wParam);
 #if defined(_DEBUG)
+            if (uMsg == WM_CTLCOLOREDIT)
+                LogDelphiInputCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc, originalBrush);
             const HWND memoChild = reinterpret_cast<HWND>(lParam);
             const bool isMemo = uMsg == WM_CTLCOLOREDIT && memoChild
                 && WndCompat::IsWindowClass(memoChild, L"TMemo");
@@ -1293,9 +1320,8 @@ namespace
                     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
                 }
             }
-            // В Debug + GLASS_DELPHI_DRAW_PROBE: только наблюдение IAT EXE
-            // на время вызова VCL. Точный HDC из DRAWITEMSTRUCT записывается
-            // отдельно; memory DC в журнале не считается автоматически его частью.
+            // VCL рисует строку в HDC из DRAWITEMSTRUCT. Production сессия
+            // обрабатывает только этот DC; необязательная probe ничего не меняет.
             if (dis->CtlType == ODT_LISTBOX && dis->hwndItem
                 && GetParent(dis->hwndItem) == hWnd
                 && (WndCompat::IsWindowClass(dis->hwndItem, L"TListBox")
@@ -1307,6 +1333,15 @@ namespace
                 const HMODULE core = GetModuleHandleW(L"GlassCore.dll");
                 const auto begin = core ? reinterpret_cast<BeginFn>(GetProcAddress(core, "GlassCore_BeginDelphiListBoxProbe")) : nullptr;
                 const auto end = core ? reinterpret_cast<EndFn>(GetProcAddress(core, "GlassCore_EndDelphiListBoxProbe")) : nullptr;
+                const auto drawBegin = core ? reinterpret_cast<BeginFn>(GetProcAddress(core, "GlassCore_BeginDelphiListBoxDraw")) : nullptr;
+                const auto drawEnd = core ? reinterpret_cast<EndFn>(GetProcAddress(core, "GlassCore_EndDelphiListBoxDraw")) : nullptr;
+                if (drawBegin && drawEnd && drawBegin(hWnd, dis))
+                {
+                    auto finishDraw = wil::scope_exit([&]() noexcept { drawEnd(); });
+                    const bool probing = begin && end && begin(hWnd, dis);
+                    auto finishProbe = wil::scope_exit([&]() noexcept { if (probing) end(); });
+                    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                }
                 if (begin && end && begin(hWnd, dis))
                 {
                     auto finish = wil::scope_exit([&]() noexcept { end(); });

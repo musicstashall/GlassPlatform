@@ -378,6 +378,7 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         Equals(cls, L"TMaskEdit") ||
         Equals(cls, L"TSearchBox") ||
         Equals(cls, L"TNumberBox") ||
+        Equals(cls, L"TSpinEdit") ||
         Equals(cls, L"THotKey") ||
         Equals(cls, L"TMemo") ||
         Equals(cls, L"TInplaceEditList"))

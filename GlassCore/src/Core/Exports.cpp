@@ -10,6 +10,7 @@
 #include <Hooks/Button.h>
 #include <Hooks/delphi/TBitBtnHooks.h>
 #include <Hooks/delphi/TListBoxProbe.h>
+#include <Hooks/delphi/TListBoxDraw.h>
 #include <Hooks/Static.h>
 #include <Hooks/Rebar.h>
 #include <GlassCoreProviders.h>
@@ -301,6 +302,17 @@ extern "C" __declspec(dllexport)
 void WINAPI GlassCore_EndDelphiBitBtnDraw() noexcept
 {
     GlassCore::Button::EndDelphiBitBtnOwnerDraw();
+}
+
+extern "C" __declspec(dllexport)
+BOOL WINAPI GlassCore_BeginDelphiListBoxDraw(HWND parent, const DRAWITEMSTRUCT* dis) noexcept
+{
+    return GlassCore::DelphiListBox::BeginDraw(parent, dis) ? TRUE : FALSE;
+}
+extern "C" __declspec(dllexport)
+void WINAPI GlassCore_EndDelphiListBoxDraw() noexcept
+{
+    GlassCore::DelphiListBox::EndDraw();
 }
 
 extern "C" __declspec(dllexport)

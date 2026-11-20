@@ -86,6 +86,39 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn('TListBoxProbe.cpp', read(file))
             self.assertIn('TListBoxProbe.h', read(file))
 
+    def test_vcl_list_draw_uses_exact_owner_dc_and_keeps_controls_intact(self):
+        code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
+        root = read('WndCompat/Root/RootSubclass.cpp')
+        for guard in ('ODT_LISTBOX', 'GetParent(dis->hwndItem) != parent',
+                      'GlassIsBackdropAllowedForHwnd', 'dis->hDC',
+                      'GlassControlKind::ListBox', 'dc == s.dc',
+                      'GetTextAlign(dc) & TA_UPDATECP', 'DT_CALCRECT | DT_MODIFYSTRING',
+                      'IntersectClipRect(dc, s.item.left', 'EqualRect(&clipped, r)',
+                      'IsColorSample(s, *r)', 's.checkList',
+                      'CreateSolidColorBrushWithAlpha', 'g_inHook',
+                      'if (s.hooks[i]) g_dispatcher.EnableHook(i, false)'):
+            self.assertIn(guard, code)
+        self.assertIn('ExtTextOutWithAlpha', code)
+        self.assertIn('DrawTextWithAlpha', code)
+        self.assertIn('BLACKNESS', code)
+        self.assertIn('GlassCore_BeginDelphiListBoxDraw', root)
+        self.assertIn('GlassCore_EndDelphiListBoxDraw', root)
+        self.assertIn('finishDraw = wil::scope_exit', root)
+        self.assertIn('GlassCore::DelphiListBox::Shutdown()', read('GlassCore/src/Hooks/ListBoxHooks.cpp'))
+        for file in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            self.assertIn('TListBoxDraw.cpp', read(file))
+            self.assertIn('TListBoxDraw.h', read(file))
+
+    def test_spin_edit_uses_edit_and_input_color_probe_is_bounded(self):
+        classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
+        self.assertRegex(classifier, r'(?s)if\s*\([^;{}]*L"TSpinEdit"[^;{}]*\)\s*return ControlKind::Edit\s*;')
+        root = read('WndCompat/Root/RootSubclass.cpp')
+        probe = root.split('static void LogDelphiInputCtlColor', 1)[1].split('#endif', 1)[0]
+        for cls in ('TNumberBox', 'THotKey', 'TSpinEdit'):
+            self.assertIn('L"' + cls + '"', probe)
+        self.assertIn('budget = 24', probe)
+        self.assertIn('[WndCompat][DelphiInputColor]', probe)
+
     def test_vcl_draw_probes_are_opt_in_and_balanced(self):
         header = read("GlassCore/Include/Hooks/RootGdiHooks.h")
         gdi = read("GlassCore/src/Hooks/RootGdiHooks.cpp")

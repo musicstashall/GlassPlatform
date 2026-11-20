@@ -177,6 +177,7 @@
     <ClCompile Include="src\Core\Utils.cpp" />
     <ClCompile Include="src\Core\Intercept\CodePatcher.cpp" />
     <ClCompile Include="src\Hooks\ButtonHooks.cpp" />
+    <ClCompile Include="src\Hooks\delphi\TListBoxDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\TListBoxProbe.cpp" />
     <ClCompile Include="src\Hooks\delphi\TBitBtnHooks.cpp" />
     <ClCompile Include="src\Hooks\delphi\TToggleSwitchHooks.cpp" />
@@ -257,6 +258,7 @@
     <ClInclude Include="Include\Core\TextPreviewExport.h" />
     <ClInclude Include="Include\Core\Utils.h" />
     <ClInclude Include="Include\Hooks\Button.h" />
+    <ClInclude Include="Include\Hooks\delphi\TListBoxDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\TListBoxProbe.h" />
     <ClInclude Include="Include\Hooks\delphi\TBitBtnHooks.h" />
     <ClInclude Include="Include\Hooks\delphi\TBitBtnBridge.h" />

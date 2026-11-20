@@ -6,6 +6,7 @@
 
 #include "CorePch.h"
 #include <Hooks/ListBox.h>
+#include <Hooks/delphi/TListBoxDraw.h>
 #include <Hooks/forms/FormsHooks.h>
 #include <Hooks/ScrollBarDrawTheme.h>
 #include <Hooks/ScrollBarTheme.h>
@@ -733,6 +734,7 @@ namespace GlassCore::ListBoxControl
 
     void Startup()
     {
+        GlassCore::DelphiListBox::Startup();
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintGlobal, OnEndPaintGlobal });
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ OnListBoxGetDCBegin, OnListBoxGetDCEnd });
         GlassCore::PaintDispatcher::RegisterCompatDCProvider({ OnListBoxCompatBegin, OnListBoxCompatEnd });
@@ -756,6 +758,7 @@ namespace GlassCore::ListBoxControl
 
     void Shutdown()
     {
+        GlassCore::DelphiListBox::Shutdown();
         g_shutdown.store(true, std::memory_order_seq_cst);
         DisableAllOverallHooks();
         g_lbSessionRef = 0;
