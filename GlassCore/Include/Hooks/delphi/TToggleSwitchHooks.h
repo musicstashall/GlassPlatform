@@ -1,9 +1,10 @@
 #pragma once
 #include <windows.h>
 
-#if defined(_DEBUG)
 namespace GlassCore::DelphiToggle
 {
+    bool PreservePaintDcBkColor(HWND hwnd, HDC dc, HMODULE caller) noexcept;
+#if defined(_DEBUG)
     struct DelphiToggleDeleteTrace
     {
         HWND paintHwnd = nullptr;
@@ -17,5 +18,5 @@ namespace GlassCore::DelphiToggle
     DelphiToggleDeleteTrace CaptureDelphiToggleDelete(HWND paintHwnd, HDC dc) noexcept;
     void LogDelphiToggleDelete(const DelphiToggleDeleteTrace& trace, HDC dc,
         HMODULE caller, BOOL result) noexcept;
-}
 #endif
+}
