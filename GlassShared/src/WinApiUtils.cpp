@@ -252,19 +252,18 @@ namespace Shared::WinApiUtils
         std::memset(bits, 0, static_cast<size_t>(w) * static_cast<size_t>(h) * 4u);
 
         RECT rcMem{ 0, 0, w, h };
+        RECT blendRect = *pRect;
         RECT rcClipMem{};
         LPCRECT pClipMem = nullptr;
         if (pClipRect)
         {
-            RECT inter{};
-            if (IntersectRect(&inter, pRect, pClipRect))
-            {
-                rcClipMem.left   = inter.left - pRect->left;
-                rcClipMem.top    = inter.top - pRect->top;
-                rcClipMem.right  = inter.right - pRect->left;
-                rcClipMem.bottom = inter.bottom - pRect->top;
-                pClipMem         = &rcClipMem;
-            }
+            if (!IntersectRect(&blendRect, pRect, pClipRect))
+                return true;
+            rcClipMem.left   = blendRect.left - pRect->left;
+            rcClipMem.top    = blendRect.top - pRect->top;
+            rcClipMem.right  = blendRect.right - pRect->left;
+            rcClipMem.bottom = blendRect.bottom - pRect->top;
+            pClipMem = &rcClipMem;
         }
 
         if (FAILED(orig(hTheme, hdcWork.get(), partId, stateId, &rcMem, pClipMem)))
@@ -278,15 +277,15 @@ namespace Shared::WinApiUtils
 
         return GdiAlphaBlend(
                    hdcDest,
-                   pRect->left,
-                   pRect->top,
-                   w,
-                   h,
+                   blendRect.left,
+                   blendRect.top,
+                   blendRect.right - blendRect.left,
+                   blendRect.bottom - blendRect.top,
                    hdcWork.get(),
-                   0,
-                   0,
-                   w,
-                   h,
+                   blendRect.left - pRect->left,
+                   blendRect.top - pRect->top,
+                   blendRect.right - blendRect.left,
+                   blendRect.bottom - blendRect.top,
                    bf)
             == TRUE;
     }

@@ -1300,6 +1300,31 @@ namespace
                 break;
 
 #if defined(_DEBUG)
+            // Passive owner-draw observation: VCL combo items may be painted by
+            // the application, independently of the native ComboBox DTB path.
+            if (dis->CtlType == ODT_COMBOBOX && dis->hwndItem
+                && GetParent(dis->hwndItem) == hWnd
+                && (WndCompat::IsWindowClass(dis->hwndItem, L"TComboBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TColorBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TDriveComboBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TFilterComboBox")))
+            {
+                static thread_local ULONGLONG epoch = 0;
+                static thread_local unsigned budget = 0;
+                const ULONGLONG now = GetTickCount64();
+                if (!epoch || now - epoch >= 1000) { epoch = now; budget = 24; }
+                if (budget)
+                {
+                    --budget;
+                    wchar_t cls[64]{};
+                    GetClassNameW(dis->hwndItem, cls, _countof(cls));
+                    const RECT& r = dis->rcItem;
+                    DebugLog(DBG_NORMAL,
+                        L"[WndCompat][DelphiCombo] WM_DRAWITEM parent=0x%p hwnd=0x%p class=%s dc=0x%p dcWnd=0x%p item=%u action=0x%X state=0x%X rect=[%ld,%ld,%ld,%ld]",
+                        hWnd, dis->hwndItem, cls, dis->hDC, WindowFromDC(dis->hDC),
+                        dis->itemID, dis->itemAction, dis->itemState, r.left, r.top, r.right, r.bottom);
+                }
+            }
             // Пассивный зонд именно owner-draw TBitBtn; не меняет передачу
             // WM_DRAWITEM, содержимое DRAWITEMSTRUCT или результаты VCL.
             if (dis->CtlType == ODT_BUTTON && dis->hwndItem
