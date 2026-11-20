@@ -595,8 +595,7 @@ class DelphiPipelineContract(unittest.TestCase):
                       'L"TShownValueList"', 'L"TStringGrid"', 'L"TDrawGrid"',
                       'TA_UPDATECP', 'ETO_GLYPH_INDEX', 'ETO_PDY',
                       'lb.lbStyle == BS_SOLID',
-                      'plainFill == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)',
-                      'plainFill == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF)', 'L"Header"',
+                      'plainFill == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)', 'L"Header"',
                       'ExtTextOutWithAlpha', 'return orig('):
             self.assertIn(guard, grid)
         self.assertIn('options == ETO_CLIPPED && rect && rect->top == 0', grid)
@@ -743,7 +742,7 @@ class DelphiPipelineContract(unittest.TestCase):
         kind_for("SysHeader32", "Header")
         kind_for("SysLink", "Static")
 
-    def test_delphi_grid_background_has_no_alpha_brushes(self):
+    def test_delphi_grid_background_uses_low_alpha_for_non_window_colors(self):
         wc = read("WndCompat/Tracker/WindowClassifier.cpp")
         edit_block = wc.split('Equals(cls, L"TInplaceEditList")', 1)[0][-200:]
         self.assertIn('Equals(cls, L"TInplaceEdit")', edit_block)
@@ -752,9 +751,16 @@ class DelphiPipelineContract(unittest.TestCase):
         brush = brush.split('// BWM: COMDLG32', 1)[0]
         for marker in ('IsDelphiGridClass(hostCls)',
                        'plainGrid == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)',
-                       'return o(RGB(0, 0, 0))', 'return o(color)'):
+                       'return o(RGB(0, 0, 0))',
+                       'kDelphiGridCellAlpha', 'return o(color)'):
             self.assertIn(marker, brush)
-        self.assertNotIn('CreateSolidColorBrushWithAlpha', brush)
+        # COLOR_WINDOW → 0, остальные цвета → низкая альфа (не 255).
+        self.assertIn('constexpr BYTE kDelphiGridCellAlpha = 35;', root)
+        self.assertIn('CreateSolidColorBrushWithAlpha(', brush)
+        self.assertNotIn(', 255)', brush)
+        syscolor = root.split('HBRUSH WINAPI Root_MyGetSysColorBrush(int nIndex)', 1)[1].split('HBRUSH WINAPI Root_MyCreateSolidBrush', 1)[0]
+        for marker in ('IsDelphiGridClass(hostCls)', 'nIndex == COLOR_BTNFACE', 'kDelphiGridCellAlpha'):
+            self.assertIn(marker, syscolor)
         fill = root.split('int WINAPI Root_MyDelphiGridFill(HDC dc', 1)[1].split('HRESULT WINAPI Root_MyDelphiGridTheme', 1)[0]
         for marker in ('[GlassCore][DelphiGrid] Fill', 'color=0x%08X', 'brush=%d'):
             self.assertIn(marker, fill)
