@@ -2167,3 +2167,21 @@ paint-сессии — таблица (`IsDelphiGridPaintHost`). Белая ки
 Диагностика: `[DelphiGrid] GetSysColor COLOR_WINDOW→0 (client fill)`.
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 63: grid-слоты на модуле caller'а BeginPaint
+
+Журнал 18: `GetSysColorEnter` не появляется вообще, как и `FillEnter` для
+заливки клиента. Значит эти вызовы идут мимо IAT точки входа: `TCustomGrid.Paint`
+(VCL) рисует фон клиента, а заливки ячеек делает код приложения из EXE — поэтому
+вторые видны, а первые нет. Классическая причина — VCL в runtime-пакете
+(`*.bpl`): его IAT не патчится.
+
+В `Root_OnBeginPaint` добавлено: для окон `TStringGrid`/`TDrawGrid`/
+`TShownValueList` набор grid-слотов (`OHK_DELPHI_GRID_TEXT/FILL/THEME`,
+`OHK_GETSYSCOLOR`, `OHK_PATBLT`, `OHK_BITBLT`) включается **ещё и на модуле,
+вызвавшем BeginPaint**, если его там нет. Спеки добавляются в
+`session.specs`, поэтому `Root_OnEndPaint` снимает их парно, как остальные.
+
+Диагностика: `[Root][Session] BeginPaint: … caller=0x… +N grid-слотов на модуле caller'а`.
+
+Сборка и визуальный результат на Windows не проверены.
