@@ -33,10 +33,10 @@ enum class ControlKind
     // ── Win32 / Delphi / MFC / wxWidgets ─────────────────────────────────────
     Button,             // Button, TButton, TBitBtn, TCheckBox, TRadioButton
     Static,             // Static, TStatic, TStaticText, SysLink, Link Window
-    Edit,               // Edit, TEdit, TMemo, TLabeledEdit, TButtonedEdit, TMaskEdit, TSearchBox
-    RichEdit20W,        // RichEdit20W, TRichEdit
-    RichEdit50W,        // RICHEDIT50W
-    ListBox,            // ListBox, TListBox, ComboLBox
+    Edit,               // Edit, TEdit, TMemo, TLabeledEdit, TButtonedEdit, TMaskEdit, TSearchBox, TNumberBox, THotKey
+    RichEdit20W,        // RichEdit20W
+    RichEdit50W,        // RICHEDIT50W, TRichEdit (Delphi)
+    ListBox,            // ListBox, TListBox, TCheckListBox, TColorListBox
     ComboBox,           // ComboBox, TComboBox
     ComboBoxEx32,       // ComboBoxEx32 (extended combobox; root-subclass для WM_CTLCOLOR*)
     ListView,           // SysListView32, TListView, TSystemListView

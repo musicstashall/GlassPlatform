@@ -45,7 +45,7 @@ namespace GlassCore::Root
     };
 
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-    // Сессионные passthrough-пробы EXE; только точные TBitBtn / TToggleSwitch.
+    // Сессионные passthrough-пробы EXE для точных VCL классов (opt-in).
     void BeginVclDrawProbe(HWND hWnd, bool paint) noexcept;
     void EndVclDrawProbe(HWND hWnd, bool paint) noexcept;
     void ClearVclDrawProbe() noexcept;
