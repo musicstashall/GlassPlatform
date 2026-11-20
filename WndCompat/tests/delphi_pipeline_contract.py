@@ -560,6 +560,28 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertNotIn('DebugDetourHooks::SetEnabled', edit)
         self.assertNotIn('DebugDetourHooks::SetEnabled', paint)
 
+    def test_vcl_background_waits_for_proven_client_or_drawitem_dc(self):
+        code = read('GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp')
+        for marker in ('IsFullInjectionMode()', 'GlassIsBackdropAllowedForHwnd',
+                       'GlassControlKind::ListBox', 'GlassControlKind::Edit',
+                       'HasDelphiInputDefaultBackground', 'IsInsideDraw()',
+                       'EqualRect(r, &client)', 'GetMapMode(dc) == MM_TEXT',
+                       'RegisterPaintProvider', 'RegisterPostPaintProvider', 'RegisterGetDCProvider',
+                       's.paintDc == dc', 'IsCurrentPaintDcForHwnd',
+                       's.observedDc != dc', 'observedBitmap', 'LB_GETTOPINDEX',
+                       'LB_GETCOUNT', 'LB_GETITEMRECT', 'dis->itemID != static_cast<UINT>(top)',
+                       'dis->hDC', 'serial == s.serial', 'if (s.armed)',
+                       'g_dispatcher.DisableAllHooks()', 'BLACKNESS'):
+            self.assertIn(marker, code)
+        self.assertNotIn('TSpinEdit', code)
+        self.assertIn('ClearObservedListTail(dis->hwndItem, dis)', read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp'))
+        engine = read('GlassCore/src/Core/Engine.cpp')
+        self.assertIn('DelphiBackground::Startup()', engine)
+        self.assertIn('DelphiBackground::Shutdown()', engine)
+        for file in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            self.assertIn('TBackgroundHooks.cpp', read(file))
+            self.assertIn('TBackgroundHooks.h', read(file))
+
     def test_tab_brush_is_not_restored_to_another_class(self):
         source = read("WndCompat/Controls/TabControlSubclass.cpp")
         self.assertIn('_wcsicmp(className, L"TPageControl") != 0', source)
