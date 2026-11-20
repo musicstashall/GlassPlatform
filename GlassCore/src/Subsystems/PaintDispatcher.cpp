@@ -301,6 +301,46 @@ namespace GlassCore::PaintDispatcher
             && !IsPopupOnlyPaintDispatcherKind(GlassShared::GlassGetWindowKind(hWnd));
     }
 
+#if defined(_DEBUG)
+    // Наблюдаем только уже существующие detours PaintDispatcher, без нового
+    // глобального зонда и без пользовательского текста. GetDCEx даёт flags,
+    // позволяющие отличить DCX_WINDOW (рамка) от клиентского DC.
+    static void LogVclEditDc(const wchar_t* api, HWND hwnd, HDC dc, HMODULE caller,
+        DWORD flags, const PAINTSTRUCT* ps, int result, HDC src = nullptr) noexcept
+    {
+        if (!hwnd || g_shutdown.load(std::memory_order_acquire)) return;
+        wchar_t cls[64]{};
+        if (!GetClassNameW(hwnd, cls, _countof(cls))) return;
+        const bool memo = _wcsicmp(cls, L"TMemo") == 0;
+        bool comboEdit = false;
+        HWND parent = GetParent(hwnd);
+        if (!memo && _wcsicmp(cls, L"Edit") == 0 && parent)
+        {
+            wchar_t parentClass[64]{};
+            comboEdit = GetClassNameW(parent, parentClass, _countof(parentClass))
+                && _wcsicmp(parentClass, L"TComboBox") == 0;
+        }
+        if (!memo && !comboEdit) return;
+        const unsigned channel = (api[0] == L'C' || api[0] == L'D') ? 2u
+            : ((api[0] == L'B' || api[0] == L'E') ? 0u : 1u);
+        static thread_local ULONGLONG epoch[3]{};
+        static thread_local unsigned budget[3]{};
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch[channel] || now - epoch[channel] >= 1000) { epoch[channel] = now; budget[channel] = 48; }
+        if (!budget[channel]) return;
+        --budget[channel];
+        RECT clip{};
+        const int clipKind = dc ? GetClipBox(dc, &clip) : ERROR;
+        const RECT r = ps ? ps->rcPaint : RECT{};
+        DebugLog(DBG_NORMAL,
+            L"[GlassCore][VclEditProbe] api=%s hwnd=0x%p class=%s parent=0x%p focused=%d dc=0x%p dcWnd=0x%p src=0x%p caller=0x%p flags=0x%08X result=%d clipKind=%d clip=[%ld,%ld,%ld,%ld] paint=[%ld,%ld,%ld,%ld] erase=%d stack=%zu",
+            api, hwnd, cls, parent, GetFocus() == hwnd ? 1 : 0, dc,
+            dc ? WindowFromDC(dc) : nullptr, src, caller, static_cast<unsigned>(flags), result,
+            clipKind, clip.left, clip.top, clip.right, clip.bottom,
+            r.left, r.top, r.right, r.bottom, ps ? ps->fErase : -1, g_dcStack.size());
+    }
+#endif
+
     // ── Detours хуки ─────────────────────────────────────────────────────────
 
     static HDC WINAPI HookBeginPaint(HWND hWnd, LPPAINTSTRUCT lpPaint)
@@ -360,6 +400,9 @@ namespace GlassCore::PaintDispatcher
             // чтобы провайдеры (стек HMODULE, HookDispatcher::hookRef) не разбалансировались.
             for (auto& p : g_paintProviders) p.onEnd(hWnd, callerMod);
         }
+#if defined(_DEBUG)
+        LogVclEditDc(L"BeginPaint", hWnd, hdc, callerMod, 0, hdc ? lpPaint : nullptr, hdc ? 1 : 0);
+#endif
         return hdc;
     }
 
@@ -372,8 +415,15 @@ namespace GlassCore::PaintDispatcher
             return g_origEndPaint(hWnd, lpPaint);
         }
         HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
+#if defined(_DEBUG)
+        LogVclEditDc(L"EndPaint.before", hWnd, lpPaint ? lpPaint->hdc : nullptr, callerMod, 0, lpPaint, -1);
+#endif
         if (lpPaint) PopDC(lpPaint->hdc, g_paintProviders, callerMod, hWnd);
-        return g_origEndPaint(hWnd, lpPaint);
+        const BOOL result = g_origEndPaint(hWnd, lpPaint);
+#if defined(_DEBUG)
+        LogVclEditDc(L"EndPaint.after", hWnd, nullptr, callerMod, 0, nullptr, result);
+#endif
+        return result;
     }
 
     static HDC WINAPI HookGetDC(HWND hWnd)
@@ -396,6 +446,9 @@ namespace GlassCore::PaintDispatcher
             PushDC(hWnd, hdc, g_getDCProviders, callerMod, DcEntryType::GetDC);
             g_tlCurrentGetDcForProviders = nullptr;
         }
+#if defined(_DEBUG)
+        LogVclEditDc(L"GetDC", hWnd, hdc, callerMod, 0, nullptr, hdc ? 1 : 0);
+#endif
         return hdc;
     }
 
@@ -422,6 +475,9 @@ namespace GlassCore::PaintDispatcher
             PushDC(hWnd, hdc, g_getDCProviders, callerMod, DcEntryType::GetDC);
             g_tlCurrentGetDcForProviders = nullptr;
         }
+#if defined(_DEBUG)
+        LogVclEditDc(L"GetDCEx", hWnd, hdc, callerMod, flags, nullptr, hdc ? 1 : 0);
+#endif
         return hdc;
     }
 
@@ -433,8 +489,15 @@ namespace GlassCore::PaintDispatcher
             return g_origReleaseDC(hWnd, hDC);
         }
         HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
+#if defined(_DEBUG)
+        LogVclEditDc(L"ReleaseDC.before", hWnd, hDC, callerMod, 0, nullptr, -1);
+#endif
         PopDC(hDC, g_getDCProviders, callerMod, hWnd);
-        return g_origReleaseDC(hWnd, hDC);
+        const int result = g_origReleaseDC(hWnd, hDC);
+#if defined(_DEBUG)
+        LogVclEditDc(L"ReleaseDC.after", hWnd, nullptr, callerMod, 0, nullptr, result);
+#endif
+        return result;
     }
 
     // CreateCompatibleDC/DeleteDC — только g_compatDCProviders.
@@ -479,6 +542,10 @@ namespace GlassCore::PaintDispatcher
                 g_activePaintHWnd = hResolved;
                 for (auto& p : g_compatDCProviders)
                     p.onBegin(hResolved, callerMod);
+#if defined(_DEBUG)
+                // hResolved может быть контекстным fallback, а не фактическим владельцем DC.
+                LogVclEditDc(L"CreateCompatibleDC.context", hResolved, hdc, callerMod, 0, nullptr, 1, hdcSrc);
+#endif
             }
         }
         return hdc;
@@ -487,6 +554,10 @@ namespace GlassCore::PaintDispatcher
     static BOOL WINAPI HookDeleteDC(HDC hdc)
     {
         HMODULE callerMod = DetourGetContainingModule(_ReturnAddress());
+#if defined(_DEBUG)
+        const HWND contextHwnd = GetStackOwnerForDc(hdc);
+        LogVclEditDc(L"DeleteDC.before.context", contextHwnd, hdc, callerMod, 0, nullptr, -1);
+#endif
         PopDC(hdc, g_compatDCProviders, callerMod);
         return g_origDeleteDC(hdc);
     }

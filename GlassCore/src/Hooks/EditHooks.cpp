@@ -157,6 +157,24 @@ namespace GlassCore::EditControl
         return true;
     }
 
+    [[nodiscard]] static bool AllowDelphiComboEditLog(HWND hwnd) noexcept
+    {
+        WCHAR cls[64]{}, parentClass[64]{};
+        const HWND parent = hwnd ? GetParent(hwnd) : nullptr;
+        if (!parent || !GetClassNameW(hwnd, cls, _countof(cls))
+            || _wcsicmp(cls, L"Edit") != 0
+            || !GetClassNameW(parent, parentClass, _countof(parentClass))
+            || _wcsicmp(parentClass, L"TComboBox") != 0)
+            return false;
+        static thread_local ULONGLONG epoch = 0;
+        static thread_local unsigned budget = 0;
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch || now - epoch >= 1000) { epoch = now; budget = 16; }
+        if (!budget) return false;
+        --budget;
+        return true;
+    }
+
     // Только суммарная alpha-статистика, не содержимое DIB. Ограничиваем работу.
     static void MemoAlphaStats(const RGBQUAD* bits, int width, int height,
         size_t& nonzero, unsigned& maximum) noexcept
@@ -511,7 +529,16 @@ namespace GlassCore::EditControl
         GetClientRect(sessionHwnd, &clientClip);
         if (!IntersectRect(&r, &r, &clientClip) || IsRectEmpty(&r)) return;
 
-        PatBlt(targetDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+        const BOOL cleared = PatBlt(targetDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+#if defined(_DEBUG)
+        if (AllowDelphiMemoLog(sessionHwnd, 2))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiMemo] ApplyBackground api=PatBlt hwnd=0x%p source=0x%p target=0x%p targetWnd=0x%p session=%d rect=[%ld,%ld,%ld,%ld] rop=BLACKNESS result=%d bk=0x%08X",
+                sessionHwnd, hdc, targetDC, WindowFromDC(targetDC), useSession ? 1 : 0,
+                r.left, r.top, r.right, r.bottom, cleared, static_cast<unsigned>(GetBkColor(hdc)));
+#else
+        (void)cleared;
+#endif
         if (useSession && g_activeEditBuffer && targetDC == g_activeEditBuffer->memDC)
             PushSessionBlacknessRect(r, g_activeEditBuffer->width, g_activeEditBuffer->height);
 
@@ -785,6 +812,23 @@ namespace GlassCore::EditControl
                 wantSession ? 1 : 0, useSession ? 1 : 0,
                 EditSessionBufferAcceptsSourceDc(g_activeEditBuffer, sessionHwnd, hdc) ? 1 : 0,
                 g_sessionBlacknessRects.size());
+        if (AllowDelphiComboEditLog(sessionHwnd))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiComboEdit] ExtTextOut hwnd=0x%p parent=0x%p focused=%d dc=0x%p dcWnd=0x%p caller=0x%p paintDepth=%zu dcDepth=%zu options=0x%X count=%u x=%d y=%d bk=0x%08X",
+                sessionHwnd, GetParent(sessionHwnd), GetFocus() == sessionHwnd ? 1 : 0,
+                hdc, WindowFromDC(hdc), callerMod, g_editSessionStack.size(), g_editDcStack.size(),
+                options, c, x, y, static_cast<unsigned>(GetBkColor(hdc)));
+        if (AllowDelphiMemoLog(sessionHwnd, 0))
+        {
+            RECT clip{};
+            const int clipKind = GetClipBox(hdc, &clip);
+            const RECT r = lprect ? *lprect : RECT{};
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiMemo] TextGeometry hwnd=0x%p caller=0x%p dc=0x%p target=0x%p obj=%d x=%d y=%d rectPresent=%d rect=[%ld,%ld,%ld,%ld] clipKind=%d clip=[%ld,%ld,%ld,%ld] align=0x%X mode=%d",
+                sessionHwnd, callerMod, hdc, targetDC, GetObjectType(hdc), x, y, lprect ? 1 : 0,
+                r.left, r.top, r.right, r.bottom, clipKind, clip.left, clip.top, clip.right, clip.bottom,
+                GetTextAlign(hdc), GetBkMode(hdc));
+        }
 #endif
 
         // ── RichEdit20: фон на весь клиент (без изменений) ────────────────────
@@ -962,6 +1006,11 @@ namespace GlassCore::EditControl
             const auto& inkCapsule = GlassCore::Text::GetRuntimeInkCapsuleProfile(plainDual);
             const HRESULT hrPlain = GlassCore::Text::ExtTextOutWithAlpha(
                 hdc, x, y, drawOptions, lprect, lpString, c, lpDx, origW, directMode, sessionHwnd, &inkCapsule);
+#if defined(_DEBUG)
+            if (AllowDelphiComboEditLog(sessionHwnd))
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiComboEdit] TextResult hwnd=0x%p dc=0x%p options=0x%X count=%u hr=0x%08lX fallback=%d",
+                    sessionHwnd, hdc, options, c, static_cast<unsigned long>(hrPlain), FAILED(hrPlain) ? 1 : 0);
+#endif
             if (SUCCEEDED(hrPlain))
                 return TRUE;
             DebugLog(DBG_NORMAL,
@@ -1001,6 +1050,26 @@ namespace GlassCore::EditControl
         if (dcWnd && !IsEditKind(GlassShared::GlassGetWindowKind(dcWnd)))
             return orig(hdc, x, y, options, lprect, lpString, c, lpDx);
 
+#if defined(_DEBUG)
+        if (IsDelphiMemo(sessionHwnd) && (options & ETO_GLYPH_INDEX))
+        {
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 4; }
+            if (budget)
+            {
+                --budget;
+                void* frames[8]{};
+                const USHORT captured = CaptureStackBackTrace(0, _countof(frames), frames, nullptr);
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiMemo] ExtTextOutStack hwnd=0x%p focused=%d dc=0x%p dcWnd=0x%p caller=0x%p options=0x%X frames=%u stack=[%p,%p,%p,%p,%p,%p,%p,%p]",
+                    sessionHwnd, GetFocus() == sessionHwnd ? 1 : 0, hdc, dcWnd, callerMod, options,
+                    static_cast<unsigned>(captured), frames[0], frames[1], frames[2], frames[3],
+                    frames[4], frames[5], frames[6], frames[7]);
+            }
+        }
+#endif
         return Edit_WorkExtTextOutCore(sessionHwnd, hdc, x, y, options, lprect, lpString, c, lpDx, callerMod, orig);
     }
 

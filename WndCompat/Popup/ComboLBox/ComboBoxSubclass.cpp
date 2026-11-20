@@ -2,6 +2,8 @@
 #include "ComboBoxSubclass.h"
 #include <WndCompat.h>
 #include <GlassControlKind.h>
+#include <GlassBackdropMark.h>
+#include <InjectionMode.h>
 #include <DropDownEventProvider.h>
 #include "Tracker/WindowClassUtils.h"
 #include <Tracker/WinEventHandler.h>
@@ -31,6 +33,55 @@ namespace
 
         switch (uMsg)
         {
+        case WM_CTLCOLOREDIT:
+        {
+            // Только настоящий дочерний Edit TComboBox в Full. Редактор сам
+            // посылает CTLCOLOR родителю, поэтому root окна это не перехватывает.
+            if (WndCompat::WinEventHook_GetMode() != Shared::InjectionMode::Full
+                || !GlassShared::GlassIsBackdropAllowedForHwnd(hWnd)
+                || !WndCompat::IsWindowClass(hWnd, L"TComboBox"))
+                break;
+            COMBOBOXINFO info{ sizeof(info) };
+            HWND edit = reinterpret_cast<HWND>(lParam);
+            if (!GetComboBoxInfo(hWnd, &info) || info.hwndItem != edit
+                || !edit || !WndCompat::IsWindowClass(edit, L"Edit"))
+                break;
+            HDC dc = reinterpret_cast<HDC>(wParam);
+            if (!dc) break;
+            const LRESULT original = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            const COLORREF bk = GetBkColor(dc);
+            LOGBRUSH lb{};
+            const HBRUSH brush = reinterpret_cast<HBRUSH>(original);
+            const bool solid = brush && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb)
+                && lb.lbStyle == BS_SOLID;
+            const COLORREF windowColor = GetSysColor(COLOR_WINDOW) & 0xFFFFFFu;
+            // Не менять произвольный цвет фона/owner-draw. Уже чёрную кисть,
+            // возвращённую родителем, тоже оставляем в покое.
+            const bool replace = solid && (lb.lbColor & 0xFFFFFFu) == windowColor
+                && (bk & 0xFFFFFFu) == windowColor;
+            LRESULT result = original;
+            if (replace)
+            {
+                SetBkColor(dc, 0);
+                result = reinterpret_cast<LRESULT>(GetStockObject(BLACK_BRUSH));
+            }
+#if defined(_DEBUG)
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 16; }
+            if (budget)
+            {
+                --budget;
+                DebugLog(DBG_NORMAL,
+                    L"[WndCompat][DelphiComboEdit] CTLCOLOR combo=0x%p edit=0x%p dc=0x%p focused=%d bk=0x%08X brush=0x%p solid=%d color=0x%08X replaced=%d",
+                    hWnd, edit, dc, GetFocus() == edit ? 1 : 0, static_cast<unsigned>(bk),
+                    brush, solid ? 1 : 0, static_cast<unsigned>(lb.lbColor), replace ? 1 : 0);
+            }
+#endif
+            return result;
+        }
+
         case WM_LBUTTONDOWN:
         {
             // Только для ComboBox внутри FloatNotifySink (Explorer address bar и др.)
@@ -84,6 +135,18 @@ namespace WndCompat
             g_comboBoxWindows.push_back(hWnd);
             GlassShared::GlassMarkWindow(hWnd, kind);
             WndCompat::RegisterThemedChromeClientWithGlassCore(hWnd);
+            // Edit может быть отрисован до появления subclass ComboBox. После
+            // attach отложенно попросить один повторный paint, не принуждая
+            // синхронный WM_PAINT внутри обработки события создания.
+            if (WndCompat::WinEventHook_GetMode() == Shared::InjectionMode::Full
+                && GlassShared::GlassIsBackdropAllowedForHwnd(hWnd)
+                && WndCompat::IsWindowClass(hWnd, L"TComboBox"))
+            {
+                COMBOBOXINFO info{ sizeof(info) };
+                if (GetComboBoxInfo(hWnd, &info) && info.hwndItem
+                    && WndCompat::IsWindowClass(info.hwndItem, L"Edit"))
+                    InvalidateRect(info.hwndItem, nullptr, TRUE);
+            }
             DebugLog(L"[WndCompat][ComboBox] ComboBox_Attach: subclassed 0x%p", hWnd);
         }
         else

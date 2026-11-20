@@ -138,6 +138,30 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('HeaderTextClear', grid)
         self.assertIn('[GlassCore][DelphiMemo] DirectGetDC', read("GlassCore/src/Hooks/EditHooks.cpp"))
 
+    def test_targeted_vcl_edit_probes_and_combo_ctlcolor(self):
+        combo = read("WndCompat/Popup/ComboLBox/ComboBoxSubclass.cpp")
+        ctl = combo.split('case WM_CTLCOLOREDIT:', 1)[1].split('case WM_LBUTTONDOWN:', 1)[0]
+        for guard in ('Shared::InjectionMode::Full', 'GlassIsBackdropAllowedForHwnd(hWnd)',
+                      'L"TComboBox"', 'info.hwndItem != edit', 'L"Edit"',
+                      'DefSubclassProc', 'lb.lbStyle == BS_SOLID', 'GetSysColor(COLOR_WINDOW)',
+                      'SetBkColor(dc, 0)', 'BLACK_BRUSH', '#if defined(_DEBUG)'):
+            self.assertIn(guard, ctl)
+        self.assertIn('return result;', ctl)
+        self.assertIn('InvalidateRect(info.hwndItem, nullptr, TRUE)', combo)
+        paint = read("GlassCore/src/Subsystems/PaintDispatcher.cpp")
+        for marker in ('LogVclEditDc(L"BeginPaint"', 'LogVclEditDc(L"EndPaint.before"',
+                       'LogVclEditDc(L"GetDC"', 'LogVclEditDc(L"GetDCEx"',
+                       'LogVclEditDc(L"ReleaseDC.before"', 'CreateCompatibleDC.context',
+                       'DeleteDC.before.context', 'L"TMemo"', 'L"TComboBox"'):
+            self.assertIn(marker, paint)
+        edit = read("GlassCore/src/Hooks/EditHooks.cpp")
+        for marker in ('DelphiMemo] TextGeometry', 'DelphiMemo] ApplyBackground api=PatBlt',
+                       'DelphiMemo] ExtTextOutStack', 'DelphiComboEdit] TextResult'):
+            self.assertIn(marker, edit)
+        self.assertIn('DelphiMemo] BufferAPI api=EndBufferedPaint', read("GlassCore/src/Subsystems/RenderText.cpp"))
+        self.assertNotIn('DebugDetourHooks::SetEnabled', edit)
+        self.assertNotIn('DebugDetourHooks::SetEnabled', paint)
+
     def test_tab_brush_is_not_restored_to_another_class(self):
         source = read("WndCompat/Controls/TabControlSubclass.cpp")
         self.assertIn('_wcsicmp(className, L"TPageControl") != 0', source)
