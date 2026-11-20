@@ -662,6 +662,23 @@ namespace GlassCore::Root
                 || (GetTextAlign(dc) & TA_UPDATECP) || (options & (ETO_GLYPH_INDEX | ETO_PDY))
                 || ((options & ETO_OPAQUE) && !rect))
                 return orig(dc, x, y, options, rect, text, count, dx);
+            // VCL рисует свои заголовки до текста; DrawThemeBackground может
+            // вызываться не через IAT EXE. В наблюдённом пути caption приходит
+            // с ETO_CLIPPED и прямоугольником первого ряда (top=0). Очистить
+            // только его до текста, не трогая data rows и произвольные окна.
+            if (options == ETO_CLIPPED && rect && rect->top == 0
+                && !IsRectEmpty(rect) && x >= rect->left && x < rect->right
+                && y >= rect->top && y < rect->bottom)
+            {
+                const BOOL cleared = PatBlt(dc, rect->left, rect->top,
+                    rect->right - rect->left, rect->bottom - rect->top, BLACKNESS);
+#if defined(_DEBUG)
+                if (AllowDelphiGridLog(2))
+                    DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] HeaderTextClear hwnd=0x%p rect=[%ld,%ld,%ld,%ld] ok=%d",
+                        WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom, cleared);
+#endif
+                (void)cleared;
+            }
             if ((options & ETO_OPAQUE) && !IsRectEmpty(rect)
                 && !PatBlt(dc, rect->left, rect->top, rect->right - rect->left,
                     rect->bottom - rect->top, BLACKNESS))

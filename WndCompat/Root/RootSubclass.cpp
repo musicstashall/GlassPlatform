@@ -1633,6 +1633,10 @@ namespace WndCompat
             return;
         if (WndCompat::IsShuttingDown())
             return;
+        wchar_t className[256]{};
+        if (GetClassNameW(hWnd, className, static_cast<int>(_countof(className))) > 0
+            && (_wcsicmp(className, L"TApplication") == 0 || _wcsicmp(className, L"TPUtilWindow") == 0))
+            return;
         // Полная обвязка (Full / GenericContainer) уже обрабатывает CBN_DROPDOWN — не дублируем.
         if (WndCompat::Root_IsAttached(hWnd))
             return;
@@ -1700,6 +1704,14 @@ namespace WndCompat
         if (_wcsicmp(rootClassName, L"TApplication") == 0)
         {
             DebugLog(L"[WndCompat][Root] Root_Attach: skip VCL TApplication hwnd=0x%p", hRoot);
+            return;
+        }
+
+        // Защита и для прямого Root_Attach в обход классификатора.
+        // WM_NCDESTROY слишком поздно: DeallocateHWnd уже сохранил WNDPROC.
+        if (_wcsicmp(rootClassName, L"TPUtilWindow") == 0)
+        {
+            DebugLog(L"[WndCompat][Root] Root_Attach: skip VCL TPUtilWindow hwnd=0x%p", hRoot);
             return;
         }
 

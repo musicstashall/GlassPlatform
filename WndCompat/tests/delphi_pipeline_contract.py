@@ -89,8 +89,12 @@ class DelphiPipelineContract(unittest.TestCase):
         classifier = read("WndCompat/Tracker/WindowClassifier.cpp")
         root = read("WndCompat/Root/RootSubclass.cpp")
         self.assertRegex(classifier, r'(?s)if \(Equals\(cls, L"TApplication"\)\)\s*return \{\};')
+        self.assertRegex(classifier, r'(?s)if \(Equals\(cls, L"TPUtilWindow"\)\)\s*return \{\};')
         attach = root.split("void Root_Attach(HWND hRoot)", 1)[1].split("void Root_Detach(HWND hRoot)", 1)[0]
         self.assertRegex(attach, r'(?s)if \(_wcsicmp\(rootClassName, L"TApplication"\) == 0\).*?return;.*?SetWindowSubclass')
+        self.assertRegex(attach, r'(?s)if \(_wcsicmp\(rootClassName, L"TPUtilWindow"\) == 0\).*?return;.*?SetWindowSubclass')
+        notify = root.split('void Root_AttachDropDownNotify(HWND hWnd)', 1)[1].split('bool Root_DropDownNotifyAttached', 1)[0]
+        self.assertRegex(notify, r'(?s)L"TPUtilWindow".*?return;.*?SetWindowSubclass')
 
     def test_treeview_diagnostics_do_not_add_hooks(self):
         tree = read("GlassCore/src/Hooks/TreeViewHooks.cpp")
@@ -130,6 +134,8 @@ class DelphiPipelineContract(unittest.TestCase):
                       'lb.lbStyle == BS_SOLID', 'RGB(255, 255, 255)', 'L"Header"',
                       'ExtTextOutWithAlpha', 'return orig('):
             self.assertIn(guard, grid)
+        self.assertIn('options == ETO_CLIPPED && rect && rect->top == 0', grid)
+        self.assertIn('HeaderTextClear', grid)
         self.assertIn('[GlassCore][DelphiMemo] DirectGetDC', read("GlassCore/src/Hooks/EditHooks.cpp"))
 
     def test_tab_brush_is_not_restored_to_another_class(self):

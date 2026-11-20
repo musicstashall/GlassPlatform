@@ -523,6 +523,12 @@ ClassifyResult WindowClassifier::Classify(HWND hwnd)
     if (Equals(cls, L"TApplication"))
         return {};
 
+    // RTL AllocateHWnd/DeallocateHWnd: DeallocateHWnd считывает WNDPROC
+    // до DestroyWindow и освобождает его как Delphi thunk. Comctl subclass
+    // подменяет WNDPROC, поэтому служебный TPUtilWindow нельзя subclass-ить.
+    if (Equals(cls, L"TPUtilWindow"))
+        return {};
+
     // 0. Win11 CoreWindow: SEH/ShellHost/SMEH/SearchHost — Special; иначе Ignored (никогда Root).
     //    Класс остаётся в kHardList (SWCA-exempt).
     if (Equals(cls, L"Windows.UI.Core.CoreWindow"))
