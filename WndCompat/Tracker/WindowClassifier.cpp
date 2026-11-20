@@ -363,10 +363,13 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::Button;
 
     // ── Static / SysLink ─────────────────────────────────────────────────────
+    // TLinkLabel идёт по пути нативного SysLink: тот же Static-путь
+    // (StaticHooks/Static_Attach) отвечает за текст ссылки.
     if (Equals(cls, L"Static") ||
         Equals(cls, L"TStatic") ||
         Equals(cls, L"TStaticText") ||
         Equals(cls, L"SysLink") ||
+        Equals(cls, L"TLinkLabel") ||
         Equals(cls, L"Link Window"))
         return ControlKind::Static;
 
@@ -457,7 +460,9 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::UpDown;
 
     // ── Header ───────────────────────────────────────────────────────────────
-    if (Equals(cls, L"SysHeader32"))
+    // THeaderControl — Delphi-обёртка вокруг SysHeader32: тот же Header-путь
+    // (HeaderHooks/Header_Attach).
+    if (Equals(cls, L"SysHeader32") || Equals(cls, L"THeaderControl"))
         return ControlKind::Header;
 
     // ── Animate ──────────────────────────────────────────────────────────────
@@ -473,7 +478,9 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::DateTimePicker;
 
     // ── MonthCal ─────────────────────────────────────────────────────────────
-    if (Equals(cls, L"SysMonthCal32"))
+    // TMonthCalendar — Delphi-обёртка вокруг SysMonthCal32: тот же MonthCal-путь
+    // (MonthCalHooks/MonthCal_Attach).
+    if (Equals(cls, L"SysMonthCal32") || Equals(cls, L"TMonthCalendar"))
         return ControlKind::MonthCal;
 
     // ── ReBar ────────────────────────────────────────────────────────────────

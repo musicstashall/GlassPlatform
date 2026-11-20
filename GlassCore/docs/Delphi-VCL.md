@@ -1829,3 +1829,28 @@ hWnd=… kind=19`: это дочерний `Edit`, а строк `ComboBoxContro
 Проверить: `TDriveComboBox` на неактивной странице и после выбора, `TColorBox`,
 `TFilterComboBox`, `TComboBox` как контроль, обычный `ComboBox` с открытием
 списка и без. Сборка и видимый результат на Windows не проверены.
+
+## Тест 47: TMonthCalendar, THeaderControl, TLinkLabel → нативные ветки
+
+По журналам эти три контрола не получали отрисовку вообще: их имена не были в
+классификаторе, `GetControlKind` возвращал `Unknown`, attach не происходил, и
+хуки GlassCore (они гейтятся по `GlassGetWindowKind`) не включались.
+
+Классификатор `WndCompat/Tracker/WindowClassifier.cpp` теперь отправляет их по
+пути нативных аналогов, без отдельных путей и без новых хуков:
+
+| класс | kind | существующий путь |
+|---|---|---|
+| `TMonthCalendar` | `MonthCal` | `MonthCal_Attach` + `MonthCalHooks`, как `SysMonthCal32` |
+| `THeaderControl` | `Header` | `Header_Attach` + `HeaderHooks`, как `SysHeader32` |
+| `TLinkLabel` | `Static` | `Static_Attach` + `StaticHooks`, как `SysLink` |
+
+`WinEventHandler` уже обрабатывает эти `ControlKind` (Full-режим), поэтому
+других правок не потребовалось. Проверить: календарь (стрелки месяцев, сегодня,
+ховер), заголовок таблицы (сортировочная стрелка, ховер), ссылка (текст и
+ховер). Сборка и визуальный результат на Windows не проверены.
+
+Замечание: `TLinkLabel` в VCL — `TGraphicControl`, у него может не быть своего
+HWND; тогда класс в журнале будет родительским. Если после этой правки строк
+`kind=3 (Static)` для ссылки нет — нужен журнал с фактическим именем класса
+окна, а не догадка.

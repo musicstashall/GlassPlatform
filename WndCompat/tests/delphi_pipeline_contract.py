@@ -722,5 +722,21 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('_wcsicmp(className, L"TPageControl") != 0', source)
         self.assertGreaterEqual(source.count('_wcsicmp(g_brushClass, className) == 0'), 2)
 
+    def test_delphi_calendar_header_linklabel_use_native_kinds(self):
+        src = read("WndCompat/Tracker/WindowClassifier.cpp")
+        def kind_for(cls_name, kind):
+            marker = 'Equals(cls, L"' + cls_name + '")'
+            self.assertIn(marker, src, cls_name)
+            tail = src[src.index(marker):]
+            stmt = tail[:tail.index(';')]
+            self.assertIn('ControlKind::' + kind, stmt, f"{cls_name} -> {kind}")
+        kind_for("TMonthCalendar", "MonthCal")
+        kind_for("THeaderControl", "Header")
+        kind_for("TLinkLabel", "Static")
+        # Нативные аналоги остались в тех же ветках.
+        kind_for("SysMonthCal32", "MonthCal")
+        kind_for("SysHeader32", "Header")
+        kind_for("SysLink", "Static")
+
 if __name__ == "__main__":
     unittest.main()
