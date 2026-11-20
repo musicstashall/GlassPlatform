@@ -1823,13 +1823,6 @@ namespace GlassCore::Root
                 GetClassNameW(hWnd, cls, _countof(cls));
 
             HMODULE caller = GetCallerModule(_ReturnAddress());
-            if (GlassCore::ComboBoxControl::IsNativeAppPaintSession(
-                    hWnd ? hWnd : HwndFromDcOrMmcSession(hDC, caller)))
-            {
-                LOGBRUSH lb{};
-                GetObject(hbr, sizeof(lb), &lb);
-                LogNativeComboGdi(L"FrameRect", hDC, lprc, lb.lbColor, L"observed");
-            }
             if (CallerBaseIs(caller, L"ACLUI.dll") && StrEqI(cls, L"CHECKLIST_ACLUI"))
             {
                 LOGBRUSH lb{};
@@ -1960,18 +1953,6 @@ namespace GlassCore::Root
             wchar_t cls[256]{};
             if (hWnd)
                 GetClassNameW(hWnd, cls, _countof(cls));
-
-            if (GlassCore::ComboBoxControl::IsNativeAppPaintSession(
-                    hWnd ? hWnd : HwndFromDcOrMmcSession(hdc, caller)))
-            {
-                // The native ComboBox is fully GDI-painted (no DTB in the
-                // original app); log any bitmap blit so the drop button's
-                // painter is visible in the journal.
-                const RECT r{ x, y, x + cx, y + cy };
-                wchar_t branch[64]{};
-                swprintf_s(branch, L"rop=0x%08X", static_cast<unsigned>(rop));
-                LogNativeComboGdi(L"BitBlt", hdc, &r, GetBkColor(hdc), branch);
-            }
 
             const bool afxToolbar = CallerBaseIs(caller, L"comctl32.dll")
                 && StrEqI(cls, L"AfxWnd42u")
