@@ -990,6 +990,8 @@ namespace GlassCore::ComboBoxControl
                 GlassCore::Root::EnableRootHook(comctlMod, GlassCore::Root::OHK_FILLRECT, true);
                 GlassCore::Root::EnableRootHook(comctlMod, GlassCore::Root::OHK_RECTANGLE, true);
                 GlassCore::Root::EnableRootHook(comctlMod, GlassCore::Root::OHK_PATBLT, true);
+                GlassCore::Root::EnableRootHook(comctlMod, GlassCore::Root::OHK_FRAMERECT, true);
+                GlassCore::Root::EnableRootHook(comctlMod, GlassCore::Root::OHK_BITBLT, true);
                 g_nativeAppGdiHooksOn = true;
                 // The EXE begins the paint, but the field itself (white PatBlt,
                 // clip, text) is produced by COMCTL32 on the same HDC. Attach the
@@ -1002,6 +1004,8 @@ namespace GlassCore::ComboBoxControl
                     GlassCore::Root::EnableRootHook(peer, GlassCore::Root::OHK_FILLRECT, true);
                     GlassCore::Root::EnableRootHook(peer, GlassCore::Root::OHK_RECTANGLE, true);
                     GlassCore::Root::EnableRootHook(peer, GlassCore::Root::OHK_PATBLT, true);
+                    GlassCore::Root::EnableRootHook(peer, GlassCore::Root::OHK_FRAMERECT, true);
+                    GlassCore::Root::EnableRootHook(peer, GlassCore::Root::OHK_BITBLT, true);
                     g_nativePeerMod = peer;
                 }
             }
@@ -1052,6 +1056,8 @@ namespace GlassCore::ComboBoxControl
                 GlassCore::Root::EnableRootHook(g_nativePeerMod, GlassCore::Root::OHK_FILLRECT, false);
                 GlassCore::Root::EnableRootHook(g_nativePeerMod, GlassCore::Root::OHK_RECTANGLE, false);
                 GlassCore::Root::EnableRootHook(g_nativePeerMod, GlassCore::Root::OHK_PATBLT, false);
+                GlassCore::Root::EnableRootHook(g_nativePeerMod, GlassCore::Root::OHK_FRAMERECT, false);
+                GlassCore::Root::EnableRootHook(g_nativePeerMod, GlassCore::Root::OHK_BITBLT, false);
                 g_nativePeerMod = nullptr;
             }
             if (g_nativeAppGdiHooksOn)
@@ -1059,6 +1065,8 @@ namespace GlassCore::ComboBoxControl
                 GlassCore::Root::EnableRootHook(g_activePaintMod, GlassCore::Root::OHK_FILLRECT, false);
                 GlassCore::Root::EnableRootHook(g_activePaintMod, GlassCore::Root::OHK_RECTANGLE, false);
                 GlassCore::Root::EnableRootHook(g_activePaintMod, GlassCore::Root::OHK_PATBLT, false);
+                GlassCore::Root::EnableRootHook(g_activePaintMod, GlassCore::Root::OHK_FRAMERECT, false);
+                GlassCore::Root::EnableRootHook(g_activePaintMod, GlassCore::Root::OHK_BITBLT, false);
                 g_nativeAppGdiHooksOn = false;
             }
             EnableComboBoxHooksForSession(kind, g_activePaintMod, false);

@@ -751,6 +751,13 @@ class DelphiPipelineContract(unittest.TestCase):
         for marker in ('WindowFromDC(hdc) == comboWnd', 'rop == PATCOPY || rop == WHITENESS',
                        'return o(hdc, x, y, cx, cy, BLACKNESS)'):
             self.assertIn(marker, root)
+        # The control is GDI-only (no DTB in the original app): blits and
+        # frame rects must be observable for the same scoped session.
+        for marker in ('OHK_FRAMERECT, true', 'OHK_BITBLT, true',
+                       'OHK_FRAMERECT, false', 'OHK_BITBLT, false'):
+            self.assertIn(marker, hooks)
+        for marker in ('LogNativeComboGdi(L"BitBlt"', 'LogNativeComboGdi(L"FrameRect"'):
+            self.assertIn(marker, root)
 
 if __name__ == "__main__":
     unittest.main()
