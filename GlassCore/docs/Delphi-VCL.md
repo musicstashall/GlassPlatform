@@ -1829,3 +1829,28 @@ hWnd=… kind=19`: это дочерний `Edit`, а строк `ComboBoxContro
 Проверить: `TDriveComboBox` на неактивной странице и после выбора, `TColorBox`,
 `TFilterComboBox`, `TComboBox` как контроль, обычный `ComboBox` с открытием
 списка и без. Сборка и видимый результат на Windows не проверены.
+
+## Тест 44: поле обычного `ComboBox` — FillRect без темы
+
+`LogViewer-10.log` закрыл вопрос о сессии: для `ComboBox hwnd=0x59090E`
+(`kind=5`) есть строки `BeginPaint session open … class=ComboBox
+source=app-iat`, но **нет ни одного** `InvokeComboDrawThemeBg`/`DTB result`.
+У `TColorBox 0x8404F6` и `TComboBox 0x4E09A0` такие строки есть (`part=4/6`,
+`alpha=35`), значит окно рисуется не темой, а обычным GDI из EXE. Поэтому
+alpha-путь через `DrawThemeBackground` для него не запускается в принципе.
+
+Теперь на время `BeginPaint`-сессии окна класса ровно `ComboBox`, рисуемого
+EXE, включаются root-хуки `FillRect`, `Rectangle`, `PatBlt` и **только для
+этого HWND** (`IsNativeAppPaintSession`: `g_comboHwnd` + класс `ComboBox` +
+активный модуль = entry point). Сплошная заливка цветом `COLOR_WINDOW` или
+`COLOR_BTNFACE` заменяется на `PatBlt(BLACKNESS)` (прозрачный фон), остальные
+цвета проходят без изменений. `Rectangle`/`PatBlt` только логируются:
+`[GlassCore][NativeCombo] api=… hwnd=… rect=… color=… branch=…`
+(`cleared-system` / `observed` / `rop=…`), бюджет 32 строки в секунду. На
+`EndPaint` хуки выключаются, так что `TComboBox` с дочерним `Edit`,
+`TColorBox` и списки не затрагиваются.
+
+Проверить на Windows: обычный `ComboBox` без фокуса, в фокусе и с открытым
+списком. Ожидаемо: в журнале `[NativeCombo]`-строки с `cleared-system` для
+белой подложки; если белая кнопка останется, её `api`/`rect`/`rop` из тех же
+строк покажут, чем именно она рисуется. Сборка на Windows не проверена.
