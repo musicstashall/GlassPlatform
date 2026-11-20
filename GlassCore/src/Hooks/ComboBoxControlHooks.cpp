@@ -335,9 +335,14 @@ namespace GlassCore::ComboBoxControl
                     WCHAR dcClass[MAX_PATH + 1]{};
                     if (hTheme && SUCCEEDED(Shared::ThemeHelper::GetThemeClass(hTheme, dcClass, MAX_PATH)))
                     {
+                        // dcWnd/class shows which control the unthemed paint belongs
+                        // to; an unattached native ComboBox reaches this branch.
+                        const HWND dcWnd = WindowFromDC(hdc);
+                        WCHAR wndClass[64]{};
+                        if (dcWnd) GetClassNameW(dcWnd, wndClass, _countof(wndClass));
                         DebugLog(DBG_NORMAL,
-                            L"[GlassCore][ComboBoxControl] DTB(вне сессии): class=\"%s\" part=%d state=%d caller=%p",
-                            dcClass, iPartId, iStateId, callerMod);
+                            L"[GlassCore][ComboBoxControl] DTB(вне сессии): class=\"%s\" part=%d state=%d caller=%p dcWnd=0x%p wndClass=%s",
+                            dcClass, iPartId, iStateId, callerMod, dcWnd, wndClass);
                     }
                 }
                 return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
@@ -892,17 +897,45 @@ namespace GlassCore::ComboBoxControl
                 return;
 
             const GlassControlKind kind = GlassGetWindowKind(hWnd);
-            if (!IsComboBoxSessionKind(kind) || g_activePaintMod)
+            if (!IsComboBoxSessionKind(kind))
                 return;
+#if defined(_DEBUG)
+            // Narrow, rate-limited diagnosis: why a ComboBox paint did not open
+            // a themed-field session (nested/leaked session or foreign caller).
+            static std::atomic<unsigned> s_beginDiag{48};
+            [[maybe_unused]] auto logSkip = [&](const wchar_t* reason)
+            {
+                if (s_beginDiag.fetch_sub(1, std::memory_order_relaxed) >= 48)
+                    return;
+                wchar_t cls[64]{};
+                GetClassNameW(hWnd, cls, _countof(cls));
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][ComboBoxControl] BeginPaint session skip hwnd=0x%p class=%s caller=%p active=0x%p reason=%s",
+                    hWnd, cls, callerMod, g_comboHwnd, reason);
+            };
+#else
+            [[maybe_unused]] auto logSkip = [](const wchar_t*) noexcept {};
+#endif
+            if (g_activePaintMod)
+            {
+                logSkip(L"active-session");
+                return;
+            }
 
             auto* g_new = GlassCore::ModuleHandler::g_comctl32New;
             auto* g_legacy = GlassCore::ModuleHandler::g_comctl32Legacy;
             if (callerMod != g_new && callerMod != g_legacy)
+            {
+                logSkip(L"caller-not-comctl32");
                 return;
+            }
 
             const HMODULE comctlMod = ResolveComboComctlHookModule(callerMod);
             if (!comctlMod)
+            {
+                logSkip(L"comctl-module-unresolved");
                 return;
+            }
 
             GlassCore::ScrollBarTheme::EnsureComctlScrollBarIatIfComctlCaller(hWnd, callerMod);
             g_comboDtbDedupField.reset();

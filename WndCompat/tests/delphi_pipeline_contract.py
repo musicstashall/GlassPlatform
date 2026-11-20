@@ -93,7 +93,8 @@ class DelphiPipelineContract(unittest.TestCase):
                       'GlassIsBackdropAllowedForHwnd', 'dis->hDC',
                       'GlassControlKind::ListBox', 'dc == s.dc',
                       'GetTextAlign(dc) & TA_UPDATECP', 'DT_CALCRECT | DT_MODIFYSTRING',
-                      'IntersectClipRect(dc, s.item.left', 'EqualRect(&clipped, r)',
+                      'IntersectClipRect(dc, s.bounds.left', 's.bounds = s.item',
+                      'EqualRect(&clipped, r)',
                       'IsColorSample(s, *r)', 's.checkList',
                       'CreateSolidColorBrushWithAlpha', 'g_inHook',
                       'if (s.hooks[i]) g_dispatcher.EnableHook(i, false)'):
@@ -596,6 +597,37 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('options == ETO_CLIPPED && rect && rect->top == 0', grid)
         self.assertIn('HeaderTextClear', grid)
         self.assertIn('[GlassCore][DelphiMemo] DirectGetDC', read("GlassCore/src/Hooks/EditHooks.cpp"))
+
+    def test_vcl_combo_owner_draw_text_uses_only_supplied_dc(self):
+        draw = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
+        begin = draw.split('bool BeginDraw(HWND parent', 1)[1].split('bool TryCheckListThemeBackground', 1)[0]
+        for guard in ('ODT_COMBOBOX', 'L"TColorBox"', 'L"TDriveComboBox"',
+                      'L"TFilterComboBox"', 'GlassControlKind::ComboBox',
+                      'GetClientRect(dis->hwndItem, &client)', 's.bounds = client',
+                      'ODS_COMBOBOXEDIT', 's.combo = combo'):
+            self.assertIn(guard, begin)
+        # TComboBox keeps its working field/Edit path and never enters this branch.
+        self.assertNotIn('L"TComboBox"', begin)
+        ext = draw.split('BOOL WINAPI MyExtText(HDC dc', 1)[1].split('int WINAPI MyDrawText(', 1)[0]
+        for guard in ('IntersectClipRect(dc, s.bounds.left', 'ETO_OPAQUE',
+                      'PatBlt(dc, rect->left', 'ExtTextOutWithAlpha(', 'if (!count) return TRUE;'):
+            self.assertIn(guard, ext)
+        drawtext = draw.split('int WINAPI MyDrawText(', 1)[1].split('void Startup()', 1)[0]
+        self.assertIn('IntersectClipRect(dc, s.bounds.left', drawtext)
+        fill = draw.split('int WINAPI MyFill(HDC dc', 1)[1].split('BOOL WINAPI MyExtText(', 1)[0]
+        for guard in ('if (s.combo)', 'ComboFillBounds(s, *r)', 'SystemBackground(lb.lbColor)',
+                      'return orig(dc, r, brush);'):
+            self.assertIn(guard, fill)
+        root = read('WndCompat/Root/RootSubclass.cpp')
+        for guard in ('comboOwnerDraw', 'L"TColorBox"', 'L"TDriveComboBox"',
+                      'L"TFilterComboBox"', 'listOwnerDraw && begin && end && begin(hWnd, dis)',
+                      'if (listOwnerDraw || comboOwnerDraw)'):
+            self.assertIn(guard, root)
+        combo = read('GlassCore/src/Hooks/ComboBoxControlHooks.cpp')
+        for marker in ('BeginPaint session skip', 'active-session', 'caller-not-comctl32',
+                       'comctl-module-unresolved', 'g_activePaintMod',
+                       'DTB(вне сессии)', 'wndClass=%s'):
+            self.assertIn(marker, combo)
 
     def test_vcl_combo_classification_and_combo_alpha_paths(self):
         classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
