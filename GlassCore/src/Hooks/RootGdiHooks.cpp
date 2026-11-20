@@ -1068,11 +1068,12 @@ namespace GlassCore::Root
 
         int WINAPI Root_MyDelphiGridFill(HDC dc, const RECT* rect, HBRUSH brush)
         {
-            auto orig = GetRootOrg<OHK_DELPHI_GRID_FILL, decltype(&FillRect)>(GetCallerModule(_ReturnAddress()));
-            if (!orig) return FillRect(dc, rect, brush);
+            const HMODULE callerMod = GetCallerModule(_ReturnAddress());
+            auto orig = GetRootOrg<OHK_DELPHI_GRID_FILL, decltype(&FillRect)>(callerMod);
 #if defined(_DEBUG)
-            // Вход в детур виден всегда: иначе нельзя отличить «гейт отсёк» от
-            // «детур не вызвали».
+            // Вход в детур виден всегда, в том числе когда orig для этого caller'а
+            // не найден (иначе такие вызовы уходили в FillRect молча — так
+            // пропадала заливка всего клиента таблицы).
             if (AllowDelphiGridLog(0))
             {
                 wchar_t dcCls[128]{};
@@ -1081,16 +1082,20 @@ namespace GlassCore::Root
                 LOGBRUSH elb{};
                 const bool eok = brush && GetObjectW(brush, sizeof(elb), &elb) == sizeof(elb);
                 DebugLog(DBG_NORMAL,
-                    L"[GlassCore][DelphiGrid] FillEnter dc=0x%p dcWnd=0x%p dcCls=\"%s\" rect=[%ld,%ld,%ld,%ld] style=%d color=0x%08X gate=%d",
+                    L"[GlassCore][DelphiGrid] FillEnter dc=0x%p dcWnd=0x%p dcCls=\"%s\" rect=[%ld,%ld,%ld,%ld] style=%d color=0x%08X gate=%d orig=%d caller=%s",
                     dc, dcWnd, dcCls,
                     rect ? rect->left : 0, rect ? rect->top : 0, rect ? rect->right : 0, rect ? rect->bottom : 0,
                     eok ? static_cast<int>(elb.lbStyle) : -1,
                     eok ? static_cast<unsigned>(elb.lbColor) : 0u,
-                    IsDelphiGridFillDC(dc) ? 1 : 0);
+                    IsDelphiGridFillDC(dc) ? 1 : 0, orig ? 1 : 0, CallerBaseName(callerMod).c_str());
             }
 #endif
+            const auto passthrough = [&]() -> int
+            {
+                return orig ? orig(dc, rect, brush) : ::FillRect(dc, rect, brush);
+            };
             if (g_shutdown.load(std::memory_order_acquire) || !IsDelphiGridFillDC(dc))
-                return orig(dc, rect, brush);
+                return passthrough();
             LOGBRUSH lb{};
             const bool haveBrush = brush
                 && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
@@ -1143,7 +1148,7 @@ namespace GlassCore::Root
                     haveBrush ? static_cast<unsigned>(lb.lbColor) : 0u,
                     haveBrush ? static_cast<unsigned>(lb.lbStyle) : 0u, haveBrush ? 1 : 0);
 #endif
-            return orig(dc, rect, brush);
+            return passthrough();
         }
 
         HRESULT WINAPI Root_MyDelphiGridTheme(HTHEME theme, HDC dc, int part, int state,

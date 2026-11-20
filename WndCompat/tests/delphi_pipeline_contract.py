@@ -807,6 +807,13 @@ class DelphiPipelineContract(unittest.TestCase):
     def test_delphi_grid_logs_fill_entry_and_general_fillrect(self):
         root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
         self.assertIn('[GlassCore][DelphiGrid] FillEnter dc=0x%p dcWnd=0x%p', root)
+        self.assertIn('orig=%d caller=%s', root)
+        # Обработка не должна зависеть от наличия трамплина: без orig детур
+        # раньше молча уходил в FillRect.
+        fill = root.split('Root_MyDelphiGridFill(', 1)[1].split('Root_MyDelphiGridTheme(', 1)[0]
+        self.assertLess(fill.index('const auto passthrough'), fill.index('IsDelphiGridFillDC(dc))'))
+        self.assertIn('orig ? orig(dc, rect, brush) : ::FillRect(dc, rect, brush)', fill)
+        self.assertIn('ApplyDelphiGridCellBackground(dc, rect, fillColor)', fill)
         self.assertIn('[GlassCore][DelphiGrid] GenFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld]', root)
         # Общий FillRect не должен разыменовывать rect/brush до проверки.
         gen = root.split('[GlassCore][DelphiGrid] GenFill', 1)[0]
