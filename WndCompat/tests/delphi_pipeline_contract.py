@@ -203,6 +203,22 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('[GlassCore][DelphiMemo] BufferTarget', source)
         self.assertIn('[GlassCore][DelphiMemo] ComposeFallback', source)
 
+    def test_toggle_delete_trace_is_debug_bounded_and_observational(self):
+        source = read('GlassCore/src/Subsystems/PaintDispatcher.cpp')
+        trace = source.split('struct DelphiToggleDeleteTrace', 1)[1].split('static BOOL WINAPI HookDeleteDC', 1)[0]
+        for guard in ('it->type != DcEntryType::Paint', 'L"TToggleSwitch"', 'OBJ_MEMDC',
+                      'IsFullInjectionMode()', 'total >= 128', 'budget = 32',
+                      'CaptureStackBackTrace', 'not DC ownership', 'GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT'):
+            self.assertIn(guard, trace)
+        self.assertIn('#if defined(_DEBUG)\n    // Контекст TToggleSwitch', source)
+        body = source.split('static BOOL WINAPI HookDeleteDC(HDC hdc)', 1)[1].split('// ── Lifecycle', 1)[0]
+        self.assertEqual(body.count('g_origDeleteDC(hdc)'), 1)
+        self.assertLess(body.index('CaptureDelphiToggleDelete(hdc)'), body.index('PopDC(hdc,'))
+        self.assertLess(body.index('PopDC(hdc,'), body.index('g_origDeleteDC(hdc)'))
+        self.assertIn('SetLastError(beforeTraceError)', body)
+        self.assertIn('SetLastError(originalError)', body)
+        self.assertIn('return result;', body)
+
     def test_memo_background_is_composed_separately_from_text(self):
         source = read("GlassCore/src/Hooks/EditHooks.cpp")
         self.assertIn('std::vector<MemoBackgroundOp> memoBackgrounds;', source)
