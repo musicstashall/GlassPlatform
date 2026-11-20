@@ -634,8 +634,14 @@ class DelphiPipelineContract(unittest.TestCase):
         native = combo.split('BeginPaint session skip', 1)[1].split('static void OnEndPaintGlobal', 1)[0]
         self.assertIn('callerMod == entryPoint', native)
         self.assertNotIn('IsNativeComboBoxClass(hWnd) ||', native)
-        for marker in ('L"opaque"', 'L"text"', 'L"drawtext"'):
-            self.assertIn(marker, draw)
+        self.assertIn('current->combo', draw)
+        self.assertNotIn('LogComboText', draw)
+        begin_draw = draw.split('bool BeginDraw(HWND parent', 1)[1].split('bool TryCheckListThemeBackground', 1)[0]
+        for guard in ('const bool comboField', 'if (!comboField) return false;',
+                      'if (s.combo && i != FillSlot) continue;', 's.field = comboField'):
+            self.assertIn(guard, begin_draw)
+        self.assertIn('opaque-brush', draw)
+        self.assertIn('CreateSolidColorBrushWithAlpha(lb.lbColor, 255)', draw)
 
     def test_vcl_combo_classification_and_combo_alpha_paths(self):
         classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
