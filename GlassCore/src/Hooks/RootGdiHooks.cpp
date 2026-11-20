@@ -2082,6 +2082,22 @@ namespace GlassCore::Root
             if (hWnd)
                 GetClassNameW(hWnd, cls, _countof(cls));
 
+#if defined(_DEBUG)
+            // Диагностика таблиц: BitBlt в их DC (двойная буферизация) не виден
+            // другим хукам — пишем, чтобы найти источник непрозрачного фона.
+            if (IsDelphiGridFillDC(hdc) && AllowDelphiGridLog(2))
+            {
+                const HWND srcWnd = hdcSrc ? WindowFromDC(hdcSrc) : nullptr;
+                const HGDIOBJ srcBmp = hdcSrc ? GetCurrentObject(hdcSrc, OBJ_BITMAP) : nullptr;
+                BITMAP bm{};
+                const bool bmOk = srcBmp && GetObjectW(srcBmp, sizeof(bm), &bm) == sizeof(bm);
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] BitBlt hwnd=0x%p dst=(%d,%d) %dx%d srcWnd=0x%p srcBmp=0x%p %ldx%ld bpp=%u rop=0x%08X",
+                    hWnd, x, y, cx, cy, srcWnd, srcBmp, bm.bmWidth, bm.bmHeight,
+                    static_cast<unsigned>(bm.bmBitsPixel), static_cast<unsigned>(rop));
+            }
+#endif
+
             const bool afxToolbar = CallerBaseIs(caller, L"comctl32.dll")
                 && StrEqI(cls, L"AfxWnd42u")
                 && cx == 16 && cy == 16;

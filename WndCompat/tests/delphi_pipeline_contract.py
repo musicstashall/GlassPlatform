@@ -795,6 +795,15 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertLess(erase.index('L"TStringGrid"'),
                         erase.index('GlassIsBackdropAllowedForHwnd'))
 
+    def test_delphi_grid_diagnostics_cover_surface_and_bitblt(self):
+        root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        self.assertIn('static bool IsDelphiGridFillDC(', root)
+        self.assertIn('[GlassCore][DelphiGrid] BitBlt hwnd=0x%p dst=(%d,%d) %dx%d', root)
+        win = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
+        grid = win.split('L"TShownValueList"', 1)[1].split('// Точка входа процесса', 1)[0]
+        self.assertIn('PushPaint(instMod, OHK_BITBLT, cache);', grid)
+        self.assertIn('bmp=0x%p px=0x%08X', win)
+
     def test_delphi_grid_clears_repaint_area_after_beginpaint(self):
         root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         body = root.split('Root_OnDelphiGridAfterBeginPaint(', 1)[1].split('static void EnableSpecs', 1)[0]
