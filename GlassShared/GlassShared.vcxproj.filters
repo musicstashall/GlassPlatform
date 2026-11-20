@@ -145,6 +145,9 @@
     <ClInclude Include="include\GlassBackdropMark.h">
       <Filter>include</Filter>
     </ClInclude>
+    <ClInclude Include="include\GlassDelphiMemoBackground.h">
+      <Filter>include</Filter>
+    </ClInclude>
     <ClInclude Include="include\GlassHostRegistry.h">
       <Filter>include</Filter>
     </ClInclude>

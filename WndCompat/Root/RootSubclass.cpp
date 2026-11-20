@@ -32,6 +32,7 @@
 #include <Tracker/WindowClassUtils.h>
 #include <Tracker/WinEventHandler.h>
 #include <GlassControlKind.h>
+#include <GlassDelphiMemoBackground.h>
 #include <GlassComctlScrollHost.h>
 #include <InjectionMode.h>
 #include <Helpers/ThemeHelper.h>
@@ -646,7 +647,26 @@ namespace
 #endif
 
         LOGBRUSH lb{};
-        if (GetObject(reinterpret_cast<HGDIOBJ>(defResult), sizeof(lb), &lb))
+        const bool validBrush = GetObject(reinterpret_cast<HGDIOBJ>(defResult), sizeof(lb), &lb) == sizeof(lb);
+        // Read-only TMemo получает WM_CTLCOLORSTATIC. Сохраняем только цвет
+        // сплошной пользовательской кисти, совпадающий с цветом DC; pattern,
+        // прозрачные и системные кисти никогда не аппроксимируем одним RGB.
+        const HWND memo = reinterpret_cast<HWND>(lParam);
+        if (uMsg == WM_CTLCOLORSTATIC && memo && WndCompat::IsWindowClass(memo, L"TMemo"))
+        {
+            const COLORREF rgb = lb.lbColor & 0xFFFFFFu;
+            if (validBrush && lb.lbStyle == BS_SOLID && GetBkMode(hdc) == OPAQUE
+                && rgb == (GetBkColor(hdc) & 0xFFFFFFu) && rgb != 0
+                && rgb != (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)
+                && rgb != (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu))
+            {
+                if (!GlassShared::SetDelphiMemoBackground(memo, rgb))
+                    GlassShared::ClearDelphiMemoBackground(memo);
+            }
+            else
+                GlassShared::ClearDelphiMemoBackground(memo);
+        }
+        if (validBrush)
         {
             if (lb.lbStyle == BS_SOLID && GetBkMode(hdc) == OPAQUE)
             {

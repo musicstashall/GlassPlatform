@@ -4,6 +4,7 @@
 #include "WndPch.h"
 #include "EditSubclass.h"
 #include <GlassControlKind.h>
+#include <GlassDelphiMemoBackground.h>
 #include <DebugLog.h>
 #include <Richedit.h>
 
@@ -67,6 +68,7 @@ namespace WndCompat
 
     void Edit_Detach(HWND hWnd)
     {
+        GlassShared::ClearDelphiMemoBackground(hWnd);
         GlassShared::GlassUnmarkWindow(hWnd);
 
         {
@@ -90,7 +92,10 @@ namespace WndCompat
         for (HWND hWnd : windows)
         {
             if (IsWindow(hWnd))
+            {
+                GlassShared::ClearDelphiMemoBackground(hWnd);
                 GlassShared::GlassUnmarkWindow(hWnd);
+            }
         }
 
         DebugLog(L"[WndCompat][Edit] Edit_DetachAll: снято %zu окон", windows.size());

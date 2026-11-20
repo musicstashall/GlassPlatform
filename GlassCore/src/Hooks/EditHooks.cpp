@@ -38,6 +38,7 @@
 #include <Subsystems/RenderText.h>
 #include <Subsystems/TextInkClientRegistry.h>
 #include <GlassControlKind.h>
+#include <GlassDelphiMemoBackground.h>
 #include <WinApiUtils.h>
 #include <wil.h>
 
@@ -142,6 +143,7 @@ namespace GlassCore::EditControl
         // fromGetDC: сессия создана для GetDC-канала (не BeginPaint)
         bool fromGetDC = false;
         bool delphiMemo = false;
+        COLORREF memoSolidBackground = CLR_INVALID;
         // Только фон TMemo; текст в отдельном DIB, чтобы tblend не ослаблял заливку.
         std::vector<MemoBackgroundOp> memoBackgrounds;
     };
@@ -311,6 +313,8 @@ namespace GlassCore::EditControl
         buf->height = rc.bottom;
         buf->fromGetDC = fromGetDC;
         buf->delphiMemo = IsDelphiMemo(hWnd);
+        if (buf->delphiMemo)
+            buf->memoSolidBackground = GlassShared::GetDelphiMemoBackground(hWnd);
 
         const DWORD style = static_cast<DWORD>(GetWindowLongW(hWnd, GWL_STYLE));
         buf->hasHScroll = (style & WS_HSCROLL) != 0;
@@ -362,6 +366,29 @@ namespace GlassCore::EditControl
             DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] BufferTarget hwnd=0x%p screenDc=0x%p paintDc=0x%p memDc=0x%p",
                 hWnd, screenDC, g_editSessionStack.empty() ? nullptr : g_editSessionStack.back().paintDc, memDC);
 #endif
+    }
+
+    // Не используем устаревшую CTLCOLOR-property без подтверждения хотя бы
+    // одной текущей ETO_OPAQUE заливкой тем же цветом. Только буфер TMemo и
+    // клиентский BeginPaint: копирование на screenDC ограничено update clip.
+    [[nodiscard]] static bool HasConfirmedMemoSolidBackground(const EditBufferedSession& buf) noexcept
+    {
+        if (!buf.delphiMemo || buf.memoSolidBackground == CLR_INVALID) return false;
+        for (const auto& op : buf.memoBackgrounds)
+            if (op.fill && (op.color & 0xFFFFFFu) == buf.memoSolidBackground)
+                return true;
+        return false;
+    }
+
+    static bool PrimeMemoSolidBackground(HDC dc, const EditBufferedSession& buf) noexcept
+    {
+        if (!dc || !HasConfirmedMemoSolidBackground(buf)) return false;
+        wil::unique_hbrush brush{
+            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(buf.memoSolidBackground, 255) };
+        if (!brush) return false;
+        RECT rect{ 0, 0, buf.width, buf.height };
+        if (!PatBlt(dc, 0, 0, buf.width, buf.height, BLACKNESS)) return false;
+        return FillRect(dc, &rect, brush.get()) != 0;
     }
 
     // Как на прямом GetDC: сначала прозрачная очистка, затем непрозрачная
@@ -459,7 +486,18 @@ namespace GlassCore::EditControl
 
                 // ── 2. Фон для ETO_OPAQUE областей ───────────────────────────
                 if (buf->delphiMemo)
+                {
+                    const bool primed = PrimeMemoSolidBackground(composeDC, *buf);
+#if defined(_DEBUG)
+                    if (logMemoFlush)
+                        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] SolidBackground hwnd=0x%p color=0x%08X confirmed=%d primed=%d target=compose",
+                            buf->hWnd, static_cast<unsigned>(buf->memoSolidBackground),
+                            HasConfirmedMemoSolidBackground(*buf) ? 1 : 0, primed ? 1 : 0);
+#else
+                    (void)primed;
+#endif
                     ReplayMemoBackgrounds(composeDC, *buf);
+                }
                 else
                 {
                     for (RECT r : g_sessionBlacknessRects)
@@ -526,7 +564,18 @@ namespace GlassCore::EditControl
                     buf->hWnd, buf->screenDC);
 #endif
             if (buf->delphiMemo)
+            {
+                const bool primed = PrimeMemoSolidBackground(buf->screenDC, *buf);
+#if defined(_DEBUG)
+                if (logMemoFlush)
+                    DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] SolidBackground hwnd=0x%p color=0x%08X confirmed=%d primed=%d target=fallback",
+                        buf->hWnd, static_cast<unsigned>(buf->memoSolidBackground),
+                        HasConfirmedMemoSolidBackground(*buf) ? 1 : 0, primed ? 1 : 0);
+#else
+                (void)primed;
+#endif
                 ReplayMemoBackgrounds(buf->screenDC, *buf);
+            }
             else
             {
                 for (RECT r : g_sessionBlacknessRects)

@@ -109,9 +109,36 @@ class DelphiPipelineContract(unittest.TestCase):
         replay = source.split('static void ReplayMemoBackgrounds(', 1)[1].split('// ── FlushEditBuffer', 1)[0]
         self.assertRegex(replay, r'(?s)for \(const auto& op : buf.memoBackgrounds\).*?PatBlt\(dc.*?if \(op.fill\).*?CreateSolidColorBrushWithAlpha\(op.color, 255\).*?FillRect\(dc')
         flush = source.split('static void FlushEditBuffer()', 1)[1].split('static void ApplyEditBackgroundRect(', 1)[0]
-        self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*ReplayMemoBackgrounds\(composeDC, \*buf\);.*?GdiAlphaBlend\(composeDC')
-        self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*ReplayMemoBackgrounds\(buf->screenDC, \*buf\);.*?GdiAlphaBlend\(buf->screenDC')
+        self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*\{.*?ReplayMemoBackgrounds\(composeDC, \*buf\);.*?GdiAlphaBlend\(composeDC')
+        self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*\{.*?ReplayMemoBackgrounds\(buf->screenDC, \*buf\);.*?GdiAlphaBlend\(buf->screenDC')
         self.assertIn('memoBackgrounds=%zu', flush)
+
+    def test_memo_solid_background_requires_current_color_confirmation(self):
+        root = read('WndCompat/Root/RootSubclass.cpp')
+        capture = root.split('const bool validBrush = GetObject(', 1)[1].split('if (validBrush)', 1)[0]
+        for guard in ('WM_CTLCOLORSTATIC', 'L"TMemo"', 'validBrush', 'BS_SOLID', 'OPAQUE',
+                      'GetBkColor(hdc)', 'COLOR_WINDOW', 'COLOR_BTNFACE'):
+            self.assertIn(guard, capture)
+        self.assertIn('SetDelphiMemoBackground(memo, rgb)', capture)
+        self.assertIn('ClearDelphiMemoBackground(memo)', capture)
+        edit_host = read('WndCompat/Controls/EditSubclass.cpp')
+        self.assertEqual(edit_host.count('GlassShared::ClearDelphiMemoBackground(hWnd)'), 2)
+        prop = read('GlassShared/include/GlassDelphiMemoBackground.h')
+        self.assertIn('(color & 0xFFFFFFu) + 1u', prop)
+        self.assertIn('value > 0x1000000u', prop)
+        edit = read('GlassCore/src/Hooks/EditHooks.cpp')
+        self.assertIn('if (buf->delphiMemo)\n            buf->memoSolidBackground = GlassShared::GetDelphiMemoBackground(hWnd);', edit)
+        confirm = edit.split('static bool HasConfirmedMemoSolidBackground(', 1)[1].split('static bool PrimeMemoSolidBackground(', 1)[0]
+        self.assertIn('buf.memoSolidBackground == CLR_INVALID', confirm)
+        self.assertIn('op.fill && (op.color & 0xFFFFFFu) == buf.memoSolidBackground', confirm)
+        prime = edit.split('static bool PrimeMemoSolidBackground(', 1)[1].split('static void ReplayMemoBackgrounds(', 1)[0]
+        self.assertIn('!HasConfirmedMemoSolidBackground(buf)', prime)
+        self.assertIn('CreateSolidColorBrushWithAlpha(buf.memoSolidBackground, 255)', prime)
+        flush = edit.split('static void FlushEditBuffer()', 1)[1].split('static void ApplyEditBackgroundRect(', 1)[0]
+        for dc in ('composeDC', 'buf->screenDC'):
+            self.assertLess(flush.index(f'PrimeMemoSolidBackground({dc}, *buf)'), flush.index(f'ReplayMemoBackgrounds({dc}, *buf)'))
+        self.assertIn('BitBlt(buf->screenDC', flush)
+        self.assertIn('SolidBackground hwnd=', flush)
 
     def test_memo_dib_is_scoped_and_listview_black_brush_is_preserved(self):
         edit = read("GlassCore/src/Hooks/EditHooks.cpp")
