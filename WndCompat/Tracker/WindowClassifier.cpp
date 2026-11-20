@@ -408,7 +408,10 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
 
     // ── ComboBox ─────────────────────────────────────────────────────────────
     if (Equals(cls, L"ComboBox") ||
-        Equals(cls, L"TComboBox"))
+        Equals(cls, L"TComboBox") ||
+        Equals(cls, L"TColorBox") ||
+        Equals(cls, L"TDriveComboBox") ||
+        Equals(cls, L"TFilterComboBox"))
         return ControlKind::ComboBox;
 
     // ── ComboBoxEx32 ────────────────────────────────────────────────────────

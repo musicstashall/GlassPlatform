@@ -388,26 +388,8 @@ namespace GlassCore::ComboBoxControl
                 pRect->bottom,
                 static_cast<unsigned>(effAlpha));
 
-            if (dropPart)
-            {
-                if (effAlpha == 0)
-                {
-                    RECT fill{};
-                    if (pClipRect)
-                    {
-                        if (!IntersectRect(&fill, pRect, pClipRect))
-                            return S_OK;
-                    }
-                    else
-                        fill = *pRect;
-                    PatBlt(hdc, fill.left, fill.top, fill.right - fill.left, fill.bottom - fill.top, BLACKNESS);
-                    return S_OK;
-                }
-                DebugLog(DBG_NORMAL,
-                    L"[GlassCore][ComboBoxControl] InvokeComboDrawThemeBg: drop part → orig (без DIB+AlphaBlend)");
-                return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
-            }
-
+            // Field and drop button use the same themed-chrome opacity. Drop
+            // parts still bypass field dedup: each state/paint must reach DTB.
             const bool alphaOk = Shared::WinApiUtils::DrawThemeBackgroundWithConstantAlpha(
                 orig,
                 hTheme,
@@ -417,11 +399,28 @@ namespace GlassCore::ComboBoxControl
                 pRect,
                 pClipRect,
                 effAlpha);
-
-            g_comboDtbDedupField = dedupKey;
-
+#if defined(_DEBUG)
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 32; }
+            if (budget)
+            {
+                --budget;
+                wchar_t cls[64]{};
+                GetClassNameW(g_comboHwnd, cls, _countof(cls));
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][ComboBoxControl] DTB result hwnd=0x%p class=%s dc=0x%p part=%d state=%d alpha=%u drop=%d success=%d clip=%d",
+                    g_comboHwnd, cls, hdc, iPartId, iStateId, static_cast<unsigned>(effAlpha),
+                    dropPart ? 1 : 0, alphaOk ? 1 : 0, pClipRect ? 1 : 0);
+            }
+#endif
             if (alphaOk)
+            {
+                if (!dropPart) g_comboDtbDedupField = dedupKey;
                 return S_OK;
+            }
+            if (!dropPart) g_comboDtbDedupField.reset();
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
         }
 

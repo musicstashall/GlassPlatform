@@ -597,11 +597,33 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('HeaderTextClear', grid)
         self.assertIn('[GlassCore][DelphiMemo] DirectGetDC', read("GlassCore/src/Hooks/EditHooks.cpp"))
 
+    def test_vcl_combo_classification_and_combo_alpha_paths(self):
+        classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
+        subclass = read('WndCompat/Popup/ComboLBox/ComboBoxSubclass.cpp')
+        for cls in ('TComboBox', 'TColorBox', 'TDriveComboBox', 'TFilterComboBox'):
+            self.assertRegex(classifier, r'(?s)if\s*\([^;{}]*L"' + cls +
+                             r'"[^;{}]*\)\s*return ControlKind::ComboBox\s*;')
+            self.assertIn('L"' + cls + '"', subclass)
+        code = read('GlassCore/src/Hooks/ComboBoxControlHooks.cpp')
+        draw = code.split('static HRESULT InvokeComboDrawThemeBackground(', 1)[1].split('int WINAPI Overall_MyDrawTextW', 1)[0]
+        self.assertIn('GetEffectiveDrawThemeConstantAlphaForSession', draw)
+        self.assertIn('DrawThemeBackgroundWithConstantAlpha(', draw)
+        self.assertNotIn('if (dropPart)', draw)
+        self.assertIn('if (!dropPart && g_comboDtbDedupField', draw)
+        self.assertIn('if (!dropPart) g_comboDtbDedupField = dedupKey', draw)
+        self.assertLess(draw.index('if (alphaOk)'), draw.index('g_comboDtbDedupField = dedupKey'))
+        helper = read('GlassShared/src/WinApiUtils.cpp').split('bool DrawThemeBackgroundWithConstantAlpha(', 1)[1].split('bool DrawThemeBackgroundWithConstantAlphaAndChromaKey(', 1)[0]
+        for guard in ('if (!IntersectRect(&blendRect, pRect, pClipRect))',
+                      'blendRect.left - pRect->left', 'blendRect.right - blendRect.left',
+                      'blendRect.bottom - blendRect.top', 'GdiAlphaBlend('):
+            self.assertIn(guard, helper)
+        self.assertIn('[WndCompat][DelphiCombo] WM_DRAWITEM', read('WndCompat/Root/RootSubclass.cpp'))
+
     def test_targeted_vcl_edit_probes_and_combo_ctlcolor(self):
         combo = read("WndCompat/Popup/ComboLBox/ComboBoxSubclass.cpp")
         ctl = combo.split('case WM_CTLCOLOREDIT:', 1)[1].split('case WM_LBUTTONDOWN:', 1)[0]
         for guard in ('Shared::InjectionMode::Full', 'GlassIsBackdropAllowedForHwnd(hWnd)',
-                      'L"TComboBox"', 'info.hwndItem != edit', 'L"Edit"',
+                      'IsDelphiComboBox(hWnd)', 'info.hwndItem != edit', 'L"Edit"',
                       'DefSubclassProc', 'lb.lbStyle == BS_SOLID', 'GetSysColor(COLOR_WINDOW)',
                       'SetBkColor(dc, 0)', 'BLACK_BRUSH', '#if defined(_DEBUG)'):
             self.assertIn(guard, ctl)

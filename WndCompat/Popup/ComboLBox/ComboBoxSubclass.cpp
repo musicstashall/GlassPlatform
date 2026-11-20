@@ -13,6 +13,15 @@
 
 namespace
 {
+    // Exact VCL window classes only; native ComboBox/WinForms keep their policy.
+    bool IsDelphiComboBox(HWND hwnd) noexcept
+    {
+        return WndCompat::IsWindowClass(hwnd, L"TComboBox")
+            || WndCompat::IsWindowClass(hwnd, L"TColorBox")
+            || WndCompat::IsWindowClass(hwnd, L"TDriveComboBox")
+            || WndCompat::IsWindowClass(hwnd, L"TFilterComboBox");
+    }
+
     LRESULT CALLBACK ComboBoxSubclassProc(
         HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         UINT_PTR /*uIdSubclass*/, DWORD_PTR /*dwRefData*/)
@@ -35,11 +44,11 @@ namespace
         {
         case WM_CTLCOLOREDIT:
         {
-            // Только настоящий дочерний Edit TComboBox в Full. Редактор сам
+            // Только настоящий дочерний Edit VCL ComboBox в Full. Редактор сам
             // посылает CTLCOLOR родителю, поэтому root окна это не перехватывает.
             if (WndCompat::WinEventHook_GetMode() != Shared::InjectionMode::Full
                 || !GlassShared::GlassIsBackdropAllowedForHwnd(hWnd)
-                || !WndCompat::IsWindowClass(hWnd, L"TComboBox"))
+                || !IsDelphiComboBox(hWnd))
                 break;
             COMBOBOXINFO info{ sizeof(info) };
             HWND edit = reinterpret_cast<HWND>(lParam);
@@ -140,7 +149,7 @@ namespace WndCompat
             // синхронный WM_PAINT внутри обработки события создания.
             if (WndCompat::WinEventHook_GetMode() == Shared::InjectionMode::Full
                 && GlassShared::GlassIsBackdropAllowedForHwnd(hWnd)
-                && WndCompat::IsWindowClass(hWnd, L"TComboBox"))
+                && IsDelphiComboBox(hWnd))
             {
                 COMBOBOXINFO info{ sizeof(info) };
                 if (GetComboBoxInfo(hWnd, &info) && info.hwndItem
