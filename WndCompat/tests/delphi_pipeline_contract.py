@@ -722,23 +722,5 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('_wcsicmp(className, L"TPageControl") != 0', source)
         self.assertGreaterEqual(source.count('_wcsicmp(g_brushClass, className) == 0'), 2)
 
-    def test_native_combo_app_paint_fill_is_scoped_and_transparent(self):
-        header = read("GlassCore/Include/Hooks/ComboBoxControl.h")
-        self.assertIn('bool IsNativeAppPaintSession(HWND hWnd) noexcept', header)
-        hooks = read("GlassCore/src/Hooks/ComboBoxControlHooks.cpp")
-        for marker in ('bool IsNativeAppPaintSession(HWND hWnd) noexcept',
-                       'g_comboHwnd != hWnd', 'IsNativeComboBoxClass(hWnd)',
-                       'g_nativeAppGdiHooksOn',
-                       'OHK_FILLRECT, true', 'OHK_RECTANGLE, true', 'OHK_PATBLT, true',
-                       'OHK_FILLRECT, false', 'OHK_RECTANGLE, false', 'OHK_PATBLT, false'):
-            self.assertIn(marker, hooks)
-        self.assertLess(hooks.index('OHK_FILLRECT, true'),
-                        hooks.index('EnableComboBoxHooksForSession(kind, g_activePaintMod, false)'))
-        root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
-        for marker in ('[GlassCore][NativeCombo]', 'IsNativeAppPaintSession(hWnd)',
-                       'IsNativeAppPaintSession(WindowFromDC(hdc))',
-                       'L"cleared-system"', 'BLACKNESS'):
-            self.assertIn(marker, root)
-
 if __name__ == "__main__":
     unittest.main()

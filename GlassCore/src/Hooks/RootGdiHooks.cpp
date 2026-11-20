@@ -30,7 +30,6 @@
 #include <Helpers/ThemeHelper.h>
 #include <Subsystems/PaintDispatcher.h>
 #include <GlassControlKind.h>
-#include <Hooks/ComboBoxControl.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <Subsystems/GdiHookUtils.h>
 #include <WinApiUtils.h>
@@ -258,23 +257,6 @@ namespace GlassCore::Root
             const bool sAlive = s && ::IsWindow(s);
             HWND host = (sAlive && GlassCore::Root::HasRootHookCache(s)) ? s : nullptr;
             return host;
-        }
-
-        void LogNativeComboGdi(const wchar_t* api, HDC hdc, const RECT* r,
-            COLORREF color, const wchar_t* branch) noexcept
-        {
-            static thread_local ULONGLONG epoch = 0;
-            static thread_local unsigned budget = 0;
-            const ULONGLONG now = GetTickCount64();
-            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 32; }
-            if (!budget) return;
-            --budget;
-            const HWND w = WindowFromDC(hdc);
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][NativeCombo] api=%s hwnd=0x%p dc=0x%p dcType=%u rect=[%ld,%ld,%ld,%ld] color=0x%08X branch=%s",
-                api, w, hdc, static_cast<unsigned>(GetObjectType(hdc)),
-                r ? r->left : 0, r ? r->top : 0, r ? r->right : 0, r ? r->bottom : 0,
-                static_cast<unsigned>(color), branch);
         }
 
         [[nodiscard]] static std::wstring CallerBaseName(HMODULE m) noexcept
@@ -1469,14 +1451,6 @@ namespace GlassCore::Root
             HGDIOBJ hbr = GetCurrentObject(hdc, OBJ_BRUSH);
             GetObject(hbr, sizeof(lbrush), &lbrush);
 
-            if (GlassCore::ComboBoxControl::IsNativeAppPaintSession(HwndFromDcOrMmcSession(hdc, caller)))
-            {
-                const RECT r{ x, y, x + cx, y + cy };
-                wchar_t branch[32]{};
-                swprintf_s(branch, L"rop=0x%08X", static_cast<unsigned>(rop));
-                LogNativeComboGdi(L"PatBlt", hdc, &r, lbrush.lbColor, branch);
-            }
-
             const bool sysmon = CallerBaseIs(caller, L"sysmon.ocx") && StrEqI(cls, L"SysmonCtrl");
             const bool gdiplusCaller = CallerBaseIs(caller, L"gdiplus.dll");
             const bool wantSpecial = wvcChartPaint || sysmon || gdiplusCaller;
@@ -1769,14 +1743,6 @@ namespace GlassCore::Root
             if (g_shutdown.load(std::memory_order_acquire))
                 return o(hdc, left, top, right, bottom);
 
-            if (GlassCore::ComboBoxControl::IsNativeAppPaintSession(WindowFromDC(hdc)))
-            {
-                LOGPEN pen{};
-                GetObject(GetCurrentObject(hdc, OBJ_PEN), sizeof(pen), &pen);
-                const RECT r{ left, top, right, bottom };
-                LogNativeComboGdi(L"Rectangle", hdc, &r, pen.lopnColor, L"observed");
-            }
-
             HWND hWnd = HwndFromDcOrMmcSession(hdc, caller);
             if (CallerBaseIs(caller, L"COMDLG32.dll") && hWnd
                 && static_cast<ATOM>(GetClassLongPtrW(hWnd, GCW_ATOM)) == static_cast<ATOM>(32770))
@@ -1846,23 +1812,6 @@ namespace GlassCore::Root
             LOGBRUSH lb{};
             if (!GetObject(hbr, sizeof(lb), &lb))
                 return o(hDC, lprc, hbr);
-
-            if (GlassCore::ComboBoxControl::IsNativeAppPaintSession(hWnd))
-            {
-                // Native class-"ComboBox" painted by the EXE: its field/button
-                // background is opaque system colour. Convert that fill to the
-                // transparent black used elsewhere; other colours pass through.
-                if (lb.lbStyle == BS_SOLID && lb.lbColor != 0
-                    && (lb.lbColor == GetSysColor(COLOR_WINDOW)
-                        || lb.lbColor == GetSysColor(COLOR_BTNFACE)))
-                {
-                    PatBlt(hDC, lprc->left, lprc->top,
-                        lprc->right - lprc->left, lprc->bottom - lprc->top, BLACKNESS);
-                    LogNativeComboGdi(L"FillRect", hDC, lprc, lb.lbColor, L"cleared-system");
-                    return 1;
-                }
-                LogNativeComboGdi(L"FillRect", hDC, lprc, lb.lbColor, L"observed");
-            }
 
             if (lb.lbStyle == BS_SOLID)
             {
