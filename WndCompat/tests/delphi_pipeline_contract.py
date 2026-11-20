@@ -804,6 +804,11 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('PushPaint(instMod, OHK_BITBLT, cache);', grid)
         self.assertIn('bmp=0x%p px=0x%08X', win)
 
+    def test_delphi_grid_logs_theme_and_any_patblt(self):
+        root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        self.assertIn('[GlassCore][DelphiGrid] Theme hwnd=0x%p part=%d state=%d', root)
+        self.assertIn('[GlassCore][DelphiGrid] PatBltAny hwnd=0x%p rop=0x%08X', root)
+
     def test_delphi_grid_clears_repaint_area_after_beginpaint(self):
         root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         body = root.split('Root_OnDelphiGridAfterBeginPaint(', 1)[1].split('static void EnableSpecs', 1)[0]
