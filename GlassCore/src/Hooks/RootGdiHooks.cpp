@@ -1070,6 +1070,25 @@ namespace GlassCore::Root
         {
             auto orig = GetRootOrg<OHK_DELPHI_GRID_FILL, decltype(&FillRect)>(GetCallerModule(_ReturnAddress()));
             if (!orig) return FillRect(dc, rect, brush);
+#if defined(_DEBUG)
+            // Вход в детур виден всегда: иначе нельзя отличить «гейт отсёк» от
+            // «детур не вызвали».
+            if (AllowDelphiGridLog(0))
+            {
+                wchar_t dcCls[128]{};
+                const HWND dcWnd = WindowFromDC(dc);
+                if (dcWnd) GetClassNameW(dcWnd, dcCls, _countof(dcCls));
+                LOGBRUSH elb{};
+                const bool eok = brush && GetObjectW(brush, sizeof(elb), &elb) == sizeof(elb);
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] FillEnter dc=0x%p dcWnd=0x%p dcCls=\"%s\" rect=[%ld,%ld,%ld,%ld] style=%d color=0x%08X gate=%d",
+                    dc, dcWnd, dcCls,
+                    rect ? rect->left : 0, rect ? rect->top : 0, rect ? rect->right : 0, rect ? rect->bottom : 0,
+                    eok ? static_cast<int>(elb.lbStyle) : -1,
+                    eok ? static_cast<unsigned>(elb.lbColor) : 0u,
+                    IsDelphiGridFillDC(dc) ? 1 : 0);
+            }
+#endif
             if (g_shutdown.load(std::memory_order_acquire) || !IsDelphiGridFillDC(dc))
                 return orig(dc, rect, brush);
             LOGBRUSH lb{};
@@ -2022,6 +2041,19 @@ namespace GlassCore::Root
             if (hWnd)
                 GetClassNameW(hWnd, cls, _countof(cls));
 
+#if defined(_DEBUG)
+            if (lprc && hbr && (StrEqI(cls, L"TStringGrid") || StrEqI(cls, L"TDrawGrid")
+                || StrEqI(cls, L"TShownValueList")))
+            {
+                LOGBRUSH glb{};
+                const bool gok = GetObject(hbr, sizeof(glb), &glb) != 0;
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] GenFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] style=%d color=0x%08X",
+                    hWnd, lprc->left, lprc->top, lprc->right, lprc->bottom,
+                    gok ? static_cast<int>(glb.lbStyle) : -1,
+                    gok ? static_cast<unsigned>(glb.lbColor) : 0u);
+            }
+#endif
             const bool isAfx = StrEqI(cls, L"AfxWnd42u");
             const bool isDmView = CallerBaseIs(caller, L"dmview.ocx");
             const bool isDmdskmgr = CallerBaseIs(caller, L"dmdskmgr.dll");
