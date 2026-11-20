@@ -783,5 +783,17 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(marker, fill)
         self.assertIn('count=%u rect=[', root)
 
+    def test_delphi_grid_erase_is_blackened_in_subclass(self):
+        root = read("WndCompat/Root/RootSubclass.cpp")
+        erase = root.split('case WM_ERASEBKGND:', 1)[1].split('case WM_CTLCOLORSTATIC:', 1)[0]
+        for marker in ('WndCompat::IsWindowClass(hWnd, L"TStringGrid")',
+                       'WndCompat::IsWindowClass(hWnd, L"TDrawGrid")',
+                       'WndCompat::IsWindowClass(hWnd, L"TShownValueList")',
+                       'GetClipBox(hdc, &rc)', 'PatBlt(hdc, rc.left, rc.top', 'return 1;'):
+            self.assertIn(marker, erase)
+        # Черная очистка должна идти ДО проверки backdrop.
+        self.assertLess(erase.index('L"TStringGrid"'),
+                        erase.index('GlassIsBackdropAllowedForHwnd'))
+
 if __name__ == "__main__":
     unittest.main()

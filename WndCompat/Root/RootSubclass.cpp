@@ -1053,6 +1053,23 @@ namespace
             if (Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hWnd))
                 break;
 
+            // VCL-таблицы (TStringGrid/TDrawGrid/TShownValueList) стирают фон
+            // здесь, до paint-сессии: без этого фиксированные ячейки остаются
+            // непрозрачными (в журнале для них нет ни Fill, ни PatBlt).
+            if (WndCompat::IsWindowClass(hWnd, L"TStringGrid")
+                || WndCompat::IsWindowClass(hWnd, L"TDrawGrid")
+                || WndCompat::IsWindowClass(hWnd, L"TShownValueList"))
+            {
+                HDC hdc = reinterpret_cast<HDC>(wParam);
+                RECT rc{};
+                if (hdc && GetClipBox(hdc, &rc) != ERROR && !IsRectEmpty(&rc))
+                {
+                    PatBlt(hdc, rc.left, rc.top, rc.right - rc.left,
+                        rc.bottom - rc.top, BLACKNESS);
+                    return 1;
+                }
+            }
+
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
                 break;
 
