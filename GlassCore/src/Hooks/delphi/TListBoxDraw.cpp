@@ -389,9 +389,24 @@ namespace GlassCore::DelphiListBox
             auto orig = Original<DrawTextSlot, decltype(&::DrawTextW)>();
             if (!orig) return DrawTextW(dc, text, count, rect, format);
             const auto* current = Current(dc);
-            if (!current || current->combo || !rect || !text
-                || (format & (DT_CALCRECT | DT_MODIFYSTRING)))
+            if (!current || !rect || !text || (format & (DT_CALCRECT | DT_MODIFYSTRING)))
                 return orig(dc, text, count, rect, format);
+            if (current->combo)
+            {
+                // VCL may paint the field text with DrawTextW on the owner DC.
+                // Composite the glyphs without filling the background so the
+                // selection/theme under the text stays intact.
+                const Session comboSession = *current;
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+                LogComboText(comboSession, dc, format, static_cast<UINT>(count), rect,
+                    GetBkColor(dc), L"drawtext");
+#endif
+                int comboResult = 0;
+                if (SUCCEEDED(GlassCore::Text::DrawTextWithAlpha(
+                        dc, text, count, rect, format, comboResult, true)))
+                    return comboResult;
+                return orig(dc, text, count, rect, format);
+            }
             const Session s = *current;
             const int saved = SaveDC(dc);
             if (!saved) return orig(dc, text, count, rect, format);
@@ -482,9 +497,10 @@ namespace GlassCore::DelphiListBox
             g_dispatcher.moduleAddress = mod;
             for (size_t i = 0; i < Count; ++i)
             {
-                // Combo field: FillRect plus ExtTextOutW only to strip the
-                // opaque background. DrawText and Rectangle stay with VCL.
-                if (s.combo && i != FillSlot && i != ExtTextSlot) continue;
+                // Combo field: FillRect plus the text APIs that VCL uses for
+                // the field (ExtTextOutW strips the opaque background, DrawTextW
+                // renders glyphs). Rectangle stays with VCL.
+                if (s.combo && i != FillSlot && i != ExtTextSlot && i != DrawTextSlot) continue;
                 if (i == RectangleSlot && !s.checkList) continue;
                 const int before = g_dispatcher.GetRef(i);
                 g_dispatcher.EnableHook(i, true);
