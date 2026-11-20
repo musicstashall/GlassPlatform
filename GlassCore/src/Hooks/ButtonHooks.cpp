@@ -1284,20 +1284,19 @@ namespace GlassCore::Button
         }
         g_delphiBitBtnDrawStack.push_back(session);
 #if defined(_DEBUG)
-        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawItem begin hwnd=0x%p dc=0x%p action=0x%X theme=%d text=%d parent=%d slotTheme=%d slotText=%d slotParent=%d",
+        // Импорты EXE неизменны за жизнь процесса. Сканируем один раз, но
+        // выводим кеш вместе с каждой сессией: пользователь может включить
+        // логирование после первой отрисовки кнопки.
+        static const std::array<bool, 4> namedImports{
+            HasDelphiThemeImport(module, "DrawThemeBackground"),
+            HasDelphiThemeImport(module, "DrawThemeBackgroundEx"),
+            HasDelphiThemeImport(module, "DrawThemeParentBackground"),
+            HasDelphiThemeImport(module, "DrawThemeParentBackgroundEx")
+        };
+        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawItem begin hwnd=0x%p dc=0x%p action=0x%X theme=%d text=%d parent=%d slotTheme=%d slotText=%d slotParent=%d importDtb=%d importDtbEx=%d importParent=%d importParentEx=%d",
             session.hwnd, session.dc, dis->itemAction, session.acquired[0], session.acquired[1], session.acquired[2],
-            session.slotFound[0], session.slotFound[1], session.slotFound[2]);
-        static std::atomic<bool> loggedImports{ false };
-        if (!loggedImports.exchange(true, std::memory_order_relaxed))
-        {
-            const bool dtb = HasDelphiThemeImport(module, "DrawThemeBackground");
-            const bool dtbEx = HasDelphiThemeImport(module, "DrawThemeBackgroundEx");
-            const bool parent = HasDelphiThemeImport(module, "DrawThemeParentBackground");
-            const bool parentEx = HasDelphiThemeImport(module, "DrawThemeParentBackgroundEx");
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiBitBtn] EXE imports named dtb=%d dtbEx=%d parent=%d parentEx=%d (regular or delay, selected DLL names)",
-                dtb, dtbEx, parent, parentEx);
-        }
+            session.slotFound[0], session.slotFound[1], session.slotFound[2],
+            namedImports[0], namedImports[1], namedImports[2], namedImports[3]);
 #endif
         return true;
     }

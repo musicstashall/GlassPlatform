@@ -56,6 +56,8 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn(guard + '\n        OHK_VCLPROBE_FILL', header)
         self.assertIn(guard + '\n        struct VclProbeSession', gdi)
         self.assertIn(guard + '\n    static void VclProbePaintBegin', root)
+        self.assertIn('[GlassCore][DelphiProbeBuild] optional IAT probe compiled=0', root)
+        self.assertIn('[GlassCore][DelphiProbeBuild] optional IAT probe compiled=1', root)
         self.assertIn('session.acquired[i] = AcquireVclProbeHook(ep, i)', gdi)
         self.assertIn('if (session.acquired[i]) EnableRootHook(session.module, i, false)', gdi)
         self.assertIn('it->second.GetRef(index) > before', gdi)
@@ -98,7 +100,8 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('if (session.acquired[i]) EnableHooksOnModule', code)
         self.assertIn('slotTheme=%d slotText=%d slotParent=%d', code)
         self.assertIn('hookInfoCache[index].first.IsValid()', code)
-        self.assertIn('EXE imports named dtb=%d dtbEx=%d parent=%d parentEx=%d', code)
+        self.assertIn('importDtb=%d importDtbEx=%d importParent=%d importParentEx=%d', code)
+        self.assertIn('static const std::array<bool, 4> namedImports', code)
         probe = code.split('static bool HasDelphiThemeImport', 1)[1].split('#endif', 1)[0]
         self.assertIn('Hooks::GetIAT', probe)
         self.assertIn('Hooks::GetDelayloadIAT', probe)

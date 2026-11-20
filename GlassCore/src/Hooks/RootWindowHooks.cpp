@@ -919,6 +919,13 @@ namespace GlassCore::Root
 
     void Startup() noexcept
     {
+#if defined(_DEBUG)
+#if defined(GLASS_DELPHI_DRAW_PROBE)
+        DebugLog(DBG_IMPORTANT, L"[GlassCore][DelphiProbeBuild] optional IAT probe compiled=1 (diagnostic; not a normal visual test)");
+#else
+        DebugLog(DBG_IMPORTANT, L"[GlassCore][DelphiProbeBuild] optional IAT probe compiled=0");
+#endif
+#endif
         /*using namespace Hooks::DebugDetourHooks;
         (void)SetEnabled(DDH_All, true);*/
         // Предпрогрев IAT точки входа для динамического SETBKCOLOR
