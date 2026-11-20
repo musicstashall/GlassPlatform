@@ -1214,7 +1214,22 @@ namespace GlassCore::Root
         // точке его получения: белый (COLOR_WINDOW) → чёрный = прозрачность.
         DWORD WINAPI Root_MyGetSysColor(int nIndex)
         {
-            auto o = GetRootOrg<OHK_GETSYSCOLOR, decltype(&GetSysColor)>(GetCallerModule(_ReturnAddress()));
+            const HMODULE callerMod = GetCallerModule(_ReturnAddress());
+            auto o = GetRootOrg<OHK_GETSYSCOLOR, decltype(&GetSysColor)>(callerMod);
+#if defined(_DEBUG)
+            // Вход виден всегда: иначе не отличить «детур не позвали» от
+            // «orig не найден» и «хост сессии не таблица».
+            if (nIndex == COLOR_WINDOW && AllowDelphiGridLog(2))
+            {
+                const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+                wchar_t hostCls[128]{};
+                if (host) GetClassNameW(host, hostCls, _countof(hostCls));
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] GetSysColorEnter nIndex=%d host=0x%p hostCls=\"%s\" gridHost=%d orig=%d caller=%s",
+                    nIndex, host, hostCls, IsDelphiGridPaintHost() ? 1 : 0, o ? 1 : 0,
+                    CallerBaseName(callerMod).c_str());
+            }
+#endif
             if (!o)
                 return GetSysColor(nIndex);
             if (!g_shutdown.load(std::memory_order_acquire) && nIndex == COLOR_WINDOW
