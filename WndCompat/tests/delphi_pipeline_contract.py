@@ -594,7 +594,9 @@ class DelphiPipelineContract(unittest.TestCase):
         for guard in ('WindowFromDC(dc)', 'GetPaintSessionHostHwnd()', 'IsForeignPaintBarrierActive()',
                       'L"TShownValueList"', 'L"TStringGrid"', 'L"TDrawGrid"',
                       'TA_UPDATECP', 'ETO_GLYPH_INDEX', 'ETO_PDY',
-                      'lb.lbStyle == BS_SOLID', 'RGB(255, 255, 255)', 'L"Header"',
+                      'lb.lbStyle == BS_SOLID',
+                      'plainFill == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)',
+                      'plainFill == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF)', 'L"Header"',
                       'ExtTextOutWithAlpha', 'return orig('):
             self.assertIn(guard, grid)
         self.assertIn('options == ETO_CLIPPED && rect && rect->top == 0', grid)
