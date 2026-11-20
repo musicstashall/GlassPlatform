@@ -34,6 +34,12 @@
     <Filter Include="src\Hooks">
       <UniqueIdentifier>{AD2D1EBD-89BF-41BB-98D5-B0EBF2A27B8F}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\Hooks\delphi">
+      <UniqueIdentifier>{2A70F838-1F17-4897-9A6A-5328C95F8EC2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\Hooks\delphi">
+      <UniqueIdentifier>{8C477C68-CE73-4817-A77B-6D6A347D9A48}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\Hooks\forms">
       <UniqueIdentifier>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</UniqueIdentifier>
     </Filter>
@@ -102,6 +108,12 @@
     </ClCompile>
     <ClCompile Include="src\Hooks\ExplorerFrameHooks.cpp">
       <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TBitBtnHooks.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TToggleSwitchHooks.cpp">
+      <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
     <ClCompile Include="src\Hooks\forms\FormsHooks.cpp">
       <Filter>src\Hooks\forms</Filter>
@@ -329,6 +341,15 @@
     </ClInclude>
     <ClInclude Include="Include\Hooks\ExplorerFrame.h">
       <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TBitBtnHooks.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TBitBtnBridge.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TToggleSwitchHooks.h">
+      <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\forms\FormsHooks.h">
       <Filter>Include\Hooks\forms</Filter>
