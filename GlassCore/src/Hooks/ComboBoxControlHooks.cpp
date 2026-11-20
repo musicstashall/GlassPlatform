@@ -926,11 +926,18 @@ namespace GlassCore::ComboBoxControl
 #if defined(_DEBUG)
             // Narrow, rate-limited diagnosis: why a ComboBox paint did not open
             // a themed-field session (nested/leaked session or foreign caller).
-            static std::atomic<unsigned> s_beginDiag{48};
+            static thread_local ULONGLONG s_beginEpoch = 0;
+            static thread_local unsigned s_beginBudget = 0;
             [[maybe_unused]] auto logSkip = [&](const wchar_t* reason)
             {
-                if (s_beginDiag.fetch_sub(1, std::memory_order_relaxed) >= 48)
-                    return;
+                const ULONGLONG now = GetTickCount64();
+                if (!s_beginEpoch || now - s_beginEpoch >= 1000)
+                {
+                    s_beginEpoch = now;
+                    s_beginBudget = 32;
+                }
+                if (!s_beginBudget) return;
+                --s_beginBudget;
                 wchar_t cls[64]{};
                 GetClassNameW(hWnd, cls, _countof(cls));
                 DebugLog(DBG_NORMAL,
@@ -971,13 +978,24 @@ namespace GlassCore::ComboBoxControl
             g_comboHwnd = hWnd;
             EnableComboBoxHooksForSession(kind, comctlMod, true);
 #if defined(_DEBUG)
-            if (appPaintedNative)
             {
-                static std::atomic<unsigned> s_appDiag{16};
-                if (s_appDiag.fetch_sub(1, std::memory_order_relaxed) < 16)
+                static thread_local ULONGLONG s_openEpoch = 0;
+                static thread_local unsigned s_openBudget = 0;
+                const ULONGLONG now = GetTickCount64();
+                if (!s_openEpoch || now - s_openEpoch >= 1000)
+                {
+                    s_openEpoch = now;
+                    s_openBudget = 16;
+                }
+                if (s_openBudget)
+                {
+                    --s_openBudget;
+                    wchar_t openCls[64]{};
+                    GetClassNameW(hWnd, openCls, _countof(openCls));
                     DebugLog(DBG_NORMAL,
-                        L"[GlassCore][ComboBoxControl] BeginPaint session open hwnd=0x%p class=ComboBox source=app-iat",
-                        hWnd);
+                        L"[GlassCore][ComboBoxControl] BeginPaint session open hwnd=0x%p class=%s source=%s",
+                        hWnd, openCls, appPaintedNative ? L"app-iat" : L"comctl32");
+                }
             }
 #endif
             // Паритет BWM Paint/ComboBox (caller == comctl32 v6, т.е. g_new):

@@ -1801,3 +1801,31 @@ Debug `DelphiComboDraw fill` показывает `branch=system-background` д�
 наличие `BeginPaint session open ... source=app-iat`, наличие/отсутствие
 `DTB result ... class=ComboBox` и строки `DelphiComboDraw`. Без них любая
 подмена заливок кнопки была бы догадкой.
+
+## Тест 43: текст поля через DrawTextW и диагностика сессий
+
+`LogViewer-9.log` для поля `TDriveComboBox` показывает `fill/ext` включёнными,
+но **ни одной** строки `DelphiComboDraw text`: `ExtTextOutW` на HDC из
+`WM_DRAWITEM` для текста поля не вызывается. Поэтому снятие `ETO_OPAQUE` из
+теста 42 на этот случай не попадало, и текст оставался невидимым. Поле
+рисуется иначе — вероятнее всего, `DrawTextW` на оконном DC (в журнале есть
+`WM_DRAWITEM` с `dcType=3`, `dcWnd=combo`).
+
+Теперь combo-сессия подключает и `DrawTextW`: для combo он вызывает
+`DrawTextWithAlpha` с `transparentBufferBackground=true`, то есть рисует только
+глифы и не заливает фон под текстом (выделение и тема сохраняются). Debug
+`DelphiComboDraw text … branch=drawtext` подтверждает попадание. `Rectangle`
+по-прежнему не перехватывается, строки выпадающего списка не затрагиваются.
+
+По обычному `ComboBox` журнал дал только `[GlassCore][Edit] BeginPaint
+hWnd=… kind=19`: это дочерний `Edit`, а строк `ComboBoxControl` нет вообще.
+Причина — прежний общий бюджет диагностики (`48` строк на процесс): он
+расходовался на предыдущие комбо и до этого окна не доходил. Бюджеты
+`BeginPaint session skip` и `BeginPaint session open` теперь обновляются раз в
+секунду (32 и 16 строк), поэтому следующая попытка покажет фактическую причину:
+`active-session`, `caller-not-comctl32`, `comctl-module-unresolved` или
+`session open … source=app-iat|comctl32`.
+
+Проверить: `TDriveComboBox` на неактивной странице и после выбора, `TColorBox`,
+`TFilterComboBox`, `TComboBox` как контроль, обычный `ComboBox` с открытием
+списка и без. Сборка и видимый результат на Windows не проверены.

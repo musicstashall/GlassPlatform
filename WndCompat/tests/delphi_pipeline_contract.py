@@ -628,7 +628,7 @@ class DelphiPipelineContract(unittest.TestCase):
                        'comctl-module-unresolved', 'g_activePaintMod',
                        'DTB(вне сессии)', 'wndClass=%s',
                        'IsNativeComboBoxClass', 'StrEq(cls, L"ComboBox")',
-                       'appPaintedNative', 'source=app-iat',
+                       'appPaintedNative', 'L"app-iat"', 'source=%s',
                        'OnHotBeginGlobal'):
             self.assertIn(marker, combo)
         self.assertEqual(combo.count('GlassCore::DelphiListBox::IsInsideDraw()'), 3)
@@ -644,7 +644,7 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('if (!count) return TRUE;', combo_text)
         begin_draw = draw.split('bool BeginDraw(HWND parent', 1)[1].split('bool TryCheckListThemeBackground', 1)[0]
         for guard in ('const bool comboField', 'if (!comboField) return false;',
-                      'if (s.combo && i != FillSlot && i != ExtTextSlot) continue;', 's.field = comboField'):
+                      'if (s.combo && i != FillSlot && i != ExtTextSlot && i != DrawTextSlot) continue;', 's.field = comboField'):
             self.assertIn(guard, begin_draw)
         self.assertIn('opaque-brush', draw)
         self.assertIn('CreateSolidColorBrushWithAlpha(lb.lbColor, 255)', draw)
