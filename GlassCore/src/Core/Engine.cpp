@@ -19,6 +19,7 @@
 #include <Hooks/DirectUI.h>
 #include <Hooks/Button.h>
 #include <Hooks/delphi/TToggleSwitchHooks.h>
+#include <Hooks/delphi/TBackgroundHooks.h>
 #include <Hooks/UpDown.h>
 #include <Hooks/forms/FormsHooks.h>
 #include <Subsystems/CtlColorProbe.h>
@@ -163,6 +164,7 @@ namespace GlassCore::Engine
         // Button, StaticControl и MonthCal регистрируют провайдеров до PaintDispatcher::Startup
         GlassCore::Button::Startup();
         GlassCore::DelphiToggle::Startup();
+        GlassCore::DelphiBackground::Startup();
         GlassCore::UpDownControl::Startup();
         GlassCore::FormsHooks::Startup();
         GlassCore::Hooks::Immersive::Startup();
@@ -277,6 +279,7 @@ namespace GlassCore::Engine
         GlassCore::StatusBarControl::Shutdown();
         GlassCore::ProgressBarControl::Shutdown();
         GlassCore::DirectUI::Shutdown();
+        GlassCore::DelphiBackground::Shutdown();
         GlassCore::DelphiToggle::Shutdown();
         GlassCore::Button::Shutdown();
         GlassCore::UpDownControl::Shutdown();

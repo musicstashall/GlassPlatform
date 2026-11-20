@@ -1,6 +1,7 @@
 // VCL owner-draw: only the HDC and rectangle supplied in WM_DRAWITEM.
 #include "CorePch.h"
 #include <Hooks/delphi/TListBoxDraw.h>
+#include <Hooks/delphi/TBackgroundHooks.h>
 #include <Core/Intercept/HookDispatcher.h>
 #include <Module/ModuleHandler.h>
 #include <Subsystems/RenderText.h>
@@ -179,6 +180,7 @@ namespace GlassCore::DelphiListBox
         auto lock = g_lock.lock_exclusive();
         g_dispatcher.DisableAllHooks();
     }
+    bool IsInsideDraw() noexcept { return !g_stack.empty(); }
     bool BeginDraw(HWND parent, const DRAWITEMSTRUCT* dis) noexcept
     {
         if (g_shutdown.load(std::memory_order_acquire) || !GlassCore::Root::IsFullInjectionMode()
@@ -190,6 +192,7 @@ namespace GlassCore::DelphiListBox
         if (!GetClassNameW(dis->hwndItem, cls, _countof(cls))) return false;
         const bool color = _wcsicmp(cls, L"TColorListBox") == 0;
         if (!color && _wcsicmp(cls, L"TListBox") != 0 && _wcsicmp(cls, L"TCheckListBox") != 0) return false;
+        GlassCore::DelphiBackground::ClearObservedListTail(dis->hwndItem, dis);
         HMODULE mod = GlassCore::ModuleHandler::g_entryPointModule;
         if (!mod) return false;
         Session s{dis->hwndItem, dis->hDC, dis->rcItem, color,

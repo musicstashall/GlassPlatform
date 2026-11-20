@@ -109,6 +109,9 @@
     <ClCompile Include="src\Hooks\ExplorerFrameHooks.cpp">
       <Filter>src\Hooks</Filter>
     </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TBackgroundHooks.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
     <ClCompile Include="src\Hooks\delphi\TInputHooks.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
@@ -350,6 +353,9 @@
     </ClInclude>
     <ClInclude Include="Include\Hooks\ExplorerFrame.h">
       <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TBackgroundHooks.h">
+      <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\delphi\TInputHooks.h">
       <Filter>Include\Hooks\delphi</Filter>
