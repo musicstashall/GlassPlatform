@@ -1276,6 +1276,23 @@ namespace
                 }
             }
 #endif
+            // Не меняем VCL WM_DRAWITEM: на время DefSubclassProc передаём
+            // GlassCore именно DRAWITEMSTRUCT.hDC и затем закрываем сессию.
+            if (dis->CtlType == ODT_BUTTON && dis->hwndItem
+                && GetParent(dis->hwndItem) == hWnd
+                && WndCompat::IsWindowClass(dis->hwndItem, L"TBitBtn"))
+            {
+                using BeginFn = BOOL (WINAPI*)(HWND, const DRAWITEMSTRUCT*) noexcept;
+                using EndFn = void (WINAPI*)() noexcept;
+                const HMODULE core = GetModuleHandleW(L"GlassCore.dll");
+                const auto begin = core ? reinterpret_cast<BeginFn>(GetProcAddress(core, "GlassCore_BeginDelphiBitBtnDraw")) : nullptr;
+                const auto end = core ? reinterpret_cast<EndFn>(GetProcAddress(core, "GlassCore_EndDelphiBitBtnDraw")) : nullptr;
+                if (begin && end && begin(hWnd, dis))
+                {
+                    auto finish = wil::scope_exit([&]() noexcept { end(); });
+                    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                }
+            }
             // Нас интересуют только пункты меню
             if (dis->CtlType == ODT_MENU)
             {
@@ -1677,7 +1694,8 @@ namespace WndCompat
             return;
         wchar_t className[256]{};
         if (GetClassNameW(hWnd, className, static_cast<int>(_countof(className))) > 0
-            && (_wcsicmp(className, L"TApplication") == 0 || _wcsicmp(className, L"TPUtilWindow") == 0))
+            && (_wcsicmp(className, L"TApplication") == 0 || _wcsicmp(className, L"TPUtilWindow") == 0
+                || _wcsicmp(className, L"TToggleSwitch") == 0))
             return;
         // Полная обвязка (Full / GenericContainer) уже обрабатывает CBN_DROPDOWN — не дублируем.
         if (WndCompat::Root_IsAttached(hWnd))
@@ -1756,6 +1774,10 @@ namespace WndCompat
             DebugLog(L"[WndCompat][Root] Root_Attach: skip VCL TPUtilWindow hwnd=0x%p", hRoot);
             return;
         }
+
+        // Не допускать direct Root_Attach пользовательского VCL-переключателя.
+        if (_wcsicmp(rootClassName, L"TToggleSwitch") == 0)
+            return;
 
         // Панель задач — только TaskbarHost_Attach (без RootSubclassProc).
         if (_wcsicmp(rootClassName, L"Shell_TrayWnd") == 0

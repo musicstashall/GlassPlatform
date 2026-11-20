@@ -316,8 +316,7 @@ namespace GlassCore::PaintDispatcher
             || _wcsicmp(cls, L"TButtonedEdit") == 0
             || _wcsicmp(cls, L"TMaskEdit") == 0
             || _wcsicmp(cls, L"TSearchBox") == 0;
-        const bool vclDraw = _wcsicmp(cls, L"TBitBtn") == 0
-            || _wcsicmp(cls, L"TToggleSwitch") == 0;
+        const bool vclDraw = _wcsicmp(cls, L"TBitBtn") == 0;
         bool comboEdit = false;
         HWND parent = GetParent(hwnd);
         if (!memo && _wcsicmp(cls, L"Edit") == 0 && parent)

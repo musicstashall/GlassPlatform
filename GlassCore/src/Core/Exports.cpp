@@ -288,6 +288,19 @@ void WINAPI GlassCore_ApplyDropDownShow(HWND hWndDropDown)
     GlassCore::DropDown::OnDropDownShow(hWndDropDown);
 }
 
+// Узкий необязательный мост без изменения ABI GlassCoreProviders.
+extern "C" __declspec(dllexport)
+BOOL WINAPI GlassCore_BeginDelphiBitBtnDraw(HWND parent, const DRAWITEMSTRUCT* dis) noexcept
+{
+    return GlassCore::Button::BeginDelphiBitBtnOwnerDraw(parent, dis) ? TRUE : FALSE;
+}
+
+extern "C" __declspec(dllexport)
+void WINAPI GlassCore_EndDelphiBitBtnDraw() noexcept
+{
+    GlassCore::Button::EndDelphiBitBtnOwnerDraw();
+}
+
 extern "C" __declspec(dllexport)
 BOOL WINAPI GlassCore_GetProviders(GlassCoreProviders* out)
 {

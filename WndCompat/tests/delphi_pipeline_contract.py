@@ -59,11 +59,52 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('session.acquired[i] = AcquireVclProbeHook(ep, i)', gdi)
         self.assertIn('if (session.acquired[i]) EnableRootHook(session.module, i, false)', gdi)
         self.assertIn('it->second.GetRef(index) > before', gdi)
-        for cls in ('TBitBtn', 'TToggleSwitch'):
-            self.assertIn('L"' + cls + '"', gdi)
-            self.assertIn('L"' + cls + '"', read('GlassCore/src/Subsystems/PaintDispatcher.cpp'))
+        self.assertIn('L"TBitBtn"', gdi)
+        self.assertIn('L"TBitBtn"', read('GlassCore/src/Subsystems/PaintDispatcher.cpp'))
+        for source in (gdi, read('GlassCore/src/Subsystems/PaintDispatcher.cpp')):
+            self.assertNotIn('L"TToggleSwitch"', source)
         self.assertIn('[WndCompat][DelphiBitBtn] WM_DRAWITEM', read('WndCompat/Root/RootSubclass.cpp'))
         self.assertNotIn('DDH_All', root.split('static void VclProbePaintBegin', 1)[1].split('#endif', 1)[0])
+
+    def test_toggle_is_not_processed_as_unknown_root(self):
+        classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
+        classify = classifier.split('ClassifyResult WindowClassifier::Classify(HWND hwnd)', 1)[1]
+        self.assertRegex(classify, r'(?s)if \(Equals\(cls, L"TToggleSwitch"\)\)\s*return \{\};')
+        self.assertLess(classify.index('L"TToggleSwitch"'), classify.index('IsControlWindow(hwnd, cls, kind)'))
+        root = read('WndCompat/Root/RootSubclass.cpp')
+        attach = root.split('void Root_Attach(HWND hRoot)', 1)[1].split('void Root_Detach(HWND hRoot)', 1)[0]
+        self.assertRegex(attach, r'(?s)if \(_wcsicmp\(rootClassName, L"TToggleSwitch"\) == 0\)\s*return;')
+        notify = root.split('void Root_AttachDropDownNotify(HWND hWnd)', 1)[1].split('bool Root_DropDownNotifyAttached', 1)[0]
+        self.assertIn('L"TToggleSwitch"', notify)
+        self.assertNotIn('L"TToggleSwitch"', read('GlassCore/src/Hooks/RootGdiHooks.cpp'))
+        self.assertNotIn('L"TToggleSwitch"', read('GlassCore/src/Subsystems/PaintDispatcher.cpp'))
+
+    def test_bitbtn_ownerdraw_is_scoped_to_drawitem_and_exact_dc(self):
+        root = read('WndCompat/Root/RootSubclass.cpp')
+        code = read('GlassCore/src/Hooks/ButtonHooks.cpp')
+        exports = read('GlassCore/src/Core/Exports.cpp')
+        owner = root.split('using BeginFn = BOOL (WINAPI*)(HWND, const DRAWITEMSTRUCT*)', 1)[1].split('// Нас интересуют только пункты меню', 1)[0]
+        self.assertIn('begin(hWnd, dis)', owner)
+        self.assertIn('wil::scope_exit', owner)
+        self.assertIn('return DefSubclassProc(hWnd, uMsg, wParam, lParam)', owner)
+        self.assertIn('GlassCore_BeginDelphiBitBtnDraw', exports)
+        begin = code.split('bool BeginDelphiBitBtnOwnerDraw', 1)[1].split('void EndDelphiBitBtnOwnerDraw', 1)[0]
+        for guard in ('ODT_BUTTON', 'GetParent(dis->hwndItem) != parent',
+                      'GlassIsBackdropAllowedForHwnd', 'BS_OWNERDRAW', 'L"TBitBtn"',
+                      'dis->hDC', 'g_entryPointModule', 'AcquireDelphiBitBtnHook'):
+            self.assertIn(guard, begin)
+        self.assertIn('if (session.acquired[i]) EnableHooksOnModule', code)
+        self.assertIn('return dc && s.dc == dc ? &s : nullptr', code)
+        self.assertIn('EqualRect(rect, &session.rect)', code)
+        self.assertIn('part == BP_PUSHBUTTON', code)
+        self.assertIn('DTT_CALCRECT | DTT_CALLBACK', code)
+        self.assertIn('BLACKNESS', code.split('HRESULT WINAPI DelphiBitBtnParentBg(HWND hwnd', 1)[1].split('// =========================================================================', 1)[0])
+        # Ни glyph BitBlt, ни произвольные memory DC в owner-draw не подменяются.
+        self.assertNotIn('OHK_BITBLT', begin)
+        self.assertIn('!delphiBitBtn && !IsButtonIconOrBitmapStyle(hWnd)', code)
+        self.assertIn('sess.delphiBitBtn || IsButtonIconOrBitmapStyle(sess.hWnd)', code)
+        self.assertIn('s.kind, false, s.delphiBitBtn', code)
+        self.assertIn('sess.kind == GK::Button && !ownerDrawSession', code)
 
     def test_containers_use_guarded_root_attach(self):
         source = read("WndCompat/Tracker/WinEventHandler.cpp")

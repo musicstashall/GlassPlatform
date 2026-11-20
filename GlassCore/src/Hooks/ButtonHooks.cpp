@@ -29,6 +29,8 @@
 #include <Subsystems/GdiHookUtils.h>
 #include <Subsystems/Settings.h>
 #include <GlassControlKind.h>
+#include <GlassBackdropMark.h>
+#include <Subsystems/RootSwcaGradient.h>
 #include <wil.h>
 #include <uxtheme.h>
 
@@ -60,6 +62,7 @@ namespace GlassCore::Button
         HMODULE                       mod{};
         GlassShared::GlassControlKind kind{};
         HWND                          hWnd{};
+        bool                          delphiBitBtn{};
     };
 
     // Части темы «Button» (vssym32 BUTTONPARTS): без чекбокса/радио/группы.
@@ -119,6 +122,15 @@ namespace GlassCore::Button
             return false;
         const LONG style = GetWindowLongW(hWnd, GWL_STYLE);
         return (style & (BS_ICON | BS_BITMAP)) != 0;
+    }
+
+    // VCL TBitBtn использует собственный glyph при BS_OWNERDRAW, но обычно
+    // не выставляет BS_BITMAP/BS_ICON: по одному стилю нельзя исключить картинку.
+    [[nodiscard]] static bool IsDelphiBitBtn(HWND hwnd) noexcept
+    {
+        wchar_t cls[64]{};
+        return hwnd && GetClassNameW(hwnd, cls, _countof(cls))
+            && _wcsicmp(cls, L"TBitBtn") == 0;
     }
 
     // BS_SPLITBUTTON (0x0C) / BS_DEFSPLITBUTTON (0x0D): comctl32 дважды вызывает DrawThemeBackground
@@ -202,6 +214,9 @@ namespace GlassCore::Button
     HBRUSH   WINAPI Overall_MyCreateSolidBrush(COLORREF);
     BOOL     WINAPI Overall_MyBitBlt(HDC, int, int, int, int, HDC, int, int, DWORD);
     BOOL     WINAPI Overall_MyDrawEdge(HDC, LPRECT, UINT, UINT);
+    HRESULT WINAPI DelphiBitBtnThemeBg(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
+    HRESULT WINAPI DelphiBitBtnThemeText(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, LPRECT, const DTTOPTS*);
+    HRESULT WINAPI DelphiBitBtnParentBg(HWND, HDC, const RECT*);
 
     enum OverallHookIndex : size_t
     {
@@ -217,6 +232,9 @@ namespace GlassCore::Button
         OHK_CREATESOLIDBRUSH,
         OHK_BITBLT,
         OHK_DRAWEDGE,
+        OHK_DELPHI_BITBTN_THEME,
+        OHK_DELPHI_BITBTN_TEXT,
+        OHK_DELPHI_BITBTN_PARENT,
         OHK_COUNT
     };
 
@@ -258,6 +276,12 @@ namespace GlassCore::Button
                                                         // OHK_DRAWEDGE (COMCTL32 → split-кнопка, см. EnableButtonHooksForModule)
                                                         std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
                                                             "DrawEdge", reinterpret_cast<PVOID>(Overall_MyDrawEdge) },
+            std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv },
+                "DrawThemeBackground", reinterpret_cast<PVOID>(DelphiBitBtnThemeBg) },
+            std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv },
+                "DrawThemeTextEx", reinterpret_cast<PVOID>(DelphiBitBtnThemeText) },
+            std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv },
+                "DrawThemeParentBackground", reinterpret_cast<PVOID>(DelphiBitBtnParentBg) },
                                             } };
 
     using OverallDispatcher = HookDispatcher<OHK_COUNT, 3>;
@@ -438,13 +462,16 @@ namespace GlassCore::Button
         int iStateId,
         LPCRECT pRect,
         LPCRECT pClipRect,
-        uint32_t seq) noexcept
+        uint32_t seq,
+        const ButtonPaintSession* ownerDrawSession = nullptr) noexcept
     {
         if (!orig)
             return DrawThemeBackground(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
         ButtonPaintSession sess{};
-        if (!TryResolveWinFormsNiButtonThemeSession(hdc, sess))
+        if (ownerDrawSession)
+            sess = *ownerDrawSession;
+        else if (!TryResolveWinFormsNiButtonThemeSession(hdc, sess))
         {
             DebugLog(DBG_NORMAL,
                 L"[GlassCore][Button] InvokeButtonDrawThemeBg: seq=%u branch=Skip reason=noSession caller=%p part=%d state=%d",
@@ -548,7 +575,7 @@ namespace GlassCore::Button
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
         }
 
-        const bool dedupNativePush = (sess.kind == GK::Button);
+        const bool dedupNativePush = (sess.kind == GK::Button && !ownerDrawSession);
 
         SplitDtbDedupKey dedupKey{};
         if (dedupNativePush)
@@ -619,7 +646,8 @@ namespace GlassCore::Button
         HWND hWnd,
         HMODULE callerMod,
         GlassShared::GlassControlKind kind,
-        bool enable)
+        bool enable,
+        bool delphiBitBtn)
     {
         using namespace GlassShared;
         void* const caller = static_cast<void*>(callerMod);
@@ -701,7 +729,7 @@ namespace GlassCore::Button
                     EnableHooksOnModule(hUx, OHK_DRAWTEXTEX, enable);
             }
             
-            if (hWnd && !IsButtonIconOrBitmapStyle(hWnd))
+            if (hWnd && !delphiBitBtn && !IsButtonIconOrBitmapStyle(hWnd))
                 EnableHooksOnModule(caller, OHK_BITBLT, enable);
         }
 
@@ -1109,7 +1137,7 @@ namespace GlassCore::Button
             return orig(hdc, x, y, cx, cy, hdcSrc, x1, y1, rop);
 
         // Согласовано с EnableComctlBitBltForButtonPaint; защита от несоответствия стека/стиля.
-        if (IsButtonIconOrBitmapStyle(sess.hWnd))
+        if (sess.delphiBitBtn || IsButtonIconOrBitmapStyle(sess.hWnd))
             return orig(hdc, x, y, cx, cy, hdcSrc, x1, y1, rop);
 
         if (rop != SRCCOPY || !cx || !cy || !hdcSrc)
@@ -1184,6 +1212,150 @@ namespace GlassCore::Button
         return orig(hdc, qrc, edge, grfFlags);
     }
 
+    // WM_DRAWITEM даёт точный HDC, в том числе временный comctl32 memory DC.
+    // Сессия ограничена вызовом DefSubclassProc родителя, а не эвристикой
+    // WindowFromDC / чужим или кэшированным compatible DC.
+    struct DelphiBitBtnDrawSession
+    {
+        HWND hwnd;
+        HDC dc;
+        RECT rect;
+        HMODULE module;
+        std::array<bool, 3> acquired{};
+    };
+    static thread_local std::vector<DelphiBitBtnDrawSession> g_delphiBitBtnDrawStack;
+
+    static bool AcquireDelphiBitBtnHook(HMODULE mod, size_t index) noexcept
+    {
+        auto lock = g_overallLock.lock_exclusive();
+        auto it = g_overallMap.find(mod);
+        if (it == g_overallMap.end())
+        {
+            auto [ins, inserted] = g_overallMap.emplace(
+                std::piecewise_construct, std::forward_as_tuple(mod),
+                std::forward_as_tuple(g_overallHookDep, mod));
+            it = ins;
+            it->second.CacheHookData();
+        }
+        const int before = it->second.GetRef(index);
+        it->second.EnableHook(index, true);
+        return it->second.GetRef(index) > before;
+    }
+
+    bool BeginDelphiBitBtnOwnerDraw(HWND parent, const DRAWITEMSTRUCT* dis) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || !GlassCore::Root::IsFullInjectionMode()
+            || !dis || dis->CtlType != ODT_BUTTON || !dis->hwndItem || !dis->hDC
+            || GetParent(dis->hwndItem) != parent || IsRectEmpty(&dis->rcItem)
+            || GlassShared::GlassGetWindowKind(dis->hwndItem) != GlassShared::GlassControlKind::Button
+            || !GlassShared::GlassIsBackdropAllowedForHwnd(dis->hwndItem)) return false;
+        wchar_t cls[64]{};
+        if (!GetClassNameW(dis->hwndItem, cls, _countof(cls)) || _wcsicmp(cls, L"TBitBtn") != 0
+            || (GetWindowLongW(dis->hwndItem, GWL_STYLE) & BS_TYPEMASK) != BS_OWNERDRAW)
+            return false;
+        HMODULE module = GlassCore::ModuleHandler::g_entryPointModule;
+        if (!module) return false;
+        DelphiBitBtnDrawSession session{ dis->hwndItem, dis->hDC, dis->rcItem, module };
+        for (size_t i = 0; i < session.acquired.size(); ++i)
+            session.acquired[i] = AcquireDelphiBitBtnHook(module, OHK_DELPHI_BITBTN_THEME + i);
+        g_delphiBitBtnDrawStack.push_back(session);
+#if defined(_DEBUG)
+        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawItem begin hwnd=0x%p dc=0x%p action=0x%X theme=%d text=%d parent=%d",
+            session.hwnd, session.dc, dis->itemAction, session.acquired[0], session.acquired[1], session.acquired[2]);
+#endif
+        return true;
+    }
+
+    void EndDelphiBitBtnOwnerDraw() noexcept
+    {
+        if (g_delphiBitBtnDrawStack.empty()) return;
+        const auto session = g_delphiBitBtnDrawStack.back();
+        g_delphiBitBtnDrawStack.pop_back();
+        for (size_t i = 0; i < session.acquired.size(); ++i)
+            if (session.acquired[i]) EnableHooksOnModule(session.module, OHK_DELPHI_BITBTN_THEME + i, false);
+    }
+
+    [[nodiscard]] static const DelphiBitBtnDrawSession* GetDelphiBitBtnDraw(HDC dc) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || g_delphiBitBtnDrawStack.empty()) return nullptr;
+        const auto& s = g_delphiBitBtnDrawStack.back();
+        return dc && s.dc == dc ? &s : nullptr;
+    }
+
+    [[nodiscard]] static bool IsDelphiBitBtnTheme(HTHEME theme, int part) noexcept
+    {
+        WCHAR name[MAX_PATH + 1]{};
+        return theme && part == BP_PUSHBUTTON
+            && SUCCEEDED(Shared::ThemeHelper::GetThemeClass(theme, name, MAX_PATH))
+            && StrEq(name, L"Button");
+    }
+
+    HRESULT WINAPI DelphiBitBtnThemeBg(HTHEME theme, HDC dc, int part, int state, LPCRECT rect, LPCRECT clip)
+    {
+        auto orig = GetOverallOrigSafe<OHK_DELPHI_BITBTN_THEME, decltype(&DrawThemeBackground)>(GlassCore::ModuleHandler::g_entryPointModule);
+        if (!orig) return DrawThemeBackground(theme, dc, part, state, rect, clip);
+        const auto* current = GetDelphiBitBtnDraw(dc);
+        if (!current) return orig(theme, dc, part, state, rect, clip);
+        const auto session = *current; // вложенный WM_DRAWITEM может перевыделить стек
+        if (!rect || !EqualRect(rect, &session.rect) || !IsDelphiBitBtnTheme(theme, part))
+            return orig(theme, dc, part, state, rect, clip);
+        const ButtonPaintSession button{ session.module, GlassShared::GlassControlKind::Button, session.hwnd };
+#if defined(_DEBUG)
+        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawThemeBackground hwnd=0x%p dc=0x%p part=%d state=%d", session.hwnd, dc, part, state);
+#endif
+        return InvokeButtonDrawThemeBackgroundImpl(orig, session.module, theme, dc, part, state, rect, clip, 0, &button);
+    }
+
+    HRESULT WINAPI DelphiBitBtnThemeText(HTHEME theme, HDC dc, int part, int state, LPCWSTR text,
+        int count, DWORD flags, LPRECT rect, const DTTOPTS* options)
+    {
+        auto orig = GetOverallOrigSafe<OHK_DELPHI_BITBTN_TEXT, decltype(&DrawThemeTextEx)>(GlassCore::ModuleHandler::g_entryPointModule);
+        if (!orig) return DrawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
+        const auto* current = GetDelphiBitBtnDraw(dc);
+        if (!current) return orig(theme, dc, part, state, text, count, flags, rect, options);
+        const auto session = *current;
+        RECT overlap{};
+        if (!text || count == 0 || !rect || IsRectEmpty(rect)
+            || !IntersectRect(&overlap, rect, &session.rect) || !IsDelphiBitBtnTheme(theme, part)
+            || (flags & DT_CALCRECT)
+            || (options && (options->dwSize != sizeof(DTTOPTS)
+                || (options->dwFlags & (DTT_CALCRECT | DTT_CALLBACK)))))
+            return orig(theme, dc, part, state, text, count, flags, rect, options);
+        DTTOPTS opts{ sizeof(DTTOPTS) };
+        if (options) opts = *options;
+        opts.dwFlags |= DTT_COMPOSITED;
+        HRESULT drawResult = E_FAIL;
+        const HRESULT bufferResult = GlassCore::Text::DrawThemeContent(
+            dc, *rect, &session.rect, nullptr, 0,
+            [&](HDC mem, HPAINTBUFFER, RGBQUAD*, int) {
+                RECT work = *rect;
+                drawResult = DrawThemeTextEx(theme, mem, part, state, text, count, flags, &work, &opts);
+            }, 255, false, true, false);
+#if defined(_DEBUG)
+        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawThemeTextEx hwnd=0x%p dc=0x%p part=%d state=%d buffer=0x%08X draw=0x%08X",
+            session.hwnd, dc, part, state, static_cast<unsigned>(bufferResult), static_cast<unsigned>(drawResult));
+#endif
+        return SUCCEEDED(bufferResult) && SUCCEEDED(drawResult) ? drawResult
+            : orig(theme, dc, part, state, text, count, flags, rect, options);
+    }
+
+    HRESULT WINAPI DelphiBitBtnParentBg(HWND hwnd, HDC dc, const RECT* rect)
+    {
+        auto orig = GetOverallOrigSafe<OHK_DELPHI_BITBTN_PARENT, decltype(&DrawThemeParentBackground)>(GlassCore::ModuleHandler::g_entryPointModule);
+        if (!orig) return DrawThemeParentBackground(hwnd, dc, rect);
+        const auto* current = GetDelphiBitBtnDraw(dc);
+        if (!current) return orig(hwnd, dc, rect);
+        const auto session = *current;
+        if (hwnd != session.hwnd) return orig(hwnd, dc, rect);
+        RECT clear = session.rect;
+        if (rect && !IntersectRect(&clear, &session.rect, rect)) return S_OK;
+        const BOOL ok = PatBlt(dc, clear.left, clear.top, clear.right - clear.left, clear.bottom - clear.top, BLACKNESS);
+#if defined(_DEBUG)
+        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawThemeParentBackground hwnd=0x%p dc=0x%p cleared=%d", hwnd, dc, ok);
+#endif
+        return ok ? S_OK : orig(hwnd, dc, rect);
+    }
+
     // =========================================================================
     //  PaintDispatcher provider callbacks
     // =========================================================================
@@ -1217,10 +1389,11 @@ namespace GlassCore::Button
             }
         }
 #endif
-        g_buttonSessionStack.push_back({ callerMod, kind, hWnd });
+        const bool delphiBitBtn = IsDelphiBitBtn(hWnd);
+        g_buttonSessionStack.push_back({ callerMod, kind, hWnd, delphiBitBtn });
         if (g_buttonSessionStack.size() == 1)
             g_splitButtonDtbDedupKey.reset();
-        EnableButtonHooksForModule(hWnd, callerMod, kind, true);
+        EnableButtonHooksForModule(hWnd, callerMod, kind, true, delphiBitBtn);
         DebugLog(DBG_NORMAL,
             L"[GlassCore][Button] BeginPaint: callerMod=0x%p hWnd=0x%p kind=%d depth=%zu",
             callerMod, hWnd, static_cast<int>(kind), g_buttonSessionStack.size());
@@ -1236,7 +1409,7 @@ namespace GlassCore::Button
 
         const ButtonPaintSession s = g_buttonSessionStack.back();
         g_buttonSessionStack.pop_back();
-        EnableButtonHooksForModule(s.hWnd ? s.hWnd : hWnd, s.mod, s.kind, false);
+        EnableButtonHooksForModule(s.hWnd ? s.hWnd : hWnd, s.mod, s.kind, false, s.delphiBitBtn);
         DebugLog(DBG_NORMAL,
             L"[GlassCore][Button] %s: hWnd=0x%p depth=%zu",
             endReason, hWnd, g_buttonSessionStack.size());
@@ -1260,10 +1433,11 @@ namespace GlassCore::Button
             GlassCore::Settings::QueryIconBackgroundColorRemovalContext(
                 { L"Root", L"Control", L"Button" }, g_buttonIconRemoval);
 
-        g_buttonSessionStack.push_back({ callerMod, kind, hWnd });
+        const bool delphiBitBtn = IsDelphiBitBtn(hWnd);
+        g_buttonSessionStack.push_back({ callerMod, kind, hWnd, delphiBitBtn });
         if (g_buttonSessionStack.size() == 1)
             g_splitButtonDtbDedupKey.reset();
-        EnableButtonHooksForModule(hWnd, callerMod, kind, true);
+        EnableButtonHooksForModule(hWnd, callerMod, kind, true, delphiBitBtn);
         DebugLog(DBG_NORMAL,
             L"[GlassCore][Button] GetDC: callerMod=0x%p hWnd=0x%p kind=%d depth=%zu",
             callerMod, hWnd, static_cast<int>(kind), g_buttonSessionStack.size());
@@ -1335,6 +1509,7 @@ namespace GlassCore::Button
         DisableAllOverallHooks();
 
         g_buttonSessionStack.clear();
+        g_delphiBitBtnDrawStack.clear();
         g_splitButtonDtbDedupKey.reset();
 
         g_shutdown.store(false, std::memory_order_seq_cst);
@@ -1353,9 +1528,9 @@ namespace GlassCore::Button
         for (const ButtonPaintSession& s : g_buttonSessionStack)
             sessions.push_back(s);
         for (const ButtonPaintSession& s : sessions)
-            EnableButtonHooksForModule(s.hWnd, s.mod, s.kind, false);
+            EnableButtonHooksForModule(s.hWnd, s.mod, s.kind, false, s.delphiBitBtn);
         for (const ButtonPaintSession& s : sessions)
-            EnableButtonHooksForModule(s.hWnd, s.mod, s.kind, true);
+            EnableButtonHooksForModule(s.hWnd, s.mod, s.kind, true, s.delphiBitBtn);
     }
 
     namespace FormsNiDtbAccess

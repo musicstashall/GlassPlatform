@@ -534,6 +534,11 @@ ClassifyResult WindowClassifier::Classify(HWND hwnd)
     if (Equals(cls, L"TPUtilWindow"))
         return {};
 
+    // Пользовательский VCL-контрол: не направлять в Unknown → Root_Attach.
+    // Специальной обработки его отрисовки в Glass нет.
+    if (Equals(cls, L"TToggleSwitch"))
+        return {};
+
     // 0. Win11 CoreWindow: SEH/ShellHost/SMEH/SearchHost — Special; иначе Ignored (никогда Root).
     //    Класс остаётся в kHardList (SWCA-exempt).
     if (Equals(cls, L"Windows.UI.Core.CoreWindow"))
