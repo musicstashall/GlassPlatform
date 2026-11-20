@@ -661,18 +661,27 @@ namespace GlassCore::Root
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
                 return false;
             const RECT rc = ps->rcPaint;
+            // ВРЕМЕННАЯ диагностика: инверсия repaint-области вместо чёрной
+            // очистки. Если пиксели на экране меняются — наш DC это видимая
+            // поверхность; если нет — рисуем не туда.
             const BOOL ok = PatBlt(hdc, rc.left, rc.top, rc.right - rc.left,
-                rc.bottom - rc.top, BLACKNESS);
+                rc.bottom - rc.top, DSTINVERT);
 #if defined(_DEBUG)
             // Диагностика поверхности: dcWnd/bmp показывают, куда реально легла
             // заливка (оконный DC, memory DC, DIB), px — что вернулось обратно.
             const HWND dcWnd = WindowFromDC(hdc);
             const HGDIOBJ bmp = GetCurrentObject(hdc, OBJ_BITMAP);
             const COLORREF px = GetPixel(hdc, rc.left + 2, rc.top + 2);
+            wchar_t parentCls[128]{};
+            const HWND parent = GetParent(hWnd);
+            if (parent)
+                GetClassNameW(parent, parentCls, _countof(parentCls));
             DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiGrid] Erase hwnd=0x%p rect=[%ld,%ld,%ld,%ld] ok=%d dc=0x%p dcWnd=0x%p bmp=0x%p px=0x%08X",
+                L"[GlassCore][DelphiGrid] Erase hwnd=0x%p rect=[%ld,%ld,%ld,%ld] ok=%d dc=0x%p dcWnd=0x%p bmp=0x%p px=0x%08X ex=0x%08X parent=0x%p parentCls=\"%s\"",
                 hWnd, rc.left, rc.top, rc.right, rc.bottom, ok ? 1 : 0,
-                hdc, dcWnd, bmp, static_cast<unsigned>(px));
+                hdc, dcWnd, bmp, static_cast<unsigned>(px),
+                static_cast<unsigned>(GetWindowLongPtrW(hWnd, GWL_EXSTYLE)),
+                parent, parentCls);
 #endif
             return ok != FALSE;
         }
