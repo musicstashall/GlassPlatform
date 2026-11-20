@@ -29,6 +29,9 @@ namespace GlassCore::Root
         OHK_TEXTOUT,
         OHK_FILLRECT,
         OHK_DELPHI_DRAWTHEMETEXTEX,
+        OHK_DELPHI_GRID_TEXT,
+        OHK_DELPHI_GRID_FILL,
+        OHK_DELPHI_GRID_THEME,
         OHK_COUNT
     };
 

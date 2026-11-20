@@ -27,6 +27,7 @@
 #include <Core/Intercept/IATRegistry.h>
 #include <Module/ModuleHandler.h>
 #include <Subsystems/RenderText.h>
+#include <Helpers/ThemeHelper.h>
 #include <Subsystems/PaintDispatcher.h>
 #include <GlassControlKind.h>
 #include <Subsystems/RootSwcaGradient.h>
@@ -504,6 +505,10 @@ namespace GlassCore::Root
         int WINAPI Root_MyFillRect(HDC, const RECT*, HBRUSH);
         HRESULT WINAPI Root_MyDelphiDrawThemeTextEx(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, LPRECT, const DTTOPTS*);
 
+        BOOL WINAPI Root_MyDelphiGridText(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
+        int WINAPI Root_MyDelphiGridFill(HDC, const RECT*, HBRUSH);
+        HRESULT WINAPI Root_MyDelphiGridTheme(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
+
         inline const HookDispatcherDependency<OHK_COUNT, 3> g_rootHookDep
         { {
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
@@ -542,6 +547,12 @@ namespace GlassCore::Root
                 "FillRect", reinterpret_cast<PVOID>(Root_MyFillRect) },
             std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv },
                 "DrawThemeTextEx", reinterpret_cast<PVOID>(Root_MyDelphiDrawThemeTextEx) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv },
+                "ExtTextOutW", reinterpret_cast<PVOID>(Root_MyDelphiGridText) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                "FillRect", reinterpret_cast<PVOID>(Root_MyDelphiGridFill) },
+            std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv },
+                "DrawThemeBackground", reinterpret_cast<PVOID>(Root_MyDelphiGridTheme) },
         } };
 
         using RootDispatcher = HookDispatcher<OHK_COUNT, 3>;
@@ -612,6 +623,112 @@ namespace GlassCore::Root
         }
 
         // ── Hook bodies: root GDI (упрощённые ветки BWM OverallHooks) ───────
+
+        // IAT является общим для процесса: не изменять чужой DC или memory DC,
+        // даже если они вызваны во время paint этой таблицы.
+        static bool IsDelphiGridPaintDC(HDC dc) noexcept
+        {
+            const HWND hwnd = dc ? WindowFromDC(dc) : nullptr;
+            if (!hwnd || hwnd != GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()
+                || GlassCore::PaintDispatcher::IsForeignPaintBarrierActive())
+                return false;
+            wchar_t cls[128]{};
+            return GetClassNameW(hwnd, cls, _countof(cls)) && StrEqI(cls, L"TShownValueList");
+        }
+
+#if defined(_DEBUG)
+        static bool AllowDelphiGridLog(unsigned channel) noexcept
+        {
+            static thread_local ULONGLONG epoch[3]{};
+            static thread_local unsigned budget[3]{};
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch[channel] || now - epoch[channel] >= 1000)
+            {
+                epoch[channel] = now;
+                budget[channel] = 16;
+            }
+            if (!budget[channel]) return false;
+            --budget[channel];
+            return true;
+        }
+#endif
+
+        BOOL WINAPI Root_MyDelphiGridText(HDC dc, int x, int y, UINT options,
+            const RECT* rect, LPCWSTR text, UINT count, const INT* dx)
+        {
+            auto orig = GetRootOrg<OHK_DELPHI_GRID_TEXT, decltype(&ExtTextOutW)>(GetCallerModule(_ReturnAddress()));
+            if (!orig) return ExtTextOutW(dc, x, y, options, rect, text, count, dx);
+            if (g_shutdown.load(std::memory_order_acquire) || !IsDelphiGridPaintDC(dc)
+                || (GetTextAlign(dc) & TA_UPDATECP) || (options & (ETO_GLYPH_INDEX | ETO_PDY))
+                || ((options & ETO_OPAQUE) && !rect))
+                return orig(dc, x, y, options, rect, text, count, dx);
+            if ((options & ETO_OPAQUE) && !IsRectEmpty(rect)
+                && !PatBlt(dc, rect->left, rect->top, rect->right - rect->left,
+                    rect->bottom - rect->top, BLACKNESS))
+                return orig(dc, x, y, options, rect, text, count, dx);
+            if (!count) return TRUE;
+            if (!text) return orig(dc, x, y, options, rect, text, count, dx);
+            const UINT drawOptions = options & ~static_cast<UINT>(ETO_OPAQUE);
+            const HRESULT hr = GlassCore::Text::ExtTextOutWithAlpha(dc, x, y, drawOptions,
+                rect, text, count, dx, orig);
+#if defined(_DEBUG)
+            if (AllowDelphiGridLog(0))
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] Text hwnd=0x%p options=0x%X count=%u hr=0x%08lX",
+                    WindowFromDC(dc), options, count, static_cast<unsigned long>(hr));
+#endif
+            if (SUCCEEDED(hr)) return TRUE;
+            return orig(dc, x, y, drawOptions, rect, text, count, dx);
+        }
+
+        int WINAPI Root_MyDelphiGridFill(HDC dc, const RECT* rect, HBRUSH brush)
+        {
+            auto orig = GetRootOrg<OHK_DELPHI_GRID_FILL, decltype(&FillRect)>(GetCallerModule(_ReturnAddress()));
+            if (!orig) return FillRect(dc, rect, brush);
+            LOGBRUSH lb{};
+            if (!g_shutdown.load(std::memory_order_acquire) && IsDelphiGridPaintDC(dc)
+                && rect && !IsRectEmpty(rect) && brush
+                && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb)
+                && lb.lbStyle == BS_SOLID && lb.lbColor == RGB(255, 255, 255)
+                && PatBlt(dc, rect->left, rect->top, rect->right - rect->left,
+                    rect->bottom - rect->top, BLACKNESS))
+            {
+#if defined(_DEBUG)
+                if (AllowDelphiGridLog(1))
+                    DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] WhiteFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld]",
+                        WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom);
+#endif
+                return 1;
+            }
+            return orig(dc, rect, brush);
+        }
+
+        HRESULT WINAPI Root_MyDelphiGridTheme(HTHEME theme, HDC dc, int part, int state,
+            LPCRECT rect, LPCRECT clip)
+        {
+            auto orig = GetRootOrg<OHK_DELPHI_GRID_THEME, decltype(&DrawThemeBackground)>(GetCallerModule(_ReturnAddress()));
+            if (!orig) return DrawThemeBackground(theme, dc, part, state, rect, clip);
+            wchar_t cls[MAX_PATH + 1]{};
+            if (!g_shutdown.load(std::memory_order_acquire) && IsDelphiGridPaintDC(dc)
+                && rect && !IsRectEmpty(rect) && (part == 0 || part == 1)
+                && (state == 1 || state == 4)
+                && SUCCEEDED(Shared::ThemeHelper::GetThemeClass(theme, cls, MAX_PATH))
+                && StrEqI(cls, L"Header"))
+            {
+                RECT area = *rect;
+                if (clip && !IntersectRect(&area, &area, clip)) return S_OK;
+                if (PatBlt(dc, area.left, area.top, area.right - area.left,
+                    area.bottom - area.top, BLACKNESS))
+                {
+#if defined(_DEBUG)
+                    if (AllowDelphiGridLog(2))
+                        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] Header hwnd=0x%p part=%d state=%d",
+                            WindowFromDC(dc), part, state);
+#endif
+                    return S_OK;
+                }
+            }
+            return orig(theme, dc, part, state, rect, clip);
+        }
 
         int WINAPI Root_MyDrawTextW(
             HDC hdc, LPCWSTR t, int c, LPRECT rc, UINT fmt)

@@ -30,7 +30,7 @@ class DelphiPipelineContract(unittest.TestCase):
         root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         gdi = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
         header = read("GlassCore/Include/Hooks/RootGdiHooks.h")
-        self.assertIn("OHK_DELPHI_DRAWTHEMETEXTEX,\n        OHK_COUNT", header)
+        self.assertIn("OHK_DELPHI_DRAWTHEMETEXTEX,", header)
         self.assertIn('"DrawThemeTextEx", reinterpret_cast<PVOID>(Root_MyDelphiDrawThemeTextEx)', gdi)
         self.assertIn("PushPaint(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache)", root)
         self.assertIn("PushDc(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache)", root)
@@ -116,6 +116,21 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(guard, post)
         self.assertIn('PatBlt(hdc, ps->rcPaint.left, ps->rcPaint.top', post)
         self.assertIn('RegisterPostPaintProvider({ OnDelphiTreeAfterBeginPaint })', tree)
+
+    def test_vcl_grid_hooks_are_narrow_and_balanced(self):
+        root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
+        block = root.split('StrEqI(cls, L"TShownValueList")', 1)[1].split('// Точка входа', 1)[0]
+        for name in ('OHK_DELPHI_GRID_TEXT', 'OHK_DELPHI_GRID_FILL', 'OHK_DELPHI_GRID_THEME'):
+            self.assertIn('PushPaint(instMod, ' + name, block)
+            self.assertNotIn('PushDc(instMod, ' + name, block)
+        gdi = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        grid = gdi.split('static bool IsDelphiGridPaintDC', 1)[1].split('int WINAPI Root_MyDrawTextW(', 1)[0]
+        for guard in ('WindowFromDC(dc)', 'GetPaintSessionHostHwnd()', 'IsForeignPaintBarrierActive()',
+                      'L"TShownValueList"', 'TA_UPDATECP', 'ETO_GLYPH_INDEX', 'ETO_PDY',
+                      'lb.lbStyle == BS_SOLID', 'RGB(255, 255, 255)', 'L"Header"',
+                      'ExtTextOutWithAlpha', 'return orig('):
+            self.assertIn(guard, grid)
+        self.assertIn('[GlassCore][DelphiMemo] DirectGetDC', read("GlassCore/src/Hooks/EditHooks.cpp"))
 
     def test_tab_brush_is_not_restored_to_another_class(self):
         source = read("WndCompat/Controls/TabControlSubclass.cpp")

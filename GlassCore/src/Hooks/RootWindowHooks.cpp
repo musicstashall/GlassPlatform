@@ -585,6 +585,16 @@ namespace GlassCore::Root
                 PushDc(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache);
             }
 
+            // TShownValueList рисует ячейки и свой Header сам, не через SysHeader32.
+            // Набор только на время WM_PAINT; тела проверяют окно и DC.
+            if (instMod == GlassCore::ModuleHandler::g_entryPointModule
+                && StrEqI(cls, L"TShownValueList"))
+            {
+                PushPaint(instMod, OHK_DELPHI_GRID_TEXT, cache);
+                PushPaint(instMod, OHK_DELPHI_GRID_FILL, cache);
+                PushPaint(instMod, OHK_DELPHI_GRID_THEME, cache);
+            }
+
             // Точка входа процесса — типичные диалоги / сценарии владельца — BWM Paint (+ HEX: Paint+Dc)
             if (instMod == GlassCore::ModuleHandler::g_entryPointModule)
             {

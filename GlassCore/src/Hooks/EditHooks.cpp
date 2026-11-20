@@ -144,8 +144,8 @@ namespace GlassCore::EditControl
     {
         if (!IsDelphiMemo(hwnd))
             return false;
-        static thread_local ULONGLONG epoch[2]{};
-        static thread_local unsigned budget[2]{};
+        static thread_local ULONGLONG epoch[3]{};
+        static thread_local unsigned budget[3]{};
         const ULONGLONG now = GetTickCount64();
         if (!epoch[channel] || now - epoch[channel] >= 1000)
         {
@@ -930,9 +930,17 @@ namespace GlassCore::EditControl
             const bool sessionLikeUseDualPass = GlassCore::Text::PlainEditUseDualPass(sessionHwnd, rm);
             const auto& inkCapsule =
                 GlassCore::Text::GetRuntimeInkCapsuleProfile(sessionLikeUseDualPass);
-            if (SUCCEEDED(GlassCore::Text::ExtTextOutWithAlphaMultilinePlainGetDc(
-                hdc, x, y, drawOptions, lprect, lpString, c, lpDx, origW, sessionLikeUseDualPass, &inkCapsule)))
-                return TRUE;
+            const HRESULT hrGetDc = GlassCore::Text::ExtTextOutWithAlphaMultilinePlainGetDc(
+                hdc, x, y, drawOptions, lprect, lpString, c, lpDx, origW, sessionLikeUseDualPass, &inkCapsule);
+#if defined(_DEBUG)
+            if (AllowDelphiMemoLog(sessionHwnd, 2))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiMemo] DirectGetDC hwnd=0x%p focused=%d dc=0x%p dcWnd=0x%p options=0x%X count=%u dual=%d hr=0x%08lX fallback=%d",
+                    sessionHwnd, GetFocus() == sessionHwnd ? 1 : 0, hdc, WindowFromDC(hdc),
+                    options, c, sessionLikeUseDualPass ? 1 : 0,
+                    static_cast<unsigned long>(hrGetDc), FAILED(hrGetDc) ? 1 : 0);
+#endif
+            if (SUCCEEDED(hrGetDc)) return TRUE;
             return origW(hdc, x, y, drawOptions, lprect, lpString, c, lpDx);
         }
 
