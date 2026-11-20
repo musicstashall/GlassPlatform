@@ -524,6 +524,8 @@ namespace GlassCore::Root
         int WINAPI VclProbeDrawTextEx(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
         HBRUSH WINAPI VclProbeCreateBrushIndirect(const LOGBRUSH*);
         HRESULT WINAPI VclProbeThemeTextEx(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, LPRECT, const DTTOPTS*);
+        BOOL WINAPI VclProbeStretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
+        BOOL WINAPI VclProbeFocusRect(HDC, const RECT*);
 #endif
 
         inline const HookDispatcherDependency<OHK_COUNT, 3> g_rootHookDep
@@ -585,6 +587,8 @@ namespace GlassCore::Root
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "DrawTextExW", reinterpret_cast<PVOID>(VclProbeDrawTextEx) },
             std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "CreateBrushIndirect", reinterpret_cast<PVOID>(VclProbeCreateBrushIndirect) },
             std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv }, "DrawThemeTextEx", reinterpret_cast<PVOID>(VclProbeThemeTextEx) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "StretchBlt", reinterpret_cast<PVOID>(VclProbeStretchBlt) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "DrawFocusRect", reinterpret_cast<PVOID>(VclProbeFocusRect) },
 #endif
         } };
 
@@ -640,13 +644,13 @@ namespace GlassCore::Root
             if (g_shutdown.load(std::memory_order_acquire) || !hwnd) return;
             WCHAR cls[64]{};
             if (!GetClassNameW(hwnd, cls, _countof(cls))
-                || _wcsicmp(cls, L"TBitBtn") != 0)
+                || (_wcsicmp(cls, L"TBitBtn") != 0 && _wcsicmp(cls, L"TToggleSwitch") != 0))
                 return;
             HMODULE ep = GlassCore::ModuleHandler::g_entryPointModule;
             if (!ep) return;
             VclProbeSession session{ hwnd, paint, ep };
             unsigned armed = 0;
-            for (size_t i = OHK_VCLPROBE_FILL; i <= OHK_VCLPROBE_THEMETEXTEX; ++i)
+            for (size_t i = OHK_VCLPROBE_FILL; i <= OHK_VCLPROBE_FOCUSRECT; ++i)
             {
                 session.acquired[i] = AcquireVclProbeHook(ep, i);
                 if (session.acquired[i]) ++armed;
@@ -663,7 +667,7 @@ namespace GlassCore::Root
                 if (it->hwnd != hwnd || it->paint != paint) continue;
                 const VclProbeSession session = *it;
                 g_vclProbeStack.erase((it + 1).base());
-                for (size_t i = OHK_VCLPROBE_FILL; i <= OHK_VCLPROBE_THEMETEXTEX; ++i)
+                for (size_t i = OHK_VCLPROBE_FILL; i <= OHK_VCLPROBE_FOCUSRECT; ++i)
                     if (session.acquired[i]) EnableRootHook(session.module, i, false);
                 DebugLog(DBG_NORMAL, L"[GlassCore][DelphiDrawProbe] End hwnd=0x%p channel=%s depth=%zu",
                     hwnd, paint ? L"paint" : L"getdc", g_vclProbeStack.size());
@@ -674,7 +678,7 @@ namespace GlassCore::Root
         void ClearVclDrawProbe() noexcept { g_vclProbeStack.clear(); }
 
         static void LogVclProbe(const wchar_t* api, HDC dc, const RECT* rect,
-            HGDIOBJ object, HDC src, DWORD flags, int a = 0, int b = 0) noexcept
+            HGDIOBJ object, HDC src, DWORD flags, int a = 0, int b = 0, int c = 0, int d = 0) noexcept
         {
             if (g_shutdown.load(std::memory_order_acquire) || g_vclProbeStack.empty()) return;
             static thread_local ULONGLONG epoch = 0;
@@ -694,19 +698,28 @@ namespace GlassCore::Root
             LOGBRUSH lb{};
             const bool brushValid = brush && GetObjectType(brush) == OBJ_BRUSH
                 && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
+            BITMAP destBitmap{};
+            const HGDIOBJ destObject = dc ? GetCurrentObject(dc, OBJ_BITMAP) : nullptr;
+            const bool destBitmapValid = destObject && GetObjectW(destObject, sizeof(destBitmap), &destBitmap) == sizeof(destBitmap);
+            LOGPEN pen{};
+            const HGDIOBJ penObject = dc ? GetCurrentObject(dc, OBJ_PEN) : nullptr;
+            const bool penValid = penObject && GetObjectW(penObject, sizeof(pen), &pen) == sizeof(pen);
             BITMAP sourceBitmap{};
             const HGDIOBJ bitmap = src ? GetCurrentObject(src, OBJ_BITMAP) : nullptr;
             const bool bitmapValid = bitmap && GetObjectW(bitmap, sizeof(sourceBitmap), &sourceBitmap) == sizeof(sourceBitmap);
             DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiDrawProbe] api=%s hwnd=0x%p class=%s channel=%s dc=0x%p dcWnd=0x%p dcType=%u src=0x%p srcWnd=0x%p bitmap=0x%p bitmapValid=%d bitmapSize=%ldx%ld bpp=%u obj=0x%p objType=%u brush=0x%p brushValid=%d brushStyle=%u brushColor=0x%08X rect=[%ld,%ld,%ld,%ld] clipKind=%d clip=[%ld,%ld,%ld,%ld] flags=0x%08X a=%d b=%d",
+                L"[GlassCore][DelphiDrawProbe] api=%s hwnd=0x%p class=%s channel=%s dc=0x%p dcWnd=0x%p dcType=%u destBitmap=0x%p destValid=%d destSize=%ldx%ld destBpp=%u pen=0x%p penValid=%d penStyle=%u penWidth=%ld penColor=0x%08X src=0x%p srcWnd=0x%p bitmap=0x%p bitmapValid=%d bitmapSize=%ldx%ld bpp=%u obj=0x%p objType=%u brush=0x%p brushValid=%d brushStyle=%u brushColor=0x%08X rect=[%ld,%ld,%ld,%ld] clipKind=%d clip=[%ld,%ld,%ld,%ld] flags=0x%08X a=%d b=%d c=%d d=%d",
                 api, session.hwnd, cls, session.paint ? L"paint" : L"getdc", dc,
                 dc ? WindowFromDC(dc) : nullptr, dc ? static_cast<unsigned>(GetObjectType(dc)) : 0,
+                destObject, destBitmapValid ? 1 : 0, destBitmap.bmWidth, destBitmap.bmHeight,
+                static_cast<unsigned>(destBitmap.bmBitsPixel), penObject, penValid ? 1 : 0,
+                static_cast<unsigned>(pen.lopnStyle), pen.lopnWidth.x, static_cast<unsigned>(pen.lopnColor),
                 src, src ? WindowFromDC(src) : nullptr, bitmap, bitmapValid ? 1 : 0,
                 sourceBitmap.bmWidth, sourceBitmap.bmHeight, static_cast<unsigned>(sourceBitmap.bmBitsPixel), object,
                 object ? static_cast<unsigned>(GetObjectType(object)) : 0,
                 brush, brushValid ? 1 : 0, static_cast<unsigned>(lb.lbStyle), static_cast<unsigned>(lb.lbColor),
                 r.left, r.top, r.right, r.bottom, clipKind, clip.left, clip.top, clip.right, clip.bottom,
-                static_cast<unsigned>(flags), a, b);
+                static_cast<unsigned>(flags), a, b, c, d);
         }
 
         int WINAPI VclProbeFill(HDC dc, const RECT* r, HBRUSH brush)
@@ -795,6 +808,21 @@ namespace GlassCore::Root
             auto orig = GetRootOrg<OHK_VCLPROBE_SELECT, decltype(&SelectObject)>(GlassCore::ModuleHandler::g_entryPointModule);
             LogVclProbe(L"SelectObject", dc, nullptr, obj, nullptr, 0);
             return orig ? orig(dc, obj) : SelectObject(dc, obj);
+        }
+        BOOL WINAPI VclProbeStretchBlt(HDC dc, int x, int y, int w, int h,
+            HDC src, int sx, int sy, int sw, int sh, DWORD rop)
+        {
+            auto orig = GetRootOrg<OHK_VCLPROBE_STRETCHBLT, decltype(&StretchBlt)>(GlassCore::ModuleHandler::g_entryPointModule);
+            const RECT r{ x, y, x + w, y + h };
+            LogVclProbe(L"StretchBlt", dc, &r, nullptr, src, rop, sx, sy, sw, sh);
+            return orig ? orig(dc, x, y, w, h, src, sx, sy, sw, sh, rop)
+                : StretchBlt(dc, x, y, w, h, src, sx, sy, sw, sh, rop);
+        }
+        BOOL WINAPI VclProbeFocusRect(HDC dc, const RECT* r)
+        {
+            auto orig = GetRootOrg<OHK_VCLPROBE_FOCUSRECT, decltype(&DrawFocusRect)>(GlassCore::ModuleHandler::g_entryPointModule);
+            LogVclProbe(L"DrawFocusRect", dc, r, nullptr, nullptr, 0);
+            return orig ? orig(dc, r) : DrawFocusRect(dc, r);
         }
 #endif
 

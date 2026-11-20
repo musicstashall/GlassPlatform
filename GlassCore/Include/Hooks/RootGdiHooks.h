@@ -39,12 +39,13 @@ namespace GlassCore::Root
         OHK_VCLPROBE_CREATEBRUSH, OHK_VCLPROBE_SELECT,
         OHK_VCLPROBE_ELLIPSE, OHK_VCLPROBE_DRAWTEXTEX,
         OHK_VCLPROBE_CREATEBRUSHINDIRECT, OHK_VCLPROBE_THEMETEXTEX,
+        OHK_VCLPROBE_STRETCHBLT, OHK_VCLPROBE_FOCUSRECT,
 #endif
         OHK_COUNT
     };
 
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-    // Сессионные passthrough-пробы EXE; только точный TBitBtn.
+    // Сессионные passthrough-пробы EXE; только точные TBitBtn / TToggleSwitch.
     void BeginVclDrawProbe(HWND hWnd, bool paint) noexcept;
     void EndVclDrawProbe(HWND hWnd, bool paint) noexcept;
     void ClearVclDrawProbe() noexcept;

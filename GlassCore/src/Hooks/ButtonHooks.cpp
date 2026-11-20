@@ -1294,11 +1294,46 @@ namespace GlassCore::Button
     {
         auto orig = GetOverallOrigSafe<OHK_DELPHI_BITBTN_THEME, decltype(&DrawThemeBackground)>(GlassCore::ModuleHandler::g_entryPointModule);
         if (!orig) return DrawThemeBackground(theme, dc, part, state, rect, clip);
+#if defined(_DEBUG)
+        if (!g_delphiBitBtnDrawStack.empty())
+        {
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 24; }
+            if (budget)
+            {
+                --budget;
+                const auto session = g_delphiBitBtnDrawStack.back();
+                const RECT r = rect ? *rect : RECT{};
+                WCHAR themeClass[MAX_PATH + 1]{};
+                const HRESULT themeHr = theme ? Shared::ThemeHelper::GetThemeClass(theme, themeClass, MAX_PATH) : E_INVALIDARG;
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiBitBtn] DTB entry hwnd=0x%p dc=0x%p itemDc=0x%p matched=%d part=%d state=%d themeHr=0x%08X theme=%s rect=[%ld,%ld,%ld,%ld] item=[%ld,%ld,%ld,%ld]",
+                    session.hwnd, dc, session.dc, dc && session.dc == dc ? 1 : 0, part, state, static_cast<unsigned>(themeHr),
+                    SUCCEEDED(themeHr) ? themeClass : L"?", r.left, r.top, r.right, r.bottom,
+                    session.rect.left, session.rect.top, session.rect.right, session.rect.bottom);
+            }
+        }
+#endif
         const auto* current = GetDelphiBitBtnDraw(dc);
         if (!current) return orig(theme, dc, part, state, rect, clip);
         const auto session = *current; // вложенный WM_DRAWITEM может перевыделить стек
-        if (!rect || !EqualRect(rect, &session.rect) || !IsDelphiBitBtnTheme(theme, part))
+        RECT overlap{};
+        if (!rect || !IntersectRect(&overlap, rect, &session.rect) || !IsDelphiBitBtnTheme(theme, part))
             return orig(theme, dc, part, state, rect, clip);
+        RECT drawClip = session.rect;
+        if (clip && !IntersectRect(&drawClip, &session.rect, clip)) return S_OK;
+        const int saved = SaveDC(dc);
+        if (!saved) return orig(theme, dc, part, state, rect, clip);
+        // Учитываем и clip вызывающего, и rcItem: alpha renderer копирует
+        // исходный rect целиком, поэтому ограничить только его source недостаточно.
+        if (IntersectClipRect(dc, drawClip.left, drawClip.top, drawClip.right, drawClip.bottom) == ERROR)
+        {
+            RestoreDC(dc, saved);
+            return orig(theme, dc, part, state, rect, clip);
+        }
+        auto restore = wil::scope_exit([&]() noexcept { RestoreDC(dc, saved); });
         const ButtonPaintSession button{ session.module, GlassShared::GlassControlKind::Button, session.hwnd };
 #if defined(_DEBUG)
         DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBitBtn] DrawThemeBackground hwnd=0x%p dc=0x%p part=%d state=%d", session.hwnd, dc, part, state);

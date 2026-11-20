@@ -62,22 +62,24 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('L"TBitBtn"', gdi)
         self.assertIn('L"TBitBtn"', read('GlassCore/src/Subsystems/PaintDispatcher.cpp'))
         for source in (gdi, read('GlassCore/src/Subsystems/PaintDispatcher.cpp')):
-            self.assertNotIn('L"TToggleSwitch"', source)
+            self.assertIn('L"TToggleSwitch"', source)
+        for api in ('StretchBlt', 'DrawFocusRect', 'Rectangle', 'FillRect', 'BitBlt', 'DrawTextW'):
+            self.assertIn('"' + api + '"', gdi)
+        self.assertIn('i <= OHK_VCLPROBE_FOCUSRECT', gdi)
         self.assertIn('[WndCompat][DelphiBitBtn] WM_DRAWITEM', read('WndCompat/Root/RootSubclass.cpp'))
         self.assertNotIn('DDH_All', root.split('static void VclProbePaintBegin', 1)[1].split('#endif', 1)[0])
 
-    def test_toggle_is_not_processed_as_unknown_root(self):
+    def test_toggle_restores_unknown_child_root_fallback(self):
         classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
         classify = classifier.split('ClassifyResult WindowClassifier::Classify(HWND hwnd)', 1)[1]
-        self.assertRegex(classify, r'(?s)if \(Equals\(cls, L"TToggleSwitch"\)\)\s*return \{\};')
-        self.assertLess(classify.index('L"TToggleSwitch"'), classify.index('IsControlWindow(hwnd, cls, kind)'))
+        self.assertNotIn('L"TToggleSwitch"', classify)
         root = read('WndCompat/Root/RootSubclass.cpp')
         attach = root.split('void Root_Attach(HWND hRoot)', 1)[1].split('void Root_Detach(HWND hRoot)', 1)[0]
-        self.assertRegex(attach, r'(?s)if \(_wcsicmp\(rootClassName, L"TToggleSwitch"\) == 0\)\s*return;')
         notify = root.split('void Root_AttachDropDownNotify(HWND hWnd)', 1)[1].split('bool Root_DropDownNotifyAttached', 1)[0]
-        self.assertIn('L"TToggleSwitch"', notify)
-        self.assertNotIn('L"TToggleSwitch"', read('GlassCore/src/Hooks/RootGdiHooks.cpp'))
-        self.assertNotIn('L"TToggleSwitch"', read('GlassCore/src/Subsystems/PaintDispatcher.cpp'))
+        self.assertNotIn('L"TToggleSwitch"', attach)
+        self.assertNotIn('L"TToggleSwitch"', notify)
+        event = read('WndCompat/Tracker/WinEventHandler.cpp')
+        self.assertRegex(event, r'(?s)case ControlKind::Unknown:\s*if \(isFull && allowGlassForHwnd\).*?DispatchRootAttachToOwnerThread\(hWnd\)')
 
     def test_bitbtn_ownerdraw_is_scoped_to_drawitem_and_exact_dc(self):
         root = read('WndCompat/Root/RootSubclass.cpp')
@@ -95,7 +97,15 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(guard, begin)
         self.assertIn('if (session.acquired[i]) EnableHooksOnModule', code)
         self.assertIn('return dc && s.dc == dc ? &s : nullptr', code)
-        self.assertIn('EqualRect(rect, &session.rect)', code)
+        self.assertIn('"DrawThemeBackground", reinterpret_cast<PVOID>(DelphiBitBtnThemeBg)', code)
+        theme = code.split('HRESULT WINAPI DelphiBitBtnThemeBg(HTHEME theme', 1)[1].split('HRESULT WINAPI DelphiBitBtnThemeText(HTHEME theme', 1)[0]
+        self.assertIn('GetOverallOrigSafe<OHK_DELPHI_BITBTN_THEME', theme)
+        self.assertIn('GlassCore::ModuleHandler::g_entryPointModule', theme)
+        self.assertIn('IntersectRect(&overlap, rect, &session.rect)', theme)
+        self.assertIn('IntersectRect(&drawClip, &session.rect, clip)', theme)
+        self.assertIn('IntersectClipRect(dc, drawClip.left', theme)
+        self.assertIn('RestoreDC(dc, saved)', theme)
+        self.assertIn('[GlassCore][DelphiBitBtn] DTB entry', theme)
         self.assertIn('part == BP_PUSHBUTTON', code)
         self.assertIn('DTT_CALCRECT | DTT_CALLBACK', code)
         self.assertIn('BLACKNESS', code.split('HRESULT WINAPI DelphiBitBtnParentBg(HWND hwnd', 1)[1].split('// =========================================================================', 1)[0])
