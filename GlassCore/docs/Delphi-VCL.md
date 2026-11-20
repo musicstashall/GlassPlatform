@@ -1854,3 +1854,25 @@ hWnd=… kind=19`: это дочерний `Edit`, а строк `ComboBoxContro
 HWND; тогда класс в журнале будет родительским. Если после этой правки строк
 `kind=3 (Static)` для ссылки нет — нужен журнал с фактическим именем класса
 окна, а не догадка.
+
+## Тест 48: TStringGrid / TDrawGrid — та же процедура, что TShownValueList
+
+`TStringGrid` и `TDrawGrid` — это `TCustomGrid` (`TWinControl`), но **не нативные
+контролы**: у них нет `SysListView32`/`SysHeader32`, они рисуют себя сами из EXE
+(`TCustomGrid.WMPaint` → `TCanvas` → `FillRect`/`ExtTextOutW`/`DrawTextW`, заголовок
+колонок — тем же canvas'ом). Поэтому «нативного аналога» у них нет, а есть уже
+готовая процедура — `[GlassCore][DelphiGrid]`, сделанная для `TShownValueList`
+(та же VCL-таблица).
+
+Класс `TStringGrid`/`TDrawGrid` не в классификаторе → kind `Unknown` → в Full
+`Root_Attach` (как и `TShownValueList`), поэтому правка ровно в двух местах:
+
+- `RootWindowHooks::ClassifyRootWindow`: слоты `OHK_DELPHI_GRID_TEXT/FILL/THEME`
+  включаются для `TStringGrid`/`TDrawGrid` так же, как для `TShownValueList`;
+- `RootGdiHooks::IsDelphiGridClass`: тела хуков принимают эти классы (проверка
+  `WindowFromDC(dc) == GetPaintSessionHostHwnd()` осталась).
+
+То есть белые заливки ячеек → `BLACKNESS`, текст ячеек/заголовка → `ExtTextOutWithAlpha`,
+`Header`-тема → прозрачный фон; строки данных и чужие окна не затрагиваются.
+Проверить: `TStringGrid` (заголовок, строки, числа, скролл) и `TDrawGrid`
+(рисуемые значения). Сборка и визуальный результат на Windows не проверены.

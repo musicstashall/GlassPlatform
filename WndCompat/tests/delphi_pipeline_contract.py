@@ -584,13 +584,16 @@ class DelphiPipelineContract(unittest.TestCase):
     def test_vcl_grid_hooks_are_narrow_and_balanced(self):
         root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         block = root.split('StrEqI(cls, L"TShownValueList")', 1)[1].split('// Точка входа', 1)[0]
+        for grid_cls in ('L"TStringGrid"', 'L"TDrawGrid"'):
+            self.assertIn(grid_cls, block + root.split('StrEqI(cls, L"TShownValueList")', 1)[0][-400:])
         for name in ('OHK_DELPHI_GRID_TEXT', 'OHK_DELPHI_GRID_FILL', 'OHK_DELPHI_GRID_THEME'):
             self.assertIn('PushPaint(instMod, ' + name, block)
             self.assertNotIn('PushDc(instMod, ' + name, block)
         gdi = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
-        grid = gdi.split('static bool IsDelphiGridPaintDC', 1)[1].split('int WINAPI Root_MyDrawTextW(', 1)[0]
+        grid = gdi.split('static bool IsDelphiGridClass', 1)[1].split('int WINAPI Root_MyDrawTextW(', 1)[0]
         for guard in ('WindowFromDC(dc)', 'GetPaintSessionHostHwnd()', 'IsForeignPaintBarrierActive()',
-                      'L"TShownValueList"', 'TA_UPDATECP', 'ETO_GLYPH_INDEX', 'ETO_PDY',
+                      'L"TShownValueList"', 'L"TStringGrid"', 'L"TDrawGrid"',
+                      'TA_UPDATECP', 'ETO_GLYPH_INDEX', 'ETO_PDY',
                       'lb.lbStyle == BS_SOLID', 'RGB(255, 255, 255)', 'L"Header"',
                       'ExtTextOutWithAlpha', 'return orig('):
             self.assertIn(guard, grid)
