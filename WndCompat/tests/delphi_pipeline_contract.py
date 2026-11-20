@@ -46,7 +46,8 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('[GlassCore][DelphiInput] ExtTextOut', edit)
         self.assertIn('[GlassCore][DelphiInput] TextResult', edit)
         self.assertIn('static thread_local unsigned budget[2]', edit)
-        self.assertIn('[GlassCore][DelphiBitBtn] BeginPaint', read('GlassCore/src/Hooks/ButtonHooks.cpp'))
+        self.assertIn('[GlassCore][DelphiBitBtn] BeginPaint', read('GlassCore/src/Hooks/delphi/TBitBtnHooks.cpp'))
+        self.assertIn('LogDelphiBitBtnBeginPaint(hWnd', read('GlassCore/src/Hooks/ButtonHooks.cpp'))
 
     def test_vcl_draw_probes_are_opt_in_and_balanced(self):
         header = read("GlassCore/Include/Hooks/RootGdiHooks.h")
@@ -85,7 +86,8 @@ class DelphiPipelineContract(unittest.TestCase):
 
     def test_bitbtn_ownerdraw_is_scoped_to_drawitem_and_exact_dc(self):
         root = read('WndCompat/Root/RootSubclass.cpp')
-        code = read('GlassCore/src/Hooks/ButtonHooks.cpp')
+        button = read('GlassCore/src/Hooks/ButtonHooks.cpp')
+        code = read('GlassCore/src/Hooks/delphi/TBitBtnHooks.cpp')
         exports = read('GlassCore/src/Core/Exports.cpp')
         owner = root.split('using BeginFn = BOOL (WINAPI*)(HWND, const DRAWITEMSTRUCT*)', 1)[1].split('// Нас интересуют только пункты меню', 1)[0]
         self.assertIn('begin(hWnd, dis)', owner)
@@ -97,9 +99,10 @@ class DelphiPipelineContract(unittest.TestCase):
                       'GlassIsBackdropAllowedForHwnd', 'BS_OWNERDRAW', 'L"TBitBtn"',
                       'dis->hDC', 'g_entryPointModule', 'AcquireDelphiBitBtnHook'):
             self.assertIn(guard, begin)
-        self.assertIn('if (session.acquired[i]) EnableHooksOnModule', code)
+        self.assertIn('if (session.acquired[i]) ReleaseDelphiBitBtnHook(session.module, i)', code)
         self.assertIn('slotTheme=%d slotText=%d slotParent=%d', code)
-        self.assertIn('hookInfoCache[index].first.IsValid()', code)
+        self.assertIn('hookInfoCache[hookIndex].first.IsValid()', button)
+        self.assertIn('OHK_DELPHI_BITBTN_THEME + index', button)
         self.assertIn('importDtb=%d importDtbEx=%d importParent=%d importParentEx=%d', code)
         self.assertIn('static const std::array<bool, 4> namedImports', code)
         probe = code.split('static bool HasDelphiThemeImport', 1)[1].split('#endif', 1)[0]
@@ -107,9 +110,10 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('Hooks::GetDelayloadIAT', probe)
         self.assertNotIn('EnableHook', probe)
         self.assertIn('return dc && s.dc == dc ? &s : nullptr', code)
-        self.assertIn('"DrawThemeBackground", reinterpret_cast<PVOID>(DelphiBitBtnThemeBg)', code)
+        self.assertIn('"DrawThemeBackground", reinterpret_cast<PVOID>(DelphiBitBtnThemeBg)', button)
         theme = code.split('HRESULT WINAPI DelphiBitBtnThemeBg(HTHEME theme', 1)[1].split('HRESULT WINAPI DelphiBitBtnThemeText(HTHEME theme', 1)[0]
-        self.assertIn('GetOverallOrigSafe<OHK_DELPHI_BITBTN_THEME', theme)
+        self.assertIn('GetDelphiBitBtnThemeOriginal', theme)
+        self.assertIn('GetOverallOrigSafe<OHK_DELPHI_BITBTN_THEME', button)
         self.assertIn('GlassCore::ModuleHandler::g_entryPointModule', theme)
         self.assertIn('IntersectRect(&overlap, rect, &session.rect)', theme)
         self.assertIn('IntersectRect(&drawClip, &session.rect, clip)', theme)
@@ -118,13 +122,28 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('[GlassCore][DelphiBitBtn] DTB entry', theme)
         self.assertIn('part == BP_PUSHBUTTON', code)
         self.assertIn('DTT_CALCRECT | DTT_CALLBACK', code)
-        self.assertIn('BLACKNESS', code.split('HRESULT WINAPI DelphiBitBtnParentBg(HWND hwnd', 1)[1].split('// =========================================================================', 1)[0])
+        self.assertIn('BLACKNESS', code.split('HRESULT WINAPI DelphiBitBtnParentBg(HWND hwnd', 1)[1].split('void ClearDelphiBitBtnDraw', 1)[0])
         # Ни glyph BitBlt, ни произвольные memory DC в owner-draw не подменяются.
         self.assertNotIn('OHK_BITBLT', begin)
-        self.assertIn('!delphiBitBtn && !IsButtonIconOrBitmapStyle(hWnd)', code)
-        self.assertIn('sess.delphiBitBtn || IsButtonIconOrBitmapStyle(sess.hWnd)', code)
-        self.assertIn('s.kind, false, s.delphiBitBtn', code)
-        self.assertIn('sess.kind == GK::Button && !ownerDrawSession', code)
+        self.assertIn('!delphiBitBtn && !IsButtonIconOrBitmapStyle(hWnd)', button)
+        self.assertIn('sess.delphiBitBtn || IsButtonIconOrBitmapStyle(sess.hWnd)', button)
+        self.assertIn('s.kind, false, s.delphiBitBtn', button)
+        self.assertIn('sess.kind == GK::Button && !ownerDrawSession', button)
+
+    def test_delphi_hook_files_are_registered_in_the_windows_project(self):
+        project = read('GlassCore/GlassCore.vcxproj')
+        filters = read('GlassCore/GlassCore.vcxproj.filters')
+        for file in (r'src\Hooks\delphi\TBitBtnHooks.cpp',
+                     r'src\Hooks\delphi\TToggleSwitchHooks.cpp',
+                     r'Include\Hooks\delphi\TBitBtnHooks.h',
+                     r'Include\Hooks\delphi\TBitBtnBridge.h',
+                     r'Include\Hooks\delphi\TToggleSwitchHooks.h'):
+            self.assertIn(file, project)
+            self.assertIn(file, filters)
+        self.assertIn('#include <Subsystems/RootSwcaGradient.h>', read('GlassCore/src/Hooks/delphi/TBitBtnHooks.cpp'))
+        self.assertNotIn('struct DelphiBitBtnDrawSession', read('GlassCore/src/Hooks/ButtonHooks.cpp'))
+        self.assertNotIn('CaptureStackBackTrace', read('GlassCore/src/Subsystems/PaintDispatcher.cpp'))
+        self.assertIn('ClearDelphiBitBtnDraw();', read('GlassCore/src/Hooks/ButtonHooks.cpp'))
 
     def test_containers_use_guarded_root_attach(self):
         source = read("WndCompat/Tracker/WinEventHandler.cpp")
@@ -205,15 +224,16 @@ class DelphiPipelineContract(unittest.TestCase):
 
     def test_toggle_delete_trace_is_debug_bounded_and_observational(self):
         source = read('GlassCore/src/Subsystems/PaintDispatcher.cpp')
-        trace = source.split('struct DelphiToggleDeleteTrace', 1)[1].split('static BOOL WINAPI HookDeleteDC', 1)[0]
-        for guard in ('it->type != DcEntryType::Paint', 'L"TToggleSwitch"', 'OBJ_MEMDC',
-                      'IsFullInjectionMode()', 'total >= 128', 'budget = 32',
+        trace = read('GlassCore/src/Hooks/delphi/TToggleSwitchHooks.cpp')
+        for guard in ('L"TToggleSwitch"', 'OBJ_MEMDC', 'total >= 128', 'budget = 32',
                       'CaptureStackBackTrace', 'not DC ownership', 'GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT'):
             self.assertIn(guard, trace)
-        self.assertIn('#if defined(_DEBUG)\n    // Контекст TToggleSwitch', source)
+        self.assertIn('it->type == DcEntryType::Paint', source)
+        self.assertIn('IsFullInjectionMode()', source)
+        self.assertIn('#if defined(_DEBUG)', trace)
         body = source.split('static BOOL WINAPI HookDeleteDC(HDC hdc)', 1)[1].split('// ── Lifecycle', 1)[0]
         self.assertEqual(body.count('g_origDeleteDC(hdc)'), 1)
-        self.assertLess(body.index('CaptureDelphiToggleDelete(hdc)'), body.index('PopDC(hdc,'))
+        self.assertLess(body.index('CaptureDelphiToggleDelete('), body.index('PopDC(hdc,'))
         self.assertLess(body.index('PopDC(hdc,'), body.index('g_origDeleteDC(hdc)'))
         self.assertIn('SetLastError(beforeTraceError)', body)
         self.assertIn('SetLastError(originalError)', body)

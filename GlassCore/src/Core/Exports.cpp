@@ -8,6 +8,7 @@
 #include <Hooks/MonthCal.h>
 #include <Hooks/DirectUI.h>
 #include <Hooks/Button.h>
+#include <Hooks/delphi/TBitBtnHooks.h>
 #include <Hooks/Static.h>
 #include <Hooks/Rebar.h>
 #include <GlassCoreProviders.h>
