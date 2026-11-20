@@ -2,6 +2,9 @@
 #include "CorePch.h"
 #include <Hooks/delphi/TListBoxDraw.h>
 #include <Hooks/delphi/TBackgroundHooks.h>
+#include <Hooks/UxThemeHooks.h>
+#include <Helpers/ThemeHelper.h>
+#include <vssym32.h>
 #include <Core/Intercept/HookDispatcher.h>
 #include <Module/ModuleHandler.h>
 #include <Subsystems/RenderText.h>
@@ -19,11 +22,10 @@ namespace GlassCore::DelphiListBox
     {
         using namespace GlassCore::Hooks;
         using namespace std::literals;
-        enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, RectangleSlot, Count };
+        enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, Count };
         int WINAPI MyFill(HDC, const RECT*, HBRUSH);
         BOOL WINAPI MyExtText(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
         int WINAPI MyDrawText(HDC, LPCWSTR, int, LPRECT, UINT);
-        BOOL WINAPI MyRectangle(HDC, int, int, int, int);
         const HookDispatcherDependency<Count, 3> g_dep{{
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
                 "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "FillRect", reinterpret_cast<void*>(MyFill) },
@@ -31,8 +33,6 @@ namespace GlassCore::DelphiListBox
                 "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "ExtTextOutW", reinterpret_cast<void*>(MyExtText) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
                 "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "DrawTextW", reinterpret_cast<void*>(MyDrawText) },
-            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv,
-                "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "Rectangle", reinterpret_cast<void*>(MyRectangle) },
         }};
         HookDispatcher<Count, 3> g_dispatcher{ g_dep, nullptr };
         wil::srwlock g_lock;
@@ -44,14 +44,12 @@ namespace GlassCore::DelphiListBox
             RECT item;
             bool colorList;
             bool checkList;
-            unsigned long long serial{};
-            RECT checkOutline{};
-            bool hasCheckOutline{};
+            bool themeDetourAcquired{};
             std::array<bool, Count> hooks{};
         };
         thread_local std::vector<Session> g_stack;
         thread_local bool g_inHook = false;
-        thread_local unsigned long long g_serial = 0;
+        thread_local bool g_inCheckTheme = false;
 
         template <size_t index, typename T> T Original() noexcept
         {
@@ -80,53 +78,6 @@ namespace GlassCore::DelphiListBox
                 && r.right - r.left <= w / 3 && r.top > s.item.top
                 && r.bottom < s.item.bottom && r.bottom > r.top;
         }
-        // VCL first draws a hollow, background-coloured outer checkbox rectangle.
-        // Record it only after the original succeeds; this is not a glyph replacement.
-        BOOL WINAPI MyRectangle(HDC dc, int left, int top, int right, int bottom)
-        {
-            auto orig = Original<RectangleSlot, decltype(&::Rectangle)>();
-            if (!orig) return Rectangle(dc, left, top, right, bottom);
-            const auto* current = Current(dc);
-            if (!current || !current->checkList) return orig(dc, left, top, right, bottom);
-            const Session s = *current;
-            const LONG height = s.item.bottom - s.item.top;
-            const RECT box{left, top, right, bottom};
-            RECT clipped{};
-            LOGBRUSH brush{};
-            LOGPEN pen{};
-            const bool candidate = height > 0 && right > left && bottom > top
-                && left >= s.item.left && right <= s.item.left + 2 * height
-                && right - left <= 2 * height && bottom - top <= height
-                && IntersectRect(&clipped, &box, &s.item) && EqualRect(&clipped, &box)
-                && GetObjectW(GetCurrentObject(dc, OBJ_BRUSH), sizeof(brush), &brush) == sizeof(brush)
-                && brush.lbStyle == BS_NULL
-                && GetObjectW(GetCurrentObject(dc, OBJ_PEN), sizeof(pen), &pen) == sizeof(pen)
-                && pen.lopnStyle == PS_SOLID && pen.lopnWidth.x == 1 && SystemBackground(pen.lopnColor);
-            const BOOL result = orig(dc, left, top, right, bottom);
-            const DWORD error = GetLastError();
-            if (result && candidate && !g_stack.empty() && g_stack.back().serial == s.serial)
-            {
-                g_stack.back().checkOutline = box;
-                g_stack.back().hasCheckOutline = true;
-            }
-            SetLastError(error);
-            return result;
-        }
-
-        bool ClipExcludesCheckOutline(HDC dc, const RECT& outline) noexcept
-        {
-            // GetClipRgn is in device coordinates, whereas the observed Rectangle
-            // uses logical coordinates. Reject non-axis-aligned transforms.
-            POINT p[4]{{outline.left, outline.top}, {outline.right, outline.top},
-                {outline.left, outline.bottom}, {outline.right, outline.bottom}};
-            if (!LPtoDP(dc, p, 4) || p[0].y != p[1].y || p[2].y != p[3].y
-                || p[0].x != p[2].x || p[1].x != p[3].x
-                || p[0].x >= p[1].x || p[0].y >= p[2].y) return false;
-            const RECT deviceBox{p[0].x, p[0].y, p[1].x, p[2].y};
-            wil::unique_hrgn region{CreateRectRgn(0, 0, 0, 0)};
-            return region && GetClipRgn(dc, region.get()) == 1
-                && !RectInRegion(region.get(), &deviceBox);
-        }
         int WINAPI MyFill(HDC dc, const RECT* r, HBRUSH brush)
         {
             auto orig = Original<FillSlot, decltype(&::FillRect)>();
@@ -142,45 +93,8 @@ namespace GlassCore::DelphiListBox
             if (GetObjectW(brush, sizeof(lb), &lb) != sizeof(lb) || lb.lbStyle != BS_SOLID)
                 return orig(dc, r, brush);
             const bool sample = IsColorSample(s, *r);
-            // The narrow left part contains the native/VCL checkbox drawing.
-            // Keep the checkbox glyphs and complex-clip interior with VCL.
-            const LONG itemHeight = s.item.bottom - s.item.top;
-            if (s.checkList && r->left == s.item.left && itemHeight > 0
-                && r->right - r->left <= 2 * itemHeight)
-            {
-                // For the complex clip, an outer checkbox rectangle must have
-                // been observed and its entire box must be excluded from the
-                // application clip. PatBlt keeps the original clip unchanged.
-                RECT clip{};
-                const int clipKind = GetClipBox(dc, &clip);
-                RECT boxWithinFill{};
-                const bool excludedCheck = clipKind == COMPLEXREGION && s.hasCheckOutline
-                    && IntersectRect(&boxWithinFill, &s.checkOutline, r)
-                    && EqualRect(&boxWithinFill, &s.checkOutline)
-                    && ClipExcludesCheckOutline(dc, s.checkOutline);
-                if (r->top == s.item.top && r->bottom == s.item.bottom
-                    && SystemBackground(lb.lbColor)
-                    && (clipKind == SIMPLEREGION || excludedCheck))
-                {
-                    if (PatBlt(dc, r->left, r->top, r->right - r->left,
-                        r->bottom - r->top, BLACKNESS))
-                    {
-#if defined(_DEBUG)
-                        if (excludedCheck)
-                        {
-                            static thread_local ULONGLONG epoch = 0;
-                            static thread_local unsigned budget = 0;
-                            const ULONGLONG now = GetTickCount64();
-                            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 12; }
-                            if (budget) { --budget; DebugLog(DBG_NORMAL,
-                                L"[GlassCore][DelphiListDraw] checkbox background hwnd=0x%p dc=0x%p clip=complex", s.hwnd, dc); }
-                        }
-#endif
-                        return 1;
-                    }
-                }
-                return orig(dc, r, brush);
-            }
+            // VCL's own DC clip governs each fill, including checkbox backgrounds.
+            // Do not infer or alter checkbox geometry or clipping here.
             g_inHook = true;
             auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
             if (!sample && SystemBackground(lb.lbColor))
@@ -253,8 +167,20 @@ namespace GlassCore::DelphiListBox
     void Shutdown() noexcept
     {
         g_shutdown.store(true, std::memory_order_release);
-        auto lock = g_lock.lock_exclusive();
-        g_dispatcher.DisableAllHooks();
+        {
+            auto lock = g_lock.lock_exclusive();
+            g_dispatcher.DisableAllHooks();
+        }
+        // Shutdown can occur on this thread within an owner-draw session. Other
+        // threads keep their own marker and release it in EndDraw.
+        for (auto& s : g_stack)
+        {
+            if (s.themeDetourAcquired)
+            {
+                s.themeDetourAcquired = false;
+                GlassCore::Hooks::UxThemeHooks::EnableThemeHooks(false);
+            }
+        }
     }
     bool IsInsideDraw() noexcept { return !g_stack.empty(); }
     bool BeginDraw(HWND parent, const DRAWITEMSTRUCT* dis) noexcept
@@ -273,7 +199,6 @@ namespace GlassCore::DelphiListBox
         if (!mod) return false;
         Session s{dis->hwndItem, dis->hDC, dis->rcItem, color,
             _wcsicmp(cls, L"TCheckListBox") == 0};
-        s.serial = ++g_serial;
         {
             auto lock = g_lock.lock_exclusive();
             if (g_shutdown.load(std::memory_order_acquire)) return false;
@@ -286,6 +211,11 @@ namespace GlassCore::DelphiListBox
             }
         }
         g_stack.push_back(s);
+        if (s.checkList)
+        {
+            g_stack.back().themeDetourAcquired = GlassCore::Hooks::UxThemeHooks::EnableThemeHooks(true);
+            s.themeDetourAcquired = g_stack.back().themeDetourAcquired;
+        }
 #if defined(_DEBUG)
         static thread_local ULONGLONG epoch = 0;
         static thread_local unsigned budget = 0;
@@ -296,12 +226,62 @@ namespace GlassCore::DelphiListBox
             --budget;
             RECT client{};
             GetClientRect(s.hwnd, &client);
-            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p class=%s dc=0x%p fill=%d ext=%d draw=%d rectangle=%d state=0x%X item=%u rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld,%ld,%ld]",
-                s.hwnd, cls, s.dc, s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot], s.hooks[RectangleSlot],
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p class=%s dc=0x%p fill=%d ext=%d draw=%d theme=%d state=0x%X item=%u rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld,%ld,%ld]",
+                s.hwnd, cls, s.dc, s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot], s.themeDetourAcquired,
                 dis->itemState, dis->itemID, s.item.left, s.item.top, s.item.right, s.item.bottom,
                 client.left, client.top, client.right, client.bottom);
         }
 #endif
+        return true;
+    }
+    bool TryCheckListThemeBackground(decltype(&::DrawThemeBackground) orig,
+        HTHEME theme, HDC dc, int part, int state, LPCRECT rect, LPCRECT clip,
+        HRESULT& result) noexcept
+    {
+        if (!orig || g_inCheckTheme || !theme || !rect || IsRectEmpty(rect) || part != BP_CHECKBOX)
+            return false;
+        const auto* current = Current(dc);
+        if (!current || !current->checkList || !current->themeDetourAcquired) return false;
+        const Session session = *current;
+        WCHAR themeClass[MAX_PATH + 1]{};
+        if (FAILED(Shared::ThemeHelper::GetThemeClass(theme, themeClass, MAX_PATH))
+            || _wcsicmp(themeClass, L"Button") != 0) return false;
+
+        // Use the theme's own drawing and per-pixel alpha, not a reconstructed
+        // checkbox, colour key, or a substitute clipping region. The buffer is
+        // scoped to the API's original rectangle and the original clip is passed on.
+        BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+        BP_PAINTPARAMS params{sizeof(BP_PAINTPARAMS), 0, nullptr, &blend};
+        HDC bufferDc = nullptr;
+        HPAINTBUFFER buffer = BeginBufferedPaint(dc, rect, BPBF_TOPDOWNDIB, &params, &bufferDc);
+        if (!buffer || !bufferDc)
+        {
+            if (buffer) EndBufferedPaint(buffer, FALSE);
+            return false;
+        }
+        if (FAILED(BufferedPaintClear(buffer, nullptr)))
+        {
+            EndBufferedPaint(buffer, FALSE);
+            return false;
+        }
+        g_inCheckTheme = true;
+        const HRESULT draw = orig(theme, bufferDc, part, state, rect, clip);
+        g_inCheckTheme = false;
+        const HRESULT end = EndBufferedPaint(buffer, SUCCEEDED(draw));
+#if defined(_DEBUG)
+        static thread_local ULONGLONG epoch = 0;
+        static thread_local unsigned budget = 0;
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch || now - epoch >= 1000) { epoch = now; budget = 12; }
+        if (budget)
+        {
+            --budget;
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] checkbox DTB hwnd=0x%p dc=0x%p part=%d state=%d draw=0x%08X end=0x%08X",
+                session.hwnd, dc, part, state, static_cast<unsigned>(draw), static_cast<unsigned>(end));
+        }
+#endif
+        if (FAILED(draw) || FAILED(end)) return false;
+        result = draw;
         return true;
     }
     void EndDraw() noexcept
@@ -309,6 +289,8 @@ namespace GlassCore::DelphiListBox
         if (g_stack.empty()) return;
         const Session s = g_stack.back();
         g_stack.pop_back();
+        if (s.themeDetourAcquired)
+            GlassCore::Hooks::UxThemeHooks::EnableThemeHooks(false);
         auto lock = g_lock.lock_exclusive();
         if (!g_shutdown.load(std::memory_order_acquire))
             for (size_t i = 0; i < Count; ++i)

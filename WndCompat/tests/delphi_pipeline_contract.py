@@ -130,32 +130,35 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn('TInputHooks.cpp', read(path))
             self.assertIn('TInputHooks.h', read(path))
 
-    def test_checkbox_complex_background_requires_observed_excluded_outline(self):
+    def test_checkbox_uses_scoped_theme_drawing_without_geometry_heuristics(self):
         code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
-        area = code.split('if (s.checkList && r->left == s.item.left', 1)[1].split('g_inHook = true;', 1)[0]
-        for guard in ('r->top == s.item.top', 'r->bottom == s.item.bottom',
-                      'clipKind == SIMPLEREGION || excludedCheck', 'clipKind == COMPLEXREGION',
-                      's.hasCheckOutline', 'EqualRect(&boxWithinFill, &s.checkOutline)',
-                      'ClipExcludesCheckOutline(dc, s.checkOutline)', 'SystemBackground(lb.lbColor)',
-                      'BLACKNESS', 'return orig(dc, r, brush)'):
-            self.assertIn(guard, area)
-        rectangle = code.split('BOOL WINAPI MyRectangle(HDC dc, int left', 1)[1].split('bool ClipExcludesCheckOutline', 1)[0]
-        for guard in ('current->checkList', 'brush.lbStyle == BS_NULL',
-                      'pen.lopnStyle == PS_SOLID', 'pen.lopnWidth.x == 1',
-                      'SystemBackground(pen.lopnColor)', 'EqualRect(&clipped, &box)',
-                      'const BOOL result = orig(dc, left, top, right, bottom)',
-                      'g_stack.back().serial == s.serial'):
-            self.assertIn(guard, rectangle)
-        clip = code.split('bool ClipExcludesCheckOutline', 1)[1].split('int WINAPI MyFill(HDC dc', 1)[0]
-        for guard in ('LPtoDP(dc, p, 4)', 'GetClipRgn(dc, region.get()) == 1',
-                      '!RectInRegion(region.get(), &deviceBox)'):
-            self.assertIn(guard, clip)
-        self.assertNotIn('SelectClipRgn(', clip)
-        self.assertNotIn('ExcludeClipRect(', clip)
+        theme = code.split('bool TryCheckListThemeBackground(', 1)[1].split('void EndDraw()', 1)[0]
+        for guard in ('part != BP_CHECKBOX', '!current->checkList',
+                      '!current->themeDetourAcquired', 'GetThemeClass(theme',
+                      '_wcsicmp(themeClass, L"Button")', 'g_inCheckTheme',
+                      'BeginBufferedPaint(dc, rect, BPBF_TOPDOWNDIB',
+                      'AC_SRC_ALPHA', 'BufferedPaintClear(buffer, nullptr)',
+                      'orig(theme, bufferDc, part, state, rect, clip)',
+                      'EndBufferedPaint(buffer, SUCCEEDED(draw))',
+                      'FAILED(draw) || FAILED(end)'):
+            self.assertIn(guard, theme)
+        for forbidden in ('ExcludeClipRect', 'IntersectClipRect', 'RectInRegion',
+                          'GetClipRgn', 'WindowFromDC', 'ChromaKey'):
+            self.assertNotIn(forbidden, theme)
+        fill = code.split('int WINAPI MyFill(HDC dc', 1)[1].split('BOOL WINAPI MyExtText(HDC dc', 1)[0]
+        for forbidden in ('GetClipBox', 'COMPLEXREGION', 'SIMPLEREGION', 'checkOutline'):
+            self.assertNotIn(forbidden, fill)
+        self.assertIn('SystemBackground(lb.lbColor)', fill)
+        self.assertIn('if (s.themeDetourAcquired)', code)
+        self.assertIn('EnableThemeHooks(true)', code)
+        self.assertIn('EnableThemeHooks(false)', code)
+        ux = read('GlassCore/src/Hooks/UxThemeHooks.cpp')
+        self.assertIn('DelphiListBox::TryCheckListThemeBackground', ux)
+        self.assertIn('Button::TryDelphiBitBtnThemeBgDetour', ux)
 
     def test_vcl_draw_hook_slots_do_not_shadow_winapi_macros(self):
         code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
-        self.assertIn('enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, RectangleSlot, Count }', code)
+        self.assertIn('enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, Count }', code)
         self.assertIn('Original<DrawTextSlot, decltype(&::DrawTextW)>()', code)
         self.assertIn('Original<FillSlot, decltype(&::FillRect)>()', code)
         self.assertIn('Original<ExtTextSlot, decltype(&::ExtTextOutW)>()', code)
