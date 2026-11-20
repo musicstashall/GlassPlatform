@@ -84,6 +84,9 @@ namespace GlassCore::PaintDispatcher
     // У MEMDC WindowFromDC часто NULL — для сессионного буфера Edit сверяем hdc с этим стеком.
     [[nodiscard]] bool IsPaintStackDcForHwnd(HWND hWnd, HDC hdc) noexcept;
 
+    // Ближайшая оконная paint/GetDC-сессия без учёта вложенных memory DC.
+    [[nodiscard]] bool IsTopWindowDrawingSession(HWND hWnd) noexcept;
+
     // Ближайшая запись именно этого HDC — BeginPaint данного окна, не вложенный GetDC.
     [[nodiscard]] bool IsCurrentPaintDcForHwnd(HWND hWnd, HDC hdc) noexcept;
 
