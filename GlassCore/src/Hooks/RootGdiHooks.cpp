@@ -977,15 +977,22 @@ namespace GlassCore::Root
             LOGBRUSH lb{};
             const bool haveBrush = brush
                 && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
-            if (rect && !IsRectEmpty(rect) && haveBrush
-                && lb.lbStyle == BS_SOLID && lb.lbColor == RGB(255, 255, 255)
+            // Фиксированные строка/колонка TStringGrid и часть ячеек TDrawGrid
+            // заливаются COLOR_BTNFACE, а не белым — гасим оба системных цвета.
+            const COLORREF plainFill = lb.lbColor & 0xFFFFFF;
+            const bool systemFill = haveBrush && lb.lbStyle == BS_SOLID
+                && (plainFill == 0
+                    || plainFill == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
+                    || plainFill == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF));
+            if (rect && !IsRectEmpty(rect) && systemFill
                 && PatBlt(dc, rect->left, rect->top, rect->right - rect->left,
                     rect->bottom - rect->top, BLACKNESS))
             {
 #if defined(_DEBUG)
                 if (AllowDelphiGridLog(1))
-                    DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] WhiteFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld]",
-                        WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom);
+                    DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] WhiteFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X",
+                        WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
+                        static_cast<unsigned>(lb.lbColor));
 #endif
                 return 1;
             }
@@ -1329,8 +1336,14 @@ namespace GlassCore::Root
                 wchar_t hostCls[64]{};
                 if (GetClassNameW(host, hostCls, _countof(hostCls)) && IsDelphiGridClass(hostCls))
                 {
+                    // Фон таблиц: только «оконные» цвета системы → прозрачный
+                    // (COLOR_WINDOW: ячейки; COLOR_BTNFACE: фиксированные
+                    // строка/колонка TStringGrid и часть ячеек TDrawGrid).
+                    // Остальные цвета — обычная кисть, без alpha.
                     const COLORREF plainGrid = color & 0xFFFFFF;
-                    if (!plainGrid || plainGrid == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF))
+                    if (!plainGrid
+                        || plainGrid == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
+                        || plainGrid == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF))
                         return o(RGB(0, 0, 0));
                     return o(color);
                 }
