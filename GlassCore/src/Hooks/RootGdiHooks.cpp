@@ -898,6 +898,58 @@ namespace GlassCore::Root
                 || StrEqI(cls, L"TDrawGrid");
         }
 
+        // Заливка прямоугольника цветом с истинной альфой: GDI не переносит
+        // альфу из pattern-кисти (FillRect с alpha-кистью даёт непрозрачный
+        // цвет — см. скриншот «альфа 12»). Поэтому 1x1 premultiplied DIB и
+        // GdiAlphaBlend с растяжением на весь прямоугольник.
+        static bool FillRectWithAlphaBlend(HDC dc, const RECT* rect,
+            COLORREF color, BYTE alpha) noexcept
+        {
+            if (!dc || !rect)
+                return false;
+            const int w = rect->right - rect->left;
+            const int h = rect->bottom - rect->top;
+            if (w <= 0 || h <= 0 || !alpha)
+                return false;
+
+            BITMAPINFO bi{};
+            bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bi.bmiHeader.biWidth = 1;
+            bi.bmiHeader.biHeight = -1;
+            bi.bmiHeader.biPlanes = 1;
+            bi.bmiHeader.biBitCount = 32;
+            bi.bmiHeader.biCompression = BI_RGB;
+
+            void* bits = nullptr;
+            HDC mem = CreateCompatibleDC(dc);
+            if (!mem)
+                return false;
+            HBITMAP bmp = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+            if (!bmp || !bits)
+            {
+                if (bmp) DeleteObject(bmp);
+                DeleteDC(mem);
+                return false;
+            }
+            const HGDIOBJ old = SelectObject(mem, bmp);
+            const auto premul = [alpha](BYTE c) noexcept
+            {
+                return static_cast<BYTE>((c * (alpha + 1)) >> 8);
+            };
+            auto* px = static_cast<BYTE*>(bits);
+            px[0] = premul(GetBValue(color));
+            px[1] = premul(GetGValue(color));
+            px[2] = premul(GetRValue(color));
+            px[3] = alpha;
+
+            const BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+            const BOOL ok = GdiAlphaBlend(dc, rect->left, rect->top, w, h, mem, 0, 0, 1, 1, bf);
+            SelectObject(mem, old);
+            DeleteObject(bmp);
+            DeleteDC(mem);
+            return ok != FALSE;
+        }
+
         static bool IsDelphiGridPaintDC(HDC dc) noexcept
         {
             const HWND hwnd = dc ? WindowFromDC(dc) : nullptr;
@@ -981,24 +1033,52 @@ namespace GlassCore::Root
             LOGBRUSH lb{};
             const bool haveBrush = brush
                 && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
-            // COLOR_WINDOW — прозрачный фон ячеек. Прочие цвета (например
-            // clBtnFace фиксированных ячеек) приходят уже alpha-кистью и здесь
-            // только проходят в orig().
-            const COLORREF plainFill = lb.lbColor & 0xFFFFFF;
-            const bool systemFill = haveBrush && lb.lbStyle == BS_SOLID
-                && (plainFill == 0
-                    || plainFill == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF));
-            if (rect && !IsRectEmpty(rect) && systemFill
-                && PatBlt(dc, rect->left, rect->top, rect->right - rect->left,
-                    rect->bottom - rect->top, BLACKNESS))
+            // Стоковые кисти GetObject не отдают — определяем по хэндлу.
+            COLORREF fillColor = haveBrush ? (lb.lbColor & 0xFFFFFF) : 0;
+            bool solid = haveBrush && lb.lbStyle == BS_SOLID;
+            if (!haveBrush && brush)
             {
+                if (brush == GetSysColorBrush(COLOR_WINDOW))
+                {
+                    solid = true;
+                    fillColor = GetSysColor(COLOR_WINDOW) & 0xFFFFFF;
+                }
+                else if (brush == GetSysColorBrush(COLOR_BTNFACE))
+                {
+                    solid = true;
+                    fillColor = GetSysColor(COLOR_BTNFACE) & 0xFFFFFF;
+                }
+            }
+
+            if (rect && !IsRectEmpty(rect) && solid)
+            {
+                const int w = rect->right - rect->left;
+                const int h = rect->bottom - rect->top;
+                // Сначала очищаем чёрным (прозрачный фон), только потом —
+                // цветная подложка с альфой. Иначе AlphaBlend ложится поверх
+                // старого содержимого и цвет получается плотным.
+                const bool cleared = PatBlt(dc, rect->left, rect->top, w, h, BLACKNESS) != FALSE;
+                if (cleared && (!fillColor || fillColor == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)))
+                {
 #if defined(_DEBUG)
-                if (AllowDelphiGridLog(1))
-                    DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] WhiteFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X",
-                        WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
-                        static_cast<unsigned>(lb.lbColor));
+                    if (AllowDelphiGridLog(1))
+                        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] WhiteFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X",
+                            WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
+                            static_cast<unsigned>(fillColor));
 #endif
-                return 1;
+                    return 1;
+                }
+                if (cleared && FillRectWithAlphaBlend(dc, rect, fillColor, kDelphiGridCellAlpha))
+                {
+#if defined(_DEBUG)
+                    if (AllowDelphiGridLog(1))
+                        DebugLog(DBG_NORMAL,
+                            L"[GlassCore][DelphiGrid] AlphaFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X alpha=%u",
+                            WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
+                            static_cast<unsigned>(fillColor), static_cast<unsigned>(kDelphiGridCellAlpha));
+#endif
+                    return 1;
+                }
             }
 #if defined(_DEBUG)
             // Диагностика: чем именно закрашивается фон (например, заголовок
@@ -1286,15 +1366,11 @@ namespace GlassCore::Root
                         if (GetClassNameW(host, hostCls, _countof(hostCls))
                             && IsDelphiGridClass(hostCls))
                         {
+                            // COLOR_WINDOW → прозрачный; цветные системные кисти
+                            // (COLOR_BTNFACE и т.п.) отдаём как есть: альфа
+                            // применяется в Root_MyDelphiGridFill.
                             if (nIndex == COLOR_WINDOW)
                                 return CreateSolidBrush(0);
-                            if (nIndex == COLOR_BTNFACE)
-                            {
-                                if (HBRUSH cell = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(
-                                        GetSysColor(COLOR_BTNFACE), kDelphiGridCellAlpha))
-                                    return cell;
-                                return o(nIndex);
-                            }
                         }
                     }
                     if (nIndex == COLOR_WINDOW || nIndex == COLOR_BTNFACE || nIndex == COLOR_MENU)
@@ -1356,15 +1432,12 @@ namespace GlassCore::Root
                 wchar_t hostCls[64]{};
                 if (GetClassNameW(host, hostCls, _countof(hostCls)) && IsDelphiGridClass(hostCls))
                 {
-                    // Фон таблиц: COLOR_WINDOW → полностью прозрачный, любой
-                    // другой цвет (фиксированные ячейки clBtnFace и т.п.) →
-                    // низкая альфа, чтобы цвет отличался от фона и просвечивал.
+                    // Фон таблиц: COLOR_WINDOW → прозрачный. Прочие цвета — обычная
+                    // кисть; альфа делается на этапе заливки (Root_MyDelphiGridFill),
+                    // потому что pattern-кисть через FillRect альфу не переносит.
                     const COLORREF plainGrid = color & 0xFFFFFF;
                     if (!plainGrid || plainGrid == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF))
                         return o(RGB(0, 0, 0));
-                    if (HBRUSH cell = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(
-                            color, kDelphiGridCellAlpha))
-                        return cell;
                     return o(color);
                 }
             }
