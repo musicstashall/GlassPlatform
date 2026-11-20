@@ -34,6 +34,7 @@ namespace GlassCore::DelphiBackground
             unsigned long long serial{};
             bool paint{};
             bool list{};
+            bool checkList{};
             bool armed{};
             bool number{};
             bool afterBegin{};
@@ -97,7 +98,11 @@ namespace GlassCore::DelphiBackground
             {
                 s.list = list;
                 WCHAR cls[64]{};
-                s.number = GetClassNameW(hwnd, cls, _countof(cls)) && _wcsicmp(cls, L"TNumberBox") == 0;
+                if (GetClassNameW(hwnd, cls, _countof(cls)))
+                {
+                    s.number = _wcsicmp(cls, L"TNumberBox") == 0;
+                    s.checkList = _wcsicmp(cls, L"TCheckListBox") == 0;
+                }
                 s.armed = Acquire();
             }
             g_sessions.push_back(s);
@@ -210,22 +215,48 @@ namespace GlassCore::DelphiBackground
         g_dispatcher.DisableAllHooks();
         g_sessions.clear();
     }
-    void ClearObservedListTail(HWND hwnd, const DRAWITEMSTRUCT* dis) noexcept
+    void PrepareObservedListBackground(HWND hwnd, const DRAWITEMSTRUCT* dis) noexcept
     {
-        if (g_shutdown.load(std::memory_order_acquire) || !dis || !dis->hDC || dis->hwndItem != hwnd
-            || !(dis->itemAction & ODA_DRAWENTIRE) || dis->itemID == static_cast<UINT>(-1)) return;
+        if (g_shutdown.load(std::memory_order_acquire) || !dis || !dis->hDC || dis->hwndItem != hwnd) return;
         for (auto it = g_sessions.rbegin(); it != g_sessions.rend(); ++it)
         {
             if (it->hwnd != hwnd || !it->armed || !it->list || !it->defaultBrush || it->observedDc != dis->hDC
                 || it->observedBitmap != GetCurrentObject(dis->hDC, OBJ_BITMAP)
                 || !IsFullClient(hwnd, dis->hDC, &it->observedRect)) continue;
-            // Consume once: never repeatedly erase beneath already painted items.
+            // The full background fill must precede the first item draw on this
+            // exact surface. Do not clear after an earlier focus/select draw.
+            if (!(dis->itemAction & ODA_DRAWENTIRE) || dis->itemID == static_cast<UINT>(-1))
+            {
+                if (it->checkList) it->defaultBrush = false;
+                return;
+            }
+            const bool checkList = it->checkList;
             it->defaultBrush = false;
             const RECT client = it->observedRect;
             if (dis->rcItem.top != client.top || dis->rcItem.left != client.left) return;
             const LRESULT top = SendMessageW(hwnd, LB_GETTOPINDEX, 0, 0);
             const LRESULT count = SendMessageW(hwnd, LB_GETCOUNT, 0, 0);
             if (top == LB_ERR || count <= 0 || dis->itemID != static_cast<UINT>(top)) return;
+            if (checkList)
+            {
+                // The logged VCL memory buffer was filled with the default
+                // background before any item. Clear it now, before VCL draws
+                // checkbox themes, instead of clearing their finished glyphs.
+                const BOOL cleared = PatBlt(dis->hDC, client.left, client.top,
+                    client.right-client.left, client.bottom-client.top, BLACKNESS);
+#if defined(_DEBUG)
+                static thread_local ULONGLONG epoch = 0;
+                static thread_local unsigned budget = 0;
+                const ULONGLONG now = GetTickCount64();
+                if (!epoch || now - epoch >= 1000) { epoch = now; budget = 12; }
+                if (budget) { --budget; DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiBackground] checklist initial background hwnd=0x%p dc=0x%p result=%d",
+                    hwnd, dis->hDC, cleared); }
+#else
+                (void)cleared;
+#endif
+                return;
+            }
             RECT last{};
             if (SendMessageW(hwnd, LB_GETITEMRECT, static_cast<WPARAM>(count - 1), reinterpret_cast<LPARAM>(&last)) == LB_ERR
                 || last.bottom < client.top || last.bottom >= client.bottom) return;

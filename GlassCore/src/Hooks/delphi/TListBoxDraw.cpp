@@ -194,7 +194,7 @@ namespace GlassCore::DelphiListBox
         if (!GetClassNameW(dis->hwndItem, cls, _countof(cls))) return false;
         const bool color = _wcsicmp(cls, L"TColorListBox") == 0;
         if (!color && _wcsicmp(cls, L"TListBox") != 0 && _wcsicmp(cls, L"TCheckListBox") != 0) return false;
-        GlassCore::DelphiBackground::ClearObservedListTail(dis->hwndItem, dis);
+        GlassCore::DelphiBackground::PrepareObservedListBackground(dis->hwndItem, dis);
         HMODULE mod = GlassCore::ModuleHandler::g_entryPointModule;
         if (!mod) return false;
         Session s{dis->hwndItem, dis->hDC, dis->rcItem, color,
