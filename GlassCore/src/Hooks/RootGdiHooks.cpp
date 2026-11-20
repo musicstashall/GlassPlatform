@@ -967,12 +967,20 @@ namespace GlassCore::Root
 
         static bool IsDelphiGridPaintDC(HDC dc) noexcept
         {
-            const HWND hwnd = dc ? WindowFromDC(dc) : nullptr;
-            if (!hwnd || hwnd != GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()
-                || GlassCore::PaintDispatcher::IsForeignPaintBarrierActive())
+            if (!dc || GlassCore::PaintDispatcher::IsForeignPaintBarrierActive())
+                return false;
+            // VCL может рисовать таблицу в промежуточный bitmap (двойная
+            // буферизация): WindowFromDC == NULL. Тогда владельцем считаем
+            // окно активной paint-сессии, если это таблица. Оконный DC
+            // по-прежнему должен принадлежать именно ей.
+            const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+            if (!host)
+                return false;
+            const HWND dcWnd = WindowFromDC(dc);
+            if (dcWnd && dcWnd != host)
                 return false;
             wchar_t cls[128]{};
-            return GetClassNameW(hwnd, cls, _countof(cls)) && IsDelphiGridClass(cls);
+            return GetClassNameW(host, cls, _countof(cls)) && IsDelphiGridClass(cls);
         }
 
 #if defined(_DEBUG)
@@ -1077,12 +1085,12 @@ namespace GlassCore::Root
                     const bool tinted = plain && plain != (GetSysColor(COLOR_WINDOW) & 0xFFFFFF);
                     if (tinted)
                         DebugLog(DBG_NORMAL,
-                            L"[GlassCore][DelphiGrid] AlphaFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X alpha=%u",
-                            WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
+                            L"[GlassCore][DelphiGrid] AlphaFill hwnd=0x%p dcWnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X alpha=%u",
+                            WindowFromDC(dc), WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
                             static_cast<unsigned>(fillColor), static_cast<unsigned>(kDelphiGridCellAlpha));
                     else
-                        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] WhiteFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X",
-                            WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
+                        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] WhiteFill hwnd=0x%p dcWnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X",
+                            WindowFromDC(dc), WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
                             static_cast<unsigned>(fillColor));
                 }
 #endif
@@ -1093,8 +1101,8 @@ namespace GlassCore::Root
             // TStringGrid), чтобы не гадать по скриншоту.
             if (AllowDelphiGridLog(1))
                 DebugLog(DBG_NORMAL,
-                    L"[GlassCore][DelphiGrid] Fill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X style=%u brush=%d",
-                    WindowFromDC(dc), rect ? rect->left : 0, rect ? rect->top : 0,
+                    L"[GlassCore][DelphiGrid] Fill hwnd=0x%p dcWnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X style=%u brush=%d",
+                    WindowFromDC(dc), WindowFromDC(dc), rect ? rect->left : 0, rect ? rect->top : 0,
                     rect ? rect->right : 0, rect ? rect->bottom : 0,
                     haveBrush ? static_cast<unsigned>(lb.lbColor) : 0u,
                     haveBrush ? static_cast<unsigned>(lb.lbStyle) : 0u, haveBrush ? 1 : 0);
