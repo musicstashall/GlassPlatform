@@ -2024,3 +2024,20 @@ VCL: в журнале 12 `WhiteFill`/`Fill` ячейки идёт **до** `Tex
   (`COLOR_WINDOW` → прозрачность, прочие цвета → тинт с `kDelphiGridCellAlpha`).
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 56: WM_ERASEBKGND таблицы чернится в субклассе
+
+Журнал 13 подтвердил: для фиксированных ячеек `TStringGrid` (`rect=[1,1,63,23]`,
+`[1,26,63,48]`, `[1,51,63,73]`, `[1,76,63,98]`) нет ни `Fill`, ни нового
+`PatBlt` — только `Text options=0x4`. Значит фон рисуется в `WM_ERASEBKGND`,
+который приходит **до** paint-сессии: IAT-слоты таблицы (`OHK_DELPHI_GRID_FILL`,
+`OHK_PATBLT`) в этот момент ещё выключены, поэтому релаксация
+`IsDelphiGridFillDC` (тест 55) ничего не поймала.
+
+Правка в `WndCompat/Root/RootSubclass.cpp`, `case WM_ERASEBKGND`: для окон
+`TStringGrid`/`TDrawGrid`/`TShownValueList` клиент по clip-боксу чернится
+(`PatBlt BLACKNESS`) и возвращается `1` — до проверки
+`GlassIsBackdropAllowedForHwnd`. Стирание фоном `FixedColor` больше не
+происходит, поэтому фиксированные ячейки становятся прозрачными, как остальные.
+
+Сборка и визуальный результат на Windows не проверены.
