@@ -50,6 +50,20 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(f"EnableTabHooks(session.{module}, true, session)", source)
             self.assertIn(f"EnableTabHooks(top.{module}, false, top)", source)
 
+    def test_background_diagnostics_use_existing_handlers(self):
+        root = read("WndCompat/Root/RootSubclass.cpp")
+        lv = read("GlassCore/src/Hooks/ListViewHooks.cpp")
+        self.assertIn('[WndCompat][DelphiMemo] CTLCOLOR', root)
+        self.assertIn('WndCompat::IsWindowClass(child, L"TMemo")', root)
+        self.assertIn('budget = 16', root)
+        self.assertIn('now - epoch >= 1000', root)
+        self.assertIn('LogDelphiMemoCtlColor(hWnd, uMsg', root)
+        self.assertIn('[GlassCore][DelphiListView] Begin', lv)
+        self.assertIn('[GlassCore][DelphiListView] FillRect', lv)
+        self.assertIn('AllowDelphiListViewLog(0)', lv)
+        self.assertIn('AllowDelphiListViewLog(1)', lv)
+        self.assertIn('now - epoch[channel] >= 1000', lv)
+
     def test_tab_brush_is_not_restored_to_another_class(self):
         source = read("WndCompat/Controls/TabControlSubclass.cpp")
         self.assertIn('_wcsicmp(className, L"TPageControl") != 0', source)

@@ -603,6 +603,31 @@ namespace GlassCore::ListViewControl
     //   другой цвет  → заменяем кисть на alpha-aware версию
     // Гистограмма заливок снята (финиш 2026-10-13).
 
+#if defined(_DEBUG)
+    [[nodiscard]] static bool IsDelphiListView(HWND hwnd) noexcept
+    {
+        WCHAR cls[128]{};
+        return hwnd && GetClassNameW(hwnd, cls, _countof(cls)) > 0
+            && (_wcsicmp(cls, L"TListView") == 0 || _wcsicmp(cls, L"TSystemListView") == 0);
+    }
+
+    // Отдельные лимиты для Begin и Fill; возобновляются после очистки лога.
+    [[nodiscard]] static bool AllowDelphiListViewLog(unsigned channel) noexcept
+    {
+        static thread_local ULONGLONG epoch[2]{};
+        static thread_local unsigned budget[2]{};
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch[channel] || now - epoch[channel] >= 1000)
+        {
+            epoch[channel] = now;
+            budget[channel] = 16;
+        }
+        if (!budget[channel]) return false;
+        --budget[channel];
+        return true;
+    }
+#endif
+
     BOOL WINAPI Overall_MyFillRect(HDC hdc, const RECT* lprc, HBRUSH hbr)
     {
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
@@ -620,6 +645,17 @@ namespace GlassCore::ListViewControl
         LOGBRUSH lb{};
         if (GetObject(hbr, sizeof(lb), &lb) && lb.lbStyle == BS_SOLID)
         {
+#if defined(_DEBUG)
+            if (IsDelphiListView(g_lvSessionStack.back().hWnd) && AllowDelphiListViewLog(1))
+            {
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiListView] FillRect hwnd=0x%p dc=0x%p dcWnd=0x%p caller=0x%p "
+                    L"rect=[%ld,%ld,%ld,%ld] style=%u color=0x%08X",
+                    g_lvSessionStack.back().hWnd, hdc, WindowFromDC(hdc), callerMod,
+                    lprc->left, lprc->top, lprc->right, lprc->bottom,
+                    static_cast<unsigned>(lb.lbStyle), static_cast<unsigned>(lb.lbColor));
+            }
+#endif
             const int rcW = lprc->right - lprc->left;
             const int rcH = lprc->bottom - lprc->top;
             const int band = GetScrollBandSizeForDpiCached(hdc);
@@ -1316,11 +1352,19 @@ namespace GlassCore::ListViewControl
         // FIX repaint-storm: слать только при смене значения — comctl инвалидирует
         // список на каждый LVM_SETBKCOLOR, превращая paint в самоподдержку (60fps).
         bool diagFlipped = false;
+#if defined(_DEBUG)
+        COLORREF vclBkBefore = CLR_INVALID;
+        COLORREF vclTextBkBefore = CLR_INVALID;
+#endif
         if (kind == GlassControlKind::ListView)
         {
             // Дефолтный bk сбрасываем в чёрный (прозрачный фон).
             const COLORREF diagBk = ListView_GetBkColor(hWnd);
             const COLORREF diagTBk = ListView_GetTextBkColor(hWnd);
+#if defined(_DEBUG)
+            vclBkBefore = diagBk;
+            vclTextBkBefore = diagTBk;
+#endif
             if (diagBk != 0)
             {
                 ListView_SetBkColor(hWnd, 0);
@@ -1346,6 +1390,15 @@ namespace GlassCore::ListViewControl
         if (g_lvBgPrimed.size() > 512)
             g_lvBgPrimed.clear(); // защита от роста на recycled HWND
         const bool firstPaint = g_lvBgPrimed.insert(hWnd).second;
+#if defined(_DEBUG)
+        if (IsDelphiListView(hWnd) && AllowDelphiListViewLog(0))
+        {
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiListView] Begin hwnd=0x%p caller=0x%p bkBefore=0x%08X textBkBefore=0x%08X flipped=%d first=%d",
+                hWnd, callerMod, static_cast<unsigned>(vclBkBefore), static_cast<unsigned>(vclTextBkBefore),
+                diagFlipped ? 1 : 0, firstPaint ? 1 : 0);
+        }
+#endif
 
         g_lvSessionStack.push_back({ callerMod, kind, hWnd, diagFlipped || firstPaint });
         DebugLog(DBG_NORMAL, L"[GlassCore][ListView] BeginPaint: callerMod=0x%p hWnd=0x%p kind=%d depth=%zu",

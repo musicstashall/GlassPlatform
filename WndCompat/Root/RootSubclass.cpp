@@ -586,6 +586,35 @@ namespace
             pfn(enable ? TRUE : FALSE);
     }
 
+#if defined(_DEBUG)
+    // Диагностика только существующего CTLCOLOR-пути: без Detours/IAT и текста из окна.
+    void LogDelphiMemoCtlColor(HWND parent, UINT msg, HWND child, HDC dc,
+        LRESULT originalBrush, LRESULT resultBrush, COLORREF originalBk, int originalMode) noexcept
+    {
+        if (!child || !WndCompat::IsWindowClass(child, L"TMemo"))
+            return;
+        static thread_local ULONGLONG epoch = 0;
+        static thread_local unsigned budget = 0;
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch || now - epoch >= 1000)
+        {
+            epoch = now;
+            budget = 16;
+        }
+        if (!budget) return;
+        --budget;
+        LOGBRUSH brush{};
+        const bool valid = GetObject(reinterpret_cast<HGDIOBJ>(originalBrush), sizeof(brush), &brush) == sizeof(brush);
+        DebugLog(DBG_NORMAL,
+            L"[WndCompat][DelphiMemo] CTLCOLOR parent=0x%p hwnd=0x%p msg=0x%X focused=%d "
+            L"bk=0x%08X mode=%d brush=0x%p valid=%d style=%u color=0x%08X result=0x%p finalBk=0x%08X",
+            parent, child, msg, GetFocus() == child ? 1 : 0,
+            static_cast<unsigned>(originalBk), originalMode, reinterpret_cast<void*>(originalBrush),
+            valid ? 1 : 0, static_cast<unsigned>(brush.lbStyle), static_cast<unsigned>(brush.lbColor),
+            reinterpret_cast<void*>(resultBrush), static_cast<unsigned>(GetBkColor(dc)));
+    }
+#endif
+
     // BWM WinHandler WM_CTLCOLORSTATIC/LISTBOX — probe кисти через DefSubclassProc + SetBkColor hook.
     [[nodiscard]] bool TryResolveCtlColorStaticBrush(
         HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, LRESULT& outResult) noexcept
@@ -609,6 +638,12 @@ namespace
         SetCtlColorBkColorProbeAttach(true);
         const LRESULT defResult = DefSubclassProc(hWnd, uMsg, wParam, lParam);
         SetCtlColorBkColorProbeAttach(false);
+#if defined(_DEBUG)
+        const HWND memoChild = reinterpret_cast<HWND>(lParam);
+        const bool isMemo = memoChild && WndCompat::IsWindowClass(memoChild, L"TMemo");
+        const COLORREF memoOriginalBk = isMemo ? GetBkColor(hdc) : CLR_INVALID;
+        const int memoOriginalMode = isMemo ? GetBkMode(hdc) : 0;
+#endif
 
         LOGBRUSH lb{};
         if (GetObject(reinterpret_cast<HGDIOBJ>(defResult), sizeof(lb), &lb))
@@ -624,18 +659,30 @@ namespace
                 else
                 {
                     outResult = defResult;
+#if defined(_DEBUG)
+                    LogDelphiMemoCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc,
+                        defResult, outResult, memoOriginalBk, memoOriginalMode);
+#endif
                     return true;
                 }
             }
             else if (lb.lbStyle == BS_NULL && GetBkMode(hdc) == TRANSPARENT)
             {
                 outResult = defResult;
+#if defined(_DEBUG)
+                LogDelphiMemoCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc,
+                    defResult, outResult, memoOriginalBk, memoOriginalMode);
+#endif
                 return true;
             }
         }
 
         SetBkColor(hdc, 0);
         outResult = reinterpret_cast<LRESULT>(GetStockObject(BLACK_BRUSH));
+#if defined(_DEBUG)
+        LogDelphiMemoCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc,
+            defResult, outResult, memoOriginalBk, memoOriginalMode);
+#endif
         return true;
     }
 
@@ -1004,12 +1051,27 @@ namespace
                 break;
 
             // Визуальный стиль устанавливает SetTextColor на DC через DefWindowProc
-            DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            const LRESULT originalBrush = DefSubclassProc(hWnd, uMsg, wParam, lParam);
 
             // Переопределяем только фон для стекла
             HDC hdc = reinterpret_cast<HDC>(wParam);
+#if defined(_DEBUG)
+            const HWND memoChild = reinterpret_cast<HWND>(lParam);
+            const bool isMemo = uMsg == WM_CTLCOLOREDIT && memoChild
+                && WndCompat::IsWindowClass(memoChild, L"TMemo");
+            const COLORREF memoOriginalBk = isMemo ? GetBkColor(hdc) : CLR_INVALID;
+            const int memoOriginalMode = isMemo ? GetBkMode(hdc) : 0;
+#else
+            (void)originalBrush;
+#endif
             SetBkColor(hdc, 0);
-            return reinterpret_cast<LRESULT>(GetStockObject(BLACK_BRUSH));
+            const LRESULT resultBrush = reinterpret_cast<LRESULT>(GetStockObject(BLACK_BRUSH));
+#if defined(_DEBUG)
+            if (isMemo)
+                LogDelphiMemoCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc,
+                    originalBrush, resultBrush, memoOriginalBk, memoOriginalMode);
+#endif
+            return resultBrush;
         }
 
         // ComboLBox / ListBox в Full: как у прочих WM_CTLCOLOR* — сначала Def для SetTextColor темы, потом чёрный фон
