@@ -2,6 +2,7 @@
 
 #include <Hooks/UxThemeHooks.h>
 #include <Hooks/delphi/TBitBtnHooks.h>
+#include <Hooks/delphi/TListBoxDraw.h>
 #include <Core/Intercept/HookDispatcher.h>
 #include <Core/Intercept/HookHelper.h>
 
@@ -452,6 +453,10 @@ namespace GlassCore::Hooks::UxThemeHooks
         LPCRECT pClipRect)
     {
         HRESULT delphiResult = S_OK;
+        if (GlassCore::DelphiListBox::TryCheckListThemeBackground(
+                g_actualDrawThemeBackground, hTheme, hdc, iPartId, iStateId,
+                pRect, pClipRect, delphiResult))
+            return delphiResult;
         if (GlassCore::Button::TryDelphiBitBtnThemeBgDetour(
                 g_actualDrawThemeBackground, hTheme, hdc, iPartId, iStateId,
                 pRect, pClipRect, delphiResult))
