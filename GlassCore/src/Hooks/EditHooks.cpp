@@ -39,6 +39,7 @@
 #include <Subsystems/TextInkClientRegistry.h>
 #include <GlassControlKind.h>
 #include <GlassDelphiMemoBackground.h>
+#include <Hooks/delphi/TInputHooks.h>
 #include <WinApiUtils.h>
 #include <wil.h>
 
@@ -74,6 +75,8 @@ namespace GlassCore::EditControl
         // Заполняется после успешного оригинального BeginPaint, а не при
         // onBegin (внутри BeginPaint может быть вложенный GetDCEx/WM_NCPAINT).
         HDC paintDc = nullptr;
+        bool hotKeyFillHook = false;
+        bool numberBackgroundCleared = false;
     };
 
     thread_local std::vector<EditPaintSession> g_editSessionStack;  // BeginPaint/EndPaint
@@ -905,7 +908,8 @@ namespace GlassCore::EditControl
         // освобождается раньше EndPaint: привязывать к нему буфер нельзя.
         // WindowFromDC не различает эти два DC; используем точный HDC из
         // post-BeginPaint и не переадресуем в буфер чужие/вложенные DC.
-        if (!g_editSessionStack.empty() && IsDelphiMemo(sessionHwnd))
+        if (!g_editSessionStack.empty() && (IsDelphiMemo(sessionHwnd)
+            || GlassCore::DelphiInput::IsSpinEdit(sessionHwnd)))
         {
             const auto& paint = g_editSessionStack.back();
             if (paint.hwnd != sessionHwnd || !paint.paintDc || paint.paintDc != hdc
@@ -922,6 +926,12 @@ namespace GlassCore::EditControl
                 return origW(hdc, x, y, options, lprect, lpString, c, lpDx);
             }
         }
+
+        if (!g_editSessionStack.empty() && c && !g_editSessionStack.back().numberBackgroundCleared
+            && g_editSessionStack.back().hwnd == sessionHwnd
+            && g_editSessionStack.back().paintDc == hdc
+            && GlassCore::DelphiInput::ClearNumberBoxGlyphBackground(sessionHwnd, hdc, lprect, options))
+            g_editSessionStack.back().numberBackgroundCleared = true;
 
         SyncActiveEditBufferDualPassFromGlobals();
 
@@ -1251,6 +1261,14 @@ namespace GlassCore::EditControl
         if (!lprc || !hbr)
             return orig(hdc, lprc, hbr);
 
+        if (!g_editSessionStack.empty())
+        {
+            const auto& paint = g_editSessionStack.back();
+            if (paint.hotKeyFillHook && paint.paintDc == hdc
+                && GlassCore::DelphiInput::ClearHotKeyBackground(paint.hwnd, hdc, lprc, hbr))
+                return TRUE;
+        }
+
         LOGBRUSH lb{};
         if (GetObject(hbr, sizeof(lb), &lb) && lb.lbStyle == BS_SOLID)
         {
@@ -1436,12 +1454,19 @@ namespace GlassCore::EditControl
             L"[GlassCore][Edit] BeginPaint: mod=0x%p hWnd=0x%p kind=%d depth=%zu",
             callerMod, hWnd, static_cast<int>(kind), g_editSessionStack.size());
         EnableEditHooksForModule(callerMod, kind, true);
+        if (callerMod && GlassCore::DelphiInput::IsHotKey(hWnd))
+        {
+            EnableHooksOnModule(callerMod, EHK_FILLRECT, true);
+            g_editSessionStack.back().hotKeyFillHook = true;
+        }
     }
 
     [[nodiscard]] static bool OnEditAfterBeginPaint(
         HWND hWnd, HDC hdc, LPPAINTSTRUCT /*ps*/, HMODULE /*callerMod*/) noexcept
     {
-        if (g_shutdown.load(std::memory_order_acquire) || !hdc || !IsDelphiMemo(hWnd)
+        if (g_shutdown.load(std::memory_order_acquire) || !hdc
+            || (!IsDelphiMemo(hWnd) && !GlassCore::DelphiInput::IsSpinEdit(hWnd)
+                && !GlassCore::DelphiInput::IsNumberBox(hWnd) && !GlassCore::DelphiInput::IsHotKey(hWnd))
             || g_editSessionStack.empty() || g_editSessionStack.back().hwnd != hWnd)
             return false;
         g_editSessionStack.back().paintDc = hdc;
@@ -1465,6 +1490,7 @@ namespace GlassCore::EditControl
 
         const EditPaintSession s = g_editSessionStack.back();
         g_editSessionStack.pop_back();
+        if (s.hotKeyFillHook) EnableHooksOnModule(s.mod, EHK_FILLRECT, false);
         EnableEditHooksForModule(s.mod, s.kind, false);
         DebugLog(DBG_NORMAL, L"[GlassCore][Edit] EndPaint: hWnd=0x%p depth=%zu",
             hWnd, g_editSessionStack.size());

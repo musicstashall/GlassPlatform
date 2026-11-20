@@ -33,6 +33,7 @@
 #include <Tracker/WinEventHandler.h>
 #include <GlassControlKind.h>
 #include <GlassDelphiMemoBackground.h>
+#include <GlassDelphiInputBackground.h>
 #include <GlassComctlScrollHost.h>
 #include <InjectionMode.h>
 #include <Helpers/ThemeHelper.h>
@@ -616,6 +617,19 @@ namespace
     }
 #endif
 
+    static void CaptureNumberBoxDefaultBackground(HWND child, HDC dc, LRESULT brush) noexcept
+    {
+        if (!child || !dc || !WndCompat::IsWindowClass(child, L"TNumberBox")) return;
+        LOGBRUSH lb{};
+        const bool solid = GetObjectW(reinterpret_cast<HGDIOBJ>(brush), sizeof(lb), &lb) == sizeof(lb)
+            && lb.lbStyle == BS_SOLID && GetBkMode(dc) == OPAQUE;
+        const COLORREF color = lb.lbColor & 0xFFFFFFu;
+        const bool isDefault = solid && color == (GetBkColor(dc) & 0xFFFFFFu)
+            && (color == (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)
+                || color == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu));
+        GlassShared::SetDelphiInputDefaultBackground(child, isDefault);
+    }
+
 #if defined(_DEBUG)
     static void LogDelphiInputCtlColor(HWND parent, UINT msg, HWND child, HDC dc, LRESULT brush) noexcept
     {
@@ -663,6 +677,8 @@ namespace
         SetCtlColorBkColorProbeAttach(true);
         const LRESULT defResult = DefSubclassProc(hWnd, uMsg, wParam, lParam);
         SetCtlColorBkColorProbeAttach(false);
+        if (uMsg == WM_CTLCOLORSTATIC)
+            CaptureNumberBoxDefaultBackground(reinterpret_cast<HWND>(lParam), hdc, defResult);
 #if defined(_DEBUG)
         LogDelphiInputCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc, defResult);
         const HWND memoChild = reinterpret_cast<HWND>(lParam);
@@ -1100,6 +1116,8 @@ namespace
 
             // Переопределяем только фон для стекла
             HDC hdc = reinterpret_cast<HDC>(wParam);
+            if (uMsg == WM_CTLCOLOREDIT)
+                CaptureNumberBoxDefaultBackground(reinterpret_cast<HWND>(lParam), hdc, originalBrush);
 #if defined(_DEBUG)
             if (uMsg == WM_CTLCOLOREDIT)
                 LogDelphiInputCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc, originalBrush);
