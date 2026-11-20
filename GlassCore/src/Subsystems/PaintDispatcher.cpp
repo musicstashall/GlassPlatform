@@ -663,6 +663,18 @@ namespace GlassCore::PaintDispatcher
         return false;
     }
 
+    bool IsCurrentPaintDcForHwnd(HWND hWnd, HDC hdc) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || !hWnd || !hdc)
+            return false;
+        for (auto it = g_dcStack.rbegin(); it != g_dcStack.rend(); ++it)
+        {
+            if (it->hDC == hdc)
+                return it->hWnd == hWnd && it->type == DcEntryType::Paint;
+        }
+        return false;
+    }
+
     // Tier-1: владелец memory-DC из стека текущего потока (см. PaintDispatcher.h).
     HWND GetStackOwnerForDc(HDC hdc) noexcept
     {

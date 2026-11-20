@@ -76,6 +76,29 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('const bool isDib = composeBits != nullptr', source)
         self.assertIn('buf->height, &composeBits)', source)
 
+    def test_memo_buffer_uses_live_beginpaint_dc(self):
+        source = read("GlassCore/src/Hooks/EditHooks.cpp")
+        core = source.split("static BOOL Edit_WorkExtTextOutCore(", 1)[1].split("SyncActiveEditBufferDualPassFromGlobals();", 1)[0]
+        self.assertIn('!g_editSessionStack.empty() && IsDelphiMemo(sessionHwnd)', core)
+        for guard in ('paint.hwnd != sessionHwnd', '!paint.paintDc', 'paint.paintDc != hdc',
+                      'IsCurrentPaintDcForHwnd(sessionHwnd, hdc)',
+                      'g_activeEditBuffer->screenDC != paint.paintDc'):
+            self.assertIn(guard, core)
+        self.assertIn('return origW(hdc, x, y, options, lprect, lpString, c, lpDx);', core)
+        post = source.split('static bool OnEditAfterBeginPaint(', 1)[1].split('static void OnEndPaintEdit(', 1)[0]
+        self.assertIn('!IsDelphiMemo(hWnd)', post)
+        self.assertIn('g_editSessionStack.back().hwnd != hWnd', post)
+        self.assertIn('g_editSessionStack.back().paintDc = hdc;', post)
+        self.assertIn('return false;', post)
+        self.assertIn('RegisterPostPaintProvider({ OnEditAfterBeginPaint })', source)
+        dispatcher = read('GlassCore/src/Subsystems/PaintDispatcher.cpp')
+        lookup = dispatcher.split('bool IsCurrentPaintDcForHwnd(', 1)[1].split('// Tier-1:', 1)[0]
+        self.assertIn('g_dcStack.rbegin()', lookup)
+        self.assertIn('if (it->hDC == hdc)', lookup)
+        self.assertIn('it->hWnd == hWnd && it->type == DcEntryType::Paint', lookup)
+        self.assertIn('[GlassCore][DelphiMemo] BufferTarget', source)
+        self.assertIn('[GlassCore][DelphiMemo] ComposeFallback', source)
+
     def test_memo_dib_is_scoped_and_listview_black_brush_is_preserved(self):
         edit = read("GlassCore/src/Hooks/EditHooks.cpp")
         self.assertIn('buf->delphiMemo = IsDelphiMemo(hWnd)', edit)

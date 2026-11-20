@@ -84,6 +84,9 @@ namespace GlassCore::PaintDispatcher
     // У MEMDC WindowFromDC часто NULL — для сессионного буфера Edit сверяем hdc с этим стеком.
     [[nodiscard]] bool IsPaintStackDcForHwnd(HWND hWnd, HDC hdc) noexcept;
 
+    // Ближайшая запись именно этого HDC — BeginPaint данного окна, не вложенный GetDC.
+    [[nodiscard]] bool IsCurrentPaintDcForHwnd(HWND hWnd, HDC hdc) noexcept;
+
     // Tier-1: владелец memory-DC из стека текущего потока (обратный поиск hdc→hWnd, от свежих к старым).
     // Закрывает buffered-рисование вне активной BeginPaint-сессии без глобального мапа.
     // Только свой поток; кросс-поток здесь не виден (см. HwndFromDcOrMmcSession в RootGdiHooks).

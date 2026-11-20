@@ -70,6 +70,9 @@ namespace GlassCore::EditControl
         HWND    hwnd;
         HMODULE mod;
         GlassShared::GlassControlKind kind;
+        // Заполняется после успешного оригинального BeginPaint, а не при
+        // onBegin (внутри BeginPaint может быть вложенный GetDCEx/WM_NCPAINT).
+        HDC paintDc = nullptr;
     };
 
     thread_local std::vector<EditPaintSession> g_editSessionStack;  // BeginPaint/EndPaint
@@ -345,6 +348,11 @@ namespace GlassCore::EditControl
             static_cast<int>(buf->useDualPass),
             static_cast<int>(fromGetDC),
             buf->bgSnapshot ? 1 : 0);
+#if defined(_DEBUG)
+        if (buf->delphiMemo && AllowDelphiMemoLog(hWnd, 1))
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] BufferTarget hwnd=0x%p screenDc=0x%p paintDc=0x%p memDc=0x%p",
+                hWnd, screenDC, g_editSessionStack.empty() ? nullptr : g_editSessionStack.back().paintDc, memDC);
+#endif
     }
 
     // ── FlushEditBuffer ─────────────────────────────────────────────────────
@@ -480,6 +488,11 @@ namespace GlassCore::EditControl
         // Fallback если compose DC не создался
         if (!composed)
         {
+#if defined(_DEBUG)
+            if (logMemoFlush)
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] ComposeFallback hwnd=0x%p screenDc=0x%p",
+                    buf->hWnd, buf->screenDC);
+#endif
             for (RECT r : g_sessionBlacknessRects)
             {
                 if (editStyle == kEditStyleInsetTextRect)
@@ -771,6 +784,29 @@ namespace GlassCore::EditControl
         HMODULE callerMod, decltype(&ExtTextOutW) origW)
     {
         const GlassShared::GlassControlKind controlKind = GlassShared::GlassGetWindowKind(sessionHwnd);
+
+        // В VCL TMemo BeginPaint может синхронно вызвать WM_NCPAINT и GetDCEx
+        // с DCX_WINDOW до того, как вернёт клиентский HDC. Этот временный DC
+        // освобождается раньше EndPaint: привязывать к нему буфер нельзя.
+        // WindowFromDC не различает эти два DC; используем точный HDC из
+        // post-BeginPaint и не переадресуем в буфер чужие/вложенные DC.
+        if (!g_editSessionStack.empty() && IsDelphiMemo(sessionHwnd))
+        {
+            const auto& paint = g_editSessionStack.back();
+            if (paint.hwnd != sessionHwnd || !paint.paintDc || paint.paintDc != hdc
+                || !GlassCore::PaintDispatcher::IsCurrentPaintDcForHwnd(sessionHwnd, hdc)
+                || (g_activeEditBuffer && (g_activeEditBuffer->hWnd != sessionHwnd
+                    || g_activeEditBuffer->screenDC != paint.paintDc)))
+            {
+#if defined(_DEBUG)
+                if (AllowDelphiMemoLog(sessionHwnd, 0))
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][DelphiMemo] NonPaintPass hwnd=0x%p dc=0x%p paintHwnd=0x%p paintDc=0x%p options=0x%X count=%u",
+                        sessionHwnd, hdc, paint.hwnd, paint.paintDc, options, c);
+#endif
+                return origW(hdc, x, y, options, lprect, lpString, c, lpDx);
+            }
+        }
 
         SyncActiveEditBufferDualPassFromGlobals();
 
@@ -1271,6 +1307,21 @@ namespace GlassCore::EditControl
         EnableEditHooksForModule(callerMod, kind, true);
     }
 
+    [[nodiscard]] static bool OnEditAfterBeginPaint(
+        HWND hWnd, HDC hdc, LPPAINTSTRUCT /*ps*/, HMODULE /*callerMod*/) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || !hdc || !IsDelphiMemo(hWnd)
+            || g_editSessionStack.empty() || g_editSessionStack.back().hwnd != hWnd)
+            return false;
+        g_editSessionStack.back().paintDc = hdc;
+#if defined(_DEBUG)
+        if (AllowDelphiMemoLog(hWnd, 1))
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] PaintBind hwnd=0x%p dc=0x%p depth=%zu",
+                hWnd, hdc, g_editSessionStack.size());
+#endif
+        return false; // только связываем HDC, фон не очищаем
+    }
+
     static void OnEndPaintEdit(HWND hWnd, HMODULE /*callerMod*/)
     {
         using namespace GlassShared;
@@ -1381,6 +1432,7 @@ namespace GlassCore::EditControl
     void Startup()
     {
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintEdit, OnEndPaintEdit });
+        GlassCore::PaintDispatcher::RegisterPostPaintProvider({ OnEditAfterBeginPaint });
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ OnGetDCEdit, OnReleaseDCEdit });
         PrewarmModule(GetModuleHandleW(L"user32.dll"));
         PrewarmModule(GetModuleHandleW(L"gdi32full.dll"));
