@@ -595,7 +595,7 @@ class DelphiPipelineContract(unittest.TestCase):
                       'L"TShownValueList"', 'L"TStringGrid"', 'L"TDrawGrid"',
                       'TA_UPDATECP', 'ETO_GLYPH_INDEX', 'ETO_PDY',
                       'lb.lbStyle == BS_SOLID',
-                      'plainFill == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)', 'L"Header"',
+                      'fillColor == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)', 'L"Header"',
                       'ExtTextOutWithAlpha', 'return orig('):
             self.assertIn(guard, grid)
         self.assertIn('options == ETO_CLIPPED && rect && rect->top == 0', grid)
@@ -754,13 +754,21 @@ class DelphiPipelineContract(unittest.TestCase):
                        'return o(RGB(0, 0, 0))',
                        'kDelphiGridCellAlpha', 'return o(color)'):
             self.assertIn(marker, brush)
-        # COLOR_WINDOW → 0, остальные цвета → низкая альфа (не 255).
+        # COLOR_WINDOW → 0; альфа для цветных ячеек делается на заливке
+        # (pattern-кисть через FillRect альфу не переносит).
         self.assertIn('constexpr BYTE kDelphiGridCellAlpha = 12;', root)
-        self.assertIn('CreateSolidColorBrushWithAlpha(', brush)
-        self.assertNotIn(', 255)', brush)
+        self.assertNotIn('CreateSolidColorBrushWithAlpha', brush)
         syscolor = root.split('HBRUSH WINAPI Root_MyGetSysColorBrush(int nIndex)', 1)[1].split('HBRUSH WINAPI Root_MyCreateSolidBrush', 1)[0]
-        for marker in ('IsDelphiGridClass(hostCls)', 'nIndex == COLOR_BTNFACE', 'kDelphiGridCellAlpha'):
+        for marker in ('IsDelphiGridClass(hostCls)', 'nIndex == COLOR_WINDOW'):
             self.assertIn(marker, syscolor)
+        self.assertNotIn('CreateSolidColorBrushWithAlpha', syscolor)
+        # Очистка чёрным, затем AlphaBlend цветной подложки.
+        for marker in ('static bool FillRectWithAlphaBlend(',
+                       'GdiAlphaBlend(dc, rect->left, rect->top, w, h, mem, 0, 0, 1, 1, bf)',
+                       'AC_SRC_ALPHA', 'const bool cleared = PatBlt(dc, rect->left, rect->top, w, h, BLACKNESS)',
+                       'FillRectWithAlphaBlend(dc, rect, fillColor, kDelphiGridCellAlpha)',
+                       'AlphaFill hwnd=0x%p'):
+            self.assertIn(marker, root)
         fill = root.split('int WINAPI Root_MyDelphiGridFill(HDC dc', 1)[1].split('HRESULT WINAPI Root_MyDelphiGridTheme', 1)[0]
         for marker in ('[GlassCore][DelphiGrid] Fill', 'color=0x%08X', 'brush=%d'):
             self.assertIn(marker, fill)

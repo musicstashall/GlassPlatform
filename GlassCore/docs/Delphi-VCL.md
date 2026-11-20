@@ -1943,3 +1943,26 @@ COLOR_WINDOW→0`, `WhiteFill` ячеек, `Text` с `hr=0x0`. Правки по
 Сборка и визуальный результат на Windows не проверены. Если 12 окажется мало
 или много — это одна константа `kDelphiGridCellAlpha` в `RootGdiHooks.cpp`
 (было 35, стало 12).
+
+## Тест 52: чёрная очистка + AlphaBlend для цветных ячеек
+
+Скриншот «и это при альфе 12?» показал, что цветные ячейки остаются плотными:
+`FillRect` с pattern-кистью (`CreateSolidColorBrushWithAlpha`) **не переносит
+альфу** — GDI пишет RGB и делает пиксель непрозрачным. Поэтому alpha-кисти для
+фона таблиц больше не создаются (`Root_MyCreateSolidBrush` /
+`Root_MyGetSysColorBrush` отдают обычную/системную кисть, `COLOR_WINDOW` → 0).
+
+Новый порядок в `Root_MyDelphiGridFill` для сплошной кисти:
+
+1. прямоугольник очищается `PatBlt(BLACKNESS)` — прозрачный фон;
+2. если цвет отличается от `COLOR_WINDOW` — поверх кладётся цветная подложка
+   через `FillRectWithAlphaBlend` (1×1 premultiplied DIB + `GdiAlphaBlend` с
+   `AC_SRC_ALPHA`), альфа `kDelphiGridCellAlpha = 12`.
+
+Так цвет ячейки одновременно отличается от общего фона и просвечивает, а не
+смешивается со старым содержимым (что и давало «плотный» цвет). Стоковые кисти
+`GetSysColorBrush(COLOR_WINDOW/COLOR_BTNFACE)` распознаются по хэндлу, потому что
+`GetObject` для них не работает. В журнале: `WhiteFill` (только очистка) или
+`AlphaFill … color=0x… alpha=12`.
+
+Сборка и визуальный результат на Windows не проверены.
