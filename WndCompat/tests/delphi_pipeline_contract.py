@@ -595,7 +595,7 @@ class DelphiPipelineContract(unittest.TestCase):
                       'L"TShownValueList"', 'L"TStringGrid"', 'L"TDrawGrid"',
                       'TA_UPDATECP', 'ETO_GLYPH_INDEX', 'ETO_PDY',
                       'lb.lbStyle == BS_SOLID',
-                      'fillColor == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)', 'L"Header"',
+                      'ApplyDelphiGridCellBackground(dc, rect, GetBkColor(dc))', 'L"Header"',
                       'ExtTextOutWithAlpha', 'return orig('):
             self.assertIn(guard, grid)
         self.assertIn('options == ETO_CLIPPED && rect && rect->top == 0', grid)
@@ -765,8 +765,12 @@ class DelphiPipelineContract(unittest.TestCase):
         # Очистка чёрным, затем AlphaBlend цветной подложки.
         for marker in ('static bool FillRectWithAlphaBlend(',
                        'GdiAlphaBlend(dc, rect->left, rect->top, w, h, mem, 0, 0, 1, 1, bf)',
-                       'AC_SRC_ALPHA', 'const bool cleared = PatBlt(dc, rect->left, rect->top, w, h, BLACKNESS)',
-                       'FillRectWithAlphaBlend(dc, rect, fillColor, kDelphiGridCellAlpha)',
+                       'AC_SRC_ALPHA',
+                       'static bool ApplyDelphiGridCellBackground(',
+                       'rect->bottom - rect->top, BLACKNESS)',
+                       'return FillRectWithAlphaBlend(dc, rect, color, kDelphiGridCellAlpha)',
+                       'ApplyDelphiGridCellBackground(dc, rect, fillColor)',
+                       'ApplyDelphiGridCellBackground(dc, rect, GetBkColor(dc))',
                        'AlphaFill hwnd=0x%p'):
             self.assertIn(marker, root)
         fill = root.split('int WINAPI Root_MyDelphiGridFill(HDC dc', 1)[1].split('HRESULT WINAPI Root_MyDelphiGridTheme', 1)[0]

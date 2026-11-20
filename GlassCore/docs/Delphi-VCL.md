@@ -1965,3 +1965,20 @@ COLOR_WINDOW→0`, `WhiteFill` ячеек, `Text` с `hr=0x0`. Правки по
 `AlphaFill … color=0x… alpha=35`.
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 53: текст с ETO_OPAQUE больше не стирает цветную подложку
+
+После теста 52 цветные ячейки оставались невидимыми. Причина — порядок вызовов
+VCL: в журнале 12 `WhiteFill`/`Fill` ячейки идёт **до** `Text`, а текст приходит
+с `options=0x6` (`ETO_OPAQUE|ETO_CLIPPED`). Старая ветка `ETO_OPAQUE` делала
+`PatBlt(BLACKNESS)` по прямоугольнику и стирала только что нарисованную подложку.
+
+Теперь обе ветки используют одну функцию `ApplyDelphiGridCellBackground`:
+1. `PatBlt(BLACKNESS)` — прозрачный фон;
+2. если цвет (кисти или текущий `BkColor` для `ETO_OPAQUE`) не `COLOR_WINDOW` —
+   `FillRectWithAlphaBlend` с `kDelphiGridCellAlpha` (35).
+
+`ETO_OPAQUE` снимается перед `ExtTextOutWithAlpha`, поэтому текст ложится поверх
+подложки, а не поверх чёрного. Проверка: цветные ячейки `TDrawGrid` и
+фиксированные строка/колонка `TStringGrid` должны быть видны как лёгкая
+подложка. Сборка и визуальный результат на Windows не проверены.

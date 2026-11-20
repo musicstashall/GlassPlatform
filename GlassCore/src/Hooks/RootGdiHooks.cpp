@@ -950,6 +950,21 @@ namespace GlassCore::Root
             return ok != FALSE;
         }
 
+        // Фон ячейки таблицы: сначала чёрная очистка (прозрачность), затем —
+        // если цвет не COLOR_WINDOW — цветная подложка с альфой.
+        static bool ApplyDelphiGridCellBackground(HDC dc, const RECT* rect, COLORREF color) noexcept
+        {
+            if (!dc || !rect || IsRectEmpty(rect))
+                return false;
+            if (!PatBlt(dc, rect->left, rect->top, rect->right - rect->left,
+                    rect->bottom - rect->top, BLACKNESS))
+                return false;
+            const COLORREF plain = color & 0xFFFFFF;
+            if (!plain || plain == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF))
+                return true;
+            return FillRectWithAlphaBlend(dc, rect, color, kDelphiGridCellAlpha);
+        }
+
         static bool IsDelphiGridPaintDC(HDC dc) noexcept
         {
             const HWND hwnd = dc ? WindowFromDC(dc) : nullptr;
@@ -1003,9 +1018,11 @@ namespace GlassCore::Root
 #endif
                 (void)cleared;
             }
-            if ((options & ETO_OPAQUE) && !IsRectEmpty(rect)
-                && !PatBlt(dc, rect->left, rect->top, rect->right - rect->left,
-                    rect->bottom - rect->top, BLACKNESS))
+            // ETO_OPAQUE заливает фон под текстом цветом текущего BkColor.
+            // Раньше здесь был только BLACKNESS — он стирал цветную подложку,
+            // нарисованную FillRect до текста (ячейки становились невидимыми).
+            if ((options & ETO_OPAQUE) && (!rect || IsRectEmpty(rect)
+                || !ApplyDelphiGridCellBackground(dc, rect, GetBkColor(dc))))
                 return orig(dc, x, y, options, rect, text, count, dx);
             if (!count) return TRUE;
             if (!text) return orig(dc, x, y, options, rect, text, count, dx);
@@ -1050,35 +1067,26 @@ namespace GlassCore::Root
                 }
             }
 
-            if (rect && !IsRectEmpty(rect) && solid)
+            if (rect && !IsRectEmpty(rect) && solid
+                && ApplyDelphiGridCellBackground(dc, rect, fillColor))
             {
-                const int w = rect->right - rect->left;
-                const int h = rect->bottom - rect->top;
-                // Сначала очищаем чёрным (прозрачный фон), только потом —
-                // цветная подложка с альфой. Иначе AlphaBlend ложится поверх
-                // старого содержимого и цвет получается плотным.
-                const bool cleared = PatBlt(dc, rect->left, rect->top, w, h, BLACKNESS) != FALSE;
-                if (cleared && (!fillColor || fillColor == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)))
-                {
 #if defined(_DEBUG)
-                    if (AllowDelphiGridLog(1))
-                        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] WhiteFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X",
-                            WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
-                            static_cast<unsigned>(fillColor));
-#endif
-                    return 1;
-                }
-                if (cleared && FillRectWithAlphaBlend(dc, rect, fillColor, kDelphiGridCellAlpha))
+                if (AllowDelphiGridLog(1))
                 {
-#if defined(_DEBUG)
-                    if (AllowDelphiGridLog(1))
+                    const COLORREF plain = fillColor & 0xFFFFFF;
+                    const bool tinted = plain && plain != (GetSysColor(COLOR_WINDOW) & 0xFFFFFF);
+                    if (tinted)
                         DebugLog(DBG_NORMAL,
                             L"[GlassCore][DelphiGrid] AlphaFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X alpha=%u",
                             WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
                             static_cast<unsigned>(fillColor), static_cast<unsigned>(kDelphiGridCellAlpha));
-#endif
-                    return 1;
+                    else
+                        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] WhiteFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X",
+                            WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
+                            static_cast<unsigned>(fillColor));
                 }
+#endif
+                return 1;
             }
 #if defined(_DEBUG)
             // Диагностика: чем именно закрашивается фон (например, заголовок
