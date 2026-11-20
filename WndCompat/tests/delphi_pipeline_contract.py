@@ -795,5 +795,13 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertLess(erase.index('L"TStringGrid"'),
                         erase.index('GlassIsBackdropAllowedForHwnd'))
 
+    def test_delphi_grid_clears_repaint_area_after_beginpaint(self):
+        root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
+        body = root.split('Root_OnDelphiGridAfterBeginPaint(', 1)[1].split('static void EnableSpecs', 1)[0]
+        for marker in ('IsRectEmpty(&ps->rcPaint)', 'L"TStringGrid"', 'L"TDrawGrid"',
+                       'L"TShownValueList"', 'BLACKNESS', 'return ok != FALSE;'):
+            self.assertIn(marker, body)
+        self.assertIn('RegisterPostPaintProvider({ Root_OnDelphiGridAfterBeginPaint })', root)
+
 if __name__ == "__main__":
     unittest.main()
