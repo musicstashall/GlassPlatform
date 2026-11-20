@@ -65,15 +65,20 @@ namespace GlassCore::TreeViewControl
     //  Helpers
     // =========================================================================
 
+    [[nodiscard]] static bool IsDelphiTreeView(HWND hwnd) noexcept
+    {
+        WCHAR cls[128]{};
+        return hwnd && GetClassNameW(hwnd, cls, _countof(cls)) > 0
+            && (_wcsicmp(cls, L"TTreeView") == 0 || _wcsicmp(cls, L"TResTreeView") == 0);
+    }
+
 #if defined(_DEBUG)
     [[nodiscard]] static bool AllowDelphiTreeLog(HWND hwnd, unsigned channel) noexcept
     {
-        WCHAR cls[128]{};
-        if (!hwnd || GetClassNameW(hwnd, cls, _countof(cls)) <= 0
-            || (_wcsicmp(cls, L"TTreeView") != 0 && _wcsicmp(cls, L"TResTreeView") != 0))
+        if (!IsDelphiTreeView(hwnd))
             return false;
-        static thread_local ULONGLONG epoch[2]{};
-        static thread_local unsigned budget[2]{};
+        static thread_local ULONGLONG epoch[3]{};
+        static thread_local unsigned budget[3]{};
         const ULONGLONG now = GetTickCount64();
         if (!epoch[channel] || now - epoch[channel] >= 1000)
         {
@@ -702,6 +707,29 @@ namespace GlassCore::TreeViewControl
         //DebugLog(DBG_NORMAL, L"[GlassCore][TreeView] EndPaint: hWnd=0x%p depth=%zu", hWnd, g_treeSessionStack.size());
     }
 
+    // Очистка только update region на клиентском DC после настоящего BeginPaint;
+    // чужие TreeView и произвольные оконные/memory DC не затрагиваем.
+    [[nodiscard]] static bool OnDelphiTreeAfterBeginPaint(
+        HWND hWnd, HDC hdc, LPPAINTSTRUCT ps, HMODULE /*callerMod*/) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || !hdc || !ps
+            || IsRectEmpty(&ps->rcPaint) || g_treeSessionStack.empty()
+            || g_treeSessionStack.back().hWnd != hWnd
+            || !IsDelphiTreeView(hWnd))
+            return false;
+        const BOOL cleared = PatBlt(hdc, ps->rcPaint.left, ps->rcPaint.top,
+            ps->rcPaint.right - ps->rcPaint.left, ps->rcPaint.bottom - ps->rcPaint.top,
+            BLACKNESS);
+#if defined(_DEBUG)
+        if (AllowDelphiTreeLog(hWnd, 2))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiTreeView] PostBegin hwnd=0x%p rect=[%ld,%ld,%ld,%ld] erase=%d cleared=%d",
+                hWnd, ps->rcPaint.left, ps->rcPaint.top, ps->rcPaint.right, ps->rcPaint.bottom,
+                ps->fErase ? 1 : 0, cleared ? 1 : 0);
+#endif
+        return cleared != FALSE;
+    }
+
     // =========================================================================
     //  Lifecycle
     // =========================================================================
@@ -743,6 +771,7 @@ namespace GlassCore::TreeViewControl
     void Startup()
     {
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintGlobal, OnEndPaintGlobal });
+        GlassCore::PaintDispatcher::RegisterPostPaintProvider({ OnDelphiTreeAfterBeginPaint });
 
         PrewarmModule(GlassCore::ModuleHandler::g_comctl32New);
         PrewarmModule(GlassCore::ModuleHandler::g_comctl32Legacy);

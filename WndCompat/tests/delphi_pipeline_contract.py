@@ -100,6 +100,23 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('AllowDelphiTreeLog(g_treeSessionStack.back().hWnd, 1)', tree)
         self.assertIn('now - epoch[channel] >= 1000', tree)
 
+    def test_vcl_scroll_cleanup_uses_post_begin_paint_dc(self):
+        lv = read("GlassCore/src/Hooks/ListViewHooks.cpp")
+        post = lv.split('static bool OnListViewAfterBeginPaint', 1)[1].split('//  Lifecycle', 1)[0]
+        self.assertIn('g_lvSessionStack.back().hWnd != hWnd', post)
+        self.assertIn('session.needBlackout || session.vclListView', post)
+        self.assertIn('PatBlt(hdc,', post)
+        self.assertIn('ps->rcPaint.right - ps->rcPaint.left', post)
+        self.assertIn('if (!cleared)', post)
+        self.assertIn('const bool vclListView = IsDelphiListView(hWnd)', lv)
+        tree = read("GlassCore/src/Hooks/TreeViewHooks.cpp")
+        post = tree.split('static bool OnDelphiTreeAfterBeginPaint', 1)[1].split('//  Lifecycle', 1)[0]
+        for guard in ('g_treeSessionStack.back().hWnd != hWnd', '!IsDelphiTreeView(hWnd)',
+                      'IsRectEmpty(&ps->rcPaint)', 'return cleared != FALSE'):
+            self.assertIn(guard, post)
+        self.assertIn('PatBlt(hdc, ps->rcPaint.left, ps->rcPaint.top', post)
+        self.assertIn('RegisterPostPaintProvider({ OnDelphiTreeAfterBeginPaint })', tree)
+
     def test_tab_brush_is_not_restored_to_another_class(self):
         source = read("WndCompat/Controls/TabControlSubclass.cpp")
         self.assertIn('_wcsicmp(className, L"TPageControl") != 0', source)
