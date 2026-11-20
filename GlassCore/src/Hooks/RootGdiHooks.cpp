@@ -885,6 +885,15 @@ namespace GlassCore::Root
 
         // IAT является общим для процесса: не изменять чужой DC или memory DC,
         // даже если они вызваны во время paint этой таблицы.
+        // VCL-таблицы рисуют себя сами из EXE (TCustomGrid.WMPaint → TCanvas):
+        // TShownValueList (msinfo), TStringGrid/TDrawGrid — одна и та же процедура.
+        [[nodiscard]] static bool IsDelphiGridClass(const wchar_t* cls) noexcept
+        {
+            return StrEqI(cls, L"TShownValueList")
+                || StrEqI(cls, L"TStringGrid")
+                || StrEqI(cls, L"TDrawGrid");
+        }
+
         static bool IsDelphiGridPaintDC(HDC dc) noexcept
         {
             const HWND hwnd = dc ? WindowFromDC(dc) : nullptr;
@@ -892,7 +901,7 @@ namespace GlassCore::Root
                 || GlassCore::PaintDispatcher::IsForeignPaintBarrierActive())
                 return false;
             wchar_t cls[128]{};
-            return GetClassNameW(hwnd, cls, _countof(cls)) && StrEqI(cls, L"TShownValueList");
+            return GetClassNameW(hwnd, cls, _countof(cls)) && IsDelphiGridClass(cls);
         }
 
 #if defined(_DEBUG)

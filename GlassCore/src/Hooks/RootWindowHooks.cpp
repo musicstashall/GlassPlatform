@@ -585,10 +585,13 @@ namespace GlassCore::Root
                 PushDc(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache);
             }
 
-            // TShownValueList рисует ячейки и свой Header сам, не через SysHeader32.
+            // VCL-таблицы (TShownValueList, TStringGrid, TDrawGrid) рисуют ячейки
+            // и свой Header сами, не через SysHeader32: TCustomGrid.WMPaint из EXE.
             // Набор только на время WM_PAINT; тела проверяют окно и DC.
             if (instMod == GlassCore::ModuleHandler::g_entryPointModule
-                && StrEqI(cls, L"TShownValueList"))
+                && (StrEqI(cls, L"TShownValueList")
+                    || StrEqI(cls, L"TStringGrid")
+                    || StrEqI(cls, L"TDrawGrid")))
             {
                 PushPaint(instMod, OHK_DELPHI_GRID_TEXT, cache);
                 PushPaint(instMod, OHK_DELPHI_GRID_FILL, cache);
