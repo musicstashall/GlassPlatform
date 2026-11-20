@@ -626,8 +626,16 @@ class DelphiPipelineContract(unittest.TestCase):
         combo = read('GlassCore/src/Hooks/ComboBoxControlHooks.cpp')
         for marker in ('BeginPaint session skip', 'active-session', 'caller-not-comctl32',
                        'comctl-module-unresolved', 'g_activePaintMod',
-                       'DTB(вне сессии)', 'wndClass=%s'):
+                       'DTB(вне сессии)', 'wndClass=%s',
+                       'IsNativeComboBoxClass', 'StrEq(cls, L"ComboBox")',
+                       'appPaintedNative', 'source=app-iat',
+                       'OnHotBeginGlobal'):
             self.assertIn(marker, combo)
+        native = combo.split('BeginPaint session skip', 1)[1].split('static void OnEndPaintGlobal', 1)[0]
+        self.assertIn('callerMod == entryPoint', native)
+        self.assertNotIn('IsNativeComboBoxClass(hWnd) ||', native)
+        for marker in ('L"opaque"', 'L"text"', 'L"drawtext"'):
+            self.assertIn(marker, draw)
 
     def test_vcl_combo_classification_and_combo_alpha_paths(self):
         classifier = read('WndCompat/Tracker/WindowClassifier.cpp')

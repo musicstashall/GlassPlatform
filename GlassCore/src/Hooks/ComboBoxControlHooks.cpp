@@ -122,6 +122,16 @@ namespace GlassCore::ComboBoxControl
 
         static bool CbxSessionActive() noexcept { return g_activePaintMod != nullptr || g_activeHotMod != nullptr; }
 
+        // A window of the predefined class "ComboBox" may be painted by the host
+        // application instead of comctl32 (LogViewer-8: BeginPaint caller == EXE).
+        // Only this exact class is allowed to open a session from the EXE IAT.
+        [[nodiscard]] static bool IsNativeComboBoxClass(HWND hWnd) noexcept
+        {
+            wchar_t cls[64]{};
+            return hWnd && GetClassNameW(hWnd, cls, _countof(cls))
+                && StrEq(cls, L"ComboBox");
+        }
+
         // Имя caller-модуля без пути — узкая проверка своих сценариев (паритет ListView/ComboLBox).
         [[nodiscard]] static bool CallerBaseIs(HMODULE caller, LPCWSTR base) noexcept
         {
@@ -924,13 +934,17 @@ namespace GlassCore::ComboBoxControl
 
             auto* g_new = GlassCore::ModuleHandler::g_comctl32New;
             auto* g_legacy = GlassCore::ModuleHandler::g_comctl32Legacy;
-            if (callerMod != g_new && callerMod != g_legacy)
+            HMODULE entryPoint = GlassCore::ModuleHandler::g_entryPointModule;
+            const bool appPaintedNative =
+                callerMod && callerMod == entryPoint && IsNativeComboBoxClass(hWnd);
+            if (callerMod != g_new && callerMod != g_legacy && !appPaintedNative)
             {
                 logSkip(L"caller-not-comctl32");
                 return;
             }
 
-            const HMODULE comctlMod = ResolveComboComctlHookModule(callerMod);
+            const HMODULE comctlMod = appPaintedNative
+                ? entryPoint : ResolveComboComctlHookModule(callerMod);
             if (!comctlMod)
             {
                 logSkip(L"comctl-module-unresolved");
@@ -942,6 +956,16 @@ namespace GlassCore::ComboBoxControl
             g_activePaintMod = comctlMod;
             g_comboHwnd = hWnd;
             EnableComboBoxHooksForSession(kind, comctlMod, true);
+#if defined(_DEBUG)
+            if (appPaintedNative)
+            {
+                static std::atomic<unsigned> s_appDiag{16};
+                if (s_appDiag.fetch_sub(1, std::memory_order_relaxed) < 16)
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][ComboBoxControl] BeginPaint session open hwnd=0x%p class=ComboBox source=app-iat",
+                        hWnd);
+            }
+#endif
             // Паритет BWM Paint/ComboBox (caller == comctl32 v6, т.е. g_new):
             // текст поля рисует точка входа (cleanmgr.exe) — цепляем её ExtTextOutW.
             // Тело Overall_MyExtTextOutW гейтится CbxSessionActive, отдельный
@@ -992,10 +1016,14 @@ namespace GlassCore::ComboBoxControl
 
             auto* g_new = GlassCore::ModuleHandler::g_comctl32New;
             auto* g_legacy = GlassCore::ModuleHandler::g_comctl32Legacy;
-            if (callerMod != g_new && callerMod != g_legacy)
+            HMODULE entryPoint = GlassCore::ModuleHandler::g_entryPointModule;
+            const bool appPaintedNative =
+                callerMod && callerMod == entryPoint && IsNativeComboBoxClass(hWnd);
+            if (callerMod != g_new && callerMod != g_legacy && !appPaintedNative)
                 return;
 
-            const HMODULE comctlMod = ResolveComboComctlHookModule(callerMod);
+            const HMODULE comctlMod = appPaintedNative
+                ? entryPoint : ResolveComboComctlHookModule(callerMod);
             if (!comctlMod)
                 return;
 
