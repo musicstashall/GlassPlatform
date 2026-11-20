@@ -318,6 +318,7 @@ namespace GlassCore::PaintDispatcher
             || _wcsicmp(cls, L"TMaskEdit") == 0
             || _wcsicmp(cls, L"TSearchBox") == 0
             || _wcsicmp(cls, L"TNumberBox") == 0
+            || _wcsicmp(cls, L"TSpinEdit") == 0
             || _wcsicmp(cls, L"THotKey") == 0
             || _wcsicmp(cls, L"TRichEdit") == 0;
         const bool vclDraw = _wcsicmp(cls, L"TBitBtn") == 0

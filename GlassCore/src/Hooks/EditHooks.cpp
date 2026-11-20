@@ -196,7 +196,7 @@ namespace GlassCore::EditControl
         if (!hwnd || !GetClassNameW(hwnd, cls, _countof(cls))) return false;
         if (_wcsicmp(cls, L"TLabeledEdit") != 0 && _wcsicmp(cls, L"TButtonedEdit") != 0
             && _wcsicmp(cls, L"TMaskEdit") != 0 && _wcsicmp(cls, L"TSearchBox") != 0
-            && _wcsicmp(cls, L"TNumberBox") != 0 && _wcsicmp(cls, L"THotKey") != 0
+            && _wcsicmp(cls, L"TNumberBox") != 0 && _wcsicmp(cls, L"TSpinEdit") != 0 && _wcsicmp(cls, L"THotKey") != 0
             && _wcsicmp(cls, L"TRichEdit") != 0)
             return false;
         static thread_local ULONGLONG epoch[2]{};
