@@ -599,6 +599,8 @@ namespace GlassCore::Root
                 // Стирание фона (WM_ERASEBKGND) VCL делает PatBlt-ом с кистью
                 // FixedColor — без этого фиксированные ячейки остаются плотными.
                 PushPaint(instMod, OHK_PATBLT, cache);
+                // Диагностика (только лог): Blt из промежуточного буфера в DC таблицы.
+                PushPaint(instMod, OHK_BITBLT, cache);
             }
 
             // Точка входа процесса — типичные диалоги / сценарии владельца — BWM Paint (+ HEX: Paint+Dc)
@@ -662,9 +664,15 @@ namespace GlassCore::Root
             const BOOL ok = PatBlt(hdc, rc.left, rc.top, rc.right - rc.left,
                 rc.bottom - rc.top, BLACKNESS);
 #if defined(_DEBUG)
+            // Диагностика поверхности: dcWnd/bmp показывают, куда реально легла
+            // заливка (оконный DC, memory DC, DIB), px — что вернулось обратно.
+            const HWND dcWnd = WindowFromDC(hdc);
+            const HGDIOBJ bmp = GetCurrentObject(hdc, OBJ_BITMAP);
+            const COLORREF px = GetPixel(hdc, rc.left + 2, rc.top + 2);
             DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiGrid] Erase hwnd=0x%p rect=[%ld,%ld,%ld,%ld] ok=%d",
-                hWnd, rc.left, rc.top, rc.right, rc.bottom, ok ? 1 : 0);
+                L"[GlassCore][DelphiGrid] Erase hwnd=0x%p rect=[%ld,%ld,%ld,%ld] ok=%d dc=0x%p dcWnd=0x%p bmp=0x%p px=0x%08X",
+                hWnd, rc.left, rc.top, rc.right, rc.bottom, ok ? 1 : 0,
+                hdc, dcWnd, bmp, static_cast<unsigned>(px));
 #endif
             return ok != FALSE;
         }
