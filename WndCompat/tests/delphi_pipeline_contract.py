@@ -109,6 +109,35 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn('TListBoxDraw.cpp', read(file))
             self.assertIn('TListBoxDraw.h', read(file))
 
+    def test_delphi_input_fixes_are_exact_and_balanced(self):
+        edit = read('GlassCore/src/Hooks/EditHooks.cpp')
+        code = read('GlassCore/src/Hooks/delphi/TInputHooks.cpp')
+        root = read('WndCompat/Root/RootSubclass.cpp')
+        for guard in ('HasDelphiInputDefaultBackground(hwnd)', 'GetFocus() == hwnd',
+                      'ES_NOHIDESEL', 'ETO_GLYPH_INDEX | ETO_CLIPPED',
+                      'IsCurrentPaintDcForHwnd(hwnd, dc)', 'EqualRect(&client, rect)',
+                      'IsHotKey(hwnd)', 'GetSysColor(COLOR_WINDOW)', 'BS_SOLID'):
+            self.assertIn(guard, code)
+        self.assertIn('g_editSessionStack.back().paintDc == hdc', edit)
+        self.assertIn('numberBackgroundCleared = true', edit)
+        self.assertIn('paint.hotKeyFillHook && paint.paintDc == hdc', edit)
+        self.assertIn('EnableHooksOnModule(callerMod, EHK_FILLRECT, true)', edit)
+        self.assertIn('if (s.hotKeyFillHook) EnableHooksOnModule(s.mod, EHK_FILLRECT, false)', edit)
+        self.assertIn('CaptureNumberBoxDefaultBackground', root)
+        self.assertIn('color == (GetBkColor(dc) & 0xFFFFFFu)', root)
+        self.assertIn('SetDelphiInputDefaultBackground(hWnd, false)', read('WndCompat/Controls/EditSubclass.cpp'))
+        for path in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            self.assertIn('TInputHooks.cpp', read(path))
+            self.assertIn('TInputHooks.h', read(path))
+
+    def test_checkbox_background_avoids_complex_checkbox_clip(self):
+        code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
+        area = code.split('if (s.checkList && r->left == s.item.left', 1)[1].split('g_inHook = true;', 1)[0]
+        for guard in ('r->top == s.item.top', 'r->bottom == s.item.bottom',
+                      'GetClipBox(dc, &clip) == SIMPLEREGION', 'SystemBackground(lb.lbColor)',
+                      'BLACKNESS', 'return orig(dc, r, brush)'):
+            self.assertIn(guard, area)
+
     def test_vcl_draw_hook_slots_do_not_shadow_winapi_macros(self):
         code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
         self.assertIn('enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, Count }', code)
@@ -287,7 +316,8 @@ class DelphiPipelineContract(unittest.TestCase):
     def test_memo_buffer_uses_live_beginpaint_dc(self):
         source = read("GlassCore/src/Hooks/EditHooks.cpp")
         core = source.split("static BOOL Edit_WorkExtTextOutCore(", 1)[1].split("SyncActiveEditBufferDualPassFromGlobals();", 1)[0]
-        self.assertIn('!g_editSessionStack.empty() && IsDelphiMemo(sessionHwnd)', core)
+        self.assertIn('!g_editSessionStack.empty() && (IsDelphiMemo(sessionHwnd)', core)
+        self.assertIn('GlassCore::DelphiInput::IsSpinEdit(sessionHwnd)', core)
         for guard in ('paint.hwnd != sessionHwnd', '!paint.paintDc', 'paint.paintDc != hdc',
                       'IsCurrentPaintDcForHwnd(sessionHwnd, hdc)',
                       'g_activeEditBuffer->screenDC != paint.paintDc'):

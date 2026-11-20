@@ -5,6 +5,7 @@
 #include "EditSubclass.h"
 #include <GlassControlKind.h>
 #include <GlassDelphiMemoBackground.h>
+#include <GlassDelphiInputBackground.h>
 #include <DebugLog.h>
 #include <Richedit.h>
 
@@ -69,6 +70,7 @@ namespace WndCompat
     void Edit_Detach(HWND hWnd)
     {
         GlassShared::ClearDelphiMemoBackground(hWnd);
+        GlassShared::SetDelphiInputDefaultBackground(hWnd, false);
         GlassShared::GlassUnmarkWindow(hWnd);
 
         {
@@ -94,6 +96,7 @@ namespace WndCompat
             if (IsWindow(hWnd))
             {
                 GlassShared::ClearDelphiMemoBackground(hWnd);
+                GlassShared::SetDelphiInputDefaultBackground(hWnd, false);
                 GlassShared::GlassUnmarkWindow(hWnd);
             }
         }

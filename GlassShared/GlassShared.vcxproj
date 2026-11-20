@@ -202,6 +202,7 @@
     <ClInclude Include="include\PartRegistryQuery.h" />
     <ClInclude Include="include\RootRegistryMigration.h" />
     <ClInclude Include="include\GlassBackdropMark.h" />
+    <ClInclude Include="include\GlassDelphiInputBackground.h" />
     <ClInclude Include="include\GlassDelphiMemoBackground.h" />
     <ClInclude Include="include\GlassHostRegistry.h" />
     <ClInclude Include="SharedPch.h" />

@@ -88,11 +88,22 @@ namespace GlassCore::DelphiListBox
                 return orig(dc, r, brush);
             const bool sample = IsColorSample(s, *r);
             // The narrow left part contains the native/VCL checkbox drawing.
-            // Leave its background and check glyphs entirely to VCL.
+            // Keep the checkbox glyphs and complex-clip interior with VCL.
             const LONG itemHeight = s.item.bottom - s.item.top;
             if (s.checkList && r->left == s.item.left && itemHeight > 0
                 && r->right - r->left <= 2 * itemHeight)
+            {
+                // Logged VCL background covers the full item height with a
+                // simple clip; the later checkbox fill uses a complex clip.
+                RECT clip{};
+                if (r->top == s.item.top && r->bottom == s.item.bottom
+                    && GetClipBox(dc, &clip) == SIMPLEREGION && SystemBackground(lb.lbColor))
+                {
+                    if (PatBlt(dc, r->left, r->top, r->right - r->left,
+                        r->bottom - r->top, BLACKNESS)) return 1;
+                }
                 return orig(dc, r, brush);
+            }
             g_inHook = true;
             auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
             if (!sample && SystemBackground(lb.lbColor))
@@ -200,7 +211,16 @@ namespace GlassCore::DelphiListBox
         static thread_local unsigned budget = 0;
         const ULONGLONG now = GetTickCount64();
         if (!epoch || now - epoch >= 1000) { epoch = now; budget = 24; }
-        if (budget) { --budget; DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p dc=0x%p fill=%d ext=%d draw=%d state=0x%X", s.hwnd, s.dc, s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot], dis->itemState); }
+        if (budget)
+        {
+            --budget;
+            RECT client{};
+            GetClientRect(s.hwnd, &client);
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p class=%s dc=0x%p fill=%d ext=%d draw=%d state=0x%X item=%u rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld,%ld,%ld]",
+                s.hwnd, cls, s.dc, s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot],
+                dis->itemState, dis->itemID, s.item.left, s.item.top, s.item.right, s.item.bottom,
+                client.left, client.top, client.right, client.bottom);
+        }
 #endif
         return true;
     }
