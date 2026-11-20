@@ -15,6 +15,7 @@
 #include <Helpers/ThemeHelper.h>
 #include <Subsystems/ThemePaintRegistry.h>
 #include <Hooks/delphi/TListBoxDraw.h>
+#include <Hooks/RootGdiHooks.h>
 #include <Core/Intercept/HookDispatcher.h>
 
 #include <Module/ModuleHandler.h>
@@ -43,6 +44,9 @@ namespace GlassCore::ComboBoxControl
         // BWM Paint/ComboBox (caller == comctl32 v6): EXTTEXTOUT точки входа
         // включён только в paint-сессии; флаг — для парного снятия в EndPaint.
         thread_local bool   g_entryPointExtTextOutOn = false;
+        // Native class-"ComboBox" painted by the EXE: temporary Root GDI hooks
+        // (fill/rectangle/PatBlt) scoped to that window and session.
+        thread_local bool   g_nativeAppGdiHooksOn = false;
         static std::atomic<bool> g_shutdown{ false };
 
         // Дедуп: два идентичных DTB подряд (тот же part/state/rect) → skip, иначе второй проход ломает стекло.
@@ -977,6 +981,13 @@ namespace GlassCore::ComboBoxControl
             g_activePaintMod = comctlMod;
             g_comboHwnd = hWnd;
             EnableComboBoxHooksForSession(kind, comctlMod, true);
+            if (appPaintedNative && comctlMod)
+            {
+                GlassCore::Root::EnableRootHook(comctlMod, GlassCore::Root::OHK_FILLRECT, true);
+                GlassCore::Root::EnableRootHook(comctlMod, GlassCore::Root::OHK_RECTANGLE, true);
+                GlassCore::Root::EnableRootHook(comctlMod, GlassCore::Root::OHK_PATBLT, true);
+                g_nativeAppGdiHooksOn = true;
+            }
 #if defined(_DEBUG)
             {
                 static thread_local ULONGLONG s_openEpoch = 0;
@@ -1018,6 +1029,13 @@ namespace GlassCore::ComboBoxControl
             if (!g_activePaintMod)
                 return;
 
+            if (g_nativeAppGdiHooksOn)
+            {
+                GlassCore::Root::EnableRootHook(g_activePaintMod, GlassCore::Root::OHK_FILLRECT, false);
+                GlassCore::Root::EnableRootHook(g_activePaintMod, GlassCore::Root::OHK_RECTANGLE, false);
+                GlassCore::Root::EnableRootHook(g_activePaintMod, GlassCore::Root::OHK_PATBLT, false);
+                g_nativeAppGdiHooksOn = false;
+            }
             EnableComboBoxHooksForSession(kind, g_activePaintMod, false);
             if (g_entryPointExtTextOutOn)
             {
@@ -1131,6 +1149,16 @@ namespace GlassCore::ComboBoxControl
             return InvokeComboDrawThemeBackground(
                 orig, callerMod, hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
         }
+    }
+
+    bool IsNativeAppPaintSession(HWND hWnd) noexcept
+    {
+        if (!hWnd || !g_comboHwnd || g_comboHwnd != hWnd)
+            return false;
+        HMODULE ep = GlassCore::ModuleHandler::g_entryPointModule;
+        if (!ep || (g_activePaintMod != ep && g_activeHotMod != ep))
+            return false;
+        return IsNativeComboBoxClass(hWnd);
     }
 
     namespace FormsNiDtbAccess
