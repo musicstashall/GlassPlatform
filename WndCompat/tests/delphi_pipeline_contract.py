@@ -756,7 +756,7 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(marker, brush)
         # COLOR_WINDOW → 0; альфа для цветных ячеек делается на заливке
         # (pattern-кисть через FillRect альфу не переносит).
-        self.assertIn('constexpr BYTE kDelphiGridCellAlpha = 35;', root)
+        self.assertIn('constexpr BYTE kDelphiGridCellAlpha = 100;', root)
         self.assertNotIn('CreateSolidColorBrushWithAlpha', brush)
         syscolor = root.split('HBRUSH WINAPI Root_MyGetSysColorBrush(int nIndex)', 1)[1].split('HBRUSH WINAPI Root_MyCreateSolidBrush', 1)[0]
         for marker in ('IsDelphiGridClass(hostCls)', 'nIndex == COLOR_WINDOW'):
