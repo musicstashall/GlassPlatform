@@ -316,7 +316,10 @@ namespace GlassCore::PaintDispatcher
         const bool vclEdit = _wcsicmp(cls, L"TLabeledEdit") == 0
             || _wcsicmp(cls, L"TButtonedEdit") == 0
             || _wcsicmp(cls, L"TMaskEdit") == 0
-            || _wcsicmp(cls, L"TSearchBox") == 0;
+            || _wcsicmp(cls, L"TSearchBox") == 0
+            || _wcsicmp(cls, L"TNumberBox") == 0
+            || _wcsicmp(cls, L"THotKey") == 0
+            || _wcsicmp(cls, L"TRichEdit") == 0;
         const bool vclDraw = _wcsicmp(cls, L"TBitBtn") == 0
             || _wcsicmp(cls, L"TToggleSwitch") == 0;
         bool comboEdit = false;

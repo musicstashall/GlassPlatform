@@ -127,10 +127,7 @@ namespace WndCompat
 
     void RichEdit_Detach(HWND hWnd)
     {
-        // Восстанавливаем системный цвет фона
-        if (IsWindow(hWnd))
-            SendMessageW(hWnd, EM_SETBKGNDCOLOR, 1, 0);
-
+        // Attach не меняет фон: не сбрасывать пользовательский цвет при detach.
         GlassShared::GlassUnmarkWindow(hWnd);
 
         {
@@ -155,7 +152,6 @@ namespace WndCompat
         {
             if (IsWindow(hWnd))
             {
-                SendMessageW(hWnd, EM_SETBKGNDCOLOR, 1, 0);
                 GlassShared::GlassUnmarkWindow(hWnd);
             }
         }

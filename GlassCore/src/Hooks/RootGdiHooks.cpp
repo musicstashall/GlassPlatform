@@ -644,7 +644,10 @@ namespace GlassCore::Root
             if (g_shutdown.load(std::memory_order_acquire) || !hwnd) return;
             WCHAR cls[64]{};
             if (!GetClassNameW(hwnd, cls, _countof(cls))
-                || (_wcsicmp(cls, L"TBitBtn") != 0 && _wcsicmp(cls, L"TToggleSwitch") != 0))
+                || (_wcsicmp(cls, L"TBitBtn") != 0 && _wcsicmp(cls, L"TToggleSwitch") != 0
+                    && _wcsicmp(cls, L"TListBox") != 0 && _wcsicmp(cls, L"TCheckListBox") != 0
+                    && _wcsicmp(cls, L"TColorListBox") != 0 && _wcsicmp(cls, L"TNumberBox") != 0
+                    && _wcsicmp(cls, L"THotKey") != 0 && _wcsicmp(cls, L"TRichEdit") != 0))
                 return;
             HMODULE ep = GlassCore::ModuleHandler::g_entryPointModule;
             if (!ep) return;

@@ -49,6 +49,43 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('[GlassCore][DelphiBitBtn] BeginPaint', read('GlassCore/src/Hooks/delphi/TBitBtnHooks.cpp'))
         self.assertIn('LogDelphiBitBtnBeginPaint(hWnd', read('GlassCore/src/Hooks/ButtonHooks.cpp'))
 
+    def test_six_vcl_controls_use_requested_paths(self):
+        classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
+        for cls, kind in (("TNumberBox", "Edit"), ("THotKey", "Edit"),
+                          ("TRichEdit", "RichEdit50W"), ("TListBox", "ListBox"),
+                          ("TCheckListBox", "ListBox"), ("TColorListBox", "ListBox")):
+            with self.subTest(cls=cls):
+                self.assertRegex(classifier, r'(?s)if\s*\([^;{}]*L"' + cls +
+                                 r'"[^;{}]*\)\s*return ControlKind::' + kind + r'\s*;')
+        edit = read('WndCompat/Controls/EditSubclass.cpp')
+        detach = edit.split('void RichEdit_Detach(HWND hWnd)', 1)[1]
+        self.assertNotIn('EM_SETBKGNDCOLOR', detach)
+        for cls in ('TNumberBox', 'THotKey', 'TRichEdit'):
+            self.assertIn('L"' + cls + '"', read('GlassCore/src/Hooks/EditHooks.cpp'))
+
+    def test_vcl_list_owner_draw_probe_is_passthrough_and_scoped(self):
+        code = read('GlassCore/src/Hooks/delphi/TListBoxProbe.cpp')
+        root = read('WndCompat/Root/RootSubclass.cpp')
+        for guard in ('#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)',
+                      'ODT_LISTBOX', 'GetParent(dis->hwndItem) != parent',
+                      'GlassIsBackdropAllowedForHwnd', 'dis->hDC',
+                      'GlassControlKind::ListBox', 'g_entryPointModule'):
+            self.assertIn(guard, code)
+        for cls in ('TListBox', 'TCheckListBox', 'TColorListBox'):
+            self.assertIn('L"' + cls + '"', code)
+            self.assertIn('L"' + cls + '"', read('GlassCore/src/Hooks/RootGdiHooks.cpp'))
+        self.assertIn('BeginVclDrawProbe(dis->hwndItem, true)', code)
+        self.assertIn('EndVclDrawProbe(hwnd, true)', code)
+        self.assertIn('[GlassCore][DelphiListBox] WM_DRAWITEM', code)
+        self.assertNotIn('PatBlt(', code)
+        self.assertNotIn('FillRect(', code)
+        owner = root.split('GlassCore_BeginDelphiListBoxProbe', 1)[1].split('// Нас интересуют только пункты меню', 1)[0]
+        self.assertIn('wil::scope_exit', owner)
+        self.assertIn('return DefSubclassProc(hWnd, uMsg, wParam, lParam)', owner)
+        for file in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            self.assertIn('TListBoxProbe.cpp', read(file))
+            self.assertIn('TListBoxProbe.h', read(file))
+
     def test_vcl_draw_probes_are_opt_in_and_balanced(self):
         header = read("GlassCore/Include/Hooks/RootGdiHooks.h")
         gdi = read("GlassCore/src/Hooks/RootGdiHooks.cpp")

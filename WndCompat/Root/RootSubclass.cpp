@@ -1293,6 +1293,26 @@ namespace
                     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
                 }
             }
+            // В Debug + GLASS_DELPHI_DRAW_PROBE: только наблюдение IAT EXE
+            // на время вызова VCL. Точный HDC из DRAWITEMSTRUCT записывается
+            // отдельно; memory DC в журнале не считается автоматически его частью.
+            if (dis->CtlType == ODT_LISTBOX && dis->hwndItem
+                && GetParent(dis->hwndItem) == hWnd
+                && (WndCompat::IsWindowClass(dis->hwndItem, L"TListBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TCheckListBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TColorListBox")))
+            {
+                using BeginFn = BOOL (WINAPI*)(HWND, const DRAWITEMSTRUCT*) noexcept;
+                using EndFn = void (WINAPI*)() noexcept;
+                const HMODULE core = GetModuleHandleW(L"GlassCore.dll");
+                const auto begin = core ? reinterpret_cast<BeginFn>(GetProcAddress(core, "GlassCore_BeginDelphiListBoxProbe")) : nullptr;
+                const auto end = core ? reinterpret_cast<EndFn>(GetProcAddress(core, "GlassCore_EndDelphiListBoxProbe")) : nullptr;
+                if (begin && end && begin(hWnd, dis))
+                {
+                    auto finish = wil::scope_exit([&]() noexcept { end(); });
+                    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                }
+            }
             // Нас интересуют только пункты меню
             if (dis->CtlType == ODT_MENU)
             {

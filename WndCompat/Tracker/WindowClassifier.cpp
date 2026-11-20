@@ -377,16 +377,17 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         Equals(cls, L"TButtonedEdit") ||
         Equals(cls, L"TMaskEdit") ||
         Equals(cls, L"TSearchBox") ||
+        Equals(cls, L"TNumberBox") ||
+        Equals(cls, L"THotKey") ||
         Equals(cls, L"TMemo") ||
         Equals(cls, L"TInplaceEditList"))
         return ControlKind::Edit;
 
     // ── RichEdit ─────────────────────────────────────────────────────────────
-    if (Equals(cls, L"RichEdit20W") ||
-        Equals(cls, L"TRichEdit"))
+    if (Equals(cls, L"RichEdit20W"))
         return ControlKind::RichEdit20W;
 
-    if (Equals(cls, L"RICHEDIT50W"))
+    if (Equals(cls, L"TRichEdit") || Equals(cls, L"RICHEDIT50W"))
         return ControlKind::RichEdit50W;
 
     // ── ComboLBox (popup — классифицируется через IsSpecialWindow; только нативный класс)
@@ -399,7 +400,9 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
 
     // ── ListBox ──────────────────────────────────────────────────────────────
     if (Equals(cls, L"ListBox") ||
-        Equals(cls, L"TListBox"))
+        Equals(cls, L"TListBox") ||
+        Equals(cls, L"TCheckListBox") ||
+        Equals(cls, L"TColorListBox"))
         return ControlKind::ListBox;
 
     // ── ComboBox ─────────────────────────────────────────────────────────────
