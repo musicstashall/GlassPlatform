@@ -1691,3 +1691,45 @@ BeginPaint session skip` перечисляет причины, по котор�
 останется и не появится строка `DelphiComboDraw fill`, источник не в
 `FillRect`/`ETO_OPAQUE` этого HDC и нужен новый узкий лог, а не расширение
 области замены.
+
+## Тест 40: приложение рисует обычный ComboBox
+
+`LogViewer-8.log` подтверждает, что owner-draw сессия для `TColorBox` и
+`TDriveComboBox` действительно открывается: `combo=1`, `field=1`,
+`bounds=[0,0,200,22]`/`[0,0,260,21]`, белая заливка `[3,3,180,19]`/
+`[3,3,240,18]` с кистью `0x00FFFFFF` доходит до production-ветки
+`system-background`. Для строк списка видны `pass-through` заливки цветных
+образцов (`0x000000`, `0x00008000`, `0x00808080` и т.п.) и текст с
+`options=0x6` (`ETO_OPAQUE|ETO_CLIPPED`) и белым `bk`: образцы не тронуты, фон
+текста заменяется. Для поля `TDriveComboBox` в этом журнале нет строки
+`DelphiComboDraw text`, то есть текст поля не рисовался как `ETO_OPAQUE`; путь
+его текста по журналу не установлен. Новые Debug-строки `text`/`drawtext`
+покажут `ExtTextOutW`/`DrawTextW` без `ETO_OPAQUE`, если они идут через эту
+сессию.
+
+Для окна класса `ComboBox` журнал даёт точную причину отсутствия alpha-blend:
+сессия не открывалась, `BeginPaint session skip ... class=ComboBox
+caller=0x...B50000 reason=caller-not-comctl32`, где caller — модуль точки входа
+(`DelphiControlsSample_Win64.exe`). То есть attach и классификация сработали,
+но поле рисует само приложение, а не comctl32, и прежний гейт сессии такие
+вызовы отбрасывал. Теперь сессия ComboBox разрешена для `BeginPaint`/`GetDC`,
+если вызывающий модуль — точка входа **и** класс окна ровно `ComboBox`;
+IAT-хуки (`DrawThemeBackground`, `DrawThemeText`, `ExtTextOutW`, `DrawTextW` и
+сопутствующие) ставятся на модуль приложения только на время этой сессии и
+снимаются в `EndPaint`/`ReleaseDC`. VCL-классы `T*ComboBox` и `TColorBox` этим
+путём не затрагиваются: для них правило прежнее (comctl32 либо отдельная
+owner-draw сессия). `TComboBox` остаётся контролем — его поле и `Edit`
+продолжают работать как раньше.
+
+Debug `BeginPaint session open ... source=app-iat` подтверждает новый путь.
+Остаётся риск, что приложение берёт `DrawThemeBackground` через
+`GetProcAddress`, а не через IAT: тогда в журнале будет открытие сессии, но не
+будет `DTB result` для `class=ComboBox`. Это будет означать, что нужен другой
+способ перехвата, а не повторное расширение гейта.
+
+Сборка и визуальный результат на Windows не проверены. Проверить: обычный
+`ComboBox` (поле, стрелка, открытый список, hover, фокус, disabled, активное и
+неактивное окно, alpha 0/промежуточная/255); `TColorBox` с пустым и выбранным
+значением и цветными образцами; `TDriveComboBox` с иконкой диска, длинным
+путём и выбранной строкой; `TFilterComboBox`; `TComboBox` как контроль; DPI и
+частичную перерисовку.

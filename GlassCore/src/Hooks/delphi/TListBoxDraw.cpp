@@ -349,6 +349,12 @@ namespace GlassCore::DelphiListBox
             }
             if (!count) return TRUE;
             if (!text) return orig(dc, x, y, drawOptions, rect, text, count, dx);
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+            {
+                const RECT logged = rect ? *rect : s.bounds;
+                LogComboText(s, dc, drawOptions, count, logged, GetBkColor(dc), L"text");
+            }
+#endif
             if (SUCCEEDED(GlassCore::Text::ExtTextOutWithAlpha(dc, x, y, drawOptions, rect, text, count, dx, orig)))
                 return TRUE;
             return orig(dc, x, y, drawOptions, rect, text, count, dx);
@@ -368,6 +374,9 @@ namespace GlassCore::DelphiListBox
                 return orig(dc, text, count, rect, format);
             g_inHook = true;
             auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+            LogComboText(s, dc, format, static_cast<UINT>(count), *rect, GetBkColor(dc), L"drawtext");
+#endif
             int result = 0;
             if (SUCCEEDED(GlassCore::Text::DrawTextWithAlpha(dc, text, count, rect, format, result))) return result;
             return orig(dc, text, count, rect, format);
