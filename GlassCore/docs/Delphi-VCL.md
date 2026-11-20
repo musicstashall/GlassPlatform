@@ -1956,13 +1956,13 @@ COLOR_WINDOW→0`, `WhiteFill` ячеек, `Text` с `hr=0x0`. Правки по
 1. прямоугольник очищается `PatBlt(BLACKNESS)` — прозрачный фон;
 2. если цвет отличается от `COLOR_WINDOW` — поверх кладётся цветная подложка
    через `FillRectWithAlphaBlend` (1×1 premultiplied DIB + `GdiAlphaBlend` с
-   `AC_SRC_ALPHA`), альфа `kDelphiGridCellAlpha` (сейчас 35).
+   `AC_SRC_ALPHA`), альфа `kDelphiGridCellAlpha` (сейчас 100).
 
 Так цвет ячейки одновременно отличается от общего фона и просвечивает, а не
 смешивается со старым содержимым (что и давало «плотный» цвет). Стоковые кисти
 `GetSysColorBrush(COLOR_WINDOW/COLOR_BTNFACE)` распознаются по хэндлу, потому что
 `GetObject` для них не работает. В журнале: `WhiteFill` (только очистка) или
-`AlphaFill … color=0x… alpha=35`.
+`AlphaFill … color=0x… alpha=100`.
 
 Сборка и визуальный результат на Windows не проверены.
 
@@ -1976,7 +1976,7 @@ VCL: в журнале 12 `WhiteFill`/`Fill` ячейки идёт **до** `Tex
 Теперь обе ветки используют одну функцию `ApplyDelphiGridCellBackground`:
 1. `PatBlt(BLACKNESS)` — прозрачный фон;
 2. если цвет (кисти или текущий `BkColor` для `ETO_OPAQUE`) не `COLOR_WINDOW` —
-   `FillRectWithAlphaBlend` с `kDelphiGridCellAlpha` (35).
+   `FillRectWithAlphaBlend` с `kDelphiGridCellAlpha` (100).
 
 `ETO_OPAQUE` снимается перед `ExtTextOutWithAlpha`, поэтому текст ложится поверх
 подложки, а не поверх чёрного. Проверка: цветные ячейки `TDrawGrid` и

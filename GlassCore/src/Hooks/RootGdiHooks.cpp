@@ -889,7 +889,7 @@ namespace GlassCore::Root
         // TShownValueList (msinfo), TStringGrid/TDrawGrid — одна и та же процедура.
         // Низкая альфа для ячеек таблиц, цвет которых отличается от COLOR_WINDOW:
         // цвет виден, но стекло просвечивает (тот же порядок, что у темы/комбо).
-        constexpr BYTE kDelphiGridCellAlpha = 35;
+        constexpr BYTE kDelphiGridCellAlpha = 100;
 
         [[nodiscard]] static bool IsDelphiGridClass(const wchar_t* cls) noexcept
         {
