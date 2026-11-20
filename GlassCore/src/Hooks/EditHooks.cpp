@@ -107,6 +107,13 @@ namespace GlassCore::EditControl
     // =========================================================================
     //  EditBufferedSession — сессионный DIB для многострочного Edit
     // =========================================================================
+    struct MemoBackgroundOp
+    {
+        RECT rect;
+        COLORREF color;
+        bool fill;
+    };
+
     struct EditBufferedSession
     {
         HWND     hWnd = nullptr;
@@ -135,6 +142,8 @@ namespace GlassCore::EditControl
         // fromGetDC: сессия создана для GetDC-канала (не BeginPaint)
         bool fromGetDC = false;
         bool delphiMemo = false;
+        // Только фон TMemo; текст в отдельном DIB, чтобы tblend не ослаблял заливку.
+        std::vector<MemoBackgroundOp> memoBackgrounds;
     };
 
     thread_local EditBufferedSession* g_activeEditBuffer = nullptr;
@@ -355,11 +364,29 @@ namespace GlassCore::EditControl
 #endif
     }
 
+    // Как на прямом GetDC: сначала прозрачная очистка, затем непрозрачная
+    // пользовательская/selection заливка. Порядок важен при пересечении rect.
+    static void ReplayMemoBackgrounds(HDC dc, const EditBufferedSession& buf) noexcept
+    {
+        for (const auto& op : buf.memoBackgrounds)
+        {
+            const RECT& r = op.rect;
+            PatBlt(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+            if (op.fill)
+            {
+                wil::unique_hbrush brush{
+                    Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(op.color, 255) };
+                if (brush) FillRect(dc, &r, brush.get());
+            }
+        }
+    }
+
     // ── FlushEditBuffer ─────────────────────────────────────────────────────
     // Компонует результат и выводит на экран.
     // Использует bgSnapshot вместо повторного BitBlt(screenDC):
     //   bgSnapshot → фон без «загрязнения»
-    //   g_sessionBlacknessRects → BLACKNESS для ETO_OPAQUE областей
+    //   обычный Edit: g_sessionBlacknessRects → BLACKNESS для ETO_OPAQUE
+    //   TMemo: memoBackgrounds → BLACKNESS и цветные заливки по порядку
     //   buf->memDC  → текст с premultiplied alpha
     static void FlushEditBuffer() noexcept
     {
@@ -379,9 +406,9 @@ namespace GlassCore::EditControl
             unsigned maxAlpha = 0;
             MemoAlphaStats(buf->bits, buf->width, buf->height, nonzero, maxAlpha);
             DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiMemo] Flush hwnd=0x%p focused=%d blackRects=%zu paintDepth=%zu dcDepth=%zu inkAlphaCount=%zu inkAlphaMax=%u",
+                L"[GlassCore][DelphiMemo] Flush hwnd=0x%p focused=%d blackRects=%zu memoBackgrounds=%zu paintDepth=%zu dcDepth=%zu inkAlphaCount=%zu inkAlphaMax=%u",
                 buf->hWnd, GetFocus() == buf->hWnd ? 1 : 0, g_sessionBlacknessRects.size(),
-                g_editSessionStack.size(), g_editDcStack.size(), nonzero, maxAlpha);
+                buf->memoBackgrounds.size(), g_editSessionStack.size(), g_editDcStack.size(), nonzero, maxAlpha);
         }
 #endif
 
@@ -430,14 +457,19 @@ namespace GlassCore::EditControl
                         buf->screenDC, 0, 0, SRCCOPY);
                 }
 
-                // ── 2. BLACKNESS для ETO_OPAQUE областей ─────────────────────
-                for (RECT r : g_sessionBlacknessRects)
+                // ── 2. Фон для ETO_OPAQUE областей ───────────────────────────
+                if (buf->delphiMemo)
+                    ReplayMemoBackgrounds(composeDC, *buf);
+                else
                 {
-                    if (editStyle == kEditStyleInsetTextRect)
-                        InflateRect(&r, 2, 2);
-                    RECT clip{ 0, 0, buf->width, buf->height };
-                    if (!IntersectRect(&r, &r, &clip) || IsRectEmpty(&r)) continue;
-                    PatBlt(composeDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+                    for (RECT r : g_sessionBlacknessRects)
+                    {
+                        if (editStyle == kEditStyleInsetTextRect)
+                            InflateRect(&r, 2, 2);
+                        RECT clip{ 0, 0, buf->width, buf->height };
+                        if (!IntersectRect(&r, &r, &clip) || IsRectEmpty(&r)) continue;
+                        PatBlt(composeDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+                    }
                 }
 
                 // ── 3. AlphaBlend текста (tblend — из профиля капсулы, не RAM-превью) ──
@@ -493,13 +525,18 @@ namespace GlassCore::EditControl
                 DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] ComposeFallback hwnd=0x%p screenDc=0x%p",
                     buf->hWnd, buf->screenDC);
 #endif
-            for (RECT r : g_sessionBlacknessRects)
+            if (buf->delphiMemo)
+                ReplayMemoBackgrounds(buf->screenDC, *buf);
+            else
             {
-                if (editStyle == kEditStyleInsetTextRect)
-                    InflateRect(&r, 2, 2);
-                RECT clip{ 0, 0, buf->width, buf->height };
-                if (!IntersectRect(&r, &r, &clip) || IsRectEmpty(&r)) continue;
-                PatBlt(buf->screenDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+                for (RECT r : g_sessionBlacknessRects)
+                {
+                    if (editStyle == kEditStyleInsetTextRect)
+                        InflateRect(&r, 2, 2);
+                    RECT clip{ 0, 0, buf->width, buf->height };
+                    if (!IntersectRect(&r, &r, &clip) || IsRectEmpty(&r)) continue;
+                    PatBlt(buf->screenDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+                }
             }
             const BYTE sessionTblend =
                 GlassCore::Text::ResolveEffectiveTargetBlendAlpha(buf->useDualPass);
@@ -552,13 +589,23 @@ namespace GlassCore::EditControl
 #else
         (void)cleared;
 #endif
-        if (useSession && g_activeEditBuffer && targetDC == g_activeEditBuffer->memDC)
-            PushSessionBlacknessRect(r, g_activeEditBuffer->width, g_activeEditBuffer->height);
-
         const COLORREF color = backgroundOverride ? *backgroundOverride : GetBkColor(hdc);
         const COLORREF rgb = color & 0xFFFFFFu;
         const COLORREF sysWnd = GetSysColor(COLOR_WINDOW) & 0xFFFFFFu;
         const COLORREF sysBtn = GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu;
+        const bool fill = rgb != 0 && rgb != sysBtn && rgb != sysWnd;
+
+        if (useSession && g_activeEditBuffer && targetDC == g_activeEditBuffer->memDC)
+        {
+            if (g_activeEditBuffer->delphiMemo)
+            {
+                // BLACKNESS выше стирает старый текст из DIB. Заливку откладываем
+                // до композиции, иначе она смешивается с текстом при tblend < 255.
+                g_activeEditBuffer->memoBackgrounds.push_back({ r, color, fill });
+                return;
+            }
+            PushSessionBlacknessRect(r, g_activeEditBuffer->width, g_activeEditBuffer->height);
+        }
 
         wil::unique_hbrush brush{
             Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255) };

@@ -99,6 +99,20 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('[GlassCore][DelphiMemo] BufferTarget', source)
         self.assertIn('[GlassCore][DelphiMemo] ComposeFallback', source)
 
+    def test_memo_background_is_composed_separately_from_text(self):
+        source = read("GlassCore/src/Hooks/EditHooks.cpp")
+        self.assertIn('std::vector<MemoBackgroundOp> memoBackgrounds;', source)
+        apply = source.split('static void ApplyEditBackgroundRect(', 1)[1].split('static COLORREF GetRichEdit20BackgroundFromEm', 1)[0]
+        self.assertRegex(apply, r'(?s)PatBlt\(targetDC.*?if \(useSession && g_activeEditBuffer && targetDC == g_activeEditBuffer->memDC\).*?if \(g_activeEditBuffer->delphiMemo\).*?memoBackgrounds.push_back\(\{ r, color, fill \}\);\s*return;')
+        self.assertIn('PushSessionBlacknessRect(r,', apply)
+        self.assertIn('FillRect(targetDC, &r, brush.get())', apply)
+        replay = source.split('static void ReplayMemoBackgrounds(', 1)[1].split('// ── FlushEditBuffer', 1)[0]
+        self.assertRegex(replay, r'(?s)for \(const auto& op : buf.memoBackgrounds\).*?PatBlt\(dc.*?if \(op.fill\).*?CreateSolidColorBrushWithAlpha\(op.color, 255\).*?FillRect\(dc')
+        flush = source.split('static void FlushEditBuffer()', 1)[1].split('static void ApplyEditBackgroundRect(', 1)[0]
+        self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*ReplayMemoBackgrounds\(composeDC, \*buf\);.*?GdiAlphaBlend\(composeDC')
+        self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*ReplayMemoBackgrounds\(buf->screenDC, \*buf\);.*?GdiAlphaBlend\(buf->screenDC')
+        self.assertIn('memoBackgrounds=%zu', flush)
+
     def test_memo_dib_is_scoped_and_listview_black_brush_is_preserved(self):
         edit = read("GlassCore/src/Hooks/EditHooks.cpp")
         self.assertIn('buf->delphiMemo = IsDelphiMemo(hWnd)', edit)
