@@ -19,10 +19,11 @@ namespace GlassCore::DelphiListBox
     {
         using namespace GlassCore::Hooks;
         using namespace std::literals;
-        enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, Count };
+        enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, RectangleSlot, Count };
         int WINAPI MyFill(HDC, const RECT*, HBRUSH);
         BOOL WINAPI MyExtText(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
         int WINAPI MyDrawText(HDC, LPCWSTR, int, LPRECT, UINT);
+        BOOL WINAPI MyRectangle(HDC, int, int, int, int);
         const HookDispatcherDependency<Count, 3> g_dep{{
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
                 "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "FillRect", reinterpret_cast<void*>(MyFill) },
@@ -30,6 +31,8 @@ namespace GlassCore::DelphiListBox
                 "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "ExtTextOutW", reinterpret_cast<void*>(MyExtText) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
                 "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "DrawTextW", reinterpret_cast<void*>(MyDrawText) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv,
+                "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "Rectangle", reinterpret_cast<void*>(MyRectangle) },
         }};
         HookDispatcher<Count, 3> g_dispatcher{ g_dep, nullptr };
         wil::srwlock g_lock;
@@ -41,10 +44,14 @@ namespace GlassCore::DelphiListBox
             RECT item;
             bool colorList;
             bool checkList;
+            unsigned long long serial{};
+            RECT checkOutline{};
+            bool hasCheckOutline{};
             std::array<bool, Count> hooks{};
         };
         thread_local std::vector<Session> g_stack;
         thread_local bool g_inHook = false;
+        thread_local unsigned long long g_serial = 0;
 
         template <size_t index, typename T> T Original() noexcept
         {
@@ -73,6 +80,53 @@ namespace GlassCore::DelphiListBox
                 && r.right - r.left <= w / 3 && r.top > s.item.top
                 && r.bottom < s.item.bottom && r.bottom > r.top;
         }
+        // VCL first draws a hollow, background-coloured outer checkbox rectangle.
+        // Record it only after the original succeeds; this is not a glyph replacement.
+        BOOL WINAPI MyRectangle(HDC dc, int left, int top, int right, int bottom)
+        {
+            auto orig = Original<RectangleSlot, decltype(&::Rectangle)>();
+            if (!orig) return Rectangle(dc, left, top, right, bottom);
+            const auto* current = Current(dc);
+            if (!current || !current->checkList) return orig(dc, left, top, right, bottom);
+            const Session s = *current;
+            const LONG height = s.item.bottom - s.item.top;
+            const RECT box{left, top, right, bottom};
+            RECT clipped{};
+            LOGBRUSH brush{};
+            LOGPEN pen{};
+            const bool candidate = height > 0 && right > left && bottom > top
+                && left >= s.item.left && right <= s.item.left + 2 * height
+                && right - left <= 2 * height && bottom - top <= height
+                && IntersectRect(&clipped, &box, &s.item) && EqualRect(&clipped, &box)
+                && GetObjectW(GetCurrentObject(dc, OBJ_BRUSH), sizeof(brush), &brush) == sizeof(brush)
+                && brush.lbStyle == BS_NULL
+                && GetObjectW(GetCurrentObject(dc, OBJ_PEN), sizeof(pen), &pen) == sizeof(pen)
+                && pen.lopnStyle == PS_SOLID && pen.lopnWidth.x == 1 && SystemBackground(pen.lopnColor);
+            const BOOL result = orig(dc, left, top, right, bottom);
+            const DWORD error = GetLastError();
+            if (result && candidate && !g_stack.empty() && g_stack.back().serial == s.serial)
+            {
+                g_stack.back().checkOutline = box;
+                g_stack.back().hasCheckOutline = true;
+            }
+            SetLastError(error);
+            return result;
+        }
+
+        bool ClipExcludesCheckOutline(HDC dc, const RECT& outline) noexcept
+        {
+            // GetClipRgn is in device coordinates, whereas the observed Rectangle
+            // uses logical coordinates. Reject non-axis-aligned transforms.
+            POINT p[4]{{outline.left, outline.top}, {outline.right, outline.top},
+                {outline.left, outline.bottom}, {outline.right, outline.bottom}};
+            if (!LPtoDP(dc, p, 4) || p[0].y != p[1].y || p[2].y != p[3].y
+                || p[0].x != p[2].x || p[1].x != p[3].x
+                || p[0].x >= p[1].x || p[0].y >= p[2].y) return false;
+            const RECT deviceBox{p[0].x, p[0].y, p[1].x, p[2].y};
+            wil::unique_hrgn region{CreateRectRgn(0, 0, 0, 0)};
+            return region && GetClipRgn(dc, region.get()) == 1
+                && !RectInRegion(region.get(), &deviceBox);
+        }
         int WINAPI MyFill(HDC dc, const RECT* r, HBRUSH brush)
         {
             auto orig = Original<FillSlot, decltype(&::FillRect)>();
@@ -94,14 +148,36 @@ namespace GlassCore::DelphiListBox
             if (s.checkList && r->left == s.item.left && itemHeight > 0
                 && r->right - r->left <= 2 * itemHeight)
             {
-                // Logged VCL background covers the full item height with a
-                // simple clip; the later checkbox fill uses a complex clip.
+                // For the complex clip, an outer checkbox rectangle must have
+                // been observed and its entire box must be excluded from the
+                // application clip. PatBlt keeps the original clip unchanged.
                 RECT clip{};
+                const int clipKind = GetClipBox(dc, &clip);
+                RECT boxWithinFill{};
+                const bool excludedCheck = clipKind == COMPLEXREGION && s.hasCheckOutline
+                    && IntersectRect(&boxWithinFill, &s.checkOutline, r)
+                    && EqualRect(&boxWithinFill, &s.checkOutline)
+                    && ClipExcludesCheckOutline(dc, s.checkOutline);
                 if (r->top == s.item.top && r->bottom == s.item.bottom
-                    && GetClipBox(dc, &clip) == SIMPLEREGION && SystemBackground(lb.lbColor))
+                    && SystemBackground(lb.lbColor)
+                    && (clipKind == SIMPLEREGION || excludedCheck))
                 {
                     if (PatBlt(dc, r->left, r->top, r->right - r->left,
-                        r->bottom - r->top, BLACKNESS)) return 1;
+                        r->bottom - r->top, BLACKNESS))
+                    {
+#if defined(_DEBUG)
+                        if (excludedCheck)
+                        {
+                            static thread_local ULONGLONG epoch = 0;
+                            static thread_local unsigned budget = 0;
+                            const ULONGLONG now = GetTickCount64();
+                            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 12; }
+                            if (budget) { --budget; DebugLog(DBG_NORMAL,
+                                L"[GlassCore][DelphiListDraw] checkbox background hwnd=0x%p dc=0x%p clip=complex", s.hwnd, dc); }
+                        }
+#endif
+                        return 1;
+                    }
                 }
                 return orig(dc, r, brush);
             }
@@ -197,6 +273,7 @@ namespace GlassCore::DelphiListBox
         if (!mod) return false;
         Session s{dis->hwndItem, dis->hDC, dis->rcItem, color,
             _wcsicmp(cls, L"TCheckListBox") == 0};
+        s.serial = ++g_serial;
         {
             auto lock = g_lock.lock_exclusive();
             if (g_shutdown.load(std::memory_order_acquire)) return false;
@@ -219,8 +296,8 @@ namespace GlassCore::DelphiListBox
             --budget;
             RECT client{};
             GetClientRect(s.hwnd, &client);
-            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p class=%s dc=0x%p fill=%d ext=%d draw=%d state=0x%X item=%u rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld,%ld,%ld]",
-                s.hwnd, cls, s.dc, s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot],
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p class=%s dc=0x%p fill=%d ext=%d draw=%d rectangle=%d state=0x%X item=%u rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld,%ld,%ld]",
+                s.hwnd, cls, s.dc, s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot], s.hooks[RectangleSlot],
                 dis->itemState, dis->itemID, s.item.left, s.item.top, s.item.right, s.item.bottom,
                 client.left, client.top, client.right, client.bottom);
         }
