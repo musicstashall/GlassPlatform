@@ -267,6 +267,24 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertNotIn('PreservePaintDcBkColor', root)
         self.assertIn('SetBkColor: entryPoint COLOR_WINDOW→0', root)
 
+    def test_toggle_getdc_copy_probes_are_debug_only_and_observational(self):
+        code = read('GlassCore/src/Hooks/delphi/TToggleSwitchHooks.cpp')
+        enum = code.split('enum : size_t { TrackRectangle', 1)[1].split('HookCount };', 1)[0]
+        self.assertIn('#if defined(_DEBUG)', enum)
+        self.assertIn('CopyBitBlt, CopyStretchBlt', enum)
+        self.assertIn('if (paint && (i == CopyBitBlt || i == CopyStretchBlt)) continue;', code)
+        for name in ('TraceBitBlt', 'TraceStretchBlt'):
+            body = code.rsplit(f'BOOL WINAPI {name}(', 1)[1].split('\n        }', 1)[0]
+            self.assertIn('g_sessions.back().windowDC == dest', body)
+            self.assertIn('WindowFromDC(dest) == g_sessions.back().hwnd', body)
+            self.assertIn('IsTopWindowDrawingSession', body)
+            self.assertEqual(body.count('const BOOL result = orig('), 1)
+            self.assertIn('SetLastError(entryError)', body)
+            self.assertIn('SetLastError(error)', body)
+            self.assertIn('return result;', body)
+        self.assertIn('budget = 32', code)
+        self.assertIn('LogCopy(L"StretchBlt"', code)
+
     def test_toggle_delete_trace_is_debug_bounded_and_observational(self):
         source = read('GlassCore/src/Subsystems/PaintDispatcher.cpp')
         trace = read('GlassCore/src/Hooks/delphi/TToggleSwitchHooks.cpp')

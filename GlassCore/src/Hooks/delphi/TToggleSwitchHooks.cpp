@@ -18,7 +18,15 @@ namespace GlassCore::DelphiToggle
     {
         using namespace GlassCore::Hooks;
         using namespace std::literals;
-        enum : size_t { TrackRectangle, ThumbFillRect, HookCount };
+        enum : size_t { TrackRectangle, ThumbFillRect,
+#if defined(_DEBUG)
+            CopyBitBlt, CopyStretchBlt,
+#endif
+            HookCount };
+#if defined(_DEBUG)
+        BOOL WINAPI TraceBitBlt(HDC, int, int, int, int, HDC, int, int, DWORD);
+        BOOL WINAPI TraceStretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
+#endif
         BOOL WINAPI ToggleRectangle(HDC dc, int left, int top, int right, int bottom);
         int WINAPI ToggleFillRect(HDC dc, const RECT* rect, HBRUSH brush);
         const HookDispatcherDependency<HookCount, 3> g_dependency{{
@@ -26,6 +34,12 @@ namespace GlassCore::DelphiToggle
                 "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "Rectangle", reinterpret_cast<void*>(ToggleRectangle) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
                 "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "FillRect", reinterpret_cast<void*>(ToggleFillRect) },
+#if defined(_DEBUG)
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv,
+                "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "BitBlt", reinterpret_cast<void*>(TraceBitBlt) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv,
+                "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "StretchBlt", reinterpret_cast<void*>(TraceStretchBlt) },
+#endif
         }};
         HookDispatcher<HookCount, 3> g_dispatcher{ g_dependency, nullptr };
         wil::srwlock g_lock;
@@ -36,6 +50,9 @@ namespace GlassCore::DelphiToggle
             unsigned long long serial{};
             bool isPaint{};
             bool eligible{};
+#if defined(_DEBUG)
+            HDC windowDC{};
+#endif
             std::array<bool, HookCount> hooks{};
             HDC trackDC{};
             HBITMAP trackBitmap{};
@@ -62,6 +79,9 @@ namespace GlassCore::DelphiToggle
             session.hwnd = hwnd;
             session.serial = ++g_nextSerial;
             session.isPaint = paint;
+#if defined(_DEBUG)
+            if (!paint) session.windowDC = GlassCore::PaintDispatcher::GetCurrentGetDcSessionHdc();
+#endif
             session.eligible = IsTarget(hwnd) && caller
                 && caller == GlassCore::ModuleHandler::g_entryPointModule;
             if (!session.eligible)
@@ -76,6 +96,10 @@ namespace GlassCore::DelphiToggle
                 if (g_shutdown.load(std::memory_order_acquire)) return;
                 for (size_t i = 0; i < HookCount; ++i)
                 {
+#if defined(_DEBUG)
+                    // Copy probes are observational and restricted to GetDC.
+                    if (paint && (i == CopyBitBlt || i == CopyStretchBlt)) continue;
+#endif
                     const int before = g_dispatcher.GetRef(i);
                     g_dispatcher.EnableHook(i, true);
                     session.hooks[i] = g_dispatcher.GetRef(i) > before;
@@ -83,8 +107,9 @@ namespace GlassCore::DelphiToggle
             }
             g_sessions.push_back(session);
 #if defined(_DEBUG)
-            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiToggle] begin hwnd=0x%p paint=%d rectangle=%d fill=%d",
-                hwnd, paint, session.hooks[TrackRectangle], session.hooks[ThumbFillRect]);
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiToggle] begin hwnd=0x%p paint=%d rectangle=%d fill=%d copyBit=%d copyStretch=%d windowDC=0x%p",
+                hwnd, paint, session.hooks[TrackRectangle], session.hooks[ThumbFillRect],
+                session.hooks[CopyBitBlt], session.hooks[CopyStretchBlt], session.windowDC);
 #endif
         }
         void End(HWND hwnd, bool paint) noexcept
@@ -212,6 +237,99 @@ namespace GlassCore::DelphiToggle
             }
             return result;
         }
+
+#if defined(_DEBUG)
+        void LogCopy(const wchar_t* api, const Session& session, HDC dest, int x, int y,
+            int width, int height, HDC source, int sx, int sy, int sw, int sh,
+            DWORD rop, BOOL result) noexcept
+        {
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 32; }
+            if (!budget) return;
+            --budget;
+            HGDIOBJ bitmap = source ? GetCurrentObject(source, OBJ_BITMAP) : nullptr;
+            DIBSECTION dib{};
+            const int got = bitmap ? GetObject(bitmap, sizeof(dib), &dib) : 0;
+            // Только доступный 32bpp DIB: небольшая безопасная выборка из 16
+            // пикселей через ReadProcessMemory, без модификации или GdiFlush.
+            // Это статистика, не полное доказательство альфы или принадлежности DC.
+            unsigned samples = 0, alphaZero = 0, alphaFull = 0, alphaPartial = 0;
+            unsigned blackZero = 0, blackFull = 0;
+            const BITMAP& bm = dib.dsBm;
+            if (got == sizeof(DIBSECTION) && bm.bmBits && bm.bmBitsPixel == 32
+                && bm.bmWidth > 0 && bm.bmWidth <= 4096 && bm.bmHeight > 0 && bm.bmHeight <= 4096
+                && bm.bmWidthBytes >= bm.bmWidth * 4 && bm.bmWidthBytes <= 1024 * 1024)
+            {
+                for (int row = 0; row < 4; ++row)
+                    for (int col = 0; col < 4; ++col)
+                    {
+                        const size_t py = static_cast<size_t>((static_cast<long long>(bm.bmHeight - 1) * row) / 3);
+                        const size_t px = static_cast<size_t>((static_cast<long long>(bm.bmWidth - 1) * col) / 3);
+                        const auto address = reinterpret_cast<ULONG_PTR>(bm.bmBits)
+                            + py * static_cast<size_t>(bm.bmWidthBytes) + px * 4;
+                        DWORD pixel = 0; SIZE_T read = 0;
+                        if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address),
+                            &pixel, sizeof(pixel), &read) || read != sizeof(pixel)) continue;
+                        ++samples;
+                        const BYTE alpha = static_cast<BYTE>(pixel >> 24);
+                        if (!alpha) { ++alphaZero; if (!(pixel & 0xFFFFFF)) ++blackZero; }
+                        else if (alpha == 255) { ++alphaFull; if (!(pixel & 0xFFFFFF)) ++blackFull; }
+                        else ++alphaPartial;
+                    }
+            }
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiToggle] copy api=%s hwnd=0x%p dest=0x%p src=0x%p srcType=%u bmp=0x%p bitmap=%ldx%ld bpp=%u dib=%d bits=%d samples=%u a0=%u a255=%u apart=%u blackA0=%u blackA255=%u dst=[%d,%d,%d,%d] srcRect=[%d,%d,%d,%d] rop=0x%08X result=%d",
+                api, session.hwnd, dest, source, source ? static_cast<unsigned>(GetObjectType(source)) : 0,
+                bitmap, bm.bmWidth, bm.bmHeight, static_cast<unsigned>(bm.bmBitsPixel),
+                got == sizeof(DIBSECTION), got == sizeof(DIBSECTION) && bm.bmBits != nullptr,
+                samples, alphaZero, alphaFull, alphaPartial, blackZero, blackFull,
+                x, y, width, height, sx, sy, sw, sh, static_cast<unsigned>(rop), result);
+        }
+
+        BOOL WINAPI TraceBitBlt(HDC dest, int x, int y, int width, int height,
+            HDC source, int sx, int sy, DWORD rop)
+        {
+            const DWORD entryError = GetLastError();
+            auto orig = g_dispatcher.GetOrg<CopyBitBlt, decltype(&BitBlt)>();
+            if (!orig) { SetLastError(entryError); return BitBlt(dest, x, y, width, height, source, sx, sy, rop); }
+            const bool tracked = !g_sessions.empty() && g_sessions.back().eligible
+                && !g_sessions.back().isPaint && g_sessions.back().windowDC == dest
+                && WindowFromDC(dest) == g_sessions.back().hwnd
+                && GlassCore::PaintDispatcher::IsTopWindowDrawingSession(g_sessions.back().hwnd);
+            Session session{};
+            if (tracked) session = g_sessions.back();
+            SetLastError(entryError);
+            const BOOL result = orig(dest, x, y, width, height, source, sx, sy, rop);
+            const DWORD error = GetLastError();
+            if (tracked) LogCopy(L"BitBlt", session, dest, x, y, width, height,
+                source, sx, sy, width, height, rop, result);
+            SetLastError(error);
+            return result;
+        }
+
+        BOOL WINAPI TraceStretchBlt(HDC dest, int x, int y, int width, int height,
+            HDC source, int sx, int sy, int sw, int sh, DWORD rop)
+        {
+            const DWORD entryError = GetLastError();
+            auto orig = g_dispatcher.GetOrg<CopyStretchBlt, decltype(&StretchBlt)>();
+            if (!orig) { SetLastError(entryError); return StretchBlt(dest, x, y, width, height, source, sx, sy, sw, sh, rop); }
+            const bool tracked = !g_sessions.empty() && g_sessions.back().eligible
+                && !g_sessions.back().isPaint && g_sessions.back().windowDC == dest
+                && WindowFromDC(dest) == g_sessions.back().hwnd
+                && GlassCore::PaintDispatcher::IsTopWindowDrawingSession(g_sessions.back().hwnd);
+            Session session{};
+            if (tracked) session = g_sessions.back();
+            SetLastError(entryError);
+            const BOOL result = orig(dest, x, y, width, height, source, sx, sy, sw, sh, rop);
+            const DWORD error = GetLastError();
+            if (tracked) LogCopy(L"StretchBlt", session, dest, x, y, width, height,
+                source, sx, sy, sw, sh, rop, result);
+            SetLastError(error);
+            return result;
+        }
+#endif
 
         int WINAPI ToggleFillRect(HDC dc, const RECT* rect, HBRUSH brush)
         {
