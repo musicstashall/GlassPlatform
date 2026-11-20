@@ -113,6 +113,27 @@ namespace GlassCore::EditControl
     thread_local bool                g_bypassEditBuffer = false;
     thread_local std::vector<RECT>   g_sessionBlacknessRects;
 
+#if defined(_DEBUG)
+    // Никакого текста пользователя; лимит отдельно для вызовов и flush.
+    [[nodiscard]] static bool AllowDelphiMemoLog(HWND hwnd, unsigned channel) noexcept
+    {
+        WCHAR cls[64]{};
+        if (!hwnd || !GetClassNameW(hwnd, cls, _countof(cls)) || _wcsicmp(cls, L"TMemo") != 0)
+            return false;
+        static thread_local ULONGLONG epoch[2]{};
+        static thread_local unsigned budget[2]{};
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch[channel] || now - epoch[channel] >= 1000)
+        {
+            epoch[channel] = now;
+            budget[channel] = 16;
+        }
+        if (!budget[channel]) return false;
+        --budget[channel];
+        return true;
+    }
+#endif
+
     // RichEdit20: политика BWM на весь клиент
     thread_local HWND    g_re20FullClientBgPrimedHwnd = nullptr;
     thread_local COLORREF g_re20LastAppliedEmBg = CLR_INVALID;
@@ -278,6 +299,13 @@ namespace GlassCore::EditControl
             return;
         }
         g_activeEditBuffer = nullptr;
+#if defined(_DEBUG)
+        if (AllowDelphiMemoLog(buf->hWnd, 1))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiMemo] Flush hwnd=0x%p focused=%d blackRects=%zu paintDepth=%zu dcDepth=%zu",
+                buf->hWnd, GetFocus() == buf->hWnd ? 1 : 0, g_sessionBlacknessRects.size(),
+                g_editSessionStack.size(), g_editDcStack.size());
+#endif
 
         GdiFlush();
 
@@ -663,6 +691,20 @@ namespace GlassCore::EditControl
             SetBkColor(targetDC, GetBkColor(hdc));
             SetBkMode(targetDC, GetBkMode(hdc));
         }
+
+#if defined(_DEBUG)
+        if (AllowDelphiMemoLog(sessionHwnd, 0))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiMemo] ExtTextOut hwnd=0x%p focused=%d dc=0x%p dcWnd=0x%p "
+                L"paintDepth=%zu dcDepth=%zu count=%u options=0x%X textColor=0x%08X bk=0x%08X "
+                L"wantSession=%d useSession=%d accepted=%d rects=%zu",
+                sessionHwnd, GetFocus() == sessionHwnd ? 1 : 0, hdc, WindowFromDC(hdc),
+                g_editSessionStack.size(), g_editDcStack.size(), c, options,
+                static_cast<unsigned>(GetTextColor(hdc)), static_cast<unsigned>(GetBkColor(hdc)),
+                wantSession ? 1 : 0, useSession ? 1 : 0,
+                EditSessionBufferAcceptsSourceDc(g_activeEditBuffer, sessionHwnd, hdc) ? 1 : 0,
+                g_sessionBlacknessRects.size());
+#endif
 
         // ── RichEdit20: фон на весь клиент (без изменений) ────────────────────
         if (IsRichEdit20Only(controlKind) && sessionHwnd)
@@ -1099,8 +1141,13 @@ namespace GlassCore::EditControl
 
         GlassCore::TextInk::EnsureTextInkClientRegistered(hWnd);
 
-        g_bypassEditBuffer = false;
-        g_sessionBlacknessRects.clear();
+        // GetDC может быть вложен в WM_PAINT: его начало не должно стирать
+        // накопленные ETO_OPAQUE-прямоугольники или сбрасывать fallback буфера.
+        if (g_editSessionStack.empty() && g_editDcStack.empty())
+        {
+            g_bypassEditBuffer = false;
+            g_sessionBlacknessRects.clear();
+        }
         if (IsRichEdit20Only(kind) && g_editSessionStack.empty())
         {
             g_re20FullClientBgPrimedHwnd = nullptr;

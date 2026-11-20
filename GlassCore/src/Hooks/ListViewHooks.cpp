@@ -614,8 +614,8 @@ namespace GlassCore::ListViewControl
     // Отдельные лимиты для Begin и Fill; возобновляются после очистки лога.
     [[nodiscard]] static bool AllowDelphiListViewLog(unsigned channel) noexcept
     {
-        static thread_local ULONGLONG epoch[2]{};
-        static thread_local unsigned budget[2]{};
+        static thread_local ULONGLONG epoch[3]{};
+        static thread_local unsigned budget[3]{};
         const ULONGLONG now = GetTickCount64();
         if (!epoch[channel] || now - epoch[channel] >= 1000)
         {
@@ -1393,9 +1393,14 @@ namespace GlassCore::ListViewControl
 #if defined(_DEBUG)
         if (IsDelphiListView(hWnd) && AllowDelphiListViewLog(0))
         {
+            WCHAR cls[128]{};
+            RECT client{};
+            GetClassNameW(hWnd, cls, _countof(cls));
+            GetClientRect(hWnd, &client);
             DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiListView] Begin hwnd=0x%p caller=0x%p bkBefore=0x%08X textBkBefore=0x%08X flipped=%d first=%d",
-                hWnd, callerMod, static_cast<unsigned>(vclBkBefore), static_cast<unsigned>(vclTextBkBefore),
+                L"[GlassCore][DelphiListView] Begin hwnd=0x%p class=%s client=[%ld,%ld,%ld,%ld] caller=0x%p bkBefore=0x%08X textBkBefore=0x%08X flipped=%d first=%d",
+                hWnd, cls, client.left, client.top, client.right, client.bottom, callerMod,
+                static_cast<unsigned>(vclBkBefore), static_cast<unsigned>(vclTextBkBefore),
                 diagFlipped ? 1 : 0, firstPaint ? 1 : 0);
         }
 #endif
@@ -1437,6 +1442,13 @@ namespace GlassCore::ListViewControl
         if (!hdc || !ps || IsRectEmpty(&ps->rcPaint))
             return false;
 
+#if defined(_DEBUG)
+        if (!g_lvSessionStack.empty() && IsDelphiListView(hWnd) && AllowDelphiListViewLog(2))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiListView] PostBegin hwnd=0x%p rect=[%ld,%ld,%ld,%ld] erase=%d blackout=%d",
+                hWnd, ps->rcPaint.left, ps->rcPaint.top, ps->rcPaint.right, ps->rcPaint.bottom,
+                ps->fErase ? 1 : 0, g_lvSessionStack.back().needBlackout ? 1 : 0);
+#endif
         if (g_lvSessionStack.empty() || !g_lvSessionStack.back().needBlackout)
             return false; // фон уже чернили: не стробим, fErase не трогаем
         g_lvSessionStack.back().needBlackout = false;

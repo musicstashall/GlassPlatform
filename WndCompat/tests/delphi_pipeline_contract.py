@@ -62,7 +62,17 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('[GlassCore][DelphiListView] FillRect', lv)
         self.assertIn('AllowDelphiListViewLog(0)', lv)
         self.assertIn('AllowDelphiListViewLog(1)', lv)
+        self.assertIn('AllowDelphiListViewLog(2)', lv)
+        self.assertIn('[GlassCore][DelphiListView] PostBegin', lv)
         self.assertIn('now - epoch[channel] >= 1000', lv)
+
+    def test_edit_getdc_preserves_active_paint_state(self):
+        source = read("GlassCore/src/Hooks/EditHooks.cpp")
+        getdc = source.split("static void OnGetDCEdit", 1)[1].split("static void OnReleaseDCEdit", 1)[0]
+        self.assertRegex(getdc, r'(?s)if \(g_editSessionStack.empty\(\) && g_editDcStack.empty\(\)\)\s*\{\s*g_bypassEditBuffer = false;\s*g_sessionBlacknessRects.clear\(\);\s*\}')
+        self.assertIn('[GlassCore][DelphiMemo] ExtTextOut', source)
+        self.assertIn('[GlassCore][DelphiMemo] Flush', source)
+        self.assertIn('_wcsicmp(cls, L"TMemo")', source)
 
     def test_tab_brush_is_not_restored_to_another_class(self):
         source = read("WndCompat/Controls/TabControlSubclass.cpp")
