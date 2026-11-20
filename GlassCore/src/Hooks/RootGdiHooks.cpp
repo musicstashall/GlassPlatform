@@ -887,6 +887,10 @@ namespace GlassCore::Root
         // даже если они вызваны во время paint этой таблицы.
         // VCL-таблицы рисуют себя сами из EXE (TCustomGrid.WMPaint → TCanvas):
         // TShownValueList (msinfo), TStringGrid/TDrawGrid — одна и та же процедура.
+        // Низкая альфа для ячеек таблиц, цвет которых отличается от COLOR_WINDOW:
+        // цвет виден, но стекло просвечивает (тот же порядок, что у темы/комбо).
+        constexpr BYTE kDelphiGridCellAlpha = 35;
+
         [[nodiscard]] static bool IsDelphiGridClass(const wchar_t* cls) noexcept
         {
             return StrEqI(cls, L"TShownValueList")
@@ -977,13 +981,13 @@ namespace GlassCore::Root
             LOGBRUSH lb{};
             const bool haveBrush = brush
                 && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
-            // Фиксированные строка/колонка TStringGrid и часть ячеек TDrawGrid
-            // заливаются COLOR_BTNFACE, а не белым — гасим оба системных цвета.
+            // COLOR_WINDOW — прозрачный фон ячеек. Прочие цвета (например
+            // clBtnFace фиксированных ячеек) приходят уже alpha-кистью и здесь
+            // только проходят в orig().
             const COLORREF plainFill = lb.lbColor & 0xFFFFFF;
             const bool systemFill = haveBrush && lb.lbStyle == BS_SOLID
                 && (plainFill == 0
-                    || plainFill == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
-                    || plainFill == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF));
+                    || plainFill == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF));
             if (rect && !IsRectEmpty(rect) && systemFill
                 && PatBlt(dc, rect->left, rect->top, rect->right - rect->left,
                     rect->bottom - rect->top, BLACKNESS))
@@ -1276,6 +1280,23 @@ namespace GlassCore::Root
                 // получают чёрные кисти вместо системных. В Full — прежнее поведение.
                 if (IsFullInjectionMode() || GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() != nullptr)
                 {
+                    if (const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())
+                    {
+                        wchar_t hostCls[64]{};
+                        if (GetClassNameW(host, hostCls, _countof(hostCls))
+                            && IsDelphiGridClass(hostCls))
+                        {
+                            if (nIndex == COLOR_WINDOW)
+                                return CreateSolidBrush(0);
+                            if (nIndex == COLOR_BTNFACE)
+                            {
+                                if (HBRUSH cell = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(
+                                        GetSysColor(COLOR_BTNFACE), kDelphiGridCellAlpha))
+                                    return cell;
+                                return o(nIndex);
+                            }
+                        }
+                    }
                     if (nIndex == COLOR_WINDOW || nIndex == COLOR_BTNFACE || nIndex == COLOR_MENU)
                     {
                         // Диагностика ограничена по числу срабатываний: видно, от каких модулей
@@ -1328,23 +1349,22 @@ namespace GlassCore::Root
             GetModuleFileNameW(caller, baseBuf, MAX_PATH);
             const std::wstring base = BasenamePtr(baseBuf);
 
-            // VCL-таблицы (TStringGrid/TDrawGrid/TShownValueList): фон ячеек и
-            // заголовка — только COLOR_WINDOW→0. Никаких alpha-кистей: всё
-            // остальное отдаём как есть.
+            // VCL-таблицы (TStringGrid/TDrawGrid/TShownValueList): COLOR_WINDOW →
+            // прозрачный фон, прочие цвета → низкая альфа (стекло просвечивает).
             if (const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())
             {
                 wchar_t hostCls[64]{};
                 if (GetClassNameW(host, hostCls, _countof(hostCls)) && IsDelphiGridClass(hostCls))
                 {
-                    // Фон таблиц: только «оконные» цвета системы → прозрачный
-                    // (COLOR_WINDOW: ячейки; COLOR_BTNFACE: фиксированные
-                    // строка/колонка TStringGrid и часть ячеек TDrawGrid).
-                    // Остальные цвета — обычная кисть, без alpha.
+                    // Фон таблиц: COLOR_WINDOW → полностью прозрачный, любой
+                    // другой цвет (фиксированные ячейки clBtnFace и т.п.) →
+                    // низкая альфа, чтобы цвет отличался от фона и просвечивал.
                     const COLORREF plainGrid = color & 0xFFFFFF;
-                    if (!plainGrid
-                        || plainGrid == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
-                        || plainGrid == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF))
+                    if (!plainGrid || plainGrid == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF))
                         return o(RGB(0, 0, 0));
+                    if (HBRUSH cell = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(
+                            color, kDelphiGridCellAlpha))
+                        return cell;
                     return o(color);
                 }
             }
