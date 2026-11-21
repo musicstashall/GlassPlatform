@@ -178,6 +178,7 @@
     <ClCompile Include="src\Core\Intercept\CodePatcher.cpp" />
     <ClCompile Include="src\Hooks\ButtonHooks.cpp" />
     <ClCompile Include="src\Hooks\delphi\TBackgroundHooks.cpp" />
+    <ClCompile Include="src\Hooks\delphi\TPanelDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\TInputHooks.cpp" />
     <ClCompile Include="src\Hooks\delphi\TListBoxDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\TListBoxProbe.cpp" />
@@ -262,6 +263,7 @@
     <ClInclude Include="Include\Core\Utils.h" />
     <ClInclude Include="Include\Hooks\Button.h" />
     <ClInclude Include="Include\Hooks\delphi\TBackgroundHooks.h" />
+    <ClInclude Include="Include\Hooks\delphi\TPanelDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\TInputHooks.h" />
     <ClInclude Include="Include\Hooks\delphi\TListBoxDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\TListBoxProbe.h" />

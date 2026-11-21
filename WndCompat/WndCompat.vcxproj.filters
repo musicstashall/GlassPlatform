@@ -322,6 +322,9 @@
     <ClInclude Include="Root\RootSubclassShared.h">
       <Filter>Root</Filter>
     </ClInclude>
+    <ClInclude Include="Root\DelphiPanelPaint.h">
+      <Filter>Root</Filter>
+    </ClInclude>
     <ClInclude Include="Root\TaskbarHost.h">
       <Filter>Root</Filter>
     </ClInclude>

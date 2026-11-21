@@ -18,11 +18,14 @@
 
 Контейнеры подключаются к обычному root-пути при Full и разрешённом backdrop;
 перечисленные обёртки штатных контролов направляются в их существующие
-провайдеры. На `TGroupBox`, `TTabSheet`, `TPanel`, `TScrollBox` дополнительно
-включается в BeginPaint/GetDC сессионный IAT `DrawThemeTextEx` модуля EXE.
-Обработка ограничена совпадающим HWND оконного DC и хозяином сессии текущего
-потока, пропускает измерение и callback, сохраняет DTTOPTS и при ошибке
-использует оригинал. `TPageControl` не меняет общую кисть класса табов.
+провайдеры. На `TGroupBox`, `TTabSheet` и точном наборе панелей/фреймов из
+`GlassDelphiPanel.h` (включая `TFrame`, `TSampleFrame`, `TEmbeddedForm`)
+дополнительно включается в BeginPaint/GetDC сессионный IAT `DrawThemeTextEx`
+модуля EXE. Обработка проверяет HWND оконного DC и хозяина сессии текущего
+потока либо DC native paint-моста панелей, пропускает измерение и callback,
+сохраняет DTTOPTS и при сообщённой ошибке использует оригинал. Подробности
+фона и расширения текста — тесты 85–86 ниже. `TPageControl` не меняет общую
+кисть класса табов.
 Исходный диагностический зонд не включается.
 
 ## Ограничения и проверка на Windows
@@ -2970,3 +2973,149 @@ MSVC-сборка и пиксельный результат этого шага
 затем `paint ... began=1` и `text api=DrawThemeText` (либо `DrawTextExW`) с темой,
 `text api=DrawTextW` без темы. До этих строк менять цвет/alpha текста вслепую
 не следует.
+
+## Тест 85: цветные панели и фреймы — родное стирание вместо потери Brush.Color
+
+Пользователь закрыл задачу TCoolBar после `5076d5c`. Его путь больше не
+изменяется. Следующие требования: для панелей фон, отличающийся от текущих
+`COLOR_WINDOW` **и** `COLOR_BTNFACE`, сохранять с **alpha=100/255**, системные
+два цвета чернить штатно; у `TFrame`, `TSampleFrame`, `TEmbeddedForm` нет текста.
+
+`LogViewer-16.log` записан при отображении **с визуальными стилями**. PID 31856,
+TID 11116; зонд подтверждает точные оконные классы и родной текстовый маршрут:
+
+| Время | HWND / класс | Операции на том же оконном DC |
+|---|---|---|
+| 15:16:26.687 | `0x3100FE` / `TEmbeddedForm` | WndCompat BLACKNESS `498x58`, EXE DrawThemeTextEx `Edit` part/state=1/1, подпись, rect `[0,0,92,15]` |
+| 15:16:34.588 | `0x240666` / `TFrame` | WndCompat BLACKNESS `198x58`, тот же API/тема, rect `[0,0,40,15]` |
+| 15:17:18.754 | `0x600598` / `TSampleFrame` | WndCompat BLACKNESS `260x60`, тот же API/тема, rect `[0,0,79,15]` |
+
+Во всех трёх случаях `textFlags=0x40` (`DT_EXPANDTABS`),
+`DTTOPTS(size=72 flags=0x801)` (`DTT_TEXTCOLOR | DTT_GLOWSIZE`), затем
+`uxtheme!DrawTextExW(lpdtp=NULL)` и glyph-index `ExtTextOutW`. Это не отсутствие
+родного вывода текста. Новых классов нет в whitelist существующего VCL DTTEx.
+Самих цветных заливок этих окон в журнале нет: `RootSubclassProc` поглощал
+`WM_ERASEBKGND` и возвращал после BLACKNESS, не вызывая VCL. Исходный цвет
+по такому журналу установить нельзя; получать его из имени класса/темы или
+общей кисти класса было бы неверно.
+
+**Шаг 1 — только фон, отдельный коммит:**
+
+- общий точный список `GlassDelphiPanel.h`: `TPanel`, `TFlowPanel`, `TGridPanel`,
+  `TStackPanel`, `TRelativePanel`, `TCategoryPanel`, `TCategoryPanelGroup`,
+  `TScrollBox`, `TFrame`, `TSampleFrame`, `TEmbeddedForm`. Без поиска подстрок
+  и без расширения на произвольные формы/потомки; классификация — DelphiContainer;
+- узкий мост `Root/DelphiPanelPaint.h` до общего WM_ERASEBKGND вызывает родной
+  `DefSubclassProc` в собственной сессии `Hooks/delphi/TPanelDraw`. Сохраняются
+  WM_PAINT, WM_ERASEBKGND и WM_PRINTCLIENT с исходными параметрами/результатом;
+- только сессионные EXE IAT FillRect, PatBlt(PATCOPY), пустой ExtTextOutW(ETO_OPAQUE).
+  Проверяется сплошной цвет **реальной** кисти/фона DC, полная клиентская заливка
+  или стандартный bevel-inset; узкие chrome-полосы и узорные кисти остаются native;
+- сравниваются только два текущих системных COLORREF, без hardcoded белого/чёрного.
+  Цветной фон: BLACKNESS + 1x1 premultiplied BGRA DIB + GdiAlphaBlend(AC_SRC_ALPHA),
+  A=100, SourceConstantAlpha=255. Повторный repaint не накапливает альфу;
+- generic root CreateSolidBrush/GetSysColorBrush/SetBkColor не включаются для
+  этих панелей: иначе цвет мог бы превратиться в BLACK/pattern до проверки;
+- Full + разрешённый backdrop; оконный DC принадлежит текущему HWND, явно
+  переданный DC сообщения принимается напрямую, прочий memory DC требует
+  подтверждения PaintDispatcher. Снимаются только приобретённые refs;
+- необязательные экспорты моста зарегистрированы также в `.def` для x86;
+  ABI GlassCoreProviders не меняется. Startup/Shutdown и projects/filters
+  подключены. У таблиц, списков и принятого TCoolBar код не менялся.
+
+Проверки: source-contract дополнен маршрутами/цветовой политикой/сборочным
+wiring; `panel_rendering_test.py` исполняет production hooks и message bridge,
+а не копию алгоритма. Проверяются точные классы, родной erase, DIB-байты alpha=100,
+изменение системных цветов, повторная заливка, сохранение bevel, чужие DC,
+WM_PRINTCLIENT, отказы GDI, reentry, вложенные сессии, отсутствующие импорты/
+экспорты, Full/backdrop/shutdown. Doubles не проверяют Windows IAT-цепочки,
+реальную композицию и MSVC-сборку. Произвольные BPL/GetProcAddress-рисовальщики
+и нестандартные большие bevel-inset этим EXE IAT-путём не гарантируются.
+
+Проверки шага 1 в Linux: contracts **63/63**, panel C++ **6/6** (также
+ASan/UBSan), контрольный CoolBar C++ **9/9**, UTF-8, XML projects и
+`git diff --check` — OK. Исходный входящий LogViewer-16 после сохранения
+выводов удалён; копии журнала в репозитории нет.
+
+Текст на момент шага 1 оставался следующим отдельным шагом (реализация —
+тест 86 ниже). Визуальный результат нового фона на Windows пока не проверен;
+ожидаются `[GlassCore][DelphiPanel] Begin ... class="TFrame"` и
+`background ... color=... alpha=100 ok=1` (для системного фона — `alpha=0`).
+
+## Тест 86: themed-текст TEmbeddedForm, TFrame и TSampleFrame
+
+**Шаг 2 — отдельный коммит после фонового `e247773`.** Новый исходный журнал
+не требуется для установления API: в тесте 85 уже подтверждён именно
+`EXE!DrawThemeTextEx(Edit, 1, 1)`. Старый themed-перехват не был потерян:
+его включение в RootWindowHooks **и** обработчик в RootGdiHooks разрешали
+только `TGroupBox`, `TTabSheet`, `TPanel`, `TScrollBox`. Три новых точных
+оконных класса не проходили ни первый, ни второй фильтр. Название темы `Edit`
+не делает эти HWND элементами ввода и не должно выбирать для них EditHooks.
+
+Изменения:
+
+- root-кеш BeginPaint/GetDC использует общий точный предикат панелей/фреймов,
+  плюс прежние `TGroupBox` и `TTabSheet`. Substring-поиска, произвольных
+  потомков форм и изменений TCoolBar/Rebar нет;
+- сам root IAT-обработчик получает original из **установленного EXE-слота**,
+  а не угадывает модуль по `_ReturnAddress`: при наличии IAT-цепочки адрес
+  возврата может оказаться внутри GlassCore. Это не утверждение, что такой
+  сбой отдельно доказан журналом, а устранение зависимости от trampoline
+  для слота, который заведомо устанавливается только на EXE;
+- проверка и компоновка вынесены в `delphi/TPanelDraw::DrawContainerThemeTextEx`.
+  Сохраняется старый путь четырёх контейнеров; добавлены все точные классы
+  общего panel-предиката. DC должен совпадать с текущим оконным paint-owner
+  либо быть подтверждён native message-сессией панели. Чужие и произвольные
+  memory DC не считаются принадлежащими панели;
+- используются прежний `Text::DrawThemeContent` с прозрачным буфером и
+  исходный DrawThemeTextEx: тот же HTHEME, part/state, текст, count и flags.
+  `DTTOPTS` копируются целиком; добавляется **только `DTT_COMPOSITED`**.
+  Не подменяются цвет, font props или glow. Для зондовых `size=72, flags=0x801`
+  renderer получает `0x2801`; исходная структура вызывающего кода не меняется;
+- `DT_CALCRECT`, `DTT_CALCRECT`, `DTT_CALLBACK`, неподдержанный размер DTTOPTS,
+  `DT_MODIFYSTRING`, пустые/некорректные входы остаются native. Прямоугольник
+  реального рисования копируется; расчётный оригинал может менять RECT
+  штатно. Сообщённая ошибка буфера/рисования возвращает вызов original на
+  исходный DC с исходными опциями. Reentry и shutdown остаются native;
+- текст не стирает фон панели. Внутренние DrawTextEx/glyph-index ExtTextOut
+  из uxtheme/gdi32full не перехватываются новым общесистемным хуком.
+  Алгоритм RenderText, alpha=100 фонового шага, таблицы, списки и иконки
+  не изменены.
+
+Диагностика с отдельным лимитом 16 строк/сек на поток:
+
+```
+[GlassCore][DelphiPanel] text api=DrawThemeTextEx hwnd=... class="TFrame" dc=... dcWnd=... panelDc=1 theme=... part=1 state=1 flags=0x40 options=0x801 bufferHr=0x00000000 drawHr=0x00000000
+```
+
+Это подтверждение прохождения renderer и его HRESULT, **не** независимое
+измерение пиксельной альфы. Отсутствие строки не доказывает отсутствия
+исходного API. Проверить на Windows три подписи с темой и несистемный цветной
+фон под ними, повторный repaint/resize, стандартные TPanel/TScrollBox и
+TGroupBox/TTabSheet. Нужна совместная сборка GlassCore и WndCompat из обоих
+коммитов фонового/текстового шага.
+
+Проверки в Linux:
+
+- `python3 WndCompat/tests/delphi_pipeline_contract.py` — **65/65**;
+- `python3 WndCompat/tests/panel_rendering_test.py -v` — **10/10** C++-сценариев.
+  Помимо шести фоновых исполняются production text-helper и извлечённые **без
+  копирования алгоритма** root class-gate/обработчик. Проверяются все точные
+  классы, EXE-only модуль и переданный chain-original, реальные значения
+  трёх зондовых RECT/flags/options, сохранение уже нанесённой alpha100-заливки,
+  legacy-контейнеры, изоляция DC, измерение/callback, ошибки и reentry;
+- целевая red-проверка: подстановка **только прежнего exact-four root gate**
+  в компилируемую тестовую выдержку приводит к ожидаемому отказу root-route
+  сценария на `TEmbeddedForm`. Production-файлы для проверки не менялись;
+- те же **10/10** panel-сценариев с ASan/UBSan — OK;
+- контрольный `coolbar_rendering_test.py` — **9/9**; его production-код и тесты
+  в этих двух шагах не менялись;
+- `git diff --check`, UTF-8 изменённых файлов — OK.
+
+Ограничения: Win32/IAT/RenderText doubles не проверяют реальные PE/IAT-цепочки,
+MSVC, Windows uxtheme или итоговые пиксели. Standalone WM_PRINTCLIENT без
+BeginPaint/GetDC не приобретает root text-слот: тестируется только принятие
+явно переданного DC композитором при уже активном перехвате; для фона native
+WM_PRINTCLIENT-мост работает самостоятельно. Произвольные BPL/GetProcAddress
+и неизвестные offscreen DC по-прежнему не гарантируются. Визуальный результат
+на Windows ещё не проверен.

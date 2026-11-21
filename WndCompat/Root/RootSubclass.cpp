@@ -51,6 +51,7 @@
 #include "Root/RootExplorerSubclassBridge.h"
 #include "Root/ExplorerRootSubclass.h"
 #include "Root/RootSubclassShared.h"
+#include "Root/DelphiPanelPaint.h"
 #include "Root/RootBackdropRefreshThrottle.h"
 #include "Root/TaskbarHost.h"
 #include <string>
@@ -992,6 +993,12 @@ namespace
 
         if (WndCompat::IsShuttingDown())
             return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+
+        // VCL-панелям нужен исходный Brush.Color: безусловный BLACKNESS в
+        // WM_ERASEBKGND ниже уничтожает его до вызова родного VCL-обработчика.
+        LRESULT panelResult{};
+        if (WndCompat::TryHandleDelphiPanelPaint(hWnd, uMsg, wParam, lParam, panelResult))
+            return panelResult;
 
         switch (uMsg)
         {

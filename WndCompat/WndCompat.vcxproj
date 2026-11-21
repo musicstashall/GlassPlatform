@@ -275,6 +275,7 @@
     <ClInclude Include="Root\TaskbarHost.h" />
     <ClInclude Include="Root\RootExplorerSubclassBridge.h" />
     <ClInclude Include="Root\RootSubclassShared.h" />
+    <ClInclude Include="Root\DelphiPanelPaint.h" />
     <ClInclude Include="Explorer\ExplorerIslandContainerSubclass.h" />
     <ClInclude Include="Tracker\WindowClassifier.h" />
     <ClInclude Include="Tracker\WindowClassUtils.h" />
