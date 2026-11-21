@@ -207,6 +207,15 @@ class DelphiPipelineContract(unittest.TestCase):
                            'kRestoratorMemoSlots', 'Restorator memo EXE thunks:'):
             self.assertIn(production, runner)
 
+    def test_restorator_memo_scope_exit_matches_wil_callback_constraints(self):
+        code = read('GlassCore/src/Hooks/delphi/RestoratorMemoDraw.cpp')
+        self.assertIn('wil::scope_exit([&]() noexcept { restoreNow(); })', code)
+        self.assertNotIn('wil::scope_exit(restoreNow)', code)
+        shim = read('WndCompat/tests/coolbar_test_shim.h')
+        self.assertIn('auto scope_exit(F&& fn)', shim)
+        self.assertIn('!std::is_reference_v<F>', shim)
+        self.assertIn('std::is_same_v<decltype(fn()), void>', shim)
+
     def test_new_vcl_input_and_bitbtn_use_existing_providers(self):
         classifier = read("WndCompat/Tracker/WindowClassifier.cpp")
         for cls, kind in (("TBitBtn", "Button"), ("TLabeledEdit", "Edit"),

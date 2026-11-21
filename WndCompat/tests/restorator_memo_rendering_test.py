@@ -112,6 +112,24 @@ class RestoratorMemoRenderingTest(unittest.TestCase):
                 result = subprocess.run([str(binary), name], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_scope_exit_double_rejects_reference_and_non_void_callbacks(self):
+        compiler = shlex.split(os.environ.get('CXX', 'g++'))
+        source = Path(self.tmp.name) / 'invalid-scope-exit.cpp'
+        cases = (
+            ('const auto restoreNow = [] {}; auto guard = wil::scope_exit(restoreNow);',
+             'scope_exit should only be directly used with a lambda'),
+            ('auto guard = wil::scope_exit([] { return 1; });',
+             'scope_exit lambdas must not have a return value'),
+        )
+        for body, diagnostic in cases:
+            with self.subTest(diagnostic=diagnostic):
+                source.write_text('#include "coolbar_test_shim.h"\nvoid Invalid() { ' + body + ' }\n', encoding='utf-8')
+                result = subprocess.run(compiler + [
+                    '-std=c++20', '-fsyntax-only', '-I', str(ROOT / 'WndCompat/tests'), str(source),
+                ], capture_output=True, text=True, timeout=30)
+                self.assertNotEqual(result.returncode, 0, 'The WIL double accepted an invalid callback')
+                self.assertIn(diagnostic, result.stderr)
+
     def test_exact_classes_process_and_no_generic_half_route(self): self.run_case('classes')
     def test_each_missing_or_conflicting_import_rolls_back_only_acquired_refs(self): self.run_case('transaction')
     def test_real_paint_provider_post_erase_then_ansi_memory_dc_path(self): self.run_case('paint')

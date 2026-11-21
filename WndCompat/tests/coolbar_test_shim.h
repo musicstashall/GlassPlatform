@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -219,7 +220,14 @@ namespace wil
         Guard lock_shared() { return {}; }
     };
     template <typename F> struct ScopeExit { F fn; ~ScopeExit() { fn(); } };
-    template <typename F> auto scope_exit(F fn) { return ScopeExit<F>{std::move(fn)}; }
+    // Match WIL lambda_call's forwarding deduction and constructor checks:
+    // a by-value double silently accepted lvalue callbacks that real WIL rejects.
+    template <typename F> auto scope_exit(F&& fn)
+    {
+        static_assert(std::is_same_v<decltype(fn()), void>, "scope_exit lambdas must not have a return value");
+        static_assert(!std::is_reference_v<F>, "scope_exit should only be directly used with a lambda");
+        return ScopeExit<F>{std::forward<F>(fn)};
+    }
     using unique_hfont = std::unique_ptr<TestFont>;
 }
 namespace GlassCore::ModuleHandler

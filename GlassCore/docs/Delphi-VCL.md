@@ -3996,3 +3996,39 @@ RestoratorMemo записи, включая hooks/erase/text, а не тольк
 - **Windows/MSVC Win32/x64 и визуальная проверка Restorator здесь недоступны**.
   Doubles не проверяют реальные codepages, IAT-патчинг, растеризацию GDI или
   перенос alpha через конечный bitmap/StretchBlt. Визуальный PASS не заявлен.
+
+## Тест 98: сборочная ошибка C2338 — WIL scope_exit и именованная лямбда
+
+Пользователь сообщил `static_assert failed: 'scope_exit should only be directly
+used with a lambda'` в `wil/resource.h:551`, пакет **WIL 1.0.260126.7**.
+Причина — добавленный в `RestoratorMemoDraw.cpp::DrawAnsi` вызов
+`wil::scope_exit(restoreNow)`: const-лямбда передавалась как **lvalue**.
+Сверен [исходник именно этой версии WIL](https://github.com/microsoft/wil/blob/v1.0.260126.7/include/wil/resource.h#L539-L552):
+`scope_exit(TLambda&&)` сохраняет выведенный тип, и `lambda_call` запрещает
+ссылочные TLambda. Для такого аргумента получается `const lambda&`.
+
+Единственная production-правка — временная обёртка:
+
+```cpp
+auto restore = wil::scope_exit([&]() noexcept { restoreNow(); });
+```
+
+Существующая идемпотентная `restoreNow` и её ранний вызов перед native fallback
+сохранены. Порядок восстановления DC и логика рисования не меняются. WIL,
+static_assert, настройки проекта и версия зависимости **не изменяются**.
+
+Прежний portable double принимал callable **по значению**, отбрасывал ссылку
+и потому пропустил эту несовместимость. Теперь он использует forwarding reference
+и те же существенные проверки WIL: нессылочный тип и void return. Сначала
+ужесточён только double: сборка прежнего production-файла воспроизвела тот же
+static_assert на вызове restoreNow. После production-правки сборка проходит.
+Добавлена compile-negative проверка: именованная lvalue-лямбда и callback,
+возвращающий не void, обязаны отвергаться с соответствующими WIL diagnostics.
+
+Проверки: contracts **77/77**; memo suite **14/14** (13 runtime-сценариев в
+Release/Debug и один compile-negative тест с двумя входами), также **ASan/UBSan**;
+button groups **9/9 × Release/Debug**, panels **12/12 × Release/Debug**,
+TCoolBar **9/9**, input icons **6/6** — PASS. UTF-8/diff checks — PASS.
+Полная Windows/MSVC-сборка здесь недоступна; это адресная правка установленной
+причины C2338, не заявление о проверке всей Windows-сборки. Визуальный результат
+memo/gutter из теста 97 по-прежнему требует проверки в Restorator.

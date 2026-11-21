@@ -230,7 +230,7 @@ namespace GlassCore::RestoratorMemo
         // preparation pixels: native fallback is a repaint, not a pixel rollback.
         bool restored = false;
         const auto restoreNow = [&] { if (!restored) { RestoreDC(dc, saved); restored = true; } };
-        auto restore = wil::scope_exit(restoreNow);
+        auto restore = wil::scope_exit([&]() noexcept { restoreNow(); });
         const auto fallback = [&](LPCWSTR reason) { restoreNow(); return nativeReason(reason); };
         const auto background = GetBkColor(dc);
         const bool opaque = GetBkMode(dc) == OPAQUE;
