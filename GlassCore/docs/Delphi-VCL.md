@@ -2319,3 +2319,32 @@ fallback на `ExtTextOutW`.
   «неизвестно» кодируется `-1`.
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 68: TControlList (двойная буферизация через StretchBlt)
+
+Зонд по `TControlList` (`hwnd=0x9D0AD4`) показал необычный путь — элемент
+рисуется **в промежуточный bitmap**, а затем копируется на окно:
+
+- `PatBlt hdc=0xFFFFFFFFC5011943 (0,0) 219x96 rop=0x00FF0062` — `WHITENESS`,
+  очистка буфера в белый (`hdcWin=-`, оконного окна нет);
+- `FillRect hdc=0xFFFFFFFFC6011943 rect=[0,0,219,96] style=0 color=0x00FFFFFF`
+  — фон всего клиента в буфере;
+- `ExtTextOutW hdc=0xFFFFFFFFC6011943 x=8 y=4 opt=0x0 rect=- c=14 text="TControlList 0…3"`
+  — текст элементов в буфер (прямоугольник не передаётся);
+- `StretchBlt hdcDest=0x5B010103 ← hdcSrc=0xFFFFFFFFC6011943 219x96 SRCCOPY`
+  — буфер на окно.
+
+Класс `TControlList` (наследник `TCustomControl`, не `TCustomGrid`) в списках
+таблиц отсутствовал, поэтому ни один слот не включался: белый буфер уходил на
+экран как есть (непрозрачный фон), а текст терялся в color key.
+
+Добавлено `TControlList` во все списки таблиц (`IsDelphiGridClass`, `GenFill`,
+классификация root-окна, динамические спеки на модуле caller'а,
+`Root_OnDelphiGridAfterBeginPaint`, чернение `WM_ERASEBKGND` в субклассе).
+Memory-DC принимается существующим правилом `IsDelphiGridPaintDC` (DC без окна
+при условии, что хост paint-сессии — таблица), поэтому `WHITENESS`/`FillRect`
+буфера уходят в чёрную очистку + тинт, а текст рисуется через
+`ExtTextOutWithAlpha`. Реконструкция фиксированной области не включается:
+origin `(0,0)` → `haveRow`/`haveCol` ложны.
+
+Сборка и визуальный результат на Windows не проверены.

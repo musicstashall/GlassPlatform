@@ -899,7 +899,8 @@ namespace GlassCore::Root
             return StrEqI(cls, L"TShownValueList")
                 || StrEqI(cls, L"TStringGrid")
                 || StrEqI(cls, L"TDrawGrid")
-                || StrEqI(cls, L"TValueListEditor");
+                || StrEqI(cls, L"TValueListEditor")
+                || StrEqI(cls, L"TControlList");
         }
 
         // Заливка прямоугольника цветом с истинной альфой: GDI не переносит
@@ -2294,7 +2295,8 @@ namespace GlassCore::Root
 
 #if defined(_DEBUG)
             if (lprc && hbr && (StrEqI(cls, L"TStringGrid") || StrEqI(cls, L"TDrawGrid")
-                || StrEqI(cls, L"TShownValueList") || StrEqI(cls, L"TValueListEditor")))
+                || StrEqI(cls, L"TShownValueList") || StrEqI(cls, L"TValueListEditor")
+                || StrEqI(cls, L"TControlList")))
             {
                 LOGBRUSH glb{};
                 const bool gok = GetObject(hbr, sizeof(glb), &glb) != 0;
