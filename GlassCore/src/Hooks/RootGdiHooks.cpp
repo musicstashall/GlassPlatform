@@ -23,8 +23,6 @@
 #include "CorePch.h"
 #include <Hooks/delphi/TPanelDraw.h>
 #include <Hooks/delphi/TButtonGroupsDraw.h>
-#include <Hooks/delphi/TBomeMemoDraw.h>
-#include <GlassBomeMemo.h>
 #include <GlassDelphiButtonGroups.h>
 #include <Hooks/RootGdiHooks.h>
 #include <Hooks/RootWindowHooks.h>
@@ -514,8 +512,6 @@ namespace GlassCore::Root
         int WINAPI Root_MyDelphiGridFill(HDC, const RECT*, HBRUSH);
         HRESULT WINAPI Root_MyDelphiGridTheme(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
         DWORD WINAPI Root_MyGetSysColor(int);
-        int WINAPI Root_MyBomeMemoText(HDC, LPCSTR, int, LPRECT, UINT);
-        int WINAPI Root_MyBomeMemoFill(HDC, const RECT*, HBRUSH);
         int WINAPI Root_MyDelphiGroupText(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
         int WINAPI Root_MyDelphiGroupFill(HDC, const RECT*, HBRUSH);
         template <size_t slot> BOOL WINAPI Root_MyDelphiGroupGradient(HDC, PTRIVERTEX, ULONG, PVOID, ULONG, ULONG);
@@ -585,12 +581,6 @@ namespace GlassCore::Root
                 "DrawThemeBackground", reinterpret_cast<PVOID>(Root_MyDelphiGridTheme) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv },
                 "GetSysColor", reinterpret_cast<PVOID>(Root_MyGetSysColor) },
-            // Bome memo ANSI paint slots (keep order in RootHookIndex).
-            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
-                "DrawTextA", reinterpret_cast<PVOID>(Root_MyBomeMemoText) },
-            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
-                "FillRect", reinterpret_cast<PVOID>(Root_MyBomeMemoFill) },
-            // Custom VCL group paint slots.
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
                 "DrawTextExW", reinterpret_cast<PVOID>(Root_MyDelphiGroupText) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
@@ -1466,25 +1456,6 @@ namespace GlassCore::Root
             return o(nIndex);
         }
 
-        // Bome memo EXE wrappers: the IAT slot, not a trampoline return address,
-        // identifies the original. PaintWindow supplies the exact HWND/DC gate.
-        int WINAPI Root_MyBomeMemoText(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
-        {
-            const auto original = GetRootOrg<OHK_BOME_MEMO_TEXT, decltype(&::DrawTextA)>(
-                GlassCore::ModuleHandler::g_entryPointModule);
-            if (!original) return ::DrawTextA(dc, text, count, rect, flags);
-            if (g_shutdown.load(std::memory_order_acquire)) return original(dc, text, count, rect, flags);
-            return GlassCore::DelphiBomeMemo::DrawAnsiText(original, dc, text, count, rect, flags);
-        }
-        int WINAPI Root_MyBomeMemoFill(HDC dc, const RECT* rect, HBRUSH brush)
-        {
-            const auto original = GetRootOrg<OHK_BOME_MEMO_FILL, decltype(&::FillRect)>(
-                GlassCore::ModuleHandler::g_entryPointModule);
-            if (!original) return ::FillRect(dc, rect, brush);
-            if (g_shutdown.load(std::memory_order_acquire)) return original(dc, rect, brush);
-            return GlassCore::DelphiBomeMemo::FillBackground(original, dc, rect, brush);
-        }
-
         int WINAPI Root_MyDrawTextW(
             HDC hdc, LPCWSTR t, int c, LPRECT rc, UINT fmt)
         {
@@ -1659,10 +1630,9 @@ namespace GlassCore::Root
             if (hFromDc)
                 GetClassNameW(hFromDc, cls, _countof(cls));
             // An outer root paint may still hold this generic EXE hook while a
-            // group or Bome control repaints. Preserve its actual background RGB.
+            // group repaints. Preserve its operation RGB for the dedicated path.
             if (caller == GlassCore::ModuleHandler::g_entryPointModule
-                && (GlassShared::IsDelphiButtonGroupsClassName(cls)
-                    || GlassShared::IsBomeMemoClassName(cls))) return o(hdc, color);
+                && GlassShared::IsDelphiButtonGroupsClassName(cls)) return o(hdc, color);
 
             if (!g_shutdown.load(std::memory_order_acquire)
                 && (0xFFFFFF & color) == GetSysColor(COLOR_WINDOW))
@@ -1731,8 +1701,7 @@ namespace GlassCore::Root
             if (!o)
                 return GetSysColorBrush(nIndex);
             if (caller == GlassCore::ModuleHandler::g_entryPointModule
-                && (GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())
-                    || GlassShared::IsBomeMemoWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())))
+                && GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
                 return o(nIndex);
             if (!g_shutdown.load(std::memory_order_acquire))
             {
@@ -1789,8 +1758,7 @@ namespace GlassCore::Root
             if (g_shutdown.load(std::memory_order_acquire))
                 return o(color);
             if (caller == GlassCore::ModuleHandler::g_entryPointModule
-                && (GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())
-                    || GlassShared::IsBomeMemoWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())))
+                && GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
                 return o(color);
 
             // PopupOnly: без активной paint-сессии (стеклянного popup'а) comctl32
