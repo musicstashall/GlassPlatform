@@ -2607,3 +2607,30 @@ ExtTextOutW caller=gdi32full.dll x=11 y=4 opt=0x10 c=8
   BLACKNESS`, `band edges … kept=… keyed=… of …`, `OnPaintBegin … fill=%d`.
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 76: TCoolBar — логов нет вовсе
+
+После теста 75 фон остался белым, а в журнале не появилось ни одной строки про
+rebar. Значит `Rebar_Attach` для этого окна не вызывался, сессия `RebarHooks`
+не открывается, и ни один из хуков полосы не срабатывает (текст в
+`image-46.png` — это собственная отрисовка VCL поверх белой полосы, а не наш
+alpha-путь).
+
+Почему так: `ControlKind::ReBar` обрабатывается только в ветке
+`WindowRole::Control` по Windows-событию. Если `TCoolBar` (или его
+`ReBarWindow32`) создан до инжекции, события CREATE по нему уже не будет, а
+догоняющего прохода по поддереву root-окна не существовало.
+
+Добавлено:
+
+- `WndCompat::Rebar_CatchUp(hRoot)` — рекурсивный `EnumChildWindows` по
+  поддереву root-окна (`EnumChildWindows` сам обходит всех потомков), attach для
+  классов `TCoolBar`/`ReBarWindow32`/`SizeableRebar`;
+- вызов из `Root_Attach` сразу после субкласса root-окна;
+- следы в журнале, чтобы следующий лог отвечал на вопрос «почему нет attach»:
+  `[WndCompat][Rebar] Rebar_Attach: skip (mode!=Full|!IsWindow) hwnd=…`,
+  `[WndCompat][WinEvent] Rebar_Attach: skip (allow=… parent=…) hwnd=…`,
+  `[WndCompat][Rebar] Rebar_CatchUp: root=… rebar-windows=N`,
+  `[WndCompat][Rebar] WM_PAINT hwnd=…` (бюджет 8/с).
+
+Сборка и визуальный результат на Windows не проверены.

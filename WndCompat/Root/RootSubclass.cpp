@@ -2026,6 +2026,10 @@ namespace WndCompat
         if (Shared::RootBackdropPolicy::IsHwndBackdropExempt(hRoot))
             Shared::GlassHostRegistry::MarkSubtreeGlassDisabled(hRoot);
 
+        // Rebar/TCoolBar в этом поддереве: догоняющий attach, иначе такие окна
+        // остаются без сабкласса (нет Windows-события CREATE после инжекции).
+        WndCompat::Rebar_CatchUp(hRoot);
+
         WndCompat::BackdropPolicyRescan::ScheduleSubtreeRescanAfterRootAttach(hRoot);
     }
 

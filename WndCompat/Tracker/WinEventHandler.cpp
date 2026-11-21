@@ -935,7 +935,12 @@ namespace
                     // не аттачим вовсе.
                     HWND parent = GetParent(hWnd);
                     if (!allowGlassForHwnd || !parent)
+                    {
+                        DebugLog(DBG_NORMAL,
+                            L"[WndCompat][WinEvent] Rebar_Attach: skip (allow=%d parent=0x%p) hwnd=0x%p",
+                            allowGlassForHwnd ? 1 : 0, parent, hWnd);
                         break;
+                    }
                     if (!isFull && WindowClassifier::IsCommonDialogHeaderPieWindow(hWnd))
                     {
                         DebugLog(L"[WndCompat][WinEvent] Rebar_Attach: skip (PopupOnly dialog-header π) hwnd=0x%p", hWnd);
