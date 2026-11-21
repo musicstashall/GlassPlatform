@@ -36,41 +36,6 @@
 
   Button и Static регистрируются **только** через `RegisterPaintProvider`. `HookDeleteDC` и `HookReleaseDC` обращаются исключительно к своим спискам и никогда не достигают `g_paintProviders` — это намеренно и не должно меняться.
 
-### RichEdit: единая композиция цветного фона
-
-`EditHooks.cpp`: RichEdit20W/RICHEDIT50W и оба WinForms-kind (в том числе
-классифицированный как 50 `TRichEdit`) используют один фоновой композитор.
-Исходный RGB берётся из реального `ETO_OPAQUE`, solid `FillRect` или
-`PatBlt(PATCOPY)`. `COLOR_WINDOW`/`COLOR_BTNFACE` → прежний `BLACKNESS`;
-прочие фоновые RGB → premultiplied BGRA DIB с **alpha=100/255** и
-`GdiAlphaBlend(AC_SRC_ALPHA, SourceConstantAlpha=255)` после очистки. Это не
-полупрозрачная pattern-кисть и не общий tblend текста. Включены также заливки
-пустого клиента; цвет строки/выделения не распространяется на весь клиент.
-Системный `COLOR_HIGHLIGHT` при непустом `EM_EXGETSEL` остаётся на прежней
-непрозрачной selection-ветке; само совпадение RGB без выделения этого не делает.
-Plain Edit/TMemo, их DIB/replay и настройки ink не меняются.
-
-Самостоятельные `FillRect`/`PatBlt` допускаются только в своей RichEdit-сессии:
-точный HDC из post-BeginPaint/GetDC либо зарегистрированный memory DC при
-совпадающем текущем хозяине. **Нельзя применять этот строгий fill-gate ко всему
-тексту:** native `ExtTextOutW/A` может использовать memory DC, созданный до
-текущего BeginPaint и отсутствующий в текущем реестре DC. Для текста и только
-его `ETO_OPAQUE` допускается такой MEMDC из `riched20.dll`/`msftedit.dll`/
-`gdi32full.dll` при активной, успешно связанной оконной RichEdit-сессии,
-совпадающих host/top-window, Full и разрешённом backdrop. Чужие оконные и
-зарегистрированные за другим HWND DC не допускаются. Этот путь не регистрирует
-DC и не расширяет права самостоятельных заливок. Во вложенном RichEdit GetDC
-он разрешается до fallback на внешний plain Edit/TMemo.
-
-Принятые refs запоминаются вместе с HMODULE/слотом и освобождаются по этому
-списку. Никаких изменений цвета через `EM_SETBKGNDCOLOR` или локального getter
-`WM_USER+109`. Проверки и Windows-ограничения:
-[фон, тест 88](Delphi-VCL.md#тест-88-все-richedit--цветной-фон-alpha100),
-[регрессия допуска текста, тест 89](Delphi-VCL.md#тест-89-регрессия-обычной-строки-richedit-после-249178c).
-Debug-лог `[GlassCore][RichEdit] TextDc ... route=native-memdc accepted=1`
-показывает выбор текстового допуска, а не измерение пикселей или доказанную
-историю создания/кэширования DC.
-
 ### PopupOnly: привязка сессии к окну
 
 В Full `g_activePaintHWnd` — вершина стека, и сессионные GDI-хуки действуют на весь поток. В PopupOnly этого мало: чужой `BeginPaint`/`GetDC` (TreeView, поле комбо, тулбар шапки диалога) шёл мимо стека и оставлял хостом уже закрытый попап, а memory-DC uxtheme кэширует без `DeleteDC`.
