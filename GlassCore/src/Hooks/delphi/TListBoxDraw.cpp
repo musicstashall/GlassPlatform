@@ -10,6 +10,11 @@
 #include <Module/ModuleHandler.h>
 #include <Subsystems/RenderText.h>
 #include <Subsystems/RootSwcaGradient.h>
+#include <Subsystems/GdiHookUtils.h>
+#include <Subsystems/Settings.h>
+#include <Helpers/ColorUtils.h>
+#include <BitmapUtils.h>
+#include <Providers/MenuContext.h>
 #include <GlassControlKind.h>
 #include <GlassBackdropMark.h>
 #include <WinApiUtils.h>
@@ -18,17 +23,26 @@
 #include <climits>
 #include <vector>
 
+#pragma comment(lib, "msimg32.lib")
+
 namespace GlassCore::DelphiListBox
 {
     namespace
     {
         using namespace GlassCore::Hooks;
         using namespace std::literals;
-        enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, RectangleSlot, Count };
+        enum : size_t
+        {
+            FillSlot, ExtTextSlot, DrawTextSlot, RectangleSlot,
+            BitBltSlot, StretchBltSlot,
+            Count,
+        };
         int WINAPI MyFill(HDC, const RECT*, HBRUSH);
         BOOL WINAPI MyExtText(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
         int WINAPI MyDrawText(HDC, LPCWSTR, int, LPRECT, UINT);
         BOOL WINAPI MyRectangle(HDC, int, int, int, int);
+        BOOL WINAPI MyBitBlt(HDC, int, int, int, int, HDC, int, int, DWORD);
+        BOOL WINAPI MyStretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
         const HookDispatcherDependency<Count, 3> g_dep{{
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
                 "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "FillRect", reinterpret_cast<void*>(MyFill) },
@@ -38,6 +52,10 @@ namespace GlassCore::DelphiListBox
                 "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "DrawTextW", reinterpret_cast<void*>(MyDrawText) },
             std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv,
                 "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "Rectangle", reinterpret_cast<void*>(MyRectangle) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv,
+                "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "BitBlt", reinterpret_cast<void*>(MyBitBlt) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv,
+                "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "StretchBlt", reinterpret_cast<void*>(MyStretchBlt) },
         }};
         HookDispatcher<Count, 3> g_dispatcher{ g_dep, nullptr };
         wil::srwlock g_lock;
@@ -55,6 +73,9 @@ namespace GlassCore::DelphiListBox
             bool field{};
             RECT bounds{};
             bool themeDetourAcquired{};
+            // Значок уже скомпонован с альфой: следующая монохромная маска
+            // ImageList не нужна и вырезала бы готовый значок.
+            bool iconAlphaDone{};
             unsigned long long serial{};
             RECT checkboxThemeRect{};
             bool pendingCheckboxBackgroundOutline{};
@@ -69,6 +90,10 @@ namespace GlassCore::DelphiListBox
         };
         thread_local std::vector<Session> g_stack;
         thread_local bool g_inHook = false;
+        // Удаление фона значков строк (Root\Control\ListBox|ComboBox). Как
+        // ListView/Toolbar: читается один раз на внешнюю сессию; без ключа
+        // работает автоматический ключ по фону значка.
+        thread_local WndCompat::Menu::IconBackgroundColorRemoval g_iconRemoval{};
         thread_local bool g_inCheckTheme = false;
         thread_local unsigned long long g_sessionSerial = 0;
 
@@ -255,6 +280,182 @@ namespace GlassCore::DelphiListBox
             SetLastError(error);
             return result;
         }
+        // ── Значки строк списка и поля комбо ────────────────────────────────
+        // VCL рисует значок ImageList двумя проходами: SRCCOPY цветного
+        // битмапа (фон значка непрозрачный — в наблюдаемом пути белый), затем
+        // маска (1bpp/4bpp либо ROP 0x00E20746). На прозрачном фоне color key
+        // первый проход оставляет белый квадрат вокруг значка.
+        // Заменяем эту пару одним GdiAlphaBlend с вырезанным фоном; после
+        // композиции второй проход (маска) пропускается — иначе он вырежет
+        // уже готовый значок.
+        enum class IconBlit { PassThrough, Done, Skip };
+        enum class IconBackgroundKind { Unknown, Flat, Solid };
+
+        // Плоский фон значка = все четыре угла одного цвета, а центр — нет
+        // (у сплошной заливки/образца цвета центр совпадает с углами: это не
+        // значок, его не трогаем).
+        IconBackgroundKind ClassifyIconBackground(HBITMAP bmp32, COLORREF& bg) noexcept
+        {
+            DIBSECTION ds{};
+            if (!bmp32 || !GetObject(bmp32, sizeof(ds), &ds) || !ds.dsBm.bmBits
+                || ds.dsBm.bmBitsPixel != 32)
+                return IconBackgroundKind::Unknown;
+            const int w = ds.dsBm.bmWidth;
+            const int h = ds.dsBm.bmHeight < 0 ? -ds.dsBm.bmHeight : ds.dsBm.bmHeight;
+            if (w < 3 || h < 3)
+                return IconBackgroundKind::Unknown;
+            const auto* px = static_cast<const DWORD*>(ds.dsBm.bmBits);
+            const bool topDown = ds.dsBm.bmHeight < 0;
+            const auto at = [&](int x, int y) noexcept {
+                const int row = topDown ? y : (h - 1 - y);
+                return static_cast<COLORREF>(
+                    px[static_cast<size_t>(row) * static_cast<size_t>(w) + x] & 0xFFFFFFu);
+            };
+            const COLORREF corner = at(0, 0);
+            if (corner != at(w - 1, 0) || corner != at(0, h - 1)
+                || corner != at(w - 1, h - 1))
+                return IconBackgroundKind::Unknown;
+            if (at(w / 2, h / 2) == corner)
+                return IconBackgroundKind::Solid;
+            bg = corner;
+            return IconBackgroundKind::Flat;
+        }
+
+        void ApplyIconBackground(HBITMAP bmp32) noexcept
+        {
+            // Явная настройка (Root\Control\ListBox|ComboBox\ColorTreatAsTransparent)
+            // перекрывает автоматику — как у ListView/Toolbar/Button.
+            if (g_iconRemoval.enable)
+            {
+                Shared::BitmapUtils::SpriteEffect eff(
+                    Shared::ColorUtils::ARGBToCOLORREF(g_iconRemoval.colorTreatAsTransparent),
+                    static_cast<BYTE>(g_iconRemoval.colorTreatAsTransparentThreshold));
+                eff.Apply(bmp32);
+                return;
+            }
+            COLORREF bg{};
+            if (ClassifyIconBackground(bmp32, bg) == IconBackgroundKind::Flat)
+            {
+                // Фон значка списка обычно белый (VCL компонует его на белой
+                // подложке), поэтому black-key его не убирает.
+                Shared::BitmapUtils::SpriteEffect eff(bg, 10);
+                eff.Apply(bmp32);
+                return;
+            }
+            GlassCore::GdiUtils::ApplyBlackKeyAlpha(bmp32);
+        }
+
+        IconBlit BlitListItemIcon(const Session& session, HDC dst, int x, int y, int cx, int cy,
+            HDC src, int sx, int sy, int scx, int scy, DWORD rop) noexcept
+        {
+            if (!cx || !cy || !src || !scx || !scy)
+                return IconBlit::PassThrough;
+            const HBITMAP source = static_cast<HBITMAP>(GetCurrentObject(src, OBJ_BITMAP));
+            if (!source || Shared::BitmapUtils::IsOemBitmap(source))
+                return IconBlit::PassThrough;
+            BITMAP bm{};
+            if (!GetObject(source, sizeof(bm), &bm))
+                return IconBlit::PassThrough;
+            const bool maskSource = bm.bmBitsPixel > 0 && bm.bmBitsPixel < 8;
+            const bool maskRop = rop == 0x00E20746 || rop == 0x00220326
+                || rop == SRCAND || rop == SRCINVERT;
+            if (maskSource || maskRop)
+            {
+                if (!session.iconAlphaDone)
+                    return IconBlit::PassThrough;
+                g_stack.back().iconAlphaDone = false;
+                return IconBlit::Skip;
+            }
+            if (rop != SRCCOPY)
+                return IconBlit::PassThrough;
+            // Значок — небольшое изображение целиком внутри строки: не фон
+            // строки и не посторонняя графика (скроллбар, рамка).
+            if (cx > 128 || cy > 128)
+                return IconBlit::PassThrough;
+            if (x <= session.item.left && y <= session.item.top
+                && x + cx >= session.item.right && y + cy >= session.item.bottom)
+                return IconBlit::PassThrough;
+            const RECT dstRect{ x, y, x + cx, y + cy };
+            RECT inside{};
+            if (!IntersectRect(&inside, &dstRect, &session.item)
+                || !EqualRect(&inside, &dstRect))
+                return IconBlit::PassThrough;
+
+            const bool hasAlpha = Shared::BitmapUtils::HasAlphaChannel(source);
+            wil::unique_hbitmap converted;
+            if (!hasAlpha)
+            {
+                converted.reset(Shared::BitmapUtils::Promise32BPP(source));
+                if (!converted)
+                    return IconBlit::PassThrough;
+                COLORREF bg{};
+                if (!g_iconRemoval.enable
+                    && ClassifyIconBackground(converted.get(), bg) == IconBackgroundKind::Solid)
+                    return IconBlit::PassThrough; // образец цвета / плитка
+                ApplyIconBackground(converted.get());
+            }
+            const HGDIOBJ oldBitmap = converted ? SelectObject(src, converted.get()) : nullptr;
+            auto restore = wil::scope_exit([&]() noexcept {
+                if (converted && oldBitmap && oldBitmap != HGDI_ERROR)
+                    SelectObject(src, oldBitmap);
+            });
+
+            BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+            const bool blended = GdiAlphaBlend(dst, x, y, cx, cy, src, sx, sy, scx, scy, bf) != FALSE;
+            if (!blended)
+                return IconBlit::PassThrough;
+            g_stack.back().iconAlphaDone = true;
+#if defined(_DEBUG)
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 24; }
+            if (budget)
+            {
+                --budget;
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiListDraw] icon hwnd=0x%p combo=%d dst=[%d,%d,%d,%d] srcBpp=%ld hasAlpha=%d custom=%d",
+                    session.hwnd, session.combo ? 1 : 0, x, y, cx, cy,
+                    bm.bmBitsPixel, hasAlpha ? 1 : 0, g_iconRemoval.enable ? 1 : 0);
+            }
+#endif
+            return IconBlit::Done;
+        }
+
+        BOOL WINAPI MyBitBlt(HDC dc, int x, int y, int cx, int cy,
+            HDC src, int sx, int sy, DWORD rop)
+        {
+            auto orig = Original<BitBltSlot, decltype(&::BitBlt)>();
+            if (!orig) return BitBlt(dc, x, y, cx, cy, src, sx, sy, rop);
+            const auto* current = Current(dc);
+            if (!current) return orig(dc, x, y, cx, cy, src, sx, sy, rop);
+            const IconBlit result = [&]() noexcept {
+                g_inHook = true;
+                auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
+                return BlitListItemIcon(*current, dc, x, y, cx, cy, src, sx, sy, cx, cy, rop);
+            }();
+            if (result != IconBlit::PassThrough)
+                return TRUE;
+            return orig(dc, x, y, cx, cy, src, sx, sy, rop);
+        }
+
+        BOOL WINAPI MyStretchBlt(HDC dc, int x, int y, int cx, int cy,
+            HDC src, int sx, int sy, int scx, int scy, DWORD rop)
+        {
+            auto orig = Original<StretchBltSlot, decltype(&::StretchBlt)>();
+            if (!orig) return StretchBlt(dc, x, y, cx, cy, src, sx, sy, scx, scy, rop);
+            const auto* current = Current(dc);
+            if (!current) return orig(dc, x, y, cx, cy, src, sx, sy, scx, scy, rop);
+            const IconBlit result = [&]() noexcept {
+                g_inHook = true;
+                auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
+                return BlitListItemIcon(*current, dc, x, y, cx, cy, src, sx, sy, scx, scy, rop);
+            }();
+            if (result != IconBlit::PassThrough)
+                return TRUE;
+            return orig(dc, x, y, cx, cy, src, sx, sy, scx, scy, rop);
+        }
+
         int WINAPI MyFill(HDC dc, const RECT* r, HBRUSH brush)
         {
             auto orig = Original<FillSlot, decltype(&::FillRect)>();
@@ -476,6 +677,17 @@ namespace GlassCore::DelphiListBox
             if (GlassShared::GlassGetWindowKind(dis->hwndItem) != GlassShared::GlassControlKind::ComboBox)
                 return false;
         }
+        if (g_stack.empty())
+        {
+            // Значки строк: Root\Control\ListBox; значок поля — ...\ComboBox.
+            // Ключа может не быть — тогда фон значка определяется по пикселям.
+            if (list)
+                GlassCore::Settings::QueryIconBackgroundColorRemovalContext(
+                    { L"Root", L"Control", L"ListBox" }, g_iconRemoval);
+            else
+                GlassCore::Settings::QueryIconBackgroundColorRemovalContext(
+                    { L"Root", L"Control", L"ComboBox" }, g_iconRemoval);
+        }
         if (list)
             GlassCore::DelphiBackground::ClearObservedListTail(dis->hwndItem, dis);
         HMODULE mod = GlassCore::ModuleHandler::g_entryPointModule;
@@ -502,7 +714,8 @@ namespace GlassCore::DelphiListBox
                 // Combo field: FillRect plus the text APIs that VCL uses for
                 // the field (ExtTextOutW strips the opaque background, DrawTextW
                 // renders glyphs). Rectangle stays with VCL.
-                if (s.combo && i != FillSlot && i != ExtTextSlot && i != DrawTextSlot) continue;
+                if (s.combo && i != FillSlot && i != ExtTextSlot && i != DrawTextSlot
+                    && i != BitBltSlot && i != StretchBltSlot) continue;
                 if (i == RectangleSlot && !s.checkList) continue;
                 const int before = g_dispatcher.GetRef(i);
                 g_dispatcher.EnableHook(i, true);
@@ -529,10 +742,11 @@ namespace GlassCore::DelphiListBox
             --budget;
             RECT client{};
             GetClientRect(s.hwnd, &client);
-            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p class=%s dc=0x%p combo=%d field=%d bounds=[%ld,%ld,%ld,%ld] fill=%d ext=%d draw=%d rectangle=%d theme=%d state=0x%X item=%u rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld,%ld,%ld]",
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiListDraw] hwnd=0x%p class=%s dc=0x%p combo=%d field=%d bounds=[%ld,%ld,%ld,%ld] fill=%d ext=%d draw=%d rectangle=%d bitblt=%d stretch=%d theme=%d state=0x%X item=%u rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld,%ld,%ld]",
                 s.hwnd, cls, s.dc, s.combo ? 1 : 0, s.field ? 1 : 0,
                 s.bounds.left, s.bounds.top, s.bounds.right, s.bounds.bottom,
-                s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot], s.hooks[RectangleSlot], s.themeDetourAcquired,
+                s.hooks[FillSlot], s.hooks[ExtTextSlot], s.hooks[DrawTextSlot], s.hooks[RectangleSlot],
+                s.hooks[BitBltSlot], s.hooks[StretchBltSlot], s.themeDetourAcquired,
                 dis->itemState, dis->itemID, s.item.left, s.item.top, s.item.right, s.item.bottom,
                 client.left, client.top, client.right, client.bottom);
         }
