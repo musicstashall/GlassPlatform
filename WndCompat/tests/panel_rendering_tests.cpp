@@ -130,6 +130,50 @@ namespace
         CHECK(c.Message() && c.Message()); CHECK(Test::black == before+2);
         CHECK(Test::nativeFill == 0);
     }
+    void PanelBackgroundDefaultScope()
+    {
+        Context c;
+        int api = 0;
+        Test::duringNativePaint = [&](HWND, UINT, WPARAM, LPARAM) {
+            if (api == 0) c.Fill();
+            else if (api == 1)
+                CHECK(c.Call("PatBlt", &::PatBlt, &c.dc, 0, 0, 198, 58, PATCOPY));
+            else
+                CHECK(c.Call("ExtTextOutW", &::ExtTextOutW, &c.dc, 0, 0,
+                    ETO_OPAQUE, &c.client, nullptr, 0u, nullptr));
+        };
+        const auto check = [&](LPCWSTR name, COLORREF color, bool tint) {
+            c.window.cls = name; c.custom.lbColor = color; c.dc.background = color;
+            const int blends = PanelTest::blends, black = Test::black;
+            for (api = 0; api < 3; ++api) { CHECK(c.Message()); c.Refs(0); }
+            CHECK(PanelTest::blends == blends + (tint ? 3 : 0) && Test::black == black+3);
+            if (tint)
+            {
+                const auto mul = [](unsigned x) { return (x*100+127)/255; };
+                const auto p = PanelTest::blendPixel;
+                CHECK(p[0] == mul(GetBValue(color)) && p[1] == mul(GetGValue(color)) && p[2] == mul(GetRValue(color)));
+                CHECK(p[3] == 100 && PanelTest::blendMode.SourceConstantAlpha == 255);
+            }
+        };
+        // Only exact TPanel changes the previous WINDOW/BTNFACE rule. A group
+        // client's solid fill is tested here, not its child's gradient header.
+        for (LPCWSTR name : {L"TPanel", L"TCategoryPanelGroup", L"TCategoryPanel", L"TFrame"})
+        {
+            check(name, GetSysColor(COLOR_WINDOW), false);
+            check(name, GetSysColor(COLOR_BTNFACE), _wcsicmp(name, L"TPanel") == 0);
+            check(name, RGB(72,144,216), true);
+            check(name, RGB(0,0,0), true);
+        }
+        PanelTest::windowColor = RGB(20,21,22); PanelTest::faceColor = RGB(40,41,42);
+        check(L"TPanel", GetSysColor(COLOR_WINDOW), false);
+        check(L"TPanel", GetSysColor(COLOR_BTNFACE), true);
+        check(L"TPanel", RGB(255,255,255), true);
+        check(L"TFrame", GetSysColor(COLOR_BTNFACE), false);
+        // When the two current system RGBs coincide, WINDOW still wins.
+        PanelTest::faceColor = PanelTest::windowColor;
+        check(L"TPanel", GetSysColor(COLOR_BTNFACE), false);
+        CHECK(Test::nativeFill == 0 && Test::nativeExt == 0);
+    }
     void NativeBrushApisAndChrome()
     {
         Context c;
@@ -456,6 +500,7 @@ int main(int argc, char** argv)
 {
     const std::unordered_map<std::string, void(*)()> cases{
         {"classes-and-erase", ClassesAndNativeErase}, {"alpha-colors", CustomAlphaAndSystemColors},
+        {"panel-default-scope", PanelBackgroundDefaultScope},
         {"apis-and-chrome", NativeBrushApisAndChrome}, {"dc-and-print", DcOwnershipAndPrintClient},
         {"gates-and-sessions", GatesAndBalancedSessions}, {"failures-and-reentry", FailureAndReentry},
         {"root-themed-route", RootThemedClassGateAndOriginal},

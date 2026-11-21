@@ -116,8 +116,13 @@ namespace GlassCore::DelphiPanel
         bool ApplyBackground(HDC dc, const RECT& r, COLORREF color, const wchar_t* api) noexcept
         {
             const COLORREF rgb = color & 0xFFFFFFu;
+            // Exact TPanel: only COLOR_WINDOW is a transparent default. Keep
+            // the earlier BTNFACE exemption for the other panels and frames.
+            wchar_t cls[64]{};
+            GetClassNameW(g_stack.back().hwnd, cls, static_cast<int>(_countof(cls)));
+            const bool windowOnlyDefault = _wcsicmp(cls, L"TPanel") == 0;
             const bool system = rgb == (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)
-                || rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu);
+                || (!windowOnlyDefault && rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu));
             bool ok = false;
             if (system) ok = Blacken(dc, r);
             else

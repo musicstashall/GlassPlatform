@@ -70,6 +70,9 @@ class PanelRenderingTest(unittest.TestCase):
     def test_custom_alpha_100_system_black_and_nonaccumulating_repaints(self):
         self.run_case('alpha-colors')
 
+    def test_tpanel_only_exempts_window_while_category_group_and_frames_keep_legacy_defaults(self):
+        self.run_case('panel-default-scope')
+
     def test_native_brush_apis_and_preserved_chrome(self):
         self.run_case('apis-and-chrome')
 

@@ -1313,7 +1313,7 @@ class DelphiPipelineContract(unittest.TestCase):
         root = read('WndCompat/Root/RootSubclass.cpp').split('LRESULT CALLBACK RootSubclassProcShared(', 1)[1]
         self.assertLess(root.index('WndCompat::TryHandleDelphiPanelPaint('), root.index('case WM_ERASEBKGND:'))
 
-    def test_panel_background_uses_real_alpha_and_only_two_default_colors(self):
+    def test_panel_background_uses_real_alpha_and_scopes_window_only_default_to_exact_tpanel(self):
         code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
         self.assertIn('kCustomBackgroundAlpha = 100', code)
         for api in ('"FillRect"', '"PatBlt"', '"ExtTextOutW"', 'GdiAlphaBlend',
@@ -1324,6 +1324,9 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertEqual(policy.count('GetSysColor('), 2)
         self.assertIn('GetSysColor(COLOR_WINDOW)', policy)
         self.assertIn('GetSysColor(COLOR_BTNFACE)', policy)
+        self.assertIn('GetClassNameW(g_stack.back().hwnd, cls,', policy)
+        self.assertIn('const bool windowOnlyDefault = _wcsicmp(cls, L"TPanel") == 0;', policy)
+        self.assertIn('|| (!windowOnlyDefault && rgb == (GetSysColor(COLOR_BTNFACE)', policy)
         self.assertIn('pixel[3] = kCustomBackgroundAlpha', policy)
         cache = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
         self.assertIn('if (!GlassShared::IsDelphiPanelClassName(cls)\n'

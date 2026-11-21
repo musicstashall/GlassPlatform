@@ -3454,3 +3454,71 @@ panels/frames **11/11**, TCoolBar **9/9**, input icons **6/6** — PASS.
 UTF-8 без BOM и `git diff --check` — PASS. Новая Windows/MSVC-сборка не выполнялась.
 После сохранения этих выводов исходный LogViewer-18 удалён из входящих
 вложений; копия лога в репозитории не хранится. Изображения сохранены.
+
+## Тест 93: TPanel — только COLOR_WINDOW как default; аудит SplitView / buffered panels
+
+### Уточнение политики точного TPanel
+
+Новое требование пользователя: у TPanel любой фон, отличающийся от текущего
+COLOR_WINDOW, должен иметь A100. Ранее тест 85 исключал из alpha-пути два
+цвета — COLOR_WINDOW и COLOR_BTNFACE — для всех перечисленных панелей/фреймов.
+Это не одна и та же политика: COLOR_BTNFACE обычно отличается от COLOR_WINDOW.
+
+В `TPanelDraw::ApplyBackground` правило сужено **только для точного оконного
+класса TPanel**, case-insensitive, без чтения caption и без substring matching:
+
+- RGB == текущий COLOR_WINDOW → прежняя очистка BLACKNESS;
+- любой другой solid RGB, **включая COLOR_BTNFACE и настоящий чёрный**, → A100;
+- если два системных RGB совпали, равенство COLOR_WINDOW по-прежнему даёт очистку;
+- TFrame, TSampleFrame, TEmbeddedForm, TCategoryPanelGroup, TCategoryPanel и
+  остальные классы прежнего списка сохраняют принятую пару WINDOW/BTNFACE.
+
+Используются прежние premultiplied DIB + GdiAlphaBlend; FillRect, PATCOPY и
+пустой ExtTextOutW(ETO_OPAQUE) разделяют одну функцию выбора политики. Нет
+изменений текстового renderer, DC ownership, geometry/bevel gate, root IAT,
+перечня классов, lifecycle или значений alpha других контролов. Эта правка
+не объявляется решением финальной opacity двойного буфера.
+
+### Результат source-аудита остальных трёх случаев
+
+Новых runtime-логов/скриншотов этих контролов пользователь пока не передал.
+Справочный код Delphi Berlin помогает определить точки проверки, **не версию
+VCL галереи и не фактические runtime-вызовы**.
+
+| Элемент | Что установлено по коду | Граница результата |
+| --- | --- | --- |
+| TSplitView | В [Vcl.WinXCtrls.pas](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.WinXCtrls.pas#L751) TCustomSplitView наследует TCustomPanel: выдвижной боковой контейнер, docked/overlay, не разделитель TSplitter. Конструктор задаёт DoubleBuffered=True (строки 2947–2953). Точного TSplitView в нашем shared panel predicate пока нет. | Узкий panel-маршрут сейчас не назначается этому имени. Просто добавить имя недостаточно для заявления о правильной конечной альфе: нужен тот же buffered audit. В этом шаге класс не добавлен. |
+| TCategoryPanelGroup | Точное имя уже находится в shared predicate и native message bridge. Его поддержанный сплошной client background получает A100, если RGB отличается от WINDOW и BTNFACE; это также проверяется portable-сценарием. | Это не доказывает alpha каждого цветного участка галереи. В [Vcl.ExtCtrls.pas](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.ExtCtrls.pas#L11304) группа имеет собственный WM_ERASEBKGND/FillRect; заголовок дочернего TCategoryPanel отдельно рисуется через GetWindowDC и GradientFillCanvas (строки 10244–10331). Gradient/header не является поддержанным full-client solid fill TPanelDraw. Расширять его geometry gate на header вслепую нельзя. |
+| TPanel Buffered | В [Vcl.Controls.pas, TWinControl.WMPaint](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.Controls.pas#L10416) DWM-ветка создаёт BPBF_COMPOSITED, рисует WM_ERASEBKGND/WM_PRINTCLIENT и перед публикацией вызывает BufferedPaintMakeOpaque, если нет csPaintBlackOpaqueOnGlass. | Это конкретный кандидат на превращение уже очищенного чёрного в непрозрачный, но runtime галереи ещё не установлен. Другой fallback этой функции использует bitmap/BitBlt; выбирать исправление без трассы преждевременно. |
+
+В [Winapi.UxTheme.pas](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/rtl/win/Winapi.UxTheme.pas#L5171)
+BufferedPaintMakeOpaque — inline-обёртка над **BufferedPaintSetAlpha(...,255)**;
+сам BufferedPaintSetAlpha объявлен delayed import. В текущем panel dispatcher
+нет перехвата этого API, он меняет только фоновые FillRect/PatBlt/ExtTextOutW.
+Уменьшение alpha ещё одной кисти не устраняет последующую установку A255 на
+целом буфере. Однако пока это source-гипотеза для конкретного визуального FAIL
+Buffered TPanel; не блокировать SetAlpha(255) глобально или по одному ambient HWND.
+Надпись «TPanel Buffered» не считать именем оконного класса и не использовать
+для выбора пути. Требуются реальный class/DC и принадлежность буфера.
+
+### Проверки и следующий runtime-шаг
+
+Новый `panel-default-scope` на предыдущем production-коде дал ожидаемый **FAIL**
+по числу alpha-blends: воспроизведено лишнее исключение BTNFACE у TPanel.
+С правкой — PASS для трёх фоновых API, TPanel/TCategoryPanelGroup/TCategoryPanel/
+TFrame, custom/black/system RGB, текущих изменённых системных цветов и случая
+WINDOW == BTNFACE. Существующие проверки caption, chrome, ownership и lifecycle
+сохранены. Это portable-проверка аргументов и DIB-байтов, не Windows-пиксели.
+
+Проверки: contracts **73/73**; panels **12/12 × Release/Debug** и отдельный
+ASan/UBSan-прогон; button groups **9/9 × Release/Debug**, TCoolBar **9/9**,
+input icons **6/6** — PASS. UTF-8 без BOM и `git diff --check` — PASS.
+MSVC/Windows-сборка недоступна; Buffered TPanel, TSplitView и конечная альфа
+цветных участков TCategoryPanelGroup **остаются открытыми**.
+
+Для продолжения нужны отдельно TSplitView, TCategoryPanelGroup и TPanel Buffered:
+скриншот оригинала/Glass + «Логи при отображении» (включая `[DelphiPanel]`) +
+«Логи с зондом при отображении элемента». Для buffered случая особенно важны
+BeginBufferedPaint, BufferedPaintSetAlpha, EndBufferedPaint и предшествующие
+заливки/BitBlt. Эти buffered API уже есть в DebugDetour-зонде (номера 30/33/31);
+новый глобальный зонд для запроса не добавлялся.
