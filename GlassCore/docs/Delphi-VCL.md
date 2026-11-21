@@ -2543,3 +2543,40 @@ VCL-списки собирают значок на белой подложке 
   — по `bg=` видно, какой цвет считается фоном значка.
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 74: TCoolBar (rebar полосы)
+
+`image-44.png` — штатный вид: светлая полоса, текст `TCoolBar`, точечный
+gripper слева, рамка и линия под полосой. `image-45.png` — наш вид: фон полосы
+прозрачный, но текста нет, нижней линии нет. Журнал с зондом:
+
+```
+FillRect hdc=FD01127D rect=[2,2,498,42] color=0x00F0F0F0   cls="TCoolBar"
+PatBlt caller=WndCompat BLACKNESS hdc=CF011B63 (0,0) 496x40
+DrawThemeText caller=COMCTL32.dll className="Rebar" part=0 state=0 text="TCoolBar" rect=11,4,59,19
+ExtTextOutW caller=gdi32full.dll x=11 y=4 opt=0x10 c=8
+```
+
+То есть полоса и её текст рисуются comctl32 темой `Rebar` на DC окна, а
+`TCoolBar` в классификации отсутствовал: `ControlKind::ReBar` требовал
+`ReBarWindow32`/`SizeableRebar`, поэтому не было ни `Rebar_Attach`, ни
+`RebarSubclass`, ни сессии `RebarHooks` — текст уходил обычным GDI (чёрным по
+прозрачному) и исчезал, а фон полосы оставался почернённым общей веткой
+`WM_ERASEBKGND`.
+
+Добавлено:
+
+- `TCoolBar` → `ControlKind::ReBar` (классификатор);
+- в `WinEventHandler` разрешён attach rebar, у которого родитель — VCL-контейнер
+  `TCoolBar` (`vclHostRebar`): VCL создаёт rebar дочерним окном, поэтому ни
+  `shellRebar`, ни «родитель top-level» не срабатывали;
+- в `RebarHooks` фон полосы больше не чернится целиком: тема рисуется в 32bpp
+  DIB, заливка (цвет центра полосы) становится прозрачной, а рамки и разделители
+  остаются непрозрачными и попадают на экран через `GdiAlphaBlend`
+  (`DrawRebarBandWithAlpha`). Полное чернение осталось запасным вариантом, когда
+  кроме заливки в полосе ничего нет. Причина: нижнюю линию полосы рисует та же
+  тема, что и заливку, — чёрная заливка её и убирала;
+- диагностика: `[GlassCore][Rebar] band part=… state=… rect=[…] alpha-edges|black`
+  и существующие `[GlassCore][Rebar] OnPaintBegin/OnPaintEnd`.
+
+Сборка и визуальный результат на Windows не проверены.

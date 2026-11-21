@@ -51,7 +51,7 @@ enum class ControlKind
     ScrollBar,          // ScrollBar, TScrollBar
     DateTimePicker,     // SysDateTimePick32, TDateTimePicker
     MonthCal,           // SysMonthCal32
-    ReBar,              // ReBarWindow32, SizeableRebar
+    ReBar,              // ReBarWindow32, SizeableRebar, TCoolBar
     ToolBar,            // ToolbarWindow32, TToolBar
     DirectUI,           // DirectUIHWND (DUser.dll/wdc.dll, Windows 10+)
     NetUI,              // NetUIHWND, UIRibbonCommandBar (Office ribbon / UIRibbon.dll)
