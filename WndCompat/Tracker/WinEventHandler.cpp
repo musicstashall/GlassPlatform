@@ -951,17 +951,13 @@ namespace
                         || WndCompat::IsWindowClass(parent, L"SizeableRebar");
                     const bool topLevelHostRebar =
                         isFull && (GetAncestor(parent, GA_ROOT) == parent);
-                    // VCL-хост: TCoolBar создаёт rebar как дочернее окно, его
-                    // родитель — не top-level, но это тот же контрол-контейнер.
-                    const bool vclHostRebar =
-                        isFull && WndCompat::IsWindowClass(parent, L"TCoolBar");
-                    if (isFull && (shellRebar || topLevelHostRebar || vclHostRebar))
+
+                    if (isFull && (shellRebar || topLevelHostRebar))
                     {
-                        DebugLog(L"[WndCompat][WinEvent] Rebar_Attach: hwnd=0x%p shell=%d toplevelHost=%d vclHost=%d",
+                        DebugLog(L"[WndCompat][WinEvent] Rebar_Attach: hwnd=0x%p shell=%d toplevelHost=%d",
                             hWnd,
                             shellRebar ? 1 : 0,
-                            topLevelHostRebar ? 1 : 0,
-                            vclHostRebar ? 1 : 0);
+                            topLevelHostRebar ? 1 : 0);
                         WndCompat::Rebar_Attach(hWnd);
                     }
                     break;

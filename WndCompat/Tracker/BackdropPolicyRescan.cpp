@@ -149,8 +149,9 @@ namespace
         {
             wchar_t cls[64]{};
             if (GetClassNameW(hChild, cls, static_cast<int>(std::size(cls))) > 0
-                && (wcsstr(cls, L"CoolBar") != nullptr || wcsstr(cls, L"ReBar") != nullptr
-                    || wcsstr(cls, L"Rebar") != nullptr))
+                && (_wcsicmp(cls, L"ReBarWindow32") == 0
+                    || _wcsicmp(cls, L"SizeableRebar") == 0
+                    || _wcsicmp(cls, L"CoolBar") == 0))
             {
                 WndCompat::Rebar_Attach(hChild);
                 return;

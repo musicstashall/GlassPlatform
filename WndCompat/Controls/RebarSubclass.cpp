@@ -137,15 +137,13 @@ namespace WndCompat
 
     namespace
     {
-        [[nodiscard]] bool IsRebarLikeClass(const wchar_t* cls) noexcept
+        [[nodiscard]] bool IsRebarClass(const wchar_t* cls) noexcept
         {
             if (!cls)
                 return false;
             return _wcsicmp(cls, L"ReBarWindow32") == 0
                 || _wcsicmp(cls, L"SizeableRebar") == 0
-                || wcsstr(cls, L"CoolBar") != nullptr
-                || wcsstr(cls, L"ReBar") != nullptr
-                || wcsstr(cls, L"Rebar") != nullptr;
+                || _wcsicmp(cls, L"CoolBar") == 0;
         }
 
         struct RebarCensus
@@ -173,7 +171,7 @@ namespace WndCompat
             if (!known && ctx->distinct < _countof(ctx->classes))
                 wcscpy_s(ctx->classes[ctx->distinct++], cls);
 
-            if (IsRebarLikeClass(cls))
+            if (IsRebarClass(cls))
             {
                 ++ctx->rebar;
                 WndCompat::Rebar_Attach(hWnd);

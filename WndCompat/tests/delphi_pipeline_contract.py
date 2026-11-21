@@ -868,11 +868,12 @@ class DelphiPipelineContract(unittest.TestCase):
     def test_tcoolbar_uses_rebar_glass_path(self):
         cls = read("WndCompat/Tracker/WindowClassifier.cpp")
         block = cls.split('// ── ReBar ─', 1)[1].split('return ControlKind::ReBar;', 1)[0]
-        self.assertIn('Equals(cls, L"TCoolBar")', block)
+        # Класс окна rebar у Delphi TCoolBar — ровно CoolBar (API Monitor).
+        self.assertIn('Equals(cls, L"CoolBar")', block)
+        self.assertNotIn('Equals(cls, L"TCoolBar")', block)
         handler = read("WndCompat/Tracker/WinEventHandler.cpp")
-        self.assertIn('const bool vclHostRebar =', handler)
-        self.assertIn('IsWindowClass(parent, L"TCoolBar")', handler)
-        self.assertIn('shellRebar || topLevelHostRebar || vclHostRebar', handler)
+        self.assertIn('shellRebar || topLevelHostRebar', handler)
+        self.assertNotIn('vclHostRebar', handler)
         rebar = read("GlassCore/src/Hooks/RebarHooks.cpp")
         # Полоса: тема в DIB, заливка прозрачна, рамки остаются.
         self.assertIn('static bool DrawRebarBandWithAlpha(', rebar)
@@ -897,7 +898,13 @@ class DelphiPipelineContract(unittest.TestCase):
         # Перепись поддерева: «тишина» ≠ «проход не вызывался».
         self.assertIn('struct RebarCensus', subclass)
         self.assertIn('Rebar_CatchUp: root=0x%p children=%u rebar=%u classes=%s', subclass)
-        self.assertIn('IsRebarLikeClass', subclass)
+        self.assertIn('IsRebarClass', subclass)
+        self.assertNotIn('wcsstr(cls, L"Rebar")', subclass)
+        # Фон полосы = ExtTextOutW(ETO_OPAQUE, "") — его и перехватываем.
+        self.assertIn('OHK_EXTTEXTOUT', rebar)
+        self.assertIn('"ExtTextOutW", reinterpret_cast<PVOID>(Overall_MyExtTextOutW)', rebar)
+        self.assertIn('(options & ETO_OPAQUE) == 0 || cch != 0', rebar)
+        self.assertIn('band-fill hdc=0x%p', rebar)
         rescan = read("WndCompat/Tracker/BackdropPolicyRescan.cpp")
         self.assertIn('WndCompat::Rebar_Attach(hChild);', rescan)
         handler = read("WndCompat/Tracker/WinEventHandler.cpp")
