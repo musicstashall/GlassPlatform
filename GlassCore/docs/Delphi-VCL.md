@@ -2656,3 +2656,42 @@ alpha-путь).
   (если окно уже помечено, синтетический CREATE для него пропускается).
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 78: TCoolBar — класс окна `CoolBar`, фон рисуется `ExtTextOutW`
+
+Принято замечание: подгонять классы по подстрокам (`ReBar`/`Rebar`) не нужно.
+Конкретный класс окна rebar у Delphi `TCoolBar` — **`CoolBar`**; подстрочные
+эвристики и выдуманное правило `vclHostRebar` убраны.
+
+Что показал API Monitor (`API-Monitor-5.log`, окно `0xd509a8`):
+
+```
+COMCTL32   BeginPaint(hwnd)
+EXE        GetWindowDC(hwnd) → ExcludeClipRect(2,2,498,42)
+EXE        DrawEdge(EDGE_ETCHED, BF_RECT|BF_ADJUST)      ← рамка
+EXE        IntersectClipRect(2,2,498,42) → FillRect(...)  ← 0x00F0F0F0
+uxtheme    SetBkColor(0x00FCF7F4); ExtTextOutW(hdc,0,0,ETO_OPAQUE,rect,NULL,0,NULL)
+uxtheme    SetBkColor(0x00B4B4B4); ExtTextOutW(hdc,0,0,ETO_OPAQUE,rect,NULL,0,NULL)
+COMCTL32   SetTextColor(0); SetBkColor(0x00F0F0F0); SetBkMode(TRANSPARENT)
+uxtheme    DrawTextExW("TCoolBar", DT_HIDEPREFIX)        ← текст полосы
+gdi32full  ExtTextOutW(11,4,ETO_GLYPH_INDEX,…)           ← глифы
+```
+
+То есть фон полосы — не `DrawThemeBackground` и не `FillRect`, а **пустой
+`ExtTextOutW` с `ETO_OPAQUE`** (цвет из `SetBkColor`), который рисует uxtheme.
+Поэтому ни один из прежних хуков полосы не срабатывал.
+
+Изменено:
+
+- `WindowClassifier`: `CoolBar` → `ControlKind::ReBar` (список точный:
+  `ReBarWindow32`, `SizeableRebar`, `CoolBar`);
+- `WinEventHandler`: правило `vclHostRebar` удалено, остались `shellRebar` и
+  `topLevelHostRebar`;
+- `RebarSubclass`/`BackdropPolicyRescan`: точные имена классов, без подстрок;
+- `RebarHooks`: новый слот `ExtTextOutW` (gdi32), вооружается на время сессии на
+  comctl32, uxtheme и модуль приложения. Если `ETO_OPAQUE` стоит, а текст пустой
+  и DC принадлежит окну сессии — вместо заливки рисуется `PatBlt(BLACKNESS)`
+  (прозрачность). Рамка от `DrawEdge` и текст полосы не затрагиваются;
+- диагностика: `[GlassCore][Rebar] band-fill hdc=… rect=[…] bk=0x… -> BLACKNESS ok=1`.
+
+Сборка и визуальный результат на Windows не проверены.

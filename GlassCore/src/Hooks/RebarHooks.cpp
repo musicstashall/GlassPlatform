@@ -297,6 +297,7 @@ namespace GlassCore::RebarControl
     int WINAPI Overall_MyDrawTextExW(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
     int WINAPI Overall_MyFillRect(HDC, const RECT*, HBRUSH);
     BOOL WINAPI Overall_MyPatBlt(HDC, int, int, int, int, DWORD);
+    int WINAPI Overall_MyExtTextOutW(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
 
     enum OverallHookIndex : size_t
     {
@@ -305,6 +306,7 @@ namespace GlassCore::RebarControl
         OHK_DRAWTEXTEX,
         OHK_FILLRECT,
         OHK_PATBLT,
+        OHK_EXTTEXTOUT,
         OHK_COUNT
     };
 
@@ -325,6 +327,10 @@ namespace GlassCore::RebarControl
         // OHK_PATBLT: WHITENESS → BLACKNESS в той же отрисовке.
         std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
             "PatBlt", reinterpret_cast<PVOID>(Overall_MyPatBlt) },
+        // OHK_EXTTEXTOUT: заливка полосы темой — ExtTextOutW(ETO_OPAQUE, ""),
+        // цвет берётся из SetBkColor. Это и есть белая полоса.
+        std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
+            "ExtTextOutW", reinterpret_cast<PVOID>(Overall_MyExtTextOutW) },
     } };
 
     using OverallDispatcher = HookDispatcher<OHK_COUNT, 3>;
@@ -568,6 +574,32 @@ namespace GlassCore::RebarControl
         return ok;
     }
 
+    // Тема рисует фон полосы пустым ExtTextOutW с ETO_OPAQUE: цвет берётся из
+    // SetBkColor, глифов нет. Раньше такой вызов проходил мимо всех хуков и
+    // оставлял непрозрачную светлую полосу.
+    int WINAPI Overall_MyExtTextOutW(
+        HDC hdc, int x, int y, UINT options, const RECT* rc,
+        LPCWSTR text, UINT cch, const INT* dx)
+    {
+        HMODULE callerMod = GetCallerModule(_ReturnAddress());
+        auto orig = GetOverallOrigSafe<OHK_EXTTEXTOUT, decltype(&ExtTextOutW)>(callerMod);
+        if (!orig)
+            return ExtTextOutW(hdc, x, y, options, rc, text, cch, dx);
+        if (g_inRebarFill || !rc || (options & ETO_OPAQUE) == 0 || cch != 0
+            || !IsRebarPaintDc(hdc))
+            return orig(hdc, x, y, options, rc, text, cch, dx);
+
+        g_inRebarFill = true;
+        const BOOL ok = PatBlt(hdc, rc->left, rc->top,
+            rc->right - rc->left, rc->bottom - rc->top, BLACKNESS);
+        g_inRebarFill = false;
+        DebugLog(DBG_NORMAL,
+            L"[GlassCore][Rebar] band-fill hdc=0x%p rect=[%ld,%ld,%ld,%ld] bk=0x%08X -> BLACKNESS ok=%d",
+            hdc, rc->left, rc->top, rc->right, rc->bottom,
+            static_cast<unsigned>(GetBkColor(hdc)), ok ? 1 : 0);
+        return ok ? TRUE : 0;
+    }
+
     // =========================================================================
     //  Публичные функции — прямое управление хуками из WndCompat
     // =========================================================================
@@ -601,6 +633,13 @@ namespace GlassCore::RebarControl
             && EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_FILLRECT, true);
         if (EnableHooksOnModule(callerMod, OHK_PATBLT, true))
             EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_PATBLT, true);
+        // Фон полосы рисует uxtheme, поэтому ExtTextOutW вооружается и там.
+        if (EnableHooksOnModule(callerMod, OHK_EXTTEXTOUT, true))
+        {
+            EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_EXTTEXTOUT, true);
+            if (HMODULE hUx = GetModuleHandleW(L"uxtheme.dll"))
+                EnableHooksOnModule(hUx, OHK_EXTTEXTOUT, true);
+        }
         g_rebarSessionStack.back().fillHooks = fillHooks;
 
         if (!glow || !hUx)
@@ -635,6 +674,10 @@ namespace GlassCore::RebarControl
             EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_FILLRECT, false);
             EnableHooksOnModule(session.comctlMod, OHK_PATBLT, false);
             EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_PATBLT, false);
+            EnableHooksOnModule(session.comctlMod, OHK_EXTTEXTOUT, false);
+            EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_EXTTEXTOUT, false);
+            if (HMODULE hUx = GetModuleHandleW(L"uxtheme.dll"))
+                EnableHooksOnModule(hUx, OHK_EXTTEXTOUT, false);
         }
 
         switch (session.textHook)
