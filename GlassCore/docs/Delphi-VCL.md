@@ -2580,3 +2580,30 @@ ExtTextOutW caller=gdi32full.dll x=11 y=4 opt=0x10 c=8
   и существующие `[GlassCore][Rebar] OnPaintBegin/OnPaintEnd`.
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 75: TCoolBar — текст есть, фон белый
+
+`image-46.png`: текст `TCoolBar` виден (сессия RebarHooks работает, текст идёт
+через `DrawThemeContent`), но фон полосы остался непрозрачным белым
+(255,255,255) — то есть заливку делает не тема `Rebar` через
+`DrawThemeBackground`, а обычная сплошная кисть: у comctl32 полоса красится
+цветом окна, а у VCL — кистью `FillRect` внутри `WM_PAINT`.
+
+Изменено:
+
+- `RebarHooks` расширен слотами `FillRect` (user32) и `PatBlt` (gdi32) с
+  отдельным диспетчером по модулям; они вооружаются только на время сессии
+  отрисовки окна и снимаются в `OnPaintEnd`;
+- `Overall_MyFillRect`: если `WindowFromDC(hdc)` — окно текущей сессии и кисть
+  сплошная с цветом `COLOR_WINDOW`/`COLOR_BTNFACE`/`COLOR_3DFACE`/белый/чёрный,
+  тот же прямоугольник рисуется `PatBlt(BLACKNESS)` (прозрачность под color key);
+- `Overall_MyPatBlt`: `WHITENESS` в DC окна сессии заменяется на `BLACKNESS`;
+- полоса темы (`RP_BAND`/`RP_BACKGROUND`) больше не выпускает заливку на экран:
+  из нарисованной темы в 32bpp DIB наружу идут только пиксели в 2px от края,
+  отличные от самого частого цвета (заливки). Это возвращает нижнюю линию и
+  gripper-рамку, но никогда не даёт непрозрачный блок; если рамки нет — прежнее
+  `PatBlt(BLACKNESS)`;
+- диагностика: `[GlassCore][Rebar] fill … -> BLACKNESS`, `patblt … WHITENESS ->
+  BLACKNESS`, `band edges … kept=… keyed=… of …`, `OnPaintBegin … fill=%d`.
+
+Сборка и визуальный результат на Windows не проверены.

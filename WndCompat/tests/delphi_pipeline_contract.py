@@ -878,9 +878,16 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('static bool DrawRebarBandWithAlpha(', rebar)
         self.assertIn('DrawRebarBandWithAlpha(orig, hTheme, hdc, iPartId, iStateId, *pRect, pClipRect)',
                       rebar)
-        self.assertIn('alpha-edges', rebar)
+        self.assertIn('band edges', rebar)
         self.assertIn('PatBlt(hdc,', rebar)
         self.assertIn('BLACKNESS', rebar)
+        # Белая заливка полосы (от comctl32 или от VCL) → прозрачность.
+        self.assertIn('OHK_FILLRECT', rebar)
+        self.assertIn('"FillRect", reinterpret_cast<PVOID>(Overall_MyFillRect)', rebar)
+        self.assertIn('"PatBlt", reinterpret_cast<PVOID>(Overall_MyPatBlt)', rebar)
+        self.assertIn('static bool IsRebarPaintDc(HDC hdc)', rebar)
+        self.assertIn('WindowFromDC(hdc) == sessionHwnd', rebar)
+        self.assertIn('rop != WHITENESS', rebar)
 
     def test_list_item_icons_are_alpha_composited(self):
         draw = read("GlassCore/src/Hooks/delphi/TListBoxDraw.cpp")

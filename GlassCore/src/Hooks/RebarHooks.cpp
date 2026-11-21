@@ -25,6 +25,7 @@
 #include <wil.h>
 #include <uxtheme.h>
 #include <vector>
+#include <array>
 #include <cstring>
 
 using namespace GlassCore::Hooks;
@@ -47,8 +48,10 @@ namespace GlassCore::RebarControl
 
     struct RebarPaintSession
     {
+        HWND          hwnd{};
         HMODULE       comctlMod{};
         RebarTextHook textHook{ RebarTextHook::None };
+        bool          fillHooks{};
     };
 
     thread_local std::vector<RebarPaintSession> g_rebarSessionStack;
@@ -189,32 +192,95 @@ namespace GlassCore::RebarControl
             return false;
 
         auto* pixels = static_cast<DWORD*>(bits);
-        const COLORREF bg = static_cast<COLORREF>(
-            pixels[static_cast<size_t>(h / 2) * static_cast<size_t>(w) + static_cast<size_t>(w / 2)]
-            & 0xFFFFFFu);
+        const size_t count = static_cast<size_t>(w) * static_cast<size_t>(h);
+
+        // Заливка полосы = самый частый цвет (а не цвет центра: центр может
+        // попасть на разделитель/текст, а заливка может быть не однотонной).
+        // Квантование по 8 оттенков на канал, затем уточнение средним.
+        std::array<unsigned, 32 * 32 * 32> histogram{};
+        for (size_t i = 0; i < count; ++i)
+        {
+            const DWORD c = pixels[i] & 0xFFFFFFu;
+            const size_t bin = static_cast<size_t>((c & 0xF8u) >> 3)
+                | (static_cast<size_t>((c & 0xF800u) >> 8))
+                | (static_cast<size_t>((c & 0xF80000u) >> 13));
+            ++histogram[bin];
+        }
+        size_t bestBin = 0;
+        unsigned bestCount = 0;
+        for (size_t i = 0; i < histogram.size(); ++i)
+        {
+            if (histogram[i] > bestCount)
+            {
+                bestCount = histogram[i];
+                bestBin = i;
+            }
+        }
+        // Средний цвет пикселей выбранного бина — точнее центра бина.
+        unsigned long long sumR = 0, sumG = 0, sumB = 0;
+        for (size_t i = 0; i < count; ++i)
+        {
+            const DWORD c = pixels[i] & 0xFFFFFFu;
+            const size_t bin = static_cast<size_t>((c & 0xF8u) >> 3)
+                | (static_cast<size_t>((c & 0xF800u) >> 8))
+                | (static_cast<size_t>((c & 0xF80000u) >> 13));
+            if (bin != bestBin)
+                continue;
+            sumR += (c & 0xFFu);
+            sumG += (c >> 8) & 0xFFu;
+            sumB += (c >> 16) & 0xFFu;
+        }
+        if (!bestCount)
+            return false;
+        const COLORREF bg = RGB(
+            static_cast<BYTE>(sumR / bestCount),
+            static_cast<BYTE>(sumG / bestCount),
+            static_cast<BYTE>(sumB / bestCount));
+
+        // Наружу выпускаем только рамку полосы, всё остальное — прозрачно.
+        // Так нижняя линия темы сохраняется, а заливка (какой бы она ни была)
+        // на экран не попадает: непрозрачным становится лишь то, что реально
+        // отличается от заливки и лежит в 2px от края.
+        constexpr int kRing = 2;
         constexpr int kThreshold = 8;
         size_t kept = 0;
+        size_t keyed = 0;
         for (int y = 0; y < h; ++y)
         {
             DWORD* row = pixels + static_cast<size_t>(y) * static_cast<size_t>(w);
             for (int x = 0; x < w; ++x)
             {
                 const COLORREF c = static_cast<COLORREF>(row[x] & 0xFFFFFFu);
-                if (ChannelDeltaRebar(GetRValue(c), GetRValue(bg)) <= kThreshold
+                const bool nearFill =
+                    ChannelDeltaRebar(GetRValue(c), GetRValue(bg)) <= kThreshold
                     && ChannelDeltaRebar(GetGValue(c), GetGValue(bg)) <= kThreshold
-                    && ChannelDeltaRebar(GetBValue(c), GetBValue(bg)) <= kThreshold)
-                {
-                    row[x] = 0; // заливка полосы → прозрачность
-                }
-                else
+                    && ChannelDeltaRebar(GetBValue(c), GetBValue(bg)) <= kThreshold;
+                const bool ring = x < kRing || y < kRing || x >= w - kRing || y >= h - kRing;
+                if (ring && !nearFill)
                 {
                     row[x] |= 0xFF000000u;
                     ++kept;
                 }
+                else
+                {
+                    row[x] = 0;
+                    ++keyed;
+                }
             }
         }
-        if (!kept)
-            return false; // одна заливка: пусть вызывающий сделает BLACKNESS
+        // Рамки нет (тема заливает полосу целиком) — пусть вызывающий сделает
+        // BLACKNESS: прозрачно и без белой рамки по краю.
+        if (!kept || kept * 50 < count)
+        {
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][Rebar] band edges-reject bg=0x%08X kept=%zu of %zu",
+                static_cast<unsigned>(bg), kept, count);
+            return false;
+        }
+
+        DebugLog(DBG_NORMAL,
+            L"[GlassCore][Rebar] band edges bg=0x%08X kept=%zu keyed=%zu of %zu",
+            static_cast<unsigned>(bg), kept, keyed, count);
 
         BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
         return GdiAlphaBlend(hdc, dst.left, dst.top, dst.right - dst.left, dst.bottom - dst.top,
@@ -229,12 +295,16 @@ namespace GlassCore::RebarControl
     int WINAPI Overall_MyDrawThemeBg(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
     HRESULT WINAPI Overall_MyDrawThemeText(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, DWORD, LPCRECT);
     int WINAPI Overall_MyDrawTextExW(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
+    int WINAPI Overall_MyFillRect(HDC, const RECT*, HBRUSH);
+    BOOL WINAPI Overall_MyPatBlt(HDC, int, int, int, int, DWORD);
 
     enum OverallHookIndex : size_t
     {
         OHK_DRAWTHEMEBG = 0,
         OHK_DRAWTHEMETEXT,
         OHK_DRAWTEXTEX,
+        OHK_FILLRECT,
+        OHK_PATBLT,
         OHK_COUNT
     };
 
@@ -249,6 +319,12 @@ namespace GlassCore::RebarControl
         // OHK_DRAWTEXTEX (glow: uxtheme → user32!DrawTextExW)
         std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
             "DrawTextExW", reinterpret_cast<PVOID>(Overall_MyDrawTextExW) },
+        // OHK_FILLRECT: заливка полосы системным цветом (белый/face) → чёрный.
+        std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+            "FillRect", reinterpret_cast<PVOID>(Overall_MyFillRect) },
+        // OHK_PATBLT: WHITENESS → BLACKNESS в той же отрисовке.
+        std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
+            "PatBlt", reinterpret_cast<PVOID>(Overall_MyPatBlt) },
     } };
 
     using OverallDispatcher = HookDispatcher<OHK_COUNT, 3>;
@@ -423,6 +499,76 @@ namespace GlassCore::RebarControl
     }
 
     // =========================================================================
+    //  Заливки полосы: белый/face фон → прозрачность (BLACKNESS)
+    // =========================================================================
+
+    static thread_local bool g_inRebarFill = false;
+
+    // DC принадлежит окну текущей сессии: иначе это чужая отрисовка.
+    static bool IsRebarPaintDc(HDC hdc) noexcept
+    {
+        if (!hdc || g_rebarSessionStack.empty())
+            return false;
+        const HWND sessionHwnd = g_rebarSessionStack.back().hwnd;
+        if (!sessionHwnd || !IsWindow(sessionHwnd))
+            return false;
+        return WindowFromDC(hdc) == sessionHwnd;
+    }
+
+    static bool IsRebarBackgroundFill(HDC hdc, HBRUSH brush) noexcept
+    {
+        if (!brush || !IsRebarPaintDc(hdc))
+            return false;
+        LOGBRUSH lb{};
+        if (GetObjectW(brush, sizeof(lb), &lb) != sizeof(lb) || lb.lbStyle != BS_SOLID)
+            return false;
+        const COLORREF color = lb.lbColor & 0xFFFFFF;
+        return color == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
+            || color == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF)
+            || color == (GetSysColor(COLOR_3DFACE) & 0xFFFFFF)
+            || color == RGB(255, 255, 255)
+            || color == RGB(0, 0, 0);
+    }
+
+    int WINAPI Overall_MyFillRect(HDC hdc, const RECT* rc, HBRUSH brush)
+    {
+        HMODULE callerMod = GetCallerModule(_ReturnAddress());
+        auto orig = GetOverallOrigSafe<OHK_FILLRECT, decltype(&FillRect)>(callerMod);
+        if (!orig)
+            return FillRect(hdc, rc, brush);
+        if (g_inRebarFill || !rc || !IsRebarBackgroundFill(hdc, brush))
+            return orig(hdc, rc, brush);
+
+        // Фон полосы/рамки: тот же прямоугольник, но в прозрачность.
+        g_inRebarFill = true;
+        const BOOL ok = PatBlt(hdc, rc->left, rc->top,
+            rc->right - rc->left, rc->bottom - rc->top, BLACKNESS);
+        g_inRebarFill = false;
+        DebugLog(DBG_NORMAL,
+            L"[GlassCore][Rebar] fill hdc=0x%p rect=[%ld,%ld,%ld,%ld] -> BLACKNESS ok=%d",
+            hdc, rc->left, rc->top, rc->right, rc->bottom, ok ? 1 : 0);
+        return ok ? TRUE : 0;
+    }
+
+    BOOL WINAPI Overall_MyPatBlt(HDC hdc, int x, int y, int cx, int cy, DWORD rop)
+    {
+        HMODULE callerMod = GetCallerModule(_ReturnAddress());
+        auto orig = GetOverallOrigSafe<OHK_PATBLT, decltype(&PatBlt)>(callerMod);
+        if (!orig)
+            return PatBlt(hdc, x, y, cx, cy, rop);
+        if (g_inRebarFill || rop != WHITENESS || !IsRebarPaintDc(hdc))
+            return orig(hdc, x, y, cx, cy, rop);
+
+        g_inRebarFill = true;
+        const BOOL ok = orig(hdc, x, y, cx, cy, BLACKNESS);
+        g_inRebarFill = false;
+        DebugLog(DBG_NORMAL,
+            L"[GlassCore][Rebar] patblt hdc=0x%p (%d,%d) %dx%d WHITENESS -> BLACKNESS ok=%d",
+            hdc, x, y, cx, cy, ok ? 1 : 0);
+        return ok;
+    }
+
+    // =========================================================================
     //  Публичные функции — прямое управление хуками из WndCompat
     // =========================================================================
 
@@ -442,10 +588,20 @@ namespace GlassCore::RebarControl
         const bool glow = GlassCore::Text::IsInkGlowEffectActiveForPaintSession(hWnd);
         HMODULE hUx = GetModuleHandleW(L"uxtheme.dll");
 
-        RebarPaintSession session{ callerMod, RebarTextHook::None };
+        RebarPaintSession session{ hWnd, callerMod, RebarTextHook::None, false };
         g_rebarSessionStack.push_back(session);
 
         EnableHooksOnModule(callerMod, OHK_DRAWTHEMEBG, true);
+
+        // Заливку полосы может делать и comctl32, и сама VCL (EXE) — белый или
+        // face-цвет; тогда красим её в прозрачность, иначе полоса остаётся
+        // белой (см. image-46).
+        const bool fillHooks =
+            EnableHooksOnModule(callerMod, OHK_FILLRECT, true)
+            && EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_FILLRECT, true);
+        if (EnableHooksOnModule(callerMod, OHK_PATBLT, true))
+            EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_PATBLT, true);
+        g_rebarSessionStack.back().fillHooks = fillHooks;
 
         if (!glow || !hUx)
         {
@@ -458,8 +614,9 @@ namespace GlassCore::RebarControl
             g_rebarSessionStack.back().textHook = RebarTextHook::DrawTextExW;
         }
 
-        DebugLog(DBG_NORMAL, L"[GlassCore][Rebar] OnPaintBegin: hWnd=0x%p callerMod=0x%p textHook=%d depth=%zu",
-            hWnd, callerMod, static_cast<int>(g_rebarSessionStack.back().textHook), g_rebarSessionStack.size());
+        DebugLog(DBG_NORMAL, L"[GlassCore][Rebar] OnPaintBegin: hWnd=0x%p callerMod=0x%p textHook=%d fill=%d depth=%zu",
+            hWnd, callerMod, static_cast<int>(g_rebarSessionStack.back().textHook),
+            g_rebarSessionStack.back().fillHooks ? 1 : 0, g_rebarSessionStack.size());
     }
 
     void OnPaintEnd()
@@ -471,6 +628,14 @@ namespace GlassCore::RebarControl
         g_rebarSessionStack.pop_back();
 
         EnableHooksOnModule(session.comctlMod, OHK_DRAWTHEMEBG, false);
+
+        if (session.fillHooks)
+        {
+            EnableHooksOnModule(session.comctlMod, OHK_FILLRECT, false);
+            EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_FILLRECT, false);
+            EnableHooksOnModule(session.comctlMod, OHK_PATBLT, false);
+            EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_PATBLT, false);
+        }
 
         switch (session.textHook)
         {
