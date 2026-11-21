@@ -2721,3 +2721,29 @@ uxtheme, поэтому текст шёл штатным GDI чёрным по �
   `OnPaintEnd … themed=%d dtb=%d` — `dtb=0` подтверждает, что тема не рисуется.
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 80: TCoolBar — текста нет ни с темой, ни без
+
+`image-48.png` — без визуальных стилей: текст есть, но с непрозрачной белой
+подложкой и цветными каймами (ClearType) — то есть сработал **штатный** путь
+GDI, а не наш alpha. `image-49.png` — с визуальными стилями: текста нет вовсе
+(comctl32 ставит `SetBkMode(TRANSPARENT)`, чёрные глифы уходят в прозрачность).
+
+Причина одна: хук текста отбрасывался проверкой DC. `IsRebarGlassSessionAllowedForHdc`
+сначала брал `PaintDispatcher::GetPaintSessionHostHwnd()` — а там корневое окно
+(форма), вид которого не `Rebar`, поэтому `DrawTextExW` уходил в оригинал.
+
+Изменено:
+
+- в `IsRebarGlassSessionAllowedForHdc` первым делом проверяется DC самой сессии
+  (`IsRebarPaintDc`): `WindowFromDC(hdc) == hwnd` сессии; `PaintDispatcher`
+  остаётся только запасным вариантом;
+- `DrawTextExW` вооружается **всегда** (comctl32 + uxtheme): comctl32 рисует
+  текст этим API и с темой, и без неё; `DrawThemeText` добавляется только при
+  наличии темы;
+- защита от рекурсии `g_rebarTextDepth` (внутри `DrawTextWithAlpha` uxtheme
+  снова вызывает `DrawTextExW` на memory-DC);
+- журнал: `[GlassCore][Rebar] text hdc=… hr=0x… result=… color=0x… bk=0x… rect=[…]`
+  и `text-bypass … reason=not-session-dc|dtparams`.
+
+Сборка и визуальный результат на Windows не проверены.

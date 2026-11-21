@@ -55,6 +55,7 @@ namespace GlassCore::RebarControl
         bool          themed{};
         bool          textOnComctl{};
         bool          textOnUx{};
+        bool          textOnTheme{};
         bool          dtbSeen{};
     };
 
@@ -69,6 +70,24 @@ namespace GlassCore::RebarControl
     static bool StrEq(LPCWSTR a, LPCWSTR b)
     {
         return _wcsicmp(a, b) == 0;
+    }
+
+    static bool IsRebarPaintDc(HDC hdc) noexcept;
+
+    // Почему текст полосы не пошёл через alpha-путь.
+    static void RebarTextDiag(HDC hdc, int cchText, const RECT* rc, const wchar_t* reason) noexcept
+    {
+        static thread_local ULONGLONG epoch = 0;
+        static thread_local unsigned budget = 0;
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch || now - epoch >= 1000) { epoch = now; budget = 8; }
+        if (!budget)
+            return;
+        --budget;
+        DebugLog(DBG_NORMAL,
+            L"[GlassCore][Rebar] text-bypass hdc=0x%p reason=%s cch=%d rect=[%ld,%ld,%ld,%ld]",
+            hdc, reason, cchText,
+            rc ? rc->left : 0, rc ? rc->top : 0, rc ? rc->right : 0, rc ? rc->bottom : 0);
     }
 
     // vsstyle.h REBARPARTS — gripper/chevron/splitter не затираем PatBlt.
@@ -139,9 +158,14 @@ namespace GlassCore::RebarControl
 
     [[nodiscard]] static bool IsRebarGlassSessionAllowedForHdc(HDC hdc) noexcept
     {
-        HWND hWnd = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+        // DC самой сессии — основной случай (BeginPaint внутри WM_PAINT).
+        // PaintDispatcher может указывать на корень (форму), и проверка вида
+        // окна по нему отвергала бы rebar: текст уходил в штатный GDI.
+        if (IsRebarPaintDc(hdc))
+            return true;
+        HWND hWnd = WindowFromDC(hdc);
         if (!hWnd)
-            hWnd = WindowFromDC(hdc);
+            hWnd = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
         return IsRebarGlassSessionAllowed(hWnd);
     }
 
@@ -508,6 +532,8 @@ namespace GlassCore::RebarControl
             });
     }
 
+    static thread_local unsigned g_rebarTextDepth = 0;
+
     int WINAPI Overall_MyDrawTextExW(
         HDC hdc, LPWSTR lpchText, int cchText,
         LPRECT lprc, UINT format, LPDRAWTEXTPARAMS lpdtp)
@@ -518,18 +544,43 @@ namespace GlassCore::RebarControl
         if (!orig)
             return DrawTextExW(hdc, lpchText, cchText, lprc, format, lpdtp);
 
-        if (g_rebarSessionStack.empty())
+        if (g_rebarSessionStack.empty() || g_rebarTextDepth > 0)
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
 
         if (!IsRebarGlassSessionAllowedForHdc(hdc))
+        {
+            RebarTextDiag(hdc, cchText, lprc, L"not-session-dc");
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
+        }
 
         if (lpdtp)
+        {
+            RebarTextDiag(hdc, cchText, lprc, L"dtparams");
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
+        }
 
+        ++g_rebarTextDepth;
+        auto popDepth = wil::scope_exit([]() noexcept { --g_rebarTextDepth; });
         EnsureRebarTextColorOnDc(hdc);
         int result = 0;
-        if (!FAILED(GlassCore::Text::DrawTextWithAlpha(hdc, lpchText, cchText, lprc, format, result)))
+        const HRESULT hr = GlassCore::Text::DrawTextWithAlpha(hdc, lpchText, cchText, lprc, format, result);
+        {
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 8; }
+            if (budget)
+            {
+                --budget;
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][Rebar] text hdc=0x%p hr=0x%08X result=%d color=0x%08X bk=0x%08X rect=[%ld,%ld,%ld,%ld]",
+                    hdc, static_cast<unsigned>(hr), result,
+                    static_cast<unsigned>(GetTextColor(hdc)),
+                    static_cast<unsigned>(GetBkColor(hdc)),
+                    lprc->left, lprc->top, lprc->right, lprc->bottom);
+            }
+        }
+        if (!FAILED(hr))
             return result;
         return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
     }
@@ -676,22 +727,17 @@ namespace GlassCore::RebarControl
         }
         g_rebarSessionStack.back().fillHooks = fillHooks;
 
-        if (themed && (!glow || !hUx))
         {
-            // Тема без glow: текст полосы идёт через DrawThemeText (comctl32).
-            g_rebarSessionStack.back().textOnComctl =
-                EnableHooksOnModule(callerMod, OHK_DRAWTHEMETEXT, true);
-            g_rebarSessionStack.back().textHook = RebarTextHook::DrawThemeText;
-        }
-        else
-        {
-            // Без темы (и в glow-режиме) comctl32 рисует текст обычным
-            // DrawTextExW — вооружаем его и на comctl32, и на uxtheme.
+            // Текст полосы comctl32 рисует через DrawTextExW и с темой, и без
+            // неё (в теме это внутренний вызов uxtheme) — вооружаем всегда.
             auto& session0 = g_rebarSessionStack.back();
             session0.textOnComctl = EnableHooksOnModule(callerMod, OHK_DRAWTEXTEX, true);
             if (hUx)
                 session0.textOnUx = EnableHooksOnModule(hUx, OHK_DRAWTEXTEX, true);
-            session0.textHook = RebarTextHook::DrawTextExW;
+            if (themed && (!glow || !hUx))
+                session0.textOnTheme = EnableHooksOnModule(callerMod, OHK_DRAWTHEMETEXT, true);
+            session0.textHook = session0.textOnTheme ? RebarTextHook::DrawThemeText
+                                                    : RebarTextHook::DrawTextExW;
         }
 
         DebugLog(DBG_NORMAL, L"[GlassCore][Rebar] OnPaintBegin: hWnd=0x%p callerMod=0x%p themed=%d textHook=%d fill=%d depth=%zu",
@@ -723,16 +769,13 @@ namespace GlassCore::RebarControl
                 EnableHooksOnModule(hUx, OHK_EXTTEXTOUT, false);
         }
 
-        if (session.textHook == RebarTextHook::DrawThemeText && session.textOnComctl)
+        if (session.textOnTheme)
             EnableHooksOnModule(session.comctlMod, OHK_DRAWTHEMETEXT, false);
-        if (session.textHook == RebarTextHook::DrawTextExW)
-        {
-            if (session.textOnComctl)
-                EnableHooksOnModule(session.comctlMod, OHK_DRAWTEXTEX, false);
-            if (session.textOnUx)
-                if (HMODULE hUx = GetModuleHandleW(L"uxtheme.dll"))
-                    EnableHooksOnModule(hUx, OHK_DRAWTEXTEX, false);
-        }
+        if (session.textOnComctl)
+            EnableHooksOnModule(session.comctlMod, OHK_DRAWTEXTEX, false);
+        if (session.textOnUx)
+            if (HMODULE hUx = GetModuleHandleW(L"uxtheme.dll"))
+                EnableHooksOnModule(hUx, OHK_DRAWTEXTEX, false);
 
         DebugLog(DBG_NORMAL, L"[GlassCore][Rebar] OnPaintEnd: callerMod=0x%p themed=%d dtb=%d depth=%zu",
             session.comctlMod, session.themed ? 1 : 0, session.dtbSeen ? 1 : 0,
