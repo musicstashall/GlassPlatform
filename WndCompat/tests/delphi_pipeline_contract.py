@@ -865,6 +865,23 @@ class DelphiPipelineContract(unittest.TestCase):
         for name in ("TFileListBox", "TDirectoryListBox"):
             self.assertIn('_wcsicmp(cls, L"%s")' % name, probe)
 
+    def test_tcoolbar_uses_rebar_glass_path(self):
+        cls = read("WndCompat/Tracker/WindowClassifier.cpp")
+        block = cls.split('// ── ReBar ─', 1)[1].split('return ControlKind::ReBar;', 1)[0]
+        self.assertIn('Equals(cls, L"TCoolBar")', block)
+        handler = read("WndCompat/Tracker/WinEventHandler.cpp")
+        self.assertIn('const bool vclHostRebar =', handler)
+        self.assertIn('IsWindowClass(parent, L"TCoolBar")', handler)
+        self.assertIn('shellRebar || topLevelHostRebar || vclHostRebar', handler)
+        rebar = read("GlassCore/src/Hooks/RebarHooks.cpp")
+        # Полоса: тема в DIB, заливка прозрачна, рамки остаются.
+        self.assertIn('static bool DrawRebarBandWithAlpha(', rebar)
+        self.assertIn('DrawRebarBandWithAlpha(orig, hTheme, hdc, iPartId, iStateId, *pRect, pClipRect)',
+                      rebar)
+        self.assertIn('alpha-edges', rebar)
+        self.assertIn('PatBlt(hdc,', rebar)
+        self.assertIn('BLACKNESS', rebar)
+
     def test_list_item_icons_are_alpha_composited(self):
         draw = read("GlassCore/src/Hooks/delphi/TListBoxDraw.cpp")
         # Слоты BitBlt/StretchBlt в сессии owner-draw.

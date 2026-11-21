@@ -25,9 +25,12 @@
 #include <wil.h>
 #include <uxtheme.h>
 #include <vector>
+#include <cstring>
 
 using namespace GlassCore::Hooks;
 using namespace std::literals;
+
+#pragma comment(lib, "msimg32.lib")
 
 namespace GlassCore::RebarControl
 {
@@ -117,6 +120,106 @@ namespace GlassCore::RebarControl
             return;
         if ((GetTextColor(hdc) & 0xFFFFFF) == 0)
             SetTextColor(hdc, GetSysColor(COLOR_WINDOWTEXT));
+    }
+
+    // =========================================================================
+    //  Полоса Rebar с прозрачным фоном, но с рамками
+    // =========================================================================
+
+    static int ChannelDeltaRebar(BYTE a, BYTE b) noexcept
+    {
+        return a > b ? static_cast<int>(a) - static_cast<int>(b)
+                     : static_cast<int>(b) - static_cast<int>(a);
+    }
+
+    // Полное чернение полосы (PatBlt BLACKNESS) убирало её нижнюю линию:
+    // рамки рисует та же тема, что и заливку. Поэтому тема рисуется в 32bpp
+    // DIB, заливка (цвет центра полосы) становится прозрачной, а рамки и
+    // разделители остаются непрозрачными и попадают на экран через
+    // GdiAlphaBlend.
+    static bool DrawRebarBandWithAlpha(
+        decltype(&DrawThemeBackground) orig, HTHEME hTheme, HDC hdc,
+        int iPartId, int iStateId, const RECT& rect, const RECT* clip) noexcept
+    {
+        if (!orig || !hdc)
+            return false;
+        const int w = rect.right - rect.left;
+        const int h = rect.bottom - rect.top;
+        if (w <= 0 || h <= 0 || w > 8192 || h > 1024)
+            return false;
+
+        BITMAPINFO bi{};
+        bi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth       = w;
+        bi.bmiHeader.biHeight      = -h;
+        bi.bmiHeader.biPlanes      = 1;
+        bi.bmiHeader.biBitCount    = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+
+        void* bits = nullptr;
+        wil::unique_hbitmap dib{ CreateDIBSection(hdc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0) };
+        if (!dib || !bits)
+            return false;
+        wil::unique_hdc mem{ CreateCompatibleDC(hdc) };
+        if (!mem)
+            return false;
+        const HGDIOBJ oldBmp = SelectObject(mem.get(), dib.get());
+        if (!oldBmp || oldBmp == HGDI_ERROR)
+            return false;
+        auto restoreBmp = wil::scope_exit([&]() noexcept { (void)SelectObject(mem.get(), oldBmp); });
+
+        std::memset(bits, 0, static_cast<size_t>(w) * static_cast<size_t>(h) * 4u);
+
+        RECT memRect{ 0, 0, w, h };
+        RECT clipMem{};
+        LPCRECT pClipMem = nullptr;
+        RECT dst = rect;
+        if (clip)
+        {
+            RECT inter{};
+            if (!IntersectRect(&inter, &rect, clip))
+                return true; // вне клипа: рисовать нечего, но и не ошибка
+            clipMem = RECT{ inter.left - rect.left, inter.top - rect.top,
+                inter.right - rect.left, inter.bottom - rect.top };
+            pClipMem = &clipMem;
+            dst = inter;
+        }
+
+        if (FAILED(orig(hTheme, mem.get(), iPartId, iStateId, &memRect, pClipMem)))
+            return false;
+
+        auto* pixels = static_cast<DWORD*>(bits);
+        const COLORREF bg = static_cast<COLORREF>(
+            pixels[static_cast<size_t>(h / 2) * static_cast<size_t>(w) + static_cast<size_t>(w / 2)]
+            & 0xFFFFFFu);
+        constexpr int kThreshold = 8;
+        size_t kept = 0;
+        for (int y = 0; y < h; ++y)
+        {
+            DWORD* row = pixels + static_cast<size_t>(y) * static_cast<size_t>(w);
+            for (int x = 0; x < w; ++x)
+            {
+                const COLORREF c = static_cast<COLORREF>(row[x] & 0xFFFFFFu);
+                if (ChannelDeltaRebar(GetRValue(c), GetRValue(bg)) <= kThreshold
+                    && ChannelDeltaRebar(GetGValue(c), GetGValue(bg)) <= kThreshold
+                    && ChannelDeltaRebar(GetBValue(c), GetBValue(bg)) <= kThreshold)
+                {
+                    row[x] = 0; // заливка полосы → прозрачность
+                }
+                else
+                {
+                    row[x] |= 0xFF000000u;
+                    ++kept;
+                }
+            }
+        }
+        if (!kept)
+            return false; // одна заливка: пусть вызывающий сделает BLACKNESS
+
+        BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+        return GdiAlphaBlend(hdc, dst.left, dst.top, dst.right - dst.left, dst.bottom - dst.top,
+            mem.get(), dst.left - rect.left, dst.top - rect.top,
+            dst.right - dst.left, dst.bottom - dst.top, bf) != FALSE;
     }
 
     // =========================================================================
@@ -240,12 +343,24 @@ namespace GlassCore::RebarControl
 
             if (IsRebarGlassTransparentFillPart(iPartId))
             {
+                // Сначала пробуем оставить рамки полосы (нижняя линия), вырезав
+                // только заливку; полное чернение — запасной вариант.
+                if (DrawRebarBandWithAlpha(orig, hTheme, hdc, iPartId, iStateId, *pRect, pClipRect))
+                {
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][Rebar] band part=%d state=%d rect=[%ld,%ld,%ld,%ld] alpha-edges",
+                        iPartId, iStateId, pRect->left, pRect->top, pRect->right, pRect->bottom);
+                    return S_OK;
+                }
                 const RECT* clipRect = pClipRect ? pClipRect : pRect;
                 PatBlt(hdc,
                     clipRect->left, clipRect->top,
                     clipRect->right  - clipRect->left,
                     clipRect->bottom - clipRect->top,
                     BLACKNESS);
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][Rebar] band part=%d state=%d rect=[%ld,%ld,%ld,%ld] black",
+                    iPartId, iStateId, pRect->left, pRect->top, pRect->right, pRect->bottom);
                 return S_OK;
             }
         }
