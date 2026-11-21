@@ -23,6 +23,7 @@
 #include "CorePch.h"
 #include <Hooks/delphi/TPanelDraw.h>
 #include <Hooks/delphi/TButtonGroupsDraw.h>
+#include <Hooks/delphi/RestoratorMemoDraw.h>
 #include <GlassDelphiButtonGroups.h>
 #include <Hooks/RootGdiHooks.h>
 #include <Hooks/RootWindowHooks.h>
@@ -40,6 +41,7 @@
 #include <DebugLog.h>
 
 
+#include <iterator>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -515,6 +517,10 @@ namespace GlassCore::Root
         int WINAPI Root_MyDelphiGroupText(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
         int WINAPI Root_MyDelphiGroupFill(HDC, const RECT*, HBRUSH);
         template <size_t slot> BOOL WINAPI Root_MyDelphiGroupGradient(HDC, PTRIVERTEX, ULONG, PVOID, ULONG, ULONG);
+        int WINAPI Root_MyRestoratorMemoText(HDC, LPCSTR, int, LPRECT, UINT);
+        HBRUSH WINAPI Root_MyRestoratorMemoBrush(const LOGBRUSH*);
+        DWORD WINAPI Root_MyRestoratorMemoColor(int);
+        int WINAPI Root_MyRestoratorMemoFill(HDC, const RECT*, HBRUSH);
 
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
         int WINAPI VclProbeFill(HDC, const RECT*, HBRUSH);
@@ -589,6 +595,15 @@ namespace GlassCore::Root
                 "GradientFill", reinterpret_cast<PVOID>(Root_MyDelphiGroupGradient<OHK_DELPHI_GROUP_GRADIENT>) },
             std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
                 "GdiGradientFill", reinterpret_cast<PVOID>(Root_MyDelphiGroupGradient<OHK_DELPHI_GROUP_GDIGRADIENT>) },
+            // Restorator memo route: keep order in sync with its readiness bits.
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                "DrawTextA", reinterpret_cast<PVOID>(Root_MyRestoratorMemoText) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
+                "CreateBrushIndirect", reinterpret_cast<PVOID>(Root_MyRestoratorMemoBrush) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv },
+                "GetSysColor", reinterpret_cast<PVOID>(Root_MyRestoratorMemoColor) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                "FillRect", reinterpret_cast<PVOID>(Root_MyRestoratorMemoFill) },
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "FillRect", reinterpret_cast<PVOID>(VclProbeFill) },
             std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "PatBlt", reinterpret_cast<PVOID>(VclProbePatBlt) },
@@ -883,6 +898,47 @@ namespace GlassCore::Root
                 it = ins;
                 it->second.CacheHookData();
             }
+        }
+
+        // Restorator memo acquisition is deliberately separate from EnableSpecs:
+        // EnableHook(false) is not paired with a failed enable (nor is its return
+        // value an acquisition indicator when a nested ref already exists).
+        static constexpr size_t kRestoratorMemoSlots[] = {
+            OHK_RESTORATOR_MEMO_TEXT, OHK_RESTORATOR_MEMO_BRUSH,
+            OHK_RESTORATOR_MEMO_COLOR, OHK_RESTORATOR_MEMO_FILL };
+        unsigned AcquireRestoratorMemoHooks() noexcept
+        {
+            void* ep = GlassCore::ModuleHandler::g_entryPointModule;
+            if (!ep || g_shutdown.load(std::memory_order_acquire)) return 0;
+            auto lock = g_rootLock.lock_exclusive();
+            auto it = g_rootMap.find(ep);
+            if (it == g_rootMap.end())
+            {
+                auto [inserted, ok] = g_rootMap.emplace(std::piecewise_construct,
+                    std::forward_as_tuple(ep), std::forward_as_tuple(g_rootHookDep, ep));
+                it = inserted;
+                it->second.CacheHookData();
+            }
+            unsigned mask = 0;
+            for (size_t i = 0; i < std::size(kRestoratorMemoSlots); ++i)
+            {
+                const size_t slot = kRestoratorMemoSlots[i];
+                const int before = it->second.GetRef(slot);
+                it->second.EnableHook(slot, true);
+                if (it->second.GetRef(slot) > before) mask |= 1u << i;
+            }
+            if (mask != GlassCore::RestoratorMemo::kReadyMask)
+                for (size_t i = std::size(kRestoratorMemoSlots); i-- > 0;)
+                    if (mask & (1u << i)) it->second.EnableHook(kRestoratorMemoSlots[i], false);
+            return mask;
+        }
+        void ReleaseRestoratorMemoHooks() noexcept
+        {
+            auto lock = g_rootLock.lock_exclusive();
+            const auto it = g_rootMap.find(GlassCore::ModuleHandler::g_entryPointModule);
+            if (it == g_rootMap.end()) return;
+            for (size_t i = std::size(kRestoratorMemoSlots); i-- > 0;)
+                it->second.EnableHook(kRestoratorMemoSlots[i], false);
         }
 
         void DisableAllRootHooks() noexcept
@@ -1475,6 +1531,11 @@ namespace GlassCore::Root
                 return DrawTextW(hdc, t, c, rc, fmt);
             if (g_shutdown.load(std::memory_order_acquire))
                 return o(hdc, t, c, rc, fmt);
+            // An outer root can still own this generic import. Do not run half
+            // of another text path when the dedicated ANSI route is unarmed.
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassCore::RestoratorMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
+                return o(hdc, t, c, rc, fmt);
             if ((fmt & DT_CALCRECT) != 0)
                 return o(hdc, t, c, rc, fmt);
             int r = 0;
@@ -1514,6 +1575,42 @@ namespace GlassCore::Root
                 return orig(theme, dc, part, state, text, count, flags, rect, options);
             return GlassCore::DelphiPanel::DrawContainerThemeTextEx(
                 orig, theme, dc, part, state, text, count, flags, rect, options);
+        }
+
+        // Restorator memo EXE thunks: the import owner, not a possible chain
+        // trampoline's return address, selects the original. Helpers enforce TLS
+        // readiness and exact window/DC scope even while another thread holds IAT.
+        int WINAPI Root_MyRestoratorMemoText(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
+        {
+            const auto orig = GetRootOrg<OHK_RESTORATOR_MEMO_TEXT, decltype(&::DrawTextA)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::DrawTextA(dc, text, count, rect, flags);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(dc, text, count, rect, flags);
+            return GlassCore::RestoratorMemo::DrawAnsi(orig, dc, text, count, rect, flags);
+        }
+        HBRUSH WINAPI Root_MyRestoratorMemoBrush(const LOGBRUSH* brush)
+        {
+            const auto orig = GetRootOrg<OHK_RESTORATOR_MEMO_BRUSH, decltype(&::CreateBrushIndirect)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::CreateBrushIndirect(brush);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(brush);
+            return GlassCore::RestoratorMemo::CreateBrush(orig, brush);
+        }
+        DWORD WINAPI Root_MyRestoratorMemoColor(int index)
+        {
+            const auto orig = GetRootOrg<OHK_RESTORATOR_MEMO_COLOR, decltype(&::GetSysColor)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::GetSysColor(index);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(index);
+            return GlassCore::RestoratorMemo::SystemColor(orig, index);
+        }
+        int WINAPI Root_MyRestoratorMemoFill(HDC dc, const RECT* rect, HBRUSH brush)
+        {
+            const auto orig = GetRootOrg<OHK_RESTORATOR_MEMO_FILL, decltype(&::FillRect)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::FillRect(dc, rect, brush);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(dc, rect, brush);
+            return GlassCore::RestoratorMemo::Fill(orig, dc, rect, brush);
         }
 
         // Dedicated EXE slots: return addresses in IAT chains are not import owners.
@@ -1633,6 +1730,8 @@ namespace GlassCore::Root
             // group repaints. Preserve its operation RGB for the dedicated path.
             if (caller == GlassCore::ModuleHandler::g_entryPointModule
                 && GlassShared::IsDelphiButtonGroupsClassName(cls)) return o(hdc, color);
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassCore::RestoratorMemo::IsWindow(hFromDc)) return o(hdc, color);
 
             if (!g_shutdown.load(std::memory_order_acquire)
                 && (0xFFFFFF & color) == GetSysColor(COLOR_WINDOW))
@@ -1703,6 +1802,9 @@ namespace GlassCore::Root
             if (caller == GlassCore::ModuleHandler::g_entryPointModule
                 && GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
                 return o(nIndex);
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassCore::RestoratorMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
+                return o(nIndex);
             if (!g_shutdown.load(std::memory_order_acquire))
             {
                 // PopupOnly: вне активной paint-сессии (стеклянного popup'а) comctl32/user32/
@@ -1759,6 +1861,9 @@ namespace GlassCore::Root
                 return o(color);
             if (caller == GlassCore::ModuleHandler::g_entryPointModule
                 && GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
+                return o(color);
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassCore::RestoratorMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
                 return o(color);
 
             // PopupOnly: без активной paint-сессии (стеклянного popup'а) comctl32

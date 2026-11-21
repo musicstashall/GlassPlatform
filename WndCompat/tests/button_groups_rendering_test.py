@@ -38,7 +38,7 @@ class ButtonGroupsRenderingTest(unittest.TestCase):
         thunks = gdi.split('// Dedicated EXE slots:', 1)[1].split('        BOOL WINAPI Root_MyExtTextOutW(', 1)[0]
         thunks = thunks[thunks.index('        int WINAPI Root_MyDelphiGroupText('):]
         row = gdi.index('"DrawTextExW", reinterpret_cast<PVOID>(Root_MyDelphiGroupText)')
-        dep = gdi[gdi.rfind('            std::tuple{', 0, row):].split('#if defined(_DEBUG)', 1)[0]
+        dep = gdi[gdi.rfind('            std::tuple{', 0, row):].split('// Restorator memo route:', 1)[0]
         (stubs / 'root_button_groups_test.inc').write_text(
             'namespace GlassCore::Root {\nusing namespace std::literals;\n'
             'inline RootHookCache GroupSpecsForTest(HMODULE instMod, LPCWSTR cls) {\n'

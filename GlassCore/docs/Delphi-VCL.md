@@ -3840,3 +3840,159 @@ Form.DoubleBuffered остаются за пределами этого шага
   работоспособная новая Glass-поддержка этих классов **не заявляется**.
   Общий renderer/Edit, финализация буферов и прочие принятые пути не менялись.
   Копий донора/лога или scratch-файлов в репозитории не оставлено.
+
+## Тест 97: Restorator memo — согласованный Paint/GetDC-маршрут после image-59
+
+### Новый отрицательный результат и границы диагноза
+
+`image-59.png`: белое поле, вместо XML-строк — серые клетчатые полосы
+разной длины, бледные номера. Новые inline-записи: **22:36:04.713**, PID
+**35044**, TID **10316**, Restorator.exe, `TBomeMemo`, hwndDC **0x007D0D64**;
+три `[Root] SetBkColor: entryPoint COLOR_WINDOW→0`: HDC **0x84012C3D** один
+раз, **0x41012B23** дважды. Нового файла runtime-лога не приложено.
+
+Это подтверждает только generic remap DC. По этим трём строкам **нельзя**
+определить источник клетчатых пикселей, bpp source bitmap, прохождение ANSI
+renderer или реально загруженную версию GlassCore.dll. На опубликованном
+**83c6416** специальной Bome-реализации уже не было: rollback 80897fd завершён,
+повторно отменять его незачем. Структурный пробел оставшегося исходного пути
+установлен отдельно: общий EXE SetBkColor включался, а DrawTextA, согласованная
+подготовка кистей и очистка repaint не обслуживались. Это не доказательство
+единственной пиксельной причины скриншота.
+
+### Что меняет новый маршрут
+
+Новый `delphi/RestoratorMemoDraw.h/.cpp` используется только для **точных
+TBomeMemo / TBMGutter в Restorator.exe**, EXE HINSTANCE и caller BeginPaint/GetDC
+== entry-point, **Full + разрешённый backdrop**. Это window-путь BWM, не Edit/
+TMemo alias, не новое правило для всей VCL. WndCompat-классификатор не меняется:
+эти неизвестные дочерние классы уже доходят до существующего Root_Attach.
+
+Четыре отдельных root IAT-слота составляют одну группу:
+
+| Бит готовности | Импорт EXE | Назначение |
+| --- | --- | --- |
+| `1` | DrawTextA | ANSI → Unicode → существующий alpha-text renderer |
+| `2` | CreateBrushIndirect | Ранняя замена только solid WINDOW/BTNFACE-кистей |
+| `4` | GetSysColor | WINDOW/BTNFACE → 0 только внутри готовой memo-сессии |
+| `8` | FillRect | Покрытие закэшированных solid системных фоновых кистей |
+
+Оба канала — **BeginPaint/EndPaint и GetDC/ReleaseDC** — получают одинаковый
+набор. Он включается транзакционно под root lock: фактом приобретения считается
+**приращение GetRef**, не bool от EnableHook, который при вложенном ref возвращает
+false. Если нет хотя бы одного импорта либо IAT уже занят другим владельцем,
+снимаются только refs этой попытки; частичная маска диагностическая, не активный
+маршрут. Группа с маской `0xF` снимается при закрытии соответствующей сессии.
+
+Сессия с неготовой группой остаётся **TLS native-barrier**. Поэтому чужая/другая
+сессия или поток не получает подмену только из-за глобально активного IAT.
+Физический оконный DC должен совпадать с HWND, memory DC — иметь запись этого
+HWND в стеке PaintDispatcher; требуется текущая оконная Paint/GetDC-сессия.
+Одна ambient HWND недостаточна. Стековая привязка memory DC всё ещё означает
+контекст создания, **не доказанную lineage выбранного bitmap**.
+
+Для этих окон исключены static/dynamic generic SetBkColor, generic системные
+кисти и DrawTextW. В телах generic hooks есть узкий passthrough на случай,
+если их ещё держит внешний root paint. При неполной группе не остаётся
+специально включённого «одного чёрного BkColor без текста».
+
+После успешного настоящего BeginPaint, до помещения HDC в стек диспетчера,
+post-provider сверяет **готовую pre-BeginPaint TLS-сессию** и очищает только
+`PAINTSTRUCT.rcPaint` через BLACKNESS. `fErase=0` выставляет сам диспетчер только
+при успешной очистке. Не проверять здесь ActiveHost/новый stack DC: они ещё
+не опубликованы. Ошибка BeginPaint по существующему пути компенсирует onBegin
+парным onEnd; отдельной очистки/полного client erase для GetDC не добавляется.
+
+### Фоны, ANSI и намеренные отличия от донора
+
+- Process-wide lifetime GetSysColor Detours из BWM **не переносится**. Новый
+  GetSysColor ограничен готовой memo-сессией; для уже созданных до неё WINDOW/
+  BTNFACE-кистей есть FillRect. Это безопасное отличие от startup-подмены донора,
+  а не заявление о переносе всех его lifetime-эффектов.
+- CreateBrushIndirect копирует LOGBRUSH и вызывает настоящий original с
+  чёрным solid RGB только для фактических системных WINDOW/BTNFACE цветов.
+  Возвращается **обычная caller-owned кисть**, не borrowed stock BLACK_BRUSH.
+  Pattern/custom/null brush остаются штатными; параметры приложения не меняются.
+- FillRect проверяет известный DC, rect и реальную solid кисть. Закэшированные
+  WINDOW/BTNFACE очищаются; custom/black/pattern и другие encoded COLOR_* кисти
+  остаются native. **Нет black-pixel colour key** для bitmap, текста или иконок.
+- При **OPAQUE DrawTextA** воспроизводится узкое donor-правило: фон операции
+  0/WINDOW/BTNFACE очищается в layout rect, другой RGB получает **A255 только
+  в своём прямоугольнике** через существующий DrawThemeContent. Это не A100 на
+  весь буфер. `BufferedPaintSetAlpha(255)` вызывается только для этого локально
+  созданного фонового буфера; чужая нормализация не подавляется.
+- TRANSPARENT text не стирает подложку. Текст передаётся существующему
+  `DrawTextWithAlpha(..., true)` без BPPF_ERASE; **RenderText не изменён**.
+- Конверсия использует выбранный font charset/TranslateCharsetInfo либо CP_ACP
+  для DEFAULT_CHARSET, flags=0 и исходный **ANSI byte count**. В renderer идёт
+  фактическое **число Unicode code units**, а не старое число ANSI-байт. При
+  `count=-1` конвертер учитывает NUL, после чего он исключается из wide count.
+  Symbol/неизвестная или неудачная конверсия остаётся native. DT_CALCRECT,
+  DT_MODIFYSTRING, DT_NOCLIP, некорректные аргументы/геометрия не перенаправляются.
+- SaveDC/RestoreDC сохраняют состояние; перед вызовом ANSI original при отказе
+  оно восстанавливается **до**, а не после native вызова. Но это **не откат
+  пикселей** уже подготовленного фона. Отказ — native repaint, не обещание
+  транзакционного pixel rollback.
+- Обязательного 32bpp gate нет: его нет в настоящем donor Bome-пути, а формат
+  source bitmap в старом API6 не был установлен. Выбранный bitmap/bpp теперь
+  **наблюдаются в логе**, не принуждаются. Это не доказывает, что финальный
+  StretchBlt любого формата сохранит нужную альфу.
+
+Отменённые TBomeMemoDraw/GlassBomeMemo и их paint-only слоты не восстановлены.
+Нет новых StretchBlt/GDI+/checkerboard hooks, переделки общего renderer, native
+Edit/RichEdit, grids, panels/frames, TCoolBar/ImageList, выключения DoubleBuffered
+или обхода позднего SetAlpha255. RichEdit selection и прежний Debug|Win32 AV
+остаются отдельными нерешёнными задачами; AV по Continue безопасным не признан.
+
+### Диагностика и следующая Windows-проверка
+
+Новый маркер **`[GlassCore][RestoratorMemo] hooks route=2`** содержит HWND,
+точный class, Paint/GetDC, mask и ready. Норма для обслуженной сессии:
+**`mask=0xF ready=1`**. При ready=0 частичные изменения сняты; маска показывает
+успешные биты попытки. Нулевая маска возможна также при не-EXE caller, а не
+обязательно означает отсутствие всех импортов.
+
+Далее видны `erase ... rect ... ok`, `brush`, `fill`, `syscolor` и `text`:
+HDC/type, selected bitmap, **bpp/size**, ANSI/wide counts, cp, flags, rect,
+BkColor/OPAQUE, hr/result. Неподдержанный DC даёт `text-skip`, аргументы,
+конверсия, SaveDC/подготовка или renderer — `text-native ... reason=...`.
+Текст документа в логи не выводится; сообщения ограничены по частоте.
+
+Даже `hr=S_OK` от прежнего DrawTextWithAlpha не является проверкой пикселей:
+он может успешно вернуть после внутреннего plain-GDI fallback. Эти логи
+разделяют включение маршрута, его gates и попытку рисования, **не подменяют
+Windows/DWM acceptance**. Если остаются только старые `[Root] SetBkColor`,
+сначала установить загруженную DLL/прохождение нового маршрута; не делать
+вывод «новая ANSI-композиция сработала» по generic строкам.
+
+Повторная проверка — **Restorator**, тот же XML и gutter: отображение, прокрутка,
+частичный repaint/resize, фокус и фон без белого поля/клетчатых полос, читаемый
+текст и номера. Формат ответа пользователя остаётся: **скриншот → «Логи при
+отображении» → «Логи с зондом при отображении элемента»**; полезны полные новые
+RestoratorMemo записи, включая hooks/erase/text, а не только фильтр SetBkColor.
+Реально загруженная сборка из image-59 по-прежнему не установлена.
+
+### Проверки нового шага
+
+- Contracts **76/76** — PASS; соответствие всех release/debug enum/dependency
+  строк сохранено. Новые contracts охватывают scope, четыре слота, оба канала,
+  ref-increment/rollback, TLS barrier, post-before-push и ABI/native ограничения.
+- Новый portable runner компилирует **полный production RestoratorMemoDraw.cpp**,
+  реальные root acquire/release/thunks/провайдеры и релевантные classification
+  ветки, не копию этих алгоритмов: **13/13 × Release/Debug** — PASS.
+- Те же **13/13 × Release/Debug под ASan + UBSan** — PASS. Покрыты каждый
+  отсутствующий/занятый импорт, вложенный ref с false-возвратом EnableHook,
+  Paint/GetDC/native barrier, erase, ANSI/DBCS counts, measurement/mutation,
+  кисти/фоны, известные/чужие DC, mode/backdrop, отказы/reentry, внеочередное
+  закрытие, компенсация failed BeginPaint, другой поток и shutdown.
+- Panels **12/12 × Release/Debug**, button groups **9/9 × Release/Debug**,
+  TCoolBar **9/9**, input icons **6/6** — PASS. В двух старых runners уточнены
+  границы production-фрагментов из-за новых соседних root слотов; сами
+  panel/group production-реализации не менялись.
+- UTF-8 без BOM/управляющих символов, XML проектов/filters, diff checks — PASS.
+  BWM SHA-256 не изменён; image-58/image-59 сохранены. Во входящих снова оказался
+  тот же API6 (сверены 41252 байт и прежний SHA из теста 95); после проверки
+  сохранённых выводов он повторно удалён, копии capture не создавались.
+- **Windows/MSVC Win32/x64 и визуальная проверка Restorator здесь недоступны**.
+  Doubles не проверяют реальные codepages, IAT-патчинг, растеризацию GDI или
+  перенос alpha через конечный bitmap/StretchBlt. Визуальный PASS не заявлен.

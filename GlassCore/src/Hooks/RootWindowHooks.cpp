@@ -29,6 +29,7 @@
 #include "CorePch.h"
 #include <Hooks/RootWindowHooks.h>
 #include <Hooks/RootGdiHooks.h>
+#include <Hooks/delphi/RestoratorMemoDraw.h>
 #include <Hooks/ExplorerFrame.h>
 #include <Module/ModuleHandler.h>
 #include <Subsystems/PaintDispatcher.h>
@@ -65,6 +66,7 @@ namespace GlassCore::Root
             std::vector<HookSpec> dcHooks;          // только GetDC / ReleaseDC
             std::vector<HookSpec> compatDcHooks;    // только CreateCompatibleDC / DeleteDC
             bool winFormsDrawTextEx = false;        // не IAT: Detours в Button, вместе с paint-сессией
+            bool restoratorMemo = false;           // four all-or-native EXE imports, Paint + GetDC
         };
 
         static wil::srwlock                                     s_cacheLock;
@@ -85,11 +87,13 @@ namespace GlassCore::Root
             // Статика Classify покрывает только instMod == entry-point,
             // а caller BeginPaint виден лишь в сессии. Только Paint-канал.
             bool entryPointSetBkColor = false;
+            bool restoratorMemo = false; // includes an unarmed/native session barrier
         };
         struct RootHookSession
         {
             HWND hWnd = nullptr;
             std::vector<HookSpec> specs;
+            bool restoratorMemo = false;
         };
         thread_local std::vector<RootPaintSession>              g_rootPaintStack;
         thread_local std::vector<RootHookSession>               g_rootDcStack;
@@ -349,6 +353,10 @@ namespace GlassCore::Root
             const HMODULE instMod = reinterpret_cast<HMODULE>(GetWindowLongPtrW(hWnd, GWLP_HINSTANCE));
             const ATOM dlgAtom = static_cast<ATOM>(GetClassLongPtrW(hWnd, GCW_ATOM));
             const bool is32770 = (dlgAtom == static_cast<ATOM>(32770));
+            // BWM Restorator window path (not its native memo/Edit ctrl path).
+            // A missing/conflicting import must not leave only SetBkColor armed.
+            cache.restoratorMemo = instMod == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassCore::RestoratorMemo::IsWindow(hWnd);
 
             // USER32.dll + класс диалога #32770 — BWM Paint
             if (StrEqI(wndBase.c_str(), L"USER32.dll") && StrEqI(cls, L"#32770"))
@@ -631,13 +639,15 @@ namespace GlassCore::Root
                 // their delphi draw paths. Generic remaps would destroy it
                 // before the client fill can apply the requested alpha=100.
                 if (!GlassShared::IsDelphiPanelClassName(cls)
-                    && !GlassShared::IsDelphiButtonGroupsClassName(cls))
+                    && !GlassShared::IsDelphiButtonGroupsClassName(cls)
+                    && !cache.restoratorMemo)
                 {
                     PushPaint(ep, OHK_SETBKCOLOR, cache);
                     PushPaint(ep, OHK_GETSYSCOLORBR, cache);
                     PushPaint(ep, OHK_CREATESOLIDBRUSH, cache);
                 }
-                PushPaint(ep, OHK_DRAWTEXT, cache);
+                if (!cache.restoratorMemo)
+                    PushPaint(ep, OHK_DRAWTEXT, cache);
                 // BWM Paint, ветка «else // window», «callerModule == EntryPointModule»:
                 // «else if (szModuleName == msinfo32.exe)» — там szModuleName это basename
                 // caller-модуля BeginPaint (т.е. имя EXE точки входа), а не модуль окна.
@@ -711,6 +721,13 @@ namespace GlassCore::Root
             return ok != FALSE;
         }
 
+        static bool Root_OnRestoratorMemoAfterBeginPaint(
+            HWND hwnd, HDC dc, LPPAINTSTRUCT ps, HMODULE caller) noexcept
+        {
+            return !g_shutdown.load(std::memory_order_acquire)
+                && GlassCore::RestoratorMemo::AfterBeginPaint(hwnd, dc, ps, caller);
+        }
+
         // EnableRootHook держит ref-count на паре (module, OHK) в HookDispatcher.
         static void EnableSpecs(const std::vector<HookSpec>& specs, bool enable) noexcept
         {
@@ -746,6 +763,7 @@ namespace GlassCore::Root
                 chartInherit = lr.inheritedFromChartGraph;
                 session.specs = lr.cache->paintHooks;
                 session.winFormsDrawTextEx = lr.cache->winFormsDrawTextEx;
+                session.restoratorMemo = lr.cache->restoratorMemo;
             }
             // BWM PaintHandler.cpp, ветка «window», callerModule == EntryPointModule:
             // фон окон и #32770-диалогов, рисуемых кодом самого EXE (dfrgui.exe),
@@ -756,7 +774,8 @@ namespace GlassCore::Root
             if (callerMod && GlassCore::ModuleHandler::g_entryPointModule
                 && callerMod == GlassCore::ModuleHandler::g_entryPointModule
                 && !GlassShared::IsDelphiPanelWindow(hWnd)
-                && !GlassShared::IsDelphiButtonGroupsWindow(hWnd))
+                && !GlassShared::IsDelphiButtonGroupsWindow(hWnd)
+                && !GlassCore::RestoratorMemo::IsWindow(hWnd))
             {
                 void* ep = GlassCore::ModuleHandler::g_entryPointModule;
                 bool already = false;
@@ -771,8 +790,15 @@ namespace GlassCore::Root
                 if (!already)
                     wantEntrySetBk = true;
             }
-            if (session.specs.empty() && !session.winFormsDrawTextEx && !wantEntrySetBk)
+            if (session.specs.empty() && !session.winFormsDrawTextEx && !wantEntrySetBk && !session.restoratorMemo)
                 return;
+            if (session.restoratorMemo)
+            {
+                const unsigned mask = IsFullInjectionMode()
+                    && callerMod == GlassCore::ModuleHandler::g_entryPointModule
+                    ? AcquireRestoratorMemoHooks() : 0;
+                GlassCore::RestoratorMemo::BeginSession(hWnd, true, mask);
+            }
             wchar_t cn[256]{};
             GetClassNameW(hWnd, cn, _countof(cn));
             if (IsMmcChartSessionClass(cn))
@@ -854,6 +880,8 @@ namespace GlassCore::Root
                     EnableRootHook(GlassCore::ModuleHandler::g_entryPointModule, OHK_SETBKCOLOR, false);
                 if (session.winFormsDrawTextEx)
                     GlassCore::FormsHooks::DrawTextExAttach(false);
+                if (session.restoratorMemo && GlassCore::RestoratorMemo::EndSession(hWnd, true))
+                    ReleaseRestoratorMemoHooks();
                 return;
             }
             // Пары для этого HWND нет (открытие было без кеша/спеков) — тихий выход.
@@ -861,7 +889,7 @@ namespace GlassCore::Root
 
         // --- Канал 2: GetDC / ReleaseDC (аналог PaintHandler::Dc) ---
 
-        static void Root_OnGetDC(HWND hWnd, HMODULE /*callerMod*/) noexcept
+        static void Root_OnGetDC(HWND hWnd, HMODULE callerMod) noexcept
         {
             if (g_shutdown.load(std::memory_order_acquire)) return;
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd)) return;
@@ -874,8 +902,16 @@ namespace GlassCore::Root
                 const RootCacheLookupResult lr = LookupRootHookCacheLocked(hWnd);
                 if (!lr.cache) return;
                 session.specs = lr.cache->dcHooks;
+                session.restoratorMemo = lr.cache->restoratorMemo;
             }
-            if (session.specs.empty()) return;
+            if (session.specs.empty() && !session.restoratorMemo) return;
+            if (session.restoratorMemo)
+            {
+                const unsigned mask = IsFullInjectionMode()
+                    && callerMod == GlassCore::ModuleHandler::g_entryPointModule
+                    ? AcquireRestoratorMemoHooks() : 0;
+                GlassCore::RestoratorMemo::BeginSession(hWnd, false, mask);
+            }
             wchar_t cn[256]{};
             GetClassNameW(hWnd, cn, _countof(cn));
             if (IsMmcChartSessionClass(cn))
@@ -897,6 +933,8 @@ namespace GlassCore::Root
                 auto session = std::move(*it);
                 g_rootDcStack.erase((it + 1).base());
                 EnableSpecs(session.specs, false);
+                if (session.restoratorMemo && GlassCore::RestoratorMemo::EndSession(hWnd, false))
+                    ReleaseRestoratorMemoHooks();
                 return;
             }
             // Пары для этого HWND нет — тихий выход.
@@ -950,7 +988,7 @@ namespace GlassCore::Root
         ClassifyRootWindow(hRoot, cache);
 
         if (cache.paintHooks.empty() && cache.dcHooks.empty()
-            && cache.compatDcHooks.empty() && !cache.winFormsDrawTextEx)
+            && cache.compatDcHooks.empty() && !cache.winFormsDrawTextEx && !cache.restoratorMemo)
             return;
 
         // Предпрогрев IAT-кешей модулей из спеков (только чтение) — холодный скан PE
@@ -968,6 +1006,7 @@ namespace GlassCore::Root
             entry.dcHooks.insert(entry.dcHooks.end(), cache.dcHooks.begin(), cache.dcHooks.end());
             entry.compatDcHooks.insert(entry.compatDcHooks.end(), cache.compatDcHooks.begin(), cache.compatDcHooks.end());
             entry.winFormsDrawTextEx |= cache.winFormsDrawTextEx;
+            entry.restoratorMemo |= cache.restoratorMemo;
             prewarmModules.reserve(
                 entry.paintHooks.size() + entry.dcHooks.size() + entry.compatDcHooks.size());
             for (auto& [mod, idx] : entry.paintHooks) { (void)idx; if (mod) prewarmModules.push_back(mod); }
@@ -1050,6 +1089,7 @@ namespace GlassCore::Root
             PrewarmRootHook(ep);
         GlassCore::PaintDispatcher::RegisterPaintProvider({ Root_OnBeginPaint, Root_OnEndPaint });
         GlassCore::PaintDispatcher::RegisterPostPaintProvider({ Root_OnDelphiGridAfterBeginPaint });
+        GlassCore::PaintDispatcher::RegisterPostPaintProvider({ Root_OnRestoratorMemoAfterBeginPaint });
         GlassCore::Root::RegisterDelphiGridPaintProvider();
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ Root_OnGetDC, Root_OnReleaseDC });
         GlassCore::PaintDispatcher::RegisterCompatDCProvider({ Root_OnCreateCompatDC, Root_OnDeleteDC });
@@ -1077,6 +1117,7 @@ namespace GlassCore::Root
         g_rootPaintStack.clear();
         g_rootDcStack.clear();
         g_rootCompatDcStack.clear();
+        GlassCore::RestoratorMemo::ClearSessions();
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
         ClearVclDrawProbe();
 #endif
