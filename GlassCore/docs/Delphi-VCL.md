@@ -2634,3 +2634,25 @@ alpha-путь).
   `[WndCompat][Rebar] WM_PAINT hwnd=…` (бюджет 8/с).
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 77: TCoolBar — журнал содержит только `[GlassCore][Rebar] Startup`
+
+`Startup: cached 0x…8C3D0000` (comctl32) и `0xF80000` (EXE) — значит модуль
+загружен и диспетчеры закешированы, но ни `OnPaintBegin`, ни `Rebar_Attach`, ни
+`Rebar_CatchUp` в журнале нет. То есть до rebar-ветки дело не доходит, и
+«тишина» не отличает «в поддереве нет rebar-окон» от «догоняющий проход не
+вызывался».
+
+Добавлено:
+
+- `Rebar_CatchUp` логируется **всегда** и перечисляет классы, увиденные в
+  поддереве root-окна (до 16 уникальных):
+  `[WndCompat][Rebar] Rebar_CatchUp: root=0x… children=N rebar=M classes="TForm|TCoolBar|…"` —
+  по этой строке видно и количество окон, и есть ли вообще `TCoolBar` под root'ом;
+- сопоставление класса rebar'а расширено: `ReBarWindow32`, `SizeableRebar`, а
+  также любое имя, содержащее `CoolBar`/`ReBar`/`Rebar` (`IsRebarLikeClass`);
+- `BackdropPolicyRescan::TryRescanControlHwnd` теперь сразу делает
+  `Rebar_Attach` для rebar-классов, не полагаясь на синтетическое CREATE-событие
+  (если окно уже помечено, синтетический CREATE для него пропускается).
+
+Сборка и визуальный результат на Windows не проверены.

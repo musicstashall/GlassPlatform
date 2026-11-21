@@ -9,6 +9,8 @@
 #include <GlassBackdropMark.h>
 #include <RootPolicyQuery.h>
 #include <RootEventProvider.h>
+#include <string>
+#include <cwchar>
 
 #include <vector>
 #include <algorithm>
@@ -135,21 +137,47 @@ namespace WndCompat
 
     namespace
     {
+        [[nodiscard]] bool IsRebarLikeClass(const wchar_t* cls) noexcept
+        {
+            if (!cls)
+                return false;
+            return _wcsicmp(cls, L"ReBarWindow32") == 0
+                || _wcsicmp(cls, L"SizeableRebar") == 0
+                || wcsstr(cls, L"CoolBar") != nullptr
+                || wcsstr(cls, L"ReBar") != nullptr
+                || wcsstr(cls, L"Rebar") != nullptr;
+        }
+
+        struct RebarCensus
+        {
+            unsigned  children{};
+            unsigned  rebar{};
+            unsigned  distinct{};
+            wchar_t   classes[16][64]{};
+        };
+
         BOOL CALLBACK RebarCatchUpProc(HWND hWnd, LPARAM lParam) noexcept
         {
+            auto* ctx = reinterpret_cast<RebarCensus*>(lParam);
+            if (!ctx)
+                return FALSE;
+            ++ctx->children;
+
             wchar_t cls[64]{};
             if (!GetClassNameW(hWnd, cls, _countof(cls)))
                 return TRUE;
-            const bool rebar = _wcsicmp(cls, L"ReBarWindow32") == 0
-                || _wcsicmp(cls, L"SizeableRebar") == 0
-                || _wcsicmp(cls, L"TCoolBar") == 0;
-            if (rebar)
+
+            bool known = false;
+            for (unsigned i = 0; i < ctx->distinct; ++i)
+                if (_wcsicmp(ctx->classes[i], cls) == 0) { known = true; break; }
+            if (!known && ctx->distinct < _countof(ctx->classes))
+                wcscpy_s(ctx->classes[ctx->distinct++], cls);
+
+            if (IsRebarLikeClass(cls))
             {
-                auto* count = reinterpret_cast<unsigned*>(lParam);
-                ++*count;
+                ++ctx->rebar;
                 WndCompat::Rebar_Attach(hWnd);
             }
-            // EnumChildWindows рекурсивен по всем потомкам — вручную не спускаемся.
             return TRUE;
         }
     }
@@ -160,11 +188,22 @@ namespace WndCompat
             return;
         if (WinEventHook_GetMode() != Shared::InjectionMode::Full)
             return;
-        unsigned seen = 0;
-        EnumChildWindows(hRoot, RebarCatchUpProc, reinterpret_cast<LPARAM>(&seen));
-        if (seen)
-            DebugLog(DBG_NORMAL, L"[WndCompat][Rebar] Rebar_CatchUp: root=0x%p rebar-windows=%u",
-                hRoot, seen);
+
+        RebarCensus ctx{};
+        EnumChildWindows(hRoot, RebarCatchUpProc, reinterpret_cast<LPARAM>(&ctx));
+
+        // Перепись поддерева: без неё «тишина в журнале» не отличает «нет
+        // rebar-окон» от «догоняющий проход не вызывался».
+        std::wstring names;
+        for (unsigned i = 0; i < ctx.distinct; ++i)
+        {
+            if (i)
+                names += L'|';
+            names += ctx.classes[i];
+        }
+        DebugLog(DBG_NORMAL,
+            L"[WndCompat][Rebar] Rebar_CatchUp: root=0x%p children=%u rebar=%u classes=%s",
+            hRoot, ctx.children, ctx.rebar, names.c_str());
     }
 
     void Rebar_Detach(HWND hWnd)

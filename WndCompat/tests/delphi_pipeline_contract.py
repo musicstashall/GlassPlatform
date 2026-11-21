@@ -894,6 +894,12 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('EnumChildWindows(hRoot, RebarCatchUpProc', subclass)
         self.assertIn('WndCompat::Rebar_CatchUp(hRoot);', read("WndCompat/Root/RootSubclass.cpp"))
         self.assertIn('[WndCompat][Rebar] WM_PAINT hwnd=0x%p', subclass)
+        # Перепись поддерева: «тишина» ≠ «проход не вызывался».
+        self.assertIn('struct RebarCensus', subclass)
+        self.assertIn('Rebar_CatchUp: root=0x%p children=%u rebar=%u classes=%s', subclass)
+        self.assertIn('IsRebarLikeClass', subclass)
+        rescan = read("WndCompat/Tracker/BackdropPolicyRescan.cpp")
+        self.assertIn('WndCompat::Rebar_Attach(hChild);', rescan)
         handler = read("WndCompat/Tracker/WinEventHandler.cpp")
         self.assertIn('Rebar_Attach: skip (allow=%d parent=0x%p)', handler)
 
