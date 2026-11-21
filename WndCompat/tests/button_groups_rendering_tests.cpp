@@ -191,6 +191,58 @@ namespace
         CHECK(GroupTest::chainGradient == 2 && GroupTest::chainGdiGradient == 2);
         CHECK(GroupTest::flushes == 4 && GroupTest::alphaCalls == 4);
     }
+    void ObservedCategoryBackgroundStates()
+    {
+        // LogViewer-18: API inputs, not an emulation of VCL state transitions.
+        // The later captured paint supplied a solid gray fill, not a pink gradient.
+        Context c; c.window.cls = L"TCategoryButtons";
+        TestDC reopened; reopened.owner = &c.window;
+        const RECT category{2,1,234,44};
+        TRIVERTEX vertices[]{{2,1,0xff00,0xea00,0xff00,0}, {234,44,0xf000,0xf000,0xf000,0}};
+        const auto before = std::array{vertices[0],vertices[1]};
+        GRADIENT_RECT pair{0,1};
+        LOGBRUSH face{BS_SOLID, RGB(240,240,240)}, gray{BS_SOLID, RGB(230,230,230)},
+            window{BS_SOLID, RGB(255,255,255)};
+        for (bool solid : {false, true})
+        {
+            HDC dc = solid ? &reopened : &c.dc;
+            const int buffers = GroupTest::bufferCalls, commits = GroupTest::commits,
+                alpha = GroupTest::alphaCalls, black = Test::black,
+                gradients = GroupTest::chainGradient;
+            CHECK(c.Fill(nullptr, dc, &face) == 1);
+            CHECK(GroupTest::bufferCalls == buffers && Test::black == black+1);
+            if (solid)
+                CHECK(c.Fill(&category, dc, &gray) == 1);
+            else
+                CHECK(c.Call("GradientFill", &::GdiGradientFill, dc,
+                    vertices, 2u, &pair, 1u, GRADIENT_FILL_RECT_H));
+            CHECK(GroupTest::bufferCalls == buffers+1 && GroupTest::commits == commits+1);
+            CHECK(GroupTest::alphaCalls == alpha+1 && GroupTest::constantAlpha == 100);
+            CHECK(Test::black == black+2 && !GroupTest::bufferErase);
+            CHECK(GroupTest::chainGradient == gradients + (solid ? 0 : 1));
+            CHECK(std::memcmp(&GroupTest::bufferRect, &category, sizeof(category)) == 0);
+            if (solid)
+            {
+                for (const auto& p : GroupTest::committed)
+                    CHECK(p.rgbRed == 230 && p.rgbGreen == 230 && p.rgbBlue == 230 && p.rgbReserved == 255);
+            }
+            else
+            {
+                const auto& first = GroupTest::committed.front();
+                const auto& last = GroupTest::committed.back();
+                CHECK(first.rgbRed == 255 && first.rgbGreen == 234 && first.rgbBlue == 255 && first.rgbReserved == 255);
+                CHECK(last.rgbRed == 240 && last.rgbGreen == 240 && last.rgbBlue == 240 && last.rgbReserved == 255);
+                CHECK(GroupTest::lastVertices == vertices && GroupTest::lastMesh == &pair);
+                CHECK(GroupTest::lastMode == GRADIENT_FILL_RECT_H);
+            }
+            for (const RECT item : {RECT{5,22,27,44}, RECT{29,22,51,44}})
+                CHECK(c.Fill(&item, dc, &window) == 1);
+            CHECK(GroupTest::bufferCalls == buffers+1 && GroupTest::commits == commits+1);
+            CHECK(Test::black == black+4);
+        }
+        CHECK(std::memcmp(vertices, before.data(), sizeof(vertices)) == 0);
+        CHECK(GroupTest::chainGradient == 1 && GroupTest::chainFill == 1);
+    }
     void DcModeAndBackdropIsolation()
     {
         Context c;
@@ -287,6 +339,7 @@ int main(int argc, char** argv)
     const std::unordered_map<std::string, void(*)()> cases{
         {"class-gate",ClassGateAndSlots}, {"probe-text",ProbeTextAndNativeParameters},
         {"fills",FillPoliciesAndRepaints}, {"gradients",NativeGradientAndBothImports},
+        {"category-states",ObservedCategoryBackgroundStates},
         {"dc-isolation",DcModeAndBackdropIsolation}, {"unsupported",UnsupportedGeometryAndBrushes},
         {"failures",FailureFallbackAndReentry}, {"slot-originals",SlotOriginalsAndMissingImports},
     };
