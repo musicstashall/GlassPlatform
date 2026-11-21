@@ -576,7 +576,7 @@ class DelphiPipelineContract(unittest.TestCase):
         apply = source.split('static void ApplyEditBackgroundRect(', 1)[1].split('static COLORREF GetRichEdit20BackgroundFromEm', 1)[0]
         self.assertRegex(apply, r'const bool fill = IsRichEditKind\(GlassShared::GlassGetWindowKind\(sessionHwnd\)\) \|\| IsDelphiMemo\(sessionHwnd\)\s*'
                                r'\? rgb != sysWnd : rgb != 0 && rgb != sysBtn && rgb != sysWnd;')
-        self.assertIn('CreateSolidColorBrushWithAlpha(color, 100)', apply)
+        self.assertRegex(apply, r'CreateSolidColorBrushWithAlpha\(color,\s*rgb == \(GetSysColor\(COLOR_HIGHLIGHT\) & 0xFFFFFFu\) \? 255 : 100\)')
         self.assertRegex(apply, r'(?s)if \(!fill\)\s*\{[^}]*\}\s*else\s*\{\s*FillRect\(targetDC, &r, brush.get\(\)\);')
         self.assertNotIn('rgb == 0 || rgb == sysBtn || rgb == sysWnd', apply)
 
@@ -588,7 +588,7 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('PushSessionBlacknessRect(r,', apply)
         self.assertIn('FillRect(targetDC, &r, brush.get())', apply)
         replay = source.split('static void ReplayMemoBackgrounds(', 1)[1].split('// ── FlushEditBuffer', 1)[0]
-        self.assertRegex(replay, r'(?s)for \(const auto& op : buf.memoBackgrounds\).*?PatBlt\(dc.*?if \(op.fill\).*?CreateSolidColorBrushWithAlpha\(op.color, 100\).*?FillRect\(dc')
+        self.assertRegex(replay, r'(?s)for \(const auto& op : buf.memoBackgrounds\).*?PatBlt\(dc.*?if \(op.fill\).*?CreateSolidColorBrushWithAlpha\(op.color,\s*\(op.color & 0xFFFFFFu\) == \(GetSysColor\(COLOR_HIGHLIGHT\) & 0xFFFFFFu\) \? 255 : 100\).*?FillRect\(dc')
         flush = source.split('static void FlushEditBuffer()', 1)[1].split('static void ApplyEditBackgroundRect(', 1)[0]
         self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*\{.*?ReplayMemoBackgrounds\(composeDC, \*buf\);.*?GdiAlphaBlend\(composeDC')
         self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*\{.*?ReplayMemoBackgrounds\(buf->screenDC, \*buf\);.*?GdiAlphaBlend\(buf->screenDC')
@@ -618,7 +618,7 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('op.fill && (op.color & 0xFFFFFFu) == buf.memoSolidBackground', confirm)
         prime = edit.split('static bool PrimeMemoSolidBackground(', 1)[1].split('static void ReplayMemoBackgrounds(', 1)[0]
         self.assertIn('!HasConfirmedMemoSolidBackground(buf)', prime)
-        self.assertIn('CreateSolidColorBrushWithAlpha(buf.memoSolidBackground, 100)', prime)
+        self.assertRegex(prime, r'CreateSolidColorBrushWithAlpha\(buf.memoSolidBackground,\s*\(buf.memoSolidBackground & 0xFFFFFFu\) == \(GetSysColor\(COLOR_HIGHLIGHT\) & 0xFFFFFFu\) \? 255 : 100\)')
         flush = edit.split('static void FlushEditBuffer()', 1)[1].split('static void ApplyEditBackgroundRect(', 1)[0]
         for dc in ('composeDC', 'buf->screenDC'):
             self.assertLess(flush.index(f'PrimeMemoSolidBackground({dc}, *buf)'), flush.index(f'ReplayMemoBackgrounds({dc}, *buf)'))
