@@ -571,6 +571,34 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('SetLastError(originalError)', body)
         self.assertIn('return result;', body)
 
+    def test_rich_selection_native_brush_paths_are_scoped_and_do_not_rewrite_text(self):
+        code = read('GlassCore/src/Hooks/EditHooks.cpp')
+        self.assertIn('BOOL WINAPI Edit_MyPatBlt(', code)
+        resolver = code.split('static HWND ResolveRichEditSelectionDc(', 1)[1].split('static bool IsRichEditHighlightBrush(', 1)[0]
+        for guard in ('g_shutdown', 'GetSessionHwnd()', 'IsRichEditKind', 'WindowFromDC(hdc)',
+                      'IsPaintStackDcForHwnd', 'IsTopWindowDrawingSession', 'OBJ_MEMDC', 'bitmap.bmBitsPixel > 1'):
+            self.assertIn(guard, resolver)
+        brush = code.split('static bool IsRichEditHighlightBrush(', 1)[1].split('BOOL WINAPI Edit_MyFillRect(', 1)[0]
+        for guard in ('BS_SOLID', 'COLOR_HIGHLIGHT', 'GetDCBrushColor', 'DC_BRUSH', 'COLOR_MENUBAR', '0xFFFFFFu'):
+            self.assertIn(guard, brush)
+        fill = code.split('BOOL WINAPI Edit_MyFillRect(HDC hdc,', 1)[1].split('BOOL WINAPI Edit_MyPatBlt(HDC hdc,', 1)[0]
+        pat = code.split('BOOL WINAPI Edit_MyPatBlt(HDC hdc,', 1)[1].split('BOOL WINAPI Edit_MyExtTextOutA(', 1)[0]
+        for body in (fill, pat):
+            self.assertIn('ResolveRichEditSelectionDc(hdc)', body)
+            self.assertIn('CreateSolidColorBrushWithAlpha(GetSysColor(COLOR_HIGHLIGHT), 255)', body)
+            self.assertIn('SetLastError(error)', body)
+            self.assertNotIn('ApplyEditBackgroundRect(', body)
+            self.assertNotIn('EnsureEditBuffer(', body)
+            self.assertNotIn('ExtTextOutWithAlpha(', body)
+        self.assertIn('rop == PATCOPY', pat)
+        self.assertIn('old != HGDI_ERROR', pat)
+        self.assertIn('paint.hotKeyFillHook && paint.mod == callerMod', fill)
+        self.assertLess(fill.index('if (!hotKeyModule)'), fill.index('COLOR_SCROLLBAR'))
+        hooks = code.split('static void EnableEditHooksForModule(', 1)[1].split('//  PaintDispatcher provider callbacks', 1)[0]
+        for guard in ('IsRichEditKind(kind)', 'L"riched20.dll"', 'L"msftedit.dll"', 'L"gdi32full.dll"', 'EHK_FILLRECT', 'EHK_PATBLT'):
+            self.assertIn(guard, hooks)
+        self.assertIn('[GlassCore][RichEditSelection]', code)
+
     def test_richedit_and_memo_background_use_alpha_brush_for_every_non_window_color(self):
         source = read('GlassCore/src/Hooks/EditHooks.cpp')
         apply = source.split('static void ApplyEditBackgroundRect(', 1)[1].split('static COLORREF GetRichEdit20BackgroundFromEm', 1)[0]
