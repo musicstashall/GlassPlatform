@@ -914,10 +914,13 @@ class DelphiPipelineContract(unittest.TestCase):
 
         # GlassCore: своя сессия и свои слоты.
         hooks = read("GlassCore/src/Hooks/delphi/TCoolBarDraw.cpp")
-        for marker in ('ExtTextOutSlot', 'FillRectSlot', 'PatBltSlot', 'DrawTextExSlot',
-                       'bool IsPaintDc(HDC hdc) noexcept'):
+        for marker in ('ExtTextOutSlot', 'FillRectSlot', 'PatBltSlot', 'DrawTextSlot',
+                       'DrawTextExSlot', 'DrawThemeTextSlot', 'bool IsPaintDc(HDC hdc) noexcept'):
             self.assertIn(marker, hooks)
-        self.assertIn('return WindowFromDC(hdc) == sessionHwnd;', hooks)
+        self.assertIn('return owner == sessionHwnd;', hooks)
+        self.assertIn('session.suppliedDc && hdc == session.suppliedDc', hooks)
+        self.assertIn('IsTopWindowDrawingSession(sessionHwnd)', hooks)
+        self.assertIn('IsPaintStackDcForHwnd(sessionHwnd, hdc)', hooks)
         self.assertIn('ETO_OPAQUE', hooks)
         self.assertIn('GlassCore::Text::ExtTextOutWithAlpha', hooks)
         self.assertIn('GlassCore::Text::DrawTextWithAlpha', hooks)
@@ -935,6 +938,46 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('WndCompat::CoolBar::SetCoolBarEventProvider(providers.coolbar);', wnd)
         kind = read("GlassShared/include/GlassControlKind.h")
         self.assertIn('CoolBar                   = 39', kind)
+
+    def test_coolbar_covers_native_text_routes_and_preserves_dc_state(self):
+        hooks = read('GlassCore/src/Hooks/delphi/TCoolBarDraw.cpp')
+        for api in ('DrawTextW', 'DrawTextExW', 'DrawThemeText'):
+            self.assertIn('"' + api + '", reinterpret_cast<PVOID>(My', hooks)
+            self.assertIn('L"' + api + '"', hooks)
+        self.assertIn('Dependencies<ComctlNewModule>()', hooks)
+        self.assertIn('Dependencies<ComctlLegacyModule>()', hooks)
+        self.assertIn('Dependencies<EntryPointModule>()', hooks)
+        self.assertIn('Dependencies<UxThemeModule>()', hooks)
+        self.assertNotIn('CallerModule(_ReturnAddress())', hooks)
+        self.assertIn('held.acquired[i] = dispatcher.GetRef(i) > before', hooks)
+        self.assertIn('if (held.acquired[i])', hooks)
+        self.assertIn('ReleaseModule(session.modules[m - 1])', hooks)
+        self.assertNotIn('if (!comctl)', hooks)
+        self.assertIn('SetBkMode(hdc, TRANSPARENT)', hooks)
+        self.assertIn('RestoreDC(hdc, saved)', hooks)
+        self.assertIn('DT_CALCRECT | DT_MODIFYSTRING', hooks)
+        self.assertIn('GetThemeFont(theme, hdc, part, state, TMT_FONT', hooks)
+        self.assertIn('GetThemeColor(theme, part, state, TMT_TEXTCOLOR', hooks)
+        self.assertIn('text, cch, dx, orig)', hooks)
+        self.assertNotIn('GetProcAddress', hooks)
+        self.assertIn('chrome-fill-preserved', hooks)
+        self.assertIn('IsChromeStripe(&rc)', hooks)
+        self.assertIn('!IsBackgroundBrush(static_cast<HBRUSH>(GetCurrentObject(hdc, OBJ_BRUSH)))', hooks)
+        for diag in ('hooks module=', 'text api=', 'not-session-dc', 'alpha-failed', 'stackOwner='):
+            self.assertIn(diag, hooks)
+
+    def test_coolbar_printclient_is_native_paint_with_a_balanced_session(self):
+        subclass = read('WndCompat/Controls/CoolBarSubclass.cpp')
+        paint = subclass.split('case WM_PAINT:', 1)[1].split('case WM_ERASEBKGND:', 1)[0]
+        self.assertIn('case WM_PRINTCLIENT:', paint)
+        self.assertIn('p->OnPaintBegin(hWnd, reinterpret_cast<HDC>(wParam))', paint)
+        self.assertIn('if (began) end()', paint)
+        self.assertIn('wil::scope_exit', paint)
+        self.assertIn('return DefSubclassProc(hWnd, uMsg, wParam, lParam)', paint)
+        self.assertNotIn('PatBlt(', paint)
+        self.assertNotIn('case WM_PRINTCLIENT:', subclass.split('case WM_ERASEBKGND:', 1)[1])
+        provider = read('GlassShared/include/Providers/CoolBarEventProvider.h')
+        self.assertIn('bool (*OnPaintBegin)(HWND hWnd, HDC suppliedDc)', provider)
 
     def test_list_item_icons_are_alpha_composited(self):
         draw = read("GlassCore/src/Hooks/delphi/TListBoxDraw.cpp")

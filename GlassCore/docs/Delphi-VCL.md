@@ -2802,3 +2802,92 @@ C2677 бинарный "!=": не найден оператор для "Shared::
 
 Границы путей: `RebarHooks` — generic rebar (`ReBarWindow32`, `SizeableRebar`),
 `delphi/TCoolBarDraw` — только `CoolBar`, без `DrawThemeBackground`.
+
+## Тест 83: CoolBar — неполный маршрут текста и потеря WM_PRINTCLIENT
+
+Результат Windows-проверки после теста 82 (сборка прошла):
+
+- `image-50.png`, визуальные стили включены — фон прозрачен, подписи нет,
+  в начале полосы остаются отдельные пиксели;
+- `image-51.png`, визуальные стили выключены — подпись видна с белой
+  прямоугольной подложкой. Общий фон уже очищен;
+- нового журнала к этим двум изображениям не приложено. Какой именно
+  текстовый API пропущен в этой сборке, по изображениям установить нельзя.
+
+**Уточнение прежних выводов:** отсутствие `GetWindowTheme(hwnd)` или
+`DrawThemeBackground` не доказывает отсутствие themed-текста внутри
+comctl32. Утверждения тестов 79–81 «у CoolBar нет темы» и «в обоих режимах
+достаточно DrawTextExW» были слишком сильными. В сохранённой трассе
+`API-Monitor-5.log` наблюдался именно `uxtheme → DrawTextExW`, а не прямой
+вызов этого API из comctl32. Отдельный путь нужен по поведению VCL, но
+отбрасывать другие маршруты текста на этом основании нельзя.
+
+Проверяемые дефекты прежней реализации:
+
+1. Единственный high-level text-слот — `DrawTextExW`; `DrawTextW` и
+   `DrawThemeText` вообще не перехватывались.
+2. Выбирался `g_comctl32New`, и только при его отсутствии — legacy.
+   Наличие v6 в процессе ещё не означает, что именно она рисует `CoolBar`.
+3. `WM_PRINTCLIENT` завершался после одного `BLACKNESS`, не передаваясь
+   контролу. Буферизованный вывод при таком сообщении терял всё содержимое.
+4. Проверка `WindowFromDC(dc) == hwnd` безусловно отвергала memory DC,
+   включая явно переданный DC `WM_PRINTCLIENT`.
+5. Удалялся только `ETO_OPAQUE`; не учитывался самостоятельный фон текста
+   при `BkMode=OPAQUE`. Не различались широкая заливка полосы и узкая нижняя
+   линия, которая в старой API-трассе также рисовалась пустым `ExtTextOutW`.
+6. Источник original определялся через `_ReturnAddress`. В действующей
+   IATRegistry-цепочке вызов может прийти от другого detour из GlassCore,
+   а не непосредственно из исходного comctl32/uxtheme.
+
+Исправления ограничены собственным путём `delphi/TCoolBarDraw`:
+
+- поддержаны `DrawTextW`, `DrawTextExW`, `DrawThemeText` и glyph-путь
+  `ExtTextOutW`; используется существующий `RenderText`, без нового движка
+  альфы или дополнительных настроек GlassSettings;
+- одновременно включаются обе загруженные comctl32, EXE и uxtheme; одинаковые
+  базы не дублируются. На End снимаются только успешно приобретённые refs
+  с тех же баз, которые сохранены на Begin;
+- каждый источник импорта имеет собственный thunk; original берётся у его
+  диспетчера, без угадывания по адресу возврата;
+- `WM_PRINTCLIENT` проходит native paint в собственной сессии. Begin
+  возвращает bool, а End вызывается scope-guard'ом только при успехе Begin;
+- явно переданный DC разрешён непосредственно; прочий memory DC — только
+  при подтверждённой принадлежности в PaintDispatcher и текущей оконной
+  сессии этого CoolBar. Чужие оконные и произвольные memory DC не меняются;
+- на время вывода текста задаётся `TRANSPARENT`, затем восстанавливается
+  DC. Для `DrawThemeText` сохраняются theme font/text color; измерения
+  `DT_CALCRECT`, `DT_MODIFYSTRING` и непустые `DRAWTEXTPARAMS` остаются native;
+- узкие полосы заливки (толщина рамки с учётом DPI) и `DrawEdge` сохраняются;
+  `PATCOPY` с несистемной/несплошной кистью не подменяется;
+- `RebarHooks.cpp`, таблицы и принятые ранее пути списков/иконок не изменены.
+
+Диагностика без необязательного зонда, с отдельными лимитами для фона/текста:
+
+```
+[WndCompat][CoolBar] paint ... msg=0x000F|0x0318 ... provider=1 began=1
+[GlassCore][CoolBar] hooks module=... acquired=0x.. (ETO=01 Fill=02 Pat=04 Text=08 TextEx=10 ThemeText=20)
+[GlassCore][CoolBar] OnPaintBegin: ... suppliedDc=... theme=... depth=...
+[GlassCore][CoolBar] text api=DrawTextW|DrawTextExW|DrawThemeText|ExtTextOutW module=... reason=alpha|alpha-failed|not-session-dc|drawtext-params|theme-flags2 ...
+[GlassCore][CoolBar] chrome-fill-preserved ...
+```
+
+Строка текста содержит HRESULT, результат, владельца DC, тип DC, host и
+stackOwner, прямоугольник, флаги, text/bk color и BkMode. Успешный HRESULT
+означает возврат RenderText, а не независимое подтверждение пиксельной альфы.
+Новый журнал нужен **отдельно для двух режимов** с начала отображения CoolBar;
+если есть предупреждения `[GlassCore][RenderText]`, их также сохранить.
+
+Проверки в Linux:
+
+- `python3 WndCompat/tests/delphi_pipeline_contract.py` — 58/58;
+- `python3 WndCompat/tests/coolbar_rendering_test.py` — 7/7 исполняемых C++
+  сценариев с Win32/IAT/RenderText doubles. Компилируются настоящие исходники
+  TCoolBarDraw, CoolBarSubclass и провайдера, не копия алгоритма. Проверяются
+  обе версии comctl32, альтернативные text API, прозрачный BkMode и restore,
+  принадлежность DC, реентерабельность, refs, нижняя линия и WM_PRINTCLIENT;
+- те же 7 C++-сценариев с AddressSanitizer/UndefinedBehaviorSanitizer — OK;
+- `git diff --check`.
+
+Полная MSVC-сборка и новый визуальный результат на Windows пока не проверены.
+Нужно пересобрать **GlassCore и WndCompat вместе**: уточнена сигнатура
+`CoolBarEventProvider::OnPaintBegin`.

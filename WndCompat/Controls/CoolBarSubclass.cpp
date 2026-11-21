@@ -1,9 +1,7 @@
-// Сабкласс окна CoolBar — окно Delphi TCoolBar.
-//
-// У контрола нет темы: полосу заливает пустой ExtTextOutW(ETO_OPAQUE),
-// текст рисует comctl32 обычным DrawTextExW, рамку — VCL через DrawEdge.
-// Поэтому у CoolBar отдельный набор хуков GlassCore (delphi/TCoolBarDraw) и своя
-// сессия отрисовки; rebar-ветка здесь не используется.
+// Сабкласс Delphi TCoolBar (точный класс окна CoolBar).
+// WM_PAINT / WM_PRINTCLIENT сохраняют native paint внутри отдельной
+// GlassCore-сессии delphi/TCoolBarDraw; generic rebar не используется.
+// WM_ERASEBKGND чистит фон; рамку VCL продолжает рисовать через DrawEdge.
 
 #include "WndPch.h"
 #include <Controls/CoolBarSubclass.h>
@@ -14,6 +12,7 @@
 #include <GlassBackdropMark.h>
 #include <CoolBarEventProvider.h>
 #include <WndCompat.h>
+#include <wil.h>
 
 namespace
 {
@@ -45,28 +44,41 @@ namespace
         switch (uMsg)
         {
         case WM_PAINT:
-        {
-            if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
-                return DefSubclassProc(hWnd, uMsg, wParam, lParam);
-
-            auto* p = WndCompat::CoolBar::GetCoolBarEventProvider();
-            if (p && p->OnPaintBegin)
-                p->OnPaintBegin(hWnd);
-
-            const LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-
-            if (p && p->OnPaintEnd)
-                p->OnPaintEnd();
-            return result;
-        }
-
-        case WM_ERASEBKGND:
         case WM_PRINTCLIENT:
         {
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
                 return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 
-            // Фон → прозрачность; содержимое полосы рисуется в WM_PAINT.
+            const auto* p = WndCompat::CoolBar::GetCoolBarEventProvider();
+            // Снимок End и результат Begin: отказ во вложенном paint не
+            // должен закрывать сессию родителя; сброс провайдера не теряет пару.
+            const auto end = p ? p->OnPaintEnd : nullptr;
+            const bool began = p && p->OnPaintBegin && end
+                && p->OnPaintBegin(hWnd, reinterpret_cast<HDC>(wParam));
+            auto finish = wil::scope_exit([&]() noexcept { if (began) end(); });
+
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 16; }
+            if (budget)
+            {
+                --budget;
+                DebugLog(DBG_NORMAL,
+                    L"[WndCompat][CoolBar] paint hwnd=0x%p msg=0x%04X dc=0x%p provider=%d began=%d",
+                    hWnd, uMsg, reinterpret_cast<HDC>(wParam), p ? 1 : 0, began ? 1 : 0);
+            }
+            // В том числе WM_PRINTCLIENT: нельзя подменять его одним BLACKNESS,
+            // иначе double-buffered VCL получает снимок без текста и полос.
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        }
+
+        case WM_ERASEBKGND:
+        {
+            if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
+                return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+
+            // Только стирание фона; WM_PRINTCLIENT выше рисует и содержимое.
             HDC hdc = reinterpret_cast<HDC>(wParam);
             if (!hdc)
                 return DefSubclassProc(hWnd, uMsg, wParam, lParam);
