@@ -1,19 +1,17 @@
 #pragma once
 #include <windows.h>
 
-// Отдельный путь отрисовки Delphi TCoolBar (окно класса CoolBar).
-//
-// Rebar-ветка для этого контрола не подходит: у окна нет темы, полоса
-// заливается пустым ExtTextOutW с ETO_OPAQUE, текст рисуется DrawTextExW
-// штатным GDI. Поэтому у CoolBar свой набор хуков и своя сессия отрисовки.
-
+// Собственная сессия и набор IAT-хуков Delphi TCoolBar (точный класс CoolBar).
+// Рендеринг текста не зависит от GetWindowTheme(hwnd): поддерживаются
+// DrawTextW / DrawTextExW / DrawThemeText. Generic rebar не используется.
 namespace GlassCore::CoolBarControl
 {
     void Prepare();
     void Startup();
     void Shutdown();
 
-    // Прямое управление хуками из WndCompat (CoolBarSubclassProc).
-    void OnPaintBegin(HWND hWnd);
+    // suppliedDc — аргумент WM_PRINTCLIENT или WM_PAINT (может быть NULL).
+    // End вызывается только после успешного Begin, включая вложенные paint.
+    bool OnPaintBegin(HWND hWnd, HDC suppliedDc);
     void OnPaintEnd();
 }
