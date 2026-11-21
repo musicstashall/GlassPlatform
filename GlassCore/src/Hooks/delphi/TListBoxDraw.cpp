@@ -291,37 +291,143 @@ namespace GlassCore::DelphiListBox
         enum class IconBlit { PassThrough, Done, Skip };
         enum class IconBackgroundKind { Unknown, Flat, Solid };
 
-        // Плоский фон значка = все четыре угла одного цвета, а центр — нет
-        // (у сплошной заливки/образца цвета центр совпадает с углами: это не
-        // значок, его не трогаем).
-        IconBackgroundKind ClassifyIconBackground(HBITMAP bmp32, COLORREF& bg) noexcept
+        struct IconPixels
+        {
+            DWORD* data{};
+            int    width{};
+            int    height{};
+            bool   topDown{};
+        };
+
+        // Пиксели 32bpp DIBSECTION (результат Promise32BPP): шаг строки в
+        // пикселях равен ширине, потому что 32bpp уже выровнен по 4 байтам.
+        bool GetIconPixels(HBITMAP bmp32, IconPixels& out) noexcept
         {
             DIBSECTION ds{};
             if (!bmp32 || !GetObject(bmp32, sizeof(ds), &ds) || !ds.dsBm.bmBits
                 || ds.dsBm.bmBitsPixel != 32)
+                return false;
+            out.data = static_cast<DWORD*>(ds.dsBm.bmBits);
+            out.width = ds.dsBm.bmWidth;
+            out.height = ds.dsBm.bmHeight < 0 ? -ds.dsBm.bmHeight : ds.dsBm.bmHeight;
+            out.topDown = ds.dsBm.bmHeight < 0;
+            return out.width > 0 && out.height > 0;
+        }
+
+        DWORD* IconRow(const IconPixels& px, int y) noexcept
+        {
+            const int row = px.topDown ? y : (px.height - 1 - y);
+            return px.data + static_cast<size_t>(row) * static_cast<size_t>(px.width);
+        }
+
+        COLORREF IconRgb(DWORD pixel) noexcept
+        {
+            return static_cast<COLORREF>(pixel & 0xFFFFFFu);
+        }
+
+        int ChannelDelta(BYTE a, BYTE b) noexcept
+        {
+            return a > b ? static_cast<int>(a) - static_cast<int>(b)
+                         : static_cast<int>(b) - static_cast<int>(a);
+        }
+
+        bool ColorNear(COLORREF a, COLORREF b, BYTE threshold) noexcept
+        {
+            return ChannelDelta(GetRValue(a), GetRValue(b)) <= threshold
+                && ChannelDelta(GetGValue(a), GetGValue(b)) <= threshold
+                && ChannelDelta(GetBValue(a), GetBValue(b)) <= threshold;
+        }
+
+        // Фон значка = цвет, одинаковый во всех четырёх углах (у значка это
+        // подложка, у сплошной заливки совпадает и всё остальное — тогда это
+        // не значок, а образец цвета, его не трогаем).
+        IconBackgroundKind ClassifyIconBackground(HBITMAP bmp32, COLORREF& bg) noexcept
+        {
+            IconPixels px{};
+            if (!GetIconPixels(bmp32, px) || px.width < 3 || px.height < 3)
                 return IconBackgroundKind::Unknown;
-            const int w = ds.dsBm.bmWidth;
-            const int h = ds.dsBm.bmHeight < 0 ? -ds.dsBm.bmHeight : ds.dsBm.bmHeight;
-            if (w < 3 || h < 3)
+            const DWORD* first = IconRow(px, 0);
+            const DWORD* last = IconRow(px, px.height - 1);
+            const COLORREF corner = IconRgb(first[0]);
+            if (corner != IconRgb(first[px.width - 1]) || corner != IconRgb(last[0])
+                || corner != IconRgb(last[px.width - 1]))
                 return IconBackgroundKind::Unknown;
-            const auto* px = static_cast<const DWORD*>(ds.dsBm.bmBits);
-            const bool topDown = ds.dsBm.bmHeight < 0;
-            const auto at = [&](int x, int y) noexcept {
-                const int row = topDown ? y : (h - 1 - y);
-                return static_cast<COLORREF>(
-                    px[static_cast<size_t>(row) * static_cast<size_t>(w) + x] & 0xFFFFFFu);
-            };
-            const COLORREF corner = at(0, 0);
-            if (corner != at(w - 1, 0) || corner != at(0, h - 1)
-                || corner != at(w - 1, h - 1))
-                return IconBackgroundKind::Unknown;
-            if (at(w / 2, h / 2) == corner)
+            bool solid = true;
+            for (int y = 0; y < px.height && solid; ++y)
+            {
+                const DWORD* row = IconRow(px, y);
+                for (int x = 0; x < px.width; ++x)
+                    if (IconRgb(row[x]) != corner) { solid = false; break; }
+            }
+            if (solid)
                 return IconBackgroundKind::Solid;
             bg = corner;
             return IconBackgroundKind::Flat;
         }
 
-        void ApplyIconBackground(HBITMAP bmp32) noexcept
+        // У VCL-битмапов 4-й байт не используется (мусор или нули), поэтому
+        // пиксель значка с alpha==0 и цветом, отличным от фона, делаем
+        // непрозрачным: иначе GdiAlphaBlend рисует его как «ничего».
+        void RestoreGlyphAlpha(HBITMAP bmp32, COLORREF bg, BYTE threshold) noexcept
+        {
+            IconPixels px{};
+            if (!GetIconPixels(bmp32, px))
+                return;
+            for (int y = 0; y < px.height; ++y)
+            {
+                DWORD* row = IconRow(px, y);
+                for (int x = 0; x < px.width; ++x)
+                    if ((row[x] & 0xFF000000u) == 0 && !ColorNear(IconRgb(row[x]), bg, threshold))
+                        row[x] |= 0xFF000000u;
+            }
+        }
+
+        struct AlphaStats
+        {
+            int transparent{};
+            int opaque{};
+        };
+
+        AlphaStats ScanIconAlpha(HBITMAP bmp32) noexcept
+        {
+            AlphaStats stats{};
+            IconPixels px{};
+            if (!GetIconPixels(bmp32, px))
+                return stats;
+            for (int y = 0; y < px.height; ++y)
+            {
+                const DWORD* row = IconRow(px, y);
+                for (int x = 0; x < px.width; ++x)
+                {
+                    const DWORD a = row[x] >> 24;
+                    if (a == 0)
+                        ++stats.transparent;
+                    else if (a == 0xFF)
+                        ++stats.opaque;
+                }
+            }
+            return stats;
+        }
+
+        bool HasOpaquePixels(HBITMAP bmp32) noexcept
+        {
+            IconPixels px{};
+            if (!GetIconPixels(bmp32, px))
+                return false;
+            for (int y = 0; y < px.height; ++y)
+            {
+                const DWORD* row = IconRow(px, y);
+                for (int x = 0; x < px.width; ++x)
+                    if (row[x] & 0xFF000000u)
+                        return true;
+            }
+            return false;
+        }
+
+        // Подготовка значка к GdiAlphaBlend. false — рисовать нечего: это
+        // образец цвета/плитка либо после вырезания не осталось непрозрачных
+        // пикселей (лучше оставить оригинальный вызов, чем потерять значок).
+        bool PrepareItemIcon(HBITMAP bmp32, const wchar_t*& branch) noexcept
         {
             // Явная настройка (Root\Control\ListBox|ComboBox\ColorTreatAsTransparent)
             // перекрывает автоматику — как у ListView/Toolbar/Button.
@@ -331,18 +437,40 @@ namespace GlassCore::DelphiListBox
                     Shared::ColorUtils::ARGBToCOLORREF(g_iconRemoval.colorTreatAsTransparent),
                     static_cast<BYTE>(g_iconRemoval.colorTreatAsTransparentThreshold));
                 eff.Apply(bmp32);
-                return;
+                RestoreGlyphAlpha(bmp32,
+                    Shared::ColorUtils::ARGBToCOLORREF(g_iconRemoval.colorTreatAsTransparent),
+                    static_cast<BYTE>(g_iconRemoval.colorTreatAsTransparentThreshold));
+                branch = L"custom";
+                return HasOpaquePixels(bmp32);
+            }
+            // Настоящая альфа значка: есть и полностью прозрачные, и полностью
+            // непрозрачные пиксели. Тогда 4-й байт осмысленный — не трогаем.
+            const AlphaStats alpha = ScanIconAlpha(bmp32);
+            if (alpha.transparent > 0 && alpha.opaque > 0)
+            {
+                branch = L"alpha";
+                return HasOpaquePixels(bmp32);
             }
             COLORREF bg{};
-            if (ClassifyIconBackground(bmp32, bg) == IconBackgroundKind::Flat)
+            switch (ClassifyIconBackground(bmp32, bg))
             {
-                // Фон значка списка обычно белый (VCL компонует его на белой
-                // подложке), поэтому black-key его не убирает.
-                Shared::BitmapUtils::SpriteEffect eff(bg, 10);
-                eff.Apply(bmp32);
-                return;
+            case IconBackgroundKind::Solid:
+                branch = L"solid";
+                return false;
+            case IconBackgroundKind::Flat:
+                // Фон значка списка плоский (у VCL — обычно белый), black-key
+                // его не убирает, поэтому ключ берётся из углов.
+                Shared::BitmapUtils::SpriteEffect(bg, 10).Apply(bmp32);
+                RestoreGlyphAlpha(bmp32, bg, 10);
+                branch = L"flat";
+                break;
+            default:
+                GlassCore::GdiUtils::ApplyBlackKeyAlpha(bmp32);
+                RestoreGlyphAlpha(bmp32, RGB(0, 0, 0), 0);
+                branch = L"blackkey";
+                break;
             }
-            GlassCore::GdiUtils::ApplyBlackKeyAlpha(bmp32);
+            return HasOpaquePixels(bmp32);
         }
 
         IconBlit BlitListItemIcon(const Session& session, HDC dst, int x, int y, int cx, int cy,
@@ -368,35 +496,41 @@ namespace GlassCore::DelphiListBox
             }
             if (rop != SRCCOPY)
                 return IconBlit::PassThrough;
-            // Значок — небольшое изображение целиком внутри строки: не фон
-            // строки и не посторонняя графика (скроллбар, рамка).
+            // Значок — небольшое изображение внутри строки, а не её фон и не
+            // посторонняя графика (скроллбар, рамка).
             if (cx > 128 || cy > 128)
                 return IconBlit::PassThrough;
             if (x <= session.item.left && y <= session.item.top
                 && x + cx >= session.item.right && y + cy >= session.item.bottom)
                 return IconBlit::PassThrough;
-            const RECT dstRect{ x, y, x + cx, y + cy };
-            RECT inside{};
-            if (!IntersectRect(&inside, &dstRect, &session.item)
-                || !EqualRect(&inside, &dstRect))
+            const POINT center{ x + cx / 2, y + cy / 2 };
+            if (!PtInRect(&session.item, center))
                 return IconBlit::PassThrough;
 
-            const bool hasAlpha = Shared::BitmapUtils::HasAlphaChannel(source);
-            wil::unique_hbitmap converted;
-            if (!hasAlpha)
+            wil::unique_hbitmap converted{ Shared::BitmapUtils::Promise32BPP(source) };
+            if (!converted)
+                return IconBlit::PassThrough;
+            const wchar_t* branch = L"";
+            if (!PrepareItemIcon(converted.get(), branch))
             {
-                converted.reset(Shared::BitmapUtils::Promise32BPP(source));
-                if (!converted)
-                    return IconBlit::PassThrough;
-                COLORREF bg{};
-                if (!g_iconRemoval.enable
-                    && ClassifyIconBackground(converted.get(), bg) == IconBackgroundKind::Solid)
-                    return IconBlit::PassThrough; // образец цвета / плитка
-                ApplyIconBackground(converted.get());
+#if defined(_DEBUG)
+                static thread_local ULONGLONG skipEpoch = 0;
+                static thread_local unsigned skipBudget = 0;
+                const ULONGLONG skipNow = GetTickCount64();
+                if (!skipEpoch || skipNow - skipEpoch >= 1000) { skipEpoch = skipNow; skipBudget = 16; }
+                if (skipBudget)
+                {
+                    --skipBudget;
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][DelphiListDraw] icon-skip hwnd=0x%p dst=[%d,%d,%d,%d] branch=%s srcBpp=%ld",
+                        session.hwnd, x, y, cx, cy, branch, bm.bmBitsPixel);
+                }
+#endif
+                return IconBlit::PassThrough;
             }
-            const HGDIOBJ oldBitmap = converted ? SelectObject(src, converted.get()) : nullptr;
+            const HGDIOBJ oldBitmap = SelectObject(src, converted.get());
             auto restore = wil::scope_exit([&]() noexcept {
-                if (converted && oldBitmap && oldBitmap != HGDI_ERROR)
+                if (oldBitmap && oldBitmap != HGDI_ERROR)
                     SelectObject(src, oldBitmap);
             });
 
@@ -414,9 +548,9 @@ namespace GlassCore::DelphiListBox
             {
                 --budget;
                 DebugLog(DBG_NORMAL,
-                    L"[GlassCore][DelphiListDraw] icon hwnd=0x%p combo=%d dst=[%d,%d,%d,%d] srcBpp=%ld hasAlpha=%d custom=%d",
+                    L"[GlassCore][DelphiListDraw] icon hwnd=0x%p combo=%d dst=[%d,%d,%d,%d] srcBpp=%ld branch=%s",
                     session.hwnd, session.combo ? 1 : 0, x, y, cx, cy,
-                    bm.bmBitsPixel, hasAlpha ? 1 : 0, g_iconRemoval.enable ? 1 : 0);
+                    bm.bmBitsPixel, branch);
             }
 #endif
             return IconBlit::Done;

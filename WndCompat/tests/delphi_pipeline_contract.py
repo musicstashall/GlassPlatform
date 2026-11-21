@@ -880,7 +880,9 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('QueryIconBackgroundColorRemovalContext(', draw)
         self.assertIn('{ L"Root", L"Control", L"ListBox" }', draw)
         self.assertIn('{ L"Root", L"Control", L"ComboBox" }', draw)
-        self.assertIn('ApplyIconBackground(converted.get());', draw)
+        self.assertIn('PrepareItemIcon(converted.get(), branch)', draw)
+        self.assertIn('RestoreGlyphAlpha(bmp32, bg, 10);', draw)
+        self.assertIn('if (!PrepareItemIcon(converted.get(), branch))', draw)
         self.assertIn('GdiAlphaBlend(dst, x, y, cx, cy, src, sx, sy, scx, scy, bf)', draw)
 
     def test_delphi_grid_replay_supports_row_only_fixed_area(self):
