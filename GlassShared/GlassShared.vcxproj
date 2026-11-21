@@ -206,6 +206,7 @@
     <ClInclude Include="include\GlassDelphiInputBackground.h" />
     <ClInclude Include="include\GlassDelphiMemoBackground.h" />
     <ClInclude Include="include\GlassDelphiPanel.h" />
+    <ClInclude Include="include\GlassDelphiButtonGroups.h" />
     <ClInclude Include="include\GlassHostRegistry.h" />
     <ClInclude Include="SharedPch.h" />
   </ItemGroup>

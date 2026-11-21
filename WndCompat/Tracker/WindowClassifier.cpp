@@ -3,6 +3,7 @@
 #include "Tracker/WindowClassUtils.h"
 #include <Controls/TCoolBarSubclass.h>
 #include <GlassDelphiPanel.h>
+#include <GlassDelphiButtonGroups.h>
 #include <ExplorerCompatHostPolicy.h>
 #include <RootBackdropPolicy.h>
 #include <SystemHelper.h>
@@ -510,7 +511,8 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
     // ── Delphi-контейнеры ────────────────────────────────────────────────────
     if (Equals(cls, L"TGroupBox") || Equals(cls, L"TRadioGroup") ||
         Equals(cls, L"TCard") || Equals(cls, L"TTabSheet") ||
-        GlassShared::IsDelphiPanelClassName(cls.c_str()))
+        GlassShared::IsDelphiPanelClassName(cls.c_str()) ||
+        GlassShared::IsDelphiButtonGroupsClassName(cls.c_str()))
         return ControlKind::DelphiContainer;
 
     // ── Прочие WS_CHILD контейнеры ───────────────────────────────────────────

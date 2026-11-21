@@ -22,6 +22,8 @@
 
 #include "CorePch.h"
 #include <Hooks/delphi/TPanelDraw.h>
+#include <Hooks/delphi/TButtonGroupsDraw.h>
+#include <GlassDelphiButtonGroups.h>
 #include <Hooks/RootGdiHooks.h>
 #include <Hooks/RootWindowHooks.h>
 #include <Core/Intercept/HookDispatcher.h>
@@ -510,6 +512,9 @@ namespace GlassCore::Root
         int WINAPI Root_MyDelphiGridFill(HDC, const RECT*, HBRUSH);
         HRESULT WINAPI Root_MyDelphiGridTheme(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
         DWORD WINAPI Root_MyGetSysColor(int);
+        int WINAPI Root_MyDelphiGroupText(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
+        int WINAPI Root_MyDelphiGroupFill(HDC, const RECT*, HBRUSH);
+        template <size_t slot> BOOL WINAPI Root_MyDelphiGroupGradient(HDC, PTRIVERTEX, ULONG, PVOID, ULONG, ULONG);
 
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
         int WINAPI VclProbeFill(HDC, const RECT*, HBRUSH);
@@ -576,6 +581,14 @@ namespace GlassCore::Root
                 "DrawThemeBackground", reinterpret_cast<PVOID>(Root_MyDelphiGridTheme) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv },
                 "GetSysColor", reinterpret_cast<PVOID>(Root_MyGetSysColor) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                "DrawTextExW", reinterpret_cast<PVOID>(Root_MyDelphiGroupText) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                "FillRect", reinterpret_cast<PVOID>(Root_MyDelphiGroupFill) },
+            std::tuple{ std::array{ "msimg32.dll"sv, ""sv, ""sv },
+                "GradientFill", reinterpret_cast<PVOID>(Root_MyDelphiGroupGradient<OHK_DELPHI_GROUP_GRADIENT>) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
+                "GdiGradientFill", reinterpret_cast<PVOID>(Root_MyDelphiGroupGradient<OHK_DELPHI_GROUP_GDIGRADIENT>) },
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "FillRect", reinterpret_cast<PVOID>(VclProbeFill) },
             std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "PatBlt", reinterpret_cast<PVOID>(VclProbePatBlt) },
@@ -1503,6 +1516,37 @@ namespace GlassCore::Root
                 orig, theme, dc, part, state, text, count, flags, rect, options);
         }
 
+        // Dedicated EXE slots: return addresses in IAT chains are not import owners.
+        int WINAPI Root_MyDelphiGroupText(HDC dc, LPWSTR text, int count,
+            LPRECT rect, UINT flags, LPDRAWTEXTPARAMS params)
+        {
+            const auto orig = GetRootOrg<OHK_DELPHI_GROUP_TEXT, decltype(&::DrawTextExW)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::DrawTextExW(dc, text, count, rect, flags, params);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(dc, text, count, rect, flags, params);
+            return GlassCore::DelphiButtonGroups::DrawCaptionText(orig, dc, text, count, rect, flags, params);
+        }
+        int WINAPI Root_MyDelphiGroupFill(HDC dc, const RECT* rect, HBRUSH brush)
+        {
+            const auto orig = GetRootOrg<OHK_DELPHI_GROUP_FILL, decltype(&::FillRect)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::FillRect(dc, rect, brush);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(dc, rect, brush);
+            return GlassCore::DelphiButtonGroups::Fill(orig, dc, rect, brush);
+        }
+        template <size_t slot>
+        BOOL WINAPI Root_MyDelphiGroupGradient(HDC dc, PTRIVERTEX vertices, ULONG vertexCount,
+            PVOID mesh, ULONG meshCount, ULONG mode)
+        {
+            const auto orig = GetRootOrg<slot, decltype(&::GdiGradientFill)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::GdiGradientFill(dc, vertices, vertexCount, mesh, meshCount, mode);
+            if (g_shutdown.load(std::memory_order_acquire))
+                return orig(dc, vertices, vertexCount, mesh, meshCount, mode);
+            return GlassCore::DelphiButtonGroups::Gradient(orig, dc, vertices, vertexCount, mesh, meshCount, mode,
+                slot == OHK_DELPHI_GROUP_GRADIENT ? L"GradientFill" : L"GdiGradientFill");
+        }
+
         BOOL WINAPI Root_MyExtTextOutW(
             HDC hdc, int x, int y, UINT opt, const RECT* lpr,
             LPCWSTR s, UINT c, const INT* dx)
@@ -1585,6 +1629,10 @@ namespace GlassCore::Root
             wchar_t            cls[128]{};
             if (hFromDc)
                 GetClassNameW(hFromDc, cls, _countof(cls));
+            // An outer root paint may still hold this generic EXE hook while a
+            // group repaints. Preserve its operation RGB for the dedicated path.
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassShared::IsDelphiButtonGroupsClassName(cls)) return o(hdc, color);
 
             if (!g_shutdown.load(std::memory_order_acquire)
                 && (0xFFFFFF & color) == GetSysColor(COLOR_WINDOW))
@@ -1648,9 +1696,13 @@ namespace GlassCore::Root
 
         HBRUSH WINAPI Root_MyGetSysColorBrush(int nIndex)
         {
-            auto o = GetRootOrg<OHK_GETSYSCOLORBR, decltype(&GetSysColorBrush)>(GetCallerModule(_ReturnAddress()));
+            const auto caller = GetCallerModule(_ReturnAddress());
+            auto o = GetRootOrg<OHK_GETSYSCOLORBR, decltype(&GetSysColorBrush)>(caller);
             if (!o)
                 return GetSysColorBrush(nIndex);
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
+                return o(nIndex);
             if (!g_shutdown.load(std::memory_order_acquire))
             {
                 // PopupOnly: вне активной paint-сессии (стеклянного popup'а) comctl32/user32/
@@ -1704,6 +1756,9 @@ namespace GlassCore::Root
                 return CreateSolidBrush(color);
 
             if (g_shutdown.load(std::memory_order_acquire))
+                return o(color);
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
                 return o(color);
 
             // PopupOnly: без активной paint-сессии (стеклянного popup'а) comctl32

@@ -179,6 +179,7 @@
     <ClCompile Include="src\Hooks\ButtonHooks.cpp" />
     <ClCompile Include="src\Hooks\delphi\TBackgroundHooks.cpp" />
     <ClCompile Include="src\Hooks\delphi\TPanelDraw.cpp" />
+    <ClCompile Include="src\Hooks\delphi\TButtonGroupsDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\TInputHooks.cpp" />
     <ClCompile Include="src\Hooks\delphi\TInputIcons.cpp" />
     <ClCompile Include="src\Hooks\delphi\TListBoxDraw.cpp" />
@@ -265,6 +266,7 @@
     <ClInclude Include="Include\Hooks\Button.h" />
     <ClInclude Include="Include\Hooks\delphi\TBackgroundHooks.h" />
     <ClInclude Include="Include\Hooks\delphi\TPanelDraw.h" />
+    <ClInclude Include="Include\Hooks\delphi\TButtonGroupsDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\TInputHooks.h" />
     <ClInclude Include="Include\Hooks\delphi\TInputIcons.h" />
     <ClInclude Include="Include\Hooks\delphi\TListBoxDraw.h" />

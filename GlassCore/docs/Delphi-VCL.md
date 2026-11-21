@@ -3314,3 +3314,75 @@ TButtonGroup/TCategoryButtons и их цветной фон — следующи
 Проверки шага: `delphi_pipeline_contract.py` **69/69**,
 `panel_rendering_test.py` **11/11**, `coolbar_rendering_test.py` **9/9**,
 `input_icons_test.py` **6/6**, UTF-8 и `git diff --check` — PASS.
+
+## Тест 91: отдельный путь TButtonGroup / TCategoryButtons
+
+**Код:** `delphi/TButtonGroupsDraw.cpp`, root IAT/cache,
+`GlassShared/include/GlassDelphiButtonGroups.h` и WindowClassifier.
+Только точные TButtonGroup / TCategoryButtons; это custom-painted контейнеры,
+не native Button, не расширение фонового predicate панелей.
+
+Используется существующий Root lifecycle: четыре EXE IAT-слота
+DrawTextExW / FillRect / msimg32!GradientFill / gdi32!GdiGradientFill в paint и
+GetDC сессиях, парное снятие прежним Root dispatcher. Нет нового Detours,
+сабкласса, экспортируемого bridge, стека сессий или Engine Startup/Shutdown.
+Каждый thunk получает original из **своего установленного EXE-слота**, не по
+адресу возврата; два gradient-импорта не смешивают originals.
+
+### Рисование и границы
+
+- DrawTextExW One/Two/Three, header, Alpha/Beta из зонда идут через существующий
+  DrawTextWithAlpha с `transparentBufferBackground=true`. Исходные font, text
+  color, rect и flags сохраняются; надпись не закрашивает градиент. DT_CALCRECT,
+  DT_MODIFYSTRING, ненулевой DRAWTEXTPARAMS и пустые операции — native.
+- Сплошные client FillRect: фактический RGB, совпадающий с текущим COLOR_WINDOW
+  **или** COLOR_BTNFACE, → BLACKNESS; остальные, включая настоящий чёрный, →
+  **A100**. Это отдельная политика двух групп; прежние контролы не меняются.
+  Custom brush рисует original в буфер с A255, итоговая композиция имеет
+  SourceConstantAlpha=100. Pattern/hatch brushes и узкие chrome/insert strips
+  остаются native. При каждом repaint очистка до композиции, не alpha-over-alpha.
+- Прямоугольный GradientFill: ровно 2 TRIVERTEX + 1 GRADIENT_RECT, H/V, корректные
+  индексы, внутри клиента. Original рисует с **исходными вершинами, RGB, mesh,
+  mode** в буфер, без собственного пересчёта интерполяции. После GdiFlush
+  BufferedPaintSetAlpha задаёт A255 для поверхности, затем композиция A100.
+  Нулевая Alpha исходных TRIVERTEX не удаляет цвет; чёрный endpoint тоже
+  сохраняется как цвет. Градиент не определяется по равенству endpoints
+  системным цветам. Triangles/другие meshes/некорректные bounds — native.
+- Замена разрешена только Full/backdrop, MM_TEXT, известному оконному DC либо
+  MEMDC с подтверждённым owner в PaintDispatcher и текущему paint/GetDC-окну.
+  Одной ambient-сессии недостаточно. Произвольные/чужие DC и похожие имена — native.
+- Generic SetBkColor/CreateSolidBrush/GetSysColorBrush больше не включаются для
+  этих двух классов. Узкие passthrough-guards сохраняют их RGB и при вложенном
+  paint, если generic EXE-hook ещё удерживается внешней Root-сессией.
+- При ошибке буфера/native draw/GdiFlush/SetAlpha буфер не публикуется, целевой
+  DC ещё не очищен; при ошибке очистки — native fallback. Reentry и Root shutdown
+  также остаются native. Текстовый renderer/его собственные fallback не менялись.
+
+Новый ограниченный лог, до 16 строк/сек отдельно для text/fill/gradient:
+`[GlassCore][DelphiButtonGroups] text ... hr=...`, `fill ... rgb=... alpha=... ok=...`,
+`gradient api=GradientFill|GdiGradientFill ... rgb=[..., ...] alpha=100 ... ok=...`.
+В отличие от исходного зонда он даст фактические endpoints/режим пути фона
+категории, **если именно этот поддержанный вызов присутствует**. Глобальный зонд
+не расширяется и не требуется для штатной отрисовки.
+
+### Проверки и что остаётся проверить на Windows
+
+`button_groups_rendering_test.py`: **8/8 × Release/Debug**, повтор с ASan/UBSan —
+PASS. Компилируется целиком production TButtonGroupsDraw.cpp, а root gate,
+четыре dependency-row и EXE-thunks извлекаются непосредственно из production.
+Проверены операции из зонда, font/flags/options, обе gradient-формы H/V,
+неизменность vertices/mesh, black endpoint, current system colors, повторные
+заливки, native passthrough и ошибки/reentry. Двойники не доказывают native
+uxtheme/DWM-пиксели или настоящий IAT chain.
+
+`delphi_pipeline_contract.py` **73/73**; panels/frames **11/11**, TCoolBar **9/9**,
+ImageList input icons **6/6**; регистрация файлов проектов и UTF-8/diff — PASS.
+Код Edit/RichEdit, renderer, grids, TCoolBar и значки не изменялись.
+
+**MSVC/Windows визуальная проверка недоступна в Arena.** Проверить обычные подписи
+обеих групп, collapsed/expanded TCategoryButtons с исходными category colors и
+H/V gradient, hover/selection, partial repaint/resize, Full/backdrop toggle и
+регрессии принятых контролов. Runtime-пакеты BPL, произвольный owner-draw,
+WM_PRINTCLIENT без paint/GetDC-сессии и другие API custom VCL styles этим EXE-путём
+не заявляются как покрытые. Если дефект остался: скриншот + «Логи при отображении»
+(включая новые DelphiButtonGroups-строки) + «Логи с зондом при отображении элемента».
