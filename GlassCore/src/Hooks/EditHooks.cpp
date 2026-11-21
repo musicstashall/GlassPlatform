@@ -679,7 +679,7 @@ namespace GlassCore::EditControl
         }
 
         wil::unique_hbrush brush{
-            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255) };
+            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 100) };
         if (!brush) return;
 
         if (rgb == 0 || rgb == sysBtn || rgb == sysWnd)
