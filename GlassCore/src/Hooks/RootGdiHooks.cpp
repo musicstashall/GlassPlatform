@@ -1003,6 +1003,124 @@ namespace GlassCore::Root
             return GetClassNameW(w, cls, _countof(cls)) && IsDelphiGridClass(cls);
         }
 
+        // ── Реконструкция фона фиксированной области таблицы ─────────────────
+        // Фон клиента (TCustomGrid.Paint: GetSysColor → CreateBrushIndirect →
+        // FillRect(ClientRect)) приходит мимо наших IAT-слотов: ни перехватить,
+        // ни перекрасить его нельзя. Поэтому после отрисовки чистим
+        // фиксированную строку/колонку чёрным и заново рисуем их текст —
+        // записи текста собраны в Root_MyDelphiGridText, границы области берём
+        // из первой перехваченной заливки ячейки (левый верхний угол данных).
+        struct GridTextRec
+        {
+            int      x{};
+            int      y{};
+            UINT     options{};
+            RECT     rect{};
+            std::wstring text;
+            COLORREF color{};
+            HFONT    font{};
+        };
+        struct GridPaintRec
+        {
+            HWND                    hwnd{};
+            HDC                     dc{};
+            bool                    haveDataOrigin{};
+            POINT                   dataOrigin{};
+            std::vector<GridTextRec> texts;
+        };
+        static thread_local std::vector<GridPaintRec> g_gridPaints;
+
+        static GridPaintRec* FindGridPaint(HDC dc, HWND wnd) noexcept
+        {
+            if (!wnd || g_gridPaints.empty())
+                return nullptr;
+            auto& rec = g_gridPaints.back();
+            if (rec.hwnd != wnd)
+                return nullptr;
+            if (!rec.dc)
+                rec.dc = dc;
+            return &rec;
+        }
+
+        static void ReplayGridFixedArea(const GridPaintRec& rec) noexcept
+        {
+            if (!rec.hwnd || !rec.dc || !rec.haveDataOrigin || rec.texts.empty())
+                return;
+            RECT client{};
+            if (!GetClientRect(rec.hwnd, &client) || IsRectEmpty(&client))
+                return;
+            const LONG x0 = rec.dataOrigin.x;
+            const LONG y0 = rec.dataOrigin.y;
+            if (x0 <= client.left || x0 >= client.right || y0 <= client.top || y0 >= client.bottom)
+                return;
+            HDC dc = rec.dc;
+            const int saved = SaveDC(dc);
+            const RECT rowStrip{ client.left, client.top, client.right, y0 };
+            const RECT colStrip{ client.left, client.top, x0, client.bottom };
+            PatBlt(dc, client.left, client.top, client.right - client.left, y0 - client.top, BLACKNESS);
+            PatBlt(dc, client.left, client.top, x0 - client.left, client.bottom - client.top, BLACKNESS);
+            size_t drawn = 0;
+            for (const auto& t : rec.texts)
+            {
+                RECT tmp{};
+                if (!IntersectRect(&tmp, &t.rect, &rowStrip)
+                    && !IntersectRect(&tmp, &t.rect, &colStrip))
+                    continue;
+                const HGDIOBJ oldFont = t.font ? SelectObject(dc, t.font) : nullptr;
+                const COLORREF oldColor = SetTextColor(dc, t.color);
+                const int oldBk = SetBkMode(dc, TRANSPARENT);
+                ExtTextOutW(dc, t.x, t.y, t.options & ~static_cast<UINT>(ETO_OPAQUE),
+                    &t.rect, t.text.c_str(), static_cast<UINT>(t.text.size()), nullptr);
+                SetBkMode(dc, oldBk);
+                SetTextColor(dc, oldColor);
+                if (oldFont)
+                    SelectObject(dc, oldFont);
+                ++drawn;
+            }
+            if (saved)
+                RestoreDC(dc, saved);
+#if defined(_DEBUG)
+            if (drawn)
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] FixedReplay hwnd=0x%p row=%ld col=%ld texts=%zu",
+                    rec.hwnd, y0, x0, drawn);
+#endif
+        }
+
+        static void GridPaintBegin(HWND hWnd, HMODULE /*callerMod*/) noexcept
+        {
+            if (g_shutdown.load(std::memory_order_acquire) || !hWnd)
+                return;
+            wchar_t cls[128]{};
+            if (!GetClassNameW(hWnd, cls, _countof(cls)) || !IsDelphiGridClass(cls))
+                return;
+            // Повторный BeginPaint того же окна (EndPaint мог не дойти до нас)
+            // не плодит записи: реконструкция идёт по свежим данным.
+            if (!g_gridPaints.empty() && g_gridPaints.back().hwnd == hWnd)
+                g_gridPaints.back() = GridPaintRec{ hWnd };
+            else
+            {
+                while (g_gridPaints.size() >= 8)
+                    g_gridPaints.erase(g_gridPaints.begin());
+                g_gridPaints.push_back(GridPaintRec{ hWnd });
+            }
+            g_gridPaints.back().hwnd = hWnd;
+        }
+
+        static void GridPaintEnd(HWND hWnd, HMODULE /*callerMod*/) noexcept
+        {
+            for (auto it = g_gridPaints.rbegin(); it != g_gridPaints.rend(); ++it)
+            {
+                if (it->hwnd != hWnd)
+                    continue;
+                GridPaintRec rec = std::move(*it);
+                g_gridPaints.erase((it + 1).base());
+                if (!g_shutdown.load(std::memory_order_acquire))
+                    ReplayGridFixedArea(rec);
+                return;
+            }
+        }
+
         // Окно текущей paint-сессии — таблица? (без DC: для GetSysColor его нет)
         static bool IsDelphiGridPaintHost() noexcept
         {
@@ -1043,6 +1161,24 @@ namespace GlassCore::Root
             // вызываться не через IAT EXE. В наблюдённом пути caption приходит
             // с ETO_CLIPPED и прямоугольником первого ряда (top=0). Очистить
             // только его до текста, не трогая data rows и произвольные окна.
+            if (rect && text && count)
+            {
+                if (auto* rec = FindGridPaint(dc, WindowFromDC(dc)))
+                {
+                    if (rec->texts.size() < 512)
+                    {
+                        GridTextRec recText{};
+                        recText.x = x;
+                        recText.y = y;
+                        recText.options = options;
+                        recText.rect = *rect;
+                        recText.text.assign(text, count);
+                        recText.color = GetTextColor(dc);
+                        recText.font = static_cast<HFONT>(GetCurrentObject(dc, OBJ_FONT));
+                        rec->texts.push_back(std::move(recText));
+                    }
+                }
+            }
             if (options == ETO_CLIPPED && rect && rect->top == 0
                 && !IsRectEmpty(rect) && x >= rect->left && x < rect->right
                 && y >= rect->top && y < rect->bottom)
@@ -1132,6 +1268,14 @@ namespace GlassCore::Root
             if (rect && !IsRectEmpty(rect) && solid
                 && ApplyDelphiGridCellBackground(dc, rect, fillColor))
             {
+                if (auto* rec = FindGridPaint(dc, WindowFromDC(dc)))
+                {
+                    if (!rec->haveDataOrigin)
+                    {
+                        rec->dataOrigin = POINT{ rect->left, rect->top };
+                        rec->haveDataOrigin = true;
+                    }
+                }
 #if defined(_DEBUG)
                 if (AllowDelphiGridLog(1))
                 {
@@ -2358,5 +2502,11 @@ namespace GlassCore::Root
                 return TRUE;
             return o(hdc, x, y, lpString, c);
         }
+
+    // Пара провайдеров для реконструкции фона фиксированной области таблиц.
+    void RegisterDelphiGridPaintProvider() noexcept
+    {
+        GlassCore::PaintDispatcher::RegisterPaintProvider({ GridPaintBegin, GridPaintEnd });
+    }
 
 } // namespace GlassCore::Root

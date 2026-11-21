@@ -804,6 +804,21 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('PushPaint(instMod, OHK_BITBLT, cache);', grid)
         self.assertIn('bmp=0x%p px=0x%08X', win)
 
+    def test_delphi_grid_replays_fixed_area_text(self):
+        root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        self.assertIn('struct GridTextRec', root)
+        self.assertIn('struct GridPaintRec', root)
+        replay = root.split('static void ReplayGridFixedArea(const GridPaintRec& rec)', 1)[1].split(
+            'static void GridPaintBegin', 1)[0]
+        for marker in ('rec.haveDataOrigin', 'rowStrip', 'colStrip', 'BLACKNESS',
+                       'SetTextColor(dc, t.color)', 'ExtTextOutW(dc, t.x, t.y'):
+            self.assertIn(marker, replay)
+        self.assertIn('RegisterDelphiGridPaintProvider', root)
+        header = read("GlassCore/Include/Hooks/RootGdiHooks.h")
+        self.assertIn('void RegisterDelphiGridPaintProvider() noexcept;', header)
+        win = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
+        self.assertIn('GlassCore::Root::RegisterDelphiGridPaintProvider();', win)
+
     def test_delphi_grid_specs_enabled_on_beginpaint_caller(self):
         win = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         block = win.split('kGridSessionSpecs[] = {', 1)[1].split('g_rootPaintStack.push_back', 1)[0]

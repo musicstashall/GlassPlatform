@@ -62,6 +62,9 @@ namespace GlassCore::Root
     // Безусловно снять все root-хуки (shutdown).
     void DisableAllRootHooks() noexcept;
 
+    // Регистрация BeginPaint/EndPaint-провайдера реконструкции фона таблиц.
+    void RegisterDelphiGridPaintProvider() noexcept;
+
     // Установить флаг shutdown для тел хуков (вызывается из RootWindowHooks).
     void SetRootGdiShutdown(bool value) noexcept;
 }
