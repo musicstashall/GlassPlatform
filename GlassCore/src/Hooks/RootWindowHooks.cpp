@@ -591,7 +591,8 @@ namespace GlassCore::Root
             if (instMod == GlassCore::ModuleHandler::g_entryPointModule
                 && (StrEqI(cls, L"TShownValueList")
                     || StrEqI(cls, L"TStringGrid")
-                    || StrEqI(cls, L"TDrawGrid")))
+                    || StrEqI(cls, L"TDrawGrid")
+                    || StrEqI(cls, L"TValueListEditor")))
             {
                 PushPaint(instMod, OHK_DELPHI_GRID_TEXT, cache);
                 PushPaint(instMod, OHK_DELPHI_GRID_FILL, cache);
@@ -658,7 +659,7 @@ namespace GlassCore::Root
             if (!GetClassNameW(hWnd, cls, _countof(cls)))
                 return false;
             if (!(StrEqI(cls, L"TStringGrid") || StrEqI(cls, L"TDrawGrid")
-                || StrEqI(cls, L"TShownValueList")))
+                || StrEqI(cls, L"TShownValueList") || StrEqI(cls, L"TValueListEditor")))
                 return false;
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
                 return false;
@@ -779,7 +780,7 @@ namespace GlassCore::Root
             // вызвавшем BeginPaint (парная пара снимется в Root_OnEndPaint).
             if (callerMod
                 && (StrEqI(cn, L"TStringGrid") || StrEqI(cn, L"TDrawGrid")
-                    || StrEqI(cn, L"TShownValueList")))
+                    || StrEqI(cn, L"TShownValueList") || StrEqI(cn, L"TValueListEditor")))
             {
                 static constexpr size_t kGridSessionSpecs[] = {
                     OHK_DELPHI_GRID_TEXT, OHK_DELPHI_GRID_FILL, OHK_DELPHI_GRID_THEME,

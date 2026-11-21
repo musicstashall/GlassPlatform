@@ -584,7 +584,7 @@ class DelphiPipelineContract(unittest.TestCase):
     def test_vcl_grid_hooks_are_narrow_and_balanced(self):
         root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         block = root.split('StrEqI(cls, L"TShownValueList")', 1)[1].split('// Точка входа', 1)[0]
-        for grid_cls in ('L"TStringGrid"', 'L"TDrawGrid"'):
+        for grid_cls in ('L"TStringGrid"', 'L"TDrawGrid"', 'L"TValueListEditor"'):
             self.assertIn(grid_cls, block + root.split('StrEqI(cls, L"TShownValueList")', 1)[0][-400:])
         for name in ('OHK_DELPHI_GRID_TEXT', 'OHK_DELPHI_GRID_FILL', 'OHK_DELPHI_GRID_THEME'):
             self.assertIn('PushPaint(instMod, ' + name, block)
@@ -819,12 +819,35 @@ class DelphiPipelineContract(unittest.TestCase):
         win = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         self.assertIn('GlassCore::Root::RegisterDelphiGridPaintProvider();', win)
 
+    def test_value_list_editor_is_handled_as_delphi_grid(self):
+        root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        self.assertIn('|| StrEqI(cls, L"TValueListEditor");', root)
+        # Тема Toolbar (фон ячейки значения у TValueListEditor) тоже гасится.
+        theme = root.split('HRESULT WINAPI Root_MyDelphiGridTheme(HTHEME theme', 1)[1].split(
+            'DWORD WINAPI Root_MyGetSysColor', 1)[0]
+        self.assertIn('toolbarPart', theme)
+        self.assertIn('StrEqI(cls, L"Toolbar")', theme)
+        win = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
+        for marker in ('StrEqI(cls, L"TValueListEditor")', 'StrEqI(cn, L"TValueListEditor")'):
+            self.assertIn(marker, win)
+        sub = read("WndCompat/Root/RootSubclass.cpp")
+        self.assertIn('WndCompat::IsWindowClass(hWnd, L"TValueListEditor")', sub)
+
+    def test_delphi_grid_replay_supports_row_only_fixed_area(self):
+        root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        replay = root.split('static void ReplayGridFixedArea(const GridPaintRec& rec)', 1)[1].split(
+            'static void GridPaintBegin', 1)[0]
+        for marker in ('const bool haveRow', 'const bool haveCol',
+                       'if (!haveRow && !haveCol)', 'if (haveRow)', 'if (haveCol)'):
+            self.assertIn(marker, replay)
+
     def test_delphi_grid_remembers_data_origin_for_partial_paints(self):
         root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
         self.assertIn('thread_local std::unordered_map<HWND, POINT> g_gridDataOrigins;', root)
         remember = root.split('static void RememberGridDataOrigin', 1)[1].split(
             'static GridPaintRec* FindGridPaint', 1)[0]
-        for marker in ('g_gridDataOrigins[wnd]', 'x < p.x', 'y < p.y'):
+        for marker in ('try_emplace(wnd, POINT{ -1, -1 })', 'x < p.x', 'y < p.y',
+                       'x < 0 || y < 0'):
             self.assertIn(marker, remember)
         replay = root.split('static void ReplayGridFixedArea(const GridPaintRec& rec)', 1)[1].split(
             'static void GridPaintBegin', 1)[0]

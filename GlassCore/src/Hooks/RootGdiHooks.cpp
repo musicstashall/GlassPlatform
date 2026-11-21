@@ -898,7 +898,8 @@ namespace GlassCore::Root
         {
             return StrEqI(cls, L"TShownValueList")
                 || StrEqI(cls, L"TStringGrid")
-                || StrEqI(cls, L"TDrawGrid");
+                || StrEqI(cls, L"TDrawGrid")
+                || StrEqI(cls, L"TValueListEditor");
         }
 
         // Заливка прямоугольника цветом с истинной альфой: GDI не переносит
@@ -1032,18 +1033,20 @@ namespace GlassCore::Root
         // Левый верхний угол области данных, запомненный по прошлым отрисовкам:
         // частичная перерисовка (клик, активация окна) может не содержать ни
         // одной заливки ячейки, и тогда границы фиксированной области брать неоткуда.
+        // -1 = «неизвестно»; 0 значит «фиксированной полосы нет» (у
+        // TValueListEditor данные начинаются с x=0 — фиксированной колонки нет).
         static thread_local std::unordered_map<HWND, POINT> g_gridDataOrigins;
 
         static void RememberGridDataOrigin(HWND wnd, LONG x, LONG y) noexcept
         {
-            if (!wnd || x <= 0 || y <= 0)
+            if (!wnd || x < 0 || y < 0)
                 return;
             if (g_gridDataOrigins.size() > 64)
                 g_gridDataOrigins.clear();
-            POINT& p = g_gridDataOrigins[wnd];
-            if (p.x == 0 || x < p.x)
+            POINT& p = g_gridDataOrigins.try_emplace(wnd, POINT{ -1, -1 }).first->second;
+            if (p.x < 0 || x < p.x)
                 p.x = x;
-            if (p.y == 0 || y < p.y)
+            if (p.y < 0 || y < p.y)
                 p.y = y;
         }
 
@@ -1066,31 +1069,40 @@ namespace GlassCore::Root
             RECT client{};
             if (!GetClientRect(rec.hwnd, &client) || IsRectEmpty(&client))
                 return;
-            LONG x0 = rec.haveDataOrigin ? rec.dataOrigin.x : 0;
-            LONG y0 = rec.haveDataOrigin ? rec.dataOrigin.y : 0;
-            if ((!x0 || !y0) && !g_gridDataOrigins.empty())
+            LONG x0 = rec.haveDataOrigin ? rec.dataOrigin.x : -1;
+            LONG y0 = rec.haveDataOrigin ? rec.dataOrigin.y : -1;
             {
                 const auto it = g_gridDataOrigins.find(rec.hwnd);
                 if (it != g_gridDataOrigins.end())
                 {
-                    if (!x0) x0 = it->second.x;
-                    if (!y0) y0 = it->second.y;
+                    if (x0 < 0) x0 = it->second.x;
+                    if (y0 < 0) y0 = it->second.y;
                 }
             }
-            if (x0 <= client.left || x0 >= client.right || y0 <= client.top || y0 >= client.bottom)
+            // У TStringGrid/TDrawGrid есть и фиксированная строка, и колонка;
+            // у TValueListEditor — только строка (данные начинаются с x=0).
+            const bool haveRow = y0 > client.top && y0 < client.bottom;
+            const bool haveCol = x0 > client.left && x0 < client.right;
+            if (!haveRow && !haveCol)
                 return;
             HDC dc = rec.dc;
             const int saved = SaveDC(dc);
-            const RECT rowStrip{ client.left, client.top, client.right, y0 };
-            const RECT colStrip{ client.left, client.top, x0, client.bottom };
-            PatBlt(dc, client.left, client.top, client.right - client.left, y0 - client.top, BLACKNESS);
-            PatBlt(dc, client.left, client.top, x0 - client.left, client.bottom - client.top, BLACKNESS);
+            const RECT rowStrip{ client.left, client.top, client.right,
+                haveRow ? y0 : client.top };
+            const RECT colStrip{ client.left, client.top,
+                haveCol ? x0 : client.left, client.bottom };
+            if (haveRow)
+                PatBlt(dc, client.left, client.top, client.right - client.left,
+                    y0 - client.top, BLACKNESS);
+            if (haveCol)
+                PatBlt(dc, client.left, client.top, x0 - client.left,
+                    client.bottom - client.top, BLACKNESS);
             size_t drawn = 0;
             for (const auto& t : rec.texts)
             {
                 RECT tmp{};
-                if (!IntersectRect(&tmp, &t.rect, &rowStrip)
-                    && !IntersectRect(&tmp, &t.rect, &colStrip))
+                if ((!haveRow || !IntersectRect(&tmp, &t.rect, &rowStrip))
+                    && (!haveCol || !IntersectRect(&tmp, &t.rect, &colStrip)))
                     continue;
                 const HGDIOBJ oldFont = t.font ? SelectObject(dc, t.font) : nullptr;
                 const COLORREF oldColor = SetTextColor(dc, t.color);
@@ -1365,11 +1377,16 @@ namespace GlassCore::Root
                     rect ? rect->right : 0, rect ? rect->bottom : 0, themeCls);
             }
 #endif
+            // Header — фон фиксированной строки (TStringGrid/TValueListEditor),
+            // Toolbar part=1 — фон ячейки значения у TValueListEditor
+            // (StyleServices рисует его темой панели). Оба должны стать
+            // прозрачными, иначе ячейка/заголовок остаются непрозрачными.
+            const bool headerPart = (part == 0 || part == 1) && (state == 1 || state == 4);
+            const bool toolbarPart = part == 1 && (state == 1 || state == 2);
             if (!g_shutdown.load(std::memory_order_acquire) && IsDelphiGridPaintDC(dc)
-                && rect && !IsRectEmpty(rect) && (part == 0 || part == 1)
-                && (state == 1 || state == 4)
+                && rect && !IsRectEmpty(rect) && (headerPart || toolbarPart)
                 && SUCCEEDED(Shared::ThemeHelper::GetThemeClass(theme, cls, MAX_PATH))
-                && StrEqI(cls, L"Header"))
+                && (StrEqI(cls, L"Header") || StrEqI(cls, L"Toolbar")))
             {
                 RECT area = *rect;
                 if (clip && !IntersectRect(&area, &area, clip)) return S_OK;
@@ -2277,7 +2294,7 @@ namespace GlassCore::Root
 
 #if defined(_DEBUG)
             if (lprc && hbr && (StrEqI(cls, L"TStringGrid") || StrEqI(cls, L"TDrawGrid")
-                || StrEqI(cls, L"TShownValueList")))
+                || StrEqI(cls, L"TShownValueList") || StrEqI(cls, L"TValueListEditor")))
             {
                 LOGBRUSH glb{};
                 const bool gok = GetObject(hbr, sizeof(glb), &glb) != 0;

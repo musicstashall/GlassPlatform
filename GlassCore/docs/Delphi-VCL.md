@@ -2291,3 +2291,31 @@ fallback на `ExtTextOutW`.
 известный угол области данных (иначе повтор пропускается — безопасный no-op);
 цветной фон фиксированной ячейки, если он когда-нибудь появится, будет
 потерян (тинт можно добавить тем же повтором).
+
+## Тест 67: TValueListEditor как Delphi-таблица
+
+Класс окна `TValueListEditor` (наследник `TCustomGrid`) в списках таблиц
+отсутствовал, поэтому для него не включался ни один grid-слот — в журнале не
+было строк `[DelphiGrid]`, а отрисовка шла «как есть». Зонд (`GetThemeColor` /
+`DrawThemeBackground` / `FillRect` / `ExtTextOutW`) показал состав:
+
+- заголовок `Key`/`Value` — `DrawThemeBackground class="Header" part=1 state=1`,
+  `rect=0,0,151,19` и `151,0,219,19`, текст — `ExtTextOutW opt=0x4`;
+- ячейки — `FillRect color=0x00FFFFFF` (`[0,19,150,37]`, `[151,19,218,37]`, …)
+  и текст `opt=0x6` (`Key`-колонка) / `opt=0x4` (значения);
+- фон ячейки значения у активной строки — `DrawThemeBackground
+  class="Toolbar" part=1 state=2`;
+- инлайн-редактор — `TInplaceEditList` (уже обрабатывался веткой Edit).
+
+Добавлено:
+- `TValueListEditor` во все списки таблиц: `IsDelphiGridClass`, `GenFill`,
+  классификация root-окна, динамические спеки на модуле caller'а,
+  `Root_OnDelphiGridAfterBeginPaint`, чернение `WM_ERASEBKGND` в субклассе;
+- тема `Toolbar part=1` гасится так же, как `Header` (иначе ячейка значения
+  остаётся непрозрачной);
+- `ReplayGridFixedArea` теперь поддерживает таблицу **без фиксированной
+  колонки**: у `TValueListEditor` данные начинаются с `x=0`, поэтому полосы
+  считаются независимо (`haveRow`/`haveCol`). Кэш origin допускает `x==0`,
+  «неизвестно» кодируется `-1`.
+
+Сборка и визуальный результат на Windows не проверены.
