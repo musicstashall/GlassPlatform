@@ -630,6 +630,8 @@ namespace GlassCore::EditControl
         delete buf;
     }
 
+    static bool IsRichEditKind(GlassShared::GlassControlKind kind) noexcept;
+
     // ── ApplyEditBackgroundRect ─────────────────────────────────────────────
     // Обработка ETO_OPAQUE: PatBlt(BLACKNESS) + опциональный FillRect.
     static void ApplyEditBackgroundRect(
@@ -664,7 +666,9 @@ namespace GlassCore::EditControl
         const COLORREF rgb = color & 0xFFFFFFu;
         const COLORREF sysWnd = GetSysColor(COLOR_WINDOW) & 0xFFFFFFu;
         const COLORREF sysBtn = GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu;
-        const bool fill = rgb != 0 && rgb != sysBtn && rgb != sysWnd;
+        // RichEdit skips only COLOR_WINDOW; plain Edit/TMemo keep their policy.
+        const bool fill = IsRichEditKind(GlassShared::GlassGetWindowKind(sessionHwnd))
+            ? rgb != sysWnd : rgb != 0 && rgb != sysBtn && rgb != sysWnd;
 
         if (useSession && g_activeEditBuffer && targetDC == g_activeEditBuffer->memDC)
         {
@@ -682,7 +686,7 @@ namespace GlassCore::EditControl
             Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 100) };
         if (!brush) return;
 
-        if (rgb == 0 || rgb == sysBtn || rgb == sysWnd)
+        if (!fill)
         {
             // Прозрачный фон — только BLACKNESS, без FillRect
         }
@@ -721,7 +725,6 @@ namespace GlassCore::EditControl
     //  OVERALL DISPATCHER MAP
     // =========================================================================
     static bool IsEditKind(GlassShared::GlassControlKind kind);
-    static bool IsRichEditKind(GlassShared::GlassControlKind kind) noexcept;
 
     BOOL WINAPI Edit_MyExtTextOutW(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
     BOOL WINAPI Edit_MyExtTextOutA(HDC, int, int, UINT, const RECT*, LPCSTR, UINT, const INT*);

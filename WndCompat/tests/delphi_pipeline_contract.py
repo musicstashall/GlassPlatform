@@ -535,6 +535,15 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('SetLastError(originalError)', body)
         self.assertIn('return result;', body)
 
+    def test_richedit_background_uses_alpha_brush_for_every_non_window_color(self):
+        source = read('GlassCore/src/Hooks/EditHooks.cpp')
+        apply = source.split('static void ApplyEditBackgroundRect(', 1)[1].split('static COLORREF GetRichEdit20BackgroundFromEm', 1)[0]
+        self.assertRegex(apply, r'const bool fill = IsRichEditKind\(GlassShared::GlassGetWindowKind\(sessionHwnd\)\)\s*'
+                               r'\? rgb != sysWnd : rgb != 0 && rgb != sysBtn && rgb != sysWnd;')
+        self.assertIn('CreateSolidColorBrushWithAlpha(color, 100)', apply)
+        self.assertRegex(apply, r'(?s)if \(!fill\)\s*\{[^}]*\}\s*else\s*\{\s*FillRect\(targetDC, &r, brush.get\(\)\);')
+        self.assertNotIn('rgb == 0 || rgb == sysBtn || rgb == sysWnd', apply)
+
     def test_memo_background_is_composed_separately_from_text(self):
         source = read("GlassCore/src/Hooks/EditHooks.cpp")
         self.assertIn('std::vector<MemoBackgroundOp> memoBackgrounds;', source)
