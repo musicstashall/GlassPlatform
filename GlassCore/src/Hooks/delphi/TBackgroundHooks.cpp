@@ -54,7 +54,9 @@ namespace GlassCore::DelphiBackground
             WCHAR cls[64]{};
             if (!GetClassNameW(hwnd, cls, _countof(cls))) return false;
             isList = _wcsicmp(cls, L"TListBox") == 0 || _wcsicmp(cls, L"TCheckListBox") == 0
-                || _wcsicmp(cls, L"TColorListBox") == 0;
+                || _wcsicmp(cls, L"TColorListBox") == 0
+                || _wcsicmp(cls, L"TFileListBox") == 0
+                || _wcsicmp(cls, L"TDirectoryListBox") == 0;
             if (isList) return GlassShared::GlassGetWindowKind(hwnd) == GlassShared::GlassControlKind::ListBox;
             return (_wcsicmp(cls, L"TNumberBox") == 0 || _wcsicmp(cls, L"THotKey") == 0)
                 && GlassShared::GlassGetWindowKind(hwnd) == GlassShared::GlassControlKind::Edit;

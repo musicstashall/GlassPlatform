@@ -1388,7 +1388,9 @@ namespace
                 && GetParent(dis->hwndItem) == hWnd
                 && (WndCompat::IsWindowClass(dis->hwndItem, L"TListBox")
                     || WndCompat::IsWindowClass(dis->hwndItem, L"TCheckListBox")
-                    || WndCompat::IsWindowClass(dis->hwndItem, L"TColorListBox"));
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TColorListBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TFileListBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TDirectoryListBox"));
             // VCL combo fields that draw their item themselves. TComboBox is not
             // here: its field text already goes through the child Edit path.
             const bool comboOwnerDraw = dis->CtlType == ODT_COMBOBOX && dis->hwndItem

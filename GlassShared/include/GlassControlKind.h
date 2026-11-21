@@ -43,7 +43,7 @@ namespace GlassShared
         RichEdit50W             = 23, // RICHEDIT50W, TRichEdit
         WinForms_RichEdit50W    = 24, // .RICHEDIT50W
         ScrollBar               = 25, // класс ScrollBar — ScrollBarHost (WndCompat) + BitBlt/AlphaBlend в ScrollBarThemeHooks (GlassCore)
-        ListBox                 = 26, // ListBox, TListBox, TCheckListBox, TColorListBox
+        ListBox                 = 26, // ListBox, TListBox, TCheckListBox, TColorListBox, TFileListBox, TDirectoryListBox
         WinForms_ListBox        = 27, // .LISTBOX (WinForms)
         StatusBar               = 28, // msctls_statusbar32
         ProgressBar             = 29, // msctls_progress32

@@ -460,7 +460,9 @@ namespace GlassCore::DelphiListBox
             || (dis->itemState & ODS_COMBOBOXEDIT) != 0);
         if (list)
         {
-            if (!color && !check && _wcsicmp(cls, L"TListBox") != 0) return false;
+            if (!color && !check && _wcsicmp(cls, L"TListBox") != 0
+                && _wcsicmp(cls, L"TFileListBox") != 0
+                && _wcsicmp(cls, L"TDirectoryListBox") != 0) return false;
             if (GlassShared::GlassGetWindowKind(dis->hwndItem) != GlassShared::GlassControlKind::ListBox)
                 return false;
         }
