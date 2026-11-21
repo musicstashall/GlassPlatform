@@ -905,6 +905,15 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('"ExtTextOutW", reinterpret_cast<PVOID>(Overall_MyExtTextOutW)', rebar)
         self.assertIn('(options & ETO_OPAQUE) == 0 || cch != 0', rebar)
         self.assertIn('band-fill hdc=0x%p', rebar)
+        # Две ветки: с темой (DTB + DrawThemeText) и без темы (DrawTextExW).
+        self.assertIn('static bool RebarHasTheme(HWND hWnd) noexcept', rebar)
+        self.assertIn('GetWindowTheme(hWnd) != nullptr', rebar)
+        self.assertIn('if (themed && (!glow || !hUx))', rebar)
+        self.assertIn('EnableHooksOnModule(callerMod, OHK_DRAWTEXTEX, true)', rebar)
+        self.assertIn('themed=%d textHook=%d', rebar)
+        self.assertIn('themed=%d dtb=%d', rebar)
+        # Политика свечения не должна глушить текст полосы.
+        self.assertIn('glow-policy=0 hwnd=0x%p', rebar)
         rescan = read("WndCompat/Tracker/BackdropPolicyRescan.cpp")
         self.assertIn('WndCompat::Rebar_Attach(hChild);', rescan)
         handler = read("WndCompat/Tracker/WinEventHandler.cpp")

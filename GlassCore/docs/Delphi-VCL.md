@@ -2695,3 +2695,29 @@ gdi32full  ExtTextOutW(11,4,ETO_GLYPH_INDEX,…)           ← глифы
 - диагностика: `[GlassCore][Rebar] band-fill hdc=… rect=[…] bk=0x… -> BLACKNESS ok=1`.
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 79: TCoolBar — фон очистился, текст пропал; у rebar нет темы
+
+`image-47.png`: полоса прозрачная (хук `ExtTextOutW(ETO_OPAQUE, "")` сработал),
+текста нет. Причина: у окна `CoolBar` (VCL `TCoolBar`) **нет темы** —
+`DrawThemeBackground` для него не вызывается вообще, comctl32 рисует
+классической веткой: заливка полосы пустым `ExtTextOutW` и текст обычным
+`DrawTextExW`. Наши хуки были настроены на themed-ветку (DTB + `DrawThemeText`
+на comctl32), а `DrawTextExW` вооружался только в glow-режиме и только на
+uxtheme, поэтому текст шёл штатным GDI чёрным по прозрачному и исчезал.
+
+Сделано разделение веток по факту наличия темы у окна:
+
+- `RebarHasTheme(hWnd)` = `IsThemeActive()` и `GetWindowTheme(hWnd) != nullptr`
+  (тот же handle, которым пользуется comctl32; свою тему не открываем);
+- themed: `DrawThemeBackground` + `DrawThemeText` (или `DrawTextExW` на uxtheme
+  в glow-режиме);
+- без темы: `DrawThemeBackground` не вооружается, текст идёт через
+  `DrawTextExW`, который теперь вооружается на comctl32 (и на uxtheme как
+  страховка), а рисуется alpha-путём `Text::DrawTextWithAlpha`;
+- политика `IsInkGlowAllowedForWindow` больше не глушит текст полосы: её отказ
+  только пишется в журнал (`glow-policy=0`);
+- журнал: `OnPaintBegin … themed=%d textHook=%d fill=%d`,
+  `OnPaintEnd … themed=%d dtb=%d` — `dtb=0` подтверждает, что тема не рисуется.
+
+Сборка и визуальный результат на Windows не проверены.
