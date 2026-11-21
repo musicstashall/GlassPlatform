@@ -175,8 +175,8 @@
     <ClCompile Include="src\Hooks\ProgressBarHooks.cpp">
       <Filter>src\Hooks</Filter>
     </ClCompile>
-    <ClCompile Include="src\Hooks\CoolBarHooks.cpp">
-      <Filter>src\Hooks</Filter>
+    <ClCompile Include="src\Hooks\delphi\TCoolBarDraw.cpp">
+      <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
     <ClCompile Include="src\Hooks\RebarHooks.cpp">
       <Filter>src\Hooks</Filter>
@@ -420,8 +420,8 @@
     <ClInclude Include="Include\Hooks\ProgressBar.h">
       <Filter>Include\Hooks</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Hooks\CoolBar.h">
-      <Filter>Include\Hooks</Filter>
+    <ClInclude Include="Include\Hooks\delphi\TCoolBarDraw.h">
+      <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\Rebar.h">
       <Filter>Include\Hooks</Filter>

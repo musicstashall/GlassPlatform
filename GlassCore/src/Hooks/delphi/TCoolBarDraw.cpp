@@ -10,7 +10,7 @@
 // правила: фон → прозрачность, текст → alpha-путь Text::DrawTextWithAlpha.
 
 #include "CorePch.h"
-#include <Hooks/CoolBar.h>
+#include <Hooks/delphi/TCoolBarDraw.h>
 #include <Subsystems/RenderText.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <Core/Intercept/HookDispatcher.h>
@@ -21,6 +21,7 @@
 #include <wil.h>
 #include <array>
 #include <atomic>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 

@@ -13,7 +13,7 @@
 #include <Hooks/delphi/TListBoxDraw.h>
 #include <Hooks/Static.h>
 #include <Hooks/Rebar.h>
-#include <Hooks/CoolBar.h>
+#include <Hooks/delphi/TCoolBarDraw.h>
 #include <GlassCoreProviders.h>
 #include <Core/Engine.h>
 #include <Hooks/RootWindowHooks.h>

@@ -2778,3 +2778,27 @@ GDI, а не наш alpha. `image-49.png` — с визуальными стил
   `patblt`, `text` (с `color`/`bk` в строке).
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 82: правки сборки для CoolBar
+
+Сборка падала на `WndCompat/Controls/CoolBarSubclass.cpp`:
+
+```
+C3861 WinEventHook_SignalDetachComplete: идентификатор не найден
+C3861 WinEventHook_GetMode: идентификатор не найден
+C2677 бинарный "!=": не найден оператор для "Shared::InjectionMode"
+```
+
+Не хватало заголовков `Tracker/WinEventHandler.h` и `InjectionMode.h` (в
+`RebarSubclass.cpp` они есть) — добавлены.
+
+Заодно расположение приведено к принятому: код Delphi-контрола живёт в
+`Hooks/delphi`, а не в общем `Hooks`:
+
+- `GlassCore/src/Hooks/delphi/TCoolBarDraw.cpp`;
+- `GlassCore/Include/Hooks/delphi/TCoolBarDraw.h`;
+- обновлены `GlassCore.vcxproj`/`.filters` (фильтр `src\Hooks\delphi`),
+  `Engine.cpp`, `Exports.cpp`.
+
+Границы путей: `RebarHooks` — generic rebar (`ReBarWindow32`, `SizeableRebar`),
+`delphi/TCoolBarDraw` — только `CoolBar`, без `DrawThemeBackground`.
