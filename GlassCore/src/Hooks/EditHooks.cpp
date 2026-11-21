@@ -406,14 +406,14 @@ namespace GlassCore::EditControl
     {
         if (!dc || !HasConfirmedMemoSolidBackground(buf)) return false;
         wil::unique_hbrush brush{
-            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(buf.memoSolidBackground, 255) };
+            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(buf.memoSolidBackground, 100) };
         if (!brush) return false;
         RECT rect{ 0, 0, buf.width, buf.height };
         if (!PatBlt(dc, 0, 0, buf.width, buf.height, BLACKNESS)) return false;
         return FillRect(dc, &rect, brush.get()) != 0;
     }
 
-    // Как на прямом GetDC: сначала прозрачная очистка, затем непрозрачная
+    // Как на прямом GetDC: сначала прозрачная очистка, затем alpha-100
     // пользовательская/selection заливка. Порядок важен при пересечении rect.
     static void ReplayMemoBackgrounds(HDC dc, const EditBufferedSession& buf) noexcept
     {
@@ -424,7 +424,7 @@ namespace GlassCore::EditControl
             if (op.fill)
             {
                 wil::unique_hbrush brush{
-                    Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(op.color, 255) };
+                    Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(op.color, 100) };
                 if (brush) FillRect(dc, &r, brush.get());
             }
         }
@@ -666,8 +666,8 @@ namespace GlassCore::EditControl
         const COLORREF rgb = color & 0xFFFFFFu;
         const COLORREF sysWnd = GetSysColor(COLOR_WINDOW) & 0xFFFFFFu;
         const COLORREF sysBtn = GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu;
-        // RichEdit skips only COLOR_WINDOW; plain Edit/TMemo keep their policy.
-        const bool fill = IsRichEditKind(GlassShared::GlassGetWindowKind(sessionHwnd))
+        // RichEdit/TMemo skip only COLOR_WINDOW; other plain Edits keep their policy.
+        const bool fill = IsRichEditKind(GlassShared::GlassGetWindowKind(sessionHwnd)) || IsDelphiMemo(sessionHwnd)
             ? rgb != sysWnd : rgb != 0 && rgb != sysBtn && rgb != sysWnd;
 
         if (useSession && g_activeEditBuffer && targetDC == g_activeEditBuffer->memDC)

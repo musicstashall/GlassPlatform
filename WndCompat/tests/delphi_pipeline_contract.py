@@ -64,6 +64,42 @@ class DelphiPipelineContract(unittest.TestCase):
         for cls in ('TNumberBox', 'THotKey', 'TRichEdit'):
             self.assertIn('L"' + cls + '"', read('GlassCore/src/Hooks/EditHooks.cpp'))
 
+    def test_vcl_input_icons_use_exact_controls_and_proven_destination_dc(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        for guard in ('IsFullInjectionMode()', 'GetMapMode(dc) != MM_TEXT',
+                      'WindowFromDC(dc)', 'GetStackOwnerForDc(dc)',
+                      'IsTopWindowDrawingSession(window)', 'bitmap.bmBitsPixel <= 1',
+                      'L"TButtonedEdit"', 'L"TSearchBox"', 'L"TGlyph"', 'GetParent(window)',
+                      'GlassControlKind::Edit', 'GlassIsBackdropAllowedForHwnd(owner)',
+                      'GlassIsBackdropAllowedForHwnd(window)', 'g_inside', 'g_shutdown'):
+            self.assertIn(guard, code)
+        for forbidden in ('wcsstr', 'GetPaintSessionHostHwnd', 'ApplyBlackKeyAlpha',
+                          'ColorTreatAsTransparent', 'ExtTextOut', 'reinterpret_cast<PVOID>(BitBlt)'):
+            self.assertNotIn(forbidden, code)
+        self.assertIn('g_entryPointModule', code)
+        self.assertNotIn('RegisterModulePrewarmHandler', code)  # no IAT writes under loader lock
+
+    def test_vcl_input_icons_keep_native_imagelist_parameters_and_alpha(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        for required in ('"ImageList_Draw"', '"ImageList_DrawEx"', '"ImageList_DrawIndirect"',
+                         'ILD_MASK | ILD_ROP | ILD_DPISCALE', 'ILD_TRANSPARENT | ILD_PRESERVEALPHA',
+                         'BPBF_TOPDOWNDIB', 'AC_SRC_OVER, 0, 255, AC_SRC_ALPHA',
+                         'BufferedPaintClear(buffer, nullptr)', 'EndBufferedPaint(buffer, drawn)',
+                         'GetBufferedPaintBits(buffer, &pixels, &stride)', 'if (!hasAlpha) return std::nullopt',
+                         'if (buffer) EndBufferedPaint(buffer, FALSE)', 'auto work = *params',
+                         'work.hdcDst = memory; work.fStyle = flags', 'params->cbSize != sizeof(*params)',
+                         'GetProcAddress(module, "ImageList_GetIconSize")', 'g_dispatcher.DisableAllHooks()'):
+            self.assertIn(required, code)
+        engine = read('GlassCore/src/Core/Engine.cpp')
+        self.assertIn('GlassCore::DelphiInputIcons::Startup()', engine)
+        self.assertIn('GlassCore::DelphiInputIcons::Shutdown()', engine)
+        for path in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            for file in ('TInputIcons.cpp', 'TInputIcons.h'):
+                self.assertIn(file, read(path))
+        runner = read('WndCompat/tests/input_icons_test.py')
+        self.assertIn("for debug in (False, True)", runner)
+        self.assertIn('GlassCore/src/Hooks/delphi/TInputIcons.cpp', runner)
+
     def test_vcl_list_owner_draw_probe_is_passthrough_and_scoped(self):
         code = read('GlassCore/src/Hooks/delphi/TListBoxProbe.cpp')
         root = read('WndCompat/Root/RootSubclass.cpp')
@@ -535,10 +571,10 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('SetLastError(originalError)', body)
         self.assertIn('return result;', body)
 
-    def test_richedit_background_uses_alpha_brush_for_every_non_window_color(self):
+    def test_richedit_and_memo_background_use_alpha_brush_for_every_non_window_color(self):
         source = read('GlassCore/src/Hooks/EditHooks.cpp')
         apply = source.split('static void ApplyEditBackgroundRect(', 1)[1].split('static COLORREF GetRichEdit20BackgroundFromEm', 1)[0]
-        self.assertRegex(apply, r'const bool fill = IsRichEditKind\(GlassShared::GlassGetWindowKind\(sessionHwnd\)\)\s*'
+        self.assertRegex(apply, r'const bool fill = IsRichEditKind\(GlassShared::GlassGetWindowKind\(sessionHwnd\)\) \|\| IsDelphiMemo\(sessionHwnd\)\s*'
                                r'\? rgb != sysWnd : rgb != 0 && rgb != sysBtn && rgb != sysWnd;')
         self.assertIn('CreateSolidColorBrushWithAlpha(color, 100)', apply)
         self.assertRegex(apply, r'(?s)if \(!fill\)\s*\{[^}]*\}\s*else\s*\{\s*FillRect\(targetDC, &r, brush.get\(\)\);')
@@ -552,7 +588,7 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('PushSessionBlacknessRect(r,', apply)
         self.assertIn('FillRect(targetDC, &r, brush.get())', apply)
         replay = source.split('static void ReplayMemoBackgrounds(', 1)[1].split('// ── FlushEditBuffer', 1)[0]
-        self.assertRegex(replay, r'(?s)for \(const auto& op : buf.memoBackgrounds\).*?PatBlt\(dc.*?if \(op.fill\).*?CreateSolidColorBrushWithAlpha\(op.color, 255\).*?FillRect\(dc')
+        self.assertRegex(replay, r'(?s)for \(const auto& op : buf.memoBackgrounds\).*?PatBlt\(dc.*?if \(op.fill\).*?CreateSolidColorBrushWithAlpha\(op.color, 100\).*?FillRect\(dc')
         flush = source.split('static void FlushEditBuffer()', 1)[1].split('static void ApplyEditBackgroundRect(', 1)[0]
         self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*\{.*?ReplayMemoBackgrounds\(composeDC, \*buf\);.*?GdiAlphaBlend\(composeDC')
         self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*\{.*?ReplayMemoBackgrounds\(buf->screenDC, \*buf\);.*?GdiAlphaBlend\(buf->screenDC')
@@ -562,10 +598,14 @@ class DelphiPipelineContract(unittest.TestCase):
         root = read('WndCompat/Root/RootSubclass.cpp')
         capture = root.split('const bool validBrush = GetObject(', 1)[1].split('if (validBrush)', 1)[0]
         for guard in ('WM_CTLCOLORSTATIC', 'L"TMemo"', 'validBrush', 'BS_SOLID', 'OPAQUE',
-                      'GetBkColor(hdc)', 'COLOR_WINDOW', 'COLOR_BTNFACE'):
+                      'GetBkColor(hdc)', 'COLOR_WINDOW'):
             self.assertIn(guard, capture)
         self.assertIn('SetDelphiMemoBackground(memo, rgb)', capture)
         self.assertIn('ClearDelphiMemoBackground(memo)', capture)
+        self.assertNotIn('rgb != 0', capture)
+        self.assertNotIn('COLOR_BTNFACE', capture)
+        self.assertIn('if (!memoBackground) SetBkColor(hdc, 0)', root)
+        self.assertIn('uMsg != WM_CTLCOLOREDIT || !WndCompat::IsWindowClass(reinterpret_cast<HWND>(lParam), L"TMemo")', root)
         edit_host = read('WndCompat/Controls/EditSubclass.cpp')
         self.assertEqual(edit_host.count('GlassShared::ClearDelphiMemoBackground(hWnd)'), 2)
         prop = read('GlassShared/include/GlassDelphiMemoBackground.h')
@@ -578,7 +618,7 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('op.fill && (op.color & 0xFFFFFFu) == buf.memoSolidBackground', confirm)
         prime = edit.split('static bool PrimeMemoSolidBackground(', 1)[1].split('static void ReplayMemoBackgrounds(', 1)[0]
         self.assertIn('!HasConfirmedMemoSolidBackground(buf)', prime)
-        self.assertIn('CreateSolidColorBrushWithAlpha(buf.memoSolidBackground, 255)', prime)
+        self.assertIn('CreateSolidColorBrushWithAlpha(buf.memoSolidBackground, 100)', prime)
         flush = edit.split('static void FlushEditBuffer()', 1)[1].split('static void ApplyEditBackgroundRect(', 1)[0]
         for dc in ('composeDC', 'buf->screenDC'):
             self.assertLess(flush.index(f'PrimeMemoSolidBackground({dc}, *buf)'), flush.index(f'ReplayMemoBackgrounds({dc}, *buf)'))

@@ -692,16 +692,16 @@ namespace
         LOGBRUSH lb{};
         const bool validBrush = GetObject(reinterpret_cast<HGDIOBJ>(defResult), sizeof(lb), &lb) == sizeof(lb);
         // Read-only TMemo получает WM_CTLCOLORSTATIC. Сохраняем только цвет
-        // сплошной пользовательской кисти, совпадающий с цветом DC; pattern,
-        // прозрачные и системные кисти никогда не аппроксимируем одним RGB.
+        // сплошной кисти, совпадающий с цветом DC. Прозрачные/pattern кисти
+        // и COLOR_WINDOW не аппроксимируем одним RGB.
         const HWND memo = reinterpret_cast<HWND>(lParam);
-        if (uMsg == WM_CTLCOLORSTATIC && memo && WndCompat::IsWindowClass(memo, L"TMemo"))
+        const bool memoBackground = uMsg == WM_CTLCOLORSTATIC && memo && WndCompat::IsWindowClass(memo, L"TMemo");
+        if (memoBackground)
         {
             const COLORREF rgb = lb.lbColor & 0xFFFFFFu;
             if (validBrush && lb.lbStyle == BS_SOLID && GetBkMode(hdc) == OPAQUE
-                && rgb == (GetBkColor(hdc) & 0xFFFFFFu) && rgb != 0
-                && rgb != (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)
-                && rgb != (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu))
+                && rgb == (GetBkColor(hdc) & 0xFFFFFFu)
+                && rgb != (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu))
             {
                 if (!GlassShared::SetDelphiMemoBackground(memo, rgb))
                     GlassShared::ClearDelphiMemoBackground(memo);
@@ -713,9 +713,9 @@ namespace
         {
             if (lb.lbStyle == BS_SOLID && GetBkMode(hdc) == OPAQUE)
             {
-                if (!lb.lbColor
-                    || lb.lbColor == GetSysColor(COLOR_WINDOW)
-                    || lb.lbColor == GetSysColor(COLOR_BTNFACE))
+                if (memoBackground ? (lb.lbColor & 0xFFFFFFu) == (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)
+                    : (!lb.lbColor || lb.lbColor == GetSysColor(COLOR_WINDOW)
+                        || lb.lbColor == GetSysColor(COLOR_BTNFACE)))
                 {
                     // sys-фон → чёрная кисть ниже
                 }
@@ -740,7 +740,8 @@ namespace
             }
         }
 
-        SetBkColor(hdc, 0);
+        // Keep COLOR_WINDOW distinguishable from a genuinely black TMemo.
+        if (!memoBackground) SetBkColor(hdc, 0);
         outResult = reinterpret_cast<LRESULT>(GetStockObject(BLACK_BRUSH));
 #if defined(_DEBUG)
         LogDelphiMemoCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc,
@@ -1156,7 +1157,9 @@ namespace
 #else
             (void)originalBrush;
 #endif
-            SetBkColor(hdc, 0);
+            // EditHooks needs the original TMemo RGB for the alpha-100 policy.
+            if (uMsg != WM_CTLCOLOREDIT || !WndCompat::IsWindowClass(reinterpret_cast<HWND>(lParam), L"TMemo"))
+                SetBkColor(hdc, 0);
             const LRESULT resultBrush = reinterpret_cast<LRESULT>(GetStockObject(BLACK_BRUSH));
 #if defined(_DEBUG)
             if (isMemo)
