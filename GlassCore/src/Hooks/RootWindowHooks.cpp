@@ -1021,6 +1021,7 @@ namespace GlassCore::Root
             PrewarmRootHook(ep);
         GlassCore::PaintDispatcher::RegisterPaintProvider({ Root_OnBeginPaint, Root_OnEndPaint });
         GlassCore::PaintDispatcher::RegisterPostPaintProvider({ Root_OnDelphiGridAfterBeginPaint });
+        GlassCore::Root::RegisterDelphiGridPaintProvider();
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ Root_OnGetDC, Root_OnReleaseDC });
         GlassCore::PaintDispatcher::RegisterCompatDCProvider({ Root_OnCreateCompatDC, Root_OnDeleteDC });
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
