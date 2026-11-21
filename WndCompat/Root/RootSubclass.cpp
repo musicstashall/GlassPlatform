@@ -1058,7 +1058,8 @@ namespace
             // непрозрачными (в журнале для них нет ни Fill, ни PatBlt).
             if (WndCompat::IsWindowClass(hWnd, L"TStringGrid")
                 || WndCompat::IsWindowClass(hWnd, L"TDrawGrid")
-                || WndCompat::IsWindowClass(hWnd, L"TShownValueList"))
+                || WndCompat::IsWindowClass(hWnd, L"TShownValueList")
+                || WndCompat::IsWindowClass(hWnd, L"TValueListEditor"))
             {
                 HDC hdc = reinterpret_cast<HDC>(wParam);
                 RECT rc{};
