@@ -3386,3 +3386,139 @@ H/V gradient, hover/selection, partial repaint/resize, Full/backdrop toggle и
 WM_PRINTCLIENT без paint/GetDC-сессии и другие API custom VCL styles этим EXE-путём
 не заявляются как покрытые. Если дефект остался: скриншот + «Логи при отображении»
 (включая новые DelphiButtonGroups-строки) + «Логи с зондом при отображении элемента».
+
+## Тест 92: TCategoryButtons — подтверждённые gradient / solid состояния
+
+### Данные LogViewer-18 и четырёх скриншотов
+
+Проверка пользователем после `9a9a151`: `LogViewer-18.log`, UTF-8 без BOM,
+18319 байт, 108 строк по bytes.splitlines. Два отображения без зонда и те же
+два состояния с зондом; точный класс TCategoryButtons, клиент 236×96.
+`image-54.png` / `image-55.png` — оригинал при первом показе / после
+сворачивания-разворачивания; `image-56.png` / `image-57.png` — Glass
+в этих состояниях. В оригинале розовый фон также сменяется серым. В Glass
+пользователь видит слабую заливку при первом показе и почти незаметную после
+сворачивания-разворачивания. Это уточняет предыдущее сообщение об отсутствии
+цветного фона: для показанного пути заливка **попадает в обработчик**.
+
+| Состояние | Без зонда | С зондом | Фон категории из DelphiButtonGroups |
+| --- | --- | --- | --- |
+| Первый показ | 20:41:36.398, PID 10760 / TID 15400 | 20:45:53.659, PID 33092 / TID 45256 | GradientFill, mode=0 (RECT_H), RGB 0xFFEAFF → 0xF0F0F0, rect=[2,1,234,44], alpha=100, ok=1. |
+| После сворачивания-разворачивания | 20:42:39.059 | 20:46:23.565 | FillRect, RGB 0xE6E6E6, тот же rect, alpha=100, ok=1. GradientFill для этого состояния в обоих фрагментах отсутствует. |
+
+В обоих состояниях full-client FillRect 0xF0F0F0 [0,0,236,96] идёт с alpha=0,
+как COLOR_BTNFACE; item FillRect 0xFFFFFF [5,22,27,44] и [29,22,51,44] — с
+alpha=0, как COLOR_WINDOW. Все `ok=1`. Header DrawTextExW format=0x8100,
+count=16 и item text format=0x8004, count=5/4 возвращают hr=0x00000000.
+В логе без зонда hwnd=0x100FB6, с зондом hwnd=0x510E22; для первого показа
+DC=0x40011A60, для повторного DC=0x490121CE. Зонд подтверждает оконный DC
+TCategoryButtons. Для этих наблюдений не требуется объяснение через
+непойманный delay-import или неизвестного владельца bitmap-DC: обе операции
+уже зарегистрированы production-обработчиком с исходными RGB и bounds.
+Не распространять этот вывод на все версии VCL, BPL и другие buffer paths.
+
+### Вывод о смене цвета и видимости
+
+Розовый градиент во втором состоянии **заменён самим контролом на сплошной
+серый фон**, а не потерян Glass. В справочном
+[Vcl.CategoryButtons.pas, DrawCategory](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.CategoryButtons.pas#L1151-L1199)
+выбранная категория использует SelectedButtonColor и не попадает в обычную
+ветку gradient. Это согласуется с наблюдаемой сменой состояния; версия VCL
+sample и внутреннее FSelectedItem непосредственно логом не устанавливаются.
+Принудительно возвращать розовый после клика нельзя: это изменило бы native
+поведение, подтверждённое и скриншотами оригинала.
+
+A100 означает **100/255 ≈ 39,2% непрозрачности**, не 100%. Исходный бледный
+0xFFEAFF и так имеет небольшой цветовой контраст, а второй endpoint — нейтральный
+0xF0F0F0. Вклад оттенка дополнительно уменьшается принятой альфой. Сплошной
+0xE6E6E6 не содержит розового оттенка и на близком по яркости glass-backdrop
+тоже может быть слабо различим. Это согласуется со скриншотами, но не является
+измерением конечных DWM-пикселей. В group helper нет второго A100: поверхность
+буфера получает A255, затем один SourceConstantAlpha=100. Видимость при другой
+альфе — отдельное изменение политики, не исправление пропущенного GradientFill.
+
+### Фиксация без изменения renderer
+
+Добавлен portable-сценарий `category-states`: записанные rect/RGB, сначала
+GradientFill 0xFFEAFF → 0xF0F0F0, затем FillRect 0xE6E6E6 на другом оконном DC,
+с системными full-client/item fills в каждом кадре. Проверяются неизменность
+цветов/вершин, одна композиция A100 на custom background, A255 в буфере,
+отсутствие старого розового в solid-кадре и отсутствие alpha-композиции для
+системных заливок. Это воспроизведение входных API-операций, **не эмуляция
+нативных VCL-событий, не MSVC-сборка и не pixel test**.
+
+Production-код, значение A100 и принятые политики других контролов не менялись.
+Проверки: `delphi_pipeline_contract.py` **73/73**;
+`button_groups_rendering_test.py` **9/9 × Release/Debug**, также с ASan/UBSan;
+panels/frames **11/11**, TCoolBar **9/9**, input icons **6/6** — PASS.
+UTF-8 без BOM и `git diff --check` — PASS. Новая Windows/MSVC-сборка не выполнялась.
+После сохранения этих выводов исходный LogViewer-18 удалён из входящих
+вложений; копия лога в репозитории не хранится. Изображения сохранены.
+
+## Тест 93: TPanel — только COLOR_WINDOW как default; аудит SplitView / buffered panels
+
+### Уточнение политики точного TPanel
+
+Новое требование пользователя: у TPanel любой фон, отличающийся от текущего
+COLOR_WINDOW, должен иметь A100. Ранее тест 85 исключал из alpha-пути два
+цвета — COLOR_WINDOW и COLOR_BTNFACE — для всех перечисленных панелей/фреймов.
+Это не одна и та же политика: COLOR_BTNFACE обычно отличается от COLOR_WINDOW.
+
+В `TPanelDraw::ApplyBackground` правило сужено **только для точного оконного
+класса TPanel**, case-insensitive, без чтения caption и без substring matching:
+
+- RGB == текущий COLOR_WINDOW → прежняя очистка BLACKNESS;
+- любой другой solid RGB, **включая COLOR_BTNFACE и настоящий чёрный**, → A100;
+- если два системных RGB совпали, равенство COLOR_WINDOW по-прежнему даёт очистку;
+- TFrame, TSampleFrame, TEmbeddedForm, TCategoryPanelGroup, TCategoryPanel и
+  остальные классы прежнего списка сохраняют принятую пару WINDOW/BTNFACE.
+
+Используются прежние premultiplied DIB + GdiAlphaBlend; FillRect, PATCOPY и
+пустой ExtTextOutW(ETO_OPAQUE) разделяют одну функцию выбора политики. Нет
+изменений текстового renderer, DC ownership, geometry/bevel gate, root IAT,
+перечня классов, lifecycle или значений alpha других контролов. Эта правка
+не объявляется решением финальной opacity двойного буфера.
+
+### Результат source-аудита остальных трёх случаев
+
+Новых runtime-логов/скриншотов этих контролов пользователь пока не передал.
+Справочный код Delphi Berlin помогает определить точки проверки, **не версию
+VCL галереи и не фактические runtime-вызовы**.
+
+| Элемент | Что установлено по коду | Граница результата |
+| --- | --- | --- |
+| TSplitView | В [Vcl.WinXCtrls.pas](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.WinXCtrls.pas#L751) TCustomSplitView наследует TCustomPanel: выдвижной боковой контейнер, docked/overlay, не разделитель TSplitter. Конструктор задаёт DoubleBuffered=True (строки 2947–2953). Точного TSplitView в нашем shared panel predicate пока нет. | Узкий panel-маршрут сейчас не назначается этому имени. Просто добавить имя недостаточно для заявления о правильной конечной альфе: нужен тот же buffered audit. В этом шаге класс не добавлен. |
+| TCategoryPanelGroup | Точное имя уже находится в shared predicate и native message bridge. Его поддержанный сплошной client background получает A100, если RGB отличается от WINDOW и BTNFACE; это также проверяется portable-сценарием. | Это не доказывает alpha каждого цветного участка галереи. В [Vcl.ExtCtrls.pas](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.ExtCtrls.pas#L11304) группа имеет собственный WM_ERASEBKGND/FillRect; заголовок дочернего TCategoryPanel отдельно рисуется через GetWindowDC и GradientFillCanvas (строки 10244–10331). Gradient/header не является поддержанным full-client solid fill TPanelDraw. Расширять его geometry gate на header вслепую нельзя. |
+| TPanel Buffered | В [Vcl.Controls.pas, TWinControl.WMPaint](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.Controls.pas#L10416) DWM-ветка создаёт BPBF_COMPOSITED, рисует WM_ERASEBKGND/WM_PRINTCLIENT и перед публикацией вызывает BufferedPaintMakeOpaque, если нет csPaintBlackOpaqueOnGlass. | Это конкретный кандидат на превращение уже очищенного чёрного в непрозрачный, но runtime галереи ещё не установлен. Другой fallback этой функции использует bitmap/BitBlt; выбирать исправление без трассы преждевременно. |
+
+В [Winapi.UxTheme.pas](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/rtl/win/Winapi.UxTheme.pas#L5171)
+BufferedPaintMakeOpaque — inline-обёртка над **BufferedPaintSetAlpha(...,255)**;
+сам BufferedPaintSetAlpha объявлен delayed import. В текущем panel dispatcher
+нет перехвата этого API, он меняет только фоновые FillRect/PatBlt/ExtTextOutW.
+Уменьшение alpha ещё одной кисти не устраняет последующую установку A255 на
+целом буфере. Однако пока это source-гипотеза для конкретного визуального FAIL
+Buffered TPanel; не блокировать SetAlpha(255) глобально или по одному ambient HWND.
+Надпись «TPanel Buffered» не считать именем оконного класса и не использовать
+для выбора пути. Требуются реальный class/DC и принадлежность буфера.
+
+### Проверки и следующий runtime-шаг
+
+Новый `panel-default-scope` на предыдущем production-коде дал ожидаемый **FAIL**
+по числу alpha-blends: воспроизведено лишнее исключение BTNFACE у TPanel.
+С правкой — PASS для трёх фоновых API, TPanel/TCategoryPanelGroup/TCategoryPanel/
+TFrame, custom/black/system RGB, текущих изменённых системных цветов и случая
+WINDOW == BTNFACE. Существующие проверки caption, chrome, ownership и lifecycle
+сохранены. Это portable-проверка аргументов и DIB-байтов, не Windows-пиксели.
+
+Проверки: contracts **73/73**; panels **12/12 × Release/Debug** и отдельный
+ASan/UBSan-прогон; button groups **9/9 × Release/Debug**, TCoolBar **9/9**,
+input icons **6/6** — PASS. UTF-8 без BOM и `git diff --check` — PASS.
+MSVC/Windows-сборка недоступна; Buffered TPanel, TSplitView и конечная альфа
+цветных участков TCategoryPanelGroup **остаются открытыми**.
+
+Для продолжения нужны отдельно TSplitView, TCategoryPanelGroup и TPanel Buffered:
+скриншот оригинала/Glass + «Логи при отображении» (включая `[DelphiPanel]`) +
+«Логи с зондом при отображении элемента». Для buffered случая особенно важны
+BeginBufferedPaint, BufferedPaintSetAlpha, EndBufferedPaint и предшествующие
+заливки/BitBlt. Эти buffered API уже есть в DebugDetour-зонде (номера 30/33/31);
+новый глобальный зонд для запроса не добавлялся.

@@ -76,6 +76,9 @@ class ButtonGroupsRenderingTest(unittest.TestCase):
     def test_both_gradient_imports_keep_native_mesh_rgb_and_black_endpoint(self):
         self.run_case('gradients')
 
+    def test_observed_pink_gradient_then_solid_gray_keep_native_colors_and_single_alpha(self):
+        self.run_case('category-states')
+
     def test_known_dc_owner_current_session_mode_and_backdrop(self):
         self.run_case('dc-isolation')
 
