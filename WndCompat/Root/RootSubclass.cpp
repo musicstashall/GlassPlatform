@@ -1059,7 +1059,8 @@ namespace
             if (WndCompat::IsWindowClass(hWnd, L"TStringGrid")
                 || WndCompat::IsWindowClass(hWnd, L"TDrawGrid")
                 || WndCompat::IsWindowClass(hWnd, L"TShownValueList")
-                || WndCompat::IsWindowClass(hWnd, L"TValueListEditor"))
+                || WndCompat::IsWindowClass(hWnd, L"TValueListEditor")
+                || WndCompat::IsWindowClass(hWnd, L"TControlList"))
             {
                 HDC hdc = reinterpret_cast<HDC>(wParam);
                 RECT rc{};

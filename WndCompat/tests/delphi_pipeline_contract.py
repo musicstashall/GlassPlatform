@@ -821,7 +821,8 @@ class DelphiPipelineContract(unittest.TestCase):
 
     def test_value_list_editor_is_handled_as_delphi_grid(self):
         root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
-        self.assertIn('|| StrEqI(cls, L"TValueListEditor");', root)
+        self.assertIn('|| StrEqI(cls, L"TValueListEditor")', root)
+        self.assertIn('|| StrEqI(cls, L"TControlList");', root)
         # Тема Toolbar (фон ячейки значения у TValueListEditor) тоже гасится.
         theme = root.split('HRESULT WINAPI Root_MyDelphiGridTheme(HTHEME theme', 1)[1].split(
             'DWORD WINAPI Root_MyGetSysColor', 1)[0]
@@ -832,6 +833,15 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(marker, win)
         sub = read("WndCompat/Root/RootSubclass.cpp")
         self.assertIn('WndCompat::IsWindowClass(hWnd, L"TValueListEditor")', sub)
+
+    def test_control_list_is_handled_as_delphi_grid(self):
+        root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        self.assertIn('|| StrEqI(cls, L"TControlList");', root)
+        win = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
+        for marker in ('StrEqI(cls, L"TControlList")', 'StrEqI(cn, L"TControlList")'):
+            self.assertIn(marker, win)
+        sub = read("WndCompat/Root/RootSubclass.cpp")
+        self.assertIn('WndCompat::IsWindowClass(hWnd, L"TControlList")', sub)
 
     def test_delphi_grid_replay_supports_row_only_fixed_area(self):
         root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
