@@ -4,6 +4,7 @@
 #include <Controls/TCoolBarSubclass.h>
 #include <GlassDelphiPanel.h>
 #include <GlassDelphiButtonGroups.h>
+#include <GlassBomeMemo.h>
 #include <ExplorerCompatHostPolicy.h>
 #include <RootBackdropPolicy.h>
 #include <SystemHelper.h>
@@ -512,7 +513,8 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
     if (Equals(cls, L"TGroupBox") || Equals(cls, L"TRadioGroup") ||
         Equals(cls, L"TCard") || Equals(cls, L"TTabSheet") ||
         GlassShared::IsDelphiPanelClassName(cls.c_str()) ||
-        GlassShared::IsDelphiButtonGroupsClassName(cls.c_str()))
+        GlassShared::IsDelphiButtonGroupsClassName(cls.c_str()) ||
+        GlassShared::IsBomeMemoClassName(cls.c_str()))
         return ControlKind::DelphiContainer;
 
     // ── Прочие WS_CHILD контейнеры ───────────────────────────────────────────

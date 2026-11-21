@@ -157,6 +157,9 @@
     <ClInclude Include="include\GlassDelphiButtonGroups.h">
       <Filter>include</Filter>
     </ClInclude>
+    <ClInclude Include="include\GlassBomeMemo.h">
+      <Filter>include</Filter>
+    </ClInclude>
     <ClInclude Include="include\GlassHostRegistry.h">
       <Filter>include</Filter>
     </ClInclude>

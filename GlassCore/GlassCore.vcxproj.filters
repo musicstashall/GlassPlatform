@@ -118,6 +118,9 @@
     <ClCompile Include="src\Hooks\delphi\TButtonGroupsDraw.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TBomeMemoDraw.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
     <ClCompile Include="src\Hooks\delphi\TInputHooks.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
@@ -373,6 +376,9 @@
       <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\delphi\TButtonGroupsDraw.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TBomeMemoDraw.h">
       <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\delphi\TInputHooks.h">
