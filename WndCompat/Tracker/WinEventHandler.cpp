@@ -48,6 +48,7 @@
 #include <Controls/EditSubclass.h>
 #include <Controls/StaticSubclass.h>
 #include <Controls/RebarSubclass.h>
+#include <Controls/CoolBarSubclass.h>
 #include <Controls/HeaderSubclass.h>
 #include <Controls/ListBoxSubclass.h>
 #include <Controls/StatusBarSubclass.h>
@@ -959,6 +960,17 @@ namespace
                             shellRebar ? 1 : 0,
                             topLevelHostRebar ? 1 : 0);
                         WndCompat::Rebar_Attach(hWnd);
+                    }
+                    break;
+                }
+
+                case ControlKind::CoolBar:
+                {
+                    // Delphi TCoolBar (окно CoolBar): свой путь отрисовки.
+                    if (isFull && allowGlassForHwnd)
+                    {
+                        DebugLog(L"[WndCompat][WinEvent] CoolBar_Attach: hwnd=0x%p", hWnd);
+                        WndCompat::CoolBar_Attach(hWnd);
                     }
                     break;
                 }

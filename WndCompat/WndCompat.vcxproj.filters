@@ -72,6 +72,9 @@
     <ClCompile Include="Controls\ProgressBarSubclass.cpp">
       <Filter>Controls</Filter>
     </ClCompile>
+    <ClCompile Include="Controls\CoolBarSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
     <ClCompile Include="Controls\RebarSubclass.cpp">
       <Filter>Controls</Filter>
     </ClCompile>
@@ -150,6 +153,9 @@
       <Filter>Providers</Filter>
     </ClCompile>
     <ClCompile Include="Providers\MenuEventProvider.cpp">
+      <Filter>Providers</Filter>
+    </ClCompile>
+    <ClCompile Include="Providers\CoolBarEventProvider.cpp">
       <Filter>Providers</Filter>
     </ClCompile>
     <ClCompile Include="Providers\RebarEventProvider.cpp">
@@ -233,6 +239,9 @@
       <Filter>Controls</Filter>
     </ClInclude>
     <ClInclude Include="Controls\NetUISubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="Controls\CoolBarSubclass.h">
       <Filter>Controls</Filter>
     </ClInclude>
     <ClInclude Include="Controls\RebarSubclass.h">

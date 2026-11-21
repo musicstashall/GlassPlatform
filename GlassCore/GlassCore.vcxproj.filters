@@ -175,6 +175,9 @@
     <ClCompile Include="src\Hooks\ProgressBarHooks.cpp">
       <Filter>src\Hooks</Filter>
     </ClCompile>
+    <ClCompile Include="src\Hooks\CoolBarHooks.cpp">
+      <Filter>src\Hooks</Filter>
+    </ClCompile>
     <ClCompile Include="src\Hooks\RebarHooks.cpp">
       <Filter>src\Hooks</Filter>
     </ClCompile>
@@ -415,6 +418,9 @@
       <Filter>Include\Hooks</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\ProgressBar.h">
+      <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\CoolBar.h">
       <Filter>Include\Hooks</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\Rebar.h">
