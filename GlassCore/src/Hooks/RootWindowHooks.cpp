@@ -41,7 +41,6 @@
 #include <GlassBackdropMark.h>
 #include <GlassDelphiPanel.h>
 #include <GlassDelphiButtonGroups.h>
-#include <GlassBomeMemo.h>
 
 #include <string>
 #include <unordered_map>
@@ -577,15 +576,6 @@ namespace GlassCore::Root
             if (StrEqI(wndBase.c_str(), L"System.Windows.Forms.ni.dll") && IsWinFormsDotWindow(hWnd))
                 cache.winFormsDrawTextEx = true;
 
-            // Custom-painted TBomeMemo/TBMGutter: ANSI rows, not native Edit.
-            // API-Monitor-6 proves only EXE BeginPaint, not GetDC/BPL rendering.
-            if (instMod == GlassCore::ModuleHandler::g_entryPointModule
-                && GlassShared::IsBomeMemoClassName(cls))
-            {
-                PushPaint(instMod, OHK_BOME_MEMO_TEXT, cache);
-                PushPaint(instMod, OHK_BOME_MEMO_FILL, cache);
-            }
-
             // VCL paints windowless labels and group captions directly from the EXE.
             // Share the exact panel/frame classes with the native background bridge;
             // the handler verifies either that bridge's DC or the current paint owner.
@@ -637,12 +627,11 @@ namespace GlassCore::Root
             if (instMod == GlassCore::ModuleHandler::g_entryPointModule)
             {
                 void* ep = GlassCore::ModuleHandler::g_entryPointModule;
-                // Dedicated panel/group/Bome paths consume actual background
-                // colours. Generic remaps would destroy the distinction between
-                // a system default and genuine black/custom fills.
+                // Panels and VCL groups consume the *actual solid brush* in
+                // their delphi draw paths. Generic remaps would destroy it
+                // before the client fill can apply the requested alpha=100.
                 if (!GlassShared::IsDelphiPanelClassName(cls)
-                    && !GlassShared::IsDelphiButtonGroupsClassName(cls)
-                    && !GlassShared::IsBomeMemoClassName(cls))
+                    && !GlassShared::IsDelphiButtonGroupsClassName(cls))
                 {
                     PushPaint(ep, OHK_SETBKCOLOR, cache);
                     PushPaint(ep, OHK_GETSYSCOLORBR, cache);
@@ -767,8 +756,7 @@ namespace GlassCore::Root
             if (callerMod && GlassCore::ModuleHandler::g_entryPointModule
                 && callerMod == GlassCore::ModuleHandler::g_entryPointModule
                 && !GlassShared::IsDelphiPanelWindow(hWnd)
-                && !GlassShared::IsDelphiButtonGroupsWindow(hWnd)
-                && !GlassShared::IsBomeMemoWindow(hWnd))
+                && !GlassShared::IsDelphiButtonGroupsWindow(hWnd))
             {
                 void* ep = GlassCore::ModuleHandler::g_entryPointModule;
                 bool already = false;

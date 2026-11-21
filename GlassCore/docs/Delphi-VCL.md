@@ -3648,7 +3648,14 @@ Windows/MSVC и визуальная проверка исправления н�
 LogViewer-19 удалён из входящих вложений; копия лога не хранится.
 Временные файлы не создавались.
 
-## Тест 95: Restorator — точные TBomeMemo / TBMGutter, ANSI-строки и системные фоны
+## Тест 95: Restorator — неудачный путь TBomeMemo / TBMGutter отменён
+
+**Итог Windows-проверки пользователя: FAIL.** После `80897fd` на
+`image-58.png` остаётся белое поле с почти нечитаемым текстом и номерами
+строк. Это отрицательная визуальная проверка; прежние portable PASS её
+не меняют. По требованию пользователя реализация полностью отменена.
+Скриншот сам по себе не устанавливает, какой DC gate прошёл и где именно
+изменились пиксели/альфа; новых runtime-логов этой сборки не предоставлено.
 
 ### Scope и данные API Monitor
 
@@ -3679,7 +3686,7 @@ HWND=0x9E0B04 показывает только generic EXE SetBkColor: COLOR_WI
 но сам API Monitor здесь **не содержит GetClassName/GetParent**, значений
 RECT/LOGBRUSH по указателям или BITMAP выбранного source bitmap. Поэтому
 не считать доказанными его bpp, точные fill bounds или родство окон только
-по этому текстовому экспорту. В тестовых двойниках используются API-строки
+по этому текстовому экспорту. В удалённых portable-тестах использовались API-строки
 и геометрия строк/клиента, согласованные с наблюдаемыми IntersectClipRect /
 StretchBlt; это не восстановление всех значений структур из capture.
 
@@ -3690,82 +3697,28 @@ StretchBlt; это не восстановление всех значений �
 внутренний ExtTextOutW из user32/gdi32full не проходит через EXE DrawTextW IAT.
 Отсутствие собственного текстового лога зонда не означало отсутствия API.
 
-### Отдельный узкий путь без изменения Edit / renderer
+### Что удалено при отмене 80897fd
 
-- `GlassBomeMemo.h` перечисляет **только TBomeMemo и TBMGutter**, case-insensitive,
-  без подстрок. Оба — DelphiContainer → существующий Root_Attach в Full,
-  **не алиасы Edit/TMemo** и не получатели native Edit-сообщений/композитора.
-- В root cache два выделенных EXE IAT slot: **DrawTextA / FillRect**, только
-  Paint-канал и только HINSTANCE==entry-point. Сохранённый original берётся
-  по модулю/номеру слота, не по return address trampoline. Используется прежняя
-  сбалансированная Root BeginPaint/EndPaint-сессия; новых экспортов, меж-DLL
-  связей, Detours и lifecycle/refcount-инфраструктуры нет.
-- `delphi/TBomeMemoDraw` допускает только текущий BeginPaint DC либо записанный
-  PaintDispatcher memory DC этого HWND при открытом paint и совпадении верхней
-  drawing session. Один ambient HWND недостаточен. NC/GetWindowDC, чужой или
-  неучтённый memory DC, standalone GetDC, другой mode/backdrop — native.
-  Это контекстная запись CreateCompatibleDC, не доказательство физической
-  цепочки bitmap → финальный StretchBlt; сам перенос не перехватывается.
-  Для memory DC дополнительно проверяется **selected BITMAP: 1 plane / 32bpp**,
-  положительные размеры. Неизвестный/24bpp bitmap не преобразуется наугад;
-  появляется ограниченная диагностика `BomeMemo] UnsupportedBitmap`.
-- Поддержаны MM_TEXT, GM_COMPATIBLE, обычный layout и нулевые window/viewport
-  origins. Неизвестные transforms/layout передаются оригиналу. Native clip
-  DC сохраняется; фоновые rect строк/остатков не обязаны быть full-client.
-- Для TBomeMemo очищается **только текущий COLOR_WINDOW**; для TBMGutter —
-  COLOR_WINDOW **или COLOR_BTNFACE**. В FillRect учитываются solid HBRUSH и
-  encoded COLOR_*+1. Black/custom/selection RGB, отличные от этих системных
-  значений, и pattern brushes остаются native — новый A100/selection classifier
-  не вводится.
-- В DrawTextA поддержаны наблюдаемые single-line rows. При OPAQUE допускается
-  только такой системный фон: сначала BLACKNESS на layout rect, затем прежний
-  `DrawTextWithAlpha(..., transparentBufferBackground=true)`. При TRANSPARENT
-  фон не очищается. Используются исходный выбранный font и text color DC;
-  caller RECT отдаётся renderer через копию. SaveDC/RestoreDC ограничивает
-  TRANSPARENT, включая внутренний plain-GDI fallback прежнего renderer.
-  При отказе до очистки — исходный ANSI API. После успешной очистки фон уже
-  Glass: отказ renderer даёт native ANSI glyphs в TRANSPARENT поверх него,
-  а не повторную непрозрачную заливку. Это **не** транзакционный откат пикселей;
-  состояние DC восстанавливается при успехе, отказе и C++-исключении.
-- ANSI декодируется по charset выбранного шрифта через TranslateCharsetInfo;
-  DEFAULT_CHARSET использует CP_ACP, Symbol/неизвестный charset — native.
-  Соблюдаются явный **байтовый** count, DBCS и -1 с исключением завершающего NUL
-  из Unicode count. XML `encoding='UTF-8'` не принимается за кодовую страницу
-  аргумента DrawTextA. DT_CALCRECT, DT_MODIFYSTRING, DT_NOCLIP и multiline
-  layout остаются native, как пустой/невалидный ввод и переполнение RECT.
-- Generic SetBkColor/GetSysColorBrush/CreateSolidBrush не должны заранее
-  превращать исходный системный RGB в неотличимый black ни в собственной,
-  ни во вложенной root-сессии этих классов. Исключение ограничено двумя
-  точными классами; прежняя политика остальных окон/групп сохранена.
+- Весь `delphi/TBomeMemoDraw.h/.cpp`: самостоятельная ANSI-конверсия,
+  DrawTextA/FillRect-композиция, DC/32bpp gates, fallback и диагностика.
+- `GlassBomeMemo.h`, оба OHK_BOME_MEMO slot/dependency/wrapper, регистрация
+  файлов в проектах/filters и явная DelphiContainer-классификация двух классов.
+- Добавленные в generic root hooks исключения SetBkColor/GetSysColorBrush/
+  CreateSolidBrush; их прежнее поведение восстановлено, не оставлен скрытый
+  кусок неудачной реализации.
+- Три новых portable test/shim файла и два Bome-specific contracts; существующие
+  contracts панелей/групп восстановлены, а не ослаблены под другой вариант.
 
-Финальный StretchBlt, cached bitmap приложения, NC/LineTo, RenderText,
-Edit/RichEdit, панели/фреймы, grids, TCoolBar и ImageList-код не менялись.
-Добавлены ограниченные записи `[GlassCore][BomeMemo] text` / `fill` с HWND/DC,
-кодовой страницей/длинами, RGB/результатом. Это не новый глобальный зонд.
+Сверено: все production/project/test-файлы совпадают с **583203a**, то есть
+состоянием до неудачного шага. Предыдущие успешные изменения TPanel, CategoryButtons,
+ButtonGroup, frames, grids, TCoolBar и input icons не отменяются. Выводы
+API-Monitor-6 и отдельный раздел об AV сохранены, поскольку
+исходный runtime-лог уже удалён после анализа, а причина AV не установлена.
 
-### Проверки и Windows acceptance
-
-`WndCompat/tests/bome_memo_rendering_test.py` компилирует production helper
-и реальные root gate/dependency rows/wrappers, а также DelphiContainer-ветку
-classifier с Win32/IAT doubles.
-**8/8 × Release/Debug**, отдельно ASan+UBSan — PASS: memo memory/direct gutter,
-20 ANSI-строк, кодовые страницы/DBCS/count, opaque/transparent и динамические
-системные RGB, настоящий black/custom/selection passthrough, measurement/
-mutation/unclipped passthrough, 32bpp/DC/paint/mode/layout/backdrop gates,
-ошибки конверсии/SaveDC/SetBkMode/очистки/renderer, reentry, original slot
-и shutdown. Contracts **75/75**; panels **12/12 × Release/Debug**, button groups
-**9/9 × Release/Debug**, TCoolBar **9/9**, input icons **6/6** — PASS.
-Проверки XML проектов, UTF-8 без BOM и `git diff --check` — PASS.
-
-**Windows/MSVC Debug|Win32 и визуальная проверка Restorator не выполнялись.**
-Portable doubles не доказывают сохранение альфы в реальном compatible bitmap
-и после native StretchBlt; BITSPIXEL target из лога не заменяет проверку source.
-После сборки проверить основной текст, номера строк, repaint/scroll/resize,
-caret/focus и выделение, non-ASCII, Full/backdrop toggle. Неподтверждённые
-GetDC/BPL/другие text API не заявляются как покрытые. Если дефект остаётся:
-скриншот + «Логи при отображении» (новые BomeMemo text/fill/UnsupportedBitmap)
-+ «Логи с зондом при отображении элемента». Финализация галерейного буфера и
-тулбар остаются отдельной задачей.
+Исторические 8/8 portable Bome-тестов × Release/Debug и ASan/UBSan проверяли
+переданные аргументы/выбор ветвей на doubles, **не** GDI/DWM-пиксели. Они
+не могут опровергать неудачный пользовательский результат и удалены вместе
+с отменённым вариантом. Новая замена в этом шаге не добавляется.
 
 ### Отдельное сообщение о Debug|Win32 access violation
 
@@ -3784,7 +3737,106 @@ PDB и дамп не переданы; API-Monitor-6 содержит рисов
 отключать остановку на AV. Нужны скопированный Call Stack в точке остановки
 (с внешними кадрами до первого Glass-модуля), имя модуля/функция/строка,
 состояние символов соответствующей Win32 Debug DLL; при недостатке — дамп
-именно остановленного процесса. Исключение этим render-патчем не исправлено.
+именно остановленного процесса. Исключение ни отменённым render-патчем,
+ни его откатом не исправлялось.
 
 После сохранения выводов и сверки SHA-256 исходный API-Monitor-6 удалён
 из входящих вложений; копия capture в репозитории не сохранялась.
+
+## Тест 96: BWM.txt — аудит настоящего Restorator-пути TBomeMemo / TBMGutter
+
+Пользователь предоставил **донорский исходный код**, не runtime-лог:
+`BWM.txt`, 1691166 байт, UTF-16 LE с BOM; SHA-256:
+`bf679ce9c8a29e0d6b4ac8e3dce73cad4f52e454de0961a28e9840133f1e547f`.
+Файл содержит именованные BEGIN/END FILE секции. Ниже ссылки на строки
+именно этого экспорта; исходник не копируется в репозиторий и не редактируется.
+`BWM.txt` и `image-58.png` сохранены во входящих вложениях: правило удаления
+исследованных runtime-логов к ним не относится.
+
+### Прямые ветки двух классов
+
+| Место донора / строки BWM.txt | Действие |
+| --- | --- |
+| `RestoratorWinHandler.cpp`, EVENT_OBJECT_CREATE, 17301–17314 | Для точных дочерних TBMGutter и TBomeMemo вызывается `WndList::SetDataAttach(hWnd)`. Здесь нет Edit alias и нет отдельного subclass, который применён ниже к TPanel/TPage. |
+| `RestoratorPaintHandler.cpp`, `Paint`, **else/window**, 17056–17065 | При caller==EntryPointModule: **erase=true**, `DrawTextAttach(enable)` и **CreateBrushIndirectAttach(enable)** для обоих классов. Это не ветка ctrl/TMemo. |
+| Там же, `Dc`, **else/window**, 17173–17182 | При том же caller и точных классах включаются те же DrawTextAttach и CreateBrushIndirectAttach; возвращается true. Обработка не ограничена только BeginPaint. |
+| `WndList.cpp`, `MyBeginPaint`, 24472–24499 | Paint callbacks сначала выставляют erase и включают хуки, затем вызывается настоящий BeginPaint. При erase\|\|fErase область **PAINTSTRUCT.rcPaint** очищается PatBlt(BLACKNESS), fErase сбрасывается; DC записывается в DataWndList. |
+
+`Framework.cpp` выбирает специальный Restorator startup/WinEvent для
+Restorator.exe (16659–16663), а `WndList.cpp` добавляет Restorator paint/DC
+callbacks к общим (24293–24330). Значит поведение нельзя переносить как
+правило для всех VCL-контролов или любого процесса.
+
+### Содержимое RestoratorWinHooks — не только DrawTextA
+
+1. **GetSysColor с запуска.** Startup вызывает `GetSysColorAttach(true)`
+   (17747–17772). `MyGetSysColor` (18382–18395) возвращает **0 для COLOR_WINDOW
+   и COLOR_BTNFACE**, кроме вызовов из собственного модуля BWM. Это
+   process-wide Detours-подмена, а не локальное изменение BkColor конкретного DC;
+   приложение может получать чёрный системный фон ещё при создании/кэшировании
+   GDI-объектов, до последнего FillRect.
+2. **Кисть до заливки.** `CreateBrushIndirectAttach` (17871–17887) ставит
+   Detours на GDI CreateBrushIndirect. `MyCreateBrushIndirect` (18398–18409)
+   для caller==EXE возвращает **stock BLACK_BRUSH**; не проверяет здесь
+   ни конкретный RGB, ни BS_SOLID. Таким образом донор подменяет создаваемую
+   приложением кисть, а не распознаёт её цвет в каждом FillRect постфактум.
+3. **ANSI DrawText.** `DrawTextAttach` (17795–17811), несмотря на общее имя,
+   ставит **Detours на DrawTextA**, а не только IAT DrawTextW. Тело
+   `MyDrawTextA` (18014–18058) пропускает DT_CALCRECT; при OPAQUE очищает
+   layout rect для black/COLOR_WINDOW/COLOR_BTNFACE, иначе заливает исходный
+   RGB кистью с **A255**. Затем A2W → прежний ThemeHelper::DrawTextWithAlpha;
+   отказ вызывает настоящий ANSI original. Здесь нет проверки selected bitmap
+   32bpp, MM_TEXT/origins или обязательной записи memory DC в paint-стеке.
+   Нельзя выдавать эти отличия за установленную причину данного скриншота:
+   из изображения не известны формат bitmap и фактически прошедшие gates.
+
+Итак, донорская цепочка — **исходный фон/создание кисти → очистка repaint →
+ANSI alpha-text**, причём Paint и DC пути согласованы. Мой отменённый
+paint-only DrawTextA/FillRect вариант не воспроизводил эту цепочку:
+не было CreateBrushIndirect, начального erase и DC-канала; вместо ранней
+подмены системных цветов были добавлены исключения из generic remap.
+Одно расширение списка классов или ослабление 32bpp gate не восполняет
+эти различия.
+
+### Что не относится к исправлению этих двух классов
+
+- Упоминание TBomeMemo с **968×576** находится в **DetoursHooks.cpp**
+  (5304–5319), тестовом модуле. Тело if пустое, `rop=BLACKNESS` закомментирован;
+  функция возвращает native StretchBlt. Это **не рабочий размерный патч**.
+- Настоящий `RestoratorWinHooks::MyStretchBlt` (18411–18471) с
+  GdipCreateBitmapAlpha включается в других ветках — TImgViewBox/TScrollBox
+  и специальный вложенный TPanel (17076–17095), **не в Bome-ветке**.
+  Поэтому нет основания добавлять для TBomeMemo глобальный StretchBlt hook,
+  GDI+, black colour-key или общий A255/DoubleBuffered обход.
+- `CompatibleDc(!hWnd)` (17188–17204) включает CreateDIBSection/FillRect и
+  GDI+. Но `MyCreateDIBSection` (18543–18554) только запоминает imgRect и
+  передаёт исходный BITMAPINFO: **не принуждает bitmap к 32bpp**.
+  `MyFillRect` (18557–18588) рисует checkerboard для изображения при совпадении
+  imgRect; это не специальная обработка memo-строк. Не переносить её только
+  потому, что API-Monitor-6 тоже содержит CreateCompatibleDC(NULL).
+- Реализация **ThemeHelper::DrawTextWithAlpha в этом экспорте отсутствует**:
+  видны её вызовы, не внутреннее устройство renderer. Аудит не обосновывает
+  новую переделку принятого RenderText/Edit или заявления об эквивалентности
+  конечных пикселей двух проектов.
+
+Это source-аудит и откат, **не новая реализация визуального исправления**.
+При последующем переносе нужно согласовать создание фона/кистей и оба
+канала для точных классов в Full/backdrop, не копируя process-wide Detours
+и безусловный BLACK_BRUSH для всех цветов/окон. Политика selection и общий
+Form.DoubleBuffered остаются за пределами этого шага.
+
+### Проверки отката
+
+- `git diff 583203a -- . ':!GlassCore/docs/Delphi-VCL.md'` пуст: все
+  production/project/test-файлы точно восстановлены, не только отключены.
+- Все шесть созданных в 80897fd source/header/test/shim файлов отсутствуют;
+  в production и tests нет BomeMemo/BMGutter/OHK_BOME_MEMO остатков.
+- Contracts **73/73**, panels **12/12 × Release/Debug**, button groups
+  **9/9 × Release/Debug**, TCoolBar **9/9**, input icons **6/6** — PASS.
+- `git diff --check`, staged diff check, UTF-8 без BOM для изменённых текстов
+  и XML проектов/filters — PASS. Разбор точных веток/Detours callbacks
+  донора машинно сверен; его SHA-256 не изменился, скриншот сохранён.
+- Windows/MSVC и повторная визуальная проверка после отката не выполнялись;
+  работоспособная новая Glass-поддержка этих классов **не заявляется**.
+  Общий renderer/Edit, финализация буферов и прочие принятые пути не менялись.
+  Копий донора/лога или scratch-файлов в репозитории не оставлено.
