@@ -888,6 +888,14 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('static bool IsRebarPaintDc(HDC hdc)', rebar)
         self.assertIn('WindowFromDC(hdc) == sessionHwnd', rebar)
         self.assertIn('rop != WHITENESS', rebar)
+        # Догоняющий attach: окно создано до инжекции → не было события CREATE.
+        subclass = read("WndCompat/Controls/RebarSubclass.cpp")
+        self.assertIn('void Rebar_CatchUp(HWND hRoot) noexcept', subclass)
+        self.assertIn('EnumChildWindows(hRoot, RebarCatchUpProc', subclass)
+        self.assertIn('WndCompat::Rebar_CatchUp(hRoot);', read("WndCompat/Root/RootSubclass.cpp"))
+        self.assertIn('[WndCompat][Rebar] WM_PAINT hwnd=0x%p', subclass)
+        handler = read("WndCompat/Tracker/WinEventHandler.cpp")
+        self.assertIn('Rebar_Attach: skip (allow=%d parent=0x%p)', handler)
 
     def test_list_item_icons_are_alpha_composited(self):
         draw = read("GlassCore/src/Hooks/delphi/TListBoxDraw.cpp")
